@@ -1,0 +1,28 @@
+{
+  "name": "local-writing-app",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "scripts": {
+    "dev": "vite --host 127.0.0.1 --configLoader runner",
+    "build": "vite build --configLoader runner",
+    "preview": "vite preview --host 127.0.0.1 --configLoader runner"
+  },
+  "dependencies": {
+    "@tiptap/core": "^2.10.4",
+    "@tiptap/extension-table": "^2.10.4",
+    "@tiptap/extension-table-cell": "^2.10.4",
+    "@tiptap/extension-table-header": "^2.10.4",
+    "@tiptap/extension-table-row": "^2.10.4",
+    "@tiptap/starter-kit": "^2.10.4",
+    "marked": "^15.0.6",
+    "svelte": "^5.16.0",
+    "turndown": "^7.2.0",
+    "turndown-plugin-gfm": "^1.0.2"
+  },
+  "devDependencies": {
+    "@sveltejs/vite-plugin-svelte": "^5.0.3",
+    "typescript": "^5.7.2",
+    "vite": "^6.0.7"
+  }
+}

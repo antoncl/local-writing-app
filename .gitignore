@@ -1,0 +1,10 @@
+.venv/
+node_modules/
+.npm-cache/
+.pip-cache/
+dist/
+__pycache__/
+*.py[cod]
+*.egg-info/
+.cache/
+work/

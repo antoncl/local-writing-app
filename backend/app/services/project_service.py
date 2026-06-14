@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from copy import deepcopy
 import hashlib
 import re
 import uuid
@@ -15,6 +16,7 @@ from app.models import (
     CreateTodoRequest,
     DirectoryEntry,
     DirectoryListing,
+    MetadataSchema,
     ProjectInfo,
     ProjectValidation,
     SaveSceneRequest,
@@ -36,6 +38,81 @@ TODO_ANCHOR_PATTERN = re.compile(
 EMBEDDED_TODO_PATTERN = re.compile(
     r"<!--\s*embedded-todo:id=([A-Za-z0-9_-]+);status=(open|done);note=([^\s]*)\s*-->([\s\S]*?)<!--\s*/embedded-todo\s*-->",
 )
+WORD_PATTERN = re.compile(r"[A-Za-z0-9]+(?:['-][A-Za-z0-9]+)?")
+
+DEFAULT_METADATA_SCHEMA: dict[str, Any] = {
+    "version": 1,
+    "entry_types": {
+        "scene": {
+            "name": "Scene",
+            "kind": "scene",
+            "fields": ["status", "summary", "characters", "location", "word_count"],
+        },
+        "scene_sequel": {
+            "name": "Scene / Sequel",
+            "kind": "scene",
+            "fields": [
+                "status",
+                "summary",
+                "scene_phase",
+                "goal",
+                "conflict",
+                "disaster",
+                "reaction",
+                "dilemma",
+                "decision",
+                "word_count",
+            ],
+        },
+        "scene_mckee": {
+            "name": "McKee Scene",
+            "kind": "scene",
+            "fields": [
+                "status",
+                "summary",
+                "value_at_start",
+                "value_at_end",
+                "value_change",
+                "turning_point",
+                "word_count",
+            ],
+        },
+    },
+    "fields": {
+        "status": {
+            "name": "Status",
+            "type": "select",
+            "options": ["draft", "revised", "complete"],
+        },
+        "summary": {"name": "Summary", "type": "long_text"},
+        "characters": {"name": "Characters", "type": "multi_select"},
+        "location": {"name": "Location", "type": "text"},
+        "scene_phase": {
+            "name": "Scene Phase",
+            "type": "select",
+            "options": ["scene", "sequel"],
+        },
+        "goal": {"name": "Goal", "type": "long_text"},
+        "conflict": {"name": "Conflict", "type": "long_text"},
+        "disaster": {"name": "Disaster", "type": "long_text"},
+        "reaction": {"name": "Reaction", "type": "long_text"},
+        "dilemma": {"name": "Dilemma", "type": "long_text"},
+        "decision": {"name": "Decision", "type": "long_text"},
+        "value_at_start": {"name": "Value at Start", "type": "text"},
+        "value_at_end": {"name": "Value at End", "type": "text"},
+        "value_change": {
+            "name": "Value Change",
+            "type": "select",
+            "options": ["positive", "negative", "positive_to_negative", "negative_to_positive", "unchanged"],
+        },
+        "turning_point": {"name": "Turning Point", "type": "long_text"},
+        "word_count": {
+            "name": "Word Count",
+            "type": "computed",
+            "computed": {"source": "body", "function": "word_count"},
+        },
+    },
+}
 
 
 class ProjectServiceError(Exception):
@@ -57,12 +134,15 @@ class ProjectService:
             (root / folder).mkdir(exist_ok=True)
 
         self._write_yaml(root / "project.yaml", self._new_project_manifest(title, root))
+        self._write_yaml(root / "metadata.schema.yaml", deepcopy(DEFAULT_METADATA_SCHEMA))
         initial_scene = Scene(
             id=self._new_id("scene"),
             title="Untitled Scene",
             body_markdown="",
             revision="",
             status="draft",
+            entry_type="scene",
+            metadata={},
         )
         self._write_scene_file(root / "scenes" / f"{initial_scene.id}.md", initial_scene)
         initial_structure = {
@@ -157,6 +237,11 @@ class ProjectService:
         for required in ["project.yaml", "manuscript.structure.yaml", "todo.yaml"]:
             if not (root / required).exists():
                 errors.append(f"Missing {required}.")
+        if (root / "metadata.schema.yaml").exists():
+            try:
+                self.read_metadata_schema()
+            except (ProjectServiceError, ValueError) as exc:
+                errors.append(f"Invalid metadata.schema.yaml: {exc}")
 
         scene_ids = {path.stem for path in (root / "scenes").glob("*.md")}
         referenced = self._collect_scene_ids(self.read_structure().root)
@@ -165,6 +250,16 @@ class ProjectService:
             errors.append(f"Structure references missing scene {scene_id}.")
         for scene_id in sorted(scene_ids - referenced):
             warnings.append(f"Scene {scene_id} is not in the manuscript structure.")
+        for scene_id in sorted(scene_ids):
+            path = root / "scenes" / f"{scene_id}.md"
+            try:
+                front_matter, _ = self._read_markdown_with_front_matter(path, strict=True)
+                self._normalise_metadata(front_matter.get("metadata"), path)
+                entry_type = front_matter.get("entry_type", "scene")
+                if entry_type is not None and not isinstance(entry_type, str):
+                    errors.append(f"Scene {scene_id} has invalid entry_type; it must be text.")
+            except ProjectServiceError as exc:
+                errors.append(exc.message)
 
         todos = self.read_todos()
         todo_anchor_refs = {
@@ -236,6 +331,23 @@ class ProjectService:
         data = self._read_yaml(root / "manuscript.structure.yaml")
         return StructureDocument.model_validate(data)
 
+    def read_metadata_schema(self) -> MetadataSchema:
+        root = self._require_project()
+        path = root / "metadata.schema.yaml"
+        data = deepcopy(DEFAULT_METADATA_SCHEMA)
+        if path.exists():
+            project_data = self._read_yaml(path)
+            data["version"] = project_data.get("version", data["version"])
+            data["entry_types"] = {
+                **data.get("entry_types", {}),
+                **project_data.get("entry_types", {}),
+            }
+            data["fields"] = {
+                **data.get("fields", {}),
+                **project_data.get("fields", {}),
+            }
+        return MetadataSchema.model_validate(data)
+
     def create_scene(self, request: CreateSceneRequest) -> Scene:
         root = self._require_project()
         scene_id = self._new_id("scene")
@@ -245,6 +357,8 @@ class ProjectService:
             body_markdown="",
             revision="",
             status="draft",
+            entry_type="scene",
+            metadata={},
         )
         self._write_scene_file(root / "scenes" / f"{scene_id}.md", scene)
 
@@ -267,15 +381,20 @@ class ProjectService:
         path = root / "scenes" / f"{scene_id}.md"
         if not path.exists():
             raise ProjectServiceError(f"Scene {scene_id} does not exist.", 404)
-        front_matter, body = self._read_markdown_with_front_matter(path)
+        front_matter, body = self._read_markdown_with_front_matter(path, strict=True)
         title = str(front_matter.get("title") or scene_id)
         status = str(front_matter.get("status") or "draft")
+        entry_type = str(front_matter.get("entry_type") or "scene")
+        metadata = self._normalise_metadata(front_matter.get("metadata"), path)
         return Scene(
             id=scene_id,
             title=title,
             body_markdown=body,
             revision=self._revision(path),
             status=status,
+            entry_type=entry_type,
+            metadata=metadata,
+            computed_metadata=self._computed_scene_metadata(body),
         )
 
     def save_scene(self, scene_id: str, request: SaveSceneRequest) -> Scene:
@@ -296,6 +415,8 @@ class ProjectService:
             body_markdown=request.body_markdown,
             revision=current_revision,
             status=request.status,
+            entry_type=request.entry_type,
+            metadata=self._normalise_metadata(request.metadata, path),
         )
         self._write_scene_file(path, scene)
         self._update_scene_title_in_structure(scene_id, request.title)
@@ -360,12 +481,7 @@ class ProjectService:
     def search(self, request: SearchRequest) -> SearchResponse:
         root = self._require_project()
         hits: list[SearchHit] = []
-        folders: list[Path] = []
         query = request.query.strip()
-        if request.include_scenes:
-            folders.append(root / "scenes")
-        if request.include_lore:
-            folders.append(root / "lore")
 
         if not query and not request.include_open_todos:
             return SearchResponse(query=query, hits=[])
@@ -388,7 +504,7 @@ class ProjectService:
                     )
 
             for path in (root / "scenes").rglob("*.md"):
-                _, body = self._read_markdown_with_front_matter(path)
+                _, body = self._read_markdown_with_front_matter(path, strict=True)
                 for match in EMBEDDED_TODO_PATTERN.finditer(body):
                     if match.group(2) != "open":
                         continue
@@ -407,14 +523,47 @@ class ProjectService:
                         )
 
         if pattern is not None:
-            for folder in folders:
-                for path in folder.rglob("*.md"):
-                    for index, line in enumerate(path.read_text(encoding="utf-8").splitlines(), start=1):
+            if request.include_scenes:
+                for path in (root / "scenes").rglob("*.md"):
+                    front_matter, body = self._read_markdown_with_front_matter(path, strict=True)
+                    title = str(front_matter.get("title") or path.stem)
+                    status = str(front_matter.get("status") or "draft")
+                    entry_type = str(front_matter.get("entry_type") or "scene")
+                    metadata = self._normalise_metadata(front_matter.get("metadata"), path)
+                    searchable_metadata = {
+                        "title": title,
+                        "status": status,
+                        "entry_type": entry_type,
+                        **metadata,
+                    }
+                    for label, value in self._iter_metadata_search_values(searchable_metadata):
+                        if pattern.search(value):
+                            hits.append(
+                                SearchHit(
+                                    file_id=path.stem,
+                                    path=f"{scene_paths.get(path.stem, str(path.relative_to(root)))} metadata",
+                                    line=1,
+                                    excerpt=f"{label}: {value}",
+                                )
+                            )
+                    for index, line in enumerate(body.splitlines(), start=1):
                         if pattern.search(line):
                             hits.append(
                                 SearchHit(
                                     file_id=path.stem,
                                     path=scene_paths.get(path.stem, str(path.relative_to(root))),
+                                    line=index,
+                                    excerpt=line.strip(),
+                                )
+                            )
+            if request.include_lore:
+                for path in (root / "lore").rglob("*.md"):
+                    for index, line in enumerate(path.read_text(encoding="utf-8").splitlines(), start=1):
+                        if pattern.search(line):
+                            hits.append(
+                                SearchHit(
+                                    file_id=path.stem,
+                                    path=str(path.relative_to(root)),
                                     line=index,
                                     excerpt=line.strip(),
                                 )
@@ -447,27 +596,80 @@ class ProjectService:
             temp_path = Path(temp.name)
         temp_path.replace(path)
 
-    def _read_markdown_with_front_matter(self, path: Path) -> tuple[dict[str, Any], str]:
+    def _read_markdown_with_front_matter(self, path: Path, *, strict: bool = False) -> tuple[dict[str, Any], str]:
         text = path.read_text(encoding="utf-8")
         if not text.startswith("---\n"):
             return {}, text
         _, rest = text.split("---\n", 1)
         if "\n---\n" not in rest:
+            if strict:
+                raise ProjectServiceError(f"Malformed front matter in {path.name}: missing closing ---.", 422)
             return {}, text
         front, body = rest.split("\n---\n", 1)
-        data = yaml.safe_load(front) or {}
+        try:
+            data = yaml.safe_load(front) or {}
+        except yaml.YAMLError as exc:
+            if strict:
+                raise ProjectServiceError(f"Malformed front matter in {path.name}: {exc}", 422) from exc
+            return {}, text
         if not isinstance(data, dict):
+            if strict:
+                raise ProjectServiceError(f"Malformed front matter in {path.name}: front matter must be a YAML object.", 422)
             data = {}
         return data, body
 
     def _write_scene_file(self, path: Path, scene: Scene) -> None:
         front_matter = yaml.safe_dump(
-            {"id": scene.id, "title": scene.title, "status": scene.status},
+            {
+                "id": scene.id,
+                "title": scene.title,
+                "entry_type": scene.entry_type,
+                "status": scene.status,
+                "metadata": scene.metadata,
+            },
             sort_keys=False,
             allow_unicode=True,
         ).strip()
         body = scene.body_markdown.rstrip() + "\n" if scene.body_markdown.strip() else ""
         self._atomic_write(path, f"---\n{front_matter}\n---\n\n{body}")
+
+    def _normalise_metadata(self, value: Any, path: Path) -> dict[str, Any]:
+        if value is None:
+            return {}
+        if not isinstance(value, dict):
+            raise ProjectServiceError(f"Invalid metadata in {path.name}: metadata must be a YAML object.", 422)
+        return {str(key): self._normalise_metadata_value(raw_value) for key, raw_value in value.items()}
+
+    def _normalise_metadata_value(self, value: Any) -> Any:
+        if value is None or isinstance(value, str | int | float | bool):
+            return value
+        if isinstance(value, list):
+            return [self._normalise_metadata_value(item) for item in value]
+        if isinstance(value, dict):
+            return {str(key): self._normalise_metadata_value(raw_value) for key, raw_value in value.items()}
+        return str(value)
+
+    def _computed_scene_metadata(self, body_markdown: str) -> dict[str, Any]:
+        without_comments = re.sub(r"<!--[\s\S]*?-->", " ", body_markdown)
+        return {"word_count": len(WORD_PATTERN.findall(without_comments))}
+
+    def _iter_metadata_search_values(self, metadata: dict[str, Any], prefix: str = "") -> list[tuple[str, str]]:
+        values: list[tuple[str, str]] = []
+        for key, raw_value in metadata.items():
+            label = f"{prefix}.{key}" if prefix else key
+            if raw_value is None:
+                continue
+            if isinstance(raw_value, dict):
+                values.extend(self._iter_metadata_search_values(raw_value, label))
+            elif isinstance(raw_value, list):
+                text = ", ".join(str(item) for item in raw_value if item is not None)
+                if text:
+                    values.append((label, text))
+            else:
+                text = str(raw_value)
+                if text:
+                    values.append((label, text))
+        return values
 
     def _revision(self, path: Path) -> str:
         digest = hashlib.sha256()
@@ -573,16 +775,7 @@ class ProjectService:
 
         if front_matter:
             scene = self.read_scene(scene_id)
-            self._write_scene_file(
-                path,
-                Scene(
-                    id=scene.id,
-                    title=scene.title,
-                    body_markdown=repaired_body,
-                    revision=scene.revision,
-                    status=scene.status,
-                ),
-            )
+            self._write_scene_file(path, scene.model_copy(update={"body_markdown": repaired_body}))
         else:
             self._atomic_write(path, repaired_body)
 
@@ -607,16 +800,7 @@ class ProjectService:
             return
         if front_matter:
             scene = self.read_scene(scene_id)
-            self._write_scene_file(
-                path,
-                Scene(
-                    id=scene.id,
-                    title=scene.title,
-                    body_markdown=repaired_body,
-                    revision=scene.revision,
-                    status=scene.status,
-                ),
-            )
+            self._write_scene_file(path, scene.model_copy(update={"body_markdown": repaired_body}))
         else:
             self._atomic_write(path, repaired_body)
 

@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from typing import Literal
+from typing import Any, Literal
 
 from pydantic import BaseModel, Field
 
@@ -48,12 +48,51 @@ class StructureDocument(BaseModel):
     root: StructureNode
 
 
+MetadataValue = str | int | float | bool | None | list[Any] | dict[str, Any]
+
+
+class MetadataFieldDefinition(BaseModel):
+    name: str
+    type: Literal[
+        "text",
+        "long_text",
+        "number",
+        "boolean",
+        "date",
+        "select",
+        "multi_select",
+        "entity_ref",
+        "entity_ref_list",
+        "tags",
+        "computed",
+    ]
+    options: list[str] = Field(default_factory=list)
+    target: dict[str, str] | None = None
+    computed: dict[str, str] | None = None
+
+
+class EntryTypeDefinition(BaseModel):
+    name: str
+    kind: str
+    parent: str | None = None
+    fields: list[str] = Field(default_factory=list)
+
+
+class MetadataSchema(BaseModel):
+    version: int = 1
+    entry_types: dict[str, EntryTypeDefinition] = Field(default_factory=dict)
+    fields: dict[str, MetadataFieldDefinition] = Field(default_factory=dict)
+
+
 class Scene(BaseModel):
     id: str
     title: str
     body_markdown: str
     revision: str
     status: str = "draft"
+    entry_type: str = "scene"
+    metadata: dict[str, MetadataValue] = Field(default_factory=dict)
+    computed_metadata: dict[str, MetadataValue] = Field(default_factory=dict)
 
 
 class CreateSceneRequest(BaseModel):
@@ -66,6 +105,8 @@ class SaveSceneRequest(BaseModel):
     body_markdown: str
     base_revision: str | None = None
     status: str = "draft"
+    entry_type: str = "scene"
+    metadata: dict[str, MetadataValue] = Field(default_factory=dict)
 
 
 class TodoItem(BaseModel):

@@ -28,6 +28,7 @@ out of scope for this first slice.
 ```text
 project.yaml
 manuscript.structure.yaml
+metadata.schema.yaml
 scenes/
 lore/
 prompts/
@@ -43,6 +44,9 @@ allowed Manuscript Structure container types. The manuscript tree remains in
 
 Anchored TODO ownership and synchronization invariants are documented in
 `docs/editor-todo-invariants.md`.
+
+The planned metadata model for Scenes, Lore Entries, and Prompt Entries is
+documented in `docs/metadata-strategy.md`.
 
 ## Run Locally
 

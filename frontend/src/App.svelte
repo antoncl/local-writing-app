@@ -4,6 +4,8 @@
   import DocumentEditorPane from "./DocumentEditorPane.svelte";
   import type {
     DirectoryListing,
+    EntryMetadata,
+    MetadataSchema,
     ProjectInfo,
     ProjectValidation,
     Scene,
@@ -34,6 +36,9 @@
     dirty: boolean;
     draftTitle: string;
     draftMarkdown: string;
+    draftStatus: string;
+    draftEntryType: string;
+    draftMetadata: EntryMetadata;
     saving: boolean;
   };
   type ConfirmationState = {
@@ -68,6 +73,7 @@
   let activeParentId: string | undefined = undefined;
   let todos: TodoItem[] = [];
   let validation: ProjectValidation | null = null;
+  let metadataSchema: MetadataSchema | null = null;
   let newTodo = "";
   let searchQuery = "";
   let searchOpenTodos = false;
@@ -123,6 +129,9 @@
       dirty: false,
       draftTitle: "",
       draftMarkdown: "",
+      draftStatus: "draft",
+      draftEntryType: "scene",
+      draftMetadata: {},
       saving: false,
     };
   }
@@ -308,6 +317,10 @@
     todos = (await api.getTodos()).items.filter((item) => !item.anchor_id);
   }
 
+  async function refreshMetadataSchema() {
+    metadataSchema = await api.getMetadataSchema();
+  }
+
   async function openDirectoryPicker(event?: MouseEvent) {
     event?.preventDefault();
     event?.stopPropagation();
@@ -335,6 +348,7 @@
     await run(async () => {
       const openedProject = await api.createProject(projectPath, projectTitle);
       await refreshStructure();
+      await refreshMetadataSchema();
       await refreshTodos();
       openProjectWorkspace(openedProject);
       const initialSceneId = findFirstSceneId(structure?.root);
@@ -350,6 +364,7 @@
       const openedProject = await api.openProject(projectPath);
       projectTitle = openedProject.title;
       await refreshStructure();
+      await refreshMetadataSchema();
       await refreshTodos();
       openProjectWorkspace(openedProject);
       status = `Opened ${openedProject.title}`;
@@ -402,6 +417,9 @@
             dirty: false,
             draftTitle: scene.title,
             draftMarkdown: scene.body_markdown,
+            draftStatus: scene.status,
+            draftEntryType: scene.entry_type,
+            draftMetadata: cloneMetadata(scene.metadata),
             saving: false,
           }
         : pane,
@@ -432,17 +450,34 @@
     return pane;
   }
 
-  function updateEditorPaneDraft(id: string, title: string, bodyMarkdown: string) {
+  function updateEditorPaneDraft(id: string, title: string, bodyMarkdown: string, status: string, entryType: string, metadata: EntryMetadata) {
     editorPanes = editorPanes.map((pane) =>
       pane.id === id
         ? {
             ...pane,
-            dirty: Boolean(pane.scene) && (title !== pane.scene.title || bodyMarkdown !== pane.scene.body_markdown),
+            dirty:
+              Boolean(pane.scene) &&
+              (title !== pane.scene.title ||
+                bodyMarkdown !== pane.scene.body_markdown ||
+                status !== pane.scene.status ||
+                entryType !== pane.scene.entry_type ||
+                !metadataEqual(metadata, pane.scene.metadata)),
             draftTitle: title,
             draftMarkdown: bodyMarkdown,
+            draftStatus: status,
+            draftEntryType: entryType,
+            draftMetadata: cloneMetadata(metadata),
           }
         : pane,
     );
+  }
+
+  function cloneMetadata(metadata: EntryMetadata) {
+    return JSON.parse(JSON.stringify(metadata ?? {})) as EntryMetadata;
+  }
+
+  function metadataEqual(left: EntryMetadata, right: EntryMetadata) {
+    return JSON.stringify(left ?? {}) === JSON.stringify(right ?? {});
   }
 
   function toggleEditorPanePinned(id: string) {
@@ -474,7 +509,16 @@
     if (!pane?.scene) return;
     setEditorPaneSaving(id, true);
     try {
-      const savedScene = await api.saveScene({ ...pane.scene, title: pane.draftTitle }, pane.draftMarkdown);
+      const savedScene = await api.saveScene(
+        {
+          ...pane.scene,
+          title: pane.draftTitle,
+          status: pane.draftStatus,
+          entry_type: pane.draftEntryType,
+          metadata: cloneMetadata(pane.draftMetadata),
+        },
+        pane.draftMarkdown,
+      );
       editorPanes = editorPanes.map((candidate) =>
         candidate.id === id
           ? {
@@ -484,6 +528,9 @@
               dirty: false,
               draftTitle: savedScene.title,
               draftMarkdown: savedScene.body_markdown,
+              draftStatus: savedScene.status,
+              draftEntryType: savedScene.entry_type,
+              draftMetadata: cloneMetadata(savedScene.metadata),
               saving: false,
             }
           : candidate,
@@ -832,10 +879,19 @@
       <DocumentEditorPane
         bind:this={editorPaneComponents[editorPane.id]}
         scene={editorPane.scene}
+        metadataSchema={metadataSchema}
         dirty={editorPane.dirty}
         todoStatusHint={embeddedTodoStatusHintsByPane[editorPane.id] ?? "No embedded TODOs. Select text to mark a TODO."}
         on:focus={() => focusPane(editorPane.id)}
-        on:change={(event) => updateEditorPaneDraft(editorPane.id, event.detail.title, event.detail.bodyMarkdown)}
+        on:change={(event) =>
+          updateEditorPaneDraft(
+            editorPane.id,
+            event.detail.title,
+            event.detail.bodyMarkdown,
+            event.detail.status,
+            event.detail.entryType,
+            event.detail.metadata,
+          )}
         on:embeddedTodos={(event) => updateEmbeddedTodosForPane(editorPane.id, event.detail.todos)}
       />
       <button class="pane-resize" type="button" aria-label="Resize Scene Editor pane" on:keydown={(event) => handlePaneResizeKeydown(event, editorPane.id)} on:mousedown={(event) => startPaneResize(event, editorPane.id)}></button>

@@ -1,5 +1,6 @@
 import type {
   DirectoryListing,
+  MetadataSchema,
   ProjectInfo,
   ProjectValidation,
   Scene,
@@ -41,6 +42,9 @@ export const api = {
   getStructure() {
     return request<StructureDocument>("/structure");
   },
+  getMetadataSchema() {
+    return request<MetadataSchema>("/metadata/schema");
+  },
   listDirectories(path?: string) {
     const query = path ? `?path=${encodeURIComponent(path)}` : "";
     return request<DirectoryListing>(`/directories${query}`);
@@ -72,6 +76,8 @@ export const api = {
         body_markdown: bodyMarkdown,
         base_revision: scene.revision,
         status: scene.status,
+        entry_type: scene.entry_type,
+        metadata: scene.metadata,
       }),
     });
   },

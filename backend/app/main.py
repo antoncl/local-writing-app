@@ -11,6 +11,7 @@ from app.models import (
     CreateSceneRequest,
     CreateTodoRequest,
     DirectoryListing,
+    MetadataSchema,
     OpenProjectRequest,
     ProjectInfo,
     ProjectValidation,
@@ -90,6 +91,12 @@ def repair_project() -> ProjectValidation:
 def get_structure() -> StructureDocument:
     with translate_errors():
         return service.read_structure()
+
+
+@app.get("/api/metadata/schema", response_model=MetadataSchema)
+def get_metadata_schema() -> MetadataSchema:
+    with translate_errors():
+        return service.read_metadata_schema()
 
 
 @app.post("/api/scenes", response_model=Scene)

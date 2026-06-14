@@ -16,6 +16,47 @@ export type Scene = {
   body_markdown: string;
   revision: string;
   status: string;
+  entry_type: string;
+  metadata: EntryMetadata;
+  computed_metadata: EntryMetadata;
+};
+
+export type MetadataValue = string | number | boolean | null | MetadataValue[] | { [key: string]: MetadataValue };
+
+export type EntryMetadata = Record<string, MetadataValue>;
+
+export type MetadataFieldType =
+  | "text"
+  | "long_text"
+  | "number"
+  | "boolean"
+  | "date"
+  | "select"
+  | "multi_select"
+  | "entity_ref"
+  | "entity_ref_list"
+  | "tags"
+  | "computed";
+
+export type MetadataFieldDefinition = {
+  name: string;
+  type: MetadataFieldType;
+  options: string[];
+  target?: Record<string, string> | null;
+  computed?: Record<string, string> | null;
+};
+
+export type EntryTypeDefinition = {
+  name: string;
+  kind: string;
+  parent?: string | null;
+  fields: string[];
+};
+
+export type MetadataSchema = {
+  version: number;
+  entry_types: Record<string, EntryTypeDefinition>;
+  fields: Record<string, MetadataFieldDefinition>;
 };
 
 export type TodoItem = {

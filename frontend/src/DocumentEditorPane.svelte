@@ -10,14 +10,16 @@
   import TableHeader from "@tiptap/extension-table-header";
   import TableRow from "@tiptap/extension-table-row";
   import { editorHtmlToSceneMarkdown, sceneMarkdownToHtml } from "./markdown";
-  import type { Scene } from "./types";
+  import MetadataLongTextEditor from "./MetadataLongTextEditor.svelte";
+  import type { EntryMetadata, MetadataFieldDefinition, MetadataSchema, MetadataValue, Scene } from "./types";
 
   export let scene: Scene | null = null;
+  export let metadataSchema: MetadataSchema | null = null;
   export let dirty = false;
   export let todoStatusHint = "";
 
   const dispatch = createEventDispatcher<{
-    change: { title: string; bodyMarkdown: string };
+    change: { title: string; bodyMarkdown: string; status: string; entryType: string; metadata: EntryMetadata };
     focus: void;
     embeddedTodos: { todos: EmbeddedTodo[] };
   }>();
@@ -104,6 +106,11 @@
   let editor: Editor | null = null;
   let loadedSceneId: string | null = null;
   let title = "";
+  let status = "draft";
+  let entryType = "scene";
+  let metadata: EntryMetadata = {};
+  let liveWordCount = 0;
+  let metadataExpanded = false;
   let editorEmpty = true;
   let selectionMenu: FloatingMenuState = { visible: false, x: 0, y: 0, wordCount: 0, placement: "above" };
   let slashMenu: SlashMenuState = { visible: false, x: 0, y: 0, selectedIndex: 0 };
@@ -114,6 +121,9 @@
   $: slashCommands = editor ? getSlashCommands() : [];
   $: activeSlashCommand = slashCommands[slashMenu.selectedIndex];
   $: selectionToolbarActions = editor ? getSelectionToolbarActions() : [];
+  $: sceneEntryTypes = Object.entries(metadataSchema?.entry_types ?? {}).filter(([, definition]) => definition.kind === "scene");
+  $: activeEntryType = metadataSchema?.entry_types[entryType] ?? metadataSchema?.entry_types.scene;
+  $: metadataFieldIds = activeEntryType?.fields ?? [];
 
   $: if (editor && scene && scene.id !== loadedSceneId) {
     void loadScene(scene);
@@ -122,6 +132,10 @@
   $: if (editor && !scene && loadedSceneId !== null) {
     loadedSceneId = null;
     title = "";
+    status = "draft";
+    entryType = "scene";
+    metadata = {};
+    liveWordCount = 0;
     editor.commands.clearContent(false);
     syncEditorEmpty();
   }
@@ -172,12 +186,16 @@
   async function loadScene(nextScene: Scene) {
     const sceneId = nextScene.id;
     title = nextScene.title;
+    status = nextScene.status || "draft";
+    entryType = nextScene.entry_type || "scene";
+    metadata = cloneMetadata(nextScene.metadata);
     const html = await sceneMarkdownToHtml(nextScene.body_markdown || "");
     if (!editor || scene?.id !== sceneId) return;
     editor.commands.setContent(html || "<p></p>", false);
     loadedSceneId = sceneId;
     enforceUniqueTodoAnchors();
     syncTodoAnchorDomState(true);
+    updateLiveWordCount();
     dispatchEmbeddedTodos();
     syncEditorEmpty();
     updateSelectionMenu();
@@ -189,11 +207,86 @@
     updateSelectionMenu();
     updateSlashMenuFromContent();
     syncTodoAnchorDomState(true);
+    updateLiveWordCount();
     dispatchEmbeddedTodos();
     dispatch("change", {
       title,
       bodyMarkdown: editorHtmlToSceneMarkdown(editor.getHTML()),
+      status,
+      entryType,
+      metadata: cloneMetadata(metadata),
     });
+  }
+
+  function cloneMetadata(value: EntryMetadata) {
+    return JSON.parse(JSON.stringify(value ?? {})) as EntryMetadata;
+  }
+
+  function updateStatus(value: string) {
+    status = value;
+    emitChange();
+  }
+
+  function updateEntryType(value: string) {
+    entryType = value;
+    emitChange();
+  }
+
+  function updateMetadataField(fieldId: string, field: MetadataFieldDefinition, value: MetadataValue) {
+    metadata = {
+      ...metadata,
+      [fieldId]: normaliseFieldValue(field, value),
+    };
+    emitChange();
+  }
+
+  function normaliseFieldValue(field: MetadataFieldDefinition, value: MetadataValue): MetadataValue {
+    if (field.type === "multi_select" || field.type === "tags" || field.type === "entity_ref_list") {
+      if (Array.isArray(value)) return value.map((item) => String(item).trim()).filter(Boolean);
+      return String(value ?? "")
+        .split(",")
+        .map((item) => item.trim())
+        .filter(Boolean);
+    }
+    if (field.type === "number") {
+      if (value === "" || value === null) return null;
+      const parsed = Number(value);
+      return Number.isFinite(parsed) ? parsed : null;
+    }
+    if (field.type === "boolean") {
+      return Boolean(value);
+    }
+    return value === null ? "" : String(value);
+  }
+
+  function metadataFieldString(fieldId: string) {
+    const value = metadata[fieldId];
+    if (Array.isArray(value)) return value.join(", ");
+    if (value === null || value === undefined) return "";
+    if (typeof value === "object") return JSON.stringify(value);
+    return String(value);
+  }
+
+  function computedFieldString(fieldId: string) {
+    if (fieldId === "word_count") return String(liveWordCount);
+    const value = scene?.computed_metadata?.[fieldId];
+    if (Array.isArray(value)) return value.join(", ");
+    if (value === null || value === undefined) return "";
+    if (typeof value === "object") return JSON.stringify(value);
+    return String(value);
+  }
+
+  function metadataSummary() {
+    const typeName = activeEntryType?.name ?? entryType;
+    return `${typeName} · ${status || "draft"} · ${liveWordCount} ${liveWordCount === 1 ? "word" : "words"}`;
+  }
+
+  function updateLiveWordCount() {
+    if (!editor) {
+      liveWordCount = 0;
+      return;
+    }
+    liveWordCount = editor.state.doc.textBetween(0, editor.state.doc.content.size, " ").split(/\s+/).filter(Boolean).length;
   }
 
   function syncEditorEmpty() {
@@ -888,6 +981,93 @@
           Select text for formatting. Type / on an empty line for insert commands.
         {/if}
       </div>
+      {#if metadataSchema}
+        <section class="scene-metadata" aria-label="Scene metadata">
+          <button class="metadata-toggle" type="button" on:click={() => (metadataExpanded = !metadataExpanded)}>
+            <strong>{metadataExpanded ? "Hide Metadata" : "Show Metadata"}</strong>
+            <span>{metadataSummary()}</span>
+          </button>
+          {#if metadataExpanded}
+            <div class="metadata-panel">
+              <label>
+                Scene Type
+                <select value={entryType} on:change={(event) => updateEntryType(event.currentTarget.value)}>
+                  {#if entryType && !metadataSchema.entry_types[entryType]}
+                    <option value={entryType}>{entryType}</option>
+                  {/if}
+                  {#each sceneEntryTypes as [typeId, definition]}
+                    <option value={typeId}>{definition.name}</option>
+                  {/each}
+                </select>
+              </label>
+              <div class="metadata-fields">
+                {#each metadataFieldIds as fieldId}
+                  {#if metadataSchema.fields[fieldId]}
+                    {@const field = metadataSchema.fields[fieldId]}
+                    {#if field.type === "long_text"}
+                      <div class="metadata-field wide-field">
+                        <span class="metadata-field-label">{field.name}</span>
+                        <MetadataLongTextEditor
+                          ariaLabel={field.name}
+                          value={metadataFieldString(fieldId)}
+                          on:change={(event) => updateMetadataField(fieldId, field, event.detail.value)}
+                        />
+                      </div>
+                    {:else}
+                      <label class:wide-field={field.type === "computed"}>
+                        {field.name}
+                        {#if fieldId === "status"}
+                        <select value={status} on:change={(event) => updateStatus(event.currentTarget.value)}>
+                          {#if status && !field.options.includes(status)}
+                            <option value={status}>{status}</option>
+                          {/if}
+                          {#each field.options as option}
+                            <option value={option}>{option}</option>
+                          {/each}
+                        </select>
+                        {:else if field.type === "select"}
+                        <select
+                          value={metadataFieldString(fieldId)}
+                          on:change={(event) => updateMetadataField(fieldId, field, event.currentTarget.value)}
+                        >
+                          <option value=""></option>
+                          {#if metadataFieldString(fieldId) && !field.options.includes(metadataFieldString(fieldId))}
+                            <option value={metadataFieldString(fieldId)}>{metadataFieldString(fieldId)}</option>
+                          {/if}
+                          {#each field.options as option}
+                            <option value={option}>{option}</option>
+                          {/each}
+                        </select>
+                      {:else if field.type === "boolean"}
+                        <input
+                          type="checkbox"
+                          checked={Boolean(metadata[fieldId])}
+                          on:change={(event) => updateMetadataField(fieldId, field, event.currentTarget.checked)}
+                        />
+                      {:else if field.type === "number"}
+                        <input
+                          type="number"
+                          value={metadataFieldString(fieldId)}
+                          on:input={(event) => updateMetadataField(fieldId, field, event.currentTarget.value)}
+                        />
+                      {:else if field.type === "computed"}
+                        <input readonly value={computedFieldString(fieldId)} />
+                      {:else}
+                        <input
+                          value={metadataFieldString(fieldId)}
+                          placeholder={field.type === "multi_select" || field.type === "tags" || field.type === "entity_ref_list" ? "Comma-separated values" : ""}
+                          on:input={(event) => updateMetadataField(fieldId, field, event.currentTarget.value)}
+                        />
+                        {/if}
+                      </label>
+                    {/if}
+                  {/if}
+                {/each}
+              </div>
+            </div>
+          {/if}
+        </section>
+      {/if}
     {:else}
       <h2>Select a scene</h2>
     {/if}

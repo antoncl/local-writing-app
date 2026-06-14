@@ -6,6 +6,7 @@ import uuid
 from pathlib import Path
 from tempfile import NamedTemporaryFile
 from typing import Any
+from urllib.parse import unquote
 
 import yaml
 
@@ -28,6 +29,13 @@ from app.models import (
     UpdateTodoRequest,
 )
 from app.services.markdown_validation import validate_scene_markdown
+
+TODO_ANCHOR_PATTERN = re.compile(
+    r"<!--\s*todo-anchor:id=([A-Za-z0-9_-]+)\s*-->([\s\S]*?)<!--\s*/todo-anchor\s*-->",
+)
+EMBEDDED_TODO_PATTERN = re.compile(
+    r"<!--\s*embedded-todo:id=([A-Za-z0-9_-]+);status=(open|done);note=([^\s]*)\s*-->([\s\S]*?)<!--\s*/embedded-todo\s*-->",
+)
 
 
 class ProjectServiceError(Exception):
@@ -158,7 +166,70 @@ class ProjectService:
         for scene_id in sorted(scene_ids - referenced):
             warnings.append(f"Scene {scene_id} is not in the manuscript structure.")
 
+        todos = self.read_todos()
+        todo_anchor_refs = {
+            (item.scene_id, item.anchor_id)
+            for item in todos.items
+            if item.scene_id and item.anchor_id
+        }
+        anchors_by_scene = self._read_scene_todo_anchors(scene_ids)
+        anchor_counts_by_scene = self._read_scene_todo_anchor_counts(scene_ids)
+
+        for item in todos.items:
+            label = f"TODO {item.id}"
+            if item.scene_id and item.scene_id not in scene_ids:
+                errors.append(f"{label} references missing scene {item.scene_id}.")
+            if item.anchor_id and not item.scene_id:
+                errors.append(f"{label} has anchor {item.anchor_id} but no scene.")
+            if item.scene_id and item.anchor_id and item.anchor_id not in anchors_by_scene.get(item.scene_id, set()):
+                errors.append(f"{label} references missing anchor {item.anchor_id} in scene {item.scene_id}.")
+
+        for scene_id, anchors in anchors_by_scene.items():
+            for anchor_id in sorted(anchors):
+                if (scene_id, anchor_id) not in todo_anchor_refs:
+                    warnings.append(f"Scene {scene_id} contains orphan TODO anchor {anchor_id}.")
+
+        for scene_id, anchor_counts in anchor_counts_by_scene.items():
+            for anchor_id, count in sorted(anchor_counts.items()):
+                if count > 1:
+                    errors.append(f"Scene {scene_id} contains duplicate TODO anchor {anchor_id}.")
+
         return ProjectValidation(valid=not errors, warnings=warnings, errors=errors)
+
+    def repair_project(self) -> ProjectValidation:
+        root = self._require_project()
+        scene_ids = {path.stem for path in (root / "scenes").glob("*.md")}
+        anchors_by_scene = self._read_scene_todo_anchors(scene_ids)
+        todos = self.read_todos()
+
+        kept_items: list[TodoItem] = []
+        valid_anchor_refs: set[tuple[str, str]] = set()
+        for item in todos.items:
+            if item.scene_id and item.scene_id not in scene_ids:
+                continue
+            if item.anchor_id and not item.scene_id:
+                continue
+            if item.scene_id and item.anchor_id:
+                if item.anchor_id not in anchors_by_scene.get(item.scene_id, set()):
+                    continue
+                valid_anchor_refs.add((item.scene_id, item.anchor_id))
+            kept_items.append(item)
+
+        if len(kept_items) != len(todos.items):
+            todos.items = kept_items
+            self._write_yaml(root / "todo.yaml", todos.model_dump())
+
+        for scene_id, anchors in anchors_by_scene.items():
+            orphan_anchor_ids = {
+                anchor_id
+                for anchor_id in anchors
+                if (scene_id, anchor_id) not in valid_anchor_refs
+            }
+            if orphan_anchor_ids:
+                self._remove_scene_anchor_comments(scene_id, orphan_anchor_ids)
+            self._remove_duplicate_scene_anchor_comments(scene_id)
+
+        return self.validate_project()
 
     def read_structure(self) -> StructureDocument:
         root = self._require_project()
@@ -228,6 +299,7 @@ class ProjectService:
         )
         self._write_scene_file(path, scene)
         self._update_scene_title_in_structure(scene_id, request.title)
+        self._remove_missing_scene_todo_anchors(scene_id, request.body_markdown)
         return self.read_scene(scene_id)
 
     def delete_scene(self, scene_id: str) -> StructureDocument:
@@ -238,6 +310,7 @@ class ProjectService:
         structure = self.read_structure()
         self._remove_scene_node(structure.root, scene_id)
         self._write_yaml(root / "manuscript.structure.yaml", structure.model_dump())
+        self._remove_scene_todos(scene_id)
         return self.read_structure()
 
     def read_todos(self) -> TodoDocument:
@@ -254,6 +327,7 @@ class ProjectService:
                 text=request.text,
                 scope=request.scope,
                 scene_id=request.scene_id,
+                anchor_id=request.anchor_id,
             )
         )
         self._write_yaml(root / "todo.yaml", todos.model_dump())
@@ -268,6 +342,10 @@ class ProjectService:
                     item.text = request.text
                 if request.status is not None:
                     item.status = request.status
+                if request.scope is not None:
+                    item.scope = request.scope
+                if request.scene_id is not None:
+                    item.scene_id = request.scene_id
                 self._write_yaml(root / "todo.yaml", todos.model_dump())
                 return todos
         raise ProjectServiceError(f"TODO {todo_id} does not exist.", 404)
@@ -283,24 +361,64 @@ class ProjectService:
         root = self._require_project()
         hits: list[SearchHit] = []
         folders: list[Path] = []
+        query = request.query.strip()
         if request.include_scenes:
             folders.append(root / "scenes")
         if request.include_lore:
             folders.append(root / "lore")
 
-        pattern = re.compile(re.escape(request.query), re.IGNORECASE)
-        for folder in folders:
-            for path in folder.rglob("*.md"):
-                for index, line in enumerate(path.read_text(encoding="utf-8").splitlines(), start=1):
-                    if pattern.search(line):
+        if not query and not request.include_open_todos:
+            return SearchResponse(query=query, hits=[])
+
+        scene_paths = self._scene_display_paths()
+        pattern = re.compile(re.escape(query), re.IGNORECASE) if query else None
+        if request.include_open_todos:
+            for item in self.read_todos().items:
+                if item.status != "open":
+                    continue
+                if pattern is None or pattern.search(item.text):
+                    hits.append(
+                        SearchHit(
+                            file_id=item.scene_id or "project",
+                            path=f"{scene_paths.get(item.scene_id, 'Project')} TODO" if item.scene_id else "Project TODO",
+                            line=1,
+                            excerpt=item.text,
+                            todo_id=item.id,
+                        )
+                    )
+
+            for path in (root / "scenes").rglob("*.md"):
+                _, body = self._read_markdown_with_front_matter(path)
+                for match in EMBEDDED_TODO_PATTERN.finditer(body):
+                    if match.group(2) != "open":
+                        continue
+                    note = unquote(match.group(3))
+                    prose = re.sub(r"\s+", " ", match.group(4)).strip()
+                    excerpt = note or prose
+                    if pattern is None or pattern.search(f"{note} {prose}"):
                         hits.append(
                             SearchHit(
                                 file_id=path.stem,
-                                path=str(path.relative_to(root)),
-                                line=index,
-                                excerpt=line.strip(),
+                                path=scene_paths.get(path.stem, str(path.relative_to(root))),
+                                line=body[: match.start()].count("\n") + 1,
+                                excerpt=excerpt,
+                                todo_id=match.group(1),
                             )
                         )
+
+        if pattern is not None:
+            for folder in folders:
+                for path in folder.rglob("*.md"):
+                    for index, line in enumerate(path.read_text(encoding="utf-8").splitlines(), start=1):
+                        if pattern.search(line):
+                            hits.append(
+                                SearchHit(
+                                    file_id=path.stem,
+                                    path=scene_paths.get(path.stem, str(path.relative_to(root))),
+                                    line=index,
+                                    excerpt=line.strip(),
+                                )
+                            )
         return SearchResponse(query=request.query, hits=hits)
 
     def _require_project(self) -> Path:
@@ -366,6 +484,141 @@ class ProjectService:
         for child in node.children:
             ids.update(self._collect_scene_ids(child))
         return ids
+
+    def _scene_display_paths(self) -> dict[str, str]:
+        paths: dict[str, str] = {}
+
+        def walk(node: StructureNode, parents: list[str]) -> None:
+            next_parents = parents if node.type == "root" else [*parents, node.title]
+            if node.type == "scene" and node.scene_id:
+                paths[node.scene_id] = " / ".join(next_parents)
+            for child in node.children:
+                walk(child, next_parents)
+
+        walk(self.read_structure().root, [])
+        return paths
+
+    def _extract_todo_anchor_ids(self, markdown: str) -> set[str]:
+        return {match.group(1) for match in TODO_ANCHOR_PATTERN.finditer(markdown)}
+
+    def _extract_todo_anchor_counts(self, markdown: str) -> dict[str, int]:
+        counts: dict[str, int] = {}
+        for match in TODO_ANCHOR_PATTERN.finditer(markdown):
+            anchor_id = match.group(1)
+            counts[anchor_id] = counts.get(anchor_id, 0) + 1
+        return counts
+
+    def _read_scene_todo_anchors(self, scene_ids: set[str]) -> dict[str, set[str]]:
+        root = self._require_project()
+        anchors_by_scene: dict[str, set[str]] = {}
+        for scene_id in scene_ids:
+            path = root / "scenes" / f"{scene_id}.md"
+            if not path.exists():
+                continue
+            _, body = self._read_markdown_with_front_matter(path)
+            anchors = self._extract_todo_anchor_ids(body)
+            if anchors:
+                anchors_by_scene[scene_id] = anchors
+        return anchors_by_scene
+
+    def _read_scene_todo_anchor_counts(self, scene_ids: set[str]) -> dict[str, dict[str, int]]:
+        root = self._require_project()
+        counts_by_scene: dict[str, dict[str, int]] = {}
+        for scene_id in scene_ids:
+            path = root / "scenes" / f"{scene_id}.md"
+            if not path.exists():
+                continue
+            _, body = self._read_markdown_with_front_matter(path)
+            counts = self._extract_todo_anchor_counts(body)
+            if counts:
+                counts_by_scene[scene_id] = counts
+        return counts_by_scene
+
+    def _remove_missing_scene_todo_anchors(self, scene_id: str, markdown: str) -> None:
+        root = self._require_project()
+        todos = self.read_todos()
+        anchors = self._extract_todo_anchor_ids(markdown)
+        kept_items = [
+            item
+            for item in todos.items
+            if not (item.scene_id == scene_id and item.anchor_id and item.anchor_id not in anchors)
+        ]
+        if len(kept_items) != len(todos.items):
+            todos.items = kept_items
+            self._write_yaml(root / "todo.yaml", todos.model_dump())
+
+    def _remove_scene_todos(self, scene_id: str) -> None:
+        root = self._require_project()
+        todos = self.read_todos()
+        kept_items = [item for item in todos.items if item.scene_id != scene_id]
+        if len(kept_items) != len(todos.items):
+            todos.items = kept_items
+            self._write_yaml(root / "todo.yaml", todos.model_dump())
+
+    def _remove_scene_anchor_comments(self, scene_id: str, anchor_ids: set[str]) -> None:
+        root = self._require_project()
+        path = root / "scenes" / f"{scene_id}.md"
+        if not path.exists():
+            return
+        front_matter, body = self._read_markdown_with_front_matter(path)
+
+        def replace_anchor(match: re.Match[str]) -> str:
+            anchor_id = match.group(1)
+            content = match.group(2)
+            return content if anchor_id in anchor_ids else match.group(0)
+
+        repaired_body = TODO_ANCHOR_PATTERN.sub(replace_anchor, body)
+        if repaired_body == body:
+            return
+
+        if front_matter:
+            scene = self.read_scene(scene_id)
+            self._write_scene_file(
+                path,
+                Scene(
+                    id=scene.id,
+                    title=scene.title,
+                    body_markdown=repaired_body,
+                    revision=scene.revision,
+                    status=scene.status,
+                ),
+            )
+        else:
+            self._atomic_write(path, repaired_body)
+
+    def _remove_duplicate_scene_anchor_comments(self, scene_id: str) -> None:
+        root = self._require_project()
+        path = root / "scenes" / f"{scene_id}.md"
+        if not path.exists():
+            return
+        front_matter, body = self._read_markdown_with_front_matter(path)
+        seen_anchor_ids: set[str] = set()
+
+        def replace_duplicate(match: re.Match[str]) -> str:
+            anchor_id = match.group(1)
+            content = match.group(2)
+            if anchor_id in seen_anchor_ids:
+                return content
+            seen_anchor_ids.add(anchor_id)
+            return match.group(0)
+
+        repaired_body = TODO_ANCHOR_PATTERN.sub(replace_duplicate, body)
+        if repaired_body == body:
+            return
+        if front_matter:
+            scene = self.read_scene(scene_id)
+            self._write_scene_file(
+                path,
+                Scene(
+                    id=scene.id,
+                    title=scene.title,
+                    body_markdown=repaired_body,
+                    revision=scene.revision,
+                    status=scene.status,
+                ),
+            )
+        else:
+            self._atomic_write(path, repaired_body)
 
     def _insert_scene_node(
         self,

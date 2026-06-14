@@ -1,4 +1,12 @@
-import type { DirectoryListing, ProjectInfo, Scene, SearchHit, StructureDocument, TodoDocument } from "./types";
+import type {
+  DirectoryListing,
+  ProjectInfo,
+  ProjectValidation,
+  Scene,
+  SearchHit,
+  StructureDocument,
+  TodoDocument,
+} from "./types";
 
 const baseUrl = "http://127.0.0.1:8787/api";
 
@@ -37,6 +45,16 @@ export const api = {
     const query = path ? `?path=${encodeURIComponent(path)}` : "";
     return request<DirectoryListing>(`/directories${query}`);
   },
+  validateProject() {
+    return request<ProjectValidation>("/project/validate", {
+      method: "POST",
+    });
+  },
+  repairProject() {
+    return request<ProjectValidation>("/project/repair", {
+      method: "POST",
+    });
+  },
   createScene(title: string, parentId?: string) {
     return request<Scene>("/scenes", {
       method: "POST",
@@ -65,26 +83,35 @@ export const api = {
   getTodos() {
     return request<TodoDocument>("/todos");
   },
-  createTodo(text: string, sceneId?: string | null) {
+  createTodo(text: string, sceneId?: string | null, anchorId?: string | null) {
     return request<TodoDocument>("/todos", {
       method: "POST",
       body: JSON.stringify({
         text,
         scope: sceneId ? "scene" : "project",
         scene_id: sceneId,
+        anchor_id: anchorId,
       }),
     });
   },
-  updateTodo(todoId: string, status: "open" | "done") {
+  updateTodo(
+    todoId: string,
+    updates: { status?: "open" | "done"; text?: string; scope?: "project" | "scene"; scene_id?: string | null },
+  ) {
     return request<TodoDocument>(`/todos/${todoId}`, {
       method: "PATCH",
-      body: JSON.stringify({ status }),
+      body: JSON.stringify(updates),
     });
   },
-  search(query: string) {
+  deleteTodo(todoId: string) {
+    return request<TodoDocument>(`/todos/${todoId}`, {
+      method: "DELETE",
+    });
+  },
+  search(query: string, includeOpenTodos = false) {
     return request<{ query: string; hits: SearchHit[] }>("/search", {
       method: "POST",
-      body: JSON.stringify({ query }),
+      body: JSON.stringify({ query, include_open_todos: includeOpenTodos }),
     });
   },
 };

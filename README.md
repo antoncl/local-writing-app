@@ -41,6 +41,9 @@ todo.yaml
 allowed Manuscript Structure container types. The manuscript tree remains in
 `manuscript.structure.yaml`, and prose remains in Scene Markdown files.
 
+Anchored TODO ownership and synchronization invariants are documented in
+`docs/editor-todo-invariants.md`.
+
 ## Run Locally
 
 Backend:

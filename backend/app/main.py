@@ -80,6 +80,12 @@ def validate_project() -> ProjectValidation:
         return service.validate_project()
 
 
+@app.post("/api/project/repair", response_model=ProjectValidation)
+def repair_project() -> ProjectValidation:
+    with translate_errors():
+        return service.repair_project()
+
+
 @app.get("/api/structure", response_model=StructureDocument)
 def get_structure() -> StructureDocument:
     with translate_errors():

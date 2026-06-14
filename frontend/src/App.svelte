@@ -5,6 +5,7 @@
   import type {
     DirectoryListing,
     ProjectInfo,
+    ProjectValidation,
     Scene,
     SearchHit,
     StructureDocument,
@@ -42,6 +43,15 @@
     destructive: boolean;
     onConfirm: () => Promise<void>;
   };
+  type EmbeddedTodo = {
+    id: string;
+    text: string;
+    status: "open" | "done";
+    note: string;
+    paneId: string;
+    sceneId: string;
+    sceneTitle: string;
+  };
 
   let projectPath = "";
   let projectTitle = "Untitled Project";
@@ -57,8 +67,10 @@
   $: activeScene = focusedEditorPane?.scene ?? null;
   let activeParentId: string | undefined = undefined;
   let todos: TodoItem[] = [];
+  let validation: ProjectValidation | null = null;
   let newTodo = "";
   let searchQuery = "";
+  let searchOpenTodos = false;
   let searchHits: SearchHit[] = [];
   let confirmation: ConfirmationState | null = null;
   let error = "";
@@ -76,6 +88,21 @@
     search: { title: "Search", x: 1126, y: 360, width: 310, height: 320, z: 5 },
   };
   let editorPanes: EditorPaneState[] = [];
+  let editorPaneComponents: Record<
+    string,
+    | {
+        updateEmbeddedTodo: (todoId: string, updates: { status?: "open" | "done"; note?: string }) => void;
+        deleteEmbeddedTodo: (todoId: string) => void;
+        highlightEmbeddedTodo: (todoId: string) => void;
+      }
+    | undefined
+  > = {};
+  let embeddedTodosByPane: Record<string, EmbeddedTodo[]> = {};
+  let embeddedTodoStatusHintsByPane: Record<string, string> = {};
+  let allEmbeddedTodos: EmbeddedTodo[] = [];
+
+  $: allEmbeddedTodos = Object.values(embeddedTodosByPane).flat();
+  $: embeddedTodoStatusHintsByPane = buildEmbeddedTodoStatusHintsByPane(embeddedTodosByPane);
 
   onMount(() => {
     fitPanesToViewport();
@@ -278,7 +305,7 @@
   }
 
   async function refreshTodos() {
-    todos = (await api.getTodos()).items;
+    todos = (await api.getTodos()).items.filter((item) => !item.anchor_id);
   }
 
   async function openDirectoryPicker(event?: MouseEvent) {
@@ -432,6 +459,8 @@
 
       const remainingEditorPanes = editorPanes.filter((candidate) => candidate.id !== id);
       editorPanes = remainingEditorPanes;
+      const { [id]: _closedTodos, ...remainingEmbeddedTodos } = embeddedTodosByPane;
+      embeddedTodosByPane = remainingEmbeddedTodos;
       const { [id]: _closedPane, ...remainingPanes } = panes;
       panes = remainingPanes;
       if (focusedEditorPaneId === id) {
@@ -460,6 +489,7 @@
           : candidate,
       );
       await refreshStructure();
+      await refreshTodos();
       status = `Saved ${savedScene.title}`;
     } catch (caught) {
       setEditorPaneSaving(id, false);
@@ -496,6 +526,7 @@
     if (!pane?.scene) return;
     const sceneTitle = pane.scene.title;
     structure = await api.deleteScene(pane.scene.id);
+    await refreshTodos();
     editorPanes = editorPanes.map((candidate) => (candidate.id === id ? createEmptyEditorPane(id) : candidate));
     status = `Deleted ${sceneTitle}`;
   }
@@ -510,24 +541,163 @@
 
   async function toggleTodo(item: TodoItem) {
     await run(async () => {
-      todos = (await api.updateTodo(item.id, item.status === "open" ? "done" : "open")).items;
+      todos = (await api.updateTodo(item.id, { status: item.status === "open" ? "done" : "open" })).items;
+    });
+  }
+
+  async function updateTodoText(item: TodoItem, text: string) {
+    const trimmed = text.trim();
+    if (!trimmed || trimmed === item.text) return;
+    await run(async () => {
+      todos = (await api.updateTodo(item.id, { text: trimmed })).items;
+    });
+  }
+
+  async function deleteTodo(item: TodoItem) {
+    await run(async () => {
+      todos = (await api.deleteTodo(item.id)).items;
+      status = "Deleted TODO";
+    });
+  }
+
+  async function deleteCompletedTodos() {
+    const completedTodos = todos.filter((item) => item.status === "done");
+    const completedEmbeddedTodos = allEmbeddedTodos.filter((item) => item.status === "done");
+    if (completedTodos.length === 0 && completedEmbeddedTodos.length === 0) return;
+    await run(async () => {
+      let nextTodos = todos;
+      for (const item of completedTodos) {
+        nextTodos = (await api.deleteTodo(item.id)).items;
+      }
+      todos = nextTodos.filter((item) => !item.anchor_id);
+      for (const item of completedEmbeddedTodos) {
+        editorPaneComponents[item.paneId]?.deleteEmbeddedTodo(item.id);
+      }
+      const deletedCount = completedTodos.length + completedEmbeddedTodos.length;
+      status = `Deleted ${deletedCount} completed TODO${deletedCount === 1 ? "" : "s"}`;
+    });
+  }
+
+  function handleTodoTextKeydown(event: KeyboardEvent, item: TodoItem) {
+    const input = event.currentTarget as HTMLTextAreaElement;
+    if (event.key === "Enter" && event.ctrlKey) {
+      event.preventDefault();
+      input.blur();
+    } else if (event.key === "Escape") {
+      input.value = item.text;
+      input.blur();
+    }
+  }
+
+  async function validateProject() {
+    await run(async () => {
+      validation = await api.validateProject();
+      status = validation.valid ? "Project validation passed" : "Project validation found issues";
+    });
+  }
+
+  async function repairProject() {
+    await run(async () => {
+      validation = await api.repairProject();
+      await refreshStructure();
+      await refreshTodos();
+      status = validation.valid ? "Project repair complete" : "Project repair complete with remaining issues";
     });
   }
 
   async function search() {
-    if (!searchQuery.trim()) return;
+    if (!searchQuery.trim() && !searchOpenTodos) return;
     await run(async () => {
-      searchHits = (await api.search(searchQuery.trim())).hits;
+      searchHits = (await api.search(searchQuery.trim(), searchOpenTodos)).hits;
     });
+  }
+
+  async function openSearchHit(hit: SearchHit) {
+    if (hit.file_id === "project") return;
+    await run(async () => {
+      await openSceneInEditorPane(hit.file_id);
+      if (hit.todo_id) {
+        window.setTimeout(() => highlightEmbeddedTodoInOpenPane(hit.file_id, hit.todo_id!), 0);
+      }
+    });
+  }
+
+  async function openEmbeddedTodo(item: EmbeddedTodo) {
+    await run(async () => {
+      await openSceneInEditorPane(item.sceneId);
+      window.setTimeout(() => highlightEmbeddedTodoInOpenPane(item.sceneId, item.id), 0);
+    });
+  }
+
+  async function openFileTodo(item: TodoItem) {
+    if (!item.scene_id) return;
+    await run(async () => {
+      await openSceneInEditorPane(item.scene_id!);
+    });
+  }
+
+  function highlightEmbeddedTodoInOpenPane(sceneId: string, todoId: string) {
+    const pane = editorPanes.find((candidate) => candidate.scene?.id === sceneId);
+    if (!pane) return;
+    editorPaneComponents[pane.id]?.highlightEmbeddedTodo(todoId);
   }
 
   function nodeChildren(node: StructureNode) {
     return node.children ?? [];
   }
+
+  function updateEmbeddedTodosForPane(id: string, embeddedTodos: Array<{ id: string; text: string; status: "open" | "done"; note: string }>) {
+    const pane = editorPanes.find((candidate) => candidate.id === id);
+    if (!pane?.scene) {
+      const { [id]: _removed, ...remainingTodos } = embeddedTodosByPane;
+      embeddedTodosByPane = remainingTodos;
+      return;
+    }
+    embeddedTodosByPane = {
+      ...embeddedTodosByPane,
+      [id]: embeddedTodos.map((item) => ({
+        ...item,
+        paneId: id,
+        sceneId: pane.scene!.id,
+        sceneTitle: pane.scene!.title,
+      })),
+    };
+  }
+
+  function toggleEmbeddedTodo(item: EmbeddedTodo) {
+    editorPaneComponents[item.paneId]?.updateEmbeddedTodo(item.id, {
+      status: item.status === "open" ? "done" : "open",
+    });
+  }
+
+  function updateEmbeddedTodoNote(item: EmbeddedTodo, note: string) {
+    if (note === item.note) return;
+    editorPaneComponents[item.paneId]?.updateEmbeddedTodo(item.id, { note });
+  }
+
+  function deleteEmbeddedTodo(item: EmbeddedTodo) {
+    editorPaneComponents[item.paneId]?.deleteEmbeddedTodo(item.id);
+  }
+
+  function buildEmbeddedTodoStatusHintsByPane(itemsByPane: Record<string, EmbeddedTodo[]>) {
+    return Object.fromEntries(
+      Object.entries(itemsByPane).map(([paneId, items]) => {
+        const openCount = items.filter((item) => item.status === "open").length;
+        const doneCount = items.length - openCount;
+        return [
+          paneId,
+          items.length === 0
+            ? "No embedded TODOs. Select text to mark a TODO."
+            : `${openCount} open embedded TODO${openCount === 1 ? "" : "s"} · ${doneCount} completed.`,
+        ];
+      }),
+    );
+  }
 </script>
 
 <main class="workspace">
-  <section class:hidden-pane={!isPaneVisible("project")} class="pane project-pane" data-pane-id="project" style={paneStyle("project")} aria-label="Project pane">
+  <!-- svelte-ignore a11y_no_noninteractive_element_interactions -->
+  <section class:hidden-pane={!isPaneVisible("project")} class="pane project-pane" data-pane-id="project" style={paneStyle("project")} aria-label="Project pane" on:mousedown={() => focusPane("project")}>
     <header class="pane-header" role="button" tabindex="0" aria-label="Move Project pane" on:keydown={(event) => handlePaneHeaderKeydown(event, "project")} on:mousedown={(event) => startPaneDrag(event, "project")}>
       <h2>Project</h2>
     </header>
@@ -547,12 +717,39 @@
       <div class="button-row">
         <button type="button" on:click={createProject}>Create</button>
         <button type="button" on:click={openProject}>Open</button>
+        <button type="button" disabled={!isProjectOpen} on:click={validateProject}>Validate</button>
       </div>
+      {#if validation}
+        <section class:invalid={!validation.valid} class="validation-panel" aria-label="Project validation result">
+          <h3>{validation.valid ? "Project Looks Consistent" : "Project Issues Found"}</h3>
+          {#if validation.errors.length > 0}
+            <strong>Errors</strong>
+            {#each validation.errors as validationError}
+              <p>{validationError}</p>
+            {/each}
+          {/if}
+          {#if validation.warnings.length > 0}
+            <strong>Warnings</strong>
+            {#each validation.warnings as validationWarning}
+              <p>{validationWarning}</p>
+            {/each}
+          {/if}
+          {#if validation.errors.length === 0 && validation.warnings.length === 0}
+            <p>No structure, scene, or TODO synchronization issues found.</p>
+          {/if}
+          {#if validation.errors.length > 0 || validation.warnings.length > 0}
+            <div class="validation-actions">
+              <button type="button" on:click={repairProject}>Repair TODO Links</button>
+            </div>
+          {/if}
+        </section>
+      {/if}
     </div>
     <button class="pane-resize" type="button" aria-label="Resize Project pane" on:keydown={(event) => handlePaneResizeKeydown(event, "project")} on:mousedown={(event) => startPaneResize(event, "project")}></button>
   </section>
 
-  <section class:hidden-pane={!isPaneVisible("outline")} class="pane outline-pane" data-pane-id="outline" style={paneStyle("outline")} aria-label="Manuscript Outline pane">
+  <!-- svelte-ignore a11y_no_noninteractive_element_interactions -->
+  <section class:hidden-pane={!isPaneVisible("outline")} class="pane outline-pane" data-pane-id="outline" style={paneStyle("outline")} aria-label="Manuscript Outline pane" on:mousedown={() => focusPane("outline")}>
     <header class="pane-header" role="button" tabindex="0" aria-label="Move Manuscript Outline pane" on:keydown={(event) => handlePaneHeaderKeydown(event, "outline")} on:mousedown={(event) => startPaneDrag(event, "outline")}>
       <h2>Manuscript Outline</h2>
     </header>
@@ -633,35 +830,95 @@
         </div>
       </header>
       <DocumentEditorPane
+        bind:this={editorPaneComponents[editorPane.id]}
         scene={editorPane.scene}
         dirty={editorPane.dirty}
+        todoStatusHint={embeddedTodoStatusHintsByPane[editorPane.id] ?? "No embedded TODOs. Select text to mark a TODO."}
         on:focus={() => focusPane(editorPane.id)}
         on:change={(event) => updateEditorPaneDraft(editorPane.id, event.detail.title, event.detail.bodyMarkdown)}
+        on:embeddedTodos={(event) => updateEmbeddedTodosForPane(editorPane.id, event.detail.todos)}
       />
       <button class="pane-resize" type="button" aria-label="Resize Scene Editor pane" on:keydown={(event) => handlePaneResizeKeydown(event, editorPane.id)} on:mousedown={(event) => startPaneResize(event, editorPane.id)}></button>
     </section>
   {/each}
 
-  <section class:hidden-pane={!isPaneVisible("todo")} class="pane todo-pane" data-pane-id="todo" style={paneStyle("todo")} aria-label="TODO pane">
+  <!-- svelte-ignore a11y_no_noninteractive_element_interactions -->
+  <section class:hidden-pane={!isPaneVisible("todo")} class="pane todo-pane" data-pane-id="todo" style={paneStyle("todo")} aria-label="TODO pane" on:mousedown={() => focusPane("todo")}>
     <header class="pane-header" role="button" tabindex="0" aria-label="Move TODO pane" on:keydown={(event) => handlePaneHeaderKeydown(event, "todo")} on:mousedown={(event) => startPaneDrag(event, "todo")}>
       <h2>TODO</h2>
+      <div class="pane-header-actions">
+        <button
+          class="pin-button danger"
+          type="button"
+          disabled={!todos.some((item) => item.status === "done") && !allEmbeddedTodos.some((item) => item.status === "done")}
+          title="Delete all completed TODOs"
+          on:mousedown={(event) => event.stopPropagation()}
+          on:click={deleteCompletedTodos}
+        >
+          Delete Done
+        </button>
+      </div>
     </header>
     <div class="pane-content">
       <div class="todo-entry">
-        <input bind:value={newTodo} placeholder="Add a TODO" on:keydown={(event) => event.key === "Enter" && addTodo()} />
+        <textarea bind:value={newTodo} placeholder="Add a file-level TODO description" rows="3" on:keydown={(event) => event.key === "Enter" && event.ctrlKey && addTodo()}></textarea>
         <button on:click={addTodo}>Add</button>
       </div>
+      {#if allEmbeddedTodos.length > 0}
+        <div class="todo-section-label">Embedded TODOs from open scenes</div>
+      {/if}
+      {#each allEmbeddedTodos as item}
+        <div class:done={item.status === "done"} class="todo-item">
+          <input class="todo-checkbox" type="checkbox" checked={item.status === "done"} aria-label="Toggle embedded TODO" on:change={() => toggleEmbeddedTodo(item)} />
+          <div class="todo-text-stack">
+            <textarea
+              class="todo-text"
+              value={item.note}
+              aria-label="Embedded TODO note"
+              title="Edit embedded TODO note"
+              placeholder={item.text}
+              rows="3"
+              on:blur={(event) => updateEmbeddedTodoNote(item, event.currentTarget.value)}
+            ></textarea>
+            <button class="todo-link" type="button" on:click={() => openEmbeddedTodo(item)}>
+              <strong>{item.sceneTitle}</strong>
+              <span>{item.text}</span>
+            </button>
+          </div>
+          <small>Embedded</small>
+          <button class="todo-delete" type="button" on:click={() => deleteEmbeddedTodo(item)}>Remove</button>
+        </div>
+      {/each}
+      {#if todos.length > 0}
+        <div class="todo-section-label">File TODOs</div>
+      {/if}
       {#each todos as item}
-        <label class:done={item.status === "done"} class="todo-item">
-          <input type="checkbox" checked={item.status === "done"} on:change={() => toggleTodo(item)} />
-          <span>{item.text}</span>
-        </label>
+        <div class:done={item.status === "done"} class="todo-item">
+          <input class="todo-checkbox" type="checkbox" checked={item.status === "done"} aria-label="Toggle TODO" on:change={() => toggleTodo(item)} />
+          <textarea
+            class="todo-text"
+            value={item.text}
+            aria-label="TODO description"
+            title="Edit TODO description"
+            placeholder="Describe this TODO"
+            rows="3"
+            on:blur={(event) => updateTodoText(item, event.currentTarget.value)}
+            on:keydown={(event) => handleTodoTextKeydown(event, item)}
+          ></textarea>
+          {#if item.scene_id}
+            <button class="todo-link compact" type="button" on:click={() => openFileTodo(item)}>Open Scene</button>
+          {:else}
+            <small>Project</small>
+          {/if}
+          <button class="todo-delete" type="button" on:click={() => deleteTodo(item)}>Delete</button>
+        </div>
       {/each}
     </div>
     <button class="pane-resize" type="button" aria-label="Resize TODO pane" on:keydown={(event) => handlePaneResizeKeydown(event, "todo")} on:mousedown={(event) => startPaneResize(event, "todo")}></button>
   </section>
 
-  <section class:hidden-pane={!isPaneVisible("search")} class="pane search-pane" data-pane-id="search" style={paneStyle("search")} aria-label="Search pane">
+  <!-- svelte-ignore a11y_no_noninteractive_element_interactions -->
+  <section class:hidden-pane={!isPaneVisible("search")} class="pane search-pane" data-pane-id="search" style={paneStyle("search")} aria-label="Search pane" on:mousedown={() => focusPane("search")}>
     <header class="pane-header" role="button" tabindex="0" aria-label="Move Search pane" on:keydown={(event) => handlePaneHeaderKeydown(event, "search")} on:mousedown={(event) => startPaneDrag(event, "search")}>
       <h2>Search</h2>
     </header>
@@ -670,8 +927,12 @@
         <input bind:value={searchQuery} placeholder="Find in scenes and lore" on:keydown={(event) => event.key === "Enter" && search()} />
         <button on:click={search}>Find</button>
       </div>
+      <label class="inline-check">
+        <input type="checkbox" bind:checked={searchOpenTodos} />
+        Include open TODOs
+      </label>
       {#each searchHits as hit}
-        <button class="search-hit" on:click={() => run(() => openSceneInEditorPane(hit.file_id))}>
+        <button class="search-hit" on:click={() => openSearchHit(hit)}>
           <strong>{hit.path}:{hit.line}</strong>
           <span>{hit.excerpt}</span>
         </button>

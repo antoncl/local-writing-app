@@ -74,6 +74,7 @@ class TodoItem(BaseModel):
     status: Literal["open", "done"] = "open"
     scope: Literal["project", "scene"] = "project"
     scene_id: str | None = None
+    anchor_id: str | None = None
 
 
 class TodoDocument(BaseModel):
@@ -84,17 +85,21 @@ class CreateTodoRequest(BaseModel):
     text: str = Field(min_length=1)
     scope: Literal["project", "scene"] = "project"
     scene_id: str | None = None
+    anchor_id: str | None = None
 
 
 class UpdateTodoRequest(BaseModel):
     text: str | None = None
     status: Literal["open", "done"] | None = None
+    scope: Literal["project", "scene"] | None = None
+    scene_id: str | None = None
 
 
 class SearchRequest(BaseModel):
-    query: str = Field(min_length=1)
+    query: str = ""
     include_scenes: bool = True
     include_lore: bool = True
+    include_open_todos: bool = False
 
 
 class SearchHit(BaseModel):
@@ -102,6 +107,7 @@ class SearchHit(BaseModel):
     path: str
     line: int
     excerpt: str
+    todo_id: str | None = None
 
 
 class SearchResponse(BaseModel):

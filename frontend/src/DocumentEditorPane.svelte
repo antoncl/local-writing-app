@@ -1,7 +1,8 @@
 <script lang="ts">
   import { createEventDispatcher, onMount } from "svelte";
-  import { Editor } from "@tiptap/core";
-  import type { Fragment, Node as ProseMirrorNode } from "@tiptap/pm/model";
+  import { Editor, Mark, mergeAttributes } from "@tiptap/core";
+  import { Fragment, type Node as ProseMirrorNode } from "@tiptap/pm/model";
+  import { TextSelection } from "@tiptap/pm/state";
   import type { EditorView } from "@tiptap/pm/view";
   import StarterKit from "@tiptap/starter-kit";
   import Table from "@tiptap/extension-table";
@@ -13,10 +14,12 @@
 
   export let scene: Scene | null = null;
   export let dirty = false;
+  export let todoStatusHint = "";
 
   const dispatch = createEventDispatcher<{
     change: { title: string; bodyMarkdown: string };
     focus: void;
+    embeddedTodos: { todos: EmbeddedTodo[] };
   }>();
 
   type FloatingMenuState = {
@@ -36,13 +39,13 @@
     label: string;
     description: string;
     group: string;
-    run: () => void;
+    run: () => void | Promise<void>;
   };
   type ToolbarButtonAction = {
     kind: "button";
     id: string;
     label: string;
-    run: () => void;
+    run: () => void | Promise<void>;
   };
   type ToolbarMenuAction = {
     kind: "menu";
@@ -51,11 +54,50 @@
     items: Array<{
       id: string;
       label: string;
-      run: () => void;
+      run: () => void | Promise<void>;
     }>;
   };
   type ToolbarAction = ToolbarButtonAction | ToolbarMenuAction;
   type BlockWrapType = "blockquote" | "bulletList" | "orderedList";
+  export type EmbeddedTodo = {
+    id: string;
+    text: string;
+    status: "open" | "done";
+    note: string;
+  };
+
+  const TodoAnchor = Mark.create({
+    name: "todoAnchor",
+    inclusive: false,
+    addAttributes() {
+      return {
+        anchorId: {
+          default: null,
+          parseHTML: (element) => element.getAttribute("data-todo-id") ?? element.getAttribute("data-todo-anchor-id"),
+          renderHTML: (attributes) => {
+            if (!attributes.anchorId) return {};
+            return { "data-todo-id": attributes.anchorId };
+          },
+        },
+        status: {
+          default: "open",
+          parseHTML: (element) => (element.getAttribute("data-todo-status") === "done" ? "done" : "open"),
+          renderHTML: (attributes) => ({ "data-todo-status": attributes.status === "done" ? "done" : "open" }),
+        },
+        note: {
+          default: "",
+          parseHTML: (element) => element.getAttribute("data-todo-note") ?? "",
+          renderHTML: (attributes) => ({ "data-todo-note": attributes.note ?? "" }),
+        },
+      };
+    },
+    parseHTML() {
+      return [{ tag: "span[data-todo-id]" }, { tag: "span[data-todo-anchor-id]" }];
+    },
+    renderHTML({ HTMLAttributes }) {
+      return ["span", mergeAttributes(HTMLAttributes, { class: "todo-anchor" }), 0];
+    },
+  });
 
   let editorFrame: HTMLDivElement;
   let editorElement: HTMLDivElement;
@@ -66,6 +108,8 @@
   let selectionMenu: FloatingMenuState = { visible: false, x: 0, y: 0, wordCount: 0, placement: "above" };
   let slashMenu: SlashMenuState = { visible: false, x: 0, y: 0, selectedIndex: 0 };
   let openToolbarMenuId: string | null = null;
+  let reconcilingTodoAnchors = false;
+  let highlightedTodoId: string | null = null;
 
   $: slashCommands = editor ? getSlashCommands() : [];
   $: activeSlashCommand = slashCommands[slashMenu.selectedIndex];
@@ -87,6 +131,7 @@
       element: editorElement,
       extensions: [
         StarterKit.configure({ heading: { levels: [1, 2, 3] } }),
+        TodoAnchor,
         Table.configure({ resizable: true }),
         TableRow,
         TableHeader,
@@ -106,7 +151,11 @@
           },
         },
       },
-      onUpdate: emitChange,
+      onUpdate: () => {
+        if (!enforceUniqueTodoAnchors()) {
+          emitChange();
+        }
+      },
       onSelectionUpdate: updateSelectionMenu,
       onBlur: () => {
         hideSelectionMenu();
@@ -127,6 +176,9 @@
     if (!editor || scene?.id !== sceneId) return;
     editor.commands.setContent(html || "<p></p>", false);
     loadedSceneId = sceneId;
+    enforceUniqueTodoAnchors();
+    syncTodoAnchorDomState(true);
+    dispatchEmbeddedTodos();
     syncEditorEmpty();
     updateSelectionMenu();
   }
@@ -136,6 +188,8 @@
     syncEditorEmpty();
     updateSelectionMenu();
     updateSlashMenuFromContent();
+    syncTodoAnchorDomState(true);
+    dispatchEmbeddedTodos();
     dispatch("change", {
       title,
       bodyMarkdown: editorHtmlToSceneMarkdown(editor.getHTML()),
@@ -337,10 +391,248 @@
     syncEditorEmpty();
   }
 
-  function focusAndRun(command: () => void) {
-    command();
-    openToolbarMenuId = null;
-    updateSelectionMenu();
+  async function focusAndRun(command: () => void | Promise<void>) {
+    try {
+      await command();
+    } catch {
+      // The parent action surfaces failures through the app-level error state.
+    } finally {
+      openToolbarMenuId = null;
+      updateSelectionMenu();
+    }
+  }
+
+  function markSelectionAsTodo() {
+    if (!editor) return;
+    const { from, to } = editor.state.selection;
+    const selectedText = selectedPlainText();
+    if (!selectedText) return;
+    const anchorId = createTodoId();
+    const docEnd = editor.state.doc.content.size;
+    if (from >= to || from > docEnd || to > docEnd) return;
+    editor.view.dispatch(editor.state.tr.setSelection(TextSelection.create(editor.state.doc, from, to)));
+    editor.chain().focus().setMark("todoAnchor", { anchorId, status: "open", note: "" }).run();
+    window.setTimeout(() => syncTodoAnchorDomState(true), 0);
+  }
+
+  function createTodoId() {
+    const randomId = globalThis.crypto?.randomUUID?.().replace(/-/g, "") ?? Math.random().toString(16).slice(2);
+    return `todo_${randomId.slice(0, 12)}`;
+  }
+
+  function selectedPlainText() {
+    if (!editor) return "";
+    const { selection } = editor.state;
+    return editor.state.doc.textBetween(selection.from, selection.to, " ").trim();
+  }
+
+  function enforceUniqueTodoAnchors() {
+    const seenAnchorIds = new Set<string>();
+    return removeTodoAnchors((anchorId) => {
+      if (seenAnchorIds.has(anchorId)) return true;
+      seenAnchorIds.add(anchorId);
+      return false;
+    });
+  }
+
+  function removeTodoAnchors(shouldRemove: (anchorId: string) => boolean) {
+    if (!editor || reconcilingTodoAnchors) return false;
+    const markType = editor.state.schema.marks.todoAnchor;
+    if (!markType) return false;
+
+    let transaction = editor.state.tr;
+    editor.state.doc.descendants((node, position) => {
+      if (!node.isText) return true;
+      for (const mark of node.marks) {
+        if (mark.type !== markType) continue;
+        const anchorId = String(mark.attrs.anchorId ?? "");
+        if (anchorId && shouldRemove(anchorId)) {
+          transaction = transaction.removeMark(position, position + node.nodeSize, mark);
+        }
+      }
+      return true;
+    });
+
+    if (!transaction.docChanged) return false;
+    reconcilingTodoAnchors = true;
+    editor.view.dispatch(transaction);
+    reconcilingTodoAnchors = false;
+    window.setTimeout(() => syncTodoAnchorDomState(true), 0);
+    return true;
+  }
+
+  function syncTodoAnchorDomState(force = false) {
+    if (!editorElement) return;
+    for (const element of editorElement.querySelectorAll<HTMLElement>("[data-todo-anchor-id]")) {
+      element.dataset.todoId = element.dataset.todoAnchorId;
+      delete element.dataset.todoAnchorId;
+    }
+    for (const element of editorElement.querySelectorAll<HTMLElement>("[data-todo-id]")) {
+      element.classList.toggle("todo-anchor-highlight", element.dataset.todoId === highlightedTodoId);
+      const status = element.dataset.todoStatus === "done" ? "done" : "open";
+      element.title = status === "done" ? "Completed TODO" : "Open TODO";
+    }
+  }
+
+  function collectSelectedTodoAnchorIds() {
+    if (!editor) return new Set<string>();
+    const { from, to } = editor.state.selection;
+    return collectTodoAnchorIdsInRange(from, to);
+  }
+
+  function collectDocumentTodoAnchorIds() {
+    if (!editor) return new Set<string>();
+    return collectTodoAnchorIdsInRange(0, editor.state.doc.content.size);
+  }
+
+  function collectTodoAnchorIdsInRange(from: number, to: number) {
+    const anchorIds = new Set<string>();
+    if (!editor || from >= to) return anchorIds;
+    const markType = editor.state.schema.marks.todoAnchor;
+    if (!markType) return anchorIds;
+    editor.state.doc.nodesBetween(from, to, (node) => {
+      for (const mark of node.marks) {
+        if (mark.type === markType && mark.attrs.anchorId) {
+          anchorIds.add(String(mark.attrs.anchorId));
+        }
+      }
+    });
+    return anchorIds;
+  }
+
+  function collectFragmentTodoAnchorIds(fragment: Fragment) {
+    const anchorIds = new Set<string>();
+    fragment.forEach((node) => {
+      collectNodeTodoAnchorIds(node, anchorIds);
+    });
+    return anchorIds;
+  }
+
+  function collectNodeTodoAnchorIds(node: ProseMirrorNode, anchorIds: Set<string>) {
+    for (const mark of node.marks) {
+      if (mark.type.name === "todoAnchor" && mark.attrs.anchorId) {
+        anchorIds.add(String(mark.attrs.anchorId));
+      }
+    }
+    node.content.forEach((child) => collectNodeTodoAnchorIds(child, anchorIds));
+  }
+
+  function mapFragmentTodoAnchors(fragment: Fragment, shouldKeep: (anchorId: string) => boolean) {
+    const children: ProseMirrorNode[] = [];
+    fragment.forEach((node) => {
+      children.push(mapNodeTodoAnchors(node, shouldKeep));
+    });
+    return Fragment.fromArray(children);
+  }
+
+  function mapNodeTodoAnchors(node: ProseMirrorNode, shouldKeep: (anchorId: string) => boolean) {
+    const content = node.content.size > 0 ? mapFragmentTodoAnchors(node.content, shouldKeep) : node.content;
+    const marks = node.marks.filter((mark) => {
+      if (mark.type.name !== "todoAnchor") return true;
+      const anchorId = String(mark.attrs.anchorId ?? "");
+      return Boolean(anchorId) && shouldKeep(anchorId);
+    });
+    const copy = node.isText ? node : node.copy(content);
+    return copy.mark(marks);
+  }
+
+  function addTodoAnchorToFragment(fragment: Fragment, anchorId: string) {
+    const children: ProseMirrorNode[] = [];
+    fragment.forEach((node) => {
+      children.push(addTodoAnchorToNode(node, anchorId));
+    });
+    return Fragment.fromArray(children);
+  }
+
+  function addTodoAnchorToNode(node: ProseMirrorNode, anchorId: string) {
+    if (!editor) return node;
+    const markType = editor.state.schema.marks.todoAnchor;
+    if (!markType) return node;
+    const content = node.content.size > 0 ? addTodoAnchorToFragment(node.content, anchorId) : node.content;
+    const copy = node.isText ? node : node.copy(content);
+    if (!node.isText || !node.textContent.trim()) return copy;
+    return copy.mark([...copy.marks.filter((mark) => mark.type !== markType), markType.create({ anchorId })]);
+  }
+
+  function dispatchEmbeddedTodos() {
+    dispatch("embeddedTodos", { todos: collectEmbeddedTodos() });
+  }
+
+  function collectEmbeddedTodos() {
+    const todosById = new Map<string, EmbeddedTodo>();
+    if (!editor) return [];
+    const markType = editor.state.schema.marks.todoAnchor;
+    if (!markType) return [];
+    editor.state.doc.descendants((node) => {
+      if (!node.isText) return true;
+      for (const mark of node.marks) {
+        if (mark.type !== markType) continue;
+        const id = String(mark.attrs.anchorId ?? "");
+        if (!id) continue;
+        const existing = todosById.get(id);
+        const text = node.textContent;
+        todosById.set(id, {
+          id,
+          text: existing ? `${existing.text}${text}` : text,
+          status: mark.attrs.status === "done" ? "done" : "open",
+          note: String(mark.attrs.note ?? ""),
+        });
+      }
+      return true;
+    });
+    return Array.from(todosById.values());
+  }
+
+  export function updateEmbeddedTodo(todoId: string, updates: { status?: "open" | "done"; note?: string }) {
+    if (!editor) return;
+    updateTodoMark(todoId, updates);
+  }
+
+  export function deleteEmbeddedTodo(todoId: string) {
+    if (removeTodoAnchors((anchorId) => anchorId === todoId)) {
+      emitChange();
+    }
+  }
+
+  export function highlightEmbeddedTodo(todoId: string) {
+    if (!editorElement) return;
+    const target = editorElement.querySelector<HTMLElement>(`[data-todo-id="${CSS.escape(todoId)}"]`);
+    if (!target) return;
+    highlightedTodoId = todoId;
+    syncTodoAnchorDomState(true);
+    target.scrollIntoView({ block: "center", behavior: "smooth" });
+    window.setTimeout(() => {
+      if (highlightedTodoId === todoId) {
+        highlightedTodoId = null;
+        syncTodoAnchorDomState(true);
+      }
+    }, 2400);
+  }
+
+  function updateTodoMark(todoId: string, updates: { status?: "open" | "done"; note?: string }) {
+    if (!editor || reconcilingTodoAnchors) return;
+    const markType = editor.state.schema.marks.todoAnchor;
+    if (!markType) return;
+    let transaction = editor.state.tr;
+    editor.state.doc.descendants((node, position) => {
+      if (!node.isText) return true;
+      for (const mark of node.marks) {
+        if (mark.type !== markType || mark.attrs.anchorId !== todoId) continue;
+        const attrs = {
+          ...mark.attrs,
+          status: updates.status ?? mark.attrs.status,
+          note: updates.note ?? mark.attrs.note,
+        };
+        transaction = transaction
+          .removeMark(position, position + node.nodeSize, mark)
+          .addMark(position, position + node.nodeSize, markType.create(attrs));
+      }
+      return true;
+    });
+    if (transaction.docChanged) {
+      editor.view.dispatch(transaction);
+      emitChange();
+    }
   }
 
   function applySelectionHeading(level: 1 | 2 | 3) {
@@ -517,6 +809,12 @@
         label: "Quote",
         run: () => applySelectionBlockWrap("blockquote"),
       },
+      {
+        kind: "button",
+        id: "todo",
+        label: "TODO",
+        run: markSelectionAsTodo,
+      },
     ];
   }
 
@@ -582,7 +880,9 @@
         <input class="title-input" aria-label="Scene title" bind:value={title} on:input={emitChange} />
       </div>
       <div class="editor-hint">
-        {#if editorEmpty}
+        {#if todoStatusHint}
+          {todoStatusHint}
+        {:else if editorEmpty}
           Start writing, or type / for commands.
         {:else}
           Select text for formatting. Type / on an empty line for insert commands.

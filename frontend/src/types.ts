@@ -24,10 +24,17 @@ export type TodoItem = {
   status: "open" | "done";
   scope: "project" | "scene";
   scene_id?: string | null;
+  anchor_id?: string | null;
 };
 
 export type TodoDocument = {
   items: TodoItem[];
+};
+
+export type ProjectValidation = {
+  valid: boolean;
+  warnings: string[];
+  errors: string[];
 };
 
 export type ProjectInfo = {
@@ -51,4 +58,5 @@ export type SearchHit = {
   path: string;
   line: number;
   excerpt: string;
+  todo_id?: string | null;
 };

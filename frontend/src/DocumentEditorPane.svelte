@@ -21,6 +21,7 @@
   const dispatch = createEventDispatcher<{
     change: { title: string; bodyMarkdown: string; status: string; entryType: string; metadata: EntryMetadata };
     focus: void;
+    "custom-data": { entryType: string };
     embeddedTodos: { todos: EmbeddedTodo[] };
   }>();
 
@@ -68,6 +69,8 @@
     note: string;
   };
 
+  const WORD_PATTERN = /[A-Za-z0-9]+(?:['-][A-Za-z0-9]+)?/g;
+
   const TodoAnchor = Mark.create({
     name: "todoAnchor",
     inclusive: false,
@@ -110,6 +113,7 @@
   let entryType = "scene";
   let metadata: EntryMetadata = {};
   let liveWordCount = 0;
+  let metadataSummaryText = "";
   let metadataExpanded = false;
   let editorEmpty = true;
   let selectionMenu: FloatingMenuState = { visible: false, x: 0, y: 0, wordCount: 0, placement: "above" };
@@ -124,6 +128,7 @@
   $: sceneEntryTypes = Object.entries(metadataSchema?.entry_types ?? {}).filter(([, definition]) => definition.kind === "scene");
   $: activeEntryType = metadataSchema?.entry_types[entryType] ?? metadataSchema?.entry_types.scene;
   $: metadataFieldIds = activeEntryType?.fields ?? [];
+  $: metadataSummaryText = buildMetadataSummary(activeEntryType?.name ?? entryType, status, liveWordCount);
 
   $: if (editor && scene && scene.id !== loadedSceneId) {
     void loadScene(scene);
@@ -276,9 +281,8 @@
     return String(value);
   }
 
-  function metadataSummary() {
-    const typeName = activeEntryType?.name ?? entryType;
-    return `${typeName} · ${status || "draft"} · ${liveWordCount} ${liveWordCount === 1 ? "word" : "words"}`;
+  function buildMetadataSummary(typeName: string, currentStatus: string, wordCount: number) {
+    return `${typeName} · ${currentStatus || "draft"} · ${wordCount} ${wordCount === 1 ? "word" : "words"}`;
   }
 
   function updateLiveWordCount() {
@@ -286,7 +290,11 @@
       liveWordCount = 0;
       return;
     }
-    liveWordCount = editor.state.doc.textBetween(0, editor.state.doc.content.size, " ").split(/\s+/).filter(Boolean).length;
+    liveWordCount = countWords(editor.state.doc.textBetween(0, editor.state.doc.content.size, " "));
+  }
+
+  function countWords(text: string) {
+    return Array.from(text.matchAll(WORD_PATTERN)).length;
   }
 
   function syncEditorEmpty() {
@@ -400,7 +408,7 @@
     const unclampedX = (anchorRect.left + anchorRect.right) / 2;
     const minX = Math.max(frameBounds.left, 0) + toolbarHalfWidth;
     const maxX = Math.min(frameBounds.right, window.innerWidth) - toolbarHalfWidth;
-    const wordCount = selectedText.split(/\s+/).filter(Boolean).length;
+    const wordCount = countWords(selectedText);
     selectionMenu = {
       visible: true,
       x: minX <= maxX ? clamp(unclampedX, minX, maxX) : (Math.max(frameBounds.left, 0) + Math.min(frameBounds.right, window.innerWidth)) / 2,
@@ -983,10 +991,19 @@
       </div>
       {#if metadataSchema}
         <section class="scene-metadata" aria-label="Scene metadata">
-          <button class="metadata-toggle" type="button" on:click={() => (metadataExpanded = !metadataExpanded)}>
-            <strong>{metadataExpanded ? "Hide Metadata" : "Show Metadata"}</strong>
-            <span>{metadataSummary()}</span>
-          </button>
+          <div class="metadata-stripe">
+            <button class="metadata-toggle" type="button" on:click={() => (metadataExpanded = !metadataExpanded)}>
+              <strong>{metadataExpanded ? "Hide Metadata" : "Show Metadata"}</strong>
+              <span>{metadataSummaryText}</span>
+            </button>
+            <button
+              class="metadata-custom-button"
+              type="button"
+              on:click={() => dispatch("custom-data", { entryType })}
+            >
+              Custom data
+            </button>
+          </div>
           {#if metadataExpanded}
             <div class="metadata-panel">
               <label>

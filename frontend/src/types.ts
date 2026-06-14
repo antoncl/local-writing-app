@@ -59,6 +59,32 @@ export type MetadataSchema = {
   fields: Record<string, MetadataFieldDefinition>;
 };
 
+export type MetadataSchemaLayer = {
+  id: string;
+  label: string;
+  folder_path: string;
+  schema_path: string;
+  exists: boolean;
+};
+
+export type MetadataSchemaLayers = {
+  layers: MetadataSchemaLayer[];
+};
+
+export type MetadataDefinitionSource = {
+  layer_id: string;
+  layer_label: string;
+  schema_path?: string | null;
+  built_in: boolean;
+};
+
+export type MetadataSchemaOverview = {
+  effective_schema: MetadataSchema;
+  layers: MetadataSchemaLayer[];
+  entry_type_sources: Record<string, MetadataDefinitionSource>;
+  field_sources: Record<string, MetadataDefinitionSource>;
+};
+
 export type TodoItem = {
   id: string;
   text: string;
@@ -81,6 +107,7 @@ export type ProjectValidation = {
 export type ProjectInfo = {
   title: string;
   root_path: string;
+  projects_base_folder?: string | null;
 };
 
 export type DirectoryEntry = {

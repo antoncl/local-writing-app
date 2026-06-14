@@ -5,7 +5,11 @@
   import type {
     DirectoryListing,
     EntryMetadata,
+    MetadataFieldDefinition,
+    MetadataFieldType,
     MetadataSchema,
+    MetadataSchemaLayer,
+    MetadataSchemaOverview,
     ProjectInfo,
     ProjectValidation,
     Scene,
@@ -41,6 +45,8 @@
     draftMetadata: EntryMetadata;
     saving: boolean;
   };
+
+  const SYSTEM_SCENE_FIELD_IDS = ["status", "summary", "word_count"];
   type ConfirmationState = {
     title: string;
     message: string;
@@ -60,6 +66,7 @@
 
   let projectPath = "";
   let projectTitle = "Untitled Project";
+  let projectsBaseFolder = "";
   let directoryPickerOpen = false;
   let directoryListing: DirectoryListing | null = null;
   let directoryPickerLoading = false;
@@ -74,6 +81,24 @@
   let todos: TodoItem[] = [];
   let validation: ProjectValidation | null = null;
   let metadataSchema: MetadataSchema | null = null;
+  let metadataSchemaOverview: MetadataSchemaOverview | null = null;
+  let metadataSchemaLayers: MetadataSchemaLayer[] = [];
+  let schemaFieldLayerId = "";
+  let schemaFieldEntryType = "scene";
+  let schemaFieldId = "";
+  let schemaFieldName = "";
+  let schemaFieldType: MetadataFieldType = "text";
+  let schemaFieldAllowMultiple = false;
+  let schemaFieldOptions = "";
+  let schemaFieldReadonlyTypeLabel = "";
+  let selectedSchemaFieldId: string | null = null;
+  let schemaFieldIdManuallyEdited = false;
+  let schemaFieldReadonly = false;
+  let schemaPaneOpen = false;
+  let schemaFieldPaneOpen = false;
+  let draggedSchemaFieldId: string | null = null;
+  let systemSchemaFieldEntries: Array<[string, MetadataFieldDefinition]> = [];
+  let schemaFieldEntriesByLayer: Record<string, Array<[string, MetadataFieldDefinition]>> = {};
   let newTodo = "";
   let searchQuery = "";
   let searchOpenTodos = false;
@@ -90,6 +115,8 @@
   let panes: Record<PaneId, PaneState> = {
     project: { title: "Project", x: 18, y: 18, width: 380, height: 340, z: 1 },
     outline: { title: "Manuscript Outline", x: 18, y: 260, width: 300, height: 420, z: 2 },
+    schema: { title: "Custom Data", x: 330, y: 260, width: 360, height: 420, z: 3 },
+    schema_field: { title: "Custom Field", x: 708, y: 260, width: 360, height: 420, z: 4 },
     todo: { title: "TODO", x: 1126, y: 18, width: 310, height: 320, z: 4 },
     search: { title: "Search", x: 1126, y: 360, width: 310, height: 320, z: 5 },
   };
@@ -109,6 +136,9 @@
 
   $: allEmbeddedTodos = Object.values(embeddedTodosByPane).flat();
   $: embeddedTodoStatusHintsByPane = buildEmbeddedTodoStatusHintsByPane(embeddedTodosByPane);
+  $: schemaSceneEntryTypes = Object.entries(metadataSchema?.entry_types ?? {}).filter(([, definition]) => definition.kind === "scene");
+  $: systemSchemaFieldEntries = buildSystemSchemaFieldEntries(metadataSchema);
+  $: schemaFieldEntriesByLayer = buildSchemaFieldEntriesByLayer(metadataSchema, metadataSchemaOverview, metadataSchemaLayers);
 
   onMount(() => {
     fitPanesToViewport();
@@ -142,7 +172,11 @@
   }
 
   function isPaneVisible(id: PaneId) {
-    return id === "project" || (isProjectOpen && (!isEditorPaneId(id) || editorPanes.some((pane) => pane.id === id)));
+    if (id === "project") return true;
+    if (!isProjectOpen) return false;
+    if (id === "schema") return schemaPaneOpen;
+    if (id === "schema_field") return schemaFieldPaneOpen;
+    return !isEditorPaneId(id) || editorPanes.some((pane) => pane.id === id);
   }
 
   function isEditorPaneId(id: PaneId) {
@@ -151,6 +185,9 @@
 
   function openProjectWorkspace(nextProject: ProjectInfo) {
     resetEditorWorkspace();
+    projectPath = nextProject.root_path;
+    projectTitle = nextProject.title;
+    projectsBaseFolder = nextProject.projects_base_folder ?? "";
     appState = { name: "projectOpen", project: nextProject };
     fitPanesToViewport();
     focusPane("outline");
@@ -163,6 +200,8 @@
     panes = {
       project: panes.project,
       outline: panes.outline,
+      schema: panes.schema,
+      schema_field: panes.schema_field,
       todo: panes.todo,
       search: panes.search,
     };
@@ -318,7 +357,12 @@
   }
 
   async function refreshMetadataSchema() {
-    metadataSchema = await api.getMetadataSchema();
+    metadataSchemaOverview = await api.getMetadataSchemaOverview();
+    metadataSchema = metadataSchemaOverview.effective_schema;
+    metadataSchemaLayers = metadataSchemaOverview.layers;
+    if (!schemaFieldLayerId || !metadataSchemaLayers.some((layer) => layer.id === schemaFieldLayerId)) {
+      schemaFieldLayerId = projectSchemaLayerId();
+    }
   }
 
   async function openDirectoryPicker(event?: MouseEvent) {
@@ -362,12 +406,232 @@
   async function openProject() {
     await run(async () => {
       const openedProject = await api.openProject(projectPath);
-      projectTitle = openedProject.title;
       await refreshStructure();
       await refreshMetadataSchema();
       await refreshTodos();
       openProjectWorkspace(openedProject);
       status = `Opened ${openedProject.title}`;
+    });
+  }
+
+  async function updateProjectSettings() {
+    if (!isProjectOpen) return;
+    await run(async () => {
+      const updatedProject = await api.updateProjectSettings(projectsBaseFolder);
+      appState = { name: "projectOpen", project: updatedProject };
+      projectsBaseFolder = updatedProject.projects_base_folder ?? "";
+      await refreshMetadataSchema();
+      validation = await api.validateProject();
+      status = "Updated project settings";
+    });
+  }
+
+  function projectSchemaLayerId() {
+    return metadataSchemaLayers[metadataSchemaLayers.length - 1]?.id ?? "";
+  }
+
+  function layerLabel(layerId: string | undefined | null) {
+    if (!layerId) return "Unknown";
+    if (layerId === "built_in") return "Built-in";
+    return metadataSchemaLayers.find((layer) => layer.id === layerId)?.label ?? "Unknown";
+  }
+
+  function buildSystemSchemaFieldEntries(schema: MetadataSchema | null) {
+    return SYSTEM_SCENE_FIELD_IDS
+      .map((fieldId) => {
+        const field = schema?.fields[fieldId];
+        return field ? ([fieldId, field] as [string, MetadataFieldDefinition]) : null;
+      })
+      .filter((entry): entry is [string, MetadataFieldDefinition] => Boolean(entry));
+  }
+
+  function buildSchemaFieldEntriesByLayer(
+    schema: MetadataSchema | null,
+    overview: MetadataSchemaOverview | null,
+    layers: MetadataSchemaLayer[],
+  ) {
+    const entriesByLayer = Object.fromEntries(layers.map((layer) => [layer.id, [] as Array<[string, MetadataFieldDefinition]>]));
+    for (const [fieldId, field] of Object.entries(schema?.fields ?? {})) {
+      const source = overview?.field_sources[fieldId];
+      if (source && !source.built_in && source.layer_id in entriesByLayer) {
+        entriesByLayer[source.layer_id].push([fieldId, field]);
+      }
+    }
+    for (const entries of Object.values(entriesByLayer)) {
+      entries.sort(([, left], [, right]) => left.name.localeCompare(right.name));
+    }
+    return entriesByLayer;
+  }
+
+  function fieldTypeLabel(type: MetadataFieldType) {
+    const labels: Record<MetadataFieldType, string> = {
+      text: "Text",
+      long_text: "Long Text",
+      number: "Number",
+      boolean: "Checkbox",
+      date: "Date",
+      select: "Select",
+      multi_select: "Select, Multiple",
+      entity_ref: "Entry Reference",
+      entity_ref_list: "Entry Reference, Multiple",
+      tags: "Tags",
+      computed: "Computed",
+    };
+    return labels[type] ?? type;
+  }
+
+  function openSchemaFieldDetail(fieldId: string) {
+    const field = metadataSchema?.fields[fieldId];
+    if (!field) return;
+    selectedSchemaFieldId = fieldId;
+    schemaFieldId = fieldId;
+    schemaFieldName = field.name;
+    schemaFieldReadonly = Boolean(metadataSchemaOverview?.field_sources[fieldId]?.built_in);
+    schemaFieldReadonlyTypeLabel = "";
+    schemaFieldAllowMultiple = field.type === "multi_select" || field.type === "entity_ref_list";
+    schemaFieldType = schemaFieldReadonly
+      ? field.type
+      : field.type === "multi_select"
+        ? "select"
+        : field.type === "entity_ref_list"
+          ? "entity_ref"
+          : field.type === "computed"
+            ? "text"
+            : field.type;
+    schemaFieldOptions = field.options.join(", ");
+    schemaFieldLayerId = metadataSchemaOverview?.field_sources[fieldId]?.built_in ? projectSchemaLayerId() : (metadataSchemaOverview?.field_sources[fieldId]?.layer_id ?? projectSchemaLayerId());
+    schemaFieldEntryType = schemaSceneEntryTypes[0]?.[0] ?? "scene";
+    schemaFieldIdManuallyEdited = true;
+    schemaFieldPaneOpen = true;
+    focusPane("schema_field");
+  }
+
+  function openSystemSceneTypeDetail() {
+    const sceneType = metadataSchema?.entry_types.scene;
+    selectedSchemaFieldId = "system:scene_type";
+    schemaFieldId = "scene";
+    schemaFieldName = sceneType?.name ?? "Scene";
+    schemaFieldType = "text";
+    schemaFieldReadonly = true;
+    schemaFieldReadonlyTypeLabel = "Scene Type";
+    schemaFieldAllowMultiple = false;
+    schemaFieldOptions = "";
+    schemaFieldLayerId = "built_in";
+    schemaFieldEntryType = "scene";
+    schemaFieldIdManuallyEdited = true;
+    schemaFieldPaneOpen = true;
+    focusPane("schema_field");
+  }
+
+  function createSchemaFieldDraft(layerId = projectSchemaLayerId()) {
+    selectedSchemaFieldId = null;
+    schemaFieldId = "";
+    schemaFieldName = "";
+    schemaFieldType = "text";
+    schemaFieldReadonly = false;
+    schemaFieldReadonlyTypeLabel = "";
+    schemaFieldAllowMultiple = false;
+    schemaFieldOptions = "";
+    schemaFieldLayerId = layerId;
+    schemaFieldEntryType = schemaSceneEntryTypes[0]?.[0] ?? "scene";
+    schemaFieldIdManuallyEdited = false;
+    schemaFieldPaneOpen = true;
+    focusPane("schema_field");
+  }
+
+  function openSchemaForSceneData(entryType: string) {
+    schemaPaneOpen = true;
+    schemaFieldEntryType = entryType || "scene";
+    focusPane("schema");
+  }
+
+  function closeSchemaPane(id: "schema" | "schema_field") {
+    if (id === "schema") schemaPaneOpen = false;
+    else schemaFieldPaneOpen = false;
+  }
+
+  function selectSchemaLayer(layerId: string) {
+    if (!schemaFieldPaneOpen) createSchemaFieldDraft(layerId);
+    schemaFieldLayerId = layerId;
+  }
+
+  function startSchemaFieldDrag(fieldId: string) {
+    draggedSchemaFieldId = fieldId;
+  }
+
+  async function dropSchemaFieldOnLayer(layerId: string) {
+    if (draggedSchemaFieldId) {
+      const fieldId = draggedSchemaFieldId;
+      const source = metadataSchemaOverview?.field_sources[fieldId];
+      draggedSchemaFieldId = null;
+      if (source?.built_in) {
+        status = "System fields cannot be moved";
+        return;
+      }
+      if (source?.layer_id === layerId) {
+        openSchemaFieldDetail(fieldId);
+        return;
+      }
+      await run(async () => {
+        metadataSchema = await api.moveMetadataField(fieldId, layerId, schemaFieldEntryType);
+        await refreshMetadataSchema();
+        validation = await api.validateProject();
+        selectedSchemaFieldId = fieldId;
+        schemaFieldLayerId = layerId;
+        status = `Moved ${fieldId} to ${layerLabel(layerId)}`;
+      });
+    } else if (!schemaFieldPaneOpen) {
+      createSchemaFieldDraft(layerId);
+      draggedSchemaFieldId = null;
+    } else {
+      schemaFieldLayerId = layerId;
+      draggedSchemaFieldId = null;
+    }
+  }
+
+  function schemaFieldSaveType(): MetadataFieldType {
+    if (schemaFieldType === "select" && schemaFieldAllowMultiple) return "multi_select";
+    if (schemaFieldType === "entity_ref" && schemaFieldAllowMultiple) return "entity_ref_list";
+    return schemaFieldType;
+  }
+
+  function updateSchemaFieldName(value: string) {
+    schemaFieldName = value;
+    if (!selectedSchemaFieldId && !schemaFieldIdManuallyEdited) {
+      schemaFieldId = slugifyFieldId(value);
+    }
+  }
+
+  function updateSchemaFieldId(value: string) {
+    schemaFieldId = value;
+    schemaFieldIdManuallyEdited = true;
+  }
+
+  function slugifyFieldId(value: string) {
+    return value
+      .trim()
+      .toLowerCase()
+      .replace(/[^a-z0-9]+/g, "_")
+      .replace(/^_+|_+$/g, "")
+      .replace(/^[0-9]/, "field_$&");
+  }
+
+  async function saveSchemaField() {
+    if (!schemaFieldLayerId) return;
+    await run(async () => {
+      const options = schemaFieldOptions
+        .split(",")
+        .map((option) => option.trim())
+        .filter(Boolean);
+      metadataSchema = await api.upsertMetadataField(schemaFieldLayerId, schemaFieldId.trim(), {
+        name: schemaFieldName.trim() || schemaFieldId.trim(),
+        type: schemaFieldSaveType(),
+        options: schemaFieldType === "select" ? options : [],
+      }, schemaFieldEntryType);
+      await refreshMetadataSchema();
+      validation = await api.validateProject();
+      selectedSchemaFieldId = schemaFieldId.trim();
+      status = "Updated metadata schema";
     });
   }
 
@@ -766,6 +1030,15 @@
         <button type="button" on:click={openProject}>Open</button>
         <button type="button" disabled={!isProjectOpen} on:click={validateProject}>Validate</button>
       </div>
+      {#if isProjectOpen}
+        <label>
+          Projects base folder
+          <input bind:value={projectsBaseFolder} placeholder="Folder to search upward from for metadata.schema.yaml" />
+        </label>
+        <div class="button-row">
+          <button type="button" on:click={updateProjectSettings}>Apply Base Folder</button>
+        </div>
+      {/if}
       {#if validation}
         <section class:invalid={!validation.valid} class="validation-panel" aria-label="Project validation result">
           <h3>{validation.valid ? "Project Looks Consistent" : "Project Issues Found"}</h3>
@@ -817,6 +1090,164 @@
       {/if}
     </div>
     <button class="pane-resize" type="button" aria-label="Resize Manuscript Outline pane" on:keydown={(event) => handlePaneResizeKeydown(event, "outline")} on:mousedown={(event) => startPaneResize(event, "outline")}></button>
+  </section>
+
+  <!-- svelte-ignore a11y_no_noninteractive_element_interactions -->
+  <section class:hidden-pane={!isProjectOpen || !schemaPaneOpen} class="pane schema-pane" data-pane-id="schema" style={paneStyle("schema")} aria-label="Custom Data pane" on:mousedown={() => focusPane("schema")}>
+    <header class="pane-header" role="button" tabindex="0" aria-label="Move Custom Data pane" on:keydown={(event) => handlePaneHeaderKeydown(event, "schema")} on:mousedown={(event) => startPaneDrag(event, "schema")}>
+      <h2>Custom Data</h2>
+      <div class="pane-header-actions">
+        <button class="pin-button" type="button" on:mousedown={(event) => event.stopPropagation()} on:click={() => createSchemaFieldDraft()}>+ Field</button>
+        <button class="pin-button" type="button" on:mousedown={(event) => event.stopPropagation()} on:click={() => closeSchemaPane("schema")}>Close</button>
+      </div>
+    </header>
+    <div class="pane-content schema-list">
+      <section class="schema-layer-group system" role="group" aria-label="System custom fields">
+        <div class="schema-layer-heading">
+          <div class="schema-layer-title">
+            <strong>System</strong>
+            <small>Managed by the app</small>
+          </div>
+        </div>
+
+        <div class="schema-layer-fields">
+          <button class:active={selectedSchemaFieldId === "system:scene_type"} class="schema-row system-row" type="button" on:click={openSystemSceneTypeDetail}>
+            <span class="drag-handle muted-handle" aria-hidden="true">::</span>
+            <span>
+              <strong>Scene Type</strong>
+              <small>scene · Scene Type</small>
+            </span>
+          </button>
+          {#each systemSchemaFieldEntries as [fieldId, field]}
+            <button class:active={selectedSchemaFieldId === fieldId} class="schema-row system-row" type="button" on:click={() => openSchemaFieldDetail(fieldId)}>
+              <span class="drag-handle muted-handle" aria-hidden="true">::</span>
+              <span>
+                <strong>{field.name}</strong>
+                <small>{fieldId} · {fieldTypeLabel(field.type)}</small>
+              </span>
+            </button>
+          {/each}
+        </div>
+      </section>
+
+      {#each metadataSchemaLayers as layer}
+        {@const layerFields = schemaFieldEntriesByLayer[layer.id] ?? []}
+        <section
+          class:active={schemaFieldLayerId === layer.id}
+          class="schema-layer-group"
+          role="group"
+          aria-label={`${layer.label} custom fields`}
+          on:dragover|preventDefault
+          on:drop|preventDefault={() => dropSchemaFieldOnLayer(layer.id)}
+        >
+          <div class="schema-layer-heading">
+            <button class="schema-layer-title" type="button" on:click={() => selectSchemaLayer(layer.id)}>
+              <strong>{layer.label}</strong>
+              <small>{layer.exists ? layer.folder_path : "No schema file yet"}</small>
+            </button>
+            <button class="pin-button" type="button" on:click={() => createSchemaFieldDraft(layer.id)}>+ New field here</button>
+          </div>
+
+          <div class="schema-layer-fields">
+            {#each layerFields as [fieldId, field]}
+              <button
+                class:active={selectedSchemaFieldId === fieldId}
+                class="schema-row"
+                draggable="true"
+                type="button"
+                on:click={() => openSchemaFieldDetail(fieldId)}
+                on:dragstart={() => startSchemaFieldDrag(fieldId)}
+                on:dragend={() => (draggedSchemaFieldId = null)}
+              >
+                <span class="drag-handle" aria-hidden="true">::</span>
+                <span>
+                  <strong>{field.name}</strong>
+                  <small>{fieldId} · {fieldTypeLabel(field.type)}</small>
+                </span>
+              </button>
+            {/each}
+            {#if layerFields.length === 0}
+              <p class="muted">No fields defined at this level.</p>
+            {/if}
+          </div>
+        </section>
+      {/each}
+    </div>
+    <button class="pane-resize" type="button" aria-label="Resize Custom Data pane" on:keydown={(event) => handlePaneResizeKeydown(event, "schema")} on:mousedown={(event) => startPaneResize(event, "schema")}></button>
+  </section>
+
+  <!-- svelte-ignore a11y_no_noninteractive_element_interactions -->
+  <section class:hidden-pane={!isProjectOpen || !schemaFieldPaneOpen} class="pane schema-field-pane" data-pane-id="schema_field" style={paneStyle("schema_field")} aria-label="Custom Field pane" on:mousedown={() => focusPane("schema_field")}>
+    <header class="pane-header" role="button" tabindex="0" aria-label="Move Custom Field pane" on:keydown={(event) => handlePaneHeaderKeydown(event, "schema_field")} on:mousedown={(event) => startPaneDrag(event, "schema_field")}>
+      <h2>Custom Field</h2>
+      <div class="pane-header-actions">
+        <button class="pin-button" type="button" on:mousedown={(event) => event.stopPropagation()} on:click={() => closeSchemaPane("schema_field")}>Close</button>
+      </div>
+    </header>
+    <div class="pane-content schema-editor">
+      <div class="schema-target-layer">
+        <strong>{schemaFieldReadonly ? "Scope" : "Save layer"}</strong>
+        <span>{schemaFieldReadonly ? "System" : layerLabel(schemaFieldLayerId)}</span>
+      </div>
+      {#if !schemaFieldReadonly}
+        <label>
+          Add to scene type
+          <select bind:value={schemaFieldEntryType}>
+            {#each schemaSceneEntryTypes as [typeId, definition]}
+              <option value={typeId}>{definition.name}</option>
+            {/each}
+          </select>
+        </label>
+      {/if}
+      <label>
+        Display name
+        <input readonly={schemaFieldReadonly} value={schemaFieldName} placeholder="POV Character" on:input={(event) => updateSchemaFieldName(event.currentTarget.value)} />
+      </label>
+      <label>
+        Field ID
+        <input
+          value={schemaFieldId}
+          readonly={schemaFieldReadonly || Boolean(selectedSchemaFieldId)}
+          placeholder="pov_character"
+          on:input={(event) => updateSchemaFieldId(event.currentTarget.value)}
+        />
+      </label>
+      <label>
+        Field type
+        {#if schemaFieldReadonly}
+          <input readonly value={schemaFieldReadonlyTypeLabel || fieldTypeLabel(schemaFieldType)} />
+        {:else}
+          <select bind:value={schemaFieldType}>
+            <option value="text">Text</option>
+            <option value="long_text">Long Text</option>
+            <option value="number">Number</option>
+            <option value="boolean">Boolean</option>
+            <option value="date">Date</option>
+            <option value="select">Select</option>
+            <option value="entity_ref">Entity Reference</option>
+            <option value="tags">Tags</option>
+          </select>
+        {/if}
+      </label>
+      {#if !schemaFieldReadonly && (schemaFieldType === "select" || schemaFieldType === "entity_ref")}
+        <label class="inline-check">
+          <input type="checkbox" bind:checked={schemaFieldAllowMultiple} />
+          Allow multiple
+        </label>
+      {/if}
+      {#if schemaFieldType === "select" && (!schemaFieldReadonly || schemaFieldOptions)}
+        <label>
+          Options
+          <input readonly={schemaFieldReadonly} bind:value={schemaFieldOptions} placeholder="draft, revised, complete" />
+        </label>
+      {/if}
+      {#if !schemaFieldReadonly}
+        <div class="button-row">
+          <button type="button" disabled={!schemaFieldLayerId || !schemaFieldId.trim() || !schemaFieldName.trim()} on:click={saveSchemaField}>Save Field</button>
+        </div>
+      {/if}
+    </div>
+    <button class="pane-resize" type="button" aria-label="Resize Custom Field pane" on:keydown={(event) => handlePaneResizeKeydown(event, "schema_field")} on:mousedown={(event) => startPaneResize(event, "schema_field")}></button>
   </section>
 
   {#each editorPanes as editorPane (editorPane.id)}
@@ -892,6 +1323,7 @@
             event.detail.entryType,
             event.detail.metadata,
           )}
+        on:custom-data={(event) => openSchemaForSceneData(event.detail.entryType)}
         on:embeddedTodos={(event) => updateEmbeddedTodosForPane(editorPane.id, event.detail.todos)}
       />
       <button class="pane-resize" type="button" aria-label="Resize Scene Editor pane" on:keydown={(event) => handlePaneResizeKeydown(event, editorPane.id)} on:mousedown={(event) => startPaneResize(event, editorPane.id)}></button>

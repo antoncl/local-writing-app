@@ -17,6 +17,11 @@ class OpenProjectRequest(BaseModel):
 class ProjectInfo(BaseModel):
     title: str
     root_path: str
+    projects_base_folder: str | None = None
+
+
+class UpdateProjectSettingsRequest(BaseModel):
+    projects_base_folder: str | None = None
 
 
 class ProjectValidation(BaseModel):
@@ -82,6 +87,45 @@ class MetadataSchema(BaseModel):
     version: int = 1
     entry_types: dict[str, EntryTypeDefinition] = Field(default_factory=dict)
     fields: dict[str, MetadataFieldDefinition] = Field(default_factory=dict)
+
+
+class MetadataSchemaLayer(BaseModel):
+    id: str
+    label: str
+    folder_path: str
+    schema_path: str
+    exists: bool = False
+
+
+class MetadataSchemaLayers(BaseModel):
+    layers: list[MetadataSchemaLayer] = Field(default_factory=list)
+
+
+class MetadataDefinitionSource(BaseModel):
+    layer_id: str
+    layer_label: str
+    schema_path: str | None = None
+    built_in: bool = False
+
+
+class MetadataSchemaOverview(BaseModel):
+    effective_schema: MetadataSchema
+    layers: list[MetadataSchemaLayer] = Field(default_factory=list)
+    entry_type_sources: dict[str, MetadataDefinitionSource] = Field(default_factory=dict)
+    field_sources: dict[str, MetadataDefinitionSource] = Field(default_factory=dict)
+
+
+class UpsertMetadataFieldRequest(BaseModel):
+    layer_id: str = Field(min_length=1)
+    field_id: str = Field(min_length=1)
+    field: MetadataFieldDefinition
+    entry_type: str = "scene"
+
+
+class MoveMetadataFieldRequest(BaseModel):
+    field_id: str = Field(min_length=1)
+    target_layer_id: str = Field(min_length=1)
+    entry_type: str = "scene"
 
 
 class Scene(BaseModel):

@@ -16,7 +16,13 @@ from app.models import (
     CreateTodoRequest,
     DirectoryEntry,
     DirectoryListing,
+    MetadataFieldDefinition,
+    MetadataDefinitionSource,
     MetadataSchema,
+    MetadataSchemaLayer,
+    MetadataSchemaLayers,
+    MetadataSchemaOverview,
+    MoveMetadataFieldRequest,
     ProjectInfo,
     ProjectValidation,
     SaveSceneRequest,
@@ -28,6 +34,8 @@ from app.models import (
     StructureNode,
     TodoDocument,
     TodoItem,
+    UpsertMetadataFieldRequest,
+    UpdateProjectSettingsRequest,
     UpdateTodoRequest,
 )
 from app.services.markdown_validation import validate_scene_markdown
@@ -46,36 +54,7 @@ DEFAULT_METADATA_SCHEMA: dict[str, Any] = {
         "scene": {
             "name": "Scene",
             "kind": "scene",
-            "fields": ["status", "summary", "characters", "location", "word_count"],
-        },
-        "scene_sequel": {
-            "name": "Scene / Sequel",
-            "kind": "scene",
-            "fields": [
-                "status",
-                "summary",
-                "scene_phase",
-                "goal",
-                "conflict",
-                "disaster",
-                "reaction",
-                "dilemma",
-                "decision",
-                "word_count",
-            ],
-        },
-        "scene_mckee": {
-            "name": "McKee Scene",
-            "kind": "scene",
-            "fields": [
-                "status",
-                "summary",
-                "value_at_start",
-                "value_at_end",
-                "value_change",
-                "turning_point",
-                "word_count",
-            ],
+            "fields": ["status", "summary", "word_count"],
         },
     },
     "fields": {
@@ -85,27 +64,6 @@ DEFAULT_METADATA_SCHEMA: dict[str, Any] = {
             "options": ["draft", "revised", "complete"],
         },
         "summary": {"name": "Summary", "type": "long_text"},
-        "characters": {"name": "Characters", "type": "multi_select"},
-        "location": {"name": "Location", "type": "text"},
-        "scene_phase": {
-            "name": "Scene Phase",
-            "type": "select",
-            "options": ["scene", "sequel"],
-        },
-        "goal": {"name": "Goal", "type": "long_text"},
-        "conflict": {"name": "Conflict", "type": "long_text"},
-        "disaster": {"name": "Disaster", "type": "long_text"},
-        "reaction": {"name": "Reaction", "type": "long_text"},
-        "dilemma": {"name": "Dilemma", "type": "long_text"},
-        "decision": {"name": "Decision", "type": "long_text"},
-        "value_at_start": {"name": "Value at Start", "type": "text"},
-        "value_at_end": {"name": "Value at End", "type": "text"},
-        "value_change": {
-            "name": "Value Change",
-            "type": "select",
-            "options": ["positive", "negative", "positive_to_negative", "negative_to_positive", "unchanged"],
-        },
-        "turning_point": {"name": "Turning Point", "type": "long_text"},
         "word_count": {
             "name": "Word Count",
             "type": "computed",
@@ -134,7 +92,7 @@ class ProjectService:
             (root / folder).mkdir(exist_ok=True)
 
         self._write_yaml(root / "project.yaml", self._new_project_manifest(title, root))
-        self._write_yaml(root / "metadata.schema.yaml", deepcopy(DEFAULT_METADATA_SCHEMA))
+        self._write_yaml(root / "metadata.schema.yaml", self._empty_metadata_schema())
         initial_scene = Scene(
             id=self._new_id("scene"),
             title="Untitled Scene",
@@ -184,6 +142,9 @@ class ProjectService:
             },
         }
 
+    def _empty_metadata_schema(self) -> dict[str, Any]:
+        return {"version": 1, "entry_types": {}, "fields": {}}
+
     def open_project(self, root_path: Path) -> ProjectInfo:
         root = root_path.expanduser().resolve()
         if not (root / "project.yaml").exists():
@@ -195,7 +156,30 @@ class ProjectService:
 
     def current_project(self) -> ProjectInfo:
         root = self._require_project()
-        return ProjectInfo(title=self.title or root.name, root_path=str(root))
+        return ProjectInfo(
+            title=self.title or root.name,
+            root_path=str(root),
+            projects_base_folder=str(self._metadata_schema_base_folder(root) or root.parent),
+        )
+
+    def update_project_settings(self, request: UpdateProjectSettingsRequest) -> ProjectInfo:
+        root = self._require_project()
+        manifest = self._read_yaml(root / "project.yaml")
+        settings = manifest.get("settings")
+        if not isinstance(settings, dict):
+            settings = {}
+        if request.projects_base_folder is not None:
+            if not request.projects_base_folder.strip():
+                raise ProjectServiceError("Projects base folder is required.", 400)
+            base_folder = Path(request.projects_base_folder).expanduser().resolve()
+            if not base_folder.exists():
+                raise ProjectServiceError("Projects base folder does not exist.", 404)
+            if not base_folder.is_dir():
+                raise ProjectServiceError("Projects base folder must be a folder.", 400)
+            settings["projects_base_folder"] = str(base_folder)
+        manifest["settings"] = settings
+        self._write_yaml(root / "project.yaml", manifest)
+        return self.current_project()
 
     def list_directories(self, path: Path | None = None) -> DirectoryListing:
         target = (path or self._default_directory_picker_path()).expanduser().resolve()
@@ -233,15 +217,18 @@ class ProjectService:
         root = self._require_project()
         warnings: list[str] = []
         errors: list[str] = []
+        metadata_schema: MetadataSchema | None = None
 
         for required in ["project.yaml", "manuscript.structure.yaml", "todo.yaml"]:
             if not (root / required).exists():
                 errors.append(f"Missing {required}.")
-        if (root / "metadata.schema.yaml").exists():
-            try:
-                self.read_metadata_schema()
-            except (ProjectServiceError, ValueError) as exc:
-                errors.append(f"Invalid metadata.schema.yaml: {exc}")
+
+        try:
+            metadata_schema = self.read_metadata_schema()
+            warnings.extend(self._metadata_schema_layer_warnings(root))
+            errors.extend(self._validate_metadata_schema_definition(metadata_schema))
+        except (ProjectServiceError, ValueError) as exc:
+            errors.append(f"Invalid metadata schema: {exc}")
 
         scene_ids = {path.stem for path in (root / "scenes").glob("*.md")}
         referenced = self._collect_scene_ids(self.read_structure().root)
@@ -254,10 +241,14 @@ class ProjectService:
             path = root / "scenes" / f"{scene_id}.md"
             try:
                 front_matter, _ = self._read_markdown_with_front_matter(path, strict=True)
-                self._normalise_metadata(front_matter.get("metadata"), path)
                 entry_type = front_matter.get("entry_type", "scene")
                 if entry_type is not None and not isinstance(entry_type, str):
                     errors.append(f"Scene {scene_id} has invalid entry_type; it must be text.")
+                    entry_type = "scene"
+                metadata = self._normalise_metadata(front_matter.get("metadata"), path)
+                status = str(front_matter.get("status") or "draft")
+                if metadata_schema:
+                    errors.extend(self._validate_scene_metadata(scene_id, str(entry_type or "scene"), status, metadata, metadata_schema))
             except ProjectServiceError as exc:
                 errors.append(exc.message)
 
@@ -333,20 +324,380 @@ class ProjectService:
 
     def read_metadata_schema(self) -> MetadataSchema:
         root = self._require_project()
-        path = root / "metadata.schema.yaml"
         data = deepcopy(DEFAULT_METADATA_SCHEMA)
-        if path.exists():
-            project_data = self._read_yaml(path)
-            data["version"] = project_data.get("version", data["version"])
-            data["entry_types"] = {
-                **data.get("entry_types", {}),
-                **project_data.get("entry_types", {}),
-            }
-            data["fields"] = {
-                **data.get("fields", {}),
-                **project_data.get("fields", {}),
-            }
+        for path in self._metadata_schema_layer_paths(root):
+            if path.exists():
+                layer_data = self._read_metadata_schema_layer(path)
+                self._merge_metadata_schema_layer(data, layer_data)
         return MetadataSchema.model_validate(data)
+
+    def read_metadata_schema_layers(self) -> MetadataSchemaLayers:
+        root = self._require_project()
+        paths = self._metadata_schema_layer_paths(root)
+        layers: list[MetadataSchemaLayer] = []
+        for index, path in enumerate(paths):
+            folder = path.parent
+            if folder == root:
+                label = self.title or root.name
+            elif index == 0:
+                label = "Base Folder"
+            else:
+                label = folder.name
+            layers.append(
+                MetadataSchemaLayer(
+                    id=self._metadata_schema_layer_id(folder),
+                    label=label,
+                    folder_path=str(folder),
+                    schema_path=str(path),
+                    exists=path.exists(),
+                )
+            )
+        return MetadataSchemaLayers(layers=layers)
+
+    def read_metadata_schema_overview(self) -> MetadataSchemaOverview:
+        root = self._require_project()
+        data = deepcopy(DEFAULT_METADATA_SCHEMA)
+        built_in_source = MetadataDefinitionSource(
+            layer_id="built_in",
+            layer_label="Built-in",
+            built_in=True,
+        )
+        entry_type_sources = {
+            entry_type_id: built_in_source
+            for entry_type_id in data.get("entry_types", {})
+        }
+        field_sources = {
+            field_id: built_in_source
+            for field_id in data.get("fields", {})
+        }
+        layers = self.read_metadata_schema_layers().layers
+        layers_by_path = {Path(layer.schema_path): layer for layer in layers}
+
+        for path in self._metadata_schema_layer_paths(root):
+            if not path.exists():
+                continue
+            layer_data = self._read_metadata_schema_layer(path)
+            self._merge_metadata_schema_layer(data, layer_data)
+            layer = layers_by_path.get(path)
+            if not layer:
+                continue
+            source = MetadataDefinitionSource(
+                layer_id=layer.id,
+                layer_label=layer.label,
+                schema_path=layer.schema_path,
+            )
+            for entry_type_id in self._schema_section_keys(layer_data, "entry_types"):
+                entry_type_sources[entry_type_id] = source
+            for field_id in self._schema_section_keys(layer_data, "fields"):
+                field_sources[field_id] = source
+
+        return MetadataSchemaOverview(
+            effective_schema=MetadataSchema.model_validate(data),
+            layers=layers,
+            entry_type_sources=entry_type_sources,
+            field_sources=field_sources,
+        )
+
+    def upsert_metadata_field(self, request: UpsertMetadataFieldRequest) -> MetadataSchema:
+        root = self._require_project()
+        layer_path = self._metadata_schema_layer_path_for_id(root, request.layer_id)
+        if layer_path is None:
+            raise ProjectServiceError("Unknown metadata schema layer.", 404)
+
+        field_id = request.field_id.strip()
+        if not re.fullmatch(r"[A-Za-z][A-Za-z0-9_]*", field_id):
+            raise ProjectServiceError("Metadata field ID must start with a letter and contain only letters, numbers, and underscores.", 422)
+        if request.field.type == "computed":
+            raise ProjectServiceError("Computed metadata fields are derived by the app and cannot be created here.", 422)
+
+        layer_data = self._read_yaml(layer_path) if layer_path.exists() else self._empty_metadata_schema()
+        fields = layer_data.get("fields")
+        if not isinstance(fields, dict):
+            fields = {}
+        fields[field_id] = request.field.model_dump(exclude_none=True)
+        layer_data["fields"] = fields
+
+        entry_types = layer_data.get("entry_types")
+        if not isinstance(entry_types, dict):
+            entry_types = {}
+        entry_type_data = entry_types.get(request.entry_type)
+        if not isinstance(entry_type_data, dict):
+            effective_entry_type = self._read_metadata_schema_through_path(root, layer_path).entry_types.get(request.entry_type)
+            entry_type_data = {
+                "name": effective_entry_type.name if effective_entry_type else request.entry_type,
+                "kind": effective_entry_type.kind if effective_entry_type else "scene",
+                "fields": [],
+            }
+        fields_list = entry_type_data.get("fields")
+        if not isinstance(fields_list, list):
+            fields_list = []
+        if field_id not in fields_list:
+            fields_list.append(field_id)
+        entry_type_data["fields"] = fields_list
+        entry_types[request.entry_type] = entry_type_data
+        layer_data["entry_types"] = entry_types
+
+        candidate = deepcopy(DEFAULT_METADATA_SCHEMA)
+        for path in self._metadata_schema_layer_paths(root):
+            if path == layer_path:
+                self._merge_metadata_schema_layer(candidate, layer_data)
+            elif path.exists():
+                self._merge_metadata_schema_layer(candidate, self._read_metadata_schema_layer(path))
+        schema = MetadataSchema.model_validate(candidate)
+        schema_errors = self._validate_metadata_schema_definition(schema)
+        if schema_errors:
+            raise ProjectServiceError(" ".join(schema_errors), 422)
+
+        self._write_yaml(layer_path, layer_data)
+        return self.read_metadata_schema()
+
+    def move_metadata_field(self, request: MoveMetadataFieldRequest) -> MetadataSchema:
+        root = self._require_project()
+        target_path = self._metadata_schema_layer_path_for_id(root, request.target_layer_id)
+        if target_path is None:
+            raise ProjectServiceError("Unknown metadata schema layer.", 404)
+
+        field_id = request.field_id.strip()
+        schema = self.read_metadata_schema()
+        field = schema.fields.get(field_id)
+        if field is None:
+            raise ProjectServiceError(f"Unknown metadata field {field_id}.", 404)
+
+        overview = self.read_metadata_schema_overview()
+        source = overview.field_sources.get(field_id)
+        if source is None:
+            raise ProjectServiceError(f"Unknown metadata field {field_id}.", 404)
+        if source.built_in:
+            raise ProjectServiceError("System metadata fields cannot be moved.", 422)
+
+        source_path = self._metadata_schema_layer_path_for_id(root, source.layer_id)
+        if source_path is None:
+            raise ProjectServiceError("Unknown metadata schema layer.", 404)
+        if source_path == target_path:
+            return schema
+
+        source_data = self._read_yaml(source_path) if source_path.exists() else self._empty_metadata_schema()
+        target_data = self._read_yaml(target_path) if target_path.exists() else self._empty_metadata_schema()
+        self._remove_metadata_field_from_layer(source_data, field_id, request.entry_type)
+        self._add_metadata_field_to_layer(root, target_path, target_data, field_id, field, request.entry_type)
+
+        candidate = deepcopy(DEFAULT_METADATA_SCHEMA)
+        for path in self._metadata_schema_layer_paths(root):
+            if path == source_path:
+                self._merge_metadata_schema_layer(candidate, source_data)
+            elif path == target_path:
+                self._merge_metadata_schema_layer(candidate, target_data)
+            elif path.exists():
+                self._merge_metadata_schema_layer(candidate, self._read_metadata_schema_layer(path))
+        moved_schema = MetadataSchema.model_validate(candidate)
+        schema_errors = self._validate_metadata_schema_definition(moved_schema)
+        if schema_errors:
+            raise ProjectServiceError(" ".join(schema_errors), 422)
+
+        self._write_yaml(source_path, source_data)
+        self._write_yaml(target_path, target_data)
+        return self.read_metadata_schema()
+
+    def _add_metadata_field_to_layer(
+        self,
+        root: Path,
+        layer_path: Path,
+        layer_data: dict[str, Any],
+        field_id: str,
+        field: MetadataFieldDefinition,
+        entry_type: str,
+    ) -> None:
+        fields = layer_data.get("fields")
+        if not isinstance(fields, dict):
+            fields = {}
+        fields[field_id] = field.model_dump(exclude_none=True)
+        layer_data["fields"] = fields
+
+        entry_types = layer_data.get("entry_types")
+        if not isinstance(entry_types, dict):
+            entry_types = {}
+        entry_type_data = entry_types.get(entry_type)
+        if not isinstance(entry_type_data, dict):
+            effective_entry_type = self._read_metadata_schema_through_path(root, layer_path).entry_types.get(entry_type)
+            entry_type_data = {
+                "name": effective_entry_type.name if effective_entry_type else entry_type,
+                "kind": effective_entry_type.kind if effective_entry_type else "scene",
+                "fields": [],
+            }
+        fields_list = entry_type_data.get("fields")
+        if not isinstance(fields_list, list):
+            fields_list = []
+        if field_id not in fields_list:
+            fields_list.append(field_id)
+        entry_type_data["fields"] = fields_list
+        entry_types[entry_type] = entry_type_data
+        layer_data["entry_types"] = entry_types
+
+    def _remove_metadata_field_from_layer(self, layer_data: dict[str, Any], field_id: str, entry_type: str) -> None:
+        fields = layer_data.get("fields")
+        if isinstance(fields, dict):
+            fields.pop(field_id, None)
+            layer_data["fields"] = fields
+
+        entry_types = layer_data.get("entry_types")
+        if not isinstance(entry_types, dict):
+            return
+        candidate_entry_types = [entry_type] if entry_type in entry_types else list(entry_types)
+        for entry_type_id in candidate_entry_types:
+            entry_type_data = entry_types.get(entry_type_id)
+            if not isinstance(entry_type_data, dict):
+                continue
+            fields_list = entry_type_data.get("fields")
+            if isinstance(fields_list, list):
+                entry_type_data["fields"] = [candidate for candidate in fields_list if candidate != field_id]
+
+    def _metadata_schema_layer_paths(self, root: Path) -> list[Path]:
+        base_folder = self._metadata_schema_base_folder(root)
+        if base_folder is None or not self._is_relative_to(root, base_folder):
+            return [root / "metadata.schema.yaml"]
+
+        folders: list[Path] = []
+        current = root
+        while True:
+            folders.append(current)
+            if current == base_folder:
+                break
+            current = current.parent
+        return [folder / "metadata.schema.yaml" for folder in reversed(folders)]
+
+    def _metadata_schema_layer_id(self, folder: Path) -> str:
+        return hashlib.sha256(str(folder.resolve()).encode("utf-8")).hexdigest()[:16]
+
+    def _metadata_schema_layer_path_for_id(self, root: Path, layer_id: str) -> Path | None:
+        for path in self._metadata_schema_layer_paths(root):
+            if self._metadata_schema_layer_id(path.parent) == layer_id:
+                return path
+        return None
+
+    def _read_metadata_schema_through_path(self, root: Path, target_path: Path) -> MetadataSchema:
+        data = deepcopy(DEFAULT_METADATA_SCHEMA)
+        for path in self._metadata_schema_layer_paths(root):
+            if path.exists():
+                self._merge_metadata_schema_layer(data, self._read_metadata_schema_layer(path))
+            if path == target_path:
+                break
+        return MetadataSchema.model_validate(data)
+
+    def _metadata_schema_layer_warnings(self, root: Path) -> list[str]:
+        warnings: list[str] = []
+        base_folder = self._metadata_schema_base_folder(root)
+        if base_folder is None:
+            warnings.append("Project has no settings.projects_base_folder; using project metadata schema only.")
+        elif not self._is_relative_to(root, base_folder):
+            warnings.append(
+                f"Project root is not inside settings.projects_base_folder {base_folder}; using project metadata schema only."
+            )
+        return warnings
+
+    def _metadata_schema_base_folder(self, root: Path) -> Path | None:
+        manifest = self._read_yaml(root / "project.yaml")
+        settings = manifest.get("settings")
+        if not isinstance(settings, dict):
+            return None
+        base_folder = settings.get("projects_base_folder")
+        if not isinstance(base_folder, str) or not base_folder.strip():
+            return None
+        return Path(base_folder).expanduser().resolve()
+
+    def _is_relative_to(self, path: Path, possible_parent: Path) -> bool:
+        try:
+            path.resolve().relative_to(possible_parent.resolve())
+        except ValueError:
+            return False
+        return True
+
+    def _read_metadata_schema_layer(self, path: Path) -> dict[str, Any]:
+        try:
+            return self._read_yaml(path)
+        except ProjectServiceError as exc:
+            raise ProjectServiceError(f"{path}: {exc.message}", exc.status_code) from exc
+
+    def _merge_metadata_schema_layer(self, base: dict[str, Any], layer: dict[str, Any]) -> None:
+        base["version"] = layer.get("version", base.get("version", 1))
+        if "entry_types" in layer:
+            base["entry_types"] = self._merge_metadata_entry_types(
+                base.get("entry_types", {}),
+                layer.get("entry_types"),
+            )
+        if "fields" in layer:
+            base["fields"] = self._merge_metadata_schema_section(
+                base.get("fields", {}),
+                layer.get("fields"),
+            )
+
+    def _merge_metadata_entry_types(self, base: Any, layer: Any) -> Any:
+        if not isinstance(base, dict):
+            base = {}
+        if not isinstance(layer, dict):
+            return layer
+
+        merged = deepcopy(base)
+        for entry_type_id, layer_entry_type in layer.items():
+            base_entry_type = merged.get(entry_type_id)
+            if not isinstance(base_entry_type, dict) or not isinstance(layer_entry_type, dict):
+                merged[entry_type_id] = deepcopy(layer_entry_type)
+                continue
+
+            next_entry_type = self._merge_metadata_schema_section(base_entry_type, layer_entry_type)
+            if isinstance(base_entry_type.get("fields"), list) or isinstance(layer_entry_type.get("fields"), list):
+                next_entry_type["fields"] = self._merge_metadata_field_lists(
+                    base_entry_type.get("fields", []),
+                    layer_entry_type.get("fields", []),
+                )
+            merged[entry_type_id] = next_entry_type
+        return merged
+
+    def _merge_metadata_field_lists(self, base: Any, layer: Any) -> list[Any]:
+        fields: list[Any] = []
+        if isinstance(base, list):
+            fields.extend(deepcopy(base))
+        if isinstance(layer, list):
+            for field_id in layer:
+                if field_id not in fields:
+                    fields.append(deepcopy(field_id))
+        return fields
+
+    def _merge_metadata_schema_section(self, base: Any, layer: Any) -> Any:
+        if not isinstance(base, dict):
+            base = {}
+        if not isinstance(layer, dict):
+            return layer
+
+        merged = deepcopy(base)
+        for key, value in layer.items():
+            key = str(key)
+            if isinstance(value, dict) and isinstance(merged.get(key), dict):
+                merged[key] = {**merged[key], **value}
+            else:
+                merged[key] = value
+        return merged
+
+    def _schema_section_keys(self, data: dict[str, Any], section: str) -> list[str]:
+        value = data.get(section)
+        if not isinstance(value, dict):
+            return []
+        return [str(key) for key in value]
+
+    def _validate_metadata_schema_definition(self, schema: MetadataSchema) -> list[str]:
+        errors: list[str] = []
+        for entry_type_id, entry_type in schema.entry_types.items():
+            for field_id in entry_type.fields:
+                if field_id not in schema.fields:
+                    errors.append(f"Metadata entry_type {entry_type_id} references unknown field {field_id}.")
+
+        for field_id, field in schema.fields.items():
+            if field.type == "computed":
+                if not field.computed:
+                    errors.append(f"Computed metadata field {field_id} must define computed settings.")
+                continue
+            if field.computed:
+                errors.append(f"Metadata field {field_id} has computed settings but is not type computed.")
+        return errors
 
     def create_scene(self, request: CreateSceneRequest) -> Scene:
         root = self._require_project()
@@ -384,8 +735,14 @@ class ProjectService:
         front_matter, body = self._read_markdown_with_front_matter(path, strict=True)
         title = str(front_matter.get("title") or scene_id)
         status = str(front_matter.get("status") or "draft")
-        entry_type = str(front_matter.get("entry_type") or "scene")
+        raw_entry_type = front_matter.get("entry_type") or "scene"
+        if not isinstance(raw_entry_type, str):
+            raise ProjectServiceError(f"Scene {scene_id} has invalid entry_type; it must be text.", 422)
+        entry_type = raw_entry_type
         metadata = self._normalise_metadata(front_matter.get("metadata"), path)
+        metadata_errors = self._validate_scene_metadata(scene_id, entry_type, status, metadata, self.read_metadata_schema())
+        if metadata_errors:
+            raise ProjectServiceError(" ".join(metadata_errors), 422)
         return Scene(
             id=scene_id,
             title=title,
@@ -418,6 +775,15 @@ class ProjectService:
             entry_type=request.entry_type,
             metadata=self._normalise_metadata(request.metadata, path),
         )
+        metadata_errors = self._validate_scene_metadata(
+            scene_id,
+            scene.entry_type,
+            scene.status,
+            scene.metadata,
+            self.read_metadata_schema(),
+        )
+        if metadata_errors:
+            raise ProjectServiceError(" ".join(metadata_errors), 422)
         self._write_scene_file(path, scene)
         self._update_scene_title_in_structure(scene_id, request.title)
         self._remove_missing_scene_todo_anchors(scene_id, request.body_markdown)
@@ -648,6 +1014,72 @@ class ProjectService:
         if isinstance(value, dict):
             return {str(key): self._normalise_metadata_value(raw_value) for key, raw_value in value.items()}
         return str(value)
+
+    def _validate_scene_metadata(
+        self,
+        scene_id: str,
+        entry_type: str,
+        status: str,
+        metadata: dict[str, Any],
+        schema: MetadataSchema,
+    ) -> list[str]:
+        errors: list[str] = []
+        entry_type_definition = schema.entry_types.get(entry_type)
+        if not entry_type_definition:
+            errors.append(f"Scene {scene_id} has unknown entry_type {entry_type}.")
+        elif entry_type_definition.kind != "scene":
+            errors.append(f"Scene {scene_id} uses non-scene entry_type {entry_type}.")
+
+        status_field = schema.fields.get("status")
+        if status_field:
+            errors.extend(self._validate_metadata_field_value(scene_id, "status", status, status_field, allow_computed=True))
+
+        for field_id, value in metadata.items():
+            field = schema.fields.get(field_id)
+            if not field:
+                errors.append(f"Scene {scene_id} has unknown metadata field {field_id}.")
+                continue
+            errors.extend(self._validate_metadata_field_value(scene_id, field_id, value, field))
+        return errors
+
+    def _validate_metadata_field_value(
+        self,
+        scene_id: str,
+        field_id: str,
+        value: Any,
+        field: MetadataFieldDefinition,
+        *,
+        allow_computed: bool = False,
+    ) -> list[str]:
+        if value is None or value == "":
+            return []
+        if field.type == "computed" and not allow_computed:
+            return [f"Scene {scene_id} stores computed metadata field {field_id}; computed fields are derived."]
+        if field.type in {"text", "long_text", "date", "entity_ref"}:
+            if not isinstance(value, str):
+                return [f"Scene {scene_id} metadata field {field_id} must be text."]
+            return []
+        if field.type == "select":
+            if not isinstance(value, str):
+                return [f"Scene {scene_id} metadata field {field_id} must be text."]
+            if field.options and value not in field.options:
+                return [f"Scene {scene_id} metadata field {field_id} must be one of: {', '.join(field.options)}."]
+            return []
+        if field.type == "number":
+            if isinstance(value, bool) or not isinstance(value, int | float):
+                return [f"Scene {scene_id} metadata field {field_id} must be a number."]
+            return []
+        if field.type == "boolean":
+            if not isinstance(value, bool):
+                return [f"Scene {scene_id} metadata field {field_id} must be true or false."]
+            return []
+        if field.type in {"multi_select", "entity_ref_list", "tags"}:
+            if not isinstance(value, list):
+                return [f"Scene {scene_id} metadata field {field_id} must be a list."]
+            if any(not isinstance(item, str) for item in value):
+                return [f"Scene {scene_id} metadata field {field_id} must contain only text values."]
+            return []
+        return []
 
     def _computed_scene_metadata(self, body_markdown: str) -> dict[str, Any]:
         without_comments = re.sub(r"<!--[\s\S]*?-->", " ", body_markdown)

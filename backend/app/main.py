@@ -12,6 +12,9 @@ from app.models import (
     CreateTodoRequest,
     DirectoryListing,
     MetadataSchema,
+    MetadataSchemaLayers,
+    MetadataSchemaOverview,
+    MoveMetadataFieldRequest,
     OpenProjectRequest,
     ProjectInfo,
     ProjectValidation,
@@ -21,6 +24,8 @@ from app.models import (
     SearchResponse,
     StructureDocument,
     TodoDocument,
+    UpsertMetadataFieldRequest,
+    UpdateProjectSettingsRequest,
     UpdateTodoRequest,
 )
 from app.services.project_service import ProjectService, ProjectServiceError
@@ -69,6 +74,12 @@ def get_project() -> ProjectInfo:
         return service.current_project()
 
 
+@app.patch("/api/project/settings", response_model=ProjectInfo)
+def update_project_settings(request: UpdateProjectSettingsRequest) -> ProjectInfo:
+    with translate_errors():
+        return service.update_project_settings(request)
+
+
 @app.get("/api/directories", response_model=DirectoryListing)
 def list_directories(path: str | None = Query(default=None)) -> DirectoryListing:
     with translate_errors():
@@ -97,6 +108,30 @@ def get_structure() -> StructureDocument:
 def get_metadata_schema() -> MetadataSchema:
     with translate_errors():
         return service.read_metadata_schema()
+
+
+@app.get("/api/metadata/schema/layers", response_model=MetadataSchemaLayers)
+def get_metadata_schema_layers() -> MetadataSchemaLayers:
+    with translate_errors():
+        return service.read_metadata_schema_layers()
+
+
+@app.get("/api/metadata/schema/overview", response_model=MetadataSchemaOverview)
+def get_metadata_schema_overview() -> MetadataSchemaOverview:
+    with translate_errors():
+        return service.read_metadata_schema_overview()
+
+
+@app.put("/api/metadata/schema/fields", response_model=MetadataSchema)
+def upsert_metadata_field(request: UpsertMetadataFieldRequest) -> MetadataSchema:
+    with translate_errors():
+        return service.upsert_metadata_field(request)
+
+
+@app.post("/api/metadata/schema/fields/move", response_model=MetadataSchema)
+def move_metadata_field(request: MoveMetadataFieldRequest) -> MetadataSchema:
+    with translate_errors():
+        return service.move_metadata_field(request)
 
 
 @app.post("/api/scenes", response_model=Scene)

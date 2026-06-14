@@ -1,6 +1,9 @@
 import type {
   DirectoryListing,
+  MetadataFieldDefinition,
   MetadataSchema,
+  MetadataSchemaLayers,
+  MetadataSchemaOverview,
   ProjectInfo,
   ProjectValidation,
   Scene,
@@ -39,11 +42,35 @@ export const api = {
       body: JSON.stringify({ root_path: rootPath }),
     });
   },
+  updateProjectSettings(projectsBaseFolder: string) {
+    return request<ProjectInfo>("/project/settings", {
+      method: "PATCH",
+      body: JSON.stringify({ projects_base_folder: projectsBaseFolder }),
+    });
+  },
   getStructure() {
     return request<StructureDocument>("/structure");
   },
   getMetadataSchema() {
     return request<MetadataSchema>("/metadata/schema");
+  },
+  getMetadataSchemaLayers() {
+    return request<MetadataSchemaLayers>("/metadata/schema/layers");
+  },
+  getMetadataSchemaOverview() {
+    return request<MetadataSchemaOverview>("/metadata/schema/overview");
+  },
+  upsertMetadataField(layerId: string, fieldId: string, field: MetadataFieldDefinition, entryType = "scene") {
+    return request<MetadataSchema>("/metadata/schema/fields", {
+      method: "PUT",
+      body: JSON.stringify({ layer_id: layerId, field_id: fieldId, field, entry_type: entryType }),
+    });
+  },
+  moveMetadataField(fieldId: string, targetLayerId: string, entryType = "scene") {
+    return request<MetadataSchema>("/metadata/schema/fields/move", {
+      method: "POST",
+      body: JSON.stringify({ field_id: fieldId, target_layer_id: targetLayerId, entry_type: entryType }),
+    });
   },
   listDirectories(path?: string) {
     const query = path ? `?path=${encodeURIComponent(path)}` : "";

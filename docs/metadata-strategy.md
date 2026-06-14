@@ -68,11 +68,17 @@ a dedicated metadata UI, not inline in prose.
 
 ## Schema Files
 
-Metadata field definitions should be schema-driven. The app should support two
-levels of schema:
+Metadata field definitions should be schema-driven. The app should support
+layered schema:
 
-- Application defaults: built-in fields and entry types available to all projects.
-- Project schema: project-specific fields, entry types, options, and overrides.
+- Minimal application defaults: built-in fields and entry types available to all projects.
+- Ancestor folder schemas: every `metadata.schema.yaml` from
+  `settings.projects_base_folder` down to the project folder.
+- Project schema: the final project-local `metadata.schema.yaml`.
+
+Ancestor folders are not assigned semantic roles by the app. A user may choose
+base, world, series, book, or any other depth; schema files are merged in folder
+order, and nearer folders override farther ancestors.
 
 A future project schema may look like this:
 

@@ -38,6 +38,21 @@ button.primary {
   color: white;
 }
 
+button.danger-primary {
+  background: #9d2f2a;
+  border-color: #9d2f2a;
+  color: white;
+}
+
+button:disabled {
+  cursor: default;
+  opacity: 0.52;
+}
+
+button:disabled:hover {
+  background: #ffffff;
+}
+
 input {
   width: 100%;
   border: 1px solid #cbd6d2;
@@ -140,6 +155,11 @@ h3 {
   color: #234e43;
 }
 
+.pin-button.danger {
+  border-color: #e2c4c2;
+  color: #7c1f18;
+}
+
 .pane-content {
   min-height: 0;
   padding: 14px;
@@ -213,6 +233,47 @@ h3 {
   place-items: center;
   padding: 24px;
   background: rgba(25, 40, 35, 0.28);
+}
+
+.modal-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 2100;
+  display: grid;
+  place-items: center;
+  padding: 24px;
+  background: rgba(25, 40, 35, 0.28);
+}
+
+.confirm-modal {
+  display: grid;
+  gap: 14px;
+  width: min(420px, calc(100vw - 48px));
+  padding: 18px;
+  border: 1px solid #cbd6d2;
+  border-radius: 8px;
+  background: #ffffff;
+  box-shadow: 0 24px 60px rgba(25, 40, 35, 0.28);
+}
+
+.confirm-modal-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.confirm-modal p {
+  margin: 0;
+  color: #4d5753;
+  font-size: 14px;
+  line-height: 1.45;
+}
+
+.confirm-modal-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
 }
 
 .directory-modal {
@@ -312,26 +373,55 @@ h3 {
   grid-template-rows: auto 1fr auto;
   min-width: 0;
   min-height: 0;
+  background: #ffffff;
 }
 
 .editor-header {
   display: grid;
-  gap: 10px;
-  padding: 14px 18px;
+  gap: 6px;
+  padding: 16px 22px 12px;
   border-bottom: 1px solid #dfe6e3;
   background: #ffffff;
+}
+
+.scene-title-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 14px;
+  align-items: start;
 }
 
 .title-input {
   border: 0;
   border-bottom: 1px solid #dfe6e3;
   border-radius: 0;
-  font-size: 24px;
+  font-family:
+    Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI",
+    sans-serif;
+  font-size: 26px;
   font-weight: 700;
   padding-left: 0;
 }
 
+.title-input:focus {
+  border-bottom-color: #2f6f5e;
+  outline: none;
+}
+
+.editor-actions {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  padding-top: 2px;
+}
+
+.editor-hint {
+  color: #74817b;
+  font-size: 12px;
+}
+
 .editor-wrap {
+  position: relative;
   min-height: 0;
   overflow: auto;
   background: #ffffff;
@@ -348,6 +438,14 @@ h3 {
   line-height: 1.65;
 }
 
+.editor-wrap.empty-editor .editor-body > p:first-child::before {
+  float: left;
+  height: 0;
+  color: #9aa6a1;
+  content: "Start writing, or type / for commands...";
+  pointer-events: none;
+}
+
 .editor-body h1,
 .editor-body h2,
 .editor-body h3 {
@@ -358,15 +456,177 @@ h3 {
 }
 
 .editor-body table {
+  table-layout: fixed;
   border-collapse: collapse;
   width: 100%;
-  margin: 18px 0;
+  margin: 20px 0;
+  border: 1px solid #9aaaa4;
+  font-family:
+    Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI",
+    sans-serif;
+  font-size: 15px;
+  line-height: 1.45;
 }
 
 .editor-body th,
 .editor-body td {
+  min-width: 1em;
+  border: 1px solid #9aaaa4;
+  padding: 7px 9px;
+  vertical-align: top;
+}
+
+.editor-body th {
+  background: #edf3f1;
+  font-weight: 700;
+}
+
+.editor-body th p,
+.editor-body td p {
+  margin: 0;
+}
+
+.selection-toolbar {
+  position: fixed;
+  z-index: 20;
+  display: flex;
+  align-items: center;
+  max-width: min(720px, calc(100% - 24px));
+  overflow: visible;
+  border: 1px solid #37413d;
+  border-radius: 7px;
+  background: #28302d;
+  box-shadow: 0 14px 28px rgba(25, 40, 35, 0.22);
+  transform: translate(-50%, calc(-100% - 8px));
+}
+
+.selection-toolbar.below {
+  transform: translate(-50%, 0);
+}
+
+.selection-toolbar button,
+.selection-count {
+  height: 34px;
+  border: 0;
+  border-right: 1px solid #414b47;
+  border-radius: 0;
+  background: transparent;
+  color: #f5f7f6;
+  font-size: 13px;
+  font-weight: 700;
+  white-space: nowrap;
+}
+
+.selection-toolbar button {
+  min-width: 38px;
+  padding: 0 10px;
+}
+
+.selection-toolbar button:hover {
+  background: #3c4642;
+}
+
+.selection-toolbar button.open {
+  background: #3c4642;
+}
+
+.selection-count {
+  display: inline-flex;
+  align-items: center;
+  padding: 0 12px;
+  color: #e2e8e5;
+}
+
+.toolbar-menu {
+  position: relative;
+}
+
+.toolbar-menu > button::after {
+  content: " ▾";
+  font-size: 11px;
+}
+
+.toolbar-menu-popover {
+  position: absolute;
+  left: 0;
+  bottom: calc(100% + 6px);
+  z-index: 30;
+  display: grid;
+  min-width: 144px;
+  overflow: hidden;
+  border: 1px solid #37413d;
+  border-radius: 7px;
+  background: #28302d;
+  box-shadow: 0 14px 28px rgba(25, 40, 35, 0.22);
+}
+
+.toolbar-menu-popover.below {
+  top: calc(100% + 6px);
+  bottom: auto;
+}
+
+.toolbar-menu-popover button {
+  justify-content: start;
+  width: 100%;
+  min-width: 0;
+  height: 32px;
+  border-right: 0;
+  border-bottom: 1px solid #414b47;
+  text-align: left;
+}
+
+.toolbar-menu-popover button:last-child {
+  border-bottom: 0;
+}
+
+.slash-menu {
+  position: absolute;
+  z-index: 25;
+  display: grid;
+  width: min(380px, calc(100% - 32px));
+  max-height: min(420px, calc(100% - 32px));
+  overflow: auto;
+  padding: 8px;
   border: 1px solid #cbd6d2;
-  padding: 6px 8px;
+  border-radius: 8px;
+  background: #ffffff;
+  box-shadow: 0 18px 42px rgba(25, 40, 35, 0.22);
+}
+
+.slash-group {
+  padding: 8px 6px 5px;
+  color: #65716c;
+  font-size: 12px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.slash-menu button {
+  display: grid;
+  gap: 3px;
+  width: 100%;
+  min-height: 58px;
+  padding: 9px 10px;
+  border-color: transparent;
+  background: transparent;
+  text-align: left;
+}
+
+.slash-menu button.active,
+.slash-menu button:hover {
+  background: #edf6f2;
+}
+
+.slash-menu button strong {
+  color: #26302c;
+  font-size: 13px;
+}
+
+.slash-menu button span {
+  color: #65716c;
+  font-size: 12px;
+  line-height: 1.35;
 }
 
 .status {

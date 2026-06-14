@@ -35,6 +35,13 @@
     draftMarkdown: string;
     saving: boolean;
   };
+  type ConfirmationState = {
+    title: string;
+    message: string;
+    confirmLabel: string;
+    destructive: boolean;
+    onConfirm: () => Promise<void>;
+  };
 
   let projectPath = "";
   let projectTitle = "Untitled Project";
@@ -53,6 +60,7 @@
   let newTodo = "";
   let searchQuery = "";
   let searchHits: SearchHit[] = [];
+  let confirmation: ConfirmationState | null = null;
   let error = "";
   let status = "No project open";
   let nextZ = 10;
@@ -463,16 +471,33 @@
     editorPanes = editorPanes.map((pane) => (pane.id === id ? { ...pane, saving } : pane));
   }
 
+  function requestDeleteEditorPaneScene(id: string) {
+    const pane = editorPanes.find((candidate) => candidate.id === id);
+    if (!pane?.scene) return;
+    const sceneTitle = pane.scene.title;
+    confirmation = {
+      title: "Delete Scene",
+      message: `Delete "${sceneTitle}"? This removes the scene file from the project.`,
+      confirmLabel: "Delete Scene",
+      destructive: true,
+      onConfirm: () => deleteEditorPaneScene(id),
+    };
+  }
+
+  async function confirmModalAction() {
+    const currentConfirmation = confirmation;
+    if (!currentConfirmation) return;
+    confirmation = null;
+    await run(currentConfirmation.onConfirm);
+  }
+
   async function deleteEditorPaneScene(id: string) {
     const pane = editorPanes.find((candidate) => candidate.id === id);
     if (!pane?.scene) return;
     const sceneTitle = pane.scene.title;
-    if (!confirm(`Delete "${sceneTitle}"? This removes the scene file from the project.`)) return;
-    await run(async () => {
-      structure = await api.deleteScene(pane.scene!.id);
-      editorPanes = editorPanes.map((candidate) => (candidate.id === id ? createEmptyEditorPane(id) : candidate));
-      status = `Deleted ${sceneTitle}`;
-    });
+    structure = await api.deleteScene(pane.scene.id);
+    editorPanes = editorPanes.map((candidate) => (candidate.id === id ? createEmptyEditorPane(id) : candidate));
+    status = `Deleted ${sceneTitle}`;
   }
 
   async function addTodo() {
@@ -551,13 +576,41 @@
   </section>
 
   {#each editorPanes as editorPane (editorPane.id)}
-    <section class:hidden-pane={!isPaneVisible(editorPane.id)} class="pane editor-pane" data-pane-id={editorPane.id} style={paneStyle(editorPane.id)} aria-label="Scene Editor pane">
+    <!-- svelte-ignore a11y_no_noninteractive_element_interactions -->
+    <section
+      class:hidden-pane={!isPaneVisible(editorPane.id)}
+      class="pane editor-pane"
+      data-pane-id={editorPane.id}
+      style={paneStyle(editorPane.id)}
+      aria-label="Scene Editor pane"
+      on:mousedown={() => focusPane(editorPane.id)}
+    >
       <header class="pane-header" role="button" tabindex="0" aria-label="Move Scene Editor pane" on:keydown={(event) => handlePaneHeaderKeydown(event, editorPane.id)} on:mousedown={(event) => startPaneDrag(event, editorPane.id)}>
         <h2>{editorPane.scene?.title ?? "Scene Editor"}</h2>
         <div class="pane-header-actions">
           {#if editorPane.dirty}
             <span class="pane-status">Unsaved</span>
           {/if}
+          <button
+            class="pin-button"
+            type="button"
+            disabled={editorPane.saving || !editorPane.dirty}
+            title={editorPane.saving ? "Saving this scene" : "Save this scene"}
+            on:mousedown={(event) => event.stopPropagation()}
+            on:click={() => run(() => saveEditorPane(editorPane.id))}
+          >
+            {editorPane.saving ? "Saving" : "Save"}
+          </button>
+          <button
+            class="pin-button danger"
+            type="button"
+            disabled={!editorPane.scene}
+            title="Delete this scene"
+            on:mousedown={(event) => event.stopPropagation()}
+            on:click={() => requestDeleteEditorPaneScene(editorPane.id)}
+          >
+            Delete
+          </button>
           <button
             class:active-pin={editorPane.pinned}
             class="pin-button"
@@ -582,10 +635,8 @@
       <DocumentEditorPane
         scene={editorPane.scene}
         dirty={editorPane.dirty}
-        saving={editorPane.saving}
+        on:focus={() => focusPane(editorPane.id)}
         on:change={(event) => updateEditorPaneDraft(editorPane.id, event.detail.title, event.detail.bodyMarkdown)}
-        on:save={() => run(() => saveEditorPane(editorPane.id))}
-        on:delete={() => deleteEditorPaneScene(editorPane.id)}
       />
       <button class="pane-resize" type="button" aria-label="Resize Scene Editor pane" on:keydown={(event) => handlePaneResizeKeydown(event, editorPane.id)} on:mousedown={(event) => startPaneResize(event, editorPane.id)}></button>
     </section>
@@ -662,6 +713,28 @@
               <p class="muted">No folders here.</p>
             {/if}
           {/if}
+        </div>
+      </div>
+    </section>
+  {/if}
+
+  {#if confirmation}
+    <section class="modal-backdrop" aria-label={confirmation.title}>
+      <div class="confirm-modal" role="dialog" aria-modal="true" aria-labelledby="confirm-title">
+        <header class="confirm-modal-header">
+          <h2 id="confirm-title">{confirmation.title}</h2>
+        </header>
+        <p>{confirmation.message}</p>
+        <div class="confirm-modal-actions">
+          <button type="button" on:click={() => (confirmation = null)}>Cancel</button>
+          <button
+            class:danger-primary={confirmation.destructive}
+            class:primary={!confirmation.destructive}
+            type="button"
+            on:click={confirmModalAction}
+          >
+            {confirmation.confirmLabel}
+          </button>
         </div>
       </div>
     </section>

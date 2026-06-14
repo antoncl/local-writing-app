@@ -10,6 +10,7 @@ from app.models import (
     CreateProjectRequest,
     CreateSceneRequest,
     CreateTodoRequest,
+    DeleteMetadataFieldRequest,
     DirectoryListing,
     MetadataSchema,
     MetadataSchemaLayers,
@@ -18,6 +19,7 @@ from app.models import (
     OpenProjectRequest,
     ProjectInfo,
     ProjectValidation,
+    RenameMetadataFieldRequest,
     SaveSceneRequest,
     Scene,
     SearchRequest,
@@ -132,6 +134,18 @@ def upsert_metadata_field(request: UpsertMetadataFieldRequest) -> MetadataSchema
 def move_metadata_field(request: MoveMetadataFieldRequest) -> MetadataSchema:
     with translate_errors():
         return service.move_metadata_field(request)
+
+
+@app.post("/api/metadata/schema/fields/rename", response_model=MetadataSchema)
+def rename_metadata_field(request: RenameMetadataFieldRequest) -> MetadataSchema:
+    with translate_errors():
+        return service.rename_metadata_field(request)
+
+
+@app.delete("/api/metadata/schema/fields", response_model=MetadataSchema)
+def delete_metadata_field(request: DeleteMetadataFieldRequest) -> MetadataSchema:
+    with translate_errors():
+        return service.delete_metadata_field(request)
 
 
 @app.post("/api/scenes", response_model=Scene)

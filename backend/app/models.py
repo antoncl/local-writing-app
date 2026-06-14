@@ -120,11 +120,23 @@ class UpsertMetadataFieldRequest(BaseModel):
     field_id: str = Field(min_length=1)
     field: MetadataFieldDefinition
     entry_type: str = "scene"
+    allow_existing: bool = True
 
 
 class MoveMetadataFieldRequest(BaseModel):
     field_id: str = Field(min_length=1)
     target_layer_id: str = Field(min_length=1)
+    entry_type: str = "scene"
+
+
+class RenameMetadataFieldRequest(BaseModel):
+    old_field_id: str = Field(min_length=1)
+    new_field_id: str = Field(min_length=1)
+    entry_type: str = "scene"
+
+
+class DeleteMetadataFieldRequest(BaseModel):
+    field_id: str = Field(min_length=1)
     entry_type: str = "scene"
 
 

@@ -24,6 +24,7 @@
     | { name: "projectOpen"; project: ProjectInfo };
   type DocumentRef = { type: "scene"; id: string };
   type PaneId = "project" | "outline" | "todo" | "search" | string;
+  type MetadataReloadSignal = { token: number; metadata: EntryMetadata; status: string; entryType: string };
   type PaneState = {
     title: string;
     x: number;
@@ -92,7 +93,6 @@
   let schemaFieldOptions = "";
   let schemaFieldReadonlyTypeLabel = "";
   let selectedSchemaFieldId: string | null = null;
-  let schemaFieldIdManuallyEdited = false;
   let schemaFieldReadonly = false;
   let schemaPaneOpen = false;
   let schemaFieldPaneOpen = false;
@@ -121,6 +121,8 @@
     search: { title: "Search", x: 1126, y: 360, width: 310, height: 320, z: 5 },
   };
   let editorPanes: EditorPaneState[] = [];
+  let nextMetadataReloadToken = 1;
+  let metadataReloadsByPane: Record<string, MetadataReloadSignal> = {};
   let editorPaneComponents: Record<
     string,
     | {
@@ -197,6 +199,8 @@
     editorPanes = [];
     focusedEditorPaneId = null;
     nextEditorPaneIndex = 1;
+    nextMetadataReloadToken = 1;
+    metadataReloadsByPane = {};
     panes = {
       project: panes.project,
       outline: panes.outline,
@@ -501,7 +505,6 @@
     schemaFieldOptions = field.options.join(", ");
     schemaFieldLayerId = metadataSchemaOverview?.field_sources[fieldId]?.built_in ? projectSchemaLayerId() : (metadataSchemaOverview?.field_sources[fieldId]?.layer_id ?? projectSchemaLayerId());
     schemaFieldEntryType = schemaSceneEntryTypes[0]?.[0] ?? "scene";
-    schemaFieldIdManuallyEdited = true;
     schemaFieldPaneOpen = true;
     focusPane("schema_field");
   }
@@ -518,7 +521,6 @@
     schemaFieldOptions = "";
     schemaFieldLayerId = "built_in";
     schemaFieldEntryType = "scene";
-    schemaFieldIdManuallyEdited = true;
     schemaFieldPaneOpen = true;
     focusPane("schema_field");
   }
@@ -534,7 +536,6 @@
     schemaFieldOptions = "";
     schemaFieldLayerId = layerId;
     schemaFieldEntryType = schemaSceneEntryTypes[0]?.[0] ?? "scene";
-    schemaFieldIdManuallyEdited = false;
     schemaFieldPaneOpen = true;
     focusPane("schema_field");
   }
@@ -552,6 +553,7 @@
 
   function selectSchemaLayer(layerId: string) {
     if (!schemaFieldPaneOpen) createSchemaFieldDraft(layerId);
+    else if (selectedSchemaFieldId) return;
     schemaFieldLayerId = layerId;
   }
 
@@ -597,14 +599,9 @@
 
   function updateSchemaFieldName(value: string) {
     schemaFieldName = value;
-    if (!selectedSchemaFieldId && !schemaFieldIdManuallyEdited) {
+    if (!schemaFieldReadonly) {
       schemaFieldId = slugifyFieldId(value);
     }
-  }
-
-  function updateSchemaFieldId(value: string) {
-    schemaFieldId = value;
-    schemaFieldIdManuallyEdited = true;
   }
 
   function slugifyFieldId(value: string) {
@@ -619,20 +616,100 @@
   async function saveSchemaField() {
     if (!schemaFieldLayerId) return;
     await run(async () => {
+      const previousFieldId = selectedSchemaFieldId && !selectedSchemaFieldId.startsWith("system:") ? selectedSchemaFieldId : null;
+      const nextFieldId = schemaFieldId.trim();
+      const previousField = previousFieldId ? metadataSchema?.fields[previousFieldId] : null;
       const options = schemaFieldOptions
         .split(",")
         .map((option) => option.trim())
         .filter(Boolean);
-      metadataSchema = await api.upsertMetadataField(schemaFieldLayerId, schemaFieldId.trim(), {
-        name: schemaFieldName.trim() || schemaFieldId.trim(),
+      const nextField: MetadataFieldDefinition = {
+        name: schemaFieldName.trim() || nextFieldId,
         type: schemaFieldSaveType(),
         options: schemaFieldType === "select" ? options : [],
-      }, schemaFieldEntryType);
+      };
+      const optionMigration = buildOptionMigration(previousField, nextField);
+      if (previousFieldId && previousFieldId !== nextFieldId) {
+        await api.renameMetadataField(previousFieldId, nextFieldId, schemaFieldEntryType);
+      }
+      metadataSchema = await api.upsertMetadataField(schemaFieldLayerId, nextFieldId, nextField, schemaFieldEntryType, Boolean(previousFieldId));
       await refreshMetadataSchema();
+      if (previousFieldId) {
+        const renamedField = previousFieldId !== nextFieldId;
+        await refreshOpenEditorPaneBaselines((metadata) => {
+          const renamedMetadata = renamedField ? renameMetadataKey(metadata, previousFieldId, nextFieldId) : metadata;
+          return migrateMetadataOptionValues(renamedMetadata, nextFieldId, optionMigration);
+        });
+      }
       validation = await api.validateProject();
-      selectedSchemaFieldId = schemaFieldId.trim();
+      selectedSchemaFieldId = nextFieldId;
       status = "Updated metadata schema";
     });
+  }
+
+  function requestDeleteSchemaField() {
+    if (!selectedSchemaFieldId || selectedSchemaFieldId.startsWith("system:") || schemaFieldReadonly) return;
+    const fieldName = schemaFieldName || selectedSchemaFieldId;
+    confirmation = {
+      title: "Delete Custom Field",
+      message: `Delete "${fieldName}"? This removes the field definition and removes that metadata value from scenes.`,
+      confirmLabel: "Delete Field",
+      destructive: true,
+      onConfirm: () => deleteSchemaField(selectedSchemaFieldId!),
+    };
+  }
+
+  async function deleteSchemaField(fieldId: string) {
+    metadataSchema = await api.deleteMetadataField(fieldId, schemaFieldEntryType);
+    await refreshMetadataSchema();
+    await refreshOpenEditorPaneBaselines((metadata) => removeMetadataKey(metadata, fieldId));
+    validation = await api.validateProject();
+    selectedSchemaFieldId = null;
+    schemaFieldPaneOpen = false;
+    status = `Deleted ${fieldId}`;
+  }
+
+  function renameMetadataKey(metadata: EntryMetadata, oldFieldId: string, newFieldId: string) {
+    if (!(oldFieldId in metadata)) return metadata;
+    const nextMetadata = cloneMetadata(metadata);
+    if (!(newFieldId in nextMetadata)) {
+      nextMetadata[newFieldId] = nextMetadata[oldFieldId];
+    }
+    delete nextMetadata[oldFieldId];
+    return nextMetadata;
+  }
+
+  function removeMetadataKey(metadata: EntryMetadata, fieldId: string) {
+    if (!(fieldId in metadata)) return metadata;
+    const nextMetadata = cloneMetadata(metadata);
+    delete nextMetadata[fieldId];
+    return nextMetadata;
+  }
+
+  function buildOptionMigration(previousField: MetadataFieldDefinition | null | undefined, nextField: MetadataFieldDefinition) {
+    const optionTypes = new Set<MetadataFieldType>(["select", "multi_select", "tags"]);
+    if (!previousField || !optionTypes.has(previousField.type) || !optionTypes.has(nextField.type)) return null;
+    if (!previousField.options.length || previousField.options.length !== nextField.options.length) return null;
+    const migration: Record<string, string> = {};
+    previousField.options.forEach((previousOption, index) => {
+      const nextOption = nextField.options[index];
+      if (previousOption !== nextOption) {
+        migration[previousOption] = nextOption;
+      }
+    });
+    return Object.keys(migration).length > 0 ? migration : null;
+  }
+
+  function migrateMetadataOptionValues(metadata: EntryMetadata, fieldId: string, migration: Record<string, string> | null) {
+    if (!migration || !(fieldId in metadata)) return metadata;
+    const value = metadata[fieldId];
+    const nextMetadata = cloneMetadata(metadata);
+    if (typeof value === "string") {
+      nextMetadata[fieldId] = migration[value] ?? value;
+    } else if (Array.isArray(value)) {
+      nextMetadata[fieldId] = value.map((item) => (typeof item === "string" ? migration[item] ?? item : item));
+    }
+    return nextMetadata;
   }
 
   function findFirstSceneId(node: StructureNode | null | undefined): string | null {
@@ -720,12 +797,7 @@
         ? {
             ...pane,
             dirty:
-              Boolean(pane.scene) &&
-              (title !== pane.scene.title ||
-                bodyMarkdown !== pane.scene.body_markdown ||
-                status !== pane.scene.status ||
-                entryType !== pane.scene.entry_type ||
-                !metadataEqual(metadata, pane.scene.metadata)),
+              isEditorPaneDirty(pane.scene, title, bodyMarkdown, status, entryType, metadata),
             draftTitle: title,
             draftMarkdown: bodyMarkdown,
             draftStatus: status,
@@ -744,6 +816,61 @@
     return JSON.stringify(left ?? {}) === JSON.stringify(right ?? {});
   }
 
+  function isEditorPaneDirty(
+    scene: Scene | null,
+    title: string,
+    bodyMarkdown: string,
+    status: string,
+    entryType: string,
+    metadata: EntryMetadata,
+  ) {
+    return (
+      Boolean(scene) &&
+      (title !== scene?.title ||
+        bodyMarkdown !== scene?.body_markdown ||
+        status !== scene?.status ||
+        entryType !== scene?.entry_type ||
+        !metadataEqual(metadata, scene?.metadata ?? {}))
+    );
+  }
+
+  async function refreshOpenEditorPaneBaselines(transformDraftMetadata?: (metadata: EntryMetadata) => EntryMetadata) {
+    const sceneIds = Array.from(
+      new Set(editorPanes.map((pane) => pane.scene?.id).filter((sceneId): sceneId is string => Boolean(sceneId))),
+    );
+    if (sceneIds.length === 0) return;
+    const refreshedScenes = await Promise.all(sceneIds.map((sceneId) => api.getScene(sceneId)));
+    const refreshedById = new Map(refreshedScenes.map((scene) => [scene.id, scene]));
+    const nextReloads: Record<string, MetadataReloadSignal> = {};
+    editorPanes = editorPanes.map((pane) => {
+      if (!pane.scene) return pane;
+      const refreshedScene = refreshedById.get(pane.scene.id);
+      if (!refreshedScene) return pane;
+      const draftMetadata = transformDraftMetadata ? transformDraftMetadata(refreshedScene.metadata) : refreshedScene.metadata;
+      nextReloads[pane.id] = {
+        token: nextMetadataReloadToken,
+        metadata: cloneMetadata(draftMetadata),
+        status: refreshedScene.status,
+        entryType: refreshedScene.entry_type,
+      };
+      nextMetadataReloadToken += 1;
+      return {
+        ...pane,
+        scene: refreshedScene,
+        draftMetadata: cloneMetadata(draftMetadata),
+        dirty: isEditorPaneDirty(
+          refreshedScene,
+          pane.draftTitle,
+          pane.draftMarkdown,
+          pane.draftStatus,
+          pane.draftEntryType,
+          draftMetadata,
+        ),
+      };
+    });
+    metadataReloadsByPane = { ...metadataReloadsByPane, ...nextReloads };
+  }
+
   function toggleEditorPanePinned(id: string) {
     editorPanes = editorPanes.map((pane) => (pane.id === id ? { ...pane, pinned: !pane.pinned } : pane));
   }
@@ -760,6 +887,8 @@
       editorPanes = remainingEditorPanes;
       const { [id]: _closedTodos, ...remainingEmbeddedTodos } = embeddedTodosByPane;
       embeddedTodosByPane = remainingEmbeddedTodos;
+      const { [id]: _closedReload, ...remainingReloads } = metadataReloadsByPane;
+      metadataReloadsByPane = remainingReloads;
       const { [id]: _closedPane, ...remainingPanes } = panes;
       panes = remainingPanes;
       if (focusedEditorPaneId === id) {
@@ -1186,7 +1315,7 @@
     </header>
     <div class="pane-content schema-editor">
       <div class="schema-target-layer">
-        <strong>{schemaFieldReadonly ? "Scope" : "Save layer"}</strong>
+        <strong>{schemaFieldReadonly ? "Scope" : selectedSchemaFieldId ? "Defined at" : "Save layer"}</strong>
         <span>{schemaFieldReadonly ? "System" : layerLabel(schemaFieldLayerId)}</span>
       </div>
       {#if !schemaFieldReadonly}
@@ -1206,10 +1335,11 @@
       <label>
         Field ID
         <input
+          aria-label="Generated Field ID"
+          title="Generated from the field name"
           value={schemaFieldId}
-          readonly={schemaFieldReadonly || Boolean(selectedSchemaFieldId)}
+          readonly
           placeholder="pov_character"
-          on:input={(event) => updateSchemaFieldId(event.currentTarget.value)}
         />
       </label>
       <label>
@@ -1244,6 +1374,9 @@
       {#if !schemaFieldReadonly}
         <div class="button-row">
           <button type="button" disabled={!schemaFieldLayerId || !schemaFieldId.trim() || !schemaFieldName.trim()} on:click={saveSchemaField}>Save Field</button>
+          {#if selectedSchemaFieldId}
+            <button class="danger" type="button" on:click={requestDeleteSchemaField}>Delete Field</button>
+          {/if}
         </div>
       {/if}
     </div>
@@ -1311,6 +1444,7 @@
         bind:this={editorPaneComponents[editorPane.id]}
         scene={editorPane.scene}
         metadataSchema={metadataSchema}
+        metadataReload={metadataReloadsByPane[editorPane.id] ?? null}
         dirty={editorPane.dirty}
         todoStatusHint={embeddedTodoStatusHintsByPane[editorPane.id] ?? "No embedded TODOs. Select text to mark a TODO."}
         on:focus={() => focusPane(editorPane.id)}

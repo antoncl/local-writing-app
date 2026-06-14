@@ -14,6 +14,7 @@ import yaml
 from app.models import (
     CreateSceneRequest,
     CreateTodoRequest,
+    DeleteMetadataFieldRequest,
     DirectoryEntry,
     DirectoryListing,
     MetadataFieldDefinition,
@@ -25,6 +26,7 @@ from app.models import (
     MoveMetadataFieldRequest,
     ProjectInfo,
     ProjectValidation,
+    RenameMetadataFieldRequest,
     SaveSceneRequest,
     Scene,
     SearchHit,
@@ -410,6 +412,9 @@ class ProjectService:
         if request.field.type == "computed":
             raise ProjectServiceError("Computed metadata fields are derived by the app and cannot be created here.", 422)
 
+        existing_field = self.read_metadata_schema().fields.get(field_id)
+        if existing_field is not None and not request.allow_existing:
+            raise ProjectServiceError(f"Metadata field {field_id} already exists.", 422)
         layer_data = self._read_yaml(layer_path) if layer_path.exists() else self._empty_metadata_schema()
         fields = layer_data.get("fields")
         if not isinstance(fields, dict):
@@ -449,6 +454,8 @@ class ProjectService:
             raise ProjectServiceError(" ".join(schema_errors), 422)
 
         self._write_yaml(layer_path, layer_data)
+        if existing_field is not None:
+            self._migrate_scene_metadata_option_values(root, field_id, existing_field, request.field)
         return self.read_metadata_schema()
 
     def move_metadata_field(self, request: MoveMetadataFieldRequest) -> MetadataSchema:
@@ -496,6 +503,88 @@ class ProjectService:
 
         self._write_yaml(source_path, source_data)
         self._write_yaml(target_path, target_data)
+        return self.read_metadata_schema()
+
+    def rename_metadata_field(self, request: RenameMetadataFieldRequest) -> MetadataSchema:
+        root = self._require_project()
+        old_field_id = request.old_field_id.strip()
+        new_field_id = request.new_field_id.strip()
+        if old_field_id == new_field_id:
+            return self.read_metadata_schema()
+        if not re.fullmatch(r"[A-Za-z][A-Za-z0-9_]*", new_field_id):
+            raise ProjectServiceError("Metadata field ID must start with a letter and contain only letters, numbers, and underscores.", 422)
+
+        schema = self.read_metadata_schema()
+        if old_field_id not in schema.fields:
+            raise ProjectServiceError(f"Unknown metadata field {old_field_id}.", 404)
+        if new_field_id in schema.fields:
+            raise ProjectServiceError(f"Metadata field {new_field_id} already exists.", 422)
+
+        overview = self.read_metadata_schema_overview()
+        source = overview.field_sources.get(old_field_id)
+        if source is None:
+            raise ProjectServiceError(f"Unknown metadata field {old_field_id}.", 404)
+        if source.built_in:
+            raise ProjectServiceError("System metadata fields cannot be renamed.", 422)
+        source_path = self._metadata_schema_layer_path_for_id(root, source.layer_id)
+        if source_path is None:
+            raise ProjectServiceError("Unknown metadata schema layer.", 404)
+
+        layer_data = self._read_yaml(source_path) if source_path.exists() else self._empty_metadata_schema()
+        fields = layer_data.get("fields")
+        if not isinstance(fields, dict) or old_field_id not in fields:
+            raise ProjectServiceError(f"Metadata field {old_field_id} is not defined in its source layer.", 422)
+        fields[new_field_id] = fields.pop(old_field_id)
+        self._replace_metadata_field_reference_in_layer(layer_data, old_field_id, new_field_id, request.entry_type)
+
+        candidate = deepcopy(DEFAULT_METADATA_SCHEMA)
+        for path in self._metadata_schema_layer_paths(root):
+            if path == source_path:
+                self._merge_metadata_schema_layer(candidate, layer_data)
+            elif path.exists():
+                self._merge_metadata_schema_layer(candidate, self._read_metadata_schema_layer(path))
+        renamed_schema = MetadataSchema.model_validate(candidate)
+        schema_errors = self._validate_metadata_schema_definition(renamed_schema)
+        if schema_errors:
+            raise ProjectServiceError(" ".join(schema_errors), 422)
+
+        self._write_yaml(source_path, layer_data)
+        self._rename_scene_metadata_key(root, old_field_id, new_field_id)
+        return self.read_metadata_schema()
+
+    def delete_metadata_field(self, request: DeleteMetadataFieldRequest) -> MetadataSchema:
+        root = self._require_project()
+        field_id = request.field_id.strip()
+        schema = self.read_metadata_schema()
+        if field_id not in schema.fields:
+            raise ProjectServiceError(f"Unknown metadata field {field_id}.", 404)
+
+        overview = self.read_metadata_schema_overview()
+        source = overview.field_sources.get(field_id)
+        if source is None:
+            raise ProjectServiceError(f"Unknown metadata field {field_id}.", 404)
+        if source.built_in:
+            raise ProjectServiceError("System metadata fields cannot be deleted.", 422)
+        source_path = self._metadata_schema_layer_path_for_id(root, source.layer_id)
+        if source_path is None:
+            raise ProjectServiceError("Unknown metadata schema layer.", 404)
+
+        layer_data = self._read_yaml(source_path) if source_path.exists() else self._empty_metadata_schema()
+        self._remove_metadata_field_from_layer(layer_data, field_id, request.entry_type)
+
+        candidate = deepcopy(DEFAULT_METADATA_SCHEMA)
+        for path in self._metadata_schema_layer_paths(root):
+            if path == source_path:
+                self._merge_metadata_schema_layer(candidate, layer_data)
+            elif path.exists():
+                self._merge_metadata_schema_layer(candidate, self._read_metadata_schema_layer(path))
+        deleted_schema = MetadataSchema.model_validate(candidate)
+        schema_errors = self._validate_metadata_schema_definition(deleted_schema)
+        if schema_errors:
+            raise ProjectServiceError(" ".join(schema_errors), 422)
+
+        self._write_yaml(source_path, layer_data)
+        self._remove_scene_metadata_key(root, field_id)
         return self.read_metadata_schema()
 
     def _add_metadata_field_to_layer(
@@ -550,6 +639,101 @@ class ProjectService:
             fields_list = entry_type_data.get("fields")
             if isinstance(fields_list, list):
                 entry_type_data["fields"] = [candidate for candidate in fields_list if candidate != field_id]
+
+    def _replace_metadata_field_reference_in_layer(
+        self,
+        layer_data: dict[str, Any],
+        old_field_id: str,
+        new_field_id: str,
+        entry_type: str,
+    ) -> None:
+        entry_types = layer_data.get("entry_types")
+        if not isinstance(entry_types, dict):
+            return
+        candidate_entry_types = [entry_type] if entry_type in entry_types else list(entry_types)
+        for entry_type_id in candidate_entry_types:
+            entry_type_data = entry_types.get(entry_type_id)
+            if not isinstance(entry_type_data, dict):
+                continue
+            fields_list = entry_type_data.get("fields")
+            if not isinstance(fields_list, list):
+                continue
+            replaced: list[Any] = []
+            for candidate in fields_list:
+                next_field_id = new_field_id if candidate == old_field_id else candidate
+                if next_field_id not in replaced:
+                    replaced.append(next_field_id)
+            entry_type_data["fields"] = replaced
+
+    def _rename_scene_metadata_key(self, root: Path, old_field_id: str, new_field_id: str) -> None:
+        for path in (root / "scenes").glob("*.md"):
+            front_matter, body = self._read_markdown_with_front_matter(path, strict=True)
+            metadata = front_matter.get("metadata")
+            if not isinstance(metadata, dict) or old_field_id not in metadata:
+                continue
+            if new_field_id not in metadata:
+                metadata[new_field_id] = metadata[old_field_id]
+            metadata.pop(old_field_id, None)
+            front_matter["metadata"] = metadata
+            self._write_markdown_with_front_matter(path, front_matter, body)
+
+    def _remove_scene_metadata_key(self, root: Path, field_id: str) -> None:
+        for path in (root / "scenes").glob("*.md"):
+            front_matter, body = self._read_markdown_with_front_matter(path, strict=True)
+            metadata = front_matter.get("metadata")
+            if not isinstance(metadata, dict) or field_id not in metadata:
+                continue
+            metadata.pop(field_id, None)
+            front_matter["metadata"] = metadata
+            self._write_markdown_with_front_matter(path, front_matter, body)
+
+    def _migrate_scene_metadata_option_values(
+        self,
+        root: Path,
+        field_id: str,
+        old_field: MetadataFieldDefinition,
+        new_field: MetadataFieldDefinition,
+    ) -> None:
+        migration = self._metadata_option_migration(old_field, new_field)
+        if not migration:
+            return
+
+        for path in (root / "scenes").glob("*.md"):
+            front_matter, body = self._read_markdown_with_front_matter(path, strict=True)
+            metadata = front_matter.get("metadata")
+            if not isinstance(metadata, dict) or field_id not in metadata:
+                continue
+            value = metadata[field_id]
+            next_value = self._migrate_metadata_option_value(value, migration)
+            if next_value == value:
+                continue
+            metadata[field_id] = next_value
+            front_matter["metadata"] = metadata
+            self._write_markdown_with_front_matter(path, front_matter, body)
+
+    def _metadata_option_migration(
+        self,
+        old_field: MetadataFieldDefinition,
+        new_field: MetadataFieldDefinition,
+    ) -> dict[str, str] | None:
+        option_types = {"select", "multi_select", "tags"}
+        if old_field.type not in option_types or new_field.type not in option_types:
+            return None
+        if not old_field.options or len(old_field.options) != len(new_field.options):
+            return None
+        migration = {
+            old_option: new_option
+            for old_option, new_option in zip(old_field.options, new_field.options, strict=True)
+            if old_option != new_option
+        }
+        return migration or None
+
+    def _migrate_metadata_option_value(self, value: Any, migration: dict[str, str]) -> Any:
+        if isinstance(value, str):
+            return migration.get(value, value)
+        if isinstance(value, list):
+            return [migration.get(item, item) if isinstance(item, str) else item for item in value]
+        return value
 
     def _metadata_schema_layer_paths(self, root: Path) -> list[Path]:
         base_folder = self._metadata_schema_base_folder(root)
@@ -983,6 +1167,10 @@ class ProjectService:
                 raise ProjectServiceError(f"Malformed front matter in {path.name}: front matter must be a YAML object.", 422)
             data = {}
         return data, body
+
+    def _write_markdown_with_front_matter(self, path: Path, front_matter: dict[str, Any], body: str) -> None:
+        front_matter_text = yaml.safe_dump(front_matter, sort_keys=False, allow_unicode=True).strip()
+        self._atomic_write(path, f"---\n{front_matter_text}\n---\n{body}")
 
     def _write_scene_file(self, path: Path, scene: Scene) -> None:
         front_matter = yaml.safe_dump(

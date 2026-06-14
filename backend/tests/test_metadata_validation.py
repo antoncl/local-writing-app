@@ -4,7 +4,15 @@ from pathlib import Path
 from tempfile import TemporaryDirectory
 import unittest
 
-from app.models import MetadataFieldDefinition, MoveMetadataFieldRequest, SaveSceneRequest, UpdateProjectSettingsRequest, UpsertMetadataFieldRequest
+from app.models import (
+    DeleteMetadataFieldRequest,
+    MetadataFieldDefinition,
+    MoveMetadataFieldRequest,
+    RenameMetadataFieldRequest,
+    SaveSceneRequest,
+    UpdateProjectSettingsRequest,
+    UpsertMetadataFieldRequest,
+)
 from app.services.project_service import ProjectService, ProjectServiceError
 
 
@@ -216,6 +224,37 @@ class MetadataValidationTests(unittest.TestCase):
         self.assertNotIn("word_count", world_schema["entry_types"]["scene"]["fields"])
         self.assertNotIn("pov_character", self.service._read_yaml(self.root / "metadata.schema.yaml").get("fields", {}))
 
+    def test_create_metadata_field_rejects_duplicate_field_id(self) -> None:
+        world_layer = next(
+            layer
+            for layer in self.service.read_metadata_schema_layers().layers
+            if layer.folder_path == str(self.world)
+        )
+        self.service.upsert_metadata_field(
+            UpsertMetadataFieldRequest(
+                layer_id=world_layer.id,
+                field_id="color",
+                field=MetadataFieldDefinition(name="Background Color", type="select", options=["Red", "Green", "Blue"]),
+                entry_type="scene",
+            )
+        )
+
+        with self.assertRaises(ProjectServiceError) as raised:
+            self.service.upsert_metadata_field(
+                UpsertMetadataFieldRequest(
+                    layer_id=world_layer.id,
+                    field_id="color",
+                    field=MetadataFieldDefinition(name="Color", type="text"),
+                    entry_type="scene",
+                    allow_existing=False,
+                )
+            )
+
+        self.assertEqual(raised.exception.status_code, 422)
+        schema = self.service.read_metadata_schema()
+        self.assertEqual(schema.fields["color"].name, "Background Color")
+        self.assertEqual(schema.fields["color"].type, "select")
+
     def test_move_metadata_field_removes_original_layer_definition(self) -> None:
         layers = self.service.read_metadata_schema_layers().layers
         world_layer = next(layer for layer in layers if layer.folder_path == str(self.world))
@@ -244,6 +283,155 @@ class MetadataValidationTests(unittest.TestCase):
         self.assertNotIn("techlevel", world_schema["entry_types"]["scene"]["fields"])
         self.assertIn("techlevel", project_schema["fields"])
         self.assertEqual(project_schema["entry_types"]["scene"]["fields"], ["techlevel"])
+
+    def test_rename_metadata_field_updates_schema_and_scene_metadata(self) -> None:
+        world_layer = next(
+            layer
+            for layer in self.service.read_metadata_schema_layers().layers
+            if layer.folder_path == str(self.world)
+        )
+        self.service.upsert_metadata_field(
+            UpsertMetadataFieldRequest(
+                layer_id=world_layer.id,
+                field_id="techlevel",
+                field=MetadataFieldDefinition(name="Techlevel", type="text"),
+                entry_type="scene",
+            )
+        )
+        scene = self.service.read_scene(self.scene_id)
+        self.service.save_scene(
+            self.scene_id,
+            SaveSceneRequest(
+                title=scene.title,
+                body_markdown=scene.body_markdown,
+                base_revision=scene.revision,
+                status=scene.status,
+                entry_type=scene.entry_type,
+                metadata={"techlevel": "steam"},
+            ),
+        )
+
+        schema = self.service.rename_metadata_field(
+            RenameMetadataFieldRequest(old_field_id="techlevel", new_field_id="technology_level", entry_type="scene")
+        )
+
+        self.assertNotIn("techlevel", schema.fields)
+        self.assertIn("technology_level", schema.fields)
+        self.assertIn("technology_level", schema.entry_types["scene"].fields)
+        world_schema = self.service._read_yaml(self.world / "metadata.schema.yaml")
+        self.assertNotIn("techlevel", world_schema["fields"])
+        self.assertEqual(world_schema["entry_types"]["scene"]["fields"], ["technology_level"])
+        renamed_scene = self.service.read_scene(self.scene_id)
+        self.assertEqual(renamed_scene.metadata, {"technology_level": "steam"})
+
+    def test_rename_metadata_field_rejects_duplicate_field_id(self) -> None:
+        world_layer = next(
+            layer
+            for layer in self.service.read_metadata_schema_layers().layers
+            if layer.folder_path == str(self.world)
+        )
+        self.service.upsert_metadata_field(
+            UpsertMetadataFieldRequest(
+                layer_id=world_layer.id,
+                field_id="color",
+                field=MetadataFieldDefinition(name="Color", type="select", options=["Red", "Green", "Blue"]),
+                entry_type="scene",
+            )
+        )
+        self.service.upsert_metadata_field(
+            UpsertMetadataFieldRequest(
+                layer_id=world_layer.id,
+                field_id="background_color",
+                field=MetadataFieldDefinition(name="Background Color", type="select", options=["Red", "Green", "Blue"]),
+                entry_type="scene",
+            )
+        )
+
+        with self.assertRaises(ProjectServiceError) as raised:
+            self.service.rename_metadata_field(
+                RenameMetadataFieldRequest(old_field_id="background_color", new_field_id="color", entry_type="scene")
+            )
+
+        self.assertEqual(raised.exception.status_code, 422)
+        schema = self.service.read_metadata_schema()
+        self.assertIn("background_color", schema.fields)
+        self.assertEqual(schema.fields["background_color"].name, "Background Color")
+
+    def test_upsert_metadata_field_migrates_renamed_select_options(self) -> None:
+        world_layer = next(
+            layer
+            for layer in self.service.read_metadata_schema_layers().layers
+            if layer.folder_path == str(self.world)
+        )
+        self.service.upsert_metadata_field(
+            UpsertMetadataFieldRequest(
+                layer_id=world_layer.id,
+                field_id="color",
+                field=MetadataFieldDefinition(name="Color", type="select", options=["Red", "Green", "Blue"]),
+                entry_type="scene",
+            )
+        )
+        scene = self.service.read_scene(self.scene_id)
+        self.service.save_scene(
+            self.scene_id,
+            SaveSceneRequest(
+                title=scene.title,
+                body_markdown=scene.body_markdown,
+                base_revision=scene.revision,
+                status=scene.status,
+                entry_type=scene.entry_type,
+                metadata={"color": "Green"},
+            ),
+        )
+
+        self.service.upsert_metadata_field(
+            UpsertMetadataFieldRequest(
+                layer_id=world_layer.id,
+                field_id="color",
+                field=MetadataFieldDefinition(name="Background Color", type="select", options=["red", "green", "blue"]),
+                entry_type="scene",
+            )
+        )
+
+        updated_scene = self.service.read_scene(self.scene_id)
+        self.assertEqual(updated_scene.metadata, {"color": "green"})
+
+    def test_delete_metadata_field_removes_schema_and_scene_metadata(self) -> None:
+        world_layer = next(
+            layer
+            for layer in self.service.read_metadata_schema_layers().layers
+            if layer.folder_path == str(self.world)
+        )
+        self.service.upsert_metadata_field(
+            UpsertMetadataFieldRequest(
+                layer_id=world_layer.id,
+                field_id="techlevel",
+                field=MetadataFieldDefinition(name="Techlevel", type="text"),
+                entry_type="scene",
+            )
+        )
+        scene = self.service.read_scene(self.scene_id)
+        self.service.save_scene(
+            self.scene_id,
+            SaveSceneRequest(
+                title=scene.title,
+                body_markdown=scene.body_markdown,
+                base_revision=scene.revision,
+                status=scene.status,
+                entry_type=scene.entry_type,
+                metadata={"techlevel": "steam"},
+            ),
+        )
+
+        schema = self.service.delete_metadata_field(DeleteMetadataFieldRequest(field_id="techlevel", entry_type="scene"))
+
+        self.assertNotIn("techlevel", schema.fields)
+        self.assertNotIn("techlevel", schema.entry_types["scene"].fields)
+        world_schema = self.service._read_yaml(self.world / "metadata.schema.yaml")
+        self.assertNotIn("techlevel", world_schema["fields"])
+        self.assertNotIn("techlevel", world_schema["entry_types"]["scene"]["fields"])
+        deleted_scene_metadata = self.service.read_scene(self.scene_id).metadata
+        self.assertEqual(deleted_scene_metadata, {})
 
 
 if __name__ == "__main__":

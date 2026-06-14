@@ -15,6 +15,7 @@
 
   export let scene: Scene | null = null;
   export let metadataSchema: MetadataSchema | null = null;
+  export let metadataReload: { token: number; metadata: EntryMetadata; status: string; entryType: string } | null = null;
   export let dirty = false;
   export let todoStatusHint = "";
 
@@ -121,6 +122,7 @@
   let openToolbarMenuId: string | null = null;
   let reconcilingTodoAnchors = false;
   let highlightedTodoId: string | null = null;
+  let lastMetadataReloadToken = 0;
 
   $: slashCommands = editor ? getSlashCommands() : [];
   $: activeSlashCommand = slashCommands[slashMenu.selectedIndex];
@@ -129,6 +131,13 @@
   $: activeEntryType = metadataSchema?.entry_types[entryType] ?? metadataSchema?.entry_types.scene;
   $: metadataFieldIds = activeEntryType?.fields ?? [];
   $: metadataSummaryText = buildMetadataSummary(activeEntryType?.name ?? entryType, status, liveWordCount);
+
+  $: if (metadataReload && metadataReload.token !== lastMetadataReloadToken) {
+    lastMetadataReloadToken = metadataReload.token;
+    status = metadataReload.status || "draft";
+    entryType = metadataReload.entryType || "scene";
+    metadata = cloneMetadata(metadataReload.metadata);
+  }
 
   $: if (editor && scene && scene.id !== loadedSceneId) {
     void loadScene(scene);
@@ -227,6 +236,10 @@
     return JSON.parse(JSON.stringify(value ?? {})) as EntryMetadata;
   }
 
+  function metadataEqual(left: EntryMetadata, right: EntryMetadata) {
+    return JSON.stringify(left ?? {}) === JSON.stringify(right ?? {});
+  }
+
   function updateStatus(value: string) {
     status = value;
     emitChange();
@@ -264,12 +277,30 @@
     return value === null ? "" : String(value);
   }
 
-  function metadataFieldString(fieldId: string) {
-    const value = metadata[fieldId];
+  function metadataValueString(value: MetadataValue | undefined) {
     if (Array.isArray(value)) return value.join(", ");
     if (value === null || value === undefined) return "";
     if (typeof value === "object") return JSON.stringify(value);
     return String(value);
+  }
+
+  function syncSelectValue(node: HTMLSelectElement, value: string) {
+    let mounted = true;
+    const applyValue = (nextValue: string) => {
+      window.queueMicrotask(() => {
+        if (!mounted) return;
+        node.value = nextValue;
+      });
+    };
+    applyValue(value);
+    return {
+      update(nextValue: string) {
+        applyValue(nextValue);
+      },
+      destroy() {
+        mounted = false;
+      },
+    };
   }
 
   function computedFieldString(fieldId: string) {
@@ -1021,12 +1052,13 @@
                 {#each metadataFieldIds as fieldId}
                   {#if metadataSchema.fields[fieldId]}
                     {@const field = metadataSchema.fields[fieldId]}
+                    {@const currentValue = metadataValueString(metadata[fieldId])}
                     {#if field.type === "long_text"}
                       <div class="metadata-field wide-field">
                         <span class="metadata-field-label">{field.name}</span>
                         <MetadataLongTextEditor
                           ariaLabel={field.name}
-                          value={metadataFieldString(fieldId)}
+                          value={currentValue}
                           on:change={(event) => updateMetadataField(fieldId, field, event.detail.value)}
                         />
                       </div>
@@ -1043,18 +1075,17 @@
                           {/each}
                         </select>
                         {:else if field.type === "select"}
-                        <select
-                          value={metadataFieldString(fieldId)}
-                          on:change={(event) => updateMetadataField(fieldId, field, event.currentTarget.value)}
-                        >
-                          <option value=""></option>
-                          {#if metadataFieldString(fieldId) && !field.options.includes(metadataFieldString(fieldId))}
-                            <option value={metadataFieldString(fieldId)}>{metadataFieldString(fieldId)}</option>
-                          {/if}
-                          {#each field.options as option}
-                            <option value={option}>{option}</option>
-                          {/each}
-                        </select>
+                        {#key `${fieldId}:${currentValue}:${field.options.join("\u0000")}`}
+                          <select data-metadata-field-id={fieldId} use:syncSelectValue={currentValue} on:change={(event) => updateMetadataField(fieldId, field, event.currentTarget.value)}>
+                            <option value="" selected={currentValue === ""}></option>
+                            {#if currentValue && !field.options.includes(currentValue)}
+                              <option value={currentValue} selected>{currentValue}</option>
+                            {/if}
+                            {#each field.options as option}
+                              <option value={option} selected={option === currentValue}>{option}</option>
+                            {/each}
+                          </select>
+                        {/key}
                       {:else if field.type === "boolean"}
                         <input
                           type="checkbox"
@@ -1064,14 +1095,14 @@
                       {:else if field.type === "number"}
                         <input
                           type="number"
-                          value={metadataFieldString(fieldId)}
+                          value={currentValue}
                           on:input={(event) => updateMetadataField(fieldId, field, event.currentTarget.value)}
                         />
                       {:else if field.type === "computed"}
                         <input readonly value={computedFieldString(fieldId)} />
                       {:else}
                         <input
-                          value={metadataFieldString(fieldId)}
+                          value={currentValue}
                           placeholder={field.type === "multi_select" || field.type === "tags" || field.type === "entity_ref_list" ? "Comma-separated values" : ""}
                           on:input={(event) => updateMetadataField(fieldId, field, event.currentTarget.value)}
                         />

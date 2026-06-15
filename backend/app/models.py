@@ -45,7 +45,7 @@ class DirectoryListing(BaseModel):
 
 class StructureNode(BaseModel):
     id: str
-    type: Literal["root", "act", "chapter", "sequence", "scene"]
+    type: str
     title: str
     scene_id: str | None = None
     children: list["StructureNode"] = Field(default_factory=list)

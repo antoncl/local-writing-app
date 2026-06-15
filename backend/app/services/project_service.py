@@ -85,6 +85,16 @@ class NodeIndex:
 DEFAULT_METADATA_SCHEMA: dict[str, Any] = {
     "version": 1,
     "entry_types": {
+        "act": {
+            "name": "Act",
+            "kind": "scene",
+            "fields": [],
+        },
+        "chapter": {
+            "name": "Chapter",
+            "kind": "scene",
+            "fields": [],
+        },
         "scene": {
             "name": "Scene",
             "kind": "scene",
@@ -233,7 +243,6 @@ class ProjectService:
                 "container_types": [
                     {"type": "act", "label": "Act"},
                     {"type": "chapter", "label": "Chapter"},
-                    {"type": "sequence", "label": "Sequence"},
                 ]
             },
         }
@@ -2151,7 +2160,7 @@ class ProjectService:
 
     def _collect_scene_ids(self, node: StructureNode) -> set[str]:
         ids: set[str] = set()
-        if node.type == "scene" and node.scene_id:
+        if node.scene_id:
             ids.add(node.scene_id)
         for child in node.children:
             ids.update(self._collect_scene_ids(child))
@@ -2162,7 +2171,7 @@ class ProjectService:
 
         def walk(node: StructureNode, parents: list[str]) -> None:
             next_parents = parents if node.type == "root" else [*parents, node.title]
-            if node.type == "scene" and node.scene_id:
+            if node.scene_id:
                 paths[node.scene_id] = " / ".join(next_parents)
             for child in node.children:
                 walk(child, next_parents)
@@ -2280,7 +2289,7 @@ class ProjectService:
         parent_id: str | None,
         scene_node: StructureNode,
     ) -> bool:
-        if parent_id and node.id == parent_id and node.type != "scene":
+        if parent_id and node.id == parent_id and not node.scene_id:
             node.children.append(scene_node)
             return True
         for child in node.children:
@@ -2289,11 +2298,11 @@ class ProjectService:
         return False
 
     def _first_container(self, node: StructureNode) -> StructureNode:
-        if node.type != "scene":
+        if not node.scene_id:
             if not node.children:
                 return node
             for child in node.children:
-                if child.type != "scene":
+                if not child.scene_id:
                     return self._first_container(child)
         return node
 
@@ -2302,7 +2311,7 @@ class ProjectService:
         node.children = [
             child
             for child in node.children
-            if not (child.type == "scene" and child.scene_id == scene_id)
+            if child.scene_id != scene_id
         ]
         if len(node.children) != before:
             return True
@@ -2315,7 +2324,7 @@ class ProjectService:
             self._write_yaml(root / "manuscript.structure.yaml", structure.model_dump())
 
     def _rename_scene_node(self, node: StructureNode, scene_id: str, title: str) -> bool:
-        if node.type == "scene" and node.scene_id == scene_id:
+        if node.scene_id == scene_id:
             node.title = title
             return True
         return any(self._rename_scene_node(child, scene_id, title) for child in node.children)

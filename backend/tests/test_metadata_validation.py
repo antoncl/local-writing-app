@@ -42,6 +42,60 @@ class MetadataValidationTests(unittest.TestCase):
         manifest.setdefault("settings", {})["projects_base_folder"] = str(path)
         self.service._write_yaml(self.root / "project.yaml", manifest)
 
+    def test_default_schema_seeds_act_and_chapter(self) -> None:
+        schema = self.service.read_metadata_schema()
+        self.assertIn("act", schema.entry_types)
+        self.assertIn("chapter", schema.entry_types)
+        self.assertEqual(schema.entry_types["act"].kind, "scene")
+        self.assertEqual(schema.entry_types["chapter"].kind, "scene")
+        self.assertFalse(schema.entry_types["act"].abstract)
+        self.assertFalse(schema.entry_types["chapter"].abstract)
+
+    def test_new_project_drops_sequence_from_container_types(self) -> None:
+        manifest = self.service._read_yaml(self.root / "project.yaml")
+        types = [item["type"] for item in manifest["manuscript_structure"]["container_types"]]
+        self.assertEqual(types, ["act", "chapter"])
+
+    def test_structure_accepts_custom_container_type(self) -> None:
+        structure = self.service.read_structure().root
+        structure.children.insert(
+            0,
+            self.service.read_structure().root.model_validate(
+                {
+                    "id": "part_one",
+                    "type": "part",
+                    "title": "Part One",
+                    "children": [],
+                }
+            ),
+        )
+        self.service._write_yaml(self.root / "manuscript.structure.yaml", {"root": structure.model_dump()})
+        round_tripped = self.service.read_structure()
+        part = next(child for child in round_tripped.root.children if child.id == "part_one")
+        self.assertEqual(part.type, "part")
+        self.assertEqual(part.scene_id, None)
+
+    def test_scene_helpers_walk_custom_container_types(self) -> None:
+        scene_id = next((self.root / "scenes").glob("*.md")).stem
+        root_node = self.service.read_structure().root
+        scene_child = root_node.children[0]
+        custom_branch = root_node.model_validate(
+            {
+                "id": "custom_branch",
+                "type": "part",
+                "title": "Part One",
+                "children": [scene_child.model_dump()],
+            }
+        )
+        new_root = root_node.model_copy(update={"children": [custom_branch]})
+        self.service._write_yaml(self.root / "manuscript.structure.yaml", {"root": new_root.model_dump()})
+
+        scene_ids = self.service._collect_scene_ids(self.service.read_structure().root)
+        self.assertIn(scene_id, scene_ids)
+        display_paths = self.service._scene_display_paths()
+        self.assertIn(scene_id, display_paths)
+        self.assertTrue(display_paths[scene_id].startswith("Part One"))
+
     def test_schema_layers_include_empty_intermediate_folders(self) -> None:
         layers = self.service.read_metadata_schema_layers().layers
 

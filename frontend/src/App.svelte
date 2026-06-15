@@ -971,7 +971,7 @@
 
   function findFirstSceneId(node: StructureNode | null | undefined): string | null {
     if (!node) return null;
-    if (node.type === "scene" && node.scene_id) return node.scene_id;
+    if (node.scene_id) return node.scene_id;
     for (const child of node.children ?? []) {
       const sceneId = findFirstSceneId(child);
       if (sceneId) return sceneId;
@@ -2117,7 +2117,7 @@
 
 {#snippet renderTree(node: StructureNode, depth: number)}
   <div class="tree-row" style={`padding-left: ${depth * 14}px`}>
-    {#if node.type === "scene" && node.scene_id}
+    {#if node.scene_id}
       <button class="tree-scene" on:click={() => run(() => openSceneInEditorPane(node.scene_id!))}>{node.title}</button>
     {:else}
       <button class="tree-group" on:click={() => (activeParentId = node.id)}>{node.title}</button>

@@ -1,6 +1,6 @@
 export type StructureNode = {
   id: string;
-  type: "root" | "act" | "chapter" | "sequence" | "scene";
+  type: string;
   title: string;
   scene_id?: string | null;
   children: StructureNode[];

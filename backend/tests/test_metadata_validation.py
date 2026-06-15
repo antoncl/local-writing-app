@@ -800,5 +800,180 @@ class MetadataValidationTests(unittest.TestCase):
         self.assertEqual(self.service.read_known_tags().tags, ["Crew"])
 
 
+class ReferenceResolutionTests(unittest.TestCase):
+    def setUp(self) -> None:
+        self.temp_dir = TemporaryDirectory()
+        self.base = Path(self.temp_dir.name) / "writing"
+        self.root = self.base / "test"
+        self.service = ProjectService()
+        self.service.create_project(self.root, "Test Project")
+        manifest = self.service._read_yaml(self.root / "project.yaml")
+        manifest.setdefault("settings", {})["projects_base_folder"] = str(self.base)
+        self.service._write_yaml(self.root / "project.yaml", manifest)
+
+    def tearDown(self) -> None:
+        self.temp_dir.cleanup()
+
+    def _save_body(self, entry_id: str, body: str) -> None:
+        entry = self.service.read_lore_entry(entry_id)
+        self.service.save_lore_entry(
+            entry_id,
+            SaveLoreEntryRequest(
+                title=entry.title,
+                body_markdown=body,
+                base_revision=entry.revision,
+                entry_type=entry.entry_type,
+                metadata=entry.metadata,
+            ),
+        )
+
+    def test_resolve_returns_titles_for_known_ids(self) -> None:
+        seren = self.service.create_lore_entry(CreateLoreEntryRequest(title="Seren", entry_type="character"))
+        taverna = self.service.create_lore_entry(CreateLoreEntryRequest(title="Taverna", entry_type="place"))
+
+        response = self.service.resolve_references([seren.id, taverna.id])
+
+        ids = {candidate.id: candidate for candidate in response.candidates}
+        self.assertEqual(ids[seren.id].title, "Seren")
+        self.assertEqual(ids[seren.id].entry_type, "character")
+        self.assertTrue(ids[seren.id].found)
+        self.assertEqual(ids[taverna.id].title, "Taverna")
+        self.assertEqual(ids[taverna.id].kind, "lore")
+
+    def test_resolve_marks_unknown_ids_as_not_found(self) -> None:
+        response = self.service.resolve_references(["lore_does_not_exist"])
+
+        self.assertEqual(len(response.candidates), 1)
+        candidate = response.candidates[0]
+        self.assertFalse(candidate.found)
+        self.assertEqual(candidate.id, "lore_does_not_exist")
+
+    def test_resolve_includes_body_summary(self) -> None:
+        seren = self.service.create_lore_entry(CreateLoreEntryRequest(title="Seren", entry_type="character"))
+        self._save_body(seren.id, "# Seren\n\nA brave caravan guard.\n")
+
+        response = self.service.resolve_references([seren.id])
+
+        self.assertEqual(response.candidates[0].summary, "A brave caravan guard.")
+
+    def test_candidates_filter_by_kind(self) -> None:
+        self.service.create_lore_entry(CreateLoreEntryRequest(title="Seren", entry_type="character"))
+        scene_id = next((self.root / "scenes").glob("*.md")).stem
+
+        response = self.service.list_reference_candidates(kind="lore")
+
+        ids = {candidate.id for candidate in response.candidates}
+        self.assertNotIn(scene_id, ids)
+        self.assertTrue(any(candidate.title == "Seren" for candidate in response.candidates))
+
+    def test_candidates_filter_by_entry_type_with_inheritance(self) -> None:
+        self.service.create_lore_entry(CreateLoreEntryRequest(title="Seren", entry_type="character"))
+        self.service.create_lore_entry(CreateLoreEntryRequest(title="Taverna", entry_type="place"))
+
+        characters_only = self.service.list_reference_candidates(entry_type="character")
+        titles = {candidate.title for candidate in characters_only.candidates}
+        self.assertEqual(titles, {"Seren"})
+
+        all_lore = self.service.list_reference_candidates(entry_type="lore_entry")
+        titles = {candidate.title for candidate in all_lore.candidates}
+        self.assertEqual(titles, {"Seren", "Taverna"})
+
+    def test_candidates_exclude_id(self) -> None:
+        seren = self.service.create_lore_entry(CreateLoreEntryRequest(title="Seren", entry_type="character"))
+        aren = self.service.create_lore_entry(CreateLoreEntryRequest(title="Aren", entry_type="character"))
+
+        response = self.service.list_reference_candidates(entry_type="character", exclude_id=seren.id)
+
+        ids = {candidate.id for candidate in response.candidates}
+        self.assertIn(aren.id, ids)
+        self.assertNotIn(seren.id, ids)
+
+    def test_backlinks_finds_references(self) -> None:
+        seren = self.service.create_lore_entry(CreateLoreEntryRequest(title="Seren", entry_type="character"))
+        taverna = self.service.create_lore_entry(CreateLoreEntryRequest(title="Taverna", entry_type="place"))
+        self.service.save_lore_entry(
+            seren.id,
+            SaveLoreEntryRequest(
+                title="Seren",
+                body_markdown=seren.body_markdown,
+                base_revision=seren.revision,
+                entry_type="character",
+                metadata={"home_place": taverna.id},
+            ),
+        )
+        scene_id = next((self.root / "scenes").glob("*.md")).stem
+        scene = self.service.read_scene(scene_id)
+        self.service.save_scene(
+            scene_id,
+            SaveSceneRequest(
+                title=scene.title,
+                body_markdown=scene.body_markdown,
+                base_revision=scene.revision,
+                status=scene.status,
+                entry_type="scene",
+                metadata={"characters": [seren.id], "locations": [taverna.id]},
+            ),
+        )
+
+        seren_backlinks = self.service.list_backlinks(seren.id)
+        self.assertEqual(len(seren_backlinks.backlinks), 1)
+        link = seren_backlinks.backlinks[0]
+        self.assertEqual(link.id, scene_id)
+        self.assertEqual(link.field_id, "characters")
+
+        taverna_backlinks = self.service.list_backlinks(taverna.id)
+        sources = {(link.id, link.field_id) for link in taverna_backlinks.backlinks}
+        self.assertEqual(sources, {(seren.id, "home_place"), (scene_id, "locations")})
+
+    def test_backlinks_returns_empty_for_unknown_id(self) -> None:
+        response = self.service.list_backlinks("lore_does_not_exist")
+        self.assertEqual(response.backlinks, [])
+
+    def test_search_resolves_reference_titles_in_excerpts(self) -> None:
+        seren = self.service.create_lore_entry(CreateLoreEntryRequest(title="Seren", entry_type="character"))
+        scene_id = next((self.root / "scenes").glob("*.md")).stem
+        scene = self.service.read_scene(scene_id)
+        self.service.save_scene(
+            scene_id,
+            SaveSceneRequest(
+                title=scene.title,
+                body_markdown=scene.body_markdown,
+                base_revision=scene.revision,
+                status=scene.status,
+                entry_type="scene",
+                metadata={"characters": [seren.id]},
+            ),
+        )
+
+        by_title = self.service.search(SearchRequest(query="Seren"))
+        excerpts = [hit.excerpt for hit in by_title.hits if hit.kind == "scene"]
+        self.assertTrue(any("Seren" in excerpt for excerpt in excerpts))
+        self.assertFalse(any(seren.id in excerpt for excerpt in excerpts))
+
+    def test_http_reference_routes(self) -> None:
+        from fastapi.testclient import TestClient
+        import app.main as app_main
+
+        original_service = app_main.service
+        app_main.service = self.service
+        try:
+            client = TestClient(app_main.app)
+            seren = self.service.create_lore_entry(CreateLoreEntryRequest(title="Seren", entry_type="character"))
+
+            resolve_response = client.post("/api/references/resolve", json={"ids": [seren.id, "missing"]})
+            self.assertEqual(resolve_response.status_code, 200)
+            payload = resolve_response.json()
+            ids_by = {candidate["id"]: candidate for candidate in payload["candidates"]}
+            self.assertEqual(ids_by[seren.id]["title"], "Seren")
+            self.assertFalse(ids_by["missing"]["found"])
+
+            candidates_response = client.get("/api/references/candidates", params={"entry_type": "character"})
+            self.assertEqual(candidates_response.status_code, 200)
+            titles = {candidate["title"] for candidate in candidates_response.json()["candidates"]}
+            self.assertIn("Seren", titles)
+        finally:
+            app_main.service = original_service
+
+
 if __name__ == "__main__":
     unittest.main()

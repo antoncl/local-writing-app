@@ -3,6 +3,7 @@
   import { api } from "./api";
   import DocumentEditorPane from "./DocumentEditorPane.svelte";
   import type {
+    Backlink,
     DirectoryListing,
     EditableDocument,
     EntryMetadata,
@@ -67,6 +68,7 @@
   type ConfirmationState = {
     title: string;
     message: string;
+    details?: string[];
     confirmLabel: string;
     destructive: boolean;
     onConfirm: () => Promise<void>;
@@ -110,6 +112,7 @@
   let schemaFieldType: MetadataFieldType = "text";
   let schemaFieldAllowMultiple = false;
   let schemaFieldReferenceTarget: "scene" | "lore" = "lore";
+  let schemaFieldReferenceEntryType = "";
   let schemaFieldOptions = "";
   let schemaFieldReadonlyTypeLabel = "";
   let selectedSchemaFieldId: string | null = null;
@@ -650,7 +653,8 @@
     schemaFieldReadonly = Boolean(metadataSchemaOverview?.field_sources[fieldId]?.built_in);
     schemaFieldReadonlyTypeLabel = "";
     schemaFieldAllowMultiple = field.type === "multi_select" || field.type === "entity_ref_list";
-    schemaFieldReferenceTarget = field.target?.kind === "scene" ? "scene" : "lore";
+    schemaFieldReferenceEntryType = field.target?.entry_type ?? "";
+    schemaFieldReferenceTarget = resolveReferenceKind(field.target, schemaFieldReferenceEntryType);
     schemaFieldType = schemaFieldReadonly
       ? field.type
       : field.type === "multi_select"
@@ -676,11 +680,22 @@
     schemaFieldReadonlyTypeLabel = "";
     schemaFieldAllowMultiple = false;
     schemaFieldReferenceTarget = "lore";
+    schemaFieldReferenceEntryType = "";
     schemaFieldOptions = "";
     schemaFieldLayerId = layerId;
     schemaFieldEntryType = entryTypeId;
     schemaFieldPaneOpen = true;
     focusPane("schema_field");
+  }
+
+  function resolveReferenceKind(target: Record<string, string> | null | undefined, entryTypeId: string): "scene" | "lore" {
+    if (target?.kind === "scene") return "scene";
+    if (target?.kind === "lore") return "lore";
+    if (entryTypeId) {
+      const definition = metadataSchema?.entry_types[entryTypeId];
+      if (definition?.kind === "scene") return "scene";
+    }
+    return "lore";
   }
 
   function createSchemaTypeDraft(layerId = projectSchemaLayerId(), parentTypeId = "") {
@@ -816,7 +831,13 @@
         name: schemaFieldName.trim() || nextFieldId,
         type: schemaFieldSaveType(),
         options: schemaFieldType === "select" ? options : [],
-        ...(schemaFieldType === "entity_ref" ? { target: { kind: schemaFieldReferenceTarget } } : {}),
+        ...(schemaFieldType === "entity_ref"
+          ? {
+              target: schemaFieldReferenceEntryType
+                ? { entry_type: schemaFieldReferenceEntryType }
+                : { kind: schemaFieldReferenceTarget },
+            }
+          : {}),
       };
       const optionMigration = buildOptionMigration(previousField, nextField);
       if (previousFieldId && previousFieldId !== nextFieldId) {
@@ -1314,14 +1335,28 @@
     editorPanes = editorPanes.map((pane) => (pane.id === id ? { ...pane, saving } : pane));
   }
 
-  function requestDeleteEditorPaneScene(id: string) {
+  async function requestDeleteEditorPaneScene(id: string) {
     const pane = editorPanes.find((candidate) => candidate.id === id);
     if (!pane?.scene) return;
     const documentKind = pane.document?.type ?? "scene";
     const sceneTitle = pane.scene.title;
+    const sceneId = pane.scene.id;
+    let backlinks: Backlink[] = [];
+    try {
+      backlinks = (await api.listBacklinks(sceneId)).backlinks;
+    } catch (error) {
+      console.warn("Failed to fetch backlinks", error);
+    }
+    const baseMessage = `Delete "${sceneTitle}"? This removes the ${documentKind === "lore" ? "entry" : "scene"} file from the project.`;
+    const message =
+      backlinks.length > 0
+        ? `${baseMessage}\n\n${backlinks.length} ${backlinks.length === 1 ? "entry references" : "entries reference"} this — those links will become broken:`
+        : baseMessage;
+    const details = backlinks.map((link) => `${link.title} — ${link.field_name}`);
     confirmation = {
       title: documentKind === "lore" ? "Delete Entry" : "Delete Scene",
-      message: `Delete "${sceneTitle}"? This removes the ${documentKind === "lore" ? "entry" : "scene"} file from the project.`,
+      message,
+      details,
       confirmLabel: documentKind === "lore" ? "Delete Entry" : "Delete Scene",
       destructive: true,
       onConfirm: () => deleteEditorPaneScene(id),
@@ -1772,7 +1807,6 @@
             <option value="long_text">Long Text</option>
             <option value="number">Number</option>
             <option value="boolean">Boolean</option>
-            <option value="date">Date</option>
             <option value="select">Select</option>
             <option value="entity_ref">Entity Reference</option>
             <option value="tags">Tags</option>
@@ -1788,9 +1822,24 @@
       {#if schemaFieldType === "entity_ref" && !schemaFieldReadonly}
         <label>
           Reference target
-          <select bind:value={schemaFieldReferenceTarget}>
+          <select
+            value={schemaFieldReferenceTarget}
+            on:change={(event) => {
+              schemaFieldReferenceTarget = event.currentTarget.value as "scene" | "lore";
+              schemaFieldReferenceEntryType = "";
+            }}
+          >
             <option value="lore">Lore Entries</option>
             <option value="scene">Scenes</option>
+          </select>
+        </label>
+        <label>
+          Narrow to type (optional)
+          <select bind:value={schemaFieldReferenceEntryType}>
+            <option value="">Any {schemaFieldReferenceTarget === "scene" ? "scene" : "lore"} entry</option>
+            {#each Object.entries(metadataSchema?.entry_types ?? {}).filter(([, definition]) => definition.kind === schemaFieldReferenceTarget) as [typeId, definition]}
+              <option value={typeId}>{definition.name}</option>
+            {/each}
           </select>
         </label>
       {/if}
@@ -2039,6 +2088,13 @@
           <h2 id="confirm-title">{confirmation.title}</h2>
         </header>
         <p>{confirmation.message}</p>
+        {#if confirmation.details && confirmation.details.length > 0}
+          <ul class="confirm-modal-details">
+            {#each confirmation.details as detail}
+              <li>{detail}</li>
+            {/each}
+          </ul>
+        {/if}
         <div class="confirm-modal-actions">
           <button type="button" on:click={() => (confirmation = null)}>Cancel</button>
           <button

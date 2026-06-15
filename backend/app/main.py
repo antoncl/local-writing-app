@@ -7,6 +7,7 @@ from fastapi import FastAPI, HTTPException, Query
 from fastapi.middleware.cors import CORSMiddleware
 
 from app.models import (
+    BacklinksResponse,
     CreateLoreEntryRequest,
     CreateProjectRequest,
     CreateSceneRequest,
@@ -24,6 +25,9 @@ from app.models import (
     OpenProjectRequest,
     ProjectInfo,
     ProjectValidation,
+    ReferenceCandidatesResponse,
+    ReferenceResolveRequest,
+    ReferenceResolveResponse,
     RenameMetadataFieldRequest,
     SaveLoreEntryRequest,
     SaveSceneRequest,
@@ -249,6 +253,28 @@ def update_todo(todo_id: str, request: UpdateTodoRequest) -> TodoDocument:
 def delete_todo(todo_id: str) -> TodoDocument:
     with translate_errors():
         return service.delete_todo(todo_id)
+
+
+@app.post("/api/references/resolve", response_model=ReferenceResolveResponse)
+def resolve_references(request: ReferenceResolveRequest) -> ReferenceResolveResponse:
+    with translate_errors():
+        return service.resolve_references(request.ids)
+
+
+@app.get("/api/references/candidates", response_model=ReferenceCandidatesResponse)
+def list_reference_candidates(
+    kind: str | None = Query(default=None),
+    entry_type: str | None = Query(default=None),
+    exclude_id: str | None = Query(default=None),
+) -> ReferenceCandidatesResponse:
+    with translate_errors():
+        return service.list_reference_candidates(kind=kind, entry_type=entry_type, exclude_id=exclude_id)
+
+
+@app.get("/api/references/backlinks", response_model=BacklinksResponse)
+def list_backlinks(id: str = Query()) -> BacklinksResponse:
+    with translate_errors():
+        return service.list_backlinks(id)
 
 
 @app.post("/api/search", response_model=SearchResponse)

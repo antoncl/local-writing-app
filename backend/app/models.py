@@ -246,6 +246,41 @@ class UpdateTodoRequest(BaseModel):
     scene_id: str | None = None
 
 
+class ReferenceCandidate(BaseModel):
+    id: str
+    title: str
+    kind: str
+    entry_type: str
+    summary: str = ""
+    found: bool = True
+
+
+class ReferenceResolveRequest(BaseModel):
+    ids: list[str] = Field(default_factory=list)
+
+
+class ReferenceResolveResponse(BaseModel):
+    candidates: list[ReferenceCandidate] = Field(default_factory=list)
+
+
+class ReferenceCandidatesResponse(BaseModel):
+    candidates: list[ReferenceCandidate] = Field(default_factory=list)
+
+
+class Backlink(BaseModel):
+    id: str
+    title: str
+    kind: str
+    entry_type: str
+    field_id: str
+    field_name: str
+
+
+class BacklinksResponse(BaseModel):
+    target_id: str
+    backlinks: list[Backlink] = Field(default_factory=list)
+
+
 class SearchRequest(BaseModel):
     query: str = ""
     include_scenes: bool = True

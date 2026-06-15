@@ -13,6 +13,8 @@ from urllib.parse import unquote
 import yaml
 
 from app.models import (
+    Backlink,
+    BacklinksResponse,
     CreateLoreEntryRequest,
     CreateSceneRequest,
     CreateTodoRequest,
@@ -33,6 +35,10 @@ from app.models import (
     MoveMetadataFieldRequest,
     ProjectInfo,
     ProjectValidation,
+    ReferenceCandidate,
+    ReferenceCandidatesResponse,
+    ReferenceResolveRequest,
+    ReferenceResolveResponse,
     RenameMetadataFieldRequest,
     SaveLoreEntryRequest,
     SaveSceneRequest,
@@ -66,6 +72,7 @@ class NodeIndexEntry:
     kind: str
     entry_type: str
     path: Path
+    title: str = ""
 
 
 @dataclass
@@ -1229,7 +1236,9 @@ class ProjectService:
 
                 raw_entry_type = front_matter.get("entry_type") or default_entry_type
                 entry_type = raw_entry_type if isinstance(raw_entry_type, str) else default_entry_type
-                entry = NodeIndexEntry(id=node_id, kind=kind, entry_type=entry_type, path=path)
+                raw_title = front_matter.get("title")
+                title = raw_title.strip() if isinstance(raw_title, str) and raw_title.strip() else node_id
+                entry = NodeIndexEntry(id=node_id, kind=kind, entry_type=entry_type, path=path, title=title)
                 index.id_by_path[path.resolve()] = node_id
                 if node_id in index.by_id:
                     other = index.by_id[node_id]
@@ -1260,6 +1269,122 @@ class ProjectService:
             return fallback_path
         label = "Scene" if kind == "scene" else "Lore Entry"
         raise ProjectServiceError(f"{label} {node_id} does not exist.", 404)
+
+    def _read_body_summary(self, path: Path, *, max_chars: int = 160) -> str:
+        try:
+            with path.open("r", encoding="utf-8") as handle:
+                first_line = handle.readline()
+                if first_line.strip() == "---":
+                    for line in handle:
+                        if line.strip() == "---":
+                            break
+                for line in handle:
+                    text = line.strip()
+                    if not text or text.startswith("#"):
+                        continue
+                    if len(text) > max_chars:
+                        return text[: max_chars - 1].rstrip() + "…"
+                    return text
+        except OSError:
+            return ""
+        return ""
+
+    def _entry_type_matches(self, entry_type_id: str, target_entry_type: str, schema: MetadataSchema) -> bool:
+        if entry_type_id == target_entry_type:
+            return True
+        seen: set[str] = set()
+        current = schema.entry_types.get(entry_type_id)
+        while current and current.parent and current.parent not in seen:
+            if current.parent == target_entry_type:
+                return True
+            seen.add(current.parent)
+            current = schema.entry_types.get(current.parent)
+        return False
+
+    def _candidate_from_index_entry(self, entry: NodeIndexEntry, *, include_summary: bool) -> ReferenceCandidate:
+        return ReferenceCandidate(
+            id=entry.id,
+            title=entry.title or entry.id,
+            kind=entry.kind,
+            entry_type=entry.entry_type,
+            summary=self._read_body_summary(entry.path) if include_summary else "",
+            found=True,
+        )
+
+    def resolve_references(self, ids: list[str]) -> ReferenceResolveResponse:
+        index = self._build_node_index()
+        candidates: list[ReferenceCandidate] = []
+        for node_id in ids:
+            entry = index.by_id.get(node_id)
+            if entry is None:
+                candidates.append(
+                    ReferenceCandidate(id=node_id, title=node_id, kind="", entry_type="", summary="", found=False)
+                )
+                continue
+            candidates.append(self._candidate_from_index_entry(entry, include_summary=True))
+        return ReferenceResolveResponse(candidates=candidates)
+
+    def list_backlinks(self, target_id: str) -> BacklinksResponse:
+        node_index = self._build_node_index()
+        if target_id not in node_index.by_id:
+            return BacklinksResponse(target_id=target_id, backlinks=[])
+        schema = self.read_metadata_schema()
+        backlinks: list[Backlink] = []
+        for entry in node_index.by_id.values():
+            if entry.id == target_id:
+                continue
+            entry_definition = schema.entry_types.get(entry.entry_type)
+            if entry_definition is None:
+                continue
+            try:
+                front_matter = self._read_front_matter_only(entry.path, strict=True)
+            except ProjectServiceError:
+                continue
+            metadata = self._normalise_metadata(front_matter.get("metadata"), entry.path)
+            for field_id in entry_definition.fields:
+                field = schema.fields.get(field_id)
+                if field is None:
+                    continue
+                value = metadata.get(field_id)
+                matched = False
+                if field.type == "entity_ref" and isinstance(value, str) and value == target_id:
+                    matched = True
+                elif field.type == "entity_ref_list" and isinstance(value, list) and target_id in value:
+                    matched = True
+                if matched:
+                    backlinks.append(
+                        Backlink(
+                            id=entry.id,
+                            title=entry.title or entry.id,
+                            kind=entry.kind,
+                            entry_type=entry.entry_type,
+                            field_id=field_id,
+                            field_name=field.name,
+                        )
+                    )
+        backlinks.sort(key=lambda link: (link.kind, link.title.lower(), link.field_id))
+        return BacklinksResponse(target_id=target_id, backlinks=backlinks)
+
+    def list_reference_candidates(
+        self,
+        *,
+        kind: str | None = None,
+        entry_type: str | None = None,
+        exclude_id: str | None = None,
+    ) -> ReferenceCandidatesResponse:
+        index = self._build_node_index()
+        schema = self.read_metadata_schema() if entry_type else None
+        candidates: list[ReferenceCandidate] = []
+        for entry in index.by_id.values():
+            if exclude_id and entry.id == exclude_id:
+                continue
+            if kind and entry.kind != kind:
+                continue
+            if entry_type and schema is not None and not self._entry_type_matches(entry.entry_type, entry_type, schema):
+                continue
+            candidates.append(self._candidate_from_index_entry(entry, include_summary=False))
+        candidates.sort(key=lambda candidate: (candidate.entry_type, candidate.title.lower(), candidate.id))
+        return ReferenceCandidatesResponse(candidates=candidates)
 
     def create_scene(self, request: CreateSceneRequest) -> Scene:
         root = self._require_project()
@@ -1564,6 +1689,8 @@ class ProjectService:
                         )
 
         if pattern is not None:
+            schema = self.read_metadata_schema()
+            node_index = self._build_node_index(root)
             if request.include_scenes:
                 for path in (root / "scenes").rglob("*.md"):
                     front_matter, body = self._read_markdown_with_front_matter(path, strict=True)
@@ -1571,7 +1698,12 @@ class ProjectService:
                     title = str(front_matter.get("title") or scene_id)
                     status = str(front_matter.get("status") or "draft")
                     entry_type = str(front_matter.get("entry_type") or "scene")
-                    metadata = self._normalise_metadata(front_matter.get("metadata"), path)
+                    metadata = self._resolve_reference_titles(
+                        self._normalise_metadata(front_matter.get("metadata"), path),
+                        entry_type,
+                        schema,
+                        node_index,
+                    )
                     searchable_metadata = {
                         "title": title,
                         "status": status,
@@ -1606,7 +1738,12 @@ class ProjectService:
                     entry_id = self._node_id_for_path(path, front_matter)
                     title = str(front_matter.get("title") or entry_id)
                     entry_type = str(front_matter.get("entry_type") or "lore_note")
-                    metadata = self._normalise_metadata(front_matter.get("metadata"), path)
+                    metadata = self._resolve_reference_titles(
+                        self._normalise_metadata(front_matter.get("metadata"), path),
+                        entry_type,
+                        schema,
+                        node_index,
+                    )
                     searchable_metadata = {
                         "title": title,
                         "entry_type": entry_type,
@@ -1974,6 +2111,35 @@ class ProjectService:
                 if text:
                     values.append((label, text))
         return values
+
+    def _resolve_reference_titles(
+        self,
+        metadata: dict[str, Any],
+        entry_type: str,
+        schema: MetadataSchema,
+        node_index: NodeIndex,
+    ) -> dict[str, Any]:
+        entry_definition = schema.entry_types.get(entry_type)
+        if entry_definition is None:
+            return metadata
+        resolved = dict(metadata)
+        for field_id in entry_definition.fields:
+            field = schema.fields.get(field_id)
+            if field is None:
+                continue
+            value = resolved.get(field_id)
+            if value is None:
+                continue
+            if field.type == "entity_ref" and isinstance(value, str):
+                target = node_index.by_id.get(value)
+                if target and target.title:
+                    resolved[field_id] = target.title
+            elif field.type == "entity_ref_list" and isinstance(value, list):
+                resolved[field_id] = [
+                    (node_index.by_id.get(item).title if isinstance(item, str) and node_index.by_id.get(item) and node_index.by_id.get(item).title else item)
+                    for item in value
+                ]
+        return resolved
 
     def _revision(self, path: Path) -> str:
         digest = hashlib.sha256()

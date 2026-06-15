@@ -11,6 +11,7 @@
   import TableRow from "@tiptap/extension-table-row";
   import { editorHtmlToSceneMarkdown, sceneMarkdownToHtml } from "./markdown";
   import MetadataLongTextEditor from "./MetadataLongTextEditor.svelte";
+  import ReferencePicker from "./ReferencePicker.svelte";
   import type { EditableDocument, EntryMetadata, MetadataFieldDefinition, MetadataSchema, MetadataValue } from "./types";
 
   export let scene: EditableDocument | null = null;
@@ -316,6 +317,13 @@
       .filter(Boolean);
   }
 
+  function metadataReferenceValue(field: MetadataFieldDefinition, value: MetadataValue | undefined): string | string[] {
+    if (field.type === "entity_ref_list") return metadataValueList(value);
+    if (value === null || value === undefined) return "";
+    if (typeof value === "object") return "";
+    return String(value);
+  }
+
   function hasTag(fieldId: string, tag: string) {
     const key = tag.toLowerCase();
     return metadataValueList(metadata[fieldId]).some((item) => item.toLowerCase() === key);
@@ -325,6 +333,21 @@
     const key = tag.toLowerCase();
     const nextTags = metadataValueList(metadata[fieldId]).filter((item) => item.toLowerCase() !== key);
     updateMetadataField(fieldId, field, [...nextTags, tag]);
+  }
+
+  function toggleMultiSelectOption(fieldId: string, field: MetadataFieldDefinition, option: string) {
+    const current = metadataValueList(metadata[fieldId]);
+    const key = option.toLowerCase();
+    const hasIt = current.some((item) => item.toLowerCase() === key);
+    const next = hasIt
+      ? current.filter((item) => item.toLowerCase() !== key)
+      : [...current, option];
+    updateMetadataField(fieldId, field, next);
+  }
+
+  function isMultiSelectOptionSelected(fieldId: string, option: string) {
+    const key = option.toLowerCase();
+    return metadataValueList(metadata[fieldId]).some((item) => item.toLowerCase() === key);
   }
 
   function toggleTagPicker(fieldId: string, event: MouseEvent) {
@@ -1137,6 +1160,34 @@
                           on:change={(event) => updateMetadataField(fieldId, field, event.detail.value)}
                         />
                       </div>
+                    {:else if field.type === "entity_ref" || field.type === "entity_ref_list"}
+                      <div class="metadata-field wide-field">
+                        <span class="metadata-field-label">{field.name}</span>
+                        <ReferencePicker
+                          {field}
+                          value={metadataReferenceValue(field, metadata[fieldId])}
+                          metadataSchema={metadataSchema}
+                          excludeId={scene?.id ?? null}
+                          ariaLabel={field.name}
+                          on:change={(event) => updateMetadataField(fieldId, field, event.detail.value)}
+                        />
+                      </div>
+                    {:else if field.type === "multi_select" && field.options.length > 0}
+                      <div class="metadata-field wide-field">
+                        <span class="metadata-field-label">{field.name}</span>
+                        <div class="multi-select-chips" aria-label={field.name}>
+                          {#each field.options as option}
+                            <button
+                              class:active={isMultiSelectOptionSelected(fieldId, option)}
+                              class="multi-select-chip"
+                              type="button"
+                              on:click={() => toggleMultiSelectOption(fieldId, field, option)}
+                            >
+                              {option}
+                            </button>
+                          {/each}
+                        </div>
+                      </div>
                     {:else}
                       <label class:wide-field={field.type === "computed"}>
                         {field.name}
@@ -1200,7 +1251,7 @@
                       {:else}
                         <input
                           value={currentValue}
-                          placeholder={field.type === "multi_select" || field.type === "entity_ref_list" ? "Comma-separated values" : ""}
+                          placeholder={field.type === "multi_select" ? "Comma-separated values" : ""}
                           on:input={(event) => updateMetadataField(fieldId, field, event.currentTarget.value)}
                         />
                         {/if}

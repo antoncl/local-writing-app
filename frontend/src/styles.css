@@ -665,6 +665,17 @@ h3 {
   color: #4d5753;
   font-size: 14px;
   line-height: 1.45;
+  white-space: pre-line;
+}
+
+.confirm-modal-details {
+  margin: 0;
+  padding-left: 20px;
+  color: #4d5753;
+  font-size: 13px;
+  line-height: 1.5;
+  max-height: 200px;
+  overflow: auto;
 }
 
 .confirm-modal-actions {
@@ -1000,6 +1011,32 @@ h3 {
 .tag-picker span {
   color: #65716c;
   font-size: 12px;
+}
+
+.multi-select-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.multi-select-chip {
+  padding: 4px 10px;
+  border: 1px solid #dfe6e3;
+  border-radius: 999px;
+  background: #ffffff;
+  font-size: 12px;
+  color: #4a5450;
+  cursor: pointer;
+}
+
+.multi-select-chip:hover {
+  background: #f3f8f5;
+}
+
+.multi-select-chip.active {
+  border-color: #2f6f5e;
+  background: #edf6f2;
+  color: #1f4d41;
 }
 
 .editor-wrap {

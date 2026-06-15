@@ -159,3 +159,34 @@ export type SearchHit = {
   excerpt: string;
   todo_id?: string | null;
 };
+
+export type ReferenceCandidate = {
+  id: string;
+  title: string;
+  kind: string;
+  entry_type: string;
+  summary: string;
+  found: boolean;
+};
+
+export type ReferenceCandidatesResponse = {
+  candidates: ReferenceCandidate[];
+};
+
+export type ReferenceResolveResponse = {
+  candidates: ReferenceCandidate[];
+};
+
+export type Backlink = {
+  id: string;
+  title: string;
+  kind: string;
+  entry_type: string;
+  field_id: string;
+  field_name: string;
+};
+
+export type BacklinksResponse = {
+  target_id: string;
+  backlinks: Backlink[];
+};

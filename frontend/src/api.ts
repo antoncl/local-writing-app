@@ -1,5 +1,6 @@
 import type {
   DirectoryListing,
+  EntryTypeDefinition,
   KnownTags,
   LoreEntry,
   LoreEntryList,
@@ -33,16 +34,16 @@ async function request<T>(path: string, options: RequestInit = {}): Promise<T> {
 }
 
 export const api = {
-  createProject(rootPath: string, title: string) {
+  createProject(rootPath: string, title: string, projectsBaseFolder: string) {
     return request<ProjectInfo>("/project/create", {
       method: "POST",
-      body: JSON.stringify({ root_path: rootPath, title }),
+      body: JSON.stringify({ root_path: rootPath, title, projects_base_folder: projectsBaseFolder }),
     });
   },
-  openProject(rootPath: string) {
+  openProject(rootPath: string, projectsBaseFolder: string) {
     return request<ProjectInfo>("/project/open", {
       method: "POST",
-      body: JSON.stringify({ root_path: rootPath }),
+      body: JSON.stringify({ root_path: rootPath, projects_base_folder: projectsBaseFolder }),
     });
   },
   updateProjectSettings(projectsBaseFolder: string) {
@@ -65,6 +66,18 @@ export const api = {
   },
   getKnownTags() {
     return request<KnownTags>("/tags");
+  },
+  upsertMetadataEntryType(layerId: string, entryTypeId: string, entryType: EntryTypeDefinition, allowExisting = true) {
+    return request<MetadataSchema>("/metadata/schema/entry-types", {
+      method: "PUT",
+      body: JSON.stringify({ layer_id: layerId, entry_type_id: entryTypeId, entry_type: entryType, allow_existing: allowExisting }),
+    });
+  },
+  deleteMetadataEntryType(entryTypeId: string) {
+    return request<MetadataSchema>("/metadata/schema/entry-types", {
+      method: "DELETE",
+      body: JSON.stringify({ entry_type_id: entryTypeId }),
+    });
   },
   upsertMetadataField(layerId: string, fieldId: string, field: MetadataFieldDefinition, entryType = "scene", allowExisting = true) {
     return request<MetadataSchema>("/metadata/schema/fields", {

@@ -17,6 +17,8 @@ front matter, and manuscript arrangement is stored in `manuscript.structure.yaml
 - Create, read, save, and delete scenes
 - Edit a scene with a WYSIWYG editor
 - Store scene prose as Markdown
+- Maintain Lore entries with entry types, tags, aliases, and Markdown bodies
+- Edit layered metadata field and node-type definitions
 - Maintain project-level and scene-level TODOs
 - Basic full-project search
 
@@ -51,10 +53,12 @@ those concepts directly. The project base folder can be changed from the
 Project pane after opening a project.
 
 The Metadata Schema pane lists effective schema definitions and their source
-layers. New fields are edited in the Schema Field pane and must be saved to an
-explicit schema layer, such as the base folder, an ancestor folder, or the
-project folder. The app creates a `metadata.schema.yaml` file at that layer
-only when a field is saved there.
+layers. Node types are displayed as an embedded tree for the current context,
+with local field bindings shown on each node and inherited fields visible by
+expanding parent nodes. New fields and node types are saved to an explicit
+schema layer, such as the base folder, an ancestor folder, or the project
+folder. The app creates a `metadata.schema.yaml` file at that layer only when a
+definition is saved there.
 
 Anchored TODO ownership and synchronization invariants are documented in
 `docs/editor-todo-invariants.md`.

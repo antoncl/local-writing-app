@@ -8,10 +8,12 @@ from pydantic import BaseModel, Field
 class CreateProjectRequest(BaseModel):
     root_path: str = Field(min_length=1)
     title: str = Field(default="Untitled Project", min_length=1)
+    projects_base_folder: str = Field(min_length=1)
 
 
 class OpenProjectRequest(BaseModel):
     root_path: str = Field(min_length=1)
+    projects_base_folder: str = Field(min_length=1)
 
 
 class ProjectInfo(BaseModel):
@@ -80,7 +82,9 @@ class EntryTypeDefinition(BaseModel):
     name: str
     kind: str
     parent: str | None = None
+    abstract: bool = False
     fields: list[str] = Field(default_factory=list)
+    own_fields: list[str] = Field(default_factory=list)
 
 
 class MetadataSchema(BaseModel):
@@ -121,6 +125,17 @@ class UpsertMetadataFieldRequest(BaseModel):
     field: MetadataFieldDefinition
     entry_type: str = "scene"
     allow_existing: bool = True
+
+
+class UpsertMetadataEntryTypeRequest(BaseModel):
+    layer_id: str = Field(min_length=1)
+    entry_type_id: str = Field(min_length=1)
+    entry_type: EntryTypeDefinition
+    allow_existing: bool = True
+
+
+class DeleteMetadataEntryTypeRequest(BaseModel):
+    entry_type_id: str = Field(min_length=1)
 
 
 class MoveMetadataFieldRequest(BaseModel):

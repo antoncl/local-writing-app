@@ -17,12 +17,14 @@ as Acts, Chapters, Sequences, and Arcs.
 
 ## Entity Model
 
-The long-term model is entity-oriented:
+The long-term model is node-oriented. The current implementation still uses
+Scene and Lore Entry terminology at storage/API boundaries, but metadata
+definitions are moving toward node types and subtypes:
 
 - `id`: stable identity.
-- `kind`: broad system category, such as `scene`, `lore_entry`, or `prompt_entry`.
+- `kind`: broad system category, currently `scene` or `lore`.
 - `entry_type`: schema-defined subtype, such as `scene`, `scene_sequel`,
-  `scene_mckee`, `lore_character`, or `lore_location`.
+  `scene_mckee`, `character`, `place`, `item`, or `lore_note`.
 - `title`: display title.
 - `metadata`: schema-defined values.
 - `body_markdown`: optional Markdown body for entities that carry prose or text.
@@ -123,18 +125,27 @@ entry_types:
       - turning_point
       - word_count
 
-  lore_character:
+  lore_entry:
+    name: Entry
+    kind: lore
+    abstract: true
+    fields:
+      - aliases
+      - tags
+      - related_entries
+
+  character:
     name: Character
-    kind: lore_entry
+    kind: lore
     parent: lore_entry
     fields:
       - gender
       - pronouns
       - story_role
 
-  lore_location:
+  place:
     name: Location
-    kind: lore_entry
+    kind: lore
     parent: lore_entry
     fields:
       - parent_location
@@ -175,6 +186,12 @@ fields:
 
 Field IDs should be stable machine-readable keys. Display names can change
 without rewriting every entry file.
+
+The effective schema returned by the backend contains inherited `fields` and
+derived `own_fields`. Schema files store only local `fields`; `own_fields` is
+response-only data used by the UI so each node card can show fields defined
+directly on that node while inherited fields remain visible through parent
+cards.
 
 ## Field Types
 
@@ -237,18 +254,31 @@ matter, and concatenate scene bodies in Manuscript Structure order.
 Front matter should be excluded from prose export by default. Metadata may later
 support export options, such as exporting only scenes with a given status.
 
-## First Implementation Slice
+## Current Implementation Status
 
-The first metadata slice should focus on Scenes only:
+Implemented:
 
-- Add generic scene `entry_type` and `metadata` parsing/writing through YAML
-  front matter.
-- Add `metadata.schema.yaml` with default scene entry types and field
-  definitions.
-- Add a compact schema-driven scene metadata UI.
-- Support simple editable field types plus read-only `computed` fields.
-- Include generic scene metadata in search.
-- Add malformed front matter detection to validation and scene loading.
+- Generic scene `entry_type` and `metadata` parsing/writing through YAML front
+  matter.
+- Layered `metadata.schema.yaml` merging from the configured projects base
+  folder to the project folder.
+- Schema-driven metadata UI for Scenes and Lore Entries.
+- Lore Entries with entry subtypes, tags, aliases, references, and Markdown
+  bodies.
+- Known tags in `tags.yaml`, with case-insensitive matching and backend casing
+  as authoritative.
+- Custom Data UI that displays node types as a nested tree, with local fields
+  collapsed by default on each node card.
+- Simple editable field types plus read-only `computed` fields.
+- Metadata search across title, body, and metadata values.
+- Malformed front matter detection in validation and loading.
 
-After the Scene path is stable, apply the same model to Lore Entries and Prompt
-Entries.
+Outstanding:
+
+- Generalize the model into a shared base Node concept across Scenes, Lore
+  Entries, Prompt Entries, and eventually Manuscript Structure entities.
+- Add full field binding management from node cards, including add/remove/delete
+  flows and clearer scope controls.
+- Add Prompt Entries.
+- Decide how Manuscript Structure nodes become node-backed without disrupting
+  ordering and hierarchy.

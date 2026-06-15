@@ -15,6 +15,7 @@ from app.models import (
     CreateLoreEntryRequest,
     CreateSceneRequest,
     CreateTodoRequest,
+    DeleteMetadataEntryTypeRequest,
     DeleteMetadataFieldRequest,
     DirectoryEntry,
     DirectoryListing,
@@ -42,6 +43,7 @@ from app.models import (
     StructureNode,
     TodoDocument,
     TodoItem,
+    UpsertMetadataEntryTypeRequest,
     UpsertMetadataFieldRequest,
     UpdateProjectSettingsRequest,
     UpdateTodoRequest,
@@ -64,25 +66,35 @@ DEFAULT_METADATA_SCHEMA: dict[str, Any] = {
             "kind": "scene",
             "fields": ["status", "summary", "characters", "locations", "word_count"],
         },
+        "lore_entry": {
+            "name": "Entry",
+            "kind": "lore",
+            "abstract": True,
+            "fields": ["aliases", "tags", "related_entries"],
+        },
         "character": {
             "name": "Character",
             "kind": "lore",
-            "fields": ["aliases", "tags", "home_place", "appears_in_scenes", "related_entries"],
+            "parent": "lore_entry",
+            "fields": ["home_place", "appears_in_scenes"],
         },
         "place": {
             "name": "Place",
             "kind": "lore",
-            "fields": ["aliases", "tags", "appears_in_scenes", "related_entries"],
+            "parent": "lore_entry",
+            "fields": ["appears_in_scenes"],
         },
         "item": {
             "name": "Item",
             "kind": "lore",
-            "fields": ["aliases", "tags", "appears_in_scenes", "related_entries"],
+            "parent": "lore_entry",
+            "fields": ["appears_in_scenes"],
         },
         "lore_note": {
             "name": "Note",
             "kind": "lore",
-            "fields": ["aliases", "tags", "related_entries"],
+            "parent": "lore_entry",
+            "fields": [],
         },
     },
     "fields": {
@@ -140,13 +152,16 @@ class ProjectService:
         self.root_path: Path | None = None
         self.title: str | None = None
 
-    def create_project(self, root_path: Path, title: str) -> ProjectInfo:
+    def create_project(self, root_path: Path, title: str, projects_base_folder: Path | None = None) -> ProjectInfo:
         root = root_path.expanduser().resolve()
+        if projects_base_folder is None:
+            root.parent.mkdir(parents=True, exist_ok=True)
+        base_folder = self._validate_projects_base_folder(projects_base_folder or root.parent, root)
         root.mkdir(parents=True, exist_ok=True)
         for folder in ["scenes", "lore", "prompts", ".cache"]:
             (root / folder).mkdir(exist_ok=True)
 
-        self._write_yaml(root / "project.yaml", self._new_project_manifest(title, root))
+        self._write_yaml(root / "project.yaml", self._new_project_manifest(title, root, base_folder))
         self._write_yaml(root / "metadata.schema.yaml", self._empty_metadata_schema())
         self._write_yaml(root / "tags.yaml", {"tags": []})
         initial_scene = Scene(
@@ -181,12 +196,13 @@ class ProjectService:
         self.title = title
         return self.current_project()
 
-    def _new_project_manifest(self, title: str, root: Path) -> dict[str, Any]:
+    def _new_project_manifest(self, title: str, root: Path, projects_base_folder: Path | None = None) -> dict[str, Any]:
+        base_folder = projects_base_folder or root.parent
         return {
             "title": title,
             "version": 1,
             "settings": {
-                "projects_base_folder": str(root.parent),
+                "projects_base_folder": str(base_folder),
                 "theme": "system",
             },
             "manuscript_structure": {
@@ -201,11 +217,19 @@ class ProjectService:
     def _empty_metadata_schema(self) -> dict[str, Any]:
         return {"version": 1, "entry_types": {}, "fields": {}}
 
-    def open_project(self, root_path: Path) -> ProjectInfo:
+    def open_project(self, root_path: Path, projects_base_folder: Path | None = None) -> ProjectInfo:
         root = root_path.expanduser().resolve()
         if not (root / "project.yaml").exists():
             raise ProjectServiceError("No project.yaml found in that folder.", 404)
         manifest = self._read_yaml(root / "project.yaml")
+        if projects_base_folder is not None:
+            base_folder = self._validate_projects_base_folder(projects_base_folder, root)
+            settings = manifest.get("settings")
+            if not isinstance(settings, dict):
+                settings = {}
+            settings["projects_base_folder"] = str(base_folder)
+            manifest["settings"] = settings
+            self._write_yaml(root / "project.yaml", manifest)
         self.root_path = root
         self.title = str(manifest.get("title") or root.name)
         return self.current_project()
@@ -227,15 +251,21 @@ class ProjectService:
         if request.projects_base_folder is not None:
             if not request.projects_base_folder.strip():
                 raise ProjectServiceError("Projects base folder is required.", 400)
-            base_folder = Path(request.projects_base_folder).expanduser().resolve()
-            if not base_folder.exists():
-                raise ProjectServiceError("Projects base folder does not exist.", 404)
-            if not base_folder.is_dir():
-                raise ProjectServiceError("Projects base folder must be a folder.", 400)
+            base_folder = self._validate_projects_base_folder(Path(request.projects_base_folder), root)
             settings["projects_base_folder"] = str(base_folder)
         manifest["settings"] = settings
         self._write_yaml(root / "project.yaml", manifest)
         return self.current_project()
+
+    def _validate_projects_base_folder(self, base_folder_path: Path, project_root: Path) -> Path:
+        base_folder = base_folder_path.expanduser().resolve()
+        if not base_folder.exists():
+            raise ProjectServiceError("Projects base folder does not exist.", 404)
+        if not base_folder.is_dir():
+            raise ProjectServiceError("Projects base folder must be a folder.", 400)
+        if not self._is_relative_to(project_root, base_folder):
+            raise ProjectServiceError("Project folder must be inside the projects base folder.", 400)
+        return base_folder
 
     def list_directories(self, path: Path | None = None) -> DirectoryListing:
         target = (path or self._default_directory_picker_path()).expanduser().resolve()
@@ -399,6 +429,7 @@ class ProjectService:
             if path.exists():
                 layer_data = self._read_metadata_schema_layer(path)
                 self._merge_metadata_schema_layer(data, layer_data)
+        data = self._resolve_metadata_schema_inheritance(data)
         return MetadataSchema.model_validate(data)
 
     def read_metadata_schema_layers(self) -> MetadataSchemaLayers:
@@ -461,6 +492,7 @@ class ProjectService:
             for field_id in self._schema_section_keys(layer_data, "fields"):
                 field_sources[field_id] = source
 
+        data = self._resolve_metadata_schema_inheritance(data)
         return MetadataSchemaOverview(
             effective_schema=MetadataSchema.model_validate(data),
             layers=layers,
@@ -487,6 +519,104 @@ class ProjectService:
             tags.append(tag)
         tags.sort(key=str.lower)
         return KnownTags(tags=tags)
+
+    def upsert_metadata_entry_type(self, request: UpsertMetadataEntryTypeRequest) -> MetadataSchema:
+        root = self._require_project()
+        layer_path = self._metadata_schema_layer_path_for_id(root, request.layer_id)
+        if layer_path is None:
+            raise ProjectServiceError("Unknown metadata schema layer.", 404)
+
+        entry_type_id = request.entry_type_id.strip()
+        if not re.fullmatch(r"[A-Za-z][A-Za-z0-9_]*", entry_type_id):
+            raise ProjectServiceError("Node type ID must start with a letter and contain only letters, numbers, and underscores.", 422)
+        if request.entry_type.kind not in {"scene", "lore"}:
+            raise ProjectServiceError("Node type kind must be scene or lore.", 422)
+        if request.entry_type.parent == entry_type_id:
+            raise ProjectServiceError("Node type cannot inherit from itself.", 422)
+
+        schema = self.read_metadata_schema()
+        if not request.allow_existing and entry_type_id in schema.entry_types:
+            raise ProjectServiceError(f"Node type {entry_type_id} already exists.", 422)
+
+        overview = self.read_metadata_schema_overview()
+        source = overview.entry_type_sources.get(entry_type_id)
+        if source and source.built_in:
+            raise ProjectServiceError("System node types cannot be edited.", 422)
+
+        layer_data = self._read_yaml(layer_path) if layer_path.exists() else self._empty_metadata_schema()
+        entry_types = layer_data.get("entry_types")
+        if not isinstance(entry_types, dict):
+            entry_types = {}
+
+        existing_entry_type = entry_types.get(entry_type_id)
+        existing_fields = existing_entry_type.get("fields") if isinstance(existing_entry_type, dict) else None
+        fields = existing_fields if isinstance(existing_fields, list) else request.entry_type.fields
+        entry_type_data = request.entry_type.model_dump(exclude_none=True)
+        entry_type_data.pop("own_fields", None)
+        entry_type_data["name"] = request.entry_type.name.strip() or entry_type_id
+        entry_type_data["kind"] = request.entry_type.kind
+        entry_type_data["abstract"] = bool(request.entry_type.abstract)
+        entry_type_data["fields"] = fields
+        if not request.entry_type.parent:
+            entry_type_data.pop("parent", None)
+        entry_types[entry_type_id] = entry_type_data
+        layer_data["entry_types"] = entry_types
+
+        candidate = deepcopy(DEFAULT_METADATA_SCHEMA)
+        for path in self._metadata_schema_layer_paths(root):
+            if path == layer_path:
+                self._merge_metadata_schema_layer(candidate, layer_data)
+            elif path.exists():
+                self._merge_metadata_schema_layer(candidate, self._read_metadata_schema_layer(path))
+        schema_errors = self._validate_metadata_schema_definition(
+            MetadataSchema.model_validate(self._resolve_metadata_schema_inheritance(candidate))
+        )
+        if schema_errors:
+            raise ProjectServiceError(" ".join(schema_errors), 422)
+
+        self._write_yaml(layer_path, layer_data)
+        return self.read_metadata_schema()
+
+    def delete_metadata_entry_type(self, request: DeleteMetadataEntryTypeRequest) -> MetadataSchema:
+        root = self._require_project()
+        entry_type_id = request.entry_type_id.strip()
+        schema = self.read_metadata_schema()
+        if entry_type_id not in schema.entry_types:
+            raise ProjectServiceError(f"Unknown node type {entry_type_id}.", 404)
+        if self._entry_type_in_use(root, entry_type_id):
+            raise ProjectServiceError(f"Node type {entry_type_id} is used by project documents.", 422)
+
+        overview = self.read_metadata_schema_overview()
+        source = overview.entry_type_sources.get(entry_type_id)
+        if source is None:
+            raise ProjectServiceError(f"Unknown node type {entry_type_id}.", 404)
+        if source.built_in:
+            raise ProjectServiceError("System node types cannot be deleted.", 422)
+        source_path = self._metadata_schema_layer_path_for_id(root, source.layer_id)
+        if source_path is None:
+            raise ProjectServiceError("Unknown metadata schema layer.", 404)
+
+        layer_data = self._read_yaml(source_path) if source_path.exists() else self._empty_metadata_schema()
+        entry_types = layer_data.get("entry_types")
+        if not isinstance(entry_types, dict) or entry_type_id not in entry_types:
+            raise ProjectServiceError(f"Node type {entry_type_id} is not defined in its source layer.", 422)
+        entry_types.pop(entry_type_id)
+        layer_data["entry_types"] = entry_types
+
+        candidate = deepcopy(DEFAULT_METADATA_SCHEMA)
+        for path in self._metadata_schema_layer_paths(root):
+            if path == source_path:
+                self._merge_metadata_schema_layer(candidate, layer_data)
+            elif path.exists():
+                self._merge_metadata_schema_layer(candidate, self._read_metadata_schema_layer(path))
+        schema_errors = self._validate_metadata_schema_definition(
+            MetadataSchema.model_validate(self._resolve_metadata_schema_inheritance(candidate))
+        )
+        if schema_errors:
+            raise ProjectServiceError(" ".join(schema_errors), 422)
+
+        self._write_yaml(source_path, layer_data)
+        return self.read_metadata_schema()
 
     def upsert_metadata_field(self, request: UpsertMetadataFieldRequest) -> MetadataSchema:
         root = self._require_project()
@@ -536,7 +666,7 @@ class ProjectService:
                 self._merge_metadata_schema_layer(candidate, layer_data)
             elif path.exists():
                 self._merge_metadata_schema_layer(candidate, self._read_metadata_schema_layer(path))
-        schema = MetadataSchema.model_validate(candidate)
+        schema = MetadataSchema.model_validate(self._resolve_metadata_schema_inheritance(candidate))
         schema_errors = self._validate_metadata_schema_definition(schema)
         if schema_errors:
             raise ProjectServiceError(" ".join(schema_errors), 422)
@@ -584,7 +714,7 @@ class ProjectService:
                 self._merge_metadata_schema_layer(candidate, target_data)
             elif path.exists():
                 self._merge_metadata_schema_layer(candidate, self._read_metadata_schema_layer(path))
-        moved_schema = MetadataSchema.model_validate(candidate)
+        moved_schema = MetadataSchema.model_validate(self._resolve_metadata_schema_inheritance(candidate))
         schema_errors = self._validate_metadata_schema_definition(moved_schema)
         if schema_errors:
             raise ProjectServiceError(" ".join(schema_errors), 422)
@@ -631,7 +761,7 @@ class ProjectService:
                 self._merge_metadata_schema_layer(candidate, layer_data)
             elif path.exists():
                 self._merge_metadata_schema_layer(candidate, self._read_metadata_schema_layer(path))
-        renamed_schema = MetadataSchema.model_validate(candidate)
+        renamed_schema = MetadataSchema.model_validate(self._resolve_metadata_schema_inheritance(candidate))
         schema_errors = self._validate_metadata_schema_definition(renamed_schema)
         if schema_errors:
             raise ProjectServiceError(" ".join(schema_errors), 422)
@@ -666,7 +796,7 @@ class ProjectService:
                 self._merge_metadata_schema_layer(candidate, layer_data)
             elif path.exists():
                 self._merge_metadata_schema_layer(candidate, self._read_metadata_schema_layer(path))
-        deleted_schema = MetadataSchema.model_validate(candidate)
+        deleted_schema = MetadataSchema.model_validate(self._resolve_metadata_schema_inheritance(candidate))
         schema_errors = self._validate_metadata_schema_definition(deleted_schema)
         if schema_errors:
             raise ProjectServiceError(" ".join(schema_errors), 422)
@@ -755,6 +885,13 @@ class ProjectService:
 
     def _entry_markdown_paths(self, root: Path) -> list[Path]:
         return [*(root / "scenes").glob("*.md"), *(root / "lore").glob("*.md")]
+
+    def _entry_type_in_use(self, root: Path, entry_type_id: str) -> bool:
+        for path in self._entry_markdown_paths(root):
+            front_matter, _ = self._read_markdown_with_front_matter(path, strict=True)
+            if front_matter.get("entry_type") == entry_type_id:
+                return True
+        return False
 
     def _rename_entry_metadata_key(self, root: Path, old_field_id: str, new_field_id: str) -> None:
         for path in self._entry_markdown_paths(root):
@@ -856,6 +993,7 @@ class ProjectService:
                 self._merge_metadata_schema_layer(data, self._read_metadata_schema_layer(path))
             if path == target_path:
                 break
+        data = self._resolve_metadata_schema_inheritance(data)
         return MetadataSchema.model_validate(data)
 
     def _metadata_schema_layer_warnings(self, root: Path) -> list[str]:
@@ -877,7 +1015,16 @@ class ProjectService:
         base_folder = settings.get("projects_base_folder")
         if not isinstance(base_folder, str) or not base_folder.strip():
             return None
-        return Path(base_folder).expanduser().resolve()
+        configured_base = Path(base_folder).expanduser().resolve()
+        if configured_base == root.parent:
+            schema_ancestors = [
+                ancestor
+                for ancestor in root.parents
+                if ancestor != root.parent and (ancestor / "metadata.schema.yaml").exists()
+            ]
+            if schema_ancestors:
+                return schema_ancestors[-1].resolve()
+        return configured_base
 
     def _is_relative_to(self, path: Path, possible_parent: Path) -> bool:
         try:
@@ -904,6 +1051,49 @@ class ProjectService:
                 base.get("fields", {}),
                 layer.get("fields"),
             )
+
+    def _resolve_metadata_schema_inheritance(self, data: dict[str, Any]) -> dict[str, Any]:
+        resolved_data = deepcopy(data)
+        entry_types = resolved_data.get("entry_types")
+        if not isinstance(entry_types, dict):
+            return resolved_data
+
+        resolved: dict[str, Any] = {}
+        resolving: set[str] = set()
+
+        def resolve_entry_type(entry_type_id: str) -> Any:
+            if entry_type_id in resolved:
+                return resolved[entry_type_id]
+            raw_entry_type = entry_types.get(entry_type_id)
+            if not isinstance(raw_entry_type, dict):
+                resolved[entry_type_id] = raw_entry_type
+                return raw_entry_type
+            if entry_type_id in resolving:
+                resolved[entry_type_id] = deepcopy(raw_entry_type)
+                return resolved[entry_type_id]
+
+            resolving.add(entry_type_id)
+            parent_id = raw_entry_type.get("parent")
+            inherited_fields: list[Any] = []
+            if isinstance(parent_id, str) and parent_id in entry_types:
+                parent_entry_type = resolve_entry_type(parent_id)
+                if isinstance(parent_entry_type, dict):
+                    inherited_fields = parent_entry_type.get("fields", [])
+
+            next_entry_type = deepcopy(raw_entry_type)
+            local_fields = raw_entry_type.get("fields", [])
+            next_entry_type["own_fields"] = deepcopy(local_fields) if isinstance(local_fields, list) else []
+            next_entry_type["fields"] = self._merge_metadata_field_lists(
+                inherited_fields,
+                local_fields,
+            )
+            resolving.remove(entry_type_id)
+            resolved[entry_type_id] = next_entry_type
+            return next_entry_type
+
+        for entry_type_id in list(entry_types):
+            entry_types[entry_type_id] = resolve_entry_type(str(entry_type_id))
+        return resolved_data
 
     def _merge_metadata_entry_types(self, base: Any, layer: Any) -> Any:
         if not isinstance(base, dict):
@@ -960,6 +1150,22 @@ class ProjectService:
 
     def _validate_metadata_schema_definition(self, schema: MetadataSchema) -> list[str]:
         errors: list[str] = []
+        for entry_type_id, entry_type in schema.entry_types.items():
+            if entry_type.parent and entry_type.parent not in schema.entry_types:
+                errors.append(f"Metadata entry_type {entry_type_id} references unknown parent {entry_type.parent}.")
+            if entry_type.parent and entry_type.parent in schema.entry_types:
+                parent_entry_type = schema.entry_types[entry_type.parent]
+                if parent_entry_type.kind != entry_type.kind:
+                    errors.append(f"Metadata entry_type {entry_type_id} parent {entry_type.parent} has a different kind.")
+            seen: set[str] = set()
+            parent_id = entry_type.parent
+            while parent_id:
+                if parent_id in seen or parent_id == entry_type_id:
+                    errors.append(f"Metadata entry_type {entry_type_id} has a circular parent chain.")
+                    break
+                seen.add(parent_id)
+                parent_id = schema.entry_types.get(parent_id).parent if parent_id in schema.entry_types else None
+
         for entry_type_id, entry_type in schema.entry_types.items():
             for field_id in entry_type.fields:
                 if field_id not in schema.fields:
@@ -1538,13 +1744,23 @@ class ProjectService:
         entry_type_definition = schema.entry_types.get(entry_type)
         if not entry_type_definition:
             errors.append(f"{label} has unknown entry_type {entry_type}.")
+            allowed_field_ids: set[str] = set()
         elif entry_type_definition.kind != expected_kind:
             errors.append(f"{label} uses non-{expected_kind} entry_type {entry_type}.")
+            allowed_field_ids = set(entry_type_definition.fields)
+        elif entry_type_definition.abstract:
+            errors.append(f"{label} uses abstract entry_type {entry_type}.")
+            allowed_field_ids = set(entry_type_definition.fields)
+        else:
+            allowed_field_ids = set(entry_type_definition.fields)
 
         for field_id, value in metadata.items():
             field = schema.fields.get(field_id)
             if not field:
                 errors.append(f"{label} has unknown metadata field {field_id}.")
+                continue
+            if field_id not in allowed_field_ids:
+                errors.append(f"{label} metadata field {field_id} is not defined for entry_type {entry_type}.")
                 continue
             errors.extend(self._validate_metadata_field_value(label, field_id, value, field))
         return errors

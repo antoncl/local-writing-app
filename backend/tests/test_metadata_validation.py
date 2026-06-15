@@ -6,7 +6,9 @@ import unittest
 
 from app.models import (
     CreateLoreEntryRequest,
+    DeleteMetadataEntryTypeRequest,
     DeleteMetadataFieldRequest,
+    EntryTypeDefinition,
     MetadataFieldDefinition,
     MoveMetadataFieldRequest,
     RenameMetadataFieldRequest,
@@ -14,6 +16,7 @@ from app.models import (
     SaveSceneRequest,
     SearchRequest,
     UpdateProjectSettingsRequest,
+    UpsertMetadataEntryTypeRequest,
     UpsertMetadataFieldRequest,
 )
 from app.services.project_service import ProjectService, ProjectServiceError
@@ -38,6 +41,34 @@ class MetadataValidationTests(unittest.TestCase):
         manifest = self.service._read_yaml(self.root / "project.yaml")
         manifest.setdefault("settings", {})["projects_base_folder"] = str(path)
         self.service._write_yaml(self.root / "project.yaml", manifest)
+
+    def test_schema_layers_include_empty_intermediate_folders(self) -> None:
+        layers = self.service.read_metadata_schema_layers().layers
+
+        self.assertEqual(
+            [Path(layer.folder_path) for layer in layers],
+            [self.base, self.universe, self.world, self.root],
+        )
+        self.assertFalse(layers[1].exists)
+        self.assertFalse(layers[2].exists)
+
+    def test_schema_layers_infer_base_schema_above_default_project_parent(self) -> None:
+        self._set_projects_base_folder(self.root.parent)
+        self.service._write_yaml(
+            self.base / "metadata.schema.yaml",
+            {
+                "version": 1,
+                "entry_types": {},
+                "fields": {},
+            },
+        )
+
+        layers = self.service.read_metadata_schema_layers().layers
+
+        self.assertEqual(
+            [Path(layer.folder_path) for layer in layers],
+            [self.base, self.universe, self.world, self.root],
+        )
 
     def test_valid_scene_metadata_saves(self) -> None:
         scene = self.service.read_scene(self.scene_id)
@@ -157,14 +188,20 @@ class MetadataValidationTests(unittest.TestCase):
         )
 
     def test_project_settings_update_sets_base_folder(self) -> None:
-        updated_base = Path(self.temp_dir.name) / "new-base"
-        updated_base.mkdir()
+        updated_base = self.universe
 
         project = self.service.update_project_settings(UpdateProjectSettingsRequest(projects_base_folder=str(updated_base)))
 
         self.assertEqual(project.projects_base_folder, str(updated_base.resolve()))
         manifest = self.service._read_yaml(self.root / "project.yaml")
         self.assertEqual(manifest["settings"]["projects_base_folder"], str(updated_base.resolve()))
+
+    def test_project_settings_rejects_base_folder_outside_project_ancestry(self) -> None:
+        updated_base = Path(self.temp_dir.name) / "new-base"
+        updated_base.mkdir()
+
+        with self.assertRaisesRegex(ProjectServiceError, "inside the projects base folder"):
+            self.service.update_project_settings(UpdateProjectSettingsRequest(projects_base_folder=str(updated_base)))
 
     def test_schema_layers_are_listed_from_base_to_project(self) -> None:
         layers = self.service.read_metadata_schema_layers().layers
@@ -441,16 +478,130 @@ class MetadataValidationTests(unittest.TestCase):
 
         self.assertEqual(schema.entry_types["character"].kind, "lore")
         self.assertEqual(schema.entry_types["place"].kind, "lore")
+        self.assertTrue(schema.entry_types["lore_entry"].abstract)
+        self.assertEqual(schema.entry_types["character"].parent, "lore_entry")
+        self.assertEqual(schema.entry_types["lore_note"].parent, "lore_entry")
         self.assertNotIn("summary", schema.entry_types["character"].fields)
         self.assertNotIn("summary", schema.entry_types["lore_note"].fields)
         self.assertNotIn("appears_in_scenes", schema.entry_types["lore_note"].fields)
         self.assertIn("aliases", schema.entry_types["lore_note"].fields)
         self.assertIn("tags", schema.entry_types["lore_note"].fields)
+        self.assertEqual(schema.entry_types["lore_entry"].own_fields, ["aliases", "tags", "related_entries"])
+        self.assertEqual(schema.entry_types["character"].own_fields, ["home_place", "appears_in_scenes"])
         self.assertEqual(schema.fields["aliases"].type, "multi_select")
         self.assertEqual(schema.fields["tags"].type, "tags")
         self.assertEqual(schema.fields["related_entries"].type, "entity_ref_list")
         self.assertEqual(schema.fields["related_entries"].target, {"kind": "lore"})
         self.assertEqual(schema.fields["characters"].target, {"entry_type": "character"})
+
+    def test_metadata_rejects_fields_not_bound_to_entry_type(self) -> None:
+        entry = self.service.create_lore_entry(CreateLoreEntryRequest(title="Seren", entry_type="character"))
+
+        with self.assertRaisesRegex(ProjectServiceError, "metadata field summary is not defined for entry_type character"):
+            self.service.save_lore_entry(
+                entry.id,
+                SaveLoreEntryRequest(
+                    title="Seren",
+                    body_markdown="A captain with a secret.",
+                    base_revision=entry.revision,
+                    entry_type="character",
+                    metadata={"summary": "Scene-only field"},
+                ),
+            )
+
+    def test_lore_subtypes_inherit_custom_fields_from_lore_entry_base(self) -> None:
+        project_layer = next(
+            layer
+            for layer in self.service.read_metadata_schema_layers().layers
+            if layer.folder_path == str(self.root)
+        )
+        schema = self.service.upsert_metadata_field(
+            UpsertMetadataFieldRequest(
+                layer_id=project_layer.id,
+                field_id="importance",
+                field=MetadataFieldDefinition(name="Importance", type="select", options=["Low", "High"]),
+                entry_type="lore_entry",
+            )
+        )
+        self.assertIn("importance", schema.entry_types["character"].fields)
+        self.assertIn("importance", schema.entry_types["lore_note"].fields)
+
+        entry = self.service.create_lore_entry(CreateLoreEntryRequest(title="Seren", entry_type="character"))
+        saved = self.service.save_lore_entry(
+            entry.id,
+            SaveLoreEntryRequest(
+                title="Seren",
+                body_markdown="A captain with a secret.",
+                base_revision=entry.revision,
+                entry_type="character",
+                metadata={"importance": "High"},
+            ),
+        )
+
+        self.assertEqual(saved.metadata["importance"], "High")
+
+    def test_custom_lore_subtype_can_be_created_and_inherits_parent_fields(self) -> None:
+        project_layer = next(
+            layer
+            for layer in self.service.read_metadata_schema_layers().layers
+            if layer.folder_path == str(self.root)
+        )
+        schema = self.service.upsert_metadata_entry_type(
+            UpsertMetadataEntryTypeRequest(
+                layer_id=project_layer.id,
+                entry_type_id="faction",
+                entry_type=EntryTypeDefinition(
+                    name="Faction",
+                    kind="lore",
+                    parent="lore_entry",
+                    fields=[],
+                ),
+            )
+        )
+
+        self.assertIn("faction", schema.entry_types)
+        self.assertIn("aliases", schema.entry_types["faction"].fields)
+        self.assertIn("tags", schema.entry_types["faction"].fields)
+        self.assertEqual(schema.entry_types["faction"].own_fields, [])
+        project_schema = self.service._read_yaml(self.root / "metadata.schema.yaml")
+        self.assertNotIn("own_fields", project_schema["entry_types"]["faction"])
+
+        entry = self.service.create_lore_entry(CreateLoreEntryRequest(title="The Pact", entry_type="faction"))
+        saved = self.service.save_lore_entry(
+            entry.id,
+            SaveLoreEntryRequest(
+                title="The Pact",
+                body_markdown="A secret faction.",
+                base_revision=entry.revision,
+                entry_type="faction",
+                metadata={"tags": ["Politics"]},
+            ),
+        )
+
+        self.assertEqual(saved.entry_type, "faction")
+        self.assertEqual(saved.metadata["tags"], ["Politics"])
+
+    def test_abstract_entry_type_cannot_be_used_by_documents(self) -> None:
+        with self.assertRaisesRegex(ProjectServiceError, "abstract entry_type lore_entry"):
+            self.service.create_lore_entry(CreateLoreEntryRequest(title="Abstract", entry_type="lore_entry"))
+
+    def test_used_custom_entry_type_cannot_be_deleted(self) -> None:
+        project_layer = next(
+            layer
+            for layer in self.service.read_metadata_schema_layers().layers
+            if layer.folder_path == str(self.root)
+        )
+        self.service.upsert_metadata_entry_type(
+            UpsertMetadataEntryTypeRequest(
+                layer_id=project_layer.id,
+                entry_type_id="faction",
+                entry_type=EntryTypeDefinition(name="Faction", kind="lore", parent="lore_entry", fields=[]),
+            )
+        )
+        self.service.create_lore_entry(CreateLoreEntryRequest(title="The Pact", entry_type="faction"))
+
+        with self.assertRaisesRegex(ProjectServiceError, "used by project documents"):
+            self.service.delete_metadata_entry_type(DeleteMetadataEntryTypeRequest(entry_type_id="faction"))
 
     def test_lore_entry_round_trips_metadata(self) -> None:
         entry = self.service.create_lore_entry(CreateLoreEntryRequest(title="Seren", entry_type="character"))

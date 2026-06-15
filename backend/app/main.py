@@ -11,6 +11,7 @@ from app.models import (
     CreateProjectRequest,
     CreateSceneRequest,
     CreateTodoRequest,
+    DeleteMetadataEntryTypeRequest,
     DeleteMetadataFieldRequest,
     DirectoryListing,
     KnownTags,
@@ -31,6 +32,7 @@ from app.models import (
     SearchResponse,
     StructureDocument,
     TodoDocument,
+    UpsertMetadataEntryTypeRequest,
     UpsertMetadataFieldRequest,
     UpdateProjectSettingsRequest,
     UpdateTodoRequest,
@@ -66,13 +68,13 @@ def health() -> dict[str, str]:
 @app.post("/api/project/create", response_model=ProjectInfo)
 def create_project(request: CreateProjectRequest) -> ProjectInfo:
     with translate_errors():
-        return service.create_project(Path(request.root_path), request.title)
+        return service.create_project(Path(request.root_path), request.title, Path(request.projects_base_folder))
 
 
 @app.post("/api/project/open", response_model=ProjectInfo)
 def open_project(request: OpenProjectRequest) -> ProjectInfo:
     with translate_errors():
-        return service.open_project(Path(request.root_path))
+        return service.open_project(Path(request.root_path), Path(request.projects_base_folder))
 
 
 @app.get("/api/project", response_model=ProjectInfo)
@@ -133,6 +135,18 @@ def get_metadata_schema_overview() -> MetadataSchemaOverview:
 def get_known_tags() -> KnownTags:
     with translate_errors():
         return service.read_known_tags()
+
+
+@app.put("/api/metadata/schema/entry-types", response_model=MetadataSchema)
+def upsert_metadata_entry_type(request: UpsertMetadataEntryTypeRequest) -> MetadataSchema:
+    with translate_errors():
+        return service.upsert_metadata_entry_type(request)
+
+
+@app.delete("/api/metadata/schema/entry-types", response_model=MetadataSchema)
+def delete_metadata_entry_type(request: DeleteMetadataEntryTypeRequest) -> MetadataSchema:
+    with translate_errors():
+        return service.delete_metadata_entry_type(request)
 
 
 @app.put("/api/metadata/schema/fields", response_model=MetadataSchema)

@@ -19,6 +19,14 @@ incremental progress, and understandable code over fashionable complexity.
 - Scenes are the atomic draft unit.
 - Acts, chapters, sequences, and other groupings organize scenes.
 - Scene prose is stored as Markdown with YAML front matter.
+- Lore is stored as Markdown entries with YAML front matter.
+- Lore entries have schema-driven entry types, tags, aliases, references, and
+  Markdown bodies.
+- Metadata schemas are layered from a configured projects base folder down to
+  the open project folder.
+- Node types can inherit field definitions from parent node types. The current
+  implementation has Scene and Lore Entry roots; a broader base Node model is
+  the intended direction.
 - The manuscript arrangement is stored separately and owned by the backend.
 - The story information collection is called Lore.
 - Individual Lore items are called Entries.
@@ -29,6 +37,8 @@ incremental progress, and understandable code over fashionable complexity.
 ```text
 project.yaml
 manuscript.structure.yaml
+metadata.schema.yaml
+tags.yaml
 scenes/
 lore/
 prompts/
@@ -37,7 +47,7 @@ todo.yaml
 ```
 
 Scenes live in `scenes/` as Markdown files. Lore entries will live under
-`lore/`. Cache data must be disposable.
+`lore/`. Tags live in `tags.yaml`. Cache data must be disposable.
 
 `project.yaml` may contain project configuration such as UI preferences,
 default project folder hints, and allowed Manuscript Structure container types.

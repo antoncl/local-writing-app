@@ -133,7 +133,7 @@
   $: selectionToolbarActions = editor ? getSelectionToolbarActions() : [];
   $: documentLabel = documentKind === "lore" ? "Entry" : "Scene";
   $: documentNameLabel = documentKind === "lore" ? "Name" : "Title";
-  $: documentEntryTypes = Object.entries(metadataSchema?.entry_types ?? {}).filter(([, definition]) => definition.kind === documentKind);
+  $: documentEntryTypes = Object.entries(metadataSchema?.entry_types ?? {}).filter(([, definition]) => definition.kind === documentKind && !definition.abstract);
   $: activeEntryType = metadataSchema?.entry_types[entryType] ?? metadataSchema?.entry_types[defaultEntryType()];
   $: metadataFieldIds = activeEntryType?.fields ?? [];
   $: metadataSummaryText = buildMetadataSummary(activeEntryType?.name ?? entryType, status, liveWordCount);

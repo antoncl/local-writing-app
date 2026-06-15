@@ -6,6 +6,7 @@
     DirectoryListing,
     EditableDocument,
     EntryMetadata,
+    EntryTypeDefinition,
     LoreEntrySummary,
     MetadataFieldDefinition,
     MetadataFieldType,
@@ -32,6 +33,15 @@
     entries: LoreEntrySummary[];
     depth: number;
   };
+  type NodeTypeOption = {
+    id: string;
+    label: string;
+    depth: number;
+    definition: EntryTypeDefinition;
+  };
+  type NodeTypeTreeNode = NodeTypeOption & {
+    children: NodeTypeTreeNode[];
+  };
   type PaneState = {
     title: string;
     x: number;
@@ -54,8 +64,6 @@
     saving: boolean;
   };
 
-  const SYSTEM_SCENE_FIELD_IDS = ["status", "summary", "characters", "locations", "word_count"];
-  const SYSTEM_LORE_FIELD_IDS = ["aliases", "tags", "home_place", "appears_in_scenes", "related_entries"];
   type ConfirmationState = {
     title: string;
     message: string;
@@ -108,13 +116,24 @@
   let schemaFieldReadonly = false;
   let schemaPaneOpen = false;
   let schemaFieldPaneOpen = false;
-  let draggedSchemaFieldId: string | null = null;
-  let systemSchemaFieldEntries: Array<[string, MetadataFieldDefinition]> = [];
-  let schemaFieldEntriesByLayer: Record<string, Array<[string, MetadataFieldDefinition]>> = {};
+  let schemaTypePaneOpen = false;
+  let schemaTypeLayerId = "";
+  let schemaTypeId = "";
+  let schemaTypeName = "";
+  let schemaTypeKind: "scene" | "lore" = "lore";
+  let schemaTypeParent = "";
+  let schemaTypeAbstract = false;
+  let schemaTypeReadonly = false;
+  let selectedSchemaTypeId: string | null = null;
+  let draggedSchemaTypeId: string | null = null;
+  let schemaSelectedEntryType: EntryTypeDefinition | null = null;
+  let schemaNodeTypeOptions: NodeTypeOption[] = [];
+  let schemaNodeTypeTree: NodeTypeTreeNode[] = [];
   let newTodo = "";
   let searchQuery = "";
   let loreSearchQuery = "";
   let collapsedLoreGroups: Record<string, boolean> = {};
+  let collapsedSchemaFieldsByType: Record<string, boolean> = {};
   let searchOpenTodos = false;
   let searchHits: SearchHit[] = [];
   let confirmation: ConfirmationState | null = null;
@@ -132,6 +151,7 @@
     lore: { title: "Lore", x: 330, y: 260, width: 300, height: 320, z: 3 },
     schema: { title: "Custom Data", x: 330, y: 260, width: 360, height: 420, z: 3 },
     schema_field: { title: "Custom Field", x: 708, y: 260, width: 360, height: 420, z: 4 },
+    schema_type: { title: "Node Type", x: 708, y: 260, width: 360, height: 390, z: 4 },
     todo: { title: "TODO", x: 1126, y: 18, width: 310, height: 320, z: 4 },
     search: { title: "Search", x: 1126, y: 360, width: 310, height: 320, z: 5 },
   };
@@ -155,9 +175,10 @@
   $: embeddedTodoStatusHintsByPane = buildEmbeddedTodoStatusHintsByPane(embeddedTodosByPane);
   $: filteredLoreEntries = filterLoreEntries(loreEntries, loreSearchQuery);
   $: groupedLoreEntries = groupLoreEntriesByType(filteredLoreEntries, metadataSchema);
-  $: schemaEntryTypes = Object.entries(metadataSchema?.entry_types ?? {}).filter(([, definition]) => definition.kind === schemaFieldKind);
-  $: systemSchemaFieldEntries = buildSystemSchemaFieldEntries(metadataSchema);
-  $: schemaFieldEntriesByLayer = buildSchemaFieldEntriesByLayer(metadataSchema, metadataSchemaOverview, metadataSchemaLayers, schemaFieldKind);
+  $: schemaSelectedEntryType = metadataSchema?.entry_types[schemaFieldEntryType] ?? metadataSchema?.entry_types.scene ?? null;
+  $: schemaFieldKind = schemaSelectedEntryType?.kind === "lore" ? "lore" : "scene";
+  $: schemaNodeTypeOptions = buildNodeTypeOptions(metadataSchema);
+  $: schemaNodeTypeTree = buildNodeTypeTree(metadataSchema, schemaFieldKind);
 
   onMount(() => {
     fitPanesToViewport();
@@ -195,6 +216,7 @@
     if (!isProjectOpen) return false;
     if (id === "schema") return schemaPaneOpen;
     if (id === "schema_field") return schemaFieldPaneOpen;
+    if (id === "schema_type") return schemaTypePaneOpen;
     return !isEditorPaneId(id) || editorPanes.some((pane) => pane.id === id);
   }
 
@@ -225,6 +247,7 @@
       lore: panes.lore,
       schema: panes.schema,
       schema_field: panes.schema_field,
+      schema_type: panes.schema_type,
       todo: panes.todo,
       search: panes.search,
     };
@@ -391,8 +414,14 @@
     metadataSchemaOverview = await api.getMetadataSchemaOverview();
     metadataSchema = metadataSchemaOverview.effective_schema;
     metadataSchemaLayers = metadataSchemaOverview.layers;
+    if (!metadataSchema.entry_types[schemaFieldEntryType]) {
+      schemaFieldEntryType = metadataSchema.entry_types.scene ? "scene" : Object.keys(metadataSchema.entry_types)[0] ?? "scene";
+    }
     if (!schemaFieldLayerId || !metadataSchemaLayers.some((layer) => layer.id === schemaFieldLayerId)) {
       schemaFieldLayerId = projectSchemaLayerId();
+    }
+    if (!schemaTypeLayerId || !metadataSchemaLayers.some((layer) => layer.id === schemaTypeLayerId)) {
+      schemaTypeLayerId = projectSchemaLayerId();
     }
   }
 
@@ -421,7 +450,7 @@
 
   async function createProject() {
     await run(async () => {
-      const openedProject = await api.createProject(projectPath, projectTitle);
+      const openedProject = await api.createProject(projectPath, projectTitle, projectsBaseFolder);
       openProjectWorkspace(openedProject);
       await refreshStructure();
       await refreshLoreEntries();
@@ -438,7 +467,7 @@
 
   async function openProject() {
     await run(async () => {
-      const openedProject = await api.openProject(projectPath);
+      const openedProject = await api.openProject(projectPath, projectsBaseFolder);
       openProjectWorkspace(openedProject);
       await refreshStructure();
       await refreshLoreEntries();
@@ -471,33 +500,125 @@
     return metadataSchemaLayers.find((layer) => layer.id === layerId)?.label ?? "Unknown";
   }
 
-  function buildSystemSchemaFieldEntries(schema: MetadataSchema | null) {
-    const fieldIds = schemaFieldKind === "lore" ? SYSTEM_LORE_FIELD_IDS : SYSTEM_SCENE_FIELD_IDS;
+  function fieldEntriesForEntryType(entryTypeId: string) {
+    const entryType = metadataSchema?.entry_types[entryTypeId];
+    const fieldIds = entryType?.own_fields ?? entryType?.fields ?? [];
     return fieldIds
       .map((fieldId) => {
-        const field = schema?.fields[fieldId];
+        const field = metadataSchema?.fields[fieldId];
         return field ? ([fieldId, field] as [string, MetadataFieldDefinition]) : null;
       })
       .filter((entry): entry is [string, MetadataFieldDefinition] => Boolean(entry));
   }
 
-  function buildSchemaFieldEntriesByLayer(
-    schema: MetadataSchema | null,
-    overview: MetadataSchemaOverview | null,
-    layers: MetadataSchemaLayer[],
-    kind: "scene" | "lore",
-  ) {
-    const entriesByLayer = Object.fromEntries(layers.map((layer) => [layer.id, [] as Array<[string, MetadataFieldDefinition]>]));
-    for (const [fieldId, field] of Object.entries(schema?.fields ?? {})) {
-      const source = overview?.field_sources[fieldId];
-      if (source && !source.built_in && source.layer_id in entriesByLayer && entryTypeIdsForField(fieldId, kind).length > 0) {
-        entriesByLayer[source.layer_id].push([fieldId, field]);
+  function fieldAppliesToEntryType(fieldId: string, entryTypeId: string) {
+    return Boolean(metadataSchema?.entry_types[entryTypeId]?.fields.includes(fieldId));
+  }
+
+  function toggleSchemaFieldsForType(entryTypeId: string) {
+    const fieldsCollapsed = collapsedSchemaFieldsByType[entryTypeId] ?? true;
+    collapsedSchemaFieldsByType = {
+      ...collapsedSchemaFieldsByType,
+      [entryTypeId]: !fieldsCollapsed,
+    };
+  }
+
+  function buildNodeTypeOptions(schema: MetadataSchema | null): NodeTypeOption[] {
+    const entryTypes = schema?.entry_types ?? {};
+    const childrenByParent: Record<string, string[]> = {};
+    const roots: string[] = [];
+    for (const [typeId, definition] of Object.entries(entryTypes)) {
+      const parent = definition.parent;
+      if (parent && entryTypes[parent]) {
+        childrenByParent[parent] = [...(childrenByParent[parent] ?? []), typeId];
+      } else {
+        roots.push(typeId);
       }
     }
-    for (const entries of Object.values(entriesByLayer)) {
-      entries.sort(([, left], [, right]) => left.name.localeCompare(right.name));
+    const compareByName = (left: string, right: string) => nodeTypeDisplayName(left, entryTypes[left]).localeCompare(nodeTypeDisplayName(right, entryTypes[right]));
+    roots.sort((left, right) => {
+      if (left === "scene") return -1;
+      if (right === "scene") return 1;
+      if (left === "lore_entry") return -1;
+      if (right === "lore_entry") return 1;
+      return compareByName(left, right);
+    });
+    for (const children of Object.values(childrenByParent)) {
+      children.sort(compareByName);
     }
-    return entriesByLayer;
+
+    const options: NodeTypeOption[] = [];
+    const append = (typeId: string, depth: number) => {
+      const definition = entryTypes[typeId];
+      if (!definition) return;
+      options.push({
+        id: typeId,
+        label: nodeTypeDisplayName(typeId, definition),
+        depth,
+        definition,
+      });
+      for (const childId of childrenByParent[typeId] ?? []) {
+        append(childId, depth + 1);
+      }
+    };
+    for (const rootId of roots) {
+      append(rootId, 0);
+    }
+    return options;
+  }
+
+  function buildNodeTypeTree(schema: MetadataSchema | null, kind: "scene" | "lore"): NodeTypeTreeNode[] {
+    const entryTypes = schema?.entry_types ?? {};
+    const childrenByParent: Record<string, string[]> = {};
+    const roots: string[] = [];
+    for (const [typeId, definition] of Object.entries(entryTypes)) {
+      if (definition.kind !== kind) continue;
+      const parent = definition.parent;
+      if (parent && entryTypes[parent]?.kind === kind) {
+        childrenByParent[parent] = [...(childrenByParent[parent] ?? []), typeId];
+      } else {
+        roots.push(typeId);
+      }
+    }
+    const compareByName = (left: string, right: string) => nodeTypeDisplayName(left, entryTypes[left]).localeCompare(nodeTypeDisplayName(right, entryTypes[right]));
+    for (const children of Object.values(childrenByParent)) {
+      children.sort(compareByName);
+    }
+    const rootIds = kind === "lore" && entryTypes.lore_entry ? ["lore_entry"] : roots.sort(compareByName);
+    const buildNode = (typeId: string, depth: number): NodeTypeTreeNode | null => {
+      const definition = entryTypes[typeId];
+      if (!definition || definition.kind !== kind) return null;
+      const children = (childrenByParent[typeId] ?? [])
+        .map((childId) => buildNode(childId, depth + 1))
+        .filter((child): child is NodeTypeTreeNode => Boolean(child));
+      return {
+        id: typeId,
+        label: nodeTypeDisplayName(typeId, definition),
+        depth,
+        definition,
+        children,
+      };
+    };
+    return rootIds.map((typeId) => buildNode(typeId, 0)).filter((node): node is NodeTypeTreeNode => Boolean(node));
+  }
+
+  function nodeTypeDisplayName(typeId: string, definition: EntryTypeDefinition | undefined) {
+    if (typeId === "scene") return "Scenes";
+    if (typeId === "lore_entry") return "Lore Entries";
+    return definition?.name ?? typeId;
+  }
+
+  function schemaTypeSource(typeId: string | null) {
+    return typeId ? metadataSchemaOverview?.entry_type_sources[typeId] : null;
+  }
+
+  function sourceLayerIndex(source: { layer_id: string; built_in: boolean } | undefined | null) {
+    if (!source || source.built_in) return 0;
+    return Math.max(0, metadataSchemaLayers.findIndex((layer) => layer.id === source.layer_id) + 1);
+  }
+
+  function sourceBadgeLabel(source: { layer_label: string; built_in: boolean } | undefined | null) {
+    return source?.built_in ? "System" : (source?.layer_label ?? "Unknown");
   }
 
   function fieldTypeLabel(type: MetadataFieldType) {
@@ -517,10 +638,12 @@
     return labels[type] ?? type;
   }
 
-  function openSchemaFieldDetail(fieldId: string) {
+  function openSchemaFieldDetail(fieldId: string, entryTypeId = schemaFieldEntryType) {
     const field = metadataSchema?.fields[fieldId];
     if (!field) return;
-    const entryTypeId = entryTypeIdsForField(fieldId, schemaFieldKind)[0] ?? defaultSchemaEntryType(schemaFieldKind);
+    const targetEntryTypeId = fieldAppliesToEntryType(fieldId, entryTypeId)
+      ? entryTypeId
+      : (entryTypeIdsForField(fieldId, schemaFieldKind)[0] ?? defaultSchemaEntryType(schemaFieldKind));
     selectedSchemaFieldId = fieldId;
     schemaFieldId = fieldId;
     schemaFieldName = field.name;
@@ -539,48 +662,12 @@
             : field.type;
     schemaFieldOptions = field.options.join(", ");
     schemaFieldLayerId = metadataSchemaOverview?.field_sources[fieldId]?.built_in ? projectSchemaLayerId() : (metadataSchemaOverview?.field_sources[fieldId]?.layer_id ?? projectSchemaLayerId());
-    schemaFieldEntryType = entryTypeId;
+    schemaFieldEntryType = targetEntryTypeId;
     schemaFieldPaneOpen = true;
     focusPane("schema_field");
   }
 
-  function openSystemSceneTypeDetail() {
-    const sceneType = metadataSchema?.entry_types.scene;
-    selectedSchemaFieldId = "system:scene_type";
-    schemaFieldId = "scene";
-    schemaFieldName = sceneType?.name ?? "Scene";
-    schemaFieldType = "text";
-    schemaFieldKind = "scene";
-    schemaFieldReadonly = true;
-    schemaFieldReadonlyTypeLabel = "Scene Type";
-    schemaFieldAllowMultiple = false;
-    schemaFieldReferenceTarget = "lore";
-    schemaFieldOptions = "";
-    schemaFieldLayerId = "built_in";
-    schemaFieldEntryType = "scene";
-    schemaFieldPaneOpen = true;
-    focusPane("schema_field");
-  }
-
-  function openSystemLoreTypeDetail(typeId = "lore_note") {
-    const entryType = metadataSchema?.entry_types[typeId];
-    selectedSchemaFieldId = `system:${typeId}_type`;
-    schemaFieldId = typeId;
-    schemaFieldName = entryType?.name ?? "Entry";
-    schemaFieldType = "text";
-    schemaFieldKind = "lore";
-    schemaFieldReadonly = true;
-    schemaFieldReadonlyTypeLabel = "Entry Type";
-    schemaFieldAllowMultiple = false;
-    schemaFieldReferenceTarget = "lore";
-    schemaFieldOptions = "";
-    schemaFieldLayerId = "built_in";
-    schemaFieldEntryType = typeId;
-    schemaFieldPaneOpen = true;
-    focusPane("schema_field");
-  }
-
-  function createSchemaFieldDraft(layerId = projectSchemaLayerId()) {
+  function createSchemaFieldDraft(layerId = projectSchemaLayerId(), entryTypeId = schemaFieldEntryType) {
     selectedSchemaFieldId = null;
     schemaFieldId = "";
     schemaFieldName = "";
@@ -591,22 +678,57 @@
     schemaFieldReferenceTarget = "lore";
     schemaFieldOptions = "";
     schemaFieldLayerId = layerId;
-    schemaFieldEntryType = defaultSchemaEntryType(schemaFieldKind);
+    schemaFieldEntryType = entryTypeId;
     schemaFieldPaneOpen = true;
     focusPane("schema_field");
   }
 
-  function openSchemaForCustomData(entryType: string, kind: "scene" | "lore") {
-    schemaPaneOpen = true;
-    schemaFieldKind = kind;
-    schemaFieldEntryType = entryType || defaultSchemaEntryType(kind);
-    focusPane("schema");
+  function createSchemaTypeDraft(layerId = projectSchemaLayerId(), parentTypeId = "") {
+    selectedSchemaTypeId = null;
+    schemaTypeId = "";
+    schemaTypeName = "";
+    const parentType = parentTypeId ? metadataSchema?.entry_types[parentTypeId] : null;
+    schemaTypeKind = parentType?.kind === "scene" ? "scene" : parentType?.kind === "lore" ? "lore" : schemaFieldKind;
+    schemaTypeParent = parentTypeId || (schemaSelectedEntryType?.abstract || schemaFieldEntryType !== "scene" ? schemaFieldEntryType : defaultSchemaParentType(schemaFieldKind));
+    schemaTypeAbstract = false;
+    schemaTypeReadonly = false;
+    schemaTypeLayerId = layerId;
+    schemaTypePaneOpen = true;
+    focusPane("schema_type");
   }
 
-  function updateSchemaFieldKind(value: string) {
-    schemaFieldKind = value === "lore" ? "lore" : "scene";
-    schemaFieldEntryType = defaultSchemaEntryType(schemaFieldKind);
-    selectedSchemaFieldId = null;
+  function openSchemaTypeDetail(typeId: string) {
+    const entryType = metadataSchema?.entry_types[typeId];
+    if (!entryType) return;
+    const source = schemaTypeSource(typeId);
+    selectedSchemaTypeId = typeId;
+    schemaTypeId = typeId;
+    schemaTypeName = entryType.name;
+    schemaTypeKind = entryType.kind === "scene" ? "scene" : "lore";
+    schemaTypeParent = entryType.parent ?? "";
+    schemaTypeAbstract = Boolean(entryType.abstract);
+    schemaTypeReadonly = Boolean(source?.built_in);
+    schemaTypeLayerId = source?.built_in ? projectSchemaLayerId() : (source?.layer_id ?? projectSchemaLayerId());
+    schemaTypePaneOpen = true;
+    focusPane("schema_type");
+  }
+
+  function updateSchemaTypeName(value: string) {
+    schemaTypeName = value;
+    if (!schemaTypeReadonly) {
+      schemaTypeId = slugifyFieldId(value);
+    }
+  }
+
+  function defaultSchemaParentType(kind: "scene" | "lore") {
+    if (kind === "lore" && metadataSchema?.entry_types.lore_entry) return "lore_entry";
+    return "";
+  }
+
+  function openSchemaForCustomData(entryType: string, kind: "scene" | "lore") {
+    schemaPaneOpen = true;
+    schemaFieldEntryType = entryType || defaultSchemaEntryType(kind);
+    focusPane("schema");
   }
 
   function defaultSchemaEntryType(kind: "scene" | "lore") {
@@ -619,49 +741,43 @@
       .map(([typeId]) => typeId);
   }
 
-  function closeSchemaPane(id: "schema" | "schema_field") {
+  function closeSchemaPane(id: "schema" | "schema_field" | "schema_type") {
     if (id === "schema") schemaPaneOpen = false;
-    else schemaFieldPaneOpen = false;
+    else if (id === "schema_field") schemaFieldPaneOpen = false;
+    else schemaTypePaneOpen = false;
   }
 
-  function selectSchemaLayer(layerId: string) {
-    if (!schemaFieldPaneOpen) createSchemaFieldDraft(layerId);
-    else if (selectedSchemaFieldId) return;
-    schemaFieldLayerId = layerId;
+  function startSchemaTypeDrag(typeId: string) {
+    draggedSchemaTypeId = typeId;
   }
 
-  function startSchemaFieldDrag(fieldId: string) {
-    draggedSchemaFieldId = fieldId;
-  }
-
-  async function dropSchemaFieldOnLayer(layerId: string) {
-    if (draggedSchemaFieldId) {
-      const fieldId = draggedSchemaFieldId;
-      const source = metadataSchemaOverview?.field_sources[fieldId];
-      draggedSchemaFieldId = null;
-      if (source?.built_in) {
-        status = "System fields cannot be moved";
-        return;
-      }
-      if (source?.layer_id === layerId) {
-        openSchemaFieldDetail(fieldId);
-        return;
-      }
-      await run(async () => {
-        metadataSchema = await api.moveMetadataField(fieldId, layerId, schemaFieldEntryType);
-        await refreshMetadataSchema();
-        validation = await api.validateProject();
-        selectedSchemaFieldId = fieldId;
-        schemaFieldLayerId = layerId;
-        status = `Moved ${fieldId} to ${layerLabel(layerId)}`;
-      });
-    } else if (!schemaFieldPaneOpen) {
-      createSchemaFieldDraft(layerId);
-      draggedSchemaFieldId = null;
-    } else {
-      schemaFieldLayerId = layerId;
-      draggedSchemaFieldId = null;
+  async function dropSchemaTypeOnParent(parentTypeId: string) {
+    const typeId = draggedSchemaTypeId;
+    draggedSchemaTypeId = null;
+    if (!typeId || typeId === parentTypeId) return;
+    const entryType = metadataSchema?.entry_types[typeId];
+    const parentType = metadataSchema?.entry_types[parentTypeId];
+    if (!entryType || !parentType || entryType.kind !== parentType.kind) return;
+    const source = schemaTypeSource(typeId);
+    if (!source || source.built_in) {
+      status = "System node types cannot be moved";
+      return;
     }
+    await run(async () => {
+      metadataSchema = await api.upsertMetadataEntryType(
+        source.layer_id,
+        typeId,
+        {
+          ...entryType,
+          parent: parentTypeId,
+        },
+        true,
+      );
+      await refreshMetadataSchema();
+      validation = await api.validateProject();
+      selectedSchemaTypeId = typeId;
+      status = `Moved ${entryType.name} under ${parentType.name}`;
+    });
   }
 
   function schemaFieldSaveType(): MetadataFieldType {
@@ -719,6 +835,52 @@
       selectedSchemaFieldId = nextFieldId;
       status = "Updated metadata schema";
     });
+  }
+
+  async function saveSchemaType() {
+    if (!schemaTypeLayerId) return;
+    await run(async () => {
+      const previousTypeId = selectedSchemaTypeId && !schemaTypeReadonly ? selectedSchemaTypeId : null;
+      const nextTypeId = schemaTypeId.trim();
+      const nextType: EntryTypeDefinition = {
+        name: schemaTypeName.trim() || nextTypeId,
+        kind: schemaTypeKind,
+        parent: schemaTypeParent || null,
+        abstract: schemaTypeAbstract,
+        fields: previousTypeId ? (metadataSchema?.entry_types[previousTypeId]?.own_fields ?? metadataSchema?.entry_types[previousTypeId]?.fields ?? []) : [],
+      };
+      if (previousTypeId && previousTypeId !== nextTypeId) {
+        status = "Renaming node types is not available yet";
+        return;
+      }
+      metadataSchema = await api.upsertMetadataEntryType(schemaTypeLayerId, nextTypeId, nextType, Boolean(previousTypeId));
+      await refreshMetadataSchema();
+      validation = await api.validateProject();
+      selectedSchemaTypeId = nextTypeId;
+      schemaFieldEntryType = nextTypeId;
+      status = "Updated node type";
+    });
+  }
+
+  function requestDeleteSchemaType() {
+    if (!selectedSchemaTypeId || schemaTypeReadonly) return;
+    const typeName = schemaTypeName || selectedSchemaTypeId;
+    confirmation = {
+      title: "Delete Node Type",
+      message: `Delete "${typeName}"? Existing documents using this type must be changed first.`,
+      confirmLabel: "Delete Type",
+      destructive: true,
+      onConfirm: () => deleteSchemaType(selectedSchemaTypeId!),
+    };
+  }
+
+  async function deleteSchemaType(typeId: string) {
+    metadataSchema = await api.deleteMetadataEntryType(typeId);
+    await refreshMetadataSchema();
+    validation = await api.validateProject();
+    selectedSchemaTypeId = null;
+    schemaTypePaneOpen = false;
+    status = `Deleted ${typeId}`;
   }
 
   function requestDeleteSchemaField() {
@@ -1365,6 +1527,10 @@
     <div class="pane-content project-panel">
       <h1>Local Writer</h1>
       <label>
+        Projects base folder
+        <input bind:value={projectsBaseFolder} placeholder="C:\path\to\writing-base" />
+      </label>
+      <label>
         Project folder
         <div class="path-picker-row">
           <input bind:value={projectPath} placeholder="C:\path\to\my-novel" />
@@ -1376,15 +1542,11 @@
         <input bind:value={projectTitle} />
       </label>
       <div class="button-row">
-        <button type="button" on:click={createProject}>Create</button>
-        <button type="button" on:click={openProject}>Open</button>
+        <button type="button" disabled={!projectsBaseFolder.trim() || !projectPath.trim()} on:click={createProject}>Create</button>
+        <button type="button" disabled={!projectsBaseFolder.trim() || !projectPath.trim()} on:click={openProject}>Open</button>
         <button type="button" disabled={!isProjectOpen} on:click={validateProject}>Validate</button>
       </div>
       {#if isProjectOpen}
-        <label>
-          Projects base folder
-          <input bind:value={projectsBaseFolder} placeholder="Folder to search upward from for metadata.schema.yaml" />
-        </label>
         <div class="button-row">
           <button type="button" on:click={updateProjectSettings}>Apply Base Folder</button>
         </div>
@@ -1492,102 +1654,85 @@
     <header class="pane-header" role="button" tabindex="0" aria-label="Move Custom Data pane" on:keydown={(event) => handlePaneHeaderKeydown(event, "schema")} on:mousedown={(event) => startPaneDrag(event, "schema")}>
       <h2>Custom Data</h2>
       <div class="pane-header-actions">
-        <button class="pin-button" type="button" on:mousedown={(event) => event.stopPropagation()} on:click={() => createSchemaFieldDraft()}>+ Field</button>
+        <button class="pin-button" type="button" on:mousedown={(event) => event.stopPropagation()} on:click={() => createSchemaTypeDraft()}>+ Type</button>
         <button class="pin-button" type="button" on:mousedown={(event) => event.stopPropagation()} on:click={() => closeSchemaPane("schema")}>Close</button>
       </div>
     </header>
     <div class="pane-content schema-list">
-      <label>
-        Field group
-        <select value={schemaFieldKind} on:change={(event) => updateSchemaFieldKind(event.currentTarget.value)}>
-          <option value="scene">Scenes</option>
-          <option value="lore">Lore Entries</option>
-        </select>
-      </label>
-      <section class="schema-layer-group system" role="group" aria-label="System custom fields">
-        <div class="schema-layer-heading">
-          <div class="schema-layer-title">
-            <strong>System</strong>
-            <small>Managed by the app</small>
-          </div>
-        </div>
-
-        <div class="schema-layer-fields">
-          {#if schemaFieldKind === "scene"}
-            <button class:active={selectedSchemaFieldId === "system:scene_type"} class="schema-row system-row" type="button" on:click={openSystemSceneTypeDetail}>
-              <span class="drag-handle muted-handle" aria-hidden="true">::</span>
-              <span>
-                <strong>Scene Type</strong>
-                <small>scene · Scene Type</small>
-              </span>
-            </button>
-          {:else}
-            {#each schemaEntryTypes as [typeId, definition]}
-              <button class:active={selectedSchemaFieldId === `system:${typeId}_type`} class="schema-row system-row" type="button" on:click={() => openSystemLoreTypeDetail(typeId)}>
-                <span class="drag-handle muted-handle" aria-hidden="true">::</span>
-                <span>
-                  <strong>{definition.name} Type</strong>
-                  <small>{typeId} · Entry Type</small>
-                </span>
-              </button>
-            {/each}
-          {/if}
-          {#each systemSchemaFieldEntries as [fieldId, field]}
-            <button class:active={selectedSchemaFieldId === fieldId} class="schema-row system-row" type="button" on:click={() => openSchemaFieldDetail(fieldId)}>
-              <span class="drag-handle muted-handle" aria-hidden="true">::</span>
-              <span>
-                <strong>{field.name}</strong>
-                <small>{fieldId} · {fieldTypeLabel(field.type)}</small>
-              </span>
-            </button>
-          {/each}
-        </div>
-      </section>
-
-      {#each metadataSchemaLayers as layer}
-        {@const layerFields = schemaFieldEntriesByLayer[layer.id] ?? []}
-        <section
-          class:active={schemaFieldLayerId === layer.id}
-          class="schema-layer-group"
-          role="group"
-          aria-label={`${layer.label} custom fields`}
-          on:dragover|preventDefault
-          on:drop|preventDefault={() => dropSchemaFieldOnLayer(layer.id)}
-        >
-          <div class="schema-layer-heading">
-            <button class="schema-layer-title" type="button" on:click={() => selectSchemaLayer(layer.id)}>
-              <strong>{layer.label}</strong>
-              <small>{layer.exists ? layer.folder_path : "No schema file yet"}</small>
-            </button>
-            <button class="pin-button" type="button" on:click={() => createSchemaFieldDraft(layer.id)}>+ New field here</button>
-          </div>
-
-          <div class="schema-layer-fields">
-            {#each layerFields as [fieldId, field]}
-              <button
-                class:active={selectedSchemaFieldId === fieldId}
-                class="schema-row"
-                draggable="true"
-                type="button"
-                on:click={() => openSchemaFieldDetail(fieldId)}
-                on:dragstart={() => startSchemaFieldDrag(fieldId)}
-                on:dragend={() => (draggedSchemaFieldId = null)}
-              >
-                <span class="drag-handle" aria-hidden="true">::</span>
-                <span>
-                  <strong>{field.name}</strong>
-                  <small>{fieldId} · {fieldTypeLabel(field.type)}</small>
-                </span>
-              </button>
-            {/each}
-            {#if layerFields.length === 0}
-              <p class="muted">No fields defined at this level.</p>
-            {/if}
-          </div>
-        </section>
-      {/each}
+      <div class="schema-context-heading">
+        <strong>{schemaFieldKind === "lore" ? "Lore Entry Types" : "Scene Types"}</strong>
+        <small>Drag a custom type onto another type to change its parent.</small>
+      </div>
+      <div class="schema-node-tree" aria-label={schemaFieldKind === "lore" ? "Lore entry type tree" : "Scene type tree"}>
+        {#each schemaNodeTypeTree as node}
+          {@render renderNodeTypeCard(node)}
+        {/each}
+        {#if schemaNodeTypeTree.length === 0}
+          <p class="muted">No node types defined for this context.</p>
+        {/if}
+      </div>
     </div>
     <button class="pane-resize" type="button" aria-label="Resize Custom Data pane" on:keydown={(event) => handlePaneResizeKeydown(event, "schema")} on:mousedown={(event) => startPaneResize(event, "schema")}></button>
+  </section>
+
+  <!-- svelte-ignore a11y_no_noninteractive_element_interactions -->
+  <section class:hidden-pane={!isProjectOpen || !schemaTypePaneOpen} class="pane schema-type-pane" data-pane-id="schema_type" style={paneStyle("schema_type")} aria-label="Node Type pane" on:mousedown={() => focusPane("schema_type")}>
+    <header class="pane-header" role="button" tabindex="0" aria-label="Move Node Type pane" on:keydown={(event) => handlePaneHeaderKeydown(event, "schema_type")} on:mousedown={(event) => startPaneDrag(event, "schema_type")}>
+      <h2>Node Type</h2>
+      <div class="pane-header-actions">
+        <button class="pin-button" type="button" on:mousedown={(event) => event.stopPropagation()} on:click={() => closeSchemaPane("schema_type")}>Close</button>
+      </div>
+    </header>
+    <div class="pane-content schema-editor">
+      {#if schemaTypeReadonly}
+        <div class="schema-target-layer">
+          <strong>Scope</strong>
+          <span>System</span>
+        </div>
+      {:else}
+        <label>
+          Save layer
+          <select bind:value={schemaTypeLayerId}>
+            {#each metadataSchemaLayers as layer}
+              <option value={layer.id}>{layer.label}</option>
+            {/each}
+          </select>
+        </label>
+      {/if}
+      <label>
+        Display name
+        <input readonly={schemaTypeReadonly} value={schemaTypeName} placeholder="Faction" on:input={(event) => updateSchemaTypeName(event.currentTarget.value)} />
+      </label>
+      <label>
+        Type ID
+        <input
+          aria-label="Generated Type ID"
+          title="Generated from the type name"
+          value={schemaTypeId}
+          readonly
+          placeholder="faction"
+        />
+      </label>
+      <label class="inline-check">
+        <input type="checkbox" disabled={schemaTypeReadonly} bind:checked={schemaTypeAbstract} />
+        Abstract base type
+      </label>
+      {#if selectedSchemaTypeId}
+        <div class="schema-target-layer">
+          <strong>Effective fields</strong>
+          <span>{metadataSchema?.entry_types[selectedSchemaTypeId]?.fields.length ?? 0}</span>
+        </div>
+      {/if}
+      {#if !schemaTypeReadonly}
+        <div class="button-row">
+          <button type="button" disabled={!schemaTypeLayerId || !schemaTypeId.trim() || !schemaTypeName.trim()} on:click={saveSchemaType}>Save Type</button>
+          {#if selectedSchemaTypeId}
+            <button class="danger-button" type="button" on:click={requestDeleteSchemaType}>Delete</button>
+          {/if}
+        </div>
+      {/if}
+    </div>
+    <button class="pane-resize" type="button" aria-label="Resize Node Type pane" on:keydown={(event) => handlePaneResizeKeydown(event, "schema_type")} on:mousedown={(event) => startPaneResize(event, "schema_type")}></button>
   </section>
 
   <!-- svelte-ignore a11y_no_noninteractive_element_interactions -->
@@ -1603,16 +1748,6 @@
         <strong>{schemaFieldReadonly ? "Scope" : selectedSchemaFieldId ? "Defined at" : "Save layer"}</strong>
         <span>{schemaFieldReadonly ? "System" : layerLabel(schemaFieldLayerId)}</span>
       </div>
-      {#if !schemaFieldReadonly}
-        <label>
-          Add to {schemaFieldKind === "lore" ? "entry" : "scene"} type
-          <select bind:value={schemaFieldEntryType}>
-            {#each schemaEntryTypes as [typeId, definition]}
-              <option value={typeId}>{definition.name}</option>
-            {/each}
-          </select>
-        </label>
-      {/if}
       <label>
         Display name
         <input readonly={schemaFieldReadonly} value={schemaFieldName} placeholder="POV Character" on:input={(event) => updateSchemaFieldName(event.currentTarget.value)} />
@@ -1935,4 +2070,69 @@
   {#each nodeChildren(node) as child}
     {@render renderTree(child, depth + 1)}
   {/each}
+{/snippet}
+
+{#snippet renderNodeTypeCard(node: NodeTypeTreeNode)}
+  {@const typeSource = schemaTypeSource(node.id)}
+  {@const fieldEntries = fieldEntriesForEntryType(node.id)}
+  {@const fieldsCollapsed = collapsedSchemaFieldsByType[node.id] ?? true}
+  <section
+    class:active={selectedSchemaTypeId === node.id}
+    class="schema-node-card"
+    draggable={!typeSource?.built_in}
+    role="group"
+    aria-label={`${node.label} node type`}
+    style={`--source-index: ${sourceLayerIndex(typeSource)}`}
+    on:dragstart={() => {
+      if (!typeSource?.built_in) startSchemaTypeDrag(node.id);
+    }}
+    on:dragend={() => (draggedSchemaTypeId = null)}
+    on:dragover|preventDefault
+    on:drop|preventDefault={() => dropSchemaTypeOnParent(node.id)}
+  >
+    <div class="schema-node-card-main">
+      <button class="schema-node-title" type="button" on:click={() => openSchemaTypeDetail(node.id)}>
+        <span>
+          <strong>{node.label}</strong>
+          <small>{node.id} · {node.definition.abstract ? "Abstract " : ""}Node Type</small>
+        </span>
+      </button>
+      <span class="schema-source-badge" style={`--source-index: ${sourceLayerIndex(typeSource)}`}>{sourceBadgeLabel(typeSource)}</span>
+      <div class="schema-node-actions">
+        <button class="pin-button" type="button" on:click={() => createSchemaTypeDraft(schemaTypeLayerId || projectSchemaLayerId(), node.id)}>+ Type</button>
+        <button class="pin-button" type="button" on:click={() => createSchemaFieldDraft(schemaTypeLayerId || projectSchemaLayerId(), node.id)}>+ Field</button>
+      </div>
+    </div>
+    <section class="schema-node-fields" aria-label={`${node.label} fields`}>
+      <button class="schema-node-fields-toggle" type="button" aria-expanded={!fieldsCollapsed} on:click={() => toggleSchemaFieldsForType(node.id)}>
+        <span class:collapsed={fieldsCollapsed} class="lore-group-caret">▾</span>
+        <span>Fields</span>
+        <small>{fieldEntries.length}</small>
+      </button>
+      {#if !fieldsCollapsed}
+        <div class="schema-node-field-list">
+          {#each fieldEntries as [fieldId, field]}
+            {@const fieldSource = metadataSchemaOverview?.field_sources[fieldId]}
+            <button class="schema-node-field-row" type="button" on:click={() => openSchemaFieldDetail(fieldId, node.id)}>
+              <span>
+                <strong>{field.name}</strong>
+                <small>{fieldId} · {fieldTypeLabel(field.type)}</small>
+              </span>
+              <span class="schema-source-badge" style={`--source-index: ${sourceLayerIndex(fieldSource)}`}>{sourceBadgeLabel(fieldSource)}</span>
+            </button>
+          {/each}
+          {#if fieldEntries.length === 0}
+            <p class="muted">No local fields defined on this type.</p>
+          {/if}
+        </div>
+      {/if}
+    </section>
+    {#if node.children.length > 0}
+      <div class="schema-node-children">
+        {#each node.children as child}
+          {@render renderNodeTypeCard(child)}
+        {/each}
+      </div>
+    {/if}
+  </section>
 {/snippet}

@@ -78,7 +78,9 @@ export type EntryTypeDefinition = {
   name: string;
   kind: string;
   parent?: string | null;
+  abstract?: boolean;
   fields: string[];
+  own_fields?: string[];
 };
 
 export type MetadataSchema = {

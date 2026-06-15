@@ -20,6 +20,8 @@ incremental progress, and understandable code over fashionable complexity.
 - Acts, chapters, sequences, and other groupings organize scenes.
 - Scene prose is stored as Markdown with YAML front matter.
 - Lore is stored as Markdown entries with YAML front matter.
+- Markdown front matter owns stable node IDs. Filenames are user-facing storage
+  paths and are not canonical identity.
 - Lore entries have schema-driven entry types, tags, aliases, references, and
   Markdown bodies.
 - Metadata schemas are layered from a configured projects base folder down to

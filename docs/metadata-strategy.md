@@ -37,10 +37,18 @@ Structure for now. Later, Manuscript Structure can become an ordered view over
 entities, but that migration is intentionally separate from the first metadata
 slice.
 
+Canonical node identity lives in Markdown front matter, not in the filename.
+The app may create machine-generated filenames today, and users may later
+rename files to human-readable names. References and Manuscript Structure scene
+links should use the stable front-matter `id`. When an older file has no
+front-matter `id`, the backend uses the filename stem as a legacy fallback and
+validation reports that missing ID.
+
 ## Canonical Ownership
 
 - Entry body text is stored in the entry Markdown file.
 - Entry metadata values are stored in the entry Markdown file's YAML front matter.
+- Entry identity is stored in the entry Markdown file's YAML front matter.
 - Metadata field and entry-type definitions are stored in schema files.
 - Computed metadata values are derived from canonical files and are not stored as canonical values.
 - Search indexes and caches are derived and rebuildable.
@@ -228,6 +236,15 @@ metadata fields. Structured search can later support filters such as:
 - `word_count > 1200`
 
 Entity references should be stored by stable ID and displayed by resolved name.
+The backend maintains a minimal in-memory identity index while a project is
+open:
+
+- file path -> node ID
+- node ID -> file path, kind, and entry type
+
+This index is derived by scanning front matter in `scenes/` and `lore/`; it is
+not canonical and can be rebuilt at any time. It deliberately does not include
+aliases, tags, or search text.
 
 ## Malformed Front Matter
 
@@ -265,6 +282,10 @@ Implemented:
 - Schema-driven metadata UI for Scenes and Lore Entries.
 - Lore Entries with entry subtypes, tags, aliases, references, and Markdown
   bodies.
+- Stable front-matter node IDs with filename-stem fallback for older files.
+- In-memory identity index for resolving node IDs to files and validating
+  reference targets.
+- Reference field validation for missing nodes and wrong target kind/entry type.
 - Known tags in `tags.yaml`, with case-insensitive matching and backend casing
   as authoritative.
 - Custom Data UI that displays node types as a nested tree, with local fields
@@ -279,6 +300,8 @@ Outstanding:
   Entries, Prompt Entries, and eventually Manuscript Structure entities.
 - Add full field binding management from node cards, including add/remove/delete
   flows and clearer scope controls.
+- Add author-friendly reference picker controls that resolve IDs to names in
+  the UI.
 - Add Prompt Entries.
 - Decide how Manuscript Structure nodes become node-backed without disrupting
   ordering and hierarchy.

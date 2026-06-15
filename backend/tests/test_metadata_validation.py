@@ -605,6 +605,7 @@ class MetadataValidationTests(unittest.TestCase):
 
     def test_lore_entry_round_trips_metadata(self) -> None:
         entry = self.service.create_lore_entry(CreateLoreEntryRequest(title="Seren", entry_type="character"))
+        place = self.service.create_lore_entry(CreateLoreEntryRequest(title="Taverna", entry_type="place"))
 
         saved = self.service.save_lore_entry(
             entry.id,
@@ -616,7 +617,7 @@ class MetadataValidationTests(unittest.TestCase):
                 metadata={
                     "aliases": ["Ren"],
                     "tags": ["crew"],
-                    "home_place": "lore_home",
+                    "home_place": place.id,
                     "appears_in_scenes": [self.scene_id],
                 },
             ),
@@ -631,6 +632,78 @@ class MetadataValidationTests(unittest.TestCase):
         self.assertIn("captain with a secret", listed_entry.body_markdown)
         front_matter, _ = self.service._read_markdown_with_front_matter(self.root / "lore" / f"{entry.id}.md", strict=True)
         self.assertNotIn("status", front_matter)
+
+    def test_lore_entry_can_be_read_after_file_rename_by_front_matter_id(self) -> None:
+        entry = self.service.create_lore_entry(CreateLoreEntryRequest(title="Robert Smith", entry_type="character"))
+        original_path = self.root / "lore" / f"{entry.id}.md"
+        renamed_path = self.root / "lore" / "robert-smith.md"
+        original_path.rename(renamed_path)
+
+        loaded = self.service.read_lore_entry(entry.id)
+        listed = self.service.list_lore_entries().entries
+
+        self.assertEqual(loaded.id, entry.id)
+        self.assertEqual(loaded.title, "Robert Smith")
+        self.assertEqual([item.id for item in listed], [entry.id])
+
+    def test_scene_can_be_read_after_file_rename_by_front_matter_id(self) -> None:
+        scene = self.service.read_scene(self.scene_id)
+        original_path = self.root / "scenes" / f"{scene.id}.md"
+        renamed_path = self.root / "scenes" / "opening-scene.md"
+        original_path.rename(renamed_path)
+
+        loaded = self.service.read_scene(scene.id)
+        validation = self.service.validate_project()
+
+        self.assertEqual(loaded.id, scene.id)
+        self.assertFalse(any("Structure references missing scene" in error for error in validation.errors), validation.errors)
+
+    def test_validation_reports_missing_and_duplicate_front_matter_ids(self) -> None:
+        entry = self.service.create_lore_entry(CreateLoreEntryRequest(title="Seren", entry_type="character"))
+        path = self.root / "lore" / f"{entry.id}.md"
+        text = path.read_text(encoding="utf-8")
+        path.write_text(text.replace(f"id: {entry.id}\n", ""), encoding="utf-8")
+
+        validation = self.service.validate_project()
+
+        self.assertTrue(any("missing front matter id" in warning for warning in validation.warnings), validation.warnings)
+
+        duplicate = self.service.create_lore_entry(CreateLoreEntryRequest(title="Other Seren", entry_type="character"))
+        duplicate_path = self.root / "lore" / f"{duplicate.id}.md"
+        duplicate_text = duplicate_path.read_text(encoding="utf-8")
+        duplicate_path.write_text(duplicate_text.replace(f"id: {duplicate.id}\n", f"id: {entry.id}\n"), encoding="utf-8")
+
+        validation = self.service.validate_project()
+
+        self.assertTrue(any("Duplicate front matter id" in error for error in validation.errors), validation.errors)
+
+    def test_reference_fields_validate_missing_and_wrong_targets(self) -> None:
+        character = self.service.create_lore_entry(CreateLoreEntryRequest(title="Seren", entry_type="character"))
+        other_character = self.service.create_lore_entry(CreateLoreEntryRequest(title="Aren", entry_type="character"))
+
+        with self.assertRaisesRegex(ProjectServiceError, "references unknown node missing_place"):
+            self.service.save_lore_entry(
+                character.id,
+                SaveLoreEntryRequest(
+                    title=character.title,
+                    body_markdown=character.body_markdown,
+                    base_revision=character.revision,
+                    entry_type=character.entry_type,
+                    metadata={"home_place": "missing_place"},
+                ),
+            )
+
+        with self.assertRaisesRegex(ProjectServiceError, "expected entry_type place"):
+            self.service.save_lore_entry(
+                character.id,
+                SaveLoreEntryRequest(
+                    title=character.title,
+                    body_markdown=character.body_markdown,
+                    base_revision=character.revision,
+                    entry_type=character.entry_type,
+                    metadata={"home_place": other_character.id},
+                ),
+            )
 
     def test_lore_entry_rejects_scene_entry_type(self) -> None:
         with self.assertRaisesRegex(ProjectServiceError, "non-lore entry_type scene"):

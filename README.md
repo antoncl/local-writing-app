@@ -9,6 +9,8 @@ The app is split into:
 
 The project format is file-based. Scenes are stored as Markdown files with YAML
 front matter, and manuscript arrangement is stored in `manuscript.structure.yaml`.
+Markdown front matter carries each node's stable `id`; filenames are not the
+canonical identity.
 
 ## Current Scope
 

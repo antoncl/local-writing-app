@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from copy import deepcopy
+from dataclasses import dataclass, field
 import hashlib
 import re
 import uuid
@@ -57,6 +58,22 @@ EMBEDDED_TODO_PATTERN = re.compile(
     r"<!--\s*embedded-todo:id=([A-Za-z0-9_-]+);status=(open|done);note=([^\s]*)\s*-->([\s\S]*?)<!--\s*/embedded-todo\s*-->",
 )
 WORD_PATTERN = re.compile(r"[A-Za-z0-9]+(?:['-][A-Za-z0-9]+)?")
+
+
+@dataclass(frozen=True)
+class NodeIndexEntry:
+    id: str
+    kind: str
+    entry_type: str
+    path: Path
+
+
+@dataclass
+class NodeIndex:
+    by_id: dict[str, NodeIndexEntry] = field(default_factory=dict)
+    id_by_path: dict[Path, str] = field(default_factory=dict)
+    warnings: list[str] = field(default_factory=list)
+    errors: list[str] = field(default_factory=list)
 
 DEFAULT_METADATA_SCHEMA: dict[str, Any] = {
     "version": 1,
@@ -304,6 +321,9 @@ class ProjectService:
         warnings: list[str] = []
         errors: list[str] = []
         metadata_schema: MetadataSchema | None = None
+        node_index = self._build_node_index(root)
+        warnings.extend(node_index.warnings)
+        errors.extend(node_index.errors)
 
         for required in ["project.yaml", "manuscript.structure.yaml", "todo.yaml"]:
             if not (root / required).exists():
@@ -316,15 +336,16 @@ class ProjectService:
         except (ProjectServiceError, ValueError) as exc:
             errors.append(f"Invalid metadata schema: {exc}")
 
-        scene_ids = {path.stem for path in (root / "scenes").glob("*.md")}
+        scene_ids = {entry.id for entry in node_index.by_id.values() if entry.kind == "scene"}
         referenced = self._collect_scene_ids(self.read_structure().root)
 
         for scene_id in sorted(referenced - scene_ids):
             errors.append(f"Structure references missing scene {scene_id}.")
         for scene_id in sorted(scene_ids - referenced):
             warnings.append(f"Scene {scene_id} is not in the manuscript structure.")
-        for scene_id in sorted(scene_ids):
-            path = root / "scenes" / f"{scene_id}.md"
+        for entry in sorted((entry for entry in node_index.by_id.values() if entry.kind == "scene"), key=lambda item: item.id):
+            scene_id = entry.id
+            path = entry.path
             try:
                 front_matter, _ = self._read_markdown_with_front_matter(path, strict=True)
                 entry_type = front_matter.get("entry_type", "scene")
@@ -334,12 +355,13 @@ class ProjectService:
                 metadata = self._normalise_metadata(front_matter.get("metadata"), path)
                 status = str(front_matter.get("status") or "draft")
                 if metadata_schema:
-                    errors.extend(self._validate_scene_metadata(scene_id, str(entry_type or "scene"), status, metadata, metadata_schema))
+                    errors.extend(self._validate_scene_metadata(scene_id, str(entry_type or "scene"), status, metadata, metadata_schema, node_index))
             except ProjectServiceError as exc:
                 errors.append(exc.message)
 
-        for path in sorted((root / "lore").glob("*.md")):
-            entry_id = path.stem
+        for entry in sorted((entry for entry in node_index.by_id.values() if entry.kind == "lore"), key=lambda item: item.id):
+            entry_id = entry.id
+            path = entry.path
             try:
                 front_matter, _ = self._read_markdown_with_front_matter(path, strict=True)
                 entry_type = front_matter.get("entry_type", "lore_note")
@@ -348,7 +370,7 @@ class ProjectService:
                     entry_type = "lore_note"
                 metadata = self._normalise_metadata(front_matter.get("metadata"), path)
                 if metadata_schema:
-                    errors.extend(self._validate_lore_entry_metadata(entry_id, str(entry_type or "lore_note"), metadata, metadata_schema))
+                    errors.extend(self._validate_lore_entry_metadata(entry_id, str(entry_type or "lore_note"), metadata, metadata_schema, node_index))
             except ProjectServiceError as exc:
                 errors.append(exc.message)
 
@@ -384,7 +406,8 @@ class ProjectService:
 
     def repair_project(self) -> ProjectValidation:
         root = self._require_project()
-        scene_ids = {path.stem for path in (root / "scenes").glob("*.md")}
+        node_index = self._build_node_index(root)
+        scene_ids = {entry.id for entry in node_index.by_id.values() if entry.kind == "scene"}
         anchors_by_scene = self._read_scene_todo_anchors(scene_ids)
         todos = self.read_todos()
 
@@ -1180,6 +1203,64 @@ class ProjectService:
                 errors.append(f"Metadata field {field_id} has computed settings but is not type computed.")
         return errors
 
+    def _build_node_index(self, root: Path | None = None) -> NodeIndex:
+        root = root or self._require_project()
+        index = NodeIndex()
+        for kind, folder_name, default_entry_type in [
+            ("scene", "scenes", "scene"),
+            ("lore", "lore", "lore_note"),
+        ]:
+            for path in sorted((root / folder_name).glob("*.md")):
+                try:
+                    front_matter = self._read_front_matter_only(path, strict=True)
+                except ProjectServiceError as exc:
+                    index.errors.append(exc.message)
+                    continue
+
+                raw_node_id = front_matter.get("id")
+                if raw_node_id is None:
+                    node_id = path.stem
+                    index.warnings.append(f"{kind.title()} file {path.relative_to(root)} is missing front matter id; using filename stem as legacy id.")
+                elif isinstance(raw_node_id, str) and raw_node_id.strip():
+                    node_id = raw_node_id.strip()
+                else:
+                    node_id = path.stem
+                    index.errors.append(f"{kind.title()} file {path.relative_to(root)} has invalid front matter id; it must be text.")
+
+                raw_entry_type = front_matter.get("entry_type") or default_entry_type
+                entry_type = raw_entry_type if isinstance(raw_entry_type, str) else default_entry_type
+                entry = NodeIndexEntry(id=node_id, kind=kind, entry_type=entry_type, path=path)
+                index.id_by_path[path.resolve()] = node_id
+                if node_id in index.by_id:
+                    other = index.by_id[node_id]
+                    index.errors.append(
+                        f"Duplicate front matter id {node_id} in {other.path.relative_to(root)} and {path.relative_to(root)}."
+                    )
+                    continue
+                index.by_id[node_id] = entry
+        return index
+
+    def _node_id_for_path(self, path: Path, front_matter: dict[str, Any] | None = None) -> str:
+        if front_matter is None:
+            front_matter = self._read_front_matter_only(path, strict=True)
+        raw_node_id = front_matter.get("id")
+        if isinstance(raw_node_id, str) and raw_node_id.strip():
+            return raw_node_id.strip()
+        return path.stem
+
+    def _path_for_node_id(self, node_id: str, kind: str) -> Path:
+        root = self._require_project()
+        index = self._build_node_index(root)
+        entry = index.by_id.get(node_id)
+        if entry and entry.kind == kind:
+            return entry.path
+        fallback_folder = "scenes" if kind == "scene" else "lore"
+        fallback_path = root / fallback_folder / f"{node_id}.md"
+        if fallback_path.exists():
+            return fallback_path
+        label = "Scene" if kind == "scene" else "Lore Entry"
+        raise ProjectServiceError(f"{label} {node_id} does not exist.", 404)
+
     def create_scene(self, request: CreateSceneRequest) -> Scene:
         root = self._require_project()
         scene_id = self._new_id("scene")
@@ -1209,23 +1290,21 @@ class ProjectService:
         return self.read_scene(scene_id)
 
     def read_scene(self, scene_id: str) -> Scene:
-        root = self._require_project()
-        path = root / "scenes" / f"{scene_id}.md"
-        if not path.exists():
-            raise ProjectServiceError(f"Scene {scene_id} does not exist.", 404)
+        path = self._path_for_node_id(scene_id, "scene")
         front_matter, body = self._read_markdown_with_front_matter(path, strict=True)
-        title = str(front_matter.get("title") or scene_id)
+        node_id = self._node_id_for_path(path, front_matter)
+        title = str(front_matter.get("title") or node_id)
         status = str(front_matter.get("status") or "draft")
         raw_entry_type = front_matter.get("entry_type") or "scene"
         if not isinstance(raw_entry_type, str):
-            raise ProjectServiceError(f"Scene {scene_id} has invalid entry_type; it must be text.", 422)
+            raise ProjectServiceError(f"Scene {node_id} has invalid entry_type; it must be text.", 422)
         entry_type = raw_entry_type
         metadata = self._normalise_metadata(front_matter.get("metadata"), path)
-        metadata_errors = self._validate_scene_metadata(scene_id, entry_type, status, metadata, self.read_metadata_schema())
+        metadata_errors = self._validate_scene_metadata(node_id, entry_type, status, metadata, self.read_metadata_schema(), self._build_node_index())
         if metadata_errors:
             raise ProjectServiceError(" ".join(metadata_errors), 422)
         return Scene(
-            id=scene_id,
+            id=node_id,
             title=title,
             body_markdown=body,
             revision=self._revision(path),
@@ -1236,10 +1315,9 @@ class ProjectService:
         )
 
     def save_scene(self, scene_id: str, request: SaveSceneRequest) -> Scene:
-        root = self._require_project()
-        path = root / "scenes" / f"{scene_id}.md"
-        if not path.exists():
-            raise ProjectServiceError(f"Scene {scene_id} does not exist.", 404)
+        path = self._path_for_node_id(scene_id, "scene")
+        front_matter = self._read_front_matter_only(path, strict=True)
+        node_id = self._node_id_for_path(path, front_matter)
         current_revision = self._revision(path)
         if request.base_revision and request.base_revision != current_revision:
             raise ProjectServiceError("Scene changed on disk after it was opened.", 409)
@@ -1252,7 +1330,7 @@ class ProjectService:
         metadata = self._canonicalise_metadata_tags(metadata, schema)
 
         scene = Scene(
-            id=scene_id,
+            id=node_id,
             title=request.title,
             body_markdown=request.body_markdown,
             revision=current_revision,
@@ -1261,28 +1339,30 @@ class ProjectService:
             metadata=metadata,
         )
         metadata_errors = self._validate_scene_metadata(
-            scene_id,
+            node_id,
             scene.entry_type,
             scene.status,
             scene.metadata,
             schema,
+            self._build_node_index(),
         )
         if metadata_errors:
             raise ProjectServiceError(" ".join(metadata_errors), 422)
         self._write_scene_file(path, scene)
-        self._update_scene_title_in_structure(scene_id, request.title)
-        self._remove_missing_scene_todo_anchors(scene_id, request.body_markdown)
-        return self.read_scene(scene_id)
+        self._update_scene_title_in_structure(node_id, request.title)
+        self._remove_missing_scene_todo_anchors(node_id, request.body_markdown)
+        return self.read_scene(node_id)
 
     def delete_scene(self, scene_id: str) -> StructureDocument:
         root = self._require_project()
-        path = root / "scenes" / f"{scene_id}.md"
+        path = self._path_for_node_id(scene_id, "scene")
+        node_id = self._node_id_for_path(path)
         if path.exists():
             path.unlink()
         structure = self.read_structure()
-        self._remove_scene_node(structure.root, scene_id)
+        self._remove_scene_node(structure.root, node_id)
         self._write_yaml(root / "manuscript.structure.yaml", structure.model_dump())
-        self._remove_scene_todos(scene_id)
+        self._remove_scene_todos(node_id)
         return self.read_structure()
 
     def list_lore_entries(self) -> LoreEntryList:
@@ -1290,12 +1370,13 @@ class ProjectService:
         entries: list[LoreEntrySummary] = []
         for path in sorted((root / "lore").glob("*.md")):
             front_matter, body = self._read_markdown_with_front_matter(path, strict=True)
+            entry_id = self._node_id_for_path(path, front_matter)
             raw_entry_type = front_matter.get("entry_type") or "lore_note"
             entry_type = raw_entry_type if isinstance(raw_entry_type, str) else "lore_note"
             entries.append(
                 LoreEntrySummary(
-                    id=path.stem,
-                    title=str(front_matter.get("title") or path.stem),
+                    id=entry_id,
+                    title=str(front_matter.get("title") or entry_id),
                     body_markdown=body,
                     entry_type=entry_type,
                     metadata=self._normalise_metadata(front_matter.get("metadata"), path),
@@ -1329,22 +1410,20 @@ class ProjectService:
         return self.read_lore_entry(entry_id)
 
     def read_lore_entry(self, entry_id: str) -> LoreEntry:
-        root = self._require_project()
-        path = root / "lore" / f"{entry_id}.md"
-        if not path.exists():
-            raise ProjectServiceError(f"Lore Entry {entry_id} does not exist.", 404)
+        path = self._path_for_node_id(entry_id, "lore")
         front_matter, body = self._read_markdown_with_front_matter(path, strict=True)
+        node_id = self._node_id_for_path(path, front_matter)
         raw_entry_type = front_matter.get("entry_type") or "lore_note"
         if not isinstance(raw_entry_type, str):
-            raise ProjectServiceError(f"Lore Entry {entry_id} has invalid entry_type; it must be text.", 422)
+            raise ProjectServiceError(f"Lore Entry {node_id} has invalid entry_type; it must be text.", 422)
         entry_type = raw_entry_type
         metadata = self._normalise_metadata(front_matter.get("metadata"), path)
-        metadata_errors = self._validate_lore_entry_metadata(entry_id, entry_type, metadata, self.read_metadata_schema())
+        metadata_errors = self._validate_lore_entry_metadata(node_id, entry_type, metadata, self.read_metadata_schema(), self._build_node_index())
         if metadata_errors:
             raise ProjectServiceError(" ".join(metadata_errors), 422)
         return LoreEntry(
-            id=entry_id,
-            title=str(front_matter.get("title") or entry_id),
+            id=node_id,
+            title=str(front_matter.get("title") or node_id),
             body_markdown=body,
             revision=self._revision(path),
             entry_type=entry_type,
@@ -1353,10 +1432,9 @@ class ProjectService:
         )
 
     def save_lore_entry(self, entry_id: str, request: SaveLoreEntryRequest) -> LoreEntry:
-        root = self._require_project()
-        path = root / "lore" / f"{entry_id}.md"
-        if not path.exists():
-            raise ProjectServiceError(f"Lore Entry {entry_id} does not exist.", 404)
+        path = self._path_for_node_id(entry_id, "lore")
+        front_matter = self._read_front_matter_only(path, strict=True)
+        node_id = self._node_id_for_path(path, front_matter)
         current_revision = self._revision(path)
         if request.base_revision and request.base_revision != current_revision:
             raise ProjectServiceError("Lore Entry changed on disk after it was opened.", 409)
@@ -1369,7 +1447,7 @@ class ProjectService:
         metadata = self._canonicalise_metadata_tags(metadata, schema)
 
         entry = LoreEntry(
-            id=entry_id,
+            id=node_id,
             title=request.title,
             body_markdown=request.body_markdown,
             revision=current_revision,
@@ -1377,19 +1455,19 @@ class ProjectService:
             metadata=metadata,
         )
         metadata_errors = self._validate_lore_entry_metadata(
-            entry_id,
+            node_id,
             entry.entry_type,
             entry.metadata,
             schema,
+            self._build_node_index(),
         )
         if metadata_errors:
             raise ProjectServiceError(" ".join(metadata_errors), 422)
         self._write_lore_entry_file(path, entry)
-        return self.read_lore_entry(entry_id)
+        return self.read_lore_entry(node_id)
 
     def delete_lore_entry(self, entry_id: str) -> LoreEntryList:
-        root = self._require_project()
-        path = root / "lore" / f"{entry_id}.md"
+        path = self._path_for_node_id(entry_id, "lore")
         if path.exists():
             path.unlink()
         return self.list_lore_entries()
@@ -1465,7 +1543,8 @@ class ProjectService:
                     )
 
             for path in (root / "scenes").rglob("*.md"):
-                _, body = self._read_markdown_with_front_matter(path, strict=True)
+                front_matter, body = self._read_markdown_with_front_matter(path, strict=True)
+                scene_id = self._node_id_for_path(path, front_matter)
                 for match in EMBEDDED_TODO_PATTERN.finditer(body):
                     if match.group(2) != "open":
                         continue
@@ -1476,8 +1555,8 @@ class ProjectService:
                         hits.append(
                             SearchHit(
                                 kind="scene",
-                                file_id=path.stem,
-                                path=scene_paths.get(path.stem, str(path.relative_to(root))),
+                                file_id=scene_id,
+                                path=scene_paths.get(scene_id, str(path.relative_to(root))),
                                 line=body[: match.start()].count("\n") + 1,
                                 excerpt=excerpt,
                                 todo_id=match.group(1),
@@ -1488,7 +1567,8 @@ class ProjectService:
             if request.include_scenes:
                 for path in (root / "scenes").rglob("*.md"):
                     front_matter, body = self._read_markdown_with_front_matter(path, strict=True)
-                    title = str(front_matter.get("title") or path.stem)
+                    scene_id = self._node_id_for_path(path, front_matter)
+                    title = str(front_matter.get("title") or scene_id)
                     status = str(front_matter.get("status") or "draft")
                     entry_type = str(front_matter.get("entry_type") or "scene")
                     metadata = self._normalise_metadata(front_matter.get("metadata"), path)
@@ -1503,8 +1583,8 @@ class ProjectService:
                             hits.append(
                                 SearchHit(
                                     kind="scene",
-                                    file_id=path.stem,
-                                    path=f"{scene_paths.get(path.stem, str(path.relative_to(root)))} metadata",
+                                    file_id=scene_id,
+                                    path=f"{scene_paths.get(scene_id, str(path.relative_to(root)))} metadata",
                                     line=1,
                                     excerpt=f"{label}: {value}",
                                 )
@@ -1514,8 +1594,8 @@ class ProjectService:
                             hits.append(
                                 SearchHit(
                                     kind="scene",
-                                    file_id=path.stem,
-                                    path=scene_paths.get(path.stem, str(path.relative_to(root))),
+                                    file_id=scene_id,
+                                    path=scene_paths.get(scene_id, str(path.relative_to(root))),
                                     line=index,
                                     excerpt=line.strip(),
                                 )
@@ -1523,7 +1603,8 @@ class ProjectService:
             if request.include_lore:
                 for path in (root / "lore").rglob("*.md"):
                     front_matter, body = self._read_markdown_with_front_matter(path, strict=True)
-                    title = str(front_matter.get("title") or path.stem)
+                    entry_id = self._node_id_for_path(path, front_matter)
+                    title = str(front_matter.get("title") or entry_id)
                     entry_type = str(front_matter.get("entry_type") or "lore_note")
                     metadata = self._normalise_metadata(front_matter.get("metadata"), path)
                     searchable_metadata = {
@@ -1536,7 +1617,7 @@ class ProjectService:
                             hits.append(
                                 SearchHit(
                                     kind="lore",
-                                    file_id=path.stem,
+                                    file_id=entry_id,
                                     path=f"Lore / {title} metadata",
                                     line=1,
                                     excerpt=f"{label}: {value}",
@@ -1547,7 +1628,7 @@ class ProjectService:
                             hits.append(
                                 SearchHit(
                                     kind="lore",
-                                    file_id=path.stem,
+                                    file_id=entry_id,
                                     path=f"Lore / {title}",
                                     line=index,
                                     excerpt=line.strip(),
@@ -1602,6 +1683,32 @@ class ProjectService:
                 raise ProjectServiceError(f"Malformed front matter in {path.name}: front matter must be a YAML object.", 422)
             data = {}
         return data, body
+
+    def _read_front_matter_only(self, path: Path, *, strict: bool = False) -> dict[str, Any]:
+        with path.open("r", encoding="utf-8") as handle:
+            first_line = handle.readline()
+            if first_line.strip() != "---":
+                return {}
+            lines: list[str] = []
+            for line in handle:
+                if line.strip() == "---":
+                    break
+                lines.append(line)
+            else:
+                if strict:
+                    raise ProjectServiceError(f"Malformed front matter in {path.name}: missing closing ---.", 422)
+                return {}
+        try:
+            data = yaml.safe_load("".join(lines)) or {}
+        except yaml.YAMLError as exc:
+            if strict:
+                raise ProjectServiceError(f"Malformed front matter in {path.name}: {exc}", 422) from exc
+            return {}
+        if not isinstance(data, dict):
+            if strict:
+                raise ProjectServiceError(f"Malformed front matter in {path.name}: front matter must be a YAML object.", 422)
+            return {}
+        return data
 
     def _write_markdown_with_front_matter(self, path: Path, front_matter: dict[str, Any], body: str) -> None:
         front_matter_text = yaml.safe_dump(front_matter, sort_keys=False, allow_unicode=True).strip()
@@ -1703,6 +1810,7 @@ class ProjectService:
         status: str,
         metadata: dict[str, Any],
         schema: MetadataSchema,
+        node_index: NodeIndex | None = None,
     ) -> list[str]:
         errors = self._validate_entry_metadata(
             label=f"Scene {scene_id}",
@@ -1710,10 +1818,11 @@ class ProjectService:
             expected_kind="scene",
             metadata=metadata,
             schema=schema,
+            node_index=node_index,
         )
         status_field = schema.fields.get("status")
         if status_field:
-            errors.extend(self._validate_metadata_field_value(f"Scene {scene_id}", "status", status, status_field, allow_computed=True))
+            errors.extend(self._validate_metadata_field_value(f"Scene {scene_id}", "status", status, status_field, allow_computed=True, node_index=node_index))
         return errors
 
     def _validate_lore_entry_metadata(
@@ -1722,6 +1831,7 @@ class ProjectService:
         entry_type: str,
         metadata: dict[str, Any],
         schema: MetadataSchema,
+        node_index: NodeIndex | None = None,
     ) -> list[str]:
         return self._validate_entry_metadata(
             label=f"Lore Entry {entry_id}",
@@ -1729,6 +1839,7 @@ class ProjectService:
             expected_kind="lore",
             metadata=metadata,
             schema=schema,
+            node_index=node_index,
         )
 
     def _validate_entry_metadata(
@@ -1739,6 +1850,7 @@ class ProjectService:
         expected_kind: str,
         metadata: dict[str, Any],
         schema: MetadataSchema,
+        node_index: NodeIndex | None = None,
     ) -> list[str]:
         errors: list[str] = []
         entry_type_definition = schema.entry_types.get(entry_type)
@@ -1762,7 +1874,7 @@ class ProjectService:
             if field_id not in allowed_field_ids:
                 errors.append(f"{label} metadata field {field_id} is not defined for entry_type {entry_type}.")
                 continue
-            errors.extend(self._validate_metadata_field_value(label, field_id, value, field))
+            errors.extend(self._validate_metadata_field_value(label, field_id, value, field, node_index=node_index))
         return errors
 
     def _validate_metadata_field_value(
@@ -1773,15 +1885,20 @@ class ProjectService:
         field: MetadataFieldDefinition,
         *,
         allow_computed: bool = False,
+        node_index: NodeIndex | None = None,
     ) -> list[str]:
         if value is None or value == "":
             return []
         if field.type == "computed" and not allow_computed:
             return [f"{label} stores computed metadata field {field_id}; computed fields are derived."]
-        if field.type in {"text", "long_text", "date", "entity_ref"}:
+        if field.type in {"text", "long_text", "date"}:
             if not isinstance(value, str):
                 return [f"{label} metadata field {field_id} must be text."]
             return []
+        if field.type == "entity_ref":
+            if not isinstance(value, str):
+                return [f"{label} metadata field {field_id} must be text."]
+            return self._validate_reference_target(label, field_id, value, field, node_index)
         if field.type == "select":
             if not isinstance(value, str):
                 return [f"{label} metadata field {field_id} must be text."]
@@ -1796,12 +1913,44 @@ class ProjectService:
             if not isinstance(value, bool):
                 return [f"{label} metadata field {field_id} must be true or false."]
             return []
-        if field.type in {"multi_select", "entity_ref_list", "tags"}:
+        if field.type in {"multi_select", "tags"}:
             if not isinstance(value, list):
                 return [f"{label} metadata field {field_id} must be a list."]
             if any(not isinstance(item, str) for item in value):
                 return [f"{label} metadata field {field_id} must contain only text values."]
             return []
+        if field.type == "entity_ref_list":
+            if not isinstance(value, list):
+                return [f"{label} metadata field {field_id} must be a list."]
+            if any(not isinstance(item, str) for item in value):
+                return [f"{label} metadata field {field_id} must contain only text values."]
+            errors: list[str] = []
+            for item in value:
+                errors.extend(self._validate_reference_target(label, field_id, item, field, node_index))
+            return errors
+        return []
+
+    def _validate_reference_target(
+        self,
+        label: str,
+        field_id: str,
+        node_id: str,
+        field: MetadataFieldDefinition,
+        node_index: NodeIndex | None,
+    ) -> list[str]:
+        if not node_id:
+            return []
+        if node_index is None:
+            node_index = self._build_node_index()
+        target = node_index.by_id.get(node_id)
+        if not target:
+            return [f"{label} metadata field {field_id} references unknown node {node_id}."]
+        expected_kind = field.target.get("kind") if field.target else None
+        if expected_kind and target.kind != expected_kind:
+            return [f"{label} metadata field {field_id} references {node_id} but expected kind {expected_kind}."]
+        expected_entry_type = field.target.get("entry_type") if field.target else None
+        if expected_entry_type and target.entry_type != expected_entry_type:
+            return [f"{label} metadata field {field_id} references {node_id} but expected entry_type {expected_entry_type}."]
         return []
 
     def _computed_scene_metadata(self, body_markdown: str) -> dict[str, Any]:
@@ -1866,11 +2015,11 @@ class ProjectService:
         return counts
 
     def _read_scene_todo_anchors(self, scene_ids: set[str]) -> dict[str, set[str]]:
-        root = self._require_project()
         anchors_by_scene: dict[str, set[str]] = {}
         for scene_id in scene_ids:
-            path = root / "scenes" / f"{scene_id}.md"
-            if not path.exists():
+            try:
+                path = self._path_for_node_id(scene_id, "scene")
+            except ProjectServiceError:
                 continue
             _, body = self._read_markdown_with_front_matter(path)
             anchors = self._extract_todo_anchor_ids(body)
@@ -1879,11 +2028,11 @@ class ProjectService:
         return anchors_by_scene
 
     def _read_scene_todo_anchor_counts(self, scene_ids: set[str]) -> dict[str, dict[str, int]]:
-        root = self._require_project()
         counts_by_scene: dict[str, dict[str, int]] = {}
         for scene_id in scene_ids:
-            path = root / "scenes" / f"{scene_id}.md"
-            if not path.exists():
+            try:
+                path = self._path_for_node_id(scene_id, "scene")
+            except ProjectServiceError:
                 continue
             _, body = self._read_markdown_with_front_matter(path)
             counts = self._extract_todo_anchor_counts(body)
@@ -1913,9 +2062,9 @@ class ProjectService:
             self._write_yaml(root / "todo.yaml", todos.model_dump())
 
     def _remove_scene_anchor_comments(self, scene_id: str, anchor_ids: set[str]) -> None:
-        root = self._require_project()
-        path = root / "scenes" / f"{scene_id}.md"
-        if not path.exists():
+        try:
+            path = self._path_for_node_id(scene_id, "scene")
+        except ProjectServiceError:
             return
         front_matter, body = self._read_markdown_with_front_matter(path)
 
@@ -1935,9 +2084,9 @@ class ProjectService:
             self._atomic_write(path, repaired_body)
 
     def _remove_duplicate_scene_anchor_comments(self, scene_id: str) -> None:
-        root = self._require_project()
-        path = root / "scenes" / f"{scene_id}.md"
-        if not path.exists():
+        try:
+            path = self._path_for_node_id(scene_id, "scene")
+        except ProjectServiceError:
             return
         front_matter, body = self._read_markdown_with_front_matter(path)
         seen_anchor_ids: set[str] = set()

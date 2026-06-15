@@ -7,11 +7,15 @@ from fastapi import FastAPI, HTTPException, Query
 from fastapi.middleware.cors import CORSMiddleware
 
 from app.models import (
+    CreateLoreEntryRequest,
     CreateProjectRequest,
     CreateSceneRequest,
     CreateTodoRequest,
     DeleteMetadataFieldRequest,
     DirectoryListing,
+    KnownTags,
+    LoreEntry,
+    LoreEntryList,
     MetadataSchema,
     MetadataSchemaLayers,
     MetadataSchemaOverview,
@@ -20,6 +24,7 @@ from app.models import (
     ProjectInfo,
     ProjectValidation,
     RenameMetadataFieldRequest,
+    SaveLoreEntryRequest,
     SaveSceneRequest,
     Scene,
     SearchRequest,
@@ -124,6 +129,12 @@ def get_metadata_schema_overview() -> MetadataSchemaOverview:
         return service.read_metadata_schema_overview()
 
 
+@app.get("/api/tags", response_model=KnownTags)
+def get_known_tags() -> KnownTags:
+    with translate_errors():
+        return service.read_known_tags()
+
+
 @app.put("/api/metadata/schema/fields", response_model=MetadataSchema)
 def upsert_metadata_field(request: UpsertMetadataFieldRequest) -> MetadataSchema:
     with translate_errors():
@@ -170,6 +181,36 @@ def save_scene(scene_id: str, request: SaveSceneRequest) -> Scene:
 def delete_scene(scene_id: str) -> StructureDocument:
     with translate_errors():
         return service.delete_scene(scene_id)
+
+
+@app.get("/api/lore", response_model=LoreEntryList)
+def list_lore_entries() -> LoreEntryList:
+    with translate_errors():
+        return service.list_lore_entries()
+
+
+@app.post("/api/lore", response_model=LoreEntry)
+def create_lore_entry(request: CreateLoreEntryRequest) -> LoreEntry:
+    with translate_errors():
+        return service.create_lore_entry(request)
+
+
+@app.get("/api/lore/{entry_id}", response_model=LoreEntry)
+def get_lore_entry(entry_id: str) -> LoreEntry:
+    with translate_errors():
+        return service.read_lore_entry(entry_id)
+
+
+@app.put("/api/lore/{entry_id}", response_model=LoreEntry)
+def save_lore_entry(entry_id: str, request: SaveLoreEntryRequest) -> LoreEntry:
+    with translate_errors():
+        return service.save_lore_entry(entry_id, request)
+
+
+@app.delete("/api/lore/{entry_id}", response_model=LoreEntryList)
+def delete_lore_entry(entry_id: str) -> LoreEntryList:
+    with translate_errors():
+        return service.delete_lore_entry(entry_id)
 
 
 @app.get("/api/todos", response_model=TodoDocument)

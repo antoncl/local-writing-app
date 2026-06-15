@@ -1,0 +1,20 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Known Tags Regression</title>
+    <script type="module">
+      import "../src/styles.css";
+      import { mount } from "svelte";
+      import KnownTagsRegression from "./KnownTagsRegression.svelte";
+
+      mount(KnownTagsRegression, {
+        target: document.getElementById("app"),
+      });
+    </script>
+  </head>
+  <body>
+    <div id="app"></div>
+  </body>
+</html>

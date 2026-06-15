@@ -1,5 +1,8 @@
 import type {
   DirectoryListing,
+  KnownTags,
+  LoreEntry,
+  LoreEntryList,
   MetadataFieldDefinition,
   MetadataSchema,
   MetadataSchemaLayers,
@@ -59,6 +62,9 @@ export const api = {
   },
   getMetadataSchemaOverview() {
     return request<MetadataSchemaOverview>("/metadata/schema/overview");
+  },
+  getKnownTags() {
+    return request<KnownTags>("/tags");
   },
   upsertMetadataField(layerId: string, fieldId: string, field: MetadataFieldDefinition, entryType = "scene", allowExisting = true) {
     return request<MetadataSchema>("/metadata/schema/fields", {
@@ -122,6 +128,35 @@ export const api = {
   },
   deleteScene(sceneId: string) {
     return request<StructureDocument>(`/scenes/${sceneId}`, {
+      method: "DELETE",
+    });
+  },
+  listLoreEntries() {
+    return request<LoreEntryList>("/lore");
+  },
+  createLoreEntry(title: string, entryType = "lore_note") {
+    return request<LoreEntry>("/lore", {
+      method: "POST",
+      body: JSON.stringify({ title, entry_type: entryType }),
+    });
+  },
+  getLoreEntry(entryId: string) {
+    return request<LoreEntry>(`/lore/${entryId}`);
+  },
+  saveLoreEntry(entry: LoreEntry, bodyMarkdown: string) {
+    return request<LoreEntry>(`/lore/${entry.id}`, {
+      method: "PUT",
+      body: JSON.stringify({
+        title: entry.title,
+        body_markdown: bodyMarkdown,
+        base_revision: entry.revision,
+        entry_type: entry.entry_type,
+        metadata: entry.metadata,
+      }),
+    });
+  },
+  deleteLoreEntry(entryId: string) {
+    return request<LoreEntryList>(`/lore/${entryId}`, {
       method: "DELETE",
     });
   },

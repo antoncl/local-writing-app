@@ -5,11 +5,14 @@ from tempfile import TemporaryDirectory
 import unittest
 
 from app.models import (
+    CreateLoreEntryRequest,
     DeleteMetadataFieldRequest,
     MetadataFieldDefinition,
     MoveMetadataFieldRequest,
     RenameMetadataFieldRequest,
+    SaveLoreEntryRequest,
     SaveSceneRequest,
+    SearchRequest,
     UpdateProjectSettingsRequest,
     UpsertMetadataFieldRequest,
 )
@@ -124,7 +127,7 @@ class MetadataValidationTests(unittest.TestCase):
         self.assertEqual(schema.entry_types["scene"].name, "World Scene")
         self.assertIn("pov", schema.fields)
         self.assertIn("tension", schema.fields)
-        self.assertEqual(schema.entry_types["scene"].fields, ["status", "summary", "word_count", "pov", "tension"])
+        self.assertEqual(schema.entry_types["scene"].fields, ["status", "summary", "characters", "locations", "word_count", "pov", "tension"])
 
         scene = self.service.read_scene(self.scene_id)
         saved = self.service.save_scene(
@@ -432,6 +435,145 @@ class MetadataValidationTests(unittest.TestCase):
         self.assertNotIn("techlevel", world_schema["entry_types"]["scene"]["fields"])
         deleted_scene_metadata = self.service.read_scene(self.scene_id).metadata
         self.assertEqual(deleted_scene_metadata, {})
+
+    def test_default_schema_includes_lore_entry_subtypes_and_reference_fields(self) -> None:
+        schema = self.service.read_metadata_schema()
+
+        self.assertEqual(schema.entry_types["character"].kind, "lore")
+        self.assertEqual(schema.entry_types["place"].kind, "lore")
+        self.assertNotIn("summary", schema.entry_types["character"].fields)
+        self.assertNotIn("summary", schema.entry_types["lore_note"].fields)
+        self.assertNotIn("appears_in_scenes", schema.entry_types["lore_note"].fields)
+        self.assertIn("aliases", schema.entry_types["lore_note"].fields)
+        self.assertIn("tags", schema.entry_types["lore_note"].fields)
+        self.assertEqual(schema.fields["aliases"].type, "multi_select")
+        self.assertEqual(schema.fields["tags"].type, "tags")
+        self.assertEqual(schema.fields["related_entries"].type, "entity_ref_list")
+        self.assertEqual(schema.fields["related_entries"].target, {"kind": "lore"})
+        self.assertEqual(schema.fields["characters"].target, {"entry_type": "character"})
+
+    def test_lore_entry_round_trips_metadata(self) -> None:
+        entry = self.service.create_lore_entry(CreateLoreEntryRequest(title="Seren", entry_type="character"))
+
+        saved = self.service.save_lore_entry(
+            entry.id,
+            SaveLoreEntryRequest(
+                title="Seren",
+                body_markdown="A captain with a secret.",
+                base_revision=entry.revision,
+                entry_type="character",
+                metadata={
+                    "aliases": ["Ren"],
+                    "tags": ["crew"],
+                    "home_place": "lore_home",
+                    "appears_in_scenes": [self.scene_id],
+                },
+            ),
+        )
+
+        self.assertEqual(saved.entry_type, "character")
+        self.assertEqual(saved.metadata["aliases"], ["Ren"])
+        self.assertEqual(saved.metadata["tags"], ["crew"])
+        self.assertFalse(hasattr(saved, "status"))
+        listed_entry = self.service.list_lore_entries().entries[0]
+        self.assertEqual(listed_entry.title, "Seren")
+        self.assertIn("captain with a secret", listed_entry.body_markdown)
+        front_matter, _ = self.service._read_markdown_with_front_matter(self.root / "lore" / f"{entry.id}.md", strict=True)
+        self.assertNotIn("status", front_matter)
+
+    def test_lore_entry_rejects_scene_entry_type(self) -> None:
+        with self.assertRaisesRegex(ProjectServiceError, "non-lore entry_type scene"):
+            self.service.create_lore_entry(CreateLoreEntryRequest(title="Wrong", entry_type="scene"))
+
+    def test_lore_metadata_field_mutations_update_lore_files(self) -> None:
+        world_layer = next(
+            layer
+            for layer in self.service.read_metadata_schema_layers().layers
+            if layer.folder_path == str(self.world)
+        )
+        self.service.upsert_metadata_field(
+            UpsertMetadataFieldRequest(
+                layer_id=world_layer.id,
+                field_id="faction",
+                field=MetadataFieldDefinition(name="Faction", type="select", options=["A", "B"]),
+                entry_type="character",
+            )
+        )
+        entry = self.service.create_lore_entry(CreateLoreEntryRequest(title="Seren", entry_type="character"))
+        self.service.save_lore_entry(
+            entry.id,
+            SaveLoreEntryRequest(
+                title=entry.title,
+                body_markdown=entry.body_markdown,
+                base_revision=entry.revision,
+                entry_type=entry.entry_type,
+                metadata={"faction": "A"},
+            ),
+        )
+
+        self.service.rename_metadata_field(
+            RenameMetadataFieldRequest(old_field_id="faction", new_field_id="allegiance", entry_type="character")
+        )
+        renamed = self.service.read_lore_entry(entry.id)
+
+        self.assertEqual(renamed.metadata, {"allegiance": "A"})
+
+    def test_search_reports_lore_hit_kind(self) -> None:
+        entry = self.service.create_lore_entry(CreateLoreEntryRequest(title="Seren", entry_type="character"))
+        self.service.save_lore_entry(
+            entry.id,
+            SaveLoreEntryRequest(
+                title="Seren",
+                body_markdown="Keeps the ember map.",
+                base_revision=entry.revision,
+                entry_type="character",
+                metadata={"tags": ["Navigator"]},
+            ),
+        )
+
+        result = self.service.search(SearchRequest(query="ember"))
+
+        self.assertEqual(result.hits[0].kind, "lore")
+        self.assertEqual(result.hits[0].file_id, entry.id)
+
+    def test_tag_registry_canonicalizes_lore_tags_case_insensitively(self) -> None:
+        self.service._write_yaml(self.root / "tags.yaml", {"tags": ["Crew"]})
+        entry = self.service.create_lore_entry(CreateLoreEntryRequest(title="Seren", entry_type="character"))
+
+        saved = self.service.save_lore_entry(
+            entry.id,
+            SaveLoreEntryRequest(
+                title="Seren",
+                body_markdown=entry.body_markdown,
+                base_revision=entry.revision,
+                entry_type="character",
+                metadata={"tags": ["crew", "ALLY", "ally"]},
+            ),
+        )
+
+        self.assertEqual(saved.metadata["tags"], ["Crew", "ALLY"])
+        self.assertEqual(self.service.read_known_tags().tags, ["ALLY", "Crew"])
+        front_matter, _ = self.service._read_markdown_with_front_matter(self.root / "lore" / f"{entry.id}.md", strict=True)
+        self.assertEqual(front_matter["metadata"]["tags"], ["Crew", "ALLY"])
+
+    def test_aliases_do_not_populate_known_tags(self) -> None:
+        self.service._write_yaml(self.root / "tags.yaml", {"tags": ["Crew"]})
+        entry = self.service.create_lore_entry(CreateLoreEntryRequest(title="Robert Smith", entry_type="character"))
+
+        saved = self.service.save_lore_entry(
+            entry.id,
+            SaveLoreEntryRequest(
+                title="Robert Smith",
+                body_markdown=entry.body_markdown,
+                base_revision=entry.revision,
+                entry_type="character",
+                metadata={"aliases": ["Mr. Smith", "Bob"], "tags": ["crew"]},
+            ),
+        )
+
+        self.assertEqual(saved.metadata["aliases"], ["Mr. Smith", "Bob"])
+        self.assertEqual(saved.metadata["tags"], ["Crew"])
+        self.assertEqual(self.service.read_known_tags().tags, ["Crew"])
 
 
 if __name__ == "__main__":

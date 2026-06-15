@@ -4,7 +4,9 @@
   import DocumentEditorPane from "./DocumentEditorPane.svelte";
   import type {
     DirectoryListing,
+    EditableDocument,
     EntryMetadata,
+    LoreEntrySummary,
     MetadataFieldDefinition,
     MetadataFieldType,
     MetadataSchema,
@@ -12,7 +14,6 @@
     MetadataSchemaOverview,
     ProjectInfo,
     ProjectValidation,
-    Scene,
     SearchHit,
     StructureDocument,
     StructureNode,
@@ -22,9 +23,15 @@
   type AppState =
     | { name: "needsProject" }
     | { name: "projectOpen"; project: ProjectInfo };
-  type DocumentRef = { type: "scene"; id: string };
-  type PaneId = "project" | "outline" | "todo" | "search" | string;
+  type DocumentRef = { type: "scene" | "lore"; id: string };
+  type PaneId = "project" | "outline" | "lore" | "todo" | "search" | string;
   type MetadataReloadSignal = { token: number; metadata: EntryMetadata; status: string; entryType: string };
+  type LoreEntryGroup = {
+    id: string;
+    label: string;
+    entries: LoreEntrySummary[];
+    depth: number;
+  };
   type PaneState = {
     title: string;
     x: number;
@@ -36,7 +43,7 @@
   type EditorPaneState = {
     id: string;
     document: DocumentRef | null;
-    scene: Scene | null;
+    scene: EditableDocument | null;
     pinned: boolean;
     dirty: boolean;
     draftTitle: string;
@@ -47,7 +54,8 @@
     saving: boolean;
   };
 
-  const SYSTEM_SCENE_FIELD_IDS = ["status", "summary", "word_count"];
+  const SYSTEM_SCENE_FIELD_IDS = ["status", "summary", "characters", "locations", "word_count"];
+  const SYSTEM_LORE_FIELD_IDS = ["aliases", "tags", "home_place", "appears_in_scenes", "related_entries"];
   type ConfirmationState = {
     title: string;
     message: string;
@@ -75,21 +83,25 @@
   $: project = appState.name === "projectOpen" ? appState.project : null;
   $: isProjectOpen = appState.name === "projectOpen";
   let structure: StructureDocument | null = null;
+  let loreEntries: LoreEntrySummary[] = [];
+  let knownTags: string[] = [];
   let focusedEditorPaneId: string | null = null;
   $: focusedEditorPane = editorPanes.find((pane) => pane.id === focusedEditorPaneId) ?? editorPanes[0] ?? null;
-  $: activeScene = focusedEditorPane?.scene ?? null;
+  $: activeScene = focusedEditorPane?.document?.type === "scene" ? focusedEditorPane.scene : null;
   let activeParentId: string | undefined = undefined;
   let todos: TodoItem[] = [];
   let validation: ProjectValidation | null = null;
   let metadataSchema: MetadataSchema | null = null;
   let metadataSchemaOverview: MetadataSchemaOverview | null = null;
   let metadataSchemaLayers: MetadataSchemaLayer[] = [];
+  let schemaFieldKind: "scene" | "lore" = "scene";
   let schemaFieldLayerId = "";
   let schemaFieldEntryType = "scene";
   let schemaFieldId = "";
   let schemaFieldName = "";
   let schemaFieldType: MetadataFieldType = "text";
   let schemaFieldAllowMultiple = false;
+  let schemaFieldReferenceTarget: "scene" | "lore" = "lore";
   let schemaFieldOptions = "";
   let schemaFieldReadonlyTypeLabel = "";
   let selectedSchemaFieldId: string | null = null;
@@ -101,6 +113,8 @@
   let schemaFieldEntriesByLayer: Record<string, Array<[string, MetadataFieldDefinition]>> = {};
   let newTodo = "";
   let searchQuery = "";
+  let loreSearchQuery = "";
+  let collapsedLoreGroups: Record<string, boolean> = {};
   let searchOpenTodos = false;
   let searchHits: SearchHit[] = [];
   let confirmation: ConfirmationState | null = null;
@@ -115,6 +129,7 @@
   let panes: Record<PaneId, PaneState> = {
     project: { title: "Project", x: 18, y: 18, width: 380, height: 340, z: 1 },
     outline: { title: "Manuscript Outline", x: 18, y: 260, width: 300, height: 420, z: 2 },
+    lore: { title: "Lore", x: 330, y: 260, width: 300, height: 320, z: 3 },
     schema: { title: "Custom Data", x: 330, y: 260, width: 360, height: 420, z: 3 },
     schema_field: { title: "Custom Field", x: 708, y: 260, width: 360, height: 420, z: 4 },
     todo: { title: "TODO", x: 1126, y: 18, width: 310, height: 320, z: 4 },
@@ -138,9 +153,11 @@
 
   $: allEmbeddedTodos = Object.values(embeddedTodosByPane).flat();
   $: embeddedTodoStatusHintsByPane = buildEmbeddedTodoStatusHintsByPane(embeddedTodosByPane);
-  $: schemaSceneEntryTypes = Object.entries(metadataSchema?.entry_types ?? {}).filter(([, definition]) => definition.kind === "scene");
+  $: filteredLoreEntries = filterLoreEntries(loreEntries, loreSearchQuery);
+  $: groupedLoreEntries = groupLoreEntriesByType(filteredLoreEntries, metadataSchema);
+  $: schemaEntryTypes = Object.entries(metadataSchema?.entry_types ?? {}).filter(([, definition]) => definition.kind === schemaFieldKind);
   $: systemSchemaFieldEntries = buildSystemSchemaFieldEntries(metadataSchema);
-  $: schemaFieldEntriesByLayer = buildSchemaFieldEntriesByLayer(metadataSchema, metadataSchemaOverview, metadataSchemaLayers);
+  $: schemaFieldEntriesByLayer = buildSchemaFieldEntriesByLayer(metadataSchema, metadataSchemaOverview, metadataSchemaLayers, schemaFieldKind);
 
   onMount(() => {
     fitPanesToViewport();
@@ -197,6 +214,7 @@
 
   function resetEditorWorkspace() {
     editorPanes = [];
+    knownTags = [];
     focusedEditorPaneId = null;
     nextEditorPaneIndex = 1;
     nextMetadataReloadToken = 1;
@@ -204,6 +222,7 @@
     panes = {
       project: panes.project,
       outline: panes.outline,
+      lore: panes.lore,
       schema: panes.schema,
       schema_field: panes.schema_field,
       todo: panes.todo,
@@ -356,6 +375,14 @@
     structure = await api.getStructure();
   }
 
+  async function refreshLoreEntries() {
+    loreEntries = (await api.listLoreEntries()).entries;
+  }
+
+  async function refreshKnownTags() {
+    knownTags = (await api.getKnownTags()).tags;
+  }
+
   async function refreshTodos() {
     todos = (await api.getTodos()).items.filter((item) => !item.anchor_id);
   }
@@ -395,10 +422,12 @@
   async function createProject() {
     await run(async () => {
       const openedProject = await api.createProject(projectPath, projectTitle);
-      await refreshStructure();
-      await refreshMetadataSchema();
-      await refreshTodos();
       openProjectWorkspace(openedProject);
+      await refreshStructure();
+      await refreshLoreEntries();
+      await refreshMetadataSchema();
+      await refreshKnownTags();
+      await refreshTodos();
       const initialSceneId = findFirstSceneId(structure?.root);
       if (initialSceneId) {
         await openSceneInEditorPane(initialSceneId);
@@ -410,10 +439,12 @@
   async function openProject() {
     await run(async () => {
       const openedProject = await api.openProject(projectPath);
-      await refreshStructure();
-      await refreshMetadataSchema();
-      await refreshTodos();
       openProjectWorkspace(openedProject);
+      await refreshStructure();
+      await refreshLoreEntries();
+      await refreshMetadataSchema();
+      await refreshKnownTags();
+      await refreshTodos();
       status = `Opened ${openedProject.title}`;
     });
   }
@@ -441,7 +472,8 @@
   }
 
   function buildSystemSchemaFieldEntries(schema: MetadataSchema | null) {
-    return SYSTEM_SCENE_FIELD_IDS
+    const fieldIds = schemaFieldKind === "lore" ? SYSTEM_LORE_FIELD_IDS : SYSTEM_SCENE_FIELD_IDS;
+    return fieldIds
       .map((fieldId) => {
         const field = schema?.fields[fieldId];
         return field ? ([fieldId, field] as [string, MetadataFieldDefinition]) : null;
@@ -453,11 +485,12 @@
     schema: MetadataSchema | null,
     overview: MetadataSchemaOverview | null,
     layers: MetadataSchemaLayer[],
+    kind: "scene" | "lore",
   ) {
     const entriesByLayer = Object.fromEntries(layers.map((layer) => [layer.id, [] as Array<[string, MetadataFieldDefinition]>]));
     for (const [fieldId, field] of Object.entries(schema?.fields ?? {})) {
       const source = overview?.field_sources[fieldId];
-      if (source && !source.built_in && source.layer_id in entriesByLayer) {
+      if (source && !source.built_in && source.layer_id in entriesByLayer && entryTypeIdsForField(fieldId, kind).length > 0) {
         entriesByLayer[source.layer_id].push([fieldId, field]);
       }
     }
@@ -475,7 +508,7 @@
       boolean: "Checkbox",
       date: "Date",
       select: "Select",
-      multi_select: "Select, Multiple",
+      multi_select: "List",
       entity_ref: "Entry Reference",
       entity_ref_list: "Entry Reference, Multiple",
       tags: "Tags",
@@ -487,12 +520,14 @@
   function openSchemaFieldDetail(fieldId: string) {
     const field = metadataSchema?.fields[fieldId];
     if (!field) return;
+    const entryTypeId = entryTypeIdsForField(fieldId, schemaFieldKind)[0] ?? defaultSchemaEntryType(schemaFieldKind);
     selectedSchemaFieldId = fieldId;
     schemaFieldId = fieldId;
     schemaFieldName = field.name;
     schemaFieldReadonly = Boolean(metadataSchemaOverview?.field_sources[fieldId]?.built_in);
     schemaFieldReadonlyTypeLabel = "";
     schemaFieldAllowMultiple = field.type === "multi_select" || field.type === "entity_ref_list";
+    schemaFieldReferenceTarget = field.target?.kind === "scene" ? "scene" : "lore";
     schemaFieldType = schemaFieldReadonly
       ? field.type
       : field.type === "multi_select"
@@ -504,7 +539,7 @@
             : field.type;
     schemaFieldOptions = field.options.join(", ");
     schemaFieldLayerId = metadataSchemaOverview?.field_sources[fieldId]?.built_in ? projectSchemaLayerId() : (metadataSchemaOverview?.field_sources[fieldId]?.layer_id ?? projectSchemaLayerId());
-    schemaFieldEntryType = schemaSceneEntryTypes[0]?.[0] ?? "scene";
+    schemaFieldEntryType = entryTypeId;
     schemaFieldPaneOpen = true;
     focusPane("schema_field");
   }
@@ -515,12 +550,32 @@
     schemaFieldId = "scene";
     schemaFieldName = sceneType?.name ?? "Scene";
     schemaFieldType = "text";
+    schemaFieldKind = "scene";
     schemaFieldReadonly = true;
     schemaFieldReadonlyTypeLabel = "Scene Type";
     schemaFieldAllowMultiple = false;
+    schemaFieldReferenceTarget = "lore";
     schemaFieldOptions = "";
     schemaFieldLayerId = "built_in";
     schemaFieldEntryType = "scene";
+    schemaFieldPaneOpen = true;
+    focusPane("schema_field");
+  }
+
+  function openSystemLoreTypeDetail(typeId = "lore_note") {
+    const entryType = metadataSchema?.entry_types[typeId];
+    selectedSchemaFieldId = `system:${typeId}_type`;
+    schemaFieldId = typeId;
+    schemaFieldName = entryType?.name ?? "Entry";
+    schemaFieldType = "text";
+    schemaFieldKind = "lore";
+    schemaFieldReadonly = true;
+    schemaFieldReadonlyTypeLabel = "Entry Type";
+    schemaFieldAllowMultiple = false;
+    schemaFieldReferenceTarget = "lore";
+    schemaFieldOptions = "";
+    schemaFieldLayerId = "built_in";
+    schemaFieldEntryType = typeId;
     schemaFieldPaneOpen = true;
     focusPane("schema_field");
   }
@@ -533,17 +588,35 @@
     schemaFieldReadonly = false;
     schemaFieldReadonlyTypeLabel = "";
     schemaFieldAllowMultiple = false;
+    schemaFieldReferenceTarget = "lore";
     schemaFieldOptions = "";
     schemaFieldLayerId = layerId;
-    schemaFieldEntryType = schemaSceneEntryTypes[0]?.[0] ?? "scene";
+    schemaFieldEntryType = defaultSchemaEntryType(schemaFieldKind);
     schemaFieldPaneOpen = true;
     focusPane("schema_field");
   }
 
-  function openSchemaForSceneData(entryType: string) {
+  function openSchemaForCustomData(entryType: string, kind: "scene" | "lore") {
     schemaPaneOpen = true;
-    schemaFieldEntryType = entryType || "scene";
+    schemaFieldKind = kind;
+    schemaFieldEntryType = entryType || defaultSchemaEntryType(kind);
     focusPane("schema");
+  }
+
+  function updateSchemaFieldKind(value: string) {
+    schemaFieldKind = value === "lore" ? "lore" : "scene";
+    schemaFieldEntryType = defaultSchemaEntryType(schemaFieldKind);
+    selectedSchemaFieldId = null;
+  }
+
+  function defaultSchemaEntryType(kind: "scene" | "lore") {
+    return Object.entries(metadataSchema?.entry_types ?? {}).find(([, definition]) => definition.kind === kind)?.[0] ?? (kind === "lore" ? "lore_note" : "scene");
+  }
+
+  function entryTypeIdsForField(fieldId: string, kind: "scene" | "lore") {
+    return Object.entries(metadataSchema?.entry_types ?? {})
+      .filter(([, definition]) => definition.kind === kind && definition.fields.includes(fieldId))
+      .map(([typeId]) => typeId);
   }
 
   function closeSchemaPane(id: "schema" | "schema_field") {
@@ -627,6 +700,7 @@
         name: schemaFieldName.trim() || nextFieldId,
         type: schemaFieldSaveType(),
         options: schemaFieldType === "select" ? options : [],
+        ...(schemaFieldType === "entity_ref" ? { target: { kind: schemaFieldReferenceTarget } } : {}),
       };
       const optionMigration = buildOptionMigration(previousField, nextField);
       if (previousFieldId && previousFieldId !== nextFieldId) {
@@ -730,6 +804,14 @@
     });
   }
 
+  async function newLoreEntry() {
+    await run(async () => {
+      const entry = await api.createLoreEntry("New Entry", "lore_note");
+      await refreshLoreEntries();
+      await openLoreEntryInEditorPane(entry.id);
+    });
+  }
+
   async function openSceneInEditorPane(sceneId: string) {
     const existingPane = editorPanes.find((pane) => pane.document?.type === "scene" && pane.document.id === sceneId);
     if (existingPane) {
@@ -770,6 +852,115 @@
     status = `Loaded ${scene.title}`;
   }
 
+  async function openLoreEntryInEditorPane(entryId: string) {
+    const existingPane = editorPanes.find((pane) => pane.document?.type === "lore" && pane.document.id === entryId);
+    if (existingPane) {
+      focusedEditorPaneId = existingPane.id;
+      focusPane(existingPane.id);
+      status = `Focused ${existingPane.scene?.title ?? "open entry"}`;
+      return;
+    }
+
+    let targetPane = editorPanes.find((pane) => !pane.pinned);
+    if (!targetPane) {
+      targetPane = addEditorPane();
+    }
+
+    if (targetPane.dirty) {
+      await saveEditorPane(targetPane.id);
+    }
+
+    const entry = await api.getLoreEntry(entryId);
+    editorPanes = editorPanes.map((pane) =>
+      pane.id === targetPane.id
+        ? {
+            ...pane,
+            document: { type: "lore", id: entry.id },
+            scene: entry,
+            dirty: false,
+            draftTitle: entry.title,
+            draftMarkdown: entry.body_markdown,
+            draftStatus: "",
+            draftEntryType: entry.entry_type,
+            draftMetadata: cloneMetadata(entry.metadata),
+            saving: false,
+          }
+        : pane,
+    );
+    focusedEditorPaneId = targetPane.id;
+    focusPane(targetPane.id);
+    status = `Loaded ${entry.title}`;
+  }
+
+  function filterLoreEntries(entries: LoreEntrySummary[], query: string) {
+    const normalizedQuery = query.trim().toLowerCase();
+    if (!normalizedQuery) return entries;
+    return entries.filter((entry) => loreEntrySearchText(entry).includes(normalizedQuery));
+  }
+
+  function groupLoreEntriesByType(entries: LoreEntrySummary[], schema: MetadataSchema | null): LoreEntryGroup[] {
+    const groupsByType = new Map<string, LoreEntryGroup>();
+    for (const entry of entries) {
+      const groupId = `type:${entry.entry_type || "unknown"}`;
+      const existingGroup = groupsByType.get(groupId);
+      if (existingGroup) {
+        existingGroup.entries.push(entry);
+      } else {
+        groupsByType.set(groupId, {
+          id: groupId,
+          label: loreEntryTypeName(entry, schema),
+          entries: [entry],
+          depth: 0,
+        });
+      }
+    }
+    return Array.from(groupsByType.values()).sort((left, right) => left.label.localeCompare(right.label, undefined, { sensitivity: "base" }));
+  }
+
+  function toggleLoreGroup(groupId: string) {
+    collapsedLoreGroups = {
+      ...collapsedLoreGroups,
+      [groupId]: !collapsedLoreGroups[groupId],
+    };
+  }
+
+  function loreEntrySearchText(entry: LoreEntrySummary) {
+    return [
+      entry.title,
+      entry.body_markdown,
+      loreEntryTypeName(entry, metadataSchema),
+      metadataSearchText(entry.metadata),
+    ]
+      .join(" ")
+      .toLowerCase();
+  }
+
+  function loreEntryTypeName(entry: LoreEntrySummary, schema = metadataSchema) {
+    return schema?.entry_types[entry.entry_type]?.name ?? "Entry";
+  }
+
+  function loreEntryDetailText(entry: LoreEntrySummary) {
+    const details = [];
+    const aliases = metadataListText(entry.metadata.aliases);
+    const tags = metadataListText(entry.metadata.tags);
+    if (aliases) details.push(`Aliases: ${aliases}`);
+    if (tags) details.push(`Tags: ${tags}`);
+    return details.join(" · ");
+  }
+
+  function metadataListText(value: unknown) {
+    if (Array.isArray(value)) return value.map((item) => String(item).trim()).filter(Boolean).join(", ");
+    if (typeof value === "string") return value.trim();
+    return "";
+  }
+
+  function metadataSearchText(value: unknown): string {
+    if (value === null || value === undefined) return "";
+    if (Array.isArray(value)) return value.map(metadataSearchText).join(" ");
+    if (typeof value === "object") return Object.values(value).map(metadataSearchText).join(" ");
+    return String(value);
+  }
+
   function addEditorPane() {
     const id = `editor_${nextEditorPaneIndex}`;
     nextEditorPaneIndex += 1;
@@ -777,7 +968,7 @@
     panes = {
       ...panes,
       [id]: {
-        title: "Scene Editor",
+        title: "Editor",
         x: 342 + offset,
         y: 18 + offset,
         width: 760,
@@ -817,7 +1008,7 @@
   }
 
   function isEditorPaneDirty(
-    scene: Scene | null,
+    scene: EditableDocument | null,
     title: string,
     bodyMarkdown: string,
     status: string,
@@ -828,38 +1019,50 @@
       Boolean(scene) &&
       (title !== scene?.title ||
         bodyMarkdown !== scene?.body_markdown ||
-        status !== scene?.status ||
+        (documentStatus(scene) ? status !== documentStatus(scene) : false) ||
         entryType !== scene?.entry_type ||
         !metadataEqual(metadata, scene?.metadata ?? {}))
     );
   }
 
+  function documentStatus(document: EditableDocument | null) {
+    return document && "status" in document ? document.status : "";
+  }
+
   async function refreshOpenEditorPaneBaselines(transformDraftMetadata?: (metadata: EntryMetadata) => EntryMetadata) {
-    const sceneIds = Array.from(
-      new Set(editorPanes.map((pane) => pane.scene?.id).filter((sceneId): sceneId is string => Boolean(sceneId))),
+    const documentRefs = Array.from(
+      new Map(
+        editorPanes
+          .map((pane) => pane.document)
+          .filter((document): document is DocumentRef => Boolean(document))
+          .map((document) => [`${document.type}:${document.id}`, document]),
+      ).values(),
     );
-    if (sceneIds.length === 0) return;
-    const refreshedScenes = await Promise.all(sceneIds.map((sceneId) => api.getScene(sceneId)));
-    const refreshedById = new Map(refreshedScenes.map((scene) => [scene.id, scene]));
+    if (documentRefs.length === 0) return;
+    const refreshedDocuments = await Promise.all(
+      documentRefs.map((document) => (document.type === "lore" ? api.getLoreEntry(document.id) : api.getScene(document.id))),
+    );
+    const refreshedByKey = new Map(refreshedDocuments.map((document, index) => [`${documentRefs[index].type}:${document.id}`, document]));
     const nextReloads: Record<string, MetadataReloadSignal> = {};
     editorPanes = editorPanes.map((pane) => {
-      if (!pane.scene) return pane;
-      const refreshedScene = refreshedById.get(pane.scene.id);
-      if (!refreshedScene) return pane;
-      const draftMetadata = transformDraftMetadata ? transformDraftMetadata(refreshedScene.metadata) : refreshedScene.metadata;
+      if (!pane.scene || !pane.document) return pane;
+      const refreshedDocument = refreshedByKey.get(`${pane.document.type}:${pane.scene.id}`);
+      if (!refreshedDocument) return pane;
+      const draftMetadata = transformDraftMetadata ? transformDraftMetadata(refreshedDocument.metadata) : refreshedDocument.metadata;
       nextReloads[pane.id] = {
         token: nextMetadataReloadToken,
         metadata: cloneMetadata(draftMetadata),
-        status: refreshedScene.status,
-        entryType: refreshedScene.entry_type,
+        status: documentStatus(refreshedDocument),
+        entryType: refreshedDocument.entry_type,
       };
       nextMetadataReloadToken += 1;
       return {
         ...pane,
-        scene: refreshedScene,
+        scene: refreshedDocument,
         draftMetadata: cloneMetadata(draftMetadata),
+        draftStatus: documentStatus(refreshedDocument),
         dirty: isEditorPaneDirty(
-          refreshedScene,
+          refreshedDocument,
           pane.draftTitle,
           pane.draftMarkdown,
           pane.draftStatus,
@@ -900,37 +1103,45 @@
   async function saveEditorPane(id: string) {
     const pane = editorPanes.find((candidate) => candidate.id === id);
     if (!pane?.scene) return;
+    const documentKind = pane.document?.type ?? "scene";
     setEditorPaneSaving(id, true);
     try {
-      const savedScene = await api.saveScene(
-        {
-          ...pane.scene,
-          title: pane.draftTitle,
-          status: pane.draftStatus,
-          entry_type: pane.draftEntryType,
-          metadata: cloneMetadata(pane.draftMetadata),
-        },
-        pane.draftMarkdown,
-      );
+      const draftDocument = {
+        ...pane.scene,
+        title: pane.draftTitle,
+        ...(documentKind === "scene" ? { status: pane.draftStatus } : {}),
+        entry_type: pane.draftEntryType,
+        metadata: cloneMetadata(pane.draftMetadata),
+      };
+      const savedDocument =
+        documentKind === "lore"
+          ? await api.saveLoreEntry(draftDocument, pane.draftMarkdown)
+          : await api.saveScene(draftDocument, pane.draftMarkdown);
       editorPanes = editorPanes.map((candidate) =>
         candidate.id === id
           ? {
               ...candidate,
-              document: { type: "scene", id: savedScene.id },
-              scene: savedScene,
+              document: { type: documentKind, id: savedDocument.id },
+              scene: savedDocument,
               dirty: false,
-              draftTitle: savedScene.title,
-              draftMarkdown: savedScene.body_markdown,
-              draftStatus: savedScene.status,
-              draftEntryType: savedScene.entry_type,
-              draftMetadata: cloneMetadata(savedScene.metadata),
+              draftTitle: savedDocument.title,
+              draftMarkdown: savedDocument.body_markdown,
+              draftStatus: documentStatus(savedDocument),
+              draftEntryType: savedDocument.entry_type,
+              draftMetadata: cloneMetadata(savedDocument.metadata),
               saving: false,
             }
           : candidate,
       );
-      await refreshStructure();
-      await refreshTodos();
-      status = `Saved ${savedScene.title}`;
+      if (documentKind === "lore") {
+        await refreshLoreEntries();
+        await refreshKnownTags();
+      } else {
+        await refreshStructure();
+        await refreshTodos();
+        await refreshKnownTags();
+      }
+      status = `Saved ${savedDocument.title}`;
     } catch (caught) {
       setEditorPaneSaving(id, false);
       throw caught;
@@ -944,11 +1155,12 @@
   function requestDeleteEditorPaneScene(id: string) {
     const pane = editorPanes.find((candidate) => candidate.id === id);
     if (!pane?.scene) return;
+    const documentKind = pane.document?.type ?? "scene";
     const sceneTitle = pane.scene.title;
     confirmation = {
-      title: "Delete Scene",
-      message: `Delete "${sceneTitle}"? This removes the scene file from the project.`,
-      confirmLabel: "Delete Scene",
+      title: documentKind === "lore" ? "Delete Entry" : "Delete Scene",
+      message: `Delete "${sceneTitle}"? This removes the ${documentKind === "lore" ? "entry" : "scene"} file from the project.`,
+      confirmLabel: documentKind === "lore" ? "Delete Entry" : "Delete Scene",
       destructive: true,
       onConfirm: () => deleteEditorPaneScene(id),
     };
@@ -964,9 +1176,14 @@
   async function deleteEditorPaneScene(id: string) {
     const pane = editorPanes.find((candidate) => candidate.id === id);
     if (!pane?.scene) return;
+    const documentKind = pane.document?.type ?? "scene";
     const sceneTitle = pane.scene.title;
-    structure = await api.deleteScene(pane.scene.id);
-    await refreshTodos();
+    if (documentKind === "lore") {
+      loreEntries = (await api.deleteLoreEntry(pane.scene.id)).entries;
+    } else {
+      structure = await api.deleteScene(pane.scene.id);
+      await refreshTodos();
+    }
     editorPanes = editorPanes.map((candidate) => (candidate.id === id ? createEmptyEditorPane(id) : candidate));
     status = `Deleted ${sceneTitle}`;
   }
@@ -1055,8 +1272,12 @@
   async function openSearchHit(hit: SearchHit) {
     if (hit.file_id === "project") return;
     await run(async () => {
-      await openSceneInEditorPane(hit.file_id);
-      if (hit.todo_id) {
+      if (hit.kind === "lore") {
+        await openLoreEntryInEditorPane(hit.file_id);
+      } else {
+        await openSceneInEditorPane(hit.file_id);
+      }
+      if (hit.kind === "scene" && hit.todo_id) {
         window.setTimeout(() => highlightEmbeddedTodoInOpenPane(hit.file_id, hit.todo_id!), 0);
       }
     });
@@ -1088,7 +1309,7 @@
 
   function updateEmbeddedTodosForPane(id: string, embeddedTodos: Array<{ id: string; text: string; status: "open" | "done"; note: string }>) {
     const pane = editorPanes.find((candidate) => candidate.id === id);
-    if (!pane?.scene) {
+    if (!pane?.scene || pane.document?.type !== "scene") {
       const { [id]: _removed, ...remainingTodos } = embeddedTodosByPane;
       embeddedTodosByPane = remainingTodos;
       return;
@@ -1222,6 +1443,51 @@
   </section>
 
   <!-- svelte-ignore a11y_no_noninteractive_element_interactions -->
+  <section class:hidden-pane={!isPaneVisible("lore")} class="pane lore-pane" data-pane-id="lore" style={paneStyle("lore")} aria-label="Lore pane" on:mousedown={() => focusPane("lore")}>
+    <header class="pane-header" role="button" tabindex="0" aria-label="Move Lore pane" on:keydown={(event) => handlePaneHeaderKeydown(event, "lore")} on:mousedown={(event) => startPaneDrag(event, "lore")}>
+      <h2>Lore</h2>
+      <div class="pane-header-actions">
+        <button class="pin-button" type="button" title="Add entry" on:mousedown={(event) => event.stopPropagation()} on:click={() => newLoreEntry()}>+ Entry</button>
+      </div>
+    </header>
+    <div class="pane-content">
+      <input class="lore-search" bind:value={loreSearchQuery} placeholder="Search entries, tags, aliases" />
+      <div class="schema-layer-fields lore-entry-list">
+        {#each groupedLoreEntries as group}
+          <section class="lore-entry-group" style={`--group-depth: ${group.depth}`}>
+            <button class="lore-group-header" type="button" aria-expanded={!collapsedLoreGroups[group.id]} on:mousedown={(event) => event.stopPropagation()} on:click={() => toggleLoreGroup(group.id)}>
+              <span class:collapsed={collapsedLoreGroups[group.id]} class="lore-group-caret">▾</span>
+              <span>{group.label}</span>
+              <small>{group.entries.length}</small>
+            </button>
+            {#if !collapsedLoreGroups[group.id]}
+              <div class="lore-group-entries">
+                {#each group.entries as entry}
+                  {@const detailText = loreEntryDetailText(entry)}
+                  <button class:active={focusedEditorPane?.document?.type === "lore" && focusedEditorPane.document.id === entry.id} class="schema-row system-row lore-row" type="button" on:mousedown={(event) => event.stopPropagation()} on:click={() => openLoreEntryInEditorPane(entry.id)}>
+                    <span>
+                      <strong>{entry.title}</strong>
+                      {#if detailText}
+                        <small>{detailText}</small>
+                      {/if}
+                    </span>
+                  </button>
+                {/each}
+              </div>
+            {/if}
+          </section>
+        {/each}
+      </div>
+      {#if loreEntries.length === 0}
+        <p class="muted">No entries yet.</p>
+      {:else if filteredLoreEntries.length === 0}
+        <p class="muted">No entries match this search.</p>
+      {/if}
+    </div>
+    <button class="pane-resize" type="button" aria-label="Resize Lore pane" on:keydown={(event) => handlePaneResizeKeydown(event, "lore")} on:mousedown={(event) => startPaneResize(event, "lore")}></button>
+  </section>
+
+  <!-- svelte-ignore a11y_no_noninteractive_element_interactions -->
   <section class:hidden-pane={!isProjectOpen || !schemaPaneOpen} class="pane schema-pane" data-pane-id="schema" style={paneStyle("schema")} aria-label="Custom Data pane" on:mousedown={() => focusPane("schema")}>
     <header class="pane-header" role="button" tabindex="0" aria-label="Move Custom Data pane" on:keydown={(event) => handlePaneHeaderKeydown(event, "schema")} on:mousedown={(event) => startPaneDrag(event, "schema")}>
       <h2>Custom Data</h2>
@@ -1231,6 +1497,13 @@
       </div>
     </header>
     <div class="pane-content schema-list">
+      <label>
+        Field group
+        <select value={schemaFieldKind} on:change={(event) => updateSchemaFieldKind(event.currentTarget.value)}>
+          <option value="scene">Scenes</option>
+          <option value="lore">Lore Entries</option>
+        </select>
+      </label>
       <section class="schema-layer-group system" role="group" aria-label="System custom fields">
         <div class="schema-layer-heading">
           <div class="schema-layer-title">
@@ -1240,13 +1513,25 @@
         </div>
 
         <div class="schema-layer-fields">
-          <button class:active={selectedSchemaFieldId === "system:scene_type"} class="schema-row system-row" type="button" on:click={openSystemSceneTypeDetail}>
-            <span class="drag-handle muted-handle" aria-hidden="true">::</span>
-            <span>
-              <strong>Scene Type</strong>
-              <small>scene · Scene Type</small>
-            </span>
-          </button>
+          {#if schemaFieldKind === "scene"}
+            <button class:active={selectedSchemaFieldId === "system:scene_type"} class="schema-row system-row" type="button" on:click={openSystemSceneTypeDetail}>
+              <span class="drag-handle muted-handle" aria-hidden="true">::</span>
+              <span>
+                <strong>Scene Type</strong>
+                <small>scene · Scene Type</small>
+              </span>
+            </button>
+          {:else}
+            {#each schemaEntryTypes as [typeId, definition]}
+              <button class:active={selectedSchemaFieldId === `system:${typeId}_type`} class="schema-row system-row" type="button" on:click={() => openSystemLoreTypeDetail(typeId)}>
+                <span class="drag-handle muted-handle" aria-hidden="true">::</span>
+                <span>
+                  <strong>{definition.name} Type</strong>
+                  <small>{typeId} · Entry Type</small>
+                </span>
+              </button>
+            {/each}
+          {/if}
           {#each systemSchemaFieldEntries as [fieldId, field]}
             <button class:active={selectedSchemaFieldId === fieldId} class="schema-row system-row" type="button" on:click={() => openSchemaFieldDetail(fieldId)}>
               <span class="drag-handle muted-handle" aria-hidden="true">::</span>
@@ -1320,9 +1605,9 @@
       </div>
       {#if !schemaFieldReadonly}
         <label>
-          Add to scene type
+          Add to {schemaFieldKind === "lore" ? "entry" : "scene"} type
           <select bind:value={schemaFieldEntryType}>
-            {#each schemaSceneEntryTypes as [typeId, definition]}
+            {#each schemaEntryTypes as [typeId, definition]}
               <option value={typeId}>{definition.name}</option>
             {/each}
           </select>
@@ -1365,6 +1650,15 @@
           Allow multiple
         </label>
       {/if}
+      {#if schemaFieldType === "entity_ref" && !schemaFieldReadonly}
+        <label>
+          Reference target
+          <select bind:value={schemaFieldReferenceTarget}>
+            <option value="lore">Lore Entries</option>
+            <option value="scene">Scenes</option>
+          </select>
+        </label>
+      {/if}
       {#if schemaFieldType === "select" && (!schemaFieldReadonly || schemaFieldOptions)}
         <label>
           Options
@@ -1390,11 +1684,11 @@
       class="pane editor-pane"
       data-pane-id={editorPane.id}
       style={paneStyle(editorPane.id)}
-      aria-label="Scene Editor pane"
+      aria-label="Editor pane"
       on:mousedown={() => focusPane(editorPane.id)}
     >
-      <header class="pane-header" role="button" tabindex="0" aria-label="Move Scene Editor pane" on:keydown={(event) => handlePaneHeaderKeydown(event, editorPane.id)} on:mousedown={(event) => startPaneDrag(event, editorPane.id)}>
-        <h2>{editorPane.scene?.title ?? "Scene Editor"}</h2>
+      <header class="pane-header" role="button" tabindex="0" aria-label="Move Editor pane" on:keydown={(event) => handlePaneHeaderKeydown(event, editorPane.id)} on:mousedown={(event) => startPaneDrag(event, editorPane.id)}>
+        <h2>{editorPane.scene?.title ?? "Editor"}</h2>
         <div class="pane-header-actions">
           {#if editorPane.dirty}
             <span class="pane-status">Unsaved</span>
@@ -1403,7 +1697,7 @@
             class="pin-button"
             type="button"
             disabled={editorPane.saving || !editorPane.dirty}
-            title={editorPane.saving ? "Saving this scene" : "Save this scene"}
+            title={editorPane.saving ? "Saving this document" : "Save this document"}
             on:mousedown={(event) => event.stopPropagation()}
             on:click={() => run(() => saveEditorPane(editorPane.id))}
           >
@@ -1413,7 +1707,7 @@
             class="pin-button danger"
             type="button"
             disabled={!editorPane.scene}
-            title="Delete this scene"
+            title={editorPane.document?.type === "lore" ? "Delete this entry" : "Delete this scene"}
             on:mousedown={(event) => event.stopPropagation()}
             on:click={() => requestDeleteEditorPaneScene(editorPane.id)}
           >
@@ -1443,10 +1737,12 @@
       <DocumentEditorPane
         bind:this={editorPaneComponents[editorPane.id]}
         scene={editorPane.scene}
+        documentKind={editorPane.document?.type ?? "scene"}
         metadataSchema={metadataSchema}
+        knownTags={knownTags}
         metadataReload={metadataReloadsByPane[editorPane.id] ?? null}
         dirty={editorPane.dirty}
-        todoStatusHint={embeddedTodoStatusHintsByPane[editorPane.id] ?? "No embedded TODOs. Select text to mark a TODO."}
+        todoStatusHint={editorPane.document?.type === "scene" ? (embeddedTodoStatusHintsByPane[editorPane.id] ?? "No embedded TODOs. Select text to mark a TODO.") : ""}
         on:focus={() => focusPane(editorPane.id)}
         on:change={(event) =>
           updateEditorPaneDraft(
@@ -1457,10 +1753,10 @@
             event.detail.entryType,
             event.detail.metadata,
           )}
-        on:custom-data={(event) => openSchemaForSceneData(event.detail.entryType)}
+        on:custom-data={(event) => openSchemaForCustomData(event.detail.entryType, event.detail.kind)}
         on:embeddedTodos={(event) => updateEmbeddedTodosForPane(editorPane.id, event.detail.todos)}
       />
-      <button class="pane-resize" type="button" aria-label="Resize Scene Editor pane" on:keydown={(event) => handlePaneResizeKeydown(event, editorPane.id)} on:mousedown={(event) => startPaneResize(event, editorPane.id)}></button>
+      <button class="pane-resize" type="button" aria-label="Resize Editor pane" on:keydown={(event) => handlePaneResizeKeydown(event, editorPane.id)} on:mousedown={(event) => startPaneResize(event, editorPane.id)}></button>
     </section>
   {/each}
 

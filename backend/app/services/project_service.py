@@ -12,11 +12,16 @@ from urllib.parse import unquote
 import yaml
 
 from app.models import (
+    CreateLoreEntryRequest,
     CreateSceneRequest,
     CreateTodoRequest,
     DeleteMetadataFieldRequest,
     DirectoryEntry,
     DirectoryListing,
+    KnownTags,
+    LoreEntry,
+    LoreEntryList,
+    LoreEntrySummary,
     MetadataFieldDefinition,
     MetadataDefinitionSource,
     MetadataSchema,
@@ -27,6 +32,7 @@ from app.models import (
     ProjectInfo,
     ProjectValidation,
     RenameMetadataFieldRequest,
+    SaveLoreEntryRequest,
     SaveSceneRequest,
     Scene,
     SearchHit,
@@ -56,7 +62,27 @@ DEFAULT_METADATA_SCHEMA: dict[str, Any] = {
         "scene": {
             "name": "Scene",
             "kind": "scene",
-            "fields": ["status", "summary", "word_count"],
+            "fields": ["status", "summary", "characters", "locations", "word_count"],
+        },
+        "character": {
+            "name": "Character",
+            "kind": "lore",
+            "fields": ["aliases", "tags", "home_place", "appears_in_scenes", "related_entries"],
+        },
+        "place": {
+            "name": "Place",
+            "kind": "lore",
+            "fields": ["aliases", "tags", "appears_in_scenes", "related_entries"],
+        },
+        "item": {
+            "name": "Item",
+            "kind": "lore",
+            "fields": ["aliases", "tags", "appears_in_scenes", "related_entries"],
+        },
+        "lore_note": {
+            "name": "Note",
+            "kind": "lore",
+            "fields": ["aliases", "tags", "related_entries"],
         },
     },
     "fields": {
@@ -66,6 +92,33 @@ DEFAULT_METADATA_SCHEMA: dict[str, Any] = {
             "options": ["draft", "revised", "complete"],
         },
         "summary": {"name": "Summary", "type": "long_text"},
+        "aliases": {"name": "Aliases", "type": "multi_select"},
+        "tags": {"name": "Tags", "type": "tags"},
+        "characters": {
+            "name": "Characters",
+            "type": "entity_ref_list",
+            "target": {"entry_type": "character"},
+        },
+        "locations": {
+            "name": "Locations",
+            "type": "entity_ref_list",
+            "target": {"entry_type": "place"},
+        },
+        "home_place": {
+            "name": "Home Place",
+            "type": "entity_ref",
+            "target": {"entry_type": "place"},
+        },
+        "appears_in_scenes": {
+            "name": "Appears In Scenes",
+            "type": "entity_ref_list",
+            "target": {"kind": "scene"},
+        },
+        "related_entries": {
+            "name": "Related Entries",
+            "type": "entity_ref_list",
+            "target": {"kind": "lore"},
+        },
         "word_count": {
             "name": "Word Count",
             "type": "computed",
@@ -95,6 +148,7 @@ class ProjectService:
 
         self._write_yaml(root / "project.yaml", self._new_project_manifest(title, root))
         self._write_yaml(root / "metadata.schema.yaml", self._empty_metadata_schema())
+        self._write_yaml(root / "tags.yaml", {"tags": []})
         initial_scene = Scene(
             id=self._new_id("scene"),
             title="Untitled Scene",
@@ -254,6 +308,20 @@ class ProjectService:
             except ProjectServiceError as exc:
                 errors.append(exc.message)
 
+        for path in sorted((root / "lore").glob("*.md")):
+            entry_id = path.stem
+            try:
+                front_matter, _ = self._read_markdown_with_front_matter(path, strict=True)
+                entry_type = front_matter.get("entry_type", "lore_note")
+                if entry_type is not None and not isinstance(entry_type, str):
+                    errors.append(f"Lore Entry {entry_id} has invalid entry_type; it must be text.")
+                    entry_type = "lore_note"
+                metadata = self._normalise_metadata(front_matter.get("metadata"), path)
+                if metadata_schema:
+                    errors.extend(self._validate_lore_entry_metadata(entry_id, str(entry_type or "lore_note"), metadata, metadata_schema))
+            except ProjectServiceError as exc:
+                errors.append(exc.message)
+
         todos = self.read_todos()
         todo_anchor_refs = {
             (item.scene_id, item.anchor_id)
@@ -400,6 +468,26 @@ class ProjectService:
             field_sources=field_sources,
         )
 
+    def read_known_tags(self) -> KnownTags:
+        root = self._require_project()
+        data = self._read_yaml(root / "tags.yaml")
+        raw_tags = data.get("tags", [])
+        if not isinstance(raw_tags, list):
+            raise ProjectServiceError("tags.yaml tags must be a list.", 422)
+        tags: list[str] = []
+        seen: set[str] = set()
+        for raw_tag in raw_tags:
+            tag = str(raw_tag).strip()
+            if not tag:
+                continue
+            key = tag.lower()
+            if key in seen:
+                continue
+            seen.add(key)
+            tags.append(tag)
+        tags.sort(key=str.lower)
+        return KnownTags(tags=tags)
+
     def upsert_metadata_field(self, request: UpsertMetadataFieldRequest) -> MetadataSchema:
         root = self._require_project()
         layer_path = self._metadata_schema_layer_path_for_id(root, request.layer_id)
@@ -455,7 +543,7 @@ class ProjectService:
 
         self._write_yaml(layer_path, layer_data)
         if existing_field is not None:
-            self._migrate_scene_metadata_option_values(root, field_id, existing_field, request.field)
+            self._migrate_entry_metadata_option_values(root, field_id, existing_field, request.field)
         return self.read_metadata_schema()
 
     def move_metadata_field(self, request: MoveMetadataFieldRequest) -> MetadataSchema:
@@ -549,7 +637,7 @@ class ProjectService:
             raise ProjectServiceError(" ".join(schema_errors), 422)
 
         self._write_yaml(source_path, layer_data)
-        self._rename_scene_metadata_key(root, old_field_id, new_field_id)
+        self._rename_entry_metadata_key(root, old_field_id, new_field_id)
         return self.read_metadata_schema()
 
     def delete_metadata_field(self, request: DeleteMetadataFieldRequest) -> MetadataSchema:
@@ -584,7 +672,7 @@ class ProjectService:
             raise ProjectServiceError(" ".join(schema_errors), 422)
 
         self._write_yaml(source_path, layer_data)
-        self._remove_scene_metadata_key(root, field_id)
+        self._remove_entry_metadata_key(root, field_id)
         return self.read_metadata_schema()
 
     def _add_metadata_field_to_layer(
@@ -665,8 +753,11 @@ class ProjectService:
                     replaced.append(next_field_id)
             entry_type_data["fields"] = replaced
 
-    def _rename_scene_metadata_key(self, root: Path, old_field_id: str, new_field_id: str) -> None:
-        for path in (root / "scenes").glob("*.md"):
+    def _entry_markdown_paths(self, root: Path) -> list[Path]:
+        return [*(root / "scenes").glob("*.md"), *(root / "lore").glob("*.md")]
+
+    def _rename_entry_metadata_key(self, root: Path, old_field_id: str, new_field_id: str) -> None:
+        for path in self._entry_markdown_paths(root):
             front_matter, body = self._read_markdown_with_front_matter(path, strict=True)
             metadata = front_matter.get("metadata")
             if not isinstance(metadata, dict) or old_field_id not in metadata:
@@ -677,8 +768,8 @@ class ProjectService:
             front_matter["metadata"] = metadata
             self._write_markdown_with_front_matter(path, front_matter, body)
 
-    def _remove_scene_metadata_key(self, root: Path, field_id: str) -> None:
-        for path in (root / "scenes").glob("*.md"):
+    def _remove_entry_metadata_key(self, root: Path, field_id: str) -> None:
+        for path in self._entry_markdown_paths(root):
             front_matter, body = self._read_markdown_with_front_matter(path, strict=True)
             metadata = front_matter.get("metadata")
             if not isinstance(metadata, dict) or field_id not in metadata:
@@ -687,7 +778,7 @@ class ProjectService:
             front_matter["metadata"] = metadata
             self._write_markdown_with_front_matter(path, front_matter, body)
 
-    def _migrate_scene_metadata_option_values(
+    def _migrate_entry_metadata_option_values(
         self,
         root: Path,
         field_id: str,
@@ -698,7 +789,7 @@ class ProjectService:
         if not migration:
             return
 
-        for path in (root / "scenes").glob("*.md"):
+        for path in self._entry_markdown_paths(root):
             front_matter, body = self._read_markdown_with_front_matter(path, strict=True)
             metadata = front_matter.get("metadata")
             if not isinstance(metadata, dict) or field_id not in metadata:
@@ -950,6 +1041,10 @@ class ProjectService:
         if markdown_errors:
             raise ProjectServiceError(" ".join(markdown_errors), 422)
 
+        schema = self.read_metadata_schema()
+        metadata = self._normalise_metadata(request.metadata, path)
+        metadata = self._canonicalise_metadata_tags(metadata, schema)
+
         scene = Scene(
             id=scene_id,
             title=request.title,
@@ -957,14 +1052,14 @@ class ProjectService:
             revision=current_revision,
             status=request.status,
             entry_type=request.entry_type,
-            metadata=self._normalise_metadata(request.metadata, path),
+            metadata=metadata,
         )
         metadata_errors = self._validate_scene_metadata(
             scene_id,
             scene.entry_type,
             scene.status,
             scene.metadata,
-            self.read_metadata_schema(),
+            schema,
         )
         if metadata_errors:
             raise ProjectServiceError(" ".join(metadata_errors), 422)
@@ -983,6 +1078,115 @@ class ProjectService:
         self._write_yaml(root / "manuscript.structure.yaml", structure.model_dump())
         self._remove_scene_todos(scene_id)
         return self.read_structure()
+
+    def list_lore_entries(self) -> LoreEntryList:
+        root = self._require_project()
+        entries: list[LoreEntrySummary] = []
+        for path in sorted((root / "lore").glob("*.md")):
+            front_matter, body = self._read_markdown_with_front_matter(path, strict=True)
+            raw_entry_type = front_matter.get("entry_type") or "lore_note"
+            entry_type = raw_entry_type if isinstance(raw_entry_type, str) else "lore_note"
+            entries.append(
+                LoreEntrySummary(
+                    id=path.stem,
+                    title=str(front_matter.get("title") or path.stem),
+                    body_markdown=body,
+                    entry_type=entry_type,
+                    metadata=self._normalise_metadata(front_matter.get("metadata"), path),
+                )
+            )
+        entries.sort(key=lambda entry: (entry.title.lower(), entry.id))
+        return LoreEntryList(entries=entries)
+
+    def create_lore_entry(self, request: CreateLoreEntryRequest) -> LoreEntry:
+        root = self._require_project()
+        entry_type = request.entry_type or "lore_note"
+        metadata_errors = self._validate_lore_entry_metadata(
+            "new",
+            entry_type,
+            {},
+            self.read_metadata_schema(),
+        )
+        if metadata_errors:
+            raise ProjectServiceError(" ".join(metadata_errors), 422)
+
+        entry_id = self._new_id("lore")
+        entry = LoreEntry(
+            id=entry_id,
+            title=request.title,
+            body_markdown="",
+            revision="",
+            entry_type=entry_type,
+            metadata={},
+        )
+        self._write_lore_entry_file(root / "lore" / f"{entry_id}.md", entry)
+        return self.read_lore_entry(entry_id)
+
+    def read_lore_entry(self, entry_id: str) -> LoreEntry:
+        root = self._require_project()
+        path = root / "lore" / f"{entry_id}.md"
+        if not path.exists():
+            raise ProjectServiceError(f"Lore Entry {entry_id} does not exist.", 404)
+        front_matter, body = self._read_markdown_with_front_matter(path, strict=True)
+        raw_entry_type = front_matter.get("entry_type") or "lore_note"
+        if not isinstance(raw_entry_type, str):
+            raise ProjectServiceError(f"Lore Entry {entry_id} has invalid entry_type; it must be text.", 422)
+        entry_type = raw_entry_type
+        metadata = self._normalise_metadata(front_matter.get("metadata"), path)
+        metadata_errors = self._validate_lore_entry_metadata(entry_id, entry_type, metadata, self.read_metadata_schema())
+        if metadata_errors:
+            raise ProjectServiceError(" ".join(metadata_errors), 422)
+        return LoreEntry(
+            id=entry_id,
+            title=str(front_matter.get("title") or entry_id),
+            body_markdown=body,
+            revision=self._revision(path),
+            entry_type=entry_type,
+            metadata=metadata,
+            computed_metadata={},
+        )
+
+    def save_lore_entry(self, entry_id: str, request: SaveLoreEntryRequest) -> LoreEntry:
+        root = self._require_project()
+        path = root / "lore" / f"{entry_id}.md"
+        if not path.exists():
+            raise ProjectServiceError(f"Lore Entry {entry_id} does not exist.", 404)
+        current_revision = self._revision(path)
+        if request.base_revision and request.base_revision != current_revision:
+            raise ProjectServiceError("Lore Entry changed on disk after it was opened.", 409)
+        markdown_errors = validate_scene_markdown(request.body_markdown)
+        if markdown_errors:
+            raise ProjectServiceError(" ".join(markdown_errors), 422)
+
+        schema = self.read_metadata_schema()
+        metadata = self._normalise_metadata(request.metadata, path)
+        metadata = self._canonicalise_metadata_tags(metadata, schema)
+
+        entry = LoreEntry(
+            id=entry_id,
+            title=request.title,
+            body_markdown=request.body_markdown,
+            revision=current_revision,
+            entry_type=request.entry_type,
+            metadata=metadata,
+        )
+        metadata_errors = self._validate_lore_entry_metadata(
+            entry_id,
+            entry.entry_type,
+            entry.metadata,
+            schema,
+        )
+        if metadata_errors:
+            raise ProjectServiceError(" ".join(metadata_errors), 422)
+        self._write_lore_entry_file(path, entry)
+        return self.read_lore_entry(entry_id)
+
+    def delete_lore_entry(self, entry_id: str) -> LoreEntryList:
+        root = self._require_project()
+        path = root / "lore" / f"{entry_id}.md"
+        if path.exists():
+            path.unlink()
+        return self.list_lore_entries()
 
     def read_todos(self) -> TodoDocument:
         root = self._require_project()
@@ -1045,6 +1249,7 @@ class ProjectService:
                 if pattern is None or pattern.search(item.text):
                     hits.append(
                         SearchHit(
+                            kind="scene" if item.scene_id else "project",
                             file_id=item.scene_id or "project",
                             path=f"{scene_paths.get(item.scene_id, 'Project')} TODO" if item.scene_id else "Project TODO",
                             line=1,
@@ -1064,6 +1269,7 @@ class ProjectService:
                     if pattern is None or pattern.search(f"{note} {prose}"):
                         hits.append(
                             SearchHit(
+                                kind="scene",
                                 file_id=path.stem,
                                 path=scene_paths.get(path.stem, str(path.relative_to(root))),
                                 line=body[: match.start()].count("\n") + 1,
@@ -1090,6 +1296,7 @@ class ProjectService:
                         if pattern.search(value):
                             hits.append(
                                 SearchHit(
+                                    kind="scene",
                                     file_id=path.stem,
                                     path=f"{scene_paths.get(path.stem, str(path.relative_to(root)))} metadata",
                                     line=1,
@@ -1100,6 +1307,7 @@ class ProjectService:
                         if pattern.search(line):
                             hits.append(
                                 SearchHit(
+                                    kind="scene",
                                     file_id=path.stem,
                                     path=scene_paths.get(path.stem, str(path.relative_to(root))),
                                     line=index,
@@ -1108,12 +1316,33 @@ class ProjectService:
                             )
             if request.include_lore:
                 for path in (root / "lore").rglob("*.md"):
-                    for index, line in enumerate(path.read_text(encoding="utf-8").splitlines(), start=1):
+                    front_matter, body = self._read_markdown_with_front_matter(path, strict=True)
+                    title = str(front_matter.get("title") or path.stem)
+                    entry_type = str(front_matter.get("entry_type") or "lore_note")
+                    metadata = self._normalise_metadata(front_matter.get("metadata"), path)
+                    searchable_metadata = {
+                        "title": title,
+                        "entry_type": entry_type,
+                        **metadata,
+                    }
+                    for label, value in self._iter_metadata_search_values(searchable_metadata):
+                        if pattern.search(value):
+                            hits.append(
+                                SearchHit(
+                                    kind="lore",
+                                    file_id=path.stem,
+                                    path=f"Lore / {title} metadata",
+                                    line=1,
+                                    excerpt=f"{label}: {value}",
+                                )
+                            )
+                    for index, line in enumerate(body.splitlines(), start=1):
                         if pattern.search(line):
                             hits.append(
                                 SearchHit(
+                                    kind="lore",
                                     file_id=path.stem,
-                                    path=str(path.relative_to(root)),
+                                    path=f"Lore / {title}",
                                     line=index,
                                     excerpt=line.strip(),
                                 )
@@ -1187,6 +1416,20 @@ class ProjectService:
         body = scene.body_markdown.rstrip() + "\n" if scene.body_markdown.strip() else ""
         self._atomic_write(path, f"---\n{front_matter}\n---\n\n{body}")
 
+    def _write_lore_entry_file(self, path: Path, entry: LoreEntry) -> None:
+        front_matter = yaml.safe_dump(
+            {
+                "id": entry.id,
+                "title": entry.title,
+                "entry_type": entry.entry_type,
+                "metadata": entry.metadata,
+            },
+            sort_keys=False,
+            allow_unicode=True,
+        ).strip()
+        body = entry.body_markdown.rstrip() + "\n" if entry.body_markdown.strip() else ""
+        self._atomic_write(path, f"---\n{front_matter}\n---\n\n{body}")
+
     def _normalise_metadata(self, value: Any, path: Path) -> dict[str, Any]:
         if value is None:
             return {}
@@ -1203,6 +1446,50 @@ class ProjectService:
             return {str(key): self._normalise_metadata_value(raw_value) for key, raw_value in value.items()}
         return str(value)
 
+    def _canonicalise_metadata_tags(self, metadata: dict[str, Any], schema: MetadataSchema) -> dict[str, Any]:
+        tags_by_lower = {tag.lower(): tag for tag in self.read_known_tags().tags}
+        changed_known_tags = False
+        next_metadata = dict(metadata)
+
+        for field_id, value in metadata.items():
+            field = schema.fields.get(field_id)
+            if not field or field.type != "tags" or not isinstance(value, list):
+                continue
+            if any(not isinstance(raw_tag, str) for raw_tag in value):
+                continue
+            canonical_values: list[str] = []
+            seen_values: set[str] = set()
+            for raw_tag in value:
+                tag = raw_tag.strip()
+                if not tag:
+                    continue
+                key = tag.lower()
+                canonical_tag = tags_by_lower.get(key)
+                if canonical_tag is None:
+                    canonical_tag = tag
+                    tags_by_lower[key] = canonical_tag
+                    changed_known_tags = True
+                if key in seen_values:
+                    continue
+                seen_values.add(key)
+                canonical_values.append(canonical_tag)
+            next_metadata[field_id] = canonical_values
+
+        if changed_known_tags:
+            self._write_known_tags(list(tags_by_lower.values()))
+        return next_metadata
+
+    def _write_known_tags(self, tags: list[str]) -> None:
+        root = self._require_project()
+        known_tags = KnownTags(tags=tags)
+        canonical_tags = self.read_known_tags().tags
+        for tag in known_tags.tags:
+            stripped = tag.strip()
+            if stripped and all(existing.lower() != stripped.lower() for existing in canonical_tags):
+                canonical_tags.append(stripped)
+        canonical_tags.sort(key=str.lower)
+        self._write_yaml(root / "tags.yaml", {"tags": canonical_tags})
+
     def _validate_scene_metadata(
         self,
         scene_id: str,
@@ -1211,28 +1498,60 @@ class ProjectService:
         metadata: dict[str, Any],
         schema: MetadataSchema,
     ) -> list[str]:
+        errors = self._validate_entry_metadata(
+            label=f"Scene {scene_id}",
+            entry_type=entry_type,
+            expected_kind="scene",
+            metadata=metadata,
+            schema=schema,
+        )
+        status_field = schema.fields.get("status")
+        if status_field:
+            errors.extend(self._validate_metadata_field_value(f"Scene {scene_id}", "status", status, status_field, allow_computed=True))
+        return errors
+
+    def _validate_lore_entry_metadata(
+        self,
+        entry_id: str,
+        entry_type: str,
+        metadata: dict[str, Any],
+        schema: MetadataSchema,
+    ) -> list[str]:
+        return self._validate_entry_metadata(
+            label=f"Lore Entry {entry_id}",
+            entry_type=entry_type,
+            expected_kind="lore",
+            metadata=metadata,
+            schema=schema,
+        )
+
+    def _validate_entry_metadata(
+        self,
+        *,
+        label: str,
+        entry_type: str,
+        expected_kind: str,
+        metadata: dict[str, Any],
+        schema: MetadataSchema,
+    ) -> list[str]:
         errors: list[str] = []
         entry_type_definition = schema.entry_types.get(entry_type)
         if not entry_type_definition:
-            errors.append(f"Scene {scene_id} has unknown entry_type {entry_type}.")
-        elif entry_type_definition.kind != "scene":
-            errors.append(f"Scene {scene_id} uses non-scene entry_type {entry_type}.")
-
-        status_field = schema.fields.get("status")
-        if status_field:
-            errors.extend(self._validate_metadata_field_value(scene_id, "status", status, status_field, allow_computed=True))
+            errors.append(f"{label} has unknown entry_type {entry_type}.")
+        elif entry_type_definition.kind != expected_kind:
+            errors.append(f"{label} uses non-{expected_kind} entry_type {entry_type}.")
 
         for field_id, value in metadata.items():
             field = schema.fields.get(field_id)
             if not field:
-                errors.append(f"Scene {scene_id} has unknown metadata field {field_id}.")
+                errors.append(f"{label} has unknown metadata field {field_id}.")
                 continue
-            errors.extend(self._validate_metadata_field_value(scene_id, field_id, value, field))
+            errors.extend(self._validate_metadata_field_value(label, field_id, value, field))
         return errors
 
     def _validate_metadata_field_value(
         self,
-        scene_id: str,
+        label: str,
         field_id: str,
         value: Any,
         field: MetadataFieldDefinition,
@@ -1242,30 +1561,30 @@ class ProjectService:
         if value is None or value == "":
             return []
         if field.type == "computed" and not allow_computed:
-            return [f"Scene {scene_id} stores computed metadata field {field_id}; computed fields are derived."]
+            return [f"{label} stores computed metadata field {field_id}; computed fields are derived."]
         if field.type in {"text", "long_text", "date", "entity_ref"}:
             if not isinstance(value, str):
-                return [f"Scene {scene_id} metadata field {field_id} must be text."]
+                return [f"{label} metadata field {field_id} must be text."]
             return []
         if field.type == "select":
             if not isinstance(value, str):
-                return [f"Scene {scene_id} metadata field {field_id} must be text."]
+                return [f"{label} metadata field {field_id} must be text."]
             if field.options and value not in field.options:
-                return [f"Scene {scene_id} metadata field {field_id} must be one of: {', '.join(field.options)}."]
+                return [f"{label} metadata field {field_id} must be one of: {', '.join(field.options)}."]
             return []
         if field.type == "number":
             if isinstance(value, bool) or not isinstance(value, int | float):
-                return [f"Scene {scene_id} metadata field {field_id} must be a number."]
+                return [f"{label} metadata field {field_id} must be a number."]
             return []
         if field.type == "boolean":
             if not isinstance(value, bool):
-                return [f"Scene {scene_id} metadata field {field_id} must be true or false."]
+                return [f"{label} metadata field {field_id} must be true or false."]
             return []
         if field.type in {"multi_select", "entity_ref_list", "tags"}:
             if not isinstance(value, list):
-                return [f"Scene {scene_id} metadata field {field_id} must be a list."]
+                return [f"{label} metadata field {field_id} must be a list."]
             if any(not isinstance(item, str) for item in value):
-                return [f"Scene {scene_id} metadata field {field_id} must contain only text values."]
+                return [f"{label} metadata field {field_id} must contain only text values."]
             return []
         return []
 

@@ -21,6 +21,34 @@ export type Scene = {
   computed_metadata: EntryMetadata;
 };
 
+export type LoreEntrySummary = {
+  id: string;
+  title: string;
+  body_markdown: string;
+  entry_type: string;
+  metadata: EntryMetadata;
+};
+
+export type LoreEntry = {
+  id: string;
+  title: string;
+  body_markdown: string;
+  revision: string;
+  entry_type: string;
+  metadata: EntryMetadata;
+  computed_metadata: EntryMetadata;
+};
+
+export type EditableDocument = Scene | LoreEntry;
+
+export type LoreEntryList = {
+  entries: LoreEntrySummary[];
+};
+
+export type KnownTags = {
+  tags: string[];
+};
+
 export type MetadataValue = string | number | boolean | null | MetadataValue[] | { [key: string]: MetadataValue };
 
 export type EntryMetadata = Record<string, MetadataValue>;
@@ -122,6 +150,7 @@ export type DirectoryListing = {
 };
 
 export type SearchHit = {
+  kind: "scene" | "lore" | "project";
   file_id: string;
   path: string;
   line: number;

@@ -11,18 +11,20 @@
   import TableRow from "@tiptap/extension-table-row";
   import { editorHtmlToSceneMarkdown, sceneMarkdownToHtml } from "./markdown";
   import MetadataLongTextEditor from "./MetadataLongTextEditor.svelte";
-  import type { EntryMetadata, MetadataFieldDefinition, MetadataSchema, MetadataValue, Scene } from "./types";
+  import type { EditableDocument, EntryMetadata, MetadataFieldDefinition, MetadataSchema, MetadataValue } from "./types";
 
-  export let scene: Scene | null = null;
+  export let scene: EditableDocument | null = null;
+  export let documentKind: "scene" | "lore" = "scene";
   export let metadataSchema: MetadataSchema | null = null;
-  export let metadataReload: { token: number; metadata: EntryMetadata; status: string; entryType: string } | null = null;
+  export let knownTags: string[] = [];
+  export let metadataReload: { token: number; metadata: EntryMetadata; status?: string; entryType: string } | null = null;
   export let dirty = false;
   export let todoStatusHint = "";
 
   const dispatch = createEventDispatcher<{
     change: { title: string; bodyMarkdown: string; status: string; entryType: string; metadata: EntryMetadata };
     focus: void;
-    "custom-data": { entryType: string };
+    "custom-data": { entryType: string; kind: "scene" | "lore" };
     embeddedTodos: { todos: EmbeddedTodo[] };
   }>();
 
@@ -123,19 +125,23 @@
   let reconcilingTodoAnchors = false;
   let highlightedTodoId: string | null = null;
   let lastMetadataReloadToken = 0;
+  let tagPickerFieldId: string | null = null;
+  let tagPickerPosition: { x: number; y: number; width: number } | null = null;
 
-  $: slashCommands = editor ? getSlashCommands() : [];
+  $: slashCommands = editor && documentKind === "scene" ? getSlashCommands() : [];
   $: activeSlashCommand = slashCommands[slashMenu.selectedIndex];
   $: selectionToolbarActions = editor ? getSelectionToolbarActions() : [];
-  $: sceneEntryTypes = Object.entries(metadataSchema?.entry_types ?? {}).filter(([, definition]) => definition.kind === "scene");
-  $: activeEntryType = metadataSchema?.entry_types[entryType] ?? metadataSchema?.entry_types.scene;
+  $: documentLabel = documentKind === "lore" ? "Entry" : "Scene";
+  $: documentNameLabel = documentKind === "lore" ? "Name" : "Title";
+  $: documentEntryTypes = Object.entries(metadataSchema?.entry_types ?? {}).filter(([, definition]) => definition.kind === documentKind);
+  $: activeEntryType = metadataSchema?.entry_types[entryType] ?? metadataSchema?.entry_types[defaultEntryType()];
   $: metadataFieldIds = activeEntryType?.fields ?? [];
   $: metadataSummaryText = buildMetadataSummary(activeEntryType?.name ?? entryType, status, liveWordCount);
 
   $: if (metadataReload && metadataReload.token !== lastMetadataReloadToken) {
     lastMetadataReloadToken = metadataReload.token;
-    status = metadataReload.status || "draft";
-    entryType = metadataReload.entryType || "scene";
+    status = metadataReload.status || defaultStatus();
+    entryType = metadataReload.entryType || defaultEntryType();
     metadata = cloneMetadata(metadataReload.metadata);
   }
 
@@ -146,9 +152,11 @@
   $: if (editor && !scene && loadedSceneId !== null) {
     loadedSceneId = null;
     title = "";
-    status = "draft";
-    entryType = "scene";
+    status = defaultStatus();
+    entryType = defaultEntryType();
     metadata = {};
+    tagPickerFieldId = null;
+    tagPickerPosition = null;
     liveWordCount = 0;
     editor.commands.clearContent(false);
     syncEditorEmpty();
@@ -200,9 +208,12 @@
   async function loadScene(nextScene: Scene) {
     const sceneId = nextScene.id;
     title = nextScene.title;
-    status = nextScene.status || "draft";
-    entryType = nextScene.entry_type || "scene";
+    status = documentStatus(nextScene);
+    entryType = nextScene.entry_type || defaultEntryType();
     metadata = cloneMetadata(nextScene.metadata);
+    metadataExpanded = documentKind === "lore";
+    tagPickerFieldId = null;
+    tagPickerPosition = null;
     const html = await sceneMarkdownToHtml(nextScene.body_markdown || "");
     if (!editor || scene?.id !== sceneId) return;
     editor.commands.setContent(html || "<p></p>", false);
@@ -250,6 +261,18 @@
     emitChange();
   }
 
+  function defaultEntryType() {
+    return documentKind === "lore" ? "lore_note" : "scene";
+  }
+
+  function defaultStatus() {
+    return documentKind === "scene" ? "draft" : "";
+  }
+
+  function documentStatus(document: EditableDocument) {
+    return "status" in document ? document.status || "draft" : "";
+  }
+
   function updateMetadataField(fieldId: string, field: MetadataFieldDefinition, value: MetadataValue) {
     metadata = {
       ...metadata,
@@ -284,6 +307,42 @@
     return String(value);
   }
 
+  function metadataValueList(value: MetadataValue | undefined) {
+    if (Array.isArray(value)) return value.map((item) => String(item).trim()).filter(Boolean);
+    if (value === null || value === undefined || value === "") return [];
+    return String(value)
+      .split(",")
+      .map((item) => item.trim())
+      .filter(Boolean);
+  }
+
+  function hasTag(fieldId: string, tag: string) {
+    const key = tag.toLowerCase();
+    return metadataValueList(metadata[fieldId]).some((item) => item.toLowerCase() === key);
+  }
+
+  function addKnownTag(fieldId: string, field: MetadataFieldDefinition, tag: string) {
+    const key = tag.toLowerCase();
+    const nextTags = metadataValueList(metadata[fieldId]).filter((item) => item.toLowerCase() !== key);
+    updateMetadataField(fieldId, field, [...nextTags, tag]);
+  }
+
+  function toggleTagPicker(fieldId: string, event: MouseEvent) {
+    if (tagPickerFieldId === fieldId) {
+      tagPickerFieldId = null;
+      tagPickerPosition = null;
+      return;
+    }
+    const anchor = (event.currentTarget as HTMLElement).closest(".tag-picker-anchor") as HTMLElement | null;
+    const bounds = (anchor ?? (event.currentTarget as HTMLElement)).getBoundingClientRect();
+    tagPickerFieldId = fieldId;
+    tagPickerPosition = {
+      x: bounds.left,
+      y: bounds.bottom + 4,
+      width: Math.min(320, Math.max(220, bounds.width)),
+    };
+  }
+
   function syncSelectValue(node: HTMLSelectElement, value: string) {
     let mounted = true;
     const applyValue = (nextValue: string) => {
@@ -313,6 +372,7 @@
   }
 
   function buildMetadataSummary(typeName: string, currentStatus: string, wordCount: number) {
+    if (documentKind === "lore") return typeName;
     return `${typeName} · ${currentStatus || "draft"} · ${wordCount} ${wordCount === 1 ? "word" : "words"}`;
   }
 
@@ -345,6 +405,11 @@
   }
 
   function handleEditorKeydown(view: EditorView, event: KeyboardEvent) {
+    if (documentKind !== "scene") {
+      if (slashMenu.visible) closeSlashMenu();
+      return false;
+    }
+
     if (slashMenu.visible) {
       if (event.key === "ArrowDown") {
         event.preventDefault();
@@ -390,12 +455,18 @@
   }
 
   function isSlashTriggerContext() {
+    if (documentKind !== "scene") return false;
     if (!editor) return false;
     const { selection } = editor.state;
     return selection.empty && selection.$from.parent.type.name === "paragraph" && selection.$from.parent.textContent.trim() === "/";
   }
 
   function updateSlashMenuFromContent() {
+    if (documentKind !== "scene") {
+      if (slashMenu.visible) closeSlashMenu();
+      return;
+    }
+
     if (isSlashTriggerContext()) {
       window.setTimeout(openSlashMenu, 0);
     } else if (slashMenu.visible) {
@@ -491,6 +562,7 @@
   }
 
   function openSlashMenu() {
+    if (documentKind !== "scene") return;
     if (!editor || !editorFrame || !editor.isFocused) return;
     const coords = editor.view.coordsAtPos(editor.state.selection.from);
     const frameBounds = editorFrame.getBoundingClientRect();
@@ -1009,19 +1081,22 @@
   <section class="editor-header">
     {#if scene}
       <div class="scene-title-row">
-        <input class="title-input" aria-label="Scene title" bind:value={title} on:input={emitChange} />
+        <label class="title-label">
+          {documentNameLabel}
+          <input class="title-input" aria-label={`${documentLabel} ${documentNameLabel.toLowerCase()}`} placeholder={documentNameLabel} bind:value={title} on:input={emitChange} />
+        </label>
       </div>
       <div class="editor-hint">
         {#if todoStatusHint}
           {todoStatusHint}
         {:else if editorEmpty}
-          Start writing, or type / for commands.
+          {documentKind === "scene" ? "Start writing, or type / for commands." : "Start writing."}
         {:else}
-          Select text for formatting. Type / on an empty line for insert commands.
+          {documentKind === "scene" ? "Select text for formatting. Type / on an empty line for insert commands." : "Select text for formatting."}
         {/if}
       </div>
       {#if metadataSchema}
-        <section class="scene-metadata" aria-label="Scene metadata">
+        <section class="scene-metadata" aria-label={`${documentLabel} metadata`}>
           <div class="metadata-stripe">
             <button class="metadata-toggle" type="button" on:click={() => (metadataExpanded = !metadataExpanded)}>
               <strong>{metadataExpanded ? "Hide Metadata" : "Show Metadata"}</strong>
@@ -1030,7 +1105,7 @@
             <button
               class="metadata-custom-button"
               type="button"
-              on:click={() => dispatch("custom-data", { entryType })}
+              on:click={() => dispatch("custom-data", { entryType, kind: documentKind })}
             >
               Custom data
             </button>
@@ -1038,12 +1113,12 @@
           {#if metadataExpanded}
             <div class="metadata-panel">
               <label>
-                Scene Type
+                {documentLabel} Type
                 <select value={entryType} on:change={(event) => updateEntryType(event.currentTarget.value)}>
                   {#if entryType && !metadataSchema.entry_types[entryType]}
                     <option value={entryType}>{entryType}</option>
                   {/if}
-                  {#each sceneEntryTypes as [typeId, definition]}
+                  {#each documentEntryTypes as [typeId, definition]}
                     <option value={typeId}>{definition.name}</option>
                   {/each}
                 </select>
@@ -1100,10 +1175,32 @@
                         />
                       {:else if field.type === "computed"}
                         <input readonly value={computedFieldString(fieldId)} />
+                      {:else if field.type === "tags"}
+                        <div class="tag-picker-anchor">
+                          <div class="tag-field-control">
+                            <input
+                              value={currentValue}
+                              placeholder="Comma-separated values"
+                              on:input={(event) => updateMetadataField(fieldId, field, event.currentTarget.value)}
+                            />
+                            <button class="tag-picker-toggle" type="button" title="Add known tags" on:click={(event) => toggleTagPicker(fieldId, event)}>+</button>
+                          </div>
+                          {#if tagPickerFieldId === fieldId && tagPickerPosition}
+                            <div class="tag-picker" style={`left: ${tagPickerPosition.x}px; top: ${tagPickerPosition.y}px; width: ${tagPickerPosition.width}px;`} aria-label={`${field.name} known tags`}>
+                              {#if knownTags.length > 0}
+                                {#each knownTags as tag}
+                                  <button class:active={hasTag(fieldId, tag)} type="button" on:mousedown|preventDefault on:click={() => addKnownTag(fieldId, field, tag)}>{tag}</button>
+                                {/each}
+                              {:else}
+                                <span>No known tags yet.</span>
+                              {/if}
+                            </div>
+                          {/if}
+                        </div>
                       {:else}
                         <input
                           value={currentValue}
-                          placeholder={field.type === "multi_select" || field.type === "tags" || field.type === "entity_ref_list" ? "Comma-separated values" : ""}
+                          placeholder={field.type === "multi_select" || field.type === "entity_ref_list" ? "Comma-separated values" : ""}
                           on:input={(event) => updateMetadataField(fieldId, field, event.currentTarget.value)}
                         />
                         {/if}
@@ -1121,7 +1218,7 @@
     {/if}
   </section>
 
-  <div class:empty-editor={editorEmpty} class="editor-wrap" bind:this={editorFrame}>
+  <div class:empty-editor={editorEmpty} class:lore-editor={documentKind === "lore"} class="editor-wrap" bind:this={editorFrame}>
     {#if selectionMenu.visible}
       <div class:below={selectionMenu.placement === "below"} class="selection-toolbar" style={`left: ${selectionMenu.x}px; top: ${selectionMenu.y}px;`}>
         <span class="selection-count">{selectionMenu.wordCount} {selectionMenu.wordCount === 1 ? "word" : "words"}</span>

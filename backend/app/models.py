@@ -165,6 +165,45 @@ class SaveSceneRequest(BaseModel):
     metadata: dict[str, MetadataValue] = Field(default_factory=dict)
 
 
+class LoreEntrySummary(BaseModel):
+    id: str
+    title: str
+    body_markdown: str = ""
+    entry_type: str = "lore_note"
+    metadata: dict[str, MetadataValue] = Field(default_factory=dict)
+
+
+class LoreEntry(BaseModel):
+    id: str
+    title: str
+    body_markdown: str
+    revision: str
+    entry_type: str = "lore_note"
+    metadata: dict[str, MetadataValue] = Field(default_factory=dict)
+    computed_metadata: dict[str, MetadataValue] = Field(default_factory=dict)
+
+
+class LoreEntryList(BaseModel):
+    entries: list[LoreEntrySummary] = Field(default_factory=list)
+
+
+class KnownTags(BaseModel):
+    tags: list[str] = Field(default_factory=list)
+
+
+class CreateLoreEntryRequest(BaseModel):
+    title: str = Field(min_length=1)
+    entry_type: str = "lore_note"
+
+
+class SaveLoreEntryRequest(BaseModel):
+    title: str = Field(min_length=1)
+    body_markdown: str
+    base_revision: str | None = None
+    entry_type: str = "lore_note"
+    metadata: dict[str, MetadataValue] = Field(default_factory=dict)
+
+
 class TodoItem(BaseModel):
     id: str
     text: str
@@ -200,6 +239,7 @@ class SearchRequest(BaseModel):
 
 
 class SearchHit(BaseModel):
+    kind: Literal["scene", "lore", "project"] = "scene"
     file_id: str
     path: str
     line: int

@@ -225,7 +225,7 @@ class ProjectService:
             entry_type="scene",
             metadata={},
         )
-        self._write_scene_file(root / "scenes" / f"{initial_scene.id}.md", initial_scene)
+        self._write_scene_file(self._filepath_for_new_node(root / "scenes", initial_scene.title), initial_scene)
         initial_structure = {
             "root": {
                 "id": "root",
@@ -1483,7 +1483,7 @@ class ProjectService:
             entry_type="scene",
             metadata={},
         )
-        self._write_scene_file(root / "scenes" / f"{scene_id}.md", scene)
+        self._write_scene_file(self._filepath_for_new_node(root / "scenes", request.title), scene)
 
         structure = self.read_structure()
         scene_node = StructureNode(
@@ -1668,6 +1668,7 @@ class ProjectService:
             front_matter, body = self._read_markdown_with_front_matter(path, strict=True)
             front_matter["title"] = clean_title
             self._write_markdown_with_front_matter(path, front_matter, body)
+            self._maybe_rename_node_file(path, clean_title)
         self._write_yaml(root / "manuscript.structure.yaml", self._structure_dump_for_storage(structure))
         return self.read_structure()
 
@@ -1702,7 +1703,7 @@ class ProjectService:
             entry_type=request.entry_type,
             metadata={},
         )
-        self._write_scene_file(root / "scenes" / f"{file_id}.md", scene)
+        self._write_scene_file(self._filepath_for_new_node(root / "scenes", request.title), scene)
 
         new_node = StructureNode(
             id=self._new_id("node"),
@@ -1776,6 +1777,7 @@ class ProjectService:
         if metadata_errors:
             raise ProjectServiceError(" ".join(metadata_errors), 422)
         self._write_scene_file(path, scene)
+        path = self._maybe_rename_node_file(path, request.title)
         self._update_scene_title_in_structure(node_id, request.title)
         self._remove_missing_scene_todo_anchors(node_id, request.body_markdown)
         return self.read_scene(node_id)
@@ -1833,7 +1835,7 @@ class ProjectService:
             entry_type=entry_type,
             metadata={},
         )
-        self._write_lore_entry_file(root / "lore" / f"{entry_id}.md", entry)
+        self._write_lore_entry_file(self._filepath_for_new_node(root / "lore", request.title), entry)
         return self.read_lore_entry(entry_id)
 
     def read_lore_entry(self, entry_id: str) -> LoreEntry:
@@ -1891,6 +1893,7 @@ class ProjectService:
         if metadata_errors:
             raise ProjectServiceError(" ".join(metadata_errors), 422)
         self._write_lore_entry_file(path, entry)
+        self._maybe_rename_node_file(path, request.title)
         return self.read_lore_entry(node_id)
 
     def delete_lore_entry(self, entry_id: str) -> LoreEntryList:
@@ -2152,6 +2155,49 @@ class ProjectService:
     def _write_markdown_with_front_matter(self, path: Path, front_matter: dict[str, Any], body: str) -> None:
         front_matter_text = yaml.safe_dump(front_matter, sort_keys=False, allow_unicode=True).strip()
         self._atomic_write(path, f"---\n{front_matter_text}\n---\n{body}")
+
+    _FILENAME_ILLEGAL_CHARS = re.compile(r'[<>:"/\\|?*\x00-\x1f]')
+    _FILENAME_WHITESPACE = re.compile(r"\s+")
+    _FILENAME_WINDOWS_RESERVED = frozenset(
+        {"CON", "PRN", "AUX", "NUL"}
+        | {f"COM{i}" for i in range(1, 10)}
+        | {f"LPT{i}" for i in range(1, 10)}
+    )
+
+    def _sanitize_filename(self, title: str) -> str:
+        sanitized = self._FILENAME_ILLEGAL_CHARS.sub("_", title)
+        sanitized = self._FILENAME_WHITESPACE.sub(" ", sanitized).strip()
+        sanitized = sanitized.rstrip(". ")
+        if len(sanitized) > 100:
+            sanitized = sanitized[:100].rstrip(". ")
+        if not sanitized:
+            sanitized = "Untitled"
+        base = sanitized.split(".")[0].upper()
+        if base in self._FILENAME_WINDOWS_RESERVED:
+            sanitized = "_" + sanitized
+        return sanitized
+
+    def _unique_filepath(self, folder: Path, sanitized: str, current_path: Path | None = None) -> Path:
+        current_resolved = current_path.resolve() if current_path else None
+        candidate = folder / f"{sanitized}.md"
+        if not candidate.exists() or (current_resolved and candidate.resolve() == current_resolved):
+            return candidate
+        i = 2
+        while True:
+            candidate = folder / f"{sanitized} ({i}).md"
+            if not candidate.exists() or (current_resolved and candidate.resolve() == current_resolved):
+                return candidate
+            i += 1
+
+    def _filepath_for_new_node(self, folder: Path, title: str) -> Path:
+        return self._unique_filepath(folder, self._sanitize_filename(title))
+
+    def _maybe_rename_node_file(self, path: Path, new_title: str) -> Path:
+        target = self._unique_filepath(path.parent, self._sanitize_filename(new_title), current_path=path)
+        if target == path:
+            return path
+        path.rename(target)
+        return target
 
     def _write_scene_file(self, path: Path, scene: Scene) -> None:
         front_matter = yaml.safe_dump(

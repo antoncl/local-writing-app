@@ -105,6 +105,33 @@ parent's field list.
 
 ---
 
+## File naming
+
+Scene, container, and lore entry files are named by their **title**, not
+by an internal id. So a chapter called *The Departure* lives at
+`scenes/The Departure.md`, and a character *Seren* lives at
+`lore/Seren.md`. The canonical identity is still the `id:` field in the
+front matter; the filename is just an alias for it.
+
+This means you can open `scenes/` or `lore/` in Explorer or Finder and
+the contents are immediately legible. Renaming a node in the app
+renames the underlying file. Renaming a file by hand outside the app
+is also safe — the app finds it by front-matter id on the next load.
+
+Title sanitisation:
+
+- Forbidden filesystem characters (`< > : " / \ | ? *` and control
+  chars) are replaced with `_`
+- Trailing dots and spaces are trimmed
+- Names are capped at 100 characters
+- Empty titles fall back to `Untitled`
+- Windows reserved names (`CON`, `PRN`, `COM1`, etc.) get a leading `_`
+
+Collisions get a `(2)`, `(3)`, … suffix. Two scenes called *Chapter 1*
+land at `Chapter 1.md` and `Chapter 1 (2).md`.
+
+---
+
 ## Other tweakable knobs
 
 | Field on entry type | Meaning | Default |

@@ -32,7 +32,8 @@ class MetadataValidationTests(unittest.TestCase):
         self.service = ProjectService()
         self.service.create_project(self.root, "Test Project")
         self._set_projects_base_folder(self.base)
-        self.scene_id = next((self.root / "scenes").glob("*.md")).stem
+        first_scene_path = next((self.root / "scenes").glob("*.md"))
+        self.scene_id = self.service._read_front_matter_only(first_scene_path, strict=True)["id"]
 
     def tearDown(self) -> None:
         self.temp_dir.cleanup()
@@ -103,8 +104,9 @@ class MetadataValidationTests(unittest.TestCase):
         self.assertEqual(len(act_nodes), 1)
         self.assertEqual(act_nodes[0].title, "Act One")
         self.assertIsNotNone(act_nodes[0].scene_id)
-        backing_file = self.root / "scenes" / f"{act_nodes[0].scene_id}.md"
+        backing_file = self.service._path_for_node_id(act_nodes[0].scene_id, "scene")
         self.assertTrue(backing_file.exists())
+        self.assertEqual(backing_file.stem, "Act One")
 
     def test_container_is_loadable_as_scene(self) -> None:
         from app.models import CreateStructureNodeRequest
@@ -280,7 +282,7 @@ class MetadataValidationTests(unittest.TestCase):
         self.assertEqual(renamed_act.title, "The Departure")
 
     def test_rename_structure_node_updates_scene_file_for_leaf(self) -> None:
-        scene_id = next((self.root / "scenes").glob("*.md")).stem
+        scene_id = self.scene_id
         structure = self.service.read_structure()
         scene_node = next(child for child in structure.root.children if child.scene_id == scene_id)
 
@@ -309,7 +311,7 @@ class MetadataValidationTests(unittest.TestCase):
             self._make_create_scene("Arrival", parent_id=act_node.id)
         )
 
-        scene_path = next((self.root / "scenes").glob(f"{scene.id}.md"))
+        scene_path = self.service._path_for_node_id(scene.id, "scene")
         self.assertTrue(scene_path.exists())
 
         self.service.delete_structure_node(act_node.id)
@@ -441,6 +443,49 @@ class MetadataValidationTests(unittest.TestCase):
             self.service.delete_structure_node("root")
         self.assertEqual(ctx.exception.status_code, 422)
 
+    def _first_scene_id(self) -> str:
+        first_scene_path = next((self.root / "scenes").glob("*.md"))
+        return self.service._read_front_matter_only(first_scene_path, strict=True)["id"]
+
+    def test_new_scene_file_is_named_by_title(self) -> None:
+        scene = self.service.create_scene(self._make_create_scene("First Light"))
+        path = self.service._path_for_node_id(scene.id, "scene")
+        self.assertEqual(path.name, "First Light.md")
+
+    def test_new_lore_file_is_named_by_title(self) -> None:
+        entry = self.service.create_lore_entry(CreateLoreEntryRequest(title="Seren the Brave", entry_type="character"))
+        path = self.service._path_for_node_id(entry.id, "lore")
+        self.assertEqual(path.name, "Seren the Brave.md")
+
+    def test_title_with_illegal_chars_gets_sanitized(self) -> None:
+        scene = self.service.create_scene(self._make_create_scene('Chapter 1: "Hello?"'))
+        path = self.service._path_for_node_id(scene.id, "scene")
+        for forbidden in '<>:"/\\|?*':
+            self.assertNotIn(forbidden, path.stem)
+
+    def test_collision_resolved_with_suffix(self) -> None:
+        first = self.service.create_scene(self._make_create_scene("Departure"))
+        second = self.service.create_scene(self._make_create_scene("Departure"))
+        first_path = self.service._path_for_node_id(first.id, "scene")
+        second_path = self.service._path_for_node_id(second.id, "scene")
+        self.assertEqual(first_path.name, "Departure.md")
+        self.assertEqual(second_path.name, "Departure (2).md")
+
+    def test_rename_structure_node_renames_file_too(self) -> None:
+        from app.models import CreateStructureNodeRequest
+
+        self.service.create_structure_node(CreateStructureNodeRequest(title="Act One", entry_type="act"))
+        structure = self.service.read_structure()
+        act_node = next(child for child in structure.root.children if child.type == "act")
+        original_path = self.service._path_for_node_id(act_node.scene_id, "scene")
+        self.assertEqual(original_path.name, "Act One.md")
+
+        self.service.rename_structure_node(act_node.id, "The Departure")
+
+        self.assertFalse(original_path.exists())
+        new_path = self.service._path_for_node_id(act_node.scene_id, "scene")
+        self.assertEqual(new_path.name, "The Departure.md")
+
     def _make_create_scene(self, title: str, parent_id: str | None = None):
         from app.models import CreateSceneRequest
 
@@ -485,7 +530,7 @@ class MetadataValidationTests(unittest.TestCase):
         self.assertEqual(part.scene_id, None)
 
     def test_scene_helpers_walk_custom_container_types(self) -> None:
-        scene_id = next((self.root / "scenes").glob("*.md")).stem
+        scene_id = self._first_scene_id()
         root_node = self.service.read_structure().root
         scene_child = root_node.children[0]
         custom_branch = root_node.model_validate(
@@ -570,7 +615,7 @@ class MetadataValidationTests(unittest.TestCase):
             )
 
     def test_validation_reports_hand_edited_computed_metadata(self) -> None:
-        path = self.root / "scenes" / f"{self.scene_id}.md"
+        path = self.service._path_for_node_id(self.scene_id, "scene")
         text = path.read_text(encoding="utf-8")
         path.write_text(text.replace("metadata: {}", "metadata:\n  word_count: 12"), encoding="utf-8")
 
@@ -1093,13 +1138,13 @@ class MetadataValidationTests(unittest.TestCase):
         listed_entry = self.service.list_lore_entries().entries[0]
         self.assertEqual(listed_entry.title, "Seren")
         self.assertIn("captain with a secret", listed_entry.body_markdown)
-        front_matter, _ = self.service._read_markdown_with_front_matter(self.root / "lore" / f"{entry.id}.md", strict=True)
+        front_matter, _ = self.service._read_markdown_with_front_matter(self.service._path_for_node_id(entry.id, "lore"), strict=True)
         self.assertNotIn("status", front_matter)
 
     def test_lore_entry_can_be_read_after_file_rename_by_front_matter_id(self) -> None:
         entry = self.service.create_lore_entry(CreateLoreEntryRequest(title="Robert Smith", entry_type="character"))
-        original_path = self.root / "lore" / f"{entry.id}.md"
-        renamed_path = self.root / "lore" / "robert-smith.md"
+        original_path = self.service._path_for_node_id(entry.id, "lore")
+        renamed_path = self.root / "lore" / "robert-smith-renamed.md"
         original_path.rename(renamed_path)
 
         loaded = self.service.read_lore_entry(entry.id)
@@ -1111,8 +1156,8 @@ class MetadataValidationTests(unittest.TestCase):
 
     def test_scene_can_be_read_after_file_rename_by_front_matter_id(self) -> None:
         scene = self.service.read_scene(self.scene_id)
-        original_path = self.root / "scenes" / f"{scene.id}.md"
-        renamed_path = self.root / "scenes" / "opening-scene.md"
+        original_path = self.service._path_for_node_id(scene.id, "scene")
+        renamed_path = self.root / "scenes" / "opening-scene-renamed.md"
         original_path.rename(renamed_path)
 
         loaded = self.service.read_scene(scene.id)
@@ -1123,16 +1168,18 @@ class MetadataValidationTests(unittest.TestCase):
 
     def test_validation_reports_missing_and_duplicate_front_matter_ids(self) -> None:
         entry = self.service.create_lore_entry(CreateLoreEntryRequest(title="Seren", entry_type="character"))
-        path = self.root / "lore" / f"{entry.id}.md"
-        text = path.read_text(encoding="utf-8")
-        path.write_text(text.replace(f"id: {entry.id}\n", ""), encoding="utf-8")
+        path = self.service._path_for_node_id(entry.id, "lore")
+        original_text = path.read_text(encoding="utf-8")
+        path.write_text(original_text.replace(f"id: {entry.id}\n", ""), encoding="utf-8")
 
         validation = self.service.validate_project()
 
         self.assertTrue(any("missing front matter id" in warning for warning in validation.warnings), validation.warnings)
 
+        path.write_text(original_text, encoding="utf-8")
+
         duplicate = self.service.create_lore_entry(CreateLoreEntryRequest(title="Other Seren", entry_type="character"))
-        duplicate_path = self.root / "lore" / f"{duplicate.id}.md"
+        duplicate_path = self.service._path_for_node_id(duplicate.id, "lore")
         duplicate_text = duplicate_path.read_text(encoding="utf-8")
         duplicate_path.write_text(duplicate_text.replace(f"id: {duplicate.id}\n", f"id: {entry.id}\n"), encoding="utf-8")
 
@@ -1240,7 +1287,7 @@ class MetadataValidationTests(unittest.TestCase):
 
         self.assertEqual(saved.metadata["tags"], ["Crew", "ALLY"])
         self.assertEqual(self.service.read_known_tags().tags, ["ALLY", "Crew"])
-        front_matter, _ = self.service._read_markdown_with_front_matter(self.root / "lore" / f"{entry.id}.md", strict=True)
+        front_matter, _ = self.service._read_markdown_with_front_matter(self.service._path_for_node_id(entry.id, "lore"), strict=True)
         self.assertEqual(front_matter["metadata"]["tags"], ["Crew", "ALLY"])
 
     def test_aliases_do_not_populate_known_tags(self) -> None:
@@ -1276,6 +1323,10 @@ class ReferenceResolutionTests(unittest.TestCase):
 
     def tearDown(self) -> None:
         self.temp_dir.cleanup()
+
+    def _first_scene_id(self) -> str:
+        first_scene_path = next((self.root / "scenes").glob("*.md"))
+        return self.service._read_front_matter_only(first_scene_path, strict=True)["id"]
 
     def _save_body(self, entry_id: str, body: str) -> None:
         entry = self.service.read_lore_entry(entry_id)
@@ -1321,7 +1372,7 @@ class ReferenceResolutionTests(unittest.TestCase):
 
     def test_candidates_filter_by_kind(self) -> None:
         self.service.create_lore_entry(CreateLoreEntryRequest(title="Seren", entry_type="character"))
-        scene_id = next((self.root / "scenes").glob("*.md")).stem
+        scene_id = self._first_scene_id()
 
         response = self.service.list_reference_candidates(kind="lore")
 
@@ -1364,7 +1415,7 @@ class ReferenceResolutionTests(unittest.TestCase):
                 metadata={"home_place": taverna.id},
             ),
         )
-        scene_id = next((self.root / "scenes").glob("*.md")).stem
+        scene_id = self._first_scene_id()
         scene = self.service.read_scene(scene_id)
         self.service.save_scene(
             scene_id,
@@ -1394,7 +1445,7 @@ class ReferenceResolutionTests(unittest.TestCase):
 
     def test_search_resolves_reference_titles_in_excerpts(self) -> None:
         seren = self.service.create_lore_entry(CreateLoreEntryRequest(title="Seren", entry_type="character"))
-        scene_id = next((self.root / "scenes").glob("*.md")).stem
+        scene_id = self._first_scene_id()
         scene = self.service.read_scene(scene_id)
         self.service.save_scene(
             scene_id,

@@ -44,6 +44,9 @@
     x: number;
     y: number;
     selectedIndex: number;
+    mode: "commands" | "table-grid";
+    gridRows: number;
+    gridCols: number;
   };
   type SlashCommand = {
     label: string;
@@ -51,6 +54,9 @@
     group: string;
     run: () => void | Promise<void>;
   };
+
+  const TABLE_GRID_MAX_ROWS = 8;
+  const TABLE_GRID_MAX_COLS = 8;
   type ToolbarButtonAction = {
     kind: "button";
     id: string;
@@ -124,7 +130,7 @@
   let metadataExpanded = false;
   let editorEmpty = true;
   let selectionMenu: FloatingMenuState = { visible: false, x: 0, y: 0, wordCount: 0, placement: "above" };
-  let slashMenu: SlashMenuState = { visible: false, x: 0, y: 0, selectedIndex: 0 };
+  let slashMenu: SlashMenuState = { visible: false, x: 0, y: 0, selectedIndex: 0, mode: "commands", gridRows: 1, gridCols: 1 };
   let openToolbarMenuId: string | null = null;
   let reconcilingTodoAnchors = false;
   let highlightedTodoId: string | null = null;
@@ -469,7 +475,38 @@
       return false;
     }
 
-    if (slashMenu.visible) {
+    if (slashMenu.visible && slashMenu.mode === "table-grid") {
+      if (event.key === "ArrowDown") {
+        event.preventDefault();
+        slashMenu = { ...slashMenu, gridRows: Math.min(TABLE_GRID_MAX_ROWS, slashMenu.gridRows + 1) };
+        return true;
+      }
+      if (event.key === "ArrowUp") {
+        event.preventDefault();
+        slashMenu = { ...slashMenu, gridRows: Math.max(1, slashMenu.gridRows - 1) };
+        return true;
+      }
+      if (event.key === "ArrowRight") {
+        event.preventDefault();
+        slashMenu = { ...slashMenu, gridCols: Math.min(TABLE_GRID_MAX_COLS, slashMenu.gridCols + 1) };
+        return true;
+      }
+      if (event.key === "ArrowLeft") {
+        event.preventDefault();
+        slashMenu = { ...slashMenu, gridCols: Math.max(1, slashMenu.gridCols - 1) };
+        return true;
+      }
+      if (event.key === "Enter") {
+        event.preventDefault();
+        insertTableFromGrid(slashMenu.gridRows, slashMenu.gridCols);
+        return true;
+      }
+      if (event.key === "Escape") {
+        event.preventDefault();
+        closeSlashMenu();
+        return true;
+      }
+    } else if (slashMenu.visible) {
       if (event.key === "ArrowDown") {
         event.preventDefault();
         slashMenu = { ...slashMenu, selectedIndex: (slashMenu.selectedIndex + 1) % slashCommands.length };
@@ -523,6 +560,10 @@
   function updateSlashMenuFromContent() {
     if (documentKind !== "scene") {
       if (slashMenu.visible) closeSlashMenu();
+      return;
+    }
+
+    if (slashMenu.visible && slashMenu.mode === "table-grid") {
       return;
     }
 
@@ -630,11 +671,25 @@
       x: coords.left - frameBounds.left + editorFrame.scrollLeft,
       y: coords.bottom - frameBounds.top + editorFrame.scrollTop + 8,
       selectedIndex: 0,
+      mode: "commands",
+      gridRows: 1,
+      gridCols: 1,
     };
   }
 
   function closeSlashMenu() {
-    slashMenu = { ...slashMenu, visible: false, selectedIndex: 0 };
+    slashMenu = { ...slashMenu, visible: false, selectedIndex: 0, mode: "commands", gridRows: 1, gridCols: 1 };
+  }
+
+  function openTableGrid() {
+    slashMenu = { ...slashMenu, mode: "table-grid", gridRows: 1, gridCols: 1 };
+  }
+
+  function insertTableFromGrid(rows: number, cols: number) {
+    clearSlashTrigger();
+    editor?.chain().focus().insertTable({ rows, cols, withHeaderRow: true }).run();
+    closeSlashMenu();
+    syncEditorEmpty();
   }
 
   function clearSlashTrigger() {
@@ -648,10 +703,12 @@
   }
 
   function runSlashCommand(command: SlashCommand) {
-    clearSlashTrigger();
     command.run();
-    closeSlashMenu();
-    syncEditorEmpty();
+    clearSlashTrigger();
+    if (slashMenu.mode === "commands") {
+      closeSlashMenu();
+      syncEditorEmpty();
+    }
   }
 
   async function focusAndRun(command: () => void | Promise<void>) {
@@ -1129,8 +1186,8 @@
       {
         group: "Insert",
         label: "Table",
-        description: "Insert a 3 by 3 table with a header row.",
-        run: () => editor?.chain().focus().insertTable({ rows: 3, cols: 3, withHeaderRow: true }).run(),
+        description: "Pick the size, then click to insert.",
+        run: () => openTableGrid(),
       },
     ];
   }
@@ -1357,21 +1414,40 @@
     {/if}
 
     {#if slashMenu.visible}
-      <div class="slash-menu" style={`left: ${slashMenu.x}px; top: ${slashMenu.y}px;`}>
-        {#each slashCommands as command, index}
-          {#if index === 0 || slashCommands[index - 1].group !== command.group}
-            <div class="slash-group">{command.group}</div>
-          {/if}
-          <button
-            class:active={index === slashMenu.selectedIndex}
-            type="button"
-            on:mouseenter={() => (slashMenu = { ...slashMenu, selectedIndex: index })}
-            on:mousedown|preventDefault={() => runSlashCommand(command)}
-          >
-            <strong>{command.label}</strong>
-            <span>{command.description}</span>
-          </button>
-        {/each}
+      <div class:table-mode={slashMenu.mode === "table-grid"} class="slash-menu" style={`left: ${slashMenu.x}px; top: ${slashMenu.y}px;`}>
+        {#if slashMenu.mode === "table-grid"}
+          <div class="table-grid">
+            {#each Array(TABLE_GRID_MAX_ROWS) as _, rowIndex}
+              <div class="table-grid-row">
+                {#each Array(TABLE_GRID_MAX_COLS) as _, colIndex}
+                  <button
+                    class:active={rowIndex < slashMenu.gridRows && colIndex < slashMenu.gridCols}
+                    type="button"
+                    aria-label={`${rowIndex + 1} rows by ${colIndex + 1} columns`}
+                    on:mouseenter={() => (slashMenu = { ...slashMenu, gridRows: rowIndex + 1, gridCols: colIndex + 1 })}
+                    on:mousedown|preventDefault={() => insertTableFromGrid(rowIndex + 1, colIndex + 1)}
+                  ></button>
+                {/each}
+              </div>
+            {/each}
+          </div>
+          <div class="table-grid-label">{slashMenu.gridCols} × {slashMenu.gridRows}</div>
+        {:else}
+          {#each slashCommands as command, index}
+            {#if index === 0 || slashCommands[index - 1].group !== command.group}
+              <div class="slash-group">{command.group}</div>
+            {/if}
+            <button
+              class:active={index === slashMenu.selectedIndex}
+              type="button"
+              on:mouseenter={() => (slashMenu = { ...slashMenu, selectedIndex: index })}
+              on:mousedown|preventDefault={() => runSlashCommand(command)}
+            >
+              <strong>{command.label}</strong>
+              <span>{command.description}</span>
+            </button>
+          {/each}
+        {/if}
       </div>
     {/if}
 

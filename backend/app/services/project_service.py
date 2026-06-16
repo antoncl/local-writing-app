@@ -1459,7 +1459,7 @@ class ProjectService:
         def walk(n: StructureNode, is_target: bool) -> None:
             nonlocal descendant_scene_count, descendant_container_count
             if not is_target:
-                if n.scene_id:
+                if self._is_leaf_node(n):
                     descendant_scene_count += 1
                 else:
                     descendant_container_count += 1
@@ -1638,10 +1638,23 @@ class ProjectService:
             raise ProjectServiceError(f"Entry type {request.entry_type} is abstract and cannot be instantiated.", 422)
 
         structure = self.read_structure()
+        file_id = self._new_id("scene")
+        scene = Scene(
+            id=file_id,
+            title=request.title,
+            body_markdown="",
+            revision="",
+            status="draft",
+            entry_type=request.entry_type,
+            metadata={},
+        )
+        self._write_scene_file(root / "scenes" / f"{file_id}.md", scene)
+
         new_node = StructureNode(
             id=self._new_id("node"),
             type=request.entry_type,
             title=request.title,
+            scene_id=file_id,
         )
         inserted = self._insert_scene_node(structure.root, request.parent_id, new_node)
         if not inserted:
@@ -2509,13 +2522,16 @@ class ProjectService:
         else:
             self._atomic_write(path, repaired_body)
 
+    def _is_leaf_node(self, node: StructureNode) -> bool:
+        return node.type == "scene"
+
     def _insert_scene_node(
         self,
         node: StructureNode,
         parent_id: str | None,
         scene_node: StructureNode,
     ) -> bool:
-        if parent_id and node.id == parent_id and not node.scene_id:
+        if parent_id and node.id == parent_id and not self._is_leaf_node(node):
             node.children.append(scene_node)
             return True
         for child in node.children:
@@ -2524,11 +2540,11 @@ class ProjectService:
         return False
 
     def _first_container(self, node: StructureNode) -> StructureNode:
-        if not node.scene_id:
+        if not self._is_leaf_node(node):
             if not node.children:
                 return node
             for child in node.children:
-                if not child.scene_id:
+                if not self._is_leaf_node(child):
                     return self._first_container(child)
         return node
 

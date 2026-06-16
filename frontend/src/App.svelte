@@ -990,7 +990,7 @@
 
   function findFirstSceneId(node: StructureNode | null | undefined): string | null {
     if (!node) return null;
-    if (node.scene_id) return node.scene_id;
+    if (node.scene_id && isLeafNode(node)) return node.scene_id;
     for (const child of node.children ?? []) {
       const sceneId = findFirstSceneId(child);
       if (sceneId) return sceneId;
@@ -1004,6 +1004,10 @@
       await refreshStructure();
       await openSceneInEditorPane(scene.id);
     });
+  }
+
+  function isLeafNode(node: StructureNode): boolean {
+    return node.type === "scene";
   }
 
   function defaultChildEntryType(parentType: string): string | null {
@@ -1278,7 +1282,7 @@
     const rect = target.getBoundingClientRect();
     const ratio = (event.clientY - rect.top) / rect.height;
     let position: "before" | "after" | "into";
-    const isContainer = !node.scene_id;
+    const isContainer = !isLeafNode(node);
     if (isContainer && ratio > 0.2 && ratio < 0.8) {
       position = "into";
     } else if (ratio < 0.5) {
@@ -2576,11 +2580,11 @@
         on:keydown={(event) => handleRenameKeydown(event, node.id)}
         on:blur={() => commitRename(node.id)}
       />
-    {:else if node.scene_id}
-      <button data-tree-node-id={node.id} class="tree-scene tree-title" on:click={() => run(() => openSceneInEditorPane(node.scene_id!))} on:dblclick={() => startRename(node.id, node.title)} on:keydown={(event) => handleTreeRowKeydown(event, node)}>{node.title}</button>
+    {:else if isLeafNode(node)}
+      <button data-tree-node-id={node.id} class="tree-scene tree-title" on:click={() => node.scene_id && run(() => openSceneInEditorPane(node.scene_id!))} on:dblclick={() => node.scene_id && run(() => openSceneInEditorPane(node.scene_id!))} on:keydown={(event) => handleTreeRowKeydown(event, node)}>{node.title}</button>
       <button class="tree-delete" title={`Delete ${entryTypeName(node.type, metadataSchema)}`} on:click={() => requestDeleteStructureNode(node)}>×</button>
     {:else}
-      <button data-tree-node-id={node.id} class="tree-group tree-title" on:click={() => (activeParentId = node.id)} on:dblclick={() => startRename(node.id, node.title)} on:keydown={(event) => handleTreeRowKeydown(event, node)}>{node.title}</button>
+      <button data-tree-node-id={node.id} class="tree-group tree-title" on:click={() => (activeParentId = node.id)} on:dblclick={() => node.scene_id && run(() => openSceneInEditorPane(node.scene_id!))} on:keydown={(event) => handleTreeRowKeydown(event, node)}>{node.title}</button>
       {@const defaultType = defaultChildEntryType(node.type)}
       {#if defaultType}
         <button class="tree-add" title={`Add ${entryTypeName(defaultType, metadataSchema)}`} on:click={() => addStructureChild(node.id, defaultType)}>+</button>

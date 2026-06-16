@@ -102,7 +102,36 @@ class MetadataValidationTests(unittest.TestCase):
         act_nodes = [child for child in updated.root.children if child.type == "act"]
         self.assertEqual(len(act_nodes), 1)
         self.assertEqual(act_nodes[0].title, "Act One")
-        self.assertIsNone(act_nodes[0].scene_id)
+        self.assertIsNotNone(act_nodes[0].scene_id)
+        backing_file = self.root / "scenes" / f"{act_nodes[0].scene_id}.md"
+        self.assertTrue(backing_file.exists())
+
+    def test_container_is_loadable_as_scene(self) -> None:
+        from app.models import CreateStructureNodeRequest
+
+        updated = self.service.create_structure_node(
+            CreateStructureNodeRequest(title="Act One", entry_type="act")
+        )
+        act_node = next(child for child in updated.root.children if child.type == "act")
+
+        scene = self.service.read_scene(act_node.scene_id)
+
+        self.assertEqual(scene.id, act_node.scene_id)
+        self.assertEqual(scene.title, "Act One")
+        self.assertEqual(scene.entry_type, "act")
+
+    def test_container_can_be_referenced_via_entity_ref(self) -> None:
+        from app.models import CreateStructureNodeRequest
+
+        updated = self.service.create_structure_node(
+            CreateStructureNodeRequest(title="Act One", entry_type="act")
+        )
+        act_node = next(child for child in updated.root.children if child.type == "act")
+
+        candidates = self.service.list_reference_candidates(entry_type="act")
+
+        ids = {candidate.id for candidate in candidates.candidates}
+        self.assertIn(act_node.scene_id, ids)
 
     def test_create_structure_node_nests_under_specific_parent(self) -> None:
         from app.models import CreateStructureNodeRequest

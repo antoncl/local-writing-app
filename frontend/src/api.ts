@@ -58,6 +58,12 @@ export const api = {
   getStructure() {
     return request<StructureDocument>("/structure");
   },
+  createStructureNode(title: string, entryType: string, parentId?: string | null) {
+    return request<StructureDocument>("/structure/nodes", {
+      method: "POST",
+      body: JSON.stringify({ title, entry_type: entryType, parent_id: parentId ?? null }),
+    });
+  },
   getMetadataSchema() {
     return request<MetadataSchema>("/metadata/schema");
   },

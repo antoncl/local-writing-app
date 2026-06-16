@@ -11,6 +11,7 @@ from app.models import (
     CreateLoreEntryRequest,
     CreateProjectRequest,
     CreateSceneRequest,
+    CreateStructureNodeRequest,
     CreateTodoRequest,
     DeleteMetadataEntryTypeRequest,
     DeleteMetadataFieldRequest,
@@ -115,6 +116,12 @@ def repair_project() -> ProjectValidation:
 def get_structure() -> StructureDocument:
     with translate_errors():
         return service.read_structure()
+
+
+@app.post("/api/structure/nodes", response_model=StructureDocument)
+def create_structure_node(request: CreateStructureNodeRequest) -> StructureDocument:
+    with translate_errors():
+        return service.create_structure_node(request)
 
 
 @app.get("/api/metadata/schema", response_model=MetadataSchema)

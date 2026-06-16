@@ -85,20 +85,29 @@ class NodeIndex:
 DEFAULT_METADATA_SCHEMA: dict[str, Any] = {
     "version": 1,
     "entry_types": {
+        "manuscript_structure": {
+            "name": "Manuscript",
+            "kind": "scene",
+            "abstract": True,
+            "fields": ["summary"],
+        },
         "act": {
             "name": "Act",
             "kind": "scene",
+            "parent": "manuscript_structure",
             "fields": [],
         },
         "chapter": {
             "name": "Chapter",
             "kind": "scene",
+            "parent": "manuscript_structure",
             "fields": [],
         },
         "scene": {
             "name": "Scene",
             "kind": "scene",
-            "fields": ["status", "summary", "characters", "locations", "word_count"],
+            "parent": "manuscript_structure",
+            "fields": ["status", "characters", "locations", "word_count"],
         },
         "lore_entry": {
             "name": "Entry",
@@ -526,8 +535,12 @@ class ProjectService:
                 layer_label=layer.label,
                 schema_path=layer.schema_path,
             )
-            for entry_type_id in self._schema_section_keys(layer_data, "entry_types"):
-                entry_type_sources[entry_type_id] = source
+            layer_entry_types = layer_data.get("entry_types") if isinstance(layer_data.get("entry_types"), dict) else {}
+            for entry_type_id, layer_type_data in layer_entry_types.items():
+                if self._layer_overrides_entry_type(layer_type_data):
+                    entry_type_sources[entry_type_id] = source
+                else:
+                    entry_type_sources.setdefault(entry_type_id, source)
             for field_id in self._schema_section_keys(layer_data, "fields"):
                 field_sources[field_id] = source
 
@@ -685,11 +698,14 @@ class ProjectService:
         entry_type_data = entry_types.get(request.entry_type)
         if not isinstance(entry_type_data, dict):
             effective_entry_type = self._read_metadata_schema_through_path(root, layer_path).entry_types.get(request.entry_type)
-            entry_type_data = {
-                "name": effective_entry_type.name if effective_entry_type else request.entry_type,
-                "kind": effective_entry_type.kind if effective_entry_type else "scene",
-                "fields": [],
-            }
+            if effective_entry_type is not None:
+                entry_type_data = {"fields": []}
+            else:
+                entry_type_data = {
+                    "name": request.entry_type,
+                    "kind": "scene",
+                    "fields": [],
+                }
         fields_list = entry_type_data.get("fields")
         if not isinstance(fields_list, list):
             fields_list = []
@@ -1181,6 +1197,11 @@ class ProjectService:
                 merged[key] = value
         return merged
 
+    def _layer_overrides_entry_type(self, layer_type_data: Any) -> bool:
+        if not isinstance(layer_type_data, dict):
+            return False
+        return any(key in layer_type_data for key in ("name", "kind", "parent", "abstract"))
+
     def _schema_section_keys(self, data: dict[str, Any], section: str) -> list[str]:
         value = data.get(section)
         if not isinstance(value, dict):
@@ -1422,6 +1443,29 @@ class ProjectService:
             self._first_container(structure.root).children.append(scene_node)
         self._write_yaml(root / "manuscript.structure.yaml", structure.model_dump())
         return self.read_scene(scene_id)
+
+    def create_structure_node(self, request: CreateStructureNodeRequest) -> StructureDocument:
+        root = self._require_project()
+        schema = self.read_metadata_schema()
+        entry_type = schema.entry_types.get(request.entry_type)
+        if entry_type is None:
+            raise ProjectServiceError(f"Unknown entry type {request.entry_type}.", 404)
+        if entry_type.kind != "scene":
+            raise ProjectServiceError(f"Entry type {request.entry_type} is not a manuscript type.", 422)
+        if entry_type.abstract:
+            raise ProjectServiceError(f"Entry type {request.entry_type} is abstract and cannot be instantiated.", 422)
+
+        structure = self.read_structure()
+        new_node = StructureNode(
+            id=self._new_id("node"),
+            type=request.entry_type,
+            title=request.title,
+        )
+        inserted = self._insert_scene_node(structure.root, request.parent_id, new_node)
+        if not inserted:
+            structure.root.children.append(new_node)
+        self._write_yaml(root / "manuscript.structure.yaml", structure.model_dump())
+        return self.read_structure()
 
     def read_scene(self, scene_id: str) -> Scene:
         path = self._path_for_node_id(scene_id, "scene")

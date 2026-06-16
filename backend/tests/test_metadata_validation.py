@@ -51,10 +51,91 @@ class MetadataValidationTests(unittest.TestCase):
         self.assertFalse(schema.entry_types["act"].abstract)
         self.assertFalse(schema.entry_types["chapter"].abstract)
 
+    def test_manuscript_structure_is_shared_abstract_parent(self) -> None:
+        schema = self.service.read_metadata_schema()
+        parent = schema.entry_types.get("manuscript_structure")
+        self.assertIsNotNone(parent)
+        assert parent is not None
+        self.assertTrue(parent.abstract)
+        self.assertEqual(parent.kind, "scene")
+        for type_id in ["act", "chapter", "scene"]:
+            self.assertEqual(schema.entry_types[type_id].parent, "manuscript_structure")
+            self.assertIn("summary", schema.entry_types[type_id].fields)
+
+    def test_builtin_entry_type_keeps_built_in_source_after_field_add(self) -> None:
+        custom_field = MetadataFieldDefinition(name="POV", type="text", options=[])
+        self.service.upsert_metadata_field(
+            UpsertMetadataFieldRequest(
+                layer_id=self.service._metadata_schema_layer_id(self.root),
+                field_id="pov",
+                field=custom_field,
+                entry_type="scene",
+                allow_existing=False,
+            )
+        )
+
+        overview = self.service.read_metadata_schema_overview()
+
+        self.assertTrue(overview.entry_type_sources["scene"].built_in)
+        self.assertTrue(overview.entry_type_sources["chapter"].built_in)
+        self.assertTrue(overview.entry_type_sources["act"].built_in)
+        self.assertFalse(overview.field_sources["pov"].built_in)
+
+    def test_summary_lives_on_parent_not_in_scene_own_fields(self) -> None:
+        schema = self.service.read_metadata_schema()
+        scene_definition = schema.entry_types["scene"]
+        self.assertNotIn("summary", scene_definition.own_fields)
+        self.assertIn("summary", scene_definition.fields)
+        self.assertIn("status", scene_definition.own_fields)
+
     def test_new_project_drops_sequence_from_container_types(self) -> None:
         manifest = self.service._read_yaml(self.root / "project.yaml")
         types = [item["type"] for item in manifest["manuscript_structure"]["container_types"]]
         self.assertEqual(types, ["act", "chapter"])
+
+    def test_create_structure_node_inserts_container_under_root(self) -> None:
+        from app.models import CreateStructureNodeRequest
+
+        updated = self.service.create_structure_node(
+            CreateStructureNodeRequest(title="Act One", entry_type="act")
+        )
+        act_nodes = [child for child in updated.root.children if child.type == "act"]
+        self.assertEqual(len(act_nodes), 1)
+        self.assertEqual(act_nodes[0].title, "Act One")
+        self.assertIsNone(act_nodes[0].scene_id)
+
+    def test_create_structure_node_nests_under_specific_parent(self) -> None:
+        from app.models import CreateStructureNodeRequest
+
+        updated = self.service.create_structure_node(
+            CreateStructureNodeRequest(title="Act One", entry_type="act")
+        )
+        act_node = next(child for child in updated.root.children if child.type == "act")
+        updated = self.service.create_structure_node(
+            CreateStructureNodeRequest(title="Chapter 1", entry_type="chapter", parent_id=act_node.id)
+        )
+        nested_act = next(child for child in updated.root.children if child.id == act_node.id)
+        chapters = [child for child in nested_act.children if child.type == "chapter"]
+        self.assertEqual(len(chapters), 1)
+        self.assertEqual(chapters[0].title, "Chapter 1")
+
+    def test_create_structure_node_rejects_abstract_type(self) -> None:
+        from app.models import CreateStructureNodeRequest
+
+        with self.assertRaises(ProjectServiceError) as ctx:
+            self.service.create_structure_node(
+                CreateStructureNodeRequest(title="Bad", entry_type="manuscript_structure")
+            )
+        self.assertIn("abstract", ctx.exception.message)
+
+    def test_create_structure_node_rejects_lore_type(self) -> None:
+        from app.models import CreateStructureNodeRequest
+
+        with self.assertRaises(ProjectServiceError) as ctx:
+            self.service.create_structure_node(
+                CreateStructureNodeRequest(title="Bad", entry_type="character")
+            )
+        self.assertIn("not a manuscript type", ctx.exception.message)
 
     def test_structure_accepts_custom_container_type(self) -> None:
         structure = self.service.read_structure().root
@@ -212,7 +293,7 @@ class MetadataValidationTests(unittest.TestCase):
         self.assertEqual(schema.entry_types["scene"].name, "World Scene")
         self.assertIn("pov", schema.fields)
         self.assertIn("tension", schema.fields)
-        self.assertEqual(schema.entry_types["scene"].fields, ["status", "summary", "characters", "locations", "word_count", "pov", "tension"])
+        self.assertEqual(schema.entry_types["scene"].fields, ["summary", "status", "characters", "locations", "word_count", "pov", "tension"])
 
         scene = self.service.read_scene(self.scene_id)
         saved = self.service.save_scene(

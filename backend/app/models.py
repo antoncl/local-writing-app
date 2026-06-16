@@ -171,6 +171,12 @@ class CreateSceneRequest(BaseModel):
     parent_id: str | None = None
 
 
+class CreateStructureNodeRequest(BaseModel):
+    title: str = Field(min_length=1)
+    entry_type: str = Field(min_length=1)
+    parent_id: str | None = None
+
+
 class SaveSceneRequest(BaseModel):
     title: str = Field(min_length=1)
     body_markdown: str

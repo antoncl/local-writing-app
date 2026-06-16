@@ -99,6 +99,7 @@
   $: focusedEditorPane = editorPanes.find((pane) => pane.id === focusedEditorPaneId) ?? editorPanes[0] ?? null;
   $: activeScene = focusedEditorPane?.document?.type === "scene" ? focusedEditorPane.scene : null;
   let activeParentId: string | undefined = undefined;
+  let addMenuOpenFor: string | null = null;
   let todos: TodoItem[] = [];
   let validation: ProjectValidation | null = null;
   let metadataSchema: MetadataSchema | null = null;
@@ -987,6 +988,45 @@
     });
   }
 
+  function defaultChildEntryType(parentType: string): string | null {
+    if (parentType === "root") return "act";
+    if (parentType === "act") return "chapter";
+    if (parentType === "chapter") return "scene";
+    return null;
+  }
+
+  function manuscriptEntryTypeChoices(schema: MetadataSchema | null): Array<{ id: string; name: string }> {
+    return Object.entries(schema?.entry_types ?? {})
+      .filter(([, definition]) => definition.kind === "scene" && !definition.abstract)
+      .map(([id, definition]) => ({ id, name: definition.name }))
+      .sort((a, b) => a.name.localeCompare(b.name));
+  }
+
+  function entryTypeName(typeId: string, schema: MetadataSchema | null): string {
+    return schema?.entry_types[typeId]?.name ?? typeId;
+  }
+
+  async function addStructureChild(parentId: string | null, entryType: string) {
+    const typeName = entryTypeName(entryType, metadataSchema);
+    const promptValue = window.prompt(`Title for new ${typeName}:`, `New ${typeName}`);
+    const title = promptValue?.trim();
+    if (!title) return;
+    addMenuOpenFor = null;
+    await run(async () => {
+      if (entryType === "scene") {
+        const scene = await api.createScene(title, parentId ?? undefined);
+        await refreshStructure();
+        await openSceneInEditorPane(scene.id);
+      } else {
+        structure = await api.createStructureNode(title, entryType, parentId);
+      }
+    });
+  }
+
+  function toggleAddMenu(nodeId: string) {
+    addMenuOpenFor = addMenuOpenFor === nodeId ? null : nodeId;
+  }
+
   async function newLoreEntry() {
     await run(async () => {
       const entry = await api.createLoreEntry("New Entry", "lore_note");
@@ -1623,7 +1663,19 @@
     <div class="pane-content">
       <div class="section-title">
         <h3>Scenes</h3>
-        <button on:click={() => newScene(activeParentId)}>+</button>
+        <div class="tree-add-controls">
+          <button class="tree-add" on:click={() => addStructureChild(null, defaultChildEntryType("root") ?? "scene")}>+ {entryTypeName(defaultChildEntryType("root") ?? "scene", metadataSchema)}</button>
+          <div class="tree-menu-anchor">
+            <button class="tree-menu" title="Other types" on:click={() => toggleAddMenu("__root__")}>⋯</button>
+            {#if addMenuOpenFor === "__root__"}
+              <div class="tree-add-menu">
+                {#each manuscriptEntryTypeChoices(metadataSchema) as choice (choice.id)}
+                  <button type="button" on:click={() => addStructureChild(null, choice.id)}>{choice.name}</button>
+                {/each}
+              </div>
+            {/if}
+          </div>
+        </div>
       </div>
       {#if structure}
         {#each nodeChildren(structure.root) as child}
@@ -2118,9 +2170,23 @@
 {#snippet renderTree(node: StructureNode, depth: number)}
   <div class="tree-row" style={`padding-left: ${depth * 14}px`}>
     {#if node.scene_id}
-      <button class="tree-scene" on:click={() => run(() => openSceneInEditorPane(node.scene_id!))}>{node.title}</button>
+      <button class="tree-scene tree-title" on:click={() => run(() => openSceneInEditorPane(node.scene_id!))}>{node.title}</button>
     {:else}
-      <button class="tree-group" on:click={() => (activeParentId = node.id)}>{node.title}</button>
+      <button class="tree-group tree-title" on:click={() => (activeParentId = node.id)}>{node.title}</button>
+      {@const defaultType = defaultChildEntryType(node.type)}
+      {#if defaultType}
+        <button class="tree-add" title={`Add ${entryTypeName(defaultType, metadataSchema)}`} on:click={() => addStructureChild(node.id, defaultType)}>+</button>
+      {/if}
+      <div class="tree-menu-anchor">
+        <button class="tree-menu" title="Other types" on:click={() => toggleAddMenu(node.id)}>⋯</button>
+        {#if addMenuOpenFor === node.id}
+          <div class="tree-add-menu">
+            {#each manuscriptEntryTypeChoices(metadataSchema) as choice (choice.id)}
+              <button type="button" on:click={() => addStructureChild(node.id, choice.id)}>{choice.name}</button>
+            {/each}
+          </div>
+        {/if}
+      </div>
     {/if}
   </div>
   {#each nodeChildren(node) as child}

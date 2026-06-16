@@ -120,6 +120,37 @@ class MetadataValidationTests(unittest.TestCase):
         self.assertEqual(scene.title, "Act One")
         self.assertEqual(scene.entry_type, "act")
 
+    def test_structure_carries_counter_in_computed_metadata(self) -> None:
+        from app.models import CreateStructureNodeRequest
+
+        self.service.create_structure_node(CreateStructureNodeRequest(title="Act 1", entry_type="act"))
+        self.service.create_structure_node(CreateStructureNodeRequest(title="Act 2", entry_type="act"))
+
+        structure = self.service.read_structure()
+        act_nodes = [child for child in structure.root.children if child.type == "act"]
+        numbers = [node.computed_metadata.get("number") for node in act_nodes]
+        self.assertEqual(numbers, [1, 2])
+
+    def test_structure_yaml_does_not_persist_computed_metadata(self) -> None:
+        from app.models import CreateStructureNodeRequest
+
+        self.service.create_structure_node(CreateStructureNodeRequest(title="Act 1", entry_type="act"))
+
+        raw = self.service._read_yaml(self.root / "manuscript.structure.yaml")
+
+        def has_computed(node: dict) -> bool:
+            if "computed_metadata" in node:
+                return True
+            return any(has_computed(child) for child in node.get("children", []))
+
+        self.assertFalse(has_computed(raw["root"]))
+
+    def test_display_template_inherits_from_manuscript_structure(self) -> None:
+        schema = self.service.read_metadata_schema()
+        for type_id in ("act", "chapter", "scene"):
+            self.assertEqual(schema.entry_types[type_id].display_template, "{number}. {title}")
+        self.assertEqual(schema.entry_types["character"].display_template, "{title}")
+
     def test_counter_among_siblings_for_acts(self) -> None:
         from app.models import CreateStructureNodeRequest
 

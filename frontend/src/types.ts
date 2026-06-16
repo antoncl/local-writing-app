@@ -3,6 +3,7 @@ export type StructureNode = {
   type: string;
   title: string;
   scene_id?: string | null;
+  computed_metadata?: Record<string, MetadataValue>;
   children: StructureNode[];
 };
 
@@ -81,6 +82,7 @@ export type EntryTypeDefinition = {
   abstract?: boolean;
   fields: string[];
   own_fields?: string[];
+  display_template?: string;
 };
 
 export type MetadataSchema = {

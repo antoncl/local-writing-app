@@ -48,6 +48,7 @@ class StructureNode(BaseModel):
     type: str
     title: str
     scene_id: str | None = None
+    computed_metadata: dict[str, Any] = Field(default_factory=dict)
     children: list["StructureNode"] = Field(default_factory=list)
 
 
@@ -85,6 +86,7 @@ class EntryTypeDefinition(BaseModel):
     abstract: bool = False
     fields: list[str] = Field(default_factory=list)
     own_fields: list[str] = Field(default_factory=list)
+    display_template: str = "{title}"
 
 
 class MetadataSchema(BaseModel):

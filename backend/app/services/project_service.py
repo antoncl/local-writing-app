@@ -91,6 +91,7 @@ DEFAULT_METADATA_SCHEMA: dict[str, Any] = {
             "kind": "scene",
             "abstract": True,
             "fields": ["number", "summary"],
+            "display_template": "{number}. {title}",
         },
         "act": {
             "name": "Act",
@@ -474,7 +475,47 @@ class ProjectService:
     def read_structure(self) -> StructureDocument:
         root = self._require_project()
         data = self._read_yaml(root / "manuscript.structure.yaml")
-        return StructureDocument.model_validate(data)
+        document = StructureDocument.model_validate(data)
+        schema = self.read_metadata_schema()
+        self._inject_structure_computed_metadata(document.root, document.root, schema)
+        return document
+
+    def _inject_structure_computed_metadata(
+        self,
+        node: StructureNode,
+        root: StructureNode,
+        schema: MetadataSchema,
+    ) -> None:
+        entry_definition = schema.entry_types.get(node.type)
+        if entry_definition is not None and node.scene_id:
+            computed: dict[str, Any] = {}
+            for field_id in entry_definition.fields:
+                field = schema.fields.get(field_id)
+                if field is None or field.type != "computed" or not field.computed:
+                    continue
+                function = field.computed.get("function")
+                if function == "counter":
+                    scope = field.computed.get("scope", "siblings")
+                    value = self._compute_counter(root, node.scene_id, node.type, scope)
+                    if value is not None:
+                        computed[field_id] = value
+            node.computed_metadata = computed
+        for child in node.children:
+            self._inject_structure_computed_metadata(child, root, schema)
+
+    def _structure_dump_for_storage(self, structure: StructureDocument) -> dict[str, Any]:
+        raw = structure.model_dump()
+        self._strip_key_recursively(raw, "computed_metadata")
+        return raw
+
+    def _strip_key_recursively(self, data: Any, key: str) -> None:
+        if isinstance(data, dict):
+            data.pop(key, None)
+            for value in data.values():
+                self._strip_key_recursively(value, key)
+        elif isinstance(data, list):
+            for item in data:
+                self._strip_key_recursively(item, key)
 
     def read_metadata_schema(self) -> MetadataSchema:
         root = self._require_project()
@@ -1148,6 +1189,12 @@ class ProjectService:
                 inherited_fields,
                 local_fields,
             )
+            if isinstance(parent_id, str) and parent_id in entry_types:
+                parent_definition = resolved.get(parent_id)
+                if isinstance(parent_definition, dict):
+                    for inheritable in ("display_template",):
+                        if inheritable not in next_entry_type and inheritable in parent_definition:
+                            next_entry_type[inheritable] = parent_definition[inheritable]
             resolving.remove(entry_type_id)
             resolved[entry_type_id] = next_entry_type
             return next_entry_type
@@ -1447,7 +1494,7 @@ class ProjectService:
         inserted = self._insert_scene_node(structure.root, parent_id, scene_node)
         if not inserted:
             self._first_container(structure.root).children.append(scene_node)
-        self._write_yaml(root / "manuscript.structure.yaml", structure.model_dump())
+        self._write_yaml(root / "manuscript.structure.yaml", self._structure_dump_for_storage(structure))
         return self.read_scene(scene_id)
 
     def cascade_delete_preview(self, node_id: str) -> StructureNodeDeletePreview:
@@ -1546,7 +1593,7 @@ class ProjectService:
             self._remove_scene_todos(scene_id)
 
         self._remove_structure_node_by_id(structure.root, node_id)
-        self._write_yaml(root / "manuscript.structure.yaml", structure.model_dump())
+        self._write_yaml(root / "manuscript.structure.yaml", self._structure_dump_for_storage(structure))
         return self.read_structure()
 
     def _remove_structure_node_by_id(self, node: StructureNode, node_id: str) -> bool:
@@ -1584,7 +1631,7 @@ class ProjectService:
         insert_at = max(0, min(position, len(target_parent.children)))
         target_parent.children.insert(insert_at, removed)
 
-        self._write_yaml(root_path / "manuscript.structure.yaml", structure.model_dump())
+        self._write_yaml(root_path / "manuscript.structure.yaml", self._structure_dump_for_storage(structure))
         return self.read_structure()
 
     def _contains_node(self, root: StructureNode, target_id: str) -> bool:
@@ -1619,7 +1666,7 @@ class ProjectService:
             front_matter, body = self._read_markdown_with_front_matter(path, strict=True)
             front_matter["title"] = clean_title
             self._write_markdown_with_front_matter(path, front_matter, body)
-        self._write_yaml(root / "manuscript.structure.yaml", structure.model_dump())
+        self._write_yaml(root / "manuscript.structure.yaml", self._structure_dump_for_storage(structure))
         return self.read_structure()
 
     def _find_structure_node(self, node: StructureNode, node_id: str) -> StructureNode | None:
@@ -1664,7 +1711,7 @@ class ProjectService:
         inserted = self._insert_scene_node(structure.root, request.parent_id, new_node)
         if not inserted:
             structure.root.children.append(new_node)
-        self._write_yaml(root / "manuscript.structure.yaml", structure.model_dump())
+        self._write_yaml(root / "manuscript.structure.yaml", self._structure_dump_for_storage(structure))
         return self.read_structure()
 
     def read_scene(self, scene_id: str) -> Scene:
@@ -1739,7 +1786,7 @@ class ProjectService:
             path.unlink()
         structure = self.read_structure()
         self._remove_scene_node(structure.root, node_id)
-        self._write_yaml(root / "manuscript.structure.yaml", structure.model_dump())
+        self._write_yaml(root / "manuscript.structure.yaml", self._structure_dump_for_storage(structure))
         self._remove_scene_todos(node_id)
         return self.read_structure()
 
@@ -2635,7 +2682,7 @@ class ProjectService:
         root = self._require_project()
         structure = self.read_structure()
         if self._rename_scene_node(structure.root, scene_id, title):
-            self._write_yaml(root / "manuscript.structure.yaml", structure.model_dump())
+            self._write_yaml(root / "manuscript.structure.yaml", self._structure_dump_for_storage(structure))
 
     def _rename_scene_node(self, node: StructureNode, scene_id: str, title: str) -> bool:
         if node.scene_id == scene_id:

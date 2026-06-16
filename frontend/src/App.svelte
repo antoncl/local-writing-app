@@ -103,6 +103,7 @@
   let addMenuOpenFor: string | null = null;
   let editingNodeId: string | null = null;
   let editingTitle = "";
+  let draftTitleByScene = new Map<string, string>();
   let draggedNodeId: string | null = null;
   let dragOverNodeId: string | null = null;
   let dragOverPosition: "before" | "after" | "into" | null = null;
@@ -185,6 +186,20 @@
   $: allEmbeddedTodos = Object.values(embeddedTodosByPane).flat();
   $: embeddedTodoStatusHintsByPane = buildEmbeddedTodoStatusHintsByPane(embeddedTodosByPane);
   $: filteredLoreEntries = filterLoreEntries(loreEntries, loreSearchQuery);
+  $: draftTitleByScene = computeDraftTitleOverrides(editorPanes);
+
+  function computeDraftTitleOverrides(panes: EditorPaneState[]): Map<string, string> {
+    const map = new Map<string, string>();
+    for (const pane of panes) {
+      const sceneId = pane.scene?.id;
+      if (!sceneId) continue;
+      const trimmed = pane.draftTitle.trim();
+      if (trimmed && trimmed !== pane.scene?.title) {
+        map.set(sceneId, trimmed);
+      }
+    }
+    return map;
+  }
   $: groupedLoreEntries = groupLoreEntriesByType(filteredLoreEntries, metadataSchema);
   $: schemaSelectedEntryType = metadataSchema?.entry_types[schemaFieldEntryType] ?? metadataSchema?.entry_types.scene ?? null;
   $: schemaFieldKind = schemaSelectedEntryType?.kind === "lore" ? "lore" : "scene";
@@ -1008,6 +1023,18 @@
 
   function isLeafNode(node: StructureNode): boolean {
     return node.type === "scene";
+  }
+
+  function renderNodeTitle(node: StructureNode, schema: MetadataSchema | null): string {
+    const template = schema?.entry_types[node.type]?.display_template ?? "{title}";
+    const liveTitle = node.scene_id ? draftTitleByScene.get(node.scene_id) : undefined;
+    const effectiveTitle = liveTitle ?? node.title;
+    return template.replace(/\{(\w+)\}/g, (_match, fieldName) => {
+      if (fieldName === "title") return effectiveTitle;
+      const computed = node.computed_metadata?.[fieldName];
+      if (computed !== undefined && computed !== null) return String(computed);
+      return "";
+    });
   }
 
   function defaultChildEntryType(parentType: string): string | null {
@@ -2581,10 +2608,10 @@
         on:blur={() => commitRename(node.id)}
       />
     {:else if isLeafNode(node)}
-      <button data-tree-node-id={node.id} class="tree-scene tree-title" on:click={() => node.scene_id && run(() => openSceneInEditorPane(node.scene_id!))} on:dblclick={() => node.scene_id && run(() => openSceneInEditorPane(node.scene_id!))} on:keydown={(event) => handleTreeRowKeydown(event, node)}>{node.title}</button>
+      <button data-tree-node-id={node.id} class="tree-scene tree-title" on:click={() => node.scene_id && run(() => openSceneInEditorPane(node.scene_id!))} on:dblclick={() => node.scene_id && run(() => openSceneInEditorPane(node.scene_id!))} on:keydown={(event) => handleTreeRowKeydown(event, node)}>{renderNodeTitle(node, metadataSchema)}</button>
       <button class="tree-delete" title={`Delete ${entryTypeName(node.type, metadataSchema)}`} on:click={() => requestDeleteStructureNode(node)}>×</button>
     {:else}
-      <button data-tree-node-id={node.id} class="tree-group tree-title" on:click={() => (activeParentId = node.id)} on:dblclick={() => node.scene_id && run(() => openSceneInEditorPane(node.scene_id!))} on:keydown={(event) => handleTreeRowKeydown(event, node)}>{node.title}</button>
+      <button data-tree-node-id={node.id} class="tree-group tree-title" on:click={() => (activeParentId = node.id)} on:dblclick={() => node.scene_id && run(() => openSceneInEditorPane(node.scene_id!))} on:keydown={(event) => handleTreeRowKeydown(event, node)}>{renderNodeTitle(node, metadataSchema)}</button>
       {@const defaultType = defaultChildEntryType(node.type)}
       {#if defaultType}
         <button class="tree-add" title={`Add ${entryTypeName(defaultType, metadataSchema)}`} on:click={() => addStructureChild(node.id, defaultType)}>+</button>

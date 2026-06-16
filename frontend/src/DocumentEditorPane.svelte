@@ -1111,7 +1111,7 @@
   }
 </script>
 
-<div class="editor-panel">
+<div class="editor-panel" class:body-hidden={!hasBody}>
   <section class="editor-header">
     {#if scene}
       <div class="scene-title-row">

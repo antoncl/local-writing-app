@@ -242,9 +242,18 @@
     };
   }
 
+  $: paneStyleMap = buildPaneStyleMap(panes);
+
+  function buildPaneStyleMap(source: Record<PaneId, PaneState>): Record<string, string> {
+    const result: Record<string, string> = {};
+    for (const [id, pane] of Object.entries(source)) {
+      result[id] = `left: ${pane.x}px; top: ${pane.y}px; width: ${pane.width}px; height: ${pane.height}px; z-index: ${pane.z};`;
+    }
+    return result;
+  }
+
   function paneStyle(id: PaneId) {
-    const pane = panes[id];
-    return `left: ${pane.x}px; top: ${pane.y}px; width: ${pane.width}px; height: ${pane.height}px; z-index: ${pane.z};`;
+    return paneStyleMap[id] ?? "";
   }
 
   function isPaneVisible(id: PaneId) {
@@ -1478,6 +1487,40 @@
     focusedEditorPaneId = targetPane.id;
     focusPane(targetPane.id);
     status = `Loaded ${scene.title}`;
+    if (!sceneEntryHasBody(scene)) {
+      await tick();
+      fitEditorPaneToContent(targetPane.id);
+    }
+  }
+
+  function sceneEntryHasBody(scene: Scene): boolean {
+    const entryDefinition = metadataSchema?.entry_types[scene.entry_type];
+    return entryDefinition?.has_body ?? true;
+  }
+
+  function fitEditorPaneToContent(paneId: string) {
+    setTimeout(() => {
+      const paneEl = document.querySelector<HTMLElement>(`[data-pane-id="${paneId}"]`);
+      if (!paneEl) return;
+      const headerEl = paneEl.querySelector<HTMLElement>(".pane-header");
+      const panelEl = paneEl.querySelector<HTMLElement>(".editor-panel");
+      if (!headerEl || !panelEl) return;
+      let contentHeight = 0;
+      for (const child of Array.from(panelEl.children)) {
+        const el = child as HTMLElement;
+        if (el.offsetParent === null) continue;
+        contentHeight += el.getBoundingClientRect().height;
+      }
+      const totalHeight = headerEl.getBoundingClientRect().height + contentHeight + 24;
+      const current = panes[paneId];
+      if (!current || totalHeight < 120) return;
+      const newHeight = Math.round(totalHeight);
+      panes = {
+        ...panes,
+        [paneId]: { ...current, height: newHeight },
+      };
+      paneEl.style.height = `${newHeight}px`;
+    }, 100);
   }
 
   async function openLoreEntryInEditorPane(entryId: string) {
@@ -2386,7 +2429,7 @@
         metadataReload={metadataReloadsByPane[editorPane.id] ?? null}
         titleReload={titleReloadsByPane[editorPane.id] ?? null}
         dirty={editorPane.dirty}
-        todoStatusHint={editorPane.document?.type === "scene" ? (embeddedTodoStatusHintsByPane[editorPane.id] ?? "No embedded TODOs. Select text to mark a TODO.") : ""}
+        todoStatusHint={editorPane.document?.type === "scene" && editorPane.scene && sceneEntryHasBody(editorPane.scene) ? (embeddedTodoStatusHintsByPane[editorPane.id] ?? "No embedded TODOs. Select text to mark a TODO.") : ""}
         on:focus={() => focusPane(editorPane.id)}
         on:change={(event) =>
           updateEditorPaneDraft(

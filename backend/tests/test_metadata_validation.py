@@ -120,6 +120,78 @@ class MetadataValidationTests(unittest.TestCase):
         self.assertEqual(scene.title, "Act One")
         self.assertEqual(scene.entry_type, "act")
 
+    def test_counter_among_siblings_for_acts(self) -> None:
+        from app.models import CreateStructureNodeRequest
+
+        first = self.service.create_structure_node(CreateStructureNodeRequest(title="Act 1", entry_type="act"))
+        self.service.create_structure_node(CreateStructureNodeRequest(title="Act 2", entry_type="act"))
+        third = self.service.create_structure_node(CreateStructureNodeRequest(title="Act 3", entry_type="act"))
+        act_nodes = [child for child in third.root.children if child.type == "act"]
+
+        scenes = [self.service.read_scene(node.scene_id) for node in act_nodes]
+
+        self.assertEqual([s.computed_metadata.get("number") for s in scenes], [1, 2, 3])
+
+    def test_counter_among_siblings_resets_per_parent(self) -> None:
+        from app.models import CreateStructureNodeRequest
+
+        self.service.create_structure_node(CreateStructureNodeRequest(title="Act 1", entry_type="act"))
+        self.service.create_structure_node(CreateStructureNodeRequest(title="Act 2", entry_type="act"))
+        structure = self.service.read_structure()
+        act_one = next(child for child in structure.root.children if child.title == "Act 1")
+        act_two = next(child for child in structure.root.children if child.title == "Act 2")
+        self.service.create_structure_node(CreateStructureNodeRequest(title="Chapter 1", entry_type="chapter", parent_id=act_one.id))
+        self.service.create_structure_node(CreateStructureNodeRequest(title="Chapter 2", entry_type="chapter", parent_id=act_one.id))
+        self.service.create_structure_node(CreateStructureNodeRequest(title="Chapter 1", entry_type="chapter", parent_id=act_two.id))
+
+        structure = self.service.read_structure()
+        act_one = next(child for child in structure.root.children if child.title == "Act 1")
+        act_two = next(child for child in structure.root.children if child.title == "Act 2")
+        ch_a1 = self.service.read_scene(act_one.children[0].scene_id)
+        ch_a2 = self.service.read_scene(act_one.children[1].scene_id)
+        ch_b1 = self.service.read_scene(act_two.children[0].scene_id)
+
+        self.assertEqual(ch_a1.computed_metadata.get("number"), 1)
+        self.assertEqual(ch_a2.computed_metadata.get("number"), 2)
+        self.assertEqual(ch_b1.computed_metadata.get("number"), 1)
+
+    def test_counter_in_manuscript_scope_is_global(self) -> None:
+        from app.models import CreateStructureNodeRequest
+
+        self.service._write_yaml(
+            self.root / "metadata.schema.yaml",
+            {
+                "version": 1,
+                "fields": {
+                    "number": {
+                        "name": "Number",
+                        "type": "computed",
+                        "computed": {"function": "counter", "scope": "manuscript"},
+                    },
+                },
+            },
+        )
+
+        self.service.create_structure_node(CreateStructureNodeRequest(title="Act 1", entry_type="act"))
+        self.service.create_structure_node(CreateStructureNodeRequest(title="Act 2", entry_type="act"))
+        structure = self.service.read_structure()
+        act_one = next(child for child in structure.root.children if child.title == "Act 1")
+        act_two = next(child for child in structure.root.children if child.title == "Act 2")
+        self.service.create_structure_node(CreateStructureNodeRequest(title="Chapter 1", entry_type="chapter", parent_id=act_one.id))
+        self.service.create_structure_node(CreateStructureNodeRequest(title="Chapter 2", entry_type="chapter", parent_id=act_one.id))
+        self.service.create_structure_node(CreateStructureNodeRequest(title="Chapter 3", entry_type="chapter", parent_id=act_two.id))
+
+        structure = self.service.read_structure()
+        act_one = next(child for child in structure.root.children if child.title == "Act 1")
+        act_two = next(child for child in structure.root.children if child.title == "Act 2")
+        first_in_a1 = self.service.read_scene(act_one.children[0].scene_id)
+        second_in_a1 = self.service.read_scene(act_one.children[1].scene_id)
+        first_in_a2 = self.service.read_scene(act_two.children[0].scene_id)
+
+        self.assertEqual(first_in_a1.computed_metadata.get("number"), 1)
+        self.assertEqual(second_in_a1.computed_metadata.get("number"), 2)
+        self.assertEqual(first_in_a2.computed_metadata.get("number"), 3)
+
     def test_container_can_be_referenced_via_entity_ref(self) -> None:
         from app.models import CreateStructureNodeRequest
 
@@ -510,7 +582,7 @@ class MetadataValidationTests(unittest.TestCase):
         self.assertEqual(schema.entry_types["scene"].name, "World Scene")
         self.assertIn("pov", schema.fields)
         self.assertIn("tension", schema.fields)
-        self.assertEqual(schema.entry_types["scene"].fields, ["summary", "status", "characters", "locations", "word_count", "pov", "tension"])
+        self.assertEqual(schema.entry_types["scene"].fields, ["number", "summary", "status", "characters", "locations", "word_count", "pov", "tension"])
 
         scene = self.service.read_scene(self.scene_id)
         saved = self.service.save_scene(

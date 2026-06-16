@@ -90,7 +90,7 @@ DEFAULT_METADATA_SCHEMA: dict[str, Any] = {
             "name": "Manuscript",
             "kind": "scene",
             "abstract": True,
-            "fields": ["summary"],
+            "fields": ["number", "summary"],
         },
         "act": {
             "name": "Act",
@@ -179,6 +179,11 @@ DEFAULT_METADATA_SCHEMA: dict[str, Any] = {
             "name": "Word Count",
             "type": "computed",
             "computed": {"source": "body", "function": "word_count"},
+        },
+        "number": {
+            "name": "Number",
+            "type": "computed",
+            "computed": {"function": "counter", "scope": "siblings"},
         },
     },
 }
@@ -1684,7 +1689,7 @@ class ProjectService:
             status=status,
             entry_type=entry_type,
             metadata=metadata,
-            computed_metadata=self._computed_scene_metadata(body),
+            computed_metadata=self._computed_scene_metadata(body, node_id=node_id, entry_type=entry_type),
         )
 
     def save_scene(self, scene_id: str, request: SaveSceneRequest) -> Scene:
@@ -2338,9 +2343,76 @@ class ProjectService:
             return [f"{label} metadata field {field_id} references {node_id} but expected entry_type {expected_entry_type}."]
         return []
 
-    def _computed_scene_metadata(self, body_markdown: str) -> dict[str, Any]:
-        without_comments = re.sub(r"<!--[\s\S]*?-->", " ", body_markdown)
-        return {"word_count": len(WORD_PATTERN.findall(without_comments))}
+    def _computed_scene_metadata(
+        self,
+        body_markdown: str,
+        node_id: str | None = None,
+        entry_type: str | None = None,
+        schema: MetadataSchema | None = None,
+        structure: StructureDocument | None = None,
+    ) -> dict[str, Any]:
+        computed: dict[str, Any] = {}
+        if schema is None:
+            schema = self.read_metadata_schema()
+        entry_definition = schema.entry_types.get(entry_type or "")
+        field_ids = entry_definition.fields if entry_definition else ["word_count"]
+        for field_id in field_ids:
+            field = schema.fields.get(field_id)
+            if field is None or field.type != "computed" or not field.computed:
+                continue
+            function = field.computed.get("function")
+            if function == "word_count":
+                without_comments = re.sub(r"<!--[\s\S]*?-->", " ", body_markdown)
+                computed[field_id] = len(WORD_PATTERN.findall(without_comments))
+            elif function == "counter" and node_id and entry_type:
+                if structure is None:
+                    structure = self.read_structure()
+                scope = field.computed.get("scope", "siblings")
+                value = self._compute_counter(structure.root, node_id, entry_type, scope)
+                if value is not None:
+                    computed[field_id] = value
+        return computed
+
+    def _compute_counter(self, root: StructureNode, target_scene_id: str, entry_type: str, scope: str) -> int | None:
+        if scope == "siblings":
+            return self._counter_among_siblings(root, target_scene_id, entry_type)
+        if scope == "manuscript":
+            return self._counter_in_manuscript(root, target_scene_id, entry_type)
+        return None
+
+    def _counter_among_siblings(self, root: StructureNode, target_scene_id: str, entry_type: str) -> int | None:
+        for i, child in enumerate(root.children):
+            if child.scene_id == target_scene_id:
+                counter = 0
+                for j in range(i + 1):
+                    if root.children[j].type == entry_type:
+                        counter += 1
+                return counter
+        for child in root.children:
+            found = self._counter_among_siblings(child, target_scene_id, entry_type)
+            if found is not None:
+                return found
+        return None
+
+    def _counter_in_manuscript(self, root: StructureNode, target_scene_id: str, entry_type: str) -> int | None:
+        result: list[int | None] = [None]
+        counter = [0]
+
+        def walk(node: StructureNode) -> None:
+            if result[0] is not None:
+                return
+            if node.type == entry_type:
+                counter[0] += 1
+                if node.scene_id == target_scene_id:
+                    result[0] = counter[0]
+                    return
+            for child in node.children:
+                walk(child)
+                if result[0] is not None:
+                    return
+
+        walk(root)
+        return result[0]
 
     def _iter_metadata_search_values(self, metadata: dict[str, Any], prefix: str = "") -> list[tuple[str, str]]:
         values: list[tuple[str, str]] = []

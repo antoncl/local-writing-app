@@ -1180,6 +1180,10 @@ h3 {
   background: #ffffff;
 }
 
+.editor-wrap.hidden-body {
+  display: none;
+}
+
 .editor-body {
   max-width: 780px;
   min-height: 100%;

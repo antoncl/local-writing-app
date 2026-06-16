@@ -151,6 +151,14 @@ class MetadataValidationTests(unittest.TestCase):
             self.assertEqual(schema.entry_types[type_id].display_template, "{number}. {title}")
         self.assertEqual(schema.entry_types["character"].display_template, "{title}")
 
+    def test_has_body_inherits_false_for_containers_true_for_scene(self) -> None:
+        schema = self.service.read_metadata_schema()
+        self.assertFalse(schema.entry_types["manuscript_structure"].has_body)
+        self.assertFalse(schema.entry_types["act"].has_body)
+        self.assertFalse(schema.entry_types["chapter"].has_body)
+        self.assertTrue(schema.entry_types["scene"].has_body)
+        self.assertTrue(schema.entry_types["character"].has_body)
+
     def test_counter_among_siblings_for_acts(self) -> None:
         from app.models import CreateStructureNodeRequest
 

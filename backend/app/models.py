@@ -87,6 +87,7 @@ class EntryTypeDefinition(BaseModel):
     fields: list[str] = Field(default_factory=list)
     own_fields: list[str] = Field(default_factory=list)
     display_template: str = "{title}"
+    has_body: bool = True
 
 
 class MetadataSchema(BaseModel):

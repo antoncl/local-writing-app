@@ -139,7 +139,8 @@
   $: documentEntryTypes = Object.entries(metadataSchema?.entry_types ?? {}).filter(([, definition]) => definition.kind === documentKind && !definition.abstract);
   $: activeEntryType = metadataSchema?.entry_types[entryType] ?? metadataSchema?.entry_types[defaultEntryType()];
   $: metadataFieldIds = activeEntryType?.fields ?? [];
-  $: metadataSummaryText = buildMetadataSummary(activeEntryType?.name ?? entryType, status, liveWordCount);
+  $: hasBody = activeEntryType?.has_body ?? true;
+  $: metadataSummaryText = buildMetadataSummary(activeEntryType?.name ?? entryType, status, liveWordCount, hasBody);
 
   $: if (metadataReload && metadataReload.token !== lastMetadataReloadToken) {
     lastMetadataReloadToken = metadataReload.token;
@@ -219,7 +220,9 @@
     status = documentStatus(nextScene);
     entryType = nextScene.entry_type || defaultEntryType();
     metadata = cloneMetadata(nextScene.metadata);
-    metadataExpanded = documentKind === "lore";
+    const nextEntryDefinition = metadataSchema?.entry_types[entryType];
+    const nextHasBody = nextEntryDefinition?.has_body ?? true;
+    metadataExpanded = documentKind === "lore" || !nextHasBody;
     tagPickerFieldId = null;
     tagPickerPosition = null;
     const html = await sceneMarkdownToHtml(nextScene.body_markdown || "");
@@ -401,8 +404,9 @@
     return String(value);
   }
 
-  function buildMetadataSummary(typeName: string, currentStatus: string, wordCount: number) {
+  function buildMetadataSummary(typeName: string, currentStatus: string, wordCount: number, bodyEnabled: boolean) {
     if (documentKind === "lore") return typeName;
+    if (!bodyEnabled) return typeName;
     return `${typeName} · ${currentStatus || "draft"} · ${wordCount} ${wordCount === 1 ? "word" : "words"}`;
   }
 
@@ -1276,7 +1280,7 @@
     {/if}
   </section>
 
-  <div class:empty-editor={editorEmpty} class:lore-editor={documentKind === "lore"} class="editor-wrap" bind:this={editorFrame}>
+  <div class:empty-editor={editorEmpty} class:lore-editor={documentKind === "lore"} class:hidden-body={!hasBody} class="editor-wrap" bind:this={editorFrame}>
     {#if selectionMenu.visible}
       <div class:below={selectionMenu.placement === "below"} class="selection-toolbar" style={`left: ${selectionMenu.x}px; top: ${selectionMenu.y}px;`}>
         <span class="selection-count">{selectionMenu.wordCount} {selectionMenu.wordCount === 1 ? "word" : "words"}</span>

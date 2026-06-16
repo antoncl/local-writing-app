@@ -114,6 +114,7 @@ parent's field list.
 | `parent` | Parent entry type id (for inheritance) | none |
 | `abstract` | If true, can't be instantiated; only inherited from | false |
 | `display_template` | Outline title template, see above | `{title}` |
+| `has_body` | If false, hide the body markdown editor when this type is open. Inherited. | true |
 | `fields` | List of field ids to attach (concatenates with parent's) | `[]` |
 
 Anything not listed here either has no override yet or hasn't been

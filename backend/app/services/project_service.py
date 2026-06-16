@@ -92,6 +92,7 @@ DEFAULT_METADATA_SCHEMA: dict[str, Any] = {
             "abstract": True,
             "fields": ["number", "summary"],
             "display_template": "{number}. {title}",
+            "has_body": False,
         },
         "act": {
             "name": "Act",
@@ -110,6 +111,7 @@ DEFAULT_METADATA_SCHEMA: dict[str, Any] = {
             "kind": "scene",
             "parent": "manuscript_structure",
             "fields": ["status", "characters", "locations", "word_count"],
+            "has_body": True,
         },
         "lore_entry": {
             "name": "Entry",
@@ -1192,7 +1194,7 @@ class ProjectService:
             if isinstance(parent_id, str) and parent_id in entry_types:
                 parent_definition = resolved.get(parent_id)
                 if isinstance(parent_definition, dict):
-                    for inheritable in ("display_template",):
+                    for inheritable in ("display_template", "has_body"):
                         if inheritable not in next_entry_type and inheritable in parent_definition:
                             next_entry_type[inheritable] = parent_definition[inheritable]
             resolving.remove(entry_type_id)

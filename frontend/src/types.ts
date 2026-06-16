@@ -83,6 +83,7 @@ export type EntryTypeDefinition = {
   fields: string[];
   own_fields?: string[];
   display_template?: string;
+  has_body?: boolean;
 };
 
 export type MetadataSchema = {

@@ -12,7 +12,8 @@
   import { editorHtmlToSceneMarkdown, sceneMarkdownToHtml } from "./markdown";
   import MetadataLongTextEditor from "./MetadataLongTextEditor.svelte";
   import ReferencePicker from "./ReferencePicker.svelte";
-  import type { EditableDocument, EntryMetadata, MetadataFieldDefinition, MetadataSchema, MetadataValue } from "./types";
+  import { api } from "./api";
+  import type { Backlink, EditableDocument, EntryMetadata, MetadataFieldDefinition, MetadataSchema, MetadataValue } from "./types";
 
   export let scene: EditableDocument | null = null;
   export let documentKind: "scene" | "lore" = "scene";
@@ -28,6 +29,7 @@
     focus: void;
     "custom-data": { entryType: string; kind: "scene" | "lore" };
     embeddedTodos: { todos: EmbeddedTodo[] };
+    navigate: { id: string; kind: string };
   }>();
 
   type FloatingMenuState = {
@@ -130,6 +132,9 @@
   let lastTitleReloadToken = 0;
   let tagPickerFieldId: string | null = null;
   let tagPickerPosition: { x: number; y: number; width: number } | null = null;
+  let backlinks: Backlink[] = [];
+  let backlinksExpanded = false;
+  let lastBacklinksSceneId: string | null = null;
 
   $: slashCommands = editor && documentKind === "scene" ? getSlashCommands() : [];
   $: activeSlashCommand = slashCommands[slashMenu.selectedIndex];
@@ -152,6 +157,26 @@
   $: if (titleReload && titleReload.token !== lastTitleReloadToken) {
     lastTitleReloadToken = titleReload.token;
     title = titleReload.title;
+  }
+
+  $: if (scene && scene.id !== lastBacklinksSceneId) {
+    void refreshBacklinks(scene.id);
+  } else if (!scene && lastBacklinksSceneId !== null) {
+    lastBacklinksSceneId = null;
+    backlinks = [];
+    backlinksExpanded = false;
+  }
+
+  async function refreshBacklinks(sceneId: string) {
+    lastBacklinksSceneId = sceneId;
+    try {
+      const response = await api.listBacklinks(sceneId);
+      if (lastBacklinksSceneId === sceneId) {
+        backlinks = response.backlinks;
+      }
+    } catch (error) {
+      if (lastBacklinksSceneId === sceneId) backlinks = [];
+    }
   }
 
   $: if (editor && scene && scene.id !== loadedSceneId) {
@@ -1271,6 +1296,28 @@
                   {/if}
                 {/each}
               </div>
+            </div>
+          {/if}
+        </section>
+        <section class="scene-backlinks" aria-label="Incoming references">
+          <div class="backlinks-stripe">
+            <button class="backlinks-toggle" type="button" on:click={() => (backlinksExpanded = !backlinksExpanded)}>
+              <strong>{backlinksExpanded ? "Hide References" : "Show References"}</strong>
+              <span>{backlinks.length} incoming</span>
+            </button>
+          </div>
+          {#if backlinksExpanded}
+            <div class="backlinks-panel">
+              {#if backlinks.length === 0}
+                <div class="backlinks-empty">No incoming references.</div>
+              {:else}
+                {#each backlinks as link (`${link.id}:${link.field_id}`)}
+                  <button class="backlink-row" type="button" on:click={() => dispatch("navigate", { id: link.id, kind: link.kind })}>
+                    <span class="backlink-title">{link.title}</span>
+                    <span class="backlink-field">{link.field_name}</span>
+                  </button>
+                {/each}
+              {/if}
             </div>
           {/if}
         </section>

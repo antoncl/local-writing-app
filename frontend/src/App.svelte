@@ -1498,6 +1498,14 @@
     return entryDefinition?.has_body ?? true;
   }
 
+  function navigateToBacklink(id: string, kind: string) {
+    if (kind === "lore") {
+      void run(() => openLoreEntryInEditorPane(id));
+    } else {
+      void run(() => openSceneInEditorPane(id));
+    }
+  }
+
   function fitEditorPaneToContent(paneId: string) {
     setTimeout(() => {
       const paneEl = document.querySelector<HTMLElement>(`[data-pane-id="${paneId}"]`);
@@ -2442,6 +2450,7 @@
           )}
         on:custom-data={(event) => openSchemaForCustomData(event.detail.entryType, event.detail.kind)}
         on:embeddedTodos={(event) => updateEmbeddedTodosForPane(editorPane.id, event.detail.todos)}
+        on:navigate={(event) => navigateToBacklink(event.detail.id, event.detail.kind)}
       />
       <button class="pane-resize" type="button" aria-label="Resize Editor pane" on:keydown={(event) => handlePaneResizeKeydown(event, editorPane.id)} on:mousedown={(event) => startPaneResize(event, editorPane.id)}></button>
     </section>

@@ -1057,6 +1057,87 @@ h3 {
   overscroll-behavior: contain;
 }
 
+.scene-backlinks {
+  display: grid;
+  gap: 8px;
+  padding-top: 8px;
+}
+
+.backlinks-stripe {
+  display: flex;
+  align-items: stretch;
+  gap: 8px;
+}
+
+.backlinks-toggle {
+  display: flex;
+  flex: 1;
+  justify-content: space-between;
+  gap: 10px;
+  min-width: 0;
+  text-align: left;
+}
+
+.backlinks-toggle span {
+  color: #65716c;
+  font-size: 12px;
+  font-weight: 400;
+}
+
+.backlinks-panel {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  max-height: min(240px, 28vh);
+  overflow: auto;
+  padding: 6px;
+  border: 1px solid #dfe6e3;
+  border-radius: 6px;
+  background: #fbfcfc;
+}
+
+.backlinks-empty {
+  padding: 8px;
+  font-size: 12px;
+  color: #65716c;
+  text-align: center;
+}
+
+.backlink-row {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 6px 10px;
+  border: 1px solid transparent;
+  border-radius: 4px;
+  background: transparent;
+  cursor: pointer;
+  text-align: left;
+}
+
+.backlink-row:hover {
+  background: #edf6f2;
+  border-color: #dfe6e3;
+}
+
+.backlink-title {
+  flex: 1;
+  min-width: 0;
+  font-size: 13px;
+  color: #1f4d41;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.backlink-field {
+  font-size: 11px;
+  color: #65716c;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
 .scene-metadata label {
   color: #4d5753;
   font-size: 12px;

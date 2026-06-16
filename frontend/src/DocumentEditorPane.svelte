@@ -204,6 +204,32 @@
   }
 
   onMount(() => {
+    const AlignedTableCell = TableCell.extend({
+      addAttributes() {
+        return {
+          ...this.parent?.(),
+          align: {
+            default: null,
+            parseHTML: (element: HTMLElement) => element.style.textAlign || element.getAttribute("align") || null,
+            renderHTML: (attributes: { align?: string | null }) =>
+              attributes.align ? { style: `text-align: ${attributes.align}` } : {},
+          },
+        };
+      },
+    });
+    const AlignedTableHeader = TableHeader.extend({
+      addAttributes() {
+        return {
+          ...this.parent?.(),
+          align: {
+            default: null,
+            parseHTML: (element: HTMLElement) => element.style.textAlign || element.getAttribute("align") || null,
+            renderHTML: (attributes: { align?: string | null }) =>
+              attributes.align ? { style: `text-align: ${attributes.align}` } : {},
+          },
+        };
+      },
+    });
     editor = new Editor({
       element: editorElement,
       extensions: [
@@ -211,8 +237,8 @@
         TodoAnchor,
         Table.configure({ resizable: true }),
         TableRow,
-        TableHeader,
-        TableCell,
+        AlignedTableHeader,
+        AlignedTableCell,
       ],
       content: "",
       editorProps: {
@@ -579,6 +605,46 @@
     } else if (slashMenu.visible) {
       closeSlashMenu();
     }
+  }
+
+  function setCellAlign(align: "left" | "center" | "right") {
+    if (!editor) return;
+    const { state, view } = editor;
+    const { $from } = state.selection;
+    let tablePos = -1;
+    let tableNode: ProseMirrorNode | null = null;
+    let tableDepth = -1;
+    for (let d = $from.depth; d >= 0; d--) {
+      const node = $from.node(d);
+      if (node.type.name === "table") {
+        tablePos = $from.before(d);
+        tableNode = node;
+        tableDepth = d;
+        break;
+      }
+    }
+    if (!tableNode || tablePos < 0 || $from.depth < tableDepth + 2) {
+      editor.chain().focus().setCellAttribute("align", align).run();
+      return;
+    }
+    const cellIndex = $from.index(tableDepth + 1);
+    let tr = state.tr;
+    let rowPos = tablePos + 1;
+    for (let i = 0; i < tableNode.childCount; i++) {
+      const row = tableNode.child(i);
+      let cellPos = rowPos + 1;
+      for (let j = 0; j < row.childCount; j++) {
+        const cell = row.child(j);
+        if (j === cellIndex) {
+          tr = tr.setNodeMarkup(cellPos, null, { ...cell.attrs, align });
+          break;
+        }
+        cellPos += cell.nodeSize;
+      }
+      rowPos += row.nodeSize;
+    }
+    view.dispatch(tr);
+    editor.commands.focus();
   }
 
   function findCurrentTableElement(): HTMLElement | null {
@@ -1505,6 +1571,10 @@
         <button type="button" title="Insert row above" on:mousedown|preventDefault={() => editor?.chain().focus().addRowBefore().run()}>+ row ↑</button>
         <button type="button" title="Insert row below" on:mousedown|preventDefault={() => editor?.chain().focus().addRowAfter().run()}>+ row ↓</button>
         <button type="button" title="Delete row" on:mousedown|preventDefault={() => editor?.chain().focus().deleteRow().run()}>− row</button>
+        <span class="table-toolbar-sep" aria-hidden="true"></span>
+        <button type="button" title="Align left" on:mousedown|preventDefault={() => setCellAlign("left")}>⟵</button>
+        <button type="button" title="Align center" on:mousedown|preventDefault={() => setCellAlign("center")}>↔</button>
+        <button type="button" title="Align right" on:mousedown|preventDefault={() => setCellAlign("right")}>⟶</button>
         <span class="table-toolbar-sep" aria-hidden="true"></span>
         <button type="button" title="Toggle header row" on:mousedown|preventDefault={() => editor?.chain().focus().toggleHeaderRow().run()}>Hdr row</button>
         <button type="button" title="Toggle header column" on:mousedown|preventDefault={() => editor?.chain().focus().toggleHeaderColumn().run()}>Hdr col</button>

@@ -27,18 +27,34 @@ turndown.addRule("simpleMarkdownTable", {
   filter: "table",
   replacement: (_content: string, node: Node) => {
     const table = node as HTMLTableElement;
-    const rows = Array.from(table.rows).map((row) =>
+    const cellRows = Array.from(table.rows);
+    if (cellRows.length === 0) return "";
+
+    const textRows = cellRows.map((row) =>
       Array.from(row.cells).map((cell) => cleanTableCell(turndown.turndown(cell.innerHTML))),
     );
-    if (rows.length === 0) return "";
-
-    const columnCount = Math.max(...rows.map((row) => row.length));
+    const columnCount = Math.max(...textRows.map((row) => row.length));
     if (columnCount === 0) return "";
 
-    const normalizedRows = rows.map((row) => padRow(row, columnCount));
+    const alignments = Array.from({ length: columnCount }, (_, colIndex) => {
+      for (const row of cellRows) {
+        const cell = row.cells[colIndex] as HTMLElement | undefined;
+        if (!cell) continue;
+        const value = (cell.style.textAlign || cell.getAttribute("align") || "").toLowerCase();
+        if (value) return value;
+      }
+      return "";
+    });
+
+    const normalizedRows = textRows.map((row) => padRow(row, columnCount));
     const header = normalizedRows[0];
     const bodyRows = normalizedRows.slice(1);
-    const separator = Array.from({ length: columnCount }, () => "---");
+    const separator = alignments.map((align) => {
+      if (align === "center") return ":---:";
+      if (align === "right") return "---:";
+      if (align === "left") return ":---";
+      return "---";
+    });
     const markdownRows = [header, separator, ...bodyRows].map(formatTableRow);
 
     return `\n\n${markdownRows.join("\n")}\n\n`;

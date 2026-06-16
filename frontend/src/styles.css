@@ -804,6 +804,12 @@ h3 {
   background: #edf6f2;
 }
 
+.tree-row .tree-title:focus {
+  outline: 3px solid #2f6f5e;
+  outline-offset: -3px;
+  background: #ffffff;
+}
+
 .tree-group {
   font-weight: 700;
 }
@@ -860,10 +866,9 @@ h3 {
 }
 
 .tree-handle {
-  visibility: hidden;
   display: inline-block;
   padding: 0 4px;
-  color: #8a948f;
+  color: #c5cdc9;
   cursor: grab;
   user-select: none;
   font-weight: 700;
@@ -871,7 +876,7 @@ h3 {
 }
 
 .tree-row:hover .tree-handle {
-  visibility: visible;
+  color: #6a7470;
 }
 
 .tree-handle:active {

@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { onMount } from "svelte";
+  import { onMount, tick } from "svelte";
   import { api } from "./api";
   import DocumentEditorPane from "./DocumentEditorPane.svelte";
   import type {
@@ -1173,7 +1173,74 @@
     if (event.key === "F2") {
       event.preventDefault();
       startRename(node.id, node.title);
+      return;
     }
+    if (!(event.ctrlKey || event.metaKey)) return;
+    if (event.key === "ArrowUp") {
+      event.preventDefault();
+      void moveNodeUp(node);
+    } else if (event.key === "ArrowDown") {
+      event.preventDefault();
+      void moveNodeDown(node);
+    } else if (event.key === "ArrowRight") {
+      event.preventDefault();
+      void indentNode(node);
+    } else if (event.key === "ArrowLeft") {
+      event.preventDefault();
+      void outdentNode(node);
+    }
+  }
+
+  async function refocusTreeNode(nodeId: string) {
+    await tick();
+    const el = document.querySelector<HTMLElement>(`[data-tree-node-id="${nodeId}"]`);
+    el?.focus();
+  }
+
+  async function moveNodeUp(node: StructureNode) {
+    if (!structure) return;
+    const found = findParentAndIndex(structure.root, node.id);
+    if (!found || found.index === 0) return;
+    await run(async () => {
+      structure = await api.moveStructureNode(node.id, found.parent.id, found.index - 1);
+    });
+    await refocusTreeNode(node.id);
+  }
+
+  async function moveNodeDown(node: StructureNode) {
+    if (!structure) return;
+    const found = findParentAndIndex(structure.root, node.id);
+    if (!found || found.index >= (found.parent.children?.length ?? 0) - 1) return;
+    await run(async () => {
+      structure = await api.moveStructureNode(node.id, found.parent.id, found.index + 1);
+    });
+    await refocusTreeNode(node.id);
+  }
+
+  async function indentNode(node: StructureNode) {
+    if (!structure) return;
+    const found = findParentAndIndex(structure.root, node.id);
+    if (!found || found.index === 0) return;
+    const previousSibling = found.parent.children[found.index - 1];
+    if (previousSibling.scene_id) return;
+    const newPosition = previousSibling.children?.length ?? 0;
+    await run(async () => {
+      structure = await api.moveStructureNode(node.id, previousSibling.id, newPosition);
+    });
+    await refocusTreeNode(node.id);
+  }
+
+  async function outdentNode(node: StructureNode) {
+    if (!structure) return;
+    const parentFound = findParentAndIndex(structure.root, node.id);
+    if (!parentFound) return;
+    if (parentFound.parent.id === structure.root.id) return;
+    const grandparentFound = findParentAndIndex(structure.root, parentFound.parent.id);
+    if (!grandparentFound) return;
+    await run(async () => {
+      structure = await api.moveStructureNode(node.id, grandparentFound.parent.id, grandparentFound.index + 1);
+    });
+    await refocusTreeNode(node.id);
   }
 
   function findParentAndIndex(
@@ -1212,7 +1279,7 @@
     const ratio = (event.clientY - rect.top) / rect.height;
     let position: "before" | "after" | "into";
     const isContainer = !node.scene_id;
-    if (isContainer && ratio > 0.25 && ratio < 0.75) {
+    if (isContainer && ratio > 0.2 && ratio < 0.8) {
       position = "into";
     } else if (ratio < 0.5) {
       position = "before";
@@ -2486,6 +2553,8 @@
     class:dragging={draggedNodeId === node.id}
     role="treeitem"
     aria-label={node.title}
+    aria-selected="false"
+    tabindex={-1}
     style={`padding-left: ${depth * 14}px`}
     on:dragover={(event) => handleTreeDragOver(event, node)}
     on:drop={(event) => handleTreeDrop(event, node)}
@@ -2508,10 +2577,10 @@
         on:blur={() => commitRename(node.id)}
       />
     {:else if node.scene_id}
-      <button class="tree-scene tree-title" on:click={() => run(() => openSceneInEditorPane(node.scene_id!))} on:dblclick={() => startRename(node.id, node.title)} on:keydown={(event) => handleTreeRowKeydown(event, node)}>{node.title}</button>
+      <button data-tree-node-id={node.id} class="tree-scene tree-title" on:click={() => run(() => openSceneInEditorPane(node.scene_id!))} on:dblclick={() => startRename(node.id, node.title)} on:keydown={(event) => handleTreeRowKeydown(event, node)}>{node.title}</button>
       <button class="tree-delete" title={`Delete ${entryTypeName(node.type, metadataSchema)}`} on:click={() => requestDeleteStructureNode(node)}>×</button>
     {:else}
-      <button class="tree-group tree-title" on:click={() => (activeParentId = node.id)} on:dblclick={() => startRename(node.id, node.title)} on:keydown={(event) => handleTreeRowKeydown(event, node)}>{node.title}</button>
+      <button data-tree-node-id={node.id} class="tree-group tree-title" on:click={() => (activeParentId = node.id)} on:dblclick={() => startRename(node.id, node.title)} on:keydown={(event) => handleTreeRowKeydown(event, node)}>{node.title}</button>
       {@const defaultType = defaultChildEntryType(node.type)}
       {#if defaultType}
         <button class="tree-add" title={`Add ${entryTypeName(defaultType, metadataSchema)}`} on:click={() => addStructureChild(node.id, defaultType)}>+</button>

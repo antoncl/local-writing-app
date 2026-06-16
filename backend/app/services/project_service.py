@@ -1444,6 +1444,35 @@ class ProjectService:
         self._write_yaml(root / "manuscript.structure.yaml", structure.model_dump())
         return self.read_scene(scene_id)
 
+    def rename_structure_node(self, node_id: str, title: str) -> StructureDocument:
+        root = self._require_project()
+        structure = self.read_structure()
+        node = self._find_structure_node(structure.root, node_id)
+        if node is None:
+            raise ProjectServiceError(f"Structure node {node_id} does not exist.", 404)
+        if node.type == "root":
+            raise ProjectServiceError("Cannot rename the root node.", 422)
+        clean_title = title.strip()
+        if not clean_title:
+            raise ProjectServiceError("Title cannot be empty.", 422)
+        node.title = clean_title
+        if node.scene_id:
+            path = self._path_for_node_id(node.scene_id, "scene")
+            front_matter, body = self._read_markdown_with_front_matter(path, strict=True)
+            front_matter["title"] = clean_title
+            self._write_markdown_with_front_matter(path, front_matter, body)
+        self._write_yaml(root / "manuscript.structure.yaml", structure.model_dump())
+        return self.read_structure()
+
+    def _find_structure_node(self, node: StructureNode, node_id: str) -> StructureNode | None:
+        if node.id == node_id:
+            return node
+        for child in node.children:
+            found = self._find_structure_node(child, node_id)
+            if found is not None:
+                return found
+        return None
+
     def create_structure_node(self, request: CreateStructureNodeRequest) -> StructureDocument:
         root = self._require_project()
         schema = self.read_metadata_schema()

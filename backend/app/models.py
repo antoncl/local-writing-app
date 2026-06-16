@@ -177,6 +177,10 @@ class CreateStructureNodeRequest(BaseModel):
     parent_id: str | None = None
 
 
+class RenameStructureNodeRequest(BaseModel):
+    title: str = Field(min_length=1)
+
+
 class SaveSceneRequest(BaseModel):
     title: str = Field(min_length=1)
     body_markdown: str

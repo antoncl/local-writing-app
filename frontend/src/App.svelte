@@ -100,6 +100,8 @@
   $: activeScene = focusedEditorPane?.document?.type === "scene" ? focusedEditorPane.scene : null;
   let activeParentId: string | undefined = undefined;
   let addMenuOpenFor: string | null = null;
+  let editingNodeId: string | null = null;
+  let editingTitle = "";
   let todos: TodoItem[] = [];
   let validation: ProjectValidation | null = null;
   let metadataSchema: MetadataSchema | null = null;
@@ -186,13 +188,23 @@
 
   onMount(() => {
     fitPanesToViewport();
+    document.addEventListener("mousedown", handleDocumentMousedown);
     return () => {
       document.removeEventListener("mousemove", movePane);
       document.removeEventListener("mouseup", stopPaneDrag);
       document.removeEventListener("mousemove", resizePane);
       document.removeEventListener("mouseup", stopPaneResize);
+      document.removeEventListener("mousedown", handleDocumentMousedown);
     };
   });
+
+  function handleDocumentMousedown(event: MouseEvent) {
+    if (addMenuOpenFor === null) return;
+    const target = event.target as HTMLElement | null;
+    if (!target?.closest(".tree-menu-anchor")) {
+      addMenuOpenFor = null;
+    }
+  }
 
   function createEmptyEditorPane(id: string): EditorPaneState {
     return {
@@ -1006,25 +1018,134 @@
     return schema?.entry_types[typeId]?.name ?? typeId;
   }
 
-  async function addStructureChild(parentId: string | null, entryType: string) {
+  function findStructureNodeById(node: StructureNode | null | undefined, id: string): StructureNode | null {
+    if (!node) return null;
+    if (node.id === id) return node;
+    for (const child of node.children ?? []) {
+      const found = findStructureNodeById(child, id);
+      if (found) return found;
+    }
+    return null;
+  }
+
+  function parentNodeOrRoot(parentId: string | null): StructureNode | null {
+    if (!structure) return null;
+    if (!parentId) return structure.root;
+    return findStructureNodeById(structure.root, parentId);
+  }
+
+  function nextAutoName(parentId: string | null, entryType: string): string {
     const typeName = entryTypeName(entryType, metadataSchema);
-    const promptValue = window.prompt(`Title for new ${typeName}:`, `New ${typeName}`);
-    const title = promptValue?.trim();
-    if (!title) return;
+    const parent = parentNodeOrRoot(parentId);
+    const siblingCount = parent?.children?.filter((child) => child.type === entryType).length ?? 0;
+    return `${typeName} ${siblingCount + 1}`;
+  }
+
+  function findNewlyAddedChildId(
+    before: StructureDocument | null,
+    after: StructureDocument | null,
+    parentId: string | null,
+  ): string | null {
+    if (!after) return null;
+    const beforeParent = before ? findStructureNodeById(before.root, parentId ?? before.root.id) : null;
+    const afterParent = findStructureNodeById(after.root, parentId ?? after.root.id);
+    if (!afterParent) return null;
+    const beforeIds = new Set(beforeParent?.children?.map((child) => child.id) ?? []);
+    return afterParent.children.find((child) => !beforeIds.has(child.id))?.id ?? null;
+  }
+
+  async function addStructureChild(parentId: string | null, entryType: string) {
+    const title = nextAutoName(parentId, entryType);
     addMenuOpenFor = null;
     await run(async () => {
+      const before = structure;
+      let createdNodeId: string | null = null;
       if (entryType === "scene") {
         const scene = await api.createScene(title, parentId ?? undefined);
         await refreshStructure();
         await openSceneInEditorPane(scene.id);
+        const newNode = structure ? findStructureNodeForScene(structure.root, scene.id) : null;
+        createdNodeId = newNode?.id ?? null;
       } else {
         structure = await api.createStructureNode(title, entryType, parentId);
+        createdNodeId = findNewlyAddedChildId(before, structure, parentId);
+      }
+      if (createdNodeId) {
+        startRename(createdNodeId, title);
       }
     });
   }
 
+  function findStructureNodeForScene(node: StructureNode, sceneId: string): StructureNode | null {
+    if (node.scene_id === sceneId) return node;
+    for (const child of node.children ?? []) {
+      const found = findStructureNodeForScene(child, sceneId);
+      if (found) return found;
+    }
+    return null;
+  }
+
   function toggleAddMenu(nodeId: string) {
     addMenuOpenFor = addMenuOpenFor === nodeId ? null : nodeId;
+  }
+
+  function startRename(nodeId: string, currentTitle: string) {
+    editingNodeId = nodeId;
+    editingTitle = currentTitle;
+    setTimeout(() => {
+      const input = document.querySelector<HTMLInputElement>(`[data-node-edit-id="${nodeId}"]`);
+      if (input) {
+        input.focus();
+        input.select();
+      }
+    }, 0);
+  }
+
+  async function commitRename(nodeId: string) {
+    if (editingNodeId !== nodeId) return;
+    const trimmed = editingTitle.trim();
+    const node = structure ? findStructureNodeById(structure.root, nodeId) : null;
+    editingNodeId = null;
+    if (!trimmed || !node || node.title === trimmed) {
+      return;
+    }
+    if (structure) {
+      structure = { root: updateNodeTitleInTree(structure.root, nodeId, trimmed) };
+    }
+    await run(async () => {
+      structure = await api.renameStructureNode(nodeId, trimmed);
+    });
+  }
+
+  function cancelRename() {
+    editingNodeId = null;
+  }
+
+  function updateNodeTitleInTree(node: StructureNode, nodeId: string, title: string): StructureNode {
+    if (node.id === nodeId) {
+      return { ...node, title };
+    }
+    return {
+      ...node,
+      children: (node.children ?? []).map((child) => updateNodeTitleInTree(child, nodeId, title)),
+    };
+  }
+
+  function handleRenameKeydown(event: KeyboardEvent, nodeId: string) {
+    if (event.key === "Enter") {
+      event.preventDefault();
+      void commitRename(nodeId);
+    } else if (event.key === "Escape") {
+      event.preventDefault();
+      cancelRename();
+    }
+  }
+
+  function handleTreeRowKeydown(event: KeyboardEvent, node: StructureNode) {
+    if (event.key === "F2") {
+      event.preventDefault();
+      startRename(node.id, node.title);
+    }
   }
 
   async function newLoreEntry() {
@@ -2169,10 +2290,18 @@
 
 {#snippet renderTree(node: StructureNode, depth: number)}
   <div class="tree-row" style={`padding-left: ${depth * 14}px`}>
-    {#if node.scene_id}
-      <button class="tree-scene tree-title" on:click={() => run(() => openSceneInEditorPane(node.scene_id!))}>{node.title}</button>
+    {#if editingNodeId === node.id}
+      <input
+        class="tree-title tree-rename-input"
+        data-node-edit-id={node.id}
+        bind:value={editingTitle}
+        on:keydown={(event) => handleRenameKeydown(event, node.id)}
+        on:blur={() => commitRename(node.id)}
+      />
+    {:else if node.scene_id}
+      <button class="tree-scene tree-title" on:click={() => run(() => openSceneInEditorPane(node.scene_id!))} on:dblclick={() => startRename(node.id, node.title)} on:keydown={(event) => handleTreeRowKeydown(event, node)}>{node.title}</button>
     {:else}
-      <button class="tree-group tree-title" on:click={() => (activeParentId = node.id)}>{node.title}</button>
+      <button class="tree-group tree-title" on:click={() => (activeParentId = node.id)} on:dblclick={() => startRename(node.id, node.title)} on:keydown={(event) => handleTreeRowKeydown(event, node)}>{node.title}</button>
       {@const defaultType = defaultChildEntryType(node.type)}
       {#if defaultType}
         <button class="tree-add" title={`Add ${entryTypeName(defaultType, metadataSchema)}`} on:click={() => addStructureChild(node.id, defaultType)}>+</button>

@@ -13,6 +13,7 @@ from app.models import (
     CreateSceneRequest,
     CreateStructureNodeRequest,
     CreateTodoRequest,
+    RenameStructureNodeRequest,
     DeleteMetadataEntryTypeRequest,
     DeleteMetadataFieldRequest,
     DirectoryListing,
@@ -122,6 +123,12 @@ def get_structure() -> StructureDocument:
 def create_structure_node(request: CreateStructureNodeRequest) -> StructureDocument:
     with translate_errors():
         return service.create_structure_node(request)
+
+
+@app.patch("/api/structure/nodes/{node_id}", response_model=StructureDocument)
+def rename_structure_node(node_id: str, request: RenameStructureNodeRequest) -> StructureDocument:
+    with translate_errors():
+        return service.rename_structure_node(node_id, request.title)
 
 
 @app.get("/api/metadata/schema", response_model=MetadataSchema)

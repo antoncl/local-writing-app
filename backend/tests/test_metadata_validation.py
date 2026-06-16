@@ -128,6 +128,45 @@ class MetadataValidationTests(unittest.TestCase):
             )
         self.assertIn("abstract", ctx.exception.message)
 
+    def test_rename_structure_node_updates_container_title(self) -> None:
+        from app.models import CreateStructureNodeRequest
+
+        updated = self.service.create_structure_node(
+            CreateStructureNodeRequest(title="Act One", entry_type="act")
+        )
+        act_node = next(child for child in updated.root.children if child.type == "act")
+        renamed = self.service.rename_structure_node(act_node.id, "The Departure")
+        renamed_act = next(child for child in renamed.root.children if child.id == act_node.id)
+        self.assertEqual(renamed_act.title, "The Departure")
+
+    def test_rename_structure_node_updates_scene_file_for_leaf(self) -> None:
+        scene_id = next((self.root / "scenes").glob("*.md")).stem
+        structure = self.service.read_structure()
+        scene_node = next(child for child in structure.root.children if child.scene_id == scene_id)
+
+        self.service.rename_structure_node(scene_node.id, "First Arrival")
+
+        scene = self.service.read_scene(scene_id)
+        self.assertEqual(scene.title, "First Arrival")
+        structure = self.service.read_structure()
+        refreshed = next(child for child in structure.root.children if child.id == scene_node.id)
+        self.assertEqual(refreshed.title, "First Arrival")
+
+    def test_rename_structure_node_rejects_unknown_id(self) -> None:
+        with self.assertRaises(ProjectServiceError) as ctx:
+            self.service.rename_structure_node("node_does_not_exist", "Anything")
+        self.assertEqual(ctx.exception.status_code, 404)
+
+    def test_rename_structure_node_rejects_empty_title(self) -> None:
+        from app.models import CreateStructureNodeRequest
+
+        updated = self.service.create_structure_node(
+            CreateStructureNodeRequest(title="Act One", entry_type="act")
+        )
+        act_node = next(child for child in updated.root.children if child.type == "act")
+        with self.assertRaises(ProjectServiceError):
+            self.service.rename_structure_node(act_node.id, "   ")
+
     def test_create_structure_node_rejects_lore_type(self) -> None:
         from app.models import CreateStructureNodeRequest
 

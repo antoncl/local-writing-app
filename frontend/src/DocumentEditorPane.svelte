@@ -131,6 +131,7 @@
   let editorEmpty = true;
   let selectionMenu: FloatingMenuState = { visible: false, x: 0, y: 0, wordCount: 0, placement: "above" };
   let slashMenu: SlashMenuState = { visible: false, x: 0, y: 0, selectedIndex: 0, mode: "commands", gridRows: 1, gridCols: 1 };
+  let tableMenu: { visible: boolean; x: number; y: number } = { visible: false, x: 0, y: 0 };
   let openToolbarMenuId: string | null = null;
   let reconcilingTodoAnchors = false;
   let highlightedTodoId: string | null = null;
@@ -232,9 +233,13 @@
           emitChange();
         }
       },
-      onSelectionUpdate: updateSelectionMenu,
+      onSelectionUpdate: () => {
+        updateSelectionMenu();
+        updateTableMenu();
+      },
       onBlur: () => {
         hideSelectionMenu();
+        tableMenu = { ...tableMenu, visible: false };
       },
     });
 
@@ -266,12 +271,14 @@
     dispatchEmbeddedTodos();
     syncEditorEmpty();
     updateSelectionMenu();
+    updateTableMenu();
   }
 
   function emitChange() {
     if (!scene || !editor) return;
     syncEditorEmpty();
     updateSelectionMenu();
+    updateTableMenu();
     updateSlashMenuFromContent();
     syncTodoAnchorDomState(true);
     updateLiveWordCount();
@@ -572,6 +579,44 @@
     } else if (slashMenu.visible) {
       closeSlashMenu();
     }
+  }
+
+  function findCurrentTableElement(): HTMLElement | null {
+    if (!editor) return null;
+    const { selection } = editor.state;
+    let node: Node | null = editor.view.domAtPos(selection.from).node;
+    while (node && node !== document.body) {
+      if (node instanceof HTMLElement && node.tagName === "TABLE") return node;
+      node = node.parentNode;
+    }
+    return null;
+  }
+
+  function updateTableMenu() {
+    if (!editor || !editorFrame || documentKind !== "scene" || !editor.isFocused) {
+      if (tableMenu.visible) tableMenu = { ...tableMenu, visible: false };
+      return;
+    }
+    if (!editor.isActive("table")) {
+      if (tableMenu.visible) tableMenu = { ...tableMenu, visible: false };
+      return;
+    }
+    const tableEl = findCurrentTableElement();
+    if (!tableEl) {
+      if (tableMenu.visible) tableMenu = { ...tableMenu, visible: false };
+      return;
+    }
+    const tableRect = tableEl.getBoundingClientRect();
+    const frameBounds = editorFrame.getBoundingClientRect();
+    const toolbarHeight = 36;
+    const above = tableRect.top - frameBounds.top - toolbarHeight - 4;
+    const below = tableRect.bottom - frameBounds.top + 6;
+    const y = above >= 4 ? above : below;
+    tableMenu = {
+      visible: true,
+      x: tableRect.left - frameBounds.left + editorFrame.scrollLeft,
+      y: y + editorFrame.scrollTop,
+    };
   }
 
   function updateSelectionMenu() {
@@ -1448,6 +1493,23 @@
             </button>
           {/each}
         {/if}
+      </div>
+    {/if}
+
+    {#if tableMenu.visible}
+      <div class="table-toolbar" style={`left: ${tableMenu.x}px; top: ${tableMenu.y}px;`}>
+        <button type="button" title="Insert column before" on:mousedown|preventDefault={() => editor?.chain().focus().addColumnBefore().run()}>+ col ←</button>
+        <button type="button" title="Insert column after" on:mousedown|preventDefault={() => editor?.chain().focus().addColumnAfter().run()}>+ col →</button>
+        <button type="button" title="Delete column" on:mousedown|preventDefault={() => editor?.chain().focus().deleteColumn().run()}>− col</button>
+        <span class="table-toolbar-sep" aria-hidden="true"></span>
+        <button type="button" title="Insert row above" on:mousedown|preventDefault={() => editor?.chain().focus().addRowBefore().run()}>+ row ↑</button>
+        <button type="button" title="Insert row below" on:mousedown|preventDefault={() => editor?.chain().focus().addRowAfter().run()}>+ row ↓</button>
+        <button type="button" title="Delete row" on:mousedown|preventDefault={() => editor?.chain().focus().deleteRow().run()}>− row</button>
+        <span class="table-toolbar-sep" aria-hidden="true"></span>
+        <button type="button" title="Toggle header row" on:mousedown|preventDefault={() => editor?.chain().focus().toggleHeaderRow().run()}>Hdr row</button>
+        <button type="button" title="Toggle header column" on:mousedown|preventDefault={() => editor?.chain().focus().toggleHeaderColumn().run()}>Hdr col</button>
+        <span class="table-toolbar-sep" aria-hidden="true"></span>
+        <button type="button" title="Delete table" on:mousedown|preventDefault={() => editor?.chain().focus().deleteTable().run()}>Delete</button>
       </div>
     {/if}
 

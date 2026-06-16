@@ -71,6 +71,12 @@ export const api = {
       body: JSON.stringify({ title }),
     });
   },
+  moveStructureNode(nodeId: string, targetParentId: string, position: number) {
+    return request<StructureDocument>(`/structure/nodes/${encodeURIComponent(nodeId)}/move`, {
+      method: "POST",
+      body: JSON.stringify({ target_parent_id: targetParentId, position }),
+    });
+  },
   cascadeDeletePreview(nodeId: string) {
     return request<StructureNodeDeletePreview>(`/structure/nodes/${encodeURIComponent(nodeId)}/cascade-preview`);
   },

@@ -239,6 +239,63 @@ class MetadataValidationTests(unittest.TestCase):
 
         self.assertEqual(preview.backlinks, [])
 
+    def test_move_structure_node_reorders_within_same_parent(self) -> None:
+        from app.models import CreateStructureNodeRequest
+
+        self.service.create_structure_node(CreateStructureNodeRequest(title="Act 1", entry_type="act"))
+        self.service.create_structure_node(CreateStructureNodeRequest(title="Act 2", entry_type="act"))
+        structure = self.service.read_structure()
+        acts = [child for child in structure.root.children if child.type == "act"]
+        act_1, act_2 = acts[0], acts[1]
+
+        self.service.move_structure_node(act_2.id, structure.root.id, 0)
+        refreshed = self.service.read_structure()
+        reordered = [child for child in refreshed.root.children if child.type == "act"]
+        self.assertEqual([n.id for n in reordered], [act_2.id, act_1.id])
+
+    def test_move_structure_node_reparents_into_container(self) -> None:
+        from app.models import CreateStructureNodeRequest
+
+        self.service.create_structure_node(CreateStructureNodeRequest(title="Act 1", entry_type="act"))
+        self.service.create_structure_node(CreateStructureNodeRequest(title="Act 2", entry_type="act"))
+        structure = self.service.read_structure()
+        acts = [child for child in structure.root.children if child.type == "act"]
+        act_1, act_2 = acts[0], acts[1]
+        chapter_doc = self.service.create_structure_node(
+            CreateStructureNodeRequest(title="Chapter 1", entry_type="chapter", parent_id=act_1.id)
+        )
+        refreshed_act_1 = next(child for child in chapter_doc.root.children if child.id == act_1.id)
+        chapter_node = refreshed_act_1.children[0]
+
+        self.service.move_structure_node(chapter_node.id, act_2.id, 0)
+
+        final = self.service.read_structure()
+        final_act_1 = next(child for child in final.root.children if child.id == act_1.id)
+        final_act_2 = next(child for child in final.root.children if child.id == act_2.id)
+        self.assertEqual(len(final_act_1.children), 0)
+        self.assertEqual([c.id for c in final_act_2.children], [chapter_node.id])
+
+    def test_move_structure_node_rejects_self_into_descendant(self) -> None:
+        from app.models import CreateStructureNodeRequest
+
+        self.service.create_structure_node(CreateStructureNodeRequest(title="Act 1", entry_type="act"))
+        structure = self.service.read_structure()
+        act = next(child for child in structure.root.children if child.type == "act")
+        chapter_doc = self.service.create_structure_node(
+            CreateStructureNodeRequest(title="Chapter 1", entry_type="chapter", parent_id=act.id)
+        )
+        refreshed_act = next(child for child in chapter_doc.root.children if child.id == act.id)
+        chapter = refreshed_act.children[0]
+
+        with self.assertRaises(ProjectServiceError) as ctx:
+            self.service.move_structure_node(act.id, chapter.id, 0)
+        self.assertEqual(ctx.exception.status_code, 422)
+
+    def test_move_structure_node_rejects_root(self) -> None:
+        with self.assertRaises(ProjectServiceError) as ctx:
+            self.service.move_structure_node("root", "root", 0)
+        self.assertEqual(ctx.exception.status_code, 422)
+
     def test_delete_structure_node_rejects_root(self) -> None:
         with self.assertRaises(ProjectServiceError) as ctx:
             self.service.delete_structure_node("root")

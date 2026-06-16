@@ -859,6 +859,48 @@ h3 {
   background: #fbeeee;
 }
 
+.tree-handle {
+  visibility: hidden;
+  display: inline-block;
+  padding: 0 4px;
+  color: #8a948f;
+  cursor: grab;
+  user-select: none;
+  font-weight: 700;
+  letter-spacing: -2px;
+}
+
+.tree-row:hover .tree-handle {
+  visibility: visible;
+}
+
+.tree-handle:active {
+  cursor: grabbing;
+}
+
+.tree-row.dragging {
+  opacity: 0.45;
+}
+
+.tree-row.drop-before {
+  border-top: 2px solid #2f6f5e;
+  margin-top: 0;
+  padding-top: 0;
+}
+
+.tree-row.drop-after {
+  border-bottom: 2px solid #2f6f5e;
+  margin-bottom: 0;
+  padding-bottom: 0;
+}
+
+.tree-row.drop-into {
+  background: #d9ecdf;
+  outline: 2px solid #2f6f5e;
+  outline-offset: -2px;
+  border-radius: 4px;
+}
+
 .tree-menu-anchor {
   position: relative;
 }

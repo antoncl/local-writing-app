@@ -1551,6 +1551,52 @@ class ProjectService:
             return True
         return any(self._remove_structure_node_by_id(child, node_id) for child in node.children)
 
+    def move_structure_node(self, node_id: str, target_parent_id: str, position: int) -> StructureDocument:
+        root_path = self._require_project()
+        structure = self.read_structure()
+
+        node = self._find_structure_node(structure.root, node_id)
+        if node is None:
+            raise ProjectServiceError(f"Structure node {node_id} does not exist.", 404)
+        if node.type == "root":
+            raise ProjectServiceError("Cannot move the root node.", 422)
+
+        target_parent = self._find_structure_node(structure.root, target_parent_id)
+        if target_parent is None:
+            raise ProjectServiceError(f"Target parent {target_parent_id} does not exist.", 404)
+
+        if self._contains_node(node, target_parent_id):
+            raise ProjectServiceError("Cannot move a node into itself or its descendants.", 422)
+
+        removed = self._extract_structure_node(structure.root, node_id)
+        if removed is None:
+            raise ProjectServiceError(f"Could not detach {node_id} from its current parent.", 500)
+
+        target_parent = self._find_structure_node(structure.root, target_parent_id)
+        if target_parent is None:
+            raise ProjectServiceError("Target parent disappeared after detach.", 500)
+
+        insert_at = max(0, min(position, len(target_parent.children)))
+        target_parent.children.insert(insert_at, removed)
+
+        self._write_yaml(root_path / "manuscript.structure.yaml", structure.model_dump())
+        return self.read_structure()
+
+    def _contains_node(self, root: StructureNode, target_id: str) -> bool:
+        if root.id == target_id:
+            return True
+        return any(self._contains_node(child, target_id) for child in root.children)
+
+    def _extract_structure_node(self, parent: StructureNode, node_id: str) -> StructureNode | None:
+        for i, child in enumerate(parent.children):
+            if child.id == node_id:
+                return parent.children.pop(i)
+        for child in parent.children:
+            found = self._extract_structure_node(child, node_id)
+            if found is not None:
+                return found
+        return None
+
     def rename_structure_node(self, node_id: str, title: str) -> StructureDocument:
         root = self._require_project()
         structure = self.read_structure()

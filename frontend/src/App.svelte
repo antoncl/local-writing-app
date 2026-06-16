@@ -103,6 +103,9 @@
   let addMenuOpenFor: string | null = null;
   let editingNodeId: string | null = null;
   let editingTitle = "";
+  let draggedNodeId: string | null = null;
+  let dragOverNodeId: string | null = null;
+  let dragOverPosition: "before" | "after" | "into" | null = null;
   let todos: TodoItem[] = [];
   let validation: ProjectValidation | null = null;
   let metadataSchema: MetadataSchema | null = null;
@@ -1171,6 +1174,85 @@
       event.preventDefault();
       startRename(node.id, node.title);
     }
+  }
+
+  function findParentAndIndex(
+    parent: StructureNode,
+    nodeId: string,
+  ): { parent: StructureNode; index: number } | null {
+    for (let i = 0; i < (parent.children?.length ?? 0); i++) {
+      if (parent.children[i].id === nodeId) return { parent, index: i };
+      const found = findParentAndIndex(parent.children[i], nodeId);
+      if (found) return found;
+    }
+    return null;
+  }
+
+  function handleTreeDragStart(event: DragEvent, node: StructureNode) {
+    draggedNodeId = node.id;
+    if (event.dataTransfer) {
+      event.dataTransfer.effectAllowed = "move";
+      event.dataTransfer.setData("text/plain", node.id);
+    }
+  }
+
+  function handleTreeDragEnd() {
+    draggedNodeId = null;
+    dragOverNodeId = null;
+    dragOverPosition = null;
+  }
+
+  function handleTreeDragOver(event: DragEvent, node: StructureNode) {
+    if (!draggedNodeId || draggedNodeId === node.id) return;
+    event.preventDefault();
+    if (event.dataTransfer) event.dataTransfer.dropEffect = "move";
+    const target = event.currentTarget;
+    if (!(target instanceof HTMLElement)) return;
+    const rect = target.getBoundingClientRect();
+    const ratio = (event.clientY - rect.top) / rect.height;
+    let position: "before" | "after" | "into";
+    const isContainer = !node.scene_id;
+    if (isContainer && ratio > 0.25 && ratio < 0.75) {
+      position = "into";
+    } else if (ratio < 0.5) {
+      position = "before";
+    } else {
+      position = "after";
+    }
+    if (dragOverNodeId !== node.id || dragOverPosition !== position) {
+      dragOverNodeId = node.id;
+      dragOverPosition = position;
+    }
+  }
+
+  async function handleTreeDrop(event: DragEvent, node: StructureNode) {
+    event.preventDefault();
+    const sourceId = draggedNodeId;
+    const position = dragOverPosition;
+    handleTreeDragEnd();
+    if (!sourceId || !position || !structure || sourceId === node.id) return;
+
+    let targetParentId: string;
+    let targetIndex: number;
+    if (position === "into") {
+      targetParentId = node.id;
+      const target = findStructureNodeById(structure.root, node.id);
+      targetIndex = target?.children?.length ?? 0;
+    } else {
+      const found = findParentAndIndex(structure.root, node.id);
+      if (!found) return;
+      targetParentId = found.parent.id;
+      targetIndex = found.index + (position === "after" ? 1 : 0);
+    }
+
+    const sourceFound = findParentAndIndex(structure.root, sourceId);
+    if (sourceFound && sourceFound.parent.id === targetParentId && sourceFound.index < targetIndex) {
+      targetIndex -= 1;
+    }
+
+    await run(async () => {
+      structure = await api.moveStructureNode(sourceId, targetParentId, targetIndex);
+    });
   }
 
   async function requestDeleteStructureNode(node: StructureNode) {
@@ -2396,7 +2478,27 @@
 </main>
 
 {#snippet renderTree(node: StructureNode, depth: number)}
-  <div class="tree-row" style={`padding-left: ${depth * 14}px`}>
+  <div
+    class="tree-row"
+    class:drop-before={dragOverNodeId === node.id && dragOverPosition === "before"}
+    class:drop-after={dragOverNodeId === node.id && dragOverPosition === "after"}
+    class:drop-into={dragOverNodeId === node.id && dragOverPosition === "into"}
+    class:dragging={draggedNodeId === node.id}
+    role="treeitem"
+    aria-label={node.title}
+    style={`padding-left: ${depth * 14}px`}
+    on:dragover={(event) => handleTreeDragOver(event, node)}
+    on:drop={(event) => handleTreeDrop(event, node)}
+  >
+    <span
+      class="tree-handle"
+      draggable="true"
+      role="button"
+      tabindex="-1"
+      aria-label="Drag to reorder"
+      on:dragstart={(event) => handleTreeDragStart(event, node)}
+      on:dragend={handleTreeDragEnd}
+    >⋮⋮</span>
     {#if editingNodeId === node.id}
       <input
         class="tree-title tree-rename-input"

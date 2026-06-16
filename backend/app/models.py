@@ -181,6 +181,11 @@ class RenameStructureNodeRequest(BaseModel):
     title: str = Field(min_length=1)
 
 
+class MoveStructureNodeRequest(BaseModel):
+    target_parent_id: str = Field(min_length=1)
+    position: int = Field(default=0, ge=0)
+
+
 class SaveSceneRequest(BaseModel):
     title: str = Field(min_length=1)
     body_markdown: str

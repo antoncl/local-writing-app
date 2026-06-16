@@ -13,6 +13,7 @@ from app.models import (
     CreateSceneRequest,
     CreateStructureNodeRequest,
     CreateTodoRequest,
+    MoveStructureNodeRequest,
     RenameStructureNodeRequest,
     DeleteMetadataEntryTypeRequest,
     DeleteMetadataFieldRequest,
@@ -130,6 +131,12 @@ def create_structure_node(request: CreateStructureNodeRequest) -> StructureDocum
 def rename_structure_node(node_id: str, request: RenameStructureNodeRequest) -> StructureDocument:
     with translate_errors():
         return service.rename_structure_node(node_id, request.title)
+
+
+@app.post("/api/structure/nodes/{node_id}/move", response_model=StructureDocument)
+def move_structure_node(node_id: str, request: MoveStructureNodeRequest) -> StructureDocument:
+    with translate_errors():
+        return service.move_structure_node(node_id, request.target_parent_id, request.position)
 
 
 @app.get("/api/structure/nodes/{node_id}/cascade-preview", response_model=StructureNodeDeletePreview)

@@ -64,11 +64,11 @@ class MetadataValidationTests(unittest.TestCase):
             self.assertIn("summary", schema.entry_types[type_id].fields)
 
     def test_builtin_entry_type_keeps_built_in_source_after_field_add(self) -> None:
-        custom_field = MetadataFieldDefinition(name="POV", type="text", options=[])
+        custom_field = MetadataFieldDefinition(name="Weather", type="text", options=[])
         self.service.upsert_metadata_field(
             UpsertMetadataFieldRequest(
                 layer_id=self.service._metadata_schema_layer_id(self.root),
-                field_id="pov",
+                field_id="weather",
                 field=custom_field,
                 entry_type="scene",
                 allow_existing=False,
@@ -80,7 +80,7 @@ class MetadataValidationTests(unittest.TestCase):
         self.assertTrue(overview.entry_type_sources["scene"].built_in)
         self.assertTrue(overview.entry_type_sources["chapter"].built_in)
         self.assertTrue(overview.entry_type_sources["act"].built_in)
-        self.assertFalse(overview.field_sources["pov"].built_in)
+        self.assertFalse(overview.field_sources["weather"].built_in)
 
     def test_summary_lives_on_parent_not_in_scene_own_fields(self) -> None:
         schema = self.service.read_metadata_schema()
@@ -636,11 +636,11 @@ class MetadataValidationTests(unittest.TestCase):
                     "scene": {
                         "name": "Base Scene",
                         "kind": "scene",
-                        "fields": ["status", "summary", "pov", "word_count"],
+                        "fields": ["status", "summary", "mood", "word_count"],
                     }
                 },
                 "fields": {
-                    "pov": {"name": "Point of View", "type": "text"},
+                    "mood": {"name": "Mood", "type": "text"},
                 },
             },
         )
@@ -652,7 +652,7 @@ class MetadataValidationTests(unittest.TestCase):
                     "scene": {
                         "name": "World Scene",
                         "kind": "scene",
-                        "fields": ["status", "summary", "pov", "tension", "word_count"],
+                        "fields": ["status", "summary", "mood", "tension", "word_count"],
                     }
                 },
                 "fields": {
@@ -664,9 +664,12 @@ class MetadataValidationTests(unittest.TestCase):
         schema = self.service.read_metadata_schema()
 
         self.assertEqual(schema.entry_types["scene"].name, "World Scene")
-        self.assertIn("pov", schema.fields)
+        self.assertIn("mood", schema.fields)
         self.assertIn("tension", schema.fields)
-        self.assertEqual(schema.entry_types["scene"].fields, ["number", "summary", "status", "characters", "locations", "word_count", "pov", "tension"])
+        self.assertEqual(
+            schema.entry_types["scene"].fields,
+            ["number", "summary", "status", "pov", "characters", "locations", "word_count", "mood", "tension"],
+        )
 
         scene = self.service.read_scene(self.scene_id)
         saved = self.service.save_scene(
@@ -677,11 +680,11 @@ class MetadataValidationTests(unittest.TestCase):
                 base_revision=scene.revision,
                 status="draft",
                 entry_type="scene",
-                metadata={"pov": "Seren", "tension": 3},
+                metadata={"mood": "tense", "tension": 3},
             ),
         )
 
-        self.assertEqual(saved.metadata["pov"], "Seren")
+        self.assertEqual(saved.metadata["mood"], "tense")
         self.assertEqual(saved.metadata["tension"], 3)
 
     def test_validation_warns_when_base_folder_is_not_an_ancestor(self) -> None:
@@ -726,13 +729,13 @@ class MetadataValidationTests(unittest.TestCase):
             {
                 "version": 1,
                 "fields": {
-                    "pov": {"name": "Point of View", "type": "text"},
+                    "mood": {"name": "Mood", "type": "text"},
                 },
                 "entry_types": {
                     "scene": {
                         "name": "World Scene",
                         "kind": "scene",
-                        "fields": ["status", "summary", "pov", "word_count"],
+                        "fields": ["status", "summary", "mood", "word_count"],
                     }
                 },
             },
@@ -743,7 +746,7 @@ class MetadataValidationTests(unittest.TestCase):
         self.assertTrue(overview.field_sources["status"].built_in)
         self.assertTrue(overview.field_sources["summary"].built_in)
         self.assertTrue(overview.field_sources["word_count"].built_in)
-        self.assertEqual(overview.field_sources["pov"].layer_label, "series")
+        self.assertEqual(overview.field_sources["mood"].layer_label, "series")
         self.assertEqual(overview.entry_type_sources["scene"].layer_label, "series")
 
     def test_upsert_metadata_field_writes_selected_layer(self) -> None:

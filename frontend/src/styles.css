@@ -1775,3 +1775,122 @@ h3 {
     cursor: default;
   }
 }
+
+.ai-settings {
+  display: grid;
+  gap: 10px;
+  margin-top: 16px;
+  padding-top: 14px;
+  border-top: 1px solid #d8dfdd;
+}
+
+.ai-settings h3 {
+  margin: 0;
+  font-size: 13px;
+  font-weight: 600;
+  color: #2a3431;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.ai-policy {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 14px;
+  border: 1px solid #cbd6d2;
+  border-radius: 6px;
+  padding: 8px 10px;
+}
+
+.ai-policy legend {
+  font-size: 12px;
+  color: #4d5753;
+  padding: 0 4px;
+}
+
+.ai-policy label {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 13px;
+}
+
+.ai-health-result {
+  margin: 0;
+  padding: 8px 10px;
+  border-radius: 4px;
+  font-size: 13px;
+  line-height: 1.4;
+}
+
+.ai-health-result.ok {
+  background: #e3f1ea;
+  color: #1d4d36;
+  border: 1px solid #b0d6c1;
+}
+
+.ai-health-result.fail {
+  background: #fbe6e2;
+  color: #6b1f16;
+  border: 1px solid #e3b3a9;
+}
+
+.machine-settings-modal {
+  width: min(540px, calc(100vw - 48px));
+}
+
+.machine-settings-modal code {
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 12px;
+  background: #f1f4f3;
+  padding: 1px 5px;
+  border-radius: 3px;
+}
+
+.machine-settings-modal label {
+  display: grid;
+  gap: 4px;
+  font-size: 13px;
+}
+
+.machine-settings-modal input,
+.machine-settings-modal select {
+  font-size: 13px;
+  padding: 6px 8px;
+  border: 1px solid #cbd6d2;
+  border-radius: 4px;
+}
+
+.default-models {
+  display: grid;
+  gap: 6px;
+  border: 1px solid #cbd6d2;
+  border-radius: 6px;
+  padding: 8px 10px;
+}
+
+.default-models legend {
+  font-size: 12px;
+  color: #4d5753;
+  padding: 0 4px;
+}
+
+.default-models .row {
+  display: grid;
+  grid-template-columns: 110px 1fr;
+  align-items: center;
+  gap: 8px;
+}
+
+.default-models .row span {
+  font-size: 13px;
+  color: #4d5753;
+  text-transform: capitalize;
+}
+
+.migration-applied {
+  color: #1d4d36;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 12px;
+}
+

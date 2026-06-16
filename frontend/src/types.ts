@@ -135,12 +135,48 @@ export type ProjectValidation = {
   valid: boolean;
   warnings: string[];
   errors: string[];
+  migrations_applied: string[];
 };
+
+export type AIPolicy = "off" | "local-only" | "cloud-allowed";
 
 export type ProjectInfo = {
   title: string;
   root_path: string;
   projects_base_folder?: string | null;
+  ai_policy: AIPolicy;
+  ai_default_provider?: string | null;
+  ai_default_model_class?: string | null;
+};
+
+export type ProviderCredentialsView = {
+  anthropic_api_key: string;
+  openai_api_key: string;
+  openrouter_api_key: string;
+  ollama_host: string;
+};
+
+export type MachineSettingsView = {
+  version: number;
+  providers: ProviderCredentialsView;
+  default_provider: string;
+  default_models: Record<string, string>;
+  config_path: string;
+};
+
+export type MachineSettingsUpdate = {
+  providers?: Partial<ProviderCredentialsView>;
+  default_provider?: string;
+  default_models?: Record<string, string>;
+};
+
+export type AIHealthResponse = {
+  provider: string;
+  model: string;
+  ok: boolean;
+  latency_ms: number;
+  policy: AIPolicy;
+  error?: string | null;
 };
 
 export type DirectoryEntry = {

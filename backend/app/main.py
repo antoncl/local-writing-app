@@ -7,12 +7,16 @@ from fastapi import FastAPI, HTTPException, Query
 from fastapi.middleware.cors import CORSMiddleware
 
 from app.models import (
+    AIHealthRequest,
+    AIHealthResponse,
     BacklinksResponse,
     CreateLoreEntryRequest,
     CreateProjectRequest,
     CreateSceneRequest,
     CreateStructureNodeRequest,
     CreateTodoRequest,
+    MachineSettingsUpdate,
+    MachineSettingsView,
     MoveStructureNodeRequest,
     RenameStructureNodeRequest,
     DeleteMetadataEntryTypeRequest,
@@ -45,6 +49,8 @@ from app.models import (
     UpdateProjectSettingsRequest,
     UpdateTodoRequest,
 )
+from app.services import machine_settings as machine_settings_service
+from app.services.ai import providers as ai_providers
 from app.services.project_service import ProjectService, ProjectServiceError
 
 
@@ -315,3 +321,56 @@ def list_backlinks(id: str = Query()) -> BacklinksResponse:
 def search(request: SearchRequest) -> SearchResponse:
     with translate_errors():
         return service.search(request)
+
+
+# --- Machine settings (AI provider config; never travels with the project) ---
+
+
+@app.get("/api/settings/machine", response_model=MachineSettingsView)
+def get_machine_settings() -> MachineSettingsView:
+    current = machine_settings_service.load_settings()
+    masked = machine_settings_service.mask_credentials(current)
+    return MachineSettingsView(
+        version=masked["version"],
+        providers=masked["providers"],
+        default_provider=masked["default_provider"],
+        default_models=masked["default_models"],
+        config_path=str(machine_settings_service.config_path()),
+    )
+
+
+@app.put("/api/settings/machine", response_model=MachineSettingsView)
+def update_machine_settings(request: MachineSettingsUpdate) -> MachineSettingsView:
+    current = machine_settings_service.load_settings()
+    patch = request.model_dump(exclude_unset=True)
+    updated = machine_settings_service.merge_update(current, patch)
+    machine_settings_service.save_settings(updated)
+    masked = machine_settings_service.mask_credentials(updated)
+    return MachineSettingsView(
+        version=masked["version"],
+        providers=masked["providers"],
+        default_provider=masked["default_provider"],
+        default_models=masked["default_models"],
+        config_path=str(machine_settings_service.config_path()),
+    )
+
+
+# --- AI: health check ---
+
+
+@app.post("/api/ai/health", response_model=AIHealthResponse)
+def ai_health(request: AIHealthRequest) -> AIHealthResponse:
+    settings = machine_settings_service.load_settings()
+    provider_name = request.provider or settings.default_provider
+    model = request.model or settings.default_models.get(provider_name, "")
+    try:
+        project_info = service.current_project()
+        policy = project_info.ai_policy
+    except ProjectServiceError:
+        policy = "off"
+    return ai_providers.health_check(
+        provider_name=provider_name,
+        model=model,
+        settings=settings,
+        policy=policy,
+    )

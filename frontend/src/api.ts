@@ -1,10 +1,14 @@
 import type {
+  AIHealthResponse,
+  AIPolicy,
   BacklinksResponse,
   DirectoryListing,
   EntryTypeDefinition,
   KnownTags,
   LoreEntry,
   LoreEntryList,
+  MachineSettingsUpdate,
+  MachineSettingsView,
   MetadataFieldDefinition,
   MetadataSchema,
   MetadataSchemaLayers,
@@ -50,10 +54,30 @@ export const api = {
       body: JSON.stringify({ root_path: rootPath, projects_base_folder: projectsBaseFolder }),
     });
   },
-  updateProjectSettings(projectsBaseFolder: string) {
+  updateProjectSettings(updates: {
+    projects_base_folder?: string;
+    ai_policy?: AIPolicy;
+    ai_default_provider?: string | null;
+    ai_default_model_class?: string | null;
+  }) {
     return request<ProjectInfo>("/project/settings", {
       method: "PATCH",
-      body: JSON.stringify({ projects_base_folder: projectsBaseFolder }),
+      body: JSON.stringify(updates),
+    });
+  },
+  getMachineSettings() {
+    return request<MachineSettingsView>("/settings/machine");
+  },
+  updateMachineSettings(update: MachineSettingsUpdate) {
+    return request<MachineSettingsView>("/settings/machine", {
+      method: "PUT",
+      body: JSON.stringify(update),
+    });
+  },
+  aiHealth(provider?: string, model?: string) {
+    return request<AIHealthResponse>("/ai/health", {
+      method: "POST",
+      body: JSON.stringify({ provider: provider ?? null, model: model ?? null }),
     });
   },
   getStructure() {

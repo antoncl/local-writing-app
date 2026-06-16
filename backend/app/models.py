@@ -16,20 +16,30 @@ class OpenProjectRequest(BaseModel):
     projects_base_folder: str = Field(min_length=1)
 
 
+AIPolicy = Literal["off", "local-only", "cloud-allowed"]
+
+
 class ProjectInfo(BaseModel):
     title: str
     root_path: str
     projects_base_folder: str | None = None
+    ai_policy: AIPolicy = "off"
+    ai_default_provider: str | None = None
+    ai_default_model_class: str | None = None
 
 
 class UpdateProjectSettingsRequest(BaseModel):
     projects_base_folder: str | None = None
+    ai_policy: AIPolicy | None = None
+    ai_default_provider: str | None = None
+    ai_default_model_class: str | None = None
 
 
 class ProjectValidation(BaseModel):
     valid: bool
     warnings: list[str] = Field(default_factory=list)
     errors: list[str] = Field(default_factory=list)
+    migrations_applied: list[str] = Field(default_factory=list)
 
 
 class DirectoryEntry(BaseModel):
@@ -327,6 +337,51 @@ class SearchHit(BaseModel):
 class SearchResponse(BaseModel):
     query: str
     hits: list[SearchHit] = Field(default_factory=list)
+
+
+# --- AI / machine settings ---
+
+
+class ProviderCredentialsView(BaseModel):
+    anthropic_api_key: str = ""
+    openai_api_key: str = ""
+    openrouter_api_key: str = ""
+    ollama_host: str = ""
+
+
+class MachineSettingsView(BaseModel):
+    version: int
+    providers: ProviderCredentialsView
+    default_provider: str
+    default_models: dict[str, str]
+    config_path: str
+
+
+class ProviderCredentialsPatch(BaseModel):
+    anthropic_api_key: str | None = None
+    openai_api_key: str | None = None
+    openrouter_api_key: str | None = None
+    ollama_host: str | None = None
+
+
+class MachineSettingsUpdate(BaseModel):
+    providers: ProviderCredentialsPatch | None = None
+    default_provider: str | None = None
+    default_models: dict[str, str] | None = None
+
+
+class AIHealthRequest(BaseModel):
+    provider: str | None = None
+    model: str | None = None
+
+
+class AIHealthResponse(BaseModel):
+    provider: str
+    model: str
+    ok: bool
+    latency_ms: int
+    policy: AIPolicy
+    error: str | None = None
 
 
 StructureNode.model_rebuild()

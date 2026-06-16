@@ -57,6 +57,7 @@ from app.models import (
     UpdateTodoRequest,
 )
 from app.services.markdown_validation import validate_scene_markdown
+from app.services.migrations import CURRENT_VERSION as PROJECT_SCHEMA_VERSION, migrate_project
 
 TODO_ANCHOR_PATTERN = re.compile(
     r"<!--\s*todo-anchor:id=([A-Za-z0-9_-]+)\s*-->([\s\S]*?)<!--\s*/todo-anchor\s*-->",
@@ -110,7 +111,7 @@ DEFAULT_METADATA_SCHEMA: dict[str, Any] = {
             "name": "Scene",
             "kind": "scene",
             "parent": "manuscript_structure",
-            "fields": ["status", "characters", "locations", "word_count"],
+            "fields": ["status", "pov", "characters", "locations", "word_count"],
             "has_body": True,
         },
         "lore_entry": {
@@ -143,6 +144,19 @@ DEFAULT_METADATA_SCHEMA: dict[str, Any] = {
             "parent": "lore_entry",
             "fields": [],
         },
+        "snippet": {
+            "name": "Snippet",
+            "kind": "snippet",
+            "fields": ["tags"],
+            "has_body": True,
+        },
+        "prompt": {
+            "name": "Prompt",
+            "kind": "prompt",
+            "abstract": True,
+            "fields": ["tags"],
+            "has_body": True,
+        },
     },
     "fields": {
         "status": {
@@ -156,6 +170,11 @@ DEFAULT_METADATA_SCHEMA: dict[str, Any] = {
         "characters": {
             "name": "Characters",
             "type": "entity_ref_list",
+            "target": {"entry_type": "character"},
+        },
+        "pov": {
+            "name": "POV",
+            "type": "entity_ref",
             "target": {"entry_type": "character"},
         },
         "locations": {
@@ -203,14 +222,16 @@ class ProjectService:
     def __init__(self) -> None:
         self.root_path: Path | None = None
         self.title: str | None = None
+        self.last_migrations: list[str] = []
 
     def create_project(self, root_path: Path, title: str, projects_base_folder: Path | None = None) -> ProjectInfo:
+        self.last_migrations = []
         root = root_path.expanduser().resolve()
         if projects_base_folder is None:
             root.parent.mkdir(parents=True, exist_ok=True)
         base_folder = self._validate_projects_base_folder(projects_base_folder or root.parent, root)
         root.mkdir(parents=True, exist_ok=True)
-        for folder in ["scenes", "lore", "prompts", ".cache"]:
+        for folder in ["scenes", "lore", "prompts", "snippets", ".cache"]:
             (root / folder).mkdir(exist_ok=True)
 
         self._write_yaml(root / "project.yaml", self._new_project_manifest(title, root, base_folder))
@@ -253,9 +274,15 @@ class ProjectService:
         return {
             "title": title,
             "version": 1,
+            "schema_version": PROJECT_SCHEMA_VERSION,
             "settings": {
                 "projects_base_folder": str(base_folder),
                 "theme": "system",
+                "ai": {
+                    "policy": "off",
+                    "default_provider": None,
+                    "default_model_class": None,
+                },
             },
             "manuscript_structure": {
                 "container_types": [
@@ -272,6 +299,10 @@ class ProjectService:
         root = root_path.expanduser().resolve()
         if not (root / "project.yaml").exists():
             raise ProjectServiceError("No project.yaml found in that folder.", 404)
+        try:
+            self.last_migrations = migrate_project(root)
+        except Exception as exc:  # noqa: BLE001
+            raise ProjectServiceError(f"Project migration failed: {exc}", 500) from exc
         manifest = self._read_yaml(root / "project.yaml")
         if projects_base_folder is not None:
             base_folder = self._validate_projects_base_folder(projects_base_folder, root)
@@ -287,10 +318,14 @@ class ProjectService:
 
     def current_project(self) -> ProjectInfo:
         root = self._require_project()
+        ai = self._read_ai_settings(root)
         return ProjectInfo(
             title=self.title or root.name,
             root_path=str(root),
             projects_base_folder=str(self._metadata_schema_base_folder(root) or root.parent),
+            ai_policy=ai.get("policy", "off"),
+            ai_default_provider=ai.get("default_provider"),
+            ai_default_model_class=ai.get("default_model_class"),
         )
 
     def update_project_settings(self, request: UpdateProjectSettingsRequest) -> ProjectInfo:
@@ -304,9 +339,31 @@ class ProjectService:
                 raise ProjectServiceError("Projects base folder is required.", 400)
             base_folder = self._validate_projects_base_folder(Path(request.projects_base_folder), root)
             settings["projects_base_folder"] = str(base_folder)
+        ai_settings = settings.get("ai")
+        if not isinstance(ai_settings, dict):
+            ai_settings = {}
+        if request.ai_policy is not None:
+            ai_settings["policy"] = request.ai_policy
+        if request.ai_default_provider is not None:
+            ai_settings["default_provider"] = request.ai_default_provider or None
+        if request.ai_default_model_class is not None:
+            ai_settings["default_model_class"] = request.ai_default_model_class or None
+        if ai_settings:
+            settings["ai"] = ai_settings
         manifest["settings"] = settings
         self._write_yaml(root / "project.yaml", manifest)
         return self.current_project()
+
+    def _read_ai_settings(self, root: Path) -> dict[str, Any]:
+        try:
+            manifest = self._read_yaml(root / "project.yaml")
+        except Exception:
+            return {}
+        settings = manifest.get("settings")
+        if not isinstance(settings, dict):
+            return {}
+        ai = settings.get("ai")
+        return ai if isinstance(ai, dict) else {}
 
     def _validate_projects_base_folder(self, base_folder_path: Path, project_root: Path) -> Path:
         base_folder = base_folder_path.expanduser().resolve()
@@ -436,7 +493,12 @@ class ProjectService:
                 if count > 1:
                     errors.append(f"Scene {scene_id} contains duplicate TODO anchor {anchor_id}.")
 
-        return ProjectValidation(valid=not errors, warnings=warnings, errors=errors)
+        return ProjectValidation(
+            valid=not errors,
+            warnings=warnings,
+            errors=errors,
+            migrations_applied=list(self.last_migrations),
+        )
 
     def repair_project(self) -> ProjectValidation:
         root = self._require_project()

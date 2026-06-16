@@ -3,12 +3,16 @@
   import { api } from "./api";
   import DocumentEditorPane from "./DocumentEditorPane.svelte";
   import type {
+    AIHealthResponse,
+    AIPolicy,
     Backlink,
     DirectoryListing,
     EditableDocument,
     EntryMetadata,
     EntryTypeDefinition,
     LoreEntrySummary,
+    MachineSettingsUpdate,
+    MachineSettingsView,
     MetadataFieldDefinition,
     MetadataFieldType,
     MetadataSchema,
@@ -90,6 +94,24 @@
   let directoryPickerOpen = false;
   let directoryListing: DirectoryListing | null = null;
   let directoryPickerLoading = false;
+
+  let aiPolicy: AIPolicy = "off";
+  let aiDefaultProvider = "";
+  let aiDefaultModelClass = "";
+  let aiHealthResult: AIHealthResponse | null = null;
+  let aiHealthChecking = false;
+
+  let machineSettings: MachineSettingsView | null = null;
+  let machineSettingsOpen = false;
+  type MachineSettingsDraft = {
+    anthropic_api_key: string;
+    openai_api_key: string;
+    openrouter_api_key: string;
+    ollama_host: string;
+    default_provider: string;
+    default_models: Record<string, string>;
+  };
+  let machineSettingsDraft: MachineSettingsDraft | null = null;
   let appState: AppState = { name: "needsProject" };
   $: project = appState.name === "projectOpen" ? appState.project : null;
   $: isProjectOpen = appState.name === "projectOpen";
@@ -274,6 +296,10 @@
     projectPath = nextProject.root_path;
     projectTitle = nextProject.title;
     projectsBaseFolder = nextProject.projects_base_folder ?? "";
+    aiPolicy = nextProject.ai_policy;
+    aiDefaultProvider = nextProject.ai_default_provider ?? "";
+    aiDefaultModelClass = nextProject.ai_default_model_class ?? "";
+    aiHealthResult = null;
     appState = { name: "projectOpen", project: nextProject };
     fitPanesToViewport();
     focusPane("outline");
@@ -527,12 +553,76 @@
   async function updateProjectSettings() {
     if (!isProjectOpen) return;
     await run(async () => {
-      const updatedProject = await api.updateProjectSettings(projectsBaseFolder);
+      const updatedProject = await api.updateProjectSettings({ projects_base_folder: projectsBaseFolder });
       appState = { name: "projectOpen", project: updatedProject };
       projectsBaseFolder = updatedProject.projects_base_folder ?? "";
+      aiPolicy = updatedProject.ai_policy;
+      aiDefaultProvider = updatedProject.ai_default_provider ?? "";
+      aiDefaultModelClass = updatedProject.ai_default_model_class ?? "";
       await refreshMetadataSchema();
       validation = await api.validateProject();
       status = "Updated project settings";
+    });
+  }
+
+  async function updateProjectAISettings() {
+    if (!isProjectOpen) return;
+    await run(async () => {
+      const updatedProject = await api.updateProjectSettings({
+        ai_policy: aiPolicy,
+        ai_default_provider: aiDefaultProvider || null,
+        ai_default_model_class: aiDefaultModelClass || null,
+      });
+      appState = { name: "projectOpen", project: updatedProject };
+      aiPolicy = updatedProject.ai_policy;
+      aiDefaultProvider = updatedProject.ai_default_provider ?? "";
+      aiDefaultModelClass = updatedProject.ai_default_model_class ?? "";
+      status = "Updated AI settings";
+    });
+  }
+
+  async function openMachineSettings() {
+    await run(async () => {
+      machineSettings = await api.getMachineSettings();
+      machineSettingsDraft = {
+        anthropic_api_key: machineSettings.providers.anthropic_api_key,
+        openai_api_key: machineSettings.providers.openai_api_key,
+        openrouter_api_key: machineSettings.providers.openrouter_api_key,
+        ollama_host: machineSettings.providers.ollama_host,
+        default_provider: machineSettings.default_provider,
+        default_models: { ...machineSettings.default_models },
+      };
+      machineSettingsOpen = true;
+    });
+  }
+
+  async function saveMachineSettings() {
+    if (!machineSettings || !machineSettingsDraft) return;
+    await run(async () => {
+      const update: MachineSettingsUpdate = {
+        providers: {
+          anthropic_api_key: machineSettingsDraft!.anthropic_api_key,
+          openai_api_key: machineSettingsDraft!.openai_api_key,
+          openrouter_api_key: machineSettingsDraft!.openrouter_api_key,
+          ollama_host: machineSettingsDraft!.ollama_host,
+        },
+        default_provider: machineSettingsDraft!.default_provider,
+        default_models: machineSettingsDraft!.default_models,
+      };
+      machineSettings = await api.updateMachineSettings(update);
+      machineSettingsOpen = false;
+      status = "Saved machine settings";
+    });
+  }
+
+  async function runAIHealthCheck() {
+    await run(async () => {
+      aiHealthChecking = true;
+      try {
+        aiHealthResult = await api.aiHealth(aiDefaultProvider || undefined);
+      } finally {
+        aiHealthChecking = false;
+      }
     });
   }
 
@@ -2084,9 +2174,64 @@
           <button type="button" on:click={updateProjectSettings}>Apply Base Folder</button>
         </div>
       {/if}
+
+      <section class="ai-settings" aria-label="AI settings">
+        <h3>AI</h3>
+        <div class="button-row">
+          <button type="button" on:click={openMachineSettings}>Machine Settings…</button>
+        </div>
+        {#if isProjectOpen}
+          <fieldset class="ai-policy">
+            <legend>Project policy</legend>
+            <label><input type="radio" bind:group={aiPolicy} value="off" /> Off</label>
+            <label><input type="radio" bind:group={aiPolicy} value="local-only" /> Local only</label>
+            <label><input type="radio" bind:group={aiPolicy} value="cloud-allowed" /> Cloud allowed</label>
+          </fieldset>
+          <label>
+            Default provider
+            <select bind:value={aiDefaultProvider}>
+              <option value="">(machine default)</option>
+              <option value="anthropic">Anthropic</option>
+              <option value="openai">OpenAI</option>
+              <option value="openrouter">OpenRouter</option>
+              <option value="ollama">Ollama (local)</option>
+            </select>
+          </label>
+          <label>
+            Default model class
+            <select bind:value={aiDefaultModelClass}>
+              <option value="">(unset)</option>
+              <option value="cheap">cheap</option>
+              <option value="balanced">balanced</option>
+              <option value="best">best</option>
+            </select>
+          </label>
+          <div class="button-row">
+            <button type="button" on:click={updateProjectAISettings}>Save AI Settings</button>
+            <button type="button" disabled={aiHealthChecking || aiPolicy === "off"} on:click={runAIHealthCheck}>
+              {aiHealthChecking ? "Pinging…" : "Health Check"}
+            </button>
+          </div>
+          {#if aiHealthResult}
+            <p class="ai-health-result" class:ok={aiHealthResult.ok} class:fail={!aiHealthResult.ok}>
+              {#if aiHealthResult.ok}
+                ✓ {aiHealthResult.provider} · {aiHealthResult.model} · {aiHealthResult.latency_ms} ms
+              {:else}
+                ✗ {aiHealthResult.provider || "(no provider)"} — {aiHealthResult.error}
+              {/if}
+            </p>
+          {/if}
+        {/if}
+      </section>
       {#if validation}
         <section class:invalid={!validation.valid} class="validation-panel" aria-label="Project validation result">
           <h3>{validation.valid ? "Project Looks Consistent" : "Project Issues Found"}</h3>
+          {#if validation.migrations_applied.length > 0}
+            <strong>Migrations Applied</strong>
+            {#each validation.migrations_applied as migration}
+              <p class="migration-applied">{migration}</p>
+            {/each}
+          {/if}
           {#if validation.errors.length > 0}
             <strong>Errors</strong>
             {#each validation.errors as validationError}
@@ -2617,6 +2762,60 @@
           >
             {confirmation.confirmLabel}
           </button>
+        </div>
+      </div>
+    </section>
+  {/if}
+
+  {#if machineSettingsOpen && machineSettingsDraft}
+    <section class="modal-backdrop" aria-label="Machine settings">
+      <div class="confirm-modal machine-settings-modal" role="dialog" aria-modal="true" aria-labelledby="machine-settings-title">
+        <header class="confirm-modal-header">
+          <h2 id="machine-settings-title">Machine Settings</h2>
+        </header>
+        <p class="muted">Stored locally at: <code>{machineSettings?.config_path}</code></p>
+        <p class="muted">API keys are masked on read. Leaving a masked field unchanged keeps the existing value.</p>
+
+        <label>
+          Anthropic API key
+          <input type="password" autocomplete="off" bind:value={machineSettingsDraft.anthropic_api_key} placeholder="sk-ant-…" />
+        </label>
+        <label>
+          OpenAI API key
+          <input type="password" autocomplete="off" bind:value={machineSettingsDraft.openai_api_key} placeholder="sk-…" />
+        </label>
+        <label>
+          OpenRouter API key
+          <input type="password" autocomplete="off" bind:value={machineSettingsDraft.openrouter_api_key} placeholder="sk-or-…" />
+        </label>
+        <label>
+          Ollama host
+          <input type="text" bind:value={machineSettingsDraft.ollama_host} placeholder="http://127.0.0.1:11434" />
+        </label>
+
+        <label>
+          Default provider
+          <select bind:value={machineSettingsDraft.default_provider}>
+            <option value="anthropic">Anthropic</option>
+            <option value="openai">OpenAI</option>
+            <option value="openrouter">OpenRouter</option>
+            <option value="ollama">Ollama (local)</option>
+          </select>
+        </label>
+
+        <fieldset class="default-models">
+          <legend>Default model per provider</legend>
+          {#each ["anthropic", "openai", "openrouter", "ollama"] as providerName}
+            <label class="row">
+              <span>{providerName}</span>
+              <input type="text" bind:value={machineSettingsDraft.default_models[providerName]} />
+            </label>
+          {/each}
+        </fieldset>
+
+        <div class="confirm-modal-actions">
+          <button type="button" on:click={() => (machineSettingsOpen = false)}>Cancel</button>
+          <button class="primary" type="button" on:click={saveMachineSettings}>Save</button>
         </div>
       </div>
     </section>

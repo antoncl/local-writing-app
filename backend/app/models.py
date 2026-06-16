@@ -291,6 +291,15 @@ class BacklinksResponse(BaseModel):
     backlinks: list[Backlink] = Field(default_factory=list)
 
 
+class StructureNodeDeletePreview(BaseModel):
+    target_id: str
+    target_title: str
+    target_type: str
+    descendant_scene_count: int = 0
+    descendant_container_count: int = 0
+    backlinks: list[Backlink] = Field(default_factory=list)
+
+
 class SearchRequest(BaseModel):
     query: str = ""
     include_scenes: bool = True

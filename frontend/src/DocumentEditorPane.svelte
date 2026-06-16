@@ -19,6 +19,7 @@
   export let metadataSchema: MetadataSchema | null = null;
   export let knownTags: string[] = [];
   export let metadataReload: { token: number; metadata: EntryMetadata; status?: string; entryType: string } | null = null;
+  export let titleReload: { token: number; title: string } | null = null;
   export let dirty = false;
   export let todoStatusHint = "";
 
@@ -126,6 +127,7 @@
   let reconcilingTodoAnchors = false;
   let highlightedTodoId: string | null = null;
   let lastMetadataReloadToken = 0;
+  let lastTitleReloadToken = 0;
   let tagPickerFieldId: string | null = null;
   let tagPickerPosition: { x: number; y: number; width: number } | null = null;
 
@@ -144,6 +146,11 @@
     status = metadataReload.status || defaultStatus();
     entryType = metadataReload.entryType || defaultEntryType();
     metadata = cloneMetadata(metadataReload.metadata);
+  }
+
+  $: if (titleReload && titleReload.token !== lastTitleReloadToken) {
+    lastTitleReloadToken = titleReload.token;
+    title = titleReload.title;
   }
 
   $: if (editor && scene && scene.id !== loadedSceneId) {

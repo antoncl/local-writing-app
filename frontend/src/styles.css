@@ -841,6 +841,24 @@ h3 {
   background: #edf6f2;
 }
 
+.tree-delete {
+  visibility: hidden;
+  padding: 2px 8px;
+  font-size: 14px;
+  color: #a64a4a;
+  border-radius: 4px;
+  line-height: 1;
+}
+
+.tree-row:hover .tree-delete,
+.tree-delete:focus {
+  visibility: visible;
+}
+
+.tree-delete:hover {
+  background: #fbeeee;
+}
+
 .tree-menu-anchor {
   position: relative;
 }

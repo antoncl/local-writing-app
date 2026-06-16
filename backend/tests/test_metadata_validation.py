@@ -157,6 +157,98 @@ class MetadataValidationTests(unittest.TestCase):
             self.service.rename_structure_node("node_does_not_exist", "Anything")
         self.assertEqual(ctx.exception.status_code, 404)
 
+    def test_delete_structure_node_removes_container_and_scene_files(self) -> None:
+        from app.models import CreateStructureNodeRequest
+
+        self.service.create_structure_node(
+            CreateStructureNodeRequest(title="Act One", entry_type="act")
+        )
+        structure = self.service.read_structure()
+        act_node = next(child for child in structure.root.children if child.type == "act")
+        scene = self.service.create_scene(
+            self._make_create_scene("Arrival", parent_id=act_node.id)
+        )
+
+        scene_path = next((self.root / "scenes").glob(f"{scene.id}.md"))
+        self.assertTrue(scene_path.exists())
+
+        self.service.delete_structure_node(act_node.id)
+
+        self.assertFalse(scene_path.exists())
+        refreshed = self.service.read_structure()
+        self.assertFalse(any(child.id == act_node.id for child in refreshed.root.children))
+
+    def test_cascade_delete_preview_counts_descendants_and_backlinks(self) -> None:
+        from app.models import CreateStructureNodeRequest
+
+        self.service.create_structure_node(
+            CreateStructureNodeRequest(title="Act One", entry_type="act")
+        )
+        structure = self.service.read_structure()
+        act_node = next(child for child in structure.root.children if child.type == "act")
+        chapter_doc = self.service.create_structure_node(
+            CreateStructureNodeRequest(title="Chapter 1", entry_type="chapter", parent_id=act_node.id)
+        )
+        refreshed_act = next(child for child in chapter_doc.root.children if child.id == act_node.id)
+        chapter_node = next(grandchild for grandchild in refreshed_act.children if grandchild.type == "chapter")
+        scene_a = self.service.create_scene(self._make_create_scene("Arrival", parent_id=chapter_node.id))
+        seren = self.service.create_lore_entry(CreateLoreEntryRequest(title="Seren", entry_type="character"))
+        self.service.save_lore_entry(
+            seren.id,
+            SaveLoreEntryRequest(
+                title="Seren",
+                body_markdown=seren.body_markdown,
+                base_revision=seren.revision,
+                entry_type="character",
+                metadata={"appears_in_scenes": [scene_a.id]},
+            ),
+        )
+
+        preview = self.service.cascade_delete_preview(act_node.id)
+
+        self.assertEqual(preview.descendant_scene_count, 1)
+        self.assertEqual(preview.descendant_container_count, 1)
+        self.assertEqual(len(preview.backlinks), 1)
+        self.assertEqual(preview.backlinks[0].id, seren.id)
+        self.assertEqual(preview.backlinks[0].field_id, "appears_in_scenes")
+
+    def test_cascade_delete_preview_skips_internal_backlinks(self) -> None:
+        from app.models import CreateStructureNodeRequest
+
+        self.service.create_structure_node(
+            CreateStructureNodeRequest(title="Act One", entry_type="act")
+        )
+        structure = self.service.read_structure()
+        act_node = next(child for child in structure.root.children if child.type == "act")
+        scene_a = self.service.create_scene(self._make_create_scene("Arrival", parent_id=act_node.id))
+        scene_b = self.service.create_scene(self._make_create_scene("Departure", parent_id=act_node.id))
+        refreshed_b = self.service.read_scene(scene_b.id)
+        self.service.save_scene(
+            scene_b.id,
+            SaveSceneRequest(
+                title=refreshed_b.title,
+                body_markdown=refreshed_b.body_markdown,
+                base_revision=refreshed_b.revision,
+                status=refreshed_b.status,
+                entry_type=refreshed_b.entry_type,
+                metadata={"characters": []},
+            ),
+        )
+
+        preview = self.service.cascade_delete_preview(act_node.id)
+
+        self.assertEqual(preview.backlinks, [])
+
+    def test_delete_structure_node_rejects_root(self) -> None:
+        with self.assertRaises(ProjectServiceError) as ctx:
+            self.service.delete_structure_node("root")
+        self.assertEqual(ctx.exception.status_code, 422)
+
+    def _make_create_scene(self, title: str, parent_id: str | None = None):
+        from app.models import CreateSceneRequest
+
+        return CreateSceneRequest(title=title, parent_id=parent_id)
+
     def test_rename_structure_node_rejects_empty_title(self) -> None:
         from app.models import CreateStructureNodeRequest
 

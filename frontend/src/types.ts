@@ -190,3 +190,12 @@ export type BacklinksResponse = {
   target_id: string;
   backlinks: Backlink[];
 };
+
+export type StructureNodeDeletePreview = {
+  target_id: string;
+  target_title: string;
+  target_type: string;
+  descendant_scene_count: number;
+  descendant_container_count: number;
+  backlinks: Backlink[];
+};

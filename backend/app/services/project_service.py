@@ -48,6 +48,7 @@ from app.models import (
     SearchResponse,
     StructureDocument,
     StructureNode,
+    StructureNodeDeletePreview,
     TodoDocument,
     TodoItem,
     UpsertMetadataEntryTypeRequest,
@@ -1443,6 +1444,112 @@ class ProjectService:
             self._first_container(structure.root).children.append(scene_node)
         self._write_yaml(root / "manuscript.structure.yaml", structure.model_dump())
         return self.read_scene(scene_id)
+
+    def cascade_delete_preview(self, node_id: str) -> StructureNodeDeletePreview:
+        structure = self.read_structure()
+        node = self._find_structure_node(structure.root, node_id)
+        if node is None:
+            raise ProjectServiceError(f"Structure node {node_id} does not exist.", 404)
+        if node.type == "root":
+            raise ProjectServiceError("Cannot delete the root node.", 422)
+
+        descendant_scene_count = 0
+        descendant_container_count = 0
+
+        def walk(n: StructureNode, is_target: bool) -> None:
+            nonlocal descendant_scene_count, descendant_container_count
+            if not is_target:
+                if n.scene_id:
+                    descendant_scene_count += 1
+                else:
+                    descendant_container_count += 1
+            for child in n.children:
+                walk(child, is_target=False)
+
+        walk(node, is_target=True)
+        doomed_scene_ids = self._collect_scene_ids(node)
+        backlinks = self._backlinks_to_targets(doomed_scene_ids, exclude_source_ids=doomed_scene_ids)
+        return StructureNodeDeletePreview(
+            target_id=node.id,
+            target_title=node.title,
+            target_type=node.type,
+            descendant_scene_count=descendant_scene_count,
+            descendant_container_count=descendant_container_count,
+            backlinks=backlinks,
+        )
+
+    def _backlinks_to_targets(self, target_ids: set[str], *, exclude_source_ids: set[str] | None = None) -> list[Backlink]:
+        if not target_ids:
+            return []
+        excluded = exclude_source_ids or set()
+        node_index = self._build_node_index()
+        schema = self.read_metadata_schema()
+        backlinks: list[Backlink] = []
+        for entry in node_index.by_id.values():
+            if entry.id in excluded:
+                continue
+            entry_definition = schema.entry_types.get(entry.entry_type)
+            if entry_definition is None:
+                continue
+            try:
+                front_matter = self._read_front_matter_only(entry.path, strict=True)
+            except ProjectServiceError:
+                continue
+            metadata = self._normalise_metadata(front_matter.get("metadata"), entry.path)
+            for field_id in entry_definition.fields:
+                field = schema.fields.get(field_id)
+                if field is None:
+                    continue
+                value = metadata.get(field_id)
+                hits_target = False
+                if field.type == "entity_ref" and isinstance(value, str) and value in target_ids:
+                    hits_target = True
+                elif field.type == "entity_ref_list" and isinstance(value, list):
+                    if any(isinstance(item, str) and item in target_ids for item in value):
+                        hits_target = True
+                if hits_target:
+                    backlinks.append(
+                        Backlink(
+                            id=entry.id,
+                            title=entry.title or entry.id,
+                            kind=entry.kind,
+                            entry_type=entry.entry_type,
+                            field_id=field_id,
+                            field_name=field.name,
+                        )
+                    )
+        backlinks.sort(key=lambda link: (link.kind, link.title.lower(), link.field_id))
+        return backlinks
+
+    def delete_structure_node(self, node_id: str) -> StructureDocument:
+        root = self._require_project()
+        structure = self.read_structure()
+        node = self._find_structure_node(structure.root, node_id)
+        if node is None:
+            raise ProjectServiceError(f"Structure node {node_id} does not exist.", 404)
+        if node.type == "root":
+            raise ProjectServiceError("Cannot delete the root node.", 422)
+
+        scene_ids = self._collect_scene_ids(node)
+        for scene_id in scene_ids:
+            try:
+                path = self._path_for_node_id(scene_id, "scene")
+                if path.exists():
+                    path.unlink()
+            except ProjectServiceError:
+                pass
+            self._remove_scene_todos(scene_id)
+
+        self._remove_structure_node_by_id(structure.root, node_id)
+        self._write_yaml(root / "manuscript.structure.yaml", structure.model_dump())
+        return self.read_structure()
+
+    def _remove_structure_node_by_id(self, node: StructureNode, node_id: str) -> bool:
+        before = len(node.children)
+        node.children = [child for child in node.children if child.id != node_id]
+        if len(node.children) != before:
+            return True
+        return any(self._remove_structure_node_by_id(child, node_id) for child in node.children)
 
     def rename_structure_node(self, node_id: str, title: str) -> StructureDocument:
         root = self._require_project()

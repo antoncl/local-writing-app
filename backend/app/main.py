@@ -37,6 +37,7 @@ from app.models import (
     SearchRequest,
     SearchResponse,
     StructureDocument,
+    StructureNodeDeletePreview,
     TodoDocument,
     UpsertMetadataEntryTypeRequest,
     UpsertMetadataFieldRequest,
@@ -129,6 +130,18 @@ def create_structure_node(request: CreateStructureNodeRequest) -> StructureDocum
 def rename_structure_node(node_id: str, request: RenameStructureNodeRequest) -> StructureDocument:
     with translate_errors():
         return service.rename_structure_node(node_id, request.title)
+
+
+@app.get("/api/structure/nodes/{node_id}/cascade-preview", response_model=StructureNodeDeletePreview)
+def cascade_delete_preview(node_id: str) -> StructureNodeDeletePreview:
+    with translate_errors():
+        return service.cascade_delete_preview(node_id)
+
+
+@app.delete("/api/structure/nodes/{node_id}", response_model=StructureDocument)
+def delete_structure_node(node_id: str) -> StructureDocument:
+    with translate_errors():
+        return service.delete_structure_node(node_id)
 
 
 @app.get("/api/metadata/schema", response_model=MetadataSchema)

@@ -16,6 +16,7 @@ import type {
   Scene,
   SearchHit,
   StructureDocument,
+  StructureNodeDeletePreview,
   TodoDocument,
 } from "./types";
 
@@ -68,6 +69,14 @@ export const api = {
     return request<StructureDocument>(`/structure/nodes/${encodeURIComponent(nodeId)}`, {
       method: "PATCH",
       body: JSON.stringify({ title }),
+    });
+  },
+  cascadeDeletePreview(nodeId: string) {
+    return request<StructureNodeDeletePreview>(`/structure/nodes/${encodeURIComponent(nodeId)}/cascade-preview`);
+  },
+  deleteStructureNode(nodeId: string) {
+    return request<StructureDocument>(`/structure/nodes/${encodeURIComponent(nodeId)}`, {
+      method: "DELETE",
     });
   },
   getMetadataSchema() {

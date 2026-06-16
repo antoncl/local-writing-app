@@ -19,6 +19,7 @@
     SearchHit,
     StructureDocument,
     StructureNode,
+    StructureNodeDeletePreview,
     TodoItem,
   } from "./types";
 
@@ -164,6 +165,7 @@
   let editorPanes: EditorPaneState[] = [];
   let nextMetadataReloadToken = 1;
   let metadataReloadsByPane: Record<string, MetadataReloadSignal> = {};
+  let titleReloadsByPane: Record<string, { token: number; title: string }> = {};
   let editorPaneComponents: Record<
     string,
     | {
@@ -257,6 +259,7 @@
     nextEditorPaneIndex = 1;
     nextMetadataReloadToken = 1;
     metadataReloadsByPane = {};
+    titleReloadsByPane = {};
     panes = {
       project: panes.project,
       outline: panes.outline,
@@ -1114,7 +1117,29 @@
     }
     await run(async () => {
       structure = await api.renameStructureNode(nodeId, trimmed);
+      syncRenameIntoEditorPanes(nodeId, trimmed);
     });
+  }
+
+  function syncRenameIntoEditorPanes(nodeId: string, newTitle: string) {
+    if (!structure) return;
+    const renamedNode = findStructureNodeById(structure.root, nodeId);
+    if (!renamedNode?.scene_id) return;
+    const sceneId = renamedNode.scene_id;
+    const nextReloads = { ...titleReloadsByPane };
+    editorPanes = editorPanes.map((pane) => {
+      if (!pane.scene || pane.scene.id !== sceneId) return pane;
+      const nextScene = { ...pane.scene, title: newTitle };
+      if (pane.dirty) {
+        return { ...pane, scene: nextScene };
+      }
+      nextReloads[pane.id] = {
+        token: (nextReloads[pane.id]?.token ?? 0) + 1,
+        title: newTitle,
+      };
+      return { ...pane, scene: nextScene, draftTitle: newTitle };
+    });
+    titleReloadsByPane = nextReloads;
   }
 
   function cancelRename() {
@@ -1146,6 +1171,85 @@
       event.preventDefault();
       startRename(node.id, node.title);
     }
+  }
+
+  async function requestDeleteStructureNode(node: StructureNode) {
+    if (editingNodeId === node.id) {
+      editingNodeId = null;
+    }
+    let preview: StructureNodeDeletePreview | null = null;
+    try {
+      preview = await api.cascadeDeletePreview(node.id);
+    } catch (error) {
+      console.warn("Failed to fetch cascade preview", error);
+    }
+    const typeName = entryTypeName(node.type, metadataSchema);
+    const sceneCount = preview?.descendant_scene_count ?? 0;
+    const containerCount = preview?.descendant_container_count ?? 0;
+    const backlinks = preview?.backlinks ?? [];
+
+    let message = `Delete ${typeName} "${node.title}"?`;
+    const cascadeParts: string[] = [];
+    if (sceneCount > 0) cascadeParts.push(`${sceneCount} scene${sceneCount === 1 ? "" : "s"}`);
+    if (containerCount > 0) cascadeParts.push(`${containerCount} sub-container${containerCount === 1 ? "" : "s"}`);
+    if (cascadeParts.length > 0) {
+      message += `\n\nThis will also permanently remove ${cascadeParts.join(" and ")} inside it.`;
+    } else if (node.scene_id) {
+      message += " This removes the scene file from the project.";
+    } else {
+      message += " This removes the container from the project.";
+    }
+    if (backlinks.length > 0) {
+      message += `\n\n${backlinks.length} ${backlinks.length === 1 ? "entry references" : "entries reference"} content that will be deleted — those links will break:`;
+    }
+    const details = backlinks.map((link) => `${link.title} — ${link.field_name}`);
+
+    confirmation = {
+      title: `Delete ${typeName}`,
+      message,
+      details,
+      confirmLabel: `Delete ${typeName}`,
+      destructive: true,
+      onConfirm: () => deleteStructureNode(node.id),
+    };
+  }
+
+  async function deleteStructureNode(nodeId: string) {
+    structure = await api.deleteStructureNode(nodeId);
+    await refreshTodos();
+    const livingSceneIds = collectSceneIdSet(structure?.root ?? null);
+    const deadPaneIds = editorPanes
+      .filter((pane) => pane.scene && !livingSceneIds.has(pane.scene.id))
+      .map((pane) => pane.id);
+    if (deadPaneIds.length > 0) {
+      const deadSet = new Set(deadPaneIds);
+      editorPanes = editorPanes.filter((pane) => !deadSet.has(pane.id));
+      embeddedTodosByPane = Object.fromEntries(
+        Object.entries(embeddedTodosByPane).filter(([id]) => !deadSet.has(id)),
+      );
+      metadataReloadsByPane = Object.fromEntries(
+        Object.entries(metadataReloadsByPane).filter(([id]) => !deadSet.has(id)),
+      );
+      titleReloadsByPane = Object.fromEntries(
+        Object.entries(titleReloadsByPane).filter(([id]) => !deadSet.has(id)),
+      );
+      panes = Object.fromEntries(Object.entries(panes).filter(([id]) => !deadSet.has(id)));
+      if (focusedEditorPaneId && deadSet.has(focusedEditorPaneId)) {
+        focusedEditorPaneId = editorPanes[0]?.id ?? null;
+      }
+    }
+    status = "Deleted";
+  }
+
+  function collectSceneIdSet(node: StructureNode | null): Set<string> {
+    const ids = new Set<string>();
+    if (!node) return ids;
+    const walk = (current: StructureNode) => {
+      if (current.scene_id) ids.add(current.scene_id);
+      for (const child of current.children ?? []) walk(child);
+    };
+    walk(node);
+    return ids;
   }
 
   async function newLoreEntry() {
@@ -1436,6 +1540,8 @@
       embeddedTodosByPane = remainingEmbeddedTodos;
       const { [id]: _closedReload, ...remainingReloads } = metadataReloadsByPane;
       metadataReloadsByPane = remainingReloads;
+      const { [id]: _closedTitleReload, ...remainingTitleReloads } = titleReloadsByPane;
+      titleReloadsByPane = remainingTitleReloads;
       const { [id]: _closedPane, ...remainingPanes } = panes;
       panes = remainingPanes;
       if (focusedEditorPaneId === id) {
@@ -2098,6 +2204,7 @@
         metadataSchema={metadataSchema}
         knownTags={knownTags}
         metadataReload={metadataReloadsByPane[editorPane.id] ?? null}
+        titleReload={titleReloadsByPane[editorPane.id] ?? null}
         dirty={editorPane.dirty}
         todoStatusHint={editorPane.document?.type === "scene" ? (embeddedTodoStatusHintsByPane[editorPane.id] ?? "No embedded TODOs. Select text to mark a TODO.") : ""}
         on:focus={() => focusPane(editorPane.id)}
@@ -2300,6 +2407,7 @@
       />
     {:else if node.scene_id}
       <button class="tree-scene tree-title" on:click={() => run(() => openSceneInEditorPane(node.scene_id!))} on:dblclick={() => startRename(node.id, node.title)} on:keydown={(event) => handleTreeRowKeydown(event, node)}>{node.title}</button>
+      <button class="tree-delete" title={`Delete ${entryTypeName(node.type, metadataSchema)}`} on:click={() => requestDeleteStructureNode(node)}>×</button>
     {:else}
       <button class="tree-group tree-title" on:click={() => (activeParentId = node.id)} on:dblclick={() => startRename(node.id, node.title)} on:keydown={(event) => handleTreeRowKeydown(event, node)}>{node.title}</button>
       {@const defaultType = defaultChildEntryType(node.type)}
@@ -2316,6 +2424,7 @@
           </div>
         {/if}
       </div>
+      <button class="tree-delete" title={`Delete ${entryTypeName(node.type, metadataSchema)}`} on:click={() => requestDeleteStructureNode(node)}>×</button>
     {/if}
   </div>
   {#each nodeChildren(node) as child}

@@ -57,6 +57,33 @@
 
   const TABLE_GRID_MAX_ROWS = 8;
   const TABLE_GRID_MAX_COLS = 8;
+
+  // Built-in template for "continue from cursor". Will move to a prompt node in M5.
+  const CONTINUE_SCENE_TEMPLATE = `{% role "system" %}
+You are an expert fiction writer. Continue the scene in the same voice and style as the existing prose. Match register, POV, and prose rhythm. Do not conclude the scene — push it forward by one beat only.
+{% endrole %}
+
+{% role "user" %}
+{% if pov(scene) %}POV: {{ pov(scene).title }}
+{% endif %}
+{{ relevant_lore(scene) }}
+{% if scenes_before(scene) %}
+
+The story so far:
+{{ scenes_before(scene) }}
+{% endif %}
+
+{% if text_before %}
+Here is the scene so far:
+<<<
+{{ text_before }}
+>>>
+
+Continue from where it left off. Write about {{ input.words | default(250) }} words. Output prose only — no preamble, no explanation, no closing remarks.
+{% else %}
+Open the scene. Write about {{ input.words | default(250) }} words to start it. Output prose only — no preamble.
+{% endif %}
+{% endrole %}`;
   type ToolbarButtonAction = {
     kind: "button";
     id: string;
@@ -83,6 +110,30 @@
   };
 
   const WORD_PATTERN = /[A-Za-z0-9]+(?:['-][A-Za-z0-9]+)?/g;
+
+  const AISuggestion = Mark.create({
+    name: "aiSuggestion",
+    inclusive: false,
+    excludes: "",
+    addAttributes() {
+      return {
+        suggestionId: {
+          default: null,
+          parseHTML: (element) => element.getAttribute("data-ai-suggestion-id"),
+          renderHTML: (attributes) => {
+            if (!attributes.suggestionId) return {};
+            return { "data-ai-suggestion-id": attributes.suggestionId };
+          },
+        },
+      };
+    },
+    parseHTML() {
+      return [{ tag: "span[data-ai-suggestion-id]" }];
+    },
+    renderHTML({ HTMLAttributes }) {
+      return ["span", mergeAttributes(HTMLAttributes, { class: "ai-suggestion" }), 0];
+    },
+  });
 
   const TodoAnchor = Mark.create({
     name: "todoAnchor",
@@ -142,6 +193,13 @@
   let backlinks: Backlink[] = [];
   let backlinksExpanded = false;
   let lastBacklinksSceneId: string | null = null;
+
+  // AI suggestion state. v1 supports a single pending suggestion at a time.
+  let aiGenerating = false;
+  let aiError: string | null = null;
+  let aiSuggestionId: string | null = null;
+  let aiSuggestionMeta: { provider: string; model: string; latency_ms: number; truncated: boolean } | null = null;
+  let aiNextSuggestionId = 1;
 
   $: slashCommands = editor && documentKind === "scene" ? getSlashCommands() : [];
   $: activeSlashCommand = slashCommands[slashMenu.selectedIndex];
@@ -234,6 +292,7 @@
       element: editorElement,
       extensions: [
         StarterKit.configure({ heading: { levels: [1, 2, 3] } }),
+        AISuggestion,
         TodoAnchor,
         Table.configure({ resizable: true }),
         TableRow,
@@ -282,6 +341,10 @@
     status = documentStatus(nextScene);
     entryType = nextScene.entry_type || defaultEntryType();
     metadata = cloneMetadata(nextScene.metadata);
+    // Drop any pending AI suggestion state when changing documents.
+    aiSuggestionId = null;
+    aiSuggestionMeta = null;
+    aiError = null;
     const nextEntryDefinition = metadataSchema?.entry_types[entryType];
     const nextHasBody = nextEntryDefinition?.has_body ?? true;
     metadataExpanded = documentKind === "lore" || !nextHasBody;
@@ -506,6 +569,13 @@
     if (documentKind !== "scene") {
       if (slashMenu.visible) closeSlashMenu();
       return false;
+    }
+
+    // Ctrl/⌘+J: AI continue at cursor (regardless of slash menu state).
+    if (event.key.toLowerCase() === "j" && (event.ctrlKey || event.metaKey) && !event.altKey && !event.shiftKey) {
+      event.preventDefault();
+      void runAIContinue();
+      return true;
     }
 
     if (slashMenu.visible && slashMenu.mode === "table-grid") {
@@ -820,6 +890,132 @@
       closeSlashMenu();
       syncEditorEmpty();
     }
+  }
+
+  async function runAIContinue() {
+    if (!editor || !scene || aiGenerating || documentKind !== "scene") return;
+    if (aiSuggestionId) {
+      aiError = "Accept or revert the pending suggestion before generating another.";
+      return;
+    }
+    const cursorPos = editor.state.selection.from;
+    const docSize = editor.state.doc.content.size;
+    const textBefore = editor.state.doc.textBetween(0, cursorPos, "\n\n", " ");
+    const textAfter = editor.state.doc.textBetween(cursorPos, docSize, "\n\n", " ");
+
+    aiError = null;
+    aiGenerating = true;
+    try {
+      const response = await api.aiGenerate({
+        template_source: CONTINUE_SCENE_TEMPLATE,
+        target_scene_id: scene.id,
+        session_id: scene.id,
+        inputs: {},
+        text_before: textBefore,
+        text_after: textAfter,
+        commit: false,
+      });
+      if (!response.ok) {
+        aiError = response.error ?? "Unknown error";
+        return;
+      }
+      if (!response.content.trim()) {
+        aiError = "Model returned empty output.";
+        return;
+      }
+      insertAISuggestion(response.content);
+      aiSuggestionMeta = {
+        provider: response.provider,
+        model: response.model,
+        latency_ms: response.latency_ms,
+        truncated: response.truncated,
+      };
+    } catch (e) {
+      aiError = (e as Error).message;
+    } finally {
+      aiGenerating = false;
+    }
+  }
+
+  function insertAISuggestion(text: string) {
+    if (!editor) return;
+    const suggestionId = `ai-${aiNextSuggestionId++}`;
+    const startPos = editor.state.selection.from;
+
+    // Split AI text into ProseMirror paragraph nodes.
+    type Inline = { type: "text"; text: string } | { type: "hardBreak" };
+    const paragraphs = text
+      .split(/\n{2,}/)
+      .map((para) => {
+        const content: Inline[] = [];
+        const lines = para.split(/\n/);
+        lines.forEach((line, i) => {
+          if (i > 0) content.push({ type: "hardBreak" });
+          if (line) content.push({ type: "text", text: line });
+        });
+        return { type: "paragraph", content };
+      })
+      .filter((p) => p.content.length > 0);
+
+    if (paragraphs.length === 0) return;
+
+    editor.chain().focus().insertContent(paragraphs).run();
+    const endPos = editor.state.selection.from;
+
+    editor
+      .chain()
+      .setTextSelection({ from: startPos, to: endPos })
+      .setMark("aiSuggestion", { suggestionId })
+      .setTextSelection(endPos)
+      .run();
+
+    aiSuggestionId = suggestionId;
+  }
+
+  function findAISuggestionRange(suggestionId: string): { from: number; to: number } | null {
+    if (!editor) return null;
+    let from = -1;
+    let to = -1;
+    editor.state.doc.descendants((node, pos) => {
+      if (!node.isText) return true;
+      const has = node.marks.some(
+        (m) => m.type.name === "aiSuggestion" && m.attrs.suggestionId === suggestionId,
+      );
+      if (has) {
+        if (from === -1) from = pos;
+        to = pos + node.nodeSize;
+      }
+      return true;
+    });
+    return from === -1 ? null : { from, to };
+  }
+
+  function acceptAISuggestion() {
+    if (!editor || !aiSuggestionId) return;
+    const range = findAISuggestionRange(aiSuggestionId);
+    if (range) {
+      editor
+        .chain()
+        .focus()
+        .setTextSelection(range)
+        .unsetMark("aiSuggestion")
+        .setTextSelection(range.to)
+        .run();
+    }
+    aiSuggestionId = null;
+    aiSuggestionMeta = null;
+    aiError = null;
+  }
+
+  function revertAISuggestion() {
+    if (!editor || !aiSuggestionId) return;
+    const range = findAISuggestionRange(aiSuggestionId);
+    if (range) {
+      editor.chain().focus().deleteRange(range).run();
+    }
+    aiSuggestionId = null;
+    aiSuggestionMeta = null;
+    aiError = null;
   }
 
   async function focusAndRun(command: () => void | Promise<void>) {
@@ -1300,6 +1496,15 @@
         description: "Pick the size, then click to insert.",
         run: () => openTableGrid(),
       },
+      {
+        group: "AI",
+        label: "AI: Continue scene",
+        description: "Generate the next beat at the cursor.",
+        run: () => {
+          clearSlashTrigger();
+          void runAIContinue();
+        },
+      },
     ];
   }
 </script>
@@ -1496,6 +1701,30 @@
   </section>
 
   <div class:empty-editor={editorEmpty} class:lore-editor={documentKind === "lore"} class:hidden-body={!hasBody} class="editor-wrap" bind:this={editorFrame}>
+    {#if aiGenerating || aiSuggestionId || aiError}
+      <div class="ai-banner" class:ai-banner-error={aiError && !aiSuggestionId} class:ai-banner-pending={aiSuggestionId} class:ai-banner-loading={aiGenerating}>
+        {#if aiGenerating}
+          <span class="ai-banner-label">AI generating…</span>
+        {:else if aiSuggestionId}
+          <span class="ai-banner-label">
+            AI suggestion
+            {#if aiSuggestionMeta}
+              <span class="ai-banner-meta">
+                · {aiSuggestionMeta.provider} · {aiSuggestionMeta.model} · {aiSuggestionMeta.latency_ms} ms
+                {#if aiSuggestionMeta.truncated}· <strong>truncated</strong>{/if}
+              </span>
+            {/if}
+          </span>
+          <div class="ai-banner-actions">
+            <button type="button" on:click={revertAISuggestion}>Revert</button>
+            <button type="button" class="primary" on:click={acceptAISuggestion}>Accept</button>
+          </div>
+        {:else if aiError}
+          <span class="ai-banner-label">AI error: {aiError}</span>
+          <button type="button" on:click={() => (aiError = null)}>Dismiss</button>
+        {/if}
+      </div>
+    {/if}
     {#if selectionMenu.visible}
       <div class:below={selectionMenu.placement === "below"} class="selection-toolbar" style={`left: ${selectionMenu.x}px; top: ${selectionMenu.y}px;`}>
         <span class="selection-count">{selectionMenu.wordCount} {selectionMenu.wordCount === 1 ? "word" : "words"}</span>

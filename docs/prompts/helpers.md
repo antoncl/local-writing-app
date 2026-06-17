@@ -65,19 +65,26 @@ POV: {{ pov(scene).title }} (also known as: {{ pov(scene).aliases | join(", ") }
 
 ## `scenes_before(scene)`
 
-Returns a markdown-formatted summary of every scene that appears before `scene` in manuscript order.
+Returns an XML-wrapped listing of every scene that appears before `scene` in manuscript order.
 
 **Signature**
 ```python
 scenes_before(scene) -> str
 ```
 
-**Returns**: a string. Each prior scene contributes a section like:
-```markdown
-**Scene Title**
-Scene summary text.
+**Returns**: a string. Output shape:
+```xml
+<story_so_far>
+<scene title="The Departure">
+Honor takes the Salamander into battle.
+</scene>
+
+<scene title="The Briefing">
+The crew receives their orders.
+</scene>
+</story_so_far>
 ```
-Sections are joined with blank lines. Empty string if there are no prior scenes (which produces no message if the surrounding `{% role %}` block has no other content).
+Empty string if there are no prior scenes (which produces no message if the surrounding `{% role %}` block has no other content).
 
 **Example**
 ```jinja
@@ -95,7 +102,26 @@ The story so far:
 
 ## `relevant_lore(scene, mode="implicit", partition="all")`
 
-Returns a markdown block of lore entries the model should know about for this scene.
+Returns an XML block of lore entries the model should know about for this scene. Each entry uses its `entry_type` as the tag name. [Anthropic specifically recommends XML tags](https://docs.anthropic.com/en/docs/build-with-claude/prompt-engineering/use-xml-tags) for delimiting structure in prompts; the format helps the model locate entities unambiguously.
+
+**Output shape**:
+```xml
+<lore>
+<character name="Honor Harrington" aliases="The Salamander">
+Captain of the Fearless. Treecat-adopted.
+</character>
+
+<character name="Nimitz">
+Honor's treecat companion.
+</character>
+
+<place name="Manticore" aliases="Star Kingdom">
+A binary star system; the capital world of the Star Kingdom.
+</place>
+</lore>
+```
+
+The entry's body is XML-escaped (so `Captain & Crew` becomes `Captain &amp; Crew`); markdown structure within the body is preserved as-is. Aliases are comma-joined into a single attribute. An entry with no body or summary renders as a self-closing tag (`<character name="..." />`).
 
 **Signature**
 ```python
@@ -118,7 +144,7 @@ relevant_lore(scene, mode: str = "implicit", partition: str = "all") -> str
 | `"stable"` | Entries whose `revision` matches the session baseline (unchanged since the prior call). |
 | `"volatile"` | Entries that are new or changed since the prior call. |
 
-**Returns**: a markdown string, one `## Title` section per entry with the entry's body (or summary as fallback). Sorted by lore ID for stable ordering — important for cache coherence; see [strategy_ai_integration](README.md).
+**Returns**: a string. Sorted by lore ID for stable ordering — important for cache coherence; see [strategy_ai_integration](README.md).
 
 **Example — partition-aware**
 ```jinja

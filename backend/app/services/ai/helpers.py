@@ -22,6 +22,7 @@ from __future__ import annotations
 
 import re
 from typing import Any, TYPE_CHECKING
+from xml.sax.saxutils import escape as xml_escape, quoteattr
 
 from jinja2.sandbox import SandboxedEnvironment
 
@@ -184,11 +185,13 @@ def _pov(project: "ProjectService", scene: Any) -> dict[str, Any] | None:
 
 
 def _scenes_before(project: "ProjectService", scene: Any) -> str:
-    """Markdown listing of summaries for all scenes before `scene` in manuscript order.
+    """XML listing of summaries for all scenes before `scene` in manuscript order.
 
     Walks the manuscript structure depth-first, collecting scene summaries up
-    to (but not including) the current scene. Scope is the whole project; once
-    nested-project support lands the scope will be the current book.
+    to (but not including) the current scene. Wraps each as
+    `<scene title="...">summary</scene>` inside a `<story_so_far>` block.
+    Scope is the whole project; once nested-project support lands the scope
+    will be the current book.
     """
     target_id = _attr_or_item(scene, "id")
     if not target_id:
@@ -198,15 +201,17 @@ def _scenes_before(project: "ProjectService", scene: Any) -> str:
     except Exception:
         return ""
 
-    summaries: list[str] = []
-    _walk_collect(structure.root, target_id, project, summaries)
-    return "\n\n".join(summaries)
+    chunks: list[str] = []
+    _walk_collect(structure.root, target_id, project, chunks)
+    if not chunks:
+        return ""
+    return "<story_so_far>\n" + "\n\n".join(chunks) + "\n</story_so_far>"
 
 
 def _walk_collect(
-    node: Any, target_id: str, project: "ProjectService", summaries: list[str]
+    node: Any, target_id: str, project: "ProjectService", chunks: list[str]
 ) -> bool:
-    """Append summary entries for scene nodes preceding `target_id`.
+    """Append `<scene>` entries for scene nodes preceding `target_id`.
 
     Returns True once `target_id` has been encountered (so the caller stops
     descending into later siblings).
@@ -224,9 +229,13 @@ def _walk_collect(
             summary = _get_field(full, "summary")
             title = _attr_or_item(full, "title") or ""
             if isinstance(summary, str) and summary.strip():
-                summaries.append(f"**{title}**\n{summary.strip()}")
+                chunks.append(
+                    f"<scene title={quoteattr(str(title))}>\n"
+                    f"{xml_escape(summary.strip())}\n"
+                    f"</scene>"
+                )
     for child in _attr_or_item(node, "children") or []:
-        if _walk_collect(child, target_id, project, summaries):
+        if _walk_collect(child, target_id, project, chunks):
             return True
     return False
 
@@ -361,21 +370,60 @@ def _name_appears(name: str, words: set[str], haystack_lower: str) -> bool:
 
 
 def _format_lore_block(project: "ProjectService", entry_ids: list[str]) -> str:
-    """Read each lore entry and format it as a single markdown block."""
+    """Render lore entries as an XML block.
+
+    Each entry becomes `<{entry_type} name="..." aliases="...">body</...>`,
+    all wrapped in `<lore>...</lore>`. Anthropic specifically recommends XML
+    tags for context structure; the format helps models locate entities
+    unambiguously without losing the natural prose body.
+    """
+    if not entry_ids:
+        return ""
     chunks: list[str] = []
     for entry_id in entry_ids:
         entry = _safe_read_lore(project, entry_id)
         if entry is None:
             continue
-        title = _attr_or_item(entry, "title") or entry_id
-        body = _attr_or_item(entry, "body_markdown") or ""
-        body = body.strip()
-        if body:
-            chunks.append(f"## {title}\n{body}")
+        entry_type = _attr_or_item(entry, "entry_type") or "lore_entry"
+        tag = _xml_safe_tag(entry_type)
+        title = str(_attr_or_item(entry, "title") or entry_id)
+        aliases_raw = _get_field(entry, "aliases") or []
+        if isinstance(aliases_raw, list):
+            aliases = [str(a).strip() for a in aliases_raw if str(a).strip()]
         else:
+            aliases = []
+
+        body = _attr_or_item(entry, "body_markdown") or ""
+        body = str(body).strip()
+        if not body:
             summary = _get_field(entry, "summary")
             if isinstance(summary, str) and summary.strip():
-                chunks.append(f"## {title}\n{summary.strip()}")
-            else:
-                chunks.append(f"## {title}")
-    return "\n\n".join(chunks)
+                body = summary.strip()
+
+        chunks.append(_render_lore_xml_entry(tag, title, aliases, body))
+    if not chunks:
+        return ""
+    return "<lore>\n" + "\n\n".join(chunks) + "\n</lore>"
+
+
+def _render_lore_xml_entry(
+    tag: str, title: str, aliases: list[str], body: str
+) -> str:
+    attrs = [f"name={quoteattr(title)}"]
+    if aliases:
+        attrs.append(f"aliases={quoteattr(', '.join(aliases))}")
+    attr_str = " ".join(attrs)
+    if body:
+        return f"<{tag} {attr_str}>\n{xml_escape(body)}\n</{tag}>"
+    return f"<{tag} {attr_str} />"
+
+
+_XML_TAG_FALLBACK = "lore_entry"
+
+
+def _xml_safe_tag(name: Any) -> str:
+    """Coerce a node entry_type into a valid XML element name."""
+    cleaned = re.sub(r"[^A-Za-z0-9_]", "_", str(name).strip())
+    if not cleaned or not cleaned[0].isalpha() and cleaned[0] != "_":
+        return _XML_TAG_FALLBACK
+    return cleaned

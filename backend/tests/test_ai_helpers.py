@@ -377,6 +377,99 @@ class SessionPartitionTests(_HelperFixtureBase):
         self.assertIn("Honor Harrington", out_volatile.messages[0].text)
 
 
+class XmlOutputStructureTests(_HelperFixtureBase):
+    def _render_lore(self, scene_attr: str) -> str:
+        scene = self.service.read_scene(getattr(self, scene_attr).scene_id)
+        env = create_environment_for_project(self.service)
+        out = render_template(
+            '{% role "user" %}{{ relevant_lore(scene) }}{% endrole %}',
+            context={"scene": scene},
+            env=env,
+        )
+        return out.messages[0].text
+
+    def test_lore_block_wraps_in_lore_tag(self) -> None:
+        text = self._render_lore("scene_one_node")
+        self.assertTrue(text.startswith("<lore>"), text[:40])
+        self.assertTrue(text.rstrip().endswith("</lore>"), text[-40:])
+
+    def test_lore_entry_uses_entry_type_as_tag(self) -> None:
+        text = self._render_lore("scene_one_node")
+        # Honor + Nimitz are characters
+        self.assertIn('<character name="Honor Harrington"', text)
+        self.assertIn('<character name="Nimitz"', text)
+        # And properly closed
+        self.assertIn("</character>", text)
+
+    def test_aliases_appear_as_attribute(self) -> None:
+        text = self._render_lore("scene_one_node")
+        self.assertIn('aliases="The Salamander"', text)
+
+    def test_no_aliases_attribute_when_empty(self) -> None:
+        text = self._render_lore("scene_one_node")
+        # Nimitz has no aliases set — the tag should still appear but without aliases=
+        nimitz_block = text[text.index("Nimitz") - 20:text.index("Nimitz") + 80]
+        self.assertNotIn("aliases=", nimitz_block)
+
+    def test_body_is_xml_escaped(self) -> None:
+        # Edit Honor's body to contain & (the XML-special character that prose
+        # legitimately contains — the markdown validator blocks raw HTML so
+        # we can't test angle brackets through the normal path).
+        self._update_lore(
+            self.honor["id"],
+            entry_type="character",
+            metadata={
+                "aliases": ["The Salamander"],
+                "related_entries": [self.nimitz["id"]],
+            },
+            body="Captain of the Fearless & treecat-adopted.",
+        )
+        text = self._render_lore("scene_one_node")
+        self.assertIn("&amp;", text)
+        self.assertNotIn(" & treecat", text)
+
+    def test_title_with_special_chars_is_attribute_escaped(self) -> None:
+        # Title with a double-quote forces quoteattr to switch to single-quoting
+        self._update_lore(
+            self.honor["id"],
+            entry_type="character",
+            metadata={"aliases": []},
+            body="body",
+        )
+        existing = self.service.read_lore_entry(self.honor["id"])
+        self.service.save_lore_entry(
+            self.honor["id"],
+            SaveLoreEntryRequest(
+                title='Honor "The Salamander" Harrington',
+                body_markdown="body",
+                base_revision=existing.revision,
+                entry_type="character",
+                metadata={"aliases": []},
+            ),
+        )
+        text = self._render_lore("scene_one_node")
+        # quoteattr will pick whichever quote character avoids the conflict
+        self.assertTrue(
+            "Honor &quot;The Salamander&quot; Harrington" in text
+            or "Honor \"The Salamander\" Harrington" in text,
+            text,
+        )
+
+    def test_scenes_before_wraps_in_story_so_far(self) -> None:
+        scene_two = self.service.read_scene(self.scene_two_node.scene_id)
+        env = create_environment_for_project(self.service)
+        out = render_template(
+            '{% role "user" %}{{ scenes_before(scene) }}{% endrole %}',
+            context={"scene": scene_two},
+            env=env,
+        )
+        text = out.messages[0].text
+        self.assertTrue(text.startswith("<story_so_far>"), text[:40])
+        self.assertTrue(text.rstrip().endswith("</story_so_far>"), text[-40:])
+        self.assertIn('<scene title="The Departure">', text)
+        self.assertIn("</scene>", text)
+
+
 class HelperIntegrationTests(_HelperFixtureBase):
     def test_full_template_with_multiple_helpers(self) -> None:
         scene_two = self.service.read_scene(self.scene_two_node.scene_id)

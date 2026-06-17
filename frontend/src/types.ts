@@ -179,6 +179,34 @@ export type AIHealthResponse = {
   error?: string | null;
 };
 
+export type AIPreviewRequest = {
+  template_source: string;
+  target_scene_id: string;
+  session_id?: string | null;
+  inputs?: Record<string, unknown>;
+  text_before?: string;
+  text_after?: string;
+  commit?: boolean;
+};
+
+export type PreviewContentBlock = {
+  text: string;
+  cache_break_after: boolean;
+};
+
+export type PreviewMessage = {
+  role: string;
+  blocks: PreviewContentBlock[];
+};
+
+export type AIPreviewResponse = {
+  messages: PreviewMessage[];
+  warnings: string[];
+  char_count: number;
+  session_id?: string | null;
+  rendered: boolean;
+};
+
 export type DirectoryEntry = {
   name: string;
   path: string;

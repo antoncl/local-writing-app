@@ -1,10 +1,12 @@
 <script lang="ts">
   import { onMount, tick } from "svelte";
   import { api } from "./api";
+  import CodeEditor from "./CodeEditor.svelte";
   import DocumentEditorPane from "./DocumentEditorPane.svelte";
   import type {
     AIHealthResponse,
     AIPolicy,
+    AIPreviewResponse,
     Backlink,
     DirectoryListing,
     EditableDocument,
@@ -103,6 +105,33 @@
 
   let machineSettings: MachineSettingsView | null = null;
   let machineSettingsOpen = false;
+
+  // AI preview pane state.
+  const DEFAULT_PREVIEW_TEMPLATE = `{% role "system" %}
+You are an expert fiction writer.
+{% endrole %}
+
+{% role "user" %}
+{% if pov(scene) %}POV: {{ pov(scene).title }}{% endif %}
+
+{{ relevant_lore(scene) }}
+{% cache_break %}
+{% if scenes_before(scene) %}
+The story so far:
+{{ scenes_before(scene) }}
+{% endif %}
+{% endrole %}`;
+
+  let previewTemplate = DEFAULT_PREVIEW_TEMPLATE;
+  let previewTargetSceneId = "";
+  let previewSessionId = "";
+  let previewInputsJson = "{}";
+  let previewTextBefore = "";
+  let previewTextAfter = "";
+  let previewCommit = false;
+  let previewResult: AIPreviewResponse | null = null;
+  let previewError: string | null = null;
+  let previewRunning = false;
   type MachineSettingsDraft = {
     anthropic_api_key: string;
     openai_api_key: string;
@@ -187,6 +216,7 @@
     schema_type: { title: "Node Type", x: 708, y: 260, width: 360, height: 390, z: 4 },
     todo: { title: "TODO", x: 1126, y: 18, width: 310, height: 320, z: 4 },
     search: { title: "Search", x: 1126, y: 360, width: 310, height: 320, z: 5 },
+    preview: { title: "AI Preview", x: 720, y: 18, width: 480, height: 560, z: 6 },
   };
   let editorPanes: EditorPaneState[] = [];
   let nextMetadataReloadToken = 1;
@@ -613,6 +643,49 @@
       machineSettingsOpen = false;
       status = "Saved machine settings";
     });
+  }
+
+  function fillPreviewWithActiveScene() {
+    if (activeScene) {
+      previewTargetSceneId = activeScene.id;
+    }
+  }
+
+  async function runAIPreview() {
+    previewError = null;
+    let inputsParsed: Record<string, unknown> = {};
+    if (previewInputsJson.trim()) {
+      try {
+        inputsParsed = JSON.parse(previewInputsJson);
+        if (typeof inputsParsed !== "object" || inputsParsed === null || Array.isArray(inputsParsed)) {
+          throw new Error("Inputs must be a JSON object.");
+        }
+      } catch (e) {
+        previewError = `Inputs JSON parse error: ${(e as Error).message}`;
+        return;
+      }
+    }
+    if (!previewTargetSceneId.trim()) {
+      previewError = "Target scene ID is required.";
+      return;
+    }
+    previewRunning = true;
+    try {
+      previewResult = await api.aiPreview({
+        template_source: previewTemplate,
+        target_scene_id: previewTargetSceneId.trim(),
+        session_id: previewSessionId.trim() || null,
+        inputs: inputsParsed,
+        text_before: previewTextBefore,
+        text_after: previewTextAfter,
+        commit: previewCommit,
+      });
+    } catch (e) {
+      previewError = (e as Error).message;
+      previewResult = null;
+    } finally {
+      previewRunning = false;
+    }
   }
 
   async function runAIHealthCheck() {
@@ -2698,6 +2771,102 @@
       {/each}
     </div>
     <button class="pane-resize" type="button" aria-label="Resize Search pane" on:keydown={(event) => handlePaneResizeKeydown(event, "search")} on:mousedown={(event) => startPaneResize(event, "search")}></button>
+  </section>
+
+  <!-- svelte-ignore a11y_no_noninteractive_element_interactions -->
+  <section class:hidden-pane={!isPaneVisible("preview")} class="pane preview-pane" data-pane-id="preview" style={paneStyle("preview")} aria-label="AI Preview pane" on:mousedown={() => focusPane("preview")}>
+    <header class="pane-header" role="button" tabindex="0" aria-label="Move AI Preview pane" on:keydown={(event) => handlePaneHeaderKeydown(event, "preview")} on:mousedown={(event) => startPaneDrag(event, "preview")}>
+      <h2>AI Preview</h2>
+    </header>
+    <div class="pane-content preview-panel">
+      <label class="preview-label">
+        Template (Jinja2)
+        <div class="preview-template">
+          <CodeEditor bind:value={previewTemplate} language="jinja2" />
+        </div>
+      </label>
+
+      <div class="preview-row">
+        <label class="preview-label flex-grow">
+          Target scene ID
+          <input type="text" bind:value={previewTargetSceneId} placeholder="scene_xxxxx" />
+        </label>
+        <button type="button" disabled={!activeScene} on:click={fillPreviewWithActiveScene} title="Use focused editor's scene">Use Active</button>
+      </div>
+
+      <div class="preview-row">
+        <label class="preview-label flex-grow">
+          Session ID (optional)
+          <input type="text" bind:value={previewSessionId} placeholder="leave blank to disable session caching" />
+        </label>
+        <label class="inline-check">
+          <input type="checkbox" bind:checked={previewCommit} />
+          Commit
+        </label>
+      </div>
+
+      <label class="preview-label">
+        Inputs (JSON)
+        <div class="preview-inputs">
+          <CodeEditor bind:value={previewInputsJson} language="json" />
+        </div>
+      </label>
+
+      <div class="preview-row">
+        <label class="preview-label flex-grow">
+          text_before
+          <textarea class="preview-cursor" bind:value={previewTextBefore} spellcheck="false"></textarea>
+        </label>
+        <label class="preview-label flex-grow">
+          text_after
+          <textarea class="preview-cursor" bind:value={previewTextAfter} spellcheck="false"></textarea>
+        </label>
+      </div>
+
+      <div class="button-row">
+        <button type="button" class="primary" disabled={previewRunning || !previewTargetSceneId.trim()} on:click={runAIPreview}>
+          {previewRunning ? "Rendering…" : "Preview"}
+        </button>
+      </div>
+
+      {#if previewError}
+        <p class="preview-result-error">{previewError}</p>
+      {/if}
+
+      {#if previewResult}
+        <div class="preview-result">
+          <div class="preview-meta">
+            <span>{previewResult.messages.length} message{previewResult.messages.length === 1 ? "" : "s"}</span>
+            <span>·</span>
+            <span>{previewResult.char_count} chars</span>
+            {#if previewResult.session_id}
+              <span>·</span>
+              <span>session: {previewResult.session_id}</span>
+            {/if}
+          </div>
+          {#if previewResult.warnings.length > 0}
+            <div class="preview-warnings">
+              <strong>Warnings</strong>
+              {#each previewResult.warnings as warning}
+                <p>{warning}</p>
+              {/each}
+            </div>
+          {/if}
+          {#each previewResult.messages as message}
+            <div class="preview-message preview-message-{message.role}">
+              <header class="preview-message-role">{message.role}</header>
+              {#each message.blocks as block, blockIndex}
+                <pre class="preview-block">{block.text}</pre>
+                {#if block.cache_break_after}
+                  <div class="preview-cache-break" aria-label="cache breakpoint">cache_break</div>
+                {/if}
+              {/each}
+            </div>
+          {/each}
+        </div>
+      {/if}
+    </div>
+    <button class="pane-resize" type="button" aria-label="Resize AI Preview pane" on:keydown={(event) => handlePaneResizeKeydown(event, "preview")} on:mousedown={(event) => startPaneResize(event, "preview")}></button>
   </section>
 
   {#if directoryPickerOpen}

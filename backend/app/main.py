@@ -9,6 +9,10 @@ from fastapi.middleware.cors import CORSMiddleware
 from app.models import (
     AIHealthRequest,
     AIHealthResponse,
+    AIPreviewRequest,
+    AIPreviewResponse,
+    PreviewContentBlock,
+    PreviewMessage,
     BacklinksResponse,
     CreateLoreEntryRequest,
     CreateProjectRequest,
@@ -51,6 +55,7 @@ from app.models import (
 )
 from app.services import machine_settings as machine_settings_service
 from app.services.ai import providers as ai_providers
+from app.services.ai.preview import PreviewError, build_preview
 from app.services.project_service import ProjectService, ProjectServiceError
 
 
@@ -373,4 +378,44 @@ def ai_health(request: AIHealthRequest) -> AIHealthResponse:
         model=model,
         settings=settings,
         policy=policy,
+    )
+
+
+@app.post("/api/ai/preview", response_model=AIPreviewResponse)
+def ai_preview(request: AIPreviewRequest) -> AIPreviewResponse:
+    with translate_errors():
+        # `current_project` raises ProjectServiceError if no project is open;
+        # translate_errors handles that. Preview itself raises PreviewError for
+        # template / target failures, which we convert here.
+        try:
+            rendered, session_id = build_preview(
+                project_service=service,
+                template_source=request.template_source,
+                target_scene_id=request.target_scene_id,
+                session_id=request.session_id,
+                inputs=request.inputs,
+                text_before=request.text_before,
+                text_after=request.text_after,
+                commit=request.commit,
+            )
+        except PreviewError as exc:
+            raise HTTPException(status_code=exc.status_code, detail=exc.message) from exc
+
+    messages = [
+        PreviewMessage(
+            role=m.role,
+            blocks=[
+                PreviewContentBlock(text=b.text, cache_break_after=b.cache_break_after)
+                for b in m.blocks
+            ],
+        )
+        for m in rendered.messages
+    ]
+    char_count = sum(len(b.text) for m in messages for b in m.blocks)
+    return AIPreviewResponse(
+        messages=messages,
+        warnings=rendered.warnings,
+        char_count=char_count,
+        session_id=session_id,
+        rendered=True,
     )

@@ -1,6 +1,8 @@
 import type {
   AIHealthResponse,
   AIPolicy,
+  AIPreviewRequest,
+  AIPreviewResponse,
   BacklinksResponse,
   DirectoryListing,
   EntryTypeDefinition,
@@ -78,6 +80,12 @@ export const api = {
     return request<AIHealthResponse>("/ai/health", {
       method: "POST",
       body: JSON.stringify({ provider: provider ?? null, model: model ?? null }),
+    });
+  },
+  aiPreview(payload: AIPreviewRequest) {
+    return request<AIPreviewResponse>("/ai/preview", {
+      method: "POST",
+      body: JSON.stringify(payload),
     });
   },
   getStructure() {

@@ -384,4 +384,32 @@ class AIHealthResponse(BaseModel):
     error: str | None = None
 
 
+class AIPreviewRequest(BaseModel):
+    template_source: str = Field(min_length=1)
+    target_scene_id: str = Field(min_length=1)
+    session_id: str | None = None
+    inputs: dict[str, Any] = Field(default_factory=dict)
+    text_before: str = ""
+    text_after: str = ""
+    commit: bool = False
+
+
+class PreviewContentBlock(BaseModel):
+    text: str
+    cache_break_after: bool
+
+
+class PreviewMessage(BaseModel):
+    role: str
+    blocks: list[PreviewContentBlock]
+
+
+class AIPreviewResponse(BaseModel):
+    messages: list[PreviewMessage]
+    warnings: list[str] = Field(default_factory=list)
+    char_count: int
+    session_id: str | None = None
+    rendered: bool
+
+
 StructureNode.model_rebuild()

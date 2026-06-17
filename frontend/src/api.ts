@@ -1,4 +1,6 @@
 import type {
+  AIChatRequest,
+  AIChatResponse,
   AIHealthResponse,
   AIPolicy,
   AIPreviewRequest,
@@ -84,6 +86,12 @@ export const api = {
   },
   aiPreview(payload: AIPreviewRequest) {
     return request<AIPreviewResponse>("/ai/preview", {
+      method: "POST",
+      body: JSON.stringify(payload),
+    });
+  },
+  aiChat(payload: AIChatRequest) {
+    return request<AIChatResponse>("/ai/chat", {
       method: "POST",
       body: JSON.stringify(payload),
     });

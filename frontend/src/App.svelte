@@ -8,6 +8,7 @@
     AIPolicy,
     AIPreviewResponse,
     Backlink,
+    ChatMessage,
     DirectoryListing,
     EditableDocument,
     EntryMetadata,
@@ -132,6 +133,20 @@ The story so far:
   let previewResult: AIPreviewResponse | null = null;
   let previewError: string | null = null;
   let previewRunning = false;
+
+  // AI chat pane state.
+  const DEFAULT_CHAT_SYSTEM_PROMPT =
+    "You are a brainstorming partner for a fiction writer. " +
+    "Be concise, propose options, and don't write prose unless asked.";
+  let chatSystemPrompt = DEFAULT_CHAT_SYSTEM_PROMPT;
+  let chatProvider = "";
+  let chatModel = "";
+  let chatInput = "";
+  let chatHistory: ChatMessage[] = [];
+  let chatRunning = false;
+  let chatError: string | null = null;
+  let chatLastMeta: { provider: string; model: string; latency_ms: number } | null = null;
+  let chatScrollEl: HTMLDivElement | null = null;
   type MachineSettingsDraft = {
     anthropic_api_key: string;
     openai_api_key: string;
@@ -217,6 +232,7 @@ The story so far:
     todo: { title: "TODO", x: 1126, y: 18, width: 310, height: 320, z: 4 },
     search: { title: "Search", x: 1126, y: 360, width: 310, height: 320, z: 5 },
     preview: { title: "AI Preview", x: 720, y: 18, width: 480, height: 560, z: 6 },
+    chat: { title: "AI Chat", x: 1210, y: 18, width: 420, height: 600, z: 7 },
   };
   let editorPanes: EditorPaneState[] = [];
   let nextMetadataReloadToken = 1;
@@ -686,6 +702,61 @@ The story so far:
     } finally {
       previewRunning = false;
     }
+  }
+
+  async function sendChat() {
+    if (chatRunning) return;
+    const text = chatInput.trim();
+    if (!text) return;
+    chatError = null;
+    const userTurn: ChatMessage = { role: "user", content: text };
+    chatHistory = [...chatHistory, userTurn];
+    chatInput = "";
+    chatRunning = true;
+    try {
+      const response = await api.aiChat({
+        provider: chatProvider.trim() || null,
+        model: chatModel.trim() || null,
+        system_prompt: chatSystemPrompt,
+        messages: chatHistory,
+      });
+      if (response.ok) {
+        chatHistory = [...chatHistory, { role: "assistant", content: response.content }];
+        chatLastMeta = {
+          provider: response.provider,
+          model: response.model,
+          latency_ms: response.latency_ms,
+        };
+      } else {
+        chatError = response.error ?? "Unknown error";
+        // Drop the user turn we just appended so they can re-send after fixing things.
+        chatHistory = chatHistory.slice(0, -1);
+        chatInput = text;
+      }
+    } catch (e) {
+      chatError = (e as Error).message;
+      chatHistory = chatHistory.slice(0, -1);
+      chatInput = text;
+    } finally {
+      chatRunning = false;
+      await tick();
+      if (chatScrollEl) {
+        chatScrollEl.scrollTop = chatScrollEl.scrollHeight;
+      }
+    }
+  }
+
+  function handleChatInputKeydown(event: KeyboardEvent) {
+    if (event.key === "Enter" && (event.ctrlKey || event.metaKey)) {
+      event.preventDefault();
+      sendChat();
+    }
+  }
+
+  function clearChat() {
+    chatHistory = [];
+    chatLastMeta = null;
+    chatError = null;
   }
 
   async function runAIHealthCheck() {
@@ -2867,6 +2938,74 @@ The story so far:
       {/if}
     </div>
     <button class="pane-resize" type="button" aria-label="Resize AI Preview pane" on:keydown={(event) => handlePaneResizeKeydown(event, "preview")} on:mousedown={(event) => startPaneResize(event, "preview")}></button>
+  </section>
+
+  <!-- svelte-ignore a11y_no_noninteractive_element_interactions -->
+  <section class:hidden-pane={!isPaneVisible("chat")} class="pane chat-pane" data-pane-id="chat" style={paneStyle("chat")} aria-label="AI Chat pane" on:mousedown={() => focusPane("chat")}>
+    <header class="pane-header" role="button" tabindex="0" aria-label="Move AI Chat pane" on:keydown={(event) => handlePaneHeaderKeydown(event, "chat")} on:mousedown={(event) => startPaneDrag(event, "chat")}>
+      <h2>AI Chat</h2>
+    </header>
+    <div class="pane-content chat-panel">
+      <details class="chat-config">
+        <summary>System prompt &amp; provider</summary>
+        <label class="chat-label">
+          System prompt
+          <textarea class="chat-system" bind:value={chatSystemPrompt} spellcheck="false"></textarea>
+        </label>
+        <div class="chat-row">
+          <label class="chat-label flex-grow">
+            Provider override
+            <input type="text" bind:value={chatProvider} placeholder="(machine default)" />
+          </label>
+          <label class="chat-label flex-grow">
+            Model override
+            <input type="text" bind:value={chatModel} placeholder="(machine default)" />
+          </label>
+        </div>
+      </details>
+
+      <div class="chat-history" bind:this={chatScrollEl}>
+        {#if chatHistory.length === 0}
+          <p class="muted chat-empty">No messages yet. Ctrl/⌘+Enter to send.</p>
+        {/if}
+        {#each chatHistory as message}
+          <div class="chat-message chat-message-{message.role}">
+            <header class="chat-message-role">{message.role}</header>
+            <div class="chat-message-content">{message.content}</div>
+          </div>
+        {/each}
+        {#if chatRunning}
+          <div class="chat-message chat-message-assistant">
+            <header class="chat-message-role">assistant</header>
+            <div class="chat-message-content chat-typing">…thinking</div>
+          </div>
+        {/if}
+      </div>
+
+      {#if chatLastMeta}
+        <p class="chat-meta">
+          {chatLastMeta.provider} · {chatLastMeta.model} · {chatLastMeta.latency_ms} ms
+        </p>
+      {/if}
+      {#if chatError}
+        <p class="preview-result-error">{chatError}</p>
+      {/if}
+
+      <textarea
+        class="chat-input"
+        bind:value={chatInput}
+        on:keydown={handleChatInputKeydown}
+        placeholder="Message… (Ctrl/⌘+Enter to send)"
+        spellcheck="true"
+      ></textarea>
+      <div class="button-row">
+        <button type="button" disabled={!chatHistory.length || chatRunning} on:click={clearChat}>Clear</button>
+        <button type="button" class="primary" disabled={!chatInput.trim() || chatRunning} on:click={sendChat}>
+          {chatRunning ? "Sending…" : "Send"}
+        </button>
+      </div>
+    </div>
+    <button class="pane-resize" type="button" aria-label="Resize AI Chat pane" on:keydown={(event) => handlePaneResizeKeydown(event, "chat")} on:mousedown={(event) => startPaneResize(event, "chat")}></button>
   </section>
 
   {#if directoryPickerOpen}

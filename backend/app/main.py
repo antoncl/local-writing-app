@@ -7,6 +7,8 @@ from fastapi import FastAPI, HTTPException, Query
 from fastapi.middleware.cors import CORSMiddleware
 
 from app.models import (
+    AIChatRequest,
+    AIChatResponse,
     AIHealthRequest,
     AIHealthResponse,
     AIPreviewRequest,
@@ -418,4 +420,39 @@ def ai_preview(request: AIPreviewRequest) -> AIPreviewResponse:
         char_count=char_count,
         session_id=session_id,
         rendered=True,
+    )
+
+
+# --- AI: chat completion (first real model call) ---
+
+
+@app.post("/api/ai/chat", response_model=AIChatResponse)
+def ai_chat(request: AIChatRequest) -> AIChatResponse:
+    settings = machine_settings_service.load_settings()
+    provider_name = request.provider or settings.default_provider
+    model = request.model or settings.default_models.get(provider_name or "", "")
+    try:
+        project_info = service.current_project()
+        policy = project_info.ai_policy
+    except ProjectServiceError:
+        policy = "off"
+
+    result = ai_providers.chat(
+        provider_name=provider_name,
+        model=model,
+        system_prompt=request.system_prompt,
+        messages=[m.model_dump() for m in request.messages],
+        max_tokens=request.max_tokens,
+        settings=settings,
+        policy=policy,
+    )
+    return AIChatResponse(
+        role="assistant",
+        content=result.content,
+        provider=result.provider,
+        model=result.model,
+        latency_ms=result.latency_ms,
+        policy=policy,
+        ok=result.ok,
+        error=result.error,
     )

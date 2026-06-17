@@ -412,4 +412,28 @@ class AIPreviewResponse(BaseModel):
     rendered: bool
 
 
+class ChatMessage(BaseModel):
+    role: Literal["user", "assistant"]
+    content: str
+
+
+class AIChatRequest(BaseModel):
+    provider: str | None = None
+    model: str | None = None
+    system_prompt: str = ""
+    messages: list[ChatMessage] = Field(default_factory=list)
+    max_tokens: int = 1024
+
+
+class AIChatResponse(BaseModel):
+    role: Literal["assistant"] = "assistant"
+    content: str
+    provider: str
+    model: str
+    latency_ms: int
+    policy: AIPolicy
+    ok: bool
+    error: str | None = None
+
+
 StructureNode.model_rebuild()

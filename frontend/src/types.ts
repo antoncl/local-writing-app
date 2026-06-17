@@ -207,6 +207,30 @@ export type AIPreviewResponse = {
   rendered: boolean;
 };
 
+export type ChatMessage = {
+  role: "user" | "assistant";
+  content: string;
+};
+
+export type AIChatRequest = {
+  provider?: string | null;
+  model?: string | null;
+  system_prompt?: string;
+  messages: ChatMessage[];
+  max_tokens?: number;
+};
+
+export type AIChatResponse = {
+  role: "assistant";
+  content: string;
+  provider: string;
+  model: string;
+  latency_ms: number;
+  policy: AIPolicy;
+  ok: boolean;
+  error?: string | null;
+};
+
 export type DirectoryEntry = {
   name: string;
   path: string;

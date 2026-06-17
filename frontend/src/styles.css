@@ -2167,6 +2167,63 @@ h3 {
   padding: 4px 10px;
 }
 
+.ai-inline-toolbar {
+  position: absolute;
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  padding: 4px 6px;
+  background: rgba(34, 44, 40, 0.96);
+  border-radius: 6px;
+  font-size: 12px;
+  color: #f5f7f6;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.22);
+  z-index: 30;
+  white-space: nowrap;
+  user-select: none;
+  transform: translateY(-2px);
+}
+
+.ai-toolbar-btn {
+  background: transparent;
+  border: none;
+  color: inherit;
+  padding: 4px 9px;
+  font-size: 12px;
+  font-weight: 500;
+  cursor: pointer;
+  border-radius: 4px;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  line-height: 1;
+}
+
+.ai-toolbar-btn:hover {
+  background: rgba(255, 255, 255, 0.13);
+}
+
+.ai-toolbar-btn:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
+.ai-toolbar-accept {
+  color: #9adfba;
+}
+
+.ai-toolbar-discard {
+  color: #e9b4ab;
+}
+
+.ai-toolbar-meta {
+  padding: 0 8px 0 6px;
+  color: #b6c7c1;
+  font-style: italic;
+  border-left: 1px solid rgba(255, 255, 255, 0.15);
+  margin-left: 2px;
+}
+
 .chat-panel {
   display: grid;
   gap: 8px;

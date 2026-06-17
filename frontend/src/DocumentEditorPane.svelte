@@ -198,7 +198,8 @@ Open the scene. Write about {{ input.words | default(250) }} words to start it. 
   let aiGenerating = false;
   let aiError: string | null = null;
   let aiSuggestionId: string | null = null;
-  let aiSuggestionMeta: { provider: string; model: string; latency_ms: number; truncated: boolean } | null = null;
+  let aiSuggestionMeta: { provider: string; model: string; latency_ms: number; truncated: boolean; wordCount: number } | null = null;
+  let aiToolbarPosition: { x: number; y: number; visible: boolean } = { x: 0, y: 0, visible: false };
   let aiNextSuggestionId = 1;
 
   $: slashCommands = editor && documentKind === "scene" ? getSlashCommands() : [];
@@ -317,10 +318,12 @@ Open the scene. Write about {{ input.words | default(250) }} words to start it. 
         if (!enforceUniqueTodoAnchors()) {
           emitChange();
         }
+        if (aiSuggestionId) updateAIToolbarPosition();
       },
       onSelectionUpdate: () => {
         updateSelectionMenu();
         updateTableMenu();
+        if (aiSuggestionId) updateAIToolbarPosition();
       },
       onBlur: () => {
         hideSelectionMenu();
@@ -929,11 +932,35 @@ Open the scene. Write about {{ input.words | default(250) }} words to start it. 
         model: response.model,
         latency_ms: response.latency_ms,
         truncated: response.truncated,
+        wordCount: countWords(response.content),
       };
     } catch (e) {
       aiError = (e as Error).message;
     } finally {
       aiGenerating = false;
+    }
+  }
+
+  function updateAIToolbarPosition() {
+    if (!editor || !editorFrame || !aiSuggestionId) {
+      if (aiToolbarPosition.visible) aiToolbarPosition = { x: 0, y: 0, visible: false };
+      return;
+    }
+    const range = findAISuggestionRange(aiSuggestionId);
+    if (!range) {
+      aiToolbarPosition = { x: 0, y: 0, visible: false };
+      return;
+    }
+    try {
+      const coords = editor.view.coordsAtPos(range.from);
+      const frameBounds = editorFrame.getBoundingClientRect();
+      aiToolbarPosition = {
+        x: coords.left - frameBounds.left + editorFrame.scrollLeft,
+        y: coords.top - frameBounds.top + editorFrame.scrollTop,
+        visible: true,
+      };
+    } catch {
+      aiToolbarPosition = { x: 0, y: 0, visible: false };
     }
   }
 
@@ -970,6 +997,8 @@ Open the scene. Write about {{ input.words | default(250) }} words to start it. 
       .run();
 
     aiSuggestionId = suggestionId;
+    // Defer toolbar positioning until the editor has rendered the new content.
+    requestAnimationFrame(updateAIToolbarPosition);
   }
 
   function findAISuggestionRange(suggestionId: string): { from: number; to: number } | null {
@@ -1005,6 +1034,7 @@ Open the scene. Write about {{ input.words | default(250) }} words to start it. 
     aiSuggestionId = null;
     aiSuggestionMeta = null;
     aiError = null;
+    aiToolbarPosition = { x: 0, y: 0, visible: false };
   }
 
   function revertAISuggestion() {
@@ -1016,6 +1046,13 @@ Open the scene. Write about {{ input.words | default(250) }} words to start it. 
     aiSuggestionId = null;
     aiSuggestionMeta = null;
     aiError = null;
+    aiToolbarPosition = { x: 0, y: 0, visible: false };
+  }
+
+  async function retryAISuggestion() {
+    if (!aiSuggestionId || aiGenerating) return;
+    revertAISuggestion();
+    await runAIContinue();
   }
 
   async function focusAndRun(command: () => void | Promise<void>) {
@@ -1701,27 +1738,31 @@ Open the scene. Write about {{ input.words | default(250) }} words to start it. 
   </section>
 
   <div class:empty-editor={editorEmpty} class:lore-editor={documentKind === "lore"} class:hidden-body={!hasBody} class="editor-wrap" bind:this={editorFrame}>
-    {#if aiGenerating || aiSuggestionId || aiError}
-      <div class="ai-banner" class:ai-banner-error={aiError && !aiSuggestionId} class:ai-banner-pending={aiSuggestionId} class:ai-banner-loading={aiGenerating}>
+    {#if aiGenerating || aiError}
+      <div class="ai-banner" class:ai-banner-error={!!aiError} class:ai-banner-loading={aiGenerating}>
         {#if aiGenerating}
           <span class="ai-banner-label">AI generating…</span>
-        {:else if aiSuggestionId}
-          <span class="ai-banner-label">
-            AI suggestion
-            {#if aiSuggestionMeta}
-              <span class="ai-banner-meta">
-                · {aiSuggestionMeta.provider} · {aiSuggestionMeta.model} · {aiSuggestionMeta.latency_ms} ms
-                {#if aiSuggestionMeta.truncated}· <strong>truncated</strong>{/if}
-              </span>
-            {/if}
-          </span>
-          <div class="ai-banner-actions">
-            <button type="button" on:click={revertAISuggestion}>Revert</button>
-            <button type="button" class="primary" on:click={acceptAISuggestion}>Accept</button>
-          </div>
         {:else if aiError}
           <span class="ai-banner-label">AI error: {aiError}</span>
           <button type="button" on:click={() => (aiError = null)}>Dismiss</button>
+        {/if}
+      </div>
+    {/if}
+    {#if aiSuggestionId && aiToolbarPosition.visible}
+      <div class="ai-inline-toolbar" style={`left: ${aiToolbarPosition.x}px; top: ${aiToolbarPosition.y}px;`}>
+        <button type="button" class="ai-toolbar-btn ai-toolbar-accept" on:mousedown|preventDefault={acceptAISuggestion} title="Accept (keep the text)">
+          <span aria-hidden="true">✓</span> Accept
+        </button>
+        <button type="button" class="ai-toolbar-btn" on:mousedown|preventDefault={retryAISuggestion} title="Retry (regenerate)" disabled={aiGenerating}>
+          <span aria-hidden="true">↻</span> Retry
+        </button>
+        <button type="button" class="ai-toolbar-btn ai-toolbar-discard" on:mousedown|preventDefault={revertAISuggestion} title="Discard (delete the text)">
+          <span aria-hidden="true">✕</span> Discard
+        </button>
+        {#if aiSuggestionMeta}
+          <span class="ai-toolbar-meta">
+            {aiSuggestionMeta.wordCount} words, {aiSuggestionMeta.model}{#if aiSuggestionMeta.truncated} · truncated{/if}
+          </span>
         {/if}
       </div>
     {/if}

@@ -1,6 +1,8 @@
 import type {
   AIChatRequest,
   AIChatResponse,
+  AIGenerateRequest,
+  AIGenerateResponse,
   AIHealthResponse,
   AIPolicy,
   AIPreviewRequest,
@@ -92,6 +94,12 @@ export const api = {
   },
   aiChat(payload: AIChatRequest) {
     return request<AIChatResponse>("/ai/chat", {
+      method: "POST",
+      body: JSON.stringify(payload),
+    });
+  },
+  aiGenerate(payload: AIGenerateRequest) {
+    return request<AIGenerateResponse>("/ai/generate", {
       method: "POST",
       body: JSON.stringify(payload),
     });

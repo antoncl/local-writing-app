@@ -438,4 +438,33 @@ class AIChatResponse(BaseModel):
     truncated: bool = False
 
 
+class AIGenerateRequest(BaseModel):
+    template_source: str = Field(min_length=1)
+    target_scene_id: str = Field(min_length=1)
+    session_id: str | None = None
+    inputs: dict[str, Any] = Field(default_factory=dict)
+    text_before: str = ""
+    text_after: str = ""
+    commit: bool = False
+    provider: str | None = None
+    model: str | None = None
+    max_tokens: int = 4096
+
+
+class AIGenerateResponse(BaseModel):
+    content: str
+    rendered_messages: list[PreviewMessage] = Field(default_factory=list)
+    rendered_warnings: list[str] = Field(default_factory=list)
+    char_count: int
+    provider: str
+    model: str
+    latency_ms: int
+    policy: AIPolicy
+    ok: bool
+    error: str | None = None
+    stop_reason: str | None = None
+    truncated: bool = False
+    session_id: str | None = None
+
+
 StructureNode.model_rebuild()

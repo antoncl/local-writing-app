@@ -4,6 +4,7 @@
   import CodeEditor from "./CodeEditor.svelte";
   import DocumentEditorPane from "./DocumentEditorPane.svelte";
   import type {
+    AIGenerateResponse,
     AIHealthResponse,
     AIPolicy,
     AIPreviewResponse,
@@ -133,6 +134,9 @@ The story so far:
   let previewResult: AIPreviewResponse | null = null;
   let previewError: string | null = null;
   let previewRunning = false;
+  let generateResult: AIGenerateResponse | null = null;
+  let generateRunning = false;
+  let generateMaxTokens = 4096;
 
   // AI chat pane state.
   const DEFAULT_CHAT_SYSTEM_PROMPT =
@@ -668,19 +672,25 @@ The story so far:
     }
   }
 
+  function parsePreviewInputs(): { ok: true; inputs: Record<string, unknown> } | { ok: false; error: string } {
+    if (!previewInputsJson.trim()) return { ok: true, inputs: {} };
+    try {
+      const parsed = JSON.parse(previewInputsJson);
+      if (typeof parsed !== "object" || parsed === null || Array.isArray(parsed)) {
+        return { ok: false, error: "Inputs must be a JSON object." };
+      }
+      return { ok: true, inputs: parsed };
+    } catch (e) {
+      return { ok: false, error: `Inputs JSON parse error: ${(e as Error).message}` };
+    }
+  }
+
   async function runAIPreview() {
     previewError = null;
-    let inputsParsed: Record<string, unknown> = {};
-    if (previewInputsJson.trim()) {
-      try {
-        inputsParsed = JSON.parse(previewInputsJson);
-        if (typeof inputsParsed !== "object" || inputsParsed === null || Array.isArray(inputsParsed)) {
-          throw new Error("Inputs must be a JSON object.");
-        }
-      } catch (e) {
-        previewError = `Inputs JSON parse error: ${(e as Error).message}`;
-        return;
-      }
+    const parsed = parsePreviewInputs();
+    if (!parsed.ok) {
+      previewError = parsed.error;
+      return;
     }
     if (!previewTargetSceneId.trim()) {
       previewError = "Target scene ID is required.";
@@ -692,7 +702,7 @@ The story so far:
         template_source: previewTemplate,
         target_scene_id: previewTargetSceneId.trim(),
         session_id: previewSessionId.trim() || null,
-        inputs: inputsParsed,
+        inputs: parsed.inputs,
         text_before: previewTextBefore,
         text_after: previewTextAfter,
         commit: previewCommit,
@@ -702,6 +712,37 @@ The story so far:
       previewResult = null;
     } finally {
       previewRunning = false;
+    }
+  }
+
+  async function runAIGenerate() {
+    previewError = null;
+    const parsed = parsePreviewInputs();
+    if (!parsed.ok) {
+      previewError = parsed.error;
+      return;
+    }
+    if (!previewTargetSceneId.trim()) {
+      previewError = "Target scene ID is required.";
+      return;
+    }
+    generateRunning = true;
+    try {
+      generateResult = await api.aiGenerate({
+        template_source: previewTemplate,
+        target_scene_id: previewTargetSceneId.trim(),
+        session_id: previewSessionId.trim() || null,
+        inputs: parsed.inputs,
+        text_before: previewTextBefore,
+        text_after: previewTextAfter,
+        commit: previewCommit,
+        max_tokens: generateMaxTokens,
+      });
+    } catch (e) {
+      previewError = (e as Error).message;
+      generateResult = null;
+    } finally {
+      generateRunning = false;
     }
   }
 
@@ -2899,14 +2940,42 @@ The story so far:
         </label>
       </div>
 
-      <div class="button-row">
+      <div class="button-row preview-actions">
         <button type="button" class="primary" disabled={previewRunning || !previewTargetSceneId.trim()} on:click={runAIPreview}>
           {previewRunning ? "Rendering…" : "Preview"}
         </button>
+        <button type="button" disabled={generateRunning || !previewTargetSceneId.trim()} on:click={runAIGenerate}>
+          {generateRunning ? "Generating…" : "Generate"}
+        </button>
+        <label class="inline-tokens">
+          max tokens
+          <input type="number" min="64" max="32768" step="64" bind:value={generateMaxTokens} />
+        </label>
       </div>
 
       {#if previewError}
         <p class="preview-result-error">{previewError}</p>
+      {/if}
+
+      {#if generateResult}
+        <div class="generate-result">
+          <header class="generate-result-header">
+            <span class="generate-result-title">Generated</span>
+            <span class="generate-result-meta">
+              {generateResult.provider} · {generateResult.model} · {generateResult.latency_ms} ms · in: {generateResult.char_count} chars
+            </span>
+          </header>
+          {#if !generateResult.ok}
+            <p class="preview-result-error">{generateResult.error}</p>
+          {:else}
+            <pre class="generate-result-content">{generateResult.content}</pre>
+            {#if generateResult.truncated}
+              <p class="chat-truncated-banner">
+                Response cut off — hit max tokens. Increase the limit and re-run.
+              </p>
+            {/if}
+          {/if}
+        </div>
       {/if}
 
       {#if previewResult}

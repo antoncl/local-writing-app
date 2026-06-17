@@ -1,8 +1,12 @@
-"""Preview dispatch — renders a template against a target scene and returns
-structured messages for the UI to render.
+"""Preview + generation dispatch.
 
-This is the M2.4 surface. It does NOT call any model — preview is for staring
-at the assembled prompt before paying tokens for it.
+Preview (`build_preview`) renders a template against a target scene and
+returns structured messages. It does NOT call a model. M2.4.
+
+Generation (`build_chat_payload` + caller) converts the rendered template
+into the chat-API shape (system_prompt + alternating user/assistant
+messages). The actual chat call lives in the route handler, which has
+access to settings and policy. M4.0.
 """
 
 from __future__ import annotations
@@ -77,3 +81,25 @@ def build_preview(
         session.commit()
 
     return rendered, session_id
+
+
+def build_chat_payload(rendered: RenderedTemplate) -> tuple[str, list[dict[str, str]]]:
+    """Convert a RenderedTemplate into a chat-API payload.
+
+    System messages are concatenated into a single system_prompt string.
+    User and assistant messages pass through verbatim in order. Other roles
+    are ignored (warnings on the rendered template already flag them).
+
+    Returns: (system_prompt, messages)
+    """
+    system_parts: list[str] = []
+    chat_messages: list[dict[str, str]] = []
+    for msg in rendered.messages:
+        text = "".join(block.text for block in msg.blocks)
+        if msg.role == "system":
+            if text.strip():
+                system_parts.append(text)
+        elif msg.role in ("user", "assistant"):
+            chat_messages.append({"role": msg.role, "content": text})
+    system_prompt = "\n\n".join(system_parts)
+    return system_prompt, chat_messages

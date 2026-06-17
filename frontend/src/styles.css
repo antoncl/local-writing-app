@@ -2045,6 +2045,70 @@ h3 {
   border-bottom: 1px dashed #6f9d8b;
 }
 
+.preview-actions {
+  align-items: center;
+  gap: 10px;
+}
+
+.inline-tokens {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+  color: #4d5753;
+}
+
+.inline-tokens input {
+  width: 80px;
+  font-size: 13px;
+  padding: 4px 6px;
+  border: 1px solid #cbd6d2;
+  border-radius: 4px;
+}
+
+.generate-result {
+  border: 1px solid #b6cdc1;
+  border-radius: 6px;
+  background: #f4f9f6;
+  overflow: hidden;
+}
+
+.generate-result-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 6px 10px;
+  background: #e1ede6;
+  border-bottom: 1px solid #b6cdc1;
+}
+
+.generate-result-title {
+  font-size: 12px;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: #1d4d36;
+}
+
+.generate-result-meta {
+  font-size: 12px;
+  color: #4d5753;
+}
+
+.generate-result-content {
+  margin: 0;
+  padding: 10px 14px;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 15px;
+  line-height: 1.55;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  word-break: break-word;
+  color: #2a3431;
+  max-height: none;
+}
+
 .chat-panel {
   display: grid;
   gap: 8px;

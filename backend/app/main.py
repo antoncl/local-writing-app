@@ -9,6 +9,8 @@ from fastapi.middleware.cors import CORSMiddleware
 from app.models import (
     AIChatRequest,
     AIChatResponse,
+    AIGenerateRequest,
+    AIGenerateResponse,
     AIHealthRequest,
     AIHealthResponse,
     AIPreviewRequest,
@@ -57,7 +59,7 @@ from app.models import (
 )
 from app.services import machine_settings as machine_settings_service
 from app.services.ai import providers as ai_providers
-from app.services.ai.preview import PreviewError, build_preview
+from app.services.ai.preview import PreviewError, build_chat_payload, build_preview
 from app.services.project_service import ProjectService, ProjectServiceError
 
 
@@ -459,4 +461,85 @@ def ai_chat(request: AIChatRequest) -> AIChatResponse:
         error=result.error,
         stop_reason=result.stop_reason,
         truncated=truncated,
+    )
+
+
+# --- AI: generate (template + provider, the full pipeline) ---
+
+
+@app.post("/api/ai/generate", response_model=AIGenerateResponse)
+def ai_generate(request: AIGenerateRequest) -> AIGenerateResponse:
+    with translate_errors():
+        try:
+            rendered, session_id = build_preview(
+                project_service=service,
+                template_source=request.template_source,
+                target_scene_id=request.target_scene_id,
+                session_id=request.session_id,
+                inputs=request.inputs,
+                text_before=request.text_before,
+                text_after=request.text_after,
+                commit=request.commit,
+            )
+        except PreviewError as exc:
+            raise HTTPException(status_code=exc.status_code, detail=exc.message) from exc
+
+    system_prompt, chat_messages = build_chat_payload(rendered)
+
+    preview_messages = [
+        PreviewMessage(
+            role=m.role,
+            blocks=[
+                PreviewContentBlock(text=b.text, cache_break_after=b.cache_break_after)
+                for b in m.blocks
+            ],
+        )
+        for m in rendered.messages
+    ]
+    char_count = sum(len(b.text) for m in preview_messages for b in m.blocks)
+
+    if not chat_messages:
+        raise HTTPException(
+            status_code=400,
+            detail=(
+                "Template produced no user/assistant messages — nothing to send to "
+                "the model. The template must contain at least one {% role \"user\" %} "
+                "block with non-empty content."
+            ),
+        )
+
+    settings = machine_settings_service.load_settings()
+    provider_name = request.provider or settings.default_provider
+    model = request.model or settings.default_models.get(provider_name or "", "")
+    try:
+        project_info = service.current_project()
+        policy = project_info.ai_policy
+    except ProjectServiceError:
+        policy = "off"
+
+    result = ai_providers.chat(
+        provider_name=provider_name,
+        model=model,
+        system_prompt=system_prompt,
+        messages=chat_messages,
+        max_tokens=request.max_tokens,
+        settings=settings,
+        policy=policy,
+    )
+    truncated = result.stop_reason in {"max_tokens", "length"}
+
+    return AIGenerateResponse(
+        content=result.content,
+        rendered_messages=preview_messages,
+        rendered_warnings=rendered.warnings,
+        char_count=char_count,
+        provider=result.provider,
+        model=result.model,
+        latency_ms=result.latency_ms,
+        policy=policy,
+        ok=result.ok,
+        error=result.error,
+        stop_reason=result.stop_reason,
+        truncated=truncated,
+        session_id=session_id,
     )

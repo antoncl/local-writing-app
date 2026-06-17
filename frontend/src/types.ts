@@ -233,6 +233,35 @@ export type AIChatResponse = {
   truncated: boolean;
 };
 
+export type AIGenerateRequest = {
+  template_source: string;
+  target_scene_id: string;
+  session_id?: string | null;
+  inputs?: Record<string, unknown>;
+  text_before?: string;
+  text_after?: string;
+  commit?: boolean;
+  provider?: string | null;
+  model?: string | null;
+  max_tokens?: number;
+};
+
+export type AIGenerateResponse = {
+  content: string;
+  rendered_messages: PreviewMessage[];
+  rendered_warnings: string[];
+  char_count: number;
+  provider: string;
+  model: string;
+  latency_ms: number;
+  policy: AIPolicy;
+  ok: boolean;
+  error?: string | null;
+  stop_reason?: string | null;
+  truncated: boolean;
+  session_id?: string | null;
+};
+
 export type DirectoryEntry = {
   name: string;
   path: string;

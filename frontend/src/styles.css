@@ -2100,9 +2100,9 @@ h3 {
 }
 
 .chat-history {
-  display: grid;
+  display: flex;
+  flex-direction: column;
   gap: 8px;
-  align-content: start;
   overflow-y: auto;
   overflow-x: hidden;
   padding: 4px 2px;
@@ -2120,6 +2120,7 @@ h3 {
   border-radius: 6px;
   overflow: hidden;
   min-width: 0;
+  flex-shrink: 0;
 }
 
 .chat-message-user {

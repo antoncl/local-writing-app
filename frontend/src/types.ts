@@ -229,6 +229,8 @@ export type AIChatResponse = {
   policy: AIPolicy;
   ok: boolean;
   error?: string | null;
+  stop_reason?: string | null;
+  truncated: boolean;
 };
 
 export type DirectoryEntry = {

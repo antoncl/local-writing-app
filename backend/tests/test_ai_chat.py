@@ -54,7 +54,7 @@ class ChatEndpointTests(unittest.TestCase):
         self._allow_cloud()
         loaded = _set_machine_keys(anthropic="sk-ant-test", default_provider="anthropic")
         with patch("app.services.machine_settings.load_settings", return_value=loaded), \
-             patch("app.services.ai.providers._anthropic_chat", return_value="Hello back."):
+             patch("app.services.ai.providers._anthropic_chat", return_value=("Hello back.", "end_turn")):
             response = self.client.post(
                 "/api/ai/chat",
                 json={
@@ -79,7 +79,7 @@ class ChatEndpointTests(unittest.TestCase):
         with patch("app.services.machine_settings.load_settings", return_value=loaded), \
              patch(
                 "app.services.ai.providers._openai_compatible_chat",
-                return_value="Local reply.",
+                return_value=("Local reply.", "stop"),
             ) as mock_chat:
             response = self.client.post(
                 "/api/ai/chat",
@@ -104,7 +104,7 @@ class ChatEndpointTests(unittest.TestCase):
         with patch("app.services.machine_settings.load_settings", return_value=loaded), \
              patch(
                 "app.services.ai.providers._anthropic_chat",
-                return_value="Third reply.",
+                return_value=("Third reply.", "end_turn"),
             ) as mock_chat:
             self.client.post(
                 "/api/ai/chat",
@@ -170,7 +170,7 @@ class ChatEndpointTests(unittest.TestCase):
         with patch("app.services.machine_settings.load_settings", return_value=loaded), \
              patch(
                 "app.services.ai.providers._openai_compatible_chat",
-                return_value="OK.",
+                return_value=("OK.", "stop"),
             ):
             response = self.client.post(
                 "/api/ai/chat",
@@ -232,13 +232,54 @@ class ChatEndpointTests(unittest.TestCase):
         self.assertFalse(body["ok"])
         self.assertIn("Unknown provider", body["error"])
 
+    def test_truncated_flag_set_when_stop_reason_is_max_tokens(self) -> None:
+        self._allow_cloud()
+        loaded = _set_machine_keys(anthropic="sk-ant-test")
+        with patch("app.services.machine_settings.load_settings", return_value=loaded), \
+             patch(
+                "app.services.ai.providers._anthropic_chat",
+                return_value=("partial response that hit the cap", "max_tokens"),
+            ):
+            response = self.client.post(
+                "/api/ai/chat",
+                json={
+                    "provider": "anthropic",
+                    "model": "claude-haiku-4-5-20251001",
+                    "messages": [{"role": "user", "content": "Write something long."}],
+                },
+            )
+        body = response.json()
+        self.assertTrue(body["ok"])
+        self.assertTrue(body["truncated"])
+        self.assertEqual(body["stop_reason"], "max_tokens")
+
+    def test_truncated_false_on_normal_stop(self) -> None:
+        self._allow_cloud()
+        loaded = _set_machine_keys(anthropic="sk-ant-test")
+        with patch("app.services.machine_settings.load_settings", return_value=loaded), \
+             patch(
+                "app.services.ai.providers._anthropic_chat",
+                return_value=("complete reply", "end_turn"),
+            ):
+            response = self.client.post(
+                "/api/ai/chat",
+                json={
+                    "provider": "anthropic",
+                    "model": "claude-haiku-4-5-20251001",
+                    "messages": [{"role": "user", "content": "hi"}],
+                },
+            )
+        body = response.json()
+        self.assertFalse(body["truncated"])
+        self.assertEqual(body["stop_reason"], "end_turn")
+
     def test_provider_defaults_from_machine_settings(self) -> None:
         self._allow_local_only()
         loaded = _set_machine_keys(default_provider="ollama")
         with patch("app.services.machine_settings.load_settings", return_value=loaded), \
              patch(
                 "app.services.ai.providers._openai_compatible_chat",
-                return_value="default-provider reply",
+                return_value=("default-provider reply", "stop"),
             ):
             response = self.client.post(
                 "/api/ai/chat",

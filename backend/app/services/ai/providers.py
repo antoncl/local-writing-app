@@ -23,6 +23,7 @@ class ChatResult:
     latency_ms: int
     ok: bool
     error: str | None = None
+    stop_reason: str | None = None
 
 
 def _policy_allows(policy: AIPolicy, provider: str) -> tuple[bool, str | None]:
@@ -227,7 +228,7 @@ def chat(
     started = time.perf_counter()
     try:
         if provider_name == "anthropic":
-            content = _anthropic_chat(
+            content, stop_reason = _anthropic_chat(
                 api_key=settings.providers.anthropic_api_key,
                 model=model,
                 system_prompt=system_prompt,
@@ -235,7 +236,7 @@ def chat(
                 max_tokens=max_tokens,
             )
         elif provider_name == "openai":
-            content = _openai_compatible_chat(
+            content, stop_reason = _openai_compatible_chat(
                 base_url="https://api.openai.com/v1",
                 api_key=settings.providers.openai_api_key,
                 model=model,
@@ -245,7 +246,7 @@ def chat(
                 requires_key=True,
             )
         elif provider_name == "openrouter":
-            content = _openai_compatible_chat(
+            content, stop_reason = _openai_compatible_chat(
                 base_url="https://openrouter.ai/api/v1",
                 api_key=settings.providers.openrouter_api_key,
                 model=model,
@@ -258,7 +259,7 @@ def chat(
             base = settings.providers.ollama_host.rstrip("/")
             if not base.endswith("/v1"):
                 base = base + "/v1"
-            content = _openai_compatible_chat(
+            content, stop_reason = _openai_compatible_chat(
                 base_url=base,
                 api_key="ollama",
                 model=model,
@@ -288,13 +289,14 @@ def chat(
         model=model,
         latency_ms=int((time.perf_counter() - started) * 1000),
         ok=True,
+        stop_reason=stop_reason,
     )
 
 
 def _anthropic_chat(
     *, api_key: str, model: str, system_prompt: str,
     messages: list[dict[str, str]], max_tokens: int,
-) -> str:
+) -> tuple[str, str | None]:
     if not api_key:
         raise _ProviderError("Anthropic API key is not configured.")
     try:
@@ -302,7 +304,7 @@ def _anthropic_chat(
     except ImportError as exc:
         raise _ProviderError(f"anthropic package not installed: {exc}") from exc
 
-    client = Anthropic(api_key=api_key, timeout=60.0)
+    client = Anthropic(api_key=api_key, timeout=120.0)
     kwargs: dict = {
         "model": model,
         "max_tokens": max_tokens,
@@ -317,13 +319,14 @@ def _anthropic_chat(
         text = getattr(block, "text", None)
         if text:
             parts.append(text)
-    return "".join(parts)
+    stop_reason = getattr(response, "stop_reason", None)
+    return "".join(parts), stop_reason
 
 
 def _openai_compatible_chat(
     *, base_url: str, api_key: str, model: str, system_prompt: str,
     messages: list[dict[str, str]], max_tokens: int, requires_key: bool,
-) -> str:
+) -> tuple[str, str | None]:
     if requires_key and not api_key:
         raise _ProviderError("API key is not configured for this provider.")
     try:
@@ -331,7 +334,7 @@ def _openai_compatible_chat(
     except ImportError as exc:
         raise _ProviderError(f"openai package not installed: {exc}") from exc
 
-    client = OpenAI(base_url=base_url, api_key=api_key or "sk-none", timeout=120.0)
+    client = OpenAI(base_url=base_url, api_key=api_key or "sk-none", timeout=180.0)
     full_messages: list[dict[str, str]] = []
     if system_prompt:
         full_messages.append({"role": "system", "content": system_prompt})
@@ -342,4 +345,5 @@ def _openai_compatible_chat(
         messages=full_messages,
     )
     choice = response.choices[0]
-    return choice.message.content or ""
+    stop_reason = getattr(choice, "finish_reason", None)
+    return choice.message.content or "", stop_reason

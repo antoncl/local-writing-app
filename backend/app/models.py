@@ -422,7 +422,7 @@ class AIChatRequest(BaseModel):
     model: str | None = None
     system_prompt: str = ""
     messages: list[ChatMessage] = Field(default_factory=list)
-    max_tokens: int = 1024
+    max_tokens: int = 4096
 
 
 class AIChatResponse(BaseModel):
@@ -434,6 +434,8 @@ class AIChatResponse(BaseModel):
     policy: AIPolicy
     ok: bool
     error: str | None = None
+    stop_reason: str | None = None
+    truncated: bool = False
 
 
 StructureNode.model_rebuild()

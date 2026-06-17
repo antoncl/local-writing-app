@@ -142,11 +142,12 @@ The story so far:
   let chatProvider = "";
   let chatModel = "";
   let chatInput = "";
-  let chatHistory: ChatMessage[] = [];
+  let chatHistory: { role: "user" | "assistant"; content: string; truncated?: boolean }[] = [];
   let chatRunning = false;
   let chatError: string | null = null;
   let chatLastMeta: { provider: string; model: string; latency_ms: number } | null = null;
   let chatScrollEl: HTMLDivElement | null = null;
+  let chatMaxTokens = 4096;
   type MachineSettingsDraft = {
     anthropic_api_key: string;
     openai_api_key: string;
@@ -718,10 +719,14 @@ The story so far:
         provider: chatProvider.trim() || null,
         model: chatModel.trim() || null,
         system_prompt: chatSystemPrompt,
-        messages: chatHistory,
+        messages: chatHistory.map(({ role, content }) => ({ role, content })),
+        max_tokens: chatMaxTokens,
       });
       if (response.ok) {
-        chatHistory = [...chatHistory, { role: "assistant", content: response.content }];
+        chatHistory = [
+          ...chatHistory,
+          { role: "assistant", content: response.content, truncated: response.truncated },
+        ];
         chatLastMeta = {
           provider: response.provider,
           model: response.model,
@@ -2962,6 +2967,10 @@ The story so far:
             <input type="text" bind:value={chatModel} placeholder="(machine default)" />
           </label>
         </div>
+        <label class="chat-label">
+          Max response tokens
+          <input type="number" min="64" max="32768" step="64" bind:value={chatMaxTokens} />
+        </label>
       </details>
 
       <div class="chat-history" bind:this={chatScrollEl}>
@@ -2972,6 +2981,11 @@ The story so far:
           <div class="chat-message chat-message-{message.role}">
             <header class="chat-message-role">{message.role}</header>
             <div class="chat-message-content">{message.content}</div>
+            {#if message.truncated}
+              <div class="chat-truncated-banner">
+                Response cut off — hit max tokens. Increase the limit in System prompt &amp; provider, then re-send.
+              </div>
+            {/if}
           </div>
         {/each}
         {#if chatRunning}

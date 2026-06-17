@@ -2157,6 +2157,22 @@ h3 {
   font-style: italic;
 }
 
+.chat-truncated-banner {
+  padding: 6px 12px;
+  background: #fff7e1;
+  border-top: 1px solid #ddc28d;
+  color: #6b4d0c;
+  font-size: 13px;
+  line-height: 1.4;
+}
+
+/* Defensive: nothing in a chat message should ever be height-clipped. */
+.chat-message,
+.chat-message-content {
+  height: auto;
+  max-height: none;
+}
+
 .chat-meta {
   margin: 0;
   font-size: 13px;

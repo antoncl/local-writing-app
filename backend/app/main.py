@@ -446,6 +446,8 @@ def ai_chat(request: AIChatRequest) -> AIChatResponse:
         settings=settings,
         policy=policy,
     )
+    # Both Anthropic and OpenAI signal "hit max_tokens" — different names.
+    truncated = result.stop_reason in {"max_tokens", "length"}
     return AIChatResponse(
         role="assistant",
         content=result.content,
@@ -455,4 +457,6 @@ def ai_chat(request: AIChatRequest) -> AIChatResponse:
         policy=policy,
         ok=result.ok,
         error=result.error,
+        stop_reason=result.stop_reason,
+        truncated=truncated,
     )

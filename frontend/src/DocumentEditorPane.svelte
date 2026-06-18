@@ -14,7 +14,7 @@
   import MetadataLongTextEditor from "./MetadataLongTextEditor.svelte";
   import ReferencePicker from "./ReferencePicker.svelte";
   import { api } from "./api";
-  import type { Backlink, EditableDocument, EntryMetadata, MetadataFieldDefinition, MetadataSchema, MetadataValue, PromptEntrySummary } from "./types";
+  import type { Backlink, EditableDocument, EntryMetadata, MetadataFieldDefinition, MetadataSchema, MetadataValue, PromptEntrySummary, PromptInputDefinition } from "./types";
 
   export let scene: EditableDocument | null = null;
   export let documentKind: "scene" | "lore" | "prompt" | "snippet" = "scene";
@@ -194,6 +194,9 @@
   // is the anchor.
   let aiAnchorPos: number | null = null;
   let lastInvokedEntryId: string | null = null;
+  let lastInvokedInputs: Record<string, unknown> = {};
+  let inputsDialogEntry: PromptEntrySummary | null = null;
+  let inputsDialogDrafts: Record<string, string> = {};
 
   $: slashCommands = editor && documentKind === "scene" ? getSlashCommands() : [];
   // slashFilterText is a plain `let` because TipTap mutates editor state in
@@ -624,6 +627,10 @@
     return typeName;
   }
 
+  function effectivePromptInputs(entry: PromptEntrySummary) {
+    return metadataSchema?.entry_types[entry.entry_type]?.prompt?.inputs ?? [];
+  }
+
   function handleEditorKeydown(view: EditorView, event: KeyboardEvent) {
     if (documentKind !== "scene") {
       if (slashMenu.visible) closeSlashMenu();
@@ -1003,12 +1010,90 @@
     }
   }
 
-  async function runPromptEntry(entry: PromptEntrySummary) {
+  async function runPromptEntry(entry: PromptEntrySummary, prefilledInputs?: Record<string, unknown>) {
     if (!editor || !scene || aiGenerating || documentKind !== "scene") return;
     if (aiSuggestionId) {
       aiError = "Accept or revert the pending suggestion before generating another.";
       return;
     }
+    const declared = effectivePromptInputs(entry);
+    if (declared.length > 0 && !prefilledInputs) {
+      openInputsDialog(entry);
+      return;
+    }
+    await runPromptEntryWithInputs(entry, prefilledInputs ?? {});
+  }
+
+  function openInputsDialog(entry: PromptEntrySummary) {
+    const declared = effectivePromptInputs(entry);
+    const prior = lastInvokedEntryId === entry.id ? lastInvokedInputs : {};
+    const drafts: Record<string, string> = {};
+    for (const input of declared) {
+      const previous = prior[input.name];
+      if (previous !== undefined && previous !== null) {
+        drafts[input.name] = String(previous);
+      } else if (input.default !== undefined && input.default !== null) {
+        drafts[input.name] = String(input.default);
+      } else {
+        drafts[input.name] = input.type === "boolean" ? "false" : "";
+      }
+    }
+    inputsDialogDrafts = drafts;
+    inputsDialogEntry = entry;
+  }
+
+  function cancelInputsDialog() {
+    inputsDialogEntry = null;
+    inputsDialogDrafts = {};
+  }
+
+  function updateInputsDialogDraft(name: string, value: string) {
+    inputsDialogDrafts = { ...inputsDialogDrafts, [name]: value };
+  }
+
+  function coerceInputValue(raw: string, type: PromptInputDefinition["type"]): unknown {
+    const trimmed = raw.trim();
+    if (type === "number") {
+      if (trimmed === "") return null;
+      const parsed = Number(trimmed);
+      return Number.isFinite(parsed) ? parsed : trimmed;
+    }
+    if (type === "boolean") return trimmed.toLowerCase() === "true";
+    return trimmed;
+  }
+
+  async function submitInputsDialog() {
+    const entry = inputsDialogEntry;
+    if (!entry) return;
+    const declared = effectivePromptInputs(entry);
+    const missing = declared.filter((input) => input.required && !inputsDialogDrafts[input.name]?.trim());
+    if (missing.length > 0) {
+      aiError = `Missing required: ${missing.map((i) => i.label || i.name).join(", ")}.`;
+      return;
+    }
+    const values: Record<string, unknown> = {};
+    for (const input of declared) {
+      const raw = inputsDialogDrafts[input.name] ?? "";
+      const coerced = coerceInputValue(raw, input.type);
+      if (coerced !== null && coerced !== "") values[input.name] = coerced;
+    }
+    inputsDialogEntry = null;
+    inputsDialogDrafts = {};
+    await runPromptEntry(entry, values);
+  }
+
+  function handleInputsDialogKeydown(event: KeyboardEvent) {
+    if (event.key === "Escape") {
+      event.preventDefault();
+      cancelInputsDialog();
+    } else if (event.key === "Enter" && (event.ctrlKey || event.metaKey)) {
+      event.preventDefault();
+      void submitInputsDialog();
+    }
+  }
+
+  async function runPromptEntryWithInputs(entry: PromptEntrySummary, inputs: Record<string, unknown>) {
+    if (!editor || !scene) return;
     const outputKind = effectiveOutputKind(entry);
     if (outputKind !== "append_to_body" && outputKind !== "replace_selection") {
       aiError = `Output kind "${outputKind ?? "(unset)"}" is not yet supported for inline dispatch.`;
@@ -1056,13 +1141,14 @@
     aiAnchorPos = from;
     aiGenerating = true;
     lastInvokedEntryId = entry.id;
+    lastInvokedInputs = inputs;
     updateAIToolbarPosition();
     try {
       const response = await api.aiGenerate({
         template_source: entry.body_markdown,
         target_scene_id: scene.id,
         session_id: scene.id,
-        inputs: {},
+        inputs,
         text_before: textBefore,
         text_after: textAfter,
         ...(selectionText !== undefined ? { selection: selectionText } : {}),
@@ -1307,7 +1393,7 @@
       const restoredTo = range.from + original.length;
       editor.chain().focus().setTextSelection({ from: range.from, to: restoredTo }).run();
     }
-    await runPromptEntry(entry);
+    await runPromptEntry(entry, lastInvokedInputs);
   }
 
   async function focusAndRun(command: () => void | Promise<void>) {
@@ -2157,3 +2243,65 @@
     {/if}
   </footer>
 </div>
+
+{#if inputsDialogEntry}
+  {@const declaredInputs = effectivePromptInputs(inputsDialogEntry)}
+  <!-- svelte-ignore a11y_no_noninteractive_element_interactions -->
+  <div class="inputs-dialog-backdrop" on:mousedown|self={cancelInputsDialog}>
+    <section class="inputs-dialog" role="dialog" aria-label={`Run ${inputsDialogEntry.title}`} on:keydown={handleInputsDialogKeydown}>
+      <header>
+        <strong>{inputsDialogEntry.title}</strong>
+        <small>{promptEntryDescription(inputsDialogEntry)}</small>
+      </header>
+      <div class="inputs-dialog-fields">
+        {#each declaredInputs as input (input.name)}
+          <label>
+            {input.label || input.name}{#if input.required}<span class="required-marker"> *</span>{/if}
+            {#if input.type === "long_text"}
+              <textarea
+                rows="4"
+                value={inputsDialogDrafts[input.name] ?? ""}
+                on:input={(event) => updateInputsDialogDraft(input.name, event.currentTarget.value)}
+              ></textarea>
+            {:else if input.type === "number"}
+              <input
+                type="number"
+                value={inputsDialogDrafts[input.name] ?? ""}
+                on:input={(event) => updateInputsDialogDraft(input.name, event.currentTarget.value)}
+              />
+            {:else if input.type === "boolean"}
+              <input
+                type="checkbox"
+                checked={inputsDialogDrafts[input.name] === "true"}
+                on:change={(event) => updateInputsDialogDraft(input.name, event.currentTarget.checked ? "true" : "false")}
+              />
+            {:else if input.type === "select"}
+              <select
+                value={inputsDialogDrafts[input.name] ?? ""}
+                on:change={(event) => updateInputsDialogDraft(input.name, event.currentTarget.value)}
+              >
+                {#if !input.required}
+                  <option value="">(none)</option>
+                {/if}
+                {#each input.options ?? [] as option}
+                  <option value={option}>{option}</option>
+                {/each}
+              </select>
+            {:else}
+              <input
+                type="text"
+                value={inputsDialogDrafts[input.name] ?? ""}
+                on:input={(event) => updateInputsDialogDraft(input.name, event.currentTarget.value)}
+              />
+            {/if}
+          </label>
+        {/each}
+      </div>
+      <div class="inputs-dialog-actions">
+        <button type="button" on:click={cancelInputsDialog}>Cancel</button>
+        <button type="button" class="primary" on:click={submitInputsDialog}>Run</button>
+      </div>
+      <small class="inputs-dialog-hint">Ctrl/⌘+Enter to run · Esc to cancel</small>
+    </section>
+  </div>
+{/if}

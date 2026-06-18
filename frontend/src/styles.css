@@ -2507,3 +2507,88 @@ h3 {
 .editor-pane .hidden {
   display: none;
 }
+
+.inputs-dialog-backdrop {
+  position: fixed;
+  inset: 0;
+  background: rgba(15, 23, 32, 0.45);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 1000;
+}
+
+.inputs-dialog {
+  background: #ffffff;
+  border-radius: 8px;
+  box-shadow: 0 12px 36px rgba(15, 23, 32, 0.25);
+  padding: 16px 20px;
+  min-width: 360px;
+  max-width: 520px;
+  display: grid;
+  gap: 12px;
+}
+
+.inputs-dialog header {
+  display: grid;
+  gap: 2px;
+}
+
+.inputs-dialog header strong {
+  font-size: 15px;
+}
+
+.inputs-dialog header small {
+  color: #4d5753;
+}
+
+.inputs-dialog-fields {
+  display: grid;
+  gap: 10px;
+}
+
+.inputs-dialog-fields label {
+  display: grid;
+  gap: 4px;
+  font-size: 13px;
+}
+
+.inputs-dialog-fields .required-marker {
+  color: #b04848;
+}
+
+.inputs-dialog-fields textarea,
+.inputs-dialog-fields input[type="text"],
+.inputs-dialog-fields input[type="number"],
+.inputs-dialog-fields select {
+  width: 100%;
+  box-sizing: border-box;
+}
+
+.inputs-dialog-fields textarea {
+  font-family: inherit;
+  resize: vertical;
+}
+
+.inputs-dialog-actions {
+  display: flex;
+  gap: 8px;
+  justify-content: flex-end;
+}
+
+.inputs-dialog-actions .primary {
+  background: #2f6f5e;
+  color: #ffffff;
+  border-color: #2f6f5e;
+}
+
+.inputs-dialog-actions .primary:hover {
+  background: #275c4e;
+  border-color: #275c4e;
+}
+
+.inputs-dialog-hint {
+  color: #74817b;
+  font-size: 11px;
+  text-align: right;
+}

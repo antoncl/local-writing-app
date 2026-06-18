@@ -11,6 +11,7 @@ access to settings and policy. M4.0.
 
 from __future__ import annotations
 
+from datetime import date as _date_cls
 from typing import Any
 
 from jinja2 import TemplateError
@@ -18,6 +19,28 @@ from jinja2 import TemplateError
 from app.services.ai.helpers import create_environment_for_project
 from app.services.ai.sessions import AISession, default_registry
 from app.services.ai.templates import RenderedTemplate, render_template
+
+
+class _DateProxy:
+    """Exposes the current date as `date.today`, `date.iso`, and bare {{ date }}.
+
+    Avoids confusion with Python's `date.today()` callable: `{{ date.today }}` returns
+    the ISO string for today, not a method object.
+    """
+
+    def __init__(self, today: _date_cls) -> None:
+        self._today = today
+
+    @property
+    def today(self) -> str:
+        return self._today.isoformat()
+
+    @property
+    def iso(self) -> str:
+        return self._today.isoformat()
+
+    def __str__(self) -> str:
+        return self._today.isoformat()
 
 
 class PreviewError(Exception):
@@ -68,10 +91,12 @@ def build_preview(
     context = {
         "scene": scene,
         "project": project_info,
+        "novel": project_info,
         "input": inputs,
         "text_before": text_before,
         "text_after": text_after,
         "selection": selection,
+        "date": _DateProxy(_date_cls.today()),
     }
 
     try:

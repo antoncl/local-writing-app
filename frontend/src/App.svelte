@@ -168,6 +168,7 @@ The story so far:
   let chatLastMeta: { provider: string; model: string; latency_ms: number } | null = null;
   let chatScrollEl: HTMLDivElement | null = null;
   let chatMaxTokens = 4096;
+  let chatActivePromptEntry: { id: string; title: string } | null = null;
   type MachineSettingsDraft = {
     anthropic_api_key: string;
     openai_api_key: string;
@@ -792,6 +793,82 @@ The story so far:
     }
   }
 
+  async function seedChatFromPromptEntry(
+    entry: PromptEntrySummary,
+    inputs: Record<string, unknown>,
+    sceneId: string | null,
+  ) {
+    if (!sceneId) {
+      error = "Open a scene before invoking a chat prompt — context needs a target.";
+      return;
+    }
+    await run(async () => {
+      const preview = await api.aiPreview({
+        template_source: entry.body_markdown,
+        target_scene_id: sceneId,
+        inputs,
+        commit: false,
+      });
+      const messages = preview.messages ?? [];
+      const flatten = (blocks: { text: string }[]) => blocks.map((b) => b.text).join("");
+      const systemBlocks = messages.filter((m) => m.role === "system").map((m) => flatten(m.blocks));
+      const turns = messages
+        .filter((m) => m.role === "user" || m.role === "assistant")
+        .map((m) => ({ role: m.role as "user" | "assistant", content: flatten(m.blocks) }));
+
+      chatSystemPrompt = systemBlocks.join("\n\n") || DEFAULT_CHAT_SYSTEM_PROMPT;
+      chatHistory = turns;
+      chatError = null;
+      chatLastMeta = null;
+      chatInput = "";
+      chatActivePromptEntry = { id: entry.id, title: entry.title };
+
+      focusPane("chat");
+
+      const lastTurn = turns[turns.length - 1];
+      if (lastTurn?.role === "user") {
+        await sendChatTurn();
+      }
+      status = `Loaded ${entry.title} into chat`;
+    });
+  }
+
+  async function sendChatTurn() {
+    if (chatRunning) return;
+    chatRunning = true;
+    chatError = null;
+    try {
+      const response = await api.aiChat({
+        provider: chatProvider.trim() || null,
+        model: chatModel.trim() || null,
+        system_prompt: chatSystemPrompt,
+        messages: chatHistory.map(({ role, content }) => ({ role, content })),
+        max_tokens: chatMaxTokens,
+      });
+      if (response.ok) {
+        chatHistory = [
+          ...chatHistory,
+          { role: "assistant", content: response.content, truncated: response.truncated },
+        ];
+        chatLastMeta = {
+          provider: response.provider,
+          model: response.model,
+          latency_ms: response.latency_ms,
+        };
+      } else {
+        chatError = response.error ?? "Unknown error";
+      }
+    } catch (e) {
+      chatError = (e as Error).message;
+    } finally {
+      chatRunning = false;
+      await tick();
+      if (chatScrollEl) {
+        chatScrollEl.scrollTop = chatScrollEl.scrollHeight;
+      }
+    }
+  }
+
   async function sendChat() {
     if (chatRunning) return;
     const text = chatInput.trim();
@@ -849,6 +926,13 @@ The story so far:
     chatHistory = [];
     chatLastMeta = null;
     chatError = null;
+    chatActivePromptEntry = null;
+  }
+
+  function clearActivePromptOnEdit() {
+    // If the user edits the system prompt, the active prompt indicator no longer
+    // accurately reflects what's running. Drop it.
+    chatActivePromptEntry = null;
   }
 
   async function runAIHealthCheck() {
@@ -3213,6 +3297,7 @@ The story so far:
         on:custom-data={(event) => openSchemaForCustomData(event.detail.entryType, event.detail.kind)}
         on:embeddedTodos={(event) => updateEmbeddedTodosForPane(editorPane.id, event.detail.todos)}
         on:navigate={(event) => navigateToBacklink(event.detail.id, event.detail.kind)}
+        on:open-chat={(event) => seedChatFromPromptEntry(event.detail.entry, event.detail.inputs, event.detail.sceneId)}
       />
       <button class="pane-resize" type="button" aria-label="Resize Editor pane" on:keydown={(event) => handlePaneResizeKeydown(event, editorPane.id)} on:mousedown={(event) => startPaneResize(event, editorPane.id)}></button>
     </section>
@@ -3447,11 +3532,17 @@ The story so far:
       <h2>AI Chat</h2>
     </header>
     <div class="pane-content chat-panel">
+      {#if chatActivePromptEntry}
+        <div class="chat-active-prompt">
+          <span>Chatting via <strong>{chatActivePromptEntry.title}</strong></span>
+          <button type="button" on:click={() => (chatActivePromptEntry = null)}>×</button>
+        </div>
+      {/if}
       <details class="chat-config">
         <summary>System prompt &amp; provider</summary>
         <label class="chat-label">
           System prompt
-          <textarea class="chat-system" bind:value={chatSystemPrompt} spellcheck="false"></textarea>
+          <textarea class="chat-system" bind:value={chatSystemPrompt} on:input={clearActivePromptOnEdit} spellcheck="false"></textarea>
         </label>
         <div class="chat-row">
           <label class="chat-label flex-grow">

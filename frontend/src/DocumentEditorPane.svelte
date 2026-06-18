@@ -32,6 +32,7 @@
     "custom-data": { entryType: string; kind: "scene" | "lore" | "prompt" };
     embeddedTodos: { todos: EmbeddedTodo[] };
     navigate: { id: string; kind: string };
+    "open-chat": { entry: PromptEntrySummary; inputs: Record<string, unknown>; sceneId: string | null };
   }>();
 
   type FloatingMenuState = {
@@ -1095,6 +1096,12 @@
   async function runPromptEntryWithInputs(entry: PromptEntrySummary, inputs: Record<string, unknown>) {
     if (!editor || !scene) return;
     const outputKind = effectiveOutputKind(entry);
+    if (outputKind === "chat_panel") {
+      lastInvokedEntryId = entry.id;
+      lastInvokedInputs = inputs;
+      dispatch("open-chat", { entry, inputs, sceneId: scene.id });
+      return;
+    }
     if (outputKind !== "append_to_body" && outputKind !== "replace_selection") {
       aiError = `Output kind "${outputKind ?? "(unset)"}" is not yet supported for inline dispatch.`;
       updateAIToolbarPosition();
@@ -1896,15 +1903,20 @@
         description: "Pick the size, then click to insert.",
         run: () => openTableGrid(),
       },
-      ...promptEntriesForSurface("append_to_body").map((entry) => ({
-        group: "AI",
-        label: entry.title,
-        description: promptEntryDescription(entry),
-        run: () => {
-          clearSlashTrigger();
-          void runPromptEntry(entry);
-        },
-      })),
+      ...[
+        ...promptEntriesForSurface("append_to_body"),
+        ...promptEntriesForSurface("chat_panel"),
+      ]
+        .sort((a, b) => a.title.localeCompare(b.title, undefined, { sensitivity: "base" }))
+        .map((entry) => ({
+          group: "AI",
+          label: entry.title,
+          description: promptEntryDescription(entry),
+          run: () => {
+            clearSlashTrigger();
+            void runPromptEntry(entry);
+          },
+        })),
     ];
   }
 </script>

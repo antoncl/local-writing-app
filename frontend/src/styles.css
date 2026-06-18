@@ -2592,3 +2592,31 @@ h3 {
   font-size: 11px;
   text-align: right;
 }
+
+.chat-active-prompt {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 6px 10px;
+  border: 1px solid #cbd6d2;
+  border-left: 3px solid #2f6f5e;
+  border-radius: 6px;
+  background: #edf6f2;
+  font-size: 12px;
+  color: #25312d;
+}
+
+.chat-active-prompt button {
+  padding: 2px 8px;
+  border: 1px solid #cbd6d2;
+  background: transparent;
+  color: #4d5753;
+  font-size: 14px;
+  line-height: 1;
+  border-radius: 4px;
+}
+
+.chat-active-prompt button:hover {
+  background: #ffffff;
+}

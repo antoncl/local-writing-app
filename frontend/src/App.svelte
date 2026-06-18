@@ -2291,21 +2291,24 @@ The story so far:
       if (pane.dirty) {
         await saveEditorPane(id);
       }
-
-      const remainingEditorPanes = editorPanes.filter((candidate) => candidate.id !== id);
-      editorPanes = remainingEditorPanes;
-      const { [id]: _closedTodos, ...remainingEmbeddedTodos } = embeddedTodosByPane;
-      embeddedTodosByPane = remainingEmbeddedTodos;
-      const { [id]: _closedReload, ...remainingReloads } = metadataReloadsByPane;
-      metadataReloadsByPane = remainingReloads;
-      const { [id]: _closedTitleReload, ...remainingTitleReloads } = titleReloadsByPane;
-      titleReloadsByPane = remainingTitleReloads;
-      const { [id]: _closedPane, ...remainingPanes } = panes;
-      panes = remainingPanes;
-      if (focusedEditorPaneId === id) {
-        focusedEditorPaneId = remainingEditorPanes[0]?.id ?? null;
-      }
+      tearDownEditorPane(id);
     });
+  }
+
+  function tearDownEditorPane(id: string) {
+    const remainingEditorPanes = editorPanes.filter((candidate) => candidate.id !== id);
+    editorPanes = remainingEditorPanes;
+    const { [id]: _closedTodos, ...remainingEmbeddedTodos } = embeddedTodosByPane;
+    embeddedTodosByPane = remainingEmbeddedTodos;
+    const { [id]: _closedReload, ...remainingReloads } = metadataReloadsByPane;
+    metadataReloadsByPane = remainingReloads;
+    const { [id]: _closedTitleReload, ...remainingTitleReloads } = titleReloadsByPane;
+    titleReloadsByPane = remainingTitleReloads;
+    const { [id]: _closedPane, ...remainingPanes } = panes;
+    panes = remainingPanes;
+    if (focusedEditorPaneId === id) {
+      focusedEditorPaneId = remainingEditorPanes[0]?.id ?? null;
+    }
   }
 
   async function saveEditorPane(id: string) {
@@ -2421,7 +2424,7 @@ The story so far:
       structure = await api.deleteScene(pane.scene.id);
       await refreshTodos();
     }
-    editorPanes = editorPanes.map((candidate) => (candidate.id === id ? createEmptyEditorPane(id) : candidate));
+    tearDownEditorPane(id);
     status = `Deleted ${sceneTitle}`;
   }
 

@@ -248,7 +248,13 @@ Open the scene. Write about {{ input.words | default(250) }} words to start it. 
   let aiAnchorPos: number | null = null;
 
   $: slashCommands = editor && documentKind === "scene" ? getSlashCommands() : [];
-  $: activeSlashCommand = slashCommands[slashMenu.selectedIndex];
+  // slashFilterText must NOT depend on slashMenu — otherwise the index-reset
+  // reactive below forms a cycle (filtered changes → index reset modifies
+  // slashMenu → filter recomputes).
+  $: slashFilterText = editor && documentKind === "scene" ? readSlashFilterText() : "";
+  $: filteredSlashCommands = filterSlashCommands(slashCommands, slashFilterText);
+  $: activeSlashCommand = filteredSlashCommands[slashMenu.selectedIndex];
+  $: clampSlashSelectedIndex(filteredSlashCommands.length);
   $: selectionToolbarActions = editor ? getSelectionToolbarActions() : [];
   $: documentLabel = documentKind === "lore" ? "Entry" : "Scene";
   $: documentNameLabel = documentKind === "lore" ? "Name" : "Title";
@@ -667,16 +673,17 @@ Open the scene. Write about {{ input.words | default(250) }} words to start it. 
         return true;
       }
     } else if (slashMenu.visible) {
-      if (event.key === "ArrowDown") {
+      const count = filteredSlashCommands.length;
+      if (event.key === "ArrowDown" && count > 0) {
         event.preventDefault();
-        slashMenu = { ...slashMenu, selectedIndex: (slashMenu.selectedIndex + 1) % slashCommands.length };
+        slashMenu = { ...slashMenu, selectedIndex: (slashMenu.selectedIndex + 1) % count };
         return true;
       }
-      if (event.key === "ArrowUp") {
+      if (event.key === "ArrowUp" && count > 0) {
         event.preventDefault();
         slashMenu = {
           ...slashMenu,
-          selectedIndex: (slashMenu.selectedIndex - 1 + slashCommands.length) % slashCommands.length,
+          selectedIndex: (slashMenu.selectedIndex - 1 + count) % count,
         };
         return true;
       }
@@ -710,11 +717,44 @@ Open the scene. Write about {{ input.words | default(250) }} words to start it. 
     return selection.empty && selection.$from.parent.type.name === "paragraph" && selection.$from.parent.textContent.length === 0;
   }
 
+  // Allowed chars in the filter text after `/`. Excludes whitespace and
+  // punctuation so a user typing "/ some prose" or "/run!" cleanly exits the
+  // menu and resumes normal typing.
+  const SLASH_FILTER_PATTERN = /^[a-zA-Z0-9_-]*$/;
+
   function isSlashTriggerContext() {
     if (documentKind !== "scene") return false;
     if (!editor) return false;
     const { selection } = editor.state;
-    return selection.empty && selection.$from.parent.type.name === "paragraph" && selection.$from.parent.textContent.trim() === "/";
+    if (!selection.empty) return false;
+    if (selection.$from.parent.type.name !== "paragraph") return false;
+    const text = selection.$from.parent.textContent;
+    if (!text.startsWith("/")) return false;
+    return SLASH_FILTER_PATTERN.test(text.slice(1));
+  }
+
+  function readSlashFilterText(): string {
+    if (!editor) return "";
+    const text = editor.state.selection.$from.parent.textContent;
+    if (!text.startsWith("/")) return "";
+    return text.slice(1);
+  }
+
+  function filterSlashCommands(commands: SlashCommand[], filter: string): SlashCommand[] {
+    if (!filter) return commands;
+    const lower = filter.toLowerCase();
+    return commands.filter((cmd) =>
+      cmd.label.toLowerCase().includes(lower) ||
+      cmd.description.toLowerCase().includes(lower) ||
+      cmd.group.toLowerCase().includes(lower),
+    );
+  }
+
+  function clampSlashSelectedIndex(count: number) {
+    if (!slashMenu.visible || slashMenu.mode !== "commands") return;
+    if (slashMenu.selectedIndex > 0 && slashMenu.selectedIndex >= count) {
+      slashMenu = { ...slashMenu, selectedIndex: 0 };
+    }
   }
 
   function updateSlashMenuFromContent() {
@@ -935,7 +975,7 @@ Open the scene. Write about {{ input.words | default(250) }} words to start it. 
     const { selection } = editor.state;
     const paragraphStart = selection.$from.start();
     const paragraphText = selection.$from.parent.textContent;
-    if (paragraphText.trim() === "/") {
+    if (paragraphText.startsWith("/") && SLASH_FILTER_PATTERN.test(paragraphText.slice(1))) {
       editor.chain().focus().deleteRange({ from: paragraphStart, to: paragraphStart + paragraphText.length }).run();
     }
   }
@@ -2036,8 +2076,14 @@ Open the scene. Write about {{ input.words | default(250) }} words to start it. 
           </div>
           <div class="table-grid-label">{slashMenu.gridCols} × {slashMenu.gridRows}</div>
         {:else}
-          {#each slashCommands as command, index}
-            {#if index === 0 || slashCommands[index - 1].group !== command.group}
+          {#if slashFilterText}
+            <div class="slash-filter-indicator">filter: <code>{slashFilterText}</code></div>
+          {/if}
+          {#if filteredSlashCommands.length === 0}
+            <div class="slash-empty">No commands match "<code>{slashFilterText}</code>"</div>
+          {/if}
+          {#each filteredSlashCommands as command, index}
+            {#if index === 0 || filteredSlashCommands[index - 1].group !== command.group}
               <div class="slash-group">{command.group}</div>
             {/if}
             <button

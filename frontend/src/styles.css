@@ -1532,6 +1532,35 @@ h3 {
   letter-spacing: 0.04em;
 }
 
+.slash-filter-indicator {
+  padding: 6px 10px;
+  background: #eff5f1;
+  border-bottom: 1px solid #d8dfdd;
+  font-size: 12px;
+  color: #4d5753;
+}
+
+.slash-filter-indicator code {
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 12px;
+  color: #1d4d36;
+  background: transparent;
+}
+
+.slash-empty {
+  padding: 14px 12px;
+  color: #6f7c78;
+  font-size: 13px;
+  font-style: italic;
+  text-align: center;
+}
+
+.slash-empty code {
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-style: normal;
+  color: #4d5753;
+}
+
 .slash-menu button {
   display: grid;
   gap: 3px;

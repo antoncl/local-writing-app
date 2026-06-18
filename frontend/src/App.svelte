@@ -14,7 +14,13 @@
     EditableDocument,
     EntryMetadata,
     EntryTypeDefinition,
+    LoreEntry,
     LoreEntrySummary,
+    PromptEntry,
+    PromptEntrySummary,
+    Scene,
+    SnippetEntry,
+    SnippetEntrySummary,
     MachineSettingsUpdate,
     MachineSettingsView,
     MetadataFieldDefinition,
@@ -38,7 +44,7 @@
   type AppState =
     | { name: "needsProject" }
     | { name: "projectOpen"; project: ProjectInfo };
-  type DocumentRef = { type: "scene" | "lore"; id: string };
+  type DocumentRef = { type: "scene" | "lore" | "prompt" | "snippet"; id: string };
   type PaneId = "project" | "outline" | "lore" | "todo" | "search" | string;
   type MetadataReloadSignal = { token: number; metadata: EntryMetadata; status: string; entryType: string };
   type LoreEntryGroup = {
@@ -242,6 +248,9 @@ The story so far:
   let promptOutputKind = "";
   let promptOutputReview = "";
   let promptTypeTree: NodeTypeTreeNode[] = [];
+  let promptEntries: PromptEntrySummary[] = [];
+  let snippetEntries: SnippetEntrySummary[] = [];
+  let snippetsPaneOpen = false;
   let newTodo = "";
   let searchQuery = "";
   let loreSearchQuery = "";
@@ -267,6 +276,7 @@ The story so far:
     schema_type: { title: "Node Type", x: 708, y: 260, width: 360, height: 390, z: 4 },
     prompts: { title: "Prompts", x: 330, y: 260, width: 360, height: 420, z: 3 },
     prompt_type: { title: "Prompt Type", x: 708, y: 260, width: 440, height: 560, z: 4 },
+    snippets: { title: "Snippets", x: 330, y: 260, width: 360, height: 360, z: 3 },
     todo: { title: "TODO", x: 1126, y: 18, width: 310, height: 320, z: 4 },
     search: { title: "Search", x: 1126, y: 360, width: 310, height: 320, z: 5 },
     preview: { title: "AI Preview", x: 720, y: 18, width: 480, height: 560, z: 6 },
@@ -372,6 +382,7 @@ The story so far:
     if (id === "schema_type") return schemaTypePaneOpen;
     if (id === "prompts") return promptsPaneOpen;
     if (id === "prompt_type") return promptTypePaneOpen;
+    if (id === "snippets") return snippetsPaneOpen;
     return !isEditorPaneId(id) || editorPanes.some((pane) => pane.id === id);
   }
 
@@ -562,6 +573,14 @@ The story so far:
     loreEntries = (await api.listLoreEntries()).entries;
   }
 
+  async function refreshPromptEntries() {
+    promptEntries = (await api.listPromptEntries()).entries;
+  }
+
+  async function refreshSnippetEntries() {
+    snippetEntries = (await api.listSnippetEntries()).entries;
+  }
+
   async function refreshKnownTags() {
     knownTags = (await api.getKnownTags()).tags;
   }
@@ -614,6 +633,8 @@ The story so far:
       openProjectWorkspace(openedProject);
       await refreshStructure();
       await refreshLoreEntries();
+      await refreshPromptEntries();
+      await refreshSnippetEntries();
       await refreshMetadataSchema();
       await refreshKnownTags();
       await refreshTodos();
@@ -631,6 +652,8 @@ The story so far:
       openProjectWorkspace(openedProject);
       await refreshStructure();
       await refreshLoreEntries();
+      await refreshPromptEntries();
+      await refreshSnippetEntries();
       await refreshMetadataSchema();
       await refreshKnownTags();
       await refreshTodos();
@@ -2112,6 +2135,97 @@ The story so far:
     }, 100);
   }
 
+  async function openPromptEntryInEditorPane(entryId: string) {
+    const existingPane = editorPanes.find((pane) => pane.document?.type === "prompt" && pane.document.id === entryId);
+    if (existingPane) {
+      focusedEditorPaneId = existingPane.id;
+      focusPane(existingPane.id);
+      status = `Focused ${existingPane.scene?.title ?? "open prompt"}`;
+      return;
+    }
+    let targetPane = editorPanes.find((pane) => !pane.pinned);
+    if (!targetPane) targetPane = addEditorPane();
+    if (targetPane.dirty) await saveEditorPane(targetPane.id);
+    const entry = await api.getPromptEntry(entryId);
+    editorPanes = editorPanes.map((pane) =>
+      pane.id === targetPane.id
+        ? {
+            ...pane,
+            document: { type: "prompt", id: entry.id },
+            scene: entry,
+            dirty: false,
+            draftTitle: entry.title,
+            draftMarkdown: entry.body_markdown,
+            draftStatus: "",
+            draftEntryType: entry.entry_type,
+            draftMetadata: cloneMetadata(entry.metadata),
+            saving: false,
+          }
+        : pane,
+    );
+    focusedEditorPaneId = targetPane.id;
+    focusPane(targetPane.id);
+    status = `Loaded ${entry.title}`;
+  }
+
+  async function openSnippetEntryInEditorPane(entryId: string) {
+    const existingPane = editorPanes.find((pane) => pane.document?.type === "snippet" && pane.document.id === entryId);
+    if (existingPane) {
+      focusedEditorPaneId = existingPane.id;
+      focusPane(existingPane.id);
+      status = `Focused ${existingPane.scene?.title ?? "open snippet"}`;
+      return;
+    }
+    let targetPane = editorPanes.find((pane) => !pane.pinned);
+    if (!targetPane) targetPane = addEditorPane();
+    if (targetPane.dirty) await saveEditorPane(targetPane.id);
+    const entry = await api.getSnippetEntry(entryId);
+    editorPanes = editorPanes.map((pane) =>
+      pane.id === targetPane.id
+        ? {
+            ...pane,
+            document: { type: "snippet", id: entry.id },
+            scene: entry,
+            dirty: false,
+            draftTitle: entry.title,
+            draftMarkdown: entry.body_markdown,
+            draftStatus: "",
+            draftEntryType: entry.entry_type,
+            draftMetadata: cloneMetadata(entry.metadata),
+            saving: false,
+          }
+        : pane,
+    );
+    focusedEditorPaneId = targetPane.id;
+    focusPane(targetPane.id);
+    status = `Loaded ${entry.title}`;
+  }
+
+  async function newPromptEntry(entryType: string) {
+    await run(async () => {
+      const created = await api.createPromptEntry(`Untitled Prompt`, entryType);
+      await refreshPromptEntries();
+      await openPromptEntryInEditorPane(created.id);
+    });
+  }
+
+  async function newSnippetEntry() {
+    await run(async () => {
+      const created = await api.createSnippetEntry(`Untitled Snippet`);
+      await refreshSnippetEntries();
+      await openSnippetEntryInEditorPane(created.id);
+    });
+  }
+
+  function openSnippetsPane() {
+    snippetsPaneOpen = true;
+    focusPane("snippets");
+  }
+
+  function closeSnippetsPane() {
+    snippetsPaneOpen = false;
+  }
+
   async function openLoreEntryInEditorPane(entryId: string) {
     const existingPane = editorPanes.find((pane) => pane.document?.type === "lore" && pane.document.id === entryId);
     if (existingPane) {
@@ -2300,7 +2414,15 @@ The story so far:
     );
     if (documentRefs.length === 0) return;
     const refreshedDocuments = await Promise.all(
-      documentRefs.map((document) => (document.type === "lore" ? api.getLoreEntry(document.id) : api.getScene(document.id))),
+      documentRefs.map((document) =>
+        document.type === "lore"
+          ? api.getLoreEntry(document.id)
+          : document.type === "prompt"
+            ? api.getPromptEntry(document.id)
+            : document.type === "snippet"
+              ? api.getSnippetEntry(document.id)
+              : api.getScene(document.id),
+      ),
     );
     const refreshedByKey = new Map(refreshedDocuments.map((document, index) => [`${documentRefs[index].type}:${document.id}`, document]));
     const nextReloads: Record<string, MetadataReloadSignal> = {};
@@ -2375,10 +2497,16 @@ The story so far:
         entry_type: pane.draftEntryType,
         metadata: cloneMetadata(pane.draftMetadata),
       };
-      const savedDocument =
-        documentKind === "lore"
-          ? await api.saveLoreEntry(draftDocument, pane.draftMarkdown)
-          : await api.saveScene(draftDocument, pane.draftMarkdown);
+      let savedDocument: EditableDocument;
+      if (documentKind === "lore") {
+        savedDocument = await api.saveLoreEntry(draftDocument as LoreEntry, pane.draftMarkdown);
+      } else if (documentKind === "prompt") {
+        savedDocument = await api.savePromptEntry(draftDocument as PromptEntry, pane.draftMarkdown);
+      } else if (documentKind === "snippet") {
+        savedDocument = await api.saveSnippetEntry(draftDocument as SnippetEntry, pane.draftMarkdown);
+      } else {
+        savedDocument = await api.saveScene(draftDocument as Scene, pane.draftMarkdown);
+      }
       editorPanes = editorPanes.map((candidate) =>
         candidate.id === id
           ? {
@@ -2398,6 +2526,10 @@ The story so far:
       if (documentKind === "lore") {
         await refreshLoreEntries();
         await refreshKnownTags();
+      } else if (documentKind === "prompt") {
+        await refreshPromptEntries();
+      } else if (documentKind === "snippet") {
+        await refreshSnippetEntries();
       } else {
         await refreshStructure();
         await refreshTodos();
@@ -2426,17 +2558,26 @@ The story so far:
     } catch (error) {
       console.warn("Failed to fetch backlinks", error);
     }
-    const baseMessage = `Delete "${sceneTitle}"? This removes the ${documentKind === "lore" ? "entry" : "scene"} file from the project.`;
+    const fileLabel = documentKind === "scene" ? "scene" : documentKind === "lore" ? "entry" : documentKind;
+    const titleLabel =
+      documentKind === "scene"
+        ? "Delete Scene"
+        : documentKind === "lore"
+          ? "Delete Entry"
+          : documentKind === "prompt"
+            ? "Delete Prompt"
+            : "Delete Snippet";
+    const baseMessage = `Delete "${sceneTitle}"? This removes the ${fileLabel} file from the project.`;
     const message =
       backlinks.length > 0
         ? `${baseMessage}\n\n${backlinks.length} ${backlinks.length === 1 ? "entry references" : "entries reference"} this — those links will become broken:`
         : baseMessage;
     const details = backlinks.map((link) => `${link.title} — ${link.field_name}`);
     confirmation = {
-      title: documentKind === "lore" ? "Delete Entry" : "Delete Scene",
+      title: titleLabel,
       message,
       details,
-      confirmLabel: documentKind === "lore" ? "Delete Entry" : "Delete Scene",
+      confirmLabel: titleLabel,
       destructive: true,
       onConfirm: () => deleteEditorPaneScene(id),
     };
@@ -2456,6 +2597,10 @@ The story so far:
     const sceneTitle = pane.scene.title;
     if (documentKind === "lore") {
       loreEntries = (await api.deleteLoreEntry(pane.scene.id)).entries;
+    } else if (documentKind === "prompt") {
+      promptEntries = (await api.deletePromptEntry(pane.scene.id)).entries;
+    } else if (documentKind === "snippet") {
+      snippetEntries = (await api.deleteSnippetEntry(pane.scene.id)).entries;
     } else {
       structure = await api.deleteScene(pane.scene.id);
       await refreshTodos();
@@ -2705,6 +2850,7 @@ The story so far:
           </div>
           <div class="button-row">
             <button type="button" on:click={openPromptsPane}>Prompts…</button>
+            <button type="button" on:click={openSnippetsPane}>Snippets…</button>
           </div>
           {#if aiHealthResult}
             <p class="ai-health-result" class:ok={aiHealthResult.ok} class:fail={!aiHealthResult.ok}>
@@ -3032,8 +3178,59 @@ The story so far:
           <p class="muted">No prompt types yet. Click “+ Type” to create one.</p>
         {/if}
       </div>
+
+      <div class="schema-context-heading">
+        <strong>Prompt Entries</strong>
+        <small>Actual prompt files. The body holds the Jinja2 template.</small>
+      </div>
+      {#each promptTypeTree as node}
+        {#if !node.definition.abstract}
+          <div class="prompt-entry-section">
+            <header>
+              <strong>{node.label}</strong>
+              <button class="pin-button" type="button" on:click={() => newPromptEntry(node.id)}>+ Entry</button>
+            </header>
+            {#each promptEntries.filter((e) => e.entry_type === node.id) as entry (entry.id)}
+              <button class:active={focusedEditorPane?.document?.type === "prompt" && focusedEditorPane.document.id === entry.id} class="prompt-entry-row" type="button" on:click={() => openPromptEntryInEditorPane(entry.id)}>
+                <span><strong>{entry.title}</strong></span>
+              </button>
+            {/each}
+          </div>
+        {/if}
+      {/each}
+      {#if promptEntries.length === 0}
+        <p class="muted">No prompt entries yet. Use one of the “+ Entry” buttons above.</p>
+      {/if}
     </div>
     <button class="pane-resize" type="button" aria-label="Resize Prompts pane" on:keydown={(event) => handlePaneResizeKeydown(event, "prompts")} on:mousedown={(event) => startPaneResize(event, "prompts")}></button>
+  </section>
+
+  <!-- svelte-ignore a11y_no_noninteractive_element_interactions -->
+  <section class:hidden-pane={!isProjectOpen || !snippetsPaneOpen} class="pane snippets-pane" data-pane-id="snippets" style={paneStyle("snippets")} aria-label="Snippets pane" on:mousedown={() => focusPane("snippets")}>
+    <header class="pane-header" role="button" tabindex="0" aria-label="Move Snippets pane" on:keydown={(event) => handlePaneHeaderKeydown(event, "snippets")} on:mousedown={(event) => startPaneDrag(event, "snippets")}>
+      <h2>Snippets</h2>
+      <div class="pane-header-actions">
+        <button class="pin-button" type="button" on:mousedown={(event) => event.stopPropagation()} on:click={newSnippetEntry}>+ Snippet</button>
+        <button class="pin-button" type="button" on:mousedown={(event) => event.stopPropagation()} on:click={closeSnippetsPane}>Close</button>
+      </div>
+    </header>
+    <div class="pane-content schema-list">
+      <div class="schema-context-heading">
+        <strong>Snippet Entries</strong>
+        <small>Reusable text the user wrote once. Pulled into prompts via the <code>include</code> directive.</small>
+      </div>
+      <div class="prompt-entry-section">
+        {#each snippetEntries as entry (entry.id)}
+          <button class:active={focusedEditorPane?.document?.type === "snippet" && focusedEditorPane.document.id === entry.id} class="prompt-entry-row" type="button" on:click={() => openSnippetEntryInEditorPane(entry.id)}>
+            <span><strong>{entry.title}</strong></span>
+          </button>
+        {/each}
+        {#if snippetEntries.length === 0}
+          <p class="muted">No snippets yet. Click “+ Snippet” to create one.</p>
+        {/if}
+      </div>
+    </div>
+    <button class="pane-resize" type="button" aria-label="Resize Snippets pane" on:keydown={(event) => handlePaneResizeKeydown(event, "snippets")} on:mousedown={(event) => startPaneResize(event, "snippets")}></button>
   </section>
 
   <!-- svelte-ignore a11y_no_noninteractive_element_interactions -->

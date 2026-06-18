@@ -20,7 +20,9 @@ from app.models import (
     BacklinksResponse,
     CreateLoreEntryRequest,
     CreateProjectRequest,
+    CreatePromptEntryRequest,
     CreateSceneRequest,
+    CreateSnippetEntryRequest,
     CreateStructureNodeRequest,
     CreateTodoRequest,
     MachineSettingsUpdate,
@@ -40,15 +42,21 @@ from app.models import (
     OpenProjectRequest,
     ProjectInfo,
     ProjectValidation,
+    PromptEntry,
+    PromptEntryList,
     ReferenceCandidatesResponse,
     ReferenceResolveRequest,
     ReferenceResolveResponse,
     RenameMetadataFieldRequest,
     SaveLoreEntryRequest,
+    SavePromptEntryRequest,
     SaveSceneRequest,
+    SaveSnippetEntryRequest,
     Scene,
     SearchRequest,
     SearchResponse,
+    SnippetEntry,
+    SnippetEntryList,
     StructureDocument,
     StructureNodeDeletePreview,
     TodoDocument,
@@ -278,6 +286,66 @@ def save_lore_entry(entry_id: str, request: SaveLoreEntryRequest) -> LoreEntry:
 def delete_lore_entry(entry_id: str) -> LoreEntryList:
     with translate_errors():
         return service.delete_lore_entry(entry_id)
+
+
+@app.get("/api/prompts", response_model=PromptEntryList)
+def list_prompt_entries() -> PromptEntryList:
+    with translate_errors():
+        return service.list_prompt_entries()
+
+
+@app.post("/api/prompts", response_model=PromptEntry)
+def create_prompt_entry(request: CreatePromptEntryRequest) -> PromptEntry:
+    with translate_errors():
+        return service.create_prompt_entry(request)
+
+
+@app.get("/api/prompts/{entry_id}", response_model=PromptEntry)
+def get_prompt_entry(entry_id: str) -> PromptEntry:
+    with translate_errors():
+        return service.read_prompt_entry(entry_id)
+
+
+@app.put("/api/prompts/{entry_id}", response_model=PromptEntry)
+def save_prompt_entry(entry_id: str, request: SavePromptEntryRequest) -> PromptEntry:
+    with translate_errors():
+        return service.save_prompt_entry(entry_id, request)
+
+
+@app.delete("/api/prompts/{entry_id}", response_model=PromptEntryList)
+def delete_prompt_entry(entry_id: str) -> PromptEntryList:
+    with translate_errors():
+        return service.delete_prompt_entry(entry_id)
+
+
+@app.get("/api/snippets", response_model=SnippetEntryList)
+def list_snippet_entries() -> SnippetEntryList:
+    with translate_errors():
+        return service.list_snippet_entries()
+
+
+@app.post("/api/snippets", response_model=SnippetEntry)
+def create_snippet_entry(request: CreateSnippetEntryRequest) -> SnippetEntry:
+    with translate_errors():
+        return service.create_snippet_entry(request)
+
+
+@app.get("/api/snippets/{entry_id}", response_model=SnippetEntry)
+def get_snippet_entry(entry_id: str) -> SnippetEntry:
+    with translate_errors():
+        return service.read_snippet_entry(entry_id)
+
+
+@app.put("/api/snippets/{entry_id}", response_model=SnippetEntry)
+def save_snippet_entry(entry_id: str, request: SaveSnippetEntryRequest) -> SnippetEntry:
+    with translate_errors():
+        return service.save_snippet_entry(entry_id, request)
+
+
+@app.delete("/api/snippets/{entry_id}", response_model=SnippetEntryList)
+def delete_snippet_entry(entry_id: str) -> SnippetEntryList:
+    with translate_errors():
+        return service.delete_snippet_entry(entry_id)
 
 
 @app.get("/api/todos", response_model=TodoDocument)

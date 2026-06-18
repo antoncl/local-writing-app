@@ -10,13 +10,14 @@
   import TableHeader from "@tiptap/extension-table-header";
   import TableRow from "@tiptap/extension-table-row";
   import { editorHtmlToSceneMarkdown, sceneMarkdownToHtml } from "./markdown";
+  import CodeEditor from "./CodeEditor.svelte";
   import MetadataLongTextEditor from "./MetadataLongTextEditor.svelte";
   import ReferencePicker from "./ReferencePicker.svelte";
   import { api } from "./api";
   import type { Backlink, EditableDocument, EntryMetadata, MetadataFieldDefinition, MetadataSchema, MetadataValue } from "./types";
 
   export let scene: EditableDocument | null = null;
-  export let documentKind: "scene" | "lore" = "scene";
+  export let documentKind: "scene" | "lore" | "prompt" | "snippet" = "scene";
   export let metadataSchema: MetadataSchema | null = null;
   export let knownTags: string[] = [];
   export let metadataReload: { token: number; metadata: EntryMetadata; status?: string; entryType: string } | null = null;
@@ -211,6 +212,13 @@ Open the scene. Write about {{ input.words | default(250) }} words to start it. 
   let editorElement: HTMLDivElement;
   let editor: Editor | null = null;
   let loadedSceneId: string | null = null;
+  let rawBody = "";
+  let lastEmittedRawBody = "";
+  $: rawBodyMode = documentKind === "prompt";
+  $: if (rawBodyMode && rawBody !== lastEmittedRawBody) {
+    lastEmittedRawBody = rawBody;
+    emitChange();
+  }
   let title = "";
   let status = "draft";
   let entryType = "scene";
@@ -409,6 +417,14 @@ Open the scene. Write about {{ input.words | default(250) }} words to start it. 
     metadataExpanded = documentKind === "lore" || !nextHasBody;
     tagPickerFieldId = null;
     tagPickerPosition = null;
+    if (rawBodyMode) {
+      const nextBody = nextScene.body_markdown ?? "";
+      rawBody = nextBody;
+      lastEmittedRawBody = nextBody;
+      loadedSceneId = sceneId;
+      liveWordCount = countWords(nextBody);
+      return;
+    }
     const html = await sceneMarkdownToHtml(nextScene.body_markdown || "");
     if (!editor || scene?.id !== sceneId) return;
     editor.commands.setContent(html || "<p></p>", false);
@@ -423,7 +439,19 @@ Open the scene. Write about {{ input.words | default(250) }} words to start it. 
   }
 
   function emitChange() {
-    if (!scene || !editor) return;
+    if (!scene) return;
+    if (rawBodyMode) {
+      liveWordCount = countWords(rawBody);
+      dispatch("change", {
+        title,
+        bodyMarkdown: rawBody,
+        status,
+        entryType,
+        metadata: cloneMetadata(metadata),
+      });
+      return;
+    }
+    if (!editor) return;
     syncEditorEmpty();
     updateSelectionMenu();
     updateTableMenu();
@@ -2133,7 +2161,12 @@ Open the scene. Write about {{ input.words | default(250) }} words to start it. 
       </div>
     {/if}
 
-    <div bind:this={editorElement}></div>
+    {#if rawBodyMode}
+      <div class="raw-body-editor">
+        <CodeEditor bind:value={rawBody} language="jinja2" />
+      </div>
+    {/if}
+    <div bind:this={editorElement} class:hidden={rawBodyMode}></div>
   </div>
 
   <footer class="status">

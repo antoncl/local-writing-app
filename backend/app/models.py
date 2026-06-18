@@ -274,6 +274,76 @@ class SaveLoreEntryRequest(BaseModel):
     metadata: dict[str, MetadataValue] = Field(default_factory=dict)
 
 
+class PromptEntrySummary(BaseModel):
+    id: str
+    title: str
+    body_markdown: str = ""
+    entry_type: str = "prompt"
+    metadata: dict[str, MetadataValue] = Field(default_factory=dict)
+
+
+class PromptEntry(BaseModel):
+    id: str
+    title: str
+    body_markdown: str
+    revision: str
+    entry_type: str = "prompt"
+    metadata: dict[str, MetadataValue] = Field(default_factory=dict)
+    computed_metadata: dict[str, MetadataValue] = Field(default_factory=dict)
+
+
+class PromptEntryList(BaseModel):
+    entries: list[PromptEntrySummary] = Field(default_factory=list)
+
+
+class CreatePromptEntryRequest(BaseModel):
+    title: str = Field(min_length=1)
+    entry_type: str = "prompt"
+
+
+class SavePromptEntryRequest(BaseModel):
+    title: str = Field(min_length=1)
+    body_markdown: str
+    base_revision: str | None = None
+    entry_type: str = "prompt"
+    metadata: dict[str, MetadataValue] = Field(default_factory=dict)
+
+
+class SnippetEntrySummary(BaseModel):
+    id: str
+    title: str
+    body_markdown: str = ""
+    entry_type: str = "snippet"
+    metadata: dict[str, MetadataValue] = Field(default_factory=dict)
+
+
+class SnippetEntry(BaseModel):
+    id: str
+    title: str
+    body_markdown: str
+    revision: str
+    entry_type: str = "snippet"
+    metadata: dict[str, MetadataValue] = Field(default_factory=dict)
+    computed_metadata: dict[str, MetadataValue] = Field(default_factory=dict)
+
+
+class SnippetEntryList(BaseModel):
+    entries: list[SnippetEntrySummary] = Field(default_factory=list)
+
+
+class CreateSnippetEntryRequest(BaseModel):
+    title: str = Field(min_length=1)
+    entry_type: str = "snippet"
+
+
+class SaveSnippetEntryRequest(BaseModel):
+    title: str = Field(min_length=1)
+    body_markdown: str
+    base_revision: str | None = None
+    entry_type: str = "snippet"
+    metadata: dict[str, MetadataValue] = Field(default_factory=dict)
+
+
 class TodoItem(BaseModel):
     id: str
     text: str

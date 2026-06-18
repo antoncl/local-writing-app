@@ -2453,3 +2453,57 @@ h3 {
 .prompt-input-row .danger:hover {
   background: #fdecec;
 }
+
+.prompt-entry-section {
+  display: grid;
+  gap: 4px;
+  padding: 8px;
+  border: 1px solid #cbd6d2;
+  border-radius: 6px;
+  background: #ffffff;
+}
+
+.prompt-entry-section > header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 6px;
+  margin-bottom: 4px;
+}
+
+.prompt-entry-row {
+  display: block;
+  padding: 6px 8px;
+  border: 1px solid #cbd6d2;
+  border-radius: 4px;
+  background: #fbfcfc;
+  text-align: left;
+  cursor: pointer;
+}
+
+.prompt-entry-row:hover {
+  background: #edf6f2;
+}
+
+.prompt-entry-row.active {
+  border-color: #2f6f5e;
+  background: #edf6f2;
+}
+
+.raw-body-editor {
+  display: grid;
+  height: 100%;
+  min-height: 200px;
+}
+
+.raw-body-editor :global(.code-editor) {
+  height: 100%;
+}
+
+.raw-body-editor :global(.cm-editor) {
+  height: 100%;
+}
+
+.editor-pane .hidden {
+  display: none;
+}

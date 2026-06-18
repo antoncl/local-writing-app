@@ -21,10 +21,14 @@ import type {
   MetadataSchemaOverview,
   ProjectInfo,
   ProjectValidation,
+  PromptEntry,
+  PromptEntryList,
   ReferenceCandidatesResponse,
   ReferenceResolveResponse,
   Scene,
   SearchHit,
+  SnippetEntry,
+  SnippetEntryList,
   StructureDocument,
   StructureNodeDeletePreview,
   TodoDocument,
@@ -248,6 +252,64 @@ export const api = {
   },
   deleteLoreEntry(entryId: string) {
     return request<LoreEntryList>(`/lore/${entryId}`, {
+      method: "DELETE",
+    });
+  },
+  listPromptEntries() {
+    return request<PromptEntryList>("/prompts");
+  },
+  createPromptEntry(title: string, entryType: string) {
+    return request<PromptEntry>("/prompts", {
+      method: "POST",
+      body: JSON.stringify({ title, entry_type: entryType }),
+    });
+  },
+  getPromptEntry(entryId: string) {
+    return request<PromptEntry>(`/prompts/${entryId}`);
+  },
+  savePromptEntry(entry: PromptEntry, bodyMarkdown: string) {
+    return request<PromptEntry>(`/prompts/${entry.id}`, {
+      method: "PUT",
+      body: JSON.stringify({
+        title: entry.title,
+        body_markdown: bodyMarkdown,
+        base_revision: entry.revision,
+        entry_type: entry.entry_type,
+        metadata: entry.metadata,
+      }),
+    });
+  },
+  deletePromptEntry(entryId: string) {
+    return request<PromptEntryList>(`/prompts/${entryId}`, {
+      method: "DELETE",
+    });
+  },
+  listSnippetEntries() {
+    return request<SnippetEntryList>("/snippets");
+  },
+  createSnippetEntry(title: string, entryType = "snippet") {
+    return request<SnippetEntry>("/snippets", {
+      method: "POST",
+      body: JSON.stringify({ title, entry_type: entryType }),
+    });
+  },
+  getSnippetEntry(entryId: string) {
+    return request<SnippetEntry>(`/snippets/${entryId}`);
+  },
+  saveSnippetEntry(entry: SnippetEntry, bodyMarkdown: string) {
+    return request<SnippetEntry>(`/snippets/${entry.id}`, {
+      method: "PUT",
+      body: JSON.stringify({
+        title: entry.title,
+        body_markdown: bodyMarkdown,
+        base_revision: entry.revision,
+        entry_type: entry.entry_type,
+        metadata: entry.metadata,
+      }),
+    });
+  },
+  deleteSnippetEntry(entryId: string) {
+    return request<SnippetEntryList>(`/snippets/${entryId}`, {
       method: "DELETE",
     });
   },

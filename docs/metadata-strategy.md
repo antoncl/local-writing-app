@@ -22,14 +22,74 @@ Scene and Lore Entry terminology at storage/API boundaries, but metadata
 definitions are moving toward node types and subtypes:
 
 - `id`: stable identity.
-- `kind`: broad system category, currently `scene` or `lore`.
-- `entry_type`: schema-defined subtype, such as `scene`, `scene_sequel`,
-  `scene_mckee`, `character`, `place`, `item`, or `lore_note`.
+- `kind`: broad system category. Today: `scene`, `lore`, or `prompt`.
+- `entry_type`: schema-defined subtype with optional `parent` for single-inheritance
+  (e.g. `character` → `lore_entry`; `continuation` → `prompt`; `bob` → `general` →
+  `prompt`).
 - `title`: display title.
 - `metadata`: schema-defined values.
 - `body_markdown`: optional Markdown body for entities that carry prose or text.
 - `computed_metadata`: derived values exposed by the app but not stored as
   canonical entry data.
+
+### Class–instance model
+
+In object-oriented language: `kind` is a top-level class, an `entry_type`
+declaration is a sub-class with optional single-inheritance, and an actual
+entry file (e.g. `scenes/Day 2.md`) is an instance. The schema editor edits
+classes; instance editors edit objects.
+
+| OO concept | This codebase |
+|---|---|
+| Top-level class | `kind` (`scene`, `lore`, `prompt`) |
+| Sub-class | An entry-type declaration with `kind: <X>` and optional `parent: <Y>` |
+| Abstract base | `abstract: true` on a sub-class (cannot be instantiated, only inherited) |
+| Class hierarchy editor | The Custom Data / Node Type pane, scoped to one `kind` |
+| Instance list | The pane that lists entries of that `kind` (Manuscript Outline, Lore, Prompts) |
+| Instance editor | The document editor opened on a single entry file |
+| Inheritance resolution | Backend merges `fields`, `display_template`, `has_body`, and `prompt` extras up the `parent` chain (see `_resolve_metadata_schema_inheritance`) |
+
+Each `kind` gets one folder (`scenes/`, `lore/`, `prompts/`), one CRUD endpoint
+family (`/api/scenes`, `/api/lore`, `/api/prompts`), and one instance pane in
+the UI. The schema editor is contextual: opened from a lore editor it shows
+lore sub-classes, from a scene editor it shows scene sub-classes, from a prompt
+editor it shows prompt sub-classes.
+
+### Invariants — don't introduce a new `kind` to express:
+
+- **An output disposition.** "I want this prompt to chat vs. append vs. replace"
+  is captured by `context_strategy.output.kind` on an entry-type, inherited from
+  an abstract base. See [Prompt taxonomy](#prompt-taxonomy) below.
+- **A body editor variant.** "I want raw text vs. WYSIWYG vs. code" should be a
+  per-entry-type declaration (`body_editor`, `body_language`). Today this is
+  still glued to `kind` (prompt → CodeMirror, others → TipTap WYSIWYG); the
+  refactor is tracked in `memory/strategy_ai_integration.md` "Open todos".
+- **A user-facing label.** Sub-classes already provide that — `Continuation` and
+  `Revise` are sub-classes of `prompt`, not separate kinds.
+- **Snippet was wrongly modelled as its own `kind` in an earlier draft.** It is
+  a concrete sub-type of `prompt` with no invocation extras. The kind whitelist
+  is intentionally short and adding to it must be justified by a genuinely
+  different storage shape or routing surface, not by a different user-visible
+  affordance.
+
+### Prompt taxonomy
+
+The `prompt` kind has four built-in sub-types. The first three are abstract;
+each captures an activation surface × output disposition. User sub-types
+inherit one of them to pick up the dispatch behavior — the user only writes the
+personality (`system_prompt`, `inputs`, the Jinja body).
+
+| Sub-type | Activation surface | Output | Concrete? |
+|---|---|---|---|
+| `continuation` | Slash menu in scene editor | Append at cursor (`append_to_body`) | abstract |
+| `revise` | Selection toolbar | Replace selection (`replace_selection`) | abstract |
+| `general` | Slash menu | Chat panel (`chat_panel`) | abstract |
+| `snippet` | None — included by name via `{% include %}` from other prompts | None | concrete |
+
+Routing example: a user creates `bob extends general` with the system_prompt
+"You are Bob." The dispatcher walks Bob's parent chain to find `general`, sees
+the inherited `output.kind: chat_panel`, and surfaces Bob in the slash menu;
+when invoked, the response lands in the chat panel.
 
 Metadata can describe semantic relationships such as characters, locations, or
 parent locations. Manuscript ordering and hierarchy remain in Manuscript

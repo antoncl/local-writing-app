@@ -391,6 +391,7 @@ class AIPreviewRequest(BaseModel):
     inputs: dict[str, Any] = Field(default_factory=dict)
     text_before: str = ""
     text_after: str = ""
+    selection: str = ""
     commit: bool = False
 
 
@@ -445,6 +446,7 @@ class AIGenerateRequest(BaseModel):
     inputs: dict[str, Any] = Field(default_factory=dict)
     text_before: str = ""
     text_after: str = ""
+    selection: str = ""
     commit: bool = False
     provider: str | None = None
     model: str | None = None

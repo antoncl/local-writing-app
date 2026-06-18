@@ -226,6 +226,28 @@ class GenerateEndpointTests(unittest.TestCase):
         self.assertTrue(body["truncated"])
         self.assertEqual(body["stop_reason"], "max_tokens")
 
+    def test_selection_is_available_in_template(self) -> None:
+        self._allow_cloud()
+        settings = _settings(anthropic="sk-ant-test", default_provider="anthropic")
+        with patch("app.services.machine_settings.load_settings", return_value=settings), \
+             patch(
+                "app.services.ai.providers._anthropic_chat",
+                return_value=("OK", "end_turn"),
+            ) as mock_chat:
+            self.client.post(
+                "/api/ai/generate",
+                json={
+                    "template_source": '{% role "user" %}Rewrite: {{ selection }}{% endrole %}',
+                    "target_scene_id": self.scene_id,
+                    "selection": "the original sentence",
+                    "provider": "anthropic",
+                    "model": "x",
+                },
+            )
+        kwargs = mock_chat.call_args.kwargs
+        self.assertEqual(len(kwargs["messages"]), 1)
+        self.assertEqual(kwargs["messages"][0]["content"], "Rewrite: the original sentence")
+
     def test_session_id_echoed_when_supplied(self) -> None:
         self._allow_cloud()
         settings = _settings(anthropic="sk-ant-test", default_provider="anthropic")

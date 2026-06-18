@@ -240,6 +240,7 @@ export type AIGenerateRequest = {
   inputs?: Record<string, unknown>;
   text_before?: string;
   text_after?: string;
+  selection?: string;
   commit?: boolean;
   provider?: string | null;
   model?: string | null;

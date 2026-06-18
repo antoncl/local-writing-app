@@ -39,6 +39,7 @@ def build_preview(
     text_before: str,
     text_after: str,
     commit: bool,
+    selection: str = "",
 ) -> tuple[RenderedTemplate, str | None]:
     """Render the template and return (output, session_id_used).
 
@@ -70,6 +71,7 @@ def build_preview(
         "input": inputs,
         "text_before": text_before,
         "text_after": text_after,
+        "selection": selection,
     }
 
     try:

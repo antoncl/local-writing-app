@@ -58,6 +58,40 @@
   const TABLE_GRID_MAX_ROWS = 8;
   const TABLE_GRID_MAX_COLS = 8;
 
+  // How much surrounding text to send for revise's context window.
+  const REVISE_CONTEXT_CHARS = 600;
+
+  // Built-in revise template. Will move to a prompt node in M5.
+  const REVISE_SELECTION_TEMPLATE = `{% role "system" %}
+You are an expert fiction writer. Rewrite the selection. Keep the same point of view, tense, and overall meaning. Tighten phrasing, sharpen sensory detail, and prefer showing over telling. Output ONLY the revised prose — no preamble, no commentary, no quote marks around it.
+{% endrole %}
+
+{% role "user" %}
+{% if pov(scene) %}POV: {{ pov(scene).title }}
+{% endif %}
+{{ relevant_lore(scene) }}
+
+{% if text_before %}Context before the selection:
+<<<
+{{ text_before }}
+>>>
+
+{% endif %}
+Selection to rewrite:
+<<<
+{{ selection }}
+>>>
+{% if text_after %}
+
+Context after the selection:
+<<<
+{{ text_after }}
+>>>
+{% endif %}
+
+{{ input.instruction | default("Tighten and sharpen. Same meaning, better prose.") }}
+{% endrole %}`;
+
   // Built-in template for "continue from cursor". Will move to a prompt node in M5.
   const CONTINUE_SCENE_TEMPLATE = `{% role "system" %}
 You are an expert fiction writer. Continue the scene in the same voice and style as the existing prose. Match register, POV, and prose rhythm. Do not conclude the scene — push it forward by one beat only.
@@ -201,6 +235,8 @@ Open the scene. Write about {{ input.words | default(250) }} words to start it. 
   let aiSuggestionMeta: { provider: string; model: string; latency_ms: number; truncated: boolean; wordCount: number } | null = null;
   let aiToolbarPosition: { x: number; y: number; visible: boolean } = { x: 0, y: 0, visible: false };
   let aiNextSuggestionId = 1;
+  // For revisions: the original selected text to restore on discard. null for continuations.
+  let aiSuggestionOriginal: string | null = null;
 
   $: slashCommands = editor && documentKind === "scene" ? getSlashCommands() : [];
   $: activeSlashCommand = slashCommands[slashMenu.selectedIndex];
@@ -347,6 +383,7 @@ Open the scene. Write about {{ input.words | default(250) }} words to start it. 
     // Drop any pending AI suggestion state when changing documents.
     aiSuggestionId = null;
     aiSuggestionMeta = null;
+    aiSuggestionOriginal = null;
     aiError = null;
     const nextEntryDefinition = metadataSchema?.entry_types[entryType];
     const nextHasBody = nextEntryDefinition?.has_body ?? true;
@@ -578,6 +615,12 @@ Open the scene. Write about {{ input.words | default(250) }} words to start it. 
     if (event.key.toLowerCase() === "j" && (event.ctrlKey || event.metaKey) && !event.altKey && !event.shiftKey) {
       event.preventDefault();
       void runAIContinue();
+      return true;
+    }
+    // Ctrl/⌘+Shift+J: AI revise selection.
+    if (event.key.toLowerCase() === "j" && (event.ctrlKey || event.metaKey) && !event.altKey && event.shiftKey) {
+      event.preventDefault();
+      void runAIRevise();
       return true;
     }
 
@@ -895,6 +938,110 @@ Open the scene. Write about {{ input.words | default(250) }} words to start it. 
     }
   }
 
+  async function runAIRevise() {
+    if (!editor || !scene || aiGenerating || documentKind !== "scene") return;
+    if (aiSuggestionId) {
+      aiError = "Accept or revert the pending suggestion before generating another.";
+      return;
+    }
+    const { from, to } = editor.state.selection;
+    if (from === to) {
+      aiError = "Select text to revise.";
+      return;
+    }
+    const selectionText = editor.state.doc.textBetween(from, to, "\n\n", " ");
+    if (!selectionText.trim()) {
+      aiError = "Select non-empty text to revise.";
+      return;
+    }
+    const docSize = editor.state.doc.content.size;
+    const beforeStart = Math.max(0, from - REVISE_CONTEXT_CHARS);
+    const afterEnd = Math.min(docSize, to + REVISE_CONTEXT_CHARS);
+    const textBefore = editor.state.doc.textBetween(beforeStart, from, "\n\n", " ");
+    const textAfter = editor.state.doc.textBetween(to, afterEnd, "\n\n", " ");
+
+    aiError = null;
+    aiGenerating = true;
+    try {
+      const response = await api.aiGenerate({
+        template_source: REVISE_SELECTION_TEMPLATE,
+        target_scene_id: scene.id,
+        session_id: scene.id,
+        inputs: {},
+        text_before: textBefore,
+        text_after: textAfter,
+        selection: selectionText,
+        commit: false,
+      });
+      if (!response.ok) {
+        aiError = response.error ?? "Unknown error";
+        return;
+      }
+      if (!response.content.trim()) {
+        aiError = "Model returned empty output.";
+        return;
+      }
+      // Fingerprint check: the original text should still be at [from, to].
+      if (!editor) return;
+      const currentText = editor.state.doc.textBetween(from, to, "\n\n", " ");
+      if (currentText !== selectionText) {
+        aiError = "Document changed during the AI call. Re-select the text and retry.";
+        return;
+      }
+      replaceWithAISuggestion(from, to, response.content, selectionText);
+      aiSuggestionMeta = {
+        provider: response.provider,
+        model: response.model,
+        latency_ms: response.latency_ms,
+        truncated: response.truncated,
+        wordCount: countWords(response.content),
+      };
+    } catch (e) {
+      aiError = (e as Error).message;
+    } finally {
+      aiGenerating = false;
+    }
+  }
+
+  function replaceWithAISuggestion(from: number, to: number, newText: string, originalText: string) {
+    if (!editor) return;
+    const suggestionId = `ai-${aiNextSuggestionId++}`;
+    type Inline = { type: "text"; text: string } | { type: "hardBreak" };
+    const paragraphs = newText
+      .split(/\n{2,}/)
+      .map((para) => {
+        const content: Inline[] = [];
+        const lines = para.split(/\n/);
+        lines.forEach((line, i) => {
+          if (i > 0) content.push({ type: "hardBreak" });
+          if (line) content.push({ type: "text", text: line });
+        });
+        return { type: "paragraph", content };
+      })
+      .filter((p) => p.content.length > 0);
+    if (paragraphs.length === 0) return;
+
+    editor
+      .chain()
+      .focus()
+      .setTextSelection({ from, to })
+      .deleteSelection()
+      .insertContent(paragraphs)
+      .run();
+    const endPos = editor.state.selection.from;
+
+    editor
+      .chain()
+      .setTextSelection({ from, to: endPos })
+      .setMark("aiSuggestion", { suggestionId })
+      .setTextSelection(endPos)
+      .run();
+
+    aiSuggestionId = suggestionId;
+    aiSuggestionOriginal = originalText;
+    requestAnimationFrame(updateAIToolbarPosition);
+  }
+
   async function runAIContinue() {
     if (!editor || !scene || aiGenerating || documentKind !== "scene") return;
     if (aiSuggestionId) {
@@ -1033,6 +1180,7 @@ Open the scene. Write about {{ input.words | default(250) }} words to start it. 
     }
     aiSuggestionId = null;
     aiSuggestionMeta = null;
+    aiSuggestionOriginal = null;
     aiError = null;
     aiToolbarPosition = { x: 0, y: 0, visible: false };
   }
@@ -1041,18 +1189,43 @@ Open the scene. Write about {{ input.words | default(250) }} words to start it. 
     if (!editor || !aiSuggestionId) return;
     const range = findAISuggestionRange(aiSuggestionId);
     if (range) {
-      editor.chain().focus().deleteRange(range).run();
+      if (aiSuggestionOriginal !== null) {
+        // Revise discard: replace AI text with the original.
+        editor
+          .chain()
+          .focus()
+          .setTextSelection(range)
+          .deleteSelection()
+          .insertContent(aiSuggestionOriginal)
+          .run();
+      } else {
+        // Continue discard: just delete the inserted text.
+        editor.chain().focus().deleteRange(range).run();
+      }
     }
     aiSuggestionId = null;
     aiSuggestionMeta = null;
+    aiSuggestionOriginal = null;
     aiError = null;
     aiToolbarPosition = { x: 0, y: 0, visible: false };
   }
 
   async function retryAISuggestion() {
-    if (!aiSuggestionId || aiGenerating) return;
+    if (!aiSuggestionId || aiGenerating || !editor) return;
+    const wasRevision = aiSuggestionOriginal !== null;
+    const original = aiSuggestionOriginal;
+    const range = findAISuggestionRange(aiSuggestionId);
+
     revertAISuggestion();
-    await runAIContinue();
+
+    if (wasRevision && original && range) {
+      // After revert, the original text occupies [range.from, range.from + original.length].
+      const restoredTo = range.from + original.length;
+      editor.chain().focus().setTextSelection({ from: range.from, to: restoredTo }).run();
+      await runAIRevise();
+    } else {
+      await runAIContinue();
+    }
   }
 
   async function focusAndRun(command: () => void | Promise<void>) {
@@ -1422,6 +1595,12 @@ Open the scene. Write about {{ input.words | default(250) }} words to start it. 
         id: "strike",
         label: "S",
         run: () => editor?.chain().focus().toggleStrike().run(),
+      },
+      {
+        kind: "button",
+        id: "ai-revise",
+        label: "✨ Revise",
+        run: () => focusAndRun(runAIRevise),
       },
       {
         kind: "menu",

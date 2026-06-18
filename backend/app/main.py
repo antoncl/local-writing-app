@@ -400,6 +400,7 @@ def ai_preview(request: AIPreviewRequest) -> AIPreviewResponse:
                 inputs=request.inputs,
                 text_before=request.text_before,
                 text_after=request.text_after,
+                selection=request.selection,
                 commit=request.commit,
             )
         except PreviewError as exc:
@@ -479,6 +480,7 @@ def ai_generate(request: AIGenerateRequest) -> AIGenerateResponse:
                 inputs=request.inputs,
                 text_before=request.text_before,
                 text_after=request.text_after,
+                selection=request.selection,
                 commit=request.commit,
             )
         except PreviewError as exc:

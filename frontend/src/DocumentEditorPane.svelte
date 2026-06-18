@@ -14,11 +14,12 @@
   import MetadataLongTextEditor from "./MetadataLongTextEditor.svelte";
   import ReferencePicker from "./ReferencePicker.svelte";
   import { api } from "./api";
-  import type { Backlink, EditableDocument, EntryMetadata, MetadataFieldDefinition, MetadataSchema, MetadataValue } from "./types";
+  import type { Backlink, EditableDocument, EntryMetadata, MetadataFieldDefinition, MetadataSchema, MetadataValue, PromptEntrySummary } from "./types";
 
   export let scene: EditableDocument | null = null;
   export let documentKind: "scene" | "lore" | "prompt" | "snippet" = "scene";
   export let metadataSchema: MetadataSchema | null = null;
+  export let promptEntries: PromptEntrySummary[] = [];
   export let knownTags: string[] = [];
   export let metadataReload: { token: number; metadata: EntryMetadata; status?: string; entryType: string } | null = null;
   export let titleReload: { token: number; title: string } | null = null;
@@ -59,71 +60,9 @@
   const TABLE_GRID_MAX_ROWS = 8;
   const TABLE_GRID_MAX_COLS = 8;
 
-  // How much surrounding text to send for revise's context window.
+  // How much surrounding text to send when a revise prompt runs on a selection.
   const REVISE_CONTEXT_CHARS = 600;
 
-  // Built-in revise template. Will move to a prompt node in M5.
-  // The bracket-directive paragraph is the kind of behavior that wants to be a
-  // snippet — when snippet nodes are user-authorable, it moves out and the
-  // template just includes it (see ui_inspiration_novelcrafter memory note).
-  const REVISE_SELECTION_TEMPLATE = `{% role "system" %}
-You are an expert fiction writer. Rewrite the selection. Keep the same point of view, tense, and overall meaning. Tighten phrasing, sharpen sensory detail, and prefer showing over telling. Output ONLY the revised prose — no preamble, no commentary, no quote marks around it.
-
-If the selection contains text in [square brackets], those are author directives — read them as instructions to you, not as prose to transcribe. Incorporate the requested change in your rewrite. Do NOT include the brackets or any reference to them in your output.
-{% endrole %}
-
-{% role "user" %}
-{% if pov(scene) %}POV: {{ pov(scene).title }}
-{% endif %}
-{{ relevant_lore(scene) }}
-
-{% if text_before %}Context before the selection:
-<<<
-{{ text_before }}
->>>
-
-{% endif %}
-Selection to rewrite:
-<<<
-{{ selection }}
->>>
-{% if text_after %}
-
-Context after the selection:
-<<<
-{{ text_after }}
->>>
-{% endif %}
-
-{{ input.instruction | default("Tighten and sharpen. Same meaning, better prose.") }}
-{% endrole %}`;
-
-  // Built-in template for "continue from cursor". Will move to a prompt node in M5.
-  const CONTINUE_SCENE_TEMPLATE = `{% role "system" %}
-You are an expert fiction writer. Continue the scene in the same voice and style as the existing prose. Match register, POV, and prose rhythm. Do not conclude the scene — push it forward by one beat only.
-{% endrole %}
-
-{% role "user" %}
-{% if pov(scene) %}POV: {{ pov(scene).title }}
-{% endif %}
-{{ relevant_lore(scene) }}
-{% if scenes_before(scene) %}
-
-The story so far:
-{{ scenes_before(scene) }}
-{% endif %}
-
-{% if text_before %}
-Here is the scene so far:
-<<<
-{{ text_before }}
->>>
-
-Continue from where it left off. Write about {{ input.words | default(250) }} words. Output prose only — no preamble, no explanation, no closing remarks.
-{% else %}
-Open the scene. Write about {{ input.words | default(250) }} words to start it. Output prose only — no preamble.
-{% endif %}
-{% endrole %}`;
   type ToolbarButtonAction = {
     kind: "button";
     id: string;
@@ -254,6 +193,7 @@ Open the scene. Write about {{ input.words | default(250) }} words to start it. 
   // (while generating or after a failure). null when the suggestion's own range
   // is the anchor.
   let aiAnchorPos: number | null = null;
+  let lastInvokedEntryId: string | null = null;
 
   $: slashCommands = editor && documentKind === "scene" ? getSlashCommands() : [];
   // slashFilterText is a plain `let` because TipTap mutates editor state in
@@ -652,22 +592,56 @@ Open the scene. Write about {{ input.words | default(250) }} words to start it. 
     editorEmpty = firstNode.type.name === "paragraph" && firstNode.content.size === 0;
   }
 
+  function walkPromptAncestors(entryTypeId: string | undefined | null): string[] {
+    if (!entryTypeId || !metadataSchema) return [];
+    const seen = new Set<string>();
+    const chain: string[] = [];
+    let current: string | undefined = entryTypeId;
+    while (current && !seen.has(current)) {
+      seen.add(current);
+      chain.push(current);
+      current = metadataSchema.entry_types[current]?.parent ?? undefined;
+    }
+    return chain;
+  }
+
+  function effectiveOutputKind(entry: PromptEntrySummary): string | null {
+    const definition = metadataSchema?.entry_types[entry.entry_type];
+    const output = definition?.prompt?.context_strategy?.output;
+    if (!output || typeof output.kind !== "string") return null;
+    return output.kind;
+  }
+
+  function promptEntriesForSurface(surface: "append_to_body" | "replace_selection" | "chat_panel"): PromptEntrySummary[] {
+    if (!metadataSchema) return [];
+    return promptEntries
+      .filter((entry) => effectiveOutputKind(entry) === surface)
+      .sort((a, b) => a.title.localeCompare(b.title, undefined, { sensitivity: "base" }));
+  }
+
+  function promptEntryDescription(entry: PromptEntrySummary): string {
+    const typeName = metadataSchema?.entry_types[entry.entry_type]?.name ?? entry.entry_type;
+    return typeName;
+  }
+
   function handleEditorKeydown(view: EditorView, event: KeyboardEvent) {
     if (documentKind !== "scene") {
       if (slashMenu.visible) closeSlashMenu();
       return false;
     }
 
-    // Ctrl/⌘+J: AI continue at cursor (regardless of slash menu state).
+    // Ctrl/⌘+J: invoke the first available continuation prompt.
     if (event.key.toLowerCase() === "j" && (event.ctrlKey || event.metaKey) && !event.altKey && !event.shiftKey) {
       event.preventDefault();
-      void runAIContinue();
+      const entry = defaultPromptForSurface("append_to_body");
+      if (entry) void runPromptEntry(entry);
       return true;
     }
-    // Ctrl/⌘+Shift+J: AI revise selection.
+    // Ctrl/⌘+Shift+J: invoke the first available revise prompt.
     if (event.key.toLowerCase() === "j" && (event.ctrlKey || event.metaKey) && !event.altKey && event.shiftKey) {
       event.preventDefault();
-      void runAIRevise();
+      const entry = defaultPromptForSurface("replace_selection");
+      if (entry) void runPromptEntry(entry);
       return true;
     }
 
@@ -1029,45 +1003,69 @@ Open the scene. Write about {{ input.words | default(250) }} words to start it. 
     }
   }
 
-  async function runAIRevise() {
+  async function runPromptEntry(entry: PromptEntrySummary) {
     if (!editor || !scene || aiGenerating || documentKind !== "scene") return;
     if (aiSuggestionId) {
       aiError = "Accept or revert the pending suggestion before generating another.";
       return;
     }
-    const { from, to } = editor.state.selection;
-    if (from === to) {
-      aiAnchorPos = from;
-      aiError = "Select text to revise.";
+    const outputKind = effectiveOutputKind(entry);
+    if (outputKind !== "append_to_body" && outputKind !== "replace_selection") {
+      aiError = `Output kind "${outputKind ?? "(unset)"}" is not yet supported for inline dispatch.`;
       updateAIToolbarPosition();
       return;
     }
-    const selectionText = editor.state.doc.textBetween(from, to, "\n\n", " ");
-    if (!selectionText.trim()) {
-      aiAnchorPos = from;
-      aiError = "Select non-empty text to revise.";
-      updateAIToolbarPosition();
-      return;
+
+    let selectionText: string | undefined;
+    let textBefore: string;
+    let textAfter: string;
+    let from: number;
+    let to: number;
+
+    if (outputKind === "replace_selection") {
+      const sel = editor.state.selection;
+      from = sel.from;
+      to = sel.to;
+      if (from === to) {
+        aiAnchorPos = from;
+        aiError = "Select text to revise.";
+        updateAIToolbarPosition();
+        return;
+      }
+      selectionText = editor.state.doc.textBetween(from, to, "\n\n", " ");
+      if (!selectionText.trim()) {
+        aiAnchorPos = from;
+        aiError = "Select non-empty text to revise.";
+        updateAIToolbarPosition();
+        return;
+      }
+      const docSize = editor.state.doc.content.size;
+      const beforeStart = Math.max(0, from - REVISE_CONTEXT_CHARS);
+      const afterEnd = Math.min(docSize, to + REVISE_CONTEXT_CHARS);
+      textBefore = editor.state.doc.textBetween(beforeStart, from, "\n\n", " ");
+      textAfter = editor.state.doc.textBetween(to, afterEnd, "\n\n", " ");
+    } else {
+      from = editor.state.selection.from;
+      to = from;
+      const docSize = editor.state.doc.content.size;
+      textBefore = editor.state.doc.textBetween(0, from, "\n\n", " ");
+      textAfter = editor.state.doc.textBetween(from, docSize, "\n\n", " ");
     }
-    const docSize = editor.state.doc.content.size;
-    const beforeStart = Math.max(0, from - REVISE_CONTEXT_CHARS);
-    const afterEnd = Math.min(docSize, to + REVISE_CONTEXT_CHARS);
-    const textBefore = editor.state.doc.textBetween(beforeStart, from, "\n\n", " ");
-    const textAfter = editor.state.doc.textBetween(to, afterEnd, "\n\n", " ");
 
     aiError = null;
     aiAnchorPos = from;
     aiGenerating = true;
+    lastInvokedEntryId = entry.id;
     updateAIToolbarPosition();
     try {
       const response = await api.aiGenerate({
-        template_source: REVISE_SELECTION_TEMPLATE,
+        template_source: entry.body_markdown,
         target_scene_id: scene.id,
         session_id: scene.id,
         inputs: {},
         text_before: textBefore,
         text_after: textAfter,
-        selection: selectionText,
+        ...(selectionText !== undefined ? { selection: selectionText } : {}),
         commit: false,
       });
       if (!response.ok) {
@@ -1079,12 +1077,16 @@ Open the scene. Write about {{ input.words | default(250) }} words to start it. 
         return;
       }
       if (!editor) return;
-      const currentText = editor.state.doc.textBetween(from, to, "\n\n", " ");
-      if (currentText !== selectionText) {
-        aiError = "Document changed during the AI call. Re-select the text and retry.";
-        return;
+      if (outputKind === "replace_selection") {
+        const currentText = editor.state.doc.textBetween(from, to, "\n\n", " ");
+        if (currentText !== selectionText) {
+          aiError = "Document changed during the AI call. Re-select the text and retry.";
+          return;
+        }
+        replaceWithAISuggestion(from, to, response.content, selectionText!);
+      } else {
+        insertAISuggestion(response.content);
       }
-      replaceWithAISuggestion(from, to, response.content, selectionText);
       aiSuggestionMeta = {
         provider: response.provider,
         model: response.model,
@@ -1092,7 +1094,7 @@ Open the scene. Write about {{ input.words | default(250) }} words to start it. 
         truncated: response.truncated,
         wordCount: countWords(response.content),
       };
-      aiAnchorPos = null; // suggestion range takes over as anchor
+      aiAnchorPos = null;
     } catch (e) {
       aiError = (e as Error).message;
     } finally {
@@ -1140,54 +1142,13 @@ Open the scene. Write about {{ input.words | default(250) }} words to start it. 
     requestAnimationFrame(updateAIToolbarPosition);
   }
 
-  async function runAIContinue() {
-    if (!editor || !scene || aiGenerating || documentKind !== "scene") return;
-    if (aiSuggestionId) {
-      aiError = "Accept or revert the pending suggestion before generating another.";
-      return;
-    }
-    const cursorPos = editor.state.selection.from;
-    const docSize = editor.state.doc.content.size;
-    const textBefore = editor.state.doc.textBetween(0, cursorPos, "\n\n", " ");
-    const textAfter = editor.state.doc.textBetween(cursorPos, docSize, "\n\n", " ");
+  function findPromptEntry(entryId: string | null): PromptEntrySummary | null {
+    if (!entryId) return null;
+    return promptEntries.find((entry) => entry.id === entryId) ?? null;
+  }
 
-    aiError = null;
-    aiAnchorPos = cursorPos;
-    aiGenerating = true;
-    updateAIToolbarPosition();
-    try {
-      const response = await api.aiGenerate({
-        template_source: CONTINUE_SCENE_TEMPLATE,
-        target_scene_id: scene.id,
-        session_id: scene.id,
-        inputs: {},
-        text_before: textBefore,
-        text_after: textAfter,
-        commit: false,
-      });
-      if (!response.ok) {
-        aiError = response.error ?? "Unknown error";
-        return;
-      }
-      if (!response.content.trim()) {
-        aiError = "Model returned empty output.";
-        return;
-      }
-      insertAISuggestion(response.content);
-      aiSuggestionMeta = {
-        provider: response.provider,
-        model: response.model,
-        latency_ms: response.latency_ms,
-        truncated: response.truncated,
-        wordCount: countWords(response.content),
-      };
-      aiAnchorPos = null;
-    } catch (e) {
-      aiError = (e as Error).message;
-    } finally {
-      aiGenerating = false;
-      updateAIToolbarPosition();
-    }
+  function defaultPromptForSurface(surface: "append_to_body" | "replace_selection"): PromptEntrySummary | null {
+    return promptEntriesForSurface(surface)[0] ?? null;
   }
 
   function updateAIToolbarPosition() {
@@ -1333,6 +1294,11 @@ Open the scene. Write about {{ input.words | default(250) }} words to start it. 
     const wasRevision = aiSuggestionOriginal !== null;
     const original = aiSuggestionOriginal;
     const range = findAISuggestionRange(aiSuggestionId);
+    const entry = findPromptEntry(lastInvokedEntryId);
+    if (!entry) {
+      aiError = "Original prompt is no longer available.";
+      return;
+    }
 
     revertAISuggestion();
 
@@ -1340,10 +1306,8 @@ Open the scene. Write about {{ input.words | default(250) }} words to start it. 
       // After revert, the original text occupies [range.from, range.from + original.length].
       const restoredTo = range.from + original.length;
       editor.chain().focus().setTextSelection({ from: range.from, to: restoredTo }).run();
-      await runAIRevise();
-    } else {
-      await runAIContinue();
     }
+    await runPromptEntry(entry);
   }
 
   async function focusAndRun(command: () => void | Promise<void>) {
@@ -1695,6 +1659,27 @@ Open the scene. Write about {{ input.words | default(250) }} words to start it. 
 
   function getSelectionToolbarActions(): ToolbarAction[] {
     if (!editor) return [];
+    const reviseEntries = promptEntriesForSurface("replace_selection");
+    const reviseAction: ToolbarAction | null =
+      reviseEntries.length === 0
+        ? null
+        : reviseEntries.length === 1
+          ? {
+              kind: "button",
+              id: `ai-revise:${reviseEntries[0].id}`,
+              label: `✨ ${reviseEntries[0].title}`,
+              run: () => focusAndRun(() => runPromptEntry(reviseEntries[0])),
+            }
+          : {
+              kind: "menu",
+              id: "ai-revise",
+              label: "✨ Revise",
+              items: reviseEntries.map((entry) => ({
+                id: `ai-revise:${entry.id}`,
+                label: entry.title,
+                run: () => focusAndRun(() => runPromptEntry(entry)),
+              })),
+            };
     return [
       {
         kind: "button",
@@ -1714,12 +1699,7 @@ Open the scene. Write about {{ input.words | default(250) }} words to start it. 
         label: "S",
         run: () => editor?.chain().focus().toggleStrike().run(),
       },
-      {
-        kind: "button",
-        id: "ai-revise",
-        label: "✨ Revise",
-        run: () => focusAndRun(runAIRevise),
-      },
+      ...(reviseAction ? [reviseAction] : []),
       {
         kind: "menu",
         id: "heading",
@@ -1830,15 +1810,15 @@ Open the scene. Write about {{ input.words | default(250) }} words to start it. 
         description: "Pick the size, then click to insert.",
         run: () => openTableGrid(),
       },
-      {
+      ...promptEntriesForSurface("append_to_body").map((entry) => ({
         group: "AI",
-        label: "AI: Continue scene",
-        description: "Generate the next beat at the cursor.",
+        label: entry.title,
+        description: promptEntryDescription(entry),
         run: () => {
           clearSlashTrigger();
-          void runAIContinue();
+          void runPromptEntry(entry);
         },
-      },
+      })),
     ];
   }
 </script>

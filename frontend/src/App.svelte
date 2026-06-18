@@ -3191,6 +3191,7 @@ The story so far:
         scene={editorPane.scene}
         documentKind={editorPane.document?.type ?? "scene"}
         metadataSchema={metadataSchema}
+        promptEntries={promptEntries}
         knownTags={knownTags}
         metadataReload={metadataReloadsByPane[editorPane.id] ?? null}
         titleReload={titleReloadsByPane[editorPane.id] ?? null}

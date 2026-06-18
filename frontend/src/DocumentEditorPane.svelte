@@ -62,8 +62,13 @@
   const REVISE_CONTEXT_CHARS = 600;
 
   // Built-in revise template. Will move to a prompt node in M5.
+  // The bracket-directive paragraph is the kind of behavior that wants to be a
+  // snippet — when snippet nodes are user-authorable, it moves out and the
+  // template just includes it (see ui_inspiration_novelcrafter memory note).
   const REVISE_SELECTION_TEMPLATE = `{% role "system" %}
 You are an expert fiction writer. Rewrite the selection. Keep the same point of view, tense, and overall meaning. Tighten phrasing, sharpen sensory detail, and prefer showing over telling. Output ONLY the revised prose — no preamble, no commentary, no quote marks around it.
+
+If the selection contains text in [square brackets], those are author directives — read them as instructions to you, not as prose to transcribe. Incorporate the requested change in your rewrite. Do NOT include the brackets or any reference to them in your output.
 {% endrole %}
 
 {% role "user" %}
@@ -237,6 +242,10 @@ Open the scene. Write about {{ input.words | default(250) }} words to start it. 
   let aiNextSuggestionId = 1;
   // For revisions: the original selected text to restore on discard. null for continuations.
   let aiSuggestionOriginal: string | null = null;
+  // ProseMirror position to anchor the toolbar to BEFORE a suggestion exists
+  // (while generating or after a failure). null when the suggestion's own range
+  // is the anchor.
+  let aiAnchorPos: number | null = null;
 
   $: slashCommands = editor && documentKind === "scene" ? getSlashCommands() : [];
   $: activeSlashCommand = slashCommands[slashMenu.selectedIndex];
@@ -384,7 +393,9 @@ Open the scene. Write about {{ input.words | default(250) }} words to start it. 
     aiSuggestionId = null;
     aiSuggestionMeta = null;
     aiSuggestionOriginal = null;
+    aiAnchorPos = null;
     aiError = null;
+    aiToolbarPosition = { x: 0, y: 0, visible: false };
     const nextEntryDefinition = metadataSchema?.entry_types[entryType];
     const nextHasBody = nextEntryDefinition?.has_body ?? true;
     metadataExpanded = documentKind === "lore" || !nextHasBody;
@@ -946,12 +957,16 @@ Open the scene. Write about {{ input.words | default(250) }} words to start it. 
     }
     const { from, to } = editor.state.selection;
     if (from === to) {
+      aiAnchorPos = from;
       aiError = "Select text to revise.";
+      updateAIToolbarPosition();
       return;
     }
     const selectionText = editor.state.doc.textBetween(from, to, "\n\n", " ");
     if (!selectionText.trim()) {
+      aiAnchorPos = from;
       aiError = "Select non-empty text to revise.";
+      updateAIToolbarPosition();
       return;
     }
     const docSize = editor.state.doc.content.size;
@@ -961,7 +976,9 @@ Open the scene. Write about {{ input.words | default(250) }} words to start it. 
     const textAfter = editor.state.doc.textBetween(to, afterEnd, "\n\n", " ");
 
     aiError = null;
+    aiAnchorPos = from;
     aiGenerating = true;
+    updateAIToolbarPosition();
     try {
       const response = await api.aiGenerate({
         template_source: REVISE_SELECTION_TEMPLATE,
@@ -981,7 +998,6 @@ Open the scene. Write about {{ input.words | default(250) }} words to start it. 
         aiError = "Model returned empty output.";
         return;
       }
-      // Fingerprint check: the original text should still be at [from, to].
       if (!editor) return;
       const currentText = editor.state.doc.textBetween(from, to, "\n\n", " ");
       if (currentText !== selectionText) {
@@ -996,10 +1012,12 @@ Open the scene. Write about {{ input.words | default(250) }} words to start it. 
         truncated: response.truncated,
         wordCount: countWords(response.content),
       };
+      aiAnchorPos = null; // suggestion range takes over as anchor
     } catch (e) {
       aiError = (e as Error).message;
     } finally {
       aiGenerating = false;
+      updateAIToolbarPosition();
     }
   }
 
@@ -1054,7 +1072,9 @@ Open the scene. Write about {{ input.words | default(250) }} words to start it. 
     const textAfter = editor.state.doc.textBetween(cursorPos, docSize, "\n\n", " ");
 
     aiError = null;
+    aiAnchorPos = cursorPos;
     aiGenerating = true;
+    updateAIToolbarPosition();
     try {
       const response = await api.aiGenerate({
         template_source: CONTINUE_SCENE_TEMPLATE,
@@ -1081,25 +1101,35 @@ Open the scene. Write about {{ input.words | default(250) }} words to start it. 
         truncated: response.truncated,
         wordCount: countWords(response.content),
       };
+      aiAnchorPos = null;
     } catch (e) {
       aiError = (e as Error).message;
     } finally {
       aiGenerating = false;
+      updateAIToolbarPosition();
     }
   }
 
   function updateAIToolbarPosition() {
-    if (!editor || !editorFrame || !aiSuggestionId) {
+    if (!editor || !editorFrame) {
       if (aiToolbarPosition.visible) aiToolbarPosition = { x: 0, y: 0, visible: false };
       return;
     }
-    const range = findAISuggestionRange(aiSuggestionId);
-    if (!range) {
-      aiToolbarPosition = { x: 0, y: 0, visible: false };
+    // Anchor priority: existing suggestion range > pre-suggestion anchor (loading/error).
+    let pos: number | null = null;
+    if (aiSuggestionId) {
+      const range = findAISuggestionRange(aiSuggestionId);
+      if (range) pos = range.from;
+    } else if (aiAnchorPos !== null) {
+      const docSize = editor.state.doc.content.size;
+      pos = Math.max(0, Math.min(aiAnchorPos, docSize));
+    }
+    if (pos === null) {
+      if (aiToolbarPosition.visible) aiToolbarPosition = { x: 0, y: 0, visible: false };
       return;
     }
     try {
-      const coords = editor.view.coordsAtPos(range.from);
+      const coords = editor.view.coordsAtPos(pos);
       const frameBounds = editorFrame.getBoundingClientRect();
       aiToolbarPosition = {
         x: coords.left - frameBounds.left + editorFrame.scrollLeft,
@@ -1109,6 +1139,12 @@ Open the scene. Write about {{ input.words | default(250) }} words to start it. 
     } catch {
       aiToolbarPosition = { x: 0, y: 0, visible: false };
     }
+  }
+
+  function dismissAIError() {
+    aiError = null;
+    aiAnchorPos = null;
+    aiToolbarPosition = { x: 0, y: 0, visible: false };
   }
 
   function insertAISuggestion(text: string) {
@@ -1181,6 +1217,7 @@ Open the scene. Write about {{ input.words | default(250) }} words to start it. 
     aiSuggestionId = null;
     aiSuggestionMeta = null;
     aiSuggestionOriginal = null;
+    aiAnchorPos = null;
     aiError = null;
     aiToolbarPosition = { x: 0, y: 0, visible: false };
   }
@@ -1206,6 +1243,7 @@ Open the scene. Write about {{ input.words | default(250) }} words to start it. 
     aiSuggestionId = null;
     aiSuggestionMeta = null;
     aiSuggestionOriginal = null;
+    aiAnchorPos = null;
     aiError = null;
     aiToolbarPosition = { x: 0, y: 0, visible: false };
   }
@@ -1917,31 +1955,36 @@ Open the scene. Write about {{ input.words | default(250) }} words to start it. 
   </section>
 
   <div class:empty-editor={editorEmpty} class:lore-editor={documentKind === "lore"} class:hidden-body={!hasBody} class="editor-wrap" bind:this={editorFrame}>
-    {#if aiGenerating || aiError}
-      <div class="ai-banner" class:ai-banner-error={!!aiError} class:ai-banner-loading={aiGenerating}>
+    {#if aiToolbarPosition.visible && (aiGenerating || aiSuggestionId || aiError)}
+      <div
+        class="ai-inline-toolbar"
+        class:ai-inline-toolbar-loading={aiGenerating}
+        class:ai-inline-toolbar-error={aiError && !aiSuggestionId}
+        style={`left: ${aiToolbarPosition.x}px; top: ${aiToolbarPosition.y}px;`}
+      >
         {#if aiGenerating}
-          <span class="ai-banner-label">AI generating…</span>
-        {:else if aiError}
-          <span class="ai-banner-label">AI error: {aiError}</span>
-          <button type="button" on:click={() => (aiError = null)}>Dismiss</button>
-        {/if}
-      </div>
-    {/if}
-    {#if aiSuggestionId && aiToolbarPosition.visible}
-      <div class="ai-inline-toolbar" style={`left: ${aiToolbarPosition.x}px; top: ${aiToolbarPosition.y}px;`}>
-        <button type="button" class="ai-toolbar-btn ai-toolbar-accept" on:mousedown|preventDefault={acceptAISuggestion} title="Accept (keep the text)">
-          <span aria-hidden="true">✓</span> Accept
-        </button>
-        <button type="button" class="ai-toolbar-btn" on:mousedown|preventDefault={retryAISuggestion} title="Retry (regenerate)" disabled={aiGenerating}>
-          <span aria-hidden="true">↻</span> Retry
-        </button>
-        <button type="button" class="ai-toolbar-btn ai-toolbar-discard" on:mousedown|preventDefault={revertAISuggestion} title="Discard (delete the text)">
-          <span aria-hidden="true">✕</span> Discard
-        </button>
-        {#if aiSuggestionMeta}
-          <span class="ai-toolbar-meta">
-            {aiSuggestionMeta.wordCount} words, {aiSuggestionMeta.model}{#if aiSuggestionMeta.truncated} · truncated{/if}
-          </span>
+          <span class="ai-toolbar-spinner" aria-hidden="true">⟳</span>
+          <span class="ai-toolbar-status">Generating…</span>
+        {:else if aiError && !aiSuggestionId}
+          <span class="ai-toolbar-status">⚠ {aiError}</span>
+          <button type="button" class="ai-toolbar-btn" on:mousedown|preventDefault={dismissAIError} title="Dismiss">
+            <span aria-hidden="true">✕</span> Dismiss
+          </button>
+        {:else if aiSuggestionId}
+          <button type="button" class="ai-toolbar-btn ai-toolbar-accept" on:mousedown|preventDefault={acceptAISuggestion} title="Accept (keep the text)">
+            <span aria-hidden="true">✓</span> Accept
+          </button>
+          <button type="button" class="ai-toolbar-btn" on:mousedown|preventDefault={retryAISuggestion} title="Retry (regenerate)" disabled={aiGenerating}>
+            <span aria-hidden="true">↻</span> Retry
+          </button>
+          <button type="button" class="ai-toolbar-btn ai-toolbar-discard" on:mousedown|preventDefault={revertAISuggestion} title="Discard (delete the text)">
+            <span aria-hidden="true">✕</span> Discard
+          </button>
+          {#if aiSuggestionMeta}
+            <span class="ai-toolbar-meta">
+              {aiSuggestionMeta.wordCount} words, {aiSuggestionMeta.model}{#if aiSuggestionMeta.truncated} · truncated{/if}
+            </span>
+          {/if}
         {/if}
       </div>
     {/if}

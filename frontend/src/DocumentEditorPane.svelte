@@ -248,10 +248,10 @@ Open the scene. Write about {{ input.words | default(250) }} words to start it. 
   let aiAnchorPos: number | null = null;
 
   $: slashCommands = editor && documentKind === "scene" ? getSlashCommands() : [];
-  // slashFilterText must NOT depend on slashMenu — otherwise the index-reset
-  // reactive below forms a cycle (filtered changes → index reset modifies
-  // slashMenu → filter recomputes).
-  $: slashFilterText = editor && documentKind === "scene" ? readSlashFilterText() : "";
+  // slashFilterText is a plain `let` because TipTap mutates editor state in
+  // place — a `$:` declaration depending on `editor` wouldn't re-run when the
+  // user types. We refresh it explicitly from onUpdate/onSelectionUpdate.
+  let slashFilterText = "";
   $: filteredSlashCommands = filterSlashCommands(slashCommands, slashFilterText);
   $: activeSlashCommand = filteredSlashCommands[slashMenu.selectedIndex];
   $: clampSlashSelectedIndex(filteredSlashCommands.length);
@@ -370,11 +370,13 @@ Open the scene. Write about {{ input.words | default(250) }} words to start it. 
           emitChange();
         }
         if (aiSuggestionId) updateAIToolbarPosition();
+        refreshSlashFilterText();
       },
       onSelectionUpdate: () => {
         updateSelectionMenu();
         updateTableMenu();
         if (aiSuggestionId) updateAIToolbarPosition();
+        refreshSlashFilterText();
       },
       onBlur: () => {
         hideSelectionMenu();
@@ -738,6 +740,11 @@ Open the scene. Write about {{ input.words | default(250) }} words to start it. 
     const text = editor.state.selection.$from.parent.textContent;
     if (!text.startsWith("/")) return "";
     return text.slice(1);
+  }
+
+  function refreshSlashFilterText() {
+    const next = editor && documentKind === "scene" ? readSlashFilterText() : "";
+    if (next !== slashFilterText) slashFilterText = next;
   }
 
   function filterSlashCommands(commands: SlashCommand[], filter: string): SlashCommand[] {

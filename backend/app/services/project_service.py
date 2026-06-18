@@ -692,8 +692,10 @@ class ProjectService:
         entry_type_id = request.entry_type_id.strip()
         if not re.fullmatch(r"[A-Za-z][A-Za-z0-9_]*", entry_type_id):
             raise ProjectServiceError("Node type ID must start with a letter and contain only letters, numbers, and underscores.", 422)
-        if request.entry_type.kind not in {"scene", "lore"}:
-            raise ProjectServiceError("Node type kind must be scene or lore.", 422)
+        if request.entry_type.kind not in {"scene", "lore", "prompt", "snippet"}:
+            raise ProjectServiceError("Node type kind must be scene, lore, prompt, or snippet.", 422)
+        if request.entry_type.prompt is not None and request.entry_type.kind != "prompt":
+            raise ProjectServiceError("Prompt configuration is only valid on prompt node types.", 422)
         if request.entry_type.parent == entry_type_id:
             raise ProjectServiceError("Node type cannot inherit from itself.", 422)
 
@@ -722,6 +724,10 @@ class ProjectService:
         entry_type_data["fields"] = fields
         if not request.entry_type.parent:
             entry_type_data.pop("parent", None)
+        if request.entry_type.prompt is None and isinstance(existing_entry_type, dict):
+            existing_prompt = existing_entry_type.get("prompt")
+            if isinstance(existing_prompt, dict):
+                entry_type_data["prompt"] = deepcopy(existing_prompt)
         entry_types[entry_type_id] = entry_type_data
         layer_data["entry_types"] = entry_types
 
@@ -1259,6 +1265,11 @@ class ProjectService:
                     for inheritable in ("display_template", "has_body"):
                         if inheritable not in next_entry_type and inheritable in parent_definition:
                             next_entry_type[inheritable] = parent_definition[inheritable]
+                    parent_prompt = parent_definition.get("prompt")
+                    if isinstance(parent_prompt, dict):
+                        child_prompt = next_entry_type.get("prompt") if isinstance(next_entry_type.get("prompt"), dict) else {}
+                        merged_prompt = {**deepcopy(parent_prompt), **deepcopy(child_prompt)}
+                        next_entry_type["prompt"] = merged_prompt
             resolving.remove(entry_type_id)
             resolved[entry_type_id] = next_entry_type
             return next_entry_type
@@ -1347,6 +1358,20 @@ class ProjectService:
             for field_id in entry_type.fields:
                 if field_id not in schema.fields:
                     errors.append(f"Metadata entry_type {entry_type_id} references unknown field {field_id}.")
+
+        for entry_type_id, entry_type in schema.entry_types.items():
+            if entry_type.prompt is None:
+                continue
+            if entry_type.kind != "prompt":
+                errors.append(f"Entry type {entry_type_id} has prompt configuration but kind is {entry_type.kind}.")
+                continue
+            seen_inputs: set[str] = set()
+            for input_def in entry_type.prompt.inputs:
+                if input_def.name in seen_inputs:
+                    errors.append(f"Entry type {entry_type_id} has duplicate prompt input '{input_def.name}'.")
+                seen_inputs.add(input_def.name)
+                if input_def.type == "select" and not input_def.options:
+                    errors.append(f"Entry type {entry_type_id} input '{input_def.name}' is type select but has no options.")
 
         for field_id, field in schema.fields.items():
             if field.type == "computed":

@@ -11,6 +11,9 @@ from app.models import (
     EntryTypeDefinition,
     MetadataFieldDefinition,
     MoveMetadataFieldRequest,
+    PromptContextStrategy,
+    PromptEntryTypeExtras,
+    PromptInputDefinition,
     RenameMetadataFieldRequest,
     SaveLoreEntryRequest,
     SaveSceneRequest,
@@ -1311,6 +1314,222 @@ class MetadataValidationTests(unittest.TestCase):
         self.assertEqual(saved.metadata["aliases"], ["Mr. Smith", "Bob"])
         self.assertEqual(saved.metadata["tags"], ["Crew"])
         self.assertEqual(self.service.read_known_tags().tags, ["Crew"])
+
+    def _project_layer_id(self) -> str:
+        return next(
+            layer.id
+            for layer in self.service.read_metadata_schema_layers().layers
+            if layer.folder_path == str(self.root)
+        )
+
+    def test_prompt_subtype_round_trips_with_inputs_and_context_strategy(self) -> None:
+        layer_id = self._project_layer_id()
+        extras = PromptEntryTypeExtras(
+            system_prompt="You are a careful continuation engine.",
+            model_class="balanced",
+            provider_policy="cloud-allowed",
+            inputs=[
+                PromptInputDefinition(name="words", type="number", default=300, label="Words"),
+                PromptInputDefinition(name="beat", type="long_text", label="Beat instruction"),
+            ],
+            context_strategy=PromptContextStrategy(
+                target={"required": True, "kind": "scene"},
+                scan_surface=["_text_before", "_selection"],
+                output={"kind": "append_to_body", "review": "visual_diff"},
+            ),
+        )
+        schema = self.service.upsert_metadata_entry_type(
+            UpsertMetadataEntryTypeRequest(
+                layer_id=layer_id,
+                entry_type_id="continue_scene",
+                entry_type=EntryTypeDefinition(
+                    name="Continue Scene",
+                    kind="prompt",
+                    parent="prompt",
+                    prompt=extras,
+                ),
+            )
+        )
+
+        stored = schema.entry_types["continue_scene"]
+        assert stored.prompt is not None
+        self.assertEqual(stored.prompt.system_prompt, "You are a careful continuation engine.")
+        self.assertEqual(stored.prompt.model_class, "balanced")
+        self.assertEqual(stored.prompt.provider_policy, "cloud-allowed")
+        self.assertEqual([i.name for i in stored.prompt.inputs], ["words", "beat"])
+        assert stored.prompt.context_strategy is not None
+        self.assertEqual(stored.prompt.context_strategy.scan_surface, ["_text_before", "_selection"])
+        self.assertEqual(stored.prompt.context_strategy.target, {"required": True, "kind": "scene"})
+
+        on_disk = self.service._read_yaml(self.root / "metadata.schema.yaml")
+        disk_entry = on_disk["entry_types"]["continue_scene"]
+        self.assertEqual(disk_entry["kind"], "prompt")
+        self.assertEqual(disk_entry["prompt"]["model_class"], "balanced")
+        self.assertEqual(disk_entry["prompt"]["inputs"][0]["name"], "words")
+
+        reread = self.service.read_metadata_schema()
+        rer = reread.entry_types["continue_scene"]
+        assert rer.prompt is not None
+        self.assertEqual(rer.prompt.system_prompt, "You are a careful continuation engine.")
+        self.assertEqual([i.name for i in rer.prompt.inputs], ["words", "beat"])
+
+    def test_snippet_subtype_can_be_created(self) -> None:
+        layer_id = self._project_layer_id()
+        schema = self.service.upsert_metadata_entry_type(
+            UpsertMetadataEntryTypeRequest(
+                layer_id=layer_id,
+                entry_type_id="house_voice",
+                entry_type=EntryTypeDefinition(
+                    name="House Voice",
+                    kind="snippet",
+                    parent="snippet",
+                ),
+            )
+        )
+
+        self.assertIn("house_voice", schema.entry_types)
+        self.assertEqual(schema.entry_types["house_voice"].kind, "snippet")
+        self.assertIsNone(schema.entry_types["house_voice"].prompt)
+
+    def test_unknown_kind_is_rejected(self) -> None:
+        layer_id = self._project_layer_id()
+        with self.assertRaisesRegex(ProjectServiceError, "kind must be"):
+            self.service.upsert_metadata_entry_type(
+                UpsertMetadataEntryTypeRequest(
+                    layer_id=layer_id,
+                    entry_type_id="bogus",
+                    entry_type=EntryTypeDefinition(name="Bogus", kind="bogus"),
+                )
+            )
+
+    def test_prompt_extras_rejected_on_non_prompt_kind(self) -> None:
+        layer_id = self._project_layer_id()
+        with self.assertRaisesRegex(ProjectServiceError, "only valid on prompt"):
+            self.service.upsert_metadata_entry_type(
+                UpsertMetadataEntryTypeRequest(
+                    layer_id=layer_id,
+                    entry_type_id="faction",
+                    entry_type=EntryTypeDefinition(
+                        name="Faction",
+                        kind="lore",
+                        parent="lore_entry",
+                        prompt=PromptEntryTypeExtras(system_prompt="Nope"),
+                    ),
+                )
+            )
+
+    def test_prompt_input_select_requires_options(self) -> None:
+        layer_id = self._project_layer_id()
+        with self.assertRaisesRegex(ProjectServiceError, "no options"):
+            self.service.upsert_metadata_entry_type(
+                UpsertMetadataEntryTypeRequest(
+                    layer_id=layer_id,
+                    entry_type_id="bad_prompt",
+                    entry_type=EntryTypeDefinition(
+                        name="Bad Prompt",
+                        kind="prompt",
+                        parent="prompt",
+                        prompt=PromptEntryTypeExtras(
+                            inputs=[PromptInputDefinition(name="tone", type="select", options=[])],
+                        ),
+                    ),
+                )
+            )
+
+    def test_prompt_duplicate_input_name_rejected(self) -> None:
+        layer_id = self._project_layer_id()
+        with self.assertRaisesRegex(ProjectServiceError, "duplicate prompt input"):
+            self.service.upsert_metadata_entry_type(
+                UpsertMetadataEntryTypeRequest(
+                    layer_id=layer_id,
+                    entry_type_id="dup_prompt",
+                    entry_type=EntryTypeDefinition(
+                        name="Dup Prompt",
+                        kind="prompt",
+                        parent="prompt",
+                        prompt=PromptEntryTypeExtras(
+                            inputs=[
+                                PromptInputDefinition(name="x"),
+                                PromptInputDefinition(name="x"),
+                            ],
+                        ),
+                    ),
+                )
+            )
+
+    def test_prompt_child_inherits_system_prompt_from_parent(self) -> None:
+        layer_id = self._project_layer_id()
+        self.service.upsert_metadata_entry_type(
+            UpsertMetadataEntryTypeRequest(
+                layer_id=layer_id,
+                entry_type_id="house_prompt",
+                entry_type=EntryTypeDefinition(
+                    name="House Prompt",
+                    kind="prompt",
+                    parent="prompt",
+                    abstract=True,
+                    prompt=PromptEntryTypeExtras(
+                        system_prompt="House style: terse, no purple prose.",
+                        model_class="balanced",
+                    ),
+                ),
+            )
+        )
+        schema = self.service.upsert_metadata_entry_type(
+            UpsertMetadataEntryTypeRequest(
+                layer_id=layer_id,
+                entry_type_id="house_continue",
+                entry_type=EntryTypeDefinition(
+                    name="House Continue",
+                    kind="prompt",
+                    parent="house_prompt",
+                    prompt=PromptEntryTypeExtras(
+                        inputs=[PromptInputDefinition(name="words", type="number", default=200)],
+                    ),
+                ),
+            )
+        )
+
+        child = schema.entry_types["house_continue"]
+        assert child.prompt is not None
+        self.assertEqual(child.prompt.system_prompt, "House style: terse, no purple prose.")
+        self.assertEqual(child.prompt.model_class, "balanced")
+        self.assertEqual([i.name for i in child.prompt.inputs], ["words"])
+
+    def test_prompt_extras_preserved_on_partial_update(self) -> None:
+        layer_id = self._project_layer_id()
+        self.service.upsert_metadata_entry_type(
+            UpsertMetadataEntryTypeRequest(
+                layer_id=layer_id,
+                entry_type_id="my_prompt",
+                entry_type=EntryTypeDefinition(
+                    name="My Prompt",
+                    kind="prompt",
+                    parent="prompt",
+                    prompt=PromptEntryTypeExtras(
+                        system_prompt="Keep it short.",
+                        inputs=[PromptInputDefinition(name="topic")],
+                    ),
+                ),
+            )
+        )
+        schema = self.service.upsert_metadata_entry_type(
+            UpsertMetadataEntryTypeRequest(
+                layer_id=layer_id,
+                entry_type_id="my_prompt",
+                entry_type=EntryTypeDefinition(
+                    name="Renamed Prompt",
+                    kind="prompt",
+                    parent="prompt",
+                ),
+            )
+        )
+
+        stored = schema.entry_types["my_prompt"]
+        self.assertEqual(stored.name, "Renamed Prompt")
+        assert stored.prompt is not None
+        self.assertEqual(stored.prompt.system_prompt, "Keep it short.")
+        self.assertEqual([i.name for i in stored.prompt.inputs], ["topic"])
 
 
 class ReferenceResolutionTests(unittest.TestCase):

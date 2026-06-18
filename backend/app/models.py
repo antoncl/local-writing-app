@@ -89,6 +89,32 @@ class MetadataFieldDefinition(BaseModel):
     computed: dict[str, str] | None = None
 
 
+PromptInputType = Literal["text", "long_text", "number", "boolean", "select"]
+
+
+class PromptInputDefinition(BaseModel):
+    name: str = Field(min_length=1)
+    type: PromptInputType = "text"
+    label: str | None = None
+    default: Any | None = None
+    options: list[str] = Field(default_factory=list)
+    required: bool = False
+
+
+class PromptContextStrategy(BaseModel):
+    target: dict[str, Any] | None = None
+    scan_surface: list[str] = Field(default_factory=list)
+    output: dict[str, Any] | None = None
+
+
+class PromptEntryTypeExtras(BaseModel):
+    system_prompt: str | None = None
+    model_class: str | None = None
+    provider_policy: AIPolicy | None = None
+    inputs: list[PromptInputDefinition] = Field(default_factory=list)
+    context_strategy: PromptContextStrategy | None = None
+
+
 class EntryTypeDefinition(BaseModel):
     name: str
     kind: str
@@ -98,6 +124,7 @@ class EntryTypeDefinition(BaseModel):
     own_fields: list[str] = Field(default_factory=list)
     display_template: str = "{title}"
     has_body: bool = True
+    prompt: PromptEntryTypeExtras | None = None
 
 
 class MetadataSchema(BaseModel):

@@ -169,6 +169,15 @@ The story so far:
   let chatScrollEl: HTMLDivElement | null = null;
   let chatMaxTokens = 4096;
   let chatActivePromptEntry: { id: string; title: string } | null = null;
+  type ChatContextItem = {
+    id: string;
+    kind: "scene" | "lore";
+    title: string;
+    entryType: string;
+  };
+  let chatContextItems: ChatContextItem[] = [];
+  let chatContextMenuOpen = false;
+  let chatContextCategory: "scene" | "lore" | null = null;
   type MachineSettingsDraft = {
     anthropic_api_key: string;
     openai_api_key: string;
@@ -838,10 +847,11 @@ The story so far:
     chatRunning = true;
     chatError = null;
     try {
+      const contextBlock = await composeContextBlocks();
       const response = await api.aiChat({
         provider: chatProvider.trim() || null,
         model: chatModel.trim() || null,
-        system_prompt: chatSystemPrompt,
+        system_prompt: buildEffectiveChatSystemPrompt(contextBlock),
         messages: chatHistory.map(({ role, content }) => ({ role, content })),
         max_tokens: chatMaxTokens,
       });
@@ -879,10 +889,11 @@ The story so far:
     chatInput = "";
     chatRunning = true;
     try {
+      const contextBlock = await composeContextBlocks();
       const response = await api.aiChat({
         provider: chatProvider.trim() || null,
         model: chatModel.trim() || null,
-        system_prompt: chatSystemPrompt,
+        system_prompt: buildEffectiveChatSystemPrompt(contextBlock),
         messages: chatHistory.map(({ role, content }) => ({ role, content })),
         max_tokens: chatMaxTokens,
       });
@@ -927,12 +938,80 @@ The story so far:
     chatLastMeta = null;
     chatError = null;
     chatActivePromptEntry = null;
+    chatContextItems = [];
   }
 
   function clearActivePromptOnEdit() {
     // If the user edits the system prompt, the active prompt indicator no longer
     // accurately reflects what's running. Drop it.
     chatActivePromptEntry = null;
+  }
+
+  function toggleContextMenu() {
+    chatContextMenuOpen = !chatContextMenuOpen;
+    chatContextCategory = null;
+  }
+
+  function openContextCategory(kind: "scene" | "lore") {
+    chatContextCategory = kind;
+  }
+
+  function addContextItem(item: ChatContextItem) {
+    if (chatContextItems.some((existing) => existing.id === item.id && existing.kind === item.kind)) {
+      chatContextMenuOpen = false;
+      return;
+    }
+    chatContextItems = [...chatContextItems, item];
+    chatContextMenuOpen = false;
+  }
+
+  function removeContextItem(id: string, kind: "scene" | "lore") {
+    chatContextItems = chatContextItems.filter((item) => !(item.id === id && item.kind === kind));
+  }
+
+  function escapeXmlAttr(value: string): string {
+    return value.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
+  }
+
+  async function composeContextBlocks(): Promise<string> {
+    if (chatContextItems.length === 0) return "";
+    const blocks: string[] = [];
+    for (const item of chatContextItems) {
+      try {
+        if (item.kind === "scene") {
+          const scene = await api.getScene(item.id);
+          blocks.push(
+            `<scene title="${escapeXmlAttr(scene.title)}" id="${escapeXmlAttr(scene.id)}">\n${scene.body_markdown.trim()}\n</scene>`,
+          );
+        } else {
+          const entry = await api.getLoreEntry(item.id);
+          blocks.push(
+            `<lore_entry entry_type="${escapeXmlAttr(entry.entry_type)}" title="${escapeXmlAttr(entry.title)}" id="${escapeXmlAttr(entry.id)}">\n${entry.body_markdown.trim()}\n</lore_entry>`,
+          );
+        }
+      } catch {
+        // Skip items we can't fetch (e.g., deleted entry).
+      }
+    }
+    return blocks.length ? `<context>\n${blocks.join("\n\n")}\n</context>` : "";
+  }
+
+  function buildEffectiveChatSystemPrompt(contextBlock: string): string {
+    const trimmed = chatSystemPrompt.trim();
+    if (!contextBlock) return chatSystemPrompt;
+    if (!trimmed) return contextBlock;
+    return `${chatSystemPrompt}\n\n${contextBlock}`;
+  }
+
+  function flattenStructureScenes(node: StructureNode | null | undefined, acc: { id: string; title: string }[] = []): { id: string; title: string }[] {
+    if (!node) return acc;
+    if (node.scene_id && isLeafNode(node)) {
+      acc.push({ id: node.scene_id, title: node.title });
+    }
+    for (const child of node.children ?? []) {
+      flattenStructureScenes(child, acc);
+    }
+    return acc;
   }
 
   async function runAIHealthCheck() {
@@ -3592,6 +3671,18 @@ The story so far:
         <p class="preview-result-error">{chatError}</p>
       {/if}
 
+      {#if chatContextItems.length > 0}
+        <div class="chat-context-chips">
+          {#each chatContextItems as item (item.kind + ":" + item.id)}
+            <span class="chat-context-chip" class:scene={item.kind === "scene"} class:lore={item.kind === "lore"}>
+              <small>{item.kind === "scene" ? "Scene" : item.entryType}</small>
+              <strong>{item.title}</strong>
+              <button type="button" aria-label="Remove from context" on:click={() => removeContextItem(item.id, item.kind)}>×</button>
+            </span>
+          {/each}
+        </div>
+      {/if}
+
       <textarea
         class="chat-input"
         bind:value={chatInput}
@@ -3599,7 +3690,40 @@ The story so far:
         placeholder="Message… (Ctrl/⌘+Enter to send)"
         spellcheck="true"
       ></textarea>
-      <div class="button-row">
+      <div class="button-row chat-action-row">
+        <div class="chat-context-anchor">
+          <button type="button" on:click={toggleContextMenu}>+ Context</button>
+          {#if chatContextMenuOpen}
+            <div class="chat-context-menu" role="menu">
+              {#if chatContextCategory === null}
+                <button type="button" on:click={() => openContextCategory("scene")}>Scenes ›</button>
+                <button type="button" on:click={() => openContextCategory("lore")}>Lore Entries ›</button>
+              {:else if chatContextCategory === "scene"}
+                <button type="button" class="chat-context-back" on:click={() => (chatContextCategory = null)}>‹ Back</button>
+                {#each flattenStructureScenes(structure?.root) as scene (scene.id)}
+                  <button
+                    type="button"
+                    on:click={() => addContextItem({ id: scene.id, kind: "scene", title: scene.title, entryType: "scene" })}
+                  >{scene.title}</button>
+                {/each}
+                {#if flattenStructureScenes(structure?.root).length === 0}
+                  <p class="muted">No scenes in this project.</p>
+                {/if}
+              {:else}
+                <button type="button" class="chat-context-back" on:click={() => (chatContextCategory = null)}>‹ Back</button>
+                {#each loreEntries as entry (entry.id)}
+                  <button
+                    type="button"
+                    on:click={() => addContextItem({ id: entry.id, kind: "lore", title: entry.title, entryType: entry.entry_type })}
+                  >{entry.title}</button>
+                {/each}
+                {#if loreEntries.length === 0}
+                  <p class="muted">No lore entries in this project.</p>
+                {/if}
+              {/if}
+            </div>
+          {/if}
+        </div>
         <button type="button" disabled={!chatHistory.length || chatRunning} on:click={clearChat}>Clear</button>
         <button type="button" class="primary" disabled={!chatInput.trim() || chatRunning} on:click={sendChat}>
           {chatRunning ? "Sending…" : "Send"}

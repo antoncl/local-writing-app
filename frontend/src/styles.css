@@ -2620,3 +2620,110 @@ h3 {
 .chat-active-prompt button:hover {
   background: #ffffff;
 }
+
+.chat-context-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-bottom: 6px;
+}
+
+.chat-context-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 3px 6px 3px 8px;
+  border: 1px solid #cbd6d2;
+  border-radius: 6px;
+  background: #fbfcfc;
+  font-size: 12px;
+}
+
+.chat-context-chip.scene {
+  border-color: #2f6f5e;
+  background: #edf6f2;
+}
+
+.chat-context-chip.lore {
+  border-color: #6b6db5;
+  background: #ecedf5;
+}
+
+.chat-context-chip small {
+  color: #65716c;
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.chat-context-chip strong {
+  font-weight: 600;
+}
+
+.chat-context-chip button {
+  padding: 0 5px;
+  border: 0;
+  background: transparent;
+  color: #74817b;
+  font-size: 14px;
+  line-height: 1;
+  cursor: pointer;
+}
+
+.chat-context-chip button:hover {
+  color: #25312d;
+  background: transparent;
+}
+
+.chat-action-row {
+  position: relative;
+  align-items: center;
+}
+
+.chat-context-anchor {
+  position: relative;
+  margin-right: auto;
+}
+
+.chat-context-menu {
+  position: absolute;
+  bottom: 100%;
+  left: 0;
+  margin-bottom: 4px;
+  display: grid;
+  min-width: 220px;
+  max-height: 280px;
+  overflow-y: auto;
+  padding: 4px;
+  border: 1px solid #cbd6d2;
+  border-radius: 6px;
+  background: #ffffff;
+  box-shadow: 0 8px 20px rgba(15, 23, 32, 0.18);
+  z-index: 50;
+}
+
+.chat-context-menu button {
+  text-align: left;
+  padding: 6px 8px;
+  border: 0;
+  border-radius: 4px;
+  background: transparent;
+}
+
+.chat-context-menu button:hover {
+  background: #edf6f2;
+}
+
+.chat-context-menu .chat-context-back {
+  color: #4d5753;
+  font-size: 12px;
+  border-bottom: 1px solid #e8efec;
+  border-radius: 0;
+  margin-bottom: 2px;
+}
+
+.chat-context-menu p.muted {
+  margin: 6px 8px;
+  color: #74817b;
+  font-size: 12px;
+}

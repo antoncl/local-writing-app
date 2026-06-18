@@ -169,15 +169,17 @@ The story so far:
   let chatScrollEl: HTMLDivElement | null = null;
   let chatMaxTokens = 4096;
   let chatActivePromptEntry: { id: string; title: string } | null = null;
+  type ChatContextKind = "scene" | "lore" | "snippet";
   type ChatContextItem = {
     id: string;
-    kind: "scene" | "lore";
+    kind: ChatContextKind;
     title: string;
     entryType: string;
   };
   let chatContextItems: ChatContextItem[] = [];
   let chatContextMenuOpen = false;
-  let chatContextCategory: "scene" | "lore" | null = null;
+  let chatContextCategory: ChatContextKind | null = null;
+  let chatContextSearch = "";
   type MachineSettingsDraft = {
     anthropic_api_key: string;
     openai_api_key: string;
@@ -950,10 +952,21 @@ The story so far:
   function toggleContextMenu() {
     chatContextMenuOpen = !chatContextMenuOpen;
     chatContextCategory = null;
+    chatContextSearch = "";
   }
 
-  function openContextCategory(kind: "scene" | "lore") {
+  function openContextCategory(kind: ChatContextKind) {
     chatContextCategory = kind;
+    chatContextSearch = "";
+    tick().then(() => {
+      const input = document.querySelector<HTMLInputElement>(".chat-context-search");
+      input?.focus();
+    });
+  }
+
+  function backToContextCategories() {
+    chatContextCategory = null;
+    chatContextSearch = "";
   }
 
   function addContextItem(item: ChatContextItem) {
@@ -963,10 +976,59 @@ The story so far:
     }
     chatContextItems = [...chatContextItems, item];
     chatContextMenuOpen = false;
+    chatContextSearch = "";
   }
 
-  function removeContextItem(id: string, kind: "scene" | "lore") {
+  function removeContextItem(id: string, kind: ChatContextKind) {
     chatContextItems = chatContextItems.filter((item) => !(item.id === id && item.kind === kind));
+  }
+
+  function titleMatchesQuery(title: string, query: string): boolean {
+    const q = query.trim().toLowerCase();
+    if (!q) return true;
+    return title.toLowerCase().includes(q);
+  }
+
+  function snippetEntriesFor(query: string): PromptEntrySummary[] {
+    const schema = metadataSchema;
+    if (!schema) return [];
+    const isSnippetType = (typeId: string | undefined | null): boolean => {
+      if (!typeId) return false;
+      const seen = new Set<string>();
+      let current: string | undefined = typeId;
+      while (current && !seen.has(current)) {
+        if (current === "snippet") return true;
+        seen.add(current);
+        current = schema.entry_types[current]?.parent ?? undefined;
+      }
+      return false;
+    };
+    return promptEntries
+      .filter((entry) => isSnippetType(entry.entry_type) && titleMatchesQuery(entry.title, query))
+      .sort((a, b) => a.title.localeCompare(b.title, undefined, { sensitivity: "base" }));
+  }
+
+  function filteredStructureScenes(root: StructureNode | null | undefined, query: string): { id: string; title: string }[] {
+    return flattenStructureScenes(root).filter((s) => titleMatchesQuery(s.title, query));
+  }
+
+  function loreEntriesGroupedByType(query: string): { typeId: string; typeName: string; entries: LoreEntrySummary[] }[] {
+    const groups = new Map<string, { typeId: string; typeName: string; entries: LoreEntrySummary[] }>();
+    for (const entry of loreEntries) {
+      if (!titleMatchesQuery(entry.title, query)) continue;
+      const key = entry.entry_type || "lore_note";
+      const existing = groups.get(key);
+      if (existing) {
+        existing.entries.push(entry);
+      } else {
+        groups.set(key, {
+          typeId: key,
+          typeName: loreEntryTypeName(entry),
+          entries: [entry],
+        });
+      }
+    }
+    return Array.from(groups.values()).sort((a, b) => a.typeName.localeCompare(b.typeName, undefined, { sensitivity: "base" }));
   }
 
   function escapeXmlAttr(value: string): string {
@@ -983,10 +1045,15 @@ The story so far:
           blocks.push(
             `<scene title="${escapeXmlAttr(scene.title)}" id="${escapeXmlAttr(scene.id)}">\n${scene.body_markdown.trim()}\n</scene>`,
           );
-        } else {
+        } else if (item.kind === "lore") {
           const entry = await api.getLoreEntry(item.id);
           blocks.push(
             `<lore_entry entry_type="${escapeXmlAttr(entry.entry_type)}" title="${escapeXmlAttr(entry.title)}" id="${escapeXmlAttr(entry.id)}">\n${entry.body_markdown.trim()}\n</lore_entry>`,
+          );
+        } else {
+          const entry = await api.getPromptEntry(item.id);
+          blocks.push(
+            `<snippet title="${escapeXmlAttr(entry.title)}" id="${escapeXmlAttr(entry.id)}">\n${entry.body_markdown.trim()}\n</snippet>`,
           );
         }
       } catch {
@@ -3698,27 +3765,51 @@ The story so far:
               {#if chatContextCategory === null}
                 <button type="button" on:click={() => openContextCategory("scene")}>Scenes ›</button>
                 <button type="button" on:click={() => openContextCategory("lore")}>Lore Entries ›</button>
-              {:else if chatContextCategory === "scene"}
-                <button type="button" class="chat-context-back" on:click={() => (chatContextCategory = null)}>‹ Back</button>
-                {#each flattenStructureScenes(structure?.root) as scene (scene.id)}
-                  <button
-                    type="button"
-                    on:click={() => addContextItem({ id: scene.id, kind: "scene", title: scene.title, entryType: "scene" })}
-                  >{scene.title}</button>
-                {/each}
-                {#if flattenStructureScenes(structure?.root).length === 0}
-                  <p class="muted">No scenes in this project.</p>
-                {/if}
+                <button type="button" on:click={() => openContextCategory("snippet")}>Snippets ›</button>
               {:else}
-                <button type="button" class="chat-context-back" on:click={() => (chatContextCategory = null)}>‹ Back</button>
-                {#each loreEntries as entry (entry.id)}
-                  <button
-                    type="button"
-                    on:click={() => addContextItem({ id: entry.id, kind: "lore", title: entry.title, entryType: entry.entry_type })}
-                  >{entry.title}</button>
-                {/each}
-                {#if loreEntries.length === 0}
-                  <p class="muted">No lore entries in this project.</p>
+                <button type="button" class="chat-context-back" on:click={backToContextCategories}>‹ Back</button>
+                <input
+                  class="chat-context-search"
+                  type="text"
+                  placeholder="Search…"
+                  bind:value={chatContextSearch}
+                />
+                {#if chatContextCategory === "scene"}
+                  {@const scenes = filteredStructureScenes(structure?.root, chatContextSearch)}
+                  {#each scenes as scene (scene.id)}
+                    <button
+                      type="button"
+                      on:click={() => addContextItem({ id: scene.id, kind: "scene", title: scene.title, entryType: "scene" })}
+                    >{scene.title}</button>
+                  {/each}
+                  {#if scenes.length === 0}
+                    <p class="muted">{chatContextSearch ? "No matches." : "No scenes in this project."}</p>
+                  {/if}
+                {:else if chatContextCategory === "lore"}
+                  {@const groups = loreEntriesGroupedByType(chatContextSearch)}
+                  {#each groups as group (group.typeId)}
+                    <div class="chat-context-group-heading">{group.typeName}</div>
+                    {#each group.entries as entry (entry.id)}
+                      <button
+                        type="button"
+                        on:click={() => addContextItem({ id: entry.id, kind: "lore", title: entry.title, entryType: entry.entry_type })}
+                      >{entry.title}</button>
+                    {/each}
+                  {/each}
+                  {#if groups.length === 0}
+                    <p class="muted">{chatContextSearch ? "No matches." : "No lore entries in this project."}</p>
+                  {/if}
+                {:else}
+                  {@const snippets = snippetEntriesFor(chatContextSearch)}
+                  {#each snippets as snippet (snippet.id)}
+                    <button
+                      type="button"
+                      on:click={() => addContextItem({ id: snippet.id, kind: "snippet", title: snippet.title, entryType: snippet.entry_type })}
+                    >{snippet.title}</button>
+                  {/each}
+                  {#if snippets.length === 0}
+                    <p class="muted">{chatContextSearch ? "No matches." : "No snippets in this project."}</p>
+                  {/if}
                 {/if}
               {/if}
             </div>

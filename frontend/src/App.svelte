@@ -1164,7 +1164,8 @@ The story so far:
 
   function openSchemaForCustomData(entryType: string, kind: "scene" | "lore" | "prompt") {
     schemaPaneOpen = true;
-    schemaFieldEntryType = entryType || defaultSchemaEntryType(kind);
+    const candidate = metadataSchema?.entry_types[entryType];
+    schemaFieldEntryType = candidate?.kind === kind ? entryType : defaultSchemaEntryType(kind);
     focusPane("schema");
   }
 
@@ -1414,11 +1415,15 @@ The story so far:
   }
 
   async function deleteSchemaType(typeId: string) {
+    const deletedKind = schemaFieldKind;
     metadataSchema = await api.deleteMetadataEntryType(typeId);
     await refreshMetadataSchema();
     validation = await api.validateProject();
     selectedSchemaTypeId = null;
     schemaTypePaneOpen = false;
+    if (schemaFieldEntryType === typeId || !metadataSchema?.entry_types[schemaFieldEntryType]) {
+      schemaFieldEntryType = defaultSchemaEntryType(deletedKind);
+    }
     status = `Deleted ${typeId}`;
   }
 

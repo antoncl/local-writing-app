@@ -75,6 +75,31 @@ export type MetadataFieldDefinition = {
   computed?: Record<string, string> | null;
 };
 
+export type PromptInputType = "text" | "long_text" | "number" | "boolean" | "select";
+
+export type PromptInputDefinition = {
+  name: string;
+  type: PromptInputType;
+  label?: string | null;
+  default?: MetadataValue;
+  options?: string[];
+  required?: boolean;
+};
+
+export type PromptContextStrategy = {
+  target?: Record<string, MetadataValue> | null;
+  scan_surface?: string[];
+  output?: Record<string, MetadataValue> | null;
+};
+
+export type PromptEntryTypeExtras = {
+  system_prompt?: string | null;
+  model_class?: string | null;
+  provider_policy?: AIPolicy | null;
+  inputs?: PromptInputDefinition[];
+  context_strategy?: PromptContextStrategy | null;
+};
+
 export type EntryTypeDefinition = {
   name: string;
   kind: string;
@@ -84,6 +109,7 @@ export type EntryTypeDefinition = {
   own_fields?: string[];
   display_template?: string;
   has_body?: boolean;
+  prompt?: PromptEntryTypeExtras | null;
 };
 
 export type MetadataSchema = {

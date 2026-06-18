@@ -18,7 +18,6 @@ from app.models import (
     CreateLoreEntryRequest,
     CreatePromptEntryRequest,
     CreateSceneRequest,
-    CreateSnippetEntryRequest,
     CreateTodoRequest,
     DeleteMetadataEntryTypeRequest,
     DeleteMetadataFieldRequest,
@@ -48,11 +47,7 @@ from app.models import (
     SaveLoreEntryRequest,
     SavePromptEntryRequest,
     SaveSceneRequest,
-    SaveSnippetEntryRequest,
     Scene,
-    SnippetEntry,
-    SnippetEntryList,
-    SnippetEntrySummary,
     SearchHit,
     SearchRequest,
     SearchResponse,
@@ -154,17 +149,18 @@ DEFAULT_METADATA_SCHEMA: dict[str, Any] = {
             "parent": "lore_entry",
             "fields": [],
         },
-        "snippet": {
-            "name": "Snippet",
-            "kind": "snippet",
-            "fields": ["tags"],
-            "has_body": True,
-        },
         "prompt": {
             "name": "Prompt",
             "kind": "prompt",
             "abstract": True,
             "fields": ["tags"],
+            "has_body": True,
+        },
+        "snippet": {
+            "name": "Snippet",
+            "kind": "prompt",
+            "parent": "prompt",
+            "fields": [],
             "has_body": True,
         },
     },
@@ -241,7 +237,7 @@ class ProjectService:
             root.parent.mkdir(parents=True, exist_ok=True)
         base_folder = self._validate_projects_base_folder(projects_base_folder or root.parent, root)
         root.mkdir(parents=True, exist_ok=True)
-        for folder in ["scenes", "lore", "prompts", "snippets", ".cache"]:
+        for folder in ["scenes", "lore", "prompts", ".cache"]:
             (root / folder).mkdir(exist_ok=True)
 
         self._write_yaml(root / "project.yaml", self._new_project_manifest(title, root, base_folder))
@@ -702,8 +698,8 @@ class ProjectService:
         entry_type_id = request.entry_type_id.strip()
         if not re.fullmatch(r"[A-Za-z][A-Za-z0-9_]*", entry_type_id):
             raise ProjectServiceError("Node type ID must start with a letter and contain only letters, numbers, and underscores.", 422)
-        if request.entry_type.kind not in {"scene", "lore", "prompt", "snippet"}:
-            raise ProjectServiceError("Node type kind must be scene, lore, prompt, or snippet.", 422)
+        if request.entry_type.kind not in {"scene", "lore", "prompt"}:
+            raise ProjectServiceError("Node type kind must be scene, lore, or prompt.", 422)
         if request.entry_type.prompt is not None and request.entry_type.kind != "prompt":
             raise ProjectServiceError("Prompt configuration is only valid on prompt node types.", 422)
         if request.entry_type.parent == entry_type_id:
@@ -1399,7 +1395,6 @@ class ProjectService:
             ("scene", "scenes", "scene"),
             ("lore", "lore", "lore_note"),
             ("prompt", "prompts", "prompt"),
-            ("snippet", "snippets", "snippet"),
         ]:
             for path in sorted((root / folder_name).glob("*.md")):
                 try:
@@ -1447,8 +1442,8 @@ class ProjectService:
         entry = index.by_id.get(node_id)
         if entry and entry.kind == kind:
             return entry.path
-        folder_by_kind = {"scene": "scenes", "lore": "lore", "prompt": "prompts", "snippet": "snippets"}
-        label_by_kind = {"scene": "Scene", "lore": "Lore Entry", "prompt": "Prompt", "snippet": "Snippet"}
+        folder_by_kind = {"scene": "scenes", "lore": "lore", "prompt": "prompts"}
+        label_by_kind = {"scene": "Scene", "lore": "Lore Entry", "prompt": "Prompt"}
         fallback_folder = folder_by_kind.get(kind, "lore")
         fallback_path = root / fallback_folder / f"{node_id}.md"
         if fallback_path.exists():
@@ -2095,84 +2090,6 @@ class ProjectService:
         if path.exists():
             path.unlink()
         return self.list_prompt_entries()
-
-    def list_snippet_entries(self) -> SnippetEntryList:
-        root = self._require_project()
-        entries: list[SnippetEntrySummary] = []
-        for path in sorted((root / "snippets").glob("*.md")):
-            front_matter, body = self._read_markdown_with_front_matter(path, strict=True)
-            entry_id = self._node_id_for_path(path, front_matter)
-            raw_entry_type = front_matter.get("entry_type") or "snippet"
-            entry_type = raw_entry_type if isinstance(raw_entry_type, str) else "snippet"
-            entries.append(
-                SnippetEntrySummary(
-                    id=entry_id,
-                    title=str(front_matter.get("title") or entry_id),
-                    body_markdown=body,
-                    entry_type=entry_type,
-                    metadata=self._normalise_metadata(front_matter.get("metadata"), path),
-                )
-            )
-        entries.sort(key=lambda entry: (entry.title.lower(), entry.id))
-        return SnippetEntryList(entries=entries)
-
-    def create_snippet_entry(self, request: CreateSnippetEntryRequest) -> SnippetEntry:
-        root = self._require_project()
-        self._check_entry_type_kind(request.entry_type, "snippet")
-        entry_id = self._new_id("snippet")
-        entry = SnippetEntry(
-            id=entry_id,
-            title=request.title,
-            body_markdown="",
-            revision="",
-            entry_type=request.entry_type,
-            metadata={},
-        )
-        self._write_node_entry_file(
-            self._filepath_for_new_node(root / "snippets", request.title),
-            entry.id,
-            entry.title,
-            entry.entry_type,
-            entry.metadata,
-            entry.body_markdown,
-        )
-        return self.read_snippet_entry(entry_id)
-
-    def read_snippet_entry(self, entry_id: str) -> SnippetEntry:
-        path = self._path_for_node_id(entry_id, "snippet")
-        front_matter, body = self._read_markdown_with_front_matter(path, strict=True)
-        node_id = self._node_id_for_path(path, front_matter)
-        raw_entry_type = front_matter.get("entry_type") or "snippet"
-        if not isinstance(raw_entry_type, str):
-            raise ProjectServiceError(f"Snippet {node_id} has invalid entry_type; it must be text.", 422)
-        return SnippetEntry(
-            id=node_id,
-            title=str(front_matter.get("title") or node_id),
-            body_markdown=body,
-            revision=self._revision(path),
-            entry_type=raw_entry_type,
-            metadata=self._normalise_metadata(front_matter.get("metadata"), path),
-            computed_metadata={},
-        )
-
-    def save_snippet_entry(self, entry_id: str, request: SaveSnippetEntryRequest) -> SnippetEntry:
-        path = self._path_for_node_id(entry_id, "snippet")
-        front_matter = self._read_front_matter_only(path, strict=True)
-        node_id = self._node_id_for_path(path, front_matter)
-        current_revision = self._revision(path)
-        if request.base_revision and request.base_revision != current_revision:
-            raise ProjectServiceError("Snippet changed on disk after it was opened.", 409)
-        self._check_entry_type_kind(request.entry_type, "snippet")
-        metadata = self._normalise_metadata(request.metadata, path)
-        self._write_node_entry_file(path, node_id, request.title, request.entry_type, metadata, request.body_markdown)
-        self._maybe_rename_node_file(path, request.title)
-        return self.read_snippet_entry(node_id)
-
-    def delete_snippet_entry(self, entry_id: str) -> SnippetEntryList:
-        path = self._path_for_node_id(entry_id, "snippet")
-        if path.exists():
-            path.unlink()
-        return self.list_snippet_entries()
 
     def _write_node_entry_file(
         self,

@@ -27,8 +27,6 @@ import type {
   ReferenceResolveResponse,
   Scene,
   SearchHit,
-  SnippetEntry,
-  SnippetEntryList,
   StructureDocument,
   StructureNodeDeletePreview,
   TodoDocument,
@@ -281,35 +279,6 @@ export const api = {
   },
   deletePromptEntry(entryId: string) {
     return request<PromptEntryList>(`/prompts/${entryId}`, {
-      method: "DELETE",
-    });
-  },
-  listSnippetEntries() {
-    return request<SnippetEntryList>("/snippets");
-  },
-  createSnippetEntry(title: string, entryType = "snippet") {
-    return request<SnippetEntry>("/snippets", {
-      method: "POST",
-      body: JSON.stringify({ title, entry_type: entryType }),
-    });
-  },
-  getSnippetEntry(entryId: string) {
-    return request<SnippetEntry>(`/snippets/${entryId}`);
-  },
-  saveSnippetEntry(entry: SnippetEntry, bodyMarkdown: string) {
-    return request<SnippetEntry>(`/snippets/${entry.id}`, {
-      method: "PUT",
-      body: JSON.stringify({
-        title: entry.title,
-        body_markdown: bodyMarkdown,
-        base_revision: entry.revision,
-        entry_type: entry.entry_type,
-        metadata: entry.metadata,
-      }),
-    });
-  },
-  deleteSnippetEntry(entryId: string) {
-    return request<SnippetEntryList>(`/snippets/${entryId}`, {
       method: "DELETE",
     });
   },

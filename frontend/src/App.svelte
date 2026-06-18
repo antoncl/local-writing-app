@@ -19,8 +19,6 @@
     PromptEntry,
     PromptEntrySummary,
     Scene,
-    SnippetEntry,
-    SnippetEntrySummary,
     MachineSettingsUpdate,
     MachineSettingsView,
     MetadataFieldDefinition,
@@ -44,7 +42,7 @@
   type AppState =
     | { name: "needsProject" }
     | { name: "projectOpen"; project: ProjectInfo };
-  type DocumentRef = { type: "scene" | "lore" | "prompt" | "snippet"; id: string };
+  type DocumentRef = { type: "scene" | "lore" | "prompt"; id: string };
   type PaneId = "project" | "outline" | "lore" | "todo" | "search" | string;
   type MetadataReloadSignal = { token: number; metadata: EntryMetadata; status: string; entryType: string };
   type LoreEntryGroup = {
@@ -201,7 +199,7 @@ The story so far:
   let metadataSchema: MetadataSchema | null = null;
   let metadataSchemaOverview: MetadataSchemaOverview | null = null;
   let metadataSchemaLayers: MetadataSchemaLayer[] = [];
-  let schemaFieldKind: "scene" | "lore" = "scene";
+  let schemaFieldKind: "scene" | "lore" | "prompt" = "scene";
   let schemaFieldLayerId = "";
   let schemaFieldEntryType = "scene";
   let schemaFieldId = "";
@@ -220,7 +218,7 @@ The story so far:
   let schemaTypeLayerId = "";
   let schemaTypeId = "";
   let schemaTypeName = "";
-  let schemaTypeKind: "scene" | "lore" = "lore";
+  let schemaTypeKind: "scene" | "lore" | "prompt" = "lore";
   let schemaTypeParent = "";
   let schemaTypeAbstract = false;
   let schemaTypeReadonly = false;
@@ -230,14 +228,6 @@ The story so far:
   let schemaNodeTypeOptions: NodeTypeOption[] = [];
   let schemaNodeTypeTree: NodeTypeTreeNode[] = [];
   let promptsPaneOpen = false;
-  let promptTypePaneOpen = false;
-  let promptTypeLayerId = "";
-  let promptTypeId = "";
-  let promptTypeName = "";
-  let promptTypeParent = "prompt";
-  let promptTypeAbstract = false;
-  let promptTypeReadonly = false;
-  let selectedPromptTypeId: string | null = null;
   let promptSystemPrompt = "";
   let promptModelClass = "";
   let promptProviderPolicy: AIPolicy | "" = "";
@@ -247,10 +237,7 @@ The story so far:
   let promptScanSurface = "";
   let promptOutputKind = "";
   let promptOutputReview = "";
-  let promptTypeTree: NodeTypeTreeNode[] = [];
   let promptEntries: PromptEntrySummary[] = [];
-  let snippetEntries: SnippetEntrySummary[] = [];
-  let snippetsPaneOpen = false;
   let newTodo = "";
   let searchQuery = "";
   let loreSearchQuery = "";
@@ -273,10 +260,8 @@ The story so far:
     lore: { title: "Lore", x: 330, y: 260, width: 300, height: 320, z: 3 },
     schema: { title: "Custom Data", x: 330, y: 260, width: 360, height: 420, z: 3 },
     schema_field: { title: "Custom Field", x: 708, y: 260, width: 360, height: 420, z: 4 },
-    schema_type: { title: "Node Type", x: 708, y: 260, width: 360, height: 390, z: 4 },
+    schema_type: { title: "Node Type", x: 708, y: 260, width: 440, height: 560, z: 4 },
     prompts: { title: "Prompts", x: 330, y: 260, width: 360, height: 420, z: 3 },
-    prompt_type: { title: "Prompt Type", x: 708, y: 260, width: 440, height: 560, z: 4 },
-    snippets: { title: "Snippets", x: 330, y: 260, width: 360, height: 360, z: 3 },
     todo: { title: "TODO", x: 1126, y: 18, width: 310, height: 320, z: 4 },
     search: { title: "Search", x: 1126, y: 360, width: 310, height: 320, z: 5 },
     preview: { title: "AI Preview", x: 720, y: 18, width: 480, height: 560, z: 6 },
@@ -318,11 +303,20 @@ The story so far:
   }
   $: groupedLoreEntries = groupLoreEntriesByType(filteredLoreEntries, metadataSchema);
   $: schemaSelectedEntryType = metadataSchema?.entry_types[schemaFieldEntryType] ?? metadataSchema?.entry_types.scene ?? null;
-  $: schemaFieldKind = schemaSelectedEntryType?.kind === "lore" ? "lore" : "scene";
+  $: schemaFieldKind =
+    schemaSelectedEntryType?.kind === "lore"
+      ? "lore"
+      : schemaSelectedEntryType?.kind === "prompt"
+        ? "prompt"
+        : "scene";
   $: schemaNodeTypeOptions = buildNodeTypeOptions(metadataSchema);
   $: schemaNodeTypeTree = buildNodeTypeTree(metadataSchema, schemaFieldKind);
-  $: promptTypeTree = buildPromptTypeTree(metadataSchema);
-  $: promptParentOptionList = buildPromptParentOptions(metadataSchema);
+  $: schemaContextHeading =
+    schemaFieldKind === "lore" ? "Lore Entry Types" : schemaFieldKind === "prompt" ? "Prompt Types" : "Scene Types";
+  $: concretePromptSubtypes = Object.entries(metadataSchema?.entry_types ?? {})
+    .filter(([id, definition]) => definition.kind === "prompt" && !definition.abstract && id !== "prompt")
+    .map(([id, definition]) => ({ id, label: definition.name || id }))
+    .sort((a, b) => a.label.localeCompare(b.label));
 
   onMount(() => {
     fitPanesToViewport();
@@ -381,8 +375,6 @@ The story so far:
     if (id === "schema_field") return schemaFieldPaneOpen;
     if (id === "schema_type") return schemaTypePaneOpen;
     if (id === "prompts") return promptsPaneOpen;
-    if (id === "prompt_type") return promptTypePaneOpen;
-    if (id === "snippets") return snippetsPaneOpen;
     return !isEditorPaneId(id) || editorPanes.some((pane) => pane.id === id);
   }
 
@@ -577,10 +569,6 @@ The story so far:
     promptEntries = (await api.listPromptEntries()).entries;
   }
 
-  async function refreshSnippetEntries() {
-    snippetEntries = (await api.listSnippetEntries()).entries;
-  }
-
   async function refreshKnownTags() {
     knownTags = (await api.getKnownTags()).tags;
   }
@@ -634,7 +622,6 @@ The story so far:
       await refreshStructure();
       await refreshLoreEntries();
       await refreshPromptEntries();
-      await refreshSnippetEntries();
       await refreshMetadataSchema();
       await refreshKnownTags();
       await refreshTodos();
@@ -653,7 +640,6 @@ The story so far:
       await refreshStructure();
       await refreshLoreEntries();
       await refreshPromptEntries();
-      await refreshSnippetEntries();
       await refreshMetadataSchema();
       await refreshKnownTags();
       await refreshTodos();
@@ -953,7 +939,7 @@ The story so far:
     return options;
   }
 
-  function buildNodeTypeTree(schema: MetadataSchema | null, kind: "scene" | "lore"): NodeTypeTreeNode[] {
+  function buildNodeTypeTree(schema: MetadataSchema | null, kind: "scene" | "lore" | "prompt"): NodeTypeTreeNode[] {
     const entryTypes = schema?.entry_types ?? {};
     const childrenByParent: Record<string, string[]> = {};
     const roots: string[] = [];
@@ -970,7 +956,12 @@ The story so far:
     for (const children of Object.values(childrenByParent)) {
       children.sort(compareByName);
     }
-    const rootIds = kind === "lore" && entryTypes.lore_entry ? ["lore_entry"] : roots.sort(compareByName);
+    const rootIds =
+      kind === "lore" && entryTypes.lore_entry
+        ? ["lore_entry"]
+        : kind === "prompt" && entryTypes.prompt
+          ? ["prompt"]
+          : roots.sort(compareByName);
     const buildNode = (typeId: string, depth: number): NodeTypeTreeNode | null => {
       const definition = entryTypes[typeId];
       if (!definition || definition.kind !== kind) return null;
@@ -991,6 +982,7 @@ The story so far:
   function nodeTypeDisplayName(typeId: string, definition: EntryTypeDefinition | undefined) {
     if (typeId === "scene") return "Scenes";
     if (typeId === "lore_entry") return "Lore Entries";
+    if (typeId === "prompt") return "Prompts";
     return definition?.name ?? typeId;
   }
 
@@ -1086,128 +1078,24 @@ The story so far:
     schemaTypeId = "";
     schemaTypeName = "";
     const parentType = parentTypeId ? metadataSchema?.entry_types[parentTypeId] : null;
-    schemaTypeKind = parentType?.kind === "scene" ? "scene" : parentType?.kind === "lore" ? "lore" : schemaFieldKind;
+    schemaTypeKind =
+      parentType?.kind === "scene"
+        ? "scene"
+        : parentType?.kind === "lore"
+          ? "lore"
+          : parentType?.kind === "prompt"
+            ? "prompt"
+            : schemaFieldKind;
     schemaTypeParent = parentTypeId || (schemaSelectedEntryType?.abstract || schemaFieldEntryType !== "scene" ? schemaFieldEntryType : defaultSchemaParentType(schemaFieldKind));
     schemaTypeAbstract = false;
     schemaTypeReadonly = false;
     schemaTypeLayerId = layerId;
+    resetPromptExtrasForm();
     schemaTypePaneOpen = true;
     focusPane("schema_type");
   }
 
-  function openSchemaTypeDetail(typeId: string) {
-    const entryType = metadataSchema?.entry_types[typeId];
-    if (!entryType) return;
-    const source = schemaTypeSource(typeId);
-    selectedSchemaTypeId = typeId;
-    schemaTypeId = typeId;
-    schemaTypeName = entryType.name;
-    schemaTypeKind = entryType.kind === "scene" ? "scene" : "lore";
-    schemaTypeParent = entryType.parent ?? "";
-    schemaTypeAbstract = Boolean(entryType.abstract);
-    schemaTypeReadonly = Boolean(source?.built_in);
-    schemaTypeLayerId = source?.built_in ? projectSchemaLayerId() : (source?.layer_id ?? projectSchemaLayerId());
-    schemaTypePaneOpen = true;
-    focusPane("schema_type");
-  }
-
-  function updateSchemaTypeName(value: string) {
-    schemaTypeName = value;
-    if (!schemaTypeReadonly) {
-      schemaTypeId = slugifyFieldId(value);
-    }
-  }
-
-  function defaultSchemaParentType(kind: "scene" | "lore") {
-    if (kind === "lore" && metadataSchema?.entry_types.lore_entry) return "lore_entry";
-    return "";
-  }
-
-  function openSchemaForCustomData(entryType: string, kind: "scene" | "lore") {
-    schemaPaneOpen = true;
-    schemaFieldEntryType = entryType || defaultSchemaEntryType(kind);
-    focusPane("schema");
-  }
-
-  function defaultSchemaEntryType(kind: "scene" | "lore") {
-    return Object.entries(metadataSchema?.entry_types ?? {}).find(([, definition]) => definition.kind === kind)?.[0] ?? (kind === "lore" ? "lore_note" : "scene");
-  }
-
-  function entryTypeIdsForField(fieldId: string, kind: "scene" | "lore") {
-    return Object.entries(metadataSchema?.entry_types ?? {})
-      .filter(([, definition]) => definition.kind === kind && definition.fields.includes(fieldId))
-      .map(([typeId]) => typeId);
-  }
-
-  function closeSchemaPane(id: "schema" | "schema_field" | "schema_type" | "prompts" | "prompt_type") {
-    if (id === "schema") schemaPaneOpen = false;
-    else if (id === "schema_field") schemaFieldPaneOpen = false;
-    else if (id === "schema_type") schemaTypePaneOpen = false;
-    else if (id === "prompts") promptsPaneOpen = false;
-    else if (id === "prompt_type") promptTypePaneOpen = false;
-  }
-
-  function buildPromptTypeTree(schema: MetadataSchema | null): NodeTypeTreeNode[] {
-    const entryTypes = schema?.entry_types ?? {};
-    const childrenByParent: Record<string, string[]> = {};
-    const orphans: string[] = [];
-    for (const [typeId, definition] of Object.entries(entryTypes)) {
-      if (definition.kind !== "prompt") continue;
-      if (typeId === "prompt") continue;
-      const parent = definition.parent;
-      if (parent && entryTypes[parent]?.kind === "prompt") {
-        childrenByParent[parent] = [...(childrenByParent[parent] ?? []), typeId];
-      } else {
-        orphans.push(typeId);
-      }
-    }
-    const compareByName = (left: string, right: string) =>
-      nodeTypeDisplayName(left, entryTypes[left]).localeCompare(nodeTypeDisplayName(right, entryTypes[right]));
-    for (const children of Object.values(childrenByParent)) {
-      children.sort(compareByName);
-    }
-    const buildNode = (typeId: string, depth: number): NodeTypeTreeNode | null => {
-      const definition = entryTypes[typeId];
-      if (!definition || definition.kind !== "prompt") return null;
-      const children = (childrenByParent[typeId] ?? [])
-        .map((childId) => buildNode(childId, depth + 1))
-        .filter((child): child is NodeTypeTreeNode => Boolean(child));
-      return {
-        id: typeId,
-        label: definition.name ?? typeId,
-        depth,
-        definition,
-        children,
-      };
-    };
-    if (entryTypes.prompt) {
-      const rootChildren = (childrenByParent.prompt ?? []).slice().sort(compareByName);
-      return rootChildren.map((id) => buildNode(id, 0)).filter((node): node is NodeTypeTreeNode => Boolean(node));
-    }
-    return orphans.sort(compareByName).map((id) => buildNode(id, 0)).filter((node): node is NodeTypeTreeNode => Boolean(node));
-  }
-
-  function buildPromptParentOptions(schema: MetadataSchema | null): { id: string; label: string }[] {
-    const entries = Object.entries(schema?.entry_types ?? {});
-    return entries
-      .filter(([, definition]) => definition.kind === "prompt")
-      .map(([id, definition]) => ({ id, label: definition.name || id }))
-      .sort((a, b) => a.label.localeCompare(b.label));
-  }
-
-  function openPromptsPane() {
-    promptsPaneOpen = true;
-    focusPane("prompts");
-  }
-
-  function createPromptTypeDraft(layerId = projectSchemaLayerId(), parentTypeId = "prompt") {
-    selectedPromptTypeId = null;
-    promptTypeId = "";
-    promptTypeName = "";
-    promptTypeParent = parentTypeId || "prompt";
-    promptTypeAbstract = false;
-    promptTypeReadonly = false;
-    promptTypeLayerId = layerId;
+  function resetPromptExtrasForm() {
     promptSystemPrompt = "";
     promptModelClass = "";
     promptProviderPolicy = "";
@@ -1217,22 +1105,10 @@ The story so far:
     promptScanSurface = "";
     promptOutputKind = "";
     promptOutputReview = "";
-    promptTypePaneOpen = true;
-    focusPane("prompt_type");
   }
 
-  function openPromptTypeDetail(typeId: string) {
-    const entryType = metadataSchema?.entry_types[typeId];
-    if (!entryType) return;
-    const source = schemaTypeSource(typeId);
-    selectedPromptTypeId = typeId;
-    promptTypeId = typeId;
-    promptTypeName = entryType.name;
-    promptTypeParent = entryType.parent ?? "prompt";
-    promptTypeAbstract = Boolean(entryType.abstract);
-    promptTypeReadonly = Boolean(source?.built_in);
-    promptTypeLayerId = source?.built_in ? projectSchemaLayerId() : (source?.layer_id ?? projectSchemaLayerId());
-    const extras = entryType.prompt ?? null;
+  function loadPromptExtrasFromEntryType(entryType: EntryTypeDefinition | undefined | null) {
+    const extras = entryType?.prompt ?? null;
     promptSystemPrompt = extras?.system_prompt ?? "";
     promptModelClass = extras?.model_class ?? "";
     promptProviderPolicy = extras?.provider_policy ?? "";
@@ -1253,15 +1129,66 @@ The story so far:
       typeof contextStrategy?.output?.kind === "string" ? (contextStrategy.output.kind as string) : "";
     promptOutputReview =
       typeof contextStrategy?.output?.review === "string" ? (contextStrategy.output.review as string) : "";
-    promptTypePaneOpen = true;
-    focusPane("prompt_type");
   }
 
-  function updatePromptTypeName(value: string) {
-    promptTypeName = value;
-    if (!promptTypeReadonly) {
-      promptTypeId = slugifyFieldId(value);
+  function openSchemaTypeDetail(typeId: string) {
+    const entryType = metadataSchema?.entry_types[typeId];
+    if (!entryType) return;
+    const source = schemaTypeSource(typeId);
+    selectedSchemaTypeId = typeId;
+    schemaTypeId = typeId;
+    schemaTypeName = entryType.name;
+    schemaTypeKind =
+      entryType.kind === "scene" ? "scene" : entryType.kind === "prompt" ? "prompt" : "lore";
+    schemaTypeParent = entryType.parent ?? "";
+    schemaTypeAbstract = Boolean(entryType.abstract);
+    schemaTypeReadonly = Boolean(source?.built_in);
+    schemaTypeLayerId = source?.built_in ? projectSchemaLayerId() : (source?.layer_id ?? projectSchemaLayerId());
+    loadPromptExtrasFromEntryType(entryType);
+    schemaTypePaneOpen = true;
+    focusPane("schema_type");
+  }
+
+  function updateSchemaTypeName(value: string) {
+    schemaTypeName = value;
+    if (!schemaTypeReadonly) {
+      schemaTypeId = slugifyFieldId(value);
     }
+  }
+
+  function defaultSchemaParentType(kind: "scene" | "lore" | "prompt") {
+    if (kind === "lore" && metadataSchema?.entry_types.lore_entry) return "lore_entry";
+    if (kind === "prompt" && metadataSchema?.entry_types.prompt) return "prompt";
+    return "";
+  }
+
+  function openSchemaForCustomData(entryType: string, kind: "scene" | "lore" | "prompt") {
+    schemaPaneOpen = true;
+    schemaFieldEntryType = entryType || defaultSchemaEntryType(kind);
+    focusPane("schema");
+  }
+
+  function defaultSchemaEntryType(kind: "scene" | "lore" | "prompt") {
+    const fallback = kind === "lore" ? "lore_note" : kind === "prompt" ? "prompt" : "scene";
+    return Object.entries(metadataSchema?.entry_types ?? {}).find(([, definition]) => definition.kind === kind)?.[0] ?? fallback;
+  }
+
+  function entryTypeIdsForField(fieldId: string, kind: "scene" | "lore" | "prompt") {
+    return Object.entries(metadataSchema?.entry_types ?? {})
+      .filter(([, definition]) => definition.kind === kind && definition.fields.includes(fieldId))
+      .map(([typeId]) => typeId);
+  }
+
+  function closeSchemaPane(id: "schema" | "schema_field" | "schema_type" | "prompts") {
+    if (id === "schema") schemaPaneOpen = false;
+    else if (id === "schema_field") schemaFieldPaneOpen = false;
+    else if (id === "schema_type") schemaTypePaneOpen = false;
+    else if (id === "prompts") promptsPaneOpen = false;
+  }
+
+  function openPromptsPane() {
+    promptsPaneOpen = true;
+    focusPane("prompts");
   }
 
   function addPromptInput() {
@@ -1348,65 +1275,6 @@ The story so far:
       ...(contextStrategy ? { context_strategy: contextStrategy } : {}),
     };
     return Object.keys(extras).length ? extras : null;
-  }
-
-  async function savePromptType() {
-    if (!promptTypeLayerId) return;
-    await run(async () => {
-      const previousTypeId = selectedPromptTypeId && !promptTypeReadonly ? selectedPromptTypeId : null;
-      const nextTypeId = promptTypeId.trim();
-      if (!nextTypeId) {
-        status = "Prompt type ID is required";
-        return;
-      }
-      if (previousTypeId && previousTypeId !== nextTypeId) {
-        status = "Renaming prompt types is not available yet";
-        return;
-      }
-      const extras = buildPromptExtras();
-      const existing = previousTypeId ? metadataSchema?.entry_types[previousTypeId] : null;
-      const nextType: EntryTypeDefinition = {
-        name: promptTypeName.trim() || nextTypeId,
-        kind: "prompt",
-        parent: promptTypeParent || "prompt",
-        abstract: promptTypeAbstract,
-        fields: existing?.own_fields ?? existing?.fields ?? [],
-        ...(extras ? { prompt: extras } : { prompt: null }),
-      };
-      metadataSchema = await api.upsertMetadataEntryType(
-        promptTypeLayerId,
-        nextTypeId,
-        nextType,
-        Boolean(previousTypeId),
-      );
-      await refreshMetadataSchema();
-      validation = await api.validateProject();
-      selectedPromptTypeId = nextTypeId;
-      status = previousTypeId ? "Updated prompt type" : "Created prompt type";
-    });
-  }
-
-  function requestDeletePromptType() {
-    if (!selectedPromptTypeId || promptTypeReadonly) return;
-    const typeName = promptTypeName || selectedPromptTypeId;
-    confirmation = {
-      title: "Delete Prompt Type",
-      message: `Delete "${typeName}"? Existing documents using this type must be changed first.`,
-      confirmLabel: "Delete Type",
-      destructive: true,
-      onConfirm: async () => {
-        const typeId = selectedPromptTypeId;
-        if (!typeId) return;
-        await run(async () => {
-          metadataSchema = await api.deleteMetadataEntryType(typeId);
-          await refreshMetadataSchema();
-          validation = await api.validateProject();
-          selectedPromptTypeId = null;
-          promptTypePaneOpen = false;
-          status = `Deleted prompt type ${typeName}`;
-        });
-      },
-    };
   }
 
   function startSchemaTypeDrag(typeId: string) {
@@ -1510,12 +1378,15 @@ The story so far:
     await run(async () => {
       const previousTypeId = selectedSchemaTypeId && !schemaTypeReadonly ? selectedSchemaTypeId : null;
       const nextTypeId = schemaTypeId.trim();
+      const existing = previousTypeId ? metadataSchema?.entry_types[previousTypeId] : null;
+      const promptExtras = schemaTypeKind === "prompt" ? buildPromptExtras() : null;
       const nextType: EntryTypeDefinition = {
         name: schemaTypeName.trim() || nextTypeId,
         kind: schemaTypeKind,
         parent: schemaTypeParent || null,
         abstract: schemaTypeAbstract,
-        fields: previousTypeId ? (metadataSchema?.entry_types[previousTypeId]?.own_fields ?? metadataSchema?.entry_types[previousTypeId]?.fields ?? []) : [],
+        fields: previousTypeId ? (existing?.own_fields ?? existing?.fields ?? []) : [],
+        ...(schemaTypeKind === "prompt" ? { prompt: promptExtras } : {}),
       };
       if (previousTypeId && previousTypeId !== nextTypeId) {
         status = "Renaming node types is not available yet";
@@ -2168,62 +2039,12 @@ The story so far:
     status = `Loaded ${entry.title}`;
   }
 
-  async function openSnippetEntryInEditorPane(entryId: string) {
-    const existingPane = editorPanes.find((pane) => pane.document?.type === "snippet" && pane.document.id === entryId);
-    if (existingPane) {
-      focusedEditorPaneId = existingPane.id;
-      focusPane(existingPane.id);
-      status = `Focused ${existingPane.scene?.title ?? "open snippet"}`;
-      return;
-    }
-    let targetPane = editorPanes.find((pane) => !pane.pinned);
-    if (!targetPane) targetPane = addEditorPane();
-    if (targetPane.dirty) await saveEditorPane(targetPane.id);
-    const entry = await api.getSnippetEntry(entryId);
-    editorPanes = editorPanes.map((pane) =>
-      pane.id === targetPane.id
-        ? {
-            ...pane,
-            document: { type: "snippet", id: entry.id },
-            scene: entry,
-            dirty: false,
-            draftTitle: entry.title,
-            draftMarkdown: entry.body_markdown,
-            draftStatus: "",
-            draftEntryType: entry.entry_type,
-            draftMetadata: cloneMetadata(entry.metadata),
-            saving: false,
-          }
-        : pane,
-    );
-    focusedEditorPaneId = targetPane.id;
-    focusPane(targetPane.id);
-    status = `Loaded ${entry.title}`;
-  }
-
   async function newPromptEntry(entryType: string) {
     await run(async () => {
       const created = await api.createPromptEntry(`Untitled Prompt`, entryType);
       await refreshPromptEntries();
       await openPromptEntryInEditorPane(created.id);
     });
-  }
-
-  async function newSnippetEntry() {
-    await run(async () => {
-      const created = await api.createSnippetEntry(`Untitled Snippet`);
-      await refreshSnippetEntries();
-      await openSnippetEntryInEditorPane(created.id);
-    });
-  }
-
-  function openSnippetsPane() {
-    snippetsPaneOpen = true;
-    focusPane("snippets");
-  }
-
-  function closeSnippetsPane() {
-    snippetsPaneOpen = false;
   }
 
   async function openLoreEntryInEditorPane(entryId: string) {
@@ -2419,9 +2240,7 @@ The story so far:
           ? api.getLoreEntry(document.id)
           : document.type === "prompt"
             ? api.getPromptEntry(document.id)
-            : document.type === "snippet"
-              ? api.getSnippetEntry(document.id)
-              : api.getScene(document.id),
+            : api.getScene(document.id),
       ),
     );
     const refreshedByKey = new Map(refreshedDocuments.map((document, index) => [`${documentRefs[index].type}:${document.id}`, document]));
@@ -2502,8 +2321,6 @@ The story so far:
         savedDocument = await api.saveLoreEntry(draftDocument as LoreEntry, pane.draftMarkdown);
       } else if (documentKind === "prompt") {
         savedDocument = await api.savePromptEntry(draftDocument as PromptEntry, pane.draftMarkdown);
-      } else if (documentKind === "snippet") {
-        savedDocument = await api.saveSnippetEntry(draftDocument as SnippetEntry, pane.draftMarkdown);
       } else {
         savedDocument = await api.saveScene(draftDocument as Scene, pane.draftMarkdown);
       }
@@ -2528,8 +2345,6 @@ The story so far:
         await refreshKnownTags();
       } else if (documentKind === "prompt") {
         await refreshPromptEntries();
-      } else if (documentKind === "snippet") {
-        await refreshSnippetEntries();
       } else {
         await refreshStructure();
         await refreshTodos();
@@ -2558,15 +2373,13 @@ The story so far:
     } catch (error) {
       console.warn("Failed to fetch backlinks", error);
     }
-    const fileLabel = documentKind === "scene" ? "scene" : documentKind === "lore" ? "entry" : documentKind;
+    const fileLabel = documentKind === "scene" ? "scene" : documentKind === "lore" ? "entry" : "prompt";
     const titleLabel =
       documentKind === "scene"
         ? "Delete Scene"
         : documentKind === "lore"
           ? "Delete Entry"
-          : documentKind === "prompt"
-            ? "Delete Prompt"
-            : "Delete Snippet";
+          : "Delete Prompt";
     const baseMessage = `Delete "${sceneTitle}"? This removes the ${fileLabel} file from the project.`;
     const message =
       backlinks.length > 0
@@ -2599,8 +2412,6 @@ The story so far:
       loreEntries = (await api.deleteLoreEntry(pane.scene.id)).entries;
     } else if (documentKind === "prompt") {
       promptEntries = (await api.deletePromptEntry(pane.scene.id)).entries;
-    } else if (documentKind === "snippet") {
-      snippetEntries = (await api.deleteSnippetEntry(pane.scene.id)).entries;
     } else {
       structure = await api.deleteScene(pane.scene.id);
       await refreshTodos();
@@ -2850,7 +2661,6 @@ The story so far:
           </div>
           <div class="button-row">
             <button type="button" on:click={openPromptsPane}>Prompts…</button>
-            <button type="button" on:click={openSnippetsPane}>Snippets…</button>
           </div>
           {#if aiHealthResult}
             <p class="ai-health-result" class:ok={aiHealthResult.ok} class:fail={!aiHealthResult.ok}>
@@ -2990,10 +2800,10 @@ The story so far:
     </header>
     <div class="pane-content schema-list">
       <div class="schema-context-heading">
-        <strong>{schemaFieldKind === "lore" ? "Lore Entry Types" : "Scene Types"}</strong>
+        <strong>{schemaContextHeading}</strong>
         <small>Drag a custom type onto another type to change its parent.</small>
       </div>
-      <div class="schema-node-tree" aria-label={schemaFieldKind === "lore" ? "Lore entry type tree" : "Scene type tree"}>
+      <div class="schema-node-tree" aria-label={`${schemaContextHeading} tree`}>
         {#each schemaNodeTypeTree as node}
           {@render renderNodeTypeCard(node)}
         {/each}
@@ -3053,6 +2863,133 @@ The story so far:
           <span>{metadataSchema?.entry_types[selectedSchemaTypeId]?.fields.length ?? 0}</span>
         </div>
       {/if}
+
+      {#if schemaTypeKind === "prompt"}
+        <fieldset class="prompt-fieldset" disabled={schemaTypeReadonly}>
+          <legend>Defaults</legend>
+          <label>
+            System prompt
+            <textarea rows="4" bind:value={promptSystemPrompt} placeholder="Optional system message inherited by sub-types."></textarea>
+          </label>
+          <div class="prompt-row">
+            <label>
+              Model class
+              <select bind:value={promptModelClass}>
+                <option value="">(inherit)</option>
+                <option value="cheap">cheap</option>
+                <option value="balanced">balanced</option>
+                <option value="best">best</option>
+              </select>
+            </label>
+            <label>
+              Provider policy
+              <select bind:value={promptProviderPolicy}>
+                <option value="">(inherit project policy)</option>
+                <option value="off">Off</option>
+                <option value="local-only">Local only</option>
+                <option value="cloud-allowed">Cloud allowed</option>
+              </select>
+            </label>
+          </div>
+        </fieldset>
+
+        <fieldset class="prompt-fieldset" disabled={schemaTypeReadonly}>
+          <legend>Inputs</legend>
+          <p class="muted">Form fields presented to the user before this prompt runs. Bound as <code>{`{{ input.<name> }}`}</code> in the template.</p>
+          {#each promptInputs as input, index (index)}
+            <div class="prompt-input-row">
+              <div class="prompt-input-grid">
+                <label>
+                  Name
+                  <input value={input.name} placeholder="words" on:input={(event) => updatePromptInput(index, { name: event.currentTarget.value })} />
+                </label>
+                <label>
+                  Type
+                  <select value={input.type} on:change={(event) => updatePromptInput(index, { type: event.currentTarget.value as PromptInputType })}>
+                    <option value="text">Text</option>
+                    <option value="long_text">Long Text</option>
+                    <option value="number">Number</option>
+                    <option value="boolean">Boolean</option>
+                    <option value="select">Select</option>
+                  </select>
+                </label>
+                <label>
+                  Label
+                  <input value={input.label} placeholder="Words to generate" on:input={(event) => updatePromptInput(index, { label: event.currentTarget.value })} />
+                </label>
+                <label>
+                  Default
+                  <input value={input.defaultValue} placeholder="300" on:input={(event) => updatePromptInput(index, { defaultValue: event.currentTarget.value })} />
+                </label>
+                {#if input.type === "select"}
+                  <label class="prompt-input-options">
+                    Options
+                    <input value={input.options} placeholder="terse, neutral, warm" on:input={(event) => updatePromptInput(index, { options: event.currentTarget.value })} />
+                  </label>
+                {/if}
+                <label class="inline-check">
+                  <input type="checkbox" checked={input.required} on:change={(event) => updatePromptInput(index, { required: event.currentTarget.checked })} />
+                  Required
+                </label>
+              </div>
+              <button class="danger" type="button" on:click={() => removePromptInput(index)}>Remove</button>
+            </div>
+          {/each}
+          {#if promptInputs.length === 0}
+            <p class="muted">No inputs defined.</p>
+          {/if}
+          <div class="button-row">
+            <button type="button" on:click={addPromptInput}>+ Input</button>
+          </div>
+        </fieldset>
+
+        <fieldset class="prompt-fieldset" disabled={schemaTypeReadonly}>
+          <legend>Context strategy</legend>
+          <p class="muted">How the dispatcher picks the target node and what surrounding context it includes.</p>
+          <div class="prompt-row">
+            <label>
+              Target kind
+              <select bind:value={promptContextTargetKind}>
+                <option value="">(none)</option>
+                <option value="scene">Scene</option>
+                <option value="lore">Lore Entry</option>
+              </select>
+            </label>
+            <label class="inline-check">
+              <input type="checkbox" bind:checked={promptContextTargetRequired} />
+              Target required
+            </label>
+          </div>
+          <label>
+            Scan surface
+            <input bind:value={promptScanSurface} placeholder="_text_before, _selection" />
+            <small>Comma-separated tokens (e.g. <code>_text_before</code>, <code>_selection</code>) or field names.</small>
+          </label>
+          <div class="prompt-row">
+            <label>
+              Output kind
+              <select bind:value={promptOutputKind}>
+                <option value="">(none)</option>
+                <option value="append_to_body">Append to body</option>
+                <option value="replace_selection">Replace selection</option>
+                <option value="replace_field">Replace field</option>
+                <option value="chat_panel">Chat panel</option>
+                <option value="new_node">New node</option>
+              </select>
+            </label>
+            <label>
+              Review
+              <select bind:value={promptOutputReview}>
+                <option value="">(default)</option>
+                <option value="visual_diff">Visual diff</option>
+                <option value="auto_apply_undo">Auto-apply with undo</option>
+                <option value="none">None</option>
+              </select>
+            </label>
+          </div>
+        </fieldset>
+      {/if}
+
       {#if !schemaTypeReadonly}
         <div class="button-row">
           <button type="button" disabled={!schemaTypeLayerId || !schemaTypeId.trim() || !schemaTypeName.trim()} on:click={saveSchemaType}>Save Type</button>
@@ -3161,258 +3098,31 @@ The story so far:
     <header class="pane-header" role="button" tabindex="0" aria-label="Move Prompts pane" on:keydown={(event) => handlePaneHeaderKeydown(event, "prompts")} on:mousedown={(event) => startPaneDrag(event, "prompts")}>
       <h2>Prompts</h2>
       <div class="pane-header-actions">
-        <button class="pin-button" type="button" on:mousedown={(event) => event.stopPropagation()} on:click={() => createPromptTypeDraft()}>+ Type</button>
         <button class="pin-button" type="button" on:mousedown={(event) => event.stopPropagation()} on:click={() => closeSchemaPane("prompts")}>Close</button>
       </div>
     </header>
     <div class="pane-content schema-list">
-      <div class="schema-context-heading">
-        <strong>Prompt Types</strong>
-        <small>Define the prompts users can invoke. Each type declares its inputs and how context is gathered.</small>
-      </div>
-      <div class="schema-node-tree" aria-label="Prompt type tree">
-        {#each promptTypeTree as node}
-          {@render renderPromptTypeCard(node)}
-        {/each}
-        {#if promptTypeTree.length === 0}
-          <p class="muted">No prompt types yet. Click “+ Type” to create one.</p>
-        {/if}
-      </div>
-
-      <div class="schema-context-heading">
-        <strong>Prompt Entries</strong>
-        <small>Actual prompt files. The body holds the Jinja2 template.</small>
-      </div>
-      {#each promptTypeTree as node}
-        {#if !node.definition.abstract}
-          <div class="prompt-entry-section">
-            <header>
-              <strong>{node.label}</strong>
-              <button class="pin-button" type="button" on:click={() => newPromptEntry(node.id)}>+ Entry</button>
-            </header>
-            {#each promptEntries.filter((e) => e.entry_type === node.id) as entry (entry.id)}
-              <button class:active={focusedEditorPane?.document?.type === "prompt" && focusedEditorPane.document.id === entry.id} class="prompt-entry-row" type="button" on:click={() => openPromptEntryInEditorPane(entry.id)}>
-                <span><strong>{entry.title}</strong></span>
-              </button>
-            {/each}
-          </div>
-        {/if}
+      {#each concretePromptSubtypes as subtype (subtype.id)}
+        <div class="prompt-entry-section">
+          <header>
+            <strong>{subtype.label}</strong>
+            <button class="pin-button" type="button" on:click={() => newPromptEntry(subtype.id)}>+ Entry</button>
+          </header>
+          {#each promptEntries.filter((e) => e.entry_type === subtype.id) as entry (entry.id)}
+            <button class:active={focusedEditorPane?.document?.type === "prompt" && focusedEditorPane.document.id === entry.id} class="prompt-entry-row" type="button" on:click={() => openPromptEntryInEditorPane(entry.id)}>
+              <span><strong>{entry.title}</strong></span>
+            </button>
+          {/each}
+        </div>
       {/each}
-      {#if promptEntries.length === 0}
-        <p class="muted">No prompt entries yet. Use one of the “+ Entry” buttons above.</p>
+      {#if concretePromptSubtypes.length === 0}
+        <p class="muted">No prompt sub-types defined yet. Open a prompt entry's Custom Data to create one.</p>
       {/if}
     </div>
     <button class="pane-resize" type="button" aria-label="Resize Prompts pane" on:keydown={(event) => handlePaneResizeKeydown(event, "prompts")} on:mousedown={(event) => startPaneResize(event, "prompts")}></button>
   </section>
 
-  <!-- svelte-ignore a11y_no_noninteractive_element_interactions -->
-  <section class:hidden-pane={!isProjectOpen || !snippetsPaneOpen} class="pane snippets-pane" data-pane-id="snippets" style={paneStyle("snippets")} aria-label="Snippets pane" on:mousedown={() => focusPane("snippets")}>
-    <header class="pane-header" role="button" tabindex="0" aria-label="Move Snippets pane" on:keydown={(event) => handlePaneHeaderKeydown(event, "snippets")} on:mousedown={(event) => startPaneDrag(event, "snippets")}>
-      <h2>Snippets</h2>
-      <div class="pane-header-actions">
-        <button class="pin-button" type="button" on:mousedown={(event) => event.stopPropagation()} on:click={newSnippetEntry}>+ Snippet</button>
-        <button class="pin-button" type="button" on:mousedown={(event) => event.stopPropagation()} on:click={closeSnippetsPane}>Close</button>
-      </div>
-    </header>
-    <div class="pane-content schema-list">
-      <div class="schema-context-heading">
-        <strong>Snippet Entries</strong>
-        <small>Reusable text the user wrote once. Pulled into prompts via the <code>include</code> directive.</small>
-      </div>
-      <div class="prompt-entry-section">
-        {#each snippetEntries as entry (entry.id)}
-          <button class:active={focusedEditorPane?.document?.type === "snippet" && focusedEditorPane.document.id === entry.id} class="prompt-entry-row" type="button" on:click={() => openSnippetEntryInEditorPane(entry.id)}>
-            <span><strong>{entry.title}</strong></span>
-          </button>
-        {/each}
-        {#if snippetEntries.length === 0}
-          <p class="muted">No snippets yet. Click “+ Snippet” to create one.</p>
-        {/if}
-      </div>
-    </div>
-    <button class="pane-resize" type="button" aria-label="Resize Snippets pane" on:keydown={(event) => handlePaneResizeKeydown(event, "snippets")} on:mousedown={(event) => startPaneResize(event, "snippets")}></button>
-  </section>
 
-  <!-- svelte-ignore a11y_no_noninteractive_element_interactions -->
-  <section class:hidden-pane={!isProjectOpen || !promptTypePaneOpen} class="pane prompt-type-pane" data-pane-id="prompt_type" style={paneStyle("prompt_type")} aria-label="Prompt Type pane" on:mousedown={() => focusPane("prompt_type")}>
-    <header class="pane-header" role="button" tabindex="0" aria-label="Move Prompt Type pane" on:keydown={(event) => handlePaneHeaderKeydown(event, "prompt_type")} on:mousedown={(event) => startPaneDrag(event, "prompt_type")}>
-      <h2>Prompt Type</h2>
-      <div class="pane-header-actions">
-        <button class="pin-button" type="button" on:mousedown={(event) => event.stopPropagation()} on:click={() => closeSchemaPane("prompt_type")}>Close</button>
-      </div>
-    </header>
-    <div class="pane-content schema-editor prompt-editor">
-      {#if promptTypeReadonly}
-        <div class="schema-target-layer">
-          <strong>Scope</strong>
-          <span>System</span>
-        </div>
-      {:else}
-        <label>
-          Save layer
-          <select bind:value={promptTypeLayerId}>
-            {#each metadataSchemaLayers as layer}
-              <option value={layer.id}>{layer.label}</option>
-            {/each}
-          </select>
-        </label>
-      {/if}
-      <label>
-        Display name
-        <input readonly={promptTypeReadonly} value={promptTypeName} placeholder="Continue Scene" on:input={(event) => updatePromptTypeName(event.currentTarget.value)} />
-      </label>
-      <label>
-        Type ID
-        <input aria-label="Generated Type ID" title="Generated from the type name" value={promptTypeId} readonly placeholder="continue_scene" />
-      </label>
-      <label>
-        Inherits from
-        <select disabled={promptTypeReadonly} bind:value={promptTypeParent}>
-          {#each promptParentOptionList as option (option.id)}
-            <option value={option.id} disabled={option.id === selectedPromptTypeId}>{option.label}</option>
-          {/each}
-        </select>
-      </label>
-      <label class="inline-check">
-        <input type="checkbox" disabled={promptTypeReadonly} bind:checked={promptTypeAbstract} />
-        Abstract base type
-      </label>
-
-      <fieldset class="prompt-fieldset" disabled={promptTypeReadonly}>
-        <legend>Defaults</legend>
-        <label>
-          System prompt
-          <textarea rows="4" bind:value={promptSystemPrompt} placeholder="Optional system message inherited by sub-types."></textarea>
-        </label>
-        <div class="prompt-row">
-          <label>
-            Model class
-            <select bind:value={promptModelClass}>
-              <option value="">(inherit)</option>
-              <option value="cheap">cheap</option>
-              <option value="balanced">balanced</option>
-              <option value="best">best</option>
-            </select>
-          </label>
-          <label>
-            Provider policy
-            <select bind:value={promptProviderPolicy}>
-              <option value="">(inherit project policy)</option>
-              <option value="off">Off</option>
-              <option value="local-only">Local only</option>
-              <option value="cloud-allowed">Cloud allowed</option>
-            </select>
-          </label>
-        </div>
-      </fieldset>
-
-      <fieldset class="prompt-fieldset" disabled={promptTypeReadonly}>
-        <legend>Inputs</legend>
-        <p class="muted">Form fields presented to the user before this prompt runs. Bound as <code>{`{{ input.<name> }}`}</code> in the template.</p>
-        {#each promptInputs as input, index (index)}
-          <div class="prompt-input-row">
-            <div class="prompt-input-grid">
-              <label>
-                Name
-                <input value={input.name} placeholder="words" on:input={(event) => updatePromptInput(index, { name: event.currentTarget.value })} />
-              </label>
-              <label>
-                Type
-                <select value={input.type} on:change={(event) => updatePromptInput(index, { type: event.currentTarget.value as PromptInputType })}>
-                  <option value="text">Text</option>
-                  <option value="long_text">Long Text</option>
-                  <option value="number">Number</option>
-                  <option value="boolean">Boolean</option>
-                  <option value="select">Select</option>
-                </select>
-              </label>
-              <label>
-                Label
-                <input value={input.label} placeholder="Words to generate" on:input={(event) => updatePromptInput(index, { label: event.currentTarget.value })} />
-              </label>
-              <label>
-                Default
-                <input value={input.defaultValue} placeholder="300" on:input={(event) => updatePromptInput(index, { defaultValue: event.currentTarget.value })} />
-              </label>
-              {#if input.type === "select"}
-                <label class="prompt-input-options">
-                  Options
-                  <input value={input.options} placeholder="terse, neutral, warm" on:input={(event) => updatePromptInput(index, { options: event.currentTarget.value })} />
-                </label>
-              {/if}
-              <label class="inline-check">
-                <input type="checkbox" checked={input.required} on:change={(event) => updatePromptInput(index, { required: event.currentTarget.checked })} />
-                Required
-              </label>
-            </div>
-            <button class="danger" type="button" on:click={() => removePromptInput(index)}>Remove</button>
-          </div>
-        {/each}
-        {#if promptInputs.length === 0}
-          <p class="muted">No inputs defined.</p>
-        {/if}
-        <div class="button-row">
-          <button type="button" on:click={addPromptInput}>+ Input</button>
-        </div>
-      </fieldset>
-
-      <fieldset class="prompt-fieldset" disabled={promptTypeReadonly}>
-        <legend>Context strategy</legend>
-        <p class="muted">How the dispatcher picks the target node and what surrounding context it includes.</p>
-        <div class="prompt-row">
-          <label>
-            Target kind
-            <select bind:value={promptContextTargetKind}>
-              <option value="">(none)</option>
-              <option value="scene">Scene</option>
-              <option value="lore">Lore Entry</option>
-            </select>
-          </label>
-          <label class="inline-check">
-            <input type="checkbox" bind:checked={promptContextTargetRequired} />
-            Target required
-          </label>
-        </div>
-        <label>
-          Scan surface
-          <input bind:value={promptScanSurface} placeholder="_text_before, _selection" />
-          <small>Comma-separated tokens (e.g. <code>_text_before</code>, <code>_selection</code>) or field names.</small>
-        </label>
-        <div class="prompt-row">
-          <label>
-            Output kind
-            <select bind:value={promptOutputKind}>
-              <option value="">(none)</option>
-              <option value="append_to_body">Append to body</option>
-              <option value="replace_selection">Replace selection</option>
-              <option value="replace_field">Replace field</option>
-              <option value="chat_panel">Chat panel</option>
-              <option value="new_node">New node</option>
-            </select>
-          </label>
-          <label>
-            Review
-            <select bind:value={promptOutputReview}>
-              <option value="">(default)</option>
-              <option value="visual_diff">Visual diff</option>
-              <option value="auto_apply_undo">Auto-apply with undo</option>
-              <option value="none">None</option>
-            </select>
-          </label>
-        </div>
-      </fieldset>
-
-      {#if !promptTypeReadonly}
-        <div class="button-row">
-          <button type="button" disabled={!promptTypeLayerId || !promptTypeId.trim() || !promptTypeName.trim()} on:click={savePromptType}>Save Prompt Type</button>
-          {#if selectedPromptTypeId}
-            <button class="danger-button" type="button" on:click={requestDeletePromptType}>Delete</button>
-          {/if}
-        </div>
-      {/if}
-    </div>
-    <button class="pane-resize" type="button" aria-label="Resize Prompt Type pane" on:keydown={(event) => handlePaneResizeKeydown(event, "prompt_type")} on:mousedown={(event) => startPaneResize(event, "prompt_type")}></button>
-  </section>
 
   {#each editorPanes as editorPane (editorPane.id)}
     <!-- svelte-ignore a11y_no_noninteractive_element_interactions -->
@@ -4049,33 +3759,3 @@ The story so far:
   </section>
 {/snippet}
 
-{#snippet renderPromptTypeCard(node: NodeTypeTreeNode)}
-  {@const typeSource = schemaTypeSource(node.id)}
-  <section
-    class:active={selectedPromptTypeId === node.id}
-    class="schema-node-card"
-    role="group"
-    aria-label={`${node.label} prompt type`}
-    style={`--source-index: ${sourceLayerIndex(typeSource)}`}
-  >
-    <div class="schema-node-card-main">
-      <button class="schema-node-title" type="button" on:click={() => openPromptTypeDetail(node.id)}>
-        <span>
-          <strong>{node.label}</strong>
-          <small>{node.id} · {node.definition.abstract ? "Abstract " : ""}Prompt Type</small>
-        </span>
-      </button>
-      <span class="schema-source-badge" style={`--source-index: ${sourceLayerIndex(typeSource)}`}>{sourceBadgeLabel(typeSource)}</span>
-      <div class="schema-node-actions">
-        <button class="pin-button" type="button" on:click={() => createPromptTypeDraft(promptTypeLayerId || projectSchemaLayerId(), node.id)}>+ Type</button>
-      </div>
-    </div>
-    {#if node.children.length > 0}
-      <div class="schema-node-children">
-        {#each node.children as child}
-          {@render renderPromptTypeCard(child)}
-        {/each}
-      </div>
-    {/if}
-  </section>
-{/snippet}

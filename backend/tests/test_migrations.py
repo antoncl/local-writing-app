@@ -86,9 +86,11 @@ class MigrationFrameworkTests(unittest.TestCase):
             migrations.MIGRATIONS.extend(original_registry)
             migrations.CURRENT_VERSION = original_current
 
-    def test_fresh_project_has_snippets_folder(self) -> None:
-        """v2 ships snippets/ via create_project; no migration needed for fresh projects."""
-        self.assertTrue((self.root / "snippets").is_dir())
+    def test_fresh_project_does_not_create_snippets_folder(self) -> None:
+        """Snippets are now a prompt sub-type. New projects no longer create snippets/.
+        Existing v1 projects still get snippets/ via the v1→v2 migration for backwards
+        compatibility; see test_v1_project_migrates_to_v2_creating_snippets_folder."""
+        self.assertFalse((self.root / "snippets").exists())
         self.assertEqual(read_project_version(self.root), CURRENT_VERSION)
         self.assertEqual(self.service.last_migrations, [])
 

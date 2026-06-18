@@ -28,7 +28,7 @@
   const dispatch = createEventDispatcher<{
     change: { title: string; bodyMarkdown: string; status: string; entryType: string; metadata: EntryMetadata };
     focus: void;
-    "custom-data": { entryType: string; kind: "scene" | "lore" };
+    "custom-data": { entryType: string; kind: "scene" | "lore" | "prompt" };
     embeddedTodos: { todos: EmbeddedTodo[] };
     navigate: { id: string; kind: string };
   }>();

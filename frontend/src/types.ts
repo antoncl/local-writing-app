@@ -40,7 +40,7 @@ export type LoreEntry = {
   computed_metadata: EntryMetadata;
 };
 
-export type EditableDocument = Scene | LoreEntry | PromptEntry | SnippetEntry;
+export type EditableDocument = Scene | LoreEntry | PromptEntry;
 
 export type LoreEntryList = {
   entries: LoreEntrySummary[];
@@ -68,27 +68,6 @@ export type PromptEntryList = {
   entries: PromptEntrySummary[];
 };
 
-export type SnippetEntrySummary = {
-  id: string;
-  title: string;
-  body_markdown: string;
-  entry_type: string;
-  metadata: EntryMetadata;
-};
-
-export type SnippetEntry = {
-  id: string;
-  title: string;
-  body_markdown: string;
-  revision: string;
-  entry_type: string;
-  metadata: EntryMetadata;
-  computed_metadata: EntryMetadata;
-};
-
-export type SnippetEntryList = {
-  entries: SnippetEntrySummary[];
-};
 
 export type KnownTags = {
   tags: string[];

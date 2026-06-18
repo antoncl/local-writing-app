@@ -1373,7 +1373,7 @@ class MetadataValidationTests(unittest.TestCase):
         self.assertEqual(rer.prompt.system_prompt, "You are a careful continuation engine.")
         self.assertEqual([i.name for i in rer.prompt.inputs], ["words", "beat"])
 
-    def test_snippet_subtype_can_be_created(self) -> None:
+    def test_snippet_subtype_inherits_from_prompt_kind(self) -> None:
         layer_id = self._project_layer_id()
         schema = self.service.upsert_metadata_entry_type(
             UpsertMetadataEntryTypeRequest(
@@ -1381,15 +1381,17 @@ class MetadataValidationTests(unittest.TestCase):
                 entry_type_id="house_voice",
                 entry_type=EntryTypeDefinition(
                     name="House Voice",
-                    kind="snippet",
+                    kind="prompt",
                     parent="snippet",
                 ),
             )
         )
 
         self.assertIn("house_voice", schema.entry_types)
-        self.assertEqual(schema.entry_types["house_voice"].kind, "snippet")
-        self.assertIsNone(schema.entry_types["house_voice"].prompt)
+        self.assertEqual(schema.entry_types["house_voice"].kind, "prompt")
+        self.assertEqual(schema.entry_types["house_voice"].parent, "snippet")
+        self.assertEqual(schema.entry_types["snippet"].kind, "prompt")
+        self.assertEqual(schema.entry_types["snippet"].parent, "prompt")
 
     def test_unknown_kind_is_rejected(self) -> None:
         layer_id = self._project_layer_id()

@@ -949,6 +949,11 @@ Open the scene. Write about {{ input.words | default(250) }} words to start it. 
   function openSlashMenu() {
     if (documentKind !== "scene") return;
     if (!editor || !editorFrame || !editor.isFocused) return;
+    // Re-check trigger context: this function is called via setTimeout(0) from
+    // updateSlashMenuFromContent, so by the time it fires the slash text may
+    // already have been cleared (e.g. by clearSlashTrigger inside runSlashCommand).
+    // Without this check the menu would re-open the moment after closeSlashMenu ran.
+    if (!isSlashTriggerContext()) return;
     const coords = editor.view.coordsAtPos(editor.state.selection.from);
     const frameBounds = editorFrame.getBoundingClientRect();
     slashMenu = {

@@ -270,9 +270,9 @@ The story so far:
     project: { title: "Project", x: 18, y: 18, width: 380, height: 340, z: 1 },
     outline: { title: "Manuscript Outline", x: 18, y: 260, width: 300, height: 420, z: 2 },
     lore: { title: "Lore", x: 330, y: 260, width: 300, height: 320, z: 3 },
-    schema: { title: "Custom Data", x: 330, y: 260, width: 360, height: 420, z: 3 },
-    schema_field: { title: "Custom Field", x: 708, y: 260, width: 360, height: 420, z: 4 },
-    schema_type: { title: "Node Type", x: 708, y: 260, width: 440, height: 560, z: 4 },
+    schema: { title: "Detail Types", x: 330, y: 260, width: 360, height: 420, z: 3 },
+    schema_field: { title: "Detail Field", x: 708, y: 260, width: 360, height: 420, z: 4 },
+    schema_type: { title: "Detail Type", x: 708, y: 260, width: 440, height: 560, z: 4 },
     prompts: { title: "Prompts", x: 330, y: 260, width: 360, height: 420, z: 3 },
     todo: { title: "TODO", x: 1126, y: 18, width: 310, height: 320, z: 4 },
     search: { title: "Search", x: 1126, y: 360, width: 310, height: 320, z: 5 },
@@ -1521,7 +1521,7 @@ The story so far:
     if (!entryType || !parentType || entryType.kind !== parentType.kind) return;
     const source = schemaTypeSource(typeId);
     if (!source || source.built_in) {
-      status = "System node types cannot be moved";
+      status = "System detail types cannot be moved";
       return;
     }
     await run(async () => {
@@ -1600,7 +1600,7 @@ The story so far:
       }
       validation = await api.validateProject();
       selectedSchemaFieldId = nextFieldId;
-      status = "Updated metadata schema";
+      status = "Updated details schema";
     });
   }
 
@@ -1620,7 +1620,7 @@ The story so far:
         ...(schemaTypeKind === "prompt" ? { prompt: promptExtras } : {}),
       };
       if (previousTypeId && previousTypeId !== nextTypeId) {
-        status = "Renaming node types is not available yet";
+        status = "Renaming detail types is not available yet";
         return;
       }
       metadataSchema = await api.upsertMetadataEntryType(schemaTypeLayerId, nextTypeId, nextType, Boolean(previousTypeId));
@@ -1628,7 +1628,7 @@ The story so far:
       validation = await api.validateProject();
       selectedSchemaTypeId = nextTypeId;
       schemaFieldEntryType = nextTypeId;
-      status = "Updated node type";
+      status = "Updated detail type";
     });
   }
 
@@ -1636,7 +1636,7 @@ The story so far:
     if (!selectedSchemaTypeId || schemaTypeReadonly) return;
     const typeName = schemaTypeName || selectedSchemaTypeId;
     confirmation = {
-      title: "Delete Node Type",
+      title: "Delete Detail Type",
       message: `Delete "${typeName}"? Existing documents using this type must be changed first.`,
       confirmLabel: "Delete Type",
       destructive: true,
@@ -1661,7 +1661,7 @@ The story so far:
     if (!selectedSchemaFieldId || selectedSchemaFieldId.startsWith("system:") || schemaFieldReadonly) return;
     const fieldName = schemaFieldName || selectedSchemaFieldId;
     confirmation = {
-      title: "Delete Custom Field",
+      title: "Delete Detail Field",
       message: `Delete "${fieldName}"? This removes the field definition and removes that metadata value from scenes.`,
       confirmLabel: "Delete Field",
       destructive: true,
@@ -3028,9 +3028,9 @@ The story so far:
   </section>
 
   <!-- svelte-ignore a11y_no_noninteractive_element_interactions -->
-  <section class:hidden-pane={!isProjectOpen || !schemaPaneOpen} class="pane schema-pane" data-pane-id="schema" style={paneStyle("schema")} aria-label="Custom Data pane" on:mousedown={() => focusPane("schema")}>
-    <header class="pane-header" role="button" tabindex="0" aria-label="Move Custom Data pane" on:keydown={(event) => handlePaneHeaderKeydown(event, "schema")} on:mousedown={(event) => startPaneDrag(event, "schema")}>
-      <h2>Custom Data</h2>
+  <section class:hidden-pane={!isProjectOpen || !schemaPaneOpen} class="pane schema-pane" data-pane-id="schema" style={paneStyle("schema")} aria-label="Detail Types pane" on:mousedown={() => focusPane("schema")}>
+    <header class="pane-header" role="button" tabindex="0" aria-label="Move Detail Types pane" on:keydown={(event) => handlePaneHeaderKeydown(event, "schema")} on:mousedown={(event) => startPaneDrag(event, "schema")}>
+      <h2>Detail Types</h2>
       <div class="pane-header-actions">
         <button class="pin-button" type="button" on:mousedown={(event) => event.stopPropagation()} on:click={() => createSchemaTypeDraft()}>+ Type</button>
         <button class="pin-button" type="button" on:mousedown={(event) => event.stopPropagation()} on:click={() => closeSchemaPane("schema")}>Close</button>
@@ -3046,17 +3046,17 @@ The story so far:
           {@render renderNodeTypeCard(node)}
         {/each}
         {#if schemaNodeTypeTree.length === 0}
-          <p class="muted">No node types defined for this context.</p>
+          <p class="muted">No detail types defined for this context.</p>
         {/if}
       </div>
     </div>
-    <button class="pane-resize" type="button" aria-label="Resize Custom Data pane" on:keydown={(event) => handlePaneResizeKeydown(event, "schema")} on:mousedown={(event) => startPaneResize(event, "schema")}></button>
+    <button class="pane-resize" type="button" aria-label="Resize Detail Types pane" on:keydown={(event) => handlePaneResizeKeydown(event, "schema")} on:mousedown={(event) => startPaneResize(event, "schema")}></button>
   </section>
 
   <!-- svelte-ignore a11y_no_noninteractive_element_interactions -->
-  <section class:hidden-pane={!isProjectOpen || !schemaTypePaneOpen} class="pane schema-type-pane" data-pane-id="schema_type" style={paneStyle("schema_type")} aria-label="Node Type pane" on:mousedown={() => focusPane("schema_type")}>
-    <header class="pane-header" role="button" tabindex="0" aria-label="Move Node Type pane" on:keydown={(event) => handlePaneHeaderKeydown(event, "schema_type")} on:mousedown={(event) => startPaneDrag(event, "schema_type")}>
-      <h2>Node Type</h2>
+  <section class:hidden-pane={!isProjectOpen || !schemaTypePaneOpen} class="pane schema-type-pane" data-pane-id="schema_type" style={paneStyle("schema_type")} aria-label="Detail Type pane" on:mousedown={() => focusPane("schema_type")}>
+    <header class="pane-header" role="button" tabindex="0" aria-label="Move Detail Type pane" on:keydown={(event) => handlePaneHeaderKeydown(event, "schema_type")} on:mousedown={(event) => startPaneDrag(event, "schema_type")}>
+      <h2>Detail Type</h2>
       <div class="pane-header-actions">
         <button class="pin-button" type="button" on:mousedown={(event) => event.stopPropagation()} on:click={() => closeSchemaPane("schema_type")}>Close</button>
       </div>
@@ -3237,13 +3237,13 @@ The story so far:
         </div>
       {/if}
     </div>
-    <button class="pane-resize" type="button" aria-label="Resize Node Type pane" on:keydown={(event) => handlePaneResizeKeydown(event, "schema_type")} on:mousedown={(event) => startPaneResize(event, "schema_type")}></button>
+    <button class="pane-resize" type="button" aria-label="Resize Detail Type pane" on:keydown={(event) => handlePaneResizeKeydown(event, "schema_type")} on:mousedown={(event) => startPaneResize(event, "schema_type")}></button>
   </section>
 
   <!-- svelte-ignore a11y_no_noninteractive_element_interactions -->
-  <section class:hidden-pane={!isProjectOpen || !schemaFieldPaneOpen} class="pane schema-field-pane" data-pane-id="schema_field" style={paneStyle("schema_field")} aria-label="Custom Field pane" on:mousedown={() => focusPane("schema_field")}>
-    <header class="pane-header" role="button" tabindex="0" aria-label="Move Custom Field pane" on:keydown={(event) => handlePaneHeaderKeydown(event, "schema_field")} on:mousedown={(event) => startPaneDrag(event, "schema_field")}>
-      <h2>Custom Field</h2>
+  <section class:hidden-pane={!isProjectOpen || !schemaFieldPaneOpen} class="pane schema-field-pane" data-pane-id="schema_field" style={paneStyle("schema_field")} aria-label="Detail Field pane" on:mousedown={() => focusPane("schema_field")}>
+    <header class="pane-header" role="button" tabindex="0" aria-label="Move Detail Field pane" on:keydown={(event) => handlePaneHeaderKeydown(event, "schema_field")} on:mousedown={(event) => startPaneDrag(event, "schema_field")}>
+      <h2>Detail Field</h2>
       <div class="pane-header-actions">
         <button class="pin-button" type="button" on:mousedown={(event) => event.stopPropagation()} on:click={() => closeSchemaPane("schema_field")}>Close</button>
       </div>
@@ -3328,7 +3328,7 @@ The story so far:
         </div>
       {/if}
     </div>
-    <button class="pane-resize" type="button" aria-label="Resize Custom Field pane" on:keydown={(event) => handlePaneResizeKeydown(event, "schema_field")} on:mousedown={(event) => startPaneResize(event, "schema_field")}></button>
+    <button class="pane-resize" type="button" aria-label="Resize Detail Field pane" on:keydown={(event) => handlePaneResizeKeydown(event, "schema_field")} on:mousedown={(event) => startPaneResize(event, "schema_field")}></button>
   </section>
 
   <!-- svelte-ignore a11y_no_noninteractive_element_interactions -->
@@ -3354,7 +3354,7 @@ The story so far:
         </div>
       {/each}
       {#if concretePromptSubtypes.length === 0}
-        <p class="muted">No prompt sub-types defined yet. Open a prompt entry's Custom Data to create one.</p>
+        <p class="muted">No prompt sub-types defined yet. Open a prompt entry's Detail Types to create one.</p>
       {/if}
     </div>
     <button class="pane-resize" type="button" aria-label="Resize Prompts pane" on:keydown={(event) => handlePaneResizeKeydown(event, "prompts")} on:mousedown={(event) => startPaneResize(event, "prompts")}></button>
@@ -4018,7 +4018,7 @@ The story so far:
     class="schema-node-card"
     draggable={!typeSource?.built_in}
     role="group"
-    aria-label={`${node.label} node type`}
+    aria-label={`${node.label} detail type`}
     style={`--source-index: ${sourceLayerIndex(typeSource)}`}
     on:dragstart={() => {
       if (!typeSource?.built_in) startSchemaTypeDrag(node.id);
@@ -4031,7 +4031,7 @@ The story so far:
       <button class="schema-node-title" type="button" on:click={() => openSchemaTypeDetail(node.id)}>
         <span>
           <strong>{node.label}</strong>
-          <small>{node.id} · {node.definition.abstract ? "Abstract " : ""}Node Type</small>
+          <small>{node.id} · {node.definition.abstract ? "Abstract " : ""}Detail Type</small>
         </span>
       </button>
       <span class="schema-source-badge" style={`--source-index: ${sourceLayerIndex(typeSource)}`}>{sourceBadgeLabel(typeSource)}</span>

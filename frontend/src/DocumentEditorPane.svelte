@@ -1940,10 +1940,10 @@
         {/if}
       </div>
       {#if metadataSchema}
-        <section class="scene-metadata" aria-label={`${documentLabel} metadata`}>
+        <section class="scene-metadata" aria-label={`${documentLabel} details`}>
           <div class="metadata-stripe">
             <button class="metadata-toggle" type="button" on:click={() => (metadataExpanded = !metadataExpanded)}>
-              <strong>{metadataExpanded ? "Hide Metadata" : "Show Metadata"}</strong>
+              <strong>{metadataExpanded ? "Hide Details" : "Show Details"}</strong>
               <span>{metadataSummaryText}</span>
             </button>
             <button
@@ -1951,7 +1951,7 @@
               type="button"
               on:click={() => dispatch("custom-data", { entryType, kind: documentKind })}
             >
-              Custom data
+              Edit Detail Types
             </button>
           </div>
           {#if metadataExpanded}

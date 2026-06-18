@@ -2258,9 +2258,9 @@
 
 {#if inputsDialogEntry}
   {@const declaredInputs = effectivePromptInputs(inputsDialogEntry)}
-  <!-- svelte-ignore a11y_no_noninteractive_element_interactions -->
-  <div class="inputs-dialog-backdrop" on:mousedown|self={cancelInputsDialog}>
-    <section class="inputs-dialog" role="dialog" aria-label={`Run ${inputsDialogEntry.title}`} on:keydown={handleInputsDialogKeydown}>
+  <!-- svelte-ignore a11y_no_static_element_interactions -->
+  <div class="inputs-dialog-backdrop" role="presentation" on:mousedown|self={cancelInputsDialog}>
+    <div class="inputs-dialog" role="dialog" aria-label={`Run ${inputsDialogEntry.title}`} aria-modal="true" tabindex="-1" on:keydown={handleInputsDialogKeydown}>
       <header>
         <strong>{inputsDialogEntry.title}</strong>
         <small>{promptEntryDescription(inputsDialogEntry)}</small>
@@ -2314,6 +2314,6 @@
         <button type="button" class="primary" on:click={submitInputsDialog}>Run</button>
       </div>
       <small class="inputs-dialog-hint">Ctrl/⌘+Enter to run · Esc to cancel</small>
-    </section>
+    </div>
   </div>
 {/if}

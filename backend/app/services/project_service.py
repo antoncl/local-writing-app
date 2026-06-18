@@ -156,6 +156,49 @@ DEFAULT_METADATA_SCHEMA: dict[str, Any] = {
             "fields": ["tags"],
             "has_body": True,
         },
+        "continuation": {
+            "name": "Continuation",
+            "kind": "prompt",
+            "parent": "prompt",
+            "abstract": True,
+            "fields": [],
+            "has_body": True,
+            "prompt": {
+                "context_strategy": {
+                    "target": {"required": True, "kind": "scene"},
+                    "scan_surface": ["_text_before"],
+                    "output": {"kind": "append_to_body", "review": "visual_diff"},
+                },
+            },
+        },
+        "revise": {
+            "name": "Revise",
+            "kind": "prompt",
+            "parent": "prompt",
+            "abstract": True,
+            "fields": [],
+            "has_body": True,
+            "prompt": {
+                "context_strategy": {
+                    "target": {"required": True, "kind": "scene"},
+                    "scan_surface": ["_text_before", "_selection", "_text_after"],
+                    "output": {"kind": "replace_selection", "review": "visual_diff"},
+                },
+            },
+        },
+        "general": {
+            "name": "General",
+            "kind": "prompt",
+            "parent": "prompt",
+            "abstract": True,
+            "fields": [],
+            "has_body": True,
+            "prompt": {
+                "context_strategy": {
+                    "output": {"kind": "chat_panel"},
+                },
+            },
+        },
         "snippet": {
             "name": "Snippet",
             "kind": "prompt",

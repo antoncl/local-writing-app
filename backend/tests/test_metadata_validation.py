@@ -1373,6 +1373,59 @@ class MetadataValidationTests(unittest.TestCase):
         self.assertEqual(rer.prompt.system_prompt, "You are a careful continuation engine.")
         self.assertEqual([i.name for i in rer.prompt.inputs], ["words", "beat"])
 
+    def test_default_schema_seeds_four_prompt_bases(self) -> None:
+        """continuation/revise/general are abstract bases with preset output kinds;
+        snippet is a concrete sibling. Each sub-types prompt directly."""
+        schema = self.service.read_metadata_schema()
+        for type_id in ("continuation", "revise", "general", "snippet"):
+            self.assertIn(type_id, schema.entry_types)
+            self.assertEqual(schema.entry_types[type_id].kind, "prompt")
+            self.assertEqual(schema.entry_types[type_id].parent, "prompt")
+
+        self.assertTrue(schema.entry_types["continuation"].abstract)
+        self.assertTrue(schema.entry_types["revise"].abstract)
+        self.assertTrue(schema.entry_types["general"].abstract)
+        self.assertFalse(schema.entry_types["snippet"].abstract)
+
+        continuation_prompt = schema.entry_types["continuation"].prompt
+        assert continuation_prompt is not None
+        assert continuation_prompt.context_strategy is not None
+        self.assertEqual(continuation_prompt.context_strategy.output, {"kind": "append_to_body", "review": "visual_diff"})
+
+        revise_prompt = schema.entry_types["revise"].prompt
+        assert revise_prompt is not None
+        assert revise_prompt.context_strategy is not None
+        self.assertEqual(revise_prompt.context_strategy.output, {"kind": "replace_selection", "review": "visual_diff"})
+
+        general_prompt = schema.entry_types["general"].prompt
+        assert general_prompt is not None
+        assert general_prompt.context_strategy is not None
+        self.assertEqual(general_prompt.context_strategy.output, {"kind": "chat_panel"})
+
+        self.assertIsNone(schema.entry_types["snippet"].prompt)
+
+    def test_concrete_subtype_inherits_output_kind_from_abstract_base(self) -> None:
+        """A user creates `bob extends general`; the output disposition is inherited."""
+        layer_id = self._project_layer_id()
+        schema = self.service.upsert_metadata_entry_type(
+            UpsertMetadataEntryTypeRequest(
+                layer_id=layer_id,
+                entry_type_id="bob",
+                entry_type=EntryTypeDefinition(
+                    name="Bob",
+                    kind="prompt",
+                    parent="general",
+                    prompt=PromptEntryTypeExtras(system_prompt="You are Bob."),
+                ),
+            )
+        )
+
+        bob_prompt = schema.entry_types["bob"].prompt
+        assert bob_prompt is not None
+        assert bob_prompt.context_strategy is not None
+        self.assertEqual(bob_prompt.context_strategy.output, {"kind": "chat_panel"})
+        self.assertEqual(bob_prompt.system_prompt, "You are Bob.")
+
     def test_snippet_subtype_inherits_from_prompt_kind(self) -> None:
         layer_id = self._project_layer_id()
         schema = self.service.upsert_metadata_entry_type(

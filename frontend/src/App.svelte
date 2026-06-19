@@ -439,19 +439,44 @@ The story so far:
     return paneStyleMap[id] ?? "";
   }
 
-  function isPaneVisible(id: PaneId) {
+  // Reactive function: rebound whenever any visibility-deciding state changes.
+  // Templates that call `isPaneVisible(id)` track the function's identity — so
+  // when this `$:` recomputes, every callsite re-runs and the pane shows.
+  //
+  // Why this is necessary: function calls are opaque to Svelte's template
+  // dependency analyzer. A plain `function isPaneVisible(id)` that reads
+  // `chatsPaneOpen` inside doesn't tell the compiler that flipping
+  // `chatsPaneOpen` should re-evaluate `class:hidden-pane={!isPaneVisible("chats")}`.
+  // The `$:` rebinding gives the template a tracked dependency.
+  $: isPaneVisible = ((
+    _isProjectOpen,
+    _assistantsPaneOpen,
+    _schemaPaneOpen,
+    _schemaFieldPaneOpen,
+    _schemaTypePaneOpen,
+    _promptsPaneOpen,
+    _chatsPaneOpen,
+    _editorPanes,
+  ) => (id: PaneId): boolean => {
     if (id === "project") return true;
-    // Assistants live in the per-machine config dir, so the pane is available
-    // even without a project open.
-    if (id === "assistants") return assistantsPaneOpen;
-    if (!isProjectOpen) return false;
-    if (id === "schema") return schemaPaneOpen;
-    if (id === "schema_field") return schemaFieldPaneOpen;
-    if (id === "schema_type") return schemaTypePaneOpen;
-    if (id === "prompts") return promptsPaneOpen;
-    if (id === "chats") return chatsPaneOpen;
-    return !isEditorPaneId(id) || editorPanes.some((pane) => pane.id === id);
-  }
+    if (id === "assistants") return _assistantsPaneOpen;
+    if (!_isProjectOpen) return false;
+    if (id === "schema") return _schemaPaneOpen;
+    if (id === "schema_field") return _schemaFieldPaneOpen;
+    if (id === "schema_type") return _schemaTypePaneOpen;
+    if (id === "prompts") return _promptsPaneOpen;
+    if (id === "chats") return _chatsPaneOpen;
+    return !isEditorPaneId(id) || _editorPanes.some((pane) => pane.id === id);
+  })(
+    isProjectOpen,
+    assistantsPaneOpen,
+    schemaPaneOpen,
+    schemaFieldPaneOpen,
+    schemaTypePaneOpen,
+    promptsPaneOpen,
+    chatsPaneOpen,
+    editorPanes,
+  );
 
   function isEditorPaneId(id: PaneId) {
     return id.startsWith("editor_");
@@ -487,16 +512,12 @@ The story so far:
     chatSessions = [];
     clearChat();
     chatSystemPrompt = DEFAULT_CHAT_SYSTEM_PROMPT;
-    panes = {
-      project: panes.project,
-      outline: panes.outline,
-      lore: panes.lore,
-      schema: panes.schema,
-      schema_field: panes.schema_field,
-      schema_type: panes.schema_type,
-      todo: panes.todo,
-      search: panes.search,
-    };
+    // Preserve all pane configs. An earlier version stripped chat/preview/
+    // prompts/assistants/chats out of `panes`, which made `panes.chats` etc.
+    // undefined after a project switch — focusPane then created `{ z }` entries
+    // with no left/top/width/height, and paneStyle returned an empty string,
+    // so opening those panes did nothing visible. Pane positions and sizes are
+    // pure UI state; nothing project-specific lives here.
   }
 
   function fitPanesToViewport() {

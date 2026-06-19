@@ -204,6 +204,8 @@ class Scene(BaseModel):
     entry_type: str = "scene"
     metadata: dict[str, MetadataValue] = Field(default_factory=dict)
     computed_metadata: dict[str, MetadataValue] = Field(default_factory=dict)
+    source_layer_id: str = ""
+    source_layer_label: str = ""
 
 
 class CreateSceneRequest(BaseModel):
@@ -241,6 +243,8 @@ class LoreEntrySummary(BaseModel):
     body_markdown: str = ""
     entry_type: str = "lore_note"
     metadata: dict[str, MetadataValue] = Field(default_factory=dict)
+    source_layer_id: str = ""
+    source_layer_label: str = ""
 
 
 class LoreEntry(BaseModel):
@@ -251,6 +255,8 @@ class LoreEntry(BaseModel):
     entry_type: str = "lore_note"
     metadata: dict[str, MetadataValue] = Field(default_factory=dict)
     computed_metadata: dict[str, MetadataValue] = Field(default_factory=dict)
+    source_layer_id: str = ""
+    source_layer_label: str = ""
 
 
 class LoreEntryList(BaseModel):
@@ -280,6 +286,8 @@ class PromptEntrySummary(BaseModel):
     body_markdown: str = ""
     entry_type: str = "prompt"
     metadata: dict[str, MetadataValue] = Field(default_factory=dict)
+    source_layer_id: str = ""
+    source_layer_label: str = ""
 
 
 class PromptEntry(BaseModel):
@@ -290,6 +298,8 @@ class PromptEntry(BaseModel):
     entry_type: str = "prompt"
     metadata: dict[str, MetadataValue] = Field(default_factory=dict)
     computed_metadata: dict[str, MetadataValue] = Field(default_factory=dict)
+    source_layer_id: str = ""
+    source_layer_label: str = ""
 
 
 class PromptEntryList(BaseModel):
@@ -343,6 +353,8 @@ class ReferenceCandidate(BaseModel):
     entry_type: str
     summary: str = ""
     found: bool = True
+    source_layer_id: str = ""
+    source_layer_label: str = ""
 
 
 class ReferenceResolveRequest(BaseModel):

@@ -80,6 +80,8 @@ class NodeIndexEntry:
     entry_type: str
     path: Path
     title: str = ""
+    source_layer_id: str = ""
+    source_layer_label: str = ""
 
 
 @dataclass
@@ -646,16 +648,10 @@ class ProjectService:
         layers: list[MetadataSchemaLayer] = []
         for index, path in enumerate(paths):
             folder = path.parent
-            if folder == root:
-                label = self.title or root.name
-            elif index == 0:
-                label = "Base Folder"
-            else:
-                label = folder.name
             layers.append(
                 MetadataSchemaLayer(
                     id=self._metadata_schema_layer_id(folder),
-                    label=label,
+                    label=self._layer_label_for_folder(root, folder, index),
                     folder_path=str(folder),
                     schema_path=str(path),
                     exists=path.exists(),
@@ -1184,10 +1180,11 @@ class ProjectService:
             return [migration.get(item, item) if isinstance(item, str) else item for item in value]
         return value
 
-    def _metadata_schema_layer_paths(self, root: Path) -> list[Path]:
+    def _project_layer_folders(self, root: Path) -> list[Path]:
+        """Project folders from outermost ancestor to current root, inclusive."""
         base_folder = self._metadata_schema_base_folder(root)
         if base_folder is None or not self._is_relative_to(root, base_folder):
-            return [root / "metadata.schema.yaml"]
+            return [root]
 
         folders: list[Path] = []
         current = root
@@ -1196,7 +1193,17 @@ class ProjectService:
             if current == base_folder:
                 break
             current = current.parent
-        return [folder / "metadata.schema.yaml" for folder in reversed(folders)]
+        return list(reversed(folders))
+
+    def _metadata_schema_layer_paths(self, root: Path) -> list[Path]:
+        return [folder / "metadata.schema.yaml" for folder in self._project_layer_folders(root)]
+
+    def _layer_label_for_folder(self, root: Path, folder: Path, layer_index: int) -> str:
+        if folder == root:
+            return self.title or root.name
+        if layer_index == 0:
+            return "Base Folder"
+        return folder.name
 
     def _metadata_schema_layer_id(self, folder: Path) -> str:
         return hashlib.sha256(str(folder.resolve()).encode("utf-8")).hexdigest()[:16]
@@ -1434,42 +1441,101 @@ class ProjectService:
     def _build_node_index(self, root: Path | None = None) -> NodeIndex:
         root = root or self._require_project()
         index = NodeIndex()
-        for kind, folder_name, default_entry_type in [
-            ("scene", "scenes", "scene"),
-            ("lore", "lore", "lore_note"),
-            ("prompt", "prompts", "prompt"),
-        ]:
-            for path in sorted((root / folder_name).glob("*.md")):
-                try:
-                    front_matter = self._read_front_matter_only(path, strict=True)
-                except ProjectServiceError as exc:
-                    index.errors.append(exc.message)
+        layer_folders = self._project_layer_folders(root)
+        # Outermost ancestor first so descendant entries overwrite on collision.
+        for layer_index, folder in enumerate(layer_folders):
+            layer_id = self._metadata_schema_layer_id(folder)
+            layer_label = self._layer_label_for_folder(root, folder, layer_index)
+            is_current_project = folder == root
+            for kind, folder_name, default_entry_type in [
+                ("scene", "scenes", "scene"),
+                ("lore", "lore", "lore_note"),
+                ("prompt", "prompts", "prompt"),
+            ]:
+                # Scenes stay book-scoped — only walk the current project's scenes folder.
+                if kind == "scene" and not is_current_project:
                     continue
+                self._collect_layer_entries(
+                    folder=folder,
+                    folder_name=folder_name,
+                    kind=kind,
+                    default_entry_type=default_entry_type,
+                    layer_id=layer_id,
+                    layer_label=layer_label,
+                    index=index,
+                    duplicate_relative_to=root,
+                )
+        return index
 
-                raw_node_id = front_matter.get("id")
-                if raw_node_id is None:
-                    node_id = path.stem
-                    index.warnings.append(f"{kind.title()} file {path.relative_to(root)} is missing front matter id; using filename stem as legacy id.")
-                elif isinstance(raw_node_id, str) and raw_node_id.strip():
-                    node_id = raw_node_id.strip()
-                else:
-                    node_id = path.stem
-                    index.errors.append(f"{kind.title()} file {path.relative_to(root)} has invalid front matter id; it must be text.")
+    def _collect_layer_entries(
+        self,
+        *,
+        folder: Path,
+        folder_name: str,
+        kind: str,
+        default_entry_type: str,
+        layer_id: str,
+        layer_label: str,
+        index: NodeIndex,
+        duplicate_relative_to: Path,
+    ) -> None:
+        for path in sorted((folder / folder_name).glob("*.md")):
+            try:
+                front_matter = self._read_front_matter_only(path, strict=True)
+            except ProjectServiceError as exc:
+                index.errors.append(exc.message)
+                continue
 
-                raw_entry_type = front_matter.get("entry_type") or default_entry_type
-                entry_type = raw_entry_type if isinstance(raw_entry_type, str) else default_entry_type
-                raw_title = front_matter.get("title")
-                title = raw_title.strip() if isinstance(raw_title, str) and raw_title.strip() else node_id
-                entry = NodeIndexEntry(id=node_id, kind=kind, entry_type=entry_type, path=path, title=title)
-                index.id_by_path[path.resolve()] = node_id
-                if node_id in index.by_id:
-                    other = index.by_id[node_id]
+            raw_node_id = front_matter.get("id")
+            if raw_node_id is None:
+                node_id = path.stem
+                index.warnings.append(
+                    f"{kind.title()} file {self._safe_relative(path, folder)} is missing front matter id; using filename stem as legacy id."
+                )
+            elif isinstance(raw_node_id, str) and raw_node_id.strip():
+                node_id = raw_node_id.strip()
+            else:
+                node_id = path.stem
+                index.errors.append(
+                    f"{kind.title()} file {self._safe_relative(path, folder)} has invalid front matter id; it must be text."
+                )
+
+            raw_entry_type = front_matter.get("entry_type") or default_entry_type
+            entry_type = raw_entry_type if isinstance(raw_entry_type, str) else default_entry_type
+            raw_title = front_matter.get("title")
+            title = raw_title.strip() if isinstance(raw_title, str) and raw_title.strip() else node_id
+            entry = NodeIndexEntry(
+                id=node_id,
+                kind=kind,
+                entry_type=entry_type,
+                path=path,
+                title=title,
+                source_layer_id=layer_id,
+                source_layer_label=layer_label,
+            )
+            index.id_by_path[path.resolve()] = node_id
+            existing = index.by_id.get(node_id)
+            if existing is not None:
+                if existing.source_layer_id == layer_id:
+                    # Duplicate within the same layer — stays an error.
                     index.errors.append(
-                        f"Duplicate front matter id {node_id} in {other.path.relative_to(root)} and {path.relative_to(root)}."
+                        f"Duplicate front matter id {node_id} in "
+                        f"{self._safe_relative(existing.path, duplicate_relative_to)} and "
+                        f"{self._safe_relative(path, duplicate_relative_to)}."
                     )
                     continue
-                index.by_id[node_id] = entry
-        return index
+                # Cross-layer collision: descendant wins, but flag it for visibility.
+                index.warnings.append(
+                    f"Entry id {node_id} in {layer_label} shadows the entry from "
+                    f"{existing.source_layer_label}."
+                )
+            index.by_id[node_id] = entry
+
+    def _safe_relative(self, path: Path, anchor: Path) -> Path | str:
+        try:
+            return path.relative_to(anchor)
+        except ValueError:
+            return path
 
     def _node_id_for_path(self, path: Path, front_matter: dict[str, Any] | None = None) -> str:
         if front_matter is None:
@@ -1532,6 +1598,8 @@ class ProjectService:
             entry_type=entry.entry_type,
             summary=self._read_body_summary(entry.path) if include_summary else "",
             found=True,
+            source_layer_id=entry.source_layer_id,
+            source_layer_label=entry.source_layer_label,
         )
 
     def resolve_references(self, ids: list[str]) -> ReferenceResolveResponse:
@@ -1856,7 +1924,12 @@ class ProjectService:
         return self.read_structure()
 
     def read_scene(self, scene_id: str) -> Scene:
-        path = self._path_for_node_id(scene_id, "scene")
+        index = self._build_node_index()
+        index_entry = index.by_id.get(scene_id)
+        if index_entry is not None and index_entry.kind == "scene":
+            path = index_entry.path
+        else:
+            path = self._path_for_node_id(scene_id, "scene")
         front_matter, body = self._read_markdown_with_front_matter(path, strict=True)
         node_id = self._node_id_for_path(path, front_matter)
         title = str(front_matter.get("title") or node_id)
@@ -1866,7 +1939,7 @@ class ProjectService:
             raise ProjectServiceError(f"Scene {node_id} has invalid entry_type; it must be text.", 422)
         entry_type = raw_entry_type
         metadata = self._normalise_metadata(front_matter.get("metadata"), path)
-        metadata_errors = self._validate_scene_metadata(node_id, entry_type, status, metadata, self.read_metadata_schema(), self._build_node_index())
+        metadata_errors = self._validate_scene_metadata(node_id, entry_type, status, metadata, self.read_metadata_schema(), index)
         if metadata_errors:
             raise ProjectServiceError(" ".join(metadata_errors), 422)
         return Scene(
@@ -1878,6 +1951,8 @@ class ProjectService:
             entry_type=entry_type,
             metadata=metadata,
             computed_metadata=self._computed_scene_metadata(body, node_id=node_id, entry_type=entry_type),
+            source_layer_id=index_entry.source_layer_id if index_entry else "",
+            source_layer_label=index_entry.source_layer_label if index_entry else "",
         )
 
     def save_scene(self, scene_id: str, request: SaveSceneRequest) -> Scene:
@@ -1933,20 +2008,26 @@ class ProjectService:
         return self.read_structure()
 
     def list_lore_entries(self) -> LoreEntryList:
-        root = self._require_project()
+        index = self._build_node_index()
         entries: list[LoreEntrySummary] = []
-        for path in sorted((root / "lore").glob("*.md")):
-            front_matter, body = self._read_markdown_with_front_matter(path, strict=True)
-            entry_id = self._node_id_for_path(path, front_matter)
+        for entry in index.by_id.values():
+            if entry.kind != "lore":
+                continue
+            try:
+                front_matter, body = self._read_markdown_with_front_matter(entry.path, strict=True)
+            except ProjectServiceError:
+                continue
             raw_entry_type = front_matter.get("entry_type") or "lore_note"
             entry_type = raw_entry_type if isinstance(raw_entry_type, str) else "lore_note"
             entries.append(
                 LoreEntrySummary(
-                    id=entry_id,
-                    title=str(front_matter.get("title") or entry_id),
+                    id=entry.id,
+                    title=str(front_matter.get("title") or entry.id),
                     body_markdown=body,
                     entry_type=entry_type,
-                    metadata=self._normalise_metadata(front_matter.get("metadata"), path),
+                    metadata=self._normalise_metadata(front_matter.get("metadata"), entry.path),
+                    source_layer_id=entry.source_layer_id,
+                    source_layer_label=entry.source_layer_label,
                 )
             )
         entries.sort(key=lambda entry: (entry.title.lower(), entry.id))
@@ -1977,7 +2058,12 @@ class ProjectService:
         return self.read_lore_entry(entry_id)
 
     def read_lore_entry(self, entry_id: str) -> LoreEntry:
-        path = self._path_for_node_id(entry_id, "lore")
+        index = self._build_node_index()
+        index_entry = index.by_id.get(entry_id)
+        if index_entry is not None and index_entry.kind == "lore":
+            path = index_entry.path
+        else:
+            path = self._path_for_node_id(entry_id, "lore")
         front_matter, body = self._read_markdown_with_front_matter(path, strict=True)
         node_id = self._node_id_for_path(path, front_matter)
         raw_entry_type = front_matter.get("entry_type") or "lore_note"
@@ -1985,7 +2071,7 @@ class ProjectService:
             raise ProjectServiceError(f"Lore Entry {node_id} has invalid entry_type; it must be text.", 422)
         entry_type = raw_entry_type
         metadata = self._normalise_metadata(front_matter.get("metadata"), path)
-        metadata_errors = self._validate_lore_entry_metadata(node_id, entry_type, metadata, self.read_metadata_schema(), self._build_node_index())
+        metadata_errors = self._validate_lore_entry_metadata(node_id, entry_type, metadata, self.read_metadata_schema(), index)
         if metadata_errors:
             raise ProjectServiceError(" ".join(metadata_errors), 422)
         return LoreEntry(
@@ -1996,6 +2082,8 @@ class ProjectService:
             entry_type=entry_type,
             metadata=metadata,
             computed_metadata={},
+            source_layer_id=index_entry.source_layer_id if index_entry else "",
+            source_layer_label=index_entry.source_layer_label if index_entry else "",
         )
 
     def save_lore_entry(self, entry_id: str, request: SaveLoreEntryRequest) -> LoreEntry:
@@ -2057,20 +2145,26 @@ class ProjectService:
             )
 
     def list_prompt_entries(self) -> PromptEntryList:
-        root = self._require_project()
+        index = self._build_node_index()
         entries: list[PromptEntrySummary] = []
-        for path in sorted((root / "prompts").glob("*.md")):
-            front_matter, body = self._read_markdown_with_front_matter(path, strict=True)
-            entry_id = self._node_id_for_path(path, front_matter)
+        for entry in index.by_id.values():
+            if entry.kind != "prompt":
+                continue
+            try:
+                front_matter, body = self._read_markdown_with_front_matter(entry.path, strict=True)
+            except ProjectServiceError:
+                continue
             raw_entry_type = front_matter.get("entry_type") or "prompt"
             entry_type = raw_entry_type if isinstance(raw_entry_type, str) else "prompt"
             entries.append(
                 PromptEntrySummary(
-                    id=entry_id,
-                    title=str(front_matter.get("title") or entry_id),
+                    id=entry.id,
+                    title=str(front_matter.get("title") or entry.id),
                     body_markdown=body,
                     entry_type=entry_type,
-                    metadata=self._normalise_metadata(front_matter.get("metadata"), path),
+                    metadata=self._normalise_metadata(front_matter.get("metadata"), entry.path),
+                    source_layer_id=entry.source_layer_id,
+                    source_layer_label=entry.source_layer_label,
                 )
             )
         entries.sort(key=lambda entry: (entry.title.lower(), entry.id))
@@ -2099,7 +2193,11 @@ class ProjectService:
         return self.read_prompt_entry(entry_id)
 
     def read_prompt_entry(self, entry_id: str) -> PromptEntry:
-        path = self._path_for_node_id(entry_id, "prompt")
+        index_entry = self._build_node_index().by_id.get(entry_id)
+        if index_entry is not None and index_entry.kind == "prompt":
+            path = index_entry.path
+        else:
+            path = self._path_for_node_id(entry_id, "prompt")
         front_matter, body = self._read_markdown_with_front_matter(path, strict=True)
         node_id = self._node_id_for_path(path, front_matter)
         raw_entry_type = front_matter.get("entry_type") or "prompt"
@@ -2113,6 +2211,8 @@ class ProjectService:
             entry_type=raw_entry_type,
             metadata=self._normalise_metadata(front_matter.get("metadata"), path),
             computed_metadata={},
+            source_layer_id=index_entry.source_layer_id if index_entry else "",
+            source_layer_label=index_entry.source_layer_label if index_entry else "",
         )
 
     def save_prompt_entry(self, entry_id: str, request: SavePromptEntryRequest) -> PromptEntry:

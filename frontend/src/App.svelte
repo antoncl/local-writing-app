@@ -1106,6 +1106,14 @@ The story so far:
     return metadataSchemaLayers.find((layer) => layer.id === layerId)?.label ?? "Unknown";
   }
 
+  function paneEntryFromAncestor(pane: EditorPaneState): boolean {
+    const layerId = pane.scene?.source_layer_id;
+    if (!layerId) return false;
+    const projectLayer = projectSchemaLayerId();
+    if (!projectLayer) return false;
+    return layerId !== projectLayer;
+  }
+
   function fieldEntriesForEntryType(entryTypeId: string) {
     const entryType = metadataSchema?.entry_types[entryTypeId];
     const fieldIds = entryType?.own_fields ?? entryType?.fields ?? [];
@@ -3370,6 +3378,7 @@ The story so far:
     <!-- svelte-ignore a11y_no_noninteractive_element_interactions -->
     <section
       class:hidden-pane={!isPaneVisible(editorPane.id)}
+      class:from-ancestor={paneEntryFromAncestor(editorPane)}
       class="pane editor-pane"
       data-pane-id={editorPane.id}
       style={paneStyle(editorPane.id)}
@@ -3377,7 +3386,14 @@ The story so far:
       on:mousedown={() => focusPane(editorPane.id)}
     >
       <header class="pane-header" role="button" tabindex="0" aria-label="Move Editor pane" on:keydown={(event) => handlePaneHeaderKeydown(event, editorPane.id)} on:mousedown={(event) => startPaneDrag(event, editorPane.id)}>
-        <h2>{editorPane.scene?.title ?? "Editor"}</h2>
+        <h2>
+          {editorPane.scene?.title ?? "Editor"}
+          {#if paneEntryFromAncestor(editorPane)}
+            <span class="ancestor-badge" title="This entry lives in an ancestor project. Edits write back to the original file.">
+              from {editorPane.scene?.source_layer_label ?? "ancestor"}
+            </span>
+          {/if}
+        </h2>
         <div class="pane-header-actions">
           {#if editorPane.dirty}
             <span class="pane-status">Unsaved</span>

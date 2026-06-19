@@ -26,6 +26,11 @@ incremental progress, and understandable code over fashionable complexity.
   Markdown bodies.
 - Metadata schemas are layered from a configured projects base folder down to
   the open project folder.
+- Lore entries and prompt entries are also layered. Opening a book project sees
+  lore + prompts from its series and universe ancestors. Scenes stay
+  book-scoped. On entry-id collision the descendant wins (warning logged).
+  Edits to an ancestor entry write back to its original file; the editor pane
+  shows a distinct header to flag this.
 - Node types can inherit field definitions from parent node types. The current
   implementation has Scene and Lore Entry roots; a broader base Node model is
   the intended direction.

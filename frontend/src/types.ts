@@ -20,6 +20,8 @@ export type Scene = {
   entry_type: string;
   metadata: EntryMetadata;
   computed_metadata: EntryMetadata;
+  source_layer_id?: string;
+  source_layer_label?: string;
 };
 
 export type LoreEntrySummary = {
@@ -28,6 +30,8 @@ export type LoreEntrySummary = {
   body_markdown: string;
   entry_type: string;
   metadata: EntryMetadata;
+  source_layer_id?: string;
+  source_layer_label?: string;
 };
 
 export type LoreEntry = {
@@ -38,6 +42,8 @@ export type LoreEntry = {
   entry_type: string;
   metadata: EntryMetadata;
   computed_metadata: EntryMetadata;
+  source_layer_id?: string;
+  source_layer_label?: string;
 };
 
 export type EditableDocument = Scene | LoreEntry | PromptEntry;
@@ -52,6 +58,8 @@ export type PromptEntrySummary = {
   body_markdown: string;
   entry_type: string;
   metadata: EntryMetadata;
+  source_layer_id?: string;
+  source_layer_label?: string;
 };
 
 export type PromptEntry = {
@@ -62,6 +70,8 @@ export type PromptEntry = {
   entry_type: string;
   metadata: EntryMetadata;
   computed_metadata: EntryMetadata;
+  source_layer_id?: string;
+  source_layer_label?: string;
 };
 
 export type PromptEntryList = {
@@ -339,6 +349,8 @@ export type ReferenceCandidate = {
   entry_type: string;
   summary: string;
   found: boolean;
+  source_layer_id?: string;
+  source_layer_label?: string;
 };
 
 export type ReferenceCandidatesResponse = {

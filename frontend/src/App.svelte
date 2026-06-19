@@ -197,6 +197,12 @@ The story so far:
   let chatPromptEntryId = "";
   let promptPickerOpen = false;
   let promptPickerSearch = "";
+  // Preview disclosure state. The text is computed on demand (composing the
+  // context block requires async fetches) and invalidated when the user changes
+  // assistant / brief / context / prompt.
+  let promptPreviewText: string | null = null;
+  let promptPreviewLoading = false;
+  let promptPreviewError: string | null = null;
   type MachineSettingsDraft = {
     anthropic_api_key: string;
     openai_api_key: string;
@@ -1191,7 +1197,13 @@ The story so far:
     activeChatPinned = session.pinned;
     chatPromptEntryId = session.prompt_entry_id || "";
     chatAssistantId = session.assistant_id || "";
-    chatSystemPrompt = session.system_prompt || DEFAULT_CHAT_SYSTEM_PROMPT;
+    // Materialised brief from the session. When a prompt is locked in, this
+    // came from the prompt's rendered system blocks (possibly empty). Don't
+    // overlay DEFAULT_CHAT_SYSTEM_PROMPT here — for prompt-driven chats the
+    // overlay would silently corrupt the locked system message; for freeform
+    // chats with an empty system, an empty default is the honest answer.
+    chatSystemPrompt = session.system_prompt || (session.prompt_entry_id ? "" : DEFAULT_CHAT_SYSTEM_PROMPT);
+    invalidateChatPromptPreview();
     chatContextItems = (session.context_items || []).map((item: ChatSessionContextItem) => ({
       kind: item.kind,
       id: item.id,
@@ -1344,9 +1356,15 @@ The story so far:
       const initialTurns = messages
         .filter((m) => m.role === "user" || m.role === "assistant")
         .map((m) => ({ role: m.role as "user" | "assistant", content: flatten(m.blocks) }));
-      const brief = systemBlocks.join("\n\n") || DEFAULT_CHAT_SYSTEM_PROMPT;
+      // Use the prompt's rendered system blocks verbatim. Critically, do NOT
+      // fall back to DEFAULT_CHAT_SYSTEM_PROMPT here — that overlay used to
+      // bleed the brainstorming-partner copy into every prompt that didn't
+      // declare its own {% role "system" %}, conflicting with the prompt's
+      // user-block instructions.
+      const brief = systemBlocks.join("\n\n");
       const preferredAssistantId = preferredAssistantForPrompt(entry);
 
+      invalidateChatPromptPreview();
       if (mustCreateNew) {
         // Auto-name the new chat with the prompt's title so it's scannable in
         // the Chats pane immediately.
@@ -1385,12 +1403,37 @@ The story so far:
     }
   }
 
+  async function handlePromptPreviewToggle(event: Event): Promise<void> {
+    const details = event.currentTarget as HTMLDetailsElement | null;
+    if (!details?.open) return;
+    // Cache miss → compose and store. Cache survives until something the
+    // preview depends on changes (see invalidateChatPromptPreview).
+    if (promptPreviewText !== null && !promptPreviewError) return;
+    promptPreviewLoading = true;
+    promptPreviewError = null;
+    try {
+      const contextBlock = await composeContextBlocks();
+      promptPreviewText = buildEffectiveChatSystemPrompt(contextBlock);
+    } catch (e) {
+      promptPreviewError = (e as Error).message || "Couldn't compose preview.";
+      promptPreviewText = null;
+    } finally {
+      promptPreviewLoading = false;
+    }
+  }
+
+  function invalidateChatPromptPreview(): void {
+    promptPreviewText = null;
+    promptPreviewError = null;
+  }
+
   function clearChatPrompt() {
     // Drop the locked prompt — only meaningful before any messages exist.
     if (isActiveChatLocked()) return;
     chatPromptEntryId = "";
     chatSystemPrompt = DEFAULT_CHAT_SYSTEM_PROMPT;
     activeChatTitle = "Untitled chat";
+    invalidateChatPromptPreview();
     void persistActiveChat();
   }
 
@@ -1477,11 +1520,13 @@ The story so far:
     chatContextItems = [...chatContextItems, item];
     chatContextMenuOpen = false;
     chatContextSearch = "";
+    invalidateChatPromptPreview();
     void persistActiveChat();
   }
 
   function removeContextItem(id: string, kind: ChatContextKind) {
     chatContextItems = chatContextItems.filter((item) => !(item.id === id && item.kind === kind));
+    invalidateChatPromptPreview();
     void persistActiveChat();
   }
 
@@ -1490,6 +1535,7 @@ The story so far:
   }
 
   function handleChatSystemPromptBlur() {
+    invalidateChatPromptPreview();
     void persistActiveChat();
   }
 
@@ -4535,7 +4581,7 @@ The story so far:
         </div>
       {/if}
       <details class="chat-config">
-        <summary>Assistant &amp; brief {#if isActiveChatLocked()}<span class="chat-lock-glyph" aria-label="locked">🔒</span>{/if}</summary>
+        <summary>Assistant{#if !chatPromptEntryId} &amp; brief{/if} {#if isActiveChatLocked()}<span class="chat-lock-glyph" aria-label="locked">🔒</span>{/if}</summary>
         <label class="chat-label">
           Assistant
           <select bind:value={chatAssistantId} on:change={handleChatAssistantChange} disabled={isActiveChatLocked()}>
@@ -4545,16 +4591,40 @@ The story so far:
             {/each}
           </select>
         </label>
-        <label class="chat-label">
-          Brief
-          <textarea class="chat-system" bind:value={chatSystemPrompt} on:input={clearActivePromptOnEdit} on:blur={handleChatSystemPromptBlur} spellcheck="false" readonly={isActiveChatLocked()}></textarea>
-        </label>
+        {#if !chatPromptEntryId}
+          <!-- Brief is meaningful only in freeform mode. When a prompt is locked
+               in, the system message is the prompt's rendered template — use the
+               Preview disclosure below to inspect what's actually sent. -->
+          <label class="chat-label">
+            Brief
+            <textarea class="chat-system" bind:value={chatSystemPrompt} on:input={clearActivePromptOnEdit} on:blur={handleChatSystemPromptBlur} spellcheck="false" readonly={isActiveChatLocked()}></textarea>
+          </label>
+        {/if}
         {#if isActiveChatLocked()}
           <p class="muted chat-lock-hint">
             Prompt, assistant, and brief are locked once a chat has messages — switching them mid-conversation would invalidate the AI cache prefix and force a full re-send.
             Start a new chat to change them.
           </p>
         {/if}
+      </details>
+
+      <details class="chat-preview" on:toggle={handlePromptPreviewToggle}>
+        <summary>Preview what's sent <small>· system message + attached context</small></summary>
+        {#if promptPreviewLoading}
+          <p class="muted">Composing preview…</p>
+        {:else if promptPreviewError}
+          <p class="preview-result-error">{promptPreviewError}</p>
+        {:else if promptPreviewText !== null}
+          {#if promptPreviewText.trim()}
+            <pre class="chat-preview-content">{promptPreviewText}</pre>
+          {:else}
+            <p class="muted">No system message will be sent. The model sees only the chat history.</p>
+          {/if}
+        {/if}
+        <p class="muted chat-preview-hint">
+          This is the system message and context the assistant receives on the next turn.
+          Chat history above is also sent. Composer text becomes the next user message.
+        </p>
       </details>
 
       <div class="chat-history" bind:this={chatScrollEl}>

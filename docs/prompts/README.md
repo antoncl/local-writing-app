@@ -4,6 +4,18 @@ This is the technical reference for the local-writing-app's AI integration: how 
 
 > **Status:** in progress. The architecture is described in this folder; individual features ship over milestones M1–M6 (see [strategy_ai_integration](https://github.com/antoncl/local-writing-app) in the project memory).
 
+## Mental model
+
+The writer **subscribes** to a **provider** (Anthropic, OpenAI, OpenRouter, or a local Ollama). Through that subscription they **hire an assistant** — a specific model. The assistant is then told three things, every time it runs:
+
+- a **role** — who to be (the system prompt / persona)
+- a **task** — what to do (the prompt entry, defined as a sub-type of `prompt`)
+- the **data** — what to look at (the context envelope: scenes, lore, snippets, helpers)
+
+Most of the surface in this folder concerns the last two. The subscription and the assistant live in machine settings; the role lives on the prompt sub-type; the task *is* the sub-type; the data is everything assembled by the template + helpers + context picker.
+
+This is the user-facing framing — internal docs still use the technical terms (provider, model, system prompt, context strategy) so be ready to translate.
+
 ## What's here
 
 | Page | Covers | Stable? |

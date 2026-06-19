@@ -306,6 +306,11 @@ export type AIGenerateRequest = {
   max_tokens?: number;
 };
 
+export type AIContextPresetResponse = {
+  kind: string;
+  content: string;
+};
+
 export type AIGenerateResponse = {
   content: string;
   rendered_messages: PreviewMessage[];

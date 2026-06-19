@@ -543,4 +543,9 @@ class AIGenerateResponse(BaseModel):
     session_id: str | None = None
 
 
+class AIContextPresetResponse(BaseModel):
+    kind: str
+    content: str
+
+
 StructureNode.model_rebuild()

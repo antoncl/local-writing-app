@@ -1,6 +1,7 @@
 import type {
   AIChatRequest,
   AIChatResponse,
+  AIContextPresetResponse,
   AIGenerateRequest,
   AIGenerateResponse,
   AIHealthResponse,
@@ -105,6 +106,9 @@ export const api = {
       method: "POST",
       body: JSON.stringify(payload),
     });
+  },
+  aiContextPreset(kind: "full_outline" | "full_text") {
+    return request<AIContextPresetResponse>(`/ai/context-preset?kind=${encodeURIComponent(kind)}`);
   },
   getStructure() {
     return request<StructureDocument>("/structure");

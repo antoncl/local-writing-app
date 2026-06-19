@@ -655,5 +655,39 @@ class FullTextTests(_HelperFixtureBase):
         )
 
 
+class ContextPresetTests(_HelperFixtureBase):
+    def test_full_outline_renders_nested_xml(self) -> None:
+        from app.services.ai.context_presets import render_preset
+
+        out = render_preset(self.service, "full_outline")
+        self.assertTrue(out.startswith("<outline>"))
+        self.assertTrue(out.endswith("</outline>"))
+        self.assertIn("Act One", out)
+        self.assertIn("The Departure", out)
+        self.assertIn("The Arrival", out)
+        # Act has children, so it opens and closes (not a self-closing tag).
+        self.assertIn("<act title=\"Act One\">", out)
+        self.assertIn("</act>", out)
+        # Leaf scenes with no children render as self-closing tags.
+        self.assertIn("/>", out)
+
+    def test_full_text_renders_scene_bodies(self) -> None:
+        from app.services.ai.context_presets import render_preset
+
+        out = render_preset(self.service, "full_text")
+        self.assertTrue(out.startswith("<novel_text>"))
+        self.assertTrue(out.endswith("</novel_text>"))
+        self.assertIn("<scene title=\"The Departure\">", out)
+        self.assertIn("Scene one body.", out)
+        # Departure precedes Arrival.
+        self.assertLess(out.index("The Departure"), out.index("The Arrival"))
+
+    def test_unknown_preset_raises(self) -> None:
+        from app.services.ai.context_presets import render_preset
+
+        with self.assertRaises(ValueError):
+            render_preset(self.service, "not_a_preset")
+
+
 if __name__ == "__main__":
     unittest.main()

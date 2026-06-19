@@ -169,7 +169,7 @@ The story so far:
   let chatScrollEl: HTMLDivElement | null = null;
   let chatMaxTokens = 4096;
   let chatActivePromptEntry: { id: string; title: string } | null = null;
-  type ChatContextKind = "scene" | "lore" | "snippet";
+  type ChatContextKind = "scene" | "lore" | "snippet" | "preset";
   type ChatContextItem = {
     id: string;
     kind: ChatContextKind;
@@ -1054,6 +1054,11 @@ The story so far:
           blocks.push(
             `<lore_entry entry_type="${escapeXmlAttr(entry.entry_type)}" title="${escapeXmlAttr(entry.title)}" id="${escapeXmlAttr(entry.id)}">\n${entry.body_markdown.trim()}\n</lore_entry>`,
           );
+        } else if (item.kind === "preset") {
+          const preset = await api.aiContextPreset(item.id as "full_outline" | "full_text");
+          if (preset.content.trim()) {
+            blocks.push(preset.content);
+          }
         } else {
           const entry = await api.getPromptEntry(item.id);
           blocks.push(
@@ -3783,6 +3788,10 @@ The story so far:
           {#if chatContextMenuOpen}
             <div class="chat-context-menu" role="menu">
               {#if chatContextCategory === null}
+                <div class="chat-context-group-heading">Presets</div>
+                <button type="button" title="Include the manuscript outline (acts → chapters → scenes with summaries)" on:click={() => addContextItem({ id: "full_outline", kind: "preset", title: "Full Outline", entryType: "preset" })}>Full Outline</button>
+                <button type="button" title="Include every scene's prose in manuscript order. Can be large." on:click={() => addContextItem({ id: "full_text", kind: "preset", title: "Full Novel Text", entryType: "preset" })}>Full Novel Text</button>
+                <div class="chat-context-group-heading">Browse</div>
                 <button type="button" on:click={() => openContextCategory("scene")}>Scenes ›</button>
                 <button type="button" on:click={() => openContextCategory("lore")}>Lore Entries ›</button>
                 <button type="button" on:click={() => openContextCategory("snippet")}>Snippets ›</button>

@@ -9,6 +9,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from app.models import (
     AIChatRequest,
     AIChatResponse,
+    AIContextPresetResponse,
     AIGenerateRequest,
     AIGenerateResponse,
     AIHealthRequest,
@@ -579,3 +580,17 @@ def ai_generate(request: AIGenerateRequest) -> AIGenerateResponse:
         truncated=truncated,
         session_id=session_id,
     )
+
+
+@app.get("/api/ai/context-preset", response_model=AIContextPresetResponse)
+def ai_context_preset(kind: str = Query(...)) -> AIContextPresetResponse:
+    from app.services.ai.context_presets import VALID_PRESETS, render_preset
+
+    if kind not in VALID_PRESETS:
+        raise HTTPException(
+            status_code=422,
+            detail=f"Unknown context preset '{kind}'. Valid: {list(VALID_PRESETS)}.",
+        )
+    with translate_errors():
+        content = render_preset(service, kind)
+    return AIContextPresetResponse(kind=kind, content=content)

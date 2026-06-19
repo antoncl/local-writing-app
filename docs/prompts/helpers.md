@@ -40,16 +40,10 @@ Returns the POV character entity for a scene, resolved through lore.
 
 **Signature**
 ```python
-pov(scene) -> dict | None
+pov(scene) -> EntryRef | None
 ```
 
-**Returns**: `None` if the scene has no `pov` metadata field set, or a dict with:
-
-- `id` — lore entry ID, or `None` if the field was a raw string
-- `title` — character name (or the raw string if the ref didn't resolve)
-- `aliases` — list of alias strings from the lore entry
-
-Templates can access these with attribute or item notation: `{{ pov(scene).title }}` and `{{ pov(scene)['title'] }}` are equivalent.
+**Returns**: `None` when the scene has no `pov` lore reference, otherwise an [EntryRef](#entryref) for the linked character.
 
 **Example**
 ```jinja
@@ -60,8 +54,110 @@ POV: {{ pov(scene).title }} (also known as: {{ pov(scene).aliases | join(", ") }
 
 **Caveats**:
 
-- The seeded `pov` field on the `scene` entry type is an `entity_ref` targeting characters. A `pov` field with a different type (e.g., `text`) is still read but won't resolve through lore — the returned dict will have `id: None`.
+- The seeded `pov` field on the `scene` entry type is an `entity_ref` targeting characters. A `pov` field with free-form text (no lore id) returns `None`; read `scene.metadata.pov` directly if you need the raw string.
 - If the metadata holds a list of refs, only the first is returned.
+
+## `entry(ref_or_id)`
+
+Wrap a string id (or an EntryRef, or any object with an `.id` attribute) as an [EntryRef](#entryref). Useful when you have the raw id of an entry and want to walk into its fields without writing the lookup by hand.
+
+**Signature**
+```python
+entry(value) -> EntryRef | None
+```
+
+**Returns**: an EntryRef for the resolved id, or `None` when the input is empty / unrecognized. The EntryRef itself is lazy — it doesn't touch disk until you read a non-id attribute.
+
+**Example**
+```jinja
+{% set honor = entry(scene.metadata.pov) %}
+{{ honor.title }} lives on {{ honor.home_place.title }}.
+```
+
+## EntryRef
+
+A lazy wrapper around a single entry returned by `pov(scene)`, `entry(...)`, and any auto-resolved `entity_ref` / `entity_ref_list` field inside another EntryRef's metadata. Templates read it like a normal object; the underlying entry is loaded on demand through the layered node index, so ancestor-layer entries (lore from the universe or series) just work.
+
+| Attribute | Returns |
+| --- | --- |
+| `.id` / `.raw_id` | The string id without resolving. Always available, even if the target doesn't exist. |
+| `.title` | The entry's title. Falls back to `.id` when the entry is missing. |
+| `.entry_type` | The entry's `entry_type` (e.g. `character`, `place`). |
+| `.body_markdown` | The entry's markdown body. |
+| `.found` | `True` when the id resolves through the index, `False` otherwise. Useful for `{% if ref.found %}` guards. |
+| `.metadata.<field>` | The metadata value for that field. `entity_ref` fields auto-resolve to a child EntryRef; `entity_ref_list` fields resolve to a list of EntryRef. Other fields pass through as their raw value. |
+| `.<field>` | Shortcut for `.metadata.<field>`. Lets you write `honor.home_place` instead of `honor.metadata.home_place`. |
+| `str(ref)` | The title (or raw id) — so `{{ honor }}` works directly. |
+
+**Auto-resolve and the depth limit**: each `entity_ref` hop produces a child EntryRef carrying a `depth` counter. After 6 hops the EntryRef refuses to load and `.title` falls back to the raw id. This is a defensive ceiling for unbounded link cycles; hand-written chains stay nowhere near it.
+
+**Example — chasing a ref graph**
+```jinja
+{% if pov(scene) %}
+POV: {{ pov(scene).title }}
+Home: {{ pov(scene).home_place.title }}
+{% for friend in pov(scene).related_entries %}
+- {{ friend.title }} ({{ friend.entry_type }})
+{% endfor %}
+{% endif %}
+```
+
+## `full_outline()`
+
+Returns the manuscript structure as a list of nested outline nodes — useful when a prompt needs to brief the model on the whole book's shape rather than just one scene's context.
+
+**Signature**
+```python
+full_outline() -> list[OutlineNode]
+```
+
+**Node shape** (attribute access; templates write `node.title` etc.):
+
+- `.title` — node title
+- `.summary` — `summary` metadata of the linked scene, if any
+- `.entry_type` — the structure node's type (`act`, `chapter`, `scene`)
+- `.scene_id` — id of the linked scene, or `None` for containers without one
+- `.children` — list of OutlineNode, recursive
+
+**Example**
+```jinja
+{% for top in full_outline() %}
+# {{ top.title }}
+{% for child in top.children %}
+- {{ child.title }} — {{ child.summary }}
+{% endfor %}
+{% endfor %}
+```
+
+**Caveats**: walks `manuscript.structure.yaml` depth-first. Containers without summary metadata still appear with `.summary == ""`. For a flat scene list with bodies (not summaries), use `full_text()`.
+
+## `full_text()`
+
+Returns every scene's prose in manuscript order. Heavy — sized for templates that want the whole book in context.
+
+**Signature**
+```python
+full_text() -> list[SceneText]
+```
+
+**Scene shape**:
+
+- `.title` — scene title
+- `.body` — full markdown body
+- `.scene_id` — id
+- `.entry_type` — the scene's `entry_type`
+
+**Example**
+```jinja
+{% for s in full_text() %}
+## {{ s.title }}
+
+{{ s.body }}
+
+{% endfor %}
+```
+
+**Caveats**: skips structure nodes that don't link to a scene (acts, chapters with no body). For an outline-only view use `full_outline()`.
 
 ## `scenes_before(scene)`
 

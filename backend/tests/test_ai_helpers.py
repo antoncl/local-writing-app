@@ -491,5 +491,169 @@ class HelperIntegrationTests(_HelperFixtureBase):
         self.assertIn("The Departure", user_text)
 
 
+class EntryRefTests(_HelperFixtureBase):
+    def setUp(self) -> None:
+        super().setUp()
+        # Link Honor's home_place → Manticore so we have a single-ref to chase.
+        self._update_lore(
+            self.honor["id"],
+            entry_type="character",
+            metadata={
+                "aliases": ["The Salamander"],
+                "related_entries": [self.nimitz["id"]],
+                "home_place": self.manticore["id"],
+            },
+            body="Captain of the Fearless.",
+        )
+
+    def test_entry_helper_returns_ref_with_title(self) -> None:
+        env = create_environment_for_project(self.service)
+        out = render_template(
+            '{% role "user" %}{{ entry("' + self.honor["id"] + '").title }}{% endrole %}',
+            context={},
+            env=env,
+        )
+        self.assertEqual(out.messages[0].text, "Honor Harrington")
+
+    def test_entry_id_exposes_raw_string_without_resolving(self) -> None:
+        env = create_environment_for_project(self.service)
+        out = render_template(
+            '{% role "user" %}{{ entry("' + self.honor["id"] + '").id }}{% endrole %}',
+            context={},
+            env=env,
+        )
+        self.assertEqual(out.messages[0].text, self.honor["id"])
+
+    def test_entity_ref_field_auto_resolves(self) -> None:
+        env = create_environment_for_project(self.service)
+        out = render_template(
+            '{% role "user" %}{{ entry("'
+            + self.honor["id"]
+            + '").home_place.title }}{% endrole %}',
+            context={},
+            env=env,
+        )
+        self.assertEqual(out.messages[0].text, "Manticore")
+
+    def test_entity_ref_list_auto_resolves_to_refs(self) -> None:
+        env = create_environment_for_project(self.service)
+        out = render_template(
+            '{% role "user" %}'
+            '{% for related in entry("' + self.honor["id"] + '").related_entries %}'
+            "{{ related.title }};"
+            "{% endfor %}"
+            "{% endrole %}",
+            context={},
+            env=env,
+        )
+        self.assertEqual(out.messages[0].text, "Nimitz;")
+
+    def test_unknown_id_resolves_to_falsy_ref(self) -> None:
+        env = create_environment_for_project(self.service)
+        out = render_template(
+            '{% role "user" %}'
+            '{% if entry("lore_does_not_exist").found %}YES{% else %}NO{% endif %}'
+            "{% endrole %}",
+            context={},
+            env=env,
+        )
+        self.assertEqual(out.messages[0].text, "NO")
+
+    def test_cycle_resolves_through_within_depth_limit(self) -> None:
+        # Close the loop: Nimitz related_entries → Honor. Honor → Nimitz already
+        # exists from the base fixture. So Honor → Nimitz → Honor is a 2-node
+        # cycle via related_entries.
+        self._update_lore(
+            self.nimitz["id"],
+            entry_type="character",
+            metadata={"aliases": [], "related_entries": [self.honor["id"]]},
+            body="Honor's treecat.",
+        )
+        env = create_environment_for_project(self.service)
+        # Chain hops through the cycle: each resolves to the right title at
+        # this depth (well within MAX_DEPTH).
+        out = render_template(
+            '{% role "user" %}'
+            "{{ entry('" + self.honor["id"] + "').related_entries[0].title }}|"
+            "{{ entry('"
+            + self.honor["id"]
+            + "').related_entries[0].related_entries[0].title }}|"
+            "{{ entry('"
+            + self.honor["id"]
+            + "').related_entries[0].related_entries[0].related_entries[0].title }}"
+            "{% endrole %}",
+            context={},
+            env=env,
+        )
+        parts = out.messages[0].text.split("|")
+        self.assertEqual(parts[0], "Nimitz")
+        self.assertEqual(parts[1], "Honor Harrington")
+        self.assertEqual(parts[2], "Nimitz")
+
+    def test_depth_limit_returns_raw_id_at_truncation(self) -> None:
+        # Close the cycle. Then chain exactly _ENTRY_REF_MAX_DEPTH hops; the
+        # final EntryRef refuses to load and `.title` falls back to the raw id.
+        self._update_lore(
+            self.nimitz["id"],
+            entry_type="character",
+            metadata={"aliases": [], "related_entries": [self.honor["id"]]},
+            body="Honor's treecat.",
+        )
+        env = create_environment_for_project(self.service)
+        # 6 hops at depth limit 6 → the 6th EntryRef has depth=6 and refuses.
+        chain = "entry('" + self.honor["id"] + "')"
+        for _ in range(6):
+            chain += ".related_entries[0]"
+        out = render_template(
+            '{% role "user" %}{{ ' + chain + ".title }}{% endrole %}",
+            context={},
+            env=env,
+        )
+        # The cycle alternates honor → nimitz → honor; 6 hops lands on honor.
+        text = out.messages[0].text
+        self.assertEqual(text, self.honor["id"])
+
+
+class FullOutlineTests(_HelperFixtureBase):
+    def test_returns_act_with_scene_children(self) -> None:
+        env = create_environment_for_project(self.service)
+        out = render_template(
+            '{% role "user" %}'
+            "{% for top in full_outline() %}"
+            "TOP={{ top.title }};"
+            "{% for child in top.children %}"
+            "CHILD={{ child.title }}/{{ child.summary }};"
+            "{% endfor %}"
+            "{% endfor %}"
+            "{% endrole %}",
+            context={},
+            env=env,
+        )
+        text = out.messages[0].text
+        self.assertIn("TOP=Act One;", text)
+        self.assertIn("CHILD=The Departure/Honor takes the Salamander into battle.;", text)
+        self.assertIn("CHILD=The Arrival/", text)
+
+
+class FullTextTests(_HelperFixtureBase):
+    def test_returns_scenes_in_manuscript_order(self) -> None:
+        env = create_environment_for_project(self.service)
+        out = render_template(
+            '{% role "user" %}'
+            "{% for s in full_text() %}<<{{ s.title }}|{{ s.body|trim }}>>{% endfor %}"
+            "{% endrole %}",
+            context={},
+            env=env,
+        )
+        text = out.messages[0].text
+        # create_project seeds an "Untitled Scene"; the two fixture scenes
+        # follow it.
+        self.assertIn("<<The Departure|Scene one body.>>", text)
+        self.assertIn("<<The Arrival|Scene two body.>>", text)
+        self.assertLess(
+            text.index("<<The Departure"), text.index("<<The Arrival")
+        )
+
+
 if __name__ == "__main__":
     unittest.main()

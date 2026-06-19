@@ -64,6 +64,241 @@ def last_words(text: Any, n: Any) -> str:
     return " ".join(words[-n_int:])
 
 
+# ----- EntryRef: lazy auto-resolving entry wrapper ------------------------
+
+# Defensive depth limit. Real-world chains are bounded by the ancestor folder
+# walk and the field graph; this just prevents pathological link cycles from
+# blowing the context.
+_ENTRY_REF_MAX_DEPTH = 6
+_MISSING = object()
+
+
+class EntryRef:
+    """Lazy wrapper around a lore / scene / prompt entry inside Jinja templates.
+
+    `.id` and `.raw_id` return the underlying string without resolving.
+    Any other attribute (e.g. `.title`, `.entry_type`, `.body_markdown`,
+    `.metadata`) lazily loads the target entry through the project's layered
+    node index. Inside `.metadata`, `entity_ref` fields auto-wrap to EntryRef
+    and `entity_ref_list` fields to `list[EntryRef]`, with per-render cycle
+    detection so a self-referential graph cannot loop forever.
+
+    `str(ref)` renders as the entry's title (or the raw id if missing) so
+    `{{ honor }}` works directly in templates.
+    """
+
+    __slots__ = ("_project", "_schema", "_id", "_depth", "_loaded")
+
+    def __init__(
+        self,
+        project: "ProjectService",
+        schema: Any,
+        entry_id: str,
+        *,
+        depth: int = 0,
+    ) -> None:
+        self._project = project
+        self._schema = schema
+        self._id = str(entry_id)
+        self._depth = depth
+        self._loaded: Any = None
+
+    @property
+    def id(self) -> str:
+        return self._id
+
+    @property
+    def raw_id(self) -> str:
+        return self._id
+
+    @property
+    def found(self) -> bool:
+        return self._load() is not None
+
+    def _load(self) -> Any:
+        if self._loaded is not None:
+            return None if self._loaded is _MISSING else self._loaded
+        # Depth limit catches unbounded recursive walkers. Authors writing
+        # `a.b.c.d` chains by hand stay well below this.
+        if self._depth >= _ENTRY_REF_MAX_DEPTH:
+            self._loaded = _MISSING
+            return None
+        try:
+            index = self._project._build_node_index()
+        except Exception:
+            self._loaded = _MISSING
+            return None
+        idx_entry = index.by_id.get(self._id)
+        if idx_entry is None:
+            self._loaded = _MISSING
+            return None
+        try:
+            if idx_entry.kind == "lore":
+                self._loaded = self._project.read_lore_entry(self._id)
+            elif idx_entry.kind == "scene":
+                self._loaded = self._project.read_scene(self._id)
+            elif idx_entry.kind == "prompt":
+                self._loaded = self._project.read_prompt_entry(self._id)
+            else:
+                self._loaded = _MISSING
+        except Exception:
+            self._loaded = _MISSING
+        return None if self._loaded is _MISSING else self._loaded
+
+    @property
+    def title(self) -> str:
+        entry = self._load()
+        if entry is None:
+            return self._id
+        return str(getattr(entry, "title", "") or self._id)
+
+    @property
+    def entry_type(self) -> str:
+        entry = self._load()
+        if entry is None:
+            return ""
+        return str(getattr(entry, "entry_type", "") or "")
+
+    @property
+    def body_markdown(self) -> str:
+        entry = self._load()
+        if entry is None:
+            return ""
+        return str(getattr(entry, "body_markdown", "") or "")
+
+    @property
+    def metadata(self) -> "_EntryMetadataView":
+        entry = self._load()
+        data = getattr(entry, "metadata", None) if entry is not None else None
+        return _EntryMetadataView(
+            data if isinstance(data, dict) else {},
+            project=self._project,
+            schema=self._schema,
+            depth=self._depth + 1,
+        )
+
+    def __getattr__(self, name: str) -> Any:
+        # Final fallback: treat unknown attribute as a metadata key. Lets
+        # templates write `{{ honor.home_planet.title }}` instead of
+        # `{{ honor.metadata.home_planet.title }}`. `__slots__` keeps real
+        # attributes out of this path.
+        if name.startswith("_"):
+            raise AttributeError(name)
+        return self.metadata.get(name)
+
+    def __str__(self) -> str:
+        return self.title or self._id
+
+    def __bool__(self) -> bool:
+        return bool(self._id)
+
+    def __eq__(self, other: object) -> bool:
+        if isinstance(other, EntryRef):
+            return self._id == other._id
+        return NotImplemented
+
+    def __hash__(self) -> int:
+        return hash(("EntryRef", self._id))
+
+    def __repr__(self) -> str:
+        return f"<EntryRef {self._id!r}>"
+
+
+class _EntryMetadataView:
+    """Dict-like view over an entry's metadata.
+
+    Returned by `EntryRef.metadata`. Iteration / `.items()` / `.keys()` /
+    `.values()` work like a normal mapping; item or attribute access wraps
+    `entity_ref` fields as EntryRef on demand. `entity_ref_list` fields wrap
+    to `list[EntryRef]`. Other fields pass through.
+    """
+
+    __slots__ = ("_data", "_project", "_schema", "_depth")
+
+    def __init__(
+        self,
+        data: dict[str, Any],
+        *,
+        project: "ProjectService",
+        schema: Any,
+        depth: int,
+    ) -> None:
+        self._data = data
+        self._project = project
+        self._schema = schema
+        self._depth = depth
+
+    def _wrap(self, key: str, value: Any) -> Any:
+        if value is None or self._schema is None:
+            return value
+        field_def = getattr(self._schema, "fields", {}).get(key)
+        if field_def is None:
+            return value
+        field_type = getattr(field_def, "type", None)
+        if field_type == "entity_ref" and isinstance(value, str) and value:
+            return EntryRef(self._project, self._schema, value, depth=self._depth)
+        if field_type == "entity_ref_list" and isinstance(value, list):
+            return [
+                EntryRef(self._project, self._schema, v, depth=self._depth)
+                for v in value
+                if isinstance(v, str) and v
+            ]
+        return value
+
+    def __getitem__(self, key: str) -> Any:
+        if key not in self._data:
+            raise KeyError(key)
+        return self._wrap(key, self._data[key])
+
+    def __getattr__(self, key: str) -> Any:
+        if key.startswith("_"):
+            raise AttributeError(key)
+        return self._wrap(key, self._data.get(key))
+
+    def __contains__(self, key: object) -> bool:
+        return key in self._data
+
+    def __iter__(self):
+        return iter(self._data)
+
+    def __len__(self) -> int:
+        return len(self._data)
+
+    def get(self, key: str, default: Any = None) -> Any:
+        if key in self._data:
+            return self._wrap(key, self._data[key])
+        return default
+
+    def keys(self):
+        return self._data.keys()
+
+    def values(self):
+        return [self._wrap(k, v) for k, v in self._data.items()]
+
+    def items(self):
+        return [(k, self._wrap(k, v)) for k, v in self._data.items()]
+
+
+def _coerce_entry_ref(
+    project: "ProjectService", schema: Any, value: Any
+) -> EntryRef | None:
+    """Helper backing the `entry()` Jinja global.
+
+    Accepts a string id, an EntryRef (returns it unchanged), or an object with
+    an `.id` attribute. Returns None for anything else.
+    """
+    if value is None or value == "":
+        return None
+    if isinstance(value, EntryRef):
+        return value
+    if isinstance(value, str):
+        return EntryRef(project, schema, value)
+    inner = getattr(value, "id", None)
+    if isinstance(inner, str) and inner:
+        return EntryRef(project, schema, inner)
+    return None
+
+
 # ----- Project-bound helpers ----------------------------------------------
 
 
@@ -78,14 +313,22 @@ def register_helpers(
     becomes meaningful — entries' revisions are snapshotted into the session
     and partitioned against its baseline.
     """
+    try:
+        schema = project.read_metadata_schema()
+    except Exception:
+        schema = None
+
     env.globals["last_words"] = last_words
-    env.globals["pov"] = lambda scene: _pov(project, scene)
+    env.globals["pov"] = lambda scene: _pov(project, schema, scene)
     env.globals["scenes_before"] = lambda scene: _scenes_before(project, scene)
     env.globals["relevant_lore"] = (
         lambda scene, mode="implicit", partition="all": _relevant_lore(
             project, scene, mode, partition, session
         )
     )
+    env.globals["entry"] = lambda value: _coerce_entry_ref(project, schema, value)
+    env.globals["full_outline"] = lambda: _full_outline(project)
+    env.globals["full_text"] = lambda: _full_text(project)
 
 
 def create_environment_for_project(
@@ -155,12 +398,16 @@ def _safe_read_lore(project: "ProjectService", entry_id: str) -> Any:
 # ----- `pov(scene)` --------------------------------------------------------
 
 
-def _pov(project: "ProjectService", scene: Any) -> dict[str, Any] | None:
-    """Return the POV character entity for a scene, or None.
+def _pov(
+    project: "ProjectService", schema: Any, scene: Any
+) -> EntryRef | None:
+    """Return an EntryRef for the scene's POV character, or None.
 
     Looks for a `pov` field on the scene's metadata. If it's an entity_ref
-    (a lore ID), resolves to a dict with id/title/aliases. If the field is
-    set but doesn't resolve, returns a stub dict with just the raw id.
+    (a lore id), wraps it as an EntryRef so `pov(scene).title` /
+    `pov(scene).aliases` work. If the field is a free-form string (no lore
+    id), returns None — templates that need to display free-form text can
+    read `scene.metadata.pov` directly.
     """
     raw = _get_field(scene, "pov")
     if not raw:
@@ -170,15 +417,8 @@ def _pov(project: "ProjectService", scene: Any) -> dict[str, Any] | None:
         if not raw:
             return None
     if not _is_lore_id(raw):
-        return {"id": None, "title": str(raw), "aliases": []}
-    entry = _safe_read_lore(project, raw)
-    if entry is None:
-        return {"id": raw, "title": raw, "aliases": []}
-    return {
-        "id": _attr_or_item(entry, "id"),
-        "title": _attr_or_item(entry, "title"),
-        "aliases": list(_get_field(entry, "aliases") or []),
-    }
+        return None
+    return EntryRef(project, schema, raw)
 
 
 # ----- `scenes_before(scene)` ---------------------------------------------
@@ -427,3 +667,109 @@ def _xml_safe_tag(name: Any) -> str:
     if not cleaned or not cleaned[0].isalpha() and cleaned[0] != "_":
         return _XML_TAG_FALLBACK
     return cleaned
+
+
+# ----- `full_outline()` and `full_text()` ---------------------------------
+
+
+class _OutlineNode(dict):
+    """Plain dict carrying outline data, but with attribute access for Jinja.
+
+    Templates can write `{{ node.title }}` and `{% for c in node.children %}`,
+    matching the look of EntryRef without dragging EntryRef's lazy load along
+    for what is essentially structural data.
+    """
+
+    def __getattr__(self, name: str) -> Any:
+        if name.startswith("_"):
+            raise AttributeError(name)
+        return self.get(name)
+
+
+def _full_outline(project: "ProjectService") -> list[_OutlineNode]:
+    """Manuscript outline as a list of nested nodes.
+
+    Each node carries `title`, `summary`, `entry_type`, `scene_id`, and
+    `children` (recursive). Walks the manuscript structure in document
+    order. Containers (acts, chapters) carry their own title; the summary
+    comes from the linked scene's metadata when present.
+    """
+    try:
+        structure = project.read_structure()
+    except Exception:
+        return []
+    return [_build_outline_node(child, project) for child in structure.root.children]
+
+
+def _build_outline_node(node: Any, project: "ProjectService") -> _OutlineNode:
+    scene_id = _attr_or_item(node, "scene_id")
+    title = _attr_or_item(node, "title") or ""
+    summary = ""
+    if scene_id:
+        try:
+            scene = project.read_scene(scene_id)
+        except Exception:
+            scene = None
+        if scene is not None:
+            raw_summary = _get_field(scene, "summary")
+            if isinstance(raw_summary, str):
+                summary = raw_summary.strip()
+            if not title:
+                title = _attr_or_item(scene, "title") or ""
+    return _OutlineNode(
+        title=str(title),
+        summary=summary,
+        entry_type=str(_attr_or_item(node, "type") or ""),
+        scene_id=scene_id,
+        children=[
+            _build_outline_node(child, project)
+            for child in (_attr_or_item(node, "children") or [])
+        ],
+    )
+
+
+class _SceneText(dict):
+    """Plain dict + attribute access. Same shape rationale as `_OutlineNode`."""
+
+    def __getattr__(self, name: str) -> Any:
+        if name.startswith("_"):
+            raise AttributeError(name)
+        return self.get(name)
+
+
+def _full_text(project: "ProjectService") -> list[_SceneText]:
+    """Every scene's prose in manuscript order.
+
+    Each item has `title`, `body`, `scene_id`, and `entry_type`. Skips
+    structural containers that have no scene_id, since their body would be
+    empty by design (containers carry only metadata).
+    """
+    try:
+        structure = project.read_structure()
+    except Exception:
+        return []
+    out: list[_SceneText] = []
+    _collect_scene_text(structure.root, project, out)
+    return out
+
+
+def _collect_scene_text(
+    node: Any, project: "ProjectService", sink: list[_SceneText]
+) -> None:
+    scene_id = _attr_or_item(node, "scene_id")
+    if scene_id:
+        try:
+            scene = project.read_scene(scene_id)
+        except Exception:
+            scene = None
+        if scene is not None:
+            sink.append(
+                _SceneText(
+                    title=str(_attr_or_item(scene, "title") or ""),
+                    body=str(_attr_or_item(scene, "body_markdown") or ""),
+                    scene_id=scene_id,
+                    entry_type=str(_attr_or_item(scene, "entry_type") or ""),
+                )
+            )
+    for child in _attr_or_item(node, "children") or []:
+        _collect_scene_text(child, project, sink)

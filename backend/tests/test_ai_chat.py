@@ -34,8 +34,18 @@ class ChatEndpointTests(unittest.TestCase):
         global_service.__init__()
         global_service.create_project(self.root, "Chat Tests")
         self.client = TestClient(app)
+        # Isolate the file-backed assistant store so the chat resolver
+        # doesn't pick up the developer's real ~/AppData entries.
+        self.config_dir = Path(self.temp_dir.name) / "machine_config"
+        self.config_dir.mkdir()
+        self._config_patcher = patch(
+            "app.services.machine_settings.config_path",
+            return_value=self.config_dir / "config.yaml",
+        )
+        self._config_patcher.start()
 
     def tearDown(self) -> None:
+        self._config_patcher.stop()
         self.temp_dir.cleanup()
 
     def _allow_cloud(self) -> None:

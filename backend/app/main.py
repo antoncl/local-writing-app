@@ -433,18 +433,32 @@ def _resolve_call_params(
 
     Priority for each field, highest first:
       1. Explicit override on the request (provider, model, max_tokens).
-      2. The assistant indicated by assistant_id, or the default assistant.
+      2. The assistant indicated by assistant_id, or the entry flagged
+         is_default in the file-backed roster.
       3. The legacy default_provider / default_models matrix on settings.
     """
-    assistant = machine_settings_service.resolve_assistant(settings, assistant_id)
+    assistant = service.resolve_assistant(assistant_id)
     if assistant is not None:
-        provider = provider_override or assistant.provider
-        model = model_override or assistant.model
-        max_tokens = max_tokens_override if max_tokens_override is not None else assistant.max_tokens
+        meta = assistant.metadata or {}
+        a_provider = meta.get("ai_provider")
+        a_model = meta.get("ai_model")
+        provider = provider_override or (str(a_provider) if isinstance(a_provider, str) else "")
+        model = model_override or (str(a_model) if isinstance(a_model, str) else "")
+        try:
+            temperature = float(meta.get("ai_temperature", 0.7))
+        except (TypeError, ValueError):
+            temperature = 0.7
+        if max_tokens_override is not None:
+            max_tokens = max_tokens_override
+        else:
+            try:
+                max_tokens = int(meta.get("ai_max_tokens", 4096))
+            except (TypeError, ValueError):
+                max_tokens = 4096
         return _ResolvedCall(
             provider=provider,
             model=model,
-            temperature=assistant.temperature,
+            temperature=temperature,
             max_tokens=max_tokens,
         )
     provider = provider_override or settings.default_provider
@@ -463,8 +477,6 @@ def _build_settings_view(masked: dict[str, Any]) -> MachineSettingsView:
         providers=masked["providers"],
         default_provider=masked["default_provider"],
         default_models=masked["default_models"],
-        assistants=masked.get("assistants", []),
-        default_assistant_id=masked.get("default_assistant_id", ""),
         config_path=str(machine_settings_service.config_path()),
     )
 

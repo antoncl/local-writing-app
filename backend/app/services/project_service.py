@@ -2472,6 +2472,48 @@ class ProjectService:
         )
         return index
 
+    def resolve_assistant(self, assistant_id: str | None) -> AssistantEntry | None:
+        """Look up an assistant by id; falls back to the entry flagged
+        is_default. Returns None when nothing matches — callers fall back to
+        the legacy default_provider / default_models path."""
+        index = self._build_assistant_index()
+        if assistant_id:
+            entry = index.by_id.get(assistant_id)
+            if entry is None or entry.kind != "assistant":
+                return None
+            return self._read_assistant_from_index_entry(entry)
+        # No id supplied: find the entry flagged is_default in the highest-
+        # priority (descendant) layer present. The index is already iterated
+        # outermost → innermost with descendant-wins, so the value in by_id
+        # is the right one. Search by metadata.is_default.
+        for entry in index.by_id.values():
+            if entry.kind != "assistant":
+                continue
+            data = self._read_assistant_from_index_entry(entry)
+            if data is None:
+                continue
+            if bool(data.metadata.get("is_default")):
+                return data
+        return None
+
+    def _read_assistant_from_index_entry(
+        self, entry: "NodeIndexEntry"
+    ) -> AssistantEntry | None:
+        try:
+            front_matter, _body = self._read_markdown_with_front_matter(entry.path, strict=True)
+        except ProjectServiceError:
+            return None
+        raw_entry_type = front_matter.get("entry_type") or "assistant"
+        return AssistantEntry(
+            id=entry.id,
+            title=str(front_matter.get("title") or entry.id),
+            revision=self._revision(entry.path),
+            entry_type=raw_entry_type if isinstance(raw_entry_type, str) else "assistant",
+            metadata=self._normalise_metadata(front_matter.get("metadata"), entry.path),
+            source_layer_id=entry.source_layer_id,
+            source_layer_label=entry.source_layer_label,
+        )
+
     def _write_node_entry_file(
         self,
         path: Path,

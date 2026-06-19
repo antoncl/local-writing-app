@@ -214,7 +214,7 @@ The story so far:
   let metadataSchema: MetadataSchema | null = null;
   let metadataSchemaOverview: MetadataSchemaOverview | null = null;
   let metadataSchemaLayers: MetadataSchemaLayer[] = [];
-  let schemaFieldKind: "scene" | "lore" | "prompt" = "scene";
+  let schemaFieldKind: "scene" | "lore" | "prompt" | "assistant" = "scene";
   let schemaFieldLayerId = "";
   let schemaFieldEntryType = "scene";
   let schemaFieldId = "";
@@ -233,7 +233,7 @@ The story so far:
   let schemaTypeLayerId = "";
   let schemaTypeId = "";
   let schemaTypeName = "";
-  let schemaTypeKind: "scene" | "lore" | "prompt" = "lore";
+  let schemaTypeKind: "scene" | "lore" | "prompt" | "assistant" = "lore";
   let schemaTypeParent = "";
   let schemaTypeAbstract = false;
   let schemaTypeReadonly = false;
@@ -326,11 +326,19 @@ The story so far:
       ? "lore"
       : schemaSelectedEntryType?.kind === "prompt"
         ? "prompt"
-        : "scene";
+        : schemaSelectedEntryType?.kind === "assistant"
+          ? "assistant"
+          : "scene";
   $: schemaNodeTypeOptions = buildNodeTypeOptions(metadataSchema);
   $: schemaNodeTypeTree = buildNodeTypeTree(metadataSchema, schemaFieldKind);
   $: schemaContextHeading =
-    schemaFieldKind === "lore" ? "Lore Entry Types" : schemaFieldKind === "prompt" ? "Prompt Types" : "Scene Types";
+    schemaFieldKind === "lore"
+      ? "Lore Entry Types"
+      : schemaFieldKind === "prompt"
+        ? "Prompt Types"
+        : schemaFieldKind === "assistant"
+          ? "Assistant Types"
+          : "Scene Types";
   $: concretePromptSubtypes = Object.entries(metadataSchema?.entry_types ?? {})
     .filter(([id, definition]) => definition.kind === "prompt" && !definition.abstract && id !== "prompt")
     .map(([id, definition]) => ({ id, label: definition.name || id }))
@@ -610,9 +618,11 @@ The story so far:
     promptEntries = (await api.listPromptEntries()).entries;
   }
 
-  function assistantEntriesGroupedByLayer(): { layerId: string; layerLabel: string; entries: AssistantEntrySummary[] }[] {
+  $: groupedAssistantEntries = groupAssistantEntriesByLayer(assistantEntries);
+
+  function groupAssistantEntriesByLayer(entries: AssistantEntrySummary[]): { layerId: string; layerLabel: string; entries: AssistantEntrySummary[] }[] {
     const groups = new Map<string, { layerId: string; layerLabel: string; entries: AssistantEntrySummary[] }>();
-    for (const entry of assistantEntries) {
+    for (const entry of entries) {
       const key = entry.source_layer_id || "";
       const label = entry.source_layer_label || "Unknown";
       const existing = groups.get(key);
@@ -1257,7 +1267,7 @@ The story so far:
     return options;
   }
 
-  function buildNodeTypeTree(schema: MetadataSchema | null, kind: "scene" | "lore" | "prompt"): NodeTypeTreeNode[] {
+  function buildNodeTypeTree(schema: MetadataSchema | null, kind: "scene" | "lore" | "prompt" | "assistant"): NodeTypeTreeNode[] {
     const entryTypes = schema?.entry_types ?? {};
     const childrenByParent: Record<string, string[]> = {};
     const roots: string[] = [];
@@ -1403,7 +1413,9 @@ The story so far:
           ? "lore"
           : parentType?.kind === "prompt"
             ? "prompt"
-            : schemaFieldKind;
+            : parentType?.kind === "assistant"
+              ? "assistant"
+              : schemaFieldKind;
     schemaTypeParent = parentTypeId || (schemaSelectedEntryType?.abstract || schemaFieldEntryType !== "scene" ? schemaFieldEntryType : defaultSchemaParentType(schemaFieldKind));
     schemaTypeAbstract = false;
     schemaTypeReadonly = false;
@@ -1463,7 +1475,13 @@ The story so far:
     schemaTypeId = typeId;
     schemaTypeName = entryType.name;
     schemaTypeKind =
-      entryType.kind === "scene" ? "scene" : entryType.kind === "prompt" ? "prompt" : "lore";
+      entryType.kind === "scene"
+        ? "scene"
+        : entryType.kind === "prompt"
+          ? "prompt"
+          : entryType.kind === "assistant"
+            ? "assistant"
+            : "lore";
     schemaTypeParent = entryType.parent ?? "";
     schemaTypeAbstract = Boolean(entryType.abstract);
     schemaTypeReadonly = Boolean(source?.built_in);
@@ -1480,25 +1498,25 @@ The story so far:
     }
   }
 
-  function defaultSchemaParentType(kind: "scene" | "lore" | "prompt") {
+  function defaultSchemaParentType(kind: "scene" | "lore" | "prompt" | "assistant") {
     if (kind === "lore" && metadataSchema?.entry_types.lore_entry) return "lore_entry";
     if (kind === "prompt" && metadataSchema?.entry_types.prompt) return "prompt";
     return "";
   }
 
-  function openSchemaForCustomData(entryType: string, kind: "scene" | "lore" | "prompt") {
+  function openSchemaForCustomData(entryType: string, kind: "scene" | "lore" | "prompt" | "assistant") {
     schemaPaneOpen = true;
     const candidate = metadataSchema?.entry_types[entryType];
     schemaFieldEntryType = candidate?.kind === kind ? entryType : defaultSchemaEntryType(kind);
     focusPane("schema");
   }
 
-  function defaultSchemaEntryType(kind: "scene" | "lore" | "prompt") {
-    const fallback = kind === "lore" ? "lore_note" : kind === "prompt" ? "prompt" : "scene";
+  function defaultSchemaEntryType(kind: "scene" | "lore" | "prompt" | "assistant") {
+    const fallback = kind === "lore" ? "lore_note" : kind === "prompt" ? "prompt" : kind === "assistant" ? "assistant" : "scene";
     return Object.entries(metadataSchema?.entry_types ?? {}).find(([, definition]) => definition.kind === kind)?.[0] ?? fallback;
   }
 
-  function entryTypeIdsForField(fieldId: string, kind: "scene" | "lore" | "prompt") {
+  function entryTypeIdsForField(fieldId: string, kind: "scene" | "lore" | "prompt" | "assistant") {
     return Object.entries(metadataSchema?.entry_types ?? {})
       .filter(([, definition]) => definition.kind === kind && definition.fields.includes(fieldId))
       .map(([typeId]) => typeId);
@@ -3543,7 +3561,7 @@ The story so far:
       </div>
     </header>
     <div class="pane-content schema-list">
-      {#each assistantEntriesGroupedByLayer() as group (group.layerId)}
+      {#each groupedAssistantEntries as group (group.layerId)}
         <div class="prompt-entry-section">
           <header>
             <strong>{group.layerLabel}</strong>

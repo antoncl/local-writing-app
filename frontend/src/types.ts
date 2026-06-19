@@ -46,7 +46,7 @@ export type LoreEntry = {
   source_layer_label?: string;
 };
 
-export type EditableDocument = Scene | LoreEntry | PromptEntry;
+export type EditableDocument = Scene | LoreEntry | PromptEntry | AssistantEntry;
 
 export type LoreEntryList = {
   entries: LoreEntrySummary[];
@@ -76,6 +76,34 @@ export type PromptEntry = {
 
 export type PromptEntryList = {
   entries: PromptEntrySummary[];
+};
+
+export type AssistantEntrySummary = {
+  id: string;
+  title: string;
+  entry_type: string;
+  metadata: EntryMetadata;
+  source_layer_id?: string;
+  source_layer_label?: string;
+};
+
+export type AssistantEntry = {
+  id: string;
+  title: string;
+  revision: string;
+  entry_type: string;
+  metadata: EntryMetadata;
+  // has_body: false — these are present so AssistantEntry satisfies the
+  // EditableDocument shape used by DocumentEditorPane, but they are always
+  // empty / undefined for assistant kind.
+  body_markdown?: string;
+  computed_metadata?: EntryMetadata;
+  source_layer_id?: string;
+  source_layer_label?: string;
+};
+
+export type AssistantEntryList = {
+  entries: AssistantEntrySummary[];
 };
 
 

@@ -8,6 +8,8 @@
     AIHealthResponse,
     AIPolicy,
     AIPreviewResponse,
+    AssistantEntry,
+    AssistantEntrySummary,
     Backlink,
     ChatMessage,
     DirectoryListing,
@@ -19,7 +21,6 @@
     PromptEntry,
     PromptEntrySummary,
     Scene,
-    AssistantView,
     MachineSettingsUpdate,
     MachineSettingsView,
     MetadataFieldDefinition,
@@ -43,7 +44,7 @@
   type AppState =
     | { name: "needsProject" }
     | { name: "projectOpen"; project: ProjectInfo };
-  type DocumentRef = { type: "scene" | "lore" | "prompt"; id: string };
+  type DocumentRef = { type: "scene" | "lore" | "prompt" | "assistant"; id: string };
   type PaneId = "project" | "outline" | "lore" | "todo" | "search" | string;
   type MetadataReloadSignal = { token: number; metadata: EntryMetadata; status: string; entryType: string };
   type LoreEntryGroup = {
@@ -189,8 +190,6 @@ The story so far:
     ollama_host: string;
     default_provider: string;
     default_models: Record<string, string>;
-    assistants: AssistantView[];
-    default_assistant_id: string;
   };
   let machineSettingsDraft: MachineSettingsDraft | null = null;
   let appState: AppState = { name: "needsProject" };
@@ -244,6 +243,7 @@ The story so far:
   let schemaNodeTypeOptions: NodeTypeOption[] = [];
   let schemaNodeTypeTree: NodeTypeTreeNode[] = [];
   let promptsPaneOpen = false;
+  let assistantsPaneOpen = false;
   let promptSystemPrompt = "";
   let promptModelClass = "";
   let promptProviderPolicy: AIPolicy | "" = "";
@@ -254,6 +254,7 @@ The story so far:
   let promptOutputKind = "";
   let promptOutputReview = "";
   let promptEntries: PromptEntrySummary[] = [];
+  let assistantEntries: AssistantEntrySummary[] = [];
   let newTodo = "";
   let searchQuery = "";
   let loreSearchQuery = "";
@@ -278,6 +279,7 @@ The story so far:
     schema_field: { title: "Detail Field", x: 708, y: 260, width: 360, height: 420, z: 4 },
     schema_type: { title: "Detail Type", x: 708, y: 260, width: 440, height: 560, z: 4 },
     prompts: { title: "Prompts", x: 330, y: 260, width: 360, height: 420, z: 3 },
+    assistants: { title: "Assistants", x: 330, y: 260, width: 340, height: 420, z: 3 },
     todo: { title: "TODO", x: 1126, y: 18, width: 310, height: 320, z: 4 },
     search: { title: "Search", x: 1126, y: 360, width: 310, height: 320, z: 5 },
     preview: { title: "AI Preview", x: 720, y: 18, width: 480, height: 560, z: 6 },
@@ -357,6 +359,9 @@ The story so far:
       // Backend may be offline — leave machineSettings as null; pickers will
       // hide and the request falls back to the backend's default assistant.
     }
+    // The file-backed assistant index is canonical for the chat-panel and
+    // inputs-dialog pickers; load it eagerly alongside machine settings.
+    await refreshAssistantEntries();
   }
 
   function handleDocumentMousedown(event: MouseEvent) {
@@ -403,6 +408,9 @@ The story so far:
 
   function isPaneVisible(id: PaneId) {
     if (id === "project") return true;
+    // Assistants live in the per-machine config dir, so the pane is available
+    // even without a project open.
+    if (id === "assistants") return assistantsPaneOpen;
     if (!isProjectOpen) return false;
     if (id === "schema") return schemaPaneOpen;
     if (id === "schema_field") return schemaFieldPaneOpen;
@@ -602,6 +610,43 @@ The story so far:
     promptEntries = (await api.listPromptEntries()).entries;
   }
 
+  function assistantEntriesGroupedByLayer(): { layerId: string; layerLabel: string; entries: AssistantEntrySummary[] }[] {
+    const groups = new Map<string, { layerId: string; layerLabel: string; entries: AssistantEntrySummary[] }>();
+    for (const entry of assistantEntries) {
+      const key = entry.source_layer_id || "";
+      const label = entry.source_layer_label || "Unknown";
+      const existing = groups.get(key);
+      if (existing) {
+        existing.entries.push(entry);
+      } else {
+        groups.set(key, { layerId: key, layerLabel: label, entries: [entry] });
+      }
+    }
+    // Machine layer first; then alphabetical by label.
+    return Array.from(groups.values()).sort((a, b) => {
+      if (a.layerLabel === "Machine") return -1;
+      if (b.layerLabel === "Machine") return 1;
+      return a.layerLabel.localeCompare(b.layerLabel);
+    });
+  }
+
+  function assistantSubtitle(entry: AssistantEntrySummary): string {
+    const provider = entry.metadata?.ai_provider;
+    const model = entry.metadata?.ai_model;
+    if (provider && model) return `${provider} · ${model}`;
+    if (model) return String(model);
+    if (provider) return String(provider);
+    return "";
+  }
+
+  async function refreshAssistantEntries() {
+    try {
+      assistantEntries = (await api.listAssistantEntries()).entries;
+    } catch {
+      // Backend may be unavailable; leave previous list in place.
+    }
+  }
+
   async function refreshKnownTags() {
     knownTags = (await api.getKnownTags()).tags;
   }
@@ -721,48 +766,9 @@ The story so far:
         ollama_host: machineSettings.providers.ollama_host,
         default_provider: machineSettings.default_provider,
         default_models: { ...machineSettings.default_models },
-        assistants: machineSettings.assistants.map((a) => ({ ...a })),
-        default_assistant_id: machineSettings.default_assistant_id,
       };
       machineSettingsOpen = true;
     });
-  }
-
-  function addAssistant() {
-    if (!machineSettingsDraft) return;
-    const existing = new Set(machineSettingsDraft.assistants.map((a) => a.id));
-    let id = "new-assistant";
-    let suffix = 2;
-    while (existing.has(id)) {
-      id = `new-assistant-${suffix}`;
-      suffix += 1;
-    }
-    machineSettingsDraft = {
-      ...machineSettingsDraft,
-      assistants: [
-        ...machineSettingsDraft.assistants,
-        { id, name: "New assistant", provider: "anthropic", model: "", temperature: 0.7, max_tokens: 4096 },
-      ],
-    };
-  }
-
-  function updateAssistant(index: number, patch: Partial<AssistantView>) {
-    if (!machineSettingsDraft) return;
-    machineSettingsDraft = {
-      ...machineSettingsDraft,
-      assistants: machineSettingsDraft.assistants.map((a, i) => (i === index ? { ...a, ...patch } : a)),
-    };
-  }
-
-  function removeAssistant(index: number) {
-    if (!machineSettingsDraft) return;
-    const removed = machineSettingsDraft.assistants[index];
-    const next = machineSettingsDraft.assistants.filter((_, i) => i !== index);
-    let defaultId = machineSettingsDraft.default_assistant_id;
-    if (removed && removed.id === defaultId) {
-      defaultId = next[0]?.id ?? "";
-    }
-    machineSettingsDraft = { ...machineSettingsDraft, assistants: next, default_assistant_id: defaultId };
   }
 
   async function saveMachineSettings() {
@@ -777,8 +783,6 @@ The story so far:
         },
         default_provider: machineSettingsDraft!.default_provider,
         default_models: machineSettingsDraft!.default_models,
-        assistants: machineSettingsDraft!.assistants,
-        default_assistant_id: machineSettingsDraft!.default_assistant_id,
       };
       machineSettings = await api.updateMachineSettings(update);
       machineSettingsOpen = false;
@@ -1171,7 +1175,11 @@ The story so far:
 
   function assistantNameFor(assistantId: string): string {
     if (!assistantId) return "";
-    return machineSettings?.assistants.find((a) => a.id === assistantId)?.name ?? "";
+    return assistantEntries.find((a) => a.id === assistantId)?.title ?? "";
+  }
+
+  function defaultAssistantEntryId(): string {
+    return assistantEntries.find((a) => Boolean(a.metadata?.is_default))?.id ?? "";
   }
 
   function paneEntryFromAncestor(pane: EditorPaneState): boolean {
@@ -1496,16 +1504,23 @@ The story so far:
       .map(([typeId]) => typeId);
   }
 
-  function closeSchemaPane(id: "schema" | "schema_field" | "schema_type" | "prompts") {
+  function closeSchemaPane(id: "schema" | "schema_field" | "schema_type" | "prompts" | "assistants") {
     if (id === "schema") schemaPaneOpen = false;
     else if (id === "schema_field") schemaFieldPaneOpen = false;
     else if (id === "schema_type") schemaTypePaneOpen = false;
     else if (id === "prompts") promptsPaneOpen = false;
+    else if (id === "assistants") assistantsPaneOpen = false;
   }
 
   function openPromptsPane() {
     promptsPaneOpen = true;
     focusPane("prompts");
+  }
+
+  function openAssistantsPane() {
+    assistantsPaneOpen = true;
+    void refreshAssistantEntries();
+    focusPane("assistants");
   }
 
   function addPromptInput() {
@@ -2376,6 +2391,47 @@ The story so far:
     });
   }
 
+  async function openAssistantEntryInEditorPane(entryId: string) {
+    const existingPane = editorPanes.find((pane) => pane.document?.type === "assistant" && pane.document.id === entryId);
+    if (existingPane) {
+      focusedEditorPaneId = existingPane.id;
+      focusPane(existingPane.id);
+      status = `Focused ${existingPane.scene?.title ?? "open assistant"}`;
+      return;
+    }
+    let targetPane = editorPanes.find((pane) => !pane.pinned);
+    if (!targetPane) targetPane = addEditorPane();
+    if (targetPane.dirty) await saveEditorPane(targetPane.id);
+    const entry = await api.getAssistantEntry(entryId);
+    editorPanes = editorPanes.map((pane) =>
+      pane.id === targetPane.id
+        ? {
+            ...pane,
+            document: { type: "assistant", id: entry.id },
+            scene: entry,
+            dirty: false,
+            draftTitle: entry.title,
+            draftMarkdown: "",
+            draftStatus: "",
+            draftEntryType: entry.entry_type,
+            draftMetadata: cloneMetadata(entry.metadata),
+            saving: false,
+          }
+        : pane,
+    );
+    focusedEditorPaneId = targetPane.id;
+    focusPane(targetPane.id);
+    status = `Loaded ${entry.title}`;
+  }
+
+  async function newAssistantEntry() {
+    await run(async () => {
+      const created = await api.createAssistantEntry("Untitled assistant");
+      await refreshAssistantEntries();
+      await openAssistantEntryInEditorPane(created.id);
+    });
+  }
+
   async function openLoreEntryInEditorPane(entryId: string) {
     const existingPane = editorPanes.find((pane) => pane.document?.type === "lore" && pane.document.id === entryId);
     if (existingPane) {
@@ -2653,6 +2709,8 @@ The story so far:
         savedDocument = await api.saveLoreEntry(draftDocument as LoreEntry, pane.draftMarkdown);
       } else if (documentKind === "prompt") {
         savedDocument = await api.savePromptEntry(draftDocument as PromptEntry, pane.draftMarkdown);
+      } else if (documentKind === "assistant") {
+        savedDocument = await api.saveAssistantEntry(draftDocument as AssistantEntry);
       } else {
         savedDocument = await api.saveScene(draftDocument as Scene, pane.draftMarkdown);
       }
@@ -2677,6 +2735,8 @@ The story so far:
         await refreshKnownTags();
       } else if (documentKind === "prompt") {
         await refreshPromptEntries();
+      } else if (documentKind === "assistant") {
+        await refreshAssistantEntries();
       } else {
         await refreshStructure();
         await refreshTodos();
@@ -2744,6 +2804,8 @@ The story so far:
       loreEntries = (await api.deleteLoreEntry(pane.scene.id)).entries;
     } else if (documentKind === "prompt") {
       promptEntries = (await api.deletePromptEntry(pane.scene.id)).entries;
+    } else if (documentKind === "assistant") {
+      assistantEntries = (await api.deleteAssistantEntry(pane.scene.id)).entries;
     } else {
       structure = await api.deleteScene(pane.scene.id);
       await refreshTodos();
@@ -2958,6 +3020,7 @@ The story so far:
         <h3>AI</h3>
         <div class="button-row">
           <button type="button" on:click={openMachineSettings}>Machine Settings…</button>
+          <button type="button" on:click={openAssistantsPane}>Assistants…</button>
         </div>
         {#if isProjectOpen}
           <fieldset class="ai-policy">
@@ -3470,6 +3533,41 @@ The story so far:
     <button class="pane-resize" type="button" aria-label="Resize Prompts pane" on:keydown={(event) => handlePaneResizeKeydown(event, "prompts")} on:mousedown={(event) => startPaneResize(event, "prompts")}></button>
   </section>
 
+  <!-- svelte-ignore a11y_no_noninteractive_element_interactions -->
+  <section class:hidden-pane={!assistantsPaneOpen} class="pane assistants-pane" data-pane-id="assistants" style={paneStyle("assistants")} aria-label="Assistants pane" on:mousedown={() => focusPane("assistants")}>
+    <header class="pane-header" role="button" tabindex="0" aria-label="Move Assistants pane" on:keydown={(event) => handlePaneHeaderKeydown(event, "assistants")} on:mousedown={(event) => startPaneDrag(event, "assistants")}>
+      <h2>Assistants</h2>
+      <div class="pane-header-actions">
+        <button class="pin-button" type="button" title="Add assistant" on:mousedown={(event) => event.stopPropagation()} on:click={() => newAssistantEntry()}>+ Assistant</button>
+        <button class="pin-button" type="button" on:mousedown={(event) => event.stopPropagation()} on:click={() => closeSchemaPane("assistants")}>Close</button>
+      </div>
+    </header>
+    <div class="pane-content schema-list">
+      {#each assistantEntriesGroupedByLayer() as group (group.layerId)}
+        <div class="prompt-entry-section">
+          <header>
+            <strong>{group.layerLabel}</strong>
+            <small>{group.entries.length}</small>
+          </header>
+          {#each group.entries as entry (entry.id)}
+            <button class:active={focusedEditorPane?.document?.type === "assistant" && focusedEditorPane.document.id === entry.id} class="prompt-entry-row" type="button" on:click={() => openAssistantEntryInEditorPane(entry.id)}>
+              <span>
+                <strong>{entry.title}</strong>
+                {#if entry.metadata?.is_default}
+                  <small class="assistant-default-badge">default</small>
+                {/if}
+                <small>{assistantSubtitle(entry)}</small>
+              </span>
+            </button>
+          {/each}
+        </div>
+      {/each}
+      {#if assistantEntries.length === 0}
+        <p class="muted">No assistants defined yet. Click + Assistant to create one in the machine layer.</p>
+      {/if}
+    </div>
+    <button class="pane-resize" type="button" aria-label="Resize Assistants pane" on:keydown={(event) => handlePaneResizeKeydown(event, "assistants")} on:mousedown={(event) => startPaneResize(event, "assistants")}></button>
+  </section>
 
 
   {#each editorPanes as editorPane (editorPane.id)}
@@ -3544,8 +3642,8 @@ The story so far:
         metadataSchema={metadataSchema}
         promptEntries={promptEntries}
         knownTags={knownTags}
-        assistants={machineSettings?.assistants ?? []}
-        defaultAssistantId={machineSettings?.default_assistant_id ?? ""}
+        assistantEntries={assistantEntries}
+        defaultAssistantId={defaultAssistantEntryId()}
         metadataReload={metadataReloadsByPane[editorPane.id] ?? null}
         titleReload={titleReloadsByPane[editorPane.id] ?? null}
         dirty={editorPane.dirty}
@@ -3809,9 +3907,9 @@ The story so far:
         <label class="chat-label">
           Assistant
           <select bind:value={chatAssistantId}>
-            <option value="">Default ({assistantNameFor(machineSettings?.default_assistant_id ?? "") || "use machine default"})</option>
-            {#each machineSettings?.assistants ?? [] as assistant (assistant.id)}
-              <option value={assistant.id}>{assistant.name}</option>
+            <option value="">Default ({assistantNameFor(defaultAssistantEntryId()) || "use machine default"})</option>
+            {#each assistantEntries as assistant (assistant.id)}
+              <option value={assistant.id}>{assistant.title}</option>
             {/each}
           </select>
         </label>
@@ -4036,62 +4134,9 @@ The story so far:
           <input type="text" bind:value={machineSettingsDraft.ollama_host} placeholder="http://127.0.0.1:11434" />
         </label>
 
-        <fieldset class="assistants-roster">
-          <legend>Your assistants</legend>
-          <p class="muted">Each assistant pairs a model with a temperature and output size. Pick one as the default; the dispatch UI lets you override per call.</p>
-          {#each machineSettingsDraft.assistants as assistant, index (assistant.id)}
-            <div class="assistant-row">
-              <div class="assistant-grid">
-                <label>
-                  ID
-                  <input type="text" value={assistant.id} on:input={(event) => updateAssistant(index, { id: event.currentTarget.value })} />
-                </label>
-                <label>
-                  Name
-                  <input type="text" value={assistant.name} on:input={(event) => updateAssistant(index, { name: event.currentTarget.value })} />
-                </label>
-                <label>
-                  Subscription
-                  <select value={assistant.provider} on:change={(event) => updateAssistant(index, { provider: event.currentTarget.value })}>
-                    <option value="anthropic">Anthropic</option>
-                    <option value="openai">OpenAI</option>
-                    <option value="openrouter">OpenRouter</option>
-                    <option value="ollama">Ollama (local)</option>
-                  </select>
-                </label>
-                <label>
-                  Model
-                  <input type="text" value={assistant.model} on:input={(event) => updateAssistant(index, { model: event.currentTarget.value })} placeholder="claude-sonnet-4-6" />
-                </label>
-                <label>
-                  Temperature
-                  <input type="number" min="0" max="2" step="0.1" value={assistant.temperature} on:input={(event) => updateAssistant(index, { temperature: Number(event.currentTarget.value) })} />
-                </label>
-                <label>
-                  Max output tokens
-                  <input type="number" min="64" max="32768" step="64" value={assistant.max_tokens} on:input={(event) => updateAssistant(index, { max_tokens: Number(event.currentTarget.value) })} />
-                </label>
-              </div>
-              <button class="danger" type="button" on:click={() => removeAssistant(index)}>Remove</button>
-            </div>
-          {/each}
-          {#if machineSettingsDraft.assistants.length === 0}
-            <p class="muted">No assistants defined yet.</p>
-          {/if}
-          <button type="button" on:click={addAssistant}>+ Assistant</button>
-        </fieldset>
-
-        <label>
-          Default assistant
-          <select bind:value={machineSettingsDraft.default_assistant_id}>
-            {#each machineSettingsDraft.assistants as assistant (assistant.id)}
-              <option value={assistant.id}>{assistant.name}</option>
-            {/each}
-            {#if machineSettingsDraft.assistants.length === 0}
-              <option value="">(no assistants)</option>
-            {/if}
-          </select>
-        </label>
+        <p class="muted">
+          Assistants moved to the <strong>Assistants</strong> pane (open from the AI section of the Project pane). Each lives as its own file under the machine config dir and can be overridden by ancestor projects.
+        </p>
 
         <div class="confirm-modal-actions">
           <button type="button" on:click={() => (machineSettingsOpen = false)}>Cancel</button>

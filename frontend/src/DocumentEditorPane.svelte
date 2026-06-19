@@ -14,14 +14,14 @@
   import MetadataLongTextEditor from "./MetadataLongTextEditor.svelte";
   import ReferencePicker from "./ReferencePicker.svelte";
   import { api } from "./api";
-  import type { AssistantView, Backlink, EditableDocument, EntryBodyLanguage, EntryMetadata, MetadataFieldDefinition, MetadataSchema, MetadataValue, PromptEntrySummary, PromptInputDefinition } from "./types";
+  import type { AssistantEntrySummary, Backlink, EditableDocument, EntryBodyLanguage, EntryMetadata, MetadataFieldDefinition, MetadataSchema, MetadataValue, PromptEntrySummary, PromptInputDefinition } from "./types";
 
   export let scene: EditableDocument | null = null;
-  export let documentKind: "scene" | "lore" | "prompt" | "snippet" = "scene";
+  export let documentKind: "scene" | "lore" | "prompt" | "snippet" | "assistant" = "scene";
   export let metadataSchema: MetadataSchema | null = null;
   export let promptEntries: PromptEntrySummary[] = [];
   export let knownTags: string[] = [];
-  export let assistants: AssistantView[] = [];
+  export let assistantEntries: AssistantEntrySummary[] = [];
   export let defaultAssistantId: string = "";
   export let metadataReload: { token: number; metadata: EntryMetadata; status?: string; entryType: string } | null = null;
   export let titleReload: { token: number; title: string } | null = null;
@@ -31,7 +31,7 @@
   const dispatch = createEventDispatcher<{
     change: { title: string; bodyMarkdown: string; status: string; entryType: string; metadata: EntryMetadata };
     focus: void;
-    "custom-data": { entryType: string; kind: "scene" | "lore" | "prompt" };
+    "custom-data": { entryType: string; kind: "scene" | "lore" | "prompt" | "assistant" };
     embeddedTodos: { todos: EmbeddedTodo[] };
     navigate: { id: string; kind: string };
     "open-chat": { entry: PromptEntrySummary; inputs: Record<string, unknown>; sceneId: string | null; assistantId: string };
@@ -1105,7 +1105,7 @@
 
   function assistantDisplayName(assistantId: string): string {
     if (!assistantId) return "";
-    return assistants.find((a) => a.id === assistantId)?.name ?? "";
+    return assistantEntries.find((a) => a.id === assistantId)?.title ?? "";
   }
 
   function refInputStubField(input: PromptInputDefinition): MetadataFieldDefinition {
@@ -2396,8 +2396,8 @@
           Assistant
           <select bind:value={inputsDialogAssistantId}>
             <option value="">Default ({assistantDisplayName(defaultAssistantId) || "use machine default"})</option>
-            {#each assistants as assistant (assistant.id)}
-              <option value={assistant.id}>{assistant.name}</option>
+            {#each assistantEntries as assistant (assistant.id)}
+              <option value={assistant.id}>{assistant.title}</option>
             {/each}
           </select>
         </label>

@@ -2542,6 +2542,38 @@ h3 {
   background: #edf6f2;
 }
 
+.assistants-pane {
+  min-width: 280px;
+}
+
+.assistants-pane .prompt-entry-row {
+  display: grid;
+  gap: 2px;
+}
+
+.assistants-pane .prompt-entry-row > span {
+  display: grid;
+  gap: 2px;
+}
+
+.assistants-pane .prompt-entry-row > span > small {
+  color: #65716c;
+}
+
+.assistant-default-badge {
+  display: inline-block;
+  margin-left: 6px;
+  padding: 0 6px;
+  border-radius: 8px;
+  background: #2f6f5e;
+  color: #ffffff;
+  font-size: 10px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  vertical-align: middle;
+}
+
 .raw-body-editor {
   display: grid;
   height: 100%;

@@ -5,6 +5,8 @@ import type {
   AIGenerateRequest,
   AIGenerateResponse,
   AIHealthResponse,
+  AssistantEntry,
+  AssistantEntryList,
   AIPolicy,
   AIPreviewRequest,
   AIPreviewResponse,
@@ -283,6 +285,34 @@ export const api = {
   },
   deletePromptEntry(entryId: string) {
     return request<PromptEntryList>(`/prompts/${entryId}`, {
+      method: "DELETE",
+    });
+  },
+  listAssistantEntries() {
+    return request<AssistantEntryList>("/assistants");
+  },
+  createAssistantEntry(title: string, layerId: string = "") {
+    return request<AssistantEntry>("/assistants", {
+      method: "POST",
+      body: JSON.stringify({ title, entry_type: "assistant", layer_id: layerId }),
+    });
+  },
+  getAssistantEntry(entryId: string) {
+    return request<AssistantEntry>(`/assistants/${entryId}`);
+  },
+  saveAssistantEntry(entry: AssistantEntry) {
+    return request<AssistantEntry>(`/assistants/${entry.id}`, {
+      method: "PUT",
+      body: JSON.stringify({
+        title: entry.title,
+        base_revision: entry.revision,
+        entry_type: entry.entry_type,
+        metadata: entry.metadata,
+      }),
+    });
+  },
+  deleteAssistantEntry(entryId: string) {
+    return request<AssistantEntryList>(`/assistants/${entryId}`, {
       method: "DELETE",
     });
   },

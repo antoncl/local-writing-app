@@ -188,6 +188,7 @@ def chat(
     max_tokens: int,
     settings: MachineSettings,
     policy: AIPolicy,
+    temperature: float = 0.7,
 ) -> ChatResult:
     """Run a chat completion against the chosen provider.
 
@@ -234,6 +235,7 @@ def chat(
                 system_prompt=system_prompt,
                 messages=messages,
                 max_tokens=max_tokens,
+                temperature=temperature,
             )
         elif provider_name == "openai":
             content, stop_reason = _openai_compatible_chat(
@@ -244,6 +246,7 @@ def chat(
                 messages=messages,
                 max_tokens=max_tokens,
                 requires_key=True,
+                temperature=temperature,
             )
         elif provider_name == "openrouter":
             content, stop_reason = _openai_compatible_chat(
@@ -254,6 +257,7 @@ def chat(
                 messages=messages,
                 max_tokens=max_tokens,
                 requires_key=True,
+                temperature=temperature,
             )
         elif provider_name == "ollama":
             base = settings.providers.ollama_host.rstrip("/")
@@ -267,6 +271,7 @@ def chat(
                 messages=messages,
                 max_tokens=max_tokens,
                 requires_key=False,
+                temperature=temperature,
             )
         else:
             raise RuntimeError(f"Provider '{provider_name}' is recognized but not wired.")
@@ -295,7 +300,7 @@ def chat(
 
 def _anthropic_chat(
     *, api_key: str, model: str, system_prompt: str,
-    messages: list[dict[str, str]], max_tokens: int,
+    messages: list[dict[str, str]], max_tokens: int, temperature: float = 0.7,
 ) -> tuple[str, str | None]:
     if not api_key:
         raise _ProviderError("Anthropic API key is not configured.")
@@ -308,6 +313,7 @@ def _anthropic_chat(
     kwargs: dict = {
         "model": model,
         "max_tokens": max_tokens,
+        "temperature": temperature,
         "messages": messages,
     }
     if system_prompt:
@@ -326,6 +332,7 @@ def _anthropic_chat(
 def _openai_compatible_chat(
     *, base_url: str, api_key: str, model: str, system_prompt: str,
     messages: list[dict[str, str]], max_tokens: int, requires_key: bool,
+    temperature: float = 0.7,
 ) -> tuple[str, str | None]:
     if requires_key and not api_key:
         raise _ProviderError("API key is not configured for this provider.")
@@ -342,6 +349,7 @@ def _openai_compatible_chat(
     response = client.chat.completions.create(
         model=model,
         max_tokens=max_tokens,
+        temperature=temperature,
         messages=full_messages,
     )
     choice = response.choices[0]

@@ -228,11 +228,22 @@ export type ProviderCredentialsView = {
   ollama_host: string;
 };
 
+export type AssistantView = {
+  id: string;
+  name: string;
+  provider: string;
+  model: string;
+  temperature: number;
+  max_tokens: number;
+};
+
 export type MachineSettingsView = {
   version: number;
   providers: ProviderCredentialsView;
   default_provider: string;
   default_models: Record<string, string>;
+  assistants: AssistantView[];
+  default_assistant_id: string;
   config_path: string;
 };
 
@@ -240,6 +251,8 @@ export type MachineSettingsUpdate = {
   providers?: Partial<ProviderCredentialsView>;
   default_provider?: string;
   default_models?: Record<string, string>;
+  assistants?: AssistantView[];
+  default_assistant_id?: string;
 };
 
 export type AIHealthResponse = {

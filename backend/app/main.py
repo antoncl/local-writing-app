@@ -1,7 +1,9 @@
 from __future__ import annotations
 
 from contextlib import contextmanager
+from dataclasses import dataclass
 from pathlib import Path
+from typing import Any
 
 from fastapi import FastAPI, HTTPException, Query
 from fastapi.middleware.cors import CORSMiddleware
@@ -370,17 +372,67 @@ def search(request: SearchRequest) -> SearchResponse:
 # --- Machine settings (AI provider config; never travels with the project) ---
 
 
-@app.get("/api/settings/machine", response_model=MachineSettingsView)
-def get_machine_settings() -> MachineSettingsView:
-    current = machine_settings_service.load_settings()
-    masked = machine_settings_service.mask_credentials(current)
+@dataclass
+class _ResolvedCall:
+    provider: str
+    model: str
+    temperature: float
+    max_tokens: int
+
+
+def _resolve_call_params(
+    settings: machine_settings_service.MachineSettings,
+    *,
+    assistant_id: str | None,
+    provider_override: str | None,
+    model_override: str | None,
+    max_tokens_override: int | None,
+) -> _ResolvedCall:
+    """Resolve provider / model / temperature / max_tokens from a request.
+
+    Priority for each field, highest first:
+      1. Explicit override on the request (provider, model, max_tokens).
+      2. The assistant indicated by assistant_id, or the default assistant.
+      3. The legacy default_provider / default_models matrix on settings.
+    """
+    assistant = machine_settings_service.resolve_assistant(settings, assistant_id)
+    if assistant is not None:
+        provider = provider_override or assistant.provider
+        model = model_override or assistant.model
+        max_tokens = max_tokens_override if max_tokens_override is not None else assistant.max_tokens
+        return _ResolvedCall(
+            provider=provider,
+            model=model,
+            temperature=assistant.temperature,
+            max_tokens=max_tokens,
+        )
+    provider = provider_override or settings.default_provider
+    model = model_override or settings.default_models.get(provider or "", "")
+    return _ResolvedCall(
+        provider=provider,
+        model=model,
+        temperature=0.7,
+        max_tokens=max_tokens_override if max_tokens_override is not None else 4096,
+    )
+
+
+def _build_settings_view(masked: dict[str, Any]) -> MachineSettingsView:
     return MachineSettingsView(
         version=masked["version"],
         providers=masked["providers"],
         default_provider=masked["default_provider"],
         default_models=masked["default_models"],
+        assistants=masked.get("assistants", []),
+        default_assistant_id=masked.get("default_assistant_id", ""),
         config_path=str(machine_settings_service.config_path()),
     )
+
+
+@app.get("/api/settings/machine", response_model=MachineSettingsView)
+def get_machine_settings() -> MachineSettingsView:
+    current = machine_settings_service.load_settings()
+    masked = machine_settings_service.mask_credentials(current)
+    return _build_settings_view(masked)
 
 
 @app.put("/api/settings/machine", response_model=MachineSettingsView)
@@ -390,13 +442,7 @@ def update_machine_settings(request: MachineSettingsUpdate) -> MachineSettingsVi
     updated = machine_settings_service.merge_update(current, patch)
     machine_settings_service.save_settings(updated)
     masked = machine_settings_service.mask_credentials(updated)
-    return MachineSettingsView(
-        version=masked["version"],
-        providers=masked["providers"],
-        default_provider=masked["default_provider"],
-        default_models=masked["default_models"],
-        config_path=str(machine_settings_service.config_path()),
-    )
+    return _build_settings_view(masked)
 
 
 # --- AI: health check ---
@@ -405,16 +451,21 @@ def update_machine_settings(request: MachineSettingsUpdate) -> MachineSettingsVi
 @app.post("/api/ai/health", response_model=AIHealthResponse)
 def ai_health(request: AIHealthRequest) -> AIHealthResponse:
     settings = machine_settings_service.load_settings()
-    provider_name = request.provider or settings.default_provider
-    model = request.model or settings.default_models.get(provider_name, "")
+    resolved = _resolve_call_params(
+        settings,
+        assistant_id=request.assistant_id,
+        provider_override=request.provider,
+        model_override=request.model,
+        max_tokens_override=None,
+    )
     try:
         project_info = service.current_project()
         policy = project_info.ai_policy
     except ProjectServiceError:
         policy = "off"
     return ai_providers.health_check(
-        provider_name=provider_name,
-        model=model,
+        provider_name=resolved.provider,
+        model=resolved.model,
         settings=settings,
         policy=policy,
     )
@@ -467,8 +518,13 @@ def ai_preview(request: AIPreviewRequest) -> AIPreviewResponse:
 @app.post("/api/ai/chat", response_model=AIChatResponse)
 def ai_chat(request: AIChatRequest) -> AIChatResponse:
     settings = machine_settings_service.load_settings()
-    provider_name = request.provider or settings.default_provider
-    model = request.model or settings.default_models.get(provider_name or "", "")
+    resolved = _resolve_call_params(
+        settings,
+        assistant_id=request.assistant_id,
+        provider_override=request.provider,
+        model_override=request.model,
+        max_tokens_override=request.max_tokens,
+    )
     try:
         project_info = service.current_project()
         policy = project_info.ai_policy
@@ -476,11 +532,12 @@ def ai_chat(request: AIChatRequest) -> AIChatResponse:
         policy = "off"
 
     result = ai_providers.chat(
-        provider_name=provider_name,
-        model=model,
+        provider_name=resolved.provider,
+        model=resolved.model,
         system_prompt=request.system_prompt,
         messages=[m.model_dump() for m in request.messages],
-        max_tokens=request.max_tokens,
+        max_tokens=resolved.max_tokens,
+        temperature=resolved.temperature,
         settings=settings,
         policy=policy,
     )
@@ -546,8 +603,13 @@ def ai_generate(request: AIGenerateRequest) -> AIGenerateResponse:
         )
 
     settings = machine_settings_service.load_settings()
-    provider_name = request.provider or settings.default_provider
-    model = request.model or settings.default_models.get(provider_name or "", "")
+    resolved = _resolve_call_params(
+        settings,
+        assistant_id=request.assistant_id,
+        provider_override=request.provider,
+        model_override=request.model,
+        max_tokens_override=request.max_tokens,
+    )
     try:
         project_info = service.current_project()
         policy = project_info.ai_policy
@@ -555,11 +617,12 @@ def ai_generate(request: AIGenerateRequest) -> AIGenerateResponse:
         policy = "off"
 
     result = ai_providers.chat(
-        provider_name=provider_name,
-        model=model,
+        provider_name=resolved.provider,
+        model=resolved.model,
         system_prompt=system_prompt,
         messages=chat_messages,
-        max_tokens=request.max_tokens,
+        max_tokens=resolved.max_tokens,
+        temperature=resolved.temperature,
         settings=settings,
         policy=policy,
     )

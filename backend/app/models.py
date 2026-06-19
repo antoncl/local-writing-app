@@ -438,11 +438,22 @@ class ProviderCredentialsView(BaseModel):
     ollama_host: str = ""
 
 
+class AssistantView(BaseModel):
+    id: str
+    name: str
+    provider: str
+    model: str
+    temperature: float = 0.7
+    max_tokens: int = 4096
+
+
 class MachineSettingsView(BaseModel):
     version: int
     providers: ProviderCredentialsView
     default_provider: str
     default_models: dict[str, str]
+    assistants: list[AssistantView] = Field(default_factory=list)
+    default_assistant_id: str = ""
     config_path: str
 
 
@@ -457,11 +468,14 @@ class MachineSettingsUpdate(BaseModel):
     providers: ProviderCredentialsPatch | None = None
     default_provider: str | None = None
     default_models: dict[str, str] | None = None
+    assistants: list[AssistantView] | None = None
+    default_assistant_id: str | None = None
 
 
 class AIHealthRequest(BaseModel):
     provider: str | None = None
     model: str | None = None
+    assistant_id: str | None = None
 
 
 class AIHealthResponse(BaseModel):
@@ -510,9 +524,10 @@ class ChatMessage(BaseModel):
 class AIChatRequest(BaseModel):
     provider: str | None = None
     model: str | None = None
+    assistant_id: str | None = None
     system_prompt: str = ""
     messages: list[ChatMessage] = Field(default_factory=list)
-    max_tokens: int = 4096
+    max_tokens: int | None = None
 
 
 class AIChatResponse(BaseModel):
@@ -539,7 +554,8 @@ class AIGenerateRequest(BaseModel):
     commit: bool = False
     provider: str | None = None
     model: str | None = None
-    max_tokens: int = 4096
+    assistant_id: str | None = None
+    max_tokens: int | None = None
 
 
 class AIGenerateResponse(BaseModel):

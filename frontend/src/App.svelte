@@ -19,6 +19,7 @@
     PromptEntry,
     PromptEntrySummary,
     Scene,
+    AssistantView,
     MachineSettingsUpdate,
     MachineSettingsView,
     MetadataFieldDefinition,
@@ -189,6 +190,8 @@ The story so far:
     ollama_host: string;
     default_provider: string;
     default_models: Record<string, string>;
+    assistants: AssistantView[];
+    default_assistant_id: string;
   };
   let machineSettingsDraft: MachineSettingsDraft | null = null;
   let appState: AppState = { name: "needsProject" };
@@ -706,9 +709,48 @@ The story so far:
         ollama_host: machineSettings.providers.ollama_host,
         default_provider: machineSettings.default_provider,
         default_models: { ...machineSettings.default_models },
+        assistants: machineSettings.assistants.map((a) => ({ ...a })),
+        default_assistant_id: machineSettings.default_assistant_id,
       };
       machineSettingsOpen = true;
     });
+  }
+
+  function addAssistant() {
+    if (!machineSettingsDraft) return;
+    const existing = new Set(machineSettingsDraft.assistants.map((a) => a.id));
+    let id = "new-assistant";
+    let suffix = 2;
+    while (existing.has(id)) {
+      id = `new-assistant-${suffix}`;
+      suffix += 1;
+    }
+    machineSettingsDraft = {
+      ...machineSettingsDraft,
+      assistants: [
+        ...machineSettingsDraft.assistants,
+        { id, name: "New assistant", provider: "anthropic", model: "", temperature: 0.7, max_tokens: 4096 },
+      ],
+    };
+  }
+
+  function updateAssistant(index: number, patch: Partial<AssistantView>) {
+    if (!machineSettingsDraft) return;
+    machineSettingsDraft = {
+      ...machineSettingsDraft,
+      assistants: machineSettingsDraft.assistants.map((a, i) => (i === index ? { ...a, ...patch } : a)),
+    };
+  }
+
+  function removeAssistant(index: number) {
+    if (!machineSettingsDraft) return;
+    const removed = machineSettingsDraft.assistants[index];
+    const next = machineSettingsDraft.assistants.filter((_, i) => i !== index);
+    let defaultId = machineSettingsDraft.default_assistant_id;
+    if (removed && removed.id === defaultId) {
+      defaultId = next[0]?.id ?? "";
+    }
+    machineSettingsDraft = { ...machineSettingsDraft, assistants: next, default_assistant_id: defaultId };
   }
 
   async function saveMachineSettings() {
@@ -723,6 +765,8 @@ The story so far:
         },
         default_provider: machineSettingsDraft!.default_provider,
         default_models: machineSettingsDraft!.default_models,
+        assistants: machineSettingsDraft!.assistants,
+        default_assistant_id: machineSettingsDraft!.default_assistant_id,
       };
       machineSettings = await api.updateMachineSettings(update);
       machineSettingsOpen = false;
@@ -3978,25 +4022,62 @@ The story so far:
           <input type="text" bind:value={machineSettingsDraft.ollama_host} placeholder="http://127.0.0.1:11434" />
         </label>
 
+        <fieldset class="assistants-roster">
+          <legend>Your assistants</legend>
+          <p class="muted">Each assistant pairs a model with a temperature and output size. Pick one as the default; the dispatch UI lets you override per call.</p>
+          {#each machineSettingsDraft.assistants as assistant, index (assistant.id)}
+            <div class="assistant-row">
+              <div class="assistant-grid">
+                <label>
+                  ID
+                  <input type="text" value={assistant.id} on:input={(event) => updateAssistant(index, { id: event.currentTarget.value })} />
+                </label>
+                <label>
+                  Name
+                  <input type="text" value={assistant.name} on:input={(event) => updateAssistant(index, { name: event.currentTarget.value })} />
+                </label>
+                <label>
+                  Subscription
+                  <select value={assistant.provider} on:change={(event) => updateAssistant(index, { provider: event.currentTarget.value })}>
+                    <option value="anthropic">Anthropic</option>
+                    <option value="openai">OpenAI</option>
+                    <option value="openrouter">OpenRouter</option>
+                    <option value="ollama">Ollama (local)</option>
+                  </select>
+                </label>
+                <label>
+                  Model
+                  <input type="text" value={assistant.model} on:input={(event) => updateAssistant(index, { model: event.currentTarget.value })} placeholder="claude-sonnet-4-6" />
+                </label>
+                <label>
+                  Temperature
+                  <input type="number" min="0" max="2" step="0.1" value={assistant.temperature} on:input={(event) => updateAssistant(index, { temperature: Number(event.currentTarget.value) })} />
+                </label>
+                <label>
+                  Max output tokens
+                  <input type="number" min="64" max="32768" step="64" value={assistant.max_tokens} on:input={(event) => updateAssistant(index, { max_tokens: Number(event.currentTarget.value) })} />
+                </label>
+              </div>
+              <button class="danger" type="button" on:click={() => removeAssistant(index)}>Remove</button>
+            </div>
+          {/each}
+          {#if machineSettingsDraft.assistants.length === 0}
+            <p class="muted">No assistants defined yet.</p>
+          {/if}
+          <button type="button" on:click={addAssistant}>+ Assistant</button>
+        </fieldset>
+
         <label>
-          Default provider
-          <select bind:value={machineSettingsDraft.default_provider}>
-            <option value="anthropic">Anthropic</option>
-            <option value="openai">OpenAI</option>
-            <option value="openrouter">OpenRouter</option>
-            <option value="ollama">Ollama (local)</option>
+          Default assistant
+          <select bind:value={machineSettingsDraft.default_assistant_id}>
+            {#each machineSettingsDraft.assistants as assistant (assistant.id)}
+              <option value={assistant.id}>{assistant.name}</option>
+            {/each}
+            {#if machineSettingsDraft.assistants.length === 0}
+              <option value="">(no assistants)</option>
+            {/if}
           </select>
         </label>
-
-        <fieldset class="default-models">
-          <legend>Default model per provider</legend>
-          {#each ["anthropic", "openai", "openrouter", "ollama"] as providerName}
-            <label class="row">
-              <span>{providerName}</span>
-              <input type="text" bind:value={machineSettingsDraft.default_models[providerName]} />
-            </label>
-          {/each}
-        </fieldset>
 
         <div class="confirm-modal-actions">
           <button type="button" on:click={() => (machineSettingsOpen = false)}>Cancel</button>

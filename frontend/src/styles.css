@@ -2471,6 +2471,41 @@ h3 {
   background: #fdecec;
 }
 
+.assistants-roster {
+  display: grid;
+  gap: 10px;
+}
+
+.assistants-roster legend {
+  font-weight: 600;
+}
+
+.assistant-row {
+  display: grid;
+  gap: 6px;
+  padding: 8px;
+  border: 1px dashed #cbd6d2;
+  border-radius: 6px;
+  background: #ffffff;
+}
+
+.assistant-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  gap: 6px 8px;
+}
+
+.assistant-row .danger {
+  justify-self: end;
+  background: transparent;
+  border: 1px solid #d77c7c;
+  color: #b04848;
+}
+
+.assistant-row .danger:hover {
+  background: #fdecec;
+}
+
 .prompt-entry-section {
   display: grid;
   gap: 4px;

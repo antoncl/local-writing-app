@@ -6,13 +6,15 @@ This is the technical reference for the local-writing-app's AI integration: how 
 
 ## Mental model
 
-The writer **subscribes** to a **provider** (Anthropic, OpenAI, OpenRouter, or a local Ollama). Through that subscription they **hire an assistant** — a specific model. The assistant is then told three things, every time it runs:
+The writer **subscribes** to a **provider** (Anthropic, OpenAI, OpenRouter, or a local Ollama). Through that subscription they **hire an assistant** — a saved configuration of a specific model with its own temperature and output budget. The assistant is then told three things, every time it runs:
 
 - a **role** — who to be (the system prompt / persona)
 - a **task** — what to do (the prompt entry, defined as a sub-type of `prompt`)
 - the **data** — what to look at (the context envelope: scenes, lore, snippets, helpers)
 
-Most of the surface in this folder concerns the last two. The subscription and the assistant live in machine settings; the role lives on the prompt sub-type; the task *is* the sub-type; the data is everything assembled by the template + helpers + context picker.
+Most of the surface in this folder concerns the last two. The subscription lives in machine settings as API keys + endpoint. **Assistants** also live in machine settings — a user-defined roster `(name, provider, model, temperature, max_tokens)` with one marked default. The role lives on the prompt sub-type; the task *is* the sub-type; the data is everything assembled by the template + helpers + context picker.
+
+When an AI endpoint runs, the resolution order is: explicit overrides on the request → the named assistant (or the default) → the legacy `default_provider` + `default_models` fallback. So a chat request can carry just `{messages: [...]}` and get the default assistant's settings, or `{assistant_id: "cheap-summary", ...}` to pick one specifically, or `{model: "claude-opus-4-8", ...}` to override on top of an assistant.
 
 This is the user-facing framing — internal docs still use the technical terms (provider, model, system prompt, context strategy) so be ready to translate.
 

@@ -14,6 +14,8 @@ from app.models import (
     AIContextPresetResponse,
     AIGenerateRequest,
     AIGenerateResponse,
+    AssistantEntry,
+    AssistantEntryList,
     AIHealthRequest,
     AIHealthResponse,
     AIPreviewRequest,
@@ -23,6 +25,7 @@ from app.models import (
     BacklinksResponse,
     CreateLoreEntryRequest,
     CreateProjectRequest,
+    CreateAssistantEntryRequest,
     CreatePromptEntryRequest,
     CreateSceneRequest,
     CreateStructureNodeRequest,
@@ -51,6 +54,7 @@ from app.models import (
     ReferenceResolveResponse,
     RenameMetadataFieldRequest,
     SaveLoreEntryRequest,
+    SaveAssistantEntryRequest,
     SavePromptEntryRequest,
     SaveSceneRequest,
     Scene,
@@ -315,6 +319,36 @@ def save_prompt_entry(entry_id: str, request: SavePromptEntryRequest) -> PromptE
 def delete_prompt_entry(entry_id: str) -> PromptEntryList:
     with translate_errors():
         return service.delete_prompt_entry(entry_id)
+
+
+@app.get("/api/assistants", response_model=AssistantEntryList)
+def list_assistant_entries() -> AssistantEntryList:
+    with translate_errors():
+        return service.list_assistant_entries()
+
+
+@app.post("/api/assistants", response_model=AssistantEntry)
+def create_assistant_entry(request: CreateAssistantEntryRequest) -> AssistantEntry:
+    with translate_errors():
+        return service.create_assistant_entry(request)
+
+
+@app.get("/api/assistants/{entry_id}", response_model=AssistantEntry)
+def get_assistant_entry(entry_id: str) -> AssistantEntry:
+    with translate_errors():
+        return service.read_assistant_entry(entry_id)
+
+
+@app.put("/api/assistants/{entry_id}", response_model=AssistantEntry)
+def save_assistant_entry(entry_id: str, request: SaveAssistantEntryRequest) -> AssistantEntry:
+    with translate_errors():
+        return service.save_assistant_entry(entry_id, request)
+
+
+@app.delete("/api/assistants/{entry_id}", response_model=AssistantEntryList)
+def delete_assistant_entry(entry_id: str) -> AssistantEntryList:
+    with translate_errors():
+        return service.delete_assistant_entry(entry_id)
 
 
 @app.get("/api/todos", response_model=TodoDocument)

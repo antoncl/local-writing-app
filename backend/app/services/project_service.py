@@ -13,7 +13,12 @@ from urllib.parse import unquote
 import yaml
 
 from app.models import (
+    AssistantEntry,
+    AssistantEntryList,
+    AssistantEntrySummary,
     Backlink,
+    CreateAssistantEntryRequest,
+    SaveAssistantEntryRequest,
     BacklinksResponse,
     CreateLoreEntryRequest,
     CreatePromptEntryRequest,
@@ -210,6 +215,19 @@ DEFAULT_METADATA_SCHEMA: dict[str, Any] = {
             "fields": [],
             "has_body": True,
         },
+        "assistant": {
+            "name": "Assistant",
+            "kind": "assistant",
+            "fields": [
+                "ai_provider",
+                "ai_model",
+                "ai_temperature",
+                "ai_max_tokens",
+                "summary",
+                "is_default",
+            ],
+            "has_body": False,
+        },
     },
     "fields": {
         "status": {
@@ -260,6 +278,15 @@ DEFAULT_METADATA_SCHEMA: dict[str, Any] = {
             "type": "computed",
             "computed": {"function": "counter", "scope": "siblings"},
         },
+        "ai_provider": {
+            "name": "Subscription",
+            "type": "select",
+            "options": ["anthropic", "openai", "openrouter", "ollama"],
+        },
+        "ai_model": {"name": "Model", "type": "text"},
+        "ai_temperature": {"name": "Temperature", "type": "number"},
+        "ai_max_tokens": {"name": "Max output tokens", "type": "number"},
+        "is_default": {"name": "Default", "type": "boolean"},
     },
 }
 
@@ -739,8 +766,10 @@ class ProjectService:
         entry_type_id = request.entry_type_id.strip()
         if not re.fullmatch(r"[A-Za-z][A-Za-z0-9_]*", entry_type_id):
             raise ProjectServiceError("Node type ID must start with a letter and contain only letters, numbers, and underscores.", 422)
-        if request.entry_type.kind not in {"scene", "lore", "prompt"}:
-            raise ProjectServiceError("Node type kind must be scene, lore, or prompt.", 422)
+        if request.entry_type.kind not in {"scene", "lore", "prompt", "assistant"}:
+            raise ProjectServiceError(
+                "Node type kind must be scene, lore, prompt, or assistant.", 422
+            )
         if request.entry_type.prompt is not None and request.entry_type.kind != "prompt":
             raise ProjectServiceError("Prompt configuration is only valid on prompt node types.", 422)
         if request.entry_type.parent == entry_type_id:
@@ -1443,6 +1472,9 @@ class ProjectService:
     def _build_node_index(self, root: Path | None = None) -> NodeIndex:
         root = root or self._require_project()
         index = NodeIndex()
+        # Machine config dir is a base layer for assistants only — it lives
+        # outside the project tree and carries the user's roster.
+        self._collect_machine_layer_assistants(index, duplicate_relative_to=root)
         layer_folders = self._project_layer_folders(root)
         # Outermost ancestor first so descendant entries overwrite on collision.
         for layer_index, folder in enumerate(layer_folders):
@@ -1453,6 +1485,7 @@ class ProjectService:
                 ("scene", "scenes", "scene"),
                 ("lore", "lore", "lore_note"),
                 ("prompt", "prompts", "prompt"),
+                ("assistant", "assistants", "assistant"),
             ]:
                 # Scenes stay book-scoped — only walk the current project's scenes folder.
                 if kind == "scene" and not is_current_project:
@@ -1468,6 +1501,25 @@ class ProjectService:
                     duplicate_relative_to=root,
                 )
         return index
+
+    def _collect_machine_layer_assistants(
+        self, index: NodeIndex, *, duplicate_relative_to: Path
+    ) -> None:
+        from app.services import machine_settings as ms_service
+
+        machine_dir = ms_service.assistants_dir().parent
+        if not (machine_dir / "assistants").exists():
+            return
+        self._collect_layer_entries(
+            folder=machine_dir,
+            folder_name="assistants",
+            kind="assistant",
+            default_entry_type="assistant",
+            layer_id=self._metadata_schema_layer_id(machine_dir),
+            layer_label="Machine",
+            index=index,
+            duplicate_relative_to=duplicate_relative_to,
+        )
 
     def _collect_layer_entries(
         self,
@@ -2235,6 +2287,122 @@ class ProjectService:
         if path.exists():
             path.unlink()
         return self.list_prompt_entries()
+
+    # ----- Assistants (file-backed, layered, machine-first) ---------------
+
+    def list_assistant_entries(self) -> AssistantEntryList:
+        index = self._build_assistant_index()
+        entries: list[AssistantEntrySummary] = []
+        for entry in index.by_id.values():
+            if entry.kind != "assistant":
+                continue
+            try:
+                front_matter, _body = self._read_markdown_with_front_matter(entry.path, strict=True)
+            except ProjectServiceError:
+                continue
+            raw_entry_type = front_matter.get("entry_type") or "assistant"
+            entry_type = raw_entry_type if isinstance(raw_entry_type, str) else "assistant"
+            entries.append(
+                AssistantEntrySummary(
+                    id=entry.id,
+                    title=str(front_matter.get("title") or entry.id),
+                    entry_type=entry_type,
+                    metadata=self._normalise_metadata(front_matter.get("metadata"), entry.path),
+                    source_layer_id=entry.source_layer_id,
+                    source_layer_label=entry.source_layer_label,
+                )
+            )
+        entries.sort(key=lambda entry: (entry.title.lower(), entry.id))
+        return AssistantEntryList(entries=entries)
+
+    def read_assistant_entry(self, entry_id: str) -> AssistantEntry:
+        index_entry = self._build_assistant_index().by_id.get(entry_id)
+        if index_entry is None or index_entry.kind != "assistant":
+            raise ProjectServiceError(f"Assistant {entry_id} does not exist.", 404)
+        path = index_entry.path
+        front_matter, _body = self._read_markdown_with_front_matter(path, strict=True)
+        node_id = self._node_id_for_path(path, front_matter)
+        raw_entry_type = front_matter.get("entry_type") or "assistant"
+        if not isinstance(raw_entry_type, str):
+            raise ProjectServiceError(f"Assistant {node_id} has invalid entry_type; it must be text.", 422)
+        return AssistantEntry(
+            id=node_id,
+            title=str(front_matter.get("title") or node_id),
+            revision=self._revision(path),
+            entry_type=raw_entry_type,
+            metadata=self._normalise_metadata(front_matter.get("metadata"), path),
+            source_layer_id=index_entry.source_layer_id,
+            source_layer_label=index_entry.source_layer_label,
+        )
+
+    def create_assistant_entry(self, request: CreateAssistantEntryRequest) -> AssistantEntry:
+        target_folder = self._assistant_layer_folder_for_id(request.layer_id)
+        self._check_entry_type_kind(request.entry_type, "assistant")
+        entry_id = self._new_id("assistant")
+        target_folder.mkdir(parents=True, exist_ok=True)
+        path = self._filepath_for_new_node(target_folder, request.title)
+        self._write_node_entry_file(
+            path,
+            entry_id,
+            request.title,
+            request.entry_type,
+            {},
+            "",
+        )
+        return self.read_assistant_entry(entry_id)
+
+    def save_assistant_entry(self, entry_id: str, request: SaveAssistantEntryRequest) -> AssistantEntry:
+        index_entry = self._build_assistant_index().by_id.get(entry_id)
+        if index_entry is None or index_entry.kind != "assistant":
+            raise ProjectServiceError(f"Assistant {entry_id} does not exist.", 404)
+        path = index_entry.path
+        front_matter = self._read_front_matter_only(path, strict=True)
+        node_id = self._node_id_for_path(path, front_matter)
+        current_revision = self._revision(path)
+        if request.base_revision and request.base_revision != current_revision:
+            raise ProjectServiceError("Assistant changed on disk after it was opened.", 409)
+        self._check_entry_type_kind(request.entry_type, "assistant")
+        metadata = self._normalise_metadata(request.metadata, path)
+        self._write_node_entry_file(path, node_id, request.title, request.entry_type, metadata, "")
+        self._maybe_rename_node_file(path, request.title)
+        return self.read_assistant_entry(node_id)
+
+    def delete_assistant_entry(self, entry_id: str) -> AssistantEntryList:
+        index_entry = self._build_assistant_index().by_id.get(entry_id)
+        if index_entry is None or index_entry.kind != "assistant":
+            raise ProjectServiceError(f"Assistant {entry_id} does not exist.", 404)
+        if index_entry.path.exists():
+            index_entry.path.unlink()
+        return self.list_assistant_entries()
+
+    def _assistant_layer_folder_for_id(self, layer_id: str) -> Path:
+        """Resolve a layer_id (from list_metadata_schema_layers, or "") to its
+        assistants/ folder. Empty layer_id → machine config dir (the canonical
+        per-user roster)."""
+        from app.services import machine_settings as ms_service
+
+        if not layer_id:
+            return ms_service.assistants_dir()
+        machine_dir = ms_service.assistants_dir().parent
+        if self._metadata_schema_layer_id(machine_dir) == layer_id:
+            return machine_dir / "assistants"
+        if self.root_path is not None:
+            for folder in self._project_layer_folders(self.root_path):
+                if self._metadata_schema_layer_id(folder) == layer_id:
+                    return folder / "assistants"
+        raise ProjectServiceError(f"Unknown layer id {layer_id}.", 422)
+
+    def _build_assistant_index(self) -> NodeIndex:
+        """Build a node index covering just the assistant kind. Works without
+        an open project (machine layer only) or with one (full layered walk).
+        """
+        if self.root_path is not None:
+            return self._build_node_index(self.root_path)
+        index = NodeIndex()
+        self._collect_machine_layer_assistants(
+            index, duplicate_relative_to=Path("/")
+        )
+        return index
 
     def _write_node_entry_file(
         self,

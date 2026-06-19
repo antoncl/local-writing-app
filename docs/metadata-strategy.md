@@ -49,6 +49,8 @@ classes; instance editors edit objects.
 | Instance editor | The document editor opened on a single entry file |
 | Inheritance resolution | Backend merges `fields`, `display_template`, `has_body`, `body_editor`, `body_language`, and `prompt` extras up the `parent` chain (see `_resolve_metadata_schema_inheritance`) |
 
+The four kinds today are **scene**, **lore**, **prompt**, and **assistant**. Scenes are book-scoped; lore, prompts, and assistants are layered. Assistants additionally have the machine config dir (`~/.config/local-writing-app/assistants/` or `%APPDATA%/local-writing-app/assistants/`) prepended as a base layer so each user has a per-machine roster that follows them across projects. See [docs/prompts/README.md](prompts/README.md) for the mental model framing.
+
 Each `kind` gets one folder (`scenes/`, `lore/`, `prompts/`), one CRUD endpoint
 family (`/api/scenes`, `/api/lore`, `/api/prompts`), and one instance pane in
 the UI. The schema editor is contextual: opened from a lore editor it shows

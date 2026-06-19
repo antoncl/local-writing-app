@@ -334,6 +334,44 @@ class SavePromptEntryRequest(BaseModel):
     metadata: dict[str, MetadataValue] = Field(default_factory=dict)
 
 
+class AssistantEntrySummary(BaseModel):
+    id: str
+    title: str
+    entry_type: str = "assistant"
+    metadata: dict[str, MetadataValue] = Field(default_factory=dict)
+    source_layer_id: str = ""
+    source_layer_label: str = ""
+
+
+class AssistantEntry(BaseModel):
+    id: str
+    title: str
+    revision: str
+    entry_type: str = "assistant"
+    metadata: dict[str, MetadataValue] = Field(default_factory=dict)
+    source_layer_id: str = ""
+    source_layer_label: str = ""
+
+
+class AssistantEntryList(BaseModel):
+    entries: list[AssistantEntrySummary] = Field(default_factory=list)
+
+
+class CreateAssistantEntryRequest(BaseModel):
+    title: str = Field(min_length=1)
+    entry_type: str = "assistant"
+    # "" → machine layer (the default). Otherwise the layer-id (project root
+    # hash) where the file should land.
+    layer_id: str = ""
+
+
+class SaveAssistantEntryRequest(BaseModel):
+    title: str = Field(min_length=1)
+    base_revision: str | None = None
+    entry_type: str = "assistant"
+    metadata: dict[str, MetadataValue] = Field(default_factory=dict)
+
+
 class TodoItem(BaseModel):
     id: str
     text: str

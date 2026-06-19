@@ -238,5 +238,153 @@ class MachineSettingsRoundTripTests(unittest.TestCase):
         self.assertEqual(body["default_assistant_id"], "main")
 
 
+class FileBackedAssistantsTests(unittest.TestCase):
+    """Slice A: assistants now live as Node-style markdown files in the
+    machine config dir (and ancestor / project layers). The inline
+    settings.assistants list mirrors the file index on load."""
+
+    def setUp(self) -> None:
+        self.temp_dir = TemporaryDirectory()
+        self.root = Path(self.temp_dir.name) / "project"
+        global_service.__init__()
+        global_service.create_project(self.root, "Files Tests")
+        self.client = TestClient(app)
+        self.config_dir = Path(self.temp_dir.name) / "config"
+        self.config_dir.mkdir()
+        self._patcher = patch(
+            "app.services.machine_settings.config_path",
+            return_value=self.config_dir / "config.yaml",
+        )
+        self._patcher.start()
+
+    def tearDown(self) -> None:
+        self._patcher.stop()
+        self.temp_dir.cleanup()
+
+    def test_save_then_load_round_trips_via_files(self) -> None:
+        """PUT writes assistant files to disk; subsequent GET reads them back."""
+        put = self.client.put(
+            "/api/settings/machine",
+            json={
+                "assistants": [
+                    {
+                        "id": "creative",
+                        "name": "Creative drafting",
+                        "provider": "anthropic",
+                        "model": "claude-sonnet-4-6",
+                        "temperature": 0.9,
+                        "max_tokens": 4096,
+                    },
+                    {
+                        "id": "cheap",
+                        "name": "Cheap summary",
+                        "provider": "anthropic",
+                        "model": "claude-haiku-4-5-20251001",
+                        "temperature": 0.2,
+                        "max_tokens": 512,
+                    },
+                ],
+                "default_assistant_id": "creative",
+            },
+        )
+        self.assertEqual(put.status_code, 200, put.text)
+
+        assistants_dir = self.config_dir / "assistants"
+        self.assertTrue((assistants_dir / "creative.md").exists())
+        self.assertTrue((assistants_dir / "cheap.md").exists())
+
+        # Verify is_default lives in the metadata of the right file.
+        creative_text = (assistants_dir / "creative.md").read_text(encoding="utf-8")
+        self.assertIn("is_default: true", creative_text)
+        cheap_text = (assistants_dir / "cheap.md").read_text(encoding="utf-8")
+        self.assertNotIn("is_default: true", cheap_text)
+
+        get = self.client.get("/api/settings/machine")
+        body = get.json()
+        ids = {a["id"] for a in body["assistants"]}
+        self.assertEqual(ids, {"creative", "cheap"})
+        self.assertEqual(body["default_assistant_id"], "creative")
+
+    def test_files_override_inline_yaml_list(self) -> None:
+        """If the user hand-edits config.yaml's inline list but files exist,
+        the file index wins (single source of truth)."""
+        assistants_dir = self.config_dir / "assistants"
+        assistants_dir.mkdir(parents=True)
+        (assistants_dir / "from-disk.md").write_text(
+            "---\n"
+            "id: from-disk\n"
+            "title: From disk\n"
+            "entry_type: assistant\n"
+            "metadata:\n"
+            "  ai_provider: ollama\n"
+            "  ai_model: llama3.2\n"
+            "  ai_temperature: 0.3\n"
+            "  ai_max_tokens: 1024\n"
+            "  is_default: true\n"
+            "---\n",
+            encoding="utf-8",
+        )
+        (self.config_dir / "config.yaml").write_text(
+            "version: 1\n"
+            "default_provider: anthropic\n"
+            "default_models: {}\n"
+            "assistants:\n"
+            "  - id: only-inline\n"
+            "    name: Only inline\n"
+            "    provider: anthropic\n"
+            "    model: claude-sonnet-4-6\n"
+            "    temperature: 0.7\n"
+            "    max_tokens: 4096\n"
+            "default_assistant_id: only-inline\n",
+            encoding="utf-8",
+        )
+
+        get = self.client.get("/api/settings/machine")
+        body = get.json()
+
+        # The file wins.
+        self.assertEqual([a["id"] for a in body["assistants"]], ["from-disk"])
+        self.assertEqual(body["default_assistant_id"], "from-disk")
+        self.assertEqual(body["assistants"][0]["temperature"], 0.3)
+
+    def test_assistant_index_includes_machine_layer(self) -> None:
+        """Project-scoped reads (e.g. /api/assistants) see the machine
+        layer's assistants."""
+        assistants_dir = self.config_dir / "assistants"
+        assistants_dir.mkdir(parents=True)
+        (assistants_dir / "fleet.md").write_text(
+            "---\n"
+            "id: fleet\n"
+            "title: Fleet drafting\n"
+            "entry_type: assistant\n"
+            "metadata: { ai_provider: anthropic, ai_model: claude-sonnet-4-6 }\n"
+            "---\n",
+            encoding="utf-8",
+        )
+        response = self.client.get("/api/assistants")
+        self.assertEqual(response.status_code, 200, response.text)
+        body = response.json()
+        ids = [a["id"] for a in body["entries"]]
+        self.assertIn("fleet", ids)
+        # The machine layer carries a stable label.
+        fleet = next(a for a in body["entries"] if a["id"] == "fleet")
+        self.assertEqual(fleet["source_layer_label"], "Machine")
+
+    def test_create_assistant_endpoint_lands_in_machine_layer(self) -> None:
+        """POST without a layer_id lands in the machine config dir."""
+        create = self.client.post(
+            "/api/assistants",
+            json={"title": "New one", "entry_type": "assistant"},
+        )
+        self.assertEqual(create.status_code, 200, create.text)
+        entry = create.json()
+        self.assertTrue(entry["id"].startswith("assistant_"))
+        self.assertEqual(entry["source_layer_label"], "Machine")
+
+        # File is on disk under the patched assistants dir.
+        files = list((self.config_dir / "assistants").glob("*.md"))
+        self.assertEqual(len(files), 1)
+
+
 if __name__ == "__main__":
     unittest.main()

@@ -18,6 +18,7 @@ from app.models import (
     AssistantEntrySummary,
     Backlink,
     CreateAssistantEntryRequest,
+    ReorderAssistantsRequest,
     SaveAssistantEntryRequest,
     BacklinksResponse,
     CreateLoreEntryRequest,
@@ -2293,6 +2294,7 @@ class ProjectService:
     def list_assistant_entries(self) -> AssistantEntryList:
         index = self._build_assistant_index()
         entries: list[AssistantEntrySummary] = []
+        layer_paths: dict[str, Path] = {}
         for entry in index.by_id.values():
             if entry.kind != "assistant":
                 continue
@@ -2312,8 +2314,74 @@ class ProjectService:
                     source_layer_label=entry.source_layer_label,
                 )
             )
-        entries.sort(key=lambda entry: (entry.title.lower(), entry.id))
+            layer_paths.setdefault(entry.source_layer_id, entry.path.parent)
+        # Per-layer ordering: read each layer's .order.yaml (if any) and use
+        # it as the primary sort key. Entries not listed in the order file
+        # sort alphabetically by title after the listed ones.
+        order_by_layer: dict[str, dict[str, int]] = {}
+        for layer_id, folder in layer_paths.items():
+            ordered = self._read_assistants_order(folder)
+            order_by_layer[layer_id] = {entry_id: idx for idx, entry_id in enumerate(ordered)}
+
+        def sort_key(entry: AssistantEntrySummary):
+            positions = order_by_layer.get(entry.source_layer_id, {})
+            if entry.id in positions:
+                return (0, positions[entry.id], "")
+            return (1, 0, entry.title.lower())
+
+        entries.sort(key=sort_key)
         return AssistantEntryList(entries=entries)
+
+    def reorder_assistant_entries(
+        self, request: ReorderAssistantsRequest
+    ) -> AssistantEntryList:
+        folder = self._assistant_layer_folder_for_id(request.layer_id)
+        if not folder.exists():
+            raise ProjectServiceError(
+                f"No assistants folder exists at layer {request.layer_id!r}.", 404
+            )
+        # Validate that every supplied id exists in this layer.
+        layer_ids: set[str] = set()
+        for path in folder.glob("*.md"):
+            try:
+                front = self._read_front_matter_only(path, strict=True)
+            except ProjectServiceError:
+                continue
+            entry_id = front.get("id")
+            if isinstance(entry_id, str) and entry_id.strip():
+                layer_ids.add(entry_id.strip())
+        unknown = [eid for eid in request.ordered_ids if eid not in layer_ids]
+        if unknown:
+            raise ProjectServiceError(
+                f"Unknown assistant id(s) for layer: {', '.join(unknown)}.", 422
+            )
+        # Preserve only the supplied ids; unlisted entries trail alphabetically.
+        dedup: list[str] = []
+        seen: set[str] = set()
+        for entry_id in request.ordered_ids:
+            if entry_id in seen:
+                continue
+            seen.add(entry_id)
+            dedup.append(entry_id)
+        self._write_assistants_order(folder, dedup)
+        return self.list_assistant_entries()
+
+    def _read_assistants_order(self, folder: Path) -> list[str]:
+        order_file = folder / ".order.yaml"
+        if not order_file.exists():
+            return []
+        try:
+            data = self._read_yaml(order_file)
+        except ProjectServiceError:
+            return []
+        ids = data.get("ids") if isinstance(data, dict) else None
+        if not isinstance(ids, list):
+            return []
+        return [str(entry_id) for entry_id in ids if isinstance(entry_id, str)]
+
+    def _write_assistants_order(self, folder: Path, ordered_ids: list[str]) -> None:
+        folder.mkdir(parents=True, exist_ok=True)
+        self._write_yaml(folder / ".order.yaml", {"ids": list(ordered_ids)})
 
     def read_assistant_entry(self, entry_id: str) -> AssistantEntry:
         index_entry = self._build_assistant_index().by_id.get(entry_id)

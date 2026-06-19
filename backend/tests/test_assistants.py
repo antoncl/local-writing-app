@@ -386,5 +386,70 @@ class FileBackedAssistantsTests(unittest.TestCase):
         self.assertEqual(len(files), 1)
 
 
+class AssistantReorderTests(unittest.TestCase):
+    """Slice C: per-layer assistants/.order.yaml drives list ordering;
+    /api/assistants/order writes it."""
+
+    def setUp(self) -> None:
+        self.temp_dir = TemporaryDirectory()
+        self.root = Path(self.temp_dir.name) / "project"
+        global_service.__init__()
+        global_service.create_project(self.root, "Reorder Tests")
+        self.client = TestClient(app)
+        self.config_dir = Path(self.temp_dir.name) / "config"
+        self.config_dir.mkdir()
+        self._patcher = patch(
+            "app.services.machine_settings.config_path",
+            return_value=self.config_dir / "config.yaml",
+        )
+        self._patcher.start()
+        # Seed three machine-layer assistants.
+        assistants_dir = self.config_dir / "assistants"
+        assistants_dir.mkdir(parents=True)
+        for slug in ("alpha", "bravo", "charlie"):
+            (assistants_dir / f"{slug}.md").write_text(
+                f"---\nid: {slug}\ntitle: {slug.capitalize()}\nentry_type: assistant\nmetadata: {{ ai_provider: anthropic, ai_model: m }}\n---\n",
+                encoding="utf-8",
+            )
+        self.machine_layer_id = global_service._metadata_schema_layer_id(self.config_dir)
+
+    def tearDown(self) -> None:
+        self._patcher.stop()
+        self.temp_dir.cleanup()
+
+    def test_default_order_is_alphabetical(self) -> None:
+        response = self.client.get("/api/assistants")
+        ids = [e["id"] for e in response.json()["entries"]]
+        self.assertEqual(ids, ["alpha", "bravo", "charlie"])
+
+    def test_reorder_endpoint_writes_order_file(self) -> None:
+        response = self.client.post(
+            "/api/assistants/order",
+            json={"layer_id": self.machine_layer_id, "ordered_ids": ["charlie", "alpha"]},
+        )
+        self.assertEqual(response.status_code, 200, response.text)
+        order_file = self.config_dir / "assistants" / ".order.yaml"
+        self.assertTrue(order_file.exists())
+        # Listed ids first in order, unlisted (bravo) trails alphabetically.
+        ids = [e["id"] for e in response.json()["entries"]]
+        self.assertEqual(ids, ["charlie", "alpha", "bravo"])
+
+    def test_reorder_with_unknown_id_returns_422(self) -> None:
+        response = self.client.post(
+            "/api/assistants/order",
+            json={"layer_id": self.machine_layer_id, "ordered_ids": ["alpha", "ghost"]},
+        )
+        self.assertEqual(response.status_code, 422)
+
+    def test_subsequent_get_respects_saved_order(self) -> None:
+        self.client.post(
+            "/api/assistants/order",
+            json={"layer_id": self.machine_layer_id, "ordered_ids": ["bravo", "charlie", "alpha"]},
+        )
+        response = self.client.get("/api/assistants")
+        ids = [e["id"] for e in response.json()["entries"]]
+        self.assertEqual(ids, ["bravo", "charlie", "alpha"])
+
+
 if __name__ == "__main__":
     unittest.main()

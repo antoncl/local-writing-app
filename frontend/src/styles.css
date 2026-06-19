@@ -2546,6 +2546,45 @@ h3 {
   min-width: 280px;
 }
 
+.assistant-row-wrap {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  align-items: center;
+  gap: 2px;
+  border-top: 2px solid transparent;
+  border-bottom: 2px solid transparent;
+}
+
+.assistant-row-wrap.dragging {
+  opacity: 0.45;
+}
+
+.assistant-row-wrap.drop-before {
+  border-top-color: #2f6f5e;
+}
+
+.assistant-row-wrap.drop-after {
+  border-bottom-color: #2f6f5e;
+}
+
+.assistant-drag-handle {
+  display: inline-block;
+  padding: 0 4px;
+  color: #c5cdc9;
+  cursor: grab;
+  user-select: none;
+  font-weight: 700;
+  letter-spacing: -2px;
+}
+
+.assistant-row-wrap:hover .assistant-drag-handle {
+  color: #6a7470;
+}
+
+.assistant-drag-handle:active {
+  cursor: grabbing;
+}
+
 .assistants-pane .prompt-entry-row {
   display: grid;
   gap: 2px;

@@ -620,6 +620,77 @@ The story so far:
 
   $: groupedAssistantEntries = groupAssistantEntriesByLayer(assistantEntries);
 
+  // Drag-drop state for reordering assistants within a layer.
+  let assistantDragId: string | null = null;
+  let assistantDragLayerId: string | null = null;
+  let assistantDropTarget: { id: string; position: "before" | "after" } | null = null;
+
+  function startAssistantDrag(event: DragEvent, entry: AssistantEntrySummary) {
+    if (!event.dataTransfer) return;
+    assistantDragId = entry.id;
+    assistantDragLayerId = entry.source_layer_id ?? "";
+    event.dataTransfer.effectAllowed = "move";
+    // Some browsers require setData to start a drag.
+    event.dataTransfer.setData("text/plain", entry.id);
+  }
+
+  function onAssistantDragOver(event: DragEvent, entry: AssistantEntrySummary) {
+    if (!assistantDragId || assistantDragLayerId !== (entry.source_layer_id ?? "")) return;
+    if (entry.id === assistantDragId) return;
+    event.preventDefault();
+    if (event.dataTransfer) event.dataTransfer.dropEffect = "move";
+    const row = event.currentTarget as HTMLElement;
+    const rect = row.getBoundingClientRect();
+    const position = event.clientY < rect.top + rect.height / 2 ? "before" : "after";
+    assistantDropTarget = { id: entry.id, position };
+  }
+
+  function onAssistantDragLeave() {
+    assistantDropTarget = null;
+  }
+
+  function endAssistantDrag() {
+    assistantDragId = null;
+    assistantDragLayerId = null;
+    assistantDropTarget = null;
+  }
+
+  async function onAssistantDrop(event: DragEvent, entry: AssistantEntrySummary) {
+    event.preventDefault();
+    if (!assistantDragId || assistantDragId === entry.id) {
+      endAssistantDrag();
+      return;
+    }
+    const layerId = entry.source_layer_id ?? "";
+    if (assistantDragLayerId !== layerId) {
+      endAssistantDrag();
+      return;
+    }
+    const group = groupedAssistantEntries.find((g) => g.layerId === layerId);
+    if (!group) {
+      endAssistantDrag();
+      return;
+    }
+    const draggedId = assistantDragId;
+    const dropPosition = assistantDropTarget?.position ?? "after";
+    const withoutDragged = group.entries.filter((e) => e.id !== draggedId);
+    const targetIndex = withoutDragged.findIndex((e) => e.id === entry.id);
+    if (targetIndex === -1) {
+      endAssistantDrag();
+      return;
+    }
+    const insertAt = dropPosition === "before" ? targetIndex : targetIndex + 1;
+    const orderedIds = [
+      ...withoutDragged.slice(0, insertAt).map((e) => e.id),
+      draggedId,
+      ...withoutDragged.slice(insertAt).map((e) => e.id),
+    ];
+    endAssistantDrag();
+    await run(async () => {
+      assistantEntries = (await api.reorderAssistants(layerId, orderedIds)).entries;
+    });
+  }
+
   function groupAssistantEntriesByLayer(entries: AssistantEntrySummary[]): { layerId: string; layerLabel: string; entries: AssistantEntrySummary[] }[] {
     const groups = new Map<string, { layerId: string; layerLabel: string; entries: AssistantEntrySummary[] }>();
     for (const entry of entries) {
@@ -3568,15 +3639,35 @@ The story so far:
             <small>{group.entries.length}</small>
           </header>
           {#each group.entries as entry (entry.id)}
-            <button class:active={focusedEditorPane?.document?.type === "assistant" && focusedEditorPane.document.id === entry.id} class="prompt-entry-row" type="button" on:click={() => openAssistantEntryInEditorPane(entry.id)}>
-              <span>
-                <strong>{entry.title}</strong>
-                {#if entry.metadata?.is_default}
-                  <small class="assistant-default-badge">default</small>
-                {/if}
-                <small>{assistantSubtitle(entry)}</small>
-              </span>
-            </button>
+            <!-- svelte-ignore a11y_no_static_element_interactions -->
+            <div
+              class="assistant-row-wrap"
+              class:drop-before={assistantDropTarget?.id === entry.id && assistantDropTarget?.position === "before"}
+              class:drop-after={assistantDropTarget?.id === entry.id && assistantDropTarget?.position === "after"}
+              class:dragging={assistantDragId === entry.id}
+              on:dragover={(event) => onAssistantDragOver(event, entry)}
+              on:dragleave={onAssistantDragLeave}
+              on:drop={(event) => onAssistantDrop(event, entry)}
+            >
+              <span
+                class="assistant-drag-handle"
+                draggable="true"
+                role="button"
+                tabindex="-1"
+                aria-label="Drag to reorder"
+                on:dragstart={(event) => startAssistantDrag(event, entry)}
+                on:dragend={endAssistantDrag}
+              >⋮⋮</span>
+              <button class:active={focusedEditorPane?.document?.type === "assistant" && focusedEditorPane.document.id === entry.id} class="prompt-entry-row" type="button" on:click={() => openAssistantEntryInEditorPane(entry.id)}>
+                <span>
+                  <strong>{entry.title}</strong>
+                  {#if entry.metadata?.is_default}
+                    <small class="assistant-default-badge">default</small>
+                  {/if}
+                  <small>{assistantSubtitle(entry)}</small>
+                </span>
+              </button>
+            </div>
           {/each}
         </div>
       {/each}

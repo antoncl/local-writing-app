@@ -316,6 +316,12 @@ export const api = {
       method: "DELETE",
     });
   },
+  reorderAssistants(layerId: string, orderedIds: string[]) {
+    return request<AssistantEntryList>("/assistants/order", {
+      method: "POST",
+      body: JSON.stringify({ layer_id: layerId, ordered_ids: orderedIds }),
+    });
+  },
   getTodos() {
     return request<TodoDocument>("/todos");
   },

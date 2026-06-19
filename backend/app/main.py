@@ -27,6 +27,7 @@ from app.models import (
     CreateProjectRequest,
     CreateAssistantEntryRequest,
     CreatePromptEntryRequest,
+    ReorderAssistantsRequest,
     CreateSceneRequest,
     CreateStructureNodeRequest,
     CreateTodoRequest,
@@ -349,6 +350,12 @@ def save_assistant_entry(entry_id: str, request: SaveAssistantEntryRequest) -> A
 def delete_assistant_entry(entry_id: str) -> AssistantEntryList:
     with translate_errors():
         return service.delete_assistant_entry(entry_id)
+
+
+@app.post("/api/assistants/order", response_model=AssistantEntryList)
+def reorder_assistant_entries(request: ReorderAssistantsRequest) -> AssistantEntryList:
+    with translate_errors():
+        return service.reorder_assistant_entries(request)
 
 
 @app.get("/api/todos", response_model=TodoDocument)

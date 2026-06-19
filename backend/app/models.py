@@ -372,6 +372,13 @@ class SaveAssistantEntryRequest(BaseModel):
     metadata: dict[str, MetadataValue] = Field(default_factory=dict)
 
 
+class ReorderAssistantsRequest(BaseModel):
+    # "" → machine layer. Otherwise the layer id (hash of folder path) as
+    # returned in source_layer_id on each entry.
+    layer_id: str = ""
+    ordered_ids: list[str] = Field(default_factory=list)
+
+
 class TodoItem(BaseModel):
     id: str
     text: str

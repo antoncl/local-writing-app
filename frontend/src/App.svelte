@@ -162,15 +162,14 @@ The story so far:
     "You are a brainstorming partner for a fiction writer. " +
     "Be concise, propose options, and don't write prose unless asked.";
   let chatSystemPrompt = DEFAULT_CHAT_SYSTEM_PROMPT;
-  let chatProvider = "";
-  let chatModel = "";
+  // "" means: use the user's default assistant (resolved server-side).
+  let chatAssistantId = "";
   let chatInput = "";
   let chatHistory: { role: "user" | "assistant"; content: string; truncated?: boolean }[] = [];
   let chatRunning = false;
   let chatError: string | null = null;
   let chatLastMeta: { provider: string; model: string; latency_ms: number } | null = null;
   let chatScrollEl: HTMLDivElement | null = null;
-  let chatMaxTokens = 4096;
   let chatActivePromptEntry: { id: string; title: string } | null = null;
   type ChatContextKind = "scene" | "lore" | "snippet" | "preset";
   type ChatContextItem = {
@@ -338,6 +337,10 @@ The story so far:
   onMount(() => {
     fitPanesToViewport();
     document.addEventListener("mousedown", handleDocumentMousedown);
+    // Eagerly fetch machine settings so the chat panel and inputs dialog
+    // can show the assistant roster without a round-trip when first opened.
+    // Failure is non-fatal — both UIs fall back to "default assistant".
+    void loadMachineSettings();
     return () => {
       document.removeEventListener("mousemove", movePane);
       document.removeEventListener("mouseup", stopPaneDrag);
@@ -346,6 +349,15 @@ The story so far:
       document.removeEventListener("mousedown", handleDocumentMousedown);
     };
   });
+
+  async function loadMachineSettings() {
+    try {
+      machineSettings = await api.getMachineSettings();
+    } catch {
+      // Backend may be offline — leave machineSettings as null; pickers will
+      // hide and the request falls back to the backend's default assistant.
+    }
+  }
 
   function handleDocumentMousedown(event: MouseEvent) {
     const target = event.target as HTMLElement | null;
@@ -858,6 +870,7 @@ The story so far:
     entry: PromptEntrySummary,
     inputs: Record<string, unknown>,
     sceneId: string | null,
+    assistantId: string = "",
   ) {
     if (!sceneId) {
       error = "Open a scene before invoking a chat prompt — context needs a target.";
@@ -883,6 +896,9 @@ The story so far:
       chatLastMeta = null;
       chatInput = "";
       chatActivePromptEntry = { id: entry.id, title: entry.title };
+      // Carry the assistant pick from the inputs dialog into the chat panel
+      // so the first (and subsequent) turns use it.
+      chatAssistantId = assistantId;
 
       focusPane("chat");
 
@@ -901,11 +917,9 @@ The story so far:
     try {
       const contextBlock = await composeContextBlocks();
       const response = await api.aiChat({
-        provider: chatProvider.trim() || null,
-        model: chatModel.trim() || null,
+        assistant_id: chatAssistantId || null,
         system_prompt: buildEffectiveChatSystemPrompt(contextBlock),
         messages: chatHistory.map(({ role, content }) => ({ role, content })),
-        max_tokens: chatMaxTokens,
       });
       if (response.ok) {
         chatHistory = [
@@ -943,11 +957,9 @@ The story so far:
     try {
       const contextBlock = await composeContextBlocks();
       const response = await api.aiChat({
-        provider: chatProvider.trim() || null,
-        model: chatModel.trim() || null,
+        assistant_id: chatAssistantId || null,
         system_prompt: buildEffectiveChatSystemPrompt(contextBlock),
         messages: chatHistory.map(({ role, content }) => ({ role, content })),
-        max_tokens: chatMaxTokens,
       });
       if (response.ok) {
         chatHistory = [
@@ -1155,6 +1167,11 @@ The story so far:
     if (!layerId) return "Unknown";
     if (layerId === "built_in") return "Built-in";
     return metadataSchemaLayers.find((layer) => layer.id === layerId)?.label ?? "Unknown";
+  }
+
+  function assistantNameFor(assistantId: string): string {
+    if (!assistantId) return "";
+    return machineSettings?.assistants.find((a) => a.id === assistantId)?.name ?? "";
   }
 
   function paneEntryFromAncestor(pane: EditorPaneState): boolean {
@@ -3527,6 +3544,8 @@ The story so far:
         metadataSchema={metadataSchema}
         promptEntries={promptEntries}
         knownTags={knownTags}
+        assistants={machineSettings?.assistants ?? []}
+        defaultAssistantId={machineSettings?.default_assistant_id ?? ""}
         metadataReload={metadataReloadsByPane[editorPane.id] ?? null}
         titleReload={titleReloadsByPane[editorPane.id] ?? null}
         dirty={editorPane.dirty}
@@ -3544,7 +3563,7 @@ The story so far:
         on:custom-data={(event) => openSchemaForCustomData(event.detail.entryType, event.detail.kind)}
         on:embeddedTodos={(event) => updateEmbeddedTodosForPane(editorPane.id, event.detail.todos)}
         on:navigate={(event) => navigateToBacklink(event.detail.id, event.detail.kind)}
-        on:open-chat={(event) => seedChatFromPromptEntry(event.detail.entry, event.detail.inputs, event.detail.sceneId)}
+        on:open-chat={(event) => seedChatFromPromptEntry(event.detail.entry, event.detail.inputs, event.detail.sceneId, event.detail.assistantId)}
       />
       <button class="pane-resize" type="button" aria-label="Resize Editor pane" on:keydown={(event) => handlePaneResizeKeydown(event, editorPane.id)} on:mousedown={(event) => startPaneResize(event, editorPane.id)}></button>
     </section>
@@ -3786,24 +3805,19 @@ The story so far:
         </div>
       {/if}
       <details class="chat-config">
-        <summary>System prompt &amp; provider</summary>
+        <summary>Assistant &amp; system prompt</summary>
+        <label class="chat-label">
+          Assistant
+          <select bind:value={chatAssistantId}>
+            <option value="">Default ({assistantNameFor(machineSettings?.default_assistant_id ?? "") || "use machine default"})</option>
+            {#each machineSettings?.assistants ?? [] as assistant (assistant.id)}
+              <option value={assistant.id}>{assistant.name}</option>
+            {/each}
+          </select>
+        </label>
         <label class="chat-label">
           System prompt
           <textarea class="chat-system" bind:value={chatSystemPrompt} on:input={clearActivePromptOnEdit} spellcheck="false"></textarea>
-        </label>
-        <div class="chat-row">
-          <label class="chat-label flex-grow">
-            Provider override
-            <input type="text" bind:value={chatProvider} placeholder="(machine default)" />
-          </label>
-          <label class="chat-label flex-grow">
-            Model override
-            <input type="text" bind:value={chatModel} placeholder="(machine default)" />
-          </label>
-        </div>
-        <label class="chat-label">
-          Max response tokens
-          <input type="number" min="64" max="32768" step="64" bind:value={chatMaxTokens} />
         </label>
       </details>
 

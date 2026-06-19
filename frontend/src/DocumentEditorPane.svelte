@@ -14,13 +14,15 @@
   import MetadataLongTextEditor from "./MetadataLongTextEditor.svelte";
   import ReferencePicker from "./ReferencePicker.svelte";
   import { api } from "./api";
-  import type { Backlink, EditableDocument, EntryBodyLanguage, EntryMetadata, MetadataFieldDefinition, MetadataSchema, MetadataValue, PromptEntrySummary, PromptInputDefinition } from "./types";
+  import type { AssistantView, Backlink, EditableDocument, EntryBodyLanguage, EntryMetadata, MetadataFieldDefinition, MetadataSchema, MetadataValue, PromptEntrySummary, PromptInputDefinition } from "./types";
 
   export let scene: EditableDocument | null = null;
   export let documentKind: "scene" | "lore" | "prompt" | "snippet" = "scene";
   export let metadataSchema: MetadataSchema | null = null;
   export let promptEntries: PromptEntrySummary[] = [];
   export let knownTags: string[] = [];
+  export let assistants: AssistantView[] = [];
+  export let defaultAssistantId: string = "";
   export let metadataReload: { token: number; metadata: EntryMetadata; status?: string; entryType: string } | null = null;
   export let titleReload: { token: number; title: string } | null = null;
   export let dirty = false;
@@ -32,7 +34,7 @@
     "custom-data": { entryType: string; kind: "scene" | "lore" | "prompt" };
     embeddedTodos: { todos: EmbeddedTodo[] };
     navigate: { id: string; kind: string };
-    "open-chat": { entry: PromptEntrySummary; inputs: Record<string, unknown>; sceneId: string | null };
+    "open-chat": { entry: PromptEntrySummary; inputs: Record<string, unknown>; sceneId: string | null; assistantId: string };
   }>();
 
   type FloatingMenuState = {
@@ -200,6 +202,9 @@
   let lastInvokedInputs: Record<string, unknown> = {};
   let inputsDialogEntry: PromptEntrySummary | null = null;
   let inputsDialogDrafts: Record<string, string> = {};
+  // "" means: use the user's default assistant (resolved server-side).
+  let inputsDialogAssistantId: string = "";
+  let lastInvokedAssistantId: string = "";
 
   $: slashCommands = editor && documentKind === "scene" ? getSlashCommands() : [];
   // slashFilterText is a plain `let` because TipTap mutates editor state in
@@ -1013,7 +1018,11 @@
     }
   }
 
-  async function runPromptEntry(entry: PromptEntrySummary, prefilledInputs?: Record<string, unknown>) {
+  async function runPromptEntry(
+    entry: PromptEntrySummary,
+    prefilledInputs?: Record<string, unknown>,
+    assistantId: string = "",
+  ) {
     if (!editor || !scene || aiGenerating || documentKind !== "scene") return;
     if (aiSuggestionId) {
       aiError = "Accept or revert the pending suggestion before generating another.";
@@ -1024,7 +1033,7 @@
       openInputsDialog(entry);
       return;
     }
-    await runPromptEntryWithInputs(entry, prefilledInputs ?? {});
+    await runPromptEntryWithInputs(entry, prefilledInputs ?? {}, assistantId);
   }
 
   function openInputsDialog(entry: PromptEntrySummary) {
@@ -1042,12 +1051,15 @@
       }
     }
     inputsDialogDrafts = drafts;
+    // Seed with the user's default; the picker shows it as "Default (Name)".
+    inputsDialogAssistantId = "";
     inputsDialogEntry = entry;
   }
 
   function cancelInputsDialog() {
     inputsDialogEntry = null;
     inputsDialogDrafts = {};
+    inputsDialogAssistantId = "";
   }
 
   function updateInputsDialogDraft(name: string, value: string) {
@@ -1091,6 +1103,11 @@
     return Array.isArray(value) ? JSON.stringify(value) : value;
   }
 
+  function assistantDisplayName(assistantId: string): string {
+    if (!assistantId) return "";
+    return assistants.find((a) => a.id === assistantId)?.name ?? "";
+  }
+
   function refInputStubField(input: PromptInputDefinition): MetadataFieldDefinition {
     const target: Record<string, string> = {};
     const t = input.target as { kind?: unknown; entry_type?: unknown } | null | undefined;
@@ -1127,9 +1144,11 @@
       const coerced = coerceInputValue(raw, input.type);
       if (coerced !== null && coerced !== "") values[input.name] = coerced;
     }
+    const pickedAssistantId = inputsDialogAssistantId;
     inputsDialogEntry = null;
     inputsDialogDrafts = {};
-    await runPromptEntry(entry, values);
+    inputsDialogAssistantId = "";
+    await runPromptEntry(entry, values, pickedAssistantId);
   }
 
   function handleInputsDialogKeydown(event: KeyboardEvent) {
@@ -1142,13 +1161,18 @@
     }
   }
 
-  async function runPromptEntryWithInputs(entry: PromptEntrySummary, inputs: Record<string, unknown>) {
+  async function runPromptEntryWithInputs(
+    entry: PromptEntrySummary,
+    inputs: Record<string, unknown>,
+    assistantId: string = "",
+  ) {
     if (!editor || !scene) return;
     const outputKind = effectiveOutputKind(entry);
     if (outputKind === "chat_panel") {
       lastInvokedEntryId = entry.id;
       lastInvokedInputs = inputs;
-      dispatch("open-chat", { entry, inputs, sceneId: scene.id });
+      lastInvokedAssistantId = assistantId;
+      dispatch("open-chat", { entry, inputs, sceneId: scene.id, assistantId });
       return;
     }
     if (outputKind !== "append_to_body" && outputKind !== "replace_selection") {
@@ -1198,6 +1222,7 @@
     aiGenerating = true;
     lastInvokedEntryId = entry.id;
     lastInvokedInputs = inputs;
+    lastInvokedAssistantId = assistantId;
     updateAIToolbarPosition();
     try {
       const response = await api.aiGenerate({
@@ -1208,6 +1233,7 @@
         text_before: textBefore,
         text_after: textAfter,
         ...(selectionText !== undefined ? { selection: selectionText } : {}),
+        ...(assistantId ? { assistant_id: assistantId } : {}),
         commit: false,
       });
       if (!response.ok) {
@@ -1449,7 +1475,7 @@
       const restoredTo = range.from + original.length;
       editor.chain().focus().setTextSelection({ from: range.from, to: restoredTo }).run();
     }
-    await runPromptEntry(entry, lastInvokedInputs);
+    await runPromptEntry(entry, lastInvokedInputs, lastInvokedAssistantId);
   }
 
   async function focusAndRun(command: () => void | Promise<void>) {
@@ -2366,6 +2392,15 @@
             {/if}
           </label>
         {/each}
+        <label>
+          Assistant
+          <select bind:value={inputsDialogAssistantId}>
+            <option value="">Default ({assistantDisplayName(defaultAssistantId) || "use machine default"})</option>
+            {#each assistants as assistant (assistant.id)}
+              <option value={assistant.id}>{assistant.name}</option>
+            {/each}
+          </select>
+        </label>
       </div>
       <div class="inputs-dialog-actions">
         <button type="button" on:click={cancelInputsDialog}>Cancel</button>

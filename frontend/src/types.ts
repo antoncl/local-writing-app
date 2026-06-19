@@ -300,6 +300,7 @@ export type ChatMessage = {
 export type AIChatRequest = {
   provider?: string | null;
   model?: string | null;
+  assistant_id?: string | null;
   system_prompt?: string;
   messages: ChatMessage[];
   max_tokens?: number;
@@ -329,6 +330,7 @@ export type AIGenerateRequest = {
   commit?: boolean;
   provider?: string | null;
   model?: string | null;
+  assistant_id?: string | null;
   max_tokens?: number;
 };
 

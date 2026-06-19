@@ -12,6 +12,10 @@
     AssistantEntrySummary,
     Backlink,
     ChatMessage,
+    ChatSession,
+    ChatSessionContextItem,
+    ChatSessionMessage,
+    ChatSessionSummary,
     DirectoryListing,
     EditableDocument,
     EntryMetadata,
@@ -166,7 +170,7 @@ The story so far:
   // "" means: use the user's default assistant (resolved server-side).
   let chatAssistantId = "";
   let chatInput = "";
-  let chatHistory: { role: "user" | "assistant"; content: string; truncated?: boolean }[] = [];
+  let chatHistory: { role: "user" | "assistant"; content: string; truncated?: boolean; thinking?: string }[] = [];
   let chatRunning = false;
   let chatError: string | null = null;
   let chatLastMeta: { provider: string; model: string; latency_ms: number } | null = null;
@@ -183,6 +187,10 @@ The story so far:
   let chatContextMenuOpen = false;
   let chatContextCategory: ChatContextKind | null = null;
   let chatContextSearch = "";
+  let chatSessions: ChatSessionSummary[] = [];
+  let activeChatId: string | null = null;
+  let activeChatTitle = "Untitled chat";
+  let activeChatPinned = false;
   type MachineSettingsDraft = {
     anthropic_api_key: string;
     openai_api_key: string;
@@ -244,6 +252,7 @@ The story so far:
   let schemaNodeTypeTree: NodeTypeTreeNode[] = [];
   let promptsPaneOpen = false;
   let assistantsPaneOpen = false;
+  let chatsPaneOpen = false;
   let promptSystemPrompt = "";
   let promptModelClass = "";
   let promptProviderPolicy: AIPolicy | "" = "";
@@ -280,6 +289,7 @@ The story so far:
     schema_type: { title: "Detail Type", x: 708, y: 260, width: 440, height: 560, z: 4 },
     prompts: { title: "Prompts", x: 330, y: 260, width: 360, height: 420, z: 3 },
     assistants: { title: "Assistants", x: 330, y: 260, width: 340, height: 420, z: 3 },
+    chats: { title: "Chats", x: 330, y: 260, width: 320, height: 420, z: 3 },
     todo: { title: "TODO", x: 1126, y: 18, width: 310, height: 320, z: 4 },
     search: { title: "Search", x: 1126, y: 360, width: 310, height: 320, z: 5 },
     preview: { title: "AI Preview", x: 720, y: 18, width: 480, height: 560, z: 6 },
@@ -424,6 +434,7 @@ The story so far:
     if (id === "schema_field") return schemaFieldPaneOpen;
     if (id === "schema_type") return schemaTypePaneOpen;
     if (id === "prompts") return promptsPaneOpen;
+    if (id === "chats") return chatsPaneOpen;
     return !isEditorPaneId(id) || editorPanes.some((pane) => pane.id === id);
   }
 
@@ -443,6 +454,7 @@ The story so far:
     appState = { name: "projectOpen", project: nextProject };
     fitPanesToViewport();
     focusPane("outline");
+    void hydrateChatSessionsForProject();
   }
 
   function resetEditorWorkspace() {
@@ -453,6 +465,12 @@ The story so far:
     nextMetadataReloadToken = 1;
     metadataReloadsByPane = {};
     titleReloadsByPane = {};
+    activeChatId = null;
+    activeChatTitle = "Untitled chat";
+    activeChatPinned = false;
+    chatSessions = [];
+    clearChat();
+    chatSystemPrompt = DEFAULT_CHAT_SYSTEM_PROMPT;
     panes = {
       project: panes.project,
       outline: panes.outline,
@@ -995,30 +1013,65 @@ The story so far:
     });
   }
 
+  async function streamAssistantReply(onError: () => void): Promise<void> {
+    // Appends an empty assistant message and mutates its content as deltas
+    // arrive. On error, removes the placeholder and calls onError() so the
+    // caller can decide whether to also rewind the user turn.
+    const contextBlock = await composeContextBlocks();
+    chatHistory = [...chatHistory, { role: "assistant", content: "" }];
+    const idx = chatHistory.length - 1;
+    let scrollPending = false;
+    const scheduleScroll = async () => {
+      if (scrollPending) return;
+      scrollPending = true;
+      await tick();
+      scrollPending = false;
+      if (chatScrollEl) chatScrollEl.scrollTop = chatScrollEl.scrollHeight;
+    };
+    let errored = false;
+    for await (const ev of api.aiChatStream({
+      assistant_id: chatAssistantId || null,
+      system_prompt: buildEffectiveChatSystemPrompt(contextBlock),
+      // Send history WITHOUT the placeholder we just pushed.
+      messages: chatHistory.slice(0, idx).map(({ role, content }) => ({ role, content })),
+    })) {
+      if (ev.type === "delta") {
+        chatHistory[idx].content += ev.text;
+        chatHistory = chatHistory;
+        scheduleScroll();
+      } else if (ev.type === "thinking") {
+        chatHistory[idx].thinking = (chatHistory[idx].thinking ?? "") + ev.text;
+        chatHistory = chatHistory;
+        scheduleScroll();
+      } else if (ev.type === "done") {
+        chatHistory[idx].truncated = ev.truncated;
+        chatHistory = chatHistory;
+        chatLastMeta = { provider: ev.provider, model: ev.model, latency_ms: ev.latency_ms };
+      } else if (ev.type === "error") {
+        errored = true;
+        chatError = ev.error || "Unknown error";
+        // Drop the empty assistant placeholder.
+        chatHistory = chatHistory.slice(0, idx);
+        onError();
+      }
+    }
+    if (!errored && !chatHistory[idx]?.content && !chatHistory[idx]?.thinking) {
+      // Stream ended without any deltas and without an error — treat as empty.
+      chatHistory = chatHistory.slice(0, idx);
+      chatError = "Model returned empty output.";
+      onError();
+    } else if (!errored) {
+      // Persist the new turn — crash-safe so the user never loses a reply.
+      void persistActiveChat();
+    }
+  }
+
   async function sendChatTurn() {
     if (chatRunning) return;
     chatRunning = true;
     chatError = null;
     try {
-      const contextBlock = await composeContextBlocks();
-      const response = await api.aiChat({
-        assistant_id: chatAssistantId || null,
-        system_prompt: buildEffectiveChatSystemPrompt(contextBlock),
-        messages: chatHistory.map(({ role, content }) => ({ role, content })),
-      });
-      if (response.ok) {
-        chatHistory = [
-          ...chatHistory,
-          { role: "assistant", content: response.content, truncated: response.truncated },
-        ];
-        chatLastMeta = {
-          provider: response.provider,
-          model: response.model,
-          latency_ms: response.latency_ms,
-        };
-      } else {
-        chatError = response.error ?? "Unknown error";
-      }
+      await streamAssistantReply(() => {});
     } catch (e) {
       chatError = (e as Error).message;
     } finally {
@@ -1037,35 +1090,19 @@ The story so far:
     chatError = null;
     const userTurn: ChatMessage = { role: "user", content: text };
     chatHistory = [...chatHistory, userTurn];
+    const userIdx = chatHistory.length - 1;
     chatInput = "";
     chatRunning = true;
+    const rewindUser = () => {
+      // Drop the user turn at userIdx so they can fix and re-send.
+      chatHistory = chatHistory.filter((_, i) => i !== userIdx);
+      chatInput = text;
+    };
     try {
-      const contextBlock = await composeContextBlocks();
-      const response = await api.aiChat({
-        assistant_id: chatAssistantId || null,
-        system_prompt: buildEffectiveChatSystemPrompt(contextBlock),
-        messages: chatHistory.map(({ role, content }) => ({ role, content })),
-      });
-      if (response.ok) {
-        chatHistory = [
-          ...chatHistory,
-          { role: "assistant", content: response.content, truncated: response.truncated },
-        ];
-        chatLastMeta = {
-          provider: response.provider,
-          model: response.model,
-          latency_ms: response.latency_ms,
-        };
-      } else {
-        chatError = response.error ?? "Unknown error";
-        // Drop the user turn we just appended so they can re-send after fixing things.
-        chatHistory = chatHistory.slice(0, -1);
-        chatInput = text;
-      }
+      await streamAssistantReply(rewindUser);
     } catch (e) {
       chatError = (e as Error).message;
-      chatHistory = chatHistory.slice(0, -1);
-      chatInput = text;
+      rewindUser();
     } finally {
       chatRunning = false;
       await tick();
@@ -1088,6 +1125,172 @@ The story so far:
     chatError = null;
     chatActivePromptEntry = null;
     chatContextItems = [];
+  }
+
+  // --- Chat sessions (Phase 3) ---
+
+  async function refreshChatSessions() {
+    try {
+      const listing = await api.listChatSessions();
+      chatSessions = listing.sessions;
+    } catch {
+      chatSessions = [];
+    }
+  }
+
+  function deriveChatTitleFromHistory(): string | null {
+    const firstUser = chatHistory.find((m) => m.role === "user");
+    if (!firstUser) return null;
+    const text = firstUser.content.trim().replace(/\s+/g, " ");
+    if (!text) return null;
+    return text.length > 50 ? text.slice(0, 50).trim() + "…" : text;
+  }
+
+  function currentChatSessionPayload(): SaveChatSessionRequest {
+    // Auto-title once: if the user hasn't renamed it and we have a user turn,
+    // derive a title from the first user message so the Chats pane is scannable.
+    let title = activeChatTitle || "Untitled chat";
+    if (title === "Untitled chat") {
+      const derived = deriveChatTitleFromHistory();
+      if (derived) title = derived;
+    }
+    return {
+      title,
+      assistant_id: chatAssistantId,
+      system_prompt: chatSystemPrompt,
+      pinned: activeChatPinned,
+      context_items: chatContextItems.map((item) => ({
+        kind: item.kind,
+        id: item.id,
+        entry_type: item.entryType,
+        title: item.title,
+      })),
+      messages: chatHistory.map((m) => ({
+        role: m.role,
+        content: m.content,
+        thinking: m.thinking ?? "",
+        truncated: !!m.truncated,
+      })),
+    };
+  }
+
+  function applyChatSession(session: ChatSession) {
+    activeChatId = session.id;
+    activeChatTitle = session.title || "Untitled chat";
+    activeChatPinned = session.pinned;
+    chatAssistantId = session.assistant_id || "";
+    chatSystemPrompt = session.system_prompt || DEFAULT_CHAT_SYSTEM_PROMPT;
+    chatContextItems = (session.context_items || []).map((item: ChatSessionContextItem) => ({
+      kind: item.kind,
+      id: item.id,
+      title: item.title || item.id,
+      entryType: item.entry_type || "",
+    }));
+    chatHistory = (session.messages || []).map((m: ChatSessionMessage) => ({
+      role: m.role,
+      content: m.content,
+      truncated: !!m.truncated,
+      thinking: m.thinking || undefined,
+    }));
+    chatLastMeta = null;
+    chatError = null;
+    chatActivePromptEntry = null;
+    chatInput = "";
+  }
+
+  async function persistActiveChat(): Promise<void> {
+    if (!activeChatId) return;
+    try {
+      const saved = await api.saveChatSession(activeChatId, currentChatSessionPayload());
+      activeChatTitle = saved.title;
+      activeChatPinned = saved.pinned;
+      void refreshChatSessions();
+    } catch (e) {
+      // Non-fatal; surface in chat error band so the user notices.
+      chatError = `Couldn't save chat: ${(e as Error).message}`;
+    }
+  }
+
+  async function openChatSession(chatId: string): Promise<void> {
+    if (activeChatId === chatId) {
+      focusPane("chat");
+      return;
+    }
+    // Save current chat before switching so in-flight edits aren't lost.
+    if (activeChatId) {
+      await persistActiveChat();
+    }
+    try {
+      const session = await api.getChatSession(chatId);
+      applyChatSession(session);
+      focusPane("chat");
+    } catch (e) {
+      error = `Couldn't open chat: ${(e as Error).message}`;
+    }
+  }
+
+  async function createNewChatSession(): Promise<void> {
+    if (activeChatId) {
+      await persistActiveChat();
+    }
+    try {
+      const session = await api.createChatSession({
+        assistant_id: chatAssistantId,
+      });
+      applyChatSession(session);
+      await refreshChatSessions();
+      focusPane("chat");
+    } catch (e) {
+      error = `Couldn't create chat: ${(e as Error).message}`;
+    }
+  }
+
+  async function deleteChatSessionFromPane(chatId: string): Promise<void> {
+    try {
+      const listing = await api.deleteChatSession(chatId);
+      chatSessions = listing.sessions;
+      if (activeChatId === chatId) {
+        activeChatId = null;
+        activeChatTitle = "Untitled chat";
+        activeChatPinned = false;
+        clearChat();
+        chatSystemPrompt = DEFAULT_CHAT_SYSTEM_PROMPT;
+      }
+    } catch (e) {
+      error = `Couldn't delete chat: ${(e as Error).message}`;
+    }
+  }
+
+  async function hydrateChatSessionsForProject(): Promise<void> {
+    await refreshChatSessions();
+    if (chatSessions.length === 0) {
+      // Auto-create a first chat so the panel always has somewhere to write.
+      try {
+        const session = await api.createChatSession({});
+        chatSessions = [{
+          id: session.id,
+          title: session.title,
+          assistant_id: session.assistant_id,
+          pinned: session.pinned,
+          created_at: session.created_at,
+          updated_at: session.updated_at,
+          message_count: 0,
+        }];
+        applyChatSession(session);
+      } catch {
+        // Backend may be offline at boot — leave the chat panel in transient
+        // mode; user can retry by clicking + New Chat.
+      }
+      return;
+    }
+    // Pick the most-recently-updated chat as the active session on open.
+    const first = chatSessions[0];
+    try {
+      const session = await api.getChatSession(first.id);
+      applyChatSession(session);
+    } catch {
+      // Ignore; user can pick manually from the Chats pane.
+    }
   }
 
   function clearActivePromptOnEdit() {
@@ -1124,10 +1327,59 @@ The story so far:
     chatContextItems = [...chatContextItems, item];
     chatContextMenuOpen = false;
     chatContextSearch = "";
+    void persistActiveChat();
   }
 
   function removeContextItem(id: string, kind: ChatContextKind) {
     chatContextItems = chatContextItems.filter((item) => !(item.id === id && item.kind === kind));
+    void persistActiveChat();
+  }
+
+  function handleChatAssistantChange() {
+    void persistActiveChat();
+  }
+
+  function handleChatSystemPromptBlur() {
+    void persistActiveChat();
+  }
+
+  async function toggleActiveChatPin(): Promise<void> {
+    if (!activeChatId) return;
+    activeChatPinned = !activeChatPinned;
+    await persistActiveChat();
+  }
+
+  async function togglePinForChat(chatId: string): Promise<void> {
+    // Pin/unpin a chat from the Chats pane row (not necessarily the active one).
+    if (chatId === activeChatId) {
+      await toggleActiveChatPin();
+      return;
+    }
+    // For other chats, read-then-save so we don't disturb panel state.
+    try {
+      const session = await api.getChatSession(chatId);
+      await api.saveChatSession(chatId, {
+        title: session.title,
+        assistant_id: session.assistant_id,
+        system_prompt: session.system_prompt,
+        pinned: !session.pinned,
+        context_items: session.context_items,
+        messages: session.messages,
+      });
+      await refreshChatSessions();
+    } catch (e) {
+      error = `Couldn't update chat: ${(e as Error).message}`;
+    }
+  }
+
+  async function renameActiveChat(): Promise<void> {
+    if (!activeChatId) return;
+    const proposed = window.prompt("Rename chat", activeChatTitle);
+    if (proposed === null) return;
+    const trimmed = proposed.trim();
+    if (!trimmed || trimmed === activeChatTitle) return;
+    activeChatTitle = trimmed;
+    await persistActiveChat();
   }
 
   function titleMatchesQuery(title: string, query: string): boolean {
@@ -1593,12 +1845,13 @@ The story so far:
       .map(([typeId]) => typeId);
   }
 
-  function closeSchemaPane(id: "schema" | "schema_field" | "schema_type" | "prompts" | "assistants") {
+  function closeSchemaPane(id: "schema" | "schema_field" | "schema_type" | "prompts" | "assistants" | "chats") {
     if (id === "schema") schemaPaneOpen = false;
     else if (id === "schema_field") schemaFieldPaneOpen = false;
     else if (id === "schema_type") schemaTypePaneOpen = false;
     else if (id === "prompts") promptsPaneOpen = false;
     else if (id === "assistants") assistantsPaneOpen = false;
+    else if (id === "chats") chatsPaneOpen = false;
   }
 
   function openPromptsPane() {
@@ -1610,6 +1863,12 @@ The story so far:
     assistantsPaneOpen = true;
     void refreshAssistantEntries();
     focusPane("assistants");
+  }
+
+  function openChatsPane() {
+    chatsPaneOpen = true;
+    void refreshChatSessions();
+    focusPane("chats");
   }
 
   function addPromptInput() {
@@ -3110,16 +3369,19 @@ The story so far:
         <div class="button-row">
           <button type="button" on:click={openMachineSettings}>Machine Settings…</button>
           <button type="button" on:click={openAssistantsPane}>Assistants…</button>
+          {#if isProjectOpen}
+            <button type="button" on:click={openChatsPane}>Chats…</button>
+          {/if}
         </div>
         {#if isProjectOpen}
           <fieldset class="ai-policy">
-            <legend>Project policy</legend>
+            <legend>AI access</legend>
             <label><input type="radio" bind:group={aiPolicy} value="off" /> Off</label>
             <label><input type="radio" bind:group={aiPolicy} value="local-only" /> Local only</label>
             <label><input type="radio" bind:group={aiPolicy} value="cloud-allowed" /> Cloud allowed</label>
           </fieldset>
           <label>
-            Default provider
+            Preferred subscription
             <select bind:value={aiDefaultProvider}>
               <option value="">(machine default)</option>
               <option value="anthropic">Anthropic</option>
@@ -3129,7 +3391,7 @@ The story so far:
             </select>
           </label>
           <label>
-            Default model class
+            Preferred assistant tier
             <select bind:value={aiDefaultModelClass}>
               <option value="">(unset)</option>
               <option value="cheap">cheap</option>
@@ -3352,12 +3614,12 @@ The story so far:
         <fieldset class="prompt-fieldset" disabled={schemaTypeReadonly}>
           <legend>Defaults</legend>
           <label>
-            System prompt
-            <textarea rows="4" bind:value={promptSystemPrompt} placeholder="Optional system message inherited by sub-types."></textarea>
+            Brief
+            <textarea rows="4" bind:value={promptSystemPrompt} placeholder="Optional brief inherited by sub-types — sets the assistant's role."></textarea>
           </label>
           <div class="prompt-row">
             <label>
-              Model class
+              Assistant tier
               <select bind:value={promptModelClass}>
                 <option value="">(inherit)</option>
                 <option value="cheap">cheap</option>
@@ -3366,7 +3628,7 @@ The story so far:
               </select>
             </label>
             <label>
-              Provider policy
+              Subscription policy
               <select bind:value={promptProviderPolicy}>
                 <option value="">(inherit project policy)</option>
                 <option value="off">Off</option>
@@ -3676,6 +3938,38 @@ The story so far:
       {/if}
     </div>
     <button class="pane-resize" type="button" aria-label="Resize Assistants pane" on:keydown={(event) => handlePaneResizeKeydown(event, "assistants")} on:mousedown={(event) => startPaneResize(event, "assistants")}></button>
+  </section>
+
+
+  <!-- svelte-ignore a11y_no_noninteractive_element_interactions -->
+  <section class:hidden-pane={!isPaneVisible("chats")} class="pane chats-pane" data-pane-id="chats" style={paneStyle("chats")} aria-label="Chats pane" on:mousedown={() => focusPane("chats")}>
+    <header class="pane-header" role="button" tabindex="0" aria-label="Move Chats pane" on:keydown={(event) => handlePaneHeaderKeydown(event, "chats")} on:mousedown={(event) => startPaneDrag(event, "chats")}>
+      <h2>Chats</h2>
+      <div class="pane-header-actions">
+        <button class="pin-button" type="button" title="Start a new chat" on:mousedown={(event) => event.stopPropagation()} on:click={() => createNewChatSession()}>+ New Chat</button>
+        <button class="pin-button" type="button" on:mousedown={(event) => event.stopPropagation()} on:click={() => closeSchemaPane("chats")}>Close</button>
+      </div>
+    </header>
+    <div class="pane-content schema-list">
+      {#if chatSessions.length === 0}
+        <p class="muted">No chats yet. Click + New Chat to start one.</p>
+      {:else}
+        {#each chatSessions as session (session.id)}
+          <div class="chat-session-row-wrap" class:active-chat-row={activeChatId === session.id}>
+            <button class:active={activeChatId === session.id} class="prompt-entry-row chat-session-row" type="button" on:click={() => openChatSession(session.id)}>
+              <span>
+                <strong>{session.title || "Untitled chat"}</strong>
+                {#if session.pinned}<small class="assistant-default-badge">pinned</small>{/if}
+                <small>{session.message_count} message{session.message_count === 1 ? "" : "s"} · {session.updated_at.slice(0, 16).replace("T", " ")}</small>
+              </span>
+            </button>
+            <button class="chat-session-pin" type="button" title={session.pinned ? "Unpin" : "Pin"} on:click={() => togglePinForChat(session.id)}>{session.pinned ? "★" : "☆"}</button>
+            <button class="chat-session-delete" type="button" title="Delete chat" on:click={() => deleteChatSessionFromPane(session.id)}>×</button>
+          </div>
+        {/each}
+      {/if}
+    </div>
+    <button class="pane-resize" type="button" aria-label="Resize Chats pane" on:keydown={(event) => handlePaneResizeKeydown(event, "chats")} on:mousedown={(event) => startPaneResize(event, "chats")}></button>
   </section>
 
 
@@ -4002,7 +4296,15 @@ The story so far:
   <!-- svelte-ignore a11y_no_noninteractive_element_interactions -->
   <section class:hidden-pane={!isPaneVisible("chat")} class="pane chat-pane" data-pane-id="chat" style={paneStyle("chat")} aria-label="AI Chat pane" on:mousedown={() => focusPane("chat")}>
     <header class="pane-header" role="button" tabindex="0" aria-label="Move AI Chat pane" on:keydown={(event) => handlePaneHeaderKeydown(event, "chat")} on:mousedown={(event) => startPaneDrag(event, "chat")}>
-      <h2>AI Chat</h2>
+      <h2>
+        {activeChatId ? activeChatTitle : "AI Chat"}
+      </h2>
+      {#if activeChatId}
+        <div class="pane-header-actions">
+          <button class="pin-button" type="button" title={activeChatPinned ? "Unpin" : "Pin"} on:mousedown={(event) => event.stopPropagation()} on:click={() => toggleActiveChatPin()}>{activeChatPinned ? "★" : "☆"}</button>
+          <button class="pin-button" type="button" title="Rename chat" on:mousedown={(event) => event.stopPropagation()} on:click={() => renameActiveChat()}>Rename</button>
+        </div>
+      {/if}
     </header>
     <div class="pane-content chat-panel">
       {#if chatActivePromptEntry}
@@ -4012,10 +4314,10 @@ The story so far:
         </div>
       {/if}
       <details class="chat-config">
-        <summary>Assistant &amp; system prompt</summary>
+        <summary>Assistant &amp; brief</summary>
         <label class="chat-label">
           Assistant
-          <select bind:value={chatAssistantId}>
+          <select bind:value={chatAssistantId} on:change={handleChatAssistantChange}>
             <option value="">Default ({assistantNameFor(defaultAssistantEntryId()) || "use machine default"})</option>
             {#each assistantEntries as assistant (assistant.id)}
               <option value={assistant.id}>{assistant.title}</option>
@@ -4023,8 +4325,8 @@ The story so far:
           </select>
         </label>
         <label class="chat-label">
-          System prompt
-          <textarea class="chat-system" bind:value={chatSystemPrompt} on:input={clearActivePromptOnEdit} spellcheck="false"></textarea>
+          Brief
+          <textarea class="chat-system" bind:value={chatSystemPrompt} on:input={clearActivePromptOnEdit} on:blur={handleChatSystemPromptBlur} spellcheck="false"></textarea>
         </label>
       </details>
 
@@ -4032,23 +4334,27 @@ The story so far:
         {#if chatHistory.length === 0}
           <p class="muted chat-empty">No messages yet. Ctrl/⌘+Enter to send.</p>
         {/if}
-        {#each chatHistory as message}
+        {#each chatHistory as message, i}
           <div class="chat-message chat-message-{message.role}">
             <header class="chat-message-role">{message.role}</header>
-            <div class="chat-message-content">{message.content}</div>
+            {#if message.thinking}
+              <details class="chat-thinking" open={chatRunning && i === chatHistory.length - 1 && !message.content}>
+                <summary>Thinking</summary>
+                <div class="chat-thinking-content">{message.thinking}</div>
+              </details>
+            {/if}
+            {#if chatRunning && i === chatHistory.length - 1 && message.role === "assistant" && !message.content && !message.thinking}
+              <div class="chat-message-content chat-typing">…thinking</div>
+            {:else if message.content}
+              <div class="chat-message-content">{message.content}</div>
+            {/if}
             {#if message.truncated}
               <div class="chat-truncated-banner">
-                Response cut off — hit max tokens. Increase the limit in System prompt &amp; provider, then re-send.
+                Response cut off — hit max tokens. Increase the limit in Assistant &amp; brief, then re-send.
               </div>
             {/if}
           </div>
         {/each}
-        {#if chatRunning}
-          <div class="chat-message chat-message-assistant">
-            <header class="chat-message-role">assistant</header>
-            <div class="chat-message-content chat-typing">…thinking</div>
-          </div>
-        {/if}
       </div>
 
       {#if chatLastMeta}
@@ -4223,6 +4529,7 @@ The story so far:
         <header class="confirm-modal-header">
           <h2 id="machine-settings-title">Machine Settings</h2>
         </header>
+        <p class="muted">Your AI subscriptions — provider accounts and keys.</p>
         <p class="muted">Stored locally at: <code>{machineSettings?.config_path}</code></p>
         <p class="muted">API keys are masked on read. Leaving a masked field unchanged keeps the existing value.</p>
 

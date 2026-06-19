@@ -611,4 +611,67 @@ class AIContextPresetResponse(BaseModel):
     content: str
 
 
+# --- Persistent chat sessions (Phase 3) ---
+
+
+class ChatSessionMessage(BaseModel):
+    role: Literal["user", "assistant"]
+    content: str
+    thinking: str = ""
+    truncated: bool = False
+
+
+class ChatSessionContextItem(BaseModel):
+    """A context attachment carried with the chat across turns.
+
+    `kind` identifies the source — "scene" / "lore" / "snippet" point at an
+    entry by id; "preset" carries a builtin preset name (e.g. "full_outline").
+    """
+    kind: Literal["scene", "lore", "snippet", "preset"]
+    id: str
+    entry_type: str = ""
+    title: str = ""
+
+
+class ChatSession(BaseModel):
+    id: str
+    title: str
+    assistant_id: str = ""
+    system_prompt: str = ""
+    pinned: bool = False
+    created_at: str
+    updated_at: str
+    context_items: list[ChatSessionContextItem] = Field(default_factory=list)
+    messages: list[ChatSessionMessage] = Field(default_factory=list)
+
+
+class ChatSessionSummary(BaseModel):
+    id: str
+    title: str
+    assistant_id: str = ""
+    pinned: bool = False
+    created_at: str
+    updated_at: str
+    message_count: int = 0
+
+
+class ChatSessionList(BaseModel):
+    sessions: list[ChatSessionSummary]
+
+
+class CreateChatSessionRequest(BaseModel):
+    title: str = ""
+    assistant_id: str = ""
+    system_prompt: str = ""
+
+
+class SaveChatSessionRequest(BaseModel):
+    title: str
+    assistant_id: str = ""
+    system_prompt: str = ""
+    pinned: bool = False
+    context_items: list[ChatSessionContextItem] = Field(default_factory=list)
+    messages: list[ChatSessionMessage] = Field(default_factory=list)
+
+
 StructureNode.model_rebuild()

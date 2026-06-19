@@ -2364,6 +2364,34 @@ h3 {
   font-style: italic;
 }
 
+.chat-thinking {
+  margin: 0;
+  padding: 6px 12px;
+  background: #f4f1ea;
+  border-bottom: 1px solid #e0d9c6;
+  font-size: 13px;
+  color: #5b5847;
+}
+
+.chat-thinking > summary {
+  cursor: pointer;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  font-size: 11px;
+  color: #6b6750;
+  user-select: none;
+}
+
+.chat-thinking-content {
+  margin-top: 6px;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  word-break: break-word;
+  line-height: 1.5;
+  font-style: italic;
+}
+
 .chat-truncated-banner {
   padding: 6px 12px;
   background: #fff7e1;
@@ -2617,6 +2645,57 @@ h3 {
   display: grid;
   height: 100%;
   min-height: 200px;
+}
+
+.chats-pane .chat-session-row-wrap {
+  display: flex;
+  align-items: stretch;
+  gap: 4px;
+}
+
+.chats-pane .chat-session-row-wrap.active-chat-row {
+  background: #e7f0ec;
+  border-radius: 4px;
+}
+
+.chats-pane .chat-session-row {
+  flex: 1;
+  display: grid;
+  gap: 2px;
+}
+
+.chats-pane .chat-session-row > span {
+  display: grid;
+  gap: 2px;
+}
+
+.chats-pane .chat-session-row > span > small {
+  color: #65716c;
+}
+
+.chats-pane .chat-session-delete,
+.chats-pane .chat-session-pin {
+  flex: 0 0 auto;
+  border: 1px solid transparent;
+  background: transparent;
+  color: #8a948f;
+  cursor: pointer;
+  font-size: 16px;
+  line-height: 1;
+  padding: 0 8px;
+  border-radius: 4px;
+}
+
+.chats-pane .chat-session-delete:hover {
+  background: #f7e0e0;
+  color: #8c2f2f;
+  border-color: #d8b6b6;
+}
+
+.chats-pane .chat-session-pin:hover {
+  background: #f3eed2;
+  color: #6b5a0c;
+  border-color: #d8c98e;
 }
 
 .raw-body-editor :global(.code-editor) {

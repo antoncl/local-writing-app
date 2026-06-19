@@ -11,6 +11,10 @@ import type {
   AIPreviewRequest,
   AIPreviewResponse,
   BacklinksResponse,
+  ChatSession,
+  ChatSessionList,
+  CreateChatSessionRequest,
+  SaveChatSessionRequest,
   DirectoryListing,
   EntryTypeDefinition,
   KnownTags,
@@ -50,6 +54,85 @@ async function request<T>(path: string, options: RequestInit = {}): Promise<T> {
     throw new Error(payload?.detail ?? response.statusText);
   }
   return response.json() as Promise<T>;
+}
+
+export type AIStreamEvent =
+  | { type: "delta"; text: string }
+  | { type: "thinking"; text: string }
+  | {
+      type: "done";
+      provider: string;
+      model: string;
+      latency_ms: number;
+      stop_reason: string | null;
+      truncated: boolean;
+      policy: string;
+      session_id?: string;
+      char_count?: number;
+    }
+  | {
+      type: "error";
+      error: string;
+      provider: string;
+      model: string;
+      latency_ms: number;
+      policy: string;
+    };
+
+async function* streamNdjson(
+  path: string,
+  body: unknown,
+  signal?: AbortSignal,
+): AsyncIterableIterator<AIStreamEvent> {
+  const response = await fetch(`${baseUrl}${path}`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(body),
+    signal,
+  });
+  if (!response.ok) {
+    const payload = await response.json().catch(() => null);
+    throw new Error(payload?.detail ?? response.statusText);
+  }
+  if (!response.body) {
+    throw new Error("Streaming not supported by this response.");
+  }
+  const reader = response.body.getReader();
+  const decoder = new TextDecoder();
+  let buffer = "";
+  try {
+    while (true) {
+      const { value, done } = await reader.read();
+      if (value) {
+        buffer += decoder.decode(value, { stream: true });
+        let nl = buffer.indexOf("\n");
+        while (nl !== -1) {
+          const line = buffer.slice(0, nl).trim();
+          buffer = buffer.slice(nl + 1);
+          if (line) {
+            try {
+              yield JSON.parse(line) as AIStreamEvent;
+            } catch {
+              // Ignore malformed lines — server should never emit them, but
+              // don't kill the whole stream over one bad chunk.
+            }
+          }
+          nl = buffer.indexOf("\n");
+        }
+      }
+      if (done) break;
+    }
+    const tail = buffer.trim();
+    if (tail) {
+      try {
+        yield JSON.parse(tail) as AIStreamEvent;
+      } catch {
+        // ignore
+      }
+    }
+  } finally {
+    reader.releaseLock();
+  }
 }
 
 export const api = {
@@ -108,6 +191,12 @@ export const api = {
       method: "POST",
       body: JSON.stringify(payload),
     });
+  },
+  aiChatStream(payload: AIChatRequest, signal?: AbortSignal) {
+    return streamNdjson("/ai/chat/stream", payload, signal);
+  },
+  aiGenerateStream(payload: AIGenerateRequest, signal?: AbortSignal) {
+    return streamNdjson("/ai/generate/stream", payload, signal);
   },
   aiContextPreset(kind: "full_outline" | "full_text") {
     return request<AIContextPresetResponse>(`/ai/context-preset?kind=${encodeURIComponent(kind)}`);
@@ -320,6 +409,29 @@ export const api = {
     return request<AssistantEntryList>("/assistants/order", {
       method: "POST",
       body: JSON.stringify({ layer_id: layerId, ordered_ids: orderedIds }),
+    });
+  },
+  listChatSessions() {
+    return request<ChatSessionList>("/chats");
+  },
+  createChatSession(payload: CreateChatSessionRequest = {}) {
+    return request<ChatSession>("/chats", {
+      method: "POST",
+      body: JSON.stringify(payload),
+    });
+  },
+  getChatSession(chatId: string) {
+    return request<ChatSession>(`/chats/${encodeURIComponent(chatId)}`);
+  },
+  saveChatSession(chatId: string, payload: SaveChatSessionRequest) {
+    return request<ChatSession>(`/chats/${encodeURIComponent(chatId)}`, {
+      method: "PUT",
+      body: JSON.stringify(payload),
+    });
+  },
+  deleteChatSession(chatId: string) {
+    return request<ChatSessionList>(`/chats/${encodeURIComponent(chatId)}`, {
+      method: "DELETE",
     });
   },
   getTodos() {

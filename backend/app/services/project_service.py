@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from copy import deepcopy
 from dataclasses import dataclass, field
+from datetime import datetime, timezone
 import hashlib
 import re
 import uuid
@@ -17,9 +18,15 @@ from app.models import (
     AssistantEntryList,
     AssistantEntrySummary,
     Backlink,
+    ChatSession,
+    ChatSessionList,
+    ChatSessionMessage,
+    ChatSessionSummary,
     CreateAssistantEntryRequest,
+    CreateChatSessionRequest,
     ReorderAssistantsRequest,
     SaveAssistantEntryRequest,
+    SaveChatSessionRequest,
     BacklinksResponse,
     CreateLoreEntryRequest,
     CreatePromptEntryRequest,
@@ -224,6 +231,7 @@ DEFAULT_METADATA_SCHEMA: dict[str, Any] = {
                 "ai_model",
                 "ai_temperature",
                 "ai_max_tokens",
+                "ai_thinking",
                 "summary",
                 "is_default",
             ],
@@ -287,6 +295,7 @@ DEFAULT_METADATA_SCHEMA: dict[str, Any] = {
         "ai_model": {"name": "Model", "type": "text"},
         "ai_temperature": {"name": "Temperature", "type": "number"},
         "ai_max_tokens": {"name": "Max output tokens", "type": "number"},
+        "ai_thinking": {"name": "Show thinking", "type": "boolean"},
         "is_default": {"name": "Default", "type": "boolean"},
     },
 }
@@ -2442,6 +2451,118 @@ class ProjectService:
         if index_entry.path.exists():
             index_entry.path.unlink()
         return self.list_assistant_entries()
+
+    # --- Chat sessions (Phase 3) ---
+    #
+    # Persistent chat sessions live in `<project>/chats/<chat_id>.yaml` —
+    # a sidecar store, not a Node kind. Each file is the full session
+    # (metadata + message history). Save-after-reply means the file gets
+    # rewritten on every assistant turn.
+
+    def _chats_dir(self) -> Path:
+        root = self._require_project()
+        return root / "chats"
+
+    def _chat_path(self, chat_id: str) -> Path:
+        if not re.fullmatch(r"chat_[a-zA-Z0-9_-]+", chat_id):
+            raise ProjectServiceError(f"Invalid chat id {chat_id!r}.", 422)
+        return self._chats_dir() / f"{chat_id}.yaml"
+
+    @staticmethod
+    def _utcnow_iso() -> str:
+        # Microsecond precision keeps sort order stable across rapid back-to-back
+        # saves (e.g. user creates two chats and saves them in the same second).
+        return datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%S.%fZ")
+
+    def list_chat_sessions(self) -> ChatSessionList:
+        folder = self._chats_dir()
+        if not folder.exists():
+            return ChatSessionList(sessions=[])
+        summaries: list[ChatSessionSummary] = []
+        for entry in folder.iterdir():
+            if not entry.is_file() or entry.suffix.lower() != ".yaml":
+                continue
+            try:
+                data = self._read_yaml(entry)
+            except Exception:
+                continue
+            if not isinstance(data, dict) or not data.get("id"):
+                continue
+            messages = data.get("messages") or []
+            summaries.append(
+                ChatSessionSummary(
+                    id=str(data.get("id", "")),
+                    title=str(data.get("title", "")) or "Untitled chat",
+                    assistant_id=str(data.get("assistant_id", "") or ""),
+                    pinned=bool(data.get("pinned", False)),
+                    created_at=str(data.get("created_at", "") or ""),
+                    updated_at=str(data.get("updated_at", "") or ""),
+                    message_count=len(messages) if isinstance(messages, list) else 0,
+                )
+            )
+        # Pinned first, then most-recently-updated first.
+        pinned = sorted(
+            (s for s in summaries if s.pinned),
+            key=lambda s: s.updated_at, reverse=True,
+        )
+        unpinned = sorted(
+            (s for s in summaries if not s.pinned),
+            key=lambda s: s.updated_at, reverse=True,
+        )
+        return ChatSessionList(sessions=pinned + unpinned)
+
+    def read_chat_session(self, chat_id: str) -> ChatSession:
+        path = self._chat_path(chat_id)
+        if not path.exists():
+            raise ProjectServiceError(f"Chat {chat_id} does not exist.", 404)
+        data = self._read_yaml(path)
+        if not isinstance(data, dict):
+            raise ProjectServiceError(f"Chat {chat_id} is malformed.", 500)
+        return ChatSession.model_validate(data)
+
+    def create_chat_session(self, request: CreateChatSessionRequest) -> ChatSession:
+        self._chats_dir().mkdir(parents=True, exist_ok=True)
+        now = self._utcnow_iso()
+        session = ChatSession(
+            id=self._new_id("chat"),
+            title=request.title or "Untitled chat",
+            assistant_id=request.assistant_id,
+            system_prompt=request.system_prompt,
+            pinned=False,
+            created_at=now,
+            updated_at=now,
+            context_items=[],
+            messages=[],
+        )
+        self._write_yaml(self._chat_path(session.id), session.model_dump())
+        return session
+
+    def save_chat_session(
+        self, chat_id: str, request: SaveChatSessionRequest
+    ) -> ChatSession:
+        path = self._chat_path(chat_id)
+        if not path.exists():
+            raise ProjectServiceError(f"Chat {chat_id} does not exist.", 404)
+        existing = self.read_chat_session(chat_id)
+        updated = ChatSession(
+            id=existing.id,
+            title=request.title or existing.title or "Untitled chat",
+            assistant_id=request.assistant_id,
+            system_prompt=request.system_prompt,
+            pinned=request.pinned,
+            created_at=existing.created_at,
+            updated_at=self._utcnow_iso(),
+            context_items=request.context_items,
+            messages=request.messages,
+        )
+        self._write_yaml(path, updated.model_dump())
+        return updated
+
+    def delete_chat_session(self, chat_id: str) -> ChatSessionList:
+        path = self._chat_path(chat_id)
+        if path.exists():
+            path.unlink()
+        return self.list_chat_sessions()
 
     def _assistant_layer_folder_for_id(self, layer_id: str) -> Path:
         """Resolve a layer_id (from list_metadata_schema_layers, or "") to its

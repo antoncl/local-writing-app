@@ -370,6 +370,61 @@ export type AIGenerateResponse = {
   session_id?: string | null;
 };
 
+export type ChatSessionMessage = {
+  role: "user" | "assistant";
+  content: string;
+  thinking?: string;
+  truncated?: boolean;
+};
+
+export type ChatSessionContextItem = {
+  kind: "scene" | "lore" | "snippet" | "preset";
+  id: string;
+  entry_type?: string;
+  title?: string;
+};
+
+export type ChatSession = {
+  id: string;
+  title: string;
+  assistant_id: string;
+  system_prompt: string;
+  pinned: boolean;
+  created_at: string;
+  updated_at: string;
+  context_items: ChatSessionContextItem[];
+  messages: ChatSessionMessage[];
+};
+
+export type ChatSessionSummary = {
+  id: string;
+  title: string;
+  assistant_id: string;
+  pinned: boolean;
+  created_at: string;
+  updated_at: string;
+  message_count: number;
+};
+
+export type ChatSessionList = {
+  sessions: ChatSessionSummary[];
+};
+
+export type CreateChatSessionRequest = {
+  title?: string;
+  assistant_id?: string;
+  system_prompt?: string;
+};
+
+export type SaveChatSessionRequest = {
+  title: string;
+  assistant_id: string;
+  system_prompt: string;
+  pinned: boolean;
+  context_items: ChatSessionContextItem[];
+  messages: ChatSessionMessage[];
+};
+
 export type DirectoryEntry = {
   name: string;
   path: string;

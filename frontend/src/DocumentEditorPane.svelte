@@ -1224,8 +1224,35 @@
     lastInvokedInputs = inputs;
     lastInvokedAssistantId = assistantId;
     updateAIToolbarPosition();
+
+    const suggestionId = `ai-${aiNextSuggestionId++}`;
+    let startPos = from;
+    let streamingActive = false;
+    let accumulated = "";
+    let lastMeta: { provider: string; model: string; latency_ms: number; truncated: boolean } | null = null;
+    let streamErrored = false;
+
+    const ensureStreamingStarted = () => {
+      if (streamingActive || !editor) return;
+      if (outputKind === "replace_selection") {
+        const currentText = editor.state.doc.textBetween(from, to, "\n\n", " ");
+        if (currentText !== selectionText) {
+          aiError = "Document changed during the AI call. Re-select the text and retry.";
+          streamErrored = true;
+          return;
+        }
+        editor.chain().focus().setTextSelection({ from, to }).deleteSelection().run();
+        startPos = editor.state.selection.from;
+        aiSuggestionOriginal = selectionText!;
+      } else {
+        startPos = editor.state.selection.from;
+      }
+      aiSuggestionId = suggestionId;
+      streamingActive = true;
+    };
+
     try {
-      const response = await api.aiGenerate({
+      for await (const ev of api.aiGenerateStream({
         template_source: entry.body_markdown,
         target_scene_id: scene.id,
         session_id: scene.id,
@@ -1235,40 +1262,102 @@
         ...(selectionText !== undefined ? { selection: selectionText } : {}),
         ...(assistantId ? { assistant_id: assistantId } : {}),
         commit: false,
-      });
-      if (!response.ok) {
-        aiError = response.error ?? "Unknown error";
-        return;
-      }
-      if (!response.content.trim()) {
-        aiError = "Model returned empty output.";
-        return;
-      }
-      if (!editor) return;
-      if (outputKind === "replace_selection") {
-        const currentText = editor.state.doc.textBetween(from, to, "\n\n", " ");
-        if (currentText !== selectionText) {
-          aiError = "Document changed during the AI call. Re-select the text and retry.";
-          return;
+      })) {
+        if (ev.type === "delta") {
+          accumulated += ev.text;
+          ensureStreamingStarted();
+          if (streamErrored) break;
+          if (!editor) break;
+          renderStreamingSuggestion(startPos, accumulated, suggestionId);
+        } else if (ev.type === "done") {
+          lastMeta = {
+            provider: ev.provider,
+            model: ev.model,
+            latency_ms: ev.latency_ms,
+            truncated: ev.truncated,
+          };
+        } else if (ev.type === "error") {
+          aiError = ev.error || "Unknown error";
+          streamErrored = true;
+          if (streamingActive && editor) {
+            // Roll back: if we were revising, restore the original text; if appending, drop what we inserted.
+            const range = findAISuggestionRange(suggestionId);
+            if (range) {
+              if (outputKind === "replace_selection" && aiSuggestionOriginal) {
+                editor
+                  .chain()
+                  .setTextSelection({ from: range.from, to: range.to })
+                  .deleteSelection()
+                  .insertContent(aiSuggestionOriginal)
+                  .run();
+              } else {
+                editor
+                  .chain()
+                  .setTextSelection({ from: range.from, to: range.to })
+                  .deleteSelection()
+                  .run();
+              }
+            }
+            aiSuggestionId = null;
+            aiSuggestionOriginal = null;
+          }
         }
-        replaceWithAISuggestion(from, to, response.content, selectionText!);
-      } else {
-        insertAISuggestion(response.content);
       }
-      aiSuggestionMeta = {
-        provider: response.provider,
-        model: response.model,
-        latency_ms: response.latency_ms,
-        truncated: response.truncated,
-        wordCount: countWords(response.content),
-      };
-      aiAnchorPos = null;
+      if (!streamErrored) {
+        if (!accumulated.trim()) {
+          aiError = "Model returned empty output.";
+        } else if (lastMeta) {
+          aiSuggestionMeta = {
+            provider: lastMeta.provider,
+            model: lastMeta.model,
+            latency_ms: lastMeta.latency_ms,
+            truncated: lastMeta.truncated,
+            wordCount: countWords(accumulated),
+          };
+          aiAnchorPos = null;
+        }
+      }
     } catch (e) {
       aiError = (e as Error).message;
     } finally {
       aiGenerating = false;
       updateAIToolbarPosition();
     }
+  }
+
+  function renderStreamingSuggestion(startPos: number, fullText: string, suggestionId: string) {
+    if (!editor) return;
+    type Inline = { type: "text"; text: string } | { type: "hardBreak" };
+    const paragraphs = fullText
+      .split(/\n{2,}/)
+      .map((para) => {
+        const content: Inline[] = [];
+        const lines = para.split(/\n/);
+        lines.forEach((line, i) => {
+          if (i > 0) content.push({ type: "hardBreak" });
+          if (line) content.push({ type: "text", text: line });
+        });
+        return { type: "paragraph", content };
+      })
+      .filter((p) => p.content.length > 0);
+    if (paragraphs.length === 0) return;
+    const existing = findAISuggestionRange(suggestionId);
+    const from = existing ? existing.from : startPos;
+    const to = existing ? existing.to : startPos;
+    editor
+      .chain()
+      .setTextSelection({ from, to })
+      .deleteRange({ from, to })
+      .insertContent(paragraphs)
+      .run();
+    const endPos = editor.state.selection.from;
+    editor
+      .chain()
+      .setTextSelection({ from, to: endPos })
+      .setMark("aiSuggestion", { suggestionId })
+      .setTextSelection(endPos)
+      .run();
+    updateAIToolbarPosition();
   }
 
   function replaceWithAISuggestion(from: number, to: number, newText: string, originalText: string) {

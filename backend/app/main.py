@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import json
+from collections.abc import Iterator
 from contextlib import contextmanager
 from dataclasses import dataclass
 from pathlib import Path
@@ -7,6 +9,7 @@ from typing import Any
 
 from fastapi import FastAPI, HTTPException, Query
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import StreamingResponse
 
 from app.models import (
     AIChatRequest,
@@ -20,6 +23,10 @@ from app.models import (
     AIHealthResponse,
     AIPreviewRequest,
     AIPreviewResponse,
+    ChatSession,
+    ChatSessionList,
+    CreateChatSessionRequest,
+    SaveChatSessionRequest,
     PreviewContentBlock,
     PreviewMessage,
     BacklinksResponse,
@@ -358,6 +365,39 @@ def reorder_assistant_entries(request: ReorderAssistantsRequest) -> AssistantEnt
         return service.reorder_assistant_entries(request)
 
 
+# --- Persistent chat sessions (Phase 3) ---
+
+
+@app.get("/api/chats", response_model=ChatSessionList)
+def list_chat_sessions() -> ChatSessionList:
+    with translate_errors():
+        return service.list_chat_sessions()
+
+
+@app.post("/api/chats", response_model=ChatSession)
+def create_chat_session(request: CreateChatSessionRequest) -> ChatSession:
+    with translate_errors():
+        return service.create_chat_session(request)
+
+
+@app.get("/api/chats/{chat_id}", response_model=ChatSession)
+def get_chat_session(chat_id: str) -> ChatSession:
+    with translate_errors():
+        return service.read_chat_session(chat_id)
+
+
+@app.put("/api/chats/{chat_id}", response_model=ChatSession)
+def save_chat_session(chat_id: str, request: SaveChatSessionRequest) -> ChatSession:
+    with translate_errors():
+        return service.save_chat_session(chat_id, request)
+
+
+@app.delete("/api/chats/{chat_id}", response_model=ChatSessionList)
+def delete_chat_session(chat_id: str) -> ChatSessionList:
+    with translate_errors():
+        return service.delete_chat_session(chat_id)
+
+
 @app.get("/api/todos", response_model=TodoDocument)
 def get_todos() -> TodoDocument:
     with translate_errors():
@@ -419,6 +459,7 @@ class _ResolvedCall:
     model: str
     temperature: float
     max_tokens: int
+    thinking_enabled: bool = False
 
 
 def _resolve_call_params(
@@ -460,6 +501,7 @@ def _resolve_call_params(
             model=model,
             temperature=temperature,
             max_tokens=max_tokens,
+            thinking_enabled=bool(meta.get("ai_thinking", False)),
         )
     provider = provider_override or settings.default_provider
     model = model_override or settings.default_models.get(provider or "", "")
@@ -695,6 +737,169 @@ def ai_generate(request: AIGenerateRequest) -> AIGenerateResponse:
         stop_reason=result.stop_reason,
         truncated=truncated,
         session_id=session_id,
+    )
+
+
+# --- AI: streaming variants (NDJSON) ---
+#
+# Each line of the response is a JSON object. Events:
+#   {"type":"delta","text":"..."}                            (zero or more)
+#   {"type":"thinking","text":"..."}                         (zero or more)
+#   {"type":"done","provider":"...","model":"...",
+#    "latency_ms":N,"stop_reason":"...","truncated":bool,
+#    "policy":"...","session_id":"...","char_count":N}       (exactly one, on success)
+#   {"type":"error","error":"...","provider":"...",
+#    "model":"...","latency_ms":N,"policy":"..."}            (exactly one, on failure)
+
+
+def _ndjson(line: dict[str, Any]) -> str:
+    return json.dumps(line, ensure_ascii=False) + "\n"
+
+
+def _stream_provider_events(
+    events: Iterator[ai_providers.StreamEvent],
+    *,
+    policy: str,
+    extra_done: dict[str, Any] | None = None,
+) -> Iterator[str]:
+    """Adapt provider events to NDJSON lines. Suppresses empty deltas."""
+    extra_done = extra_done or {}
+    try:
+        for ev in events:
+            if isinstance(ev, ai_providers.StreamDelta):
+                if ev.text:
+                    yield _ndjson({"type": "delta", "text": ev.text})
+            elif isinstance(ev, ai_providers.StreamThinking):
+                if ev.text:
+                    yield _ndjson({"type": "thinking", "text": ev.text})
+            elif isinstance(ev, ai_providers.StreamDone):
+                yield _ndjson({
+                    "type": "done",
+                    "provider": ev.provider,
+                    "model": ev.model,
+                    "latency_ms": ev.latency_ms,
+                    "stop_reason": ev.stop_reason,
+                    "truncated": ev.truncated,
+                    "policy": policy,
+                    **extra_done,
+                })
+            elif isinstance(ev, ai_providers.StreamError):
+                yield _ndjson({
+                    "type": "error",
+                    "error": ev.error,
+                    "provider": ev.provider,
+                    "model": ev.model,
+                    "latency_ms": ev.latency_ms,
+                    "policy": policy,
+                })
+    except Exception as exc:  # noqa: BLE001 — last-resort guard so the stream always terminates
+        yield _ndjson({
+            "type": "error",
+            "error": f"{type(exc).__name__}: {exc}",
+            "provider": "",
+            "model": "",
+            "latency_ms": 0,
+            "policy": policy,
+        })
+
+
+@app.post("/api/ai/chat/stream")
+def ai_chat_stream(request: AIChatRequest) -> StreamingResponse:
+    settings = machine_settings_service.load_settings()
+    resolved = _resolve_call_params(
+        settings,
+        assistant_id=request.assistant_id,
+        provider_override=request.provider,
+        model_override=request.model,
+        max_tokens_override=request.max_tokens,
+    )
+    try:
+        project_info = service.current_project()
+        policy = project_info.ai_policy
+    except ProjectServiceError:
+        policy = "off"
+
+    events = ai_providers.chat_stream(
+        provider_name=resolved.provider,
+        model=resolved.model,
+        system_prompt=request.system_prompt,
+        messages=[m.model_dump() for m in request.messages],
+        max_tokens=resolved.max_tokens,
+        temperature=resolved.temperature,
+        thinking_enabled=resolved.thinking_enabled,
+        settings=settings,
+        policy=policy,
+    )
+    return StreamingResponse(
+        _stream_provider_events(events, policy=policy),
+        media_type="application/x-ndjson",
+    )
+
+
+@app.post("/api/ai/generate/stream")
+def ai_generate_stream(request: AIGenerateRequest) -> StreamingResponse:
+    # Render template first — if this fails, return an HTTP error like the
+    # non-streaming endpoint does. The stream itself only carries provider events.
+    with translate_errors():
+        try:
+            rendered, session_id = build_preview(
+                project_service=service,
+                template_source=request.template_source,
+                target_scene_id=request.target_scene_id,
+                session_id=request.session_id,
+                inputs=request.inputs,
+                text_before=request.text_before,
+                text_after=request.text_after,
+                selection=request.selection,
+                commit=request.commit,
+            )
+        except PreviewError as exc:
+            raise HTTPException(status_code=exc.status_code, detail=exc.message) from exc
+
+    system_prompt, chat_messages = build_chat_payload(rendered)
+    if not chat_messages:
+        raise HTTPException(
+            status_code=400,
+            detail=(
+                "Template produced no user/assistant messages — nothing to send to "
+                "the model. The template must contain at least one {% role \"user\" %} "
+                "block with non-empty content."
+            ),
+        )
+    char_count = sum(len(b.text) for m in rendered.messages for b in m.blocks)
+
+    settings = machine_settings_service.load_settings()
+    resolved = _resolve_call_params(
+        settings,
+        assistant_id=request.assistant_id,
+        provider_override=request.provider,
+        model_override=request.model,
+        max_tokens_override=request.max_tokens,
+    )
+    try:
+        project_info = service.current_project()
+        policy = project_info.ai_policy
+    except ProjectServiceError:
+        policy = "off"
+
+    events = ai_providers.chat_stream(
+        provider_name=resolved.provider,
+        model=resolved.model,
+        system_prompt=system_prompt,
+        messages=chat_messages,
+        max_tokens=resolved.max_tokens,
+        temperature=resolved.temperature,
+        thinking_enabled=resolved.thinking_enabled,
+        settings=settings,
+        policy=policy,
+    )
+    return StreamingResponse(
+        _stream_provider_events(
+            events,
+            policy=policy,
+            extra_done={"session_id": session_id, "char_count": char_count},
+        ),
+        media_type="application/x-ndjson",
     )
 
 

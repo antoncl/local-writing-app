@@ -303,5 +303,171 @@ class ChatEndpointTests(unittest.TestCase):
         self.assertEqual(response.json()["provider"], "ollama")
 
 
+class ChatStreamEndpointTests(unittest.TestCase):
+    def setUp(self) -> None:
+        self.temp_dir = TemporaryDirectory()
+        self.root = Path(self.temp_dir.name) / "project"
+        global_service.__init__()
+        global_service.create_project(self.root, "Stream Tests")
+        self.client = TestClient(app)
+        self.config_dir = Path(self.temp_dir.name) / "machine_config"
+        self.config_dir.mkdir()
+        self._config_patcher = patch(
+            "app.services.machine_settings.config_path",
+            return_value=self.config_dir / "config.yaml",
+        )
+        self._config_patcher.start()
+
+    def tearDown(self) -> None:
+        self._config_patcher.stop()
+        self.temp_dir.cleanup()
+
+    def _parse_ndjson(self, body: str) -> list[dict]:
+        import json
+        events = []
+        for line in body.splitlines():
+            line = line.strip()
+            if line:
+                events.append(json.loads(line))
+        return events
+
+    def test_chat_stream_emits_deltas_then_done(self) -> None:
+        from app.services.ai import providers as ai_providers
+        global_service.update_project_settings(
+            UpdateProjectSettingsRequest(ai_policy="cloud-allowed")
+        )
+        loaded = _set_machine_keys(anthropic="sk-ant-test", default_provider="anthropic")
+
+        def fake_anthropic_stream(**_kwargs):
+            yield ai_providers.StreamDelta(text="Hello, ")
+            yield ai_providers.StreamDelta(text="world!")
+            yield "end_turn"
+
+        with patch("app.services.machine_settings.load_settings", return_value=loaded), \
+             patch("app.services.ai.providers._anthropic_chat_stream", side_effect=fake_anthropic_stream):
+            response = self.client.post(
+                "/api/ai/chat/stream",
+                json={
+                    "provider": "anthropic",
+                    "model": "claude-haiku-4-5-20251001",
+                    "messages": [{"role": "user", "content": "hi"}],
+                },
+            )
+        self.assertEqual(response.status_code, 200, response.text)
+        self.assertTrue(response.headers["content-type"].startswith("application/x-ndjson"))
+        events = self._parse_ndjson(response.text)
+        deltas = [e for e in events if e["type"] == "delta"]
+        done = [e for e in events if e["type"] == "done"]
+        self.assertEqual([d["text"] for d in deltas], ["Hello, ", "world!"])
+        self.assertEqual(len(done), 1)
+        self.assertEqual(done[0]["provider"], "anthropic")
+        self.assertEqual(done[0]["stop_reason"], "end_turn")
+        self.assertFalse(done[0]["truncated"])
+        self.assertEqual(done[0]["policy"], "cloud-allowed")
+
+    def test_chat_stream_policy_off_emits_error(self) -> None:
+        # default project policy is "off"
+        loaded = _set_machine_keys(anthropic="sk-ant-test", default_provider="anthropic")
+        with patch("app.services.machine_settings.load_settings", return_value=loaded), \
+             patch("app.services.ai.providers._anthropic_chat_stream") as mock_stream:
+            response = self.client.post(
+                "/api/ai/chat/stream",
+                json={
+                    "provider": "anthropic",
+                    "model": "claude-haiku-4-5-20251001",
+                    "messages": [{"role": "user", "content": "hi"}],
+                },
+            )
+        self.assertEqual(response.status_code, 200, response.text)
+        events = self._parse_ndjson(response.text)
+        self.assertEqual(len(events), 1)
+        self.assertEqual(events[0]["type"], "error")
+        self.assertIn("policy: off", events[0]["error"])
+        mock_stream.assert_not_called()
+
+    def test_chat_stream_anthropic_thinking_events(self) -> None:
+        from app.services.ai import providers as ai_providers
+        global_service.update_project_settings(
+            UpdateProjectSettingsRequest(ai_policy="cloud-allowed")
+        )
+        loaded = _set_machine_keys(anthropic="sk-ant-test")
+
+        def fake_stream(**_kwargs):
+            yield ai_providers.StreamThinking(text="Let me think… ")
+            yield ai_providers.StreamThinking(text="OK.")
+            yield ai_providers.StreamDelta(text="Hi!")
+            yield "end_turn"
+
+        # Create an assistant with ai_thinking enabled so the resolver
+        # plumbs thinking_enabled=True. The provider mock doesn't care, but
+        # this exercises the param wiring.
+        from app.models import CreateAssistantEntryRequest, SaveAssistantEntryRequest
+        created = global_service.create_assistant_entry(
+            CreateAssistantEntryRequest(title="Thinker", entry_type="assistant")
+        )
+        global_service.save_assistant_entry(
+            created.id,
+            SaveAssistantEntryRequest(
+                title="Thinker",
+                base_revision=created.revision,
+                entry_type="assistant",
+                metadata={
+                    "ai_provider": "anthropic",
+                    "ai_model": "claude-haiku-4-5-20251001",
+                    "ai_thinking": True,
+                },
+            ),
+        )
+
+        captured: dict = {}
+
+        def capture_and_stream(**kwargs):
+            captured.update(kwargs)
+            yield from fake_stream(**kwargs)
+
+        with patch("app.services.machine_settings.load_settings", return_value=loaded), \
+             patch("app.services.ai.providers._anthropic_chat_stream", side_effect=capture_and_stream):
+            response = self.client.post(
+                "/api/ai/chat/stream",
+                json={
+                    "assistant_id": created.id,
+                    "messages": [{"role": "user", "content": "hi"}],
+                },
+            )
+        self.assertEqual(response.status_code, 200, response.text)
+        self.assertTrue(captured.get("thinking_enabled"))
+        events = self._parse_ndjson(response.text)
+        thinking = [e for e in events if e["type"] == "thinking"]
+        deltas = [e for e in events if e["type"] == "delta"]
+        self.assertEqual([t["text"] for t in thinking], ["Let me think… ", "OK."])
+        self.assertEqual([d["text"] for d in deltas], ["Hi!"])
+
+    def test_chat_stream_truncated_when_stop_reason_is_max_tokens(self) -> None:
+        from app.services.ai import providers as ai_providers
+        global_service.update_project_settings(
+            UpdateProjectSettingsRequest(ai_policy="cloud-allowed")
+        )
+        loaded = _set_machine_keys(anthropic="sk-ant-test")
+
+        def fake_stream(**_kwargs):
+            yield ai_providers.StreamDelta(text="partial")
+            yield "max_tokens"
+
+        with patch("app.services.machine_settings.load_settings", return_value=loaded), \
+             patch("app.services.ai.providers._anthropic_chat_stream", side_effect=fake_stream):
+            response = self.client.post(
+                "/api/ai/chat/stream",
+                json={
+                    "provider": "anthropic",
+                    "model": "claude-haiku-4-5-20251001",
+                    "messages": [{"role": "user", "content": "go"}],
+                },
+            )
+        events = self._parse_ndjson(response.text)
+        done = next(e for e in events if e["type"] == "done")
+        self.assertTrue(done["truncated"])
+        self.assertEqual(done["stop_reason"], "max_tokens")
+
+
 if __name__ == "__main__":
     unittest.main()

@@ -168,7 +168,7 @@ DEFAULT_METADATA_SCHEMA: dict[str, Any] = {
             "name": "Prompt",
             "kind": "prompt",
             "abstract": True,
-            "fields": ["tags"],
+            "fields": ["tags", "preferred_assistant_id"],
             "has_body": True,
             "body_editor": "code",
             "body_language": "jinja2",
@@ -297,6 +297,11 @@ DEFAULT_METADATA_SCHEMA: dict[str, Any] = {
         "ai_max_tokens": {"name": "Max output tokens", "type": "number"},
         "ai_thinking": {"name": "Show thinking", "type": "boolean"},
         "is_default": {"name": "Default", "type": "boolean"},
+        "preferred_assistant_id": {
+            "name": "Preferred assistant",
+            "type": "entity_ref",
+            "target": {"kind": "assistant"},
+        },
     },
 }
 
@@ -802,7 +807,12 @@ class ProjectService:
         existing_entry_type = entry_types.get(entry_type_id)
         existing_fields = existing_entry_type.get("fields") if isinstance(existing_entry_type, dict) else None
         fields = existing_fields if isinstance(existing_fields, list) else request.entry_type.fields
-        entry_type_data = request.entry_type.model_dump(exclude_none=True)
+        # Persist ONLY the fields the caller actually set — `model_dump(exclude_unset=True)`.
+        # Pydantic defaults like `body_editor="wysiwyg"` would otherwise leak onto disk and
+        # override the inherited values from a parent type (e.g. a `prompt` sub-type would
+        # end up with body_editor=wysiwyg pinned in the layer file, masking the parent's
+        # code/jinja2). Inheritance fills in absent fields on read.
+        entry_type_data = request.entry_type.model_dump(exclude_unset=True, exclude_none=True)
         entry_type_data.pop("own_fields", None)
         entry_type_data["name"] = request.entry_type.name.strip() or entry_type_id
         entry_type_data["kind"] = request.entry_type.kind
@@ -2493,6 +2503,7 @@ class ProjectService:
                 ChatSessionSummary(
                     id=str(data.get("id", "")),
                     title=str(data.get("title", "")) or "Untitled chat",
+                    prompt_entry_id=str(data.get("prompt_entry_id", "") or ""),
                     assistant_id=str(data.get("assistant_id", "") or ""),
                     pinned=bool(data.get("pinned", False)),
                     created_at=str(data.get("created_at", "") or ""),
@@ -2526,6 +2537,7 @@ class ProjectService:
         session = ChatSession(
             id=self._new_id("chat"),
             title=request.title or "Untitled chat",
+            prompt_entry_id=request.prompt_entry_id,
             assistant_id=request.assistant_id,
             system_prompt=request.system_prompt,
             pinned=False,
@@ -2544,9 +2556,32 @@ class ProjectService:
         if not path.exists():
             raise ProjectServiceError(f"Chat {chat_id} does not exist.", 404)
         existing = self.read_chat_session(chat_id)
+        # Once any messages exist, the preset (prompt + assistant + brief) is
+        # locked. Switching them mid-conversation would invalidate the Anthropic
+        # cache prefix and force a full re-send. Callers should start a new chat.
+        if existing.messages:
+            if request.prompt_entry_id != existing.prompt_entry_id:
+                raise ProjectServiceError(
+                    "Cannot change prompt of a chat that already has messages. "
+                    "Start a new chat with this prompt instead.",
+                    409,
+                )
+            if request.assistant_id != existing.assistant_id:
+                raise ProjectServiceError(
+                    "Cannot change assistant of a chat that already has messages. "
+                    "Start a new chat with this assistant instead.",
+                    409,
+                )
+            if request.system_prompt != existing.system_prompt:
+                raise ProjectServiceError(
+                    "Cannot change brief of a chat that already has messages. "
+                    "Start a new chat to use a different brief.",
+                    409,
+                )
         updated = ChatSession(
             id=existing.id,
             title=request.title or existing.title or "Untitled chat",
+            prompt_entry_id=request.prompt_entry_id,
             assistant_id=request.assistant_id,
             system_prompt=request.system_prompt,
             pinned=request.pinned,

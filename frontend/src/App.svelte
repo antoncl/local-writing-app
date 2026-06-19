@@ -191,6 +191,12 @@ The story so far:
   let activeChatId: string | null = null;
   let activeChatTitle = "Untitled chat";
   let activeChatPinned = false;
+  // The locked prompt for the active chat. Empty string means "freeform" (no
+  // prompt). Once chatHistory has messages, this becomes immutable for the
+  // session — switching prompts creates a new chat.
+  let chatPromptEntryId = "";
+  let promptPickerOpen = false;
+  let promptPickerSearch = "";
   type MachineSettingsDraft = {
     anthropic_api_key: string;
     openai_api_key: string;
@@ -392,6 +398,9 @@ The story so far:
       chatContextCategory = null;
       chatContextSearch = "";
     }
+    if (promptPickerOpen && !target?.closest(".chat-prompt-anchor")) {
+      closeChatPromptPicker();
+    }
   }
 
   function createEmptyEditorPane(id: string): EditorPaneState {
@@ -468,6 +477,7 @@ The story so far:
     activeChatId = null;
     activeChatTitle = "Untitled chat";
     activeChatPinned = false;
+    chatPromptEntryId = "";
     chatSessions = [];
     clearChat();
     chatSystemPrompt = DEFAULT_CHAT_SYSTEM_PROMPT;
@@ -1156,6 +1166,7 @@ The story so far:
     }
     return {
       title,
+      prompt_entry_id: chatPromptEntryId,
       assistant_id: chatAssistantId,
       system_prompt: chatSystemPrompt,
       pinned: activeChatPinned,
@@ -1178,6 +1189,7 @@ The story so far:
     activeChatId = session.id;
     activeChatTitle = session.title || "Untitled chat";
     activeChatPinned = session.pinned;
+    chatPromptEntryId = session.prompt_entry_id || "";
     chatAssistantId = session.assistant_id || "";
     chatSystemPrompt = session.system_prompt || DEFAULT_CHAT_SYSTEM_PROMPT;
     chatContextItems = (session.context_items || []).map((item: ChatSessionContextItem) => ({
@@ -1229,13 +1241,21 @@ The story so far:
     }
   }
 
-  async function createNewChatSession(): Promise<void> {
+  async function createNewChatSession(opts: {
+    promptEntryId?: string;
+    assistantId?: string;
+    systemPrompt?: string;
+    title?: string;
+  } = {}): Promise<void> {
     if (activeChatId) {
       await persistActiveChat();
     }
     try {
       const session = await api.createChatSession({
-        assistant_id: chatAssistantId,
+        prompt_entry_id: opts.promptEntryId ?? "",
+        assistant_id: opts.assistantId ?? chatAssistantId,
+        system_prompt: opts.systemPrompt ?? "",
+        title: opts.title,
       });
       applyChatSession(session);
       await refreshChatSessions();
@@ -1243,6 +1263,135 @@ The story so far:
     } catch (e) {
       error = `Couldn't create chat: ${(e as Error).message}`;
     }
+  }
+
+  // --- Prompt picker (chat composer) ---
+
+  function chatRoutedPromptEntries(): PromptEntrySummary[] {
+    if (!metadataSchema) return [];
+    return promptEntries.filter((entry) => {
+      const def = metadataSchema?.entry_types[entry.entry_type];
+      return def?.prompt?.context_strategy?.output?.kind === "chat_panel";
+    });
+  }
+
+  function filteredChatPromptEntries(): PromptEntrySummary[] {
+    const list = chatRoutedPromptEntries();
+    const q = promptPickerSearch.trim().toLowerCase();
+    if (!q) return list.slice().sort((a, b) => a.title.localeCompare(b.title, undefined, { sensitivity: "base" }));
+    return list
+      .filter((e) => e.title.toLowerCase().includes(q) || (e.entry_type || "").toLowerCase().includes(q))
+      .sort((a, b) => a.title.localeCompare(b.title, undefined, { sensitivity: "base" }));
+  }
+
+  function activePromptTitle(): string {
+    if (!chatPromptEntryId) return "Freeform";
+    const entry = promptEntries.find((p) => p.id === chatPromptEntryId);
+    return entry?.title || "Unknown prompt";
+  }
+
+  function chatSessionPromptTitle(session: ChatSessionSummary): string {
+    if (!session.prompt_entry_id) return "";
+    const entry = promptEntries.find((p) => p.id === session.prompt_entry_id);
+    return entry?.title || "Unknown prompt";
+  }
+
+  function preferredAssistantForPrompt(entry: PromptEntrySummary): string {
+    const raw = (entry.metadata ?? {})["preferred_assistant_id"];
+    return typeof raw === "string" ? raw : "";
+  }
+
+  function isActiveChatLocked(): boolean {
+    return chatHistory.length > 0;
+  }
+
+  function toggleChatPromptPicker() {
+    promptPickerOpen = !promptPickerOpen;
+    promptPickerSearch = "";
+    if (promptPickerOpen) {
+      tick().then(() => {
+        const input = document.querySelector<HTMLInputElement>(".chat-prompt-picker-search");
+        input?.focus();
+      });
+    }
+  }
+
+  function closeChatPromptPicker() {
+    promptPickerOpen = false;
+    promptPickerSearch = "";
+  }
+
+  async function pickPromptForChat(entry: PromptEntrySummary): Promise<void> {
+    closeChatPromptPicker();
+    // Lock check: never replace the prompt of a chat with history. Start a new
+    // chat instead. The backend would reject the save anyway — failing here is
+    // a nicer UX.
+    const mustCreateNew = !activeChatId || isActiveChatLocked();
+    try {
+      // Materialize the brief by rendering the template. If the prompt needs
+      // a target_scene_id or inputs, this will surface an error — for v1 we
+      // pass an empty inputs dict and rely on the prompt being self-contained
+      // (the user can attach context items afterwards). Future: inputs dialog.
+      const preview = await api.aiPreview({
+        template_source: entry.body_markdown,
+        target_scene_id: "",
+        inputs: {},
+        commit: false,
+      });
+      const messages = preview.messages ?? [];
+      const flatten = (blocks: { text: string }[]) => blocks.map((b) => b.text).join("");
+      const systemBlocks = messages.filter((m) => m.role === "system").map((m) => flatten(m.blocks));
+      const initialTurns = messages
+        .filter((m) => m.role === "user" || m.role === "assistant")
+        .map((m) => ({ role: m.role as "user" | "assistant", content: flatten(m.blocks) }));
+      const brief = systemBlocks.join("\n\n") || DEFAULT_CHAT_SYSTEM_PROMPT;
+      const preferredAssistantId = preferredAssistantForPrompt(entry);
+
+      if (mustCreateNew) {
+        // Auto-name the new chat with the prompt's title so it's scannable in
+        // the Chats pane immediately.
+        await createNewChatSession({
+          promptEntryId: entry.id,
+          assistantId: preferredAssistantId || chatAssistantId,
+          systemPrompt: brief,
+          title: entry.title,
+        });
+        if (initialTurns.length > 0) {
+          chatHistory = initialTurns;
+          // If the template ended with a user turn, stream the reply.
+          const last = initialTurns[initialTurns.length - 1];
+          if (last?.role === "user") {
+            await sendChatTurn();
+          } else {
+            await persistActiveChat();
+          }
+        }
+      } else {
+        // Empty active chat — apply preset in-place.
+        chatPromptEntryId = entry.id;
+        chatSystemPrompt = brief;
+        if (preferredAssistantId) chatAssistantId = preferredAssistantId;
+        chatHistory = initialTurns;
+        activeChatTitle = entry.title;
+        const last = initialTurns[initialTurns.length - 1];
+        if (last?.role === "user") {
+          await sendChatTurn();
+        } else {
+          await persistActiveChat();
+        }
+      }
+    } catch (e) {
+      chatError = `Couldn't apply prompt: ${(e as Error).message}`;
+    }
+  }
+
+  function clearChatPrompt() {
+    // Drop the locked prompt — only meaningful before any messages exist.
+    if (isActiveChatLocked()) return;
+    chatPromptEntryId = "";
+    chatSystemPrompt = DEFAULT_CHAT_SYSTEM_PROMPT;
+    activeChatTitle = "Untitled chat";
+    void persistActiveChat();
   }
 
   async function deleteChatSessionFromPane(chatId: string): Promise<void> {
@@ -1253,6 +1402,7 @@ The story so far:
         activeChatId = null;
         activeChatTitle = "Untitled chat";
         activeChatPinned = false;
+        chatPromptEntryId = "";
         clearChat();
         chatSystemPrompt = DEFAULT_CHAT_SYSTEM_PROMPT;
       }
@@ -3960,6 +4110,18 @@ The story so far:
               <span>
                 <strong>{session.title || "Untitled chat"}</strong>
                 {#if session.pinned}<small class="assistant-default-badge">pinned</small>{/if}
+                {#if session.prompt_entry_id || session.assistant_id}
+                  <small class="chat-session-preset">
+                    {#if session.prompt_entry_id}
+                      <span class="chat-prompt-glyph" aria-hidden="true">✨</span>
+                      {chatSessionPromptTitle(session)}
+                    {/if}
+                    {#if session.prompt_entry_id && session.assistant_id} · {/if}
+                    {#if session.assistant_id}
+                      {assistantNameFor(session.assistant_id) || "(unknown)"}
+                    {/if}
+                  </small>
+                {/if}
                 <small>{session.message_count} message{session.message_count === 1 ? "" : "s"} · {session.updated_at.slice(0, 16).replace("T", " ")}</small>
               </span>
             </button>
@@ -4307,6 +4469,65 @@ The story so far:
       {/if}
     </header>
     <div class="pane-content chat-panel">
+      <!-- Three-way composer strip: Prompt · Assistant · Context.
+           Prompt + Assistant are read-only once chat history exists (locked
+           preset, preserves the Anthropic cache prefix). Context is additive. -->
+      <div class="chat-composer-strip">
+        <div class="chat-prompt-anchor">
+          <button
+            type="button"
+            class="chat-prompt-chip"
+            class:locked={isActiveChatLocked()}
+            class:assigned={!!chatPromptEntryId}
+            title={isActiveChatLocked() ? "Prompt is locked while this chat has messages. Start a new chat to switch." : "Pick a prompt"}
+            on:click={() => !isActiveChatLocked() && toggleChatPromptPicker()}
+            disabled={isActiveChatLocked() && !chatPromptEntryId}
+          >
+            <span class="chat-prompt-glyph" aria-hidden="true">✨</span>
+            <strong>{activePromptTitle()}</strong>
+            {#if isActiveChatLocked()}
+              <span class="chat-lock-glyph" aria-label="locked">🔒</span>
+            {:else}
+              <span class="chat-prompt-caret" aria-hidden="true">▾</span>
+            {/if}
+          </button>
+          {#if chatPromptEntryId && !isActiveChatLocked()}
+            <button
+              type="button"
+              class="chat-prompt-clear"
+              title="Drop this prompt (revert to freeform chat)"
+              on:click={clearChatPrompt}
+            >×</button>
+          {/if}
+          {#if promptPickerOpen}
+            <div class="chat-prompt-picker" role="menu">
+              <input
+                class="chat-prompt-picker-search"
+                type="text"
+                placeholder="Search prompts…"
+                bind:value={promptPickerSearch}
+              />
+              {#each filteredChatPromptEntries() as entry (entry.id)}
+                <button
+                  type="button"
+                  class:active-prompt={entry.id === chatPromptEntryId}
+                  on:click={() => pickPromptForChat(entry)}
+                >
+                  <strong>{entry.title}</strong>
+                  <small>{entry.entry_type}</small>
+                </button>
+              {:else}
+                <p class="muted">
+                  {promptPickerSearch
+                    ? "No prompts match."
+                    : "No chat-routed prompts. Create a prompt with output_kind = chat_panel."}
+                </p>
+              {/each}
+            </div>
+          {/if}
+        </div>
+      </div>
+
       {#if chatActivePromptEntry}
         <div class="chat-active-prompt">
           <span>Chatting via <strong>{chatActivePromptEntry.title}</strong></span>
@@ -4314,10 +4535,10 @@ The story so far:
         </div>
       {/if}
       <details class="chat-config">
-        <summary>Assistant &amp; brief</summary>
+        <summary>Assistant &amp; brief {#if isActiveChatLocked()}<span class="chat-lock-glyph" aria-label="locked">🔒</span>{/if}</summary>
         <label class="chat-label">
           Assistant
-          <select bind:value={chatAssistantId} on:change={handleChatAssistantChange}>
+          <select bind:value={chatAssistantId} on:change={handleChatAssistantChange} disabled={isActiveChatLocked()}>
             <option value="">Default ({assistantNameFor(defaultAssistantEntryId()) || "use machine default"})</option>
             {#each assistantEntries as assistant (assistant.id)}
               <option value={assistant.id}>{assistant.title}</option>
@@ -4326,8 +4547,14 @@ The story so far:
         </label>
         <label class="chat-label">
           Brief
-          <textarea class="chat-system" bind:value={chatSystemPrompt} on:input={clearActivePromptOnEdit} on:blur={handleChatSystemPromptBlur} spellcheck="false"></textarea>
+          <textarea class="chat-system" bind:value={chatSystemPrompt} on:input={clearActivePromptOnEdit} on:blur={handleChatSystemPromptBlur} spellcheck="false" readonly={isActiveChatLocked()}></textarea>
         </label>
+        {#if isActiveChatLocked()}
+          <p class="muted chat-lock-hint">
+            Prompt, assistant, and brief are locked once a chat has messages — switching them mid-conversation would invalidate the AI cache prefix and force a full re-send.
+            Start a new chat to change them.
+          </p>
+        {/if}
       </details>
 
       <div class="chat-history" bind:this={chatScrollEl}>

@@ -368,7 +368,13 @@
     metadataExpanded = documentKind === "lore" || !nextHasBody;
     tagPickerFieldId = null;
     tagPickerPosition = null;
-    if (rawBodyMode) {
+    // Branch on the FRESHLY-resolved entry-type's body_editor — the `rawBodyMode`
+    // reactive hasn't recomputed yet (Svelte updates on the next microtask), so
+    // reading it here would reflect the PREVIOUS entry. For a prompt opened
+    // after a scene that meant we fell through to the WYSIWYG branch and lost
+    // the Jinja2 source view.
+    const nextRawBodyMode = (nextEntryDefinition?.body_editor ?? "wysiwyg") === "code";
+    if (nextRawBodyMode) {
       const nextBody = nextScene.body_markdown ?? "";
       rawBody = nextBody;
       lastEmittedRawBody = nextBody;

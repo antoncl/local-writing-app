@@ -2392,6 +2392,145 @@ h3 {
   font-style: italic;
 }
 
+/* Composer strip: Prompt · Assistant · Context (peer controls above the chat). */
+.chat-composer-strip {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 0 0 8px 0;
+}
+
+.chat-prompt-anchor {
+  position: relative;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.chat-prompt-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 10px;
+  border: 1px solid #cbd6d2;
+  border-radius: 14px;
+  background: #f4f7f5;
+  color: #2a3431;
+  font-size: 13px;
+  cursor: pointer;
+}
+
+.chat-prompt-chip:hover:not(:disabled) {
+  background: #e7f0ec;
+  border-color: #2f6f5e;
+}
+
+.chat-prompt-chip:disabled {
+  cursor: default;
+  opacity: 0.7;
+}
+
+.chat-prompt-chip.assigned {
+  background: #e7f0ec;
+  border-color: #2f6f5e;
+  color: #1f4a3f;
+}
+
+.chat-prompt-chip.locked {
+  background: #efeae1;
+  border-color: #c8b896;
+  color: #5b4c2c;
+}
+
+.chat-prompt-glyph {
+  font-size: 14px;
+}
+
+.chat-prompt-caret {
+  color: #6f7c78;
+  font-size: 11px;
+}
+
+.chat-lock-glyph {
+  font-size: 11px;
+  margin-left: 4px;
+}
+
+.chat-prompt-clear {
+  border: 1px solid transparent;
+  background: transparent;
+  color: #8a948f;
+  cursor: pointer;
+  font-size: 14px;
+  line-height: 1;
+  padding: 0 6px;
+  border-radius: 4px;
+}
+
+.chat-prompt-clear:hover {
+  background: #f7e0e0;
+  color: #8c2f2f;
+  border-color: #d8b6b6;
+}
+
+.chat-prompt-picker {
+  position: absolute;
+  top: calc(100% + 4px);
+  left: 0;
+  z-index: 50;
+  min-width: 260px;
+  max-height: 320px;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 6px;
+  background: #fff;
+  border: 1px solid #cbd6d2;
+  border-radius: 6px;
+  box-shadow: 0 6px 18px rgba(0, 0, 0, 0.12);
+}
+
+.chat-prompt-picker-search {
+  margin-bottom: 4px;
+  padding: 4px 6px;
+  border: 1px solid #cbd6d2;
+  border-radius: 4px;
+  font-size: 13px;
+}
+
+.chat-prompt-picker button {
+  display: grid;
+  gap: 2px;
+  text-align: left;
+  padding: 6px 8px;
+  border: 1px solid transparent;
+  background: transparent;
+  cursor: pointer;
+  border-radius: 4px;
+}
+
+.chat-prompt-picker button:hover {
+  background: #f4f7f5;
+  border-color: #cbd6d2;
+}
+
+.chat-prompt-picker button.active-prompt {
+  background: #e7f0ec;
+  border-color: #2f6f5e;
+}
+
+.chat-prompt-picker button > small {
+  color: #65716c;
+  font-size: 11px;
+}
+
+.chat-lock-hint {
+  margin-top: 4px;
+  font-size: 12px;
+  line-height: 1.4;
+}
+
 .chat-truncated-banner {
   padding: 6px 12px;
   background: #fff7e1;
@@ -2696,6 +2835,11 @@ h3 {
   background: #f3eed2;
   color: #6b5a0c;
   border-color: #d8c98e;
+}
+
+.chats-pane .chat-session-preset {
+  color: #2f6f5e;
+  font-size: 11px;
 }
 
 .raw-body-editor :global(.code-editor) {

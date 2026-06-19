@@ -636,6 +636,10 @@ class ChatSessionContextItem(BaseModel):
 class ChatSession(BaseModel):
     id: str
     title: str
+    # The locked preset for this chat. Once messages exist, prompt_entry_id,
+    # assistant_id, and system_prompt cannot change — switching requires starting
+    # a new chat. This keeps the Anthropic cache prefix stable across turns.
+    prompt_entry_id: str = ""
     assistant_id: str = ""
     system_prompt: str = ""
     pinned: bool = False
@@ -648,6 +652,7 @@ class ChatSession(BaseModel):
 class ChatSessionSummary(BaseModel):
     id: str
     title: str
+    prompt_entry_id: str = ""
     assistant_id: str = ""
     pinned: bool = False
     created_at: str
@@ -661,12 +666,14 @@ class ChatSessionList(BaseModel):
 
 class CreateChatSessionRequest(BaseModel):
     title: str = ""
+    prompt_entry_id: str = ""
     assistant_id: str = ""
     system_prompt: str = ""
 
 
 class SaveChatSessionRequest(BaseModel):
     title: str
+    prompt_entry_id: str = ""
     assistant_id: str = ""
     system_prompt: str = ""
     pinned: bool = False

@@ -814,6 +814,46 @@ class MetadataValidationTests(unittest.TestCase):
         self.assertNotIn("word_count", world_schema["entry_types"]["scene"]["fields"])
         self.assertNotIn("pov_character", self.service._read_yaml(self.root / "metadata.schema.yaml").get("fields", {}))
 
+    def test_upsert_entry_type_does_not_leak_pydantic_defaults_to_disk(self) -> None:
+        # Regression: previously model_dump(exclude_none=True) wrote
+        # body_editor='wysiwyg' and body_language='markdown' to disk even
+        # though the frontend never sent them. That explicit value then
+        # overrode the parent prompt type's body_editor='code' during
+        # inheritance, so user-defined prompt sub-types opened in the
+        # WYSIWYG editor instead of the Jinja2 code editor.
+        project_layer = next(
+            layer
+            for layer in self.service.read_metadata_schema_layers().layers
+            if layer.folder_path == str(self.root)
+        )
+
+        self.service.upsert_metadata_entry_type(
+            UpsertMetadataEntryTypeRequest(
+                layer_id=project_layer.id,
+                entry_type_id="brainstorm",
+                allow_existing=False,
+                entry_type=EntryTypeDefinition.model_validate({
+                    "name": "Brainstorm",
+                    "kind": "prompt",
+                    "parent": "prompt",
+                    "abstract": False,
+                    "fields": [],
+                }),
+            )
+        )
+
+        # On disk: the sparse form — no body_editor/body_language pollution.
+        on_disk = self.service._read_yaml(self.root / "metadata.schema.yaml")
+        brain_on_disk = on_disk["entry_types"]["brainstorm"]
+        self.assertNotIn("body_editor", brain_on_disk)
+        self.assertNotIn("body_language", brain_on_disk)
+
+        # Resolved: inheritance from the parent `prompt` fills these in.
+        schema = self.service.read_metadata_schema()
+        brain_resolved = schema.entry_types["brainstorm"]
+        self.assertEqual(brain_resolved.body_editor, "code")
+        self.assertEqual(brain_resolved.body_language, "jinja2")
+
     def test_create_metadata_field_rejects_duplicate_field_id(self) -> None:
         world_layer = next(
             layer

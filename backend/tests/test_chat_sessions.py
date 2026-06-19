@@ -143,6 +143,137 @@ class ChatSessionEndpointTests(unittest.TestCase):
         response = self.client.put("/api/chats/chat_nope", json=payload)
         self.assertEqual(response.status_code, 404)
 
+    def test_create_persists_prompt_entry_id(self) -> None:
+        response = self.client.post(
+            "/api/chats",
+            json={
+                "title": "Brainstorm session",
+                "prompt_entry_id": "prompt_abc",
+                "assistant_id": "asst_x",
+                "system_prompt": "Be creative.",
+            },
+        )
+        self.assertEqual(response.status_code, 200, response.text)
+        body = response.json()
+        self.assertEqual(body["prompt_entry_id"], "prompt_abc")
+        # And it survives a round-trip:
+        again = self.client.get(f"/api/chats/{body['id']}").json()
+        self.assertEqual(again["prompt_entry_id"], "prompt_abc")
+
+    def test_list_surfaces_prompt_entry_id_in_summary(self) -> None:
+        self.client.post("/api/chats", json={"title": "T", "prompt_entry_id": "prompt_xyz"})
+        listing = self.client.get("/api/chats").json()["sessions"]
+        self.assertEqual(listing[0]["prompt_entry_id"], "prompt_xyz")
+
+    def _make_chat_with_message(self, **overrides):
+        """Create a chat then save a user message into it, returning the saved session."""
+        created = self.client.post("/api/chats", json={
+            "title": "T",
+            "prompt_entry_id": overrides.get("prompt_entry_id", "prompt_initial"),
+            "assistant_id": overrides.get("assistant_id", "asst_initial"),
+            "system_prompt": overrides.get("system_prompt", "Initial brief."),
+        }).json()
+        payload = {
+            "title": created["title"],
+            "prompt_entry_id": created["prompt_entry_id"],
+            "assistant_id": created["assistant_id"],
+            "system_prompt": created["system_prompt"],
+            "pinned": False,
+            "context_items": [],
+            "messages": [{"role": "user", "content": "hi"}],
+        }
+        saved = self.client.put(f"/api/chats/{created['id']}", json=payload)
+        self.assertEqual(saved.status_code, 200, saved.text)
+        return saved.json()
+
+    def test_save_locks_prompt_after_messages_exist(self) -> None:
+        chat = self._make_chat_with_message()
+        # Try to switch prompt — should be rejected.
+        payload = {
+            "title": chat["title"],
+            "prompt_entry_id": "prompt_DIFFERENT",
+            "assistant_id": chat["assistant_id"],
+            "system_prompt": chat["system_prompt"],
+            "pinned": False,
+            "context_items": [],
+            "messages": chat["messages"],
+        }
+        response = self.client.put(f"/api/chats/{chat['id']}", json=payload)
+        self.assertEqual(response.status_code, 409, response.text)
+        self.assertIn("prompt", response.json()["detail"].lower())
+
+    def test_save_locks_assistant_after_messages_exist(self) -> None:
+        chat = self._make_chat_with_message()
+        payload = {
+            "title": chat["title"],
+            "prompt_entry_id": chat["prompt_entry_id"],
+            "assistant_id": "asst_DIFFERENT",
+            "system_prompt": chat["system_prompt"],
+            "pinned": False,
+            "context_items": [],
+            "messages": chat["messages"],
+        }
+        response = self.client.put(f"/api/chats/{chat['id']}", json=payload)
+        self.assertEqual(response.status_code, 409, response.text)
+        self.assertIn("assistant", response.json()["detail"].lower())
+
+    def test_save_locks_brief_after_messages_exist(self) -> None:
+        chat = self._make_chat_with_message()
+        payload = {
+            "title": chat["title"],
+            "prompt_entry_id": chat["prompt_entry_id"],
+            "assistant_id": chat["assistant_id"],
+            "system_prompt": "A totally new brief.",
+            "pinned": False,
+            "context_items": [],
+            "messages": chat["messages"],
+        }
+        response = self.client.put(f"/api/chats/{chat['id']}", json=payload)
+        self.assertEqual(response.status_code, 409, response.text)
+        self.assertIn("brief", response.json()["detail"].lower())
+
+    def test_save_allows_locked_field_changes_when_history_is_empty(self) -> None:
+        # Creating a chat with one config, then immediately switching before any
+        # messages are sent, should succeed — the preset isn't locked yet.
+        created = self.client.post("/api/chats", json={
+            "title": "T",
+            "prompt_entry_id": "prompt_a",
+            "assistant_id": "asst_a",
+            "system_prompt": "First.",
+        }).json()
+        response = self.client.put(f"/api/chats/{created['id']}", json={
+            "title": "T",
+            "prompt_entry_id": "prompt_b",
+            "assistant_id": "asst_b",
+            "system_prompt": "Second.",
+            "pinned": False,
+            "context_items": [],
+            "messages": [],
+        })
+        self.assertEqual(response.status_code, 200, response.text)
+        self.assertEqual(response.json()["prompt_entry_id"], "prompt_b")
+
+    def test_save_allows_volatile_fields_after_lock(self) -> None:
+        # Title, pinned, context_items, and (importantly) messages can still
+        # change after the preset is locked — only the preset is frozen.
+        chat = self._make_chat_with_message()
+        payload = {
+            "title": "Renamed mid-conversation",
+            "prompt_entry_id": chat["prompt_entry_id"],
+            "assistant_id": chat["assistant_id"],
+            "system_prompt": chat["system_prompt"],
+            "pinned": True,
+            "context_items": [{"kind": "scene", "id": "scene_1", "title": "Opening"}],
+            "messages": chat["messages"] + [{"role": "assistant", "content": "hello"}],
+        }
+        response = self.client.put(f"/api/chats/{chat['id']}", json=payload)
+        self.assertEqual(response.status_code, 200, response.text)
+        body = response.json()
+        self.assertEqual(body["title"], "Renamed mid-conversation")
+        self.assertTrue(body["pinned"])
+        self.assertEqual(len(body["context_items"]), 1)
+        self.assertEqual(len(body["messages"]), 2)
+
 
 if __name__ == "__main__":
     unittest.main()

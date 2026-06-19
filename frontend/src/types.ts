@@ -387,6 +387,7 @@ export type ChatSessionContextItem = {
 export type ChatSession = {
   id: string;
   title: string;
+  prompt_entry_id: string;
   assistant_id: string;
   system_prompt: string;
   pinned: boolean;
@@ -399,6 +400,7 @@ export type ChatSession = {
 export type ChatSessionSummary = {
   id: string;
   title: string;
+  prompt_entry_id: string;
   assistant_id: string;
   pinned: boolean;
   created_at: string;
@@ -412,12 +414,14 @@ export type ChatSessionList = {
 
 export type CreateChatSessionRequest = {
   title?: string;
+  prompt_entry_id?: string;
   assistant_id?: string;
   system_prompt?: string;
 };
 
 export type SaveChatSessionRequest = {
   title: string;
+  prompt_entry_id: string;
   assistant_id: string;
   system_prompt: string;
   pinned: boolean;

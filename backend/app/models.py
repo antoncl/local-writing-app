@@ -89,7 +89,15 @@ class MetadataFieldDefinition(BaseModel):
     computed: dict[str, str] | None = None
 
 
-PromptInputType = Literal["text", "long_text", "number", "boolean", "select"]
+PromptInputType = Literal[
+    "text",
+    "long_text",
+    "number",
+    "boolean",
+    "select",
+    "entity_ref",
+    "entity_ref_list",
+]
 
 
 class PromptInputDefinition(BaseModel):
@@ -99,6 +107,11 @@ class PromptInputDefinition(BaseModel):
     default: Any | None = None
     options: list[str] = Field(default_factory=list)
     required: bool = False
+    # When type is entity_ref / entity_ref_list, `target` constrains which
+    # entries the dispatch-form picker offers. Same shape as the existing
+    # `target` on entity_ref metadata fields: {"kind": "scene"|"lore"} and
+    # optionally {"entry_type": "<sub-type-id>"}.
+    target: dict[str, Any] | None = None
 
 
 class PromptContextStrategy(BaseModel):

@@ -73,6 +73,47 @@ These belong on the sub-type (`prompt.continue_scene`, etc.), not on individual 
 
 A user authoring a custom prompt picks (or forks) a sub-type, then writes the body template.
 
+### Input types
+
+The `inputs` list on a sub-type declares the dispatch form. Each entry is:
+
+```yaml
+- name: words
+  type: number
+  label: Words
+  default: 300
+  required: true
+```
+
+Supported `type` values:
+
+| `type` | Renders as | Template value |
+| --- | --- | --- |
+| `text` | single-line text input | string |
+| `long_text` | textarea | string |
+| `number` | number input | number |
+| `boolean` | checkbox | `True` / `False` |
+| `select` | dropdown (uses `options`) | string |
+| `entity_ref` | `ReferencePicker` (single) | string id |
+| `entity_ref_list` | `ReferencePicker` (multi) | list of string ids |
+
+For `entity_ref` and `entity_ref_list`, an optional `target` filters the picker:
+
+```yaml
+- name: character
+  type: entity_ref
+  label: Speaking character
+  target: { kind: lore, entry_type: character }
+  required: true
+```
+
+Inside the template the value is the raw id (or list of ids). Wrap with `entry()` to walk into fields:
+
+```jinja
+{{ entry(input.character).title }}
+{% for r in input.related %}- {{ entry(r).title }}{% endfor %}
+```
+
 ## File layout
 
 A fresh M2-era project has:

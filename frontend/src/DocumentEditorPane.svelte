@@ -1062,14 +1062,61 @@
       return Number.isFinite(parsed) ? parsed : trimmed;
     }
     if (type === "boolean") return trimmed.toLowerCase() === "true";
+    if (type === "entity_ref_list") {
+      if (!trimmed) return null;
+      try {
+        const parsed = JSON.parse(trimmed);
+        return Array.isArray(parsed) ? parsed : null;
+      } catch {
+        return null;
+      }
+    }
     return trimmed;
+  }
+
+  function refInputDraftValue(input: PromptInputDefinition, raw: string | undefined): string | string[] {
+    if (input.type === "entity_ref_list") {
+      if (!raw) return [];
+      try {
+        const parsed = JSON.parse(raw);
+        return Array.isArray(parsed) ? parsed : [];
+      } catch {
+        return [];
+      }
+    }
+    return raw ?? "";
+  }
+
+  function encodeRefInputDraft(value: string | string[]): string {
+    return Array.isArray(value) ? JSON.stringify(value) : value;
+  }
+
+  function refInputStubField(input: PromptInputDefinition): MetadataFieldDefinition {
+    const target: Record<string, string> = {};
+    const t = input.target as { kind?: unknown; entry_type?: unknown } | null | undefined;
+    if (t && typeof t.kind === "string") target.kind = t.kind;
+    if (t && typeof t.entry_type === "string") target.entry_type = t.entry_type;
+    return {
+      name: input.label || input.name,
+      type: input.type === "entity_ref_list" ? "entity_ref_list" : "entity_ref",
+      options: [],
+      target: Object.keys(target).length ? target : null,
+    };
   }
 
   async function submitInputsDialog() {
     const entry = inputsDialogEntry;
     if (!entry) return;
     const declared = effectivePromptInputs(entry);
-    const missing = declared.filter((input) => input.required && !inputsDialogDrafts[input.name]?.trim());
+    const missing = declared.filter((input) => {
+      if (!input.required) return false;
+      const raw = inputsDialogDrafts[input.name];
+      if (input.type === "entity_ref_list") {
+        const list = refInputDraftValue(input, raw);
+        return !Array.isArray(list) || list.length === 0;
+      }
+      return !raw?.trim();
+    });
     if (missing.length > 0) {
       aiError = `Missing required: ${missing.map((i) => i.label || i.name).join(", ")}.`;
       return;
@@ -2301,6 +2348,15 @@
                   <option value={option}>{option}</option>
                 {/each}
               </select>
+            {:else if input.type === "entity_ref" || input.type === "entity_ref_list"}
+              <ReferencePicker
+                field={refInputStubField(input)}
+                value={refInputDraftValue(input, inputsDialogDrafts[input.name])}
+                metadataSchema={metadataSchema}
+                excludeId={scene?.id ?? null}
+                ariaLabel={input.label || input.name}
+                on:change={(event) => updateInputsDialogDraft(input.name, encodeRefInputDraft(event.detail.value))}
+              />
             {:else}
               <input
                 type="text"

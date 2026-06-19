@@ -1409,6 +1409,68 @@ class MetadataValidationTests(unittest.TestCase):
         self.assertEqual(rer.prompt.system_prompt, "You are a careful continuation engine.")
         self.assertEqual([i.name for i in rer.prompt.inputs], ["words", "beat"])
 
+    def test_prompt_inputs_round_trip_entity_ref_with_target(self) -> None:
+        layer_id = self._project_layer_id()
+        extras = PromptEntryTypeExtras(
+            inputs=[
+                PromptInputDefinition(
+                    name="character",
+                    type="entity_ref",
+                    label="Speaking character",
+                    target={"kind": "lore", "entry_type": "character"},
+                    required=True,
+                ),
+                PromptInputDefinition(
+                    name="related",
+                    type="entity_ref_list",
+                    label="Related entries",
+                    target={"kind": "lore"},
+                ),
+                PromptInputDefinition(
+                    name="words",
+                    type="number",
+                    default=300,
+                ),
+            ],
+        )
+        self.service.upsert_metadata_entry_type(
+            UpsertMetadataEntryTypeRequest(
+                layer_id=layer_id,
+                entry_type_id="character_chat",
+                entry_type=EntryTypeDefinition(
+                    name="Character chat",
+                    kind="prompt",
+                    parent="general",
+                    prompt=extras,
+                ),
+            )
+        )
+
+        schema = self.service.read_metadata_schema()
+        inputs = schema.entry_types["character_chat"].prompt.inputs
+        by_name = {i.name: i for i in inputs}
+
+        self.assertEqual(by_name["character"].type, "entity_ref")
+        self.assertEqual(by_name["character"].target, {"kind": "lore", "entry_type": "character"})
+        self.assertTrue(by_name["character"].required)
+
+        self.assertEqual(by_name["related"].type, "entity_ref_list")
+        self.assertEqual(by_name["related"].target, {"kind": "lore"})
+
+        # Non-ref inputs untouched: target stays None.
+        self.assertEqual(by_name["words"].type, "number")
+        self.assertIsNone(by_name["words"].target)
+
+        # Reload from YAML to confirm the round-trip survives the disk hop.
+        on_disk = self.service._read_yaml(self.root / "metadata.schema.yaml")
+        disk_inputs = on_disk["entry_types"]["character_chat"]["prompt"]["inputs"]
+        disk_by_name = {i["name"]: i for i in disk_inputs}
+        self.assertEqual(disk_by_name["character"]["type"], "entity_ref")
+        self.assertEqual(
+            disk_by_name["character"]["target"],
+            {"kind": "lore", "entry_type": "character"},
+        )
+
     def test_default_schema_seeds_four_prompt_bases(self) -> None:
         """continuation/revise/general are abstract bases with preset output kinds;
         snippet is a concrete sibling. Each sub-types prompt directly."""

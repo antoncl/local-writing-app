@@ -67,6 +67,8 @@
     defaultValue: string;
     options: string;
     required: boolean;
+    targetKind: "" | "scene" | "lore";
+    targetEntryType: string;
   };
   type PaneState = {
     title: string;
@@ -1366,6 +1368,12 @@ The story so far:
       defaultValue: input.default === undefined || input.default === null ? "" : String(input.default),
       options: (input.options ?? []).join(", "),
       required: Boolean(input.required),
+      targetKind:
+        input.target?.kind === "scene" || input.target?.kind === "lore"
+          ? (input.target.kind as "scene" | "lore")
+          : "",
+      targetEntryType:
+        typeof input.target?.entry_type === "string" ? input.target.entry_type : "",
     }));
     const contextStrategy = extras?.context_strategy ?? null;
     promptContextTargetKind =
@@ -1442,7 +1450,7 @@ The story so far:
   function addPromptInput() {
     promptInputs = [
       ...promptInputs,
-      { name: "", type: "text", label: "", defaultValue: "", options: "", required: false },
+      { name: "", type: "text", label: "", defaultValue: "", options: "", required: false, targetKind: "", targetEntryType: "" },
     ];
   }
 
@@ -1475,6 +1483,13 @@ The story so far:
         } else {
           defaultValue = defaultRaw;
         }
+        const isRefInput = draft.type === "entity_ref" || draft.type === "entity_ref_list";
+        const target = isRefInput && (draft.targetKind || draft.targetEntryType.trim())
+          ? {
+              ...(draft.targetKind ? { kind: draft.targetKind } : {}),
+              ...(draft.targetEntryType.trim() ? { entry_type: draft.targetEntryType.trim() } : {}),
+            }
+          : null;
         const input: PromptInputDefinition = {
           name,
           type: draft.type,
@@ -1482,6 +1497,7 @@ The story so far:
           ...(defaultValue === null ? {} : { default: defaultValue }),
           ...(draft.type === "select" ? { options } : {}),
           ...(draft.required ? { required: true } : {}),
+          ...(target ? { target } : {}),
         };
         return input;
       })
@@ -3166,6 +3182,8 @@ The story so far:
                     <option value="number">Number</option>
                     <option value="boolean">Boolean</option>
                     <option value="select">Select</option>
+                    <option value="entity_ref">Entity Reference</option>
+                    <option value="entity_ref_list">Entity Reference List</option>
                   </select>
                 </label>
                 <label>
@@ -3180,6 +3198,20 @@ The story so far:
                   <label class="prompt-input-options">
                     Options
                     <input value={input.options} placeholder="terse, neutral, warm" on:input={(event) => updatePromptInput(index, { options: event.currentTarget.value })} />
+                  </label>
+                {/if}
+                {#if input.type === "entity_ref" || input.type === "entity_ref_list"}
+                  <label>
+                    Target kind
+                    <select value={input.targetKind} on:change={(event) => updatePromptInput(index, { targetKind: event.currentTarget.value as "" | "scene" | "lore" })}>
+                      <option value="">Any</option>
+                      <option value="scene">Scene</option>
+                      <option value="lore">Lore</option>
+                    </select>
+                  </label>
+                  <label>
+                    Target entry type
+                    <input value={input.targetEntryType} placeholder="(optional, e.g. character)" on:input={(event) => updatePromptInput(index, { targetEntryType: event.currentTarget.value })} />
                   </label>
                 {/if}
                 <label class="inline-check">

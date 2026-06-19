@@ -108,7 +108,14 @@ export type MetadataFieldDefinition = {
   computed?: Record<string, string> | null;
 };
 
-export type PromptInputType = "text" | "long_text" | "number" | "boolean" | "select";
+export type PromptInputType =
+  | "text"
+  | "long_text"
+  | "number"
+  | "boolean"
+  | "select"
+  | "entity_ref"
+  | "entity_ref_list";
 
 export type PromptInputDefinition = {
   name: string;
@@ -117,6 +124,7 @@ export type PromptInputDefinition = {
   default?: MetadataValue;
   options?: string[];
   required?: boolean;
+  target?: Record<string, MetadataValue> | null;
 };
 
 export type PromptContextStrategy = {

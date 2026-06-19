@@ -51,9 +51,36 @@ async function request<T>(path: string, options: RequestInit = {}): Promise<T> {
   });
   if (!response.ok) {
     const payload = await response.json().catch(() => null);
-    throw new Error(payload?.detail ?? response.statusText);
+    throw new Error(formatErrorDetail(payload?.detail) ?? response.statusText);
   }
   return response.json() as Promise<T>;
+}
+
+function formatErrorDetail(detail: unknown): string | null {
+  // FastAPI returns plain strings for ProjectServiceError, but its 422
+  // validation errors arrive as an array of {loc, msg, type} objects. Without
+  // explicit handling those stringified to "[object Object]" — flatten them
+  // into a human-readable form so users see what went wrong.
+  if (detail == null) return null;
+  if (typeof detail === "string") return detail;
+  if (Array.isArray(detail)) {
+    return detail
+      .map((item) => {
+        if (typeof item === "string") return item;
+        if (item && typeof item === "object") {
+          const obj = item as { loc?: unknown[]; msg?: string; type?: string };
+          const field = Array.isArray(obj.loc) ? obj.loc.filter((p) => p !== "body").join(".") : "";
+          return field ? `${field}: ${obj.msg ?? obj.type ?? "invalid"}` : (obj.msg ?? JSON.stringify(item));
+        }
+        return String(item);
+      })
+      .join("; ");
+  }
+  if (typeof detail === "object") {
+    const obj = detail as { msg?: string };
+    return obj.msg ?? JSON.stringify(detail);
+  }
+  return String(detail);
 }
 
 export type AIStreamEvent =

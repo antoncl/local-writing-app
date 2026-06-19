@@ -521,7 +521,9 @@ class AIHealthResponse(BaseModel):
 
 class AIPreviewRequest(BaseModel):
     template_source: str = Field(min_length=1)
-    target_scene_id: str = Field(min_length=1)
+    # Empty string is allowed: chat-routed prompts don't need a scene context.
+    # build_preview skips scene resolution in that case and `scene` becomes None.
+    target_scene_id: str = ""
     session_id: str | None = None
     inputs: dict[str, Any] = Field(default_factory=dict)
     text_before: str = ""

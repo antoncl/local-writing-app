@@ -193,6 +193,39 @@ class PreviewEndpointTests(unittest.TestCase):
         )
         self.assertEqual(response.status_code, 404)
 
+    def test_empty_target_scene_id_is_allowed(self) -> None:
+        # Chat-routed prompts can be applied without a scene context. The
+        # template renders with `scene` bound to None — templates that need
+        # scene can guard with `{% if scene %}`.
+        response = self.client.post(
+            "/api/ai/preview",
+            json={
+                "template_source": '{% role "user" %}Hello, no scene needed.{% endrole %}',
+                "target_scene_id": "",
+            },
+        )
+        self.assertEqual(response.status_code, 200, response.text)
+        messages = response.json()["messages"]
+        self.assertEqual(len(messages), 1)
+        self.assertEqual(messages[0]["role"], "user")
+
+    def test_empty_target_scene_id_leaves_scene_none(self) -> None:
+        # A template that branches on `scene` should see it as falsy.
+        response = self.client.post(
+            "/api/ai/preview",
+            json={
+                "template_source": (
+                    '{% role "user" %}'
+                    "{% if scene %}has scene{% else %}no scene{% endif %}"
+                    "{% endrole %}"
+                ),
+                "target_scene_id": "",
+            },
+        )
+        self.assertEqual(response.status_code, 200, response.text)
+        text = "".join(b["text"] for b in response.json()["messages"][0]["blocks"])
+        self.assertEqual(text, "no scene")
+
     def test_warnings_are_surfaced(self) -> None:
         response = self.client.post(
             "/api/ai/preview",

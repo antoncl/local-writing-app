@@ -69,10 +69,15 @@ def build_preview(
     `session_id_used` is None when no session was bound (caller did not supply
     one), so the response surface can report 'no caching' to the user.
     """
-    try:
-        scene = project_service.read_scene(target_scene_id)
-    except Exception as exc:  # noqa: BLE001
-        raise PreviewError(f"Target scene not found: {exc}", 404) from exc
+    if target_scene_id:
+        try:
+            scene = project_service.read_scene(target_scene_id)
+        except Exception as exc:  # noqa: BLE001
+            raise PreviewError(f"Target scene not found: {exc}", 404) from exc
+    else:
+        # Chat-routed prompts may not target a specific scene. Templates that
+        # reference `scene` will see None and can guard with `{% if scene %}`.
+        scene = None
 
     session: AISession | None = None
     if session_id:

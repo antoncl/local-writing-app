@@ -157,6 +157,8 @@ DEFAULT_METADATA_SCHEMA: dict[str, Any] = {
             "abstract": True,
             "fields": ["tags"],
             "has_body": True,
+            "body_editor": "code",
+            "body_language": "jinja2",
         },
         "continuation": {
             "name": "Continuation",
@@ -1318,7 +1320,7 @@ class ProjectService:
             if isinstance(parent_id, str) and parent_id in entry_types:
                 parent_definition = resolved.get(parent_id)
                 if isinstance(parent_definition, dict):
-                    for inheritable in ("display_template", "has_body"):
+                    for inheritable in ("display_template", "has_body", "body_editor", "body_language"):
                         if inheritable not in next_entry_type and inheritable in parent_definition:
                             next_entry_type[inheritable] = parent_definition[inheritable]
                     parent_prompt = parent_definition.get("prompt")

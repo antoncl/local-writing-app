@@ -47,7 +47,7 @@ classes; instance editors edit objects.
 | Class hierarchy editor | The Custom Data / Node Type pane, scoped to one `kind` |
 | Instance list | The pane that lists entries of that `kind` (Manuscript Outline, Lore, Prompts) |
 | Instance editor | The document editor opened on a single entry file |
-| Inheritance resolution | Backend merges `fields`, `display_template`, `has_body`, and `prompt` extras up the `parent` chain (see `_resolve_metadata_schema_inheritance`) |
+| Inheritance resolution | Backend merges `fields`, `display_template`, `has_body`, `body_editor`, `body_language`, and `prompt` extras up the `parent` chain (see `_resolve_metadata_schema_inheritance`) |
 
 Each `kind` gets one folder (`scenes/`, `lore/`, `prompts/`), one CRUD endpoint
 family (`/api/scenes`, `/api/lore`, `/api/prompts`), and one instance pane in
@@ -60,10 +60,13 @@ editor it shows prompt sub-classes.
 - **An output disposition.** "I want this prompt to chat vs. append vs. replace"
   is captured by `context_strategy.output.kind` on an entry-type, inherited from
   an abstract base. See [Prompt taxonomy](#prompt-taxonomy) below.
-- **A body editor variant.** "I want raw text vs. WYSIWYG vs. code" should be a
-  per-entry-type declaration (`body_editor`, `body_language`). Today this is
-  still glued to `kind` (prompt → CodeMirror, others → TipTap WYSIWYG); the
-  refactor is tracked in `memory/strategy_ai_integration.md` "Open todos".
+- **A body editor variant.** "I want raw text vs. WYSIWYG vs. code" is captured
+  by per-entry-type `body_editor` (`wysiwyg` | `code`) and `body_language`
+  (`markdown` | `jinja2` | `plain`), both inherited from the parent chain.
+  The seeded `prompt` abstract declares `code` + `jinja2` so all prompt
+  sub-types pick it up; everything else defaults to `wysiwyg` + `markdown`.
+  A future `research_note` sub-type that wants plain text just declares
+  `body_editor: code` + `body_language: plain` — no app code change needed.
 - **A user-facing label.** Sub-classes already provide that — `Continuation` and
   `Revise` are sub-classes of `prompt`, not separate kinds.
 - **Snippet was wrongly modelled as its own `kind` in an earlier draft.** It is

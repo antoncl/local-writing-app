@@ -133,6 +133,9 @@ export type PromptEntryTypeExtras = {
   context_strategy?: PromptContextStrategy | null;
 };
 
+export type EntryBodyEditor = "wysiwyg" | "code";
+export type EntryBodyLanguage = "markdown" | "jinja2" | "plain";
+
 export type EntryTypeDefinition = {
   name: string;
   kind: string;
@@ -142,6 +145,8 @@ export type EntryTypeDefinition = {
   own_fields?: string[];
   display_template?: string;
   has_body?: boolean;
+  body_editor?: EntryBodyEditor;
+  body_language?: EntryBodyLanguage;
   prompt?: PromptEntryTypeExtras | null;
 };
 

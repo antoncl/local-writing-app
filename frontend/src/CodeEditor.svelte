@@ -6,7 +6,10 @@
   import { json as jsonLang } from "@codemirror/lang-json";
 
   export let value: string;
-  export let language: "jinja2" | "json" = "jinja2";
+  // Languages that ship with a CodeMirror extension here highlight; anything
+  // else falls through to a plain code surface (still better than TipTap for
+  // editing raw text — monospace font, no auto-formatting).
+  export let language: "jinja2" | "json" | "markdown" | "plain" = "jinja2";
 
   let host: HTMLDivElement;
   let editor: EditorView | null = null;

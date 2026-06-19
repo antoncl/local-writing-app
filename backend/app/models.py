@@ -124,6 +124,8 @@ class EntryTypeDefinition(BaseModel):
     own_fields: list[str] = Field(default_factory=list)
     display_template: str = "{title}"
     has_body: bool = True
+    body_editor: Literal["wysiwyg", "code"] = "wysiwyg"
+    body_language: Literal["markdown", "jinja2", "plain"] = "markdown"
     prompt: PromptEntryTypeExtras | None = None
 
 

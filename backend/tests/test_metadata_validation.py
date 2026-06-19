@@ -92,6 +92,42 @@ class MetadataValidationTests(unittest.TestCase):
         self.assertIn("summary", scene_definition.fields)
         self.assertIn("status", scene_definition.own_fields)
 
+    def test_scene_entry_type_defaults_to_wysiwyg_markdown(self) -> None:
+        schema = self.service.read_metadata_schema()
+        scene = schema.entry_types["scene"]
+        self.assertEqual(scene.body_editor, "wysiwyg")
+        self.assertEqual(scene.body_language, "markdown")
+
+    def test_prompt_subtypes_inherit_code_and_jinja2(self) -> None:
+        schema = self.service.read_metadata_schema()
+        for type_id in ("prompt", "continuation", "revise", "general", "snippet"):
+            definition = schema.entry_types[type_id]
+            self.assertEqual(definition.body_editor, "code", msg=type_id)
+            self.assertEqual(definition.body_language, "jinja2", msg=type_id)
+
+    def test_layer_can_override_body_editor(self) -> None:
+        # A project layer can override an inherited body_editor / body_language.
+        self.service._write_yaml(
+            self.root / "metadata.schema.yaml",
+            {
+                "version": 1,
+                "entry_types": {
+                    "research_note": {
+                        "name": "Research Note",
+                        "kind": "lore",
+                        "parent": "lore_entry",
+                        "fields": [],
+                        "body_editor": "code",
+                        "body_language": "plain",
+                    }
+                },
+            },
+        )
+        schema = self.service.read_metadata_schema()
+        note = schema.entry_types["research_note"]
+        self.assertEqual(note.body_editor, "code")
+        self.assertEqual(note.body_language, "plain")
+
     def test_new_project_drops_sequence_from_container_types(self) -> None:
         manifest = self.service._read_yaml(self.root / "project.yaml")
         types = [item["type"] for item in manifest["manuscript_structure"]["container_types"]]

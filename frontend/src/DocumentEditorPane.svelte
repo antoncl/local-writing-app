@@ -14,7 +14,7 @@
   import MetadataLongTextEditor from "./MetadataLongTextEditor.svelte";
   import ReferencePicker from "./ReferencePicker.svelte";
   import { api } from "./api";
-  import type { Backlink, EditableDocument, EntryMetadata, MetadataFieldDefinition, MetadataSchema, MetadataValue, PromptEntrySummary, PromptInputDefinition } from "./types";
+  import type { Backlink, EditableDocument, EntryBodyLanguage, EntryMetadata, MetadataFieldDefinition, MetadataSchema, MetadataValue, PromptEntrySummary, PromptInputDefinition } from "./types";
 
   export let scene: EditableDocument | null = null;
   export let documentKind: "scene" | "lore" | "prompt" | "snippet" = "scene";
@@ -154,7 +154,9 @@
   let loadedSceneId: string | null = null;
   let rawBody = "";
   let lastEmittedRawBody = "";
-  $: rawBodyMode = documentKind === "prompt";
+  $: entryTypeDef = metadataSchema?.entry_types[entryType] ?? null;
+  $: rawBodyMode = (entryTypeDef?.body_editor ?? "wysiwyg") === "code";
+  $: rawBodyLanguage = (entryTypeDef?.body_language ?? "markdown") satisfies EntryBodyLanguage;
   $: if (rawBodyMode && rawBody !== lastEmittedRawBody) {
     lastEmittedRawBody = rawBody;
     emitChange();
@@ -2241,7 +2243,7 @@
 
     {#if rawBodyMode}
       <div class="raw-body-editor">
-        <CodeEditor bind:value={rawBody} language="jinja2" />
+        <CodeEditor bind:value={rawBody} language={rawBodyLanguage} />
       </div>
     {/if}
     <div bind:this={editorElement} class:hidden={rawBodyMode}></div>

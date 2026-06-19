@@ -343,10 +343,14 @@ The story so far:
   });
 
   function handleDocumentMousedown(event: MouseEvent) {
-    if (addMenuOpenFor === null) return;
     const target = event.target as HTMLElement | null;
-    if (!target?.closest(".tree-menu-anchor")) {
+    if (addMenuOpenFor !== null && !target?.closest(".tree-menu-anchor")) {
       addMenuOpenFor = null;
+    }
+    if (chatContextMenuOpen && !target?.closest(".chat-context-anchor")) {
+      chatContextMenuOpen = false;
+      chatContextCategory = null;
+      chatContextSearch = "";
     }
   }
 

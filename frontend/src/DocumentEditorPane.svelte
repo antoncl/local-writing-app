@@ -224,9 +224,14 @@
   let promptPreviewLastRenderKey = ""; // dedupe identical renders.
   // Diagnostics pinned in the CodeEditor gutter — driven by render errors.
   let promptPreviewDiagnostics: { line: number; col?: number; severity: "error" | "warning"; message: string }[] = [];
+  // Read metadataSchema directly in the expression — Svelte's dependency
+  // analyzer can't see through the function call, so calling
+  // effectivePromptInputs() here would leave the reactive blind to schema
+  // changes (editing inputs via the Detail Type editor wouldn't reflect into
+  // the prompt-preview panel until the entry was reopened).
   $: promptPreviewDeclaredInputs =
-    documentKind === "prompt" && scene
-      ? effectivePromptInputs(scene as unknown as PromptEntrySummary)
+    documentKind === "prompt" && scene && metadataSchema
+      ? (metadataSchema.entry_types[(scene as unknown as PromptEntrySummary).entry_type]?.prompt?.inputs ?? [])
       : [];
   // Reset preview when the underlying entry changes — stale results from a
   // previous prompt would be confusing.

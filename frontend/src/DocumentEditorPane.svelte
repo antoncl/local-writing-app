@@ -210,15 +210,17 @@
   let lastInvokedAssistantId: string = "";
 
   // --- Inline prompt preview (when editing a prompt entry) ---
-  // The author edits the Jinja2 template above, then expands this preview to
-  // render it against a chosen scene with optional inputs — without switching
-  // panes. Lazy: nothing fires until the details element is opened.
+  // The editor splits vertically: CodeEditor on top, this preview always
+  // visible below (resizable divider between them). Auto-renders on body
+  // change with a debounce, so warnings and errors track the live draft.
   let promptPreviewSceneId = "";
   let promptPreviewInputDrafts: Record<string, string> = {};
   let promptPreviewResult: AIPreviewResponse | null = null;
   let promptPreviewRunning = false;
   let promptPreviewError: string | null = null;
-  let promptPreviewOpen = false;
+  let promptPreviewPaneHeight = 280; // px; persisted only in memory for now.
+  let promptPreviewDebounceTimer: ReturnType<typeof setTimeout> | null = null;
+  let promptPreviewLastRenderKey = ""; // dedupe identical renders.
   $: promptPreviewDeclaredInputs =
     documentKind === "prompt" && scene
       ? effectivePromptInputs(scene as unknown as PromptEntrySummary)
@@ -229,54 +231,78 @@
     promptPreviewResult = null;
     promptPreviewError = null;
     promptPreviewInputDrafts = {};
+    promptPreviewLastRenderKey = "";
   }
+  // Seed the scene picker once availableScenes arrive.
+  $: if (documentKind === "prompt" && !promptPreviewSceneId && availableScenes.length > 0) {
+    promptPreviewSceneId = availableScenes[0].id;
+  }
+  // Auto-re-render whenever inputs to the render change. Debounced so the
+  // backend isn't hammered while the author is mid-keystroke.
+  $: schedulePromptPreviewRender(rawBody, promptPreviewSceneId, JSON.stringify(promptPreviewInputDrafts));
 
-  function defaultPreviewSceneId(): string {
-    if (promptPreviewSceneId && availableScenes.some((s) => s.id === promptPreviewSceneId)) {
-      return promptPreviewSceneId;
-    }
-    return availableScenes[0]?.id ?? "";
+  function schedulePromptPreviewRender(_body: string, _scene: string, _inputs: string): void {
+    if (documentKind !== "prompt" || !scene) return;
+    if (promptPreviewDebounceTimer) clearTimeout(promptPreviewDebounceTimer);
+    promptPreviewDebounceTimer = setTimeout(() => {
+      promptPreviewDebounceTimer = null;
+      void runPromptPreview();
+    }, 800);
   }
 
   async function runPromptPreview(): Promise<void> {
     if (!scene || documentKind !== "prompt") return;
-    if (promptPreviewRunning) return;
+    if (!rawBody.trim()) {
+      // Empty template — clear results without calling the backend (which would
+      // 422 on template_source min_length). Keeps the panel quiet while the
+      // author hasn't typed anything yet.
+      promptPreviewResult = null;
+      promptPreviewError = null;
+      promptPreviewLastRenderKey = "";
+      return;
+    }
+    const inputs: Record<string, unknown> = {};
+    for (const declared of promptPreviewDeclaredInputs) {
+      const raw = promptPreviewInputDrafts[declared.name] ?? "";
+      const coerced = coerceInputValue(raw, declared.type);
+      if (coerced !== null && coerced !== "") inputs[declared.name] = coerced;
+    }
+    const key = JSON.stringify({ rawBody, promptPreviewSceneId, inputs });
+    if (key === promptPreviewLastRenderKey && !promptPreviewError) return;
+    promptPreviewLastRenderKey = key;
     promptPreviewRunning = true;
-    promptPreviewError = null;
     try {
-      const inputs: Record<string, unknown> = {};
-      for (const declared of promptPreviewDeclaredInputs) {
-        const raw = promptPreviewInputDrafts[declared.name] ?? "";
-        const coerced = coerceInputValue(raw, declared.type);
-        if (coerced !== null && coerced !== "") inputs[declared.name] = coerced;
-      }
       promptPreviewResult = await api.aiPreview({
-        // Use the current draft text — what's in the editor right now, even if
-        // not saved yet. rawBody is bound to the CodeEditor for prompts.
         template_source: rawBody,
         target_scene_id: promptPreviewSceneId || "",
         inputs,
         commit: false,
       });
+      promptPreviewError = null;
     } catch (e) {
       promptPreviewError = (e as Error).message || "Render failed.";
-      promptPreviewResult = null;
+      // Keep the previous result visible — it's stale but at least gives the
+      // author something to compare against the error.
     } finally {
       promptPreviewRunning = false;
     }
   }
 
-  function handlePromptPreviewToggle(event: Event): void {
-    const details = event.currentTarget as HTMLDetailsElement | null;
-    promptPreviewOpen = !!details?.open;
-    if (!promptPreviewOpen) return;
-    // Seed the scene picker the first time the panel is opened.
-    if (!promptPreviewSceneId) promptPreviewSceneId = defaultPreviewSceneId();
-    // Auto-run on first open if we don't already have a result for the user
-    // to compare against. They can re-run via the button after edits.
-    if (!promptPreviewResult && !promptPreviewError) {
-      void runPromptPreview();
+  function startPromptPreviewResize(event: MouseEvent): void {
+    if (event.button !== 0) return;
+    event.preventDefault();
+    const startY = event.clientY;
+    const startHeight = promptPreviewPaneHeight;
+    function onMove(e: MouseEvent) {
+      // Drag UP shrinks editor / grows preview. Clamp so neither collapses.
+      promptPreviewPaneHeight = Math.max(120, Math.min(800, startHeight + (startY - e.clientY)));
     }
+    function onUp() {
+      document.removeEventListener("mousemove", onMove);
+      document.removeEventListener("mouseup", onUp);
+    }
+    document.addEventListener("mousemove", onMove);
+    document.addEventListener("mouseup", onUp);
   }
 
   $: slashCommands = editor && documentKind === "scene" ? getSlashCommands() : [];
@@ -2489,32 +2515,53 @@
     {/if}
     <div bind:this={editorElement} class:hidden={rawBodyMode}></div>
 
-    {#if documentKind === "prompt" && scene}
-      <!-- Inline render preview. Lazy: nothing renders or runs until opened. -->
-      <details class="prompt-preview" on:toggle={handlePromptPreviewToggle}>
-        <summary>Preview rendering <small>· run this template against a scene</small></summary>
-        <div class="prompt-preview-controls">
-          <label class="prompt-preview-field">
-            Target scene
-            <select bind:value={promptPreviewSceneId}>
-              <option value="">(no scene)</option>
-              {#each availableScenes as s (s.id)}
-                <option value={s.id}>{s.title}</option>
-              {/each}
-            </select>
-          </label>
-          {#if promptPreviewDeclaredInputs.length > 0}
+  </div>
+
+  {#if documentKind === "prompt" && scene}
+    <!-- Vertical split: editor above gets the remaining space; this preview
+         pane stays always-visible at the bottom with its own internal scroll.
+         The handle between them drags to resize. -->
+    <div
+      class="prompt-preview-resize"
+      role="separator"
+      aria-orientation="horizontal"
+      aria-label="Resize prompt preview"
+      on:mousedown={startPromptPreviewResize}
+    ></div>
+    <section class="prompt-preview-pane" style="height: {promptPreviewPaneHeight}px;">
+      <header class="prompt-preview-pane-header">
+        <strong>Preview</strong>
+        <div class="prompt-preview-pane-meta">
+          {#if promptPreviewRunning}
+            <span class="prompt-preview-status">rendering…</span>
+          {:else if promptPreviewResult}
+            <span class="prompt-preview-status">{promptPreviewResult.messages.length} msg · {promptPreviewResult.char_count} chars</span>
+          {/if}
+          <button type="button" disabled={promptPreviewRunning || !rawBody.trim()} on:click={runPromptPreview}>
+            {promptPreviewRunning ? "Rendering…" : "Render now"}
+          </button>
+        </div>
+      </header>
+
+      <div class="prompt-preview-pane-controls">
+        <label class="prompt-preview-field">
+          <span>Target scene</span>
+          <select bind:value={promptPreviewSceneId}>
+            <option value="">(no scene)</option>
+            {#each availableScenes as s (s.id)}
+              <option value={s.id}>{s.title}</option>
+            {/each}
+          </select>
+        </label>
+        {#if promptPreviewDeclaredInputs.length > 0}
+          <details class="prompt-preview-inputs-drawer">
+            <summary>Inputs ({promptPreviewDeclaredInputs.length})</summary>
             <div class="prompt-preview-inputs">
-              <div class="prompt-preview-inputs-heading">Inputs</div>
               {#each promptPreviewDeclaredInputs as inputDef (inputDef.name)}
                 <label class="prompt-preview-field">
-                  {inputDef.label || inputDef.name}
+                  <span>{inputDef.label || inputDef.name}</span>
                   {#if inputDef.type === "long_text"}
-                    <textarea
-                      rows="3"
-                      placeholder={inputDef.placeholder || ""}
-                      bind:value={promptPreviewInputDrafts[inputDef.name]}
-                    ></textarea>
+                    <textarea rows="2" placeholder={inputDef.placeholder || ""} bind:value={promptPreviewInputDrafts[inputDef.name]}></textarea>
                   {:else if inputDef.type === "number"}
                     <input type="number" bind:value={promptPreviewInputDrafts[inputDef.name]} />
                   {:else if inputDef.type === "boolean"}
@@ -2525,49 +2572,43 @@
                 </label>
               {/each}
             </div>
-          {/if}
-          <div class="prompt-preview-actions">
-            <button type="button" class="primary" disabled={promptPreviewRunning} on:click={runPromptPreview}>
-              {promptPreviewRunning ? "Rendering…" : "Render"}
-            </button>
-          </div>
-        </div>
+          </details>
+        {/if}
+      </div>
 
+      <div class="prompt-preview-pane-body">
         {#if promptPreviewError}
           <p class="prompt-preview-error">{promptPreviewError}</p>
         {/if}
 
-        {#if promptPreviewResult}
-          <div class="prompt-preview-result">
-            <div class="prompt-preview-meta">
-              <span>{promptPreviewResult.messages.length} message{promptPreviewResult.messages.length === 1 ? "" : "s"}</span>
-              <span>·</span>
-              <span>{promptPreviewResult.char_count} chars</span>
+        {#if !rawBody.trim()}
+          <p class="prompt-preview-empty muted">Type a template above to see the rendered output here.</p>
+        {:else if promptPreviewResult}
+          {#if promptPreviewResult.warnings.length > 0}
+            <div class="prompt-preview-warnings">
+              <strong>Warnings</strong>
+              {#each promptPreviewResult.warnings as warning}
+                <p>{warning}</p>
+              {/each}
             </div>
-            {#if promptPreviewResult.warnings.length > 0}
-              <div class="prompt-preview-warnings">
-                <strong>Warnings</strong>
-                {#each promptPreviewResult.warnings as warning}
-                  <p>{warning}</p>
-                {/each}
-              </div>
-            {/if}
-            {#each promptPreviewResult.messages as message}
-              <div class="prompt-preview-message prompt-preview-message-{message.role}">
-                <header class="prompt-preview-message-role">{message.role}</header>
-                {#each message.blocks as block}
-                  <pre class="prompt-preview-block">{block.text}</pre>
-                  {#if block.cache_break_after}
-                    <div class="prompt-preview-cache-break" aria-label="cache breakpoint">cache_break</div>
-                  {/if}
-                {/each}
-              </div>
-            {/each}
-          </div>
+          {/if}
+          {#each promptPreviewResult.messages as message}
+            <div class="prompt-preview-message prompt-preview-message-{message.role}">
+              <header class="prompt-preview-message-role">{message.role}</header>
+              {#each message.blocks as block}
+                <pre class="prompt-preview-block">{block.text}</pre>
+                {#if block.cache_break_after}
+                  <div class="prompt-preview-cache-break" aria-label="cache breakpoint">cache_break</div>
+                {/if}
+              {/each}
+            </div>
+          {/each}
+        {:else if !promptPreviewRunning && !promptPreviewError}
+          <p class="prompt-preview-empty muted">Waiting for first render…</p>
         {/if}
-      </details>
-    {/if}
-  </div>
+      </div>
+    </section>
+  {/if}
 
   <footer class="status">
     {#if scene}

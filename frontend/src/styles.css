@@ -963,7 +963,11 @@ h3 {
 
 .editor-panel {
   display: grid;
+  /* When a prompt-preview pane is present the implicit grid creates extra
+     auto-sized rows for the resize handle and the preview pane between the
+     1fr editor row and the auto footer. */
   grid-template-rows: auto 1fr auto;
+  grid-auto-rows: auto;
   min-width: 0;
   min-height: 0;
   background: #ffffff;
@@ -2575,51 +2579,88 @@ h3 {
   line-height: 1.4;
 }
 
-/* Inline prompt-author preview (DocumentEditorPane, prompt entries only) */
-.prompt-preview {
-  margin: 12px 0 0;
-  padding: 8px 12px;
-  background: #f4f7f5;
-  border: 1px solid #cbd6d2;
-  border-radius: 6px;
-  font-size: 13px;
+/* Inline prompt-author preview (DocumentEditorPane, prompt entries only) — */
+/* a permanent split below the editor. */
+.prompt-preview-resize {
+  height: 6px;
+  cursor: ns-resize;
+  background: #e6eceb;
+  border-top: 1px solid #cbd6d2;
+  border-bottom: 1px solid #cbd6d2;
+  flex-shrink: 0;
 }
 
-.prompt-preview > summary {
-  cursor: pointer;
-  user-select: none;
-  font-weight: 600;
+.prompt-preview-resize:hover {
+  background: #d4e0dc;
+}
+
+.prompt-preview-pane {
+  display: grid;
+  grid-template-rows: auto auto 1fr;
+  min-height: 120px;
+  background: #f4f7f5;
+  font-size: 13px;
+  border-top: 1px solid #cbd6d2;
+  overflow: hidden;
+}
+
+.prompt-preview-pane-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 6px 12px;
+  background: #e8efed;
+  border-bottom: 1px solid #d8e0dd;
+}
+
+.prompt-preview-pane-header > strong {
+  font-size: 13px;
   color: #2a3431;
 }
 
-.prompt-preview > summary > small {
-  font-weight: 400;
-  color: #65716c;
-  margin-left: 4px;
+.prompt-preview-pane-meta {
+  display: flex;
+  align-items: center;
+  gap: 8px;
 }
 
-.prompt-preview-controls {
-  display: grid;
+.prompt-preview-status {
+  font-size: 11px;
+  color: #65716c;
+}
+
+.prompt-preview-pane-controls {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
   gap: 8px;
-  margin-top: 8px;
-  padding-top: 8px;
-  border-top: 1px solid #d8e0dd;
+  padding: 6px 12px;
+  border-bottom: 1px solid #d8e0dd;
 }
 
 .prompt-preview-field {
   display: grid;
-  gap: 4px;
-  font-size: 12px;
+  gap: 2px;
+  font-size: 11px;
   color: #4d5753;
+}
+
+.prompt-preview-field > span {
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  font-size: 10px;
+  color: #65716c;
 }
 
 .prompt-preview-field > input,
 .prompt-preview-field > select,
 .prompt-preview-field > textarea {
-  padding: 4px 6px;
+  padding: 3px 6px;
   border: 1px solid #cbd6d2;
   border-radius: 4px;
-  font-size: 13px;
+  font-size: 12px;
   background: #ffffff;
 }
 
@@ -2628,27 +2669,44 @@ h3 {
   resize: vertical;
 }
 
-.prompt-preview-inputs {
-  display: grid;
-  gap: 6px;
-  padding: 6px 8px;
-  background: #ffffff;
-  border: 1px solid #d8e0dd;
-  border-radius: 4px;
+.prompt-preview-inputs-drawer {
+  margin-left: auto;
+  font-size: 12px;
+  color: #4d5753;
 }
 
-.prompt-preview-inputs-heading {
-  font-size: 11px;
+.prompt-preview-inputs-drawer > summary {
+  cursor: pointer;
+  user-select: none;
   font-weight: 600;
+  font-size: 11px;
   text-transform: uppercase;
   letter-spacing: 0.04em;
   color: #65716c;
 }
 
-.prompt-preview-actions {
-  display: flex;
-  justify-content: flex-end;
+.prompt-preview-inputs {
+  display: grid;
   gap: 6px;
+  margin-top: 6px;
+  padding: 8px;
+  background: #ffffff;
+  border: 1px solid #d8e0dd;
+  border-radius: 4px;
+}
+
+.prompt-preview-pane-body {
+  overflow: auto;
+  padding: 8px 12px;
+  display: grid;
+  gap: 8px;
+  align-content: start;
+  background: #ffffff;
+}
+
+.prompt-preview-empty {
+  margin: 0;
+  font-size: 12px;
 }
 
 .prompt-preview-error {
@@ -2660,14 +2718,6 @@ h3 {
   color: #6c2424;
   font-size: 12px;
   line-height: 1.45;
-}
-
-.prompt-preview-result {
-  margin-top: 10px;
-  padding-top: 8px;
-  border-top: 1px solid #d8e0dd;
-  display: grid;
-  gap: 8px;
 }
 
 .prompt-preview-meta {

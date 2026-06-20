@@ -310,9 +310,6 @@
                   on:change={() => toggleNode(kind.id, item.id)}
                 />
                 <span class="ctx-tree-name">{item.name}</span>
-                {#if item.abstract}
-                  <small class="ctx-tree-abstract">(group)</small>
-                {/if}
               </label>
             </div>
           {/each}

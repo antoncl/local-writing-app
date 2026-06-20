@@ -150,6 +150,40 @@ def test_journal_refuses_reorder(tmp_path, monkeypatch):
     assert exc.value.status_code == 409
 
 
+def test_save_without_journal_field_preserves_existing(tmp_path, monkeypatch):
+    # Regression: the frontend's persistActiveChat() omits the journal
+    # field (it doesn't manage that state). Previously this defaulted
+    # to [] and the append-only guard 409'd. Now omitting means
+    # "leave the persisted journal alone".
+    from app.models import ChatSessionMessage
+
+    service = _project(tmp_path, monkeypatch)
+    session = service.create_chat_session(
+        CreateChatSessionRequest(title="X", prompt_entry_id="p")
+    )
+    seeded = [
+        ChatSessionJournalEntry(entry_id="lore_honor", title="Honor"),
+        ChatSessionJournalEntry(entry_id="lore_nimitz", title="Nimitz"),
+    ]
+    service.save_chat_session(
+        session.id,
+        SaveChatSessionRequest(title="X", prompt_entry_id="p", journal=seeded),
+    )
+
+    # General save with no journal field — must not erase or 409.
+    saved = service.save_chat_session(
+        session.id,
+        SaveChatSessionRequest(
+            title="Renamed", prompt_entry_id="p",
+            messages=[ChatSessionMessage(role="user", content="hi")],
+            # journal omitted on purpose
+        ),
+    )
+    assert [e.entry_id for e in saved.journal] == ["lore_honor", "lore_nimitz"]
+    assert saved.title == "Renamed"
+    assert len(saved.messages) == 1
+
+
 def test_journal_persists_after_message_locking(tmp_path, monkeypatch):
     # The journal continues to grow once the chat is locked (messages
     # exist) — that's the whole point: new turns detect new names and

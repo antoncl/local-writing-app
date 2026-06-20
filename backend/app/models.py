@@ -835,7 +835,12 @@ class SaveChatSessionRequest(BaseModel):
     context_items: list[ChatSessionContextItem] = Field(default_factory=list)
     messages: list[ChatSessionMessage] = Field(default_factory=list)
     inputs: dict[str, Any] = Field(default_factory=dict)
-    journal: list[ChatSessionJournalEntry] = Field(default_factory=list)
+    # None = "don't touch the persisted journal". A list (even []) means
+    # "this is the new journal value" and is subject to the append-only
+    # guard. The chat-send endpoint is the only intended producer of new
+    # journal entries; general saves (rename, message append, etc.)
+    # should omit the field so the journal persists untouched.
+    journal: list[ChatSessionJournalEntry] | None = None
 
 
 StructureNode.model_rebuild()

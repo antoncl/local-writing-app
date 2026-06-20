@@ -1,0 +1,171 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>Matcher benchmark — regex-OR vs Aho-Corasick</title>
+<style>
+  :root { color-scheme: light dark; }
+  body {
+    font-family: ui-monospace, 'SF Mono', Menlo, Consolas, monospace;
+    max-width: 1000px;
+    margin: 24px auto;
+    padding: 0 16px;
+    line-height: 1.45;
+  }
+  h1 { font-size: 1.3rem; margin-bottom: 4px; }
+  .sub { color: #888; font-size: 0.85rem; margin-bottom: 16px; }
+  button {
+    font: inherit;
+    padding: 8px 16px;
+    border: 1px solid currentColor;
+    background: transparent;
+    color: inherit;
+    cursor: pointer;
+    border-radius: 4px;
+  }
+  button:disabled { opacity: 0.5; cursor: wait; }
+  #log {
+    white-space: pre;
+    background: rgba(127,127,127,0.08);
+    padding: 12px;
+    border-radius: 4px;
+    margin-top: 16px;
+    font-size: 0.85rem;
+    max-height: 60vh;
+    overflow: auto;
+  }
+  #report {
+    margin-top: 16px;
+    background: rgba(127,127,127,0.08);
+    padding: 12px;
+    border-radius: 4px;
+    font-size: 0.85rem;
+    overflow: auto;
+  }
+  #report table { border-collapse: collapse; margin: 8px 0; }
+  #report th, #report td {
+    border: 1px solid rgba(127,127,127,0.4);
+    padding: 4px 8px;
+    text-align: right;
+  }
+  #report th:first-child, #report td:first-child { text-align: left; }
+  .row { display: flex; gap: 8px; align-items: center; }
+  .ok { color: #2a8; }
+  .warn { color: #c83; }
+</style>
+</head>
+<body>
+<h1>Matcher benchmark</h1>
+<div class="sub">
+  regex-OR vs Aho-Corasick at varied pattern count, text size, window size.
+  Run in Chrome for <code>performance.memory</code> support.
+</div>
+
+<div class="row">
+  <button id="run">Run benchmark</button>
+  <button id="download" disabled>Download results.md</button>
+  <span id="status" class="sub"></span>
+</div>
+
+<div id="log"></div>
+<div id="report"></div>
+
+<script type="module">
+import { runBenchmark, resultsToMarkdown } from './runner.js';
+
+const logEl = document.getElementById('log');
+const reportEl = document.getElementById('report');
+const statusEl = document.getElementById('status');
+const runBtn = document.getElementById('run');
+const dlBtn = document.getElementById('download');
+
+let lastMarkdown = '';
+
+function append(line) {
+  logEl.textContent += line + '\n';
+  logEl.scrollTop = logEl.scrollHeight;
+}
+
+function renderMarkdown(md) {
+  // Tiny markdown → HTML for tables, headers, code, bold.
+  const lines = md.split('\n');
+  const html = [];
+  let inTable = false;
+  let tableRows = [];
+  const flushTable = () => {
+    if (!inTable) return;
+    html.push('<table>');
+    tableRows.forEach((cells, i) => {
+      if (i === 1 && cells.every(c => /^[-:]+$/.test(c.trim()))) return; // separator row
+      const tag = i === 0 ? 'th' : 'td';
+      html.push('<tr>' + cells.map(c => `<${tag}>${c.trim()}</${tag}>`).join('') + '</tr>');
+    });
+    html.push('</table>');
+    inTable = false;
+    tableRows = [];
+  };
+  for (const line of lines) {
+    if (line.startsWith('|')) {
+      inTable = true;
+      const cells = line.split('|').slice(1, -1);
+      tableRows.push(cells);
+      continue;
+    }
+    flushTable();
+    if (line.startsWith('# ')) html.push(`<h2>${line.slice(2)}</h2>`);
+    else if (line.startsWith('## ')) html.push(`<h3>${line.slice(3)}</h3>`);
+    else if (line.trim() === '') html.push('<br>');
+    else {
+      const formatted = line
+        .replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>')
+        .replace(/`(.+?)`/g, '<code>$1</code>');
+      html.push(`<div>${formatted}</div>`);
+    }
+  }
+  flushTable();
+  reportEl.innerHTML = html.join('');
+}
+
+runBtn.addEventListener('click', async () => {
+  runBtn.disabled = true;
+  dlBtn.disabled = true;
+  logEl.textContent = '';
+  reportEl.textContent = '';
+  statusEl.textContent = 'running…';
+  statusEl.className = 'sub';
+  append('Starting benchmark. This takes 1-3 minutes at full scale.');
+
+  try {
+    const t0 = performance.now();
+    const results = await runBenchmark(append);
+    const elapsed = (performance.now() - t0) / 1000;
+    append(`\nDone in ${elapsed.toFixed(1)}s`);
+
+    lastMarkdown = resultsToMarkdown(results);
+    renderMarkdown(lastMarkdown);
+
+    statusEl.textContent = `done in ${elapsed.toFixed(1)}s`;
+    statusEl.className = 'sub ok';
+    dlBtn.disabled = false;
+  } catch (err) {
+    append(`\nERROR: ${err.message}\n${err.stack}`);
+    statusEl.textContent = 'error';
+    statusEl.className = 'sub warn';
+  } finally {
+    runBtn.disabled = false;
+  }
+});
+
+dlBtn.addEventListener('click', () => {
+  if (!lastMarkdown) return;
+  const blob = new Blob([lastMarkdown], { type: 'text/markdown' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = 'results.md';
+  a.click();
+  URL.revokeObjectURL(url);
+});
+</script>
+</body>
+</html>

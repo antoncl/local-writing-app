@@ -14,7 +14,6 @@
     Backlink,
     ChatMessage,
     ChatSession,
-    ChatSessionContextItem,
     ChatSessionMessage,
     ChatSessionSummary,
     DirectoryListing,
@@ -159,17 +158,6 @@
   let chatLastMeta: { provider: string; model: string; latency_ms: number } | null = null;
   let chatScrollEl: HTMLDivElement | null = null;
   let chatActivePromptEntry: { id: string; title: string } | null = null;
-  type ChatContextKind = "scene" | "lore" | "snippet" | "preset";
-  type ChatContextItem = {
-    id: string;
-    kind: ChatContextKind;
-    title: string;
-    entryType: string;
-  };
-  let chatContextItems: ChatContextItem[] = [];
-  let chatContextMenuOpen = false;
-  let chatContextCategory: ChatContextKind | null = null;
-  let chatContextSearch = "";
   let chatSessions: ChatSessionSummary[] = [];
   let activeChatId: string | null = null;
   let activeChatTitle = "Untitled chat";
@@ -409,11 +397,6 @@
     const target = event.target as HTMLElement | null;
     if (addMenuOpenFor !== null && !target?.closest(".tree-menu-anchor")) {
       addMenuOpenFor = null;
-    }
-    if (chatContextMenuOpen && !target?.closest(".chat-context-anchor")) {
-      chatContextMenuOpen = false;
-      chatContextCategory = null;
-      chatContextSearch = "";
     }
     if (promptPickerOpen && !target?.closest(".chat-prompt-anchor")) {
       closeChatPromptPicker();
@@ -1052,7 +1035,6 @@
     // Appends an empty assistant message and mutates its content as deltas
     // arrive. On error, removes the placeholder and calls onError() so the
     // caller can decide whether to also rewind the user turn.
-    const contextBlock = await composeContextBlocks();
     chatHistory = [...chatHistory, { role: "assistant", content: "" }];
     const idx = chatHistory.length - 1;
     let scrollPending = false;
@@ -1066,7 +1048,7 @@
     let errored = false;
     for await (const ev of api.aiChatStream({
       assistant_id: chatAssistantId || null,
-      system_prompt: buildEffectiveChatSystemPrompt(contextBlock),
+      system_prompt: chatSystemPrompt,
       // Send history WITHOUT the placeholder we just pushed.
       messages: chatHistory.slice(0, idx).map(({ role, content }) => ({ role, content })),
     })) {
@@ -1159,7 +1141,6 @@
     chatLastMeta = null;
     chatError = null;
     chatActivePromptEntry = null;
-    chatContextItems = [];
   }
 
   // --- Chat sessions (Phase 3) ---
@@ -1195,12 +1176,10 @@
       assistant_id: chatAssistantId,
       system_prompt: chatSystemPrompt,
       pinned: activeChatPinned,
-      context_items: chatContextItems.map((item) => ({
-        kind: item.kind,
-        id: item.id,
-        entry_type: item.entryType,
-        title: item.title,
-      })),
+      // Legacy chat-level + Context menu was removed; new chats don't
+      // attach session-level context items. Existing items on previously
+      // saved sessions get overwritten with [] on next save by design.
+      context_items: [],
       messages: chatHistory.map((m) => ({
         role: m.role,
         content: m.content,
@@ -1223,12 +1202,11 @@
     // chats with an empty system, an empty default is the honest answer.
     chatSystemPrompt = session.system_prompt || (session.prompt_entry_id ? "" : DEFAULT_CHAT_SYSTEM_PROMPT);
     invalidateChatPromptPreview();
-    chatContextItems = (session.context_items || []).map((item: ChatSessionContextItem) => ({
-      kind: item.kind,
-      id: item.id,
-      title: item.title || item.id,
-      entryType: item.entry_type || "",
-    }));
+    // Legacy chat-level context items (session.context_items) are no
+    // longer surfaced. The picker model moved to prompt-declared
+    // context_pick inputs (rendered into the system_prompt at
+    // prompt-pick time). Old data stays on disk until the session
+    // re-saves with [].
     chatHistory = (session.messages || []).map((m: ChatSessionMessage) => ({
       role: m.role,
       content: m.content,
@@ -1401,13 +1379,13 @@
       return Number.isFinite(parsed) ? parsed : trimmed;
     }
     if (type === "boolean") return trimmed.toLowerCase() === "true";
-    if (type === "entity_ref_list") {
-      if (!trimmed) return null;
+    if (type === "entity_ref_list" || type === "context_pick") {
+      if (!trimmed) return type === "context_pick" ? [] : null;
       try {
         const parsed = JSON.parse(trimmed);
-        return Array.isArray(parsed) ? parsed : null;
+        return Array.isArray(parsed) ? parsed : (type === "context_pick" ? [] : null);
       } catch {
-        return null;
+        return type === "context_pick" ? [] : null;
       }
     }
     return trimmed;
@@ -1420,7 +1398,7 @@
     const missing = declared.filter((input) => {
       if (!input.required) return false;
       const raw = chatInputsDialogDrafts[input.name];
-      if (input.type === "entity_ref_list") {
+      if (input.type === "entity_ref_list" || input.type === "context_pick") {
         try {
           const parsed = JSON.parse(raw || "[]");
           return !Array.isArray(parsed) || parsed.length === 0;
@@ -1527,8 +1505,7 @@
     promptPreviewLoading = true;
     promptPreviewError = null;
     try {
-      const contextBlock = await composeContextBlocks();
-      promptPreviewText = buildEffectiveChatSystemPrompt(contextBlock);
+      promptPreviewText = chatSystemPrompt;
     } catch (e) {
       promptPreviewError = (e as Error).message || "Couldn't compose preview.";
       promptPreviewText = null;
@@ -1607,44 +1584,6 @@
     chatActivePromptEntry = null;
   }
 
-  function toggleContextMenu() {
-    chatContextMenuOpen = !chatContextMenuOpen;
-    chatContextCategory = null;
-    chatContextSearch = "";
-  }
-
-  function openContextCategory(kind: ChatContextKind) {
-    chatContextCategory = kind;
-    chatContextSearch = "";
-    tick().then(() => {
-      const input = document.querySelector<HTMLInputElement>(".chat-context-search");
-      input?.focus();
-    });
-  }
-
-  function backToContextCategories() {
-    chatContextCategory = null;
-    chatContextSearch = "";
-  }
-
-  function addContextItem(item: ChatContextItem) {
-    if (chatContextItems.some((existing) => existing.id === item.id && existing.kind === item.kind)) {
-      chatContextMenuOpen = false;
-      return;
-    }
-    chatContextItems = [...chatContextItems, item];
-    chatContextMenuOpen = false;
-    chatContextSearch = "";
-    invalidateChatPromptPreview();
-    void persistActiveChat();
-  }
-
-  function removeContextItem(id: string, kind: ChatContextKind) {
-    chatContextItems = chatContextItems.filter((item) => !(item.id === id && item.kind === kind));
-    invalidateChatPromptPreview();
-    void persistActiveChat();
-  }
-
   function handleChatAssistantChange() {
     void persistActiveChat();
   }
@@ -1697,92 +1636,6 @@
     const q = query.trim().toLowerCase();
     if (!q) return true;
     return title.toLowerCase().includes(q);
-  }
-
-  function snippetEntriesFor(query: string): PromptEntrySummary[] {
-    const schema = metadataSchema;
-    if (!schema) return [];
-    const isSnippetType = (typeId: string | undefined | null): boolean => {
-      if (!typeId) return false;
-      const seen = new Set<string>();
-      let current: string | undefined = typeId;
-      while (current && !seen.has(current)) {
-        if (current === "snippet") return true;
-        seen.add(current);
-        current = schema.entry_types[current]?.parent ?? undefined;
-      }
-      return false;
-    };
-    return promptEntries
-      .filter((entry) => isSnippetType(entry.entry_type) && titleMatchesQuery(entry.title, query))
-      .sort((a, b) => a.title.localeCompare(b.title, undefined, { sensitivity: "base" }));
-  }
-
-  function filteredStructureScenes(root: StructureNode | null | undefined, query: string): { id: string; title: string }[] {
-    return flattenStructureScenes(root).filter((s) => titleMatchesQuery(s.title, query));
-  }
-
-  function loreEntriesGroupedByType(query: string): { typeId: string; typeName: string; entries: LoreEntrySummary[] }[] {
-    const groups = new Map<string, { typeId: string; typeName: string; entries: LoreEntrySummary[] }>();
-    for (const entry of loreEntries) {
-      if (!titleMatchesQuery(entry.title, query)) continue;
-      const key = entry.entry_type || "lore_note";
-      const existing = groups.get(key);
-      if (existing) {
-        existing.entries.push(entry);
-      } else {
-        groups.set(key, {
-          typeId: key,
-          typeName: loreEntryTypeName(entry),
-          entries: [entry],
-        });
-      }
-    }
-    return Array.from(groups.values()).sort((a, b) => a.typeName.localeCompare(b.typeName, undefined, { sensitivity: "base" }));
-  }
-
-  function escapeXmlAttr(value: string): string {
-    return value.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
-  }
-
-  async function composeContextBlocks(): Promise<string> {
-    if (chatContextItems.length === 0) return "";
-    const blocks: string[] = [];
-    for (const item of chatContextItems) {
-      try {
-        if (item.kind === "scene") {
-          const scene = await api.getScene(item.id);
-          blocks.push(
-            `<scene title="${escapeXmlAttr(scene.title)}" id="${escapeXmlAttr(scene.id)}">\n${scene.body_markdown.trim()}\n</scene>`,
-          );
-        } else if (item.kind === "lore") {
-          const entry = await api.getLoreEntry(item.id);
-          blocks.push(
-            `<lore_entry entry_type="${escapeXmlAttr(entry.entry_type)}" title="${escapeXmlAttr(entry.title)}" id="${escapeXmlAttr(entry.id)}">\n${entry.body_markdown.trim()}\n</lore_entry>`,
-          );
-        } else if (item.kind === "preset") {
-          const preset = await api.aiContextPreset(item.id as "full_outline" | "full_text");
-          if (preset.content.trim()) {
-            blocks.push(preset.content);
-          }
-        } else {
-          const entry = await api.getPromptEntry(item.id);
-          blocks.push(
-            `<snippet title="${escapeXmlAttr(entry.title)}" id="${escapeXmlAttr(entry.id)}">\n${entry.body_markdown.trim()}\n</snippet>`,
-          );
-        }
-      } catch {
-        // Skip items we can't fetch (e.g., deleted entry).
-      }
-    }
-    return blocks.length ? `<context>\n${blocks.join("\n\n")}\n</context>` : "";
-  }
-
-  function buildEffectiveChatSystemPrompt(contextBlock: string): string {
-    const trimmed = chatSystemPrompt.trim();
-    if (!contextBlock) return chatSystemPrompt;
-    if (!trimmed) return contextBlock;
-    return `${chatSystemPrompt}\n\n${contextBlock}`;
   }
 
   function flattenStructureScenes(node: StructureNode | null | undefined, acc: { id: string; title: string }[] = []): { id: string; title: string }[] {
@@ -4678,18 +4531,6 @@
         <p class="preview-result-error">{chatError}</p>
       {/if}
 
-      {#if chatContextItems.length > 0}
-        <div class="chat-context-chips">
-          {#each chatContextItems as item (item.kind + ":" + item.id)}
-            <span class="chat-context-chip" class:scene={item.kind === "scene"} class:lore={item.kind === "lore"}>
-              <small>{item.kind === "scene" ? "Scene" : item.entryType}</small>
-              <strong>{item.title}</strong>
-              <button type="button" aria-label="Remove from context" on:click={() => removeContextItem(item.id, item.kind)}>×</button>
-            </span>
-          {/each}
-        </div>
-      {/if}
-
       <textarea
         class="chat-input"
         bind:value={chatInput}
@@ -4698,67 +4539,6 @@
         spellcheck="true"
       ></textarea>
       <div class="button-row chat-action-row">
-        <div class="chat-context-anchor">
-          <button type="button" on:click={toggleContextMenu}>+ Context</button>
-          {#if chatContextMenuOpen}
-            <div class="chat-context-menu" role="menu">
-              {#if chatContextCategory === null}
-                <div class="chat-context-group-heading">Presets</div>
-                <button type="button" title="Include the manuscript outline (acts → chapters → scenes with summaries)" on:click={() => addContextItem({ id: "full_outline", kind: "preset", title: "Full Outline", entryType: "preset" })}>Full Outline</button>
-                <button type="button" title="Include every scene's prose in manuscript order. Can be large." on:click={() => addContextItem({ id: "full_text", kind: "preset", title: "Full Novel Text", entryType: "preset" })}>Full Novel Text</button>
-                <div class="chat-context-group-heading">Browse</div>
-                <button type="button" on:click={() => openContextCategory("scene")}>Scenes ›</button>
-                <button type="button" on:click={() => openContextCategory("lore")}>Lore Entries ›</button>
-                <button type="button" on:click={() => openContextCategory("snippet")}>Snippets ›</button>
-              {:else}
-                <button type="button" class="chat-context-back" on:click={backToContextCategories}>‹ Back</button>
-                <input
-                  class="chat-context-search"
-                  type="text"
-                  placeholder="Search…"
-                  bind:value={chatContextSearch}
-                />
-                {#if chatContextCategory === "scene"}
-                  {@const scenes = filteredStructureScenes(structure?.root, chatContextSearch)}
-                  {#each scenes as scene (scene.id)}
-                    <button
-                      type="button"
-                      on:click={() => addContextItem({ id: scene.id, kind: "scene", title: scene.title, entryType: "scene" })}
-                    >{scene.title}</button>
-                  {/each}
-                  {#if scenes.length === 0}
-                    <p class="muted">{chatContextSearch ? "No matches." : "No scenes in this project."}</p>
-                  {/if}
-                {:else if chatContextCategory === "lore"}
-                  {@const groups = loreEntriesGroupedByType(chatContextSearch)}
-                  {#each groups as group (group.typeId)}
-                    <div class="chat-context-group-heading">{group.typeName}</div>
-                    {#each group.entries as entry (entry.id)}
-                      <button
-                        type="button"
-                        on:click={() => addContextItem({ id: entry.id, kind: "lore", title: entry.title, entryType: entry.entry_type })}
-                      >{entry.title}</button>
-                    {/each}
-                  {/each}
-                  {#if groups.length === 0}
-                    <p class="muted">{chatContextSearch ? "No matches." : "No lore entries in this project."}</p>
-                  {/if}
-                {:else}
-                  {@const snippets = snippetEntriesFor(chatContextSearch)}
-                  {#each snippets as snippet (snippet.id)}
-                    <button
-                      type="button"
-                      on:click={() => addContextItem({ id: snippet.id, kind: "snippet", title: snippet.title, entryType: snippet.entry_type })}
-                    >{snippet.title}</button>
-                  {/each}
-                  {#if snippets.length === 0}
-                    <p class="muted">{chatContextSearch ? "No matches." : "No snippets in this project."}</p>
-                  {/if}
-                {/if}
-              {/if}
-            </div>
-          {/if}
-        </div>
         <button type="button" disabled={!chatHistory.length || chatRunning} on:click={clearChat}>Clear</button>
         <button type="button" class="primary" disabled={!chatInput.trim() || chatRunning} on:click={sendChat}>
           {chatRunning ? "Sending…" : "Send"}
@@ -4963,6 +4743,9 @@
                 metadataSchema={metadataSchema}
                 excludeId={null}
                 ariaLabel={input.label || input.name}
+                structure={structure}
+                loreEntries={loreEntries}
+                promptEntries={promptEntries}
                 on:change={(event) => updateChatInputsDraft(input.name, event.detail.value)}
               />
             </label>

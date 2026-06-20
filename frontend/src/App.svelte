@@ -75,6 +75,11 @@
     required: boolean;
     targetKind: "" | "scene" | "lore";
     targetEntryType: string;
+    // True while the ID should auto-derive from the Label as the user types
+    // (mirrors the field-editor flow: name → slugified id). Flips to false
+    // when the user edits the ID directly, OR when an existing input is loaded
+    // (so we don't surprise-rename their established accessors).
+    nameDerived: boolean;
   };
   type PaneState = {
     title: string;
@@ -1995,6 +2000,10 @@ The story so far:
           : "",
       targetEntryType:
         typeof input.target?.entry_type === "string" ? input.target.entry_type : "",
+      // Loaded existing input — freeze the ID so changing the Label later
+      // doesn't silently rename an accessor the author has already used in
+      // their template.
+      nameDerived: false,
     }));
     const contextStrategy = extras?.context_strategy ?? null;
     promptContextTargetKind =
@@ -2091,8 +2100,25 @@ The story so far:
   function addPromptInput() {
     promptInputs = [
       ...promptInputs,
-      { name: "", type: "text", label: "", defaultValue: "", options: "", required: false, targetKind: "", targetEntryType: "" },
+      { name: "", type: "text", label: "", defaultValue: "", options: "", required: false, targetKind: "", targetEntryType: "", nameDerived: true },
     ];
+  }
+
+  function updatePromptInputLabel(index: number, label: string) {
+    promptInputs = promptInputs.map((input, i) => {
+      if (i !== index) return input;
+      const next: PromptInputDraft = { ...input, label };
+      if (input.nameDerived) next.name = slugifyFieldId(label);
+      return next;
+    });
+  }
+
+  function updatePromptInputName(index: number, name: string) {
+    // Slugify on input so the field always shows the canonical accessor form
+    // (lowercase, underscore-separated). User typing "Genre" sees "genre".
+    promptInputs = promptInputs.map((input, i) =>
+      i === index ? { ...input, name: slugifyFieldId(name), nameDerived: false } : input,
+    );
   }
 
   function removePromptInput(index: number) {
@@ -3863,8 +3889,15 @@ The story so far:
             <div class="prompt-input-row">
               <div class="prompt-input-grid">
                 <label>
-                  Name
-                  <input value={input.name} placeholder="words" on:input={(event) => updatePromptInput(index, { name: event.currentTarget.value })} />
+                  Label
+                  <input value={input.label} placeholder="Words to generate" on:input={(event) => updatePromptInputLabel(index, event.currentTarget.value)} />
+                </label>
+                <label>
+                  ID
+                  <input value={input.name} placeholder="words" on:input={(event) => updatePromptInputName(index, event.currentTarget.value)} />
+                  {#if input.name}
+                    <small class="prompt-input-accessor"><code>&lbrace;&lbrace; input.{input.name} &rbrace;&rbrace;</code></small>
+                  {/if}
                 </label>
                 <label>
                   Type
@@ -3877,10 +3910,6 @@ The story so far:
                     <option value="entity_ref">Entity Reference</option>
                     <option value="entity_ref_list">Entity Reference List</option>
                   </select>
-                </label>
-                <label>
-                  Label
-                  <input value={input.label} placeholder="Words to generate" on:input={(event) => updatePromptInput(index, { label: event.currentTarget.value })} />
                 </label>
                 <label>
                   Default

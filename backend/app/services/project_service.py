@@ -50,6 +50,7 @@ from app.models import (
     ProjectInfo,
     PromptEntry,
     PromptEntryList,
+    PromptInputDefinition,
     PromptEntrySummary,
     ProjectValidation,
     ReferenceCandidate,
@@ -2237,6 +2238,7 @@ class ProjectService:
                     body_markdown=body,
                     entry_type=entry_type,
                     metadata=self._normalise_metadata(front_matter.get("metadata"), entry.path),
+                    inputs=self._parse_prompt_inputs(front_matter.get("inputs")),
                     source_layer_id=entry.source_layer_id,
                     source_layer_label=entry.source_layer_label,
                 )
@@ -2284,6 +2286,7 @@ class ProjectService:
             revision=self._revision(path),
             entry_type=raw_entry_type,
             metadata=self._normalise_metadata(front_matter.get("metadata"), path),
+            inputs=self._parse_prompt_inputs(front_matter.get("inputs")),
             computed_metadata={},
             source_layer_id=index_entry.source_layer_id if index_entry else "",
             source_layer_label=index_entry.source_layer_label if index_entry else "",
@@ -2298,9 +2301,38 @@ class ProjectService:
             raise ProjectServiceError("Prompt changed on disk after it was opened.", 409)
         self._check_entry_type_kind(request.entry_type, "prompt")
         metadata = self._normalise_metadata(request.metadata, path)
-        self._write_node_entry_file(path, node_id, request.title, request.entry_type, metadata, request.body_markdown)
+        inputs_payload = [i.model_dump(exclude_none=True) for i in request.inputs]
+        self._write_node_entry_file(
+            path,
+            node_id,
+            request.title,
+            request.entry_type,
+            metadata,
+            request.body_markdown,
+            extra={"inputs": inputs_payload},
+        )
         self._maybe_rename_node_file(path, request.title)
         return self.read_prompt_entry(node_id)
+
+    @staticmethod
+    def _parse_prompt_inputs(raw: Any) -> list[PromptInputDefinition]:
+        from pydantic import ValidationError
+
+        if not isinstance(raw, list):
+            return []
+        parsed: list[PromptInputDefinition] = []
+        for item in raw:
+            if not isinstance(item, dict):
+                continue
+            try:
+                parsed.append(PromptInputDefinition.model_validate(item))
+            except ValidationError:
+                # Skip malformed entries rather than fail the whole prompt load.
+                # Narrowed from `except Exception` after a missing import was
+                # silently swallowed (NameError caught as "malformed") and
+                # every input was discarded.
+                continue
+        return parsed
 
     def delete_prompt_entry(self, entry_id: str) -> PromptEntryList:
         path = self._path_for_node_id(entry_id, "prompt")
@@ -2678,9 +2710,24 @@ class ProjectService:
         entry_type: str,
         metadata: dict[str, Any],
         body: str,
+        *,
+        extra: dict[str, Any] | None = None,
     ) -> None:
+        front_matter_data: dict[str, Any] = {
+            "id": node_id,
+            "title": title,
+            "entry_type": entry_type,
+            "metadata": metadata,
+        }
+        if extra:
+            # Extra top-level front-matter keys (e.g. `inputs` on prompt entries).
+            # Empty/None values are skipped to keep the file tidy.
+            for key, value in extra.items():
+                if value in (None, "", [], {}):
+                    continue
+                front_matter_data[key] = value
         front_matter = yaml.safe_dump(
-            {"id": node_id, "title": title, "entry_type": entry_type, "metadata": metadata},
+            front_matter_data,
             sort_keys=False,
             allow_unicode=True,
         ).strip()

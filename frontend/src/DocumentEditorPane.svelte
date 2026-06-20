@@ -33,7 +33,7 @@
   export let todoStatusHint = "";
 
   const dispatch = createEventDispatcher<{
-    change: { title: string; bodyMarkdown: string; status: string; entryType: string; metadata: EntryMetadata };
+    change: { title: string; bodyMarkdown: string; status: string; entryType: string; metadata: EntryMetadata; inputs?: PromptInputDefinition[] };
     focus: void;
     "custom-data": { entryType: string; kind: "scene" | "lore" | "prompt" | "assistant" };
     embeddedTodos: { todos: EmbeddedTodo[] };
@@ -210,6 +210,151 @@
   let inputsDialogAssistantId: string = "";
   let lastInvokedAssistantId: string = "";
 
+  // --- Per-entry prompt inputs editor (declaration side) ---
+  // Inputs live on the entry now, not the entry-type. The drafts here are the
+  // editor-side form state; on every edit we rebuild the canonical
+  // PromptInputDefinition[] and emit it as part of the change event. App.svelte
+  // stores it on the pane and persists on save.
+  type EntryInputDraft = {
+    name: string;
+    type: import("./types").PromptInputType;
+    label: string;
+    defaultValue: string;
+    options: string; // comma-separated for select
+    required: boolean;
+    targetKind: "" | "scene" | "lore";
+    targetEntryType: string;
+    nameDerived: boolean;
+  };
+  let entryInputDrafts: EntryInputDraft[] = [];
+  let entryInputsExpanded = false;
+  // Seed drafts from the scene prop. scene only changes when a different entry
+  // is opened or after a save; the user's typing updates entryInputDrafts
+  // locally without touching scene, so this won't fight in-flight edits.
+  // Reactive identity key: when scene reference changes (different entry),
+  // re-seed. We compare via scene id rather than reference because Svelte may
+  // pass the same object reference between renders.
+  let lastSeededSceneId: string | null = null;
+  $: maybeReseedInputs(scene, documentKind);
+
+  function maybeReseedInputs(currentScene: typeof scene, currentKind: typeof documentKind): void {
+    if (currentKind !== "prompt" || !currentScene) {
+      lastSeededSceneId = null;
+      return;
+    }
+    if (currentScene.id === lastSeededSceneId) return;
+    const sceneInputs = ((currentScene as unknown as PromptEntrySummary).inputs ?? []);
+    entryInputDrafts = sceneInputs.map(inputDefinitionToDraft);
+    lastSeededSceneId = currentScene.id;
+  }
+
+  function inputDefinitionToDraft(input: PromptInputDefinition): EntryInputDraft {
+    const targetKindRaw = (input.target as { kind?: unknown } | null | undefined)?.kind;
+    const targetEntryTypeRaw = (input.target as { entry_type?: unknown } | null | undefined)?.entry_type;
+    return {
+      name: input.name,
+      type: input.type,
+      label: input.label ?? "",
+      defaultValue: input.default === undefined || input.default === null ? "" : String(input.default),
+      options: (input.options ?? []).join(", "),
+      required: Boolean(input.required),
+      targetKind: targetKindRaw === "scene" || targetKindRaw === "lore" ? (targetKindRaw as "scene" | "lore") : "",
+      targetEntryType: typeof targetEntryTypeRaw === "string" ? targetEntryTypeRaw : "",
+      nameDerived: false,
+    };
+  }
+
+  function entrySlugify(value: string): string {
+    return value
+      .trim()
+      .toLowerCase()
+      .replace(/[^a-z0-9]+/g, "_")
+      .replace(/^_+|_+$/g, "")
+      .replace(/^[0-9]/, "input_$&");
+  }
+
+  function entryInputDraftsToCanonical(drafts: EntryInputDraft[]): PromptInputDefinition[] {
+    return drafts
+      .filter((d) => d.name)
+      .map((d) => {
+        const target: Record<string, string> = {};
+        if (d.targetKind) target.kind = d.targetKind;
+        if (d.targetEntryType) target.entry_type = d.targetEntryType;
+        const out: PromptInputDefinition = {
+          name: d.name,
+          type: d.type,
+        };
+        if (d.label) out.label = d.label;
+        if (d.defaultValue !== "") out.default = d.defaultValue;
+        if (d.type === "select") {
+          out.options = d.options.split(",").map((s) => s.trim()).filter(Boolean);
+        }
+        if (d.required) out.required = true;
+        if (Object.keys(target).length > 0) out.target = target;
+        return out;
+      });
+  }
+
+  function emitInputsChange(): void {
+    if (!scene) return;
+    const canonical = entryInputDraftsToCanonical(entryInputDrafts);
+    dispatch("change", {
+      title,
+      bodyMarkdown: rawBodyMode ? rawBody : (editor ? editorHtmlToSceneMarkdown(editor.getHTML()) : ""),
+      status,
+      entryType,
+      metadata: cloneMetadata(metadata),
+      inputs: canonical,
+    });
+  }
+
+  function addEntryInput(): void {
+    entryInputDrafts = [
+      ...entryInputDrafts,
+      {
+        name: "",
+        type: "text",
+        label: "",
+        defaultValue: "",
+        options: "",
+        required: false,
+        targetKind: "",
+        targetEntryType: "",
+        nameDerived: true,
+      },
+    ];
+    emitInputsChange();
+  }
+
+  function removeEntryInput(index: number): void {
+    entryInputDrafts = entryInputDrafts.filter((_, i) => i !== index);
+    emitInputsChange();
+  }
+
+  function updateEntryInputLabel(index: number, label: string): void {
+    entryInputDrafts = entryInputDrafts.map((draft, i) => {
+      if (i !== index) return draft;
+      const next = { ...draft, label };
+      if (draft.nameDerived) next.name = entrySlugify(label);
+      return next;
+    });
+    emitInputsChange();
+  }
+
+  function updateEntryInputName(index: number, name: string): void {
+    entryInputDrafts = entryInputDrafts.map((draft, i) =>
+      i !== index ? draft : { ...draft, name: entrySlugify(name), nameDerived: false },
+    );
+    emitInputsChange();
+  }
+
+  function updateEntryInput(index: number, patch: Partial<EntryInputDraft>): void {
+    entryInputDrafts = entryInputDrafts.map((draft, i) =>
+      i !== index ? draft : { ...draft, ...patch },
+    );
+    emitInputsChange();
+  }
+
   // --- Inline prompt preview (when editing a prompt entry) ---
   // The editor splits vertically: CodeEditor on top, this preview always
   // visible below (resizable divider between them). Auto-renders on body
@@ -224,14 +369,11 @@
   let promptPreviewLastRenderKey = ""; // dedupe identical renders.
   // Diagnostics pinned in the CodeEditor gutter — driven by render errors.
   let promptPreviewDiagnostics: { line: number; col?: number; severity: "error" | "warning"; message: string }[] = [];
-  // Read metadataSchema directly in the expression — Svelte's dependency
-  // analyzer can't see through the function call, so calling
-  // effectivePromptInputs() here would leave the reactive blind to schema
-  // changes (editing inputs via the Detail Type editor wouldn't reflect into
-  // the prompt-preview panel until the entry was reopened).
+  // Inputs are per-entry now. Read scene.inputs directly so the reactive
+  // re-fires when the entry's inputs change via the editor section below.
   $: promptPreviewDeclaredInputs =
-    documentKind === "prompt" && scene && metadataSchema
-      ? (metadataSchema.entry_types[(scene as unknown as PromptEntrySummary).entry_type]?.prompt?.inputs ?? [])
+    documentKind === "prompt" && scene
+      ? ((scene as unknown as PromptEntrySummary).inputs ?? [])
       : [];
   // Reset preview when the underlying entry changes — stale results from a
   // previous prompt would be confusing.
@@ -599,6 +741,7 @@
         status,
         entryType,
         metadata: cloneMetadata(metadata),
+        inputs: documentKind === "prompt" ? entryInputDraftsToCanonical(entryInputDrafts) : undefined,
       });
       return;
     }
@@ -615,6 +758,7 @@
       bodyMarkdown: editorHtmlToSceneMarkdown(editor.getHTML()),
       status,
       entryType,
+      inputs: documentKind === "prompt" ? entryInputDraftsToCanonical(entryInputDrafts) : undefined,
       metadata: cloneMetadata(metadata),
     });
   }
@@ -836,7 +980,9 @@
   }
 
   function effectivePromptInputs(entry: PromptEntrySummary) {
-    return metadataSchema?.entry_types[entry.entry_type]?.prompt?.inputs ?? [];
+    // Inputs now live on the entry itself (not the entry-type) — the
+    // declaration and the template that uses it are coupled.
+    return entry.inputs ?? [];
   }
 
   function handleEditorKeydown(view: EditorView, event: KeyboardEvent) {
@@ -2613,6 +2759,76 @@
   </div>
 
   {#if documentKind === "prompt" && scene}
+    <details class="entry-inputs-editor" bind:open={entryInputsExpanded}>
+      <summary>
+        Inputs <small>{entryInputDrafts.length}</small>
+        <small class="entry-inputs-hint">declared on this prompt · use as <code>&lbrace;&lbrace; input.&lt;id&gt; &rbrace;&rbrace;</code></small>
+      </summary>
+      {#if entryInputDrafts.length === 0}
+        <p class="muted entry-inputs-empty">No inputs yet. Click + Input to declare one.</p>
+      {/if}
+      {#each entryInputDrafts as draft, index (index)}
+        <div class="prompt-input-row">
+          <div class="prompt-input-grid">
+            <label>
+              Label
+              <input value={draft.label} placeholder="Topic to brainstorm" on:input={(e) => updateEntryInputLabel(index, (e.currentTarget as HTMLInputElement).value)} />
+            </label>
+            <label>
+              ID
+              <input value={draft.name} placeholder="topic_to_brainstorm" on:input={(e) => updateEntryInputName(index, (e.currentTarget as HTMLInputElement).value)} />
+              {#if draft.name}
+                <small class="prompt-input-accessor"><code>&lbrace;&lbrace; input.{draft.name} &rbrace;&rbrace;</code></small>
+              {/if}
+            </label>
+            <label>
+              Type
+              <select value={draft.type} on:change={(e) => updateEntryInput(index, { type: (e.currentTarget as HTMLSelectElement).value as import("./types").PromptInputType })}>
+                <option value="text">Text</option>
+                <option value="long_text">Long Text</option>
+                <option value="number">Number</option>
+                <option value="boolean">Boolean</option>
+                <option value="select">Select</option>
+                <option value="entity_ref">Entity Reference</option>
+                <option value="entity_ref_list">Entity Reference List</option>
+              </select>
+            </label>
+            <label>
+              Default
+              <input value={draft.defaultValue} placeholder="" on:input={(e) => updateEntryInput(index, { defaultValue: (e.currentTarget as HTMLInputElement).value })} />
+            </label>
+            {#if draft.type === "select"}
+              <label class="prompt-input-options">
+                Options
+                <input value={draft.options} placeholder="quick, thorough" on:input={(e) => updateEntryInput(index, { options: (e.currentTarget as HTMLInputElement).value })} />
+              </label>
+            {/if}
+            {#if draft.type === "entity_ref" || draft.type === "entity_ref_list"}
+              <label>
+                Target kind
+                <select value={draft.targetKind} on:change={(e) => updateEntryInput(index, { targetKind: (e.currentTarget as HTMLSelectElement).value as "" | "scene" | "lore" })}>
+                  <option value="">Any</option>
+                  <option value="scene">Scene</option>
+                  <option value="lore">Lore</option>
+                </select>
+              </label>
+              <label>
+                Target entry type
+                <input value={draft.targetEntryType} placeholder="" on:input={(e) => updateEntryInput(index, { targetEntryType: (e.currentTarget as HTMLInputElement).value })} />
+              </label>
+            {/if}
+            <label class="prompt-input-required">
+              <input type="checkbox" checked={draft.required} on:change={(e) => updateEntryInput(index, { required: (e.currentTarget as HTMLInputElement).checked })} />
+              Required
+            </label>
+            <button type="button" class="prompt-input-remove" title="Remove input" on:click={() => removeEntryInput(index)}>×</button>
+          </div>
+        </div>
+      {/each}
+      <div class="entry-inputs-add">
+        <button type="button" on:click={addEntryInput}>+ Input</button>
+      </div>
+    </details>
     <!-- Vertical split: editor above gets the remaining space; this preview
          pane stays always-visible at the bottom with its own internal scroll.
          The handle between them drags to resize. -->

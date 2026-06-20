@@ -417,6 +417,7 @@ export const api = {
         base_revision: entry.revision,
         entry_type: entry.entry_type,
         metadata: entry.metadata,
+        inputs: entry.inputs ?? [],
       }),
     });
   },

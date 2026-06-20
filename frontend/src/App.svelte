@@ -100,6 +100,9 @@
     draftStatus: string;
     draftEntryType: string;
     draftMetadata: EntryMetadata;
+    // Per-entry prompt inputs. Only meaningful when document.type === "prompt";
+    // ignored for other kinds. Persisted in the entry's YAML on save.
+    draftInputs: PromptInputDefinition[];
     saving: boolean;
   };
 
@@ -426,6 +429,7 @@ The story so far:
       draftStatus: "draft",
       draftEntryType: "scene",
       draftMetadata: {},
+      draftInputs: [],
       saving: false,
     };
   }
@@ -2965,6 +2969,7 @@ The story so far:
             draftStatus: "",
             draftEntryType: entry.entry_type,
             draftMetadata: cloneMetadata(entry.metadata),
+            draftInputs: JSON.parse(JSON.stringify(entry.inputs ?? [])),
             saving: false,
           }
         : pane,
@@ -3153,21 +3158,22 @@ The story so far:
     return pane;
   }
 
-  function updateEditorPaneDraft(id: string, title: string, bodyMarkdown: string, status: string, entryType: string, metadata: EntryMetadata) {
-    editorPanes = editorPanes.map((pane) =>
-      pane.id === id
-        ? {
-            ...pane,
-            dirty:
-              isEditorPaneDirty(pane.scene, title, bodyMarkdown, status, entryType, metadata),
-            draftTitle: title,
-            draftMarkdown: bodyMarkdown,
-            draftStatus: status,
-            draftEntryType: entryType,
-            draftMetadata: cloneMetadata(metadata),
-          }
-        : pane,
-    );
+  function updateEditorPaneDraft(id: string, title: string, bodyMarkdown: string, status: string, entryType: string, metadata: EntryMetadata, inputs?: PromptInputDefinition[]) {
+    editorPanes = editorPanes.map((pane) => {
+      if (pane.id !== id) return pane;
+      const nextInputs = inputs ?? pane.draftInputs;
+      return {
+        ...pane,
+        dirty:
+          isEditorPaneDirty(pane.scene, title, bodyMarkdown, status, entryType, metadata, nextInputs),
+        draftTitle: title,
+        draftMarkdown: bodyMarkdown,
+        draftStatus: status,
+        draftEntryType: entryType,
+        draftMetadata: cloneMetadata(metadata),
+        draftInputs: JSON.parse(JSON.stringify(nextInputs ?? [])),
+      };
+    });
   }
 
   function cloneMetadata(metadata: EntryMetadata) {
@@ -3185,15 +3191,21 @@ The story so far:
     status: string,
     entryType: string,
     metadata: EntryMetadata,
+    inputs?: PromptInputDefinition[],
   ) {
-    return (
-      Boolean(scene) &&
-      (title !== scene?.title ||
-        bodyMarkdown !== scene?.body_markdown ||
-        (documentStatus(scene) ? status !== documentStatus(scene) : false) ||
-        entryType !== scene?.entry_type ||
-        !metadataEqual(metadata, scene?.metadata ?? {}))
-    );
+    if (!scene) return false;
+    if (title !== scene.title) return true;
+    if (bodyMarkdown !== scene.body_markdown) return true;
+    if (documentStatus(scene) ? status !== documentStatus(scene) : false) return true;
+    if (entryType !== scene.entry_type) return true;
+    if (!metadataEqual(metadata, scene.metadata ?? {})) return true;
+    // Prompt-only: inputs are a per-entry array of definitions. Compare the
+    // serialised form so reordering / type changes are detected.
+    const sceneInputs = (scene as { inputs?: PromptInputDefinition[] }).inputs;
+    if (inputs !== undefined && sceneInputs !== undefined) {
+      if (JSON.stringify(inputs) !== JSON.stringify(sceneInputs)) return true;
+    }
+    return false;
   }
 
   function documentStatus(document: EditableDocument | null) {
@@ -3294,6 +3306,7 @@ The story so far:
         ...(documentKind === "scene" ? { status: pane.draftStatus } : {}),
         entry_type: pane.draftEntryType,
         metadata: cloneMetadata(pane.draftMetadata),
+        ...(documentKind === "prompt" ? { inputs: pane.draftInputs } : {}),
       };
       let savedDocument: EditableDocument;
       if (documentKind === "lore") {
@@ -4319,6 +4332,7 @@ The story so far:
             event.detail.status,
             event.detail.entryType,
             event.detail.metadata,
+            event.detail.inputs,
           )}
         on:custom-data={(event) => openSchemaForCustomData(event.detail.entryType, event.detail.kind)}
         on:embeddedTodos={(event) => updateEmbeddedTodosForPane(editorPane.id, event.detail.todos)}

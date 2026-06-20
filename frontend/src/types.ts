@@ -58,6 +58,7 @@ export type PromptEntrySummary = {
   body_markdown: string;
   entry_type: string;
   metadata: EntryMetadata;
+  inputs: PromptInputDefinition[];
   source_layer_id?: string;
   source_layer_label?: string;
 };
@@ -69,6 +70,7 @@ export type PromptEntry = {
   revision: string;
   entry_type: string;
   metadata: EntryMetadata;
+  inputs: PromptInputDefinition[];
   computed_metadata: EntryMetadata;
   source_layer_id?: string;
   source_layer_label?: string;

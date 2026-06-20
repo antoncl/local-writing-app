@@ -1724,6 +1724,75 @@ class MetadataValidationTests(unittest.TestCase):
         self.assertEqual(stored.prompt.system_prompt, "Keep it short.")
         self.assertEqual([i.name for i in stored.prompt.inputs], ["topic"])
 
+    def test_prompt_entry_inputs_round_trip(self) -> None:
+        # Inputs live on the prompt entry (not the entry-type) — declared and
+        # used in the same scope as the template body. Regression for a bug
+        # where a missing PromptInputDefinition import in project_service
+        # caused _parse_prompt_inputs's broad `except Exception` to swallow
+        # the resulting NameError, silently discarding every input on read.
+        from app.models import (
+            CreatePromptEntryRequest,
+            EntryTypeDefinition,
+            PromptInputDefinition,
+            SavePromptEntryRequest,
+            UpsertMetadataEntryTypeRequest,
+        )
+
+        # Concrete prompt sub-type for the test (all seeded prompt types are
+        # abstract).
+        project_layer = next(
+            layer
+            for layer in self.service.read_metadata_schema_layers().layers
+            if layer.folder_path == str(self.root)
+        )
+        self.service.upsert_metadata_entry_type(
+            UpsertMetadataEntryTypeRequest(
+                layer_id=project_layer.id,
+                entry_type_id="brainstorm",
+                allow_existing=False,
+                entry_type=EntryTypeDefinition.model_validate({
+                    "name": "Brainstorm",
+                    "kind": "prompt",
+                    "parent": "general",
+                    "abstract": False,
+                    "fields": [],
+                }),
+            )
+        )
+        created = self.service.create_prompt_entry(
+            CreatePromptEntryRequest(title="Brainstorm", entry_type="brainstorm"),
+        )
+        saved = self.service.save_prompt_entry(
+            created.id,
+            SavePromptEntryRequest(
+                title="Brainstorm",
+                body_markdown='{% role "user" %}Talk about {{ input.topic }}.{% endrole %}',
+                base_revision=created.revision,
+                entry_type=created.entry_type,
+                metadata={},
+                inputs=[
+                    PromptInputDefinition(name="topic", type="text", label="Topic", required=True),
+                    PromptInputDefinition(name="depth", type="select", label="Depth", options=["quick", "thorough"], default="quick"),
+                ],
+            ),
+        )
+        self.assertEqual(len(saved.inputs), 2)
+
+        # Re-read from disk — the bug surfaced here as inputs=[].
+        reread = self.service.read_prompt_entry(created.id)
+        self.assertEqual(len(reread.inputs), 2)
+        self.assertEqual(reread.inputs[0].name, "topic")
+        self.assertTrue(reread.inputs[0].required)
+        self.assertEqual(reread.inputs[1].type, "select")
+        self.assertEqual(reread.inputs[1].options, ["quick", "thorough"])
+        self.assertEqual(reread.inputs[1].default, "quick")
+
+        # And the list endpoint should surface inputs too (used by the chat
+        # composer when picking a prompt).
+        listing = self.service.list_prompt_entries()
+        match = next(e for e in listing.entries if e.id == created.id)
+        self.assertEqual([i.name for i in match.inputs], ["topic", "depth"])
+
     def test_front_matter_body_round_trip_does_not_accumulate_leading_newlines(self) -> None:
         # Regression: the writer emitted `---\n\n{body}` and the reader split
         # on `\n---\n`, leaving the separator `\n` attached to the body. A

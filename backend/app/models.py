@@ -301,6 +301,12 @@ class PromptEntrySummary(BaseModel):
     body_markdown: str = ""
     entry_type: str = "prompt"
     metadata: dict[str, MetadataValue] = Field(default_factory=dict)
+    # Per-entry input declarations. Each prompt declares the parameters its
+    # template body references via `{{ input.<name> }}`. Used to be on the
+    # entry-type's PromptEntryTypeExtras; now lives where the template that
+    # uses it lives. The Type-level inputs field stays in the model for
+    # backwards-compatibility on read but is no longer consulted at runtime.
+    inputs: list[PromptInputDefinition] = Field(default_factory=list)
     source_layer_id: str = ""
     source_layer_label: str = ""
 
@@ -312,6 +318,7 @@ class PromptEntry(BaseModel):
     revision: str
     entry_type: str = "prompt"
     metadata: dict[str, MetadataValue] = Field(default_factory=dict)
+    inputs: list[PromptInputDefinition] = Field(default_factory=list)
     computed_metadata: dict[str, MetadataValue] = Field(default_factory=dict)
     source_layer_id: str = ""
     source_layer_label: str = ""
@@ -332,6 +339,7 @@ class SavePromptEntryRequest(BaseModel):
     base_revision: str | None = None
     entry_type: str = "prompt"
     metadata: dict[str, MetadataValue] = Field(default_factory=dict)
+    inputs: list[PromptInputDefinition] = Field(default_factory=list)
 
 
 class AssistantEntrySummary(BaseModel):

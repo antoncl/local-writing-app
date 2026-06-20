@@ -2772,6 +2772,114 @@ h3 {
   padding: 0 4px;
 }
 
+/* Per-entry inputs editor (DocumentEditorPane, prompt entries). Sits between
+   the body editor and the resize handle / preview pane. */
+.entry-inputs-editor {
+  padding: 6px 12px;
+  background: #f4f7f5;
+  border-top: 1px solid #cbd6d2;
+  font-size: 13px;
+}
+
+.entry-inputs-editor > summary {
+  cursor: pointer;
+  user-select: none;
+  font-weight: 600;
+  color: #2a3431;
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
+}
+
+.entry-inputs-editor > summary > small {
+  color: #65716c;
+  font-weight: 400;
+}
+
+.entry-inputs-hint {
+  margin-left: auto;
+  font-size: 11px;
+}
+
+.entry-inputs-hint > code {
+  background: #ffffff;
+  border: 1px solid #d8e0dd;
+  border-radius: 3px;
+  padding: 0 4px;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+}
+
+.entry-inputs-empty {
+  margin: 6px 0;
+  font-size: 12px;
+}
+
+.entry-inputs-add {
+  margin-top: 6px;
+}
+
+.entry-inputs-editor .prompt-input-row {
+  margin: 6px 0;
+  padding: 8px;
+  background: #ffffff;
+  border: 1px solid #d8e0dd;
+  border-radius: 4px;
+}
+
+.entry-inputs-editor .prompt-input-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
+  gap: 6px 10px;
+  align-items: end;
+}
+
+.entry-inputs-editor .prompt-input-grid label {
+  display: grid;
+  gap: 2px;
+  font-size: 10px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: #65716c;
+}
+
+.entry-inputs-editor .prompt-input-grid input,
+.entry-inputs-editor .prompt-input-grid select {
+  padding: 3px 6px;
+  border: 1px solid #cbd6d2;
+  border-radius: 4px;
+  font-size: 12px;
+  background: #ffffff;
+}
+
+.entry-inputs-editor .prompt-input-required {
+  flex-direction: row;
+  align-items: center;
+  gap: 4px;
+}
+
+.entry-inputs-editor .prompt-input-required > input {
+  margin: 0;
+}
+
+.entry-inputs-editor .prompt-input-remove {
+  align-self: end;
+  border: 1px solid transparent;
+  background: transparent;
+  color: #8a948f;
+  cursor: pointer;
+  font-size: 16px;
+  line-height: 1;
+  padding: 0 8px;
+  border-radius: 4px;
+}
+
+.entry-inputs-editor .prompt-input-remove:hover {
+  background: #f7e0e0;
+  color: #8c2f2f;
+  border-color: #d8b6b6;
+}
+
 .prompt-preview-field.missing-required > input,
 .prompt-preview-field.missing-required > select,
 .prompt-preview-field.missing-required > textarea {

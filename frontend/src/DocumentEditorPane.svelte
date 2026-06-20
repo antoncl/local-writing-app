@@ -11,6 +11,7 @@
   import TableRow from "@tiptap/extension-table-row";
   import { editorHtmlToSceneMarkdown, sceneMarkdownToHtml } from "./markdown";
   import CodeEditor from "./CodeEditor.svelte";
+  import ContextPickConfigEditor from "./ContextPickConfigEditor.svelte";
   import MetadataLongTextEditor from "./MetadataLongTextEditor.svelte";
   import ProviderTierPicker from "./ProviderTierPicker.svelte";
   import ReferencePicker from "./ReferencePicker.svelte";
@@ -225,6 +226,10 @@
     required: boolean;
     targetKind: "" | "scene" | "lore";
     targetEntryType: string;
+    // Carries the per-input config for type === "context_pick". When the
+    // user picks any other type this draft field is ignored at serialize
+    // time (entryInputDraftsToCanonical drops it unless type matches).
+    contextPickConfig: import("./types").ContextPickConfig;
     nameDerived: boolean;
   };
   let entryInputDrafts: EntryInputDraft[] = [];
@@ -252,6 +257,10 @@
   function inputDefinitionToDraft(input: PromptInputDefinition): EntryInputDraft {
     const targetKindRaw = (input.target as { kind?: unknown } | null | undefined)?.kind;
     const targetEntryTypeRaw = (input.target as { entry_type?: unknown } | null | undefined)?.entry_type;
+    const contextPickConfig =
+      input.type === "context_pick" && input.target && typeof input.target === "object"
+        ? (input.target as unknown as import("./types").ContextPickConfig)
+        : ({ kinds: [], presets: [], multiple: true } as import("./types").ContextPickConfig);
     return {
       name: input.name,
       type: input.type,
@@ -261,6 +270,7 @@
       required: Boolean(input.required),
       targetKind: targetKindRaw === "scene" || targetKindRaw === "lore" ? (targetKindRaw as "scene" | "lore") : "",
       targetEntryType: typeof targetEntryTypeRaw === "string" ? targetEntryTypeRaw : "",
+      contextPickConfig,
       nameDerived: false,
     };
   }
@@ -278,19 +288,26 @@
     return drafts
       .filter((d) => d.name)
       .map((d) => {
-        const target: Record<string, string> = {};
-        if (d.targetKind) target.kind = d.targetKind;
-        if (d.targetEntryType) target.entry_type = d.targetEntryType;
         const out: PromptInputDefinition = {
           name: d.name,
           type: d.type,
         };
         if (d.label) out.label = d.label;
+        if (d.required) out.required = true;
+        if (d.type === "context_pick") {
+          // Serialize the rich config into `target`. Skip default / options
+          // (they don't apply); skip targetKind / targetEntryType (those
+          // are for entity_ref types).
+          out.target = d.contextPickConfig as unknown as Record<string, import("./types").MetadataValue>;
+          return out;
+        }
         if (d.defaultValue !== "") out.default = d.defaultValue;
         if (d.type === "select") {
           out.options = d.options.split(",").map((s) => s.trim()).filter(Boolean);
         }
-        if (d.required) out.required = true;
+        const target: Record<string, string> = {};
+        if (d.targetKind) target.kind = d.targetKind;
+        if (d.targetEntryType) target.entry_type = d.targetEntryType;
         if (Object.keys(target).length > 0) out.target = target;
         return out;
       });
@@ -321,10 +338,18 @@
         required: false,
         targetKind: "",
         targetEntryType: "",
+        contextPickConfig: { kinds: [], presets: [], multiple: true },
         nameDerived: true,
       },
     ];
     emitInputsChange();
+  }
+
+  function updateEntryInputContextPickConfig(
+    index: number,
+    config: import("./types").ContextPickConfig,
+  ): void {
+    updateEntryInput(index, { contextPickConfig: config });
   }
 
   function removeEntryInput(index: number): void {
@@ -2863,12 +2888,15 @@
                 <option value="select">Select</option>
                 <option value="entity_ref">Entity Reference</option>
                 <option value="entity_ref_list">Entity Reference List</option>
+                <option value="context_pick">Context Picker</option>
               </select>
             </label>
-            <label>
-              Default
-              <input value={draft.defaultValue} placeholder="" on:input={(e) => updateEntryInput(index, { defaultValue: (e.currentTarget as HTMLInputElement).value })} />
-            </label>
+            {#if draft.type !== "context_pick"}
+              <label>
+                Default
+                <input value={draft.defaultValue} placeholder="" on:input={(e) => updateEntryInput(index, { defaultValue: (e.currentTarget as HTMLInputElement).value })} />
+              </label>
+            {/if}
             {#if draft.type === "select"}
               <label class="prompt-input-options">
                 Options
@@ -2888,6 +2916,15 @@
                 Target entry type
                 <input value={draft.targetEntryType} placeholder="" on:input={(e) => updateEntryInput(index, { targetEntryType: (e.currentTarget as HTMLInputElement).value })} />
               </label>
+            {/if}
+            {#if draft.type === "context_pick"}
+              <div class="prompt-input-context-config">
+                <ContextPickConfigEditor
+                  config={draft.contextPickConfig}
+                  metadataSchema={metadataSchema}
+                  on:change={(event) => updateEntryInputContextPickConfig(index, event.detail.config)}
+                />
+              </div>
             {/if}
             <label class="prompt-input-required">
               <input type="checkbox" checked={draft.required} on:change={(e) => updateEntryInput(index, { required: (e.currentTarget as HTMLInputElement).checked })} />

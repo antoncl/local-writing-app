@@ -11,6 +11,7 @@
   import TableRow from "@tiptap/extension-table-row";
   import { editorHtmlToSceneMarkdown, sceneMarkdownToHtml } from "./markdown";
   import { sanitizePastedHtml } from "./sanitizePastedHtml";
+  import { ImplicitContextHighlight, REBUILD_META } from "./implicitContextHighlight";
   import CodeEditor from "./CodeEditor.svelte";
   import ContextPickConfigEditor from "./ContextPickConfigEditor.svelte";
   import MetadataLongTextEditor from "./MetadataLongTextEditor.svelte";
@@ -685,6 +686,7 @@
         TableRow,
         AlignedTableHeader,
         AlignedTableCell,
+        ImplicitContextHighlight.configure({ matcher: implicitContextMatcher }),
       ],
       content: "",
       editorProps: {
@@ -730,6 +732,23 @@
 
     return () => editor?.destroy();
   });
+
+  // Reactively poke the ImplicitContextHighlight extension when the
+  // matcher reference changes (lore added/edited at the App level).
+  // Mirrors PlainTextEditor + MetadataLongTextEditor.
+  $: if (editor) updateImplicitMatcher(implicitContextMatcher);
+  function updateImplicitMatcher(next: typeof implicitContextMatcher): void {
+    if (!editor) return;
+    const ext = editor.extensionManager.extensions.find(
+      (e) => e.name === "implicitContextHighlight",
+    );
+    if (!ext) return;
+    ext.options.matcher = next;
+    const view = editor.view;
+    if (!view) return;
+    const tr = view.state.tr.setMeta(REBUILD_META, true).setMeta("addToHistory", false);
+    view.dispatch(tr);
+  }
 
   async function loadScene(nextScene: Scene) {
     const sceneId = nextScene.id;

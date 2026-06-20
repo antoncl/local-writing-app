@@ -3355,6 +3355,79 @@ h3 {
   box-sizing: border-box;
 }
 
+/* Inline inputs strip — replaces the legacy modal inputs dialog.
+   Renders just above the composer textarea; compact horizontal layout
+   that wraps when fields don't fit. Once chatHistory has messages
+   the strip becomes read-only (locked alongside the rest of the
+   preset) with a Hide toggle to reclaim space. */
+.chat-inputs-strip {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 8px 10px;
+  margin-bottom: 6px;
+  border: 1px solid #d8dfdd;
+  border-radius: 4px;
+  background: #fafbfa;
+  font-size: 13px;
+}
+
+.chat-inputs-strip.locked {
+  background: #f4f7f5;
+  border-style: dashed;
+}
+
+.chat-inputs-toggle {
+  align-self: flex-start;
+  padding: 2px 8px;
+  border: none;
+  background: transparent;
+  color: #65716c;
+  font-size: 12px;
+  cursor: pointer;
+  border-radius: 3px;
+}
+
+.chat-inputs-toggle:hover {
+  background: #eef2f0;
+}
+
+.chat-inputs-fields {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px 14px;
+  align-items: flex-start;
+}
+
+.chat-input-field {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 140px;
+  flex: 1 1 180px;
+}
+
+.chat-input-label {
+  font-size: 11px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: #65716c;
+}
+
+.chat-input-field.missing .chat-input-label {
+  color: #b04a3f;
+}
+
+.chat-input-field.missing .required-marker {
+  color: #b04a3f;
+}
+
+.chat-input-field.disabled {
+  pointer-events: none;
+  opacity: 0.7;
+}
+
 
 .prompt-editor {
   overflow-y: auto;

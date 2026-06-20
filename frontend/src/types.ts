@@ -483,6 +483,7 @@ export type ChatSession = {
   updated_at: string;
   context_items: ChatSessionContextItem[];
   messages: ChatSessionMessage[];
+  inputs?: Record<string, unknown>;
 };
 
 export type ChatSessionSummary = {
@@ -515,6 +516,7 @@ export type SaveChatSessionRequest = {
   pinned: boolean;
   context_items: ChatSessionContextItem[];
   messages: ChatSessionMessage[];
+  inputs?: Record<string, unknown>;
 };
 
 export type DirectoryEntry = {

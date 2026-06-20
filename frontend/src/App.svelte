@@ -168,15 +168,16 @@
   let chatPromptEntryId = "";
   let promptPickerOpen = false;
   let promptPickerSearch = "";
-  // Inputs dialog for chat-routed prompts that declare {{ input.* }} fields.
-  // Opens between picker selection and applying the preset; the user fills
-  // values, then we materialize the template and seed the chat.
-  let chatInputsDialogEntry: PromptEntrySummary | null = null;
-  let chatInputsDialogDrafts: Record<string, string> = {};
-  let chatInputsDialogError = "";
-  // Remember last-used inputs per prompt id so re-picking the same prompt
-  // prefills with the user's last values instead of resetting to defaults.
-  let chatInputsLastUsed: Record<string, Record<string, string>> = {};
+  // Per-input draft values for the active chat (keyed by input.name,
+  // JSON-encoded for entity_ref_list / context_pick the same way the
+  // legacy dialog did). Persists per chat session via
+  // SaveChatSessionRequest.inputs so reopening a half-configured chat
+  // restores the work. Coerced to typed values at first-send time
+  // when the template renders.
+  let chatInputDrafts: Record<string, string> = {};
+  // Hide the read-only input strip after first send to reclaim space.
+  // Only meaningful when chatHistory has messages (locked phase).
+  let chatInputsHidden = false;
   // Preview disclosure state. The text is computed on demand (composing the
   // context block requires async fetches) and invalidated when the user changes
   // assistant / brief / context / prompt.
@@ -1102,9 +1103,29 @@
 
   async function sendChat() {
     if (chatRunning) return;
+    if (missingRequiredInputs.length > 0) {
+      // UI should already have disabled the Send button — this is a
+      // belt-and-braces guard.
+      chatError = `Missing required: ${missingRequiredInputs.map((i) => i.label || i.name).join(", ")}.`;
+      return;
+    }
     const text = chatInput.trim();
     if (!text) return;
     chatError = null;
+    // First-send template render: the template was deferred from
+    // prompt-pick to right now so the user could edit inputs freely.
+    // After this, system_prompt is locked along with the rest of the
+    // preset (same lock semantics as today).
+    if (activePromptEntry && !chatSystemPrompt && (activePromptEntry.inputs ?? []).length > 0) {
+      chatRunning = true;
+      try {
+        const ok = await renderAndLockPromptTemplate(activePromptEntry);
+        if (!ok) return;
+        await persistActiveChat();
+      } finally {
+        chatRunning = false;
+      }
+    }
     const userTurn: ChatMessage = { role: "user", content: text };
     chatHistory = [...chatHistory, userTurn];
     const userIdx = chatHistory.length - 1;
@@ -1141,6 +1162,8 @@
     chatLastMeta = null;
     chatError = null;
     chatActivePromptEntry = null;
+    chatInputDrafts = {};
+    chatInputsHidden = false;
   }
 
   // --- Chat sessions (Phase 3) ---
@@ -1186,6 +1209,9 @@
         thinking: m.thinking ?? "",
         truncated: !!m.truncated,
       })),
+      // Per-prompt input drafts. Persisted so a half-configured chat
+      // (drafts typed but not yet sent) restores on reopen.
+      inputs: chatInputDrafts,
     };
   }
 
@@ -1217,6 +1243,15 @@
     chatError = null;
     chatActivePromptEntry = null;
     chatInput = "";
+    // Restore per-prompt input drafts. Strings only — the values
+    // were JSON-encoded by PromptInputField if they're list-shaped.
+    chatInputDrafts = {};
+    const raw = (session as unknown as { inputs?: Record<string, unknown> }).inputs ?? {};
+    for (const [name, value] of Object.entries(raw)) {
+      if (typeof value === "string") chatInputDrafts[name] = value;
+      else chatInputDrafts[name] = JSON.stringify(value);
+    }
+    chatInputsHidden = false;
   }
 
   async function persistActiveChat(): Promise<void> {
@@ -1334,41 +1369,30 @@
 
   async function pickPromptForChat(entry: PromptEntrySummary): Promise<void> {
     closeChatPromptPicker();
-    // If the prompt declares inputs, gather them in a modal before rendering
-    // the template. Prompts with no declared inputs apply immediately.
-    if ((entry.inputs ?? []).length > 0) {
-      openChatInputsDialog(entry);
-      return;
-    }
-    await applyChatPromptPreset(entry, {});
+    // No more dialog interruption — apply preset immediately, render the
+    // input fields inline in the composer. Template render is deferred
+    // to first-send so the user can edit drafts freely (system_prompt
+    // stays empty until then; once set, it's locked alongside the rest
+    // of the preset).
+    await applyChatPromptPreset(entry);
   }
 
-  function openChatInputsDialog(entry: PromptEntrySummary) {
+  function defaultDraftFor(input: PromptInputDefinition): string {
+    if (input.default !== undefined && input.default !== null) return String(input.default);
+    return input.type === "boolean" ? "false" : "";
+  }
+
+  function seedInputDraftsFromEntry(entry: PromptEntrySummary): Record<string, string> {
     const drafts: Record<string, string> = {};
-    const prior = chatInputsLastUsed[entry.id] ?? {};
-    for (const input of entry.inputs ?? []) {
-      const previous = prior[input.name];
-      if (previous !== undefined && previous !== null) {
-        drafts[input.name] = previous;
-      } else if (input.default !== undefined && input.default !== null) {
-        drafts[input.name] = String(input.default);
-      } else {
-        drafts[input.name] = input.type === "boolean" ? "false" : "";
-      }
-    }
-    chatInputsDialogDrafts = drafts;
-    chatInputsDialogError = "";
-    chatInputsDialogEntry = entry;
+    for (const input of entry.inputs ?? []) drafts[input.name] = defaultDraftFor(input);
+    return drafts;
   }
 
-  function cancelChatInputsDialog() {
-    chatInputsDialogEntry = null;
-    chatInputsDialogDrafts = {};
-    chatInputsDialogError = "";
-  }
-
-  function updateChatInputsDraft(name: string, value: string) {
-    chatInputsDialogDrafts = { ...chatInputsDialogDrafts, [name]: value };
+  function updateChatInputDraft(name: string, value: string) {
+    chatInputDrafts = { ...chatInputDrafts, [name]: value };
+    // Persist drafts so a half-configured chat survives a reload. Throttle
+    // isn't needed at typing speed (backend write is local-disk and small).
+    void persistActiveChat();
   }
 
   function coerceChatInputValue(raw: string, type: PromptInputDefinition["type"]): unknown {
@@ -1391,63 +1415,82 @@
     return trimmed;
   }
 
-  async function submitChatInputsDialog() {
-    const entry = chatInputsDialogEntry;
-    if (!entry) return;
-    const declared = entry.inputs ?? [];
-    const missing = declared.filter((input) => {
-      if (!input.required) return false;
-      const raw = chatInputsDialogDrafts[input.name];
-      if (input.type === "entity_ref_list" || input.type === "context_pick") {
-        try {
-          const parsed = JSON.parse(raw || "[]");
-          return !Array.isArray(parsed) || parsed.length === 0;
-        } catch {
-          return true;
-        }
+  // The inputs the active prompt declares (or [] for freeform chats).
+  // Used by the inline composer strip + first-send template render +
+  // required-fields gating.
+  $: activePromptEntry = chatPromptEntryId
+    ? promptEntries.find((p) => p.id === chatPromptEntryId) ?? null
+    : null;
+  $: declaredInputs = activePromptEntry?.inputs ?? [];
+  // Mirror of isActiveChatLocked() that Svelte's $: tracking can
+  // actually re-evaluate (function calls inside template expressions
+  // don't track their reads — see [[feedback-svelte5-reactivity-traps]]).
+  $: chatIsLocked = chatHistory.length > 0;
+
+  // Required-input check used to gate the Send button. Empty string for
+  // text-ish types or empty array for list-ish types means missing.
+  function isInputMissing(input: PromptInputDefinition, raw: string | undefined): boolean {
+    if (input.type === "entity_ref_list" || input.type === "context_pick") {
+      try {
+        const parsed = JSON.parse(raw || "[]");
+        return !Array.isArray(parsed) || parsed.length === 0;
+      } catch {
+        return true;
       }
-      return !raw?.trim();
-    });
-    if (missing.length > 0) {
-      chatInputsDialogError = `Missing required: ${missing.map((i) => i.label || i.name).join(", ")}.`;
-      return;
     }
-    const values: Record<string, unknown> = {};
-    for (const input of declared) {
-      const raw = chatInputsDialogDrafts[input.name] ?? "";
-      const coerced = coerceChatInputValue(raw, input.type);
-      if (coerced !== null && coerced !== "") values[input.name] = coerced;
-    }
-    // Remember for next time the user picks this prompt.
-    chatInputsLastUsed = { ...chatInputsLastUsed, [entry.id]: { ...chatInputsDialogDrafts } };
-    const target = entry;
-    chatInputsDialogEntry = null;
-    chatInputsDialogDrafts = {};
-    chatInputsDialogError = "";
-    await applyChatPromptPreset(target, values);
+    return !raw?.trim();
   }
+  $: missingRequiredInputs = declaredInputs.filter(
+    (i) => i.required && isInputMissing(i, chatInputDrafts[i.name]),
+  );
 
-  function handleChatInputsDialogKeydown(event: KeyboardEvent) {
-    if (event.key === "Escape") {
-      event.preventDefault();
-      cancelChatInputsDialog();
-    } else if (event.key === "Enter" && (event.ctrlKey || event.metaKey)) {
-      event.preventDefault();
-      void submitChatInputsDialog();
-    }
-  }
-
-  async function applyChatPromptPreset(
-    entry: PromptEntrySummary,
-    inputs: Record<string, unknown>,
-  ): Promise<void> {
+  async function applyChatPromptPreset(entry: PromptEntrySummary): Promise<void> {
     // Lock check: never replace the prompt of a chat with history. Start a new
     // chat instead. The backend would reject the save anyway — failing here is
     // a nicer UX.
     const mustCreateNew = !activeChatId || isActiveChatLocked();
+    const preferredAssistantId = preferredAssistantForPrompt(entry);
+    const seededDrafts = seedInputDraftsFromEntry(entry);
     try {
-      // Materialize the brief by rendering the template with the collected
-      // inputs (empty object if the prompt declared none).
+      invalidateChatPromptPreview();
+      if (mustCreateNew) {
+        await createNewChatSession({
+          promptEntryId: entry.id,
+          assistantId: preferredAssistantId || chatAssistantId,
+          systemPrompt: "",
+          title: entry.title,
+        });
+        // Apply drafts AFTER createNewChatSession so applyChatSession
+        // doesn't clobber them.
+        chatInputDrafts = seededDrafts;
+      } else {
+        chatPromptEntryId = entry.id;
+        if (preferredAssistantId) chatAssistantId = preferredAssistantId;
+        chatSystemPrompt = "";
+        chatHistory = [];
+        chatInputDrafts = seededDrafts;
+        activeChatTitle = entry.title;
+      }
+      chatInputsHidden = false;
+      await persistActiveChat();
+    } catch (e) {
+      chatError = `Couldn't apply prompt: ${(e as Error).message}`;
+    }
+  }
+
+  // First-send template render. Called from sendChat when the chat has
+  // a prompt but no rendered system_prompt yet — typically right before
+  // the first user message goes out. Renders the template with the
+  // current input drafts, sets system_prompt + any initial turns, and
+  // returns true on success. After this, the preset is locked.
+  async function renderAndLockPromptTemplate(entry: PromptEntrySummary): Promise<boolean> {
+    const inputs: Record<string, unknown> = {};
+    for (const input of entry.inputs ?? []) {
+      const raw = chatInputDrafts[input.name] ?? "";
+      const coerced = coerceChatInputValue(raw, input.type);
+      if (coerced !== null && coerced !== "") inputs[input.name] = coerced;
+    }
+    try {
       const preview = await api.aiPreview({
         template_source: entry.body_markdown,
         target_scene_id: "",
@@ -1456,43 +1499,19 @@
       });
       const messages = preview.messages ?? [];
       const flatten = (blocks: { text: string }[]) => blocks.map((b) => b.text).join("");
-      const systemBlocks = messages.filter((m) => m.role === "system").map((m) => flatten(m.blocks));
+      const systemBlocks = messages
+        .filter((m) => m.role === "system")
+        .map((m) => flatten(m.blocks));
       const initialTurns = messages
         .filter((m) => m.role === "user" || m.role === "assistant")
         .map((m) => ({ role: m.role as "user" | "assistant", content: flatten(m.blocks) }));
-      // Use the prompt's rendered system blocks verbatim. Critically, do NOT
-      // fall back to DEFAULT_CHAT_SYSTEM_PROMPT here — that overlay used to
-      // bleed the brainstorming-partner copy into every prompt that didn't
-      // declare its own {% role "system" %}, conflicting with the prompt's
-      // user-block instructions.
-      const brief = systemBlocks.join("\n\n");
-      const preferredAssistantId = preferredAssistantForPrompt(entry);
-
+      chatSystemPrompt = systemBlocks.join("\n\n");
+      if (initialTurns.length > 0) chatHistory = [...initialTurns];
       invalidateChatPromptPreview();
-      if (mustCreateNew) {
-        // Auto-name the new chat with the prompt's title so it's scannable in
-        // the Chats pane immediately.
-        await createNewChatSession({
-          promptEntryId: entry.id,
-          assistantId: preferredAssistantId || chatAssistantId,
-          systemPrompt: brief,
-          title: entry.title,
-        });
-        if (initialTurns.length > 0) {
-          chatHistory = initialTurns;
-        }
-        await persistActiveChat();
-      } else {
-        // Empty active chat — apply preset in-place.
-        chatPromptEntryId = entry.id;
-        chatSystemPrompt = brief;
-        if (preferredAssistantId) chatAssistantId = preferredAssistantId;
-        chatHistory = initialTurns;
-        activeChatTitle = entry.title;
-        await persistActiveChat();
-      }
+      return true;
     } catch (e) {
-      chatError = `Couldn't apply prompt: ${(e as Error).message}`;
+      chatError = `Couldn't render prompt template: ${(e as Error).message}`;
+      return false;
     }
   }
 
@@ -4531,6 +4550,42 @@
         <p class="preview-result-error">{chatError}</p>
       {/if}
 
+      {#if declaredInputs.length > 0}
+        <div class="chat-inputs-strip" class:locked={chatIsLocked} class:hidden={chatIsLocked && chatInputsHidden}>
+          {#if chatIsLocked}
+            <button
+              type="button"
+              class="chat-inputs-toggle"
+              aria-expanded={!chatInputsHidden}
+              on:click={() => (chatInputsHidden = !chatInputsHidden)}
+            >{chatInputsHidden ? "▸ Show inputs" : "▾ Hide inputs"}</button>
+          {/if}
+          {#if !chatIsLocked || !chatInputsHidden}
+            <div class="chat-inputs-fields">
+              {#each declaredInputs as input (input.name)}
+                {@const missing = input.required && isInputMissing(input, chatInputDrafts[input.name])}
+                <label class="chat-input-field" class:missing class:disabled={chatIsLocked}>
+                  <span class="chat-input-label">
+                    {input.label || input.name}{#if input.required}<span class="required-marker" title="Required"> *</span>{/if}
+                  </span>
+                  <PromptInputField
+                    input={input}
+                    value={chatInputDrafts[input.name] ?? ""}
+                    metadataSchema={metadataSchema}
+                    excludeId={null}
+                    ariaLabel={input.label || input.name}
+                    structure={structure}
+                    loreEntries={loreEntries}
+                    promptEntries={promptEntries}
+                    on:change={(event) => !chatIsLocked && updateChatInputDraft(input.name, event.detail.value)}
+                  />
+                </label>
+              {/each}
+            </div>
+          {/if}
+        </div>
+      {/if}
+
       <textarea
         class="chat-input"
         bind:value={chatInput}
@@ -4540,7 +4595,15 @@
       ></textarea>
       <div class="button-row chat-action-row">
         <button type="button" disabled={!chatHistory.length || chatRunning} on:click={clearChat}>Clear</button>
-        <button type="button" class="primary" disabled={!chatInput.trim() || chatRunning} on:click={sendChat}>
+        <button
+          type="button"
+          class="primary"
+          disabled={!chatInput.trim() || chatRunning || missingRequiredInputs.length > 0}
+          title={missingRequiredInputs.length > 0
+            ? `Fill required input${missingRequiredInputs.length > 1 ? "s" : ""}: ${missingRequiredInputs.map((i) => i.label || i.name).join(", ")}`
+            : ""}
+          on:click={sendChat}
+        >
           {chatRunning ? "Sending…" : "Send"}
         </button>
       </div>
@@ -4724,44 +4787,6 @@
     <section class="error-toast">{error}</section>
   {/if}
 
-  {#if chatInputsDialogEntry}
-    {@const declaredChatInputs = chatInputsDialogEntry.inputs ?? []}
-    <!-- svelte-ignore a11y_no_static_element_interactions -->
-    <div class="inputs-dialog-backdrop" role="presentation" on:mousedown|self={cancelChatInputsDialog}>
-      <div class="inputs-dialog" role="dialog" aria-label={`Apply ${chatInputsDialogEntry.title}`} aria-modal="true" tabindex="-1" on:keydown={handleChatInputsDialogKeydown}>
-        <header>
-          <strong>{chatInputsDialogEntry.title}</strong>
-          <small>Fill in the inputs declared by this prompt.</small>
-        </header>
-        <div class="inputs-dialog-fields">
-          {#each declaredChatInputs as input (input.name)}
-            <label>
-              {input.label || input.name}{#if input.required}<span class="required-marker"> *</span>{/if}
-              <PromptInputField
-                input={input}
-                value={chatInputsDialogDrafts[input.name] ?? ""}
-                metadataSchema={metadataSchema}
-                excludeId={null}
-                ariaLabel={input.label || input.name}
-                structure={structure}
-                loreEntries={loreEntries}
-                promptEntries={promptEntries}
-                on:change={(event) => updateChatInputsDraft(input.name, event.detail.value)}
-              />
-            </label>
-          {/each}
-        </div>
-        {#if chatInputsDialogError}
-          <p class="preview-result-error">{chatInputsDialogError}</p>
-        {/if}
-        <div class="inputs-dialog-actions">
-          <button type="button" on:click={cancelChatInputsDialog}>Cancel</button>
-          <button type="button" class="primary" on:click={submitChatInputsDialog}>Apply</button>
-        </div>
-        <small class="inputs-dialog-hint">Ctrl/⌘+Enter to apply · Esc to cancel</small>
-      </div>
-    </div>
-  {/if}
 </main>
 
 {#snippet renderTree(node: StructureNode, depth: number)}

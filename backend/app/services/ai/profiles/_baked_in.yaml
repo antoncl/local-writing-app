@@ -1,0 +1,111 @@
+# Fallback model catalogue per provider.
+#
+# Used when live discovery fails (offline, API down). For providers that
+# don't publish pricing via /v1/models (Anthropic, OpenAI), this file is
+# ALSO the source of tier + cost data even when discovery succeeds —
+# discovery only confirms which model ids exist; tier/cost gets merged
+# from here.
+#
+# Per [docs/ai-model-selection.md](../../../../../docs/ai-model-selection.md).
+#
+# Maintenance: when a new model drops, add a line here. When a model
+# sunsets, set `deprecated: true` and add `sunset_date` + `successor`.
+# Prices in USD per 1M tokens; check provider pricing pages before edits.
+# Last hand-audit: 2026-06-20.
+
+anthropic:
+  - id: claude-haiku-4-5-20251001
+    display_name: Haiku 4.5
+    context_window: 200000
+    tier: fast
+    capabilities: [vision, tools, caching]
+    cost_in_per_mtok: 0.8
+    cost_out_per_mtok: 4.0
+    cache_read_multiplier: 0.1
+  - id: claude-sonnet-4-6
+    display_name: Sonnet 4.6
+    context_window: 200000
+    tier: balanced
+    capabilities: [vision, tools, caching]
+    cost_in_per_mtok: 3.0
+    cost_out_per_mtok: 15.0
+    cache_read_multiplier: 0.1
+  - id: claude-opus-4-7
+    display_name: Opus 4.7
+    context_window: 200000
+    tier: premium
+    capabilities: [vision, tools, thinking, caching]
+    cost_in_per_mtok: 15.0
+    cost_out_per_mtok: 75.0
+    cache_read_multiplier: 0.1
+  - id: claude-opus-4-8
+    display_name: Opus 4.8
+    context_window: 200000
+    tier: premium
+    capabilities: [vision, tools, thinking, caching]
+    cost_in_per_mtok: 15.0
+    cost_out_per_mtok: 75.0
+    cache_read_multiplier: 0.1
+  - id: claude-fable-5
+    display_name: Fable 5
+    context_window: 200000
+    tier: reasoning
+    capabilities: [vision, tools, thinking, caching]
+    cost_in_per_mtok: 15.0
+    cost_out_per_mtok: 75.0
+    cache_read_multiplier: 0.1
+
+openai:
+  - id: gpt-4o-mini
+    display_name: GPT-4o mini
+    context_window: 128000
+    tier: fast
+    capabilities: [vision, tools, caching]
+    cost_in_per_mtok: 0.15
+    cost_out_per_mtok: 0.6
+    cache_read_multiplier: 0.5
+  - id: gpt-4o
+    display_name: GPT-4o
+    context_window: 128000
+    tier: balanced
+    capabilities: [vision, tools, caching]
+    cost_in_per_mtok: 2.5
+    cost_out_per_mtok: 10.0
+    cache_read_multiplier: 0.5
+  - id: o3-mini
+    display_name: o3-mini
+    context_window: 200000
+    tier: reasoning
+    capabilities: [tools, thinking, caching]
+    cost_in_per_mtok: 1.1
+    cost_out_per_mtok: 4.4
+    cache_read_multiplier: 0.5
+  - id: o1
+    display_name: o1
+    context_window: 200000
+    tier: premium
+    capabilities: [vision, thinking, caching]
+    cost_in_per_mtok: 15.0
+    cost_out_per_mtok: 60.0
+    cache_read_multiplier: 0.5
+
+# OpenRouter is intentionally sparse here — the live /api/v1/models
+# endpoint returns hundreds of models with rich metadata (pricing,
+# context, capabilities). We rely on live data and only fall back to
+# this tiny seed when offline.
+openrouter:
+  - id: anthropic/claude-sonnet-4.6
+    display_name: Sonnet 4.6 (via OpenRouter)
+    context_window: 200000
+    tier: balanced
+    capabilities: [vision, tools, caching]
+  - id: openai/gpt-4o
+    display_name: GPT-4o (via OpenRouter)
+    context_window: 128000
+    tier: balanced
+    capabilities: [vision, tools, caching]
+
+# Ollama is per-machine and discovered via /api/tags. No bake-in models —
+# the list is whatever the user has pulled locally. Keep the key here
+# (even if empty) so the YAML structure is uniform.
+ollama: []

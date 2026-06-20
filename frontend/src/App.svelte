@@ -4276,6 +4276,7 @@ The story so far:
         knownTags={knownTags}
         assistantEntries={assistantEntries}
         defaultAssistantId={defaultAssistantEntryId()}
+        availableScenes={flattenStructureScenes(structure?.root)}
         metadataReload={metadataReloadsByPane[editorPane.id] ?? null}
         titleReload={titleReloadsByPane[editorPane.id] ?? null}
         dirty={editorPane.dirty}

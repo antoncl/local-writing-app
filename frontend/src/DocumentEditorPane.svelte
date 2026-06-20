@@ -14,7 +14,7 @@
   import MetadataLongTextEditor from "./MetadataLongTextEditor.svelte";
   import ReferencePicker from "./ReferencePicker.svelte";
   import { api } from "./api";
-  import type { AssistantEntrySummary, Backlink, EditableDocument, EntryBodyLanguage, EntryMetadata, MetadataFieldDefinition, MetadataSchema, MetadataValue, PromptEntrySummary, PromptInputDefinition } from "./types";
+  import type { AIPreviewResponse, AssistantEntrySummary, Backlink, EditableDocument, EntryBodyLanguage, EntryMetadata, MetadataFieldDefinition, MetadataSchema, MetadataValue, PromptEntrySummary, PromptInputDefinition } from "./types";
 
   export let scene: EditableDocument | null = null;
   export let documentKind: "scene" | "lore" | "prompt" | "snippet" | "assistant" = "scene";
@@ -23,6 +23,9 @@
   export let knownTags: string[] = [];
   export let assistantEntries: AssistantEntrySummary[] = [];
   export let defaultAssistantId: string = "";
+  // Scenes available for the inline prompt-preview scene picker. The pane is
+  // host-agnostic — App.svelte derives this from its structure tree.
+  export let availableScenes: { id: string; title: string }[] = [];
   export let metadataReload: { token: number; metadata: EntryMetadata; status?: string; entryType: string } | null = null;
   export let titleReload: { token: number; title: string } | null = null;
   export let dirty = false;
@@ -205,6 +208,76 @@
   // "" means: use the user's default assistant (resolved server-side).
   let inputsDialogAssistantId: string = "";
   let lastInvokedAssistantId: string = "";
+
+  // --- Inline prompt preview (when editing a prompt entry) ---
+  // The author edits the Jinja2 template above, then expands this preview to
+  // render it against a chosen scene with optional inputs — without switching
+  // panes. Lazy: nothing fires until the details element is opened.
+  let promptPreviewSceneId = "";
+  let promptPreviewInputDrafts: Record<string, string> = {};
+  let promptPreviewResult: AIPreviewResponse | null = null;
+  let promptPreviewRunning = false;
+  let promptPreviewError: string | null = null;
+  let promptPreviewOpen = false;
+  $: promptPreviewDeclaredInputs =
+    documentKind === "prompt" && scene
+      ? effectivePromptInputs(scene as unknown as PromptEntrySummary)
+      : [];
+  // Reset preview when the underlying entry changes — stale results from a
+  // previous prompt would be confusing.
+  $: if (loadedSceneId) {
+    promptPreviewResult = null;
+    promptPreviewError = null;
+    promptPreviewInputDrafts = {};
+  }
+
+  function defaultPreviewSceneId(): string {
+    if (promptPreviewSceneId && availableScenes.some((s) => s.id === promptPreviewSceneId)) {
+      return promptPreviewSceneId;
+    }
+    return availableScenes[0]?.id ?? "";
+  }
+
+  async function runPromptPreview(): Promise<void> {
+    if (!scene || documentKind !== "prompt") return;
+    if (promptPreviewRunning) return;
+    promptPreviewRunning = true;
+    promptPreviewError = null;
+    try {
+      const inputs: Record<string, unknown> = {};
+      for (const declared of promptPreviewDeclaredInputs) {
+        const raw = promptPreviewInputDrafts[declared.name] ?? "";
+        const coerced = coerceInputValue(raw, declared.type);
+        if (coerced !== null && coerced !== "") inputs[declared.name] = coerced;
+      }
+      promptPreviewResult = await api.aiPreview({
+        // Use the current draft text — what's in the editor right now, even if
+        // not saved yet. rawBody is bound to the CodeEditor for prompts.
+        template_source: rawBody,
+        target_scene_id: promptPreviewSceneId || "",
+        inputs,
+        commit: false,
+      });
+    } catch (e) {
+      promptPreviewError = (e as Error).message || "Render failed.";
+      promptPreviewResult = null;
+    } finally {
+      promptPreviewRunning = false;
+    }
+  }
+
+  function handlePromptPreviewToggle(event: Event): void {
+    const details = event.currentTarget as HTMLDetailsElement | null;
+    promptPreviewOpen = !!details?.open;
+    if (!promptPreviewOpen) return;
+    // Seed the scene picker the first time the panel is opened.
+    if (!promptPreviewSceneId) promptPreviewSceneId = defaultPreviewSceneId();
+    // Auto-run on first open if we don't already have a result for the user
+    // to compare against. They can re-run via the button after edits.
+    if (!promptPreviewResult && !promptPreviewError) {
+      void runPromptPreview();
+    }
+  }
 
   $: slashCommands = editor && documentKind === "scene" ? getSlashCommands() : [];
   // slashFilterText is a plain `let` because TipTap mutates editor state in
@@ -2415,6 +2488,85 @@
       </div>
     {/if}
     <div bind:this={editorElement} class:hidden={rawBodyMode}></div>
+
+    {#if documentKind === "prompt" && scene}
+      <!-- Inline render preview. Lazy: nothing renders or runs until opened. -->
+      <details class="prompt-preview" on:toggle={handlePromptPreviewToggle}>
+        <summary>Preview rendering <small>· run this template against a scene</small></summary>
+        <div class="prompt-preview-controls">
+          <label class="prompt-preview-field">
+            Target scene
+            <select bind:value={promptPreviewSceneId}>
+              <option value="">(no scene)</option>
+              {#each availableScenes as s (s.id)}
+                <option value={s.id}>{s.title}</option>
+              {/each}
+            </select>
+          </label>
+          {#if promptPreviewDeclaredInputs.length > 0}
+            <div class="prompt-preview-inputs">
+              <div class="prompt-preview-inputs-heading">Inputs</div>
+              {#each promptPreviewDeclaredInputs as inputDef (inputDef.name)}
+                <label class="prompt-preview-field">
+                  {inputDef.label || inputDef.name}
+                  {#if inputDef.type === "long_text"}
+                    <textarea
+                      rows="3"
+                      placeholder={inputDef.placeholder || ""}
+                      bind:value={promptPreviewInputDrafts[inputDef.name]}
+                    ></textarea>
+                  {:else if inputDef.type === "number"}
+                    <input type="number" bind:value={promptPreviewInputDrafts[inputDef.name]} />
+                  {:else if inputDef.type === "boolean"}
+                    <input type="checkbox" on:change={(e) => promptPreviewInputDrafts[inputDef.name] = (e.currentTarget as HTMLInputElement).checked ? "true" : ""} checked={promptPreviewInputDrafts[inputDef.name] === "true"} />
+                  {:else}
+                    <input type="text" placeholder={inputDef.placeholder || ""} bind:value={promptPreviewInputDrafts[inputDef.name]} />
+                  {/if}
+                </label>
+              {/each}
+            </div>
+          {/if}
+          <div class="prompt-preview-actions">
+            <button type="button" class="primary" disabled={promptPreviewRunning} on:click={runPromptPreview}>
+              {promptPreviewRunning ? "Rendering…" : "Render"}
+            </button>
+          </div>
+        </div>
+
+        {#if promptPreviewError}
+          <p class="prompt-preview-error">{promptPreviewError}</p>
+        {/if}
+
+        {#if promptPreviewResult}
+          <div class="prompt-preview-result">
+            <div class="prompt-preview-meta">
+              <span>{promptPreviewResult.messages.length} message{promptPreviewResult.messages.length === 1 ? "" : "s"}</span>
+              <span>·</span>
+              <span>{promptPreviewResult.char_count} chars</span>
+            </div>
+            {#if promptPreviewResult.warnings.length > 0}
+              <div class="prompt-preview-warnings">
+                <strong>Warnings</strong>
+                {#each promptPreviewResult.warnings as warning}
+                  <p>{warning}</p>
+                {/each}
+              </div>
+            {/if}
+            {#each promptPreviewResult.messages as message}
+              <div class="prompt-preview-message prompt-preview-message-{message.role}">
+                <header class="prompt-preview-message-role">{message.role}</header>
+                {#each message.blocks as block}
+                  <pre class="prompt-preview-block">{block.text}</pre>
+                  {#if block.cache_break_after}
+                    <div class="prompt-preview-cache-break" aria-label="cache breakpoint">cache_break</div>
+                  {/if}
+                {/each}
+              </div>
+            {/each}
+          </div>
+        {/if}
+      </details>
+    {/if}
   </div>
 
   <footer class="status">

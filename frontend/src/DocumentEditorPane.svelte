@@ -2521,6 +2521,7 @@
     <!-- Vertical split: editor above gets the remaining space; this preview
          pane stays always-visible at the bottom with its own internal scroll.
          The handle between them drags to resize. -->
+    <!-- svelte-ignore a11y_no_noninteractive_element_interactions -->
     <div
       class="prompt-preview-resize"
       role="separator"

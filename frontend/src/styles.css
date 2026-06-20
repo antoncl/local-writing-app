@@ -1944,59 +1944,6 @@ h3 {
   font-size: 12px;
 }
 
-.preview-panel {
-  display: grid;
-  gap: 10px;
-  grid-template-rows: auto auto auto auto auto auto auto minmax(0, 1fr);
-  min-height: 0;
-}
-
-.preview-label {
-  display: grid;
-  gap: 4px;
-  font-size: 13px;
-  color: #4d5753;
-}
-
-.preview-row {
-  display: flex;
-  gap: 8px;
-  align-items: flex-end;
-}
-
-.flex-grow {
-  flex: 1 1 auto;
-  min-width: 0;
-}
-
-.preview-template {
-  min-height: 180px;
-  display: grid;
-}
-
-.preview-template :global(.cm-editor) {
-  min-height: 180px;
-}
-
-.preview-inputs {
-  min-height: 60px;
-  display: grid;
-}
-
-.preview-inputs :global(.cm-editor) {
-  min-height: 60px;
-}
-
-.preview-cursor {
-  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
-  font-size: 13px;
-  min-height: 44px;
-  padding: 6px 8px;
-  border: 1px solid #cbd6d2;
-  border-radius: 4px;
-  resize: vertical;
-}
-
 .preview-result-error {
   margin: 0;
   padding: 8px 10px;
@@ -2005,158 +1952,6 @@ h3 {
   border: 1px solid #e3b3a9;
   border-radius: 4px;
   font-size: 14px;
-}
-
-.preview-result {
-  display: grid;
-  gap: 10px;
-  overflow: auto;
-  min-height: 0;
-  padding: 4px 0;
-}
-
-.preview-meta {
-  display: flex;
-  gap: 6px;
-  font-size: 13px;
-  color: #4d5753;
-}
-
-.preview-warnings {
-  background: #fff7e1;
-  border: 1px solid #ddc28d;
-  border-radius: 4px;
-  padding: 8px 10px;
-  font-size: 13px;
-}
-
-.preview-warnings strong {
-  font-size: 13px;
-  color: #6b4d0c;
-}
-
-.preview-warnings p {
-  margin: 2px 0 0;
-  color: #6b4d0c;
-}
-
-.preview-message {
-  border: 1px solid #cbd6d2;
-  border-radius: 4px;
-  overflow: hidden;
-}
-
-.preview-message-role {
-  font-size: 12px;
-  font-weight: 600;
-  letter-spacing: 0.06em;
-  text-transform: uppercase;
-  padding: 5px 10px;
-  background: #ebf2ef;
-  color: #2a3431;
-}
-
-.preview-message-system .preview-message-role {
-  background: #e1eaf5;
-  color: #1f3656;
-}
-
-.preview-message-user .preview-message-role {
-  background: #ebf2ef;
-  color: #1d4d36;
-}
-
-.preview-message-assistant .preview-message-role {
-  background: #f4ecdf;
-  color: #6b4d0c;
-}
-
-.preview-block {
-  margin: 0;
-  padding: 8px 12px;
-  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
-  font-size: 14px;
-  line-height: 1.5;
-  white-space: pre-wrap;
-  background: #fff;
-  color: #2a3431;
-}
-
-.preview-cache-break {
-  font-size: 11px;
-  font-weight: 700;
-  letter-spacing: 0.1em;
-  text-transform: uppercase;
-  padding: 5px 10px;
-  background: linear-gradient(90deg, #cfe2dc, transparent 50%, #cfe2dc);
-  color: #1d4d36;
-  text-align: center;
-  border-top: 1px dashed #6f9d8b;
-  border-bottom: 1px dashed #6f9d8b;
-}
-
-.preview-actions {
-  align-items: center;
-  gap: 10px;
-}
-
-.inline-tokens {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  font-size: 12px;
-  color: #4d5753;
-}
-
-.inline-tokens input {
-  width: 80px;
-  font-size: 13px;
-  padding: 4px 6px;
-  border: 1px solid #cbd6d2;
-  border-radius: 4px;
-}
-
-.generate-result {
-  border: 1px solid #b6cdc1;
-  border-radius: 6px;
-  background: #f4f9f6;
-  overflow: hidden;
-}
-
-.generate-result-header {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 10px;
-  padding: 6px 10px;
-  background: #e1ede6;
-  border-bottom: 1px solid #b6cdc1;
-}
-
-.generate-result-title {
-  font-size: 12px;
-  font-weight: 600;
-  letter-spacing: 0.06em;
-  text-transform: uppercase;
-  color: #1d4d36;
-}
-
-.generate-result-meta {
-  font-size: 12px;
-  color: #4d5753;
-}
-
-.generate-result-content {
-  margin: 0;
-  padding: 10px 14px;
-  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
-  font-size: 15px;
-  line-height: 1.55;
-  white-space: pre-wrap;
-  overflow-wrap: anywhere;
-  word-break: break-word;
-  color: #2a3431;
-  max-height: none;
 }
 
 .ai-suggestion {
@@ -2774,6 +2569,97 @@ h3 {
 
 /* Per-entry inputs editor (DocumentEditorPane, prompt entries). Sits between
    the body editor and the resize handle / preview pane. */
+.prompt-cheatsheet {
+  padding: 6px 12px;
+  background: #f4f7f5;
+  border-top: 1px solid #cbd6d2;
+  font-size: 13px;
+}
+
+.prompt-cheatsheet > summary {
+  cursor: pointer;
+  user-select: none;
+  font-weight: 600;
+  color: #2a3431;
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
+}
+
+.prompt-cheatsheet-hint {
+  margin-left: auto;
+  font-size: 11px;
+  font-weight: 400;
+  color: #65716c;
+}
+
+.prompt-cheatsheet-hint > code {
+  background: #ffffff;
+  border: 1px solid #d8e0dd;
+  border-radius: 3px;
+  padding: 0 4px;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+}
+
+.prompt-cheatsheet-body {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 16px;
+  margin-top: 8px;
+}
+
+@media (max-width: 720px) {
+  .prompt-cheatsheet-body {
+    grid-template-columns: 1fr;
+  }
+}
+
+.prompt-cheatsheet-body h4 {
+  margin: 0 0 6px;
+  font-size: 12px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: #4d5753;
+}
+
+.prompt-cheatsheet-body dl {
+  margin: 0;
+  display: grid;
+  gap: 4px 8px;
+}
+
+.prompt-cheatsheet-body dt {
+  margin: 0;
+}
+
+.prompt-cheatsheet-body dt > code {
+  background: #ffffff;
+  border: 1px solid #d8e0dd;
+  border-radius: 3px;
+  padding: 0 4px;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 12px;
+  color: #1d4d36;
+}
+
+.prompt-cheatsheet-body dd {
+  margin: 0 0 6px;
+  color: #4d5753;
+  font-size: 12px;
+  line-height: 1.45;
+}
+
+.prompt-cheatsheet-body dd > code {
+  background: #ffffff;
+  border: 1px solid #d8e0dd;
+  border-radius: 3px;
+  padding: 0 3px;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 11px;
+  color: #1d4d36;
+}
+
 .entry-inputs-editor {
   padding: 6px 12px;
   background: #f4f7f5;

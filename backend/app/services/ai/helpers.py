@@ -96,12 +96,16 @@ class EntryRef:
         entry_id: str,
         *,
         depth: int = 0,
+        loaded: Any = None,
     ) -> None:
         self._project = project
         self._schema = schema
         self._id = str(entry_id)
         self._depth = depth
-        self._loaded: Any = None
+        # `loaded` lets a caller hand in the already-read entry (e.g. the
+        # build_preview path already holds the target Scene). Skips a wasted
+        # re-read on the first attribute access.
+        self._loaded: Any = loaded
 
     @property
     def id(self) -> str:
@@ -358,6 +362,16 @@ def _get_field(node: Any, key: str) -> Any:
 def _attr_or_item(obj: Any, key: str) -> Any:
     if obj is None:
         return None
+    if isinstance(obj, EntryRef):
+        # Drill to the underlying Pydantic model so helpers see the raw
+        # metadata dict and raw field values — EntryRef's attribute view
+        # wraps entity_ref fields as EntryRefs, which breaks helpers like
+        # pov() that need the raw lore id back. .id is preserved even when
+        # the underlying load fails.
+        loaded = obj._load()
+        if loaded is None:
+            return obj.id if key == "id" else None
+        return getattr(loaded, key, None)
     if isinstance(obj, dict):
         return obj.get(key)
     return getattr(obj, key, None)

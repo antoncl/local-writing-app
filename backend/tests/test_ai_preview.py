@@ -304,6 +304,42 @@ class PreviewEndpointTests(unittest.TestCase):
             "Write 250 words.",
         )
 
+    def test_scene_metadata_fields_accessible_as_shortcut(self) -> None:
+        # Scene is wrapped as an EntryRef in the template context so authors
+        # can write `scene.summary` instead of `scene.metadata.summary`.
+        response = self.client.post(
+            "/api/ai/preview",
+            json={
+                "template_source": (
+                    '{% role "user" %}Summary: {{ scene.summary }}{% endrole %}'
+                ),
+                "target_scene_id": self.scene_id,
+            },
+        )
+        self.assertEqual(response.status_code, 200, response.text)
+        self.assertEqual(
+            response.json()["messages"][0]["blocks"][0]["text"],
+            "Summary: Honor takes the Salamander into battle.",
+        )
+
+    def test_scene_entity_ref_field_auto_resolves(self) -> None:
+        # `scene.pov` is an entity_ref to a lore entry; the shortcut should
+        # return an EntryRef so `scene.pov.title` works in templates.
+        response = self.client.post(
+            "/api/ai/preview",
+            json={
+                "template_source": (
+                    '{% role "user" %}POV: {{ scene.pov.title }}{% endrole %}'
+                ),
+                "target_scene_id": self.scene_id,
+            },
+        )
+        self.assertEqual(response.status_code, 200, response.text)
+        self.assertEqual(
+            response.json()["messages"][0]["blocks"][0]["text"],
+            "POV: Honor Harrington",
+        )
+
     def test_text_before_and_text_after_are_available(self) -> None:
         response = self.client.post(
             "/api/ai/preview",

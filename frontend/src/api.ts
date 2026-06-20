@@ -3,7 +3,6 @@ import type {
   AIChatResponse,
   AIContextPresetResponse,
   AIGenerateRequest,
-  AIGenerateResponse,
   AIHealthResponse,
   AssistantEntry,
   AssistantEntryList,
@@ -230,12 +229,6 @@ export const api = {
   },
   aiChat(payload: AIChatRequest) {
     return request<AIChatResponse>("/ai/chat", {
-      method: "POST",
-      body: JSON.stringify(payload),
-    });
-  },
-  aiGenerate(payload: AIGenerateRequest) {
-    return request<AIGenerateResponse>("/ai/generate", {
       method: "POST",
       body: JSON.stringify(payload),
     });

@@ -16,7 +16,7 @@ from typing import Any
 
 from jinja2 import TemplateError
 
-from app.services.ai.helpers import create_environment_for_project
+from app.services.ai.helpers import EntryRef, create_environment_for_project
 from app.services.ai.sessions import AISession, default_registry
 from app.services.ai.templates import RenderedTemplate, render_template
 
@@ -106,6 +106,17 @@ def build_preview(
         project_info = project_service.current_project()
     except Exception:  # noqa: BLE001
         project_info = None
+
+    # Wrap the loaded scene as an EntryRef so templates can write
+    # `scene.pov.title` instead of `scene.metadata.pov.title`. The wrapper
+    # pre-fills `loaded=` so .title / .body_markdown don't trigger a re-read,
+    # and helpers reach the raw payload via _attr_or_item's EntryRef path.
+    if scene is not None:
+        try:
+            schema = project_service.read_metadata_schema()
+        except Exception:  # noqa: BLE001
+            schema = None
+        scene = EntryRef(project_service, schema, scene.id, loaded=scene)
 
     context = {
         "scene": scene,

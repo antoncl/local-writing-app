@@ -4,10 +4,8 @@
   import CodeEditor from "./CodeEditor.svelte";
   import DocumentEditorPane from "./DocumentEditorPane.svelte";
   import type {
-    AIGenerateResponse,
     AIHealthResponse,
     AIPolicy,
-    AIPreviewResponse,
     AssistantEntry,
     AssistantEntrySummary,
     Backlink,
@@ -35,7 +33,6 @@
     PromptContextStrategy,
     PromptEntryTypeExtras,
     PromptInputDefinition,
-    PromptInputType,
     ProjectInfo,
     ProjectValidation,
     SearchHit,
@@ -65,21 +62,6 @@
   };
   type NodeTypeTreeNode = NodeTypeOption & {
     children: NodeTypeTreeNode[];
-  };
-  type PromptInputDraft = {
-    name: string;
-    type: PromptInputType;
-    label: string;
-    defaultValue: string;
-    options: string;
-    required: boolean;
-    targetKind: "" | "scene" | "lore";
-    targetEntryType: string;
-    // True while the ID should auto-derive from the Label as the user types
-    // (mirrors the field-editor flow: name → slugified id). Flips to false
-    // when the user edits the ID directly, OR when an existing input is loaded
-    // (so we don't surprise-rename their established accessors).
-    nameDerived: boolean;
   };
   type PaneState = {
     title: string;
@@ -139,36 +121,6 @@
 
   let machineSettings: MachineSettingsView | null = null;
   let machineSettingsOpen = false;
-
-  // AI preview pane state.
-  const DEFAULT_PREVIEW_TEMPLATE = `{% role "system" %}
-You are an expert fiction writer.
-{% endrole %}
-
-{% role "user" %}
-{% if pov(scene) %}POV: {{ pov(scene).title }}{% endif %}
-
-{{ relevant_lore(scene) }}
-{% cache_break %}
-{% if scenes_before(scene) %}
-The story so far:
-{{ scenes_before(scene) }}
-{% endif %}
-{% endrole %}`;
-
-  let previewTemplate = DEFAULT_PREVIEW_TEMPLATE;
-  let previewTargetSceneId = "";
-  let previewSessionId = "";
-  let previewInputsJson = "{}";
-  let previewTextBefore = "";
-  let previewTextAfter = "";
-  let previewCommit = false;
-  let previewResult: AIPreviewResponse | null = null;
-  let previewError: string | null = null;
-  let previewRunning = false;
-  let generateResult: AIGenerateResponse | null = null;
-  let generateRunning = false;
-  let generateMaxTokens = 4096;
 
   // AI chat pane state.
   const DEFAULT_CHAT_SYSTEM_PROMPT =
@@ -276,7 +228,6 @@ The story so far:
   let promptSystemPrompt = "";
   let promptModelClass = "";
   let promptProviderPolicy: AIPolicy | "" = "";
-  let promptInputs: PromptInputDraft[] = [];
   let promptContextTargetKind = "";
   let promptContextTargetRequired = false;
   let promptScanSurface = "";
@@ -312,7 +263,6 @@ The story so far:
     chats: { title: "Chats", x: 330, y: 260, width: 320, height: 420, z: 3 },
     todo: { title: "TODO", x: 1126, y: 18, width: 310, height: 320, z: 4 },
     search: { title: "Search", x: 1126, y: 360, width: 310, height: 320, z: 5 },
-    preview: { title: "AI Preview", x: 720, y: 18, width: 480, height: 560, z: 6 },
     chat: { title: "AI Chat", x: 1210, y: 18, width: 420, height: 600, z: 7 },
   };
   let editorPanes: EditorPaneState[] = [];
@@ -933,86 +883,6 @@ The story so far:
       machineSettingsOpen = false;
       status = "Saved machine settings";
     });
-  }
-
-  function fillPreviewWithActiveScene() {
-    if (activeScene) {
-      previewTargetSceneId = activeScene.id;
-    }
-  }
-
-  function parsePreviewInputs(): { ok: true; inputs: Record<string, unknown> } | { ok: false; error: string } {
-    if (!previewInputsJson.trim()) return { ok: true, inputs: {} };
-    try {
-      const parsed = JSON.parse(previewInputsJson);
-      if (typeof parsed !== "object" || parsed === null || Array.isArray(parsed)) {
-        return { ok: false, error: "Inputs must be a JSON object." };
-      }
-      return { ok: true, inputs: parsed };
-    } catch (e) {
-      return { ok: false, error: `Inputs JSON parse error: ${(e as Error).message}` };
-    }
-  }
-
-  async function runAIPreview() {
-    previewError = null;
-    const parsed = parsePreviewInputs();
-    if (!parsed.ok) {
-      previewError = parsed.error;
-      return;
-    }
-    if (!previewTargetSceneId.trim()) {
-      previewError = "Target scene ID is required.";
-      return;
-    }
-    previewRunning = true;
-    try {
-      previewResult = await api.aiPreview({
-        template_source: previewTemplate,
-        target_scene_id: previewTargetSceneId.trim(),
-        session_id: previewSessionId.trim() || null,
-        inputs: parsed.inputs,
-        text_before: previewTextBefore,
-        text_after: previewTextAfter,
-        commit: previewCommit,
-      });
-    } catch (e) {
-      previewError = (e as Error).message;
-      previewResult = null;
-    } finally {
-      previewRunning = false;
-    }
-  }
-
-  async function runAIGenerate() {
-    previewError = null;
-    const parsed = parsePreviewInputs();
-    if (!parsed.ok) {
-      previewError = parsed.error;
-      return;
-    }
-    if (!previewTargetSceneId.trim()) {
-      previewError = "Target scene ID is required.";
-      return;
-    }
-    generateRunning = true;
-    try {
-      generateResult = await api.aiGenerate({
-        template_source: previewTemplate,
-        target_scene_id: previewTargetSceneId.trim(),
-        session_id: previewSessionId.trim() || null,
-        inputs: parsed.inputs,
-        text_before: previewTextBefore,
-        text_after: previewTextAfter,
-        commit: previewCommit,
-        max_tokens: generateMaxTokens,
-      });
-    } catch (e) {
-      previewError = (e as Error).message;
-      generateResult = null;
-    } finally {
-      generateRunning = false;
-    }
   }
 
   async function seedChatFromPromptEntry(
@@ -1978,7 +1848,6 @@ The story so far:
     promptSystemPrompt = "";
     promptModelClass = "";
     promptProviderPolicy = "";
-    promptInputs = [];
     promptContextTargetKind = "";
     promptContextTargetRequired = false;
     promptScanSurface = "";
@@ -1991,24 +1860,6 @@ The story so far:
     promptSystemPrompt = extras?.system_prompt ?? "";
     promptModelClass = extras?.model_class ?? "";
     promptProviderPolicy = extras?.provider_policy ?? "";
-    promptInputs = (extras?.inputs ?? []).map((input) => ({
-      name: input.name,
-      type: input.type,
-      label: input.label ?? "",
-      defaultValue: input.default === undefined || input.default === null ? "" : String(input.default),
-      options: (input.options ?? []).join(", "),
-      required: Boolean(input.required),
-      targetKind:
-        input.target?.kind === "scene" || input.target?.kind === "lore"
-          ? (input.target.kind as "scene" | "lore")
-          : "",
-      targetEntryType:
-        typeof input.target?.entry_type === "string" ? input.target.entry_type : "",
-      // Loaded existing input — freeze the ID so changing the Label later
-      // doesn't silently rename an accessor the author has already used in
-      // their template.
-      nameDerived: false,
-    }));
     const contextStrategy = extras?.context_strategy ?? null;
     promptContextTargetKind =
       typeof contextStrategy?.target?.kind === "string" ? (contextStrategy.target.kind as string) : "";
@@ -2101,79 +1952,7 @@ The story so far:
     focusPane("chats");
   }
 
-  function addPromptInput() {
-    promptInputs = [
-      ...promptInputs,
-      { name: "", type: "text", label: "", defaultValue: "", options: "", required: false, targetKind: "", targetEntryType: "", nameDerived: true },
-    ];
-  }
-
-  function updatePromptInputLabel(index: number, label: string) {
-    promptInputs = promptInputs.map((input, i) => {
-      if (i !== index) return input;
-      const next: PromptInputDraft = { ...input, label };
-      if (input.nameDerived) next.name = slugifyFieldId(label);
-      return next;
-    });
-  }
-
-  function updatePromptInputName(index: number, name: string) {
-    // Slugify on input so the field always shows the canonical accessor form
-    // (lowercase, underscore-separated). User typing "Genre" sees "genre".
-    promptInputs = promptInputs.map((input, i) =>
-      i === index ? { ...input, name: slugifyFieldId(name), nameDerived: false } : input,
-    );
-  }
-
-  function removePromptInput(index: number) {
-    promptInputs = promptInputs.filter((_, i) => i !== index);
-  }
-
-  function updatePromptInput(index: number, patch: Partial<PromptInputDraft>) {
-    promptInputs = promptInputs.map((input, i) => (i === index ? { ...input, ...patch } : input));
-  }
-
   function buildPromptExtras(): PromptEntryTypeExtras | null {
-    const inputs: PromptInputDefinition[] = promptInputs
-      .map((draft) => {
-        const name = draft.name.trim();
-        if (!name) return null;
-        const options = draft.options
-          .split(",")
-          .map((option) => option.trim())
-          .filter(Boolean);
-        const defaultRaw = draft.defaultValue.trim();
-        let defaultValue: PromptInputDefinition["default"];
-        if (defaultRaw === "") {
-          defaultValue = null;
-        } else if (draft.type === "number") {
-          const parsed = Number(defaultRaw);
-          defaultValue = Number.isFinite(parsed) ? parsed : defaultRaw;
-        } else if (draft.type === "boolean") {
-          defaultValue = defaultRaw.toLowerCase() === "true";
-        } else {
-          defaultValue = defaultRaw;
-        }
-        const isRefInput = draft.type === "entity_ref" || draft.type === "entity_ref_list";
-        const target = isRefInput && (draft.targetKind || draft.targetEntryType.trim())
-          ? {
-              ...(draft.targetKind ? { kind: draft.targetKind } : {}),
-              ...(draft.targetEntryType.trim() ? { entry_type: draft.targetEntryType.trim() } : {}),
-            }
-          : null;
-        const input: PromptInputDefinition = {
-          name,
-          type: draft.type,
-          ...(draft.label.trim() ? { label: draft.label.trim() } : {}),
-          ...(defaultValue === null ? {} : { default: defaultValue }),
-          ...(draft.type === "select" ? { options } : {}),
-          ...(draft.required ? { required: true } : {}),
-          ...(target ? { target } : {}),
-        };
-        return input;
-      })
-      .filter((value): value is PromptInputDefinition => value !== null);
-
     const scanSurface = promptScanSurface
       .split(",")
       .map((token) => token.trim())
@@ -2206,7 +1985,6 @@ The story so far:
       ...(promptSystemPrompt.trim() ? { system_prompt: promptSystemPrompt } : {}),
       ...(promptModelClass.trim() ? { model_class: promptModelClass.trim() } : {}),
       ...(promptProviderPolicy ? { provider_policy: promptProviderPolicy } : {}),
-      ...(inputs.length ? { inputs } : {}),
       ...(contextStrategy ? { context_strategy: contextStrategy } : {}),
     };
     return Object.keys(extras).length ? extras : null;
@@ -3896,75 +3674,6 @@ The story so far:
         </fieldset>
 
         <fieldset class="prompt-fieldset" disabled={schemaTypeReadonly}>
-          <legend>Inputs</legend>
-          <p class="muted">Form fields presented to the user before this prompt runs. Bound as <code>{`{{ input.<name> }}`}</code> in the template.</p>
-          {#each promptInputs as input, index (index)}
-            <div class="prompt-input-row">
-              <div class="prompt-input-grid">
-                <label>
-                  Label
-                  <input value={input.label} placeholder="Words to generate" on:input={(event) => updatePromptInputLabel(index, event.currentTarget.value)} />
-                </label>
-                <label>
-                  ID
-                  <input value={input.name} placeholder="words" on:input={(event) => updatePromptInputName(index, event.currentTarget.value)} />
-                  {#if input.name}
-                    <small class="prompt-input-accessor"><code>&lbrace;&lbrace; input.{input.name} &rbrace;&rbrace;</code></small>
-                  {/if}
-                </label>
-                <label>
-                  Type
-                  <select value={input.type} on:change={(event) => updatePromptInput(index, { type: event.currentTarget.value as PromptInputType })}>
-                    <option value="text">Text</option>
-                    <option value="long_text">Long Text</option>
-                    <option value="number">Number</option>
-                    <option value="boolean">Boolean</option>
-                    <option value="select">Select</option>
-                    <option value="entity_ref">Entity Reference</option>
-                    <option value="entity_ref_list">Entity Reference List</option>
-                  </select>
-                </label>
-                <label>
-                  Default
-                  <input value={input.defaultValue} placeholder="300" on:input={(event) => updatePromptInput(index, { defaultValue: event.currentTarget.value })} />
-                </label>
-                {#if input.type === "select"}
-                  <label class="prompt-input-options">
-                    Options
-                    <input value={input.options} placeholder="terse, neutral, warm" on:input={(event) => updatePromptInput(index, { options: event.currentTarget.value })} />
-                  </label>
-                {/if}
-                {#if input.type === "entity_ref" || input.type === "entity_ref_list"}
-                  <label>
-                    Target kind
-                    <select value={input.targetKind} on:change={(event) => updatePromptInput(index, { targetKind: event.currentTarget.value as "" | "scene" | "lore" })}>
-                      <option value="">Any</option>
-                      <option value="scene">Scene</option>
-                      <option value="lore">Lore</option>
-                    </select>
-                  </label>
-                  <label>
-                    Target entry type
-                    <input value={input.targetEntryType} placeholder="(optional, e.g. character)" on:input={(event) => updatePromptInput(index, { targetEntryType: event.currentTarget.value })} />
-                  </label>
-                {/if}
-                <label class="inline-check">
-                  <input type="checkbox" checked={input.required} on:change={(event) => updatePromptInput(index, { required: event.currentTarget.checked })} />
-                  Required
-                </label>
-              </div>
-              <button class="danger" type="button" on:click={() => removePromptInput(index)}>Remove</button>
-            </div>
-          {/each}
-          {#if promptInputs.length === 0}
-            <p class="muted">No inputs defined.</p>
-          {/if}
-          <div class="button-row">
-            <button type="button" on:click={addPromptInput}>+ Input</button>
-          </div>
-        </fieldset>
-
-        <fieldset class="prompt-fieldset" disabled={schemaTypeReadonly}>
           <legend>Context strategy</legend>
           <p class="muted">How the dispatcher picks the target node and what surrounding context it includes.</p>
           <div class="prompt-row">
@@ -4440,130 +4149,6 @@ The story so far:
       {/each}
     </div>
     <button class="pane-resize" type="button" aria-label="Resize Search pane" on:keydown={(event) => handlePaneResizeKeydown(event, "search")} on:mousedown={(event) => startPaneResize(event, "search")}></button>
-  </section>
-
-  <!-- svelte-ignore a11y_no_noninteractive_element_interactions -->
-  <section class:hidden-pane={!isPaneVisible("preview")} class="pane preview-pane" data-pane-id="preview" style={paneStyle("preview")} aria-label="AI Preview pane" on:mousedown={() => focusPane("preview")}>
-    <header class="pane-header" role="button" tabindex="0" aria-label="Move AI Preview pane" on:keydown={(event) => handlePaneHeaderKeydown(event, "preview")} on:mousedown={(event) => startPaneDrag(event, "preview")}>
-      <h2>AI Preview</h2>
-    </header>
-    <div class="pane-content preview-panel">
-      <label class="preview-label">
-        Template (Jinja2)
-        <div class="preview-template">
-          <CodeEditor bind:value={previewTemplate} language="jinja2" />
-        </div>
-      </label>
-
-      <div class="preview-row">
-        <label class="preview-label flex-grow">
-          Target scene ID
-          <input type="text" bind:value={previewTargetSceneId} placeholder="scene_xxxxx" />
-        </label>
-        <button type="button" disabled={!activeScene} on:click={fillPreviewWithActiveScene} title="Use focused editor's scene">Use Active</button>
-      </div>
-
-      <div class="preview-row">
-        <label class="preview-label flex-grow">
-          Session ID (optional)
-          <input type="text" bind:value={previewSessionId} placeholder="leave blank to disable session caching" />
-        </label>
-        <label class="inline-check">
-          <input type="checkbox" bind:checked={previewCommit} />
-          Commit
-        </label>
-      </div>
-
-      <label class="preview-label">
-        Inputs (JSON)
-        <div class="preview-inputs">
-          <CodeEditor bind:value={previewInputsJson} language="json" />
-        </div>
-      </label>
-
-      <div class="preview-row">
-        <label class="preview-label flex-grow">
-          text_before
-          <textarea class="preview-cursor" bind:value={previewTextBefore} spellcheck="false"></textarea>
-        </label>
-        <label class="preview-label flex-grow">
-          text_after
-          <textarea class="preview-cursor" bind:value={previewTextAfter} spellcheck="false"></textarea>
-        </label>
-      </div>
-
-      <div class="button-row preview-actions">
-        <button type="button" class="primary" disabled={previewRunning || !previewTargetSceneId.trim()} on:click={runAIPreview}>
-          {previewRunning ? "Rendering…" : "Preview"}
-        </button>
-        <button type="button" disabled={generateRunning || !previewTargetSceneId.trim()} on:click={runAIGenerate}>
-          {generateRunning ? "Generating…" : "Generate"}
-        </button>
-        <label class="inline-tokens">
-          max tokens
-          <input type="number" min="64" max="32768" step="64" bind:value={generateMaxTokens} />
-        </label>
-      </div>
-
-      {#if previewError}
-        <p class="preview-result-error">{previewError}</p>
-      {/if}
-
-      {#if generateResult}
-        <div class="generate-result">
-          <header class="generate-result-header">
-            <span class="generate-result-title">Generated</span>
-            <span class="generate-result-meta">
-              {generateResult.provider} · {generateResult.model} · {generateResult.latency_ms} ms · in: {generateResult.char_count} chars
-            </span>
-          </header>
-          {#if !generateResult.ok}
-            <p class="preview-result-error">{generateResult.error}</p>
-          {:else}
-            <pre class="generate-result-content">{generateResult.content}</pre>
-            {#if generateResult.truncated}
-              <p class="chat-truncated-banner">
-                Response cut off — hit max tokens. Increase the limit and re-run.
-              </p>
-            {/if}
-          {/if}
-        </div>
-      {/if}
-
-      {#if previewResult}
-        <div class="preview-result">
-          <div class="preview-meta">
-            <span>{previewResult.messages.length} message{previewResult.messages.length === 1 ? "" : "s"}</span>
-            <span>·</span>
-            <span>{previewResult.char_count} chars</span>
-            {#if previewResult.session_id}
-              <span>·</span>
-              <span>session: {previewResult.session_id}</span>
-            {/if}
-          </div>
-          {#if previewResult.warnings.length > 0}
-            <div class="preview-warnings">
-              <strong>Warnings</strong>
-              {#each previewResult.warnings as warning}
-                <p>{warning}</p>
-              {/each}
-            </div>
-          {/if}
-          {#each previewResult.messages as message}
-            <div class="preview-message preview-message-{message.role}">
-              <header class="preview-message-role">{message.role}</header>
-              {#each message.blocks as block, blockIndex}
-                <pre class="preview-block">{block.text}</pre>
-                {#if block.cache_break_after}
-                  <div class="preview-cache-break" aria-label="cache breakpoint">cache_break</div>
-                {/if}
-              {/each}
-            </div>
-          {/each}
-        </div>
-      {/if}
-    </div>
-    <button class="pane-resize" type="button" aria-label="Resize AI Preview pane" on:keydown={(event) => handlePaneResizeKeydown(event, "preview")} on:mousedown={(event) => startPaneResize(event, "preview")}></button>
   </section>
 
   <!-- svelte-ignore a11y_no_noninteractive_element_interactions -->

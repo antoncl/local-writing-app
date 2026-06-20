@@ -2759,6 +2759,51 @@
   </div>
 
   {#if documentKind === "prompt" && scene}
+    <details class="prompt-cheatsheet">
+      <summary>
+        Variables &amp; helpers
+        <small class="prompt-cheatsheet-hint">what you can reference in <code>&lbrace;&lbrace; … &rbrace;&rbrace;</code> and <code>&lbrace;% … %&rbrace;</code></small>
+      </summary>
+      <div class="prompt-cheatsheet-body">
+        <section>
+          <h4>Variables</h4>
+          <dl>
+            <dt><code>scene</code></dt>
+            <dd>The target scene. <code>scene.title</code>, <code>scene.body_markdown</code>, <code>scene.entry_type</code>, <code>scene.&lt;field&gt;</code> for any field on the scene (e.g. <code>scene.summary</code>, <code>scene.pov.title</code>). Entity-ref fields auto-resolve.</dd>
+            <dt><code>project</code> / <code>novel</code></dt>
+            <dd>Project info (title, root path, AI policy). Both names point to the same value.</dd>
+            <dt><code>text_before</code> / <code>text_after</code></dt>
+            <dd>Body markdown around the cursor in the current scene. Empty string when not dispatched from an editor.</dd>
+            <dt><code>selection</code></dt>
+            <dd>The selected text in the editor, or empty string.</dd>
+            <dt><code>date</code></dt>
+            <dd>Today as an ISO string (e.g. <code>2026-06-20</code>). Also <code>date.today</code> and <code>date.iso</code>.</dd>
+            <dt><code>input.&lt;id&gt;</code></dt>
+            <dd>The value of an input declared on this prompt (see the Inputs panel below).</dd>
+          </dl>
+        </section>
+        <section>
+          <h4>Helpers</h4>
+          <dl>
+            <dt><code>pov(scene)</code></dt>
+            <dd>POV character as an EntryRef, or <code>None</code> when the scene has no <code>pov</code> ref.</dd>
+            <dt><code>relevant_lore(scene, mode="implicit", partition="all")</code></dt>
+            <dd>XML <code>&lt;lore&gt;</code> block of entries in scope for the scene. Modes: <code>implicit</code>, <code>explicit</code>, <code>pinned_only</code>. Partitions (session-bound): <code>all</code>, <code>stable</code>, <code>volatile</code>.</dd>
+            <dt><code>scenes_before(scene)</code></dt>
+            <dd>XML <code>&lt;story_so_far&gt;</code> of prior scenes' summaries in manuscript order.</dd>
+            <dt><code>last_words(text, n)</code></dt>
+            <dd>Trailing <code>n</code> words of a string. Pure helper — useful for continuation prompts.</dd>
+            <dt><code>full_outline()</code></dt>
+            <dd>Nested list of outline nodes (<code>.title</code>, <code>.summary</code>, <code>.children</code>) — the whole book's shape.</dd>
+            <dt><code>full_text()</code></dt>
+            <dd>Every scene's prose in manuscript order (<code>.title</code>, <code>.body</code>). Heavy.</dd>
+            <dt><code>entry(id_or_ref)</code></dt>
+            <dd>Wrap a raw entry id as an EntryRef so you can walk its fields: <code>&lbrace;&lbrace; entry(scene.metadata.pov).home_place.title &rbrace;&rbrace;</code>.</dd>
+          </dl>
+        </section>
+      </div>
+    </details>
+
     <details class="entry-inputs-editor" bind:open={entryInputsExpanded}>
       <summary>
         Inputs <small>{entryInputDrafts.length}</small>

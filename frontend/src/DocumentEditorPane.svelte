@@ -18,7 +18,7 @@
   import type { AIPreviewResponse, AssistantEntrySummary, Backlink, EditableDocument, EntryBodyLanguage, EntryMetadata, MetadataFieldDefinition, MetadataSchema, MetadataValue, PromptEntrySummary, PromptInputDefinition } from "./types";
 
   export let scene: EditableDocument | null = null;
-  export let documentKind: "scene" | "lore" | "prompt" | "snippet" | "assistant" = "scene";
+  export let documentKind: "scene" | "lore" | "prompt" | "snippet" | "assistant" | "project" = "scene";
   export let metadataSchema: MetadataSchema | null = null;
   export let promptEntries: PromptEntrySummary[] = [];
   export let knownTags: string[] = [];

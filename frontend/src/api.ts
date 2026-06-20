@@ -26,7 +26,9 @@ import type {
   MetadataSchemaLayers,
   MetadataSchemaOverview,
   ProjectInfo,
+  ProjectNode,
   ProjectValidation,
+  SaveProjectNodeRequest,
   PromptEntry,
   PromptEntryList,
   ReferenceCandidatesResponse,
@@ -211,6 +213,21 @@ export const api = {
     return request<ProjectInfo>("/project/settings", {
       method: "PATCH",
       body: JSON.stringify(updates),
+    });
+  },
+  getProjectNode() {
+    return request<ProjectNode>("/project/node");
+  },
+  saveProjectNode(node: ProjectNode, bodyMarkdown: string) {
+    return request<ProjectNode>("/project/node", {
+      method: "PUT",
+      body: JSON.stringify({
+        title: node.title,
+        body_markdown: bodyMarkdown,
+        base_revision: node.revision,
+        entry_type: node.entry_type,
+        metadata: node.metadata,
+      } satisfies SaveProjectNodeRequest),
     });
   },
   getMachineSettings() {

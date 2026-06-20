@@ -35,6 +35,7 @@
     PromptEntryTypeExtras,
     PromptInputDefinition,
     ProjectInfo,
+    ProjectNode,
     RecentProject,
     ProjectValidation,
     SearchHit,
@@ -47,7 +48,7 @@
   type AppState =
     | { name: "needsProject" }
     | { name: "projectOpen"; project: ProjectInfo };
-  type DocumentRef = { type: "scene" | "lore" | "prompt" | "assistant"; id: string };
+  type DocumentRef = { type: "scene" | "lore" | "prompt" | "assistant" | "project"; id: string };
   type PaneId = "project" | "outline" | "lore" | "todo" | "search" | string;
   type MetadataReloadSignal = { token: number; metadata: EntryMetadata; status: string; entryType: string };
   type LoreEntryGroup = {
@@ -215,7 +216,7 @@
   let metadataSchema: MetadataSchema | null = null;
   let metadataSchemaOverview: MetadataSchemaOverview | null = null;
   let metadataSchemaLayers: MetadataSchemaLayer[] = [];
-  let schemaFieldKind: "scene" | "lore" | "prompt" | "assistant" = "scene";
+  let schemaFieldKind: "scene" | "lore" | "prompt" | "assistant" | "project" = "scene";
   let schemaFieldLayerId = "";
   let schemaFieldEntryType = "scene";
   let schemaFieldId = "";
@@ -234,7 +235,7 @@
   let schemaTypeLayerId = "";
   let schemaTypeId = "";
   let schemaTypeName = "";
-  let schemaTypeKind: "scene" | "lore" | "prompt" | "assistant" = "lore";
+  let schemaTypeKind: "scene" | "lore" | "prompt" | "assistant" | "project" = "lore";
   let schemaTypeParent = "";
   let schemaTypeAbstract = false;
   let schemaTypeReadonly = false;
@@ -329,7 +330,9 @@
         ? "prompt"
         : schemaSelectedEntryType?.kind === "assistant"
           ? "assistant"
-          : "scene";
+          : schemaSelectedEntryType?.kind === "project"
+            ? "project"
+            : "scene";
   $: schemaNodeTypeOptions = buildNodeTypeOptions(metadataSchema);
   $: schemaNodeTypeTree = buildNodeTypeTree(metadataSchema, schemaFieldKind);
   $: schemaContextHeading =
@@ -339,7 +342,9 @@
         ? "Prompt Types"
         : schemaFieldKind === "assistant"
           ? "Assistant Types"
-          : "Scene Types";
+          : schemaFieldKind === "project"
+            ? "Project Types"
+            : "Scene Types";
   $: concretePromptSubtypes = Object.entries(metadataSchema?.entry_types ?? {})
     .filter(([id, definition]) => definition.kind === "prompt" && !definition.abstract && id !== "prompt")
     .map(([id, definition]) => ({ id, label: definition.name || id }))
@@ -1789,7 +1794,7 @@
     return options;
   }
 
-  function buildNodeTypeTree(schema: MetadataSchema | null, kind: "scene" | "lore" | "prompt" | "assistant"): NodeTypeTreeNode[] {
+  function buildNodeTypeTree(schema: MetadataSchema | null, kind: "scene" | "lore" | "prompt" | "assistant" | "project"): NodeTypeTreeNode[] {
     const entryTypes = schema?.entry_types ?? {};
     const childrenByParent: Record<string, string[]> = {};
     const roots: string[] = [];
@@ -2005,13 +2010,13 @@
     }
   }
 
-  function defaultSchemaParentType(kind: "scene" | "lore" | "prompt" | "assistant") {
+  function defaultSchemaParentType(kind: "scene" | "lore" | "prompt" | "assistant" | "project") {
     if (kind === "lore" && metadataSchema?.entry_types.lore_entry) return "lore_entry";
     if (kind === "prompt" && metadataSchema?.entry_types.prompt) return "prompt";
     return "";
   }
 
-  function openSchemaForCustomData(entryType: string, kind: "scene" | "lore" | "prompt" | "assistant") {
+  function openSchemaForCustomData(entryType: string, kind: "scene" | "lore" | "prompt" | "assistant" | "project") {
     // Phase B: the entry editor's "Edit type…" button now opens ONLY the
     // per-type editor (schema_type pane) — not the schema/tree hierarchy
     // view. Tree access is the top bar's "Detail Types" button.
@@ -2041,16 +2046,16 @@
   // schemaFieldEntryType via a $: expression — to switch kinds we set
   // entryType to a default of the target kind. The cascade updates
   // schemaContextHeading and schemaNodeTypeTree on the next tick.
-  function switchSchemaKind(kind: "scene" | "lore" | "prompt" | "assistant") {
+  function switchSchemaKind(kind: "scene" | "lore" | "prompt" | "assistant" | "project") {
     schemaFieldEntryType = defaultSchemaEntryType(kind);
   }
 
-  function defaultSchemaEntryType(kind: "scene" | "lore" | "prompt" | "assistant") {
-    const fallback = kind === "lore" ? "lore_note" : kind === "prompt" ? "prompt" : kind === "assistant" ? "assistant" : "scene";
+  function defaultSchemaEntryType(kind: "scene" | "lore" | "prompt" | "assistant" | "project") {
+    const fallback = kind === "lore" ? "lore_note" : kind === "prompt" ? "prompt" : kind === "assistant" ? "assistant" : kind === "project" ? "project" : "scene";
     return Object.entries(metadataSchema?.entry_types ?? {}).find(([, definition]) => definition.kind === kind)?.[0] ?? fallback;
   }
 
-  function entryTypeIdsForField(fieldId: string, kind: "scene" | "lore" | "prompt" | "assistant") {
+  function entryTypeIdsForField(fieldId: string, kind: "scene" | "lore" | "prompt" | "assistant" | "project") {
     return Object.entries(metadataSchema?.entry_types ?? {})
       .filter(([, definition]) => definition.kind === kind && definition.fields.includes(fieldId))
       .map(([typeId]) => typeId);
@@ -2771,6 +2776,57 @@
     });
   }
 
+  async function openProjectNodeInEditorPane() {
+    // Singleton — focus the existing pane if it's already showing the
+    // project node, otherwise reuse a non-pinned pane (or open one).
+    const existingPane = editorPanes.find((pane) => pane.document?.type === "project");
+    if (existingPane) {
+      focusedEditorPaneId = existingPane.id;
+      focusPane(existingPane.id);
+      status = `Focused ${existingPane.scene?.title ?? "project"}`;
+      return;
+    }
+
+    await run(async () => {
+      let targetPane = editorPanes.find((pane) => !pane.pinned);
+      if (!targetPane) {
+        targetPane = addEditorPane();
+      }
+      if (targetPane.dirty) {
+        await saveEditorPane(targetPane.id);
+      }
+
+      const node = await api.getProjectNode();
+      // The editor pane uses Scene-compatible shape; project nodes have no
+      // `status` so default to "" and let the documentKind branch hide it.
+      const sceneShaped = {
+        ...node,
+        status: "",
+        source_layer_id: "",
+        source_layer_label: "",
+      } as unknown as Scene;
+      editorPanes = editorPanes.map((pane) =>
+        pane.id === targetPane!.id
+          ? {
+              ...pane,
+              document: { type: "project", id: node.id },
+              scene: sceneShaped,
+              dirty: false,
+              draftTitle: node.title,
+              draftMarkdown: node.body_markdown,
+              draftStatus: "",
+              draftEntryType: node.entry_type,
+              draftMetadata: cloneMetadata(node.metadata),
+              saving: false,
+            }
+          : pane,
+      );
+      focusedEditorPaneId = targetPane!.id;
+      focusPane(targetPane!.id);
+      status = `Loaded ${node.title}`;
+    });
+  }
+
   async function openSceneInEditorPane(sceneId: string) {
     const existingPane = editorPanes.find((pane) => pane.document?.type === "scene" && pane.document.id === sceneId);
     if (existingPane) {
@@ -3223,6 +3279,11 @@
         savedDocument = await api.savePromptEntry(draftDocument as PromptEntry, pane.draftMarkdown);
       } else if (documentKind === "assistant") {
         savedDocument = await api.saveAssistantEntry(draftDocument as AssistantEntry);
+      } else if (documentKind === "project") {
+        // Project node is the project.md singleton; round-trip via the
+        // dedicated endpoint and re-shape into the editor pane's
+        // Scene-compatible draft.
+        savedDocument = await api.saveProjectNode(draftDocument as ProjectNode, pane.draftMarkdown) as unknown as EditableDocument;
       } else {
         savedDocument = await api.saveScene(draftDocument as Scene, pane.draftMarkdown);
       }
@@ -3249,6 +3310,15 @@
         await refreshPromptEntries();
       } else if (documentKind === "assistant") {
         await refreshAssistantEntries();
+      } else if (documentKind === "project") {
+        // Title may have changed; reflect it on the top bar and pane.
+        projectTitle = savedDocument.title;
+        if (appState.name === "projectOpen") {
+          appState = {
+            ...appState,
+            project: { ...appState.project, title: savedDocument.title },
+          };
+        }
       } else {
         await refreshStructure();
         await refreshTodos();
@@ -3504,6 +3574,7 @@
   onOpenAssistants={openAssistantsPane}
   onOpenSettings={openMachineSettings}
   onOpenDetailTypes={openDetailTypesPane}
+  onOpenProjectNode={() => void openProjectNodeInEditorPane()}
 />
 
 <main class="workspace">
@@ -3735,6 +3806,13 @@
           class:active={schemaFieldKind === "assistant"}
           on:click={() => switchSchemaKind("assistant")}
         >Assistant</button>
+        <button
+          type="button"
+          role="tab"
+          aria-selected={schemaFieldKind === "project"}
+          class:active={schemaFieldKind === "project"}
+          on:click={() => switchSchemaKind("project")}
+        >Project</button>
       </div>
       <div class="schema-context-heading">
         <strong>{schemaContextHeading}</strong>

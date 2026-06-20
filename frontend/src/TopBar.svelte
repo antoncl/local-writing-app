@@ -13,6 +13,7 @@
   export let onOpenSettings: () => void = () => {};
   // Detail Types is project-scoped — disabled when no project is open.
   export let onOpenDetailTypes: () => void = () => {};
+  export let onOpenProjectNode: () => void = () => {};
   export let projectOpen: boolean = false;
 
   let switcherOpen = false;
@@ -132,6 +133,7 @@
   </div>
 
   <div class="actions">
+    <button type="button" class="action-button" disabled={!projectOpen} on:click={onOpenProjectNode}>Project</button>
     <button type="button" class="action-button" disabled={!projectOpen} on:click={onOpenDetailTypes}>Detail Types</button>
     <button type="button" class="action-button" on:click={onOpenAssistants}>Assistants</button>
     <button type="button" class="action-button icon-button" aria-label="Settings" title="Settings" on:click={onOpenSettings}>

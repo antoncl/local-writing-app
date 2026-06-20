@@ -258,6 +258,24 @@ export type ProviderCredentialsView = {
   ollama_host: string;
 };
 
+export type ProjectNode = {
+  id: string;
+  title: string;
+  body_markdown: string;
+  revision: string;
+  entry_type: string;
+  metadata: Record<string, unknown>;
+  computed_metadata: Record<string, unknown>;
+};
+
+export type SaveProjectNodeRequest = {
+  title: string;
+  body_markdown: string;
+  base_revision?: string | null;
+  entry_type?: string;
+  metadata?: Record<string, unknown>;
+};
+
 export type RecentProject = {
   path: string;
   title: string;

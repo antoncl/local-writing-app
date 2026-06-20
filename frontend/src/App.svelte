@@ -16,6 +16,7 @@
     Backlink,
     ChatMessage,
     ChatSession,
+    ChatSessionJournalEntry,
     ChatSessionMessage,
     ChatSessionSummary,
     DirectoryListing,
@@ -163,6 +164,15 @@
   let chatSessions: ChatSessionSummary[] = [];
   let activeChatId: string | null = null;
   let activeChatTitle = "Untitled chat";
+  // Cumulative journal — all lore entries the implicit-context expander
+  // has pulled into the active chat's cache. Mirrors the server-side
+  // ChatSession.journal so the user can always see what's in scope, not
+  // just per-turn additions. Append-only; refreshed from session.journal
+  // on load and extended after each send.
+  let activeChatJournal: ChatSessionJournalEntry[] = [];
+  // IDs added on the most recent send — used to briefly flash-highlight
+  // the fresh chips in the scope strip. Cleared after a short timeout.
+  let activeChatJournalFreshIds = new Set<string>();
   let activeChatPinned = false;
   // The locked prompt for the active chat. Empty string means "freeform" (no
   // prompt). Once chatHistory has messages, this becomes immutable for the
@@ -509,6 +519,8 @@
     activeChatId = null;
     activeChatTitle = "Untitled chat";
     activeChatPinned = false;
+    activeChatJournal = [];
+    activeChatJournalFreshIds = new Set();
     chatPromptEntryId = "";
     chatSessions = [];
     clearChat();
@@ -1074,10 +1086,12 @@
       } else if (ev.type === "done") {
         chatHistory[idx].truncated = ev.truncated;
         // journal_added is piggy-backed on the terminal done event. Attach
-        // to the assistant message so the audit chip strip renders, and so
-        // persistActiveChat round-trips it for next reload.
+        // to the assistant message so the per-turn audit chip strip
+        // renders, AND append to the cumulative scope strip near the
+        // composer with a brief flash-highlight on the new entries.
         if (Array.isArray(ev.journal_added) && ev.journal_added.length > 0) {
           chatHistory[idx].journal_added = ev.journal_added;
+          appendToActiveChatJournal(ev.journal_added);
         }
         chatHistory = chatHistory;
         chatLastMeta = { provider: ev.provider, model: ev.model, latency_ms: ev.latency_ms };
@@ -1182,6 +1196,28 @@
     chatInputsHidden = false;
   }
 
+  // Extend the cumulative scope strip after a chat send. Dedupes against
+  // existing entries (the backend already guarantees no overlap, but a
+  // belt-and-braces filter avoids visual surprises if anything races).
+  // Marks the fresh IDs for a brief flash-highlight then clears.
+  function appendToActiveChatJournal(added: ChatSessionJournalEntry[]): void {
+    if (!added.length) return;
+    const existingIds = new Set(activeChatJournal.map((e) => e.entry_id));
+    const fresh = added.filter((e) => !existingIds.has(e.entry_id));
+    if (!fresh.length) return;
+    activeChatJournal = [...activeChatJournal, ...fresh];
+    const freshIds = new Set(activeChatJournalFreshIds);
+    for (const e of fresh) freshIds.add(e.entry_id);
+    activeChatJournalFreshIds = freshIds;
+    // Fade the flash after a short window — long enough to notice,
+    // short enough not to linger.
+    setTimeout(() => {
+      const next = new Set(activeChatJournalFreshIds);
+      for (const e of fresh) next.delete(e.entry_id);
+      activeChatJournalFreshIds = next;
+    }, 2500);
+  }
+
   // --- Chat sessions (Phase 3) ---
 
   async function refreshChatSessions() {
@@ -1235,6 +1271,10 @@
     activeChatId = session.id;
     activeChatTitle = session.title || "Untitled chat";
     activeChatPinned = session.pinned;
+    // Hydrate the visible cumulative-journal strip from the persisted
+    // session. Newly-loaded chats don't flash any chips.
+    activeChatJournal = Array.isArray(session.journal) ? [...session.journal] : [];
+    activeChatJournalFreshIds = new Set();
     chatPromptEntryId = session.prompt_entry_id || "";
     chatAssistantId = session.assistant_id || "";
     // Materialised brief from the session. When a prompt is locked in, this
@@ -1572,6 +1612,8 @@
         activeChatId = null;
         activeChatTitle = "Untitled chat";
         activeChatPinned = false;
+        activeChatJournal = [];
+        activeChatJournalFreshIds = new Set();
         chatPromptEntryId = "";
         clearChat();
         chatSystemPrompt = DEFAULT_CHAT_SYSTEM_PROMPT;
@@ -4669,6 +4711,22 @@
               {/each}
             </div>
           {/if}
+        </div>
+      {/if}
+
+      {#if activeChatId && activeChatJournal.length > 0}
+        <div class="chat-journal-scope" aria-label="Lore entries currently in this chat's implicit-context cache">
+          <span class="chat-journal-scope-label">In context:</span>
+          {#each activeChatJournal as entry (entry.entry_id)}
+            <span
+              class="chat-journal-scope-chip"
+              class:chat-journal-scope-chip-fresh={activeChatJournalFreshIds.has(entry.entry_id)}
+              class:chat-journal-scope-chip-depth1={entry.source === "depth1_expansion"}
+              title={entry.source === "depth1_expansion"
+                ? `${entry.title} — pulled in because another entity's body mentions it`
+                : `${entry.title} — detected in a user message`}
+            >{entry.title || entry.entry_id}</span>
+          {/each}
         </div>
       {/if}
 

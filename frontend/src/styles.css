@@ -3393,6 +3393,54 @@ h3 {
   color: #4d5753;
 }
 
+/* Always-visible cumulative scope strip — sits just above the chat
+   composer so the user always sees what lore is currently in this
+   chat's implicit-context cache. Fresh additions (current turn) get a
+   brief flash-highlight that fades automatically. */
+.chat-journal-scope {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px 6px;
+  padding: 6px 10px;
+  margin-bottom: 6px;
+  background: rgba(0, 0, 0, 0.02);
+  border: 1px solid rgba(0, 0, 0, 0.06);
+  border-radius: 6px;
+  font-size: 12px;
+}
+
+.chat-journal-scope-label {
+  color: #6f7c78;
+  margin-right: 2px;
+  font-weight: 500;
+}
+
+.chat-journal-scope-chip {
+  display: inline-block;
+  padding: 1px 8px;
+  border-radius: 10px;
+  background: #e0ebe6;
+  border: 1px solid #b6cdc1;
+  color: #2a3431;
+  line-height: 1.5;
+  cursor: default;
+  /* Animatable so the fade-out transition is smooth. */
+  transition: background-color 1s ease-out, border-color 1s ease-out, box-shadow 1s ease-out;
+}
+
+.chat-journal-scope-chip-depth1 {
+  background: rgba(224, 235, 230, 0.55);
+  border-style: dashed;
+  color: #4d5753;
+}
+
+.chat-journal-scope-chip-fresh {
+  background: #ffe9b8;
+  border-color: #d9a93b;
+  box-shadow: 0 0 0 2px rgba(217, 169, 59, 0.18);
+}
+
 /* Implicit-context highlight + hover popup. Applied by the ProseMirror
    plugin in implicitContextHighlight.ts. Underlines lore-name matches
    inline as the user types so they see what the send-time expander

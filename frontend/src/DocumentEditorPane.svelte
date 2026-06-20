@@ -2930,6 +2930,24 @@
               <input type="checkbox" checked={draft.required} on:change={(e) => updateEntryInput(index, { required: (e.currentTarget as HTMLInputElement).checked })} />
               Required
             </label>
+            {#if draft.type === "context_pick"}
+              <!-- Per the UX review, "Allow multiple picks" gates
+                   invocation behaviour, not the source-content config.
+                   Lives next to Required on the input row so the
+                   ContextPickConfigEditor stays focused on what's
+                   pickable. Wire format keeps it in target. -->
+              <label class="prompt-input-required">
+                <input
+                  type="checkbox"
+                  checked={draft.contextPickConfig.multiple !== false}
+                  on:change={(e) => updateEntryInputContextPickConfig(index, {
+                    ...draft.contextPickConfig,
+                    multiple: (e.currentTarget as HTMLInputElement).checked,
+                  })}
+                />
+                Multiple
+              </label>
+            {/if}
             <button type="button" class="prompt-input-remove" title="Remove input" on:click={() => removeEntryInput(index)}>×</button>
           </div>
         </div>

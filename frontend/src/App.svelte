@@ -1657,14 +1657,47 @@
     }
   }
 
-  async function renameActiveChat(): Promise<void> {
+  // Inline chat rename — mirrors the structure-tree rename pattern
+  // (editingNodeId + editingTitle + Enter/Esc) so the user gets the
+  // same paradigm they already know. Only one chat is active at a
+  // time, so a boolean flag is enough (no per-id map needed).
+  let renamingActiveChat = false;
+  let chatTitleDraft = "";
+
+  function startActiveChatRename(): void {
     if (!activeChatId) return;
-    const proposed = window.prompt("Rename chat", activeChatTitle);
-    if (proposed === null) return;
-    const trimmed = proposed.trim();
+    chatTitleDraft = activeChatTitle;
+    renamingActiveChat = true;
+    setTimeout(() => {
+      const input = document.querySelector<HTMLInputElement>("[data-chat-rename-input]");
+      if (input) {
+        input.focus();
+        input.select();
+      }
+    }, 0);
+  }
+
+  function cancelActiveChatRename(): void {
+    renamingActiveChat = false;
+  }
+
+  async function commitActiveChatRename(): Promise<void> {
+    if (!renamingActiveChat || !activeChatId) return;
+    const trimmed = chatTitleDraft.trim();
+    renamingActiveChat = false;
     if (!trimmed || trimmed === activeChatTitle) return;
     activeChatTitle = trimmed;
     await persistActiveChat();
+  }
+
+  function handleChatRenameKeydown(event: KeyboardEvent): void {
+    if (event.key === "Enter") {
+      event.preventDefault();
+      void commitActiveChatRename();
+    } else if (event.key === "Escape") {
+      event.preventDefault();
+      cancelActiveChatRename();
+    }
   }
 
   function titleMatchesQuery(title: string, query: string): boolean {
@@ -4404,13 +4437,29 @@
   <!-- svelte-ignore a11y_no_noninteractive_element_interactions -->
   <section class:hidden-pane={!isPaneVisible("chat")} class="pane chat-pane" data-pane-id="chat" style={paneStyle("chat")} aria-label="AI Chat pane" on:mousedown={() => focusPane("chat")}>
     <header class="pane-header" role="button" tabindex="0" aria-label="Move AI Chat pane" on:keydown={(event) => handlePaneHeaderKeydown(event, "chat")} on:mousedown={(event) => startPaneDrag(event, "chat")}>
-      <h2>
-        {activeChatId ? activeChatTitle : "AI Chat"}
-      </h2>
-      {#if activeChatId}
+      {#if activeChatId && renamingActiveChat}
+        <input
+          class="chat-rename-input"
+          data-chat-rename-input
+          bind:value={chatTitleDraft}
+          on:keydown={handleChatRenameKeydown}
+          on:blur={() => void commitActiveChatRename()}
+          on:mousedown={(event) => event.stopPropagation()}
+          aria-label="Chat title"
+        />
+      {:else}
+        <h2
+          class:chat-title-clickable={!!activeChatId}
+          title={activeChatId ? "Double-click to rename" : undefined}
+          on:dblclick={() => activeChatId && startActiveChatRename()}
+        >
+          {activeChatId ? activeChatTitle : "AI Chat"}
+        </h2>
+      {/if}
+      {#if activeChatId && !renamingActiveChat}
         <div class="pane-header-actions">
           <button class="pin-button" type="button" title={activeChatPinned ? "Unpin" : "Pin"} on:mousedown={(event) => event.stopPropagation()} on:click={() => toggleActiveChatPin()}>{activeChatPinned ? "★" : "☆"}</button>
-          <button class="pin-button" type="button" title="Rename chat" on:mousedown={(event) => event.stopPropagation()} on:click={() => renameActiveChat()}>Rename</button>
+          <button class="pin-button" type="button" title="Rename chat" on:mousedown={(event) => event.stopPropagation()} on:click={() => startActiveChatRename()}>Rename</button>
         </div>
       {/if}
     </header>

@@ -36,7 +36,6 @@
   type Category = "scene" | "lore" | "snippet" | "assistant";
 
   let open = false;
-  let category: Category | null = null;
   let search = "";
 
   // Allowed presets per the author config — empty means no presets shown.
@@ -55,13 +54,6 @@
       title: "Full Novel Text",
       tooltip: "Include every scene's prose in manuscript order. Can be large.",
     },
-  };
-
-  const KIND_LABELS: Record<Category, string> = {
-    scene: "Scenes",
-    lore: "Lore Entries",
-    snippet: "Snippets",
-    assistant: "Assistants",
   };
 
   function refKey(ref: ContextPickRef): string {
@@ -87,30 +79,11 @@
 
   function toggle() {
     open = !open;
-    if (open) {
-      search = "";
-      // Skip the category-picker screen when there's exactly one source.
-      // A picker that allows only scenes (or only lore) wastes a click
-      // on a one-option menu; open straight to the leaf. Preset-only
-      // configs already only have one option, so the same rule applies.
-      const oneKind = allowedKinds.length === 1 && allowedPresets.length === 0;
-      category = oneKind ? allowedKinds[0] : null;
-    }
+    if (open) search = "";
   }
 
   function close() {
     open = false;
-    category = null;
-    search = "";
-  }
-
-  function openCategory(c: Category) {
-    category = c;
-    search = "";
-  }
-
-  function backToCategories() {
-    category = null;
     search = "";
   }
 
@@ -146,19 +119,8 @@
     return out;
   }
 
-  $: allScenesUnfiltered = structure ? collectAllScenes(structure.root) : 0;
   $: allScenes = structure ? flattenScenes(structure.root) : [];
   $: filteredScenes = filterByTitle(allScenes, search);
-
-  // Counts the raw scene total irrespective of sub-type filter, so the
-  // empty-state copy can distinguish "no scenes in project" from "filter
-  // excluded everything." Returns just a number; we don't need the list.
-  function collectAllScenes(node: StructureNode | undefined): number {
-    if (!node) return 0;
-    let count = node.kind === "scene" ? 1 : 0;
-    for (const child of node.children ?? []) count += collectAllScenes(child);
-    return count;
-  }
 
   function filterByTitle<T extends { title: string }>(items: T[], q: string): T[] {
     if (!q.trim()) return items;
@@ -196,10 +158,6 @@
     }),
     search,
   );
-  // Counts irrespective of filter, for empty-state copy that distinguishes
-  // "no items in project" from "current filter excluded everything."
-  $: rawLoreCount = loreEntries.length;
-  $: rawSnippetCount = promptEntries.length;
 
   // Chip text resolution. Show the entry-type's display name from the
   // schema when known; fall back to a sensible singular for the kind.
@@ -220,10 +178,84 @@
     return displayName ?? subType ?? KIND_LABEL_SINGULAR[ref.kind] ?? ref.kind;
   }
 
-  // True when the picker was opened straight into a leaf category
-  // because the config only allows one source. Suppresses the "‹ Back"
-  // button — there's no category screen to go back to.
-  $: singleSourceMode = allowedKinds.length === 1 && allowedPresets.length === 0;
+  // Compute item tag (the small "Scene" / "Character" / "Preset" label
+  // shown alongside a result in the unified menu). Mirrors chipLabel
+  // for selected items, but for a tree item we have the full ref-shape
+  // info ready at render time.
+  function itemTag(kind: ContextPickRef["kind"], entryType?: string): string {
+    if (kind === "preset") return KIND_LABEL_SINGULAR.preset;
+    const sub = entryType && entryType !== kind ? entryType : null;
+    const displayName = sub ? metadataSchema?.entry_types[sub]?.name : null;
+    return displayName ?? sub ?? KIND_LABEL_SINGULAR[kind] ?? kind;
+  }
+
+  // Aggregate visible groups for the unified menu. Each group renders
+  // as a collapsible <details> with a header and a flat item list.
+  // Groups with no items (after the search filter and config gating)
+  // are dropped entirely.
+  $: visibleGroups = (() => {
+    type Group = { id: string; label: string; items: Array<{ ref: ContextPickRef; tag: string }> };
+    const groups: Group[] = [];
+
+    const matchingPresets = allowedPresets.filter((id) => {
+      const meta = PRESET_META[id] ?? { title: id, tooltip: "" };
+      if (!search.trim()) return true;
+      return meta.title.toLowerCase().includes(search.toLowerCase());
+    });
+    if (matchingPresets.length > 0) {
+      groups.push({
+        id: "presets",
+        label: "Presets",
+        items: matchingPresets.map((presetId) => {
+          const meta = PRESET_META[presetId] ?? { title: presetId, tooltip: "" };
+          return {
+            ref: { id: presetId, kind: "preset" as const, title: meta.title },
+            tag: itemTag("preset"),
+          };
+        }),
+      });
+    }
+
+    if (allowedKinds.includes("scene") && filteredScenes.length > 0) {
+      groups.push({
+        id: "scenes",
+        label: "Scenes",
+        items: filteredScenes.map((s) => ({
+          ref: { id: s.id, kind: "scene" as const, title: s.title, entry_type: s.entry_type },
+          tag: itemTag("scene", s.entry_type),
+        })),
+      });
+    }
+
+    if (allowedKinds.includes("lore")) {
+      const loreItems = loreGroups.flatMap((g) =>
+        g.entries.map((entry) => ({
+          ref: { id: entry.id, kind: "lore" as const, title: entry.title, entry_type: entry.entry_type },
+          tag: itemTag("lore", entry.entry_type),
+        })),
+      );
+      if (loreItems.length > 0) {
+        groups.push({ id: "lore", label: "Lore", items: loreItems });
+      }
+    }
+
+    if (allowedKinds.includes("snippet") && snippetEntries.length > 0) {
+      groups.push({
+        id: "snippets",
+        label: "Snippets",
+        items: snippetEntries.map((s) => ({
+          ref: { id: s.id, kind: "snippet" as const, title: s.title, entry_type: s.entry_type },
+          tag: itemTag("snippet", s.entry_type),
+        })),
+      });
+    }
+
+    return groups;
+  })();
+
+  $: hasAnyConfigured =
+    allowedPresets.length > 0 || allowedKinds.length > 0;
+  $: hasAnyResults = visibleGroups.length > 0;
 </script>
 
 <svelte:document on:mousedown={handleDocumentClick} on:keydown={handleKeydown} />
@@ -258,97 +290,45 @@
 
     {#if open}
       <div class="ctx-menu" role="menu">
-        {#if category === null}
-          {#if allowedPresets.length > 0}
-            <div class="ctx-group-heading">Presets</div>
-            {#each allowedPresets as presetId (presetId)}
-              {@const meta = PRESET_META[presetId] ?? { title: presetId, tooltip: "" }}
-              <button
-                type="button"
-                title={meta.tooltip}
-                on:click={() => add({ id: presetId, kind: "preset", title: meta.title })}
-              >{meta.title}</button>
-            {/each}
-          {/if}
-          {#if allowedKinds.length > 0}
-            <div class="ctx-group-heading">Browse</div>
-            {#each allowedKinds as kind (kind)}
-              <button type="button" on:click={() => openCategory(kind)}>
-                {KIND_LABELS[kind]} ›
-              </button>
-            {/each}
-          {/if}
-          {#if allowedPresets.length === 0 && allowedKinds.length === 0}
-            <p class="ctx-muted">No content sources configured for this picker.</p>
-          {/if}
-        {:else}
-          {#if !singleSourceMode}
-            <button type="button" class="ctx-back" on:click={backToCategories}>‹ Back</button>
-          {/if}
-          <input
-            class="ctx-search"
-            type="text"
-            placeholder="Search…"
-            bind:value={search}
-          />
-          {#if category === "scene"}
-            {#each filteredScenes as scene (scene.id)}
-              {@const picked = isPicked({ id: scene.id, kind: "scene", title: scene.title })}
-              <button
-                type="button"
-                disabled={picked}
-                title={picked ? "Already added" : ""}
-                on:click={() => add({ id: scene.id, kind: "scene", title: scene.title, entry_type: scene.entry_type })}
-              >{scene.title}</button>
-            {/each}
-            {#if filteredScenes.length === 0}
-              <p class="ctx-muted">
-                {#if search}No scenes match "{search}".
-                {:else if allScenesUnfiltered > 0}No scenes match this picker's sub-type filter.
-                {:else}No scenes in this project yet.
-                {/if}
-              </p>
+        <input
+          class="ctx-search"
+          type="text"
+          placeholder="Search…"
+          bind:value={search}
+          autofocus
+        />
+        {#if !hasAnyConfigured}
+          <p class="ctx-muted">No content sources configured for this picker.</p>
+        {:else if !hasAnyResults}
+          <p class="ctx-muted">
+            {#if search}
+              No matches for "{search}".
+            {:else}
+              No pickable items in this project yet.
             {/if}
-          {:else if category === "lore"}
-            {#each loreGroups as group (group.typeId)}
-              <div class="ctx-group-heading">{group.typeName}</div>
-              {#each group.entries as entry (entry.id)}
-                {@const picked = isPicked({ id: entry.id, kind: "lore", title: entry.title })}
+          </p>
+        {:else}
+          {#each visibleGroups as group (group.id)}
+            <details open class="ctx-group">
+              <summary>
+                {group.label}
+                <small>· {group.items.length}</small>
+              </summary>
+              {#each group.items as item}
+                {@const picked = isPicked(item.ref)}
                 <button
                   type="button"
+                  class="ctx-item"
                   disabled={picked}
                   title={picked ? "Already added" : ""}
-                  on:click={() => add({ id: entry.id, kind: "lore", title: entry.title, entry_type: entry.entry_type })}
-                >{entry.title}</button>
+                  on:click={() => add(item.ref)}
+                >
+                  <span class="ctx-item-tag">{item.tag}</span>
+                  <span class="ctx-item-title">{item.ref.title}</span>
+                </button>
               {/each}
-            {/each}
-            {#if loreGroups.length === 0}
-              <p class="ctx-muted">
-                {#if search}No lore entries match "{search}".
-                {:else if rawLoreCount > 0}No lore entries match this picker's sub-type filter.
-                {:else}No lore entries in this project yet.
-                {/if}
-              </p>
-            {/if}
-          {:else if category === "snippet"}
-            {#each snippetEntries as snippet (snippet.id)}
-              {@const picked = isPicked({ id: snippet.id, kind: "snippet", title: snippet.title })}
-              <button
-                type="button"
-                disabled={picked}
-                title={picked ? "Already added" : ""}
-                on:click={() => add({ id: snippet.id, kind: "snippet", title: snippet.title, entry_type: snippet.entry_type })}
-              >{snippet.title}</button>
-            {/each}
-            {#if snippetEntries.length === 0}
-              <p class="ctx-muted">
-                {#if search}No snippets match "{search}".
-                {:else if rawSnippetCount > 0}No snippets match this picker's sub-type filter.
-                {:else}No snippets in this project yet.
-                {/if}
-              </p>
-            {/if}
-          {/if}
+            </details>
+          {/each}
         {/if}
       </div>
     {/if}
@@ -463,26 +443,79 @@
     cursor: default;
   }
 
-  .ctx-back {
-    color: #65716c;
-    font-size: 12px !important;
-  }
-
   .ctx-search {
     padding: 4px 8px;
     border: 1px solid #cbd6d2;
     border-radius: 4px;
     font-size: 13px;
-    margin: 2px 0;
+    margin: 2px 0 4px;
   }
 
-  .ctx-group-heading {
-    padding: 6px 8px 2px;
+  .ctx-group {
+    display: flex;
+    flex-direction: column;
+    gap: 0;
+  }
+
+  .ctx-group > summary {
+    list-style: none;
+    cursor: pointer;
+    padding: 4px 8px;
     font-size: 11px;
     text-transform: uppercase;
     letter-spacing: 0.04em;
-    color: #65716c;
+    color: #4d5753;
     font-weight: 600;
+    user-select: none;
+  }
+
+  .ctx-group > summary::-webkit-details-marker {
+    display: none;
+  }
+
+  .ctx-group > summary::before {
+    content: "▾ ";
+    display: inline-block;
+    width: 12px;
+    color: #65716c;
+    transition: transform 0.1s;
+  }
+
+  .ctx-group:not([open]) > summary::before {
+    content: "▸ ";
+  }
+
+  .ctx-group > summary small {
+    color: #65716c;
+    font-weight: 400;
+    text-transform: none;
+    letter-spacing: 0;
+  }
+
+  .ctx-item {
+    display: grid !important;
+    grid-template-columns: minmax(70px, max-content) 1fr;
+    align-items: center;
+    gap: 8px;
+  }
+
+  .ctx-item-tag {
+    font-size: 10px;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+    color: #65716c;
+    background: #eef2f0;
+    border-radius: 3px;
+    padding: 1px 5px;
+    text-align: center;
+    line-height: 1.4;
+  }
+
+  .ctx-item-title {
+    font-size: 13px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
   }
 
   .ctx-muted {

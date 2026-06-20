@@ -48,6 +48,7 @@ from app.models import (
     MetadataSchemaOverview,
     MoveMetadataFieldRequest,
     ProjectInfo,
+    ProjectNode,
     PromptEntry,
     PromptEntryList,
     PromptInputDefinition,
@@ -60,6 +61,7 @@ from app.models import (
     RenameMetadataFieldRequest,
     SaveLoreEntryRequest,
     SavePromptEntryRequest,
+    SaveProjectNodeRequest,
     SaveSceneRequest,
     Scene,
     SearchHit,
@@ -238,6 +240,19 @@ DEFAULT_METADATA_SCHEMA: dict[str, Any] = {
             ],
             "has_body": False,
         },
+        "project": {
+            "name": "Project",
+            "kind": "project",
+            "fields": [
+                "author",
+                "language",
+                "genre",
+                "narrative_pov",
+                "target_word_count",
+                "series_number",
+            ],
+            "has_body": True,
+        },
     },
     "fields": {
         "status": {
@@ -303,6 +318,12 @@ DEFAULT_METADATA_SCHEMA: dict[str, Any] = {
             "type": "entity_ref",
             "target": {"kind": "assistant"},
         },
+        "author": {"name": "Author", "type": "text"},
+        "language": {"name": "Language", "type": "text"},
+        "genre": {"name": "Genre", "type": "text"},
+        "narrative_pov": {"name": "Narrative POV", "type": "text"},
+        "target_word_count": {"name": "Target word count", "type": "number"},
+        "series_number": {"name": "Series number", "type": "number"},
     },
 }
 
@@ -331,6 +352,11 @@ class ProjectService:
             (root / folder).mkdir(exist_ok=True)
 
         self._write_yaml(root / "project.yaml", self._new_project_manifest(title, root, base_folder))
+        # Project node singleton — book metadata, blurb, etc. live here.
+        self._write_project_node_file(
+            root / "project.md",
+            ProjectNode(id="project", title=title, body_markdown="", entry_type="project", metadata={}),
+        )
         self._write_yaml(root / "metadata.schema.yaml", self._empty_metadata_schema())
         self._write_yaml(root / "tags.yaml", {"tags": []})
         initial_scene = Scene(
@@ -782,9 +808,9 @@ class ProjectService:
         entry_type_id = request.entry_type_id.strip()
         if not re.fullmatch(r"[A-Za-z][A-Za-z0-9_]*", entry_type_id):
             raise ProjectServiceError("Node type ID must start with a letter and contain only letters, numbers, and underscores.", 422)
-        if request.entry_type.kind not in {"scene", "lore", "prompt", "assistant"}:
+        if request.entry_type.kind not in {"scene", "lore", "prompt", "assistant", "project"}:
             raise ProjectServiceError(
-                "Node type kind must be scene, lore, prompt, or assistant.", 422
+                "Node type kind must be scene, lore, prompt, assistant, or project.", 422
             )
         if request.entry_type.prompt is not None and request.entry_type.kind != "prompt":
             raise ProjectServiceError("Prompt configuration is only valid on prompt node types.", 422)
@@ -2069,6 +2095,86 @@ class ProjectService:
         self._update_scene_title_in_structure(node_id, request.title)
         self._remove_missing_scene_todo_anchors(node_id, request.body_markdown)
         return self.read_scene(node_id)
+
+    # ----- project node (singleton per folder) ------------------------------
+
+    def _project_node_path(self) -> Path:
+        return self._require_project() / "project.md"
+
+    def read_project_node(self) -> ProjectNode:
+        path = self._project_node_path()
+        if not path.exists():
+            # Should be auto-created by the v3 migration on open. If the file
+            # is genuinely missing (e.g. brand-new project before migration
+            # runs), synthesize from project.yaml's title.
+            manifest = self._read_yaml(self._require_project() / "project.yaml")
+            return ProjectNode(
+                id="project",
+                title=str(manifest.get("title") or self.title or "Untitled Project"),
+                body_markdown="",
+                revision="",
+                entry_type="project",
+                metadata={},
+            )
+        front_matter, body = self._read_markdown_with_front_matter(path, strict=True)
+        title = str(front_matter.get("title") or self.title or "Untitled Project")
+        raw_entry_type = front_matter.get("entry_type") or "project"
+        entry_type = raw_entry_type if isinstance(raw_entry_type, str) else "project"
+        metadata = self._normalise_metadata(front_matter.get("metadata"), path)
+        return ProjectNode(
+            id="project",
+            title=title,
+            body_markdown=body,
+            revision=self._revision(path),
+            entry_type=entry_type,
+            metadata=metadata,
+        )
+
+    def save_project_node(self, request: SaveProjectNodeRequest) -> ProjectNode:
+        path = self._project_node_path()
+        current_revision = self._revision(path) if path.exists() else ""
+        if request.base_revision and request.base_revision != current_revision:
+            raise ProjectServiceError("Project node changed on disk after it was opened.", 409)
+        metadata = self._normalise_metadata(request.metadata, path)
+        node = ProjectNode(
+            id="project",
+            title=request.title,
+            body_markdown=request.body_markdown,
+            revision=current_revision,
+            entry_type=request.entry_type,
+            metadata=metadata,
+        )
+        self._write_project_node_file(path, node)
+        # Keep the cached title and project.yaml's title in sync so legacy
+        # readers (current_project, etc.) see the latest value.
+        self.title = request.title
+        self._sync_project_yaml_title(request.title)
+        return self.read_project_node()
+
+    def _write_project_node_file(self, path: Path, node: ProjectNode) -> None:
+        front_matter = yaml.safe_dump(
+            {
+                "id": node.id,
+                "title": node.title,
+                "entry_type": node.entry_type,
+                "metadata": node.metadata,
+            },
+            sort_keys=False,
+            allow_unicode=True,
+        ).strip()
+        body = node.body_markdown.rstrip() + "\n" if node.body_markdown.strip() else ""
+        self._atomic_write(path, f"---\n{front_matter}\n---\n\n{body}")
+
+    def _sync_project_yaml_title(self, title: str) -> None:
+        root = self._require_project()
+        manifest_path = root / "project.yaml"
+        if not manifest_path.exists():
+            return
+        manifest = self._read_yaml(manifest_path)
+        if manifest.get("title") == title:
+            return
+        manifest["title"] = title
+        self._write_yaml(manifest_path, manifest)
 
     def delete_scene(self, scene_id: str) -> StructureDocument:
         root = self._require_project()

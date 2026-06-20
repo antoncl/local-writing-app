@@ -54,6 +54,7 @@ from app.models import (
     MoveMetadataFieldRequest,
     OpenProjectRequest,
     ProjectInfo,
+    ProjectNode,
     ProjectValidation,
     PromptEntry,
     PromptEntryList,
@@ -63,6 +64,7 @@ from app.models import (
     RenameMetadataFieldRequest,
     SaveLoreEntryRequest,
     SaveAssistantEntryRequest,
+    SaveProjectNodeRequest,
     SavePromptEntryRequest,
     SaveSceneRequest,
     Scene,
@@ -156,6 +158,18 @@ def open_project(request: OpenProjectRequest) -> ProjectInfo:
 def get_project() -> ProjectInfo:
     with translate_errors():
         return service.current_project()
+
+
+@app.get("/api/project/node", response_model=ProjectNode)
+def get_project_node() -> ProjectNode:
+    with translate_errors():
+        return service.read_project_node()
+
+
+@app.put("/api/project/node", response_model=ProjectNode)
+def save_project_node(request: SaveProjectNodeRequest) -> ProjectNode:
+    with translate_errors():
+        return service.save_project_node(request)
 
 
 @app.patch("/api/project/settings", response_model=ProjectInfo)

@@ -30,7 +30,7 @@ from typing import Callable
 
 import yaml
 
-CURRENT_VERSION = 2
+CURRENT_VERSION = 3
 KEEP_BACKUPS = 3
 BACKUP_DIRNAME = ".migration-backups"
 SKIP_FROM_BACKUP = {".migration-backups", ".cache"}
@@ -45,10 +45,41 @@ def _create_snippets_folder(root: Path) -> None:
     (root / "snippets").mkdir(exist_ok=True)
 
 
+def _create_project_node_file(root: Path) -> None:
+    """v2→v3: synthesize project.md (the project node singleton) from the
+    existing project.yaml's title. Empty body; metadata empty. Per
+    [[decisions_project_nesting]]: project IS a node kind, single instance
+    per folder, carries the book/series/universe metadata."""
+    project_md = root / "project.md"
+    if project_md.exists():
+        return
+    manifest_path = root / "project.yaml"
+    title = "Untitled Project"
+    if manifest_path.exists():
+        try:
+            data = yaml.safe_load(manifest_path.read_text(encoding="utf-8")) or {}
+            if isinstance(data, dict) and isinstance(data.get("title"), str) and data["title"].strip():
+                title = data["title"]
+        except yaml.YAMLError:
+            pass
+    front_matter = yaml.safe_dump(
+        {
+            "id": "project",
+            "title": title,
+            "entry_type": "project",
+            "metadata": {},
+        },
+        sort_keys=False,
+        allow_unicode=True,
+    ).strip()
+    project_md.write_text(f"---\n{front_matter}\n---\n\n", encoding="utf-8")
+
+
 # Each tuple: (target_version, description, function)
 # Migrations run in registry order; gaps are not allowed.
 MIGRATIONS: list[tuple[int, str, MigrationFn]] = [
     (2, "create snippets/ folder for snippet node kind", _create_snippets_folder),
+    (3, "create project.md (project node singleton)", _create_project_node_file),
 ]
 
 

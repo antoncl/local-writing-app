@@ -94,27 +94,34 @@ class MigrationFrameworkTests(unittest.TestCase):
         self.assertEqual(read_project_version(self.root), CURRENT_VERSION)
         self.assertEqual(self.service.last_migrations, [])
 
-    def test_v1_project_migrates_to_v2_creating_snippets_folder(self) -> None:
-        """An existing v1 project gains snippets/ on next open."""
+    def test_v1_project_migrates_creating_snippets_and_project_node(self) -> None:
+        """An existing v1 project gains snippets/ AND project.md on next open."""
         manifest_path = self.root / "project.yaml"
         data = yaml.safe_load(manifest_path.read_text(encoding="utf-8"))
         data["schema_version"] = 1
         manifest_path.write_text(yaml.safe_dump(data, sort_keys=False), encoding="utf-8")
-        # Simulate a v1 project on disk: snippets/ doesn't exist
+        # Simulate a v1 project on disk: snippets/ and project.md don't exist
         snippets = self.root / "snippets"
         if snippets.exists():
             for child in snippets.iterdir():
                 child.unlink()
             snippets.rmdir()
+        project_md = self.root / "project.md"
+        if project_md.exists():
+            project_md.unlink()
         self.assertFalse(snippets.exists())
+        self.assertFalse(project_md.exists())
 
         reopened = ProjectService()
         reopened.open_project(self.root)
         self.assertTrue(snippets.is_dir())
+        self.assertTrue(project_md.exists())
         self.assertEqual(read_project_version(self.root), CURRENT_VERSION)
-        self.assertEqual(len(reopened.last_migrations), 1)
-        self.assertIn("v2", reopened.last_migrations[0])
-        self.assertIn("snippets", reopened.last_migrations[0])
+        # Both pending migrations ran (v1 → v2 → v3).
+        self.assertEqual(len(reopened.last_migrations), 2)
+        joined = " ".join(reopened.last_migrations)
+        self.assertIn("snippets", joined)
+        self.assertIn("project", joined)
 
         # Backup was created
         backup_dir = self.root / BACKUP_DIRNAME

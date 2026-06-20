@@ -255,6 +255,32 @@ class SaveSceneRequest(BaseModel):
     metadata: dict[str, MetadataValue] = Field(default_factory=dict)
 
 
+class ProjectNode(BaseModel):
+    """The project's own node (file: project.md). Singleton per folder.
+
+    For a flat (single-book) project, this carries the book's metadata
+    and blurb. Per decisions_project_nesting, when nesting lands the same
+    model represents universe/series/book by different field values —
+    no separate "book" kind needed.
+    """
+
+    id: str = "project"
+    title: str
+    body_markdown: str = ""
+    revision: str = ""
+    entry_type: str = "project"
+    metadata: dict[str, MetadataValue] = Field(default_factory=dict)
+    computed_metadata: dict[str, MetadataValue] = Field(default_factory=dict)
+
+
+class SaveProjectNodeRequest(BaseModel):
+    title: str = Field(min_length=1)
+    body_markdown: str = ""
+    base_revision: str | None = None
+    entry_type: str = "project"
+    metadata: dict[str, MetadataValue] = Field(default_factory=dict)
+
+
 class LoreEntrySummary(BaseModel):
     id: str
     title: str

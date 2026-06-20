@@ -100,6 +100,7 @@ PromptInputType = Literal[
     "select",
     "entity_ref",
     "entity_ref_list",
+    "context_pick",
 ]
 
 
@@ -114,6 +115,15 @@ class PromptInputDefinition(BaseModel):
     # entries the dispatch-form picker offers. Same shape as the existing
     # `target` on entity_ref metadata fields: {"kind": "scene"|"lore"} and
     # optionally {"entry_type": "<sub-type-id>"}.
+    #
+    # When type is context_pick, `target` carries the per-input config that
+    # the runtime picker reads. Shape (see docs/context-picker.md):
+    #   {
+    #     "kinds": ["scene", "lore", "snippet", "assistant"],
+    #     "entry_types": {"lore": ["character", "place"]},  # optional, per kind
+    #     "presets": ["full_outline", "full_text"],  # optional
+    #     "multiple": true,  # default true
+    #   }
     target: dict[str, Any] | None = None
 
 

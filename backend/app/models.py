@@ -8,12 +8,15 @@ from pydantic import BaseModel, Field
 class CreateProjectRequest(BaseModel):
     root_path: str = Field(min_length=1)
     title: str = Field(default="Untitled Project", min_length=1)
-    projects_base_folder: str = Field(min_length=1)
+    # Optional — when omitted, the project's parent folder is used. The
+    # frontend no longer surfaces this; kept on the request for back-compat
+    # and to keep the validation path open for tooling.
+    projects_base_folder: str | None = None
 
 
 class OpenProjectRequest(BaseModel):
     root_path: str = Field(min_length=1)
-    projects_base_folder: str = Field(min_length=1)
+    projects_base_folder: str | None = None
 
 
 AIPolicy = Literal["off", "local-only", "cloud-allowed"]
@@ -491,11 +494,19 @@ class ProviderCredentialsView(BaseModel):
     ollama_host: str = ""
 
 
+class RecentProject(BaseModel):
+    path: str
+    title: str
+    opened_at: str   # ISO 8601
+
+
 class MachineSettingsView(BaseModel):
     version: int
     providers: ProviderCredentialsView
     default_provider: str
     default_models: dict[str, str]
+    default_projects_folder: str = ""
+    recent_projects: list[RecentProject] = Field(default_factory=list)
     config_path: str
 
 
@@ -510,6 +521,10 @@ class MachineSettingsUpdate(BaseModel):
     providers: ProviderCredentialsPatch | None = None
     default_provider: str | None = None
     default_models: dict[str, str] | None = None
+    default_projects_folder: str | None = None
+    # Replace the recent-projects list (e.g. user removed a stale entry).
+    # None = leave untouched; an explicit list rewrites it verbatim.
+    recent_projects: list[RecentProject] | None = None
 
 
 class AIHealthRequest(BaseModel):

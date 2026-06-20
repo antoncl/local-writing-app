@@ -127,14 +127,29 @@ def health() -> dict[str, str]:
 
 @app.post("/api/project/create", response_model=ProjectInfo)
 def create_project(request: CreateProjectRequest) -> ProjectInfo:
+    from app.services import machine_settings as ms_service
+
     with translate_errors():
-        return service.create_project(Path(request.root_path), request.title, Path(request.projects_base_folder))
+        info = service.create_project(
+            Path(request.root_path),
+            request.title,
+            Path(request.projects_base_folder) if request.projects_base_folder else None,
+        )
+        ms_service.touch_recent_project(Path(info.root_path), info.title)
+        return info
 
 
 @app.post("/api/project/open", response_model=ProjectInfo)
 def open_project(request: OpenProjectRequest) -> ProjectInfo:
+    from app.services import machine_settings as ms_service
+
     with translate_errors():
-        return service.open_project(Path(request.root_path), Path(request.projects_base_folder))
+        info = service.open_project(
+            Path(request.root_path),
+            Path(request.projects_base_folder) if request.projects_base_folder else None,
+        )
+        ms_service.touch_recent_project(Path(info.root_path), info.title)
+        return info
 
 
 @app.get("/api/project", response_model=ProjectInfo)
@@ -537,6 +552,8 @@ def _build_settings_view(masked: dict[str, Any]) -> MachineSettingsView:
         providers=masked["providers"],
         default_provider=masked["default_provider"],
         default_models=masked["default_models"],
+        default_projects_folder=masked.get("default_projects_folder", ""),
+        recent_projects=masked.get("recent_projects", []),
         config_path=str(machine_settings_service.config_path()),
     )
 

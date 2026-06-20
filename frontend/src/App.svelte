@@ -3,6 +3,7 @@
   import { api } from "./api";
   import CodeEditor from "./CodeEditor.svelte";
   import DocumentEditorPane from "./DocumentEditorPane.svelte";
+  import TopBar from "./TopBar.svelte";
   import type {
     AIHealthResponse,
     AIPolicy,
@@ -34,6 +35,7 @@
     PromptEntryTypeExtras,
     PromptInputDefinition,
     ProjectInfo,
+    RecentProject,
     ProjectValidation,
     SearchHit,
     StructureDocument,
@@ -108,10 +110,14 @@
 
   let projectPath = "";
   let projectTitle = "Untitled Project";
-  let projectsBaseFolder = "";
   let directoryPickerOpen = false;
   let directoryListing: DirectoryListing | null = null;
   let directoryPickerLoading = false;
+  // Tracks why the directory picker was opened so the "Select This Folder"
+  // button does the right thing on confirm. Null = picker not open.
+  // "openProject" → immediately open the picked folder as a project.
+  // "newProjectOverride" → set newProjectOverridePath (don't create yet).
+  let directoryPickerMode: "openProject" | "newProjectOverride" | null = null;
 
   let aiPolicy: AIPolicy = "off";
   let aiDefaultProvider = "";
@@ -121,6 +127,20 @@
 
   let machineSettings: MachineSettingsView | null = null;
   let machineSettingsOpen = false;
+
+  // Recent projects + default base folder come from machine settings.
+  // Reloaded after open/create (which push onto the recents list) and after
+  // machine-settings saves (which can change the default folder).
+  let recentProjects: RecentProject[] = [];
+  let defaultProjectsFolder = "";
+
+  // New Project modal — separate from the path/title state used by the
+  // (now-removed) inline create form. Kept self-contained so closing the
+  // modal doesn't bleed into the rest of the app.
+  let newProjectModalOpen = false;
+  let newProjectName = "";
+  let newProjectOverrideFolder = false;
+  let newProjectOverridePath = "";
 
   // AI chat pane state.
   const DEFAULT_CHAT_SYSTEM_PROMPT =
@@ -170,6 +190,7 @@
     ollama_host: string;
     default_provider: string;
     default_models: Record<string, string>;
+    default_projects_folder: string;
   };
   let machineSettingsDraft: MachineSettingsDraft | null = null;
   let appState: AppState = { name: "needsProject" };
@@ -343,6 +364,8 @@
   async function loadMachineSettings() {
     try {
       machineSettings = await api.getMachineSettings();
+      recentProjects = machineSettings.recent_projects ?? [];
+      defaultProjectsFolder = machineSettings.default_projects_folder ?? "";
     } catch {
       // Backend may be offline — leave machineSettings as null; pickers will
       // hide and the request falls back to the backend's default assistant.
@@ -350,6 +373,20 @@
     // The file-backed assistant index is canonical for the chat-panel and
     // inputs-dialog pickers; load it eagerly alongside machine settings.
     await refreshAssistantEntries();
+  }
+
+  // Re-pull machine settings just to refresh the recents list. Called after
+  // open/create routes — they touch_recent_project server-side; the UI
+  // needs the new list to render the switcher dropdown.
+  async function refreshRecents() {
+    try {
+      const view = await api.getMachineSettings();
+      machineSettings = view;
+      recentProjects = view.recent_projects ?? [];
+      defaultProjectsFolder = view.default_projects_folder ?? "";
+    } catch {
+      // Non-fatal — recents stays stale until next reload.
+    }
   }
 
   function handleDocumentMousedown(event: MouseEvent) {
@@ -445,7 +482,6 @@
     resetEditorWorkspace();
     projectPath = nextProject.root_path;
     projectTitle = nextProject.title;
-    projectsBaseFolder = nextProject.projects_base_folder ?? "";
     aiPolicy = nextProject.ai_policy;
     aiDefaultProvider = nextProject.ai_default_provider ?? "";
     aiDefaultModelClass = nextProject.ai_default_model_class ?? "";
@@ -784,13 +820,89 @@
   }
 
   function useDirectory(path: string) {
-    projectPath = path;
+    const mode = directoryPickerMode;
     directoryPickerOpen = false;
+    directoryPickerMode = null;
+    if (mode === "openProject") {
+      void openProjectAt(path);
+    } else if (mode === "newProjectOverride") {
+      newProjectOverridePath = path;
+      newProjectOverrideFolder = true;
+    } else {
+      // Legacy fallback — preserved for any leftover callers.
+      projectPath = path;
+    }
   }
 
-  async function createProject() {
+  function openDirectoryPickerForOpenProject() {
+    directoryPickerMode = "openProject";
+    void openDirectoryPicker();
+  }
+
+  function openDirectoryPickerForNewProjectOverride() {
+    directoryPickerMode = "newProjectOverride";
+    void openDirectoryPicker();
+  }
+
+  // ------ New Project modal -----------------------------------------------
+
+  function openNewProjectModal() {
+    newProjectName = "";
+    newProjectOverrideFolder = false;
+    newProjectOverridePath = "";
+    newProjectModalOpen = true;
+  }
+
+  function closeNewProjectModal() {
+    newProjectModalOpen = false;
+  }
+
+  // Slugify mirrors the Python slugifyFieldId convention used elsewhere —
+  // lowercase, [a-z0-9-]+, no consecutive separators, no leading/trailing
+  // dashes. Used to derive the project folder name from the title.
+  function slugifyProjectName(name: string): string {
+    const lowered = name.toLowerCase();
+    const cleaned = lowered.replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "");
+    return cleaned || "new-project";
+  }
+
+  function joinPath(base: string, child: string): string {
+    if (!base) return child;
+    const sep = base.includes("\\") ? "\\" : "/";
+    const trimmed = base.replace(/[/\\]+$/, "");
+    return `${trimmed}${sep}${child}`;
+  }
+
+  $: newProjectResolvedPath = (() => {
+    if (newProjectOverrideFolder && newProjectOverridePath) {
+      return joinPath(newProjectOverridePath, slugifyProjectName(newProjectName));
+    }
+    return joinPath(defaultProjectsFolder, slugifyProjectName(newProjectName));
+  })();
+
+  async function confirmNewProject() {
+    if (!newProjectName.trim()) {
+      error = "Project name is required.";
+      return;
+    }
+    const baseFolder = newProjectOverrideFolder && newProjectOverridePath
+      ? newProjectOverridePath
+      : defaultProjectsFolder;
+    if (!baseFolder) {
+      error = "No projects folder set. Open Settings to set a default.";
+      return;
+    }
+    const path = joinPath(baseFolder, slugifyProjectName(newProjectName));
+    closeNewProjectModal();
+    await createProjectAt(path, newProjectName.trim(), baseFolder);
+  }
+
+  // Create a project at the given path with the given title. Optional
+  // base folder lets callers override the default; omit to use the
+  // project's parent folder (matches the backend's fallback).
+  async function createProjectAt(path: string, title: string, baseFolder?: string) {
     await run(async () => {
-      const openedProject = await api.createProject(projectPath, projectTitle, projectsBaseFolder);
+      const openedProject = await api.createProject(path, title, baseFolder ?? "");
       openProjectWorkspace(openedProject);
       await refreshStructure();
       await refreshLoreEntries();
@@ -802,13 +914,14 @@
       if (initialSceneId) {
         await openSceneInEditorPane(initialSceneId);
       }
+      await refreshRecents();
       status = `Created ${openedProject.title}`;
     });
   }
 
-  async function openProject() {
+  async function openProjectAt(path: string) {
     await run(async () => {
-      const openedProject = await api.openProject(projectPath, projectsBaseFolder);
+      const openedProject = await api.openProject(path, "");
       openProjectWorkspace(openedProject);
       await refreshStructure();
       await refreshLoreEntries();
@@ -816,22 +929,8 @@
       await refreshMetadataSchema();
       await refreshKnownTags();
       await refreshTodos();
+      await refreshRecents();
       status = `Opened ${openedProject.title}`;
-    });
-  }
-
-  async function updateProjectSettings() {
-    if (!isProjectOpen) return;
-    await run(async () => {
-      const updatedProject = await api.updateProjectSettings({ projects_base_folder: projectsBaseFolder });
-      appState = { name: "projectOpen", project: updatedProject };
-      projectsBaseFolder = updatedProject.projects_base_folder ?? "";
-      aiPolicy = updatedProject.ai_policy;
-      aiDefaultProvider = updatedProject.ai_default_provider ?? "";
-      aiDefaultModelClass = updatedProject.ai_default_model_class ?? "";
-      await refreshMetadataSchema();
-      validation = await api.validateProject();
-      status = "Updated project settings";
     });
   }
 
@@ -861,6 +960,7 @@
         ollama_host: machineSettings.providers.ollama_host,
         default_provider: machineSettings.default_provider,
         default_models: { ...machineSettings.default_models },
+        default_projects_folder: machineSettings.default_projects_folder ?? "",
       };
       machineSettingsOpen = true;
     });
@@ -878,8 +978,11 @@
         },
         default_provider: machineSettingsDraft!.default_provider,
         default_models: machineSettingsDraft!.default_models,
+        default_projects_folder: machineSettingsDraft!.default_projects_folder,
       };
       machineSettings = await api.updateMachineSettings(update);
+      recentProjects = machineSettings.recent_projects ?? [];
+      defaultProjectsFolder = machineSettings.default_projects_folder ?? "";
       machineSettingsOpen = false;
       status = "Saved machine settings";
     });
@@ -3364,6 +3467,16 @@
   }
 </script>
 
+<TopBar
+  currentTitle={isProjectOpen ? projectTitle : null}
+  {recentProjects}
+  onSelectRecent={(path) => void openProjectAt(path)}
+  onOpenFolder={openDirectoryPickerForOpenProject}
+  onNewProject={openNewProjectModal}
+  onOpenAssistants={openAssistantsPane}
+  onOpenSettings={openMachineSettings}
+/>
+
 <main class="workspace">
   <!-- svelte-ignore a11y_no_noninteractive_element_interactions -->
   <section class:hidden-pane={!isPaneVisible("project")} class="pane project-pane" data-pane-id="project" style={paneStyle("project")} aria-label="Project pane" on:mousedown={() => focusPane("project")}>
@@ -3371,42 +3484,27 @@
       <h2>Project</h2>
     </header>
     <div class="pane-content project-panel">
-      <h1>Local Writer</h1>
-      <label>
-        Projects base folder
-        <input bind:value={projectsBaseFolder} placeholder="C:\path\to\writing-base" />
-      </label>
-      <label>
-        Project folder
-        <div class="path-picker-row">
-          <input bind:value={projectPath} placeholder="C:\path\to\my-novel" />
-          <button type="button" on:click={openDirectoryPicker}>Browse</button>
-        </div>
-      </label>
-      <label>
-        Title
-        <input bind:value={projectTitle} />
-      </label>
-      <div class="button-row">
-        <button type="button" disabled={!projectsBaseFolder.trim() || !projectPath.trim()} on:click={createProject}>Create</button>
-        <button type="button" disabled={!projectsBaseFolder.trim() || !projectPath.trim()} on:click={openProject}>Open</button>
-        <button type="button" disabled={!isProjectOpen} on:click={validateProject}>Validate</button>
-      </div>
-      {#if isProjectOpen}
-        <div class="button-row">
-          <button type="button" on:click={updateProjectSettings}>Apply Base Folder</button>
+      {#if !isProjectOpen}
+        <p class="muted project-empty-hint">
+          No project open. Pick one from the switcher above — recents, browse, or create new.
+        </p>
+      {:else}
+        <div class="project-identity">
+          <strong class="project-identity-title">{projectTitle}</strong>
+          <code class="project-identity-path" title={projectPath}>{projectPath}</code>
+          <div class="button-row">
+            <button type="button" on:click={validateProject}>Validate</button>
+          </div>
         </div>
       {/if}
 
-      <section class="ai-settings" aria-label="AI settings">
+      <section class="ai-settings" aria-label="AI settings" class:disabled-section={!isProjectOpen}>
         <h3>AI</h3>
+        {#if isProjectOpen}
         <div class="button-row">
-          <button type="button" on:click={openMachineSettings}>Machine Settings…</button>
-          <button type="button" on:click={openAssistantsPane}>Assistants…</button>
-          {#if isProjectOpen}
-            <button type="button" on:click={openChatsPane}>Chats…</button>
-          {/if}
+          <button type="button" on:click={openChatsPane}>Chats…</button>
         </div>
+        {/if}
         {#if isProjectOpen}
           <fieldset class="ai-policy">
             <legend>AI access</legend>
@@ -4470,6 +4568,65 @@
     </section>
   {/if}
 
+  {#if newProjectModalOpen}
+    <section class="modal-backdrop" aria-label="New project">
+      <div class="confirm-modal" role="dialog" aria-modal="true" aria-labelledby="new-project-title">
+        <header class="confirm-modal-header">
+          <h2 id="new-project-title">New Project</h2>
+        </header>
+
+        <label>
+          Project name
+          <input
+            type="text"
+            bind:value={newProjectName}
+            placeholder="Honor's First Command"
+            on:keydown={(e) => e.key === "Enter" && void confirmNewProject()}
+          />
+        </label>
+
+        {#if !newProjectOverrideFolder}
+          <p class="muted">
+            Will be created at:
+            <code>{newProjectName.trim() ? newProjectResolvedPath : (defaultProjectsFolder || "(no default folder set)")}</code>
+          </p>
+          {#if !defaultProjectsFolder}
+            <p class="muted">
+              No default projects folder set — open <button type="button" class="inline-link" on:click={() => { closeNewProjectModal(); openMachineSettings(); }}>Settings</button> to set one, or override below.
+            </p>
+          {/if}
+          <div class="button-row">
+            <button type="button" on:click={openDirectoryPickerForNewProjectOverride}>Override folder…</button>
+          </div>
+        {:else}
+          <label>
+            Parent folder
+            <div class="path-picker-row">
+              <input type="text" bind:value={newProjectOverridePath} placeholder="C:\path\to\writing" />
+              <button type="button" on:click={openDirectoryPickerForNewProjectOverride}>Browse…</button>
+            </div>
+          </label>
+          <p class="muted">
+            Will be created at: <code>{newProjectName.trim() ? newProjectResolvedPath : "(enter a name)"}</code>
+          </p>
+          <div class="button-row">
+            <button type="button" on:click={() => { newProjectOverrideFolder = false; newProjectOverridePath = ""; }}>Use default folder</button>
+          </div>
+        {/if}
+
+        <div class="confirm-modal-actions">
+          <button type="button" on:click={closeNewProjectModal}>Cancel</button>
+          <button
+            class="primary"
+            type="button"
+            disabled={!newProjectName.trim() || (newProjectOverrideFolder ? !newProjectOverridePath.trim() : !defaultProjectsFolder)}
+            on:click={confirmNewProject}
+          >Create</button>
+        </div>
+      </div>
+    </section>
+  {/if}
+
   {#if machineSettingsOpen && machineSettingsDraft}
     <section class="modal-backdrop" aria-label="Machine settings">
       <div class="confirm-modal machine-settings-modal" role="dialog" aria-modal="true" aria-labelledby="machine-settings-title">
@@ -4478,6 +4635,13 @@
         </header>
         <p class="muted">Your AI subscriptions — provider accounts and keys.</p>
         <p class="muted">Stored locally at: <code>{machineSettings?.config_path}</code></p>
+
+        <label>
+          Default projects folder
+          <input type="text" bind:value={machineSettingsDraft.default_projects_folder} placeholder="C:\path\to\writing" />
+          <small class="muted">Where new projects get created by default. The project switcher reads recent projects from this config too.</small>
+        </label>
+
         <p class="muted">API keys are masked on read. Leaving a masked field unchanged keeps the existing value.</p>
 
         <label>

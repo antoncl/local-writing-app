@@ -2,16 +2,20 @@ from __future__ import annotations
 
 import os
 import sys
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
 import yaml
 from pydantic import BaseModel, Field
 
+from app.models import RecentProject
+
 
 APP_NAME = "local-writing-app"
 CONFIG_FILENAME = "config.yaml"
 MASK = "********"
+RECENT_PROJECTS_MAX = 10
 
 DEFAULT_MODELS: dict[str, str] = {
     "anthropic": "claude-haiku-4-5-20251001",
@@ -48,6 +52,8 @@ class MachineSettings(BaseModel):
     providers: ProviderCredentials = Field(default_factory=ProviderCredentials)
     default_provider: str = "ollama"
     default_models: dict[str, str] = Field(default_factory=lambda: dict(DEFAULT_MODELS))
+    default_projects_folder: str = ""
+    recent_projects: list[RecentProject] = Field(default_factory=list)
 
 
 def config_dir() -> Path:
@@ -128,6 +134,12 @@ def merge_update(current: MachineSettings, patch: dict[str, Any]) -> MachineSett
         base["default_provider"] = patch["default_provider"]
     if "default_models" in patch and isinstance(patch["default_models"], dict):
         base.setdefault("default_models", {}).update(patch["default_models"])
+    if "default_projects_folder" in patch and patch["default_projects_folder"] is not None:
+        base["default_projects_folder"] = patch["default_projects_folder"]
+    if "recent_projects" in patch and patch["recent_projects"] is not None:
+        # An explicit list rewrites the recents — used when the user removes
+        # a stale entry from the UI.
+        base["recent_projects"] = patch["recent_projects"]
     providers_patch = patch.get("providers")
     if isinstance(providers_patch, dict):
         providers = base.setdefault("providers", {})
@@ -138,6 +150,26 @@ def merge_update(current: MachineSettings, patch: dict[str, Any]) -> MachineSett
                 continue  # keep current
             providers[key] = value
     return MachineSettings.model_validate(base)
+
+
+def touch_recent_project(root_path: Path, title: str) -> None:
+    """Move-to-top a project on the recents list. Cap at RECENT_PROJECTS_MAX.
+
+    Best-effort: any failure (read-only config dir, malformed yaml) is
+    swallowed — recents is UX polish, not a correctness path. The create /
+    open flows must not break because of a recents-write hiccup.
+    """
+    try:
+        path_str = str(root_path.expanduser().resolve())
+        now_iso = datetime.now(timezone.utc).isoformat(timespec="seconds")
+        settings = load_settings()
+        kept = [r for r in settings.recent_projects if r.path != path_str]
+        kept.insert(0, RecentProject(path=path_str, title=title, opened_at=now_iso))
+        settings.recent_projects = kept[:RECENT_PROJECTS_MAX]
+        save_settings(settings)
+    except Exception:  # noqa: BLE001
+        # Don't let recents tracking break project open/create.
+        pass
 
 
 # ----- File-based assistant migration (one-shot) ---------------------------

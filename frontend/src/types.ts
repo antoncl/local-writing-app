@@ -258,11 +258,19 @@ export type ProviderCredentialsView = {
   ollama_host: string;
 };
 
+export type RecentProject = {
+  path: string;
+  title: string;
+  opened_at: string;
+};
+
 export type MachineSettingsView = {
   version: number;
   providers: ProviderCredentialsView;
   default_provider: string;
   default_models: Record<string, string>;
+  default_projects_folder: string;
+  recent_projects: RecentProject[];
   config_path: string;
 };
 
@@ -270,6 +278,8 @@ export type MachineSettingsUpdate = {
   providers?: Partial<ProviderCredentialsView>;
   default_provider?: string;
   default_models?: Record<string, string>;
+  default_projects_folder?: string;
+  recent_projects?: RecentProject[];
 };
 
 export type AIHealthResponse = {

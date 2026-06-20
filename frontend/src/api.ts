@@ -183,16 +183,23 @@ async function* streamNdjson(
 }
 
 export const api = {
-  createProject(rootPath: string, title: string, projectsBaseFolder: string) {
+  createProject(rootPath: string, title: string, projectsBaseFolder?: string) {
     return request<ProjectInfo>("/project/create", {
       method: "POST",
-      body: JSON.stringify({ root_path: rootPath, title, projects_base_folder: projectsBaseFolder }),
+      body: JSON.stringify({
+        root_path: rootPath,
+        title,
+        ...(projectsBaseFolder ? { projects_base_folder: projectsBaseFolder } : {}),
+      }),
     });
   },
-  openProject(rootPath: string, projectsBaseFolder: string) {
+  openProject(rootPath: string, projectsBaseFolder?: string) {
     return request<ProjectInfo>("/project/open", {
       method: "POST",
-      body: JSON.stringify({ root_path: rootPath, projects_base_folder: projectsBaseFolder }),
+      body: JSON.stringify({
+        root_path: rootPath,
+        ...(projectsBaseFolder ? { projects_base_folder: projectsBaseFolder } : {}),
+      }),
     });
   },
   updateProjectSettings(updates: {

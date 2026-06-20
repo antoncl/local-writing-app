@@ -3,6 +3,7 @@
   import { api } from "./api";
   import CodeEditor from "./CodeEditor.svelte";
   import DocumentEditorPane from "./DocumentEditorPane.svelte";
+  import PromptInputField from "./PromptInputField.svelte";
   import TopBar from "./TopBar.svelte";
   import type {
     AIHealthResponse,
@@ -178,6 +179,15 @@
   let chatPromptEntryId = "";
   let promptPickerOpen = false;
   let promptPickerSearch = "";
+  // Inputs dialog for chat-routed prompts that declare {{ input.* }} fields.
+  // Opens between picker selection and applying the preset; the user fills
+  // values, then we materialize the template and seed the chat.
+  let chatInputsDialogEntry: PromptEntrySummary | null = null;
+  let chatInputsDialogDrafts: Record<string, string> = {};
+  let chatInputsDialogError = "";
+  // Remember last-used inputs per prompt id so re-picking the same prompt
+  // prefills with the user's last values instead of resetting to defaults.
+  let chatInputsLastUsed: Record<string, Record<string, string>> = {};
   // Preview disclosure state. The text is computed on demand (composing the
   // context block requires async fetches) and invalidated when the user changes
   // assistant / brief / context / prompt.
@@ -1304,11 +1314,13 @@
       .sort((a, b) => a.title.localeCompare(b.title, undefined, { sensitivity: "base" }));
   }
 
-  function activePromptTitle(): string {
-    if (!chatPromptEntryId) return "Freeform";
-    const entry = promptEntries.find((p) => p.id === chatPromptEntryId);
-    return entry?.title || "Unknown prompt";
-  }
+  // Rebound on every change to chatPromptEntryId / promptEntries so Svelte's
+  // template-side reactivity sees the dependency. A plain function would be
+  // called once and never re-run when those reactive vars change.
+  $: activePromptTitle = ((id: string, entries: PromptEntrySummary[]) => {
+    if (!id) return "Freeform";
+    return entries.find((p) => p.id === id)?.title || "Unknown prompt";
+  })(chatPromptEntryId, promptEntries);
 
   function chatSessionPromptTitle(session: ChatSessionSummary): string {
     if (!session.prompt_entry_id) return "";
@@ -1343,19 +1355,124 @@
 
   async function pickPromptForChat(entry: PromptEntrySummary): Promise<void> {
     closeChatPromptPicker();
+    // If the prompt declares inputs, gather them in a modal before rendering
+    // the template. Prompts with no declared inputs apply immediately.
+    if ((entry.inputs ?? []).length > 0) {
+      openChatInputsDialog(entry);
+      return;
+    }
+    await applyChatPromptPreset(entry, {});
+  }
+
+  function openChatInputsDialog(entry: PromptEntrySummary) {
+    const drafts: Record<string, string> = {};
+    const prior = chatInputsLastUsed[entry.id] ?? {};
+    for (const input of entry.inputs ?? []) {
+      const previous = prior[input.name];
+      if (previous !== undefined && previous !== null) {
+        drafts[input.name] = previous;
+      } else if (input.default !== undefined && input.default !== null) {
+        drafts[input.name] = String(input.default);
+      } else {
+        drafts[input.name] = input.type === "boolean" ? "false" : "";
+      }
+    }
+    chatInputsDialogDrafts = drafts;
+    chatInputsDialogError = "";
+    chatInputsDialogEntry = entry;
+  }
+
+  function cancelChatInputsDialog() {
+    chatInputsDialogEntry = null;
+    chatInputsDialogDrafts = {};
+    chatInputsDialogError = "";
+  }
+
+  function updateChatInputsDraft(name: string, value: string) {
+    chatInputsDialogDrafts = { ...chatInputsDialogDrafts, [name]: value };
+  }
+
+  function coerceChatInputValue(raw: string, type: PromptInputDefinition["type"]): unknown {
+    const trimmed = raw.trim();
+    if (type === "number") {
+      if (trimmed === "") return null;
+      const parsed = Number(trimmed);
+      return Number.isFinite(parsed) ? parsed : trimmed;
+    }
+    if (type === "boolean") return trimmed.toLowerCase() === "true";
+    if (type === "entity_ref_list") {
+      if (!trimmed) return null;
+      try {
+        const parsed = JSON.parse(trimmed);
+        return Array.isArray(parsed) ? parsed : null;
+      } catch {
+        return null;
+      }
+    }
+    return trimmed;
+  }
+
+  async function submitChatInputsDialog() {
+    const entry = chatInputsDialogEntry;
+    if (!entry) return;
+    const declared = entry.inputs ?? [];
+    const missing = declared.filter((input) => {
+      if (!input.required) return false;
+      const raw = chatInputsDialogDrafts[input.name];
+      if (input.type === "entity_ref_list") {
+        try {
+          const parsed = JSON.parse(raw || "[]");
+          return !Array.isArray(parsed) || parsed.length === 0;
+        } catch {
+          return true;
+        }
+      }
+      return !raw?.trim();
+    });
+    if (missing.length > 0) {
+      chatInputsDialogError = `Missing required: ${missing.map((i) => i.label || i.name).join(", ")}.`;
+      return;
+    }
+    const values: Record<string, unknown> = {};
+    for (const input of declared) {
+      const raw = chatInputsDialogDrafts[input.name] ?? "";
+      const coerced = coerceChatInputValue(raw, input.type);
+      if (coerced !== null && coerced !== "") values[input.name] = coerced;
+    }
+    // Remember for next time the user picks this prompt.
+    chatInputsLastUsed = { ...chatInputsLastUsed, [entry.id]: { ...chatInputsDialogDrafts } };
+    const target = entry;
+    chatInputsDialogEntry = null;
+    chatInputsDialogDrafts = {};
+    chatInputsDialogError = "";
+    await applyChatPromptPreset(target, values);
+  }
+
+  function handleChatInputsDialogKeydown(event: KeyboardEvent) {
+    if (event.key === "Escape") {
+      event.preventDefault();
+      cancelChatInputsDialog();
+    } else if (event.key === "Enter" && (event.ctrlKey || event.metaKey)) {
+      event.preventDefault();
+      void submitChatInputsDialog();
+    }
+  }
+
+  async function applyChatPromptPreset(
+    entry: PromptEntrySummary,
+    inputs: Record<string, unknown>,
+  ): Promise<void> {
     // Lock check: never replace the prompt of a chat with history. Start a new
     // chat instead. The backend would reject the save anyway — failing here is
     // a nicer UX.
     const mustCreateNew = !activeChatId || isActiveChatLocked();
     try {
-      // Materialize the brief by rendering the template. If the prompt needs
-      // a target_scene_id or inputs, this will surface an error — for v1 we
-      // pass an empty inputs dict and rely on the prompt being self-contained
-      // (the user can attach context items afterwards). Future: inputs dialog.
+      // Materialize the brief by rendering the template with the collected
+      // inputs (empty object if the prompt declared none).
       const preview = await api.aiPreview({
         template_source: entry.body_markdown,
         target_scene_id: "",
-        inputs: {},
+        inputs,
         commit: false,
       });
       const messages = preview.messages ?? [];
@@ -1384,14 +1501,8 @@
         });
         if (initialTurns.length > 0) {
           chatHistory = initialTurns;
-          // If the template ended with a user turn, stream the reply.
-          const last = initialTurns[initialTurns.length - 1];
-          if (last?.role === "user") {
-            await sendChatTurn();
-          } else {
-            await persistActiveChat();
-          }
         }
+        await persistActiveChat();
       } else {
         // Empty active chat — apply preset in-place.
         chatPromptEntryId = entry.id;
@@ -1399,12 +1510,7 @@
         if (preferredAssistantId) chatAssistantId = preferredAssistantId;
         chatHistory = initialTurns;
         activeChatTitle = entry.title;
-        const last = initialTurns[initialTurns.length - 1];
-        if (last?.role === "user") {
-          await sendChatTurn();
-        } else {
-          await persistActiveChat();
-        }
+        await persistActiveChat();
       }
     } catch (e) {
       chatError = `Couldn't apply prompt: ${(e as Error).message}`;
@@ -4434,7 +4540,7 @@
             disabled={isActiveChatLocked() && !chatPromptEntryId}
           >
             <span class="chat-prompt-glyph" aria-hidden="true">✨</span>
-            <strong>{activePromptTitle()}</strong>
+            <strong>{activePromptTitle}</strong>
             {#if isActiveChatLocked()}
               <span class="chat-lock-glyph" aria-label="locked">🔒</span>
             {:else}
@@ -4831,6 +4937,42 @@
 
   {#if error}
     <section class="error-toast">{error}</section>
+  {/if}
+
+  {#if chatInputsDialogEntry}
+    {@const declaredChatInputs = chatInputsDialogEntry.inputs ?? []}
+    <!-- svelte-ignore a11y_no_static_element_interactions -->
+    <div class="inputs-dialog-backdrop" role="presentation" on:mousedown|self={cancelChatInputsDialog}>
+      <div class="inputs-dialog" role="dialog" aria-label={`Apply ${chatInputsDialogEntry.title}`} aria-modal="true" tabindex="-1" on:keydown={handleChatInputsDialogKeydown}>
+        <header>
+          <strong>{chatInputsDialogEntry.title}</strong>
+          <small>Fill in the inputs declared by this prompt.</small>
+        </header>
+        <div class="inputs-dialog-fields">
+          {#each declaredChatInputs as input (input.name)}
+            <label>
+              {input.label || input.name}{#if input.required}<span class="required-marker"> *</span>{/if}
+              <PromptInputField
+                input={input}
+                value={chatInputsDialogDrafts[input.name] ?? ""}
+                metadataSchema={metadataSchema}
+                excludeId={null}
+                ariaLabel={input.label || input.name}
+                on:change={(event) => updateChatInputsDraft(input.name, event.detail.value)}
+              />
+            </label>
+          {/each}
+        </div>
+        {#if chatInputsDialogError}
+          <p class="preview-result-error">{chatInputsDialogError}</p>
+        {/if}
+        <div class="inputs-dialog-actions">
+          <button type="button" on:click={cancelChatInputsDialog}>Cancel</button>
+          <button type="button" class="primary" on:click={submitChatInputsDialog}>Apply</button>
+        </div>
+        <small class="inputs-dialog-hint">Ctrl/⌘+Enter to apply · Esc to cancel</small>
+      </div>
+    </div>
   {/if}
 </main>
 

@@ -2899,6 +2899,12 @@ class ProjectService:
                 raise ProjectServiceError(f"Malformed front matter in {path.name}: missing closing ---.", 422)
             return {}, text
         front, body = rest.split("\n---\n", 1)
+        # Strip the format separator newlines between the closing `---` and the
+        # body. Without this, a save/read round-trip accumulates one extra
+        # leading "\n" each cycle, because the writer emits `---\n\n{body}` but
+        # the split on `\n---\n` leaves one `\n` attached to the body — which
+        # then gets written back with the writer's own separator on top.
+        body = body.lstrip("\n")
         try:
             data = yaml.safe_load(front) or {}
         except yaml.YAMLError as exc:

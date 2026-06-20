@@ -1724,6 +1724,25 @@ class MetadataValidationTests(unittest.TestCase):
         self.assertEqual(stored.prompt.system_prompt, "Keep it short.")
         self.assertEqual([i.name for i in stored.prompt.inputs], ["topic"])
 
+    def test_front_matter_body_round_trip_does_not_accumulate_leading_newlines(self) -> None:
+        # Regression: the writer emitted `---\n\n{body}` and the reader split
+        # on `\n---\n`, leaving the separator `\n` attached to the body. A
+        # save/read cycle therefore added one leading newline each time the
+        # user opened and re-saved a prompt entry.
+        path = self.root / "scratch.md"
+        for _ in range(5):
+            self.service._write_node_entry_file(
+                path,
+                node_id="scratch_001",
+                title="Round-trip scratch",
+                entry_type="lore_note",
+                metadata={},
+                body=self.service._read_markdown_with_front_matter(path)[1] if path.exists() else "hello",
+            )
+            front, body = self.service._read_markdown_with_front_matter(path)
+            self.assertFalse(body.startswith("\n"), f"body should not gain leading newlines, got {body!r}")
+            self.assertEqual(body.strip(), "hello")
+
 
 class ReferenceResolutionTests(unittest.TestCase):
     def setUp(self) -> None:

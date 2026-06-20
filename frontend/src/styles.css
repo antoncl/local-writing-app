@@ -2669,30 +2669,54 @@ h3 {
   resize: vertical;
 }
 
-.prompt-preview-inputs-drawer {
-  margin-left: auto;
-  font-size: 12px;
-  color: #4d5753;
+.prompt-preview-inputs {
+  flex-basis: 100%;
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+  gap: 6px 10px;
+  padding: 8px;
+  background: #ffffff;
+  border: 1px solid #d8e0dd;
+  border-radius: 4px;
 }
 
-.prompt-preview-inputs-drawer > summary {
-  cursor: pointer;
-  user-select: none;
+.prompt-preview-inputs-heading {
+  grid-column: 1 / -1;
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
+  font-size: 10px;
   font-weight: 600;
-  font-size: 11px;
   text-transform: uppercase;
   letter-spacing: 0.04em;
   color: #65716c;
 }
 
-.prompt-preview-inputs {
-  display: grid;
-  gap: 6px;
-  margin-top: 6px;
-  padding: 8px;
-  background: #ffffff;
-  border: 1px solid #d8e0dd;
+.prompt-preview-inputs-heading > small {
+  color: #98a39e;
+  font-weight: 400;
+}
+
+.prompt-preview-field.missing-required > input,
+.prompt-preview-field.missing-required > select,
+.prompt-preview-field.missing-required > textarea {
+  border-color: #d8b6b6;
+  background: #fbf1f0;
+}
+
+.prompt-preview-field .required-marker {
+  color: #b85a5a;
+}
+
+.prompt-preview-required-notice {
+  margin: 0;
+  padding: 6px 10px;
+  background: #fff7e1;
+  border: 1px solid #ddc28d;
   border-radius: 4px;
+  color: #6b4d0c;
+  font-size: 12px;
+  line-height: 1.45;
 }
 
 .prompt-preview-pane-body {

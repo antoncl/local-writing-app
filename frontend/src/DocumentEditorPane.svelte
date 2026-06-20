@@ -229,12 +229,58 @@
       : [];
   // Reset preview when the underlying entry changes — stale results from a
   // previous prompt would be confusing.
-  $: if (loadedSceneId) {
+  // When opening a different entry, clear the result/diagnostics and reset
+  // the drafts. A separate reactive below fills in default values for any
+  // declared input that's still missing a draft — needed because the schema
+  // (which carries the input definitions) can arrive in a different tick from
+  // the entry itself, so the entry-switch seed sometimes runs with an empty
+  // inputs list. The default-filler closes that race idempotently.
+  let promptPreviewSeededEntryId: string | null = null;
+  $: if (loadedSceneId && loadedSceneId !== promptPreviewSeededEntryId) {
     promptPreviewResult = null;
     promptPreviewError = null;
-    promptPreviewInputDrafts = {};
     promptPreviewLastRenderKey = "";
     promptPreviewDiagnostics = [];
+    promptPreviewInputDrafts = seedInputDrafts(promptPreviewDeclaredInputs);
+    promptPreviewSeededEntryId = loadedSceneId;
+  }
+  $: {
+    // Fill in defaults for inputs that don't have a draft yet (typically: the
+    // schema arrived after the entry was already opened). Idempotent — never
+    // overwrites a value the user has typed.
+    let changed = false;
+    const next: Record<string, string> = { ...promptPreviewInputDrafts };
+    for (const input of promptPreviewDeclaredInputs) {
+      if (next[input.name] === undefined) {
+        next[input.name] = input.default !== undefined && input.default !== null
+          ? String(input.default)
+          : (input.type === "boolean" ? "false" : "");
+        changed = true;
+      }
+    }
+    if (changed) promptPreviewInputDrafts = next;
+  }
+  // List of required inputs the author hasn't filled in yet. Surfaced as a
+  // warning in the preview body so the render's empty `{{ input.foo }}` slots
+  // aren't a mystery.
+  $: promptPreviewMissingRequired = promptPreviewDeclaredInputs.filter((i) => {
+    if (!i.required) return false;
+    const v = promptPreviewInputDrafts[i.name];
+    return v === undefined || v === null || (typeof v === "string" && !v.trim());
+  });
+
+  function seedInputDrafts(declared: PromptInputDefinition[]): Record<string, string> {
+    const drafts: Record<string, string> = {};
+    for (const input of declared) {
+      if (input.default !== undefined && input.default !== null) {
+        drafts[input.name] = String(input.default);
+      } else if (input.type === "boolean") {
+        drafts[input.name] = "false";
+      } else {
+        drafts[input.name] = "";
+      }
+    }
+    return drafts;
   }
   // Seed the scene picker once availableScenes arrive.
   $: if (documentKind === "prompt" && !promptPreviewSceneId && availableScenes.length > 0) {
@@ -2577,31 +2623,79 @@
           </select>
         </label>
         {#if promptPreviewDeclaredInputs.length > 0}
-          <details class="prompt-preview-inputs-drawer">
-            <summary>Inputs ({promptPreviewDeclaredInputs.length})</summary>
-            <div class="prompt-preview-inputs">
-              {#each promptPreviewDeclaredInputs as inputDef (inputDef.name)}
-                <label class="prompt-preview-field">
-                  <span>{inputDef.label || inputDef.name}</span>
-                  {#if inputDef.type === "long_text"}
-                    <textarea rows="2" placeholder={inputDef.placeholder || ""} bind:value={promptPreviewInputDrafts[inputDef.name]}></textarea>
-                  {:else if inputDef.type === "number"}
-                    <input type="number" bind:value={promptPreviewInputDrafts[inputDef.name]} />
-                  {:else if inputDef.type === "boolean"}
-                    <input type="checkbox" on:change={(e) => promptPreviewInputDrafts[inputDef.name] = (e.currentTarget as HTMLInputElement).checked ? "true" : ""} checked={promptPreviewInputDrafts[inputDef.name] === "true"} />
-                  {:else}
-                    <input type="text" placeholder={inputDef.placeholder || ""} bind:value={promptPreviewInputDrafts[inputDef.name]} />
-                  {/if}
-                </label>
-              {/each}
+          <div class="prompt-preview-inputs">
+            <div class="prompt-preview-inputs-heading">
+              Inputs
+              <small>{promptPreviewDeclaredInputs.length}</small>
             </div>
-          </details>
+            {#each promptPreviewDeclaredInputs as inputDef (inputDef.name)}
+              {@const draft = promptPreviewInputDrafts[inputDef.name]}
+              {@const isMissing = inputDef.required && (draft === undefined || draft === null || (typeof draft === "string" && !draft.trim()))}
+              <label class="prompt-preview-field" class:missing-required={isMissing}>
+                <span>
+                  {inputDef.label || inputDef.name}{#if inputDef.required}<span class="required-marker"> *</span>{/if}
+                </span>
+                {#if inputDef.type === "long_text"}
+                  <textarea
+                    rows="2"
+                    value={draft ?? ""}
+                    on:input={(e) => promptPreviewInputDrafts = {...promptPreviewInputDrafts, [inputDef.name]: (e.currentTarget as HTMLTextAreaElement).value}}
+                  ></textarea>
+                {:else if inputDef.type === "number"}
+                  <input
+                    type="number"
+                    value={draft ?? ""}
+                    on:input={(e) => promptPreviewInputDrafts = {...promptPreviewInputDrafts, [inputDef.name]: (e.currentTarget as HTMLInputElement).value}}
+                  />
+                {:else if inputDef.type === "boolean"}
+                  <input
+                    type="checkbox"
+                    checked={draft === "true"}
+                    on:change={(e) => promptPreviewInputDrafts = {...promptPreviewInputDrafts, [inputDef.name]: (e.currentTarget as HTMLInputElement).checked ? "true" : "false"}}
+                  />
+                {:else if inputDef.type === "select"}
+                  <select
+                    value={draft ?? ""}
+                    on:change={(e) => promptPreviewInputDrafts = {...promptPreviewInputDrafts, [inputDef.name]: (e.currentTarget as HTMLSelectElement).value}}
+                  >
+                    {#if !inputDef.required}
+                      <option value="">(none)</option>
+                    {/if}
+                    {#each inputDef.options ?? [] as option}
+                      <option value={option}>{option}</option>
+                    {/each}
+                  </select>
+                {:else if inputDef.type === "entity_ref" || inputDef.type === "entity_ref_list"}
+                  <ReferencePicker
+                    field={refInputStubField(inputDef)}
+                    value={refInputDraftValue(inputDef, draft)}
+                    metadataSchema={metadataSchema}
+                    excludeId={scene?.id ?? null}
+                    ariaLabel={inputDef.label || inputDef.name}
+                    on:change={(event) => promptPreviewInputDrafts = {...promptPreviewInputDrafts, [inputDef.name]: encodeRefInputDraft(event.detail.value)}}
+                  />
+                {:else}
+                  <input
+                    type="text"
+                    value={draft ?? ""}
+                    on:input={(e) => promptPreviewInputDrafts = {...promptPreviewInputDrafts, [inputDef.name]: (e.currentTarget as HTMLInputElement).value}}
+                  />
+                {/if}
+              </label>
+            {/each}
+          </div>
         {/if}
       </div>
 
       <div class="prompt-preview-pane-body">
         {#if promptPreviewError}
           <p class="prompt-preview-error">{promptPreviewError}</p>
+        {/if}
+        {#if promptPreviewMissingRequired.length > 0}
+          <p class="prompt-preview-required-notice">
+            {promptPreviewMissingRequired.length} required input{promptPreviewMissingRequired.length === 1 ? "" : "s"} empty:
+            {promptPreviewMissingRequired.map((i) => i.label || i.name).join(", ")} — the rendered output below will have empty slots wherever this is referenced.
+          </p>
         {/if}
 
         {#if !rawBody.trim()}

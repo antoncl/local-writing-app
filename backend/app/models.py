@@ -568,6 +568,53 @@ class AIHealthResponse(BaseModel):
     error: str | None = None
 
 
+class AIProviderInfo(BaseModel):
+    """Lightweight provider listing for the picker's provider dropdown."""
+
+    name: str
+    display_name: str
+
+
+class AIProviderList(BaseModel):
+    providers: list[AIProviderInfo]
+
+
+class AIModelInfo(BaseModel):
+    """Wire-format mirror of `ModelDescriptor` (in
+    `app.services.ai.profiles.base`). Strings instead of enums so the
+    JSON shape stays stable across enum additions."""
+
+    id: str
+    display_name: str
+    provider: str
+    context_window: int
+    tier: str
+    capabilities: list[str]
+    deprecated: bool = False
+    sunset_date: str | None = None
+    successor: str | None = None
+    cost_in_per_mtok: float | None = None
+    cost_out_per_mtok: float | None = None
+    cache_read_multiplier: float | None = None
+
+
+class AIProviderModelList(BaseModel):
+    provider: str
+    models: list[AIModelInfo]
+
+
+class AITierResolution(BaseModel):
+    """Result of asking a provider profile to resolve a tier to a model id.
+
+    `model_id` is null when the tier has no candidates (e.g. requesting
+    PREMIUM from Ollama, or any tier when the provider's discovery is
+    offline and bake-in is empty)."""
+
+    provider: str
+    tier: str
+    model_id: str | None
+
+
 class AIPreviewRequest(BaseModel):
     template_source: str = Field(min_length=1)
     # Empty string is allowed: chat-routed prompts don't need a scene context.

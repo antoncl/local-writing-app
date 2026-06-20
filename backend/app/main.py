@@ -21,6 +21,11 @@ from app.models import (
     AssistantEntryList,
     AIHealthRequest,
     AIHealthResponse,
+    AIModelInfo,
+    AIProviderInfo,
+    AIProviderList,
+    AIProviderModelList,
+    AITierResolution,
     AIPreviewRequest,
     AIPreviewResponse,
     ChatSession,
@@ -81,6 +86,8 @@ from app.models import (
 from app.services import machine_settings as machine_settings_service
 from app.services.ai import providers as ai_providers
 from app.services.ai.preview import PreviewError, build_chat_payload, build_preview
+from app.services.ai.profiles import CapabilityTier, ModelDescriptor
+from app.services.ai.profiles.registry import known_provider_names, profile_for
 from app.services.project_service import ProjectService, ProjectServiceError
 
 
@@ -613,6 +620,87 @@ def ai_health(request: AIHealthRequest) -> AIHealthResponse:
         settings=settings,
         policy=policy,
     )
+
+
+def _descriptor_to_wire(descriptor: ModelDescriptor) -> AIModelInfo:
+    return AIModelInfo(
+        id=descriptor.id,
+        display_name=descriptor.display_name,
+        provider=descriptor.provider,
+        context_window=descriptor.context_window,
+        tier=descriptor.tier.value,
+        capabilities=sorted(c.value for c in descriptor.capabilities),
+        deprecated=descriptor.deprecated,
+        sunset_date=descriptor.sunset_date.isoformat() if descriptor.sunset_date else None,
+        successor=descriptor.successor,
+        cost_in_per_mtok=descriptor.cost_in_per_mtok,
+        cost_out_per_mtok=descriptor.cost_out_per_mtok,
+        cache_read_multiplier=descriptor.cache_read_multiplier,
+    )
+
+
+@app.get("/api/ai/providers", response_model=AIProviderList)
+def list_ai_providers() -> AIProviderList:
+    """List the providers the assistant builder can pick from."""
+
+    from app.services.machine_settings import PROVIDER_DISPLAY_NAMES
+
+    return AIProviderList(
+        providers=[
+            AIProviderInfo(
+                name=name,
+                display_name=PROVIDER_DISPLAY_NAMES.get(name, name.title()),
+            )
+            for name in known_provider_names()
+        ]
+    )
+
+
+@app.get("/api/ai/providers/{provider}/models", response_model=AIProviderModelList)
+async def list_ai_provider_models(
+    provider: str, force_refresh: bool = Query(default=False)
+) -> AIProviderModelList:
+    """Return the provider's model catalogue.
+
+    Falls back to bake-in data if live discovery fails (offline, bad key
+    — see `ProviderProfile.list_models()` semantics). `force_refresh`
+    bypasses any in-memory cache the profile holds."""
+
+    if provider not in known_provider_names():
+        raise HTTPException(status_code=404, detail=f"Unknown provider: {provider}")
+    settings = machine_settings_service.load_settings()
+    profile = profile_for(provider, settings)
+    descriptors = await profile.list_models(force_refresh=force_refresh)
+    return AIProviderModelList(
+        provider=provider,
+        models=[_descriptor_to_wire(d) for d in descriptors],
+    )
+
+
+@app.get(
+    "/api/ai/providers/{provider}/resolve-tier",
+    response_model=AITierResolution,
+)
+async def resolve_ai_provider_tier(
+    provider: str, tier: str = Query(...)
+) -> AITierResolution:
+    """Ask a provider to resolve a capability tier to a concrete model id.
+
+    Frontend calls this at save time so the assistant entry stores the
+    literal model. Returns null `model_id` if the tier has no candidates
+    (e.g. PREMIUM on Ollama)."""
+
+    if provider not in known_provider_names():
+        raise HTTPException(status_code=404, detail=f"Unknown provider: {provider}")
+    try:
+        tier_enum = CapabilityTier(tier)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=f"Unknown tier: {tier}") from exc
+    settings = machine_settings_service.load_settings()
+    profile = profile_for(provider, settings)
+    descriptors = await profile.list_models()
+    model_id = profile.model_for_tier(tier_enum, descriptors)
+    return AITierResolution(provider=provider, tier=tier, model_id=model_id)
 
 
 @app.post("/api/ai/preview", response_model=AIPreviewResponse)

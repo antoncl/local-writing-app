@@ -88,8 +88,17 @@ class OpenRouterProfile(ProviderProfile):
         return descriptors
 
     def caching_style(self, model_id: str) -> CachingStyle:
-        prefix = model_id.split("/", 1)[0].lower()
-        return _CACHING_BY_PREFIX.get(prefix, "none")
+        return caching_style_for_model(model_id)
+
+
+def caching_style_for_model(model_id: str) -> CachingStyle:
+    """Module-level helper so the chat dispatcher can branch without
+    instantiating a ProviderProfile. Mirrors the prefix lookup the
+    OpenRouterProfile.caching_style method does."""
+    if not model_id:
+        return "none"
+    prefix = model_id.split("/", 1)[0].lower()
+    return _CACHING_BY_PREFIX.get(prefix, "none")
 
 
 def _row_to_descriptor(row: dict) -> ModelDescriptor:

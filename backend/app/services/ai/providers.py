@@ -190,12 +190,20 @@ def chat(
     settings: MachineSettings,
     policy: AIPolicy,
     temperature: float = 0.7,
+    system_blocks: list[dict] | None = None,
+    session_id: str | None = None,
 ) -> ChatResult:
     """Run a chat completion against the chosen provider.
 
     `messages` is a list of `{role, content}` dicts where role is 'user' or
     'assistant'. The system prompt is kept separate (Anthropic places it on
     its own param; OpenAI-compatible prepends a system message).
+
+    `system_blocks` is the multi-block form with per-block cache markers
+    (see `_anthropic_system_blocks`). When provided, it overrides
+    `system_prompt`. Currently honored only by the Anthropic adapter;
+    other adapters collapse blocks back to a string (OpenRouter caching
+    support arrives in a follow-up — step 5b).
     """
     if not provider_name:
         return ChatResult(
@@ -227,6 +235,16 @@ def chat(
             error="messages must not be empty.",
         )
 
+    # OpenAI-compatible adapters don't currently understand system_blocks;
+    # collapse to a single string. OpenRouter caching support (step 5b)
+    # will branch on this so blocks survive when routing to providers
+    # that need them.
+    effective_system_prompt = system_prompt
+    if system_blocks and provider_name != "anthropic":
+        effective_system_prompt = "\n\n".join(
+            b.get("text", "") for b in system_blocks if b.get("text")
+        ) or system_prompt
+
     started = time.perf_counter()
     try:
         if provider_name == "anthropic":
@@ -237,28 +255,31 @@ def chat(
                 messages=messages,
                 max_tokens=max_tokens,
                 temperature=temperature,
+                system_blocks=system_blocks,
             )
         elif provider_name == "openai":
             content, stop_reason = _openai_compatible_chat(
                 base_url="https://api.openai.com/v1",
                 api_key=settings.providers.openai_api_key,
                 model=model,
-                system_prompt=system_prompt,
+                system_prompt=effective_system_prompt,
                 messages=messages,
                 max_tokens=max_tokens,
                 requires_key=True,
                 temperature=temperature,
             )
         elif provider_name == "openrouter":
-            content, stop_reason = _openai_compatible_chat(
-                base_url="https://openrouter.ai/api/v1",
+            from app.services.ai.profiles.openrouter import caching_style_for_model
+            content, stop_reason = _openrouter_chat(
                 api_key=settings.providers.openrouter_api_key,
                 model=model,
                 system_prompt=system_prompt,
                 messages=messages,
                 max_tokens=max_tokens,
-                requires_key=True,
                 temperature=temperature,
+                system_blocks=system_blocks,
+                caching_style=caching_style_for_model(model),
+                session_id=session_id,
             )
         elif provider_name == "ollama":
             base = settings.providers.ollama_host.rstrip("/")
@@ -268,7 +289,7 @@ def chat(
                 base_url=base,
                 api_key="ollama",
                 model=model,
-                system_prompt=system_prompt,
+                system_prompt=effective_system_prompt,
                 messages=messages,
                 max_tokens=max_tokens,
                 requires_key=False,
@@ -302,6 +323,7 @@ def chat(
 def _anthropic_chat(
     *, api_key: str, model: str, system_prompt: str,
     messages: list[dict[str, str]], max_tokens: int, temperature: float = 0.7,
+    system_blocks: list[dict] | None = None,
 ) -> tuple[str, str | None]:
     if not api_key:
         raise _ProviderError("Anthropic API key is not configured.")
@@ -317,7 +339,13 @@ def _anthropic_chat(
         "temperature": temperature,
         "messages": messages,
     }
-    if system_prompt:
+    # system_blocks (multi-block with per-block cache markers) overrides
+    # the legacy single-string system_prompt. Caller picks one or the other.
+    if system_blocks:
+        system_payload = _anthropic_system_blocks(system_blocks)
+        if system_payload:
+            kwargs["system"] = system_payload
+    elif system_prompt:
         kwargs["system"] = _anthropic_system_with_cache(system_prompt)
     response = client.messages.create(**kwargs)
     blocks = getattr(response, "content", None) or []
@@ -328,6 +356,152 @@ def _anthropic_chat(
             parts.append(text)
     stop_reason = getattr(response, "stop_reason", None)
     return "".join(parts), stop_reason
+
+
+def _openrouter_system_messages(
+    system_prompt: str,
+    system_blocks: list[dict] | None,
+    caching_style: str,
+) -> list[dict]:
+    """Build the [system] message list for an OpenRouter chat call.
+
+    OpenRouter accepts Anthropic-style `cache_control` markers on
+    individual content blocks when the routed-to provider needs them
+    explicitly (anthropic/google/qwen). For auto-cache providers
+    (openai/deepseek/grok/etc.) markers are ignored, so we collapse to
+    a plain string to keep the wire small.
+
+    Returns [] when there's nothing to send so the caller can append the
+    user/assistant messages without an empty system entry.
+
+    Pure function — testable without network or SDK.
+    """
+    if system_blocks and caching_style == "explicit":
+        parts: list[dict] = []
+        for block in system_blocks:
+            text = block.get("text") or ""
+            if not text:
+                continue
+            part: dict = {"type": "text", "text": text}
+            if block.get("cache_break_after"):
+                cache_control: dict = {"type": "ephemeral"}
+                ttl = block.get("ttl")
+                if ttl in ("5m", "1h"):
+                    cache_control["ttl"] = ttl
+                part["cache_control"] = cache_control
+            parts.append(part)
+        if parts:
+            return [{"role": "system", "content": parts}]
+        return []
+    # caching_style != "explicit": collapse blocks to a single string
+    # (auto-cache providers index on prefix bytes, no markers needed;
+    # "none" providers don't cache anyway).
+    collapsed = system_prompt
+    if system_blocks and not collapsed:
+        collapsed = "\n\n".join(
+            b.get("text", "") for b in system_blocks if b.get("text")
+        )
+    if not collapsed:
+        return []
+    return [{"role": "system", "content": collapsed}]
+
+
+def _openrouter_extra_body(session_id: str | None) -> dict:
+    """OpenRouter-specific fields outside the standard chat-completions
+    schema. Currently just `session_id` for provider stickiness — pinning
+    a chat to one underlying provider so the cache prefix stays valid
+    across turns. See https://openrouter.ai/docs/guides/best-practices/prompt-caching
+    """
+    extra: dict = {}
+    if session_id:
+        extra["session_id"] = session_id
+    return extra
+
+
+def _openrouter_chat(
+    *, api_key: str, model: str, system_prompt: str,
+    messages: list[dict[str, str]], max_tokens: int, temperature: float = 0.7,
+    system_blocks: list[dict] | None = None,
+    caching_style: str = "none",
+    session_id: str | None = None,
+) -> tuple[str, str | None]:
+    """OpenRouter chat completion, with cache-marker pass-through when the
+    routed-to provider supports explicit caching."""
+    if not api_key:
+        raise _ProviderError("API key is not configured for this provider.")
+    try:
+        from openai import OpenAI
+    except ImportError as exc:
+        raise _ProviderError(f"openai package not installed: {exc}") from exc
+
+    client = OpenAI(
+        base_url="https://openrouter.ai/api/v1",
+        api_key=api_key,
+        timeout=180.0,
+    )
+    full_messages = list(_openrouter_system_messages(system_prompt, system_blocks, caching_style))
+    full_messages.extend(messages)
+    extra_body = _openrouter_extra_body(session_id)
+    kwargs: dict = {
+        "model": model,
+        "max_tokens": max_tokens,
+        "temperature": temperature,
+        "messages": full_messages,
+    }
+    if extra_body:
+        kwargs["extra_body"] = extra_body
+    response = client.chat.completions.create(**kwargs)
+    choice = response.choices[0]
+    stop_reason = getattr(choice, "finish_reason", None)
+    return choice.message.content or "", stop_reason
+
+
+def _openrouter_chat_stream(
+    *, api_key: str, model: str, system_prompt: str,
+    messages: list[dict[str, str]], max_tokens: int, requires_key: bool,
+    temperature: float = 0.7,
+    system_blocks: list[dict] | None = None,
+    caching_style: str = "none",
+    session_id: str | None = None,
+) -> Iterator[StreamDelta | StreamThinking | str | None]:
+    """Streaming variant of _openrouter_chat. Same cache-marker semantics."""
+    if requires_key and not api_key:
+        raise _ProviderError("API key is not configured for this provider.")
+    try:
+        from openai import OpenAI
+    except ImportError as exc:
+        raise _ProviderError(f"openai package not installed: {exc}") from exc
+
+    client = OpenAI(
+        base_url="https://openrouter.ai/api/v1",
+        api_key=api_key or "sk-none",
+        timeout=300.0,
+    )
+    full_messages = list(_openrouter_system_messages(system_prompt, system_blocks, caching_style))
+    full_messages.extend(messages)
+    extra_body = _openrouter_extra_body(session_id)
+    kwargs: dict = {
+        "model": model,
+        "max_tokens": max_tokens,
+        "temperature": temperature,
+        "messages": full_messages,
+        "stream": True,
+    }
+    if extra_body:
+        kwargs["extra_body"] = extra_body
+    stop_reason: str | None = None
+    for chunk in client.chat.completions.create(**kwargs):
+        if not chunk.choices:
+            continue
+        choice = chunk.choices[0]
+        delta = getattr(choice, "delta", None)
+        text = getattr(delta, "content", None) if delta else None
+        if text:
+            yield StreamDelta(text=text)
+        finish = getattr(choice, "finish_reason", None)
+        if finish:
+            stop_reason = finish
+    yield stop_reason
 
 
 def _openai_compatible_chat(
@@ -397,30 +571,61 @@ _ANTHROPIC_THINKING_BUDGET = 1024
 
 
 def _anthropic_system_with_cache(system_prompt: str):
-    """Wrap the system prompt as a cacheable content block for Anthropic.
+    """Wrap a single system prompt as a cacheable content block.
 
-    Anthropic prompt caching needs the cacheable content surfaced as a
-    structured block carrying `cache_control: ephemeral`. The system
-    message is the materialized prompt template — the single largest
-    stable payload per chat session, so caching it cuts input cost to
-    ~10% on subsequent turns within the 5-minute TTL window.
-
-    Returns the SDK-shaped list for non-empty prompts; empty string is
-    returned as-is so the caller can skip the `system` kwarg entirely.
-
-    See [docs/ai-model-selection.md](../../../../docs/ai-model-selection.md)
-    "Caching strategy" for the broader design.
+    Thin compatibility wrapper around `_anthropic_system_blocks` for the
+    single-block path (one cache marker after the whole system prompt).
+    Kept stable for callers that haven't migrated to passing structured
+    blocks. See `_anthropic_system_blocks` for the multi-block variant.
     """
 
     if not system_prompt:
         return ""
-    return [
+    return _anthropic_system_blocks(
+        [{"text": system_prompt, "cache_break_after": True}]
+    )
+
+
+def _anthropic_system_blocks(blocks: list[dict]):
+    """Convert structured system blocks into Anthropic's content-array shape.
+
+    Each input block is a dict:
         {
-            "type": "text",
-            "text": system_prompt,
-            "cache_control": {"type": "ephemeral"},
+            "text": str,
+            "cache_break_after": bool = False,
+            "ttl": "5m" | "1h" = "5m",   # only honored when cache_break_after
         }
-    ]
+
+    Output is a list of `{type, text, cache_control?}` dicts suitable for
+    the Anthropic SDK's `system` kwarg. A cache_control marker is emitted
+    only on blocks where `cache_break_after` is True. Anthropic caches
+    the prefix UP TO each marker; placing markers between stable
+    sections (system header → lore → conversation pre-tail) lets later
+    turns reuse the cached prefix up to the last unchanged marker.
+
+    Empty blocks (no text) are dropped. Empty input list returns ""
+    so the caller can skip the `system` kwarg entirely.
+
+    Min-cache-size and breakpoint-budget enforcement are the caller's
+    responsibility — this function just emits what's asked.
+    """
+
+    if not blocks:
+        return ""
+    out: list[dict] = []
+    for block in blocks:
+        text = block.get("text") or ""
+        if not text:
+            continue
+        sdk_block: dict = {"type": "text", "text": text}
+        if block.get("cache_break_after"):
+            cache_control: dict = {"type": "ephemeral"}
+            ttl = block.get("ttl")
+            if ttl in ("5m", "1h"):
+                cache_control["ttl"] = ttl
+            sdk_block["cache_control"] = cache_control
+        out.append(sdk_block)
+    return out if out else ""
 
 
 def chat_stream(
@@ -434,6 +639,8 @@ def chat_stream(
     policy: AIPolicy,
     temperature: float = 0.7,
     thinking_enabled: bool = False,
+    system_blocks: list[dict] | None = None,
+    session_id: str | None = None,
 ) -> Iterator[StreamEvent]:
     """Stream a chat completion.
 
@@ -463,6 +670,16 @@ def chat_stream(
                           error="messages must not be empty.")
         return
 
+    # OpenAI-compatible adapters don't currently understand system_blocks;
+    # collapse to a single string. OpenRouter caching support (step 5b)
+    # will branch on this so blocks survive when routing to providers
+    # that need them.
+    effective_system_prompt = system_prompt
+    if system_blocks and provider_name != "anthropic":
+        effective_system_prompt = "\n\n".join(
+            b.get("text", "") for b in system_blocks if b.get("text")
+        ) or system_prompt
+
     started = time.perf_counter()
     stop_reason: str | None = None
     try:
@@ -472,19 +689,31 @@ def chat_stream(
                 model=model, system_prompt=system_prompt, messages=messages,
                 max_tokens=max_tokens, temperature=temperature,
                 thinking_enabled=thinking_enabled,
+                system_blocks=system_blocks,
             ):
                 if isinstance(ev, (StreamDelta, StreamThinking)):
                     yield ev
                 else:
                     stop_reason = ev  # final stop_reason string
-        elif provider_name in {"openai", "openrouter", "ollama"}:
+        elif provider_name == "openrouter":
+            from app.services.ai.profiles.openrouter import caching_style_for_model
+            for ev in _openrouter_chat_stream(
+                api_key=settings.providers.openrouter_api_key,
+                model=model, system_prompt=system_prompt, messages=messages,
+                max_tokens=max_tokens, requires_key=True,
+                temperature=temperature,
+                system_blocks=system_blocks,
+                caching_style=caching_style_for_model(model),
+                session_id=session_id,
+            ):
+                if isinstance(ev, (StreamDelta, StreamThinking)):
+                    yield ev
+                else:
+                    stop_reason = ev
+        elif provider_name in {"openai", "ollama"}:
             if provider_name == "openai":
                 base_url = "https://api.openai.com/v1"
                 api_key = settings.providers.openai_api_key
-                requires_key = True
-            elif provider_name == "openrouter":
-                base_url = "https://openrouter.ai/api/v1"
-                api_key = settings.providers.openrouter_api_key
                 requires_key = True
             else:
                 base = settings.providers.ollama_host.rstrip("/")
@@ -495,7 +724,7 @@ def chat_stream(
                 requires_key = False
             for ev in _openai_compatible_chat_stream(
                 base_url=base_url, api_key=api_key, model=model,
-                system_prompt=system_prompt, messages=messages,
+                system_prompt=effective_system_prompt, messages=messages,
                 max_tokens=max_tokens, requires_key=requires_key,
                 temperature=temperature,
             ):
@@ -528,12 +757,16 @@ def _anthropic_chat_stream(
     *, api_key: str, model: str, system_prompt: str,
     messages: list[dict[str, str]], max_tokens: int, temperature: float = 0.7,
     thinking_enabled: bool = False,
+    system_blocks: list[dict] | None = None,
 ) -> Iterator[StreamDelta | StreamThinking | str | None]:
     """Yield StreamDelta / StreamThinking events, then a final stop_reason str.
 
     When thinking_enabled is True, sends Anthropic's extended-thinking parameter
     and forwards `thinking_delta` events as StreamThinking. Otherwise behaves
     like a normal text stream.
+
+    `system_blocks` (multi-block cache markers) overrides `system_prompt`
+    when provided. See `_anthropic_system_blocks`.
     """
     if not api_key:
         raise _ProviderError("Anthropic API key is not configured.")
@@ -549,7 +782,11 @@ def _anthropic_chat_stream(
         "temperature": temperature,
         "messages": messages,
     }
-    if system_prompt:
+    if system_blocks:
+        system_payload = _anthropic_system_blocks(system_blocks)
+        if system_payload:
+            kwargs["system"] = system_payload
+    elif system_prompt:
         kwargs["system"] = _anthropic_system_with_cache(system_prompt)
     if thinking_enabled:
         budget = max(1024, min(_ANTHROPIC_THINKING_BUDGET, max_tokens - 256))

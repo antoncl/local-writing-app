@@ -12,6 +12,7 @@
   import { editorHtmlToSceneMarkdown, sceneMarkdownToHtml } from "./markdown";
   import CodeEditor from "./CodeEditor.svelte";
   import MetadataLongTextEditor from "./MetadataLongTextEditor.svelte";
+  import ProviderTierPicker from "./ProviderTierPicker.svelte";
   import ReferencePicker from "./ReferencePicker.svelte";
   import { api, HttpError } from "./api";
   import PromptInputField from "./PromptInputField.svelte";
@@ -555,7 +556,17 @@
   $: documentNameLabel = documentKind === "lore" ? "Name" : "Title";
   $: documentEntryTypes = Object.entries(metadataSchema?.entry_types ?? {}).filter(([, definition]) => definition.kind === documentKind && !definition.abstract);
   $: activeEntryType = metadataSchema?.entry_types[entryType] ?? metadataSchema?.entry_types[defaultEntryType()];
-  $: metadataFieldIds = activeEntryType?.fields ?? [];
+  // Assistants surface ai_provider / ai_capability_tier / ai_model via
+  // the bespoke ProviderTierPicker above the schema fields. Hide them
+  // from the generic field list to avoid duplicate editors.
+  const ASSISTANT_PICKER_FIELDS = new Set([
+    "ai_provider",
+    "ai_capability_tier",
+    "ai_model",
+  ]);
+  $: metadataFieldIds = (activeEntryType?.fields ?? []).filter((fieldId) =>
+    documentKind === "assistant" ? !ASSISTANT_PICKER_FIELDS.has(fieldId) : true,
+  );
   $: hasBody = activeEntryType?.has_body ?? true;
   $: metadataSummaryText = buildMetadataSummary(activeEntryType?.name ?? entryType, status, liveWordCount, hasBody);
 
@@ -2477,6 +2488,22 @@
                   {/each}
                 </select>
               </label>
+              {#if documentKind === "assistant"}
+                <ProviderTierPicker
+                  provider={metadataValueString(metadata.ai_provider)}
+                  tier={metadataValueString(metadata.ai_capability_tier) as import("./types").AICapabilityTier | ""}
+                  model={metadataValueString(metadata.ai_model)}
+                  on:change={(event) => {
+                    metadata = {
+                      ...metadata,
+                      ai_provider: event.detail.provider,
+                      ai_capability_tier: event.detail.tier,
+                      ai_model: event.detail.model,
+                    };
+                    emitChange();
+                  }}
+                />
+              {/if}
               <div class="metadata-fields">
                 {#each metadataFieldIds as fieldId}
                   {#if metadataSchema.fields[fieldId]}

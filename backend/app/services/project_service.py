@@ -231,6 +231,7 @@ DEFAULT_METADATA_SCHEMA: dict[str, Any] = {
             "kind": "assistant",
             "fields": [
                 "ai_provider",
+                "ai_capability_tier",
                 "ai_model",
                 "ai_temperature",
                 "ai_max_tokens",
@@ -307,6 +308,11 @@ DEFAULT_METADATA_SCHEMA: dict[str, Any] = {
             "name": "Subscription",
             "type": "select",
             "options": ["anthropic", "openai", "openrouter", "ollama"],
+        },
+        "ai_capability_tier": {
+            "name": "Capability tier",
+            "type": "select",
+            "options": ["", "fast", "balanced", "premium", "reasoning", "local"],
         },
         "ai_model": {"name": "Model", "type": "text"},
         "ai_temperature": {"name": "Temperature", "type": "number"},

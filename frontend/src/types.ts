@@ -309,6 +309,43 @@ export type AIHealthResponse = {
   error?: string | null;
 };
 
+export type AIProviderInfo = {
+  name: string;
+  display_name: string;
+};
+
+export type AIProviderList = {
+  providers: AIProviderInfo[];
+};
+
+export type AICapabilityTier = "fast" | "balanced" | "premium" | "reasoning" | "local";
+
+export type AIModelInfo = {
+  id: string;
+  display_name: string;
+  provider: string;
+  context_window: number;
+  tier: AICapabilityTier;
+  capabilities: string[];
+  deprecated: boolean;
+  sunset_date?: string | null;
+  successor?: string | null;
+  cost_in_per_mtok?: number | null;
+  cost_out_per_mtok?: number | null;
+  cache_read_multiplier?: number | null;
+};
+
+export type AIProviderModelList = {
+  provider: string;
+  models: AIModelInfo[];
+};
+
+export type AITierResolution = {
+  provider: string;
+  tier: string;
+  model_id: string | null;
+};
+
 export type AIPreviewRequest = {
   template_source: string;
   target_scene_id: string;

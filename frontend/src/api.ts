@@ -4,6 +4,9 @@ import type {
   AIContextPresetResponse,
   AIGenerateRequest,
   AIHealthResponse,
+  AIProviderList,
+  AIProviderModelList,
+  AITierResolution,
   AssistantEntry,
   AssistantEntryList,
   AIPolicy,
@@ -238,6 +241,18 @@ export const api = {
       method: "PUT",
       body: JSON.stringify(update),
     });
+  },
+  listAIProviders() {
+    return request<AIProviderList>("/ai/providers");
+  },
+  listAIProviderModels(provider: string, forceRefresh = false) {
+    const qs = forceRefresh ? "?force_refresh=true" : "";
+    return request<AIProviderModelList>(`/ai/providers/${encodeURIComponent(provider)}/models${qs}`);
+  },
+  resolveAIProviderTier(provider: string, tier: string) {
+    return request<AITierResolution>(
+      `/ai/providers/${encodeURIComponent(provider)}/resolve-tier?tier=${encodeURIComponent(tier)}`,
+    );
   },
   aiHealth(provider?: string, model?: string) {
     return request<AIHealthResponse>("/ai/health", {

@@ -14,6 +14,7 @@
   import MetadataLongTextEditor from "./MetadataLongTextEditor.svelte";
   import ReferencePicker from "./ReferencePicker.svelte";
   import { api, HttpError } from "./api";
+  import PromptInputField from "./PromptInputField.svelte";
   import type { AIPreviewResponse, AssistantEntrySummary, Backlink, EditableDocument, EntryBodyLanguage, EntryMetadata, MetadataFieldDefinition, MetadataSchema, MetadataValue, PromptEntrySummary, PromptInputDefinition } from "./types";
 
   export let scene: EditableDocument | null = null;
@@ -269,6 +270,24 @@
     return v === undefined || v === null || (typeof v === "string" && !v.trim());
   });
 
+  /** Translate Jinja2's terse error strings into plain English for the
+   * prompt author. Right now: UndefinedError attribute-misses on `input.<X>`
+   * (the most common authoring mistake — typo in the input name, or referring
+   * to a label instead of the name). Falls through unchanged for everything
+   * else. */
+  function friendlyTemplateError(raw: string, declared: PromptInputDefinition[]): string {
+    const m = /UndefinedError:\s*'\w+\s*object'\s*has\s*no\s*attribute\s*'(\w+)'/.exec(raw);
+    if (m) {
+      const missing = m[1];
+      const declaredNames = declared.map((d) => d.name);
+      const inputsList = declaredNames.length
+        ? ` Available inputs: ${declaredNames.map((n) => "input." + n).join(", ")}.`
+        : " No inputs are declared on this prompt — add one in the Detail Type editor first.";
+      return `Your template references \`{{ input.${missing} }}\` but there's no input named "${missing}".${inputsList}`;
+    }
+    return raw;
+  }
+
   function seedInputDrafts(declared: PromptInputDefinition[]): Record<string, string> {
     const drafts: Record<string, string> = {};
     for (const input of declared) {
@@ -332,7 +351,10 @@
       // could be pinned here too in a future slice — they're file-level today.
       promptPreviewDiagnostics = [];
     } catch (e) {
-      promptPreviewError = (e as Error).message || "Render failed.";
+      promptPreviewError = friendlyTemplateError(
+        (e as Error).message || "Render failed.",
+        promptPreviewDeclaredInputs,
+      );
       // If the error carries a line number (Jinja2 syntax errors do), pin a
       // gutter marker on that line. UndefinedError has no line — the error
       // text shown below the preview is the only signal in that case.
@@ -2627,60 +2649,31 @@
             <div class="prompt-preview-inputs-heading">
               Inputs
               <small>{promptPreviewDeclaredInputs.length}</small>
+              <small class="prompt-preview-inputs-hint">use in template as <code>&lbrace;&lbrace; input.&lt;name&gt; &rbrace;&rbrace;</code></small>
             </div>
             {#each promptPreviewDeclaredInputs as inputDef (inputDef.name)}
               {@const draft = promptPreviewInputDrafts[inputDef.name]}
               {@const isMissing = inputDef.required && (draft === undefined || draft === null || (typeof draft === "string" && !draft.trim()))}
               <label class="prompt-preview-field" class:missing-required={isMissing}>
-                <span>
-                  {inputDef.label || inputDef.name}{#if inputDef.required}<span class="required-marker"> *</span>{/if}
+                <span class="prompt-preview-field-label">
+                  <span class="prompt-preview-field-name">
+                    {inputDef.label || inputDef.name}{#if inputDef.required}<span class="required-marker"> *</span>{/if}
+                  </span>
+                  <button
+                    type="button"
+                    class="prompt-preview-field-accessor"
+                    title="Click to copy"
+                    on:click|preventDefault={() => navigator.clipboard?.writeText(`{{ input.${inputDef.name} }}`).catch(() => {})}
+                  ><code>&lbrace;&lbrace; input.{inputDef.name} &rbrace;&rbrace;</code></button>
                 </span>
-                {#if inputDef.type === "long_text"}
-                  <textarea
-                    rows="2"
-                    value={draft ?? ""}
-                    on:input={(e) => promptPreviewInputDrafts = {...promptPreviewInputDrafts, [inputDef.name]: (e.currentTarget as HTMLTextAreaElement).value}}
-                  ></textarea>
-                {:else if inputDef.type === "number"}
-                  <input
-                    type="number"
-                    value={draft ?? ""}
-                    on:input={(e) => promptPreviewInputDrafts = {...promptPreviewInputDrafts, [inputDef.name]: (e.currentTarget as HTMLInputElement).value}}
-                  />
-                {:else if inputDef.type === "boolean"}
-                  <input
-                    type="checkbox"
-                    checked={draft === "true"}
-                    on:change={(e) => promptPreviewInputDrafts = {...promptPreviewInputDrafts, [inputDef.name]: (e.currentTarget as HTMLInputElement).checked ? "true" : "false"}}
-                  />
-                {:else if inputDef.type === "select"}
-                  <select
-                    value={draft ?? ""}
-                    on:change={(e) => promptPreviewInputDrafts = {...promptPreviewInputDrafts, [inputDef.name]: (e.currentTarget as HTMLSelectElement).value}}
-                  >
-                    {#if !inputDef.required}
-                      <option value="">(none)</option>
-                    {/if}
-                    {#each inputDef.options ?? [] as option}
-                      <option value={option}>{option}</option>
-                    {/each}
-                  </select>
-                {:else if inputDef.type === "entity_ref" || inputDef.type === "entity_ref_list"}
-                  <ReferencePicker
-                    field={refInputStubField(inputDef)}
-                    value={refInputDraftValue(inputDef, draft)}
-                    metadataSchema={metadataSchema}
-                    excludeId={scene?.id ?? null}
-                    ariaLabel={inputDef.label || inputDef.name}
-                    on:change={(event) => promptPreviewInputDrafts = {...promptPreviewInputDrafts, [inputDef.name]: encodeRefInputDraft(event.detail.value)}}
-                  />
-                {:else}
-                  <input
-                    type="text"
-                    value={draft ?? ""}
-                    on:input={(e) => promptPreviewInputDrafts = {...promptPreviewInputDrafts, [inputDef.name]: (e.currentTarget as HTMLInputElement).value}}
-                  />
-                {/if}
+                <PromptInputField
+                  input={inputDef}
+                  value={draft ?? ""}
+                  metadataSchema={metadataSchema}
+                  excludeId={scene?.id ?? null}
+                  ariaLabel={inputDef.label || inputDef.name}
+                  on:change={(event) => promptPreviewInputDrafts = {...promptPreviewInputDrafts, [inputDef.name]: event.detail.value}}
+                />
               </label>
             {/each}
           </div>
@@ -2749,52 +2742,14 @@
         {#each declaredInputs as input (input.name)}
           <label>
             {input.label || input.name}{#if input.required}<span class="required-marker"> *</span>{/if}
-            {#if input.type === "long_text"}
-              <textarea
-                rows="4"
-                value={inputsDialogDrafts[input.name] ?? ""}
-                on:input={(event) => updateInputsDialogDraft(input.name, event.currentTarget.value)}
-              ></textarea>
-            {:else if input.type === "number"}
-              <input
-                type="number"
-                value={inputsDialogDrafts[input.name] ?? ""}
-                on:input={(event) => updateInputsDialogDraft(input.name, event.currentTarget.value)}
-              />
-            {:else if input.type === "boolean"}
-              <input
-                type="checkbox"
-                checked={inputsDialogDrafts[input.name] === "true"}
-                on:change={(event) => updateInputsDialogDraft(input.name, event.currentTarget.checked ? "true" : "false")}
-              />
-            {:else if input.type === "select"}
-              <select
-                value={inputsDialogDrafts[input.name] ?? ""}
-                on:change={(event) => updateInputsDialogDraft(input.name, event.currentTarget.value)}
-              >
-                {#if !input.required}
-                  <option value="">(none)</option>
-                {/if}
-                {#each input.options ?? [] as option}
-                  <option value={option}>{option}</option>
-                {/each}
-              </select>
-            {:else if input.type === "entity_ref" || input.type === "entity_ref_list"}
-              <ReferencePicker
-                field={refInputStubField(input)}
-                value={refInputDraftValue(input, inputsDialogDrafts[input.name])}
-                metadataSchema={metadataSchema}
-                excludeId={scene?.id ?? null}
-                ariaLabel={input.label || input.name}
-                on:change={(event) => updateInputsDialogDraft(input.name, encodeRefInputDraft(event.detail.value))}
-              />
-            {:else}
-              <input
-                type="text"
-                value={inputsDialogDrafts[input.name] ?? ""}
-                on:input={(event) => updateInputsDialogDraft(input.name, event.currentTarget.value)}
-              />
-            {/if}
+            <PromptInputField
+              input={input}
+              value={inputsDialogDrafts[input.name] ?? ""}
+              metadataSchema={metadataSchema}
+              excludeId={scene?.id ?? null}
+              ariaLabel={input.label || input.name}
+              on:change={(event) => updateInputsDialogDraft(input.name, event.detail.value)}
+            />
           </label>
         {/each}
         <label>

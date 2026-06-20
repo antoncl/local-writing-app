@@ -3,8 +3,10 @@
   import { api } from "./api";
   import CodeEditor from "./CodeEditor.svelte";
   import DocumentEditorPane from "./DocumentEditorPane.svelte";
+  import PlainTextEditor from "./PlainTextEditor.svelte";
   import PromptInputField from "./PromptInputField.svelte";
   import TopBar from "./TopBar.svelte";
+  import { compileMatcher } from "./implicitContextMatcher";
   import { renderChatContent } from "./chatMessageRender";
   import type {
     AIHealthResponse,
@@ -199,6 +201,10 @@
   $: isProjectOpen = appState.name === "projectOpen";
   let structure: StructureDocument | null = null;
   let loreEntries: LoreEntrySummary[] = [];
+  // Compiled matcher for implicit-context highlighting in editors.
+  // Rebuilds whenever the lore set changes. Cheap (sub-millisecond at
+  // Honorverse-scale per the benchmark) so we don't bother debouncing.
+  $: implicitContextMatcher = compileMatcher(loreEntries);
   let knownTags: string[] = [];
   let focusedEditorPaneId: string | null = null;
   $: focusedEditorPane = editorPanes.find((pane) => pane.id === focusedEditorPaneId) ?? editorPanes[0] ?? null;
@@ -1052,6 +1058,10 @@
       system_prompt: chatSystemPrompt,
       // Send history WITHOUT the placeholder we just pushed.
       messages: chatHistory.slice(0, idx).map(({ role, content }) => ({ role, content })),
+      // chat_id activates the implicit-context expander: server scans the
+      // last user message, appends new lore detections to the session
+      // journal, packs them as a cache-stable block before conversation.
+      chat_id: activeChatId,
     })) {
       if (ev.type === "delta") {
         chatHistory[idx].content += ev.text;
@@ -1063,6 +1073,12 @@
         scheduleScroll();
       } else if (ev.type === "done") {
         chatHistory[idx].truncated = ev.truncated;
+        // journal_added is piggy-backed on the terminal done event. Attach
+        // to the assistant message so the audit chip strip renders, and so
+        // persistActiveChat round-trips it for next reload.
+        if (Array.isArray(ev.journal_added) && ev.journal_added.length > 0) {
+          chatHistory[idx].journal_added = ev.journal_added;
+        }
         chatHistory = chatHistory;
         chatLastMeta = { provider: ev.provider, model: ev.model, latency_ms: ev.latency_ms };
       } else if (ev.type === "error") {
@@ -4258,6 +4274,7 @@
         metadataSchema={metadataSchema}
         promptEntries={promptEntries}
         knownTags={knownTags}
+        implicitContextMatcher={implicitContextMatcher}
         assistantEntries={assistantEntries}
         defaultAssistantId={defaultAssistantEntryId()}
         availableScenes={flattenStructureScenes(structure?.root)}
@@ -4537,6 +4554,20 @@
                 Response cut off — hit max tokens. Increase the limit in Assistant &amp; brief, then re-send.
               </div>
             {/if}
+            {#if message.journal_added && message.journal_added.length > 0}
+              <div class="chat-journal-added" title="Lore auto-detected from your message and added to this chat's context.">
+                <span class="chat-journal-added-label">Auto-added context:</span>
+                {#each message.journal_added as entry (entry.entry_id)}
+                  <span
+                    class="chat-journal-chip"
+                    class:chat-journal-chip-depth1={entry.source === "depth1_expansion"}
+                    title={entry.source === "depth1_expansion"
+                      ? `${entry.title} — pulled in because another detected entity mentions it`
+                      : `${entry.title} — detected in your message`}
+                  >{entry.title || entry.entry_id}</span>
+                {/each}
+              </div>
+            {/if}
           </div>
         {/each}
       </div>
@@ -4577,6 +4608,7 @@
                     structure={structure}
                     loreEntries={loreEntries}
                     promptEntries={promptEntries}
+                    implicitContextMatcher={implicitContextMatcher}
                     on:change={(event) => !chatIsLocked && updateChatInputDraft(input.name, event.detail.value)}
                   />
                 </label>
@@ -4586,13 +4618,17 @@
         </div>
       {/if}
 
-      <textarea
+      <PlainTextEditor
         class="chat-input"
-        bind:value={chatInput}
-        on:keydown={handleChatInputKeydown}
+        value={chatInput}
+        on:change={(e) => (chatInput = e.detail.value)}
+        on:keydown={(e) => handleChatInputKeydown(e.detail)}
         placeholder="Message… (Ctrl/⌘+Enter to send)"
-        spellcheck="true"
-      ></textarea>
+        ariaLabel="Chat message"
+        minHeight={60}
+        maxHeight={240}
+        matcher={implicitContextMatcher}
+      />
       <div class="button-row chat-action-row">
         <button type="button" disabled={!chatHistory.length || chatRunning} on:click={clearChat}>Clear</button>
         <button

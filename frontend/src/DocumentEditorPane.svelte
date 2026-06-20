@@ -24,6 +24,9 @@
   export let metadataSchema: MetadataSchema | null = null;
   export let promptEntries: PromptEntrySummary[] = [];
   export let knownTags: string[] = [];
+  // Optional matcher pass-through for the implicit-context highlight
+  // plugin on long-text metadata fields. App.svelte owns the compile.
+  export let implicitContextMatcher: import("./implicitContextMatcher").CompiledMatcher | null = null;
   export let assistantEntries: AssistantEntrySummary[] = [];
   export let defaultAssistantId: string = "";
   // Scenes available for the inline prompt-preview scene picker. The pane is
@@ -2540,6 +2543,7 @@
                         <MetadataLongTextEditor
                           ariaLabel={field.name}
                           value={currentValue}
+                          matcher={implicitContextMatcher}
                           on:change={(event) => updateMetadataField(fieldId, field, event.detail.value)}
                         />
                       </div>

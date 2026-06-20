@@ -7,9 +7,14 @@
   import TableHeader from "@tiptap/extension-table-header";
   import TableRow from "@tiptap/extension-table-row";
   import { editorHtmlToSceneMarkdown, sceneMarkdownToHtml } from "./markdown";
+  import { ImplicitContextHighlight, REBUILD_META } from "./implicitContextHighlight";
+  import type { CompiledMatcher } from "./implicitContextMatcher";
 
   export let value = "";
   export let ariaLabel = "Long text metadata";
+  // Optional implicit-context matcher — when provided, lore-name matches
+  // get inline highlighting + hover preview. Null disables.
+  export let matcher: CompiledMatcher | null = null;
 
   const dispatch = createEventDispatcher<{ change: { value: string } }>();
 
@@ -29,6 +34,20 @@
     }
   }
 
+  $: if (editor) updateMatcher(matcher);
+  function updateMatcher(next: CompiledMatcher | null): void {
+    if (!editor) return;
+    const ext = editor.extensionManager.extensions.find(
+      (e) => e.name === "implicitContextHighlight",
+    );
+    if (!ext) return;
+    ext.options.matcher = next;
+    const view = editor.view;
+    if (!view) return;
+    const tr = view.state.tr.setMeta(REBUILD_META, true).setMeta("addToHistory", false);
+    view.dispatch(tr);
+  }
+
   onMount(() => {
     editor = new Editor({
       element: editorElement,
@@ -38,6 +57,7 @@
         TableRow,
         TableHeader,
         TableCell,
+        ImplicitContextHighlight.configure({ matcher }),
       ],
       content: "",
       editorProps: {

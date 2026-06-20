@@ -407,6 +407,7 @@ export type AIChatRequest = {
   system_prompt?: string;
   messages: ChatMessage[];
   max_tokens?: number;
+  chat_id?: string | null;
 };
 
 export type AIChatResponse = {
@@ -420,6 +421,7 @@ export type AIChatResponse = {
   error?: string | null;
   stop_reason?: string | null;
   truncated: boolean;
+  journal_added?: ChatSessionJournalEntry[];
 };
 
 export type AIGenerateRequest = {
@@ -463,6 +465,7 @@ export type ChatSessionMessage = {
   content: string;
   thinking?: string;
   truncated?: boolean;
+  journal_added?: ChatSessionJournalEntry[];
 };
 
 export type ChatSessionContextItem = {
@@ -470,6 +473,14 @@ export type ChatSessionContextItem = {
   id: string;
   entry_type?: string;
   title?: string;
+};
+
+export type ChatSessionJournalEntry = {
+  entry_id: string;
+  title?: string;
+  entry_type?: string;
+  added_at_turn?: number;
+  source?: "user_message" | "rendered_prompt" | "depth1_expansion";
 };
 
 export type ChatSession = {
@@ -484,6 +495,7 @@ export type ChatSession = {
   context_items: ChatSessionContextItem[];
   messages: ChatSessionMessage[];
   inputs?: Record<string, unknown>;
+  journal?: ChatSessionJournalEntry[];
 };
 
 export type ChatSessionSummary = {
@@ -517,6 +529,7 @@ export type SaveChatSessionRequest = {
   context_items: ChatSessionContextItem[];
   messages: ChatSessionMessage[];
   inputs?: Record<string, unknown>;
+  journal?: ChatSessionJournalEntry[];
 };
 
 export type DirectoryEntry = {

@@ -750,6 +750,87 @@ def ai_preview(request: AIPreviewRequest) -> AIPreviewResponse:
 # --- AI: chat completion (first real model call) ---
 
 
+def _prepare_chat_send_payload(
+    chat_id: str | None,
+    system_prompt: str,
+    messages_list: list[dict],
+) -> tuple[list[dict] | None, str | None, list[Any]]:
+    """When chat_id is bound, run the implicit-context expander on the last
+    user message, append new detections to ChatSession.journal, save the
+    chat, and return:
+      - system_blocks: [{system_prompt, 1h ttl}, {journal_xml, 5m ttl}]
+      - session_id for OpenRouter provider stickiness
+      - journal_added: lore IDs newly detected on THIS turn (for audit UI)
+
+    Returns (None, None, []) when chat_id is empty or the chat doesn't
+    exist — caller falls back to the legacy single-string system path.
+    """
+    if not chat_id:
+        return None, None, []
+    try:
+        chat = service.read_chat_session(chat_id)
+    except ProjectServiceError:
+        return None, None, []
+
+    from app.services.ai.context_expander import expand_context
+    from app.services.ai.helpers import _format_lore_block
+
+    # The last user message in the conversation triggered this send.
+    user_text = ""
+    for m in reversed(messages_list):
+        if m.get("role") == "user":
+            user_text = m.get("content") or ""
+            break
+    turn = max(0, len(messages_list) - 1)
+
+    new_entries = expand_context(
+        service,
+        user_text,
+        existing_journal=chat.journal,
+        explicit_picks=chat.context_items,
+        source="user_message",
+        turn=turn,
+    )
+    if new_entries:
+        extended_journal = list(chat.journal) + new_entries
+        service.save_chat_session(
+            chat_id,
+            SaveChatSessionRequest(
+                title=chat.title,
+                prompt_entry_id=chat.prompt_entry_id,
+                assistant_id=chat.assistant_id,
+                system_prompt=chat.system_prompt,
+                pinned=chat.pinned,
+                context_items=chat.context_items,
+                messages=chat.messages,
+                inputs=chat.inputs,
+                journal=extended_journal,
+            ),
+        )
+        journal_for_send = extended_journal
+    else:
+        journal_for_send = list(chat.journal)
+
+    blocks: list[dict] = []
+    if system_prompt:
+        # Slot 1: system + project-stable (per decisions_implicit_context).
+        # 1h TTL because this only changes when the chat is locked at first
+        # send; multi-turn sessions reuse this for hours.
+        blocks.append({"text": system_prompt, "cache_break_after": True, "ttl": "1h"})
+    if journal_for_send:
+        journal_xml = _format_lore_block(
+            service, [e.entry_id for e in journal_for_send]
+        )
+        if journal_xml:
+            # Slot 2: merged explicit + detected context (we treat the
+            # journal as the detected portion; explicit picks already live
+            # in the rendered system_prompt at first turn). 5m TTL because
+            # this grows mid-session — append-only, ratchets forward.
+            blocks.append({"text": journal_xml, "cache_break_after": True, "ttl": "5m"})
+
+    return (blocks or None), chat_id, list(new_entries)
+
+
 @app.post("/api/ai/chat", response_model=AIChatResponse)
 def ai_chat(request: AIChatRequest) -> AIChatResponse:
     settings = machine_settings_service.load_settings()
@@ -766,15 +847,22 @@ def ai_chat(request: AIChatRequest) -> AIChatResponse:
     except ProjectServiceError:
         policy = "off"
 
+    messages_list = [m.model_dump() for m in request.messages]
+    system_blocks, session_id, journal_added = _prepare_chat_send_payload(
+        request.chat_id, request.system_prompt, messages_list
+    )
+
     result = ai_providers.chat(
         provider_name=resolved.provider,
         model=resolved.model,
         system_prompt=request.system_prompt,
-        messages=[m.model_dump() for m in request.messages],
+        messages=messages_list,
         max_tokens=resolved.max_tokens,
         temperature=resolved.temperature,
         settings=settings,
         policy=policy,
+        system_blocks=system_blocks,
+        session_id=session_id,
     )
     # Both Anthropic and OpenAI signal "hit max_tokens" — different names.
     truncated = result.stop_reason in {"max_tokens", "length"}
@@ -789,6 +877,7 @@ def ai_chat(request: AIChatRequest) -> AIChatResponse:
         error=result.error,
         stop_reason=result.stop_reason,
         truncated=truncated,
+        journal_added=journal_added,
     )
 
 
@@ -962,19 +1051,32 @@ def ai_chat_stream(request: AIChatRequest) -> StreamingResponse:
     except ProjectServiceError:
         policy = "off"
 
+    messages_list = [m.model_dump() for m in request.messages]
+    system_blocks, session_id, journal_added = _prepare_chat_send_payload(
+        request.chat_id, request.system_prompt, messages_list
+    )
+
     events = ai_providers.chat_stream(
         provider_name=resolved.provider,
         model=resolved.model,
         system_prompt=request.system_prompt,
-        messages=[m.model_dump() for m in request.messages],
+        messages=messages_list,
         max_tokens=resolved.max_tokens,
         temperature=resolved.temperature,
         thinking_enabled=resolved.thinking_enabled,
         settings=settings,
         policy=policy,
+        system_blocks=system_blocks,
+        session_id=session_id,
     )
     return StreamingResponse(
-        _stream_provider_events(events, policy=policy),
+        _stream_provider_events(
+            events, policy=policy,
+            extra_done=(
+                {"journal_added": [e.model_dump() for e in journal_added]}
+                if journal_added else None
+            ),
+        ),
         media_type="application/x-ndjson",
     )
 

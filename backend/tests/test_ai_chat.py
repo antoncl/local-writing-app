@@ -469,5 +469,202 @@ class ChatStreamEndpointTests(unittest.TestCase):
         self.assertEqual(done["stop_reason"], "max_tokens")
 
 
+class ChatEndpointJournalTests(unittest.TestCase):
+    """End-to-end exercise of the implicit-context journal on chat send.
+
+    Creates a project with lore wired so Honor's body textually mentions
+    Pavel (depth-1 expansion target), starts a chat, and posts a message
+    that triggers detection. Verifies the journal gets appended, the
+    provider receives system_blocks with the lore XML, and journal_added
+    surfaces on the response for the audit UI.
+    """
+
+    def setUp(self) -> None:
+        from app.models import (
+            CreateChatSessionRequest,
+            CreateLoreEntryRequest,
+            SaveLoreEntryRequest,
+        )
+        self.temp_dir = TemporaryDirectory()
+        self.root = Path(self.temp_dir.name) / "project"
+        global_service.__init__()
+        global_service.create_project(self.root, "Journal Tests")
+        self.client = TestClient(app)
+        self.config_dir = Path(self.temp_dir.name) / "machine_config"
+        self.config_dir.mkdir()
+        self._config_patcher = patch(
+            "app.services.machine_settings.config_path",
+            return_value=self.config_dir / "config.yaml",
+        )
+        self._config_patcher.start()
+
+        global_service.update_project_settings(
+            UpdateProjectSettingsRequest(ai_policy="cloud-allowed")
+        )
+
+        # Lore: Honor (with alias) → body mentions Pavel (depth-1); Nimitz unrelated.
+        honor = global_service.create_lore_entry(
+            CreateLoreEntryRequest(title="Honor Harrington", entry_type="character")
+        )
+        nimitz = global_service.create_lore_entry(
+            CreateLoreEntryRequest(title="Nimitz", entry_type="character")
+        )
+        pavel = global_service.create_lore_entry(
+            CreateLoreEntryRequest(title="Pavel Young", entry_type="character")
+        )
+
+        def _save(entry_id: str, metadata: dict, body: str) -> None:
+            existing = global_service.read_lore_entry(entry_id)
+            global_service.save_lore_entry(
+                entry_id,
+                SaveLoreEntryRequest(
+                    title=existing.title, body_markdown=body,
+                    base_revision=existing.revision, entry_type="character",
+                    metadata=metadata,
+                ),
+            )
+
+        _save(honor.id, {"aliases": ["Honor"]}, "Captain of the Fearless. Rival of Pavel Young.")
+        _save(nimitz.id, {"aliases": []}, "Treecat.")
+        _save(pavel.id, {"aliases": []}, "Disgraced Captain.")
+        self.honor_id = honor.id
+        self.nimitz_id = nimitz.id
+        self.pavel_id = pavel.id
+
+        chat = global_service.create_chat_session(
+            CreateChatSessionRequest(title="Test", prompt_entry_id="prompt_x")
+        )
+        self.chat_id = chat.id
+
+    def tearDown(self) -> None:
+        self._config_patcher.stop()
+        self.temp_dir.cleanup()
+
+    def test_chat_send_appends_to_journal_and_passes_system_blocks(self) -> None:
+        loaded = _set_machine_keys(anthropic="sk-ant-test", default_provider="anthropic")
+        with patch("app.services.machine_settings.load_settings", return_value=loaded), \
+             patch(
+                "app.services.ai.providers._anthropic_chat",
+                return_value=("Reply.", "end_turn"),
+             ) as mock_chat:
+            response = self.client.post(
+                "/api/ai/chat",
+                json={
+                    "provider": "anthropic",
+                    "model": "claude-haiku-4-5-20251001",
+                    "system_prompt": "You are a writing assistant.",
+                    "messages": [{"role": "user", "content": "Honor walked in."}],
+                    "chat_id": self.chat_id,
+                },
+            )
+        self.assertEqual(response.status_code, 200, response.text)
+        body = response.json()
+        self.assertTrue(body["ok"])
+
+        # journal_added must include both the direct hit and the depth-1
+        # expansion. Entries are full snapshots with title + source.
+        added_ids = {e["entry_id"] for e in body["journal_added"]}
+        self.assertIn(self.honor_id, added_ids)
+        self.assertIn(self.pavel_id, added_ids)
+        self.assertNotIn(self.nimitz_id, added_ids)
+        honor_entry = next(e for e in body["journal_added"] if e["entry_id"] == self.honor_id)
+        pavel_entry = next(e for e in body["journal_added"] if e["entry_id"] == self.pavel_id)
+        self.assertEqual(honor_entry["title"], "Honor Harrington")
+        self.assertEqual(honor_entry["source"], "user_message")
+        self.assertEqual(pavel_entry["source"], "depth1_expansion")
+
+        # Persisted chat journal mirrors what was added.
+        chat = global_service.read_chat_session(self.chat_id)
+        journal_ids = [e.entry_id for e in chat.journal]
+        self.assertIn(self.honor_id, journal_ids)
+        self.assertIn(self.pavel_id, journal_ids)
+
+        # Provider received system_blocks: slot 1 = system_prompt (1h),
+        # slot 2 = journal XML (5m).
+        kwargs = mock_chat.call_args.kwargs
+        blocks = kwargs["system_blocks"]
+        self.assertIsNotNone(blocks)
+        self.assertEqual(len(blocks), 2)
+        self.assertEqual(blocks[0]["text"], "You are a writing assistant.")
+        self.assertEqual(blocks[0]["ttl"], "1h")
+        self.assertIn("Honor Harrington", blocks[1]["text"])
+        self.assertIn("Pavel Young", blocks[1]["text"])
+        self.assertEqual(blocks[1]["ttl"], "5m")
+
+    def test_no_chat_id_skips_journal_path(self) -> None:
+        loaded = _set_machine_keys(anthropic="sk-ant-test", default_provider="anthropic")
+        with patch("app.services.machine_settings.load_settings", return_value=loaded), \
+             patch(
+                "app.services.ai.providers._anthropic_chat",
+                return_value=("Reply.", "end_turn"),
+             ) as mock_chat:
+            response = self.client.post(
+                "/api/ai/chat",
+                json={
+                    "provider": "anthropic",
+                    "model": "claude-haiku-4-5-20251001",
+                    "system_prompt": "You are helpful.",
+                    "messages": [{"role": "user", "content": "Honor walked in."}],
+                    # No chat_id — legacy path
+                },
+            )
+        self.assertEqual(response.status_code, 200, response.text)
+        self.assertEqual(response.json()["journal_added"], [])
+        # Legacy path: system_blocks not passed.
+        kwargs = mock_chat.call_args.kwargs
+        self.assertIsNone(kwargs.get("system_blocks"))
+        self.assertIsNone(kwargs.get("session_id"))
+
+    def test_journal_is_append_only_across_turns(self) -> None:
+        # Turn 1: user mentions Honor → Honor + Pavel added.
+        loaded = _set_machine_keys(anthropic="sk-ant-test", default_provider="anthropic")
+        with patch("app.services.machine_settings.load_settings", return_value=loaded), \
+             patch(
+                "app.services.ai.providers._anthropic_chat",
+                return_value=("OK.", "end_turn"),
+             ):
+            self.client.post(
+                "/api/ai/chat",
+                json={
+                    "provider": "anthropic",
+                    "model": "claude-haiku-4-5-20251001",
+                    "messages": [{"role": "user", "content": "Honor stepped onto the bridge."}],
+                    "chat_id": self.chat_id,
+                },
+            )
+        first = global_service.read_chat_session(self.chat_id)
+        first_ids = {e.entry_id for e in first.journal}
+        self.assertIn(self.honor_id, first_ids)
+
+        # Turn 2: user mentions Nimitz → Nimitz added; Honor NOT re-added.
+        with patch("app.services.machine_settings.load_settings", return_value=loaded), \
+             patch(
+                "app.services.ai.providers._anthropic_chat",
+                return_value=("OK.", "end_turn"),
+             ):
+            response = self.client.post(
+                "/api/ai/chat",
+                json={
+                    "provider": "anthropic",
+                    "model": "claude-haiku-4-5-20251001",
+                    "messages": [
+                        {"role": "user", "content": "Honor stepped onto the bridge."},
+                        {"role": "assistant", "content": "OK."},
+                        {"role": "user", "content": "What about Nimitz?"},
+                    ],
+                    "chat_id": self.chat_id,
+                },
+            )
+        added_ids = {e["entry_id"] for e in response.json()["journal_added"]}
+        self.assertIn(self.nimitz_id, added_ids)
+        self.assertNotIn(self.honor_id, added_ids)  # dedup against existing journal
+        second = global_service.read_chat_session(self.chat_id)
+        second_ids = [e.entry_id for e in second.journal]
+        # All first-turn entries preserved + new ones appended (order stable).
+        for eid in first_ids:
+            self.assertIn(eid, second_ids)
+        self.assertIn(self.nimitz_id, second_ids)
+
+
 if __name__ == "__main__":
     unittest.main()

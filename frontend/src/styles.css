@@ -3327,6 +3327,92 @@ h3 {
   line-height: 1.4;
 }
 
+/* Audit chip strip — shows which lore entries the implicit-context
+   expander pulled into scope on this turn. Sits below the assistant
+   message body so it reads as "after the reply, here's what's now
+   loaded." Depth-1 expansions get a subtler style — they were inferred,
+   not directly named by the user. */
+.chat-journal-added {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px 6px;
+  padding: 6px 12px;
+  background: rgba(0, 0, 0, 0.02);
+  border-top: 1px solid rgba(0, 0, 0, 0.06);
+  font-size: 12px;
+}
+
+.chat-journal-added-label {
+  color: #6f7c78;
+  margin-right: 2px;
+  font-weight: 500;
+}
+
+.chat-journal-chip {
+  display: inline-block;
+  padding: 1px 8px;
+  border-radius: 10px;
+  background: #e0ebe6;
+  border: 1px solid #b6cdc1;
+  color: #2a3431;
+  line-height: 1.5;
+  cursor: default;
+}
+
+.chat-journal-chip-depth1 {
+  background: rgba(224, 235, 230, 0.55);
+  border-style: dashed;
+  color: #4d5753;
+}
+
+/* Implicit-context highlight + hover popup. Applied by the ProseMirror
+   plugin in implicitContextHighlight.ts. Underlines lore-name matches
+   inline as the user types so they see what the send-time expander
+   would pick up. Subtle by default — colour comes from the entity in a
+   future iteration. */
+.implicit-context-match {
+  border-bottom: 1.5px dotted #7d9d92;
+  cursor: help;
+}
+
+.implicit-context-popup {
+  position: fixed;
+  z-index: 9999;
+  max-width: 320px;
+  padding: 8px 10px;
+  background: #ffffff;
+  border: 1px solid #b6cdc1;
+  border-radius: 6px;
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.12);
+  font-size: 13px;
+  line-height: 1.4;
+  color: #2a3431;
+  pointer-events: none;
+}
+
+.implicit-context-popup-title {
+  font-weight: 600;
+  color: #1f2a27;
+}
+
+.implicit-context-popup-type {
+  display: inline-block;
+  margin-top: 2px;
+  padding: 1px 6px;
+  background: #e0ebe6;
+  border-radius: 8px;
+  font-size: 11px;
+  color: #4d5753;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.implicit-context-popup-preview {
+  margin-top: 6px;
+  color: #4d5753;
+}
+
 /* Defensive: nothing in a chat message should ever be height-clipped. */
 .chat-message,
 .chat-message-content {
@@ -3341,16 +3427,10 @@ h3 {
   text-align: right;
 }
 
+/* The composer is now a PlainTextEditor (TipTap), so border/padding/
+   sizing live inside that component. .chat-input here just ensures the
+   wrapper fills the chat panel width. */
 .chat-input {
-  font-family: inherit;
-  font-size: 15px;
-  line-height: 1.5;
-  min-height: 80px;
-  max-height: 240px;
-  padding: 9px 11px;
-  border: 1px solid #cbd6d2;
-  border-radius: 4px;
-  resize: vertical;
   width: 100%;
   box-sizing: border-box;
 }

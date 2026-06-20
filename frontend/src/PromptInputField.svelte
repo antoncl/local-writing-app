@@ -7,6 +7,7 @@
   // halves the maintenance surface for input types.
   import { createEventDispatcher } from "svelte";
   import ContextPicker from "./ContextPicker.svelte";
+  import PlainTextEditor from "./PlainTextEditor.svelte";
   import ReferencePicker from "./ReferencePicker.svelte";
   import type {
     ContextPickConfig,
@@ -28,6 +29,9 @@
   export let structure: StructureDocument | null = null;
   export let loreEntries: LoreEntrySummary[] = [];
   export let promptEntries: PromptEntrySummary[] = [];
+  // Optional matcher pass-through for implicit-context highlighting on
+  // long_text inputs. Other input types ignore it.
+  export let implicitContextMatcher: import("./implicitContextMatcher").CompiledMatcher | null = null;
 
   const dispatch = createEventDispatcher<{ change: { value: string } }>();
 
@@ -76,12 +80,14 @@
 </script>
 
 {#if input.type === "long_text"}
-  <textarea
-    rows="3"
+  <PlainTextEditor
     value={value ?? ""}
-    aria-label={ariaLabel}
-    on:input={(e) => dispatch("change", { value: (e.currentTarget as HTMLTextAreaElement).value })}
-  ></textarea>
+    ariaLabel={ariaLabel ?? (input.label || input.name)}
+    minHeight={60}
+    maxHeight={200}
+    matcher={implicitContextMatcher}
+    on:change={(e) => dispatch("change", { value: e.detail.value })}
+  />
 {:else if input.type === "number"}
   <input
     type="number"

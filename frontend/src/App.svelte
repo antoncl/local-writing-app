@@ -5,6 +5,7 @@
   import DocumentEditorPane from "./DocumentEditorPane.svelte";
   import PromptInputField from "./PromptInputField.svelte";
   import TopBar from "./TopBar.svelte";
+  import { renderChatContent } from "./chatMessageRender";
   import type {
     AIHealthResponse,
     AIPolicy,
@@ -4647,13 +4648,17 @@
             {#if message.thinking}
               <details class="chat-thinking" open={chatRunning && i === chatHistory.length - 1 && !message.content}>
                 <summary>Thinking</summary>
-                <div class="chat-thinking-content">{message.thinking}</div>
+                <div class="chat-thinking-content chat-message-rendered">{@html renderChatContent(message.thinking)}</div>
               </details>
             {/if}
             {#if chatRunning && i === chatHistory.length - 1 && message.role === "assistant" && !message.content && !message.thinking}
               <div class="chat-message-content chat-typing">…thinking</div>
             {:else if message.content}
-              <div class="chat-message-content">{message.content}</div>
+              {#if message.role === "assistant"}
+                <div class="chat-message-content chat-message-rendered">{@html renderChatContent(message.content)}</div>
+              {:else}
+                <div class="chat-message-content">{message.content}</div>
+              {/if}
             {/if}
             {#if message.truncated}
               <div class="chat-truncated-banner">

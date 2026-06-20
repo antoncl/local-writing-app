@@ -1691,6 +1691,11 @@
   }
 
   function handleChatRenameKeydown(event: KeyboardEvent): void {
+    // The rename input lives inside .pane-header, which has its own
+    // keydown handler that swallows Space (and Enter) to focus the pane.
+    // Stop propagation so typing in the input — including spaces — isn't
+    // hijacked by the surrounding role="button" wrapper.
+    event.stopPropagation();
     if (event.key === "Enter") {
       event.preventDefault();
       void commitActiveChatRename();

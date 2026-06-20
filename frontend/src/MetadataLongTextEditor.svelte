@@ -9,6 +9,7 @@
   import { editorHtmlToSceneMarkdown, sceneMarkdownToHtml } from "./markdown";
   import { ImplicitContextHighlight, REBUILD_META } from "./implicitContextHighlight";
   import type { CompiledMatcher } from "./implicitContextMatcher";
+  import { sanitizePastedHtml } from "./sanitizePastedHtml";
 
   export let value = "";
   export let ariaLabel = "Long text metadata";
@@ -66,6 +67,7 @@
           "aria-label": ariaLabel,
           spellcheck: "true",
         },
+        transformPastedHTML: (html) => sanitizePastedHtml(html),
       },
       onUpdate: () => {
         if (!editor || applyingExternalValue) return;

@@ -10,6 +10,7 @@
   import TableHeader from "@tiptap/extension-table-header";
   import TableRow from "@tiptap/extension-table-row";
   import { editorHtmlToSceneMarkdown, sceneMarkdownToHtml } from "./markdown";
+  import { sanitizePastedHtml } from "./sanitizePastedHtml";
   import CodeEditor from "./CodeEditor.svelte";
   import ContextPickConfigEditor from "./ContextPickConfigEditor.svelte";
   import MetadataLongTextEditor from "./MetadataLongTextEditor.svelte";
@@ -698,6 +699,11 @@
             return false;
           },
         },
+        // External clipboard HTML (Word, Google Docs, web pages) ships
+        // inline styles + classes that can't round-trip through our
+        // Markdown serializer. Strip them at paste time so what's stored
+        // matches what's rendered — no surprise font/colour carryover.
+        transformPastedHTML: (html) => sanitizePastedHtml(html),
       },
       onUpdate: () => {
         if (!enforceUniqueTodoAnchors()) {

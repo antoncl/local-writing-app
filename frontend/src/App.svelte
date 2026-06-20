@@ -2037,6 +2037,14 @@
     focusPane("schema");
   }
 
+  // Switches the tree's scope. schemaFieldKind is derived from
+  // schemaFieldEntryType via a $: expression — to switch kinds we set
+  // entryType to a default of the target kind. The cascade updates
+  // schemaContextHeading and schemaNodeTypeTree on the next tick.
+  function switchSchemaKind(kind: "scene" | "lore" | "prompt" | "assistant") {
+    schemaFieldEntryType = defaultSchemaEntryType(kind);
+  }
+
   function defaultSchemaEntryType(kind: "scene" | "lore" | "prompt" | "assistant") {
     const fallback = kind === "lore" ? "lore_note" : kind === "prompt" ? "prompt" : kind === "assistant" ? "assistant" : "scene";
     return Object.entries(metadataSchema?.entry_types ?? {}).find(([, definition]) => definition.kind === kind)?.[0] ?? fallback;
@@ -3698,6 +3706,36 @@
       </div>
     </header>
     <div class="pane-content schema-list">
+      <div class="schema-kind-tabs" role="tablist" aria-label="Type kind">
+        <button
+          type="button"
+          role="tab"
+          aria-selected={schemaFieldKind === "scene"}
+          class:active={schemaFieldKind === "scene"}
+          on:click={() => switchSchemaKind("scene")}
+        >Scene</button>
+        <button
+          type="button"
+          role="tab"
+          aria-selected={schemaFieldKind === "lore"}
+          class:active={schemaFieldKind === "lore"}
+          on:click={() => switchSchemaKind("lore")}
+        >Lore</button>
+        <button
+          type="button"
+          role="tab"
+          aria-selected={schemaFieldKind === "prompt"}
+          class:active={schemaFieldKind === "prompt"}
+          on:click={() => switchSchemaKind("prompt")}
+        >Prompt</button>
+        <button
+          type="button"
+          role="tab"
+          aria-selected={schemaFieldKind === "assistant"}
+          class:active={schemaFieldKind === "assistant"}
+          on:click={() => switchSchemaKind("assistant")}
+        >Assistant</button>
+      </div>
       <div class="schema-context-heading">
         <strong>{schemaContextHeading}</strong>
         <small>Drag a custom type onto another type to change its parent.</small>

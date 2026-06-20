@@ -2126,6 +2126,37 @@ h3 {
   font-size: 12px;
 }
 
+.schema-kind-tabs {
+  display: flex;
+  gap: 2px;
+  margin: 0 -10px 8px;
+  padding: 0 10px 6px;
+  border-bottom: 1px solid #dfe6e3;
+}
+
+.schema-kind-tabs button {
+  flex: 1;
+  padding: 6px 10px;
+  background: transparent;
+  border: 1px solid transparent;
+  border-bottom: 2px solid transparent;
+  border-radius: 4px 4px 0 0;
+  font-size: 12px;
+  color: #65716c;
+  cursor: pointer;
+}
+
+.schema-kind-tabs button:hover {
+  color: #2a3431;
+  background: #f4f7f5;
+}
+
+.schema-kind-tabs button.active {
+  color: #1d4d36;
+  border-bottom-color: #1d4d36;
+  font-weight: 600;
+}
+
 .schema-type-fields {
   display: grid;
   gap: 6px;

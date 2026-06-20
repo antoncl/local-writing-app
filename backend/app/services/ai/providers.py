@@ -318,7 +318,7 @@ def _anthropic_chat(
         "messages": messages,
     }
     if system_prompt:
-        kwargs["system"] = system_prompt
+        kwargs["system"] = _anthropic_system_with_cache(system_prompt)
     response = client.messages.create(**kwargs)
     blocks = getattr(response, "content", None) or []
     parts = []
@@ -394,6 +394,33 @@ StreamEvent = StreamDelta | StreamThinking | StreamDone | StreamError
 # Default Anthropic extended-thinking budget when ai_thinking is enabled.
 # Anthropic requires budget_tokens >= 1024 and budget_tokens < max_tokens.
 _ANTHROPIC_THINKING_BUDGET = 1024
+
+
+def _anthropic_system_with_cache(system_prompt: str):
+    """Wrap the system prompt as a cacheable content block for Anthropic.
+
+    Anthropic prompt caching needs the cacheable content surfaced as a
+    structured block carrying `cache_control: ephemeral`. The system
+    message is the materialized prompt template — the single largest
+    stable payload per chat session, so caching it cuts input cost to
+    ~10% on subsequent turns within the 5-minute TTL window.
+
+    Returns the SDK-shaped list for non-empty prompts; empty string is
+    returned as-is so the caller can skip the `system` kwarg entirely.
+
+    See [docs/ai-model-selection.md](../../../../docs/ai-model-selection.md)
+    "Caching strategy" for the broader design.
+    """
+
+    if not system_prompt:
+        return ""
+    return [
+        {
+            "type": "text",
+            "text": system_prompt,
+            "cache_control": {"type": "ephemeral"},
+        }
+    ]
 
 
 def chat_stream(
@@ -523,7 +550,7 @@ def _anthropic_chat_stream(
         "messages": messages,
     }
     if system_prompt:
-        kwargs["system"] = system_prompt
+        kwargs["system"] = _anthropic_system_with_cache(system_prompt)
     if thinking_enabled:
         budget = max(1024, min(_ANTHROPIC_THINKING_BUDGET, max_tokens - 256))
         if budget >= 1024:

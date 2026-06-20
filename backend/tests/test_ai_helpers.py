@@ -50,6 +50,12 @@ class _HelperFixtureBase(unittest.TestCase):
         self.root = Path(self.temp_dir.name) / "project"
         self.service = ProjectService()
         self.service.create_project(self.root, "Helper Tests")
+        # Several tests in this file use `home_place` as a convenient
+        # single-ref field on Character to exercise EntryRef / ref-graph
+        # behaviour. The seed schema no longer ships it (it was test
+        # cruft polluting real Character entries) — re-add it locally
+        # so the tests stay hermetic.
+        self._add_home_place_to_character_schema()
 
         # Lore: Honor Harrington (character), Manticore (place), Nimitz (character)
         self.honor = self._make_lore(
@@ -127,6 +133,27 @@ class _HelperFixtureBase(unittest.TestCase):
         self.temp_dir.cleanup()
 
     # ---- helpers for setup ----
+
+    def _add_home_place_to_character_schema(self) -> None:
+        """Inject a `home_place: entity_ref(place)` field onto Character
+        in the project's schema. Used by tests that need a single-ref
+        field on Character to test EntryRef / ref-graph machinery.
+        Writes directly to the schema YAML rather than going through the
+        upsert APIs to keep setup terse."""
+        schema_path = self.root / "metadata.schema.yaml"
+        data = self.service._read_yaml(schema_path)
+        data.setdefault("fields", {})["home_place"] = {
+            "name": "Home Place",
+            "type": "entity_ref",
+            "target": {"entry_type": "place"},
+        }
+        character = data["entry_types"].get("character") or {}
+        fields = list(character.get("fields") or [])
+        if "home_place" not in fields:
+            fields.insert(0, "home_place")
+            character["fields"] = fields
+            data["entry_types"]["character"] = character
+        self.service._write_yaml(schema_path, data)
 
     def _make_lore(self, *, title: str, entry_type: str, metadata: dict, body: str) -> dict:
         created = self.service.create_lore_entry(

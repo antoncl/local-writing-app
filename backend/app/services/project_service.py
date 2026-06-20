@@ -147,10 +147,14 @@ DEFAULT_METADATA_SCHEMA: dict[str, Any] = {
             "name": "Character",
             "kind": "lore",
             "parent": "lore_entry",
-            "fields": ["home_place", "appears_in_scenes"],
+            "fields": ["appears_in_scenes"],
         },
         "place": {
-            "name": "Place",
+            # Display label is "Location" (matches the `locations` field on
+            # scene and the user's mental model); the entry-type id stays
+            # "place" so existing project YAML and metadata refs keep
+            # resolving — id is a backend identifier, display is UX.
+            "name": "Location",
             "kind": "lore",
             "parent": "lore_entry",
             "fields": ["appears_in_scenes"],

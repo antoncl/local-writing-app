@@ -2898,7 +2898,7 @@
             <dt><code>full_text()</code></dt>
             <dd>Every scene's prose in manuscript order (<code>.title</code>, <code>.body</code>). Heavy.</dd>
             <dt><code>entry(id_or_ref)</code></dt>
-            <dd>Wrap a raw entry id as an EntryRef so you can walk its fields: <code>&lbrace;&lbrace; entry(scene.metadata.pov).home_place.title &rbrace;&rbrace;</code>.</dd>
+            <dd>Wrap a raw entry id as an EntryRef so you can walk its fields: <code>&lbrace;&lbrace; entry(scene.metadata.pov).title &rbrace;&rbrace;</code>.</dd>
           </dl>
         </section>
       </div>

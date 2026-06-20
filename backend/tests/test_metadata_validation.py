@@ -35,6 +35,11 @@ class MetadataValidationTests(unittest.TestCase):
         self.service = ProjectService()
         self.service.create_project(self.root, "Test Project")
         self._set_projects_base_folder(self.base)
+        # Several tests use `home_place` as a single-ref field on
+        # Character to exercise validation + ref-graph behaviour. The
+        # seed no longer ships it (was cruft polluting real entries);
+        # re-add it locally so tests stay hermetic.
+        self._add_home_place_to_character_schema(self.root)
         first_scene_path = next((self.root / "scenes").glob("*.md"))
         self.scene_id = self.service._read_front_matter_only(first_scene_path, strict=True)["id"]
 
@@ -45,6 +50,22 @@ class MetadataValidationTests(unittest.TestCase):
         manifest = self.service._read_yaml(self.root / "project.yaml")
         manifest.setdefault("settings", {})["projects_base_folder"] = str(path)
         self.service._write_yaml(self.root / "project.yaml", manifest)
+
+    def _add_home_place_to_character_schema(self, root: Path) -> None:
+        schema_path = root / "metadata.schema.yaml"
+        data = self.service._read_yaml(schema_path)
+        data.setdefault("fields", {})["home_place"] = {
+            "name": "Home Place",
+            "type": "entity_ref",
+            "target": {"entry_type": "place"},
+        }
+        character = data["entry_types"].get("character") or {}
+        fields = list(character.get("fields") or [])
+        if "home_place" not in fields:
+            fields.insert(0, "home_place")
+            character["fields"] = fields
+            data["entry_types"]["character"] = character
+        self.service._write_yaml(schema_path, data)
 
     def test_default_schema_seeds_act_and_chapter(self) -> None:
         schema = self.service.read_metadata_schema()
@@ -1077,7 +1098,14 @@ class MetadataValidationTests(unittest.TestCase):
         self.assertIn("aliases", schema.entry_types["lore_note"].fields)
         self.assertIn("tags", schema.entry_types["lore_note"].fields)
         self.assertEqual(schema.entry_types["lore_entry"].own_fields, ["aliases", "tags", "related_entries"])
-        self.assertEqual(schema.entry_types["character"].own_fields, ["home_place", "appears_in_scenes"])
+        # Test fixture adds home_place to character (see _add_home_place_to_character_schema);
+        # the seed itself only ships appears_in_scenes. Layer-merge appends
+        # fixture fields after seed fields, so the resolved order is
+        # appears_in_scenes (from seed) then home_place (from fixture layer).
+        self.assertEqual(
+            schema.entry_types["character"].own_fields,
+            ["appears_in_scenes", "home_place"],
+        )
         self.assertEqual(schema.fields["aliases"].type, "multi_select")
         self.assertEqual(schema.fields["tags"].type, "tags")
         self.assertEqual(schema.fields["related_entries"].type, "entity_ref_list")
@@ -1823,6 +1851,22 @@ class ReferenceResolutionTests(unittest.TestCase):
         manifest = self.service._read_yaml(self.root / "project.yaml")
         manifest.setdefault("settings", {})["projects_base_folder"] = str(self.base)
         self.service._write_yaml(self.root / "project.yaml", manifest)
+        # See MetadataValidationTests for the rationale — home_place is
+        # a test-only field on Character.
+        schema_path = self.root / "metadata.schema.yaml"
+        data = self.service._read_yaml(schema_path)
+        data.setdefault("fields", {})["home_place"] = {
+            "name": "Home Place",
+            "type": "entity_ref",
+            "target": {"entry_type": "place"},
+        }
+        character = data["entry_types"].get("character") or {}
+        fields = list(character.get("fields") or [])
+        if "home_place" not in fields:
+            fields.insert(0, "home_place")
+            character["fields"] = fields
+            data["entry_types"]["character"] = character
+        self.service._write_yaml(schema_path, data)
 
     def tearDown(self) -> None:
         self.temp_dir.cleanup()

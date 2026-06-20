@@ -2678,7 +2678,26 @@
     {/if}
   </section>
 
-  <div class:empty-editor={editorEmpty} class:lore-editor={documentKind === "lore"} class:hidden-body={!hasBody} class="editor-wrap" bind:this={editorFrame}>
+  <!-- svelte-ignore a11y_no_static_element_interactions -->
+  <div
+    class:empty-editor={editorEmpty}
+    class:lore-editor={documentKind === "lore"}
+    class:hidden-body={!hasBody}
+    class="editor-wrap"
+    bind:this={editorFrame}
+    on:mousedown={(event) => {
+      // Click landed on the wrap itself (the gutter around the centered
+      // 780px column or below short content) — focus the editor at the
+      // end of the doc so the cursor lands where the user expects.
+      // Clicks inside .editor-body bubble here too, but ProseMirror
+      // has already handled them; checking event.target === currentTarget
+      // restricts our handler to the dead-space case.
+      if (event.target === event.currentTarget) {
+        event.preventDefault();
+        editor?.chain().focus("end").run();
+      }
+    }}
+  >
     {#if aiToolbarPosition.visible && (aiGenerating || aiSuggestionId || aiError)}
       <div
         class="ai-inline-toolbar"

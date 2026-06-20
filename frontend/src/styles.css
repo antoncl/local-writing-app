@@ -1481,9 +1481,16 @@ h3 {
 
 .editor-wrap {
   position: relative;
+  display: flex;
+  flex-direction: column;
   min-height: 0;
   overflow: auto;
   background: #ffffff;
+  /* Click-fall-through-to-end-of-doc: when the user clicks in the gutter
+     around the centered 780px column, the wrap intercepts it and focuses
+     the editor (see DocumentEditorPane.svelte). The cursor here signals
+     that intent. */
+  cursor: text;
 }
 
 .editor-wrap.hidden-body {
@@ -1492,9 +1499,16 @@ h3 {
 
 .editor-body {
   max-width: 780px;
-  min-height: 100%;
+  /* flex: 1 0 auto inside the .editor-wrap flex column makes the
+     editable area grow to fill vertical space without clamping content,
+     so the body always extends to at least the wrap's height. Replaces
+     the old min-height: 100% which only worked when the parent track
+     had a definite height. */
+  flex: 1 0 auto;
+  width: 100%;
   margin: 0 auto;
   padding: 10px 56px 46px;
+  box-sizing: border-box;
   outline: none;
   font-family: Georgia, "Times New Roman", serif;
   font-size: 19px;

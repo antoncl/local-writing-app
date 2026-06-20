@@ -269,6 +269,178 @@ class RelevantLoreHelperTests(_HelperFixtureBase):
         # But pov is an entity_ref → Honor should be picked up
         self.assertIn("Honor Harrington", text)
 
+    def test_implicit_finds_textual_one_hop_in_body(self) -> None:
+        # Add a third character not referenced by anyone, then mention him
+        # textually in Honor's body. Textual depth-1 should pull him in
+        # even though no entity_ref links Honor → Pavel.
+        pavel = self._make_lore(
+            title="Pavel Young",
+            entry_type="character",
+            metadata={"aliases": []},
+            body="Captain who hates Honor.",
+        )
+        self._update_lore(
+            self.honor["id"],
+            entry_type="character",
+            metadata={
+                "aliases": ["The Salamander"],
+                "related_entries": [self.nimitz["id"]],  # NOT Pavel
+            },
+            body="Captain of the Fearless. Treecat-adopted. Rival of Pavel Young.",
+        )
+
+        scene_one = self.service.read_scene(self.scene_one_node.scene_id)
+        env = create_environment_for_project(self.service)
+        out = render_template(
+            '{% role "user" %}{{ relevant_lore(scene) }}{% endrole %}',
+            context={"scene": scene_one},
+            env=env,
+        )
+        text = out.messages[0].text
+        # Honor is the direct entry (via characters field)
+        self.assertIn("Honor Harrington", text)
+        # Nimitz arrives via structural one-hop (related_entries on Honor)
+        self.assertIn("Nimitz", text)
+        # Pavel arrives via NEW textual one-hop (mentioned in Honor's body,
+        # no entity_ref between them)
+        self.assertIn("Pavel Young", text)
+
+    def test_textual_one_hop_is_depth_one_only(self) -> None:
+        # Pavel mentions a third character "Anders" in his body. Anders
+        # should NOT be pulled in — textual expansion stops at depth 1.
+        anders = self._make_lore(
+            title="Anders Pierce",
+            entry_type="character",
+            metadata={"aliases": []},
+            body="Some other captain.",
+        )
+        pavel = self._make_lore(
+            title="Pavel Young",
+            entry_type="character",
+            metadata={"aliases": []},
+            body="Captain. Friend of Anders Pierce.",  # mentions Anders
+        )
+        self._update_lore(
+            self.honor["id"],
+            entry_type="character",
+            metadata={
+                "aliases": ["The Salamander"],
+                "related_entries": [self.nimitz["id"]],
+            },
+            body="Captain of the Fearless. Rival of Pavel Young.",  # mentions Pavel
+        )
+
+        scene_one = self.service.read_scene(self.scene_one_node.scene_id)
+        env = create_environment_for_project(self.service)
+        out = render_template(
+            '{% role "user" %}{{ relevant_lore(scene) }}{% endrole %}',
+            context={"scene": scene_one},
+            env=env,
+        )
+        text = out.messages[0].text
+        # Check entity inclusion by the rendered XML tag, not raw substring —
+        # Pavel's body literally contains "Anders Pierce" as prose.
+        self.assertIn('name="Honor Harrington"', text)
+        self.assertIn('name="Pavel Young"', text)        # depth 1: yes
+        self.assertNotIn('name="Anders Pierce"', text)   # depth 2: stop
+
+    def test_journal_mode_trusts_journal_skips_alias_scan(self) -> None:
+        # When a journal is bound, the helper does NOT rescan the scene
+        # summary — it uses the journal as source of truth for detected
+        # context. Scene one's summary mentions Honor's alias "Salamander",
+        # but with an EMPTY journal we should only get the structural
+        # entity_ref picks (characters: [Honor]).
+        from app.models import ChatSessionJournalEntry
+        from app.services.ai.helpers import create_environment_for_project
+
+        scene_one = self.service.read_scene(self.scene_one_node.scene_id)
+        env = create_environment_for_project(self.service, journal=[])
+        out = render_template(
+            '{% role "user" %}{{ relevant_lore(scene) }}{% endrole %}',
+            context={"scene": scene_one},
+            env=env,
+        )
+        text = out.messages[0].text
+        # Honor — structural ref via characters[]
+        self.assertIn("Honor Harrington", text)
+        # Nimitz — structural one-hop via Honor's related_entries (still runs)
+        self.assertIn("Nimitz", text)
+        # NOTE: With journal mode active and EMPTY journal, the alias scan
+        # is skipped. No extra entities should appear beyond the structural
+        # picks. Without journal mode, the summary's mention of "Salamander"
+        # would also pull Honor (already present), so no observable diff
+        # here — the key behavior is that we didn't crash and didn't double.
+
+    def test_journal_mode_includes_journal_entries(self) -> None:
+        # With a populated journal, those entries appear in the output —
+        # even though the scene summary wouldn't have surfaced them via
+        # alias scan.
+        from app.models import ChatSessionJournalEntry
+        from app.services.ai.helpers import create_environment_for_project
+
+        # Manticore is not referenced or mentioned in scene one's summary
+        # ("Honor takes the Salamander into battle.") nor in Honor's metadata.
+        # Adding it to the journal forces it into scope.
+        journal = [
+            ChatSessionJournalEntry(
+                entry_id=self.manticore["id"],
+                title="Manticore",
+                entry_type="place",
+                added_at_turn=2,
+                source="user_message",
+            )
+        ]
+        scene_one = self.service.read_scene(self.scene_one_node.scene_id)
+        env = create_environment_for_project(self.service, journal=journal)
+        out = render_template(
+            '{% role "user" %}{{ relevant_lore(scene) }}{% endrole %}',
+            context={"scene": scene_one},
+            env=env,
+        )
+        text = out.messages[0].text
+        self.assertIn("Honor Harrington", text)  # structural
+        self.assertIn("Nimitz", text)            # structural one-hop
+        self.assertIn("Manticore", text)         # via journal
+
+    def test_journal_mode_skips_textual_one_hop(self) -> None:
+        # Without journal: textual depth-1 fires (we just added it in step 1).
+        # With journal: textual depth-1 is skipped — the send-time pipeline
+        # is supposed to have done that already and put results into journal.
+        from app.services.ai.helpers import create_environment_for_project
+
+        # Add Pavel; mention him in Honor's body. Without journal, Pavel
+        # would arrive via textual depth-1. With empty journal, he should NOT.
+        pavel = self._make_lore(
+            title="Pavel Young",
+            entry_type="character",
+            metadata={"aliases": []},
+            body="Disgraced Captain.",
+        )
+        self._update_lore(
+            self.honor["id"],
+            entry_type="character",
+            metadata={
+                "aliases": ["The Salamander"],
+                "related_entries": [self.nimitz["id"]],
+            },
+            body="Captain of the Fearless. Rival of Pavel Young.",
+        )
+
+        scene_one = self.service.read_scene(self.scene_one_node.scene_id)
+        env = create_environment_for_project(self.service, journal=[])
+        out = render_template(
+            '{% role "user" %}{{ relevant_lore(scene) }}{% endrole %}',
+            context={"scene": scene_one},
+            env=env,
+        )
+        text = out.messages[0].text
+        self.assertIn('name="Honor Harrington"', text)
+        self.assertIn('name="Nimitz"', text)
+        # Pavel was found via textual depth-1 in journal=None mode, but with
+        # an explicit empty journal the helper trusts that signal: send-time
+        # would have added Pavel to the journal if it wanted him.
+        self.assertNotIn('name="Pavel Young"', text)
+
     def test_pinned_only_returns_empty(self) -> None:
         scene_one = self.service.read_scene(self.scene_one_node.scene_id)
         env = create_environment_for_project(self.service)

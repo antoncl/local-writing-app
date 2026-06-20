@@ -2722,6 +2722,17 @@ class ProjectService:
                     "Start a new chat to use a different brief.",
                     409,
                 )
+        # Journal is append-only across the session: refuse a save that
+        # would drop or reorder entries already in scope. New entries can
+        # only be appended after the existing ones.
+        prior_ids = [e.entry_id for e in existing.journal]
+        incoming_ids = [e.entry_id for e in request.journal]
+        if incoming_ids[: len(prior_ids)] != prior_ids:
+            raise ProjectServiceError(
+                "Chat journal is append-only — cannot drop or reorder "
+                "auto-detected context entries.",
+                409,
+            )
         updated = ChatSession(
             id=existing.id,
             title=request.title or existing.title or "Untitled chat",
@@ -2734,6 +2745,7 @@ class ProjectService:
             context_items=request.context_items,
             messages=request.messages,
             inputs=request.inputs,
+            journal=request.journal,
         )
         self._write_yaml(path, updated.model_dump())
         return updated

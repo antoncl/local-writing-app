@@ -668,6 +668,11 @@ class AIChatRequest(BaseModel):
     system_prompt: str = ""
     messages: list[ChatMessage] = Field(default_factory=list)
     max_tokens: int | None = None
+    # Optional chat session id. When present the server runs the implicit-
+    # context expander on the last user message, appends new detections to
+    # ChatSession.journal, and packs the journal into a cache-stable block
+    # between system_prompt and conversation history.
+    chat_id: str | None = None
 
 
 class AIChatResponse(BaseModel):
@@ -681,6 +686,10 @@ class AIChatResponse(BaseModel):
     error: str | None = None
     stop_reason: str | None = None
     truncated: bool = False
+    # Lore entries newly auto-detected on THIS turn (for the audit UI chip
+    # strip). Empty when no detections fired. Snapshots — frontend doesn't
+    # need to look up titles separately.
+    journal_added: list["ChatSessionJournalEntry"] = Field(default_factory=list)
 
 
 class AIGenerateRequest(BaseModel):
@@ -722,11 +731,40 @@ class AIContextPresetResponse(BaseModel):
 # --- Persistent chat sessions (Phase 3) ---
 
 
+class ChatSessionJournalEntry(BaseModel):
+    """One lore entry auto-detected into the chat's implicit context.
+
+    The journal is append-only across the session: once an entity has been
+    detected (textually or via depth-1 expansion of another detection), it
+    stays in scope for every subsequent turn. This monotonic shape lets the
+    prompt cache breakpoint after the journal ratchet forward as the
+    journal grows, without invalidating earlier turns' caches.
+
+    `title` and `entry_type` are snapshots at detection time so the audit
+    UI keeps showing what the user saw, even if the lore entry is later
+    renamed or retyped.
+
+    `source` records WHY the entry entered scope. Useful for the audit UI
+    and for debugging surprising auto-includes.
+    """
+    entry_id: str
+    title: str = ""
+    entry_type: str = ""
+    added_at_turn: int = 0
+    source: Literal["user_message", "rendered_prompt", "depth1_expansion"] = "user_message"
+
+
 class ChatSessionMessage(BaseModel):
     role: Literal["user", "assistant"]
     content: str
     thinking: str = ""
     truncated: bool = False
+    # Lore entries that the implicit-context expander auto-detected on the
+    # turn this assistant message belongs to. Captured for the audit UI so
+    # reopening the chat preserves the "added when you said X" trail.
+    # Always empty on user messages (detection happens between user and
+    # assistant, attributed to the assistant turn).
+    journal_added: list[ChatSessionJournalEntry] = Field(default_factory=list)
 
 
 class ChatSessionContextItem(BaseModel):
@@ -760,6 +798,10 @@ class ChatSession(BaseModel):
     # what the user typed. After first send, the values are locked
     # along with system_prompt (template was rendered with them).
     inputs: dict[str, Any] = Field(default_factory=dict)
+    # Append-only log of entities auto-detected into this chat's implicit
+    # context. Grows as the user types new names across turns. See
+    # ChatSessionJournalEntry for the per-entry shape.
+    journal: list[ChatSessionJournalEntry] = Field(default_factory=list)
 
 
 class ChatSessionSummary(BaseModel):
@@ -793,6 +835,11 @@ class SaveChatSessionRequest(BaseModel):
     context_items: list[ChatSessionContextItem] = Field(default_factory=list)
     messages: list[ChatSessionMessage] = Field(default_factory=list)
     inputs: dict[str, Any] = Field(default_factory=dict)
+    journal: list[ChatSessionJournalEntry] = Field(default_factory=list)
 
 
 StructureNode.model_rebuild()
+# AIChatResponse declares journal_added as a forward reference because
+# ChatSessionJournalEntry is defined later in the file (in the chat-session
+# section). Resolve it once everything is in scope.
+AIChatResponse.model_rebuild()

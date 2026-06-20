@@ -310,12 +310,22 @@ def register_helpers(
     env: SandboxedEnvironment,
     project: "ProjectService",
     session: AISession | None = None,
+    journal: list[Any] | None = None,
 ) -> None:
     """Bind project-aware helpers to the given env. Idempotent.
 
     If `session` is provided, `relevant_lore(..., partition="stable"|"volatile")`
     becomes meaningful — entries' revisions are snapshotted into the session
     and partitioned against its baseline.
+
+    If `journal` is provided (a list of ChatSessionJournalEntry), the
+    implicit mode of `relevant_lore` treats the journal as the source of
+    truth for textual detection: it skips its own alias scan and depth-1
+    textual expansion. The send-time pipeline is the single producer of
+    detected context for chat sessions; the helper becomes a read of what
+    that pipeline already deposited. Structural entity_ref expansion from
+    the scene's own metadata still runs — those are template-author
+    explicit picks the send pipeline doesn't see.
     """
     try:
         schema = project.read_metadata_schema()
@@ -327,7 +337,7 @@ def register_helpers(
     env.globals["scenes_before"] = lambda scene: _scenes_before(project, scene)
     env.globals["relevant_lore"] = (
         lambda scene, mode="implicit", partition="all": _relevant_lore(
-            project, scene, mode, partition, session
+            project, scene, mode, partition, session, journal
         )
     )
     env.globals["entry"] = lambda value: _coerce_entry_ref(project, schema, value)
@@ -336,13 +346,15 @@ def register_helpers(
 
 
 def create_environment_for_project(
-    project: "ProjectService", session: AISession | None = None
+    project: "ProjectService",
+    session: AISession | None = None,
+    journal: list[Any] | None = None,
 ) -> SandboxedEnvironment:
     """Convenience: env with extensions and project helpers registered."""
     from app.services.ai.templates import create_environment
 
     env = create_environment()
-    register_helpers(env, project, session)
+    register_helpers(env, project, session, journal)
     return env
 
 
@@ -503,6 +515,7 @@ def _relevant_lore(
     mode: str = "implicit",
     partition: str = "all",
     session: AISession | None = None,
+    journal: list[Any] | None = None,
 ) -> str:
     """Return a markdown block of lore entries relevant to `scene`.
 
@@ -537,9 +550,21 @@ def _relevant_lore(
     else:
         # implicit: alias scan + one-hop expansion
         found = set(direct)
-        summary = _get_field(scene, "summary") or ""
-        if isinstance(summary, str) and summary.strip():
-            found |= _alias_match(project, summary)
+        if journal is None:
+            # No chat-session journal — helper is the producer of detected
+            # context (one-shot generates, preview, tests). Run the textual
+            # scan on the scene summary.
+            summary = _get_field(scene, "summary") or ""
+            if isinstance(summary, str) and summary.strip():
+                found |= _alias_match(project, summary)
+        else:
+            # Chat-session use: the send-time context expander has already
+            # populated the journal with textual detections (incl. depth-1).
+            # Trust it; don't re-derive.
+            for entry in journal:
+                jid = _attr_or_item(entry, "entry_id")
+                if isinstance(jid, str) and jid:
+                    found.add(jid)
 
         expanded = set(found)
         for entry_id in list(found):
@@ -549,6 +574,10 @@ def _relevant_lore(
             expanded |= _collect_lore_refs_from_metadata(
                 _attr_or_item(entry, "metadata")
             )
+        # Textual depth-1 only runs when the journal is absent; otherwise
+        # the journal already carries those expansions.
+        if journal is None:
+            expanded |= _textual_one_hop(project, found)
         ids = sorted(expanded)
 
     if session is None or partition == "all":
@@ -608,6 +637,34 @@ def _alias_match(project: "ProjectService", text: str) -> set[str]:
                     matched.add(entry_id)
                 break
     return matched
+
+
+def _textual_one_hop(
+    project: "ProjectService", entry_ids: set[str]
+) -> set[str]:
+    """Scan the body of each given entry for further textual name matches.
+
+    Used for depth-1 expansion in implicit-context detection: if Honor's
+    body mentions Nimitz by name, Nimitz is pulled in even without an
+    explicit entity_ref linking them. Bodies of newly-discovered entries
+    are NOT rescanned — depth strictly 1 — which prevents cascade
+    explosions on richly cross-referenced lore.
+
+    Returns all matches found in the scanned bodies, including the source
+    entries themselves when their body mentions their own name; callers
+    should dedup against the source set.
+    """
+    bodies: list[str] = []
+    for entry_id in entry_ids:
+        entry = _safe_read_lore(project, entry_id)
+        if entry is None:
+            continue
+        body = _attr_or_item(entry, "body_markdown")
+        if isinstance(body, str) and body.strip():
+            bodies.append(body)
+    if not bodies:
+        return set()
+    return _alias_match(project, "\n".join(bodies))
 
 
 def _name_appears(name: str, words: set[str], haystack_lower: str) -> bool:

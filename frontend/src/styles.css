@@ -3073,6 +3073,22 @@ h3 {
   font-size: 13px;
 }
 
+/* When the inputs editor is expanded with a deep context-pick tree it
+   can blow past the pane's available height, and because .pane has
+   overflow: hidden the bottom rows (preview) get clipped with no
+   scrollbar to recover them. Cap the expanded section at half the
+   viewport and scroll internally — the pane stays composable, the
+   preview row stays anchored to the bottom. */
+.entry-inputs-editor[open] {
+  max-height: 50vh;
+  overflow-y: auto;
+}
+
+.prompt-cheatsheet[open] {
+  max-height: 50vh;
+  overflow-y: auto;
+}
+
 .entry-inputs-editor > summary {
   cursor: pointer;
   user-select: none;

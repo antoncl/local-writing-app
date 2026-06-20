@@ -67,7 +67,22 @@
     depth: number;
     state: "checked" | "indeterminate" | "unchecked";
     hasLeaves: boolean;
+    hasChildren: boolean;
+    collapsed: boolean;
   };
+
+  // Per-node collapse state. Tracks IDS explicitly collapsed by the
+  // user — everything else is expanded by default. Persists for the
+  // lifetime of the editor instance (resets when the prompt entry
+  // changes). Storage-stable: not persisted to the prompt config.
+  let collapsedIds: Set<string> = new Set();
+
+  function toggleCollapse(id: string) {
+    const next = new Set(collapsedIds);
+    if (next.has(id)) next.delete(id);
+    else next.add(id);
+    collapsedIds = next;
+  }
 
   // Build the per-kind tree from the project schema. Roots are
   // entry types whose `parent` is null; descendants attach via the
@@ -124,10 +139,16 @@
     return "indeterminate";
   }
 
-  function flattenForRender(roots: SchemaNode[], selection: Set<string>): RenderedNode[] {
+  function flattenForRender(
+    roots: SchemaNode[],
+    selection: Set<string>,
+    collapsed: Set<string>,
+  ): RenderedNode[] {
     const out: RenderedNode[] = [];
     function walk(node: SchemaNode, depth: number) {
       const leaves = concreteLeaves(node);
+      const hasChildren = node.children.length > 0;
+      const isCollapsed = hasChildren && collapsed.has(node.id);
       out.push({
         id: node.id,
         name: node.name,
@@ -135,8 +156,12 @@
         depth,
         state: nodeState(node, selection),
         hasLeaves: leaves.length > 0,
+        hasChildren,
+        collapsed: isCollapsed,
       });
-      for (const child of node.children) walk(child, depth + 1);
+      if (!isCollapsed) {
+        for (const child of node.children) walk(child, depth + 1);
+      }
     }
     for (const root of roots) walk(root, 0);
     return out;
@@ -233,16 +258,17 @@
     lore: buildTree(metadataSchema, "lore"),
   };
   // Pre-computed render lists per kind, including each node's checkbox
-  // state. The reference to `config` here is critical — Svelte 5's
-  // legacy `$:` tracking only sees variables read directly in the
-  // expression body, not inside function calls. Without an explicit
-  // `config` reference, `selectionFor(...)` reading config from
-  // closure wouldn't trigger this block on config changes, and the
-  // tree would go stale (same trap as activePromptTitle hit earlier).
-  $: renderedByKind = ((_config) => ({
-    scene: flattenForRender(trees.scene, selectionFor("scene")),
-    lore: flattenForRender(trees.lore, selectionFor("lore")),
-  }))(config);
+  // state. The references to `config` and `collapsedIds` here are
+  // critical — Svelte 5's legacy `$:` tracking only sees variables
+  // read directly in the expression body, not inside function calls.
+  // Without explicit references, `selectionFor(...)` reading config
+  // from closure wouldn't trigger this block on config changes, and
+  // the tree would go stale (same trap as activePromptTitle hit
+  // earlier — see [[feedback-svelte5-reactivity-traps]]).
+  $: renderedByKind = ((_config, _collapsed) => ({
+    scene: flattenForRender(trees.scene, selectionFor("scene"), _collapsed),
+    lore: flattenForRender(trees.lore, selectionFor("lore"), _collapsed),
+  }))(config, collapsedIds);
 
   $: hasAnySource =
     (renderedByKind.scene.some((n) => n.state !== "unchecked")) ||
@@ -264,6 +290,17 @@
         {:else}
           {#each renderedByKind[kind.id] as item (item.id)}
             <div class="ctx-tree-node" style="--depth: {item.depth}">
+              {#if item.hasChildren}
+                <button
+                  type="button"
+                  class="ctx-tree-chevron"
+                  aria-label={item.collapsed ? `Expand ${item.name}` : `Collapse ${item.name}`}
+                  aria-expanded={!item.collapsed}
+                  on:click={() => toggleCollapse(item.id)}
+                >{item.collapsed ? "▸" : "▾"}</button>
+              {:else}
+                <span class="ctx-tree-chevron ctx-tree-chevron-leaf" aria-hidden="true"></span>
+              {/if}
               <label class="ctx-tree-label" class:disabled={!item.hasLeaves}>
                 <input
                   type="checkbox"
@@ -370,9 +407,38 @@
 
   .ctx-tree-node {
     display: flex;
-    flex-direction: column;
-    gap: 1px;
+    flex-direction: row;
+    align-items: center;
+    gap: 4px;
     padding-left: calc(var(--depth, 0) * 18px);
+  }
+
+  .ctx-tree-chevron {
+    width: 16px;
+    height: 16px;
+    padding: 0;
+    border: none;
+    background: transparent;
+    color: #65716c;
+    font-size: 11px;
+    line-height: 1;
+    cursor: pointer;
+    border-radius: 3px;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+  }
+
+  .ctx-tree-chevron:hover {
+    background: #eef2f0;
+  }
+
+  .ctx-tree-chevron-leaf {
+    cursor: default;
+  }
+
+  .ctx-tree-chevron-leaf:hover {
+    background: transparent;
   }
 
   .ctx-tree-label {

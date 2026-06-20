@@ -1498,15 +1498,11 @@ h3 {
 }
 
 .editor-body {
-  max-width: 780px;
   /* flex: 1 0 auto inside the .editor-wrap flex column makes the
      editable area grow to fill vertical space without clamping content,
-     so the body always extends to at least the wrap's height. Replaces
-     the old min-height: 100% which only worked when the parent track
-     had a definite height. */
+     so the body always extends to at least the wrap's height. */
   flex: 1 0 auto;
   width: 100%;
-  margin: 0 auto;
   padding: 10px 56px 46px;
   box-sizing: border-box;
   outline: none;

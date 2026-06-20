@@ -2012,9 +2012,28 @@
   }
 
   function openSchemaForCustomData(entryType: string, kind: "scene" | "lore" | "prompt" | "assistant") {
-    schemaPaneOpen = true;
+    // Phase B: the entry editor's "Edit type…" button now opens ONLY the
+    // per-type editor (schema_type pane) — not the schema/tree hierarchy
+    // view. Tree access is the top bar's "Detail Types" button.
     const candidate = metadataSchema?.entry_types[entryType];
-    schemaFieldEntryType = candidate?.kind === kind ? entryType : defaultSchemaEntryType(kind);
+    const resolvedTypeId = candidate?.kind === kind ? entryType : defaultSchemaEntryType(kind);
+    schemaFieldEntryType = resolvedTypeId;
+    if (resolvedTypeId && metadataSchema?.entry_types[resolvedTypeId]) {
+      openSchemaTypeDetail(resolvedTypeId);
+    } else {
+      // No matching type — fall back to opening the tree so the user can
+      // pick or create one. Rare edge case for new projects.
+      schemaPaneOpen = true;
+      focusPane("schema");
+    }
+  }
+
+  // Top-bar entry point: opens the schema/tree pane (the canonical
+  // hierarchy editor). The per-type editor opened from individual entries
+  // goes via openSchemaTypeDetail instead — see Phase B's split.
+  function openDetailTypesPane() {
+    if (!isProjectOpen) return;
+    schemaPaneOpen = true;
     focusPane("schema");
   }
 
@@ -3470,11 +3489,13 @@
 <TopBar
   currentTitle={isProjectOpen ? projectTitle : null}
   {recentProjects}
+  projectOpen={isProjectOpen}
   onSelectRecent={(path) => void openProjectAt(path)}
   onOpenFolder={openDirectoryPickerForOpenProject}
   onNewProject={openNewProjectModal}
   onOpenAssistants={openAssistantsPane}
   onOpenSettings={openMachineSettings}
+  onOpenDetailTypes={openDetailTypesPane}
 />
 
 <main class="workspace">
@@ -3731,15 +3752,34 @@
           placeholder="faction"
         />
       </label>
-      <label class="inline-check">
-        <input type="checkbox" disabled={schemaTypeReadonly} bind:checked={schemaTypeAbstract} />
-        Abstract base type
-      </label>
       {#if selectedSchemaTypeId}
-        <div class="schema-target-layer">
-          <strong>Effective fields</strong>
-          <span>{metadataSchema?.entry_types[selectedSchemaTypeId]?.fields.length ?? 0}</span>
-        </div>
+        {@const fieldEntries = fieldEntriesForEntryType(selectedSchemaTypeId)}
+        <section class="schema-type-fields" aria-label="Fields on this type">
+          <header class="schema-type-fields-header">
+            <strong>Fields</strong>
+            <small>{fieldEntries.length}</small>
+          </header>
+          <div class="schema-type-field-list">
+            {#each fieldEntries as [fieldId, field]}
+              {@const fieldSource = metadataSchemaOverview?.field_sources[fieldId]}
+              <button class="schema-node-field-row" type="button" on:click={() => openSchemaFieldDetail(fieldId, selectedSchemaTypeId)}>
+                <span>
+                  <strong>{field.name}</strong>
+                  <small>{fieldId} · {fieldTypeLabel(field.type)}</small>
+                </span>
+                <span class="schema-source-badge" style={`--source-index: ${sourceLayerIndex(fieldSource)}`}>{sourceBadgeLabel(fieldSource)}</span>
+              </button>
+            {/each}
+            {#if fieldEntries.length === 0}
+              <p class="muted">No local fields defined on this type.</p>
+            {/if}
+          </div>
+          {#if !schemaTypeReadonly}
+            <div class="button-row">
+              <button type="button" on:click={() => createSchemaFieldDraft(schemaTypeLayerId || projectSchemaLayerId(), selectedSchemaTypeId)}>+ Field</button>
+            </div>
+          {/if}
+        </section>
       {/if}
 
       {#if schemaTypeKind === "prompt"}

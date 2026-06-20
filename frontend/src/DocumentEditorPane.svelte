@@ -2461,7 +2461,7 @@
               type="button"
               on:click={() => dispatch("custom-data", { entryType, kind: documentKind })}
             >
-              Edit Detail Types
+              Edit type…
             </button>
           </div>
           {#if metadataExpanded}

@@ -4,19 +4,24 @@
   import { StreamLanguage } from "@codemirror/language";
   import { jinja2 } from "@codemirror/legacy-modes/mode/jinja2";
   import { json as jsonLang } from "@codemirror/lang-json";
+  import { lintGutter, setDiagnostics, type Diagnostic } from "@codemirror/lint";
 
   export let value: string;
   // Languages that ship with a CodeMirror extension here highlight; anything
   // else falls through to a plain code surface (still better than TipTap for
   // editing raw text — monospace font, no auto-formatting).
   export let language: "jinja2" | "json" | "markdown" | "plain" = "jinja2";
+  /** Diagnostics to pin in the gutter. Line is 1-based (matches Jinja's
+   * `lineno`); col is optional and 1-based when present. Callers update this
+   * prop after a render; CodeEditor reactively pushes them into CodeMirror. */
+  export let diagnostics: { line: number; col?: number; severity: "error" | "warning"; message: string }[] = [];
 
   let host: HTMLDivElement;
   let editor: EditorView | null = null;
   let lastEmitted = value;
 
   onMount(() => {
-    const extensions = [basicSetup];
+    const extensions = [basicSetup, lintGutter()];
     if (language === "jinja2") {
       extensions.push(StreamLanguage.define(jinja2));
     } else if (language === "json") {
@@ -32,6 +37,7 @@
       }),
     );
     editor = new EditorView({ doc: value, parent: host, extensions });
+    pushDiagnostics();
   });
 
   onDestroy(() => {
@@ -48,6 +54,32 @@
       });
       lastEmitted = value;
     }
+  }
+
+  // Push diagnostics whenever the prop changes.
+  $: if (editor) pushDiagnostics(diagnostics);
+
+  function pushDiagnostics(_d = diagnostics): void {
+    if (!editor) return;
+    const doc = editor.state.doc;
+    const items: Diagnostic[] = [];
+    for (const d of _d) {
+      if (!Number.isFinite(d.line) || d.line < 1 || d.line > doc.lines) continue;
+      const lineInfo = doc.line(d.line);
+      const col = d.col && d.col > 0 ? Math.min(d.col, lineInfo.length + 1) : 1;
+      // Underline the column point if given, otherwise the whole line. Either
+      // way the gutter marker shows on the line and the message tooltip is
+      // available on hover.
+      const from = lineInfo.from + col - 1;
+      const to = d.col ? Math.min(from + 1, lineInfo.to) : lineInfo.to;
+      items.push({
+        from,
+        to: to <= from ? Math.min(from + 1, doc.length) : to,
+        severity: d.severity,
+        message: d.message,
+      });
+    }
+    editor.dispatch(setDiagnostics(editor.state, items));
   }
 </script>
 

@@ -41,6 +41,20 @@ import type {
 
 const baseUrl = "http://127.0.0.1:8787/api";
 
+/** Error subclass that carries the raw response detail so structured callers
+ * can extract fields (e.g. PreviewError's line/col). `.message` still reads as
+ * a human-readable string via formatErrorDetail. */
+export class HttpError extends Error {
+  status: number;
+  detail: unknown;
+  constructor(message: string, status: number, detail: unknown) {
+    super(message);
+    this.name = "HttpError";
+    this.status = status;
+    this.detail = detail;
+  }
+}
+
 async function request<T>(path: string, options: RequestInit = {}): Promise<T> {
   const response = await fetch(`${baseUrl}${path}`, {
     ...options,
@@ -51,7 +65,12 @@ async function request<T>(path: string, options: RequestInit = {}): Promise<T> {
   });
   if (!response.ok) {
     const payload = await response.json().catch(() => null);
-    throw new Error(formatErrorDetail(payload?.detail) ?? response.statusText);
+    const detail = payload?.detail;
+    throw new HttpError(
+      formatErrorDetail(detail) ?? response.statusText,
+      response.status,
+      detail,
+    );
   }
   return response.json() as Promise<T>;
 }
@@ -77,8 +96,10 @@ function formatErrorDetail(detail: unknown): string | null {
       .join("; ");
   }
   if (typeof detail === "object") {
-    const obj = detail as { msg?: string };
-    return obj.msg ?? JSON.stringify(detail);
+    // PreviewError shape: { message, line?, col? }. FastAPI validation shape:
+    // { msg, loc, type }. Surface whichever is present.
+    const obj = detail as { message?: string; msg?: string };
+    return obj.message ?? obj.msg ?? JSON.stringify(detail);
   }
   return String(detail);
 }

@@ -44,12 +44,26 @@ class _DateProxy:
 
 
 class PreviewError(Exception):
-    """Raised when the template can't be rendered (syntax, undefined var, etc.)."""
+    """Raised when the template can't be rendered (syntax, undefined var, etc.).
 
-    def __init__(self, message: str, status_code: int = 422) -> None:
+    `line` and `col` are populated when the underlying Jinja2 error carries
+    location info — surfacing them lets the editor pin a gutter marker on
+    the offending line in the inline preview.
+    """
+
+    def __init__(
+        self,
+        message: str,
+        status_code: int = 422,
+        *,
+        line: int | None = None,
+        col: int | None = None,
+    ) -> None:
         super().__init__(message)
         self.message = message
         self.status_code = status_code
+        self.line = line
+        self.col = col
 
 
 def build_preview(
@@ -107,7 +121,15 @@ def build_preview(
     try:
         rendered = render_template(template_source, context=context, env=env)
     except TemplateError as exc:
-        raise PreviewError(f"{type(exc).__name__}: {exc.message}", 422) from exc
+        # `lineno` is set for TemplateSyntaxError and most subclasses; for
+        # UndefinedError it's typically missing. Surface what we have.
+        line = getattr(exc, "lineno", None)
+        # Jinja2 doesn't expose column info on TemplateError; col stays None.
+        raise PreviewError(
+            f"{type(exc).__name__}: {exc.message}",
+            422,
+            line=int(line) if isinstance(line, int) else None,
+        ) from exc
 
     if session is not None and commit:
         session.commit()

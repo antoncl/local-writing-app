@@ -102,6 +102,24 @@ def translate_errors():
         raise HTTPException(status_code=exc.status_code, detail=exc.message) from exc
 
 
+def _preview_error_detail(exc: PreviewError) -> Any:
+    """Shape the FastAPI HTTPException detail for a PreviewError.
+
+    Plain string when there's no location info (compat with the original
+    behavior); a structured dict when Jinja gave us a line. The frontend's
+    `formatErrorDetail` falls back to the `message` field, so old callers
+    still see something sensible.
+    """
+    if exc.line is None and exc.col is None:
+        return exc.message
+    detail: dict[str, Any] = {"message": exc.message}
+    if exc.line is not None:
+        detail["line"] = exc.line
+    if exc.col is not None:
+        detail["col"] = exc.col
+    return detail
+
+
 @app.get("/api/health")
 def health() -> dict[str, str]:
     return {"status": "ok"}
@@ -585,7 +603,10 @@ def ai_preview(request: AIPreviewRequest) -> AIPreviewResponse:
                 commit=request.commit,
             )
         except PreviewError as exc:
-            raise HTTPException(status_code=exc.status_code, detail=exc.message) from exc
+            raise HTTPException(
+                status_code=exc.status_code,
+                detail=_preview_error_detail(exc),
+            ) from exc
 
     messages = [
         PreviewMessage(
@@ -671,7 +692,10 @@ def ai_generate(request: AIGenerateRequest) -> AIGenerateResponse:
                 commit=request.commit,
             )
         except PreviewError as exc:
-            raise HTTPException(status_code=exc.status_code, detail=exc.message) from exc
+            raise HTTPException(
+                status_code=exc.status_code,
+                detail=_preview_error_detail(exc),
+            ) from exc
 
     system_prompt, chat_messages = build_chat_payload(rendered)
 
@@ -854,7 +878,10 @@ def ai_generate_stream(request: AIGenerateRequest) -> StreamingResponse:
                 commit=request.commit,
             )
         except PreviewError as exc:
-            raise HTTPException(status_code=exc.status_code, detail=exc.message) from exc
+            raise HTTPException(
+                status_code=exc.status_code,
+                detail=_preview_error_detail(exc),
+            ) from exc
 
     system_prompt, chat_messages = build_chat_payload(rendered)
     if not chat_messages:

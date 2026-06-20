@@ -13,7 +13,7 @@
   import CodeEditor from "./CodeEditor.svelte";
   import MetadataLongTextEditor from "./MetadataLongTextEditor.svelte";
   import ReferencePicker from "./ReferencePicker.svelte";
-  import { api } from "./api";
+  import { api, HttpError } from "./api";
   import type { AIPreviewResponse, AssistantEntrySummary, Backlink, EditableDocument, EntryBodyLanguage, EntryMetadata, MetadataFieldDefinition, MetadataSchema, MetadataValue, PromptEntrySummary, PromptInputDefinition } from "./types";
 
   export let scene: EditableDocument | null = null;
@@ -221,6 +221,8 @@
   let promptPreviewPaneHeight = 280; // px; persisted only in memory for now.
   let promptPreviewDebounceTimer: ReturnType<typeof setTimeout> | null = null;
   let promptPreviewLastRenderKey = ""; // dedupe identical renders.
+  // Diagnostics pinned in the CodeEditor gutter — driven by render errors.
+  let promptPreviewDiagnostics: { line: number; col?: number; severity: "error" | "warning"; message: string }[] = [];
   $: promptPreviewDeclaredInputs =
     documentKind === "prompt" && scene
       ? effectivePromptInputs(scene as unknown as PromptEntrySummary)
@@ -232,6 +234,7 @@
     promptPreviewError = null;
     promptPreviewInputDrafts = {};
     promptPreviewLastRenderKey = "";
+    promptPreviewDiagnostics = [];
   }
   // Seed the scene picker once availableScenes arrive.
   $: if (documentKind === "prompt" && !promptPreviewSceneId && availableScenes.length > 0) {
@@ -279,8 +282,27 @@
         commit: false,
       });
       promptPreviewError = null;
+      // Clear gutter markers when the render succeeds. Per-message warnings
+      // could be pinned here too in a future slice — they're file-level today.
+      promptPreviewDiagnostics = [];
     } catch (e) {
       promptPreviewError = (e as Error).message || "Render failed.";
+      // If the error carries a line number (Jinja2 syntax errors do), pin a
+      // gutter marker on that line. UndefinedError has no line — the error
+      // text shown below the preview is the only signal in that case.
+      const next: typeof promptPreviewDiagnostics = [];
+      if (e instanceof HttpError && e.detail && typeof e.detail === "object") {
+        const d = e.detail as { line?: unknown; col?: unknown; message?: unknown };
+        if (typeof d.line === "number" && d.line > 0) {
+          next.push({
+            line: d.line,
+            col: typeof d.col === "number" && d.col > 0 ? d.col : undefined,
+            severity: "error",
+            message: typeof d.message === "string" ? d.message : promptPreviewError,
+          });
+        }
+      }
+      promptPreviewDiagnostics = next;
       // Keep the previous result visible — it's stale but at least gives the
       // author something to compare against the error.
     } finally {
@@ -2510,7 +2532,7 @@
 
     {#if rawBodyMode}
       <div class="raw-body-editor">
-        <CodeEditor bind:value={rawBody} language={rawBodyLanguage} />
+        <CodeEditor bind:value={rawBody} language={rawBodyLanguage} diagnostics={documentKind === "prompt" ? promptPreviewDiagnostics : []} />
       </div>
     {/if}
     <div bind:this={editorElement} class:hidden={rawBodyMode}></div>

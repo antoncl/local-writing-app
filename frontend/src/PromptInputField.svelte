@@ -6,14 +6,28 @@
   // and the prompt-preview inputs panel — keeps look-and-feel identical and
   // halves the maintenance surface for input types.
   import { createEventDispatcher } from "svelte";
+  import ContextPicker from "./ContextPicker.svelte";
   import ReferencePicker from "./ReferencePicker.svelte";
-  import type { MetadataSchema, PromptInputDefinition } from "./types";
+  import type {
+    ContextPickConfig,
+    ContextPickRef,
+    LoreEntrySummary,
+    MetadataSchema,
+    PromptEntrySummary,
+    PromptInputDefinition,
+    StructureDocument,
+  } from "./types";
 
   export let input: PromptInputDefinition;
   export let value: string;
   export let metadataSchema: MetadataSchema | null = null;
   export let excludeId: string | null = null;
   export let ariaLabel: string | undefined = undefined;
+  // Data sources for the context_pick input type. Optional — the picker
+  // will degrade to "no items" when missing rather than throw.
+  export let structure: StructureDocument | null = null;
+  export let loreEntries: LoreEntrySummary[] = [];
+  export let promptEntries: PromptEntrySummary[] = [];
 
   const dispatch = createEventDispatcher<{ change: { value: string } }>();
 
@@ -44,6 +58,20 @@
 
   function encodeRefValue(v: string | string[]): string {
     return Array.isArray(v) ? JSON.stringify(v) : (v ?? "");
+  }
+
+  function decodeContextPickValue(raw: string): ContextPickRef[] {
+    if (!raw) return [];
+    try {
+      const parsed = JSON.parse(raw);
+      if (!Array.isArray(parsed)) return [];
+      return parsed.filter(
+        (item): item is ContextPickRef =>
+          item && typeof item === "object" && typeof item.id === "string" && typeof item.kind === "string",
+      );
+    } catch {
+      return [];
+    }
   }
 </script>
 
@@ -89,6 +117,17 @@
     excludeId={excludeId}
     ariaLabel={ariaLabel ?? (input.label || input.name)}
     on:change={(event) => dispatch("change", { value: encodeRefValue(event.detail.value) })}
+  />
+{:else if input.type === "context_pick"}
+  <ContextPicker
+    config={(input.target ?? {}) as ContextPickConfig}
+    value={decodeContextPickValue(value)}
+    label={input.label || input.name || "Context"}
+    structure={structure}
+    loreEntries={loreEntries}
+    promptEntries={promptEntries}
+    metadataSchema={metadataSchema}
+    on:change={(event) => dispatch("change", { value: JSON.stringify(event.detail.value) })}
   />
 {:else}
   <input

@@ -145,7 +145,28 @@ export type PromptInputType =
   | "boolean"
   | "select"
   | "entity_ref"
-  | "entity_ref_list";
+  | "entity_ref_list"
+  | "context_pick";
+
+// Shape carried in PromptInputDefinition.target when type === "context_pick".
+// Matches the backend convention documented in
+// docs/context-picker.md and the inline comment on models.py.
+export type ContextPickConfig = {
+  kinds?: ("scene" | "lore" | "snippet" | "assistant")[];
+  entry_types?: Record<string, string[]>;   // kind -> sub-type ids
+  presets?: ("full_outline" | "full_text")[];
+  multiple?: boolean;
+};
+
+// What ends up in input.<name> for a context_pick input — a list of
+// these light refs. Bodies are NOT carried; they're materialized
+// server-side at template render time.
+export type ContextPickRef = {
+  id: string;
+  kind: "scene" | "lore" | "snippet" | "assistant" | "preset";
+  title: string;
+  entry_type?: string;
+};
 
 export type PromptInputDefinition = {
   name: string;

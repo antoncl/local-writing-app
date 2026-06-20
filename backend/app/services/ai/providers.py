@@ -582,9 +582,13 @@ def _openai_compatible_chat_stream(
             continue
         choice = choices[0]
         delta = getattr(choice, "delta", None)
-        # DeepSeek + recent Ollama expose thinking as `reasoning_content` on the
-        # delta — a non-standard OpenAI extension. Forward it as a thinking event.
-        reasoning = getattr(delta, "reasoning_content", None) if delta else None
+        # Thinking on the delta — a non-standard OpenAI extension with two
+        # competing field names: DeepSeek uses `reasoning_content`, Ollama's
+        # /v1 compat shim uses `reasoning`. Forward either as a thinking event.
+        reasoning = (
+            getattr(delta, "reasoning_content", None)
+            or getattr(delta, "reasoning", None)
+        ) if delta else None
         if reasoning:
             yield StreamThinking(text=reasoning)
         text = getattr(delta, "content", None) if delta else None

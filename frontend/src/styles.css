@@ -2337,9 +2337,9 @@ h3 {
 }
 
 .chat-panel {
-  display: grid;
+  display: flex;
+  flex-direction: column;
   gap: 8px;
-  grid-template-rows: auto minmax(0, 1fr) auto auto auto auto;
   min-height: 0;
   min-width: 0;
 }
@@ -2391,6 +2391,7 @@ h3 {
 }
 
 .chat-history {
+  flex: 1 1 0;
   display: flex;
   flex-direction: column;
   gap: 8px;

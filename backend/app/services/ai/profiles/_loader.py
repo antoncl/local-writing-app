@@ -5,6 +5,7 @@ offline fallback path.
 
 from __future__ import annotations
 
+from dataclasses import replace
 from datetime import date
 from functools import lru_cache
 from pathlib import Path
@@ -17,6 +18,15 @@ from app.services.ai.profiles.base import (
     CapabilityTier,
     ModelDescriptor,
 )
+
+
+def mark_deprecated(descriptor: ModelDescriptor) -> ModelDescriptor:
+    """Return a copy of `descriptor` with `deprecated=True`. Used by
+    profiles when a baked-in model no longer appears in live discovery —
+    the picker still shows it (so existing assistants don't error) but
+    flags it as retired."""
+
+    return replace(descriptor, deprecated=True)
 
 
 _BAKED_IN_PATH = Path(__file__).with_name("_baked_in.yaml")

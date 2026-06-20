@@ -2733,6 +2733,7 @@ class ProjectService:
             updated_at=self._utcnow_iso(),
             context_items=request.context_items,
             messages=request.messages,
+            inputs=request.inputs,
         )
         self._write_yaml(path, updated.model_dump())
         return updated

@@ -755,6 +755,11 @@ class ChatSession(BaseModel):
     updated_at: str
     context_items: list[ChatSessionContextItem] = Field(default_factory=list)
     messages: list[ChatSessionMessage] = Field(default_factory=list)
+    # Per-input draft values keyed by input.name. Persisted so reopening
+    # a half-configured chat (drafts entered but not yet sent) restores
+    # what the user typed. After first send, the values are locked
+    # along with system_prompt (template was rendered with them).
+    inputs: dict[str, Any] = Field(default_factory=dict)
 
 
 class ChatSessionSummary(BaseModel):
@@ -787,6 +792,7 @@ class SaveChatSessionRequest(BaseModel):
     pinned: bool = False
     context_items: list[ChatSessionContextItem] = Field(default_factory=list)
     messages: list[ChatSessionMessage] = Field(default_factory=list)
+    inputs: dict[str, Any] = Field(default_factory=dict)
 
 
 StructureNode.model_rebuild()

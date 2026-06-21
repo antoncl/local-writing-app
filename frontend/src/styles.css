@@ -2302,6 +2302,19 @@ h3 {
   border-radius: 2px;
 }
 
+/* Spans of body text attributed to a specific character (roleplay
+   prompts). The inline style on the span sets `--character-color` from
+   the lore id hash; this rule paints the underline and a faint wash so
+   the author can scan attribution at a glance. TODO: revisit once an
+   explicit `color` field exists on character lore — author taste should
+   win over the hash. */
+.character-mark {
+  border-bottom: 2px solid var(--character-color, #888);
+  background: color-mix(in oklab, var(--character-color, #888) 10%, transparent);
+  padding: 0 1px;
+  border-radius: 2px;
+}
+
 .ai-inline-toolbar {
   position: absolute;
   display: inline-flex;
@@ -3452,11 +3465,47 @@ h3 {
 }
 
 .entry-inputs-editor .prompt-input-row {
+  position: relative;
   margin: 6px 0;
-  padding: 8px;
+  padding: 8px 8px 8px 22px;
   background: #ffffff;
   border: 1px solid #d8e0dd;
   border-radius: 4px;
+}
+
+/* Drag handle floats in the row's left gutter so it doesn't disturb
+   the existing content layout (especially the context_pick card,
+   which is sensitive to its container's flow). */
+.entry-inputs-editor .prompt-input-handle {
+  position: absolute;
+  top: 50%;
+  left: 4px;
+  transform: translateY(-50%);
+  font-size: 14px;
+}
+
+.entry-inputs-editor .prompt-input-row.dragging {
+  opacity: 0.45;
+}
+
+.entry-inputs-editor .prompt-input-row.drop-before::before,
+.entry-inputs-editor .prompt-input-row.drop-after::after {
+  content: "";
+  position: absolute;
+  left: 4px;
+  right: 4px;
+  height: 2px;
+  background: #5d8a7a;
+  border-radius: 2px;
+  pointer-events: none;
+}
+
+.entry-inputs-editor .prompt-input-row.drop-before::before {
+  top: -2px;
+}
+
+.entry-inputs-editor .prompt-input-row.drop-after::after {
+  bottom: -2px;
 }
 
 .entry-inputs-editor .prompt-input-grid {
@@ -4189,6 +4238,15 @@ h3 {
   max-width: 520px;
   display: grid;
   gap: 12px;
+}
+
+.inputs-dialog-error {
+  background: #fdecec;
+  border: 1px solid #d77c7c;
+  color: #8c2828;
+  padding: 6px 10px;
+  border-radius: 4px;
+  font-size: 12px;
 }
 
 .inputs-dialog header {

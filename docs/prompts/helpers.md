@@ -68,11 +68,83 @@ entry(value) -> EntryRef | None
 
 **Returns**: an EntryRef for the resolved id, or `None` when the input is empty / unrecognized. The EntryRef itself is lazy — it doesn't touch disk until you read a non-id attribute.
 
+**Accepted shapes**:
+
+- A string id: `entry("lore_abc123")`.
+- An existing EntryRef (returned unchanged).
+- Any object with an `.id` attribute.
+- A `dict` with an `id` key (e.g. a single ContextPickRef).
+- A `list` of any of the above — the **first** element wins.
+- A JSON-string of a list (the form a `context_pick` input takes when rendered into a template). Auto-parsed; the first picked ref is used.
+
+The last two shapes mean `entry(input.character)` works directly when `character` is a `context_pick` input (whether single- or multi-pick).
+
 **Example**
 ```jinja
 {% set honor = entry(scene.metadata.pov) %}
 {{ honor.title }} lives on {{ honor.home_place.title }}.
+
+{# Or against a context_pick input — first picked ref wins #}
+{% set bob = entry(input.character) %}
+You are playing {{ bob.title }}.
 ```
+
+## `character_thread(scene, character)`
+
+Reconstruct a per-character chat thread from a scene body's character markers (the `<!-- character:id=X -->…<!-- /character -->` spans the Roleplay flow writes on Accept). Emits its own role-tagged content using the same markers the `{% role %}` extension produces, so the renderer splits the output into multiple alternating chat messages.
+
+**Must be used OUTSIDE any `{% role %}` block** — it owns its role boundaries.
+
+**Signature**
+```python
+character_thread(scene, character) -> str
+```
+
+- `scene` — the target scene (an EntryRef or anything exposing `.body_markdown`). The helper reads `.body_markdown` directly.
+- `character` — the focus character whose turn is being generated. Accepts the same shapes `entry()` does: a bare id, an EntryRef, a ContextPickRef dict, a list, or a JSON-string list. In practice you pass `input.<your_character_pick_name>`.
+
+**Mapping** (each segment of the body becomes a message):
+
+| Span in body | Becomes |
+| --- | --- |
+| Tagged with the focus character's id | `assistant` turn |
+| Tagged with another character's id | `user` turn prefixed `[Name]:` (titles resolved via lore lookup; falls back to the id if unresolved) |
+| Untagged narration | `user` turn, no prefix |
+| No markers anywhere (first invocation) | Whole body as one `user`-narration message |
+| Scene ends on the focus character's own span | Synthetic `user` "Continue as <Name>." appended so the chat API has a turn to respond to |
+
+Consecutive same-role segments are coalesced into one message, and empty messages are dropped at payload-assembly time, so the LLM always sees a clean user/assistant/user alternation regardless of how spans interleave with narration.
+
+**Example** (the Roleplay default body, abridged):
+```jinja
+{% set char = entry(input.character) %}
+{% role "system" %}
+You are playing {{ char.title }}.
+{{ char.body_markdown }}
+{% endrole %}
+
+{% role "user" %}
+{% if scene.metadata.dynamics %}
+## Dynamics
+{{ scene.metadata.dynamics }}
+{% endif %}
+{{ relevant_lore(scene) }}
+{% cache_break %}
+{% if scenes_before(scene) %}
+## The story so far
+{{ scenes_before(scene) }}
+{% endif %}
+{% endrole %}
+
+{# Per-character thread takes over below. Outside the role block. #}
+{{ character_thread(scene, input.character) }}
+```
+
+**Caveats**:
+
+- The helper emits raw control-character markers (`ROLE_START`, `ROLE_END`). The template environment is `autoescape=False`, so they pass through verbatim and get re-parsed. Don't manually `e()` or `Markup()` the result.
+- Nesting `character_thread` inside a `{% role %}` block triggers the renderer's "nested role" warning and drops the outer wrapper — keep it outside.
+- See [`docs/roleplay.md`](../roleplay.md) for the user-facing howto on Roleplay prompts and the marker scheme.
 
 ## EntryRef
 

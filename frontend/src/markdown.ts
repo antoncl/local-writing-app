@@ -23,6 +23,18 @@ turndown.addRule("todoAnchor", {
     return `<!-- embedded-todo:id=${todoId};status=${status};note=${note} -->${content}<!-- /embedded-todo -->`;
   },
 });
+turndown.addRule("characterMark", {
+  filter: (node: Node) => {
+    if (!(node instanceof HTMLElement)) return false;
+    return node.tagName === "SPAN" && Boolean(node.dataset.character);
+  },
+  replacement: (content: string, node: Node) => {
+    const element = node as HTMLElement;
+    const id = element.dataset.character;
+    if (!id) return content;
+    return `<!-- character:id=${id} -->${content}<!-- /character -->`;
+  },
+});
 turndown.addRule("simpleMarkdownTable", {
   filter: "table",
   replacement: (_content: string, node: Node) => {
@@ -62,7 +74,8 @@ turndown.addRule("simpleMarkdownTable", {
 });
 
 export async function sceneMarkdownToHtml(markdown: string): Promise<string> {
-  return (await marked.parse(markEmbeddedTodos(markdown || ""))) || "<p></p>";
+  const prepared = markEmbeddedCharacters(markEmbeddedTodos(markdown || ""));
+  return (await marked.parse(prepared)) || "<p></p>";
 }
 
 export function editorHtmlToSceneMarkdown(html: string): string {
@@ -93,6 +106,15 @@ function markEmbeddedTodos(markdown: string): string {
     /<!--\s*embedded-todo:id=([A-Za-z0-9_-]+);status=(open|done);note=([^]*?)\s*-->([\s\S]*?)<!--\s*\/embedded-todo\s*-->/g,
     (_match, todoId: string, status: string, note: string, content: string) => {
       return `<span data-todo-id="${escapeAttribute(todoId)}" data-todo-status="${status}" data-todo-note="${escapeAttribute(decodeNote(note))}">${content}</span>`;
+    },
+  );
+}
+
+function markEmbeddedCharacters(markdown: string): string {
+  return markdown.replace(
+    /<!--\s*character:id=([A-Za-z0-9_-]+)\s*-->([\s\S]*?)<!--\s*\/character\s*-->/g,
+    (_match, characterId: string, content: string) => {
+      return `<span data-character="${escapeAttribute(characterId)}">${content}</span>`;
     },
   );
 }

@@ -48,9 +48,11 @@
   }>();
 
   // Widget-level collapse state. Local to the component instance — resets
-  // when the prompt entry (and therefore this widget) re-mounts. New
-  // inputs default to expanded so the author sees the affordances.
-  let collapsed = false;
+  // when the prompt entry (and therefore this widget) re-mounts. Default
+  // to collapsed so a fresh prompt doesn't dump the full picker tree on
+  // the author up-front; the row's summary chips communicate intent and
+  // the chevron invites expansion when they need to configure it.
+  let collapsed = true;
   function toggleWidgetCollapse() {
     collapsed = !collapsed;
   }

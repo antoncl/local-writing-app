@@ -73,7 +73,13 @@
     label: string;
     description: string;
     group: string;
-    run: () => void | Promise<void>;
+    // Optional canonical single-word command name. Defaults to label.
+    // Used as the Tab-autocomplete target so `/rol[Tab]` becomes
+    // `/roleplay ` (single word + space) instead of `/Untitled Prompt `
+    // — gives shell-style completion without breaking the
+    // `command + space + args` parse shape.
+    autocompleteTo?: string;
+    run: (args?: string[]) => void | Promise<void>;
   };
 
   const TABLE_GRID_MAX_ROWS = 8;
@@ -130,6 +136,51 @@
     },
     renderHTML({ HTMLAttributes }) {
       return ["span", mergeAttributes(HTMLAttributes, { class: "ai-suggestion" }), 0];
+    },
+  });
+
+  // Color derived deterministically from the character lore id. Stable
+  // across reloads (no random/Date input). TODO: revisit once an explicit
+  // `color` field exists on character lore entries — author taste should
+  // win over a hash when both are available.
+  function characterColorFromId(id: string): string {
+    let hash = 0;
+    for (let i = 0; i < id.length; i++) {
+      hash = (hash * 31 + id.charCodeAt(i)) | 0;
+    }
+    const hue = ((hash % 360) + 360) % 360;
+    return `hsl(${hue}, 62%, 48%)`;
+  }
+
+  // Spans tagged with a character lore id (`data-character="<lore-id>"`).
+  // `inclusive: false` so typing at the boundary of a character's span
+  // doesn't extend the tag over the author's surrounding narration —
+  // critical for the per-character send-time reconstruction (next slice).
+  const CharacterMark = Mark.create({
+    name: "character",
+    inclusive: false,
+    excludes: "",
+    addAttributes() {
+      return {
+        characterId: {
+          default: null,
+          parseHTML: (element) => element.getAttribute("data-character"),
+          renderHTML: (attributes) => {
+            if (!attributes.characterId) return {};
+            const id = String(attributes.characterId);
+            return {
+              "data-character": id,
+              style: `--character-color: ${characterColorFromId(id)}`,
+            };
+          },
+        },
+      };
+    },
+    parseHTML() {
+      return [{ tag: "span[data-character]" }];
+    },
+    renderHTML({ HTMLAttributes }) {
+      return ["span", mergeAttributes(HTMLAttributes, { class: "character-mark" }), 0];
     },
   });
 
@@ -233,6 +284,10 @@
   let lastInvokedEntryId: string | null = null;
   let lastInvokedInputs: Record<string, unknown> = {};
   let inputsDialogEntry: PromptEntrySummary | null = null;
+  // Inline error inside the inputs dialog — populated when a positional
+  // arg (e.g. from `/roleplay Irene`) failed to resolve so the user can
+  // see WHY the dialog opened instead of firing directly.
+  let inputsDialogError: string | null = null;
   let inputsDialogDrafts: Record<string, string> = {};
   // "" means: use the user's default assistant (resolved server-side).
   let inputsDialogAssistantId: string = "";
@@ -256,6 +311,11 @@
   // PromptInputDefinition[] and emit it as part of the change event. App.svelte
   // stores it on the pane and persists on save.
   type EntryInputDraft = {
+    // Stable key for the {#each} block. Not persisted — generated on add /
+    // seed so that reordering the drafts moves the keyed component along
+    // with the data (otherwise per-row internal state like ContextPick's
+    // collapsed flag stays anchored to the position, not the input).
+    clientId: string;
     name: string;
     type: import("./types").PromptInputType;
     label: string;
@@ -271,6 +331,11 @@
     nameDerived: boolean;
   };
   let entryInputDrafts: EntryInputDraft[] = [];
+  let entryInputDraftCounter = 0;
+  function nextInputDraftId(): string {
+    entryInputDraftCounter += 1;
+    return `__input_${entryInputDraftCounter}`;
+  }
   let entryInputsExpanded = false;
   let cheatsheetPopoverOpen = false;
   let helpButtonEl: HTMLButtonElement | undefined;
@@ -320,6 +385,7 @@
         ? (input.target as unknown as import("./types").ContextPickConfig)
         : ({ kinds: [], presets: [], multiple: true } as import("./types").ContextPickConfig);
     return {
+      clientId: nextInputDraftId(),
       name: input.name,
       type: input.type,
       label: input.label ?? "",
@@ -388,6 +454,7 @@
     entryInputDrafts = [
       ...entryInputDrafts,
       {
+        clientId: nextInputDraftId(),
         name: "",
         type: "text",
         label: "",
@@ -437,6 +504,62 @@
       i !== index ? draft : { ...draft, ...patch },
     );
     emitInputsChange();
+  }
+
+  function moveEntryInput(from: number, to: number): void {
+    if (from === to || from < 0 || to < 0) return;
+    if (from >= entryInputDrafts.length || to >= entryInputDrafts.length) return;
+    const next = entryInputDrafts.slice();
+    const [moved] = next.splice(from, 1);
+    next.splice(to, 0, moved);
+    entryInputDrafts = next;
+    emitInputsChange();
+  }
+
+  // Linear before/after reorder for the inputs list. Mirrors the tree's
+  // drag-handle UX (App.svelte's handleTreeDrag*) but without the "into"
+  // mode — inputs are a flat list.
+  let inputDragFromIndex: number | null = null;
+  let inputDragOverIndex: number | null = null;
+  let inputDragOverPosition: "before" | "after" | null = null;
+
+  function handleInputDragStart(event: DragEvent, index: number) {
+    inputDragFromIndex = index;
+    if (event.dataTransfer) {
+      event.dataTransfer.effectAllowed = "move";
+      event.dataTransfer.setData("text/plain", String(index));
+    }
+  }
+
+  function handleInputDragEnd() {
+    inputDragFromIndex = null;
+    inputDragOverIndex = null;
+    inputDragOverPosition = null;
+  }
+
+  function handleInputDragOver(event: DragEvent, index: number) {
+    if (inputDragFromIndex === null || inputDragFromIndex === index) return;
+    event.preventDefault();
+    if (event.dataTransfer) event.dataTransfer.dropEffect = "move";
+    const target = event.currentTarget;
+    if (!(target instanceof HTMLElement)) return;
+    const rect = target.getBoundingClientRect();
+    const position: "before" | "after" = event.clientY - rect.top < rect.height / 2 ? "before" : "after";
+    if (inputDragOverIndex !== index || inputDragOverPosition !== position) {
+      inputDragOverIndex = index;
+      inputDragOverPosition = position;
+    }
+  }
+
+  function handleInputDrop(event: DragEvent, index: number) {
+    event.preventDefault();
+    const from = inputDragFromIndex;
+    const position = inputDragOverPosition;
+    handleInputDragEnd();
+    if (from === null || position === null || from === index) return;
+    let to = position === "before" ? index : index + 1;
+    if (from < to) to -= 1;
+    moveEntryInput(from, to);
   }
 
   // --- Inline prompt preview (when editing a prompt entry) ---
@@ -638,7 +761,9 @@
   // place — a `$:` declaration depending on `editor` wouldn't re-run when the
   // user types. We refresh it explicitly from onUpdate/onSelectionUpdate.
   let slashFilterText = "";
-  $: filteredSlashCommands = filterSlashCommands(slashCommands, slashFilterText);
+  $: parsedSlash = parseSlashBody(slashFilterText) ?? { command: slashFilterText, args: "" };
+  $: slashArgTokens = tokenizeSlashArgs(parsedSlash.args);
+  $: filteredSlashCommands = filterSlashCommands(slashCommands, parsedSlash.command, parsedSlash.args.length > 0);
   $: activeSlashCommand = filteredSlashCommands[slashMenu.selectedIndex];
   $: clampSlashSelectedIndex(filteredSlashCommands.length);
   $: selectionToolbarActions = editor ? getSelectionToolbarActions() : [];
@@ -753,6 +878,7 @@
       extensions: [
         StarterKit.configure({ heading: { levels: [1, 2, 3] } }),
         AISuggestion,
+        CharacterMark,
         TodoAnchor,
         Table.configure({ resizable: true }),
         TableRow,
@@ -1121,6 +1247,98 @@
     return entry.inputs ?? [];
   }
 
+  // Resolve a positional-string token against a context_pick input. Returns
+  // the serialized ContextPickRef-array JSON the dialog/runtime expects,
+  // or null if the name is ambiguous / unresolved (so the caller can fall
+  // back to the dialog).
+  function resolveContextPickToken(
+    token: string,
+    target: { kind?: string; entry_type?: string } | null | undefined,
+  ): string | null {
+    const lower = token.toLowerCase();
+    const wantKind = target?.kind;
+    const wantEntryType = target?.entry_type;
+
+    type Cand = { id: string; kind: "lore" | "scene"; title: string; entry_type?: string };
+    const candidates: Cand[] = [];
+
+    if (!wantKind || wantKind === "lore") {
+      for (const lore of loreEntries) {
+        if (lore.title.toLowerCase() !== lower) continue;
+        if (wantEntryType && lore.entry_type !== wantEntryType) continue;
+        candidates.push({ id: lore.id, kind: "lore", title: lore.title, entry_type: lore.entry_type });
+      }
+    }
+    if (!wantKind || wantKind === "scene") {
+      for (const sc of availableScenes) {
+        if (sc.title.toLowerCase() !== lower) continue;
+        candidates.push({ id: sc.id, kind: "scene", title: sc.title });
+      }
+    }
+
+    if (candidates.length !== 1) return null;
+    const c = candidates[0];
+    const ref: { id: string; kind: string; title: string; entry_type?: string } = {
+      id: c.id,
+      kind: c.kind,
+      title: c.title,
+    };
+    if (c.entry_type) ref.entry_type = c.entry_type;
+    return JSON.stringify([ref]);
+  }
+
+  function resolvePromptPositionalArgs(
+    entry: PromptEntrySummary,
+    args: string[],
+  ): {
+    inputs: Record<string, unknown> | undefined;
+    satisfied: boolean;
+    unresolved: Array<{ name: string; label: string; token: string }>;
+  } {
+    const declared = effectivePromptInputs(entry);
+    if (declared.length === 0 || args.length === 0) {
+      return { inputs: undefined, satisfied: false, unresolved: [] };
+    }
+    const inputs: Record<string, unknown> = {};
+    const filledNames = new Set<string>();
+    const unresolved: Array<{ name: string; label: string; token: string }> = [];
+    const limit = Math.min(declared.length, args.length);
+    for (let i = 0; i < limit; i++) {
+      const input = declared[i];
+      const raw = args[i];
+      const label = input.label || input.name;
+      if (input.type === "context_pick") {
+        const target = input.target as { kind?: string; entry_type?: string } | null | undefined;
+        const resolved = resolveContextPickToken(raw, target);
+        if (resolved === null) {
+          unresolved.push({ name: input.name, label, token: raw });
+          continue;
+        }
+        inputs[input.name] = resolved;
+        filledNames.add(input.name);
+      } else {
+        const coerced = coerceInputValue(raw, input.type);
+        if (coerced === null || coerced === "") {
+          unresolved.push({ name: input.name, label, token: raw });
+          continue;
+        }
+        inputs[input.name] = coerced;
+        filledNames.add(input.name);
+      }
+    }
+    const missingRequired = declared.some(
+      (input) => input.required && !filledNames.has(input.name),
+    );
+    // Satisfied = no required-missing AND every supplied positional arg
+    // resolved. A partially-resolved invocation falls through to the
+    // dialog so the user can fix the unresolved tokens.
+    return {
+      inputs,
+      satisfied: !missingRequired && unresolved.length === 0,
+      unresolved,
+    };
+  }
+
   function handleEditorKeydown(view: EditorView, event: KeyboardEvent) {
     if (documentKind !== "scene") {
       if (slashMenu.visible) closeSlashMenu();
@@ -1193,11 +1411,40 @@
         runSlashCommand(activeSlashCommand);
         return true;
       }
+      if (event.key === "Tab" && activeSlashCommand) {
+        event.preventDefault();
+        autocompleteSlashFilter(activeSlashCommand);
+        return true;
+      }
       if (event.key === "Escape") {
         event.preventDefault();
         closeSlashMenu();
         return true;
       }
+    }
+
+    // Tab outside the slash menu: indent a list item if we're in one,
+    // otherwise insert a literal tab character. Both override the
+    // browser default of focusing the next form element — when the user
+    // is writing, Tab should stay inside the editor.
+    if (event.key === "Tab" && !event.shiftKey && editor) {
+      if (editor.can().sinkListItem("listItem")) {
+        event.preventDefault();
+        editor.chain().focus().sinkListItem("listItem").run();
+        return true;
+      }
+      event.preventDefault();
+      editor.chain().focus().insertContent("\t").run();
+      return true;
+    }
+    // Shift+Tab outside the slash menu: outdent a list item if we're
+    // in one. Outside lists, leave Shift+Tab alone so it can still
+    // navigate focus backward to the previous element if the user
+    // wants to escape the editor.
+    if (event.key === "Tab" && event.shiftKey && editor && editor.can().liftListItem("listItem")) {
+      event.preventDefault();
+      editor.chain().focus().liftListItem("listItem").run();
+      return true;
     }
 
     if (event.key === "/" && isEmptyTextblock(view)) {
@@ -1218,10 +1465,51 @@
     return selection.empty && selection.$from.parent.type.name === "paragraph" && selection.$from.parent.textContent.length === 0;
   }
 
-  // Allowed chars in the filter text after `/`. Excludes whitespace and
-  // punctuation so a user typing "/ some prose" or "/run!" cleanly exits the
-  // menu and resumes normal typing.
-  const SLASH_FILTER_PATTERN = /^[a-zA-Z0-9_-]*$/;
+  // Slash text shape: `/<command>[ <args>]`. The command is word-chars only;
+  // args is free text that gets tokenized at run time. `/ prose` (empty
+  // command + space) is NOT a slash trigger — that lets the user start a
+  // line with `/` and keep typing.
+  const SLASH_COMMAND_PATTERN = /^[a-zA-Z0-9_-]*$/;
+  const SLASH_WITH_ARGS_PATTERN = /^([a-zA-Z0-9_-]+)\s+(.*)$/;
+
+  function parseSlashBody(text: string): { command: string; args: string } | null {
+    if (SLASH_COMMAND_PATTERN.test(text)) return { command: text, args: "" };
+    const m = text.match(SLASH_WITH_ARGS_PATTERN);
+    if (m) return { command: m[1], args: m[2] };
+    return null;
+  }
+
+  // `/table 9x2` → 9 rows × 2 cols. The visual grid picker tops out at 8×8,
+  // but the CLI shouldn't silently truncate what the user typed — clamp
+  // generously instead so /table 50x3 still inserts a 50×3 table.
+  function parseTableDims(token: string): { rows: number; cols: number } | null {
+    const m = token.match(/^(\d+)\s*[x×]\s*(\d+)$/i);
+    if (!m) return null;
+    const rows = Math.min(100, Math.max(1, parseInt(m[1], 10)));
+    const cols = Math.min(100, Math.max(1, parseInt(m[2], 10)));
+    return { rows, cols };
+  }
+
+  function tokenizeSlashArgs(input: string): string[] {
+    const tokens: string[] = [];
+    let i = 0;
+    while (i < input.length) {
+      while (i < input.length && /\s/.test(input[i])) i++;
+      if (i >= input.length) break;
+      if (input[i] === '"' || input[i] === "'") {
+        const quote = input[i++];
+        let token = "";
+        while (i < input.length && input[i] !== quote) token += input[i++];
+        if (i < input.length) i++;
+        tokens.push(token);
+      } else {
+        let token = "";
+        while (i < input.length && !/\s/.test(input[i])) token += input[i++];
+        tokens.push(token);
+      }
+    }
+    return tokens;
+  }
 
   function isSlashTriggerContext() {
     if (documentKind !== "scene") return false;
@@ -1231,7 +1519,7 @@
     if (selection.$from.parent.type.name !== "paragraph") return false;
     const text = selection.$from.parent.textContent;
     if (!text.startsWith("/")) return false;
-    return SLASH_FILTER_PATTERN.test(text.slice(1));
+    return parseSlashBody(text.slice(1)) !== null;
   }
 
   function readSlashFilterText(): string {
@@ -1246,13 +1534,33 @@
     if (next !== slashFilterText) slashFilterText = next;
   }
 
-  function filterSlashCommands(commands: SlashCommand[], filter: string): SlashCommand[] {
-    if (!filter) return commands;
-    const lower = filter.toLowerCase();
+  // Anchor matching to word starts. `/ro` matches "Roleplay" and
+  // "Bullet List"'s second word "list" would match `/list`, but
+  // "Paragraph" (description "Return this line to plain prose.") no
+  // longer matches `/ro` just because "prose" or "Return" contain
+  // the letters somewhere inside.
+  function matchesSlashFilter(haystack: string, needle: string): boolean {
+    const lower = needle.toLowerCase();
+    return haystack.toLowerCase().split(/\s+/).some((word) => word.startsWith(lower));
+  }
+
+  function filterSlashCommands(commands: SlashCommand[], command: string, argsPresent: boolean): SlashCommand[] {
+    if (!command) return commands;
+    const lower = command.toLowerCase();
+    // With positional args, prefer an exact label match so unambiguous
+    // commands fire without showing siblings — `/table 9x2` should
+    // narrow to "Table", not also "Heading 2". With no exact match
+    // we fall through to the same word-prefix search the no-args
+    // path uses (label OR description OR group) so a prompt titled
+    // "Untitled Prompt" of type Roleplay still matches `/roleplay …`.
+    if (argsPresent) {
+      const exact = commands.filter((cmd) => cmd.label.toLowerCase() === lower);
+      if (exact.length > 0) return exact;
+    }
     return commands.filter((cmd) =>
-      cmd.label.toLowerCase().includes(lower) ||
-      cmd.description.toLowerCase().includes(lower) ||
-      cmd.group.toLowerCase().includes(lower),
+      matchesSlashFilter(cmd.label, command) ||
+      matchesSlashFilter(cmd.description, command) ||
+      matchesSlashFilter(cmd.group, command),
     );
   }
 
@@ -1486,13 +1794,38 @@
     const { selection } = editor.state;
     const paragraphStart = selection.$from.start();
     const paragraphText = selection.$from.parent.textContent;
-    if (paragraphText.startsWith("/") && SLASH_FILTER_PATTERN.test(paragraphText.slice(1))) {
+    if (paragraphText.startsWith("/") && parseSlashBody(paragraphText.slice(1)) !== null) {
       editor.chain().focus().deleteRange({ from: paragraphStart, to: paragraphStart + paragraphText.length }).run();
     }
   }
 
+  // Tab in the slash menu: rewrite the trigger paragraph from "/<partial>"
+  // to "/<full-command> " so the user can immediately type positional
+  // args. Only intercepted while the menu is visible — see the gated
+  // Tab branch in handleEditorKeydown — so prose Tab handling outside
+  // the menu is untouched.
+  function autocompleteSlashFilter(cmd: SlashCommand) {
+    if (!editor) return;
+    const { selection } = editor.state;
+    const paragraphStart = selection.$from.start();
+    const paragraphText = selection.$from.parent.textContent;
+    if (!paragraphText.startsWith("/") || parseSlashBody(paragraphText.slice(1)) === null) return;
+    const target = (cmd.autocompleteTo ?? cmd.label).trim();
+    if (!target) return;
+    const replacement = `/${target} `;
+    if (paragraphText === replacement) return;
+    editor
+      .chain()
+      .focus()
+      .deleteRange({ from: paragraphStart, to: paragraphStart + paragraphText.length })
+      .insertContent(replacement)
+      .run();
+  }
+
   function runSlashCommand(command: SlashCommand) {
-    command.run();
+    const parsed = parseSlashBody(slashFilterText) ?? { command: slashFilterText, args: "" };
+    const args = tokenizeSlashArgs(parsed.args);
+    command.run(args);
     clearSlashTrigger();
     if (slashMenu.mode === "commands") {
       closeSlashMenu();
@@ -1535,6 +1868,7 @@
     inputsDialogDrafts = drafts;
     // Seed with the user's default; the picker shows it as "Default (Name)".
     inputsDialogAssistantId = "";
+    inputsDialogError = null;
     inputsDialogEntry = entry;
   }
 
@@ -1542,6 +1876,7 @@
     inputsDialogEntry = null;
     inputsDialogDrafts = {};
     inputsDialogAssistantId = "";
+    inputsDialogError = null;
   }
 
   function updateInputsDialogDraft(name: string, value: string) {
@@ -2046,17 +2381,54 @@
     return from === -1 ? null : { from, to };
   }
 
+  // True iff the prompt entry-type chain includes `roleplay` (so any
+  // future sub-type of roleplay still gets character-tagged on Accept).
+  function isRoleplayPromptEntry(entry: PromptEntrySummary | null | undefined): boolean {
+    if (!entry || !metadataSchema) return false;
+    let cursor: string | undefined = entry.entry_type;
+    const seen = new Set<string>();
+    while (cursor && !seen.has(cursor)) {
+      if (cursor === "roleplay") return true;
+      seen.add(cursor);
+      cursor = metadataSchema.entry_types[cursor]?.parent ?? undefined;
+    }
+    return false;
+  }
+
+  // Pull the first lore id from a context_pick input value. Frontend
+  // serializes context_pick as a JSON-string list of refs (see
+  // resolveContextPickToken / PromptInputField). Returns null for any
+  // other shape, including legacy bare-string ids (a roleplay invocation
+  // always goes through the picker or CLI resolver, both of which
+  // produce the JSON-list form).
+  function characterIdFromInputValue(value: unknown): string | null {
+    if (typeof value !== "string") return null;
+    const trimmed = value.trim();
+    if (!trimmed.startsWith("[")) return null;
+    try {
+      const parsed = JSON.parse(trimmed);
+      if (!Array.isArray(parsed) || parsed.length === 0) return null;
+      const first = parsed[0];
+      if (first && typeof first === "object" && typeof first.id === "string") return first.id;
+      return null;
+    } catch {
+      return null;
+    }
+  }
+
   function acceptAISuggestion() {
     if (!editor || !aiSuggestionId) return;
     const range = findAISuggestionRange(aiSuggestionId);
     if (range) {
-      editor
-        .chain()
-        .focus()
-        .setTextSelection(range)
-        .unsetMark("aiSuggestion")
-        .setTextSelection(range.to)
-        .run();
+      const lastEntry = findPromptEntry(lastInvokedEntryId);
+      const characterId = isRoleplayPromptEntry(lastEntry)
+        ? characterIdFromInputValue(lastInvokedInputs.character)
+        : null;
+      let chain = editor.chain().focus().setTextSelection(range).unsetMark("aiSuggestion");
+      if (characterId) {
+        chain = chain.setMark("character", { characterId });
+      }
+      chain.setTextSelection(range.to).run();
     }
     aiSuggestionId = null;
     aiSuggestionMeta = null;
@@ -2610,17 +2982,55 @@
       {
         group: "Insert",
         label: "Table",
-        description: "Pick the size, then click to insert.",
-        run: () => openTableGrid(),
+        description: "Pick a size — or type \"/table NxM\" (rows × cols).",
+        run: (args) => {
+          const dims = args && args.length > 0 ? parseTableDims(args[0]) : null;
+          if (dims) {
+            insertTableFromGrid(dims.rows, dims.cols);
+          } else {
+            openTableGrid();
+          }
+        },
       },
       ...promptEntriesForSurface("append_to_body")
         .map((entry) => ({
           group: "AI",
           label: entry.title,
           description: promptEntryDescription(entry),
-          run: () => {
+          // Tab-completes to the entry-type id (always slug-shaped, no
+          // spaces), so even prompts titled "Untitled Prompt" expand
+          // to a usable shell command word like `/roleplay`.
+          autocompleteTo: entry.entry_type,
+          run: (args?: string[]) => {
             clearSlashTrigger();
-            void runPromptEntry(entry);
+            const resolved = args && args.length > 0
+              ? resolvePromptPositionalArgs(entry, args)
+              : {
+                  inputs: undefined as Record<string, unknown> | undefined,
+                  satisfied: false,
+                  unresolved: [] as Array<{ name: string; label: string; token: string }>,
+                };
+            if (resolved.inputs && resolved.satisfied) {
+              void runPromptEntry(entry, resolved.inputs);
+            } else if (resolved.inputs) {
+              // Partial: open dialog, write the resolved drafts in, and
+              // CLEAR any input whose positional arg failed to resolve so
+              // the user doesn't see a stale value from the prior run.
+              openInputsDialog(entry);
+              for (const [name, value] of Object.entries(resolved.inputs)) {
+                updateInputsDialogDraft(name, String(value));
+              }
+              for (const { name } of resolved.unresolved) {
+                updateInputsDialogDraft(name, "");
+              }
+              if (resolved.unresolved.length > 0) {
+                inputsDialogError = resolved.unresolved
+                  .map((u) => `Couldn't find “${u.token}” for ${u.label}`)
+                  .join(" · ");
+              }
+            } else {
+              void runPromptEntry(entry);
+            }
           },
         })),
     ];
@@ -3063,7 +3473,9 @@
               <dt><code>full_text()</code></dt>
               <dd>Every scene's prose in manuscript order (<code>.title</code>, <code>.body</code>). Heavy.</dd>
               <dt><code>entry(id_or_ref)</code></dt>
-              <dd>Wrap a raw entry id as an EntryRef so you can walk its fields: <code>&lbrace;&lbrace; entry(scene.metadata.pov).title &rbrace;&rbrace;</code>.</dd>
+              <dd>Wrap a raw entry id as an EntryRef so you can walk its fields: <code>&lbrace;&lbrace; entry(scene.metadata.pov).title &rbrace;&rbrace;</code>. Also accepts the value of a <code>context_pick</code> input (first picked ref wins) — <code>&lbrace;&lbrace; entry(input.character).title &rbrace;&rbrace;</code>.</dd>
+              <dt><code>character_thread(scene, character)</code></dt>
+              <dd>Per-character chat thread for the Roleplay sub-type. Walks the scene body's <code>data-character</code> spans: focus character → <code>assistant</code> turns, others → <code>user</code> prefixed <code>[Name]:</code>, untagged narration → plain <code>user</code>. No markers yet → whole body as one user message. <strong>Use OUTSIDE any <code>&lbrace;% role %&rbrace;</code> block</strong> — emits its own role boundaries. See <code>docs/roleplay.md</code>.</dd>
             </dl>
           </section>
         </div>
@@ -3078,12 +3490,28 @@
       {#if entryInputDrafts.length === 0}
         <p class="muted entry-inputs-empty">No inputs yet. Click + Input to declare one.</p>
       {/if}
-      {#each entryInputDrafts as draft, index (index)}
+      {#each entryInputDrafts as draft, index (draft.clientId)}
         {#if draft.type === "context_pick"}
           <!-- PR 2: context_pick owns its entire row (chevron · label ·
                id · type select · Required · Multiple · ×). Generic
                input types still render the .prompt-input-grid below. -->
-          <div class="prompt-input-row prompt-input-row-context">
+          <div
+            class="prompt-input-row prompt-input-row-context"
+            class:dragging={inputDragFromIndex === index}
+            class:drop-before={inputDragOverIndex === index && inputDragOverPosition === "before"}
+            class:drop-after={inputDragOverIndex === index && inputDragOverPosition === "after"}
+            on:dragover={(e) => handleInputDragOver(e, index)}
+            on:drop={(e) => handleInputDrop(e, index)}
+          >
+            <span
+              class="tree-handle prompt-input-handle"
+              draggable="true"
+              role="button"
+              tabindex="-1"
+              aria-label="Drag to reorder"
+              on:dragstart={(e) => handleInputDragStart(e, index)}
+              on:dragend={handleInputDragEnd}
+            >⋮⋮</span>
             <ContextPickConfigEditor
               config={draft.contextPickConfig}
               metadataSchema={metadataSchema}
@@ -3099,7 +3527,23 @@
             />
           </div>
         {:else}
-          <div class="prompt-input-row">
+          <div
+            class="prompt-input-row"
+            class:dragging={inputDragFromIndex === index}
+            class:drop-before={inputDragOverIndex === index && inputDragOverPosition === "before"}
+            class:drop-after={inputDragOverIndex === index && inputDragOverPosition === "after"}
+            on:dragover={(e) => handleInputDragOver(e, index)}
+            on:drop={(e) => handleInputDrop(e, index)}
+          >
+            <span
+              class="tree-handle prompt-input-handle"
+              draggable="true"
+              role="button"
+              tabindex="-1"
+              aria-label="Drag to reorder"
+              on:dragstart={(e) => handleInputDragStart(e, index)}
+              on:dragend={handleInputDragEnd}
+            >⋮⋮</span>
             <div class="prompt-input-grid">
               <label>
                 Label
@@ -3326,6 +3770,9 @@
         <strong>{inputsDialogEntry.title}</strong>
         <small>{promptEntryDescription(inputsDialogEntry)}</small>
       </header>
+      {#if inputsDialogError}
+        <div class="inputs-dialog-error" role="alert">{inputsDialogError}</div>
+      {/if}
       <div class="inputs-dialog-fields">
         {#each declaredInputs as input (input.name)}
           <label>

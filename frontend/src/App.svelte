@@ -424,8 +424,35 @@
             : "Scene Types";
   $: concretePromptSubtypes = Object.entries(metadataSchema?.entry_types ?? {})
     .filter(([id, definition]) => definition.kind === "prompt" && !definition.abstract && id !== "prompt")
-    .map(([id, definition]) => ({ id, label: definition.name || id }))
-    .sort((a, b) => a.label.localeCompare(b.label));
+    .map(([id, definition]) => ({ id, label: definition.name || id, parent: definition.parent ?? null }));
+
+  // Flat tree-with-depth for rendering. Sub-types nest under their parent
+  // (Roleplay under Continuation) so the prompts pane reads as a
+  // hierarchy. A subtype whose parent is missing or is the abstract
+  // `prompt` base lives at the root.
+  $: promptSubtypeRows = (() => {
+    type Row = { id: string; label: string; depth: number };
+    const byId = new Map(concretePromptSubtypes.map((s) => [s.id, s]));
+    const childrenOf = new Map<string | null, typeof concretePromptSubtypes>();
+    for (const s of concretePromptSubtypes) {
+      const parentKey = s.parent && byId.has(s.parent) ? s.parent : null;
+      const list = childrenOf.get(parentKey) ?? [];
+      list.push(s);
+      childrenOf.set(parentKey, list);
+    }
+    for (const [, list] of childrenOf) {
+      list.sort((a, b) => a.label.localeCompare(b.label));
+    }
+    const out: Row[] = [];
+    function walk(parentId: string | null, depth: number) {
+      for (const s of childrenOf.get(parentId) ?? []) {
+        out.push({ id: s.id, label: s.label, depth });
+        walk(s.id, depth + 1);
+      }
+    }
+    walk(null, 0);
+    return out;
+  })();
 
   onMount(() => {
     fitPanesToViewport();
@@ -4364,8 +4391,8 @@
       </div>
     </header>
     <div class="pane-content schema-list">
-      {#each concretePromptSubtypes as subtype (subtype.id)}
-        <div class="prompt-entry-section">
+      {#each promptSubtypeRows as subtype (subtype.id)}
+        <div class="prompt-entry-section prompt-subtype-row" style="padding-left: {subtype.depth * 14}px">
           <header>
             <strong>{subtype.label}</strong>
             <button class="pin-button" type="button" on:click={() => newPromptEntry(subtype.id)}>+ Entry</button>
@@ -4377,7 +4404,7 @@
           {/each}
         </div>
       {/each}
-      {#if concretePromptSubtypes.length === 0}
+      {#if promptSubtypeRows.length === 0}
         <p class="muted">No prompt sub-types defined yet. Open a prompt entry's Detail Types to create one.</p>
       {/if}
     </div>

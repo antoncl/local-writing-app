@@ -152,6 +152,11 @@
     "You are a brainstorming partner for a fiction writer. " +
     "Be concise, propose options, and don't write prose unless asked.";
   let chatSystemPrompt = DEFAULT_CHAT_SYSTEM_PROMPT;
+  // 👁 preview popover: floating, anchored to the button at toggle time.
+  // Replaces the always-visible `<details class="chat-preview">` strip.
+  let chatPreviewPopoverOpen = false;
+  let chatPreviewPopoverPos = { top: 0, right: 8 };
+  let chatPreviewBtnEl: HTMLButtonElement | undefined;
   // "" means: use the user's default assistant (resolved server-side).
   let chatAssistantId = "";
   let chatInput = "";
@@ -1140,7 +1145,12 @@
       return;
     }
     const text = chatInput.trim();
-    if (!text) return;
+    // Empty send is allowed only when the chat is bound to a prompt AND
+    // has no history yet — i.e. the template IS the message. McKee-style
+    // self-contained prompts shouldn't force the user to type "Do it".
+    // For freeform or follow-up turns, composer text is required.
+    const isFirstTurnFromPrompt = !!activePromptEntry && chatHistory.length === 0;
+    if (!text && !isFirstTurnFromPrompt) return;
     chatError = null;
     // First-send template render: the template was deferred from
     // prompt-pick to right now so the user could edit inputs freely.
@@ -1156,14 +1166,20 @@
         chatRunning = false;
       }
     }
-    const userTurn: ChatMessage = { role: "user", content: text };
-    chatHistory = [...chatHistory, userTurn];
-    const userIdx = chatHistory.length - 1;
+    // Only append a user turn for non-empty composer text. When text is
+    // empty (bound first-turn case), the template's rendered user blocks
+    // are already in chatHistory via renderAndLockPromptTemplate above.
+    let userIdx = -1;
+    if (text) {
+      const userTurn: ChatMessage = { role: "user", content: text };
+      chatHistory = [...chatHistory, userTurn];
+      userIdx = chatHistory.length - 1;
+    }
     chatInput = "";
     chatRunning = true;
     const rewindUser = () => {
       // Drop the user turn at userIdx so they can fix and re-send.
-      chatHistory = chatHistory.filter((_, i) => i !== userIdx);
+      if (userIdx >= 0) chatHistory = chatHistory.filter((_, i) => i !== userIdx);
       chatInput = text;
     };
     try {
@@ -1571,21 +1587,34 @@
     }
   }
 
-  async function handlePromptPreviewToggle(event: Event): Promise<void> {
-    const details = event.currentTarget as HTMLDetailsElement | null;
-    if (!details?.open) return;
-    // Cache miss → compose and store. Cache survives until something the
-    // preview depends on changes (see invalidateChatPromptPreview).
-    if (promptPreviewText !== null && !promptPreviewError) return;
-    promptPreviewLoading = true;
-    promptPreviewError = null;
-    try {
-      promptPreviewText = chatSystemPrompt;
-    } catch (e) {
-      promptPreviewError = (e as Error).message || "Couldn't compose preview.";
-      promptPreviewText = null;
-    } finally {
-      promptPreviewLoading = false;
+  async function toggleChatPreviewPopover(): Promise<void> {
+    if (chatPreviewPopoverOpen) {
+      chatPreviewPopoverOpen = false;
+      return;
+    }
+    if (chatPreviewBtnEl) {
+      const r = chatPreviewBtnEl.getBoundingClientRect();
+      const maxPopHeight = Math.round(window.innerHeight * 0.7);
+      const desiredTop = Math.round(r.bottom + 6);
+      const safeTop = Math.min(desiredTop, Math.max(8, window.innerHeight - maxPopHeight - 8));
+      chatPreviewPopoverPos = {
+        top: safeTop,
+        right: Math.max(8, Math.round(window.innerWidth - r.right)),
+      };
+    }
+    chatPreviewPopoverOpen = true;
+    // Compose preview content on open (cached until something invalidates it).
+    if (promptPreviewText === null || promptPreviewError) {
+      promptPreviewLoading = true;
+      promptPreviewError = null;
+      try {
+        promptPreviewText = chatSystemPrompt;
+      } catch (e) {
+        promptPreviewError = (e as Error).message || "Couldn't compose preview.";
+        promptPreviewText = null;
+      } finally {
+        promptPreviewLoading = false;
+      }
     }
   }
 
@@ -4445,14 +4474,14 @@
       {#if activeChatId && !renamingActiveChat}
         <div class="pane-header-actions">
           <button class="pin-button" type="button" title={activeChatPinned ? "Unpin" : "Pin"} on:mousedown={(event) => event.stopPropagation()} on:click={() => toggleActiveChatPin()}>{activeChatPinned ? "★" : "☆"}</button>
-          <button class="pin-button" type="button" title="Rename chat" on:mousedown={(event) => event.stopPropagation()} on:click={() => startActiveChatRename()}>Rename</button>
         </div>
       {/if}
     </header>
     <div class="pane-content chat-panel">
-      <!-- Three-way composer strip: Prompt · Assistant · Context.
+      <!-- Inputs row: Prompt + Assistant + Preview-icon. Mirrors the user's
+           mental model — chat = (prompt, assistant, context inputs, message).
            Prompt + Assistant are read-only once chat history exists (locked
-           preset, preserves the Anthropic cache prefix). Context is additive. -->
+           preset, preserves the Anthropic cache prefix). -->
       <div class="chat-composer-strip">
         <div class="chat-prompt-anchor">
           <button
@@ -4507,60 +4536,88 @@
             </div>
           {/if}
         </div>
-      </div>
-
-      {#if chatActivePromptEntry}
-        <div class="chat-active-prompt">
-          <span>Chatting via <strong>{chatActivePromptEntry.title}</strong></span>
-          <button type="button" on:click={() => (chatActivePromptEntry = null)}>×</button>
-        </div>
-      {/if}
-      <details class="chat-config">
-        <summary>Assistant{#if !chatPromptEntryId} &amp; brief{/if} {#if isActiveChatLocked()}<span class="chat-lock-glyph" aria-label="locked">🔒</span>{/if}</summary>
-        <label class="chat-label">
-          Assistant
-          <select bind:value={chatAssistantId} on:change={handleChatAssistantChange} disabled={isActiveChatLocked()}>
-            <option value="">Default ({assistantNameFor(defaultAssistantEntryId()) || "use machine default"})</option>
+        <div class="chat-assistant-anchor">
+          <span class="chat-assistant-glyph" aria-hidden="true">🤖</span>
+          <select
+            class="chat-assistant-chip"
+            class:locked={isActiveChatLocked()}
+            bind:value={chatAssistantId}
+            on:change={handleChatAssistantChange}
+            disabled={isActiveChatLocked()}
+            title={isActiveChatLocked() ? "Assistant is locked while this chat has messages." : "Pick an assistant"}
+            aria-label="Assistant"
+          >
+            <option value="">Default ({assistantNameFor(defaultAssistantEntryId()) || "machine default"})</option>
             {#each assistantEntries as assistant (assistant.id)}
               <option value={assistant.id}>{assistant.title}</option>
             {/each}
           </select>
-        </label>
-        {#if !chatPromptEntryId}
-          <!-- Brief is meaningful only in freeform mode. When a prompt is locked
-               in, the system message is the prompt's rendered template — use the
-               Preview disclosure below to inspect what's actually sent. -->
-          <label class="chat-label">
-            Brief
-            <textarea class="chat-system" bind:value={chatSystemPrompt} on:input={clearActivePromptOnEdit} on:blur={handleChatSystemPromptBlur} spellcheck="false" readonly={isActiveChatLocked()}></textarea>
-          </label>
-        {/if}
-        {#if isActiveChatLocked()}
-          <p class="muted chat-lock-hint">
-            Prompt, assistant, and brief are locked once a chat has messages — switching them mid-conversation would invalidate the AI cache prefix and force a full re-send.
-            Start a new chat to change them.
-          </p>
-        {/if}
-      </details>
+        </div>
+        <button
+          type="button"
+          class="chat-preview-icon"
+          class:active={chatPreviewPopoverOpen}
+          bind:this={chatPreviewBtnEl}
+          title="Preview what's sent — system message + attached context"
+          aria-label="Preview what's sent"
+          aria-expanded={chatPreviewPopoverOpen}
+          on:click={toggleChatPreviewPopover}
+        >👁</button>
+      </div>
 
-      <details class="chat-preview" on:toggle={handlePromptPreviewToggle}>
-        <summary>Preview what's sent <small>· system message + attached context</small></summary>
-        {#if promptPreviewLoading}
-          <p class="muted">Composing preview…</p>
-        {:else if promptPreviewError}
-          <p class="preview-result-error">{promptPreviewError}</p>
-        {:else if promptPreviewText !== null}
-          {#if promptPreviewText.trim()}
-            <pre class="chat-preview-content">{promptPreviewText}</pre>
-          {:else}
-            <p class="muted">No system message will be sent. The model sees only the chat history.</p>
-          {/if}
-        {/if}
-        <p class="muted chat-preview-hint">
-          This is the system message and context the assistant receives on the next turn.
-          Chat history above is also sent. Composer text becomes the next user message.
-        </p>
-      </details>
+      {#if !chatPromptEntryId}
+        <!-- Brief is only meaningful in freeform mode — it IS the user's only
+             system-level control. When a prompt is bound the system message
+             comes from the rendered template; the 👁 icon above opens a
+             popover for inspection. -->
+        <label class="chat-brief-label">
+          <span>Brief</span>
+          <textarea
+            class="chat-system"
+            bind:value={chatSystemPrompt}
+            on:input={clearActivePromptOnEdit}
+            on:blur={handleChatSystemPromptBlur}
+            spellcheck="false"
+          ></textarea>
+        </label>
+      {/if}
+
+      {#if chatPreviewPopoverOpen}
+        <div
+          class="chat-preview-popover"
+          role="dialog"
+          aria-label="Preview what's sent"
+          style="top: {chatPreviewPopoverPos.top}px; right: {chatPreviewPopoverPos.right}px;"
+        >
+          <header class="chat-preview-popover-header">
+            <strong>Preview</strong>
+            <small>system message + attached context</small>
+            <button
+              type="button"
+              class="chat-preview-popover-close"
+              aria-label="Close"
+              on:click={() => (chatPreviewPopoverOpen = false)}
+            >×</button>
+          </header>
+          <div class="chat-preview-popover-body">
+            {#if promptPreviewLoading}
+              <p class="muted">Composing preview…</p>
+            {:else if promptPreviewError}
+              <p class="preview-result-error">{promptPreviewError}</p>
+            {:else if promptPreviewText !== null}
+              {#if promptPreviewText.trim()}
+                <pre class="chat-preview-content">{promptPreviewText}</pre>
+              {:else}
+                <p class="muted">No system message will be sent. The model sees only the chat history.</p>
+              {/if}
+            {/if}
+            <p class="muted chat-preview-hint">
+              This is the system message and context the assistant receives on the next turn.
+              Chat history above is also sent. Composer text becomes the next user message.
+            </p>
+          </div>
+        </div>
+      {/if}
 
       <div class="chat-history" bind:this={chatScrollEl}>
         {#if chatHistory.length === 0}
@@ -4685,10 +4742,14 @@
         <button
           type="button"
           class="primary"
-          disabled={!chatInput.trim() || chatRunning || missingRequiredInputs.length > 0}
+          disabled={chatRunning
+            || missingRequiredInputs.length > 0
+            || (!chatInput.trim() && !(chatPromptEntryId && chatHistory.length === 0))}
           title={missingRequiredInputs.length > 0
             ? `Fill required input${missingRequiredInputs.length > 1 ? "s" : ""}: ${missingRequiredInputs.map((i) => i.label || i.name).join(", ")}`
-            : ""}
+            : (!chatInput.trim() && chatPromptEntryId && chatHistory.length === 0)
+              ? "Send the prompt as-is (no extra message)"
+              : ""}
           on:click={sendChat}
         >
           {chatRunning ? "Sending…" : "Send"}

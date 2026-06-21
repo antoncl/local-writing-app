@@ -2714,6 +2714,153 @@ h3 {
   border-color: #d8b6b6;
 }
 
+/* Assistant chip — chip-styled native <select> so it visually pairs with
+   the prompt chip. Glyph sits next to it (separate span so the select's
+   built-in dropdown arrow stays correctly positioned). */
+.chat-assistant-anchor {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.chat-assistant-glyph {
+  font-size: 14px;
+  line-height: 1;
+}
+
+.chat-assistant-chip {
+  padding: 4px 8px;
+  border: 1px solid #cbd6d2;
+  border-radius: 14px;
+  background: #f4f7f5;
+  color: #2a3431;
+  font-size: 13px;
+  font-family: inherit;
+  cursor: pointer;
+  max-width: 200px;
+}
+
+.chat-assistant-chip:hover:not(:disabled) {
+  background: #e7f0ec;
+  border-color: #2f6f5e;
+}
+
+.chat-assistant-chip:disabled {
+  cursor: default;
+  opacity: 0.7;
+}
+
+.chat-assistant-chip.locked {
+  background: #efeae1;
+  border-color: #c8b896;
+  color: #5b4c2c;
+}
+
+/* 👁 Preview icon — floats to the right edge of the inputs row, mirrors
+   the ? help button pattern from the prompt editor. */
+.chat-preview-icon {
+  margin-left: auto;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 26px;
+  height: 26px;
+  border-radius: 50%;
+  border: 1px solid #cbd6d2;
+  background: #ffffff;
+  color: #4d5753;
+  font-size: 14px;
+  cursor: pointer;
+  padding: 0;
+  line-height: 1;
+}
+
+.chat-preview-icon:hover,
+.chat-preview-icon.active {
+  background: #e8efed;
+  border-color: #4d5753;
+}
+
+/* Preview popover — viewport-fixed, anchored to the 👁 button at toggle
+   time. Mirrors the prompt editor's variables-and-helpers popover. */
+.chat-preview-popover {
+  position: fixed;
+  width: min(560px, calc(100vw - 24px));
+  max-height: 70vh;
+  overflow-y: auto;
+  background: #ffffff;
+  border: 1px solid #cbd6d2;
+  border-radius: 6px;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.18);
+  padding: 0;
+  z-index: 100;
+  font-size: 13px;
+}
+
+.chat-preview-popover-header {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+  padding: 10px 14px;
+  background: #f4f7f5;
+  border-bottom: 1px solid #d8e0dd;
+  border-radius: 6px 6px 0 0;
+}
+
+.chat-preview-popover-header > strong {
+  font-size: 13px;
+  color: #2a3431;
+}
+
+.chat-preview-popover-header > small {
+  color: #65716c;
+  font-size: 11px;
+  flex: 1;
+}
+
+.chat-preview-popover-close {
+  width: 22px;
+  height: 22px;
+  border-radius: 4px;
+  border: none;
+  background: transparent;
+  cursor: pointer;
+  font-size: 16px;
+  color: #65716c;
+  padding: 0;
+  line-height: 1;
+}
+
+.chat-preview-popover-close:hover {
+  background: #e8efed;
+  color: #2a3431;
+}
+
+.chat-preview-popover-body {
+  padding: 10px 14px;
+}
+
+/* Brief textarea — visible only in freeform mode (no prompt bound).
+   Compact layout: label above textarea, textarea height 60-120px. */
+.chat-brief-label {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin: 0 0 8px;
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: #65716c;
+}
+
+.chat-brief-label > .chat-system {
+  text-transform: none;
+  letter-spacing: 0;
+  color: #2a3431;
+  min-height: 60px;
+  max-height: 120px;
+}
+
 .chat-prompt-picker {
   position: absolute;
   top: calc(100% + 4px);

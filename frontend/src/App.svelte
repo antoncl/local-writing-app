@@ -1151,6 +1151,10 @@
     // For freeform or follow-up turns, composer text is required.
     const isFirstTurnFromPrompt = !!activePromptEntry && chatHistory.length === 0;
     if (!text && !isFirstTurnFromPrompt) return;
+    // After this turn lands, inputs become read-only history. Auto-collapse
+    // them so the conversation gets the vertical space; user can re-expand
+    // via the "▸ Show inputs" toggle if they want to inspect what was sent.
+    const isFirstSubmission = chatHistory.length === 0;
     chatError = null;
     // First-send template render: the template was deferred from
     // prompt-pick to right now so the user could edit inputs freely.
@@ -1184,6 +1188,7 @@
     };
     try {
       await streamAssistantReply(rewindUser);
+      if (isFirstSubmission) chatInputsHidden = true;
     } catch (e) {
       chatError = (e as Error).message;
       rewindUser();

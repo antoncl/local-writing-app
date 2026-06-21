@@ -559,6 +559,15 @@ h3 {
   gap: 6px;
 }
 
+.schema-node-delete {
+  color: #a8443e;
+}
+
+.schema-node-delete:hover {
+  background: #fbe9e7;
+  border-color: #a8443e;
+}
+
 .schema-node-fields {
   display: grid;
   gap: 6px;
@@ -2832,6 +2841,41 @@ h3 {
   overflow: hidden;
 }
 
+.prompt-preview-pane.collapsed {
+  grid-template-rows: auto;
+  min-height: 0;
+  height: auto;
+}
+
+.prompt-preview-toggle {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  background: transparent;
+  border: none;
+  padding: 0;
+  cursor: pointer;
+  color: #2a3431;
+  font: inherit;
+}
+
+.prompt-preview-toggle:hover {
+  color: #1d4d36;
+}
+
+.prompt-preview-toggle > strong {
+  font-size: 13px;
+  color: inherit;
+}
+
+.prompt-preview-caret {
+  display: inline-block;
+  width: 12px;
+  text-align: center;
+  font-size: 10px;
+  color: #65716c;
+}
+
 .prompt-preview-pane-header {
   display: flex;
   align-items: center;
@@ -3002,6 +3046,95 @@ h3 {
 
 /* Per-entry inputs editor (DocumentEditorPane, prompt entries). Sits between
    the body editor and the resize handle / preview pane. */
+.prompt-help-button {
+  position: absolute;
+  top: 8px;
+  right: 8px;
+  z-index: 5;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 22px;
+  height: 22px;
+  border-radius: 50%;
+  border: 1px solid #cbd6d2;
+  background: #ffffff;
+  color: #4d5753;
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+  padding: 0;
+  line-height: 1;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.06);
+}
+
+.prompt-help-button:hover,
+.prompt-help-button.active {
+  background: #e8efed;
+  border-color: #4d5753;
+  color: #2a3431;
+}
+
+.prompt-help-popover {
+  position: fixed;
+  width: min(720px, calc(100vw - 24px));
+  max-height: 70vh;
+  overflow-y: auto;
+  background: #ffffff;
+  border: 1px solid #cbd6d2;
+  border-radius: 6px;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.18);
+  padding: 12px 16px;
+  z-index: 100;
+  font-size: 13px;
+}
+
+.prompt-help-popover-header {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+  margin: 0 0 10px;
+  padding-bottom: 8px;
+  border-bottom: 1px solid #e8efed;
+}
+
+.prompt-help-popover-header > strong {
+  color: #2a3431;
+  font-size: 13px;
+}
+
+.prompt-help-popover-header > small {
+  color: #65716c;
+  font-size: 11px;
+  flex: 1;
+}
+
+.prompt-help-popover-header > small > code {
+  background: #f4f7f5;
+  border: 1px solid #d8e0dd;
+  border-radius: 3px;
+  padding: 0 4px;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+}
+
+.prompt-help-popover-close {
+  width: 22px;
+  height: 22px;
+  border-radius: 4px;
+  border: none;
+  background: transparent;
+  cursor: pointer;
+  font-size: 16px;
+  color: #65716c;
+  padding: 0;
+  line-height: 1;
+}
+
+.prompt-help-popover-close:hover {
+  background: #e8efed;
+  color: #2a3431;
+}
+
 .prompt-cheatsheet {
   padding: 6px 12px;
   background: #f4f7f5;
@@ -3797,7 +3930,7 @@ h3 {
 
 .raw-body-editor {
   display: grid;
-  height: 100%;
+  flex: 1;
   min-height: 200px;
 }
 
@@ -3857,12 +3990,15 @@ h3 {
   font-size: 11px;
 }
 
-.raw-body-editor :global(.code-editor) {
+.raw-body-editor .code-editor {
+  display: grid;
   height: 100%;
+  min-height: 0;
 }
 
-.raw-body-editor :global(.cm-editor) {
+.raw-body-editor .cm-editor {
   height: 100%;
+  min-height: 0;
 }
 
 .editor-pane .hidden {

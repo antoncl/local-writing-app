@@ -2324,15 +2324,18 @@
     });
   }
 
-  function requestDeleteSchemaType() {
-    if (!selectedSchemaTypeId || schemaTypeReadonly) return;
-    const typeName = schemaTypeName || selectedSchemaTypeId;
+  function requestDeleteSchemaType(typeId: string) {
+    const definition = metadataSchema?.entry_types[typeId];
+    if (!definition) return;
+    const source = schemaTypeSource(typeId);
+    if (source?.built_in) return;
+    const typeName = definition.name || typeId;
     confirmation = {
       title: "Delete Detail Type",
       message: `Delete "${typeName}"? Existing documents using this type must be changed first.`,
       confirmLabel: "Delete Type",
       destructive: true,
-      onConfirm: () => deleteSchemaType(selectedSchemaTypeId!),
+      onConfirm: () => deleteSchemaType(typeId),
     };
   }
 
@@ -3930,18 +3933,11 @@
         </label>
       {/if}
       <label>
-        Display name
+        Type name
         <input readonly={schemaTypeReadonly} value={schemaTypeName} placeholder="Faction" on:input={(event) => updateSchemaTypeName(event.currentTarget.value)} />
-      </label>
-      <label>
-        Type ID
-        <input
-          aria-label="Generated Type ID"
-          title="Generated from the type name"
-          value={schemaTypeId}
-          readonly
-          placeholder="faction"
-        />
+        {#if schemaTypeId}
+          <small class="type-id-caption" title="Identifier used in YAML and template includes (generated from the type name)">id: <code>{schemaTypeId}</code></small>
+        {/if}
       </label>
       {#if selectedSchemaTypeId}
         {@const fieldEntries = fieldEntriesForEntryType(selectedSchemaTypeId)}
@@ -3975,86 +3971,27 @@
 
       {#if schemaTypeKind === "prompt"}
         <fieldset class="prompt-fieldset" disabled={schemaTypeReadonly}>
-          <legend>Defaults</legend>
+          <legend>Prompt defaults</legend>
           <label>
             Brief
             <textarea rows="4" bind:value={promptSystemPrompt} placeholder="Optional brief inherited by sub-types — sets the assistant's role."></textarea>
           </label>
-          <div class="prompt-row">
-            <label>
-              Assistant tier
-              <select bind:value={promptModelClass}>
-                <option value="">(inherit)</option>
-                <option value="cheap">cheap</option>
-                <option value="balanced">balanced</option>
-                <option value="best">best</option>
-              </select>
-            </label>
-            <label>
-              Subscription policy
-              <select bind:value={promptProviderPolicy}>
-                <option value="">(inherit project policy)</option>
-                <option value="off">Off</option>
-                <option value="local-only">Local only</option>
-                <option value="cloud-allowed">Cloud allowed</option>
-              </select>
-            </label>
-          </div>
-        </fieldset>
-
-        <fieldset class="prompt-fieldset" disabled={schemaTypeReadonly}>
-          <legend>Context strategy</legend>
-          <p class="muted">How the dispatcher picks the target node and what surrounding context it includes.</p>
-          <div class="prompt-row">
-            <label>
-              Target kind
-              <select bind:value={promptContextTargetKind}>
-                <option value="">(none)</option>
-                <option value="scene">Scene</option>
-                <option value="lore">Lore Entry</option>
-              </select>
-            </label>
-            <label class="inline-check">
-              <input type="checkbox" bind:checked={promptContextTargetRequired} />
-              Target required
-            </label>
-          </div>
           <label>
-            Scan surface
-            <input bind:value={promptScanSurface} placeholder="_text_before, _selection" />
-            <small>Comma-separated tokens (e.g. <code>_text_before</code>, <code>_selection</code>) or field names.</small>
+            Output
+            <select bind:value={promptOutputKind}>
+              <option value="">(inherit from parent)</option>
+              <option value="append_to_body">Append to body</option>
+              <option value="replace_selection">Replace selection</option>
+              <option value="chat_panel">Chat panel</option>
+            </select>
+            <small>Where AI responses for this prompt type land. Inherited from parent (Continuation / Revise / General) when set there — only override for a top-level sub-type that doesn't inherit one of the bases.</small>
           </label>
-          <div class="prompt-row">
-            <label>
-              Output kind
-              <select bind:value={promptOutputKind}>
-                <option value="">(none)</option>
-                <option value="append_to_body">Append to body</option>
-                <option value="replace_selection">Replace selection</option>
-                <option value="replace_field">Replace field</option>
-                <option value="chat_panel">Chat panel</option>
-                <option value="new_node">New node</option>
-              </select>
-            </label>
-            <label>
-              Review
-              <select bind:value={promptOutputReview}>
-                <option value="">(default)</option>
-                <option value="visual_diff">Visual diff</option>
-                <option value="auto_apply_undo">Auto-apply with undo</option>
-                <option value="none">None</option>
-              </select>
-            </label>
-          </div>
         </fieldset>
       {/if}
 
       {#if !schemaTypeReadonly}
         <div class="button-row">
           <button type="button" disabled={!schemaTypeLayerId || !schemaTypeId.trim() || !schemaTypeName.trim()} on:click={saveSchemaType}>Save Type</button>
-          {#if selectedSchemaTypeId}
-            <button class="danger-button" type="button" on:click={requestDeleteSchemaType}>Delete</button>
-          {/if}
         </div>
       {/if}
     </div>
@@ -4353,6 +4290,8 @@
         documentKind={editorPane.document?.type ?? "scene"}
         metadataSchema={metadataSchema}
         promptEntries={promptEntries}
+        structure={structure}
+        loreEntries={loreEntries}
         knownTags={knownTags}
         implicitContextMatcher={implicitContextMatcher}
         assistantEntries={assistantEntries}
@@ -5025,6 +4964,9 @@
       <div class="schema-node-actions">
         <button class="pin-button" type="button" on:click={() => createSchemaTypeDraft(schemaTypeLayerId || projectSchemaLayerId(), node.id)}>+ Type</button>
         <button class="pin-button" type="button" on:click={() => createSchemaFieldDraft(schemaTypeLayerId || projectSchemaLayerId(), node.id)}>+ Field</button>
+        {#if !typeSource?.built_in}
+          <button class="pin-button schema-node-delete" type="button" title={`Delete ${node.label}`} aria-label={`Delete ${node.label}`} on:click={() => requestDeleteSchemaType(node.id)}>×</button>
+        {/if}
       </div>
     </div>
     <section class="schema-node-fields" aria-label={`${node.label} fields`}>

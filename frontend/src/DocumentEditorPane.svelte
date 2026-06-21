@@ -25,6 +25,10 @@
   export let documentKind: "scene" | "lore" | "prompt" | "snippet" | "assistant" | "project" = "scene";
   export let metadataSchema: MetadataSchema | null = null;
   export let promptEntries: PromptEntrySummary[] = [];
+  // Data sources for context_pick inputs in the prompt preview / inputs
+  // dialog. Optional — the picker degrades to "no items" when missing.
+  export let structure: import("./types").StructureDocument | null = null;
+  export let loreEntries: import("./types").LoreEntrySummary[] = [];
   export let knownTags: string[] = [];
   // Optional matcher pass-through for the implicit-context highlight
   // plugin on long-text metadata fields. App.svelte owns the compile.
@@ -239,6 +243,26 @@
   };
   let entryInputDrafts: EntryInputDraft[] = [];
   let entryInputsExpanded = false;
+  let cheatsheetPopoverOpen = false;
+  let helpButtonEl: HTMLButtonElement | undefined;
+  let popoverPos = { top: 0, right: 8 };
+
+  function toggleCheatsheetPopover() {
+    if (!cheatsheetPopoverOpen && helpButtonEl) {
+      const r = helpButtonEl.getBoundingClientRect();
+      // Match the CSS max-height (70vh) so we don't clip below the viewport;
+      // open below the button if it fits, otherwise pin near the top of the
+      // viewport with an 8px margin.
+      const maxPopHeight = Math.round(window.innerHeight * 0.7);
+      const desiredTop = Math.round(r.bottom + 6);
+      const safeTop = Math.min(desiredTop, Math.max(8, window.innerHeight - maxPopHeight - 8));
+      popoverPos = {
+        top: safeTop,
+        right: Math.max(8, Math.round(window.innerWidth - r.right)),
+      };
+    }
+    cheatsheetPopoverOpen = !cheatsheetPopoverOpen;
+  }
   // Seed drafts from the scene prop. scene only changes when a different entry
   // is opened or after a save; the user's typing updates entryInputDrafts
   // locally without touching scene, so this won't fight in-flight edits.
@@ -396,6 +420,9 @@
   let promptPreviewRunning = false;
   let promptPreviewError: string | null = null;
   let promptPreviewPaneHeight = 280; // px; persisted only in memory for now.
+  // Collapsed by default so the body editor is the primary focus. Users
+  // expand the preview when they want to test the template.
+  let promptPreviewCollapsed = true;
   let promptPreviewDebounceTimer: ReturnType<typeof setTimeout> | null = null;
   let promptPreviewLastRenderKey = ""; // dedupe identical renders.
   // Diagnostics pinned in the CodeEditor gutter — driven by render errors.
@@ -479,7 +506,11 @@
     }
     return drafts;
   }
-  // Seed the scene picker once availableScenes arrive.
+  // Fallback scene binding for the preview's `scene` variable. The user
+  // controls the explicit binding by marking a scene ★ in any context_pick
+  // input — that wins backend-side (see preview.py:_find_marked_target_scene_id).
+  // When no scene is marked, this auto-pick keeps the preview useful for
+  // first-time authoring (template references to scene.* don't render blank).
   $: if (documentKind === "prompt" && !promptPreviewSceneId && availableScenes.length > 0) {
     promptPreviewSceneId = availableScenes[0].id;
   }
@@ -2856,53 +2887,69 @@
     {/if}
     <div bind:this={editorElement} class:hidden={rawBodyMode}></div>
 
+    {#if documentKind === "prompt" && scene}
+      <button
+        type="button"
+        class="prompt-help-button"
+        bind:this={helpButtonEl}
+        class:active={cheatsheetPopoverOpen}
+        title="Variables & helpers — what you can reference in &lbrace;&lbrace; … &rbrace;&rbrace; and &lbrace;% … %&rbrace;"
+        aria-label="Show variables and helpers reference"
+        aria-expanded={cheatsheetPopoverOpen}
+        on:click={toggleCheatsheetPopover}
+      >?</button>
+    {/if}
+
   </div>
 
   {#if documentKind === "prompt" && scene}
-    <details class="prompt-cheatsheet">
-      <summary>
-        Variables &amp; helpers
-        <small class="prompt-cheatsheet-hint">what you can reference in <code>&lbrace;&lbrace; … &rbrace;&rbrace;</code> and <code>&lbrace;% … %&rbrace;</code></small>
-      </summary>
-      <div class="prompt-cheatsheet-body">
-        <section>
-          <h4>Variables</h4>
-          <dl>
-            <dt><code>scene</code></dt>
-            <dd>The target scene. <code>scene.title</code>, <code>scene.body_markdown</code>, <code>scene.entry_type</code>, <code>scene.&lt;field&gt;</code> for any field on the scene (e.g. <code>scene.summary</code>, <code>scene.pov.title</code>). Entity-ref fields auto-resolve.</dd>
-            <dt><code>project</code> / <code>novel</code></dt>
-            <dd>Project info (title, root path, AI policy). Both names point to the same value.</dd>
-            <dt><code>text_before</code> / <code>text_after</code></dt>
-            <dd>Body markdown around the cursor in the current scene. Empty string when not dispatched from an editor.</dd>
-            <dt><code>selection</code></dt>
-            <dd>The selected text in the editor, or empty string.</dd>
-            <dt><code>date</code></dt>
-            <dd>Today as an ISO string (e.g. <code>2026-06-20</code>). Also <code>date.today</code> and <code>date.iso</code>.</dd>
-            <dt><code>input.&lt;id&gt;</code></dt>
-            <dd>The value of an input declared on this prompt (see the Inputs panel below).</dd>
-          </dl>
-        </section>
-        <section>
-          <h4>Helpers</h4>
-          <dl>
-            <dt><code>pov(scene)</code></dt>
-            <dd>POV character as an EntryRef, or <code>None</code> when the scene has no <code>pov</code> ref.</dd>
-            <dt><code>relevant_lore(scene, mode="implicit", partition="all")</code></dt>
-            <dd>XML <code>&lt;lore&gt;</code> block of entries in scope for the scene. Modes: <code>implicit</code>, <code>explicit</code>, <code>pinned_only</code>. Partitions (session-bound): <code>all</code>, <code>stable</code>, <code>volatile</code>.</dd>
-            <dt><code>scenes_before(scene)</code></dt>
-            <dd>XML <code>&lt;story_so_far&gt;</code> of prior scenes' summaries in manuscript order.</dd>
-            <dt><code>last_words(text, n)</code></dt>
-            <dd>Trailing <code>n</code> words of a string. Pure helper — useful for continuation prompts.</dd>
-            <dt><code>full_outline()</code></dt>
-            <dd>Nested list of outline nodes (<code>.title</code>, <code>.summary</code>, <code>.children</code>) — the whole book's shape.</dd>
-            <dt><code>full_text()</code></dt>
-            <dd>Every scene's prose in manuscript order (<code>.title</code>, <code>.body</code>). Heavy.</dd>
-            <dt><code>entry(id_or_ref)</code></dt>
-            <dd>Wrap a raw entry id as an EntryRef so you can walk its fields: <code>&lbrace;&lbrace; entry(scene.metadata.pov).title &rbrace;&rbrace;</code>.</dd>
-          </dl>
-        </section>
+      {#if cheatsheetPopoverOpen}
+        <div class="prompt-help-popover" role="dialog" aria-label="Variables and helpers" style="top: {popoverPos.top}px; right: {popoverPos.right}px;">
+          <header class="prompt-help-popover-header">
+            <strong>Variables &amp; helpers</strong>
+            <small>what you can reference in <code>&lbrace;&lbrace; … &rbrace;&rbrace;</code> and <code>&lbrace;% … %&rbrace;</code></small>
+            <button type="button" class="prompt-help-popover-close" aria-label="Close" on:click={() => (cheatsheetPopoverOpen = false)}>×</button>
+          </header>
+        <div class="prompt-cheatsheet-body">
+          <section>
+            <h4>Variables</h4>
+            <dl>
+              <dt><code>scene</code></dt>
+              <dd>The target scene. <code>scene.title</code>, <code>scene.body_markdown</code>, <code>scene.entry_type</code>, <code>scene.&lt;field&gt;</code> for any field on the scene (e.g. <code>scene.summary</code>, <code>scene.pov.title</code>). Entity-ref fields auto-resolve.</dd>
+              <dt><code>project</code> / <code>novel</code></dt>
+              <dd>Project info (title, root path, AI policy). Both names point to the same value.</dd>
+              <dt><code>text_before</code> / <code>text_after</code></dt>
+              <dd>Body markdown around the cursor in the current scene. Empty string when not dispatched from an editor.</dd>
+              <dt><code>selection</code></dt>
+              <dd>The selected text in the editor, or empty string.</dd>
+              <dt><code>date</code></dt>
+              <dd>Today as an ISO string (e.g. <code>2026-06-20</code>). Also <code>date.today</code> and <code>date.iso</code>.</dd>
+              <dt><code>input.&lt;id&gt;</code></dt>
+              <dd>The value of an input declared on this prompt (see the Inputs panel below).</dd>
+            </dl>
+          </section>
+          <section>
+            <h4>Helpers</h4>
+            <dl>
+              <dt><code>pov(scene)</code></dt>
+              <dd>POV character as an EntryRef, or <code>None</code> when the scene has no <code>pov</code> ref.</dd>
+              <dt><code>relevant_lore(scene, mode="implicit", partition="all")</code></dt>
+              <dd>XML <code>&lt;lore&gt;</code> block of entries in scope for the scene. Modes: <code>implicit</code>, <code>explicit</code>, <code>pinned_only</code>. Partitions (session-bound): <code>all</code>, <code>stable</code>, <code>volatile</code>.</dd>
+              <dt><code>scenes_before(scene)</code></dt>
+              <dd>XML <code>&lt;story_so_far&gt;</code> of prior scenes' summaries in manuscript order.</dd>
+              <dt><code>last_words(text, n)</code></dt>
+              <dd>Trailing <code>n</code> words of a string. Pure helper — useful for continuation prompts.</dd>
+              <dt><code>full_outline()</code></dt>
+              <dd>Nested list of outline nodes (<code>.title</code>, <code>.summary</code>, <code>.children</code>) — the whole book's shape.</dd>
+              <dt><code>full_text()</code></dt>
+              <dd>Every scene's prose in manuscript order (<code>.title</code>, <code>.body</code>). Heavy.</dd>
+              <dt><code>entry(id_or_ref)</code></dt>
+              <dd>Wrap a raw entry id as an EntryRef so you can walk its fields: <code>&lbrace;&lbrace; entry(scene.metadata.pov).title &rbrace;&rbrace;</code>.</dd>
+            </dl>
+          </section>
+        </div>
       </div>
-    </details>
+      {/if}
 
     <details class="entry-inputs-editor" bind:open={entryInputsExpanded}>
       <summary>
@@ -3004,42 +3051,51 @@
         <button type="button" on:click={addEntryInput}>+ Input</button>
       </div>
     </details>
-    <!-- Vertical split: editor above gets the remaining space; this preview
-         pane stays always-visible at the bottom with its own internal scroll.
-         The handle between them drags to resize. -->
-    <!-- svelte-ignore a11y_no_noninteractive_element_interactions -->
-    <div
-      class="prompt-preview-resize"
-      role="separator"
-      aria-orientation="horizontal"
-      aria-label="Resize prompt preview"
-      on:mousedown={startPromptPreviewResize}
-    ></div>
-    <section class="prompt-preview-pane" style="height: {promptPreviewPaneHeight}px;">
+    <!-- Vertical split: editor above gets the remaining space when the
+         preview is expanded; collapsed by default so the body editor is
+         the primary focus. The header toggles open/closed; the handle
+         between editor and preview resizes the preview when expanded. -->
+    {#if !promptPreviewCollapsed}
+      <!-- svelte-ignore a11y_no_noninteractive_element_interactions -->
+      <div
+        class="prompt-preview-resize"
+        role="separator"
+        aria-orientation="horizontal"
+        aria-label="Resize prompt preview"
+        on:mousedown={startPromptPreviewResize}
+      ></div>
+    {/if}
+    <section
+      class="prompt-preview-pane"
+      class:collapsed={promptPreviewCollapsed}
+      style={promptPreviewCollapsed ? "" : `height: ${promptPreviewPaneHeight}px;`}
+    >
       <header class="prompt-preview-pane-header">
-        <strong>Preview</strong>
+        <button
+          type="button"
+          class="prompt-preview-toggle"
+          aria-expanded={!promptPreviewCollapsed}
+          on:click={() => (promptPreviewCollapsed = !promptPreviewCollapsed)}
+        >
+          <span class="prompt-preview-caret" aria-hidden="true">{promptPreviewCollapsed ? "▸" : "▾"}</span>
+          <strong>Preview</strong>
+        </button>
         <div class="prompt-preview-pane-meta">
           {#if promptPreviewRunning}
             <span class="prompt-preview-status">rendering…</span>
           {:else if promptPreviewResult}
             <span class="prompt-preview-status">{promptPreviewResult.messages.length} msg · {promptPreviewResult.char_count} chars</span>
           {/if}
-          <button type="button" disabled={promptPreviewRunning || !rawBody.trim()} on:click={runPromptPreview}>
-            {promptPreviewRunning ? "Rendering…" : "Render now"}
-          </button>
+          {#if !promptPreviewCollapsed}
+            <button type="button" disabled={promptPreviewRunning || !rawBody.trim()} on:click={runPromptPreview}>
+              {promptPreviewRunning ? "Rendering…" : "Render now"}
+            </button>
+          {/if}
         </div>
       </header>
 
+      {#if !promptPreviewCollapsed}
       <div class="prompt-preview-pane-controls">
-        <label class="prompt-preview-field">
-          <span>Target scene</span>
-          <select bind:value={promptPreviewSceneId}>
-            <option value="">(no scene)</option>
-            {#each availableScenes as s (s.id)}
-              <option value={s.id}>{s.title}</option>
-            {/each}
-          </select>
-        </label>
         {#if promptPreviewDeclaredInputs.length > 0}
           <div class="prompt-preview-inputs">
             <div class="prompt-preview-inputs-heading">
@@ -3068,6 +3124,9 @@
                   metadataSchema={metadataSchema}
                   excludeId={scene?.id ?? null}
                   ariaLabel={inputDef.label || inputDef.name}
+                  structure={structure}
+                  loreEntries={loreEntries}
+                  promptEntries={promptEntries}
                   on:change={(event) => promptPreviewInputDrafts = {...promptPreviewInputDrafts, [inputDef.name]: event.detail.value}}
                 />
               </label>
@@ -3113,6 +3172,7 @@
           <p class="prompt-preview-empty muted">Waiting for first render…</p>
         {/if}
       </div>
+      {/if}
     </section>
   {/if}
 
@@ -3144,6 +3204,9 @@
               metadataSchema={metadataSchema}
               excludeId={scene?.id ?? null}
               ariaLabel={input.label || input.name}
+              structure={structure}
+              loreEntries={loreEntries}
+              promptEntries={promptEntries}
               on:change={(event) => updateInputsDialogDraft(input.name, event.detail.value)}
             />
           </label>

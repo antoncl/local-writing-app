@@ -38,6 +38,12 @@
   let open = false;
   let search = "";
 
+  // Group-default thresholds: groups larger than this collapse by default
+  // so a 128-scene project doesn't drown the menu. Compact mode is more
+  // aggressive because there's less vertical room.
+  const COLLAPSE_THRESHOLD_DEFAULT = 20;
+  const COLLAPSE_THRESHOLD_COMPACT = 5;
+
   // Allowed presets per the author config — empty means no presets shown.
   $: allowedPresets = config.presets ?? [];
   // Allowed kinds per the author config — empty means no browse section.
@@ -216,12 +222,25 @@
     return displayName ?? sub ?? KIND_LABEL_SINGULAR[kind] ?? kind;
   }
 
+  // One-letter monogram for an item row's leading square. Prefers the
+  // first letter of the sub-type display name (so "Character" → C,
+  // "Location" → L, custom "Faction" → F), falls back to entry_type id,
+  // then to the kind initial. Stable + informative for user-defined
+  // sub-types without an icon set.
+  function itemMonogram(kind: ContextPickRef["kind"], entryType?: string): string {
+    if (kind === "preset") return "P";
+    const sub = entryType && entryType !== kind ? entryType : null;
+    const displayName = sub ? metadataSchema?.entry_types[sub]?.name : null;
+    const source = displayName || sub || KIND_LABEL_SINGULAR[kind] || kind;
+    return source.charAt(0).toUpperCase();
+  }
+
   // Aggregate visible groups for the unified menu. Each group renders
   // as a collapsible <details> with a header and a flat item list.
   // Groups with no items (after the search filter and config gating)
   // are dropped entirely.
   $: visibleGroups = (() => {
-    type Group = { id: string; label: string; items: Array<{ ref: ContextPickRef; tag: string }> };
+    type Group = { id: string; label: string; items: Array<{ ref: ContextPickRef; tag: string; monogram: string }> };
     const groups: Group[] = [];
 
     const matchingPresets = allowedPresets.filter((id) => {
@@ -238,6 +257,7 @@
           return {
             ref: { id: presetId, kind: "preset" as const, title: meta.title },
             tag: itemTag("preset"),
+            monogram: itemMonogram("preset"),
           };
         }),
       });
@@ -250,6 +270,7 @@
         items: filteredScenes.map((s) => ({
           ref: { id: s.id, kind: "scene" as const, title: s.title, entry_type: s.entry_type },
           tag: itemTag("scene", s.entry_type),
+          monogram: itemMonogram("scene", s.entry_type),
         })),
       });
     }
@@ -259,6 +280,7 @@
         g.entries.map((entry) => ({
           ref: { id: entry.id, kind: "lore" as const, title: entry.title, entry_type: entry.entry_type },
           tag: itemTag("lore", entry.entry_type),
+          monogram: itemMonogram("lore", entry.entry_type),
         })),
       );
       if (loreItems.length > 0) {
@@ -273,6 +295,7 @@
         items: snippetEntries.map((s) => ({
           ref: { id: s.id, kind: "snippet" as const, title: s.title, entry_type: s.entry_type },
           tag: itemTag("snippet", s.entry_type),
+          monogram: itemMonogram("snippet", s.entry_type),
         })),
       });
     }
@@ -283,6 +306,43 @@
   $: hasAnyConfigured =
     allowedPresets.length > 0 || allowedKinds.length > 0;
   $: hasAnyResults = visibleGroups.length > 0;
+
+  // Total result count for the search-bar live counter. Reflects the
+  // post-filter, post-gating reality so the user can tell when their
+  // search has zeroed out before scrolling.
+  $: totalVisibleItems = visibleGroups.reduce((acc, g) => acc + g.items.length, 0);
+
+  $: collapseThreshold = compact ? COLLAPSE_THRESHOLD_COMPACT : COLLAPSE_THRESHOLD_DEFAULT;
+
+  // Search-aware: when the user is searching, expand every surviving
+  // group so they can see what matched. When idle, collapse heavy
+  // groups by their kind-appropriate threshold.
+  function groupOpenByDefault(itemCount: number, isSearching: boolean): boolean {
+    if (isSearching) return true;
+    return itemCount <= collapseThreshold;
+  }
+
+  // Render a title as alternating plain/highlighted spans for the
+  // current search term. Empty search → single plain segment.
+  function highlightSegments(title: string, query: string): Array<{ text: string; match: boolean }> {
+    const q = query.trim();
+    if (!q) return [{ text: title, match: false }];
+    const lower = title.toLowerCase();
+    const needle = q.toLowerCase();
+    const out: Array<{ text: string; match: boolean }> = [];
+    let i = 0;
+    while (i < title.length) {
+      const found = lower.indexOf(needle, i);
+      if (found < 0) {
+        out.push({ text: title.slice(i), match: false });
+        break;
+      }
+      if (found > i) out.push({ text: title.slice(i, found), match: false });
+      out.push({ text: title.slice(found, found + needle.length), match: true });
+      i = found + needle.length;
+    }
+    return out;
+  }
 </script>
 
 <svelte:document on:mousedown={handleDocumentClick} on:keydown={handleKeydown} />
@@ -291,21 +351,34 @@
   {#if value.length > 0}
     <div class="ctx-chips">
       {#each value as ref (refKey(ref))}
-        <span class="ctx-chip" class:preset={ref.kind === "preset"} class:target={ref.target}>
-          <small>{chipLabel(ref)}</small>
-          <strong>{ref.title}</strong>
+        <span
+          class="ctx-chip"
+          class:ctx-chip-scene={ref.kind === "scene" && !ref.target}
+          class:ctx-chip-lore={ref.kind === "lore"}
+          class:ctx-chip-snippet={ref.kind === "snippet"}
+          class:ctx-chip-preset={ref.kind === "preset"}
+          class:ctx-chip-target={ref.target}
+        >
+          {#if compact}
+            <span class="ctx-chip-dot" aria-hidden="true"></span>
+          {/if}
           {#if ref.kind === "scene" && allowTargetMarking}
             <button
               type="button"
-              class="ctx-chip-target"
+              class="ctx-chip-star"
               aria-pressed={ref.target ?? false}
               aria-label={ref.target ? `Unmark ${ref.title} as target scene` : `Mark ${ref.title} as target scene`}
               title={ref.target ? "★ Target — binds to `scene` in the template. Click to unmark." : "Mark as target — binds to `scene` in the template."}
               on:click={() => toggleTarget(ref)}
             >{ref.target ? "★" : "☆"}</button>
           {/if}
+          {#if !compact}
+            <span class="ctx-chip-tag">{chipLabel(ref)}</span>
+          {/if}
+          <strong class="ctx-chip-title">{ref.title}</strong>
           <button
             type="button"
+            class="ctx-chip-remove"
             aria-label="Remove {ref.title}"
             on:click={() => remove(refKey(ref))}
           >×</button>
@@ -322,48 +395,95 @@
       aria-expanded={open}
       on:click={toggle}
     >
-      + {label}{value.length > 0 ? ` (${value.length})` : ""}
+      <span class="ctx-add-plus" aria-hidden="true">+</span>
+      <span>{label}{value.length > 0 ? ` (${value.length})` : ""}</span>
     </button>
 
     {#if open}
       <div class="ctx-menu" role="menu">
-        <input
-          class="ctx-search"
-          type="text"
-          placeholder="Search…"
-          bind:value={search}
-          autofocus
-        />
+        <label class="ctx-search-wrap" class:has-query={search.length > 0}>
+          <svg class="ctx-search-icon" width="14" height="14" viewBox="0 0 14 14" fill="none" aria-hidden="true">
+            <circle cx="6" cy="6" r="4.2" stroke="currentColor" stroke-width="1.6" />
+            <line x1="9.2" y1="9.2" x2="12.5" y2="12.5" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" />
+          </svg>
+          <input
+            class="ctx-search"
+            type="text"
+            placeholder={compact ? "Search…" : "Search scenes, lore, presets…"}
+            bind:value={search}
+            autofocus
+          />
+          {#if search.length > 0}
+            <button
+              type="button"
+              class="ctx-search-clear"
+              aria-label="Clear search"
+              on:click={() => (search = "")}
+            >×</button>
+          {:else if hasAnyResults}
+            <span class="ctx-search-count">{totalVisibleItems}{compact ? "" : " items"}</span>
+          {/if}
+        </label>
+
         {#if !hasAnyConfigured}
-          <p class="ctx-muted">No content sources configured for this picker.</p>
+          <div class="ctx-empty">
+            <span class="ctx-empty-icon" aria-hidden="true">∅</span>
+            <span class="ctx-empty-title">No content sources configured</span>
+            <span class="ctx-empty-hint">
+              This prompt's author didn't enable any pickable types or presets for this input.
+            </span>
+          </div>
         {:else if !hasAnyResults}
-          <p class="ctx-muted">
-            {#if search}
-              No matches for "{search}".
-            {:else}
-              No pickable items in this project yet.
-            {/if}
-          </p>
+          {#if search}
+            <div class="ctx-empty">
+              <svg class="ctx-empty-icon-svg" width="30" height="30" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+                <circle cx="10" cy="10" r="6.5" stroke="currentColor" stroke-width="1.4" />
+                <line x1="15" y1="15" x2="21" y2="21" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" />
+              </svg>
+              <span class="ctx-empty-title">No matches for <strong>"{search}"</strong></span>
+              <span class="ctx-empty-hint">Try a different term, or clear the search to browse.</span>
+            </div>
+          {:else}
+            <div class="ctx-empty">
+              <span class="ctx-empty-icon" aria-hidden="true">∅</span>
+              <span class="ctx-empty-title">No pickable items in this project yet</span>
+            </div>
+          {/if}
         {:else}
           {#each visibleGroups as group (group.id)}
-            <details open class="ctx-group">
-              <summary>
-                {group.label}
-                <small>· {group.items.length}</small>
+            {@const isOpen = groupOpenByDefault(group.items.length, search.length > 0)}
+            <details class="ctx-group" open={isOpen}>
+              <summary class="ctx-group-bar">
+                <span class="ctx-group-chevron" aria-hidden="true">▾</span>
+                <span class="ctx-group-label">{group.label}</span>
+                <span class="ctx-group-count">{group.items.length}</span>
               </summary>
-              {#each group.items as item}
-                {@const picked = isPicked(item.ref)}
-                <button
-                  type="button"
-                  class="ctx-item"
-                  disabled={picked}
-                  title={picked ? "Already added" : ""}
-                  on:click={() => add(item.ref)}
-                >
-                  <span class="ctx-item-tag">{item.tag}</span>
-                  <span class="ctx-item-title">{item.ref.title}</span>
-                </button>
-              {/each}
+              <div class="ctx-group-items">
+                {#each group.items as item (item.ref.id + ":" + item.ref.kind)}
+                  {@const picked = isPicked(item.ref)}
+                  <button
+                    type="button"
+                    class="ctx-item"
+                    class:ctx-item-scene={item.ref.kind === "scene"}
+                    class:ctx-item-lore={item.ref.kind === "lore"}
+                    class:ctx-item-snippet={item.ref.kind === "snippet"}
+                    class:ctx-item-preset={item.ref.kind === "preset"}
+                    disabled={picked}
+                    title={picked ? "Already added" : ""}
+                    on:click={() => add(item.ref)}
+                  >
+                    <span class="ctx-item-mono" aria-hidden="true">{item.monogram}</span>
+                    <span class="ctx-item-title">
+                      {#each highlightSegments(item.ref.title, search) as seg}
+                        {#if seg.match}<mark>{seg.text}</mark>{:else}{seg.text}{/if}
+                      {/each}
+                    </span>
+                    {#if picked && !compact}
+                      <span class="ctx-item-added">✓ Added</span>
+                    {/if}
+                  </button>
+                {/each}
+              </div>
             </details>
           {/each}
         {/if}
@@ -374,11 +494,71 @@
 
 <style>
   .ctx-picker {
+    /* Light theme tokens — mirrored to the config editor's set so the
+       two surfaces share vocabulary. Adds a kind-color quartet for chip
+       and monogram coloring. Dark set lives under [data-theme=dark]. */
+    --ctx-surface: #ffffff;
+    --ctx-panel: #f7faf8;
+    --ctx-panel-2: #eef3f0;
+    --ctx-inset: #f3f6f4;
+    --ctx-border: #cdd8d3;
+    --ctx-border-strong: #b4c2bc;
+    --ctx-text: #28332f;
+    --ctx-text-2: #4d5753;
+    --ctx-text-3: #6c7872;
+    --ctx-accent: #3f7d68;
+    --ctx-accent-strong: #356b59;
+    --ctx-accent-soft: #e2efe9;
+    --ctx-star: #b07d1e;
+    --ctx-star-soft: #f7eed7;
+    --ctx-shadow: rgba(40, 60, 52, 0.08);
+    --ctx-shadow-pop: rgba(40, 60, 52, 0.18);
+    /* Per-kind colors — scoped to ctx- to avoid dragging "lore blue"
+       into the rest of the app's namespace. */
+    --ctx-k-scene: #3f7d68;
+    --ctx-k-scene-soft: #e2efe9;
+    --ctx-k-lore: #4f7390;
+    --ctx-k-lore-soft: #e4ebf1;
+    --ctx-k-snippet: #976b46;
+    --ctx-k-snippet-soft: #efe6dc;
+    --ctx-k-preset: #5f6f67;
+    --ctx-k-preset-soft: #e7ecea;
+
     display: flex;
     flex-direction: column;
-    gap: 6px;
+    gap: 7px;
     min-width: 0;
+    color: var(--ctx-text);
   }
+
+  :global([data-theme="dark"]) .ctx-picker {
+    --ctx-surface: #18211d;
+    --ctx-panel: #141c18;
+    --ctx-panel-2: #1e2823;
+    --ctx-inset: #1b2521;
+    --ctx-border: #324039;
+    --ctx-border-strong: #41534a;
+    --ctx-text: #e3e9e5;
+    --ctx-text-2: #b4c0ba;
+    --ctx-text-3: #869189;
+    --ctx-accent: #5ea585;
+    --ctx-accent-strong: #7cc0a1;
+    --ctx-accent-soft: #22332c;
+    --ctx-star: #d6a946;
+    --ctx-star-soft: #3a2f17;
+    --ctx-shadow: rgba(0, 0, 0, 0.45);
+    --ctx-shadow-pop: rgba(0, 0, 0, 0.55);
+    --ctx-k-scene: #5ea585;
+    --ctx-k-scene-soft: #22332c;
+    --ctx-k-lore: #7aa0bf;
+    --ctx-k-lore-soft: #20303c;
+    --ctx-k-snippet: #c0986e;
+    --ctx-k-snippet-soft: #332a20;
+    --ctx-k-preset: #93a79c;
+    --ctx-k-preset-soft: #232b27;
+  }
+
+  /* --- Chip strip -------------------------------------------------- */
 
   .ctx-chips {
     display: flex;
@@ -390,203 +570,438 @@
     display: inline-flex;
     align-items: center;
     gap: 6px;
-    padding: 3px 8px;
-    background: #eef2f0;
-    border: 1px solid #cbd6d2;
-    border-radius: 12px;
-    font-size: 12px;
+    padding: 4px 8px;
+    background: var(--ctx-surface);
+    border: 1px solid var(--ctx-border);
+    border-radius: 8px;
+    font-size: 12.5px;
     line-height: 1.2;
+    color: var(--ctx-text);
+    /* Per-kind chip-tag tokens — set by the kind classes below; default
+       lands on the neutral border treatment when unset. */
+    --chip-tag-color: var(--ctx-text-3);
+    --chip-tag-bg: var(--ctx-inset);
   }
 
-  .ctx-chip.preset {
-    background: #f4f1e6;
-    border-color: #d8d1b9;
+  .ctx-chip-scene { --chip-tag-color: var(--ctx-k-scene); --chip-tag-bg: var(--ctx-k-scene-soft); }
+  .ctx-chip-lore  { --chip-tag-color: var(--ctx-k-lore);  --chip-tag-bg: var(--ctx-k-lore-soft); }
+  .ctx-chip-snippet { --chip-tag-color: var(--ctx-k-snippet); --chip-tag-bg: var(--ctx-k-snippet-soft); }
+
+  /* Preset chips reverse the polarity — pale-graphite surface so the
+     whole-document inclusion reads visually distinct from item chips. */
+  .ctx-chip-preset {
+    background: var(--ctx-k-preset-soft);
+    --chip-tag-color: var(--ctx-k-preset);
+    --chip-tag-bg: var(--ctx-surface);
   }
 
-  .ctx-chip.target {
-    border-color: #c79a2a;
-    box-shadow: 0 0 0 1px #f0d27a inset;
-  }
-
+  /* ★-bound scene gets a full gold-tint chip — loudest treatment in the
+     strip, because this scene fills the template's `scene` variable. */
   .ctx-chip-target {
-    border: none;
-    background: transparent;
-    cursor: pointer;
-    padding: 0 2px;
-    font-size: 14px;
-    color: #b8bfbc;
-    line-height: 1;
+    background: var(--ctx-star-soft);
+    border-color: var(--ctx-star);
+    --chip-tag-color: var(--ctx-star);
+    --chip-tag-bg: var(--ctx-surface);
   }
 
-  .ctx-chip-target:hover {
-    color: #c79a2a;
-  }
-
-  .ctx-chip-target[aria-pressed="true"] {
-    color: #c79a2a;
-  }
-
-  .ctx-chip small {
-    color: #65716c;
+  .ctx-chip-tag {
+    font-size: 9.5px;
+    font-weight: 700;
     text-transform: uppercase;
-    font-size: 10px;
     letter-spacing: 0.04em;
+    color: var(--chip-tag-color);
+    background: var(--chip-tag-bg);
+    border-radius: 4px;
+    padding: 1px 5px;
+    line-height: 1.3;
   }
 
-  .ctx-chip button {
+  .ctx-chip-dot {
+    width: 7px;
+    height: 7px;
+    border-radius: 50%;
+    background: var(--chip-tag-color);
+    flex: none;
+  }
+
+  .ctx-chip-target .ctx-chip-dot {
+    background: var(--ctx-star);
+  }
+
+  .ctx-chip-title {
+    font-weight: 600;
+  }
+
+  .ctx-chip-star {
+    appearance: none;
     border: none;
     background: transparent;
-    color: #65716c;
+    cursor: pointer;
+    padding: 0;
+    font-size: 13px;
+    color: var(--ctx-text-3);
+    line-height: 1;
+    opacity: 0.55;
+    transition: color 80ms linear, opacity 80ms linear;
+  }
+
+  .ctx-chip-star:hover {
+    color: var(--ctx-star);
+    opacity: 1;
+  }
+
+  .ctx-chip-star[aria-pressed="true"] {
+    color: var(--ctx-star);
+    opacity: 1;
+  }
+
+  .ctx-chip-target .ctx-chip-star {
+    color: var(--ctx-star);
+    opacity: 1;
+  }
+
+  .ctx-chip-remove {
+    appearance: none;
+    border: none;
+    background: transparent;
+    color: var(--ctx-text-3);
     font-size: 14px;
     line-height: 1;
     padding: 0 2px;
     cursor: pointer;
+    border-radius: 3px;
   }
 
-  .ctx-chip button:hover {
-    color: #b04a3f;
+  .ctx-chip-remove:hover {
+    background: var(--ctx-inset);
+    color: var(--ctx-text);
   }
+
+  /* --- Trigger ----------------------------------------------------- */
 
   .ctx-picker-anchor {
     position: relative;
     align-self: flex-start;
+    max-width: 100%;
   }
 
   .ctx-add {
-    padding: 4px 10px;
-    border: 1px solid #cbd6d2;
-    background: transparent;
-    border-radius: 4px;
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    padding: 5px 12px;
+    border: 1px dashed var(--ctx-accent);
+    background: var(--ctx-accent-soft);
+    color: var(--ctx-accent-strong);
+    border-radius: 8px;
     font-size: 13px;
+    font-weight: 600;
     cursor: pointer;
+    font-family: inherit;
+    transition: background-color 80ms linear;
   }
 
   .ctx-add:hover {
-    background: #fafbfa;
+    background: var(--ctx-surface);
   }
+
+  .ctx-add-plus {
+    font-size: 15px;
+    line-height: 1;
+  }
+
+  .compact .ctx-add {
+    font-size: 12px;
+    padding: 4px 10px;
+  }
+
+  /* --- Popover menu ------------------------------------------------ */
 
   .ctx-menu {
     position: absolute;
     top: calc(100% + 4px);
     left: 0;
-    min-width: 220px;
-    max-width: 320px;
-    max-height: 360px;
+    width: 344px;
+    max-width: 90vw;
+    max-height: 420px;
     overflow-y: auto;
-    background: #ffffff;
-    border: 1px solid #cbd6d2;
-    border-radius: 6px;
-    box-shadow: 0 4px 16px rgba(0, 0, 0, 0.08);
-    padding: 4px;
+    background: var(--ctx-surface);
+    border: 1px solid var(--ctx-border);
+    border-radius: 11px;
+    box-shadow: 0 8px 28px var(--ctx-shadow-pop);
+    padding: 10px;
     z-index: 100;
+    display: flex;
+    flex-direction: column;
+    gap: 7px;
+  }
+
+  .compact .ctx-menu {
+    width: 280px;
+    padding: 8px;
+    gap: 6px;
+  }
+
+  /* Search input — pill with leading icon + trailing count/clear. */
+  .ctx-search-wrap {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 8px 11px;
+    border: 1px solid var(--ctx-border-strong);
+    border-radius: 9px;
+    background: var(--ctx-surface);
+    transition: border-color 80ms linear, border-width 0s;
+  }
+
+  .ctx-search-wrap:focus-within,
+  .ctx-search-wrap.has-query {
+    border-color: var(--ctx-accent);
+  }
+
+  .ctx-search-icon {
+    color: var(--ctx-text-3);
+    flex: none;
+  }
+
+  .ctx-search-wrap:focus-within .ctx-search-icon,
+  .ctx-search-wrap.has-query .ctx-search-icon {
+    color: var(--ctx-accent);
+  }
+
+  .ctx-search {
+    flex: 1;
+    min-width: 0;
+    appearance: none;
+    border: none;
+    background: transparent;
+    color: var(--ctx-text);
+    font-size: 13px;
+    padding: 0;
+    font-family: inherit;
+  }
+
+  .ctx-search:focus {
+    outline: none;
+  }
+
+  .ctx-search::placeholder {
+    color: var(--ctx-text-3);
+  }
+
+  .ctx-search-count {
+    flex: none;
+    font-size: 11px;
+    font-weight: 600;
+    color: var(--ctx-text-3);
+  }
+
+  .ctx-search-clear {
+    appearance: none;
+    border: none;
+    background: transparent;
+    color: var(--ctx-text-3);
+    font-size: 14px;
+    line-height: 1;
+    cursor: pointer;
+    padding: 0 2px;
+    border-radius: 3px;
+    flex: none;
+  }
+
+  .ctx-search-clear:hover {
+    background: var(--ctx-inset);
+    color: var(--ctx-text);
+  }
+
+  /* --- Groups ------------------------------------------------------ */
+
+  .ctx-group {
     display: flex;
     flex-direction: column;
     gap: 2px;
   }
 
-  .ctx-menu button {
-    text-align: left;
-    padding: 5px 8px;
-    border: none;
-    background: transparent;
-    border-radius: 4px;
+  .ctx-group-bar {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 6px 9px;
+    background: var(--ctx-panel-2);
+    border-radius: 7px;
     cursor: pointer;
-    font-size: 13px;
+    list-style: none;
+    user-select: none;
   }
 
-  .ctx-menu button:hover:not(:disabled) {
-    background: #f4f7f5;
+  .ctx-group-bar::-webkit-details-marker {
+    display: none;
   }
 
-  .ctx-menu button:disabled {
-    opacity: 0.5;
-    cursor: default;
+  .ctx-group-chevron {
+    color: var(--ctx-text-3);
+    font-size: 10px;
+    width: 10px;
+    display: inline-block;
+    transition: transform 0.1s;
   }
 
-  .ctx-search {
-    padding: 4px 8px;
-    border: 1px solid #cbd6d2;
-    border-radius: 4px;
-    font-size: 13px;
-    margin: 2px 0 4px;
+  .ctx-group:not([open]) > .ctx-group-bar .ctx-group-chevron {
+    transform: rotate(-90deg);
   }
 
-  .ctx-group {
+  .ctx-group-label {
+    font-size: 10.5px;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.07em;
+    color: var(--ctx-text-2);
+  }
+
+  .ctx-group-count {
+    margin-left: auto;
+    font-size: 10.5px;
+    font-weight: 600;
+    color: var(--ctx-text-3);
+    background: var(--ctx-surface);
+    border: 1px solid var(--ctx-border);
+    border-radius: 999px;
+    padding: 1px 8px;
+    line-height: 1.3;
+  }
+
+  .ctx-group-items {
     display: flex;
     flex-direction: column;
     gap: 0;
   }
 
-  .ctx-group > summary {
-    list-style: none;
-    cursor: pointer;
-    padding: 4px 8px;
-    font-size: 11px;
-    text-transform: uppercase;
-    letter-spacing: 0.04em;
-    color: #4d5753;
-    font-weight: 600;
-    user-select: none;
-  }
-
-  .ctx-group > summary::-webkit-details-marker {
-    display: none;
-  }
-
-  .ctx-group > summary::before {
-    content: "▾ ";
-    display: inline-block;
-    width: 12px;
-    color: #65716c;
-    transition: transform 0.1s;
-  }
-
-  .ctx-group:not([open]) > summary::before {
-    content: "▸ ";
-  }
-
-  .ctx-group > summary small {
-    color: #65716c;
-    font-weight: 400;
-    text-transform: none;
-    letter-spacing: 0;
-  }
+  /* --- Items ------------------------------------------------------- */
 
   .ctx-item {
-    display: grid !important;
-    grid-template-columns: minmax(70px, max-content) 1fr;
+    appearance: none;
+    display: flex;
     align-items: center;
-    gap: 8px;
+    gap: 9px;
+    padding: 6px 9px;
+    border: none;
+    background: transparent;
+    border-radius: 7px;
+    cursor: pointer;
+    text-align: left;
+    font-family: inherit;
+    color: var(--ctx-text);
+    /* Per-kind monogram tokens — set by ctx-item-* below. */
+    --mono-color: var(--ctx-text-3);
+    --mono-bg: var(--ctx-inset);
   }
 
-  .ctx-item-tag {
-    font-size: 10px;
-    text-transform: uppercase;
-    letter-spacing: 0.04em;
-    color: #65716c;
-    background: #eef2f0;
-    border-radius: 3px;
-    padding: 1px 5px;
-    text-align: center;
-    line-height: 1.4;
+  .ctx-item-scene { --mono-color: var(--ctx-k-scene); --mono-bg: var(--ctx-k-scene-soft); }
+  .ctx-item-lore  { --mono-color: var(--ctx-k-lore);  --mono-bg: var(--ctx-k-lore-soft); }
+  .ctx-item-snippet { --mono-color: var(--ctx-k-snippet); --mono-bg: var(--ctx-k-snippet-soft); }
+  .ctx-item-preset  { --mono-color: var(--ctx-k-preset);  --mono-bg: var(--ctx-k-preset-soft); }
+
+  .ctx-item:hover:not(:disabled) {
+    background: var(--ctx-panel-2);
+  }
+
+  .ctx-item:disabled {
+    opacity: 0.55;
+    cursor: default;
+  }
+
+  .ctx-item-mono {
+    width: 20px;
+    height: 20px;
+    flex: none;
+    border-radius: 6px;
+    background: var(--mono-bg);
+    color: var(--mono-color);
+    font-size: 11px;
+    font-weight: 700;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    line-height: 1;
+  }
+
+  .compact .ctx-item-mono {
+    width: 19px;
+    height: 19px;
+    font-size: 10.5px;
   }
 
   .ctx-item-title {
+    flex: 1;
     font-size: 13px;
+    min-width: 0;
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
   }
 
-  .ctx-muted {
-    margin: 0;
-    padding: 6px 8px;
-    color: #65716c;
-    font-size: 12px;
+  .ctx-item-title mark {
+    background: var(--ctx-accent-soft);
+    color: var(--ctx-accent-strong);
+    border-radius: 2px;
+    padding: 0 1px;
+    font-weight: 600;
   }
 
-  .compact .ctx-add {
+  .ctx-item-added {
+    flex: none;
+    font-size: 10.5px;
+    font-weight: 600;
+    color: var(--ctx-accent-strong);
+    background: var(--ctx-accent-soft);
+    border-radius: 999px;
+    padding: 1px 8px;
+    line-height: 1.3;
+  }
+
+  /* --- Empty states ------------------------------------------------ */
+
+  .ctx-empty {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 8px;
+    padding: 30px 22px;
+    text-align: center;
+  }
+
+  .ctx-empty-icon {
+    width: 38px;
+    height: 38px;
+    border-radius: 10px;
+    background: var(--ctx-inset);
+    border: 1px solid var(--ctx-border);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    color: var(--ctx-text-3);
+    font-size: 18px;
+    line-height: 1;
+  }
+
+  .ctx-empty-icon-svg {
+    color: var(--ctx-text-3);
+    opacity: 0.6;
+  }
+
+  .ctx-empty-title {
+    font-size: 13px;
+    color: var(--ctx-text-2);
+  }
+
+  .ctx-empty-title strong {
+    color: var(--ctx-text);
+    font-weight: 600;
+  }
+
+  .ctx-empty-hint {
     font-size: 12px;
-    padding: 3px 8px;
+    color: var(--ctx-text-3);
+    line-height: 1.45;
   }
 </style>

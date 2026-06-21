@@ -287,6 +287,66 @@ class PreviewEndpointTests(unittest.TestCase):
         warnings = response.json()["warnings"]
         self.assertTrue(any("outside any role block" in w for w in warnings), warnings)
 
+    def test_marked_target_in_context_pick_overrides_target_scene_id(self) -> None:
+        # NC-style ★ target: a scene flagged target=true in a context_pick
+        # input wins over the caller's implicit target_scene_id. Templates
+        # see the marked scene as `scene`.
+        second_struct = self.service.create_structure_node(
+            CreateStructureNodeRequest(title="Aftermath", entry_type="scene"),
+        )
+        second_scene_id = next(
+            n.scene_id
+            for n in second_struct.root.children
+            if n.type == "scene" and n.title == "Aftermath"
+        )
+        second_scene = self.service.read_scene(second_scene_id)
+        self.service.save_scene(
+            second_scene_id,
+            SaveSceneRequest(
+                title=second_scene.title,
+                body_markdown="",
+                base_revision=second_scene.revision,
+                status="draft",
+                entry_type="scene",
+                metadata={"summary": "Smoke clears over the bridge."},
+            ),
+        )
+        marked_pick = (
+            '[{"id": "' + second_scene_id + '", "kind": "scene",'
+            ' "title": "Aftermath", "target": true}]'
+        )
+        response = self.client.post(
+            "/api/ai/preview",
+            json={
+                "template_source": '{% role "user" %}{{ scene.title }}{% endrole %}',
+                # Caller still passes the editor's current scene as the
+                # implicit target — the marked ★ in the picker overrides it.
+                "target_scene_id": self.scene_id,
+                "inputs": {"focus": marked_pick},
+            },
+        )
+        self.assertEqual(response.status_code, 200, response.text)
+        text = response.json()["messages"][0]["blocks"][0]["text"]
+        self.assertEqual(text, "Aftermath")
+
+    def test_unmarked_context_pick_does_not_override_target_scene_id(self) -> None:
+        # Picked scenes without target=true should NOT change the binding —
+        # the caller's target_scene_id remains authoritative.
+        pick_without_target = (
+            '[{"id": "' + self.scene_id + '", "kind": "scene", "title": "X"}]'
+        )
+        response = self.client.post(
+            "/api/ai/preview",
+            json={
+                "template_source": '{% role "user" %}{{ scene.title }}{% endrole %}',
+                "target_scene_id": self.scene_id,
+                "inputs": {"references": pick_without_target},
+            },
+        )
+        self.assertEqual(response.status_code, 200, response.text)
+        text = response.json()["messages"][0]["blocks"][0]["text"]
+        self.assertEqual(text, "The Departure")
+
     def test_inputs_are_available_as_input(self) -> None:
         response = self.client.post(
             "/api/ai/preview",

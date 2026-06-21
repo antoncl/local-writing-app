@@ -11,6 +11,7 @@ access to settings and policy. M4.0.
 
 from __future__ import annotations
 
+import json
 from datetime import date as _date_cls
 from typing import Any
 
@@ -19,6 +20,40 @@ from jinja2 import TemplateError
 from app.services.ai.helpers import EntryRef, create_environment_for_project
 from app.services.ai.sessions import AISession, default_registry
 from app.services.ai.templates import RenderedTemplate, render_template
+
+
+def _find_marked_target_scene_id(inputs: dict[str, Any]) -> str | None:
+    """Scan context_pick input values for a scene ref marked as ★ target.
+
+    The picker UI flags a single picked scene per input with `target: true`;
+    if any input carries such a ref, the marked scene becomes the template's
+    `scene` binding (overriding any caller-supplied target_scene_id). Returns
+    the first match; the picker enforces at most one per input, but if two
+    inputs each mark a scene, the first by iteration order wins.
+
+    Frontend serializes context_pick values as JSON strings (see
+    PromptInputField.svelte). Accept either a string or an already-decoded
+    list so backend tests can pass plain Python structures.
+    """
+    for value in inputs.values():
+        if isinstance(value, str):
+            stripped = value.strip()
+            if not (stripped.startswith("[") and stripped.endswith("]")):
+                continue
+            try:
+                value = json.loads(stripped)
+            except (ValueError, TypeError):
+                continue
+        if not isinstance(value, list):
+            continue
+        for item in value:
+            if not isinstance(item, dict):
+                continue
+            if item.get("target") and item.get("kind") == "scene":
+                scene_id = item.get("id")
+                if isinstance(scene_id, str) and scene_id:
+                    return scene_id
+    return None
 
 
 class _DateProxy:
@@ -83,9 +118,15 @@ def build_preview(
     `session_id_used` is None when no session was bound (caller did not supply
     one), so the response surface can report 'no caching' to the user.
     """
-    if target_scene_id:
+    # A scene marked ★ in any context_pick input wins over the caller's
+    # implicit target_scene_id. This is the NC-style pattern: the user
+    # picks the focus scene in the context picker (per-invocation) instead
+    # of relying on dispatch context.
+    effective_scene_id = _find_marked_target_scene_id(inputs) or target_scene_id
+
+    if effective_scene_id:
         try:
-            scene = project_service.read_scene(target_scene_id)
+            scene = project_service.read_scene(effective_scene_id)
         except Exception as exc:  # noqa: BLE001
             raise PreviewError(f"Target scene not found: {exc}", 404) from exc
     else:

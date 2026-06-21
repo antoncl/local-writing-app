@@ -233,6 +233,10 @@
     emit({ presets: Array.from(next) });
   }
 
+  function toggleAllowTargetMarking(checked: boolean) {
+    emit({ allow_target_marking: checked || undefined });
+  }
+
   function emit(patch: Partial<ContextPickConfig>) {
     dispatch("change", { config: { ...config, ...patch } });
   }
@@ -274,6 +278,10 @@
     (renderedByKind.scene.some((n) => n.state !== "unchecked")) ||
     (renderedByKind.lore.some((n) => n.state !== "unchecked")) ||
     (config.presets ?? []).length > 0;
+
+  // Only surface the ★-marking control when scenes are actually pickable —
+  // marking is scene-only; showing it for lore-only inputs would be noise.
+  $: scenesPickable = renderedByKind.scene.some((n) => n.state !== "unchecked");
 </script>
 
 <div class="ctx-config">
@@ -332,6 +340,28 @@
       </label>
     {/each}
   </section>
+
+  {#if scenesPickable}
+    <section class="ctx-config-section">
+      <header>
+        <strong>Scene binding</strong>
+        <small>
+          When enabled, the runtime picker shows a ★ on each picked scene.
+          The user marks one as the template's <code>scene</code> binding —
+          others stay accessible via <code>{`{{ input.<name> }}`}</code>.
+          The marked scene wins over any caller-supplied target.
+        </small>
+      </header>
+      <label class="ctx-config-check">
+        <input
+          type="checkbox"
+          checked={config.allow_target_marking === true}
+          on:change={(e) => toggleAllowTargetMarking((e.currentTarget as HTMLInputElement).checked)}
+        />
+        Allow marking a picked scene as <code>scene</code>
+      </label>
+    </section>
+  {/if}
 
   {#if !hasAnySource}
     <p class="ctx-warn">

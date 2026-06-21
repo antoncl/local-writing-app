@@ -156,16 +156,25 @@ export type ContextPickConfig = {
   entry_types?: Record<string, string[]>;   // kind -> sub-type ids
   presets?: ("full_outline" | "full_text")[];
   multiple?: boolean;
+  // When true, the runtime picker shows a ★ toggle on each picked
+  // scene chip. The author opts in per input — it tells template code
+  // that `scene` may be bound to one of the picked scenes. Single ★ per
+  // input is enforced by the picker UI.
+  allow_target_marking?: boolean;
 };
 
 // What ends up in input.<name> for a context_pick input — a list of
 // these light refs. Bodies are NOT carried; they're materialized
-// server-side at template render time.
+// server-side at template render time. `target: true` on a scene
+// ref marks it as the implicit `scene` binding for the prompt's
+// template (NC-style ★ target). Only one ref per input can be the
+// target; the picker UI enforces single-selection.
 export type ContextPickRef = {
   id: string;
   kind: "scene" | "lore" | "snippet" | "assistant" | "preset";
   title: string;
   entry_type?: string;
+  target?: boolean;
 };
 
 export type PromptInputDefinition = {

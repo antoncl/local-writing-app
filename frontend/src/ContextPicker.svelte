@@ -77,6 +77,28 @@
     });
   }
 
+  // Author opt-in: ★ target marking only when config flags it. Surface
+  // controlled by the prompt author so template code knows whether
+  // `scene` is reliably bound.
+  $: allowTargetMarking = config.allow_target_marking === true;
+
+  // ★ target marking: one scene per input may be flagged as the template's
+  // `scene` binding (NC-style). Clicking ★ on a scene toggles it; clicking
+  // ★ on a different scene moves the mark. Non-scene refs ignore the flag.
+  function toggleTarget(ref: ContextPickRef) {
+    if (ref.kind !== "scene" || !allowTargetMarking) return;
+    const targetKey = refKey(ref);
+    const willBeTarget = !ref.target;
+    const next = value.map((r) => {
+      if (r.kind !== "scene") return r;
+      if (refKey(r) === targetKey) return { ...r, target: willBeTarget };
+      // Single ★ per input — clear any prior target on other scene refs.
+      if (r.target) return { ...r, target: false };
+      return r;
+    });
+    dispatch("change", { value: next });
+  }
+
   function toggle() {
     open = !open;
     if (open) search = "";
@@ -107,10 +129,15 @@
     const allowed = new Set(config.entry_types?.scene ?? []);
     const out: Array<{ id: string; title: string; entry_type: string }> = [];
     const walk = (n: StructureNode) => {
-      if (n.kind === "scene") {
+      // StructureNode uses `type` ("scene" / "act" / "chapter" / "root").
+      // An earlier read used `n.kind`, which is always undefined — so
+      // the scene list was silently empty. scene_id is the canonical id
+      // for the scene itself (the structure node has its own id for the
+      // outline position).
+      if (n.type === "scene" && n.scene_id) {
         const sceneType = (n as unknown as { entry_type?: string }).entry_type ?? "scene";
         if (allowed.size === 0 || allowed.has(sceneType)) {
-          out.push({ id: n.id, title: n.title, entry_type: sceneType });
+          out.push({ id: n.scene_id, title: n.title, entry_type: sceneType });
         }
       }
       for (const child of n.children ?? []) walk(child);
@@ -264,9 +291,19 @@
   {#if value.length > 0}
     <div class="ctx-chips">
       {#each value as ref (refKey(ref))}
-        <span class="ctx-chip" class:preset={ref.kind === "preset"}>
+        <span class="ctx-chip" class:preset={ref.kind === "preset"} class:target={ref.target}>
           <small>{chipLabel(ref)}</small>
           <strong>{ref.title}</strong>
+          {#if ref.kind === "scene" && allowTargetMarking}
+            <button
+              type="button"
+              class="ctx-chip-target"
+              aria-pressed={ref.target ?? false}
+              aria-label={ref.target ? `Unmark ${ref.title} as target scene` : `Mark ${ref.title} as target scene`}
+              title={ref.target ? "★ Target — binds to `scene` in the template. Click to unmark." : "Mark as target — binds to `scene` in the template."}
+              on:click={() => toggleTarget(ref)}
+            >{ref.target ? "★" : "☆"}</button>
+          {/if}
           <button
             type="button"
             aria-label="Remove {ref.title}"
@@ -364,6 +401,29 @@
   .ctx-chip.preset {
     background: #f4f1e6;
     border-color: #d8d1b9;
+  }
+
+  .ctx-chip.target {
+    border-color: #c79a2a;
+    box-shadow: 0 0 0 1px #f0d27a inset;
+  }
+
+  .ctx-chip-target {
+    border: none;
+    background: transparent;
+    cursor: pointer;
+    padding: 0 2px;
+    font-size: 14px;
+    color: #b8bfbc;
+    line-height: 1;
+  }
+
+  .ctx-chip-target:hover {
+    color: #c79a2a;
+  }
+
+  .ctx-chip-target[aria-pressed="true"] {
+    color: #c79a2a;
   }
 
   .ctx-chip small {

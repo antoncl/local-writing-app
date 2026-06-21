@@ -3448,11 +3448,11 @@ h3 {
   align-items: end;
 }
 
-/* The context_pick config block carries its own layout; spanning the
-   whole row keeps the checkboxes legible without crushing them into
-   the 140px auto-fit columns. */
-.entry-inputs-editor .prompt-input-context-config {
-  grid-column: 1 / -1;
+/* The context_pick row is now rendered outside .prompt-input-grid
+   (see DocumentEditorPane's branch on draft.type). The widget owns its
+   own card chrome. */
+.entry-inputs-editor .prompt-input-row-context {
+  margin-bottom: 8px;
 }
 
 /* Child combinator: this styling is for the row's primary labels

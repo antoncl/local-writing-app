@@ -2961,92 +2961,84 @@
         <p class="muted entry-inputs-empty">No inputs yet. Click + Input to declare one.</p>
       {/if}
       {#each entryInputDrafts as draft, index (index)}
-        <div class="prompt-input-row">
-          <div class="prompt-input-grid">
-            <label>
-              Label
-              <input value={draft.label} placeholder="Topic to brainstorm" on:input={(e) => updateEntryInputLabel(index, (e.currentTarget as HTMLInputElement).value)} />
-            </label>
-            <label>
-              ID
-              <input value={draft.name} placeholder="topic_to_brainstorm" on:input={(e) => updateEntryInputName(index, (e.currentTarget as HTMLInputElement).value)} />
-              {#if draft.name}
-                <small class="prompt-input-accessor"><code>&lbrace;&lbrace; input.{draft.name} &rbrace;&rbrace;</code></small>
-              {/if}
-            </label>
-            <label>
-              Type
-              <select value={draft.type} on:change={(e) => updateEntryInput(index, { type: (e.currentTarget as HTMLSelectElement).value as import("./types").PromptInputType })}>
-                <option value="text">Text</option>
-                <option value="long_text">Long Text</option>
-                <option value="number">Number</option>
-                <option value="boolean">Boolean</option>
-                <option value="select">Select</option>
-                <option value="entity_ref">Entity Reference</option>
-                <option value="entity_ref_list">Entity Reference List</option>
-                <option value="context_pick">Context Picker</option>
-              </select>
-            </label>
-            {#if draft.type !== "context_pick"}
+        {#if draft.type === "context_pick"}
+          <!-- PR 2: context_pick owns its entire row (chevron · label ·
+               id · type select · Required · Multiple · ×). Generic
+               input types still render the .prompt-input-grid below. -->
+          <div class="prompt-input-row prompt-input-row-context">
+            <ContextPickConfigEditor
+              config={draft.contextPickConfig}
+              metadataSchema={metadataSchema}
+              label={draft.label}
+              name={draft.name}
+              required={draft.required}
+              on:change={(event) => updateEntryInputContextPickConfig(index, event.detail.config)}
+              on:labelchange={(event) => updateEntryInputLabel(index, event.detail.value)}
+              on:namechange={(event) => updateEntryInputName(index, event.detail.value)}
+              on:requiredchange={(event) => updateEntryInput(index, { required: event.detail.value })}
+              on:typechange={(event) => updateEntryInput(index, { type: event.detail.value })}
+              on:remove={() => removeEntryInput(index)}
+            />
+          </div>
+        {:else}
+          <div class="prompt-input-row">
+            <div class="prompt-input-grid">
+              <label>
+                Label
+                <input value={draft.label} placeholder="Topic to brainstorm" on:input={(e) => updateEntryInputLabel(index, (e.currentTarget as HTMLInputElement).value)} />
+              </label>
+              <label>
+                ID
+                <input value={draft.name} placeholder="topic_to_brainstorm" on:input={(e) => updateEntryInputName(index, (e.currentTarget as HTMLInputElement).value)} />
+                {#if draft.name}
+                  <small class="prompt-input-accessor"><code>&lbrace;&lbrace; input.{draft.name} &rbrace;&rbrace;</code></small>
+                {/if}
+              </label>
+              <label>
+                Type
+                <select value={draft.type} on:change={(e) => updateEntryInput(index, { type: (e.currentTarget as HTMLSelectElement).value as import("./types").PromptInputType })}>
+                  <option value="text">Text</option>
+                  <option value="long_text">Long Text</option>
+                  <option value="number">Number</option>
+                  <option value="boolean">Boolean</option>
+                  <option value="select">Select</option>
+                  <option value="entity_ref">Entity Reference</option>
+                  <option value="entity_ref_list">Entity Reference List</option>
+                  <option value="context_pick">Context Picker</option>
+                </select>
+              </label>
               <label>
                 Default
                 <input value={draft.defaultValue} placeholder="" on:input={(e) => updateEntryInput(index, { defaultValue: (e.currentTarget as HTMLInputElement).value })} />
               </label>
-            {/if}
-            {#if draft.type === "select"}
-              <label class="prompt-input-options">
-                Options
-                <input value={draft.options} placeholder="quick, thorough" on:input={(e) => updateEntryInput(index, { options: (e.currentTarget as HTMLInputElement).value })} />
-              </label>
-            {/if}
-            {#if draft.type === "entity_ref" || draft.type === "entity_ref_list"}
-              <label>
-                Target kind
-                <select value={draft.targetKind} on:change={(e) => updateEntryInput(index, { targetKind: (e.currentTarget as HTMLSelectElement).value as "" | "scene" | "lore" })}>
-                  <option value="">Any</option>
-                  <option value="scene">Scene</option>
-                  <option value="lore">Lore</option>
-                </select>
-              </label>
-              <label>
-                Target entry type
-                <input value={draft.targetEntryType} placeholder="" on:input={(e) => updateEntryInput(index, { targetEntryType: (e.currentTarget as HTMLInputElement).value })} />
-              </label>
-            {/if}
-            {#if draft.type === "context_pick"}
-              <div class="prompt-input-context-config">
-                <ContextPickConfigEditor
-                  config={draft.contextPickConfig}
-                  metadataSchema={metadataSchema}
-                  on:change={(event) => updateEntryInputContextPickConfig(index, event.detail.config)}
-                />
-              </div>
-            {/if}
-            <label class="prompt-input-required">
-              <input type="checkbox" checked={draft.required} on:change={(e) => updateEntryInput(index, { required: (e.currentTarget as HTMLInputElement).checked })} />
-              Required
-            </label>
-            {#if draft.type === "context_pick"}
-              <!-- Per the UX review, "Allow multiple picks" gates
-                   invocation behaviour, not the source-content config.
-                   Lives next to Required on the input row so the
-                   ContextPickConfigEditor stays focused on what's
-                   pickable. Wire format keeps it in target. -->
+              {#if draft.type === "select"}
+                <label class="prompt-input-options">
+                  Options
+                  <input value={draft.options} placeholder="quick, thorough" on:input={(e) => updateEntryInput(index, { options: (e.currentTarget as HTMLInputElement).value })} />
+                </label>
+              {/if}
+              {#if draft.type === "entity_ref" || draft.type === "entity_ref_list"}
+                <label>
+                  Target kind
+                  <select value={draft.targetKind} on:change={(e) => updateEntryInput(index, { targetKind: (e.currentTarget as HTMLSelectElement).value as "" | "scene" | "lore" })}>
+                    <option value="">Any</option>
+                    <option value="scene">Scene</option>
+                    <option value="lore">Lore</option>
+                  </select>
+                </label>
+                <label>
+                  Target entry type
+                  <input value={draft.targetEntryType} placeholder="" on:input={(e) => updateEntryInput(index, { targetEntryType: (e.currentTarget as HTMLInputElement).value })} />
+                </label>
+              {/if}
               <label class="prompt-input-required">
-                <input
-                  type="checkbox"
-                  checked={draft.contextPickConfig.multiple !== false}
-                  on:change={(e) => updateEntryInputContextPickConfig(index, {
-                    ...draft.contextPickConfig,
-                    multiple: (e.currentTarget as HTMLInputElement).checked,
-                  })}
-                />
-                Multiple
+                <input type="checkbox" checked={draft.required} on:change={(e) => updateEntryInput(index, { required: (e.currentTarget as HTMLInputElement).checked })} />
+                Required
               </label>
-            {/if}
-            <button type="button" class="prompt-input-remove" title="Remove input" on:click={() => removeEntryInput(index)}>×</button>
+              <button type="button" class="prompt-input-remove" title="Remove input" on:click={() => removeEntryInput(index)}>×</button>
+            </div>
           </div>
-        </div>
+        {/if}
       {/each}
       <div class="entry-inputs-add">
         <button type="button" on:click={addEntryInput}>+ Input</button>

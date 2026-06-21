@@ -348,56 +348,57 @@
 <svelte:document on:mousedown={handleDocumentClick} on:keydown={handleKeydown} />
 
 <div class="ctx-picker" class:compact>
-  {#if value.length > 0}
-    <div class="ctx-chips">
-      {#each value as ref (refKey(ref))}
-        <span
-          class="ctx-chip"
-          class:ctx-chip-scene={ref.kind === "scene" && !ref.target}
-          class:ctx-chip-lore={ref.kind === "lore"}
-          class:ctx-chip-snippet={ref.kind === "snippet"}
-          class:ctx-chip-preset={ref.kind === "preset"}
-          class:ctx-chip-target={ref.target}
-        >
-          {#if compact}
-            <span class="ctx-chip-dot" aria-hidden="true"></span>
-          {/if}
-          {#if ref.kind === "scene" && allowTargetMarking}
-            <button
-              type="button"
-              class="ctx-chip-star"
-              aria-pressed={ref.target ?? false}
-              aria-label={ref.target ? `Unmark ${ref.title} as target scene` : `Mark ${ref.title} as target scene`}
-              title={ref.target ? "★ Target — binds to `scene` in the template. Click to unmark." : "Mark as target — binds to `scene` in the template."}
-              on:click={() => toggleTarget(ref)}
-            >{ref.target ? "★" : "☆"}</button>
-          {/if}
-          {#if !compact}
-            <span class="ctx-chip-tag">{chipLabel(ref)}</span>
-          {/if}
-          <strong class="ctx-chip-title">{ref.title}</strong>
+  <!-- PR 2: chips + trigger live in one bordered "context bar" so the
+       relationship reads as a single object instead of a button with
+       chips drifting above it. Empty bar persists with just the
+       trigger so the affordance is always present. -->
+  <div class="ctx-context-bar">
+    {#each value as ref (refKey(ref))}
+      <span
+        class="ctx-chip"
+        class:ctx-chip-scene={ref.kind === "scene" && !ref.target}
+        class:ctx-chip-lore={ref.kind === "lore"}
+        class:ctx-chip-snippet={ref.kind === "snippet"}
+        class:ctx-chip-preset={ref.kind === "preset"}
+        class:ctx-chip-target={ref.target}
+      >
+        {#if compact}
+          <span class="ctx-chip-dot" aria-hidden="true"></span>
+        {/if}
+        {#if ref.kind === "scene" && allowTargetMarking}
           <button
             type="button"
-            class="ctx-chip-remove"
-            aria-label="Remove {ref.title}"
-            on:click={() => remove(refKey(ref))}
-          >×</button>
-        </span>
-      {/each}
-    </div>
-  {/if}
+            class="ctx-chip-star"
+            aria-pressed={ref.target ?? false}
+            aria-label={ref.target ? `Unmark ${ref.title} as target scene` : `Mark ${ref.title} as target scene`}
+            title={ref.target ? "★ Target — binds to `scene` in the template. Click to unmark." : "Mark as target — binds to `scene` in the template."}
+            on:click={() => toggleTarget(ref)}
+          >{ref.target ? "★" : "☆"}</button>
+        {/if}
+        {#if !compact}
+          <span class="ctx-chip-tag">{chipLabel(ref)}</span>
+        {/if}
+        <strong class="ctx-chip-title">{ref.title}</strong>
+        <button
+          type="button"
+          class="ctx-chip-remove"
+          aria-label="Remove {ref.title}"
+          on:click={() => remove(refKey(ref))}
+        >×</button>
+      </span>
+    {/each}
 
-  <div class="ctx-picker-anchor">
-    <button
-      type="button"
-      class="ctx-add"
-      aria-haspopup="menu"
-      aria-expanded={open}
-      on:click={toggle}
-    >
-      <span class="ctx-add-plus" aria-hidden="true">+</span>
-      <span>{label}{value.length > 0 ? ` (${value.length})` : ""}</span>
-    </button>
+    <div class="ctx-picker-anchor">
+      <button
+        type="button"
+        class="ctx-add"
+        aria-haspopup="menu"
+        aria-expanded={open}
+        on:click={toggle}
+      >
+        <span class="ctx-add-plus" aria-hidden="true">+</span>
+        <span class="ctx-add-label">{value.length > 0 ? "Add" : label}</span>
+      </button>
 
     {#if open}
       <div class="ctx-menu" role="menu">
@@ -489,6 +490,7 @@
         {/if}
       </div>
     {/if}
+    </div>
   </div>
 </div>
 
@@ -526,7 +528,6 @@
 
     display: flex;
     flex-direction: column;
-    gap: 7px;
     min-width: 0;
     color: var(--ctx-text);
   }
@@ -558,13 +559,27 @@
     --ctx-k-preset-soft: #232b27;
   }
 
-  /* --- Chip strip -------------------------------------------------- */
+  /* --- Context bar (PR 2: chips + trigger in one bordered well) ---- */
 
-  .ctx-chips {
+  .ctx-context-bar {
     display: flex;
     flex-wrap: wrap;
+    align-items: center;
     gap: 6px;
+    padding: 6px;
+    border: 1px solid var(--ctx-border);
+    border-radius: 10px;
+    background: var(--ctx-surface);
+    min-width: 0;
   }
+
+  .compact .ctx-context-bar {
+    padding: 5px;
+    gap: 5px;
+    border-radius: 9px;
+  }
+
+  /* --- Chip ------------------------------------------------------- */
 
   .ctx-chip {
     display: inline-flex;
@@ -681,23 +696,24 @@
 
   .ctx-picker-anchor {
     position: relative;
-    align-self: flex-start;
-    max-width: 100%;
+    /* Flows inline with the chips as the last item in the bar's
+       flex-wrap row. No align-self needed — the bar centers items. */
   }
 
   .ctx-add {
     display: inline-flex;
     align-items: center;
-    gap: 6px;
-    padding: 5px 12px;
+    gap: 5px;
+    padding: 4px 11px;
     border: 1px dashed var(--ctx-accent);
     background: var(--ctx-accent-soft);
     color: var(--ctx-accent-strong);
     border-radius: 8px;
-    font-size: 13px;
+    font-size: 12.5px;
     font-weight: 600;
     cursor: pointer;
     font-family: inherit;
+    line-height: 1.3;
     transition: background-color 80ms linear;
   }
 
@@ -706,13 +722,13 @@
   }
 
   .ctx-add-plus {
-    font-size: 15px;
+    font-size: 14px;
     line-height: 1;
   }
 
   .compact .ctx-add {
     font-size: 12px;
-    padding: 4px 10px;
+    padding: 3px 9px;
   }
 
   /* --- Popover menu ------------------------------------------------ */

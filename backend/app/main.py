@@ -408,6 +408,9 @@ def get_assistant_entry(entry_id: str) -> AssistantEntry:
 
 @app.put("/api/assistants/{entry_id}", response_model=AssistantEntry)
 def save_assistant_entry(entry_id: str, request: SaveAssistantEntryRequest) -> AssistantEntry:
+    err = _validate_assistant_temperature(request.metadata)
+    if err:
+        raise HTTPException(status_code=400, detail=err)
     with translate_errors():
         return service.save_assistant_entry(entry_id, request)
 
@@ -516,7 +519,11 @@ def search(request: SearchRequest) -> SearchResponse:
 class _ResolvedCall:
     provider: str
     model: str
-    temperature: float
+    # None means: the assistant didn't set a temperature. The provider
+    # call sites omit the param entirely so the provider applies its own
+    # default. Don't substitute a hardcoded fallback here — the whole
+    # point of None is "don't assume."
+    temperature: float | None
     max_tokens: int
     thinking_enabled: bool = False
 
@@ -536,6 +543,11 @@ def _resolve_call_params(
       2. The assistant indicated by assistant_id, or the entry flagged
          is_default in the file-backed roster.
       3. The legacy default_provider / default_models matrix on settings.
+
+    Temperature has no fallback: when the assistant doesn't set it (or
+    there's no assistant at all), we pass None and let the provider's
+    own default apply. Some newer models (e.g. claude-opus-4-7+) actually
+    400 on an explicit temperature; assuming 0.7 broke them silently.
     """
     assistant = service.resolve_assistant(assistant_id)
     if assistant is not None:
@@ -544,10 +556,7 @@ def _resolve_call_params(
         a_model = meta.get("ai_model")
         provider = provider_override or (str(a_provider) if isinstance(a_provider, str) else "")
         model = model_override or (str(a_model) if isinstance(a_model, str) else "")
-        try:
-            temperature = float(meta.get("ai_temperature", 0.7))
-        except (TypeError, ValueError):
-            temperature = 0.7
+        temperature = _coerce_optional_temperature(meta.get("ai_temperature"))
         if max_tokens_override is not None:
             max_tokens = max_tokens_override
         else:
@@ -567,9 +576,77 @@ def _resolve_call_params(
     return _ResolvedCall(
         provider=provider,
         model=model,
-        temperature=0.7,
+        temperature=None,
         max_tokens=max_tokens_override if max_tokens_override is not None else 4096,
     )
+
+
+def _coerce_optional_temperature(raw: Any) -> float | None:
+    """Parse a temperature value from assistant metadata. None / empty /
+    unparseable all collapse to None so the call site omits the param."""
+    if raw is None or raw == "":
+        return None
+    try:
+        return float(raw)
+    except (TypeError, ValueError):
+        return None
+
+
+def _profile_for_provider(provider_name: str) -> Any:
+    """Return a throwaway ProviderProfile instance for `provider_name`, or
+    None if unknown. Used for capability queries (supports/requires
+    temperature, caching style, etc.) that don't need credentials.
+    Same instantiate-empty pattern as `_extract_usage_for_provider`."""
+    if provider_name == "anthropic":
+        from app.services.ai.profiles.anthropic import AnthropicProfile
+        return AnthropicProfile(api_key="")
+    if provider_name == "openai":
+        from app.services.ai.profiles.openai import OpenAIProfile
+        return OpenAIProfile(api_key="")
+    if provider_name == "openrouter":
+        from app.services.ai.profiles.openrouter import OpenRouterProfile
+        return OpenRouterProfile(api_key="")
+    if provider_name == "ollama":
+        from app.services.ai.profiles.ollama import OllamaProfile
+        return OllamaProfile(host="http://127.0.0.1:11434")
+    return None
+
+
+def _validate_assistant_temperature(metadata: dict[str, Any] | None) -> str | None:
+    """Check that the assistant's (provider, model, temperature) combo is
+    valid. Returns an error message to surface as 400, or None when OK.
+
+    - Model requires temperature but none set → reject (no current model
+      hits this; the check is here for forward-compat).
+    - Model rejects temperature but one is set → reject so the user fixes
+      it at save time instead of seeing a runtime 400 on first use.
+
+    When provider or model are missing, defer to other validation — we
+    only check the temperature combo when there's enough info to judge.
+    """
+    if not metadata:
+        return None
+    provider_name = metadata.get("ai_provider")
+    model_id = metadata.get("ai_model")
+    if not isinstance(provider_name, str) or not isinstance(model_id, str):
+        return None
+    if not provider_name or not model_id:
+        return None
+    profile = _profile_for_provider(provider_name)
+    if profile is None:
+        return None
+    has_temp = _coerce_optional_temperature(metadata.get("ai_temperature")) is not None
+    if profile.requires_temperature(model_id) and not has_temp:
+        return (
+            f"Model '{model_id}' requires a temperature setting — "
+            "fill in the Temperature field."
+        )
+    if not profile.supports_temperature(model_id) and has_temp:
+        return (
+            f"Model '{model_id}' does not accept a temperature setting — "
+            "clear the Temperature field."
+        )
+    return None
 
 
 def _build_settings_view(masked: dict[str, Any]) -> MachineSettingsView:
@@ -1082,6 +1159,17 @@ async def ai_generate(request: AIGenerateRequest) -> AIGenerateResponse:
     except ProjectServiceError:
         policy = "off"
 
+    # Wrap the rendered system_prompt so providers that support explicit
+    # prompt caching (Anthropic, and OpenRouter when routing to them) can
+    # mark it cacheable. Continuation reuses the same prompt body across
+    # back-to-back invocations on the same scene — a 1h TTL keeps the
+    # system stable so the second hit is a cache read. Chat already gets
+    # this via _prepare_chat_send_payload; we deliberately don't reuse
+    # that helper here because journal expansion is chat-specific.
+    system_blocks: list[dict] | None = None
+    if system_prompt:
+        system_blocks = [{"text": system_prompt, "cache_break_after": True, "ttl": "1h"}]
+
     result = ai_providers.chat(
         provider_name=resolved.provider,
         model=resolved.model,
@@ -1091,6 +1179,8 @@ async def ai_generate(request: AIGenerateRequest) -> AIGenerateResponse:
         temperature=resolved.temperature,
         settings=settings,
         policy=policy,
+        system_blocks=system_blocks,
+        session_id=session_id,
     )
     truncated = result.stop_reason in {"max_tokens", "length"}
     usage_wire, cost_usd = await _usage_and_cost(
@@ -1306,6 +1396,13 @@ async def ai_generate_stream(request: AIGenerateRequest) -> StreamingResponse:
     descriptor = await ai_tokens.descriptor_for(
         provider=resolved.provider, model=resolved.model, settings=settings
     )
+    # Same cache-marker treatment as the non-streaming path above. Keep
+    # both endpoints in sync — divergence here would mean cache hits in
+    # one mode and not the other.
+    system_blocks: list[dict] | None = None
+    if system_prompt:
+        system_blocks = [{"text": system_prompt, "cache_break_after": True, "ttl": "1h"}]
+
     events = ai_providers.chat_stream(
         provider_name=resolved.provider,
         model=resolved.model,
@@ -1316,6 +1413,8 @@ async def ai_generate_stream(request: AIGenerateRequest) -> StreamingResponse:
         thinking_enabled=resolved.thinking_enabled,
         settings=settings,
         policy=policy,
+        system_blocks=system_blocks,
+        session_id=session_id,
     )
     return StreamingResponse(
         _stream_provider_events(

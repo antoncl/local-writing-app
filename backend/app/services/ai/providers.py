@@ -195,7 +195,7 @@ def chat(
     max_tokens: int,
     settings: MachineSettings,
     policy: AIPolicy,
-    temperature: float = 0.7,
+    temperature: float | None = None,
     system_blocks: list[dict] | None = None,
     session_id: str | None = None,
 ) -> ChatResult:
@@ -361,7 +361,8 @@ def _extract_usage_for_provider(
 
 def _anthropic_chat(
     *, api_key: str, model: str, system_prompt: str,
-    messages: list[dict[str, str]], max_tokens: int, temperature: float = 0.7,
+    messages: list[dict[str, str]], max_tokens: int,
+    temperature: float | None = None,
     system_blocks: list[dict] | None = None,
 ) -> tuple[str, str | None, Any]:
     """Returns (content, stop_reason, raw_response). Caller extracts
@@ -373,13 +374,20 @@ def _anthropic_chat(
     except ImportError as exc:
         raise _ProviderError(f"anthropic package not installed: {exc}") from exc
 
+    from app.services.ai.profiles.anthropic import anthropic_supports_temperature
+
     client = Anthropic(api_key=api_key, timeout=120.0)
     kwargs: dict = {
         "model": model,
         "max_tokens": max_tokens,
-        "temperature": temperature,
         "messages": messages,
     }
+    # Only send temperature if the caller set one AND the model accepts it.
+    # The model gate is a backstop for legacy assistants that pre-date the
+    # save-time validation; new assistants with an incompatible combo are
+    # refused at save and shouldn't reach here.
+    if temperature is not None and anthropic_supports_temperature(model):
+        kwargs["temperature"] = temperature
     # system_blocks (multi-block with per-block cache markers) overrides
     # the legacy single-string system_prompt. Caller picks one or the other.
     if system_blocks:
@@ -461,7 +469,8 @@ def _openrouter_extra_body(session_id: str | None) -> dict:
 
 def _openrouter_chat(
     *, api_key: str, model: str, system_prompt: str,
-    messages: list[dict[str, str]], max_tokens: int, temperature: float = 0.7,
+    messages: list[dict[str, str]], max_tokens: int,
+    temperature: float | None = None,
     system_blocks: list[dict] | None = None,
     caching_style: str = "none",
     session_id: str | None = None,
@@ -489,9 +498,10 @@ def _openrouter_chat(
     kwargs: dict = {
         "model": model,
         "max_tokens": max_tokens,
-        "temperature": temperature,
         "messages": full_messages,
     }
+    if temperature is not None:
+        kwargs["temperature"] = temperature
     if extra_body:
         kwargs["extra_body"] = extra_body
     response = client.chat.completions.create(**kwargs)
@@ -503,7 +513,7 @@ def _openrouter_chat(
 def _openrouter_chat_stream(
     *, api_key: str, model: str, system_prompt: str,
     messages: list[dict[str, str]], max_tokens: int, requires_key: bool,
-    temperature: float = 0.7,
+    temperature: float | None = None,
     system_blocks: list[dict] | None = None,
     caching_style: str = "none",
     session_id: str | None = None,
@@ -527,7 +537,6 @@ def _openrouter_chat_stream(
     kwargs: dict = {
         "model": model,
         "max_tokens": max_tokens,
-        "temperature": temperature,
         "messages": full_messages,
         "stream": True,
         # Ask the OpenAI-compatible endpoint to send a final usage chunk.
@@ -535,6 +544,8 @@ def _openrouter_chat_stream(
         # forwards it. Without this, the streaming path never sees usage.
         "stream_options": {"include_usage": True},
     }
+    if temperature is not None:
+        kwargs["temperature"] = temperature
     if extra_body:
         kwargs["extra_body"] = extra_body
     stop_reason: str | None = None
@@ -564,7 +575,7 @@ def _openrouter_chat_stream(
 def _openai_compatible_chat(
     *, base_url: str, api_key: str, model: str, system_prompt: str,
     messages: list[dict[str, str]], max_tokens: int, requires_key: bool,
-    temperature: float = 0.7,
+    temperature: float | None = None,
 ) -> tuple[str, str | None, Any]:
     """Returns (content, stop_reason, raw_response). Caller extracts
     usage via the appropriate ProviderProfile for the originating
@@ -581,12 +592,14 @@ def _openai_compatible_chat(
     if system_prompt:
         full_messages.append({"role": "system", "content": system_prompt})
     full_messages.extend(messages)
-    response = client.chat.completions.create(
-        model=model,
-        max_tokens=max_tokens,
-        temperature=temperature,
-        messages=full_messages,
-    )
+    kwargs: dict = {
+        "model": model,
+        "max_tokens": max_tokens,
+        "messages": full_messages,
+    }
+    if temperature is not None:
+        kwargs["temperature"] = temperature
+    response = client.chat.completions.create(**kwargs)
     choice = response.choices[0]
     stop_reason = getattr(choice, "finish_reason", None)
     return choice.message.content or "", stop_reason, response
@@ -717,7 +730,7 @@ def chat_stream(
     max_tokens: int,
     settings: MachineSettings,
     policy: AIPolicy,
-    temperature: float = 0.7,
+    temperature: float | None = None,
     thinking_enabled: bool = False,
     system_blocks: list[dict] | None = None,
     session_id: str | None = None,
@@ -841,7 +854,8 @@ def chat_stream(
 
 def _anthropic_chat_stream(
     *, api_key: str, model: str, system_prompt: str,
-    messages: list[dict[str, str]], max_tokens: int, temperature: float = 0.7,
+    messages: list[dict[str, str]], max_tokens: int,
+    temperature: float | None = None,
     thinking_enabled: bool = False,
     system_blocks: list[dict] | None = None,
 ) -> Iterator[StreamDelta | StreamThinking | _StreamFinal]:
@@ -861,13 +875,17 @@ def _anthropic_chat_stream(
     except ImportError as exc:
         raise _ProviderError(f"anthropic package not installed: {exc}") from exc
 
+    from app.services.ai.profiles.anthropic import anthropic_supports_temperature
+
     client = Anthropic(api_key=api_key, timeout=120.0)
+    temp_ok = anthropic_supports_temperature(model)
     kwargs: dict = {
         "model": model,
         "max_tokens": max_tokens,
-        "temperature": temperature,
         "messages": messages,
     }
+    if temperature is not None and temp_ok:
+        kwargs["temperature"] = temperature
     if system_blocks:
         system_payload = _anthropic_system_blocks(system_blocks)
         if system_payload:
@@ -878,8 +896,10 @@ def _anthropic_chat_stream(
         budget = max(1024, min(_ANTHROPIC_THINKING_BUDGET, max_tokens - 256))
         if budget >= 1024:
             kwargs["thinking"] = {"type": "enabled", "budget_tokens": budget}
-            # Anthropic requires temperature=1 when thinking is enabled.
-            kwargs["temperature"] = 1.0
+            # Anthropic requires temperature=1 when thinking is enabled —
+            # but only on models that still accept the parameter at all.
+            if temp_ok:
+                kwargs["temperature"] = 1.0
     stop_reason: str | None = None
     final_message: Any = None
     with client.messages.stream(**kwargs) as stream:
@@ -905,7 +925,7 @@ def _anthropic_chat_stream(
 def _openai_compatible_chat_stream(
     *, base_url: str, api_key: str, model: str, system_prompt: str,
     messages: list[dict[str, str]], max_tokens: int, requires_key: bool,
-    temperature: float = 0.7,
+    temperature: float | None = None,
     provider_name: str = "openai",
 ) -> Iterator[StreamDelta | StreamThinking | _StreamFinal]:
     """`provider_name` selects the response-shape parser for usage extraction.
@@ -923,15 +943,17 @@ def _openai_compatible_chat_stream(
     if system_prompt:
         full_messages.append({"role": "system", "content": system_prompt})
     full_messages.extend(messages)
-    stream = client.chat.completions.create(
-        model=model,
-        max_tokens=max_tokens,
-        temperature=temperature,
-        messages=full_messages,
-        stream=True,
+    create_kwargs: dict = {
+        "model": model,
+        "max_tokens": max_tokens,
+        "messages": full_messages,
+        "stream": True,
         # Final chunk carries .usage when this is set.
-        stream_options={"include_usage": True},
-    )
+        "stream_options": {"include_usage": True},
+    }
+    if temperature is not None:
+        create_kwargs["temperature"] = temperature
+    stream = client.chat.completions.create(**create_kwargs)
     splitter = _ThinkTagSplitter()
     stop_reason: str | None = None
     final_chunk: Any = None

@@ -205,7 +205,9 @@ def _migrate_default_models_to_files_if_empty(settings: MachineSettings) -> None
         metadata: dict[str, Any] = {
             "ai_provider": provider,
             "ai_model": model,
-            "ai_temperature": 0.7,
+            # Intentionally no `ai_temperature` — let the provider apply its
+            # own default unless the user sets one explicitly. Some newer
+            # models (e.g. claude-opus-4-7) reject an explicit temperature.
             "ai_max_tokens": 4096,
         }
         if provider == settings.default_provider:

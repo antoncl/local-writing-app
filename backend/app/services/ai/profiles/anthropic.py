@@ -28,6 +28,23 @@ from app.services.ai.profiles.base import (
 log = logging.getLogger(__name__)
 
 
+# Model-id prefixes whose API rejects `temperature` with a 400. Add to
+# this tuple as new families adopt the same constraint.
+_NO_TEMPERATURE_PREFIXES: tuple[str, ...] = (
+    "claude-opus-4-7",
+    "claude-opus-4-8",
+)
+
+
+def anthropic_supports_temperature(model_id: str) -> bool:
+    """Module-level twin of `AnthropicProfile.supports_temperature` so the
+    provider call sites in providers.py can check without instantiating a
+    profile (which would need an api_key). Both delegate to the same
+    prefix list above.
+    """
+    return not any(model_id.startswith(p) for p in _NO_TEMPERATURE_PREFIXES)
+
+
 class AnthropicProfile(ProviderProfile):
     name = "anthropic"
     display_name = "Anthropic"
@@ -91,6 +108,9 @@ class AnthropicProfile(ProviderProfile):
         # enough for budgeting. Swap to the SDK counter if accuracy becomes
         # a real complaint.
         return default_token_count(text)
+
+    def supports_temperature(self, model_id: str) -> bool:
+        return anthropic_supports_temperature(model_id)
 
     def extract_usage(self, raw_response: Any, model_id: str) -> UsageMetrics:
         # Anthropic's response.usage:

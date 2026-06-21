@@ -193,6 +193,23 @@ class ProviderProfile(ABC):
         fields default to 0 — never raise on a malformed `usage` block.
         """
 
+    def supports_temperature(self, model_id: str) -> bool:
+        """Whether the model accepts a `temperature` parameter on the
+        request. Default True — override for models that 400 on it (e.g.
+        Anthropic's Opus 4.7+ deprecates the param). Call sites should
+        omit `temperature` from the request kwargs when this returns False.
+        """
+        return True
+
+    def requires_temperature(self, model_id: str) -> bool:
+        """Whether the model's API rejects requests that omit `temperature`.
+        Default False — most APIs supply a sensible server-side default
+        when the parameter is absent. Override only for models that 400
+        on missing temp. Save-time validation refuses assistants without
+        an explicit temperature when this returns True for their model.
+        """
+        return False
+
     def model_for_tier(
         self, tier: CapabilityTier, models: list[ModelDescriptor]
     ) -> str | None:

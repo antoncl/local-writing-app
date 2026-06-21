@@ -12,6 +12,7 @@ import type {
   AIPolicy,
   AIPreviewRequest,
   AIPreviewResponse,
+  ChatUsage,
   BacklinksResponse,
   ProjectCostResponse,
   ChatSession,
@@ -122,6 +123,8 @@ export type AIStreamEvent =
       policy: string;
       session_id?: string;
       char_count?: number;
+      usage?: ChatUsage | null;
+      cost_usd?: number | null;
     }
   | {
       type: "error";

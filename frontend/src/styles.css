@@ -1237,6 +1237,24 @@ h3 {
 .editor-hint {
   color: #74817b;
   font-size: 12px;
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 12px;
+}
+.editor-hint-text {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+/* V2: persistent per-scene continuation cost rollup. Frontend-only —
+   resets on reload / scene switch; Phase C will back it with server-side
+   persistence. Sits opposite the hint text so it's always findable. */
+.continuation-cost-chip {
+  color: var(--color-muted, #888);
+  font-size: 11px;
+  white-space: nowrap;
+  cursor: default;
+  flex: 0 0 auto;
 }
 
 .scene-metadata {

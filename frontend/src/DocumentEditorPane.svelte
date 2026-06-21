@@ -20,7 +20,7 @@
   import { api, HttpError } from "./api";
   import { formatCostEur, formatTokens } from "./money";
   import PromptInputField from "./PromptInputField.svelte";
-  import type { AIPreviewResponse, AssistantEntrySummary, Backlink, EditableDocument, EntryBodyLanguage, EntryMetadata, MetadataFieldDefinition, MetadataSchema, MetadataValue, PromptEntrySummary, PromptInputDefinition } from "./types";
+  import type { AIPreviewResponse, AssistantEntrySummary, Backlink, ChatUsage, EditableDocument, EntryBodyLanguage, EntryMetadata, MetadataFieldDefinition, MetadataSchema, MetadataValue, PromptEntrySummary, PromptInputDefinition } from "./types";
 
   export let scene: EditableDocument | null = null;
   export let documentKind: "scene" | "lore" | "prompt" | "snippet" | "assistant" | "project" = "scene";
@@ -205,7 +205,23 @@
   let aiGenerating = false;
   let aiError: string | null = null;
   let aiSuggestionId: string | null = null;
-  let aiSuggestionMeta: { provider: string; model: string; latency_ms: number; truncated: boolean; wordCount: number } | null = null;
+  let aiSuggestionMeta: {
+    provider: string;
+    model: string;
+    latency_ms: number;
+    truncated: boolean;
+    wordCount: number;
+    usage?: ChatUsage | null;
+    cost_usd?: number | null;
+  } | null = null;
+  // V2: per-scene continuation cost rollup. Frontend-only — resets when
+  // you switch scenes or reload the page. Phase C will add server-side
+  // persistence (a scene-level `cost_usd_total` mirroring ChatSession's).
+  // The diff-review toolbar's cost line disappears the moment you Accept,
+  // so without this chip the cost would never have a lasting home.
+  let lastInvocationCostUsd: number | null = null;
+  let sceneSessionCostUsd = 0;
+  let lastSeenSceneIdForCost: string | null = null;
   let aiToolbarPosition: { x: number; y: number; visible: boolean } = { x: 0, y: 0, visible: false };
   let aiNextSuggestionId = 1;
   // For revisions: the original selected text to restore on discard. null for continuations.
@@ -221,6 +237,18 @@
   // "" means: use the user's default assistant (resolved server-side).
   let inputsDialogAssistantId: string = "";
   let lastInvokedAssistantId: string = "";
+  // V2: token + cost estimate for the about-to-fire continuation. Mirrors
+  // App.svelte's `chatEstimate`. Recomputed when the dialog's prompt /
+  // drafts / assistant change. Null when the dialog is closed.
+  let inputsDialogEstimate: {
+    tokens: number;
+    cost_usd: number | null;
+    caching_style: "none" | "auto" | "explicit" | null;
+    cache_blocks: { label: string; tokens: number; cache_break_after: boolean }[];
+  } | null = null;
+  // Stale-response guard: bump on every fetch, discard any earlier in-flight
+  // response whose token doesn't match the latest.
+  let inputsDialogEstimateToken = 0;
 
   // --- Per-entry prompt inputs editor (declaration side) ---
   // Inputs live on the entry now, not the entry-type. The drafts here are the
@@ -631,6 +659,18 @@
   );
   $: hasBody = activeEntryType?.has_body ?? true;
   $: metadataSummaryText = buildMetadataSummary(activeEntryType?.name ?? entryType, status, liveWordCount, hasBody);
+
+  // Reset the per-scene cost tally when the active scene changes. Reading
+  // scene?.id directly so Svelte tracks the dependency
+  // ([[feedback-svelte5-reactivity-traps]] — function calls in `$:` don't).
+  $: {
+    const currentSceneId = scene?.id ?? null;
+    if (lastSeenSceneIdForCost !== currentSceneId) {
+      lastSeenSceneIdForCost = currentSceneId;
+      sceneSessionCostUsd = 0;
+      lastInvocationCostUsd = null;
+    }
+  }
 
   $: if (metadataReload && metadataReload.token !== lastMetadataReloadToken) {
     lastMetadataReloadToken = metadataReload.token;
@@ -1508,6 +1548,55 @@
     inputsDialogDrafts = { ...inputsDialogDrafts, [name]: value };
   }
 
+  async function fetchInputsDialogEstimate(): Promise<void> {
+    const entry = inputsDialogEntry;
+    if (!entry) {
+      inputsDialogEstimate = null;
+      return;
+    }
+    const ourToken = ++inputsDialogEstimateToken;
+    const declared = effectivePromptInputs(entry);
+    const inputs: Record<string, unknown> = {};
+    for (const input of declared) {
+      const raw = inputsDialogDrafts[input.name] ?? "";
+      const coerced = coerceInputValue(raw, input.type);
+      if (coerced !== null && coerced !== "") inputs[input.name] = coerced;
+    }
+    try {
+      const preview = await api.aiPreview({
+        template_source: entry.body_markdown,
+        target_scene_id: scene?.id ?? "",
+        inputs,
+        commit: false,
+        assistant_id: inputsDialogAssistantId || null,
+      });
+      if (ourToken !== inputsDialogEstimateToken) return;
+      inputsDialogEstimate = {
+        tokens: preview.estimated_tokens ?? 0,
+        cost_usd: preview.estimated_cost_usd ?? null,
+        caching_style: preview.caching_style ?? null,
+        cache_blocks: (preview.cache_blocks ?? []).map((b) => ({
+          label: b.label,
+          tokens: b.tokens,
+          cache_break_after: b.cache_break_after,
+        })),
+      };
+    } catch {
+      // Render errors surface when the user runs; keep the strip quiet
+      // rather than flickering an error here.
+    }
+  }
+
+  // Reactive trigger: refetch when the dialog's prompt / drafts / assistant
+  // change. Per [[feedback-svelte5-reactivity-traps]], read each dep on its
+  // own line so Svelte tracks them — a function call alone wouldn't.
+  $: {
+    void inputsDialogEntry;
+    void inputsDialogDrafts;
+    void inputsDialogAssistantId;
+    void fetchInputsDialogEstimate();
+  }
+
   function coerceInputValue(raw: string, type: PromptInputDefinition["type"]): unknown {
     const trimmed = raw.trim();
     if (type === "number") {
@@ -1671,7 +1760,14 @@
     let startPos = from;
     let streamingActive = false;
     let accumulated = "";
-    let lastMeta: { provider: string; model: string; latency_ms: number; truncated: boolean } | null = null;
+    let lastMeta: {
+      provider: string;
+      model: string;
+      latency_ms: number;
+      truncated: boolean;
+      usage?: ChatUsage | null;
+      cost_usd?: number | null;
+    } | null = null;
     let streamErrored = false;
 
     const ensureStreamingStarted = () => {
@@ -1717,6 +1813,8 @@
             model: ev.model,
             latency_ms: ev.latency_ms,
             truncated: ev.truncated,
+            usage: ev.usage ?? null,
+            cost_usd: ev.cost_usd ?? null,
           };
         } else if (ev.type === "error") {
           aiError = ev.error || "Unknown error";
@@ -1755,7 +1853,13 @@
             latency_ms: lastMeta.latency_ms,
             truncated: lastMeta.truncated,
             wordCount: countWords(accumulated),
+            usage: lastMeta.usage,
+            cost_usd: lastMeta.cost_usd,
           };
+          if (typeof lastMeta.cost_usd === "number") {
+            lastInvocationCostUsd = lastMeta.cost_usd;
+            sceneSessionCostUsd += lastMeta.cost_usd;
+          }
           aiAnchorPos = null;
         }
       }
@@ -2509,11 +2613,7 @@
         description: "Pick the size, then click to insert.",
         run: () => openTableGrid(),
       },
-      ...[
-        ...promptEntriesForSurface("append_to_body"),
-        ...promptEntriesForSurface("chat_panel"),
-      ]
-        .sort((a, b) => a.title.localeCompare(b.title, undefined, { sensitivity: "base" }))
+      ...promptEntriesForSurface("append_to_body")
         .map((entry) => ({
           group: "AI",
           label: entry.title,
@@ -2537,12 +2637,19 @@
         </label>
       </div>
       <div class="editor-hint">
-        {#if todoStatusHint}
-          {todoStatusHint}
-        {:else if editorEmpty}
-          {documentKind === "scene" ? "Start writing, or type / for commands." : "Start writing."}
-        {:else}
-          {documentKind === "scene" ? "Select text for formatting. Type / on an empty line for insert commands." : "Select text for formatting."}
+        <span class="editor-hint-text">
+          {#if todoStatusHint}
+            {todoStatusHint}
+          {:else if editorEmpty}
+            {documentKind === "scene" ? "Start writing, or type / for commands." : "Start writing."}
+          {:else}
+            {documentKind === "scene" ? "Select text for formatting. Type / on an empty line for insert commands." : "Select text for formatting."}
+          {/if}
+        </span>
+        {#if documentKind === "scene" && lastInvocationCostUsd != null}
+          <span class="continuation-cost-chip" title="Last continuation invocation cost · running total for this scene this session. Resets on reload or scene switch.">
+            last {formatCostEur(lastInvocationCostUsd)} · session {formatCostEur(sceneSessionCostUsd)}
+          </span>
         {/if}
       </div>
       {#if metadataSchema}
@@ -2783,6 +2890,17 @@
           {#if aiSuggestionMeta}
             <span class="ai-toolbar-meta">
               {aiSuggestionMeta.wordCount} words, {aiSuggestionMeta.model}{#if aiSuggestionMeta.truncated} · truncated{/if}
+              {#if aiSuggestionMeta.usage}
+                {@const u = aiSuggestionMeta.usage}
+                {@const totalIn = u.input_tokens + u.cached_input_tokens + u.cache_write_tokens}
+                {@const cachePct = totalIn > 0 ? Math.round((u.cached_input_tokens / totalIn) * 100) : 0}
+                <span class="ai-toolbar-meta-sep" title={`Input: ${totalIn} tok (${u.cached_input_tokens} cached, ${u.cache_write_tokens} written). Output: ${u.output_tokens} tok.`}>
+                  · {totalIn} → {u.output_tokens} tok{#if cachePct > 0} · {cachePct}% cached{/if}
+                </span>
+              {/if}
+              {#if aiSuggestionMeta.cost_usd != null}
+                <span class="ai-toolbar-meta-cost">· {formatCostEur(aiSuggestionMeta.cost_usd)}</span>
+              {/if}
             </span>
           {/if}
         {/if}
@@ -3235,6 +3353,22 @@
           </select>
         </label>
       </div>
+      {#if inputsDialogEstimate}
+        <div class="chat-estimate-strip" title="Estimated input cost for this continuation. Output cost depends on the response.">
+          <span class="chat-estimate-tokens">{formatTokens(inputsDialogEstimate.tokens)} tok</span>
+          {#if inputsDialogEstimate.cost_usd != null}
+            <span class="chat-estimate-sep">·</span>
+            <span class="chat-estimate-cost">{formatCostEur(inputsDialogEstimate.cost_usd)}</span>
+          {/if}
+          {#if inputsDialogEstimate.caching_style === "explicit" && inputsDialogEstimate.cache_blocks.length > 1}
+            <span class="chat-estimate-sep">·</span>
+            {#each inputsDialogEstimate.cache_blocks as block, i}
+              <span class="chat-estimate-chip">{block.label} {formatTokens(block.tokens)}</span>
+              {#if i < inputsDialogEstimate.cache_blocks.length - 1}<span class="chat-estimate-sep">·</span>{/if}
+            {/each}
+          {/if}
+        </div>
+      {/if}
       <div class="inputs-dialog-actions">
         <button type="button" on:click={cancelInputsDialog}>Cancel</button>
         <button type="button" class="primary" on:click={submitInputsDialog}>Run</button>

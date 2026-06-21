@@ -1,8 +1,9 @@
 """Provider profiles for live model discovery and capability-tier resolution.
 
 Each concrete profile knows how to list its provider's models, declare
-caching behaviour per model, and resolve a tier (Fast/Balanced/Premium/
-Reasoning/Local) to a concrete model id.
+caching behaviour per model, count tokens for pre-send estimates,
+extract normalized usage from response objects, and resolve a tier
+(Fast/Balanced/Premium/Reasoning/Local) to a concrete model id.
 
 The registry maps provider names to profile instances and is the single
 entry point used by the rest of the app.
@@ -13,6 +14,9 @@ from app.services.ai.profiles.base import (
     CapabilityTier,
     ModelDescriptor,
     ProviderProfile,
+    UsageMetrics,
+    compute_cost,
+    default_token_count,
 )
 
 __all__ = [
@@ -20,4 +24,7 @@ __all__ = [
     "CapabilityTier",
     "ModelDescriptor",
     "ProviderProfile",
+    "UsageMetrics",
+    "compute_cost",
+    "default_token_count",
 ]

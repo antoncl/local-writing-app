@@ -12,12 +12,16 @@ import logging
 
 import httpx
 
+from typing import Any
+
 from app.services.ai.profiles._loader import baked_in_for, mark_deprecated
 from app.services.ai.profiles.base import (
     CachingStyle,
     CapabilityTier,
     ModelDescriptor,
     ProviderProfile,
+    UsageMetrics,
+    default_token_count,
 )
 
 
@@ -79,3 +83,27 @@ class AnthropicProfile(ProviderProfile):
         # `cache_control: ephemeral`. We don't gate per-model because every
         # production model in the bake-in supports it.
         return "explicit"
+
+    def count_tokens(self, text: str, model_id: str) -> int:
+        # Anthropic's SDK has an async count_tokens endpoint that's accurate
+        # but requires a network roundtrip per call. Pre-send estimates want
+        # a sync answer fast; cl100k_base is ~5-10% off for Claude but close
+        # enough for budgeting. Swap to the SDK counter if accuracy becomes
+        # a real complaint.
+        return default_token_count(text)
+
+    def extract_usage(self, raw_response: Any, model_id: str) -> UsageMetrics:
+        # Anthropic's response.usage:
+        #   input_tokens (excludes cache reads/writes — fresh full-rate input)
+        #   cache_creation_input_tokens (written this call)
+        #   cache_read_input_tokens (served from cache, discounted)
+        #   output_tokens
+        usage = getattr(raw_response, "usage", None)
+        if usage is None:
+            return UsageMetrics()
+        return UsageMetrics(
+            input_tokens=int(getattr(usage, "input_tokens", 0) or 0),
+            cached_input_tokens=int(getattr(usage, "cache_read_input_tokens", 0) or 0),
+            cache_write_tokens=int(getattr(usage, "cache_creation_input_tokens", 0) or 0),
+            output_tokens=int(getattr(usage, "output_tokens", 0) or 0),
+        )

@@ -4,6 +4,7 @@ import unittest
 from pathlib import Path
 from tempfile import TemporaryDirectory
 from unittest.mock import patch
+from types import SimpleNamespace
 
 from fastapi.testclient import TestClient
 
@@ -64,7 +65,7 @@ class ChatEndpointTests(unittest.TestCase):
         self._allow_cloud()
         loaded = _set_machine_keys(anthropic="sk-ant-test", default_provider="anthropic")
         with patch("app.services.machine_settings.load_settings", return_value=loaded), \
-             patch("app.services.ai.providers._anthropic_chat", return_value=("Hello back.", "end_turn")):
+             patch("app.services.ai.providers._anthropic_chat", return_value=("Hello back.", "end_turn", SimpleNamespace())):
             response = self.client.post(
                 "/api/ai/chat",
                 json={
@@ -89,7 +90,7 @@ class ChatEndpointTests(unittest.TestCase):
         with patch("app.services.machine_settings.load_settings", return_value=loaded), \
              patch(
                 "app.services.ai.providers._openai_compatible_chat",
-                return_value=("Local reply.", "stop"),
+                return_value=("Local reply.", "stop", SimpleNamespace()),
             ) as mock_chat:
             response = self.client.post(
                 "/api/ai/chat",
@@ -114,7 +115,7 @@ class ChatEndpointTests(unittest.TestCase):
         with patch("app.services.machine_settings.load_settings", return_value=loaded), \
              patch(
                 "app.services.ai.providers._anthropic_chat",
-                return_value=("Third reply.", "end_turn"),
+                return_value=("Third reply.", "end_turn", SimpleNamespace()),
             ) as mock_chat:
             self.client.post(
                 "/api/ai/chat",
@@ -180,7 +181,7 @@ class ChatEndpointTests(unittest.TestCase):
         with patch("app.services.machine_settings.load_settings", return_value=loaded), \
              patch(
                 "app.services.ai.providers._openai_compatible_chat",
-                return_value=("OK.", "stop"),
+                return_value=("OK.", "stop", SimpleNamespace()),
             ):
             response = self.client.post(
                 "/api/ai/chat",
@@ -248,7 +249,7 @@ class ChatEndpointTests(unittest.TestCase):
         with patch("app.services.machine_settings.load_settings", return_value=loaded), \
              patch(
                 "app.services.ai.providers._anthropic_chat",
-                return_value=("partial response that hit the cap", "max_tokens"),
+                return_value=("partial response that hit the cap", "max_tokens", SimpleNamespace()),
             ):
             response = self.client.post(
                 "/api/ai/chat",
@@ -269,7 +270,7 @@ class ChatEndpointTests(unittest.TestCase):
         with patch("app.services.machine_settings.load_settings", return_value=loaded), \
              patch(
                 "app.services.ai.providers._anthropic_chat",
-                return_value=("complete reply", "end_turn"),
+                return_value=("complete reply", "end_turn", SimpleNamespace()),
             ):
             response = self.client.post(
                 "/api/ai/chat",
@@ -289,7 +290,7 @@ class ChatEndpointTests(unittest.TestCase):
         with patch("app.services.machine_settings.load_settings", return_value=loaded), \
              patch(
                 "app.services.ai.providers._openai_compatible_chat",
-                return_value=("default-provider reply", "stop"),
+                return_value=("default-provider reply", "stop", SimpleNamespace()),
             ):
             response = self.client.post(
                 "/api/ai/chat",
@@ -341,7 +342,7 @@ class ChatStreamEndpointTests(unittest.TestCase):
         def fake_anthropic_stream(**_kwargs):
             yield ai_providers.StreamDelta(text="Hello, ")
             yield ai_providers.StreamDelta(text="world!")
-            yield "end_turn"
+            yield ai_providers._StreamFinal(stop_reason="end_turn")
 
         with patch("app.services.machine_settings.load_settings", return_value=loaded), \
              patch("app.services.ai.providers._anthropic_chat_stream", side_effect=fake_anthropic_stream):
@@ -396,7 +397,7 @@ class ChatStreamEndpointTests(unittest.TestCase):
             yield ai_providers.StreamThinking(text="Let me think… ")
             yield ai_providers.StreamThinking(text="OK.")
             yield ai_providers.StreamDelta(text="Hi!")
-            yield "end_turn"
+            yield ai_providers._StreamFinal(stop_reason="end_turn")
 
         # Create an assistant with ai_thinking enabled so the resolver
         # plumbs thinking_enabled=True. The provider mock doesn't care, but
@@ -451,7 +452,7 @@ class ChatStreamEndpointTests(unittest.TestCase):
 
         def fake_stream(**_kwargs):
             yield ai_providers.StreamDelta(text="partial")
-            yield "max_tokens"
+            yield ai_providers._StreamFinal(stop_reason="max_tokens")
 
         with patch("app.services.machine_settings.load_settings", return_value=loaded), \
              patch("app.services.ai.providers._anthropic_chat_stream", side_effect=fake_stream):
@@ -545,7 +546,7 @@ class ChatEndpointJournalTests(unittest.TestCase):
         with patch("app.services.machine_settings.load_settings", return_value=loaded), \
              patch(
                 "app.services.ai.providers._anthropic_chat",
-                return_value=("Reply.", "end_turn"),
+                return_value=("Reply.", "end_turn", SimpleNamespace()),
              ) as mock_chat:
             response = self.client.post(
                 "/api/ai/chat",
@@ -596,7 +597,7 @@ class ChatEndpointJournalTests(unittest.TestCase):
         with patch("app.services.machine_settings.load_settings", return_value=loaded), \
              patch(
                 "app.services.ai.providers._anthropic_chat",
-                return_value=("Reply.", "end_turn"),
+                return_value=("Reply.", "end_turn", SimpleNamespace()),
              ) as mock_chat:
             response = self.client.post(
                 "/api/ai/chat",
@@ -621,7 +622,7 @@ class ChatEndpointJournalTests(unittest.TestCase):
         with patch("app.services.machine_settings.load_settings", return_value=loaded), \
              patch(
                 "app.services.ai.providers._anthropic_chat",
-                return_value=("OK.", "end_turn"),
+                return_value=("OK.", "end_turn", SimpleNamespace()),
              ):
             self.client.post(
                 "/api/ai/chat",
@@ -640,7 +641,7 @@ class ChatEndpointJournalTests(unittest.TestCase):
         with patch("app.services.machine_settings.load_settings", return_value=loaded), \
              patch(
                 "app.services.ai.providers._anthropic_chat",
-                return_value=("OK.", "end_turn"),
+                return_value=("OK.", "end_turn", SimpleNamespace()),
              ):
             response = self.client.post(
                 "/api/ai/chat",

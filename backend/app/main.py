@@ -17,6 +17,9 @@ from app.models import (
     AIContextPresetResponse,
     AIGenerateRequest,
     AIGenerateResponse,
+    ChatUsage,
+    ProjectCostChatRow,
+    ProjectCostResponse,
     AssistantEntry,
     AssistantEntryList,
     AIHealthRequest,
@@ -32,6 +35,7 @@ from app.models import (
     ChatSessionList,
     CreateChatSessionRequest,
     SaveChatSessionRequest,
+    PreviewCacheBlock,
     PreviewContentBlock,
     PreviewMessage,
     BacklinksResponse,
@@ -85,6 +89,7 @@ from app.models import (
 )
 from app.services import machine_settings as machine_settings_service
 from app.services.ai import providers as ai_providers
+from app.services.ai import tokens as ai_tokens
 from app.services.ai.preview import PreviewError, build_chat_payload, build_preview
 from app.services.ai.profiles import CapabilityTier, ModelDescriptor
 from app.services.ai.profiles.registry import known_provider_names, profile_for
@@ -704,7 +709,7 @@ async def resolve_ai_provider_tier(
 
 
 @app.post("/api/ai/preview", response_model=AIPreviewResponse)
-def ai_preview(request: AIPreviewRequest) -> AIPreviewResponse:
+async def ai_preview(request: AIPreviewRequest) -> AIPreviewResponse:
     with translate_errors():
         # `current_project` raises ProjectServiceError if no project is open;
         # translate_errors handles that. Preview itself raises PreviewError for
@@ -738,12 +743,107 @@ def ai_preview(request: AIPreviewRequest) -> AIPreviewResponse:
         for m in rendered.messages
     ]
     char_count = sum(len(b.text) for m in messages for b in m.blocks)
+
+    # ----- Token + cost estimate (V2) ---------------------------------
+    settings = machine_settings_service.load_settings()
+    provider: str | None = None
+    model: str | None = None
+    caching_style: str | None = None
+    descriptor: ModelDescriptor | None = None
+    if request.assistant_id is not None:
+        resolved = _resolve_call_params(
+            settings,
+            assistant_id=request.assistant_id,
+            provider_override=None,
+            model_override=None,
+            max_tokens_override=None,
+        )
+        provider = resolved.provider or None
+        model = resolved.model or None
+        if provider:
+            try:
+                profile = profile_for(provider, settings)
+                caching_style = profile.caching_style(model or "")
+            except ValueError:
+                caching_style = None
+        if provider and model:
+            descriptor = await ai_tokens.descriptor_for(
+                provider=provider, model=model, settings=settings
+            )
+
+    # Group blocks into "cache segments" — each ending at a
+    # cache_break_after marker (or at the end of the message). One segment
+    # ≈ one ephemeral cache slot from the dispatch layer's perspective.
+    cache_blocks: list[PreviewCacheBlock] = []
+    counter_provider = provider or "anthropic"  # tokenizer choice is identical across providers in v1
+    for message in messages:
+        current_texts: list[str] = []
+        segment_index_in_message = 0
+        for block in message.blocks:
+            current_texts.append(block.text)
+            if block.cache_break_after:
+                segment_index_in_message += 1
+                segment_text = "".join(current_texts)
+                cache_blocks.append(
+                    PreviewCacheBlock(
+                        label=f"{message.role} block {segment_index_in_message}",
+                        role=message.role,
+                        tokens=ai_tokens.count_tokens(
+                            segment_text,
+                            provider=counter_provider,
+                            model=model or "",
+                            settings=settings,
+                        ),
+                        cache_break_after=True,
+                    )
+                )
+                current_texts = []
+        if current_texts:
+            # Trailing run with no terminating marker — the "tail" of the
+            # message. Counts the same way but is_cache=false in spirit.
+            segment_index_in_message += 1
+            tail_text = "".join(current_texts)
+            label = (
+                f"{message.role} tail"
+                if segment_index_in_message > 1 or len(message.blocks) > 1
+                else f"{message.role}"
+            )
+            cache_blocks.append(
+                PreviewCacheBlock(
+                    label=label,
+                    role=message.role,
+                    tokens=ai_tokens.count_tokens(
+                        tail_text,
+                        provider=counter_provider,
+                        model=model or "",
+                        settings=settings,
+                    ),
+                    cache_break_after=False,
+                )
+            )
+
+    estimated_tokens = sum(b.tokens for b in cache_blocks)
+    estimated_cost_usd: float | None = None
+    if descriptor is not None:
+        cost = ai_tokens.estimate_input_cost(estimated_tokens, descriptor)
+        # Distinguish "no pricing known" (None) from "pricing known, zero
+        # tokens" (0.0). When descriptor exists but cost is 0, that means
+        # either zero-length input or pricing-not-published — surface 0.0
+        # so the UI can show "€0.0000" rather than "—".
+        estimated_cost_usd = cost
+
     return AIPreviewResponse(
         messages=messages,
         warnings=rendered.warnings,
         char_count=char_count,
         session_id=session_id,
         rendered=True,
+        estimated_tokens=estimated_tokens,
+        cache_blocks=cache_blocks,
+        estimated_cost_usd=estimated_cost_usd,
+        provider=provider,
+        model=model,
+        caching_style=caching_style,
     )
 
 
@@ -831,8 +931,39 @@ def _prepare_chat_send_payload(
     return (blocks or None), chat_id, list(new_entries)
 
 
+async def _usage_and_cost(
+    usage,
+    *,
+    provider: str,
+    model: str,
+    settings,
+) -> tuple[ChatUsage | None, float | None]:
+    """Convert dispatch-layer UsageMetrics + a (provider, model) lookup
+    into wire-format ChatUsage and USD cost. Returns (None, None) when
+    usage is missing; cost stays None when pricing isn't known."""
+
+    if usage is None:
+        return None, None
+    wire_usage = ChatUsage(
+        input_tokens=usage.input_tokens,
+        cached_input_tokens=usage.cached_input_tokens,
+        cache_write_tokens=usage.cache_write_tokens,
+        output_tokens=usage.output_tokens,
+    )
+    if not provider or not model:
+        return wire_usage, None
+    from app.services.ai.profiles import compute_cost
+    descriptor = await ai_tokens.descriptor_for(
+        provider=provider, model=model, settings=settings
+    )
+    if descriptor is None:
+        return wire_usage, None
+    cost = compute_cost(usage, descriptor)
+    return wire_usage, cost
+
+
 @app.post("/api/ai/chat", response_model=AIChatResponse)
-def ai_chat(request: AIChatRequest) -> AIChatResponse:
+async def ai_chat(request: AIChatRequest) -> AIChatResponse:
     settings = machine_settings_service.load_settings()
     resolved = _resolve_call_params(
         settings,
@@ -866,6 +997,12 @@ def ai_chat(request: AIChatRequest) -> AIChatResponse:
     )
     # Both Anthropic and OpenAI signal "hit max_tokens" — different names.
     truncated = result.stop_reason in {"max_tokens", "length"}
+    usage_wire, cost_usd = await _usage_and_cost(
+        result.usage,
+        provider=result.provider,
+        model=result.model,
+        settings=settings,
+    )
     return AIChatResponse(
         role="assistant",
         content=result.content,
@@ -878,6 +1015,8 @@ def ai_chat(request: AIChatRequest) -> AIChatResponse:
         stop_reason=result.stop_reason,
         truncated=truncated,
         journal_added=journal_added,
+        usage=usage_wire,
+        cost_usd=cost_usd,
     )
 
 
@@ -885,7 +1024,7 @@ def ai_chat(request: AIChatRequest) -> AIChatResponse:
 
 
 @app.post("/api/ai/generate", response_model=AIGenerateResponse)
-def ai_generate(request: AIGenerateRequest) -> AIGenerateResponse:
+async def ai_generate(request: AIGenerateRequest) -> AIGenerateResponse:
     with translate_errors():
         try:
             rendered, session_id = build_preview(
@@ -954,6 +1093,12 @@ def ai_generate(request: AIGenerateRequest) -> AIGenerateResponse:
         policy=policy,
     )
     truncated = result.stop_reason in {"max_tokens", "length"}
+    usage_wire, cost_usd = await _usage_and_cost(
+        result.usage,
+        provider=result.provider,
+        model=result.model,
+        settings=settings,
+    )
 
     return AIGenerateResponse(
         content=result.content,
@@ -969,6 +1114,8 @@ def ai_generate(request: AIGenerateRequest) -> AIGenerateResponse:
         stop_reason=result.stop_reason,
         truncated=truncated,
         session_id=session_id,
+        usage=usage_wire,
+        cost_usd=cost_usd,
     )
 
 
@@ -993,8 +1140,15 @@ def _stream_provider_events(
     *,
     policy: str,
     extra_done: dict[str, Any] | None = None,
+    descriptor: ModelDescriptor | None = None,
 ) -> Iterator[str]:
-    """Adapt provider events to NDJSON lines. Suppresses empty deltas."""
+    """Adapt provider events to NDJSON lines. Suppresses empty deltas.
+
+    When `descriptor` is provided and the terminal StreamDone carries
+    usage, the `done` line includes `usage` + `cost_usd`. The descriptor
+    is pre-fetched by the endpoint so this sync generator can compute
+    cost without an await.
+    """
     extra_done = extra_done or {}
     try:
         for ev in events:
@@ -1005,7 +1159,7 @@ def _stream_provider_events(
                 if ev.text:
                     yield _ndjson({"type": "thinking", "text": ev.text})
             elif isinstance(ev, ai_providers.StreamDone):
-                yield _ndjson({
+                done_line: dict[str, Any] = {
                     "type": "done",
                     "provider": ev.provider,
                     "model": ev.model,
@@ -1014,7 +1168,18 @@ def _stream_provider_events(
                     "truncated": ev.truncated,
                     "policy": policy,
                     **extra_done,
-                })
+                }
+                if ev.usage is not None:
+                    done_line["usage"] = {
+                        "input_tokens": ev.usage.input_tokens,
+                        "cached_input_tokens": ev.usage.cached_input_tokens,
+                        "cache_write_tokens": ev.usage.cache_write_tokens,
+                        "output_tokens": ev.usage.output_tokens,
+                    }
+                    if descriptor is not None:
+                        from app.services.ai.profiles import compute_cost
+                        done_line["cost_usd"] = compute_cost(ev.usage, descriptor)
+                yield _ndjson(done_line)
             elif isinstance(ev, ai_providers.StreamError):
                 yield _ndjson({
                     "type": "error",
@@ -1036,7 +1201,7 @@ def _stream_provider_events(
 
 
 @app.post("/api/ai/chat/stream")
-def ai_chat_stream(request: AIChatRequest) -> StreamingResponse:
+async def ai_chat_stream(request: AIChatRequest) -> StreamingResponse:
     settings = machine_settings_service.load_settings()
     resolved = _resolve_call_params(
         settings,
@@ -1054,6 +1219,13 @@ def ai_chat_stream(request: AIChatRequest) -> StreamingResponse:
     messages_list = [m.model_dump() for m in request.messages]
     system_blocks, session_id, journal_added = _prepare_chat_send_payload(
         request.chat_id, request.system_prompt, messages_list
+    )
+
+    # Pre-fetch the pricing descriptor so the sync stream generator can
+    # compute cost when the terminal StreamDone arrives, without needing
+    # an await mid-stream.
+    descriptor = await ai_tokens.descriptor_for(
+        provider=resolved.provider, model=resolved.model, settings=settings
     )
 
     events = ai_providers.chat_stream(
@@ -1076,13 +1248,14 @@ def ai_chat_stream(request: AIChatRequest) -> StreamingResponse:
                 {"journal_added": [e.model_dump() for e in journal_added]}
                 if journal_added else None
             ),
+            descriptor=descriptor,
         ),
         media_type="application/x-ndjson",
     )
 
 
 @app.post("/api/ai/generate/stream")
-def ai_generate_stream(request: AIGenerateRequest) -> StreamingResponse:
+async def ai_generate_stream(request: AIGenerateRequest) -> StreamingResponse:
     # Render template first — if this fails, return an HTTP error like the
     # non-streaming endpoint does. The stream itself only carries provider events.
     with translate_errors():
@@ -1130,6 +1303,9 @@ def ai_generate_stream(request: AIGenerateRequest) -> StreamingResponse:
     except ProjectServiceError:
         policy = "off"
 
+    descriptor = await ai_tokens.descriptor_for(
+        provider=resolved.provider, model=resolved.model, settings=settings
+    )
     events = ai_providers.chat_stream(
         provider_name=resolved.provider,
         model=resolved.model,
@@ -1146,8 +1322,27 @@ def ai_generate_stream(request: AIGenerateRequest) -> StreamingResponse:
             events,
             policy=policy,
             extra_done={"session_id": session_id, "char_count": char_count},
+            descriptor=descriptor,
         ),
         media_type="application/x-ndjson",
+    )
+
+
+@app.get("/api/ai/project-cost", response_model=ProjectCostResponse)
+def ai_project_cost() -> ProjectCostResponse:
+    """Sum of per-chat cost_usd_total across the current project."""
+    with translate_errors():
+        result = service.compute_project_cost()
+    return ProjectCostResponse(
+        total_usd=float(result.get("total_usd", 0.0) or 0.0),
+        chats=[
+            ProjectCostChatRow(
+                id=str(row.get("id", "")),
+                title=str(row.get("title", "")),
+                cost_usd=float(row.get("cost_usd", 0.0) or 0.0),
+            )
+            for row in result.get("chats", [])
+        ],
     )
 
 

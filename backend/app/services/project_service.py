@@ -2629,6 +2629,38 @@ class ProjectService:
         # saves (e.g. user creates two chats and saves them in the same second).
         return datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%S.%fZ")
 
+    def compute_project_cost(self) -> dict:
+        """Sum per-chat cost_usd_total across all chat sessions in the
+        current project. Returns:
+            {"total_usd": float,
+             "chats": [{"id": str, "title": str, "cost_usd": float}, ...]}
+        Sorted by cost descending. Chats with zero cost are included so
+        the UI can show them; filter at the display layer if needed.
+        """
+        folder = self._chats_dir()
+        if not folder.exists():
+            return {"total_usd": 0.0, "chats": []}
+        rows: list[dict] = []
+        total = 0.0
+        for entry in folder.iterdir():
+            if not entry.is_file() or entry.suffix.lower() != ".yaml":
+                continue
+            try:
+                data = self._read_yaml(entry)
+            except Exception:
+                continue
+            if not isinstance(data, dict) or not data.get("id"):
+                continue
+            cost = float(data.get("cost_usd_total", 0.0) or 0.0)
+            total += cost
+            rows.append({
+                "id": str(data.get("id", "")),
+                "title": str(data.get("title", "")) or "Untitled chat",
+                "cost_usd": cost,
+            })
+        rows.sort(key=lambda r: r["cost_usd"], reverse=True)
+        return {"total_usd": total, "chats": rows}
+
     def list_chat_sessions(self) -> ChatSessionList:
         folder = self._chats_dir()
         if not folder.exists():
@@ -2743,6 +2775,21 @@ class ProjectService:
                     409,
                 )
             next_journal = list(request.journal)
+        # Cost + cache timestamps: persist existing values; apply optional
+        # deltas from the request. cost is purely additive (never
+        # decreases); cache_write_times stamps the listed slots with the
+        # server's current UTC time.
+        next_cost = existing.cost_usd_total
+        if request.cost_delta_usd is not None:
+            # Guard against negative deltas — cost is monotonic.
+            next_cost += max(0.0, request.cost_delta_usd)
+        next_cache_times = dict(existing.cache_write_times)
+        if request.cache_write_slots:
+            now_iso = self._utcnow_iso()
+            for slot in request.cache_write_slots:
+                if slot:
+                    next_cache_times[slot] = now_iso
+
         updated = ChatSession(
             id=existing.id,
             title=request.title or existing.title or "Untitled chat",
@@ -2756,6 +2803,8 @@ class ProjectService:
             messages=request.messages,
             inputs=request.inputs,
             journal=next_journal,
+            cost_usd_total=next_cost,
+            cache_write_times=next_cache_times,
         )
         self._write_yaml(path, updated.model_dump())
         return updated

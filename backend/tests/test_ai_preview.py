@@ -3,6 +3,7 @@ from __future__ import annotations
 import unittest
 from pathlib import Path
 from tempfile import TemporaryDirectory
+from unittest.mock import patch
 
 from fastapi.testclient import TestClient
 
@@ -416,6 +417,142 @@ class PreviewEndpointTests(unittest.TestCase):
         body = response.json()
         self.assertEqual(body["messages"][0]["blocks"][0]["text"], "She walked into")
         self.assertEqual(body["messages"][1]["blocks"][0]["text"], "the storm.")
+
+
+class PreviewCostEstimateTests(unittest.TestCase):
+    """Step 3 of V2: AIPreviewResponse now includes estimated_tokens,
+    cache_blocks[], estimated_cost_usd, provider/model, caching_style.
+    """
+
+    def setUp(self) -> None:
+        self.temp_dir = TemporaryDirectory()
+        self.root = Path(self.temp_dir.name) / "project"
+        self.config_dir = Path(self.temp_dir.name) / "config"
+        self.config_dir.mkdir()
+        # Patch machine_settings config path so assistant resolution finds
+        # OUR temp assistant file, not whatever's on the developer's disk.
+        self._patcher = patch(
+            "app.services.machine_settings.config_path",
+            return_value=self.config_dir / "config.yaml",
+        )
+        self._patcher.start()
+        folder = self.config_dir / "assistants"
+        folder.mkdir(parents=True)
+        (folder / "sonnet.md").write_text(
+            "---\n"
+            "id: sonnet\n"
+            "title: Sonnet\n"
+            "entry_type: assistant\n"
+            "metadata:\n"
+            "  ai_provider: anthropic\n"
+            "  ai_model: claude-sonnet-4-6\n"
+            "  is_default: true\n"
+            "---\n",
+            encoding="utf-8",
+        )
+        (folder / "phantom.md").write_text(
+            "---\n"
+            "id: phantom\n"
+            "title: Phantom\n"
+            "entry_type: assistant\n"
+            "metadata:\n"
+            "  ai_provider: anthropic\n"
+            "  ai_model: not-a-real-model\n"
+            "---\n",
+            encoding="utf-8",
+        )
+        global_service.__init__()
+        global_service.create_project(self.root, "Cost Tests")
+        self.service = global_service
+        default_registry.clear()
+        self.client = TestClient(app)
+
+    def tearDown(self) -> None:
+        default_registry.clear()
+        self._patcher.stop()
+        self.temp_dir.cleanup()
+
+    def _basic_preview_body(self, *, assistant_id: str | None = None) -> dict:
+        body: dict = {
+            "template_source": (
+                '{% role "system" %}You write fiction.{% cache_break %}'
+                "Stay concise.{% endrole %}"
+                '{% role "user" %}Continue from here.{% endrole %}'
+            ),
+            "target_scene_id": "",
+        }
+        if assistant_id is not None:
+            body["assistant_id"] = assistant_id
+        return body
+
+    def test_estimated_tokens_populated_without_assistant(self) -> None:
+        # No assistant_id: token count still works (universal tokenizer),
+        # but cost fields stay null.
+        response = self.client.post("/api/ai/preview", json=self._basic_preview_body())
+        self.assertEqual(response.status_code, 200, response.text)
+        body = response.json()
+        self.assertGreater(body["estimated_tokens"], 0)
+        self.assertIsNone(body["estimated_cost_usd"])
+        self.assertIsNone(body["provider"])
+        self.assertIsNone(body["model"])
+        self.assertIsNone(body["caching_style"])
+
+    def test_cache_blocks_segment_by_cache_break_marker(self) -> None:
+        response = self.client.post("/api/ai/preview", json=self._basic_preview_body())
+        body = response.json()
+        # Template structure: system has a {% cache_break %} → 2 segments
+        # (the second is the tail). user role has 1 segment.
+        # Total: 3 cache blocks.
+        self.assertEqual(len(body["cache_blocks"]), 3)
+        first, second, third = body["cache_blocks"]
+        self.assertEqual(first["role"], "system")
+        self.assertTrue(first["cache_break_after"])
+        self.assertEqual(second["role"], "system")
+        self.assertFalse(second["cache_break_after"])
+        self.assertEqual(third["role"], "user")
+        self.assertFalse(third["cache_break_after"])
+        # Tokens summed across blocks equal the top-level estimate.
+        self.assertEqual(
+            sum(b["tokens"] for b in body["cache_blocks"]),
+            body["estimated_tokens"],
+        )
+
+    def test_assistant_id_populates_provider_model_and_cost(self) -> None:
+        response = self.client.post(
+            "/api/ai/preview", json=self._basic_preview_body(assistant_id="sonnet")
+        )
+        self.assertEqual(response.status_code, 200, response.text)
+        body = response.json()
+        self.assertEqual(body["provider"], "anthropic")
+        self.assertEqual(body["model"], "claude-sonnet-4-6")
+        self.assertEqual(body["caching_style"], "explicit")
+        # claude-sonnet-4-6 has positive cost_in_per_mtok in the bake-in →
+        # cost > 0 for non-empty input.
+        self.assertIsNotNone(body["estimated_cost_usd"])
+        self.assertGreater(body["estimated_cost_usd"], 0.0)
+
+    def test_unknown_model_yields_null_cost_but_keeps_provider_model(self) -> None:
+        # phantom assistant references a model not in the bake-in.
+        # Provider/model/caching_style still surface (we know the provider);
+        # cost stays null because descriptor lookup fails.
+        response = self.client.post(
+            "/api/ai/preview", json=self._basic_preview_body(assistant_id="phantom")
+        )
+        self.assertEqual(response.status_code, 200, response.text)
+        body = response.json()
+        self.assertEqual(body["provider"], "anthropic")
+        self.assertEqual(body["model"], "not-a-real-model")
+        self.assertEqual(body["caching_style"], "explicit")
+        self.assertIsNone(body["estimated_cost_usd"])
+        # Tokens still count even when cost can't be calculated.
+        self.assertGreater(body["estimated_tokens"], 0)
+
+    def test_existing_fields_unchanged(self) -> None:
+        # Smoke: V2 additions don't break v1 callers — old fields still in shape.
+        response = self.client.post("/api/ai/preview", json=self._basic_preview_body())
+        body = response.json()
+        for key in ("messages", "warnings", "char_count", "session_id", "rendered"):
+            self.assertIn(key, body, f"missing legacy field: {key}")
 
 
 if __name__ == "__main__":

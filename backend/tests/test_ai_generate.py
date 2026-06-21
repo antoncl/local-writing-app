@@ -4,6 +4,7 @@ import unittest
 from pathlib import Path
 from tempfile import TemporaryDirectory
 from unittest.mock import patch
+from types import SimpleNamespace
 
 from fastapi.testclient import TestClient
 
@@ -83,7 +84,7 @@ class GenerateEndpointTests(unittest.TestCase):
         with patch("app.services.machine_settings.load_settings", return_value=settings), \
              patch(
                 "app.services.ai.providers._anthropic_chat",
-                return_value=("Generated continuation.", "end_turn"),
+                return_value=("Generated continuation.", "end_turn", SimpleNamespace()),
             ) as mock_chat:
             response = self.client.post(
                 "/api/ai/generate",
@@ -117,7 +118,7 @@ class GenerateEndpointTests(unittest.TestCase):
         with patch("app.services.machine_settings.load_settings", return_value=settings), \
              patch(
                 "app.services.ai.providers._anthropic_chat",
-                return_value=("OK", "end_turn"),
+                return_value=("OK", "end_turn", SimpleNamespace()),
             ) as mock_chat:
             self.client.post(
                 "/api/ai/generate",
@@ -210,7 +211,7 @@ class GenerateEndpointTests(unittest.TestCase):
         with patch("app.services.machine_settings.load_settings", return_value=settings), \
              patch(
                 "app.services.ai.providers._anthropic_chat",
-                return_value=("partial", "max_tokens"),
+                return_value=("partial", "max_tokens", SimpleNamespace()),
             ):
             response = self.client.post(
                 "/api/ai/generate",
@@ -232,7 +233,7 @@ class GenerateEndpointTests(unittest.TestCase):
         with patch("app.services.machine_settings.load_settings", return_value=settings), \
              patch(
                 "app.services.ai.providers._anthropic_chat",
-                return_value=("OK", "end_turn"),
+                return_value=("OK", "end_turn", SimpleNamespace()),
             ) as mock_chat:
             self.client.post(
                 "/api/ai/generate",
@@ -254,7 +255,7 @@ class GenerateEndpointTests(unittest.TestCase):
         with patch("app.services.machine_settings.load_settings", return_value=settings), \
              patch(
                 "app.services.ai.providers._anthropic_chat",
-                return_value=("ok", "end_turn"),
+                return_value=("ok", "end_turn", SimpleNamespace()),
             ):
             response = self.client.post(
                 "/api/ai/generate",

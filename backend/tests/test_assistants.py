@@ -4,6 +4,7 @@ import unittest
 from pathlib import Path
 from tempfile import TemporaryDirectory
 from unittest.mock import patch
+from types import SimpleNamespace
 
 from fastapi.testclient import TestClient
 
@@ -185,7 +186,7 @@ class ChatEndpointAssistantTests(unittest.TestCase):
         self.temp_dir.cleanup()
 
     def test_assistant_id_resolves_provider_model_temperature(self) -> None:
-        with patch("app.services.ai.providers._anthropic_chat", return_value=("ok", "end_turn")) as mock:
+        with patch("app.services.ai.providers._anthropic_chat", return_value=("ok", "end_turn", SimpleNamespace())) as mock:
             response = self.client.post(
                 "/api/ai/chat",
                 json={
@@ -200,7 +201,7 @@ class ChatEndpointAssistantTests(unittest.TestCase):
         self.assertEqual(kwargs["max_tokens"], 2048)
 
     def test_default_assistant_used_when_no_id_supplied(self) -> None:
-        with patch("app.services.ai.providers._anthropic_chat", return_value=("ok", "end_turn")) as mock:
+        with patch("app.services.ai.providers._anthropic_chat", return_value=("ok", "end_turn", SimpleNamespace())) as mock:
             response = self.client.post(
                 "/api/ai/chat",
                 json={"messages": [{"role": "user", "content": "Hi"}]},
@@ -212,7 +213,7 @@ class ChatEndpointAssistantTests(unittest.TestCase):
         self.assertEqual(kwargs["temperature"], 0.2)
 
     def test_explicit_model_overrides_assistant(self) -> None:
-        with patch("app.services.ai.providers._anthropic_chat", return_value=("ok", "end_turn")) as mock:
+        with patch("app.services.ai.providers._anthropic_chat", return_value=("ok", "end_turn", SimpleNamespace())) as mock:
             response = self.client.post(
                 "/api/ai/chat",
                 json={

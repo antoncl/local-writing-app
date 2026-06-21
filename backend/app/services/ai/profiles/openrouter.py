@@ -17,6 +17,8 @@ import logging
 
 import httpx
 
+from typing import Any
+
 from app.services.ai.profiles._loader import baked_in_for
 from app.services.ai.profiles.base import (
     CachingStyle,
@@ -24,6 +26,8 @@ from app.services.ai.profiles.base import (
     CapabilityTier,
     ModelDescriptor,
     ProviderProfile,
+    UsageMetrics,
+    default_token_count,
 )
 
 
@@ -89,6 +93,39 @@ class OpenRouterProfile(ProviderProfile):
 
     def caching_style(self, model_id: str) -> CachingStyle:
         return caching_style_for_model(model_id)
+
+    def count_tokens(self, text: str, model_id: str) -> int:
+        # OpenRouter routes to many providers; cl100k_base is wrong for
+        # most non-OpenAI ones but in the same ballpark. Accurate per-route
+        # tokenization would mean shipping every vendor's tokenizer.
+        return default_token_count(text)
+
+    def extract_usage(self, raw_response: Any, model_id: str) -> UsageMetrics:
+        # OpenRouter normalizes to OpenAI shape; Anthropic routes additionally
+        # surface cache_creation_input_tokens / cache_read_input_tokens at the
+        # usage level. Prefer the Anthropic-style split when present since it
+        # distinguishes reads from writes.
+        usage = getattr(raw_response, "usage", None)
+        if usage is None:
+            return UsageMetrics()
+        prompt_tokens = int(getattr(usage, "prompt_tokens", 0) or 0)
+        completion_tokens = int(getattr(usage, "completion_tokens", 0) or 0)
+        cache_read = int(getattr(usage, "cache_read_input_tokens", 0) or 0)
+        cache_write = int(getattr(usage, "cache_creation_input_tokens", 0) or 0)
+        if cache_read or cache_write:
+            return UsageMetrics(
+                input_tokens=max(0, prompt_tokens - cache_read - cache_write),
+                cached_input_tokens=cache_read,
+                cache_write_tokens=cache_write,
+                output_tokens=completion_tokens,
+            )
+        details = getattr(usage, "prompt_tokens_details", None)
+        cached = int(getattr(details, "cached_tokens", 0) or 0) if details else 0
+        return UsageMetrics(
+            input_tokens=max(0, prompt_tokens - cached),
+            cached_input_tokens=cached,
+            output_tokens=completion_tokens,
+        )
 
 
 def caching_style_for_model(model_id: str) -> CachingStyle:

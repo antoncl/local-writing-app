@@ -11,12 +11,16 @@ import logging
 
 import httpx
 
+from typing import Any
+
 from app.services.ai.profiles.base import (
     CachingStyle,
     Capability,
     CapabilityTier,
     ModelDescriptor,
     ProviderProfile,
+    UsageMetrics,
+    default_token_count,
 )
 
 
@@ -62,6 +66,30 @@ class OllamaProfile(ProviderProfile):
     def caching_style(self, model_id: str) -> CachingStyle:
         # Ollama doesn't cache server-side via the OpenAI-compat shim.
         return "none"
+
+    def count_tokens(self, text: str, model_id: str) -> int:
+        # Ollama hosts many model families (llama, mistral, qwen, ...).
+        # cl100k_base is wrong for all of them in detail but close enough
+        # for budgeting — and Ollama is free, so cost estimates are mostly
+        # a curiosity here anyway.
+        return default_token_count(text)
+
+    def extract_usage(self, raw_response: Any, model_id: str) -> UsageMetrics:
+        # OpenAI-compat shim (/v1/chat/completions) returns OpenAI-shaped
+        # usage. Native /api/chat returns prompt_eval_count / eval_count
+        # on a dict. Probe both.
+        usage = getattr(raw_response, "usage", None)
+        if usage is not None:
+            return UsageMetrics(
+                input_tokens=int(getattr(usage, "prompt_tokens", 0) or 0),
+                output_tokens=int(getattr(usage, "completion_tokens", 0) or 0),
+            )
+        if isinstance(raw_response, dict):
+            return UsageMetrics(
+                input_tokens=int(raw_response.get("prompt_eval_count", 0) or 0),
+                output_tokens=int(raw_response.get("eval_count", 0) or 0),
+            )
+        return UsageMetrics()
 
     def model_for_tier(self, tier, models):
         # Auto-rank doesn't apply: local models are all free, and there's

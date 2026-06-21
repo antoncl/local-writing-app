@@ -11,11 +11,15 @@ import logging
 
 import httpx
 
+from typing import Any
+
 from app.services.ai.profiles._loader import baked_in_for, mark_deprecated
 from app.services.ai.profiles.base import (
     CachingStyle,
     ModelDescriptor,
     ProviderProfile,
+    UsageMetrics,
+    default_token_count,
 )
 
 
@@ -64,3 +68,23 @@ class OpenAIProfile(ProviderProfile):
         # OpenAI caches input transparently for prompts ≥ 1024 tokens;
         # no request markup needed. Dispatch layer sends as-is.
         return "auto"
+
+    def count_tokens(self, text: str, model_id: str) -> int:
+        return default_token_count(text)
+
+    def extract_usage(self, raw_response: Any, model_id: str) -> UsageMetrics:
+        # OpenAI's usage.prompt_tokens INCLUDES cached tokens; subtract to
+        # get the fresh full-rate slice. Cached subfield lives at
+        # usage.prompt_tokens_details.cached_tokens.
+        usage = getattr(raw_response, "usage", None)
+        if usage is None:
+            return UsageMetrics()
+        prompt_tokens = int(getattr(usage, "prompt_tokens", 0) or 0)
+        completion_tokens = int(getattr(usage, "completion_tokens", 0) or 0)
+        details = getattr(usage, "prompt_tokens_details", None)
+        cached = int(getattr(details, "cached_tokens", 0) or 0) if details else 0
+        return UsageMetrics(
+            input_tokens=max(0, prompt_tokens - cached),
+            cached_input_tokens=cached,
+            output_tokens=completion_tokens,
+        )

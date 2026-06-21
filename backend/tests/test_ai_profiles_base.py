@@ -30,6 +30,13 @@ class _DummyProfile(ProviderProfile):
     def caching_style(self, model_id: str):
         return "none"
 
+    def count_tokens(self, text: str, model_id: str) -> int:
+        return len(text)
+
+    def extract_usage(self, raw_response, model_id: str):
+        from app.services.ai.profiles.base import UsageMetrics
+        return UsageMetrics()
+
 
 def test_baked_in_parses_for_all_expected_providers():
     catalogue = baked_in_catalogue()

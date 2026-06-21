@@ -10,6 +10,7 @@ dependencies = [
   "openai>=1.50.0",
   "pydantic>=2.8.0",
   "pyyaml>=6.0.0",
+  "tiktoken>=0.8.0",
   "uvicorn[standard]>=0.30.0"
 ]
 

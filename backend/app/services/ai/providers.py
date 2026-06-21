@@ -2,10 +2,11 @@ from __future__ import annotations
 
 import time
 from collections.abc import Iterator
-from dataclasses import dataclass
-from typing import Literal
+from dataclasses import dataclass, field
+from typing import Any, Literal
 
 from app.models import AIHealthResponse, AIPolicy
+from app.services.ai.profiles import UsageMetrics
 from app.services.machine_settings import MachineSettings
 
 
@@ -25,6 +26,11 @@ class ChatResult:
     ok: bool
     error: str | None = None
     stop_reason: str | None = None
+    # V2: per-call token + cost telemetry. None on failure paths and on
+    # streaming completions (those land in step 5). Cost is computed
+    # downstream from the descriptor — the dispatch layer doesn't know
+    # about pricing.
+    usage: UsageMetrics | None = None
 
 
 def _policy_allows(policy: AIPolicy, provider: str) -> tuple[bool, str | None]:
@@ -248,7 +254,7 @@ def chat(
     started = time.perf_counter()
     try:
         if provider_name == "anthropic":
-            content, stop_reason = _anthropic_chat(
+            content, stop_reason, raw = _anthropic_chat(
                 api_key=settings.providers.anthropic_api_key,
                 model=model,
                 system_prompt=system_prompt,
@@ -258,7 +264,7 @@ def chat(
                 system_blocks=system_blocks,
             )
         elif provider_name == "openai":
-            content, stop_reason = _openai_compatible_chat(
+            content, stop_reason, raw = _openai_compatible_chat(
                 base_url="https://api.openai.com/v1",
                 api_key=settings.providers.openai_api_key,
                 model=model,
@@ -270,7 +276,7 @@ def chat(
             )
         elif provider_name == "openrouter":
             from app.services.ai.profiles.openrouter import caching_style_for_model
-            content, stop_reason = _openrouter_chat(
+            content, stop_reason, raw = _openrouter_chat(
                 api_key=settings.providers.openrouter_api_key,
                 model=model,
                 system_prompt=system_prompt,
@@ -285,7 +291,7 @@ def chat(
             base = settings.providers.ollama_host.rstrip("/")
             if not base.endswith("/v1"):
                 base = base + "/v1"
-            content, stop_reason = _openai_compatible_chat(
+            content, stop_reason, raw = _openai_compatible_chat(
                 base_url=base,
                 api_key="ollama",
                 model=model,
@@ -310,6 +316,8 @@ def chat(
             ok=False, error=f"{type(exc).__name__}: {exc}",
         )
 
+    usage = _extract_usage_for_provider(provider_name, raw, model)
+
     return ChatResult(
         content=content,
         provider=provider_name,
@@ -317,14 +325,47 @@ def chat(
         latency_ms=int((time.perf_counter() - started) * 1000),
         ok=True,
         stop_reason=stop_reason,
+        usage=usage,
     )
+
+
+def _extract_usage_for_provider(
+    provider_name: str, raw_response: Any, model: str
+) -> UsageMetrics | None:
+    """Per-provider response → UsageMetrics. Returns None when extraction
+    raises (malformed response, unknown provider) — usage is best-effort
+    telemetry, never a failure surface for the call itself.
+
+    Profile instances are throwaway here because `extract_usage` is
+    pure parsing — no credentials needed, no state held.
+    """
+    try:
+        if provider_name == "anthropic":
+            from app.services.ai.profiles.anthropic import AnthropicProfile
+            return AnthropicProfile(api_key="").extract_usage(raw_response, model)
+        if provider_name == "openai":
+            from app.services.ai.profiles.openai import OpenAIProfile
+            return OpenAIProfile(api_key="").extract_usage(raw_response, model)
+        if provider_name == "openrouter":
+            from app.services.ai.profiles.openrouter import OpenRouterProfile
+            return OpenRouterProfile(api_key="").extract_usage(raw_response, model)
+        if provider_name == "ollama":
+            from app.services.ai.profiles.ollama import OllamaProfile
+            return OllamaProfile(host="http://127.0.0.1:11434").extract_usage(
+                raw_response, model
+            )
+    except Exception:  # noqa: BLE001
+        return None
+    return None
 
 
 def _anthropic_chat(
     *, api_key: str, model: str, system_prompt: str,
     messages: list[dict[str, str]], max_tokens: int, temperature: float = 0.7,
     system_blocks: list[dict] | None = None,
-) -> tuple[str, str | None]:
+) -> tuple[str, str | None, Any]:
+    """Returns (content, stop_reason, raw_response). Caller extracts
+    usage from raw_response via the matching ProviderProfile."""
     if not api_key:
         raise _ProviderError("Anthropic API key is not configured.")
     try:
@@ -355,7 +396,7 @@ def _anthropic_chat(
         if text:
             parts.append(text)
     stop_reason = getattr(response, "stop_reason", None)
-    return "".join(parts), stop_reason
+    return "".join(parts), stop_reason, response
 
 
 def _openrouter_system_messages(
@@ -424,9 +465,12 @@ def _openrouter_chat(
     system_blocks: list[dict] | None = None,
     caching_style: str = "none",
     session_id: str | None = None,
-) -> tuple[str, str | None]:
+) -> tuple[str, str | None, Any]:
     """OpenRouter chat completion, with cache-marker pass-through when the
-    routed-to provider supports explicit caching."""
+    routed-to provider supports explicit caching.
+
+    Returns (content, stop_reason, raw_response). Caller extracts usage.
+    """
     if not api_key:
         raise _ProviderError("API key is not configured for this provider.")
     try:
@@ -453,7 +497,7 @@ def _openrouter_chat(
     response = client.chat.completions.create(**kwargs)
     choice = response.choices[0]
     stop_reason = getattr(choice, "finish_reason", None)
-    return choice.message.content or "", stop_reason
+    return choice.message.content or "", stop_reason, response
 
 
 def _openrouter_chat_stream(
@@ -463,7 +507,7 @@ def _openrouter_chat_stream(
     system_blocks: list[dict] | None = None,
     caching_style: str = "none",
     session_id: str | None = None,
-) -> Iterator[StreamDelta | StreamThinking | str | None]:
+) -> Iterator[StreamDelta | StreamThinking | _StreamFinal]:
     """Streaming variant of _openrouter_chat. Same cache-marker semantics."""
     if requires_key and not api_key:
         raise _ProviderError("API key is not configured for this provider.")
@@ -486,11 +530,19 @@ def _openrouter_chat_stream(
         "temperature": temperature,
         "messages": full_messages,
         "stream": True,
+        # Ask the OpenAI-compatible endpoint to send a final usage chunk.
+        # On OpenAI direct this is `stream_options.include_usage`; OpenRouter
+        # forwards it. Without this, the streaming path never sees usage.
+        "stream_options": {"include_usage": True},
     }
     if extra_body:
         kwargs["extra_body"] = extra_body
     stop_reason: str | None = None
+    final_chunk: Any = None
     for chunk in client.chat.completions.create(**kwargs):
+        # Final usage chunks have an empty choices array but carry .usage.
+        if getattr(chunk, "usage", None) is not None:
+            final_chunk = chunk
         if not chunk.choices:
             continue
         choice = chunk.choices[0]
@@ -501,14 +553,22 @@ def _openrouter_chat_stream(
         finish = getattr(choice, "finish_reason", None)
         if finish:
             stop_reason = finish
-    yield stop_reason
+    usage = (
+        _extract_usage_for_provider("openrouter", final_chunk, model)
+        if final_chunk is not None
+        else None
+    )
+    yield _StreamFinal(stop_reason=stop_reason, usage=usage)
 
 
 def _openai_compatible_chat(
     *, base_url: str, api_key: str, model: str, system_prompt: str,
     messages: list[dict[str, str]], max_tokens: int, requires_key: bool,
     temperature: float = 0.7,
-) -> tuple[str, str | None]:
+) -> tuple[str, str | None, Any]:
+    """Returns (content, stop_reason, raw_response). Caller extracts
+    usage via the appropriate ProviderProfile for the originating
+    provider (OpenAI vs Ollama have different shapes)."""
     if requires_key and not api_key:
         raise _ProviderError("API key is not configured for this provider.")
     try:
@@ -529,7 +589,7 @@ def _openai_compatible_chat(
     )
     choice = response.choices[0]
     stop_reason = getattr(choice, "finish_reason", None)
-    return choice.message.content or "", stop_reason
+    return choice.message.content or "", stop_reason, response
 
 
 # ----- Streaming chat completion -----
@@ -552,6 +612,26 @@ class StreamDone:
     latency_ms: int
     stop_reason: str | None
     truncated: bool
+    # V2: per-stream telemetry. None when the provider didn't return usage
+    # in the terminal chunk (rare; we always ask for it on OpenAI-compat
+    # via stream_options.include_usage). Cost is computed downstream from
+    # the descriptor — the dispatch layer doesn't know about pricing.
+    usage: UsageMetrics | None = None
+
+
+@dataclass
+class _StreamFinal:
+    """Internal terminator from inner stream helpers, carrying everything
+    the public StreamDone needs from the provider side. The chat_stream
+    wrapper unpacks this into StreamDone.
+
+    Inner helpers used to yield a bare `stop_reason: str | None` as their
+    final element; bundling usage in here lets us add new terminal fields
+    without churning every helper's protocol.
+    """
+
+    stop_reason: str | None
+    usage: UsageMetrics | None = None
 
 
 @dataclass
@@ -682,6 +762,7 @@ def chat_stream(
 
     started = time.perf_counter()
     stop_reason: str | None = None
+    usage: UsageMetrics | None = None
     try:
         if provider_name == "anthropic":
             for ev in _anthropic_chat_stream(
@@ -693,8 +774,9 @@ def chat_stream(
             ):
                 if isinstance(ev, (StreamDelta, StreamThinking)):
                     yield ev
-                else:
-                    stop_reason = ev  # final stop_reason string
+                elif isinstance(ev, _StreamFinal):
+                    stop_reason = ev.stop_reason
+                    usage = ev.usage
         elif provider_name == "openrouter":
             from app.services.ai.profiles.openrouter import caching_style_for_model
             for ev in _openrouter_chat_stream(
@@ -708,8 +790,9 @@ def chat_stream(
             ):
                 if isinstance(ev, (StreamDelta, StreamThinking)):
                     yield ev
-                else:
-                    stop_reason = ev
+                elif isinstance(ev, _StreamFinal):
+                    stop_reason = ev.stop_reason
+                    usage = ev.usage
         elif provider_name in {"openai", "ollama"}:
             if provider_name == "openai":
                 base_url = "https://api.openai.com/v1"
@@ -727,11 +810,13 @@ def chat_stream(
                 system_prompt=effective_system_prompt, messages=messages,
                 max_tokens=max_tokens, requires_key=requires_key,
                 temperature=temperature,
+                provider_name=provider_name,
             ):
                 if isinstance(ev, (StreamDelta, StreamThinking)):
                     yield ev
-                else:
-                    stop_reason = ev
+                elif isinstance(ev, _StreamFinal):
+                    stop_reason = ev.stop_reason
+                    usage = ev.usage
         else:
             raise RuntimeError(f"Provider '{provider_name}' is recognized but not wired.")
     except _ProviderError as exc:
@@ -750,6 +835,7 @@ def chat_stream(
         provider=provider_name, model=model,
         latency_ms=int((time.perf_counter() - started) * 1000),
         stop_reason=stop_reason, truncated=truncated,
+        usage=usage,
     )
 
 
@@ -758,7 +844,7 @@ def _anthropic_chat_stream(
     messages: list[dict[str, str]], max_tokens: int, temperature: float = 0.7,
     thinking_enabled: bool = False,
     system_blocks: list[dict] | None = None,
-) -> Iterator[StreamDelta | StreamThinking | str | None]:
+) -> Iterator[StreamDelta | StreamThinking | _StreamFinal]:
     """Yield StreamDelta / StreamThinking events, then a final stop_reason str.
 
     When thinking_enabled is True, sends Anthropic's extended-thinking parameter
@@ -795,6 +881,7 @@ def _anthropic_chat_stream(
             # Anthropic requires temperature=1 when thinking is enabled.
             kwargs["temperature"] = 1.0
     stop_reason: str | None = None
+    final_message: Any = None
     with client.messages.stream(**kwargs) as stream:
         for event in stream:
             etype = getattr(event, "type", None)
@@ -809,16 +896,21 @@ def _anthropic_chat_stream(
                     text = getattr(delta, "thinking", "") or ""
                     if text:
                         yield StreamThinking(text=text)
-        final = stream.get_final_message()
-        stop_reason = getattr(final, "stop_reason", None)
-    yield stop_reason
+        final_message = stream.get_final_message()
+        stop_reason = getattr(final_message, "stop_reason", None)
+    usage = _extract_usage_for_provider("anthropic", final_message, model)
+    yield _StreamFinal(stop_reason=stop_reason, usage=usage)
 
 
 def _openai_compatible_chat_stream(
     *, base_url: str, api_key: str, model: str, system_prompt: str,
     messages: list[dict[str, str]], max_tokens: int, requires_key: bool,
     temperature: float = 0.7,
-) -> Iterator[StreamDelta | StreamThinking | str | None]:
+    provider_name: str = "openai",
+) -> Iterator[StreamDelta | StreamThinking | _StreamFinal]:
+    """`provider_name` selects the response-shape parser for usage extraction.
+    Pass "openai" or "ollama" — callers route both through this helper.
+    """
     if requires_key and not api_key:
         raise _ProviderError("API key is not configured for this provider.")
     try:
@@ -837,10 +929,15 @@ def _openai_compatible_chat_stream(
         temperature=temperature,
         messages=full_messages,
         stream=True,
+        # Final chunk carries .usage when this is set.
+        stream_options={"include_usage": True},
     )
     splitter = _ThinkTagSplitter()
     stop_reason: str | None = None
+    final_chunk: Any = None
     for chunk in stream:
+        if getattr(chunk, "usage", None) is not None:
+            final_chunk = chunk
         choices = getattr(chunk, "choices", None) or []
         if not choices:
             continue
@@ -863,7 +960,12 @@ def _openai_compatible_chat_stream(
             stop_reason = finish
     # Flush any pending buffered text after the stream ends.
     yield from splitter.flush()
-    yield stop_reason
+    usage = (
+        _extract_usage_for_provider(provider_name, final_chunk, model)
+        if final_chunk is not None
+        else None
+    )
+    yield _StreamFinal(stop_reason=stop_reason, usage=usage)
 
 
 class _ThinkTagSplitter:

@@ -636,6 +636,11 @@ class AIPreviewRequest(BaseModel):
     text_after: str = ""
     selection: str = ""
     commit: bool = False
+    # When set, the cost estimate uses this assistant's provider/model.
+    # Omit for previews that aren't bound to an assistant (e.g. the
+    # prompt-editor preview pane) — token counts still come back, only
+    # the cost/cache fields are omitted.
+    assistant_id: str | None = None
 
 
 class PreviewContentBlock(BaseModel):
@@ -648,12 +653,42 @@ class PreviewMessage(BaseModel):
     blocks: list[PreviewContentBlock]
 
 
+class PreviewCacheBlock(BaseModel):
+    """One cache block derived from `cache_break_after` markers on the
+    rendered messages. Labels are position-derived for v1; richer
+    naming may come later (template hints, role-based, etc.).
+    """
+
+    label: str
+    role: str
+    tokens: int
+    cache_break_after: bool
+
+
 class AIPreviewResponse(BaseModel):
     messages: list[PreviewMessage]
     warnings: list[str] = Field(default_factory=list)
     char_count: int
     session_id: str | None = None
     rendered: bool
+    # Token estimate over the assembled wire bytes. Always populated.
+    estimated_tokens: int = 0
+    # Per-cache-block breakdown — powers the cache strip UI. Each entry
+    # is one run of blocks ending at a `cache_break_after` marker (or
+    # the end of the message). Empty when there are no rendered messages.
+    cache_blocks: list[PreviewCacheBlock] = Field(default_factory=list)
+    # Pre-send input-side cost in USD. Frontend converts to EUR for
+    # display (see decisions_currency_display). Null when no assistant
+    # is bound or pricing is unknown (Ollama, live discovery failure).
+    estimated_cost_usd: float | None = None
+    # When an assistant is bound, surface its provider/model so the
+    # frontend can label the estimate. Null otherwise.
+    provider: str | None = None
+    model: str | None = None
+    # caching_style from the resolved provider (`none` / `auto` /
+    # `explicit`). Drives whether the cache strip shows in the UI.
+    # Null when no assistant is bound.
+    caching_style: str | None = None
 
 
 class ChatMessage(BaseModel):
@@ -675,6 +710,19 @@ class AIChatRequest(BaseModel):
     chat_id: str | None = None
 
 
+class ChatUsage(BaseModel):
+    """Per-call token counts mirrored from the dispatch layer's
+    `UsageMetrics` dataclass. The three input slots are disjoint —
+    sum (input + cached_input + cache_write) for the total billable
+    input. Costs come from `compute_cost(UsageMetrics, descriptor)`.
+    """
+
+    input_tokens: int = 0
+    cached_input_tokens: int = 0
+    cache_write_tokens: int = 0
+    output_tokens: int = 0
+
+
 class AIChatResponse(BaseModel):
     role: Literal["assistant"] = "assistant"
     content: str
@@ -690,6 +738,12 @@ class AIChatResponse(BaseModel):
     # strip). Empty when no detections fired. Snapshots — frontend doesn't
     # need to look up titles separately.
     journal_added: list["ChatSessionJournalEntry"] = Field(default_factory=list)
+    # V2: per-call telemetry. Null on failure paths and when the provider
+    # response didn't include usage (rare). Cost is null when pricing
+    # isn't known (Ollama, descriptor lookup failure). Frontend converts
+    # to EUR for display (see decisions_currency_display).
+    usage: ChatUsage | None = None
+    cost_usd: float | None = None
 
 
 class AIGenerateRequest(BaseModel):
@@ -721,11 +775,28 @@ class AIGenerateResponse(BaseModel):
     stop_reason: str | None = None
     truncated: bool = False
     session_id: str | None = None
+    # V2 telemetry — see AIChatResponse for the rules.
+    usage: ChatUsage | None = None
+    cost_usd: float | None = None
 
 
 class AIContextPresetResponse(BaseModel):
     kind: str
     content: str
+
+
+class ProjectCostChatRow(BaseModel):
+    id: str
+    title: str
+    cost_usd: float
+
+
+class ProjectCostResponse(BaseModel):
+    """V2: sum of chat session costs in the current project. Frontend
+    converts to EUR for display (see decisions_currency_display)."""
+
+    total_usd: float
+    chats: list[ProjectCostChatRow] = Field(default_factory=list)
 
 
 # --- Persistent chat sessions (Phase 3) ---
@@ -765,6 +836,11 @@ class ChatSessionMessage(BaseModel):
     # Always empty on user messages (detection happens between user and
     # assistant, attributed to the assistant turn).
     journal_added: list[ChatSessionJournalEntry] = Field(default_factory=list)
+    # V2: per-turn token + cost telemetry, captured from the streamed
+    # response. Always null on user messages. Frozen value at time-of-
+    # send — historical cost doesn't drift when pricing changes.
+    usage: ChatUsage | None = None
+    cost_usd: float | None = None
 
 
 class ChatSessionContextItem(BaseModel):
@@ -802,6 +878,16 @@ class ChatSession(BaseModel):
     # context. Grows as the user types new names across turns. See
     # ChatSessionJournalEntry for the per-entry shape.
     journal: list[ChatSessionJournalEntry] = Field(default_factory=list)
+    # V2: running USD cost for this chat session, in the provider's currency
+    # (USD; frontend converts to EUR for display). Incremented turn-by-turn
+    # via save_chat_session(cost_delta_usd=...). Frozen value at time-of-
+    # send — does NOT recompute if model pricing changes.
+    cost_usd_total: float = 0.0
+    # Per-cache-slot ISO timestamps of the most recent cache write. Slot
+    # keys are short labels emitted by the chat dispatch ("system", "lore",
+    # etc.). Powers the TTL countdown chips (step 9). Updated when a turn
+    # writes to a slot (extracted via UsageMetrics.cache_write_tokens > 0).
+    cache_write_times: dict[str, str] = Field(default_factory=dict)
 
 
 class ChatSessionSummary(BaseModel):
@@ -841,6 +927,14 @@ class SaveChatSessionRequest(BaseModel):
     # journal entries; general saves (rename, message append, etc.)
     # should omit the field so the journal persists untouched.
     journal: list[ChatSessionJournalEntry] | None = None
+    # V2: optional incremental cost update. When provided (typically by
+    # the chat panel after a successful AI turn), it's ADDED to the
+    # persisted cost_usd_total. Omit on plain renames / message-list saves.
+    cost_delta_usd: float | None = None
+    # V2: when provided, each slot name has its cache_write_times entry
+    # set to the server's current ISO timestamp. Frontend sends the labels
+    # for any slot whose `cache_write_tokens` was > 0 in the response.
+    cache_write_slots: list[str] | None = None
 
 
 StructureNode.model_rebuild()

@@ -152,6 +152,17 @@ class EntryTypeDefinition(BaseModel):
     has_body: bool = True
     body_editor: Literal["wysiwyg", "code"] = "wysiwyg"
     body_language: Literal["markdown", "jinja2", "plain"] = "markdown"
+    # Starter content for new entries of this type. Used by
+    # create_prompt_entry as the initial body_markdown so authoring a
+    # `roleplay` (or any future type with conventions worth showing off)
+    # opens with a working template the author can adapt instead of a
+    # blank page.
+    default_body: str = ""
+    # Per-entry inputs to seed onto new prompt entries of this type.
+    # Mirrors `default_body`'s role for the inputs declaration — without
+    # this, `roleplay`'s starter template would reference an
+    # `input.character` that doesn't exist on a freshly-created prompt.
+    default_inputs: list[PromptInputDefinition] = Field(default_factory=list)
     prompt: PromptEntryTypeExtras | None = None
 
 

@@ -20,6 +20,7 @@ Sandbox notes:
 
 from __future__ import annotations
 
+import json
 import re
 from typing import Any, TYPE_CHECKING
 from xml.sax.saxutils import escape as xml_escape, quoteattr
@@ -288,15 +289,34 @@ def _coerce_entry_ref(
 ) -> EntryRef | None:
     """Helper backing the `entry()` Jinja global.
 
-    Accepts a string id, an EntryRef (returns it unchanged), or an object with
-    an `.id` attribute. Returns None for anything else.
+    Accepts a string id, an EntryRef (returns it unchanged), an object with
+    an `.id` attribute, a context_pick value (list of {id, kind, ...} refs
+    or its JSON-string form — first picked ref wins), or None.
     """
     if value is None or value == "":
         return None
     if isinstance(value, EntryRef):
         return value
     if isinstance(value, str):
+        stripped = value.strip()
+        # context_pick inputs serialize as a JSON list; unwrap to the first
+        # picked ref's id. A bare id string still works (no opening bracket).
+        if stripped.startswith("[") and stripped.endswith("]"):
+            try:
+                parsed = json.loads(stripped)
+            except (ValueError, TypeError):
+                return None
+            return _coerce_entry_ref(project, schema, parsed)
         return EntryRef(project, schema, value)
+    if isinstance(value, list):
+        if not value:
+            return None
+        return _coerce_entry_ref(project, schema, value[0])
+    if isinstance(value, dict):
+        inner_id = value.get("id")
+        if isinstance(inner_id, str) and inner_id:
+            return EntryRef(project, schema, inner_id)
+        return None
     inner = getattr(value, "id", None)
     if isinstance(inner, str) and inner:
         return EntryRef(project, schema, inner)
@@ -343,6 +363,9 @@ def register_helpers(
     env.globals["entry"] = lambda value: _coerce_entry_ref(project, schema, value)
     env.globals["full_outline"] = lambda: _full_outline(project)
     env.globals["full_text"] = lambda: _full_text(project)
+    env.globals["character_thread"] = (
+        lambda scene, character: _character_thread(project, schema, scene, character)
+    )
 
 
 def create_environment_for_project(
@@ -844,3 +867,141 @@ def _collect_scene_text(
             )
     for child in _attr_or_item(node, "children") or []:
         _collect_scene_text(child, project, sink)
+
+
+# ----- Character-thread reconstruction --------------------------------------
+
+# Matches the comment-marker pair the frontend writes when accepting a
+# roleplay continuation (see frontend/src/markdown.ts). The wrapper is
+# preserved across save/reload as plain markdown; we re-discover it
+# here to split the body into per-character segments at send time.
+CHARACTER_SPAN_PATTERN = re.compile(
+    r"<!--\s*character:id=([A-Za-z0-9_-]+)\s*-->([\s\S]*?)<!--\s*/character\s*-->",
+)
+
+
+def _split_body_by_character_markers(body: str) -> list[tuple[str | None, str]]:
+    """Return [(character_id | None, text), …] for the body.
+
+    Text outside any character marker becomes a (None, text) segment.
+    Text inside `<!-- character:id=X -->…<!-- /character -->` becomes
+    (X, text). Empty segments are dropped.
+    """
+    if not body:
+        return []
+    segments: list[tuple[str | None, str]] = []
+    cursor = 0
+    for match in CHARACTER_SPAN_PATTERN.finditer(body):
+        before = body[cursor:match.start()]
+        if before:
+            segments.append((None, before))
+        char_id = match.group(1)
+        text = match.group(2)
+        if text:
+            segments.append((char_id, text))
+        cursor = match.end()
+    tail = body[cursor:]
+    if tail:
+        segments.append((None, tail))
+    return segments
+
+
+def _character_thread(
+    project: "ProjectService",
+    schema: Any,
+    scene: Any,
+    character_input: Any,
+) -> str:
+    """Build a per-character chat thread from the scene's body markers.
+
+    Must be used OUTSIDE any `{% role %}` block — emits its own
+    role-tagged content using the same ROLE_START/ROLE_END markers
+    the {% role %} extension produces, so the renderer's marker
+    parser folds the output back into multiple alternating messages.
+
+    Spans tagged with the FOCUS character (whoever `character_input`
+    resolves to) become `assistant` messages. Spans tagged with any
+    OTHER character become `user` messages prefixed `[Name]: `.
+    Untagged narration is `user` with no prefix. No markers anywhere
+    → first invocation; the whole body is one user-narration message.
+
+    If the last message in the thread would be assistant (scene
+    ended on the focus character's own turn), a short user nudge is
+    appended so the chat API has a turn to respond to.
+    """
+    from app.services.ai.templates import ROLE_END, ROLE_START, ROLE_START_SEP
+
+    focus_ref = _coerce_entry_ref(project, schema, character_input)
+    focus_id = focus_ref.id if focus_ref else None
+
+    body = ""
+    if scene is not None:
+        attr = getattr(scene, "body_markdown", None)
+        if isinstance(attr, str):
+            body = attr
+        elif isinstance(scene, dict):
+            value = scene.get("body_markdown")
+            if isinstance(value, str):
+                body = value
+
+    def role_block(role: str, text: str) -> str:
+        return f"{ROLE_START}{role}{ROLE_START_SEP}{text}{ROLE_END}"
+
+    segments = _split_body_by_character_markers(body)
+
+    # First invocation: no markers anywhere, the whole body is one
+    # user-narration message. Empty body → nothing to emit.
+    if not any(seg[0] for seg in segments):
+        if body.strip():
+            return role_block("user", body)
+        return ""
+
+    # Resolve all character lore ids to titles for the [Name]: prefix.
+    other_ids = {seg[0] for seg in segments if seg[0] and seg[0] != focus_id}
+    titles: dict[str, str] = {}
+    for cid in other_ids:
+        loaded = _safe_read_lore(project, cid)
+        title = getattr(loaded, "title", None) if loaded else None
+        titles[cid] = str(title) if title else cid
+
+    # Build alternating role-tagged messages. Coalesce consecutive
+    # segments that resolve to the same role so the model sees one
+    # turn per speaker instead of fragmented chunks.
+    parts: list[str] = []
+    current_role: str | None = None
+    buffer: list[str] = []
+
+    def flush() -> None:
+        nonlocal buffer, current_role
+        if buffer and current_role:
+            joined = "".join(buffer).strip()
+            if joined:
+                parts.append(role_block(current_role, joined))
+        buffer = []
+
+    for char_id, text in segments:
+        if char_id and char_id == focus_id:
+            role = "assistant"
+            content = text
+        elif char_id:
+            role = "user"
+            content = f"[{titles.get(char_id, char_id)}]: {text}"
+        else:
+            role = "user"
+            content = text
+
+        if role != current_role:
+            flush()
+            current_role = role
+        buffer.append(content)
+    flush()
+
+    # Chat APIs need to end on a user turn so the model knows whose
+    # turn it is. If the scene ended on the focus character's own
+    # span, append a synthetic user nudge naming them.
+    if parts and parts[-1].startswith(f"{ROLE_START}assistant"):
+        focus_title = focus_ref.title if focus_ref else ""
+        nudge = f"Continue as {focus_title}." if focus_title else "Continue."
+        parts.append(role_block("user", nudge))
+
+    return "".join(parts)

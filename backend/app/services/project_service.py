@@ -134,7 +134,7 @@ DEFAULT_METADATA_SCHEMA: dict[str, Any] = {
             "name": "Scene",
             "kind": "scene",
             "parent": "manuscript_structure",
-            "fields": ["status", "pov", "characters", "locations", "word_count"],
+            "fields": ["status", "pov", "characters", "locations", "dynamics", "word_count"],
             "has_body": True,
         },
         "lore_entry": {
@@ -193,6 +193,72 @@ DEFAULT_METADATA_SCHEMA: dict[str, Any] = {
                     "output": {"kind": "append_to_body", "review": "visual_diff"},
                 },
             },
+        },
+        "roleplay": {
+            # Continuation sub-type for two-character roleplay in one scene.
+            # `default_body` provides a working starter template and
+            # `default_inputs` seeds the `character: context_pick` input
+            # the template assumes — together a fresh Roleplay prompt
+            # comes ready to invoke via `/roleplay <Name>`. The context
+            # strategy is inherited from `continuation`.
+            "name": "Roleplay",
+            "kind": "prompt",
+            "parent": "continuation",
+            "fields": [],
+            "has_body": True,
+            "default_inputs": [
+                {
+                    "name": "character",
+                    "type": "context_pick",
+                    "label": "Character",
+                    "required": True,
+                    "target": {
+                        "kinds": ["lore"],
+                        "entry_types": {"lore": ["character"]},
+                        "multiple": False,
+                        "presets": [],
+                    },
+                },
+            ],
+            "default_body": (
+                "{% set char = entry(input.character) %}\n"
+                "{% role \"system\" %}\n"
+                "You roleplay one character within an ongoing scene. Stay in "
+                "voice, in motive, in the moment. Write that character's NEXT "
+                "beat — action, dialogue, or both — and stop. One beat, not a "
+                "paragraph of them.\n"
+                "{% if char %}\n"
+                "\nYou are playing **{{ char.title }}**.\n"
+                "{% if char.body_markdown %}\n"
+                "\n## Character\n"
+                "{{ char.body_markdown }}\n"
+                "{% endif %}\n"
+                "{% endif %}\n"
+                "{% endrole %}\n"
+                "\n"
+                "{% role \"user\" %}\n"
+                "{% if scene.metadata.dynamics %}\n"
+                "## Scene dynamics\n"
+                "{{ scene.metadata.dynamics }}\n"
+                "\n"
+                "{% endif %}\n"
+                "{{ relevant_lore(scene) }}\n"
+                "{% cache_break %}\n"
+                "{% if scenes_before(scene) %}\n"
+                "## The story so far\n"
+                "{{ scenes_before(scene) }}\n"
+                "\n"
+                "{% endif %}\n"
+                "{% endrole %}\n"
+                "\n"
+                "{# Per-character thread reconstruction. Spans tagged with the\n"
+                "   focus character become assistant turns; spans tagged with\n"
+                "   anyone else become user turns prefixed `[Name]:`; untagged\n"
+                "   narration is plain user text. First invocation (no markers\n"
+                "   yet) sends the whole scene body as one user-narration\n"
+                "   message. Must be used OUTSIDE any role block. #}\n"
+                "{{ character_thread(scene, input.character) }}\n"
+            ),
         },
         "revise": {
             "name": "Revise",
@@ -263,6 +329,13 @@ DEFAULT_METADATA_SCHEMA: dict[str, Any] = {
             "options": ["draft", "revised", "complete"],
         },
         "summary": {"name": "Summary", "type": "long_text"},
+        "dynamics": {
+            # Scene-current per-character beats for the roleplay use case.
+            # The roleplay template reads this verbatim; both characters
+            # see all beats so the AI plays them as one continuous scene.
+            "name": "Dynamics",
+            "type": "long_text",
+        },
         "aliases": {"name": "Aliases", "type": "multi_select"},
         "tags": {"name": "Tags", "type": "tags"},
         "characters": {
@@ -1403,7 +1476,7 @@ class ProjectService:
             if isinstance(parent_id, str) and parent_id in entry_types:
                 parent_definition = resolved.get(parent_id)
                 if isinstance(parent_definition, dict):
-                    for inheritable in ("display_template", "has_body", "body_editor", "body_language"):
+                    for inheritable in ("display_template", "has_body", "body_editor", "body_language", "default_body", "default_inputs"):
                         if inheritable not in next_entry_type and inheritable in parent_definition:
                             next_entry_type[inheritable] = parent_definition[inheritable]
                     parent_prompt = parent_definition.get("prompt")
@@ -2363,14 +2436,26 @@ class ProjectService:
         root = self._require_project()
         self._check_entry_type_kind(request.entry_type, "prompt")
         entry_id = self._new_id("prompt")
+        initial_body = ""
+        initial_inputs: list[PromptInputDefinition] = []
+        try:
+            schema = self.read_metadata_schema()
+            entry_type_def = schema.entry_types.get(request.entry_type)
+            if entry_type_def:
+                initial_body = entry_type_def.default_body
+                initial_inputs = list(entry_type_def.default_inputs)
+        except Exception:
+            pass
         entry = PromptEntry(
             id=entry_id,
             title=request.title,
-            body_markdown="",
+            body_markdown=initial_body,
             revision="",
             entry_type=request.entry_type,
             metadata={},
+            inputs=initial_inputs,
         )
+        inputs_payload = [i.model_dump(exclude_none=True) for i in entry.inputs]
         self._write_node_entry_file(
             self._filepath_for_new_node(root / "prompts", request.title),
             entry.id,
@@ -2378,6 +2463,7 @@ class ProjectService:
             entry.entry_type,
             entry.metadata,
             entry.body_markdown,
+            extra={"inputs": inputs_payload} if inputs_payload else None,
         )
         return self.read_prompt_entry(entry_id)
 

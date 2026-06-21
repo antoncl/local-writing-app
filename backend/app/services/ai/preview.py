@@ -193,8 +193,13 @@ def build_chat_payload(rendered: RenderedTemplate) -> tuple[str, list[dict[str, 
     """Convert a RenderedTemplate into a chat-API payload.
 
     System messages are concatenated into a single system_prompt string.
-    User and assistant messages pass through verbatim in order. Other roles
-    are ignored (warnings on the rendered template already flag them).
+    User and assistant messages pass through in order, with two safety
+    transforms: whitespace-only messages are dropped (an empty conditional
+    in the template shouldn't emit a no-op turn), and consecutive
+    same-role messages are coalesced (Anthropic rejects user/user or
+    assistant/assistant pairs outright; this also keeps OpenAI happy).
+    Other roles are ignored — warnings on the rendered template already
+    flag them.
 
     Returns: (system_prompt, messages)
     """
@@ -206,6 +211,11 @@ def build_chat_payload(rendered: RenderedTemplate) -> tuple[str, list[dict[str, 
             if text.strip():
                 system_parts.append(text)
         elif msg.role in ("user", "assistant"):
-            chat_messages.append({"role": msg.role, "content": text})
+            if not text.strip():
+                continue
+            if chat_messages and chat_messages[-1]["role"] == msg.role:
+                chat_messages[-1]["content"] = chat_messages[-1]["content"].rstrip() + "\n\n" + text.lstrip()
+            else:
+                chat_messages.append({"role": msg.role, "content": text})
     system_prompt = "\n\n".join(system_parts)
     return system_prompt, chat_messages

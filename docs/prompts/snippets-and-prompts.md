@@ -44,7 +44,9 @@ A prompt is everything required to invoke the AI for one specific task. It pairs
 
 ### Abstract parent + concrete sub-types
 
-`prompt` is an **abstract** entry type. Concrete sub-types declare the behavior for one specific task:
+`prompt` is an **abstract** entry type. Four concrete bases under it ship seeded:
+`continuation`, `revise`, `general`, `snippet`. Users may instantiate the bases
+directly, or sub-type one to declare the behavior for a specific task:
 
 | Planned sub-type | What it does |
 | --- | --- |

@@ -79,22 +79,29 @@ editor it shows prompt sub-classes.
 
 ### Prompt taxonomy
 
-The `prompt` kind has four built-in sub-types. The first three are abstract;
-each captures an activation surface × output disposition. User sub-types
-inherit one of them to pick up the dispatch behavior — the user only writes the
-personality (`system_prompt`, `inputs`, the Jinja body).
+The `prompt` kind has four built-in concrete sub-types. Each captures an
+activation surface × output disposition. Users can instantiate them directly,
+or sub-type one to add personality (`system_prompt`, the Jinja body) and have
+the dispatch behavior inherited automatically.
 
-| Sub-type | Activation surface | Output | Concrete? |
-|---|---|---|---|
-| `continuation` | Slash menu in scene editor | Append at cursor (`append_to_body`) | abstract |
-| `revise` | Selection toolbar | Replace selection (`replace_selection`) | abstract |
-| `general` | Slash menu | Chat panel (`chat_panel`) | abstract |
-| `snippet` | None — included by name via `{% include %}` from other prompts | None | concrete |
+| Sub-type | Activation surface | Output |
+|---|---|---|
+| `continuation` | Slash menu in scene editor | Append at cursor (`append_to_body`) |
+| `revise` | Selection toolbar | Replace selection (`replace_selection`) |
+| `general` | Slash menu / "+ New Chat" | Chat panel (`chat_panel`) |
+| `snippet` | None — included by name via `{% include %}` from other prompts | None |
 
 Routing example: a user creates `bob extends general` with the system_prompt
 "You are Bob." The dispatcher walks Bob's parent chain to find `general`, sees
-the inherited `output.kind: chat_panel`, and surfaces Bob in the slash menu;
+the inherited `output.kind: chat_panel`, and surfaces Bob in the prompt picker;
 when invoked, the response lands in the chat panel.
+
+The bases used to be abstract — when prompt `inputs` were declared on the type,
+abstraction meant "users must create a sub-type to fix the input shape." Once
+inputs moved to the instance (the prompt body and its inputs travel together),
+the bases had nothing left to parameterize at the type level, so they became
+concrete. Users still sub-type them when they want a reusable named role; they
+don't have to.
 
 Metadata can describe semantic relationships such as characters, locations, or
 parent locations. Manuscript ordering and hierarchy remain in Manuscript

@@ -175,7 +175,7 @@ DEFAULT_METADATA_SCHEMA: dict[str, Any] = {
             "name": "Prompt",
             "kind": "prompt",
             "abstract": True,
-            "fields": ["tags", "preferred_assistant_id"],
+            "fields": ["preferred_assistant_id"],
             "has_body": True,
             "body_editor": "code",
             "body_language": "jinja2",
@@ -184,7 +184,6 @@ DEFAULT_METADATA_SCHEMA: dict[str, Any] = {
             "name": "Continuation",
             "kind": "prompt",
             "parent": "prompt",
-            "abstract": True,
             "fields": [],
             "has_body": True,
             "prompt": {
@@ -199,7 +198,6 @@ DEFAULT_METADATA_SCHEMA: dict[str, Any] = {
             "name": "Revise",
             "kind": "prompt",
             "parent": "prompt",
-            "abstract": True,
             "fields": [],
             "has_body": True,
             "prompt": {
@@ -214,7 +212,6 @@ DEFAULT_METADATA_SCHEMA: dict[str, Any] = {
             "name": "General",
             "kind": "prompt",
             "parent": "prompt",
-            "abstract": True,
             "fields": [],
             "has_body": True,
             "prompt": {

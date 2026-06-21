@@ -1540,18 +1540,16 @@ class MetadataValidationTests(unittest.TestCase):
         )
 
     def test_default_schema_seeds_four_prompt_bases(self) -> None:
-        """continuation/revise/general are abstract bases with preset output kinds;
-        snippet is a concrete sibling. Each sub-types prompt directly."""
+        """continuation/revise/general/snippet are concrete bases with preset
+        output kinds; users instantiate them directly or sub-type them to add
+        personality. Inputs live on the instance (not the type) so the bases
+        no longer need to be abstract."""
         schema = self.service.read_metadata_schema()
         for type_id in ("continuation", "revise", "general", "snippet"):
             self.assertIn(type_id, schema.entry_types)
             self.assertEqual(schema.entry_types[type_id].kind, "prompt")
             self.assertEqual(schema.entry_types[type_id].parent, "prompt")
-
-        self.assertTrue(schema.entry_types["continuation"].abstract)
-        self.assertTrue(schema.entry_types["revise"].abstract)
-        self.assertTrue(schema.entry_types["general"].abstract)
-        self.assertFalse(schema.entry_types["snippet"].abstract)
+            self.assertFalse(schema.entry_types[type_id].abstract, msg=type_id)
 
         continuation_prompt = schema.entry_types["continuation"].prompt
         assert continuation_prompt is not None
@@ -1766,8 +1764,9 @@ class MetadataValidationTests(unittest.TestCase):
             UpsertMetadataEntryTypeRequest,
         )
 
-        # Concrete prompt sub-type for the test (all seeded prompt types are
-        # abstract).
+        # Concrete prompt sub-type for the test. The seeded `general` base is
+        # now concrete and could be used directly, but we keep a named sub-type
+        # here so the test exercises the inheritance path explicitly.
         project_layer = next(
             layer
             for layer in self.service.read_metadata_schema_layers().layers

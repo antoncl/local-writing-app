@@ -4324,6 +4324,130 @@ h3 {
   align-items: center;
 }
 
+/* V2: project-level cost chip in the project pane identity area.
+   Small, click-to-expand for per-chat breakdown. */
+.project-cost-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  margin-top: 6px;
+  padding: 2px 8px;
+  font-size: 0.82em;
+  background: transparent;
+  border: 1px solid var(--color-border, #444);
+  border-radius: 10px;
+  color: var(--color-text, #ccc);
+  cursor: pointer;
+  font-variant-numeric: tabular-nums;
+}
+.project-cost-chip:hover {
+  background: var(--color-hover, rgba(255,255,255,0.05));
+}
+.project-cost-caret {
+  font-size: 0.85em;
+  opacity: 0.6;
+}
+.project-cost-breakdown {
+  list-style: none;
+  margin: 4px 0 0;
+  padding: 4px 0;
+  font-size: 0.82em;
+  border-top: 1px dashed var(--color-border-soft, #333);
+}
+.project-cost-breakdown li {
+  display: flex;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 2px 8px;
+}
+.project-cost-breakdown-value {
+  font-variant-numeric: tabular-nums;
+  color: var(--color-muted, #888);
+}
+
+/* V2: per-turn telemetry beneath each assistant message in the
+   transcript. Same understated style as the composer's estimate strip. */
+.chat-turn-meta {
+  margin-top: 4px;
+  font-size: 0.75em;
+  color: var(--color-muted, #888);
+  font-variant-numeric: tabular-nums;
+  cursor: default;
+}
+.chat-turn-cache,
+.chat-turn-cost {
+  margin-left: 4px;
+}
+.chat-turn-cost {
+  color: var(--color-text, #ccc);
+}
+
+/* V2: pre-send token + cost strip above the chat composer. Compact
+   horizontal line — no card, reads as metadata rather than a UI element. */
+.chat-estimate-strip {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 8px 2px;
+  font-size: 0.78em;
+  color: var(--color-muted, #888);
+  cursor: default;
+}
+.chat-estimate-tokens,
+.chat-estimate-cost {
+  font-variant-numeric: tabular-nums;
+}
+.chat-estimate-cost {
+  color: var(--color-text, #ccc);
+}
+.chat-estimate-sep {
+  opacity: 0.6;
+}
+.chat-estimate-chip {
+  font-variant-numeric: tabular-nums;
+  opacity: 0.85;
+}
+
+/* V2: TTL countdown chips. Same understated row as the estimate strip,
+   one step below — only shown when caching_style is "explicit". */
+.chat-ttl-strip {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px 6px;
+  padding: 0 8px 4px;
+  font-size: 0.75em;
+  color: var(--color-muted, #888);
+  font-variant-numeric: tabular-nums;
+  cursor: default;
+}
+.chat-ttl-chip { opacity: 0.85; }
+.chat-ttl-expired {
+  opacity: 0.45;
+  text-decoration: line-through;
+}
+
+/* Same telemetry strip inside the prompt-editor preview pane. */
+.prompt-preview-cache-strip {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px 6px;
+  padding: 2px 8px 6px;
+  font-size: 0.78em;
+  color: var(--color-muted, #888);
+}
+.prompt-preview-cache-chip {
+  font-variant-numeric: tabular-nums;
+}
+.prompt-preview-cache-sep {
+  opacity: 0.6;
+}
+.prompt-preview-cost {
+  font-variant-numeric: tabular-nums;
+}
+
 .chat-context-anchor {
   position: relative;
   margin-right: auto;

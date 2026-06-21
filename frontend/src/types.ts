@@ -384,6 +384,8 @@ export type AIPreviewRequest = {
   text_before?: string;
   text_after?: string;
   commit?: boolean;
+  // V2: when set, preview response includes estimated_cost_usd + caching_style.
+  assistant_id?: string | null;
 };
 
 export type PreviewContentBlock = {
@@ -396,12 +398,27 @@ export type PreviewMessage = {
   blocks: PreviewContentBlock[];
 };
 
+export type PreviewCacheBlock = {
+  label: string;
+  role: string;
+  tokens: number;
+  cache_break_after: boolean;
+};
+
 export type AIPreviewResponse = {
   messages: PreviewMessage[];
   warnings: string[];
   char_count: number;
   session_id?: string | null;
   rendered: boolean;
+  // V2 telemetry. estimated_tokens always populated; cost null when no
+  // assistant or pricing unknown.
+  estimated_tokens?: number;
+  cache_blocks?: PreviewCacheBlock[];
+  estimated_cost_usd?: number | null;
+  provider?: string | null;
+  model?: string | null;
+  caching_style?: "none" | "auto" | "explicit" | null;
 };
 
 export type ChatMessage = {
@@ -419,6 +436,13 @@ export type AIChatRequest = {
   chat_id?: string | null;
 };
 
+export type ChatUsage = {
+  input_tokens: number;
+  cached_input_tokens: number;
+  cache_write_tokens: number;
+  output_tokens: number;
+};
+
 export type AIChatResponse = {
   role: "assistant";
   content: string;
@@ -431,6 +455,9 @@ export type AIChatResponse = {
   stop_reason?: string | null;
   truncated: boolean;
   journal_added?: ChatSessionJournalEntry[];
+  // V2 telemetry. Null on failure or when provider didn't return usage.
+  usage?: ChatUsage | null;
+  cost_usd?: number | null;
 };
 
 export type AIGenerateRequest = {
@@ -467,6 +494,19 @@ export type AIGenerateResponse = {
   stop_reason?: string | null;
   truncated: boolean;
   session_id?: string | null;
+  usage?: ChatUsage | null;
+  cost_usd?: number | null;
+};
+
+export type ProjectCostChatRow = {
+  id: string;
+  title: string;
+  cost_usd: number;
+};
+
+export type ProjectCostResponse = {
+  total_usd: number;
+  chats: ProjectCostChatRow[];
 };
 
 export type ChatSessionMessage = {
@@ -475,6 +515,8 @@ export type ChatSessionMessage = {
   thinking?: string;
   truncated?: boolean;
   journal_added?: ChatSessionJournalEntry[];
+  usage?: ChatUsage | null;
+  cost_usd?: number | null;
 };
 
 export type ChatSessionContextItem = {
@@ -505,6 +547,10 @@ export type ChatSession = {
   messages: ChatSessionMessage[];
   inputs?: Record<string, unknown>;
   journal?: ChatSessionJournalEntry[];
+  // V2: running USD cost (display as EUR via money.ts).
+  cost_usd_total?: number;
+  // V2: per-cache-slot ISO timestamps of last cache write.
+  cache_write_times?: Record<string, string>;
 };
 
 export type ChatSessionSummary = {
@@ -539,6 +585,13 @@ export type SaveChatSessionRequest = {
   messages: ChatSessionMessage[];
   inputs?: Record<string, unknown>;
   journal?: ChatSessionJournalEntry[];
+  // V2: incremental cost to ADD to persisted cost_usd_total. Backend
+  // clamps negatives to 0 (cost is monotonic).
+  cost_delta_usd?: number;
+  // V2: slot labels whose cache_write_times entry should be stamped
+  // with the current server time. Send when the response's usage had
+  // cache_write_tokens > 0 for that slot.
+  cache_write_slots?: string[];
 };
 
 export type DirectoryEntry = {

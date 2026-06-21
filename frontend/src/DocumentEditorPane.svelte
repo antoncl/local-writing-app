@@ -18,6 +18,7 @@
   import ProviderTierPicker from "./ProviderTierPicker.svelte";
   import ReferencePicker from "./ReferencePicker.svelte";
   import { api, HttpError } from "./api";
+  import { formatCostEur, formatTokens } from "./money";
   import PromptInputField from "./PromptInputField.svelte";
   import type { AIPreviewResponse, AssistantEntrySummary, Backlink, EditableDocument, EntryBodyLanguage, EntryMetadata, MetadataFieldDefinition, MetadataSchema, MetadataValue, PromptEntrySummary, PromptInputDefinition } from "./types";
 
@@ -3085,6 +3086,16 @@
             <span class="prompt-preview-status">rendering…</span>
           {:else if promptPreviewResult}
             <span class="prompt-preview-status">{promptPreviewResult.messages.length} msg · {promptPreviewResult.char_count} chars</span>
+            {#if promptPreviewResult.estimated_tokens}
+              <span class="prompt-preview-cost" title="Estimated tokens (universal tokenizer; provider-specific counts may vary slightly).">
+                · {formatTokens(promptPreviewResult.estimated_tokens)} tok
+              </span>
+            {/if}
+            {#if promptPreviewResult.estimated_cost_usd != null}
+              <span class="prompt-preview-cost" title="Estimated input cost (output cost depends on the response; not included).">
+                · {formatCostEur(promptPreviewResult.estimated_cost_usd)}
+              </span>
+            {/if}
           {/if}
           {#if !promptPreviewCollapsed}
             <button type="button" disabled={promptPreviewRunning || !rawBody.trim()} on:click={runPromptPreview}>
@@ -3134,6 +3145,17 @@
           </div>
         {/if}
       </div>
+
+      {#if promptPreviewResult && promptPreviewResult.cache_blocks && promptPreviewResult.cache_blocks.length > 1 && promptPreviewResult.caching_style === "explicit"}
+        <div class="prompt-preview-cache-strip" title="Per-cache-block token sizes. The first segment is the cacheable prefix.">
+          {#each promptPreviewResult.cache_blocks as block, i}
+            <span class="prompt-preview-cache-chip" class:cache-strip-break={block.cache_break_after}>
+              {block.label} {formatTokens(block.tokens)}
+            </span>
+            {#if i < promptPreviewResult.cache_blocks.length - 1}<span class="prompt-preview-cache-sep">·</span>{/if}
+          {/each}
+        </div>
+      {/if}
 
       <div class="prompt-preview-pane-body">
         {#if promptPreviewError}

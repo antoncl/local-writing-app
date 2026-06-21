@@ -8,6 +8,7 @@
   import TopBar from "./TopBar.svelte";
   import { compileMatcher } from "./implicitContextMatcher";
   import { renderChatContent } from "./chatMessageRender";
+  import { formatCostEur, formatTokens } from "./money";
   import type {
     AIHealthResponse,
     AIPolicy,
@@ -160,7 +161,18 @@
   // "" means: use the user's default assistant (resolved server-side).
   let chatAssistantId = "";
   let chatInput = "";
-  let chatHistory: { role: "user" | "assistant"; content: string; truncated?: boolean; thinking?: string }[] = [];
+  let chatHistory: {
+    role: "user" | "assistant";
+    content: string;
+    truncated?: boolean;
+    thinking?: string;
+    journal_added?: ChatSessionJournalEntry[];
+    // V2: per-turn actuals captured from the streaming `done` event.
+    // Persisted on the message itself so they survive reload (see
+    // ChatSessionMessage in backend models.py).
+    usage?: { input_tokens: number; cached_input_tokens: number; cache_write_tokens: number; output_tokens: number } | null;
+    cost_usd?: number | null;
+  }[] = [];
   let chatRunning = false;
   let chatError: string | null = null;
   let chatLastMeta: { provider: string; model: string; latency_ms: number } | null = null;
@@ -201,6 +213,50 @@
   let promptPreviewText: string | null = null;
   let promptPreviewLoading = false;
   let promptPreviewError: string | null = null;
+  // V2: per-cache-slot ISO timestamps from the active chat session.
+  // Drives the TTL countdown chips. Slot → ISO timestamp of last write.
+  // Hydrated from ChatSession.cache_write_times on applyChatSession.
+  let activeChatCacheWriteTimes: Record<string, string> = {};
+  // Tick counter for the live countdown. Bumped every second by an
+  // interval timer set up in onMount; chips read this implicitly via
+  // the `now` reactive to recompute remaining seconds.
+  let ttlTick = 0;
+  // Per-slot TTL in seconds. Mirrors the slot table in
+  // [[decisions-implicit-context]]. New slots get a fallback of 5min.
+  const SLOT_TTL_SECONDS: Record<string, number> = {
+    system: 3600,  // 1h
+    lore: 300,     // 5m
+  };
+  // V2: project-wide cost rollup. Refreshed on project open and after
+  // each chat save. `projectCostBreakdown` is the per-chat list returned
+  // by /api/ai/project-cost; populated only when the user expands the
+  // chip so common loads don't pay for full enumeration.
+  let projectCostTotal: number | null = null;
+  let projectCostBreakdown: { id: string; title: string; cost_usd: number }[] = [];
+  let projectCostExpanded = false;
+  // V2: incremental cost owed to the persisted ChatSession.cost_usd_total
+  // on the NEXT save. Set by streamAssistantReply when a turn lands;
+  // cleared by persistActiveChat after the save succeeds. Non-turn saves
+  // (rename, prompt change) leave it null so they don't double-charge.
+  let pendingTurnCost: number | null = null;
+  // V2: cache slot labels to stamp with the current server time on the
+  // next save. Stamped by [[decisions-implicit-context]]'s slot table:
+  // "system" for the 1h block, "lore" for the 5m block. Same lifecycle
+  // as pendingTurnCost.
+  let pendingTurnCacheWriteSlots: string[] = [];
+  // V2: token + cost estimate for the about-to-send envelope. Recomputed
+  // when prompt / inputs / assistant change. Null when no prompt is
+  // bound (freeform chat with just a brief — no template to render).
+  let chatEstimate: {
+    tokens: number;
+    cost_usd: number | null;
+    caching_style: "none" | "auto" | "explicit" | null;
+    cache_blocks: { label: string; tokens: number; cache_break_after: boolean }[];
+  } | null = null;
+  // Bump to invalidate any in-flight estimate fetch so a stale response
+  // doesn't overwrite a newer one (out-of-order responses are common
+  // when the user changes prompts/inputs rapidly).
+  let chatEstimateToken = 0;
   type MachineSettingsDraft = {
     anthropic_api_key: string;
     openai_api_key: string;
@@ -378,12 +434,16 @@
     // can show the assistant roster without a round-trip when first opened.
     // Failure is non-fatal — both UIs fall back to "default assistant".
     void loadMachineSettings();
+    // V2: drive the TTL countdown chips. One-second tick suffices —
+    // remaining times round to seconds so faster ticks waste CPU.
+    const ttlInterval = setInterval(() => { ttlTick += 1; }, 1000);
     return () => {
       document.removeEventListener("mousemove", movePane);
       document.removeEventListener("mouseup", stopPaneDrag);
       document.removeEventListener("mousemove", resizePane);
       document.removeEventListener("mouseup", stopPaneResize);
       document.removeEventListener("mousedown", handleDocumentMousedown);
+      clearInterval(ttlInterval);
     };
   });
 
@@ -507,10 +567,25 @@
     aiDefaultProvider = nextProject.ai_default_provider ?? "";
     aiDefaultModelClass = nextProject.ai_default_model_class ?? "";
     aiHealthResult = null;
+    projectCostTotal = null;
+    projectCostBreakdown = [];
+    projectCostExpanded = false;
     appState = { name: "projectOpen", project: nextProject };
     fitPanesToViewport();
     focusPane("outline");
     void hydrateChatSessionsForProject();
+    void refreshProjectCost();
+  }
+
+  async function refreshProjectCost(): Promise<void> {
+    try {
+      const result = await api.aiProjectCost();
+      projectCostTotal = result.total_usd;
+      projectCostBreakdown = result.chats ?? [];
+    } catch {
+      // Backend may be offline; leave the chip in its previous state
+      // rather than flickering to a stale "—".
+    }
   }
 
   function resetEditorWorkspace() {
@@ -1098,6 +1173,22 @@
           chatHistory[idx].journal_added = ev.journal_added;
           appendToActiveChatJournal(ev.journal_added);
         }
+        // V2: capture per-turn usage + cost on the message itself, AND
+        // queue the cost to accumulate into ChatSession.cost_usd_total
+        // on the next persistActiveChat call.
+        if (ev.usage) chatHistory[idx].usage = ev.usage;
+        if (typeof ev.cost_usd === "number") {
+          chatHistory[idx].cost_usd = ev.cost_usd;
+          pendingTurnCost = (pendingTurnCost ?? 0) + ev.cost_usd;
+        }
+        if (ev.usage && ev.usage.cache_write_tokens > 0) {
+          // We don't get per-slot writes from the provider — stamp the
+          // known "system" slot. ("lore" stamping would lie when no
+          // implicit-context journal was sent on this turn.)
+          if (!pendingTurnCacheWriteSlots.includes("system")) {
+            pendingTurnCacheWriteSlots = [...pendingTurnCacheWriteSlots, "system"];
+          }
+        }
         chatHistory = chatHistory;
         chatLastMeta = { provider: ev.provider, model: ev.model, latency_ms: ev.latency_ms };
       } else if (ev.type === "error") {
@@ -1266,6 +1357,14 @@
       const derived = deriveChatTitleFromHistory();
       if (derived) title = derived;
     }
+    // V2: pluck the cost delta off pendingTurnCost so the backend accumulates
+    // cost_usd_total. Cleared after the save resolves (see persistActiveChat).
+    // Non-turn saves (rename, settings change) leave it null → backend keeps
+    // existing total unchanged.
+    const cost_delta_usd = pendingTurnCost ?? undefined;
+    const cache_write_slots = pendingTurnCacheWriteSlots.length > 0
+      ? [...pendingTurnCacheWriteSlots]
+      : undefined;
     return {
       title,
       prompt_entry_id: chatPromptEntryId,
@@ -1281,10 +1380,15 @@
         content: m.content,
         thinking: m.thinking ?? "",
         truncated: !!m.truncated,
+        // Per-message V2 telemetry: usage + cost survive reload.
+        usage: m.usage ?? null,
+        cost_usd: m.cost_usd ?? null,
       })),
       // Per-prompt input drafts. Persisted so a half-configured chat
       // (drafts typed but not yet sent) restores on reopen.
       inputs: chatInputDrafts,
+      cost_delta_usd,
+      cache_write_slots,
     };
   }
 
@@ -1296,6 +1400,7 @@
     // session. Newly-loaded chats don't flash any chips.
     activeChatJournal = Array.isArray(session.journal) ? [...session.journal] : [];
     activeChatJournalFreshIds = new Set();
+    activeChatCacheWriteTimes = {...(session.cache_write_times ?? {})};
     chatPromptEntryId = session.prompt_entry_id || "";
     chatAssistantId = session.assistant_id || "";
     // Materialised brief from the session. When a prompt is locked in, this
@@ -1315,6 +1420,9 @@
       content: m.content,
       truncated: !!m.truncated,
       thinking: m.thinking || undefined,
+      journal_added: m.journal_added,
+      usage: m.usage ?? null,
+      cost_usd: m.cost_usd ?? null,
     }));
     chatLastMeta = null;
     chatError = null;
@@ -1337,7 +1445,21 @@
       const saved = await api.saveChatSession(activeChatId, currentChatSessionPayload());
       activeChatTitle = saved.title;
       activeChatPinned = saved.pinned;
+      // V2: pick up server-side cache_write_times stamps from this save
+      // so the TTL countdown reflects the new write times.
+      activeChatCacheWriteTimes = {...(saved.cache_write_times ?? {})};
+      // V2: clear pending cost + cache-slot stamps now that they've been
+      // applied. A failed save leaves them set — next save retries the
+      // accumulation. (Idempotent re-send is wrong; on retry we'd double-
+      // count. Acceptable risk given save failures are rare and noisy.)
+      const hadCost = pendingTurnCost != null;
+      pendingTurnCost = null;
+      pendingTurnCacheWriteSlots = [];
       void refreshChatSessions();
+      // Only refresh the project-cost chip when we actually accumulated.
+      // Plain renames don't move the total; skipping the call keeps the
+      // header quiet during settings/title saves.
+      if (hadCost) void refreshProjectCost();
     } catch (e) {
       // Non-fatal; surface in chat error band so the user notices.
       chatError = `Couldn't save chat: ${(e as Error).message}`;
@@ -1626,6 +1748,92 @@
   function invalidateChatPromptPreview(): void {
     promptPreviewText = null;
     promptPreviewError = null;
+    // V2: also invalidate the cost estimate so the strip refreshes on
+    // the next render trigger. Don't clear `chatEstimate` here — keep
+    // the previous number visible so the strip doesn't flicker between
+    // states; the fetch overwrites it on completion.
+    chatEstimateToken += 1;
+    void fetchChatEstimate();
+  }
+
+  async function fetchChatEstimate(): Promise<void> {
+    // No prompt bound → nothing to estimate. (Freeform chat with just
+    // a brief renders no template; the per-turn actuals on the next
+    // assistant message will tell the user what it cost.)
+    const entry = promptEntries.find((p) => p.id === chatPromptEntryId);
+    if (!entry) {
+      chatEstimate = null;
+      return;
+    }
+    const ourToken = ++chatEstimateToken;
+    const inputs: Record<string, unknown> = {};
+    for (const declared of entry.inputs ?? []) {
+      const raw = chatInputDrafts[declared.name] ?? "";
+      const coerced = coerceChatInputValue(raw, declared.type);
+      if (coerced !== null && coerced !== "") inputs[declared.name] = coerced;
+    }
+    try {
+      const preview = await api.aiPreview({
+        template_source: entry.body_markdown,
+        target_scene_id: "",
+        inputs,
+        commit: false,
+        assistant_id: chatAssistantId || null,
+      });
+      if (ourToken !== chatEstimateToken) return;  // stale response
+      chatEstimate = {
+        tokens: preview.estimated_tokens ?? 0,
+        cost_usd: preview.estimated_cost_usd ?? null,
+        caching_style: preview.caching_style ?? null,
+        cache_blocks: (preview.cache_blocks ?? []).map((b) => ({
+          label: b.label,
+          tokens: b.tokens,
+          cache_break_after: b.cache_break_after,
+        })),
+      };
+    } catch {
+      // Render error already surfaces in the preview popover — keep the
+      // strip quiet (don't overwrite a previous number with "—").
+    }
+  }
+
+  // V2: compute the per-slot TTL chips. Reads `ttlTick` so the chips
+  // refresh once per second; reads `activeChatCacheWriteTimes` so they
+  // refresh when a new turn stamps a slot.
+  function ttlChipsFor(times: Record<string, string>, _tick: number) {
+    if (!times || Object.keys(times).length === 0) return [];
+    const now = Date.now();
+    return Object.entries(times).map(([slot, iso]) => {
+      const writtenAt = Date.parse(iso);
+      const ttl = (SLOT_TTL_SECONDS[slot] ?? 300) * 1000;
+      const remainingMs = writtenAt + ttl - now;
+      const remainingSec = Math.max(0, Math.round(remainingMs / 1000));
+      const label = slot.charAt(0).toUpperCase() + slot.slice(1);
+      const ttlLabel = ttl >= 3600_000 ? "1h" : "5m";
+      let formatted: string;
+      if (remainingSec <= 0) {
+        formatted = "expired";
+      } else if (remainingSec >= 60) {
+        formatted = `${Math.floor(remainingSec / 60)}m`;
+      } else {
+        formatted = `${remainingSec}s`;
+      }
+      return { slot, label, ttlLabel, formatted, expired: remainingSec <= 0 };
+    });
+  }
+  $: ttlChips = ttlChipsFor(activeChatCacheWriteTimes, ttlTick);
+
+  // Re-fetch the chat estimate whenever the inputs that drive it change.
+  // Reading each dep on its own line (per [[feedback-svelte5-reactivity-traps]])
+  // forces Svelte to track them; bundling them into the function call alone
+  // wouldn't. `promptEntries.length` is the trigger we care about — we want
+  // to retry once the prompt roster has loaded.
+  $: {
+    chatPromptEntryId;
+    chatAssistantId;
+    chatInputDrafts;
+    promptEntries.length;
+    void fetchChatEstimate();
   }
 
   function clearChatPrompt() {
@@ -3704,6 +3912,30 @@
         <div class="project-identity">
           <strong class="project-identity-title">{projectTitle}</strong>
           <code class="project-identity-path" title={projectPath}>{projectPath}</code>
+          {#if projectCostTotal != null && projectCostTotal > 0}
+            <button
+              type="button"
+              class="project-cost-chip"
+              title="AI cost across all chats in this project. Click to break down by chat."
+              on:click={() => (projectCostExpanded = !projectCostExpanded)}
+            >
+              {formatCostEur(projectCostTotal)} this project
+              <span class="project-cost-caret" aria-hidden="true">{projectCostExpanded ? "▾" : "▸"}</span>
+            </button>
+            {#if projectCostExpanded}
+              <ul class="project-cost-breakdown">
+                {#each projectCostBreakdown.filter((r) => r.cost_usd > 0) as row (row.id)}
+                  <li>
+                    <span class="project-cost-breakdown-title">{row.title}</span>
+                    <span class="project-cost-breakdown-value">{formatCostEur(row.cost_usd)}</span>
+                  </li>
+                {/each}
+                {#if projectCostBreakdown.filter((r) => r.cost_usd > 0).length === 0}
+                  <li class="muted">No chats with cost yet.</li>
+                {/if}
+              </ul>
+            {/if}
+          {/if}
           <div class="button-row">
             <button type="button" on:click={validateProject}>Validate</button>
           </div>
@@ -4665,6 +4897,15 @@
                 {/each}
               </div>
             {/if}
+            {#if message.role === "assistant" && message.usage}
+              {@const totalIn = message.usage.input_tokens + message.usage.cached_input_tokens + message.usage.cache_write_tokens}
+              {@const cachePct = totalIn > 0 ? Math.round((message.usage.cached_input_tokens / totalIn) * 100) : 0}
+              <div class="chat-turn-meta" title={`Input: ${totalIn} tok (${message.usage.cached_input_tokens} cached, ${message.usage.cache_write_tokens} written). Output: ${message.usage.output_tokens} tok.`}>
+                {totalIn} → {message.usage.output_tokens} tok
+                {#if cachePct > 0}<span class="chat-turn-cache">· {cachePct}% cached</span>{/if}
+                {#if message.cost_usd != null}<span class="chat-turn-cost">· {formatCostEur(message.cost_usd)}</span>{/if}
+              </div>
+            {/if}
           </div>
         {/each}
       </div>
@@ -4731,6 +4972,30 @@
         </div>
       {/if}
 
+      {#if chatEstimate}
+        <div class="chat-estimate-strip" title="Estimated input cost for the bound prompt. Output cost depends on the response.">
+          <span class="chat-estimate-tokens">{formatTokens(chatEstimate.tokens)} tok</span>
+          <span class="chat-estimate-sep">·</span>
+          <span class="chat-estimate-cost">{formatCostEur(chatEstimate.cost_usd)}</span>
+          {#if chatEstimate.caching_style === "explicit" && chatEstimate.cache_blocks.length > 1}
+            <span class="chat-estimate-sep">·</span>
+            {#each chatEstimate.cache_blocks as block, i}
+              <span class="chat-estimate-chip">{block.label} {formatTokens(block.tokens)}</span>
+              {#if i < chatEstimate.cache_blocks.length - 1}<span class="chat-estimate-sep">·</span>{/if}
+            {/each}
+          {/if}
+        </div>
+      {/if}
+      {#if ttlChips.length > 0 && chatEstimate?.caching_style === "explicit"}
+        <div class="chat-ttl-strip" title="Cache lifetime estimates. Provider may evict early under load — these are not authoritative.">
+          {#each ttlChips as chip, i}
+            <span class="chat-ttl-chip" class:chat-ttl-expired={chip.expired}>
+              {chip.label} ({chip.ttlLabel}) {chip.formatted}
+            </span>
+            {#if i < ttlChips.length - 1}<span class="chat-estimate-sep">·</span>{/if}
+          {/each}
+        </div>
+      {/if}
       <PlainTextEditor
         class="chat-input"
         value={chatInput}

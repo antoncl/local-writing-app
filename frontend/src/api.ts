@@ -13,6 +13,7 @@ import type {
   AIPreviewRequest,
   AIPreviewResponse,
   BacklinksResponse,
+  ProjectCostResponse,
   ChatSession,
   ChatSessionList,
   CreateChatSessionRequest,
@@ -280,6 +281,9 @@ export const api = {
   },
   aiContextPreset(kind: "full_outline" | "full_text") {
     return request<AIContextPresetResponse>(`/ai/context-preset?kind=${encodeURIComponent(kind)}`);
+  },
+  aiProjectCost() {
+    return request<ProjectCostResponse>("/ai/project-cost");
   },
   getStructure() {
     return request<StructureDocument>("/structure");

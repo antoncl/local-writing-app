@@ -2,7 +2,38 @@ from __future__ import annotations
 
 from typing import Any, Literal
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
+
+
+class SelectOption(BaseModel):
+    """One choice in a select / multi_select field, or a select prompt input.
+
+    Stored as `{value, label?, color?}`. `value` is what's persisted on
+    the entry; `label` (optional) is the display text — defaults to value
+    if omitted. `color` is an optional machine-palette swatch id, used by
+    the ColoredSelect frontend widget to render a tinted pill.
+
+    Bare strings are accepted as a shortcut (`["draft", "complete"]` →
+    `[{"value": "draft"}, {"value": "complete"}]`) so existing YAMLs and
+    test fixtures keep working without migration."""
+
+    # Empty string is allowed — many select fields use "" as a "no value
+    # chosen" placeholder option. Non-string types are rejected.
+    value: str
+    label: str | None = None
+    color: str | None = None
+
+
+def _normalize_select_options(value: Any) -> list[Any]:
+    if not isinstance(value, list):
+        return value
+    out: list[Any] = []
+    for item in value:
+        if isinstance(item, str):
+            out.append({"value": item})
+        else:
+            out.append(item)
+    return out
 
 
 class CreateProjectRequest(BaseModel):
@@ -61,6 +92,14 @@ class StructureNode(BaseModel):
     type: str
     title: str
     scene_id: str | None = None
+    # Scene's current status value (the select-option value, e.g. "draft").
+    # Surfaced here so the manuscript tree can render a colored stripe
+    # without the frontend doing a per-scene fetch. None for non-leaf
+    # nodes (acts/chapters/etc.) and for scenes without a status set.
+    status: str | None = None
+    # Scene's instance-level color override (metadata.color, a palette
+    # swatch id) — lets the tree row reflect per-scene color tweaks.
+    color: str | None = None
     computed_metadata: dict[str, Any] = Field(default_factory=dict)
     children: list["StructureNode"] = Field(default_factory=list)
 
@@ -86,10 +125,16 @@ class MetadataFieldDefinition(BaseModel):
         "entity_ref_list",
         "tags",
         "computed",
+        "color",
     ]
-    options: list[str] = Field(default_factory=list)
+    options: list[SelectOption] = Field(default_factory=list)
     target: dict[str, str] | None = None
     computed: dict[str, str] | None = None
+
+    @field_validator("options", mode="before")
+    @classmethod
+    def _accept_bare_strings(cls, value: Any) -> Any:
+        return _normalize_select_options(value)
 
 
 PromptInputType = Literal[
@@ -101,6 +146,7 @@ PromptInputType = Literal[
     "entity_ref",
     "entity_ref_list",
     "context_pick",
+    "color",
 ]
 
 
@@ -109,8 +155,13 @@ class PromptInputDefinition(BaseModel):
     type: PromptInputType = "text"
     label: str | None = None
     default: Any | None = None
-    options: list[str] = Field(default_factory=list)
+    options: list[SelectOption] = Field(default_factory=list)
     required: bool = False
+
+    @field_validator("options", mode="before")
+    @classmethod
+    def _accept_bare_strings(cls, value: Any) -> Any:
+        return _normalize_select_options(value)
     # When type is entity_ref / entity_ref_list, `target` constrains which
     # entries the dispatch-form picker offers. Same shape as the existing
     # `target` on entity_ref metadata fields: {"kind": "scene"|"lore"} and
@@ -163,6 +214,18 @@ class EntryTypeDefinition(BaseModel):
     # this, `roleplay`'s starter template would reference an
     # `input.character` that doesn't exist on a freshly-created prompt.
     default_inputs: list[PromptInputDefinition] = Field(default_factory=list)
+    # Type-level color (machine palette swatch id). Resolves to a hex via
+    # the machine palette. Child types inherit unless they set their own.
+    # Entries of this type fall back to this color when they don't carry
+    # an instance-level override. None = no color set; resolver walks
+    # the parent chain, then the kind-default table, then yields null.
+    color: str | None = None
+    # The pre-inheritance color value (mirrors `own_fields` for the fields
+    # list). The editor uses this to distinguish "color set on this type"
+    # from "color inherited from parent" — letting authors clear their own
+    # override without disturbing the parent's value. Computed by the
+    # schema inheritance resolver; not authored directly.
+    own_color: str | None = None
     prompt: PromptEntryTypeExtras | None = None
 
 
@@ -547,6 +610,19 @@ class RecentProject(BaseModel):
     opened_at: str   # ISO 8601
 
 
+class Swatch(BaseModel):
+    """A named entry in the machine-level color palette.
+
+    `id` is stable — entries, type defaults, and select options reference
+    a swatch by id, never by hex. Renaming or recoloring a swatch updates
+    everything that references it. `hex` is validated as `#RRGGBB`.
+    """
+
+    id: str = Field(min_length=1, pattern=r"^[a-z0-9][a-z0-9-]*$")
+    label: str = Field(min_length=1)
+    hex: str = Field(pattern=r"^#[0-9A-Fa-f]{6}$")
+
+
 class MachineSettingsView(BaseModel):
     version: int
     providers: ProviderCredentialsView
@@ -554,6 +630,7 @@ class MachineSettingsView(BaseModel):
     default_models: dict[str, str]
     default_projects_folder: str = ""
     recent_projects: list[RecentProject] = Field(default_factory=list)
+    palette: list[Swatch] = Field(default_factory=list)
     config_path: str
 
 
@@ -572,6 +649,8 @@ class MachineSettingsUpdate(BaseModel):
     # Replace the recent-projects list (e.g. user removed a stale entry).
     # None = leave untouched; an explicit list rewrites it verbatim.
     recent_projects: list[RecentProject] | None = None
+    # Replace the whole palette list. None = leave untouched.
+    palette: list[Swatch] | None = None
 
 
 class AIHealthRequest(BaseModel):

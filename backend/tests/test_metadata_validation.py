@@ -221,6 +221,51 @@ class MetadataValidationTests(unittest.TestCase):
         self.assertTrue(schema.entry_types["scene"].has_body)
         self.assertTrue(schema.entry_types["character"].has_body)
 
+    def test_status_field_seeds_with_colored_options(self) -> None:
+        """The default `status` field ships with colored options. Verifies
+        the SelectOption wire shape and the seed colors."""
+        schema = self.service.read_metadata_schema()
+        status = schema.fields["status"]
+        self.assertEqual(status.type, "select")
+        # Stored as SelectOption objects with stable colors.
+        values = [(o.value, o.color) for o in status.options]
+        self.assertEqual(
+            values,
+            [("draft", "stone"), ("revised", "amber"), ("complete", "moss")],
+        )
+
+    def test_select_options_accept_bare_strings(self) -> None:
+        """Existing YAMLs with `options: [a, b]` keep working via the
+        back-compat validator on MetadataFieldDefinition."""
+        from app.models import MetadataFieldDefinition
+
+        field = MetadataFieldDefinition.model_validate({
+            "name": "Tier",
+            "type": "select",
+            "options": ["cheap", "balanced", "best"],
+        })
+        self.assertEqual([o.value for o in field.options], ["cheap", "balanced", "best"])
+        self.assertTrue(all(o.color is None for o in field.options))
+
+    def test_color_inherits_through_parent_chain(self) -> None:
+        """Built-in seeds set color on scene/lore_entry/prompt/assistant; child
+        types inherit unless they override. Verifies the inheritance list in
+        _resolve_metadata_schema_inheritance picks up `color`."""
+        schema = self.service.read_metadata_schema()
+        # Direct seeds.
+        self.assertEqual(schema.entry_types["scene"].color, "forest")
+        self.assertEqual(schema.entry_types["lore_entry"].color, "slate-blue")
+        self.assertEqual(schema.entry_types["prompt"].color, "warm-brown")
+        self.assertEqual(schema.entry_types["assistant"].color, "graphite")
+        # Inherited through one parent link.
+        self.assertEqual(schema.entry_types["character"].color, "slate-blue")
+        self.assertEqual(schema.entry_types["place"].color, "slate-blue")
+        self.assertEqual(schema.entry_types["item"].color, "slate-blue")
+        self.assertEqual(schema.entry_types["continuation"].color, "warm-brown")
+        self.assertEqual(schema.entry_types["general"].color, "warm-brown")
+        # Inherited through two parent links (roleplay → continuation → prompt).
+        self.assertEqual(schema.entry_types["roleplay"].color, "warm-brown")
+
     def test_counter_among_siblings_for_acts(self) -> None:
         from app.models import CreateStructureNodeRequest
 
@@ -1811,7 +1856,10 @@ class MetadataValidationTests(unittest.TestCase):
         self.assertEqual(reread.inputs[0].name, "topic")
         self.assertTrue(reread.inputs[0].required)
         self.assertEqual(reread.inputs[1].type, "select")
-        self.assertEqual(reread.inputs[1].options, ["quick", "thorough"])
+        # Options round-trip as SelectOption objects (with `value` /
+        # optional label / optional color). Bare strings are still
+        # accepted on the wire via the back-compat validator.
+        self.assertEqual([opt.value for opt in reread.inputs[1].options], ["quick", "thorough"])
         self.assertEqual(reread.inputs[1].default, "quick")
 
         # And the list endpoint should surface inputs too (used by the chat

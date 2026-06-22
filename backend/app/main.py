@@ -657,6 +657,7 @@ def _build_settings_view(masked: dict[str, Any]) -> MachineSettingsView:
         default_models=masked["default_models"],
         default_projects_folder=masked.get("default_projects_folder", ""),
         recent_projects=masked.get("recent_projects", []),
+        palette=masked.get("palette", []),
         config_path=str(machine_settings_service.config_path()),
     )
 

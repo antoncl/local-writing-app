@@ -136,12 +136,14 @@ DEFAULT_METADATA_SCHEMA: dict[str, Any] = {
             "parent": "manuscript_structure",
             "fields": ["status", "pov", "characters", "locations", "dynamics", "word_count"],
             "has_body": True,
+            "color": "forest",
         },
         "lore_entry": {
             "name": "Entry",
             "kind": "lore",
             "abstract": True,
             "fields": ["aliases", "tags", "related_entries"],
+            "color": "slate-blue",
         },
         "character": {
             "name": "Character",
@@ -179,6 +181,7 @@ DEFAULT_METADATA_SCHEMA: dict[str, Any] = {
             "has_body": True,
             "body_editor": "code",
             "body_language": "jinja2",
+            "color": "warm-brown",
         },
         "continuation": {
             "name": "Continuation",
@@ -307,6 +310,7 @@ DEFAULT_METADATA_SCHEMA: dict[str, Any] = {
                 "is_default",
             ],
             "has_body": False,
+            "color": "graphite",
         },
         "project": {
             "name": "Project",
@@ -320,13 +324,22 @@ DEFAULT_METADATA_SCHEMA: dict[str, Any] = {
                 "series_number",
             ],
             "has_body": True,
+            "color": "violet",
         },
     },
     "fields": {
         "status": {
             "name": "Status",
             "type": "select",
-            "options": ["draft", "revised", "complete"],
+            # Colored options demonstrate the ColoredSelect path. Authors
+            # can recolor or rename via the Detail Field editor; storage
+            # is the SelectOption object shape — bare strings still parse
+            # via the back-compat validator on MetadataFieldDefinition.
+            "options": [
+                {"value": "draft", "color": "stone"},
+                {"value": "revised", "color": "amber"},
+                {"value": "complete", "color": "moss"},
+            ],
         },
         "summary": {"name": "Summary", "type": "long_text"},
         "dynamics": {
@@ -743,7 +756,28 @@ class ProjectService:
         data = self._read_yaml(root / "manuscript.structure.yaml")
         document = StructureDocument.model_validate(data)
         schema = self.read_metadata_schema()
-        self._inject_structure_computed_metadata(document.root, document.root, schema)
+        # One-shot scene front-matter scan: avoids per-leaf read_scene
+        # (which does full body parsing). Builds {id → (status, color)}
+        # so each tree node gets O(1) lookup during the recursive walk.
+        index = self._build_node_index(root)
+        scene_front: dict[str, tuple[str | None, str | None]] = {}
+        for scene_id, entry in index.by_id.items():
+            if entry.kind != "scene":
+                continue
+            try:
+                fm = self._read_front_matter_only(entry.path)
+            except Exception:  # noqa: BLE001
+                continue
+            status_raw = fm.get("status")
+            status = status_raw if isinstance(status_raw, str) and status_raw else None
+            meta = fm.get("metadata")
+            color = None
+            if isinstance(meta, dict):
+                cand = meta.get("color")
+                if isinstance(cand, str) and cand:
+                    color = cand
+            scene_front[scene_id] = (status, color)
+        self._inject_structure_computed_metadata(document.root, document.root, schema, scene_front)
         return document
 
     def _inject_structure_computed_metadata(
@@ -751,6 +785,7 @@ class ProjectService:
         node: StructureNode,
         root: StructureNode,
         schema: MetadataSchema,
+        scene_front: dict[str, tuple[str | None, str | None]] | None = None,
     ) -> None:
         entry_definition = schema.entry_types.get(node.type)
         if entry_definition is not None and node.scene_id:
@@ -766,12 +801,23 @@ class ProjectService:
                     if value is not None:
                         computed[field_id] = value
             node.computed_metadata = computed
+            # Surface scene.status + scene.metadata.color via the pre-built
+            # front-matter index so the manuscript tree can render colored
+            # stripes without per-row file reads.
+            if scene_front is not None:
+                pair = scene_front.get(node.scene_id)
+                if pair:
+                    node.status, node.color = pair
         for child in node.children:
-            self._inject_structure_computed_metadata(child, root, schema)
+            self._inject_structure_computed_metadata(child, root, schema, scene_front)
 
     def _structure_dump_for_storage(self, structure: StructureDocument) -> dict[str, Any]:
         raw = structure.model_dump()
         self._strip_key_recursively(raw, "computed_metadata")
+        # `status` and `color` are projections of the scene's own state —
+        # don't echo them into the structure YAML; they'd drift out of sync.
+        self._strip_key_recursively(raw, "status")
+        self._strip_key_recursively(raw, "color")
         return raw
 
     def _strip_key_recursively(self, data: Any, key: str) -> None:
@@ -1324,10 +1370,13 @@ class ProjectService:
             return None
         if not old_field.options or len(old_field.options) != len(new_field.options):
             return None
+        # Compare by `value` since options are now SelectOption objects.
+        # A color-only edit (same value, different color) doesn't migrate
+        # entry data — only value renames do.
         migration = {
-            old_option: new_option
+            old_option.value: new_option.value
             for old_option, new_option in zip(old_field.options, new_field.options, strict=True)
-            if old_option != new_option
+            if old_option.value != new_option.value
         }
         return migration or None
 
@@ -1469,6 +1518,11 @@ class ProjectService:
             next_entry_type = deepcopy(raw_entry_type)
             local_fields = raw_entry_type.get("fields", [])
             next_entry_type["own_fields"] = deepcopy(local_fields) if isinstance(local_fields, list) else []
+            # `own_color` mirrors `own_fields` — captures the value as
+            # declared on this type before parent inheritance overwrites
+            # the effective `color`. The editor uses this to distinguish
+            # "set on this type" from "inherited".
+            next_entry_type["own_color"] = raw_entry_type.get("color")
             next_entry_type["fields"] = self._merge_metadata_field_lists(
                 inherited_fields,
                 local_fields,
@@ -1476,7 +1530,7 @@ class ProjectService:
             if isinstance(parent_id, str) and parent_id in entry_types:
                 parent_definition = resolved.get(parent_id)
                 if isinstance(parent_definition, dict):
-                    for inheritable in ("display_template", "has_body", "body_editor", "body_language", "default_body", "default_inputs"):
+                    for inheritable in ("display_template", "has_body", "body_editor", "body_language", "default_body", "default_inputs", "color"):
                         if inheritable not in next_entry_type and inheritable in parent_definition:
                             next_entry_type[inheritable] = parent_definition[inheritable]
                     parent_prompt = parent_definition.get("prompt")
@@ -3495,8 +3549,9 @@ class ProjectService:
         if field.type == "select":
             if not isinstance(value, str):
                 return [f"{label} metadata field {field_id} must be text."]
-            if field.options and value not in field.options:
-                return [f"{label} metadata field {field_id} must be one of: {', '.join(field.options)}."]
+            allowed = [opt.value for opt in field.options]
+            if allowed and value not in allowed:
+                return [f"{label} metadata field {field_id} must be one of: {', '.join(allowed)}."]
             return []
         if field.type == "number":
             if isinstance(value, bool) or not isinstance(value, int | float):

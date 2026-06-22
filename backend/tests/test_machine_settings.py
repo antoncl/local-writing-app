@@ -105,22 +105,32 @@ class RecentProjectsEndpointTests(unittest.TestCase):
 
 
 class DefaultProjectsFolderTests(unittest.TestCase):
+    """Use temp-dir paths instead of hardcoded `C:/...` literals — those
+    look real enough to confuse anyone scanning a live config.yaml. With
+    the autouse conftest fixture redirecting config_path to a tmp dir,
+    the value still doesn't leak; using a tmp-derived path is just defensive."""
+
     def setUp(self) -> None:
+        self.tmp = TemporaryDirectory()
+        self.projects_folder = str(Path(self.tmp.name) / "writing")
         self.client = TestClient(app)
+
+    def tearDown(self) -> None:
+        self.tmp.cleanup()
 
     def test_default_projects_folder_roundtrips_through_update(self) -> None:
         response = self.client.put(
             "/api/settings/machine",
-            json={"default_projects_folder": "C:/Users/me/writing"},
+            json={"default_projects_folder": self.projects_folder},
         )
         self.assertEqual(response.status_code, 200, response.text)
         view = self.client.get("/api/settings/machine").json()
-        self.assertEqual(view["default_projects_folder"], "C:/Users/me/writing")
+        self.assertEqual(view["default_projects_folder"], self.projects_folder)
 
     def test_omitting_default_projects_folder_keeps_current(self) -> None:
         self.client.put(
             "/api/settings/machine",
-            json={"default_projects_folder": "C:/keep-me"},
+            json={"default_projects_folder": self.projects_folder},
         )
         # Subsequent update of a different field doesn't clobber it.
         self.client.put(
@@ -128,7 +138,7 @@ class DefaultProjectsFolderTests(unittest.TestCase):
             json={"default_provider": "openai"},
         )
         view = self.client.get("/api/settings/machine").json()
-        self.assertEqual(view["default_projects_folder"], "C:/keep-me")
+        self.assertEqual(view["default_projects_folder"], self.projects_folder)
 
 
 class RecentProjectsRewriteTests(unittest.TestCase):
@@ -158,6 +168,74 @@ class RecentProjectsRewriteTests(unittest.TestCase):
         )
         view = self.client.get("/api/settings/machine").json()
         self.assertEqual(len(view["recent_projects"]), 1)
+
+
+class PaletteTests(unittest.TestCase):
+    """Palette state: seeded defaults, rewrite via PUT, validation."""
+
+    def setUp(self) -> None:
+        self.client = TestClient(app)
+
+    def test_seeded_palette_on_fresh_settings(self) -> None:
+        view = self.client.get("/api/settings/machine").json()
+        palette = view["palette"]
+        # The seed list is non-empty and includes the four built-in kind
+        # colors that the context picker historically hardcoded.
+        self.assertGreater(len(palette), 4)
+        ids = {s["id"] for s in palette}
+        for required in ("forest", "slate-blue", "warm-brown", "graphite"):
+            self.assertIn(required, ids)
+
+    def test_palette_rewrite_replaces_list(self) -> None:
+        response = self.client.put(
+            "/api/settings/machine",
+            json={
+                "palette": [
+                    {"id": "red", "label": "Red", "hex": "#cc0000"},
+                    {"id": "blue", "label": "Blue", "hex": "#0044cc"},
+                ]
+            },
+        )
+        self.assertEqual(response.status_code, 200, response.text)
+        view = self.client.get("/api/settings/machine").json()
+        ids = [s["id"] for s in view["palette"]]
+        # User-set swatches are at the FRONT (untouched), seeded swatches
+        # the user is missing are appended at the END by _top_up_palette
+        # so they don't have to manually re-add the latest defaults.
+        self.assertEqual(ids[:2], ["red", "blue"])
+        for seed_id in ("forest", "slate-blue", "warm-brown", "graphite"):
+            self.assertIn(seed_id, ids)
+
+    def test_palette_rejects_bad_hex(self) -> None:
+        response = self.client.put(
+            "/api/settings/machine",
+            json={"palette": [{"id": "x", "label": "X", "hex": "not-a-color"}]},
+        )
+        self.assertEqual(response.status_code, 422, response.text)
+
+    def test_palette_rejects_bad_id(self) -> None:
+        # ids must be slug-shaped (lowercase, alphanumeric, dashes).
+        response = self.client.put(
+            "/api/settings/machine",
+            json={"palette": [{"id": "Has Spaces", "label": "X", "hex": "#cc0000"}]},
+        )
+        self.assertEqual(response.status_code, 422, response.text)
+
+    def test_omitting_palette_keeps_current(self) -> None:
+        # Rewrite, then update a different field — user-set swatches stay put.
+        # (Top-up also re-adds any missing seed swatches; the user's "only"
+        # swatch must remain at the front, untouched.)
+        self.client.put(
+            "/api/settings/machine",
+            json={"palette": [{"id": "only", "label": "Only", "hex": "#abcdef"}]},
+        )
+        self.client.put(
+            "/api/settings/machine",
+            json={"default_provider": "openai"},
+        )
+        view = self.client.get("/api/settings/machine").json()
+        ids = [s["id"] for s in view["palette"]]
+        self.assertEqual(ids[0], "only")
 
 
 if __name__ == "__main__":

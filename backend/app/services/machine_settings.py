@@ -9,7 +9,7 @@ from typing import Any
 import yaml
 from pydantic import BaseModel, Field
 
-from app.models import RecentProject
+from app.models import RecentProject, Swatch
 
 
 APP_NAME = "local-writing-app"
@@ -23,6 +23,47 @@ DEFAULT_MODELS: dict[str, str] = {
     "openrouter": "anthropic/claude-haiku-4.5",
     "ollama": "llama3.2",
 }
+
+
+# The seed palette. Exactly 30 swatches so the SwatchPicker grid fills
+# its default 5×6 layout with no empty cells. The first four ids
+# (forest, slate-blue, warm-brown, graphite) preserve the historical
+# `--ctx-k-*` values from ContextPicker.svelte so the picker's chips
+# and monograms keep their look once the hardcoded vars are removed.
+# The rest is a writer-friendly spread across hues, picked to read on
+# both light and dark backgrounds.
+DEFAULT_PALETTE: list[dict[str, str]] = [
+    {"id": "forest", "label": "Forest", "hex": "#3f7d68"},
+    {"id": "slate-blue", "label": "Slate Blue", "hex": "#4f7390"},
+    {"id": "warm-brown", "label": "Warm Brown", "hex": "#976b46"},
+    {"id": "graphite", "label": "Graphite", "hex": "#5f6f67"},
+    {"id": "sage", "label": "Sage", "hex": "#7a9b7e"},
+    {"id": "moss", "label": "Moss", "hex": "#5b7a3a"},
+    {"id": "olive", "label": "Olive", "hex": "#8a8a3a"},
+    {"id": "mint", "label": "Mint", "hex": "#5fae8c"},
+    {"id": "teal", "label": "Teal", "hex": "#3f7d80"},
+    {"id": "ocean", "label": "Ocean", "hex": "#2f6680"},
+    {"id": "sky", "label": "Sky", "hex": "#6f9fc4"},
+    {"id": "navy", "label": "Navy", "hex": "#2d3f5e"},
+    {"id": "indigo", "label": "Indigo", "hex": "#4a5896"},
+    {"id": "lavender", "label": "Lavender", "hex": "#8c84bf"},
+    {"id": "violet", "label": "Violet", "hex": "#6b4d8a"},
+    {"id": "mauve", "label": "Mauve", "hex": "#8e6a7e"},
+    {"id": "plum", "label": "Plum", "hex": "#8a3f6a"},
+    {"id": "fuchsia", "label": "Fuchsia", "hex": "#b04590"},
+    {"id": "rose", "label": "Rose", "hex": "#b0567a"},
+    {"id": "crimson", "label": "Crimson", "hex": "#a8423f"},
+    {"id": "brick", "label": "Brick", "hex": "#8a3f2a"},
+    {"id": "coral", "label": "Coral", "hex": "#c46a52"},
+    {"id": "rust", "label": "Rust", "hex": "#9a5a36"},
+    {"id": "chocolate", "label": "Chocolate", "hex": "#704a2e"},
+    {"id": "amber", "label": "Amber", "hex": "#c08a3a"},
+    {"id": "ochre", "label": "Ochre", "hex": "#a08236"},
+    {"id": "sand", "label": "Sand", "hex": "#c0a874"},
+    {"id": "stone", "label": "Stone", "hex": "#7d7768"},
+    {"id": "silver", "label": "Silver", "hex": "#94a09a"},
+    {"id": "charcoal", "label": "Charcoal", "hex": "#3a423f"},
+]
 
 
 class ProviderCredentials(BaseModel):
@@ -47,6 +88,10 @@ def _slugify(text: str) -> str:
     return cleaned or "assistant"
 
 
+def _seed_palette() -> list[Swatch]:
+    return [Swatch(**entry) for entry in DEFAULT_PALETTE]
+
+
 class MachineSettings(BaseModel):
     version: int = 1
     providers: ProviderCredentials = Field(default_factory=ProviderCredentials)
@@ -54,6 +99,7 @@ class MachineSettings(BaseModel):
     default_models: dict[str, str] = Field(default_factory=lambda: dict(DEFAULT_MODELS))
     default_projects_folder: str = ""
     recent_projects: list[RecentProject] = Field(default_factory=list)
+    palette: list[Swatch] = Field(default_factory=_seed_palette)
 
 
 def config_dir() -> Path:
@@ -107,7 +153,24 @@ def load_settings() -> MachineSettings:
                 except Exception:
                     settings = MachineSettings()
     _migrate_default_models_to_files_if_empty(settings)
+    _top_up_palette(settings)
     return settings
+
+
+def _top_up_palette(settings: MachineSettings) -> None:
+    """Append any seed swatches the user's stored palette is missing.
+
+    Purely additive — never reorders, renames, or removes user swatches.
+    Handles the seed growing over time without forcing existing users to
+    manually re-add new colors. If the user *deleted* a seed swatch on
+    purpose, it'll come back here; reset is a known limitation."""
+    existing_ids = {s.id for s in settings.palette}
+    appended: list[Swatch] = []
+    for entry in DEFAULT_PALETTE:
+        if entry["id"] not in existing_ids:
+            appended.append(Swatch(**entry))
+    if appended:
+        settings.palette = list(settings.palette) + appended
 
 
 def save_settings(settings: MachineSettings) -> None:
@@ -140,6 +203,14 @@ def merge_update(current: MachineSettings, patch: dict[str, Any]) -> MachineSett
         # An explicit list rewrites the recents — used when the user removes
         # a stale entry from the UI.
         base["recent_projects"] = patch["recent_projects"]
+    if "palette" in patch and patch["palette"] is not None:
+        # The palette is edited as a whole list in the settings UI — reorder,
+        # add, rename, delete all yield a new list. Validate via Pydantic so
+        # malformed swatches (bad hex, empty id) raise before save.
+        base["palette"] = [
+            Swatch.model_validate(s).model_dump(mode="json")
+            for s in patch["palette"]
+        ]
     providers_patch = patch.get("providers")
     if isinstance(providers_patch, dict):
         providers = base.setdefault("providers", {})

@@ -3,6 +3,7 @@
   import { api } from "./api";
   import CodeEditor from "./CodeEditor.svelte";
   import NodeEditor from "./NodeEditor.svelte";
+  import NodeRow from "./NodeRow.svelte";
   import PlainTextEditor from "./PlainTextEditor.svelte";
   import PromptInputField from "./PromptInputField.svelte";
   import TopBar from "./TopBar.svelte";
@@ -4231,22 +4232,14 @@
                     if (s) return s;
                     return resolveColorForType(entry.entry_type, metadataSchema);
                   })()}
-                  <button
-                    class:active={focusedEditorPane?.document?.type === "lore" && focusedEditorPane.document.id === entry.id}
-                    class:has-row-stripe={!!entrySwatch}
-                    class="schema-row system-row lore-row"
-                    type="button"
-                    style={entrySwatch ? `--row-stripe: ${entrySwatch.hex}` : ""}
+                  <NodeRow
+                    title={entry.title}
+                    detail={detailText}
+                    active={focusedEditorPane?.document?.type === "lore" && focusedEditorPane.document.id === entry.id}
+                    stripeColor={entrySwatch?.hex ?? null}
+                    onClick={() => openLoreEntryInEditorPane(entry.id)}
                     on:mousedown={(event) => event.stopPropagation()}
-                    on:click={() => openLoreEntryInEditorPane(entry.id)}
-                  >
-                    <span>
-                      <strong>{entry.title}</strong>
-                      {#if detailText}
-                        <small>{detailText}</small>
-                      {/if}
-                    </span>
-                  </button>
+                  />
                 {/each}
               </div>
             {/if}
@@ -4550,9 +4543,11 @@
             <button class="pin-button" type="button" on:click={() => newPromptEntry(subtype.id)}>+ Entry</button>
           </header>
           {#each promptEntries.filter((e) => e.entry_type === subtype.id) as entry (entry.id)}
-            <button class:active={focusedEditorPane?.document?.type === "prompt" && focusedEditorPane.document.id === entry.id} class="prompt-entry-row" type="button" on:click={() => openPromptEntryInEditorPane(entry.id)}>
-              <span><strong>{entry.title}</strong></span>
-            </button>
+            <NodeRow
+              title={entry.title}
+              active={focusedEditorPane?.document?.type === "prompt" && focusedEditorPane.document.id === entry.id}
+              onClick={() => openPromptEntryInEditorPane(entry.id)}
+            />
           {/each}
         </div>
       {/each}
@@ -4580,35 +4575,34 @@
             <small>{group.entries.length}</small>
           </header>
           {#each group.entries as entry (entry.id)}
-            <!-- svelte-ignore a11y_no_static_element_interactions -->
-            <div
-              class="assistant-row-wrap"
-              class:drop-before={assistantDropTarget?.id === entry.id && assistantDropTarget?.position === "before"}
-              class:drop-after={assistantDropTarget?.id === entry.id && assistantDropTarget?.position === "after"}
-              class:dragging={assistantDragId === entry.id}
+            <NodeRow
+              title={entry.title}
+              active={focusedEditorPane?.document?.type === "assistant" && focusedEditorPane.document.id === entry.id}
+              dragging={assistantDragId === entry.id}
+              dropPosition={assistantDropTarget?.id === entry.id ? (assistantDropTarget?.position ?? null) : null}
+              onClick={() => openAssistantEntryInEditorPane(entry.id)}
               on:dragover={(event) => onAssistantDragOver(event, entry)}
               on:dragleave={onAssistantDragLeave}
               on:drop={(event) => onAssistantDrop(event, entry)}
             >
-              <span
-                class="assistant-drag-handle"
-                draggable="true"
-                role="button"
-                tabindex="-1"
-                aria-label="Drag to reorder"
-                on:dragstart={(event) => startAssistantDrag(event, entry)}
-                on:dragend={endAssistantDrag}
-              >⋮⋮</span>
-              <button class:active={focusedEditorPane?.document?.type === "assistant" && focusedEditorPane.document.id === entry.id} class="prompt-entry-row" type="button" on:click={() => openAssistantEntryInEditorPane(entry.id)}>
-                <span>
-                  <strong>{entry.title}</strong>
-                  {#if entry.metadata?.is_default}
-                    <small class="assistant-default-badge">default</small>
-                  {/if}
-                  <small>{assistantSubtitle(entry)}</small>
-                </span>
-              </button>
-            </div>
+              {#snippet leading()}
+                <span
+                  class="assistant-drag-handle"
+                  draggable="true"
+                  role="button"
+                  tabindex="-1"
+                  aria-label="Drag to reorder"
+                  on:dragstart={(event) => startAssistantDrag(event, entry)}
+                  on:dragend={endAssistantDrag}
+                >⋮⋮</span>
+              {/snippet}
+              {#snippet detailSlot()}
+                {#if entry.metadata?.is_default}
+                  <small class="assistant-default-badge">default</small>
+                {/if}
+                <small>{assistantSubtitle(entry)}</small>
+              {/snippet}
+            </NodeRow>
           {/each}
         </div>
       {/each}
@@ -4634,29 +4628,32 @@
         <p class="muted">No chats yet. Click + New Chat to start one.</p>
       {:else}
         {#each chatSessions as session (session.id)}
-          <div class="chat-session-row-wrap" class:active-chat-row={activeChatId === session.id}>
-            <button class:active={activeChatId === session.id} class="prompt-entry-row chat-session-row" type="button" on:click={() => openChatSession(session.id)}>
-              <span>
-                <strong>{session.title || "Untitled chat"}</strong>
-                {#if session.pinned}<small class="assistant-default-badge">pinned</small>{/if}
-                {#if session.prompt_entry_id || session.assistant_id}
-                  <small class="chat-session-preset">
-                    {#if session.prompt_entry_id}
-                      <span class="chat-prompt-glyph" aria-hidden="true">✨</span>
-                      {chatSessionPromptTitle(session)}
-                    {/if}
-                    {#if session.prompt_entry_id && session.assistant_id} · {/if}
-                    {#if session.assistant_id}
-                      {assistantNameFor(session.assistant_id) || "(unknown)"}
-                    {/if}
-                  </small>
-                {/if}
-                <small>{session.message_count} message{session.message_count === 1 ? "" : "s"} · {session.updated_at.slice(0, 16).replace("T", " ")}</small>
-              </span>
-            </button>
-            <button class="chat-session-pin" type="button" title={session.pinned ? "Unpin" : "Pin"} on:click={() => togglePinForChat(session.id)}>{session.pinned ? "★" : "☆"}</button>
-            <button class="chat-session-delete" type="button" title="Delete chat" on:click={() => deleteChatSessionFromPane(session.id)}>×</button>
-          </div>
+          <NodeRow
+            title={session.title || "Untitled chat"}
+            active={activeChatId === session.id}
+            onClick={() => openChatSession(session.id)}
+          >
+            {#snippet detailSlot()}
+              {#if session.pinned}<small class="assistant-default-badge">pinned</small>{/if}
+              {#if session.prompt_entry_id || session.assistant_id}
+                <small class="chat-session-preset">
+                  {#if session.prompt_entry_id}
+                    <span class="chat-prompt-glyph" aria-hidden="true">✨</span>
+                    {chatSessionPromptTitle(session)}
+                  {/if}
+                  {#if session.prompt_entry_id && session.assistant_id} · {/if}
+                  {#if session.assistant_id}
+                    {assistantNameFor(session.assistant_id) || "(unknown)"}
+                  {/if}
+                </small>
+              {/if}
+              <small>{session.message_count} message{session.message_count === 1 ? "" : "s"} · {session.updated_at.slice(0, 16).replace("T", " ")}</small>
+            {/snippet}
+            {#snippet trailing()}
+              <button class="chat-session-pin" type="button" title={session.pinned ? "Unpin" : "Pin"} on:click|stopPropagation={() => togglePinForChat(session.id)}>{session.pinned ? "★" : "☆"}</button>
+              <button class="chat-session-delete" type="button" title="Delete chat" on:click|stopPropagation={() => deleteChatSessionFromPane(session.id)}>×</button>
+            {/snippet}
+          </NodeRow>
         {/each}
       {/if}
     </div>

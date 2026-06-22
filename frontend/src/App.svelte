@@ -7,6 +7,7 @@
   import DirectoryPickerModal from "./DirectoryPickerModal.svelte";
   import NewProjectModal from "./NewProjectModal.svelte";
   import MachineSettingsDialog from "./MachineSettingsDialog.svelte";
+  import ConfirmModal from "./ConfirmModal.svelte";
   import PlainTextEditor from "./PlainTextEditor.svelte";
   import PromptInputField from "./PromptInputField.svelte";
   import TopBar from "./TopBar.svelte";
@@ -5184,34 +5185,11 @@ async function seedChatFromPromptEntry(
     onSelect={(path) => useDirectory(path)}
   />
 
-  {#if confirmation}
-    <section class="modal-backdrop" aria-label={confirmation.title}>
-      <div class="confirm-modal" role="dialog" aria-modal="true" aria-labelledby="confirm-title">
-        <header class="confirm-modal-header">
-          <h2 id="confirm-title">{confirmation.title}</h2>
-        </header>
-        <p>{confirmation.message}</p>
-        {#if confirmation.details && confirmation.details.length > 0}
-          <ul class="confirm-modal-details">
-            {#each confirmation.details as detail}
-              <li>{detail}</li>
-            {/each}
-          </ul>
-        {/if}
-        <div class="confirm-modal-actions">
-          <button type="button" on:click={() => (confirmation = null)}>Cancel</button>
-          <button
-            class:danger-primary={confirmation.destructive}
-            class:primary={!confirmation.destructive}
-            type="button"
-            on:click={confirmModalAction}
-          >
-            {confirmation.confirmLabel}
-          </button>
-        </div>
-      </div>
-    </section>
-  {/if}
+  <ConfirmModal
+    state={confirmation}
+    onCancel={() => (confirmation = null)}
+    onConfirm={confirmModalAction}
+  />
 
   <NewProjectModal
     open={newProjectModalOpen}

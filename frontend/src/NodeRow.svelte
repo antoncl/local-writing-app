@@ -33,6 +33,14 @@
   // Disable the click button (e.g. when inline-editing the title). The
   // outer row still renders; just no clickable label.
   export let clickable: boolean = true;
+  // Visual chrome. "card" (default) carries a border + background and is
+  // appropriate for free-standing list rows (lore, prompts, chats…).
+  // "tree" strips chrome to a hover highlight only, matching the dense
+  // outline-style visuals the scene tree and schema tree use.
+  export let variant: "card" | "tree" = "card";
+  // Override aria/dom role on the outer container. Defaults to no role
+  // (a plain "presentation" div). Use "treeitem" for tree rows.
+  export let role: string | null = null;
 
   // Snippet props.
   export let leading: Snippet | undefined = undefined;
@@ -57,7 +65,8 @@
      `display: grid` would otherwise promote inter-block text nodes to
      anonymous grid items, breaking the auto / 1fr / auto column layout. -->
 <div
-  class="node-row"
+  class="node-row variant-{variant}"
+  class:tree-row={variant === "tree"}
   class:active
   class:has-row-stripe={!!stripeColor}
   class:dragging
@@ -65,6 +74,7 @@
   class:drop-after={dropPosition === "after"}
   class:drop-into={dropPosition === "into"}
   aria-label={ariaLabel}
+  role={role}
   style={rootStyle}
   on:mousedown
   on:keydown
@@ -86,10 +96,22 @@
     align-items: center;
     gap: 8px;
     width: 100%;
+    position: relative;
+  }
+
+  .node-row.variant-card {
     border: 1px solid #cbd6d2;
     border-radius: 4px;
     background: #fbfcfc;
-    position: relative;
+  }
+
+  /* "tree" variant strips chrome to a hover highlight, matching the
+     scene tree / schema tree density. The hover background is painted
+     on the inner clickable button (or its surrogate), not the row, so
+     the indent / drag-handle area stays visually quiet. */
+  .node-row.variant-tree {
+    margin: 2px 0;
+    background: transparent;
   }
 
   /* The middle (click / static title) area takes all remaining space.
@@ -100,13 +122,23 @@
     min-width: 0;
   }
 
-  .node-row:hover {
+  .node-row.variant-card:hover {
     background: #edf6f2;
   }
 
-  .node-row.active {
+  .node-row.variant-card.active {
     border-color: #2f6f5e;
     background: #edf6f2;
+  }
+
+  .node-row.variant-tree > .node-row-click:hover {
+    background: #edf6f2;
+  }
+
+  .node-row.variant-tree > .node-row-click:focus {
+    outline: 3px solid #2f6f5e;
+    outline-offset: -3px;
+    background: #ffffff;
   }
 
   .node-row.has-row-stripe::before {

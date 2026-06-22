@@ -5458,60 +5458,66 @@
   {@const statusOption = node.status && metadataSchema?.fields?.status?.options?.find((o) => o.value === node.status)}
   {@const statusSwatch = statusOption?.color ? getSwatch(statusOption.color) : null}
   {@const stripeHex = statusSwatch?.hex ?? null}
-  <div
-    class="tree-row"
-    class:drop-before={dragOverNodeId === node.id && dragOverPosition === "before"}
-    class:drop-after={dragOverNodeId === node.id && dragOverPosition === "after"}
-    class:drop-into={dragOverNodeId === node.id && dragOverPosition === "into"}
-    class:dragging={draggedNodeId === node.id}
-    class:has-status-stripe={!!stripeHex}
+  <NodeRow
+    variant="tree"
     role="treeitem"
-    aria-label={node.title}
-    aria-selected="false"
-    tabindex={-1}
-    style={`padding-left: ${depth * 14}px${stripeHex ? `; --status-stripe: ${stripeHex}` : ""}`}
+    ariaLabel={node.title}
+    depth={depth}
+    stripeColor={stripeHex}
+    dragging={draggedNodeId === node.id}
+    dropPosition={dragOverNodeId === node.id ? dragOverPosition : null}
+    clickable={false}
     on:dragover={(event) => handleTreeDragOver(event, node)}
     on:drop={(event) => handleTreeDrop(event, node)}
   >
-    <span
-      class="tree-handle"
-      draggable="true"
-      role="button"
-      tabindex="-1"
-      aria-label="Drag to reorder"
-      on:dragstart={(event) => handleTreeDragStart(event, node)}
-      on:dragend={handleTreeDragEnd}
-    >⋮⋮</span>
-    {#if editingNodeId === node.id}
-      <input
-        class="tree-title tree-rename-input"
-        data-node-edit-id={node.id}
-        bind:value={editingTitle}
-        on:keydown={(event) => handleRenameKeydown(event, node.id)}
-        on:blur={() => commitRename(node.id)}
-      />
-    {:else if isLeafNode(node)}
-      <button data-tree-node-id={node.id} class="tree-scene tree-title" on:click={() => node.scene_id && run(() => openSceneInEditorPane(node.scene_id!))} on:dblclick={() => node.scene_id && run(() => openSceneInEditorPane(node.scene_id!))} on:keydown={(event) => handleTreeRowKeydown(event, node)}>{renderNodeTitle(node, metadataSchema)}</button>
-      <button class="tree-delete" title={`Delete ${entryTypeName(node.type, metadataSchema)}`} on:click={() => requestDeleteStructureNode(node)}>×</button>
-    {:else}
-      <button data-tree-node-id={node.id} class="tree-group tree-title" on:click={() => (activeParentId = node.id)} on:dblclick={() => node.scene_id && run(() => openSceneInEditorPane(node.scene_id!))} on:keydown={(event) => handleTreeRowKeydown(event, node)}>{renderNodeTitle(node, metadataSchema)}</button>
-      {@const defaultType = defaultChildEntryType(node.type)}
-      {#if defaultType}
-        <button class="tree-add" title={`Add ${entryTypeName(defaultType, metadataSchema)}`} on:click={() => addStructureChild(node.id, defaultType)}>+</button>
+    {#snippet leading()}
+      <span
+        class="tree-handle"
+        draggable="true"
+        role="button"
+        tabindex="-1"
+        aria-label="Drag to reorder"
+        on:dragstart={(event) => handleTreeDragStart(event, node)}
+        on:dragend={handleTreeDragEnd}
+      >⋮⋮</span>
+    {/snippet}
+    {#snippet titleSlot()}
+      {#if editingNodeId === node.id}
+        <input
+          class="tree-title tree-rename-input"
+          data-node-edit-id={node.id}
+          bind:value={editingTitle}
+          on:keydown={(event) => handleRenameKeydown(event, node.id)}
+          on:blur={() => commitRename(node.id)}
+        />
+      {:else if isLeafNode(node)}
+        <button data-tree-node-id={node.id} class="tree-scene tree-title" on:click={() => node.scene_id && run(() => openSceneInEditorPane(node.scene_id!))} on:dblclick={() => node.scene_id && run(() => openSceneInEditorPane(node.scene_id!))} on:keydown={(event) => handleTreeRowKeydown(event, node)}>{renderNodeTitle(node, metadataSchema)}</button>
+      {:else}
+        <button data-tree-node-id={node.id} class="tree-group tree-title" on:click={() => (activeParentId = node.id)} on:dblclick={() => node.scene_id && run(() => openSceneInEditorPane(node.scene_id!))} on:keydown={(event) => handleTreeRowKeydown(event, node)}>{renderNodeTitle(node, metadataSchema)}</button>
       {/if}
-      <div class="tree-menu-anchor">
-        <button class="tree-menu" title="Other types" on:click={() => toggleAddMenu(node.id)}>⋯</button>
-        {#if addMenuOpenFor === node.id}
-          <div class="tree-add-menu">
-            {#each manuscriptEntryTypeChoices(metadataSchema) as choice (choice.id)}
-              <button type="button" on:click={() => addStructureChild(node.id, choice.id)}>{choice.name}</button>
-            {/each}
+    {/snippet}
+    {#snippet trailing()}
+      {#if editingNodeId !== node.id}
+        {#if !isLeafNode(node)}
+          {@const defaultType = defaultChildEntryType(node.type)}
+          {#if defaultType}
+            <button class="tree-add" title={`Add ${entryTypeName(defaultType, metadataSchema)}`} on:click={() => addStructureChild(node.id, defaultType)}>+</button>
+          {/if}
+          <div class="tree-menu-anchor">
+            <button class="tree-menu" title="Other types" on:click={() => toggleAddMenu(node.id)}>⋯</button>
+            {#if addMenuOpenFor === node.id}
+              <div class="tree-add-menu">
+                {#each manuscriptEntryTypeChoices(metadataSchema) as choice (choice.id)}
+                  <button type="button" on:click={() => addStructureChild(node.id, choice.id)}>{choice.name}</button>
+                {/each}
+              </div>
+            {/if}
           </div>
         {/if}
-      </div>
-      <button class="tree-delete" title={`Delete ${entryTypeName(node.type, metadataSchema)}`} on:click={() => requestDeleteStructureNode(node)}>×</button>
-    {/if}
-  </div>
+        <button class="tree-delete" title={`Delete ${entryTypeName(node.type, metadataSchema)}`} on:click={() => requestDeleteStructureNode(node)}>×</button>
+      {/if}
+    {/snippet}
+  </NodeRow>
   {#each nodeChildren(node) as child}
     {@render renderTree(child, depth + 1)}
   {/each}

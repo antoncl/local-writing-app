@@ -4,6 +4,9 @@
   import CodeEditor from "./CodeEditor.svelte";
   import NodeEditor from "./NodeEditor.svelte";
   import NodeRow from "./NodeRow.svelte";
+  import DirectoryPickerModal from "./DirectoryPickerModal.svelte";
+  import NewProjectModal from "./NewProjectModal.svelte";
+  import MachineSettingsDialog from "./MachineSettingsDialog.svelte";
   import PlainTextEditor from "./PlainTextEditor.svelte";
   import PromptInputField from "./PromptInputField.svelte";
   import TopBar from "./TopBar.svelte";
@@ -1156,40 +1159,7 @@
 
   // --- Palette editor helpers (used inside the Machine Settings modal) ----
 
-  function paletteAddSwatch() {
-    if (!machineSettingsDraft) return;
-    const baseId = "new-color";
-    const existing = new Set(machineSettingsDraft.palette.map((s) => s.id));
-    let id = baseId;
-    let n = 2;
-    while (existing.has(id)) id = `${baseId}-${n++}`;
-    machineSettingsDraft.palette = [
-      ...machineSettingsDraft.palette,
-      { id, label: "New color", hex: "#888888" },
-    ];
-  }
-
-  function paletteRemoveSwatch(index: number) {
-    if (!machineSettingsDraft) return;
-    machineSettingsDraft.palette = machineSettingsDraft.palette.filter((_, i) => i !== index);
-  }
-
-  function paletteMoveSwatch(from: number, to: number) {
-    if (!machineSettingsDraft) return;
-    const list = machineSettingsDraft.palette.slice();
-    const [moved] = list.splice(from, 1);
-    list.splice(to, 0, moved);
-    machineSettingsDraft.palette = list;
-  }
-
-  function paletteSetSwatch(index: number, patch: Partial<import("./types").Swatch>) {
-    if (!machineSettingsDraft) return;
-    machineSettingsDraft.palette = machineSettingsDraft.palette.map((s, i) =>
-      i === index ? { ...s, ...patch } : s,
-    );
-  }
-
-  async function seedChatFromPromptEntry(
+async function seedChatFromPromptEntry(
     entry: PromptEntrySummary,
     inputs: Record<string, unknown>,
     sceneId: string | null,
@@ -5205,43 +5175,14 @@
     <button class="pane-resize" type="button" aria-label="Resize AI Chat pane" on:keydown={(event) => handlePaneResizeKeydown(event, "chat")} on:mousedown={(event) => startPaneResize(event, "chat")}></button>
   </section>
 
-  {#if directoryPickerOpen}
-    <section class="directory-modal-backdrop" aria-label="Choose project folder">
-      <div class="directory-modal">
-        <header class="directory-modal-header">
-          <div>
-            <h2>Choose Project Folder</h2>
-            <p>{directoryListing?.path ?? "Loading folders..."}</p>
-          </div>
-          <button type="button" on:click={() => (directoryPickerOpen = false)}>Cancel</button>
-        </header>
-
-        <div class="directory-modal-actions">
-          <button type="button" disabled={!directoryListing?.parent_path || directoryPickerLoading} on:click={() => loadDirectory(directoryListing?.parent_path)}>
-            Up
-          </button>
-          <button class="primary" type="button" disabled={!directoryListing || directoryPickerLoading} on:click={() => directoryListing && useDirectory(directoryListing.path)}>
-            Select This Folder
-          </button>
-        </div>
-
-        <div class="directory-modal-list">
-          {#if directoryPickerLoading}
-            <p class="muted">Loading folders...</p>
-          {:else if directoryListing}
-            {#each directoryListing.directories as directory}
-              <button type="button" class="directory-row" on:click={() => loadDirectory(directory.path)} title={directory.path}>
-                {directory.name}
-              </button>
-            {/each}
-            {#if directoryListing.directories.length === 0}
-              <p class="muted">No folders here.</p>
-            {/if}
-          {/if}
-        </div>
-      </div>
-    </section>
-  {/if}
+  <DirectoryPickerModal
+    open={directoryPickerOpen}
+    listing={directoryListing}
+    loading={directoryPickerLoading}
+    onClose={() => (directoryPickerOpen = false)}
+    onNavigate={(path) => loadDirectory(path)}
+    onSelect={(path) => useDirectory(path)}
+  />
 
   {#if confirmation}
     <section class="modal-backdrop" aria-label={confirmation.title}>
@@ -5272,181 +5213,27 @@
     </section>
   {/if}
 
-  {#if newProjectModalOpen}
-    <section class="modal-backdrop" aria-label="New project">
-      <div class="confirm-modal" role="dialog" aria-modal="true" aria-labelledby="new-project-title">
-        <header class="confirm-modal-header">
-          <h2 id="new-project-title">New Project</h2>
-        </header>
+  <NewProjectModal
+    open={newProjectModalOpen}
+    bind:name={newProjectName}
+    bind:overrideFolder={newProjectOverrideFolder}
+    bind:overridePath={newProjectOverridePath}
+    resolvedPath={newProjectResolvedPath}
+    {defaultProjectsFolder}
+    onClose={closeNewProjectModal}
+    onSubmit={confirmNewProject}
+    onOpenOverrideFolderPicker={openDirectoryPickerForNewProjectOverride}
+    onOpenSettings={openMachineSettings}
+    onClearOverride={() => { newProjectOverrideFolder = false; newProjectOverridePath = ""; }}
+  />
 
-        <label>
-          Project name
-          <input
-            type="text"
-            bind:value={newProjectName}
-            placeholder="Honor's First Command"
-            on:keydown={(e) => e.key === "Enter" && void confirmNewProject()}
-          />
-        </label>
-
-        {#if !newProjectOverrideFolder}
-          <p class="muted">
-            Will be created at:
-            <code>{newProjectName.trim() ? newProjectResolvedPath : (defaultProjectsFolder || "(no default folder set)")}</code>
-          </p>
-          {#if !defaultProjectsFolder}
-            <p class="muted">
-              No default projects folder set — open <button type="button" class="inline-link" on:click={() => { closeNewProjectModal(); openMachineSettings(); }}>Settings</button> to set one, or override below.
-            </p>
-          {/if}
-          <div class="button-row">
-            <button type="button" on:click={openDirectoryPickerForNewProjectOverride}>Override folder…</button>
-          </div>
-        {:else}
-          <label>
-            Parent folder
-            <div class="path-picker-row">
-              <input type="text" bind:value={newProjectOverridePath} placeholder="C:\path\to\writing" />
-              <button type="button" on:click={openDirectoryPickerForNewProjectOverride}>Browse…</button>
-            </div>
-          </label>
-          <p class="muted">
-            Will be created at: <code>{newProjectName.trim() ? newProjectResolvedPath : "(enter a name)"}</code>
-          </p>
-          <div class="button-row">
-            <button type="button" on:click={() => { newProjectOverrideFolder = false; newProjectOverridePath = ""; }}>Use default folder</button>
-          </div>
-        {/if}
-
-        <div class="confirm-modal-actions">
-          <button type="button" on:click={closeNewProjectModal}>Cancel</button>
-          <button
-            class="primary"
-            type="button"
-            disabled={!newProjectName.trim() || (newProjectOverrideFolder ? !newProjectOverridePath.trim() : !defaultProjectsFolder)}
-            on:click={confirmNewProject}
-          >Create</button>
-        </div>
-      </div>
-    </section>
-  {/if}
-
-  {#if machineSettingsOpen && machineSettingsDraft}
-    <section class="modal-backdrop" aria-label="Machine settings">
-      <div class="confirm-modal machine-settings-modal" role="dialog" aria-modal="true" aria-labelledby="machine-settings-title">
-        <header class="confirm-modal-header">
-          <h2 id="machine-settings-title">Machine Settings</h2>
-        </header>
-        <p class="muted">Your AI subscriptions — provider accounts and keys.</p>
-        <p class="muted">Stored locally at: <code>{machineSettings?.config_path}</code></p>
-
-        <label>
-          Default projects folder
-          <div class="path-picker-row">
-            <input type="text" bind:value={machineSettingsDraft.default_projects_folder} placeholder="C:\path\to\writing" />
-            <button
-              type="button"
-              disabled={!machineSettingsDraft.default_projects_folder}
-              on:click={() => machineSettingsDraft && (machineSettingsDraft.default_projects_folder = "")}
-            >Clear</button>
-          </div>
-          <small class="muted">Where new projects get created by default. Leave empty to require an explicit folder each time. The project switcher reads recent projects from this config too.</small>
-        </label>
-
-        <p class="muted">API keys are masked on read. Leaving a masked field unchanged keeps the existing value.</p>
-
-        <label>
-          Anthropic API key
-          <input type="password" autocomplete="off" bind:value={machineSettingsDraft.anthropic_api_key} placeholder="sk-ant-…" />
-        </label>
-        <label>
-          OpenAI API key
-          <input type="password" autocomplete="off" bind:value={machineSettingsDraft.openai_api_key} placeholder="sk-…" />
-        </label>
-        <label>
-          OpenRouter API key
-          <input type="password" autocomplete="off" bind:value={machineSettingsDraft.openrouter_api_key} placeholder="sk-or-…" />
-        </label>
-        <label>
-          Ollama host
-          <input type="text" bind:value={machineSettingsDraft.ollama_host} placeholder="http://127.0.0.1:11434" />
-        </label>
-
-        <p class="muted">
-          Assistants moved to the <strong>Assistants</strong> pane (open from the AI section of the Project pane). Each lives as its own file under the machine config dir and can be overridden by ancestor projects.
-        </p>
-
-        <section class="palette-editor">
-          <h3>Color palette</h3>
-          <p class="muted">
-            Colors picked here are reusable across types, entries, and select options. The first four (Forest, Slate Blue, Warm Brown, Graphite) seed the context picker's built-in chip colors.
-          </p>
-          <div class="palette-row palette-header">
-            <span></span>
-            <span>Id</span>
-            <span>Label</span>
-            <span>Hex</span>
-            <span></span>
-          </div>
-          {#each machineSettingsDraft.palette as swatch, i (swatch.id + ":" + i)}
-            <div class="palette-row">
-              <span class="palette-swatch-dot" style="background: {swatch.hex}"></span>
-              <input
-                type="text"
-                class="palette-id-input"
-                value={swatch.id}
-                pattern="^[a-z0-9][a-z0-9-]*$"
-                title="Lowercase letters, digits, dashes"
-                on:input={(e) => paletteSetSwatch(i, { id: (e.currentTarget as HTMLInputElement).value })}
-              />
-              <input
-                type="text"
-                class="palette-label-input"
-                value={swatch.label}
-                on:input={(e) => paletteSetSwatch(i, { label: (e.currentTarget as HTMLInputElement).value })}
-              />
-              <input
-                type="color"
-                class="palette-color-input"
-                value={swatch.hex}
-                on:input={(e) => paletteSetSwatch(i, { hex: (e.currentTarget as HTMLInputElement).value })}
-              />
-              <span class="palette-row-actions">
-                <button
-                  type="button"
-                  class="palette-row-btn"
-                  title="Move up"
-                  disabled={i === 0}
-                  on:click={() => paletteMoveSwatch(i, i - 1)}
-                >▲</button>
-                <button
-                  type="button"
-                  class="palette-row-btn"
-                  title="Move down"
-                  disabled={i === machineSettingsDraft.palette.length - 1}
-                  on:click={() => paletteMoveSwatch(i, i + 1)}
-                >▼</button>
-                <button
-                  type="button"
-                  class="palette-row-btn palette-row-delete"
-                  title="Delete swatch"
-                  on:click={() => paletteRemoveSwatch(i)}
-                >×</button>
-              </span>
-            </div>
-          {/each}
-          <div class="palette-add-row">
-            <button type="button" on:click={paletteAddSwatch}>+ Add color</button>
-          </div>
-        </section>
-
-        <div class="confirm-modal-actions">
-          <button type="button" on:click={() => (machineSettingsOpen = false)}>Cancel</button>
-          <button class="primary" type="button" on:click={saveMachineSettings}>Save</button>
-        </div>
-      </div>
-    </section>
-  {/if}
+  <MachineSettingsDialog
+    open={machineSettingsOpen}
+    settings={machineSettings}
+    bind:draft={machineSettingsDraft}
+    onCancel={() => (machineSettingsOpen = false)}
+    onSave={saveMachineSettings}
+  />
 
   {#if error}
     <section class="error-toast">{error}</section>

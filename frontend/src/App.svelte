@@ -5,7 +5,7 @@
   import NodeEditor from "./NodeEditor.svelte";
   import NodeRow from "./NodeRow.svelte";
   import DirectoryPickerModal from "./DirectoryPickerModal.svelte";
-  import SearchInput from "./SearchInput.svelte";
+  import NodeList from "./NodeList.svelte";
   import NewProjectModal from "./NewProjectModal.svelte";
   import MachineSettingsDialog from "./MachineSettingsDialog.svelte";
   import ConfirmModal from "./ConfirmModal.svelte";
@@ -4185,17 +4185,25 @@ async function seedChatFromPromptEntry(
       </div>
     </header>
     <div class="pane-content">
-      <SearchInput bind:value={loreSearchQuery} placeholder="Search entries, tags, aliases" />
-      <div class="schema-layer-fields lore-entry-list">
+      <NodeList
+        searchPlaceholder="Search entries, tags, aliases"
+        bind:searchValue={loreSearchQuery}
+        isEmpty={groupedLoreEntries.length === 0}
+      >
         {#each groupedLoreEntries as group}
-          <section class="lore-entry-group" style={`--group-depth: ${group.depth}`}>
-            <button class="lore-group-header" type="button" aria-expanded={!collapsedLoreGroups[group.id]} on:mousedown={(event) => event.stopPropagation()} on:click={() => toggleLoreGroup(group.id)}>
+          <NodeRow
+            variant="tree"
+            title={group.label}
+            detail={String(group.entries.length)}
+            depth={group.depth}
+            onClick={() => toggleLoreGroup(group.id)}
+            on:mousedown={(event) => event.stopPropagation()}
+          >
+            {#snippet leading()}
               <span class:collapsed={collapsedLoreGroups[group.id]} class="lore-group-caret">▾</span>
-              <span>{group.label}</span>
-              <small>{group.entries.length}</small>
-            </button>
-            {#if !collapsedLoreGroups[group.id]}
-              <div class="lore-group-entries">
+            {/snippet}
+            {#snippet children()}
+              {#if !collapsedLoreGroups[group.id]}
                 {#each group.entries as entry}
                   {@const detailText = loreEntryDetailText(entry)}
                   {@const instanceColor = typeof entry.metadata?.color === "string" ? entry.metadata.color : null}
@@ -4207,22 +4215,25 @@ async function seedChatFromPromptEntry(
                   <NodeRow
                     title={entry.title}
                     detail={detailText}
+                    depth={group.depth + 1}
                     active={focusedEditorPane?.document?.type === "lore" && focusedEditorPane.document.id === entry.id}
                     stripeColor={entrySwatch?.hex ?? null}
                     onClick={() => openLoreEntryInEditorPane(entry.id)}
                     on:mousedown={(event) => event.stopPropagation()}
                   />
                 {/each}
-              </div>
-            {/if}
-          </section>
+              {/if}
+            {/snippet}
+          </NodeRow>
         {/each}
-      </div>
-      {#if loreEntries.length === 0}
-        <p class="muted">No entries yet.</p>
-      {:else if filteredLoreEntries.length === 0}
-        <p class="muted">No entries match this search.</p>
-      {/if}
+        {#snippet whenEmpty()}
+          {#if loreEntries.length === 0}
+            <p class="muted">No entries yet.</p>
+          {:else}
+            <p class="muted">No entries match this search.</p>
+          {/if}
+        {/snippet}
+      </NodeList>
     </div>
     <button class="pane-resize" type="button" aria-label="Resize Lore pane" on:keydown={(event) => handlePaneResizeKeydown(event, "lore")} on:mousedown={(event) => startPaneResize(event, "lore")}></button>
   </section>

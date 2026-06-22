@@ -717,47 +717,11 @@ h3 {
   font-size: 11px;
 }
 
-.lore-entry-list {
-  gap: 10px;
-}
-
-.lore-entry-group {
-  display: grid;
-  gap: 5px;
-  padding-top: 7px;
-  border-top: 1px solid #dfe6e3;
-  margin-left: calc(var(--group-depth, 0) * 12px);
-}
-
-.lore-entry-group:first-child {
-  padding-top: 0;
-  border-top: 0;
-}
-
-.lore-group-header {
-  display: grid;
-  grid-template-columns: auto minmax(0, 1fr) auto;
-  align-items: center;
-  gap: 6px;
-  padding: 3px 4px;
-  border: 0;
-  background: transparent;
-  color: #4d5753;
-  text-align: left;
-  font-size: 12px;
-  font-weight: 800;
-}
-
-.lore-group-header:hover {
-  background: #eef4f1;
-}
-
-.lore-group-header small {
-  color: #74817b;
-  font-size: 11px;
-  font-weight: 700;
-}
-
+/* Caret used inside the lore-pane group-header NodeRow's leading slot.
+   Other rules in this section (.lore-entry-group, .lore-group-header,
+   .lore-group-entries, .lore-entry-list, .lore-row) were retired when
+   the lore pane migrated to NodeList + NodeRow recursion on
+   2026-06-22. */
 .lore-group-caret {
   display: inline-block;
   color: #74817b;
@@ -766,16 +730,6 @@ h3 {
 
 .lore-group-caret.collapsed {
   transform: rotate(-90deg);
-}
-
-.lore-group-entries {
-  display: grid;
-  gap: 5px;
-}
-
-.lore-row {
-  grid-template-columns: minmax(0, 1fr);
-  align-items: start;
 }
 
 .lore-type-chip {

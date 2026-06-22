@@ -1,6 +1,6 @@
 <script lang="ts">
   import { onMount, tick } from "svelte";
-  import DocumentEditorPane from "../src/DocumentEditorPane.svelte";
+  import NodeEditor from "../src/NodeEditor.svelte";
   import type { EntryMetadata, MetadataSchema, Scene } from "../src/types";
 
   let scene: Scene = {
@@ -116,4 +116,4 @@
   });
 </script>
 
-<DocumentEditorPane {scene} {metadataSchema} {metadataReload} />
+<NodeEditor {scene} {metadataSchema} {metadataReload} />

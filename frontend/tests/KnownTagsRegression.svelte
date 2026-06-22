@@ -1,6 +1,6 @@
 <script lang="ts">
   import { onMount, tick } from "svelte";
-  import DocumentEditorPane from "../src/DocumentEditorPane.svelte";
+  import NodeEditor from "../src/NodeEditor.svelte";
   import type { LoreEntry, MetadataSchema } from "../src/types";
 
   let entry: LoreEntry = {
@@ -46,4 +46,4 @@
   });
 </script>
 
-<DocumentEditorPane scene={entry} documentKind="lore" {metadataSchema} knownTags={["Crew", "Magic"]} />
+<NodeEditor scene={entry} documentKind="lore" {metadataSchema} knownTags={["Crew", "Magic"]} />

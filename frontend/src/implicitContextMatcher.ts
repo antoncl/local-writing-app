@@ -8,7 +8,8 @@
 // English possessives). Single matcher compiled per lore-set change,
 // reused for every scan.
 
-import type { LoreEntrySummary } from "./types";
+import type { LoreEntrySummary, MetadataSchema } from "./types";
+import { resolveColor } from "./colors";
 
 export type MatchHit = {
   start: number;
@@ -22,6 +23,9 @@ export type MatcherEntry = {
   title: string;
   preview: string;
   entryType: string;
+  /** Resolved hex (instance → type → kind-default → null) for inline
+   *  decoration coloring. Null when nothing resolves; CSS falls back. */
+  colorHex: string | null;
 };
 
 /** Result of a compile: the matcher + a lookup table for hover content. */
@@ -55,7 +59,10 @@ function buildPreview(body: string, max = 120): string {
 
 /** Build a matcher from the current lore set. Returns an empty matcher
  *  when the set is empty (caller can early-exit scans). */
-export function compileMatcher(entries: LoreEntrySummary[]): CompiledMatcher {
+export function compileMatcher(
+  entries: LoreEntrySummary[],
+  schema: MetadataSchema | null = null,
+): CompiledMatcher {
   // Map name (lowercased) → id, sorted by name-length DESC. Length-desc
   // alternation makes the regex pick the longest match at a given start
   // (regex engines' leftmost-longest is contingent on alternation order).
@@ -64,11 +71,14 @@ export function compileMatcher(entries: LoreEntrySummary[]): CompiledMatcher {
   const lookup = new Map<string, MatcherEntry>();
   for (const entry of entries) {
     if (!entry.id || !entry.title) continue;
+    const instanceColor = typeof entry.metadata?.color === "string" ? entry.metadata.color : null;
+    const swatch = resolveColor(instanceColor, entry.entry_type, "lore", schema);
     lookup.set(entry.id, {
       id: entry.id,
       title: entry.title,
       preview: buildPreview(entry.body_markdown ?? ""),
       entryType: entry.entry_type ?? "",
+      colorHex: swatch?.hex ?? null,
     });
     refs.push({ name: entry.title, id: entry.id });
     for (const alias of readAliases(entry.metadata as Record<string, unknown>)) {

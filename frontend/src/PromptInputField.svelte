@@ -112,7 +112,7 @@
       <option value="">(none)</option>
     {/if}
     {#each input.options ?? [] as option}
-      <option value={option}>{option}</option>
+      <option value={option.value}>{option.label ?? option.value}</option>
     {/each}
   </select>
 {:else if input.type === "entity_ref" || input.type === "entity_ref_list"}

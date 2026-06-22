@@ -33,7 +33,7 @@
   export let metadataSchema: MetadataSchema | null = null;
   // Row-level fields (PR 2). The widget now owns the entire input row
   // when type is context_pick, instead of being slotted inside the
-  // generic .prompt-input-grid in DocumentEditorPane.
+  // generic .prompt-input-grid in NodeEditor.
   export let label: string = "";
   export let name: string = "";
   export let required: boolean = false;
@@ -57,7 +57,7 @@
     collapsed = !collapsed;
   }
 
-  // Match DocumentEditorPane's generic-grid type select. When the user
+  // Match NodeEditor's generic-grid type select. When the user
   // changes type away from context_pick, the parent's {#if} branch
   // unmounts this widget and renders the generic grid for the new type.
   const INPUT_TYPES: { value: PromptInputType; label: string }[] = [

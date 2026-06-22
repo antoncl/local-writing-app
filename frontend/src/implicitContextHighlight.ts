@@ -53,12 +53,19 @@ function buildDecorations(doc: PMNode, matcher: CompiledMatcher): DecorationSet 
     if (!text) return;
     const hits = matcher.scan(text);
     for (const hit of hits) {
-      decorations.push(
-        Decoration.inline(pos + hit.start, pos + hit.end, {
-          class: HIGHLIGHT_CLASS,
-          "data-entry-id": hit.entryId,
-        }),
-      );
+      const entry = matcher.lookup.get(hit.entryId);
+      const attrs: Record<string, string> = {
+        class: HIGHLIGHT_CLASS,
+        "data-entry-id": hit.entryId,
+      };
+      // Per-entity color via inline CSS custom property — the `.implicit-
+      // context-match` rule reads var(--entity-color, <fallback>). Set
+      // only when the matcher resolved a color so the fallback kicks in
+      // for entries without a swatch.
+      if (entry?.colorHex) {
+        attrs.style = `--entity-color: ${entry.colorHex}`;
+      }
+      decorations.push(Decoration.inline(pos + hit.start, pos + hit.end, attrs));
     }
   });
   return DecorationSet.create(doc, decorations);
@@ -242,9 +249,12 @@ export const ImplicitContextHighlight = Extension.create<ImplicitContextOptions>
 });
 
 /** Helper: build options for a project's current lore set. Wraps the
- *  matcher compile so callers don't need to import it directly. */
+ *  matcher compile so callers don't need to import it directly.
+ *  Pass the metadataSchema so the matcher can resolve per-entry colors
+ *  for the highlight decorations. */
 export function buildImplicitContextOptions(
   loreEntries: Parameters<typeof compileMatcher>[0],
+  schema: Parameters<typeof compileMatcher>[1] = null,
 ): ImplicitContextOptions {
-  return { matcher: compileMatcher(loreEntries) };
+  return { matcher: compileMatcher(loreEntries, schema) };
 }

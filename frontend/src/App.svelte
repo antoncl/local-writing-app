@@ -2,13 +2,15 @@
   import { onMount, tick } from "svelte";
   import { api } from "./api";
   import CodeEditor from "./CodeEditor.svelte";
-  import DocumentEditorPane from "./DocumentEditorPane.svelte";
+  import NodeEditor from "./NodeEditor.svelte";
   import PlainTextEditor from "./PlainTextEditor.svelte";
   import PromptInputField from "./PromptInputField.svelte";
   import TopBar from "./TopBar.svelte";
   import { compileMatcher } from "./implicitContextMatcher";
   import { renderChatContent } from "./chatMessageRender";
   import { formatCostEur, formatTokens } from "./money";
+  import { setPalette, getSwatch, resolveColorForType, resolveColor } from "./colors";
+  import SwatchPicker from "./SwatchPicker.svelte";
   import type {
     AIHealthResponse,
     AIPolicy,
@@ -265,6 +267,7 @@
     default_provider: string;
     default_models: Record<string, string>;
     default_projects_folder: string;
+    palette: import("./types").Swatch[];
   };
   let machineSettingsDraft: MachineSettingsDraft | null = null;
   let appState: AppState = { name: "needsProject" };
@@ -275,7 +278,10 @@
   // Compiled matcher for implicit-context highlighting in editors.
   // Rebuilds whenever the lore set changes. Cheap (sub-millisecond at
   // Honorverse-scale per the benchmark) so we don't bother debouncing.
-  $: implicitContextMatcher = compileMatcher(loreEntries);
+  // Recompiles when loreEntries OR metadataSchema changes — schema is
+  // needed so the matcher resolves per-entry colors for the highlight
+  // decorations (Phase 4 render target).
+  $: implicitContextMatcher = compileMatcher(loreEntries, metadataSchema);
   let knownTags: string[] = [];
   let focusedEditorPaneId: string | null = null;
   $: focusedEditorPane = editorPanes.find((pane) => pane.id === focusedEditorPaneId) ?? editorPanes[0] ?? null;
@@ -303,6 +309,15 @@
   let schemaFieldReferenceTarget: "scene" | "lore" = "lore";
   let schemaFieldReferenceEntryType = "";
   let schemaFieldOptions = "";
+  // Per-option swatch ids for `select` fields, keyed by option value. Lets
+  // authors color the status field (and any other select). Edits to the
+  // comma-string value list above don't disturb this — colors are looked
+  // up by value at save time.
+  let schemaFieldOptionColors: Record<string, string | null> = {};
+  $: schemaFieldOptionValues = schemaFieldOptions
+    .split(",")
+    .map((v) => v.trim())
+    .filter(Boolean);
   let schemaFieldReadonlyTypeLabel = "";
   let selectedSchemaFieldId: string | null = null;
   let schemaFieldReadonly = false;
@@ -316,6 +331,9 @@
   let schemaTypeParent = "";
   let schemaTypeAbstract = false;
   let schemaTypeReadonly = false;
+  // Type-level palette swatch id. Empty string = "inherit from parent / no
+  // override". Saved as null when empty so backend inheritance kicks in.
+  let schemaTypeColor: string | null = null;
   let selectedSchemaTypeId: string | null = null;
   let draggedSchemaTypeId: string | null = null;
   let schemaSelectedEntryType: EntryTypeDefinition | null = null;
@@ -479,6 +497,7 @@
       machineSettings = await api.getMachineSettings();
       recentProjects = machineSettings.recent_projects ?? [];
       defaultProjectsFolder = machineSettings.default_projects_folder ?? "";
+      setPalette(machineSettings.palette ?? []);
     } catch {
       // Backend may be offline — leave machineSettings as null; pickers will
       // hide and the request falls back to the backend's default assistant.
@@ -497,6 +516,7 @@
       machineSettings = view;
       recentProjects = view.recent_projects ?? [];
       defaultProjectsFolder = view.default_projects_folder ?? "";
+      setPalette(view.palette ?? []);
     } catch {
       // Non-fatal — recents stays stale until next reload.
     }
@@ -597,11 +617,28 @@
     projectCostTotal = null;
     projectCostBreakdown = [];
     projectCostExpanded = false;
+    currentProjectColor = null;
     appState = { name: "projectOpen", project: nextProject };
     fitPanesToViewport();
     focusPane("outline");
     void hydrateChatSessionsForProject();
     void refreshProjectCost();
+    void refreshCurrentProjectColor();
+  }
+
+  // Project-node color, surfaced on the top-bar switcher as a dot so the
+  // user can tell at a glance which project they're in. Refreshed on
+  // open + on save of the project node.
+  let currentProjectColor: string | null = null;
+  async function refreshCurrentProjectColor() {
+    try {
+      const node = await api.getProjectNode();
+      const instance = typeof node?.metadata?.color === "string" ? node.metadata.color : null;
+      const swatch = resolveColor(instance, node?.entry_type, "project", metadataSchema);
+      currentProjectColor = swatch?.hex ?? null;
+    } catch {
+      currentProjectColor = null;
+    }
   }
 
   async function refreshProjectCost(): Promise<void> {
@@ -1086,6 +1123,7 @@
         default_provider: machineSettings.default_provider,
         default_models: { ...machineSettings.default_models },
         default_projects_folder: machineSettings.default_projects_folder ?? "",
+        palette: (machineSettings.palette ?? []).map((s) => ({ ...s })),
       };
       machineSettingsOpen = true;
     });
@@ -1104,13 +1142,50 @@
         default_provider: machineSettingsDraft!.default_provider,
         default_models: machineSettingsDraft!.default_models,
         default_projects_folder: machineSettingsDraft!.default_projects_folder,
+        palette: machineSettingsDraft!.palette,
       };
       machineSettings = await api.updateMachineSettings(update);
       recentProjects = machineSettings.recent_projects ?? [];
       defaultProjectsFolder = machineSettings.default_projects_folder ?? "";
+      setPalette(machineSettings.palette ?? []);
       machineSettingsOpen = false;
       status = "Saved machine settings";
     });
+  }
+
+  // --- Palette editor helpers (used inside the Machine Settings modal) ----
+
+  function paletteAddSwatch() {
+    if (!machineSettingsDraft) return;
+    const baseId = "new-color";
+    const existing = new Set(machineSettingsDraft.palette.map((s) => s.id));
+    let id = baseId;
+    let n = 2;
+    while (existing.has(id)) id = `${baseId}-${n++}`;
+    machineSettingsDraft.palette = [
+      ...machineSettingsDraft.palette,
+      { id, label: "New color", hex: "#888888" },
+    ];
+  }
+
+  function paletteRemoveSwatch(index: number) {
+    if (!machineSettingsDraft) return;
+    machineSettingsDraft.palette = machineSettingsDraft.palette.filter((_, i) => i !== index);
+  }
+
+  function paletteMoveSwatch(from: number, to: number) {
+    if (!machineSettingsDraft) return;
+    const list = machineSettingsDraft.palette.slice();
+    const [moved] = list.splice(from, 1);
+    list.splice(to, 0, moved);
+    machineSettingsDraft.palette = list;
+  }
+
+  function paletteSetSwatch(index: number, patch: Partial<import("./types").Swatch>) {
+    if (!machineSettingsDraft) return;
+    machineSettingsDraft.palette = machineSettingsDraft.palette.map((s, i) =>
+      i === index ? { ...s, ...patch } : s,
+    );
   }
 
   async function seedChatFromPromptEntry(
@@ -2238,7 +2313,13 @@
           : field.type === "computed"
             ? "text"
             : field.type;
-    schemaFieldOptions = field.options.join(", ");
+    // Options are SelectOption objects; the legacy comma-string editor
+    // surface still works on values, and the per-row swatch picker below
+    // edits colors keyed by value.
+    schemaFieldOptions = field.options.map((o) => o.value).join(", ");
+    schemaFieldOptionColors = Object.fromEntries(
+      field.options.map((o) => [o.value, o.color ?? null]),
+    );
     schemaFieldLayerId = metadataSchemaOverview?.field_sources[fieldId]?.built_in ? projectSchemaLayerId() : (metadataSchemaOverview?.field_sources[fieldId]?.layer_id ?? projectSchemaLayerId());
     schemaFieldEntryType = targetEntryTypeId;
     schemaFieldPaneOpen = true;
@@ -2256,6 +2337,7 @@
     schemaFieldReferenceTarget = "lore";
     schemaFieldReferenceEntryType = "";
     schemaFieldOptions = "";
+    schemaFieldOptionColors = {};
     schemaFieldLayerId = layerId;
     schemaFieldEntryType = entryTypeId;
     schemaFieldPaneOpen = true;
@@ -2291,6 +2373,7 @@
     schemaTypeAbstract = false;
     schemaTypeReadonly = false;
     schemaTypeLayerId = layerId;
+    schemaTypeColor = null;
     resetPromptExtrasForm();
     schemaTypePaneOpen = true;
     focusPane("schema_type");
@@ -2342,6 +2425,9 @@
     schemaTypeAbstract = Boolean(entryType.abstract);
     schemaTypeReadonly = Boolean(source?.built_in);
     schemaTypeLayerId = source?.built_in ? projectSchemaLayerId() : (source?.layer_id ?? projectSchemaLayerId());
+    // Show own-color (pre-inheritance). null = "inherit from parent",
+    // which the SwatchPicker renders as the "None" cell.
+    schemaTypeColor = entryType.own_color ?? null;
     loadPromptExtrasFromEntryType(entryType);
     schemaTypePaneOpen = true;
     focusPane("schema_type");
@@ -2530,10 +2616,29 @@
       const previousFieldId = selectedSchemaFieldId && !selectedSchemaFieldId.startsWith("system:") ? selectedSchemaFieldId : null;
       const nextFieldId = schemaFieldId.trim();
       const previousField = previousFieldId ? metadataSchema?.fields[previousFieldId] : null;
+      // Compose SelectOption objects: comma-split values from the
+      // textarea + per-value colors from the swatch row editor. Falls
+      // back to previousField.options[value].color if the row hasn't
+      // been touched this session.
+      const previousByValue = new Map(
+        (previousField?.options ?? []).map((o) => [o.value, o]),
+      );
       const options = schemaFieldOptions
         .split(",")
         .map((option) => option.trim())
-        .filter(Boolean);
+        .filter(Boolean)
+        .map((value) => {
+          const prev = previousByValue.get(value);
+          const colorFromEditor = schemaFieldOptionColors[value];
+          const color =
+            colorFromEditor !== undefined
+              ? colorFromEditor
+              : (prev?.color ?? null);
+          const out: import("./types").SelectOption = { value };
+          if (prev?.label) out.label = prev.label;
+          if (color) out.color = color;
+          return out;
+        });
       const nextField: MetadataFieldDefinition = {
         name: schemaFieldName.trim() || nextFieldId,
         type: schemaFieldSaveType(),
@@ -2578,6 +2683,7 @@
         parent: schemaTypeParent || null,
         abstract: schemaTypeAbstract,
         fields: previousTypeId ? (existing?.own_fields ?? existing?.fields ?? []) : [],
+        color: schemaTypeColor || null,
         ...(schemaTypeKind === "prompt" ? { prompt: promptExtras } : {}),
       };
       if (previousTypeId && previousTypeId !== nextTypeId) {
@@ -2664,11 +2770,14 @@
     const optionTypes = new Set<MetadataFieldType>(["select", "multi_select", "tags"]);
     if (!previousField || !optionTypes.has(previousField.type) || !optionTypes.has(nextField.type)) return null;
     if (!previousField.options.length || previousField.options.length !== nextField.options.length) return null;
+    // Compare by `value` since options are SelectOption objects. A
+    // color-only edit (same value, different swatch) doesn't migrate
+    // entry data — only value renames do.
     const migration: Record<string, string> = {};
     previousField.options.forEach((previousOption, index) => {
       const nextOption = nextField.options[index];
-      if (previousOption !== nextOption) {
-        migration[previousOption] = nextOption;
+      if (previousOption.value !== nextOption.value) {
+        migration[previousOption.value] = nextOption.value;
       }
     });
     return Object.keys(migration).length > 0 ? migration : null;
@@ -3913,6 +4022,7 @@
 
 <TopBar
   currentTitle={isProjectOpen ? projectTitle : null}
+  currentProjectColor={currentProjectColor}
   {recentProjects}
   projectOpen={isProjectOpen}
   onSelectRecent={(path) => void openProjectAt(path)}
@@ -4115,7 +4225,21 @@
               <div class="lore-group-entries">
                 {#each group.entries as entry}
                   {@const detailText = loreEntryDetailText(entry)}
-                  <button class:active={focusedEditorPane?.document?.type === "lore" && focusedEditorPane.document.id === entry.id} class="schema-row system-row lore-row" type="button" on:mousedown={(event) => event.stopPropagation()} on:click={() => openLoreEntryInEditorPane(entry.id)}>
+                  {@const instanceColor = typeof entry.metadata?.color === "string" ? entry.metadata.color : null}
+                  {@const entrySwatch = (() => {
+                    const s = getSwatch(instanceColor);
+                    if (s) return s;
+                    return resolveColorForType(entry.entry_type, metadataSchema);
+                  })()}
+                  <button
+                    class:active={focusedEditorPane?.document?.type === "lore" && focusedEditorPane.document.id === entry.id}
+                    class:has-row-stripe={!!entrySwatch}
+                    class="schema-row system-row lore-row"
+                    type="button"
+                    style={entrySwatch ? `--row-stripe: ${entrySwatch.hex}` : ""}
+                    on:mousedown={(event) => event.stopPropagation()}
+                    on:click={() => openLoreEntryInEditorPane(entry.id)}
+                  >
                     <span>
                       <strong>{entry.title}</strong>
                       {#if detailText}
@@ -4232,6 +4356,18 @@
           <small class="type-id-caption" title="Identifier used in YAML and template includes (generated from the type name)">id: <code>{schemaTypeId}</code></small>
         {/if}
       </label>
+      <div class="schema-type-color-row">
+        <span>Color</span>
+        <SwatchPicker bind:value={schemaTypeColor} />
+        {#if !schemaTypeColor && selectedSchemaTypeId}
+          {@const inherited = metadataSchema?.entry_types[selectedSchemaTypeId]?.color}
+          {#if inherited}
+            <small class="muted">inherits <code>{inherited}</code> from parent</small>
+          {:else}
+            <small class="muted">no color (chips fall back to the kind default)</small>
+          {/if}
+        {/if}
+      </div>
       {#if selectedSchemaTypeId}
         {@const fieldEntries = fieldEntriesForEntryType(selectedSchemaTypeId)}
         <section class="schema-type-fields" aria-label="Fields on this type">
@@ -4369,6 +4505,22 @@
           Options
           <input readonly={schemaFieldReadonly} bind:value={schemaFieldOptions} placeholder="draft, revised, complete" />
         </label>
+        {#if schemaFieldOptionValues.length > 0}
+          <div class="schema-field-option-colors">
+            <span class="option-colors-label">Colors</span>
+            {#each schemaFieldOptionValues as optionValue (optionValue)}
+              <div class="option-color-row">
+                <span class="option-color-value">{optionValue}</span>
+                <SwatchPicker
+                  value={schemaFieldOptionColors[optionValue] ?? null}
+                  onChange={(id) => {
+                    schemaFieldOptionColors = { ...schemaFieldOptionColors, [optionValue]: id };
+                  }}
+                />
+              </div>
+            {/each}
+          </div>
+        {/if}
       {/if}
       {#if !schemaFieldReadonly}
         <div class="button-row">
@@ -4577,7 +4729,7 @@
           </button>
         </div>
       </header>
-      <DocumentEditorPane
+      <NodeEditor
         bind:this={editorPaneComponents[editorPane.id]}
         scene={editorPane.scene}
         documentKind={editorPane.document?.type ?? "scene"}
@@ -5193,8 +5345,15 @@
 
         <label>
           Default projects folder
-          <input type="text" bind:value={machineSettingsDraft.default_projects_folder} placeholder="C:\path\to\writing" />
-          <small class="muted">Where new projects get created by default. The project switcher reads recent projects from this config too.</small>
+          <div class="path-picker-row">
+            <input type="text" bind:value={machineSettingsDraft.default_projects_folder} placeholder="C:\path\to\writing" />
+            <button
+              type="button"
+              disabled={!machineSettingsDraft.default_projects_folder}
+              on:click={() => machineSettingsDraft && (machineSettingsDraft.default_projects_folder = "")}
+            >Clear</button>
+          </div>
+          <small class="muted">Where new projects get created by default. Leave empty to require an explicit folder each time. The project switcher reads recent projects from this config too.</small>
         </label>
 
         <p class="muted">API keys are masked on read. Leaving a masked field unchanged keeps the existing value.</p>
@@ -5220,6 +5379,70 @@
           Assistants moved to the <strong>Assistants</strong> pane (open from the AI section of the Project pane). Each lives as its own file under the machine config dir and can be overridden by ancestor projects.
         </p>
 
+        <section class="palette-editor">
+          <h3>Color palette</h3>
+          <p class="muted">
+            Colors picked here are reusable across types, entries, and select options. The first four (Forest, Slate Blue, Warm Brown, Graphite) seed the context picker's built-in chip colors.
+          </p>
+          <div class="palette-row palette-header">
+            <span></span>
+            <span>Id</span>
+            <span>Label</span>
+            <span>Hex</span>
+            <span></span>
+          </div>
+          {#each machineSettingsDraft.palette as swatch, i (swatch.id + ":" + i)}
+            <div class="palette-row">
+              <span class="palette-swatch-dot" style="background: {swatch.hex}"></span>
+              <input
+                type="text"
+                class="palette-id-input"
+                value={swatch.id}
+                pattern="^[a-z0-9][a-z0-9-]*$"
+                title="Lowercase letters, digits, dashes"
+                on:input={(e) => paletteSetSwatch(i, { id: (e.currentTarget as HTMLInputElement).value })}
+              />
+              <input
+                type="text"
+                class="palette-label-input"
+                value={swatch.label}
+                on:input={(e) => paletteSetSwatch(i, { label: (e.currentTarget as HTMLInputElement).value })}
+              />
+              <input
+                type="color"
+                class="palette-color-input"
+                value={swatch.hex}
+                on:input={(e) => paletteSetSwatch(i, { hex: (e.currentTarget as HTMLInputElement).value })}
+              />
+              <span class="palette-row-actions">
+                <button
+                  type="button"
+                  class="palette-row-btn"
+                  title="Move up"
+                  disabled={i === 0}
+                  on:click={() => paletteMoveSwatch(i, i - 1)}
+                >▲</button>
+                <button
+                  type="button"
+                  class="palette-row-btn"
+                  title="Move down"
+                  disabled={i === machineSettingsDraft.palette.length - 1}
+                  on:click={() => paletteMoveSwatch(i, i + 1)}
+                >▼</button>
+                <button
+                  type="button"
+                  class="palette-row-btn palette-row-delete"
+                  title="Delete swatch"
+                  on:click={() => paletteRemoveSwatch(i)}
+                >×</button>
+              </span>
+            </div>
+          {/each}
+          <div class="palette-add-row">
+            <button type="button" on:click={paletteAddSwatch}>+ Add color</button>
+          </div>
+        </section>
+
         <div class="confirm-modal-actions">
           <button type="button" on:click={() => (machineSettingsOpen = false)}>Cancel</button>
           <button class="primary" type="button" on:click={saveMachineSettings}>Save</button>
@@ -5235,17 +5458,21 @@
 </main>
 
 {#snippet renderTree(node: StructureNode, depth: number)}
+  {@const statusOption = node.status && metadataSchema?.fields?.status?.options?.find((o) => o.value === node.status)}
+  {@const statusSwatch = statusOption?.color ? getSwatch(statusOption.color) : null}
+  {@const stripeHex = statusSwatch?.hex ?? null}
   <div
     class="tree-row"
     class:drop-before={dragOverNodeId === node.id && dragOverPosition === "before"}
     class:drop-after={dragOverNodeId === node.id && dragOverPosition === "after"}
     class:drop-into={dragOverNodeId === node.id && dragOverPosition === "into"}
     class:dragging={draggedNodeId === node.id}
+    class:has-status-stripe={!!stripeHex}
     role="treeitem"
     aria-label={node.title}
     aria-selected="false"
     tabindex={-1}
-    style={`padding-left: ${depth * 14}px`}
+    style={`padding-left: ${depth * 14}px${stripeHex ? `; --status-stripe: ${stripeHex}` : ""}`}
     on:dragover={(event) => handleTreeDragOver(event, node)}
     on:drop={(event) => handleTreeDrop(event, node)}
   >

@@ -177,6 +177,21 @@ h3 {
   text-align: left;
 }
 
+.top-bar .switcher-button .project-color-dot {
+  display: inline-block;
+  width: 10px;
+  height: 10px;
+  flex: none;
+  border-radius: 50%;
+  border: 1px solid rgba(0, 0, 0, 0.18);
+}
+
+/* `.entry-type-dot` removed — Phase 4 used it on lore rows, but per
+   [[decisions-ui-widget-taxonomy]] whole-row color belongs on a Stripe
+   (.schema-row.has-row-stripe), not an inline Dot. The Dot pattern is
+   reserved for label clusters (e.g. .project-color-dot in the
+   switcher). */
+
 .top-bar .switcher-overlay {
   position: fixed;
   inset: 0;
@@ -639,6 +654,22 @@ h3 {
   width: 100%;
   padding: 8px;
   text-align: left;
+  position: relative;
+}
+
+/* Row stripe — left-edge 3px color band on schema-rows (lore pane and
+   any future NodeRow consumer). Set via inline `--row-stripe: <hex>`
+   and `class:has-row-stripe`. Matches the .tree-row.has-status-stripe
+   pattern; see [[decisions-ui-widget-taxonomy]] for the principle. */
+.schema-row.has-row-stripe::before {
+  content: "";
+  position: absolute;
+  left: 0;
+  top: 4px;
+  bottom: 4px;
+  width: 3px;
+  border-radius: 2px;
+  background: var(--row-stripe);
 }
 
 .schema-row.active {
@@ -830,7 +861,7 @@ h3 {
   white-space: nowrap;
 }
 
-.directory-modal-backdrop {
+.modal-backdrop {
   position: fixed;
   inset: 0;
   z-index: 2000;
@@ -840,10 +871,13 @@ h3 {
   background: rgba(25, 40, 35, 0.28);
 }
 
-.modal-backdrop {
+/* The directory picker can be opened FROM another modal (the New Project
+   modal's "Override folder…" button), so its backdrop must sit ABOVE the
+   plain modal backdrop or the parent modal blocks all interaction. */
+.directory-modal-backdrop {
   position: fixed;
   inset: 0;
-  z-index: 2100;
+  z-index: 2200;
   display: grid;
   place-items: center;
   padding: 24px;
@@ -995,6 +1029,22 @@ h3 {
   align-items: center;
   gap: 2px;
   margin: 2px 0;
+  position: relative;
+}
+
+/* Status stripe — colored 3px bar along the left edge of scene tree
+   rows whose status field has an option color set. --status-stripe is
+   set inline by the renderTree snippet. Sits inside the row (no layout
+   shift) and clips with the row's padding-left indent. */
+.tree-row.has-status-stripe::before {
+  content: "";
+  position: absolute;
+  left: 0;
+  top: 2px;
+  bottom: 2px;
+  width: 3px;
+  border-radius: 2px;
+  background: var(--status-stripe);
 }
 
 .tree-row button {
@@ -1515,7 +1565,7 @@ h3 {
   background: #ffffff;
   /* Click-fall-through-to-end-of-doc: when the user clicks in the gutter
      around the centered 780px column, the wrap intercepts it and focuses
-     the editor (see DocumentEditorPane.svelte). The cursor here signals
+     the editor (see NodeEditor.svelte). The cursor here signals
      that intent. */
   cursor: text;
 }
@@ -2122,7 +2172,170 @@ h3 {
 }
 
 .machine-settings-modal {
-  width: min(540px, calc(100vw - 48px));
+  width: min(640px, calc(100vw - 48px));
+  max-height: calc(100vh - 80px);
+  overflow-y: auto;
+}
+
+.palette-editor {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin: 12px 0 4px;
+  padding: 12px;
+  border: 1px solid #cbd6d2;
+  border-radius: 6px;
+  background: #fafcfb;
+}
+
+.palette-editor h3 {
+  margin: 0;
+  font-size: 14px;
+  font-weight: 600;
+}
+
+.palette-editor p.muted {
+  margin: 0 0 8px;
+  font-size: 12px;
+}
+
+.palette-row {
+  display: grid;
+  grid-template-columns: 22px 1fr 1.5fr 44px auto;
+  gap: 8px;
+  align-items: center;
+  font-size: 12px;
+}
+
+.palette-row.palette-header {
+  font-size: 11px;
+  color: #6c7872;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  padding: 0 2px 4px;
+  border-bottom: 1px solid #e0e6e3;
+  margin-bottom: 4px;
+}
+
+.palette-swatch-dot {
+  display: inline-block;
+  width: 16px;
+  height: 16px;
+  border-radius: 50%;
+  border: 1px solid rgba(0, 0, 0, 0.18);
+}
+
+.palette-id-input,
+.palette-label-input {
+  font-size: 12px;
+  padding: 3px 6px;
+  border: 1px solid #cbd6d2;
+  border-radius: 4px;
+  min-width: 0;
+}
+
+.palette-id-input {
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+}
+
+.palette-color-input {
+  width: 44px;
+  height: 26px;
+  padding: 0;
+  border: 1px solid #cbd6d2;
+  border-radius: 4px;
+  background: transparent;
+  cursor: pointer;
+}
+
+.palette-row-actions {
+  display: inline-flex;
+  gap: 2px;
+}
+
+.palette-row-btn {
+  appearance: none;
+  background: transparent;
+  border: 1px solid transparent;
+  border-radius: 4px;
+  padding: 2px 6px;
+  font-size: 11px;
+  color: #4d5753;
+  cursor: pointer;
+  line-height: 1;
+}
+.palette-row-btn:hover:not(:disabled) {
+  background: #eef3f0;
+  border-color: #cbd6d2;
+}
+.palette-row-btn:disabled { opacity: 0.35; cursor: default; }
+.palette-row-delete:hover:not(:disabled) {
+  color: #8a3f3a;
+  background: #f7e6e2;
+  border-color: #e3b3a9;
+}
+
+.palette-add-row {
+  margin-top: 8px;
+}
+
+.schema-type-color-row,
+.metadata-color-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  font-size: 13px;
+}
+.schema-type-color-row > span:first-child,
+.metadata-color-row > span:first-child {
+  min-width: 80px;
+  color: #4d5753;
+}
+.schema-type-color-row small,
+.metadata-color-row small {
+  color: #6c7872;
+  font-size: 11px;
+}
+
+.schema-field-option-colors {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 8px 10px;
+  border: 1px solid #cbd6d2;
+  border-radius: 6px;
+  background: #fafcfb;
+}
+.schema-field-option-colors .option-colors-label {
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: #6c7872;
+  margin-bottom: 2px;
+}
+.option-color-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  font-size: 13px;
+}
+.option-color-value {
+  flex: 1;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  color: #28332f;
+}
+.palette-add-row button {
+  font-size: 12px;
+  padding: 4px 10px;
+  border: 1px dashed #b4c2bc;
+  border-radius: 4px;
+  background: transparent;
+  cursor: pointer;
+  color: #4d5753;
+}
+.palette-add-row button:hover {
+  border-style: solid;
+  background: #eef3f0;
 }
 
 .machine-settings-modal code {
@@ -2994,7 +3207,7 @@ h3 {
   line-height: 1.4;
 }
 
-/* Inline prompt-author preview (DocumentEditorPane, prompt entries only) — */
+/* Inline prompt-author preview (NodeEditor, prompt entries only) — */
 /* a permanent split below the editor. */
 .prompt-preview-resize {
   height: 6px;
@@ -3222,7 +3435,7 @@ h3 {
   padding: 0 4px;
 }
 
-/* Per-entry inputs editor (DocumentEditorPane, prompt entries). Sits between
+/* Per-entry inputs editor (NodeEditor, prompt entries). Sits between
    the body editor and the resize handle / preview pane. */
 .prompt-help-button {
   position: absolute;
@@ -3516,7 +3729,7 @@ h3 {
 }
 
 /* The context_pick row is now rendered outside .prompt-input-grid
-   (see DocumentEditorPane's branch on draft.type). The widget owns its
+   (see NodeEditor's branch on draft.type). The widget owns its
    own card chrome. */
 .entry-inputs-editor .prompt-input-row-context {
   margin-bottom: 8px;
@@ -3794,7 +4007,10 @@ h3 {
    would pick up. Subtle by default — colour comes from the entity in a
    future iteration. */
 .implicit-context-match {
-  border-bottom: 1.5px dotted #7d9d92;
+  /* Per-entity color set via --entity-color inline by the TipTap
+     decoration (see implicitContextHighlight.ts). Falls back to a
+     neutral teal-grey when the entity has no resolved color. */
+  border-bottom: 1.5px dotted var(--entity-color, #7d9d92);
   cursor: help;
 }
 

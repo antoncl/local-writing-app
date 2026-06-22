@@ -19,6 +19,17 @@
     StructureDocument,
     StructureNode,
   } from "./types";
+  import { resolveColor } from "./colors";
+
+  // Resolve a ref's color via the full chain: instance (not carried on
+  // ContextPickRef today — that's a Phase 4 surface) → entry-type → parent
+  // chain → kind-default. Returns an inline CSS custom property string;
+  // the chip / monogram CSS reads `--chip-base` and derives the soft tint
+  // via color-mix(). Empty string falls back to the neutral chip.
+  function colorStyleForRef(ref: { kind: string; entry_type?: string }): string {
+    const swatch = resolveColor(null, ref.entry_type, ref.kind, metadataSchema);
+    return swatch ? `--chip-base: ${swatch.hex};` : "";
+  }
 
   export let config: ContextPickConfig = {};
   export let value: ContextPickRef[] = [];
@@ -356,11 +367,9 @@
     {#each value as ref (refKey(ref))}
       <span
         class="ctx-chip"
-        class:ctx-chip-scene={ref.kind === "scene" && !ref.target}
-        class:ctx-chip-lore={ref.kind === "lore"}
-        class:ctx-chip-snippet={ref.kind === "snippet"}
         class:ctx-chip-preset={ref.kind === "preset"}
         class:ctx-chip-target={ref.target}
+        style={colorStyleForRef(ref)}
       >
         {#if compact}
           <span class="ctx-chip-dot" aria-hidden="true"></span>
@@ -465,12 +474,9 @@
                   <button
                     type="button"
                     class="ctx-item"
-                    class:ctx-item-scene={item.ref.kind === "scene"}
-                    class:ctx-item-lore={item.ref.kind === "lore"}
-                    class:ctx-item-snippet={item.ref.kind === "snippet"}
-                    class:ctx-item-preset={item.ref.kind === "preset"}
                     disabled={picked}
                     title={picked ? "Already added" : ""}
+                    style={colorStyleForRef(item.ref)}
                     on:click={() => add(item.ref)}
                   >
                     <span class="ctx-item-mono" aria-hidden="true">{item.monogram}</span>
@@ -515,16 +521,10 @@
     --ctx-star-soft: #f7eed7;
     --ctx-shadow: rgba(40, 60, 52, 0.08);
     --ctx-shadow-pop: rgba(40, 60, 52, 0.18);
-    /* Per-kind colors — scoped to ctx- to avoid dragging "lore blue"
-       into the rest of the app's namespace. */
-    --ctx-k-scene: #3f7d68;
-    --ctx-k-scene-soft: #e2efe9;
-    --ctx-k-lore: #4f7390;
-    --ctx-k-lore-soft: #e4ebf1;
-    --ctx-k-snippet: #976b46;
-    --ctx-k-snippet-soft: #efe6dc;
-    --ctx-k-preset: #5f6f67;
-    --ctx-k-preset-soft: #e7ecea;
+    /* Per-chip colors come from inline `--chip-base` set by the markup
+       via resolveColorForKind() — see colors.ts. The soft tint is
+       derived in CSS via color-mix so we don't have to ship two values
+       per swatch. */
 
     display: flex;
     flex-direction: column;
@@ -549,14 +549,6 @@
     --ctx-star-soft: #3a2f17;
     --ctx-shadow: rgba(0, 0, 0, 0.45);
     --ctx-shadow-pop: rgba(0, 0, 0, 0.55);
-    --ctx-k-scene: #5ea585;
-    --ctx-k-scene-soft: #22332c;
-    --ctx-k-lore: #7aa0bf;
-    --ctx-k-lore-soft: #20303c;
-    --ctx-k-snippet: #c0986e;
-    --ctx-k-snippet-soft: #332a20;
-    --ctx-k-preset: #93a79c;
-    --ctx-k-preset-soft: #232b27;
   }
 
   /* --- Context bar (PR 2: chips + trigger in one bordered well) ---- */
@@ -592,22 +584,33 @@
     font-size: 12.5px;
     line-height: 1.2;
     color: var(--ctx-text);
-    /* Per-kind chip-tag tokens — set by the kind classes below; default
-       lands on the neutral border treatment when unset. */
-    --chip-tag-color: var(--ctx-text-3);
+    /* --chip-base is set inline per chip by colorStyleForRef() — see the
+       script. The tag-pill color uses the base directly; the tag-pill
+       background is a soft tint derived via color-mix. When unset, the
+       chip falls back to a neutral border-only treatment. */
+    --chip-tag-color: var(--chip-base, var(--ctx-text-3));
     --chip-tag-bg: var(--ctx-inset);
   }
 
-  .ctx-chip-scene { --chip-tag-color: var(--ctx-k-scene); --chip-tag-bg: var(--ctx-k-scene-soft); }
-  .ctx-chip-lore  { --chip-tag-color: var(--ctx-k-lore);  --chip-tag-bg: var(--ctx-k-lore-soft); }
-  .ctx-chip-snippet { --chip-tag-color: var(--ctx-k-snippet); --chip-tag-bg: var(--ctx-k-snippet-soft); }
+  .ctx-chip[style*="--chip-base"] {
+    --chip-tag-bg: color-mix(in srgb, var(--chip-base) 12%, white 88%);
+  }
 
-  /* Preset chips reverse the polarity — pale-graphite surface so the
+  :global([data-theme="dark"]) .ctx-chip[style*="--chip-base"] {
+    --chip-tag-color: color-mix(in srgb, var(--chip-base) 75%, white 25%);
+    --chip-tag-bg: color-mix(in srgb, var(--chip-base) 18%, black 82%);
+  }
+
+  /* Preset chips reverse the polarity — pale base-tint background so the
      whole-document inclusion reads visually distinct from item chips. */
   .ctx-chip-preset {
-    background: var(--ctx-k-preset-soft);
-    --chip-tag-color: var(--ctx-k-preset);
+    background: color-mix(in srgb, var(--chip-base, var(--ctx-text-3)) 12%, white 88%);
+    --chip-tag-color: var(--chip-base, var(--ctx-text-3));
     --chip-tag-bg: var(--ctx-surface);
+  }
+
+  :global([data-theme="dark"]) .ctx-chip-preset {
+    background: color-mix(in srgb, var(--chip-base, var(--ctx-text-3)) 18%, black 82%);
   }
 
   /* ★-bound scene gets a full gold-tint chip — loudest treatment in the
@@ -907,15 +910,21 @@
     text-align: left;
     font-family: inherit;
     color: var(--ctx-text);
-    /* Per-kind monogram tokens — set by ctx-item-* below. */
-    --mono-color: var(--ctx-text-3);
+    /* --chip-base is set inline by colorStyleForRef() on the item
+       button; monogram color/background derive from it. Falls back to
+       neutral inset when unset. */
+    --mono-color: var(--chip-base, var(--ctx-text-3));
     --mono-bg: var(--ctx-inset);
   }
 
-  .ctx-item-scene { --mono-color: var(--ctx-k-scene); --mono-bg: var(--ctx-k-scene-soft); }
-  .ctx-item-lore  { --mono-color: var(--ctx-k-lore);  --mono-bg: var(--ctx-k-lore-soft); }
-  .ctx-item-snippet { --mono-color: var(--ctx-k-snippet); --mono-bg: var(--ctx-k-snippet-soft); }
-  .ctx-item-preset  { --mono-color: var(--ctx-k-preset);  --mono-bg: var(--ctx-k-preset-soft); }
+  .ctx-item[style*="--chip-base"] {
+    --mono-bg: color-mix(in srgb, var(--chip-base) 12%, white 88%);
+  }
+
+  :global([data-theme="dark"]) .ctx-item[style*="--chip-base"] {
+    --mono-color: color-mix(in srgb, var(--chip-base) 75%, white 25%);
+    --mono-bg: color-mix(in srgb, var(--chip-base) 18%, black 82%);
+  }
 
   .ctx-item:hover:not(:disabled) {
     background: var(--ctx-panel-2);

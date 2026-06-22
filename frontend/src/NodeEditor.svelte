@@ -17,6 +17,9 @@
   import MetadataLongTextEditor from "./MetadataLongTextEditor.svelte";
   import ProviderTierPicker from "./ProviderTierPicker.svelte";
   import ReferencePicker from "./ReferencePicker.svelte";
+  import SwatchPicker from "./SwatchPicker.svelte";
+  import ColoredSelect from "./ColoredSelect.svelte";
+  import { resolveColor } from "./colors";
   import { api, HttpError } from "./api";
   import { formatCostEur, formatTokens } from "./money";
   import PromptInputField from "./PromptInputField.svelte";
@@ -139,11 +142,22 @@
     },
   });
 
-  // Color derived deterministically from the character lore id. Stable
-  // across reloads (no random/Date input). TODO: revisit once an explicit
-  // `color` field exists on character lore entries — author taste should
-  // win over a hash when both are available.
+  // Per-character mark color. Walks the full resolver: instance
+  // (metadata.color on the lore entry) → entry-type color → parent
+  // chain → kind-default. Only falls back to the deterministic hash
+  // when the resolver returns null — so authors who set an explicit
+  // color get it, but uncolored characters still get a stable hue.
+  // Reads loreEntries + metadataSchema from the enclosing component
+  // scope; runs each time TipTap renders the mark, so changes flow
+  // through on next render (re-open scene if a colored character's
+  // mark looks stale).
   function characterColorFromId(id: string): string {
+    const entry = loreEntries.find((e) => e.id === id);
+    const instanceColor = typeof entry?.metadata?.color === "string" ? entry.metadata.color : null;
+    const swatch = resolveColor(instanceColor, entry?.entry_type, "lore", metadataSchema);
+    if (swatch) return swatch.hex;
+    // Hash fallback for entries with no resolved color (no instance,
+    // no type, no kind default). Stable across reloads — no randomness.
     let hash = 0;
     for (let i = 0; i < id.length; i++) {
       hash = (hash * 31 + id.charCodeAt(i)) | 0;
@@ -390,7 +404,7 @@
       type: input.type,
       label: input.label ?? "",
       defaultValue: input.default === undefined || input.default === null ? "" : String(input.default),
-      options: (input.options ?? []).join(", "),
+      options: (input.options ?? []).map((o) => o.value).join(", "),
       required: Boolean(input.required),
       targetKind: targetKindRaw === "scene" || targetKindRaw === "lore" ? (targetKindRaw as "scene" | "lore") : "",
       targetEntryType: typeof targetEntryTypeRaw === "string" ? targetEntryTypeRaw : "",
@@ -427,7 +441,14 @@
         }
         if (d.defaultValue !== "") out.default = d.defaultValue;
         if (d.type === "select") {
-          out.options = d.options.split(",").map((s) => s.trim()).filter(Boolean);
+          // Emit SelectOption objects; colors aren't editable from the
+          // prompt-input draft surface today (Phase 3 adds them to the
+          // Detail Field editor for metadata-level selects).
+          out.options = d.options
+            .split(",")
+            .map((s) => s.trim())
+            .filter(Boolean)
+            .map((value) => ({ value }));
         }
         const target: Record<string, string> = {};
         if (d.targetKind) target.kind = d.targetKind;
@@ -3090,6 +3111,24 @@
                   {/each}
                 </select>
               </label>
+              <div class="metadata-color-row">
+                <span>Color</span>
+                <SwatchPicker
+                  value={metadataValueString(metadata.color) || null}
+                  onChange={(id) => {
+                    metadata = { ...metadata, color: id ?? "" };
+                    emitChange();
+                  }}
+                />
+                {#if !metadataValueString(metadata.color)}
+                  {@const inherited = metadataSchema.entry_types[entryType]?.color}
+                  {#if inherited}
+                    <small class="muted">inherits <code>{inherited}</code> from type</small>
+                  {:else}
+                    <small class="muted">no override (falls back to type / kind default)</small>
+                  {/if}
+                {/if}
+              </div>
               {#if documentKind === "assistant"}
                 <ProviderTierPicker
                   provider={metadataValueString(metadata.ai_provider)}
@@ -3139,12 +3178,12 @@
                         <div class="multi-select-chips" aria-label={field.name}>
                           {#each field.options as option}
                             <button
-                              class:active={isMultiSelectOptionSelected(fieldId, option)}
+                              class:active={isMultiSelectOptionSelected(fieldId, option.value)}
                               class="multi-select-chip"
                               type="button"
-                              on:click={() => toggleMultiSelectOption(fieldId, field, option)}
+                              on:click={() => toggleMultiSelectOption(fieldId, field, option.value)}
                             >
-                              {option}
+                              {option.label ?? option.value}
                             </button>
                           {/each}
                         </div>
@@ -3153,26 +3192,20 @@
                       <label class:wide-field={field.type === "computed"}>
                         {field.name}
                         {#if fieldId === "status"}
-                        <select value={status} on:change={(event) => updateStatus(event.currentTarget.value)}>
-                          {#if status && !field.options.includes(status)}
-                            <option value={status}>{status}</option>
-                          {/if}
-                          {#each field.options as option}
-                            <option value={option}>{option}</option>
-                          {/each}
-                        </select>
+                          <ColoredSelect
+                            value={status}
+                            options={field.options}
+                            ariaLabel={field.name}
+                            placeholder="(no status)"
+                            onChange={updateStatus}
+                          />
                         {:else if field.type === "select"}
-                        {#key `${fieldId}:${currentValue}:${field.options.join("\u0000")}`}
-                          <select data-metadata-field-id={fieldId} use:syncSelectValue={currentValue} on:change={(event) => updateMetadataField(fieldId, field, event.currentTarget.value)}>
-                            <option value="" selected={currentValue === ""}></option>
-                            {#if currentValue && !field.options.includes(currentValue)}
-                              <option value={currentValue} selected>{currentValue}</option>
-                            {/if}
-                            {#each field.options as option}
-                              <option value={option} selected={option === currentValue}>{option}</option>
-                            {/each}
-                          </select>
-                        {/key}
+                          <ColoredSelect
+                            value={currentValue}
+                            options={field.options}
+                            ariaLabel={field.name}
+                            onChange={(v) => updateMetadataField(fieldId, field, v)}
+                          />
                       {:else if field.type === "boolean"}
                         <input
                           type="checkbox"

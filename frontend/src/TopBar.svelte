@@ -3,6 +3,10 @@
 
   // Null when no project is open — switcher shows "Open a project…".
   export let currentTitle: string | null;
+  // Resolved hex for the open project's color, or null if no color set.
+  // Rendered as a small dot before the title so the user can tell which
+  // project they're in at a glance (especially when nesting lands).
+  export let currentProjectColor: string | null = null;
   export let recentProjects: RecentProject[] = [];
   // Event hooks. The parent owns all side effects; this component is
   // purely presentational + dropdown state.
@@ -90,6 +94,9 @@
       on:click={toggleSwitcher}
     >
       <span class="chevron" aria-hidden="true">▾</span>
+      {#if currentProjectColor}
+        <span class="project-color-dot" aria-hidden="true" style={`background: ${currentProjectColor}`}></span>
+      {/if}
       <span class="switcher-label">{currentTitle ?? "Open a project…"}</span>
     </button>
 

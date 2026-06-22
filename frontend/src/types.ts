@@ -3,6 +3,12 @@ export type StructureNode = {
   type: string;
   title: string;
   scene_id?: string | null;
+  // Scene's current status value (e.g. "draft"). Used by the tree to
+  // render a colored left-edge stripe by looking up the matching option
+  // in metadataSchema.fields.status. Null for non-leaf nodes.
+  status?: string | null;
+  // Scene's instance-level color override (palette swatch id).
+  color?: string | null;
   computed_metadata?: Record<string, MetadataValue>;
   children: StructureNode[];
 };
@@ -96,7 +102,7 @@ export type AssistantEntry = {
   entry_type: string;
   metadata: EntryMetadata;
   // has_body: false — these are present so AssistantEntry satisfies the
-  // EditableDocument shape used by DocumentEditorPane, but they are always
+  // EditableDocument shape used by NodeEditor, but they are always
   // empty / undefined for assistant kind.
   body_markdown?: string;
   computed_metadata?: EntryMetadata;
@@ -128,12 +134,22 @@ export type MetadataFieldType =
   | "entity_ref"
   | "entity_ref_list"
   | "tags"
-  | "computed";
+  | "computed"
+  | "color";
+
+// One choice in a select / multi_select field, or a select prompt input.
+// Stored as `{value, label?, color?}`. Bare strings are accepted on the
+// wire (the backend normalizes) but emitted as objects.
+export type SelectOption = {
+  value: string;
+  label?: string | null;
+  color?: string | null;
+};
 
 export type MetadataFieldDefinition = {
   name: string;
   type: MetadataFieldType;
-  options: string[];
+  options: SelectOption[];
   target?: Record<string, string> | null;
   computed?: Record<string, string> | null;
 };
@@ -146,7 +162,8 @@ export type PromptInputType =
   | "select"
   | "entity_ref"
   | "entity_ref_list"
-  | "context_pick";
+  | "context_pick"
+  | "color";
 
 // Shape carried in PromptInputDefinition.target when type === "context_pick".
 // Matches the backend convention documented in
@@ -182,7 +199,7 @@ export type PromptInputDefinition = {
   type: PromptInputType;
   label?: string | null;
   default?: MetadataValue;
-  options?: string[];
+  options?: SelectOption[];
   required?: boolean;
   target?: Record<string, MetadataValue> | null;
 };
@@ -215,6 +232,14 @@ export type EntryTypeDefinition = {
   has_body?: boolean;
   body_editor?: EntryBodyEditor;
   body_language?: EntryBodyLanguage;
+  // Type-level palette swatch id. Inherits from parent unless set.
+  // Resolves to a hex via the machine palette. See colors.ts.
+  color?: string | null;
+  // Pre-inheritance color — mirrors `own_fields`. Editor uses this to
+  // distinguish "set on this type" from "inherited from parent".
+  own_color?: string | null;
+  default_body?: string;
+  default_inputs?: PromptInputDefinition[];
   prompt?: PromptEntryTypeExtras | null;
 };
 
@@ -312,6 +337,12 @@ export type RecentProject = {
   opened_at: string;
 };
 
+export type Swatch = {
+  id: string;
+  label: string;
+  hex: string;
+};
+
 export type MachineSettingsView = {
   version: number;
   providers: ProviderCredentialsView;
@@ -319,6 +350,7 @@ export type MachineSettingsView = {
   default_models: Record<string, string>;
   default_projects_folder: string;
   recent_projects: RecentProject[];
+  palette: Swatch[];
   config_path: string;
 };
 
@@ -328,6 +360,7 @@ export type MachineSettingsUpdate = {
   default_models?: Record<string, string>;
   default_projects_folder?: string;
   recent_projects?: RecentProject[];
+  palette?: Swatch[];
 };
 
 export type AIHealthResponse = {

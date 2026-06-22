@@ -5,6 +5,7 @@
   import NodeEditor from "./NodeEditor.svelte";
   import NodeRow from "./NodeRow.svelte";
   import DirectoryPickerModal from "./DirectoryPickerModal.svelte";
+  import SearchInput from "./SearchInput.svelte";
   import NewProjectModal from "./NewProjectModal.svelte";
   import MachineSettingsDialog from "./MachineSettingsDialog.svelte";
   import ConfirmModal from "./ConfirmModal.svelte";
@@ -4184,7 +4185,7 @@ async function seedChatFromPromptEntry(
       </div>
     </header>
     <div class="pane-content">
-      <input class="lore-search" bind:value={loreSearchQuery} placeholder="Search entries, tags, aliases" />
+      <SearchInput bind:value={loreSearchQuery} placeholder="Search entries, tags, aliases" />
       <div class="schema-layer-fields lore-entry-list">
         {#each groupedLoreEntries as group}
           <section class="lore-entry-group" style={`--group-depth: ${group.depth}`}>

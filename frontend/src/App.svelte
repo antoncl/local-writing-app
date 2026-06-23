@@ -4181,16 +4181,20 @@ async function seedChatFromPromptEntry(
           </div>
         </div>
       </div>
-      {#if structure}
-        {#each nodeChildren(structure.root) as child}
-          {@render renderTree(child, 0)}
-        {/each}
-        {#if nodeChildren(structure.root).length === 0}
-          <p class="muted">No scenes yet.</p>
+      <NodeList isEmpty={!structure || nodeChildren(structure.root).length === 0}>
+        {#if structure}
+          {#each nodeChildren(structure.root) as child}
+            {@render renderTree(child, 0)}
+          {/each}
         {/if}
-      {:else}
-        <p class="muted">Open or create a project to begin.</p>
-      {/if}
+        {#snippet whenEmpty()}
+          {#if !structure}
+            <p class="muted">Open or create a project to begin.</p>
+          {:else}
+            <p class="muted">No scenes yet.</p>
+          {/if}
+        {/snippet}
+      </NodeList>
     </div>
     <button class="pane-resize" type="button" aria-label="Resize Manuscript Outline pane" on:keydown={(event) => handlePaneResizeKeydown(event, "outline")} on:mousedown={(event) => startPaneResize(event, "outline")}></button>
   </section>

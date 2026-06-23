@@ -4205,6 +4205,7 @@ async function seedChatFromPromptEntry(
           <NodeRow
             variant="tree"
             groupHeader
+            collapsed={!!collapsedLoreGroups[group.id]}
             title={group.label}
             depth={group.depth}
             onClick={() => toggleLoreGroup(group.id)}

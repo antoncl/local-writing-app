@@ -51,6 +51,10 @@
   // pill in trailing. The "chapter divider" look from the Editorial
   // Card direction.
   export let groupHeader: boolean = false;
+  // When true, the children slot is fully suppressed — including its
+  // wrapper. Lets a group-header caller collapse the tier panel cleanly
+  // without it leaving a thin tinted strip from padding alone.
+  export let collapsed: boolean = false;
 
   // Snippet props.
   export let leading: Snippet | undefined = undefined;
@@ -99,7 +103,7 @@
   on:drop
 >{#if leading}{@render leading()}{/if}{#if titleSlot}{@render titleSlot()}{:else if clickable}<button type="button" class="node-row-click" on:click={onClick}><span class="node-row-text"><strong>{title}</strong>{#if detailSlot}{@render detailSlot()}{:else if detail}<small>{detail}</small>{/if}{#if visibleTags.length > 0}<span class="node-row-tags">{#each visibleTags as tag}<span class="node-row-tag">{tag}</span>{/each}{#if hiddenTagCount > 0}<span class="node-row-tag node-row-tag-overflow">+{hiddenTagCount}</span>{/if}</span>{/if}</span></button>{:else}<span class="node-row-text"><strong>{title}</strong>{#if detailSlot}{@render detailSlot()}{:else if detail}<small>{detail}</small>{/if}{#if visibleTags.length > 0}<span class="node-row-tags">{#each visibleTags as tag}<span class="node-row-tag">{tag}</span>{/each}{#if hiddenTagCount > 0}<span class="node-row-tag node-row-tag-overflow">+{hiddenTagCount}</span>{/if}</span>{/if}</span>{/if}{#if trailing}<span class="node-row-trailing">{@render trailing()}</span>{/if}</div>
 
-{#if children}
+{#if children && !collapsed}
   {#if groupHeader}
     <div class="node-row-group-children">{@render children()}</div>
   {:else}

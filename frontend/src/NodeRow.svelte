@@ -55,6 +55,12 @@
   // wrapper. Lets a group-header caller collapse the tier panel cleanly
   // without it leaving a thin tinted strip from padding alone.
   export let collapsed: boolean = false;
+  // True when the node this row represents is currently open in a
+  // pinned editor pane. NodeRow renders a non-interactive star
+  // indicator; the actual pin/unpin toggle lives on the editor pane
+  // (its existing pane-header pin button). The indicator is uniform
+  // across every NodeRow consumer so users learn one pattern.
+  export let pinned: boolean = false;
 
   // Snippet props.
   export let leading: Snippet | undefined = undefined;
@@ -101,7 +107,7 @@
   on:dragover
   on:dragleave
   on:drop
->{#if leading}{@render leading()}{/if}{#if titleSlot}{@render titleSlot()}{:else if clickable}<button type="button" class="node-row-click" on:click={onClick}><span class="node-row-text"><strong>{title}</strong>{#if detailSlot}{@render detailSlot()}{:else if detail}<small>{detail}</small>{/if}{#if visibleTags.length > 0}<span class="node-row-tags">{#each visibleTags as tag}<span class="node-row-tag">{tag}</span>{/each}{#if hiddenTagCount > 0}<span class="node-row-tag node-row-tag-overflow">+{hiddenTagCount}</span>{/if}</span>{/if}</span></button>{:else}<span class="node-row-text"><strong>{title}</strong>{#if detailSlot}{@render detailSlot()}{:else if detail}<small>{detail}</small>{/if}{#if visibleTags.length > 0}<span class="node-row-tags">{#each visibleTags as tag}<span class="node-row-tag">{tag}</span>{/each}{#if hiddenTagCount > 0}<span class="node-row-tag node-row-tag-overflow">+{hiddenTagCount}</span>{/if}</span>{/if}</span>{/if}{#if trailing}<span class="node-row-trailing">{@render trailing()}</span>{/if}</div>
+>{#if leading}{@render leading()}{/if}{#if titleSlot}{@render titleSlot()}{:else if clickable}<button type="button" class="node-row-click" on:click={onClick}><span class="node-row-text"><strong>{title}</strong>{#if detailSlot}{@render detailSlot()}{:else if detail}<small>{detail}</small>{/if}{#if visibleTags.length > 0}<span class="node-row-tags">{#each visibleTags as tag}<span class="node-row-tag">{tag}</span>{/each}{#if hiddenTagCount > 0}<span class="node-row-tag node-row-tag-overflow">+{hiddenTagCount}</span>{/if}</span>{/if}</span></button>{:else}<span class="node-row-text"><strong>{title}</strong>{#if detailSlot}{@render detailSlot()}{:else if detail}<small>{detail}</small>{/if}{#if visibleTags.length > 0}<span class="node-row-tags">{#each visibleTags as tag}<span class="node-row-tag">{tag}</span>{/each}{#if hiddenTagCount > 0}<span class="node-row-tag node-row-tag-overflow">+{hiddenTagCount}</span>{/if}</span>{/if}</span>{/if}{#if pinned}<span class="node-row-pin-indicator" title="Open in a pinned editor" aria-label="Pinned in editor">★</span>{/if}{#if trailing}<span class="node-row-trailing">{@render trailing()}</span>{/if}</div>
 
 {#if children && !collapsed}
   {#if groupHeader}
@@ -270,6 +276,26 @@
     align-items: center;
     gap: 4px;
     flex: none;
+  }
+
+  /* Pin indicator — non-interactive star shown when the row's node
+     is currently open in a pinned editor pane. Always visible (not
+     hover-revealed) so the status is readable at a glance across
+     panes. Uniform across every NodeRow consumer per the taxonomy. */
+  .node-row-pin-indicator {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    flex: none;
+    width: 22px;
+    height: 22px;
+    color: var(--star);
+    background: var(--star-soft);
+    border: 1px solid var(--star-border);
+    border-radius: 999px;
+    font-size: 13px;
+    line-height: 1;
+    user-select: none;
   }
 
   /* Trailing affordance buttons (caller-provided <button>s) get the

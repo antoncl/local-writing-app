@@ -1996,28 +1996,6 @@ async function seedChatFromPromptEntry(
     await persistActiveChat();
   }
 
-  async function togglePinForChat(chatId: string): Promise<void> {
-    // Pin/unpin a chat from the Chats pane row (not necessarily the active one).
-    if (chatId === activeChatId) {
-      await toggleActiveChatPin();
-      return;
-    }
-    // For other chats, read-then-save so we don't disturb panel state.
-    try {
-      const session = await api.getChatSession(chatId);
-      await api.saveChatSession(chatId, {
-        title: session.title,
-        assistant_id: session.assistant_id,
-        system_prompt: session.system_prompt,
-        pinned: !session.pinned,
-        context_items: session.context_items,
-        messages: session.messages,
-      });
-      await refreshChatSessions();
-    } catch (e) {
-      error = `Couldn't update chat: ${(e as Error).message}`;
-    }
-  }
 
   // Inline chat rename — mirrors the structure-tree rename pattern
   // (editingNodeId + editingTitle + Enter/Esc) so the user gets the
@@ -2113,6 +2091,19 @@ async function seedChatFromPromptEntry(
   function defaultAssistantEntryId(): string {
     return assistantEntries.find((a) => Boolean(a.metadata?.is_default))?.id ?? "";
   }
+
+  // Set of "<docType>:<id>" keys for every node currently open in a
+  // pinned editor pane. Derived reactively so the template can ask
+  // `pinnedEditorPaneKeys.has(\`lore:${entry.id}\`)` and have Svelte
+  // re-evaluate the binding when any pane's .pinned flips. (A plain
+  // `function editorPanePinnedFor(...)` doesn't track editorPanes
+  // when called inside a template prop binding — Svelte 5 legacy
+  // reactivity only tracks deps read directly in the expression.)
+  $: pinnedEditorPaneKeys = new Set<string>(
+    editorPanes
+      .filter((pane) => pane.pinned && pane.document)
+      .map((pane) => `${pane.document!.type}:${pane.document!.id}`),
+  );
 
   function paneEntryFromAncestor(pane: EditorPaneState): boolean {
     const layerId = pane.scene?.source_layer_id;
@@ -4251,6 +4242,7 @@ async function seedChatFromPromptEntry(
                     tags={entryTagList}
                     depth={group.depth + 1}
                     active={focusedEditorPane?.document?.type === "lore" && focusedEditorPane.document.id === entry.id}
+                    pinned={pinnedEditorPaneKeys.has(`lore:${entry.id}`)}
                     stripeColor={entrySwatch?.hex ?? null}
                     onClick={() => openLoreEntryInEditorPane(entry.id)}
                     on:mousedown={(event) => event.stopPropagation()}
@@ -4597,6 +4589,7 @@ async function seedChatFromPromptEntry(
                 <NodeRow
                   title={entry.title}
                   active={focusedEditorPane?.document?.type === "assistant" && focusedEditorPane.document.id === entry.id}
+                  pinned={pinnedEditorPaneKeys.has(`assistant:${entry.id}`)}
                   dragging={assistantDragId === entry.id}
                   dropPosition={assistantDropTarget?.id === entry.id ? (assistantDropTarget?.position ?? null) : null}
                   onClick={() => openAssistantEntryInEditorPane(entry.id)}
@@ -4670,7 +4663,6 @@ async function seedChatFromPromptEntry(
               <small>{session.message_count} message{session.message_count === 1 ? "" : "s"} · {session.updated_at.slice(0, 16).replace("T", " ")}</small>
             {/snippet}
             {#snippet trailing()}
-              <button class="row-action-pin" class:active={session.pinned} type="button" title={session.pinned ? "Unpin" : "Pin"} on:click|stopPropagation={() => togglePinForChat(session.id)}>{session.pinned ? "★" : "☆"}</button>
               <button class="row-action-delete" type="button" title="Delete chat" on:click|stopPropagation={() => deleteChatSessionFromPane(session.id)}>×</button>
             {/snippet}
           </NodeRow>
@@ -5295,6 +5287,7 @@ async function seedChatFromPromptEntry(
         <NodeRow
           title={entry.title}
           active={focusedEditorPane?.document?.type === "prompt" && focusedEditorPane.document.id === entry.id}
+          pinned={pinnedEditorPaneKeys.has(`prompt:${entry.id}`)}
           onClick={() => openPromptEntryInEditorPane(entry.id)}
         />
       {/each}
@@ -5315,6 +5308,7 @@ async function seedChatFromPromptEntry(
     ariaLabel={node.title}
     depth={depth}
     stripeColor={stripeHex}
+    pinned={!!node.scene_id && pinnedEditorPaneKeys.has(`scene:${node.scene_id}`)}
     dragging={draggedNodeId === node.id}
     dropPosition={dragOverNodeId === node.id ? dragOverPosition : null}
     clickable={false}

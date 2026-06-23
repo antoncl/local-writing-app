@@ -813,9 +813,15 @@
   // chained derivation and metadataFieldIds could end up frozen on the
   // entry-type the component first mounted with. The single derivation
   // tracks both deps explicitly.
-  $: metadataFieldIds = ((metadataSchema?.entry_types[entryType] ?? metadataSchema?.entry_types[defaultEntryType()])?.fields ?? []).filter((fieldId) =>
-    documentKind === "assistant" ? !ASSISTANT_PICKER_FIELDS.has(fieldId) : true,
-  );
+  //
+  // `color` is filtered out because the dedicated SwatchPicker in the
+  // metadata-color-row above already edits metadata.color — letting the
+  // generic field switch render it too would produce a duplicate
+  // (untyped text input) row.
+  $: metadataFieldIds = ((metadataSchema?.entry_types[entryType] ?? metadataSchema?.entry_types[defaultEntryType()])?.fields ?? []).filter((fieldId) => {
+    if (fieldId === "color") return false;
+    return documentKind === "assistant" ? !ASSISTANT_PICKER_FIELDS.has(fieldId) : true;
+  });
   $: hasBody = activeEntryType?.has_body ?? true;
   $: metadataSummaryText = buildMetadataSummary(activeEntryType?.name ?? entryType, status, liveWordCount, hasBody);
 

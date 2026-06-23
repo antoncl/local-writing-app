@@ -99,7 +99,13 @@
   on:drop
 >{#if leading}{@render leading()}{/if}{#if titleSlot}{@render titleSlot()}{:else if clickable}<button type="button" class="node-row-click" on:click={onClick}><span class="node-row-text"><strong>{title}</strong>{#if detailSlot}{@render detailSlot()}{:else if detail}<small>{detail}</small>{/if}{#if visibleTags.length > 0}<span class="node-row-tags">{#each visibleTags as tag}<span class="node-row-tag">{tag}</span>{/each}{#if hiddenTagCount > 0}<span class="node-row-tag node-row-tag-overflow">+{hiddenTagCount}</span>{/if}</span>{/if}</span></button>{:else}<span class="node-row-text"><strong>{title}</strong>{#if detailSlot}{@render detailSlot()}{:else if detail}<small>{detail}</small>{/if}{#if visibleTags.length > 0}<span class="node-row-tags">{#each visibleTags as tag}<span class="node-row-tag">{tag}</span>{/each}{#if hiddenTagCount > 0}<span class="node-row-tag node-row-tag-overflow">+{hiddenTagCount}</span>{/if}</span>{/if}</span>{/if}{#if trailing}<span class="node-row-trailing">{@render trailing()}</span>{/if}</div>
 
-{#if children}{@render children()}{/if}
+{#if children}
+  {#if groupHeader}
+    <div class="node-row-group-children">{@render children()}</div>
+  {:else}
+    {@render children()}
+  {/if}
+{/if}
 
 <style>
   .node-row {
@@ -312,6 +318,34 @@
     border-bottom: 1px solid var(--divider);
     padding-bottom: 4px;
     margin-bottom: 6px;
+  }
+
+  /* Tier panel — the soft tinted background behind grouped entries.
+     Applied automatically whenever a NodeRow with groupHeader=true has
+     a children slot, so every grouped pane (lore, prompts when
+     migrated, schema tree) gets the visual consistently without each
+     caller wiring its own wrapper. The padding hugs the children edges;
+     the radius matches the card variant so a card-variant entry inside
+     the panel sits cleanly within the tier. */
+  .node-row-group-children {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    padding: 8px 8px 10px;
+    background: var(--tier1);
+    border-radius: 10px;
+    margin-top: -2px;
+    margin-bottom: 8px;
+  }
+
+  /* Nested tier panels darken slightly per depth level so deeply
+     nested groups stay readable against their parent. */
+  .node-row-group-children .node-row-group-children {
+    background: var(--tier2);
+  }
+
+  .node-row-group-children .node-row-group-children .node-row-group-children {
+    background: var(--tier3);
   }
 
   .node-row.dragging {

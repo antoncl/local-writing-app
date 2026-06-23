@@ -3509,12 +3509,23 @@ async function seedChatFromPromptEntry(
   }
 
   function loreEntryDetailText(entry: LoreEntrySummary) {
-    const details = [];
-    const aliases = metadataListText(entry.metadata.aliases);
-    const tags = metadataListText(entry.metadata.tags);
-    if (aliases) details.push(`Aliases: ${aliases}`);
-    if (tags) details.push(`Tags: ${tags}`);
-    return details.join(" · ");
+    // Editorial Card direction: kind is implied by the group header,
+    // tags render as pills (see loreEntryTags), aliases stay in the
+    // editor pane only. Keeping the function for future per-entry
+    // detail (e.g. "last edited 2 days ago") — null today.
+    void entry;
+    return null;
+  }
+
+  function loreEntryTags(entry: LoreEntrySummary): string[] {
+    const raw = entry.metadata?.tags;
+    if (Array.isArray(raw)) {
+      return raw.map((item) => String(item).trim()).filter(Boolean);
+    }
+    if (typeof raw === "string") {
+      return raw.split(",").map((s) => s.trim()).filter(Boolean);
+    }
+    return [];
   }
 
   function metadataListText(value: unknown) {
@@ -4193,8 +4204,8 @@ async function seedChatFromPromptEntry(
         {#each groupedLoreEntries as group}
           <NodeRow
             variant="tree"
+            groupHeader
             title={group.label}
-            detail={String(group.entries.length)}
             depth={group.depth}
             onClick={() => toggleLoreGroup(group.id)}
             on:mousedown={(event) => event.stopPropagation()}
@@ -4202,10 +4213,14 @@ async function seedChatFromPromptEntry(
             {#snippet leading()}
               <span class:collapsed={collapsedLoreGroups[group.id]} class="lore-group-caret">▾</span>
             {/snippet}
+            {#snippet trailing()}
+              <span class="group-count-pill">{group.entries.length}</span>
+            {/snippet}
             {#snippet children()}
               {#if !collapsedLoreGroups[group.id]}
                 {#each group.entries as entry}
                   {@const detailText = loreEntryDetailText(entry)}
+                  {@const entryTagList = loreEntryTags(entry)}
                   {@const instanceColor = typeof entry.metadata?.color === "string" ? entry.metadata.color : null}
                   {@const entrySwatch = (() => {
                     const s = getSwatch(instanceColor);
@@ -4215,6 +4230,7 @@ async function seedChatFromPromptEntry(
                   <NodeRow
                     title={entry.title}
                     detail={detailText}
+                    tags={entryTagList}
                     depth={group.depth + 1}
                     active={focusedEditorPane?.document?.type === "lore" && focusedEditorPane.document.id === entry.id}
                     stripeColor={entrySwatch?.hex ?? null}

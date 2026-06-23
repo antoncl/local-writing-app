@@ -1,11 +1,13 @@
 <script lang="ts">
   // NodeRow — canonical row in a NodeList. See [[decisions-ui-widget-taxonomy]].
+  // Visual chrome follows the "Editorial Card" direction agreed in the
+  // 2026-06-22 design pass.
   //
-  // Anatomy (left → right): optional 3px Stripe (color), optional leading
-  // slot (drag handle / icon), title + optional detail (or `detail`
-  // snippet), optional trailing slot (×, +, ⋯, pin star…). May host a
-  // nested children slot (rendered BELOW the row, indented one level
-  // deeper).
+  // Anatomy (left → right): optional 4px Stripe (color, soft-rounded
+  // inset band), optional leading slot (drag handle / caret), title +
+  // optional detail + optional tag pills, optional trailing slot
+  // (×, +, ⋯, pin star…). May host a nested children slot rendered
+  // BELOW the row.
   //
   // The row is a <div> (so trailing affordances can be real <button>
   // children — nesting buttons inside a button is invalid HTML). The
@@ -17,36 +19,43 @@
 
   export let title: string = "";
   // One-line secondary text under the title. Pass `detail` (string) OR
-  // the `detailSlot` snippet for richer content (badges, multiple lines).
+  // the `detailSlot` snippet for richer content. Callers omit kind/type
+  // prefixes when the row's context already implies them (e.g. a lore
+  // entry inside a Character group doesn't say "Character · …").
   export let detail: string | null = null;
   export let active: boolean = false;
   export let stripeColor: string | null = null;
-  // Tree indent. Resolved to `padding-left: depth * 14px` on the outer
-  // wrapper to match the existing scene-tree convention.
+  // Tree indent. Resolved to `padding-left: depth * 14px`.
   export let depth: number = 0;
   export let onClick: ((event: MouseEvent) => void) | undefined = undefined;
-  // Drag visuals. Parent owns drag state and passes these in so the row
-  // paints the right outline.
+  // Drag visuals. Parent owns drag state and passes these in.
   export let dragging: boolean = false;
   export let dropPosition: "before" | "after" | "into" | null = null;
   export let ariaLabel: string | null = null;
   // Disable the click button (e.g. when inline-editing the title). The
   // outer row still renders; just no clickable label.
   export let clickable: boolean = true;
-  // Visual chrome. "card" (default) carries a border + background and is
-  // appropriate for free-standing list rows (lore, prompts, chats…).
-  // "tree" strips chrome to a hover highlight only, matching the dense
-  // outline-style visuals the scene tree and schema tree use.
+  // Visual chrome. "card" carries the full Editorial Card chrome
+  // (border + radius + shadow + soft-rounded stripe). "tree" strips
+  // chrome for dense outline views (scene tree, schema tree, group
+  // headers); the indent + caret carry hierarchy instead.
   export let variant: "card" | "tree" = "card";
-  // Override aria/dom role on the outer container. Defaults to no role
-  // (a plain "presentation" div). Use "treeitem" for tree rows.
+  // Override aria/dom role on the outer container.
   export let role: string | null = null;
+  // Tag pills under the title. Bound explicitly to `metadata.tags` —
+  // do NOT pass aliases here (aliases live in the editor pane, not
+  // the row). Visible cap: TAG_VISIBLE_MAX; overflow becomes a +N chip.
+  export let tags: readonly string[] = [];
+  // Group-header treatment: serif title + a hairline rule under the
+  // row. Pair with variant="tree", a caret in leading, and a count
+  // pill in trailing. The "chapter divider" look from the Editorial
+  // Card direction.
+  export let groupHeader: boolean = false;
 
   // Snippet props.
   export let leading: Snippet | undefined = undefined;
   export let trailing: Snippet | undefined = undefined;
-  // Overrides the `detail` string prop when provided. Rendered inside
-  // .node-row-text below the title.
+  // Overrides the `detail` string prop when provided.
   export let detailSlot: Snippet | undefined = undefined;
   // Replace the entire title + detail area with custom content (e.g. a
   // rename input). Suppresses the default <button>.
@@ -55,18 +64,23 @@
   // responsibility (they re-render NodeRow with `depth + 1`).
   export let children: Snippet | undefined = undefined;
 
+  const TAG_VISIBLE_MAX = 2;
+
   $: indentStyle = depth > 0 ? `padding-left: ${depth * 14}px` : "";
   $: stripeStyle = stripeColor ? `--row-stripe: ${stripeColor}` : "";
   $: rootStyle = [indentStyle, stripeStyle].filter(Boolean).join("; ");
+  $: visibleTags = tags.slice(0, TAG_VISIBLE_MAX);
+  $: hiddenTagCount = Math.max(0, tags.length - TAG_VISIBLE_MAX);
 </script>
 
 <!-- svelte-ignore a11y_no_static_element_interactions -->
-<!-- Whitespace between conditional blocks is intentional-free below:
-     `display: grid` would otherwise promote inter-block text nodes to
-     anonymous grid items, breaking the auto / 1fr / auto column layout. -->
+<!-- Whitespace between conditional blocks is intentionally absent in
+     the main interpolation below: `display: flex` would otherwise
+     promote inter-block text nodes to anonymous flex items. -->
 <div
   class="node-row variant-{variant}"
   class:tree-row={variant === "tree"}
+  class:group-header={groupHeader}
   class:active
   class:has-row-stripe={!!stripeColor}
   class:dragging
@@ -83,120 +97,221 @@
   on:dragover
   on:dragleave
   on:drop
->{#if leading}{@render leading()}{/if}{#if titleSlot}{@render titleSlot()}{:else if clickable}<button type="button" class="node-row-click" on:click={onClick}><span class="node-row-text"><strong>{title}</strong>{#if detailSlot}{@render detailSlot()}{:else if detail}<small>{detail}</small>{/if}</span></button>{:else}<span class="node-row-text"><strong>{title}</strong>{#if detailSlot}{@render detailSlot()}{:else if detail}<small>{detail}</small>{/if}</span>{/if}{#if trailing}<span class="node-row-trailing">{@render trailing()}</span>{/if}</div>
+>{#if leading}{@render leading()}{/if}{#if titleSlot}{@render titleSlot()}{:else if clickable}<button type="button" class="node-row-click" on:click={onClick}><span class="node-row-text"><strong>{title}</strong>{#if detailSlot}{@render detailSlot()}{:else if detail}<small>{detail}</small>{/if}{#if visibleTags.length > 0}<span class="node-row-tags">{#each visibleTags as tag}<span class="node-row-tag">{tag}</span>{/each}{#if hiddenTagCount > 0}<span class="node-row-tag node-row-tag-overflow">+{hiddenTagCount}</span>{/if}</span>{/if}</span></button>{:else}<span class="node-row-text"><strong>{title}</strong>{#if detailSlot}{@render detailSlot()}{:else if detail}<small>{detail}</small>{/if}{#if visibleTags.length > 0}<span class="node-row-tags">{#each visibleTags as tag}<span class="node-row-tag">{tag}</span>{/each}{#if hiddenTagCount > 0}<span class="node-row-tag node-row-tag-overflow">+{hiddenTagCount}</span>{/if}</span>{/if}</span>{/if}{#if trailing}<span class="node-row-trailing">{@render trailing()}</span>{/if}</div>
 
 {#if children}{@render children()}{/if}
 
 <style>
-  /* The Stripe (3px left-edge color band) and drag-state visuals match
-     the existing `.schema-row` / `.tree-row` rules — see
-     [[decisions-ui-widget-taxonomy]]. */
   .node-row {
     display: flex;
     align-items: center;
-    gap: 8px;
+    gap: 10px;
     width: 100%;
     position: relative;
   }
 
+  /* Editorial Card chrome — soft-rounded card with a whisper of shadow.
+     Cards are gap-separated, not divider-separated; NodeList provides
+     the gap. */
   .node-row.variant-card {
-    border: 1px solid #cbd6d2;
-    border-radius: 4px;
-    background: #fbfcfc;
+    padding: 11px 14px;
+    border: 1px solid var(--border);
+    border-radius: 11px;
+    background: var(--surface);
+    box-shadow: 0 1px 3px var(--shadow);
+    transition: background 120ms ease, border-color 120ms ease, box-shadow 120ms ease;
   }
 
-  /* "tree" variant strips chrome to a hover highlight, matching the
-     scene tree / schema tree density. The hover background is painted
-     on the inner clickable button (or its surrogate), not the row, so
-     the indent / drag-handle area stays visually quiet. */
+  .node-row.variant-card:hover {
+    box-shadow: 0 3px 10px var(--shadow2);
+  }
+
+  .node-row.variant-card.active {
+    border-color: var(--accent);
+    background: var(--accent-soft);
+    box-shadow:
+      0 0 0 1.5px var(--accent-soft2),
+      0 6px 18px var(--shadow2);
+  }
+
+  /* Stripe — soft-rounded inset band. Using box-shadow inset rather
+     than a ::before lets the band follow the card's rounded corners
+     naturally, giving the bookmark-band look the design called for.
+     The 4px inset is the band's width. */
+  .node-row.variant-card.has-row-stripe {
+    box-shadow:
+      inset 4px 0 0 0 var(--row-stripe),
+      0 1px 3px var(--shadow);
+  }
+
+  .node-row.variant-card.has-row-stripe:hover {
+    box-shadow:
+      inset 4px 0 0 0 var(--row-stripe),
+      0 3px 10px var(--shadow2);
+  }
+
+  .node-row.variant-card.has-row-stripe.active {
+    box-shadow:
+      inset 4px 0 0 0 var(--accent),
+      0 0 0 1.5px var(--accent-soft2),
+      0 6px 18px var(--shadow2);
+  }
+
+  /* Tree variant — no card chrome, hover-only highlight. The indent +
+     caret carry hierarchy. Used for scene tree, schema tree, and group
+     headers in grouped panes. */
   .node-row.variant-tree {
-    margin: 2px 0;
+    margin: 1px 0;
     background: transparent;
   }
 
-  /* The middle (click / static title) area takes all remaining space.
-     Leading + trailing slots stay sized to their content. */
+  .node-row.variant-tree > .node-row-click:hover {
+    background: var(--accent-soft);
+  }
+
+  .node-row.variant-tree > .node-row-click:focus {
+    outline: 2px solid var(--accent);
+    outline-offset: -2px;
+    background: var(--surface);
+  }
+
+  /* The middle (click / static title) area takes all remaining space. */
   .node-row > .node-row-click,
   .node-row > .node-row-text {
     flex: 1 1 auto;
     min-width: 0;
   }
 
-  .node-row.variant-card:hover {
-    background: #edf6f2;
-  }
-
-  .node-row.variant-card.active {
-    border-color: #2f6f5e;
-    background: #edf6f2;
-  }
-
-  .node-row.variant-tree > .node-row-click:hover {
-    background: #edf6f2;
-  }
-
-  .node-row.variant-tree > .node-row-click:focus {
-    outline: 3px solid #2f6f5e;
-    outline-offset: -3px;
-    background: #ffffff;
-  }
-
-  .node-row.has-row-stripe::before {
-    content: "";
-    position: absolute;
-    left: 0;
-    top: 4px;
-    bottom: 4px;
-    width: 3px;
-    border-radius: 2px;
-    background: var(--row-stripe);
-  }
-
-  /* The inner clickable label takes the full middle column. Borderless
-     so visually it's "the row" — only the outer .node-row paints the
-     border/background. */
   .node-row-click {
     display: block;
     width: 100%;
-    padding: 6px 8px;
+    padding: 0;
     border: none;
     background: transparent;
     color: inherit;
     text-align: left;
     cursor: pointer;
     font: inherit;
+    border-radius: 4px;
   }
 
-  /* Non-clickable middle column gets matching padding so leading +
-     trailing don't have to compensate. */
-  .node-row > .node-row-text {
-    padding: 6px 8px;
+  /* Tree variant compensates with padding on the click button so the
+     hover highlight has substance. Card variant relies on the card
+     itself for padding. */
+  .node-row.variant-tree > .node-row-click {
+    padding: 4px 6px;
   }
 
   .node-row-text {
     display: grid;
-    gap: 2px;
+    gap: 3px;
     min-width: 0;
   }
 
-  .node-row-text :global(strong),
+  .node-row-text :global(strong) {
+    display: block;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    font-size: 14.5px;
+    font-weight: 600;
+    color: var(--text);
+  }
+
   .node-row-text :global(small) {
     display: block;
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
+    font-size: 12.5px;
+    color: var(--text-3);
   }
 
-  .node-row-text :global(small) {
-    color: #65716c;
-    font-size: 11px;
+  /* Tag pill cluster — bound to metadata.tags, never aliases. Small,
+     neutral, capped at TAG_VISIBLE_MAX visible plus a +N overflow chip
+     so row height stays predictable. */
+  .node-row-tags {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 4px;
+    margin-top: 3px;
+  }
+
+  .node-row-tag {
+    display: inline-flex;
+    align-items: center;
+    padding: 1px 7px;
+    border: 1px solid var(--divider);
+    border-radius: 999px;
+    background: var(--inset);
+    color: var(--text-2);
+    font-size: 10.5px;
+    font-weight: 600;
+    line-height: 1.45;
+  }
+
+  .node-row-tag-overflow {
+    color: var(--text-3);
+    background: var(--surface);
   }
 
   .node-row-trailing {
     display: inline-flex;
     align-items: center;
     gap: 4px;
-    padding-right: 4px;
+    flex: none;
+  }
+
+  /* Trailing affordance buttons (caller-provided <button>s) get the
+     Editorial Card tinted-tile treatment when they live inside a
+     trailing slot. Hover-reveal is opt-in via .reveal-on-hover so
+     groups whose affordances should always be visible (count chips,
+     etc.) aren't suppressed. */
+  .node-row-trailing :global(button) {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    min-width: 28px;
+    height: 28px;
+    padding: 0 6px;
+    border: 1px solid transparent;
+    border-radius: 7px;
+    background: transparent;
+    color: var(--text-2);
+    font-size: 15px;
+    line-height: 1;
+    cursor: pointer;
+    transition: background 120ms ease, color 120ms ease, border-color 120ms ease;
+  }
+
+  .node-row-trailing :global(button:hover) {
+    background: var(--inset);
+    color: var(--text);
+  }
+
+  /* Tree variant trailing buttons should stay quiet — they live inside
+     dense outline rows and inherited the original sparse styling. */
+  .node-row.variant-tree .node-row-trailing :global(button) {
+    min-width: 22px;
+    height: 22px;
+    font-size: 13px;
+  }
+
+  /* Group-header treatment: serif title + a hairline rule below. The
+     chapter-divider look from the Editorial Card direction. Trailing
+     count pills are styled by the caller (they aren't button affordances). */
+  .node-row.group-header > .node-row-click .node-row-text :global(strong),
+  .node-row.group-header > .node-row-text :global(strong) {
+    font-family: var(--serif);
+    font-size: 13.5px;
+    font-weight: 700;
+    color: var(--text);
+  }
+
+  .node-row.group-header {
+    border-bottom: 1px solid var(--divider);
+    padding-bottom: 4px;
+    margin-bottom: 6px;
   }
 
   .node-row.dragging {
@@ -204,16 +319,15 @@
   }
 
   .node-row.drop-before {
-    border-top: 2px solid #2f6f5e;
+    box-shadow: 0 -2px 0 0 var(--accent), 0 1px 3px var(--shadow);
   }
 
   .node-row.drop-after {
-    border-bottom: 2px solid #2f6f5e;
+    box-shadow: 0 2px 0 0 var(--accent), 0 1px 3px var(--shadow);
   }
 
   .node-row.drop-into {
-    background: #d9ecdf;
-    outline: 2px solid #2f6f5e;
-    outline-offset: -2px;
+    background: var(--accent-drop);
+    box-shadow: 0 0 0 2px var(--accent), 0 1px 3px var(--shadow);
   }
 </style>

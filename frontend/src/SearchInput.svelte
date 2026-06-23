@@ -88,7 +88,11 @@
   }
 </script>
 
-<span class="search-input" class:has-value={!!value}>
+<span class="search-input" class:has-value={!!value} class:focused-active={badgeActive}>
+  <svg class="search-input-glyph" aria-hidden="true" viewBox="0 0 16 16" width="14" height="14">
+    <circle cx="7" cy="7" r="4.5" fill="none" stroke="currentColor" stroke-width="1.5" />
+    <line x1="10.3" y1="10.3" x2="13" y2="13" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" />
+  </svg>
   <input
     bind:this={input}
     class="search-input-field"
@@ -116,26 +120,46 @@
 </span>
 
 <style>
-  /* Visual chrome is provisional — see [[decisions-ui-widget-taxonomy]]
-     "Claude Design pass" task. The intent is to give the badge enough
-     contrast in the active state that users can read which input
-     Ctrl/Cmd+F will fire. */
+  /* Editorial Card direction (Node widget design pass, 2026-06-22):
+     framed input with a leading magnifier glyph and a keycap-style
+     shortcut badge that "presses in" when this input is the resolved
+     Ctrl/Cmd+F target. Color tokens come from styles.css :root. */
   .search-input {
     position: relative;
     display: inline-flex;
     align-items: center;
     width: 100%;
+    border: 1px solid var(--border);
+    border-radius: 9px;
+    background: var(--surface);
+    transition: border-color 120ms ease, box-shadow 120ms ease;
+    box-shadow: 0 1px 2px var(--shadow);
+  }
+
+  .search-input:focus-within {
+    border-color: var(--accent);
+    box-shadow: 0 0 0 1.5px var(--accent-soft2), 0 1px 2px var(--shadow);
+  }
+
+  .search-input-glyph {
+    flex: none;
+    margin-left: 10px;
+    color: var(--text-3);
+  }
+
+  .search-input:focus-within .search-input-glyph {
+    color: var(--accent);
   }
 
   .search-input-field {
     flex: 1 1 auto;
     width: 100%;
-    padding: 6px 60px 6px 8px;
-    border: 1px solid #cbd6d2;
-    border-radius: 4px;
-    background: #ffffff;
+    padding: 7px 8px 7px 8px;
+    border: 0;
+    background: transparent;
     color: inherit;
     font: inherit;
+    outline: none;
   }
 
   /* Hide the native search clear (we have our own × button). */
@@ -144,51 +168,59 @@
     appearance: none;
   }
 
-  .search-input-field:focus {
-    outline: 2px solid #2f6f5e;
-    outline-offset: -1px;
+  .search-input-field::placeholder {
+    color: var(--text-3);
   }
 
   .search-input-clear {
-    position: absolute;
-    right: 44px;
-    top: 50%;
-    transform: translateY(-50%);
-    width: 18px;
-    height: 18px;
+    flex: none;
+    width: 20px;
+    height: 20px;
     padding: 0;
+    margin-right: 4px;
     border: 0;
     border-radius: 999px;
-    background: #dfe6e3;
-    color: #4d5753;
+    background: var(--inset);
+    color: var(--text-2);
     font-size: 14px;
     line-height: 1;
     cursor: pointer;
-  }
-
-  .search-input-clear:hover {
-    background: #c8d2cd;
-  }
-
-  .search-input-shortcut {
-    position: absolute;
-    right: 6px;
-    top: 50%;
-    transform: translateY(-50%);
-    padding: 1px 6px;
-    border-radius: 3px;
-    background: #eef2f0;
-    color: #94a09a;
-    font-size: 10px;
-    font-weight: 700;
-    letter-spacing: 0.4px;
-    pointer-events: none;
-    user-select: none;
     transition: background 120ms ease, color 120ms ease;
   }
 
+  .search-input-clear:hover {
+    background: var(--accent-soft);
+    color: var(--accent-strong);
+  }
+
+  /* Keycap badge. Dim "available" state shows a raised key (1px bottom
+     border = the keycap edge). Active state presses in — flat against
+     the accent and shadow reverses to an inset. */
+  .search-input-shortcut {
+    flex: none;
+    margin-right: 7px;
+    padding: 2px 8px 3px;
+    border: 1px solid var(--border);
+    border-bottom-width: 2px;
+    border-radius: 5px;
+    background: var(--surface);
+    color: var(--text-3);
+    font-size: 10.5px;
+    font-weight: 700;
+    letter-spacing: 0.35px;
+    line-height: 1;
+    pointer-events: none;
+    user-select: none;
+    transition: background 120ms ease, color 120ms ease, border-color 120ms ease,
+      box-shadow 120ms ease, transform 120ms ease;
+  }
+
   .search-input-shortcut.active {
-    background: #2f6f5e;
+    background: var(--accent);
     color: #ffffff;
+    border-color: var(--accent-deep);
+    border-bottom-width: 1px;
+    box-shadow: inset 0 1px 2px rgba(0, 0, 0, 0.18);
+    transform: translateY(1px);
   }
 </style>

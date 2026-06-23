@@ -4183,8 +4183,8 @@ async function seedChatFromPromptEntry(
       </div>
       <NodeList isEmpty={!structure || nodeChildren(structure.root).length === 0}>
         {#if structure}
-          {#each nodeChildren(structure.root) as child}
-            {@render renderTree(child, 0)}
+          {#each nodeChildren(structure.root) as child (child.id)}
+            {@render renderTree(child)}
           {/each}
         {/if}
         {#snippet whenEmpty()}
@@ -5302,19 +5302,20 @@ async function seedChatFromPromptEntry(
   </NodeRow>
 {/snippet}
 
-{#snippet renderTree(node: StructureNode, depth: number)}
+{#snippet renderTree(node: StructureNode)}
   {@const statusOption = node.status && metadataSchema?.fields?.status?.options?.find((o) => o.value === node.status)}
   {@const statusSwatch = statusOption?.color ? getSwatch(statusOption.color) : null}
   {@const stripeHex = statusSwatch?.hex ?? null}
+  {@const childNodes = nodeChildren(node)}
   <NodeRow
-    variant="tree"
+    variant="card"
     role="treeitem"
     ariaLabel={node.title}
-    depth={depth}
     stripeColor={stripeHex}
     pinned={!!node.scene_id && pinnedEditorPaneKeys.has(`scene:${node.scene_id}`)}
     dragging={draggedNodeId === node.id}
     dropPosition={dragOverNodeId === node.id ? dragOverPosition : null}
+    collapsed={childNodes.length === 0}
     clickable={false}
     on:dragover={(event) => handleTreeDragOver(event, node)}
     on:drop={(event) => handleTreeDrop(event, node)}
@@ -5366,10 +5367,12 @@ async function seedChatFromPromptEntry(
         <button class="tree-delete" title={`Delete ${entryTypeName(node.type, metadataSchema)}`} on:click={() => requestDeleteStructureNode(node)}>×</button>
       {/if}
     {/snippet}
+    {#snippet children()}
+      {#each childNodes as child (child.id)}
+        {@render renderTree(child)}
+      {/each}
+    {/snippet}
   </NodeRow>
-  {#each nodeChildren(node) as child}
-    {@render renderTree(child, depth + 1)}
-  {/each}
 {/snippet}
 
 {#snippet renderNodeTypeCard(node: NodeTypeTreeNode)}

@@ -800,7 +800,20 @@
     "ai_capability_tier",
     "ai_model",
   ]);
-  $: metadataFieldIds = (activeEntryType?.fields ?? []).filter((fieldId) =>
+  // Svelte 5 reactivity trap ([[feedback-svelte5-reactivity-traps]]):
+  // chaining `$: a = ...activeEntryType...` after `$: activeEntryType =
+  // ...` doesn't reliably refresh `a` when entryType changes — the
+  // effect that writes activeEntryType and the effect that reads it
+  // race during legacy_pre_effect scheduling, and `metadataFieldIds`
+  // can end up frozen on the entry type the component first mounted
+  // with (typically "scene"). Resolving the entry type INLINE from
+  // metadataSchema + entryType in one effect avoids the chain.
+  // Resolved INLINE from (metadataSchema, entryType) rather than chained
+  // through `activeEntryType`. Svelte 5's legacy reactivity raced on the
+  // chained derivation and metadataFieldIds could end up frozen on the
+  // entry-type the component first mounted with. The single derivation
+  // tracks both deps explicitly.
+  $: metadataFieldIds = ((metadataSchema?.entry_types[entryType] ?? metadataSchema?.entry_types[defaultEntryType()])?.fields ?? []).filter((fieldId) =>
     documentKind === "assistant" ? !ASSISTANT_PICKER_FIELDS.has(fieldId) : true,
   );
   $: hasBody = activeEntryType?.has_body ?? true;
@@ -850,11 +863,26 @@
     }
   }
 
-  $: if (editor && scene && scene.id !== loadedSceneId) {
+  // Setting entryType / title / metadata SYNCHRONOUSLY here (not inside
+  // the async loadScene) is essential: an `await` inside loadScene
+  // breaks Svelte 5's legacy reactive batching, so a post-await
+  // `entryType = …` doesn't reliably re-fire the `metadataFieldIds`
+  // pre-effect. The metadata-pane rendered the previous (default)
+  // entry-type's fields until the user clicked again.
+  //
+  // The editor-body load (sceneMarkdownToHtml + setContent) stays in
+  // the async loadScene — that's the part that has to await — but it
+  // bails early if the editor isn't mounted yet. onMount calls
+  // loadScene a second time after the editor mounts so the body lands.
+  $: if (scene && scene.id !== loadedSceneId) {
+    title = scene.title;
+    status = documentStatus(scene);
+    entryType = scene.entry_type || defaultEntryType();
+    metadata = cloneMetadata(scene.metadata);
     void loadScene(scene);
   }
 
-  $: if (editor && !scene && loadedSceneId !== null) {
+  $: if (!scene && loadedSceneId !== null) {
     loadedSceneId = null;
     title = "";
     status = defaultStatus();
@@ -863,7 +891,7 @@
     tagPickerFieldId = null;
     tagPickerPosition = null;
     liveWordCount = 0;
-    editor.commands.clearContent(false);
+    editor?.commands.clearContent(false);
     syncEditorEmpty();
   }
 

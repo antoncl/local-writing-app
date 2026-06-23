@@ -139,17 +139,32 @@ DEFAULT_METADATA_SCHEMA: dict[str, Any] = {
             "color": "forest",
         },
         "lore_entry": {
+            # Abstract base for every lore kind — carries the fields every
+            # entry shares (aliases for matching, tags for filtering,
+            # related_entries for cross-links, color for per-entry tint).
             "name": "Entry",
             "kind": "lore",
             "abstract": True,
             "fields": ["aliases", "tags", "related_entries", "color"],
             "color": "slate-blue",
         },
+        "scene_entry": {
+            # Intermediate abstract for lore entries that *appear in
+            # scenes* — characters, locations, items. The
+            # `appears_in_scenes` reference list lives here so the three
+            # in-scene kinds inherit it uniformly; lore_note stays on
+            # the bare lore_entry base since notes aren't scene-bound.
+            "name": "Scene entry",
+            "kind": "lore",
+            "parent": "lore_entry",
+            "abstract": True,
+            "fields": ["appears_in_scenes"],
+        },
         "character": {
             "name": "Character",
             "kind": "lore",
-            "parent": "lore_entry",
-            "fields": ["appears_in_scenes"],
+            "parent": "scene_entry",
+            "fields": [],
         },
         "place": {
             # Display label is "Location" (matches the `locations` field on
@@ -158,14 +173,14 @@ DEFAULT_METADATA_SCHEMA: dict[str, Any] = {
             # resolving — id is a backend identifier, display is UX.
             "name": "Location",
             "kind": "lore",
-            "parent": "lore_entry",
-            "fields": ["appears_in_scenes"],
+            "parent": "scene_entry",
+            "fields": [],
         },
         "item": {
             "name": "Item",
             "kind": "lore",
-            "parent": "lore_entry",
-            "fields": ["appears_in_scenes"],
+            "parent": "scene_entry",
+            "fields": [],
         },
         "lore_note": {
             "name": "Note",

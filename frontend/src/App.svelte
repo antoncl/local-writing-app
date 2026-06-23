@@ -4536,24 +4536,33 @@ async function seedChatFromPromptEntry(
       </div>
     </header>
     <div class="pane-content schema-list">
-      {#each promptSubtypeRows as subtype (subtype.id)}
-        <div class="prompt-entry-section prompt-subtype-row" style="padding-left: {subtype.depth * 14}px">
-          <header>
-            <strong>{subtype.label}</strong>
-            <button class="pin-button" type="button" on:click={() => newPromptEntry(subtype.id)}>+ Entry</button>
-          </header>
-          {#each promptEntries.filter((e) => e.entry_type === subtype.id) as entry (entry.id)}
-            <NodeRow
-              title={entry.title}
-              active={focusedEditorPane?.document?.type === "prompt" && focusedEditorPane.document.id === entry.id}
-              onClick={() => openPromptEntryInEditorPane(entry.id)}
-            />
-          {/each}
-        </div>
-      {/each}
-      {#if promptSubtypeRows.length === 0}
-        <p class="muted">No prompt sub-types defined yet. Open a prompt entry's Detail Types to create one.</p>
-      {/if}
+      <NodeList isEmpty={promptSubtypeRows.length === 0}>
+        {#each promptSubtypeRows as subtype (subtype.id)}
+          <NodeRow
+            variant="tree"
+            groupHeader
+            title={subtype.label}
+            depth={subtype.depth}
+            clickable={false}
+          >
+            {#snippet trailing()}
+              <button class="pin-button" type="button" on:click={() => newPromptEntry(subtype.id)}>+ Entry</button>
+            {/snippet}
+            {#snippet children()}
+              {#each promptEntries.filter((e) => e.entry_type === subtype.id) as entry (entry.id)}
+                <NodeRow
+                  title={entry.title}
+                  active={focusedEditorPane?.document?.type === "prompt" && focusedEditorPane.document.id === entry.id}
+                  onClick={() => openPromptEntryInEditorPane(entry.id)}
+                />
+              {/each}
+            {/snippet}
+          </NodeRow>
+        {/each}
+        {#snippet whenEmpty()}
+          <p class="muted">No prompt sub-types defined yet. Open a prompt entry's Detail Types to create one.</p>
+        {/snippet}
+      </NodeList>
     </div>
     <button class="pane-resize" type="button" aria-label="Resize Prompts pane" on:keydown={(event) => handlePaneResizeKeydown(event, "prompts")} on:mousedown={(event) => startPaneResize(event, "prompts")}></button>
   </section>
@@ -4568,47 +4577,55 @@ async function seedChatFromPromptEntry(
       </div>
     </header>
     <div class="pane-content schema-list">
-      {#each groupedAssistantEntries as group (group.layerId)}
-        <div class="prompt-entry-section">
-          <header>
-            <strong>{group.layerLabel}</strong>
-            <small>{group.entries.length}</small>
-          </header>
-          {#each group.entries as entry (entry.id)}
-            <NodeRow
-              title={entry.title}
-              active={focusedEditorPane?.document?.type === "assistant" && focusedEditorPane.document.id === entry.id}
-              dragging={assistantDragId === entry.id}
-              dropPosition={assistantDropTarget?.id === entry.id ? (assistantDropTarget?.position ?? null) : null}
-              onClick={() => openAssistantEntryInEditorPane(entry.id)}
-              on:dragover={(event) => onAssistantDragOver(event, entry)}
-              on:dragleave={onAssistantDragLeave}
-              on:drop={(event) => onAssistantDrop(event, entry)}
-            >
-              {#snippet leading()}
-                <span
-                  class="assistant-drag-handle"
-                  draggable="true"
-                  role="button"
-                  tabindex="-1"
-                  aria-label="Drag to reorder"
-                  on:dragstart={(event) => startAssistantDrag(event, entry)}
-                  on:dragend={endAssistantDrag}
-                >⋮⋮</span>
-              {/snippet}
-              {#snippet detailSlot()}
-                {#if entry.metadata?.is_default}
-                  <small class="assistant-default-badge">default</small>
-                {/if}
-                <small>{assistantSubtitle(entry)}</small>
-              {/snippet}
-            </NodeRow>
-          {/each}
-        </div>
-      {/each}
-      {#if assistantEntries.length === 0}
-        <p class="muted">No assistants defined yet. Click + Assistant to create one in the machine layer.</p>
-      {/if}
+      <NodeList isEmpty={assistantEntries.length === 0}>
+        {#each groupedAssistantEntries as group (group.layerId)}
+          <NodeRow
+            variant="tree"
+            groupHeader
+            title={group.layerLabel}
+            clickable={false}
+          >
+            {#snippet trailing()}
+              <span class="group-count-pill">{group.entries.length}</span>
+            {/snippet}
+            {#snippet children()}
+              {#each group.entries as entry (entry.id)}
+                <NodeRow
+                  title={entry.title}
+                  active={focusedEditorPane?.document?.type === "assistant" && focusedEditorPane.document.id === entry.id}
+                  dragging={assistantDragId === entry.id}
+                  dropPosition={assistantDropTarget?.id === entry.id ? (assistantDropTarget?.position ?? null) : null}
+                  onClick={() => openAssistantEntryInEditorPane(entry.id)}
+                  on:dragover={(event) => onAssistantDragOver(event, entry)}
+                  on:dragleave={onAssistantDragLeave}
+                  on:drop={(event) => onAssistantDrop(event, entry)}
+                >
+                  {#snippet leading()}
+                    <span
+                      class="assistant-drag-handle"
+                      draggable="true"
+                      role="button"
+                      tabindex="-1"
+                      aria-label="Drag to reorder"
+                      on:dragstart={(event) => startAssistantDrag(event, entry)}
+                      on:dragend={endAssistantDrag}
+                    >⋮⋮</span>
+                  {/snippet}
+                  {#snippet detailSlot()}
+                    {#if entry.metadata?.is_default}
+                      <small class="assistant-default-badge">default</small>
+                    {/if}
+                    <small>{assistantSubtitle(entry)}</small>
+                  {/snippet}
+                </NodeRow>
+              {/each}
+            {/snippet}
+          </NodeRow>
+        {/each}
+        {#snippet whenEmpty()}
+          <p class="muted">No assistants defined yet. Click + Assistant to create one in the machine layer.</p>
+        {/snippet}
+      </NodeList>
     </div>
     <button class="pane-resize" type="button" aria-label="Resize Assistants pane" on:keydown={(event) => handlePaneResizeKeydown(event, "assistants")} on:mousedown={(event) => startPaneResize(event, "assistants")}></button>
   </section>
@@ -4624,9 +4641,7 @@ async function seedChatFromPromptEntry(
       </div>
     </header>
     <div class="pane-content schema-list">
-      {#if chatSessions.length === 0}
-        <p class="muted">No chats yet. Click + New Chat to start one.</p>
-      {:else}
+      <NodeList isEmpty={chatSessions.length === 0}>
         {#each chatSessions as session (session.id)}
           <NodeRow
             title={session.title || "Untitled chat"}
@@ -4655,7 +4670,10 @@ async function seedChatFromPromptEntry(
             {/snippet}
           </NodeRow>
         {/each}
-      {/if}
+        {#snippet whenEmpty()}
+          <p class="muted">No chats yet. Click + New Chat to start one.</p>
+        {/snippet}
+      </NodeList>
     </div>
     <button class="pane-resize" type="button" aria-label="Resize Chats pane" on:keydown={(event) => handlePaneResizeKeydown(event, "chats")} on:mousedown={(event) => startPaneResize(event, "chats")}></button>
   </section>

@@ -4365,6 +4365,22 @@ h3 {
   vertical-align: middle;
 }
 
+/* Trailing-slot marker that names the row as the resolved default
+   (e.g. the assistant returned by defaultAssistantEntryId()). One
+   per list at most — driven by the *resolved* default, not the
+   per-entry is_default field, so it can't disagree with itself. */
+.row-default-marker {
+  display: inline-flex;
+  align-items: center;
+  padding: 2px 9px;
+  border-radius: 999px;
+  background: var(--accent-soft);
+  color: var(--accent-strong);
+  font-size: 11px;
+  font-weight: 700;
+  white-space: nowrap;
+}
+
 .raw-body-editor {
   display: grid;
   flex: 1;

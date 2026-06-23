@@ -382,12 +382,27 @@
     opacity: 0.45;
   }
 
-  .node-row.drop-before {
-    box-shadow: 0 -2px 0 0 var(--accent), 0 1px 3px var(--shadow);
+  /* Straight drop indicators — a 2px absolute-positioned bar that does
+     not follow the row's border-radius. Using ::before/::after on the
+     outer row paints a clean horizontal rule regardless of card chrome. */
+  .node-row.drop-before::before,
+  .node-row.drop-after::after {
+    content: "";
+    position: absolute;
+    left: 0;
+    right: 0;
+    height: 2px;
+    background: var(--accent);
+    border-radius: 0;
+    pointer-events: none;
   }
 
-  .node-row.drop-after {
-    box-shadow: 0 2px 0 0 var(--accent), 0 1px 3px var(--shadow);
+  .node-row.drop-before::before {
+    top: -3px;
+  }
+
+  .node-row.drop-after::after {
+    bottom: -3px;
   }
 
   .node-row.drop-into {

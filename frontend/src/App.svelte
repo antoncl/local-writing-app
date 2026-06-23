@@ -4642,10 +4642,12 @@ async function seedChatFromPromptEntry(
                     >⋮⋮</span>
                   {/snippet}
                   {#snippet detailSlot()}
-                    {#if entry.metadata?.is_default}
-                      <small class="assistant-default-badge">default</small>
-                    {/if}
                     <small>{assistantSubtitle(entry)}</small>
+                  {/snippet}
+                  {#snippet trailing()}
+                    {#if entry.id === defaultAssistantEntryId()}
+                      <span class="row-default-marker" aria-label="Default assistant" title="Default assistant">★ default</span>
+                    {/if}
                   {/snippet}
                 </NodeRow>
               {/each}

@@ -299,6 +299,32 @@
     color: var(--text);
   }
 
+  /* Per the Editorial Card spec: pin and delete affordances get
+     tinted backgrounds so they read at a glance even before hover.
+     Consumers opt in by adding .row-action-pin / .row-action-delete
+     to their trailing button. Star-pin shows its "active" state with
+     a fuller fill when the row is actually pinned. */
+  .node-row-trailing :global(.row-action-pin) {
+    color: var(--star);
+  }
+
+  .node-row-trailing :global(.row-action-pin:hover),
+  .node-row-trailing :global(.row-action-pin.active) {
+    background: var(--star-soft);
+    color: var(--star);
+    border-color: var(--star-border);
+  }
+
+  .node-row-trailing :global(.row-action-delete) {
+    color: var(--danger);
+  }
+
+  .node-row-trailing :global(.row-action-delete:hover) {
+    background: var(--danger-soft);
+    color: var(--danger);
+    border-color: var(--danger-border);
+  }
+
   /* Tree variant trailing buttons should stay quiet — they live inside
      dense outline rows and inherited the original sparse styling. */
   .node-row.variant-tree .node-row-trailing :global(button) {

@@ -362,6 +362,8 @@
   let searchQuery = "";
   let loreSearchQuery = "";
   let collapsedLoreGroups: Record<string, boolean> = {};
+  let collapsedPromptGroups: Record<string, boolean> = {};
+  let collapsedAssistantGroups: Record<string, boolean> = {};
   let collapsedSchemaFieldsByType: Record<string, boolean> = {};
   let searchOpenTodos = false;
   let searchHits: SearchHit[] = [];
@@ -3493,6 +3495,20 @@ async function seedChatFromPromptEntry(
     };
   }
 
+  function togglePromptGroup(groupId: string) {
+    collapsedPromptGroups = {
+      ...collapsedPromptGroups,
+      [groupId]: !collapsedPromptGroups[groupId],
+    };
+  }
+
+  function toggleAssistantGroup(groupId: string) {
+    collapsedAssistantGroups = {
+      ...collapsedAssistantGroups,
+      [groupId]: !collapsedAssistantGroups[groupId],
+    };
+  }
+
   function loreEntrySearchText(entry: LoreEntrySummary) {
     return [
       entry.title,
@@ -4538,18 +4554,26 @@ async function seedChatFromPromptEntry(
     <div class="pane-content schema-list">
       <NodeList isEmpty={promptSubtypeRows.length === 0}>
         {#each promptSubtypeRows as subtype (subtype.id)}
+          {@const subtypeEntries = promptEntries.filter((e) => e.entry_type === subtype.id)}
+          {@const userCollapsed = !!collapsedPromptGroups[subtype.id]}
+          {@const isEmpty = subtypeEntries.length === 0}
           <NodeRow
             variant="tree"
             groupHeader
+            collapsed={userCollapsed || isEmpty}
             title={subtype.label}
             depth={subtype.depth}
-            clickable={false}
+            onClick={() => togglePromptGroup(subtype.id)}
           >
+            {#snippet leading()}
+              <span class:collapsed={userCollapsed || isEmpty} class="lore-group-caret">▾</span>
+            {/snippet}
             {#snippet trailing()}
-              <button class="pin-button" type="button" on:click={() => newPromptEntry(subtype.id)}>+ Entry</button>
+              <span class="group-count-pill">{subtypeEntries.length}</span>
+              <button class="pin-button" type="button" on:click|stopPropagation={() => newPromptEntry(subtype.id)}>+ Entry</button>
             {/snippet}
             {#snippet children()}
-              {#each promptEntries.filter((e) => e.entry_type === subtype.id) as entry (entry.id)}
+              {#each subtypeEntries as entry (entry.id)}
                 <NodeRow
                   title={entry.title}
                   active={focusedEditorPane?.document?.type === "prompt" && focusedEditorPane.document.id === entry.id}
@@ -4579,12 +4603,18 @@ async function seedChatFromPromptEntry(
     <div class="pane-content schema-list">
       <NodeList isEmpty={assistantEntries.length === 0}>
         {#each groupedAssistantEntries as group (group.layerId)}
+          {@const userCollapsed = !!collapsedAssistantGroups[group.layerId]}
+          {@const isEmpty = group.entries.length === 0}
           <NodeRow
             variant="tree"
             groupHeader
+            collapsed={userCollapsed || isEmpty}
             title={group.layerLabel}
-            clickable={false}
+            onClick={() => toggleAssistantGroup(group.layerId)}
           >
+            {#snippet leading()}
+              <span class:collapsed={userCollapsed || isEmpty} class="lore-group-caret">▾</span>
+            {/snippet}
             {#snippet trailing()}
               <span class="group-count-pill">{group.entries.length}</span>
             {/snippet}
@@ -4649,7 +4679,6 @@ async function seedChatFromPromptEntry(
             onClick={() => openChatSession(session.id)}
           >
             {#snippet detailSlot()}
-              {#if session.pinned}<small class="assistant-default-badge">pinned</small>{/if}
               {#if session.prompt_entry_id || session.assistant_id}
                 <small class="chat-session-preset">
                   {#if session.prompt_entry_id}
@@ -4665,8 +4694,8 @@ async function seedChatFromPromptEntry(
               <small>{session.message_count} message{session.message_count === 1 ? "" : "s"} · {session.updated_at.slice(0, 16).replace("T", " ")}</small>
             {/snippet}
             {#snippet trailing()}
-              <button class="chat-session-pin" type="button" title={session.pinned ? "Unpin" : "Pin"} on:click|stopPropagation={() => togglePinForChat(session.id)}>{session.pinned ? "★" : "☆"}</button>
-              <button class="chat-session-delete" type="button" title="Delete chat" on:click|stopPropagation={() => deleteChatSessionFromPane(session.id)}>×</button>
+              <button class="row-action-pin" class:active={session.pinned} type="button" title={session.pinned ? "Unpin" : "Pin"} on:click|stopPropagation={() => togglePinForChat(session.id)}>{session.pinned ? "★" : "☆"}</button>
+              <button class="row-action-delete" type="button" title="Delete chat" on:click|stopPropagation={() => deleteChatSessionFromPane(session.id)}>×</button>
             {/snippet}
           </NodeRow>
         {/each}

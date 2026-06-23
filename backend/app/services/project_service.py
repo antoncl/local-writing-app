@@ -114,7 +114,7 @@ DEFAULT_METADATA_SCHEMA: dict[str, Any] = {
             "name": "Manuscript",
             "kind": "scene",
             "abstract": True,
-            "fields": ["number", "summary"],
+            "fields": ["number", "summary", "color"],
             "display_template": "{number}. {title}",
             "has_body": False,
         },
@@ -142,7 +142,7 @@ DEFAULT_METADATA_SCHEMA: dict[str, Any] = {
             "name": "Entry",
             "kind": "lore",
             "abstract": True,
-            "fields": ["aliases", "tags", "related_entries"],
+            "fields": ["aliases", "tags", "related_entries", "color"],
             "color": "slate-blue",
         },
         "character": {
@@ -177,7 +177,7 @@ DEFAULT_METADATA_SCHEMA: dict[str, Any] = {
             "name": "Prompt",
             "kind": "prompt",
             "abstract": True,
-            "fields": ["preferred_assistant_id"],
+            "fields": ["preferred_assistant_id", "color"],
             "has_body": True,
             "body_editor": "code",
             "body_language": "jinja2",
@@ -308,6 +308,7 @@ DEFAULT_METADATA_SCHEMA: dict[str, Any] = {
                 "ai_thinking",
                 "summary",
                 "is_default",
+                "color",
             ],
             "has_body": False,
             "color": "graphite",
@@ -322,6 +323,7 @@ DEFAULT_METADATA_SCHEMA: dict[str, Any] = {
                 "narrative_pov",
                 "target_word_count",
                 "series_number",
+                "color",
             ],
             "has_body": True,
             "color": "violet",
@@ -351,6 +353,17 @@ DEFAULT_METADATA_SCHEMA: dict[str, Any] = {
         },
         "aliases": {"name": "Aliases", "type": "multi_select"},
         "tags": {"name": "Tags", "type": "tags"},
+        "color": {
+            # Instance-level color override (palette swatch id). Resolves
+            # to a stripe color on NodeRows + the manuscript tree, and
+            # ultimately to chip / dot color in the context picker. When
+            # unset, the entry-type's `color` (or its parent's) wins; see
+            # resolveColor in frontend/src/colors.ts. Built-in field so
+            # every entry kind can opt in to per-entry tinting without
+            # the user having to add a schema field.
+            "name": "Color",
+            "type": "color",
+        },
         "characters": {
             "name": "Characters",
             "type": "entity_ref_list",

@@ -452,32 +452,33 @@
     .filter(([id, definition]) => definition.kind === "prompt" && !definition.abstract && id !== "prompt")
     .map(([id, definition]) => ({ id, label: definition.name || id, parent: definition.parent ?? null }));
 
-  // Flat tree-with-depth for rendering. Sub-types nest under their parent
-  // (Roleplay under Continuation) so the prompts pane reads as a
-  // hierarchy. A subtype whose parent is missing or is the abstract
-  // `prompt` base lives at the root.
-  $: promptSubtypeRows = (() => {
-    type Row = { id: string; label: string; depth: number };
-    const byId = new Map(concretePromptSubtypes.map((s) => [s.id, s]));
-    const childrenOf = new Map<string | null, typeof concretePromptSubtypes>();
+  // Tree of concrete prompt subtypes — Roleplay nests under
+  // Continuation, etc. The prompts pane renders this recursively
+  // (each subtype becomes a group-header NodeRow whose children slot
+  // holds its prompt entries AND its child subtype NodeRows), so the
+  // schema hierarchy reads via real nesting in NodeRow's tier panel
+  // rather than a depth-padding hack. Tier1 / tier2 / tier3
+  // backgrounds in NodeRow's scoped CSS handle the visual stepping
+  // automatically.
+  type PromptSubtypeNode = { id: string; label: string; children: PromptSubtypeNode[] };
+  $: promptSubtypeTree = (() => {
+    const byId = new Map<string, PromptSubtypeNode>(
+      concretePromptSubtypes.map((s) => [s.id, { id: s.id, label: s.label, children: [] }]),
+    );
+    const roots: PromptSubtypeNode[] = [];
     for (const s of concretePromptSubtypes) {
-      const parentKey = s.parent && byId.has(s.parent) ? s.parent : null;
-      const list = childrenOf.get(parentKey) ?? [];
-      list.push(s);
-      childrenOf.set(parentKey, list);
+      const node = byId.get(s.id);
+      if (!node) continue;
+      const parent = s.parent ? byId.get(s.parent) : undefined;
+      if (parent) parent.children.push(node);
+      else roots.push(node);
     }
-    for (const [, list] of childrenOf) {
-      list.sort((a, b) => a.label.localeCompare(b.label));
+    function sortRecursively(nodes: PromptSubtypeNode[]) {
+      nodes.sort((a, b) => a.label.localeCompare(b.label));
+      for (const n of nodes) sortRecursively(n.children);
     }
-    const out: Row[] = [];
-    function walk(parentId: string | null, depth: number) {
-      for (const s of childrenOf.get(parentId) ?? []) {
-        out.push({ id: s.id, label: s.label, depth });
-        walk(s.id, depth + 1);
-      }
-    }
-    walk(null, 0);
-    return out;
+    sortRecursively(roots);
+    return roots;
   })();
 
   onMount(() => {
@@ -4552,36 +4553,9 @@ async function seedChatFromPromptEntry(
       </div>
     </header>
     <div class="pane-content schema-list">
-      <NodeList isEmpty={promptSubtypeRows.length === 0}>
-        {#each promptSubtypeRows as subtype (subtype.id)}
-          {@const subtypeEntries = promptEntries.filter((e) => e.entry_type === subtype.id)}
-          {@const userCollapsed = !!collapsedPromptGroups[subtype.id]}
-          {@const isEmpty = subtypeEntries.length === 0}
-          <NodeRow
-            variant="tree"
-            groupHeader
-            collapsed={userCollapsed || isEmpty}
-            title={subtype.label}
-            depth={subtype.depth}
-            onClick={() => togglePromptGroup(subtype.id)}
-          >
-            {#snippet leading()}
-              <span class:collapsed={userCollapsed || isEmpty} class="lore-group-caret">▾</span>
-            {/snippet}
-            {#snippet trailing()}
-              <span class="group-count-pill">{subtypeEntries.length}</span>
-              <button class="pin-button" type="button" on:click|stopPropagation={() => newPromptEntry(subtype.id)}>+ Entry</button>
-            {/snippet}
-            {#snippet children()}
-              {#each subtypeEntries as entry (entry.id)}
-                <NodeRow
-                  title={entry.title}
-                  active={focusedEditorPane?.document?.type === "prompt" && focusedEditorPane.document.id === entry.id}
-                  onClick={() => openPromptEntryInEditorPane(entry.id)}
-                />
-              {/each}
-            {/snippet}
-          </NodeRow>
+      <NodeList isEmpty={promptSubtypeTree.length === 0}>
+        {#each promptSubtypeTree as root (root.id)}
+          {@render renderPromptSubtype(root)}
         {/each}
         {#snippet whenEmpty()}
           <p class="muted">No prompt sub-types defined yet. Open a prompt entry's Detail Types to create one.</p>
@@ -5296,6 +5270,40 @@ async function seedChatFromPromptEntry(
   {/if}
 
 </main>
+
+{#snippet renderPromptSubtype(node: PromptSubtypeNode)}
+  {@const subtypeEntries = promptEntries.filter((e) => e.entry_type === node.id)}
+  {@const userCollapsed = !!collapsedPromptGroups[node.id]}
+  {@const hasContent = subtypeEntries.length > 0 || node.children.length > 0}
+  {@const isCollapsed = userCollapsed || !hasContent}
+  <NodeRow
+    variant="tree"
+    groupHeader
+    collapsed={isCollapsed}
+    title={node.label}
+    onClick={() => togglePromptGroup(node.id)}
+  >
+    {#snippet leading()}
+      <span class:collapsed={isCollapsed} class="lore-group-caret">▾</span>
+    {/snippet}
+    {#snippet trailing()}
+      <span class="group-count-pill">{subtypeEntries.length}</span>
+      <button class="pin-button" type="button" on:click|stopPropagation={() => newPromptEntry(node.id)}>+ Entry</button>
+    {/snippet}
+    {#snippet children()}
+      {#each subtypeEntries as entry (entry.id)}
+        <NodeRow
+          title={entry.title}
+          active={focusedEditorPane?.document?.type === "prompt" && focusedEditorPane.document.id === entry.id}
+          onClick={() => openPromptEntryInEditorPane(entry.id)}
+        />
+      {/each}
+      {#each node.children as child (child.id)}
+        {@render renderPromptSubtype(child)}
+      {/each}
+    {/snippet}
+  </NodeRow>
+{/snippet}
 
 {#snippet renderTree(node: StructureNode, depth: number)}
   {@const statusOption = node.status && metadataSchema?.fields?.status?.options?.find((o) => o.value === node.status)}

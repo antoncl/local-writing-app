@@ -15,7 +15,14 @@
   // screen-reader navigation works. Drag/drop event listeners forward
   // from the outer <div>.
 
+  import { getContext } from "svelte";
   import type { Snippet } from "svelte";
+
+  // Read the enclosing NodeList's mode via context. The context value is
+  // a reactive getter wrapper (set by NodeList.svelte) so changes to the
+  // list's `mode` prop propagate here without a refresh.
+  type NodeListModeContext = { readonly current: "card" | "tree" };
+  const nodeListMode = getContext<NodeListModeContext | undefined>("nodeListMode");
 
   export let title: string = "";
   // One-line secondary text under the title. Pass `detail` (string) OR
@@ -28,6 +35,11 @@
   // Tree indent. Resolved to `padding-left: depth * 14px`.
   export let depth: number = 0;
   export let onClick: ((event: MouseEvent) => void) | undefined = undefined;
+  export let onDblClick: ((event: MouseEvent) => void) | undefined = undefined;
+  // Identifier landed on the row's outer div as data-node-id, used by
+  // programmatic focus helpers (e.g. refocus-after-move) to find a
+  // specific row by node id without a per-pane custom selector.
+  export let dataNodeId: string | null = null;
   // Drag visuals. Parent owns drag state and passes these in.
   export let dragging: boolean = false;
   export let dropPosition: "before" | "after" | "into" | null = null;
@@ -35,11 +47,13 @@
   // Disable the click button (e.g. when inline-editing the title). The
   // outer row still renders; just no clickable label.
   export let clickable: boolean = true;
-  // Visual chrome. "card" carries the full Editorial Card chrome
-  // (border + radius + shadow + soft-rounded stripe). "tree" strips
-  // chrome for dense outline views (scene tree, schema tree, group
-  // headers); the indent + caret carry hierarchy instead.
-  export let variant: "card" | "tree" = "card";
+  // Visual chrome. Optional override — if unset, NodeRow inherits the
+  // enclosing NodeList's mode via the `nodeListMode` context. Header
+  // rows (groupHeader=true) always render bare regardless of either.
+  // Kept for backward compat with the handful of NodeRow callers that
+  // were written before NodeList.mode landed; new code should set mode
+  // on the NodeList and leave this unset.
+  export let variant: "card" | "tree" | undefined = undefined;
   // Override aria/dom role on the outer container.
   export let role: string | null = null;
   // Tag pills under the title. Bound explicitly to `metadata.tags` —
@@ -55,6 +69,12 @@
   // wrapper. Lets a group-header caller collapse the tier panel cleanly
   // without it leaving a thin tinted strip from padding alone.
   export let collapsed: boolean = false;
+  // Make the entire row a drag source. Set on the outer container; the
+  // caller wires drag handlers via on:dragstart / on:dragend forwarders.
+  // Lets a row support reorder without paying for a visible drag handle
+  // in the leading slot (which would visually distinguish it from rows
+  // that don't reorder, e.g. lore characters).
+  export let draggable: boolean = false;
   // True when the node this row represents is currently open in a
   // pinned editor pane. NodeRow renders a non-interactive star
   // indicator; the actual pin/unpin toggle lives on the editor pane
@@ -79,6 +99,9 @@
   $: indentStyle = depth > 0 ? `padding-left: ${depth * 14}px` : "";
   $: stripeStyle = stripeColor ? `--row-stripe: ${stripeColor}` : "";
   $: rootStyle = [indentStyle, stripeStyle].filter(Boolean).join("; ");
+  // Effective mode: header rows always bare; otherwise explicit variant
+  // prop wins, then enclosing NodeList's mode (via context), then card.
+  $: effectiveMode = groupHeader ? "tree" : (variant ?? nodeListMode?.current ?? "card");
   $: visibleTags = tags.slice(0, TAG_VISIBLE_MAX);
   $: hiddenTagCount = Math.max(0, tags.length - TAG_VISIBLE_MAX);
 </script>
@@ -88,8 +111,8 @@
      the main interpolation below: `display: flex` would otherwise
      promote inter-block text nodes to anonymous flex items. -->
 <div
-  class="node-row variant-{variant}"
-  class:tree-row={variant === "tree"}
+  class="node-row variant-{effectiveMode}"
+  class:tree-row={effectiveMode === "tree"}
   class:group-header={groupHeader}
   class:active
   class:has-row-stripe={!!stripeColor}
@@ -100,6 +123,8 @@
   aria-label={ariaLabel}
   role={role}
   style={rootStyle}
+  data-node-id={dataNodeId}
+  draggable={draggable || undefined}
   on:mousedown
   on:keydown
   on:dragstart
@@ -107,7 +132,7 @@
   on:dragover
   on:dragleave
   on:drop
->{#if leading}{@render leading()}{/if}{#if titleSlot}{@render titleSlot()}{:else if clickable}<button type="button" class="node-row-click" on:click={onClick}><span class="node-row-text"><strong>{title}</strong>{#if detailSlot}{@render detailSlot()}{:else if detail}<small>{detail}</small>{/if}{#if visibleTags.length > 0}<span class="node-row-tags">{#each visibleTags as tag}<span class="node-row-tag">{tag}</span>{/each}{#if hiddenTagCount > 0}<span class="node-row-tag node-row-tag-overflow">+{hiddenTagCount}</span>{/if}</span>{/if}</span></button>{:else}<span class="node-row-text"><strong>{title}</strong>{#if detailSlot}{@render detailSlot()}{:else if detail}<small>{detail}</small>{/if}{#if visibleTags.length > 0}<span class="node-row-tags">{#each visibleTags as tag}<span class="node-row-tag">{tag}</span>{/each}{#if hiddenTagCount > 0}<span class="node-row-tag node-row-tag-overflow">+{hiddenTagCount}</span>{/if}</span>{/if}</span>{/if}{#if pinned}<span class="node-row-pin-indicator" title="Open in a pinned editor" aria-label="Pinned in editor">★</span>{/if}{#if trailing}<span class="node-row-trailing">{@render trailing()}</span>{/if}</div>
+>{#if leading}{@render leading()}{/if}{#if titleSlot}{@render titleSlot()}{:else if clickable}<button type="button" class="node-row-click" on:click={onClick} on:dblclick={onDblClick}><span class="node-row-text"><strong>{title}</strong>{#if detailSlot}{@render detailSlot()}{:else if detail}<small>{detail}</small>{/if}{#if visibleTags.length > 0}<span class="node-row-tags">{#each visibleTags as tag}<span class="node-row-tag">{tag}</span>{/each}{#if hiddenTagCount > 0}<span class="node-row-tag node-row-tag-overflow">+{hiddenTagCount}</span>{/if}</span>{/if}</span></button>{:else}<span class="node-row-text"><strong>{title}</strong>{#if detailSlot}{@render detailSlot()}{:else if detail}<small>{detail}</small>{/if}{#if visibleTags.length > 0}<span class="node-row-tags">{#each visibleTags as tag}<span class="node-row-tag">{tag}</span>{/each}{#if hiddenTagCount > 0}<span class="node-row-tag node-row-tag-overflow">+{hiddenTagCount}</span>{/if}</span>{/if}</span>{/if}{#if pinned}<span class="node-row-pin-indicator" title="Open in a pinned editor" aria-label="Pinned in editor">★</span>{/if}{#if trailing}<span class="node-row-trailing">{@render trailing()}</span>{/if}</div>
 
 {#if children && !collapsed}
   <div class="node-row-group-children">{@render children()}</div>
@@ -122,25 +147,30 @@
     position: relative;
   }
 
-  /* Editorial Card chrome — soft-rounded card with a whisper of shadow.
-     Cards are gap-separated, not divider-separated; NodeList provides
-     the gap. */
+  /* Editorial Card chrome — soft-rounded outline. Only the focused
+     ("active") card carries a white fill; the default state is a
+     transparent card that sits on whatever surface it's placed on
+     (pane background, tier panel tint). Cards are gap-separated, not
+     divider-separated; NodeList provides the gap. */
   .node-row.variant-card {
     padding: 11px 14px;
-    border: 1px solid var(--border);
+    /* Border-width is reserved so the row doesn't reflow when .active
+       drops the accent color in. Only the focused row carries a visible
+       frame; idle rows sit transparent against whatever's behind them
+       (pane background, tier panel tint). */
+    border: 1px solid transparent;
     border-radius: 11px;
-    background: var(--surface);
-    box-shadow: 0 1px 3px var(--shadow);
+    background: transparent;
     transition: background 120ms ease, border-color 120ms ease, box-shadow 120ms ease;
   }
 
   .node-row.variant-card:hover {
-    box-shadow: 0 3px 10px var(--shadow2);
+    background: var(--inset);
   }
 
   .node-row.variant-card.active {
     border-color: var(--accent);
-    background: var(--accent-soft);
+    background: var(--surface);
     box-shadow:
       0 0 0 1.5px var(--accent-soft2),
       0 6px 18px var(--shadow2);
@@ -151,15 +181,7 @@
      naturally, giving the bookmark-band look the design called for.
      The 4px inset is the band's width. */
   .node-row.variant-card.has-row-stripe {
-    box-shadow:
-      inset 4px 0 0 0 var(--row-stripe),
-      0 1px 3px var(--shadow);
-  }
-
-  .node-row.variant-card.has-row-stripe:hover {
-    box-shadow:
-      inset 4px 0 0 0 var(--row-stripe),
-      0 3px 10px var(--shadow2);
+    box-shadow: inset 4px 0 0 0 var(--row-stripe);
   }
 
   .node-row.variant-card.has-row-stripe.active {
@@ -345,6 +367,20 @@
     background: var(--danger-soft);
     color: var(--danger);
     border-color: var(--danger-border);
+  }
+
+  /* Add affordance — accent-tinted tile mirroring the pin / delete
+     treatment. Used by row consumers that surface a "create child"
+     popover from their trailing slot. */
+  .node-row-trailing :global(.row-action-add) {
+    color: var(--accent);
+  }
+
+  .node-row-trailing :global(.row-action-add:hover),
+  .node-row-trailing :global(.row-action-add.active) {
+    background: var(--accent-soft2);
+    color: var(--accent);
+    border-color: var(--accent);
   }
 
   /* Tree variant trailing buttons should stay quiet — they live inside

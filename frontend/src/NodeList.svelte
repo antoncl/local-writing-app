@@ -23,8 +23,20 @@
   //   - Per-list `id` / `scope` — `dragScope` lives on NodeRows where
   //     it's needed for hit-testing.
 
+  import { setContext } from "svelte";
   import type { Snippet } from "svelte";
   import SearchInput from "./SearchInput.svelte";
+
+  // Card mode → NodeRows in this list render with full card chrome
+  //   (border + radius + padding + hover/active fills). The default.
+  // Tree mode → NodeRows in this list render bare (no card chrome,
+  //   hover-only highlight). Use for dense outline / schema trees.
+  // A NodeRow with `groupHeader=true` always renders bare regardless
+  // of mode — header rows are typographic dividers, not interactive
+  // cards. NodeRow reads this mode via context so consumers don't
+  // have to plumb a per-row `variant` prop.
+  export let mode: "card" | "tree" = "card";
+  setContext("nodeListMode", { get current() { return mode; } });
 
   // When set, NodeList renders a SearchInput at the top. The caller
   // is responsible for using the bound `searchValue` to filter the

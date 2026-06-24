@@ -61,7 +61,7 @@
   type AppState =
     | { name: "needsProject" }
     | { name: "projectOpen"; project: ProjectInfo };
-  type DocumentRef = { type: "scene" | "lore" | "prompt" | "assistant" | "project"; id: string };
+  type DocumentRef = { type: "scene" | "lore" | "prompt" | "assistant" | "project" | "structure_node"; id: string };
   type PaneId = "project" | "outline" | "lore" | "todo" | "search" | string;
   type MetadataReloadSignal = { token: number; metadata: EntryMetadata; status: string; entryType: string };
   type LoreEntryGroup = {
@@ -294,6 +294,11 @@
   $: activeScene = focusedEditorPane?.document?.type === "scene" ? focusedEditorPane.scene : null;
   let activeParentId: string | undefined = undefined;
   let addMenuOpenFor: string | null = null;
+  // Floating-popover coordinates captured at click time. `position: fixed`
+  // on the popover sidesteps any ancestor `overflow: hidden` (panes,
+  // tier panels) so the menu can extend below/above its anchor without
+  // being clipped.
+  let addMenuPosition: { top: number; right: number } | null = null;
   let editingNodeId: string | null = null;
   let editingTitle = "";
   let draftTitleByScene = new Map<string, string>();
@@ -365,6 +370,10 @@
   let collapsedPromptGroups: Record<string, boolean> = {};
   let collapsedAssistantGroups: Record<string, boolean> = {};
   let collapsedSchemaFieldsByType: Record<string, boolean> = {};
+  // Outline group-header collapse state, keyed by StructureNode.id.
+  // Same shape as the other collapsed-* maps so the refactor stays
+  // consistent across panes.
+  let collapsedStructureNodes: Record<string, boolean> = {};
   let searchOpenTodos = false;
   let searchHits: SearchHit[] = [];
   let confirmation: ConfirmationState | null = null;
@@ -378,7 +387,7 @@
     | null = null;
   let panes: Record<PaneId, PaneState> = {
     project: { title: "Project", x: 18, y: 18, width: 380, height: 340, z: 1 },
-    outline: { title: "Manuscript Outline", x: 18, y: 260, width: 300, height: 420, z: 2 },
+    outline: { title: "Draft", x: 18, y: 260, width: 300, height: 420, z: 2 },
     lore: { title: "Lore", x: 330, y: 260, width: 300, height: 320, z: 3 },
     schema: { title: "Detail Types", x: 330, y: 260, width: 360, height: 420, z: 3 },
     schema_field: { title: "Detail Field", x: 708, y: 260, width: 360, height: 420, z: 4 },
@@ -533,8 +542,10 @@
 
   function handleDocumentMousedown(event: MouseEvent) {
     const target = event.target as HTMLElement | null;
-    if (addMenuOpenFor !== null && !target?.closest(".tree-menu-anchor")) {
+    const inAnchorOrPopover = target?.closest(".tree-menu-anchor, .row-add-popover");
+    if (addMenuOpenFor !== null && !inAnchorOrPopover) {
       addMenuOpenFor = null;
+      addMenuPosition = null;
     }
     if (promptPickerOpen && !target?.closest(".chat-prompt-anchor")) {
       closeChatPromptPicker();
@@ -2881,8 +2892,28 @@ async function seedChatFromPromptEntry(
     return null;
   }
 
-  function toggleAddMenu(nodeId: string) {
-    addMenuOpenFor = addMenuOpenFor === nodeId ? null : nodeId;
+  function toggleAddMenu(nodeId: string, event?: MouseEvent) {
+    if (addMenuOpenFor === nodeId) {
+      addMenuOpenFor = null;
+      addMenuPosition = null;
+      return;
+    }
+    addMenuOpenFor = nodeId;
+    const anchor = event?.currentTarget;
+    if (anchor instanceof HTMLElement) {
+      const rect = anchor.getBoundingClientRect();
+      // The popover anchors to the button's right edge and drops below.
+      // If there isn't room below (less than 200px before the viewport
+      // bottom), flip above the button instead.
+      const popoverHeight = 180;
+      const fitsBelow = window.innerHeight - rect.bottom > popoverHeight;
+      addMenuPosition = {
+        top: fitsBelow ? rect.bottom + 4 : rect.top - popoverHeight - 4,
+        right: window.innerWidth - rect.right,
+      };
+    } else {
+      addMenuPosition = null;
+    }
   }
 
   function startRename(nodeId: string, currentTitle: string) {
@@ -2983,8 +3014,19 @@ async function seedChatFromPromptEntry(
 
   async function refocusTreeNode(nodeId: string) {
     await tick();
-    const el = document.querySelector<HTMLElement>(`[data-tree-node-id="${nodeId}"]`);
-    el?.focus();
+    // Look up the row via NodeRow's data-node-id attribute, then focus
+    // the inner click button (NodeRow's default title path) so the
+    // focus ring lands on the right element.
+    const row = document.querySelector<HTMLElement>(`[data-node-id="${nodeId}"]`);
+    const target = row?.querySelector<HTMLElement>("button.node-row-click") ?? row;
+    target?.focus();
+  }
+
+  function toggleStructureNodeCollapse(nodeId: string) {
+    collapsedStructureNodes = {
+      ...collapsedStructureNodes,
+      [nodeId]: !collapsedStructureNodes[nodeId],
+    };
   }
 
   async function moveNodeUp(node: StructureNode) {
@@ -3297,6 +3339,67 @@ async function seedChatFromPromptEntry(
   function sceneEntryHasBody(scene: Scene): boolean {
     const entryDefinition = metadataSchema?.entry_types[scene.entry_type];
     return entryDefinition?.has_body ?? true;
+  }
+
+  // Opens a manuscript-tree structure node (Act, Chapter, leaf-Scene-as-
+  // node) in an editor pane. Mirrors the universal model: every NodeRow
+  // opens its node's editor on double-click, regardless of whether the
+  // node has children. For now the editor is title-only — body and
+  // user-metadata for structure nodes are a follow-up; renames go
+  // through api.renameStructureNode in saveEditorPane.
+  async function openStructureNodeInEditorPane(nodeId: string) {
+    const existingPane = editorPanes.find(
+      (pane) => pane.document?.type === "structure_node" && pane.document.id === nodeId,
+    );
+    if (existingPane) {
+      focusedEditorPaneId = existingPane.id;
+      focusPane(existingPane.id);
+      status = `Focused ${existingPane.scene?.title ?? "structure node"}`;
+      return;
+    }
+    if (!structure) return;
+    const node = findStructureNodeById(structure.root, nodeId);
+    if (!node) return;
+    let targetPane = editorPanes.find((pane) => !pane.pinned);
+    if (!targetPane) {
+      targetPane = addEditorPane();
+    }
+    if (targetPane.dirty) {
+      await saveEditorPane(targetPane.id);
+    }
+    // Mirror the project-node pattern: cast a non-Scene record into the
+    // pane's Scene-shaped slot so NodeEditor's existing draft-* plumbing
+    // works without a parallel field. NodeEditor's documentKind branch
+    // hides body / status / etc. for structure_node.
+    const sceneShaped = {
+      id: node.id,
+      title: node.title,
+      body_markdown: "",
+      revision: "",
+      status: "",
+      entry_type: node.type,
+      metadata: {},
+      computed_metadata: {},
+    } as unknown as Scene;
+    editorPanes = editorPanes.map((pane) =>
+      pane.id === targetPane!.id
+        ? {
+            ...pane,
+            document: { type: "structure_node", id: node.id },
+            scene: sceneShaped,
+            dirty: false,
+            draftTitle: node.title,
+            draftMarkdown: "",
+            draftStatus: "",
+            draftEntryType: node.type,
+            draftMetadata: {},
+            saving: false,
+          }
+        : pane,
+    );
+    focusedEditorPaneId = targetPane!.id;
+    focusPane(targetPane!.id);
+    status = `Loaded ${node.title}`;
   }
 
   function navigateToBacklink(id: string, kind: string) {
@@ -3732,6 +3835,25 @@ async function seedChatFromPromptEntry(
         // dedicated endpoint and re-shape into the editor pane's
         // Scene-compatible draft.
         savedDocument = await api.saveProjectNode(draftDocument as ProjectNode, pane.draftMarkdown) as unknown as EditableDocument;
+      } else if (documentKind === "structure_node") {
+        // Structure nodes (Acts/Chapters) currently support title-only
+        // editing via the rename endpoint. Body and user-metadata for
+        // structure nodes need a parallel backend save path; deferred to
+        // a follow-up. Re-fetch the renamed node from the returned
+        // structure document and shape it for the pane.
+        const doc = await api.renameStructureNode(pane.scene.id, pane.draftTitle);
+        structure = doc;
+        const refreshed = findStructureNodeById(doc.root, pane.scene.id);
+        savedDocument = {
+          id: refreshed?.id ?? pane.scene.id,
+          title: refreshed?.title ?? pane.draftTitle,
+          body_markdown: "",
+          revision: "",
+          status: "",
+          entry_type: refreshed?.type ?? pane.draftEntryType,
+          metadata: {},
+          computed_metadata: {},
+        } as unknown as EditableDocument;
       } else {
         savedDocument = await api.saveScene(draftDocument as Scene, pane.draftMarkdown);
       }
@@ -4160,22 +4282,27 @@ async function seedChatFromPromptEntry(
   </section>
 
   <!-- svelte-ignore a11y_no_noninteractive_element_interactions -->
-  <section class:hidden-pane={!isPaneVisible("outline")} class="pane outline-pane" data-pane-id="outline" style={paneStyle("outline")} aria-label="Manuscript Outline pane" on:mousedown={() => focusPane("outline")}>
-    <header class="pane-header" role="button" tabindex="0" aria-label="Move Manuscript Outline pane" on:keydown={(event) => handlePaneHeaderKeydown(event, "outline")} on:mousedown={(event) => startPaneDrag(event, "outline")}>
-      <h2>Manuscript Outline</h2>
+  <section class:hidden-pane={!isPaneVisible("outline")} class="pane outline-pane" data-pane-id="outline" style={paneStyle("outline")} aria-label="Draft pane" on:mousedown={() => focusPane("outline")}>
+    <header class="pane-header" role="button" tabindex="0" aria-label="Move Draft pane" on:keydown={(event) => handlePaneHeaderKeydown(event, "outline")} on:mousedown={(event) => startPaneDrag(event, "outline")}>
+      <h2>Draft</h2>
     </header>
     <div class="pane-content">
       <div class="section-title">
         <h3>Scenes</h3>
         <div class="tree-add-controls">
-          <button class="tree-add" on:click={() => addStructureChild(null, defaultChildEntryType("root") ?? "scene")}>+ {entryTypeName(defaultChildEntryType("root") ?? "scene", metadataSchema)}</button>
           <div class="tree-menu-anchor">
-            <button class="tree-menu" title="Other types" on:click={() => toggleAddMenu("__root__")}>⋯</button>
+            <button class="row-action-add section-add-button" class:active={addMenuOpenFor === "__root__"} title="Add at root" on:click={(event) => toggleAddMenu("__root__", event)}>+&gt;</button>
             {#if addMenuOpenFor === "__root__"}
-              <div class="tree-add-menu">
-                {#each manuscriptEntryTypeChoices(metadataSchema) as choice (choice.id)}
-                  <button type="button" on:click={() => addStructureChild(null, choice.id)}>{choice.name}</button>
-                {/each}
+              <div class="row-add-popover" style={addMenuPosition ? `top: ${addMenuPosition.top}px; right: ${addMenuPosition.right}px` : ""}>
+                <span class="row-add-popover-heading">Add at root</span>
+                <NodeList isEmpty={false}>
+                  {#each manuscriptEntryTypeChoices(metadataSchema) as choice (choice.id)}
+                    <NodeRow
+                      title={choice.name}
+                      onClick={() => { addStructureChild(null, choice.id); addMenuOpenFor = null; addMenuPosition = null; }}
+                    />
+                  {/each}
+                </NodeList>
               </div>
             {/if}
           </div>
@@ -4196,7 +4323,7 @@ async function seedChatFromPromptEntry(
         {/snippet}
       </NodeList>
     </div>
-    <button class="pane-resize" type="button" aria-label="Resize Manuscript Outline pane" on:keydown={(event) => handlePaneResizeKeydown(event, "outline")} on:mousedown={(event) => startPaneResize(event, "outline")}></button>
+    <button class="pane-resize" type="button" aria-label="Resize Draft pane" on:keydown={(event) => handlePaneResizeKeydown(event, "outline")} on:mousedown={(event) => startPaneResize(event, "outline")}></button>
   </section>
 
   <!-- svelte-ignore a11y_no_noninteractive_element_interactions -->
@@ -4215,7 +4342,6 @@ async function seedChatFromPromptEntry(
       >
         {#each groupedLoreEntries as group}
           <NodeRow
-            variant="tree"
             groupHeader
             collapsed={!!collapsedLoreGroups[group.id]}
             title={group.label}
@@ -4576,7 +4702,6 @@ async function seedChatFromPromptEntry(
           {@const userCollapsed = !!collapsedAssistantGroups[group.layerId]}
           {@const isEmpty = group.entries.length === 0}
           <NodeRow
-            variant="tree"
             groupHeader
             collapsed={userCollapsed || isEmpty}
             title={group.layerLabel}
@@ -5273,7 +5398,6 @@ async function seedChatFromPromptEntry(
   {@const hasContent = subtypeEntries.length > 0 || node.children.length > 0}
   {@const isCollapsed = userCollapsed || !hasContent}
   <NodeRow
-    variant="tree"
     groupHeader
     collapsed={isCollapsed}
     title={node.label}
@@ -5307,32 +5431,61 @@ async function seedChatFromPromptEntry(
   {@const statusSwatch = statusOption?.color ? getSwatch(statusOption.color) : null}
   {@const stripeHex = statusSwatch?.hex ?? null}
   {@const childNodes = nodeChildren(node)}
-  <NodeRow
-    variant="card"
-    role="treeitem"
-    ariaLabel={node.title}
-    stripeColor={stripeHex}
-    pinned={!!node.scene_id && pinnedEditorPaneKeys.has(`scene:${node.scene_id}`)}
-    dragging={draggedNodeId === node.id}
-    dropPosition={dragOverNodeId === node.id ? dragOverPosition : null}
-    collapsed={childNodes.length === 0}
-    clickable={false}
-    on:dragover={(event) => handleTreeDragOver(event, node)}
-    on:drop={(event) => handleTreeDrop(event, node)}
-  >
-    {#snippet leading()}
-      <span
-        class="tree-handle"
-        draggable="true"
-        role="button"
-        tabindex="-1"
-        aria-label="Drag to reorder"
-        on:dragstart={(event) => handleTreeDragStart(event, node)}
-        on:dragend={handleTreeDragEnd}
-      >⋮⋮</span>
-    {/snippet}
-    {#snippet titleSlot()}
-      {#if editingNodeId === node.id}
+  {@const leaf = isLeafNode(node)}
+  {@const editing = editingNodeId === node.id}
+  {@const isActive = (!!node.scene_id && focusedEditorPane?.document?.type === "scene" && focusedEditorPane.document.id === node.scene_id) || (focusedEditorPane?.document?.type === "structure_node" && focusedEditorPane.document.id === node.id)}
+  {@const isPinned = (!!node.scene_id && pinnedEditorPaneKeys.has(`scene:${node.scene_id}`)) || pinnedEditorPaneKeys.has(`structure_node:${node.id}`)}
+  {#if leaf && !editing}
+    <!-- Simplest-form leaf NodeRow — same widget as a lore character:
+         default title path (NodeRow's 14.5px / weight-600 strong) with
+         a small drag handle in leading. No status stripe; the user
+         called those out as visual noise on scenes. -->
+    <NodeRow
+      role="treeitem"
+      ariaLabel={node.title}
+      title={renderNodeTitle(node, metadataSchema)}
+      active={isActive}
+      pinned={isPinned}
+      dragging={draggedNodeId === node.id}
+      dropPosition={dragOverNodeId === node.id ? dragOverPosition : null}
+      onClick={() => node.scene_id && run(() => openSceneInEditorPane(node.scene_id!))}
+      on:mousedown={(event) => event.stopPropagation()}
+      on:keydown={(event) => handleTreeRowKeydown(event, node)}
+      on:dragover={(event) => handleTreeDragOver(event, node)}
+      on:drop={(event) => handleTreeDrop(event, node)}
+    >
+      {#snippet leading()}
+        <span
+          class="tree-handle"
+          draggable="true"
+          role="button"
+          tabindex="-1"
+          aria-label="Drag to reorder"
+          on:dragstart={(event) => handleTreeDragStart(event, node)}
+          on:dragend={handleTreeDragEnd}
+        >⋮⋮</span>
+      {/snippet}
+    </NodeRow>
+  {:else if editing}
+    <!-- Rename-in-progress: titleSlot hosts the input. Variant stays
+         consistent with the underlying node (card for leaves, tree
+         group header for Acts/Chapters) so the row doesn't reflow when
+         editing ends. -->
+    <NodeRow
+      groupHeader={!leaf}
+      role="treeitem"
+      ariaLabel={node.title}
+      stripeColor={leaf ? null : stripeHex}
+      dragging={draggedNodeId === node.id}
+      dropPosition={dragOverNodeId === node.id ? dragOverPosition : null}
+      collapsed={leaf ? true : (!!collapsedStructureNodes[node.id] || childNodes.length === 0)}
+      clickable={false}
+      dataNodeId={node.id}
+      on:mousedown={(event) => event.stopPropagation()}
+      on:dragover={(event) => handleTreeDragOver(event, node)}
+      on:drop={(event) => handleTreeDrop(event, node)}
+    >
+      {#snippet titleSlot()}
         <input
           class="tree-title tree-rename-input"
           data-node-edit-id={node.id}
@@ -5340,39 +5493,79 @@ async function seedChatFromPromptEntry(
           on:keydown={(event) => handleRenameKeydown(event, node.id)}
           on:blur={() => commitRename(node.id)}
         />
-      {:else if isLeafNode(node)}
-        <button data-tree-node-id={node.id} class="tree-scene tree-title" on:click={() => node.scene_id && run(() => openSceneInEditorPane(node.scene_id!))} on:dblclick={() => node.scene_id && run(() => openSceneInEditorPane(node.scene_id!))} on:keydown={(event) => handleTreeRowKeydown(event, node)}>{renderNodeTitle(node, metadataSchema)}</button>
-      {:else}
-        <button data-tree-node-id={node.id} class="tree-group tree-title" on:click={() => (activeParentId = node.id)} on:dblclick={() => node.scene_id && run(() => openSceneInEditorPane(node.scene_id!))} on:keydown={(event) => handleTreeRowKeydown(event, node)}>{renderNodeTitle(node, metadataSchema)}</button>
-      {/if}
-    {/snippet}
-    {#snippet trailing()}
-      {#if editingNodeId !== node.id}
-        {#if !isLeafNode(node)}
-          {@const defaultType = defaultChildEntryType(node.type)}
-          {#if defaultType}
-            <button class="tree-add" title={`Add ${entryTypeName(defaultType, metadataSchema)}`} on:click={() => addStructureChild(node.id, defaultType)}>+</button>
-          {/if}
-          <div class="tree-menu-anchor">
-            <button class="tree-menu" title="Other types" on:click={() => toggleAddMenu(node.id)}>⋯</button>
-            {#if addMenuOpenFor === node.id}
-              <div class="tree-add-menu">
-                {#each manuscriptEntryTypeChoices(metadataSchema) as choice (choice.id)}
-                  <button type="button" on:click={() => addStructureChild(node.id, choice.id)}>{choice.name}</button>
-                {/each}
-              </div>
-            {/if}
-          </div>
+      {/snippet}
+      {#snippet children()}
+        {#if !leaf}
+          {#each childNodes as child (child.id)}
+            {@render renderTree(child)}
+          {/each}
         {/if}
-        <button class="tree-delete" title={`Delete ${entryTypeName(node.type, metadataSchema)}`} on:click={() => requestDeleteStructureNode(node)}>×</button>
-      {/if}
-    {/snippet}
-    {#snippet children()}
-      {#each childNodes as child (child.id)}
-        {@render renderTree(child)}
-      {/each}
-    {/snippet}
-  </NodeRow>
+      {/snippet}
+    </NodeRow>
+  {:else}
+    <!-- Group-header form (non-leaf). Same call shape as Character in
+         the lore pane: variant="tree" + groupHeader + default title
+         path (so `.node-row-click` carries focus + click handling, no
+         custom button). Single click toggles collapse; double-click
+         opens the node's editor. -->
+    {@const isCollapsed = !!collapsedStructureNodes[node.id] || childNodes.length === 0}
+    <NodeRow
+      groupHeader
+      role="treeitem"
+      ariaLabel={node.title}
+      title={renderNodeTitle(node, metadataSchema)}
+      active={isActive}
+      pinned={isPinned}
+      dragging={draggedNodeId === node.id}
+      dropPosition={dragOverNodeId === node.id ? dragOverPosition : null}
+      collapsed={isCollapsed}
+      dataNodeId={node.id}
+      onClick={() => toggleStructureNodeCollapse(node.id)}
+      onDblClick={() => run(() => openStructureNodeInEditorPane(node.id))}
+      on:mousedown={(event) => event.stopPropagation()}
+      on:keydown={(event) => handleTreeRowKeydown(event, node)}
+      on:dragover={(event) => handleTreeDragOver(event, node)}
+      on:drop={(event) => handleTreeDrop(event, node)}
+    >
+      {#snippet leading()}
+        <span
+          class="tree-handle"
+          draggable="true"
+          role="button"
+          tabindex="-1"
+          aria-label="Drag to reorder"
+          on:dragstart={(event) => handleTreeDragStart(event, node)}
+          on:dragend={handleTreeDragEnd}
+        >⋮⋮</span>
+        <span class:collapsed={isCollapsed} class="lore-group-caret">▾</span>
+      {/snippet}
+      {#snippet trailing()}
+        <span class="group-count-pill">{childNodes.length}</span>
+        <div class="tree-menu-anchor">
+          <button class="row-action-add" class:active={addMenuOpenFor === node.id} title="Add child" on:click|stopPropagation={(event) => toggleAddMenu(node.id, event)}>+&gt;</button>
+          {#if addMenuOpenFor === node.id}
+            <div class="row-add-popover" style={addMenuPosition ? `top: ${addMenuPosition.top}px; right: ${addMenuPosition.right}px` : ""}>
+              <span class="row-add-popover-heading">Add child</span>
+              <NodeList isEmpty={false}>
+                {#each manuscriptEntryTypeChoices(metadataSchema) as choice (choice.id)}
+                  <NodeRow
+                    title={choice.name}
+                    onClick={() => { addStructureChild(node.id, choice.id); addMenuOpenFor = null; addMenuPosition = null; }}
+                  />
+                {/each}
+              </NodeList>
+            </div>
+          {/if}
+        </div>
+        <button class="row-action-delete" title={`Delete ${entryTypeName(node.type, metadataSchema)}`} on:click|stopPropagation={() => requestDeleteStructureNode(node)}>×</button>
+      {/snippet}
+      {#snippet children()}
+        {#each childNodes as child (child.id)}
+          {@render renderTree(child)}
+        {/each}
+      {/snippet}
+    </NodeRow>
+  {/if}
 {/snippet}
 
 {#snippet renderNodeTypeCard(node: NodeTypeTreeNode)}

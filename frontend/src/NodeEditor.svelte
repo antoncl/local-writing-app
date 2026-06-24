@@ -26,7 +26,7 @@
   import type { AIPreviewResponse, AssistantEntrySummary, Backlink, ChatUsage, EditableDocument, EntryBodyLanguage, EntryMetadata, MetadataFieldDefinition, MetadataSchema, MetadataValue, PromptEntrySummary, PromptInputDefinition } from "./types";
 
   export let scene: EditableDocument | null = null;
-  export let documentKind: "scene" | "lore" | "prompt" | "snippet" | "assistant" | "project" = "scene";
+  export let documentKind: "scene" | "lore" | "prompt" | "snippet" | "assistant" | "project" | "structure_node" = "scene";
   export let metadataSchema: MetadataSchema | null = null;
   export let promptEntries: PromptEntrySummary[] = [];
   // Data sources for context_pick inputs in the prompt preview / inputs
@@ -788,9 +788,12 @@
   $: activeSlashCommand = filteredSlashCommands[slashMenu.selectedIndex];
   $: clampSlashSelectedIndex(filteredSlashCommands.length);
   $: selectionToolbarActions = editor ? getSelectionToolbarActions() : [];
-  $: documentLabel = documentKind === "lore" ? "Entry" : "Scene";
+  $: documentLabel = documentKind === "lore" ? "Entry" : documentKind === "structure_node" ? "Node" : "Scene";
   $: documentNameLabel = documentKind === "lore" ? "Name" : "Title";
-  $: documentEntryTypes = Object.entries(metadataSchema?.entry_types ?? {}).filter(([, definition]) => definition.kind === documentKind && !definition.abstract);
+  // structure_node has no schema kind of its own — Acts/Chapters share
+  // kind="scene" in the metadata schema. Reuse the scene entry types so
+  // the type selector still lists Act/Chapter/Scene/etc.
+  $: documentEntryTypes = Object.entries(metadataSchema?.entry_types ?? {}).filter(([, definition]) => definition.kind === (documentKind === "structure_node" ? "scene" : documentKind) && !definition.abstract);
   $: activeEntryType = metadataSchema?.entry_types[entryType] ?? metadataSchema?.entry_types[defaultEntryType()];
   // Assistants surface ai_provider / ai_capability_tier / ai_model via
   // the bespoke ProviderTierPicker above the schema fields. Hide them

@@ -1070,13 +1070,27 @@ h3 {
 }
 
 .tree-row .tree-title:focus {
-  outline: 3px solid #2f6f5e;
-  outline-offset: -3px;
+  outline: 2px solid #2f6f5e;
+  outline-offset: -2px;
   background: #ffffff;
 }
 
 .tree-group {
   font-weight: 700;
+}
+
+/* Outline group-header rows (Act, Chapter, etc.) use the serif chapter-
+   divider treatment from the Editorial Card direction. NodeRow's own
+   serif rule targets its default <strong> title path; the outline uses
+   a custom titleSlot (so it can host the rename input and route clicks
+   to setActiveParentId / openSceneInEditorPane), so the styling lives
+   here on the title button instead. Acts/Chapters are real Nodes that
+   happen to have children — see [[feedback-tree-uniformity-over-header-dichotomy]]. */
+.node-row.group-header .tree-group.tree-title {
+  font-family: var(--serif);
+  font-size: 14px;
+  font-weight: 700;
+  color: var(--text);
 }
 
 .tree-scene {
@@ -1136,7 +1150,9 @@ h3 {
   color: #c5cdc9;
   cursor: grab;
   user-select: none;
+  font-size: 14.5px;
   font-weight: 700;
+  line-height: 1;
   letter-spacing: -2px;
 }
 
@@ -1202,6 +1218,61 @@ h3 {
 
 .tree-add-menu button:hover {
   background: #edf6f2;
+}
+
+/* Add-child popover — opens from a row's +> affordance (or from a
+   pane's section-title +> button). Editorial Card surface: soft border,
+   soft shadow, rounded corners. Hosts a NodeList of NodeRows so the
+   creation choices use the same widget the user sees everywhere.
+   Positioned `fixed` so ancestor `overflow: hidden` (pane / tier panel)
+   can't clip it; the actual top/right are set inline at click time. */
+.row-add-popover {
+  position: fixed;
+  z-index: 1000;
+  min-width: 200px;
+  padding: 8px;
+  border: 1px solid var(--border);
+  border-radius: 11px;
+  background: var(--surface);
+  box-shadow: 0 6px 18px var(--shadow2);
+}
+
+/* `.row-action-add` button styling for callers outside a NodeRow
+   trailing slot (e.g. pane section-title). NodeRow's own trailing
+   has a more specific rule that wins when this same class lands
+   inside a row. */
+button.row-action-add {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 28px;
+  height: 28px;
+  padding: 0 8px;
+  border: 1px solid transparent;
+  border-radius: 7px;
+  background: transparent;
+  color: var(--accent);
+  font-size: 14px;
+  line-height: 1;
+  cursor: pointer;
+  transition: background 120ms ease, color 120ms ease, border-color 120ms ease;
+}
+
+button.row-action-add:hover,
+button.row-action-add.active {
+  background: var(--accent-soft2);
+  color: var(--accent);
+  border-color: var(--accent);
+}
+
+.row-add-popover-heading {
+  display: block;
+  padding: 2px 8px 6px;
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.07em;
+  text-transform: uppercase;
+  color: var(--text-3);
 }
 
 .editor-pane {

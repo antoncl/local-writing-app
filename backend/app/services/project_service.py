@@ -2054,6 +2054,9 @@ class ProjectService:
             raise ProjectServiceError("Cannot delete the root node.", 422)
 
         scene_ids = self._collect_scene_ids(node)
+        # Snapshot all descendant ids BEFORE we mutate the tree so we
+        # can purge references in one sweep after the file deletions.
+        purge_ids = self._collect_descendant_ids(node)
         for scene_id in scene_ids:
             try:
                 path = self._path_for_node_id(scene_id, "scene")
@@ -2065,6 +2068,7 @@ class ProjectService:
 
         self._remove_structure_node_by_id(structure.root, node_id)
         self._write_yaml(root / "manuscript.structure.yaml", self._structure_dump_for_storage(structure))
+        self._purge_references_to(purge_ids)
         return self.read_structure()
 
     def _remove_structure_node_by_id(self, node: StructureNode, node_id: str) -> bool:
@@ -2202,7 +2206,11 @@ class ProjectService:
             raise ProjectServiceError(f"Scene {node_id} has invalid entry_type; it must be text.", 422)
         entry_type = raw_entry_type
         metadata = self._normalise_metadata(front_matter.get("metadata"), path)
-        metadata_errors = self._validate_scene_metadata(node_id, entry_type, status, metadata, self.read_metadata_schema(), index)
+        schema = self.read_metadata_schema()
+        # Heal dangling references (e.g. POV character was deleted) before
+        # validation; see _strip_dangling_references for the rationale.
+        metadata = self._strip_dangling_references(metadata, schema, index)
+        metadata_errors = self._validate_scene_metadata(node_id, entry_type, status, metadata, schema, index)
         if metadata_errors:
             raise ProjectServiceError(" ".join(metadata_errors), 422)
         return Scene(
@@ -2348,6 +2356,9 @@ class ProjectService:
         self._remove_scene_node(structure.root, node_id)
         self._write_yaml(root / "manuscript.structure.yaml", self._structure_dump_for_storage(structure))
         self._remove_scene_todos(node_id)
+        # Strip references to both the scene file id and the structure
+        # node wrapping it from every metadata-bearing entry.
+        self._purge_references_to({scene_id, node_id})
         return self.read_structure()
 
     def list_lore_entries(self) -> LoreEntryList:
@@ -2414,7 +2425,11 @@ class ProjectService:
             raise ProjectServiceError(f"Lore Entry {node_id} has invalid entry_type; it must be text.", 422)
         entry_type = raw_entry_type
         metadata = self._normalise_metadata(front_matter.get("metadata"), path)
-        metadata_errors = self._validate_lore_entry_metadata(node_id, entry_type, metadata, self.read_metadata_schema(), index)
+        schema = self.read_metadata_schema()
+        # Heal dangling references before validation — see
+        # _strip_dangling_references for the rationale.
+        metadata = self._strip_dangling_references(metadata, schema, index)
+        metadata_errors = self._validate_lore_entry_metadata(node_id, entry_type, metadata, schema, index)
         if metadata_errors:
             raise ProjectServiceError(" ".join(metadata_errors), 422)
         return LoreEntry(
@@ -2469,6 +2484,7 @@ class ProjectService:
         path = self._path_for_node_id(entry_id, "lore")
         if path.exists():
             path.unlink()
+        self._purge_references_to({entry_id})
         return self.list_lore_entries()
 
     def _check_entry_type_kind(self, entry_type: str, expected_kind: str) -> None:
@@ -3605,6 +3621,147 @@ class ProjectService:
                 errors.extend(self._validate_reference_target(label, field_id, item, field, node_index))
             return errors
         return []
+
+    def _strip_dangling_references(
+        self,
+        metadata: dict[str, Any],
+        schema: MetadataSchema,
+        node_index: "NodeIndex",
+    ) -> dict[str, Any]:
+        """Return a copy of ``metadata`` with any entity_ref / entity_ref_list
+        values pointing at non-existent (or wrong-kind / wrong-entry-type)
+        nodes silently dropped. Used on READ paths so an entry stays
+        openable after one of its references is deleted; the persisted
+        file still carries the stale ID until the user next saves the
+        entry, at which point the cleaned metadata is written back.
+        """
+
+        def is_valid_ref(item: Any, field: MetadataFieldDefinition) -> bool:
+            if not isinstance(item, str) or not item:
+                return False
+            target = node_index.by_id.get(item)
+            if target is None:
+                return False
+            expected_kind = field.target.get("kind") if field.target else None
+            if expected_kind and target.kind != expected_kind:
+                return False
+            expected_entry_type = field.target.get("entry_type") if field.target else None
+            if expected_entry_type and target.entry_type != expected_entry_type:
+                return False
+            return True
+
+        cleaned = dict(metadata)
+        for field_id, value in metadata.items():
+            field = schema.fields.get(field_id)
+            if not field:
+                continue
+            if field.type == "entity_ref":
+                if value not in (None, "") and not is_valid_ref(value, field):
+                    cleaned[field_id] = ""
+            elif field.type == "entity_ref_list":
+                if isinstance(value, list):
+                    filtered = [item for item in value if is_valid_ref(item, field)]
+                    if len(filtered) != len(value):
+                        cleaned[field_id] = filtered
+        return cleaned
+
+    def _purge_metadata_refs(
+        self,
+        metadata: dict[str, Any],
+        schema: MetadataSchema,
+        purge_ids: set[str],
+    ) -> tuple[dict[str, Any], bool]:
+        """Pure helper: return a copy of ``metadata`` with any reference
+        value pointing at one of ``purge_ids`` removed, plus a flag for
+        whether anything changed.
+        """
+        cleaned = dict(metadata)
+        changed = False
+        for field_id, value in metadata.items():
+            field = schema.fields.get(field_id)
+            if not field:
+                continue
+            if field.type == "entity_ref":
+                if isinstance(value, str) and value in purge_ids:
+                    cleaned[field_id] = ""
+                    changed = True
+            elif field.type == "entity_ref_list":
+                if isinstance(value, list):
+                    filtered = [item for item in value if not (isinstance(item, str) and item in purge_ids)]
+                    if len(filtered) != len(value):
+                        cleaned[field_id] = filtered
+                        changed = True
+        return cleaned, changed
+
+    def _purge_references_to(self, purge_ids: set[str]) -> None:
+        """Walk every metadata-bearing entry in the project (scenes and
+        lore today; assistants/prompts skipped because they don't carry
+        node references in current schemas). For each, strip any
+        reference value matching one of ``purge_ids`` and write the
+        file back if it changed. Called after node deletes so cross-
+        entity references stay in sync without waiting for a per-entry
+        open+save round-trip (which is what the read-side healer in
+        ``_strip_dangling_references`` does as a fallback).
+        """
+        if not purge_ids:
+            return
+        schema = self.read_metadata_schema()
+        index = self._build_node_index()
+        for entry in list(index.by_id.values()):
+            if entry.kind not in {"scene", "lore"}:
+                continue
+            try:
+                front_matter, body = self._read_markdown_with_front_matter(entry.path, strict=True)
+            except ProjectServiceError:
+                continue
+            raw_metadata = front_matter.get("metadata")
+            if not isinstance(raw_metadata, dict):
+                continue
+            try:
+                normalised = self._normalise_metadata(raw_metadata, entry.path)
+            except ProjectServiceError:
+                continue
+            cleaned, changed = self._purge_metadata_refs(normalised, schema, purge_ids)
+            if not changed:
+                continue
+            if entry.kind == "lore":
+                self._write_lore_entry_file(
+                    entry.path,
+                    LoreEntry(
+                        id=entry.id,
+                        title=str(front_matter.get("title") or entry.id),
+                        body_markdown=body,
+                        revision="",
+                        entry_type=entry.entry_type,
+                        metadata=cleaned,
+                    ),
+                )
+            else:  # scene
+                self._write_scene_file(
+                    entry.path,
+                    Scene(
+                        id=entry.id,
+                        title=str(front_matter.get("title") or entry.id),
+                        body_markdown=body,
+                        revision="",
+                        status=str(front_matter.get("status") or "draft"),
+                        entry_type=entry.entry_type,
+                        metadata=cleaned,
+                        computed_metadata={},
+                    ),
+                )
+
+    def _collect_descendant_ids(self, node: StructureNode) -> set[str]:
+        """Gather every structure-node id + scene id in the subtree
+        rooted at ``node``. Used to feed ``_purge_references_to`` after
+        a cascade-delete: a reference could point at the structure
+        node, the underlying scene, or any descendant of either."""
+        ids: set[str] = {node.id}
+        if node.scene_id:
+            ids.add(node.scene_id)
+        for child in node.children:
+            ids.update(self._collect_descendant_ids(child))
+        return ids
 
     def _validate_reference_target(
         self,

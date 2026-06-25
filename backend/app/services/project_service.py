@@ -1711,7 +1711,71 @@ class ProjectService:
                     index=index,
                     duplicate_relative_to=root,
                 )
+            # Chat sessions live as YAML files (not Node-shaped .md), so they
+            # need their own collector. Read-only for now: this makes them
+            # discoverable as nodes (kind="chat") for reference graphs and
+            # the unified-CRUD migration to come, but ChatSession storage
+            # remains the source of truth (Phase 3b-i / decisions-node-
+            # editor-modularization).
+            if is_current_project:
+                self._collect_chat_entries(
+                    folder=folder,
+                    layer_id=layer_id,
+                    layer_label=layer_label,
+                    index=index,
+                )
         return index
+
+    def _collect_chat_entries(
+        self,
+        *,
+        folder: Path,
+        layer_id: str,
+        layer_label: str,
+        index: NodeIndex,
+    ) -> None:
+        """Walk <project>/chats/*.yaml and add an index entry per session.
+
+        Storage stays YAML — this is just a discovery layer so chats are
+        addressable from the unified node index alongside other kinds.
+        """
+        chats_dir = folder / "chats"
+        if not chats_dir.exists():
+            return
+        for path in sorted(chats_dir.glob("*.yaml")):
+            try:
+                data = self._read_yaml(path)
+            except Exception as exc:
+                index.errors.append(f"Failed to read chat session {path.name}: {exc}")
+                continue
+            if not isinstance(data, dict):
+                continue
+            raw_id = data.get("id")
+            if not isinstance(raw_id, str) or not raw_id.strip():
+                continue
+            chat_id = raw_id.strip()
+            raw_title = data.get("title")
+            title = raw_title.strip() if isinstance(raw_title, str) and raw_title.strip() else "Untitled chat"
+            entry = NodeIndexEntry(
+                id=chat_id,
+                kind="chat",
+                entry_type="chat_session",
+                path=path,
+                title=title,
+                source_layer_id=layer_id,
+                source_layer_label=layer_label,
+            )
+            index.id_by_path[path.resolve()] = chat_id
+            existing = index.by_id.get(chat_id)
+            if existing is not None:
+                # Chat ids are prefixed (`chat_…`) and minted via _new_id, so
+                # cross-kind collisions shouldn't happen in practice. If one
+                # ever does, surface it rather than silently shadowing.
+                index.errors.append(
+                    f"Chat id {chat_id} collides with an existing entry."
+                )
+                continue
+            index.by_id[chat_id] = entry
 
     def _collect_machine_layer_assistants(
         self, index: NodeIndex, *, duplicate_relative_to: Path

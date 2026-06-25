@@ -13,7 +13,7 @@
   // Stores only refs (id, kind, title) — bodies are materialized
   // server-side at template render time. See docs/context-picker.md.
 
-  import { createEventDispatcher } from "svelte";
+  import { createEventDispatcher, tick } from "svelte";
   import type {
     NodePickerConfig,
     NodePickerRef,
@@ -129,14 +129,48 @@
     dispatch("change", { value: next });
   }
 
-  function toggle() {
+  // Trigger element + menu position state. The menu is rendered with
+  // `position: fixed` so it escapes the metadata-panel's overflow:auto
+  // (which clipped the dropdown when ReferencePicker hosts this picker
+  // inside a scene/lore metadata field). Position is captured from the
+  // trigger's getBoundingClientRect at open time and on resize/scroll.
+  let triggerEl: HTMLButtonElement | undefined;
+  let menuStyle = "";
+  const MENU_WIDTH = 344;
+  const MENU_MAX_HEIGHT = 420;
+
+  function positionMenu() {
+    if (!triggerEl) return;
+    const r = triggerEl.getBoundingClientRect();
+    const vw = window.innerWidth;
+    const vh = window.innerHeight;
+    const spaceBelow = vh - r.bottom;
+    const spaceAbove = r.top;
+    const useAbove = spaceBelow < MENU_MAX_HEIGHT + 12 && spaceAbove > spaceBelow;
+    const top = useAbove
+      ? Math.max(8, r.top - MENU_MAX_HEIGHT - 4)
+      : Math.min(vh - 12, r.bottom + 4);
+    let left = r.left;
+    if (left + MENU_WIDTH + 8 > vw) left = Math.max(8, vw - MENU_WIDTH - 8);
+    menuStyle = `top: ${top}px; left: ${left}px;`;
+  }
+
+  async function toggle() {
     open = !open;
-    if (open) search = "";
+    if (open) {
+      search = "";
+      await tick();
+      positionMenu();
+    }
   }
 
   function close() {
     open = false;
     search = "";
+  }
+
+  function handleViewportShift() {
+    if (open) positionMenu();
   }
 
   function handleDocumentClick(event: MouseEvent) {
@@ -374,6 +408,7 @@
 </script>
 
 <svelte:document on:mousedown={handleDocumentClick} on:keydown={handleKeydown} />
+<svelte:window on:scroll={handleViewportShift} on:resize={handleViewportShift} />
 
 <div class="ctx-picker" class:compact>
   <!-- PR 2: chips + trigger live in one bordered "context bar" so the
@@ -418,6 +453,7 @@
 
     <div class="ctx-picker-anchor">
       <button
+        bind:this={triggerEl}
         type="button"
         class="ctx-add"
         aria-haspopup="menu"
@@ -429,7 +465,7 @@
       </button>
 
     {#if open}
-      <div class="ctx-menu" role="menu">
+      <div class="ctx-menu" role="menu" style={menuStyle}>
         <label class="ctx-search-wrap" class:has-query={search.length > 0}>
           <svg class="ctx-search-icon" width="14" height="14" viewBox="0 0 14 14" fill="none" aria-hidden="true">
             <circle cx="6" cy="6" r="4.2" stroke="currentColor" stroke-width="1.6" />
@@ -756,11 +792,14 @@
   /* --- Popover menu ------------------------------------------------ */
 
   .ctx-menu {
-    position: absolute;
-    top: calc(100% + 4px);
-    left: 0;
+    /* `fixed` so the popover escapes ancestor overflow:auto/hidden
+       containers (notably .metadata-panel's scroll region that was
+       clipping it when this picker is hosted by ReferencePicker inside
+       a lore/scene metadata field). Coordinates are JS-computed from
+       the trigger's getBoundingClientRect — see positionMenu(). */
+    position: fixed;
     width: 344px;
-    max-width: 90vw;
+    max-width: calc(100vw - 16px);
     max-height: 420px;
     overflow-y: auto;
     background: var(--ctx-surface);

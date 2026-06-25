@@ -38,6 +38,11 @@
   // host owns the row-level fields, presets + scene-binding are
   // hidden, the tree is always expanded.
   export let mode: "prompt" | "field" = "prompt";
+  // Read-only display — used by the schema-field editor when the field
+  // is a system / built-in definition. Inputs render disabled; the
+  // user can inspect the configured kinds + entry types but can't mutate
+  // them (and the host's Save button is disabled anyway).
+  export let readonly: boolean = false;
   // Row-level fields (PR 2). The widget now owns the entire input row
   // when type is context_pick, instead of being slotted inside the
   // generic .prompt-input-grid in NodeEditor.
@@ -587,13 +592,13 @@
                 {:else}
                   <span class="ctx-tree-chevron ctx-tree-chevron-leaf" aria-hidden="true"></span>
                 {/if}
-                <label class="ctx-tree-label" class:disabled={!item.hasLeaves}>
+                <label class="ctx-tree-label" class:disabled={!item.hasLeaves || readonly}>
                   <input
                     class="ctx-check"
                     type="checkbox"
                     checked={item.state === "checked"}
                     use:indeterminateBinding={item.state === "indeterminate"}
-                    disabled={!item.hasLeaves}
+                    disabled={!item.hasLeaves || readonly}
                     on:change={() => toggleNode(kind.id, item.id)}
                   />
                   <span class="ctx-tree-name" class:root={item.depth === 0}>{item.name}</span>

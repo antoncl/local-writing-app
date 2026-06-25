@@ -80,6 +80,13 @@
   };
   type NodeTypeTreeNode = NodeTypeOption & {
     children: NodeTypeTreeNode[];
+    // Field entries baked into the tree at build time so the recursive
+    // renderNodeTypeCard snippet doesn't have to look them up via the
+    // metadataSchema closure — see [[feedback-svelte5-reactivity-traps]]
+    // trap 2: closures inside recursive snippets go stale after
+    // mutations (a new field on a deep subtype didn't appear in its
+    // type's children panel until a full reload).
+    fieldEntries: [string, MetadataFieldDefinition][];
   };
   type PaneState = {
     title: string;
@@ -2206,18 +2213,27 @@ async function seedChatFromPromptEntry(
         : kind === "prompt" && entryTypes.prompt
           ? ["prompt"]
           : roots.sort(compareByName);
+    const fieldsRegistry = schema?.fields ?? {};
     const buildNode = (typeId: string, depth: number): NodeTypeTreeNode | null => {
       const definition = entryTypes[typeId];
       if (!definition || definition.kind !== kind) return null;
       const children = (childrenByParent[typeId] ?? [])
         .map((childId) => buildNode(childId, depth + 1))
         .filter((child): child is NodeTypeTreeNode => Boolean(child));
+      const fieldIds = definition.own_fields ?? definition.fields ?? [];
+      const fieldEntries = fieldIds
+        .map((fieldId): [string, MetadataFieldDefinition] | null => {
+          const f = fieldsRegistry[fieldId];
+          return f ? [fieldId, f] : null;
+        })
+        .filter((entry): entry is [string, MetadataFieldDefinition] => Boolean(entry));
       return {
         id: typeId,
         label: nodeTypeDisplayName(typeId, definition),
         depth,
         definition,
         children,
+        fieldEntries,
       };
     };
     return rootIds.map((typeId) => buildNode(typeId, 0)).filter((node): node is NodeTypeTreeNode => Boolean(node));
@@ -4588,10 +4604,11 @@ async function seedChatFromPromptEntry(
           Allow multiple
         </label>
       {/if}
-      {#if schemaFieldType === "entity_ref" && !schemaFieldReadonly}
+      {#if schemaFieldType === "entity_ref" || schemaFieldType === "entity_ref_list"}
         <div class="schema-field-picker-config">
           <NodePickerConfigEditor
             mode="field"
+            readonly={schemaFieldReadonly}
             config={schemaFieldPickerConfig}
             metadataSchema={metadataSchema}
             on:change={(event) => (schemaFieldPickerConfig = event.detail.config)}
@@ -5536,7 +5553,7 @@ async function seedChatFromPromptEntry(
 
 {#snippet renderNodeTypeCard(node: NodeTypeTreeNode)}
   {@const typeSource = schemaTypeSource(node.id)}
-  {@const fieldEntries = fieldEntriesForEntryType(node.id)}
+  {@const fieldEntries = node.fieldEntries}
   {@const typeSwatch = resolveColor(null, node.id, node.definition.kind, metadataSchema)}
   {@const stripeHex = typeSwatch?.hex ?? null}
   {@const childCount = fieldEntries.length + node.children.length}

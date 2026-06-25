@@ -1478,13 +1478,6 @@ button.row-action-add.active {
   color: #1f4d41;
 }
 
-.editor-wrap.body-region-hidden {
-  /* Kept mounted (TipTap's ProseMirror anchor) but hidden when a non-prose
-     body view (e.g. CodeBodyView) is rendering above it. 2d ProseBodyView
-     extraction will move this wrap out and remove the need for this rule. */
-  display: none;
-}
-
 .editor-wrap {
   position: relative;
   display: flex;

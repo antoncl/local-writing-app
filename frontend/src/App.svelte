@@ -2935,19 +2935,36 @@ async function seedChatFromPromptEntry(
     }
     await run(async () => {
       structure = await api.renameStructureNode(nodeId, trimmed);
-      syncRenameIntoEditorPanes(nodeId, trimmed);
+      await syncRenameIntoEditorPanes(nodeId, trimmed);
     });
   }
 
-  function syncRenameIntoEditorPanes(nodeId: string, newTitle: string) {
+  async function syncRenameIntoEditorPanes(nodeId: string, newTitle: string) {
     if (!structure) return;
     const renamedNode = findStructureNodeById(structure.root, nodeId);
     if (!renamedNode?.scene_id) return;
     const sceneId = renamedNode.scene_id;
+    // The rename rewrote the scene file's front-matter, bumping the
+    // mtime-derived revision. Any open editor pane still holds the
+    // pre-rename revision; the next save would 409. Refetch the scene
+    // for its new revision string. The user's in-progress body lives
+    // on pane.draftMarkdown — we only swap revision (and title, which
+    // we already set above) into pane.scene.
+    let refreshedRevision: string | null = null;
+    try {
+      const refreshed = await api.getScene(sceneId);
+      refreshedRevision = refreshed.revision;
+    } catch (e) {
+      // Pane closed or scene gone — fall through; nothing to sync.
+    }
     const nextReloads = { ...titleReloadsByPane };
     editorPanes = editorPanes.map((pane) => {
       if (!pane.scene || pane.scene.id !== sceneId) return pane;
-      const nextScene = { ...pane.scene, title: newTitle };
+      const nextScene = {
+        ...pane.scene,
+        title: newTitle,
+        ...(refreshedRevision !== null ? { revision: refreshedRevision } : {}),
+      };
       if (pane.dirty) {
         return { ...pane, scene: nextScene };
       }
@@ -5370,7 +5387,15 @@ async function seedChatFromPromptEntry(
   />
 
   {#if error}
-    <section class="error-toast">{error}</section>
+    <section class="error-toast" role="alert">
+      <span class="error-toast-body">{error}</span>
+      <button
+        class="error-toast-close"
+        type="button"
+        aria-label="Dismiss error"
+        on:click={() => (error = "")}
+      >×</button>
+    </section>
   {/if}
 
 </main>

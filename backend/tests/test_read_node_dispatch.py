@@ -1,7 +1,8 @@
-"""Phase 3b-ii: read_node dispatcher resolves kind from the index and
-routes to the right per-kind reader. Covers all five indexed kinds
-(scene, lore, prompt, assistant, chat) — project is singleton and not
-routed through read_node."""
+"""Phase 3b-ii/iii: read_node / save_node / delete_node dispatchers
+resolve kind via the node index and route to the right per-kind
+methods. Covers all five indexed kinds (scene, lore, prompt,
+assistant, chat) — project is singleton and not routed through these
+unified entrypoints."""
 
 from __future__ import annotations
 
@@ -16,6 +17,9 @@ from app.models import (
     CreateChatSessionRequest,
     LoreEntry,
     PromptEntry,
+    SaveChatSessionRequest,
+    SaveLoreEntryRequest,
+    SavePromptEntryRequest,
     Scene,
 )
 from app.services.project_service import ProjectServiceError
@@ -76,6 +80,99 @@ class ReadNodeDispatchTests(unittest.TestCase):
     def test_unknown_node_id_raises_404(self) -> None:
         with self.assertRaises(ProjectServiceError) as ctx:
             global_service.read_node("scene_does_not_exist")
+        self.assertEqual(ctx.exception.status_code, 404)
+
+
+class SaveNodeDispatchTests(unittest.TestCase):
+    def setUp(self) -> None:
+        self.temp_dir = TemporaryDirectory()
+        self.root = Path(self.temp_dir.name) / "project"
+        global_service.__init__()
+        global_service.create_project(self.root, "Save Node Tests")
+
+    def tearDown(self) -> None:
+        self.temp_dir.cleanup()
+
+    def test_dispatches_to_chat_saver(self) -> None:
+        created = global_service.create_chat_session(
+            CreateChatSessionRequest(title="Save Chat Test")
+        )
+        request = SaveChatSessionRequest(
+            title="Renamed via unified path",
+            prompt_entry_id=created.prompt_entry_id,
+            assistant_id=created.assistant_id,
+            system_prompt=created.system_prompt,
+            pinned=created.pinned,
+            context_items=list(created.context_items),
+            messages=list(created.messages),
+        )
+        result = global_service.save_node(created.id, request)
+        self.assertIsInstance(result, ChatSession)
+        self.assertEqual(result.title, "Renamed via unified path")
+
+    def test_wrong_request_type_for_kind_is_422(self) -> None:
+        # Create a chat, then try to save it via a Lore request.
+        chat = global_service.create_chat_session(
+            CreateChatSessionRequest(title="Wrong-type Test")
+        )
+        bogus = SaveLoreEntryRequest(
+            title="Lore-shape on a chat",
+            entry_type="lore_note",
+            metadata={},
+            body_markdown="",
+            base_revision="",
+        )
+        with self.assertRaises(ProjectServiceError) as ctx:
+            global_service.save_node(chat.id, bogus)
+        self.assertEqual(ctx.exception.status_code, 422)
+
+    def test_unknown_node_id_is_404(self) -> None:
+        request = SavePromptEntryRequest(
+            title="Whatever",
+            entry_type="general",
+            body_markdown="",
+            metadata={},
+            inputs=[],
+            base_revision="",
+        )
+        with self.assertRaises(ProjectServiceError) as ctx:
+            global_service.save_node("prompt_does_not_exist", request)
+        self.assertEqual(ctx.exception.status_code, 404)
+
+
+class DeleteNodeDispatchTests(unittest.TestCase):
+    def setUp(self) -> None:
+        self.temp_dir = TemporaryDirectory()
+        self.root = Path(self.temp_dir.name) / "project"
+        global_service.__init__()
+        global_service.create_project(self.root, "Delete Node Tests")
+
+    def tearDown(self) -> None:
+        self.temp_dir.cleanup()
+
+    def test_dispatches_to_chat_deleter(self) -> None:
+        created = global_service.create_chat_session(
+            CreateChatSessionRequest(title="Delete Chat Test")
+        )
+        chat_path = self.root / "chats" / f"{created.id}.yaml"
+        self.assertTrue(chat_path.exists())
+        result = global_service.delete_node(created.id)
+        self.assertIsNone(result)
+        self.assertFalse(chat_path.exists())
+
+    def test_dispatches_to_lore_deleter(self) -> None:
+        created = global_service.create_lore_entry(
+            from_request_or_kwargs(title="Doomed", entry_type="lore_note")
+        )
+        before = {e.id for e in global_service.list_lore_entries().entries}
+        self.assertIn(created.id, before)
+        global_service.delete_node(created.id)
+        after = {e.id for e in global_service.list_lore_entries().entries}
+        self.assertNotIn(created.id, after)
+
+    def test_unknown_node_id_is_404(self) -> None:
+        with self.assertRaises(ProjectServiceError) as ctx:
+            global_service.delete_node("scene_nothing")
         self.assertEqual(ctx.exception.status_code, 404)
 
 

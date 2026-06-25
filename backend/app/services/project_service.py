@@ -2290,6 +2290,91 @@ class ProjectService:
             f"Unsupported node kind {entry.kind!r} for node {node_id}.", 422
         )
 
+    def save_node(
+        self,
+        node_id: str,
+        request: SaveSceneRequest
+        | SaveLoreEntryRequest
+        | SavePromptEntryRequest
+        | SaveAssistantEntryRequest
+        | SaveChatSessionRequest,
+    ) -> Scene | LoreEntry | PromptEntry | AssistantEntry | ChatSession:
+        """Unified node-save entrypoint (Phase 3b-iii).
+
+        Resolves the kind via the node index and dispatches to the
+        kind-specific saver. The caller passes the request type
+        matching the node's kind; mismatch is a 422. Per-kind
+        endpoints + savers are untouched and still work the same.
+        """
+        self._require_project()
+        index = self._build_node_index()
+        entry = index.by_id.get(node_id)
+        if entry is None:
+            raise ProjectServiceError(f"Node {node_id} does not exist.", 404)
+
+        def _mismatch() -> ProjectServiceError:
+            return ProjectServiceError(
+                f"Request type {type(request).__name__} does not match "
+                f"node {node_id} kind {entry.kind!r}.",
+                422,
+            )
+
+        if entry.kind == "scene":
+            if not isinstance(request, SaveSceneRequest):
+                raise _mismatch()
+            return self.save_scene(node_id, request)
+        if entry.kind == "lore":
+            if not isinstance(request, SaveLoreEntryRequest):
+                raise _mismatch()
+            return self.save_lore_entry(node_id, request)
+        if entry.kind == "prompt":
+            if not isinstance(request, SavePromptEntryRequest):
+                raise _mismatch()
+            return self.save_prompt_entry(node_id, request)
+        if entry.kind == "assistant":
+            if not isinstance(request, SaveAssistantEntryRequest):
+                raise _mismatch()
+            return self.save_assistant_entry(node_id, request)
+        if entry.kind == "chat":
+            if not isinstance(request, SaveChatSessionRequest):
+                raise _mismatch()
+            return self.save_chat_session(node_id, request)
+        raise ProjectServiceError(
+            f"Unsupported node kind {entry.kind!r} for node {node_id}.", 422
+        )
+
+    def delete_node(self, node_id: str) -> None:
+        """Unified node-delete entrypoint (Phase 3b-iii).
+
+        Resolves the kind via the node index and dispatches to the
+        kind-specific deleter. Returns None — callers fetch the
+        kind-specific list separately to refresh their UI. Per-kind
+        delete endpoints + deleters are untouched.
+        """
+        self._require_project()
+        index = self._build_node_index()
+        entry = index.by_id.get(node_id)
+        if entry is None:
+            raise ProjectServiceError(f"Node {node_id} does not exist.", 404)
+        if entry.kind == "scene":
+            self.delete_scene(node_id)
+            return
+        if entry.kind == "lore":
+            self.delete_lore_entry(node_id)
+            return
+        if entry.kind == "prompt":
+            self.delete_prompt_entry(node_id)
+            return
+        if entry.kind == "assistant":
+            self.delete_assistant_entry(node_id)
+            return
+        if entry.kind == "chat":
+            self.delete_chat_session(node_id)
+            return
+        raise ProjectServiceError(
+            f"Unsupported node kind {entry.kind!r} for node {node_id}.", 422
+        )
+
     def read_scene(self, scene_id: str) -> Scene:
         index = self._build_node_index()
         index_entry = index.by_id.get(scene_id)

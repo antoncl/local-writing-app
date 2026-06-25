@@ -13,13 +13,16 @@
   import { sanitizePastedHtml } from "./sanitizePastedHtml";
   import { ImplicitContextHighlight, REBUILD_META } from "./implicitContextHighlight";
   import CodeEditor from "./CodeEditor.svelte";
-  import ContextPickConfigEditor from "./ContextPickConfigEditor.svelte";
+  import NodePickerConfigEditor from "./NodePickerConfigEditor.svelte";
   import MetadataLongTextEditor from "./MetadataLongTextEditor.svelte";
   import ProviderTierPicker from "./ProviderTierPicker.svelte";
+  import NodeList from "./NodeList.svelte";
+  import NodeRow from "./NodeRow.svelte";
   import ReferencePicker from "./ReferencePicker.svelte";
   import SwatchPicker from "./SwatchPicker.svelte";
   import ColoredSelect from "./ColoredSelect.svelte";
   import { resolveColor } from "./colors";
+  import type { StructureNode } from "./types";
   import { api, HttpError } from "./api";
   import { formatCostEur, formatTokens } from "./money";
   import PromptInputField from "./PromptInputField.svelte";
@@ -164,6 +167,30 @@
     }
     const hue = ((hash % 360) + 360) % 360;
     return `hsl(${hue}, 62%, 48%)`;
+  }
+
+  // Resolve a backlink's color through the full chain: instance override
+  // → entry-type → parent chain → kind-default. Returns null only if
+  // every leg comes up empty (uncolored kind with no schema color).
+  function findStructureNodeBySceneId(node: StructureNode | null | undefined, sceneId: string): StructureNode | null {
+    if (!node) return null;
+    if (node.scene_id === sceneId) return node;
+    for (const child of node.children ?? []) {
+      const hit = findStructureNodeBySceneId(child, sceneId);
+      if (hit) return hit;
+    }
+    return null;
+  }
+
+  function backlinkSwatchHex(link: Backlink): string | null {
+    let instanceColor: string | null | undefined = null;
+    if (link.kind === "lore") {
+      const entry = loreEntries.find((e) => e.id === link.id);
+      instanceColor = typeof entry?.metadata?.color === "string" ? entry.metadata.color : null;
+    } else if (link.kind === "scene") {
+      instanceColor = findStructureNodeBySceneId(structure?.root, link.id)?.color ?? null;
+    }
+    return resolveColor(instanceColor, link.entry_type, link.kind, metadataSchema)?.hex ?? null;
   }
 
   // Spans tagged with a character lore id (`data-character="<lore-id>"`).
@@ -327,7 +354,7 @@
   type EntryInputDraft = {
     // Stable key for the {#each} block. Not persisted — generated on add /
     // seed so that reordering the drafts moves the keyed component along
-    // with the data (otherwise per-row internal state like ContextPick's
+    // with the data (otherwise per-row internal state like NodePicker's
     // collapsed flag stays anchored to the position, not the input).
     clientId: string;
     name: string;
@@ -341,7 +368,7 @@
     // Carries the per-input config for type === "context_pick". When the
     // user picks any other type this draft field is ignored at serialize
     // time (entryInputDraftsToCanonical drops it unless type matches).
-    contextPickConfig: import("./types").ContextPickConfig;
+    nodePickerConfig: import("./types").NodePickerConfig;
     nameDerived: boolean;
   };
   let entryInputDrafts: EntryInputDraft[] = [];
@@ -394,10 +421,10 @@
   function inputDefinitionToDraft(input: PromptInputDefinition): EntryInputDraft {
     const targetKindRaw = (input.target as { kind?: unknown } | null | undefined)?.kind;
     const targetEntryTypeRaw = (input.target as { entry_type?: unknown } | null | undefined)?.entry_type;
-    const contextPickConfig =
+    const nodePickerConfig =
       input.type === "context_pick" && input.target && typeof input.target === "object"
-        ? (input.target as unknown as import("./types").ContextPickConfig)
-        : ({ kinds: [], presets: [], multiple: true } as import("./types").ContextPickConfig);
+        ? (input.target as unknown as import("./types").NodePickerConfig)
+        : ({ kinds: [], presets: [], multiple: true } as import("./types").NodePickerConfig);
     return {
       clientId: nextInputDraftId(),
       name: input.name,
@@ -408,7 +435,7 @@
       required: Boolean(input.required),
       targetKind: targetKindRaw === "scene" || targetKindRaw === "lore" ? (targetKindRaw as "scene" | "lore") : "",
       targetEntryType: typeof targetEntryTypeRaw === "string" ? targetEntryTypeRaw : "",
-      contextPickConfig,
+      nodePickerConfig,
       nameDerived: false,
     };
   }
@@ -436,7 +463,7 @@
           // Serialize the rich config into `target`. Skip default / options
           // (they don't apply); skip targetKind / targetEntryType (those
           // are for entity_ref types).
-          out.target = d.contextPickConfig as unknown as Record<string, import("./types").MetadataValue>;
+          out.target = d.nodePickerConfig as unknown as Record<string, import("./types").MetadataValue>;
           return out;
         }
         if (d.defaultValue !== "") out.default = d.defaultValue;
@@ -484,18 +511,18 @@
         required: false,
         targetKind: "",
         targetEntryType: "",
-        contextPickConfig: { kinds: [], presets: [], multiple: true },
+        nodePickerConfig: { kinds: [], presets: [], multiple: true },
         nameDerived: true,
       },
     ];
     emitInputsChange();
   }
 
-  function updateEntryInputContextPickConfig(
+  function updateEntryInputNodePickerConfig(
     index: number,
-    config: import("./types").ContextPickConfig,
+    config: import("./types").NodePickerConfig,
   ): void {
-    updateEntryInput(index, { contextPickConfig: config });
+    updateEntryInput(index, { nodePickerConfig: config });
   }
 
   function removeEntryInput(index: number): void {
@@ -1306,7 +1333,7 @@
   }
 
   // Resolve a positional-string token against a context_pick input. Returns
-  // the serialized ContextPickRef-array JSON the dialog/runtime expects,
+  // the serialized NodePickerRef-array JSON the dialog/runtime expects,
   // or null if the name is ambiguous / unresolved (so the caller can fall
   // back to the dialog).
   function resolveContextPickToken(
@@ -3198,15 +3225,18 @@
                         />
                       </div>
                     {:else if field.type === "entity_ref" || field.type === "entity_ref_list"}
-                      <div class="metadata-field wide-field">
-                        <span class="metadata-field-label">{field.name}</span>
+                      <div class="metadata-field wide-field reference-field">
                         <ReferencePicker
                           {field}
                           value={metadataReferenceValue(field, metadata[fieldId])}
                           metadataSchema={metadataSchema}
                           excludeId={scene?.id ?? null}
                           ariaLabel={field.name}
+                          structure={structure}
+                          loreEntries={loreEntries}
+                          promptEntries={promptEntries}
                           on:change={(event) => updateMetadataField(fieldId, field, event.detail.value)}
+                          on:navigate={(event) => dispatch("navigate", event.detail)}
                         />
                       </div>
                     {:else if field.type === "multi_select" && field.options.length > 0}
@@ -3295,26 +3325,41 @@
           {/if}
         </section>
         <section class="scene-backlinks" aria-label="Incoming references">
-          <div class="backlinks-stripe">
-            <button class="backlinks-toggle" type="button" on:click={() => (backlinksExpanded = !backlinksExpanded)}>
-              <strong>{backlinksExpanded ? "Hide References" : "Show References"}</strong>
-              <span>{backlinks.length} incoming</span>
-            </button>
-          </div>
-          {#if backlinksExpanded}
-            <div class="backlinks-panel">
-              {#if backlinks.length === 0}
-                <div class="backlinks-empty">No incoming references.</div>
-              {:else}
+          <NodeRow
+            title="References"
+            groupHeader
+            collapsed={!backlinksExpanded}
+            onClick={() => (backlinksExpanded = !backlinksExpanded)}
+          >
+            {#snippet leading()}
+              <span class:collapsed={!backlinksExpanded} class="lore-group-caret" aria-hidden="true">▾</span>
+            {/snippet}
+            {#snippet trailing()}
+              <span class="group-count-pill">{backlinks.length}</span>
+            {/snippet}
+            {#snippet children()}
+              <NodeList mode="tree" isEmpty={backlinks.length === 0}>
+                {#snippet whenEmpty()}
+                  <p class="muted">No incoming references.</p>
+                {/snippet}
                 {#each backlinks as link (`${link.id}:${link.field_id}`)}
-                  <button class="backlink-row" type="button" on:click={() => dispatch("navigate", { id: link.id, kind: link.kind })}>
-                    <span class="backlink-title">{link.title}</span>
-                    <span class="backlink-field">{link.field_name}</span>
-                  </button>
+                  {@const pillHex = backlinkSwatchHex(link)}
+                  <NodeRow
+                    title={link.title}
+                    onClick={() => dispatch("navigate", { id: link.id, kind: link.kind })}
+                  >
+                    {#snippet trailing()}
+                      <span
+                        class="backlink-type-pill"
+                        class:has-color={!!pillHex}
+                        style={pillHex ? `--chip-base: ${pillHex}` : ""}
+                      >{metadataSchema?.entry_types[link.entry_type]?.name ?? link.entry_type ?? link.kind}</span>
+                    {/snippet}
+                  </NodeRow>
                 {/each}
-              {/if}
-            </div>
-          {/if}
+              </NodeList>
+            {/snippet}
+          </NodeRow>
         </section>
       {/if}
     {:else}
@@ -3582,13 +3627,13 @@
               on:dragstart={(e) => handleInputDragStart(e, index)}
               on:dragend={handleInputDragEnd}
             >⋮⋮</span>
-            <ContextPickConfigEditor
-              config={draft.contextPickConfig}
+            <NodePickerConfigEditor
+              config={draft.nodePickerConfig}
               metadataSchema={metadataSchema}
               label={draft.label}
               name={draft.name}
               required={draft.required}
-              on:change={(event) => updateEntryInputContextPickConfig(index, event.detail.config)}
+              on:change={(event) => updateEntryInputNodePickerConfig(index, event.detail.config)}
               on:labelchange={(event) => updateEntryInputLabel(index, event.detail.value)}
               on:namechange={(event) => updateEntryInputName(index, event.detail.value)}
               on:requiredchange={(event) => updateEntryInput(index, { required: event.detail.value })}

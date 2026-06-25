@@ -1,430 +1,266 @@
 <script lang="ts">
-  import { createEventDispatcher, onMount, tick } from "svelte";
-  import { api } from "./api";
-  import type { MetadataFieldDefinition, MetadataSchema, ReferenceCandidate } from "./types";
+  // ReferencePicker — metadata-field surface for entity_ref / entity_ref_list.
+  //
+  // Thin host around NodePicker (the dropdown) + NodeRow/NodeList
+  // (the selected-ref display). The field's schema target (kind +
+  // entry_type) becomes a NodePickerConfig; the embedded NodePicker
+  // does the picking, this component owns the cards above and the
+  // id<->ref translation.
+  //
+  // No server-side candidate listing — the in-memory data sources
+  // (structure, loreEntries, promptEntries) the rest of the UI uses are
+  // canonical. excludeId becomes NodePicker.excludeIds.
+
+  import { createEventDispatcher } from "svelte";
+  import NodePicker from "./NodePicker.svelte";
+  import NodeList from "./NodeList.svelte";
+  import NodeRow from "./NodeRow.svelte";
+  import { resolveColor } from "./colors";
+  import type {
+    NodePickerConfig,
+    NodePickerRef,
+    LoreEntrySummary,
+    MetadataFieldDefinition,
+    MetadataSchema,
+    PromptEntrySummary,
+    StructureDocument,
+    StructureNode,
+  } from "./types";
 
   export let field: MetadataFieldDefinition;
   export let value: string | string[] | null | undefined;
   export let metadataSchema: MetadataSchema | null = null;
   export let excludeId: string | null = null;
   export let ariaLabel: string = "";
+  // In-memory data sources used by the embedded NodePicker.
+  export let structure: StructureDocument | null = null;
+  export let loreEntries: LoreEntrySummary[] = [];
+  export let promptEntries: PromptEntrySummary[] = [];
 
-  const dispatch = createEventDispatcher<{ change: { value: string | string[] } }>();
+  const dispatch = createEventDispatcher<{
+    change: { value: string | string[] };
+    navigate: { id: string; kind: string };
+  }>();
+
+  let expanded = false;
 
   $: multi = field.type === "entity_ref_list";
-  $: selectedIds = toIdList(value);
+  $: targetKind = resolvePickerKind(field, metadataSchema);
   $: targetEntryType = field.target?.entry_type ?? "";
-  $: pickerKind = resolvePickerKind(field, metadataSchema);
 
-  function resolvePickerKind(currentField: MetadataFieldDefinition, schema: MetadataSchema | null) {
+  function resolvePickerKind(currentField: MetadataFieldDefinition, schema: MetadataSchema | null): NodePickerRef["kind"] | "" {
     const explicitKind = currentField.target?.kind;
-    if (explicitKind) return explicitKind;
+    if (explicitKind) return explicitKind as NodePickerRef["kind"];
     const entryTypeId = currentField.target?.entry_type;
     if (entryTypeId && schema?.entry_types[entryTypeId]) {
-      return schema.entry_types[entryTypeId].kind;
+      return schema.entry_types[entryTypeId].kind as NodePickerRef["kind"];
     }
     return "";
   }
 
-  type ResolvedCandidate = ReferenceCandidate & { displayTitle: string };
+  // NodePickerConfig: the field's single target becomes the kinds + (when
+  // pinned) entry_types whitelist. `multiple` follows the field type.
+  $: pickerConfig = ((): NodePickerConfig => {
+    if (!targetKind || targetKind === "preset") return { kinds: [], multiple: multi };
+    const kinds = [targetKind as Exclude<NodePickerRef["kind"], "preset">];
+    const cfg: NodePickerConfig = { kinds, multiple: multi };
+    if (targetEntryType) cfg.entry_types = { [targetKind]: [targetEntryType] };
+    return cfg;
+  })();
 
-  let resolved: Record<string, ResolvedCandidate> = {};
-  let resolveToken = 0;
-  let dropdownOpen = false;
-  let dropdownLoading = false;
-  let dropdownError = "";
-  let candidates: ReferenceCandidate[] = [];
-  let searchText = "";
-  let pickerEl: HTMLDivElement | null = null;
-  let dropdownEl: HTMLDivElement | null = null;
-  let searchInput: HTMLInputElement | null = null;
+  $: pickerExcludeIds = excludeId ? [excludeId] : [];
 
-  $: void refreshResolved(selectedIds);
+  // id ↔ NodePickerRef translation. Selected ids are persisted; NodePicker
+  // wants refs. Look up in the same in-memory sources the picker uses so the
+  // two views agree on title/entry_type. Missing ids surface a "missing"
+  // sentinel ref the card can render distinctly.
+  type ResolvedRef = NodePickerRef & { missing?: boolean };
+
+  $: selectedIds = toIdList(value);
+  $: sceneIndex = structure ? flattenScenesAll(structure.root) : new Map<string, { id: string; title: string; entry_type: string }>();
+  $: loreIndex = new Map(loreEntries.map((e) => [e.id, e] as const));
+  $: promptIndex = new Map(promptEntries.map((e) => [e.id, e] as const));
+  $: selectedRefs = selectedIds.map((id) => resolveRefById(id));
 
   function toIdList(input: string | string[] | null | undefined): string[] {
     if (input === null || input === undefined) return [];
-    if (Array.isArray(input)) {
-      return input.map((item) => String(item).trim()).filter(Boolean);
-    }
+    if (Array.isArray(input)) return input.map((item) => String(item).trim()).filter(Boolean);
     const trimmed = String(input).trim();
     return trimmed ? [trimmed] : [];
   }
 
-  async function refreshResolved(ids: string[]) {
-    const token = ++resolveToken;
-    const missing = ids.filter((id) => !resolved[id]);
-    if (missing.length === 0) {
-      pruneResolved(ids);
-      return;
-    }
-    try {
-      const response = await api.resolveReferences(missing);
-      if (token !== resolveToken) return;
-      const next = { ...resolved };
-      for (const candidate of response.candidates) {
-        next[candidate.id] = { ...candidate, displayTitle: candidate.found ? candidate.title : candidate.id };
+  function flattenScenesAll(node: StructureNode | null | undefined): Map<string, { id: string; title: string; entry_type: string }> {
+    const out = new Map<string, { id: string; title: string; entry_type: string }>();
+    const walk = (n: StructureNode) => {
+      if (n.type === "scene" && n.scene_id) {
+        const entryType = (n as unknown as { entry_type?: string }).entry_type ?? "scene";
+        out.set(n.scene_id, { id: n.scene_id, title: n.title, entry_type: entryType });
       }
-      resolved = next;
-      pruneResolved(ids);
-    } catch (error) {
-      console.warn("Failed to resolve references", error);
-    }
+      for (const child of n.children ?? []) walk(child);
+    };
+    if (node) walk(node);
+    return out;
   }
 
-  function pruneResolved(ids: string[]) {
-    const next: Record<string, ResolvedCandidate> = {};
-    for (const id of ids) {
-      if (resolved[id]) next[id] = resolved[id];
-    }
-    resolved = next;
-  }
-
-  function entryTypeLabel(entryTypeId: string) {
-    if (!entryTypeId) return "";
-    return metadataSchema?.entry_types[entryTypeId]?.name ?? entryTypeId;
+  function resolveRefById(id: string): ResolvedRef {
+    const scene = sceneIndex.get(id);
+    if (scene) return { id, kind: "scene", title: scene.title, entry_type: scene.entry_type };
+    const lore = loreIndex.get(id);
+    if (lore) return { id, kind: "lore", title: lore.title, entry_type: lore.entry_type };
+    const snippet = promptIndex.get(id);
+    if (snippet) return { id, kind: "snippet", title: snippet.title, entry_type: snippet.entry_type };
+    // Fall back to the picker's configured kind so a freshly-saved ref whose
+    // index hasn't refreshed yet still shows the right type-pill color.
+    const fallbackKind = (targetKind || "lore") as NodePickerRef["kind"];
+    return { id, kind: fallbackKind, title: id, entry_type: targetEntryType || undefined, missing: true };
   }
 
   function emit(nextIds: string[]) {
-    if (multi) {
-      dispatch("change", { value: nextIds });
-    } else {
-      dispatch("change", { value: nextIds[0] ?? "" });
-    }
+    dispatch("change", { value: multi ? nextIds : nextIds[0] ?? "" });
+  }
+
+  function handlePickerChange(event: CustomEvent<{ value: NodePickerRef[] }>) {
+    const nextIds = event.detail.value.map((ref) => ref.id);
+    emit(nextIds);
   }
 
   function removeId(id: string) {
-    emit(selectedIds.filter((candidate) => candidate !== id));
+    emit(selectedIds.filter((other) => other !== id));
   }
 
-  async function openDropdown() {
-    dropdownOpen = true;
-    dropdownLoading = true;
-    dropdownError = "";
-    searchText = "";
-    try {
-      const response = await api.listReferenceCandidates({
-        kind: pickerKind || undefined,
-        entry_type: targetEntryType || undefined,
-        exclude_id: excludeId || undefined,
-      });
-      candidates = response.candidates;
-    } catch (error) {
-      dropdownError = error instanceof Error ? error.message : String(error);
-      candidates = [];
-    } finally {
-      dropdownLoading = false;
-      await tick();
-      searchInput?.focus();
-      dropdownEl?.scrollIntoView({ block: "nearest" });
+  function entryTypeName(entryTypeId: string | undefined, kind: string): string {
+    if (entryTypeId && metadataSchema?.entry_types[entryTypeId]?.name) {
+      return metadataSchema.entry_types[entryTypeId].name;
     }
+    return entryTypeId || kind;
   }
 
-  function closeDropdown() {
-    dropdownOpen = false;
-    candidates = [];
-  }
-
-  function chooseCandidate(candidate: ReferenceCandidate) {
-    if (multi) {
-      if (!selectedIds.includes(candidate.id)) {
-        emit([...selectedIds, candidate.id]);
-      }
-    } else {
-      emit([candidate.id]);
-      closeDropdown();
+  // Resolve a selected ref's color via the full inheritance chain so the
+  // card's type-pill matches the backlinks-pill recipe.
+  function instanceColorFor(ref: ResolvedRef): string | null {
+    if (ref.kind === "lore") {
+      const entry = loreIndex.get(ref.id);
+      return typeof entry?.metadata?.color === "string" ? entry.metadata.color : null;
     }
-  }
-
-  $: filteredCandidates = filterCandidates(candidates, searchText, selectedIds);
-  $: groupedCandidates = groupByEntryType(filteredCandidates);
-
-  function filterCandidates(list: ReferenceCandidate[], query: string, selected: string[]) {
-    const needle = query.trim().toLowerCase();
-    const selectedSet = new Set(selected);
-    return list.filter((candidate) => {
-      if (multi && selectedSet.has(candidate.id)) return false;
-      if (!needle) return true;
-      return candidate.title.toLowerCase().includes(needle) || candidate.id.toLowerCase().includes(needle);
-    });
-  }
-
-  function groupByEntryType(list: ReferenceCandidate[]) {
-    const groups = new Map<string, ReferenceCandidate[]>();
-    for (const candidate of list) {
-      const bucket = groups.get(candidate.entry_type) ?? [];
-      bucket.push(candidate);
-      groups.set(candidate.entry_type, bucket);
+    if (ref.kind === "scene") {
+      return findStructureColor(structure?.root, ref.id);
     }
-    return Array.from(groups.entries()).map(([entryType, items]) => ({
-      entryType,
-      label: entryTypeLabel(entryType),
-      items,
-    }));
+    return null;
   }
 
-  function handleDocumentClick(event: MouseEvent) {
-    if (!dropdownOpen || !pickerEl) return;
-    if (event.target instanceof Node && !pickerEl.contains(event.target)) {
-      closeDropdown();
+  function findStructureColor(node: StructureNode | null | undefined, sceneId: string): string | null {
+    if (!node) return null;
+    if (node.scene_id === sceneId) return node.color ?? null;
+    for (const child of node.children ?? []) {
+      const hit = findStructureColor(child, sceneId);
+      if (hit) return hit;
     }
+    return null;
   }
 
-  function handleKeyDown(event: KeyboardEvent) {
-    if (event.key === "Escape" && dropdownOpen) {
-      event.preventDefault();
-      closeDropdown();
-    }
+  function pillHexFor(ref: ResolvedRef): string | null {
+    return resolveColor(instanceColorFor(ref), ref.entry_type, ref.kind, metadataSchema)?.hex ?? null;
   }
-
-  onMount(() => {
-    document.addEventListener("mousedown", handleDocumentClick);
-    document.addEventListener("keydown", handleKeyDown);
-    return () => {
-      document.removeEventListener("mousedown", handleDocumentClick);
-      document.removeEventListener("keydown", handleKeyDown);
-    };
-  });
 </script>
 
-<div class="reference-picker" aria-label={ariaLabel} bind:this={pickerEl}>
-  {#if selectedIds.length > 0}
-    <div class="reference-cards">
-      {#each selectedIds as id (id)}
-        {@const entry = resolved[id]}
-        <div class:missing={entry && !entry.found} class="reference-card">
-          <div class="reference-card-main">
-            <span class="reference-card-title">{entry ? entry.displayTitle : id}</span>
-            {#if entry && entry.found}
-              <span class="reference-card-type">{entryTypeLabel(entry.entry_type)}</span>
-              {#if entry.summary}
-                <span class="reference-card-summary">{entry.summary}</span>
-              {/if}
-            {:else if entry && !entry.found}
-              <span class="reference-card-summary">Missing reference</span>
-            {/if}
-          </div>
-          <button class="reference-card-remove" type="button" title="Remove" on:click={() => removeId(id)}>×</button>
-        </div>
-      {/each}
-    </div>
-  {/if}
-
-  {#if multi || selectedIds.length === 0}
-    <button class="reference-add-button" type="button" on:click={() => (dropdownOpen ? closeDropdown() : openDropdown())}>
-      {selectedIds.length === 0 ? "+ Add reference" : "+ Add another"}
-    </button>
-  {:else}
-    <button class="reference-add-button" type="button" on:click={() => (dropdownOpen ? closeDropdown() : openDropdown())}>
-      Change reference
-    </button>
-  {/if}
-
-  {#if dropdownOpen}
-    <div class="reference-dropdown" bind:this={dropdownEl}>
-      <input
-        bind:this={searchInput}
-        bind:value={searchText}
-        class="reference-search"
-        type="text"
-        placeholder="Search"
-        aria-label="Search references"
-      />
-      {#if dropdownLoading}
-        <div class="reference-empty">Loading…</div>
-      {:else if dropdownError}
-        <div class="reference-empty reference-error">{dropdownError}</div>
-      {:else if candidates.length === 0}
-        <div class="reference-empty">No {entryTypeLabel(targetEntryType) || pickerKind || "entries"} yet</div>
-      {:else if groupedCandidates.length === 0}
-        <div class="reference-empty">No matches</div>
-      {:else}
-        <div class="reference-results">
-          {#each groupedCandidates as group (group.entryType)}
-            <div class="reference-group-label">{group.label}</div>
-            {#each group.items as candidate (candidate.id)}
+<section class="reference-picker" aria-label={ariaLabel}>
+  <NodeRow
+    title={ariaLabel || "References"}
+    groupHeader
+    collapsed={!expanded}
+    onClick={() => (expanded = !expanded)}
+  >
+    {#snippet leading()}
+      <span class:collapsed={!expanded} class="lore-group-caret" aria-hidden="true">▾</span>
+    {/snippet}
+    {#snippet trailing()}
+      <span class="group-count-pill">{selectedRefs.length}</span>
+      <span class="reference-picker-trigger">
+        <NodePicker
+          hideChips
+          config={pickerConfig}
+          value={selectedRefs.filter((r) => !r.missing)}
+          excludeIds={pickerExcludeIds}
+          label={multi || selectedRefs.length === 0 ? "Add" : "Change"}
+          structure={structure}
+          loreEntries={loreEntries}
+          promptEntries={promptEntries}
+          metadataSchema={metadataSchema}
+          on:change={handlePickerChange}
+        />
+      </span>
+    {/snippet}
+    {#snippet children()}
+      <NodeList mode="tree" isEmpty={selectedRefs.length === 0}>
+        {#snippet whenEmpty()}
+          <p class="muted">No references.</p>
+        {/snippet}
+        {#each selectedRefs as ref (ref.id)}
+          {@const hex = ref.missing ? null : pillHexFor(ref)}
+          <NodeRow
+            title={ref.title}
+            stripeColor={ref.missing ? "#c98a8a" : null}
+            onClick={ref.missing ? undefined : () => dispatch("navigate", { id: ref.id, kind: ref.kind })}
+          >
+            {#snippet trailing()}
+              <span
+                class="ref-type-pill"
+                class:has-color={!!hex}
+                class:missing={ref.missing}
+                style={hex ? `--chip-base: ${hex}` : ""}
+              >{ref.missing ? "Missing" : entryTypeName(ref.entry_type, ref.kind)}</span>
               <button
-                class="reference-option"
                 type="button"
-                on:mousedown|preventDefault
-                on:click={() => chooseCandidate(candidate)}
-              >
-                <span class="reference-option-title">{candidate.title}</span>
-                {#if candidate.summary}
-                  <span class="reference-option-summary">{candidate.summary}</span>
-                {/if}
-              </button>
-            {/each}
-          {/each}
-        </div>
-      {/if}
-    </div>
-  {/if}
-</div>
+                class="row-action-delete"
+                aria-label="Remove {ref.title}"
+                title="Remove"
+                on:click={() => removeId(ref.id)}
+              >×</button>
+            {/snippet}
+          </NodeRow>
+        {/each}
+      </NodeList>
+    {/snippet}
+  </NodeRow>
+</section>
 
 <style>
   .reference-picker {
-    position: relative;
     display: flex;
     flex-direction: column;
     gap: 6px;
   }
 
-  .reference-cards {
-    display: flex;
-    flex-direction: column;
-    gap: 4px;
-  }
-
-  .reference-card {
-    display: flex;
-    align-items: flex-start;
-    gap: 6px;
-    padding: 6px 8px;
-    border: 1px solid #dfe6e3;
-    border-radius: 6px;
-    background: #f7faf8;
-  }
-
-  .reference-card.missing {
-    border-color: #c98a8a;
-    background: #fbeeee;
-  }
-
-  .reference-card-main {
-    display: flex;
-    flex-direction: column;
-    flex: 1;
-    min-width: 0;
-    gap: 2px;
-  }
-
-  .reference-card-title {
+  /* Matches the backlinks pill recipe so the two surfaces share a vocabulary.
+     `--chip-base` set inline; color-mix derives the tinted background +
+     border + text. Missing-ref override paints the pill in danger tones. */
+  .ref-type-pill {
+    display: inline-flex;
+    align-items: center;
+    padding: 1px 8px;
+    border: 1px solid var(--divider);
+    border-radius: 999px;
+    background: var(--inset);
+    color: var(--text-2);
+    font-size: 10.5px;
     font-weight: 600;
-    font-size: 13px;
-    color: #1f4d41;
-  }
-
-  .reference-card-type {
-    font-size: 11px;
-    text-transform: uppercase;
-    letter-spacing: 0.04em;
-    color: #65716c;
-  }
-
-  .reference-card-summary {
-    font-size: 12px;
-    color: #4a5450;
-    overflow: hidden;
-    text-overflow: ellipsis;
+    line-height: 1.5;
     white-space: nowrap;
   }
 
-  .reference-card-remove {
-    border: none;
-    background: transparent;
-    color: #65716c;
-    cursor: pointer;
-    font-size: 16px;
-    line-height: 1;
-    padding: 2px 6px;
+  .ref-type-pill.has-color {
+    background: color-mix(in srgb, var(--chip-base) 14%, white 86%);
+    border-color: color-mix(in srgb, var(--chip-base) 45%, var(--divider) 55%);
+    color: color-mix(in srgb, var(--chip-base) 65%, var(--text) 35%);
+  }
+  :global([data-theme="dark"]) .ref-type-pill.has-color {
+    background: color-mix(in srgb, var(--chip-base) 22%, black 78%);
+    color: color-mix(in srgb, var(--chip-base) 70%, var(--text) 30%);
   }
 
-  .reference-card-remove:hover {
-    color: #1f4d41;
-  }
-
-  .reference-add-button {
-    align-self: flex-start;
-    padding: 4px 10px;
-    font-size: 12px;
-    border: 1px dashed #b8c3be;
-    border-radius: 6px;
-    background: transparent;
-    color: #1f4d41;
-    cursor: pointer;
-  }
-
-  .reference-add-button:hover {
-    border-style: solid;
-    background: #edf6f2;
-  }
-
-  .reference-dropdown {
-    position: absolute;
-    top: calc(100% + 4px);
-    left: 0;
-    z-index: 10000;
-    width: min(320px, calc(100vw - 24px));
-    max-height: min(320px, calc(100vh - 24px));
-    display: flex;
-    flex-direction: column;
-    border: 1px solid #dfe6e3;
-    border-radius: 6px;
-    background: #ffffff;
-    box-shadow: 0 10px 24px rgba(36, 48, 43, 0.18);
-  }
-
-  .reference-search {
-    display: block;
-    margin: 8px;
-    padding: 6px 8px;
-    width: calc(100% - 16px);
-    box-sizing: border-box;
-    font-size: 13px;
-    border: 1px solid #dfe6e3;
-    border-radius: 4px;
-  }
-
-  .reference-results {
-    overflow: auto;
-    padding: 4px 0 8px;
-  }
-
-  .reference-group-label {
-    padding: 6px 12px 2px;
-    font-size: 10px;
-    text-transform: uppercase;
-    letter-spacing: 0.06em;
-    color: #65716c;
-  }
-
-  .reference-option {
-    display: flex;
-    flex-direction: column;
-    gap: 2px;
-    width: 100%;
-    padding: 6px 12px;
-    border: none;
-    background: transparent;
-    text-align: left;
-    cursor: pointer;
-  }
-
-  .reference-option:hover {
-    background: #edf6f2;
-  }
-
-  .reference-option-title {
-    font-size: 13px;
-    color: #1f4d41;
-  }
-
-  .reference-option-summary {
-    font-size: 11px;
-    color: #65716c;
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
-  }
-
-  .reference-empty {
-    padding: 12px;
-    font-size: 12px;
-    color: #65716c;
-    text-align: center;
-  }
-
-  .reference-empty.reference-error {
-    color: #a64a4a;
+  .ref-type-pill.missing {
+    background: var(--danger-soft);
+    border-color: var(--danger-border);
+    color: var(--danger);
   }
 </style>

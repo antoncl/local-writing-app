@@ -33,7 +33,7 @@ export function getSwatch(id: string | null | undefined): Swatch | null {
 // `color` field on EntryTypeDefinition that the resolver walks via the
 // parent chain. Until then, this table keeps the context picker's
 // chip/monogram colors identical to the legacy hardcoded values in
-// ContextPicker.svelte's `--ctx-k-*` block (now removed).
+// NodePicker.svelte's `--ctx-k-*` block (now removed).
 const KIND_DEFAULT_SWATCH: Record<string, string> = {
   scene: "forest",
   lore: "slate-blue",

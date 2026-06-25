@@ -27,9 +27,9 @@
   // stale. Flat rendering sidesteps that entirely.
 
   import { createEventDispatcher } from "svelte";
-  import type { ContextPickConfig, MetadataSchema, PromptInputType } from "./types";
+  import type { NodePickerConfig, MetadataSchema, PromptInputType } from "./types";
 
-  export let config: ContextPickConfig;
+  export let config: NodePickerConfig;
   export let metadataSchema: MetadataSchema | null = null;
   // Row-level fields (PR 2). The widget now owns the entire input row
   // when type is context_pick, instead of being slotted inside the
@@ -39,7 +39,7 @@
   export let required: boolean = false;
 
   const dispatch = createEventDispatcher<{
-    change: { config: ContextPickConfig };
+    change: { config: NodePickerConfig };
     labelchange: { value: string };
     namechange: { value: string };
     requiredchange: { value: boolean };
@@ -294,7 +294,7 @@
     writeSelection(entryKind, next);
   }
 
-  function emit(patch: Partial<ContextPickConfig>) {
+  function emit(patch: Partial<NodePickerConfig>) {
     dispatch("change", { config: { ...config, ...patch } });
   }
 

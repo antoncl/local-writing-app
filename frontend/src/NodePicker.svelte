@@ -1,18 +1,22 @@
 <script lang="ts">
-  // Runtime side of the context picker (v1).
+  // NodePicker — generalized picker for choosing nodes (scenes, lore,
+  // snippets, assistants, presets) constrained by a NodePickerConfig.
+  // Used by both prompt context_pick inputs and entity_ref metadata
+  // fields via ReferencePicker.
   //
   // Renders a "+ <label>" button. Clicking opens a constrained menu
-  // limited to the kinds / sub-types / presets the prompt author
-  // declared in the `config`. Picked items render as chips above the
-  // button with × buttons to remove.
+  // limited to the kinds / sub-types / presets the config declares.
+  // Picked items render as chips above the button with × buttons to
+  // remove (suppressed when `hideChips` is set — the caller renders
+  // them itself, e.g. ReferencePicker's NodeRow cards).
   //
   // Stores only refs (id, kind, title) — bodies are materialized
   // server-side at template render time. See docs/context-picker.md.
 
   import { createEventDispatcher } from "svelte";
   import type {
-    ContextPickConfig,
-    ContextPickRef,
+    NodePickerConfig,
+    NodePickerRef,
     LoreEntrySummary,
     MetadataSchema,
     PromptEntrySummary,
@@ -22,7 +26,7 @@
   import { resolveColor } from "./colors";
 
   // Resolve a ref's color via the full chain: instance (not carried on
-  // ContextPickRef today — that's a Phase 4 surface) → entry-type → parent
+  // NodePickerRef today — that's a Phase 4 surface) → entry-type → parent
   // chain → kind-default. Returns an inline CSS custom property string;
   // the chip / monogram CSS reads `--chip-base` and derives the soft tint
   // via color-mix(). Empty string falls back to the neutral chip.
@@ -31,8 +35,8 @@
     return swatch ? `--chip-base: ${swatch.hex};` : "";
   }
 
-  export let config: ContextPickConfig = {};
-  export let value: ContextPickRef[] = [];
+  export let config: NodePickerConfig = {};
+  export let value: NodePickerRef[] = [];
   export let label: string = "Context";
   export let structure: StructureDocument | null = null;
   export let loreEntries: LoreEntrySummary[] = [];
@@ -41,8 +45,17 @@
   // Compact mode trims chrome so the picker fits inside the Inputs
   // dialog's narrow column. Composer-level renders use the default.
   export let compact: boolean = false;
+  // Suppress the built-in chip display. Caller renders selected refs
+  // themselves (e.g. ReferencePicker hosts NodeRow cards above the
+  // picker). The `value` prop still flows in so the dropdown can mark
+  // already-picked items as disabled.
+  export let hideChips: boolean = false;
+  // Ids to drop from the candidate menu — used by ReferencePicker to
+  // hide the entry that owns the field (no self-references) without the
+  // caller having to filter the in-memory data sources.
+  export let excludeIds: string[] = [];
 
-  const dispatch = createEventDispatcher<{ change: { value: ContextPickRef[] } }>();
+  const dispatch = createEventDispatcher<{ change: { value: NodePickerRef[] } }>();
 
   type Category = "scene" | "lore" | "snippet" | "assistant";
 
@@ -73,15 +86,15 @@
     },
   };
 
-  function refKey(ref: ContextPickRef): string {
+  function refKey(ref: NodePickerRef): string {
     return `${ref.kind}:${ref.id}`;
   }
 
-  function isPicked(ref: ContextPickRef): boolean {
+  function isPicked(ref: NodePickerRef): boolean {
     return value.some((existing) => refKey(existing) === refKey(ref));
   }
 
-  function add(ref: ContextPickRef) {
+  function add(ref: NodePickerRef) {
     if (isPicked(ref)) return;
     const next = allowMultiple ? [...value, ref] : [ref];
     dispatch("change", { value: next });
@@ -102,7 +115,7 @@
   // ★ target marking: one scene per input may be flagged as the template's
   // `scene` binding (NC-style). Clicking ★ on a scene toggles it; clicking
   // ★ on a different scene moves the mark. Non-scene refs ignore the flag.
-  function toggleTarget(ref: ContextPickRef) {
+  function toggleTarget(ref: NodePickerRef) {
     if (ref.kind !== "scene" || !allowTargetMarking) return;
     const targetKey = refKey(ref);
     const willBeTarget = !ref.target;
@@ -215,7 +228,7 @@
     preset: "Preset",
   };
 
-  function chipLabel(ref: ContextPickRef): string {
+  function chipLabel(ref: NodePickerRef): string {
     if (ref.kind === "preset") return KIND_LABEL_SINGULAR.preset;
     const subType = ref.entry_type && ref.entry_type !== ref.kind ? ref.entry_type : null;
     const displayName = subType ? metadataSchema?.entry_types[subType]?.name : null;
@@ -226,7 +239,7 @@
   // shown alongside a result in the unified menu). Mirrors chipLabel
   // for selected items, but for a tree item we have the full ref-shape
   // info ready at render time.
-  function itemTag(kind: ContextPickRef["kind"], entryType?: string): string {
+  function itemTag(kind: NodePickerRef["kind"], entryType?: string): string {
     if (kind === "preset") return KIND_LABEL_SINGULAR.preset;
     const sub = entryType && entryType !== kind ? entryType : null;
     const displayName = sub ? metadataSchema?.entry_types[sub]?.name : null;
@@ -238,7 +251,7 @@
   // "Location" → L, custom "Faction" → F), falls back to entry_type id,
   // then to the kind initial. Stable + informative for user-defined
   // sub-types without an icon set.
-  function itemMonogram(kind: ContextPickRef["kind"], entryType?: string): string {
+  function itemMonogram(kind: NodePickerRef["kind"], entryType?: string): string {
     if (kind === "preset") return "P";
     const sub = entryType && entryType !== kind ? entryType : null;
     const displayName = sub ? metadataSchema?.entry_types[sub]?.name : null;
@@ -250,9 +263,13 @@
   // as a collapsible <details> with a header and a flat item list.
   // Groups with no items (after the search filter and config gating)
   // are dropped entirely.
+  $: excludeIdSet = new Set(excludeIds);
+
   $: visibleGroups = (() => {
-    type Group = { id: string; label: string; items: Array<{ ref: ContextPickRef; tag: string; monogram: string }> };
+    type Group = { id: string; label: string; items: Array<{ ref: NodePickerRef; tag: string; monogram: string }> };
     const groups: Group[] = [];
+    const dropExcluded = <T extends { ref: NodePickerRef }>(items: T[]): T[] =>
+      excludeIdSet.size === 0 ? items : items.filter((i) => !excludeIdSet.has(i.ref.id));
 
     const matchingPresets = allowedPresets.filter((id) => {
       const meta = PRESET_META[id] ?? { title: id, tooltip: "" };
@@ -274,41 +291,41 @@
       });
     }
 
-    if (allowedKinds.includes("scene") && filteredScenes.length > 0) {
-      groups.push({
-        id: "scenes",
-        label: "Scenes",
-        items: filteredScenes.map((s) => ({
+    if (allowedKinds.includes("scene")) {
+      const items = dropExcluded(
+        filteredScenes.map((s) => ({
           ref: { id: s.id, kind: "scene" as const, title: s.title, entry_type: s.entry_type },
           tag: itemTag("scene", s.entry_type),
           monogram: itemMonogram("scene", s.entry_type),
         })),
-      });
+      );
+      if (items.length > 0) groups.push({ id: "scenes", label: "Scenes", items });
     }
 
     if (allowedKinds.includes("lore")) {
-      const loreItems = loreGroups.flatMap((g) =>
-        g.entries.map((entry) => ({
-          ref: { id: entry.id, kind: "lore" as const, title: entry.title, entry_type: entry.entry_type },
-          tag: itemTag("lore", entry.entry_type),
-          monogram: itemMonogram("lore", entry.entry_type),
-        })),
+      const loreItems = dropExcluded(
+        loreGroups.flatMap((g) =>
+          g.entries.map((entry) => ({
+            ref: { id: entry.id, kind: "lore" as const, title: entry.title, entry_type: entry.entry_type },
+            tag: itemTag("lore", entry.entry_type),
+            monogram: itemMonogram("lore", entry.entry_type),
+          })),
+        ),
       );
       if (loreItems.length > 0) {
         groups.push({ id: "lore", label: "Lore", items: loreItems });
       }
     }
 
-    if (allowedKinds.includes("snippet") && snippetEntries.length > 0) {
-      groups.push({
-        id: "snippets",
-        label: "Snippets",
-        items: snippetEntries.map((s) => ({
+    if (allowedKinds.includes("snippet")) {
+      const items = dropExcluded(
+        snippetEntries.map((s) => ({
           ref: { id: s.id, kind: "snippet" as const, title: s.title, entry_type: s.entry_type },
           tag: itemTag("snippet", s.entry_type),
           monogram: itemMonogram("snippet", s.entry_type),
         })),
-      });
+      );
+      if (items.length > 0) groups.push({ id: "snippets", label: "Snippets", items });
     }
 
     return groups;
@@ -363,7 +380,8 @@
        relationship reads as a single object instead of a button with
        chips drifting above it. Empty bar persists with just the
        trigger so the affordance is always present. -->
-  <div class="ctx-context-bar">
+  <div class="ctx-context-bar" class:chips-hidden={hideChips}>
+    {#if !hideChips}
     {#each value as ref (refKey(ref))}
       <span
         class="ctx-chip"
@@ -396,6 +414,7 @@
         >×</button>
       </span>
     {/each}
+    {/if}
 
     <div class="ctx-picker-anchor">
       <button

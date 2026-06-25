@@ -6,12 +6,12 @@
   // and the prompt-preview inputs panel — keeps look-and-feel identical and
   // halves the maintenance surface for input types.
   import { createEventDispatcher } from "svelte";
-  import ContextPicker from "./ContextPicker.svelte";
+  import NodePicker from "./NodePicker.svelte";
   import PlainTextEditor from "./PlainTextEditor.svelte";
   import ReferencePicker from "./ReferencePicker.svelte";
   import type {
-    ContextPickConfig,
-    ContextPickRef,
+    NodePickerConfig,
+    NodePickerRef,
     LoreEntrySummary,
     MetadataSchema,
     PromptEntrySummary,
@@ -64,13 +64,13 @@
     return Array.isArray(v) ? JSON.stringify(v) : (v ?? "");
   }
 
-  function decodeContextPickValue(raw: string): ContextPickRef[] {
+  function decodeContextPickValue(raw: string): NodePickerRef[] {
     if (!raw) return [];
     try {
       const parsed = JSON.parse(raw);
       if (!Array.isArray(parsed)) return [];
       return parsed.filter(
-        (item): item is ContextPickRef =>
+        (item): item is NodePickerRef =>
           item && typeof item === "object" && typeof item.id === "string" && typeof item.kind === "string",
       );
     } catch {
@@ -122,11 +122,14 @@
     metadataSchema={metadataSchema}
     excludeId={excludeId}
     ariaLabel={ariaLabel ?? (input.label || input.name)}
+    structure={structure}
+    loreEntries={loreEntries}
+    promptEntries={promptEntries}
     on:change={(event) => dispatch("change", { value: encodeRefValue(event.detail.value) })}
   />
 {:else if input.type === "context_pick"}
-  <ContextPicker
-    config={(input.target ?? {}) as ContextPickConfig}
+  <NodePicker
+    config={(input.target ?? {}) as NodePickerConfig}
     value={decodeContextPickValue(value)}
     label={input.label || input.name || "Context"}
     structure={structure}

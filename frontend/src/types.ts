@@ -168,7 +168,7 @@ export type PromptInputType =
 // Shape carried in PromptInputDefinition.target when type === "context_pick".
 // Matches the backend convention documented in
 // docs/context-picker.md and the inline comment on models.py.
-export type ContextPickConfig = {
+export type NodePickerConfig = {
   kinds?: ("scene" | "lore" | "snippet" | "assistant")[];
   entry_types?: Record<string, string[]>;   // kind -> sub-type ids
   presets?: ("full_outline" | "full_text")[];
@@ -186,7 +186,7 @@ export type ContextPickConfig = {
 // ref marks it as the implicit `scene` binding for the prompt's
 // template (NC-style ★ target). Only one ref per input can be the
 // target; the picker UI enforces single-selection.
-export type ContextPickRef = {
+export type NodePickerRef = {
   id: string;
   kind: "scene" | "lore" | "snippet" | "assistant" | "preset";
   title: string;

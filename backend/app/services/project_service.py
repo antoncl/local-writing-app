@@ -2256,6 +2256,40 @@ class ProjectService:
         self._write_yaml(root / "manuscript.structure.yaml", self._structure_dump_for_storage(structure))
         return self.read_structure()
 
+    def read_node(
+        self, node_id: str
+    ) -> Scene | LoreEntry | PromptEntry | AssistantEntry | ChatSession:
+        """Unified node-read entrypoint.
+
+        Resolves the kind via the node index and dispatches to the
+        kind-specific reader. Backend half of the chat-as-node refactor
+        (decisions-node-editor-modularization, Phase 3b-ii) — internal
+        callers can now look up any node by id without knowing its kind
+        ahead of time. Per-kind endpoints (`/api/scenes/{id}`,
+        `/api/chats/{id}`, etc.) are untouched and still work the same.
+
+        Project nodes (the singleton `project.md`) are NOT routed here —
+        they're addressed via `read_project_node()` with no id.
+        """
+        self._require_project()
+        index = self._build_node_index()
+        entry = index.by_id.get(node_id)
+        if entry is None:
+            raise ProjectServiceError(f"Node {node_id} does not exist.", 404)
+        if entry.kind == "scene":
+            return self.read_scene(node_id)
+        if entry.kind == "lore":
+            return self.read_lore_entry(node_id)
+        if entry.kind == "prompt":
+            return self.read_prompt_entry(node_id)
+        if entry.kind == "assistant":
+            return self.read_assistant_entry(node_id)
+        if entry.kind == "chat":
+            return self.read_chat_session(node_id)
+        raise ProjectServiceError(
+            f"Unsupported node kind {entry.kind!r} for node {node_id}.", 422
+        )
+
     def read_scene(self, scene_id: str) -> Scene:
         index = self._build_node_index()
         index_entry = index.by_id.get(scene_id)

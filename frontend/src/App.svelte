@@ -6,6 +6,7 @@
   import NodeRow from "./NodeRow.svelte";
   import DirectoryPickerModal from "./DirectoryPickerModal.svelte";
   import NodeList from "./NodeList.svelte";
+  import NodePickerConfigEditor from "./NodePickerConfigEditor.svelte";
   import NewProjectModal from "./NewProjectModal.svelte";
   import MachineSettingsDialog from "./MachineSettingsDialog.svelte";
   import ConfirmModal from "./ConfirmModal.svelte";
@@ -44,6 +45,7 @@
     MetadataSchema,
     MetadataSchemaLayer,
     MetadataSchemaOverview,
+    NodePickerConfig,
     PromptContextStrategy,
     PromptEntryTypeExtras,
     PromptInputDefinition,
@@ -317,8 +319,7 @@
   let schemaFieldName = "";
   let schemaFieldType: MetadataFieldType = "text";
   let schemaFieldAllowMultiple = false;
-  let schemaFieldReferenceTarget: "scene" | "lore" = "lore";
-  let schemaFieldReferenceEntryType = "";
+  let schemaFieldPickerConfig: NodePickerConfig = { kinds: [], entry_types: {} };
   let schemaFieldOptions = "";
   // Per-option swatch ids for `select` fields, keyed by option value. Lets
   // authors color the status field (and any other select). Edits to the
@@ -369,7 +370,6 @@
   let collapsedLoreGroups: Record<string, boolean> = {};
   let collapsedPromptGroups: Record<string, boolean> = {};
   let collapsedAssistantGroups: Record<string, boolean> = {};
-  let collapsedSchemaFieldsByType: Record<string, boolean> = {};
   // Outline group-header collapse state, keyed by StructureNode.id.
   // Same shape as the other collapsed-* maps so the refactor stays
   // consistent across panes.
@@ -2139,14 +2139,6 @@ async function seedChatFromPromptEntry(
     return Boolean(metadataSchema?.entry_types[entryTypeId]?.fields.includes(fieldId));
   }
 
-  function toggleSchemaFieldsForType(entryTypeId: string) {
-    const fieldsCollapsed = collapsedSchemaFieldsByType[entryTypeId] ?? true;
-    collapsedSchemaFieldsByType = {
-      ...collapsedSchemaFieldsByType,
-      [entryTypeId]: !fieldsCollapsed,
-    };
-  }
-
   function buildNodeTypeOptions(schema: MetadataSchema | null): NodeTypeOption[] {
     const entryTypes = schema?.entry_types ?? {};
     const childrenByParent: Record<string, string[]> = {};
@@ -2280,8 +2272,9 @@ async function seedChatFromPromptEntry(
     schemaFieldReadonly = Boolean(metadataSchemaOverview?.field_sources[fieldId]?.built_in);
     schemaFieldReadonlyTypeLabel = "";
     schemaFieldAllowMultiple = field.type === "multi_select" || field.type === "entity_ref_list";
-    schemaFieldReferenceEntryType = field.target?.entry_type ?? "";
-    schemaFieldReferenceTarget = resolveReferenceKind(field.target, schemaFieldReferenceEntryType);
+    schemaFieldPickerConfig = field.picker_config
+      ? { kinds: [...(field.picker_config.kinds ?? [])], entry_types: { ...(field.picker_config.entry_types ?? {}) }, presets: [...(field.picker_config.presets ?? [])] }
+      : { kinds: ["lore"], entry_types: {} };
     schemaFieldType = schemaFieldReadonly
       ? field.type
       : field.type === "multi_select"
@@ -2312,24 +2305,13 @@ async function seedChatFromPromptEntry(
     schemaFieldReadonly = false;
     schemaFieldReadonlyTypeLabel = "";
     schemaFieldAllowMultiple = false;
-    schemaFieldReferenceTarget = "lore";
-    schemaFieldReferenceEntryType = "";
+    schemaFieldPickerConfig = { kinds: ["lore"], entry_types: {} };
     schemaFieldOptions = "";
     schemaFieldOptionColors = {};
     schemaFieldLayerId = layerId;
     schemaFieldEntryType = entryTypeId;
     schemaFieldPaneOpen = true;
     focusPane("schema_field");
-  }
-
-  function resolveReferenceKind(target: Record<string, string> | null | undefined, entryTypeId: string): "scene" | "lore" {
-    if (target?.kind === "scene") return "scene";
-    if (target?.kind === "lore") return "lore";
-    if (entryTypeId) {
-      const definition = metadataSchema?.entry_types[entryTypeId];
-      if (definition?.kind === "scene") return "scene";
-    }
-    return "lore";
   }
 
   function createSchemaTypeDraft(layerId = projectSchemaLayerId(), parentTypeId = "") {
@@ -2622,11 +2604,7 @@ async function seedChatFromPromptEntry(
         type: schemaFieldSaveType(),
         options: schemaFieldType === "select" ? options : [],
         ...(schemaFieldType === "entity_ref"
-          ? {
-              target: schemaFieldReferenceEntryType
-                ? { entry_type: schemaFieldReferenceEntryType }
-                : { kind: schemaFieldReferenceTarget },
-            }
+          ? { picker_config: schemaFieldPickerConfig }
           : {}),
       };
       const optionMigration = buildOptionMigration(previousField, nextField);
@@ -4446,12 +4424,14 @@ async function seedChatFromPromptEntry(
         <small>Drag a custom type onto another type to change its parent.</small>
       </div>
       <div class="schema-node-tree" aria-label={`${schemaContextHeading} tree`}>
-        {#each schemaNodeTypeTree as node}
-          {@render renderNodeTypeCard(node)}
-        {/each}
-        {#if schemaNodeTypeTree.length === 0}
-          <p class="muted">No detail types defined for this context.</p>
-        {/if}
+        <NodeList mode="tree" isEmpty={schemaNodeTypeTree.length === 0}>
+          {#snippet whenEmpty()}
+            <p class="muted">No detail types defined for this context.</p>
+          {/snippet}
+          {#each schemaNodeTypeTree as node (node.id)}
+            {@render renderNodeTypeCard(node)}
+          {/each}
+        </NodeList>
       </div>
     </div>
     <button class="pane-resize" type="button" aria-label="Resize Detail Types pane" on:keydown={(event) => handlePaneResizeKeydown(event, "schema")} on:mousedown={(event) => startPaneResize(event, "schema")}></button>
@@ -4609,28 +4589,14 @@ async function seedChatFromPromptEntry(
         </label>
       {/if}
       {#if schemaFieldType === "entity_ref" && !schemaFieldReadonly}
-        <label>
-          Reference target
-          <select
-            value={schemaFieldReferenceTarget}
-            on:change={(event) => {
-              schemaFieldReferenceTarget = event.currentTarget.value as "scene" | "lore";
-              schemaFieldReferenceEntryType = "";
-            }}
-          >
-            <option value="lore">Lore Entries</option>
-            <option value="scene">Scenes</option>
-          </select>
-        </label>
-        <label>
-          Narrow to type (optional)
-          <select bind:value={schemaFieldReferenceEntryType}>
-            <option value="">Any {schemaFieldReferenceTarget === "scene" ? "scene" : "lore"} entry</option>
-            {#each Object.entries(metadataSchema?.entry_types ?? {}).filter(([, definition]) => definition.kind === schemaFieldReferenceTarget) as [typeId, definition]}
-              <option value={typeId}>{definition.name}</option>
-            {/each}
-          </select>
-        </label>
+        <div class="schema-field-picker-config">
+          <NodePickerConfigEditor
+            mode="field"
+            config={schemaFieldPickerConfig}
+            metadataSchema={metadataSchema}
+            on:change={(event) => (schemaFieldPickerConfig = event.detail.config)}
+          />
+        </div>
       {/if}
       {#if schemaFieldType === "select" && (!schemaFieldReadonly || schemaFieldOptions)}
         <label>
@@ -5571,68 +5537,59 @@ async function seedChatFromPromptEntry(
 {#snippet renderNodeTypeCard(node: NodeTypeTreeNode)}
   {@const typeSource = schemaTypeSource(node.id)}
   {@const fieldEntries = fieldEntriesForEntryType(node.id)}
-  {@const fieldsCollapsed = collapsedSchemaFieldsByType[node.id] ?? true}
-  <section
-    class:active={selectedSchemaTypeId === node.id}
-    class="schema-node-card"
+  {@const typeSwatch = resolveColor(null, node.id, node.definition.kind, metadataSchema)}
+  {@const stripeHex = typeSwatch?.hex ?? null}
+  {@const childCount = fieldEntries.length + node.children.length}
+  <NodeRow
+    title={node.label}
+    detail={`${node.id}${node.definition.abstract ? " · Abstract" : ""}`}
+    groupHeader
+    stripeColor={stripeHex}
+    active={selectedSchemaTypeId === node.id}
+    ariaLabel={`${node.label} detail type — ${sourceBadgeLabel(typeSource)}`}
+    collapsed={childCount === 0}
     draggable={!typeSource?.built_in}
-    role="group"
-    aria-label={`${node.label} detail type`}
-    style={`--source-index: ${sourceLayerIndex(typeSource)}`}
+    onClick={() => openSchemaTypeDetail(node.id)}
     on:dragstart={() => {
       if (!typeSource?.built_in) startSchemaTypeDrag(node.id);
     }}
     on:dragend={() => (draggedSchemaTypeId = null)}
-    on:dragover|preventDefault
-    on:drop|preventDefault={() => dropSchemaTypeOnParent(node.id)}
+    on:dragover={(event) => {
+      if (draggedSchemaTypeId && draggedSchemaTypeId !== node.id) event.preventDefault();
+    }}
+    on:drop={(event) => {
+      event.preventDefault();
+      dropSchemaTypeOnParent(node.id);
+    }}
   >
-    <div class="schema-node-card-main">
-      <button class="schema-node-title" type="button" on:click={() => openSchemaTypeDetail(node.id)}>
-        <span>
-          <strong>{node.label}</strong>
-          <small>{node.id} · {node.definition.abstract ? "Abstract " : ""}Detail Type</small>
-        </span>
-      </button>
-      <span class="schema-source-badge" style={`--source-index: ${sourceLayerIndex(typeSource)}`}>{sourceBadgeLabel(typeSource)}</span>
-      <div class="schema-node-actions">
-        <button class="pin-button" type="button" on:click={() => createSchemaTypeDraft(schemaTypeLayerId || projectSchemaLayerId(), node.id)}>+ Type</button>
-        <button class="pin-button" type="button" on:click={() => createSchemaFieldDraft(schemaTypeLayerId || projectSchemaLayerId(), node.id)}>+ Field</button>
-        {#if !typeSource?.built_in}
-          <button class="pin-button schema-node-delete" type="button" title={`Delete ${node.label}`} aria-label={`Delete ${node.label}`} on:click={() => requestDeleteSchemaType(node.id)}>×</button>
-        {/if}
-      </div>
-    </div>
-    <section class="schema-node-fields" aria-label={`${node.label} fields`}>
-      <button class="schema-node-fields-toggle" type="button" aria-expanded={!fieldsCollapsed} on:click={() => toggleSchemaFieldsForType(node.id)}>
-        <span class:collapsed={fieldsCollapsed} class="lore-group-caret">▾</span>
-        <span>Fields</span>
-        <small>{fieldEntries.length}</small>
-      </button>
-      {#if !fieldsCollapsed}
-        <div class="schema-node-field-list">
-          {#each fieldEntries as [fieldId, field]}
-            {@const fieldSource = metadataSchemaOverview?.field_sources[fieldId]}
-            <button class="schema-node-field-row" type="button" on:click={() => openSchemaFieldDetail(fieldId, node.id)}>
-              <span>
-                <strong>{field.name}</strong>
-                <small>{fieldId} · {fieldTypeLabel(field.type)}</small>
-              </span>
-              <span class="schema-source-badge" style={`--source-index: ${sourceLayerIndex(fieldSource)}`}>{sourceBadgeLabel(fieldSource)}</span>
-            </button>
-          {/each}
-          {#if fieldEntries.length === 0}
-            <p class="muted">No local fields defined on this type.</p>
-          {/if}
-        </div>
+    {#snippet trailing()}
+      <span class="group-count-pill" title={`${fieldEntries.length} field${fieldEntries.length === 1 ? "" : "s"}, ${node.children.length} sub-type${node.children.length === 1 ? "" : "s"}`}>{childCount}</span>
+      <button class="row-action-add" type="button" title={`Add sub-type to ${node.label}`} aria-label={`Add sub-type to ${node.label}`} on:click={() => createSchemaTypeDraft(schemaTypeLayerId || projectSchemaLayerId(), node.id)}>+ Type</button>
+      <button class="row-action-add" type="button" title={`Add field to ${node.label}`} aria-label={`Add field to ${node.label}`} on:click={() => createSchemaFieldDraft(schemaTypeLayerId || projectSchemaLayerId(), node.id)}>+ Field</button>
+      {#if !typeSource?.built_in}
+        <button class="row-action-delete" type="button" title={`Delete ${node.label}`} aria-label={`Delete ${node.label}`} on:click={() => requestDeleteSchemaType(node.id)}>×</button>
       {/if}
-    </section>
-    {#if node.children.length > 0}
-      <div class="schema-node-children">
-        {#each node.children as child}
-          {@render renderNodeTypeCard(child)}
-        {/each}
-      </div>
-    {/if}
-  </section>
+    {/snippet}
+    {#snippet children()}
+      {#each fieldEntries as [fieldId, field] (fieldId)}
+        {@const fieldSource = metadataSchemaOverview?.field_sources[fieldId]}
+        <NodeRow
+          title={field.name}
+          ariaLabel={`Field ${fieldId} — ${sourceBadgeLabel(fieldSource)}`}
+          onClick={() => openSchemaFieldDetail(fieldId, node.id)}
+        >
+          {#snippet detailSlot()}
+            <small>{fieldId}</small>
+          {/snippet}
+          {#snippet trailing()}
+            <span class="schema-field-type-pill" title={fieldTypeLabel(field.type)}>{field.type}</span>
+          {/snippet}
+        </NodeRow>
+      {/each}
+      {#each node.children as child (child.id)}
+        {@render renderNodeTypeCard(child)}
+      {/each}
+    {/snippet}
+  </NodeRow>
 {/snippet}
 

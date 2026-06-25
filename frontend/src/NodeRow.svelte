@@ -209,6 +209,18 @@
     background: var(--surface);
   }
 
+  /* Tree-mode stripe — same color-band signature as the card variant
+     ("this whole thing belongs to X"), expressed as an inset box-shadow
+     so dense rows can carry the cue without padding bloat. Per the
+     widget taxonomy: Stripe attaches to whichever list row holds it,
+     regardless of card vs tree. Padding shifts the row's content right
+     of the band so it never overlaps the title text. */
+  .node-row.variant-tree.has-row-stripe {
+    box-shadow: inset 4px 0 0 0 var(--row-stripe);
+    border-radius: 6px;
+    padding-left: 8px;
+  }
+
   /* The middle (click / static title) area takes all remaining space. */
   .node-row > .node-row-click,
   .node-row > .node-row-text {

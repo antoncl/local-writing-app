@@ -45,27 +45,19 @@
   let expanded = false;
 
   $: multi = field.type === "entity_ref_list";
-  $: targetKind = resolvePickerKind(field, metadataSchema);
-  $: targetEntryType = field.target?.entry_type ?? "";
-
-  function resolvePickerKind(currentField: MetadataFieldDefinition, schema: MetadataSchema | null): NodePickerRef["kind"] | "" {
-    const explicitKind = currentField.target?.kind;
-    if (explicitKind) return explicitKind as NodePickerRef["kind"];
-    const entryTypeId = currentField.target?.entry_type;
-    if (entryTypeId && schema?.entry_types[entryTypeId]) {
-      return schema.entry_types[entryTypeId].kind as NodePickerRef["kind"];
-    }
-    return "";
-  }
-
-  // NodePickerConfig: the field's single target becomes the kinds + (when
-  // pinned) entry_types whitelist. `multiple` follows the field type.
-  $: pickerConfig = ((): NodePickerConfig => {
-    if (!targetKind || targetKind === "preset") return { kinds: [], multiple: multi };
-    const kinds = [targetKind as Exclude<NodePickerRef["kind"], "preset">];
-    const cfg: NodePickerConfig = { kinds, multiple: multi };
-    if (targetEntryType) cfg.entry_types = { [targetKind]: [targetEntryType] };
-    return cfg;
+  // The field's authored picker_config drives the dropdown directly.
+  // `multiple` is derived from the field type (entity_ref → false,
+  // entity_ref_list → true) and overrides any cfg.multiple — the field
+  // type is the authority on cardinality, not the picker config.
+  $: pickerConfig = ({ ...(field.picker_config ?? {}), multiple: multi } as NodePickerConfig);
+  // First configured kind, used when computing fallback ref hydration
+  // for selected ids the in-memory indices don't resolve to a known
+  // entry (e.g. a freshly-saved id whose index hasn't refreshed).
+  $: targetKind = (pickerConfig.kinds?.[0] ?? "") as NodePickerRef["kind"] | "";
+  $: targetEntryType = (() => {
+    if (!targetKind) return "";
+    const allowed = pickerConfig.entry_types?.[targetKind] ?? [];
+    return allowed.length === 1 ? allowed[0] : "";
   })();
 
   $: pickerExcludeIds = excludeId ? [excludeId] : [];

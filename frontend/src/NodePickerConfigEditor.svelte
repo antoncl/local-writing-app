@@ -31,6 +31,13 @@
 
   export let config: NodePickerConfig;
   export let metadataSchema: MetadataSchema | null = null;
+  // Where the editor is mounted. "prompt" (default) is the legacy
+  // surface — the widget owns the entire input row (label / id / type
+  // / required) and offers presets + scene-binding (prompt-only
+  // features). "field" embeds it inside the schema field-detail pane:
+  // host owns the row-level fields, presets + scene-binding are
+  // hidden, the tree is always expanded.
+  export let mode: "prompt" | "field" = "prompt";
   // Row-level fields (PR 2). The widget now owns the entire input row
   // when type is context_pick, instead of being slotted inside the
   // generic .prompt-input-grid in NodeEditor.
@@ -52,10 +59,11 @@
   // to collapsed so a fresh prompt doesn't dump the full picker tree on
   // the author up-front; the row's summary chips communicate intent and
   // the chevron invites expansion when they need to configure it.
-  let collapsed = true;
+  let collapsed = mode === "prompt";
   function toggleWidgetCollapse() {
     collapsed = !collapsed;
   }
+  $: if (mode === "field") collapsed = false;
 
   // Match NodeEditor's generic-grid type select. When the user
   // changes type away from context_pick, the parent's {#if} branch
@@ -405,7 +413,8 @@
   })(config, pickedCountByKind);
 </script>
 
-<div class="ctx-config" class:collapsed>
+<div class="ctx-config" class:collapsed class:embedded={mode === "field"}>
+  {#if mode === "prompt"}
   <div class="ctx-row-header">
     <button
       type="button"
@@ -504,7 +513,9 @@
         {/each}
       {/if}
     </div>
-  {:else}
+  {/if}
+  {/if}
+  {#if !collapsed}
     <div class="ctx-body">
   {#if chips.length > 0}
     <section class="ctx-section">
@@ -598,6 +609,7 @@
     </div>
   </section>
 
+  {#if mode === "prompt"}
   <section class="ctx-section">
     <header class="ctx-section-label">Whole-document presets</header>
     <div class="ctx-preset-pills">
@@ -616,8 +628,9 @@
       {/each}
     </div>
   </section>
+  {/if}
 
-  {#if scenesPickable}
+  {#if scenesPickable && mode === "prompt"}
     <section class="ctx-section">
       <header class="ctx-section-label">Scene binding</header>
       <div class="ctx-scene-binding">

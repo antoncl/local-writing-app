@@ -150,7 +150,11 @@ export type MetadataFieldDefinition = {
   name: string;
   type: MetadataFieldType;
   options: SelectOption[];
-  target?: Record<string, string> | null;
+  // For entity_ref / entity_ref_list — constrains which nodes the
+  // picker offers. Shape mirrors PromptInputDefinition.target for
+  // context_pick inputs, so entity_ref fields and prompt picks share
+  // the same NodePicker config vocabulary.
+  picker_config?: NodePickerConfig | null;
   computed?: Record<string, string> | null;
 };
 

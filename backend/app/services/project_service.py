@@ -370,27 +370,27 @@ DEFAULT_METADATA_SCHEMA: dict[str, Any] = {
         "characters": {
             "name": "Characters",
             "type": "entity_ref_list",
-            "target": {"entry_type": "character"},
+            "picker_config": {"kinds": ["lore"], "entry_types": {"lore": ["character"]}},
         },
         "pov": {
             "name": "POV",
             "type": "entity_ref",
-            "target": {"entry_type": "character"},
+            "picker_config": {"kinds": ["lore"], "entry_types": {"lore": ["character"]}},
         },
         "locations": {
             "name": "Locations",
             "type": "entity_ref_list",
-            "target": {"entry_type": "place"},
+            "picker_config": {"kinds": ["lore"], "entry_types": {"lore": ["place"]}},
         },
         "home_place": {
             "name": "Home Place",
             "type": "entity_ref",
-            "target": {"entry_type": "place"},
+            "picker_config": {"kinds": ["lore"], "entry_types": {"lore": ["place"]}},
         },
         "related_entries": {
             "name": "Related Entries",
             "type": "entity_ref_list",
-            "target": {"kind": "lore"},
+            "picker_config": {"kinds": ["lore"]},
         },
         "word_count": {
             "name": "Word Count",
@@ -420,7 +420,7 @@ DEFAULT_METADATA_SCHEMA: dict[str, Any] = {
         "preferred_assistant_id": {
             "name": "Preferred assistant",
             "type": "entity_ref",
-            "target": {"kind": "assistant"},
+            "picker_config": {"kinds": ["assistant"]},
         },
         "author": {"name": "Author", "type": "text"},
         "language": {"name": "Language", "type": "text"},
@@ -3656,11 +3656,13 @@ class ProjectService:
             target = node_index.by_id.get(item)
             if target is None:
                 return False
-            expected_kind = field.target.get("kind") if field.target else None
-            if expected_kind and target.kind != expected_kind:
+            cfg = field.picker_config
+            if cfg is None:
+                return True
+            if cfg.kinds and target.kind not in cfg.kinds:
                 return False
-            expected_entry_type = field.target.get("entry_type") if field.target else None
-            if expected_entry_type and target.entry_type != expected_entry_type:
+            allowed = cfg.entry_types.get(target.kind, []) if cfg.entry_types else []
+            if allowed and target.entry_type not in allowed:
                 return False
             return True
 
@@ -3792,12 +3794,14 @@ class ProjectService:
         target = node_index.by_id.get(node_id)
         if not target:
             return [f"{label} metadata field {field_id} references unknown node {node_id}."]
-        expected_kind = field.target.get("kind") if field.target else None
-        if expected_kind and target.kind != expected_kind:
-            return [f"{label} metadata field {field_id} references {node_id} but expected kind {expected_kind}."]
-        expected_entry_type = field.target.get("entry_type") if field.target else None
-        if expected_entry_type and target.entry_type != expected_entry_type:
-            return [f"{label} metadata field {field_id} references {node_id} but expected entry_type {expected_entry_type}."]
+        cfg = field.picker_config
+        if cfg is None:
+            return []
+        if cfg.kinds and target.kind not in cfg.kinds:
+            return [f"{label} metadata field {field_id} references {node_id} but expected one of kinds {sorted(cfg.kinds)}."]
+        allowed = cfg.entry_types.get(target.kind, []) if cfg.entry_types else []
+        if allowed and target.entry_type not in allowed:
+            return [f"{label} metadata field {field_id} references {node_id} but expected entry_type in {sorted(allowed)}."]
         return []
 
     def _computed_scene_metadata(

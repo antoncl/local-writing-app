@@ -1175,8 +1175,9 @@ class MetadataValidationTests(unittest.TestCase):
         self.assertEqual(schema.fields["aliases"].type, "multi_select")
         self.assertEqual(schema.fields["tags"].type, "tags")
         self.assertEqual(schema.fields["related_entries"].type, "entity_ref_list")
-        self.assertEqual(schema.fields["related_entries"].target, {"kind": "lore"})
-        self.assertEqual(schema.fields["characters"].target, {"entry_type": "character"})
+        self.assertEqual(schema.fields["related_entries"].picker_config.kinds, ["lore"])
+        self.assertEqual(schema.fields["related_entries"].picker_config.entry_types, {})
+        self.assertEqual(schema.fields["characters"].picker_config.entry_types, {"lore": ["character"]})
 
     def test_metadata_rejects_fields_not_bound_to_entry_type(self) -> None:
         entry = self.service.create_lore_entry(CreateLoreEntryRequest(title="Seren", entry_type="character"))
@@ -1379,7 +1380,7 @@ class MetadataValidationTests(unittest.TestCase):
                 ),
             )
 
-        with self.assertRaisesRegex(ProjectServiceError, "expected entry_type place"):
+        with self.assertRaisesRegex(ProjectServiceError, "expected entry_type in \\['place'\\]"):
             self.service.save_lore_entry(
                 character.id,
                 SaveLoreEntryRequest(

@@ -7,7 +7,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
-from fastapi import FastAPI, HTTPException, Query
+from fastapi import FastAPI, HTTPException, Query, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse
 
@@ -458,6 +458,77 @@ def save_chat_session(chat_id: str, request: SaveChatSessionRequest) -> ChatSess
 def delete_chat_session(chat_id: str) -> ChatSessionList:
     with translate_errors():
         return service.delete_chat_session(chat_id)
+
+
+# --- Unified node endpoints (Phase 3c) ---
+#
+# Thin HTTP shim over the unified service-layer dispatchers
+# (read_node / save_node / delete_node). The per-kind endpoints
+# (`/api/scenes/{id}`, `/api/chats/{id}`, etc.) keep working — these
+# are an additional path that lets callers operate on any node by id
+# without knowing its kind. The PUT validator picks the right
+# Pydantic save-request model based on the indexed kind.
+
+
+_SAVE_NODE_REQUEST_BY_KIND: dict[str, type] = {
+    "scene": SaveSceneRequest,
+    "lore": SaveLoreEntryRequest,
+    "prompt": SavePromptEntryRequest,
+    "assistant": SaveAssistantEntryRequest,
+    "chat": SaveChatSessionRequest,
+}
+
+
+@app.get("/api/nodes/{node_id}")
+def get_node(node_id: str):
+    """Dispatches by kind via the node index. Returns the kind-specific
+    Pydantic model — Scene | LoreEntry | PromptEntry | AssistantEntry |
+    ChatSession. No response_model declared because FastAPI can't pick
+    a single model for a heterogeneous union; the underlying readers
+    each emit their canonical shape."""
+    with translate_errors():
+        return service.read_node(node_id)
+
+
+@app.put("/api/nodes/{node_id}")
+async def put_node(node_id: str, request: Request):
+    """Unified save. Looks up the node's kind first so we can validate
+    the JSON body against the right per-kind save-request model, then
+    forwards to the matching saver. Wrong-shape requests come back as
+    a Pydantic 422 just like the per-kind endpoints."""
+    kind = service.lookup_node_kind(node_id)
+    if kind is None:
+        raise HTTPException(status_code=404, detail=f"Node {node_id} does not exist.")
+    request_model = _SAVE_NODE_REQUEST_BY_KIND.get(kind)
+    if request_model is None:
+        raise HTTPException(
+            status_code=422,
+            detail=f"Unsupported node kind {kind!r} for node {node_id}.",
+        )
+    raw = await request.json()
+    try:
+        parsed = request_model.model_validate(raw)
+    except Exception as exc:
+        # Bubble Pydantic validation as a 422 with the message — matches
+        # FastAPI's default behavior for typed request bodies.
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    # Assistant requests carry the small temperature-range check the
+    # per-kind endpoint runs; mirror it here so the unified path
+    # rejects out-of-range temperatures the same way.
+    if kind == "assistant":
+        err = _validate_assistant_temperature(parsed.metadata)
+        if err:
+            raise HTTPException(status_code=400, detail=err)
+    with translate_errors():
+        return service.save_node(node_id, parsed)
+
+
+@app.delete("/api/nodes/{node_id}", status_code=204)
+def delete_node(node_id: str):
+    """Unified delete. Returns 204 No Content — callers refresh their
+    own kind-specific list separately."""
+    with translate_errors():
+        service.delete_node(node_id)
 
 
 @app.get("/api/todos", response_model=TodoDocument)

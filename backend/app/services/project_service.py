@@ -2256,6 +2256,15 @@ class ProjectService:
         self._write_yaml(root / "manuscript.structure.yaml", self._structure_dump_for_storage(structure))
         return self.read_structure()
 
+    def lookup_node_kind(self, node_id: str) -> str | None:
+        """Cheap kind lookup that doesn't read the node file. Returns None
+        if the id isn't indexed. Used by the unified HTTP endpoints to
+        pick the right per-kind request validator before parsing PUT
+        bodies (Phase 3c)."""
+        self._require_project()
+        entry = self._build_node_index().by_id.get(node_id)
+        return entry.kind if entry else None
+
     def read_node(
         self, node_id: str
     ) -> Scene | LoreEntry | PromptEntry | AssistantEntry | ChatSession:

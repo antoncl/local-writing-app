@@ -331,6 +331,25 @@ DEFAULT_METADATA_SCHEMA: dict[str, Any] = {
             "has_body": True,
             "color": "violet",
         },
+        "chat_session": {
+            # Chat-as-node base type (Phase 3 of the NodeEditor
+            # modularization). Concrete (not abstract) because chats are
+            # instantiated directly via the chats pane — Phase 3a only
+            # registers the type here; ChatSession storage at
+            # <project>/chats/<id>.yaml stays the source of truth until
+            # Phase 3b migrates it onto the Node CRUD path. The fields
+            # users edit on a chat (prompt binding, assistant, system
+            # brief, message history, journal) live on the ChatSession
+            # Python model, not the metadata schema — none are declared
+            # here. body_shape="chat" wires the future ChatBodyView once
+            # Phase 4 ships.
+            "name": "Chat",
+            "kind": "chat",
+            "fields": ["color"],
+            "has_body": False,
+            "body_shape": "chat",
+            "color": "graphite",
+        },
     },
     "fields": {
         "status": {
@@ -945,9 +964,9 @@ class ProjectService:
         entry_type_id = request.entry_type_id.strip()
         if not re.fullmatch(r"[A-Za-z][A-Za-z0-9_]*", entry_type_id):
             raise ProjectServiceError("Node type ID must start with a letter and contain only letters, numbers, and underscores.", 422)
-        if request.entry_type.kind not in {"scene", "lore", "prompt", "assistant", "project"}:
+        if request.entry_type.kind not in {"scene", "lore", "prompt", "assistant", "project", "chat"}:
             raise ProjectServiceError(
-                "Node type kind must be scene, lore, prompt, assistant, or project.", 422
+                "Node type kind must be scene, lore, prompt, assistant, project, or chat.", 422
             )
         if request.entry_type.prompt is not None and request.entry_type.kind != "prompt":
             raise ProjectServiceError("Prompt configuration is only valid on prompt node types.", 422)

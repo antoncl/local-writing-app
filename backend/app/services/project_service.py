@@ -148,22 +148,10 @@ DEFAULT_METADATA_SCHEMA: dict[str, Any] = {
             "fields": ["aliases", "tags", "related_entries", "color"],
             "color": "slate-blue",
         },
-        "scene_entry": {
-            # Intermediate abstract for lore entries that *appear in
-            # scenes* — characters, locations, items. The
-            # `appears_in_scenes` reference list lives here so the three
-            # in-scene kinds inherit it uniformly; lore_note stays on
-            # the bare lore_entry base since notes aren't scene-bound.
-            "name": "Scene entry",
-            "kind": "lore",
-            "parent": "lore_entry",
-            "abstract": True,
-            "fields": ["appears_in_scenes"],
-        },
         "character": {
             "name": "Character",
             "kind": "lore",
-            "parent": "scene_entry",
+            "parent": "lore_entry",
             "fields": [],
         },
         "place": {
@@ -173,13 +161,13 @@ DEFAULT_METADATA_SCHEMA: dict[str, Any] = {
             # resolving — id is a backend identifier, display is UX.
             "name": "Location",
             "kind": "lore",
-            "parent": "scene_entry",
+            "parent": "lore_entry",
             "fields": [],
         },
         "item": {
             "name": "Item",
             "kind": "lore",
-            "parent": "scene_entry",
+            "parent": "lore_entry",
             "fields": [],
         },
         "lore_note": {
@@ -398,11 +386,6 @@ DEFAULT_METADATA_SCHEMA: dict[str, Any] = {
             "name": "Home Place",
             "type": "entity_ref",
             "target": {"entry_type": "place"},
-        },
-        "appears_in_scenes": {
-            "name": "Appears In Scenes",
-            "type": "entity_ref_list",
-            "target": {"kind": "scene"},
         },
         "related_entries": {
             "name": "Related Entries",
@@ -2207,8 +2190,10 @@ class ProjectService:
         entry_type = raw_entry_type
         metadata = self._normalise_metadata(front_matter.get("metadata"), path)
         schema = self.read_metadata_schema()
-        # Heal dangling references (e.g. POV character was deleted) before
-        # validation; see _strip_dangling_references for the rationale.
+        # Heal stale fields (retired by a schema change) and dangling
+        # references (e.g. POV character was deleted) before validation;
+        # see _strip_unknown_metadata_fields / _strip_dangling_references.
+        metadata = self._strip_unknown_metadata_fields(metadata, entry_type, schema)
         metadata = self._strip_dangling_references(metadata, schema, index)
         metadata_errors = self._validate_scene_metadata(node_id, entry_type, status, metadata, schema, index)
         if metadata_errors:
@@ -2426,8 +2411,10 @@ class ProjectService:
         entry_type = raw_entry_type
         metadata = self._normalise_metadata(front_matter.get("metadata"), path)
         schema = self.read_metadata_schema()
-        # Heal dangling references before validation — see
-        # _strip_dangling_references for the rationale.
+        # Heal stale fields (retired by a schema change) and dangling
+        # references before validation — see _strip_unknown_metadata_fields
+        # / _strip_dangling_references for the rationale.
+        metadata = self._strip_unknown_metadata_fields(metadata, entry_type, schema)
         metadata = self._strip_dangling_references(metadata, schema, index)
         metadata_errors = self._validate_lore_entry_metadata(node_id, entry_type, metadata, schema, index)
         if metadata_errors:
@@ -3621,6 +3608,33 @@ class ProjectService:
                 errors.extend(self._validate_reference_target(label, field_id, item, field, node_index))
             return errors
         return []
+
+    def _strip_unknown_metadata_fields(
+        self,
+        metadata: dict[str, Any],
+        entry_type: str,
+        schema: MetadataSchema,
+    ) -> dict[str, Any]:
+        """Return a copy of ``metadata`` with any keys that no longer
+        correspond to a schema-defined field (or that aren't allowed for
+        this entry_type) silently dropped. Used on READ paths so an entry
+        stays openable after a schema change retires a field — the
+        persisted file keeps the stale key until the user next saves the
+        entry, at which point the cleaned metadata is written back. Mirrors
+        ``_strip_dangling_references`` for field-level rather than value-
+        level staleness.
+        """
+
+        entry_type_definition = schema.entry_types.get(entry_type)
+        allowed = set(entry_type_definition.fields) if entry_type_definition else set()
+        cleaned: dict[str, Any] = {}
+        for field_id, value in metadata.items():
+            if field_id not in schema.fields:
+                continue
+            if allowed and field_id not in allowed:
+                continue
+            cleaned[field_id] = value
+        return cleaned
 
     def _strip_dangling_references(
         self,

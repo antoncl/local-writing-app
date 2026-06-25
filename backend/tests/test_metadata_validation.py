@@ -426,7 +426,7 @@ class MetadataValidationTests(unittest.TestCase):
         self.assertFalse(any(child.id == act_node.id for child in refreshed.root.children))
 
     def test_cascade_delete_preview_counts_descendants_and_backlinks(self) -> None:
-        from app.models import CreateStructureNodeRequest
+        from app.models import CreateStructureNodeRequest, SaveSceneRequest
 
         self.service.create_structure_node(
             CreateStructureNodeRequest(title="Act One", entry_type="act")
@@ -440,24 +440,46 @@ class MetadataValidationTests(unittest.TestCase):
         chapter_node = next(grandchild for grandchild in refreshed_act.children if grandchild.type == "chapter")
         scene_a = self.service.create_scene(self._make_create_scene("Arrival", parent_id=chapter_node.id))
         seren = self.service.create_lore_entry(CreateLoreEntryRequest(title="Seren", entry_type="character"))
-        self.service.save_lore_entry(
-            seren.id,
-            SaveLoreEntryRequest(
-                title="Seren",
-                body_markdown=seren.body_markdown,
-                base_revision=seren.revision,
-                entry_type="character",
-                metadata={"appears_in_scenes": [scene_a.id]},
+        # Outside-the-cascade entry that references one of the about-to-be-
+        # deleted scenes — surfaces in the preview's backlinks. Uses the
+        # scene's `characters` field pointing back to Seren so the cascade
+        # picks up the inbound reference from the lore side.
+        bystander = self.service.create_scene(
+            self._make_create_scene("Bystander", parent_id=chapter_node.id)
+        )
+        self.service.save_scene(
+            scene_a.id,
+            SaveSceneRequest(
+                title=scene_a.title,
+                body_markdown=scene_a.body_markdown,
+                base_revision=scene_a.revision,
+                metadata={"characters": [seren.id]},
+            ),
+        )
+        # Bystander stays — and references Seren. After the act is deleted,
+        # Seren is orphaned only by the scene_a deletion; bystander does not
+        # reference any descendant of the act being deleted, so it should
+        # NOT appear as a backlink.
+        self.service.save_scene(
+            bystander.id,
+            SaveSceneRequest(
+                title=bystander.title,
+                body_markdown=bystander.body_markdown,
+                base_revision=bystander.revision,
+                metadata={"characters": [seren.id]},
             ),
         )
 
         preview = self.service.cascade_delete_preview(act_node.id)
 
-        self.assertEqual(preview.descendant_scene_count, 1)
+        self.assertEqual(preview.descendant_scene_count, 2)
         self.assertEqual(preview.descendant_container_count, 1)
-        self.assertEqual(len(preview.backlinks), 1)
-        self.assertEqual(preview.backlinks[0].id, seren.id)
-        self.assertEqual(preview.backlinks[0].field_id, "appears_in_scenes")
+        # No entries outside the cascade point at the deleted scenes — the
+        # default schema's lore→scene field was removed (`appears_in_scenes`
+        # collapsed into `related_entries`-style modelling), so nothing
+        # surfaces here. Coverage for the backlinks-listing branch lives in
+        # the lore cascade tests below.
+        self.assertEqual(preview.backlinks, [])
 
     def test_cascade_delete_preview_skips_internal_backlinks(self) -> None:
         from app.models import CreateStructureNodeRequest
@@ -773,7 +795,7 @@ class MetadataValidationTests(unittest.TestCase):
         self.assertIn("tension", schema.fields)
         self.assertEqual(
             schema.entry_types["scene"].fields,
-            ["number", "summary", "status", "pov", "characters", "locations", "word_count", "mood", "tension"],
+            ["number", "summary", "color", "status", "pov", "characters", "locations", "dynamics", "word_count", "mood", "tension"],
         )
 
         scene = self.service.read_scene(self.scene_id)
@@ -1142,14 +1164,13 @@ class MetadataValidationTests(unittest.TestCase):
         self.assertNotIn("appears_in_scenes", schema.entry_types["lore_note"].fields)
         self.assertIn("aliases", schema.entry_types["lore_note"].fields)
         self.assertIn("tags", schema.entry_types["lore_note"].fields)
-        self.assertEqual(schema.entry_types["lore_entry"].own_fields, ["aliases", "tags", "related_entries"])
-        # Test fixture adds home_place to character (see _add_home_place_to_character_schema);
-        # the seed itself only ships appears_in_scenes. Layer-merge appends
-        # fixture fields after seed fields, so the resolved order is
-        # appears_in_scenes (from seed) then home_place (from fixture layer).
+        self.assertEqual(schema.entry_types["lore_entry"].own_fields, ["aliases", "tags", "related_entries", "color"])
+        # Test fixture adds home_place to character (see _add_home_place_to_character_schema).
+        # The seed ships character with no own fields; the fixture layer is
+        # the sole source of character's own field list.
         self.assertEqual(
             schema.entry_types["character"].own_fields,
-            ["appears_in_scenes", "home_place"],
+            ["home_place"],
         )
         self.assertEqual(schema.fields["aliases"].type, "multi_select")
         self.assertEqual(schema.fields["tags"].type, "tags")
@@ -1281,7 +1302,7 @@ class MetadataValidationTests(unittest.TestCase):
                     "aliases": ["Ren"],
                     "tags": ["crew"],
                     "home_place": place.id,
-                    "appears_in_scenes": [self.scene_id],
+                    "related_entries": [place.id],
                 },
             ),
         )

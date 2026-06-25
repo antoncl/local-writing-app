@@ -6,6 +6,7 @@
   import FieldsOnlyView from "./FieldsOnlyView.svelte";
   import CodeBodyView from "./CodeBodyView.svelte";
   import ProseBodyView from "./ProseBodyView.svelte";
+  import ChatBodyView from "./ChatBodyView.svelte";
   import type { EmbeddedTodo } from "./ProseBodyView.svelte";
   import { coerceInputValue, type EntryInputDraft } from "./promptInputs";
   import { api } from "./api";
@@ -56,6 +57,7 @@
 
 
   let proseBodyView: ProseBodyView | null = null;
+  let chatBodyView: ChatBodyView | null = null;
   let loadedSceneId: string | null = null;
   let rawBody = "";
   let lastEmittedRawBody = "";
@@ -702,6 +704,22 @@
       on:embedded-todos={(event) => dispatch("embeddedTodos", event.detail)}
       on:open-chat={(event) => dispatch("open-chat", event.detail)}
       on:request-inputs-dialog={handleRequestInputsDialog}
+    />
+  {/if}
+  {#if bodyShape === "chat"}
+    <ChatBodyView
+      bind:this={chatBodyView}
+      {scene}
+      {metadataSchema}
+      {promptEntries}
+      {assistantEntries}
+      {loreEntries}
+      {structure}
+      {defaultAssistantId}
+      {implicitContextMatcher}
+      on:body-change={emitChange}
+      on:focus={() => dispatch("focus")}
+      on:open-chat={(event) => dispatch("open-chat", event.detail)}
     />
   {/if}
 

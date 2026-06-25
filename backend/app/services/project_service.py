@@ -1541,7 +1541,7 @@ class ProjectService:
             if isinstance(parent_id, str) and parent_id in entry_types:
                 parent_definition = resolved.get(parent_id)
                 if isinstance(parent_definition, dict):
-                    for inheritable in ("display_template", "has_body", "body_editor", "body_language", "default_body", "default_inputs", "color"):
+                    for inheritable in ("display_template", "has_body", "body_editor", "body_language", "body_shape", "default_body", "default_inputs", "color"):
                         if inheritable not in next_entry_type and inheritable in parent_definition:
                             next_entry_type[inheritable] = parent_definition[inheritable]
                     parent_prompt = parent_definition.get("prompt")

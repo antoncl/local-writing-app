@@ -230,6 +230,12 @@ class EntryTypeDefinition(BaseModel):
     has_body: bool = True
     body_editor: Literal["wysiwyg", "code"] = "wysiwyg"
     body_language: Literal["markdown", "jinja2", "plain"] = "markdown"
+    # The body shape this entry type opens with in NodeEditor. None →
+    # fall back to (none if !has_body, code if body_editor=="code",
+    # else prose). Explicit values let new shapes (chat) declare
+    # themselves without retrofitting has_body/body_editor semantics.
+    # See decisions-node-editor-modularization + decisions-node-editor-body-spec.
+    body_shape: Literal["prose", "code", "chat", "none"] | None = None
     # Starter content for new entries of this type. Used by
     # create_prompt_entry as the initial body_markdown so authoring a
     # `roleplay` (or any future type with conventions worth showing off)

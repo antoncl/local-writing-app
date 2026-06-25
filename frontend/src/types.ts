@@ -224,6 +224,7 @@ export type PromptEntryTypeExtras = {
 
 export type EntryBodyEditor = "wysiwyg" | "code";
 export type EntryBodyLanguage = "markdown" | "jinja2" | "plain";
+export type BodyShape = "prose" | "code" | "chat" | "none";
 
 export type EntryTypeDefinition = {
   name: string;
@@ -236,6 +237,9 @@ export type EntryTypeDefinition = {
   has_body?: boolean;
   body_editor?: EntryBodyEditor;
   body_language?: EntryBodyLanguage;
+  // None → fall back to (none if !has_body, code if body_editor=="code",
+  // else prose). See decisions-node-editor-body-spec.
+  body_shape?: BodyShape | null;
   // Type-level palette swatch id. Inherits from parent unless set.
   // Resolves to a hex via the machine palette. See colors.ts.
   color?: string | null;

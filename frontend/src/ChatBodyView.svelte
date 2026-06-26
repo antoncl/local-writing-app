@@ -95,6 +95,15 @@
   let promptPickerEl: HTMLDivElement | null = null;
   let promptPickerBtnEl: HTMLButtonElement | null = null;
 
+  // ---- 👁 preview popover state ----
+  // The popover shows the rendered system_prompt — what the assistant
+  // actually sees ahead of the conversation. For freeform chats that
+  // IS the brief; for prompt-bound chats it's the post-render template.
+  // Pure diagnostic — no fetch, just read-through of chatSystemPrompt.
+  let chatPreviewPopoverOpen = false;
+  let chatPreviewBtnEl: HTMLButtonElement | null = null;
+  let chatPreviewPopoverEl: HTMLDivElement | null = null;
+
   // ---- declared-inputs state (filled before first send for prompt-bound chats) ----
   // Per-input draft values keyed by input.name. JSON-encoded for list-shaped
   // types so storage stays string-uniform. Hydrated from session.inputs;
@@ -296,12 +305,22 @@
     await persistActiveChat();
   }
 
+  function toggleChatPreviewPopover() {
+    chatPreviewPopoverOpen = !chatPreviewPopoverOpen;
+  }
+
   function handleDocumentClick(event: MouseEvent) {
-    if (!promptPickerOpen) return;
     const target = event.target as Node;
-    if (promptPickerEl?.contains(target)) return;
-    if (promptPickerBtnEl?.contains(target)) return;
-    closeChatPromptPicker();
+    if (promptPickerOpen) {
+      const insidePicker =
+        promptPickerEl?.contains(target) || promptPickerBtnEl?.contains(target);
+      if (!insidePicker) closeChatPromptPicker();
+    }
+    if (chatPreviewPopoverOpen) {
+      const insidePreview =
+        chatPreviewPopoverEl?.contains(target) || chatPreviewBtnEl?.contains(target);
+      if (!insidePreview) chatPreviewPopoverOpen = false;
+    }
   }
 
   function assistantTitle(assistantId: string): string {
@@ -791,6 +810,48 @@
           {/each}
         </select>
       </label>
+      <div class="cbv-preview-anchor">
+        <button
+          type="button"
+          class="cbv-preview-icon"
+          class:cbv-preview-icon-active={chatPreviewPopoverOpen}
+          bind:this={chatPreviewBtnEl}
+          title="Preview what's sent — system message + attached context"
+          aria-label="Preview what's sent"
+          aria-expanded={chatPreviewPopoverOpen}
+          on:click={toggleChatPreviewPopover}
+        >👁</button>
+        {#if chatPreviewPopoverOpen}
+          <div
+            class="cbv-preview-popover"
+            role="dialog"
+            aria-label="Preview what's sent"
+            bind:this={chatPreviewPopoverEl}
+          >
+            <header class="cbv-preview-popover-header">
+              <strong>Preview</strong>
+              <small>system message + attached context</small>
+              <button
+                type="button"
+                class="cbv-preview-popover-close"
+                aria-label="Close"
+                on:click={() => (chatPreviewPopoverOpen = false)}
+              >×</button>
+            </header>
+            <div class="cbv-preview-popover-body">
+              {#if chatSystemPrompt && chatSystemPrompt.trim()}
+                <pre class="cbv-preview-content">{chatSystemPrompt}</pre>
+              {:else}
+                <p class="cbv-meta">No system message will be sent. The model sees only the chat history.</p>
+              {/if}
+              <p class="cbv-meta cbv-preview-hint">
+                This is the system message and context the assistant receives on the next turn.
+                Chat history above is also sent. Composer text becomes the next user message.
+              </p>
+            </div>
+          </div>
+        {/if}
+      </div>
     </div>
 
     {#if !chatPromptEntryId}
@@ -1126,6 +1187,84 @@
   }
   .cbv-assistant-select[disabled] {
     cursor: not-allowed;
+  }
+
+  .cbv-preview-anchor {
+    position: relative;
+    display: inline-flex;
+    align-items: center;
+  }
+  .cbv-preview-icon {
+    width: 26px;
+    height: 26px;
+    border-radius: 50%;
+    border: 1px solid var(--color-border, #d0d4dc);
+    background: var(--color-surface, #ffffff);
+    cursor: pointer;
+    font-size: 14px;
+    line-height: 1;
+    padding: 0;
+  }
+  .cbv-preview-icon-active {
+    background: color-mix(in srgb, var(--color-accent, #6366f1) 12%, transparent);
+    border-color: var(--color-accent, #6366f1);
+  }
+  .cbv-preview-popover {
+    position: absolute;
+    top: 100%;
+    right: 0;
+    margin-top: 6px;
+    z-index: 40;
+    width: 360px;
+    max-height: 60vh;
+    background: var(--color-surface, #ffffff);
+    border: 1px solid var(--color-border, #d0d4dc);
+    border-radius: 8px;
+    box-shadow: 0 6px 24px rgba(0, 0, 0, 0.10);
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+  }
+  .cbv-preview-popover-header {
+    display: flex;
+    align-items: baseline;
+    gap: 8px;
+    padding: 6px 8px;
+    border-bottom: 1px solid var(--color-border, #d0d4dc);
+    background: var(--color-surface-muted, #f3f5fa);
+    font-size: 12px;
+  }
+  .cbv-preview-popover-header strong {
+    font-size: 13px;
+  }
+  .cbv-preview-popover-header small {
+    color: var(--color-text-muted, #5b6172);
+    flex: 1;
+  }
+  .cbv-preview-popover-close {
+    background: transparent;
+    border: none;
+    cursor: pointer;
+    font-size: 14px;
+    line-height: 1;
+    padding: 0 4px;
+    color: var(--color-text-muted, #5b6172);
+  }
+  .cbv-preview-popover-body {
+    padding: 8px;
+    overflow-y: auto;
+    flex: 1;
+  }
+  .cbv-preview-content {
+    margin: 0 0 8px;
+    font-family: var(--font-mono, ui-monospace, "JetBrains Mono", monospace);
+    font-size: 12px;
+    line-height: 1.4;
+    white-space: pre-wrap;
+    word-wrap: break-word;
+  }
+  .cbv-preview-hint {
+    font-style: italic;
   }
 
   .cbv-brief-label {

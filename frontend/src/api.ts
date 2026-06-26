@@ -506,6 +506,12 @@ export const api = {
   readNode<T = unknown>(nodeId: string) {
     return request<T>(`/nodes/${encodeURIComponent(nodeId)}`);
   },
+  saveNode<T = unknown>(nodeId: string, payload: unknown) {
+    return request<T>(`/nodes/${encodeURIComponent(nodeId)}`, {
+      method: "PUT",
+      body: JSON.stringify(payload),
+    });
+  },
   listChatSessions() {
     return request<ChatSessionList>("/chats");
   },

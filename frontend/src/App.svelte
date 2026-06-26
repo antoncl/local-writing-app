@@ -5038,7 +5038,7 @@ async function seedChatFromPromptEntry(
     <div class="pane-content chat-panel">
       {#if activeChatId}
         <details class="dev-chat-body-view-mount">
-          <summary>Phase 4b preview: ChatBodyView (read-only, via /api/nodes)</summary>
+          <summary>Phase 4c preview: ChatBodyView (send/persist via /api/nodes/{id})</summary>
           <ChatBodyView
             scene={({ id: activeChatId, title: activeChatTitle, entry_type: "chat_session", metadata: {}, computed_metadata: {} } as unknown as EditableDocument)}
             {metadataSchema}

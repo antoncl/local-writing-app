@@ -1,28 +1,40 @@
 <!--
   ChatBodyView — body-region slot for entry types whose body_shape is
-  "chat". Phase 4b: read-only ownership slice — ChatBodyView fetches the
-  ChatSession via the unified /api/nodes/{id} path, renders the composer
-  chips + messages list + cost-total line. No send/clear yet; the
-  message input, brief, preview popover, inputs strip, journal scope,
-  cost-estimate strip, TTL strip, and the send/stream orchestration
-  land in subsequent slices (see [[outstanding-work-2026-06-25-phase-3]]).
+  "chat". Owns its own ChatSession state.
 
-  Until Phase 4d switches the open-chat flow to the editor pane, this
-  view is only reachable through the `?dev_chat_view=<chatId>` flag in
-  App.svelte (used to visually verify the unified-path render).
+  Phases shipped here:
+    4a — skeleton + body-shape routing
+    4b — read-only fetch via /api/nodes/{id} + composer chips + messages
+    4c-send — message input, send/stream, persist via unified PUT
+
+  Still deferred (Phase 4c+):
+    - Brief textarea (freeform mode) + preview popover
+    - Inputs strip (declared prompt inputs)
+    - Journal scope strip + cost-estimate + TTL strips
+    - Prompt picker dropdown + assistant change while unlocked
+    - Body-spec visual pass (10-region layout)
+
+  Until Phase 4d switches the editor-pane open-chat flow, this view is
+  reachable only through the `details.dev-chat-body-view-mount` panel
+  in App.svelte's chat pane (used to compare unified vs bespoke).
 -->
 <script lang="ts">
-  import { createEventDispatcher } from "svelte";
+  import { createEventDispatcher, tick } from "svelte";
   import { api } from "./api";
+  import PlainTextEditor from "./PlainTextEditor.svelte";
   import { renderChatContent } from "./chatMessageRender";
   import { formatCostEur } from "./money";
   import type {
     AssistantEntrySummary,
+    ChatMessage,
     ChatSession,
+    ChatSessionJournalEntry,
+    ChatSessionMessage,
     EditableDocument,
     LoreEntrySummary,
     MetadataSchema,
     PromptEntrySummary,
+    SaveChatSessionRequest,
     StructureDocument,
   } from "./types";
 
@@ -41,23 +53,41 @@
     "open-chat": { entry: PromptEntrySummary; inputs: Record<string, unknown>; sceneId: string | null; assistantId: string };
   }>();
 
-  // Suppress unused-prop warnings for props that Phase 4c+ will wire in.
-  // (Inputs strip, journal scope, preview popover, implicit-context highlight
-  // on the future message input — none of those exist yet in this slice.)
+  const DEFAULT_CHAT_SYSTEM_PROMPT =
+    "You are a brainstorming partner for a fiction writer. " +
+    "Be concise, propose options, and don't write prose unless asked.";
+
+  // Suppress unused-prop warnings for props Phase 4c+ wires in (preview
+  // popover, inputs strip, future journal-scope rendering).
   $: void metadataSchema;
   $: void loreEntries;
   $: void structure;
-  $: void implicitContextMatcher;
-  $: void dispatch;
 
   let chatSession: ChatSession | null = null;
   let loading = false;
   let loadError: string | null = null;
   let loadedChatId: string | null = null;
 
-  // Fetch the chat through the unified node-CRUD shim. Reactive on
-  // scene.id so the view stays in sync when the editor pane swaps to
-  // a different chat node.
+  // ---- chat working state (hydrated from chatSession on load) ----
+  let chatHistory: ChatMessage[] = [];
+  let chatRunning = false;
+  let chatError: string | null = null;
+  let chatLastMeta: { provider: string; model: string; latency_ms: number } | null = null;
+  let chatInput = "";
+  let chatScrollEl: HTMLDivElement | null = null;
+  let chatSystemPrompt = DEFAULT_CHAT_SYSTEM_PROMPT;
+  let chatPromptEntryId = "";
+  let chatAssistantId = "";
+  let activeChatTitle = "Untitled chat";
+  let activeChatPinned = false;
+  let activeChatJournal: ChatSessionJournalEntry[] = [];
+  let activeChatJournalFreshIds = new Set<string>();
+  let activeChatCacheWriteTimes: Record<string, string> = {};
+  // V2 cost accounting — pluck the delta off the streaming `done` event
+  // and forward it to the backend on the next persistActiveChat.
+  let pendingTurnCost: number | null = null;
+  let pendingTurnCacheWriteSlots: string[] = [];
+
   $: void maybeLoadChat(scene?.id ?? null);
 
   async function maybeLoadChat(chatId: string | null): Promise<void> {
@@ -65,6 +95,7 @@
       chatSession = null;
       loadError = null;
       loadedChatId = null;
+      resetChatState();
       return;
     }
     if (chatId === loadedChatId) return;
@@ -72,17 +103,65 @@
     loadError = null;
     try {
       const session = await api.readNode<ChatSession>(chatId);
-      // Guard against late returns when the user already switched chats.
       if (scene?.id !== chatId) return;
       chatSession = session;
       loadedChatId = chatId;
+      applyChatSession(session);
     } catch (err) {
       if (scene?.id !== chatId) return;
       loadError = (err as Error).message || "Couldn't load chat.";
       chatSession = null;
+      resetChatState();
     } finally {
       if (scene?.id === chatId) loading = false;
     }
+  }
+
+  function resetChatState() {
+    chatHistory = [];
+    chatRunning = false;
+    chatError = null;
+    chatLastMeta = null;
+    chatInput = "";
+    chatSystemPrompt = DEFAULT_CHAT_SYSTEM_PROMPT;
+    chatPromptEntryId = "";
+    chatAssistantId = "";
+    activeChatTitle = "Untitled chat";
+    activeChatPinned = false;
+    activeChatJournal = [];
+    activeChatJournalFreshIds = new Set();
+    activeChatCacheWriteTimes = {};
+    pendingTurnCost = null;
+    pendingTurnCacheWriteSlots = [];
+  }
+
+  // Mirrors App.svelte's applyChatSession (the source of truth for the
+  // hydration shape). Copy-not-shared so subsequent saves don't mutate
+  // the fetched session object.
+  function applyChatSession(session: ChatSession) {
+    activeChatTitle = session.title || "Untitled chat";
+    activeChatPinned = session.pinned;
+    activeChatJournal = Array.isArray(session.journal) ? [...session.journal] : [];
+    activeChatJournalFreshIds = new Set();
+    activeChatCacheWriteTimes = { ...(session.cache_write_times ?? {}) };
+    chatPromptEntryId = session.prompt_entry_id || "";
+    chatAssistantId = session.assistant_id || "";
+    chatSystemPrompt =
+      session.system_prompt || (session.prompt_entry_id ? "" : DEFAULT_CHAT_SYSTEM_PROMPT);
+    chatHistory = (session.messages || []).map((m: ChatSessionMessage) => ({
+      role: m.role,
+      content: m.content,
+      truncated: !!m.truncated,
+      thinking: m.thinking || undefined,
+      journal_added: m.journal_added,
+      usage: m.usage ?? null,
+      cost_usd: m.cost_usd ?? null,
+    }));
+    chatLastMeta = null;
+    chatError = null;
+    chatInput = "";
+    pendingTurnCost = null;
+    pendingTurnCacheWriteSlots = [];
   }
 
   function promptTitle(promptId: string): string {
@@ -99,13 +178,188 @@
     return assistantEntries.find((a) => a.id === assistantId)?.title ?? "Unknown assistant";
   }
 
-  $: isLocked = (chatSession?.messages?.length ?? 0) > 0;
-  $: messages = chatSession?.messages ?? [];
+  $: isLocked = chatHistory.length > 0;
+
+  // ---- send / stream / persist (ported from App.svelte) ----
+
+  function deriveChatTitleFromHistory(): string | null {
+    const firstUser = chatHistory.find((m) => m.role === "user");
+    if (!firstUser) return null;
+    const text = firstUser.content.trim().replace(/\s+/g, " ");
+    if (!text) return null;
+    return text.length > 50 ? text.slice(0, 50).trim() + "…" : text;
+  }
+
+  function currentChatSessionPayload(): SaveChatSessionRequest {
+    let title = activeChatTitle || "Untitled chat";
+    if (title === "Untitled chat") {
+      const derived = deriveChatTitleFromHistory();
+      if (derived) title = derived;
+    }
+    const cost_delta_usd = pendingTurnCost ?? undefined;
+    const cache_write_slots =
+      pendingTurnCacheWriteSlots.length > 0 ? [...pendingTurnCacheWriteSlots] : undefined;
+    return {
+      title,
+      prompt_entry_id: chatPromptEntryId,
+      assistant_id: chatAssistantId,
+      system_prompt: chatSystemPrompt,
+      pinned: activeChatPinned,
+      context_items: [],
+      messages: chatHistory.map((m) => ({
+        role: m.role,
+        content: m.content,
+        thinking: m.thinking ?? "",
+        truncated: !!m.truncated,
+        usage: m.usage ?? null,
+        cost_usd: m.cost_usd ?? null,
+      })),
+      inputs: {},
+      cost_delta_usd,
+      cache_write_slots,
+    };
+  }
+
+  async function persistActiveChat(): Promise<void> {
+    const chatId = scene?.id;
+    if (!chatId) return;
+    try {
+      const saved = await api.saveNode<ChatSession>(chatId, currentChatSessionPayload());
+      activeChatTitle = saved.title;
+      activeChatPinned = saved.pinned;
+      activeChatCacheWriteTimes = { ...(saved.cache_write_times ?? {}) };
+      pendingTurnCost = null;
+      pendingTurnCacheWriteSlots = [];
+      // Refresh our local snapshot of the persisted session — keeps the
+      // cost-total footer accurate without re-fetching.
+      chatSession = saved;
+      dispatch("body-change");
+    } catch (e) {
+      chatError = `Couldn't save chat: ${(e as Error).message}`;
+    }
+  }
+
+  function appendToActiveChatJournal(added: ChatSessionJournalEntry[]): void {
+    if (!added.length) return;
+    const existingIds = new Set(activeChatJournal.map((e) => e.entry_id));
+    const fresh = added.filter((e) => !existingIds.has(e.entry_id));
+    if (!fresh.length) return;
+    activeChatJournal = [...activeChatJournal, ...fresh];
+    const freshIds = new Set(activeChatJournalFreshIds);
+    for (const e of fresh) freshIds.add(e.entry_id);
+    activeChatJournalFreshIds = freshIds;
+    setTimeout(() => {
+      const next = new Set(activeChatJournalFreshIds);
+      for (const e of fresh) next.delete(e.entry_id);
+      activeChatJournalFreshIds = next;
+    }, 2500);
+  }
+
+  async function streamAssistantReply(onError: () => void): Promise<void> {
+    chatHistory = [...chatHistory, { role: "assistant", content: "" }];
+    const idx = chatHistory.length - 1;
+    let scrollPending = false;
+    const scheduleScroll = async () => {
+      if (scrollPending) return;
+      scrollPending = true;
+      await tick();
+      scrollPending = false;
+      if (chatScrollEl) chatScrollEl.scrollTop = chatScrollEl.scrollHeight;
+    };
+    let errored = false;
+    for await (const ev of api.aiChatStream({
+      assistant_id: chatAssistantId || null,
+      system_prompt: chatSystemPrompt,
+      messages: chatHistory.slice(0, idx).map(({ role, content }) => ({ role, content })),
+      chat_id: scene?.id ?? null,
+    })) {
+      if (ev.type === "delta") {
+        chatHistory[idx].content += ev.text;
+        chatHistory = chatHistory;
+        scheduleScroll();
+      } else if (ev.type === "thinking") {
+        chatHistory[idx].thinking = (chatHistory[idx].thinking ?? "") + ev.text;
+        chatHistory = chatHistory;
+        scheduleScroll();
+      } else if (ev.type === "done") {
+        chatHistory[idx].truncated = ev.truncated;
+        if (Array.isArray(ev.journal_added) && ev.journal_added.length > 0) {
+          chatHistory[idx].journal_added = ev.journal_added;
+          appendToActiveChatJournal(ev.journal_added);
+        }
+        if (ev.usage) chatHistory[idx].usage = ev.usage;
+        if (typeof ev.cost_usd === "number") {
+          chatHistory[idx].cost_usd = ev.cost_usd;
+          pendingTurnCost = (pendingTurnCost ?? 0) + ev.cost_usd;
+        }
+        if (ev.usage && ev.usage.cache_write_tokens > 0) {
+          if (!pendingTurnCacheWriteSlots.includes("system")) {
+            pendingTurnCacheWriteSlots = [...pendingTurnCacheWriteSlots, "system"];
+          }
+        }
+        chatHistory = chatHistory;
+        chatLastMeta = { provider: ev.provider, model: ev.model, latency_ms: ev.latency_ms };
+      } else if (ev.type === "error") {
+        errored = true;
+        chatError = ev.error || "Unknown error";
+        chatHistory = chatHistory.slice(0, idx);
+        onError();
+      }
+    }
+    if (!errored && !chatHistory[idx]?.content && !chatHistory[idx]?.thinking) {
+      chatHistory = chatHistory.slice(0, idx);
+      chatError = "Model returned empty output.";
+      onError();
+    } else if (!errored) {
+      void persistActiveChat();
+    }
+  }
+
+  async function sendChat() {
+    if (chatRunning) return;
+    const text = chatInput.trim();
+    if (!text) return;
+    chatError = null;
+    const userTurn: ChatMessage = { role: "user", content: text };
+    chatHistory = [...chatHistory, userTurn];
+    const userIdx = chatHistory.length - 1;
+    chatInput = "";
+    chatRunning = true;
+    const rewindUser = () => {
+      chatHistory = chatHistory.filter((_, i) => i !== userIdx);
+      chatInput = text;
+    };
+    try {
+      await streamAssistantReply(rewindUser);
+    } catch (e) {
+      chatError = (e as Error).message;
+      rewindUser();
+    } finally {
+      chatRunning = false;
+      await tick();
+      if (chatScrollEl) chatScrollEl.scrollTop = chatScrollEl.scrollHeight;
+    }
+  }
+
+  function clearChat() {
+    chatHistory = [];
+    chatLastMeta = null;
+    chatError = null;
+    // Reset cost-delta + cache-slot stamping so the next persist starts clean.
+    pendingTurnCost = null;
+    pendingTurnCacheWriteSlots = [];
+    // Persist the clear so a reload doesn't resurrect the messages.
+    void persistActiveChat();
+  }
+
+  function handleChatInputKeydown(event: KeyboardEvent) {
+    if (event.key === "Enter" && (event.ctrlKey || event.metaKey)) {
+      event.preventDefault();
+      sendChat();
+    }
+  }
 
   // ---------- Public methods (called via bind:this from parent) ----------
-  // Chats don't have a markdown body — messages are the body. NodeEditor's
-  // emitChange wraps this for the unified `change` event; returning "" keeps
-  // the existing save-path no-op-safe for chat-shape scenes.
   export function getBodyMarkdown(): string {
     return "";
   }
@@ -120,32 +374,34 @@
     <p class="cbv-error">Couldn't load chat: {loadError}</p>
   {:else if chatSession}
     <div class="cbv-composer-strip">
-      <span class="cbv-chip" class:cbv-chip-locked={isLocked} class:cbv-chip-assigned={!!chatSession.prompt_entry_id} title="Prompt (read-only in this slice; Phase 4c re-enables interactive picking)">
+      <span class="cbv-chip" class:cbv-chip-locked={isLocked} class:cbv-chip-assigned={!!chatPromptEntryId} title="Prompt (read-only in this slice; the interactive picker lands in Phase 4c)">
         <span class="cbv-chip-glyph" aria-hidden="true">✨</span>
-        <strong>{promptTitle(chatSession.prompt_entry_id)}</strong>
+        <strong>{promptTitle(chatPromptEntryId)}</strong>
         {#if isLocked}<span class="cbv-chip-lock" aria-label="locked">🔒</span>{/if}
       </span>
       <span class="cbv-chip" class:cbv-chip-locked={isLocked} title="Assistant (read-only in this slice)">
         <span class="cbv-chip-glyph" aria-hidden="true">🤖</span>
-        <strong>{assistantTitle(chatSession.assistant_id)}</strong>
+        <strong>{assistantTitle(chatAssistantId)}</strong>
         {#if isLocked}<span class="cbv-chip-lock" aria-label="locked">🔒</span>{/if}
       </span>
     </div>
 
-    <div class="cbv-messages" aria-label="Chat history">
-      {#if messages.length === 0}
-        <p class="cbv-empty">No messages yet.</p>
+    <div class="cbv-messages" bind:this={chatScrollEl} aria-label="Chat history">
+      {#if chatHistory.length === 0}
+        <p class="cbv-empty">No messages yet. Ctrl/⌘+Enter to send.</p>
       {/if}
-      {#each messages as message, i (i)}
+      {#each chatHistory as message, i (i)}
         <div class="cbv-message cbv-message-{message.role}">
           <header class="cbv-message-role">{message.role}</header>
           {#if message.thinking}
-            <details class="cbv-thinking">
+            <details class="cbv-thinking" open={chatRunning && i === chatHistory.length - 1 && !message.content}>
               <summary>Thinking</summary>
               <div class="cbv-message-rendered">{@html renderChatContent(message.thinking)}</div>
             </details>
           {/if}
-          {#if message.content}
+          {#if chatRunning && i === chatHistory.length - 1 && message.role === "assistant" && !message.content && !message.thinking}
+            <div class="cbv-message-content cbv-typing">…thinking</div>
+          {:else if message.content}
             {#if message.role === "assistant"}
               <div class="cbv-message-content cbv-message-rendered">{@html renderChatContent(message.content)}</div>
             {:else}
@@ -176,15 +432,43 @@
       {/each}
     </div>
 
+    {#if chatLastMeta}
+      <p class="cbv-meta">{chatLastMeta.provider} · {chatLastMeta.model} · {chatLastMeta.latency_ms} ms</p>
+    {/if}
+    {#if chatError}
+      <p class="cbv-error">{chatError}</p>
+    {/if}
+
+    <PlainTextEditor
+      class="cbv-input"
+      value={chatInput}
+      on:change={(e) => (chatInput = e.detail.value)}
+      on:keydown={(e) => handleChatInputKeydown(e.detail)}
+      on:focus={() => dispatch("focus")}
+      placeholder="Message… (Ctrl/⌘+Enter to send)"
+      ariaLabel="Chat message"
+      minHeight={60}
+      maxHeight={240}
+      matcher={implicitContextMatcher}
+    />
+
+    <div class="cbv-action-row">
+      <button type="button" disabled={!chatHistory.length || chatRunning} on:click={clearChat}>Clear</button>
+      <button
+        type="button"
+        class="primary"
+        disabled={chatRunning || !chatInput.trim()}
+        on:click={() => void sendChat()}
+      >
+        {chatRunning ? "Sending…" : "Send"}
+      </button>
+    </div>
+
     {#if chatSession.cost_usd_total != null}
       <footer class="cbv-foot">
         Session cost: {formatCostEur(chatSession.cost_usd_total)}
       </footer>
     {/if}
-
-    <p class="cbv-readonly-hint">
-      Phase 4b read-only preview. Send/clear and composer interactivity land in 4c.
-    </p>
   {/if}
 </div>
 
@@ -195,13 +479,13 @@
     flex: 1;
     min-height: 0;
     padding: 12px 16px 16px;
-    gap: 12px;
+    gap: 10px;
     overflow: hidden;
   }
 
   .cbv-empty,
   .cbv-error,
-  .cbv-readonly-hint {
+  .cbv-meta {
     margin: 0;
     font-size: 13px;
     color: var(--color-text-muted, #5b6172);
@@ -209,10 +493,8 @@
   .cbv-error {
     color: var(--color-text-error, #b3261e);
   }
-  .cbv-readonly-hint {
-    border-top: 1px dashed var(--color-border, #d0d4dc);
-    padding-top: 6px;
-    font-style: italic;
+  .cbv-meta {
+    font-size: 11.5px;
   }
 
   .cbv-composer-strip {
@@ -275,6 +557,10 @@
     line-height: 1.45;
     white-space: pre-wrap;
   }
+  .cbv-typing {
+    font-style: italic;
+    color: var(--color-text-muted, #5b6172);
+  }
   :global(.cbv-message-rendered) {
     font-size: 14px;
     line-height: 1.45;
@@ -334,6 +620,29 @@
     margin-top: 6px;
     font-size: 11.5px;
     color: var(--color-text-muted, #5b6172);
+  }
+
+  .cbv-action-row {
+    display: flex;
+    gap: 8px;
+    justify-content: flex-end;
+  }
+  .cbv-action-row button {
+    padding: 4px 12px;
+    font-size: 13px;
+    border-radius: 6px;
+    border: 1px solid var(--color-border, #d0d4dc);
+    background: var(--color-surface, #ffffff);
+    cursor: pointer;
+  }
+  .cbv-action-row button[disabled] {
+    opacity: 0.5;
+    cursor: not-allowed;
+  }
+  .cbv-action-row button.primary {
+    background: var(--color-accent, #6366f1);
+    color: #fff;
+    border-color: var(--color-accent, #6366f1);
   }
 
   .cbv-foot {

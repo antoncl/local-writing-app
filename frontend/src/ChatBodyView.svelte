@@ -52,6 +52,9 @@
     "body-change": void;
     focus: void;
     "open-chat": { entry: PromptEntrySummary; inputs: Record<string, unknown>; sceneId: string | null; assistantId: string };
+    // Fired after a title edit (from the pane header) persists, so the host
+    // can refresh the Chats-pane roster + summaries.
+    renamed: void;
   }>();
 
   const DEFAULT_CHAT_SYSTEM_PROMPT =
@@ -448,6 +451,22 @@
     } catch (e) {
       chatError = `Couldn't save chat: ${(e as Error).message}`;
     }
+  }
+
+  // Title rename feed from the pane header (NodeEditor owns the input;
+  // ChatBodyView owns the title state so per-turn saves never revert it).
+  // Debounced so typing doesn't hammer the backend; `renamed` lets the host
+  // refresh the Chats roster once the new title lands.
+  let titleSaveTimer: ReturnType<typeof setTimeout> | null = null;
+  export function setTitleFromPane(next: string): void {
+    if (!loadedChatId) return;
+    if (next === activeChatTitle) return;
+    activeChatTitle = next;
+    if (titleSaveTimer) clearTimeout(titleSaveTimer);
+    titleSaveTimer = setTimeout(() => {
+      titleSaveTimer = null;
+      void persistActiveChat().then(() => dispatch("renamed"));
+    }, 500);
   }
 
   function appendToActiveChatJournal(added: ChatSessionJournalEntry[]): void {

@@ -53,6 +53,7 @@
     embeddedTodos: { todos: EmbeddedTodo[] };
     navigate: { id: string; kind: string };
     "open-chat": { entry: PromptEntrySummary; inputs: Record<string, unknown>; sceneId: string | null; assistantId: string };
+    renamed: void;
   }>();
 
 
@@ -323,6 +324,14 @@
   // whichever body view owns the current body content. ProseBodyView
   // dispatches `body-change` (or other reactives mutate `rawBody`) and
   // that fires the rawBodyMode reactive above which calls emitChange.
+  // Title input handler. For chats, feed the new title into ChatBodyView,
+  // which owns the chat's title state and persists it (saveEditorPane is a
+  // no-op for chats). Other kinds persist via the pane draft → saveEditorPane.
+  function handleTitleInput() {
+    emitChange();
+    if (documentKind === "chat") chatBodyView?.setTitleFromPane(title);
+  }
+
   function emitChange() {
     if (!scene) return;
     dispatch("change", {
@@ -600,7 +609,7 @@
       <div class="scene-title-row">
         <label class="title-label">
           {documentNameLabel}
-          <input class="title-input" aria-label={`${documentLabel} ${documentNameLabel.toLowerCase()}`} placeholder={documentNameLabel} bind:value={title} on:input={emitChange} />
+          <input class="title-input" aria-label={`${documentLabel} ${documentNameLabel.toLowerCase()}`} placeholder={documentNameLabel} bind:value={title} on:input={handleTitleInput} />
         </label>
       </div>
       <div class="editor-hint">
@@ -722,6 +731,7 @@
       on:body-change={emitChange}
       on:focus={() => dispatch("focus")}
       on:open-chat={(event) => dispatch("open-chat", event.detail)}
+      on:renamed={() => dispatch("renamed")}
     />
   {/if}
 

@@ -165,85 +165,12 @@
   let newProjectOverrideFolder = false;
   let newProjectOverridePath = "";
 
-  // AI chat pane state.
-  const DEFAULT_CHAT_SYSTEM_PROMPT =
-    "You are a brainstorming partner for a fiction writer. " +
-    "Be concise, propose options, and don't write prose unless asked.";
-  let chatSystemPrompt = DEFAULT_CHAT_SYSTEM_PROMPT;
-  // 👁 preview popover: floating, anchored to the button at toggle time.
-  // Replaces the always-visible `<details class="chat-preview">` strip.
-  let chatPreviewPopoverOpen = false;
-  let chatPreviewPopoverPos = { top: 0, right: 8 };
-  let chatPreviewBtnEl: HTMLButtonElement | undefined;
-  // "" means: use the user's default assistant (resolved server-side).
-  let chatAssistantId = "";
-  let chatInput = "";
-  let chatHistory: {
-    role: "user" | "assistant";
-    content: string;
-    truncated?: boolean;
-    thinking?: string;
-    journal_added?: ChatSessionJournalEntry[];
-    // V2: per-turn actuals captured from the streaming `done` event.
-    // Persisted on the message itself so they survive reload (see
-    // ChatSessionMessage in backend models.py).
-    usage?: { input_tokens: number; cached_input_tokens: number; cache_write_tokens: number; output_tokens: number } | null;
-    cost_usd?: number | null;
-  }[] = [];
-  let chatRunning = false;
-  let chatError: string | null = null;
-  let chatLastMeta: { provider: string; model: string; latency_ms: number } | null = null;
-  let chatScrollEl: HTMLDivElement | null = null;
-  let chatActivePromptEntry: { id: string; title: string } | null = null;
+  // AI chat sessions. Per-chat state (history, composer, cost/TTL) lives
+  // inside ChatBodyView now; App only tracks the session roster (Chats pane)
+  // and which chat is currently open in an editor pane (active-row highlight).
   let chatSessions: ChatSessionSummary[] = [];
   let activeChatId: string | null = null;
   let activeChatTitle = "Untitled chat";
-  // Cumulative journal — all lore entries the implicit-context expander
-  // has pulled into the active chat's cache. Mirrors the server-side
-  // ChatSession.journal so the user can always see what's in scope, not
-  // just per-turn additions. Append-only; refreshed from session.journal
-  // on load and extended after each send.
-  let activeChatJournal: ChatSessionJournalEntry[] = [];
-  // IDs added on the most recent send — used to briefly flash-highlight
-  // the fresh chips in the scope strip. Cleared after a short timeout.
-  let activeChatJournalFreshIds = new Set<string>();
-  let activeChatPinned = false;
-  // The locked prompt for the active chat. Empty string means "freeform" (no
-  // prompt). Once chatHistory has messages, this becomes immutable for the
-  // session — switching prompts creates a new chat.
-  let chatPromptEntryId = "";
-  let promptPickerOpen = false;
-  let promptPickerSearch = "";
-  // Per-input draft values for the active chat (keyed by input.name,
-  // JSON-encoded for entity_ref_list / context_pick the same way the
-  // legacy dialog did). Persists per chat session via
-  // SaveChatSessionRequest.inputs so reopening a half-configured chat
-  // restores the work. Coerced to typed values at first-send time
-  // when the template renders.
-  let chatInputDrafts: Record<string, string> = {};
-  // Hide the read-only input strip after first send to reclaim space.
-  // Only meaningful when chatHistory has messages (locked phase).
-  let chatInputsHidden = false;
-  // Preview disclosure state. The text is computed on demand (composing the
-  // context block requires async fetches) and invalidated when the user changes
-  // assistant / brief / context / prompt.
-  let promptPreviewText: string | null = null;
-  let promptPreviewLoading = false;
-  let promptPreviewError: string | null = null;
-  // V2: per-cache-slot ISO timestamps from the active chat session.
-  // Drives the TTL countdown chips. Slot → ISO timestamp of last write.
-  // Hydrated from ChatSession.cache_write_times on applyChatSession.
-  let activeChatCacheWriteTimes: Record<string, string> = {};
-  // Tick counter for the live countdown. Bumped every second by an
-  // interval timer set up in onMount; chips read this implicitly via
-  // the `now` reactive to recompute remaining seconds.
-  let ttlTick = 0;
-  // Per-slot TTL in seconds. Mirrors the slot table in
-  // [[decisions-implicit-context]]. New slots get a fallback of 5min.
-  const SLOT_TTL_SECONDS: Record<string, number> = {
-    system: 3600,  // 1h
-    lore: 300,     // 5m
-  };
   // V2: project-wide cost rollup. Refreshed on project open and after
   // each chat save. `projectCostBreakdown` is the per-chat list returned
   // by /api/ai/project-cost; populated only when the user expands the
@@ -251,29 +178,6 @@
   let projectCostTotal: number | null = null;
   let projectCostBreakdown: { id: string; title: string; cost_usd: number }[] = [];
   let projectCostExpanded = false;
-  // V2: incremental cost owed to the persisted ChatSession.cost_usd_total
-  // on the NEXT save. Set by streamAssistantReply when a turn lands;
-  // cleared by persistActiveChat after the save succeeds. Non-turn saves
-  // (rename, prompt change) leave it null so they don't double-charge.
-  let pendingTurnCost: number | null = null;
-  // V2: cache slot labels to stamp with the current server time on the
-  // next save. Stamped by [[decisions-implicit-context]]'s slot table:
-  // "system" for the 1h block, "lore" for the 5m block. Same lifecycle
-  // as pendingTurnCost.
-  let pendingTurnCacheWriteSlots: string[] = [];
-  // V2: token + cost estimate for the about-to-send envelope. Recomputed
-  // when prompt / inputs / assistant change. Null when no prompt is
-  // bound (freeform chat with just a brief — no template to render).
-  let chatEstimate: {
-    tokens: number;
-    cost_usd: number | null;
-    caching_style: "none" | "auto" | "explicit" | null;
-    cache_blocks: { label: string; tokens: number; cache_break_after: boolean }[];
-  } | null = null;
-  // Bump to invalidate any in-flight estimate fetch so a stale response
-  // doesn't overwrite a newer one (out-of-order responses are common
-  // when the user changes prompts/inputs rapidly).
-  let chatEstimateToken = 0;
   type MachineSettingsDraft = {
     anthropic_api_key: string;
     openai_api_key: string;
@@ -404,7 +308,6 @@
     chats: { title: "Chats", x: 330, y: 260, width: 320, height: 420, z: 3 },
     todo: { title: "TODO", x: 1126, y: 18, width: 310, height: 320, z: 4 },
     search: { title: "Search", x: 1126, y: 360, width: 310, height: 320, z: 5 },
-    chat: { title: "AI Chat", x: 1210, y: 18, width: 420, height: 600, z: 7 },
   };
   let editorPanes: EditorPaneState[] = [];
   let nextMetadataReloadToken = 1;
@@ -504,16 +407,12 @@
     // can show the assistant roster without a round-trip when first opened.
     // Failure is non-fatal — both UIs fall back to "default assistant".
     void loadMachineSettings();
-    // V2: drive the TTL countdown chips. One-second tick suffices —
-    // remaining times round to seconds so faster ticks waste CPU.
-    const ttlInterval = setInterval(() => { ttlTick += 1; }, 1000);
     return () => {
       document.removeEventListener("mousemove", movePane);
       document.removeEventListener("mouseup", stopPaneDrag);
       document.removeEventListener("mousemove", resizePane);
       document.removeEventListener("mouseup", stopPaneResize);
       document.removeEventListener("mousedown", handleDocumentMousedown);
-      clearInterval(ttlInterval);
     };
   });
 
@@ -553,9 +452,6 @@
     if (addMenuOpenFor !== null && !inAnchorOrPopover) {
       addMenuOpenFor = null;
       addMenuPosition = null;
-    }
-    if (promptPickerOpen && !target?.closest(".chat-prompt-anchor")) {
-      closeChatPromptPicker();
     }
   }
 
@@ -689,13 +585,7 @@
     titleReloadsByPane = {};
     activeChatId = null;
     activeChatTitle = "Untitled chat";
-    activeChatPinned = false;
-    activeChatJournal = [];
-    activeChatJournalFreshIds = new Set();
-    chatPromptEntryId = "";
     chatSessions = [];
-    clearChat();
-    chatSystemPrompt = DEFAULT_CHAT_SYSTEM_PROMPT;
     // Preserve all pane configs. An earlier version stripped chat/preview/
     // prompts/assistants/chats out of `panes`, which made `panes.chats` etc.
     // undefined after a project switch — focusPane then created `{ z }` entries
@@ -1180,253 +1070,11 @@
     });
   }
 
-  // --- Palette editor helpers (used inside the Machine Settings modal) ----
-
-async function seedChatFromPromptEntry(
-    entry: PromptEntrySummary,
-    inputs: Record<string, unknown>,
-    sceneId: string | null,
-    assistantId: string = "",
-  ) {
-    if (!sceneId) {
-      error = "Open a scene before invoking a chat prompt — context needs a target.";
-      return;
-    }
-    await run(async () => {
-      const preview = await api.aiPreview({
-        template_source: entry.body_markdown,
-        target_scene_id: sceneId,
-        inputs,
-        commit: false,
-      });
-      const messages = preview.messages ?? [];
-      const flatten = (blocks: { text: string }[]) => blocks.map((b) => b.text).join("");
-      const systemBlocks = messages.filter((m) => m.role === "system").map((m) => flatten(m.blocks));
-      const turns = messages
-        .filter((m) => m.role === "user" || m.role === "assistant")
-        .map((m) => ({ role: m.role as "user" | "assistant", content: flatten(m.blocks) }));
-
-      chatSystemPrompt = systemBlocks.join("\n\n") || DEFAULT_CHAT_SYSTEM_PROMPT;
-      chatHistory = turns;
-      chatError = null;
-      chatLastMeta = null;
-      chatInput = "";
-      chatActivePromptEntry = { id: entry.id, title: entry.title };
-      // Carry the assistant pick from the inputs dialog into the chat panel
-      // so the first (and subsequent) turns use it.
-      chatAssistantId = assistantId;
-
-      focusPane("chat");
-
-      const lastTurn = turns[turns.length - 1];
-      if (lastTurn?.role === "user") {
-        await sendChatTurn();
-      }
-      status = `Loaded ${entry.title} into chat`;
-    });
-  }
-
-  async function streamAssistantReply(onError: () => void): Promise<void> {
-    // Appends an empty assistant message and mutates its content as deltas
-    // arrive. On error, removes the placeholder and calls onError() so the
-    // caller can decide whether to also rewind the user turn.
-    chatHistory = [...chatHistory, { role: "assistant", content: "" }];
-    const idx = chatHistory.length - 1;
-    let scrollPending = false;
-    const scheduleScroll = async () => {
-      if (scrollPending) return;
-      scrollPending = true;
-      await tick();
-      scrollPending = false;
-      if (chatScrollEl) chatScrollEl.scrollTop = chatScrollEl.scrollHeight;
-    };
-    let errored = false;
-    for await (const ev of api.aiChatStream({
-      assistant_id: chatAssistantId || null,
-      system_prompt: chatSystemPrompt,
-      // Send history WITHOUT the placeholder we just pushed.
-      messages: chatHistory.slice(0, idx).map(({ role, content }) => ({ role, content })),
-      // chat_id activates the implicit-context expander: server scans the
-      // last user message, appends new lore detections to the session
-      // journal, packs them as a cache-stable block before conversation.
-      chat_id: activeChatId,
-    })) {
-      if (ev.type === "delta") {
-        chatHistory[idx].content += ev.text;
-        chatHistory = chatHistory;
-        scheduleScroll();
-      } else if (ev.type === "thinking") {
-        chatHistory[idx].thinking = (chatHistory[idx].thinking ?? "") + ev.text;
-        chatHistory = chatHistory;
-        scheduleScroll();
-      } else if (ev.type === "done") {
-        chatHistory[idx].truncated = ev.truncated;
-        // journal_added is piggy-backed on the terminal done event. Attach
-        // to the assistant message so the per-turn audit chip strip
-        // renders, AND append to the cumulative scope strip near the
-        // composer with a brief flash-highlight on the new entries.
-        if (Array.isArray(ev.journal_added) && ev.journal_added.length > 0) {
-          chatHistory[idx].journal_added = ev.journal_added;
-          appendToActiveChatJournal(ev.journal_added);
-        }
-        // V2: capture per-turn usage + cost on the message itself, AND
-        // queue the cost to accumulate into ChatSession.cost_usd_total
-        // on the next persistActiveChat call.
-        if (ev.usage) chatHistory[idx].usage = ev.usage;
-        if (typeof ev.cost_usd === "number") {
-          chatHistory[idx].cost_usd = ev.cost_usd;
-          pendingTurnCost = (pendingTurnCost ?? 0) + ev.cost_usd;
-        }
-        if (ev.usage && ev.usage.cache_write_tokens > 0) {
-          // We don't get per-slot writes from the provider — stamp the
-          // known "system" slot. ("lore" stamping would lie when no
-          // implicit-context journal was sent on this turn.)
-          if (!pendingTurnCacheWriteSlots.includes("system")) {
-            pendingTurnCacheWriteSlots = [...pendingTurnCacheWriteSlots, "system"];
-          }
-        }
-        chatHistory = chatHistory;
-        chatLastMeta = { provider: ev.provider, model: ev.model, latency_ms: ev.latency_ms };
-      } else if (ev.type === "error") {
-        errored = true;
-        chatError = ev.error || "Unknown error";
-        // Drop the empty assistant placeholder.
-        chatHistory = chatHistory.slice(0, idx);
-        onError();
-      }
-    }
-    if (!errored && !chatHistory[idx]?.content && !chatHistory[idx]?.thinking) {
-      // Stream ended without any deltas and without an error — treat as empty.
-      chatHistory = chatHistory.slice(0, idx);
-      chatError = "Model returned empty output.";
-      onError();
-    } else if (!errored) {
-      // Persist the new turn — crash-safe so the user never loses a reply.
-      void persistActiveChat();
-    }
-  }
-
-  async function sendChatTurn() {
-    if (chatRunning) return;
-    chatRunning = true;
-    chatError = null;
-    try {
-      await streamAssistantReply(() => {});
-    } catch (e) {
-      chatError = (e as Error).message;
-    } finally {
-      chatRunning = false;
-      await tick();
-      if (chatScrollEl) {
-        chatScrollEl.scrollTop = chatScrollEl.scrollHeight;
-      }
-    }
-  }
-
-  async function sendChat() {
-    if (chatRunning) return;
-    if (missingRequiredInputs.length > 0) {
-      // UI should already have disabled the Send button — this is a
-      // belt-and-braces guard.
-      chatError = `Missing required: ${missingRequiredInputs.map((i) => i.label || i.name).join(", ")}.`;
-      return;
-    }
-    const text = chatInput.trim();
-    // Empty send is allowed only when the chat is bound to a prompt AND
-    // has no history yet — i.e. the template IS the message. McKee-style
-    // self-contained prompts shouldn't force the user to type "Do it".
-    // For freeform or follow-up turns, composer text is required.
-    const isFirstTurnFromPrompt = !!activePromptEntry && chatHistory.length === 0;
-    if (!text && !isFirstTurnFromPrompt) return;
-    // After this turn lands, inputs become read-only history. Auto-collapse
-    // them so the conversation gets the vertical space; user can re-expand
-    // via the "▸ Show inputs" toggle if they want to inspect what was sent.
-    const isFirstSubmission = chatHistory.length === 0;
-    chatError = null;
-    // First-send template render: the template was deferred from
-    // prompt-pick to right now so the user could edit inputs freely.
-    // After this, system_prompt is locked along with the rest of the
-    // preset (same lock semantics as today).
-    if (activePromptEntry && !chatSystemPrompt && (activePromptEntry.inputs ?? []).length > 0) {
-      chatRunning = true;
-      try {
-        const ok = await renderAndLockPromptTemplate(activePromptEntry);
-        if (!ok) return;
-        await persistActiveChat();
-      } finally {
-        chatRunning = false;
-      }
-    }
-    // Only append a user turn for non-empty composer text. When text is
-    // empty (bound first-turn case), the template's rendered user blocks
-    // are already in chatHistory via renderAndLockPromptTemplate above.
-    let userIdx = -1;
-    if (text) {
-      const userTurn: ChatMessage = { role: "user", content: text };
-      chatHistory = [...chatHistory, userTurn];
-      userIdx = chatHistory.length - 1;
-    }
-    chatInput = "";
-    chatRunning = true;
-    const rewindUser = () => {
-      // Drop the user turn at userIdx so they can fix and re-send.
-      if (userIdx >= 0) chatHistory = chatHistory.filter((_, i) => i !== userIdx);
-      chatInput = text;
-    };
-    try {
-      await streamAssistantReply(rewindUser);
-      if (isFirstSubmission) chatInputsHidden = true;
-    } catch (e) {
-      chatError = (e as Error).message;
-      rewindUser();
-    } finally {
-      chatRunning = false;
-      await tick();
-      if (chatScrollEl) {
-        chatScrollEl.scrollTop = chatScrollEl.scrollHeight;
-      }
-    }
-  }
-
-  function handleChatInputKeydown(event: KeyboardEvent) {
-    if (event.key === "Enter" && (event.ctrlKey || event.metaKey)) {
-      event.preventDefault();
-      sendChat();
-    }
-  }
-
-  function clearChat() {
-    chatHistory = [];
-    chatLastMeta = null;
-    chatError = null;
-    chatActivePromptEntry = null;
-    chatInputDrafts = {};
-    chatInputsHidden = false;
-  }
-
-  // Extend the cumulative scope strip after a chat send. Dedupes against
-  // existing entries (the backend already guarantees no overlap, but a
-  // belt-and-braces filter avoids visual surprises if anything races).
-  // Marks the fresh IDs for a brief flash-highlight then clears.
-  function appendToActiveChatJournal(added: ChatSessionJournalEntry[]): void {
-    if (!added.length) return;
-    const existingIds = new Set(activeChatJournal.map((e) => e.entry_id));
-    const fresh = added.filter((e) => !existingIds.has(e.entry_id));
-    if (!fresh.length) return;
-    activeChatJournal = [...activeChatJournal, ...fresh];
-    const freshIds = new Set(activeChatJournalFreshIds);
-    for (const e of fresh) freshIds.add(e.entry_id);
-    activeChatJournalFreshIds = freshIds;
-    // Fade the flash after a short window — long enough to notice,
-    // short enough not to linger.
-    setTimeout(() => {
-      const next = new Set(activeChatJournalFreshIds);
-      for (const e of fresh) next.delete(e.entry_id);
-      activeChatJournalFreshIds = next;
-    }, 2500);
-  }
-
-  // --- Chat sessions (Phase 3) ---
+  // --- Chat sessions (Phase 4: ChatBodyView owns per-chat state) ---------
+  //
+  // App keeps the session roster (Chats pane) in sync and routes opens into
+  // editor panes. Everything inside a conversation — history, composer,
+  // streaming, cost/TTL, per-turn persistence — lives in ChatBodyView.
 
   async function refreshChatSessions() {
     try {
@@ -1437,509 +1085,57 @@ async function seedChatFromPromptEntry(
     }
   }
 
-  function deriveChatTitleFromHistory(): string | null {
-    const firstUser = chatHistory.find((m) => m.role === "user");
-    if (!firstUser) return null;
-    const text = firstUser.content.trim().replace(/\s+/g, " ");
-    if (!text) return null;
-    return text.length > 50 ? text.slice(0, 50).trim() + "…" : text;
-  }
-
-  function currentChatSessionPayload(): SaveChatSessionRequest {
-    // Auto-title once: if the user hasn't renamed it and we have a user turn,
-    // derive a title from the first user message so the Chats pane is scannable.
-    let title = activeChatTitle || "Untitled chat";
-    if (title === "Untitled chat") {
-      const derived = deriveChatTitleFromHistory();
-      if (derived) title = derived;
-    }
-    // V2: pluck the cost delta off pendingTurnCost so the backend accumulates
-    // cost_usd_total. Cleared after the save resolves (see persistActiveChat).
-    // Non-turn saves (rename, settings change) leave it null → backend keeps
-    // existing total unchanged.
-    const cost_delta_usd = pendingTurnCost ?? undefined;
-    const cache_write_slots = pendingTurnCacheWriteSlots.length > 0
-      ? [...pendingTurnCacheWriteSlots]
-      : undefined;
-    return {
-      title,
-      prompt_entry_id: chatPromptEntryId,
-      assistant_id: chatAssistantId,
-      system_prompt: chatSystemPrompt,
-      pinned: activeChatPinned,
-      // Legacy chat-level + Context menu was removed; new chats don't
-      // attach session-level context items. Existing items on previously
-      // saved sessions get overwritten with [] on next save by design.
-      context_items: [],
-      messages: chatHistory.map((m) => ({
-        role: m.role,
-        content: m.content,
-        thinking: m.thinking ?? "",
-        truncated: !!m.truncated,
-        // Per-message V2 telemetry: usage + cost survive reload.
-        usage: m.usage ?? null,
-        cost_usd: m.cost_usd ?? null,
-      })),
-      // Per-prompt input drafts. Persisted so a half-configured chat
-      // (drafts typed but not yet sent) restores on reopen.
-      inputs: chatInputDrafts,
-      cost_delta_usd,
-      cache_write_slots,
-    };
-  }
-
-  function applyChatSession(session: ChatSession) {
-    activeChatId = session.id;
-    activeChatTitle = session.title || "Untitled chat";
-    activeChatPinned = session.pinned;
-    // Hydrate the visible cumulative-journal strip from the persisted
-    // session. Newly-loaded chats don't flash any chips.
-    activeChatJournal = Array.isArray(session.journal) ? [...session.journal] : [];
-    activeChatJournalFreshIds = new Set();
-    activeChatCacheWriteTimes = {...(session.cache_write_times ?? {})};
-    chatPromptEntryId = session.prompt_entry_id || "";
-    chatAssistantId = session.assistant_id || "";
-    // Materialised brief from the session. When a prompt is locked in, this
-    // came from the prompt's rendered system blocks (possibly empty). Don't
-    // overlay DEFAULT_CHAT_SYSTEM_PROMPT here — for prompt-driven chats the
-    // overlay would silently corrupt the locked system message; for freeform
-    // chats with an empty system, an empty default is the honest answer.
-    chatSystemPrompt = session.system_prompt || (session.prompt_entry_id ? "" : DEFAULT_CHAT_SYSTEM_PROMPT);
-    invalidateChatPromptPreview();
-    // Legacy chat-level context items (session.context_items) are no
-    // longer surfaced. The picker model moved to prompt-declared
-    // context_pick inputs (rendered into the system_prompt at
-    // prompt-pick time). Old data stays on disk until the session
-    // re-saves with [].
-    chatHistory = (session.messages || []).map((m: ChatSessionMessage) => ({
-      role: m.role,
-      content: m.content,
-      truncated: !!m.truncated,
-      thinking: m.thinking || undefined,
-      journal_added: m.journal_added,
-      usage: m.usage ?? null,
-      cost_usd: m.cost_usd ?? null,
-    }));
-    chatLastMeta = null;
-    chatError = null;
-    chatActivePromptEntry = null;
-    chatInput = "";
-    // Restore per-prompt input drafts. Strings only — the values
-    // were JSON-encoded by PromptInputField if they're list-shaped.
-    chatInputDrafts = {};
-    const raw = (session as unknown as { inputs?: Record<string, unknown> }).inputs ?? {};
-    for (const [name, value] of Object.entries(raw)) {
-      if (typeof value === "string") chatInputDrafts[name] = value;
-      else chatInputDrafts[name] = JSON.stringify(value);
-    }
-    chatInputsHidden = false;
-  }
-
-  async function persistActiveChat(): Promise<void> {
-    if (!activeChatId) return;
-    try {
-      const saved = await api.saveChatSession(activeChatId, currentChatSessionPayload());
-      activeChatTitle = saved.title;
-      activeChatPinned = saved.pinned;
-      // V2: pick up server-side cache_write_times stamps from this save
-      // so the TTL countdown reflects the new write times.
-      activeChatCacheWriteTimes = {...(saved.cache_write_times ?? {})};
-      // V2: clear pending cost + cache-slot stamps now that they've been
-      // applied. A failed save leaves them set — next save retries the
-      // accumulation. (Idempotent re-send is wrong; on retry we'd double-
-      // count. Acceptable risk given save failures are rare and noisy.)
-      const hadCost = pendingTurnCost != null;
-      pendingTurnCost = null;
-      pendingTurnCacheWriteSlots = [];
-      void refreshChatSessions();
-      // Only refresh the project-cost chip when we actually accumulated.
-      // Plain renames don't move the total; skipping the call keeps the
-      // header quiet during settings/title saves.
-      if (hadCost) void refreshProjectCost();
-    } catch (e) {
-      // Non-fatal; surface in chat error band so the user notices.
-      chatError = `Couldn't save chat: ${(e as Error).message}`;
-    }
-  }
-
-  async function openChatSession(chatId: string): Promise<void> {
-    if (activeChatId === chatId) {
-      focusPane("chat");
-      return;
-    }
-    // Save current chat before switching so in-flight edits aren't lost.
-    if (activeChatId) {
-      await persistActiveChat();
-    }
-    try {
-      const session = await api.getChatSession(chatId);
-      applyChatSession(session);
-      focusPane("chat");
-    } catch (e) {
-      error = `Couldn't open chat: ${(e as Error).message}`;
-    }
-  }
-
-  async function createNewChatSession(opts: {
-    promptEntryId?: string;
-    assistantId?: string;
-    systemPrompt?: string;
-    title?: string;
-  } = {}): Promise<void> {
-    if (activeChatId) {
-      await persistActiveChat();
-    }
-    try {
-      const session = await api.createChatSession({
-        prompt_entry_id: opts.promptEntryId ?? "",
-        assistant_id: opts.assistantId ?? chatAssistantId,
-        system_prompt: opts.systemPrompt ?? "",
-        title: opts.title,
-      });
-      applyChatSession(session);
-      await refreshChatSessions();
-      focusPane("chat");
-    } catch (e) {
-      error = `Couldn't create chat: ${(e as Error).message}`;
-    }
-  }
-
-  // --- Prompt picker (chat composer) ---
-
-  function chatRoutedPromptEntries(): PromptEntrySummary[] {
-    if (!metadataSchema) return [];
-    return promptEntries.filter((entry) => {
-      const def = metadataSchema?.entry_types[entry.entry_type];
-      return def?.prompt?.context_strategy?.output?.kind === "chat_panel";
-    });
-  }
-
-  function filteredChatPromptEntries(): PromptEntrySummary[] {
-    const list = chatRoutedPromptEntries();
-    const q = promptPickerSearch.trim().toLowerCase();
-    if (!q) return list.slice().sort((a, b) => a.title.localeCompare(b.title, undefined, { sensitivity: "base" }));
-    return list
-      .filter((e) => e.title.toLowerCase().includes(q) || (e.entry_type || "").toLowerCase().includes(q))
-      .sort((a, b) => a.title.localeCompare(b.title, undefined, { sensitivity: "base" }));
-  }
-
-  // Rebound on every change to chatPromptEntryId / promptEntries so Svelte's
-  // template-side reactivity sees the dependency. A plain function would be
-  // called once and never re-run when those reactive vars change.
-  $: activePromptTitle = ((id: string, entries: PromptEntrySummary[]) => {
-    if (!id) return "Freeform";
-    return entries.find((p) => p.id === id)?.title || "Unknown prompt";
-  })(chatPromptEntryId, promptEntries);
-
   function chatSessionPromptTitle(session: ChatSessionSummary): string {
     if (!session.prompt_entry_id) return "";
     const entry = promptEntries.find((p) => p.id === session.prompt_entry_id);
     return entry?.title || "Unknown prompt";
   }
 
-  function preferredAssistantForPrompt(entry: PromptEntrySummary): string {
-    const raw = (entry.metadata ?? {})["preferred_assistant_id"];
-    return typeof raw === "string" ? raw : "";
-  }
-
-  function isActiveChatLocked(): boolean {
-    return chatHistory.length > 0;
-  }
-
-  function toggleChatPromptPicker() {
-    promptPickerOpen = !promptPickerOpen;
-    promptPickerSearch = "";
-    if (promptPickerOpen) {
-      tick().then(() => {
-        const input = document.querySelector<HTMLInputElement>(".chat-prompt-picker-search");
-        input?.focus();
-      });
-    }
-  }
-
-  function closeChatPromptPicker() {
-    promptPickerOpen = false;
-    promptPickerSearch = "";
-  }
-
-  async function pickPromptForChat(entry: PromptEntrySummary): Promise<void> {
-    closeChatPromptPicker();
-    // No more dialog interruption — apply preset immediately, render the
-    // input fields inline in the composer. Template render is deferred
-    // to first-send so the user can edit drafts freely (system_prompt
-    // stays empty until then; once set, it's locked alongside the rest
-    // of the preset).
-    await applyChatPromptPreset(entry);
-  }
-
-  function defaultDraftFor(input: PromptInputDefinition): string {
-    if (input.default !== undefined && input.default !== null) return String(input.default);
-    return input.type === "boolean" ? "false" : "";
-  }
-
-  function seedInputDraftsFromEntry(entry: PromptEntrySummary): Record<string, string> {
-    const drafts: Record<string, string> = {};
-    for (const input of entry.inputs ?? []) drafts[input.name] = defaultDraftFor(input);
-    return drafts;
-  }
-
-  function updateChatInputDraft(name: string, value: string) {
-    chatInputDrafts = { ...chatInputDrafts, [name]: value };
-    // Persist drafts so a half-configured chat survives a reload. Throttle
-    // isn't needed at typing speed (backend write is local-disk and small).
-    void persistActiveChat();
-  }
-
-  function coerceChatInputValue(raw: string, type: PromptInputDefinition["type"]): unknown {
-    const trimmed = raw.trim();
-    if (type === "number") {
-      if (trimmed === "") return null;
-      const parsed = Number(trimmed);
-      return Number.isFinite(parsed) ? parsed : trimmed;
-    }
-    if (type === "boolean") return trimmed.toLowerCase() === "true";
-    if (type === "entity_ref_list" || type === "context_pick") {
-      if (!trimmed) return type === "context_pick" ? [] : null;
-      try {
-        const parsed = JSON.parse(trimmed);
-        return Array.isArray(parsed) ? parsed : (type === "context_pick" ? [] : null);
-      } catch {
-        return type === "context_pick" ? [] : null;
-      }
-    }
-    return trimmed;
-  }
-
-  // The inputs the active prompt declares (or [] for freeform chats).
-  // Used by the inline composer strip + first-send template render +
-  // required-fields gating.
-  $: activePromptEntry = chatPromptEntryId
-    ? promptEntries.find((p) => p.id === chatPromptEntryId) ?? null
-    : null;
-  $: declaredInputs = activePromptEntry?.inputs ?? [];
-  // Mirror of isActiveChatLocked() that Svelte's $: tracking can
-  // actually re-evaluate (function calls inside template expressions
-  // don't track their reads — see [[feedback-svelte5-reactivity-traps]]).
-  $: chatIsLocked = chatHistory.length > 0;
-
-  // Required-input check used to gate the Send button. Empty string for
-  // text-ish types or empty array for list-ish types means missing.
-  function isInputMissing(input: PromptInputDefinition, raw: string | undefined): boolean {
-    if (input.type === "entity_ref_list" || input.type === "context_pick") {
-      try {
-        const parsed = JSON.parse(raw || "[]");
-        return !Array.isArray(parsed) || parsed.length === 0;
-      } catch {
-        return true;
-      }
-    }
-    return !raw?.trim();
-  }
-  $: missingRequiredInputs = declaredInputs.filter(
-    (i) => i.required && isInputMissing(i, chatInputDrafts[i.name]),
-  );
-
-  async function applyChatPromptPreset(entry: PromptEntrySummary): Promise<void> {
-    // Lock check: never replace the prompt of a chat with history. Start a new
-    // chat instead. The backend would reject the save anyway — failing here is
-    // a nicer UX.
-    const mustCreateNew = !activeChatId || isActiveChatLocked();
-    const preferredAssistantId = preferredAssistantForPrompt(entry);
-    const seededDrafts = seedInputDraftsFromEntry(entry);
+  // "+ New Chat": create an empty session and open it in an editor pane.
+  async function createNewChatSession(): Promise<void> {
     try {
-      invalidateChatPromptPreview();
-      if (mustCreateNew) {
-        await createNewChatSession({
-          promptEntryId: entry.id,
-          assistantId: preferredAssistantId || chatAssistantId,
-          systemPrompt: "",
-          title: entry.title,
+      const session = await api.createChatSession({});
+      await refreshChatSessions();
+      await openChatInEditorPane(session.id);
+    } catch (e) {
+      error = `Couldn't create chat: ${(e as Error).message}`;
+    }
+  }
+
+  // "Invoke chat prompt" from a prose scene: ProseBodyView emits open-chat
+  // once its inputs dialog resolves. Create a prompt-bound chat session,
+  // seed the resolved inputs as drafts so the user's dialog entries carry
+  // over, and open it in an editor pane where ChatBodyView renders the
+  // template on first send.
+  async function openChatFromPromptEntry(
+    entry: PromptEntrySummary,
+    inputs: Record<string, unknown>,
+    assistantId: string = "",
+  ): Promise<void> {
+    await run(async () => {
+      const session = await api.createChatSession({
+        prompt_entry_id: entry.id,
+        assistant_id: assistantId,
+        title: entry.title,
+      });
+      if (Object.keys(inputs).length > 0) {
+        // Persist resolved inputs via the unified node path so ChatBodyView
+        // restores them as drafts on load.
+        await api.saveNode<ChatSession>(session.id, {
+          title: session.title,
+          prompt_entry_id: session.prompt_entry_id,
+          assistant_id: session.assistant_id,
+          system_prompt: session.system_prompt,
+          pinned: session.pinned,
+          context_items: [],
+          messages: [],
+          inputs,
         });
-        // Apply drafts AFTER createNewChatSession so applyChatSession
-        // doesn't clobber them.
-        chatInputDrafts = seededDrafts;
-      } else {
-        chatPromptEntryId = entry.id;
-        if (preferredAssistantId) chatAssistantId = preferredAssistantId;
-        chatSystemPrompt = "";
-        chatHistory = [];
-        chatInputDrafts = seededDrafts;
-        activeChatTitle = entry.title;
       }
-      chatInputsHidden = false;
-      await persistActiveChat();
-    } catch (e) {
-      chatError = `Couldn't apply prompt: ${(e as Error).message}`;
-    }
-  }
-
-  // First-send template render. Called from sendChat when the chat has
-  // a prompt but no rendered system_prompt yet — typically right before
-  // the first user message goes out. Renders the template with the
-  // current input drafts, sets system_prompt + any initial turns, and
-  // returns true on success. After this, the preset is locked.
-  async function renderAndLockPromptTemplate(entry: PromptEntrySummary): Promise<boolean> {
-    const inputs: Record<string, unknown> = {};
-    for (const input of entry.inputs ?? []) {
-      const raw = chatInputDrafts[input.name] ?? "";
-      const coerced = coerceChatInputValue(raw, input.type);
-      if (coerced !== null && coerced !== "") inputs[input.name] = coerced;
-    }
-    try {
-      const preview = await api.aiPreview({
-        template_source: entry.body_markdown,
-        target_scene_id: "",
-        inputs,
-        commit: false,
-      });
-      const messages = preview.messages ?? [];
-      const flatten = (blocks: { text: string }[]) => blocks.map((b) => b.text).join("");
-      const systemBlocks = messages
-        .filter((m) => m.role === "system")
-        .map((m) => flatten(m.blocks));
-      const initialTurns = messages
-        .filter((m) => m.role === "user" || m.role === "assistant")
-        .map((m) => ({ role: m.role as "user" | "assistant", content: flatten(m.blocks) }));
-      chatSystemPrompt = systemBlocks.join("\n\n");
-      if (initialTurns.length > 0) chatHistory = [...initialTurns];
-      invalidateChatPromptPreview();
-      return true;
-    } catch (e) {
-      chatError = `Couldn't render prompt template: ${(e as Error).message}`;
-      return false;
-    }
-  }
-
-  async function toggleChatPreviewPopover(): Promise<void> {
-    if (chatPreviewPopoverOpen) {
-      chatPreviewPopoverOpen = false;
-      return;
-    }
-    if (chatPreviewBtnEl) {
-      const r = chatPreviewBtnEl.getBoundingClientRect();
-      const maxPopHeight = Math.round(window.innerHeight * 0.7);
-      const desiredTop = Math.round(r.bottom + 6);
-      const safeTop = Math.min(desiredTop, Math.max(8, window.innerHeight - maxPopHeight - 8));
-      chatPreviewPopoverPos = {
-        top: safeTop,
-        right: Math.max(8, Math.round(window.innerWidth - r.right)),
-      };
-    }
-    chatPreviewPopoverOpen = true;
-    // Compose preview content on open (cached until something invalidates it).
-    if (promptPreviewText === null || promptPreviewError) {
-      promptPreviewLoading = true;
-      promptPreviewError = null;
-      try {
-        promptPreviewText = chatSystemPrompt;
-      } catch (e) {
-        promptPreviewError = (e as Error).message || "Couldn't compose preview.";
-        promptPreviewText = null;
-      } finally {
-        promptPreviewLoading = false;
-      }
-    }
-  }
-
-  function invalidateChatPromptPreview(): void {
-    promptPreviewText = null;
-    promptPreviewError = null;
-    // V2: also invalidate the cost estimate so the strip refreshes on
-    // the next render trigger. Don't clear `chatEstimate` here — keep
-    // the previous number visible so the strip doesn't flicker between
-    // states; the fetch overwrites it on completion.
-    chatEstimateToken += 1;
-    void fetchChatEstimate();
-  }
-
-  async function fetchChatEstimate(): Promise<void> {
-    // No prompt bound → nothing to estimate. (Freeform chat with just
-    // a brief renders no template; the per-turn actuals on the next
-    // assistant message will tell the user what it cost.)
-    const entry = promptEntries.find((p) => p.id === chatPromptEntryId);
-    if (!entry) {
-      chatEstimate = null;
-      return;
-    }
-    const ourToken = ++chatEstimateToken;
-    const inputs: Record<string, unknown> = {};
-    for (const declared of entry.inputs ?? []) {
-      const raw = chatInputDrafts[declared.name] ?? "";
-      const coerced = coerceChatInputValue(raw, declared.type);
-      if (coerced !== null && coerced !== "") inputs[declared.name] = coerced;
-    }
-    try {
-      const preview = await api.aiPreview({
-        template_source: entry.body_markdown,
-        target_scene_id: "",
-        inputs,
-        commit: false,
-        assistant_id: chatAssistantId || null,
-      });
-      if (ourToken !== chatEstimateToken) return;  // stale response
-      chatEstimate = {
-        tokens: preview.estimated_tokens ?? 0,
-        cost_usd: preview.estimated_cost_usd ?? null,
-        caching_style: preview.caching_style ?? null,
-        cache_blocks: (preview.cache_blocks ?? []).map((b) => ({
-          label: b.label,
-          tokens: b.tokens,
-          cache_break_after: b.cache_break_after,
-        })),
-      };
-    } catch {
-      // Render error already surfaces in the preview popover — keep the
-      // strip quiet (don't overwrite a previous number with "—").
-    }
-  }
-
-  // V2: compute the per-slot TTL chips. Reads `ttlTick` so the chips
-  // refresh once per second; reads `activeChatCacheWriteTimes` so they
-  // refresh when a new turn stamps a slot.
-  function ttlChipsFor(times: Record<string, string>, _tick: number) {
-    if (!times || Object.keys(times).length === 0) return [];
-    const now = Date.now();
-    return Object.entries(times).map(([slot, iso]) => {
-      const writtenAt = Date.parse(iso);
-      const ttl = (SLOT_TTL_SECONDS[slot] ?? 300) * 1000;
-      const remainingMs = writtenAt + ttl - now;
-      const remainingSec = Math.max(0, Math.round(remainingMs / 1000));
-      const label = slot.charAt(0).toUpperCase() + slot.slice(1);
-      const ttlLabel = ttl >= 3600_000 ? "1h" : "5m";
-      let formatted: string;
-      if (remainingSec <= 0) {
-        formatted = "expired";
-      } else if (remainingSec >= 60) {
-        formatted = `${Math.floor(remainingSec / 60)}m`;
-      } else {
-        formatted = `${remainingSec}s`;
-      }
-      return { slot, label, ttlLabel, formatted, expired: remainingSec <= 0 };
+      await refreshChatSessions();
+      await openChatInEditorPane(session.id);
+      status = `Opened ${entry.title} as a chat`;
     });
-  }
-  $: ttlChips = ttlChipsFor(activeChatCacheWriteTimes, ttlTick);
-
-  // Re-fetch the chat estimate whenever the inputs that drive it change.
-  // Reading each dep on its own line (per [[feedback-svelte5-reactivity-traps]])
-  // forces Svelte to track them; bundling them into the function call alone
-  // wouldn't. `promptEntries.length` is the trigger we care about — we want
-  // to retry once the prompt roster has loaded.
-  $: {
-    chatPromptEntryId;
-    chatAssistantId;
-    chatInputDrafts;
-    promptEntries.length;
-    void fetchChatEstimate();
-  }
-
-  function clearChatPrompt() {
-    // Drop the locked prompt — only meaningful before any messages exist.
-    if (isActiveChatLocked()) return;
-    chatPromptEntryId = "";
-    chatSystemPrompt = DEFAULT_CHAT_SYSTEM_PROMPT;
-    activeChatTitle = "Untitled chat";
-    invalidateChatPromptPreview();
-    void persistActiveChat();
   }
 
   async function deleteChatSessionFromPane(chatId: string): Promise<void> {
@@ -1949,12 +1145,12 @@ async function seedChatFromPromptEntry(
       if (activeChatId === chatId) {
         activeChatId = null;
         activeChatTitle = "Untitled chat";
-        activeChatPinned = false;
-        activeChatJournal = [];
-        activeChatJournalFreshIds = new Set();
-        chatPromptEntryId = "";
-        clearChat();
-        chatSystemPrompt = DEFAULT_CHAT_SYSTEM_PROMPT;
+      }
+      // Tear down any editor pane still pointing at the deleted chat.
+      for (const pane of editorPanes.filter(
+        (candidate) => candidate.document?.type === "chat" && candidate.document.id === chatId,
+      )) {
+        tearDownEditorPane(pane.id);
       }
     } catch (e) {
       error = `Couldn't delete chat: ${(e as Error).message}`;
@@ -1964,102 +1160,15 @@ async function seedChatFromPromptEntry(
   async function hydrateChatSessionsForProject(): Promise<void> {
     await refreshChatSessions();
     if (chatSessions.length === 0) {
-      // Auto-create a first chat so the panel always has somewhere to write.
+      // Auto-create a first chat so the Chats pane always has somewhere to
+      // write. Don't auto-open it — chats open into editor panes on demand.
       try {
-        const session = await api.createChatSession({});
-        chatSessions = [{
-          id: session.id,
-          title: session.title,
-          assistant_id: session.assistant_id,
-          pinned: session.pinned,
-          created_at: session.created_at,
-          updated_at: session.updated_at,
-          message_count: 0,
-        }];
-        applyChatSession(session);
+        await api.createChatSession({});
+        await refreshChatSessions();
       } catch {
-        // Backend may be offline at boot — leave the chat panel in transient
-        // mode; user can retry by clicking + New Chat.
+        // Backend may be offline at boot — leave the list empty; the user
+        // can retry via + New Chat.
       }
-      return;
-    }
-    // Pick the most-recently-updated chat as the active session on open.
-    const first = chatSessions[0];
-    try {
-      const session = await api.getChatSession(first.id);
-      applyChatSession(session);
-    } catch {
-      // Ignore; user can pick manually from the Chats pane.
-    }
-  }
-
-  function clearActivePromptOnEdit() {
-    // If the user edits the system prompt, the active prompt indicator no longer
-    // accurately reflects what's running. Drop it.
-    chatActivePromptEntry = null;
-  }
-
-  function handleChatAssistantChange() {
-    void persistActiveChat();
-  }
-
-  function handleChatSystemPromptBlur() {
-    invalidateChatPromptPreview();
-    void persistActiveChat();
-  }
-
-  async function toggleActiveChatPin(): Promise<void> {
-    if (!activeChatId) return;
-    activeChatPinned = !activeChatPinned;
-    await persistActiveChat();
-  }
-
-
-  // Inline chat rename — mirrors the structure-tree rename pattern
-  // (editingNodeId + editingTitle + Enter/Esc) so the user gets the
-  // same paradigm they already know. Only one chat is active at a
-  // time, so a boolean flag is enough (no per-id map needed).
-  let renamingActiveChat = false;
-  let chatTitleDraft = "";
-
-  function startActiveChatRename(): void {
-    if (!activeChatId) return;
-    chatTitleDraft = activeChatTitle;
-    renamingActiveChat = true;
-    setTimeout(() => {
-      const input = document.querySelector<HTMLInputElement>("[data-chat-rename-input]");
-      if (input) {
-        input.focus();
-        input.select();
-      }
-    }, 0);
-  }
-
-  function cancelActiveChatRename(): void {
-    renamingActiveChat = false;
-  }
-
-  async function commitActiveChatRename(): Promise<void> {
-    if (!renamingActiveChat || !activeChatId) return;
-    const trimmed = chatTitleDraft.trim();
-    renamingActiveChat = false;
-    if (!trimmed || trimmed === activeChatTitle) return;
-    activeChatTitle = trimmed;
-    await persistActiveChat();
-  }
-
-  function handleChatRenameKeydown(event: KeyboardEvent): void {
-    // The rename input lives inside .pane-header, which has its own
-    // keydown handler that swallows Space (and Enter) to focus the pane.
-    // Stop propagation so typing in the input — including spaces — isn't
-    // hijacked by the surrounding role="button" wrapper.
-    event.stopPropagation();
-    if (event.key === "Enter") {
-      event.preventDefault();
-      void commitActiveChatRename();
-    } else if (event.key === "Escape") {
-      event.preventDefault();
-      cancelActiveChatRename();
     }
   }
 
@@ -4965,7 +4074,8 @@ async function seedChatFromPromptEntry(
         on:custom-data={(event) => openSchemaForCustomData(event.detail.entryType, event.detail.kind)}
         on:embeddedTodos={(event) => updateEmbeddedTodosForPane(editorPane.id, event.detail.todos)}
         on:navigate={(event) => navigateToBacklink(event.detail.id, event.detail.kind)}
-        on:open-chat={(event) => seedChatFromPromptEntry(event.detail.entry, event.detail.inputs, event.detail.sceneId, event.detail.assistantId)}
+        on:open-chat={(event) => openChatFromPromptEntry(event.detail.entry, event.detail.inputs, event.detail.assistantId)}
+        on:renamed={() => void refreshChatSessions()}
       />
       <button class="pane-resize" type="button" aria-label="Resize Editor pane" on:keydown={(event) => handlePaneResizeKeydown(event, editorPane.id)} on:mousedown={(event) => startPaneResize(event, editorPane.id)}></button>
     </section>
@@ -5068,349 +4178,6 @@ async function seedChatFromPromptEntry(
       {/each}
     </div>
     <button class="pane-resize" type="button" aria-label="Resize Search pane" on:keydown={(event) => handlePaneResizeKeydown(event, "search")} on:mousedown={(event) => startPaneResize(event, "search")}></button>
-  </section>
-
-  <!-- svelte-ignore a11y_no_noninteractive_element_interactions -->
-  <section class:hidden-pane={!isPaneVisible("chat")} class="pane chat-pane" data-pane-id="chat" style={paneStyle("chat")} aria-label="AI Chat pane" on:mousedown={() => focusPane("chat")}>
-    <header class="pane-header" role="button" tabindex="0" aria-label="Move AI Chat pane" on:keydown={(event) => handlePaneHeaderKeydown(event, "chat")} on:mousedown={(event) => startPaneDrag(event, "chat")}>
-      {#if activeChatId && renamingActiveChat}
-        <input
-          class="chat-rename-input"
-          data-chat-rename-input
-          bind:value={chatTitleDraft}
-          on:keydown={handleChatRenameKeydown}
-          on:blur={() => void commitActiveChatRename()}
-          on:mousedown={(event) => event.stopPropagation()}
-          aria-label="Chat title"
-        />
-      {:else}
-        <h2
-          class:chat-title-clickable={!!activeChatId}
-          title={activeChatId ? "Double-click to rename" : undefined}
-          on:dblclick={() => activeChatId && startActiveChatRename()}
-        >
-          {activeChatId ? activeChatTitle : "AI Chat"}
-        </h2>
-      {/if}
-      {#if activeChatId && !renamingActiveChat}
-        <div class="pane-header-actions">
-          <button class="pin-button" type="button" title={activeChatPinned ? "Unpin" : "Pin"} on:mousedown={(event) => event.stopPropagation()} on:click={() => toggleActiveChatPin()}>{activeChatPinned ? "★" : "☆"}</button>
-        </div>
-      {/if}
-    </header>
-    <div class="pane-content chat-panel">
-      <!-- Inputs row: Prompt + Assistant + Preview-icon. Mirrors the user's
-           mental model — chat = (prompt, assistant, context inputs, message).
-           Prompt + Assistant are read-only once chat history exists (locked
-           preset, preserves the Anthropic cache prefix). -->
-      <div class="chat-composer-strip">
-        <div class="chat-prompt-anchor">
-          <button
-            type="button"
-            class="chat-prompt-chip"
-            class:locked={isActiveChatLocked()}
-            class:assigned={!!chatPromptEntryId}
-            title={isActiveChatLocked() ? "Prompt is locked while this chat has messages. Start a new chat to switch." : "Pick a prompt"}
-            on:click={() => !isActiveChatLocked() && toggleChatPromptPicker()}
-            disabled={isActiveChatLocked() && !chatPromptEntryId}
-          >
-            <span class="chat-prompt-glyph" aria-hidden="true">✨</span>
-            <strong>{activePromptTitle}</strong>
-            {#if isActiveChatLocked()}
-              <span class="chat-lock-glyph" aria-label="locked">🔒</span>
-            {:else}
-              <span class="chat-prompt-caret" aria-hidden="true">▾</span>
-            {/if}
-          </button>
-          {#if chatPromptEntryId && !isActiveChatLocked()}
-            <button
-              type="button"
-              class="chat-prompt-clear"
-              title="Drop this prompt (revert to freeform chat)"
-              on:click={clearChatPrompt}
-            >×</button>
-          {/if}
-          {#if promptPickerOpen}
-            <div class="chat-prompt-picker" role="menu">
-              <input
-                class="chat-prompt-picker-search"
-                type="text"
-                placeholder="Search prompts…"
-                bind:value={promptPickerSearch}
-              />
-              {#each filteredChatPromptEntries() as entry (entry.id)}
-                <button
-                  type="button"
-                  class:active-prompt={entry.id === chatPromptEntryId}
-                  on:click={() => pickPromptForChat(entry)}
-                >
-                  <strong>{entry.title}</strong>
-                  <small>{entry.entry_type}</small>
-                </button>
-              {:else}
-                <p class="muted">
-                  {promptPickerSearch
-                    ? "No prompts match."
-                    : "No chat-routed prompts. Create a prompt with output_kind = chat_panel."}
-                </p>
-              {/each}
-            </div>
-          {/if}
-        </div>
-        <div class="chat-assistant-anchor">
-          <span class="chat-assistant-glyph" aria-hidden="true">🤖</span>
-          <select
-            class="chat-assistant-chip"
-            class:locked={isActiveChatLocked()}
-            bind:value={chatAssistantId}
-            on:change={handleChatAssistantChange}
-            disabled={isActiveChatLocked()}
-            title={isActiveChatLocked() ? "Assistant is locked while this chat has messages." : "Pick an assistant"}
-            aria-label="Assistant"
-          >
-            <option value="">Default ({assistantNameFor(defaultAssistantEntryId()) || "machine default"})</option>
-            {#each assistantEntries as assistant (assistant.id)}
-              <option value={assistant.id}>{assistant.title}</option>
-            {/each}
-          </select>
-        </div>
-        <button
-          type="button"
-          class="chat-preview-icon"
-          class:active={chatPreviewPopoverOpen}
-          bind:this={chatPreviewBtnEl}
-          title="Preview what's sent — system message + attached context"
-          aria-label="Preview what's sent"
-          aria-expanded={chatPreviewPopoverOpen}
-          on:click={toggleChatPreviewPopover}
-        >👁</button>
-      </div>
-
-      {#if !chatPromptEntryId}
-        <!-- Brief is only meaningful in freeform mode — it IS the user's only
-             system-level control. When a prompt is bound the system message
-             comes from the rendered template; the 👁 icon above opens a
-             popover for inspection. -->
-        <label class="chat-brief-label">
-          <span>Brief</span>
-          <textarea
-            class="chat-system"
-            bind:value={chatSystemPrompt}
-            on:input={clearActivePromptOnEdit}
-            on:blur={handleChatSystemPromptBlur}
-            spellcheck="false"
-          ></textarea>
-        </label>
-      {/if}
-
-      {#if chatPreviewPopoverOpen}
-        <div
-          class="chat-preview-popover"
-          role="dialog"
-          aria-label="Preview what's sent"
-          style="top: {chatPreviewPopoverPos.top}px; right: {chatPreviewPopoverPos.right}px;"
-        >
-          <header class="chat-preview-popover-header">
-            <strong>Preview</strong>
-            <small>system message + attached context</small>
-            <button
-              type="button"
-              class="chat-preview-popover-close"
-              aria-label="Close"
-              on:click={() => (chatPreviewPopoverOpen = false)}
-            >×</button>
-          </header>
-          <div class="chat-preview-popover-body">
-            {#if promptPreviewLoading}
-              <p class="muted">Composing preview…</p>
-            {:else if promptPreviewError}
-              <p class="preview-result-error">{promptPreviewError}</p>
-            {:else if promptPreviewText !== null}
-              {#if promptPreviewText.trim()}
-                <pre class="chat-preview-content">{promptPreviewText}</pre>
-              {:else}
-                <p class="muted">No system message will be sent. The model sees only the chat history.</p>
-              {/if}
-            {/if}
-            <p class="muted chat-preview-hint">
-              This is the system message and context the assistant receives on the next turn.
-              Chat history above is also sent. Composer text becomes the next user message.
-            </p>
-          </div>
-        </div>
-      {/if}
-
-      <div class="chat-history" bind:this={chatScrollEl}>
-        {#if chatHistory.length === 0}
-          <p class="muted chat-empty">No messages yet. Ctrl/⌘+Enter to send.</p>
-        {/if}
-        {#each chatHistory as message, i}
-          <div class="chat-message chat-message-{message.role}">
-            <header class="chat-message-role">{message.role}</header>
-            {#if message.thinking}
-              <details class="chat-thinking" open={chatRunning && i === chatHistory.length - 1 && !message.content}>
-                <summary>Thinking</summary>
-                <div class="chat-thinking-content chat-message-rendered">{@html renderChatContent(message.thinking)}</div>
-              </details>
-            {/if}
-            {#if chatRunning && i === chatHistory.length - 1 && message.role === "assistant" && !message.content && !message.thinking}
-              <div class="chat-message-content chat-typing">…thinking</div>
-            {:else if message.content}
-              {#if message.role === "assistant"}
-                <div class="chat-message-content chat-message-rendered">{@html renderChatContent(message.content)}</div>
-              {:else}
-                <div class="chat-message-content">{message.content}</div>
-              {/if}
-            {/if}
-            {#if message.truncated}
-              <div class="chat-truncated-banner">
-                Response cut off — hit max tokens. Increase the limit in Assistant &amp; brief, then re-send.
-              </div>
-            {/if}
-            {#if message.journal_added && message.journal_added.length > 0}
-              <div class="chat-journal-added" title="Lore auto-detected from your message and added to this chat's context.">
-                <span class="chat-journal-added-label">Auto-added context:</span>
-                {#each message.journal_added as entry (entry.entry_id)}
-                  <span
-                    class="chat-journal-chip"
-                    class:chat-journal-chip-depth1={entry.source === "depth1_expansion"}
-                    title={entry.source === "depth1_expansion"
-                      ? `${entry.title} — pulled in because another detected entity mentions it`
-                      : `${entry.title} — detected in your message`}
-                  >{entry.title || entry.entry_id}</span>
-                {/each}
-              </div>
-            {/if}
-            {#if message.role === "assistant" && message.usage}
-              {@const totalIn = message.usage.input_tokens + message.usage.cached_input_tokens + message.usage.cache_write_tokens}
-              {@const cachePct = totalIn > 0 ? Math.round((message.usage.cached_input_tokens / totalIn) * 100) : 0}
-              <div class="chat-turn-meta" title={`Input: ${totalIn} tok (${message.usage.cached_input_tokens} cached, ${message.usage.cache_write_tokens} written). Output: ${message.usage.output_tokens} tok.`}>
-                {totalIn} → {message.usage.output_tokens} tok
-                {#if cachePct > 0}<span class="chat-turn-cache">· {cachePct}% cached</span>{/if}
-                {#if message.cost_usd != null}<span class="chat-turn-cost">· {formatCostEur(message.cost_usd)}</span>{/if}
-              </div>
-            {/if}
-          </div>
-        {/each}
-      </div>
-
-      {#if chatLastMeta}
-        <p class="chat-meta">
-          {chatLastMeta.provider} · {chatLastMeta.model} · {chatLastMeta.latency_ms} ms
-        </p>
-      {/if}
-      {#if chatError}
-        <p class="preview-result-error">{chatError}</p>
-      {/if}
-
-      {#if declaredInputs.length > 0}
-        <div class="chat-inputs-strip" class:locked={chatIsLocked} class:hidden={chatIsLocked && chatInputsHidden}>
-          {#if chatIsLocked}
-            <button
-              type="button"
-              class="chat-inputs-toggle"
-              aria-expanded={!chatInputsHidden}
-              on:click={() => (chatInputsHidden = !chatInputsHidden)}
-            >{chatInputsHidden ? "▸ Show inputs" : "▾ Hide inputs"}</button>
-          {/if}
-          {#if !chatIsLocked || !chatInputsHidden}
-            <div class="chat-inputs-fields">
-              {#each declaredInputs as input (input.name)}
-                {@const missing = input.required && isInputMissing(input, chatInputDrafts[input.name])}
-                <label class="chat-input-field" class:missing class:disabled={chatIsLocked}>
-                  <span class="chat-input-label">
-                    {input.label || input.name}{#if input.required}<span class="required-marker" title="Required"> *</span>{/if}
-                  </span>
-                  <PromptInputField
-                    input={input}
-                    value={chatInputDrafts[input.name] ?? ""}
-                    metadataSchema={metadataSchema}
-                    excludeId={null}
-                    ariaLabel={input.label || input.name}
-                    structure={structure}
-                    loreEntries={loreEntries}
-                    promptEntries={promptEntries}
-                    implicitContextMatcher={implicitContextMatcher}
-                    on:change={(event) => !chatIsLocked && updateChatInputDraft(input.name, event.detail.value)}
-                  />
-                </label>
-              {/each}
-            </div>
-          {/if}
-        </div>
-      {/if}
-
-      {#if activeChatId && activeChatJournal.length > 0}
-        <div class="chat-journal-scope" aria-label="Lore entries currently in this chat's implicit-context cache">
-          <span class="chat-journal-scope-label">In context:</span>
-          {#each activeChatJournal as entry (entry.entry_id)}
-            <span
-              class="chat-journal-scope-chip"
-              class:chat-journal-scope-chip-fresh={activeChatJournalFreshIds.has(entry.entry_id)}
-              class:chat-journal-scope-chip-depth1={entry.source === "depth1_expansion"}
-              title={entry.source === "depth1_expansion"
-                ? `${entry.title} — pulled in because another entity's body mentions it`
-                : `${entry.title} — detected in a user message`}
-            >{entry.title || entry.entry_id}</span>
-          {/each}
-        </div>
-      {/if}
-
-      {#if chatEstimate}
-        <div class="chat-estimate-strip" title="Estimated input cost for the bound prompt. Output cost depends on the response.">
-          <span class="chat-estimate-tokens">{formatTokens(chatEstimate.tokens)} tok</span>
-          <span class="chat-estimate-sep">·</span>
-          <span class="chat-estimate-cost">{formatCostEur(chatEstimate.cost_usd)}</span>
-          {#if chatEstimate.caching_style === "explicit" && chatEstimate.cache_blocks.length > 1}
-            <span class="chat-estimate-sep">·</span>
-            {#each chatEstimate.cache_blocks as block, i}
-              <span class="chat-estimate-chip">{block.label} {formatTokens(block.tokens)}</span>
-              {#if i < chatEstimate.cache_blocks.length - 1}<span class="chat-estimate-sep">·</span>{/if}
-            {/each}
-          {/if}
-        </div>
-      {/if}
-      {#if ttlChips.length > 0 && chatEstimate?.caching_style === "explicit"}
-        <div class="chat-ttl-strip" title="Cache lifetime estimates. Provider may evict early under load — these are not authoritative.">
-          {#each ttlChips as chip, i}
-            <span class="chat-ttl-chip" class:chat-ttl-expired={chip.expired}>
-              {chip.label} ({chip.ttlLabel}) {chip.formatted}
-            </span>
-            {#if i < ttlChips.length - 1}<span class="chat-estimate-sep">·</span>{/if}
-          {/each}
-        </div>
-      {/if}
-      <PlainTextEditor
-        class="chat-input"
-        value={chatInput}
-        on:change={(e) => (chatInput = e.detail.value)}
-        on:keydown={(e) => handleChatInputKeydown(e.detail)}
-        placeholder="Message… (Ctrl/⌘+Enter to send)"
-        ariaLabel="Chat message"
-        minHeight={60}
-        maxHeight={240}
-        matcher={implicitContextMatcher}
-      />
-      <div class="button-row chat-action-row">
-        <button type="button" disabled={!chatHistory.length || chatRunning} on:click={clearChat}>Clear</button>
-        <button
-          type="button"
-          class="primary"
-          disabled={chatRunning
-            || missingRequiredInputs.length > 0
-            || (!chatInput.trim() && !(chatPromptEntryId && chatHistory.length === 0))}
-          title={missingRequiredInputs.length > 0
-            ? `Fill required input${missingRequiredInputs.length > 1 ? "s" : ""}: ${missingRequiredInputs.map((i) => i.label || i.name).join(", ")}`
-            : (!chatInput.trim() && chatPromptEntryId && chatHistory.length === 0)
-              ? "Send the prompt as-is (no extra message)"
-              : ""}
-          on:click={sendChat}
-        >
-          {chatRunning ? "Sending…" : "Send"}
-        </button>
-      </div>
-    </div>
-    <button class="pane-resize" type="button" aria-label="Resize AI Chat pane" on:keydown={(event) => handlePaneResizeKeydown(event, "chat")} on:mousedown={(event) => startPaneResize(event, "chat")}></button>
   </section>
 
   <DirectoryPickerModal

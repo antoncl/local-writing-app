@@ -18,7 +18,6 @@ import type {
   ChatSession,
   ChatSessionList,
   CreateChatSessionRequest,
-  SaveChatSessionRequest,
   DirectoryListing,
   EntryTypeDefinition,
   KnownTags,
@@ -500,9 +499,9 @@ export const api = {
     });
   },
   // Unified node-CRUD shim (Phase 3c). Returns the kind-specific
-  // shape; callers pass the expected type. Coexists with the per-kind
-  // endpoints (getChatSession et al.) — the bespoke paths remain the
-  // source of truth until the per-kind endpoints retire.
+  // shape; callers pass the expected type. Chat read/write goes through
+  // this path now (Phase 4d); the bespoke /chats/{id} GET+PUT endpoints
+  // remain server-side until the per-kind endpoints retire.
   readNode<T = unknown>(nodeId: string) {
     return request<T>(`/nodes/${encodeURIComponent(nodeId)}`);
   },
@@ -518,15 +517,6 @@ export const api = {
   createChatSession(payload: CreateChatSessionRequest = {}) {
     return request<ChatSession>("/chats", {
       method: "POST",
-      body: JSON.stringify(payload),
-    });
-  },
-  getChatSession(chatId: string) {
-    return request<ChatSession>(`/chats/${encodeURIComponent(chatId)}`);
-  },
-  saveChatSession(chatId: string, payload: SaveChatSessionRequest) {
-    return request<ChatSession>(`/chats/${encodeURIComponent(chatId)}`, {
-      method: "PUT",
       body: JSON.stringify(payload),
     });
   },

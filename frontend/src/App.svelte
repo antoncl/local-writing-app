@@ -251,6 +251,16 @@
   // Per-field icon override (Tabler name, no prefix) — null = type default.
   let schemaFieldIcon: string | null = null;
   let iconPickerOpen = false;
+  // Stable-key handling (metadata revision, decision #10): a field's display
+  // name renames freely; its key (the Jinja/macro contract) is auto-derived
+  // only while creating, and afterwards changes only via an explicit rename
+  // (which migrates stored values). `keyEditing` reveals the key input;
+  // `keyManual` stops name→key auto-derivation once the key is hand-edited.
+  let schemaFieldKeyEditing = false;
+  let schemaFieldKeyManual = false;
+  // Per-option display labels keyed by stable value (decision #10: value is
+  // the contract, label is cosmetic). Sits alongside schemaFieldOptionColors.
+  let schemaFieldOptionLabels: Record<string, string> = {};
   // Expand-in-place field editing in the type editor: the field id whose
   // inline editor is open (one at a time), or the "__new__" sentinel while
   // adding a field. null = all rows collapsed. Replaces routing to the
@@ -1479,6 +1489,11 @@
     schemaFieldOptionColors = Object.fromEntries(
       field.options.map((o) => [o.value, o.color ?? null]),
     );
+    schemaFieldOptionLabels = Object.fromEntries(
+      field.options.filter((o) => o.label).map((o) => [o.value, o.label as string]),
+    );
+    schemaFieldKeyEditing = false;
+    schemaFieldKeyManual = false;
     schemaFieldLayerId = metadataSchemaOverview?.field_sources[fieldId]?.built_in ? projectSchemaLayerId() : (metadataSchemaOverview?.field_sources[fieldId]?.layer_id ?? projectSchemaLayerId());
     schemaFieldEntryType = targetEntryTypeId;
     schemaFieldGroup = field.group ?? "";
@@ -1506,9 +1521,12 @@
     schemaFieldPickerConfig = { kinds: ["lore"], entry_types: {} };
     schemaFieldOptions = "";
     schemaFieldOptionColors = {};
+    schemaFieldOptionLabels = {};
     schemaFieldGroup = "";
     schemaFieldIcon = null;
     iconPickerOpen = false;
+    schemaFieldKeyEditing = false;
+    schemaFieldKeyManual = false;
     schemaFieldLayerId = layerId;
     schemaFieldEntryType = entryTypeId;
     if (inline) {
@@ -1772,7 +1790,10 @@
 
   function updateSchemaFieldName(value: string) {
     schemaFieldName = value;
-    if (!schemaFieldReadonly) {
+    // Auto-derive the stable key only while CREATING a field and only until
+    // the key is hand-edited. Once the field exists, the name renames freely
+    // and the key changes solely via the explicit "rename (migrates)" path.
+    if (!schemaFieldReadonly && selectedSchemaFieldId === null && !schemaFieldKeyManual) {
       schemaFieldId = slugifyFieldId(value);
     }
   }
@@ -1810,8 +1831,13 @@
             colorFromEditor !== undefined
               ? colorFromEditor
               : (prev?.color ?? null);
+          const labelFromEditor = schemaFieldOptionLabels[value];
+          const label =
+            labelFromEditor !== undefined ? labelFromEditor : prev?.label;
           const out: import("./types").SelectOption = { value };
-          if (prev?.label) out.label = prev.label;
+          // Only persist a label when it actually differs from the stable
+          // value (label is cosmetic; value is the macro contract).
+          if (label && label.trim() && label.trim() !== value) out.label = label.trim();
           if (color) out.color = color;
           return out;
         });
@@ -3839,6 +3865,25 @@
                 <label class="inline-check"><input type="checkbox" bind:checked={schemaFieldAllowMultiple} /> Allow multiple</label>
               {/if}
             </div>
+            <div class="sfi-key-row">
+              {#if schemaFieldKeyEditing}
+                <span class="sfi-key-tag">key</span>
+                <input
+                  class="sfi-key-input"
+                  value={schemaFieldId}
+                  aria-label="Field key"
+                  on:input={(event) => { schemaFieldId = slugifyFieldId(event.currentTarget.value); schemaFieldKeyManual = true; }}
+                />
+                <span class="sfi-key-hint">{selectedSchemaFieldId ? "changing the key migrates existing values" : "auto-derived from the name"}</span>
+              {:else if schemaFieldId}
+                <span class="sfi-id">key <code>{schemaFieldId}</code></span>
+                {#if !schemaFieldReadonly}
+                  <button type="button" class="sfi-key-rename" on:click={() => (schemaFieldKeyEditing = true)}>
+                    {selectedSchemaFieldId ? "rename (migrates)" : "edit key"}
+                  </button>
+                {/if}
+              {/if}
+            </div>
             {#if schemaFieldType === "entity_ref"}
               <div class="schema-field-picker-config">
                 <NodePickerConfigEditor
@@ -3850,30 +3895,39 @@
               </div>
             {/if}
             {#if schemaFieldType === "select"}
-              <label class="sfi-field">Options
-                <input bind:value={schemaFieldOptions} placeholder="draft, revised, complete" />
+              <label class="sfi-field sfi-options-values">Option values
+                <input bind:value={schemaFieldOptions} placeholder="tribunal, crown, marsh" />
               </label>
               {#if schemaFieldOptionValues.length > 0}
-                <div class="schema-field-option-colors">
-                  <span class="option-colors-label">Colours</span>
+                <div class="sfi-options">
                   {#each schemaFieldOptionValues as optionValue (optionValue)}
-                    <div class="option-color-row">
-                      <span class="option-color-value">{optionValue}</span>
+                    <div class="sfi-option-row">
                       <SwatchPicker
                         value={schemaFieldOptionColors[optionValue] ?? null}
                         onChange={(id) => {
                           schemaFieldOptionColors = { ...schemaFieldOptionColors, [optionValue]: id };
                         }}
                       />
+                      <input
+                        class="sfi-option-label"
+                        value={schemaFieldOptionLabels[optionValue] ?? ""}
+                        placeholder={optionValue}
+                        aria-label={`Display label for ${optionValue}`}
+                        on:input={(event) => {
+                          schemaFieldOptionLabels = { ...schemaFieldOptionLabels, [optionValue]: event.currentTarget.value };
+                        }}
+                      />
+                      <span class="sfi-option-value">value: {optionValue}</span>
                     </div>
                   {/each}
+                  <p class="sfi-options-hint">
+                    <i class="ti ti-info-circle" aria-hidden="true"></i>
+                    the label renames freely; the mono <strong>value</strong> is the macro contract — rename a value in the field above to migrate it
+                  </p>
                 </div>
               {/if}
             {/if}
             <div class="sfi-footer">
-              {#if schemaFieldId}
-                <small class="sfi-id" title="Stable key referenced by templates and macros — renaming the field name does not change it">id <code>{schemaFieldId}</code></small>
-              {/if}
               <span class="sfi-spacer"></span>
               {#if selectedSchemaFieldId}
                 <button class="link-danger" type="button" on:click={requestDeleteSchemaField}>Remove</button>

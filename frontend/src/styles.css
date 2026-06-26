@@ -2733,6 +2733,87 @@ button.schema-field-row:hover {
 }
 .sfi-id code {
   font-size: 11px;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  color: var(--text-2, #4d5753);
+}
+
+/* Stable-key row (decision #10): key shown as quiet mono + rename affordance. */
+.sfi-key-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+.sfi-key-rename {
+  border: 0;
+  background: transparent;
+  padding: 0;
+  font-size: 11px;
+  color: var(--accent, #2f6f5e);
+  cursor: pointer;
+}
+.sfi-key-rename:hover {
+  text-decoration: underline;
+}
+.sfi-key-tag {
+  font-size: 11px;
+  color: var(--text-3, #74817b);
+}
+.sfi-key-input {
+  width: 160px;
+  padding: 5px 8px;
+  border: 1px solid var(--accent, #2f6f5e);
+  border-radius: 8px;
+  background: var(--surface, #fff);
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 12px;
+}
+.sfi-key-hint {
+  font-size: 11px;
+  color: var(--text-3, #74817b);
+}
+
+/* Option rows: swatch · label (renames freely) · stable mono value. */
+.sfi-options-values input {
+  font-family: inherit;
+}
+.sfi-options {
+  display: flex;
+  flex-direction: column;
+  gap: 7px;
+}
+.sfi-option-row {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+}
+.sfi-option-label {
+  flex: 1;
+  min-width: 0;
+  padding: 5px 8px;
+  border: 1px solid var(--border, #cbd6d2);
+  border-radius: 8px;
+  background: var(--surface, #fff);
+  font-size: 13px;
+}
+.sfi-option-value {
+  flex: none;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 11px;
+  color: var(--text-3, #74817b);
+}
+.sfi-options-hint {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  margin: 2px 0 0;
+  font-size: 11px;
+  color: var(--text-3, #74817b);
+}
+.sfi-options-hint strong {
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-weight: 600;
+  color: var(--text-2, #4d5753);
 }
 .sfi-spacer {
   flex: 1;

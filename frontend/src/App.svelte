@@ -4080,6 +4080,7 @@
         on:navigate={(event) => navigateToBacklink(event.detail.id, event.detail.kind)}
         on:open-chat={(event) => openChatFromPromptEntry(event.detail.entry, event.detail.inputs, event.detail.sceneId, event.detail.assistantId)}
         on:renamed={() => void refreshChatSessions()}
+        on:cost-changed={() => void refreshProjectCost()}
       />
       <button class="pane-resize" type="button" aria-label="Resize Editor pane" on:keydown={(event) => handlePaneResizeKeydown(event, editorPane.id)} on:mousedown={(event) => startPaneResize(event, editorPane.id)}></button>
     </section>

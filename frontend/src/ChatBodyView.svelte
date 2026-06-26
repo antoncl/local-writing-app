@@ -55,6 +55,9 @@
     // Fired after a title edit (from the pane header) persists, so the host
     // can refresh the Chats-pane roster + summaries.
     renamed: void;
+    // Fired after a cost-accumulating turn persists, so the host can refresh
+    // the project-wide cost rollup chip.
+    "cost-changed": void;
   }>();
 
   const DEFAULT_CHAT_SYSTEM_PROMPT =
@@ -446,6 +449,7 @@
     const chatId = scene?.id;
     if (!chatId) return;
     try {
+      const hadCost = pendingTurnCost != null;
       const saved = await api.saveNode<ChatSession>(chatId, currentChatSessionPayload());
       activeChatTitle = saved.title;
       activeChatPinned = saved.pinned;
@@ -456,6 +460,10 @@
       // cost-total footer accurate without re-fetching.
       chatSession = saved;
       dispatch("body-change");
+      // A turn that accumulated cost moves the project-wide rollup chip.
+      // App owns that chip, so signal it to re-fetch (mirrors the old
+      // bespoke persistActiveChat's refreshProjectCost call).
+      if (hadCost) dispatch("cost-changed");
     } catch (e) {
       chatError = `Couldn't save chat: ${(e as Error).message}`;
     }

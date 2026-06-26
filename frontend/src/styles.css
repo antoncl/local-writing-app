@@ -2510,6 +2510,250 @@ button.row-action-add.active {
   gap: 4px;
 }
 
+/* Type-editor identity line: kind pill + "extends <parent>". */
+.schema-type-identity {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  flex-wrap: wrap;
+  margin: 2px 0 4px;
+}
+.kind-pill {
+  display: inline-flex;
+  align-items: center;
+  padding: 1px 9px;
+  border-radius: 999px;
+  border: 1px solid var(--border, #cbd6d2);
+  background: var(--surface, #fff);
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--text-2, #4d5753);
+  text-transform: capitalize;
+}
+.kind-pill.kind-lore {
+  background: var(--k-lore-soft, #ececf6);
+  border-color: var(--k-lore-border, #c9cbe8);
+  color: var(--k-lore-text, #43448a);
+}
+.extends-label {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  font-size: 11px;
+  color: var(--text-3, #74817b);
+}
+.extends-pill {
+  display: inline-flex;
+  align-items: center;
+  padding: 1px 9px;
+  border-radius: 999px;
+  border: 1px solid var(--border, #cbd6d2);
+  background: var(--surface, #fff);
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--text-2, #4d5753);
+}
+
+/* Schema-mode field rows (metadata revision, mockup B): the same
+   icon · name vocabulary as the editor rail, plus a mono type chip and
+   the source/inherited markers. "Define looks like display." */
+.schema-field-rows {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.schema-field-row {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  width: 100%;
+  padding: 6px 8px;
+  border: 1px solid transparent;
+  border-radius: 8px;
+  background: transparent;
+  text-align: left;
+  cursor: pointer;
+}
+button.schema-field-row:hover {
+  background: var(--surface, #fff);
+  border-color: var(--divider, #e2e8e5);
+}
+.schema-field-row.inherited {
+  opacity: 0.62;
+  cursor: default;
+}
+.sfr-grip {
+  flex: none;
+  display: inline-flex;
+  color: var(--border-strong, #b4c2bc);
+  font-size: 15px;
+}
+.sfr-tile {
+  flex: none;
+  width: 24px;
+  height: 24px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 7px;
+  background: var(--inset, #f1f5f3);
+  border: 1px dashed var(--border-strong, #b4c2bc);
+  color: var(--text-2, #4d5753);
+  font-size: 14px;
+}
+.schema-field-row.inherited .sfr-tile {
+  border-style: solid;
+  border-color: var(--divider, #e2e8e5);
+}
+.sfr-name {
+  flex: 0 1 auto;
+  font-size: 13px;
+  color: var(--text, #242424);
+}
+.sfr-typechip {
+  flex: none;
+  padding: 1px 8px;
+  border-radius: 6px;
+  border: 1px solid var(--k-snippet, #7a5230);
+  background: var(--k-snippet-soft, #f3e6d6);
+  color: var(--k-snippet-text, #7a5230);
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 11px;
+  font-weight: 600;
+}
+.sfr-meta {
+  margin-left: auto;
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+}
+.sfr-group {
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  color: var(--text-3, #74817b);
+}
+.sfr-inherited-label {
+  font-size: 11px;
+  font-style: italic;
+  color: var(--text-3, #74817b);
+}
+.sfr-cog {
+  color: var(--text-3, #74817b);
+  font-size: 14px;
+}
+.schema-field-row.expanded {
+  background: var(--surface, #fff);
+  border-color: var(--divider, #e2e8e5);
+}
+
+/* Expand-in-place field editor (metadata revision, mockup C). One row's
+   editor is open at a time, accent-striped, directly under its row. */
+.schema-field-inline {
+  display: flex;
+  flex-direction: column;
+  gap: 11px;
+  margin: 2px 0 6px;
+  padding: 12px;
+  border: 1px solid var(--divider, #e2e8e5);
+  border-radius: 8px;
+  background: var(--inset, #f1f5f3);
+  box-shadow: inset 3px 0 0 0 var(--accent, #2f6f5e);
+}
+.sfi-head {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+}
+.sfi-name {
+  flex: 1;
+  min-width: 0;
+  padding: 6px 9px;
+  border: 1px solid var(--border, #cbd6d2);
+  border-radius: 8px;
+  background: var(--surface, #fff);
+  font-size: 13px;
+}
+.sfi-type {
+  flex: none;
+  padding: 6px 8px;
+  border: 1px solid var(--border, #cbd6d2);
+  border-radius: 8px;
+  background: var(--surface, #fff);
+  font-size: 12px;
+}
+.sfi-controls {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  flex-wrap: wrap;
+}
+.sfi-field {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  font-size: 12px;
+  color: var(--text-2, #4d5753);
+}
+.sfi-field input {
+  padding: 5px 8px;
+  border: 1px solid var(--border, #cbd6d2);
+  border-radius: 8px;
+  background: var(--surface, #fff);
+  font-size: 13px;
+  font-weight: 400;
+}
+.sfi-footer {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.sfi-id {
+  font-size: 11px;
+  color: var(--text-3, #74817b);
+}
+.sfi-id code {
+  font-size: 11px;
+}
+.sfi-spacer {
+  flex: 1;
+}
+.sfi-cancel {
+  padding: 5px 11px;
+  border: 1px solid var(--border, #cbd6d2);
+  border-radius: 8px;
+  background: var(--surface, #fff);
+  font-size: 12.5px;
+  color: var(--text-2, #4d5753);
+  cursor: pointer;
+}
+.sfi-done {
+  padding: 5px 14px;
+  border: 1px solid var(--accent, #2f6f5e);
+  border-radius: 8px;
+  background: var(--accent, #2f6f5e);
+  color: #fff;
+  font-size: 12.5px;
+  font-weight: 600;
+  cursor: pointer;
+}
+.sfi-done:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+.link-danger {
+  padding: 5px 4px;
+  border: 0;
+  background: transparent;
+  font-size: 12px;
+  color: #b4453a;
+  cursor: pointer;
+}
+.link-danger:hover {
+  text-decoration: underline;
+}
+
 .project-empty-hint {
   margin: 4px 0;
   font-size: 13px;

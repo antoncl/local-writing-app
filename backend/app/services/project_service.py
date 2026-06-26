@@ -34,6 +34,7 @@ from app.models import (
     CreateTodoRequest,
     DeleteMetadataEntryTypeRequest,
     DeleteMetadataFieldRequest,
+    DeleteMetadataGroupRequest,
     DirectoryEntry,
     DirectoryListing,
     KnownTags,
@@ -72,8 +73,10 @@ from app.models import (
     StructureNodeDeletePreview,
     TodoDocument,
     TodoItem,
+    SetGroupApplicationsRequest,
     UpsertMetadataEntryTypeRequest,
     UpsertMetadataFieldRequest,
+    UpsertMetadataGroupRequest,
     UpdateProjectSettingsRequest,
     UpdateTodoRequest,
 )
@@ -538,7 +541,7 @@ class ProjectService:
         }
 
     def _empty_metadata_schema(self) -> dict[str, Any]:
-        return {"version": 1, "entry_types": {}, "fields": {}}
+        return {"version": 1, "entry_types": {}, "fields": {}, "groups": {}}
 
     def open_project(self, root_path: Path, projects_base_folder: Path | None = None) -> ProjectInfo:
         root = root_path.expanduser().resolve()
@@ -990,6 +993,12 @@ class ProjectService:
         existing_entry_type = entry_types.get(entry_type_id)
         existing_fields = existing_entry_type.get("fields") if isinstance(existing_entry_type, dict) else None
         fields = existing_fields if isinstance(existing_fields, list) else request.entry_type.fields
+        # Preserve existing group applications when the caller (e.g. the type
+        # editor's Save Type) doesn't carry them — they're managed via the
+        # dedicated set_entry_type_group_applications path, like `fields`.
+        existing_applications = (
+            existing_entry_type.get("group_applications") if isinstance(existing_entry_type, dict) else None
+        )
         # Persist ONLY the fields the caller actually set — `model_dump(exclude_unset=True)`.
         # Pydantic defaults like `body_editor="wysiwyg"` would otherwise leak onto disk and
         # override the inherited values from a parent type (e.g. a `prompt` sub-type would
@@ -1001,6 +1010,8 @@ class ProjectService:
         entry_type_data["kind"] = request.entry_type.kind
         entry_type_data["abstract"] = bool(request.entry_type.abstract)
         entry_type_data["fields"] = fields
+        if isinstance(existing_applications, list) and "group_applications" not in entry_type_data:
+            entry_type_data["group_applications"] = deepcopy(existing_applications)
         if not request.entry_type.parent:
             entry_type_data.pop("parent", None)
         if request.entry_type.prompt is None and isinstance(existing_entry_type, dict):
@@ -1064,6 +1075,98 @@ class ProjectService:
             raise ProjectServiceError(" ".join(schema_errors), 422)
 
         self._write_yaml(source_path, layer_data)
+        return self.read_metadata_schema()
+
+    def _validate_candidate_schema(self, root: Path, layer_path: Path, layer_data: dict[str, Any]) -> None:
+        """Merge all layers (substituting `layer_data` for `layer_path`),
+        resolve, validate, and raise on any errors. Shared by the schema
+        write paths."""
+        candidate = deepcopy(DEFAULT_METADATA_SCHEMA)
+        for path in self._metadata_schema_layer_paths(root):
+            if path == layer_path:
+                self._merge_metadata_schema_layer(candidate, layer_data)
+            elif path.exists():
+                self._merge_metadata_schema_layer(candidate, self._read_metadata_schema_layer(path))
+        schema_errors = self._validate_metadata_schema_definition(
+            MetadataSchema.model_validate(self._resolve_metadata_schema_inheritance(candidate))
+        )
+        if schema_errors:
+            raise ProjectServiceError(" ".join(schema_errors), 422)
+
+    def upsert_metadata_group(self, request: UpsertMetadataGroupRequest) -> MetadataSchema:
+        root = self._require_project()
+        layer_path = self._metadata_schema_layer_path_for_id(root, request.layer_id)
+        if layer_path is None:
+            raise ProjectServiceError("Unknown metadata schema layer.", 404)
+        group_id = request.group_id.strip()
+        if not re.fullmatch(r"[A-Za-z][A-Za-z0-9_]*", group_id):
+            raise ProjectServiceError("Group ID must start with a letter and contain only letters, numbers, and underscores.", 422)
+        existing = self.read_metadata_schema().groups.get(group_id)
+        if existing is not None and not request.allow_existing:
+            raise ProjectServiceError(f"Group {group_id} already exists.", 422)
+        layer_data = self._read_yaml(layer_path) if layer_path.exists() else self._empty_metadata_schema()
+        groups = layer_data.get("groups")
+        if not isinstance(groups, dict):
+            groups = {}
+        groups[group_id] = request.group.model_dump(exclude_none=True)
+        layer_data["groups"] = groups
+        self._validate_candidate_schema(root, layer_path, layer_data)
+        self._write_yaml(layer_path, layer_data)
+        return self.read_metadata_schema()
+
+    def delete_metadata_group(self, request: DeleteMetadataGroupRequest) -> MetadataSchema:
+        root = self._require_project()
+        group_id = request.group_id.strip()
+        schema = self.read_metadata_schema()
+        if group_id not in schema.groups:
+            raise ProjectServiceError(f"Unknown group {group_id}.", 404)
+        for entry_type_id, entry_type in schema.entry_types.items():
+            if any(application.group_id == group_id for application in entry_type.group_applications):
+                raise ProjectServiceError(
+                    f"Group {group_id} is applied by {entry_type_id}; remove the application first.", 422
+                )
+        removed = False
+        for path in self._metadata_schema_layer_paths(root):
+            if not path.exists():
+                continue
+            layer_data = self._read_yaml(path)
+            groups = layer_data.get("groups")
+            if isinstance(groups, dict) and group_id in groups:
+                groups.pop(group_id)
+                layer_data["groups"] = groups
+                self._write_yaml(path, layer_data)
+                removed = True
+        if not removed:
+            raise ProjectServiceError(f"Group {group_id} is not defined in a project layer.", 422)
+        return self.read_metadata_schema()
+
+    def set_entry_type_group_applications(self, request: SetGroupApplicationsRequest) -> MetadataSchema:
+        root = self._require_project()
+        layer_path = self._metadata_schema_layer_path_for_id(root, request.layer_id)
+        if layer_path is None:
+            raise ProjectServiceError("Unknown metadata schema layer.", 404)
+        entry_type_id = request.entry_type_id.strip()
+        schema = self.read_metadata_schema()
+        if entry_type_id not in schema.entry_types:
+            raise ProjectServiceError(f"Unknown node type {entry_type_id}.", 404)
+        overview = self.read_metadata_schema_overview()
+        source = overview.entry_type_sources.get(entry_type_id)
+        if source and source.built_in:
+            raise ProjectServiceError("System node types cannot be edited.", 422)
+        layer_data = self._read_yaml(layer_path) if layer_path.exists() else self._empty_metadata_schema()
+        entry_types = layer_data.get("entry_types")
+        if not isinstance(entry_types, dict):
+            entry_types = {}
+        entry_type_data = entry_types.get(entry_type_id)
+        if not isinstance(entry_type_data, dict):
+            entry_type_data = {"fields": []}
+        entry_type_data["group_applications"] = [
+            application.model_dump(exclude_none=True) for application in request.applications
+        ]
+        entry_types[entry_type_id] = entry_type_data
+        layer_data["entry_types"] = entry_types
+        self._validate_candidate_schema(root, layer_path, layer_data)
+        self._write_yaml(layer_path, layer_data)
         return self.read_metadata_schema()
 
     def upsert_metadata_field(self, request: UpsertMetadataFieldRequest) -> MetadataSchema:
@@ -1516,6 +1619,11 @@ class ProjectService:
                 base.get("fields", {}),
                 layer.get("fields"),
             )
+        if "groups" in layer:
+            base["groups"] = self._merge_metadata_schema_section(
+                base.get("groups", {}),
+                layer.get("groups"),
+            )
 
     def _resolve_metadata_schema_inheritance(self, data: dict[str, Any]) -> dict[str, Any]:
         resolved_data = deepcopy(data)
@@ -1525,6 +1633,50 @@ class ProjectService:
 
         resolved: dict[str, Any] = {}
         resolving: set[str] = set()
+        # L2 groups: generated field definitions accumulated while expanding
+        # each entry type's group_applications. Merged into `fields` after
+        # resolution (declared fields win on key collision).
+        groups = resolved_data.get("groups")
+        if not isinstance(groups, dict):
+            groups = {}
+        generated_fields: dict[str, Any] = {}
+
+        def expand_group_applications(raw_entry_type: dict[str, Any], target_fields: list[Any]) -> None:
+            applications = raw_entry_type.get("group_applications")
+            if not isinstance(applications, list):
+                return
+            for application in applications:
+                if not isinstance(application, dict):
+                    continue
+                group_id = application.get("group_id")
+                group = groups.get(group_id) if isinstance(group_id, str) else None
+                if not isinstance(group, dict):
+                    continue
+                label = str(application.get("label", "")).strip()
+                prefix = str(application.get("key_prefix", "")).strip()
+                group_name = str(group.get("name", "")).strip()
+                section = f"{label} {group_name}".strip() if label else group_name
+                members = group.get("members")
+                if not isinstance(members, list):
+                    continue
+                for member in members:
+                    if not isinstance(member, dict):
+                        continue
+                    member_key = str(member.get("key", "")).strip()
+                    if not member_key:
+                        continue
+                    generated_key = f"{prefix}{member_key}"
+                    generated_fields[generated_key] = {
+                        "name": member.get("name") or member_key,
+                        "type": member.get("type", "text"),
+                        "icon": member.get("icon"),
+                        "options": deepcopy(member.get("options", [])),
+                        "picker_config": deepcopy(member.get("picker_config")),
+                        "group": section or None,
+                        "group_origin": group_id,
+                    }
+                    if generated_key not in target_fields:
+                        target_fields.append(generated_key)
 
         def resolve_entry_type(entry_type_id: str) -> Any:
             if entry_type_id in resolved:
@@ -1557,6 +1709,9 @@ class ProjectService:
                 inherited_fields,
                 local_fields,
             )
+            # L2: append generated fields from this type's group applications
+            # (after own/inherited so they trail the hand-authored fields).
+            expand_group_applications(raw_entry_type, next_entry_type["fields"])
             if isinstance(parent_id, str) and parent_id in entry_types:
                 parent_definition = resolved.get(parent_id)
                 if isinstance(parent_definition, dict):
@@ -1574,6 +1729,17 @@ class ProjectService:
 
         for entry_type_id in list(entry_types):
             entry_types[entry_type_id] = resolve_entry_type(str(entry_type_id))
+
+        # Merge generated group fields into the schema's field registry.
+        # Declared fields win on a key collision (don't clobber an authored
+        # field that happens to match a generated prefix+member key).
+        if generated_fields:
+            schema_fields = resolved_data.get("fields")
+            if not isinstance(schema_fields, dict):
+                schema_fields = {}
+            for generated_key, generated_def in generated_fields.items():
+                schema_fields.setdefault(generated_key, generated_def)
+            resolved_data["fields"] = schema_fields
         return resolved_data
 
     def _merge_metadata_entry_types(self, base: Any, layer: Any) -> Any:
@@ -1656,6 +1822,13 @@ class ProjectService:
             for field_id in entry_type.fields:
                 if field_id not in schema.fields:
                     errors.append(f"Metadata entry_type {entry_type_id} references unknown field {field_id}.")
+
+        for entry_type_id, entry_type in schema.entry_types.items():
+            for application in entry_type.group_applications:
+                if application.group_id not in schema.groups:
+                    errors.append(
+                        f"Metadata entry_type {entry_type_id} applies unknown group {application.group_id}."
+                    )
 
         for entry_type_id, entry_type in schema.entry_types.items():
             if entry_type.prompt is None:

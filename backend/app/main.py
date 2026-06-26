@@ -53,6 +53,7 @@ from app.models import (
     RenameStructureNodeRequest,
     DeleteMetadataEntryTypeRequest,
     DeleteMetadataFieldRequest,
+    DeleteMetadataGroupRequest,
     DirectoryListing,
     KnownTags,
     LoreEntry,
@@ -79,11 +80,13 @@ from app.models import (
     Scene,
     SearchRequest,
     SearchResponse,
+    SetGroupApplicationsRequest,
     StructureDocument,
     StructureNodeDeletePreview,
     TodoDocument,
     UpsertMetadataEntryTypeRequest,
     UpsertMetadataFieldRequest,
+    UpsertMetadataGroupRequest,
     UpdateProjectSettingsRequest,
     UpdateTodoRequest,
 )
@@ -302,6 +305,24 @@ def rename_metadata_field(request: RenameMetadataFieldRequest) -> MetadataSchema
 def delete_metadata_field(request: DeleteMetadataFieldRequest) -> MetadataSchema:
     with translate_errors():
         return service.delete_metadata_field(request)
+
+
+@app.put("/api/metadata/schema/groups", response_model=MetadataSchema)
+def upsert_metadata_group(request: UpsertMetadataGroupRequest) -> MetadataSchema:
+    with translate_errors():
+        return service.upsert_metadata_group(request)
+
+
+@app.delete("/api/metadata/schema/groups", response_model=MetadataSchema)
+def delete_metadata_group(request: DeleteMetadataGroupRequest) -> MetadataSchema:
+    with translate_errors():
+        return service.delete_metadata_group(request)
+
+
+@app.put("/api/metadata/schema/entry-types/group-applications", response_model=MetadataSchema)
+def set_entry_type_group_applications(request: SetGroupApplicationsRequest) -> MetadataSchema:
+    with translate_errors():
+        return service.set_entry_type_group_applications(request)
 
 
 @app.post("/api/scenes", response_model=Scene)

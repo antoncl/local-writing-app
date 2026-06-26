@@ -165,6 +165,10 @@ class MetadataFieldDefinition(BaseModel):
     # Optional L1 section label. Fields sharing a `group` render under one
     # labelled header in the rail + type editor. None = ungrouped.
     group: str | None = None
+    # Set ONLY on synthetic fields generated from an L2 group application
+    # (= the source group id). Never persisted; lets the UI render these as
+    # group-derived (read-only, "from <group>") rather than own/inherited.
+    group_origin: str | None = None
 
     @field_validator("options", mode="before")
     @classmethod
@@ -227,6 +231,60 @@ class PromptEntryTypeExtras(BaseModel):
     context_strategy: PromptContextStrategy | None = None
 
 
+class GroupMember(BaseModel):
+    """One member field of a reusable group definition (L2 groups).
+
+    `key` is the suffix combined with a GroupApplication.key_prefix to form
+    the generated field's stable key (e.g. prefix "external_" + key "goal"
+    → "external_goal"). The rest defines the generated field."""
+
+    key: str
+    name: str
+    type: Literal[
+        "text",
+        "long_text",
+        "number",
+        "boolean",
+        "date",
+        "select",
+        "multi_select",
+        "entity_ref",
+        "entity_ref_list",
+        "tags",
+        "color",
+    ] = "text"
+    icon: str | None = None
+    options: list[SelectOption] = Field(default_factory=list)
+    picker_config: NodePickerConfig | None = None
+
+    @field_validator("options", mode="before")
+    @classmethod
+    def _accept_bare_strings(cls, value: Any) -> Any:
+        return _normalize_select_options(value)
+
+
+class MetadataGroupDefinition(BaseModel):
+    """A reusable group of fields, e.g. GMO = Goal / Motivation / Obstacle.
+
+    Applied to entry types via GroupApplication. Fields resolve dynamically
+    from the definition × application, so editing the definition propagates
+    to every application (the "live" L2 model)."""
+
+    name: str
+    icon: str | None = None
+    members: list[GroupMember] = Field(default_factory=list)
+
+
+class GroupApplication(BaseModel):
+    """An entry type's use of a reusable group, with a display label and a
+    key prefix — e.g. GMO applied as External (external_) and Internal
+    (internal_): two applications of one group, not six hand-made fields."""
+
+    group_id: str
+    label: str = ""
+    key_prefix: str = ""
+
+
 class EntryTypeDefinition(BaseModel):
     name: str
     kind: str
@@ -268,12 +326,18 @@ class EntryTypeDefinition(BaseModel):
     # schema inheritance resolver; not authored directly.
     own_color: str | None = None
     prompt: PromptEntryTypeExtras | None = None
+    # Reusable group applications (L2). Each expands into generated prefixed
+    # fields in the effective schema. Authored on the type; persisted as-is.
+    group_applications: list[GroupApplication] = Field(default_factory=list)
 
 
 class MetadataSchema(BaseModel):
     version: int = 1
     entry_types: dict[str, EntryTypeDefinition] = Field(default_factory=dict)
     fields: dict[str, MetadataFieldDefinition] = Field(default_factory=dict)
+    # Reusable group definitions (L2), keyed by group id. Generated fields
+    # from group_applications are injected into `fields` at resolution time.
+    groups: dict[str, MetadataGroupDefinition] = Field(default_factory=dict)
 
 
 class MetadataSchemaLayer(BaseModel):
@@ -336,6 +400,23 @@ class RenameMetadataFieldRequest(BaseModel):
 class DeleteMetadataFieldRequest(BaseModel):
     field_id: str = Field(min_length=1)
     entry_type: str = "scene"
+
+
+class UpsertMetadataGroupRequest(BaseModel):
+    layer_id: str = Field(min_length=1)
+    group_id: str = Field(min_length=1)
+    group: MetadataGroupDefinition
+    allow_existing: bool = True
+
+
+class DeleteMetadataGroupRequest(BaseModel):
+    group_id: str = Field(min_length=1)
+
+
+class SetGroupApplicationsRequest(BaseModel):
+    layer_id: str = Field(min_length=1)
+    entry_type_id: str = Field(min_length=1)
+    applications: list[GroupApplication] = Field(default_factory=list)
 
 
 class Scene(BaseModel):

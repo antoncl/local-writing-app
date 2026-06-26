@@ -157,6 +157,14 @@ class MetadataFieldDefinition(BaseModel):
     options: list[SelectOption] = Field(default_factory=list)
     picker_config: NodePickerConfig | None = None
     computed: dict[str, str] | None = None
+    # Optional Tabler icon name (without the `ti-` prefix), e.g. "shield-half".
+    # Empty/None falls back to the default glyph for the field's type
+    # (see the metadata revision design). Display-only; the macro contract
+    # is the field key, never the icon.
+    icon: str | None = None
+    # Optional L1 section label. Fields sharing a `group` render under one
+    # labelled header in the rail + type editor. None = ungrouped.
+    group: str | None = None
 
     @field_validator("options", mode="before")
     @classmethod

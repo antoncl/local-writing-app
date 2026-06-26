@@ -81,6 +81,13 @@
   let editorEmpty = true;
   let metadataSummaryText = "";
   let metadataExpanded = false;
+  // Metadata rail (body-spec Section A). Per body shape: prose/code open,
+  // chat collapses to a 34px edge-tab, none turns the rail into the pane.
+  // `railOpen` is the user-toggleable state for the side rail; reset per
+  // scene load below. `railIsPane` means metadata renders as the main
+  // content (none-shape: assistant / project / structure_node).
+  let railOpen = true;
+  $: railIsPane = bodyShape === "none";
   // Per-scene continuation cost rollup. Bound out from ProseBodyView so the
   // header chip stays in the shell (where the rest of the document header
   // lives). Cost state itself is owned by ProseBodyView since the AI
@@ -310,6 +317,9 @@
     }
     loadedSceneId = scene.id;
     metadataExpanded = documentKind === "lore" || nextBodyShape === "none";
+    // Chat starts with the rail collapsed to its edge-tab so the
+    // conversation owns full width; every other shape opens it.
+    railOpen = nextBodyShape !== "chat";
   }
 
   $: if (!scene && loadedSceneId !== null) {
@@ -604,7 +614,57 @@
 
 </script>
 
-<div class="editor-panel" class:body-hidden={bodyShape === "none"}>
+<!-- Metadata + backlinks, rendered into either the side rail (prose/code/
+     chat) or the whole pane (none-shape). Defined once as a snippet so the
+     long prop list isn't duplicated across the two host slots. -->
+{#snippet metaContent()}
+  {#if metadataSchema}
+    <MetadataPanel
+      metadataSchema={metadataSchema}
+      entryType={entryType}
+      status={status}
+      metadata={metadata}
+      documentKind={documentKind}
+      documentLabel={documentLabel}
+      documentEntryTypes={documentEntryTypes}
+      metadataFieldIds={metadataFieldIds}
+      metadataSummaryText={metadataSummaryText}
+      expanded={true}
+      knownTags={knownTags}
+      loreEntries={loreEntries}
+      promptEntries={promptEntries}
+      structure={structure}
+      implicitContextMatcher={implicitContextMatcher}
+      excludeId={scene?.id ?? null}
+      computedFieldString={computedFieldString}
+      on:entryTypeChange={(event) => updateEntryType(event.detail.entryType)}
+      on:statusChange={(event) => updateStatus(event.detail.status)}
+      on:metadataChange={(event) => {
+        metadata = event.detail.metadata;
+        emitChange();
+      }}
+      on:customData={() => dispatch("custom-data", { entryType, kind: documentKind })}
+      on:navigate={(event) => dispatch("navigate", event.detail)}
+    />
+    {#key scene?.id ?? ""}
+      <BacklinksPanel
+        backlinks={backlinks}
+        metadataSchema={metadataSchema}
+        loreEntries={loreEntries}
+        structure={structure}
+        on:navigate={(event) => dispatch("navigate", event.detail)}
+      />
+    {/key}
+  {/if}
+{/snippet}
+
+<div
+  class="editor-panel"
+  class:body-hidden={bodyShape === "none"}
+  class:has-rail={scene && !railIsPane}
+  class:rail-collapsed={scene && !railIsPane && !railOpen}
+  class:rail-pane={scene && railIsPane}
+>
   <section class="editor-header">
     {#if scene}
       <div class="scene-title-row">
@@ -629,52 +689,19 @@
           </span>
         {/if}
       </div>
-      {#if metadataSchema}
-        <MetadataPanel
-          metadataSchema={metadataSchema}
-          entryType={entryType}
-          status={status}
-          metadata={metadata}
-          documentKind={documentKind}
-          documentLabel={documentLabel}
-          documentEntryTypes={documentEntryTypes}
-          metadataFieldIds={metadataFieldIds}
-          metadataSummaryText={metadataSummaryText}
-          expanded={metadataExpanded}
-          knownTags={knownTags}
-          loreEntries={loreEntries}
-          promptEntries={promptEntries}
-          structure={structure}
-          implicitContextMatcher={implicitContextMatcher}
-          excludeId={scene?.id ?? null}
-          computedFieldString={computedFieldString}
-          on:entryTypeChange={(event) => updateEntryType(event.detail.entryType)}
-          on:statusChange={(event) => updateStatus(event.detail.status)}
-          on:metadataChange={(event) => {
-            metadata = event.detail.metadata;
-            emitChange();
-          }}
-          on:customData={() => dispatch("custom-data", { entryType, kind: documentKind })}
-          on:navigate={(event) => dispatch("navigate", event.detail)}
-          on:toggleExpanded={() => (metadataExpanded = !metadataExpanded)}
-        />
-        {#key scene?.id ?? ""}
-          <BacklinksPanel
-            backlinks={backlinks}
-            metadataSchema={metadataSchema}
-            loreEntries={loreEntries}
-            structure={structure}
-            on:navigate={(event) => dispatch("navigate", event.detail)}
-          />
-        {/key}
-      {/if}
     {:else}
       <h2>Select a scene</h2>
     {/if}
   </section>
 
   {#if bodyShape === "none"}
-    <FieldsOnlyView />
+    {#if scene && metadataSchema}
+      <div class="editor-pane-meta">
+        {@render metaContent()}
+      </div>
+    {:else}
+      <FieldsOnlyView />
+    {/if}
   {/if}
   {#if bodyShape === "code"}
     <CodeBodyView
@@ -735,6 +762,39 @@
       on:renamed={() => dispatch("renamed")}
       on:cost-changed={() => dispatch("cost-changed")}
     />
+  {/if}
+
+  {#if scene && metadataSchema && !railIsPane}
+    {#if railOpen}
+      <aside class="editor-rail" aria-label={`${documentLabel} details`}>
+        <div class="rail-head">
+          <span class="rail-head-label">Details</span>
+          <button
+            class="rail-collapse"
+            type="button"
+            title="Collapse details"
+            aria-label="Collapse details"
+            on:click={() => (railOpen = false)}
+          >
+            <i class="ti ti-layout-sidebar-right-collapse" aria-hidden="true"></i>
+          </button>
+        </div>
+        <div class="rail-scroll">
+          {@render metaContent()}
+        </div>
+      </aside>
+    {:else}
+      <button
+        class="rail-tab"
+        type="button"
+        title="Show details"
+        aria-label="Show details"
+        on:click={() => (railOpen = true)}
+      >
+        <i class="ti ti-layout-sidebar-right-expand" aria-hidden="true"></i>
+        <span class="rail-tab-label">Details</span>
+      </button>
+    {/if}
   {/if}
 
   <footer class="status">

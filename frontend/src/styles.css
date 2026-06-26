@@ -1205,6 +1205,118 @@ button.row-action-add.active {
   flex-direction: column;
 }
 
+/* Metadata rail (body-spec Section A). When present, the editor becomes a
+   two-column grid: the existing header/body/footer stack stays in column 1,
+   the recessed rail spans all rows in column 2. Every other direct child is
+   pinned to column 1 so the implicit grid never flows a body view into the
+   rail column. */
+.editor-panel.has-rail {
+  grid-template-columns: minmax(0, 1fr) auto;
+}
+.editor-panel.has-rail > * {
+  grid-column: 1;
+  min-width: 0;
+}
+.editor-panel.has-rail > .editor-rail,
+.editor-panel.has-rail > .rail-tab {
+  grid-column: 2;
+  grid-row: 1 / -1;
+}
+
+.editor-rail {
+  display: flex;
+  flex-direction: column;
+  width: 280px;
+  min-height: 0;
+  background: var(--inset, #f1f5f3);
+  border-left: 1px solid var(--divider, #e2e8e5);
+}
+
+.rail-head {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  flex: 0 0 auto;
+  padding: 10px 12px;
+  border-bottom: 1px solid var(--divider, #e2e8e5);
+}
+.rail-head-label {
+  flex: 1;
+  font-size: 11px;
+  font-weight: 800;
+  letter-spacing: 0.09em;
+  text-transform: uppercase;
+  color: var(--text-3, #74817b);
+}
+.rail-collapse {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex: 0 0 auto;
+  width: 24px;
+  height: 24px;
+  padding: 0;
+  border: 1px solid transparent;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--text-3, #74817b);
+  font-size: 16px;
+  cursor: pointer;
+}
+.rail-collapse:hover {
+  background: var(--surface, #fff);
+  border-color: var(--divider, #e2e8e5);
+  color: var(--text-2, #4d5753);
+}
+
+.rail-scroll {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow: auto;
+  overscroll-behavior: contain;
+}
+
+/* Collapsed: a 34px vertical edge-tab that reopens the rail. */
+.rail-tab {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 8px;
+  width: 34px;
+  padding: 12px 0;
+  border: 0;
+  border-left: 1px solid var(--divider, #e2e8e5);
+  background: var(--inset, #f1f5f3);
+  color: var(--text-3, #74817b);
+  font-size: 15px;
+  cursor: pointer;
+}
+.rail-tab:hover {
+  color: var(--text, #242424);
+  background: var(--panel, #edf3f1);
+}
+.rail-tab-label {
+  writing-mode: vertical-rl;
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.09em;
+  text-transform: uppercase;
+}
+
+/* none-shape: the rail IS the pane (assistant / project / structure_node). */
+.editor-pane-meta {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow: auto;
+  overscroll-behavior: contain;
+  padding: 18px 0;
+}
+.editor-pane-meta > .scene-metadata {
+  max-width: 720px;
+  margin: 0 auto;
+  padding: 0 22px;
+}
+
 .editor-header {
   display: grid;
   gap: 6px;

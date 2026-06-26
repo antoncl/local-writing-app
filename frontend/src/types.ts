@@ -156,6 +156,13 @@ export type MetadataFieldDefinition = {
   // the same NodePicker config vocabulary.
   picker_config?: NodePickerConfig | null;
   computed?: Record<string, string> | null;
+  // Optional Tabler icon name (without the `ti-` prefix), e.g. "shield-half".
+  // Empty/undefined falls back to the default glyph for the field's type.
+  // Display-only — the stable macro contract is the field key, not the icon.
+  icon?: string | null;
+  // Optional L1 section label. Fields sharing a `group` render under one
+  // labelled header in the rail + type editor. Undefined = ungrouped.
+  group?: string | null;
 };
 
 export type PromptInputType =

@@ -82,6 +82,11 @@
   let chatSystemPrompt = DEFAULT_CHAT_SYSTEM_PROMPT;
   let chatPromptEntryId = "";
   let chatAssistantId = "";
+  // Scene this chat was opened against (e.g. "invoke chat prompt" from a
+  // prose scene). Passed as the target scene when rendering the template
+  // at first-send so prompts that reference `scene` resolve it. "" for
+  // freeform / Chats-pane chats.
+  let chatTargetSceneId = "";
   let activeChatTitle = "Untitled chat";
   let activeChatPinned = false;
   let activeChatJournal: ChatSessionJournalEntry[] = [];
@@ -180,6 +185,7 @@
     chatSystemPrompt = DEFAULT_CHAT_SYSTEM_PROMPT;
     chatPromptEntryId = "";
     chatAssistantId = "";
+    chatTargetSceneId = "";
     activeChatTitle = "Untitled chat";
     activeChatPinned = false;
     activeChatJournal = [];
@@ -202,6 +208,7 @@
     activeChatCacheWriteTimes = { ...(session.cache_write_times ?? {}) };
     chatPromptEntryId = session.prompt_entry_id || "";
     chatAssistantId = session.assistant_id || "";
+    chatTargetSceneId = session.target_scene_id || "";
     chatSystemPrompt =
       session.system_prompt || (session.prompt_entry_id ? "" : DEFAULT_CHAT_SYSTEM_PROMPT);
     chatHistory = (session.messages || []).map((m: ChatSessionMessage) => ({
@@ -418,6 +425,7 @@
       prompt_entry_id: chatPromptEntryId,
       assistant_id: chatAssistantId,
       system_prompt: chatSystemPrompt,
+      target_scene_id: chatTargetSceneId,
       pinned: activeChatPinned,
       context_items: [],
       messages: chatHistory.map((m) => ({
@@ -619,7 +627,7 @@
     try {
       const preview = await api.aiPreview({
         template_source: entry.body_markdown,
-        target_scene_id: "",
+        target_scene_id: chatTargetSceneId,
         inputs,
         commit: false,
       });
@@ -688,7 +696,7 @@
     try {
       const preview = await api.aiPreview({
         template_source: entry.body_markdown,
-        target_scene_id: "",
+        target_scene_id: chatTargetSceneId,
         inputs,
         commit: false,
         assistant_id: chatAssistantId || null,

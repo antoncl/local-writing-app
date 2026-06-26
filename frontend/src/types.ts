@@ -581,6 +581,9 @@ export type ChatSession = {
   prompt_entry_id: string;
   assistant_id: string;
   system_prompt: string;
+  // Scene this chat was opened against; passed as the `scene` binding at
+  // first-send render. Empty for freeform / Chats-pane chats.
+  target_scene_id?: string;
   pinned: boolean;
   created_at: string;
   updated_at: string;
@@ -614,6 +617,7 @@ export type CreateChatSessionRequest = {
   prompt_entry_id?: string;
   assistant_id?: string;
   system_prompt?: string;
+  target_scene_id?: string;
 };
 
 export type SaveChatSessionRequest = {
@@ -621,6 +625,7 @@ export type SaveChatSessionRequest = {
   prompt_entry_id: string;
   assistant_id: string;
   system_prompt: string;
+  target_scene_id?: string;
   pinned: boolean;
   context_items: ChatSessionContextItem[];
   messages: ChatSessionMessage[];

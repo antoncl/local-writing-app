@@ -1103,13 +1103,14 @@
   }
 
   // "Invoke chat prompt" from a prose scene: ProseBodyView emits open-chat
-  // once its inputs dialog resolves. Create a prompt-bound chat session,
-  // seed the resolved inputs as drafts so the user's dialog entries carry
-  // over, and open it in an editor pane where ChatBodyView renders the
-  // template on first send.
+  // once its inputs dialog resolves. Create a prompt-bound chat session
+  // tied to the originating scene (so the first-send render resolves the
+  // `scene` binding), seed the resolved inputs as drafts so the user's
+  // dialog entries carry over, and open it in an editor pane.
   async function openChatFromPromptEntry(
     entry: PromptEntrySummary,
     inputs: Record<string, unknown>,
+    sceneId: string | null,
     assistantId: string = "",
   ): Promise<void> {
     await run(async () => {
@@ -1117,15 +1118,18 @@
         prompt_entry_id: entry.id,
         assistant_id: assistantId,
         title: entry.title,
+        target_scene_id: sceneId ?? "",
       });
       if (Object.keys(inputs).length > 0) {
         // Persist resolved inputs via the unified node path so ChatBodyView
-        // restores them as drafts on load.
+        // restores them as drafts on load. Echo target_scene_id so it's
+        // never dropped (backend also falls back to the persisted value).
         await api.saveNode<ChatSession>(session.id, {
           title: session.title,
           prompt_entry_id: session.prompt_entry_id,
           assistant_id: session.assistant_id,
           system_prompt: session.system_prompt,
+          target_scene_id: session.target_scene_id ?? "",
           pinned: session.pinned,
           context_items: [],
           messages: [],
@@ -4074,7 +4078,7 @@
         on:custom-data={(event) => openSchemaForCustomData(event.detail.entryType, event.detail.kind)}
         on:embeddedTodos={(event) => updateEmbeddedTodosForPane(editorPane.id, event.detail.todos)}
         on:navigate={(event) => navigateToBacklink(event.detail.id, event.detail.kind)}
-        on:open-chat={(event) => openChatFromPromptEntry(event.detail.entry, event.detail.inputs, event.detail.assistantId)}
+        on:open-chat={(event) => openChatFromPromptEntry(event.detail.entry, event.detail.inputs, event.detail.sceneId, event.detail.assistantId)}
         on:renamed={() => void refreshChatSessions()}
       />
       <button class="pane-resize" type="button" aria-label="Resize Editor pane" on:keydown={(event) => handlePaneResizeKeydown(event, editorPane.id)} on:mousedown={(event) => startPaneResize(event, editorPane.id)}></button>

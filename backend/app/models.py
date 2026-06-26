@@ -987,6 +987,11 @@ class ChatSession(BaseModel):
     prompt_entry_id: str = ""
     assistant_id: str = ""
     system_prompt: str = ""
+    # Scene this chat was opened against (e.g. "invoke chat prompt" from a
+    # prose scene). The first-send template render passes it as the `scene`
+    # binding so prompts that reference scene body/metadata resolve it.
+    # Empty for freeform chats and chats started from the Chats pane.
+    target_scene_id: str = ""
     pinned: bool = False
     created_at: str
     updated_at: str
@@ -1033,6 +1038,7 @@ class CreateChatSessionRequest(BaseModel):
     prompt_entry_id: str = ""
     assistant_id: str = ""
     system_prompt: str = ""
+    target_scene_id: str = ""
 
 
 class SaveChatSessionRequest(BaseModel):
@@ -1040,6 +1046,7 @@ class SaveChatSessionRequest(BaseModel):
     prompt_entry_id: str = ""
     assistant_id: str = ""
     system_prompt: str = ""
+    target_scene_id: str = ""
     pinned: bool = False
     context_items: list[ChatSessionContextItem] = Field(default_factory=list)
     messages: list[ChatSessionMessage] = Field(default_factory=list)

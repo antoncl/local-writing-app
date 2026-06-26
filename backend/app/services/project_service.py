@@ -3099,6 +3099,7 @@ class ProjectService:
             prompt_entry_id=request.prompt_entry_id,
             assistant_id=request.assistant_id,
             system_prompt=request.system_prompt,
+            target_scene_id=request.target_scene_id,
             pinned=False,
             created_at=now,
             updated_at=now,
@@ -3178,6 +3179,11 @@ class ProjectService:
             prompt_entry_id=request.prompt_entry_id,
             assistant_id=request.assistant_id,
             system_prompt=request.system_prompt,
+            # target_scene_id only matters before first-send (the render
+            # binding); callers echo the loaded value so it survives
+            # per-turn saves. Fall back to the persisted value when a
+            # caller omits it, so it's never silently dropped.
+            target_scene_id=request.target_scene_id or existing.target_scene_id,
             pinned=request.pinned,
             created_at=existing.created_at,
             updated_at=self._utcnow_iso(),

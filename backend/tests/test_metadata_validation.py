@@ -18,6 +18,7 @@ from app.models import (
     SaveLoreEntryRequest,
     SaveSceneRequest,
     SearchRequest,
+    SetFieldOrderRequest,
     UpdateProjectSettingsRequest,
     UpsertMetadataEntryTypeRequest,
     UpsertMetadataFieldRequest,
@@ -972,6 +973,145 @@ class MetadataValidationTests(unittest.TestCase):
         schema = self.service.read_metadata_schema()
         self.assertEqual(schema.fields["color"].name, "Background Color")
         self.assertEqual(schema.fields["color"].type, "select")
+
+    def test_create_computed_field_with_supported_function(self) -> None:
+        world_layer = next(
+            layer
+            for layer in self.service.read_metadata_schema_layers().layers
+            if layer.folder_path == str(self.world)
+        )
+        schema = self.service.upsert_metadata_field(
+            UpsertMetadataFieldRequest(
+                layer_id=world_layer.id,
+                field_id="scene_number",
+                field=MetadataFieldDefinition(
+                    name="Scene Number",
+                    type="computed",
+                    computed={"function": "counter", "scope": "manuscript"},
+                ),
+                entry_type="scene",
+            )
+        )
+
+        self.assertEqual(schema.fields["scene_number"].type, "computed")
+        self.assertEqual(
+            schema.fields["scene_number"].computed,
+            {"function": "counter", "scope": "manuscript"},
+        )
+        self.assertIn("scene_number", schema.entry_types["scene"].fields)
+
+    def test_create_computed_field_rejects_unknown_function(self) -> None:
+        world_layer = next(
+            layer
+            for layer in self.service.read_metadata_schema_layers().layers
+            if layer.folder_path == str(self.world)
+        )
+        with self.assertRaises(ProjectServiceError) as raised:
+            self.service.upsert_metadata_field(
+                UpsertMetadataFieldRequest(
+                    layer_id=world_layer.id,
+                    field_id="bogus_computed",
+                    field=MetadataFieldDefinition(
+                        name="Bogus",
+                        type="computed",
+                        computed={"function": "made_up"},
+                    ),
+                    entry_type="scene",
+                )
+            )
+        self.assertEqual(raised.exception.status_code, 422)
+        self.assertNotIn("bogus_computed", self.service.read_metadata_schema().fields)
+
+    def test_create_computed_counter_rejects_bad_scope(self) -> None:
+        world_layer = next(
+            layer
+            for layer in self.service.read_metadata_schema_layers().layers
+            if layer.folder_path == str(self.world)
+        )
+        with self.assertRaises(ProjectServiceError) as raised:
+            self.service.upsert_metadata_field(
+                UpsertMetadataFieldRequest(
+                    layer_id=world_layer.id,
+                    field_id="bad_scope",
+                    field=MetadataFieldDefinition(
+                        name="Bad Scope",
+                        type="computed",
+                        computed={"function": "counter", "scope": "galaxy"},
+                    ),
+                    entry_type="scene",
+                )
+            )
+        self.assertEqual(raised.exception.status_code, 422)
+
+    def test_set_entry_type_field_order_reorders_own_fields(self) -> None:
+        project_layer = next(
+            layer
+            for layer in self.service.read_metadata_schema_layers().layers
+            if layer.folder_path == str(self.root)
+        )
+        self.service.upsert_metadata_entry_type(
+            UpsertMetadataEntryTypeRequest(
+                layer_id=project_layer.id,
+                entry_type_id="faction",
+                entry_type=EntryTypeDefinition(name="Faction", kind="lore", parent="lore_entry", fields=[]),
+            )
+        )
+        for fid in ("alpha", "beta", "gamma"):
+            self.service.upsert_metadata_field(
+                UpsertMetadataFieldRequest(
+                    layer_id=project_layer.id,
+                    field_id=fid,
+                    field=MetadataFieldDefinition(name=fid.title(), type="text"),
+                    entry_type="faction",
+                )
+            )
+        self.assertEqual(self.service.read_metadata_schema().entry_types["faction"].own_fields, ["alpha", "beta", "gamma"])
+
+        schema = self.service.set_entry_type_field_order(
+            SetFieldOrderRequest(layer_id=project_layer.id, entry_type_id="faction", field_order=["gamma", "alpha", "beta"])
+        )
+        self.assertEqual(schema.entry_types["faction"].own_fields, ["gamma", "alpha", "beta"])
+        on_disk = self.service._read_yaml(self.root / "metadata.schema.yaml")
+        self.assertEqual(on_disk["entry_types"]["faction"]["fields"], ["gamma", "alpha", "beta"])
+
+    def test_set_entry_type_field_order_rejects_non_permutation(self) -> None:
+        project_layer = next(
+            layer
+            for layer in self.service.read_metadata_schema_layers().layers
+            if layer.folder_path == str(self.root)
+        )
+        self.service.upsert_metadata_entry_type(
+            UpsertMetadataEntryTypeRequest(
+                layer_id=project_layer.id,
+                entry_type_id="faction",
+                entry_type=EntryTypeDefinition(name="Faction", kind="lore", parent="lore_entry", fields=[]),
+            )
+        )
+        self.service.upsert_metadata_field(
+            UpsertMetadataFieldRequest(
+                layer_id=project_layer.id,
+                field_id="alpha",
+                field=MetadataFieldDefinition(name="Alpha", type="text"),
+                entry_type="faction",
+            )
+        )
+        with self.assertRaises(ProjectServiceError) as raised:
+            self.service.set_entry_type_field_order(
+                SetFieldOrderRequest(layer_id=project_layer.id, entry_type_id="faction", field_order=["alpha", "ghost"])
+            )
+        self.assertEqual(raised.exception.status_code, 422)
+
+    def test_set_entry_type_field_order_rejects_system_type(self) -> None:
+        project_layer = next(
+            layer
+            for layer in self.service.read_metadata_schema_layers().layers
+            if layer.folder_path == str(self.root)
+        )
+        with self.assertRaises(ProjectServiceError) as raised:
+            self.service.set_entry_type_field_order(
+                SetFieldOrderRequest(layer_id=project_layer.id, entry_type_id="scene", field_order=[])
+            )
+        self.assertEqual(raised.exception.status_code, 422)
 
     def test_move_metadata_field_removes_original_layer_definition(self) -> None:
         layers = self.service.read_metadata_schema_layers().layers

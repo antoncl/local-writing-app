@@ -1316,6 +1316,39 @@ class ProjectService:
         self._write_yaml(layer_path, layer_data)
         return self.read_metadata_schema()
 
+    def set_entry_type_field_order(self, request: SetFieldOrderRequest) -> MetadataSchema:
+        root = self._require_project()
+        layer_path = self._metadata_schema_layer_path_for_id(root, request.layer_id)
+        if layer_path is None:
+            raise ProjectServiceError("Unknown metadata schema layer.", 404)
+        entry_type_id = request.entry_type_id.strip()
+        schema = self.read_metadata_schema()
+        if entry_type_id not in schema.entry_types:
+            raise ProjectServiceError(f"Unknown node type {entry_type_id}.", 404)
+        overview = self.read_metadata_schema_overview()
+        source = overview.entry_type_sources.get(entry_type_id)
+        if source and source.built_in:
+            raise ProjectServiceError("System node types cannot be edited.", 422)
+        layer_data = self._read_yaml(layer_path) if layer_path.exists() else self._empty_metadata_schema()
+        entry_types = layer_data.get("entry_types")
+        if not isinstance(entry_types, dict) or not isinstance(entry_types.get(entry_type_id), dict):
+            raise ProjectServiceError("This node type has no own fields to reorder at this layer.", 422)
+        entry_type_data = entry_types[entry_type_id]
+        current = entry_type_data.get("fields")
+        if not isinstance(current, list):
+            current = []
+        # The requested order must be a permutation of the fields defined on
+        # the type at this layer (own fields). Inherited/generated fields are
+        # not reorderable here.
+        if sorted(request.field_order) != sorted(current):
+            raise ProjectServiceError("Field order must be a permutation of the type's own fields.", 422)
+        entry_type_data["fields"] = list(request.field_order)
+        entry_types[entry_type_id] = entry_type_data
+        layer_data["entry_types"] = entry_types
+        self._validate_candidate_schema(root, layer_path, layer_data)
+        self._write_yaml(layer_path, layer_data)
+        return self.read_metadata_schema()
+
     def upsert_metadata_field(self, request: UpsertMetadataFieldRequest) -> MetadataSchema:
         root = self._require_project()
         layer_path = self._metadata_schema_layer_path_for_id(root, request.layer_id)
@@ -1326,7 +1359,18 @@ class ProjectService:
         if not re.fullmatch(r"[A-Za-z][A-Za-z0-9_]*", field_id):
             raise ProjectServiceError("Metadata field ID must start with a letter and contain only letters, numbers, and underscores.", 422)
         if request.field.type == "computed":
-            raise ProjectServiceError("Computed metadata fields are derived by the app and cannot be created here.", 422)
+            spec = request.field.computed or {}
+            function = spec.get("function")
+            if function not in ("word_count", "counter"):
+                raise ProjectServiceError(
+                    "Computed fields must use a supported function (word_count or counter).",
+                    422,
+                )
+            if function == "counter" and spec.get("scope", "siblings") not in ("siblings", "manuscript"):
+                raise ProjectServiceError(
+                    "Counter scope must be 'siblings' or 'manuscript'.",
+                    422,
+                )
 
         existing_field = self.read_metadata_schema().fields.get(field_id)
         if existing_field is not None and not request.allow_existing:

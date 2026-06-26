@@ -419,6 +419,14 @@ class SetGroupApplicationsRequest(BaseModel):
     applications: list[GroupApplication] = Field(default_factory=list)
 
 
+class SetFieldOrderRequest(BaseModel):
+    layer_id: str = Field(min_length=1)
+    entry_type_id: str = Field(min_length=1)
+    # Desired order of the type's own field ids (must be a permutation of the
+    # fields currently defined on the type at this layer).
+    field_order: list[str] = Field(default_factory=list)
+
+
 class Scene(BaseModel):
     id: str
     title: str

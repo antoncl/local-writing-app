@@ -83,6 +83,7 @@ from app.models import (
     Scene,
     SearchRequest,
     SearchResponse,
+    SetFieldOrderRequest,
     SetGroupApplicationsRequest,
     StructureDocument,
     StructureNodeDeletePreview,
@@ -344,6 +345,12 @@ def delete_metadata_group(request: DeleteMetadataGroupRequest) -> MetadataSchema
 def set_entry_type_group_applications(request: SetGroupApplicationsRequest) -> MetadataSchema:
     with translate_errors():
         return service.set_entry_type_group_applications(request)
+
+
+@app.put("/api/metadata/schema/entry-types/field-order", response_model=MetadataSchema)
+def set_entry_type_field_order(request: SetFieldOrderRequest) -> MetadataSchema:
+    with translate_errors():
+        return service.set_entry_type_field_order(request)
 
 
 @app.post("/api/scenes", response_model=Scene)

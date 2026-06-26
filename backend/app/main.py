@@ -56,6 +56,9 @@ from app.models import (
     DeleteMetadataGroupRequest,
     DirectoryListing,
     KnownTags,
+    MergeTagsRequest,
+    TagsOverview,
+    UpdateTagScopeRequest,
     LoreEntry,
     LoreEntryList,
     MetadataSchema,
@@ -269,6 +272,24 @@ def get_metadata_schema_overview() -> MetadataSchemaOverview:
 def get_known_tags() -> KnownTags:
     with translate_errors():
         return service.read_known_tags()
+
+
+@app.get("/api/tags/overview", response_model=TagsOverview)
+def get_tags_overview() -> TagsOverview:
+    with translate_errors():
+        return service.read_tags_overview()
+
+
+@app.put("/api/tags/scope", response_model=KnownTags)
+def update_tag_scope(request: UpdateTagScopeRequest) -> KnownTags:
+    with translate_errors():
+        return service.update_tag_scope(request)
+
+
+@app.post("/api/tags/merge", response_model=KnownTags)
+def merge_tags(request: MergeTagsRequest) -> KnownTags:
+    with translate_errors():
+        return service.merge_tags(request)
 
 
 @app.put("/api/metadata/schema/entry-types", response_model=MetadataSchema)

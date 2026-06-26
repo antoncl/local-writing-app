@@ -513,8 +513,51 @@ class LoreEntryList(BaseModel):
     entries: list[LoreEntrySummary] = Field(default_factory=list)
 
 
+class ScopedTag(BaseModel):
+    """A known tag with a scope (which kinds / sub-types it's suggested on).
+
+    Scope reuses NodePickerConfig's kinds + per-kind entry_types vocabulary.
+    An empty scope means "suggest everywhere" (legacy flat tags upgrade to
+    this)."""
+
+    name: str
+    scope: NodePickerConfig = Field(default_factory=NodePickerConfig)
+
+
 class KnownTags(BaseModel):
-    tags: list[str] = Field(default_factory=list)
+    tags: list[ScopedTag] = Field(default_factory=list)
+
+    @field_validator("tags", mode="before")
+    @classmethod
+    def _accept_flat_tags(cls, value: Any) -> Any:
+        # Defensive upgrade of the legacy flat shape (list[str]) and any
+        # caller still passing bare strings → scoped entries with empty scope.
+        if isinstance(value, list):
+            return [
+                {"name": item, "scope": {}} if isinstance(item, str) else item
+                for item in value
+            ]
+        return value
+
+
+class TagUsage(BaseModel):
+    name: str
+    scope: NodePickerConfig = Field(default_factory=NodePickerConfig)
+    count: int = 0
+
+
+class TagsOverview(BaseModel):
+    tags: list[TagUsage] = Field(default_factory=list)
+
+
+class UpdateTagScopeRequest(BaseModel):
+    name: str = Field(min_length=1)
+    scope: NodePickerConfig = Field(default_factory=NodePickerConfig)
+
+
+class MergeTagsRequest(BaseModel):
+    sources: list[str] = Field(default_factory=list)
+    target: str = Field(min_length=1)
 
 
 class CreateLoreEntryRequest(BaseModel):

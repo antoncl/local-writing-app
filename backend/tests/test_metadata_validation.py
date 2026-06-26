@@ -1463,7 +1463,7 @@ class MetadataValidationTests(unittest.TestCase):
         )
 
         self.assertEqual(saved.metadata["tags"], ["Crew", "ALLY"])
-        self.assertEqual(self.service.read_known_tags().tags, ["ALLY", "Crew"])
+        self.assertEqual([tag.name for tag in self.service.read_known_tags().tags], ["ALLY", "Crew"])
         front_matter, _ = self.service._read_markdown_with_front_matter(self.service._path_for_node_id(entry.id, "lore"), strict=True)
         self.assertEqual(front_matter["metadata"]["tags"], ["Crew", "ALLY"])
 
@@ -1484,7 +1484,7 @@ class MetadataValidationTests(unittest.TestCase):
 
         self.assertEqual(saved.metadata["aliases"], ["Mr. Smith", "Bob"])
         self.assertEqual(saved.metadata["tags"], ["Crew"])
-        self.assertEqual(self.service.read_known_tags().tags, ["Crew"])
+        self.assertEqual([tag.name for tag in self.service.read_known_tags().tags], ["Crew"])
 
     def _project_layer_id(self) -> str:
         return next(

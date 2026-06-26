@@ -20,12 +20,14 @@ import type {
   CreateChatSessionRequest,
   DirectoryListing,
   EntryTypeDefinition,
+  GroupApplication,
   KnownTags,
   LoreEntry,
   LoreEntryList,
   MachineSettingsUpdate,
   MachineSettingsView,
   MetadataFieldDefinition,
+  MetadataGroupDefinition,
   MetadataSchema,
   MetadataSchemaLayers,
   MetadataSchemaOverview,
@@ -362,6 +364,24 @@ export const api = {
     return request<MetadataSchema>("/metadata/schema/fields", {
       method: "DELETE",
       body: JSON.stringify({ field_id: fieldId, entry_type: entryType }),
+    });
+  },
+  upsertMetadataGroup(layerId: string, groupId: string, group: MetadataGroupDefinition, allowExisting = true) {
+    return request<MetadataSchema>("/metadata/schema/groups", {
+      method: "PUT",
+      body: JSON.stringify({ layer_id: layerId, group_id: groupId, group, allow_existing: allowExisting }),
+    });
+  },
+  deleteMetadataGroup(groupId: string) {
+    return request<MetadataSchema>("/metadata/schema/groups", {
+      method: "DELETE",
+      body: JSON.stringify({ group_id: groupId }),
+    });
+  },
+  setEntryTypeGroupApplications(layerId: string, entryTypeId: string, applications: GroupApplication[]) {
+    return request<MetadataSchema>("/metadata/schema/entry-types/group-applications", {
+      method: "PUT",
+      body: JSON.stringify({ layer_id: layerId, entry_type_id: entryTypeId, applications }),
     });
   },
   listDirectories(path?: string) {

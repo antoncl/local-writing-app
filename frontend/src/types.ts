@@ -163,6 +163,10 @@ export type MetadataFieldDefinition = {
   // Optional L1 section label. Fields sharing a `group` render under one
   // labelled header in the rail + type editor. Undefined = ungrouped.
   group?: string | null;
+  // Set only on synthetic fields generated from an L2 group application
+  // (= the source group id). Lets the UI render these as group-derived
+  // (read-only, "from <group>") rather than own/inherited. Never persisted.
+  group_origin?: string | null;
 };
 
 export type PromptInputType =
@@ -256,12 +260,46 @@ export type EntryTypeDefinition = {
   default_body?: string;
   default_inputs?: PromptInputDefinition[];
   prompt?: PromptEntryTypeExtras | null;
+  // Reusable group applications (L2). Each expands into generated prefixed
+  // fields in the effective schema.
+  group_applications?: GroupApplication[];
+};
+
+// One member of a reusable group definition (L2 groups). `key` is the
+// suffix combined with a GroupApplication.key_prefix to form a generated
+// field's stable key.
+export type GroupMember = {
+  key: string;
+  name: string;
+  type: MetadataFieldType;
+  icon?: string | null;
+  options?: SelectOption[];
+  picker_config?: NodePickerConfig | null;
+};
+
+// A reusable group of fields (e.g. GMO = Goal/Motivation/Obstacle), applied
+// to entry types via GroupApplication. Fields resolve dynamically, so
+// editing the definition propagates to every application.
+export type MetadataGroupDefinition = {
+  name: string;
+  icon?: string | null;
+  members: GroupMember[];
+};
+
+// An entry type's use of a reusable group, with a display label + key prefix
+// (e.g. GMO applied as External (external_) and Internal (internal_)).
+export type GroupApplication = {
+  group_id: string;
+  label: string;
+  key_prefix: string;
 };
 
 export type MetadataSchema = {
   version: number;
   entry_types: Record<string, EntryTypeDefinition>;
   fields: Record<string, MetadataFieldDefinition>;
+  // Reusable group definitions keyed by group id (L2 groups).
+  groups?: Record<string, MetadataGroupDefinition>;
 };
 
 export type MetadataSchemaLayer = {

@@ -2853,6 +2853,71 @@ button.schema-field-row:hover {
   text-decoration: underline;
 }
 
+/* L2 reusable groups in the type editor. */
+.sfr-group-origin {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 11px;
+  font-style: italic;
+  color: var(--k-lore-text, #43448a);
+}
+.applied-groups {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.applied-group {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  padding: 5px 4px;
+}
+.ag-name {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text, #242424);
+}
+.ag-as {
+  font-size: 12px;
+  color: var(--text-3, #74817b);
+}
+.ag-prefix {
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 11px;
+  color: var(--text-3, #74817b);
+}
+.ag-remove {
+  margin-left: auto;
+}
+.group-apply-form {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  gap: 10px;
+  padding: 10px;
+  border: 1px solid var(--divider, #e2e8e5);
+  border-radius: 8px;
+  background: var(--inset, #f1f5f3);
+  box-shadow: inset 3px 0 0 0 var(--accent, #2f6f5e);
+}
+.group-apply-form .sfi-field {
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 4px;
+}
+.group-apply-form .sfi-field select,
+.group-apply-form .sfi-field input {
+  padding: 5px 8px;
+  border: 1px solid var(--border, #cbd6d2);
+  border-radius: 8px;
+  background: var(--surface, #fff);
+  font-size: 13px;
+}
+.group-apply-form .sfi-footer {
+  flex-basis: 100%;
+}
+
 .project-empty-hint {
   margin: 4px 0;
   font-size: 13px;

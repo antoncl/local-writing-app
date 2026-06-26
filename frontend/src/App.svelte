@@ -19,6 +19,7 @@
   import { setPalette, getSwatch, resolveColorForType, resolveColor } from "./colors";
   import { fieldIconClass, DEFAULT_FIELD_GLYPH } from "./fieldIcons";
   import IconPicker from "./IconPicker.svelte";
+  import GroupsManagerDialog from "./GroupsManagerDialog.svelte";
   import SwatchPicker from "./SwatchPicker.svelte";
   import type {
     AIHealthResponse,
@@ -261,6 +262,13 @@
   // Per-option display labels keyed by stable value (decision #10: value is
   // the contract, label is cosmetic). Sits alongside schemaFieldOptionColors.
   let schemaFieldOptionLabels: Record<string, string> = {};
+  // L2 reusable-groups manager (modal).
+  let groupsManagerOpen = false;
+  // L2 "apply group" form state (in the type editor).
+  let groupApplyOpen = false;
+  let applyGroupId = "";
+  let applyGroupLabel = "";
+  let applyGroupPrefix = "";
   // Expand-in-place field editing in the type editor: the field id whose
   // inline editor is open (one at a time), or the "__new__" sentinel while
   // adding a field. null = all rows collapsed. Replaces routing to the
@@ -388,6 +396,20 @@
     metadataSchema && selectedSchemaTypeId ? fieldEntriesForEntryType(selectedSchemaTypeId) : [];
   $: typeInheritedFieldEntries =
     metadataSchema && selectedSchemaTypeId ? inheritedFieldEntriesForEntryType(selectedSchemaTypeId) : [];
+  // L2 reusable groups: the applications on the selected type + the groups
+  // available to apply. Reference metadataSchema explicitly so these recompute
+  // after a save (see feedback-svelte5-reactivity-traps).
+  $: typeGroupApplications =
+    (metadataSchema && selectedSchemaTypeId
+      ? metadataSchema.entry_types[selectedSchemaTypeId]?.group_applications
+      : null) ?? [];
+  $: availableGroupEntries = Object.entries(metadataSchema?.groups ?? {});
+  // Display name for a group-derived field's origin marker.
+  function groupOriginLabel(field: MetadataFieldDefinition): string {
+    if (field.group) return field.group;
+    const def = field.group_origin ? metadataSchema?.groups?.[field.group_origin] : null;
+    return def?.name ?? "group";
+  }
   $: schemaContextHeading =
     schemaFieldKind === "lore"
       ? "Lore Entry Types"
@@ -1871,6 +1893,51 @@
       // Collapse the inline editor on a successful save.
       expandedSchemaFieldId = null;
       status = "Updated details schema";
+    });
+  }
+
+  function suggestPrefixFromLabel(label: string): string {
+    const slug = slugifyFieldId(label);
+    return slug ? `${slug}_` : "";
+  }
+
+  async function applyGroupToType() {
+    if (!selectedSchemaTypeId || !applyGroupId) return;
+    const typeId = selectedSchemaTypeId;
+    const application = {
+      group_id: applyGroupId,
+      label: applyGroupLabel.trim(),
+      key_prefix: (applyGroupPrefix.trim() || suggestPrefixFromLabel(applyGroupLabel) || `${applyGroupId}_`),
+    };
+    await run(async () => {
+      metadataSchema = await api.setEntryTypeGroupApplications(
+        schemaTypeLayerId || projectSchemaLayerId(),
+        typeId,
+        [...typeGroupApplications, application],
+      );
+      await refreshMetadataSchema();
+      validation = await api.validateProject();
+      groupApplyOpen = false;
+      applyGroupId = "";
+      applyGroupLabel = "";
+      applyGroupPrefix = "";
+      status = "Applied group";
+    });
+  }
+
+  async function removeGroupApplication(index: number) {
+    if (!selectedSchemaTypeId) return;
+    const typeId = selectedSchemaTypeId;
+    const next = typeGroupApplications.filter((_, i) => i !== index);
+    await run(async () => {
+      metadataSchema = await api.setEntryTypeGroupApplications(
+        schemaTypeLayerId || projectSchemaLayerId(),
+        typeId,
+        next,
+      );
+      await refreshMetadataSchema();
+      validation = await api.validateProject();
+      status = "Removed group application";
     });
   }
 
@@ -3708,6 +3775,7 @@
       <h2>Detail Types</h2>
       <div class="pane-header-actions">
         <button class="pin-button" type="button" on:mousedown={(event) => event.stopPropagation()} on:click={() => createSchemaTypeDraft()}>+ Type</button>
+        <button class="pin-button" type="button" on:mousedown={(event) => event.stopPropagation()} on:click={() => (groupsManagerOpen = true)}>Groups…</button>
         <button class="pin-button" type="button" on:mousedown={(event) => event.stopPropagation()} on:click={() => closeSchemaPane("schema")}>Close</button>
       </div>
     </header>
@@ -3968,8 +4036,12 @@
                 <span class="sfr-name">{field.name}</span>
                 <span class="sfr-typechip">{fieldTypeLabel(field.type)}</span>
                 <span class="sfr-meta">
-                  <span class="sfr-inherited-label">inherited from {inheritedFromLabel(selectedSchemaTypeId, fieldId)}</span>
-                  <i class="ti ti-arrow-up-right sfr-cog" aria-hidden="true"></i>
+                  {#if field.group_origin}
+                    <span class="sfr-group-origin"><i class="ti ti-stack-2" aria-hidden="true"></i> {groupOriginLabel(field)}</span>
+                  {:else}
+                    <span class="sfr-inherited-label">inherited from {inheritedFromLabel(selectedSchemaTypeId, fieldId)}</span>
+                    <i class="ti ti-arrow-up-right sfr-cog" aria-hidden="true"></i>
+                  {/if}
                 </span>
               </div>
             {/each}
@@ -3986,6 +4058,65 @@
             </div>
           {/if}
         </section>
+
+        {#if !schemaTypeReadonly}
+          <section class="schema-type-fields schema-type-groups" aria-label="Reusable groups">
+            <header class="schema-type-fields-header">
+              <strong>Reusable groups</strong>
+              <small>{typeGroupApplications.length}</small>
+            </header>
+            {#if typeGroupApplications.length}
+              <div class="applied-groups">
+                {#each typeGroupApplications as application, index}
+                  {@const groupDef = metadataSchema?.groups?.[application.group_id]}
+                  <div class="applied-group">
+                    <span class="sfr-tile"><i class={`ti ti-${groupDef?.icon || "stack-2"}`} aria-hidden="true"></i></span>
+                    <span class="ag-name">{groupDef?.name ?? application.group_id}</span>
+                    <span class="ag-as">as <strong>{application.label || "—"}</strong></span>
+                    <code class="ag-prefix">{application.key_prefix}</code>
+                    <button class="link-danger ag-remove" type="button" on:click={() => removeGroupApplication(index)}>Remove</button>
+                  </div>
+                {/each}
+              </div>
+            {/if}
+            {#if availableGroupEntries.length === 0}
+              <p class="muted">No reusable groups defined yet — create one in the Groups manager.</p>
+            {:else if groupApplyOpen}
+              <div class="group-apply-form">
+                <label class="sfi-field">Group
+                  <select bind:value={applyGroupId}>
+                    <option value="">— pick —</option>
+                    {#each availableGroupEntries as [gid, gdef]}
+                      <option value={gid}>{gdef.name}</option>
+                    {/each}
+                  </select>
+                </label>
+                <label class="sfi-field">Label
+                  <input
+                    value={applyGroupLabel}
+                    placeholder="External"
+                    on:input={(event) => {
+                      applyGroupLabel = event.currentTarget.value;
+                      if (!applyGroupPrefix.trim()) applyGroupPrefix = suggestPrefixFromLabel(applyGroupLabel);
+                    }}
+                  />
+                </label>
+                <label class="sfi-field">Prefix
+                  <input value={applyGroupPrefix} placeholder="external_" on:input={(event) => (applyGroupPrefix = event.currentTarget.value)} />
+                </label>
+                <div class="sfi-footer">
+                  <span class="sfi-spacer"></span>
+                  <button class="sfi-cancel" type="button" on:click={() => (groupApplyOpen = false)}>Cancel</button>
+                  <button class="sfi-done" type="button" disabled={!applyGroupId} on:click={applyGroupToType}>Apply</button>
+                </div>
+              </div>
+            {:else}
+              <div class="button-row">
+                <button type="button" on:click={() => { groupApplyOpen = true; applyGroupId = availableGroupEntries[0]?.[0] ?? ""; }}>+ Apply group</button>
+              </div>
+            {/if}
+          </section>
+        {/if}
       {/if}
 
       {#if schemaTypeKind === "prompt"}
@@ -4489,6 +4620,15 @@
     onCancel={() => (machineSettingsOpen = false)}
     onSave={saveMachineSettings}
   />
+
+  {#if groupsManagerOpen && metadataSchema}
+    <GroupsManagerDialog
+      groups={metadataSchema.groups ?? {}}
+      layerId={schemaTypeLayerId || projectSchemaLayerId()}
+      on:changed={(event) => { metadataSchema = event.detail.schema; void refreshMetadataSchema(); }}
+      on:close={() => (groupsManagerOpen = false)}
+    />
+  {/if}
 
   {#if error}
     <section class="error-toast" role="alert">

@@ -17,7 +17,8 @@
   import { renderChatContent } from "./chatMessageRender";
   import { formatCostEur, formatTokens } from "./money";
   import { setPalette, getSwatch, resolveColorForType, resolveColor } from "./colors";
-  import { fieldIconClass } from "./fieldIcons";
+  import { fieldIconClass, DEFAULT_FIELD_GLYPH } from "./fieldIcons";
+  import IconPicker from "./IconPicker.svelte";
   import SwatchPicker from "./SwatchPicker.svelte";
   import type {
     AIHealthResponse,
@@ -247,6 +248,9 @@
   let schemaFieldReadonly = false;
   // L1 section label being edited for the current field (metadata revision).
   let schemaFieldGroup = "";
+  // Per-field icon override (Tabler name, no prefix) — null = type default.
+  let schemaFieldIcon: string | null = null;
+  let iconPickerOpen = false;
   // Expand-in-place field editing in the type editor: the field id whose
   // inline editor is open (one at a time), or the "__new__" sentinel while
   // adding a field. null = all rows collapsed. Replaces routing to the
@@ -469,6 +473,9 @@
     if (addMenuOpenFor !== null && !inAnchorOrPopover) {
       addMenuOpenFor = null;
       addMenuPosition = null;
+    }
+    if (iconPickerOpen && !target?.closest(".sfi-icon-anchor")) {
+      iconPickerOpen = false;
     }
   }
 
@@ -1475,6 +1482,8 @@
     schemaFieldLayerId = metadataSchemaOverview?.field_sources[fieldId]?.built_in ? projectSchemaLayerId() : (metadataSchemaOverview?.field_sources[fieldId]?.layer_id ?? projectSchemaLayerId());
     schemaFieldEntryType = targetEntryTypeId;
     schemaFieldGroup = field.group ?? "";
+    schemaFieldIcon = field.icon ?? null;
+    iconPickerOpen = false;
     if (inline) {
       // Expand-in-place: no separate pane; just open this row's editor.
       expandedSchemaFieldId = fieldId;
@@ -1498,6 +1507,8 @@
     schemaFieldOptions = "";
     schemaFieldOptionColors = {};
     schemaFieldGroup = "";
+    schemaFieldIcon = null;
+    iconPickerOpen = false;
     schemaFieldLayerId = layerId;
     schemaFieldEntryType = entryTypeId;
     if (inline) {
@@ -1812,9 +1823,9 @@
           ? { picker_config: schemaFieldPickerConfig }
           : {}),
         ...(schemaFieldGroup.trim() ? { group: schemaFieldGroup.trim() } : {}),
-        // Preserve a previously-set icon override (edited via the icon
-        // picker, slice 2c) — the field editor doesn't touch it here.
-        ...(previousField?.icon ? { icon: previousField.icon } : {}),
+        // Per-field icon override (chosen in the IconPicker). null/empty =
+        // fall back to the field-type default glyph.
+        ...(schemaFieldIcon ? { icon: schemaFieldIcon } : {}),
       };
       const optionMigration = buildOptionMigration(previousField, nextField);
       if (previousFieldId && previousFieldId !== nextFieldId) {
@@ -3787,7 +3798,28 @@
         {#snippet fieldInlineEditor()}
           <div class="schema-field-inline" role="group" aria-label="Field settings">
             <div class="sfi-head">
-              <span class="sfr-tile"><i class={fieldIconClass({ type: schemaFieldType, icon: null })} aria-hidden="true"></i></span>
+              <div class="sfi-icon-anchor">
+                <button
+                  type="button"
+                  class="sfr-tile sfi-icon-btn"
+                  aria-label="Choose icon"
+                  title="Choose icon"
+                  on:click={() => (iconPickerOpen = !iconPickerOpen)}
+                >
+                  <i class={fieldIconClass({ type: schemaFieldType, icon: schemaFieldIcon })} aria-hidden="true"></i>
+                </button>
+                {#if iconPickerOpen}
+                  <div class="sfi-icon-pop">
+                    <IconPicker
+                      value={schemaFieldIcon}
+                      defaultGlyph={DEFAULT_FIELD_GLYPH[schemaFieldType] ?? "letter-case"}
+                      fieldLabel={schemaFieldName || "field"}
+                      on:select={(event) => (schemaFieldIcon = event.detail.icon)}
+                      on:close={() => (iconPickerOpen = false)}
+                    />
+                  </div>
+                {/if}
+              </div>
               <input class="sfi-name" value={schemaFieldName} placeholder="POV Character" aria-label="Field display name" on:input={(event) => updateSchemaFieldName(event.currentTarget.value)} />
               <select class="sfi-type" bind:value={schemaFieldType} aria-label="Field type">
                 <option value="text">Text</option>

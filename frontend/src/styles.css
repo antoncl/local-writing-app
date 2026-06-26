@@ -2666,6 +2666,24 @@ button.schema-field-row:hover {
   align-items: center;
   gap: 9px;
 }
+.sfi-icon-anchor {
+  position: relative;
+  flex: none;
+}
+.sfi-icon-btn {
+  padding: 0;
+  cursor: pointer;
+}
+.sfi-icon-btn:hover {
+  border-color: var(--accent, #2f6f5e);
+  color: var(--accent-strong, #234e43);
+}
+.sfi-icon-pop {
+  position: absolute;
+  top: calc(100% + 6px);
+  left: 0;
+  z-index: 60;
+}
 .sfi-name {
   flex: 1;
   min-width: 0;

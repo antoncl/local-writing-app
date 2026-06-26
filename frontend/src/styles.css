@@ -112,6 +112,28 @@ button:disabled:hover {
   background: #ffffff;
 }
 
+/* Quiet inline "+ add" affordance. Echoes the dashed field-row tile
+   (`.sfr-tile`) so "Add field / Apply group / add a tag" read as an empty
+   slot to fill, not a heavy default white-box button. Used across the type
+   editor + metadata rail for visual consistency. */
+button.add-affordance {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 11px;
+  border: 1px dashed var(--border-strong, #b4c2bc);
+  border-radius: 8px;
+  background: var(--inset, #f1f5f3);
+  color: var(--text-2, #4d5753);
+  font-size: 12px;
+  font-weight: 500;
+}
+button.add-affordance:hover {
+  border-color: var(--accent, #2f6f5e);
+  color: var(--accent-strong, #234e43);
+  background: var(--surface, #fff);
+}
+
 input,
 select {
   width: 100%;
@@ -1226,10 +1248,46 @@ button.row-action-add.active {
 .editor-rail {
   display: flex;
   flex-direction: column;
+  position: relative;
   width: 280px;
   min-height: 0;
   background: var(--inset, #f1f5f3);
   border-left: 1px solid var(--divider, #e2e8e5);
+}
+
+/* Left-edge drag handle to widen/narrow the rail. */
+.rail-resize {
+  position: absolute;
+  top: 0;
+  left: -3px;
+  width: 7px;
+  height: 100%;
+  margin: 0;
+  padding: 0;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  cursor: col-resize;
+  z-index: 5;
+}
+.rail-resize:hover {
+  background: linear-gradient(
+    to right,
+    transparent 0 2px,
+    var(--accent, #2f6f5e) 2px 4px,
+    transparent 4px
+  );
+}
+.editor-rail.resizing {
+  user-select: none;
+}
+.editor-rail.resizing .rail-resize {
+  background: linear-gradient(
+    to right,
+    transparent 0 2px,
+    var(--accent, #2f6f5e) 2px 4px,
+    transparent 4px
+  );
 }
 
 .rail-head {
@@ -1524,9 +1582,20 @@ button.row-action-add.active {
 }
 
 .tag-picker-toggle {
-  min-width: 34px;
-  padding-right: 0;
+  min-width: 32px;
   padding-left: 0;
+  padding-right: 0;
+  border: 1px dashed var(--border-strong, #b4c2bc);
+  border-radius: 8px;
+  background: var(--inset, #f1f5f3);
+  color: var(--text-2, #4d5753);
+  font-size: 15px;
+  line-height: 1;
+}
+.tag-picker-toggle:hover {
+  border-color: var(--accent, #2f6f5e);
+  color: var(--accent-strong, #234e43);
+  background: var(--surface, #fff);
 }
 
 .tag-picker {
@@ -2587,6 +2656,11 @@ button.schema-field-row:hover {
   display: inline-flex;
   color: var(--border-strong, #b4c2bc);
   font-size: 15px;
+  cursor: grab;
+}
+.schema-field-row.drag-target:hover {
+  background: var(--accent-soft, #edf6f2);
+  border-color: var(--accent, #2f6f5e);
 }
 .sfr-tile {
   flex: none;
@@ -2693,13 +2767,90 @@ button.schema-field-row:hover {
   background: var(--surface, #fff);
   font-size: 13px;
 }
-.sfi-type {
+/* Type chip + grid popover (the 11-type field-type picker). */
+.sfi-type-anchor {
+  position: relative;
   flex: none;
-  padding: 6px 8px;
+}
+.sfi-type-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 9px;
   border: 1px solid var(--border, #cbd6d2);
   border-radius: 8px;
   background: var(--surface, #fff);
   font-size: 12px;
+  color: var(--text-2, #4d5753);
+  cursor: pointer;
+}
+.sfi-type-chip:hover,
+.sfi-type-chip.open {
+  border-color: var(--accent, #2f6f5e);
+  color: var(--accent-strong, #234e43);
+}
+.sfi-type-chip-label {
+  font-weight: 500;
+}
+.sfi-type-chip-caret {
+  font-size: 13px;
+  opacity: 0.6;
+}
+.sfi-type-grid {
+  position: absolute;
+  top: calc(100% + 6px);
+  right: 0;
+  z-index: 60;
+  display: grid;
+  grid-template-columns: repeat(2, minmax(120px, 1fr));
+  gap: 4px;
+  padding: 6px;
+  border: 1px solid var(--border, #cbd6d2);
+  border-radius: 10px;
+  background: var(--surface, #fff);
+  box-shadow: 0 8px 24px rgba(20, 40, 33, 0.16);
+}
+.sfi-type-cell {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 7px 9px;
+  border: 1px solid transparent;
+  border-radius: 8px;
+  background: transparent;
+  font-size: 12px;
+  color: var(--text-2, #4d5753);
+  text-align: left;
+  cursor: pointer;
+}
+.sfi-type-cell i {
+  font-size: 15px;
+  color: var(--text-3, #74817b);
+}
+.sfi-type-cell:hover {
+  background: var(--inset, #f1f5f3);
+}
+.sfi-type-cell.selected {
+  border-color: var(--accent, #2f6f5e);
+  background: var(--inset, #f1f5f3);
+  color: var(--accent-strong, #234e43);
+  font-weight: 500;
+}
+.sfi-type-cell.selected i {
+  color: var(--accent, #2f6f5e);
+}
+.sfi-computed {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.sfi-computed select,
+.sfi-field select {
+  padding: 5px 8px;
+  border: 1px solid var(--border, #cbd6d2);
+  border-radius: 8px;
+  background: var(--surface, #fff);
+  font-size: 13px;
 }
 .sfi-controls {
   display: flex;
@@ -2785,7 +2936,27 @@ button.schema-field-row:hover {
 .sfi-option-row {
   display: flex;
   align-items: center;
-  gap: 9px;
+  gap: 8px;
+}
+.sfi-option-row.dragging {
+  opacity: 0.5;
+}
+.sfi-option-grip {
+  flex: none;
+  display: inline-flex;
+  color: var(--border-strong, #b4c2bc);
+  font-size: 15px;
+  cursor: grab;
+}
+.sfi-option-value-input {
+  flex: 1;
+  min-width: 0;
+  padding: 5px 8px;
+  border: 1px solid var(--border, #cbd6d2);
+  border-radius: 8px;
+  background: var(--surface, #fff);
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 12px;
 }
 .sfi-option-label {
   flex: 1;
@@ -2796,11 +2967,27 @@ button.schema-field-row:hover {
   background: var(--surface, #fff);
   font-size: 13px;
 }
-.sfi-option-value {
+.sfi-option-remove {
   flex: none;
-  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
-  font-size: 11px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 26px;
+  height: 26px;
+  padding: 0;
+  border: 1px solid transparent;
+  border-radius: 7px;
+  background: transparent;
   color: var(--text-3, #74817b);
+  cursor: pointer;
+}
+.sfi-option-remove:hover {
+  border-color: var(--danger-border, #e2c4c2);
+  color: var(--danger, #7c1f18);
+  background: var(--danger-soft, #fff3f2);
+}
+.sfi-add-option {
+  align-self: flex-start;
 }
 .sfi-options-hint {
   display: flex;

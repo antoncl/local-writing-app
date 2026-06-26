@@ -20,12 +20,24 @@
 
   let open = false;
   let anchor: HTMLButtonElement | undefined;
+  // Popover is fixed-positioned (computed from the anchor) so it escapes the
+  // metadata rail's overflow clipping. Mirrors TagPicker.
+  let menuPos: { x: number; y: number; width: number } | null = null;
 
   $: current = options.find((o) => o.value === value) ?? null;
   // Resolve the swatch hex when the selected option carries a color id.
   $: currentSwatch = current?.color ? getSwatch(current.color) : null;
+  // Only reserve a dot column when at least one option is actually colored.
+  // A select with no colors shows no dots at all (no "no color" placeholder).
+  $: anyColored = options.some((o) => !!o.color);
 
-  function toggle() { open = !open; }
+  function toggle() {
+    open = !open;
+    if (open && anchor) {
+      const r = anchor.getBoundingClientRect();
+      menuPos = { x: r.left, y: r.bottom + 4, width: r.width };
+    }
+  }
   function close() { open = false; }
 
   function select(opt: SelectOption) {
@@ -92,8 +104,12 @@
     <span class="colored-select-caret" aria-hidden="true">▾</span>
   </button>
 
-  {#if open}
-    <div class="colored-select-popover" role="listbox">
+  {#if open && menuPos}
+    <div
+      class="colored-select-popover"
+      role="listbox"
+      style={`left: ${menuPos.x}px; top: ${menuPos.y}px; min-width: ${menuPos.width}px;`}
+    >
       {#if allowBlank}
         <button
           type="button"
@@ -103,7 +119,9 @@
           aria-selected={value === ""}
           on:click|stopPropagation={clear}
         >
-          <span class="colored-select-dot colored-select-dot-empty"></span>
+          {#if anyColored}
+            <span class="colored-select-dot colored-select-dot-spacer"></span>
+          {/if}
           <span class="colored-select-row-label muted">{placeholder}</span>
         </button>
       {/if}
@@ -118,8 +136,8 @@
         >
           {#if opt.color}
             <span class="colored-select-dot" style={dotStyle(opt)}></span>
-          {:else}
-            <span class="colored-select-dot colored-select-dot-empty"></span>
+          {:else if anyColored}
+            <span class="colored-select-dot colored-select-dot-spacer"></span>
           {/if}
           <span class="colored-select-row-label">{opt.label ?? opt.value}</span>
         </button>
@@ -172,12 +190,11 @@
     border-radius: 50%;
     border: 1px solid rgba(0, 0, 0, 0.18);
   }
-  .colored-select-dot-empty {
-    background: repeating-linear-gradient(
-      45deg,
-      transparent 0 2px,
-      rgba(0, 0, 0, 0.18) 2px 3px
-    );
+  /* Invisible same-size spacer: keeps labels aligned in a list that mixes
+     colored and uncolored options, without presenting a "no color" swatch. */
+  .colored-select-dot-spacer {
+    background: none;
+    border-color: transparent;
   }
 
   .colored-select-label,
@@ -196,10 +213,8 @@
   }
 
   .colored-select-popover {
-    position: absolute;
-    top: calc(100% + 4px);
-    left: 0;
-    z-index: 100;
+    position: fixed;
+    z-index: 10000;
     background: var(--ctx-surface, #fff);
     border: 1px solid var(--ctx-border, #cdd8d3);
     border-radius: 8px;

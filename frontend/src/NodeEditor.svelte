@@ -88,6 +88,36 @@
   // content (none-shape: assistant / project / structure_node).
   let railOpen = true;
   $: railIsPane = bodyShape === "none";
+
+  // Rail width is user-resizable via the left-edge drag handle, persisted
+  // across sessions. Clamped so the rail can be made slimmer or wider but
+  // never collapses the body.
+  const RAIL_MIN = 220;
+  const RAIL_MAX = 560;
+  function loadRailWidth(): number {
+    const stored = Number(localStorage.getItem("editorRailWidth"));
+    return Number.isFinite(stored) && stored >= RAIL_MIN && stored <= RAIL_MAX ? stored : 280;
+  }
+  let railWidth = loadRailWidth();
+  let railEl: HTMLElement | undefined;
+  let railResizing = false;
+  let railRightEdge = 0;
+  function startRailResize(event: MouseEvent) {
+    event.preventDefault();
+    railResizing = true;
+    railRightEdge = railEl ? railEl.getBoundingClientRect().right : event.clientX + railWidth;
+  }
+  function onRailResizeMove(event: MouseEvent) {
+    if (!railResizing) return;
+    // Rail sits on the right edge; dragging its left handle leftward widens it.
+    const next = Math.min(RAIL_MAX, Math.max(RAIL_MIN, railRightEdge - event.clientX));
+    railWidth = next;
+  }
+  function endRailResize() {
+    if (!railResizing) return;
+    railResizing = false;
+    localStorage.setItem("editorRailWidth", String(railWidth));
+  }
   // Per-scene continuation cost rollup. Bound out from ProseBodyView so the
   // header chip stays in the shell (where the rest of the document header
   // lives). Cost state itself is owned by ProseBodyView since the AI
@@ -658,6 +688,8 @@
   {/if}
 {/snippet}
 
+<svelte:window on:mousemove={onRailResizeMove} on:mouseup={endRailResize} />
+
 <div
   class="editor-panel"
   class:body-hidden={bodyShape === "none"}
@@ -766,7 +798,14 @@
 
   {#if scene && metadataSchema && !railIsPane}
     {#if railOpen}
-      <aside class="editor-rail" aria-label={`${documentLabel} details`}>
+      <aside class="editor-rail" class:resizing={railResizing} style={`width: ${railWidth}px`} bind:this={railEl} aria-label={`${documentLabel} details`}>
+        <button
+          class="rail-resize"
+          type="button"
+          title="Drag to resize details"
+          aria-label="Resize details rail"
+          on:mousedown={startRailResize}
+        ></button>
         <div class="rail-head">
           <span class="rail-head-label">Details</span>
           <button

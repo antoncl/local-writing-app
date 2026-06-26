@@ -401,6 +401,12 @@ export const api = {
       body: JSON.stringify({ layer_id: layerId, entry_type_id: entryTypeId, applications }),
     });
   },
+  setEntryTypeFieldOrder(layerId: string, entryTypeId: string, fieldOrder: string[]) {
+    return request<MetadataSchema>("/metadata/schema/entry-types/field-order", {
+      method: "PUT",
+      body: JSON.stringify({ layer_id: layerId, entry_type_id: entryTypeId, field_order: fieldOrder }),
+    });
+  },
   listDirectories(path?: string) {
     const query = path ? `?path=${encodeURIComponent(path)}` : "";
     return request<DirectoryListing>(`/directories${query}`);

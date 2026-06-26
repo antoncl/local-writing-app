@@ -295,12 +295,18 @@
                 onChange={(v) => updateField(fieldId, field, v)}
               />
             {:else if field.type === "boolean"}
-              <input
-                type="checkbox"
+              {@const on = Boolean(metadata[fieldId])}
+              <button
+                type="button"
+                role="switch"
+                class="fr-toggle"
+                class:on={on}
+                aria-checked={on}
                 aria-label={field.name}
-                checked={Boolean(metadata[fieldId])}
-                on:change={(event) => updateField(fieldId, field, event.currentTarget.checked)}
-              />
+                on:click={() => updateField(fieldId, field, !on)}
+              >
+                <span class="fr-toggle-knob"></span>
+              </button>
             {:else if field.type === "number"}
               <input
                 type="number"
@@ -497,12 +503,44 @@
   .field-row:not(.wide) .fr-val :global(input[type="text"]),
   .field-row:not(.wide) .fr-val :global(input[type="number"]),
   .field-row:not(.wide) .fr-val :global(input:not([type])) {
-    max-width: 130px;
-    text-align: right;
+    max-width: 160px;
+    text-align: left;
   }
   .fr-val :global(input[type="checkbox"]) {
     width: auto;
     padding: 0;
+  }
+
+  /* Boolean toggle switch — matches the on/off glyph better than a checkbox. */
+  .fr-toggle {
+    flex: none;
+    width: 34px;
+    height: 20px;
+    padding: 0;
+    border-radius: 999px;
+    border: 1px solid var(--border, #cbd6d2);
+    background: var(--inset, #f1f5f3);
+    cursor: pointer;
+    position: relative;
+    transition: background-color 120ms ease, border-color 120ms ease;
+  }
+  .fr-toggle-knob {
+    position: absolute;
+    top: 1px;
+    left: 1px;
+    width: 16px;
+    height: 16px;
+    border-radius: 50%;
+    background: #fff;
+    box-shadow: 0 1px 2px rgba(20, 40, 33, 0.28);
+    transition: transform 120ms ease;
+  }
+  .fr-toggle.on {
+    background: var(--accent, #2f6f5e);
+    border-color: var(--accent, #2f6f5e);
+  }
+  .fr-toggle.on .fr-toggle-knob {
+    transform: translateX(14px);
   }
 
   .multi-select-chips {

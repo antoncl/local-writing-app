@@ -233,19 +233,23 @@
   let schemaFieldEntryType = "scene";
   let schemaFieldId = "";
   let schemaFieldName = "";
+  // Holds the FULL resolved field type (multi_select / entity_ref_list /
+  // computed / color are first-class — chosen in the type grid, no more
+  // select+allow-multiple indirection).
   let schemaFieldType: MetadataFieldType = "text";
-  let schemaFieldAllowMultiple = false;
+  // Type-grid popover (off the type chip in the inline editor).
+  let schemaFieldTypeMenuOpen = false;
+  // Computed-field authoring (only meaningful when type === "computed").
+  let schemaFieldComputedFunction: "word_count" | "counter" = "word_count";
+  let schemaFieldComputedScope: "siblings" | "manuscript" = "siblings";
   let schemaFieldPickerConfig: NodePickerConfig = { kinds: [], entry_types: {} };
-  let schemaFieldOptions = "";
-  // Per-option swatch ids for `select` fields, keyed by option value. Lets
-  // authors color the status field (and any other select). Edits to the
-  // comma-string value list above don't disturb this — colors are looked
-  // up by value at save time.
-  let schemaFieldOptionColors: Record<string, string | null> = {};
-  $: schemaFieldOptionValues = schemaFieldOptions
-    .split(",")
-    .map((v) => v.trim())
-    .filter(Boolean);
+  // Ordered list of select/multi_select options being authored. Single source
+  // of truth (replaces the old comma-string + side maps): each row carries its
+  // stable `value` (the macro contract), a cosmetic `label`, a `color` swatch,
+  // and `originalValue` (the value at load time, or null for a freshly-added
+  // row) so a value rename can migrate stored data even after drag-reorder.
+  type OptionDraft = { value: string; label: string; color: string | null; originalValue: string | null };
+  let schemaFieldOptionList: OptionDraft[] = [];
   let schemaFieldReadonlyTypeLabel = "";
   let selectedSchemaFieldId: string | null = null;
   let schemaFieldReadonly = false;
@@ -261,9 +265,6 @@
   // `keyManual` stops name→key auto-derivation once the key is hand-edited.
   let schemaFieldKeyEditing = false;
   let schemaFieldKeyManual = false;
-  // Per-option display labels keyed by stable value (decision #10: value is
-  // the contract, label is cosmetic). Sits alongside schemaFieldOptionColors.
-  let schemaFieldOptionLabels: Record<string, string> = {};
   // L2 reusable-groups manager (modal).
   let groupsManagerOpen = false;
   // L2 "apply group" form state (in the type editor).
@@ -510,6 +511,9 @@
     }
     if (iconPickerOpen && !target?.closest(".sfi-icon-anchor")) {
       iconPickerOpen = false;
+    }
+    if (schemaFieldTypeMenuOpen && !target?.closest(".sfi-type-anchor")) {
+      schemaFieldTypeMenuOpen = false;
     }
   }
 
@@ -1464,6 +1468,33 @@
     return source?.built_in ? "System" : (source?.layer_label ?? "Unknown");
   }
 
+  // The field types offered in the inline type grid, in display order.
+  // `date` is intentionally omitted (see decisions-field-types). Each cell
+  // shows the type's default glyph + label.
+  const FIELD_TYPE_CHOICES: MetadataFieldType[] = [
+    "text",
+    "long_text",
+    "number",
+    "boolean",
+    "select",
+    "multi_select",
+    "entity_ref",
+    "entity_ref_list",
+    "tags",
+    "computed",
+    "color",
+  ];
+
+  // Switch the field type from the grid; keeps config state coherent so the
+  // type-specific blocks below show sane defaults when first revealed.
+  function chooseSchemaFieldType(type: MetadataFieldType) {
+    schemaFieldType = type;
+    schemaFieldTypeMenuOpen = false;
+    if (type === "computed" && schemaFieldComputedFunction !== "counter" && schemaFieldComputedFunction !== "word_count") {
+      schemaFieldComputedFunction = "word_count";
+    }
+  }
+
   function fieldTypeLabel(type: MetadataFieldType) {
     const labels: Record<MetadataFieldType, string> = {
       text: "Text",
@@ -1493,29 +1524,22 @@
     schemaFieldName = field.name;
     schemaFieldReadonly = Boolean(metadataSchemaOverview?.field_sources[fieldId]?.built_in);
     schemaFieldReadonlyTypeLabel = "";
-    schemaFieldAllowMultiple = field.type === "multi_select" || field.type === "entity_ref_list";
+    schemaFieldTypeMenuOpen = false;
     schemaFieldPickerConfig = field.picker_config
       ? { kinds: [...(field.picker_config.kinds ?? [])], entry_types: { ...(field.picker_config.entry_types ?? {}) }, presets: [...(field.picker_config.presets ?? [])] }
       : { kinds: ["lore"], entry_types: {} };
-    schemaFieldType = schemaFieldReadonly
-      ? field.type
-      : field.type === "multi_select"
-        ? "select"
-        : field.type === "entity_ref_list"
-          ? "entity_ref"
-          : field.type === "computed"
-            ? "text"
-            : field.type;
-    // Options are SelectOption objects; the legacy comma-string editor
-    // surface still works on values, and the per-row swatch picker below
-    // edits colors keyed by value.
-    schemaFieldOptions = field.options.map((o) => o.value).join(", ");
-    schemaFieldOptionColors = Object.fromEntries(
-      field.options.map((o) => [o.value, o.color ?? null]),
-    );
-    schemaFieldOptionLabels = Object.fromEntries(
-      field.options.filter((o) => o.label).map((o) => [o.value, o.label as string]),
-    );
+    // The full resolved type is stored directly — every type is first-class.
+    schemaFieldType = field.type;
+    schemaFieldComputedFunction = field.computed?.function === "counter" ? "counter" : "word_count";
+    schemaFieldComputedScope = field.computed?.scope === "manuscript" ? "manuscript" : "siblings";
+    // Load options into the ordered draft list. `originalValue` lets a later
+    // value rename migrate stored data even after the rows are reordered.
+    schemaFieldOptionList = field.options.map((o) => ({
+      value: o.value,
+      label: o.label ?? "",
+      color: o.color ?? null,
+      originalValue: o.value,
+    }));
     schemaFieldKeyEditing = false;
     schemaFieldKeyManual = false;
     schemaFieldLayerId = metadataSchemaOverview?.field_sources[fieldId]?.built_in ? projectSchemaLayerId() : (metadataSchemaOverview?.field_sources[fieldId]?.layer_id ?? projectSchemaLayerId());
@@ -1541,11 +1565,11 @@
     schemaFieldType = "text";
     schemaFieldReadonly = false;
     schemaFieldReadonlyTypeLabel = "";
-    schemaFieldAllowMultiple = false;
+    schemaFieldTypeMenuOpen = false;
+    schemaFieldComputedFunction = "word_count";
+    schemaFieldComputedScope = "siblings";
     schemaFieldPickerConfig = { kinds: ["lore"], entry_types: {} };
-    schemaFieldOptions = "";
-    schemaFieldOptionColors = {};
-    schemaFieldOptionLabels = {};
+    schemaFieldOptionList = [];
     schemaFieldGroup = "";
     schemaFieldIcon = null;
     iconPickerOpen = false;
@@ -1807,8 +1831,7 @@
   }
 
   function schemaFieldSaveType(): MetadataFieldType {
-    if (schemaFieldType === "select" && schemaFieldAllowMultiple) return "multi_select";
-    if (schemaFieldType === "entity_ref" && schemaFieldAllowMultiple) return "entity_ref_list";
+    // The type grid sets the full resolved type directly — no decomposition.
     return schemaFieldType;
   }
 
@@ -1836,48 +1859,44 @@
     await run(async () => {
       const previousFieldId = selectedSchemaFieldId && !selectedSchemaFieldId.startsWith("system:") ? selectedSchemaFieldId : null;
       const nextFieldId = schemaFieldId.trim();
-      const previousField = previousFieldId ? metadataSchema?.fields[previousFieldId] : null;
-      // Compose SelectOption objects: comma-split values from the
-      // textarea + per-value colors from the swatch row editor. Falls
-      // back to previousField.options[value].color if the row hasn't
-      // been touched this session.
-      const previousByValue = new Map(
-        (previousField?.options ?? []).map((o) => [o.value, o]),
-      );
-      const options = schemaFieldOptions
-        .split(",")
-        .map((option) => option.trim())
-        .filter(Boolean)
-        .map((value) => {
-          const prev = previousByValue.get(value);
-          const colorFromEditor = schemaFieldOptionColors[value];
-          const color =
-            colorFromEditor !== undefined
-              ? colorFromEditor
-              : (prev?.color ?? null);
-          const labelFromEditor = schemaFieldOptionLabels[value];
-          const label =
-            labelFromEditor !== undefined ? labelFromEditor : prev?.label;
-          const out: import("./types").SelectOption = { value };
-          // Only persist a label when it actually differs from the stable
-          // value (label is cosmetic; value is the macro contract).
-          if (label && label.trim() && label.trim() !== value) out.label = label.trim();
-          if (color) out.color = color;
+      // Compose SelectOption objects from the ordered draft list (order is
+      // preserved on save). Drop rows with an empty value; de-dupe by value.
+      const seenValues = new Set<string>();
+      const options = schemaFieldOptionList
+        .map((draft) => ({ ...draft, value: draft.value.trim() }))
+        .filter((draft) => draft.value && !seenValues.has(draft.value) && seenValues.add(draft.value))
+        .map((draft) => {
+          const out: import("./types").SelectOption = { value: draft.value };
+          const label = draft.label.trim();
+          // Only persist a label when it differs from the stable value
+          // (label is cosmetic; value is the macro contract).
+          if (label && label !== draft.value) out.label = label;
+          if (draft.color) out.color = draft.color;
           return out;
         });
+      // Migration: a row whose value changed from its loaded `originalValue`
+      // rewrites stored entry data. Reorder-safe (keyed by originalValue, not
+      // position); added rows have no originalValue so they never migrate.
+      const optionMigration = buildOptionMigrationFromDrafts();
+      const hasOptions = schemaFieldType === "select" || schemaFieldType === "multi_select";
+      const hasPicker = schemaFieldType === "entity_ref" || schemaFieldType === "entity_ref_list";
+      const computedSpec: Record<string, string> | null =
+        schemaFieldType === "computed"
+          ? schemaFieldComputedFunction === "word_count"
+            ? { source: "body", function: "word_count" }
+            : { function: "counter", scope: schemaFieldComputedScope }
+          : null;
       const nextField: MetadataFieldDefinition = {
         name: schemaFieldName.trim() || nextFieldId,
         type: schemaFieldSaveType(),
-        options: schemaFieldType === "select" ? options : [],
-        ...(schemaFieldType === "entity_ref"
-          ? { picker_config: schemaFieldPickerConfig }
-          : {}),
+        options: hasOptions ? options : [],
+        ...(hasPicker ? { picker_config: schemaFieldPickerConfig } : {}),
+        ...(computedSpec ? { computed: computedSpec } : {}),
         ...(schemaFieldGroup.trim() ? { group: schemaFieldGroup.trim() } : {}),
         // Per-field icon override (chosen in the IconPicker). null/empty =
         // fall back to the field-type default glyph.
         ...(schemaFieldIcon ? { icon: schemaFieldIcon } : {}),
       };
-      const optionMigration = buildOptionMigration(previousField, nextField);
       if (previousFieldId && previousFieldId !== nextFieldId) {
         await api.renameMetadataField(previousFieldId, nextFieldId, schemaFieldEntryType);
       }
@@ -2040,21 +2059,68 @@
     return nextMetadata;
   }
 
-  function buildOptionMigration(previousField: MetadataFieldDefinition | null | undefined, nextField: MetadataFieldDefinition) {
-    const optionTypes = new Set<MetadataFieldType>(["select", "multi_select", "tags"]);
-    if (!previousField || !optionTypes.has(previousField.type) || !optionTypes.has(nextField.type)) return null;
-    if (!previousField.options.length || previousField.options.length !== nextField.options.length) return null;
-    // Compare by `value` since options are SelectOption objects. A
-    // color-only edit (same value, different swatch) doesn't migrate
-    // entry data — only value renames do.
+  // Migration from the option draft list: a row whose value changed from the
+  // value it was loaded with rewrites stored entry data. Keyed by the loaded
+  // `originalValue`, so reordering rows never produces a spurious migration,
+  // and freshly-added rows (originalValue null) never migrate.
+  function buildOptionMigrationFromDrafts(): Record<string, string> | null {
     const migration: Record<string, string> = {};
-    previousField.options.forEach((previousOption, index) => {
-      const nextOption = nextField.options[index];
-      if (previousOption.value !== nextOption.value) {
-        migration[previousOption.value] = nextOption.value;
+    for (const draft of schemaFieldOptionList) {
+      const value = draft.value.trim();
+      if (draft.originalValue && value && draft.originalValue !== value) {
+        migration[draft.originalValue] = value;
       }
-    });
+    }
     return Object.keys(migration).length > 0 ? migration : null;
+  }
+
+  // --- Option draft list editing (select / multi_select) -------------------
+  function addSchemaFieldOption() {
+    schemaFieldOptionList = [...schemaFieldOptionList, { value: "", label: "", color: null, originalValue: null }];
+  }
+  function removeSchemaFieldOption(index: number) {
+    schemaFieldOptionList = schemaFieldOptionList.filter((_, i) => i !== index);
+  }
+  function updateSchemaFieldOption(index: number, patch: Partial<{ value: string; label: string; color: string | null }>) {
+    schemaFieldOptionList = schemaFieldOptionList.map((draft, i) => (i === index ? { ...draft, ...patch } : draft));
+  }
+  // --- Field row drag-reorder (own fields of a type) -----------------------
+  let fieldDragId: string | null = null;
+  function onFieldDragStart(fieldId: string) {
+    fieldDragId = fieldId;
+  }
+  async function onFieldDrop(targetFieldId: string) {
+    const draggedId = fieldDragId;
+    fieldDragId = null;
+    if (!draggedId || draggedId === targetFieldId || !selectedSchemaTypeId) return;
+    const order = typeOwnFieldEntries.map(([id]) => id);
+    const from = order.indexOf(draggedId);
+    const to = order.indexOf(targetFieldId);
+    if (from < 0 || to < 0) return;
+    order.splice(from, 1);
+    order.splice(to, 0, draggedId);
+    const layerId = schemaTypeLayerId || projectSchemaLayerId();
+    await run(async () => {
+      metadataSchema = await api.setEntryTypeFieldOrder(layerId, selectedSchemaTypeId, order);
+      await refreshMetadataSchema();
+      status = "Reordered fields";
+    });
+  }
+
+  let optionDragIndex: number | null = null;
+  function onOptionDragStart(index: number) {
+    optionDragIndex = index;
+  }
+  function onOptionDrop(index: number) {
+    if (optionDragIndex === null || optionDragIndex === index) {
+      optionDragIndex = null;
+      return;
+    }
+    const next = [...schemaFieldOptionList];
+    const [moved] = next.splice(optionDragIndex, 1);
+    next.splice(index, 0, moved);
+    schemaFieldOptionList = next;
+    optionDragIndex = null;
   }
 
   function migrateMetadataOptionValues(metadata: EntryMetadata, fieldId: string, migration: Record<string, string> | null) {
@@ -3918,23 +3984,43 @@
                 {/if}
               </div>
               <input class="sfi-name" value={schemaFieldName} placeholder="POV Character" aria-label="Field display name" on:input={(event) => updateSchemaFieldName(event.currentTarget.value)} />
-              <select class="sfi-type" bind:value={schemaFieldType} aria-label="Field type">
-                <option value="text">Text</option>
-                <option value="long_text">Long Text</option>
-                <option value="number">Number</option>
-                <option value="boolean">Boolean</option>
-                <option value="select">Select</option>
-                <option value="entity_ref">Entity Reference</option>
-                <option value="tags">Tags</option>
-              </select>
+              <div class="sfi-type-anchor">
+                <button
+                  type="button"
+                  class="sfi-type-chip"
+                  class:open={schemaFieldTypeMenuOpen}
+                  aria-haspopup="true"
+                  aria-expanded={schemaFieldTypeMenuOpen}
+                  aria-label="Change field type"
+                  on:click={() => (schemaFieldTypeMenuOpen = !schemaFieldTypeMenuOpen)}
+                >
+                  <i class={`ti ti-${DEFAULT_FIELD_GLYPH[schemaFieldType] ?? "letter-case"}`} aria-hidden="true"></i>
+                  <span class="sfi-type-chip-label">{fieldTypeLabel(schemaFieldType)}</span>
+                  <i class="ti ti-chevron-down sfi-type-chip-caret" aria-hidden="true"></i>
+                </button>
+                {#if schemaFieldTypeMenuOpen}
+                  <div class="sfi-type-grid" role="listbox" aria-label="Field type">
+                    {#each FIELD_TYPE_CHOICES as choice (choice)}
+                      <button
+                        type="button"
+                        class="sfi-type-cell"
+                        class:selected={schemaFieldType === choice}
+                        role="option"
+                        aria-selected={schemaFieldType === choice}
+                        on:click={() => chooseSchemaFieldType(choice)}
+                      >
+                        <i class={`ti ti-${DEFAULT_FIELD_GLYPH[choice] ?? "letter-case"}`} aria-hidden="true"></i>
+                        <span>{fieldTypeLabel(choice)}</span>
+                      </button>
+                    {/each}
+                  </div>
+                {/if}
+              </div>
             </div>
             <div class="sfi-controls">
               <label class="sfi-field">Group
                 <input value={schemaFieldGroup} placeholder="— none —" aria-label="Group section" on:input={(event) => (schemaFieldGroup = event.currentTarget.value)} />
               </label>
-              {#if schemaFieldType === "select" || schemaFieldType === "entity_ref"}
-                <label class="inline-check"><input type="checkbox" bind:checked={schemaFieldAllowMultiple} /> Allow multiple</label>
-              {/if}
             </div>
             <div class="sfi-key-row">
               {#if schemaFieldKeyEditing}
@@ -3955,7 +4041,7 @@
                 {/if}
               {/if}
             </div>
-            {#if schemaFieldType === "entity_ref"}
+            {#if schemaFieldType === "entity_ref" || schemaFieldType === "entity_ref_list"}
               <div class="schema-field-picker-config">
                 <NodePickerConfigEditor
                   mode="field"
@@ -3965,38 +4051,72 @@
                 />
               </div>
             {/if}
-            {#if schemaFieldType === "select"}
-              <label class="sfi-field sfi-options-values">Option values
-                <input bind:value={schemaFieldOptions} placeholder="tribunal, crown, marsh" />
-              </label>
-              {#if schemaFieldOptionValues.length > 0}
-                <div class="sfi-options">
-                  {#each schemaFieldOptionValues as optionValue (optionValue)}
-                    <div class="sfi-option-row">
-                      <SwatchPicker
-                        value={schemaFieldOptionColors[optionValue] ?? null}
-                        onChange={(id) => {
-                          schemaFieldOptionColors = { ...schemaFieldOptionColors, [optionValue]: id };
-                        }}
-                      />
-                      <input
-                        class="sfi-option-label"
-                        value={schemaFieldOptionLabels[optionValue] ?? ""}
-                        placeholder={optionValue}
-                        aria-label={`Display label for ${optionValue}`}
-                        on:input={(event) => {
-                          schemaFieldOptionLabels = { ...schemaFieldOptionLabels, [optionValue]: event.currentTarget.value };
-                        }}
-                      />
-                      <span class="sfi-option-value">value: {optionValue}</span>
-                    </div>
-                  {/each}
+            {#if schemaFieldType === "computed"}
+              <div class="sfi-computed">
+                <label class="sfi-field">Computation
+                  <select bind:value={schemaFieldComputedFunction}>
+                    <option value="word_count">Word count (of body)</option>
+                    <option value="counter">Counter (position among siblings)</option>
+                  </select>
+                </label>
+                {#if schemaFieldComputedFunction === "counter"}
+                  <label class="sfi-field">Scope
+                    <select bind:value={schemaFieldComputedScope}>
+                      <option value="siblings">Among siblings</option>
+                      <option value="manuscript">In manuscript</option>
+                    </select>
+                  </label>
+                {/if}
+                <p class="sfi-options-hint">
+                  <i class="ti ti-info-circle" aria-hidden="true"></i>
+                  computed values are derived automatically and can't be edited on the entry
+                </p>
+              </div>
+            {/if}
+            {#if schemaFieldType === "select" || schemaFieldType === "multi_select"}
+              <div class="sfi-options" role="list" aria-label="Options">
+                {#each schemaFieldOptionList as option, index (index)}
+                  <div
+                    class="sfi-option-row"
+                    class:dragging={optionDragIndex === index}
+                    draggable="true"
+                    on:dragstart={() => onOptionDragStart(index)}
+                    on:dragover|preventDefault
+                    on:drop|preventDefault={() => onOptionDrop(index)}
+                    on:dragend={() => (optionDragIndex = null)}
+                  >
+                    <span class="sfi-option-grip" title="Drag to reorder" aria-hidden="true"><i class="ti ti-grip-vertical"></i></span>
+                    <SwatchPicker
+                      value={option.color}
+                      onChange={(id) => updateSchemaFieldOption(index, { color: id })}
+                    />
+                    <input
+                      class="sfi-option-value-input"
+                      value={option.value}
+                      placeholder="value"
+                      aria-label="Option value"
+                      on:input={(event) => updateSchemaFieldOption(index, { value: event.currentTarget.value })}
+                    />
+                    <input
+                      class="sfi-option-label"
+                      value={option.label}
+                      placeholder="label (optional)"
+                      aria-label="Option display label"
+                      on:input={(event) => updateSchemaFieldOption(index, { label: event.currentTarget.value })}
+                    />
+                    <button class="sfi-option-remove" type="button" title="Remove option" aria-label="Remove option" on:click={() => removeSchemaFieldOption(index)}>
+                      <i class="ti ti-x" aria-hidden="true"></i>
+                    </button>
+                  </div>
+                {/each}
+                <button class="add-affordance sfi-add-option" type="button" on:click={addSchemaFieldOption}>+ Add option</button>
+                {#if schemaFieldOptionList.length > 0}
                   <p class="sfi-options-hint">
                     <i class="ti ti-info-circle" aria-hidden="true"></i>
-                    the label renames freely; the mono <strong>value</strong> is the macro contract — rename a value in the field above to migrate it
+                    drag to reorder; the <strong>value</strong> is the macro contract (renaming it migrates stored data), the label is cosmetic
                   </p>
-                </div>
-              {/if}
+                {/if}
+              </div>
             {/if}
             <div class="sfi-footer">
               <span class="sfi-spacer"></span>
@@ -4017,8 +4137,19 @@
             {#each fieldEntries as [fieldId, field]}
               {@const fieldSource = metadataSchemaOverview?.field_sources[fieldId]}
               {@const isExpanded = expandedSchemaFieldId === fieldId}
-              <button class="schema-field-row" class:expanded={isExpanded} type="button" on:click={() => toggleSchemaFieldInline(fieldId, selectedSchemaTypeId)}>
-                <span class="sfr-grip" aria-hidden="true"><i class="ti ti-grip-vertical"></i></span>
+              <button
+                class="schema-field-row"
+                class:expanded={isExpanded}
+                class:drag-target={fieldDragId !== null && fieldDragId !== fieldId}
+                type="button"
+                draggable={fieldEntries.length > 1 && !schemaTypeReadonly}
+                on:click={() => toggleSchemaFieldInline(fieldId, selectedSchemaTypeId)}
+                on:dragstart={() => onFieldDragStart(fieldId)}
+                on:dragover|preventDefault
+                on:drop|preventDefault={() => onFieldDrop(fieldId)}
+                on:dragend={() => (fieldDragId = null)}
+              >
+                <span class="sfr-grip" title="Drag to reorder" aria-hidden="true"><i class="ti ti-grip-vertical"></i></span>
                 <span class="sfr-tile"><i class={fieldIconClass(field)} aria-hidden="true"></i></span>
                 <span class="sfr-name">{field.name}</span>
                 <span class="sfr-typechip">{fieldTypeLabel(field.type)}</span>
@@ -4057,7 +4188,7 @@
           </div>
           {#if !schemaTypeReadonly && expandedSchemaFieldId !== NEW_FIELD_SENTINEL}
             <div class="button-row">
-              <button type="button" on:click={() => createSchemaFieldDraft(schemaTypeLayerId || projectSchemaLayerId(), selectedSchemaTypeId, true)}>+ Add field</button>
+              <button class="add-affordance" type="button" on:click={() => createSchemaFieldDraft(schemaTypeLayerId || projectSchemaLayerId(), selectedSchemaTypeId, true)}>+ Add field</button>
             </div>
           {/if}
         </section>
@@ -4115,7 +4246,7 @@
               </div>
             {:else}
               <div class="button-row">
-                <button type="button" on:click={() => { groupApplyOpen = true; applyGroupId = availableGroupEntries[0]?.[0] ?? ""; }}>+ Apply group</button>
+                <button class="add-affordance" type="button" on:click={() => { groupApplyOpen = true; applyGroupId = availableGroupEntries[0]?.[0] ?? ""; }}>+ Apply group</button>
               </div>
             {/if}
           </section>
@@ -4184,21 +4315,29 @@
           <input readonly value={schemaFieldReadonlyTypeLabel || fieldTypeLabel(schemaFieldType)} />
         {:else}
           <select bind:value={schemaFieldType}>
-            <option value="text">Text</option>
-            <option value="long_text">Long Text</option>
-            <option value="number">Number</option>
-            <option value="boolean">Boolean</option>
-            <option value="select">Select</option>
-            <option value="entity_ref">Entity Reference</option>
-            <option value="tags">Tags</option>
+            {#each FIELD_TYPE_CHOICES as choice (choice)}
+              <option value={choice}>{fieldTypeLabel(choice)}</option>
+            {/each}
           </select>
         {/if}
       </label>
-      {#if !schemaFieldReadonly && (schemaFieldType === "select" || schemaFieldType === "entity_ref")}
-        <label class="inline-check">
-          <input type="checkbox" bind:checked={schemaFieldAllowMultiple} />
-          Allow multiple
+      {#if !schemaFieldReadonly && schemaFieldType === "computed"}
+        <label>
+          Computation
+          <select bind:value={schemaFieldComputedFunction}>
+            <option value="word_count">Word count (of body)</option>
+            <option value="counter">Counter (position among siblings)</option>
+          </select>
         </label>
+        {#if schemaFieldComputedFunction === "counter"}
+          <label>
+            Scope
+            <select bind:value={schemaFieldComputedScope}>
+              <option value="siblings">Among siblings</option>
+              <option value="manuscript">In manuscript</option>
+            </select>
+          </label>
+        {/if}
       {/if}
       {#if schemaFieldType === "entity_ref" || schemaFieldType === "entity_ref_list"}
         <div class="schema-field-picker-config">
@@ -4211,27 +4350,34 @@
           />
         </div>
       {/if}
-      {#if schemaFieldType === "select" && (!schemaFieldReadonly || schemaFieldOptions)}
-        <label>
-          Options
-          <input readonly={schemaFieldReadonly} bind:value={schemaFieldOptions} placeholder="draft, revised, complete" />
-        </label>
-        {#if schemaFieldOptionValues.length > 0}
-          <div class="schema-field-option-colors">
-            <span class="option-colors-label">Colors</span>
-            {#each schemaFieldOptionValues as optionValue (optionValue)}
-              <div class="option-color-row">
-                <span class="option-color-value">{optionValue}</span>
-                <SwatchPicker
-                  value={schemaFieldOptionColors[optionValue] ?? null}
-                  onChange={(id) => {
-                    schemaFieldOptionColors = { ...schemaFieldOptionColors, [optionValue]: id };
-                  }}
-                />
+      {#if (schemaFieldType === "select" || schemaFieldType === "multi_select") && (!schemaFieldReadonly || schemaFieldOptionList.length)}
+        <div class="schema-field-options">
+          <span class="option-colors-label">Options</span>
+          <div class="sfi-options" role="list" aria-label="Options">
+            {#each schemaFieldOptionList as option, index (index)}
+              <div
+                class="sfi-option-row"
+                class:dragging={optionDragIndex === index}
+                draggable={!schemaFieldReadonly}
+                on:dragstart={() => onOptionDragStart(index)}
+                on:dragover|preventDefault
+                on:drop|preventDefault={() => onOptionDrop(index)}
+                on:dragend={() => (optionDragIndex = null)}
+              >
+                <span class="sfi-option-grip" title="Drag to reorder" aria-hidden="true"><i class="ti ti-grip-vertical"></i></span>
+                <SwatchPicker value={option.color} onChange={(id) => updateSchemaFieldOption(index, { color: id })} />
+                <input class="sfi-option-value-input" value={option.value} placeholder="value" aria-label="Option value" readonly={schemaFieldReadonly} on:input={(event) => updateSchemaFieldOption(index, { value: event.currentTarget.value })} />
+                <input class="sfi-option-label" value={option.label} placeholder="label (optional)" aria-label="Option display label" readonly={schemaFieldReadonly} on:input={(event) => updateSchemaFieldOption(index, { label: event.currentTarget.value })} />
+                {#if !schemaFieldReadonly}
+                  <button class="sfi-option-remove" type="button" title="Remove option" aria-label="Remove option" on:click={() => removeSchemaFieldOption(index)}><i class="ti ti-x" aria-hidden="true"></i></button>
+                {/if}
               </div>
             {/each}
+            {#if !schemaFieldReadonly}
+              <button class="add-affordance sfi-add-option" type="button" on:click={addSchemaFieldOption}>+ Add option</button>
+            {/if}
           </div>
-        {/if}
+        </div>
       {/if}
       {#if !schemaFieldReadonly}
         <div class="button-row">

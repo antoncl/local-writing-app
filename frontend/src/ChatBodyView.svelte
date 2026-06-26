@@ -1180,6 +1180,11 @@
     border: none; background: transparent; font: inherit;
     font-size: 12px; font-weight: 600; color: var(--k-graphite-text);
     cursor: pointer; padding: 0 2px; max-width: 200px;
+    /* Truncate long assistant names so the selected value never collides
+       with the UA dropdown arrow. */
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
   }
   .cbv-assistant-select[disabled] { cursor: default; }
   .cbv-assistant-select.cbv-chip-locked { opacity: 0.85; }

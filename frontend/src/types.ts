@@ -115,8 +115,25 @@ export type AssistantEntryList = {
 };
 
 
+// A known tag with a scope (which kinds / sub-types it's suggested on).
+// Scope reuses NodePickerConfig; empty scope = suggested everywhere.
+export type ScopedTag = {
+  name: string;
+  scope: NodePickerConfig;
+};
+
 export type KnownTags = {
-  tags: string[];
+  tags: ScopedTag[];
+};
+
+export type TagUsage = {
+  name: string;
+  scope: NodePickerConfig;
+  count: number;
+};
+
+export type TagsOverview = {
+  tags: TagUsage[];
 };
 
 export type MetadataValue = string | number | boolean | null | MetadataValue[] | { [key: string]: MetadataValue };

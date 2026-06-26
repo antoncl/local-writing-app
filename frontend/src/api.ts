@@ -22,6 +22,8 @@ import type {
   EntryTypeDefinition,
   GroupApplication,
   KnownTags,
+  NodePickerConfig,
+  TagsOverview,
   LoreEntry,
   LoreEntryList,
   MachineSettingsUpdate,
@@ -329,6 +331,21 @@ export const api = {
   },
   getKnownTags() {
     return request<KnownTags>("/tags");
+  },
+  getTagsOverview() {
+    return request<TagsOverview>("/tags/overview");
+  },
+  updateTagScope(name: string, scope: NodePickerConfig) {
+    return request<KnownTags>("/tags/scope", {
+      method: "PUT",
+      body: JSON.stringify({ name, scope }),
+    });
+  },
+  mergeTags(sources: string[], target: string) {
+    return request<KnownTags>("/tags/merge", {
+      method: "POST",
+      body: JSON.stringify({ sources, target }),
+    });
   },
   upsertMetadataEntryType(layerId: string, entryTypeId: string, entryType: EntryTypeDefinition, allowExisting = true) {
     return request<MetadataSchema>("/metadata/schema/entry-types", {

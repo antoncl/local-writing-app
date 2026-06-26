@@ -32,7 +32,7 @@
   // dialog. Optional — the picker degrades to "no items" when missing.
   export let structure: import("./types").StructureDocument | null = null;
   export let loreEntries: import("./types").LoreEntrySummary[] = [];
-  export let knownTags: string[] = [];
+  export let knownTags: import("./types").ScopedTag[] = [];
   // Optional matcher pass-through for the implicit-context highlight
   // plugin on long-text metadata fields. App.svelte owns the compile.
   export let implicitContextMatcher: import("./implicitContextMatcher").CompiledMatcher | null = null;

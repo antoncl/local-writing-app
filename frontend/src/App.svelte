@@ -20,6 +20,7 @@
   import { fieldIconClass, DEFAULT_FIELD_GLYPH } from "./fieldIcons";
   import IconPicker from "./IconPicker.svelte";
   import GroupsManagerDialog from "./GroupsManagerDialog.svelte";
+  import TagManagerDialog from "./TagManagerDialog.svelte";
   import SwatchPicker from "./SwatchPicker.svelte";
   import type {
     AIHealthResponse,
@@ -204,7 +205,8 @@
   // needed so the matcher resolves per-entry colors for the highlight
   // decorations (Phase 4 render target).
   $: implicitContextMatcher = compileMatcher(loreEntries, metadataSchema);
-  let knownTags: string[] = [];
+  let knownTags: import("./types").ScopedTag[] = [];
+  let tagsManagerOpen = false;
   let focusedEditorPaneId: string | null = null;
   $: focusedEditorPane = editorPanes.find((pane) => pane.id === focusedEditorPaneId) ?? editorPanes[0] ?? null;
   $: activeScene = focusedEditorPane?.document?.type === "scene" ? focusedEditorPane.scene : null;
@@ -3776,6 +3778,7 @@
       <div class="pane-header-actions">
         <button class="pin-button" type="button" on:mousedown={(event) => event.stopPropagation()} on:click={() => createSchemaTypeDraft()}>+ Type</button>
         <button class="pin-button" type="button" on:mousedown={(event) => event.stopPropagation()} on:click={() => (groupsManagerOpen = true)}>Groups…</button>
+        <button class="pin-button" type="button" on:mousedown={(event) => event.stopPropagation()} on:click={() => (tagsManagerOpen = true)}>Tags…</button>
         <button class="pin-button" type="button" on:mousedown={(event) => event.stopPropagation()} on:click={() => closeSchemaPane("schema")}>Close</button>
       </div>
     </header>
@@ -4627,6 +4630,14 @@
       layerId={schemaTypeLayerId || projectSchemaLayerId()}
       on:changed={(event) => { metadataSchema = event.detail.schema; void refreshMetadataSchema(); }}
       on:close={() => (groupsManagerOpen = false)}
+    />
+  {/if}
+
+  {#if tagsManagerOpen}
+    <TagManagerDialog
+      metadataSchema={metadataSchema}
+      on:changed={() => void refreshKnownTags()}
+      on:close={() => (tagsManagerOpen = false)}
     />
   {/if}
 

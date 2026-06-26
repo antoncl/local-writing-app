@@ -50,7 +50,7 @@
   // Legacy prop — the rail (NodeEditor) now owns collapse, so the panel
   // always renders its fields. Kept so existing call sites compile.
   export let expanded: boolean = true;
-  export let knownTags: string[] = [];
+  export let knownTags: import("./types").ScopedTag[] = [];
   export let loreEntries: LoreEntrySummary[] = [];
   export let promptEntries: PromptEntrySummary[] = [];
   export let structure: StructureDocument | null = null;
@@ -314,6 +314,8 @@
               <TagPicker
                 value={currentValue}
                 knownTags={knownTags}
+                scopeKind={documentKind}
+                scopeEntryType={entryType}
                 ariaLabel={field.name}
                 on:change={(event) => updateField(fieldId, field, event.detail.value)}
               />

@@ -1,12 +1,29 @@
 <script lang="ts">
   import { createEventDispatcher } from "svelte";
+  import type { ScopedTag } from "./types";
 
   export let value: string = "";
-  export let knownTags: string[] = [];
+  export let knownTags: ScopedTag[] = [];
+  // The current node's kind + sub-type — used to filter suggestions by tag
+  // scope (a tag is suggested where its scope is empty or includes this).
+  export let scopeKind: string = "";
+  export let scopeEntryType: string = "";
   export let ariaLabel: string;
   export let placeholder: string = "Comma-separated values";
 
   const dispatch = createEventDispatcher<{ change: { value: string } }>();
+
+  function inScope(tag: ScopedTag): boolean {
+    const scope = tag.scope ?? { kinds: [], entry_types: {} };
+    const kinds = scope.kinds ?? [];
+    const entryTypes = scope.entry_types ?? {};
+    if (kinds.length === 0 && Object.keys(entryTypes).length === 0) return true;
+    if (kinds.length && !kinds.includes(scopeKind as never)) return false;
+    const subs = entryTypes[scopeKind];
+    if (subs && subs.length && !subs.includes(scopeEntryType)) return false;
+    return true;
+  }
+  $: suggestions = knownTags.filter(inScope);
 
   let open = false;
   let position: { x: number; y: number; width: number } | null = null;
@@ -75,17 +92,17 @@
       style={`left: ${position.x}px; top: ${position.y}px; width: ${position.width}px;`}
       aria-label={`${ariaLabel} known tags`}
     >
-      {#if knownTags.length > 0}
-        {#each knownTags as tag}
+      {#if suggestions.length > 0}
+        {#each suggestions as tag}
           <button
-            class:active={selectedKeys.has(tag.toLowerCase())}
+            class:active={selectedKeys.has(tag.name.toLowerCase())}
             type="button"
             on:mousedown|preventDefault
-            on:click={() => applyTag(tag)}
-          >{tag}</button>
+            on:click={() => applyTag(tag.name)}
+          >{tag.name}</button>
         {/each}
       {:else}
-        <span>No known tags yet.</span>
+        <span>No tags suggested here yet.</span>
       {/if}
     </div>
   {/if}

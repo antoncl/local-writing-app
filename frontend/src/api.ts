@@ -499,6 +499,13 @@ export const api = {
       body: JSON.stringify({ layer_id: layerId, ordered_ids: orderedIds }),
     });
   },
+  // Unified node-CRUD shim (Phase 3c). Returns the kind-specific
+  // shape; callers pass the expected type. Coexists with the per-kind
+  // endpoints (getChatSession et al.) — the bespoke paths remain the
+  // source of truth until the per-kind endpoints retire.
+  readNode<T = unknown>(nodeId: string) {
+    return request<T>(`/nodes/${encodeURIComponent(nodeId)}`);
+  },
   listChatSessions() {
     return request<ChatSessionList>("/chats");
   },

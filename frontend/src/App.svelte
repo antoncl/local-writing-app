@@ -3,6 +3,7 @@
   import { api } from "./api";
   import CodeEditor from "./CodeEditor.svelte";
   import NodeEditor from "./NodeEditor.svelte";
+  import ChatBodyView from "./ChatBodyView.svelte";
   import NodeRow from "./NodeRow.svelte";
   import DirectoryPickerModal from "./DirectoryPickerModal.svelte";
   import NodeList from "./NodeList.svelte";
@@ -5035,6 +5036,21 @@ async function seedChatFromPromptEntry(
       {/if}
     </header>
     <div class="pane-content chat-panel">
+      {#if activeChatId}
+        <details class="dev-chat-body-view-mount">
+          <summary>Phase 4b preview: ChatBodyView (read-only, via /api/nodes)</summary>
+          <ChatBodyView
+            scene={({ id: activeChatId, title: activeChatTitle, entry_type: "chat_session", metadata: {}, computed_metadata: {} } as unknown as EditableDocument)}
+            {metadataSchema}
+            {promptEntries}
+            {assistantEntries}
+            {loreEntries}
+            {structure}
+            defaultAssistantId={defaultAssistantEntryId()}
+            {implicitContextMatcher}
+          />
+        </details>
+      {/if}
       <!-- Inputs row: Prompt + Assistant + Preview-icon. Mirrors the user's
            mental model — chat = (prompt, assistant, context inputs, message).
            Prompt + Assistant are read-only once chat history exists (locked

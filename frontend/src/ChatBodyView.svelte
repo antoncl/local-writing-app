@@ -7,11 +7,10 @@
     4b — read-only fetch via /api/nodes/{id} + composer chips + messages
     4c-send — message input, send/stream, persist via unified PUT
 
-  Still deferred (Phase 4c+):
-    - Brief textarea (freeform mode) + preview popover
-    - Inputs strip (declared prompt inputs)
+  Still deferred (Phase 4c-rest):
+    - Preview popover (rendered system + attached context)
+    - Inputs strip (declared prompt inputs) + first-send template render
     - Journal scope strip + cost-estimate + TTL strips
-    - Prompt picker dropdown + assistant change while unlocked
     - Body-spec visual pass (10-region layout)
 
   Until Phase 4d switches the editor-pane open-chat flow, this view is
@@ -19,7 +18,7 @@
   in App.svelte's chat pane (used to compare unified vs bespoke).
 -->
 <script lang="ts">
-  import { createEventDispatcher, tick } from "svelte";
+  import { createEventDispatcher, onMount, tick } from "svelte";
   import { api } from "./api";
   import PlainTextEditor from "./PlainTextEditor.svelte";
   import { renderChatContent } from "./chatMessageRender";
@@ -87,6 +86,12 @@
   // and forward it to the backend on the next persistActiveChat.
   let pendingTurnCost: number | null = null;
   let pendingTurnCacheWriteSlots: string[] = [];
+
+  // ---- prompt-picker UI state (composer chip → dropdown) ----
+  let promptPickerOpen = false;
+  let promptPickerSearch = "";
+  let promptPickerEl: HTMLDivElement | null = null;
+  let promptPickerBtnEl: HTMLButtonElement | null = null;
 
   $: void maybeLoadChat(scene?.id ?? null);
 
@@ -168,6 +173,86 @@
     if (!promptId) return "Freeform";
     const entry = promptEntries.find((p) => p.id === promptId);
     return entry?.title ?? "Unknown prompt";
+  }
+
+  function chatRoutedPromptEntries(): PromptEntrySummary[] {
+    if (!metadataSchema) return [];
+    return promptEntries.filter((entry) => {
+      const def = metadataSchema?.entry_types[entry.entry_type];
+      return def?.prompt?.context_strategy?.output?.kind === "chat_panel";
+    });
+  }
+
+  function filteredChatPromptEntries(): PromptEntrySummary[] {
+    const list = chatRoutedPromptEntries();
+    const q = promptPickerSearch.trim().toLowerCase();
+    const sorter = (a: PromptEntrySummary, b: PromptEntrySummary) =>
+      a.title.localeCompare(b.title, undefined, { sensitivity: "base" });
+    if (!q) return list.slice().sort(sorter);
+    return list
+      .filter((e) => e.title.toLowerCase().includes(q) || (e.entry_type || "").toLowerCase().includes(q))
+      .sort(sorter);
+  }
+
+  function preferredAssistantForPrompt(entry: PromptEntrySummary): string {
+    const raw = (entry.metadata ?? {})["preferred_assistant_id"];
+    return typeof raw === "string" ? raw : "";
+  }
+
+  async function toggleChatPromptPicker() {
+    if (isLocked) return;
+    promptPickerOpen = !promptPickerOpen;
+    promptPickerSearch = "";
+    if (promptPickerOpen) {
+      await tick();
+      const input = promptPickerEl?.querySelector<HTMLInputElement>(".cbv-picker-search");
+      input?.focus();
+    }
+  }
+
+  function closeChatPromptPicker() {
+    promptPickerOpen = false;
+    promptPickerSearch = "";
+  }
+
+  async function pickPromptForChat(entry: PromptEntrySummary): Promise<void> {
+    closeChatPromptPicker();
+    if (isLocked) return;
+    chatPromptEntryId = entry.id;
+    const preferred = preferredAssistantForPrompt(entry);
+    if (preferred) chatAssistantId = preferred;
+    // First-send template render (rendering the prompt body into
+    // system_prompt) lives in the next 4c slice. For now, leaving
+    // chatSystemPrompt unset for prompt-bound chats matches the legacy
+    // applyChatPromptPreset path — the brief disappears and the user
+    // can still send a freeform turn against the bound prompt id.
+    chatSystemPrompt = "";
+    await persistActiveChat();
+  }
+
+  async function clearChatPrompt(): Promise<void> {
+    if (isLocked) return;
+    chatPromptEntryId = "";
+    chatSystemPrompt = DEFAULT_CHAT_SYSTEM_PROMPT;
+    await persistActiveChat();
+  }
+
+  async function handleAssistantChange(event: Event): Promise<void> {
+    const target = event.target as HTMLSelectElement;
+    chatAssistantId = target.value;
+    await persistActiveChat();
+  }
+
+  async function handleBriefBlur(): Promise<void> {
+    await persistActiveChat();
+  }
+
+  function handleDocumentClick(event: MouseEvent) {
+    if (!promptPickerOpen) return;
+    const target = event.target as Node;
+    if (promptPickerEl?.contains(target)) return;
+    if (promptPickerBtnEl?.contains(target)) return;
+    closeChatPromptPicker();
   }
 
   function assistantTitle(assistantId: string): string {
@@ -359,6 +444,11 @@
     }
   }
 
+  onMount(() => {
+    document.addEventListener("mousedown", handleDocumentClick);
+    return () => document.removeEventListener("mousedown", handleDocumentClick);
+  });
+
   // ---------- Public methods (called via bind:this from parent) ----------
   export function getBodyMarkdown(): string {
     return "";
@@ -374,17 +464,90 @@
     <p class="cbv-error">Couldn't load chat: {loadError}</p>
   {:else if chatSession}
     <div class="cbv-composer-strip">
-      <span class="cbv-chip" class:cbv-chip-locked={isLocked} class:cbv-chip-assigned={!!chatPromptEntryId} title="Prompt (read-only in this slice; the interactive picker lands in Phase 4c)">
-        <span class="cbv-chip-glyph" aria-hidden="true">✨</span>
-        <strong>{promptTitle(chatPromptEntryId)}</strong>
-        {#if isLocked}<span class="cbv-chip-lock" aria-label="locked">🔒</span>{/if}
-      </span>
-      <span class="cbv-chip" class:cbv-chip-locked={isLocked} title="Assistant (read-only in this slice)">
+      <div class="cbv-prompt-anchor">
+        <button
+          type="button"
+          class="cbv-chip cbv-chip-button"
+          class:cbv-chip-locked={isLocked}
+          class:cbv-chip-assigned={!!chatPromptEntryId}
+          title={isLocked ? "Prompt is locked while this chat has messages." : "Pick a prompt"}
+          bind:this={promptPickerBtnEl}
+          on:click={() => void toggleChatPromptPicker()}
+          disabled={isLocked && !chatPromptEntryId}
+        >
+          <span class="cbv-chip-glyph" aria-hidden="true">✨</span>
+          <strong>{promptTitle(chatPromptEntryId)}</strong>
+          {#if isLocked}
+            <span class="cbv-chip-lock" aria-label="locked">🔒</span>
+          {:else}
+            <span class="cbv-chip-caret" aria-hidden="true">▾</span>
+          {/if}
+        </button>
+        {#if chatPromptEntryId && !isLocked}
+          <button
+            type="button"
+            class="cbv-chip-clear"
+            title="Drop this prompt (revert to freeform chat)"
+            on:click={() => void clearChatPrompt()}
+          >×</button>
+        {/if}
+        {#if promptPickerOpen}
+          <div class="cbv-prompt-picker" role="menu" bind:this={promptPickerEl}>
+            <input
+              class="cbv-picker-search"
+              type="text"
+              placeholder="Search prompts…"
+              bind:value={promptPickerSearch}
+            />
+            {#each filteredChatPromptEntries() as entry (entry.id)}
+              <button
+                type="button"
+                class:cbv-picker-active={entry.id === chatPromptEntryId}
+                on:click={() => void pickPromptForChat(entry)}
+              >
+                <strong>{entry.title}</strong>
+                <small>{entry.entry_type}</small>
+              </button>
+            {:else}
+              <p class="cbv-picker-empty">
+                {promptPickerSearch
+                  ? "No prompts match."
+                  : "No chat-routed prompts. Create one with output_kind = chat_panel."}
+              </p>
+            {/each}
+          </div>
+        {/if}
+      </div>
+      <label class="cbv-assistant-anchor">
         <span class="cbv-chip-glyph" aria-hidden="true">🤖</span>
-        <strong>{assistantTitle(chatAssistantId)}</strong>
-        {#if isLocked}<span class="cbv-chip-lock" aria-label="locked">🔒</span>{/if}
-      </span>
+        <select
+          class="cbv-assistant-select"
+          class:cbv-chip-locked={isLocked}
+          value={chatAssistantId}
+          on:change={(e) => void handleAssistantChange(e)}
+          disabled={isLocked}
+          title={isLocked ? "Assistant is locked while this chat has messages." : "Pick an assistant"}
+          aria-label="Assistant"
+        >
+          <option value="">Default ({assistantTitle("").replace(/^Default \(|\)$/g, "") || "machine default"})</option>
+          {#each assistantEntries as assistant (assistant.id)}
+            <option value={assistant.id}>{assistant.title}</option>
+          {/each}
+        </select>
+      </label>
     </div>
+
+    {#if !chatPromptEntryId}
+      <label class="cbv-brief-label">
+        <span>Brief</span>
+        <textarea
+          class="cbv-brief"
+          bind:value={chatSystemPrompt}
+          on:blur={() => void handleBriefBlur()}
+          spellcheck="false"
+        ></textarea>
+      </label>
+    {/if}
 
     <div class="cbv-messages" bind:this={chatScrollEl} aria-label="Chat history">
       {#if chatHistory.length === 0}
@@ -522,8 +685,127 @@
   .cbv-chip-glyph {
     font-size: 14px;
   }
-  .cbv-chip-lock {
+  .cbv-chip-lock,
+  .cbv-chip-caret {
     font-size: 12px;
+  }
+  .cbv-chip-button {
+    cursor: pointer;
+    font: inherit;
+  }
+  .cbv-chip-button[disabled] {
+    cursor: not-allowed;
+  }
+
+  .cbv-prompt-anchor {
+    position: relative;
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+  }
+  .cbv-chip-clear {
+    width: 20px;
+    height: 20px;
+    border-radius: 50%;
+    border: 1px solid var(--color-border, #d0d4dc);
+    background: var(--color-surface, #ffffff);
+    cursor: pointer;
+    font-size: 13px;
+    line-height: 1;
+    padding: 0;
+  }
+
+  .cbv-prompt-picker {
+    position: absolute;
+    top: 100%;
+    left: 0;
+    margin-top: 4px;
+    z-index: 30;
+    background: var(--color-surface, #ffffff);
+    border: 1px solid var(--color-border, #d0d4dc);
+    border-radius: 8px;
+    box-shadow: 0 6px 24px rgba(0, 0, 0, 0.08);
+    padding: 6px;
+    min-width: 240px;
+    max-height: 320px;
+    overflow-y: auto;
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+  }
+  .cbv-picker-search {
+    width: 100%;
+    padding: 4px 6px;
+    border-radius: 4px;
+    border: 1px solid var(--color-border, #d0d4dc);
+    font-size: 13px;
+    margin-bottom: 4px;
+  }
+  .cbv-prompt-picker > button {
+    text-align: left;
+    padding: 6px 8px;
+    border-radius: 4px;
+    border: 1px solid transparent;
+    background: transparent;
+    cursor: pointer;
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+  }
+  .cbv-prompt-picker > button:hover {
+    background: var(--color-surface-muted, #f3f5fa);
+  }
+  .cbv-prompt-picker > button.cbv-picker-active {
+    background: color-mix(in srgb, var(--color-accent, #6366f1) 12%, transparent);
+    border-color: var(--color-accent, #6366f1);
+  }
+  .cbv-prompt-picker > button > small {
+    font-size: 11px;
+    color: var(--color-text-muted, #5b6172);
+  }
+  .cbv-picker-empty {
+    margin: 4px 6px;
+    font-size: 12px;
+    color: var(--color-text-muted, #5b6172);
+  }
+
+  .cbv-assistant-anchor {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+  }
+  .cbv-assistant-select {
+    padding: 4px 8px;
+    border-radius: 999px;
+    border: 1px solid var(--color-border, #d0d4dc);
+    background: var(--color-surface-muted, #f3f5fa);
+    font-size: 13px;
+    font: inherit;
+    cursor: pointer;
+  }
+  .cbv-assistant-select[disabled] {
+    cursor: not-allowed;
+  }
+
+  .cbv-brief-label {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+    font-size: 12px;
+    color: var(--color-text-muted, #5b6172);
+  }
+  .cbv-brief {
+    font-family: inherit;
+    font-size: 13px;
+    line-height: 1.4;
+    padding: 6px 8px;
+    border-radius: 6px;
+    border: 1px solid var(--color-border, #d0d4dc);
+    background: var(--color-surface, #ffffff);
+    color: var(--color-text, #1f2330);
+    resize: vertical;
+    min-height: 48px;
+    max-height: 200px;
   }
 
   .cbv-messages {

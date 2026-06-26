@@ -298,6 +298,11 @@
   // needed so the matcher resolves per-entry colors for the highlight
   // decorations (Phase 4 render target).
   $: implicitContextMatcher = compileMatcher(loreEntries, metadataSchema);
+  // Dev-only: the chat node id used by the floating ChatBodyView preview.
+  // Falls back to the first session in the list when no chat is active —
+  // lets us verify the unified-path view without forcing pane visibility.
+  // Removed in Phase 4d when chats open via the editor pane flow.
+  $: devChatPreviewId = activeChatId || chatSessions[0]?.id || "";
   let knownTags: string[] = [];
   let focusedEditorPaneId: string | null = null;
   $: focusedEditorPane = editorPanes.find((pane) => pane.id === focusedEditorPaneId) ?? editorPanes[0] ?? null;
@@ -5036,21 +5041,6 @@ async function seedChatFromPromptEntry(
       {/if}
     </header>
     <div class="pane-content chat-panel">
-      {#if activeChatId}
-        <details class="dev-chat-body-view-mount">
-          <summary>Phase 4c preview: ChatBodyView (send/persist via /api/nodes/{id})</summary>
-          <ChatBodyView
-            scene={({ id: activeChatId, title: activeChatTitle, entry_type: "chat_session", metadata: {}, computed_metadata: {} } as unknown as EditableDocument)}
-            {metadataSchema}
-            {promptEntries}
-            {assistantEntries}
-            {loreEntries}
-            {structure}
-            defaultAssistantId={defaultAssistantEntryId()}
-            {implicitContextMatcher}
-          />
-        </details>
-      {/if}
       <!-- Inputs row: Prompt + Assistant + Preview-icon. Mirrors the user's
            mental model — chat = (prompt, assistant, context inputs, message).
            Prompt + Assistant are read-only once chat history exists (locked
@@ -5412,6 +5402,28 @@ async function seedChatFromPromptEntry(
         on:click={() => (error = "")}
       >×</button>
     </section>
+  {/if}
+
+  {#if devChatPreviewId}
+    <details
+      class="dev-chat-body-view-mount"
+      open
+      style="position:fixed;bottom:12px;right:12px;z-index:50;width:420px;max-height:78vh;display:flex;flex-direction:column;background:var(--color-surface,#fff);border:1px solid var(--color-border,#d0d4dc);border-radius:8px;box-shadow:0 8px 24px rgba(0,0,0,0.12);overflow:hidden;"
+    >
+      <summary style="padding:6px 10px;font-size:12px;cursor:pointer;background:var(--color-surface-muted,#f3f5fa);">
+        Phase 4c preview: ChatBodyView (via /api/nodes/{devChatPreviewId})
+      </summary>
+      <ChatBodyView
+        scene={({ id: devChatPreviewId, title: activeChatTitle, entry_type: "chat_session", metadata: {}, computed_metadata: {} } as unknown as EditableDocument)}
+        {metadataSchema}
+        {promptEntries}
+        {assistantEntries}
+        {loreEntries}
+        {structure}
+        defaultAssistantId={defaultAssistantEntryId()}
+        {implicitContextMatcher}
+      />
+    </details>
   {/if}
 
 </main>

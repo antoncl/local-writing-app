@@ -21,6 +21,7 @@
   import { createEventDispatcher, onMount, tick } from "svelte";
   import { api } from "./api";
   import PlainTextEditor from "./PlainTextEditor.svelte";
+  import PromptInputField from "./PromptInputField.svelte";
   import { renderChatContent } from "./chatMessageRender";
   import { formatCostEur } from "./money";
   import type {
@@ -33,6 +34,7 @@
     LoreEntrySummary,
     MetadataSchema,
     PromptEntrySummary,
+    PromptInputDefinition,
     SaveChatSessionRequest,
     StructureDocument,
   } from "./types";
@@ -93,6 +95,14 @@
   let promptPickerEl: HTMLDivElement | null = null;
   let promptPickerBtnEl: HTMLButtonElement | null = null;
 
+  // ---- declared-inputs state (filled before first send for prompt-bound chats) ----
+  // Per-input draft values keyed by input.name. JSON-encoded for list-shaped
+  // types so storage stays string-uniform. Hydrated from session.inputs;
+  // persisted on every edit so a half-configured chat survives reload.
+  let chatInputDrafts: Record<string, string> = {};
+  // Collapse the strip after first send to reclaim space — user can re-expand.
+  let chatInputsHidden = false;
+
   $: void maybeLoadChat(scene?.id ?? null);
 
   async function maybeLoadChat(chatId: string | null): Promise<void> {
@@ -138,6 +148,8 @@
     activeChatCacheWriteTimes = {};
     pendingTurnCost = null;
     pendingTurnCacheWriteSlots = [];
+    chatInputDrafts = {};
+    chatInputsHidden = false;
   }
 
   // Mirrors App.svelte's applyChatSession (the source of truth for the
@@ -167,6 +179,16 @@
     chatInput = "";
     pendingTurnCost = null;
     pendingTurnCacheWriteSlots = [];
+    // Restore per-prompt input drafts. session.inputs is Record<string, unknown>;
+    // PromptInputField stores list-shaped values JSON-encoded, so coerce
+    // back to that representation on hydrate.
+    chatInputDrafts = {};
+    const raw = (session as unknown as { inputs?: Record<string, unknown> }).inputs ?? {};
+    for (const [name, value] of Object.entries(raw)) {
+      if (typeof value === "string") chatInputDrafts[name] = value;
+      else chatInputDrafts[name] = JSON.stringify(value);
+    }
+    chatInputsHidden = false;
   }
 
   function promptTitle(promptId: string): string {
@@ -221,12 +243,12 @@
     chatPromptEntryId = entry.id;
     const preferred = preferredAssistantForPrompt(entry);
     if (preferred) chatAssistantId = preferred;
-    // First-send template render (rendering the prompt body into
-    // system_prompt) lives in the next 4c slice. For now, leaving
-    // chatSystemPrompt unset for prompt-bound chats matches the legacy
-    // applyChatPromptPreset path — the brief disappears and the user
-    // can still send a freeform turn against the bound prompt id.
+    // chatSystemPrompt stays empty until first-send; renderAndLockPromptTemplate
+    // fills it in from api.aiPreview right before the first user turn ships
+    // (deferred render lets the user edit input drafts freely).
     chatSystemPrompt = "";
+    chatInputDrafts = seedInputDraftsFromEntry(entry);
+    chatInputsHidden = false;
     await persistActiveChat();
   }
 
@@ -264,6 +286,64 @@
   }
 
   $: isLocked = chatHistory.length > 0;
+
+  // The prompt entry currently bound to the chat, if any. Used to drive
+  // declaredInputs + the first-send template render.
+  $: activePromptEntry = chatPromptEntryId
+    ? promptEntries.find((p) => p.id === chatPromptEntryId) ?? null
+    : null;
+  $: declaredInputs = activePromptEntry?.inputs ?? [];
+
+  function defaultDraftFor(input: PromptInputDefinition): string {
+    if (input.default !== undefined && input.default !== null) return String(input.default);
+    return input.type === "boolean" ? "false" : "";
+  }
+
+  function seedInputDraftsFromEntry(entry: PromptEntrySummary): Record<string, string> {
+    const drafts: Record<string, string> = {};
+    for (const input of entry.inputs ?? []) drafts[input.name] = defaultDraftFor(input);
+    return drafts;
+  }
+
+  function isInputMissing(input: PromptInputDefinition, raw: string | undefined): boolean {
+    if (input.type === "entity_ref_list" || input.type === "context_pick") {
+      try {
+        const parsed = JSON.parse(raw || "[]");
+        return !Array.isArray(parsed) || parsed.length === 0;
+      } catch {
+        return true;
+      }
+    }
+    return !raw?.trim();
+  }
+  $: missingRequiredInputs = declaredInputs.filter(
+    (i) => i.required && isInputMissing(i, chatInputDrafts[i.name]),
+  );
+
+  function coerceChatInputValue(raw: string, type: PromptInputDefinition["type"]): unknown {
+    const trimmed = raw.trim();
+    if (type === "number") {
+      if (trimmed === "") return null;
+      const parsed = Number(trimmed);
+      return Number.isFinite(parsed) ? parsed : trimmed;
+    }
+    if (type === "boolean") return trimmed.toLowerCase() === "true";
+    if (type === "entity_ref_list" || type === "context_pick") {
+      if (!trimmed) return type === "context_pick" ? [] : null;
+      try {
+        const parsed = JSON.parse(trimmed);
+        return Array.isArray(parsed) ? parsed : (type === "context_pick" ? [] : null);
+      } catch {
+        return type === "context_pick" ? [] : null;
+      }
+    }
+    return trimmed;
+  }
+
+  async function updateChatInputDraft(name: string, value: string): Promise<void> {
+    chatInputDrafts = { ...chatInputDrafts, [name]: value };
+    await persistActiveChat();
+  }
 
   // ---- send / stream / persist (ported from App.svelte) ----
 
@@ -402,20 +482,52 @@
 
   async function sendChat() {
     if (chatRunning) return;
+    if (missingRequiredInputs.length > 0) {
+      chatError = `Missing required: ${missingRequiredInputs.map((i) => i.label || i.name).join(", ")}.`;
+      return;
+    }
     const text = chatInput.trim();
-    if (!text) return;
+    // Empty composer text is allowed only when the chat is bound to a
+    // prompt AND has no history yet — i.e. the template IS the message.
+    // Mirrors sendChat in App.svelte (McKee-style self-contained prompts
+    // shouldn't force the user to type "Do it").
+    const isFirstTurnFromPrompt = !!activePromptEntry && chatHistory.length === 0;
+    if (!text && !isFirstTurnFromPrompt) return;
+    const isFirstSubmission = chatHistory.length === 0;
     chatError = null;
-    const userTurn: ChatMessage = { role: "user", content: text };
-    chatHistory = [...chatHistory, userTurn];
-    const userIdx = chatHistory.length - 1;
+    // First-send template render: defer to renderAndLockPromptTemplate
+    // when the chat is bound to a prompt that hasn't been rendered yet
+    // AND that prompt has declared inputs (the indication that the
+    // template needs values plugged in). Gating matches App.svelte's
+    // bespoke sendChat.
+    if (activePromptEntry && !chatSystemPrompt && (activePromptEntry.inputs ?? []).length > 0) {
+      chatRunning = true;
+      try {
+        const ok = await renderAndLockPromptTemplate(activePromptEntry);
+        if (!ok) {
+          chatRunning = false;
+          return;
+        }
+        await persistActiveChat();
+      } finally {
+        chatRunning = false;
+      }
+    }
+    let userIdx = -1;
+    if (text) {
+      const userTurn: ChatMessage = { role: "user", content: text };
+      chatHistory = [...chatHistory, userTurn];
+      userIdx = chatHistory.length - 1;
+    }
     chatInput = "";
     chatRunning = true;
     const rewindUser = () => {
-      chatHistory = chatHistory.filter((_, i) => i !== userIdx);
+      if (userIdx >= 0) chatHistory = chatHistory.filter((_, i) => i !== userIdx);
       chatInput = text;
     };
     try {
       await streamAssistantReply(rewindUser);
+      if (isFirstSubmission) chatInputsHidden = true;
     } catch (e) {
       chatError = (e as Error).message;
       rewindUser();
@@ -426,10 +538,48 @@
     }
   }
 
+  // First-send template render. Mirrors App.svelte's
+  // renderAndLockPromptTemplate (the source of truth). Called from
+  // sendChat right before the first user turn ships, when the chat is
+  // bound to a prompt that hasn't been rendered yet. After this the
+  // preset is locked (chatSystemPrompt is non-empty, chatHistory may
+  // hold initial turns); subsequent sends skip this path.
+  async function renderAndLockPromptTemplate(entry: PromptEntrySummary): Promise<boolean> {
+    const inputs: Record<string, unknown> = {};
+    for (const input of entry.inputs ?? []) {
+      const raw = chatInputDrafts[input.name] ?? "";
+      const coerced = coerceChatInputValue(raw, input.type);
+      if (coerced !== null && coerced !== "") inputs[input.name] = coerced;
+    }
+    try {
+      const preview = await api.aiPreview({
+        template_source: entry.body_markdown,
+        target_scene_id: "",
+        inputs,
+        commit: false,
+      });
+      const messages = preview.messages ?? [];
+      const flatten = (blocks: { text: string }[]) => blocks.map((b) => b.text).join("");
+      const systemBlocks = messages
+        .filter((m) => m.role === "system")
+        .map((m) => flatten(m.blocks));
+      const initialTurns = messages
+        .filter((m) => m.role === "user" || m.role === "assistant")
+        .map((m) => ({ role: m.role as "user" | "assistant", content: flatten(m.blocks) }));
+      chatSystemPrompt = systemBlocks.join("\n\n");
+      if (initialTurns.length > 0) chatHistory = [...initialTurns];
+      return true;
+    } catch (e) {
+      chatError = `Couldn't render prompt template: ${(e as Error).message}`;
+      return false;
+    }
+  }
+
   function clearChat() {
     chatHistory = [];
     chatLastMeta = null;
     chatError = null;
+    chatInputsHidden = false;
     // Reset cost-delta + cache-slot stamping so the next persist starts clean.
     pendingTurnCost = null;
     pendingTurnCacheWriteSlots = [];
@@ -595,6 +745,43 @@
       {/each}
     </div>
 
+    {#if declaredInputs.length > 0}
+      <div class="cbv-inputs-strip" class:cbv-inputs-locked={isLocked}>
+        {#if isLocked}
+          <button
+            type="button"
+            class="cbv-inputs-toggle"
+            aria-expanded={!chatInputsHidden}
+            on:click={() => (chatInputsHidden = !chatInputsHidden)}
+          >{chatInputsHidden ? "▸ Show inputs" : "▾ Hide inputs"}</button>
+        {/if}
+        {#if !isLocked || !chatInputsHidden}
+          <div class="cbv-inputs-fields">
+            {#each declaredInputs as input (input.name)}
+              {@const missing = input.required && isInputMissing(input, chatInputDrafts[input.name])}
+              <label class="cbv-input-field" class:cbv-input-missing={missing} class:cbv-input-disabled={isLocked}>
+                <span class="cbv-input-label">
+                  {input.label || input.name}{#if input.required}<span class="cbv-required-marker" title="Required"> *</span>{/if}
+                </span>
+                <PromptInputField
+                  input={input}
+                  value={chatInputDrafts[input.name] ?? ""}
+                  metadataSchema={metadataSchema}
+                  excludeId={null}
+                  ariaLabel={input.label || input.name}
+                  structure={structure}
+                  loreEntries={loreEntries}
+                  promptEntries={promptEntries}
+                  implicitContextMatcher={implicitContextMatcher}
+                  on:change={(event) => !isLocked && void updateChatInputDraft(input.name, event.detail.value)}
+                />
+              </label>
+            {/each}
+          </div>
+        {/if}
+      </div>
+    {/if}
+
     {#if chatLastMeta}
       <p class="cbv-meta">{chatLastMeta.provider} · {chatLastMeta.model} · {chatLastMeta.latency_ms} ms</p>
     {/if}
@@ -620,7 +807,14 @@
       <button
         type="button"
         class="primary"
-        disabled={chatRunning || !chatInput.trim()}
+        disabled={chatRunning
+          || missingRequiredInputs.length > 0
+          || (!chatInput.trim() && !(activePromptEntry && chatHistory.length === 0))}
+        title={missingRequiredInputs.length > 0
+          ? `Fill required input${missingRequiredInputs.length > 1 ? "s" : ""}: ${missingRequiredInputs.map((i) => i.label || i.name).join(", ")}`
+          : (!chatInput.trim() && activePromptEntry && chatHistory.length === 0)
+            ? "Send the prompt as-is (no extra message)"
+            : ""}
         on:click={() => void sendChat()}
       >
         {chatRunning ? "Sending…" : "Send"}
@@ -806,6 +1000,48 @@
     resize: vertical;
     min-height: 48px;
     max-height: 200px;
+  }
+
+  .cbv-inputs-strip {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    padding: 6px 8px;
+    border-radius: 6px;
+    border: 1px solid var(--color-border, #d0d4dc);
+    background: var(--color-surface-muted, #f3f5fa);
+  }
+  .cbv-inputs-toggle {
+    align-self: flex-start;
+    padding: 2px 6px;
+    font-size: 12px;
+    background: transparent;
+    border: none;
+    cursor: pointer;
+    color: var(--color-text-muted, #5b6172);
+  }
+  .cbv-inputs-fields {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+  }
+  .cbv-input-field {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+    font-size: 12px;
+  }
+  .cbv-input-label {
+    color: var(--color-text-muted, #5b6172);
+  }
+  .cbv-required-marker {
+    color: var(--color-text-error, #b3261e);
+  }
+  .cbv-input-field.cbv-input-missing > .cbv-input-label {
+    color: var(--color-text-error, #b3261e);
+  }
+  .cbv-input-field.cbv-input-disabled {
+    opacity: 0.65;
   }
 
   .cbv-messages {

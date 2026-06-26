@@ -3,7 +3,6 @@
   import { api } from "./api";
   import CodeEditor from "./CodeEditor.svelte";
   import NodeEditor from "./NodeEditor.svelte";
-  import ChatBodyView from "./ChatBodyView.svelte";
   import NodeRow from "./NodeRow.svelte";
   import DirectoryPickerModal from "./DirectoryPickerModal.svelte";
   import NodeList from "./NodeList.svelte";
@@ -64,7 +63,7 @@
   type AppState =
     | { name: "needsProject" }
     | { name: "projectOpen"; project: ProjectInfo };
-  type DocumentRef = { type: "scene" | "lore" | "prompt" | "assistant" | "project" | "structure_node"; id: string };
+  type DocumentRef = { type: "scene" | "lore" | "prompt" | "assistant" | "project" | "structure_node" | "chat"; id: string };
   type PaneId = "project" | "outline" | "lore" | "todo" | "search" | string;
   type MetadataReloadSignal = { token: number; metadata: EntryMetadata; status: string; entryType: string };
   type LoreEntryGroup = {
@@ -298,11 +297,6 @@
   // needed so the matcher resolves per-entry colors for the highlight
   // decorations (Phase 4 render target).
   $: implicitContextMatcher = compileMatcher(loreEntries, metadataSchema);
-  // Dev-only: the chat node id used by the floating ChatBodyView preview.
-  // Falls back to the first session in the list when no chat is active —
-  // lets us verify the unified-path view without forcing pane visibility.
-  // Removed in Phase 4d when chats open via the editor pane flow.
-  $: devChatPreviewId = activeChatId || chatSessions[0]?.id || "";
   let knownTags: string[] = [];
   let focusedEditorPaneId: string | null = null;
   $: focusedEditorPane = editorPanes.find((pane) => pane.id === focusedEditorPaneId) ?? editorPanes[0] ?? null;
@@ -3452,6 +3446,63 @@ async function seedChatFromPromptEntry(
     }, 100);
   }
 
+  // Open a chat session in the editor-pane system. Mirrors the structure-
+  // node pattern: synthesize a Scene-shaped record so the existing pane
+  // plumbing works without a parallel field. NodeEditor sees entry_type
+  // "chat_session" → body_shape "chat" → mounts ChatBodyView, which then
+  // fetches the full ChatSession itself via /api/nodes/{id}.
+  // saveEditorPane is a no-op for chats (ChatBodyView persists per-turn);
+  // deleteEditorPaneScene routes through api.deleteChatSession.
+  async function openChatInEditorPane(chatId: string) {
+    const existingPane = editorPanes.find(
+      (pane) => pane.document?.type === "chat" && pane.document.id === chatId,
+    );
+    if (existingPane) {
+      focusedEditorPaneId = existingPane.id;
+      focusPane(existingPane.id);
+      status = `Focused ${existingPane.scene?.title ?? "open chat"}`;
+      return;
+    }
+    const summary = chatSessions.find((s) => s.id === chatId);
+    let targetPane = editorPanes.find((pane) => !pane.pinned);
+    if (!targetPane) {
+      targetPane = addEditorPane();
+    }
+    if (targetPane.dirty) {
+      await saveEditorPane(targetPane.id);
+    }
+    const sceneShaped = {
+      id: chatId,
+      title: summary?.title || "Untitled chat",
+      body_markdown: "",
+      revision: "",
+      status: "",
+      entry_type: "chat_session",
+      metadata: {},
+      computed_metadata: {},
+    } as unknown as EditableDocument;
+    editorPanes = editorPanes.map((pane) =>
+      pane.id === targetPane!.id
+        ? {
+            ...pane,
+            document: { type: "chat", id: chatId },
+            scene: sceneShaped,
+            dirty: false,
+            draftTitle: sceneShaped.title,
+            draftMarkdown: "",
+            draftStatus: "",
+            draftEntryType: "chat_session",
+            draftMetadata: {},
+            saving: false,
+          }
+        : pane,
+    );
+    focusedEditorPaneId = targetPane!.id;
+    focusPane(targetPane!.id);
+    status = `Loaded ${sceneShaped.title}`;
+    activeChatId = chatId;
+  }
+
   async function openPromptEntryInEditorPane(entryId: string) {
     const existingPane = editorPanes.find((pane) => pane.document?.type === "prompt" && pane.document.id === entryId);
     if (existingPane) {
@@ -3830,6 +3881,10 @@ async function seedChatFromPromptEntry(
     const pane = editorPanes.find((candidate) => candidate.id === id);
     if (!pane?.scene) return;
     const documentKind = pane.document?.type ?? "scene";
+    // Chats persist per-turn from within ChatBodyView via the unified
+    // PUT /api/nodes/{id} path; the pane's draft-* fields aren't the
+    // source of truth for chat state. Treat saveEditorPane as a no-op.
+    if (documentKind === "chat") return;
     setEditorPaneSaving(id, true);
     try {
       const draftDocument = {
@@ -3975,6 +4030,9 @@ async function seedChatFromPromptEntry(
       promptEntries = (await api.deletePromptEntry(pane.scene.id)).entries;
     } else if (documentKind === "assistant") {
       assistantEntries = (await api.deleteAssistantEntry(pane.scene.id)).entries;
+    } else if (documentKind === "chat") {
+      chatSessions = (await api.deleteChatSession(pane.scene.id)).sessions;
+      if (activeChatId === pane.scene.id) activeChatId = null;
     } else {
       structure = await api.deleteScene(pane.scene.id);
       await refreshTodos();
@@ -4780,7 +4838,7 @@ async function seedChatFromPromptEntry(
           <NodeRow
             title={session.title || "Untitled chat"}
             active={activeChatId === session.id}
-            onClick={() => openChatSession(session.id)}
+            onClick={() => run(() => openChatInEditorPane(session.id))}
           >
             {#snippet detailSlot()}
               {#if session.prompt_entry_id || session.assistant_id}
@@ -5404,27 +5462,6 @@ async function seedChatFromPromptEntry(
     </section>
   {/if}
 
-  {#if devChatPreviewId}
-    <details
-      class="dev-chat-body-view-mount"
-      open
-      style="position:fixed;bottom:12px;right:12px;z-index:50;width:420px;max-height:78vh;display:flex;flex-direction:column;background:var(--color-surface,#fff);border:1px solid var(--color-border,#d0d4dc);border-radius:8px;box-shadow:0 8px 24px rgba(0,0,0,0.12);overflow:hidden;"
-    >
-      <summary style="padding:6px 10px;font-size:12px;cursor:pointer;background:var(--color-surface-muted,#f3f5fa);">
-        Phase 4c preview: ChatBodyView (via /api/nodes/{devChatPreviewId})
-      </summary>
-      <ChatBodyView
-        scene={({ id: devChatPreviewId, title: activeChatTitle, entry_type: "chat_session", metadata: {}, computed_metadata: {} } as unknown as EditableDocument)}
-        {metadataSchema}
-        {promptEntries}
-        {assistantEntries}
-        {loreEntries}
-        {structure}
-        defaultAssistantId={defaultAssistantEntryId()}
-        {implicitContextMatcher}
-      />
-    </details>
-  {/if}
 
 </main>
 

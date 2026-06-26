@@ -25,7 +25,7 @@
   }
 
   export let scene: EditableDocument | null = null;
-  export let documentKind: "scene" | "lore" | "prompt" | "snippet" | "assistant" | "project" | "structure_node" = "scene";
+  export let documentKind: "scene" | "lore" | "prompt" | "snippet" | "assistant" | "project" | "structure_node" | "chat" = "scene";
   export let metadataSchema: MetadataSchema | null = null;
   export let promptEntries: PromptEntrySummary[] = [];
   // Data sources for context_pick inputs in the prompt preview / inputs
@@ -223,8 +223,8 @@
     });
   }
 
-  $: documentLabel = documentKind === "lore" ? "Entry" : documentKind === "structure_node" ? "Node" : "Scene";
-  $: documentNameLabel = documentKind === "lore" ? "Name" : "Title";
+  $: documentLabel = documentKind === "lore" ? "Entry" : documentKind === "structure_node" ? "Node" : documentKind === "chat" ? "Chat" : "Scene";
+  $: documentNameLabel = documentKind === "lore" ? "Name" : documentKind === "chat" ? "Title" : "Title";
   // structure_node has no schema kind of its own — Acts/Chapters share
   // kind="scene" in the metadata schema. Reuse the scene entry types so
   // the type selector still lists Act/Chapter/Scene/etc.
@@ -354,7 +354,9 @@
   }
 
   function defaultEntryType() {
-    return documentKind === "lore" ? "lore_note" : "scene";
+    if (documentKind === "lore") return "lore_note";
+    if (documentKind === "chat") return "chat_session";
+    return "scene";
   }
 
   function defaultStatus() {

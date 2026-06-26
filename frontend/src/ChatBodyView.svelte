@@ -23,7 +23,7 @@
   import PlainTextEditor from "./PlainTextEditor.svelte";
   import PromptInputField from "./PromptInputField.svelte";
   import { renderChatContent } from "./chatMessageRender";
-  import { formatCostEur } from "./money";
+  import { formatCostEur, formatTokens } from "./money";
   import type {
     AssistantEntrySummary,
     ChatMessage,
@@ -102,6 +102,33 @@
   let chatInputDrafts: Record<string, string> = {};
   // Collapse the strip after first send to reclaim space — user can re-expand.
   let chatInputsHidden = false;
+
+  // ---- cost-estimate + TTL strip state ----
+  // Per-slot TTL in seconds; mirrors App.svelte's SLOT_TTL_SECONDS.
+  // Drives the TTL countdown chips. Slots not in this table get 5 min.
+  const SLOT_TTL_SECONDS: Record<string, number> = {
+    system: 3600,
+    lore: 300,
+  };
+  // Tick counter — bumped every second by an onMount interval — so the
+  // TTL chips' "remaining" recompute live. Anything else that wants a
+  // 1Hz refresh can read this too.
+  let ttlTick = 0;
+  // Next-turn estimate. Recomputed whenever the inputs that drive it
+  // change (prompt, assistant, drafts). Null when no prompt is bound —
+  // a freeform brief renders no template so there's nothing to estimate
+  // pre-send (the per-turn actuals on the assistant reply tell the user
+  // what it cost retroactively).
+  let chatEstimate: {
+    tokens: number;
+    cost_usd: number | null;
+    caching_style: "none" | "auto" | "explicit" | null;
+    cache_blocks: { label: string; tokens: number; cache_break_after: boolean }[];
+  } | null = null;
+  // Stale-response guard: every fetch grabs ourToken = ++chatEstimateToken;
+  // on resolve we drop the response if the token moved. Out-of-order
+  // resolutions are common when the user types fast.
+  let chatEstimateToken = 0;
 
   $: void maybeLoadChat(scene?.id ?? null);
 
@@ -596,8 +623,87 @@
 
   onMount(() => {
     document.addEventListener("mousedown", handleDocumentClick);
-    return () => document.removeEventListener("mousedown", handleDocumentClick);
+    const ttlInterval = setInterval(() => { ttlTick += 1; }, 1000);
+    return () => {
+      document.removeEventListener("mousedown", handleDocumentClick);
+      clearInterval(ttlInterval);
+    };
   });
+
+  async function fetchChatEstimate(): Promise<void> {
+    if (!chatPromptEntryId) {
+      chatEstimate = null;
+      return;
+    }
+    const entry = promptEntries.find((p) => p.id === chatPromptEntryId);
+    if (!entry) {
+      chatEstimate = null;
+      return;
+    }
+    const ourToken = ++chatEstimateToken;
+    const inputs: Record<string, unknown> = {};
+    for (const declared of entry.inputs ?? []) {
+      const raw = chatInputDrafts[declared.name] ?? "";
+      const coerced = coerceChatInputValue(raw, declared.type);
+      if (coerced !== null && coerced !== "") inputs[declared.name] = coerced;
+    }
+    try {
+      const preview = await api.aiPreview({
+        template_source: entry.body_markdown,
+        target_scene_id: "",
+        inputs,
+        commit: false,
+        assistant_id: chatAssistantId || null,
+      });
+      if (ourToken !== chatEstimateToken) return;
+      chatEstimate = {
+        tokens: preview.estimated_tokens ?? 0,
+        cost_usd: preview.estimated_cost_usd ?? null,
+        caching_style: preview.caching_style ?? null,
+        cache_blocks: (preview.cache_blocks ?? []).map((b) => ({
+          label: b.label,
+          tokens: b.tokens,
+          cache_break_after: b.cache_break_after,
+        })),
+      };
+    } catch {
+      // Surface errors via the future preview popover, not the strip —
+      // keep the estimate quiet rather than blinking "—".
+    }
+  }
+
+  // Per-slot TTL chips. Reads ttlTick so chips recompute live, reads
+  // activeChatCacheWriteTimes so they refresh when a new turn stamps a
+  // slot.
+  function ttlChipsFor(times: Record<string, string>, _tick: number) {
+    if (!times || Object.keys(times).length === 0) return [];
+    const now = Date.now();
+    return Object.entries(times).map(([slot, iso]) => {
+      const writtenAt = Date.parse(iso);
+      const ttl = (SLOT_TTL_SECONDS[slot] ?? 300) * 1000;
+      const remainingMs = writtenAt + ttl - now;
+      const remainingSec = Math.max(0, Math.round(remainingMs / 1000));
+      const label = slot.charAt(0).toUpperCase() + slot.slice(1);
+      const ttlLabel = ttl >= 3600_000 ? "1h" : "5m";
+      let formatted: string;
+      if (remainingSec <= 0) formatted = "expired";
+      else if (remainingSec >= 60) formatted = `${Math.floor(remainingSec / 60)}m`;
+      else formatted = `${remainingSec}s`;
+      return { slot, label, ttlLabel, formatted, expired: remainingSec <= 0 };
+    });
+  }
+  $: ttlChips = ttlChipsFor(activeChatCacheWriteTimes, ttlTick);
+
+  // Re-fetch estimate when any input that drives it changes. Each dep
+  // read on its own line so Svelte tracks them (see
+  // [[feedback-svelte5-reactivity-traps]]).
+  $: {
+    chatPromptEntryId;
+    chatAssistantId;
+    chatInputDrafts;
+    promptEntries.length;
+    void fetchChatEstimate();
+  }
 
   // ---------- Public methods (called via bind:this from parent) ----------
   export function getBodyMarkdown(): string {
@@ -779,6 +885,47 @@
             {/each}
           </div>
         {/if}
+      </div>
+    {/if}
+
+    {#if activeChatJournal.length > 0}
+      <div class="cbv-journal-scope" aria-label="Lore entries currently in this chat's implicit-context cache">
+        <span class="cbv-journal-scope-label">In context:</span>
+        {#each activeChatJournal as entry (entry.entry_id)}
+          <span
+            class="cbv-journal-scope-chip"
+            class:cbv-journal-scope-chip-fresh={activeChatJournalFreshIds.has(entry.entry_id)}
+            class:cbv-journal-scope-chip-depth1={entry.source === "depth1_expansion"}
+            title={entry.source === "depth1_expansion"
+              ? `${entry.title} — pulled in because another entity's body mentions it`
+              : `${entry.title} — detected in a user message`}
+          >{entry.title || entry.entry_id}</span>
+        {/each}
+      </div>
+    {/if}
+
+    {#if chatEstimate}
+      <div class="cbv-estimate-strip" title="Estimated input cost for the bound prompt. Output cost depends on the response.">
+        <span class="cbv-estimate-tokens">{formatTokens(chatEstimate.tokens)} tok</span>
+        <span class="cbv-estimate-sep">·</span>
+        <span class="cbv-estimate-cost">{formatCostEur(chatEstimate.cost_usd)}</span>
+        {#if chatEstimate.caching_style === "explicit" && chatEstimate.cache_blocks.length > 1}
+          <span class="cbv-estimate-sep">·</span>
+          {#each chatEstimate.cache_blocks as block, i}
+            <span class="cbv-estimate-chip">{block.label} {formatTokens(block.tokens)}</span>
+            {#if i < chatEstimate.cache_blocks.length - 1}<span class="cbv-estimate-sep">·</span>{/if}
+          {/each}
+        {/if}
+      </div>
+    {/if}
+    {#if ttlChips.length > 0 && chatEstimate?.caching_style === "explicit"}
+      <div class="cbv-ttl-strip" title="Cache lifetime estimates. Provider may evict early under load — these are not authoritative.">
+        {#each ttlChips as chip, i}
+          <span class="cbv-ttl-chip" class:cbv-ttl-expired={chip.expired}>
+            {chip.label} ({chip.ttlLabel}) {chip.formatted}
+          </span>
+          {#if i < ttlChips.length - 1}<span class="cbv-estimate-sep">·</span>{/if}
+        {/each}
       </div>
     {/if}
 
@@ -1042,6 +1189,60 @@
   }
   .cbv-input-field.cbv-input-disabled {
     opacity: 0.65;
+  }
+
+  .cbv-journal-scope {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 4px 6px;
+    align-items: center;
+    font-size: 12px;
+  }
+  .cbv-journal-scope-label {
+    color: var(--color-text-muted, #5b6172);
+  }
+  .cbv-journal-scope-chip {
+    padding: 1px 6px;
+    border-radius: 999px;
+    background: var(--color-surface-muted, #f3f5fa);
+    border: 1px solid var(--color-border, #d0d4dc);
+    transition: background 250ms ease-out, border-color 250ms ease-out;
+  }
+  .cbv-journal-scope-chip-depth1 {
+    border-style: dashed;
+  }
+  .cbv-journal-scope-chip-fresh {
+    background: color-mix(in srgb, var(--color-accent, #6366f1) 22%, transparent);
+    border-color: var(--color-accent, #6366f1);
+  }
+
+  .cbv-estimate-strip,
+  .cbv-ttl-strip {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 4px;
+    font-size: 11.5px;
+    color: var(--color-text-muted, #5b6172);
+  }
+  .cbv-estimate-sep {
+    color: var(--color-border, #d0d4dc);
+  }
+  .cbv-estimate-chip {
+    padding: 0 5px;
+    border-radius: 4px;
+    background: var(--color-surface-muted, #f3f5fa);
+    border: 1px solid var(--color-border, #d0d4dc);
+  }
+  .cbv-ttl-chip {
+    padding: 0 5px;
+    border-radius: 4px;
+    background: var(--color-surface-muted, #f3f5fa);
+    border: 1px solid var(--color-border, #d0d4dc);
+  }
+  .cbv-ttl-chip.cbv-ttl-expired {
+    color: var(--color-text-error, #b3261e);
+    border-color: var(--color-text-error, #b3261e);
   }
 
   .cbv-messages {

@@ -4812,7 +4812,12 @@
                   {/if}
                 </small>
               {/if}
-              <small>{session.message_count} message{session.message_count === 1 ? "" : "s"} · {session.updated_at.slice(0, 16).replace("T", " ")}</small>
+              <small>
+              {session.message_count} message{session.message_count === 1 ? "" : "s"} · {session.updated_at.slice(0, 16).replace("T", " ")}
+              {#if (session.cost_usd_total ?? 0) > 0}
+                · <span class="chat-session-cost">{formatCostEur(session.cost_usd_total ?? 0)}</span>
+              {/if}
+            </small>
             {/snippet}
             {#snippet trailing()}
               <button class="row-action-delete" type="button" title="Delete chat" on:click|stopPropagation={() => deleteChatSessionFromPane(session.id)}>×</button>

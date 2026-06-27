@@ -1172,6 +1172,9 @@ class ChatSessionSummary(BaseModel):
     created_at: str
     updated_at: str
     message_count: int = 0
+    # All-time running USD cost; rendered as EUR in the chats pane chip.
+    # Matches ChatSession.cost_usd_total — the file is the source of truth.
+    cost_usd_total: float = 0.0
 
 
 class ChatSessionList(BaseModel):

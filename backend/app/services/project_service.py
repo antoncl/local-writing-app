@@ -3480,6 +3480,11 @@ class ProjectService:
             if not isinstance(data, dict) or not data.get("id"):
                 continue
             messages = data.get("messages") or []
+            raw_cost = data.get("cost_usd_total", 0.0)
+            try:
+                cost_usd_total = float(raw_cost) if raw_cost is not None else 0.0
+            except (TypeError, ValueError):
+                cost_usd_total = 0.0
             summaries.append(
                 ChatSessionSummary(
                     id=str(data.get("id", "")),
@@ -3490,6 +3495,7 @@ class ProjectService:
                     created_at=str(data.get("created_at", "") or ""),
                     updated_at=str(data.get("updated_at", "") or ""),
                     message_count=len(messages) if isinstance(messages, list) else 0,
+                    cost_usd_total=cost_usd_total,
                 )
             )
         # Pinned first, then most-recently-updated first.

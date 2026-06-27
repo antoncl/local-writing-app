@@ -4331,6 +4331,11 @@ button.schema-field-row:hover {
   font-size: 11px;
 }
 
+.chats-pane .chat-session-cost {
+  color: var(--text-2, #4d5753);
+  font-variant-numeric: tabular-nums;
+}
+
 .raw-body-editor .code-editor {
   display: grid;
   height: 100%;

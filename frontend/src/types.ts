@@ -696,6 +696,7 @@ export type ChatSessionSummary = {
   created_at: string;
   updated_at: string;
   message_count: number;
+  cost_usd_total?: number;
 };
 
 export type ChatSessionList = {

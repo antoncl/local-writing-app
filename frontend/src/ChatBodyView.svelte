@@ -106,6 +106,12 @@
   let promptPickerEl: HTMLDivElement | null = null;
   let promptPickerBtnEl: HTMLButtonElement | null = null;
 
+  // ---- assistant-picker UI state (mirrors prompt picker; replaces native <select>) ----
+  let assistantPickerOpen = false;
+  let assistantPickerSearch = "";
+  let assistantPickerEl: HTMLDivElement | null = null;
+  let assistantPickerBtnEl: HTMLButtonElement | null = null;
+
   // ---- 👁 preview popover state ----
   // The popover shows the rendered system_prompt — what the assistant
   // actually sees ahead of the conversation. For freeform chats that
@@ -311,9 +317,36 @@
     await persistActiveChat();
   }
 
-  async function handleAssistantChange(event: Event): Promise<void> {
-    const target = event.target as HTMLSelectElement;
-    chatAssistantId = target.value;
+  function filteredAssistantEntries(): AssistantEntrySummary[] {
+    const q = assistantPickerSearch.trim().toLowerCase();
+    const sorter = (a: AssistantEntrySummary, b: AssistantEntrySummary) =>
+      a.title.localeCompare(b.title, undefined, { sensitivity: "base" });
+    if (!q) return assistantEntries.slice().sort(sorter);
+    return assistantEntries
+      .filter((e) => e.title.toLowerCase().includes(q) || (e.entry_type || "").toLowerCase().includes(q))
+      .sort(sorter);
+  }
+
+  async function toggleAssistantPicker() {
+    if (isLocked) return;
+    assistantPickerOpen = !assistantPickerOpen;
+    assistantPickerSearch = "";
+    if (assistantPickerOpen) {
+      await tick();
+      const input = assistantPickerEl?.querySelector<HTMLInputElement>(".cbv-picker-search");
+      input?.focus();
+    }
+  }
+
+  function closeAssistantPicker() {
+    assistantPickerOpen = false;
+    assistantPickerSearch = "";
+  }
+
+  async function pickAssistantForChat(id: string): Promise<void> {
+    closeAssistantPicker();
+    if (isLocked) return;
+    chatAssistantId = id;
     await persistActiveChat();
   }
 
@@ -331,6 +364,11 @@
       const insidePicker =
         promptPickerEl?.contains(target) || promptPickerBtnEl?.contains(target);
       if (!insidePicker) closeChatPromptPicker();
+    }
+    if (assistantPickerOpen) {
+      const insidePicker =
+        assistantPickerEl?.contains(target) || assistantPickerBtnEl?.contains(target);
+      if (!insidePicker) closeAssistantPicker();
     }
     if (chatPreviewPopoverOpen) {
       const insidePreview =
@@ -831,23 +869,58 @@
           </div>
         {/if}
       </div>
-      <label class="cbv-assistant-anchor">
-        <span class="cbv-chip-glyph" aria-hidden="true">🤖</span>
-        <select
-          class="cbv-assistant-select"
+      <div class="cbv-prompt-anchor">
+        <button
+          type="button"
+          class="cbv-chip cbv-chip-button cbv-chip-graphite"
           class:cbv-chip-locked={isLocked}
-          value={chatAssistantId}
-          on:change={(e) => void handleAssistantChange(e)}
-          disabled={isLocked}
           title={isLocked ? "Assistant is locked while this chat has messages." : "Pick an assistant"}
+          bind:this={assistantPickerBtnEl}
+          on:click={() => void toggleAssistantPicker()}
+          disabled={isLocked}
           aria-label="Assistant"
         >
-          <option value="">Default ({assistantTitle("").replace(/^Default \(|\)$/g, "") || "machine default"})</option>
-          {#each assistantEntries as assistant (assistant.id)}
-            <option value={assistant.id}>{assistant.title}</option>
-          {/each}
-        </select>
-      </label>
+          <span class="cbv-chip-glyph" aria-hidden="true">🤖</span>
+          <strong>{assistantTitle(chatAssistantId)}</strong>
+          {#if isLocked}
+            <span class="cbv-chip-lock" aria-label="locked">🔒</span>
+          {:else}
+            <span class="cbv-chip-caret" aria-hidden="true">▾</span>
+          {/if}
+        </button>
+        {#if assistantPickerOpen}
+          <div class="cbv-prompt-picker" role="menu" bind:this={assistantPickerEl}>
+            <input
+              class="cbv-picker-search"
+              type="text"
+              placeholder="Search assistants…"
+              bind:value={assistantPickerSearch}
+            />
+            <button
+              type="button"
+              class:cbv-picker-active={chatAssistantId === ""}
+              on:click={() => void pickAssistantForChat("")}
+            >
+              <strong>Default</strong>
+              <small>{assistantTitle("").replace(/^Default \(|\)$/g, "") || "machine default"}</small>
+            </button>
+            {#each filteredAssistantEntries() as assistant (assistant.id)}
+              <button
+                type="button"
+                class:cbv-picker-active={assistant.id === chatAssistantId}
+                on:click={() => void pickAssistantForChat(assistant.id)}
+              >
+                <strong>{assistant.title}</strong>
+                <small>{assistant.entry_type}</small>
+              </button>
+            {:else}
+              <p class="cbv-picker-empty">
+                {assistantPickerSearch ? "No assistants match." : "No assistants configured."}
+              </p>
+            {/each}
+          </div>
+        {/if}
+      </div>
       <div class="cbv-preview-anchor">
         <button
           type="button"
@@ -1000,7 +1073,14 @@
             title={entry.source === "depth1_expansion"
               ? `${entry.title} — pulled in because another entity's body mentions it`
               : `${entry.title} — detected in a user message`}
-          >{entry.title || entry.entry_id}</span>
+          >
+            {entry.title || entry.entry_id}
+            {#if activeChatJournalFreshIds.has(entry.entry_id)}
+              <span class="cbv-journal-scope-pip cbv-journal-scope-pip-fresh">FRESH</span>
+            {:else if entry.source === "depth1_expansion"}
+              <span class="cbv-journal-scope-pip cbv-journal-scope-pip-depth1">↳ depth 1</span>
+            {/if}
+          </span>
         {/each}
       </div>
     {/if}
@@ -1107,7 +1187,7 @@
     flex-wrap: wrap;
     align-items: center;
     gap: 8px;
-    padding-bottom: 10px;
+    padding-bottom: 11px;
     border-bottom: 1px solid var(--divider);
   }
   .cbv-chip {
@@ -1168,26 +1248,15 @@
   .cbv-prompt-picker > button > small { font-size: 11px; color: var(--text-3); }
   .cbv-picker-empty { margin: 4px 6px; font-size: 12px; color: var(--text-3); }
 
-  /* Assistant chip = graphite StatusPill wrapping a bare select. */
-  .cbv-assistant-anchor {
-    display: inline-flex; align-items: center; gap: 6px;
-    padding: 4px 8px 4px 11px; border-radius: 999px;
-    background: var(--k-graphite-soft); border: 1px solid var(--k-graphite);
-    color: var(--k-graphite-text); font-size: 12px; font-weight: 600;
+  /* Assistant chip = graphite variant of .cbv-chip. Trigger + popover
+     mirror the prompt picker exactly so both reads at the same height
+     and the dropdown renders NodeRow-style entries. */
+  .cbv-chip-graphite {
+    background: var(--k-graphite-soft);
+    border-color: var(--k-graphite);
+    color: var(--k-graphite-text);
   }
-  .cbv-assistant-anchor .cbv-chip-glyph { font-size: 12px; }
-  .cbv-assistant-select {
-    border: none; background: transparent; font: inherit;
-    font-size: 12px; font-weight: 600; color: var(--k-graphite-text);
-    cursor: pointer; padding: 0 2px; max-width: 200px;
-    /* Truncate long assistant names so the selected value never collides
-       with the UA dropdown arrow. */
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
-  }
-  .cbv-assistant-select[disabled] { cursor: default; }
-  .cbv-assistant-select.cbv-chip-locked { opacity: 0.85; }
+  .cbv-chip-graphite strong { max-width: 200px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 
   /* 👁 preview icon button. */
   .cbv-preview-anchor { position: relative; display: inline-flex; align-items: center; margin-left: auto; }
@@ -1238,7 +1307,7 @@
   /* ---- 4 · messages ---- */
   .cbv-messages {
     flex: 1 1 0; min-height: 96px; overflow-y: auto;
-    display: flex; flex-direction: column; gap: 16px; padding: 4px 4px 4px 0;
+    display: flex; flex-direction: column; gap: 16px; padding: 16px 14px;
   }
   /* The composer + strips + input + action row keep their natural height;
      only the messages region flexes (and scrolls). Prevents the message
@@ -1254,7 +1323,7 @@
   :global(.chat-body-view > .cbv-input) {
     flex: 0 0 auto;
   }
-  .cbv-message { display: flex; flex-direction: column; gap: 5px; max-width: 100%; }
+  .cbv-message { display: flex; flex-direction: column; gap: 6px; max-width: 100%; }
   .cbv-message-user { align-items: flex-end; }
   .cbv-message-assistant { align-items: flex-start; }
   .cbv-message-role {
@@ -1272,6 +1341,7 @@
   .cbv-message-assistant .cbv-message-content {
     max-width: 82%; border-radius: 13px 13px 13px 4px; white-space: normal;
     background: var(--surface); border: 1px solid var(--border); box-shadow: 0 1px 3px var(--shadow); color: var(--text);
+    padding: 11px 14px;
   }
   .cbv-typing { font-style: italic; color: var(--text-3); }
   :global(.cbv-message-rendered) { font-size: 13.5px; line-height: 1.6; }
@@ -1294,7 +1364,7 @@
 
   /* 4d · truncation banner. */
   .cbv-truncated {
-    display: inline-flex; align-items: center; gap: 7px; padding: 6px 11px;
+    display: inline-flex; align-items: center; gap: 7px; padding: 7px 12px;
     border: 1px solid var(--star-border); border-radius: 9px; background: var(--star-soft);
     font-size: 11.5px; color: var(--star);
   }
@@ -1308,7 +1378,7 @@
     font-size: 9.5px; font-weight: 800; letter-spacing: 0.06em; text-transform: uppercase; color: var(--text-3);
   }
   .cbv-journal-chip {
-    display: inline-flex; align-items: center; gap: 5px; padding: 2px 9px; border-radius: 999px;
+    display: inline-flex; align-items: center; gap: 5px; padding: 3px 10px; border-radius: 999px;
     background: var(--accent-soft); border: 1px solid var(--accent-soft2);
     color: var(--accent-strong); font-weight: 600;
   }
@@ -1316,13 +1386,13 @@
 
   /* 4c · per-turn usage meta. */
   .cbv-turn-meta {
-    display: flex; align-items: center; gap: 10px; padding: 0 2px;
+    display: flex; align-items: center; gap: 12px; padding: 0 2px;
     font-family: ui-monospace, "JetBrains Mono", monospace; font-size: 10.5px; color: var(--text-3);
   }
 
   /* ---- 5 · inputs strip (inset) ---- */
   .cbv-inputs-strip {
-    display: flex; flex-direction: column; gap: 8px; padding: 10px 12px;
+    display: flex; flex-direction: column; gap: 8px; padding: 11px 14px;
     border-radius: 10px; border: 1px solid var(--divider); background: var(--inset);
   }
   .cbv-inputs-toggle {
@@ -1341,7 +1411,7 @@
   /* ---- 6 · journal scope (inset) ---- */
   .cbv-journal-scope {
     display: flex; flex-wrap: wrap; gap: 6px 7px; align-items: center;
-    padding: 9px 12px; border-radius: 10px; border: 1px solid var(--divider);
+    padding: 11px 14px; border-radius: 10px; border: 1px solid var(--divider);
     background: var(--inset); font-size: 11px;
   }
   .cbv-journal-scope-label {
@@ -1360,12 +1430,22 @@
   .cbv-journal-scope-chip-depth1::before { background: #9a9cca; }
   .cbv-journal-scope-chip-fresh { border-color: var(--accent-soft2); }
   .cbv-journal-scope-chip-fresh::before { background: var(--accent); }
+  .cbv-journal-scope-pip {
+    font-size: 9px; font-weight: 700; border-radius: 4px;
+    padding: 1px 4px; margin-left: 1px; line-height: 1.3;
+  }
+  .cbv-journal-scope-pip-fresh {
+    color: var(--accent-strong); background: var(--accent-soft2);
+  }
+  .cbv-journal-scope-pip-depth1 {
+    color: #6c6e9e; background: var(--k-lore-soft);
+  }
 
   /* ---- 7 · cost estimate + 8 · TTL (inset) ---- */
   .cbv-estimate-strip,
   .cbv-ttl-strip {
     display: flex; flex-wrap: wrap; align-items: center; gap: 7px;
-    padding: 8px 12px; border-radius: 10px; border: 1px solid var(--divider);
+    padding: 11px 14px; border-radius: 10px; border: 1px solid var(--divider);
     background: var(--inset); font-size: 11px; color: var(--text-2);
   }
   .cbv-estimate-strip::before { content: "NEXT TURN EST."; }

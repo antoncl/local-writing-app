@@ -372,6 +372,11 @@ class UpsertMetadataFieldRequest(BaseModel):
     field: MetadataFieldDefinition
     entry_type: str = "scene"
     allow_existing: bool = True
+    # Explicit old-value → new-value rename map for select/multi_select
+    # options, computed client-side keyed by each option's original value.
+    # Reorder-safe (positional pairing would mis-rename on reorder). Values
+    # no longer present in the field's options are cleared from entries.
+    option_migration: dict[str, str] | None = None
 
 
 class UpsertMetadataEntryTypeRequest(BaseModel):

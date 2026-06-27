@@ -1418,7 +1418,9 @@ class ProjectService:
 
         self._write_yaml(layer_path, layer_data)
         if existing_field is not None:
-            self._migrate_entry_metadata_option_values(root, field_id, existing_field, request.field)
+            self._apply_option_value_changes(
+                root, field_id, existing_field, request.field, request.option_migration
+            )
         return self.read_metadata_schema()
 
     def move_metadata_field(self, request: MoveMetadataFieldRequest) -> MetadataSchema:
@@ -1660,15 +1662,28 @@ class ProjectService:
             front_matter["metadata"] = metadata
             self._write_markdown_with_front_matter(path, front_matter, body)
 
-    def _migrate_entry_metadata_option_values(
+    def _apply_option_value_changes(
         self,
         root: Path,
         field_id: str,
         old_field: MetadataFieldDefinition,
         new_field: MetadataFieldDefinition,
+        rename_map: dict[str, str] | None,
     ) -> None:
-        migration = self._metadata_option_migration(old_field, new_field)
-        if not migration:
+        """Propagate select/multi_select option edits into stored entry data.
+
+        Applies an explicit, reorder-safe `rename_map` (old value → new value,
+        keyed by the option's original value) and then clears any value that is
+        no longer one of the field's options. select → invalid value cleared;
+        multi_select → invalid items dropped. Skips `tags` (freeform; tag
+        renames flow through merge_tags, not the option list).
+        """
+        option_types = {"select", "multi_select"}
+        if old_field.type not in option_types or new_field.type not in option_types:
+            return
+        rename = {k: v for k, v in (rename_map or {}).items() if k != v}
+        valid = {option.value for option in new_field.options}
+        if not rename and not valid and not old_field.options:
             return
 
         for path in self._entry_markdown_paths(root):
@@ -1677,38 +1692,30 @@ class ProjectService:
             if not isinstance(metadata, dict) or field_id not in metadata:
                 continue
             value = metadata[field_id]
-            next_value = self._migrate_metadata_option_value(value, migration)
+            next_value = self._clean_option_value(value, rename, valid)
             if next_value == value:
                 continue
             metadata[field_id] = next_value
             front_matter["metadata"] = metadata
             self._write_markdown_with_front_matter(path, front_matter, body)
 
-    def _metadata_option_migration(
-        self,
-        old_field: MetadataFieldDefinition,
-        new_field: MetadataFieldDefinition,
-    ) -> dict[str, str] | None:
-        option_types = {"select", "multi_select", "tags"}
-        if old_field.type not in option_types or new_field.type not in option_types:
-            return None
-        if not old_field.options or len(old_field.options) != len(new_field.options):
-            return None
-        # Compare by `value` since options are now SelectOption objects.
-        # A color-only edit (same value, different color) doesn't migrate
-        # entry data — only value renames do.
-        migration = {
-            old_option.value: new_option.value
-            for old_option, new_option in zip(old_field.options, new_field.options, strict=True)
-            if old_option.value != new_option.value
-        }
-        return migration or None
-
-    def _migrate_metadata_option_value(self, value: Any, migration: dict[str, str]) -> Any:
-        if isinstance(value, str):
-            return migration.get(value, value)
+    def _clean_option_value(self, value: Any, rename: dict[str, str], valid: set[str]) -> Any:
         if isinstance(value, list):
-            return [migration.get(item, item) if isinstance(item, str) else item for item in value]
+            out: list[Any] = []
+            seen: set[str] = set()
+            for item in value:
+                if not isinstance(item, str):
+                    out.append(item)
+                    continue
+                mapped = rename.get(item, item)
+                if mapped not in valid or mapped in seen:
+                    continue
+                seen.add(mapped)
+                out.append(mapped)
+            return out
+        if isinstance(value, str):
+            mapped = rename.get(value, value)
+            return mapped if mapped in valid else ""
         return value
 
     def _project_layer_folders(self, root: Path) -> list[Path]:

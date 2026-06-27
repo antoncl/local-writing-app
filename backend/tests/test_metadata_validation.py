@@ -1248,11 +1248,86 @@ class MetadataValidationTests(unittest.TestCase):
                 field_id="color",
                 field=MetadataFieldDefinition(name="Background Color", type="select", options=["red", "green", "blue"]),
                 entry_type="scene",
+                option_migration={"Red": "red", "Green": "green", "Blue": "blue"},
             )
         )
 
         updated_scene = self.service.read_scene(self.scene_id)
         self.assertEqual(updated_scene.metadata, {"color": "green"})
+
+    def test_reordering_options_does_not_rewrite_entry_values(self) -> None:
+        world_layer = next(
+            layer
+            for layer in self.service.read_metadata_schema_layers().layers
+            if layer.folder_path == str(self.world)
+        )
+        self.service.upsert_metadata_field(
+            UpsertMetadataFieldRequest(
+                layer_id=world_layer.id,
+                field_id="rank",
+                field=MetadataFieldDefinition(name="Rank", type="select", options=["a", "b", "c"]),
+                entry_type="scene",
+            )
+        )
+        scene = self.service.read_scene(self.scene_id)
+        self.service.save_scene(
+            self.scene_id,
+            SaveSceneRequest(
+                title=scene.title,
+                body_markdown=scene.body_markdown,
+                base_revision=scene.revision,
+                status=scene.status,
+                entry_type=scene.entry_type,
+                metadata={"rank": "a"},
+            ),
+        )
+        # Reorder only (no rename map) — value must be untouched, not swapped.
+        self.service.upsert_metadata_field(
+            UpsertMetadataFieldRequest(
+                layer_id=world_layer.id,
+                field_id="rank",
+                field=MetadataFieldDefinition(name="Rank", type="select", options=["b", "a", "c"]),
+                entry_type="scene",
+            )
+        )
+        self.assertEqual(self.service.read_scene(self.scene_id).metadata, {"rank": "a"})
+
+    def test_removing_option_clears_value_from_entries(self) -> None:
+        world_layer = next(
+            layer
+            for layer in self.service.read_metadata_schema_layers().layers
+            if layer.folder_path == str(self.world)
+        )
+        self.service.upsert_metadata_field(
+            UpsertMetadataFieldRequest(
+                layer_id=world_layer.id,
+                field_id="faction",
+                field=MetadataFieldDefinition(name="Faction", type="multi_select", options=["red", "blue", "green"]),
+                entry_type="scene",
+            )
+        )
+        scene = self.service.read_scene(self.scene_id)
+        self.service.save_scene(
+            self.scene_id,
+            SaveSceneRequest(
+                title=scene.title,
+                body_markdown=scene.body_markdown,
+                base_revision=scene.revision,
+                status=scene.status,
+                entry_type=scene.entry_type,
+                metadata={"faction": ["red", "blue"]},
+            ),
+        )
+        # Remove "blue" — it should be dropped from the entry's list.
+        self.service.upsert_metadata_field(
+            UpsertMetadataFieldRequest(
+                layer_id=world_layer.id,
+                field_id="faction",
+                field=MetadataFieldDefinition(name="Faction", type="multi_select", options=["red", "green"]),
+                entry_type="scene",
+            )
+        )
+        self.assertEqual(self.service.read_scene(self.scene_id).metadata, {"faction": ["red"]})
 
     def test_delete_metadata_field_removes_schema_and_scene_metadata(self) -> None:
         world_layer = next(

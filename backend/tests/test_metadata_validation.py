@@ -24,6 +24,7 @@ from app.models import (
     UpsertMetadataFieldRequest,
 )
 from app.services.project_service import ProjectService, ProjectServiceError
+from app.services.tree_structure import TreeStructureService
 
 
 class MetadataValidationTests(unittest.TestCase):
@@ -672,7 +673,7 @@ class MetadataValidationTests(unittest.TestCase):
         new_root = root_node.model_copy(update={"children": [custom_branch]})
         self.service._write_yaml(self.root / "manuscript.structure.yaml", {"root": new_root.model_dump()})
 
-        scene_ids = self.service._collect_scene_ids(self.service.read_structure().root)
+        scene_ids = TreeStructureService.collect_leaf_ids(self.service.read_structure().root)
         self.assertIn(scene_id, scene_ids)
         display_paths = self.service._scene_display_paths()
         self.assertIn(scene_id, display_paths)

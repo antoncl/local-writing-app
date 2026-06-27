@@ -98,6 +98,13 @@ from app.services.migrations import CURRENT_VERSION as PROJECT_SCHEMA_VERSION, m
 from app.services.tree_structure import TreeConfig, TreeStructureService
 
 
+MANUSCRIPT_TREE_CONFIG = TreeConfig(
+    yaml_filename="manuscript.structure.yaml",
+    root_title="Manuscript",
+    leaf_ref_field="scene_id",
+    leaf_subdir="scenes",
+)
+
 RESEARCH_TREE_CONFIG = TreeConfig(
     yaml_filename="research.structure.yaml",
     root_title="Research",
@@ -590,23 +597,17 @@ class ProjectService:
             metadata={},
         )
         self._write_scene_file(self._filepath_for_new_node(root / "scenes", initial_scene.title), initial_scene)
-        initial_structure = {
-            "root": {
-                "id": "root",
-                "type": "root",
-                "title": "Manuscript",
-                "children": [
-                    {
-                        "id": self._new_id("node"),
-                        "type": "scene",
-                        "title": initial_scene.title,
-                        "scene_id": initial_scene.id,
-                        "children": [],
-                    }
-                ],
-            }
-        }
-        self._write_yaml(root / "manuscript.structure.yaml", initial_structure)
+        # Seed the manuscript tree with one scene leaf so a fresh project
+        # opens to something instead of an empty outline.
+        TreeStructureService(root, MANUSCRIPT_TREE_CONFIG).initialize(
+            leaf_node={
+                "id": self._new_id("node"),
+                "type": "scene",
+                "title": initial_scene.title,
+                "scene_id": initial_scene.id,
+                "children": [],
+            },
+        )
         # Research tree starts empty — no seeded topic or note. The
         # research pane / kind ships in a later slice; this just ensures
         # the file exists so validate_project doesn't flag it as missing.
@@ -780,7 +781,7 @@ class ProjectService:
             errors.append(f"Invalid metadata schema: {exc}")
 
         scene_ids = {entry.id for entry in node_index.by_id.values() if entry.kind == "scene"}
-        referenced = self._collect_scene_ids(self.read_structure().root)
+        referenced = TreeStructureService.collect_leaf_ids(self.read_structure().root)
 
         for scene_id in sorted(referenced - scene_ids):
             errors.append(f"Structure references missing scene {scene_id}.")
@@ -890,8 +891,7 @@ class ProjectService:
 
     def read_structure(self) -> StructureDocument:
         root = self._require_project()
-        data = self._read_yaml(root / "manuscript.structure.yaml")
-        document = StructureDocument.model_validate(data)
+        document = self._manuscript_tree().read()
         schema = self.read_metadata_schema()
         # One-shot scene front-matter scan: avoids per-leaf read_scene
         # (which does full body parsing). Builds {id → (status, color)}
@@ -947,24 +947,6 @@ class ProjectService:
                     node.status, node.color = pair
         for child in node.children:
             self._inject_structure_computed_metadata(child, root, schema, scene_front)
-
-    def _structure_dump_for_storage(self, structure: StructureDocument) -> dict[str, Any]:
-        raw = structure.model_dump()
-        self._strip_key_recursively(raw, "computed_metadata")
-        # `status` and `color` are projections of the scene's own state —
-        # don't echo them into the structure YAML; they'd drift out of sync.
-        self._strip_key_recursively(raw, "status")
-        self._strip_key_recursively(raw, "color")
-        return raw
-
-    def _strip_key_recursively(self, data: Any, key: str) -> None:
-        if isinstance(data, dict):
-            data.pop(key, None)
-            for value in data.values():
-                self._strip_key_recursively(value, key)
-        elif isinstance(data, list):
-            for item in data:
-                self._strip_key_recursively(item, key)
 
     def read_metadata_schema(self) -> MetadataSchema:
         root = self._require_project()
@@ -2504,12 +2486,12 @@ class ProjectService:
         inserted = self._insert_scene_node(structure.root, parent_id, scene_node)
         if not inserted:
             self._first_container(structure.root).children.append(scene_node)
-        self._write_yaml(root / "manuscript.structure.yaml", self._structure_dump_for_storage(structure))
+        self._manuscript_tree().write(structure)
         return self.read_scene(scene_id)
 
     def cascade_delete_preview(self, node_id: str) -> StructureNodeDeletePreview:
         structure = self.read_structure()
-        node = self._find_structure_node(structure.root, node_id)
+        node = TreeStructureService.find_node(structure, node_id)
         if node is None:
             raise ProjectServiceError(f"Structure node {node_id} does not exist.", 404)
         if node.type == "root":
@@ -2529,7 +2511,7 @@ class ProjectService:
                 walk(child, is_target=False)
 
         walk(node, is_target=True)
-        doomed_scene_ids = self._collect_scene_ids(node)
+        doomed_scene_ids = TreeStructureService.collect_leaf_ids(node)
         backlinks = self._backlinks_to_targets(doomed_scene_ids, exclude_source_ids=doomed_scene_ids)
         return StructureNodeDeletePreview(
             target_id=node.id,
@@ -2586,16 +2568,20 @@ class ProjectService:
     def delete_structure_node(self, node_id: str) -> StructureDocument:
         root = self._require_project()
         structure = self.read_structure()
-        node = self._find_structure_node(structure.root, node_id)
+        node = TreeStructureService.find_node(structure, node_id)
         if node is None:
             raise ProjectServiceError(f"Structure node {node_id} does not exist.", 404)
         if node.type == "root":
             raise ProjectServiceError("Cannot delete the root node.", 422)
 
-        scene_ids = self._collect_scene_ids(node)
+        scene_ids = TreeStructureService.collect_leaf_ids(node)
         # Snapshot all descendant ids BEFORE we mutate the tree so we
         # can purge references in one sweep after the file deletions.
-        purge_ids = self._collect_descendant_ids(node)
+        # Outbound references can point at either the structure-node id
+        # or the underlying leaf file id, so purge both.
+        purge_ids = TreeStructureService.collect_descendant_ids(
+            node
+        ) | TreeStructureService.collect_leaf_ids(node)
         for scene_id in scene_ids:
             try:
                 path = self._path_for_node_id(scene_id, "scene")
@@ -2605,8 +2591,8 @@ class ProjectService:
                 pass
             self._remove_scene_todos(scene_id)
 
-        self._remove_structure_node_by_id(structure.root, node_id)
-        self._write_yaml(root / "manuscript.structure.yaml", self._structure_dump_for_storage(structure))
+        TreeStructureService.remove_node_by_id(structure.root, node_id)
+        self._manuscript_tree().write(structure)
         self._purge_references_to(purge_ids)
         return self.read_structure()
 
@@ -2618,6 +2604,9 @@ class ProjectService:
     # Computed-metadata injection isn't applied — research's v1 schema
     # has no counters/status fields that need it. (docs/research-strategy.md
     # slice 1.)
+
+    def _manuscript_tree(self) -> TreeStructureService:
+        return TreeStructureService(self._require_project(), MANUSCRIPT_TREE_CONFIG)
 
     def _research_tree(self) -> TreeStructureService:
         return TreeStructureService(self._require_project(), RESEARCH_TREE_CONFIG)
@@ -2784,7 +2773,11 @@ class ProjectService:
             raise ProjectServiceError("Cannot delete the root node.", 422)
 
         note_ids = TreeStructureService.collect_leaf_ids(node)
-        purge_ids = TreeStructureService.collect_descendant_ids(node)
+        # Outbound references can point at either the structure-node id
+        # or the underlying leaf file id, so purge both.
+        purge_ids = TreeStructureService.collect_descendant_ids(
+            node
+        ) | TreeStructureService.collect_leaf_ids(node)
         for note_id in note_ids:
             try:
                 path = self._path_for_node_id(note_id, "research")
@@ -2961,63 +2954,41 @@ class ProjectService:
         if walk(document.root):
             tree.write(document)
 
-    def _remove_structure_node_by_id(self, node: StructureNode, node_id: str) -> bool:
-        before = len(node.children)
-        node.children = [child for child in node.children if child.id != node_id]
-        if len(node.children) != before:
-            return True
-        return any(self._remove_structure_node_by_id(child, node_id) for child in node.children)
-
     def move_structure_node(self, node_id: str, target_parent_id: str, position: int) -> StructureDocument:
         root_path = self._require_project()
         structure = self.read_structure()
 
-        node = self._find_structure_node(structure.root, node_id)
+        node = TreeStructureService.find_node(structure, node_id)
         if node is None:
             raise ProjectServiceError(f"Structure node {node_id} does not exist.", 404)
         if node.type == "root":
             raise ProjectServiceError("Cannot move the root node.", 422)
 
-        target_parent = self._find_structure_node(structure.root, target_parent_id)
+        target_parent = TreeStructureService.find_node(structure, target_parent_id)
         if target_parent is None:
             raise ProjectServiceError(f"Target parent {target_parent_id} does not exist.", 404)
 
-        if self._contains_node(node, target_parent_id):
+        if TreeStructureService.contains_node(node, target_parent_id):
             raise ProjectServiceError("Cannot move a node into itself or its descendants.", 422)
 
-        removed = self._extract_structure_node(structure.root, node_id)
+        removed = TreeStructureService.extract_node(structure, node_id)
         if removed is None:
             raise ProjectServiceError(f"Could not detach {node_id} from its current parent.", 500)
 
-        target_parent = self._find_structure_node(structure.root, target_parent_id)
+        target_parent = TreeStructureService.find_node(structure, target_parent_id)
         if target_parent is None:
             raise ProjectServiceError("Target parent disappeared after detach.", 500)
 
         insert_at = max(0, min(position, len(target_parent.children)))
         target_parent.children.insert(insert_at, removed)
 
-        self._write_yaml(root_path / "manuscript.structure.yaml", self._structure_dump_for_storage(structure))
+        self._manuscript_tree().write(structure)
         return self.read_structure()
-
-    def _contains_node(self, root: StructureNode, target_id: str) -> bool:
-        if root.id == target_id:
-            return True
-        return any(self._contains_node(child, target_id) for child in root.children)
-
-    def _extract_structure_node(self, parent: StructureNode, node_id: str) -> StructureNode | None:
-        for i, child in enumerate(parent.children):
-            if child.id == node_id:
-                return parent.children.pop(i)
-        for child in parent.children:
-            found = self._extract_structure_node(child, node_id)
-            if found is not None:
-                return found
-        return None
 
     def rename_structure_node(self, node_id: str, title: str) -> StructureDocument:
         root = self._require_project()
         structure = self.read_structure()
-        node = self._find_structure_node(structure.root, node_id)
+        node = TreeStructureService.find_node(structure, node_id)
         if node is None:
             raise ProjectServiceError(f"Structure node {node_id} does not exist.", 404)
         if node.type == "root":
@@ -3032,17 +3003,8 @@ class ProjectService:
             front_matter["title"] = clean_title
             self._write_markdown_with_front_matter(path, front_matter, body)
             self._maybe_rename_node_file(path, clean_title)
-        self._write_yaml(root / "manuscript.structure.yaml", self._structure_dump_for_storage(structure))
+        self._manuscript_tree().write(structure)
         return self.read_structure()
-
-    def _find_structure_node(self, node: StructureNode, node_id: str) -> StructureNode | None:
-        if node.id == node_id:
-            return node
-        for child in node.children:
-            found = self._find_structure_node(child, node_id)
-            if found is not None:
-                return found
-        return None
 
     def create_structure_node(self, request: CreateStructureNodeRequest) -> StructureDocument:
         root = self._require_project()
@@ -3077,7 +3039,7 @@ class ProjectService:
         inserted = self._insert_scene_node(structure.root, request.parent_id, new_node)
         if not inserted:
             structure.root.children.append(new_node)
-        self._write_yaml(root / "manuscript.structure.yaml", self._structure_dump_for_storage(structure))
+        self._manuscript_tree().write(structure)
         return self.read_structure()
 
     def lookup_node_kind(self, node_id: str) -> str | None:
@@ -3375,7 +3337,7 @@ class ProjectService:
             path.unlink()
         structure = self.read_structure()
         self._remove_scene_node(structure.root, node_id)
-        self._write_yaml(root / "manuscript.structure.yaml", self._structure_dump_for_storage(structure))
+        self._manuscript_tree().write(structure)
         self._remove_scene_todos(node_id)
         # Strip references to both the scene file id and the structure
         # node wrapping it from every metadata-bearing entry.
@@ -4958,18 +4920,6 @@ class ProjectService:
                     ),
                 )
 
-    def _collect_descendant_ids(self, node: StructureNode) -> set[str]:
-        """Gather every structure-node id + scene id in the subtree
-        rooted at ``node``. Used to feed ``_purge_references_to`` after
-        a cascade-delete: a reference could point at the structure
-        node, the underlying scene, or any descendant of either."""
-        ids: set[str] = {node.id}
-        if node.scene_id:
-            ids.add(node.scene_id)
-        for child in node.children:
-            ids.update(self._collect_descendant_ids(child))
-        return ids
-
     def _validate_reference_target(
         self,
         label: str,
@@ -5152,14 +5102,6 @@ class ProjectService:
     def _new_id(self, prefix: str) -> str:
         return f"{prefix}_{uuid.uuid4().hex[:10]}"
 
-    def _collect_scene_ids(self, node: StructureNode) -> set[str]:
-        ids: set[str] = set()
-        if node.scene_id:
-            ids.add(node.scene_id)
-        for child in node.children:
-            ids.update(self._collect_scene_ids(child))
-        return ids
-
     def _scene_display_paths(self) -> dict[str, str]:
         paths: dict[str, str] = {}
 
@@ -5318,7 +5260,7 @@ class ProjectService:
         root = self._require_project()
         structure = self.read_structure()
         if self._rename_scene_node(structure.root, scene_id, title):
-            self._write_yaml(root / "manuscript.structure.yaml", self._structure_dump_for_storage(structure))
+            self._manuscript_tree().write(structure)
 
     def _rename_scene_node(self, node: StructureNode, scene_id: str, title: str) -> bool:
         if node.scene_id == scene_id:

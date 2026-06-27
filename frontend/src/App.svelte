@@ -2875,6 +2875,16 @@
     if (!structure) return;
     const node = findStructureNodeById(structure.root, nodeId);
     if (!node) return;
+    // Acts/Chapters are kind="scene" with a different entry_type — their
+    // metadata + body + status live in the underlying scene .md file, so
+    // fetch it and round-trip via the regular scene endpoints. document.id
+    // stays the node id (the open-pane lookup matches on it); pane.scene
+    // carries the real Scene so saveEditorPane's structure_node branch can
+    // hand the right base_revision to api.saveScene.
+    if (!node.scene_id) {
+      error = `Node ${node.title} has no underlying scene to edit.`;
+      return;
+    }
     let targetPane = editorPanes.find((pane) => !pane.pinned);
     if (!targetPane) {
       targetPane = addEditorPane();
@@ -2882,39 +2892,26 @@
     if (targetPane.dirty) {
       await saveEditorPane(targetPane.id);
     }
-    // Mirror the project-node pattern: cast a non-Scene record into the
-    // pane's Scene-shaped slot so NodeEditor's existing draft-* plumbing
-    // works without a parallel field. NodeEditor's documentKind branch
-    // hides body / status / etc. for structure_node.
-    const sceneShaped = {
-      id: node.id,
-      title: node.title,
-      body_markdown: "",
-      revision: "",
-      status: "",
-      entry_type: node.type,
-      metadata: {},
-      computed_metadata: {},
-    } as unknown as Scene;
+    const scene = await api.getScene(node.scene_id);
     editorPanes = editorPanes.map((pane) =>
       pane.id === targetPane!.id
         ? {
             ...pane,
             document: { type: "structure_node", id: node.id },
-            scene: sceneShaped,
+            scene,
             dirty: false,
-            draftTitle: node.title,
-            draftMarkdown: "",
-            draftStatus: "",
-            draftEntryType: node.type,
-            draftMetadata: {},
+            draftTitle: scene.title,
+            draftMarkdown: scene.body_markdown,
+            draftStatus: scene.status,
+            draftEntryType: scene.entry_type,
+            draftMetadata: cloneMetadata(scene.metadata),
             saving: false,
           }
         : pane,
     );
     focusedEditorPaneId = targetPane!.id;
     focusPane(targetPane!.id);
-    status = `Loaded ${node.title}`;
+    status = `Loaded ${scene.title}`;
   }
 
   function navigateToBacklink(id: string, kind: string) {
@@ -3412,24 +3409,11 @@
         // Scene-compatible draft.
         savedDocument = await api.saveProjectNode(draftDocument as ProjectNode, pane.draftMarkdown) as unknown as EditableDocument;
       } else if (documentKind === "structure_node") {
-        // Structure nodes (Acts/Chapters) currently support title-only
-        // editing via the rename endpoint. Body and user-metadata for
-        // structure nodes need a parallel backend save path; deferred to
-        // a follow-up. Re-fetch the renamed node from the returned
-        // structure document and shape it for the pane.
-        const doc = await api.renameStructureNode(pane.scene.id, pane.draftTitle);
-        structure = doc;
-        const refreshed = findStructureNodeById(doc.root, pane.scene.id);
-        savedDocument = {
-          id: refreshed?.id ?? pane.scene.id,
-          title: refreshed?.title ?? pane.draftTitle,
-          body_markdown: "",
-          revision: "",
-          status: "",
-          entry_type: refreshed?.type ?? pane.draftEntryType,
-          metadata: {},
-          computed_metadata: {},
-        } as unknown as EditableDocument;
+        // Acts/Chapters are scenes with a non-"scene" entry_type — their
+        // metadata + body + status round-trip via the scene endpoints.
+        // The structure tree's per-node title is a projection of the
+        // scene title, so refreshStructure below will pick up renames.
+        savedDocument = await api.saveScene(draftDocument as Scene, pane.draftMarkdown);
       } else {
         savedDocument = await api.saveScene(draftDocument as Scene, pane.draftMarkdown);
       }

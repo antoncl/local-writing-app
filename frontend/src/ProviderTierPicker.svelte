@@ -264,9 +264,10 @@
     flex-direction: column;
     gap: 8px;
     padding: 8px 10px;
-    border: 1px solid #d8dfdd;
+    border: 1px solid var(--border);
     border-radius: 6px;
-    background: #fafbfa;
+    background: var(--inset);
+    color: var(--text);
     font-size: 14px;
   }
 
@@ -278,27 +279,27 @@
   }
 
   .ptp-label {
-    color: #4d5753;
+    color: var(--text-2);
     font-weight: 500;
   }
 
   .ptp-status {
     font-size: 12px;
-    color: #65716c;
+    color: var(--text-3);
   }
 
   .ptp-error {
-    color: #b04a3f;
+    color: var(--danger);
   }
 
   .ptp-advanced {
-    border-top: 1px dashed #cbd6d2;
+    border-top: 1px dashed var(--border);
     padding-top: 6px;
   }
 
   .ptp-advanced > summary {
     cursor: pointer;
-    color: #4d5753;
+    color: var(--text-2);
     font-weight: 500;
     user-select: none;
   }
@@ -313,19 +314,20 @@
 
   .ptp-refresh {
     padding: 2px 8px;
-    border: 1px solid #cbd6d2;
+    border: 1px solid var(--border);
     background: transparent;
+    color: var(--text-2);
     border-radius: 4px;
     font-size: 12px;
     cursor: pointer;
   }
 
   .ptp-refresh:hover:not(:disabled) {
-    background: #ffffff;
+    background: var(--surface);
   }
 
   .ptp-model-detail {
     font-size: 12px;
-    color: #65716c;
+    color: var(--text-3);
   }
 </style>

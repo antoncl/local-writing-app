@@ -176,22 +176,23 @@
 <style>
   .plain-text-editor {
     position: relative;
-    border: 1px solid #cdd6d3;
+    border: 1px solid var(--border);
     border-radius: 6px;
-    background: #ffffff;
+    background: var(--surface);
+    color: var(--text);
     overflow: hidden;
   }
 
   .plain-text-editor:focus-within {
-    border-color: #7d9d92;
-    box-shadow: 0 0 0 2px rgba(125, 157, 146, 0.15);
+    border-color: var(--accent);
+    box-shadow: 0 0 0 2px var(--accent-soft);
   }
 
   .plain-text-editor-placeholder {
     position: absolute;
     top: 8px;
     left: 10px;
-    color: #98a2a0;
+    color: var(--text-3);
     pointer-events: none;
     font-size: 15px;
     line-height: 1.5;

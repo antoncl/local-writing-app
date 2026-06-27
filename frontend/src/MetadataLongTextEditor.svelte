@@ -116,9 +116,10 @@
 <style>
   .metadata-long-text {
     display: grid;
-    border: 1px solid #dfe6e3;
+    border: 1px solid var(--divider);
     border-radius: 6px;
-    background: #ffffff;
+    background: var(--surface);
+    color: var(--text);
     overflow: hidden;
   }
 
@@ -127,8 +128,8 @@
     flex-wrap: wrap;
     gap: 4px;
     padding: 5px;
-    border-bottom: 1px solid #dfe6e3;
-    background: #f7faf8;
+    border-bottom: 1px solid var(--divider);
+    background: var(--inset);
   }
 
   .metadata-long-text-toolbar button {
@@ -162,7 +163,7 @@
 
   :global(.metadata-long-text-body td),
   :global(.metadata-long-text-body th) {
-    border: 1px solid #cbd6d2;
+    border: 1px solid var(--border);
     padding: 4px 6px;
   }
 </style>

@@ -333,8 +333,8 @@
   .gm-error {
     margin: 0;
     padding: 9px 16px;
-    background: #fdeceb;
-    color: #b4453a;
+    background: var(--danger-soft);
+    color: var(--danger);
     font-size: 12.5px;
   }
   .gm-body {
@@ -551,7 +551,7 @@
     border: 0;
     background: transparent;
     font-size: 12px;
-    color: #b4453a;
+    color: var(--danger);
     cursor: pointer;
   }
   .link-danger:hover {

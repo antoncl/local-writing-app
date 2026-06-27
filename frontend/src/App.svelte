@@ -13,6 +13,7 @@
   import PlainTextEditor from "./PlainTextEditor.svelte";
   import PromptInputField from "./PromptInputField.svelte";
   import TopBar from "./TopBar.svelte";
+  import { installThemeWiring, themePreference, nextPreference, type ThemePreference } from "./theme";
   import { compileMatcher } from "./implicitContextMatcher";
   import { renderChatContent } from "./chatMessageRender";
   import { formatCostEur, formatTokens } from "./money";
@@ -513,8 +514,11 @@
     }
   }
 
+  let cleanupThemeWiring: (() => void) | null = null;
+
   onMount(() => {
     fitPanesToViewport();
+    cleanupThemeWiring = installThemeWiring();
     document.addEventListener("mousedown", handleDocumentMousedown);
     // Eagerly fetch machine settings so the chat panel and inputs dialog
     // can show the assistant roster without a round-trip when first opened.
@@ -542,6 +546,7 @@
       document.removeEventListener("mousemove", resizePane);
       document.removeEventListener("mouseup", stopPaneResize);
       document.removeEventListener("mousedown", handleDocumentMousedown);
+      cleanupThemeWiring?.();
     };
   });
 
@@ -3858,6 +3863,8 @@
   currentProjectColor={currentProjectColor}
   {recentProjects}
   projectOpen={isProjectOpen}
+  themePref={$themePreference}
+  onCycleTheme={() => themePreference.update((p) => nextPreference(p))}
   onSelectRecent={(path) => void openProjectAt(path)}
   onOpenFolder={openDirectoryPickerForOpenProject}
   onNewProject={openNewProjectModal}

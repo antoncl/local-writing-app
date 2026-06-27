@@ -87,12 +87,13 @@
 
 <style>
   .code-editor :global(.cm-editor) {
-    border: 1px solid #cbd6d2;
+    border: 1px solid var(--border);
     border-radius: 4px;
-    background: #ffffff;
+    background: var(--surface);
+    color: var(--text);
   }
   .code-editor :global(.cm-editor.cm-focused) {
-    outline: 2px solid #6f9d8b;
+    outline: 2px solid var(--accent);
     outline-offset: -1px;
   }
   .code-editor :global(.cm-scroller) {
@@ -104,8 +105,8 @@
     padding: 6px 0;
   }
   .code-editor :global(.cm-gutters) {
-    background: #f1f4f3;
-    border-right: 1px solid #d8dfdd;
-    color: #4d5753;
+    background: var(--inset);
+    border-right: 1px solid var(--border);
+    color: var(--text-2);
   }
 </style>

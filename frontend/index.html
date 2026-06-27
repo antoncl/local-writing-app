@@ -4,6 +4,27 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>Local Writing App</title>
+    <script>
+      // Theme FOUC guard — applies the saved preference (or system) to
+      // <html data-theme="..."> before Svelte mounts. Kept inline so it
+      // runs synchronously ahead of the module-script payload.
+      (function () {
+        try {
+          var pref = localStorage.getItem("themePreference");
+          if (pref !== "light" && pref !== "dark") pref = "system";
+          var effective = pref;
+          if (pref === "system") {
+            effective = window.matchMedia &&
+              window.matchMedia("(prefers-color-scheme: dark)").matches
+              ? "dark"
+              : "light";
+          }
+          document.documentElement.setAttribute("data-theme", effective);
+        } catch (_) {
+          document.documentElement.setAttribute("data-theme", "light");
+        }
+      })();
+    </script>
   </head>
   <body>
     <div id="app"></div>

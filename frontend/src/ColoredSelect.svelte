@@ -161,22 +161,22 @@
     font: inherit;
     font-size: 13px;
     line-height: 1.2;
-    background: var(--ctx-surface, #fff);
-    border: 1px solid var(--ctx-border, #cdd8d3);
+    background: var(--ctx-surface, var(--surface));
+    border: 1px solid var(--ctx-border, var(--border));
     border-radius: 6px;
-    color: var(--ctx-text, #28332f);
+    color: var(--ctx-text, var(--text));
     cursor: pointer;
     transition: border-color 80ms linear, background-color 80ms linear;
     min-width: 96px;
   }
   .colored-select-trigger:hover {
-    border-color: var(--ctx-accent, #3f7d68);
+    border-color: var(--ctx-accent, var(--accent));
   }
   /* When the selected option has a color, render the whole trigger as a
      soft-tinted pill so the status is loud at a glance. */
   .colored-select-trigger.has-color {
     background: color-mix(in srgb, var(--chip-base) 12%, white 88%);
-    border-color: color-mix(in srgb, var(--chip-base) 40%, var(--ctx-border, #cdd8d3) 60%);
+    border-color: color-mix(in srgb, var(--chip-base) 40%, var(--ctx-border, var(--border)) 60%);
   }
   :global([data-theme="dark"]) .colored-select-trigger.has-color {
     background: color-mix(in srgb, var(--chip-base) 22%, black 78%);

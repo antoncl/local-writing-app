@@ -1,5 +1,6 @@
 <script lang="ts">
   import type { RecentProject } from "./types";
+  import type { ThemePreference } from "./theme";
 
   // Null when no project is open — switcher shows "Open a project…".
   export let currentTitle: string | null;
@@ -19,6 +20,24 @@
   export let onOpenDetailTypes: () => void = () => {};
   export let onOpenProjectNode: () => void = () => {};
   export let projectOpen: boolean = false;
+  // Theme toggle. Current preference + a callback that cycles to the
+  // next one. The button shows an icon for the current state and a
+  // tooltip naming what the next click will switch to.
+  export let themePref: ThemePreference = "system";
+  export let onCycleTheme: () => void = () => {};
+
+  const THEME_GLYPH: Record<ThemePreference, string> = {
+    system: "◐",
+    light: "☀",
+    dark: "☾",
+  };
+  const THEME_NEXT_LABEL: Record<ThemePreference, string> = {
+    system: "Switch to light theme",
+    light: "Switch to dark theme",
+    dark: "Follow system theme",
+  };
+  $: themeGlyph = THEME_GLYPH[themePref];
+  $: themeNextLabel = THEME_NEXT_LABEL[themePref];
 
   let switcherOpen = false;
   let switcherButton: HTMLButtonElement | null = null;
@@ -143,6 +162,15 @@
     <button type="button" class="action-button" disabled={!projectOpen} on:click={onOpenProjectNode}>Project</button>
     <button type="button" class="action-button" disabled={!projectOpen} on:click={onOpenDetailTypes}>Detail Types</button>
     <button type="button" class="action-button" on:click={onOpenAssistants}>Assistants</button>
+    <button
+      type="button"
+      class="action-button icon-button"
+      aria-label={themeNextLabel}
+      title={themeNextLabel}
+      on:click={onCycleTheme}
+    >
+      <span aria-hidden="true">{themeGlyph}</span>
+    </button>
     <button type="button" class="action-button icon-button" aria-label="Settings" title="Settings" on:click={onOpenSettings}>
       <span aria-hidden="true">⚙</span>
     </button>

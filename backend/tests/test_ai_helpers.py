@@ -983,5 +983,88 @@ class ContextPresetTests(_HelperFixtureBase):
             render_preset(self.service, "not_a_preset")
 
 
+class ResearchNoteEntryRefTests(unittest.TestCase):
+    """`entry()` Jinja helper resolves picked research notes.
+
+    Covers slice 4 of docs/research-strategy.md: research notes
+    participate in the explicit context picker, so a context_pick input
+    that resolves to a research note must be readable as an EntryRef in
+    templates (title, body, metadata).
+    """
+
+    def setUp(self) -> None:
+        self.temp_dir = TemporaryDirectory()
+        self.root = Path(self.temp_dir.name) / "project"
+        self.service = ProjectService()
+        self.service.create_project(self.root, "Research Helper Tests")
+        # Create a research note via the structure CRUD (the route the
+        # frontend uses). Capture the leaf's note id from the returned tree.
+        tree = self.service.create_research_node(
+            CreateStructureNodeRequest(title="Lancashire mill towns", entry_type="note")
+        )
+        leaf = next(child for child in tree.root.children if child.type == "note")
+        self.note_id = leaf.scene_id
+        # Populate the note's body via save_research_note so EntryRef has
+        # content to surface.
+        from app.models import SaveResearchNoteRequest
+
+        note = self.service.read_research_note(self.note_id)
+        self.service.save_research_note(
+            self.note_id,
+            SaveResearchNoteRequest(
+                title="Lancashire mill towns",
+                body_markdown="Mills employed children from age 8.",
+                base_revision=note.revision,
+                entry_type="note",
+                metadata={"tags": ["industrial", "labor"]},
+            ),
+        )
+
+    def tearDown(self) -> None:
+        self.temp_dir.cleanup()
+
+    def test_entry_resolves_research_note_title(self) -> None:
+        env = create_environment_for_project(self.service)
+        out = render_template(
+            '{% role "user" %}{{ entry("' + self.note_id + '").title }}{% endrole %}',
+            context={},
+            env=env,
+        )
+        self.assertEqual(out.messages[0].text, "Lancashire mill towns")
+
+    def test_entry_resolves_research_note_body(self) -> None:
+        env = create_environment_for_project(self.service)
+        out = render_template(
+            '{% role "user" %}{{ entry("'
+            + self.note_id
+            + '").body_markdown }}{% endrole %}',
+            context={},
+            env=env,
+        )
+        self.assertIn("Mills employed children from age 8.", out.messages[0].text)
+
+    def test_entry_resolves_research_note_entry_type(self) -> None:
+        env = create_environment_for_project(self.service)
+        out = render_template(
+            '{% role "user" %}{{ entry("'
+            + self.note_id
+            + '").entry_type }}{% endrole %}',
+            context={},
+            env=env,
+        )
+        self.assertEqual(out.messages[0].text, "note")
+
+    def test_entry_resolves_research_note_found(self) -> None:
+        env = create_environment_for_project(self.service)
+        out = render_template(
+            '{% role "user" %}'
+            '{% if entry("' + self.note_id + '").found %}YES{% else %}NO{% endif %}'
+            "{% endrole %}",
+            context={},
+            env=env,
+        )
+        self.assertEqual(out.messages[0].text, "YES")
+
+
 if __name__ == "__main__":
     unittest.main()

@@ -39,6 +39,10 @@
   export let value: NodePickerRef[] = [];
   export let label: string = "Context";
   export let structure: StructureDocument | null = null;
+  // Research tree, sibling to `structure`. Same shape — used to enumerate
+  // research notes (leaves only; topics are organizational containers
+  // with no body to inject).
+  export let researchStructure: StructureDocument | null = null;
   export let loreEntries: LoreEntrySummary[] = [];
   export let promptEntries: PromptEntrySummary[] = [];
   export let metadataSchema: MetadataSchema | null = null;
@@ -57,7 +61,7 @@
 
   const dispatch = createEventDispatcher<{ change: { value: NodePickerRef[] } }>();
 
-  type Category = "scene" | "lore" | "snippet" | "assistant";
+  type Category = "scene" | "lore" | "snippet" | "assistant" | "research";
 
   let open = false;
   let search = "";
@@ -215,6 +219,30 @@
   $: allScenes = structure ? flattenScenes(structure.root) : [];
   $: filteredScenes = filterByTitle(allScenes, search);
 
+  // Flatten the research tree's notes (leaves) into a searchable list.
+  // Topics are organizational containers with no body — only notes are
+  // pickable as context. Mirrors flattenScenes but for note_id leaves
+  // (the model field is named `scene_id` for both trees; on disk the
+  // research tree uses `note_id` — see TreeStructureService).
+  function flattenResearchNotes(node: StructureNode | undefined): Array<{ id: string; title: string; entry_type: string }> {
+    if (!node) return [];
+    const allowed = new Set(config.entry_types?.research ?? []);
+    const out: Array<{ id: string; title: string; entry_type: string }> = [];
+    const walk = (n: StructureNode) => {
+      if (n.type === "note" && n.scene_id) {
+        if (allowed.size === 0 || allowed.has(n.type)) {
+          out.push({ id: n.scene_id, title: n.title, entry_type: n.type });
+        }
+      }
+      for (const child of n.children ?? []) walk(child);
+    };
+    walk(node);
+    return out;
+  }
+
+  $: allResearchNotes = researchStructure ? flattenResearchNotes(researchStructure.root) : [];
+  $: filteredResearchNotes = filterByTitle(allResearchNotes, search);
+
   function filterByTitle<T extends { title: string }>(items: T[], q: string): T[] {
     if (!q.trim()) return items;
     const lower = q.toLowerCase();
@@ -366,6 +394,17 @@
         })),
       );
       if (items.length > 0) groups.push({ id: "snippets", label: "Snippets", items });
+    }
+
+    if (allowedKinds.includes("research")) {
+      const items = dropExcluded(
+        filteredResearchNotes.map((n) => ({
+          ref: { id: n.id, kind: "research" as const, title: n.title, entry_type: n.entry_type },
+          tag: itemTag("research", n.entry_type),
+          monogram: itemMonogram("research", n.entry_type),
+        })),
+      );
+      if (items.length > 0) groups.push({ id: "research", label: "Research", items });
     }
 
     return groups;

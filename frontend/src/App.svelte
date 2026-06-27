@@ -5127,6 +5127,7 @@
         metadataSchema={metadataSchema}
         promptEntries={promptEntries}
         structure={structure}
+        researchStructure={researchStructure}
         loreEntries={loreEntries}
         knownTags={knownTags}
         implicitContextMatcher={implicitContextMatcher}

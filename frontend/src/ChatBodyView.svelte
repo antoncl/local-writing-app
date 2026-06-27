@@ -45,6 +45,8 @@
   export let assistantEntries: AssistantEntrySummary[] = [];
   export let loreEntries: LoreEntrySummary[] = [];
   export let structure: StructureDocument | null = null;
+  // Research tree (sibling to manuscript) — threaded to the picker.
+  export let researchStructure: StructureDocument | null = null;
   export let defaultAssistantId: string = "";
   export let implicitContextMatcher: import("./implicitContextMatcher").CompiledMatcher | null = null;
 
@@ -1018,6 +1020,7 @@
                   excludeId={null}
                   ariaLabel={input.label || input.name}
                   structure={structure}
+                  researchStructure={researchStructure}
                   loreEntries={loreEntries}
                   promptEntries={promptEntries}
                   implicitContextMatcher={implicitContextMatcher}

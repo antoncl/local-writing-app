@@ -215,7 +215,7 @@ export type PromptInputType =
 // Matches the backend convention documented in
 // docs/context-picker.md and the inline comment on models.py.
 export type NodePickerConfig = {
-  kinds?: ("scene" | "lore" | "snippet" | "assistant")[];
+  kinds?: ("scene" | "lore" | "snippet" | "assistant" | "research")[];
   entry_types?: Record<string, string[]>;   // kind -> sub-type ids
   presets?: ("full_outline" | "full_text")[];
   multiple?: boolean;
@@ -234,7 +234,7 @@ export type NodePickerConfig = {
 // target; the picker UI enforces single-selection.
 export type NodePickerRef = {
   id: string;
-  kind: "scene" | "lore" | "snippet" | "assistant" | "preset";
+  kind: "scene" | "lore" | "snippet" | "assistant" | "research" | "preset";
   title: string;
   entry_type?: string;
   target?: boolean;

@@ -50,6 +50,8 @@
   export let loreEntries: LoreEntrySummary[] = [];
   export let promptEntries: PromptEntrySummary[] = [];
   export let structure: StructureDocument | null = null;
+  // Research tree (sibling to manuscript) — threaded to the picker.
+  export let researchStructure: StructureDocument | null = null;
   export let implicitContextMatcher: import("./implicitContextMatcher").CompiledMatcher | null = null;
   export let excludeId: string | null = null;
   export let computedFieldString: (fieldId: string) => string = () => "";
@@ -257,6 +259,7 @@
                 excludeId={excludeId}
                 ariaLabel={field.name}
                 structure={structure}
+                researchStructure={researchStructure}
                 loreEntries={loreEntries}
                 promptEntries={promptEntries}
                 on:change={(event) => updateField(fieldId, field, event.detail.value)}

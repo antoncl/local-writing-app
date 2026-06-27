@@ -47,6 +47,8 @@
     | "structure_node" = "prompt";
   export let metadataSchema: MetadataSchema | null = null;
   export let structure: StructureDocument | null = null;
+  // Research tree (sibling to manuscript) — threaded to the picker.
+  export let researchStructure: StructureDocument | null = null;
   export let loreEntries: LoreEntrySummary[] = [];
   export let promptEntries: PromptEntrySummary[] = [];
   export let availableScenes: { id: string; title: string }[] = [];
@@ -697,6 +699,7 @@
                   excludeId={scene?.id ?? null}
                   ariaLabel={inputDef.label || inputDef.name}
                   structure={structure}
+                  researchStructure={researchStructure}
                   loreEntries={loreEntries}
                   promptEntries={promptEntries}
                   on:change={(event) => promptPreviewInputDrafts = {...promptPreviewInputDrafts, [inputDef.name]: event.detail.value}}

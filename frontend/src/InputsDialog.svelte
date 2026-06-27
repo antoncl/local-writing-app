@@ -31,6 +31,8 @@
   // Pass-throughs for PromptInputField
   export let metadataSchema: MetadataSchema | null = null;
   export let structure: StructureDocument | null = null;
+  // Research tree (sibling to manuscript) — threaded to the picker.
+  export let researchStructure: StructureDocument | null = null;
   export let loreEntries: LoreEntrySummary[] = [];
   export let promptEntries: PromptEntrySummary[] = [];
   export let excludeId: string | null = null;
@@ -82,6 +84,7 @@
             excludeId={excludeId}
             ariaLabel={input.label || input.name}
             structure={structure}
+            researchStructure={researchStructure}
             loreEntries={loreEntries}
             promptEntries={promptEntries}
             implicitContextMatcher={implicitContextMatcher}

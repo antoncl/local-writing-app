@@ -34,6 +34,8 @@
   export let ariaLabel: string = "";
   // In-memory data sources used by the embedded NodePicker.
   export let structure: StructureDocument | null = null;
+  // Research tree (sibling to manuscript) — threaded to the picker.
+  export let researchStructure: StructureDocument | null = null;
   export let loreEntries: LoreEntrySummary[] = [];
   export let promptEntries: PromptEntrySummary[] = [];
 
@@ -175,6 +177,7 @@
           excludeIds={pickerExcludeIds}
           label={multi || selectedRefs.length === 0 ? "Add" : "Change"}
           structure={structure}
+          researchStructure={researchStructure}
           loreEntries={loreEntries}
           promptEntries={promptEntries}
           metadataSchema={metadataSchema}

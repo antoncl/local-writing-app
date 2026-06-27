@@ -161,6 +161,8 @@ class EntryRef:
                 self._loaded = self._project.read_scene(self._id)
             elif idx_entry.kind == "prompt":
                 self._loaded = self._project.read_prompt_entry(self._id)
+            elif idx_entry.kind == "research":
+                self._loaded = self._project.read_research_note(self._id)
             else:
                 self._loaded = _MISSING
         except Exception:

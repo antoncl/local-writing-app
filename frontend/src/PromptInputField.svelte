@@ -27,6 +27,8 @@
   // Data sources for the context_pick input type. Optional — the picker
   // will degrade to "no items" when missing rather than throw.
   export let structure: StructureDocument | null = null;
+  // Research tree (sibling to manuscript) — threaded to the picker.
+  export let researchStructure: StructureDocument | null = null;
   export let loreEntries: LoreEntrySummary[] = [];
   export let promptEntries: PromptEntrySummary[] = [];
   // Optional matcher pass-through for implicit-context highlighting on
@@ -123,6 +125,7 @@
     excludeId={excludeId}
     ariaLabel={ariaLabel ?? (input.label || input.name)}
     structure={structure}
+    researchStructure={researchStructure}
     loreEntries={loreEntries}
     promptEntries={promptEntries}
     on:change={(event) => dispatch("change", { value: encodeRefValue(event.detail.value) })}
@@ -133,6 +136,7 @@
     value={decodeContextPickValue(value)}
     label={input.label || input.name || "Context"}
     structure={structure}
+    researchStructure={researchStructure}
     loreEntries={loreEntries}
     promptEntries={promptEntries}
     metadataSchema={metadataSchema}

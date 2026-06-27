@@ -32,6 +32,10 @@
   // Data sources for context_pick inputs in the prompt preview / inputs
   // dialog. Optional — the picker degrades to "no items" when missing.
   export let structure: import("./types").StructureDocument | null = null;
+  // Research tree, sibling to manuscript `structure`. Threaded through to
+  // the context picker so context_pick / entity_ref fields can target
+  // research notes.
+  export let researchStructure: import("./types").StructureDocument | null = null;
   export let loreEntries: import("./types").LoreEntrySummary[] = [];
   export let knownTags: import("./types").ScopedTag[] = [];
   // Optional matcher pass-through for the implicit-context highlight
@@ -708,6 +712,7 @@
       loreEntries={loreEntries}
       promptEntries={promptEntries}
       structure={structure}
+      researchStructure={researchStructure}
       implicitContextMatcher={implicitContextMatcher}
       excludeId={scene?.id ?? null}
       computedFieldString={computedFieldString}
@@ -809,6 +814,7 @@
       {documentKind}
       {metadataSchema}
       {structure}
+      {researchStructure}
       {loreEntries}
       {promptEntries}
       {availableScenes}
@@ -851,6 +857,7 @@
       {assistantEntries}
       {loreEntries}
       {structure}
+      {researchStructure}
       {defaultAssistantId}
       {implicitContextMatcher}
       on:body-change={emitChange}
@@ -923,6 +930,7 @@
     estimate={inputsDialogEstimate}
     metadataSchema={metadataSchema}
     structure={structure}
+    researchStructure={researchStructure}
     loreEntries={loreEntries}
     promptEntries={promptEntries}
     excludeId={scene?.id ?? null}

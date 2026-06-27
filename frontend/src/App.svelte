@@ -115,6 +115,9 @@
     // ignored for other kinds. Persisted in the entry's YAML on save.
     draftInputs: PromptInputDefinition[];
     saving: boolean;
+    // True for ~2s after a successful save so the pane chip can briefly
+    // show "Saved". Reset whenever the pane becomes dirty again.
+    recentlySaved: boolean;
   };
 
   type ConfirmationState = {
@@ -601,6 +604,7 @@
       draftMetadata: {},
       draftInputs: [],
       saving: false,
+      recentlySaved: false,
     };
   }
 
@@ -2844,6 +2848,7 @@
               draftEntryType: node.entry_type,
               draftMetadata: cloneMetadata(node.metadata),
               saving: false,
+              recentlySaved: false,
             }
           : pane,
       );
@@ -2885,6 +2890,7 @@
             draftEntryType: scene.entry_type,
             draftMetadata: cloneMetadata(scene.metadata),
             saving: false,
+            recentlySaved: false,
           }
         : pane,
     );
@@ -2952,6 +2958,7 @@
             draftEntryType: scene.entry_type,
             draftMetadata: cloneMetadata(scene.metadata),
             saving: false,
+            recentlySaved: false,
           }
         : pane,
     );
@@ -3041,6 +3048,7 @@
             draftEntryType: "chat_session",
             draftMetadata: {},
             saving: false,
+            recentlySaved: false,
           }
         : pane,
     );
@@ -3076,6 +3084,7 @@
             draftMetadata: cloneMetadata(entry.metadata),
             draftInputs: JSON.parse(JSON.stringify(entry.inputs ?? [])),
             saving: false,
+            recentlySaved: false,
           }
         : pane,
     );
@@ -3117,6 +3126,7 @@
             draftEntryType: entry.entry_type,
             draftMetadata: cloneMetadata(entry.metadata),
             saving: false,
+            recentlySaved: false,
           }
         : pane,
     );
@@ -3165,6 +3175,7 @@
             draftEntryType: entry.entry_type,
             draftMetadata: cloneMetadata(entry.metadata),
             saving: false,
+            recentlySaved: false,
           }
         : pane,
     );
@@ -3288,14 +3299,60 @@
     return pane;
   }
 
+  // Auto-save: per-pane debounce. Each pane's pending timer lives in
+  // autoSaveTimers; rescheduled on every draft change, cancelled on
+  // manual save / pane teardown. Chats persist per-turn from inside
+  // ChatBodyView, so they skip the timer entirely.
+  const AUTO_SAVE_IDLE_MS = 6000;
+  const SAVED_INDICATOR_MS = 2000;
+  const autoSaveTimers = new Map<string, ReturnType<typeof setTimeout>>();
+  const savedIndicatorTimers = new Map<string, ReturnType<typeof setTimeout>>();
+
+  function cancelAutoSave(id: string) {
+    const timer = autoSaveTimers.get(id);
+    if (timer !== undefined) {
+      clearTimeout(timer);
+      autoSaveTimers.delete(id);
+    }
+  }
+
+  function scheduleAutoSave(id: string) {
+    cancelAutoSave(id);
+    const pane = editorPanes.find((candidate) => candidate.id === id);
+    if (!pane?.dirty || pane.saving) return;
+    if (pane.document?.type === "chat") return;
+    const timer = setTimeout(() => {
+      autoSaveTimers.delete(id);
+      const current = editorPanes.find((candidate) => candidate.id === id);
+      if (!current?.dirty || current.saving) return;
+      if (current.document?.type === "chat") return;
+      void run(() => saveEditorPane(id));
+    }, AUTO_SAVE_IDLE_MS);
+    autoSaveTimers.set(id, timer);
+  }
+
+  function flashSavedIndicator(id: string) {
+    const existing = savedIndicatorTimers.get(id);
+    if (existing !== undefined) clearTimeout(existing);
+    const timer = setTimeout(() => {
+      savedIndicatorTimers.delete(id);
+      editorPanes = editorPanes.map((pane) =>
+        pane.id === id ? { ...pane, recentlySaved: false } : pane,
+      );
+    }, SAVED_INDICATOR_MS);
+    savedIndicatorTimers.set(id, timer);
+  }
+
   function updateEditorPaneDraft(id: string, title: string, bodyMarkdown: string, status: string, entryType: string, metadata: EntryMetadata, inputs?: PromptInputDefinition[]) {
     editorPanes = editorPanes.map((pane) => {
       if (pane.id !== id) return pane;
       const nextInputs = inputs ?? pane.draftInputs;
+      const nextDirty = isEditorPaneDirty(pane.scene, title, bodyMarkdown, status, entryType, metadata, nextInputs);
       return {
         ...pane,
-        dirty:
-          isEditorPaneDirty(pane.scene, title, bodyMarkdown, status, entryType, metadata, nextInputs),
+        dirty: nextDirty,
+        // New edits invalidate any "Saved" feedback still on screen.
+        recentlySaved: nextDirty ? false : pane.recentlySaved,
         draftTitle: title,
         draftMarkdown: bodyMarkdown,
         draftStatus: status,
@@ -3304,6 +3361,7 @@
         draftInputs: JSON.parse(JSON.stringify(nextInputs ?? [])),
       };
     });
+    scheduleAutoSave(id);
   }
 
   function cloneMetadata(metadata: EntryMetadata) {
@@ -3409,6 +3467,12 @@
   }
 
   function tearDownEditorPane(id: string) {
+    cancelAutoSave(id);
+    const savedIndicatorTimer = savedIndicatorTimers.get(id);
+    if (savedIndicatorTimer !== undefined) {
+      clearTimeout(savedIndicatorTimer);
+      savedIndicatorTimers.delete(id);
+    }
     const remainingEditorPanes = editorPanes.filter((candidate) => candidate.id !== id);
     editorPanes = remainingEditorPanes;
     const { [id]: _closedTodos, ...remainingEmbeddedTodos } = embeddedTodosByPane;
@@ -3432,6 +3496,7 @@
     // PUT /api/nodes/{id} path; the pane's draft-* fields aren't the
     // source of truth for chat state. Treat saveEditorPane as a no-op.
     if (documentKind === "chat") return;
+    cancelAutoSave(id);
     setEditorPaneSaving(id, true);
     try {
       const draftDocument = {
@@ -3476,9 +3541,11 @@
               draftEntryType: savedDocument.entry_type,
               draftMetadata: cloneMetadata(savedDocument.metadata),
               saving: false,
+              recentlySaved: true,
             }
           : candidate,
       );
+      flashSavedIndicator(id);
       if (documentKind === "lore") {
         await refreshLoreEntries();
         await refreshKnownTags();
@@ -4769,19 +4836,13 @@
           {/if}
         </h2>
         <div class="pane-header-actions">
-          {#if editorPane.dirty}
+          {#if editorPane.saving}
+            <span class="pane-status">Saving…</span>
+          {:else if editorPane.dirty}
             <span class="pane-status">Unsaved</span>
+          {:else if editorPane.recentlySaved}
+            <span class="pane-status pane-status-saved">Saved</span>
           {/if}
-          <button
-            class="pin-button"
-            type="button"
-            disabled={editorPane.saving || !editorPane.dirty}
-            title={editorPane.saving ? "Saving this document" : "Save this document"}
-            on:mousedown={(event) => event.stopPropagation()}
-            on:click={() => run(() => saveEditorPane(editorPane.id))}
-          >
-            {editorPane.saving ? "Saving" : "Save"}
-          </button>
           <button
             class="pin-button danger"
             type="button"

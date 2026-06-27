@@ -428,6 +428,9 @@ h3 {
   text-overflow: ellipsis;
   white-space: nowrap;
 }
+.pane-status-saved {
+  color: #3a7d4c;
+}
 
 .pane-header-actions {
   display: flex;

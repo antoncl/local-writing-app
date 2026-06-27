@@ -1,262 +1,142 @@
-# Context Picker — Design Note
+# Context Picker — Howto
 
-## Problem
+Give a prompt its own **+ Reference** button (or several) that opens a constrained menu of the kinds of nodes the author allows. The author decides what's pickable; the writer just picks. Each `context_pick` input is addressed in the template the same way every other input is — `{{ input.<name> }}` — so one prompt can have a "characters to remember" picker, a "scenes to summarize" picker, and a "preset to attach" picker side by side.
 
-The current chat composer has a single global "+ Context" button that lets
-the user attach scenes / lore / snippets / presets (full outline, full
-text) to the active chat session. The picker is unconstrained — the
-prompt author has no way to say "this prompt expects only character
-refs" or "this prompt should only see scene summaries." Two costs:
+## What it gives you
 
-- **Author intent is invisible.** A prompt designed to operate on
-  characters has to validate or coerce in the template (or just hope).
-- **Runtime UX is generic.** Every prompt sees the same multi-step
-  Presets → Browse → Scenes/Lore/Snippets menu, regardless of what it
-  actually needs.
+- A new input type **`context_pick`** that sits alongside `text`, `long_text`, `select`, `entity_ref`, etc. in the prompt's Inputs editor.
+- **Constraint at the source** — the author checks which kinds (Scene, Lore, Snippet, Assistant) and which sub-types per kind, plus optional presets (Full Outline / Full Novel Text), and the runtime picker offers exactly that.
+- The **same picker UI is reused for `entity_ref` metadata fields**, with the same config shape. One vocabulary for both surfaces.
+- Picked items render as **chips** in the composer. Click `×` to drop one. Reopen the picker to add more (unless `multiple: false`).
+- Optional **★ target marking** — when enabled, the author can pick several scenes then iterate with ★ moving between them across invocations. Same prompt, N runs against N scenes.
 
-Inspiration: Novel Crafter's per-prompt "Context selection" panel lets
-the author check the allowed kinds + sub-types + treatment, and the
-runtime picker reflects that constraint.
+## When to use it
 
-## Scope (v1)
+- **`text` / `long_text` / `select`** — free-form or fixed-vocabulary values the user types or picks. Good for inputs the prompt treats as **strings**.
+- **`entity_ref` / `entity_ref_list`** — one specific named ref ("the protagonist of this prompt"). Good for inputs the prompt treats as **a single named entity** (or list of one kind).
+- **`context_pick`** — a heterogeneous pile of refs ("stuff the model should know about"). Good for **author-constrained, runtime-chosen context bundles** — possibly mixing scenes + lore + presets in one button.
 
-In scope:
+Rule of thumb: if you want one named character → `entity_ref`. If you want "let me toss in whatever's relevant" → `context_pick`.
 
-- A new prompt input type `context_pick`, sitting alongside `text`,
-  `long_text`, `select`, `entity_ref`, `entity_ref_list`, etc. in
-  `PromptInputDefinition`.
-- Per-input author config: which kinds are pickable, which sub-types
-  per kind, which presets are pickable, multiplicity, button label.
-- Runtime surfaces: a composer button (`+ <label>`) per `context_pick`
-  input on the active prompt, AND an entry in the initial inputs
-  dialog (so the user can pre-pick before sending the first message).
-- Template binding via the existing inputs namespace: `{{ input.<name> }}`
-  exposes a list of `EntryRef`-like objects.
-- The legacy chat-level freeform `+ Context` button **goes away**.
-  Existing chat sessions with `chatContextItems` still render their
-  items (read-only), but the only way to add new context is via a
-  prompt-declared `context_pick` input.
-- Extraction of the picker UI into its own Svelte component, freeing
-  ~200 lines from `App.svelte`.
+## Set up a prompt with a context picker
 
-Out of scope (v2 or later):
+1. Open **Prompts** in the top bar and edit (or create) a prompt.
+2. In the **Inputs** editor, click **+ Input**.
+3. Set the input's **Label** (e.g. "Reference scenes"), **Id** (e.g. `reference_scenes` — the template will say `input.reference_scenes`), and **Type** to **context_pick**.
+4. The row expands. Configure:
+   - **Kinds** — check Scene / Lore / Snippet / Assistant. At least one is required (a picker with nothing pickable is a bug, not a config).
+   - **Sub-types** — under each checked kind, optionally restrict to specific sub-types (e.g. Lore → only Character + Location). Leave all checked to allow any sub-type of that kind.
+   - **Presets** — check Full Outline / Full Novel Text if the picker should offer them as one-click attachments.
+   - **Multiple** — leave on for "pick several" (the default). Turn off for single-pick.
+   - **Allow target marking** — only available when scenes are pickable. See [Scene binding](#scene-binding-target-marking) below.
+5. **Required** — if checked, the runtime won't fire the prompt until something is picked.
+6. Save.
 
-- **Treatment toggles per type.** "Full text vs Summary" is a
-  render-time concern; the template author chooses via existing
-  helpers (`scene.body_markdown` vs `scene.summary`). No picker-side
-  default in v1.
-- **Per-item treatment at pick time.** Same reasoning.
-- **Cross-prompt context inheritance** (e.g. a snippet that brings its
-  own context picker when included via Jinja).
-- **Free-form text fallback** (NC's "Custom content" radio).
+## How it appears to the user
 
-## Data model
+When the prompt is bound to a chat:
 
-`PromptInputDefinition` (in [models.py](../backend/app/models.py:140))
-gets a new `type` literal value and uses the existing `target` slot
-to carry the picker config:
+- **Composer strip** — one **+ <Label>** button per `context_pick` input on the active prompt. Click to open the constrained menu.
+- **Picker menu** —
+  - **Presets** section (if any allowed): one button per preset.
+  - **Browse** section: one expandable group per allowed kind, with a search box if the group has more than ~20 items.
+- **Chips** — each picked item shows above the message textarea. Click `×` to drop one.
+- **Initial inputs dialog** — if the user picks the prompt fresh (vs invoking via `/slash` with positional args), the dialog renders one row per declared input, including the button-and-chips row for each `context_pick`. Picked values seed the chat — no need to reopen the picker after the first turn.
 
-```python
-class PromptInputDefinition(BaseModel):
-    name: str
-    type: Literal[
-        "text", "long_text", "number", "boolean", "select",
-        "entity_ref", "entity_ref_list",
-        "context_pick",                    # NEW
-    ]
-    label: str | None = None
-    default: Any = None
-    options: list[str] = []
-    required: bool = False
-    target: dict[str, Any] | None = None   # see ContextPickConfig below
+If you set **Multiple** to off, the menu closes after one pick and any prior pick is replaced.
 
+## Use it in your template
 
-# Shape carried in `target` when type == "context_pick".
-class ContextPickConfig(BaseModel):
-    kinds: list[Literal["scene", "lore", "snippet", "assistant"]] = []
-    entry_types: dict[str, list[str]] = {}   # kind -> list of sub-type ids
-    presets: list[Literal["full_outline", "full_text"]] = []
-    multiple: bool = True
-```
+Picked items expose as a list under `{{ input.<name> }}`. The template iterates:
 
-Why `target` instead of a new field: it's already the rich-config slot
-on `PromptInputDefinition`, currently used by `entity_ref` /
-`entity_ref_list` to carry `{kind, entry_type}`. Reusing it keeps the
-schema flat and avoids a Pydantic union dance.
-
-**Validation rules**:
-
-- At least one of `kinds` or `presets` must be non-empty (a picker
-  with nothing pickable is a bug, not a configuration).
-- `entry_types[kind]` is only meaningful when `kind` is in `kinds`.
-- Sub-type ids in `entry_types[kind]` must exist in the project's
-  schema (validated at save time, soft-warned at runtime since project
-  schema may have changed since the prompt was authored).
-
-## Runtime behaviour
-
-Two surfaces in the chat panel:
-
-**1. Initial inputs dialog** (when the user picks a prompt).
-The existing inputs dialog ([App.svelte:1385+](../frontend/src/App.svelte:1385))
-already iterates declared inputs and renders a `PromptInputField` per
-row. For `context_pick`, the field renders as a button (`+ <label>`)
-plus chips for any already-picked items. Clicking the button opens
-the constrained picker menu.
-
-**2. Composer buttons** (any time after the chat starts).
-For each `context_pick` input on the active prompt, render one button
-in the composer strip with the input's label. Clicking it opens the
-same picker. Picked items render as chips above the message textarea
-(reusing the existing `.chat-context-chips` styling).
-
-Both surfaces read from and write to the same storage: the input's
-value, which is a list of `EntryRef`s. Editing in one surface is
-visible in the other.
-
-**Storage**: chat sessions persist input values exactly the way the
-inputs dialog already does. No new storage layer.
-
-## Picker menu
-
-When a `context_pick` button is clicked, the menu shows:
-
-- **Presets** section (if `presets` is non-empty): one button per
-  allowed preset, labelled by the preset's display name.
-- **Browse** section: one expandable group per allowed `kind`, listing
-  the project's entries of that kind, filtered by `entry_types[kind]`
-  when set. Search box if the group has > 20 items.
-
-If `multiple: false`, the menu closes after one pick and any prior
-pick is replaced.
-
-Picked items can be removed from the chip strip via an "×" button
-(matching current behaviour).
-
-## Template binding
-
-Picked items expose as `{{ input.<name> }}` — a list of refs the
-template iterates and renders as it sees fit:
-
-```jinja2
+```jinja
 {% for item in input.reference_scenes %}
-  Scene {{ item.title }}:
-  {{ item.summary }}
-{% endfor %}
+## {{ item.title }}
+{{ scene(item.id).body_markdown }}
 
-{% for char in input.characters_involved %}
-  - {{ char.title }} ({{ char.aliases | join(", ") }})
 {% endfor %}
 ```
 
-Presets remain functions on the template helpers — picking the
-"Full Outline" preset is equivalent to the template calling
-`{{ full_outline() }}` itself. To avoid double-rendering, the picker
-exposes presets as `{type: "preset", id: "full_outline"}` refs; the
-template can either iterate via `input.<name>` and dispatch, or call
-the helpers directly. **Recommendation**: presets are rendered by the
-input loop (`{% for item in input.x %}{% if item.type == "preset" %}{{ render_preset(item.id) }}{% else %}…{% endif %}`),
-not by the template author calling helpers separately. Keeps the user's
-pick reflected in the render.
+For mixed pickers (scenes + lore + presets), each item carries `kind` + `type` you can dispatch on:
 
-**Memory note**: refs carry `{kind, id, type, title}` — no body
-content. Materialization happens server-side at render time via
-existing helpers. Picking "Full Novel Text" doesn't pull every scene's
-body into the chat session; it stores one preset ref, and
-`full_text()` iterates scene files when the template renders.
+```jinja
+{% for item in input.references %}
+  {% if item.kind == "preset" and item.id == "full_outline" %}
+{{ full_outline() }}
+  {% elif item.kind == "lore" %}
+### {{ item.title }}
+{{ lore(item.id).body_markdown }}
+  {% elif item.kind == "scene" %}
+{{ scene(item.id).body_markdown }}
+  {% endif %}
+{% endfor %}
+```
 
-## Author UI (config row)
+**Memory note**: picked refs carry only `{kind, id, type, title}` — no body content. Materialization happens server-side when the template renders, via the existing helpers (`scene()`, `lore()`, `full_outline()`, `full_text()`). Picking "Full Novel Text" stores one preset ref, not the prose — the helper iterates scene files at render time.
 
-The Inputs editor in DocumentEditorPane currently renders one row per
-declared input with type dropdown, label, default, etc. For
-`context_pick` the row expands to show:
+## Scene binding (target marking)
 
-- **Kinds**: checkbox list (Scene / Lore / Snippet / Assistant).
-- **Sub-types**: nested under each checked kind, a sub-checkbox per
-  sub-type from the project schema. Default = all sub-types allowed.
-- **Presets**: checkbox list (Full Outline / Full Novel Text).
-- **Allow multiple picks**: checkbox (default true).
+Enable **Allow target marking** in the input config — only available when scenes are pickable. When on:
 
-Display label and required flag come from the standard input row
-fields (already there).
+- Picked scene chips show **☆ / ★** indicators.
+- The user marks one scene as the **target** by clicking ★. Clicking ★ on another scene moves the mark (single ★ per input).
+- The marked scene wins over the caller's default scene (the editor's open scene). The template sees it as `{{ scene }}` — `scene.body_markdown`, `scene.title`, and the scene helpers all resolve to the marked one.
 
-## Component extraction
+**Canonical use case** — the McKee-style evaluator: one prompt with a single `context_pick` input, **Multiple: on** + **Allow target marking: on**. Pick 8 scenes you want to evaluate, then iterate: ★ scene 1 → render → notes; move ★ to scene 2 → render → notes; etc. One prompt, eight runs, no leaving the picker.
 
-Two new Svelte components, extracted from `App.svelte`:
+For Continuation / Revise prompts the editor's open scene is the default `scene` binding — marking via context_pick is purely an override. For General prompts (no implicit scene), marking is the only way to bind a scene at all.
 
-- `frontend/src/ContextPicker.svelte` — the runtime button + menu.
-  Takes a `ContextPickConfig` + current value, emits change. Replaces
-  the ~200-line inline `.chat-context-menu` block at
-  [App.svelte:4701-4756](../frontend/src/App.svelte:4701).
-- `frontend/src/ContextPickConfigEditor.svelte` — the author-time
-  config row, used inside the Inputs editor when type ===
-  "context_pick". New surface.
+## Same widget for metadata fields
 
-`App.svelte` keeps the composer-level wiring (rendering one
-`ContextPicker` per `context_pick` input on the active prompt) but
-sheds the menu internals.
+`entity_ref` and `entity_ref_list` **metadata fields** use the exact same picker — same kinds + sub-types + multiple config. In the schema editor, opening an entity_ref field reveals the same picker config UI (just without the row-level chrome: no label / required toggle / type select, since the field already owns those).
 
-## Migration
+The wire-format field name differs by surface:
 
-**Existing chat sessions** with legacy `chatContextItems` (the flat
-session-level context list): keep the items visible in the chat
-context chip strip; render them in the template via a synthetic
-fallback (`{{ chat.legacy_context }}` or similar — TBD whether worth
-the complexity). If we drop legacy rendering entirely, surface a
-one-time warning per session: "Legacy context items are no longer
-sent — re-attach via a prompt's context picker."
+- On `PromptInputDefinition` (prompts) the config sits on `target`.
+- On `MetadataFieldDefinition` (metadata) the config sits on `picker_config`.
 
-**Existing prompts**: no schema change — `PromptInputDefinition.target`
-already accepts a dict. New prompts opt into `context_pick`; old
-prompts are unaffected.
+Same `NodePickerConfig` shape underneath; the UI handles both.
 
-**Existing entity_ref / entity_ref_list inputs**: stay as-is.
-`context_pick` is additive. The two have different intent:
+## Inputs reference
 
-- `entity_ref` = "this is the specific protagonist for this prompt"
-  (named, often required, single ref).
-- `entity_ref_list` = "these are the named allies" (named list of
-  refs of one kind).
-- `context_pick` = "stuff the model should know about" (heterogeneous,
-  optional, includes presets).
+The wire shape of a `context_pick` input as stored in the prompt's YAML:
 
-## Files touched (estimated)
+```yaml
+- name: reference_scenes              # macro key: {{ input.reference_scenes }}
+  type: context_pick
+  label: "Reference scenes"
+  required: true
+  target:
+    kinds: ["scene"]                  # at least one required
+    entry_types:                      # optional, per kind
+      lore: ["character", "place"]
+    presets: ["full_outline"]         # optional
+    multiple: true                    # default true
+    allow_target_marking: true        # default false; only when scenes pickable
+```
 
-New:
+Picked-item shape (what the template iterates):
 
-- `frontend/src/ContextPicker.svelte` — runtime
-- `frontend/src/ContextPickConfigEditor.svelte` — author-time
+```yaml
+- kind: scene
+  id: scene_abc
+  type: scene                         # the sub-type (e.g. "scene", "chapter")
+  title: "The Causeway"
+- kind: preset
+  type: preset
+  id: full_outline
+  title: "Full Outline"
+- target: true                        # marked-target flag, when target-marking on
+  kind: scene
+  id: scene_xyz
+  type: scene
+  title: "The Reckoning"
+```
 
-Modified:
+## Caveats
 
-- `backend/app/models.py` — add `context_pick` to `PromptInputType`;
-  optionally add `ContextPickConfig` validation
-- `backend/app/services/ai/preview.py` (or sibling) — when rendering,
-  ensure `input.<name>` for `context_pick` deserializes to a list of
-  refs that the template can iterate
-- `frontend/src/types.ts` — `PromptInputType` add `context_pick`
-- `frontend/src/PromptInputField.svelte` — dispatch to
-  `ContextPicker` for the new type
-- `frontend/src/DocumentEditorPane.svelte` — Inputs editor surfaces
-  the new config row when type is `context_pick`
-- `frontend/src/App.svelte` — strip the legacy `+ Context` menu;
-  render one `ContextPicker` per `context_pick` input on the active
-  prompt in the composer
-
-## Open questions for v2
-
-- **Treatment defaults per type** (NC's toggle). Add to
-  `ContextPickConfig` as `treatment_defaults: dict[str, str]`. Picker
-  config carries hints; template helpers consult them. Defer until
-  template authors ask.
-- **Per-item treatment at pick time.** Probably never — author + helper
-  combo covers it.
-- **Cross-prompt context inheritance** via snippet inclusion. If
-  snippet S declares a `context_pick` input and prompt P
-  `{% include S %}`s it, do P's runtime composers get S's picker?
-  Would need a render-time scan for included snippets to extract their
-  inputs.
-- **Free-form text fallback** (NC's "Custom content" radio). Could
-  layer on as a `context_pick` config option `allow_custom: true` that
-  adds a "Type custom content…" item at the bottom of the picker
-  menu. Defer.
+- **Legacy chat-level `+ Context` is gone.** Old chat sessions with pre-`context_pick` `chatContextItems` still render their items (read-only). Add new context by binding a prompt that declares a `context_pick` input.
+- **Sub-types reference the project schema by id.** If you rename a sub-type after authoring a prompt that whitelisted it, the picker silently drops it from the allowed set. Re-open the input config and re-check.
+- **Presets are server-side helpers.** Picking "Full Novel Text" doesn't pull every scene into the chat session — it stores one preset ref, and `full_text()` iterates at render time. No memory cost.
+- **Per-item treatment ("full text vs summary") is not in the picker** — that's a render-time concern. The template author picks via the helpers (`scene.body_markdown` vs `scene.summary`).
+- **Group related kinds into one picker** rather than declaring three separate `context_pick` inputs if they conceptually pick "the same kind of thing" — three pickers = three composer buttons.

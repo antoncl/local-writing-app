@@ -34,6 +34,23 @@ if TYPE_CHECKING:
 
 VALID_PARTITIONS = {"all", "stable", "volatile"}
 
+# Per-entry context policy. Default "auto" preserves the pre-policy
+# alias-match behavior for every entry that omits the field.
+#   - "always":      pulled into every implicit-mode render
+#   - "auto":        textual alias match (current default)
+#   - "manual_only": skipped by the matcher; explicit picker only
+#   - "never":       hidden from picker and matcher
+VALID_CONTEXT_POLICIES = {"always", "auto", "manual_only", "never"}
+DEFAULT_CONTEXT_POLICY = "auto"
+
+
+def _entry_context_policy(summary: Any) -> str:
+    """Read the entry's context_policy metadata, clamped to a known value."""
+    policy = _get_field(summary, "context_policy")
+    if isinstance(policy, str) and policy in VALID_CONTEXT_POLICIES:
+        return policy
+    return DEFAULT_CONTEXT_POLICY
+
 # Word splitter — same shape as project_service.WORD_PATTERN. Splitting on
 # whitespace is a fine approximation for `last_words`.
 _WS = re.compile(r"\s+")
@@ -571,8 +588,10 @@ def _relevant_lore(
     if mode == "explicit":
         ids = sorted(direct)
     else:
-        # implicit: alias scan + one-hop expansion
-        found = set(direct)
+        # implicit: always-included + direct refs + alias scan + one-hop
+        # Always-included entries (context_policy = "always") feed every
+        # implicit render regardless of mention.
+        found = set(direct) | _always_included_lore_ids(project)
         if journal is None:
             # No chat-session journal — helper is the producer of detected
             # context (one-shot generates, preview, tests). Run the textual
@@ -602,6 +621,13 @@ def _relevant_lore(
         if journal is None:
             expanded |= _textual_one_hop(project, found)
         ids = sorted(expanded)
+
+    # Chokepoint filter: drop any "never"-policy entries that may have
+    # arrived via explicit refs or structural expansion. "Never" means
+    # truly excluded everywhere — single source of authority for that rule.
+    never_ids = _never_lore_ids(project)
+    if never_ids:
+        ids = [eid for eid in ids if eid not in never_ids]
 
     if session is None or partition == "all":
         if session is not None:
@@ -637,7 +663,13 @@ def _snapshot_revisions(
 
 
 def _alias_match(project: "ProjectService", text: str) -> set[str]:
-    """Return lore IDs whose title or aliases appear as words in `text`."""
+    """Return lore IDs whose title or aliases appear as words in `text`.
+
+    Honors `context_policy`: entries marked `manual_only` or `never` are
+    skipped here — the matcher only ever pulls in `auto` (default) entries.
+    `always`-policy entries are surfaced by `_always_included_lore_ids`,
+    not here.
+    """
     try:
         listing = project.list_lore_entries()
     except Exception:
@@ -646,6 +678,8 @@ def _alias_match(project: "ProjectService", text: str) -> set[str]:
     words = set(re.findall(r"[a-z0-9'-]+", haystack_lower))
     matched: set[str] = set()
     for summary in listing.entries:
+        if _entry_context_policy(summary) != "auto":
+            continue
         candidates: list[str] = []
         title = _attr_or_item(summary, "title")
         if isinstance(title, str):
@@ -660,6 +694,35 @@ def _alias_match(project: "ProjectService", text: str) -> set[str]:
                     matched.add(entry_id)
                 break
     return matched
+
+
+def _always_included_lore_ids(project: "ProjectService") -> set[str]:
+    """Return lore IDs whose context_policy is `always`. Used by
+    `_relevant_lore` in implicit mode to union in entries the author has
+    pinned as project-wide context (world rules, magic system primer, etc.)."""
+    return _lore_ids_with_policy(project, "always")
+
+
+def _never_lore_ids(project: "ProjectService") -> set[str]:
+    """Return lore IDs whose context_policy is `never`. These are excluded
+    from every assembly path — implicit matcher, explicit ref, structural
+    expansion. The author has said 'don't put this in front of the model.'"""
+    return _lore_ids_with_policy(project, "never")
+
+
+def _lore_ids_with_policy(project: "ProjectService", policy: str) -> set[str]:
+    try:
+        listing = project.list_lore_entries()
+    except Exception:
+        return set()
+    ids: set[str] = set()
+    for summary in listing.entries:
+        if _entry_context_policy(summary) != policy:
+            continue
+        entry_id = _attr_or_item(summary, "id")
+        if entry_id:
+            ids.add(entry_id)
+    return ids
 
 
 def _textual_one_hop(

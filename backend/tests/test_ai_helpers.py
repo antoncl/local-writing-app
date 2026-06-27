@@ -480,6 +480,101 @@ class RelevantLoreHelperTests(_HelperFixtureBase):
         self.assertEqual(out.messages, [])
 
 
+class ContextPolicyTests(_HelperFixtureBase):
+    """Per-entry context_policy: always / auto (default) / manual_only / never."""
+
+    def _set_policy(self, entry_id: str, policy: str) -> None:
+        existing = self.service.read_lore_entry(entry_id)
+        metadata = dict(existing.metadata)
+        metadata["context_policy"] = policy
+        self.service.save_lore_entry(
+            entry_id,
+            SaveLoreEntryRequest(
+                title=existing.title,
+                body_markdown=existing.body_markdown,
+                base_revision=existing.revision,
+                entry_type=existing.entry_type,
+                metadata=metadata,
+            ),
+        )
+
+    def _render_scene_one(self) -> str:
+        scene_one = self.service.read_scene(self.scene_one_node.scene_id)
+        env = create_environment_for_project(self.service)
+        out = render_template(
+            '{% role "user" %}{{ relevant_lore(scene) }}{% endrole %}',
+            context={"scene": scene_one},
+            env=env,
+        )
+        return out.messages[0].text if out.messages else ""
+
+    def test_always_policy_unioned_into_implicit_render(self) -> None:
+        # A character that's NOT referenced by scene_one and whose name is
+        # NOT in the summary. Default would be excluded; "always" pulls in.
+        pavel = self._make_lore(
+            title="Pavel Young",
+            entry_type="character",
+            metadata={"aliases": []},
+            body="Captain who hates Honor.",
+        )
+        # Sanity: default policy → not in implicit render
+        baseline = self._render_scene_one()
+        self.assertNotIn('name="Pavel Young"', baseline)
+        # Flip to always → appears
+        self._set_policy(pavel["id"], "always")
+        self.assertIn('name="Pavel Young"', self._render_scene_one())
+
+    def test_manual_only_policy_skipped_by_alias_match(self) -> None:
+        # Mention "Manticore" alias "Star Kingdom" in scene_one's summary.
+        # Default auto would pull Manticore in. manual_only must not.
+        self._update_scene(
+            self.scene_one_node.scene_id,
+            title="The Departure",
+            entry_type="scene",
+            metadata={
+                "summary": "Honor takes the Salamander into Star Kingdom space.",
+                "characters": [self.honor["id"]],
+            },
+            body="Scene one body.",
+        )
+        # Baseline (auto): Manticore appears via alias
+        self.assertIn('name="Manticore"', self._render_scene_one())
+        # Switch to manual_only: alias-match must skip
+        self._set_policy(self.manticore["id"], "manual_only")
+        self.assertNotIn('name="Manticore"', self._render_scene_one())
+
+    def test_manual_only_appears_via_explicit_ref(self) -> None:
+        # manual_only still respects explicit picks. Ref Manticore via a
+        # `locations` entity_ref_list on scene_one.
+        self._set_policy(self.manticore["id"], "manual_only")
+        self._update_scene(
+            self.scene_one_node.scene_id,
+            title="The Departure",
+            entry_type="scene",
+            metadata={
+                "summary": "Honor takes the Salamander into battle.",
+                "characters": [self.honor["id"]],
+                "locations": [self.manticore["id"]],
+            },
+            body="Scene one body.",
+        )
+        self.assertIn('name="Manticore"', self._render_scene_one())
+
+    def test_never_policy_excluded_even_via_explicit_ref(self) -> None:
+        # Honor is referenced via scene_one's `characters` field. Marking
+        # Honor as "never" must still exclude her from the render.
+        self.assertIn('name="Honor Harrington"', self._render_scene_one())
+        self._set_policy(self.honor["id"], "never")
+        self.assertNotIn('name="Honor Harrington"', self._render_scene_one())
+
+    def test_default_policy_preserves_alias_match(self) -> None:
+        # Unset / unknown policy values fall back to auto. Confirm that
+        # an entry with no policy key still alias-matches as before.
+        text = self._render_scene_one()
+        self.assertIn('name="Honor Harrington"', text)
+        self.assertIn('name="Nimitz"', text)
+
+
 class SessionPartitionTests(_HelperFixtureBase):
     def setUp(self) -> None:
         super().setUp()

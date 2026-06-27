@@ -225,9 +225,13 @@
   // when set. Empty filter = all sub-types allowed.
   $: loreGroups = (() => {
     const allowed = new Set(config.entry_types?.lore ?? []);
-    const visible = loreEntries.filter((entry) =>
-      allowed.size === 0 ? true : allowed.has(entry.entry_type),
-    );
+    const visible = loreEntries.filter((entry) => {
+      // context_policy = "never" hides the entry from every explicit
+      // picker. The entry still exists (browsable in the Lore pane);
+      // it just can't be selected as context here.
+      if (entry.metadata?.context_policy === "never") return false;
+      return allowed.size === 0 ? true : allowed.has(entry.entry_type);
+    });
     const filtered = filterByTitle(visible, search);
     const byType: Record<string, LoreEntrySummary[]> = {};
     for (const entry of filtered) {

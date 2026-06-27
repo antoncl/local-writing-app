@@ -154,11 +154,13 @@ DEFAULT_METADATA_SCHEMA: dict[str, Any] = {
         "lore_entry": {
             # Abstract base for every lore kind — carries the fields every
             # entry shares (aliases for matching, tags for filtering,
-            # related_entries for cross-links, color for per-entry tint).
+            # related_entries for cross-links, color for per-entry tint,
+            # context_policy for how the implicit / explicit context layers
+            # treat the entry).
             "name": "Entry",
             "kind": "lore",
             "abstract": True,
-            "fields": ["aliases", "tags", "related_entries", "color"],
+            "fields": ["aliases", "tags", "related_entries", "color", "context_policy"],
             "color": "slate-blue",
         },
         "character": {
@@ -389,6 +391,18 @@ DEFAULT_METADATA_SCHEMA: dict[str, Any] = {
         },
         "aliases": {"name": "Aliases", "type": "multi_select"},
         "tags": {"name": "Tags", "type": "tags"},
+        "context_policy": {
+            # How the AI-context layers treat this entry. Values:
+            #   - "always":      pulled into every implicit-mode render
+            #   - "auto":        textual alias match (current default)
+            #   - "manual_only": skipped by the matcher; explicit picker only
+            #   - "never":       hidden from picker and matcher
+            # Default "auto" preserves the pre-policy behavior — existing
+            # entries that omit the field keep their current treatment.
+            "name": "Context policy",
+            "type": "select",
+            "options": ["always", "auto", "manual_only", "never"],
+        },
         "color": {
             # Instance-level color override (palette swatch id). Resolves
             # to a stripe color on NodeRows + the manuscript tree, and

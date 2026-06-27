@@ -123,6 +123,8 @@
     details?: string[];
     confirmLabel: string;
     destructive: boolean;
+    cannotBeUndone?: boolean;
+    dontShowAgainKey?: string;
     onConfirm: () => Promise<void>;
   };
   type EmbeddedTodo = {
@@ -921,6 +923,18 @@
 
   async function refreshKnownTags() {
     knownTags = (await api.getKnownTags()).tags;
+  }
+
+  // A tag merge rewrites tag values across documents on disk; pull the new
+  // tag roster AND re-sync the entry lists + open editors so the change is
+  // reflected everywhere immediately (not just on next reload).
+  async function refreshAfterTagChange() {
+    await refreshKnownTags();
+    await run(async () => {
+      loreEntries = (await api.listLoreEntries()).entries;
+      promptEntries = (await api.listPromptEntries()).entries;
+      await refreshOpenEditorPaneBaselines();
+    });
   }
 
   async function refreshTodos() {
@@ -1856,65 +1870,99 @@
 
   async function saveSchemaField() {
     if (!schemaFieldLayerId) return;
-    await run(async () => {
-      const previousFieldId = selectedSchemaFieldId && !selectedSchemaFieldId.startsWith("system:") ? selectedSchemaFieldId : null;
-      const nextFieldId = schemaFieldId.trim();
-      // Compose SelectOption objects from the ordered draft list (order is
-      // preserved on save). Drop rows with an empty value; de-dupe by value.
-      const seenValues = new Set<string>();
-      const options = schemaFieldOptionList
-        .map((draft) => ({ ...draft, value: draft.value.trim() }))
-        .filter((draft) => draft.value && !seenValues.has(draft.value) && seenValues.add(draft.value))
-        .map((draft) => {
-          const out: import("./types").SelectOption = { value: draft.value };
-          const label = draft.label.trim();
-          // Only persist a label when it differs from the stable value
-          // (label is cosmetic; value is the macro contract).
-          if (label && label !== draft.value) out.label = label;
-          if (draft.color) out.color = draft.color;
-          return out;
-        });
-      // Migration: a row whose value changed from its loaded `originalValue`
-      // rewrites stored entry data. Reorder-safe (keyed by originalValue, not
-      // position); added rows have no originalValue so they never migrate.
-      const optionMigration = buildOptionMigrationFromDrafts();
-      const hasOptions = schemaFieldType === "select" || schemaFieldType === "multi_select";
-      const hasPicker = schemaFieldType === "entity_ref" || schemaFieldType === "entity_ref_list";
-      const computedSpec: Record<string, string> | null =
-        schemaFieldType === "computed"
-          ? schemaFieldComputedFunction === "word_count"
-            ? { source: "body", function: "word_count" }
-            : { function: "counter", scope: schemaFieldComputedScope }
-          : null;
-      const nextField: MetadataFieldDefinition = {
-        name: schemaFieldName.trim() || nextFieldId,
-        type: schemaFieldSaveType(),
-        options: hasOptions ? options : [],
-        ...(hasPicker ? { picker_config: schemaFieldPickerConfig } : {}),
-        ...(computedSpec ? { computed: computedSpec } : {}),
-        ...(schemaFieldGroup.trim() ? { group: schemaFieldGroup.trim() } : {}),
-        // Per-field icon override (chosen in the IconPicker). null/empty =
-        // fall back to the field-type default glyph.
-        ...(schemaFieldIcon ? { icon: schemaFieldIcon } : {}),
-      };
-      if (previousFieldId && previousFieldId !== nextFieldId) {
-        await api.renameMetadataField(previousFieldId, nextFieldId, schemaFieldEntryType);
-      }
-      metadataSchema = await api.upsertMetadataField(schemaFieldLayerId, nextFieldId, nextField, schemaFieldEntryType, Boolean(previousFieldId));
-      await refreshMetadataSchema();
-      if (previousFieldId) {
-        const renamedField = previousFieldId !== nextFieldId;
-        await refreshOpenEditorPaneBaselines((metadata) => {
-          const renamedMetadata = renamedField ? renameMetadataKey(metadata, previousFieldId, nextFieldId) : metadata;
-          return migrateMetadataOptionValues(renamedMetadata, nextFieldId, optionMigration);
-        });
-      }
-      validation = await api.validateProject();
-      selectedSchemaFieldId = nextFieldId;
-      // Collapse the inline editor on a successful save.
-      expandedSchemaFieldId = null;
-      status = "Updated details schema";
-    });
+    const layerId = schemaFieldLayerId;
+    const entryType = schemaFieldEntryType;
+    const previousFieldId = selectedSchemaFieldId && !selectedSchemaFieldId.startsWith("system:") ? selectedSchemaFieldId : null;
+    const nextFieldId = schemaFieldId.trim();
+    // Compose SelectOption objects from the ordered draft list (order is
+    // preserved on save). Drop rows with an empty value; de-dupe by value.
+    const seenValues = new Set<string>();
+    const options = schemaFieldOptionList
+      .map((draft) => ({ ...draft, value: draft.value.trim() }))
+      .filter((draft) => draft.value && !seenValues.has(draft.value) && seenValues.add(draft.value))
+      .map((draft) => {
+        const out: import("./types").SelectOption = { value: draft.value };
+        const label = draft.label.trim();
+        // Only persist a label when it differs from the stable value
+        // (label is cosmetic; value is the macro contract).
+        if (label && label !== draft.value) out.label = label;
+        if (draft.color) out.color = draft.color;
+        return out;
+      });
+    // Migration: a row whose value changed from its loaded `originalValue`
+    // rewrites stored entry data. Reorder-safe (keyed by originalValue, not
+    // position); added rows have no originalValue so they never migrate.
+    const optionMigration = buildOptionMigrationFromDrafts();
+    const hasOptions = schemaFieldType === "select" || schemaFieldType === "multi_select";
+    const hasPicker = schemaFieldType === "entity_ref" || schemaFieldType === "entity_ref_list";
+    const computedSpec: Record<string, string> | null =
+      schemaFieldType === "computed"
+        ? schemaFieldComputedFunction === "word_count"
+          ? { source: "body", function: "word_count" }
+          : { function: "counter", scope: schemaFieldComputedScope }
+        : null;
+    const nextField: MetadataFieldDefinition = {
+      name: schemaFieldName.trim() || nextFieldId,
+      type: schemaFieldSaveType(),
+      options: hasOptions ? options : [],
+      ...(hasPicker ? { picker_config: schemaFieldPickerConfig } : {}),
+      ...(computedSpec ? { computed: computedSpec } : {}),
+      ...(schemaFieldGroup.trim() ? { group: schemaFieldGroup.trim() } : {}),
+      // Per-field icon override (chosen in the IconPicker). null/empty =
+      // fall back to the field-type default glyph.
+      ...(schemaFieldIcon ? { icon: schemaFieldIcon } : {}),
+    };
+
+    // Detect option values that are being removed (present before, gone now,
+    // and not a rename source) — those get cleared from existing documents.
+    const previousField = previousFieldId ? metadataSchema?.fields[previousFieldId] : null;
+    const newValueSet = new Set(options.map((o) => o.value));
+    const renameKeys = new Set(Object.keys(optionMigration ?? {}));
+    const removedValues = hasOptions && previousField && (previousField.type === "select" || previousField.type === "multi_select")
+      ? previousField.options.map((o) => o.value).filter((v) => !newValueSet.has(v) && !renameKeys.has(v))
+      : [];
+
+    const persist = () => persistSchemaField({ layerId, entryType, previousFieldId, nextFieldId, nextField, optionMigration });
+
+    if (removedValues.length > 0) {
+      requestConfirm({
+        title: removedValues.length > 1 ? "Remove these option values?" : "Remove this option value?",
+        message: `Removing ${removedValues.join(", ")} will clear ${removedValues.length > 1 ? "them" : "it"} from every document that currently uses ${removedValues.length > 1 ? "them" : "it"}.`,
+        confirmLabel: "Remove & save",
+        destructive: true,
+        cannotBeUndone: true,
+        dontShowAgainKey: "removeSelectOptions",
+        onConfirm: persist,
+      });
+    } else {
+      await run(persist);
+    }
+  }
+
+  async function persistSchemaField(args: {
+    layerId: string;
+    entryType: string;
+    previousFieldId: string | null;
+    nextFieldId: string;
+    nextField: MetadataFieldDefinition;
+    optionMigration: Record<string, string> | null;
+  }) {
+    const { layerId, entryType, previousFieldId, nextFieldId, nextField, optionMigration } = args;
+    if (previousFieldId && previousFieldId !== nextFieldId) {
+      await api.renameMetadataField(previousFieldId, nextFieldId, entryType);
+    }
+    metadataSchema = await api.upsertMetadataField(layerId, nextFieldId, nextField, entryType, Boolean(previousFieldId), optionMigration);
+    await refreshMetadataSchema();
+    if (previousFieldId) {
+      // The backend rewrote entry data on disk (key rename + option
+      // rename/removal); re-pull open panes so they reflect the cleaned data.
+      await refreshOpenEditorPaneBaselines();
+    }
+    validation = await api.validateProject();
+    selectedSchemaFieldId = nextFieldId;
+    // Collapse the inline editor on a successful save.
+    expandedSchemaFieldId = null;
+    status = "Updated details schema";
   }
 
   function suggestPrefixFromLabel(label: string): string {
@@ -1997,13 +2045,15 @@
     const source = schemaTypeSource(typeId);
     if (source?.built_in) return;
     const typeName = definition.name || typeId;
-    confirmation = {
+    requestConfirm({
       title: "Delete Detail Type",
       message: `Delete "${typeName}"? Existing documents using this type must be changed first.`,
       confirmLabel: "Delete Type",
       destructive: true,
+      cannotBeUndone: true,
+      dontShowAgainKey: "deleteType",
       onConfirm: () => deleteSchemaType(typeId),
-    };
+    });
   }
 
   async function deleteSchemaType(typeId: string) {
@@ -2022,13 +2072,15 @@
   function requestDeleteSchemaField() {
     if (!selectedSchemaFieldId || selectedSchemaFieldId.startsWith("system:") || schemaFieldReadonly) return;
     const fieldName = schemaFieldName || selectedSchemaFieldId;
-    confirmation = {
+    requestConfirm({
       title: "Delete Detail Field",
-      message: `Delete "${fieldName}"? This removes the field definition and removes that metadata value from scenes.`,
+      message: `Delete "${fieldName}"? This removes the field definition and removes that metadata value from every document using it.`,
       confirmLabel: "Delete Field",
       destructive: true,
+      cannotBeUndone: true,
+      dontShowAgainKey: "deleteField",
       onConfirm: () => deleteSchemaField(selectedSchemaFieldId!),
-    };
+    });
   }
 
   async function deleteSchemaField(fieldId: string) {
@@ -2084,21 +2136,48 @@
   function updateSchemaFieldOption(index: number, patch: Partial<{ value: string; label: string; color: string | null }>) {
     schemaFieldOptionList = schemaFieldOptionList.map((draft, i) => (i === index ? { ...draft, ...patch } : draft));
   }
+  // Shared drop-position helper: before/after based on cursor vs row midpoint.
+  // Mirrors the NodeRow tree-drag marker so every reorderable list reads the
+  // same way (a 2px accent insertion line; see .drop-before/.drop-after CSS).
+  function dropPositionFromEvent(event: DragEvent): "before" | "after" {
+    const rect = (event.currentTarget as HTMLElement).getBoundingClientRect();
+    return event.clientY < rect.top + rect.height / 2 ? "before" : "after";
+  }
+  // Reorder helper: move `fromId`/index to before/after `toId`/index.
+  function reorderByPosition<T>(list: T[], from: number, to: number, position: "before" | "after"): T[] {
+    if (from < 0 || to < 0) return list;
+    const next = [...list];
+    const [moved] = next.splice(from, 1);
+    let insertAt = to > from ? to - 1 : to;
+    if (position === "after") insertAt += 1;
+    next.splice(insertAt, 0, moved);
+    return next;
+  }
+
   // --- Field row drag-reorder (own fields of a type) -----------------------
   let fieldDragId: string | null = null;
+  let fieldDropTarget: { id: string; position: "before" | "after" } | null = null;
   function onFieldDragStart(fieldId: string) {
     fieldDragId = fieldId;
   }
+  function onFieldDragOver(event: DragEvent, fieldId: string) {
+    if (!fieldDragId || fieldId === fieldDragId) return;
+    event.preventDefault();
+    if (event.dataTransfer) event.dataTransfer.dropEffect = "move";
+    fieldDropTarget = { id: fieldId, position: dropPositionFromEvent(event) };
+  }
+  function clearFieldDrag() {
+    fieldDragId = null;
+    fieldDropTarget = null;
+  }
   async function onFieldDrop(targetFieldId: string) {
     const draggedId = fieldDragId;
-    fieldDragId = null;
+    const position = fieldDropTarget?.position ?? "before";
+    clearFieldDrag();
     if (!draggedId || draggedId === targetFieldId || !selectedSchemaTypeId) return;
-    const order = typeOwnFieldEntries.map(([id]) => id);
-    const from = order.indexOf(draggedId);
-    const to = order.indexOf(targetFieldId);
-    if (from < 0 || to < 0) return;
-    order.splice(from, 1);
-    order.splice(to, 0, draggedId);
+    const current = typeOwnFieldEntries.map(([id]) => id);
+    const order = reorderByPosition(current, current.indexOf(draggedId), current.indexOf(targetFieldId), position);
+    if (order.join(" ") === current.join(" ")) return;
     const layerId = schemaTypeLayerId || projectSchemaLayerId();
     await run(async () => {
       metadataSchema = await api.setEntryTypeFieldOrder(layerId, selectedSchemaTypeId, order);
@@ -2108,19 +2187,26 @@
   }
 
   let optionDragIndex: number | null = null;
+  let optionDropTarget: { index: number; position: "before" | "after" } | null = null;
   function onOptionDragStart(index: number) {
     optionDragIndex = index;
   }
-  function onOptionDrop(index: number) {
-    if (optionDragIndex === null || optionDragIndex === index) {
-      optionDragIndex = null;
-      return;
-    }
-    const next = [...schemaFieldOptionList];
-    const [moved] = next.splice(optionDragIndex, 1);
-    next.splice(index, 0, moved);
-    schemaFieldOptionList = next;
+  function onOptionDragOver(event: DragEvent, index: number) {
+    if (optionDragIndex === null || optionDragIndex === index) return;
+    event.preventDefault();
+    if (event.dataTransfer) event.dataTransfer.dropEffect = "move";
+    optionDropTarget = { index, position: dropPositionFromEvent(event) };
+  }
+  function clearOptionDrag() {
     optionDragIndex = null;
+    optionDropTarget = null;
+  }
+  function onOptionDrop(index: number) {
+    const from = optionDragIndex;
+    const position = optionDropTarget?.position ?? "before";
+    clearOptionDrag();
+    if (from === null || from === index) return;
+    schemaFieldOptionList = reorderByPosition(schemaFieldOptionList, from, index, position);
   }
 
   function migrateMetadataOptionValues(metadata: EntryMetadata, fieldId: string, migration: Record<string, string> | null) {
@@ -3380,11 +3466,41 @@
     };
   }
 
-  async function confirmModalAction() {
+  async function confirmModalAction(dontShowAgain = false) {
     const currentConfirmation = confirmation;
     if (!currentConfirmation) return;
     confirmation = null;
+    if (dontShowAgain && currentConfirmation.dontShowAgainKey) {
+      suppressConfirm(currentConfirmation.dontShowAgainKey);
+    }
     await run(currentConfirmation.onConfirm);
+  }
+
+  // Per-operation "don't show this again" suppression (localStorage).
+  const CONFIRM_SUPPRESS_PREFIX = "confirmSuppress:";
+  function isConfirmSuppressed(key: string): boolean {
+    try {
+      return localStorage.getItem(CONFIRM_SUPPRESS_PREFIX + key) === "1";
+    } catch {
+      return false;
+    }
+  }
+  function suppressConfirm(key: string) {
+    try {
+      localStorage.setItem(CONFIRM_SUPPRESS_PREFIX + key, "1");
+    } catch {
+      // ignore storage failures — worst case, we ask again next time.
+    }
+  }
+  // Gate a destructive action behind the confirm modal, honouring a
+  // per-op-type "don't show again" suppression. If suppressed, runs the
+  // action immediately; otherwise opens the modal.
+  function requestConfirm(options: Omit<ConfirmationState, "onConfirm"> & { onConfirm: () => Promise<void> }) {
+    if (options.dontShowAgainKey && isConfirmSuppressed(options.dontShowAgainKey)) {
+      void run(options.onConfirm);
+      return;
+    }
+    confirmation = options;
   }
 
   async function deleteEditorPaneScene(id: string) {
@@ -4078,14 +4194,24 @@
                 {#each schemaFieldOptionList as option, index (index)}
                   <div
                     class="sfi-option-row"
+                    role="listitem"
                     class:dragging={optionDragIndex === index}
-                    draggable="true"
-                    on:dragstart={() => onOptionDragStart(index)}
-                    on:dragover|preventDefault
+                    class:drop-before={optionDropTarget?.index === index && optionDropTarget?.position === "before"}
+                    class:drop-after={optionDropTarget?.index === index && optionDropTarget?.position === "after"}
+                    on:dragover={(event) => onOptionDragOver(event, index)}
+                    on:dragleave={() => { if (optionDropTarget?.index === index) optionDropTarget = null; }}
                     on:drop|preventDefault={() => onOptionDrop(index)}
-                    on:dragend={() => (optionDragIndex = null)}
                   >
-                    <span class="sfi-option-grip" title="Drag to reorder" aria-hidden="true"><i class="ti ti-grip-vertical"></i></span>
+                    <span
+                      class="sfi-option-grip"
+                      role="button"
+                      tabindex="-1"
+                      aria-label="Drag to reorder"
+                      title="Drag to reorder"
+                      draggable="true"
+                      on:dragstart={() => onOptionDragStart(index)}
+                      on:dragend={clearOptionDrag}
+                    ><i class="ti ti-grip-vertical"></i></span>
                     <SwatchPicker
                       value={option.color}
                       onChange={(id) => updateSchemaFieldOption(index, { color: id })}
@@ -4140,14 +4266,16 @@
               <button
                 class="schema-field-row"
                 class:expanded={isExpanded}
-                class:drag-target={fieldDragId !== null && fieldDragId !== fieldId}
+                class:drop-before={fieldDropTarget?.id === fieldId && fieldDropTarget?.position === "before"}
+                class:drop-after={fieldDropTarget?.id === fieldId && fieldDropTarget?.position === "after"}
                 type="button"
                 draggable={fieldEntries.length > 1 && !schemaTypeReadonly}
                 on:click={() => toggleSchemaFieldInline(fieldId, selectedSchemaTypeId)}
                 on:dragstart={() => onFieldDragStart(fieldId)}
-                on:dragover|preventDefault
+                on:dragover={(event) => onFieldDragOver(event, fieldId)}
+                on:dragleave={() => { if (fieldDropTarget?.id === fieldId) fieldDropTarget = null; }}
                 on:drop|preventDefault={() => onFieldDrop(fieldId)}
-                on:dragend={() => (fieldDragId = null)}
+                on:dragend={clearFieldDrag}
               >
                 <span class="sfr-grip" title="Drag to reorder" aria-hidden="true"><i class="ti ti-grip-vertical"></i></span>
                 <span class="sfr-tile"><i class={fieldIconClass(field)} aria-hidden="true"></i></span>
@@ -4357,14 +4485,24 @@
             {#each schemaFieldOptionList as option, index (index)}
               <div
                 class="sfi-option-row"
+                role="listitem"
                 class:dragging={optionDragIndex === index}
-                draggable={!schemaFieldReadonly}
-                on:dragstart={() => onOptionDragStart(index)}
-                on:dragover|preventDefault
+                class:drop-before={optionDropTarget?.index === index && optionDropTarget?.position === "before"}
+                class:drop-after={optionDropTarget?.index === index && optionDropTarget?.position === "after"}
+                on:dragover={(event) => onOptionDragOver(event, index)}
+                on:dragleave={() => { if (optionDropTarget?.index === index) optionDropTarget = null; }}
                 on:drop|preventDefault={() => onOptionDrop(index)}
-                on:dragend={() => (optionDragIndex = null)}
               >
-                <span class="sfi-option-grip" title="Drag to reorder" aria-hidden="true"><i class="ti ti-grip-vertical"></i></span>
+                <span
+                  class="sfi-option-grip"
+                  role="button"
+                  tabindex="-1"
+                  aria-label="Drag to reorder"
+                  title="Drag to reorder"
+                  draggable={!schemaFieldReadonly}
+                  on:dragstart={() => onOptionDragStart(index)}
+                  on:dragend={clearOptionDrag}
+                ><i class="ti ti-grip-vertical"></i></span>
                 <SwatchPicker value={option.color} onChange={(id) => updateSchemaFieldOption(index, { color: id })} />
                 <input class="sfi-option-value-input" value={option.value} placeholder="value" aria-label="Option value" readonly={schemaFieldReadonly} on:input={(event) => updateSchemaFieldOption(index, { value: event.currentTarget.value })} />
                 <input class="sfi-option-label" value={option.label} placeholder="label (optional)" aria-label="Option display label" readonly={schemaFieldReadonly} on:input={(event) => updateSchemaFieldOption(index, { label: event.currentTarget.value })} />
@@ -4745,7 +4883,7 @@
   <ConfirmModal
     state={confirmation}
     onCancel={() => (confirmation = null)}
-    onConfirm={confirmModalAction}
+    onConfirm={(dontShowAgain) => confirmModalAction(dontShowAgain)}
   />
 
   <NewProjectModal
@@ -4782,7 +4920,7 @@
   {#if tagsManagerOpen}
     <TagManagerDialog
       metadataSchema={metadataSchema}
-      on:changed={() => void refreshKnownTags()}
+      on:changed={() => void refreshAfterTagChange()}
       on:close={() => (tagsManagerOpen = false)}
     />
   {/if}

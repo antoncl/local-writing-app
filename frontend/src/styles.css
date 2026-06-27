@@ -840,6 +840,28 @@ h3 {
   overflow: auto;
 }
 
+.confirm-modal-undo {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin: 0 !important;
+  font-size: 12.5px;
+  font-weight: 600;
+  color: var(--danger, #9d2f2a);
+}
+.confirm-modal-dsa {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  font-size: 12.5px;
+  color: var(--text-2, #4d5753);
+  cursor: pointer;
+}
+.confirm-modal-dsa input {
+  width: auto;
+  margin: 0;
+}
+
 .confirm-modal-actions {
   display: flex;
   justify-content: flex-end;
@@ -2658,9 +2680,33 @@ button.schema-field-row:hover {
   font-size: 15px;
   cursor: grab;
 }
-.schema-field-row.drag-target:hover {
-  background: var(--accent-soft, #edf6f2);
-  border-color: var(--accent, #2f6f5e);
+/* Drag-reorder insertion marker — a 2px accent line, matching the NodeRow
+   tree-drag marker so every reorderable list reads the same way. Applies to
+   schema field rows and select option rows. */
+.schema-field-row,
+.sfi-option-row {
+  position: relative;
+}
+.schema-field-row.drop-before::before,
+.schema-field-row.drop-after::after,
+.sfi-option-row.drop-before::before,
+.sfi-option-row.drop-after::after {
+  content: "";
+  position: absolute;
+  left: 0;
+  right: 0;
+  height: 2px;
+  background: var(--accent, #2f6f5e);
+  pointer-events: none;
+  z-index: 2;
+}
+.schema-field-row.drop-before::before,
+.sfi-option-row.drop-before::before {
+  top: -3px;
+}
+.schema-field-row.drop-after::after,
+.sfi-option-row.drop-after::after {
+  bottom: -3px;
 }
 .sfr-tile {
   flex: none;

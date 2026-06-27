@@ -1,7 +1,8 @@
 <script lang="ts">
   import { createEventDispatcher } from "svelte";
   import { api } from "./api";
-  import { fieldIconClass } from "./fieldIcons";
+  import IconPicker from "./IconPicker.svelte";
+  import { fieldIconClass, DEFAULT_FIELD_GLYPH } from "./fieldIcons";
   import type { GroupMember, MetadataGroupDefinition, MetadataSchema } from "./types";
 
   // Reusable L2 group definitions (keyed by id) + the layer to save into.
@@ -15,7 +16,6 @@
     { value: "long_text", label: "Long Text" },
     { value: "number", label: "Number" },
     { value: "boolean", label: "Boolean" },
-    { value: "date", label: "Date" },
     { value: "select", label: "Select" },
     { value: "multi_select", label: "Multi-select" },
     { value: "entity_ref", label: "Reference" },
@@ -86,6 +86,42 @@
   }
   function removeMember(index: number) {
     draftMembers = draftMembers.filter((_, i) => i !== index);
+  }
+  // Per-member icon picker (the tile is the trigger). null = none open.
+  let iconPickerFor: number | null = null;
+  function updateMemberIcon(index: number, icon: string | null) {
+    draftMembers[index] = { ...draftMembers[index], icon: icon ?? undefined };
+    draftMembers = draftMembers;
+    iconPickerFor = null;
+  }
+
+  // Drag-reorder members — same before/after insertion-line marker as the
+  // field/option lists for a consistent feel.
+  let memberDragIndex: number | null = null;
+  let memberDropTarget: { index: number; position: "before" | "after" } | null = null;
+  function onMemberDragOver(event: DragEvent, index: number) {
+    if (memberDragIndex === null || memberDragIndex === index) return;
+    event.preventDefault();
+    if (event.dataTransfer) event.dataTransfer.dropEffect = "move";
+    const rect = (event.currentTarget as HTMLElement).getBoundingClientRect();
+    const position = event.clientY < rect.top + rect.height / 2 ? "before" : "after";
+    memberDropTarget = { index, position };
+  }
+  function clearMemberDrag() {
+    memberDragIndex = null;
+    memberDropTarget = null;
+  }
+  function onMemberDrop(index: number) {
+    const from = memberDragIndex;
+    const position = memberDropTarget?.position ?? "before";
+    clearMemberDrag();
+    if (from === null || from === index) return;
+    const next = [...draftMembers];
+    const [moved] = next.splice(from, 1);
+    let insertAt = index > from ? index - 1 : index;
+    if (position === "after") insertAt += 1;
+    next.splice(insertAt, 0, moved);
+    draftMembers = next;
   }
 
   async function saveGroup() {
@@ -181,15 +217,55 @@
         <span class="lbl">Members</span>
         <div class="gm-members">
           {#each draftMembers as member, index (index)}
-            <div class="gm-member">
-              <span class="sfr-tile"><i class={fieldIconClass({ type: member.type, icon: member.icon ?? null })} aria-hidden="true"></i></span>
+            <div
+              class="gm-member"
+              role="listitem"
+              class:dragging={memberDragIndex === index}
+              class:drop-before={memberDropTarget?.index === index && memberDropTarget?.position === "before"}
+              class:drop-after={memberDropTarget?.index === index && memberDropTarget?.position === "after"}
+              on:dragover={(event) => onMemberDragOver(event, index)}
+              on:dragleave={() => { if (memberDropTarget?.index === index) memberDropTarget = null; }}
+              on:drop|preventDefault={() => onMemberDrop(index)}
+            >
+              <span
+                class="gm-member-grip"
+                role="button"
+                tabindex="-1"
+                aria-label="Drag to reorder"
+                title="Drag to reorder"
+                draggable="true"
+                on:dragstart={() => (memberDragIndex = index)}
+                on:dragend={clearMemberDrag}
+              ><i class="ti ti-grip-vertical"></i></span>
+              <div class="gm-member-icon-anchor">
+                <button
+                  type="button"
+                  class="sfr-tile gm-icon-btn"
+                  aria-label="Choose icon"
+                  title="Choose icon"
+                  on:click={() => (iconPickerFor = iconPickerFor === index ? null : index)}
+                >
+                  <i class={fieldIconClass({ type: member.type, icon: member.icon ?? null })} aria-hidden="true"></i>
+                </button>
+                {#if iconPickerFor === index}
+                  <div class="gm-icon-pop">
+                    <IconPicker
+                      value={member.icon ?? null}
+                      defaultGlyph={DEFAULT_FIELD_GLYPH[member.type] ?? "letter-case"}
+                      fieldLabel={member.name || "member"}
+                      on:select={(event) => updateMemberIcon(index, event.detail.icon)}
+                      on:close={() => (iconPickerFor = null)}
+                    />
+                  </div>
+                {/if}
+              </div>
               <input class="gm-member-name" value={member.name} placeholder="Goal" on:input={(event) => updateMemberName(index, event.currentTarget.value)} />
               <select class="gm-member-type" value={member.type} on:change={(event) => updateMemberType(index, event.currentTarget.value as GroupMember["type"])}>
                 {#each MEMBER_TYPES as option}
                   <option value={option.value}>{option.label}</option>
                 {/each}
               </select>
-              <code class="gm-member-key">{member.key || slug(member.name)}</code>
+              <code class="gm-member-key" title={member.key || slug(member.name)}>{member.key || slug(member.name)}</code>
               <button class="link-danger" type="button" on:click={() => removeMember(index)} aria-label="Remove member">✕</button>
             </div>
           {/each}
@@ -353,13 +429,72 @@
     display: flex;
     align-items: center;
     gap: 9px;
+    position: relative;
   }
+  .gm-member.dragging {
+    opacity: 0.5;
+  }
+  .gm-member-grip {
+    flex: none;
+    display: inline-flex;
+    color: var(--border-strong, #b4c2bc);
+    font-size: 15px;
+    cursor: grab;
+  }
+  .gm-member-icon-anchor {
+    position: relative;
+    flex: none;
+  }
+  .gm-icon-btn {
+    padding: 0;
+    cursor: pointer;
+  }
+  .gm-icon-btn:hover {
+    border-color: var(--accent, #2f6f5e);
+    color: var(--accent-strong, #234e43);
+  }
+  .gm-icon-pop {
+    position: absolute;
+    top: calc(100% + 6px);
+    left: 0;
+    z-index: 60;
+  }
+  .gm-member.drop-before::before,
+  .gm-member.drop-after::after {
+    content: "";
+    position: absolute;
+    left: 0;
+    right: 0;
+    height: 2px;
+    background: var(--accent, #2f6f5e);
+    pointer-events: none;
+    z-index: 2;
+  }
+  .gm-member.drop-before::before {
+    top: -4px;
+  }
+  .gm-member.drop-after::after {
+    bottom: -4px;
+  }
+  /* Fixed-width columns so members line up in neat columns: only the name
+     flexes (and is therefore identical across rows); the type select and the
+     key are fixed so they don't shift with content. */
   .gm-member-name {
-    flex: 1;
+    flex: 1 1 0;
+    min-width: 0;
+  }
+  .gm-member-type {
+    flex: 0 0 140px;
+    width: 140px;
     min-width: 0;
   }
   .gm-member-key {
-    flex: none;
+    flex: 0 0 84px;
+    width: 84px;
+    text-align: right;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
     font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
     font-size: 11px;
     color: var(--text-3, #74817b);

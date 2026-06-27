@@ -2,6 +2,8 @@
   import { createEventDispatcher, onMount } from "svelte";
   import { api } from "./api";
   import NodePickerConfigEditor from "./NodePickerConfigEditor.svelte";
+  import ConfirmModal from "./ConfirmModal.svelte";
+  import type { ConfirmationState } from "./ConfirmModal.svelte";
   import type { MetadataSchema, NodePickerConfig, TagUsage } from "./types";
 
   export let metadataSchema: MetadataSchema | null = null;
@@ -81,6 +83,48 @@
     }
   }
 
+  // Confirm gate for the merge — destructive, rewrites entries on disk.
+  // Per-op "don't show again" suppression mirrors App's confirm flow.
+  const MERGE_SUPPRESS_KEY = "confirmSuppress:mergeTags";
+  let confirmation: ConfirmationState | null = null;
+
+  function requestMerge() {
+    if (selectedNames.length === 0 || !mergeTarget.trim()) return;
+    let suppressed = false;
+    try {
+      suppressed = localStorage.getItem(MERGE_SUPPRESS_KEY) === "1";
+    } catch {
+      suppressed = false;
+    }
+    if (suppressed) {
+      void doMerge();
+      return;
+    }
+    confirmation = {
+      title: selectedNames.length > 1 ? "Merge tags?" : "Merge tag?",
+      message: `Merge ${selectedNames.join(", ")} into "${mergeTarget.trim()}"? This rewrites the tag on every document that currently uses it.`,
+      confirmLabel: "Merge",
+      destructive: true,
+      cannotBeUndone: true,
+      dontShowAgainKey: MERGE_SUPPRESS_KEY,
+      onConfirm: () => doMerge(),
+    };
+  }
+
+  function onMergeConfirm(dontShowAgain: boolean) {
+    const current = confirmation;
+    confirmation = null;
+    if (!current) return;
+    if (dontShowAgain) {
+      try {
+        localStorage.setItem(MERGE_SUPPRESS_KEY, "1");
+      } catch {
+        // ignore storage failures
+      }
+    }
+    void current.onConfirm();
+  }
+
   async function doMerge() {
     if (selectedNames.length === 0 || !mergeTarget.trim()) return;
     busy = true;
@@ -119,7 +163,7 @@
         <span class="tm-merge-note">uses migrate · scopes union</span>
         <span class="sfi-spacer"></span>
         <button class="sfi-cancel" type="button" on:click={() => (selected = new Set())}>Clear</button>
-        <button class="sfi-done" type="button" disabled={busy || !mergeTarget.trim()} on:click={doMerge}>Merge</button>
+        <button class="sfi-done" type="button" disabled={busy || !mergeTarget.trim()} on:click={requestMerge}>Merge</button>
       </div>
     {/if}
 
@@ -168,6 +212,12 @@
       {/each}
     </div>
   </div>
+
+  <ConfirmModal
+    state={confirmation}
+    onCancel={() => (confirmation = null)}
+    onConfirm={onMergeConfirm}
+  />
 </div>
 
 <style>

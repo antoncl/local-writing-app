@@ -359,10 +359,10 @@ export const api = {
       body: JSON.stringify({ entry_type_id: entryTypeId }),
     });
   },
-  upsertMetadataField(layerId: string, fieldId: string, field: MetadataFieldDefinition, entryType = "scene", allowExisting = true) {
+  upsertMetadataField(layerId: string, fieldId: string, field: MetadataFieldDefinition, entryType = "scene", allowExisting = true, optionMigration: Record<string, string> | null = null) {
     return request<MetadataSchema>("/metadata/schema/fields", {
       method: "PUT",
-      body: JSON.stringify({ layer_id: layerId, field_id: fieldId, field, entry_type: entryType, allow_existing: allowExisting }),
+      body: JSON.stringify({ layer_id: layerId, field_id: fieldId, field, entry_type: entryType, allow_existing: allowExisting, option_migration: optionMigration }),
     });
   },
   moveMetadataField(fieldId: string, targetLayerId: string, entryType = "scene") {

@@ -8,12 +8,22 @@
     details?: string[];
     confirmLabel: string;
     destructive: boolean;
+    // When true, show a prominent "this cannot be undone" warning line.
+    cannotBeUndone?: boolean;
+    // When set, render a "Don't show this again" checkbox; the parent
+    // receives its value in onConfirm and persists suppression per key.
+    dontShowAgainKey?: string;
     onConfirm: () => Promise<void> | void;
   };
 
   export let state: ConfirmationState | null = null;
   export let onCancel: () => void = () => {};
-  export let onConfirm: () => void | Promise<void> = () => {};
+  export let onConfirm: (dontShowAgain: boolean) => void | Promise<void> = () => {};
+
+  // Reset the checkbox whenever a new confirmation opens (depends only on
+  // `state`, so ticking the box itself doesn't re-trigger the reset).
+  let dontShowAgain = false;
+  $: state, (dontShowAgain = false);
 </script>
 
 {#if state}
@@ -30,13 +40,22 @@
           {/each}
         </ul>
       {/if}
+      {#if state.cannotBeUndone}
+        <p class="confirm-modal-undo"><i class="ti ti-alert-triangle" aria-hidden="true"></i> This cannot be undone.</p>
+      {/if}
+      {#if state.dontShowAgainKey}
+        <label class="confirm-modal-dsa">
+          <input type="checkbox" bind:checked={dontShowAgain} />
+          Don't show this again
+        </label>
+      {/if}
       <div class="confirm-modal-actions">
         <button type="button" on:click={onCancel}>Cancel</button>
         <button
           class:danger-primary={state.destructive}
           class:primary={!state.destructive}
           type="button"
-          on:click={onConfirm}
+          on:click={() => onConfirm(dontShowAgain)}
         >
           {state.confirmLabel}
         </button>

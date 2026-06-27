@@ -46,10 +46,6 @@
     documentKind === "assistant"
       ? metadataFieldIds.filter((id) => !ASSISTANT_PICKER_FIELDS.has(id))
       : metadataFieldIds;
-  export let metadataSummaryText: string;
-  // Legacy prop — the rail (NodeEditor) now owns collapse, so the panel
-  // always renders its fields. Kept so existing call sites compile.
-  export let expanded: boolean = true;
   export let knownTags: import("./types").ScopedTag[] = [];
   export let loreEntries: LoreEntrySummary[] = [];
   export let promptEntries: PromptEntrySummary[] = [];

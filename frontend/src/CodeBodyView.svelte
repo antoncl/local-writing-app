@@ -476,6 +476,7 @@
              still render the .prompt-input-grid below. -->
         <div
           class="prompt-input-row prompt-input-row-context"
+          role="group"
           class:dragging={inputDragFromIndex === index}
           class:drop-before={inputDragOverIndex === index && inputDragOverPosition === "before"}
           class:drop-after={inputDragOverIndex === index && inputDragOverPosition === "after"}
@@ -508,6 +509,7 @@
       {:else}
         <div
           class="prompt-input-row"
+          role="group"
           class:dragging={inputDragFromIndex === index}
           class:drop-before={inputDragOverIndex === index && inputDragOverPosition === "before"}
           class:drop-after={inputDragOverIndex === index && inputDragOverPosition === "after"}

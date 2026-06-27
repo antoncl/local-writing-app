@@ -170,8 +170,8 @@
   }
 </script>
 
-<div class="gm-backdrop" on:mousedown={() => dispatch("close")}>
-  <div class="gm-dialog" role="dialog" aria-label="Reusable groups" on:mousedown|stopPropagation>
+<div class="gm-backdrop" role="presentation" on:mousedown={() => dispatch("close")}>
+  <div class="gm-dialog" role="dialog" aria-modal="true" aria-label="Reusable groups" tabindex="-1" on:mousedown|stopPropagation>
     <header class="gm-head">
       <i class="ti ti-stack-2" aria-hidden="true"></i>
       <h2>Reusable groups</h2>

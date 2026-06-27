@@ -39,14 +39,12 @@
   import { coerceInputValue } from "./promptInputs";
   import { resolveColor } from "./colors";
   import type {
-    AssistantEntrySummary,
     ChatUsage,
     EditableDocument,
     LoreEntrySummary,
     MetadataSchema,
     PromptEntrySummary,
     PromptInputDefinition,
-    StructureDocument,
   } from "./types";
 
   // ---------- Local types ----------
@@ -111,8 +109,6 @@
   export let documentKind: "scene" | "lore" | "prompt" | "snippet" | "assistant" | "project" | "structure_node" = "scene";
   export let metadataSchema: MetadataSchema | null = null;
   export let promptEntries: PromptEntrySummary[] = [];
-  export let assistantEntries: AssistantEntrySummary[] = [];
-  export let structure: StructureDocument | null = null;
   export let loreEntries: LoreEntrySummary[] = [];
   export let availableScenes: { id: string; title: string }[] = [];
   export let implicitContextMatcher: import("./implicitContextMatcher").CompiledMatcher | null = null;

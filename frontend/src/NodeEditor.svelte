@@ -79,8 +79,6 @@
   // (word_count) + the editor-hint string can read them.
   let liveWordCount = 0;
   let editorEmpty = true;
-  let metadataSummaryText = "";
-  let metadataExpanded = false;
   // Metadata rail (body-spec Section A). Per body shape: prose/code open,
   // chat collapses to a 34px edge-tab, none turns the rail into the pane.
   // `railOpen` is the user-toggleable state for the side rail; reset per
@@ -289,7 +287,6 @@
   // (untyped text input) row.
   $: metadataFieldIds = ((metadataSchema?.entry_types[entryType] ?? metadataSchema?.entry_types[defaultEntryType()])?.fields ?? []).filter((fieldId) => fieldId !== "color");
   $: hasBody = bodyShape !== "none";
-  $: metadataSummaryText = buildMetadataSummary(activeEntryType?.name ?? entryType, status, liveWordCount, hasBody);
 
   $: if (metadataReload && metadataReload.token !== lastMetadataReloadToken) {
     lastMetadataReloadToken = metadataReload.token;
@@ -346,7 +343,6 @@
       lastEmittedRawBody = rawBody;
     }
     loadedSceneId = scene.id;
-    metadataExpanded = documentKind === "lore" || nextBodyShape === "none";
     // Chat starts with the rail collapsed to its edge-tab so the
     // conversation owns full width; every other shape opens it.
     railOpen = nextBodyShape !== "chat";
@@ -424,12 +420,6 @@
     if (value === null || value === undefined) return "";
     if (typeof value === "object") return JSON.stringify(value);
     return String(value);
-  }
-
-  function buildMetadataSummary(typeName: string, currentStatus: string, wordCount: number, bodyEnabled: boolean) {
-    if (documentKind === "lore") return typeName;
-    if (!bodyEnabled) return typeName;
-    return `${typeName} · ${currentStatus || "draft"} · ${wordCount} ${wordCount === 1 ? "word" : "words"}`;
   }
 
   function effectiveOutputKind(entry: PromptEntrySummary): string | null {
@@ -658,8 +648,6 @@
       documentLabel={documentLabel}
       documentEntryTypes={documentEntryTypes}
       metadataFieldIds={metadataFieldIds}
-      metadataSummaryText={metadataSummaryText}
-      expanded={true}
       knownTags={knownTags}
       loreEntries={loreEntries}
       promptEntries={promptEntries}
@@ -763,10 +751,8 @@
       {scene}
       {documentKind}
       {metadataSchema}
-      {structure}
       {loreEntries}
       {promptEntries}
-      {assistantEntries}
       {availableScenes}
       {implicitContextMatcher}
       {documentLabel}

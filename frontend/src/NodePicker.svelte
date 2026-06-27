@@ -61,6 +61,7 @@
 
   let open = false;
   let search = "";
+  let searchInputEl: HTMLInputElement | null = null;
 
   // Group-default thresholds: groups larger than this collapse by default
   // so a 128-scene project doesn't drown the menu. Compact mode is more
@@ -161,6 +162,7 @@
       search = "";
       await tick();
       positionMenu();
+      searchInputEl?.focus();
     }
   }
 
@@ -476,7 +478,7 @@
             type="text"
             placeholder={compact ? "Search…" : "Search scenes, lore, presets…"}
             bind:value={search}
-            autofocus
+            bind:this={searchInputEl}
           />
           {#if search.length > 0}
             <button

@@ -481,13 +481,58 @@
     return roots;
   })();
 
+  // Persisted "what was open" — survives reload (HMR or browser refresh) so
+  // the user doesn't lose their seat. Cleared on a failed re-open so a
+  // moved/deleted folder doesn't keep erroring every load.
+  const LAST_PROJECT_KEY = "lastOpenedProjectPath";
+
+  function rememberLastProject(path: string): void {
+    try {
+      localStorage.setItem(LAST_PROJECT_KEY, path);
+    } catch {
+      // Storage disabled / quota — rehydrate just won't work; not fatal.
+    }
+  }
+
+  function forgetLastProject(): void {
+    try {
+      localStorage.removeItem(LAST_PROJECT_KEY);
+    } catch {
+      // ignore
+    }
+  }
+
+  function readLastProject(): string | null {
+    try {
+      return localStorage.getItem(LAST_PROJECT_KEY);
+    } catch {
+      return null;
+    }
+  }
+
   onMount(() => {
     fitPanesToViewport();
     document.addEventListener("mousedown", handleDocumentMousedown);
     // Eagerly fetch machine settings so the chat panel and inputs dialog
     // can show the assistant roster without a round-trip when first opened.
     // Failure is non-fatal — both UIs fall back to "default assistant".
-    void loadMachineSettings();
+    void (async () => {
+      await loadMachineSettings();
+      // Auto-rehydrate the last-opened project so an HMR reload (or a
+      // plain F5) doesn't drop the user back to "No project open." Run
+      // after machine settings so recents are populated; on failure
+      // (path moved / deleted) clear the key so next load starts fresh.
+      // openProjectAt() routes errors through run() which swallows them
+      // — verify success by checking appState afterwards rather than
+      // relying on a thrown exception.
+      const lastPath = readLastProject();
+      if (lastPath) {
+        await openProjectAt(lastPath);
+        if (appState.name !== "projectOpen") {
+          forgetLastProject();
+        }
+      }
+    })();
     return () => {
       document.removeEventListener("mousemove", movePane);
       document.removeEventListener("mouseup", stopPaneDrag);
@@ -618,6 +663,7 @@
 
   function openProjectWorkspace(nextProject: ProjectInfo) {
     resetEditorWorkspace();
+    rememberLastProject(nextProject.root_path);
     projectPath = nextProject.root_path;
     collapsedStructureNodes = loadCollapsedStructureNodes(projectPath);
     projectTitle = nextProject.title;

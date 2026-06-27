@@ -137,13 +137,14 @@ textarea {
 button {
   border: 1px solid var(--border);
   background: var(--surface);
+  color: var(--text);
   border-radius: 6px;
   padding: 6px 10px;
   cursor: pointer;
 }
 
 button:hover {
-  background: #edf6f2;
+  background: var(--accent-soft);
 }
 
 button.primary {
@@ -509,14 +510,14 @@ h3 {
 }
 
 .pin-button.active-pin {
-  border-color: #2f6f5e;
-  background: #dff0ea;
-  color: #234e43;
+  border-color: var(--accent);
+  background: var(--accent-soft2);
+  color: var(--accent-strong);
 }
 
 .pin-button.danger {
-  border-color: #e2c4c2;
-  color: #7c1f18;
+  border-color: var(--danger-border);
+  color: var(--danger);
 }
 
 .pane-content {

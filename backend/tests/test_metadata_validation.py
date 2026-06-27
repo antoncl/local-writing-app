@@ -1379,7 +1379,7 @@ class MetadataValidationTests(unittest.TestCase):
         self.assertNotIn("appears_in_scenes", schema.entry_types["lore_note"].fields)
         self.assertIn("aliases", schema.entry_types["lore_note"].fields)
         self.assertIn("tags", schema.entry_types["lore_note"].fields)
-        self.assertEqual(schema.entry_types["lore_entry"].own_fields, ["aliases", "tags", "related_entries", "color"])
+        self.assertEqual(schema.entry_types["lore_entry"].own_fields, ["aliases", "tags", "related_entries", "color", "context_policy"])
         # Test fixture adds home_place to character (see _add_home_place_to_character_schema).
         # The seed ships character with `character_cost` (Phase C2 cross-kind
         # cost dispatch); the fixture layer adds home_place on top.

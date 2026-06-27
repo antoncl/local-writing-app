@@ -60,10 +60,6 @@
     "cost-changed": void;
   }>();
 
-  const DEFAULT_CHAT_SYSTEM_PROMPT =
-    "You are a brainstorming partner for a fiction writer. " +
-    "Be concise, propose options, and don't write prose unless asked.";
-
   // Suppress unused-prop warnings for props Phase 4c+ wires in (preview
   // popover, inputs strip, future journal-scope rendering).
   $: void metadataSchema;
@@ -82,7 +78,11 @@
   let chatLastMeta: { provider: string; model: string; latency_ms: number } | null = null;
   let chatInput = "";
   let chatScrollEl: HTMLDivElement | null = null;
-  let chatSystemPrompt = DEFAULT_CHAT_SYSTEM_PROMPT;
+  // Holds the rendered template for a prompt-bound chat (filled by
+  // renderAndLockPromptTemplate on first send) or — for legacy sessions
+  // — the freeform system message that was authored before chats had
+  // to be prompt-bound. Empty for fresh chats; never user-editable now.
+  let chatSystemPrompt = "";
   let chatPromptEntryId = "";
   let chatAssistantId = "";
   // Scene this chat was opened against (e.g. "invoke chat prompt" from a
@@ -191,7 +191,7 @@
     chatError = null;
     chatLastMeta = null;
     chatInput = "";
-    chatSystemPrompt = DEFAULT_CHAT_SYSTEM_PROMPT;
+    chatSystemPrompt = "";
     chatPromptEntryId = "";
     chatAssistantId = "";
     chatTargetSceneId = "";
@@ -218,8 +218,7 @@
     chatPromptEntryId = session.prompt_entry_id || "";
     chatAssistantId = session.assistant_id || "";
     chatTargetSceneId = session.target_scene_id || "";
-    chatSystemPrompt =
-      session.system_prompt || (session.prompt_entry_id ? "" : DEFAULT_CHAT_SYSTEM_PROMPT);
+    chatSystemPrompt = session.system_prompt || "";
     chatHistory = (session.messages || []).map((m: ChatSessionMessage) => ({
       role: m.role,
       content: m.content,
@@ -250,7 +249,7 @@
   }
 
   function promptTitle(promptId: string): string {
-    if (!promptId) return "Freeform";
+    if (!promptId) return "Pick a prompt";
     const entry = promptEntries.find((p) => p.id === promptId);
     return entry?.title ?? "Unknown prompt";
   }
@@ -310,13 +309,6 @@
     await persistActiveChat();
   }
 
-  async function clearChatPrompt(): Promise<void> {
-    if (isLocked) return;
-    chatPromptEntryId = "";
-    chatSystemPrompt = DEFAULT_CHAT_SYSTEM_PROMPT;
-    await persistActiveChat();
-  }
-
   function filteredAssistantEntries(): AssistantEntrySummary[] {
     const q = assistantPickerSearch.trim().toLowerCase();
     const sorter = (a: AssistantEntrySummary, b: AssistantEntrySummary) =>
@@ -347,10 +339,6 @@
     closeAssistantPicker();
     if (isLocked) return;
     chatAssistantId = id;
-    await persistActiveChat();
-  }
-
-  async function handleBriefBlur(): Promise<void> {
     await persistActiveChat();
   }
 
@@ -834,14 +822,6 @@
             <span class="cbv-chip-caret" aria-hidden="true">▾</span>
           {/if}
         </button>
-        {#if chatPromptEntryId && !isLocked}
-          <button
-            type="button"
-            class="cbv-chip-clear"
-            title="Drop this prompt (revert to freeform chat)"
-            on:click={() => void clearChatPrompt()}
-          >×</button>
-        {/if}
         {#if promptPickerOpen}
           <div class="cbv-prompt-picker" role="menu" bind:this={promptPickerEl}>
             <input
@@ -964,18 +944,6 @@
         {/if}
       </div>
     </div>
-
-    {#if !chatPromptEntryId}
-      <label class="cbv-brief-label">
-        <span>Brief</span>
-        <textarea
-          class="cbv-brief"
-          bind:value={chatSystemPrompt}
-          on:blur={() => void handleBriefBlur()}
-          spellcheck="false"
-        ></textarea>
-      </label>
-    {/if}
 
     <div class="cbv-messages" bind:this={chatScrollEl} aria-label="Chat history">
       {#if chatHistory.length === 0}
@@ -1217,12 +1185,6 @@
   .cbv-chip-button[disabled] { cursor: default; }
 
   .cbv-prompt-anchor { position: relative; display: inline-flex; align-items: center; gap: 4px; }
-  .cbv-chip-clear {
-    width: 20px; height: 20px; border-radius: 50%;
-    border: 1px solid var(--border); background: var(--surface);
-    cursor: pointer; font-size: 13px; line-height: 1; padding: 0; color: var(--text-3);
-  }
-  .cbv-chip-clear:hover { background: var(--inset); }
 
   .cbv-prompt-picker {
     position: absolute; top: 100%; left: 0; margin-top: 6px; z-index: 30;
@@ -1292,18 +1254,6 @@
   }
   .cbv-preview-hint { font-style: italic; }
 
-  /* 2 · brief textarea card (freeform only). */
-  .cbv-brief-label {
-    display: flex; flex-direction: column; gap: 6px;
-    font-size: 10px; font-weight: 800; letter-spacing: 0.07em; text-transform: uppercase; color: var(--text-3);
-  }
-  .cbv-brief {
-    font-family: inherit; font-size: 13px; line-height: 1.5; padding: 9px 11px;
-    border-radius: 10px; border: 1px solid var(--border); background: var(--surface);
-    color: var(--text); resize: vertical; min-height: 52px; max-height: 200px;
-  }
-  .cbv-brief:focus { outline: none; box-shadow: 0 0 0 3px var(--accent-soft); border-color: var(--accent-soft2); }
-
   /* ---- 4 · messages ---- */
   .cbv-messages {
     flex: 1 1 0; min-height: 96px; overflow-y: auto;
@@ -1317,7 +1267,6 @@
   .cbv-journal-scope,
   .cbv-estimate-strip,
   .cbv-ttl-strip,
-  .cbv-brief-label,
   .cbv-action-row,
   .cbv-foot,
   :global(.chat-body-view > .cbv-input) {

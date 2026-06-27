@@ -240,7 +240,7 @@
   let metadataSchema: MetadataSchema | null = null;
   let metadataSchemaOverview: MetadataSchemaOverview | null = null;
   let metadataSchemaLayers: MetadataSchemaLayer[] = [];
-  let schemaFieldKind: "scene" | "lore" | "prompt" | "assistant" | "project" = "scene";
+  let schemaFieldKind: "scene" | "lore" | "research" | "prompt" | "assistant" | "project" = "scene";
   let schemaFieldLayerId = "";
   let schemaFieldEntryType = "scene";
   let schemaFieldId = "";
@@ -418,13 +418,15 @@
   $: schemaFieldKind =
     schemaSelectedEntryType?.kind === "lore"
       ? "lore"
-      : schemaSelectedEntryType?.kind === "prompt"
-        ? "prompt"
-        : schemaSelectedEntryType?.kind === "assistant"
-          ? "assistant"
-          : schemaSelectedEntryType?.kind === "project"
-            ? "project"
-            : "scene";
+      : schemaSelectedEntryType?.kind === "research"
+        ? "research"
+        : schemaSelectedEntryType?.kind === "prompt"
+          ? "prompt"
+          : schemaSelectedEntryType?.kind === "assistant"
+            ? "assistant"
+            : schemaSelectedEntryType?.kind === "project"
+              ? "project"
+              : "scene";
   $: schemaNodeTypeOptions = buildNodeTypeOptions(metadataSchema);
   $: schemaNodeTypeTree = buildNodeTypeTree(metadataSchema, schemaFieldKind);
   // The type-editor field rows. Explicitly reference metadataSchema so these
@@ -452,13 +454,15 @@
   $: schemaContextHeading =
     schemaFieldKind === "lore"
       ? "Lore Entry Types"
-      : schemaFieldKind === "prompt"
-        ? "Prompt Types"
-        : schemaFieldKind === "assistant"
-          ? "Assistant Types"
-          : schemaFieldKind === "project"
-            ? "Project Types"
-            : "Scene Types";
+      : schemaFieldKind === "research"
+        ? "Research Types"
+        : schemaFieldKind === "prompt"
+          ? "Prompt Types"
+          : schemaFieldKind === "assistant"
+            ? "Assistant Types"
+            : schemaFieldKind === "project"
+              ? "Project Types"
+              : "Scene Types";
   $: concretePromptSubtypes = Object.entries(metadataSchema?.entry_types ?? {})
     .filter(([id, definition]) => definition.kind === "prompt" && !definition.abstract && id !== "prompt")
     .map(([id, definition]) => ({ id, label: definition.name || id, parent: definition.parent ?? null }));
@@ -1506,7 +1510,7 @@
     return options;
   }
 
-  function buildNodeTypeTree(schema: MetadataSchema | null, kind: "scene" | "lore" | "prompt" | "assistant" | "project"): NodeTypeTreeNode[] {
+  function buildNodeTypeTree(schema: MetadataSchema | null, kind: "scene" | "lore" | "research" | "prompt" | "assistant" | "project"): NodeTypeTreeNode[] {
     const entryTypes = schema?.entry_types ?? {};
     const childrenByParent: Record<string, string[]> = {};
     const roots: string[] = [];
@@ -1528,7 +1532,9 @@
         ? ["lore_entry"]
         : kind === "prompt" && entryTypes.prompt
           ? ["prompt"]
-          : roots.sort(compareByName);
+          : kind === "research" && entryTypes.research
+            ? ["research"]
+            : roots.sort(compareByName);
     const fieldsRegistry = schema?.fields ?? {};
     const buildNode = (typeId: string, depth: number): NodeTypeTreeNode | null => {
       const definition = entryTypes[typeId];
@@ -1789,13 +1795,14 @@
     }
   }
 
-  function defaultSchemaParentType(kind: "scene" | "lore" | "prompt" | "assistant" | "project") {
+  function defaultSchemaParentType(kind: "scene" | "lore" | "research" | "prompt" | "assistant" | "project") {
     if (kind === "lore" && metadataSchema?.entry_types.lore_entry) return "lore_entry";
     if (kind === "prompt" && metadataSchema?.entry_types.prompt) return "prompt";
+    if (kind === "research" && metadataSchema?.entry_types.research) return "research";
     return "";
   }
 
-  function openSchemaForCustomData(entryType: string, kind: "scene" | "lore" | "prompt" | "assistant" | "project") {
+  function openSchemaForCustomData(entryType: string, kind: "scene" | "lore" | "research" | "prompt" | "assistant" | "project") {
     // Phase B: the entry editor's "Edit type…" button now opens ONLY the
     // per-type editor (schema_type pane) — not the schema/tree hierarchy
     // view. Tree access is the top bar's "Detail Types" button.
@@ -1825,16 +1832,16 @@
   // schemaFieldEntryType via a $: expression — to switch kinds we set
   // entryType to a default of the target kind. The cascade updates
   // schemaContextHeading and schemaNodeTypeTree on the next tick.
-  function switchSchemaKind(kind: "scene" | "lore" | "prompt" | "assistant" | "project") {
+  function switchSchemaKind(kind: "scene" | "lore" | "research" | "prompt" | "assistant" | "project") {
     schemaFieldEntryType = defaultSchemaEntryType(kind);
   }
 
-  function defaultSchemaEntryType(kind: "scene" | "lore" | "prompt" | "assistant" | "project") {
-    const fallback = kind === "lore" ? "lore_note" : kind === "prompt" ? "prompt" : kind === "assistant" ? "assistant" : kind === "project" ? "project" : "scene";
+  function defaultSchemaEntryType(kind: "scene" | "lore" | "research" | "prompt" | "assistant" | "project") {
+    const fallback = kind === "lore" ? "lore_note" : kind === "research" ? "note" : kind === "prompt" ? "prompt" : kind === "assistant" ? "assistant" : kind === "project" ? "project" : "scene";
     return Object.entries(metadataSchema?.entry_types ?? {}).find(([, definition]) => definition.kind === kind)?.[0] ?? fallback;
   }
 
-  function entryTypeIdsForField(fieldId: string, kind: "scene" | "lore" | "prompt" | "assistant" | "project") {
+  function entryTypeIdsForField(fieldId: string, kind: "scene" | "lore" | "research" | "prompt" | "assistant" | "project") {
     return Object.entries(metadataSchema?.entry_types ?? {})
       .filter(([, definition]) => definition.kind === kind && definition.fields.includes(fieldId))
       .map(([typeId]) => typeId);
@@ -4424,6 +4431,13 @@
           class:active={schemaFieldKind === "lore"}
           on:click={() => switchSchemaKind("lore")}
         >Lore</button>
+        <button
+          type="button"
+          role="tab"
+          aria-selected={schemaFieldKind === "research"}
+          class:active={schemaFieldKind === "research"}
+          on:click={() => switchSchemaKind("research")}
+        >Research</button>
         <button
           type="button"
           role="tab"

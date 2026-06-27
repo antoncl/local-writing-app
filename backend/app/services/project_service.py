@@ -62,6 +62,7 @@ from app.models import (
     ProjectNode,
     PromptEntry,
     PromptEntryList,
+    MoveLoreNoteToResearchResponse,
     PromptInputDefinition,
     PromptEntrySummary,
     ProjectValidation,
@@ -2879,6 +2880,72 @@ class ProjectService:
             revision=self._revision(renamed_path),
             entry_type=entry_type,
             metadata=clean_metadata,
+        )
+
+    def move_lore_note_to_research(self, lore_id: str) -> "MoveLoreNoteToResearchResponse":
+        """Convert a `lore_note` entry into a research/note (slice 5 of
+        docs/research-strategy.md).
+
+        Copies the title + body + tags into a new research note appended
+        at the research tree root, then deletes the source lore_note.
+        Other lore_note metadata fields (`aliases`, `related_entries`,
+        `context_policy`) are intentionally dropped — the v1 research/note
+        schema is title + body + tags only. The dropped fields are
+        returned in the response so the UI can surface them; nothing
+        about the migration is silent.
+        """
+        index = self._build_node_index()
+        index_entry = index.by_id.get(lore_id)
+        if index_entry is None or index_entry.kind != "lore":
+            raise ProjectServiceError(f"Lore entry {lore_id} does not exist.", 404)
+        source = self.read_lore_entry(lore_id)
+        if source.entry_type != "lore_note":
+            raise ProjectServiceError(
+                f"Only lore_note entries can be moved to research; got {source.entry_type}.",
+                422,
+            )
+        preserved_metadata: dict[str, Any] = {}
+        dropped_fields: list[str] = []
+        for field_id, value in source.metadata.items():
+            if field_id == "tags":
+                preserved_metadata[field_id] = value
+            else:
+                if value not in (None, "", [], {}):
+                    dropped_fields.append(field_id)
+
+        tree = self._research_tree()
+        document = tree.read()
+        note_id = self._new_id("note")
+        note = ResearchNote(
+            id=note_id,
+            title=source.title,
+            body_markdown=source.body_markdown,
+            entry_type="note",
+            metadata=preserved_metadata,
+        )
+        self._write_research_note_file(
+            self._filepath_for_new_node(tree.leaf_dir, source.title), note
+        )
+        new_tree_node = StructureNode(
+            id=self._new_id("node"),
+            type="note",
+            title=source.title,
+            scene_id=note_id,
+        )
+        TreeStructureService.insert_node(document.root, new_tree_node)
+        tree.write(document)
+
+        # Delete the source lore_note last so a write failure above leaves
+        # the original intact. _purge_references_to clears outbound refs
+        # pointed at the now-gone id; downstream links break — same
+        # behavior as a manual delete.
+        self.delete_lore_entry(lore_id)
+
+        return MoveLoreNoteToResearchResponse(
+            note_id=note_id,
+            tree=tree.read(),
+            dropped_fields=sorted(dropped_fields),
+            lore=self.list_lore_entries(),
         )
 
     def _update_research_title_in_structure(self, note_id: str, title: str) -> None:

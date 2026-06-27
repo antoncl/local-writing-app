@@ -29,6 +29,7 @@ import type {
   TagsOverview,
   LoreEntry,
   LoreEntryList,
+  MoveLoreNoteToResearchResponse,
   MachineSettingsUpdate,
   MachineSettingsView,
   MetadataFieldDefinition,
@@ -541,6 +542,15 @@ export const api = {
     return request<LoreEntryList>(`/lore/${entryId}`, {
       method: "DELETE",
     });
+  },
+  // Migrate a lore_note to a research/note (slice 5). Drops aliases /
+  // related_entries / context_policy (the v1 research note schema is
+  // title + body + tags only); the response lists what was dropped.
+  moveLoreNoteToResearch(entryId: string) {
+    return request<MoveLoreNoteToResearchResponse>(
+      `/lore/${encodeURIComponent(entryId)}/move-to-research`,
+      { method: "POST" },
+    );
   },
   listPromptEntries() {
     return request<PromptEntryList>("/prompts");

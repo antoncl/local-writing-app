@@ -82,6 +82,7 @@ from app.models import (
     SaveAssistantEntryRequest,
     SaveProjectNodeRequest,
     SavePromptEntryRequest,
+    MoveLoreNoteToResearchResponse,
     ResearchNote,
     SaveResearchNoteRequest,
     SaveSceneRequest,
@@ -472,6 +473,20 @@ def save_lore_entry(entry_id: str, request: SaveLoreEntryRequest) -> LoreEntry:
 def delete_lore_entry(entry_id: str) -> LoreEntryList:
     with translate_errors():
         return service.delete_lore_entry(entry_id)
+
+
+@app.post(
+    "/api/lore/{entry_id}/move-to-research",
+    response_model=MoveLoreNoteToResearchResponse,
+)
+def move_lore_note_to_research(entry_id: str) -> MoveLoreNoteToResearchResponse:
+    """Convert a lore_note to a research/note (slice 5 of
+    docs/research-strategy.md). Returns the new note id, updated
+    research tree, dropped metadata field ids (aliases / related_entries
+    / context_policy are intentional v1 data loss), and refreshed lore
+    list so callers update both panes in one round-trip."""
+    with translate_errors():
+        return service.move_lore_note_to_research(entry_id)
 
 
 @app.get("/api/prompts", response_model=PromptEntryList)

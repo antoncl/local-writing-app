@@ -72,6 +72,13 @@ export type LoreEntryList = {
   entries: LoreEntrySummary[];
 };
 
+export type MoveLoreNoteToResearchResponse = {
+  note_id: string;
+  tree: StructureDocument;
+  dropped_fields: string[];
+  lore: LoreEntryList;
+};
+
 export type PromptEntrySummary = {
   id: string;
   title: string;

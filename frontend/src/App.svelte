@@ -2511,6 +2511,51 @@
     };
   }
 
+  // Slice 5: migrate a single lore_note to a research/note. Confirms
+  // before running because the v1 note schema is minimal — aliases /
+  // related_entries / context_policy on the source are intentionally
+  // dropped. The cascade preview surfaces what'll be lost so the user
+  // can cancel.
+  async function requestMoveLoreNoteToResearch(entry: LoreEntrySummary) {
+    const droppable: string[] = [];
+    const meta = entry.metadata ?? {};
+    if (Array.isArray(meta.aliases) && meta.aliases.length > 0) droppable.push("aliases");
+    if (Array.isArray(meta.related_entries) && meta.related_entries.length > 0) droppable.push("related_entries");
+    if (typeof meta.context_policy === "string" && meta.context_policy && meta.context_policy !== "auto") {
+      droppable.push("context_policy");
+    }
+    const cascadeNote = droppable.length > 0
+      ? `\n\nThe following metadata will be dropped (research notes only carry title + body + tags): ${droppable.join(", ")}.`
+      : "";
+    confirmation = {
+      title: "Move to Research",
+      message: `Move "${entry.title}" out of Lore and into the Research tree?${cascadeNote}`,
+      details: [],
+      confirmLabel: "Move to Research",
+      destructive: droppable.length > 0,
+      onConfirm: async () => {
+        // Close the lore entry's editor pane first so it doesn't dangle
+        // on a deleted file. The new research note will open in its own
+        // pane after the migration.
+        editorPanes.forEach((pane) => {
+          if (pane.document?.type === "lore" && pane.document.id === entry.id) {
+            tearDownEditorPane(pane.id);
+          }
+        });
+        await run(async () => {
+          const result = await api.moveLoreNoteToResearch(entry.id);
+          loreEntries = result.lore.entries;
+          researchStructure = result.tree;
+          // Open the new note in the editor so the user sees the result.
+          await openResearchNoteInEditorPane(result.note_id);
+          status = result.dropped_fields.length > 0
+            ? `Moved "${entry.title}" to Research (dropped ${result.dropped_fields.join(", ")})`
+            : `Moved "${entry.title}" to Research`;
+        });
+      },
+    };
+  }
+
   function entryTypeName(typeId: string, schema: MetadataSchema | null): string {
     return schema?.entry_types[typeId]?.name ?? typeId;
   }
@@ -4281,7 +4326,18 @@
                     stripeColor={entrySwatch?.hex ?? null}
                     onClick={() => openLoreEntryInEditorPane(entry.id)}
                     on:mousedown={(event) => event.stopPropagation()}
-                  />
+                  >
+                    {#snippet trailing()}
+                      {#if entry.entry_type === "lore_note"}
+                        <button
+                          class="row-action-add"
+                          type="button"
+                          title="Move to Research"
+                          on:click|stopPropagation={() => requestMoveLoreNoteToResearch(entry)}
+                        >→R</button>
+                      {/if}
+                    {/snippet}
+                  </NodeRow>
                 {/each}
               {/if}
             {/snippet}

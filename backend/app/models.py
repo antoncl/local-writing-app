@@ -496,6 +496,21 @@ class SaveResearchNoteRequest(BaseModel):
     metadata: dict[str, MetadataValue] = Field(default_factory=dict)
 
 
+class MoveLoreNoteToResearchResponse(BaseModel):
+    """Result of POST /api/lore/{id}/move-to-research.
+
+    Carries the new note's id, the updated research tree, the dropped
+    metadata field ids (intentional data loss from the v1 minimal note
+    schema — surfaced so the UI can warn), and the refreshed lore list
+    so callers can update both panes in one round-trip.
+    """
+
+    note_id: str
+    tree: "StructureDocument"
+    dropped_fields: list[str] = Field(default_factory=list)
+    lore: "LoreEntryList"
+
+
 class SaveSceneRequest(BaseModel):
     title: str = Field(min_length=1)
     body_markdown: str

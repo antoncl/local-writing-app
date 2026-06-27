@@ -52,7 +52,21 @@ export type LoreEntry = {
   source_layer_label?: string;
 };
 
-export type EditableDocument = Scene | LoreEntry | PromptEntry | AssistantEntry;
+// One leaf in the research tree — prose body + tags-only metadata.
+// Mirrors the backend ResearchNote shape; no status / aliases /
+// related_entries (see docs/research-strategy.md).
+export type ResearchNote = {
+  id: string;
+  title: string;
+  body_markdown: string;
+  revision: string;
+  entry_type: string;
+  metadata: EntryMetadata;
+  source_layer_id?: string;
+  source_layer_label?: string;
+};
+
+export type EditableDocument = Scene | LoreEntry | PromptEntry | AssistantEntry | ResearchNote;
 
 export type LoreEntryList = {
   entries: LoreEntrySummary[];

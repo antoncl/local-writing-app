@@ -42,6 +42,7 @@
     LoreEntrySummary,
     PromptEntry,
     PromptEntrySummary,
+    ResearchNote,
     Scene,
     MachineSettingsUpdate,
     MachineSettingsView,
@@ -68,7 +69,7 @@
   type AppState =
     | { name: "needsProject" }
     | { name: "projectOpen"; project: ProjectInfo };
-  type DocumentRef = { type: "scene" | "lore" | "prompt" | "assistant" | "project" | "structure_node" | "chat"; id: string };
+  type DocumentRef = { type: "scene" | "lore" | "prompt" | "assistant" | "project" | "structure_node" | "chat" | "research"; id: string };
   type PaneId = "project" | "outline" | "lore" | "todo" | "search" | string;
   type MetadataReloadSignal = { token: number; metadata: EntryMetadata; status: string; entryType: string };
   type LoreEntryGroup = {
@@ -203,6 +204,11 @@
   $: project = appState.name === "projectOpen" ? appState.project : null;
   $: isProjectOpen = appState.name === "projectOpen";
   let structure: StructureDocument | null = null;
+  // Research tree — parallel structure to the manuscript tree. Topics
+  // are containers, notes are leaves with their own markdown file.
+  // See docs/research-strategy.md.
+  let researchStructure: StructureDocument | null = null;
+  let collapsedResearchNodes: Record<string, boolean> = {};
   let loreEntries: LoreEntrySummary[] = [];
   // Compiled matcher for implicit-context highlighting in editors.
   // Rebuilds whenever the lore set changes. Cheap (sub-millisecond at
@@ -363,6 +369,7 @@
     project: { title: "Project", x: 18, y: 18, width: 380, height: 340, z: 1 },
     outline: { title: "Draft", x: 18, y: 260, width: 300, height: 420, z: 2 },
     lore: { title: "Lore", x: 330, y: 260, width: 300, height: 320, z: 3 },
+    research: { title: "Research", x: 650, y: 260, width: 300, height: 320, z: 3 },
     schema: { title: "Detail Types", x: 330, y: 260, width: 360, height: 420, z: 3 },
     schema_field: { title: "Detail Field", x: 708, y: 260, width: 360, height: 420, z: 4 },
     schema_type: { title: "Detail Type", x: 708, y: 260, width: 440, height: 560, z: 4 },
@@ -649,6 +656,7 @@
     if (id === "project") return true;
     if (id === "assistants") return _assistantsPaneOpen;
     if (!_isProjectOpen) return false;
+    if (id === "research") return true;
     if (id === "schema") return _schemaPaneOpen;
     if (id === "schema_field") return _schemaFieldPaneOpen;
     if (id === "schema_type") return _schemaTypePaneOpen;
@@ -880,6 +888,10 @@
 
   async function refreshStructure() {
     structure = await api.getStructure();
+  }
+
+  async function refreshResearchStructure() {
+    researchStructure = await api.getResearchStructure();
   }
 
   async function refreshLoreEntries() {
@@ -1139,6 +1151,7 @@
       const openedProject = await api.createProject(path, title, baseFolder ?? "");
       openProjectWorkspace(openedProject);
       await refreshStructure();
+      await refreshResearchStructure();
       await refreshLoreEntries();
       await refreshPromptEntries();
       await refreshMetadataSchema();
@@ -1158,6 +1171,7 @@
       const openedProject = await api.openProject(path, "");
       openProjectWorkspace(openedProject);
       await refreshStructure();
+      await refreshResearchStructure();
       await refreshLoreEntries();
       await refreshPromptEntries();
       await refreshMetadataSchema();
@@ -2348,6 +2362,155 @@
       .sort((a, b) => a.name.localeCompare(b.name));
   }
 
+  // Choices for the research-tree "+ Add child" menu — topic + note.
+  // Filters by the `research` kind and drops abstract parents.
+  function researchEntryTypeChoices(schema: MetadataSchema | null): Array<{ id: string; name: string }> {
+    return Object.entries(schema?.entry_types ?? {})
+      .filter(([, definition]) => definition.kind === "research" && !definition.abstract)
+      .map(([id, definition]) => ({ id, name: definition.name }))
+      .sort((a, b) => a.name.localeCompare(b.name));
+  }
+
+  function isResearchLeaf(node: StructureNode): boolean {
+    return node.type === "note";
+  }
+
+  function findResearchNodeForNote(node: StructureNode, noteId: string): StructureNode | null {
+    if (node.scene_id === noteId) return node;
+    for (const child of node.children ?? []) {
+      const found = findResearchNodeForNote(child, noteId);
+      if (found) return found;
+    }
+    return null;
+  }
+
+  function toggleResearchNodeCollapse(nodeId: string) {
+    collapsedResearchNodes = {
+      ...collapsedResearchNodes,
+      [nodeId]: !collapsedResearchNodes[nodeId],
+    };
+  }
+
+  async function addResearchChild(parentId: string | null, entryType: string) {
+    const typeName = entryTypeName(entryType, metadataSchema);
+    const parent = (() => {
+      if (!researchStructure) return null;
+      if (!parentId) return researchStructure.root;
+      return findStructureNodeById(researchStructure.root, parentId);
+    })();
+    const siblingCount = parent?.children?.filter((child) => child.type === entryType).length ?? 0;
+    const title = `${typeName} ${siblingCount + 1}`;
+    addMenuOpenFor = null;
+    await run(async () => {
+      const before = researchStructure;
+      researchStructure = await api.createResearchNode(title, entryType, parentId);
+      const createdNodeId = findNewlyAddedChildId(before, researchStructure, parentId);
+      if (createdNodeId) {
+        if (entryType === "note") {
+          // Notes open in the editor pane like scenes — drop the user
+          // straight into the body editor.
+          const created = findStructureNodeById(researchStructure.root, createdNodeId);
+          if (created?.scene_id) {
+            await openResearchNoteInEditorPane(created.scene_id);
+          }
+        } else {
+          // Topics rename inline in the tree, like Acts/Chapters.
+          startRename(createdNodeId, title);
+        }
+      }
+    });
+  }
+
+  async function openResearchNoteInEditorPane(noteId: string) {
+    const existingPane = editorPanes.find((pane) => pane.document?.type === "research" && pane.document.id === noteId);
+    if (existingPane) {
+      focusedEditorPaneId = existingPane.id;
+      focusPane(existingPane.id);
+      status = `Focused ${existingPane.scene?.title ?? "open note"}`;
+      return;
+    }
+
+    let targetPane = editorPanes.find((pane) => !pane.pinned);
+    if (!targetPane) {
+      targetPane = addEditorPane();
+    }
+
+    if (targetPane.dirty) {
+      await saveEditorPane(targetPane.id);
+    }
+
+    const note = await api.getResearchNote(noteId);
+    editorPanes = editorPanes.map((pane) =>
+      pane.id === targetPane.id
+        ? {
+            ...pane,
+            document: { type: "research", id: note.id },
+            scene: note,
+            dirty: false,
+            draftTitle: note.title,
+            draftMarkdown: note.body_markdown,
+            draftStatus: "",
+            draftEntryType: note.entry_type,
+            draftMetadata: cloneMetadata(note.metadata),
+            saving: false,
+            recentlySaved: false,
+          }
+        : pane,
+    );
+    focusedEditorPaneId = targetPane.id;
+    focusPane(targetPane.id);
+    status = `Loaded ${note.title}`;
+  }
+
+  async function requestDeleteResearchNode(node: StructureNode) {
+    if (editingNodeId === node.id) {
+      editingNodeId = null;
+    }
+    let preview: StructureNodeDeletePreview | null = null;
+    try {
+      preview = await api.cascadeResearchDeletePreview(node.id);
+    } catch (error) {
+      console.warn("Failed to fetch research cascade preview", error);
+    }
+    const typeName = entryTypeName(node.type, metadataSchema);
+    const noteCount = preview?.descendant_scene_count ?? 0;
+    const containerCount = preview?.descendant_container_count ?? 0;
+    const parts: string[] = [];
+    if (noteCount > 0) parts.push(`${noteCount} ${noteCount === 1 ? "note" : "notes"}`);
+    if (containerCount > 0) parts.push(`${containerCount} ${containerCount === 1 ? "topic" : "topics"}`);
+    const cascadeNote = parts.length ? ` This also removes ${parts.join(" and ")}.` : "";
+    const backlinks = preview?.backlinks ?? [];
+    const baseMessage = `Delete ${typeName.toLowerCase()} "${node.title}"?${cascadeNote}`;
+    const message = backlinks.length > 0
+      ? `${baseMessage}\n\n${backlinks.length} ${backlinks.length === 1 ? "entry references" : "entries reference"} this — those links will become broken:`
+      : baseMessage;
+    confirmation = {
+      title: `Delete ${typeName}`,
+      message,
+      details: backlinks.map((link) => `${link.title} — ${link.field_name}`),
+      confirmLabel: `Delete ${typeName}`,
+      destructive: true,
+      onConfirm: async () => {
+        // If a doomed note is open in an editor pane, close it before the
+        // delete so the pane doesn't dangle on a missing note.
+        const doomedNoteIds = new Set<string>();
+        function collectNoteIds(n: StructureNode) {
+          if (n.scene_id) doomedNoteIds.add(n.scene_id);
+          n.children?.forEach(collectNoteIds);
+        }
+        collectNoteIds(node);
+        editorPanes.forEach((pane) => {
+          if (pane.document?.type === "research" && doomedNoteIds.has(pane.document.id)) {
+            tearDownEditorPane(pane.id);
+          }
+        });
+        await run(async () => {
+          researchStructure = await api.deleteResearchNode(node.id);
+        });
+      },
+    };
+  }
+
   function entryTypeName(typeId: string, schema: MetadataSchema | null): string {
     return schema?.entry_types[typeId]?.name ?? typeId;
   }
@@ -3515,6 +3678,8 @@
       let savedDocument: EditableDocument;
       if (documentKind === "lore") {
         savedDocument = await api.saveLoreEntry(draftDocument as LoreEntry, pane.draftMarkdown);
+      } else if (documentKind === "research") {
+        savedDocument = await api.saveResearchNote(draftDocument as ResearchNote, pane.draftMarkdown);
       } else if (documentKind === "prompt") {
         savedDocument = await api.savePromptEntry(draftDocument as PromptEntry, pane.draftMarkdown);
       } else if (documentKind === "assistant") {
@@ -3567,6 +3732,11 @@
       if (documentKind === "lore") {
         await refreshLoreEntries();
         await refreshKnownTags();
+      } else if (documentKind === "research") {
+        // save_research_note already syncs the title into the research tree
+        // server-side; refresh so the pane reflects it.
+        await refreshResearchStructure();
+        await refreshKnownTags();
       } else if (documentKind === "prompt") {
         await refreshPromptEntries();
       } else if (documentKind === "assistant") {
@@ -3608,13 +3778,15 @@
     } catch (error) {
       console.warn("Failed to fetch backlinks", error);
     }
-    const fileLabel = documentKind === "scene" ? "scene" : documentKind === "lore" ? "entry" : "prompt";
+    const fileLabel = documentKind === "scene" ? "scene" : documentKind === "lore" ? "entry" : documentKind === "research" ? "note" : "prompt";
     const titleLabel =
       documentKind === "scene"
         ? "Delete Scene"
         : documentKind === "lore"
           ? "Delete Entry"
-          : "Delete Prompt";
+          : documentKind === "research"
+            ? "Delete Note"
+            : "Delete Prompt";
     const baseMessage = `Delete "${sceneTitle}"? This removes the ${fileLabel} file from the project.`;
     const message =
       backlinks.length > 0
@@ -3675,6 +3847,13 @@
     const sceneTitle = pane.scene.title;
     if (documentKind === "lore") {
       loreEntries = (await api.deleteLoreEntry(pane.scene.id)).entries;
+    } else if (documentKind === "research") {
+      // Delete the tree node that points at this note; the backend
+      // unlinks the markdown file as part of the cascade.
+      const node = researchStructure ? findResearchNodeForNote(researchStructure.root, pane.scene.id) : null;
+      if (node) {
+        researchStructure = await api.deleteResearchNode(node.id);
+      }
     } else if (documentKind === "prompt") {
       promptEntries = (await api.deletePromptEntry(pane.scene.id)).entries;
     } else if (documentKind === "assistant") {
@@ -4118,6 +4297,48 @@
       </NodeList>
     </div>
     <button class="pane-resize" type="button" aria-label="Resize Lore pane" on:keydown={(event) => handlePaneResizeKeydown(event, "lore")} on:mousedown={(event) => startPaneResize(event, "lore")}></button>
+  </section>
+
+  <!-- svelte-ignore a11y_no_noninteractive_element_interactions -->
+  <section class:hidden-pane={!isPaneVisible("research")} class="pane research-pane" data-pane-id="research" style={paneStyle("research")} aria-label="Research pane" on:mousedown={() => focusPane("research")}>
+    <header class="pane-header" role="button" tabindex="0" aria-label="Move Research pane" on:keydown={(event) => handlePaneHeaderKeydown(event, "research")} on:mousedown={(event) => startPaneDrag(event, "research")}>
+      <h2>Research</h2>
+      <div class="pane-header-actions">
+        <div class="tree-menu-anchor">
+          <button class="pin-button" type="button" class:active={addMenuOpenFor === "__research_root__"} title="Add at root" on:mousedown={(event) => event.stopPropagation()} on:click={(event) => toggleAddMenu("__research_root__", event)}>+ Add</button>
+          {#if addMenuOpenFor === "__research_root__"}
+            <div class="row-add-popover" style={addMenuPosition ? `top: ${addMenuPosition.top}px; right: ${addMenuPosition.right}px` : ""}>
+              <span class="row-add-popover-heading">Add at root</span>
+              <NodeList isEmpty={false}>
+                {#each researchEntryTypeChoices(metadataSchema) as choice (choice.id)}
+                  <NodeRow
+                    title={choice.name}
+                    onClick={() => { addResearchChild(null, choice.id); addMenuOpenFor = null; addMenuPosition = null; }}
+                  />
+                {/each}
+              </NodeList>
+            </div>
+          {/if}
+        </div>
+      </div>
+    </header>
+    <div class="pane-content">
+      <NodeList isEmpty={!researchStructure || nodeChildren(researchStructure.root).length === 0}>
+        {#if researchStructure}
+          {#each nodeChildren(researchStructure.root) as child (child.id)}
+            {@render renderResearchTree(child)}
+          {/each}
+        {/if}
+        {#snippet whenEmpty()}
+          {#if !researchStructure}
+            <p class="muted">Open or create a project to begin.</p>
+          {:else}
+            <p class="muted">No topics or notes yet.</p>
+          {/if}
+        {/snippet}
+      </NodeList>
+    </div>
+    <button class="pane-resize" type="button" aria-label="Resize Research pane" on:keydown={(event) => handlePaneResizeKeydown(event, "research")} on:mousedown={(event) => startPaneResize(event, "research")}></button>
   </section>
 
   <!-- svelte-ignore a11y_no_noninteractive_element_interactions -->
@@ -5276,6 +5497,96 @@
       {#snippet children()}
         {#each childNodes as child (child.id)}
           {@render renderTree(child)}
+        {/each}
+      {/snippet}
+    </NodeRow>
+  {/if}
+{/snippet}
+
+{#snippet renderResearchTree(node: StructureNode)}
+  {@const childNodes = nodeChildren(node)}
+  {@const leaf = isResearchLeaf(node)}
+  {@const editing = editingNodeId === node.id}
+  {@const isActive = (!!node.scene_id && focusedEditorPane?.document?.type === "research" && focusedEditorPane.document.id === node.scene_id)}
+  {@const isPinned = !!node.scene_id && pinnedEditorPaneKeys.has(`research:${node.scene_id}`)}
+  {#if leaf && !editing}
+    <NodeRow
+      role="treeitem"
+      ariaLabel={node.title}
+      title={node.title}
+      active={isActive}
+      pinned={isPinned}
+      onClick={() => node.scene_id && run(() => openResearchNoteInEditorPane(node.scene_id!))}
+      on:mousedown={(event) => event.stopPropagation()}
+    />
+  {:else if editing}
+    <NodeRow
+      groupHeader={!leaf}
+      role="treeitem"
+      ariaLabel={node.title}
+      collapsed={leaf ? true : (!!collapsedResearchNodes[node.id] || childNodes.length === 0)}
+      clickable={false}
+      dataNodeId={node.id}
+      on:mousedown={(event) => event.stopPropagation()}
+    >
+      {#snippet titleSlot()}
+        <input
+          class="tree-title tree-rename-input"
+          data-node-edit-id={node.id}
+          bind:value={editingTitle}
+          on:keydown={(event) => handleRenameKeydown(event, node.id)}
+          on:blur={() => commitRename(node.id)}
+        />
+      {/snippet}
+      {#snippet children()}
+        {#if !leaf}
+          {#each childNodes as child (child.id)}
+            {@render renderResearchTree(child)}
+          {/each}
+        {/if}
+      {/snippet}
+    </NodeRow>
+  {:else}
+    {@const isCollapsed = !!collapsedResearchNodes[node.id] || childNodes.length === 0}
+    <NodeRow
+      groupHeader
+      role="treeitem"
+      ariaLabel={node.title}
+      title={node.title}
+      active={isActive}
+      pinned={isPinned}
+      collapsed={isCollapsed}
+      dataNodeId={node.id}
+      onClick={() => toggleResearchNodeCollapse(node.id)}
+      onDblClick={() => startRename(node.id, node.title)}
+      on:mousedown={(event) => event.stopPropagation()}
+    >
+      {#snippet leading()}
+        <span class:collapsed={isCollapsed} class="lore-group-caret">▾</span>
+      {/snippet}
+      {#snippet trailing()}
+        <span class="group-count-pill">{childNodes.length}</span>
+        <div class="tree-menu-anchor">
+          <button class="row-action-add" class:active={addMenuOpenFor === node.id} title="Add child" on:click|stopPropagation={(event) => toggleAddMenu(node.id, event)}>+&gt;</button>
+          {#if addMenuOpenFor === node.id}
+            <div class="row-add-popover" style={addMenuPosition ? `top: ${addMenuPosition.top}px; right: ${addMenuPosition.right}px` : ""}>
+              <span class="row-add-popover-heading">Add child</span>
+              <NodeList isEmpty={false}>
+                {#each researchEntryTypeChoices(metadataSchema) as choice (choice.id)}
+                  <NodeRow
+                    title={choice.name}
+                    onClick={() => { addResearchChild(node.id, choice.id); addMenuOpenFor = null; addMenuPosition = null; }}
+                  />
+                {/each}
+              </NodeList>
+            </div>
+          {/if}
+        </div>
+        <button class="row-action-delete" title={`Delete ${entryTypeName(node.type, metadataSchema)}`} on:click|stopPropagation={() => requestDeleteResearchNode(node)}>×</button>
+      {/snippet}
+      {#snippet children()}
+        {#each childNodes as child (child.id)}
+          {@render renderResearchTree(child)}
         {/each}
       {/snippet}
     </NodeRow>

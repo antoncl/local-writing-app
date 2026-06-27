@@ -123,6 +123,17 @@ textarea {
   font: inherit;
 }
 
+/* Chrome's UA stylesheet sets text inputs to black-on-white regardless
+   of the parent's color, which collapses contrast in dark mode. Make
+   them inherit the document's text color and pick up the surface
+   token; per-element rules can still override. */
+input,
+select,
+textarea {
+  color: var(--text);
+  background: var(--surface);
+}
+
 button {
   border: 1px solid var(--border);
   background: var(--surface);
@@ -1463,7 +1474,7 @@ button.row-action-add.active {
 }
 
 .title-input:focus {
-  border-bottom-color: #2f6f5e;
+  border-bottom-color: var(--accent);
   outline: none;
 }
 

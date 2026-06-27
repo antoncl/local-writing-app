@@ -3528,24 +3528,37 @@
       } else {
         savedDocument = await api.saveScene(draftDocument as Scene, pane.draftMarkdown);
       }
-      editorPanes = editorPanes.map((candidate) =>
-        candidate.id === id
-          ? {
-              ...candidate,
-              document: { type: documentKind, id: savedDocument.id },
-              scene: savedDocument,
-              dirty: false,
-              draftTitle: savedDocument.title,
-              draftMarkdown: savedDocument.body_markdown,
-              draftStatus: documentStatus(savedDocument),
-              draftEntryType: savedDocument.entry_type,
-              draftMetadata: cloneMetadata(savedDocument.metadata),
-              saving: false,
-              recentlySaved: true,
-            }
-          : candidate,
-      );
-      flashSavedIndicator(id);
+      // Keep the pane's current draft-* fields rather than snapping them to
+      // savedDocument: if the user kept typing while the save was in flight
+      // (easy under the 6s auto-save debounce), those keystrokes live in
+      // the draft fields and would otherwise be silently overwritten.
+      // Recompute `dirty` against savedDocument so the next debounce picks
+      // up the interim edits.
+      let paneStillDirty = false;
+      editorPanes = editorPanes.map((candidate) => {
+        if (candidate.id !== id) return candidate;
+        paneStillDirty = isEditorPaneDirty(
+          savedDocument,
+          candidate.draftTitle,
+          candidate.draftMarkdown,
+          candidate.draftStatus,
+          candidate.draftEntryType,
+          candidate.draftMetadata,
+          candidate.draftInputs,
+        );
+        return {
+          ...candidate,
+          document: { type: documentKind, id: savedDocument.id },
+          scene: savedDocument,
+          dirty: paneStillDirty,
+          saving: false,
+          // Only show "Saved" feedback if the pane is genuinely caught up;
+          // flashing it while drafts are still pending would be misleading.
+          recentlySaved: !paneStillDirty,
+        };
+      });
+      if (paneStillDirty) scheduleAutoSave(id);
+      else flashSavedIndicator(id);
       if (documentKind === "lore") {
         await refreshLoreEntries();
         await refreshKnownTags();

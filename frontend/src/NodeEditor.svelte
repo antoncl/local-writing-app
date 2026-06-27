@@ -693,22 +693,18 @@
           <input class="title-input" aria-label={`${documentLabel} ${documentNameLabel.toLowerCase()}`} placeholder={documentNameLabel} bind:value={title} on:input={handleTitleInput} />
         </label>
       </div>
-      <div class="editor-hint">
-        <span class="editor-hint-text">
+      {#if todoStatusHint || (documentKind === "scene" && lastInvocationCostUsd != null)}
+        <div class="editor-hint">
           {#if todoStatusHint}
-            {todoStatusHint}
-          {:else if editorEmpty}
-            {documentKind === "scene" ? "Start writing, or type / for commands." : "Start writing."}
-          {:else}
-            {documentKind === "scene" ? "Select text for formatting. Type / on an empty line for insert commands." : "Select text for formatting."}
+            <span class="editor-hint-text">{todoStatusHint}</span>
           {/if}
-        </span>
-        {#if documentKind === "scene" && lastInvocationCostUsd != null}
-          <span class="continuation-cost-chip" title="Last continuation invocation cost · running total for this scene this session. Resets on reload or scene switch.">
-            last {formatCostEur(lastInvocationCostUsd)} · session {formatCostEur(sceneSessionCostUsd)}
-          </span>
-        {/if}
-      </div>
+          {#if documentKind === "scene" && lastInvocationCostUsd != null}
+            <span class="continuation-cost-chip" title="Last continuation invocation cost · running total for this scene this session. Resets on reload or scene switch.">
+              last {formatCostEur(lastInvocationCostUsd)} · session {formatCostEur(sceneSessionCostUsd)}
+            </span>
+          {/if}
+        </div>
+      {/if}
     {:else}
       <h2>Select a scene</h2>
     {/if}

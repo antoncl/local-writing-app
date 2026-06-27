@@ -1684,18 +1684,6 @@ button.row-action-add.active {
   margin-top: 0;
 }
 
-.editor-wrap.empty-editor .editor-body > p:first-child::before {
-  float: left;
-  height: 0;
-  color: #9aa6a1;
-  content: "Start writing, or type / for commands...";
-  pointer-events: none;
-}
-
-.editor-wrap.empty-editor.lore-editor .editor-body > p:first-child::before {
-  content: "Start writing...";
-}
-
 .editor-body h1,
 .editor-body h2,
 .editor-body h3 {

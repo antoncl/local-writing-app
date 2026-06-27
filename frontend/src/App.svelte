@@ -3735,7 +3735,7 @@
         return [
           paneId,
           items.length === 0
-            ? "No embedded TODOs. Select text to mark a TODO."
+            ? ""
             : `${openCount} open embedded TODO${openCount === 1 ? "" : "s"} · ${doneCount} completed.`,
         ];
       }),
@@ -4799,7 +4799,7 @@
         metadataReload={metadataReloadsByPane[editorPane.id] ?? null}
         titleReload={titleReloadsByPane[editorPane.id] ?? null}
         dirty={editorPane.dirty}
-        todoStatusHint={editorPane.document?.type === "scene" && editorPane.scene && sceneEntryHasBody(editorPane.scene) ? (embeddedTodoStatusHintsByPane[editorPane.id] ?? "No embedded TODOs. Select text to mark a TODO.") : ""}
+        todoStatusHint={editorPane.document?.type === "scene" && editorPane.scene && sceneEntryHasBody(editorPane.scene) ? (embeddedTodoStatusHintsByPane[editorPane.id] ?? "") : ""}
         on:focus={() => focusPane(editorPane.id)}
         on:change={(event) =>
           updateEditorPaneDraft(

@@ -183,6 +183,11 @@
     return `hsl(${hue}, 62%, 48%)`;
   }
 
+  function characterTitleFromId(id: string): string {
+    const entry = loreEntries.find((e) => e.id === id);
+    return entry?.title || "Unresolved character";
+  }
+
   const CharacterMark = Mark.create({
     name: "character",
     inclusive: false,
@@ -197,6 +202,7 @@
             const id = String(attributes.characterId);
             return {
               "data-character": id,
+              title: characterTitleFromId(id),
               style: `--character-color: ${characterColorFromId(id)}`,
             };
           },

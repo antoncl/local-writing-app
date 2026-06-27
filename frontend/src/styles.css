@@ -3578,6 +3578,32 @@ button.schema-field-row:hover {
   color: #2a3431;
 }
 
+.prompt-restore-default-button {
+  position: absolute;
+  top: 8px;
+  right: 38px;
+  z-index: 5;
+  display: inline-flex;
+  align-items: center;
+  height: 22px;
+  padding: 0 10px;
+  border-radius: 11px;
+  border: 1px solid #cbd6d2;
+  background: #ffffff;
+  color: #4d5753;
+  font-size: 11px;
+  font-weight: 500;
+  cursor: pointer;
+  line-height: 1;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.06);
+}
+
+.prompt-restore-default-button:hover {
+  background: #e8efed;
+  border-color: #4d5753;
+  color: #2a3431;
+}
+
 .prompt-help-popover {
   position: fixed;
   width: min(720px, calc(100vw - 24px));

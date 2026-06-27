@@ -65,6 +65,22 @@
 
   const isPrompt = (): boolean => documentKind === "prompt" && !!scene;
 
+  // --- Restore-default-body (for prompt sub-types with a non-empty
+  //     default_body, e.g. roleplay). Visible only when the current body
+  //     diverges, so a freshly-created prompt won't see noise. Click
+  //     overwrites rawBody — CodeMirror keeps undo history, and the parent
+  //     pane doesn't auto-save, so accidents are recoverable.
+  $: entryTypeDefaultBody =
+    isPrompt() && metadataSchema && scene
+      ? metadataSchema.entry_types[scene.entry_type]?.default_body ?? ""
+      : "";
+  $: canRestoreDefaultBody = entryTypeDefaultBody.length > 0 && rawBody !== entryTypeDefaultBody;
+
+  function restoreDefaultBody(): void {
+    if (!canRestoreDefaultBody) return;
+    rawBody = entryTypeDefaultBody;
+  }
+
   // --- Cheatsheet popover ---
   let cheatsheetPopoverOpen = false;
   let helpButtonEl: HTMLButtonElement | undefined;
@@ -397,6 +413,15 @@
   </div>
 
   {#if isPrompt()}
+    {#if canRestoreDefaultBody}
+      <button
+        type="button"
+        class="prompt-restore-default-button"
+        title="Replace this body with the type's default template. Ctrl+Z to undo."
+        aria-label="Restore default body"
+        on:click={restoreDefaultBody}
+      >Restore default body</button>
+    {/if}
     <button
       type="button"
       class="prompt-help-button"

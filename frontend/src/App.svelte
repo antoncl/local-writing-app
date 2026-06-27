@@ -319,8 +319,31 @@
   let collapsedAssistantGroups: Record<string, boolean> = {};
   // Outline group-header collapse state, keyed by StructureNode.id.
   // Same shape as the other collapsed-* maps so the refactor stays
-  // consistent across panes.
+  // consistent across panes. Persisted per-project to localStorage so
+  // the user's collapse choices survive reload.
   let collapsedStructureNodes: Record<string, boolean> = {};
+  const TREE_COLLAPSE_LS_PREFIX = "treeCollapse:";
+
+  function loadCollapsedStructureNodes(path: string): Record<string, boolean> {
+    if (!path) return {};
+    try {
+      const raw = localStorage.getItem(TREE_COLLAPSE_LS_PREFIX + path);
+      if (!raw) return {};
+      const parsed = JSON.parse(raw);
+      return parsed && typeof parsed === "object" ? parsed : {};
+    } catch {
+      return {};
+    }
+  }
+
+  function saveCollapsedStructureNodes(path: string, state: Record<string, boolean>): void {
+    if (!path) return;
+    try {
+      localStorage.setItem(TREE_COLLAPSE_LS_PREFIX + path, JSON.stringify(state));
+    } catch {
+      // Quota / private-browsing — silently degrade to in-memory only.
+    }
+  }
   let searchOpenTodos = false;
   let searchHits: SearchHit[] = [];
   let confirmation: ConfirmationState | null = null;
@@ -596,6 +619,7 @@
   function openProjectWorkspace(nextProject: ProjectInfo) {
     resetEditorWorkspace();
     projectPath = nextProject.root_path;
+    collapsedStructureNodes = loadCollapsedStructureNodes(projectPath);
     projectTitle = nextProject.title;
     aiPolicy = nextProject.ai_policy;
     aiDefaultProvider = nextProject.ai_default_provider ?? "";
@@ -2492,6 +2516,32 @@
       ...collapsedStructureNodes,
       [nodeId]: !collapsedStructureNodes[nodeId],
     };
+    saveCollapsedStructureNodes(projectPath, collapsedStructureNodes);
+  }
+
+  // Tree-row click → defer the collapse toggle past the browser's dblclick
+  // recognition window so a fast second click can cancel it and open the
+  // editor instead. Without the defer the user sees the row visibly toggle
+  // collapsed-state for ~100ms before the editor opens on top.
+  const DBLCLICK_GUARD_MS = 300;
+  let pendingCollapseTimeoutId: ReturnType<typeof setTimeout> | null = null;
+
+  function deferStructureNodeCollapse(nodeId: string) {
+    if (pendingCollapseTimeoutId !== null) {
+      clearTimeout(pendingCollapseTimeoutId);
+    }
+    pendingCollapseTimeoutId = setTimeout(() => {
+      pendingCollapseTimeoutId = null;
+      toggleStructureNodeCollapse(nodeId);
+    }, DBLCLICK_GUARD_MS);
+  }
+
+  function handleStructureNodeDblClick(nodeId: string) {
+    if (pendingCollapseTimeoutId !== null) {
+      clearTimeout(pendingCollapseTimeoutId);
+      pendingCollapseTimeoutId = null;
+    }
+    void run(() => openStructureNodeInEditorPane(nodeId));
   }
 
   async function moveNodeUp(node: StructureNode) {
@@ -5068,8 +5118,8 @@
       dropPosition={dragOverNodeId === node.id ? dragOverPosition : null}
       collapsed={isCollapsed}
       dataNodeId={node.id}
-      onClick={() => toggleStructureNodeCollapse(node.id)}
-      onDblClick={() => run(() => openStructureNodeInEditorPane(node.id))}
+      onClick={() => deferStructureNodeCollapse(node.id)}
+      onDblClick={() => handleStructureNodeDblClick(node.id)}
       on:mousedown={(event) => event.stopPropagation()}
       on:keydown={(event) => handleTreeRowKeydown(event, node)}
       on:dragover={(event) => handleTreeDragOver(event, node)}

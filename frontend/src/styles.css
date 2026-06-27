@@ -1004,33 +1004,6 @@ h3 {
   background: #edf6f2;
 }
 
-.tree-row .tree-title:focus {
-  outline: 2px solid #2f6f5e;
-  outline-offset: -2px;
-  background: #ffffff;
-}
-
-.tree-group {
-  font-weight: 700;
-}
-
-/* Outline group-header rows (Act, Chapter, etc.) use the serif chapter-
-   divider treatment from the Editorial Card direction. NodeRow's own
-   serif rule targets its default <strong> title path; the outline uses
-   a custom titleSlot (so it can host the rename input and route clicks
-   to setActiveParentId / openSceneInEditorPane), so the styling lives
-   here on the title button instead. Acts/Chapters are real Nodes that
-   happen to have children — see [[feedback-tree-uniformity-over-header-dichotomy]]. */
-.node-row.group-header .tree-group.tree-title {
-  font-family: var(--serif);
-  font-size: 14px;
-  font-weight: 700;
-  color: var(--text);
-}
-
-.tree-scene {
-  color: #333;
-}
 
 .tree-rename-input {
   flex: 1;

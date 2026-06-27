@@ -170,11 +170,13 @@ class ProjectCostEndpointTests(unittest.TestCase):
         response = self.client.get("/api/ai/project-cost")
         body = response.json()
         self.assertAlmostEqual(body["total_usd"], 0.40)
-        self.assertEqual(len(body["chats"]), 3)
+        # Phase C2 Slice B: zero-cost chats don't appear in the per-chat
+        # list — the source is the ai_invocations log and zero-delta saves
+        # don't append a row. "Empty" is omitted.
+        self.assertEqual(len(body["chats"]), 2)
         # Sorted desc by cost.
         self.assertEqual(body["chats"][0]["title"], "Continuation")
         self.assertEqual(body["chats"][1]["title"], "Brainstorm")
-        self.assertEqual(body["chats"][2]["title"], "Empty")
 
 
 if __name__ == "__main__":

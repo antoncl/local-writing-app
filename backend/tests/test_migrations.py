@@ -117,11 +117,12 @@ class MigrationFrameworkTests(unittest.TestCase):
         self.assertTrue(snippets.is_dir())
         self.assertTrue(project_md.exists())
         self.assertEqual(read_project_version(self.root), CURRENT_VERSION)
-        # Both pending migrations ran (v1 → v2 → v3).
-        self.assertEqual(len(reopened.last_migrations), 2)
+        # All pending migrations ran (v1 → v2 → v3 → v4).
+        self.assertEqual(len(reopened.last_migrations), 3)
         joined = " ".join(reopened.last_migrations)
         self.assertIn("snippets", joined)
         self.assertIn("project", joined)
+        self.assertIn("ai_invocations", joined)
 
         # Backup was created
         backup_dir = self.root / BACKUP_DIRNAME
@@ -156,6 +157,79 @@ class MigrationFrameworkTests(unittest.TestCase):
             migrations.MIGRATIONS.clear()
             migrations.MIGRATIONS.extend(original_registry)
             migrations.CURRENT_VERSION = original_current
+
+
+class ChatCostMigrationTests(unittest.TestCase):
+    """v3→v4: existing chat cost_usd_total moves into ai_invocations.yaml."""
+
+    def setUp(self) -> None:
+        self.temp_dir = TemporaryDirectory()
+        self.base = Path(self.temp_dir.name) / "writing"
+        self.root = self.base / "project"
+        self.service = ProjectService()
+        self.service.create_project(self.root, "Test Project")
+
+    def tearDown(self) -> None:
+        self.temp_dir.cleanup()
+
+    def _seed_v3_chat_with_total(self, chat_id: str, total: float) -> None:
+        chats_dir = self.root / "chats"
+        chats_dir.mkdir(exist_ok=True)
+        chat_path = chats_dir / f"{chat_id}.yaml"
+        chat_path.write_text(
+            yaml.safe_dump(
+                {
+                    "id": chat_id,
+                    "title": "Legacy chat",
+                    "created_at": "2026-06-01T12:00:00+00:00",
+                    "updated_at": "2026-06-02T15:30:00+00:00",
+                    "messages": [],
+                    "cost_usd_total": total,
+                    "target_scene_id": "scene_legacy",
+                },
+                sort_keys=False,
+            ),
+            encoding="utf-8",
+        )
+
+    def test_migration_moves_chat_total_into_log_and_zeros_yaml(self) -> None:
+        self._seed_v3_chat_with_total("chat_legacy_one", 0.42)
+        self._seed_v3_chat_with_total("chat_legacy_two", 0.13)
+        manifest_path = self.root / "project.yaml"
+        data = yaml.safe_load(manifest_path.read_text(encoding="utf-8"))
+        data["schema_version"] = 3
+        manifest_path.write_text(yaml.safe_dump(data, sort_keys=False), encoding="utf-8")
+
+        reopened = ProjectService()
+        reopened.open_project(self.root)
+
+        log_data = yaml.safe_load((self.root / "ai_invocations.yaml").read_text(encoding="utf-8"))
+        rows = log_data["invocations"]
+        by_chat = {r["chat_session_id"]: r for r in rows}
+        self.assertIn("chat_legacy_one", by_chat)
+        self.assertIn("chat_legacy_two", by_chat)
+        self.assertAlmostEqual(by_chat["chat_legacy_one"]["cost_usd"], 0.42, places=6)
+        self.assertAlmostEqual(by_chat["chat_legacy_two"]["cost_usd"], 0.13, places=6)
+        self.assertEqual(by_chat["chat_legacy_one"]["scene_id"], "scene_legacy")
+        # YAML cost_usd_total zeroed in place.
+        chat_yaml = yaml.safe_load(
+            (self.root / "chats" / "chat_legacy_one.yaml").read_text(encoding="utf-8")
+        )
+        self.assertEqual(chat_yaml["cost_usd_total"], 0.0)
+
+    def test_migration_skips_chats_with_zero_total(self) -> None:
+        self._seed_v3_chat_with_total("chat_zero", 0.0)
+        manifest_path = self.root / "project.yaml"
+        data = yaml.safe_load(manifest_path.read_text(encoding="utf-8"))
+        data["schema_version"] = 3
+        manifest_path.write_text(yaml.safe_dump(data, sort_keys=False), encoding="utf-8")
+
+        reopened = ProjectService()
+        reopened.open_project(self.root)
+        log_path = self.root / "ai_invocations.yaml"
+        if log_path.exists():
+            log_data = yaml.safe_load(log_path.read_text(encoding="utf-8")) or {}
+            self.assertEqual(log_data.get("invocations", []), [])
 
 
 if __name__ == "__main__":

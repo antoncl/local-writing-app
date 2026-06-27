@@ -1214,9 +1214,10 @@ class SaveChatSessionRequest(BaseModel):
 
 class AIInvocation(BaseModel):
     """Append-only telemetry record for one accepted AI invocation
-    (continuation or roleplay). The cost computed field sums these by
-    scope. Storage: <project>/ai_invocations.yaml. Not a Node kind for
-    MVP — sidecar log; promote to a kind later if an audit-log UI surfaces.
+    (continuation, roleplay, or chat turn). The cost computed field sums
+    these by scope. Storage: <project>/ai_invocations.yaml. Not a Node
+    kind for MVP — sidecar log; promote to a kind later if an audit-log
+    UI surfaces.
     """
     id: str
     ts: str
@@ -1224,6 +1225,9 @@ class AIInvocation(BaseModel):
     prompt_entry_type: str = ""
     scene_id: str = ""
     character_id: str = ""
+    # Phase C2 Slice B: chat-session attribution. Populated for rows
+    # logged via the chat-save path; empty for accept-flow rows.
+    chat_session_id: str = ""
     provider: str = ""
     model: str = ""
     usage: ChatUsage | None = None
@@ -1242,6 +1246,7 @@ class CreateAIInvocationRequest(BaseModel):
     prompt_entry_type: str = ""
     scene_id: str = ""
     character_id: str = ""
+    chat_session_id: str = ""
     provider: str = ""
     model: str = ""
     usage: ChatUsage | None = None

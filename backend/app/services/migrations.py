@@ -30,7 +30,7 @@ from typing import Callable
 
 import yaml
 
-CURRENT_VERSION = 3
+CURRENT_VERSION = 4
 KEEP_BACKUPS = 3
 BACKUP_DIRNAME = ".migration-backups"
 SKIP_FROM_BACKUP = {".migration-backups", ".cache"}
@@ -75,11 +75,72 @@ def _create_project_node_file(root: Path) -> None:
     project_md.write_text(f"---\n{front_matter}\n---\n\n", encoding="utf-8")
 
 
+def _move_chat_costs_to_invocation_log(root: Path) -> None:
+    """v3→v4: unify chat-session cost accounting into ai_invocations.yaml
+    (Phase C2 Slice B). Each chat with a non-zero cost_usd_total
+    contributes one summary row to the log (chat_session_id, scene_id,
+    cost_usd, ts), and cost_usd_total is zeroed in the chat YAML.
+    compute_project_cost reads only the log post-migration."""
+    chats_dir = root / "chats"
+    if not chats_dir.exists():
+        return
+    log_path = root / "ai_invocations.yaml"
+    log_records: list[dict] = []
+    if log_path.exists():
+        try:
+            existing = yaml.safe_load(log_path.read_text(encoding="utf-8")) or {}
+        except yaml.YAMLError:
+            existing = {}
+        if isinstance(existing, dict):
+            value = existing.get("invocations")
+            if isinstance(value, list):
+                log_records = list(value)
+    appended = False
+    for entry in chats_dir.iterdir():
+        if not entry.is_file() or entry.suffix.lower() != ".yaml":
+            continue
+        try:
+            chat = yaml.safe_load(entry.read_text(encoding="utf-8")) or {}
+        except yaml.YAMLError:
+            continue
+        if not isinstance(chat, dict):
+            continue
+        raw_cost = chat.get("cost_usd_total")
+        try:
+            cost = float(raw_cost) if raw_cost is not None else 0.0
+        except (TypeError, ValueError):
+            cost = 0.0
+        if cost <= 0:
+            continue
+        chat_id = str(chat.get("id", "") or "")
+        log_records.append({
+            "id": f"inv_migrated_{chat_id or entry.stem}",
+            "ts": str(chat.get("updated_at") or chat.get("created_at") or ""),
+            "prompt_entry_id": str(chat.get("prompt_entry_id", "") or ""),
+            "prompt_entry_type": "chat",
+            "scene_id": str(chat.get("target_scene_id", "") or ""),
+            "chat_session_id": chat_id,
+            "cost_usd": cost,
+        })
+        chat["cost_usd_total"] = 0.0
+        entry.write_text(
+            yaml.safe_dump(chat, sort_keys=False, allow_unicode=True),
+            encoding="utf-8",
+        )
+        appended = True
+    if appended:
+        log_path.write_text(
+            yaml.safe_dump({"invocations": log_records}, sort_keys=False, allow_unicode=True),
+            encoding="utf-8",
+        )
+
+
 # Each tuple: (target_version, description, function)
 # Migrations run in registry order; gaps are not allowed.
 MIGRATIONS: list[tuple[int, str, MigrationFn]] = [
     (2, "create snippets/ folder for snippet node kind", _create_snippets_folder),
     (3, "create project.md (project node singleton)", _create_project_node_file),
+    (4, "move chat cost_usd_total into ai_invocations.yaml", _move_chat_costs_to_invocation_log),
 ]
 
 

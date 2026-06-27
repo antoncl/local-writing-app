@@ -24,6 +24,7 @@ from app.models import (
     ChatSessionList,
     ChatSessionMessage,
     ChatSessionSummary,
+    ChatUsage,
     CreateAIInvocationRequest,
     CreateAssistantEntryRequest,
     CreateChatSessionRequest,
@@ -164,7 +165,7 @@ DEFAULT_METADATA_SCHEMA: dict[str, Any] = {
             "name": "Character",
             "kind": "lore",
             "parent": "lore_entry",
-            "fields": [],
+            "fields": ["character_cost"],
         },
         "place": {
             # Display label is "Location" (matches the `locations` field on
@@ -339,6 +340,7 @@ DEFAULT_METADATA_SCHEMA: dict[str, Any] = {
                 "target_word_count",
                 "series_number",
                 "color",
+                "project_cost",
             ],
             "has_body": True,
             "color": "violet",
@@ -434,12 +436,27 @@ DEFAULT_METADATA_SCHEMA: dict[str, Any] = {
             "computed": {"function": "counter", "scope": "siblings"},
         },
         "cost": {
-            # Sum of cost_usd across ai_invocations whose scope matches.
-            # MVP: scene-scoped only (sums invocations where scene_id == this
-            # scene). Cross-kind dispatch (lore/project) is the next phase.
+            # Per-scene sum of cost_usd across ai_invocations whose
+            # scene_id matches. Sibling fields character_cost / project_cost
+            # do the same for lore characters and the project node.
             "name": "AI cost",
             "type": "computed",
             "computed": {"function": "cost", "scope": "scene"},
+        },
+        "character_cost": {
+            # All-time AI cost attributed to this character across every
+            # scene — sum of cost_usd where ai_invocations.character_id ==
+            # this lore entry's id.
+            "name": "AI cost",
+            "type": "computed",
+            "computed": {"function": "cost", "scope": "character"},
+        },
+        "project_cost": {
+            # Whole-project AI cost — sum of cost_usd across every row in
+            # ai_invocations.yaml regardless of scene/character attribution.
+            "name": "AI cost",
+            "type": "computed",
+            "computed": {"function": "cost", "scope": "project"},
         },
         "ai_provider": {
             "name": "Subscription",
@@ -2799,7 +2816,7 @@ class ProjectService:
             status=status,
             entry_type=entry_type,
             metadata=metadata,
-            computed_metadata=self._computed_scene_metadata(body, node_id=node_id, entry_type=entry_type),
+            computed_metadata=self._computed_entry_metadata(body, node_id=node_id, entry_type=entry_type),
             source_layer_id=index_entry.source_layer_id if index_entry else "",
             source_layer_label=index_entry.source_layer_label if index_entry else "",
         )
@@ -2876,6 +2893,7 @@ class ProjectService:
             revision=self._revision(path),
             entry_type=entry_type,
             metadata=metadata,
+            computed_metadata=self._computed_entry_metadata(body, node_id="project", entry_type=entry_type),
         )
 
     def save_project_node(self, request: SaveProjectNodeRequest) -> ProjectNode:
@@ -3019,7 +3037,7 @@ class ProjectService:
             revision=self._revision(path),
             entry_type=entry_type,
             metadata=metadata,
-            computed_metadata={},
+            computed_metadata=self._computed_entry_metadata(body, node_id=node_id, entry_type=entry_type, schema=schema),
             source_layer_id=index_entry.source_layer_id if index_entry else "",
             source_layer_label=index_entry.source_layer_label if index_entry else "",
         )
@@ -3394,33 +3412,55 @@ class ProjectService:
         return datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%S.%fZ")
 
     def compute_project_cost(self) -> dict:
-        """Sum per-chat cost_usd_total across all chat sessions in the
-        current project. Returns:
+        """Sum cost_usd across `ai_invocations.yaml` and group by
+        chat_session_id. Rows without a chat_session_id (continuation /
+        roleplay accepts) fold into a synthetic "_other" bucket so the
+        total still matches the log total. Returns:
             {"total_usd": float,
              "chats": [{"id": str, "title": str, "cost_usd": float}, ...]}
-        Sorted by cost descending. Chats with zero cost are included so
-        the UI can show them; filter at the display layer if needed.
+        Sorted by cost descending. Phase C2 Slice B replaces the prior
+        per-chat cost_usd_total iteration.
         """
-        folder = self._chats_dir()
-        if not folder.exists():
-            return {"total_usd": 0.0, "chats": []}
-        rows: list[dict] = []
+        per_chat: dict[str, float] = {}
+        other_cost = 0.0
         total = 0.0
-        for entry in folder.iterdir():
-            if not entry.is_file() or entry.suffix.lower() != ".yaml":
+        for record in self._read_ai_invocations_raw():
+            cost = record.get("cost_usd")
+            if not isinstance(cost, (int, float)):
                 continue
-            try:
-                data = self._read_yaml(entry)
-            except Exception:
-                continue
-            if not isinstance(data, dict) or not data.get("id"):
-                continue
-            cost = float(data.get("cost_usd_total", 0.0) or 0.0)
-            total += cost
+            total += float(cost)
+            chat_id = str(record.get("chat_session_id") or "")
+            if chat_id:
+                per_chat[chat_id] = per_chat.get(chat_id, 0.0) + float(cost)
+            else:
+                other_cost += float(cost)
+        # Resolve titles via the chat YAMLs so the response carries
+        # human-readable labels. Chats whose YAML is gone (e.g. deleted
+        # but historical log rows remain) keep a stub title.
+        chat_titles: dict[str, str] = {}
+        folder = self._chats_dir()
+        if folder.exists():
+            for entry in folder.iterdir():
+                if not entry.is_file() or entry.suffix.lower() != ".yaml":
+                    continue
+                try:
+                    data = self._read_yaml(entry)
+                except Exception:
+                    continue
+                if isinstance(data, dict) and data.get("id"):
+                    chat_titles[str(data["id"])] = str(data.get("title") or "Untitled chat")
+        rows: list[dict] = []
+        for chat_id, cost in per_chat.items():
             rows.append({
-                "id": str(data.get("id", "")),
-                "title": str(data.get("title", "")) or "Untitled chat",
+                "id": chat_id,
+                "title": chat_titles.get(chat_id, "(deleted chat)"),
                 "cost_usd": cost,
+            })
+        if other_cost > 0:
+            rows.append({
+                "id": "_other",
+                "title": "Continuation & Roleplay accepts",
+                "cost_usd": other_cost,
             })
         rows.sort(key=lambda r: r["cost_usd"], reverse=True)
         return {"total_usd": total, "chats": rows}
@@ -3470,7 +3510,20 @@ class ProjectService:
         data = self._read_yaml(path)
         if not isinstance(data, dict):
             raise ProjectServiceError(f"Chat {chat_id} is malformed.", 500)
-        return ChatSession.model_validate(data)
+        session = ChatSession.model_validate(data)
+        # Phase C2 Slice B: cost_usd_total is now a projection of the
+        # unified ai_invocations log. The persisted YAML value is kept
+        # for round-trip back-compat but never consulted — sum log rows
+        # tagged with this chat_session_id for the live display value.
+        log_total = 0.0
+        for record in self._read_ai_invocations_raw():
+            if str(record.get("chat_session_id") or "") != chat_id:
+                continue
+            cost = record.get("cost_usd")
+            if isinstance(cost, (int, float)):
+                log_total += float(cost)
+        session.cost_usd_total = log_total
+        return session
 
     def create_chat_session(self, request: CreateChatSessionRequest) -> ChatSession:
         self._chats_dir().mkdir(parents=True, exist_ok=True)
@@ -3540,14 +3593,48 @@ class ProjectService:
                     409,
                 )
             next_journal = list(request.journal)
-        # Cost + cache timestamps: persist existing values; apply optional
-        # deltas from the request. cost is purely additive (never
-        # decreases); cache_write_times stamps the listed slots with the
-        # server's current UTC time.
-        next_cost = existing.cost_usd_total
-        if request.cost_delta_usd is not None:
-            # Guard against negative deltas — cost is monotonic.
-            next_cost += max(0.0, request.cost_delta_usd)
+        # Phase C2 Slice B: per-turn cost no longer lives on the chat YAML
+        # — it lands as an ai_invocations row tagged with chat_session_id.
+        # cost_usd_total stays at 0 (kept on the model for back-compat
+        # round-trips); compute_project_cost reads the unified log.
+        if request.cost_delta_usd is not None and request.cost_delta_usd > 0:
+            delta = float(request.cost_delta_usd)
+            # Try to resolve provider/model via the chat's assistant for
+            # richer telemetry rows. Empty when the assistant lookup
+            # fails — the cost still attributes correctly via chat_session_id.
+            provider = ""
+            model = ""
+            try:
+                assistant = self.resolve_assistant(request.assistant_id) if request.assistant_id else None
+                if assistant is not None:
+                    raw_provider = assistant.metadata.get("ai_provider")
+                    raw_model = assistant.metadata.get("ai_model")
+                    if isinstance(raw_provider, str):
+                        provider = raw_provider
+                    if isinstance(raw_model, str):
+                        model = raw_model
+            except Exception:
+                pass
+            # Pick up the last assistant turn's usage telemetry if the
+            # incoming messages carry it. Falls back to None when absent.
+            last_usage: ChatUsage | None = None
+            for message in reversed(request.messages):
+                if message.role == "assistant" and message.usage is not None:
+                    last_usage = message.usage
+                    break
+            self.append_ai_invocation(
+                CreateAIInvocationRequest(
+                    prompt_entry_id=request.prompt_entry_id,
+                    prompt_entry_type="chat",
+                    scene_id=existing.target_scene_id,
+                    chat_session_id=existing.id,
+                    provider=provider,
+                    model=model,
+                    usage=last_usage,
+                    cost_usd=delta,
+                )
+            )
+        next_cost = 0.0
         next_cache_times = dict(existing.cache_write_times)
         if request.cache_write_slots:
             now_iso = self._utcnow_iso()
@@ -3717,6 +3804,7 @@ class ProjectService:
         *,
         scene_id: str | None = None,
         character_id: str | None = None,
+        chat_session_id: str | None = None,
     ) -> AIInvocationList:
         raw = self._read_ai_invocations_raw()
         invocations: list[AIInvocation] = []
@@ -3728,6 +3816,8 @@ class ProjectService:
             if scene_id is not None and invocation.scene_id != scene_id:
                 continue
             if character_id is not None and invocation.character_id != character_id:
+                continue
+            if chat_session_id is not None and invocation.chat_session_id != chat_session_id:
                 continue
             invocations.append(invocation)
         return AIInvocationList(invocations=invocations)
@@ -3744,6 +3834,7 @@ class ProjectService:
             prompt_entry_type=request.prompt_entry_type,
             scene_id=request.scene_id,
             character_id=request.character_id,
+            chat_session_id=request.chat_session_id,
             provider=request.provider,
             model=request.model,
             usage=request.usage,
@@ -4473,7 +4564,7 @@ class ProjectService:
             return [f"{label} metadata field {field_id} references {node_id} but expected entry_type in {sorted(allowed)}."]
         return []
 
-    def _computed_scene_metadata(
+    def _computed_entry_metadata(
         self,
         body_markdown: str,
         node_id: str | None = None,
@@ -4501,18 +4592,38 @@ class ProjectService:
                 value = self._compute_counter(structure.root, node_id, entry_type, scope)
                 if value is not None:
                     computed[field_id] = value
-            elif function == "cost" and node_id:
-                # MVP: scene-scoped sum. Lore/project scope lands when the
-                # cross-kind computed-field dispatch does.
-                total = 0.0
-                for record in self._read_ai_invocations_raw():
-                    if record.get("scene_id") != node_id:
-                        continue
-                    cost = record.get("cost_usd")
-                    if isinstance(cost, (int, float)):
-                        total += float(cost)
-                computed[field_id] = total
+            elif function == "cost":
+                # Scope-aware sum over the ai_invocations sidecar log.
+                # `scene` and `character` need a node_id to filter on;
+                # `project` ignores it and sums the whole log.
+                scope = field.computed.get("scope", "scene")
+                total = self._compute_invocation_cost(scope, node_id)
+                if total is not None:
+                    computed[field_id] = total
         return computed
+
+    def _compute_invocation_cost(self, scope: str, node_id: str | None) -> float | None:
+        # Sum cost_usd across `ai_invocations.yaml` rows matching the scope.
+        #   scene     → records whose scene_id == node_id
+        #   character → records whose character_id == node_id
+        #   project   → all records (node_id ignored)
+        # Returns None for unknown scopes or when a node-bound scope is
+        # asked without a node_id, so the caller can skip emitting the
+        # computed field entirely instead of writing a misleading 0.
+        if scope in ("scene", "character") and not node_id:
+            return None
+        if scope not in ("scene", "character", "project"):
+            return None
+        total = 0.0
+        for record in self._read_ai_invocations_raw():
+            if scope == "scene" and record.get("scene_id") != node_id:
+                continue
+            if scope == "character" and record.get("character_id") != node_id:
+                continue
+            cost = record.get("cost_usd")
+            if isinstance(cost, (int, float)):
+                total += float(cost)
+        return total
 
     def _compute_counter(self, root: StructureNode, target_scene_id: str, entry_type: str, scope: str) -> int | None:
         if scope == "siblings":

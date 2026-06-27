@@ -194,5 +194,162 @@ class CostComputedFieldTests(unittest.TestCase):
         )
 
 
+class CrossKindCostDispatchTests(unittest.TestCase):
+    """Phase C2 Slice A. The `cost` function now dispatches by scope:
+    scene-scoped on scenes, character-scoped on lore characters, and
+    project-scoped on the project node. character_cost / project_cost are
+    sibling field defs pinned to the right entry_types."""
+
+    def setUp(self) -> None:
+        self.temp_dir = TemporaryDirectory()
+        self.root = Path(self.temp_dir.name) / "project"
+        global_service.__init__()
+        global_service.create_project(self.root, "Cross-kind Cost Tests")
+        self.client = TestClient(app)
+
+    def tearDown(self) -> None:
+        self.temp_dir.cleanup()
+
+    def _new_character(self, title: str = "Honor") -> str:
+        response = self.client.post(
+            "/api/lore",
+            json={"title": title, "entry_type": "character"},
+        )
+        self.assertEqual(response.status_code, 200, response.text)
+        return response.json()["id"]
+
+    def test_character_cost_sums_invocations_by_character_id(self) -> None:
+        alice = self._new_character("Alice")
+        bob = self._new_character("Bob")
+        # Two for Alice across two scenes, one for Bob.
+        for scene_id, character_id, cost in (
+            ("scene_a", alice, 0.01),
+            ("scene_b", alice, 0.02),
+            ("scene_a", bob, 0.99),
+        ):
+            self.client.post(
+                "/api/ai/invocations",
+                json={
+                    "scene_id": scene_id,
+                    "character_id": character_id,
+                    "cost_usd": cost,
+                },
+            )
+        alice_entry = self.client.get(f"/api/lore/{alice}").json()
+        bob_entry = self.client.get(f"/api/lore/{bob}").json()
+        self.assertAlmostEqual(
+            alice_entry["computed_metadata"]["character_cost"], 0.03, places=6
+        )
+        self.assertAlmostEqual(
+            bob_entry["computed_metadata"]["character_cost"], 0.99, places=6
+        )
+
+    def test_character_cost_is_zero_with_no_attributed_invocations(self) -> None:
+        alice = self._new_character("Alice")
+        # Invocation exists but isn't attributed to Alice.
+        self.client.post(
+            "/api/ai/invocations",
+            json={"scene_id": "scene_a", "cost_usd": 0.5},
+        )
+        alice_entry = self.client.get(f"/api/lore/{alice}").json()
+        self.assertEqual(
+            alice_entry["computed_metadata"]["character_cost"], 0.0
+        )
+
+    def test_project_cost_sums_every_invocation(self) -> None:
+        alice = self._new_character("Alice")
+        for payload in (
+            {"scene_id": "scene_a", "character_id": alice, "cost_usd": 0.10},
+            {"scene_id": "scene_b", "cost_usd": 0.20},
+            {"scene_id": "scene_c", "cost_usd": 0.30},
+        ):
+            self.client.post("/api/ai/invocations", json=payload)
+        project = self.client.get("/api/project/node").json()
+        self.assertAlmostEqual(
+            project["computed_metadata"]["project_cost"], 0.60, places=6
+        )
+
+    def test_project_cost_is_zero_when_log_empty(self) -> None:
+        project = self.client.get("/api/project/node").json()
+        self.assertEqual(project["computed_metadata"]["project_cost"], 0.0)
+
+
+class ChatSessionCostViaLogTests(unittest.TestCase):
+    """Phase C2 Slice B. Chat-session cost is no longer accumulated on
+    the chat YAML — each non-zero save delta lands as an ai_invocations
+    row tagged with chat_session_id. compute_project_cost reads the log.
+    """
+
+    def setUp(self) -> None:
+        self.temp_dir = TemporaryDirectory()
+        self.root = Path(self.temp_dir.name) / "project"
+        global_service.__init__()
+        global_service.create_project(self.root, "Slice B Tests")
+        self.client = TestClient(app)
+
+    def tearDown(self) -> None:
+        self.temp_dir.cleanup()
+
+    def _create_chat(self, title: str = "Test chat") -> str:
+        from app.models import CreateChatSessionRequest
+        chat = global_service.create_chat_session(
+            CreateChatSessionRequest(title=title, system_prompt="")
+        )
+        return chat.id
+
+    def _save_with_cost(self, chat_id: str, cost: float) -> None:
+        from app.models import SaveChatSessionRequest
+        existing = global_service.read_chat_session(chat_id)
+        global_service.save_chat_session(
+            chat_id,
+            SaveChatSessionRequest(
+                title=existing.title,
+                prompt_entry_id=existing.prompt_entry_id,
+                assistant_id=existing.assistant_id,
+                system_prompt=existing.system_prompt,
+                pinned=existing.pinned,
+                cost_delta_usd=cost,
+            ),
+        )
+
+    def test_chat_save_appends_invocation_row_with_chat_id(self) -> None:
+        chat_id = self._create_chat()
+        self._save_with_cost(chat_id, 0.05)
+        response = self.client.get(
+            f"/api/ai/invocations?chat_session_id={chat_id}"
+        )
+        body = response.json()
+        self.assertEqual(len(body["invocations"]), 1)
+        row = body["invocations"][0]
+        self.assertEqual(row["chat_session_id"], chat_id)
+        self.assertAlmostEqual(row["cost_usd"], 0.05, places=6)
+
+    def test_chat_cost_usd_total_is_projection_of_log_rows(self) -> None:
+        chat_id = self._create_chat()
+        self._save_with_cost(chat_id, 0.10)
+        self._save_with_cost(chat_id, 0.20)
+        chat = global_service.read_chat_session(chat_id)
+        # cost_usd_total is re-derived on every read; YAML value stays 0.
+        self.assertAlmostEqual(chat.cost_usd_total, 0.30, places=6)
+
+    def test_project_cost_groups_by_chat_and_buckets_accepts(self) -> None:
+        chat_id = self._create_chat("My Chat")
+        self._save_with_cost(chat_id, 0.40)
+        # An accept-flow row with no chat_session_id falls into "_other".
+        self.client.post(
+            "/api/ai/invocations",
+            json={"scene_id": "scene_x", "cost_usd": 0.25},
+        )
+        response = self.client.get("/api/ai/project-cost")
+        body = response.json()
+        self.assertAlmostEqual(body["total_usd"], 0.65, places=6)
+        rows = {row["id"]: row for row in body["chats"]}
+        self.assertIn(chat_id, rows)
+        self.assertAlmostEqual(rows[chat_id]["cost_usd"], 0.40, places=6)
+        self.assertEqual(rows[chat_id]["title"], "My Chat")
+        self.assertIn("_other", rows)
+        self.assertAlmostEqual(rows["_other"]["cost_usd"], 0.25, places=6)
+
+
 if __name__ == "__main__":
     unittest.main()

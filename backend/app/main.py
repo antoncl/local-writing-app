@@ -1583,14 +1583,18 @@ def ai_invocation_append(request: CreateAIInvocationRequest) -> AIInvocation:
 def ai_invocation_list(
     scene_id: str | None = Query(default=None),
     character_id: str | None = Query(default=None),
+    chat_session_id: str | None = Query(default=None),
 ) -> AIInvocationList:
-    """List invocation records, optionally filtered by scene_id and/or
-    character_id. Frontend uses scene_id to group per-character cost.
+    """List invocation records, optionally filtered by scene_id,
+    character_id, and/or chat_session_id. Frontend uses scene_id to
+    group per-character cost; chat_session_id surfaces per-chat cost
+    after Phase C2 Slice B.
     """
     with translate_errors():
         return service.list_ai_invocations(
             scene_id=scene_id,
             character_id=character_id,
+            chat_session_id=chat_session_id,
         )
 
 

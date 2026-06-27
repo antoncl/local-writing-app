@@ -30,7 +30,7 @@ from typing import Callable
 
 import yaml
 
-CURRENT_VERSION = 4
+CURRENT_VERSION = 5
 KEEP_BACKUPS = 3
 BACKUP_DIRNAME = ".migration-backups"
 SKIP_FROM_BACKUP = {".migration-backups", ".cache"}
@@ -135,12 +135,36 @@ def _move_chat_costs_to_invocation_log(root: Path) -> None:
         )
 
 
+def _create_research_structure(root: Path) -> None:
+    """v4→v5: introduce the research kind. Create research/notes/ for
+    note markdown files and seed an empty research.structure.yaml so
+    the validate/read paths don't have to special-case its absence
+    (docs/research-strategy.md, slice 1)."""
+    (root / "research" / "notes").mkdir(parents=True, exist_ok=True)
+    structure_path = root / "research.structure.yaml"
+    if structure_path.exists():
+        return
+    initial = {
+        "root": {
+            "id": "root",
+            "type": "root",
+            "title": "Research",
+            "children": [],
+        }
+    }
+    structure_path.write_text(
+        yaml.safe_dump(initial, sort_keys=False, allow_unicode=True),
+        encoding="utf-8",
+    )
+
+
 # Each tuple: (target_version, description, function)
 # Migrations run in registry order; gaps are not allowed.
 MIGRATIONS: list[tuple[int, str, MigrationFn]] = [
     (2, "create snippets/ folder for snippet node kind", _create_snippets_folder),
     (3, "create project.md (project node singleton)", _create_project_node_file),
     (4, "move chat cost_usd_total into ai_invocations.yaml", _move_chat_costs_to_invocation_log),
+    (5, "create research/ folder and research.structure.yaml", _create_research_structure),
 ]
 
 

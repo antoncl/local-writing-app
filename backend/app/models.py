@@ -325,6 +325,11 @@ class EntryTypeDefinition(BaseModel):
     # override without disturbing the parent's value. Computed by the
     # schema inheritance resolver; not authored directly.
     own_color: str | None = None
+    # Soft-deprecation flag. Set on entry_types that are kept readable for
+    # legacy projects but should not be offered when creating new entries.
+    # Schemas keep their definition (so existing files still validate); UI
+    # filters by this flag to hide the type from "Add entry" menus.
+    deprecated: bool = False
     prompt: PromptEntryTypeExtras | None = None
     # Reusable group applications (L2). Each expands into generated prefixed
     # fields in the effective schema. Authored on the type; persisted as-is.
@@ -463,6 +468,32 @@ class RenameStructureNodeRequest(BaseModel):
 class MoveStructureNodeRequest(BaseModel):
     target_parent_id: str = Field(min_length=1)
     position: int = Field(default=0, ge=0)
+
+
+class ResearchNote(BaseModel):
+    """A single research note file.
+
+    Parallels Scene/LoreEntry. Storage at `research/notes/<slug>.md`
+    with YAML front matter (id, title, entry_type, metadata) and a
+    markdown body. v1 schema: `tags` is the only metadata field; no
+    status, aliases, or related_entries (per
+    decisions-research-strategy).
+    """
+
+    id: str
+    title: str
+    body_markdown: str = ""
+    revision: str = ""
+    entry_type: str = "note"
+    metadata: dict[str, MetadataValue] = Field(default_factory=dict)
+
+
+class SaveResearchNoteRequest(BaseModel):
+    title: str = Field(min_length=1)
+    body_markdown: str = ""
+    base_revision: str | None = None
+    entry_type: str = "note"
+    metadata: dict[str, MetadataValue] = Field(default_factory=dict)
 
 
 class SaveSceneRequest(BaseModel):

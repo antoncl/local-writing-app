@@ -1394,6 +1394,37 @@ class MetadataValidationTests(unittest.TestCase):
         self.assertEqual(schema.fields["related_entries"].picker_config.entry_types, {})
         self.assertEqual(schema.fields["characters"].picker_config.entry_types, {"lore": ["character"]})
 
+    def test_default_schema_includes_research_kind_with_topic_and_note(self) -> None:
+        schema = self.service.read_metadata_schema()
+
+        # Research is the abstract parent for the research-kind tree —
+        # like manuscript_structure for the manuscript tree.
+        self.assertTrue(schema.entry_types["research"].abstract)
+        self.assertEqual(schema.entry_types["research"].kind, "research")
+
+        self.assertEqual(schema.entry_types["topic"].kind, "research")
+        self.assertEqual(schema.entry_types["topic"].parent, "research")
+        self.assertFalse(schema.entry_types["topic"].has_body)
+
+        self.assertEqual(schema.entry_types["note"].kind, "research")
+        self.assertEqual(schema.entry_types["note"].parent, "research")
+        self.assertTrue(schema.entry_types["note"].has_body)
+        # v1 ships notes with just tags (per decisions-research-strategy).
+        # Aliases / related_entries / context_policy intentionally omitted.
+        self.assertIn("tags", schema.entry_types["note"].fields)
+        self.assertNotIn("aliases", schema.entry_types["note"].fields)
+        self.assertNotIn("related_entries", schema.entry_types["note"].fields)
+        self.assertNotIn("context_policy", schema.entry_types["note"].fields)
+
+    def test_lore_note_is_marked_deprecated(self) -> None:
+        # lore_note stays readable for legacy projects but is soft-deprecated
+        # in favor of research/note. UI hides deprecated types from creation
+        # menus; reads keep working.
+        schema = self.service.read_metadata_schema()
+        self.assertTrue(schema.entry_types["lore_note"].deprecated)
+        self.assertFalse(schema.entry_types["character"].deprecated)
+        self.assertFalse(schema.entry_types["note"].deprecated)
+
     def test_metadata_rejects_fields_not_bound_to_entry_type(self) -> None:
         entry = self.service.create_lore_entry(CreateLoreEntryRequest(title="Seren", entry_type="character"))
 

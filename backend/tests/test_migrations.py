@@ -31,6 +31,17 @@ class MigrationFrameworkTests(unittest.TestCase):
     def test_create_stamps_current_schema_version(self) -> None:
         self.assertEqual(read_project_version(self.root), CURRENT_VERSION)
 
+    def test_create_initializes_research_artifacts(self) -> None:
+        # A fresh project ships research/notes/ + an empty
+        # research.structure.yaml so the research feature has somewhere
+        # to land without a migration step.
+        self.assertTrue((self.root / "research" / "notes").is_dir())
+        structure_path = self.root / "research.structure.yaml"
+        self.assertTrue(structure_path.exists())
+        tree = yaml.safe_load(structure_path.read_text(encoding="utf-8"))
+        self.assertEqual(tree["root"]["title"], "Research")
+        self.assertEqual(tree["root"]["children"], [])
+
     def test_fresh_project_open_runs_no_migrations(self) -> None:
         reopened_service = ProjectService()
         reopened_service.open_project(self.root)
@@ -117,11 +128,12 @@ class MigrationFrameworkTests(unittest.TestCase):
         self.assertTrue(snippets.is_dir())
         self.assertTrue(project_md.exists())
         self.assertEqual(read_project_version(self.root), CURRENT_VERSION)
-        # All pending migrations ran (v1 → v2 → v3 → v4).
-        self.assertEqual(len(reopened.last_migrations), 3)
+        # All pending migrations ran (v1 → v2 → v3 → v4 → v5).
+        self.assertEqual(len(reopened.last_migrations), 4)
         joined = " ".join(reopened.last_migrations)
         self.assertIn("snippets", joined)
         self.assertIn("project", joined)
+        self.assertIn("research", joined)
         self.assertIn("ai_invocations", joined)
 
         # Backup was created
@@ -230,6 +242,87 @@ class ChatCostMigrationTests(unittest.TestCase):
         if log_path.exists():
             log_data = yaml.safe_load(log_path.read_text(encoding="utf-8")) or {}
             self.assertEqual(log_data.get("invocations", []), [])
+
+
+class ResearchStructureMigrationTests(unittest.TestCase):
+    """v4→v5: research/notes/ folder + empty research.structure.yaml."""
+
+    def setUp(self) -> None:
+        self.temp_dir = TemporaryDirectory()
+        self.base = Path(self.temp_dir.name) / "writing"
+        self.root = self.base / "project"
+        self.service = ProjectService()
+        self.service.create_project(self.root, "Test Project")
+
+    def tearDown(self) -> None:
+        self.temp_dir.cleanup()
+
+    def test_migration_creates_research_folder_and_structure_file(self) -> None:
+        # Roll the project back to v4 and remove research artifacts so
+        # the migration has something to do.
+        manifest_path = self.root / "project.yaml"
+        data = yaml.safe_load(manifest_path.read_text(encoding="utf-8"))
+        data["schema_version"] = 4
+        manifest_path.write_text(yaml.safe_dump(data, sort_keys=False), encoding="utf-8")
+        research_dir = self.root / "research"
+        structure_path = self.root / "research.structure.yaml"
+        if structure_path.exists():
+            structure_path.unlink()
+        if research_dir.exists():
+            for child in (research_dir / "notes").iterdir():
+                child.unlink()
+            (research_dir / "notes").rmdir()
+            research_dir.rmdir()
+        self.assertFalse(research_dir.exists())
+        self.assertFalse(structure_path.exists())
+
+        reopened = ProjectService()
+        reopened.open_project(self.root)
+
+        self.assertTrue((self.root / "research" / "notes").is_dir())
+        self.assertTrue(structure_path.exists())
+        tree = yaml.safe_load(structure_path.read_text(encoding="utf-8"))
+        self.assertEqual(tree["root"]["type"], "root")
+        self.assertEqual(tree["root"]["title"], "Research")
+        self.assertEqual(tree["root"]["children"], [])
+        self.assertEqual(read_project_version(self.root), CURRENT_VERSION)
+
+    def test_migration_preserves_existing_research_structure_file(self) -> None:
+        # A user-edited research tree must not be clobbered by the
+        # back-fill. Simulate a project that already has the file.
+        manifest_path = self.root / "project.yaml"
+        data = yaml.safe_load(manifest_path.read_text(encoding="utf-8"))
+        data["schema_version"] = 4
+        manifest_path.write_text(yaml.safe_dump(data, sort_keys=False), encoding="utf-8")
+        structure_path = self.root / "research.structure.yaml"
+        structure_path.write_text(
+            yaml.safe_dump(
+                {
+                    "root": {
+                        "id": "root",
+                        "type": "root",
+                        "title": "Research",
+                        "children": [
+                            {
+                                "id": "topic_1",
+                                "type": "topic",
+                                "title": "Industrial Revolution",
+                                "children": [],
+                            }
+                        ],
+                    }
+                },
+                sort_keys=False,
+            ),
+            encoding="utf-8",
+        )
+
+        reopened = ProjectService()
+        reopened.open_project(self.root)
+
+        tree = yaml.safe_load(structure_path.read_text(encoding="utf-8"))
+        self.assertEqual(len(tree["root"]["children"]), 1)
+        self.assertEqual(tree["root"]["children"][0]["title"], "Industrial Revolution")
 
 
 if __name__ == "__main__":

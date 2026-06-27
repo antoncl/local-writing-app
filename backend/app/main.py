@@ -82,6 +82,8 @@ from app.models import (
     SaveAssistantEntryRequest,
     SaveProjectNodeRequest,
     SavePromptEntryRequest,
+    ResearchNote,
+    SaveResearchNoteRequest,
     SaveSceneRequest,
     Scene,
     SearchRequest,
@@ -252,6 +254,68 @@ def cascade_delete_preview(node_id: str) -> StructureNodeDeletePreview:
 def delete_structure_node(node_id: str) -> StructureDocument:
     with translate_errors():
         return service.delete_structure_node(node_id)
+
+
+# ----- Research structure -----
+#
+# Mirrors /api/structure for the research tree (docs/research-strategy.md
+# slice 1). Same request/response shapes; the routes share the
+# manuscript-structure request models because the tree CRUD vocabulary
+# (title, entry_type, parent_id, target_parent_id, position) is identical.
+
+@app.get("/api/research-structure", response_model=StructureDocument)
+def get_research_structure() -> StructureDocument:
+    with translate_errors():
+        return service.read_research_structure()
+
+
+@app.post("/api/research-structure/nodes", response_model=StructureDocument)
+def create_research_node(request: CreateStructureNodeRequest) -> StructureDocument:
+    with translate_errors():
+        return service.create_research_node(request)
+
+
+@app.patch("/api/research-structure/nodes/{node_id}", response_model=StructureDocument)
+def rename_research_node(
+    node_id: str, request: RenameStructureNodeRequest
+) -> StructureDocument:
+    with translate_errors():
+        return service.rename_research_node(node_id, request.title)
+
+
+@app.post("/api/research-structure/nodes/{node_id}/move", response_model=StructureDocument)
+def move_research_node(
+    node_id: str, request: MoveStructureNodeRequest
+) -> StructureDocument:
+    with translate_errors():
+        return service.move_research_node(node_id, request.target_parent_id, request.position)
+
+
+@app.get(
+    "/api/research-structure/nodes/{node_id}/cascade-preview",
+    response_model=StructureNodeDeletePreview,
+)
+def cascade_research_delete_preview(node_id: str) -> StructureNodeDeletePreview:
+    with translate_errors():
+        return service.cascade_research_delete_preview(node_id)
+
+
+@app.delete("/api/research-structure/nodes/{node_id}", response_model=StructureDocument)
+def delete_research_node(node_id: str) -> StructureDocument:
+    with translate_errors():
+        return service.delete_research_node(node_id)
+
+
+@app.get("/api/research/notes/{note_id}", response_model=ResearchNote)
+def get_research_note(note_id: str) -> ResearchNote:
+    with translate_errors():
+        return service.read_research_note(note_id)
+
+
+@app.put("/api/research/notes/{note_id}", response_model=ResearchNote)
+def put_research_note(note_id: str, request: SaveResearchNoteRequest) -> ResearchNote:
+    with translate_errors():
+        return service.save_research_note(note_id, request)
 
 
 @app.get("/api/metadata/schema", response_model=MetadataSchema)

@@ -17,7 +17,10 @@ from app.models import (
     AIContextPresetResponse,
     AIGenerateRequest,
     AIGenerateResponse,
+    AIInvocation,
+    AIInvocationList,
     ChatUsage,
+    CreateAIInvocationRequest,
     ProjectCostChatRow,
     ProjectCostResponse,
     AssistantEntry,
@@ -1564,6 +1567,31 @@ def ai_project_cost() -> ProjectCostResponse:
             for row in result.get("chats", [])
         ],
     )
+
+
+@app.post("/api/ai/invocations", response_model=AIInvocation, status_code=201)
+def ai_invocation_append(request: CreateAIInvocationRequest) -> AIInvocation:
+    """Append one AI invocation telemetry record. Called from the frontend
+    on accept of a continuation or roleplay generation. The `cost` computed
+    field and the per-character cost chip read these records.
+    """
+    with translate_errors():
+        return service.append_ai_invocation(request)
+
+
+@app.get("/api/ai/invocations", response_model=AIInvocationList)
+def ai_invocation_list(
+    scene_id: str | None = Query(default=None),
+    character_id: str | None = Query(default=None),
+) -> AIInvocationList:
+    """List invocation records, optionally filtered by scene_id and/or
+    character_id. Frontend uses scene_id to group per-character cost.
+    """
+    with translate_errors():
+        return service.list_ai_invocations(
+            scene_id=scene_id,
+            character_id=character_id,
+        )
 
 
 @app.get("/api/ai/context-preset", response_model=AIContextPresetResponse)

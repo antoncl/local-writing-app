@@ -11,6 +11,7 @@
   import { coerceInputValue, type EntryInputDraft } from "./promptInputs";
   import { api } from "./api";
   import { formatCostEur } from "./money";
+  import { resolveColor } from "./colors";
   import type { AssistantEntrySummary, Backlink, BodyShape, EditableDocument, EntryBodyLanguage, EntryMetadata, EntryTypeDefinition, MetadataFieldDefinition, MetadataSchema, PromptEntrySummary, PromptInputDefinition } from "./types";
 
   // Effective body shape for an entry type. Falls back through the
@@ -122,6 +123,44 @@
   // streaming machinery that produces it lives there.
   let lastInvocationCostUsd: number | null = null;
   let sceneSessionCostUsd = 0;
+  // Per-character cost map for this scene, summed from the persisted
+  // ai_invocations log. ProseBodyView owns the state; the footer reads it.
+  let characterCostUsd: Record<string, number> = {};
+
+  type CharacterCostRow = { id: string; title: string; cost: number; color: string };
+
+  function characterCostRows(
+    map: Record<string, number>,
+    lore: typeof loreEntries,
+    schema: MetadataSchema | null,
+  ): CharacterCostRow[] {
+    const rows: CharacterCostRow[] = [];
+    for (const [id, cost] of Object.entries(map)) {
+      if (typeof cost !== "number" || cost <= 0) continue;
+      const entry = lore.find((e) => e.id === id);
+      const title = entry?.title || id;
+      const instance =
+        entry && typeof entry.metadata?.color === "string"
+          ? (entry.metadata.color as string)
+          : null;
+      const swatch = resolveColor(instance, entry?.entry_type, "lore", schema);
+      let color: string;
+      if (swatch) {
+        color = swatch.hex;
+      } else {
+        let hash = 0;
+        for (let i = 0; i < id.length; i++) {
+          hash = (hash * 31 + id.charCodeAt(i)) | 0;
+        }
+        const hue = ((hash % 360) + 360) % 360;
+        color = `hsl(${hue}, 62%, 48%)`;
+      }
+      rows.push({ id, title, cost, color });
+    }
+    rows.sort((a, b) => b.cost - a.cost);
+    return rows;
+  }
+  $: characterCostRowsView = characterCostRows(characterCostUsd, loreEntries, metadataSchema);
   let lastMetadataReloadToken = 0;
   let lastTitleReloadToken = 0;
   let backlinks: Backlink[] = [];
@@ -693,15 +732,30 @@
           <input class="title-input" aria-label={`${documentLabel} ${documentNameLabel.toLowerCase()}`} placeholder={documentNameLabel} bind:value={title} on:input={handleTitleInput} />
         </label>
       </div>
-      {#if todoStatusHint || (documentKind === "scene" && lastInvocationCostUsd != null)}
+      {#if todoStatusHint || (documentKind === "scene" && (lastInvocationCostUsd != null || characterCostRowsView.length > 0))}
         <div class="editor-hint">
           {#if todoStatusHint}
             <span class="editor-hint-text">{todoStatusHint}</span>
           {/if}
-          {#if documentKind === "scene" && lastInvocationCostUsd != null}
-            <span class="continuation-cost-chip" title="Last continuation invocation cost · running total for this scene this session. Resets on reload or scene switch.">
-              last {formatCostEur(lastInvocationCostUsd)} · session {formatCostEur(sceneSessionCostUsd)}
-            </span>
+          {#if documentKind === "scene"}
+            <div class="editor-hint-costs">
+              {#each characterCostRowsView as row (row.id)}
+                <span
+                  class="character-cost-chip"
+                  title={`Roleplay cost attributed to ${row.title} in this scene (all sessions).`}
+                  style={`--character-color: ${row.color}`}
+                >
+                  <span class="character-cost-dot" aria-hidden="true"></span>
+                  <span class="character-cost-name">{row.title}</span>
+                  <span class="character-cost-amount">{formatCostEur(row.cost)}</span>
+                </span>
+              {/each}
+              {#if lastInvocationCostUsd != null}
+                <span class="continuation-cost-chip" title="Last continuation invocation cost · running total for this scene this session. Resets on reload or scene switch.">
+                  last {formatCostEur(lastInvocationCostUsd)} · session {formatCostEur(sceneSessionCostUsd)}
+                </span>
+              {/if}
+            </div>
           {/if}
         </div>
       {/if}
@@ -744,6 +798,7 @@
       bind:editorEmpty
       bind:lastInvocationCostUsd
       bind:sceneSessionCostUsd
+      bind:characterCostUsd
       {scene}
       {documentKind}
       {metadataSchema}

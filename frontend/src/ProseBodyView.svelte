@@ -123,6 +123,10 @@
   // values lives here, but the chip lives in the shell header).
   export let lastInvocationCostUsd: number | null = null;
   export let sceneSessionCostUsd = 0;
+  // Per-character cost rollup for THIS scene, summed from the persisted
+  // ai_invocations log. Bound out so NodeEditor's footer can render the
+  // per-character mini-chips next to the session chip.
+  export let characterCostUsd: Record<string, number> = {};
 
   const dispatch = createEventDispatcher<{
     "body-change": void;
@@ -296,6 +300,29 @@
       lastSeenSceneIdForCost = currentSceneId;
       sceneSessionCostUsd = 0;
       lastInvocationCostUsd = null;
+      characterCostUsd = {};
+      if (currentSceneId) {
+        void loadCharacterCostUsd(currentSceneId);
+      }
+    }
+  }
+
+  async function loadCharacterCostUsd(sceneId: string): Promise<void> {
+    try {
+      const result = await api.aiListInvocations({ scene_id: sceneId });
+      // Race guard: scene may have changed during the fetch.
+      if (scene?.id !== sceneId) return;
+      const totals: Record<string, number> = {};
+      for (const inv of result.invocations) {
+        const characterId = inv.character_id;
+        if (!characterId) continue;
+        const cost = inv.cost_usd;
+        if (typeof cost !== "number") continue;
+        totals[characterId] = (totals[characterId] ?? 0) + cost;
+      }
+      characterCostUsd = totals;
+    } catch (err) {
+      console.warn("Failed to load per-character invocation cost:", err);
     }
   }
 
@@ -1310,23 +1337,59 @@
   function acceptAISuggestion() {
     if (!editor || !aiSuggestionId) return;
     const range = findAISuggestionRange(aiSuggestionId);
-    if (range) {
-      const lastEntry = findPromptEntry(lastInvokedEntryId);
-      const characterId = isRoleplayPromptEntry(lastEntry)
+    const lastEntry = findPromptEntry(lastInvokedEntryId);
+    const characterId =
+      range && isRoleplayPromptEntry(lastEntry)
         ? characterIdFromInputValue(lastInvokedInputs.character)
         : null;
+    if (range) {
       let chain = editor.chain().focus().setTextSelection(range).unsetMark("aiSuggestion");
       if (characterId) {
         chain = chain.setMark("character", { characterId });
       }
       chain.setTextSelection(range.to).run();
     }
+    persistAcceptedInvocation(lastEntry, characterId);
     aiSuggestionId = null;
     aiSuggestionMeta = null;
     aiSuggestionOriginal = null;
     aiAnchorPos = null;
     aiError = null;
     aiToolbarPosition = { x: 0, y: 0, visible: false };
+  }
+
+  function persistAcceptedInvocation(
+    entry: PromptEntrySummary | null,
+    characterId: string | null,
+  ) {
+    // Telemetry write — the `cost` computed field on the scene and the
+    // per-character cost row in the footer both project from this log.
+    // Fire-and-forget; a failed POST shouldn't block accept.
+    if (!scene || !aiSuggestionMeta) return;
+    const meta = aiSuggestionMeta;
+    const cost = meta.cost_usd;
+    if (characterId && typeof cost === "number") {
+      // Optimistic per-character rollup. The next scene-load reconciles
+      // against the backend; for this session we trust the local write.
+      characterCostUsd = {
+        ...characterCostUsd,
+        [characterId]: (characterCostUsd[characterId] ?? 0) + cost,
+      };
+    }
+    api
+      .aiAppendInvocation({
+        prompt_entry_id: entry?.id ?? lastInvokedEntryId ?? "",
+        prompt_entry_type: entry?.entry_type ?? "",
+        scene_id: scene.id,
+        character_id: characterId ?? "",
+        provider: meta.provider ?? "",
+        model: meta.model ?? "",
+        usage: meta.usage ?? null,
+        cost_usd: meta.cost_usd ?? null,
+      })
+      .catch((err) => {
+        console.warn("Failed to persist AI invocation telemetry:", err);
+      });
   }
 
   function revertAISuggestion() {

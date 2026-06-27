@@ -12,6 +12,9 @@ import type {
   AIPolicy,
   AIPreviewRequest,
   AIPreviewResponse,
+  AIInvocation,
+  AIInvocationList,
+  CreateAIInvocationRequest,
   ChatUsage,
   BacklinksResponse,
   ProjectCostResponse,
@@ -290,6 +293,21 @@ export const api = {
   },
   aiProjectCost() {
     return request<ProjectCostResponse>("/ai/project-cost");
+  },
+  aiAppendInvocation(payload: CreateAIInvocationRequest) {
+    return request<AIInvocation>("/ai/invocations", {
+      method: "POST",
+      body: JSON.stringify(payload),
+    });
+  },
+  aiListInvocations(params: { scene_id?: string; character_id?: string } = {}) {
+    const search = new URLSearchParams();
+    if (params.scene_id) search.set("scene_id", params.scene_id);
+    if (params.character_id) search.set("character_id", params.character_id);
+    const query = search.toString();
+    return request<AIInvocationList>(
+      query ? `/ai/invocations?${query}` : "/ai/invocations",
+    );
   },
   getStructure() {
     return request<StructureDocument>("/structure");

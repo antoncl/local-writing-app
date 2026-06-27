@@ -14,6 +14,8 @@ from urllib.parse import unquote
 import yaml
 
 from app.models import (
+    AIInvocation,
+    AIInvocationList,
     AssistantEntry,
     AssistantEntryList,
     AssistantEntrySummary,
@@ -22,6 +24,7 @@ from app.models import (
     ChatSessionList,
     ChatSessionMessage,
     ChatSessionSummary,
+    CreateAIInvocationRequest,
     CreateAssistantEntryRequest,
     CreateChatSessionRequest,
     ReorderAssistantsRequest,
@@ -143,7 +146,7 @@ DEFAULT_METADATA_SCHEMA: dict[str, Any] = {
             "name": "Scene",
             "kind": "scene",
             "parent": "manuscript_structure",
-            "fields": ["status", "pov", "characters", "locations", "dynamics", "word_count"],
+            "fields": ["status", "pov", "characters", "locations", "dynamics", "word_count", "cost"],
             "has_body": True,
             "color": "forest",
         },
@@ -429,6 +432,14 @@ DEFAULT_METADATA_SCHEMA: dict[str, Any] = {
             "name": "Number",
             "type": "computed",
             "computed": {"function": "counter", "scope": "siblings"},
+        },
+        "cost": {
+            # Sum of cost_usd across ai_invocations whose scope matches.
+            # MVP: scene-scoped only (sums invocations where scene_id == this
+            # scene). Cross-kind dispatch (lore/project) is the next phase.
+            "name": "AI cost",
+            "type": "computed",
+            "computed": {"function": "cost", "scope": "scene"},
         },
         "ai_provider": {
             "name": "Subscription",
@@ -1361,9 +1372,9 @@ class ProjectService:
         if request.field.type == "computed":
             spec = request.field.computed or {}
             function = spec.get("function")
-            if function not in ("word_count", "counter"):
+            if function not in ("word_count", "counter", "cost"):
                 raise ProjectServiceError(
-                    "Computed fields must use a supported function (word_count or counter).",
+                    "Computed fields must use a supported function (word_count, counter, or cost).",
                     422,
                 )
             if function == "counter" and spec.get("scope", "siblings") not in ("siblings", "manuscript"):
@@ -3677,6 +3688,71 @@ class ProjectService:
         body_text = body.rstrip() + "\n" if body.strip() else ""
         self._atomic_write(path, f"---\n{front_matter}\n---\n\n{body_text}")
 
+    # AI invocation telemetry — append-only log at <project>/ai_invocations.yaml.
+    # Each accepted continuation/roleplay generation pushes one record (model,
+    # tokens, cost, scene_id, character_id). The `cost` computed field reads
+    # this log; per-character cost breakdowns also project from it. Not a Node
+    # kind for MVP — promote later if an audit-log UI surfaces.
+
+    def _ai_invocations_path(self) -> Path:
+        root = self._require_project()
+        return root / "ai_invocations.yaml"
+
+    def _read_ai_invocations_raw(self) -> list[dict[str, Any]]:
+        path = self._ai_invocations_path()
+        if not path.exists():
+            return []
+        with path.open("r", encoding="utf-8") as handle:
+            data = yaml.safe_load(handle) or {}
+        if isinstance(data, list):
+            return [record for record in data if isinstance(record, dict)]
+        if isinstance(data, dict):
+            items = data.get("invocations", [])
+            if isinstance(items, list):
+                return [record for record in items if isinstance(record, dict)]
+        return []
+
+    def list_ai_invocations(
+        self,
+        *,
+        scene_id: str | None = None,
+        character_id: str | None = None,
+    ) -> AIInvocationList:
+        raw = self._read_ai_invocations_raw()
+        invocations: list[AIInvocation] = []
+        for record in raw:
+            try:
+                invocation = AIInvocation.model_validate(record)
+            except Exception:
+                continue
+            if scene_id is not None and invocation.scene_id != scene_id:
+                continue
+            if character_id is not None and invocation.character_id != character_id:
+                continue
+            invocations.append(invocation)
+        return AIInvocationList(invocations=invocations)
+
+    def append_ai_invocation(
+        self, request: CreateAIInvocationRequest
+    ) -> AIInvocation:
+        self._require_project()
+        raw = self._read_ai_invocations_raw()
+        invocation = AIInvocation(
+            id=self._new_id("inv"),
+            ts=self._utcnow_iso(),
+            prompt_entry_id=request.prompt_entry_id,
+            prompt_entry_type=request.prompt_entry_type,
+            scene_id=request.scene_id,
+            character_id=request.character_id,
+            provider=request.provider,
+            model=request.model,
+            usage=request.usage,
+            cost_usd=request.cost_usd,
+        )
+        raw.append(invocation.model_dump())
+        self._write_yaml(self._ai_invocations_path(), {"invocations": raw})
+        return invocation
+
     def read_todos(self) -> TodoDocument:
         root = self._require_project()
         data = self._read_yaml(root / "todo.yaml")
@@ -4425,6 +4501,17 @@ class ProjectService:
                 value = self._compute_counter(structure.root, node_id, entry_type, scope)
                 if value is not None:
                     computed[field_id] = value
+            elif function == "cost" and node_id:
+                # MVP: scene-scoped sum. Lore/project scope lands when the
+                # cross-kind computed-field dispatch does.
+                total = 0.0
+                for record in self._read_ai_invocations_raw():
+                    if record.get("scene_id") != node_id:
+                        continue
+                    cost = record.get("cost_usd")
+                    if isinstance(cost, (int, float)):
+                        total += float(cost)
+                computed[field_id] = total
         return computed
 
     def _compute_counter(self, root: StructureNode, target_scene_id: str, entry_type: str, scope: str) -> int | None:

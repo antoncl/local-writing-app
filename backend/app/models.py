@@ -1212,6 +1212,42 @@ class SaveChatSessionRequest(BaseModel):
     cache_write_slots: list[str] | None = None
 
 
+class AIInvocation(BaseModel):
+    """Append-only telemetry record for one accepted AI invocation
+    (continuation or roleplay). The cost computed field sums these by
+    scope. Storage: <project>/ai_invocations.yaml. Not a Node kind for
+    MVP — sidecar log; promote to a kind later if an audit-log UI surfaces.
+    """
+    id: str
+    ts: str
+    prompt_entry_id: str = ""
+    prompt_entry_type: str = ""
+    scene_id: str = ""
+    character_id: str = ""
+    provider: str = ""
+    model: str = ""
+    usage: ChatUsage | None = None
+    cost_usd: float | None = None
+
+
+class AIInvocationList(BaseModel):
+    invocations: list[AIInvocation] = Field(default_factory=list)
+
+
+class CreateAIInvocationRequest(BaseModel):
+    """POST /api/ai/invocations body. Server assigns id + ts; everything
+    else flows from the prior generate response and the accept context.
+    """
+    prompt_entry_id: str = ""
+    prompt_entry_type: str = ""
+    scene_id: str = ""
+    character_id: str = ""
+    provider: str = ""
+    model: str = ""
+    usage: ChatUsage | None = None
+    cost_usd: float | None = None
+
+
 StructureNode.model_rebuild()
 # AIChatResponse declares journal_added as a forward reference because
 # ChatSessionJournalEntry is defined later in the file (in the chat-session

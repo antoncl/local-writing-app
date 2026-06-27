@@ -612,6 +612,34 @@ export type ProjectCostResponse = {
   chats: ProjectCostChatRow[];
 };
 
+export type AIInvocation = {
+  id: string;
+  ts: string;
+  prompt_entry_id?: string;
+  prompt_entry_type?: string;
+  scene_id?: string;
+  character_id?: string;
+  provider?: string;
+  model?: string;
+  usage?: ChatUsage | null;
+  cost_usd?: number | null;
+};
+
+export type AIInvocationList = {
+  invocations: AIInvocation[];
+};
+
+export type CreateAIInvocationRequest = {
+  prompt_entry_id?: string;
+  prompt_entry_type?: string;
+  scene_id?: string;
+  character_id?: string;
+  provider?: string;
+  model?: string;
+  usage?: ChatUsage | null;
+  cost_usd?: number | null;
+};
+
 export type ChatSessionMessage = {
   role: "user" | "assistant";
   content: string;

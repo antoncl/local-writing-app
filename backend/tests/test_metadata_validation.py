@@ -796,7 +796,7 @@ class MetadataValidationTests(unittest.TestCase):
         self.assertIn("tension", schema.fields)
         self.assertEqual(
             schema.entry_types["scene"].fields,
-            ["number", "summary", "color", "status", "pov", "characters", "locations", "dynamics", "word_count", "mood", "tension"],
+            ["number", "summary", "color", "status", "pov", "characters", "locations", "dynamics", "word_count", "cost", "mood", "tension"],
         )
 
         scene = self.service.read_scene(self.scene_id)

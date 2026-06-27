@@ -1430,15 +1430,55 @@ button.row-action-add.active {
   flex: 1 1 auto;
   min-width: 0;
 }
-/* V2: persistent per-scene continuation cost rollup. Frontend-only —
-   resets on reload / scene switch; Phase C will back it with server-side
-   persistence. Sits opposite the hint text so it's always findable. */
+/* Per-scene continuation cost rollup. Frontend-only — resets on reload
+   / scene switch. Sits in the trailing cost cluster on the footer hint
+   row. Phase C added the persisted ai_invocations log; this chip stays
+   as the session/last-call view, and `character-cost-chip` carries the
+   per-character all-time totals from the log. */
 .continuation-cost-chip {
   color: var(--color-muted, #888);
   font-size: 11px;
   white-space: nowrap;
   cursor: default;
   flex: 0 0 auto;
+}
+
+/* Trailing cluster on the editor footer hint row. Holds the
+   per-character roleplay-cost chips and the continuation chip. */
+.editor-hint-costs {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  flex: 0 1 auto;
+  min-width: 0;
+}
+
+/* Per-character cost chip — colored dot + character name + cost.
+   Backed by the persisted ai_invocations log; character color resolves
+   from the lore entry (or a deterministic hue when unset). */
+.character-cost-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 11px;
+  color: var(--color-muted, #888);
+  white-space: nowrap;
+  cursor: default;
+}
+.character-cost-dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--character-color, #888);
+  flex: 0 0 auto;
+}
+.character-cost-name {
+  color: var(--color-text, #1a1a1a);
+}
+.character-cost-amount {
+  font-variant-numeric: tabular-nums;
 }
 
 .scene-metadata {

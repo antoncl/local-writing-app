@@ -63,6 +63,15 @@ DEFAULT_PALETTE: list[dict[str, str]] = [
     {"id": "stone", "label": "Stone", "hex": "#7d7768"},
     {"id": "silver", "label": "Silver", "hex": "#94a09a"},
     {"id": "charcoal", "label": "Charcoal", "hex": "#3a423f"},
+    # Standard signaling primaries — recognizable RAG + blue/orange + a
+    # neutral. Picked to read as the literal color name (vs. the curated
+    # tones above) and to tint well under color-mix(... 12%, white 88%).
+    {"id": "red", "label": "Red", "hex": "#d44a4a"},
+    {"id": "green", "label": "Green", "hex": "#3eaa5a"},
+    {"id": "yellow", "label": "Yellow", "hex": "#d8b22a"},
+    {"id": "blue", "label": "Blue", "hex": "#3a76d8"},
+    {"id": "orange", "label": "Orange", "hex": "#e07a26"},
+    {"id": "gray", "label": "Gray", "hex": "#8a948f"},
 ]
 
 

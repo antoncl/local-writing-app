@@ -161,6 +161,23 @@
     return rows;
   }
   $: characterCostRowsView = characterCostRows(characterCostUsd, loreEntries, metadataSchema);
+
+  // All-time rollup costs surfaced as a single chip in the header hint.
+  // character_cost lives on lore character entries, project_cost on the
+  // project node — backend populates both via `computed_metadata`.
+  // Trust the computed field as the surface contract; render only when
+  // the kind matches and the number is non-zero.
+  $: rollupCostKind = (() => {
+    if (!scene) return null;
+    const computed = scene.computed_metadata as Record<string, unknown> | undefined;
+    if (documentKind === "lore" && typeof computed?.character_cost === "number" && computed.character_cost > 0) {
+      return { kind: "character" as const, value: computed.character_cost as number };
+    }
+    if (documentKind === "project" && typeof computed?.project_cost === "number" && computed.project_cost > 0) {
+      return { kind: "project" as const, value: computed.project_cost as number };
+    }
+    return null;
+  })();
   let lastMetadataReloadToken = 0;
   let lastTitleReloadToken = 0;
   let backlinks: Backlink[] = [];
@@ -732,7 +749,7 @@
           <input class="title-input" aria-label={`${documentLabel} ${documentNameLabel.toLowerCase()}`} placeholder={documentNameLabel} bind:value={title} on:input={handleTitleInput} />
         </label>
       </div>
-      {#if todoStatusHint || (documentKind === "scene" && (lastInvocationCostUsd != null || characterCostRowsView.length > 0))}
+      {#if todoStatusHint || (documentKind === "scene" && (lastInvocationCostUsd != null || characterCostRowsView.length > 0)) || rollupCostKind}
         <div class="editor-hint">
           {#if todoStatusHint}
             <span class="editor-hint-text">{todoStatusHint}</span>
@@ -755,6 +772,17 @@
                   last {formatCostEur(lastInvocationCostUsd)} · session {formatCostEur(sceneSessionCostUsd)}
                 </span>
               {/if}
+            </div>
+          {:else if rollupCostKind}
+            <div class="editor-hint-costs">
+              <span
+                class="node-rollup-cost-chip"
+                title={rollupCostKind.kind === "character"
+                  ? "All-time AI cost attributed to this character across every scene."
+                  : "Whole-project AI cost across every invocation."}
+              >
+                {rollupCostKind.kind === "character" ? "character" : "project"} cost {formatCostEur(rollupCostKind.value)}
+              </span>
             </div>
           {/if}
         </div>

@@ -1446,6 +1446,18 @@ button.row-action-add.active {
   flex: 0 0 auto;
 }
 
+/* Single-value rollup chip for character_cost / project_cost (lore
+   character entries and the project node respectively). Same muted
+   tone as the scene cost chips so the editor hint row stays calm. */
+.node-rollup-cost-chip {
+  color: var(--color-muted, #888);
+  font-size: 11px;
+  white-space: nowrap;
+  cursor: default;
+  flex: 0 0 auto;
+  font-variant-numeric: tabular-nums;
+}
+
 /* Trailing cluster on the editor footer hint row. Holds the
    per-character roleplay-cost chips and the continuation chip. */
 .editor-hint-costs {

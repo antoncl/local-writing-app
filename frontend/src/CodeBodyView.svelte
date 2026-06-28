@@ -15,6 +15,7 @@
 <script lang="ts">
   import { createEventDispatcher } from "svelte";
   import CodeEditor from "./CodeEditor.svelte";
+  import DefaultValueEditor from "./DefaultValueEditor.svelte";
   import NodePickerConfigEditor from "./NodePickerConfigEditor.svelte";
   import PromptInputField from "./PromptInputField.svelte";
   import SelectOptionsEditor from "./SelectOptionsEditor.svelte";
@@ -712,28 +713,12 @@
               </label>
               <label>
                 Default
-                {#if draft.type === "boolean"}
-                  <!-- 3-state: Unset (no default) / True / False. Unset is a real
-                       persisted state, not a silent false (#24). -->
-                  <select value={draft.defaultValue ?? ""} on:change={(e) => setEntryInputDefault(index, (e.currentTarget as HTMLSelectElement).value)}>
-                    <option value="">Unset</option>
-                    <option value="true">True</option>
-                    <option value="false">False</option>
-                  </select>
-                {:else if draft.type === "number"}
-                  <input type="number" value={draft.defaultValue ?? ""} placeholder="Unset" on:input={(e) => setEntryInputDefault(index, (e.currentTarget as HTMLInputElement).value)} />
-                {:else if draft.type === "select"}
-                  <select value={draft.defaultValue ?? ""} on:change={(e) => setEntryInputDefault(index, (e.currentTarget as HTMLSelectElement).value)}>
-                    <option value="">Unset</option>
-                    {#each draft.options.filter((o) => o.value.trim() !== "") as opt (opt.value)}
-                      <option value={opt.value}>{opt.label || opt.value}</option>
-                    {/each}
-                  </select>
-                {:else}
-                  <!-- text / long_text / entity_ref(_list): typed picker for refs
-                       is a follow-up; empty = Unset. -->
-                  <input value={draft.defaultValue ?? ""} placeholder="Unset" on:input={(e) => setEntryInputDefault(index, (e.currentTarget as HTMLInputElement).value)} />
-                {/if}
+                <DefaultValueEditor
+                  type={draft.type}
+                  value={draft.defaultValue}
+                  options={draft.options}
+                  on:change={(event) => setEntryInputDefault(index, event.detail.value ?? "")}
+                />
               </label>
               <label class="prompt-input-required">
                 <input type="checkbox" checked={draft.required} on:change={(e) => updateEntryInput(index, { required: (e.currentTarget as HTMLInputElement).checked })} />

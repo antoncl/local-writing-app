@@ -23,6 +23,7 @@
   import GroupsManagerDialog from "./GroupsManagerDialog.svelte";
   import TagManagerDialog from "./TagManagerDialog.svelte";
   import SwatchPicker from "./SwatchPicker.svelte";
+  import DefaultValueEditor from "./DefaultValueEditor.svelte";
   import SelectOptionsEditor, { type OptionDraft } from "./SelectOptionsEditor.svelte";
   import type {
     AIHealthResponse,
@@ -298,6 +299,12 @@
   // row) so a value rename can migrate stored data even after drag-reorder.
   // OptionDraft is defined and re-exported by SelectOptionsEditor.
   let schemaFieldOptionList: OptionDraft[] = [];
+  // Default-value draft for the field editor (#38). String editor-side so
+  // the shared DefaultValueEditor can drive boolean / number / select /
+  // text uniformly; coerced into a type-matched MetadataValue at save time
+  // via schemaFieldDefaultForStorage. `undefined` = "no default" (the
+  // historic behaviour) — no `default` key is emitted on save.
+  let schemaFieldDefault: string | undefined = undefined;
   let schemaFieldReadonlyTypeLabel = "";
   let selectedSchemaFieldId: string | null = null;
   let schemaFieldReadonly = false;
@@ -1689,6 +1696,12 @@
       color: o.color ?? null,
       originalValue: o.value,
     }));
+    // Stringify the persisted default for the editor; null / undefined →
+    // "no default". A real `false` boolean default stays editable as "False".
+    schemaFieldDefault =
+      field.default === undefined || field.default === null
+        ? undefined
+        : String(field.default);
     schemaFieldKeyEditing = false;
     schemaFieldKeyManual = false;
     schemaFieldLayerId = metadataSchemaOverview?.field_sources[fieldId]?.built_in ? projectSchemaLayerId() : (metadataSchemaOverview?.field_sources[fieldId]?.layer_id ?? projectSchemaLayerId());
@@ -1719,6 +1732,7 @@
     schemaFieldComputedScope = "siblings";
     schemaFieldPickerConfig = { kinds: ["lore"], entry_types: {} };
     schemaFieldOptionList = [];
+    schemaFieldDefault = undefined;
     schemaFieldGroup = "";
     schemaFieldIcon = null;
     iconPickerOpen = false;
@@ -2004,6 +2018,20 @@
       .replace(/^[0-9]/, "field_$&");
   }
 
+  // Coerce the editor-side string default onto the field-type's wire shape
+  // (#38). Mirrors NodeEditor.defaultValueForStorage for prompt inputs;
+  // returns undefined for empty (no default) and computed types.
+  function schemaFieldDefaultForStorage(): import("./types").MetadataValue | undefined {
+    const raw = schemaFieldDefault;
+    if (raw === undefined || raw === "") return undefined;
+    if (schemaFieldType === "boolean") return raw === "true";
+    if (schemaFieldType === "number") {
+      const n = Number(raw);
+      return Number.isFinite(n) ? n : raw;
+    }
+    return raw;
+  }
+
   async function saveSchemaField() {
     if (!schemaFieldLayerId) return;
     const layerId = schemaFieldLayerId;
@@ -2037,6 +2065,12 @@
           ? { source: "body", function: "word_count" }
           : { function: "counter", scope: schemaFieldComputedScope }
         : null;
+    // Coerce the editor-side string default into the field-type's wire shape
+    // (#38). Computed fields never carry a default. undefined / "" → omit
+    // the key entirely so the field stays defaultless rather than seeding
+    // a falsy value into new entries.
+    const defaultValue =
+      schemaFieldType === "computed" ? undefined : schemaFieldDefaultForStorage();
     const nextField: MetadataFieldDefinition = {
       name: schemaFieldName.trim() || nextFieldId,
       type: schemaFieldSaveType(),
@@ -2047,6 +2081,7 @@
       // Per-field icon override (chosen in the IconPicker). null/empty =
       // fall back to the field-type default glyph.
       ...(schemaFieldIcon ? { icon: schemaFieldIcon } : {}),
+      ...(defaultValue !== undefined ? { default: defaultValue } : {}),
     };
 
     // Detect option values that are being removed (present before, gone now,
@@ -4667,6 +4702,22 @@
                 on:change={(event) => (schemaFieldOptionList = event.detail.options)}
               />
             {/if}
+            {#if schemaFieldType !== "computed"}
+              <!-- Default-value editor (#38). Shared with the prompt-inputs
+                   editor via DefaultValueEditor. Empty = no default (the
+                   historic behaviour). Computed fields omit this — their
+                   value is derived, not authored. -->
+              <label class="sfi-field sfi-default-field">
+                Default for new entries
+                <DefaultValueEditor
+                  type={schemaFieldType}
+                  value={schemaFieldDefault}
+                  options={schemaFieldOptionList}
+                  ariaLabel="Default for new entries"
+                  on:change={(event) => (schemaFieldDefault = event.detail.value)}
+                />
+              </label>
+            {/if}
             <div class="sfi-footer">
               <span class="sfi-spacer"></span>
               {#if selectedSchemaFieldId}
@@ -4911,6 +4962,18 @@
             on:change={(event) => (schemaFieldOptionList = event.detail.options)}
           />
         </div>
+      {/if}
+      {#if schemaFieldType !== "computed" && (!schemaFieldReadonly || schemaFieldDefault !== undefined)}
+        <label class="sfi-field sfi-default-field">
+          Default for new entries
+          <DefaultValueEditor
+            type={schemaFieldType}
+            value={schemaFieldDefault}
+            options={schemaFieldOptionList}
+            ariaLabel="Default for new entries"
+            on:change={(event) => (schemaFieldDefault = event.detail.value)}
+          />
+        </label>
       {/if}
       {#if !schemaFieldReadonly}
         <div class="button-row">

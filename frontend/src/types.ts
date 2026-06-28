@@ -205,6 +205,10 @@ export type MetadataFieldDefinition = {
   // (= the source group id). Lets the UI render these as group-derived
   // (read-only, "from <group>") rather than own/inherited. Never persisted.
   group_origin?: string | null;
+  // Optional initial value seeded onto new entries of any type that
+  // carries this field (#38). Type-matched per `type`; computed fields
+  // never carry a default.
+  default?: MetadataValue | null;
 };
 
 export type PromptInputType =
@@ -313,6 +317,10 @@ export type GroupMember = {
   icon?: string | null;
   options?: SelectOption[];
   picker_config?: NodePickerConfig | null;
+  // Default value propagated onto each generated field at schema-resolution
+  // time, so every application of the group seeds new entries with the
+  // same default (#38).
+  default?: MetadataValue | null;
 };
 
 // A reusable group of fields (e.g. GMO = Goal/Motivation/Obstacle), applied

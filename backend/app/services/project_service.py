@@ -1950,6 +1950,7 @@ class ProjectService:
                         "icon": member.get("icon"),
                         "options": deepcopy(member.get("options", [])),
                         "picker_config": deepcopy(member.get("picker_config")),
+                        "default": deepcopy(member.get("default")),
                         "group": section or None,
                         "group_origin": group_id,
                     }
@@ -2461,17 +2462,49 @@ class ProjectService:
         candidates.sort(key=lambda candidate: (candidate.entry_type, candidate.title.lower(), candidate.id))
         return ReferenceCandidatesResponse(candidates=candidates)
 
+    def _initial_metadata_from_defaults(
+        self, entry_type_id: str, schema: MetadataSchema
+    ) -> dict[str, MetadataValue]:
+        """Seed a new entry's metadata with each field's `default` (#38).
+
+        Walks the resolved field list for `entry_type_id` (which already
+        includes inherited fields), looks up each field on the schema, and
+        copies any non-null `default` into the result. Computed fields
+        never seed — they're derived at read time. Fields that don't carry
+        a default (None) are skipped, preserving the previous "blank by
+        default" behaviour wherever no author opt-in exists.
+        """
+        entry_type = schema.entry_types.get(entry_type_id)
+        if entry_type is None:
+            return {}
+        out: dict[str, MetadataValue] = {}
+        for field_id in entry_type.fields:
+            field = schema.fields.get(field_id)
+            if field is None or field.default is None:
+                continue
+            if field.type == "computed":
+                continue
+            out[field_id] = deepcopy(field.default)
+        return out
+
     def create_scene(self, request: CreateSceneRequest) -> Scene:
         root = self._require_project()
         scene_id = self._new_id("scene")
+        schema = self.read_metadata_schema()
+        initial_metadata = self._initial_metadata_from_defaults("scene", schema)
+        # `status` is a top-level Scene field (not in metadata), so resolve
+        # its default separately when one is authored — otherwise keep the
+        # historic "draft" floor so existing flows are unchanged.
+        status_default = initial_metadata.pop("status", None)
+        initial_status = status_default if isinstance(status_default, str) and status_default else "draft"
         scene = Scene(
             id=scene_id,
             title=request.title,
             body_markdown="",
             revision="",
-            status="draft",
+            status=initial_status,
             entry_type="scene",
-            metadata={},
+            metadata=initial_metadata,
         )
         self._write_scene_file(self._filepath_for_new_node(root / "scenes", request.title), scene)
 
@@ -2649,12 +2682,13 @@ class ProjectService:
         note_id: str | None = None
         if entry_type.has_body:
             note_id = self._new_id("note")
+            initial_metadata = self._initial_metadata_from_defaults(request.entry_type, schema)
             note = ResearchNote(
                 id=note_id,
                 title=request.title,
                 body_markdown="",
                 entry_type=request.entry_type,
-                metadata={},
+                metadata=initial_metadata,
             )
             self._write_research_note_file(
                 self._filepath_for_new_node(tree.leaf_dir, request.title),
@@ -3019,14 +3053,17 @@ class ProjectService:
 
         structure = self.read_structure()
         file_id = self._new_id("scene")
+        initial_metadata = self._initial_metadata_from_defaults(request.entry_type, schema)
+        status_default = initial_metadata.pop("status", None)
+        initial_status = status_default if isinstance(status_default, str) and status_default else "draft"
         scene = Scene(
             id=file_id,
             title=request.title,
             body_markdown="",
             revision="",
-            status="draft",
+            status=initial_status,
             entry_type=request.entry_type,
-            metadata={},
+            metadata=initial_metadata,
         )
         self._write_scene_file(self._filepath_for_new_node(root / "scenes", request.title), scene)
 
@@ -3373,11 +3410,13 @@ class ProjectService:
     def create_lore_entry(self, request: CreateLoreEntryRequest) -> LoreEntry:
         root = self._require_project()
         entry_type = request.entry_type or "lore_note"
+        schema = self.read_metadata_schema()
+        initial_metadata = self._initial_metadata_from_defaults(entry_type, schema)
         metadata_errors = self._validate_lore_entry_metadata(
             "new",
             entry_type,
-            {},
-            self.read_metadata_schema(),
+            initial_metadata,
+            schema,
         )
         if metadata_errors:
             raise ProjectServiceError(" ".join(metadata_errors), 422)
@@ -3389,7 +3428,7 @@ class ProjectService:
             body_markdown="",
             revision="",
             entry_type=entry_type,
-            metadata={},
+            metadata=initial_metadata,
         )
         self._write_lore_entry_file(self._filepath_for_new_node(root / "lore", request.title), entry)
         return self.read_lore_entry(entry_id)
@@ -3521,12 +3560,14 @@ class ProjectService:
         entry_id = self._new_id("prompt")
         initial_body = ""
         initial_inputs: list[PromptInputDefinition] = []
+        initial_metadata: dict[str, MetadataValue] = {}
         try:
             schema = self.read_metadata_schema()
             entry_type_def = schema.entry_types.get(request.entry_type)
             if entry_type_def:
                 initial_body = entry_type_def.default_body
                 initial_inputs = list(entry_type_def.default_inputs)
+            initial_metadata = self._initial_metadata_from_defaults(request.entry_type, schema)
         except Exception:
             pass
         entry = PromptEntry(
@@ -3535,7 +3576,7 @@ class ProjectService:
             body_markdown=initial_body,
             revision="",
             entry_type=request.entry_type,
-            metadata={},
+            metadata=initial_metadata,
             inputs=initial_inputs,
         )
         inputs_payload = [i.model_dump(exclude_none=True) for i in entry.inputs]

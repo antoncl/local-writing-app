@@ -169,6 +169,15 @@ class MetadataFieldDefinition(BaseModel):
     # (= the source group id). Never persisted; lets the UI render these as
     # group-derived (read-only, "from <group>") rather than own/inherited.
     group_origin: str | None = None
+    # Optional initial value for newly-created entries (#38). When set,
+    # `create_scene` / `create_lore_entry` / etc. pre-fill the entry's
+    # metadata with this value. None = no default (the existing behaviour;
+    # nothing is pre-filled). Type-matched per the field's `type`: boolean
+    # fields persist `true` / `false`, number fields persist a number,
+    # select fields persist the value (not the label), refs persist the
+    # id (or list of ids for entity_ref_list). Computed fields never carry
+    # a default — they're derived at read time.
+    default: MetadataValue | None = None
 
     @field_validator("options", mode="before")
     @classmethod
@@ -257,6 +266,10 @@ class GroupMember(BaseModel):
     icon: str | None = None
     options: list[SelectOption] = Field(default_factory=list)
     picker_config: NodePickerConfig | None = None
+    # Same semantics as MetadataFieldDefinition.default (#38) — propagates
+    # to each generated field at schema-resolution time, so every
+    # application of the group seeds new entries with the same default.
+    default: MetadataValue | None = None
 
     @field_validator("options", mode="before")
     @classmethod

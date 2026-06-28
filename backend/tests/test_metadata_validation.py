@@ -6,6 +6,7 @@ import unittest
 
 from app.models import (
     CreateLoreEntryRequest,
+    CreateSceneRequest,
     DeleteMetadataEntryTypeRequest,
     DeleteMetadataFieldRequest,
     EntryTypeDefinition,
@@ -18,6 +19,7 @@ from app.models import (
     SaveLoreEntryRequest,
     SaveSceneRequest,
     SearchRequest,
+    SelectOption,
     SetFieldOrderRequest,
     UpdateProjectSettingsRequest,
     UpsertMetadataEntryTypeRequest,
@@ -2164,6 +2166,100 @@ class MetadataValidationTests(unittest.TestCase):
             front, body = self.service._read_markdown_with_front_matter(path)
             self.assertFalse(body.startswith("\n"), f"body should not gain leading newlines, got {body!r}")
             self.assertEqual(body.strip(), "hello")
+
+    def test_field_default_seeds_new_entries_and_round_trips(self) -> None:
+        # #38: a field with `default` set seeds new entries on creation
+        # (computed fields excluded; the wire shape is type-matched). The
+        # default also round-trips through the schema YAML.
+        layer_id = self._project_layer_id()
+
+        self.service.upsert_metadata_field(
+            UpsertMetadataFieldRequest(
+                layer_id=layer_id,
+                field_id="mood",
+                field=MetadataFieldDefinition(
+                    name="Mood",
+                    type="select",
+                    options=[
+                        SelectOption(value="calm"),
+                        SelectOption(value="tense"),
+                    ],
+                    default="calm",
+                ),
+                entry_type="character",
+            )
+        )
+        self.service.upsert_metadata_field(
+            UpsertMetadataFieldRequest(
+                layer_id=layer_id,
+                field_id="age",
+                field=MetadataFieldDefinition(name="Age", type="number", default=30),
+                entry_type="character",
+            )
+        )
+        self.service.upsert_metadata_field(
+            UpsertMetadataFieldRequest(
+                layer_id=layer_id,
+                field_id="active",
+                field=MetadataFieldDefinition(name="Active", type="boolean", default=True),
+                entry_type="character",
+            )
+        )
+
+        entry = self.service.create_lore_entry(
+            CreateLoreEntryRequest(title="Defaulted", entry_type="character")
+        )
+        self.assertEqual(entry.metadata.get("mood"), "calm")
+        self.assertEqual(entry.metadata.get("age"), 30)
+        self.assertEqual(entry.metadata.get("active"), True)
+
+        # Schema YAML round-trip preserves the default.
+        on_disk = self.service._read_yaml(self.root / "metadata.schema.yaml")
+        self.assertEqual(on_disk["fields"]["mood"]["default"], "calm")
+        self.assertEqual(on_disk["fields"]["age"]["default"], 30)
+        self.assertEqual(on_disk["fields"]["active"]["default"], True)
+
+        # Fields without a default keep entries blank (the historic
+        # behaviour) — only opted-in fields seed.
+        self.service.upsert_metadata_field(
+            UpsertMetadataFieldRequest(
+                layer_id=layer_id,
+                field_id="hometown",
+                field=MetadataFieldDefinition(name="Hometown", type="text"),
+                entry_type="character",
+            )
+        )
+        blank = self.service.create_lore_entry(
+            CreateLoreEntryRequest(title="Blanky", entry_type="character")
+        )
+        self.assertNotIn("hometown", blank.metadata)
+
+    def test_scene_status_field_default_promotes_to_top_level(self) -> None:
+        # `status` is a top-level Scene attribute (not in metadata). When
+        # the schema field "status" carries a default, create_scene picks
+        # it up via the Scene model's `status` field rather than leaving
+        # the default stuck in metadata where the UI wouldn't surface it.
+        layer_id = self._project_layer_id()
+        self.service.upsert_metadata_field(
+            UpsertMetadataFieldRequest(
+                layer_id=layer_id,
+                field_id="status",
+                field=MetadataFieldDefinition(
+                    name="Status",
+                    type="select",
+                    options=[
+                        SelectOption(value="draft"),
+                        SelectOption(value="revised"),
+                        SelectOption(value="complete"),
+                    ],
+                    default="revised",
+                ),
+                entry_type="scene",
+            )
+        )
+        scene = self.service.create_scene(CreateSceneRequest(title="Defaulted scene"))
+        self.assertEqual(scene.status, "revised")
+        self.assertNotIn("status", scene.metadata)
 
 
 class ReferenceResolutionTests(unittest.TestCase):

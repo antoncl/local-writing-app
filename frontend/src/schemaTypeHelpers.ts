@@ -16,6 +16,11 @@ import type {
   MetadataSchemaLayer,
 } from "./types";
 
+// The schema's kind universe (a Node's "class"). Narrower than the wider
+// DocumentKind, which also covers chat / snippet / structure_node — none
+// of which have their own schema-type tree.
+export type SchemaKind = "scene" | "lore" | "research" | "prompt" | "assistant" | "project";
+
 // Slugify a free-text label into a stable field/type id.
 export function slugifyFieldId(value: string): string {
   return value
@@ -119,4 +124,84 @@ export function buildSchemaFieldSections(
   if (ungrouped.length) out.push({ group: null, entries: ungrouped });
   for (const [group, groupEntries] of groups) out.push({ group, entries: groupEntries });
   return out;
+}
+
+// One entry type as a flat option (id + display label + nesting depth).
+export type NodeTypeOption = {
+  id: string;
+  label: string;
+  depth: number;
+  definition: EntryTypeDefinition;
+};
+
+// One entry type as a tree node for the Detail Types pane.
+export type NodeTypeTreeNode = NodeTypeOption & {
+  children: NodeTypeTreeNode[];
+  // Field entries baked into the tree at build time so the recursive
+  // renderNodeTypeCard snippet doesn't have to look them up via the
+  // metadataSchema closure — see [[feedback-svelte5-reactivity-traps]]
+  // trap 2: closures inside recursive snippets go stale after mutations
+  // (a new field on a deep subtype didn't appear in its type's children
+  // panel until a full reload).
+  fieldEntries: [string, MetadataFieldDefinition][];
+};
+
+// Build the per-kind entry-type tree the Detail Types pane renders.
+// Roots come first in a kind-specific order (the kind's canonical root —
+// lore_entry / prompt / research — or name-sorted for scene/assistant/
+// project); children sort by display name. Each node bakes in its own
+// field entries (see NodeTypeTreeNode).
+export function buildNodeTypeTree(
+  schema: MetadataSchema | null,
+  kind: SchemaKind,
+): NodeTypeTreeNode[] {
+  const entryTypes = schema?.entry_types ?? {};
+  const childrenByParent: Record<string, string[]> = {};
+  const roots: string[] = [];
+  for (const [typeId, definition] of Object.entries(entryTypes)) {
+    if (definition.kind !== kind) continue;
+    const parent = definition.parent;
+    if (parent && entryTypes[parent]?.kind === kind) {
+      childrenByParent[parent] = [...(childrenByParent[parent] ?? []), typeId];
+    } else {
+      roots.push(typeId);
+    }
+  }
+  const compareByName = (left: string, right: string) =>
+    nodeTypeDisplayName(left, entryTypes[left]).localeCompare(nodeTypeDisplayName(right, entryTypes[right]));
+  for (const children of Object.values(childrenByParent)) {
+    children.sort(compareByName);
+  }
+  const rootIds =
+    kind === "lore" && entryTypes.lore_entry
+      ? ["lore_entry"]
+      : kind === "prompt" && entryTypes.prompt
+        ? ["prompt"]
+        : kind === "research" && entryTypes.research
+          ? ["research"]
+          : roots.sort(compareByName);
+  const fieldsRegistry = schema?.fields ?? {};
+  const buildNode = (typeId: string, depth: number): NodeTypeTreeNode | null => {
+    const definition = entryTypes[typeId];
+    if (!definition || definition.kind !== kind) return null;
+    const children = (childrenByParent[typeId] ?? [])
+      .map((childId) => buildNode(childId, depth + 1))
+      .filter((child): child is NodeTypeTreeNode => Boolean(child));
+    const fieldIds = definition.own_fields ?? definition.fields ?? [];
+    const fieldEntries = fieldIds
+      .map((fieldId): [string, MetadataFieldDefinition] | null => {
+        const f = fieldsRegistry[fieldId];
+        return f ? [fieldId, f] : null;
+      })
+      .filter((entry): entry is [string, MetadataFieldDefinition] => Boolean(entry));
+    return {
+      id: typeId,
+      label: nodeTypeDisplayName(typeId, definition),
+      depth,
+      definition,
+      children,
+      fieldEntries,
+    };
+  };
+  return rootIds.map((typeId) => buildNode(typeId, 0)).filter((node): node is NodeTypeTreeNode => Boolean(node));
 }

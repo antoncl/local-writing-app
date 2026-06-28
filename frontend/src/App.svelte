@@ -10,6 +10,7 @@
   import SchemaTreePane from "./SchemaTreePane.svelte";
   import Tree, { type TreeConfig } from "./Tree.svelte";
   import Lore from "./Lore.svelte";
+  import Assistants from "./Assistants.svelte";
   import {
     buildNodeTypeTree,
     buildSchemaFieldSections,
@@ -312,7 +313,6 @@
   let newTodo = "";
   let searchQuery = "";
   let collapsedPromptGroups: Record<string, boolean> = {};
-  let collapsedAssistantGroups: Record<string, boolean> = {};
   // Outline group-header collapse state, keyed by StructureNode.id.
   // Same shape as the other collapsed-* maps so the refactor stays
   // consistent across panes. Persisted per-project to localStorage so
@@ -881,106 +881,13 @@
     promptEntries = (await api.listPromptEntries()).entries;
   }
 
-  $: groupedAssistantEntries = groupAssistantEntriesByLayer(assistantEntries);
-
-  // Drag-drop state for reordering assistants within a layer.
-  let assistantDragId: string | null = null;
-  let assistantDragLayerId: string | null = null;
-  let assistantDropTarget: { id: string; position: "before" | "after" } | null = null;
-
-  function startAssistantDrag(event: DragEvent, entry: AssistantEntrySummary) {
-    if (!event.dataTransfer) return;
-    assistantDragId = entry.id;
-    assistantDragLayerId = entry.source_layer_id ?? "";
-    event.dataTransfer.effectAllowed = "move";
-    // Some browsers require setData to start a drag.
-    event.dataTransfer.setData("text/plain", entry.id);
-  }
-
-  function onAssistantDragOver(event: DragEvent, entry: AssistantEntrySummary) {
-    if (!assistantDragId || assistantDragLayerId !== (entry.source_layer_id ?? "")) return;
-    if (entry.id === assistantDragId) return;
-    event.preventDefault();
-    if (event.dataTransfer) event.dataTransfer.dropEffect = "move";
-    const row = event.currentTarget as HTMLElement;
-    const rect = row.getBoundingClientRect();
-    const position = event.clientY < rect.top + rect.height / 2 ? "before" : "after";
-    assistantDropTarget = { id: entry.id, position };
-  }
-
-  function onAssistantDragLeave() {
-    assistantDropTarget = null;
-  }
-
-  function endAssistantDrag() {
-    assistantDragId = null;
-    assistantDragLayerId = null;
-    assistantDropTarget = null;
-  }
-
-  async function onAssistantDrop(event: DragEvent, entry: AssistantEntrySummary) {
-    event.preventDefault();
-    if (!assistantDragId || assistantDragId === entry.id) {
-      endAssistantDrag();
-      return;
-    }
-    const layerId = entry.source_layer_id ?? "";
-    if (assistantDragLayerId !== layerId) {
-      endAssistantDrag();
-      return;
-    }
-    const group = groupedAssistantEntries.find((g) => g.layerId === layerId);
-    if (!group) {
-      endAssistantDrag();
-      return;
-    }
-    const draggedId = assistantDragId;
-    const dropPosition = assistantDropTarget?.position ?? "after";
-    const withoutDragged = group.entries.filter((e) => e.id !== draggedId);
-    const targetIndex = withoutDragged.findIndex((e) => e.id === entry.id);
-    if (targetIndex === -1) {
-      endAssistantDrag();
-      return;
-    }
-    const insertAt = dropPosition === "before" ? targetIndex : targetIndex + 1;
-    const orderedIds = [
-      ...withoutDragged.slice(0, insertAt).map((e) => e.id),
-      draggedId,
-      ...withoutDragged.slice(insertAt).map((e) => e.id),
-    ];
-    endAssistantDrag();
+  // Persist a within-layer assistant reorder computed by Assistants.svelte.
+  // App owns assistantEntries (the chat pane reads it too), so the api call +
+  // state update stay here; the drag UI lives in the component.
+  async function reorderAssistantsInLayer(layerId: string, orderedIds: string[]) {
     await run(async () => {
       assistantEntries = (await api.reorderAssistants(layerId, orderedIds)).entries;
     });
-  }
-
-  function groupAssistantEntriesByLayer(entries: AssistantEntrySummary[]): { layerId: string; layerLabel: string; entries: AssistantEntrySummary[] }[] {
-    const groups = new Map<string, { layerId: string; layerLabel: string; entries: AssistantEntrySummary[] }>();
-    for (const entry of entries) {
-      const key = entry.source_layer_id || "";
-      const label = entry.source_layer_label || "Unknown";
-      const existing = groups.get(key);
-      if (existing) {
-        existing.entries.push(entry);
-      } else {
-        groups.set(key, { layerId: key, layerLabel: label, entries: [entry] });
-      }
-    }
-    // Machine layer first; then alphabetical by label.
-    return Array.from(groups.values()).sort((a, b) => {
-      if (a.layerLabel === "Machine") return -1;
-      if (b.layerLabel === "Machine") return 1;
-      return a.layerLabel.localeCompare(b.layerLabel);
-    });
-  }
-
-  function assistantSubtitle(entry: AssistantEntrySummary): string {
-    const provider = entry.metadata?.ai_provider;
-    const model = entry.metadata?.ai_model;
-    if (provider && model) return `${provider} · ${model}`;
-    if (model) return String(model);
-    if (provider) return String(provider);
-    return "";
   }
 
   async function refreshAssistantEntries() {
@@ -1367,9 +1274,12 @@
     return assistantEntries.find((a) => a.id === assistantId)?.title ?? "";
   }
 
-  function defaultAssistantEntryId(): string {
-    return assistantEntries.find((a) => Boolean(a.metadata?.is_default))?.id ?? "";
-  }
+  // Derived, not a function: consumers pass it as a prop, and a bare
+  // `defaultAssistantEntryId()` call in a prop expression wouldn't track its
+  // inner assistantEntries dependency (Svelte only static-analyzes the
+  // expression), so it'd stay stale at its initial empty value. See
+  // feedback_svelte5_reactivity_traps.
+  $: defaultAssistantId = assistantEntries.find((a) => Boolean(a.metadata?.is_default))?.id ?? "";
 
   // Set of "<docType>:<id>" keys for every node currently open in a
   // pinned editor pane. Derived reactively so the template can ask
@@ -2849,12 +2759,6 @@
     };
   }
 
-  function toggleAssistantGroup(groupId: string) {
-    collapsedAssistantGroups = {
-      ...collapsedAssistantGroups,
-      [groupId]: !collapsedAssistantGroups[groupId],
-    };
-  }
 
   function metadataListText(value: unknown) {
     if (Array.isArray(value)) return value.map((item) => String(item).trim()).filter(Boolean).join(", ");
@@ -3810,63 +3714,14 @@
       </div>
     </header>
     <div class="pane-content schema-list">
-      <NodeList isEmpty={assistantEntries.length === 0}>
-        {#each groupedAssistantEntries as group (group.layerId)}
-          {@const userCollapsed = !!collapsedAssistantGroups[group.layerId]}
-          {@const isEmpty = group.entries.length === 0}
-          <NodeRow
-            groupHeader
-            collapsed={userCollapsed || isEmpty}
-            title={group.layerLabel}
-            onClick={() => toggleAssistantGroup(group.layerId)}
-          >
-            {#snippet leading()}
-              <span class:collapsed={userCollapsed || isEmpty} class="lore-group-caret">▾</span>
-            {/snippet}
-            {#snippet trailing()}
-              <span class="group-count-pill">{group.entries.length}</span>
-            {/snippet}
-            {#snippet nested()}
-              {#each group.entries as entry (entry.id)}
-                <NodeRow
-                  title={entry.title}
-                  active={focusedEditorPane?.document?.type === "assistant" && focusedEditorPane.document.id === entry.id}
-                  pinned={pinnedEditorPaneKeys.has(`assistant:${entry.id}`)}
-                  dragging={assistantDragId === entry.id}
-                  dropPosition={assistantDropTarget?.id === entry.id ? (assistantDropTarget?.position ?? null) : null}
-                  onClick={() => openAssistantEntryInEditorPane(entry.id)}
-                  on:dragover={(event) => onAssistantDragOver(event, entry)}
-                  on:dragleave={onAssistantDragLeave}
-                  on:drop={(event) => onAssistantDrop(event, entry)}
-                >
-                  {#snippet leading()}
-                    <span
-                      class="assistant-drag-handle"
-                      draggable="true"
-                      role="button"
-                      tabindex="-1"
-                      aria-label="Drag to reorder"
-                      on:dragstart={(event) => startAssistantDrag(event, entry)}
-                      on:dragend={endAssistantDrag}
-                    >⋮⋮</span>
-                  {/snippet}
-                  {#snippet detailSlot()}
-                    <small>{assistantSubtitle(entry)}</small>
-                  {/snippet}
-                  {#snippet trailing()}
-                    {#if entry.id === defaultAssistantEntryId()}
-                      <span class="row-default-marker" aria-label="Default assistant" title="Default assistant">★ default</span>
-                    {/if}
-                  {/snippet}
-                </NodeRow>
-              {/each}
-            {/snippet}
-          </NodeRow>
-        {/each}
-        {#snippet whenEmpty()}
-          <p class="muted">No assistants defined yet. Click + Assistant to create one in the machine layer.</p>
-        {/snippet}
-      </NodeList>
+      <Assistants
+        entries={assistantEntries}
+        focusedDocument={focusedEditorPane?.document ?? null}
+        pinnedKeys={pinnedEditorPaneKeys}
+        defaultAssistantId={defaultAssistantId}
+        onOpenEntry={(id) => openAssistantEntryInEditorPane(id)}
+        onReorder={reorderAssistantsInLayer}
+      />
     </div>
     <button class="pane-resize" type="button" aria-label="Resize Assistants pane" on:keydown={(event) => handlePaneResizeKeydown(event, "assistants")} on:mousedown={(event) => startPaneResize(event, "assistants")}></button>
   </section>
@@ -3994,7 +3849,7 @@
         knownTags={knownTags}
         implicitContextMatcher={implicitContextMatcher}
         assistantEntries={assistantEntries}
-        defaultAssistantId={defaultAssistantEntryId()}
+        defaultAssistantId={defaultAssistantId}
         availableScenes={flattenStructureScenes(structure?.root)}
         metadataReload={metadataReloadsByPane[editorPane.id] ?? null}
         titleReload={titleReloadsByPane[editorPane.id] ?? null}

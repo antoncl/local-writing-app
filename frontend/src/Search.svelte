@@ -1,0 +1,37 @@
+<script lang="ts">
+  import type { SearchHit } from "./types";
+  import { api } from "./api";
+
+  // App's error-catching async wrapper (same one Tree uses).
+  export let run: (action: () => Promise<void>) => Promise<void>;
+  // Open a hit in an editor pane — App owns the pane set + the embedded-TODO
+  // highlight that follows a scene hit.
+  export let onOpenHit: (hit: SearchHit) => void;
+
+  // All search state is local to this feature — nothing else in the app reads it.
+  let query = "";
+  let includeOpenTodos = false;
+  let hits: SearchHit[] = [];
+
+  async function runSearch() {
+    if (!query.trim() && !includeOpenTodos) return;
+    await run(async () => {
+      hits = (await api.search(query.trim(), includeOpenTodos)).hits;
+    });
+  }
+</script>
+
+<div class="todo-entry">
+  <input bind:value={query} placeholder="Find in scenes and lore" on:keydown={(event) => event.key === "Enter" && runSearch()} />
+  <button on:click={runSearch}>Find</button>
+</div>
+<label class="inline-check">
+  <input type="checkbox" bind:checked={includeOpenTodos} />
+  Include open TODOs
+</label>
+{#each hits as hit}
+  <button class="search-hit" on:click={() => onOpenHit(hit)}>
+    <strong>{hit.path}:{hit.line}</strong>
+    <span>{hit.excerpt}</span>
+  </button>
+{/each}

@@ -12,6 +12,7 @@
   import Prompts from "./Prompts.svelte";
   import Chats from "./Chats.svelte";
   import Project from "./Project.svelte";
+  import Search from "./Search.svelte";
   import {
     buildNodeTypeTree,
     buildSchemaFieldSections,
@@ -311,7 +312,6 @@
   let promptEntries: PromptEntrySummary[] = [];
   let assistantEntries: AssistantEntrySummary[] = [];
   let newTodo = "";
-  let searchQuery = "";
   // Outline group-header collapse state, keyed by StructureNode.id.
   // Same shape as the other collapsed-* maps so the refactor stays
   // consistent across panes. Persisted per-project to localStorage so
@@ -339,8 +339,6 @@
       // Quota / private-browsing — silently degrade to in-memory only.
     }
   }
-  let searchOpenTodos = false;
-  let searchHits: SearchHit[] = [];
   let confirmation: ConfirmationState | null = null;
   let error = "";
   let status = "No project open";
@@ -3212,13 +3210,6 @@
     });
   }
 
-  async function search() {
-    if (!searchQuery.trim() && !searchOpenTodos) return;
-    await run(async () => {
-      searchHits = (await api.search(searchQuery.trim(), searchOpenTodos)).hits;
-    });
-  }
-
   async function openSearchHit(hit: SearchHit) {
     if (hit.file_id === "project") return;
     await run(async () => {
@@ -3777,20 +3768,7 @@
       <h2>Search</h2>
     </header>
     <div class="pane-content">
-      <div class="todo-entry">
-        <input bind:value={searchQuery} placeholder="Find in scenes and lore" on:keydown={(event) => event.key === "Enter" && search()} />
-        <button on:click={search}>Find</button>
-      </div>
-      <label class="inline-check">
-        <input type="checkbox" bind:checked={searchOpenTodos} />
-        Include open TODOs
-      </label>
-      {#each searchHits as hit}
-        <button class="search-hit" on:click={() => openSearchHit(hit)}>
-          <strong>{hit.path}:{hit.line}</strong>
-          <span>{hit.excerpt}</span>
-        </button>
-      {/each}
+      <Search {run} onOpenHit={openSearchHit} />
     </div>
     <button class="pane-resize" type="button" aria-label="Resize Search pane" on:keydown={(event) => handlePaneResizeKeydown(event, "search")} on:mousedown={(event) => startPaneResize(event, "search")}></button>
   </section>

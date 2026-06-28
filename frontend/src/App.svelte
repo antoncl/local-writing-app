@@ -14,6 +14,7 @@
   import Project from "./Project.svelte";
   import Search from "./Search.svelte";
   import Todo, { type EmbeddedTodo } from "./Todo.svelte";
+  import Pane, { type PaneChrome } from "./Pane.svelte";
   import {
     buildNodeTypeTree,
     buildSchemaFieldSections,
@@ -812,6 +813,16 @@
       [id]: { ...pane, width: Math.max(minWidth, width), height: Math.max(minHeight, height) },
     };
   }
+
+  // The shared chrome controller handed to every <Pane>. The handlers are
+  // stable function declarations, so a plain object (not reactive) is fine.
+  const paneChrome: PaneChrome = {
+    focus: focusPane,
+    headerKeydown: handlePaneHeaderKeydown,
+    headerDrag: startPaneDrag,
+    resizeKeydown: handlePaneResizeKeydown,
+    resizeDrag: startPaneResize,
+  };
 
   async function run(action: () => Promise<void>) {
     error = "";
@@ -3302,11 +3313,7 @@
 />
 
 <main class="workspace">
-  <!-- svelte-ignore a11y_no_noninteractive_element_interactions -->
-  <section class:hidden-pane={!isPaneVisible("project")} class="pane project-pane" data-pane-id="project" style={paneStyle("project")} aria-label="Project pane" on:mousedown={() => focusPane("project")}>
-    <header class="pane-header" role="button" tabindex="0" aria-label="Move Project pane" on:keydown={(event) => handlePaneHeaderKeydown(event, "project")} on:mousedown={(event) => startPaneDrag(event, "project")}>
-      <h2>Project</h2>
-    </header>
+  <Pane id="project" title="Project" paneClass="project-pane" hidden={!isPaneVisible("project")} style={paneStyle("project")} chrome={paneChrome}>
     <div class="pane-content project-panel">
       <Project
         {isProjectOpen}
@@ -3329,14 +3336,9 @@
         onRepair={repairProject}
       />
     </div>
-    <button class="pane-resize" type="button" aria-label="Resize Project pane" on:keydown={(event) => handlePaneResizeKeydown(event, "project")} on:mousedown={(event) => startPaneResize(event, "project")}></button>
-  </section>
+  </Pane>
 
-  <!-- svelte-ignore a11y_no_noninteractive_element_interactions -->
-  <section class:hidden-pane={!isPaneVisible("outline")} class="pane outline-pane" data-pane-id="outline" style={paneStyle("outline")} aria-label="Draft pane" on:mousedown={() => focusPane("outline")}>
-    <header class="pane-header" role="button" tabindex="0" aria-label="Move Draft pane" on:keydown={(event) => handlePaneHeaderKeydown(event, "outline")} on:mousedown={(event) => startPaneDrag(event, "outline")}>
-      <h2>Draft</h2>
-    </header>
+  <Pane id="outline" title="Draft" paneClass="outline-pane" hidden={!isPaneVisible("outline")} style={paneStyle("outline")} chrome={paneChrome}>
     <div class="pane-content">
       <Tree
         config={manuscriptTree}
@@ -3356,17 +3358,12 @@
         onCloseAddMenu={closeAddMenu}
       />
     </div>
-    <button class="pane-resize" type="button" aria-label="Resize Draft pane" on:keydown={(event) => handlePaneResizeKeydown(event, "outline")} on:mousedown={(event) => startPaneResize(event, "outline")}></button>
-  </section>
+  </Pane>
 
-  <!-- svelte-ignore a11y_no_noninteractive_element_interactions -->
-  <section class:hidden-pane={!isPaneVisible("lore")} class="pane lore-pane" data-pane-id="lore" style={paneStyle("lore")} aria-label="Lore pane" on:mousedown={() => focusPane("lore")}>
-    <header class="pane-header" role="button" tabindex="0" aria-label="Move Lore pane" on:keydown={(event) => handlePaneHeaderKeydown(event, "lore")} on:mousedown={(event) => startPaneDrag(event, "lore")}>
-      <h2>Lore</h2>
-      <div class="pane-header-actions">
-        <button class="pin-button" type="button" title="Add entry" on:mousedown={(event) => event.stopPropagation()} on:click={() => newLoreEntry()}>+ Entry</button>
-      </div>
-    </header>
+  <Pane id="lore" title="Lore" paneClass="lore-pane" hidden={!isPaneVisible("lore")} style={paneStyle("lore")} chrome={paneChrome}>
+    {#snippet actions()}
+      <button class="pin-button" type="button" title="Add entry" on:mousedown={(event) => event.stopPropagation()} on:click={() => newLoreEntry()}>+ Entry</button>
+    {/snippet}
     <div class="pane-content">
       <Lore
         entries={loreEntries}
@@ -3377,14 +3374,9 @@
         onMoveNoteToResearch={(entry) => requestMoveLoreNoteToResearch(entry)}
       />
     </div>
-    <button class="pane-resize" type="button" aria-label="Resize Lore pane" on:keydown={(event) => handlePaneResizeKeydown(event, "lore")} on:mousedown={(event) => startPaneResize(event, "lore")}></button>
-  </section>
+  </Pane>
 
-  <!-- svelte-ignore a11y_no_noninteractive_element_interactions -->
-  <section class:hidden-pane={!isPaneVisible("research")} class="pane research-pane" data-pane-id="research" style={paneStyle("research")} aria-label="Research pane" on:mousedown={() => focusPane("research")}>
-    <header class="pane-header" role="button" tabindex="0" aria-label="Move Research pane" on:keydown={(event) => handlePaneHeaderKeydown(event, "research")} on:mousedown={(event) => startPaneDrag(event, "research")}>
-      <h2>Research</h2>
-    </header>
+  <Pane id="research" title="Research" paneClass="research-pane" hidden={!isPaneVisible("research")} style={paneStyle("research")} chrome={paneChrome}>
     <div class="pane-content">
       <Tree
         config={researchTree}
@@ -3404,20 +3396,15 @@
         onCloseAddMenu={closeAddMenu}
       />
     </div>
-    <button class="pane-resize" type="button" aria-label="Resize Research pane" on:keydown={(event) => handlePaneResizeKeydown(event, "research")} on:mousedown={(event) => startPaneResize(event, "research")}></button>
-  </section>
+  </Pane>
 
-  <!-- svelte-ignore a11y_no_noninteractive_element_interactions -->
-  <section class:hidden-pane={!isProjectOpen || !schemaPaneOpen} class="pane schema-pane" data-pane-id="schema" style={paneStyle("schema")} aria-label="Detail Types pane" on:mousedown={() => focusPane("schema")}>
-    <header class="pane-header" role="button" tabindex="0" aria-label="Move Detail Types pane" on:keydown={(event) => handlePaneHeaderKeydown(event, "schema")} on:mousedown={(event) => startPaneDrag(event, "schema")}>
-      <h2>Detail Types</h2>
-      <div class="pane-header-actions">
-        <button class="pin-button" type="button" on:mousedown={(event) => event.stopPropagation()} on:click={() => createSchemaTypeDraft()}>+ Type</button>
-        <button class="pin-button" type="button" on:mousedown={(event) => event.stopPropagation()} on:click={() => (groupsManagerOpen = true)}>Groups…</button>
-        <button class="pin-button" type="button" on:mousedown={(event) => event.stopPropagation()} on:click={() => (tagsManagerOpen = true)}>Tags…</button>
-        <button class="pin-button" type="button" on:mousedown={(event) => event.stopPropagation()} on:click={() => closeSchemaPane("schema")}>Close</button>
-      </div>
-    </header>
+  <Pane id="schema" title="Detail Types" paneClass="schema-pane" hidden={!isProjectOpen || !schemaPaneOpen} style={paneStyle("schema")} chrome={paneChrome}>
+    {#snippet actions()}
+      <button class="pin-button" type="button" on:mousedown={(event) => event.stopPropagation()} on:click={() => createSchemaTypeDraft()}>+ Type</button>
+      <button class="pin-button" type="button" on:mousedown={(event) => event.stopPropagation()} on:click={() => (groupsManagerOpen = true)}>Groups…</button>
+      <button class="pin-button" type="button" on:mousedown={(event) => event.stopPropagation()} on:click={() => (tagsManagerOpen = true)}>Tags…</button>
+      <button class="pin-button" type="button" on:mousedown={(event) => event.stopPropagation()} on:click={() => closeSchemaPane("schema")}>Close</button>
+    {/snippet}
     <SchemaTreePane
       bind:draggedSchemaTypeId
       schemaFieldKind={schemaFieldKind}
@@ -3437,17 +3424,12 @@
       onDeleteType={requestDeleteSchemaType}
       onOpenField={openSchemaFieldDetail}
     />
-    <button class="pane-resize" type="button" aria-label="Resize Detail Types pane" on:keydown={(event) => handlePaneResizeKeydown(event, "schema")} on:mousedown={(event) => startPaneResize(event, "schema")}></button>
-  </section>
+  </Pane>
 
-  <!-- svelte-ignore a11y_no_noninteractive_element_interactions -->
-  <section class:hidden-pane={!isProjectOpen || !schemaTypePaneOpen} class="pane schema-type-pane" data-pane-id="schema_type" style={paneStyle("schema_type")} aria-label="Detail Type pane" on:mousedown={() => focusPane("schema_type")}>
-    <header class="pane-header" role="button" tabindex="0" aria-label="Move Detail Type pane" on:keydown={(event) => handlePaneHeaderKeydown(event, "schema_type")} on:mousedown={(event) => startPaneDrag(event, "schema_type")}>
-      <h2>Detail Type</h2>
-      <div class="pane-header-actions">
-        <button class="pin-button" type="button" on:mousedown={(event) => event.stopPropagation()} on:click={() => closeSchemaPane("schema_type")}>Close</button>
-      </div>
-    </header>
+  <Pane id="schema_type" title="Detail Type" paneClass="schema-type-pane" hidden={!isProjectOpen || !schemaTypePaneOpen} style={paneStyle("schema_type")} chrome={paneChrome}>
+    {#snippet actions()}
+      <button class="pin-button" type="button" on:mousedown={(event) => event.stopPropagation()} on:click={() => closeSchemaPane("schema_type")}>Close</button>
+    {/snippet}
     <SchemaTypeEditor
       bind:schemaTypeName
       bind:schemaTypeLayerId
@@ -3510,17 +3492,12 @@
       onFieldDrop={onFieldDrop}
       onClearFieldDrag={clearFieldDrag}
     />
-    <button class="pane-resize" type="button" aria-label="Resize Detail Type pane" on:keydown={(event) => handlePaneResizeKeydown(event, "schema_type")} on:mousedown={(event) => startPaneResize(event, "schema_type")}></button>
-  </section>
+  </Pane>
 
-  <!-- svelte-ignore a11y_no_noninteractive_element_interactions -->
-  <section class:hidden-pane={!isProjectOpen || !promptsPaneOpen} class="pane prompts-pane" data-pane-id="prompts" style={paneStyle("prompts")} aria-label="Prompts pane" on:mousedown={() => focusPane("prompts")}>
-    <header class="pane-header" role="button" tabindex="0" aria-label="Move Prompts pane" on:keydown={(event) => handlePaneHeaderKeydown(event, "prompts")} on:mousedown={(event) => startPaneDrag(event, "prompts")}>
-      <h2>Prompts</h2>
-      <div class="pane-header-actions">
-        <button class="pin-button" type="button" on:mousedown={(event) => event.stopPropagation()} on:click={() => closeSchemaPane("prompts")}>Close</button>
-      </div>
-    </header>
+  <Pane id="prompts" title="Prompts" paneClass="prompts-pane" hidden={!isProjectOpen || !promptsPaneOpen} style={paneStyle("prompts")} chrome={paneChrome}>
+    {#snippet actions()}
+      <button class="pin-button" type="button" on:mousedown={(event) => event.stopPropagation()} on:click={() => closeSchemaPane("prompts")}>Close</button>
+    {/snippet}
     <div class="pane-content schema-list">
       <Prompts
         schema={metadataSchema}
@@ -3531,18 +3508,13 @@
         onNewEntry={(entryType) => newPromptEntry(entryType)}
       />
     </div>
-    <button class="pane-resize" type="button" aria-label="Resize Prompts pane" on:keydown={(event) => handlePaneResizeKeydown(event, "prompts")} on:mousedown={(event) => startPaneResize(event, "prompts")}></button>
-  </section>
+  </Pane>
 
-  <!-- svelte-ignore a11y_no_noninteractive_element_interactions -->
-  <section class:hidden-pane={!assistantsPaneOpen} class="pane assistants-pane" data-pane-id="assistants" style={paneStyle("assistants")} aria-label="Assistants pane" on:mousedown={() => focusPane("assistants")}>
-    <header class="pane-header" role="button" tabindex="0" aria-label="Move Assistants pane" on:keydown={(event) => handlePaneHeaderKeydown(event, "assistants")} on:mousedown={(event) => startPaneDrag(event, "assistants")}>
-      <h2>Assistants</h2>
-      <div class="pane-header-actions">
-        <button class="pin-button" type="button" title="Add assistant" on:mousedown={(event) => event.stopPropagation()} on:click={() => newAssistantEntry()}>+ Assistant</button>
-        <button class="pin-button" type="button" on:mousedown={(event) => event.stopPropagation()} on:click={() => closeSchemaPane("assistants")}>Close</button>
-      </div>
-    </header>
+  <Pane id="assistants" title="Assistants" paneClass="assistants-pane" hidden={!assistantsPaneOpen} style={paneStyle("assistants")} chrome={paneChrome}>
+    {#snippet actions()}
+      <button class="pin-button" type="button" title="Add assistant" on:mousedown={(event) => event.stopPropagation()} on:click={() => newAssistantEntry()}>+ Assistant</button>
+      <button class="pin-button" type="button" on:mousedown={(event) => event.stopPropagation()} on:click={() => closeSchemaPane("assistants")}>Close</button>
+    {/snippet}
     <div class="pane-content schema-list">
       <Assistants
         entries={assistantEntries}
@@ -3553,19 +3525,13 @@
         onReorder={reorderAssistantsInLayer}
       />
     </div>
-    <button class="pane-resize" type="button" aria-label="Resize Assistants pane" on:keydown={(event) => handlePaneResizeKeydown(event, "assistants")} on:mousedown={(event) => startPaneResize(event, "assistants")}></button>
-  </section>
+  </Pane>
 
-
-  <!-- svelte-ignore a11y_no_noninteractive_element_interactions -->
-  <section class:hidden-pane={!isPaneVisible("chats")} class="pane chats-pane" data-pane-id="chats" style={paneStyle("chats")} aria-label="Chats pane" on:mousedown={() => focusPane("chats")}>
-    <header class="pane-header" role="button" tabindex="0" aria-label="Move Chats pane" on:keydown={(event) => handlePaneHeaderKeydown(event, "chats")} on:mousedown={(event) => startPaneDrag(event, "chats")}>
-      <h2>Chats</h2>
-      <div class="pane-header-actions">
-        <button class="pin-button" type="button" title="Start a new chat" on:mousedown={(event) => event.stopPropagation()} on:click={() => createNewChatSession()}>+ New Chat</button>
-        <button class="pin-button" type="button" on:mousedown={(event) => event.stopPropagation()} on:click={() => closeSchemaPane("chats")}>Close</button>
-      </div>
-    </header>
+  <Pane id="chats" title="Chats" paneClass="chats-pane" hidden={!isPaneVisible("chats")} style={paneStyle("chats")} chrome={paneChrome}>
+    {#snippet actions()}
+      <button class="pin-button" type="button" title="Start a new chat" on:mousedown={(event) => event.stopPropagation()} on:click={() => createNewChatSession()}>+ New Chat</button>
+      <button class="pin-button" type="button" on:mousedown={(event) => event.stopPropagation()} on:click={() => closeSchemaPane("chats")}>Close</button>
+    {/snippet}
     <div class="pane-content schema-list">
       <Chats
         sessions={chatSessions}
@@ -3576,9 +3542,7 @@
         onDeleteChat={(id) => deleteChatSessionFromPane(id)}
       />
     </div>
-    <button class="pane-resize" type="button" aria-label="Resize Chats pane" on:keydown={(event) => handlePaneResizeKeydown(event, "chats")} on:mousedown={(event) => startPaneResize(event, "chats")}></button>
-  </section>
-
+  </Pane>
 
   {#each editorPanes as editorPane (editorPane.id)}
     <!-- svelte-ignore a11y_no_noninteractive_element_interactions -->
@@ -3679,23 +3643,19 @@
     </section>
   {/each}
 
-  <!-- svelte-ignore a11y_no_noninteractive_element_interactions -->
-  <section class:hidden-pane={!isPaneVisible("todo")} class="pane todo-pane" data-pane-id="todo" style={paneStyle("todo")} aria-label="TODO pane" on:mousedown={() => focusPane("todo")}>
-    <header class="pane-header" role="button" tabindex="0" aria-label="Move TODO pane" on:keydown={(event) => handlePaneHeaderKeydown(event, "todo")} on:mousedown={(event) => startPaneDrag(event, "todo")}>
-      <h2>TODO</h2>
-      <div class="pane-header-actions">
-        <button
-          class="pin-button danger"
-          type="button"
-          disabled={!todos.some((item) => item.status === "done") && !allEmbeddedTodos.some((item) => item.status === "done")}
-          title="Delete all completed TODOs"
-          on:mousedown={(event) => event.stopPropagation()}
-          on:click={deleteCompletedTodos}
-        >
-          Delete Done
-        </button>
-      </div>
-    </header>
+  <Pane id="todo" title="TODO" paneClass="todo-pane" hidden={!isPaneVisible("todo")} style={paneStyle("todo")} chrome={paneChrome}>
+    {#snippet actions()}
+      <button
+        class="pin-button danger"
+        type="button"
+        disabled={!todos.some((item) => item.status === "done") && !allEmbeddedTodos.some((item) => item.status === "done")}
+        title="Delete all completed TODOs"
+        on:mousedown={(event) => event.stopPropagation()}
+        on:click={deleteCompletedTodos}
+      >
+        Delete Done
+      </button>
+    {/snippet}
     <div class="pane-content">
       <Todo
         {todos}
@@ -3713,19 +3673,13 @@
         onDeleteEmbeddedTodo={deleteEmbeddedTodo}
       />
     </div>
-    <button class="pane-resize" type="button" aria-label="Resize TODO pane" on:keydown={(event) => handlePaneResizeKeydown(event, "todo")} on:mousedown={(event) => startPaneResize(event, "todo")}></button>
-  </section>
+  </Pane>
 
-  <!-- svelte-ignore a11y_no_noninteractive_element_interactions -->
-  <section class:hidden-pane={!isPaneVisible("search")} class="pane search-pane" data-pane-id="search" style={paneStyle("search")} aria-label="Search pane" on:mousedown={() => focusPane("search")}>
-    <header class="pane-header" role="button" tabindex="0" aria-label="Move Search pane" on:keydown={(event) => handlePaneHeaderKeydown(event, "search")} on:mousedown={(event) => startPaneDrag(event, "search")}>
-      <h2>Search</h2>
-    </header>
+  <Pane id="search" title="Search" paneClass="search-pane" hidden={!isPaneVisible("search")} style={paneStyle("search")} chrome={paneChrome}>
     <div class="pane-content">
       <Search {run} onOpenHit={openSearchHit} />
     </div>
-    <button class="pane-resize" type="button" aria-label="Resize Search pane" on:keydown={(event) => handlePaneResizeKeydown(event, "search")} on:mousedown={(event) => startPaneResize(event, "search")}></button>
-  </section>
+  </Pane>
 
   <DirectoryPickerModal
     open={directoryPickerOpen}

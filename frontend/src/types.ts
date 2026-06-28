@@ -62,11 +62,28 @@ export type ResearchNote = {
   revision: string;
   entry_type: string;
   metadata: EntryMetadata;
+  // ResearchNote doesn't currently carry computed fields on the backend, but
+  // shared consumers (NodeEditor) probe `.computed_metadata?.[k]`.
+  computed_metadata?: EntryMetadata;
   source_layer_id?: string;
   source_layer_label?: string;
 };
 
 export type EditableDocument = Scene | LoreEntry | PromptEntry | AssistantEntry | ResearchNote;
+
+// Document-kind discriminator shared across editor components. Broader than
+// MetadataSchema.entry_types[*].kind: includes the synthetic shapes the
+// editor handles directly (chat / snippet / structure_node).
+export type DocumentKind =
+  | "scene"
+  | "lore"
+  | "prompt"
+  | "snippet"
+  | "assistant"
+  | "research"
+  | "chat"
+  | "project"
+  | "structure_node";
 
 export type LoreEntryList = {
   entries: LoreEntrySummary[];
@@ -462,6 +479,20 @@ export type MachineSettingsUpdate = {
   palette?: Swatch[];
 };
 
+// Editor-side draft for MachineSettingsDialog. Flat (provider keys hoisted
+// to top level) so two-way binding to inputs is straightforward; the parent
+// reshapes into MachineSettingsUpdate at save time.
+export type MachineSettingsDraft = {
+  anthropic_api_key: string;
+  openai_api_key: string;
+  openrouter_api_key: string;
+  ollama_host: string;
+  default_provider: string;
+  default_models: Record<string, string>;
+  default_projects_folder: string;
+  palette: Swatch[];
+};
+
 export type AIHealthResponse = {
   provider: string;
   model: string;
@@ -573,6 +604,13 @@ export type AIPreviewResponse = {
 export type ChatMessage = {
   role: "user" | "assistant";
   content: string;
+  // UI-side accumulator fields populated during the streaming chat turn.
+  // Optional on the wire — the backend ignores extras on send.
+  thinking?: string;
+  truncated?: boolean;
+  journal_added?: ChatSessionJournalEntry[];
+  usage?: ChatUsage | null;
+  cost_usd?: number | null;
 };
 
 export type AIChatRequest = {

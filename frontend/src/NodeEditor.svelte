@@ -12,7 +12,7 @@
   import { api } from "./api";
   import { formatCostEur } from "./money";
   import { resolveColor } from "./colors";
-  import type { AssistantEntrySummary, Backlink, BodyShape, EditableDocument, EntryBodyLanguage, EntryMetadata, EntryTypeDefinition, MetadataFieldDefinition, MetadataSchema, PromptEntrySummary, PromptInputDefinition } from "./types";
+  import type { AssistantEntrySummary, Backlink, BodyShape, DocumentKind, EditableDocument, EntryBodyLanguage, EntryMetadata, EntryTypeDefinition, MetadataFieldDefinition, MetadataSchema, PromptEntrySummary, PromptInputDefinition } from "./types";
 
   // Effective body shape for an entry type. Falls back through the
   // legacy has_body / body_editor pair when body_shape is absent
@@ -26,7 +26,7 @@
   }
 
   export let scene: EditableDocument | null = null;
-  export let documentKind: "scene" | "lore" | "prompt" | "snippet" | "assistant" | "project" | "structure_node" | "chat" | "research" = "scene";
+  export let documentKind: DocumentKind = "scene";
   export let metadataSchema: MetadataSchema | null = null;
   export let promptEntries: PromptEntrySummary[] = [];
   // Data sources for context_pick inputs in the prompt preview / inputs
@@ -54,7 +54,7 @@
   const dispatch = createEventDispatcher<{
     change: { title: string; body: string; status: string; entryType: string; metadata: EntryMetadata; inputs?: PromptInputDefinition[] };
     focus: void;
-    "custom-data": { entryType: string; kind: "scene" | "lore" | "prompt" | "assistant" };
+    "custom-data": { entryType: string; kind: DocumentKind };
     embeddedTodos: { todos: EmbeddedTodo[] };
     navigate: { id: string; kind: string };
     "open-chat": { entry: PromptEntrySummary; inputs: Record<string, unknown>; sceneId: string | null; assistantId: string };
@@ -206,6 +206,9 @@
     caching_style: "none" | "auto" | "explicit" | null;
     cache_blocks: { label: string; tokens: number; cache_break_after: boolean }[];
   } | null = null;
+  // Monotonic token guarding async preview races — bumps on every fetch;
+  // late responses with a stale token drop their result.
+  let inputsDialogEstimateToken = 0;
 
   // --- Per-entry prompt inputs (declaration side) ---
   // Inputs live on the entry now, not the entry-type. The drafts here are

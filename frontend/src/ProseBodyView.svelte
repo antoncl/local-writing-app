@@ -1,3 +1,15 @@
+<script lang="ts" module>
+  // Re-exported by NodeEditor / App.svelte for the embedded-todos dispatch
+  // shape. Lives in <script module> because Svelte 5 disallows type exports
+  // from instance scripts.
+  export type EmbeddedTodo = {
+    id: string;
+    text: string;
+    status: "open" | "done";
+    note: string;
+  };
+</script>
+
 <!--
   ProseBodyView — body region for entry types with body_shape === "prose"
   (today: scenes and lore). Owns the TipTap editor, all custom extensions
@@ -40,6 +52,7 @@
   import { resolveColor } from "./colors";
   import type {
     ChatUsage,
+    DocumentKind,
     EditableDocument,
     LoreEntrySummary,
     MetadataSchema,
@@ -89,12 +102,6 @@
   };
   type ToolbarAction = ToolbarButtonAction | ToolbarMenuAction;
   type BlockWrapType = "blockquote" | "bulletList" | "orderedList";
-  export type EmbeddedTodo = {
-    id: string;
-    text: string;
-    status: "open" | "done";
-    note: string;
-  };
 
   // ---------- Constants ----------
   const TABLE_GRID_MAX_ROWS = 8;
@@ -106,7 +113,7 @@
 
   // ---------- Props ----------
   export let scene: EditableDocument | null = null;
-  export let documentKind: "scene" | "lore" | "prompt" | "snippet" | "assistant" | "project" | "structure_node" = "scene";
+  export let documentKind: DocumentKind = "scene";
   export let metadataSchema: MetadataSchema | null = null;
   export let promptEntries: PromptEntrySummary[] = [];
   export let loreEntries: LoreEntrySummary[] = [];
@@ -1135,7 +1142,7 @@
       createParagraphNode(beforeContent),
       selectedBlock,
       createParagraphNode(afterContent),
-    ].filter(Boolean);
+    ].filter((n): n is NonNullable<typeof n> => n !== null);
 
     const transaction = state.tr.replaceWith($from.before(), $from.after(), replacementNodes);
     view.dispatch(transaction.scrollIntoView());
@@ -1176,19 +1183,19 @@
         kind: "button",
         id: "bold",
         label: "B",
-        run: () => editor?.chain().focus().toggleBold().run(),
+        run: () => void editor?.chain().focus().toggleBold().run(),
       },
       {
         kind: "button",
         id: "italic",
         label: "I",
-        run: () => editor?.chain().focus().toggleItalic().run(),
+        run: () => void editor?.chain().focus().toggleItalic().run(),
       },
       {
         kind: "button",
         id: "strike",
         label: "S",
-        run: () => editor?.chain().focus().toggleStrike().run(),
+        run: () => void editor?.chain().focus().toggleStrike().run(),
       },
       ...(reviseAction ? [reviseAction] : []),
       {

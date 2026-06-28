@@ -25,6 +25,7 @@
   import { coerceInputValue, type EntryInputDraft } from "./promptInputs";
   import type {
     AIPreviewResponse,
+    DocumentKind,
     EditableDocument,
     EntryBodyLanguage,
     LoreEntrySummary,
@@ -41,14 +42,7 @@
 
   // --- Read-only context from parent ---
   export let scene: EditableDocument | null = null;
-  export let documentKind:
-    | "scene"
-    | "lore"
-    | "prompt"
-    | "snippet"
-    | "assistant"
-    | "project"
-    | "structure_node" = "prompt";
+  export let documentKind: DocumentKind = "prompt";
   export let metadataSchema: MetadataSchema | null = null;
   export let structure: StructureDocument | null = null;
   // Research tree (sibling to manuscript) — threaded to the picker.

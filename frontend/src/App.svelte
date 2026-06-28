@@ -37,6 +37,7 @@
     ChatSessionMessage,
     ChatSessionSummary,
     DirectoryListing,
+    DocumentKind,
     EditableDocument,
     EntryMetadata,
     EntryTypeDefinition,
@@ -46,6 +47,7 @@
     PromptEntrySummary,
     ResearchNote,
     Scene,
+    MachineSettingsDraft,
     MachineSettingsUpdate,
     MachineSettingsView,
     MetadataFieldDefinition,
@@ -226,16 +228,6 @@
   let projectCostTotal: number | null = null;
   let projectCostBreakdown: { id: string; title: string; cost_usd: number }[] = [];
   let projectCostExpanded = false;
-  type MachineSettingsDraft = {
-    anthropic_api_key: string;
-    openai_api_key: string;
-    openrouter_api_key: string;
-    ollama_host: string;
-    default_provider: string;
-    default_models: Record<string, string>;
-    default_projects_folder: string;
-    palette: import("./types").Swatch[];
-  };
   let machineSettingsDraft: MachineSettingsDraft | null = null;
   let appState: AppState = { name: "needsProject" };
   $: project = appState.name === "projectOpen" ? appState.project : null;
@@ -337,7 +329,7 @@
   let schemaTypeLayerId = "";
   let schemaTypeId = "";
   let schemaTypeName = "";
-  let schemaTypeKind: "scene" | "lore" | "prompt" | "assistant" | "project" = "lore";
+  let schemaTypeKind: "scene" | "lore" | "research" | "prompt" | "assistant" | "project" = "lore";
   let schemaTypeParent = "";
   let schemaTypeAbstract = false;
   let schemaTypeReadonly = false;
@@ -1859,10 +1851,14 @@
     return "";
   }
 
-  function openSchemaForCustomData(entryType: string, kind: "scene" | "lore" | "research" | "prompt" | "assistant" | "project") {
+  function openSchemaForCustomData(entryType: string, kind: DocumentKind) {
     // Phase B: the entry editor's "Edit type…" button now opens ONLY the
     // per-type editor (schema_type pane) — not the schema/tree hierarchy
     // view. Tree access is the top bar's "Detail Types" button.
+    // The dispatched DocumentKind is wider than the schema's kind universe
+    // (it includes chat / snippet / structure_node — none of which have
+    // their own schema-type tree); narrow before consulting the schema.
+    if (kind !== "scene" && kind !== "lore" && kind !== "research" && kind !== "prompt" && kind !== "assistant" && kind !== "project") return;
     const candidate = metadataSchema?.entry_types[entryType];
     const resolvedTypeId = candidate?.kind === kind ? entryType : defaultSchemaEntryType(kind);
     schemaFieldEntryType = resolvedTypeId;
@@ -2346,7 +2342,7 @@
     if (order.join(" ") === current.join(" ")) return;
     const layerId = schemaTypeLayerId || projectSchemaLayerId();
     await run(async () => {
-      metadataSchema = await api.setEntryTypeFieldOrder(layerId, selectedSchemaTypeId, order);
+      metadataSchema = await api.setEntryTypeFieldOrder(layerId, selectedSchemaTypeId!, order);
       await refreshMetadataSchema();
       status = "Reordered fields";
     });
@@ -3120,7 +3116,7 @@
               draftMarkdown: node.body,
               draftStatus: "",
               draftEntryType: node.entry_type,
-              draftMetadata: cloneMetadata(node.metadata),
+              draftMetadata: cloneMetadata(node.metadata as EntryMetadata),
               saving: false,
               recentlySaved: false,
             }
@@ -4756,7 +4752,7 @@
                   class:drop-after={fieldDropTarget?.id === fieldId && fieldDropTarget?.position === "after"}
                   type="button"
                   draggable={fieldEntries.length > 1 && !schemaTypeReadonly}
-                  on:click={() => toggleSchemaFieldInline(fieldId, selectedSchemaTypeId)}
+                  on:click={() => toggleSchemaFieldInline(fieldId, selectedSchemaTypeId!)}
                   on:dragstart={() => onFieldDragStart(fieldId)}
                   on:dragover={(event) => onFieldDragOver(event, fieldId)}
                   on:dragleave={() => { if (fieldDropTarget?.id === fieldId) fieldDropTarget = null; }}
@@ -4810,7 +4806,7 @@
           </div>
           {#if !schemaTypeReadonly && expandedSchemaFieldId !== NEW_FIELD_SENTINEL}
             <div class="button-row">
-              <button class="add-affordance" type="button" on:click={() => createSchemaFieldDraft(schemaTypeLayerId || projectSchemaLayerId(), selectedSchemaTypeId)}>+ Add field</button>
+              <button class="add-affordance" type="button" on:click={() => createSchemaFieldDraft(schemaTypeLayerId || projectSchemaLayerId(), selectedSchemaTypeId ?? undefined)}>+ Add field</button>
             </div>
           {/if}
         </section>
@@ -5124,7 +5120,7 @@
         metadataReload={metadataReloadsByPane[editorPane.id] ?? null}
         titleReload={titleReloadsByPane[editorPane.id] ?? null}
         dirty={editorPane.dirty}
-        todoStatusHint={editorPane.document?.type === "scene" && editorPane.scene && sceneEntryHasBody(editorPane.scene) ? (embeddedTodoStatusHintsByPane[editorPane.id] ?? "") : ""}
+        todoStatusHint={editorPane.document?.type === "scene" && editorPane.scene && sceneEntryHasBody(editorPane.scene as Scene) ? (embeddedTodoStatusHintsByPane[editorPane.id] ?? "") : ""}
         on:focus={() => focusPane(editorPane.id)}
         on:change={(event) =>
           updateEditorPaneDraft(
@@ -5356,7 +5352,7 @@
   {@const collapsedMap = config.getCollapsed()}
   {@const stripeHex = (() => {
     if (!config.showStatusStripe) return null;
-    const opt = node.status && metadataSchema?.fields?.status?.options?.find((o) => o.value === node.status);
+    const opt = node.status ? metadataSchema?.fields?.status?.options?.find((o) => o.value === node.status) : null;
     return opt?.color ? getSwatch(opt.color)?.hex ?? null : null;
   })()}
   {@const isActive = (
@@ -5382,8 +5378,8 @@
       onClick={() => node.scene_id && run(() => config.openLeaf(node.scene_id!))}
       on:mousedown={(event) => event.stopPropagation()}
       on:keydown={(event) => config.handleRowKeydown?.(event, node)}
-      on:dragover={config.supportsDrag ? (event) => handleTreeDragOver(event, node) : undefined}
-      on:drop={config.supportsDrag ? (event) => handleTreeDrop(event, node) : undefined}
+      on:dragover={(event) => { if (config.supportsDrag) handleTreeDragOver(event, node); }}
+      on:drop={(event) => { if (config.supportsDrag) handleTreeDrop(event, node); }}
     >
       {#if config.supportsDrag}
         {#snippet leading()}
@@ -5415,8 +5411,8 @@
       clickable={false}
       dataNodeId={node.id}
       on:mousedown={(event) => event.stopPropagation()}
-      on:dragover={config.supportsDrag ? (event) => handleTreeDragOver(event, node) : undefined}
-      on:drop={config.supportsDrag ? (event) => handleTreeDrop(event, node) : undefined}
+      on:dragover={(event) => { if (config.supportsDrag) handleTreeDragOver(event, node); }}
+      on:drop={(event) => { if (config.supportsDrag) handleTreeDrop(event, node); }}
     >
       {#snippet titleSlot()}
         <input
@@ -5454,8 +5450,8 @@
       onDblClick={() => config.onGroupDblClick(node.id)}
       on:mousedown={(event) => event.stopPropagation()}
       on:keydown={(event) => config.handleRowKeydown?.(event, node)}
-      on:dragover={config.supportsDrag ? (event) => handleTreeDragOver(event, node) : undefined}
-      on:drop={config.supportsDrag ? (event) => handleTreeDrop(event, node) : undefined}
+      on:dragover={(event) => { if (config.supportsDrag) handleTreeDragOver(event, node); }}
+      on:drop={(event) => { if (config.supportsDrag) handleTreeDrop(event, node); }}
     >
       {#snippet leading()}
         {#if config.supportsDrag}

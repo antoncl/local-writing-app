@@ -41,8 +41,8 @@ marked.use({
         const token: MathToken = { type: "mathBlock", raw: match[0], tex: match[1].trim() };
         return token;
       },
-      renderer(token: MathToken) {
-        return renderMath(token.tex, true);
+      renderer(token) {
+        return renderMath((token as MathToken).tex, true);
       },
     },
     {
@@ -62,8 +62,8 @@ marked.use({
         const token: MathToken = { type: "mathInline", raw: match[0], tex: match[1] };
         return token;
       },
-      renderer(token: MathToken) {
-        return renderMath(token.tex, false);
+      renderer(token) {
+        return renderMath((token as MathToken).tex, false);
       },
     },
   ],

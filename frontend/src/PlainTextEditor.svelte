@@ -91,7 +91,6 @@
           italic: false,
           strike: false,
           code: false,
-          link: false,
         }),
         ImplicitContextHighlight.configure({ matcher }),
       ],

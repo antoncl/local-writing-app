@@ -1,7 +1,9 @@
-<script lang="ts">
+<script lang="ts" module>
   // Generic confirm/cancel modal. The parent owns the state machine —
   // pass `state` to show, null to hide. onConfirm fires the user's
   // chosen action; onCancel dismisses without doing anything.
+  // Lives in <script module> because Svelte 5 disallows type exports from
+  // instance scripts.
   export type ConfirmationState = {
     title: string;
     message: string;
@@ -15,7 +17,9 @@
     dontShowAgainKey?: string;
     onConfirm: () => Promise<void> | void;
   };
+</script>
 
+<script lang="ts">
   export let state: ConfirmationState | null = null;
   export let onCancel: () => void = () => {};
   export let onConfirm: (dontShowAgain: boolean) => void | Promise<void> = () => {};

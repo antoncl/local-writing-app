@@ -1,3 +1,14 @@
+<script lang="ts" module>
+  // Lives in <script module> because Svelte 5 disallows type exports from
+  // instance scripts.
+  export type InputsDialogEstimate = {
+    tokens: number;
+    cost_usd: number | null;
+    caching_style: "none" | "auto" | "explicit" | null;
+    cache_blocks: { label: string; tokens: number; cache_break_after: boolean }[];
+  };
+</script>
+
 <script lang="ts">
   import { createEventDispatcher } from "svelte";
   import PromptInputField from "./PromptInputField.svelte";
@@ -10,13 +21,6 @@
     PromptInputDefinition,
     StructureDocument,
   } from "./types";
-
-  export type InputsDialogEstimate = {
-    tokens: number;
-    cost_usd: number | null;
-    caching_style: "none" | "auto" | "explicit" | null;
-    cache_blocks: { label: string; tokens: number; cache_break_after: boolean }[];
-  };
 
   export let entry: PromptEntrySummary;
   export let description: string = "";

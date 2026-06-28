@@ -8,6 +8,7 @@
   import TagPicker from "./TagPicker.svelte";
   import { fieldIconClass } from "./fieldIcons";
   import type {
+    DocumentKind,
     EntryMetadata,
     EntryTypeDefinition,
     LoreEntrySummary,
@@ -17,15 +18,6 @@
     PromptEntrySummary,
     StructureDocument,
   } from "./types";
-
-  type DocumentKind =
-    | "scene"
-    | "lore"
-    | "prompt"
-    | "snippet"
-    | "assistant"
-    | "project"
-    | "structure_node";
 
   export let metadataSchema: MetadataSchema;
   export let entryType: string;

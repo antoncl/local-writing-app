@@ -7,6 +7,7 @@
   the body column when the rail is the whole pane. Keeping the slot now
   means that future change touches one file.
 -->
+<script lang="ts"></script>
 <div class="fields-only-view" aria-hidden="true"></div>
 
 <style>

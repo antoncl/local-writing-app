@@ -15,6 +15,7 @@ import type {
   AIInvocation,
   AIInvocationList,
   CreateAIInvocationRequest,
+  ChatSessionJournalEntry,
   ChatUsage,
   BacklinksResponse,
   ProjectCostResponse,
@@ -133,6 +134,7 @@ export type AIStreamEvent =
       char_count?: number;
       usage?: ChatUsage | null;
       cost_usd?: number | null;
+      journal_added?: ChatSessionJournalEntry[];
     }
   | {
       type: "error";

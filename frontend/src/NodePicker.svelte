@@ -291,6 +291,7 @@
   const KIND_LABEL_SINGULAR: Record<Category | "preset", string> = {
     scene: "Scene",
     lore: "Lore",
+    research: "Note",
     snippet: "Snippet",
     assistant: "Assistant",
     preset: "Preset",

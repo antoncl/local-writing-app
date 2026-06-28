@@ -2,13 +2,12 @@ from __future__ import annotations
 
 import time
 from collections.abc import Iterator
-from dataclasses import dataclass, field
-from typing import Any, Literal
+from dataclasses import dataclass
+from typing import Any
 
 from app.models import AIHealthResponse, AIPolicy
 from app.services.ai.profiles import UsageMetrics
 from app.services.machine_settings import MachineSettings
-
 
 CLOUD_PROVIDERS = {"anthropic", "openai", "openrouter"}
 LOCAL_PROVIDERS = {"ollama"}

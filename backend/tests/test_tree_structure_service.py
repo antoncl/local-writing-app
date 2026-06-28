@@ -13,7 +13,6 @@ from app.services.tree_structure import (
     TreeStructureService,
 )
 
-
 MANUSCRIPT_CONFIG = TreeConfig(
     yaml_filename="manuscript.structure.yaml",
     root_title="Manuscript",

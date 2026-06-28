@@ -101,7 +101,7 @@ class StructureNode(BaseModel):
     # swatch id) — lets the tree row reflect per-scene color tweaks.
     color: str | None = None
     computed_metadata: dict[str, Any] = Field(default_factory=dict)
-    children: list["StructureNode"] = Field(default_factory=list)
+    children: list[StructureNode] = Field(default_factory=list)
 
 
 class StructureDocument(BaseModel):
@@ -520,9 +520,9 @@ class MoveLoreNoteToResearchResponse(BaseModel):
     """
 
     note_id: str
-    tree: "StructureDocument"
+    tree: StructureDocument
     dropped_fields: list[str] = Field(default_factory=list)
-    lore: "LoreEntryList"
+    lore: LoreEntryList
 
 
 class SaveSceneRequest(BaseModel):
@@ -1088,7 +1088,7 @@ class AIChatResponse(BaseModel):
     # Lore entries newly auto-detected on THIS turn (for the audit UI chip
     # strip). Empty when no detections fired. Snapshots — frontend doesn't
     # need to look up titles separately.
-    journal_added: list["ChatSessionJournalEntry"] = Field(default_factory=list)
+    journal_added: list[ChatSessionJournalEntry] = Field(default_factory=list)
     # V2: per-call telemetry. Null on failure paths and when the provider
     # response didn't include usage (rare). Cost is null when pricing
     # isn't known (Ollama, descriptor lookup failure). Frontend converts

@@ -16,7 +16,7 @@ import re
 from datetime import date as _date_cls
 from typing import Any
 
-from jinja2 import TemplateError, UndefinedError, TemplateSyntaxError
+from jinja2 import TemplateError, TemplateSyntaxError, UndefinedError
 
 from app.services.ai.helpers import EntryRef, create_environment_for_project
 from app.services.ai.sessions import AISession, default_registry

@@ -24,9 +24,9 @@ from __future__ import annotations
 
 import logging
 import zipfile
-from datetime import datetime, timezone
+from collections.abc import Callable
+from datetime import UTC, datetime
 from pathlib import Path
-from typing import Callable
 
 import yaml
 
@@ -200,7 +200,7 @@ def pending_migrations(current: int) -> list[tuple[int, str, MigrationFn]]:
 def backup_project(root: Path, from_version: int) -> Path:
     backup_dir = root / BACKUP_DIRNAME
     backup_dir.mkdir(exist_ok=True)
-    timestamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
+    timestamp = datetime.now(UTC).strftime("%Y%m%dT%H%M%SZ")
     archive_path = backup_dir / f"v{from_version}-{timestamp}.zip"
     with zipfile.ZipFile(archive_path, "w", zipfile.ZIP_DEFLATED) as archive:
         for path in sorted(root.rglob("*")):

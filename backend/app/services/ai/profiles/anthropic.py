@@ -9,21 +9,18 @@ back to the bake-in catalogue alone.
 from __future__ import annotations
 
 import logging
+from typing import Any
 
 import httpx
-
-from typing import Any
 
 from app.services.ai.profiles._loader import baked_in_for, mark_deprecated
 from app.services.ai.profiles.base import (
     CachingStyle,
-    CapabilityTier,
     ModelDescriptor,
     ProviderProfile,
     UsageMetrics,
     default_token_count,
 )
-
 
 log = logging.getLogger(__name__)
 

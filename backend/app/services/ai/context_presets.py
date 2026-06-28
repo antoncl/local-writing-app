@@ -15,7 +15,8 @@ Two presets:
 from __future__ import annotations
 
 from typing import TYPE_CHECKING
-from xml.sax.saxutils import escape as xml_escape, quoteattr
+from xml.sax.saxutils import escape as xml_escape
+from xml.sax.saxutils import quoteattr
 
 from app.services.ai.helpers import _full_outline, _full_text
 
@@ -26,7 +27,7 @@ if TYPE_CHECKING:
 VALID_PRESETS = ("full_outline", "full_text")
 
 
-def render_preset(project: "ProjectService", kind: str) -> str:
+def render_preset(project: ProjectService, kind: str) -> str:
     if kind == "full_outline":
         return _render_full_outline(project)
     if kind == "full_text":
@@ -34,7 +35,7 @@ def render_preset(project: "ProjectService", kind: str) -> str:
     raise ValueError(f"Unknown context preset: {kind!r}")
 
 
-def _render_full_outline(project: "ProjectService") -> str:
+def _render_full_outline(project: ProjectService) -> str:
     nodes = _full_outline(project)
     if not nodes:
         return "<outline />"
@@ -61,7 +62,7 @@ def _render_outline_node(node: dict, *, indent: int) -> str:
     return f"{pad}<{tag} {attr_str}>\n{child_lines}\n{pad}</{tag}>"
 
 
-def _render_full_text(project: "ProjectService") -> str:
+def _render_full_text(project: ProjectService) -> str:
     scenes = _full_text(project)
     if not scenes:
         return "<novel_text />"

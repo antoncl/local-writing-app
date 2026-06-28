@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import os
 import sys
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
@@ -10,7 +10,6 @@ import yaml
 from pydantic import BaseModel, Field
 
 from app.models import RecentProject, Swatch
-
 
 APP_NAME = "local-writing-app"
 CONFIG_FILENAME = "config.yaml"
@@ -241,7 +240,7 @@ def touch_recent_project(root_path: Path, title: str) -> None:
     """
     try:
         path_str = str(root_path.expanduser().resolve())
-        now_iso = datetime.now(timezone.utc).isoformat(timespec="seconds")
+        now_iso = datetime.now(UTC).isoformat(timespec="seconds")
         settings = load_settings()
         kept = [r for r in settings.recent_projects if r.path != path_str]
         kept.insert(0, RecentProject(path=path_str, title=title, opened_at=now_iso))

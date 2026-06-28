@@ -24,7 +24,8 @@ Scope notes:
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Iterable, Literal
+from collections.abc import Iterable
+from typing import TYPE_CHECKING, Literal
 
 from app.models import ChatSessionContextItem, ChatSessionJournalEntry
 from app.services.ai.helpers import (
@@ -42,7 +43,7 @@ JournalSource = Literal["user_message", "rendered_prompt", "depth1_expansion"]
 
 
 def expand_context(
-    project: "ProjectService",
+    project: ProjectService,
     text: str,
     existing_journal: Iterable[ChatSessionJournalEntry] = (),
     explicit_picks: Iterable[ChatSessionContextItem] = (),
@@ -97,7 +98,7 @@ def expand_context(
 
 
 def _make_entries(
-    project: "ProjectService",
+    project: ProjectService,
     entry_ids: set[str],
     *,
     source: JournalSource,

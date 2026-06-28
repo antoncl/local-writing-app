@@ -20,7 +20,6 @@ from app.services.ai.profiles.ollama import OllamaProfile
 from app.services.ai.profiles.openai import OpenAIProfile
 from app.services.ai.profiles.openrouter import OpenRouterProfile
 
-
 # --- UsageMetrics + compute_cost ---------------------------------------
 
 

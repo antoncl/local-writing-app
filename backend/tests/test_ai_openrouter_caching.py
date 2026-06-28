@@ -13,7 +13,6 @@ from app.services.ai.providers import (
     _openrouter_system_messages,
 )
 
-
 # ---- caching_style_for_model (prefix lookup) ------------------------------
 
 

@@ -9,8 +9,8 @@ import yaml
 
 from app.services import migrations
 from app.services.migrations import (
-    CURRENT_VERSION,
     BACKUP_DIRNAME,
+    CURRENT_VERSION,
     migrate_project,
     read_project_version,
 )

@@ -17,7 +17,8 @@ from unittest.mock import patch
 
 from fastapi.testclient import TestClient
 
-from app.main import app, service as global_service
+from app.main import app
+from app.main import service as global_service
 from app.models import UpdateProjectSettingsRequest
 from app.services import machine_settings as ms
 from app.services.ai import providers as ai_providers

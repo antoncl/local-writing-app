@@ -4,8 +4,6 @@ journal, picks). Returns NEW journal entries; never mutates state.
 
 from __future__ import annotations
 
-from pathlib import Path
-
 import pytest
 
 from app.models import (
@@ -16,7 +14,6 @@ from app.models import (
 )
 from app.services.ai.context_expander import expand_context
 from app.services.project_service import ProjectService
-
 
 # ---- fixture --------------------------------------------------------------
 

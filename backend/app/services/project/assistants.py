@@ -245,7 +245,7 @@ class AssistantEntriesMixin:
         return None
 
     def _read_assistant_from_index_entry(
-        self, entry: "NodeIndexEntry"
+        self, entry: NodeIndexEntry
     ) -> AssistantEntry | None:
         try:
             front_matter, _body = self._read_markdown_with_front_matter(entry.path, strict=True)

@@ -20,7 +20,6 @@ from app.services.ai.profiles.ollama import OllamaProfile
 from app.services.ai.profiles.openai import OpenAIProfile
 from app.services.ai.profiles.openrouter import OpenRouterProfile
 
-
 # --- httpx fake plumbing -----------------------------------------------
 
 
@@ -54,7 +53,7 @@ class _FakeAsyncClient:
         self._raise = raise_exc
         self._capture = capture
 
-    async def __aenter__(self) -> "_FakeAsyncClient":
+    async def __aenter__(self) -> _FakeAsyncClient:
         return self
 
     async def __aexit__(self, *_exc) -> None:

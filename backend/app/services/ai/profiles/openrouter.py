@@ -14,10 +14,9 @@ can override under Advanced.
 from __future__ import annotations
 
 import logging
+from typing import Any
 
 import httpx
-
-from typing import Any
 
 from app.services.ai.profiles._loader import baked_in_for
 from app.services.ai.profiles.base import (
@@ -29,7 +28,6 @@ from app.services.ai.profiles.base import (
     UsageMetrics,
     default_token_count,
 )
-
 
 log = logging.getLogger(__name__)
 

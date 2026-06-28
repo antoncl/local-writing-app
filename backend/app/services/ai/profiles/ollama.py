@@ -8,10 +8,9 @@ Picker just lists what's installed.
 from __future__ import annotations
 
 import logging
+from typing import Any
 
 import httpx
-
-from typing import Any
 
 from app.services.ai.profiles.base import (
     CachingStyle,
@@ -22,7 +21,6 @@ from app.services.ai.profiles.base import (
     UsageMetrics,
     default_token_count,
 )
-
 
 log = logging.getLogger(__name__)
 

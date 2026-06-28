@@ -6,8 +6,6 @@ from jinja2 import UndefinedError
 
 from app.services.ai.templates import (
     ContentBlock,
-    RenderedMessage,
-    RenderedTemplate,
     render_template,
 )
 

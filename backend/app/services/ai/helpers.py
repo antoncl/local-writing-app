@@ -22,8 +22,9 @@ from __future__ import annotations
 
 import json
 import re
-from typing import Any, TYPE_CHECKING
-from xml.sax.saxutils import escape as xml_escape, quoteattr
+from typing import TYPE_CHECKING, Any
+from xml.sax.saxutils import escape as xml_escape
+from xml.sax.saxutils import quoteattr
 
 from jinja2.sandbox import SandboxedEnvironment
 
@@ -109,7 +110,7 @@ class EntryRef:
 
     def __init__(
         self,
-        project: "ProjectService",
+        project: ProjectService,
         schema: Any,
         entry_id: str,
         *,
@@ -191,7 +192,7 @@ class EntryRef:
         return str(getattr(entry, "body", "") or "")
 
     @property
-    def metadata(self) -> "_EntryMetadataView":
+    def metadata(self) -> _EntryMetadataView:
         entry = self._load()
         data = getattr(entry, "metadata", None) if entry is not None else None
         return _EntryMetadataView(
@@ -243,7 +244,7 @@ class _EntryMetadataView:
         self,
         data: dict[str, Any],
         *,
-        project: "ProjectService",
+        project: ProjectService,
         schema: Any,
         depth: int,
     ) -> None:
@@ -304,7 +305,7 @@ class _EntryMetadataView:
 
 
 def _coerce_entry_ref(
-    project: "ProjectService", schema: Any, value: Any
+    project: ProjectService, schema: Any, value: Any
 ) -> EntryRef | None:
     """Helper backing the `entry()` Jinja global.
 
@@ -347,7 +348,7 @@ def _coerce_entry_ref(
 
 def register_helpers(
     env: SandboxedEnvironment,
-    project: "ProjectService",
+    project: ProjectService,
     session: AISession | None = None,
     journal: list[Any] | None = None,
 ) -> None:
@@ -388,7 +389,7 @@ def register_helpers(
 
 
 def create_environment_for_project(
-    project: "ProjectService",
+    project: ProjectService,
     session: AISession | None = None,
     journal: list[Any] | None = None,
 ) -> SandboxedEnvironment:
@@ -456,7 +457,7 @@ def _collect_lore_refs_from_metadata(metadata: Any) -> set[str]:
     return found
 
 
-def _safe_read_lore(project: "ProjectService", entry_id: str) -> Any:
+def _safe_read_lore(project: ProjectService, entry_id: str) -> Any:
     try:
         return project.read_lore_entry(entry_id)
     except Exception:
@@ -467,7 +468,7 @@ def _safe_read_lore(project: "ProjectService", entry_id: str) -> Any:
 
 
 def _pov(
-    project: "ProjectService", schema: Any, scene: Any
+    project: ProjectService, schema: Any, scene: Any
 ) -> EntryRef | None:
     """Return an EntryRef for the scene's POV character, or None.
 
@@ -492,7 +493,7 @@ def _pov(
 # ----- `scenes_before(scene)` ---------------------------------------------
 
 
-def _scenes_before(project: "ProjectService", scene: Any) -> str:
+def _scenes_before(project: ProjectService, scene: Any) -> str:
     """XML listing of summaries for all scenes before `scene` in manuscript order.
 
     Walks the manuscript structure depth-first, collecting scene summaries up
@@ -517,7 +518,7 @@ def _scenes_before(project: "ProjectService", scene: Any) -> str:
 
 
 def _walk_collect(
-    node: Any, target_id: str, project: "ProjectService", chunks: list[str]
+    node: Any, target_id: str, project: ProjectService, chunks: list[str]
 ) -> bool:
     """Append `<scene>` entries for scene nodes preceding `target_id`.
 
@@ -552,7 +553,7 @@ def _walk_collect(
 
 
 def _relevant_lore(
-    project: "ProjectService",
+    project: ProjectService,
     scene: Any,
     mode: str = "implicit",
     partition: str = "all",
@@ -654,7 +655,7 @@ def _relevant_lore(
 
 
 def _snapshot_revisions(
-    project: "ProjectService", entry_ids: list[str], session: AISession
+    project: ProjectService, entry_ids: list[str], session: AISession
 ) -> None:
     for entry_id in entry_ids:
         entry = _safe_read_lore(project, entry_id)
@@ -664,7 +665,7 @@ def _snapshot_revisions(
         session.snapshot(entry_id, revision)
 
 
-def _alias_match(project: "ProjectService", text: str) -> set[str]:
+def _alias_match(project: ProjectService, text: str) -> set[str]:
     """Return lore IDs whose title or aliases appear as words in `text`.
 
     Honors `context_policy`: entries marked `manual_only` or `never` are
@@ -698,21 +699,21 @@ def _alias_match(project: "ProjectService", text: str) -> set[str]:
     return matched
 
 
-def _always_included_lore_ids(project: "ProjectService") -> set[str]:
+def _always_included_lore_ids(project: ProjectService) -> set[str]:
     """Return lore IDs whose context_policy is `always`. Used by
     `_relevant_lore` in implicit mode to union in entries the author has
     pinned as project-wide context (world rules, magic system primer, etc.)."""
     return _lore_ids_with_policy(project, "always")
 
 
-def _never_lore_ids(project: "ProjectService") -> set[str]:
+def _never_lore_ids(project: ProjectService) -> set[str]:
     """Return lore IDs whose context_policy is `never`. These are excluded
     from every assembly path — implicit matcher, explicit ref, structural
     expansion. The author has said 'don't put this in front of the model.'"""
     return _lore_ids_with_policy(project, "never")
 
 
-def _lore_ids_with_policy(project: "ProjectService", policy: str) -> set[str]:
+def _lore_ids_with_policy(project: ProjectService, policy: str) -> set[str]:
     try:
         listing = project.list_lore_entries()
     except Exception:
@@ -728,7 +729,7 @@ def _lore_ids_with_policy(project: "ProjectService", policy: str) -> set[str]:
 
 
 def _textual_one_hop(
-    project: "ProjectService", entry_ids: set[str]
+    project: ProjectService, entry_ids: set[str]
 ) -> set[str]:
     """Scan the body of each given entry for further textual name matches.
 
@@ -768,7 +769,7 @@ def _name_appears(name: str, words: set[str], haystack_lower: str) -> bool:
     return name_lower in words
 
 
-def _format_lore_block(project: "ProjectService", entry_ids: list[str]) -> str:
+def _format_lore_block(project: ProjectService, entry_ids: list[str]) -> str:
     """Render lore entries as an XML block.
 
     Each entry becomes `<{entry_type} name="..." aliases="...">body</...>`,
@@ -845,7 +846,7 @@ class _OutlineNode(dict):
         return self.get(name)
 
 
-def _full_outline(project: "ProjectService") -> list[_OutlineNode]:
+def _full_outline(project: ProjectService) -> list[_OutlineNode]:
     """Manuscript outline as a list of nested nodes.
 
     Each node carries `title`, `summary`, `entry_type`, `scene_id`, and
@@ -860,7 +861,7 @@ def _full_outline(project: "ProjectService") -> list[_OutlineNode]:
     return [_build_outline_node(child, project) for child in structure.root.children]
 
 
-def _build_outline_node(node: Any, project: "ProjectService") -> _OutlineNode:
+def _build_outline_node(node: Any, project: ProjectService) -> _OutlineNode:
     scene_id = _attr_or_item(node, "scene_id")
     title = _attr_or_item(node, "title") or ""
     summary = ""
@@ -896,7 +897,7 @@ class _SceneText(dict):
         return self.get(name)
 
 
-def _full_text(project: "ProjectService") -> list[_SceneText]:
+def _full_text(project: ProjectService) -> list[_SceneText]:
     """Every scene's prose in manuscript order.
 
     Each item has `title`, `body`, `scene_id`, and `entry_type`. Skips
@@ -913,7 +914,7 @@ def _full_text(project: "ProjectService") -> list[_SceneText]:
 
 
 def _collect_scene_text(
-    node: Any, project: "ProjectService", sink: list[_SceneText]
+    node: Any, project: ProjectService, sink: list[_SceneText]
 ) -> None:
     scene_id = _attr_or_item(node, "scene_id")
     if scene_id:
@@ -972,7 +973,7 @@ def _split_body_by_character_markers(body: str) -> list[tuple[str | None, str]]:
 
 
 def _character_thread(
-    project: "ProjectService",
+    project: ProjectService,
     schema: Any,
     scene: Any,
     character_input: Any,

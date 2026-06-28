@@ -12,7 +12,6 @@ from datetime import date
 from enum import Enum
 from typing import Any, Literal
 
-
 log = logging.getLogger(__name__)
 
 

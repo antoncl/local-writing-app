@@ -65,12 +65,11 @@ def test_context_pick_roundtrips_through_prompt_save(tmp_path, monkeypatch):
     # Hit the prompt save/read path so a context_pick input survives a
     # full file round-trip (front-matter YAML, _parse_prompt_inputs
     # tolerance). Uses the same harness as test_assistants.
-    from app.services.machine_settings import config_path as _cfg_path
     monkeypatch.setattr(
         "app.services.machine_settings.config_path",
         lambda: tmp_path / "machine_settings.yaml",
     )
-    from app.models import CreateProjectRequest, SavePromptEntryRequest
+    from app.models import SavePromptEntryRequest
     from app.services.project_service import ProjectService
 
     service = ProjectService()

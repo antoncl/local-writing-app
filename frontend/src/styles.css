@@ -3630,11 +3630,21 @@ button.schema-field-row:hover {
 
 /* Per-entry inputs editor (NodeEditor, prompt entries). Sits between
    the body editor and the resize handle / preview pane. */
-.prompt-help-button {
+
+/* Top-right cluster floating over the code editor: wrap toggle, restore
+   default, and the help "?" — laid out in a row so they never overlap as
+   the restore pill's width changes. */
+.raw-body-toolbar {
   position: absolute;
   top: 8px;
   right: 8px;
   z-index: 5;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.prompt-help-button {
   display: inline-flex;
   align-items: center;
   justify-content: center;
@@ -3659,11 +3669,8 @@ button.schema-field-row:hover {
   color: var(--text);
 }
 
-.prompt-restore-default-button {
-  position: absolute;
-  top: 8px;
-  right: 38px;
-  z-index: 5;
+.prompt-restore-default-button,
+.prompt-wrap-button {
   display: inline-flex;
   align-items: center;
   height: 22px;
@@ -3679,10 +3686,17 @@ button.schema-field-row:hover {
   box-shadow: 0 1px 3px rgba(0, 0, 0, 0.06);
 }
 
-.prompt-restore-default-button:hover {
+.prompt-restore-default-button:hover,
+.prompt-wrap-button:hover {
   background: var(--panel);
   border-color: var(--text-2);
   color: var(--text);
+}
+
+.prompt-wrap-button.active {
+  background: var(--accent-soft);
+  border-color: var(--accent);
+  color: var(--accent-deep);
 }
 
 .prompt-help-popover {

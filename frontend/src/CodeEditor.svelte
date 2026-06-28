@@ -1,6 +1,7 @@
 <script lang="ts">
   import { onDestroy, onMount } from "svelte";
   import { EditorView, basicSetup } from "codemirror";
+  import { Compartment } from "@codemirror/state";
   import { StreamLanguage } from "@codemirror/language";
   import { jinja2 } from "@codemirror/legacy-modes/mode/jinja2";
   import { json as jsonLang } from "@codemirror/lang-json";
@@ -11,6 +12,9 @@
   // else falls through to a plain code surface (still better than TipTap for
   // editing raw text — monospace font, no auto-formatting).
   export let language: "jinja2" | "json" | "markdown" | "plain" = "jinja2";
+  /** Soft-wrap long lines instead of horizontal scrolling. Live-reconfigured
+   * via a Compartment so callers can toggle it without rebuilding the view. */
+  export let lineWrapping = false;
   /** Diagnostics to pin in the gutter. Line is 1-based (matches Jinja's
    * `lineno`); col is optional and 1-based when present. Callers update this
    * prop after a render; CodeEditor reactively pushes them into CodeMirror. */
@@ -19,6 +23,7 @@
   let host: HTMLDivElement;
   let editor: EditorView | null = null;
   let lastEmitted = value;
+  const wrapCompartment = new Compartment();
 
   onMount(() => {
     const extensions = [basicSetup, lintGutter()];
@@ -27,6 +32,7 @@
     } else if (language === "json") {
       extensions.push(jsonLang());
     }
+    extensions.push(wrapCompartment.of(lineWrapping ? EditorView.lineWrapping : []));
     extensions.push(
       EditorView.updateListener.of((update) => {
         if (update.docChanged) {
@@ -54,6 +60,13 @@
       });
       lastEmitted = value;
     }
+  }
+
+  // Live-toggle soft wrap when the prop changes.
+  $: if (editor) {
+    editor.dispatch({
+      effects: wrapCompartment.reconfigure(lineWrapping ? EditorView.lineWrapping : []),
+    });
   }
 
   // Push diagnostics whenever the prop changes.

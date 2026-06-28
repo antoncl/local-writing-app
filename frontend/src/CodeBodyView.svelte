@@ -84,6 +84,40 @@
     rawBody = entryTypeDefaultBody;
   }
 
+  // --- Soft-wrap toggle (editor preference, not stored on the entry) ---
+  // Prompts are sentence-oriented markdown → wrap on by default. Snippets /
+  // structure files / other code-shaped bodies → wrap off (column-significant).
+  // The author can flip it per entry-type; the choice persists in localStorage
+  // keyed by kind+entry_type, so the same prompt type remembers the override.
+  const WRAP_PREF_KEY = "lwa.editor.lineWrap";
+
+  function loadWrapPrefs(): Record<string, boolean> {
+    try {
+      const raw = localStorage.getItem(WRAP_PREF_KEY);
+      const parsed = raw ? JSON.parse(raw) : {};
+      return parsed && typeof parsed === "object" ? parsed : {};
+    } catch {
+      return {};
+    }
+  }
+
+  let wrapPrefs: Record<string, boolean> = loadWrapPrefs();
+
+  $: wrapPrefKey = `${documentKind}:${scene?.entry_type ?? ""}`;
+  $: wrapDefault = documentKind === "prompt";
+  $: lineWrapEnabled = wrapPrefs[wrapPrefKey] ?? wrapDefault;
+
+  function toggleLineWrap(): void {
+    const next = { ...wrapPrefs, [wrapPrefKey]: !lineWrapEnabled };
+    wrapPrefs = next;
+    try {
+      localStorage.setItem(WRAP_PREF_KEY, JSON.stringify(next));
+    } catch {
+      // Preference is best-effort; a full/blocked localStorage just means the
+      // toggle won't persist across reloads.
+    }
+  }
+
   // --- Cheatsheet popover ---
   let cheatsheetPopoverOpen = false;
   let helpButtonEl: HTMLButtonElement | undefined;
@@ -446,29 +480,41 @@
 
 <div class="editor-wrap raw-body-wrap">
   <div class="raw-body-editor">
-    <CodeEditor bind:value={rawBody} language={rawBodyLanguage} diagnostics={isPrompt() ? promptPreviewDiagnostics : []} />
+    <CodeEditor bind:value={rawBody} language={rawBodyLanguage} lineWrapping={lineWrapEnabled} diagnostics={isPrompt() ? promptPreviewDiagnostics : []} />
   </div>
 
   {#if isPrompt()}
-    {#if canRestoreDefaultBody}
+    <div class="raw-body-toolbar">
       <button
         type="button"
-        class="prompt-restore-default-button"
-        title="Replace this body with the type's default template. Ctrl+Z to undo."
-        aria-label="Restore default body"
-        on:click={restoreDefaultBody}
-      >Restore default body</button>
-    {/if}
-    <button
-      type="button"
-      class="prompt-help-button"
-      bind:this={helpButtonEl}
-      class:active={cheatsheetPopoverOpen}
-      title="Variables & helpers — what you can reference in &lbrace;&lbrace; … &rbrace;&rbrace; and &lbrace;% … %&rbrace;"
-      aria-label="Show variables and helpers reference"
-      aria-expanded={cheatsheetPopoverOpen}
-      on:click={toggleCheatsheetPopover}
-    >?</button>
+        class="prompt-wrap-button"
+        class:active={lineWrapEnabled}
+        role="switch"
+        aria-checked={lineWrapEnabled}
+        title={lineWrapEnabled ? "Soft-wrap is on — long lines wrap to fit. Click to turn off." : "Soft-wrap is off — long lines scroll horizontally. Click to turn on."}
+        aria-label="Toggle line wrapping"
+        on:click={toggleLineWrap}
+      >Wrap</button>
+      {#if canRestoreDefaultBody}
+        <button
+          type="button"
+          class="prompt-restore-default-button"
+          title="Replace this body with the type's default template. Ctrl+Z to undo."
+          aria-label="Restore default body"
+          on:click={restoreDefaultBody}
+        >Restore default body</button>
+      {/if}
+      <button
+        type="button"
+        class="prompt-help-button"
+        bind:this={helpButtonEl}
+        class:active={cheatsheetPopoverOpen}
+        title="Variables & helpers — what you can reference in &lbrace;&lbrace; … &rbrace;&rbrace; and &lbrace;% … %&rbrace;"
+        aria-label="Show variables and helpers reference"
+        aria-expanded={cheatsheetPopoverOpen}
+        on:click={toggleCheatsheetPopover}
+      >?</button>
+    </div>
   {/if}
 </div>
 

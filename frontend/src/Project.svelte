@@ -150,3 +150,178 @@
     {/if}
   </section>
 {/if}
+
+<style>
+  /* Co-located from styles.css (#14): single-owner Project styles. `.muted` and
+     `.button-row` are also used here but stay global (shared utilities). */
+  .project-empty-hint {
+    margin: 4px 0;
+    font-size: 13px;
+  }
+
+  .project-identity {
+    display: grid;
+    gap: 6px;
+    margin-bottom: 8px;
+  }
+
+  .project-identity-title {
+    font-size: 16px;
+    color: var(--text);
+  }
+
+  .project-identity-path {
+    font-size: 11px;
+    color: var(--text-3);
+    background: var(--inset);
+    border: 1px solid var(--divider);
+    border-radius: 3px;
+    padding: 2px 6px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  }
+
+  .project-cost-chip {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    margin-top: 6px;
+    padding: 2px 8px;
+    font-size: 0.82em;
+    background: transparent;
+    border: 1px solid var(--color-border, #444);
+    border-radius: 10px;
+    color: var(--color-text, #ccc);
+    cursor: pointer;
+    font-variant-numeric: tabular-nums;
+  }
+  .project-cost-chip:hover {
+    background: var(--color-hover, rgba(255, 255, 255, 0.05));
+  }
+  .project-cost-caret {
+    font-size: 0.85em;
+    opacity: 0.6;
+  }
+  .project-cost-breakdown {
+    list-style: none;
+    margin: 4px 0 0;
+    padding: 4px 0;
+    font-size: 0.82em;
+    border-top: 1px dashed var(--color-border-soft, #333);
+  }
+  .project-cost-breakdown li {
+    display: flex;
+    justify-content: space-between;
+    gap: 8px;
+    padding: 2px 8px;
+  }
+  .project-cost-breakdown-value {
+    font-variant-numeric: tabular-nums;
+    color: var(--color-muted, #888);
+  }
+
+  .ai-settings {
+    display: grid;
+    gap: 10px;
+    margin-top: 16px;
+    padding-top: 14px;
+    border-top: 1px solid var(--border);
+  }
+
+  .ai-settings h3 {
+    margin: 0;
+    font-size: 13px;
+    font-weight: 600;
+    color: var(--text);
+    letter-spacing: 0.04em;
+    text-transform: uppercase;
+  }
+
+  .ai-policy {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 14px;
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    padding: 8px 10px;
+  }
+
+  .ai-policy legend {
+    font-size: 12px;
+    color: var(--text-2);
+    padding: 0 4px;
+  }
+
+  .ai-policy label {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    font-size: 13px;
+  }
+
+  .ai-health-result {
+    margin: 0;
+    padding: 8px 10px;
+    border-radius: 4px;
+    font-size: 13px;
+    line-height: 1.4;
+  }
+
+  .ai-health-result.ok {
+    background: var(--accent-soft);
+    color: var(--accent-deep);
+    border: 1px solid var(--accent-soft2);
+  }
+
+  .ai-health-result.fail {
+    background: var(--danger-soft);
+    color: var(--danger);
+    border: 1px solid var(--danger-border);
+  }
+
+  .disabled-section {
+    opacity: 0.6;
+  }
+
+  .migration-applied {
+    color: var(--accent-deep);
+    font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+    font-size: 12px;
+  }
+
+  .validation-panel {
+    display: grid;
+    gap: 5px;
+    padding: 10px;
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    background: var(--surface);
+  }
+
+  .validation-panel.invalid {
+    border-color: var(--star-border);
+    background: var(--star-soft);
+  }
+
+  .validation-panel strong {
+    margin-top: 4px;
+    color: var(--text-2);
+    font-size: 12px;
+    text-transform: uppercase;
+  }
+
+  .validation-panel p {
+    margin: 0;
+    color: var(--text-2);
+    font-size: 12px;
+    line-height: 1.35;
+  }
+
+  .validation-actions {
+    display: flex;
+    justify-content: flex-end;
+    margin-top: 6px;
+  }
+</style>

@@ -41,6 +41,8 @@ const KIND_DEFAULT_SWATCH: Record<string, string> = {
   preset: "graphite",
   assistant: "graphite",
   project: "violet",
+  research: "teal",
+  prompt: "indigo",
 };
 
 export function resolveColorForKind(kind: string | null | undefined): Swatch | null {

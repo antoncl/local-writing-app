@@ -52,7 +52,7 @@
   export let todoStatusHint = "";
 
   const dispatch = createEventDispatcher<{
-    change: { title: string; bodyMarkdown: string; status: string; entryType: string; metadata: EntryMetadata; inputs?: PromptInputDefinition[] };
+    change: { title: string; body: string; status: string; entryType: string; metadata: EntryMetadata; inputs?: PromptInputDefinition[] };
     focus: void;
     "custom-data": { entryType: string; kind: "scene" | "lore" | "prompt" | "assistant" };
     embeddedTodos: { todos: EmbeddedTodo[] };
@@ -340,7 +340,7 @@
     const canonical = entryInputDraftsToCanonical(entryInputDrafts);
     dispatch("change", {
       title,
-      bodyMarkdown: rawBodyMode ? rawBody : (proseBodyView?.getBodyMarkdown() ?? ""),
+      body: rawBodyMode ? rawBody : (proseBodyView?.getBody() ?? ""),
       status,
       entryType,
       metadata: cloneMetadata(metadata),
@@ -427,7 +427,7 @@
     if (nextBodyShape === "code") {
       // Code body: hydrate rawBody directly. ProseBodyView is unmounted
       // in this branch so no editor-side load runs.
-      rawBody = scene.body_markdown ?? "";
+      rawBody = scene.body ?? "";
       lastEmittedRawBody = rawBody;
     }
     loadedSceneId = scene.id;
@@ -461,7 +461,7 @@
     if (!scene) return;
     dispatch("change", {
       title,
-      bodyMarkdown: rawBodyMode ? rawBody : (proseBodyView?.getBodyMarkdown() ?? ""),
+      body: rawBodyMode ? rawBody : (proseBodyView?.getBody() ?? ""),
       status,
       entryType,
       metadata: cloneMetadata(metadata),
@@ -589,7 +589,7 @@
     }
     try {
       const preview = await api.aiPreview({
-        template_source: entry.body_markdown,
+        template_source: entry.body,
         target_scene_id: scene?.id ?? "",
         inputs,
         commit: false,

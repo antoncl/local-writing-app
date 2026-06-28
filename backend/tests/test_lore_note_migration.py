@@ -47,7 +47,7 @@ class MoveLoreNoteToResearchTests(unittest.TestCase):
             entry.id,
             SaveLoreEntryRequest(
                 title=title,
-                body_markdown=body,
+                body=body,
                 base_revision=current.revision,
                 entry_type="lore_note",
                 metadata=metadata or {},
@@ -159,7 +159,7 @@ class MoveLoreNoteToResearchTests(unittest.TestCase):
         # Read the new note back through the API.
         reread = self.client.get(f"/api/research/notes/{note_id}").json()
         # Save normalizes the trailing newline; strip for comparison.
-        self.assertEqual(reread["body_markdown"].rstrip(), body_text.rstrip())
+        self.assertEqual(reread["body"].rstrip(), body_text.rstrip())
 
     # --- tree positioning ----------------------------------------------------
 

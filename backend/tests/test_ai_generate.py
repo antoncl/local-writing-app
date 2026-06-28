@@ -61,7 +61,7 @@ class GenerateEndpointTests(unittest.TestCase):
             self.scene_id,
             SaveSceneRequest(
                 title=scene.title,
-                body_markdown="Scene body.",
+                body="Scene body.",
                 base_revision=scene.revision,
                 status="draft",
                 entry_type="scene",

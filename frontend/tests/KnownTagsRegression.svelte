@@ -6,7 +6,7 @@
   let entry: LoreEntry = {
     id: "lore-1",
     title: "Robert Smith",
-    body_markdown: "Known as Bob in private notes.",
+    body: "Known as Bob in private notes.",
     revision: "initial",
     entry_type: "lore_note",
     metadata: { tags: [] },

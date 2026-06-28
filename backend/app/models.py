@@ -317,7 +317,7 @@ class EntryTypeDefinition(BaseModel):
     # See decisions-node-editor-modularization + decisions-node-editor-body-spec.
     body_shape: Literal["prose", "code", "chat", "none"] | None = None
     # Starter content for new entries of this type. Used by
-    # create_prompt_entry as the initial body_markdown so authoring a
+    # create_prompt_entry as the initial body so authoring a
     # `roleplay` (or any future type with conventions worth showing off)
     # opens with a working template the author can adapt instead of a
     # blank page.
@@ -454,7 +454,7 @@ class SetFieldOrderRequest(BaseModel):
 class Scene(BaseModel):
     id: str
     title: str
-    body_markdown: str
+    body: str
     revision: str
     status: str = "draft"
     entry_type: str = "scene"
@@ -496,7 +496,7 @@ class ResearchNote(BaseModel):
 
     id: str
     title: str
-    body_markdown: str = ""
+    body: str = ""
     revision: str = ""
     entry_type: str = "note"
     metadata: dict[str, MetadataValue] = Field(default_factory=dict)
@@ -504,7 +504,7 @@ class ResearchNote(BaseModel):
 
 class SaveResearchNoteRequest(BaseModel):
     title: str = Field(min_length=1)
-    body_markdown: str = ""
+    body: str = ""
     base_revision: str | None = None
     entry_type: str = "note"
     metadata: dict[str, MetadataValue] = Field(default_factory=dict)
@@ -527,7 +527,7 @@ class MoveLoreNoteToResearchResponse(BaseModel):
 
 class SaveSceneRequest(BaseModel):
     title: str = Field(min_length=1)
-    body_markdown: str
+    body: str
     base_revision: str | None = None
     status: str = "draft"
     entry_type: str = "scene"
@@ -545,7 +545,7 @@ class ProjectNode(BaseModel):
 
     id: str = "project"
     title: str
-    body_markdown: str = ""
+    body: str = ""
     revision: str = ""
     entry_type: str = "project"
     metadata: dict[str, MetadataValue] = Field(default_factory=dict)
@@ -554,7 +554,7 @@ class ProjectNode(BaseModel):
 
 class SaveProjectNodeRequest(BaseModel):
     title: str = Field(min_length=1)
-    body_markdown: str = ""
+    body: str = ""
     base_revision: str | None = None
     entry_type: str = "project"
     metadata: dict[str, MetadataValue] = Field(default_factory=dict)
@@ -563,7 +563,7 @@ class SaveProjectNodeRequest(BaseModel):
 class LoreEntrySummary(BaseModel):
     id: str
     title: str
-    body_markdown: str = ""
+    body: str = ""
     entry_type: str = "lore_note"
     metadata: dict[str, MetadataValue] = Field(default_factory=dict)
     source_layer_id: str = ""
@@ -573,7 +573,7 @@ class LoreEntrySummary(BaseModel):
 class LoreEntry(BaseModel):
     id: str
     title: str
-    body_markdown: str
+    body: str
     revision: str
     entry_type: str = "lore_note"
     metadata: dict[str, MetadataValue] = Field(default_factory=dict)
@@ -640,7 +640,7 @@ class CreateLoreEntryRequest(BaseModel):
 
 class SaveLoreEntryRequest(BaseModel):
     title: str = Field(min_length=1)
-    body_markdown: str
+    body: str
     base_revision: str | None = None
     entry_type: str = "lore_note"
     metadata: dict[str, MetadataValue] = Field(default_factory=dict)
@@ -649,7 +649,7 @@ class SaveLoreEntryRequest(BaseModel):
 class PromptEntrySummary(BaseModel):
     id: str
     title: str
-    body_markdown: str = ""
+    body: str = ""
     entry_type: str = "prompt"
     metadata: dict[str, MetadataValue] = Field(default_factory=dict)
     # Per-entry input declarations. Each prompt declares the parameters its
@@ -665,7 +665,7 @@ class PromptEntrySummary(BaseModel):
 class PromptEntry(BaseModel):
     id: str
     title: str
-    body_markdown: str
+    body: str
     revision: str
     entry_type: str = "prompt"
     metadata: dict[str, MetadataValue] = Field(default_factory=dict)
@@ -686,7 +686,7 @@ class CreatePromptEntryRequest(BaseModel):
 
 class SavePromptEntryRequest(BaseModel):
     title: str = Field(min_length=1)
-    body_markdown: str
+    body: str
     base_revision: str | None = None
     entry_type: str = "prompt"
     metadata: dict[str, MetadataValue] = Field(default_factory=dict)

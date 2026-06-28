@@ -665,7 +665,7 @@
     }
     try {
       const preview = await api.aiPreview({
-        template_source: entry.body_markdown,
+        template_source: entry.body,
         target_scene_id: chatTargetSceneId,
         inputs,
         commit: false,
@@ -741,7 +741,7 @@
     }
     try {
       const preview = await api.aiPreview({
-        template_source: entry.body_markdown,
+        template_source: entry.body,
         target_scene_id: chatTargetSceneId,
         inputs,
         commit: false,
@@ -803,7 +803,7 @@
   }
 
   // ---------- Public methods (called via bind:this from parent) ----------
-  export function getBodyMarkdown(): string {
+  export function getBody(): string {
     return "";
   }
 </script>

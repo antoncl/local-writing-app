@@ -52,7 +52,7 @@ Picked items expose as a list under `{{ input.<name> }}`. The template iterates:
 ```jinja
 {% for item in input.reference_scenes %}
 ## {{ item.title }}
-{{ scene(item.id).body_markdown }}
+{{ scene(item.id).body }}
 
 {% endfor %}
 ```
@@ -65,9 +65,9 @@ For mixed pickers (scenes + lore + presets), each item carries `kind` + `type` y
 {{ full_outline() }}
   {% elif item.kind == "lore" %}
 ### {{ item.title }}
-{{ lore(item.id).body_markdown }}
+{{ lore(item.id).body }}
   {% elif item.kind == "scene" %}
-{{ scene(item.id).body_markdown }}
+{{ scene(item.id).body }}
   {% endif %}
 {% endfor %}
 ```
@@ -80,7 +80,7 @@ Enable **Allow target marking** in the input config — only available when scen
 
 - Picked scene chips show **☆ / ★** indicators.
 - The user marks one scene as the **target** by clicking ★. Clicking ★ on another scene moves the mark (single ★ per input).
-- The marked scene wins over the caller's default scene (the editor's open scene). The template sees it as `{{ scene }}` — `scene.body_markdown`, `scene.title`, and the scene helpers all resolve to the marked one.
+- The marked scene wins over the caller's default scene (the editor's open scene). The template sees it as `{{ scene }}` — `scene.body`, `scene.title`, and the scene helpers all resolve to the marked one.
 
 **Canonical use case** — the McKee-style evaluator: one prompt with a single `context_pick` input, **Multiple: on** + **Allow target marking: on**. Pick 8 scenes you want to evaluate, then iterate: ★ scene 1 → render → notes; move ★ to scene 2 → render → notes; etc. One prompt, eight runs, no leaving the picker.
 
@@ -138,5 +138,5 @@ Picked-item shape (what the template iterates):
 - **Legacy chat-level `+ Context` is gone.** Old chat sessions with pre-`context_pick` `chatContextItems` still render their items (read-only). Add new context by binding a prompt that declares a `context_pick` input.
 - **Sub-types reference the project schema by id.** If you rename a sub-type after authoring a prompt that whitelisted it, the picker silently drops it from the allowed set. Re-open the input config and re-check.
 - **Presets are server-side helpers.** Picking "Full Novel Text" doesn't pull every scene into the chat session — it stores one preset ref, and `full_text()` iterates at render time. No memory cost.
-- **Per-item treatment ("full text vs summary") is not in the picker** — that's a render-time concern. The template author picks via the helpers (`scene.body_markdown` vs `scene.summary`).
+- **Per-item treatment ("full text vs summary") is not in the picker** — that's a render-time concern. The template author picks via the helpers (`scene.body` vs `scene.summary`).
 - **Group related kinds into one picker** rather than declaring three separate `context_pick` inputs if they conceptually pick "the same kind of thing" — three pickers = three composer buttons.

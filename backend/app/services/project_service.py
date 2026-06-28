@@ -303,9 +303,9 @@ DEFAULT_METADATA_SCHEMA: dict[str, Any] = {
                 "paragraph of them.\n"
                 "{% if char %}\n"
                 "\nYou are playing **{{ char.title }}**.\n"
-                "{% if char.body_markdown %}\n"
+                "{% if char.body %}\n"
                 "\n## Character\n"
-                "{{ char.body_markdown }}\n"
+                "{{ char.body }}\n"
                 "{% endif %}\n"
                 "{% endif %}\n"
                 "{% endrole %}\n"
@@ -583,14 +583,14 @@ class ProjectService:
         # Project node singleton — book metadata, blurb, etc. live here.
         self._write_project_node_file(
             root / "project.md",
-            ProjectNode(id="project", title=title, body_markdown="", entry_type="project", metadata={}),
+            ProjectNode(id="project", title=title, body="", entry_type="project", metadata={}),
         )
         self._write_yaml(root / "metadata.schema.yaml", self._empty_metadata_schema())
         self._write_yaml(root / "tags.yaml", {"tags": []})
         initial_scene = Scene(
             id=self._new_id("scene"),
             title="Untitled Scene",
-            body_markdown="",
+            body="",
             revision="",
             status="draft",
             entry_type="scene",
@@ -2500,7 +2500,7 @@ class ProjectService:
         scene = Scene(
             id=scene_id,
             title=request.title,
-            body_markdown="",
+            body="",
             revision="",
             status=initial_status,
             entry_type="scene",
@@ -2686,7 +2686,7 @@ class ProjectService:
             note = ResearchNote(
                 id=note_id,
                 title=request.title,
-                body_markdown="",
+                body="",
                 entry_type=request.entry_type,
                 metadata=initial_metadata,
             )
@@ -2838,7 +2838,7 @@ class ProjectService:
             sort_keys=False,
             allow_unicode=True,
         ).strip()
-        body = note.body_markdown.rstrip() + "\n" if note.body_markdown.strip() else ""
+        body = note.body.rstrip() + "\n" if note.body.strip() else ""
         self._atomic_write(path, f"---\n{front_matter}\n---\n\n{body}")
 
     def read_research_note(self, note_id: str) -> ResearchNote:
@@ -2864,7 +2864,7 @@ class ProjectService:
         return ResearchNote(
             id=node_id,
             title=title,
-            body_markdown=body,
+            body=body,
             revision=self._revision(path),
             entry_type=entry_type,
             metadata=metadata,
@@ -2891,7 +2891,7 @@ class ProjectService:
         note = ResearchNote(
             id=node_id,
             title=request.title,
-            body_markdown=request.body_markdown,
+            body=request.body,
             entry_type=entry_type,
             metadata=clean_metadata,
         )
@@ -2903,7 +2903,7 @@ class ProjectService:
         return ResearchNote(
             id=node_id,
             title=request.title,
-            body_markdown=request.body_markdown,
+            body=request.body,
             revision=self._revision(renamed_path),
             entry_type=entry_type,
             metadata=clean_metadata,
@@ -2946,7 +2946,7 @@ class ProjectService:
         note = ResearchNote(
             id=note_id,
             title=source.title,
-            body_markdown=source.body_markdown,
+            body=source.body,
             entry_type="note",
             metadata=preserved_metadata,
         )
@@ -3059,7 +3059,7 @@ class ProjectService:
         scene = Scene(
             id=file_id,
             title=request.title,
-            body_markdown="",
+            body="",
             revision="",
             status=initial_status,
             entry_type=request.entry_type,
@@ -3235,7 +3235,7 @@ class ProjectService:
         return Scene(
             id=node_id,
             title=title,
-            body_markdown=body,
+            body=body,
             revision=self._revision(path),
             status=status,
             entry_type=entry_type,
@@ -3252,7 +3252,7 @@ class ProjectService:
         current_revision = self._revision(path)
         if request.base_revision and request.base_revision != current_revision:
             raise ProjectServiceError("Scene changed on disk after it was opened.", 409)
-        markdown_errors = validate_scene_markdown(request.body_markdown)
+        markdown_errors = validate_scene_markdown(request.body)
         if markdown_errors:
             raise ProjectServiceError(" ".join(markdown_errors), 422)
 
@@ -3263,7 +3263,7 @@ class ProjectService:
         scene = Scene(
             id=node_id,
             title=request.title,
-            body_markdown=request.body_markdown,
+            body=request.body,
             revision=current_revision,
             status=request.status,
             entry_type=request.entry_type,
@@ -3282,7 +3282,7 @@ class ProjectService:
         self._write_scene_file(path, scene)
         path = self._maybe_rename_node_file(path, request.title)
         self._update_scene_title_in_structure(node_id, request.title)
-        self._remove_missing_scene_todo_anchors(node_id, request.body_markdown)
+        self._remove_missing_scene_todo_anchors(node_id, request.body)
         return self.read_scene(node_id)
 
     # ----- project node (singleton per folder) ------------------------------
@@ -3300,7 +3300,7 @@ class ProjectService:
             return ProjectNode(
                 id="project",
                 title=str(manifest.get("title") or self.title or "Untitled Project"),
-                body_markdown="",
+                body="",
                 revision="",
                 entry_type="project",
                 metadata={},
@@ -3313,7 +3313,7 @@ class ProjectService:
         return ProjectNode(
             id="project",
             title=title,
-            body_markdown=body,
+            body=body,
             revision=self._revision(path),
             entry_type=entry_type,
             metadata=metadata,
@@ -3329,7 +3329,7 @@ class ProjectService:
         node = ProjectNode(
             id="project",
             title=request.title,
-            body_markdown=request.body_markdown,
+            body=request.body,
             revision=current_revision,
             entry_type=request.entry_type,
             metadata=metadata,
@@ -3352,7 +3352,7 @@ class ProjectService:
             sort_keys=False,
             allow_unicode=True,
         ).strip()
-        body = node.body_markdown.rstrip() + "\n" if node.body_markdown.strip() else ""
+        body = node.body.rstrip() + "\n" if node.body.strip() else ""
         self._atomic_write(path, f"---\n{front_matter}\n---\n\n{body}")
 
     def _sync_project_yaml_title(self, title: str) -> None:
@@ -3397,7 +3397,7 @@ class ProjectService:
                 LoreEntrySummary(
                     id=entry.id,
                     title=str(front_matter.get("title") or entry.id),
-                    body_markdown=body,
+                    body=body,
                     entry_type=entry_type,
                     metadata=self._normalise_metadata(front_matter.get("metadata"), entry.path),
                     source_layer_id=entry.source_layer_id,
@@ -3425,7 +3425,7 @@ class ProjectService:
         entry = LoreEntry(
             id=entry_id,
             title=request.title,
-            body_markdown="",
+            body="",
             revision="",
             entry_type=entry_type,
             metadata=initial_metadata,
@@ -3459,7 +3459,7 @@ class ProjectService:
         return LoreEntry(
             id=node_id,
             title=str(front_matter.get("title") or node_id),
-            body_markdown=body,
+            body=body,
             revision=self._revision(path),
             entry_type=entry_type,
             metadata=metadata,
@@ -3475,7 +3475,7 @@ class ProjectService:
         current_revision = self._revision(path)
         if request.base_revision and request.base_revision != current_revision:
             raise ProjectServiceError("Lore Entry changed on disk after it was opened.", 409)
-        markdown_errors = validate_scene_markdown(request.body_markdown)
+        markdown_errors = validate_scene_markdown(request.body)
         if markdown_errors:
             raise ProjectServiceError(" ".join(markdown_errors), 422)
 
@@ -3486,7 +3486,7 @@ class ProjectService:
         entry = LoreEntry(
             id=node_id,
             title=request.title,
-            body_markdown=request.body_markdown,
+            body=request.body,
             revision=current_revision,
             entry_type=request.entry_type,
             metadata=metadata,
@@ -3543,7 +3543,7 @@ class ProjectService:
                 PromptEntrySummary(
                     id=entry.id,
                     title=str(front_matter.get("title") or entry.id),
-                    body_markdown=body,
+                    body=body,
                     entry_type=entry_type,
                     metadata=self._normalise_metadata(front_matter.get("metadata"), entry.path),
                     inputs=self._parse_prompt_inputs(front_matter.get("inputs")),
@@ -3573,7 +3573,7 @@ class ProjectService:
         entry = PromptEntry(
             id=entry_id,
             title=request.title,
-            body_markdown=initial_body,
+            body=initial_body,
             revision="",
             entry_type=request.entry_type,
             metadata=initial_metadata,
@@ -3586,7 +3586,7 @@ class ProjectService:
             entry.title,
             entry.entry_type,
             entry.metadata,
-            entry.body_markdown,
+            entry.body,
             extra={"inputs": inputs_payload} if inputs_payload else None,
             omit_empty_metadata=True,
         )
@@ -3606,7 +3606,7 @@ class ProjectService:
         return PromptEntry(
             id=node_id,
             title=str(front_matter.get("title") or node_id),
-            body_markdown=body,
+            body=body,
             revision=self._revision(path),
             entry_type=raw_entry_type,
             metadata=self._normalise_metadata(front_matter.get("metadata"), path),
@@ -3632,7 +3632,7 @@ class ProjectService:
             request.title,
             request.entry_type,
             metadata,
-            request.body_markdown,
+            request.body,
             extra={"inputs": inputs_payload},
             omit_empty_metadata=True,
         )
@@ -4602,7 +4602,7 @@ class ProjectService:
             sort_keys=False,
             allow_unicode=True,
         ).strip()
-        body = scene.body_markdown.rstrip() + "\n" if scene.body_markdown.strip() else ""
+        body = scene.body.rstrip() + "\n" if scene.body.strip() else ""
         self._atomic_write(path, f"---\n{front_matter}\n---\n\n{body}")
 
     def _write_lore_entry_file(self, path: Path, entry: LoreEntry) -> None:
@@ -4616,7 +4616,7 @@ class ProjectService:
             sort_keys=False,
             allow_unicode=True,
         ).strip()
-        body = entry.body_markdown.rstrip() + "\n" if entry.body_markdown.strip() else ""
+        body = entry.body.rstrip() + "\n" if entry.body.strip() else ""
         self._atomic_write(path, f"---\n{front_matter}\n---\n\n{body}")
 
     def _normalise_metadata(self, value: Any, path: Path) -> dict[str, Any]:
@@ -4949,7 +4949,7 @@ class ProjectService:
                     LoreEntry(
                         id=entry.id,
                         title=str(front_matter.get("title") or entry.id),
-                        body_markdown=body,
+                        body=body,
                         revision="",
                         entry_type=entry.entry_type,
                         metadata=cleaned,
@@ -4961,7 +4961,7 @@ class ProjectService:
                     Scene(
                         id=entry.id,
                         title=str(front_matter.get("title") or entry.id),
-                        body_markdown=body,
+                        body=body,
                         revision="",
                         status=str(front_matter.get("status") or "draft"),
                         entry_type=entry.entry_type,
@@ -4997,7 +4997,7 @@ class ProjectService:
 
     def _computed_entry_metadata(
         self,
-        body_markdown: str,
+        body: str,
         node_id: str | None = None,
         entry_type: str | None = None,
         schema: MetadataSchema | None = None,
@@ -5014,7 +5014,7 @@ class ProjectService:
                 continue
             function = field.computed.get("function")
             if function == "word_count":
-                without_comments = re.sub(r"<!--[\s\S]*?-->", " ", body_markdown)
+                without_comments = re.sub(r"<!--[\s\S]*?-->", " ", body)
                 computed[field_id] = len(WORD_PATTERN.findall(without_comments))
             elif function == "counter" and node_id and entry_type:
                 if structure is None:
@@ -5240,7 +5240,7 @@ class ProjectService:
 
         if front_matter:
             scene = self.read_scene(scene_id)
-            self._write_scene_file(path, scene.model_copy(update={"body_markdown": repaired_body}))
+            self._write_scene_file(path, scene.model_copy(update={"body": repaired_body}))
         else:
             self._atomic_write(path, repaired_body)
 
@@ -5265,7 +5265,7 @@ class ProjectService:
             return
         if front_matter:
             scene = self.read_scene(scene_id)
-            self._write_scene_file(path, scene.model_copy(update={"body_markdown": repaired_body}))
+            self._write_scene_file(path, scene.model_copy(update={"body": repaired_body}))
         else:
             self._atomic_write(path, repaired_body)
 

@@ -20,7 +20,7 @@ export type StructureDocument = {
 export type Scene = {
   id: string;
   title: string;
-  body_markdown: string;
+  body: string;
   revision: string;
   status: string;
   entry_type: string;
@@ -33,7 +33,7 @@ export type Scene = {
 export type LoreEntrySummary = {
   id: string;
   title: string;
-  body_markdown: string;
+  body: string;
   entry_type: string;
   metadata: EntryMetadata;
   source_layer_id?: string;
@@ -43,7 +43,7 @@ export type LoreEntrySummary = {
 export type LoreEntry = {
   id: string;
   title: string;
-  body_markdown: string;
+  body: string;
   revision: string;
   entry_type: string;
   metadata: EntryMetadata;
@@ -58,7 +58,7 @@ export type LoreEntry = {
 export type ResearchNote = {
   id: string;
   title: string;
-  body_markdown: string;
+  body: string;
   revision: string;
   entry_type: string;
   metadata: EntryMetadata;
@@ -82,7 +82,7 @@ export type MoveLoreNoteToResearchResponse = {
 export type PromptEntrySummary = {
   id: string;
   title: string;
-  body_markdown: string;
+  body: string;
   entry_type: string;
   metadata: EntryMetadata;
   inputs: PromptInputDefinition[];
@@ -93,7 +93,7 @@ export type PromptEntrySummary = {
 export type PromptEntry = {
   id: string;
   title: string;
-  body_markdown: string;
+  body: string;
   revision: string;
   entry_type: string;
   metadata: EntryMetadata;
@@ -125,7 +125,7 @@ export type AssistantEntry = {
   // has_body: false — these are present so AssistantEntry satisfies the
   // EditableDocument shape used by NodeEditor, but they are always
   // empty / undefined for assistant kind.
-  body_markdown?: string;
+  body?: string;
   computed_metadata?: EntryMetadata;
   source_layer_id?: string;
   source_layer_label?: string;
@@ -415,7 +415,7 @@ export type ProviderCredentialsView = {
 export type ProjectNode = {
   id: string;
   title: string;
-  body_markdown: string;
+  body: string;
   revision: string;
   entry_type: string;
   metadata: Record<string, unknown>;
@@ -424,7 +424,7 @@ export type ProjectNode = {
 
 export type SaveProjectNodeRequest = {
   title: string;
-  body_markdown: string;
+  body: string;
   base_revision?: string | null;
   entry_type?: string;
   metadata?: Record<string, unknown>;

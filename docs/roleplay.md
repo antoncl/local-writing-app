@@ -82,7 +82,7 @@ This happens automatically in the `character_thread(scene, character)` Jinja hel
 {% set char = entry(input.character) %}
 {% role "system" %}
 You are playing {{ char.title }}.
-{{ char.body_markdown }}
+{{ char.body }}
 {% endrole %}
 
 {% role "user" %}

@@ -76,7 +76,7 @@ export function compileMatcher(
     lookup.set(entry.id, {
       id: entry.id,
       title: entry.title,
-      preview: buildPreview(entry.body_markdown ?? ""),
+      preview: buildPreview(entry.body ?? ""),
       entryType: entry.entry_type ?? "",
       colorHex: swatch?.hex ?? null,
     });

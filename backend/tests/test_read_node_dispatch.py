@@ -119,7 +119,7 @@ class SaveNodeDispatchTests(unittest.TestCase):
             title="Lore-shape on a chat",
             entry_type="lore_note",
             metadata={},
-            body_markdown="",
+            body="",
             base_revision="",
         )
         with self.assertRaises(ProjectServiceError) as ctx:
@@ -130,7 +130,7 @@ class SaveNodeDispatchTests(unittest.TestCase):
         request = SavePromptEntryRequest(
             title="Whatever",
             entry_type="general",
-            body_markdown="",
+            body="",
             metadata={},
             inputs=[],
             base_revision="",

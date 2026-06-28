@@ -38,7 +38,7 @@ class PreviewEndpointTests(unittest.TestCase):
             honor.id,
             SaveLoreEntryRequest(
                 title=existing.title,
-                body_markdown="Captain of the Fearless.",
+                body="Captain of the Fearless.",
                 base_revision=existing.revision,
                 entry_type="character",
                 metadata={"aliases": ["The Salamander"]},
@@ -63,7 +63,7 @@ class PreviewEndpointTests(unittest.TestCase):
             self.scene_id,
             SaveSceneRequest(
                 title=scene.title,
-                body_markdown="Some scene prose.",
+                body="Some scene prose.",
                 base_revision=scene.revision,
                 status="draft",
                 entry_type="scene",
@@ -340,7 +340,7 @@ class PreviewEndpointTests(unittest.TestCase):
             second_scene_id,
             SaveSceneRequest(
                 title=second_scene.title,
-                body_markdown="",
+                body="",
                 base_revision=second_scene.revision,
                 status="draft",
                 entry_type="scene",

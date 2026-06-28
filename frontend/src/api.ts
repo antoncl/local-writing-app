@@ -233,12 +233,12 @@ export const api = {
   getProjectNode() {
     return request<ProjectNode>("/project/node");
   },
-  saveProjectNode(node: ProjectNode, bodyMarkdown: string) {
+  saveProjectNode(node: ProjectNode, body: string) {
     return request<ProjectNode>("/project/node", {
       method: "PUT",
       body: JSON.stringify({
         title: node.title,
-        body_markdown: bodyMarkdown,
+        body,
         base_revision: node.revision,
         entry_type: node.entry_type,
         metadata: node.metadata,
@@ -374,12 +374,12 @@ export const api = {
   getResearchNote(noteId: string) {
     return request<ResearchNote>(`/research/notes/${encodeURIComponent(noteId)}`);
   },
-  saveResearchNote(note: ResearchNote, bodyMarkdown: string) {
+  saveResearchNote(note: ResearchNote, body: string) {
     return request<ResearchNote>(`/research/notes/${encodeURIComponent(note.id)}`, {
       method: "PUT",
       body: JSON.stringify({
         title: note.title,
-        body_markdown: bodyMarkdown,
+        body,
         base_revision: note.revision,
         entry_type: note.entry_type,
         metadata: note.metadata,
@@ -496,12 +496,12 @@ export const api = {
   getScene(sceneId: string) {
     return request<Scene>(`/scenes/${sceneId}`);
   },
-  saveScene(scene: Scene, bodyMarkdown: string) {
+  saveScene(scene: Scene, body: string) {
     return request<Scene>(`/scenes/${scene.id}`, {
       method: "PUT",
       body: JSON.stringify({
         title: scene.title,
-        body_markdown: bodyMarkdown,
+        body,
         base_revision: scene.revision,
         status: scene.status,
         entry_type: scene.entry_type,
@@ -526,12 +526,12 @@ export const api = {
   getLoreEntry(entryId: string) {
     return request<LoreEntry>(`/lore/${entryId}`);
   },
-  saveLoreEntry(entry: LoreEntry, bodyMarkdown: string) {
+  saveLoreEntry(entry: LoreEntry, body: string) {
     return request<LoreEntry>(`/lore/${entry.id}`, {
       method: "PUT",
       body: JSON.stringify({
         title: entry.title,
-        body_markdown: bodyMarkdown,
+        body,
         base_revision: entry.revision,
         entry_type: entry.entry_type,
         metadata: entry.metadata,
@@ -564,12 +564,12 @@ export const api = {
   getPromptEntry(entryId: string) {
     return request<PromptEntry>(`/prompts/${entryId}`);
   },
-  savePromptEntry(entry: PromptEntry, bodyMarkdown: string) {
+  savePromptEntry(entry: PromptEntry, body: string) {
     return request<PromptEntry>(`/prompts/${entry.id}`, {
       method: "PUT",
       body: JSON.stringify({
         title: entry.title,
-        body_markdown: bodyMarkdown,
+        body,
         base_revision: entry.revision,
         entry_type: entry.entry_type,
         metadata: entry.metadata,

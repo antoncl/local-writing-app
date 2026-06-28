@@ -180,7 +180,7 @@ def build_preview(
 
     # Wrap the loaded scene as an EntryRef so templates can write
     # `scene.pov.title` instead of `scene.metadata.pov.title`. The wrapper
-    # pre-fills `loaded=` so .title / .body_markdown don't trigger a re-read,
+    # pre-fills `loaded=` so .title / .body don't trigger a re-read,
     # and helpers reach the raw payload via _attr_or_item's EntryRef path.
     if scene is not None:
         try:

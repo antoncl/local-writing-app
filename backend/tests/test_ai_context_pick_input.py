@@ -81,7 +81,7 @@ def test_context_pick_roundtrips_through_prompt_save(tmp_path, monkeypatch):
     )
     request = SavePromptEntryRequest(
         title="Pick demo",
-        body_markdown="Body",
+        body="Body",
         base_revision=created.revision,
         entry_type="snippet",
         metadata={},

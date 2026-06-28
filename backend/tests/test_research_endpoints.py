@@ -251,7 +251,7 @@ class ResearchHttpEndpointTests(unittest.TestCase):
         self.assertEqual(body["id"], note_id)
         self.assertEqual(body["title"], "Mill towns")
         self.assertEqual(body["entry_type"], "note")
-        self.assertEqual(body["body_markdown"], "")
+        self.assertEqual(body["body"], "")
 
     def test_save_note_roundtrips_body_and_tags(self) -> None:
         self._create_node("Mill towns", "note")
@@ -265,7 +265,7 @@ class ResearchHttpEndpointTests(unittest.TestCase):
             f"/api/research/notes/{note_id}",
             json={
                 "title": "Mill towns",
-                "body_markdown": "Lancashire mills employed children from age 8.",
+                "body": "Lancashire mills employed children from age 8.",
                 "base_revision": current["revision"],
                 "entry_type": "note",
                 "metadata": {"tags": ["industrial", "labor"]},
@@ -274,7 +274,7 @@ class ResearchHttpEndpointTests(unittest.TestCase):
         self.assertEqual(response.status_code, 200, response.text)
         saved = response.json()
         self.assertEqual(
-            saved["body_markdown"],
+            saved["body"],
             "Lancashire mills employed children from age 8.",
         )
         self.assertEqual(saved["metadata"], {"tags": ["industrial", "labor"]})
@@ -283,7 +283,7 @@ class ResearchHttpEndpointTests(unittest.TestCase):
         # Save normalizes non-empty bodies to end with a single newline,
         # matching the convention scene/lore writes use.
         self.assertEqual(
-            reread["body_markdown"].rstrip(),
+            reread["body"].rstrip(),
             "Lancashire mills employed children from age 8.",
         )
         self.assertEqual(reread["metadata"]["tags"], ["industrial", "labor"])
@@ -297,7 +297,7 @@ class ResearchHttpEndpointTests(unittest.TestCase):
             f"/api/research/notes/{note_id}",
             json={
                 "title": "Note",
-                "body_markdown": "body",
+                "body": "body",
                 "base_revision": "stale-revision-value",
                 "entry_type": "note",
                 "metadata": {},
@@ -315,7 +315,7 @@ class ResearchHttpEndpointTests(unittest.TestCase):
             f"/api/research/notes/{note_id}",
             json={
                 "title": "Renamed via save",
-                "body_markdown": "x",
+                "body": "x",
                 "base_revision": current["revision"],
                 "entry_type": "note",
                 "metadata": {},

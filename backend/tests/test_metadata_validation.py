@@ -455,7 +455,7 @@ class MetadataValidationTests(unittest.TestCase):
             scene_a.id,
             SaveSceneRequest(
                 title=scene_a.title,
-                body_markdown=scene_a.body_markdown,
+                body=scene_a.body,
                 base_revision=scene_a.revision,
                 metadata={"characters": [seren.id]},
             ),
@@ -468,7 +468,7 @@ class MetadataValidationTests(unittest.TestCase):
             bystander.id,
             SaveSceneRequest(
                 title=bystander.title,
-                body_markdown=bystander.body_markdown,
+                body=bystander.body,
                 base_revision=bystander.revision,
                 metadata={"characters": [seren.id]},
             ),
@@ -500,7 +500,7 @@ class MetadataValidationTests(unittest.TestCase):
             scene_b.id,
             SaveSceneRequest(
                 title=refreshed_b.title,
-                body_markdown=refreshed_b.body_markdown,
+                body=refreshed_b.body,
                 base_revision=refreshed_b.revision,
                 status=refreshed_b.status,
                 entry_type=refreshed_b.entry_type,
@@ -716,7 +716,7 @@ class MetadataValidationTests(unittest.TestCase):
             self.scene_id,
             SaveSceneRequest(
                 title=scene.title,
-                body_markdown="Seren waits at the taverna.",
+                body="Seren waits at the taverna.",
                 base_revision=scene.revision,
                 status="draft",
                 entry_type="scene",
@@ -737,7 +737,7 @@ class MetadataValidationTests(unittest.TestCase):
                 self.scene_id,
                 SaveSceneRequest(
                     title=scene.title,
-                    body_markdown=scene.body_markdown,
+                    body=scene.body,
                     base_revision=scene.revision,
                     status="draft",
                     entry_type="scene",
@@ -807,7 +807,7 @@ class MetadataValidationTests(unittest.TestCase):
             self.scene_id,
             SaveSceneRequest(
                 title=scene.title,
-                body_markdown=scene.body_markdown,
+                body=scene.body,
                 base_revision=scene.revision,
                 status="draft",
                 entry_type="scene",
@@ -1164,7 +1164,7 @@ class MetadataValidationTests(unittest.TestCase):
             self.scene_id,
             SaveSceneRequest(
                 title=scene.title,
-                body_markdown=scene.body_markdown,
+                body=scene.body,
                 base_revision=scene.revision,
                 status=scene.status,
                 entry_type=scene.entry_type,
@@ -1237,7 +1237,7 @@ class MetadataValidationTests(unittest.TestCase):
             self.scene_id,
             SaveSceneRequest(
                 title=scene.title,
-                body_markdown=scene.body_markdown,
+                body=scene.body,
                 base_revision=scene.revision,
                 status=scene.status,
                 entry_type=scene.entry_type,
@@ -1277,7 +1277,7 @@ class MetadataValidationTests(unittest.TestCase):
             self.scene_id,
             SaveSceneRequest(
                 title=scene.title,
-                body_markdown=scene.body_markdown,
+                body=scene.body,
                 base_revision=scene.revision,
                 status=scene.status,
                 entry_type=scene.entry_type,
@@ -1314,7 +1314,7 @@ class MetadataValidationTests(unittest.TestCase):
             self.scene_id,
             SaveSceneRequest(
                 title=scene.title,
-                body_markdown=scene.body_markdown,
+                body=scene.body,
                 base_revision=scene.revision,
                 status=scene.status,
                 entry_type=scene.entry_type,
@@ -1351,7 +1351,7 @@ class MetadataValidationTests(unittest.TestCase):
             self.scene_id,
             SaveSceneRequest(
                 title=scene.title,
-                body_markdown=scene.body_markdown,
+                body=scene.body,
                 base_revision=scene.revision,
                 status=scene.status,
                 entry_type=scene.entry_type,
@@ -1436,7 +1436,7 @@ class MetadataValidationTests(unittest.TestCase):
                 entry.id,
                 SaveLoreEntryRequest(
                     title="Seren",
-                    body_markdown="A captain with a secret.",
+                    body="A captain with a secret.",
                     base_revision=entry.revision,
                     entry_type="character",
                     metadata={"summary": "Scene-only field"},
@@ -1465,7 +1465,7 @@ class MetadataValidationTests(unittest.TestCase):
             entry.id,
             SaveLoreEntryRequest(
                 title="Seren",
-                body_markdown="A captain with a secret.",
+                body="A captain with a secret.",
                 base_revision=entry.revision,
                 entry_type="character",
                 metadata={"importance": "High"},
@@ -1505,7 +1505,7 @@ class MetadataValidationTests(unittest.TestCase):
             entry.id,
             SaveLoreEntryRequest(
                 title="The Pact",
-                body_markdown="A secret faction.",
+                body="A secret faction.",
                 base_revision=entry.revision,
                 entry_type="faction",
                 metadata={"tags": ["Politics"]},
@@ -1545,7 +1545,7 @@ class MetadataValidationTests(unittest.TestCase):
             entry.id,
             SaveLoreEntryRequest(
                 title="Seren",
-                body_markdown="A captain with a secret.",
+                body="A captain with a secret.",
                 base_revision=entry.revision,
                 entry_type="character",
                 metadata={
@@ -1563,7 +1563,7 @@ class MetadataValidationTests(unittest.TestCase):
         self.assertFalse(hasattr(saved, "status"))
         listed_entry = self.service.list_lore_entries().entries[0]
         self.assertEqual(listed_entry.title, "Seren")
-        self.assertIn("captain with a secret", listed_entry.body_markdown)
+        self.assertIn("captain with a secret", listed_entry.body)
         front_matter, _ = self.service._read_markdown_with_front_matter(self.service._path_for_node_id(entry.id, "lore"), strict=True)
         self.assertNotIn("status", front_matter)
 
@@ -1622,7 +1622,7 @@ class MetadataValidationTests(unittest.TestCase):
                 character.id,
                 SaveLoreEntryRequest(
                     title=character.title,
-                    body_markdown=character.body_markdown,
+                    body=character.body,
                     base_revision=character.revision,
                     entry_type=character.entry_type,
                     metadata={"home_place": "missing_place"},
@@ -1634,7 +1634,7 @@ class MetadataValidationTests(unittest.TestCase):
                 character.id,
                 SaveLoreEntryRequest(
                     title=character.title,
-                    body_markdown=character.body_markdown,
+                    body=character.body,
                     base_revision=character.revision,
                     entry_type=character.entry_type,
                     metadata={"home_place": other_character.id},
@@ -1664,7 +1664,7 @@ class MetadataValidationTests(unittest.TestCase):
             entry.id,
             SaveLoreEntryRequest(
                 title=entry.title,
-                body_markdown=entry.body_markdown,
+                body=entry.body,
                 base_revision=entry.revision,
                 entry_type=entry.entry_type,
                 metadata={"faction": "A"},
@@ -1684,7 +1684,7 @@ class MetadataValidationTests(unittest.TestCase):
             entry.id,
             SaveLoreEntryRequest(
                 title="Seren",
-                body_markdown="Keeps the ember map.",
+                body="Keeps the ember map.",
                 base_revision=entry.revision,
                 entry_type="character",
                 metadata={"tags": ["Navigator"]},
@@ -1704,7 +1704,7 @@ class MetadataValidationTests(unittest.TestCase):
             entry.id,
             SaveLoreEntryRequest(
                 title="Seren",
-                body_markdown=entry.body_markdown,
+                body=entry.body,
                 base_revision=entry.revision,
                 entry_type="character",
                 metadata={"tags": ["crew", "ALLY", "ally"]},
@@ -1724,7 +1724,7 @@ class MetadataValidationTests(unittest.TestCase):
             entry.id,
             SaveLoreEntryRequest(
                 title="Robert Smith",
-                body_markdown=entry.body_markdown,
+                body=entry.body,
                 base_revision=entry.revision,
                 entry_type="character",
                 metadata={"aliases": ["Mr. Smith", "Bob"], "tags": ["crew"]},
@@ -2118,7 +2118,7 @@ class MetadataValidationTests(unittest.TestCase):
             created.id,
             SavePromptEntryRequest(
                 title="Brainstorm",
-                body_markdown='{% role "user" %}Talk about {{ input.topic }}.{% endrole %}',
+                body='{% role "user" %}Talk about {{ input.topic }}.{% endrole %}',
                 base_revision=created.revision,
                 entry_type=created.entry_type,
                 metadata={},
@@ -2302,7 +2302,7 @@ class ReferenceResolutionTests(unittest.TestCase):
             entry_id,
             SaveLoreEntryRequest(
                 title=entry.title,
-                body_markdown=body,
+                body=body,
                 base_revision=entry.revision,
                 entry_type=entry.entry_type,
                 metadata=entry.metadata,
@@ -2377,7 +2377,7 @@ class ReferenceResolutionTests(unittest.TestCase):
             seren.id,
             SaveLoreEntryRequest(
                 title="Seren",
-                body_markdown=seren.body_markdown,
+                body=seren.body,
                 base_revision=seren.revision,
                 entry_type="character",
                 metadata={"home_place": taverna.id},
@@ -2389,7 +2389,7 @@ class ReferenceResolutionTests(unittest.TestCase):
             scene_id,
             SaveSceneRequest(
                 title=scene.title,
-                body_markdown=scene.body_markdown,
+                body=scene.body,
                 base_revision=scene.revision,
                 status=scene.status,
                 entry_type="scene",
@@ -2419,7 +2419,7 @@ class ReferenceResolutionTests(unittest.TestCase):
             scene_id,
             SaveSceneRequest(
                 title=scene.title,
-                body_markdown=scene.body_markdown,
+                body=scene.body,
                 base_revision=scene.revision,
                 status=scene.status,
                 entry_type="scene",
@@ -2480,7 +2480,7 @@ class LayeredEntryIndexTests(unittest.TestCase):
         entry = LoreEntry(
             id=entry_id,
             title=title,
-            body_markdown=f"# {title}",
+            body=f"# {title}",
             revision="",
             entry_type=entry_type,
             metadata={},
@@ -2537,7 +2537,7 @@ class LayeredEntryIndexTests(unittest.TestCase):
         ancestor_scene = Scene(
             id="ghost_scene",
             title="Should not appear",
-            body_markdown="",
+            body="",
             revision="",
             status="draft",
             entry_type="scene",

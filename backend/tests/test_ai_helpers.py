@@ -170,7 +170,7 @@ class _HelperFixtureBase(unittest.TestCase):
             entry_id,
             SaveLoreEntryRequest(
                 title=existing.title,
-                body_markdown=body,
+                body=body,
                 base_revision=existing.revision,
                 entry_type=entry_type,
                 metadata=metadata,
@@ -185,7 +185,7 @@ class _HelperFixtureBase(unittest.TestCase):
             scene_id,
             SaveSceneRequest(
                 title=title,
-                body_markdown=body,
+                body=body,
                 base_revision=existing.revision,
                 status="draft",
                 entry_type=entry_type,
@@ -491,7 +491,7 @@ class ContextPolicyTests(_HelperFixtureBase):
             entry_id,
             SaveLoreEntryRequest(
                 title=existing.title,
-                body_markdown=existing.body_markdown,
+                body=existing.body,
                 base_revision=existing.revision,
                 entry_type=existing.entry_type,
                 metadata=metadata,
@@ -735,7 +735,7 @@ class XmlOutputStructureTests(_HelperFixtureBase):
             self.honor["id"],
             SaveLoreEntryRequest(
                 title='Honor "The Salamander" Harrington',
-                body_markdown="body",
+                body="body",
                 base_revision=existing.revision,
                 entry_type="character",
                 metadata={"aliases": []},
@@ -1013,7 +1013,7 @@ class ResearchNoteEntryRefTests(unittest.TestCase):
             self.note_id,
             SaveResearchNoteRequest(
                 title="Lancashire mill towns",
-                body_markdown="Mills employed children from age 8.",
+                body="Mills employed children from age 8.",
                 base_revision=note.revision,
                 entry_type="note",
                 metadata={"tags": ["industrial", "labor"]},
@@ -1037,7 +1037,7 @@ class ResearchNoteEntryRefTests(unittest.TestCase):
         out = render_template(
             '{% role "user" %}{{ entry("'
             + self.note_id
-            + '").body_markdown }}{% endrole %}',
+            + '").body }}{% endrole %}',
             context={},
             env=env,
         )

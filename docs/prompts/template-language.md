@@ -91,7 +91,7 @@ The dispatch pipeline populates the context. Common variables (the actual set wi
 
 | Variable | Meaning |
 | --- | --- |
-| `scene` | The currently active scene node (`scene.title`, `scene.summary`, `scene.body_markdown`, …) |
+| `scene` | The currently active scene node (`scene.title`, `scene.summary`, `scene.body`, …) |
 | `project` | The current project's settings node (`project.tense`, `project.language`, `project.style_voice`) |
 | `effective` | Resolved effective AI settings (`effective.model_class`, `effective.provider_policy`) |
 | `input` | User-supplied inputs declared by the prompt entry (e.g., `input.words`) |

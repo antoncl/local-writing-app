@@ -571,7 +571,7 @@
           <h4>Variables</h4>
           <dl>
             <dt><code>scene</code></dt>
-            <dd>The target scene. <code>scene.title</code>, <code>scene.body_markdown</code>, <code>scene.entry_type</code>, <code>scene.&lt;field&gt;</code> for any field on the scene (e.g. <code>scene.summary</code>, <code>scene.pov.title</code>). Entity-ref fields auto-resolve.</dd>
+            <dd>The target scene. <code>scene.title</code>, <code>scene.body</code>, <code>scene.entry_type</code>, <code>scene.&lt;field&gt;</code> for any field on the scene (e.g. <code>scene.summary</code>, <code>scene.pov.title</code>). Entity-ref fields auto-resolve.</dd>
             <dt><code>project</code> / <code>novel</code></dt>
             <dd>Project info (title, root path, AI policy). Both names point to the same value.</dd>
             <dt><code>text_before</code> / <code>text_after</code></dt>

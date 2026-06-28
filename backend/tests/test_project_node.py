@@ -34,7 +34,7 @@ class ProjectNodeServiceTests(unittest.TestCase):
         self.assertEqual(node.id, "project")
         self.assertEqual(node.title, "Honor's First Command")
         self.assertEqual(node.entry_type, "project")
-        self.assertEqual(node.body_markdown, "")
+        self.assertEqual(node.body, "")
         self.assertEqual(node.metadata, {})
 
     def test_save_project_node_roundtrips_metadata(self) -> None:
@@ -42,7 +42,7 @@ class ProjectNodeServiceTests(unittest.TestCase):
         updated = self.service.save_project_node(
             SaveProjectNodeRequest(
                 title="Honor's First Command",
-                body_markdown="A treecat-bonded young lieutenant takes her first independent command.",
+                body="A treecat-bonded young lieutenant takes her first independent command.",
                 base_revision=node.revision,
                 metadata={
                     "author": "David Weber",
@@ -56,7 +56,7 @@ class ProjectNodeServiceTests(unittest.TestCase):
         )
         self.assertEqual(updated.metadata["author"], "David Weber")
         self.assertEqual(updated.metadata["series_number"], 1)
-        self.assertEqual(updated.body_markdown.strip(), "A treecat-bonded young lieutenant takes her first independent command.")
+        self.assertEqual(updated.body.strip(), "A treecat-bonded young lieutenant takes her first independent command.")
         # Reload to confirm persistence
         reloaded = self.service.read_project_node()
         self.assertEqual(reloaded.metadata["genre"], "military sci-fi")
@@ -66,7 +66,7 @@ class ProjectNodeServiceTests(unittest.TestCase):
         self.service.save_project_node(
             SaveProjectNodeRequest(
                 title="Honor's Renamed Command",
-                body_markdown="",
+                body="",
                 base_revision=node.revision,
                 metadata={},
             )
@@ -82,7 +82,7 @@ class ProjectNodeServiceTests(unittest.TestCase):
         self.service.save_project_node(
             SaveProjectNodeRequest(
                 title="Honor's First Command",
-                body_markdown="v1",
+                body="v1",
                 base_revision=node.revision,
                 metadata={},
             )
@@ -92,7 +92,7 @@ class ProjectNodeServiceTests(unittest.TestCase):
             self.service.save_project_node(
                 SaveProjectNodeRequest(
                     title="Honor's First Command",
-                    body_markdown="v2-from-stale-tab",
+                    body="v2-from-stale-tab",
                     base_revision=node.revision,
                     metadata={},
                 )
@@ -157,7 +157,7 @@ class ProjectNodeEndpointTests(unittest.TestCase):
             "/api/project/node",
             json={
                 "title": "Pegasus Drift",
-                "body_markdown": "A salvage crew finds something they shouldn't.",
+                "body": "A salvage crew finds something they shouldn't.",
                 "base_revision": current["revision"],
                 "metadata": {
                     "author": "A. N. Author",

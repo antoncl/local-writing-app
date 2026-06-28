@@ -28,7 +28,7 @@ definitions are moving toward node types and subtypes:
   `prompt`).
 - `title`: display title.
 - `metadata`: schema-defined values.
-- `body_markdown`: optional Markdown body for entities that carry prose or text.
+- `body`: optional Markdown body for entities that carry prose or text.
 - `computed_metadata`: derived values exposed by the app but not stored as
   canonical entry data.
 

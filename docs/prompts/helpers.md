@@ -28,7 +28,7 @@ last_words(text: str, n: int) -> str
 **Example**
 ```jinja
 {% if is_start_of_text and pov(scene) == pov(scene.previous) %}
-{{ last_words(scene.previous.body_markdown, 650) }}
+{{ last_words(scene.previous.body, 650) }}
 {% endif %}
 ```
 
@@ -100,7 +100,7 @@ Reconstruct a per-character chat thread from a scene body's character markers (t
 character_thread(scene, character) -> str
 ```
 
-- `scene` — the target scene (an EntryRef or anything exposing `.body_markdown`). The helper reads `.body_markdown` directly.
+- `scene` — the target scene (an EntryRef or anything exposing `.body`). The helper reads `.body` directly.
 - `character` — the focus character whose turn is being generated. Accepts the same shapes `entry()` does: a bare id, an EntryRef, a ContextPickRef dict, a list, or a JSON-string list. In practice you pass `input.<your_character_pick_name>`.
 
 **Mapping** (each segment of the body becomes a message):
@@ -120,7 +120,7 @@ Consecutive same-role segments are coalesced into one message, and empty message
 {% set char = entry(input.character) %}
 {% role "system" %}
 You are playing {{ char.title }}.
-{{ char.body_markdown }}
+{{ char.body }}
 {% endrole %}
 
 {% role "user" %}
@@ -155,7 +155,7 @@ A lazy wrapper around a single entry returned by `pov(scene)`, `entry(...)`, and
 | `.id` / `.raw_id` | The string id without resolving. Always available, even if the target doesn't exist. |
 | `.title` | The entry's title. Falls back to `.id` when the entry is missing. |
 | `.entry_type` | The entry's `entry_type` (e.g. `character`, `place`). |
-| `.body_markdown` | The entry's markdown body. |
+| `.body` | The entry's markdown body. |
 | `.found` | `True` when the id resolves through the index, `False` otherwise. Useful for `{% if ref.found %}` guards. |
 | `.metadata.<field>` | The metadata value for that field. `entity_ref` fields auto-resolve to a child EntryRef; `entity_ref_list` fields resolve to a list of EntryRef. Other fields pass through as their raw value. |
 | `.<field>` | Shortcut for `.metadata.<field>`. Lets you write `honor.home_place` instead of `honor.metadata.home_place`. |

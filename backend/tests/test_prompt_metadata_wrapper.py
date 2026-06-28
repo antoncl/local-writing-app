@@ -46,7 +46,7 @@ class PromptMetadataWrapperTests(unittest.TestCase):
             created.id,
             SavePromptEntryRequest(
                 title="Saved Empty",
-                body_markdown="Hello {{ scene.title }}",
+                body="Hello {{ scene.title }}",
                 base_revision=created.revision,
                 entry_type="general",
                 metadata={},
@@ -62,7 +62,7 @@ class PromptMetadataWrapperTests(unittest.TestCase):
             created.id,
             SavePromptEntryRequest(
                 title="Has Meta",
-                body_markdown="Body",
+                body="Body",
                 base_revision=created.revision,
                 entry_type="general",
                 metadata={"author_note": "keep me"},

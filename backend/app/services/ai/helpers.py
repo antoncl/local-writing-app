@@ -95,7 +95,7 @@ class EntryRef:
     """Lazy wrapper around a lore / scene / prompt entry inside Jinja templates.
 
     `.id` and `.raw_id` return the underlying string without resolving.
-    Any other attribute (e.g. `.title`, `.entry_type`, `.body_markdown`,
+    Any other attribute (e.g. `.title`, `.entry_type`, `.body`,
     `.metadata`) lazily loads the target entry through the project's layered
     node index. Inside `.metadata`, `entity_ref` fields auto-wrap to EntryRef
     and `entity_ref_list` fields to `list[EntryRef]`, with per-render cycle
@@ -184,11 +184,11 @@ class EntryRef:
         return str(getattr(entry, "entry_type", "") or "")
 
     @property
-    def body_markdown(self) -> str:
+    def body(self) -> str:
         entry = self._load()
         if entry is None:
             return ""
-        return str(getattr(entry, "body_markdown", "") or "")
+        return str(getattr(entry, "body", "") or "")
 
     @property
     def metadata(self) -> "_EntryMetadataView":
@@ -747,7 +747,7 @@ def _textual_one_hop(
         entry = _safe_read_lore(project, entry_id)
         if entry is None:
             continue
-        body = _attr_or_item(entry, "body_markdown")
+        body = _attr_or_item(entry, "body")
         if isinstance(body, str) and body.strip():
             bodies.append(body)
     if not bodies:
@@ -792,7 +792,7 @@ def _format_lore_block(project: "ProjectService", entry_ids: list[str]) -> str:
         else:
             aliases = []
 
-        body = _attr_or_item(entry, "body_markdown") or ""
+        body = _attr_or_item(entry, "body") or ""
         body = str(body).strip()
         if not body:
             summary = _get_field(entry, "summary")
@@ -925,7 +925,7 @@ def _collect_scene_text(
             sink.append(
                 _SceneText(
                     title=str(_attr_or_item(scene, "title") or ""),
-                    body=str(_attr_or_item(scene, "body_markdown") or ""),
+                    body=str(_attr_or_item(scene, "body") or ""),
                     scene_id=scene_id,
                     entry_type=str(_attr_or_item(scene, "entry_type") or ""),
                 )
@@ -1001,11 +1001,11 @@ def _character_thread(
 
     body = ""
     if scene is not None:
-        attr = getattr(scene, "body_markdown", None)
+        attr = getattr(scene, "body", None)
         if isinstance(attr, str):
             body = attr
         elif isinstance(scene, dict):
-            value = scene.get("body_markdown")
+            value = scene.get("body")
             if isinstance(value, str):
                 body = value
 

@@ -50,7 +50,7 @@ def project(tmp_path, monkeypatch):
             entry_id,
             SaveLoreEntryRequest(
                 title=existing.title,
-                body_markdown=body,
+                body=body,
                 base_revision=existing.revision,
                 entry_type="character",
                 metadata=metadata,
@@ -155,7 +155,7 @@ def test_depth1_does_not_recurse(project):
         anders.id,
         SaveLoreEntryRequest(
             title=existing.title,
-            body_markdown="Some text.",
+            body="Some text.",
             base_revision=existing.revision,
             entry_type="character",
             metadata={"aliases": []},
@@ -166,7 +166,7 @@ def test_depth1_does_not_recurse(project):
         project._pavel_id,
         SaveLoreEntryRequest(
             title=pavel.title,
-            body_markdown="Disgraced Captain. Friend of Anders Pierce.",
+            body="Disgraced Captain. Friend of Anders Pierce.",
             base_revision=pavel.revision,
             entry_type="character",
             metadata={"aliases": []},

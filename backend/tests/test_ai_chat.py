@@ -519,7 +519,7 @@ class ChatEndpointJournalTests(unittest.TestCase):
             global_service.save_lore_entry(
                 entry_id,
                 SaveLoreEntryRequest(
-                    title=existing.title, body_markdown=body,
+                    title=existing.title, body=body,
                     base_revision=existing.revision, entry_type="character",
                     metadata=metadata,
                 ),

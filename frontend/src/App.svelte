@@ -2445,7 +2445,7 @@
             scene: note,
             dirty: false,
             draftTitle: note.title,
-            draftMarkdown: note.body_markdown,
+            draftMarkdown: note.body,
             draftStatus: "",
             draftEntryType: note.entry_type,
             draftMetadata: cloneMetadata(note.metadata),
@@ -3117,7 +3117,7 @@
               scene: sceneShaped,
               dirty: false,
               draftTitle: node.title,
-              draftMarkdown: node.body_markdown,
+              draftMarkdown: node.body,
               draftStatus: "",
               draftEntryType: node.entry_type,
               draftMetadata: cloneMetadata(node.metadata),
@@ -3159,7 +3159,7 @@
             scene,
             dirty: false,
             draftTitle: scene.title,
-            draftMarkdown: scene.body_markdown,
+            draftMarkdown: scene.body,
             draftStatus: scene.status,
             draftEntryType: scene.entry_type,
             draftMetadata: cloneMetadata(scene.metadata),
@@ -3227,7 +3227,7 @@
             scene,
             dirty: false,
             draftTitle: scene.title,
-            draftMarkdown: scene.body_markdown,
+            draftMarkdown: scene.body,
             draftStatus: scene.status,
             draftEntryType: scene.entry_type,
             draftMetadata: cloneMetadata(scene.metadata),
@@ -3302,7 +3302,7 @@
     const sceneShaped = {
       id: chatId,
       title: summary?.title || "Untitled chat",
-      body_markdown: "",
+      body: "",
       revision: "",
       status: "",
       entry_type: "chat_session",
@@ -3352,7 +3352,7 @@
             scene: entry,
             dirty: false,
             draftTitle: entry.title,
-            draftMarkdown: entry.body_markdown,
+            draftMarkdown: entry.body,
             draftStatus: "",
             draftEntryType: entry.entry_type,
             draftMetadata: cloneMetadata(entry.metadata),
@@ -3444,7 +3444,7 @@
             scene: entry,
             dirty: false,
             draftTitle: entry.title,
-            draftMarkdown: entry.body_markdown,
+            draftMarkdown: entry.body,
             draftStatus: "",
             draftEntryType: entry.entry_type,
             draftMetadata: cloneMetadata(entry.metadata),
@@ -3507,7 +3507,7 @@
   function loreEntrySearchText(entry: LoreEntrySummary) {
     return [
       entry.title,
-      entry.body_markdown,
+      entry.body,
       loreEntryTypeName(entry, metadataSchema),
       metadataSearchText(entry.metadata),
     ]
@@ -3617,18 +3617,18 @@
     savedIndicatorTimers.set(id, timer);
   }
 
-  function updateEditorPaneDraft(id: string, title: string, bodyMarkdown: string, status: string, entryType: string, metadata: EntryMetadata, inputs?: PromptInputDefinition[]) {
+  function updateEditorPaneDraft(id: string, title: string, body: string, status: string, entryType: string, metadata: EntryMetadata, inputs?: PromptInputDefinition[]) {
     editorPanes = editorPanes.map((pane) => {
       if (pane.id !== id) return pane;
       const nextInputs = inputs ?? pane.draftInputs;
-      const nextDirty = isEditorPaneDirty(pane.scene, title, bodyMarkdown, status, entryType, metadata, nextInputs);
+      const nextDirty = isEditorPaneDirty(pane.scene, title, body, status, entryType, metadata, nextInputs);
       return {
         ...pane,
         dirty: nextDirty,
         // New edits invalidate any "Saved" feedback still on screen.
         recentlySaved: nextDirty ? false : pane.recentlySaved,
         draftTitle: title,
-        draftMarkdown: bodyMarkdown,
+        draftMarkdown: body,
         draftStatus: status,
         draftEntryType: entryType,
         draftMetadata: cloneMetadata(metadata),
@@ -3649,7 +3649,7 @@
   function isEditorPaneDirty(
     scene: EditableDocument | null,
     title: string,
-    bodyMarkdown: string,
+    body: string,
     status: string,
     entryType: string,
     metadata: EntryMetadata,
@@ -3657,7 +3657,7 @@
   ) {
     if (!scene) return false;
     if (title !== scene.title) return true;
-    if (bodyMarkdown !== scene.body_markdown) return true;
+    if (body !== scene.body) return true;
     if (documentStatus(scene) ? status !== documentStatus(scene) : false) return true;
     if (entryType !== scene.entry_type) return true;
     if (!metadataEqual(metadata, scene.metadata ?? {})) return true;
@@ -5130,7 +5130,7 @@
           updateEditorPaneDraft(
             editorPane.id,
             event.detail.title,
-            event.detail.bodyMarkdown,
+            event.detail.body,
             event.detail.status,
             event.detail.entryType,
             event.detail.metadata,

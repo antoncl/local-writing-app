@@ -6,7 +6,7 @@
   let scene: Scene = {
     id: "scene-1",
     title: "Scene",
-    body_markdown: "One two three.",
+    body: "One two three.",
     revision: "initial",
     status: "draft",
     entry_type: "scene",

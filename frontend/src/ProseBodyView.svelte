@@ -352,7 +352,7 @@
   $: void slashArgTokens;
 
   // ---------- Public methods (called via bind:this from parent) ----------
-  export function getBodyMarkdown(): string {
+  export function getBody(): string {
     if (!editor) return "";
     return editorHtmlToSceneMarkdown(editor.getHTML());
   }
@@ -366,7 +366,7 @@
     aiAnchorPos = null;
     aiError = null;
     aiToolbarPosition = { x: 0, y: 0, visible: false };
-    const html = await sceneMarkdownToHtml(nextScene.body_markdown || "");
+    const html = await sceneMarkdownToHtml(nextScene.body || "");
     if (!editor || scene?.id !== sceneId) return;
     editor.commands.setContent(html || "<p></p>", false);
     loadedSceneId = sceneId;
@@ -1560,7 +1560,7 @@
 
     try {
       for await (const ev of api.aiGenerateStream({
-        template_source: entry.body_markdown,
+        template_source: entry.body,
         target_scene_id: scene.id,
         session_id: scene.id,
         inputs,

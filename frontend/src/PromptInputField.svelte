@@ -102,12 +102,20 @@
     on:input={(e) => dispatch("change", { value: (e.currentTarget as HTMLInputElement).value })}
   />
 {:else if input.type === "boolean"}
-  <input
-    type="checkbox"
-    checked={value === "true"}
+  <!-- Tri-state: Unset / True / False. Unset is a real persisted state
+       (#24, #42) — preview and runtime both treat it as undefined so the
+       template can guard with `is defined` and fail fast otherwise.
+       Replaces the 2-state checkbox that silently coerced "untouched"
+       into `false` and disagreed with the preview. -->
+  <select
+    value={value ?? ""}
     aria-label={ariaLabel}
-    on:change={(e) => dispatch("change", { value: (e.currentTarget as HTMLInputElement).checked ? "true" : "false" })}
-  />
+    on:change={(e) => dispatch("change", { value: (e.currentTarget as HTMLSelectElement).value })}
+  >
+    <option value="">Unset</option>
+    <option value="true">True</option>
+    <option value="false">False</option>
+  </select>
 {:else if input.type === "select"}
   <select
     value={value ?? ""}

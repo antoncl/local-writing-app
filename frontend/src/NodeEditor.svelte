@@ -546,7 +546,13 @@
       } else if (input.default !== undefined && input.default !== null) {
         drafts[input.name] = String(input.default);
       } else {
-        drafts[input.name] = input.type === "boolean" ? "false" : "";
+        // Seed everything to "" — the runtime's unset state, consistent
+        // with the preview (#42). Previously boolean was special-cased to
+        // "false", which silently sent the model `false` for an
+        // untouched checkbox while the preview surfaced an unset/undefined
+        // error. The runtime is now tri-state (Unset/True/False) so the
+        // user explicitly picks True or False or leaves it unset.
+        drafts[input.name] = "";
       }
     }
     inputsDialogDrafts = drafts;

@@ -3602,6 +3602,7 @@ button.schema-field-row:hover {
   border: 1px solid #d8e0dd;
   border-radius: 3px;
   padding: 0 4px;
+  white-space: nowrap;
 }
 
 .prompt-preview-field-accessor:hover > code {

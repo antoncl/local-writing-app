@@ -13,6 +13,7 @@
   import Chats from "./Chats.svelte";
   import Project from "./Project.svelte";
   import Search from "./Search.svelte";
+  import Todo, { type EmbeddedTodo } from "./Todo.svelte";
   import {
     buildNodeTypeTree,
     buildSchemaFieldSections,
@@ -133,15 +134,6 @@
     cannotBeUndone?: boolean;
     dontShowAgainKey?: string;
     onConfirm: () => Promise<void>;
-  };
-  type EmbeddedTodo = {
-    id: string;
-    text: string;
-    status: "open" | "done";
-    note: string;
-    paneId: string;
-    sceneId: string;
-    sceneTitle: string;
   };
 
   let projectPath = "";
@@ -3705,59 +3697,21 @@
       </div>
     </header>
     <div class="pane-content">
-      <div class="todo-entry">
-        <textarea bind:value={newTodo} placeholder="Add a file-level TODO description" rows="3" on:keydown={(event) => event.key === "Enter" && event.ctrlKey && addTodo()}></textarea>
-        <button on:click={addTodo}>Add</button>
-      </div>
-      {#if allEmbeddedTodos.length > 0}
-        <div class="todo-section-label">Embedded TODOs from open scenes</div>
-      {/if}
-      {#each allEmbeddedTodos as item}
-        <div class:done={item.status === "done"} class="todo-item">
-          <input class="todo-checkbox" type="checkbox" checked={item.status === "done"} aria-label="Toggle embedded TODO" on:change={() => toggleEmbeddedTodo(item)} />
-          <div class="todo-text-stack">
-            <textarea
-              class="todo-text"
-              value={item.note}
-              aria-label="Embedded TODO note"
-              title="Edit embedded TODO note"
-              placeholder={item.text}
-              rows="3"
-              on:blur={(event) => updateEmbeddedTodoNote(item, event.currentTarget.value)}
-            ></textarea>
-            <button class="todo-link" type="button" on:click={() => openEmbeddedTodo(item)}>
-              <strong>{item.sceneTitle}</strong>
-              <span>{item.text}</span>
-            </button>
-          </div>
-          <small>Embedded</small>
-          <button class="todo-delete" type="button" on:click={() => deleteEmbeddedTodo(item)}>Remove</button>
-        </div>
-      {/each}
-      {#if todos.length > 0}
-        <div class="todo-section-label">File TODOs</div>
-      {/if}
-      {#each todos as item}
-        <div class:done={item.status === "done"} class="todo-item">
-          <input class="todo-checkbox" type="checkbox" checked={item.status === "done"} aria-label="Toggle TODO" on:change={() => toggleTodo(item)} />
-          <textarea
-            class="todo-text"
-            value={item.text}
-            aria-label="TODO description"
-            title="Edit TODO description"
-            placeholder="Describe this TODO"
-            rows="3"
-            on:blur={(event) => updateTodoText(item, event.currentTarget.value)}
-            on:keydown={(event) => handleTodoTextKeydown(event, item)}
-          ></textarea>
-          {#if item.scene_id}
-            <button class="todo-link compact" type="button" on:click={() => openFileTodo(item)}>Open Scene</button>
-          {:else}
-            <small>Project</small>
-          {/if}
-          <button class="todo-delete" type="button" on:click={() => deleteTodo(item)}>Delete</button>
-        </div>
-      {/each}
+      <Todo
+        {todos}
+        embeddedTodos={allEmbeddedTodos}
+        bind:newTodo
+        onAddTodo={addTodo}
+        onToggleTodo={toggleTodo}
+        onUpdateTodoText={updateTodoText}
+        onDeleteTodo={deleteTodo}
+        onTodoTextKeydown={handleTodoTextKeydown}
+        onOpenFileTodo={openFileTodo}
+        onToggleEmbeddedTodo={toggleEmbeddedTodo}
+        onUpdateEmbeddedTodoNote={updateEmbeddedTodoNote}
+        onOpenEmbeddedTodo={openEmbeddedTodo}
+        onDeleteEmbeddedTodo={deleteEmbeddedTodo}
+      />
     </div>
     <button class="pane-resize" type="button" aria-label="Resize TODO pane" on:keydown={(event) => handlePaneResizeKeydown(event, "todo")} on:mousedown={(event) => startPaneResize(event, "todo")}></button>
   </section>

@@ -19,7 +19,6 @@ from app.models import (
     ChatSession,
     CreateSceneRequest,
     CreateStructureNodeRequest,
-    CreateTodoRequest,
     DeleteMetadataEntryTypeRequest,
     DeleteMetadataFieldRequest,
     DeleteMetadataGroupRequest,
@@ -63,11 +62,9 @@ from app.models import (
     StructureNodeDeletePreview,
     TagsOverview,
     TagUsage,
-    TodoDocument,
     TodoItem,
     UpdateProjectSettingsRequest,
     UpdateTagScopeRequest,
-    UpdateTodoRequest,
     UpsertMetadataEntryTypeRequest,
     UpsertMetadataFieldRequest,
     UpsertMetadataGroupRequest,
@@ -89,6 +86,7 @@ from app.services.project.lore import LoreEntriesMixin
 from app.services.project.node_index import NodeIndex, NodeIndexEntry
 from app.services.project.prompts import PromptEntriesMixin
 from app.services.project.research import ResearchNotesMixin
+from app.services.project.todos import TodosMixin
 
 # Re-exported so the historic module-level names keep resolving for any
 # importer; the definitions live in project/tree_configs.py so the research
@@ -531,6 +529,7 @@ class ProjectService(
     PromptEntriesMixin,
     LoreEntriesMixin,
     ResearchNotesMixin,
+    TodosMixin,
 ):
     def __init__(self) -> None:
         self.root_path: Path | None = None
@@ -3057,50 +3056,6 @@ class ProjectService(
         ).strip()
         body_text = body.rstrip() + "\n" if body.strip() else ""
         self._atomic_write(path, f"---\n{front_matter}\n---\n\n{body_text}")
-
-    def read_todos(self) -> TodoDocument:
-        root = self._require_project()
-        data = self._read_yaml(root / "todo.yaml")
-        return TodoDocument.model_validate(data)
-
-    def create_todo(self, request: CreateTodoRequest) -> TodoDocument:
-        root = self._require_project()
-        todos = self.read_todos()
-        todos.items.append(
-            TodoItem(
-                id=self._new_id("todo"),
-                text=request.text,
-                scope=request.scope,
-                scene_id=request.scene_id,
-                anchor_id=request.anchor_id,
-            )
-        )
-        self._write_yaml(root / "todo.yaml", todos.model_dump())
-        return todos
-
-    def update_todo(self, todo_id: str, request: UpdateTodoRequest) -> TodoDocument:
-        root = self._require_project()
-        todos = self.read_todos()
-        for item in todos.items:
-            if item.id == todo_id:
-                if request.text is not None:
-                    item.text = request.text
-                if request.status is not None:
-                    item.status = request.status
-                if request.scope is not None:
-                    item.scope = request.scope
-                if request.scene_id is not None:
-                    item.scene_id = request.scene_id
-                self._write_yaml(root / "todo.yaml", todos.model_dump())
-                return todos
-        raise ProjectServiceError(f"TODO {todo_id} does not exist.", 404)
-
-    def delete_todo(self, todo_id: str) -> TodoDocument:
-        root = self._require_project()
-        todos = self.read_todos()
-        todos.items = [item for item in todos.items if item.id != todo_id]
-        self._write_yaml(root / "todo.yaml", todos.model_dump())
-        return todos
 
     def search(self, request: SearchRequest) -> SearchResponse:
         root = self._require_project()

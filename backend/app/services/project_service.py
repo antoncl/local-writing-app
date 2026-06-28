@@ -3547,6 +3547,7 @@ class ProjectService:
             entry.metadata,
             entry.body_markdown,
             extra={"inputs": inputs_payload} if inputs_payload else None,
+            omit_empty_metadata=True,
         )
         return self.read_prompt_entry(entry_id)
 
@@ -3592,6 +3593,7 @@ class ProjectService:
             metadata,
             request.body_markdown,
             extra={"inputs": inputs_payload},
+            omit_empty_metadata=True,
         )
         self._maybe_rename_node_file(path, request.title)
         return self.read_prompt_entry(node_id)
@@ -4146,13 +4148,20 @@ class ProjectService:
         body: str,
         *,
         extra: dict[str, Any] | None = None,
+        omit_empty_metadata: bool = False,
     ) -> None:
         front_matter_data: dict[str, Any] = {
             "id": node_id,
             "title": title,
             "entry_type": entry_type,
-            "metadata": metadata,
         }
+        # A prompt has almost nothing to say about itself — title + entry_type
+        # is essentially it — and its Jinja body is content, not metadata. So
+        # prompts drop the `metadata: {}` wrapper entirely when empty (#28). A
+        # non-empty map (a future model_hint etc.) is still written. Other kinds
+        # keep emitting `metadata` unconditionally.
+        if not (omit_empty_metadata and not metadata):
+            front_matter_data["metadata"] = metadata
         if extra:
             # Extra top-level front-matter keys (e.g. `inputs` on prompt entries).
             # Empty/None values are skipped to keep the file tidy.

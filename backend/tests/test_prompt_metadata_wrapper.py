@@ -1,0 +1,81 @@
+"""#28: a prompt's stored file drops the `metadata: {}` wrapper when empty.
+
+A prompt has almost nothing to say about itself (title + entry_type is
+essentially it) and its Jinja body is content, not metadata — so the empty
+`metadata: {}` map is no longer written. A non-empty map is still written,
+and reads tolerate the key being absent (it normalises back to {})."""
+
+from __future__ import annotations
+
+import unittest
+from pathlib import Path
+from tempfile import TemporaryDirectory
+
+from app.main import service as global_service
+from app.models import SavePromptEntryRequest
+
+
+class PromptMetadataWrapperTests(unittest.TestCase):
+    def setUp(self) -> None:
+        self.temp_dir = TemporaryDirectory()
+        self.root = Path(self.temp_dir.name) / "project"
+        global_service.__init__()
+        global_service.create_project(self.root, "Prompt Metadata Tests")
+
+    def tearDown(self) -> None:
+        self.temp_dir.cleanup()
+
+    def _raw_file(self, entry_id: str) -> str:
+        path = global_service._path_for_node_id(entry_id, "prompt")
+        return path.read_text(encoding="utf-8")
+
+    def test_created_prompt_omits_empty_metadata(self) -> None:
+        created = global_service.create_prompt_entry(
+            type("R", (), {"title": "No Wrapper", "entry_type": "general"})()
+        )
+        raw = self._raw_file(created.id)
+        self.assertNotIn("metadata:", raw)
+        # Read path still works: absent key normalises to {}.
+        self.assertEqual(global_service.read_prompt_entry(created.id).metadata, {})
+
+    def test_saved_prompt_omits_empty_metadata(self) -> None:
+        created = global_service.create_prompt_entry(
+            type("R", (), {"title": "Saved Empty", "entry_type": "general"})()
+        )
+        global_service.save_prompt_entry(
+            created.id,
+            SavePromptEntryRequest(
+                title="Saved Empty",
+                body_markdown="Hello {{ scene.title }}",
+                base_revision=created.revision,
+                entry_type="general",
+                metadata={},
+            ),
+        )
+        self.assertNotIn("metadata:", self._raw_file(created.id))
+
+    def test_non_empty_metadata_is_still_written(self) -> None:
+        created = global_service.create_prompt_entry(
+            type("R", (), {"title": "Has Meta", "entry_type": "general"})()
+        )
+        global_service.save_prompt_entry(
+            created.id,
+            SavePromptEntryRequest(
+                title="Has Meta",
+                body_markdown="Body",
+                base_revision=created.revision,
+                entry_type="general",
+                metadata={"author_note": "keep me"},
+            ),
+        )
+        raw = self._raw_file(created.id)
+        self.assertIn("metadata:", raw)
+        self.assertIn("author_note", raw)
+        self.assertEqual(
+            global_service.read_prompt_entry(created.id).metadata,
+            {"author_note": "keep me"},
+        )
+
+
+if __name__ == "__main__":
+    unittest.main()

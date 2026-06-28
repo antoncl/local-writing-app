@@ -151,7 +151,7 @@
         name: "",
         type: "text",
         label: "",
-        defaultValue: "",
+        defaultValue: undefined,
         options: "",
         required: false,
         targetKind: "",
@@ -193,6 +193,12 @@
       i !== index ? draft : { ...draft, ...patch },
     );
     dispatch("inputsChange");
+  }
+
+  // Default-value setter for the type-aware controls. An empty string from
+  // any control means "Unset" → stored as undefined (no default) (#24).
+  function setEntryInputDefault(index: number, raw: string): void {
+    updateEntryInput(index, { defaultValue: raw === "" ? undefined : raw });
   }
 
   function updateEntryInputNodePickerConfig(
@@ -298,12 +304,13 @@
     const next: Record<string, string> = { ...promptPreviewInputDrafts };
     for (const input of promptPreviewDeclaredInputs) {
       if (next[input.name] === undefined) {
+        // No boolean→"false" fallback: an input with no declared default
+        // seeds empty (unset), so the preview render fails fast on its
+        // reference instead of silently treating it as false (#24).
         next[input.name] =
           input.default !== undefined && input.default !== null
             ? String(input.default)
-            : input.type === "boolean"
-              ? "false"
-              : "";
+            : "";
         changed = true;
       }
     }
@@ -364,13 +371,10 @@
   function seedInputDrafts(declared: PromptInputDefinition[]): Record<string, string> {
     const drafts: Record<string, string> = {};
     for (const input of declared) {
-      if (input.default !== undefined && input.default !== null) {
-        drafts[input.name] = String(input.default);
-      } else if (input.type === "boolean") {
-        drafts[input.name] = "false";
-      } else {
-        drafts[input.name] = "";
-      }
+      // Unset stays empty regardless of type (no boolean→"false") so an
+      // undefined default surfaces as a fail-fast undefined reference (#24).
+      drafts[input.name] =
+        input.default !== undefined && input.default !== null ? String(input.default) : "";
     }
     return drafts;
   }
@@ -658,7 +662,7 @@
             </label>
             <label>
               Type
-              <select value={draft.type} on:change={(e) => updateEntryInput(index, { type: (e.currentTarget as HTMLSelectElement).value as import("./types").PromptInputType })}>
+              <select value={draft.type} on:change={(e) => updateEntryInput(index, { type: (e.currentTarget as HTMLSelectElement).value as import("./types").PromptInputType, defaultValue: undefined })}>
                 <option value="text">Text</option>
                 <option value="long_text">Long Text</option>
                 <option value="number">Number</option>
@@ -671,7 +675,28 @@
             </label>
             <label>
               Default
-              <input value={draft.defaultValue} placeholder="" on:input={(e) => updateEntryInput(index, { defaultValue: (e.currentTarget as HTMLInputElement).value })} />
+              {#if draft.type === "boolean"}
+                <!-- 3-state: Unset (no default) / True / False. Unset is a real
+                     persisted state, not a silent false (#24). -->
+                <select value={draft.defaultValue ?? ""} on:change={(e) => setEntryInputDefault(index, (e.currentTarget as HTMLSelectElement).value)}>
+                  <option value="">Unset</option>
+                  <option value="true">True</option>
+                  <option value="false">False</option>
+                </select>
+              {:else if draft.type === "number"}
+                <input type="number" value={draft.defaultValue ?? ""} placeholder="Unset" on:input={(e) => setEntryInputDefault(index, (e.currentTarget as HTMLInputElement).value)} />
+              {:else if draft.type === "select"}
+                <select value={draft.defaultValue ?? ""} on:change={(e) => setEntryInputDefault(index, (e.currentTarget as HTMLSelectElement).value)}>
+                  <option value="">Unset</option>
+                  {#each draft.options.split(",").map((s) => s.trim()).filter(Boolean) as opt}
+                    <option value={opt}>{opt}</option>
+                  {/each}
+                </select>
+              {:else}
+                <!-- text / long_text / entity_ref(_list): typed picker for refs
+                     is a follow-up; empty = Unset. -->
+                <input value={draft.defaultValue ?? ""} placeholder="Unset" on:input={(e) => setEntryInputDefault(index, (e.currentTarget as HTMLInputElement).value)} />
+              {/if}
             </label>
             {#if draft.type === "select"}
               <label class="prompt-input-options">

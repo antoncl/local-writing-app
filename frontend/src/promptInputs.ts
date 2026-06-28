@@ -13,7 +13,10 @@ export type EntryInputDraft = {
   name: string;
   type: PromptInputType;
   label: string;
-  defaultValue: string;
+  // `undefined` = no default (a real, persisted "unset" state — distinct
+  // from a boolean false or an empty string). Any other value is the
+  // author's explicit, type-matched default. See #24.
+  defaultValue: string | undefined;
   options: string; // comma-separated for select
   required: boolean;
   targetKind: "" | "scene" | "lore";
@@ -32,7 +35,13 @@ export function coerceInputValue(raw: string, type: PromptInputDefinition["type"
     const parsed = Number(trimmed);
     return Number.isFinite(parsed) ? parsed : trimmed;
   }
-  if (type === "boolean") return trimmed.toLowerCase() === "true";
+  if (type === "boolean") {
+    // Empty = unset → null, so the caller's `!== null` filter drops it and
+    // the template fails fast on an undefined reference instead of silently
+    // coercing "no choice" into false (#24).
+    if (trimmed === "") return null;
+    return trimmed.toLowerCase() === "true";
+  }
   if (type === "entity_ref_list") {
     if (!trimmed) return null;
     try {

@@ -252,7 +252,7 @@
       name: input.name,
       type: input.type,
       label: input.label ?? "",
-      defaultValue: input.default === undefined || input.default === null ? "" : String(input.default),
+      defaultValue: input.default === undefined || input.default === null ? undefined : String(input.default),
       options: (input.options ?? []).map((o) => o.value).join(", "),
       required: Boolean(input.required),
       targetKind: targetKindRaw === "scene" || targetKindRaw === "lore" ? (targetKindRaw as "scene" | "lore") : "",
@@ -269,6 +269,19 @@
       .replace(/[^a-z0-9]+/g, "_")
       .replace(/^_+|_+$/g, "")
       .replace(/^[0-9]/, "input_$&");
+  }
+
+  // Map an editor-side default string onto its stored, type-matched value.
+  // boolean → real bool, number → real number (falls back to the raw string
+  // if unparseable), everything else (text / long_text / select / refs) →
+  // string. Callers only invoke this for a defined, non-empty default (#24).
+  function defaultValueForStorage(raw: string, type: EntryInputDraft["type"]): import("./types").MetadataValue {
+    if (type === "boolean") return raw === "true";
+    if (type === "number") {
+      const n = Number(raw);
+      return Number.isFinite(n) ? n : raw;
+    }
+    return raw;
   }
 
   function entryInputDraftsToCanonical(drafts: EntryInputDraft[]): PromptInputDefinition[] {
@@ -288,7 +301,12 @@
           out.target = d.nodePickerConfig as unknown as Record<string, import("./types").MetadataValue>;
           return out;
         }
-        if (d.defaultValue !== "") out.default = d.defaultValue;
+        // Persist a type-matched default so the stored YAML carries a real
+        // boolean / number rather than a stringly value. `undefined` (and a
+        // stray "") means unset → omit `default` entirely (#24).
+        if (d.defaultValue !== undefined && d.defaultValue !== "") {
+          out.default = defaultValueForStorage(d.defaultValue, d.type);
+        }
         if (d.type === "select") {
           // Emit SelectOption objects; colors aren't editable from the
           // prompt-input draft surface today (Phase 3 adds them to the

@@ -300,7 +300,7 @@ class RelevantLoreHelperTests(_HelperFixtureBase):
         # Add a third character not referenced by anyone, then mention him
         # textually in Honor's body. Textual depth-1 should pull him in
         # even though no entity_ref links Honor → Pavel.
-        pavel = self._make_lore(
+        self._make_lore(
             title="Pavel Young",
             entry_type="character",
             metadata={"aliases": []},
@@ -335,13 +335,13 @@ class RelevantLoreHelperTests(_HelperFixtureBase):
     def test_textual_one_hop_is_depth_one_only(self) -> None:
         # Pavel mentions a third character "Anders" in his body. Anders
         # should NOT be pulled in — textual expansion stops at depth 1.
-        anders = self._make_lore(
+        self._make_lore(
             title="Anders Pierce",
             entry_type="character",
             metadata={"aliases": []},
             body="Some other captain.",
         )
-        pavel = self._make_lore(
+        self._make_lore(
             title="Pavel Young",
             entry_type="character",
             metadata={"aliases": []},
@@ -377,7 +377,6 @@ class RelevantLoreHelperTests(_HelperFixtureBase):
         # context. Scene one's summary mentions Honor's alias "Salamander",
         # but with an EMPTY journal we should only get the structural
         # entity_ref picks (characters: [Honor]).
-        from app.models import ChatSessionJournalEntry
         from app.services.ai.helpers import create_environment_for_project
 
         scene_one = self.service.read_scene(self.scene_one_node.scene_id)
@@ -437,7 +436,7 @@ class RelevantLoreHelperTests(_HelperFixtureBase):
 
         # Add Pavel; mention him in Honor's body. Without journal, Pavel
         # would arrive via textual depth-1. With empty journal, he should NOT.
-        pavel = self._make_lore(
+        self._make_lore(
             title="Pavel Young",
             entry_type="character",
             metadata={"aliases": []},

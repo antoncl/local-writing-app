@@ -6,7 +6,8 @@ from tempfile import TemporaryDirectory
 
 from fastapi.testclient import TestClient
 
-from app.main import app, service as global_service
+from app.main import app
+from app.main import service as global_service
 
 
 class ChatSessionEndpointTests(unittest.TestCase):
@@ -83,7 +84,7 @@ class ChatSessionEndpointTests(unittest.TestCase):
         self.assertEqual(body["created_at"], created["created_at"])
 
     def test_list_sorts_pinned_first_then_recent(self) -> None:
-        a = self.client.post("/api/chats", json={"title": "a"}).json()
+        self.client.post("/api/chats", json={"title": "a"})
         b = self.client.post("/api/chats", json={"title": "b"}).json()
         c = self.client.post("/api/chats", json={"title": "c"}).json()
         # Pin b; touch c last so it's most-recent in unpinned bucket.

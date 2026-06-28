@@ -1,8 +1,8 @@
 from __future__ import annotations
 
+import unittest
 from pathlib import Path
 from tempfile import TemporaryDirectory
-import unittest
 
 from app.models import (
     CreateLoreEntryRequest,
@@ -273,7 +273,7 @@ class MetadataValidationTests(unittest.TestCase):
     def test_counter_among_siblings_for_acts(self) -> None:
         from app.models import CreateStructureNodeRequest
 
-        first = self.service.create_structure_node(CreateStructureNodeRequest(title="Act 1", entry_type="act"))
+        self.service.create_structure_node(CreateStructureNodeRequest(title="Act 1", entry_type="act"))
         self.service.create_structure_node(CreateStructureNodeRequest(title="Act 2", entry_type="act"))
         third = self.service.create_structure_node(CreateStructureNodeRequest(title="Act 3", entry_type="act"))
         act_nodes = [child for child in third.root.children if child.type == "act"]
@@ -493,7 +493,7 @@ class MetadataValidationTests(unittest.TestCase):
         )
         structure = self.service.read_structure()
         act_node = next(child for child in structure.root.children if child.type == "act")
-        scene_a = self.service.create_scene(self._make_create_scene("Arrival", parent_id=act_node.id))
+        self.service.create_scene(self._make_create_scene("Arrival", parent_id=act_node.id))
         scene_b = self.service.create_scene(self._make_create_scene("Departure", parent_id=act_node.id))
         refreshed_b = self.service.read_scene(scene_b.id)
         self.service.save_scene(
@@ -2434,6 +2434,7 @@ class ReferenceResolutionTests(unittest.TestCase):
 
     def test_http_reference_routes(self) -> None:
         from fastapi.testclient import TestClient
+
         import app.main as app_main
 
         original_service = app_main.service

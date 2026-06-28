@@ -14,7 +14,24 @@ dependencies = [
   "uvicorn[standard]>=0.30.0"
 ]
 
+[project.optional-dependencies]
+dev = [
+  "ruff>=0.15",
+]
+
 [tool.setuptools.packages.find]
 where = ["."]
 include = ["app*"]
+
+[tool.ruff]
+target-version = "py311"
+
+[tool.ruff.lint]
+# Bug-catchers (F, B) first; the rest keep imports/idioms tidy.
+# E501 (line length) is stylistic, not a bug source — left off.
+select = ["E", "F", "W", "I", "B", "UP", "C4", "SIM"]
+ignore = [
+  "E501",   # line length — stylistic, not a bug source
+  "UP042",  # str+Enum -> StrEnum changes str(member); the mix is deliberate
+]
 

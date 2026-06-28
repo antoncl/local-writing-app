@@ -13,10 +13,10 @@ import unittest
 from pathlib import Path
 from tempfile import TemporaryDirectory
 
-import yaml
 from fastapi.testclient import TestClient
 
-from app.main import app, service as global_service
+from app.main import app
+from app.main import service as global_service
 from app.models import CreateLoreEntryRequest, SaveLoreEntryRequest
 
 
@@ -78,9 +78,7 @@ class MoveLoreNoteToResearchTests(unittest.TestCase):
         self.assertIn("- labor", content)
         self.assertIn("Mills employed children from age 8.", content)
         # The source lore_note file is gone.
-        lore_files = [
-            p for p in (self.root / "lore").glob("*.md")
-        ]
+        lore_files = list((self.root / "lore").glob("*.md"))
         self.assertEqual(
             [p.read_text(encoding="utf-8") for p in lore_files
              if "Lancashire mills" in p.read_text(encoding="utf-8")],

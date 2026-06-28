@@ -14,7 +14,6 @@ from fastapi.testclient import TestClient
 
 from app.main import app
 
-
 # --- httpx fake plumbing (copy of test_ai_profiles_concrete.py's helpers) ---
 
 
@@ -49,7 +48,9 @@ class _FakeAsyncClient:
 
 
 def _patch_module_httpx(monkeypatch, module: str, **kwargs):
-    factory = lambda **kw: _FakeAsyncClient(**kwargs, **kw)
+    def factory(**kw):
+        return _FakeAsyncClient(**kwargs, **kw)
+
     monkeypatch.setattr(f"{module}.httpx.AsyncClient", factory)
 
 

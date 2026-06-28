@@ -1,10 +1,10 @@
 from __future__ import annotations
 
-from copy import deepcopy
-from datetime import datetime, timezone
 import hashlib
 import re
 import uuid
+from copy import deepcopy
+from datetime import UTC, datetime
 from pathlib import Path
 from tempfile import NamedTemporaryFile
 from typing import Any
@@ -17,12 +17,11 @@ from app.models import (
     AIInvocationList,
     AssistantEntry,
     Backlink,
+    BacklinksResponse,
     ChatSession,
     CreateAIInvocationRequest,
-    SaveAssistantEntryRequest,
-    SaveChatSessionRequest,
-    BacklinksResponse,
     CreateSceneRequest,
+    CreateStructureNodeRequest,
     CreateTodoRequest,
     DeleteMetadataEntryTypeRequest,
     DeleteMetadataFieldRequest,
@@ -32,64 +31,69 @@ from app.models import (
     KnownTags,
     LoreEntry,
     MergeTagsRequest,
-    MetadataFieldDefinition,
     MetadataDefinitionSource,
-    NodePickerConfig,
-    ScopedTag,
-    TagsOverview,
-    TagUsage,
-    UpdateTagScopeRequest,
+    MetadataFieldDefinition,
     MetadataSchema,
     MetadataSchemaLayer,
     MetadataSchemaLayers,
     MetadataSchemaOverview,
+    MetadataValue,
+    MoveLoreNoteToResearchResponse,
     MoveMetadataFieldRequest,
+    NodePickerConfig,
     ProjectInfo,
     ProjectNode,
-    PromptEntry,
-    MoveLoreNoteToResearchResponse,
     ProjectValidation,
-    ResearchNote,
-    SaveResearchNoteRequest,
+    PromptEntry,
     ReferenceCandidate,
     ReferenceCandidatesResponse,
-    ReferenceResolveRequest,
     ReferenceResolveResponse,
     RenameMetadataFieldRequest,
+    ResearchNote,
+    SaveAssistantEntryRequest,
+    SaveChatSessionRequest,
     SaveLoreEntryRequest,
-    SavePromptEntryRequest,
     SaveProjectNodeRequest,
+    SavePromptEntryRequest,
+    SaveResearchNoteRequest,
     SaveSceneRequest,
     Scene,
+    ScopedTag,
     SearchHit,
     SearchRequest,
     SearchResponse,
+    SetFieldOrderRequest,
+    SetGroupApplicationsRequest,
     StructureDocument,
     StructureNode,
     StructureNodeDeletePreview,
+    TagsOverview,
+    TagUsage,
     TodoDocument,
     TodoItem,
-    SetGroupApplicationsRequest,
+    UpdateProjectSettingsRequest,
+    UpdateTagScopeRequest,
+    UpdateTodoRequest,
     UpsertMetadataEntryTypeRequest,
     UpsertMetadataFieldRequest,
     UpsertMetadataGroupRequest,
-    UpdateProjectSettingsRequest,
-    UpdateTodoRequest,
 )
 from app.services.markdown_validation import validate_scene_markdown
-from app.services.migrations import CURRENT_VERSION as PROJECT_SCHEMA_VERSION, migrate_project
+from app.services.migrations import CURRENT_VERSION as PROJECT_SCHEMA_VERSION
+from app.services.migrations import migrate_project
 from app.services.project.assistants import AssistantEntriesMixin
 from app.services.project.chats import ChatSessionsMixin
+
 # Re-exported so the historic import path
 # `from app.services.project_service import ProjectServiceError` keeps working.
 from app.services.project.errors import ProjectServiceError
 from app.services.project.lore import LoreEntriesMixin
+
 # Re-exported so existing `NodeIndex` / `NodeIndexEntry` references in this
 # module (and any importers) keep resolving after the move.
 from app.services.project.node_index import NodeIndex, NodeIndexEntry
 from app.services.project.prompts import PromptEntriesMixin
 from app.services.tree_structure import TreeConfig, TreeStructureService
-
 
 MANUSCRIPT_TREE_CONFIG = TreeConfig(
     yaml_filename="manuscript.structure.yaml",
@@ -956,14 +960,8 @@ class ProjectService(
             layer_label="Built-in",
             built_in=True,
         )
-        entry_type_sources = {
-            entry_type_id: built_in_source
-            for entry_type_id in data.get("entry_types", {})
-        }
-        field_sources = {
-            field_id: built_in_source
-            for field_id in data.get("fields", {})
-        }
+        entry_type_sources = dict.fromkeys(data.get("entry_types", {}), built_in_source)
+        field_sources = dict.fromkeys(data.get("fields", {}), built_in_source)
         layers = self.read_metadata_schema_layers().layers
         layers_by_path = {Path(layer.schema_path): layer for layer in layers}
 
@@ -2396,9 +2394,7 @@ class ProjectService(
                     continue
                 value = metadata.get(field_id)
                 matched = False
-                if field.type == "entity_ref" and isinstance(value, str) and value == target_id:
-                    matched = True
-                elif field.type == "entity_ref_list" and isinstance(value, list) and target_id in value:
+                if field.type == "entity_ref" and isinstance(value, str) and value == target_id or field.type == "entity_ref_list" and isinstance(value, list) and target_id in value:
                     matched = True
                 if matched:
                     backlinks.append(
@@ -2551,12 +2547,15 @@ class ProjectService(
                 if field is None:
                     continue
                 value = metadata.get(field_id)
-                hits_target = False
-                if field.type == "entity_ref" and isinstance(value, str) and value in target_ids:
-                    hits_target = True
-                elif field.type == "entity_ref_list" and isinstance(value, list):
-                    if any(isinstance(item, str) and item in target_ids for item in value):
-                        hits_target = True
+                hits_target = (
+                    field.type == "entity_ref"
+                    and isinstance(value, str)
+                    and value in target_ids
+                ) or (
+                    field.type == "entity_ref_list"
+                    and isinstance(value, list)
+                    and any(isinstance(item, str) and item in target_ids for item in value)
+                )
                 if hits_target:
                     backlinks.append(
                         Backlink(
@@ -2572,7 +2571,7 @@ class ProjectService(
         return backlinks
 
     def delete_structure_node(self, node_id: str) -> StructureDocument:
-        root = self._require_project()
+        self._require_project()
         structure = self.read_structure()
         node = TreeStructureService.find_node(structure, node_id)
         if node is None:
@@ -2621,7 +2620,7 @@ class ProjectService(
         return self._research_tree().read()
 
     def create_research_node(self, request: CreateStructureNodeRequest) -> StructureDocument:
-        root = self._require_project()
+        self._require_project()
         schema = self.read_metadata_schema()
         entry_type = schema.entry_types.get(request.entry_type)
         if entry_type is None:
@@ -2882,7 +2881,7 @@ class ProjectService(
             metadata=clean_metadata,
         )
 
-    def move_lore_note_to_research(self, lore_id: str) -> "MoveLoreNoteToResearchResponse":
+    def move_lore_note_to_research(self, lore_id: str) -> MoveLoreNoteToResearchResponse:
         """Convert a `lore_note` entry into a research/note (slice 5 of
         docs/research-strategy.md).
 
@@ -2962,7 +2961,7 @@ class ProjectService(
             tree.write(document)
 
     def move_structure_node(self, node_id: str, target_parent_id: str, position: int) -> StructureDocument:
-        root_path = self._require_project()
+        self._require_project()
         structure = self.read_structure()
 
         node = TreeStructureService.find_node(structure, node_id)
@@ -2993,7 +2992,7 @@ class ProjectService(
         return self.read_structure()
 
     def rename_structure_node(self, node_id: str, title: str) -> StructureDocument:
-        root = self._require_project()
+        self._require_project()
         structure = self.read_structure()
         node = TreeStructureService.find_node(structure, node_id)
         if node is None:
@@ -3340,7 +3339,7 @@ class ProjectService(
         self._write_yaml(manifest_path, manifest)
 
     def delete_scene(self, scene_id: str) -> StructureDocument:
-        root = self._require_project()
+        self._require_project()
         path = self._path_for_node_id(scene_id, "scene")
         node_id = self._node_id_for_path(path)
         if path.exists():
@@ -3382,7 +3381,7 @@ class ProjectService(
     def _utcnow_iso() -> str:
         # Microsecond precision keeps sort order stable across rapid back-to-back
         # saves (e.g. user creates two chats and saves them in the same second).
-        return datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%S.%fZ")
+        return datetime.now(UTC).strftime("%Y-%m-%dT%H:%M:%S.%fZ")
 
     def compute_project_cost(self) -> dict:
         """Sum cost_usd across `ai_invocations.yaml` and group by
@@ -4102,7 +4101,7 @@ class ProjectService(
         self,
         metadata: dict[str, Any],
         schema: MetadataSchema,
-        node_index: "NodeIndex",
+        node_index: NodeIndex,
     ) -> dict[str, Any]:
         """Return a copy of ``metadata`` with any entity_ref / entity_ref_list
         values pointing at non-existent (or wrong-kind / wrong-entry-type)
@@ -4124,9 +4123,7 @@ class ProjectService(
             if cfg.kinds and target.kind not in cfg.kinds:
                 return False
             allowed = cfg.entry_types.get(target.kind, []) if cfg.entry_types else []
-            if allowed and target.entry_type not in allowed:
-                return False
-            return True
+            return not allowed or target.entry_type in allowed
 
         cleaned = dict(metadata)
         for field_id, value in metadata.items():
@@ -4136,11 +4133,10 @@ class ProjectService(
             if field.type == "entity_ref":
                 if value not in (None, "") and not is_valid_ref(value, field):
                     cleaned[field_id] = ""
-            elif field.type == "entity_ref_list":
-                if isinstance(value, list):
-                    filtered = [item for item in value if is_valid_ref(item, field)]
-                    if len(filtered) != len(value):
-                        cleaned[field_id] = filtered
+            elif field.type == "entity_ref_list" and isinstance(value, list):
+                filtered = [item for item in value if is_valid_ref(item, field)]
+                if len(filtered) != len(value):
+                    cleaned[field_id] = filtered
         return cleaned
 
     def _purge_metadata_refs(
@@ -4163,12 +4159,11 @@ class ProjectService(
                 if isinstance(value, str) and value in purge_ids:
                     cleaned[field_id] = ""
                     changed = True
-            elif field.type == "entity_ref_list":
-                if isinstance(value, list):
-                    filtered = [item for item in value if not (isinstance(item, str) and item in purge_ids)]
-                    if len(filtered) != len(value):
-                        cleaned[field_id] = filtered
-                        changed = True
+            elif field.type == "entity_ref_list" and isinstance(value, list):
+                filtered = [item for item in value if not (isinstance(item, str) and item in purge_ids)]
+                if len(filtered) != len(value):
+                    cleaned[field_id] = filtered
+                    changed = True
         return cleaned, changed
 
     def _purge_references_to(self, purge_ids: set[str]) -> None:
@@ -4566,7 +4561,7 @@ class ProjectService(
         return any(self._remove_scene_node(child, scene_id) for child in node.children)
 
     def _update_scene_title_in_structure(self, scene_id: str, title: str) -> None:
-        root = self._require_project()
+        self._require_project()
         structure = self.read_structure()
         if self._rename_scene_node(structure.root, scene_id, title):
             self._manuscript_tree().write(structure)

@@ -838,6 +838,51 @@ class MetadataValidationTests(unittest.TestCase):
         manifest = self.service._read_yaml(self.root / "project.yaml")
         self.assertEqual(manifest["settings"]["projects_base_folder"], str(updated_base.resolve()))
 
+    def test_project_settings_clear_ai_provider_and_class_to_default(self) -> None:
+        # Set concrete values, then clear them back to "(machine default)".
+        self.service.update_project_settings(
+            UpdateProjectSettingsRequest(
+                ai_default_provider="anthropic",
+                ai_default_model_class="balanced",
+            )
+        )
+        manifest = self.service._read_yaml(self.root / "project.yaml")
+        self.assertEqual(manifest["settings"]["ai"]["default_provider"], "anthropic")
+        self.assertEqual(manifest["settings"]["ai"]["default_model_class"], "balanced")
+
+        # An explicit null (what the frontend sends for "(machine default)" /
+        # "(unset)") clears the value rather than being treated as no-change.
+        project = self.service.update_project_settings(
+            UpdateProjectSettingsRequest(
+                ai_default_provider=None,
+                ai_default_model_class=None,
+            )
+        )
+        self.assertIsNone(project.ai_default_provider)
+        self.assertIsNone(project.ai_default_model_class)
+        manifest = self.service._read_yaml(self.root / "project.yaml")
+        self.assertIsNone(manifest["settings"]["ai"]["default_provider"])
+        self.assertIsNone(manifest["settings"]["ai"]["default_model_class"])
+
+    def test_project_settings_unset_ai_field_is_left_unchanged(self) -> None:
+        # Partial update: a request that omits the AI provider/class fields must
+        # not disturb previously-saved values (existing callers pass only
+        # ai_policy and rely on this).
+        self.service.update_project_settings(
+            UpdateProjectSettingsRequest(
+                ai_default_provider="anthropic",
+                ai_default_model_class="balanced",
+            )
+        )
+
+        project = self.service.update_project_settings(
+            UpdateProjectSettingsRequest(ai_policy="cloud-allowed")
+        )
+
+        self.assertEqual(project.ai_policy, "cloud-allowed")
+        self.assertEqual(project.ai_default_provider, "anthropic")
+        self.assertEqual(project.ai_default_model_class, "balanced")
+
     def test_project_settings_rejects_base_folder_outside_project_ancestry(self) -> None:
         updated_base = Path(self.temp_dir.name) / "new-base"
         updated_base.mkdir()

@@ -164,11 +164,18 @@ class ProjectLifecycleMixin:
         ai_settings = settings.get("ai")
         if not isinstance(ai_settings, dict):
             ai_settings = {}
+        # Partial update: only touch a field the caller explicitly sent. An
+        # explicit null (or empty string) clears the value back to the machine
+        # default; a field left unset is left unchanged. `model_fields_set`
+        # distinguishes "absent" from "present and null" — the frontend always
+        # sends all three AI fields, so selecting "(machine default)" reaches
+        # here as an explicit null and clears, instead of being a silent no-op.
+        fields_set = request.model_fields_set
         if request.ai_policy is not None:
             ai_settings["policy"] = request.ai_policy
-        if request.ai_default_provider is not None:
+        if "ai_default_provider" in fields_set:
             ai_settings["default_provider"] = request.ai_default_provider or None
-        if request.ai_default_model_class is not None:
+        if "ai_default_model_class" in fields_set:
             ai_settings["default_model_class"] = request.ai_default_model_class or None
         if ai_settings:
             settings["ai"] = ai_settings

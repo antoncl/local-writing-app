@@ -3907,6 +3907,48 @@ button.schema-field-row:hover {
   margin-top: 8px;
 }
 
+/* Inputs-side adoption of the schema-field-row collapsed pattern (#37).
+   The button itself is the shared .schema-field-row; this rule overlays
+   the inputs-specific dragging fade so the visual matches the previous
+   prompt-input-row treatment. drop-before / drop-after / hover come for
+   free from .schema-field-row. */
+.entry-inputs-editor .prompt-input-row-collapsed.dragging {
+  opacity: 0.45;
+}
+
+/* Compact accessor pill rendered in the collapsed row's meta strip.
+   Distinct from .prompt-input-accessor (the larger pill that lived in
+   the always-expanded header strip and is no longer used). */
+.prompt-input-accessor-mini {
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 10.5px;
+  color: var(--text-3);
+  background: var(--inset);
+  border: 1px solid var(--divider);
+  border-radius: 4px;
+  padding: 1px 6px;
+}
+
+/* "req" badge surfaced in the collapsed row so the author can tell at a
+   glance which inputs are required without expanding them. */
+.prompt-input-required-badge {
+  font-size: 9.5px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  padding: 1px 6px;
+  border-radius: 999px;
+  background: var(--accent-soft, color-mix(in srgb, var(--accent) 14%, var(--surface)));
+  color: var(--accent-strong, var(--accent));
+}
+
+/* Inline editor body, opens under the collapsed row when the user
+   clicks to expand. Reuses .schema-field-inline chrome (border, accent
+   stripe, padding); this rule keeps the inputs grid working inside it. */
+.entry-inputs-editor .prompt-input-inline {
+  margin-top: 2px;
+}
+
 /* Child combinator: this styling is for the row's primary labels
    (ID, Type, Default, etc.) only. Without `>`, the rule cascaded into
    deeply nested labels in NodePickerConfigEditor's tree, turning

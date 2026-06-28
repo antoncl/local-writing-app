@@ -19,6 +19,7 @@
   import PromptInputField from "./PromptInputField.svelte";
   import SelectOptionsEditor from "./SelectOptionsEditor.svelte";
   import { api } from "./api";
+  import { DEFAULT_FIELD_GLYPH } from "./fieldIcons";
   import { formatCostEur, formatTokens } from "./money";
   import { coerceInputValue, type EntryInputDraft } from "./promptInputs";
   import type {
@@ -143,27 +144,62 @@
 
   // --- Entry-inputs declaration editor ---
   let entryInputsExpanded = false;
+  // Which input row is currently expanded for editing. Matches the schema
+  // field-row pattern (App.svelte: expandedSchemaFieldId): one row open at a
+  // time, click anywhere on a collapsed row to expand it. Inputs whose
+  // clientId is the expanded one render their full editor body; the rest
+  // render the compact row chrome only. context_pick rows ignore this state
+  // — they own their entire row via NodePickerConfigEditor mode="prompt".
+  let expandedInputClientId: string | null = null;
+
+  function toggleInputRow(clientId: string): void {
+    expandedInputClientId = expandedInputClientId === clientId ? null : clientId;
+  }
+
+  // Short label for the type chip in the collapsed row. Mirrors the
+  // dropdown options in the expanded editor below.
+  const INPUT_TYPE_LABEL: Record<string, string> = {
+    text: "Text",
+    long_text: "Long Text",
+    number: "Number",
+    boolean: "Boolean",
+    select: "Select",
+    entity_ref: "Entity Reference",
+    entity_ref_list: "Entity Reference List",
+    context_pick: "Context Picker",
+    color: "Colour",
+  };
+
+  function inputIconClass(type: string): string {
+    const glyph = DEFAULT_FIELD_GLYPH[type as keyof typeof DEFAULT_FIELD_GLYPH] ?? "letter-case";
+    return `ti ti-${glyph}`;
+  }
 
   function addEntryInput(): void {
-    entryInputDrafts = [
-      ...entryInputDrafts,
-      {
-        clientId: nextInputDraftId(),
-        name: "",
-        type: "text",
-        label: "",
-        defaultValue: undefined,
-        options: [],
-        required: false,
-        nodePickerConfig: { kinds: [], presets: [] },
-        nameDerived: true,
-      },
-    ];
+    const draft: EntryInputDraft = {
+      clientId: nextInputDraftId(),
+      name: "",
+      type: "text",
+      label: "",
+      defaultValue: undefined,
+      options: [],
+      required: false,
+      nodePickerConfig: { kinds: [], presets: [] },
+      nameDerived: true,
+    };
+    entryInputDrafts = [...entryInputDrafts, draft];
+    // Auto-expand new rows so the empty grid is visible immediately —
+    // matches the field-row editor's create-then-edit-inline flow.
+    expandedInputClientId = draft.clientId;
     dispatch("inputsChange");
   }
 
   function removeEntryInput(index: number): void {
+    const removed = entryInputDrafts[index];
     entryInputDrafts = entryInputDrafts.filter((_, i) => i !== index);
+    if (removed && expandedInputClientId === removed.clientId) {
+      expandedInputClientId = null;
+    }
     dispatch("inputsChange");
   }
 
@@ -618,121 +654,124 @@
           />
         </div>
       {:else}
-        <div
-          class="prompt-input-row"
-          role="group"
+        {@const isExpanded = expandedInputClientId === draft.clientId}
+        <!-- Collapsed-by-default row mirroring App.svelte's schema-field-row
+             (decisions-inputs-fields-uniformity / #37). Click to expand into
+             the inline editor below; new rows auto-expand. Shared sfr-*
+             styling keeps the visual treatment identical across surfaces. -->
+        <button
+          class="schema-field-row prompt-input-row-collapsed"
+          type="button"
+          class:expanded={isExpanded}
           class:dragging={inputDragFromIndex === index}
           class:drop-before={inputDragOverIndex === index && inputDragOverPosition === "before"}
           class:drop-after={inputDragOverIndex === index && inputDragOverPosition === "after"}
+          draggable={entryInputDrafts.length > 1}
+          aria-expanded={isExpanded}
+          on:click={() => toggleInputRow(draft.clientId)}
+          on:dragstart={(e) => handleInputDragStart(e, index)}
+          on:dragend={handleInputDragEnd}
           on:dragover={(e) => handleInputDragOver(e, index)}
           on:drop={(e) => handleInputDrop(e, index)}
         >
-          <span
-            class="tree-handle prompt-input-handle"
-            draggable="true"
-            role="button"
-            tabindex="-1"
-            aria-label="Drag to reorder"
-            on:dragstart={(e) => handleInputDragStart(e, index)}
-            on:dragend={handleInputDragEnd}
-          >⋮⋮</span>
-          <!-- Header strip: accessor pill aligned right, out of the grid so
-               the grid row height stays constant whether or not the computed
-               id has materialized (see #26). Always rendered (min-height
-               reserved) so the row doesn't jump when the id first appears. -->
-          <div class="prompt-input-header">
+          <span class="sfr-grip" title="Drag to reorder" aria-hidden="true"><i class="ti ti-grip-vertical"></i></span>
+          <span class="sfr-tile"><i class={inputIconClass(draft.type)} aria-hidden="true"></i></span>
+          <span class="sfr-name">{draft.label || draft.name || "(unnamed input)"}</span>
+          <span class="sfr-typechip">{INPUT_TYPE_LABEL[draft.type] ?? draft.type}</span>
+          <span class="sfr-meta">
             {#if draft.name}
-              <button
-                type="button"
-                class="prompt-input-accessor"
-                title="Click to copy"
-                on:click|preventDefault={() => navigator.clipboard?.writeText(`{{ input.${draft.name} }}`).catch(() => {})}
-              ><code>&lbrace;&lbrace; input.{draft.name} &rbrace;&rbrace;</code></button>
+              <code class="prompt-input-accessor-mini">&lbrace;&lbrace; input.{draft.name} &rbrace;&rbrace;</code>
+            {/if}
+            {#if draft.required}<span class="prompt-input-required-badge" title="Required">req</span>{/if}
+            <i class={`ti sfr-cog ${isExpanded ? "ti-chevron-up" : "ti-settings"}`} aria-hidden="true"></i>
+          </span>
+        </button>
+        {#if isExpanded}
+          <div class="schema-field-inline prompt-input-inline">
+            <div class="prompt-input-grid">
+              <label>
+                Label
+                <input value={draft.label} placeholder="Topic to brainstorm" on:input={(e) => updateEntryInputLabel(index, (e.currentTarget as HTMLInputElement).value)} />
+              </label>
+              <label>
+                ID
+                <input value={draft.name} placeholder="topic_to_brainstorm" on:input={(e) => updateEntryInputName(index, (e.currentTarget as HTMLInputElement).value)} />
+              </label>
+              <label>
+                Type
+                <select value={draft.type} on:change={(e) => updateEntryInput(index, { type: (e.currentTarget as HTMLSelectElement).value as import("./types").PromptInputType, defaultValue: undefined })}>
+                  <option value="text">Text</option>
+                  <option value="long_text">Long Text</option>
+                  <option value="number">Number</option>
+                  <option value="boolean">Boolean</option>
+                  <option value="select">Select</option>
+                  <option value="entity_ref">Entity Reference</option>
+                  <option value="entity_ref_list">Entity Reference List</option>
+                  <option value="context_pick">Context Picker</option>
+                </select>
+              </label>
+              <label>
+                Default
+                {#if draft.type === "boolean"}
+                  <!-- 3-state: Unset (no default) / True / False. Unset is a real
+                       persisted state, not a silent false (#24). -->
+                  <select value={draft.defaultValue ?? ""} on:change={(e) => setEntryInputDefault(index, (e.currentTarget as HTMLSelectElement).value)}>
+                    <option value="">Unset</option>
+                    <option value="true">True</option>
+                    <option value="false">False</option>
+                  </select>
+                {:else if draft.type === "number"}
+                  <input type="number" value={draft.defaultValue ?? ""} placeholder="Unset" on:input={(e) => setEntryInputDefault(index, (e.currentTarget as HTMLInputElement).value)} />
+                {:else if draft.type === "select"}
+                  <select value={draft.defaultValue ?? ""} on:change={(e) => setEntryInputDefault(index, (e.currentTarget as HTMLSelectElement).value)}>
+                    <option value="">Unset</option>
+                    {#each draft.options.filter((o) => o.value.trim() !== "") as opt (opt.value)}
+                      <option value={opt.value}>{opt.label || opt.value}</option>
+                    {/each}
+                  </select>
+                {:else}
+                  <!-- text / long_text / entity_ref(_list): typed picker for refs
+                       is a follow-up; empty = Unset. -->
+                  <input value={draft.defaultValue ?? ""} placeholder="Unset" on:input={(e) => setEntryInputDefault(index, (e.currentTarget as HTMLInputElement).value)} />
+                {/if}
+              </label>
+              <label class="prompt-input-required">
+                <input type="checkbox" checked={draft.required} on:change={(e) => updateEntryInput(index, { required: (e.currentTarget as HTMLInputElement).checked })} />
+                Required
+              </label>
+              <button type="button" class="prompt-input-remove" title="Remove input" on:click={() => removeEntryInput(index)}>×</button>
+            </div>
+            {#if draft.type === "select"}
+              <!-- Row-per-option editor — same SelectOptionsEditor the
+                   metadata-field side uses. Replaces the comma-string text
+                   box that round-tripped-lost labels and colors. See
+                   decisions-inputs-fields-uniformity. -->
+              <div class="prompt-input-options-editor">
+                <SelectOptionsEditor
+                  options={draft.options}
+                  showMigrationHint={false}
+                  on:change={(event) => updateEntryInput(index, { options: event.detail.options })}
+                />
+              </div>
+            {/if}
+            {#if draft.type === "entity_ref" || draft.type === "entity_ref_list"}
+              <!-- Picker constraint config — same NodePickerConfigEditor the
+                   metadata-field side uses (App.svelte:4666). mode="field"
+                   hides presets + scene binding (entity_ref doesn't have
+                   those concepts) and the Multiple toggle (cardinality is
+                   implied by the type literal). See decisions-inputs-fields-
+                   uniformity / #40. -->
+              <div class="prompt-input-picker">
+                <NodePickerConfigEditor
+                  mode="field"
+                  config={draft.nodePickerConfig}
+                  metadataSchema={metadataSchema}
+                  on:change={(event) => updateEntryInputNodePickerConfig(index, event.detail.config)}
+                />
+              </div>
             {/if}
           </div>
-          <div class="prompt-input-grid">
-            <label>
-              Label
-              <input value={draft.label} placeholder="Topic to brainstorm" on:input={(e) => updateEntryInputLabel(index, (e.currentTarget as HTMLInputElement).value)} />
-            </label>
-            <label>
-              ID
-              <input value={draft.name} placeholder="topic_to_brainstorm" on:input={(e) => updateEntryInputName(index, (e.currentTarget as HTMLInputElement).value)} />
-            </label>
-            <label>
-              Type
-              <select value={draft.type} on:change={(e) => updateEntryInput(index, { type: (e.currentTarget as HTMLSelectElement).value as import("./types").PromptInputType, defaultValue: undefined })}>
-                <option value="text">Text</option>
-                <option value="long_text">Long Text</option>
-                <option value="number">Number</option>
-                <option value="boolean">Boolean</option>
-                <option value="select">Select</option>
-                <option value="entity_ref">Entity Reference</option>
-                <option value="entity_ref_list">Entity Reference List</option>
-                <option value="context_pick">Context Picker</option>
-              </select>
-            </label>
-            <label>
-              Default
-              {#if draft.type === "boolean"}
-                <!-- 3-state: Unset (no default) / True / False. Unset is a real
-                     persisted state, not a silent false (#24). -->
-                <select value={draft.defaultValue ?? ""} on:change={(e) => setEntryInputDefault(index, (e.currentTarget as HTMLSelectElement).value)}>
-                  <option value="">Unset</option>
-                  <option value="true">True</option>
-                  <option value="false">False</option>
-                </select>
-              {:else if draft.type === "number"}
-                <input type="number" value={draft.defaultValue ?? ""} placeholder="Unset" on:input={(e) => setEntryInputDefault(index, (e.currentTarget as HTMLInputElement).value)} />
-              {:else if draft.type === "select"}
-                <select value={draft.defaultValue ?? ""} on:change={(e) => setEntryInputDefault(index, (e.currentTarget as HTMLSelectElement).value)}>
-                  <option value="">Unset</option>
-                  {#each draft.options.filter((o) => o.value.trim() !== "") as opt (opt.value)}
-                    <option value={opt.value}>{opt.label || opt.value}</option>
-                  {/each}
-                </select>
-              {:else}
-                <!-- text / long_text / entity_ref(_list): typed picker for refs
-                     is a follow-up; empty = Unset. -->
-                <input value={draft.defaultValue ?? ""} placeholder="Unset" on:input={(e) => setEntryInputDefault(index, (e.currentTarget as HTMLInputElement).value)} />
-              {/if}
-            </label>
-            <label class="prompt-input-required">
-              <input type="checkbox" checked={draft.required} on:change={(e) => updateEntryInput(index, { required: (e.currentTarget as HTMLInputElement).checked })} />
-              Required
-            </label>
-            <button type="button" class="prompt-input-remove" title="Remove input" on:click={() => removeEntryInput(index)}>×</button>
-          </div>
-          {#if draft.type === "select"}
-            <!-- Row-per-option editor — same SelectOptionsEditor the
-                 metadata-field side uses. Replaces the comma-string text
-                 box that round-tripped-lost labels and colors. See
-                 decisions-inputs-fields-uniformity. -->
-            <div class="prompt-input-options-editor">
-              <SelectOptionsEditor
-                options={draft.options}
-                showMigrationHint={false}
-                on:change={(event) => updateEntryInput(index, { options: event.detail.options })}
-              />
-            </div>
-          {/if}
-          {#if draft.type === "entity_ref" || draft.type === "entity_ref_list"}
-            <!-- Picker constraint config — same NodePickerConfigEditor the
-                 metadata-field side uses (App.svelte:4666). mode="field"
-                 hides presets + scene binding (entity_ref doesn't have
-                 those concepts) and the Multiple toggle (cardinality is
-                 implied by the type literal). See decisions-inputs-fields-
-                 uniformity / #40. -->
-            <div class="prompt-input-picker">
-              <NodePickerConfigEditor
-                mode="field"
-                config={draft.nodePickerConfig}
-                metadataSchema={metadataSchema}
-                on:change={(event) => updateEntryInputNodePickerConfig(index, event.detail.config)}
-              />
-            </div>
-          {/if}
-        </div>
+        {/if}
       {/if}
     {/each}
     <div class="entry-inputs-add">

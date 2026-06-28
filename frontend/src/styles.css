@@ -3404,14 +3404,14 @@ button.schema-field-row:hover {
 .prompt-preview-resize {
   height: 6px;
   cursor: ns-resize;
-  background: #e6eceb;
+  background: var(--panel);
   border-top: 1px solid var(--border);
   border-bottom: 1px solid var(--border);
   flex-shrink: 0;
 }
 
 .prompt-preview-resize:hover {
-  background: #d4e0dc;
+  background: var(--tier2);
 }
 
 .prompt-preview-pane {
@@ -3443,7 +3443,7 @@ button.schema-field-row:hover {
 }
 
 .prompt-preview-toggle:hover {
-  color: #1d4d36;
+  color: var(--accent-deep);
 }
 
 .prompt-preview-toggle > strong {
@@ -3465,8 +3465,8 @@ button.schema-field-row:hover {
   justify-content: space-between;
   gap: 10px;
   padding: 6px 12px;
-  background: #e8efed;
-  border-bottom: 1px solid #d8e0dd;
+  background: var(--panel);
+  border-bottom: 1px solid var(--border);
 }
 
 .prompt-preview-pane-header > strong {
@@ -3491,7 +3491,7 @@ button.schema-field-row:hover {
   align-items: flex-end;
   gap: 8px;
   padding: 6px 12px;
-  border-bottom: 1px solid #d8e0dd;
+  border-bottom: 1px solid var(--border);
 }
 
 .prompt-preview-field {
@@ -3531,7 +3531,7 @@ button.schema-field-row:hover {
   gap: 6px 10px;
   padding: 8px;
   background: var(--surface);
-  border: 1px solid #d8e0dd;
+  border: 1px solid var(--border);
   border-radius: 4px;
 }
 
@@ -3548,7 +3548,7 @@ button.schema-field-row:hover {
 }
 
 .prompt-preview-inputs-heading > small {
-  color: #98a39e;
+  color: var(--text-3);
   font-weight: 400;
 }
 
@@ -3563,7 +3563,7 @@ button.schema-field-row:hover {
 .prompt-preview-inputs-hint > code {
   font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
   background: var(--surface);
-  border: 1px solid #d8e0dd;
+  border: 1px solid var(--border);
   border-radius: 3px;
   padding: 0 4px;
 }
@@ -3599,15 +3599,15 @@ button.schema-field-row:hover {
 
 .prompt-preview-field-accessor > code {
   background: var(--surface);
-  border: 1px solid #d8e0dd;
+  border: 1px solid var(--border);
   border-radius: 3px;
   padding: 0 4px;
   white-space: nowrap;
 }
 
 .prompt-preview-field-accessor:hover > code {
-  background: #e7f0ec;
-  border-color: #2f6f5e;
+  background: var(--accent-soft);
+  border-color: var(--accent);
 }
 
 .prompt-input-accessor {
@@ -3623,7 +3623,7 @@ button.schema-field-row:hover {
 
 .prompt-input-accessor > code {
   background: var(--surface);
-  border: 1px solid #d8e0dd;
+  border: 1px solid var(--border);
   border-radius: 3px;
   padding: 0 4px;
 }
@@ -3654,7 +3654,7 @@ button.schema-field-row:hover {
 
 .prompt-help-button:hover,
 .prompt-help-button.active {
-  background: #e8efed;
+  background: var(--panel);
   border-color: var(--text-2);
   color: var(--text);
 }
@@ -3680,7 +3680,7 @@ button.schema-field-row:hover {
 }
 
 .prompt-restore-default-button:hover {
-  background: #e8efed;
+  background: var(--panel);
   border-color: var(--text-2);
   color: var(--text);
 }
@@ -3705,7 +3705,7 @@ button.schema-field-row:hover {
   gap: 10px;
   margin: 0 0 10px;
   padding-bottom: 8px;
-  border-bottom: 1px solid #e8efed;
+  border-bottom: 1px solid var(--divider);
 }
 
 .prompt-help-popover-header > strong {
@@ -3721,7 +3721,7 @@ button.schema-field-row:hover {
 
 .prompt-help-popover-header > small > code {
   background: var(--inset);
-  border: 1px solid #d8e0dd;
+  border: 1px solid var(--border);
   border-radius: 3px;
   padding: 0 4px;
   font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
@@ -3741,7 +3741,7 @@ button.schema-field-row:hover {
 }
 
 .prompt-help-popover-close:hover {
-  background: #e8efed;
+  background: var(--panel);
   color: var(--text);
 }
 
@@ -3771,7 +3771,7 @@ button.schema-field-row:hover {
 
 .prompt-cheatsheet-hint > code {
   background: var(--surface);
-  border: 1px solid #d8e0dd;
+  border: 1px solid var(--border);
   border-radius: 3px;
   padding: 0 4px;
   font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
@@ -3811,12 +3811,12 @@ button.schema-field-row:hover {
 
 .prompt-cheatsheet-body dt > code {
   background: var(--surface);
-  border: 1px solid #d8e0dd;
+  border: 1px solid var(--border);
   border-radius: 3px;
   padding: 0 4px;
   font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
   font-size: 12px;
-  color: #1d4d36;
+  color: var(--accent-deep);
 }
 
 .prompt-cheatsheet-body dd {
@@ -3828,12 +3828,12 @@ button.schema-field-row:hover {
 
 .prompt-cheatsheet-body dd > code {
   background: var(--surface);
-  border: 1px solid #d8e0dd;
+  border: 1px solid var(--border);
   border-radius: 3px;
   padding: 0 3px;
   font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
   font-size: 11px;
-  color: #1d4d36;
+  color: var(--accent-deep);
 }
 
 .entry-inputs-editor {
@@ -3881,7 +3881,7 @@ button.schema-field-row:hover {
 
 .entry-inputs-hint > code {
   background: var(--surface);
-  border: 1px solid #d8e0dd;
+  border: 1px solid var(--border);
   border-radius: 3px;
   padding: 0 4px;
   font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
@@ -3901,7 +3901,7 @@ button.schema-field-row:hover {
   margin: 6px 0;
   padding: 8px 8px 8px 22px;
   background: var(--surface);
-  border: 1px solid #d8e0dd;
+  border: 1px solid var(--border);
   border-radius: 4px;
 }
 
@@ -3927,7 +3927,7 @@ button.schema-field-row:hover {
   left: 4px;
   right: 4px;
   height: 2px;
-  background: #5d8a7a;
+  background: var(--accent);
   border-radius: 2px;
   pointer-events: none;
 }
@@ -3992,7 +3992,7 @@ button.schema-field-row:hover {
   align-self: end;
   border: 1px solid transparent;
   background: transparent;
-  color: #8a948f;
+  color: var(--text-3);
   cursor: pointer;
   font-size: 16px;
   line-height: 1;
@@ -4001,29 +4001,29 @@ button.schema-field-row:hover {
 }
 
 .entry-inputs-editor .prompt-input-remove:hover {
-  background: #f7e0e0;
-  color: #8c2f2f;
-  border-color: #d8b6b6;
+  background: var(--danger-soft);
+  color: var(--danger);
+  border-color: var(--danger-border);
 }
 
 .prompt-preview-field.missing-required > input,
 .prompt-preview-field.missing-required > select,
 .prompt-preview-field.missing-required > textarea {
-  border-color: #d8b6b6;
-  background: #fbf1f0;
+  border-color: var(--danger-border);
+  background: var(--danger-soft);
 }
 
 .prompt-preview-field .required-marker {
-  color: #b85a5a;
+  color: var(--danger);
 }
 
 .prompt-preview-required-notice {
   margin: 0;
   padding: 6px 10px;
-  background: #fff7e1;
-  border: 1px solid #ddc28d;
+  background: var(--star-soft);
+  border: 1px solid var(--star-border);
   border-radius: 4px;
-  color: #6b4d0c;
+  color: var(--star);
   font-size: 12px;
   line-height: 1.45;
 }
@@ -4045,10 +4045,10 @@ button.schema-field-row:hover {
 .prompt-preview-error {
   margin: 8px 0 0;
   padding: 6px 10px;
-  background: #fbe9e7;
-  border: 1px solid #d8b6b6;
+  background: var(--danger-soft);
+  border: 1px solid var(--danger-border);
   border-radius: 4px;
-  color: #6c2424;
+  color: var(--danger);
   font-size: 12px;
   line-height: 1.45;
 }
@@ -4062,10 +4062,10 @@ button.schema-field-row:hover {
 
 .prompt-preview-warnings {
   padding: 6px 10px;
-  background: #fff7e1;
-  border: 1px solid #ddc28d;
+  background: var(--star-soft);
+  border: 1px solid var(--star-border);
   border-radius: 4px;
-  color: #6b4d0c;
+  color: var(--star);
   font-size: 12px;
 }
 
@@ -4078,7 +4078,7 @@ button.schema-field-row:hover {
   gap: 4px;
   padding: 6px 10px;
   background: var(--surface);
-  border: 1px solid #d8e0dd;
+  border: 1px solid var(--border);
   border-radius: 4px;
 }
 
@@ -4095,7 +4095,7 @@ button.schema-field-row:hover {
 }
 
 .prompt-preview-message-user {
-  border-left: 3px solid #2f6f5e;
+  border-left: 3px solid var(--accent);
 }
 
 .prompt-preview-message-assistant {
@@ -4116,10 +4116,10 @@ button.schema-field-row:hover {
 .prompt-preview-cache-break {
   align-self: start;
   padding: 1px 6px;
-  background: #efeae1;
-  border: 1px dashed #c8b896;
+  background: var(--star-soft);
+  border: 1px dashed var(--star-border);
   border-radius: 4px;
-  color: #6b5a0c;
+  color: var(--star);
   font-size: 10px;
   font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
 }
@@ -4233,12 +4233,12 @@ button.schema-field-row:hover {
 .prompt-input-row .danger {
   justify-self: end;
   background: transparent;
-  border: 1px solid #d77c7c;
-  color: #b04848;
+  border: 1px solid var(--danger-border);
+  color: var(--danger);
 }
 
 .prompt-input-row .danger:hover {
-  background: #fdecec;
+  background: var(--danger-soft);
 }
 
 .assistants-roster {
@@ -4268,12 +4268,12 @@ button.schema-field-row:hover {
 .assistant-row .danger {
   justify-self: end;
   background: transparent;
-  border: 1px solid #d77c7c;
-  color: #b04848;
+  border: 1px solid var(--danger-border);
+  color: var(--danger);
 }
 
 .assistant-row .danger:hover {
-  background: #fdecec;
+  background: var(--danger-soft);
 }
 
 .prompt-entry-section {
@@ -4451,9 +4451,9 @@ button.schema-field-row:hover {
 }
 
 .inputs-dialog-error {
-  background: #fdecec;
-  border: 1px solid #d77c7c;
-  color: #8c2828;
+  background: var(--danger-soft);
+  border: 1px solid var(--danger-border);
+  color: var(--danger);
   padding: 6px 10px;
   border-radius: 4px;
   font-size: 12px;
@@ -4484,7 +4484,7 @@ button.schema-field-row:hover {
 }
 
 .inputs-dialog-fields .required-marker {
-  color: #b04848;
+  color: var(--danger);
 }
 
 .inputs-dialog-fields textarea,
@@ -4595,7 +4595,7 @@ button.schema-field-row:hover {
   gap: 4px 6px;
   padding: 2px 8px 6px;
   font-size: 0.78em;
-  color: var(--color-muted, #888);
+  color: var(--text-3);
 }
 .prompt-preview-cache-chip {
   font-variant-numeric: tabular-nums;

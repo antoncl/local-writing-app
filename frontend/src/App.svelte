@@ -6,7 +6,7 @@
   import NodeRow from "./NodeRow.svelte";
   import DirectoryPickerModal from "./DirectoryPickerModal.svelte";
   import NodeList from "./NodeList.svelte";
-  import NodePickerConfigEditor from "./NodePickerConfigEditor.svelte";
+  import SchemaFieldInlineEditor from "./SchemaFieldInlineEditor.svelte";
   import NewProjectModal from "./NewProjectModal.svelte";
   import MachineSettingsDialog from "./MachineSettingsDialog.svelte";
   import ConfirmModal from "./ConfirmModal.svelte";
@@ -18,13 +18,11 @@
   import { renderChatContent } from "./chatMessageRender";
   import { formatCostEur, formatTokens } from "./money";
   import { setPalette, getSwatch, resolveColorForType, resolveColor } from "./colors";
-  import { fieldIconClass, DEFAULT_FIELD_GLYPH } from "./fieldIcons";
-  import IconPicker from "./IconPicker.svelte";
+  import { fieldIconClass, fieldTypeLabel } from "./fieldIcons";
   import GroupsManagerDialog from "./GroupsManagerDialog.svelte";
   import TagManagerDialog from "./TagManagerDialog.svelte";
   import SwatchPicker from "./SwatchPicker.svelte";
-  import DefaultValueEditor from "./DefaultValueEditor.svelte";
-  import SelectOptionsEditor, { type OptionDraft } from "./SelectOptionsEditor.svelte";
+  import type { OptionDraft } from "./SelectOptionsEditor.svelte";
   import type {
     AIHealthResponse,
     AIPolicy,
@@ -1643,20 +1641,6 @@
   // The field types offered in the inline type grid, in display order.
   // `date` is intentionally omitted (see decisions-field-types). Each cell
   // shows the type's default glyph + label.
-  const FIELD_TYPE_CHOICES: MetadataFieldType[] = [
-    "text",
-    "long_text",
-    "number",
-    "boolean",
-    "select",
-    "multi_select",
-    "entity_ref",
-    "entity_ref_list",
-    "tags",
-    "computed",
-    "color",
-  ];
-
   // Switch the field type from the grid; keeps config state coherent so the
   // type-specific blocks below show sane defaults when first revealed.
   function chooseSchemaFieldType(type: MetadataFieldType) {
@@ -1665,24 +1649,6 @@
     if (type === "computed" && schemaFieldComputedFunction !== "counter" && schemaFieldComputedFunction !== "word_count") {
       schemaFieldComputedFunction = "word_count";
     }
-  }
-
-  function fieldTypeLabel(type: MetadataFieldType) {
-    const labels: Record<MetadataFieldType, string> = {
-      text: "Text",
-      long_text: "Long Text",
-      number: "Number",
-      boolean: "Checkbox",
-      date: "Date",
-      select: "Select",
-      multi_select: "List",
-      entity_ref: "Entry Reference",
-      entity_ref_list: "Entry Reference, Multiple",
-      tags: "Tags",
-      computed: "Computed",
-      color: "Colour",
-    };
-    return labels[type] ?? type;
   }
 
   function openSchemaFieldDetail(fieldId: string, entryTypeId = schemaFieldEntryType) {
@@ -4583,151 +4549,32 @@
         {@const fieldEntries = typeOwnFieldEntries}
         {@const inheritedEntries = typeInheritedFieldEntries}
         {#snippet fieldInlineEditor()}
-          <div class="schema-field-inline" role="group" aria-label="Field settings">
-            <div class="sfi-head">
-              <div class="sfi-icon-anchor">
-                <button
-                  type="button"
-                  class="sfr-tile sfi-icon-btn"
-                  aria-label="Choose icon"
-                  title="Choose icon"
-                  on:click={() => (iconPickerOpen = !iconPickerOpen)}
-                >
-                  <i class={fieldIconClass({ type: schemaFieldType, icon: schemaFieldIcon })} aria-hidden="true"></i>
-                </button>
-                {#if iconPickerOpen}
-                  <div class="sfi-icon-pop">
-                    <IconPicker
-                      value={schemaFieldIcon}
-                      defaultGlyph={DEFAULT_FIELD_GLYPH[schemaFieldType] ?? "letter-case"}
-                      fieldLabel={schemaFieldName || "field"}
-                      on:select={(event) => (schemaFieldIcon = event.detail.icon)}
-                      on:close={() => (iconPickerOpen = false)}
-                    />
-                  </div>
-                {/if}
-              </div>
-              <input class="sfi-name" value={schemaFieldName} placeholder="POV Character" aria-label="Field display name" on:input={(event) => updateSchemaFieldName(event.currentTarget.value)} />
-              <div class="sfi-type-anchor">
-                <button
-                  type="button"
-                  class="sfi-type-chip"
-                  class:open={schemaFieldTypeMenuOpen}
-                  aria-haspopup="true"
-                  aria-expanded={schemaFieldTypeMenuOpen}
-                  aria-label="Change field type"
-                  on:click={() => (schemaFieldTypeMenuOpen = !schemaFieldTypeMenuOpen)}
-                >
-                  <i class={`ti ti-${DEFAULT_FIELD_GLYPH[schemaFieldType] ?? "letter-case"}`} aria-hidden="true"></i>
-                  <span class="sfi-type-chip-label">{fieldTypeLabel(schemaFieldType)}</span>
-                  <i class="ti ti-chevron-down sfi-type-chip-caret" aria-hidden="true"></i>
-                </button>
-                {#if schemaFieldTypeMenuOpen}
-                  <div class="sfi-type-grid" role="listbox" aria-label="Field type">
-                    {#each FIELD_TYPE_CHOICES as choice (choice)}
-                      <button
-                        type="button"
-                        class="sfi-type-cell"
-                        class:selected={schemaFieldType === choice}
-                        role="option"
-                        aria-selected={schemaFieldType === choice}
-                        on:click={() => chooseSchemaFieldType(choice)}
-                      >
-                        <i class={`ti ti-${DEFAULT_FIELD_GLYPH[choice] ?? "letter-case"}`} aria-hidden="true"></i>
-                        <span>{fieldTypeLabel(choice)}</span>
-                      </button>
-                    {/each}
-                  </div>
-                {/if}
-              </div>
-            </div>
-            <div class="sfi-controls">
-              <label class="sfi-field">Group
-                <input value={schemaFieldGroup} placeholder="— none —" aria-label="Group section" on:input={(event) => (schemaFieldGroup = event.currentTarget.value)} />
-              </label>
-            </div>
-            <div class="sfi-key-row">
-              {#if schemaFieldKeyEditing}
-                <span class="sfi-key-tag">key</span>
-                <input
-                  class="sfi-key-input"
-                  value={schemaFieldId}
-                  aria-label="Field key"
-                  on:input={(event) => { schemaFieldId = slugifyFieldId(event.currentTarget.value); schemaFieldKeyManual = true; }}
-                />
-                <span class="sfi-key-hint">{selectedSchemaFieldId ? "changing the key migrates existing values" : "auto-derived from the name"}</span>
-              {:else if schemaFieldId}
-                <span class="sfi-id">key <code>{schemaFieldId}</code></span>
-                {#if !schemaFieldReadonly}
-                  <button type="button" class="sfi-key-rename" on:click={() => (schemaFieldKeyEditing = true)}>
-                    {selectedSchemaFieldId ? "rename (migrates)" : "edit key"}
-                  </button>
-                {/if}
-              {/if}
-            </div>
-            {#if schemaFieldType === "entity_ref" || schemaFieldType === "entity_ref_list"}
-              <div class="schema-field-picker-config">
-                <NodePickerConfigEditor
-                  mode="field"
-                  config={schemaFieldPickerConfig}
-                  metadataSchema={metadataSchema}
-                  on:change={(event) => (schemaFieldPickerConfig = event.detail.config)}
-                />
-              </div>
-            {/if}
-            {#if schemaFieldType === "computed"}
-              <div class="sfi-computed">
-                <label class="sfi-field">Computation
-                  <select bind:value={schemaFieldComputedFunction}>
-                    <option value="word_count">Word count (of body)</option>
-                    <option value="counter">Counter (position among siblings)</option>
-                  </select>
-                </label>
-                {#if schemaFieldComputedFunction === "counter"}
-                  <label class="sfi-field">Scope
-                    <select bind:value={schemaFieldComputedScope}>
-                      <option value="siblings">Among siblings</option>
-                      <option value="manuscript">In manuscript</option>
-                    </select>
-                  </label>
-                {/if}
-                <p class="sfi-options-hint">
-                  <i class="ti ti-info-circle" aria-hidden="true"></i>
-                  computed values are derived automatically and can't be edited on the entry
-                </p>
-              </div>
-            {/if}
-            {#if schemaFieldType === "select" || schemaFieldType === "multi_select"}
-              <SelectOptionsEditor
-                options={schemaFieldOptionList}
-                on:change={(event) => (schemaFieldOptionList = event.detail.options)}
-              />
-            {/if}
-            {#if schemaFieldType !== "computed"}
-              <!-- Default-value editor (#38). Shared with the prompt-inputs
-                   editor via DefaultValueEditor. Empty = no default (the
-                   historic behaviour). Computed fields omit this — their
-                   value is derived, not authored. -->
-              <label class="sfi-field sfi-default-field">
-                Default for new entries
-                <DefaultValueEditor
-                  type={schemaFieldType}
-                  value={schemaFieldDefault}
-                  options={schemaFieldOptionList}
-                  ariaLabel="Default for new entries"
-                  on:change={(event) => (schemaFieldDefault = event.detail.value)}
-                />
-              </label>
-            {/if}
-            <div class="sfi-footer">
-              <span class="sfi-spacer"></span>
-              {#if selectedSchemaFieldId}
-                <button class="link-danger" type="button" on:click={requestDeleteSchemaField}>Remove</button>
-              {/if}
-              <button class="sfi-cancel" type="button" on:click={() => (expandedSchemaFieldId = null)}>Cancel</button>
-              <button class="sfi-done" type="button" disabled={!schemaFieldLayerId || !schemaFieldId.trim() || !schemaFieldName.trim()} on:click={saveSchemaField}>Done</button>
-            </div>
-          </div>
+          <SchemaFieldInlineEditor
+            bind:type={schemaFieldType}
+            bind:name={schemaFieldName}
+            bind:icon={schemaFieldIcon}
+            bind:id={schemaFieldId}
+            bind:group={schemaFieldGroup}
+            bind:defaultValue={schemaFieldDefault}
+            bind:options={schemaFieldOptionList}
+            bind:computedFunction={schemaFieldComputedFunction}
+            bind:computedScope={schemaFieldComputedScope}
+            bind:pickerConfig={schemaFieldPickerConfig}
+            bind:typeMenuOpen={schemaFieldTypeMenuOpen}
+            bind:keyEditing={schemaFieldKeyEditing}
+            bind:keyManual={schemaFieldKeyManual}
+            bind:iconPickerOpen={iconPickerOpen}
+            selectedFieldId={selectedSchemaFieldId}
+            readonly={schemaFieldReadonly}
+            layerId={schemaFieldLayerId}
+            metadataSchema={metadataSchema}
+            onChooseType={chooseSchemaFieldType}
+            onNameChange={updateSchemaFieldName}
+            onKeyChange={(value) => (schemaFieldId = slugifyFieldId(value))}
+            on:save={saveSchemaField}
+            on:cancel={() => (expandedSchemaFieldId = null)}
+            on:remove={requestDeleteSchemaField}
+          />
         {/snippet}
         <section class="schema-type-fields" aria-label="Fields on this type">
           <header class="schema-type-fields-header">

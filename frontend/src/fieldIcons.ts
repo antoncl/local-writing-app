@@ -37,6 +37,45 @@ export function fieldIconClass(field: Pick<MetadataFieldDefinition, "type" | "ic
   return `ti ti-${fieldGlyph(field)}`;
 }
 
+// Ordered list of field types surfaced in the Detail Type editor's
+// type-picker grid. `date` is intentionally omitted (deprecated per
+// [[decisions-field-types]]) and stays out of the picker; existing fields
+// of that type still render correctly via DEFAULT_FIELD_GLYPH.
+export const FIELD_TYPE_CHOICES: MetadataFieldType[] = [
+  "text",
+  "long_text",
+  "number",
+  "boolean",
+  "select",
+  "multi_select",
+  "entity_ref",
+  "entity_ref_list",
+  "tags",
+  "computed",
+  "color",
+];
+
+// Human label for a field type. Used by the type chip and the type-picker
+// grid. Falls through to the raw type id for any future variant that
+// hasn't been labelled yet.
+export function fieldTypeLabel(type: MetadataFieldType): string {
+  const labels: Record<MetadataFieldType, string> = {
+    text: "Text",
+    long_text: "Long Text",
+    number: "Number",
+    boolean: "Checkbox",
+    date: "Date",
+    select: "Select",
+    multi_select: "List",
+    entity_ref: "Entry Reference",
+    entity_ref_list: "Entry Reference, Multiple",
+    tags: "Tags",
+    computed: "Computed",
+    color: "Colour",
+  };
+  return labels[type] ?? type;
+}
+
 // Curated, themed subset of Tabler icons for the per-field icon picker.
 // NOT the full 5,800 — a writer-relevant set grouped by theme. Names are
 // the Tabler glyph (no `ti-` prefix); all are real v3 icons.

@@ -11,6 +11,7 @@
   import Tree, { type TreeConfig } from "./Tree.svelte";
   import Lore from "./Lore.svelte";
   import Assistants from "./Assistants.svelte";
+  import Prompts from "./Prompts.svelte";
   import {
     buildNodeTypeTree,
     buildSchemaFieldSections,
@@ -312,7 +313,6 @@
   let assistantEntries: AssistantEntrySummary[] = [];
   let newTodo = "";
   let searchQuery = "";
-  let collapsedPromptGroups: Record<string, boolean> = {};
   // Outline group-header collapse state, keyed by StructureNode.id.
   // Same shape as the other collapsed-* maps so the refactor stays
   // consistent across panes. Persisted per-project to localStorage so
@@ -441,38 +441,6 @@
             : schemaFieldKind === "project"
               ? "Project Types"
               : "Scene Types";
-  $: concretePromptSubtypes = Object.entries(metadataSchema?.entry_types ?? {})
-    .filter(([id, definition]) => definition.kind === "prompt" && !definition.abstract && id !== "prompt")
-    .map(([id, definition]) => ({ id, label: definition.name || id, parent: definition.parent ?? null }));
-
-  // Tree of concrete prompt subtypes — Roleplay nests under
-  // Continuation, etc. The prompts pane renders this recursively
-  // (each subtype becomes a group-header NodeRow whose children slot
-  // holds its prompt entries AND its child subtype NodeRows), so the
-  // schema hierarchy reads via real nesting in NodeRow's tier panel
-  // rather than a depth-padding hack. Tier1 / tier2 / tier3
-  // backgrounds in NodeRow's scoped CSS handle the visual stepping
-  // automatically.
-  type PromptSubtypeNode = { id: string; label: string; children: PromptSubtypeNode[] };
-  $: promptSubtypeTree = (() => {
-    const byId = new Map<string, PromptSubtypeNode>(
-      concretePromptSubtypes.map((s) => [s.id, { id: s.id, label: s.label, children: [] }]),
-    );
-    const roots: PromptSubtypeNode[] = [];
-    for (const s of concretePromptSubtypes) {
-      const node = byId.get(s.id);
-      if (!node) continue;
-      const parent = s.parent ? byId.get(s.parent) : undefined;
-      if (parent) parent.children.push(node);
-      else roots.push(node);
-    }
-    function sortRecursively(nodes: PromptSubtypeNode[]) {
-      nodes.sort((a, b) => a.label.localeCompare(b.label));
-      for (const n of nodes) sortRecursively(n.children);
-    }
-    sortRecursively(roots);
-    return roots;
-  })();
 
   // Persisted "what was open" — survives reload (HMR or browser refresh) so
   // the user doesn't lose their seat. Cleared on a failed re-open so a
@@ -2752,13 +2720,6 @@
     status = `Loaded ${entry.title}`;
   }
 
-  function togglePromptGroup(groupId: string) {
-    collapsedPromptGroups = {
-      ...collapsedPromptGroups,
-      [groupId]: !collapsedPromptGroups[groupId],
-    };
-  }
-
 
   function metadataListText(value: unknown) {
     if (Array.isArray(value)) return value.map((item) => String(item).trim()).filter(Boolean).join(", ");
@@ -3692,14 +3653,14 @@
       </div>
     </header>
     <div class="pane-content schema-list">
-      <NodeList isEmpty={promptSubtypeTree.length === 0}>
-        {#each promptSubtypeTree as root (root.id)}
-          {@render renderPromptSubtype(root)}
-        {/each}
-        {#snippet whenEmpty()}
-          <p class="muted">No prompt sub-types defined yet. Open a prompt entry's Detail Types to create one.</p>
-        {/snippet}
-      </NodeList>
+      <Prompts
+        schema={metadataSchema}
+        entries={promptEntries}
+        focusedDocument={focusedEditorPane?.document ?? null}
+        pinnedKeys={pinnedEditorPaneKeys}
+        onOpenEntry={(id) => openPromptEntryInEditorPane(id)}
+        onNewEntry={(entryType) => newPromptEntry(entryType)}
+      />
     </div>
     <button class="pane-resize" type="button" aria-label="Resize Prompts pane" on:keydown={(event) => handlePaneResizeKeydown(event, "prompts")} on:mousedown={(event) => startPaneResize(event, "prompts")}></button>
   </section>
@@ -4045,36 +4006,3 @@
 
 </main>
 
-{#snippet renderPromptSubtype(node: PromptSubtypeNode)}
-  {@const subtypeEntries = promptEntries.filter((e) => e.entry_type === node.id)}
-  {@const userCollapsed = !!collapsedPromptGroups[node.id]}
-  {@const hasContent = subtypeEntries.length > 0 || node.children.length > 0}
-  {@const isCollapsed = userCollapsed || !hasContent}
-  <NodeRow
-    groupHeader
-    collapsed={isCollapsed}
-    title={node.label}
-    onClick={() => togglePromptGroup(node.id)}
-  >
-    {#snippet leading()}
-      <span class:collapsed={isCollapsed} class="lore-group-caret">▾</span>
-    {/snippet}
-    {#snippet trailing()}
-      <span class="group-count-pill">{subtypeEntries.length}</span>
-      <button class="pin-button" type="button" on:click|stopPropagation={() => newPromptEntry(node.id)}>+ Entry</button>
-    {/snippet}
-    {#snippet nested()}
-      {#each subtypeEntries as entry (entry.id)}
-        <NodeRow
-          title={entry.title}
-          active={focusedEditorPane?.document?.type === "prompt" && focusedEditorPane.document.id === entry.id}
-          pinned={pinnedEditorPaneKeys.has(`prompt:${entry.id}`)}
-          onClick={() => openPromptEntryInEditorPane(entry.id)}
-        />
-      {/each}
-      {#each node.children as child (child.id)}
-        {@render renderPromptSubtype(child)}
-      {/each}
-    {/snippet}
-  </NodeRow>
-{/snippet}

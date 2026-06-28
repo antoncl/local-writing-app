@@ -8,6 +8,7 @@
   import NodeList from "./NodeList.svelte";
   import SchemaTypeEditor from "./SchemaTypeEditor.svelte";
   import SchemaTreePane from "./SchemaTreePane.svelte";
+  import Tree, { type TreeConfig } from "./Tree.svelte";
   import {
     buildNodeTypeTree,
     buildSchemaFieldSections,
@@ -16,6 +17,14 @@
     type NodeTypeTreeNode,
     type SchemaKind,
   } from "./schemaTypeHelpers";
+  import {
+    collectNodeIdSet,
+    collectSceneIdSet,
+    entryTypeName,
+    findNodeBySceneId,
+    findStructureNodeById,
+    isLeafNode,
+  } from "./treeHelpers";
   import NewProjectModal from "./NewProjectModal.svelte";
   import MachineSettingsDialog from "./MachineSettingsDialog.svelte";
   import ConfirmModal from "./ConfirmModal.svelte";
@@ -79,41 +88,9 @@
     | { name: "needsProject" }
     | { name: "projectOpen"; project: ProjectInfo };
   type DocumentRef = { type: "scene" | "lore" | "prompt" | "assistant" | "project" | "structure_node" | "chat" | "research"; id: string };
-  // Per-kind tree config. The manuscript and research panes both render
-  // hierarchical NodeRow trees with the same leaf/container shape; the
-  // only differences (drag, status stripe, leaf-open API, cascade-preview
-  // labels, etc.) live here so one snippet + one set of CRUD helpers can
-  // serve both. Add a third tree by adding another TreeConfig instance.
-  type TreeConfig = {
-    kind: "scene" | "research";
-    leafType: string;
-    getStructure: () => StructureDocument | null;
-    applyStructure: (next: StructureDocument) => void;
-    refresh: () => Promise<void>;
-    getCollapsed: () => Record<string, boolean>;
-    toggleCollapsed: (nodeId: string) => void;
-    api: {
-      create: (title: string, entryType: string, parentId: string | null) => Promise<StructureDocument>;
-      rename: (nodeId: string, title: string) => Promise<StructureDocument>;
-      cascadePreview: (nodeId: string) => Promise<StructureNodeDeletePreview>;
-      delete: (nodeId: string) => Promise<StructureDocument>;
-    };
-    openLeaf: (sceneId: string) => Promise<void>;
-    onGroupClick: (nodeId: string) => void;
-    onGroupDblClick: (nodeId: string) => void;
-    cascadeLabels: {
-      leaf: { singular: string; plural: string };
-      container: { singular: string; plural: string };
-    };
-    afterDelete?: () => Promise<void>;
-    afterRename?: (nodeId: string, newTitle: string) => Promise<void>;
-    supportsDrag: boolean;
-    showStatusStripe: boolean;
-    containerHasEditor: boolean;
-    inlineRenameOnLeafCreate: boolean;
-    rootAddMenuKey: string;
-    handleRowKeydown?: (event: KeyboardEvent, node: StructureNode) => void;
-  };
+  // TreeConfig (the per-kind manuscript/research tree contract) + the tree
+  // rendering and inline CRUD now live in Tree.svelte; App owns the structure
+  // data, the editor-pane coupling (delete, dblclick-open), and collapse state.
   type PaneId = "project" | "outline" | "lore" | "todo" | "search" | string;
   type MetadataReloadSignal = { token: number; metadata: EntryMetadata; status: string; entryType: string };
   type LoreEntryGroup = {
@@ -247,12 +224,7 @@
   // tier panels) so the menu can extend below/above its anchor without
   // being clipped.
   let addMenuPosition: { top: number; right: number } | null = null;
-  let editingNodeId: string | null = null;
-  let editingTitle = "";
   let draftTitleByScene = new Map<string, string>();
-  let draggedNodeId: string | null = null;
-  let dragOverNodeId: string | null = null;
-  let dragOverPosition: "before" | "after" | "into" | null = null;
   let todos: TodoItem[] = [];
   let validation: ProjectValidation | null = null;
   let metadataSchema: MetadataSchema | null = null;
@@ -2156,40 +2128,11 @@
     });
   }
 
-  function isLeafNode(node: StructureNode): boolean {
-    return node.type === "scene";
-  }
-
-  function renderNodeTitle(node: StructureNode, schema: MetadataSchema | null): string {
-    const template = schema?.entry_types[node.type]?.display_template ?? "{title}";
-    const liveTitle = node.scene_id ? draftTitleByScene.get(node.scene_id) : undefined;
-    const effectiveTitle = liveTitle ?? node.title;
-    return template.replace(/\{(\w+)\}/g, (_match, fieldName) => {
-      if (fieldName === "title") return effectiveTitle;
-      const computed = node.computed_metadata?.[fieldName];
-      if (computed !== undefined && computed !== null) return String(computed);
-      return "";
-    });
-  }
-
   function defaultChildEntryType(parentType: string): string | null {
     if (parentType === "root") return "act";
     if (parentType === "act") return "chapter";
     if (parentType === "chapter") return "scene";
     return null;
-  }
-
-  // Generic entry-type choices for any kind's "+ Add child" menu. Drops
-  // abstract parents (they can't be instantiated) and sorts by name. The
-  // tree's TreeConfig.kind selects which slice of the schema applies.
-  function entryTypeChoicesByKind(
-    schema: MetadataSchema | null,
-    kind: string,
-  ): Array<{ id: string; name: string }> {
-    return Object.entries(schema?.entry_types ?? {})
-      .filter(([, definition]) => definition.kind === kind && !definition.abstract)
-      .map(([id, definition]) => ({ id, name: definition.name }))
-      .sort((a, b) => a.name.localeCompare(b.name));
   }
 
   async function openResearchNoteInEditorPane(noteId: string) {
@@ -2279,72 +2222,20 @@
   }
 
 
-  function entryTypeName(typeId: string, schema: MetadataSchema | null): string {
-    return schema?.entry_types[typeId]?.name ?? typeId;
-  }
-
-  function findStructureNodeById(node: StructureNode | null | undefined, id: string): StructureNode | null {
-    if (!node) return null;
-    if (node.id === id) return node;
-    for (const child of node.children ?? []) {
-      const found = findStructureNodeById(child, id);
-      if (found) return found;
-    }
-    return null;
-  }
-
-  // Generic: find the tree node that owns a given scene/note id. Both
-  // manuscript scenes and research notes live in tree nodes whose
-  // `scene_id` field carries the underlying-document id.
-  function findNodeBySceneId(node: StructureNode, sceneId: string): StructureNode | null {
-    if (node.scene_id === sceneId) return node;
-    for (const child of node.children ?? []) {
-      const found = findNodeBySceneId(child, sceneId);
-      if (found) return found;
-    }
-    return null;
-  }
-
-  function nextAutoName(config: TreeConfig, parentId: string | null, entryType: string): string {
-    const typeName = entryTypeName(entryType, metadataSchema);
-    const root = config.getStructure()?.root ?? null;
-    const parent = !root ? null : parentId ? findStructureNodeById(root, parentId) : root;
-    const siblingCount = parent?.children?.filter((child) => child.type === entryType).length ?? 0;
-    return `${typeName} ${siblingCount + 1}`;
-  }
-
-  function findNewlyAddedChildId(
-    before: StructureDocument | null,
-    after: StructureDocument | null,
-    parentId: string | null,
-  ): string | null {
-    if (!after) return null;
-    const beforeParent = before ? findStructureNodeById(before.root, parentId ?? before.root.id) : null;
-    const afterParent = findStructureNodeById(after.root, parentId ?? after.root.id);
-    if (!afterParent) return null;
-    const beforeIds = new Set(beforeParent?.children?.map((child) => child.id) ?? []);
-    return afterParent.children.find((child) => !beforeIds.has(child.id))?.id ?? null;
-  }
-
-  // Tree configs. Function declarations referenced below are hoisted, so
-  // these can live next to the generic helpers that consume them.
+  // Tree configs — the per-kind contract consumed by Tree.svelte. Function
+  // declarations referenced below are hoisted. App keeps these (plus the
+  // delete/collapse/dblclick callbacks they wire) because they touch
+  // editor-pane and persisted-collapse state that lives here.
   const manuscriptTree: TreeConfig = {
     kind: "scene",
     leafType: "scene",
     getStructure: () => structure,
     applyStructure: (next) => { structure = next; },
     refresh: refreshStructure,
-    getCollapsed: () => collapsedStructureNodes,
-    toggleCollapsed: (nodeId) => {
-      collapsedStructureNodes = {
-        ...collapsedStructureNodes,
-        [nodeId]: !collapsedStructureNodes[nodeId],
-      };
-      saveCollapsedStructureNodes(projectPath, collapsedStructureNodes);
-    },
     api: {
       create: api.createStructureNode.bind(api),
       rename: api.renameStructureNode.bind(api),
+      move: api.moveStructureNode.bind(api),
       cascadePreview: api.cascadeDeletePreview.bind(api),
       delete: api.deleteStructureNode.bind(api),
     },
@@ -2362,7 +2253,6 @@
     containerHasEditor: true,
     inlineRenameOnLeafCreate: true,
     rootAddMenuKey: "__root__",
-    handleRowKeydown: (event, node) => handleTreeRowKeydown(event, node),
   };
 
   const researchTree: TreeConfig = {
@@ -2371,13 +2261,6 @@
     getStructure: () => researchStructure,
     applyStructure: (next) => { researchStructure = next; },
     refresh: refreshResearchStructure,
-    getCollapsed: () => collapsedResearchNodes,
-    toggleCollapsed: (nodeId) => {
-      collapsedResearchNodes = {
-        ...collapsedResearchNodes,
-        [nodeId]: !collapsedResearchNodes[nodeId],
-      };
-    },
     api: {
       create: api.createResearchNode.bind(api),
       rename: api.renameResearchNode.bind(api),
@@ -2385,12 +2268,14 @@
       delete: api.deleteResearchNode.bind(api),
     },
     openLeaf: (sceneId) => openResearchNoteInEditorPane(sceneId),
-    onGroupClick: (nodeId) => researchTree.toggleCollapsed(nodeId),
-    onGroupDblClick: (nodeId) => {
-      const root = researchStructure?.root;
-      const node = root ? findStructureNodeById(root, nodeId) : null;
-      if (node) startRename(nodeId, node.title);
+    onGroupClick: (nodeId) => {
+      collapsedResearchNodes = {
+        ...collapsedResearchNodes,
+        [nodeId]: !collapsedResearchNodes[nodeId],
+      };
     },
+    // Research has no container editor to open, so a group double-click renames.
+    groupDblClickRenames: true,
     cascadeLabels: {
       leaf: { singular: "note", plural: "notes" },
       container: { singular: "topic", plural: "topics" },
@@ -2402,51 +2287,12 @@
     rootAddMenuKey: "__research_root__",
   };
 
-  // Generic "+ Add child" creator for any tree kind. Auto-names by sibling
-  // count, calls the kind-specific create API, then either drops the user
-  // into the editor (leaf) or into an inline tree-row rename (non-leaf).
-  // The manuscript-scene leaf takes a legacy path through api.createScene
-  // (a pre-structure-node holdover that refreshes via the leaf API and
-  // also inline-renames so the auto-generated title can be replaced).
-  async function addTreeChild(config: TreeConfig, parentId: string | null, entryType: string) {
-    const title = nextAutoName(config, parentId, entryType);
-    addMenuOpenFor = null;
-    await run(async () => {
-      const before = config.getStructure();
-      let createdNodeId: string | null = null;
-      const isLeaf = entryType === config.leafType;
-      if (config.kind === "scene" && isLeaf) {
-        const scene = await api.createScene(title, parentId ?? undefined);
-        await config.refresh();
-        await config.openLeaf(scene.id);
-        const root = config.getStructure()?.root;
-        createdNodeId = root ? findNodeBySceneId(root, scene.id)?.id ?? null : null;
-      } else {
-        const next = await config.api.create(title, entryType, parentId);
-        config.applyStructure(next);
-        createdNodeId = findNewlyAddedChildId(before, next, parentId);
-        if (createdNodeId && isLeaf) {
-          const created = findStructureNodeById(next.root, createdNodeId);
-          if (created?.scene_id) {
-            await config.openLeaf(created.scene_id);
-          }
-        }
-      }
-      if (createdNodeId && (!isLeaf || config.inlineRenameOnLeafCreate)) {
-        startRename(createdNodeId, title);
-      }
-    });
-  }
-
   // Generic cascade-delete confirmation. Manuscript and research differ
   // only in noun choice ("scene"/"sub-container" vs "note"/"topic"), so
   // config.cascadeLabels covers it. The actual delete fans out through
   // performTreeDelete, which closes any editor panes that point at the
   // doomed subtree before calling the kind-specific delete API.
   async function requestDeleteTreeNode(config: TreeConfig, node: StructureNode) {
-    if (editingNodeId === node.id) {
-      editingNodeId = null;
-    }
     let preview: StructureNodeDeletePreview | null = null;
     try {
       preview = await config.api.cascadePreview(node.id);
@@ -2516,16 +2362,6 @@
     status = "Deleted";
   }
 
-  function collectNodeIdSet(root: StructureNode): Set<string> {
-    const ids = new Set<string>();
-    const walk = (current: StructureNode) => {
-      ids.add(current.id);
-      for (const child of current.children ?? []) walk(child);
-    };
-    walk(root);
-    return ids;
-  }
-
   function toggleAddMenu(nodeId: string, event?: MouseEvent) {
     if (addMenuOpenFor === nodeId) {
       addMenuOpenFor = null;
@@ -2550,37 +2386,12 @@
     }
   }
 
-  function startRename(nodeId: string, currentTitle: string) {
-    editingNodeId = nodeId;
-    editingTitle = currentTitle;
-    setTimeout(() => {
-      const input = document.querySelector<HTMLInputElement>(`[data-node-edit-id="${nodeId}"]`);
-      if (input) {
-        input.focus();
-        input.select();
-      }
-    }, 0);
-  }
-
-  async function commitRename(config: TreeConfig, nodeId: string) {
-    if (editingNodeId !== nodeId) return;
-    const trimmed = editingTitle.trim();
-    const tree = config.getStructure();
-    const node = tree ? findStructureNodeById(tree.root, nodeId) : null;
-    editingNodeId = null;
-    if (!trimmed || !node || node.title === trimmed) {
-      return;
-    }
-    if (tree) {
-      config.applyStructure({ root: updateNodeTitleInTree(tree.root, nodeId, trimmed) });
-    }
-    await run(async () => {
-      const next = await config.api.rename(nodeId, trimmed);
-      config.applyStructure(next);
-      if (config.afterRename) {
-        await config.afterRename(nodeId, trimmed);
-      }
-    });
+  // Tree.svelte's add menus close through this so its open/position state
+  // (kept here, shared across both trees + closed by the document-level
+  // click-outside handler) stays the single source of truth.
+  function closeAddMenu() {
+    addMenuOpenFor = null;
+    addMenuPosition = null;
   }
 
   async function syncRenameIntoEditorPanes(nodeId: string, newTitle: string) {
@@ -2621,62 +2432,6 @@
     titleReloadsByPane = nextReloads;
   }
 
-  function cancelRename() {
-    editingNodeId = null;
-  }
-
-  function updateNodeTitleInTree(node: StructureNode, nodeId: string, title: string): StructureNode {
-    if (node.id === nodeId) {
-      return { ...node, title };
-    }
-    return {
-      ...node,
-      children: (node.children ?? []).map((child) => updateNodeTitleInTree(child, nodeId, title)),
-    };
-  }
-
-  function handleRenameKeydown(config: TreeConfig, event: KeyboardEvent, nodeId: string) {
-    if (event.key === "Enter") {
-      event.preventDefault();
-      void commitRename(config, nodeId);
-    } else if (event.key === "Escape") {
-      event.preventDefault();
-      cancelRename();
-    }
-  }
-
-  function handleTreeRowKeydown(event: KeyboardEvent, node: StructureNode) {
-    if (event.key === "F2") {
-      event.preventDefault();
-      startRename(node.id, node.title);
-      return;
-    }
-    if (!(event.ctrlKey || event.metaKey)) return;
-    if (event.key === "ArrowUp") {
-      event.preventDefault();
-      void moveNodeUp(node);
-    } else if (event.key === "ArrowDown") {
-      event.preventDefault();
-      void moveNodeDown(node);
-    } else if (event.key === "ArrowRight") {
-      event.preventDefault();
-      void indentNode(node);
-    } else if (event.key === "ArrowLeft") {
-      event.preventDefault();
-      void outdentNode(node);
-    }
-  }
-
-  async function refocusTreeNode(nodeId: string) {
-    await tick();
-    // Look up the row via NodeRow's data-node-id attribute, then focus
-    // the inner click button (NodeRow's default title path) so the
-    // focus ring lands on the right element.
-    const row = document.querySelector<HTMLElement>(`[data-node-id="${nodeId}"]`);
-    const target = row?.querySelector<HTMLElement>("button.node-row-click") ?? row;
-    target?.focus();
-  }
-
   function toggleStructureNodeCollapse(nodeId: string) {
     collapsedStructureNodes = {
       ...collapsedStructureNodes,
@@ -2708,142 +2463,6 @@
       pendingCollapseTimeoutId = null;
     }
     void run(() => openStructureNodeInEditorPane(nodeId));
-  }
-
-  async function moveNodeUp(node: StructureNode) {
-    if (!structure) return;
-    const found = findParentAndIndex(structure.root, node.id);
-    if (!found || found.index === 0) return;
-    await run(async () => {
-      structure = await api.moveStructureNode(node.id, found.parent.id, found.index - 1);
-    });
-    await refocusTreeNode(node.id);
-  }
-
-  async function moveNodeDown(node: StructureNode) {
-    if (!structure) return;
-    const found = findParentAndIndex(structure.root, node.id);
-    if (!found || found.index >= (found.parent.children?.length ?? 0) - 1) return;
-    await run(async () => {
-      structure = await api.moveStructureNode(node.id, found.parent.id, found.index + 1);
-    });
-    await refocusTreeNode(node.id);
-  }
-
-  async function indentNode(node: StructureNode) {
-    if (!structure) return;
-    const found = findParentAndIndex(structure.root, node.id);
-    if (!found || found.index === 0) return;
-    const previousSibling = found.parent.children[found.index - 1];
-    if (previousSibling.scene_id) return;
-    const newPosition = previousSibling.children?.length ?? 0;
-    await run(async () => {
-      structure = await api.moveStructureNode(node.id, previousSibling.id, newPosition);
-    });
-    await refocusTreeNode(node.id);
-  }
-
-  async function outdentNode(node: StructureNode) {
-    if (!structure) return;
-    const parentFound = findParentAndIndex(structure.root, node.id);
-    if (!parentFound) return;
-    if (parentFound.parent.id === structure.root.id) return;
-    const grandparentFound = findParentAndIndex(structure.root, parentFound.parent.id);
-    if (!grandparentFound) return;
-    await run(async () => {
-      structure = await api.moveStructureNode(node.id, grandparentFound.parent.id, grandparentFound.index + 1);
-    });
-    await refocusTreeNode(node.id);
-  }
-
-  function findParentAndIndex(
-    parent: StructureNode,
-    nodeId: string,
-  ): { parent: StructureNode; index: number } | null {
-    for (let i = 0; i < (parent.children?.length ?? 0); i++) {
-      if (parent.children[i].id === nodeId) return { parent, index: i };
-      const found = findParentAndIndex(parent.children[i], nodeId);
-      if (found) return found;
-    }
-    return null;
-  }
-
-  function handleTreeDragStart(event: DragEvent, node: StructureNode) {
-    draggedNodeId = node.id;
-    if (event.dataTransfer) {
-      event.dataTransfer.effectAllowed = "move";
-      event.dataTransfer.setData("text/plain", node.id);
-    }
-  }
-
-  function handleTreeDragEnd() {
-    draggedNodeId = null;
-    dragOverNodeId = null;
-    dragOverPosition = null;
-  }
-
-  function handleTreeDragOver(event: DragEvent, node: StructureNode) {
-    if (!draggedNodeId || draggedNodeId === node.id) return;
-    event.preventDefault();
-    if (event.dataTransfer) event.dataTransfer.dropEffect = "move";
-    const target = event.currentTarget;
-    if (!(target instanceof HTMLElement)) return;
-    const rect = target.getBoundingClientRect();
-    const ratio = (event.clientY - rect.top) / rect.height;
-    let position: "before" | "after" | "into";
-    const isContainer = !isLeafNode(node);
-    if (isContainer && ratio > 0.2 && ratio < 0.8) {
-      position = "into";
-    } else if (ratio < 0.5) {
-      position = "before";
-    } else {
-      position = "after";
-    }
-    if (dragOverNodeId !== node.id || dragOverPosition !== position) {
-      dragOverNodeId = node.id;
-      dragOverPosition = position;
-    }
-  }
-
-  async function handleTreeDrop(event: DragEvent, node: StructureNode) {
-    event.preventDefault();
-    const sourceId = draggedNodeId;
-    const position = dragOverPosition;
-    handleTreeDragEnd();
-    if (!sourceId || !position || !structure || sourceId === node.id) return;
-
-    let targetParentId: string;
-    let targetIndex: number;
-    if (position === "into") {
-      targetParentId = node.id;
-      const target = findStructureNodeById(structure.root, node.id);
-      targetIndex = target?.children?.length ?? 0;
-    } else {
-      const found = findParentAndIndex(structure.root, node.id);
-      if (!found) return;
-      targetParentId = found.parent.id;
-      targetIndex = found.index + (position === "after" ? 1 : 0);
-    }
-
-    const sourceFound = findParentAndIndex(structure.root, sourceId);
-    if (sourceFound && sourceFound.parent.id === targetParentId && sourceFound.index < targetIndex) {
-      targetIndex -= 1;
-    }
-
-    await run(async () => {
-      structure = await api.moveStructureNode(sourceId, targetParentId, targetIndex);
-    });
-  }
-
-  function collectSceneIdSet(node: StructureNode | null): Set<string> {
-    const ids = new Set<string>();
-    if (!node) return ids;
-    const walk = (current: StructureNode) => {
-      if (current.scene_id) ids.add(current.scene_id);
-      for (const child of current.children ?? []) walk(child);
-    };
-    walk(node);
-    return ids;
   }
 
   async function newLoreEntry() {
@@ -3864,10 +3483,6 @@
     editorPaneComponents[pane.id]?.highlightEmbeddedTodo(todoId);
   }
 
-  function nodeChildren(node: StructureNode) {
-    return node.children ?? [];
-  }
-
   function updateEmbeddedTodosForPane(id: string, embeddedTodos: Array<{ id: string; text: string; status: "open" | "done"; note: string }>) {
     const pane = editorPanes.find((candidate) => candidate.id === id);
     if (!pane?.scene || pane.document?.type !== "scene") {
@@ -4072,41 +3687,23 @@
       <h2>Draft</h2>
     </header>
     <div class="pane-content">
-      <div class="section-title">
-        <h3>Scenes</h3>
-        <div class="tree-add-controls">
-          <div class="tree-menu-anchor">
-            <button class="row-action-add section-add-button" class:active={addMenuOpenFor === manuscriptTree.rootAddMenuKey} title="Add at root" on:click={(event) => toggleAddMenu(manuscriptTree.rootAddMenuKey, event)}>+&gt;</button>
-            {#if addMenuOpenFor === manuscriptTree.rootAddMenuKey}
-              <div class="row-add-popover" style={addMenuPosition ? `top: ${addMenuPosition.top}px; right: ${addMenuPosition.right}px` : ""}>
-                <span class="row-add-popover-heading">Add at root</span>
-                <NodeList isEmpty={false}>
-                  {#each entryTypeChoicesByKind(metadataSchema, manuscriptTree.kind) as choice (choice.id)}
-                    <NodeRow
-                      title={choice.name}
-                      onClick={() => { addTreeChild(manuscriptTree, null, choice.id); addMenuOpenFor = null; addMenuPosition = null; }}
-                    />
-                  {/each}
-                </NodeList>
-              </div>
-            {/if}
-          </div>
-        </div>
-      </div>
-      <NodeList isEmpty={!structure || nodeChildren(structure.root).length === 0}>
-        {#if structure}
-          {#each nodeChildren(structure.root) as child (child.id)}
-            {@render renderTree(manuscriptTree, child)}
-          {/each}
-        {/if}
-        {#snippet whenEmpty()}
-          {#if !structure}
-            <p class="muted">Open or create a project to begin.</p>
-          {:else}
-            <p class="muted">No scenes yet.</p>
-          {/if}
-        {/snippet}
-      </NodeList>
+      <Tree
+        config={manuscriptTree}
+        {structure}
+        collapsed={collapsedStructureNodes}
+        schema={metadataSchema}
+        focusedDocument={focusedEditorPane?.document ?? null}
+        pinnedKeys={pinnedEditorPaneKeys}
+        draftTitles={draftTitleByScene}
+        sectionLabel="Scenes"
+        emptyLabel="No scenes yet."
+        {run}
+        onRequestDelete={(node) => requestDeleteTreeNode(manuscriptTree, node)}
+        {addMenuOpenFor}
+        {addMenuPosition}
+        onToggleAddMenu={toggleAddMenu}
+        onCloseAddMenu={closeAddMenu}
+      />
     </div>
     <button class="pane-resize" type="button" aria-label="Resize Draft pane" on:keydown={(event) => handlePaneResizeKeydown(event, "outline")} on:mousedown={(event) => startPaneResize(event, "outline")}></button>
   </section>
@@ -4194,40 +3791,25 @@
   <section class:hidden-pane={!isPaneVisible("research")} class="pane research-pane" data-pane-id="research" style={paneStyle("research")} aria-label="Research pane" on:mousedown={() => focusPane("research")}>
     <header class="pane-header" role="button" tabindex="0" aria-label="Move Research pane" on:keydown={(event) => handlePaneHeaderKeydown(event, "research")} on:mousedown={(event) => startPaneDrag(event, "research")}>
       <h2>Research</h2>
-      <div class="pane-header-actions">
-        <div class="tree-menu-anchor">
-          <button class="pin-button" type="button" class:active={addMenuOpenFor === researchTree.rootAddMenuKey} title="Add at root" on:mousedown={(event) => event.stopPropagation()} on:click={(event) => toggleAddMenu(researchTree.rootAddMenuKey, event)}>+ Add</button>
-          {#if addMenuOpenFor === researchTree.rootAddMenuKey}
-            <div class="row-add-popover" style={addMenuPosition ? `top: ${addMenuPosition.top}px; right: ${addMenuPosition.right}px` : ""}>
-              <span class="row-add-popover-heading">Add at root</span>
-              <NodeList isEmpty={false}>
-                {#each entryTypeChoicesByKind(metadataSchema, researchTree.kind) as choice (choice.id)}
-                  <NodeRow
-                    title={choice.name}
-                    onClick={() => { addTreeChild(researchTree, null, choice.id); addMenuOpenFor = null; addMenuPosition = null; }}
-                  />
-                {/each}
-              </NodeList>
-            </div>
-          {/if}
-        </div>
-      </div>
     </header>
     <div class="pane-content">
-      <NodeList isEmpty={!researchStructure || nodeChildren(researchStructure.root).length === 0}>
-        {#if researchStructure}
-          {#each nodeChildren(researchStructure.root) as child (child.id)}
-            {@render renderTree(researchTree, child)}
-          {/each}
-        {/if}
-        {#snippet whenEmpty()}
-          {#if !researchStructure}
-            <p class="muted">Open or create a project to begin.</p>
-          {:else}
-            <p class="muted">No topics or notes yet.</p>
-          {/if}
-        {/snippet}
-      </NodeList>
+      <Tree
+        config={researchTree}
+        structure={researchStructure}
+        collapsed={collapsedResearchNodes}
+        schema={metadataSchema}
+        focusedDocument={focusedEditorPane?.document ?? null}
+        pinnedKeys={pinnedEditorPaneKeys}
+        draftTitles={draftTitleByScene}
+        sectionLabel="Notes"
+        emptyLabel="No topics or notes yet."
+        {run}
+        onRequestDelete={(node) => requestDeleteTreeNode(researchTree, node)}
+        {addMenuOpenFor}
+        {addMenuPosition}
+        onToggleAddMenu={toggleAddMenu}
+        onCloseAddMenu={closeAddMenu}
+      />
     </div>
     <button class="pane-resize" type="button" aria-label="Resize Research pane" on:keydown={(event) => handlePaneResizeKeydown(event, "research")} on:mousedown={(event) => startPaneResize(event, "research")}></button>
   </section>
@@ -4782,155 +4364,3 @@
     {/snippet}
   </NodeRow>
 {/snippet}
-
-{#snippet renderTree(config: TreeConfig, node: StructureNode)}
-  {@const childNodes = nodeChildren(node)}
-  {@const leaf = node.type === config.leafType}
-  {@const editing = editingNodeId === node.id}
-  {@const collapsedMap = config.getCollapsed()}
-  {@const stripeHex = (() => {
-    if (!config.showStatusStripe) return null;
-    const opt = node.status ? metadataSchema?.fields?.status?.options?.find((o) => o.value === node.status) : null;
-    return opt?.color ? getSwatch(opt.color)?.hex ?? null : null;
-  })()}
-  {@const isActive = (
-    (!!node.scene_id && focusedEditorPane?.document?.type === config.kind && focusedEditorPane.document.id === node.scene_id)
-    || (config.containerHasEditor && focusedEditorPane?.document?.type === "structure_node" && focusedEditorPane.document.id === node.id)
-  )}
-  {@const isPinned = (
-    (!!node.scene_id && pinnedEditorPaneKeys.has(`${config.kind}:${node.scene_id}`))
-    || (config.containerHasEditor && pinnedEditorPaneKeys.has(`structure_node:${node.id}`))
-  )}
-  {#if leaf && !editing}
-    <!-- Simplest-form leaf NodeRow — same widget as a lore character.
-         No status stripe (called out as visual noise on scenes); drag
-         handle only on trees that support reorder. -->
-    <NodeRow
-      role="treeitem"
-      ariaLabel={node.title}
-      title={renderNodeTitle(node, metadataSchema)}
-      active={isActive}
-      pinned={isPinned}
-      dragging={config.supportsDrag && draggedNodeId === node.id}
-      dropPosition={config.supportsDrag && dragOverNodeId === node.id ? dragOverPosition : null}
-      onClick={() => node.scene_id && run(() => config.openLeaf(node.scene_id!))}
-      on:mousedown={(event) => event.stopPropagation()}
-      on:keydown={(event) => config.handleRowKeydown?.(event, node)}
-      on:dragover={(event) => { if (config.supportsDrag) handleTreeDragOver(event, node); }}
-      on:drop={(event) => { if (config.supportsDrag) handleTreeDrop(event, node); }}
-    >
-      {#snippet leading()}
-        {#if config.supportsDrag}
-          <span
-            class="tree-handle"
-            draggable="true"
-            role="button"
-            tabindex="-1"
-            aria-label="Drag to reorder"
-            on:dragstart={(event) => handleTreeDragStart(event, node)}
-            on:dragend={handleTreeDragEnd}
-          >⋮⋮</span>
-        {/if}
-      {/snippet}
-    </NodeRow>
-  {:else if editing}
-    <!-- Rename-in-progress: titleSlot hosts the input. Variant stays
-         consistent with the underlying node (card for leaves, tree
-         group header for containers) so the row doesn't reflow when
-         editing ends. -->
-    <NodeRow
-      groupHeader={!leaf}
-      role="treeitem"
-      ariaLabel={node.title}
-      stripeColor={leaf ? null : stripeHex}
-      dragging={config.supportsDrag && draggedNodeId === node.id}
-      dropPosition={config.supportsDrag && dragOverNodeId === node.id ? dragOverPosition : null}
-      collapsed={leaf ? true : (!!collapsedMap[node.id] || childNodes.length === 0)}
-      clickable={false}
-      dataNodeId={node.id}
-      on:mousedown={(event) => event.stopPropagation()}
-      on:dragover={(event) => { if (config.supportsDrag) handleTreeDragOver(event, node); }}
-      on:drop={(event) => { if (config.supportsDrag) handleTreeDrop(event, node); }}
-    >
-      {#snippet titleSlot()}
-        <input
-          class="tree-title tree-rename-input"
-          data-node-edit-id={node.id}
-          bind:value={editingTitle}
-          on:keydown={(event) => handleRenameKeydown(config, event, node.id)}
-          on:blur={() => commitRename(config, node.id)}
-        />
-      {/snippet}
-      {#snippet nested()}
-        {#if !leaf}
-          {#each childNodes as child (child.id)}
-            {@render renderTree(config, child)}
-          {/each}
-        {/if}
-      {/snippet}
-    </NodeRow>
-  {:else}
-    <!-- Group-header form (non-leaf). Click toggles collapse (manuscript
-         defers to dblclick-open-editor); double-click is config-driven. -->
-    {@const isCollapsed = !!collapsedMap[node.id] || childNodes.length === 0}
-    <NodeRow
-      groupHeader
-      role="treeitem"
-      ariaLabel={node.title}
-      title={renderNodeTitle(node, metadataSchema)}
-      active={isActive}
-      pinned={isPinned}
-      dragging={config.supportsDrag && draggedNodeId === node.id}
-      dropPosition={config.supportsDrag && dragOverNodeId === node.id ? dragOverPosition : null}
-      collapsed={isCollapsed}
-      dataNodeId={node.id}
-      onClick={() => config.onGroupClick(node.id)}
-      onDblClick={() => config.onGroupDblClick(node.id)}
-      on:mousedown={(event) => event.stopPropagation()}
-      on:keydown={(event) => config.handleRowKeydown?.(event, node)}
-      on:dragover={(event) => { if (config.supportsDrag) handleTreeDragOver(event, node); }}
-      on:drop={(event) => { if (config.supportsDrag) handleTreeDrop(event, node); }}
-    >
-      {#snippet leading()}
-        {#if config.supportsDrag}
-          <span
-            class="tree-handle"
-            draggable="true"
-            role="button"
-            tabindex="-1"
-            aria-label="Drag to reorder"
-            on:dragstart={(event) => handleTreeDragStart(event, node)}
-            on:dragend={handleTreeDragEnd}
-          >⋮⋮</span>
-        {/if}
-        <span class:collapsed={isCollapsed} class="lore-group-caret">▾</span>
-      {/snippet}
-      {#snippet trailing()}
-        <span class="group-count-pill">{childNodes.length}</span>
-        <div class="tree-menu-anchor">
-          <button class="row-action-add" class:active={addMenuOpenFor === node.id} title="Add child" on:click|stopPropagation={(event) => toggleAddMenu(node.id, event)}>+&gt;</button>
-          {#if addMenuOpenFor === node.id}
-            <div class="row-add-popover" style={addMenuPosition ? `top: ${addMenuPosition.top}px; right: ${addMenuPosition.right}px` : ""}>
-              <span class="row-add-popover-heading">Add child</span>
-              <NodeList isEmpty={false}>
-                {#each entryTypeChoicesByKind(metadataSchema, config.kind) as choice (choice.id)}
-                  <NodeRow
-                    title={choice.name}
-                    onClick={() => { addTreeChild(config, node.id, choice.id); addMenuOpenFor = null; addMenuPosition = null; }}
-                  />
-                {/each}
-              </NodeList>
-            </div>
-          {/if}
-        </div>
-        <button class="row-action-delete" title={`Delete ${entryTypeName(node.type, metadataSchema)}`} on:click|stopPropagation={() => requestDeleteTreeNode(config, node)}>×</button>
-      {/snippet}
-      {#snippet nested()}
-        {#each childNodes as child (child.id)}
-          {@render renderTree(config, child)}
-        {/each}
-      {/snippet}
-    </NodeRow>
-  {/if}
-{/snippet}
-

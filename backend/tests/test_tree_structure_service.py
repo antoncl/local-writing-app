@@ -275,6 +275,17 @@ class TreeStructureServiceTests(unittest.TestCase):
         self.assertEqual(TreeStructureService.find_node(doc, "B").title, "Standalone")
         self.assertIsNone(TreeStructureService.find_node(doc, "missing"))
 
+    def test_find_by_leaf_ref(self) -> None:
+        doc = self._sample_document()
+        # Resolves a node from its leaf ref (the model's scene_id), not its
+        # structure-node id — the single primitive the manuscript and
+        # research title/delete paths share.
+        self.assertEqual(TreeStructureService.find_by_leaf_ref(doc, "s_a2").id, "A2")
+        self.assertEqual(TreeStructureService.find_by_leaf_ref(doc, "s_b").title, "Standalone")
+        # Container nodes carry no leaf ref, and unknown refs miss.
+        self.assertIsNone(TreeStructureService.find_by_leaf_ref(doc, "A"))
+        self.assertIsNone(TreeStructureService.find_by_leaf_ref(doc, "missing"))
+
     def test_find_parent(self) -> None:
         doc = self._sample_document()
         self.assertEqual(TreeStructureService.find_parent(doc, "A1").id, "A")

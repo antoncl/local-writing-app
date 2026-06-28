@@ -138,6 +138,14 @@ class TreeStructureService:
         return TreeStructureService._find_parent(document.root, node_id)
 
     @staticmethod
+    def find_by_leaf_ref(document: StructureDocument, leaf_id: str) -> StructureNode | None:
+        """Find the leaf node whose configured leaf ref (the model's
+        `scene_id`, named `leaf_ref_field` on disk) equals `leaf_id`, or
+        None. Lets callers locate a node from its underlying markdown-file
+        id rather than the structure-node id."""
+        return TreeStructureService._find_by_leaf_ref(document.root, leaf_id)
+
+    @staticmethod
     def extract_node(document: StructureDocument, node_id: str) -> StructureNode | None:
         """Remove and return the node with the given id, or None if it's not
         present (or is the root)."""
@@ -223,6 +231,16 @@ class TreeStructureService:
             if child.id == node_id:
                 return node
             found = TreeStructureService._find_parent(child, node_id)
+            if found is not None:
+                return found
+        return None
+
+    @staticmethod
+    def _find_by_leaf_ref(node: StructureNode, leaf_id: str) -> StructureNode | None:
+        if node.scene_id == leaf_id:
+            return node
+        for child in node.children:
+            found = TreeStructureService._find_by_leaf_ref(child, leaf_id)
             if found is not None:
                 return found
         return None

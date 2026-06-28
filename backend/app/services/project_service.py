@@ -536,10 +536,12 @@ class ProjectService(
             title=request.title,
             scene_id=scene_id,
         )
-        parent_id = request.parent_id
-        inserted = self._insert_scene_node(structure.root, parent_id, scene_node)
-        if not inserted:
-            self._first_container(structure.root).children.append(scene_node)
+        parent = TreeStructureService.find_node(structure, request.parent_id) if request.parent_id else None
+        # No (or unknown) parent: drop the quick-added scene into the first
+        # container so it lands somewhere visible rather than at the root.
+        if parent is None or self._is_leaf_node(parent):
+            parent = self._first_container(structure.root)
+        TreeStructureService.insert_node(parent, scene_node)
         self._manuscript_tree().write(structure)
         return self.read_scene(scene_id)
 
@@ -741,9 +743,12 @@ class ProjectService(
             title=request.title,
             scene_id=file_id,
         )
-        inserted = self._insert_scene_node(structure.root, request.parent_id, new_node)
-        if not inserted:
-            structure.root.children.append(new_node)
+        parent = TreeStructureService.find_node(structure, request.parent_id) if request.parent_id else None
+        # Unknown or leaf parent falls back to the root, matching the
+        # prior hand-rolled insert.
+        if parent is None or self._is_leaf_node(parent):
+            parent = structure.root
+        TreeStructureService.insert_node(parent, new_node)
         self._manuscript_tree().write(structure)
         return self.read_structure()
 
@@ -913,7 +918,9 @@ class ProjectService(
         if path.exists():
             path.unlink()
         structure = self.read_structure()
-        self._remove_scene_node(structure.root, node_id)
+        scene_node = TreeStructureService.find_by_leaf_ref(structure, node_id)
+        if scene_node is not None:
+            TreeStructureService.remove_node_by_id(structure.root, scene_node.id)
         self._manuscript_tree().write(structure)
         self._remove_scene_todos(node_id)
         # Strip references to both the scene file id and the structure
@@ -1735,20 +1742,6 @@ class ProjectService(
     def _is_leaf_node(self, node: StructureNode) -> bool:
         return node.type == "scene"
 
-    def _insert_scene_node(
-        self,
-        node: StructureNode,
-        parent_id: str | None,
-        scene_node: StructureNode,
-    ) -> bool:
-        if parent_id and node.id == parent_id and not self._is_leaf_node(node):
-            node.children.append(scene_node)
-            return True
-        for child in node.children:
-            if self._insert_scene_node(child, parent_id, scene_node):
-                return True
-        return False
-
     def _first_container(self, node: StructureNode) -> StructureNode:
         if not self._is_leaf_node(node):
             if not node.children:
@@ -1758,25 +1751,10 @@ class ProjectService(
                     return self._first_container(child)
         return node
 
-    def _remove_scene_node(self, node: StructureNode, scene_id: str) -> bool:
-        before = len(node.children)
-        node.children = [
-            child
-            for child in node.children
-            if child.scene_id != scene_id
-        ]
-        if len(node.children) != before:
-            return True
-        return any(self._remove_scene_node(child, scene_id) for child in node.children)
-
     def _update_scene_title_in_structure(self, scene_id: str, title: str) -> None:
         self._require_project()
         structure = self.read_structure()
-        if self._rename_scene_node(structure.root, scene_id, title):
-            self._manuscript_tree().write(structure)
-
-    def _rename_scene_node(self, node: StructureNode, scene_id: str, title: str) -> bool:
-        if node.scene_id == scene_id:
+        node = TreeStructureService.find_by_leaf_ref(structure, scene_id)
+        if node is not None:
             node.title = title
-            return True
-        return any(self._rename_scene_node(child, scene_id, title) for child in node.children)
+            self._manuscript_tree().write(structure)

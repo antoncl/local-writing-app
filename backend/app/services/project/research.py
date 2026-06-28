@@ -384,12 +384,7 @@ class ResearchNotesMixin:
     def _update_research_title_in_structure(self, note_id: str, title: str) -> None:
         tree = self._research_tree()
         document = tree.read()
-
-        def walk(node: StructureNode) -> bool:
-            if node.scene_id == note_id:
-                node.title = title
-                return True
-            return any(walk(child) for child in node.children)
-
-        if walk(document.root):
+        node = TreeStructureService.find_by_leaf_ref(document, note_id)
+        if node is not None:
+            node.title = title
             tree.write(document)

@@ -9,6 +9,7 @@
   import SchemaTypeEditor from "./SchemaTypeEditor.svelte";
   import SchemaTreePane from "./SchemaTreePane.svelte";
   import Tree, { type TreeConfig } from "./Tree.svelte";
+  import Lore from "./Lore.svelte";
   import {
     buildNodeTypeTree,
     buildSchemaFieldSections,
@@ -35,7 +36,7 @@
   import { compileMatcher } from "./implicitContextMatcher";
   import { renderChatContent } from "./chatMessageRender";
   import { formatCostEur, formatTokens } from "./money";
-  import { setPalette, getSwatch, resolveColorForType, resolveColor } from "./colors";
+  import { setPalette, resolveColor } from "./colors";
   import GroupsManagerDialog from "./GroupsManagerDialog.svelte";
   import TagManagerDialog from "./TagManagerDialog.svelte";
   import type { OptionDraft } from "./SelectOptionsEditor.svelte";
@@ -93,12 +94,6 @@
   // data, the editor-pane coupling (delete, dblclick-open), and collapse state.
   type PaneId = "project" | "outline" | "lore" | "todo" | "search" | string;
   type MetadataReloadSignal = { token: number; metadata: EntryMetadata; status: string; entryType: string };
-  type LoreEntryGroup = {
-    id: string;
-    label: string;
-    entries: LoreEntrySummary[];
-    depth: number;
-  };
   type PaneState = {
     title: string;
     x: number;
@@ -316,8 +311,6 @@
   let assistantEntries: AssistantEntrySummary[] = [];
   let newTodo = "";
   let searchQuery = "";
-  let loreSearchQuery = "";
-  let collapsedLoreGroups: Record<string, boolean> = {};
   let collapsedPromptGroups: Record<string, boolean> = {};
   let collapsedAssistantGroups: Record<string, boolean> = {};
   // Outline group-header collapse state, keyed by StructureNode.id.
@@ -390,7 +383,6 @@
 
   $: allEmbeddedTodos = Object.values(embeddedTodosByPane).flat();
   $: embeddedTodoStatusHintsByPane = buildEmbeddedTodoStatusHintsByPane(embeddedTodosByPane);
-  $: filteredLoreEntries = filterLoreEntries(loreEntries, loreSearchQuery);
   $: draftTitleByScene = computeDraftTitleOverrides(editorPanes);
 
   function computeDraftTitleOverrides(panes: EditorPaneState[]): Map<string, string> {
@@ -405,7 +397,6 @@
     }
     return map;
   }
-  $: groupedLoreEntries = groupLoreEntriesByType(filteredLoreEntries, metadataSchema);
   $: schemaSelectedEntryType = metadataSchema?.entry_types[schemaFieldEntryType] ?? metadataSchema?.entry_types.scene ?? null;
   $: schemaFieldKind =
     schemaSelectedEntryType?.kind === "lore"
@@ -2851,38 +2842,6 @@
     status = `Loaded ${entry.title}`;
   }
 
-  function filterLoreEntries(entries: LoreEntrySummary[], query: string) {
-    const normalizedQuery = query.trim().toLowerCase();
-    if (!normalizedQuery) return entries;
-    return entries.filter((entry) => loreEntrySearchText(entry).includes(normalizedQuery));
-  }
-
-  function groupLoreEntriesByType(entries: LoreEntrySummary[], schema: MetadataSchema | null): LoreEntryGroup[] {
-    const groupsByType = new Map<string, LoreEntryGroup>();
-    for (const entry of entries) {
-      const groupId = `type:${entry.entry_type || "unknown"}`;
-      const existingGroup = groupsByType.get(groupId);
-      if (existingGroup) {
-        existingGroup.entries.push(entry);
-      } else {
-        groupsByType.set(groupId, {
-          id: groupId,
-          label: loreEntryTypeName(entry, schema),
-          entries: [entry],
-          depth: 0,
-        });
-      }
-    }
-    return Array.from(groupsByType.values()).sort((left, right) => left.label.localeCompare(right.label, undefined, { sensitivity: "base" }));
-  }
-
-  function toggleLoreGroup(groupId: string) {
-    collapsedLoreGroups = {
-      ...collapsedLoreGroups,
-      [groupId]: !collapsedLoreGroups[groupId],
-    };
-  }
-
   function togglePromptGroup(groupId: string) {
     collapsedPromptGroups = {
       ...collapsedPromptGroups,
@@ -2897,52 +2856,10 @@
     };
   }
 
-  function loreEntrySearchText(entry: LoreEntrySummary) {
-    return [
-      entry.title,
-      entry.body,
-      loreEntryTypeName(entry, metadataSchema),
-      metadataSearchText(entry.metadata),
-    ]
-      .join(" ")
-      .toLowerCase();
-  }
-
-  function loreEntryTypeName(entry: LoreEntrySummary, schema = metadataSchema) {
-    return schema?.entry_types[entry.entry_type]?.name ?? "Entry";
-  }
-
-  function loreEntryDetailText(entry: LoreEntrySummary) {
-    // Editorial Card direction: kind is implied by the group header,
-    // tags render as pills (see loreEntryTags), aliases stay in the
-    // editor pane only. Keeping the function for future per-entry
-    // detail (e.g. "last edited 2 days ago") — null today.
-    void entry;
-    return null;
-  }
-
-  function loreEntryTags(entry: LoreEntrySummary): string[] {
-    const raw = entry.metadata?.tags;
-    if (Array.isArray(raw)) {
-      return raw.map((item) => String(item).trim()).filter(Boolean);
-    }
-    if (typeof raw === "string") {
-      return raw.split(",").map((s) => s.trim()).filter(Boolean);
-    }
-    return [];
-  }
-
   function metadataListText(value: unknown) {
     if (Array.isArray(value)) return value.map((item) => String(item).trim()).filter(Boolean).join(", ");
     if (typeof value === "string") return value.trim();
     return "";
-  }
-
-  function metadataSearchText(value: unknown): string {
-    if (value === null || value === undefined) return "";
-    if (Array.isArray(value)) return value.map(metadataSearchText).join(" ");
-    if (typeof value === "object") return Object.values(value).map(metadataSearchText).join(" ");
-    return String(value);
   }
 
   function addEditorPane() {
@@ -3717,72 +3634,14 @@
       </div>
     </header>
     <div class="pane-content">
-      <NodeList
-        searchPlaceholder="Search entries, tags, aliases"
-        bind:searchValue={loreSearchQuery}
-        isEmpty={groupedLoreEntries.length === 0}
-      >
-        {#each groupedLoreEntries as group}
-          <NodeRow
-            groupHeader
-            collapsed={!!collapsedLoreGroups[group.id]}
-            title={group.label}
-            depth={group.depth}
-            onClick={() => toggleLoreGroup(group.id)}
-            on:mousedown={(event) => event.stopPropagation()}
-          >
-            {#snippet leading()}
-              <span class:collapsed={collapsedLoreGroups[group.id]} class="lore-group-caret">▾</span>
-            {/snippet}
-            {#snippet trailing()}
-              <span class="group-count-pill">{group.entries.length}</span>
-            {/snippet}
-            {#snippet nested()}
-              {#if !collapsedLoreGroups[group.id]}
-                {#each group.entries as entry}
-                  {@const detailText = loreEntryDetailText(entry)}
-                  {@const entryTagList = loreEntryTags(entry)}
-                  {@const instanceColor = typeof entry.metadata?.color === "string" ? entry.metadata.color : null}
-                  {@const entrySwatch = (() => {
-                    const s = getSwatch(instanceColor);
-                    if (s) return s;
-                    return resolveColorForType(entry.entry_type, metadataSchema);
-                  })()}
-                  <NodeRow
-                    title={entry.title}
-                    detail={detailText}
-                    tags={entryTagList}
-                    depth={group.depth + 1}
-                    active={focusedEditorPane?.document?.type === "lore" && focusedEditorPane.document.id === entry.id}
-                    pinned={pinnedEditorPaneKeys.has(`lore:${entry.id}`)}
-                    stripeColor={entrySwatch?.hex ?? null}
-                    onClick={() => openLoreEntryInEditorPane(entry.id)}
-                    on:mousedown={(event) => event.stopPropagation()}
-                  >
-                    {#snippet trailing()}
-                      {#if entry.entry_type === "lore_note"}
-                        <button
-                          class="row-action-add"
-                          type="button"
-                          title="Move to Research"
-                          on:click|stopPropagation={() => requestMoveLoreNoteToResearch(entry)}
-                        >→R</button>
-                      {/if}
-                    {/snippet}
-                  </NodeRow>
-                {/each}
-              {/if}
-            {/snippet}
-          </NodeRow>
-        {/each}
-        {#snippet whenEmpty()}
-          {#if loreEntries.length === 0}
-            <p class="muted">No entries yet.</p>
-          {:else}
-            <p class="muted">No entries match this search.</p>
-          {/if}
-        {/snippet}
-      </NodeList>
+      <Lore
+        entries={loreEntries}
+        schema={metadataSchema}
+        focusedDocument={focusedEditorPane?.document ?? null}
+        pinnedKeys={pinnedEditorPaneKeys}
+        onOpenEntry={(id) => openLoreEntryInEditorPane(id)}
+        onMoveNoteToResearch={(entry) => requestMoveLoreNoteToResearch(entry)}
+      />
     </div>
     <button class="pane-resize" type="button" aria-label="Resize Lore pane" on:keydown={(event) => handlePaneResizeKeydown(event, "lore")} on:mousedown={(event) => startPaneResize(event, "lore")}></button>
   </section>

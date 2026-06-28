@@ -57,7 +57,7 @@
     {#snippet trailing()}
       <span class="group-count-pill">{backlinks.length}</span>
     {/snippet}
-    {#snippet children()}
+    {#snippet nested()}
       <NodeList mode="tree" isEmpty={backlinks.length === 0}>
         {#snippet whenEmpty()}
           <p class="muted">No incoming references.</p>

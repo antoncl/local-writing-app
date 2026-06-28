@@ -4362,7 +4362,7 @@
             {#snippet trailing()}
               <span class="group-count-pill">{group.entries.length}</span>
             {/snippet}
-            {#snippet children()}
+            {#snippet nested()}
               {#if !collapsedLoreGroups[group.id]}
                 {#each group.entries as entry}
                   {@const detailText = loreEntryDetailText(entry)}
@@ -4947,7 +4947,7 @@
             {#snippet trailing()}
               <span class="group-count-pill">{group.entries.length}</span>
             {/snippet}
-            {#snippet children()}
+            {#snippet nested()}
               {#each group.entries as entry (entry.id)}
                 <NodeRow
                   title={entry.title}
@@ -5329,7 +5329,7 @@
       <span class="group-count-pill">{subtypeEntries.length}</span>
       <button class="pin-button" type="button" on:click|stopPropagation={() => newPromptEntry(node.id)}>+ Entry</button>
     {/snippet}
-    {#snippet children()}
+    {#snippet nested()}
       {#each subtypeEntries as entry (entry.id)}
         <NodeRow
           title={entry.title}
@@ -5381,8 +5381,8 @@
       on:dragover={(event) => { if (config.supportsDrag) handleTreeDragOver(event, node); }}
       on:drop={(event) => { if (config.supportsDrag) handleTreeDrop(event, node); }}
     >
-      {#if config.supportsDrag}
-        {#snippet leading()}
+      {#snippet leading()}
+        {#if config.supportsDrag}
           <span
             class="tree-handle"
             draggable="true"
@@ -5392,8 +5392,8 @@
             on:dragstart={(event) => handleTreeDragStart(event, node)}
             on:dragend={handleTreeDragEnd}
           >⋮⋮</span>
-        {/snippet}
-      {/if}
+        {/if}
+      {/snippet}
     </NodeRow>
   {:else if editing}
     <!-- Rename-in-progress: titleSlot hosts the input. Variant stays
@@ -5423,7 +5423,7 @@
           on:blur={() => commitRename(config, node.id)}
         />
       {/snippet}
-      {#snippet children()}
+      {#snippet nested()}
         {#if !leaf}
           {#each childNodes as child (child.id)}
             {@render renderTree(config, child)}
@@ -5487,7 +5487,7 @@
         </div>
         <button class="row-action-delete" title={`Delete ${entryTypeName(node.type, metadataSchema)}`} on:click|stopPropagation={() => requestDeleteTreeNode(config, node)}>×</button>
       {/snippet}
-      {#snippet children()}
+      {#snippet nested()}
         {#each childNodes as child (child.id)}
           {@render renderTree(config, child)}
         {/each}
@@ -5532,7 +5532,7 @@
         <button class="row-action-delete" type="button" title={`Delete ${node.label}`} aria-label={`Delete ${node.label}`} on:click={() => requestDeleteSchemaType(node.id)}>×</button>
       {/if}
     {/snippet}
-    {#snippet children()}
+    {#snippet nested()}
       {#each fieldEntries as [fieldId, field] (fieldId)}
         {@const fieldSource = metadataSchemaOverview?.field_sources[fieldId]}
         <NodeRow

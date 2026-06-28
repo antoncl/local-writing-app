@@ -92,7 +92,15 @@
   export let titleSlot: Snippet | undefined = undefined;
   // Nested rows rendered after the main row. Indent is the caller's
   // responsibility (they re-render NodeRow with `depth + 1`).
-  export let children: Snippet | undefined = undefined;
+  //
+  // Why `nested` and not `children`: Svelte 5 implicitly populates a
+  // `children` prop with ANY content between `<NodeRow>` tags — including
+  // bare `{#if}` blocks that only wrap a `{#snippet leading}`. That
+  // implicit value was non-null even when no real nested rows existed,
+  // which made the `.node-row-group-children` wrapper render as an empty
+  // tinted bar below leaf rows. Using a non-reserved prop name keeps the
+  // wrapper opt-in.
+  export let nested: Snippet | undefined = undefined;
 
   const TAG_VISIBLE_MAX = 2;
 
@@ -134,8 +142,8 @@
   on:drop
 >{#if leading}{@render leading()}{/if}{#if titleSlot}{@render titleSlot()}{:else if clickable}<button type="button" class="node-row-click" on:click={onClick} on:dblclick={onDblClick}><span class="node-row-text"><strong>{title}</strong>{#if detailSlot}{@render detailSlot()}{:else if detail}<small>{detail}</small>{/if}{#if visibleTags.length > 0}<span class="node-row-tags">{#each visibleTags as tag}<span class="node-row-tag">{tag}</span>{/each}{#if hiddenTagCount > 0}<span class="node-row-tag node-row-tag-overflow">+{hiddenTagCount}</span>{/if}</span>{/if}</span></button>{:else}<span class="node-row-text"><strong>{title}</strong>{#if detailSlot}{@render detailSlot()}{:else if detail}<small>{detail}</small>{/if}{#if visibleTags.length > 0}<span class="node-row-tags">{#each visibleTags as tag}<span class="node-row-tag">{tag}</span>{/each}{#if hiddenTagCount > 0}<span class="node-row-tag node-row-tag-overflow">+{hiddenTagCount}</span>{/if}</span>{/if}</span>{/if}{#if pinned}<span class="node-row-pin-indicator" title="Open in a pinned editor" aria-label="Pinned in editor">★</span>{/if}{#if trailing}<span class="node-row-trailing">{@render trailing()}</span>{/if}</div>
 
-{#if children && !collapsed}
-  <div class="node-row-group-children">{@render children()}</div>
+{#if nested && !collapsed}
+  <div class="node-row-group-children">{@render nested()}</div>
 {/if}
 
 <style>

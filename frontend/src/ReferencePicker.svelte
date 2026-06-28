@@ -185,7 +185,7 @@
         />
       </span>
     {/snippet}
-    {#snippet children()}
+    {#snippet nested()}
       <NodeList mode="tree" isEmpty={selectedRefs.length === 0}>
         {#snippet whenEmpty()}
           <p class="muted">No references.</p>

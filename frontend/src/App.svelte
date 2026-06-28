@@ -6,7 +6,14 @@
   import NodeRow from "./NodeRow.svelte";
   import DirectoryPickerModal from "./DirectoryPickerModal.svelte";
   import NodeList from "./NodeList.svelte";
-  import SchemaFieldInlineEditor from "./SchemaFieldInlineEditor.svelte";
+  import SchemaTypeEditor from "./SchemaTypeEditor.svelte";
+  import {
+    buildSchemaFieldSections,
+    nodeTypeDisplayName,
+    slugifyFieldId,
+    sourceBadgeLabel,
+    suggestPrefixFromLabel,
+  } from "./schemaTypeHelpers";
   import NewProjectModal from "./NewProjectModal.svelte";
   import MachineSettingsDialog from "./MachineSettingsDialog.svelte";
   import ConfirmModal from "./ConfirmModal.svelte";
@@ -18,10 +25,9 @@
   import { renderChatContent } from "./chatMessageRender";
   import { formatCostEur, formatTokens } from "./money";
   import { setPalette, getSwatch, resolveColorForType, resolveColor } from "./colors";
-  import { fieldIconClass, fieldTypeLabel } from "./fieldIcons";
+  import { fieldTypeLabel } from "./fieldIcons";
   import GroupsManagerDialog from "./GroupsManagerDialog.svelte";
   import TagManagerDialog from "./TagManagerDialog.svelte";
-  import SwatchPicker from "./SwatchPicker.svelte";
   import type { OptionDraft } from "./SelectOptionsEditor.svelte";
   import type {
     AIHealthResponse,
@@ -467,34 +473,6 @@
     metadataSchema && selectedSchemaTypeId ? fieldEntriesForEntryType(selectedSchemaTypeId) : [];
   $: typeInheritedFieldEntries =
     metadataSchema && selectedSchemaTypeId ? inheritedFieldEntriesForEntryType(selectedSchemaTypeId) : [];
-  // L1 grouping for the type editor (mirrors the rail's buildSections in
-  // MetadataPanel): ungrouped fields render first under no header, then
-  // each group in first-appearance order under its own section header.
-  // Preserves the underlying entry order so drag-reorder still operates on
-  // the stored sequence.
-  type SchemaFieldSection = {
-    group: string | null;
-    entries: [string, MetadataFieldDefinition][];
-  };
-  function buildSchemaFieldSections(
-    entries: [string, MetadataFieldDefinition][],
-  ): SchemaFieldSection[] {
-    const ungrouped: [string, MetadataFieldDefinition][] = [];
-    const groups = new Map<string, [string, MetadataFieldDefinition][]>();
-    for (const entry of entries) {
-      const group = (entry[1].group ?? "").trim();
-      if (!group) {
-        ungrouped.push(entry);
-      } else {
-        if (!groups.has(group)) groups.set(group, []);
-        groups.get(group)!.push(entry);
-      }
-    }
-    const out: SchemaFieldSection[] = [];
-    if (ungrouped.length) out.push({ group: null, entries: ungrouped });
-    for (const [group, groupEntries] of groups) out.push({ group, entries: groupEntries });
-    return out;
-  }
   $: typeOwnFieldSections = buildSchemaFieldSections(typeOwnFieldEntries);
   $: typeInheritedFieldSections = buildSchemaFieldSections(typeInheritedFieldEntries);
   // L2 reusable groups: the applications on the selected type + the groups
@@ -505,12 +483,6 @@
       ? metadataSchema.entry_types[selectedSchemaTypeId]?.group_applications
       : null) ?? [];
   $: availableGroupEntries = Object.entries(metadataSchema?.groups ?? {});
-  // Display name for a group-derived field's origin marker.
-  function groupOriginLabel(field: MetadataFieldDefinition): string {
-    if (field.group) return field.group;
-    const def = field.group_origin ? metadataSchema?.groups?.[field.group_origin] : null;
-    return def?.name ?? "group";
-  }
   $: schemaContextHeading =
     schemaFieldKind === "lore"
       ? "Lore Entry Types"
@@ -1505,24 +1477,6 @@
       .filter((entry): entry is [string, MetadataFieldDefinition] => Boolean(entry));
   }
 
-  // The type a given field is inherited from (its defining entry-type's
-  // display name) — for the "extends" jump label. Best-effort: the
-  // nearest ancestor whose own_fields includes the field.
-  function inheritedFromLabel(entryTypeId: string, fieldId: string): string {
-    let cursor = metadataSchema?.entry_types[entryTypeId]?.parent ?? null;
-    let guard = 0;
-    while (cursor && guard < 20) {
-      const def = metadataSchema?.entry_types[cursor];
-      if (!def) break;
-      if (Array.isArray(def.own_fields) ? def.own_fields.includes(fieldId) : def.fields?.includes(fieldId)) {
-        return nodeTypeDisplayName(cursor, def);
-      }
-      cursor = def.parent ?? null;
-      guard += 1;
-    }
-    return "parent";
-  }
-
   function buildNodeTypeOptions(schema: MetadataSchema | null): NodeTypeOption[] {
     const entryTypes = schema?.entry_types ?? {};
     const childrenByParent: Record<string, string[]> = {};
@@ -1618,24 +1572,8 @@
     return rootIds.map((typeId) => buildNode(typeId, 0)).filter((node): node is NodeTypeTreeNode => Boolean(node));
   }
 
-  function nodeTypeDisplayName(typeId: string, definition: EntryTypeDefinition | undefined) {
-    if (typeId === "scene") return "Scenes";
-    if (typeId === "lore_entry") return "Lore Entries";
-    if (typeId === "prompt") return "Prompts";
-    return definition?.name ?? typeId;
-  }
-
   function schemaTypeSource(typeId: string | null) {
     return typeId ? metadataSchemaOverview?.entry_type_sources[typeId] : null;
-  }
-
-  function sourceLayerIndex(source: { layer_id: string; built_in: boolean } | undefined | null) {
-    if (!source || source.built_in) return 0;
-    return Math.max(0, metadataSchemaLayers.findIndex((layer) => layer.id === source.layer_id) + 1);
-  }
-
-  function sourceBadgeLabel(source: { layer_label: string; built_in: boolean } | undefined | null) {
-    return source?.built_in ? "System" : (source?.layer_label ?? "Unknown");
   }
 
   // The field types offered in the inline type grid, in display order.
@@ -1977,15 +1915,6 @@
     }
   }
 
-  function slugifyFieldId(value: string) {
-    return value
-      .trim()
-      .toLowerCase()
-      .replace(/[^a-z0-9]+/g, "_")
-      .replace(/^_+|_+$/g, "")
-      .replace(/^[0-9]/, "field_$&");
-  }
-
   // Coerce the editor-side string default onto the field-type's wire shape
   // (#38). Mirrors NodeEditor.defaultValueForStorage for prompt inputs;
   // returns undefined for empty (no default) and computed types.
@@ -2102,11 +2031,6 @@
     // Collapse the inline editor on a successful save.
     expandedSchemaFieldId = null;
     status = "Updated details schema";
-  }
-
-  function suggestPrefixFromLabel(label: string): string {
-    const slug = slugifyFieldId(label);
-    return slug ? `${slug}_` : "";
   }
 
   async function applyGroupToType() {
@@ -4502,248 +4426,68 @@
         <button class="pin-button" type="button" on:mousedown={(event) => event.stopPropagation()} on:click={() => closeSchemaPane("schema_type")}>Close</button>
       </div>
     </header>
-    <div class="pane-content schema-editor">
-      {#if schemaTypeReadonly}
-        <div class="schema-target-layer">
-          <strong>Scope</strong>
-          <span>System</span>
-        </div>
-      {:else}
-        <label>
-          Save layer
-          <select bind:value={schemaTypeLayerId}>
-            {#each metadataSchemaLayers as layer}
-              <option value={layer.id}>{layer.label}</option>
-            {/each}
-          </select>
-        </label>
-      {/if}
-      <label>
-        Type name
-        <input readonly={schemaTypeReadonly} value={schemaTypeName} placeholder="Faction" on:input={(event) => updateSchemaTypeName(event.currentTarget.value)} />
-        {#if schemaTypeId}
-          <small class="type-id-caption" title="Identifier used in YAML and template includes (generated from the type name)">id: <code>{schemaTypeId}</code></small>
-        {/if}
-      </label>
-      <div class="schema-type-identity">
-        <span class={`kind-pill kind-${schemaTypeKind}`}>{schemaTypeKind}</span>
-        {#if schemaTypeParent}
-          {@const parentDef = metadataSchema?.entry_types[schemaTypeParent]}
-          <span class="extends-label"><i class="ti ti-arrow-up" aria-hidden="true"></i> extends</span>
-          <span class="extends-pill">{nodeTypeDisplayName(schemaTypeParent, parentDef)}</span>
-        {/if}
-      </div>
-      <div class="schema-type-color-row">
-        <span>Color</span>
-        <SwatchPicker bind:value={schemaTypeColor} />
-        {#if !schemaTypeColor && selectedSchemaTypeId}
-          {@const inherited = metadataSchema?.entry_types[selectedSchemaTypeId]?.color}
-          {#if inherited}
-            <small class="muted">inherits <code>{inherited}</code> from parent</small>
-          {:else}
-            <small class="muted">no color (chips fall back to the kind default)</small>
-          {/if}
-        {/if}
-      </div>
-      {#if selectedSchemaTypeId}
-        {@const fieldEntries = typeOwnFieldEntries}
-        {@const inheritedEntries = typeInheritedFieldEntries}
-        {#snippet fieldInlineEditor()}
-          <SchemaFieldInlineEditor
-            bind:type={schemaFieldType}
-            bind:name={schemaFieldName}
-            bind:icon={schemaFieldIcon}
-            bind:id={schemaFieldId}
-            bind:group={schemaFieldGroup}
-            bind:defaultValue={schemaFieldDefault}
-            bind:options={schemaFieldOptionList}
-            bind:computedFunction={schemaFieldComputedFunction}
-            bind:computedScope={schemaFieldComputedScope}
-            bind:pickerConfig={schemaFieldPickerConfig}
-            bind:typeMenuOpen={schemaFieldTypeMenuOpen}
-            bind:keyEditing={schemaFieldKeyEditing}
-            bind:keyManual={schemaFieldKeyManual}
-            bind:iconPickerOpen={iconPickerOpen}
-            selectedFieldId={selectedSchemaFieldId}
-            readonly={schemaFieldReadonly}
-            layerId={schemaFieldLayerId}
-            metadataSchema={metadataSchema}
-            onChooseType={chooseSchemaFieldType}
-            onNameChange={updateSchemaFieldName}
-            onKeyChange={(value) => (schemaFieldId = slugifyFieldId(value))}
-            on:save={saveSchemaField}
-            on:cancel={() => (expandedSchemaFieldId = null)}
-            on:remove={requestDeleteSchemaField}
-          />
-        {/snippet}
-        <section class="schema-type-fields" aria-label="Fields on this type">
-          <header class="schema-type-fields-header">
-            <strong>Fields</strong>
-            <small>{fieldEntries.length}{inheritedEntries.length ? ` · ${inheritedEntries.length} inherited` : ""}</small>
-          </header>
-          <div class="schema-field-rows">
-            {#each typeOwnFieldSections as section}
-              {#if section.group}
-                <div class="rail-group-head">
-                  <span class="rail-group-label">{section.group}</span>
-                  <span class="rail-group-rule"></span>
-                </div>
-              {/if}
-              {#each section.entries as [fieldId, field]}
-                {@const fieldSource = metadataSchemaOverview?.field_sources[fieldId]}
-                {@const isExpanded = expandedSchemaFieldId === fieldId}
-                <button
-                  class="schema-field-row"
-                  class:expanded={isExpanded}
-                  class:drop-before={fieldDropTarget?.id === fieldId && fieldDropTarget?.position === "before"}
-                  class:drop-after={fieldDropTarget?.id === fieldId && fieldDropTarget?.position === "after"}
-                  type="button"
-                  draggable={fieldEntries.length > 1 && !schemaTypeReadonly}
-                  on:click={() => toggleSchemaFieldInline(fieldId, selectedSchemaTypeId!)}
-                  on:dragstart={() => onFieldDragStart(fieldId)}
-                  on:dragover={(event) => onFieldDragOver(event, fieldId)}
-                  on:dragleave={() => { if (fieldDropTarget?.id === fieldId) fieldDropTarget = null; }}
-                  on:drop|preventDefault={() => onFieldDrop(fieldId)}
-                  on:dragend={clearFieldDrag}
-                >
-                  <span class="sfr-grip" title="Drag to reorder" aria-hidden="true"><i class="ti ti-grip-vertical"></i></span>
-                  <span class="sfr-tile"><i class={fieldIconClass(field)} aria-hidden="true"></i></span>
-                  <span class="sfr-name">{field.name}</span>
-                  <span class="sfr-typechip">{fieldTypeLabel(field.type)}</span>
-                  <span class="sfr-meta">
-                    <span class="schema-source-badge" style={`--source-index: ${sourceLayerIndex(fieldSource)}`}>{sourceBadgeLabel(fieldSource)}</span>
-                    <i class={`ti sfr-cog ${isExpanded ? "ti-chevron-up" : "ti-settings"}`} aria-hidden="true"></i>
-                  </span>
-                </button>
-                {#if isExpanded}
-                  {@render fieldInlineEditor()}
-                {/if}
-              {/each}
-            {/each}
-            {#each typeInheritedFieldSections as section}
-              {#if section.group}
-                <div class="rail-group-head">
-                  <span class="rail-group-label">{section.group}</span>
-                  <span class="rail-group-rule"></span>
-                </div>
-              {/if}
-              {#each section.entries as [fieldId, field]}
-                <div class="schema-field-row inherited" aria-label={`${field.name} (inherited)`}>
-                  <span class="sfr-grip" aria-hidden="true"><i class="ti ti-grip-vertical"></i></span>
-                  <span class="sfr-tile"><i class={fieldIconClass(field)} aria-hidden="true"></i></span>
-                  <span class="sfr-name">{field.name}</span>
-                  <span class="sfr-typechip">{fieldTypeLabel(field.type)}</span>
-                  <span class="sfr-meta">
-                    {#if field.group_origin}
-                      <span class="sfr-group-origin"><i class="ti ti-stack-2" aria-hidden="true"></i> {groupOriginLabel(field)}</span>
-                    {:else}
-                      <span class="sfr-inherited-label">inherited from {inheritedFromLabel(selectedSchemaTypeId, fieldId)}</span>
-                      <i class="ti ti-arrow-up-right sfr-cog" aria-hidden="true"></i>
-                    {/if}
-                  </span>
-                </div>
-              {/each}
-            {/each}
-            {#if expandedSchemaFieldId === NEW_FIELD_SENTINEL}
-              {@render fieldInlineEditor()}
-            {/if}
-            {#if fieldEntries.length === 0 && inheritedEntries.length === 0 && expandedSchemaFieldId !== NEW_FIELD_SENTINEL}
-              <p class="muted">No fields defined on this type.</p>
-            {/if}
-          </div>
-          {#if !schemaTypeReadonly && expandedSchemaFieldId !== NEW_FIELD_SENTINEL}
-            <div class="button-row">
-              <button class="add-affordance" type="button" on:click={() => createSchemaFieldDraft(schemaTypeLayerId || projectSchemaLayerId(), selectedSchemaTypeId ?? undefined)}>+ Add field</button>
-            </div>
-          {/if}
-        </section>
-
-        {#if !schemaTypeReadonly}
-          <section class="schema-type-fields schema-type-groups" aria-label="Reusable groups">
-            <header class="schema-type-fields-header">
-              <strong>Reusable groups</strong>
-              <small>{typeGroupApplications.length}</small>
-            </header>
-            {#if typeGroupApplications.length}
-              <div class="applied-groups">
-                {#each typeGroupApplications as application, index}
-                  {@const groupDef = metadataSchema?.groups?.[application.group_id]}
-                  <div class="applied-group">
-                    <span class="sfr-tile"><i class={`ti ti-${groupDef?.icon || "stack-2"}`} aria-hidden="true"></i></span>
-                    <span class="ag-name">{groupDef?.name ?? application.group_id}</span>
-                    <span class="ag-as">as <strong>{application.label || "—"}</strong></span>
-                    <code class="ag-prefix">{application.key_prefix}</code>
-                    <button class="link-danger ag-remove" type="button" on:click={() => removeGroupApplication(index)}>Remove</button>
-                  </div>
-                {/each}
-              </div>
-            {/if}
-            {#if availableGroupEntries.length === 0}
-              <p class="muted">No reusable groups defined yet — create one in the Groups manager.</p>
-            {:else if groupApplyOpen}
-              <div class="group-apply-form">
-                <label class="sfi-field">Group
-                  <select bind:value={applyGroupId}>
-                    <option value="">— pick —</option>
-                    {#each availableGroupEntries as [gid, gdef]}
-                      <option value={gid}>{gdef.name}</option>
-                    {/each}
-                  </select>
-                </label>
-                <label class="sfi-field">Label
-                  <input
-                    value={applyGroupLabel}
-                    placeholder="External"
-                    on:input={(event) => {
-                      applyGroupLabel = event.currentTarget.value;
-                      if (!applyGroupPrefix.trim()) applyGroupPrefix = suggestPrefixFromLabel(applyGroupLabel);
-                    }}
-                  />
-                </label>
-                <label class="sfi-field">Prefix
-                  <input value={applyGroupPrefix} placeholder="external_" on:input={(event) => (applyGroupPrefix = event.currentTarget.value)} />
-                </label>
-                <div class="sfi-footer">
-                  <span class="sfi-spacer"></span>
-                  <button class="sfi-cancel" type="button" on:click={() => (groupApplyOpen = false)}>Cancel</button>
-                  <button class="sfi-done" type="button" disabled={!applyGroupId} on:click={applyGroupToType}>Apply</button>
-                </div>
-              </div>
-            {:else}
-              <div class="button-row">
-                <button class="add-affordance" type="button" on:click={() => { groupApplyOpen = true; applyGroupId = availableGroupEntries[0]?.[0] ?? ""; }}>+ Apply group</button>
-              </div>
-            {/if}
-          </section>
-        {/if}
-      {/if}
-
-      {#if schemaTypeKind === "prompt"}
-        <fieldset class="prompt-fieldset" disabled={schemaTypeReadonly}>
-          <legend>Prompt defaults</legend>
-          <label>
-            Brief
-            <textarea rows="4" bind:value={promptSystemPrompt} placeholder="Optional brief inherited by sub-types — sets the assistant's role."></textarea>
-          </label>
-          <label>
-            Output
-            <select bind:value={promptOutputKind}>
-              <option value="">(inherit from parent)</option>
-              <option value="append_to_body">Append to body</option>
-              <option value="replace_selection">Replace selection</option>
-              <option value="chat_panel">Chat panel</option>
-            </select>
-            <small>Where AI responses for this prompt type land. Inherited from parent (Continuation / Revise / General) when set there — only override for a top-level sub-type that doesn't inherit one of the bases.</small>
-          </label>
-        </fieldset>
-      {/if}
-
-      {#if !schemaTypeReadonly}
-        <div class="button-row">
-          <button type="button" disabled={!schemaTypeLayerId || !schemaTypeId.trim() || !schemaTypeName.trim()} on:click={saveSchemaType}>Save Type</button>
-        </div>
-      {/if}
-    </div>
+    <SchemaTypeEditor
+      bind:schemaTypeName
+      bind:schemaTypeLayerId
+      bind:schemaTypeColor
+      bind:schemaFieldType
+      bind:schemaFieldName
+      bind:schemaFieldIcon
+      bind:schemaFieldId
+      bind:schemaFieldGroup
+      bind:schemaFieldDefault
+      bind:schemaFieldOptionList
+      bind:schemaFieldComputedFunction
+      bind:schemaFieldComputedScope
+      bind:schemaFieldPickerConfig
+      bind:schemaFieldTypeMenuOpen
+      bind:schemaFieldKeyEditing
+      bind:schemaFieldKeyManual
+      bind:iconPickerOpen
+      bind:expandedSchemaFieldId
+      bind:fieldDropTarget
+      bind:groupApplyOpen
+      bind:applyGroupId
+      bind:applyGroupLabel
+      bind:applyGroupPrefix
+      bind:promptSystemPrompt
+      bind:promptOutputKind
+      schemaTypeId={schemaTypeId}
+      schemaTypeKind={schemaTypeKind}
+      schemaTypeParent={schemaTypeParent}
+      schemaTypeReadonly={schemaTypeReadonly}
+      selectedSchemaTypeId={selectedSchemaTypeId}
+      selectedSchemaFieldId={selectedSchemaFieldId}
+      schemaFieldReadonly={schemaFieldReadonly}
+      schemaFieldLayerId={schemaFieldLayerId}
+      metadataSchema={metadataSchema}
+      metadataSchemaOverview={metadataSchemaOverview}
+      metadataSchemaLayers={metadataSchemaLayers}
+      typeOwnFieldEntries={typeOwnFieldEntries}
+      typeInheritedFieldEntries={typeInheritedFieldEntries}
+      typeOwnFieldSections={typeOwnFieldSections}
+      typeInheritedFieldSections={typeInheritedFieldSections}
+      typeGroupApplications={typeGroupApplications}
+      availableGroupEntries={availableGroupEntries}
+      NEW_FIELD_SENTINEL={NEW_FIELD_SENTINEL}
+      projectSchemaLayerId={projectSchemaLayerId}
+      onTypeNameChange={updateSchemaTypeName}
+      onSaveType={saveSchemaType}
+      onChooseFieldType={chooseSchemaFieldType}
+      onFieldNameChange={updateSchemaFieldName}
+      onFieldKeyChange={(value) => (schemaFieldId = slugifyFieldId(value))}
+      onSaveField={saveSchemaField}
+      onCancelField={() => (expandedSchemaFieldId = null)}
+      onRemoveField={requestDeleteSchemaField}
+      onToggleFieldInline={toggleSchemaFieldInline}
+      onCreateFieldDraft={createSchemaFieldDraft}
+      onApplyGroup={applyGroupToType}
+      onRemoveGroupApplication={removeGroupApplication}
+      onFieldDragStart={onFieldDragStart}
+      onFieldDragOver={onFieldDragOver}
+      onFieldDrop={onFieldDrop}
+      onClearFieldDrag={clearFieldDrag}
+    />
     <button class="pane-resize" type="button" aria-label="Resize Detail Type pane" on:keydown={(event) => handlePaneResizeKeydown(event, "schema_type")} on:mousedown={(event) => startPaneResize(event, "schema_type")}></button>
   </section>
 

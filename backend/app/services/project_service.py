@@ -13,69 +13,51 @@ import yaml
 
 from app.models import (
     Backlink,
-    DirectoryEntry,
-    DirectoryListing,
     LoreEntry,
     MetadataSchema,
     MetadataValue,
-    ProjectInfo,
-    ProjectNode,
-    ProjectValidation,
-    SaveProjectNodeRequest,
     Scene,
-    StructureDocument,
-    StructureNode,
-    TodoItem,
-    UpdateProjectSettingsRequest,
 )
-from app.services.migrations import CURRENT_VERSION as PROJECT_SCHEMA_VERSION
-from app.services.migrations import migrate_project
 from app.services.project.ai_invocations import AiInvocationsMixin
 from app.services.project.assistants import AssistantEntriesMixin
 from app.services.project.chats import ChatSessionsMixin
+from app.services.project.computed_metadata import ComputedMetadataMixin
 
 # Re-exported so the historic import path
 # `from app.services.project_service import ProjectServiceError` keeps working.
 from app.services.project.errors import ProjectServiceError
+from app.services.project.lifecycle import ProjectLifecycleMixin
 from app.services.project.lore import LoreEntriesMixin
 from app.services.project.manuscript import ManuscriptMixin
 from app.services.project.metadata_values import MetadataValuesMixin
 from app.services.project.node_ops import NodeOpsMixin
+from app.services.project.project_node import ProjectNodeMixin
 from app.services.project.prompts import PromptEntriesMixin
 from app.services.project.references import ReferencesMixin
 from app.services.project.research import ResearchNotesMixin
+from app.services.project.scene_todos import SceneTodoAnchorsMixin
 from app.services.project.schema import MetadataSchemaMixin
 from app.services.project.search import SearchMixin
 from app.services.project.tags import TagsMixin
 from app.services.project.todos import TodosMixin
-
-# Re-exported so the historic module-level names keep resolving for any
-# importer; the definitions live in project/tree_configs.py so the research
-# slice can share them without an import cycle.
-from app.services.project.tree_configs import (
-    MANUSCRIPT_TREE_CONFIG,
-    RESEARCH_TREE_CONFIG,
-)
-from app.services.tree_structure import TreeStructureService
-
-TODO_ANCHOR_PATTERN = re.compile(
-    r"<!--\s*todo-anchor:id=([A-Za-z0-9_-]+)\s*-->([\s\S]*?)<!--\s*/todo-anchor\s*-->",
-)
-WORD_PATTERN = re.compile(r"[A-Za-z0-9]+(?:['-][A-Za-z0-9]+)?")
 
 
 class ProjectService(
     AiInvocationsMixin,
     AssistantEntriesMixin,
     ChatSessionsMixin,
-    PromptEntriesMixin,
+    ComputedMetadataMixin,
     LoreEntriesMixin,
     ManuscriptMixin,
     MetadataSchemaMixin,
     MetadataValuesMixin,
     NodeOpsMixin,
+    ProjectLifecycleMixin,
+    ProjectNodeMixin,
+    PromptEntriesMixin,
     ReferencesMixin,
     ResearchNotesMixin,
+    SceneTodoAnchorsMixin,
     SearchMixin,
     TagsMixin,
     TodosMixin,
@@ -84,327 +66,6 @@ class ProjectService(
         self.root_path: Path | None = None
         self.title: str | None = None
         self.last_migrations: list[str] = []
-
-    def create_project(self, root_path: Path, title: str, projects_base_folder: Path | None = None) -> ProjectInfo:
-        self.last_migrations = []
-        root = root_path.expanduser().resolve()
-        if projects_base_folder is None:
-            root.parent.mkdir(parents=True, exist_ok=True)
-        base_folder = self._validate_projects_base_folder(projects_base_folder or root.parent, root)
-        root.mkdir(parents=True, exist_ok=True)
-        for folder in ["scenes", "lore", "prompts", ".cache"]:
-            (root / folder).mkdir(exist_ok=True)
-        (root / "research" / "notes").mkdir(parents=True, exist_ok=True)
-
-        self._write_yaml(root / "project.yaml", self._new_project_manifest(title, root, base_folder))
-        # Project node singleton — book metadata, blurb, etc. live here.
-        self._write_project_node_file(
-            root / "project.md",
-            ProjectNode(id="project", title=title, body="", entry_type="project", metadata={}),
-        )
-        self._write_yaml(root / "metadata.schema.yaml", self._empty_metadata_schema())
-        self._write_yaml(root / "tags.yaml", {"tags": []})
-        initial_scene = Scene(
-            id=self._new_id("scene"),
-            title="Untitled Scene",
-            body="",
-            revision="",
-            status="draft",
-            entry_type="scene",
-            metadata={},
-        )
-        self._write_scene_file(self._filepath_for_new_node(root / "scenes", initial_scene.title), initial_scene)
-        # Seed the manuscript tree with one scene leaf so a fresh project
-        # opens to something instead of an empty outline.
-        TreeStructureService(root, MANUSCRIPT_TREE_CONFIG).initialize(
-            leaf_node={
-                "id": self._new_id("node"),
-                "type": "scene",
-                "title": initial_scene.title,
-                "scene_id": initial_scene.id,
-                "children": [],
-            },
-        )
-        # Research tree starts empty — no seeded topic or note. The
-        # research pane / kind ships in a later slice; this just ensures
-        # the file exists so validate_project doesn't flag it as missing.
-        TreeStructureService(root, RESEARCH_TREE_CONFIG).initialize()
-        self._write_yaml(root / "todo.yaml", {"items": []})
-        self.root_path = root
-        self.title = title
-        return self.current_project()
-
-    def _new_project_manifest(self, title: str, root: Path, projects_base_folder: Path | None = None) -> dict[str, Any]:
-        base_folder = projects_base_folder or root.parent
-        return {
-            "title": title,
-            "version": 1,
-            "schema_version": PROJECT_SCHEMA_VERSION,
-            "settings": {
-                "projects_base_folder": str(base_folder),
-                "theme": "system",
-                "ai": {
-                    "policy": "off",
-                    "default_provider": None,
-                    "default_model_class": None,
-                },
-            },
-            "manuscript_structure": {
-                "container_types": [
-                    {"type": "act", "label": "Act"},
-                    {"type": "chapter", "label": "Chapter"},
-                ]
-            },
-        }
-
-    def _empty_metadata_schema(self) -> dict[str, Any]:
-        return {"version": 1, "entry_types": {}, "fields": {}, "groups": {}}
-
-    def open_project(self, root_path: Path, projects_base_folder: Path | None = None) -> ProjectInfo:
-        root = root_path.expanduser().resolve()
-        if not (root / "project.yaml").exists():
-            raise ProjectServiceError("No project.yaml found in that folder.", 404)
-        try:
-            self.last_migrations = migrate_project(root)
-        except Exception as exc:  # noqa: BLE001
-            raise ProjectServiceError(f"Project migration failed: {exc}", 500) from exc
-        manifest = self._read_yaml(root / "project.yaml")
-        if projects_base_folder is not None:
-            base_folder = self._validate_projects_base_folder(projects_base_folder, root)
-            settings = manifest.get("settings")
-            if not isinstance(settings, dict):
-                settings = {}
-            settings["projects_base_folder"] = str(base_folder)
-            manifest["settings"] = settings
-            self._write_yaml(root / "project.yaml", manifest)
-        self.root_path = root
-        self.title = str(manifest.get("title") or root.name)
-        return self.current_project()
-
-    def current_project(self) -> ProjectInfo:
-        root = self._require_project()
-        ai = self._read_ai_settings(root)
-        return ProjectInfo(
-            title=self.title or root.name,
-            root_path=str(root),
-            projects_base_folder=str(self._metadata_schema_base_folder(root) or root.parent),
-            ai_policy=ai.get("policy", "off"),
-            ai_default_provider=ai.get("default_provider"),
-            ai_default_model_class=ai.get("default_model_class"),
-        )
-
-    def update_project_settings(self, request: UpdateProjectSettingsRequest) -> ProjectInfo:
-        root = self._require_project()
-        manifest = self._read_yaml(root / "project.yaml")
-        settings = manifest.get("settings")
-        if not isinstance(settings, dict):
-            settings = {}
-        if request.projects_base_folder is not None:
-            if not request.projects_base_folder.strip():
-                raise ProjectServiceError("Projects base folder is required.", 400)
-            base_folder = self._validate_projects_base_folder(Path(request.projects_base_folder), root)
-            settings["projects_base_folder"] = str(base_folder)
-        ai_settings = settings.get("ai")
-        if not isinstance(ai_settings, dict):
-            ai_settings = {}
-        if request.ai_policy is not None:
-            ai_settings["policy"] = request.ai_policy
-        if request.ai_default_provider is not None:
-            ai_settings["default_provider"] = request.ai_default_provider or None
-        if request.ai_default_model_class is not None:
-            ai_settings["default_model_class"] = request.ai_default_model_class or None
-        if ai_settings:
-            settings["ai"] = ai_settings
-        manifest["settings"] = settings
-        self._write_yaml(root / "project.yaml", manifest)
-        return self.current_project()
-
-    def _read_ai_settings(self, root: Path) -> dict[str, Any]:
-        try:
-            manifest = self._read_yaml(root / "project.yaml")
-        except Exception:
-            return {}
-        settings = manifest.get("settings")
-        if not isinstance(settings, dict):
-            return {}
-        ai = settings.get("ai")
-        return ai if isinstance(ai, dict) else {}
-
-    def _validate_projects_base_folder(self, base_folder_path: Path, project_root: Path) -> Path:
-        base_folder = base_folder_path.expanduser().resolve()
-        if not base_folder.exists():
-            raise ProjectServiceError("Projects base folder does not exist.", 404)
-        if not base_folder.is_dir():
-            raise ProjectServiceError("Projects base folder must be a folder.", 400)
-        if not self._is_relative_to(project_root, base_folder):
-            raise ProjectServiceError("Project folder must be inside the projects base folder.", 400)
-        return base_folder
-
-    def list_directories(self, path: Path | None = None) -> DirectoryListing:
-        target = (path or self._default_directory_picker_path()).expanduser().resolve()
-        if not target.exists():
-            raise ProjectServiceError("That folder does not exist.", 404)
-        if not target.is_dir():
-            raise ProjectServiceError("That path is not a folder.", 400)
-
-        directories: list[DirectoryEntry] = []
-        try:
-            children = sorted(
-                (child for child in target.iterdir() if child.is_dir()),
-                key=lambda child: child.name.lower(),
-            )
-        except PermissionError as exc:
-            raise ProjectServiceError("This folder cannot be opened.", 403) from exc
-
-        for child in children:
-            directories.append(DirectoryEntry(name=child.name, path=str(child)))
-
-        parent = target.parent if target.parent != target else None
-        return DirectoryListing(
-            path=str(target),
-            parent_path=str(parent) if parent else None,
-            directories=directories,
-        )
-
-    def _default_directory_picker_path(self) -> Path:
-        documents = Path.home() / "Documents"
-        if documents.exists() and documents.is_dir():
-            return documents
-        return Path.home()
-
-    def validate_project(self) -> ProjectValidation:
-        root = self._require_project()
-        warnings: list[str] = []
-        errors: list[str] = []
-        metadata_schema: MetadataSchema | None = None
-        node_index = self._build_node_index(root)
-        warnings.extend(node_index.warnings)
-        errors.extend(node_index.errors)
-
-        for required in [
-            "project.yaml",
-            "manuscript.structure.yaml",
-            "research.structure.yaml",
-            "todo.yaml",
-        ]:
-            if not (root / required).exists():
-                errors.append(f"Missing {required}.")
-
-        try:
-            metadata_schema = self.read_metadata_schema()
-            warnings.extend(self._metadata_schema_layer_warnings(root))
-            errors.extend(self._validate_metadata_schema_definition(metadata_schema))
-        except (ProjectServiceError, ValueError) as exc:
-            errors.append(f"Invalid metadata schema: {exc}")
-
-        scene_ids = {entry.id for entry in node_index.by_id.values() if entry.kind == "scene"}
-        referenced = TreeStructureService.collect_leaf_ids(self.read_structure().root)
-
-        for scene_id in sorted(referenced - scene_ids):
-            errors.append(f"Structure references missing scene {scene_id}.")
-        for scene_id in sorted(scene_ids - referenced):
-            warnings.append(f"Scene {scene_id} is not in the manuscript structure.")
-        for entry in sorted((entry for entry in node_index.by_id.values() if entry.kind == "scene"), key=lambda item: item.id):
-            scene_id = entry.id
-            path = entry.path
-            try:
-                front_matter, _ = self._read_markdown_with_front_matter(path, strict=True)
-                entry_type = front_matter.get("entry_type", "scene")
-                if entry_type is not None and not isinstance(entry_type, str):
-                    errors.append(f"Scene {scene_id} has invalid entry_type; it must be text.")
-                    entry_type = "scene"
-                metadata = self._normalise_metadata(front_matter.get("metadata"), path)
-                status = str(front_matter.get("status") or "draft")
-                if metadata_schema:
-                    errors.extend(self._validate_scene_metadata(scene_id, str(entry_type or "scene"), status, metadata, metadata_schema, node_index))
-            except ProjectServiceError as exc:
-                errors.append(exc.message)
-
-        for entry in sorted((entry for entry in node_index.by_id.values() if entry.kind == "lore"), key=lambda item: item.id):
-            entry_id = entry.id
-            path = entry.path
-            try:
-                front_matter, _ = self._read_markdown_with_front_matter(path, strict=True)
-                entry_type = front_matter.get("entry_type", "lore_note")
-                if entry_type is not None and not isinstance(entry_type, str):
-                    errors.append(f"Lore Entry {entry_id} has invalid entry_type; it must be text.")
-                    entry_type = "lore_note"
-                metadata = self._normalise_metadata(front_matter.get("metadata"), path)
-                if metadata_schema:
-                    errors.extend(self._validate_lore_entry_metadata(entry_id, str(entry_type or "lore_note"), metadata, metadata_schema, node_index))
-            except ProjectServiceError as exc:
-                errors.append(exc.message)
-
-        todos = self.read_todos()
-        todo_anchor_refs = {
-            (item.scene_id, item.anchor_id)
-            for item in todos.items
-            if item.scene_id and item.anchor_id
-        }
-        anchors_by_scene = self._read_scene_todo_anchors(scene_ids)
-        anchor_counts_by_scene = self._read_scene_todo_anchor_counts(scene_ids)
-
-        for item in todos.items:
-            label = f"TODO {item.id}"
-            if item.scene_id and item.scene_id not in scene_ids:
-                errors.append(f"{label} references missing scene {item.scene_id}.")
-            if item.anchor_id and not item.scene_id:
-                errors.append(f"{label} has anchor {item.anchor_id} but no scene.")
-            if item.scene_id and item.anchor_id and item.anchor_id not in anchors_by_scene.get(item.scene_id, set()):
-                errors.append(f"{label} references missing anchor {item.anchor_id} in scene {item.scene_id}.")
-
-        for scene_id, anchors in anchors_by_scene.items():
-            for anchor_id in sorted(anchors):
-                if (scene_id, anchor_id) not in todo_anchor_refs:
-                    warnings.append(f"Scene {scene_id} contains orphan TODO anchor {anchor_id}.")
-
-        for scene_id, anchor_counts in anchor_counts_by_scene.items():
-            for anchor_id, count in sorted(anchor_counts.items()):
-                if count > 1:
-                    errors.append(f"Scene {scene_id} contains duplicate TODO anchor {anchor_id}.")
-
-        return ProjectValidation(
-            valid=not errors,
-            warnings=warnings,
-            errors=errors,
-            migrations_applied=list(self.last_migrations),
-        )
-
-    def repair_project(self) -> ProjectValidation:
-        root = self._require_project()
-        node_index = self._build_node_index(root)
-        scene_ids = {entry.id for entry in node_index.by_id.values() if entry.kind == "scene"}
-        anchors_by_scene = self._read_scene_todo_anchors(scene_ids)
-        todos = self.read_todos()
-
-        kept_items: list[TodoItem] = []
-        valid_anchor_refs: set[tuple[str, str]] = set()
-        for item in todos.items:
-            if item.scene_id and item.scene_id not in scene_ids:
-                continue
-            if item.anchor_id and not item.scene_id:
-                continue
-            if item.scene_id and item.anchor_id:
-                if item.anchor_id not in anchors_by_scene.get(item.scene_id, set()):
-                    continue
-                valid_anchor_refs.add((item.scene_id, item.anchor_id))
-            kept_items.append(item)
-
-        if len(kept_items) != len(todos.items):
-            todos.items = kept_items
-            self._write_yaml(root / "todo.yaml", todos.model_dump())
-
-        for scene_id, anchors in anchors_by_scene.items():
-            orphan_anchor_ids = {
-                anchor_id
-                for anchor_id in anchors
-                if (scene_id, anchor_id) not in valid_anchor_refs
-            }
-            if orphan_anchor_ids:
-                self._remove_scene_anchor_comments(scene_id, orphan_anchor_ids)
-            self._remove_duplicate_scene_anchor_comments(scene_id)
-
-        return self.validate_project()
 
     def _entry_markdown_paths(self, root: Path) -> list[Path]:
         return [*(root / "scenes").glob("*.md"), *(root / "lore").glob("*.md")]
@@ -486,85 +147,6 @@ class ProjectService(
                     )
         backlinks.sort(key=lambda link: (link.kind, link.title.lower(), link.field_id))
         return backlinks
-
-    def _project_node_path(self) -> Path:
-        return self._require_project() / "project.md"
-
-    def read_project_node(self) -> ProjectNode:
-        path = self._project_node_path()
-        if not path.exists():
-            # Should be auto-created by the v3 migration on open. If the file
-            # is genuinely missing (e.g. brand-new project before migration
-            # runs), synthesize from project.yaml's title.
-            manifest = self._read_yaml(self._require_project() / "project.yaml")
-            return ProjectNode(
-                id="project",
-                title=str(manifest.get("title") or self.title or "Untitled Project"),
-                body="",
-                revision="",
-                entry_type="project",
-                metadata={},
-            )
-        front_matter, body = self._read_markdown_with_front_matter(path, strict=True)
-        title = str(front_matter.get("title") or self.title or "Untitled Project")
-        raw_entry_type = front_matter.get("entry_type") or "project"
-        entry_type = raw_entry_type if isinstance(raw_entry_type, str) else "project"
-        metadata = self._normalise_metadata(front_matter.get("metadata"), path)
-        return ProjectNode(
-            id="project",
-            title=title,
-            body=body,
-            revision=self._revision(path),
-            entry_type=entry_type,
-            metadata=metadata,
-            computed_metadata=self._computed_entry_metadata(body, node_id="project", entry_type=entry_type),
-        )
-
-    def save_project_node(self, request: SaveProjectNodeRequest) -> ProjectNode:
-        path = self._project_node_path()
-        current_revision = self._revision(path) if path.exists() else ""
-        if request.base_revision and request.base_revision != current_revision:
-            raise ProjectServiceError("Project node changed on disk after it was opened.", 409)
-        metadata = self._normalise_metadata(request.metadata, path)
-        node = ProjectNode(
-            id="project",
-            title=request.title,
-            body=request.body,
-            revision=current_revision,
-            entry_type=request.entry_type,
-            metadata=metadata,
-        )
-        self._write_project_node_file(path, node)
-        # Keep the cached title and project.yaml's title in sync so legacy
-        # readers (current_project, etc.) see the latest value.
-        self.title = request.title
-        self._sync_project_yaml_title(request.title)
-        return self.read_project_node()
-
-    def _write_project_node_file(self, path: Path, node: ProjectNode) -> None:
-        front_matter = yaml.safe_dump(
-            {
-                "id": node.id,
-                "title": node.title,
-                "entry_type": node.entry_type,
-                "metadata": node.metadata,
-            },
-            sort_keys=False,
-            allow_unicode=True,
-        ).strip()
-        body = node.body.rstrip() + "\n" if node.body.strip() else ""
-        self._atomic_write(path, f"---\n{front_matter}\n---\n\n{body}")
-
-    def _sync_project_yaml_title(self, title: str) -> None:
-        root = self._require_project()
-        manifest_path = root / "project.yaml"
-        if not manifest_path.exists():
-            return
-        manifest = self._read_yaml(manifest_path)
-        if manifest.get("title") == title:
-            return
-        manifest["title"] = title
-        self._write_yaml(manifest_path, manifest)
 
     def _check_entry_type_kind(self, entry_type: str, expected_kind: str) -> None:
         schema = self.read_metadata_schema()
@@ -791,108 +373,6 @@ class ProjectService(
         body = entry.body.rstrip() + "\n" if entry.body.strip() else ""
         self._atomic_write(path, f"---\n{front_matter}\n---\n\n{body}")
 
-    def _computed_entry_metadata(
-        self,
-        body: str,
-        node_id: str | None = None,
-        entry_type: str | None = None,
-        schema: MetadataSchema | None = None,
-        structure: StructureDocument | None = None,
-    ) -> dict[str, Any]:
-        computed: dict[str, Any] = {}
-        if schema is None:
-            schema = self.read_metadata_schema()
-        entry_definition = schema.entry_types.get(entry_type or "")
-        field_ids = entry_definition.fields if entry_definition else ["word_count"]
-        for field_id in field_ids:
-            field = schema.fields.get(field_id)
-            if field is None or field.type != "computed" or not field.computed:
-                continue
-            function = field.computed.get("function")
-            if function == "word_count":
-                without_comments = re.sub(r"<!--[\s\S]*?-->", " ", body)
-                computed[field_id] = len(WORD_PATTERN.findall(without_comments))
-            elif function == "counter" and node_id and entry_type:
-                if structure is None:
-                    structure = self.read_structure()
-                scope = field.computed.get("scope", "siblings")
-                value = self._compute_counter(structure.root, node_id, entry_type, scope)
-                if value is not None:
-                    computed[field_id] = value
-            elif function == "cost":
-                # Scope-aware sum over the ai_invocations sidecar log.
-                # `scene` and `character` need a node_id to filter on;
-                # `project` ignores it and sums the whole log.
-                scope = field.computed.get("scope", "scene")
-                total = self._compute_invocation_cost(scope, node_id)
-                if total is not None:
-                    computed[field_id] = total
-        return computed
-
-    def _compute_invocation_cost(self, scope: str, node_id: str | None) -> float | None:
-        # Sum cost_usd across `ai_invocations.yaml` rows matching the scope.
-        #   scene     → records whose scene_id == node_id
-        #   character → records whose character_id == node_id
-        #   project   → all records (node_id ignored)
-        # Returns None for unknown scopes or when a node-bound scope is
-        # asked without a node_id, so the caller can skip emitting the
-        # computed field entirely instead of writing a misleading 0.
-        if scope in ("scene", "character") and not node_id:
-            return None
-        if scope not in ("scene", "character", "project"):
-            return None
-        total = 0.0
-        for record in self._read_ai_invocations_raw():
-            if scope == "scene" and record.get("scene_id") != node_id:
-                continue
-            if scope == "character" and record.get("character_id") != node_id:
-                continue
-            cost = record.get("cost_usd")
-            if isinstance(cost, (int, float)):
-                total += float(cost)
-        return total
-
-    def _compute_counter(self, root: StructureNode, target_scene_id: str, entry_type: str, scope: str) -> int | None:
-        if scope == "siblings":
-            return self._counter_among_siblings(root, target_scene_id, entry_type)
-        if scope == "manuscript":
-            return self._counter_in_manuscript(root, target_scene_id, entry_type)
-        return None
-
-    def _counter_among_siblings(self, root: StructureNode, target_scene_id: str, entry_type: str) -> int | None:
-        for i, child in enumerate(root.children):
-            if child.scene_id == target_scene_id:
-                counter = 0
-                for j in range(i + 1):
-                    if root.children[j].type == entry_type:
-                        counter += 1
-                return counter
-        for child in root.children:
-            found = self._counter_among_siblings(child, target_scene_id, entry_type)
-            if found is not None:
-                return found
-        return None
-
-    def _counter_in_manuscript(self, root: StructureNode, target_scene_id: str, entry_type: str) -> int | None:
-        result: list[int | None] = [None]
-        counter = [0]
-
-        def walk(node: StructureNode) -> None:
-            if result[0] is not None:
-                return
-            if node.type == entry_type:
-                counter[0] += 1
-                if node.scene_id == target_scene_id:
-                    result[0] = counter[0]
-                    return
-            for child in node.children:
-                walk(child)
-                if result[0] is not None:
-                    return
-
-        walk(root)
-        return result[0]
-
     def _revision(self, path: Path) -> str:
         digest = hashlib.sha256()
         digest.update(path.read_bytes())
@@ -900,108 +380,3 @@ class ProjectService(
 
     def _new_id(self, prefix: str) -> str:
         return f"{prefix}_{uuid.uuid4().hex[:10]}"
-
-    def _extract_todo_anchor_ids(self, markdown: str) -> set[str]:
-        return {match.group(1) for match in TODO_ANCHOR_PATTERN.finditer(markdown)}
-
-    def _extract_todo_anchor_counts(self, markdown: str) -> dict[str, int]:
-        counts: dict[str, int] = {}
-        for match in TODO_ANCHOR_PATTERN.finditer(markdown):
-            anchor_id = match.group(1)
-            counts[anchor_id] = counts.get(anchor_id, 0) + 1
-        return counts
-
-    def _read_scene_todo_anchors(self, scene_ids: set[str]) -> dict[str, set[str]]:
-        anchors_by_scene: dict[str, set[str]] = {}
-        for scene_id in scene_ids:
-            try:
-                path = self._path_for_node_id(scene_id, "scene")
-            except ProjectServiceError:
-                continue
-            _, body = self._read_markdown_with_front_matter(path)
-            anchors = self._extract_todo_anchor_ids(body)
-            if anchors:
-                anchors_by_scene[scene_id] = anchors
-        return anchors_by_scene
-
-    def _read_scene_todo_anchor_counts(self, scene_ids: set[str]) -> dict[str, dict[str, int]]:
-        counts_by_scene: dict[str, dict[str, int]] = {}
-        for scene_id in scene_ids:
-            try:
-                path = self._path_for_node_id(scene_id, "scene")
-            except ProjectServiceError:
-                continue
-            _, body = self._read_markdown_with_front_matter(path)
-            counts = self._extract_todo_anchor_counts(body)
-            if counts:
-                counts_by_scene[scene_id] = counts
-        return counts_by_scene
-
-    def _remove_missing_scene_todo_anchors(self, scene_id: str, markdown: str) -> None:
-        root = self._require_project()
-        todos = self.read_todos()
-        anchors = self._extract_todo_anchor_ids(markdown)
-        kept_items = [
-            item
-            for item in todos.items
-            if not (item.scene_id == scene_id and item.anchor_id and item.anchor_id not in anchors)
-        ]
-        if len(kept_items) != len(todos.items):
-            todos.items = kept_items
-            self._write_yaml(root / "todo.yaml", todos.model_dump())
-
-    def _remove_scene_todos(self, scene_id: str) -> None:
-        root = self._require_project()
-        todos = self.read_todos()
-        kept_items = [item for item in todos.items if item.scene_id != scene_id]
-        if len(kept_items) != len(todos.items):
-            todos.items = kept_items
-            self._write_yaml(root / "todo.yaml", todos.model_dump())
-
-    def _remove_scene_anchor_comments(self, scene_id: str, anchor_ids: set[str]) -> None:
-        try:
-            path = self._path_for_node_id(scene_id, "scene")
-        except ProjectServiceError:
-            return
-        front_matter, body = self._read_markdown_with_front_matter(path)
-
-        def replace_anchor(match: re.Match[str]) -> str:
-            anchor_id = match.group(1)
-            content = match.group(2)
-            return content if anchor_id in anchor_ids else match.group(0)
-
-        repaired_body = TODO_ANCHOR_PATTERN.sub(replace_anchor, body)
-        if repaired_body == body:
-            return
-
-        if front_matter:
-            scene = self.read_scene(scene_id)
-            self._write_scene_file(path, scene.model_copy(update={"body": repaired_body}))
-        else:
-            self._atomic_write(path, repaired_body)
-
-    def _remove_duplicate_scene_anchor_comments(self, scene_id: str) -> None:
-        try:
-            path = self._path_for_node_id(scene_id, "scene")
-        except ProjectServiceError:
-            return
-        front_matter, body = self._read_markdown_with_front_matter(path)
-        seen_anchor_ids: set[str] = set()
-
-        def replace_duplicate(match: re.Match[str]) -> str:
-            anchor_id = match.group(1)
-            content = match.group(2)
-            if anchor_id in seen_anchor_ids:
-                return content
-            seen_anchor_ids.add(anchor_id)
-            return match.group(0)
-
-        repaired_body = TODO_ANCHOR_PATTERN.sub(replace_duplicate, body)
-        if repaired_body == body:
-            return
-        if front_matter:
-            scene = self.read_scene(scene_id)
-            self._write_scene_file(path, scene.model_copy(update={"body": repaired_body}))
-        else:
-            self._atomic_write(path, repaired_body)
-

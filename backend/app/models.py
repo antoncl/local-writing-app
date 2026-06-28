@@ -979,12 +979,35 @@ class PreviewCacheBlock(BaseModel):
     cache_break_after: bool
 
 
+class PreviewErrorInfo(BaseModel):
+    """Per-render error surfaced on `AIPreviewResponse.error` instead of an
+    HTTP error. The /api/ai/preview endpoint is exploratory — the editor
+    auto-fires it before the user has filled inputs — so render failures
+    return 200 with this info populated rather than a thrown response.
+
+    `kind` is a coarse tag so the frontend can craft a friendly message
+    without re-parsing `message`:
+      - "undefined"       → Jinja UndefinedError; `undefined_name` carries
+                            the missing attribute when derivable.
+      - "syntax"          → TemplateSyntaxError; `line` is set.
+      - "scene_not_found" → preview target_scene_id didn't resolve.
+      - "other"           → anything else (catch-all).
+    """
+
+    message: str
+    kind: str = "other"
+    line: int | None = None
+    col: int | None = None
+    undefined_name: str | None = None
+
+
 class AIPreviewResponse(BaseModel):
     messages: list[PreviewMessage]
     warnings: list[str] = Field(default_factory=list)
     char_count: int
     session_id: str | None = None
     rendered: bool
+    error: PreviewErrorInfo | None = None
     # Token estimate over the assembled wire bytes. Always populated.
     estimated_tokens: int = 0
     # Per-cache-block breakdown — powers the cache strip UI. Each entry

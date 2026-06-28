@@ -40,6 +40,7 @@ from app.models import (
     SaveChatSessionRequest,
     PreviewCacheBlock,
     PreviewContentBlock,
+    PreviewErrorInfo,
     PreviewMessage,
     BacklinksResponse,
     CreateLoreEntryRequest,
@@ -992,8 +993,11 @@ async def resolve_ai_provider_tier(
 async def ai_preview(request: AIPreviewRequest) -> AIPreviewResponse:
     with translate_errors():
         # `current_project` raises ProjectServiceError if no project is open;
-        # translate_errors handles that. Preview itself raises PreviewError for
-        # template / target failures, which we convert here.
+        # translate_errors handles that. Preview-render failures (undefined
+        # variables, syntax errors, missing target scene) are exploratory —
+        # the editor auto-fires this endpoint before the user has filled
+        # required inputs, so we return 200 with `error` populated rather
+        # than throwing. `/api/ai/generate` keeps the strict 422 behavior.
         try:
             rendered, session_id = build_preview(
                 project_service=service,
@@ -1007,10 +1011,20 @@ async def ai_preview(request: AIPreviewRequest) -> AIPreviewResponse:
                 commit=request.commit,
             )
         except PreviewError as exc:
-            raise HTTPException(
-                status_code=exc.status_code,
-                detail=_preview_error_detail(exc),
-            ) from exc
+            return AIPreviewResponse(
+                messages=[],
+                warnings=[],
+                char_count=0,
+                session_id=request.session_id,
+                rendered=False,
+                error=PreviewErrorInfo(
+                    message=exc.message,
+                    kind=exc.kind,
+                    line=exc.line,
+                    col=exc.col,
+                    undefined_name=exc.undefined_name,
+                ),
+            )
 
     messages = [
         PreviewMessage(

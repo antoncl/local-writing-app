@@ -529,12 +529,29 @@ export type PreviewCacheBlock = {
   cache_break_after: boolean;
 };
 
+// Populated on AIPreviewResponse.error when the render failed. The preview
+// endpoint returns 200 with this set rather than throwing — the editor
+// auto-fires preview before required inputs are filled, so an unrendered
+// template is an expected state. `/api/ai/generate` still throws.
+export type PreviewErrorInfo = {
+  message: string;
+  // "undefined" — Jinja UndefinedError; undefined_name set when derivable.
+  // "syntax"    — TemplateSyntaxError; line set.
+  // "scene_not_found" — preview target_scene_id didn't resolve.
+  // "other"     — catch-all.
+  kind: "undefined" | "syntax" | "scene_not_found" | "other";
+  line?: number | null;
+  col?: number | null;
+  undefined_name?: string | null;
+};
+
 export type AIPreviewResponse = {
   messages: PreviewMessage[];
   warnings: string[];
   char_count: number;
   session_id?: string | null;
   rendered: boolean;
+  error?: PreviewErrorInfo | null;
   // V2 telemetry. estimated_tokens always populated; cost null when no
   // assistant or pricing unknown.
   estimated_tokens?: number;

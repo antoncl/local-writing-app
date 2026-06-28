@@ -17,7 +17,7 @@
   import CodeEditor from "./CodeEditor.svelte";
   import NodePickerConfigEditor from "./NodePickerConfigEditor.svelte";
   import PromptInputField from "./PromptInputField.svelte";
-  import { api, HttpError } from "./api";
+  import { api } from "./api";
   import { formatCostEur, formatTokens } from "./money";
   import { coerceInputValue, type EntryInputDraft } from "./promptInputs";
   import type {
@@ -26,6 +26,7 @@
     EntryBodyLanguage,
     LoreEntrySummary,
     MetadataSchema,
+    PreviewErrorInfo,
     PromptEntrySummary,
     PromptInputDefinition,
     StructureDocument,
@@ -281,22 +282,49 @@
     return v === undefined || v === null || (typeof v === "string" && !v.trim());
   });
 
-  /** Translate Jinja2's terse error strings into plain English for the
-   * prompt author. Right now: UndefinedError attribute-misses on `input.<X>`
-   * (the most common authoring mistake — typo in the input name, or referring
-   * to a label instead of the name). Falls through unchanged for everything
-   * else. */
-  function friendlyTemplateError(raw: string, declared: PromptInputDefinition[]): string {
-    const m = /UndefinedError:\s*'\w+\s*object'\s*has\s*no\s*attribute\s*'(\w+)'/.exec(raw);
-    if (m) {
-      const missing = m[1];
-      const declaredNames = declared.map((d) => d.name);
-      const inputsList = declaredNames.length
-        ? ` Available inputs: ${declaredNames.map((n) => "input." + n).join(", ")}.`
-        : " No inputs are declared on this prompt — add one in the Detail Type editor first.";
-      return `Your template references \`{{ input.${missing} }}\` but there's no input named "${missing}".${inputsList}`;
+  /** Render PreviewErrorInfo into a user-facing message for the inline
+   * preview pane. Always returns a string — silent suppression hides the
+   * fact that the render stopped at the first undefined and tricked the
+   * author into thinking later refs were OK.
+   *
+   * Three undefined-name cases worth distinguishing:
+   *   - declared & currently empty (required)  → "fill it in" (render blocked here)
+   *   - declared & currently empty (optional)  → "fill in or guard with `is defined`"
+   *   - undeclared                             → "no such input" — real authoring bug
+   */
+  function friendlyTemplateError(
+    err: PreviewErrorInfo,
+    declared: PromptInputDefinition[],
+    drafts: Record<string, string>,
+  ): string {
+    if (err.kind === "undefined") {
+      const missing = err.undefined_name;
+      if (missing) {
+        const decl = declared.find((d) => d.name === missing);
+        if (decl) {
+          const draft = drafts[missing];
+          const isEmpty =
+            draft === undefined || draft === null || (typeof draft === "string" && !draft.trim());
+          if (isEmpty) {
+            if (decl.required) {
+              return `Preview blocked: required input \`${decl.label || missing}\` isn't set. Fill it in above to render the rest of the template.`;
+            }
+            return `Template references \`input.${missing}\`, but the input is optional and no value is set. Either fill it in above, or guard with \`{% if input.${missing} is defined %}…{% endif %}\`.`;
+          }
+          // Declared and filled — shouldn't normally happen; fall through.
+        } else {
+          const declaredNames = declared.map((d) => d.name);
+          const inputsList = declaredNames.length
+            ? ` Available inputs: ${declaredNames.map((n) => "input." + n).join(", ")}.`
+            : " No inputs are declared on this prompt — add one in the Detail Type editor first.";
+          return `Your template references \`input.${missing}\` but there's no input named "${missing}".${inputsList}`;
+        }
+      }
     }
-    return raw;
+    if (err.kind === "scene_not_found") {
+      return `${err.message} Pick a different target scene in the preview controls above.`;
+    }
+    return err.message;
   }
 
   function seedInputDrafts(declared: PromptInputDefinition[]): Record<string, string> {
@@ -351,35 +379,42 @@
     promptPreviewLastRenderKey = key;
     promptPreviewRunning = true;
     try {
-      promptPreviewResult = await api.aiPreview({
+      const result = await api.aiPreview({
         template_source: rawBody,
         target_scene_id: promptPreviewSceneId || "",
         inputs,
         commit: false,
       });
-      promptPreviewError = null;
-      promptPreviewDiagnostics = [];
-    } catch (e) {
-      promptPreviewError = friendlyTemplateError(
-        (e as Error).message || "Render failed.",
-        promptPreviewDeclaredInputs,
-      );
-      // If the error carries a line number (Jinja2 syntax errors do), pin a
-      // gutter marker on that line. UndefinedError has no line — the error
-      // text shown below the preview is the only signal in that case.
-      const next: typeof promptPreviewDiagnostics = [];
-      if (e instanceof HttpError && e.detail && typeof e.detail === "object") {
-        const d = e.detail as { line?: unknown; col?: unknown; message?: unknown };
-        if (typeof d.line === "number" && d.line > 0) {
-          next.push({
-            line: d.line,
-            col: typeof d.col === "number" && d.col > 0 ? d.col : undefined,
-            severity: "error",
-            message: typeof d.message === "string" ? d.message : promptPreviewError,
-          });
-        }
+      promptPreviewResult = result;
+      // Render errors come back as 200 + result.error (the endpoint is
+      // exploratory; auto-firing it before required inputs are filled
+      // would otherwise look like an HTTP failure). HttpError is still
+      // possible for non-render failures (project not open, 5xx, etc.).
+      if (result.error) {
+        promptPreviewError = friendlyTemplateError(
+          result.error,
+          promptPreviewDeclaredInputs,
+          promptPreviewInputDrafts,
+        );
+        const line = result.error.line;
+        promptPreviewDiagnostics = typeof line === "number" && line > 0
+          ? [{
+              line,
+              col: typeof result.error.col === "number" && result.error.col > 0
+                ? result.error.col
+                : undefined,
+              severity: "error",
+              message: promptPreviewError ?? result.error.message,
+            }]
+          : [];
+      } else {
+        promptPreviewError = null;
+        promptPreviewDiagnostics = [];
       }
-      promptPreviewDiagnostics = next;
+    } catch (e) {
+      // Falls here only for non-render failures (e.g. project closed, 5xx).
+      promptPreviewError = (e as Error).message || "Render failed.";
+      promptPreviewDiagnostics = [];
     } finally {
       promptPreviewRunning = false;
     }
@@ -728,7 +763,7 @@
         {#if promptPreviewMissingRequired.length > 0}
           <p class="prompt-preview-required-notice">
             {promptPreviewMissingRequired.length} required input{promptPreviewMissingRequired.length === 1 ? "" : "s"} empty:
-            {promptPreviewMissingRequired.map((i) => i.label || i.name).join(", ")} — the rendered output below will have empty slots wherever this is referenced.
+            {promptPreviewMissingRequired.map((i) => i.label || i.name).join(", ")} — fill them in above to render the preview.
           </p>
         {/if}
 

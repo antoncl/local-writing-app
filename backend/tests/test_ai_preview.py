@@ -173,7 +173,11 @@ class PreviewEndpointTests(unittest.TestCase):
         self.assertIn("Honor Harrington", stable_part)
         self.assertEqual(volatile_part, "")
 
-    def test_undefined_variable_returns_422(self) -> None:
+    def test_undefined_variable_returns_200_with_error(self) -> None:
+        # Preview render failures return 200 with the error in the body —
+        # the editor auto-fires preview before required inputs are filled,
+        # so an unrendered template is an expected state, not an HTTP error.
+        # (`/api/ai/generate` keeps the strict 422 behavior.)
         response = self.client.post(
             "/api/ai/preview",
             json={
@@ -181,10 +185,19 @@ class PreviewEndpointTests(unittest.TestCase):
                 "target_scene_id": self.scene_id,
             },
         )
-        self.assertEqual(response.status_code, 422)
-        self.assertIn("UndefinedError", response.json()["detail"])
+        self.assertEqual(response.status_code, 200, response.text)
+        body = response.json()
+        self.assertFalse(body["rendered"])
+        self.assertEqual(body["messages"], [])
+        error = body["error"]
+        self.assertIsNotNone(error)
+        self.assertEqual(error["kind"], "undefined")
+        self.assertIn("UndefinedError", error["message"])
+        # `nonexistent.thing` — Jinja errors on `nonexistent` itself before
+        # the .thing lookup, so that's the name surfaced.
+        self.assertEqual(error["undefined_name"], "nonexistent")
 
-    def test_missing_target_returns_404(self) -> None:
+    def test_missing_target_returns_200_with_error(self) -> None:
         response = self.client.post(
             "/api/ai/preview",
             json={
@@ -192,7 +205,13 @@ class PreviewEndpointTests(unittest.TestCase):
                 "target_scene_id": "scene_does_not_exist",
             },
         )
-        self.assertEqual(response.status_code, 404)
+        self.assertEqual(response.status_code, 200, response.text)
+        body = response.json()
+        self.assertFalse(body["rendered"])
+        error = body["error"]
+        self.assertIsNotNone(error)
+        self.assertEqual(error["kind"], "scene_not_found")
+        self.assertIn("Target scene not found", error["message"])
 
     def test_empty_target_scene_id_is_allowed(self) -> None:
         # Chat-routed prompts can be applied without a scene context. The
@@ -210,10 +229,10 @@ class PreviewEndpointTests(unittest.TestCase):
         self.assertEqual(len(messages), 1)
         self.assertEqual(messages[0]["role"], "user")
 
-    def test_template_syntax_error_returns_structured_line_info(self) -> None:
+    def test_template_syntax_error_returns_line_info_on_error(self) -> None:
         # Open `{{` with nothing after it — Jinja parse fails with lineno.
-        # The endpoint should return a 422 with detail = {message, line}
-        # so the inline preview can pin a gutter marker on that line.
+        # The endpoint returns 200 with error.kind="syntax" and error.line
+        # set so the inline preview can pin a gutter marker on that line.
         response = self.client.post(
             "/api/ai/preview",
             json={
@@ -221,24 +240,25 @@ class PreviewEndpointTests(unittest.TestCase):
                 "target_scene_id": self.scene_id,
             },
         )
-        self.assertEqual(response.status_code, 422, response.text)
+        self.assertEqual(response.status_code, 200, response.text)
         body = response.json()
-        detail = body["detail"]
-        self.assertIsInstance(detail, dict)
-        self.assertIn("message", detail)
-        self.assertIn("TemplateSyntaxError", detail["message"])
+        self.assertFalse(body["rendered"])
+        error = body["error"]
+        self.assertIsNotNone(error)
+        self.assertEqual(error["kind"], "syntax")
+        self.assertIn("TemplateSyntaxError", error["message"])
         # Jinja2 reports the line where it detected the problem, which for an
         # unclosed `{{` is the next line where it expected `}}`. Exact value
         # depends on the parser; what matters is that it's a small positive
         # int we can pin a gutter marker to.
-        self.assertIn("line", detail)
-        self.assertIsInstance(detail["line"], int)
-        self.assertGreaterEqual(detail["line"], 1)
-        self.assertLessEqual(detail["line"], 5)
+        self.assertIsInstance(error["line"], int)
+        self.assertGreaterEqual(error["line"], 1)
+        self.assertLessEqual(error["line"], 5)
 
-    def test_undefined_variable_error_keeps_string_detail(self) -> None:
-        # UndefinedError doesn't carry lineno → detail stays a plain string
-        # (back-compat with existing callers).
+    def test_undefined_variable_carries_name(self) -> None:
+        # UndefinedError doesn't carry lineno — line stays None, but
+        # undefined_name is parsed out of the message so the frontend can
+        # match it against the declared inputs and produce a friendly note.
         response = self.client.post(
             "/api/ai/preview",
             json={
@@ -246,15 +266,30 @@ class PreviewEndpointTests(unittest.TestCase):
                 "target_scene_id": self.scene_id,
             },
         )
-        self.assertEqual(response.status_code, 422, response.text)
-        detail = response.json()["detail"]
-        # Either string or dict-without-line is OK — what matters is that the
-        # frontend's formatErrorDetail surfaces a readable message.
-        if isinstance(detail, dict):
-            self.assertNotIn("line", detail)
-            self.assertIn("message", detail)
-        else:
-            self.assertIsInstance(detail, str)
+        self.assertEqual(response.status_code, 200, response.text)
+        body = response.json()
+        error = body["error"]
+        self.assertEqual(error["kind"], "undefined")
+        self.assertEqual(error["undefined_name"], "nonexistent")
+        self.assertIsNone(error["line"])
+
+    def test_undefined_input_attribute_carries_attr_name(self) -> None:
+        # `input.character` with no character supplied is the canonical
+        # roleplay-prompt-just-opened case. The error should carry the
+        # missing attribute name so the editor can match it against the
+        # prompt's declared inputs and explain that it just needs filling.
+        response = self.client.post(
+            "/api/ai/preview",
+            json={
+                "template_source": '{% role "user" %}{{ input.character }}{% endrole %}',
+                "target_scene_id": self.scene_id,
+                "inputs": {},
+            },
+        )
+        self.assertEqual(response.status_code, 200, response.text)
+        error = response.json()["error"]
+        self.assertEqual(error["kind"], "undefined")
+        self.assertEqual(error["undefined_name"], "character")
 
     def test_empty_target_scene_id_leaves_scene_none(self) -> None:
         # A template that branches on `scene` should see it as falsy.

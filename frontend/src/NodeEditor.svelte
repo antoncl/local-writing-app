@@ -562,6 +562,13 @@
         assistant_id: inputsDialogAssistantId || null,
       });
       if (ourToken !== inputsDialogEstimateToken) return;
+      // Render errors come back as 200 + preview.error (the endpoint is
+      // exploratory). Errors surface when the user runs, so keep the
+      // estimate strip quiet — null out instead of flickering a stale value.
+      if (preview.error) {
+        inputsDialogEstimate = null;
+        return;
+      }
       inputsDialogEstimate = {
         tokens: preview.estimated_tokens ?? 0,
         cost_usd: preview.estimated_cost_usd ?? null,
@@ -573,8 +580,7 @@
         })),
       };
     } catch {
-      // Render errors surface when the user runs; keep the strip quiet
-      // rather than flickering an error here.
+      // Non-render failure (project closed, 5xx, etc.) — same UX.
     }
   }
 

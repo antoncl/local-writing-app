@@ -12,10 +12,11 @@ access to settings and policy. M4.0.
 from __future__ import annotations
 
 import json
+import re
 from datetime import date as _date_cls
 from typing import Any
 
-from jinja2 import TemplateError
+from jinja2 import TemplateError, UndefinedError, TemplateSyntaxError
 
 from app.services.ai.helpers import EntryRef, create_environment_for_project
 from app.services.ai.sessions import AISession, default_registry
@@ -84,6 +85,10 @@ class PreviewError(Exception):
     `line` and `col` are populated when the underlying Jinja2 error carries
     location info — surfacing them lets the editor pin a gutter marker on
     the offending line in the inline preview.
+
+    `kind` is a coarse classification consumed by /api/ai/preview to populate
+    `AIPreviewResponse.error.kind`; the frontend uses it (with `undefined_name`)
+    to render a friendly message without re-parsing `message`.
     """
 
     def __init__(
@@ -93,12 +98,33 @@ class PreviewError(Exception):
         *,
         line: int | None = None,
         col: int | None = None,
+        kind: str = "other",
+        undefined_name: str | None = None,
     ) -> None:
         super().__init__(message)
         self.message = message
         self.status_code = status_code
         self.line = line
         self.col = col
+        self.kind = kind
+        self.undefined_name = undefined_name
+
+
+# UndefinedError messages from Jinja2 look like:
+#   "'dict object' has no attribute 'character'"
+#   "'character' is undefined"
+_UNDEFINED_ATTR_RE = re.compile(r"has no attribute '([^']+)'")
+_UNDEFINED_NAME_RE = re.compile(r"'([^']+)' is undefined")
+
+
+def _extract_undefined_name(message: str) -> str | None:
+    m = _UNDEFINED_ATTR_RE.search(message)
+    if m:
+        return m.group(1)
+    m = _UNDEFINED_NAME_RE.search(message)
+    if m:
+        return m.group(1)
+    return None
 
 
 def build_preview(
@@ -128,7 +154,11 @@ def build_preview(
         try:
             scene = project_service.read_scene(effective_scene_id)
         except Exception as exc:  # noqa: BLE001
-            raise PreviewError(f"Target scene not found: {exc}", 404) from exc
+            raise PreviewError(
+                f"Target scene not found: {exc}",
+                404,
+                kind="scene_not_found",
+            ) from exc
     else:
         # Chat-routed prompts may not target a specific scene. Templates that
         # reference `scene` will see None and can guard with `{% if scene %}`.
@@ -177,10 +207,21 @@ def build_preview(
         # UndefinedError it's typically missing. Surface what we have.
         line = getattr(exc, "lineno", None)
         # Jinja2 doesn't expose column info on TemplateError; col stays None.
+        if isinstance(exc, UndefinedError):
+            kind = "undefined"
+            undefined_name = _extract_undefined_name(exc.message or "")
+        elif isinstance(exc, TemplateSyntaxError):
+            kind = "syntax"
+            undefined_name = None
+        else:
+            kind = "other"
+            undefined_name = None
         raise PreviewError(
             f"{type(exc).__name__}: {exc.message}",
             422,
             line=int(line) if isinstance(line, int) else None,
+            kind=kind,
+            undefined_name=undefined_name,
         ) from exc
 
     if session is not None and commit:

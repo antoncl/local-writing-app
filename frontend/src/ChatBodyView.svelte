@@ -670,6 +670,13 @@
         inputs,
         commit: false,
       });
+      // Render errors come back as 200 + preview.error from /api/ai/preview
+      // (exploratory endpoint). At first-send we DO want to surface them —
+      // the user is committing to a model call that won't have a valid prompt.
+      if (preview.error) {
+        chatError = `Couldn't render prompt template: ${preview.error.message}`;
+        return false;
+      }
       const messages = preview.messages ?? [];
       const flatten = (blocks: { text: string }[]) => blocks.map((b) => b.text).join("");
       const systemBlocks = messages
@@ -741,6 +748,12 @@
         assistant_id: chatAssistantId || null,
       });
       if (ourToken !== chatEstimateToken) return;
+      // Preview render errors come back as 200 + preview.error. Don't show
+      // them in the estimate strip — they'll surface when the user sends.
+      if (preview.error) {
+        chatEstimate = null;
+        return;
+      }
       chatEstimate = {
         tokens: preview.estimated_tokens ?? 0,
         cost_usd: preview.estimated_cost_usd ?? null,
@@ -752,8 +765,7 @@
         })),
       };
     } catch {
-      // Surface errors via the future preview popover, not the strip —
-      // keep the estimate quiet rather than blinking "—".
+      // Non-render failure — same UX.
     }
   }
 

@@ -305,7 +305,6 @@
   // via schemaFieldDefaultForStorage. `undefined` = "no default" (the
   // historic behaviour) — no `default` key is emitted on save.
   let schemaFieldDefault: string | undefined = undefined;
-  let schemaFieldReadonlyTypeLabel = "";
   let selectedSchemaFieldId: string | null = null;
   let schemaFieldReadonly = false;
   // L1 section label being edited for the current field (metadata revision).
@@ -334,7 +333,6 @@
   const NEW_FIELD_SENTINEL = "__new__";
   let expandedSchemaFieldId: string | null = null;
   let schemaPaneOpen = false;
-  let schemaFieldPaneOpen = false;
   let schemaTypePaneOpen = false;
   let schemaTypeLayerId = "";
   let schemaTypeId = "";
@@ -414,7 +412,6 @@
     lore: { title: "Lore", x: 330, y: 260, width: 300, height: 320, z: 3 },
     research: { title: "Research", x: 650, y: 260, width: 300, height: 320, z: 3 },
     schema: { title: "Detail Types", x: 330, y: 260, width: 360, height: 420, z: 3 },
-    schema_field: { title: "Detail Field", x: 708, y: 260, width: 360, height: 420, z: 4 },
     schema_type: { title: "Detail Type", x: 708, y: 260, width: 440, height: 560, z: 4 },
     prompts: { title: "Prompts", x: 330, y: 260, width: 360, height: 420, z: 3 },
     assistants: { title: "Assistants", x: 330, y: 260, width: 340, height: 420, z: 3 },
@@ -480,6 +477,36 @@
     metadataSchema && selectedSchemaTypeId ? fieldEntriesForEntryType(selectedSchemaTypeId) : [];
   $: typeInheritedFieldEntries =
     metadataSchema && selectedSchemaTypeId ? inheritedFieldEntriesForEntryType(selectedSchemaTypeId) : [];
+  // L1 grouping for the type editor (mirrors the rail's buildSections in
+  // MetadataPanel): ungrouped fields render first under no header, then
+  // each group in first-appearance order under its own section header.
+  // Preserves the underlying entry order so drag-reorder still operates on
+  // the stored sequence.
+  type SchemaFieldSection = {
+    group: string | null;
+    entries: [string, MetadataFieldDefinition][];
+  };
+  function buildSchemaFieldSections(
+    entries: [string, MetadataFieldDefinition][],
+  ): SchemaFieldSection[] {
+    const ungrouped: [string, MetadataFieldDefinition][] = [];
+    const groups = new Map<string, [string, MetadataFieldDefinition][]>();
+    for (const entry of entries) {
+      const group = (entry[1].group ?? "").trim();
+      if (!group) {
+        ungrouped.push(entry);
+      } else {
+        if (!groups.has(group)) groups.set(group, []);
+        groups.get(group)!.push(entry);
+      }
+    }
+    const out: SchemaFieldSection[] = [];
+    if (ungrouped.length) out.push({ group: null, entries: ungrouped });
+    for (const [group, groupEntries] of groups) out.push({ group, entries: groupEntries });
+    return out;
+  }
+  $: typeOwnFieldSections = buildSchemaFieldSections(typeOwnFieldEntries);
+  $: typeInheritedFieldSections = buildSchemaFieldSections(typeInheritedFieldEntries);
   // L2 reusable groups: the applications on the selected type + the groups
   // available to apply. Reference metadataSchema explicitly so these recompute
   // after a save (see feedback-svelte5-reactivity-traps).
@@ -694,7 +721,6 @@
     _isProjectOpen,
     _assistantsPaneOpen,
     _schemaPaneOpen,
-    _schemaFieldPaneOpen,
     _schemaTypePaneOpen,
     _promptsPaneOpen,
     _chatsPaneOpen,
@@ -705,7 +731,6 @@
     if (!_isProjectOpen) return false;
     if (id === "research") return true;
     if (id === "schema") return _schemaPaneOpen;
-    if (id === "schema_field") return _schemaFieldPaneOpen;
     if (id === "schema_type") return _schemaTypePaneOpen;
     if (id === "prompts") return _promptsPaneOpen;
     if (id === "chats") return _chatsPaneOpen;
@@ -714,7 +739,6 @@
     isProjectOpen,
     assistantsPaneOpen,
     schemaPaneOpen,
-    schemaFieldPaneOpen,
     schemaTypePaneOpen,
     promptsPaneOpen,
     chatsPaneOpen,
@@ -1669,7 +1693,7 @@
     return labels[type] ?? type;
   }
 
-  function openSchemaFieldDetail(fieldId: string, entryTypeId = schemaFieldEntryType, inline = false) {
+  function openSchemaFieldDetail(fieldId: string, entryTypeId = schemaFieldEntryType) {
     const field = metadataSchema?.fields[fieldId];
     if (!field) return;
     const targetEntryTypeId = fieldAppliesToEntryType(fieldId, entryTypeId)
@@ -1679,7 +1703,6 @@
     schemaFieldId = fieldId;
     schemaFieldName = field.name;
     schemaFieldReadonly = Boolean(metadataSchemaOverview?.field_sources[fieldId]?.built_in);
-    schemaFieldReadonlyTypeLabel = "";
     schemaFieldTypeMenuOpen = false;
     schemaFieldPickerConfig = field.picker_config
       ? { kinds: [...(field.picker_config.kinds ?? [])], entry_types: { ...(field.picker_config.entry_types ?? {}) }, presets: [...(field.picker_config.presets ?? [])] }
@@ -1709,24 +1732,15 @@
     schemaFieldGroup = field.group ?? "";
     schemaFieldIcon = field.icon ?? null;
     iconPickerOpen = false;
-    if (inline) {
-      // Expand-in-place: no separate pane; just open this row's editor.
-      expandedSchemaFieldId = fieldId;
-      schemaFieldPaneOpen = false;
-    } else {
-      expandedSchemaFieldId = null;
-      schemaFieldPaneOpen = true;
-      focusPane("schema_field");
-    }
+    expandedSchemaFieldId = fieldId;
   }
 
-  function createSchemaFieldDraft(layerId = projectSchemaLayerId(), entryTypeId = schemaFieldEntryType, inline = false) {
+  function createSchemaFieldDraft(layerId = projectSchemaLayerId(), entryTypeId = schemaFieldEntryType) {
     selectedSchemaFieldId = null;
     schemaFieldId = "";
     schemaFieldName = "";
     schemaFieldType = "text";
     schemaFieldReadonly = false;
-    schemaFieldReadonlyTypeLabel = "";
     schemaFieldTypeMenuOpen = false;
     schemaFieldComputedFunction = "word_count";
     schemaFieldComputedScope = "siblings";
@@ -1740,14 +1754,7 @@
     schemaFieldKeyManual = false;
     schemaFieldLayerId = layerId;
     schemaFieldEntryType = entryTypeId;
-    if (inline) {
-      expandedSchemaFieldId = NEW_FIELD_SENTINEL;
-      schemaFieldPaneOpen = false;
-    } else {
-      expandedSchemaFieldId = null;
-      schemaFieldPaneOpen = true;
-      focusPane("schema_field");
-    }
+    expandedSchemaFieldId = NEW_FIELD_SENTINEL;
   }
 
   // Toggle a field row's inline editor (one open at a time).
@@ -1756,7 +1763,7 @@
       expandedSchemaFieldId = null;
       return;
     }
-    openSchemaFieldDetail(fieldId, entryTypeId, true);
+    openSchemaFieldDetail(fieldId, entryTypeId);
   }
 
   function createSchemaTypeDraft(layerId = projectSchemaLayerId(), parentTypeId = "") {
@@ -1897,9 +1904,8 @@
       .map(([typeId]) => typeId);
   }
 
-  function closeSchemaPane(id: "schema" | "schema_field" | "schema_type" | "prompts" | "assistants" | "chats") {
+  function closeSchemaPane(id: "schema" | "schema_type" | "prompts" | "assistants" | "chats") {
     if (id === "schema") schemaPaneOpen = false;
-    else if (id === "schema_field") schemaFieldPaneOpen = false;
     else if (id === "schema_type") schemaTypePaneOpen = false;
     else if (id === "prompts") promptsPaneOpen = false;
     else if (id === "assistants") assistantsPaneOpen = false;
@@ -2260,7 +2266,6 @@
     await refreshOpenEditorPaneBaselines((metadata) => removeMetadataKey(metadata, fieldId));
     validation = await api.validateProject();
     selectedSchemaFieldId = null;
-    schemaFieldPaneOpen = false;
     expandedSchemaFieldId = null;
     status = `Deleted ${fieldId}`;
   }
@@ -4734,52 +4739,67 @@
             <small>{fieldEntries.length}{inheritedEntries.length ? ` · ${inheritedEntries.length} inherited` : ""}</small>
           </header>
           <div class="schema-field-rows">
-            {#each fieldEntries as [fieldId, field]}
-              {@const fieldSource = metadataSchemaOverview?.field_sources[fieldId]}
-              {@const isExpanded = expandedSchemaFieldId === fieldId}
-              <button
-                class="schema-field-row"
-                class:expanded={isExpanded}
-                class:drop-before={fieldDropTarget?.id === fieldId && fieldDropTarget?.position === "before"}
-                class:drop-after={fieldDropTarget?.id === fieldId && fieldDropTarget?.position === "after"}
-                type="button"
-                draggable={fieldEntries.length > 1 && !schemaTypeReadonly}
-                on:click={() => toggleSchemaFieldInline(fieldId, selectedSchemaTypeId)}
-                on:dragstart={() => onFieldDragStart(fieldId)}
-                on:dragover={(event) => onFieldDragOver(event, fieldId)}
-                on:dragleave={() => { if (fieldDropTarget?.id === fieldId) fieldDropTarget = null; }}
-                on:drop|preventDefault={() => onFieldDrop(fieldId)}
-                on:dragend={clearFieldDrag}
-              >
-                <span class="sfr-grip" title="Drag to reorder" aria-hidden="true"><i class="ti ti-grip-vertical"></i></span>
-                <span class="sfr-tile"><i class={fieldIconClass(field)} aria-hidden="true"></i></span>
-                <span class="sfr-name">{field.name}</span>
-                <span class="sfr-typechip">{fieldTypeLabel(field.type)}</span>
-                <span class="sfr-meta">
-                  {#if field.group}<span class="sfr-group">{field.group}</span>{/if}
-                  <span class="schema-source-badge" style={`--source-index: ${sourceLayerIndex(fieldSource)}`}>{sourceBadgeLabel(fieldSource)}</span>
-                  <i class={`ti sfr-cog ${isExpanded ? "ti-chevron-up" : "ti-settings"}`} aria-hidden="true"></i>
-                </span>
-              </button>
-              {#if isExpanded}
-                {@render fieldInlineEditor()}
+            {#each typeOwnFieldSections as section}
+              {#if section.group}
+                <div class="rail-group-head">
+                  <span class="rail-group-label">{section.group}</span>
+                  <span class="rail-group-rule"></span>
+                </div>
               {/if}
+              {#each section.entries as [fieldId, field]}
+                {@const fieldSource = metadataSchemaOverview?.field_sources[fieldId]}
+                {@const isExpanded = expandedSchemaFieldId === fieldId}
+                <button
+                  class="schema-field-row"
+                  class:expanded={isExpanded}
+                  class:drop-before={fieldDropTarget?.id === fieldId && fieldDropTarget?.position === "before"}
+                  class:drop-after={fieldDropTarget?.id === fieldId && fieldDropTarget?.position === "after"}
+                  type="button"
+                  draggable={fieldEntries.length > 1 && !schemaTypeReadonly}
+                  on:click={() => toggleSchemaFieldInline(fieldId, selectedSchemaTypeId)}
+                  on:dragstart={() => onFieldDragStart(fieldId)}
+                  on:dragover={(event) => onFieldDragOver(event, fieldId)}
+                  on:dragleave={() => { if (fieldDropTarget?.id === fieldId) fieldDropTarget = null; }}
+                  on:drop|preventDefault={() => onFieldDrop(fieldId)}
+                  on:dragend={clearFieldDrag}
+                >
+                  <span class="sfr-grip" title="Drag to reorder" aria-hidden="true"><i class="ti ti-grip-vertical"></i></span>
+                  <span class="sfr-tile"><i class={fieldIconClass(field)} aria-hidden="true"></i></span>
+                  <span class="sfr-name">{field.name}</span>
+                  <span class="sfr-typechip">{fieldTypeLabel(field.type)}</span>
+                  <span class="sfr-meta">
+                    <span class="schema-source-badge" style={`--source-index: ${sourceLayerIndex(fieldSource)}`}>{sourceBadgeLabel(fieldSource)}</span>
+                    <i class={`ti sfr-cog ${isExpanded ? "ti-chevron-up" : "ti-settings"}`} aria-hidden="true"></i>
+                  </span>
+                </button>
+                {#if isExpanded}
+                  {@render fieldInlineEditor()}
+                {/if}
+              {/each}
             {/each}
-            {#each inheritedEntries as [fieldId, field]}
-              <div class="schema-field-row inherited" aria-label={`${field.name} (inherited)`}>
-                <span class="sfr-grip" aria-hidden="true"><i class="ti ti-grip-vertical"></i></span>
-                <span class="sfr-tile"><i class={fieldIconClass(field)} aria-hidden="true"></i></span>
-                <span class="sfr-name">{field.name}</span>
-                <span class="sfr-typechip">{fieldTypeLabel(field.type)}</span>
-                <span class="sfr-meta">
-                  {#if field.group_origin}
-                    <span class="sfr-group-origin"><i class="ti ti-stack-2" aria-hidden="true"></i> {groupOriginLabel(field)}</span>
-                  {:else}
-                    <span class="sfr-inherited-label">inherited from {inheritedFromLabel(selectedSchemaTypeId, fieldId)}</span>
-                    <i class="ti ti-arrow-up-right sfr-cog" aria-hidden="true"></i>
-                  {/if}
-                </span>
-              </div>
+            {#each typeInheritedFieldSections as section}
+              {#if section.group}
+                <div class="rail-group-head">
+                  <span class="rail-group-label">{section.group}</span>
+                  <span class="rail-group-rule"></span>
+                </div>
+              {/if}
+              {#each section.entries as [fieldId, field]}
+                <div class="schema-field-row inherited" aria-label={`${field.name} (inherited)`}>
+                  <span class="sfr-grip" aria-hidden="true"><i class="ti ti-grip-vertical"></i></span>
+                  <span class="sfr-tile"><i class={fieldIconClass(field)} aria-hidden="true"></i></span>
+                  <span class="sfr-name">{field.name}</span>
+                  <span class="sfr-typechip">{fieldTypeLabel(field.type)}</span>
+                  <span class="sfr-meta">
+                    {#if field.group_origin}
+                      <span class="sfr-group-origin"><i class="ti ti-stack-2" aria-hidden="true"></i> {groupOriginLabel(field)}</span>
+                    {:else}
+                      <span class="sfr-inherited-label">inherited from {inheritedFromLabel(selectedSchemaTypeId, fieldId)}</span>
+                      <i class="ti ti-arrow-up-right sfr-cog" aria-hidden="true"></i>
+                    {/if}
+                  </span>
+                </div>
+              {/each}
             {/each}
             {#if expandedSchemaFieldId === NEW_FIELD_SENTINEL}
               {@render fieldInlineEditor()}
@@ -4790,7 +4810,7 @@
           </div>
           {#if !schemaTypeReadonly && expandedSchemaFieldId !== NEW_FIELD_SENTINEL}
             <div class="button-row">
-              <button class="add-affordance" type="button" on:click={() => createSchemaFieldDraft(schemaTypeLayerId || projectSchemaLayerId(), selectedSchemaTypeId, true)}>+ Add field</button>
+              <button class="add-affordance" type="button" on:click={() => createSchemaFieldDraft(schemaTypeLayerId || projectSchemaLayerId(), selectedSchemaTypeId)}>+ Add field</button>
             </div>
           {/if}
         </section>
@@ -4882,109 +4902,6 @@
       {/if}
     </div>
     <button class="pane-resize" type="button" aria-label="Resize Detail Type pane" on:keydown={(event) => handlePaneResizeKeydown(event, "schema_type")} on:mousedown={(event) => startPaneResize(event, "schema_type")}></button>
-  </section>
-
-  <!-- svelte-ignore a11y_no_noninteractive_element_interactions -->
-  <section class:hidden-pane={!isProjectOpen || !schemaFieldPaneOpen} class="pane schema-field-pane" data-pane-id="schema_field" style={paneStyle("schema_field")} aria-label="Detail Field pane" on:mousedown={() => focusPane("schema_field")}>
-    <header class="pane-header" role="button" tabindex="0" aria-label="Move Detail Field pane" on:keydown={(event) => handlePaneHeaderKeydown(event, "schema_field")} on:mousedown={(event) => startPaneDrag(event, "schema_field")}>
-      <h2>Detail Field</h2>
-      <div class="pane-header-actions">
-        <button class="pin-button" type="button" on:mousedown={(event) => event.stopPropagation()} on:click={() => closeSchemaPane("schema_field")}>Close</button>
-      </div>
-    </header>
-    <div class="pane-content schema-editor">
-      <div class="schema-target-layer">
-        <strong>{schemaFieldReadonly ? "Scope" : selectedSchemaFieldId ? "Defined at" : "Save layer"}</strong>
-        <span>{schemaFieldReadonly ? "System" : layerLabel(schemaFieldLayerId)}</span>
-      </div>
-      <label>
-        Display name
-        <input readonly={schemaFieldReadonly} value={schemaFieldName} placeholder="POV Character" on:input={(event) => updateSchemaFieldName(event.currentTarget.value)} />
-      </label>
-      <label>
-        Field ID
-        <input
-          aria-label="Generated Field ID"
-          title="Generated from the field name"
-          value={schemaFieldId}
-          readonly
-          placeholder="pov_character"
-        />
-      </label>
-      <label>
-        Field type
-        {#if schemaFieldReadonly}
-          <input readonly value={schemaFieldReadonlyTypeLabel || fieldTypeLabel(schemaFieldType)} />
-        {:else}
-          <select bind:value={schemaFieldType}>
-            {#each FIELD_TYPE_CHOICES as choice (choice)}
-              <option value={choice}>{fieldTypeLabel(choice)}</option>
-            {/each}
-          </select>
-        {/if}
-      </label>
-      {#if !schemaFieldReadonly && schemaFieldType === "computed"}
-        <label>
-          Computation
-          <select bind:value={schemaFieldComputedFunction}>
-            <option value="word_count">Word count (of body)</option>
-            <option value="counter">Counter (position among siblings)</option>
-          </select>
-        </label>
-        {#if schemaFieldComputedFunction === "counter"}
-          <label>
-            Scope
-            <select bind:value={schemaFieldComputedScope}>
-              <option value="siblings">Among siblings</option>
-              <option value="manuscript">In manuscript</option>
-            </select>
-          </label>
-        {/if}
-      {/if}
-      {#if schemaFieldType === "entity_ref" || schemaFieldType === "entity_ref_list"}
-        <div class="schema-field-picker-config">
-          <NodePickerConfigEditor
-            mode="field"
-            readonly={schemaFieldReadonly}
-            config={schemaFieldPickerConfig}
-            metadataSchema={metadataSchema}
-            on:change={(event) => (schemaFieldPickerConfig = event.detail.config)}
-          />
-        </div>
-      {/if}
-      {#if (schemaFieldType === "select" || schemaFieldType === "multi_select") && (!schemaFieldReadonly || schemaFieldOptionList.length)}
-        <div class="schema-field-options">
-          <span class="option-colors-label">Options</span>
-          <SelectOptionsEditor
-            options={schemaFieldOptionList}
-            readonly={schemaFieldReadonly}
-            showMigrationHint={false}
-            on:change={(event) => (schemaFieldOptionList = event.detail.options)}
-          />
-        </div>
-      {/if}
-      {#if schemaFieldType !== "computed" && (!schemaFieldReadonly || schemaFieldDefault !== undefined)}
-        <label class="sfi-field sfi-default-field">
-          Default for new entries
-          <DefaultValueEditor
-            type={schemaFieldType}
-            value={schemaFieldDefault}
-            options={schemaFieldOptionList}
-            ariaLabel="Default for new entries"
-            on:change={(event) => (schemaFieldDefault = event.detail.value)}
-          />
-        </label>
-      {/if}
-      {#if !schemaFieldReadonly}
-        <div class="button-row">
-          <button type="button" disabled={!schemaFieldLayerId || !schemaFieldId.trim() || !schemaFieldName.trim()} on:click={saveSchemaField}>Save Field</button>
-          {#if selectedSchemaFieldId}
-            <button class="danger" type="button" on:click={requestDeleteSchemaField}>Delete Field</button>
-          {/if}
-        </div>
-      {/if}
-    </div>
-    <button class="pane-resize" type="button" aria-label="Resize Detail Field pane" on:keydown={(event) => handlePaneResizeKeydown(event, "schema_field")} on:mousedown={(event) => startPaneResize(event, "schema_field")}></button>
   </section>
 
   <!-- svelte-ignore a11y_no_noninteractive_element_interactions -->
@@ -5614,7 +5531,7 @@
     {#snippet trailing()}
       <span class="group-count-pill" title={`${fieldEntries.length} field${fieldEntries.length === 1 ? "" : "s"}, ${node.children.length} sub-type${node.children.length === 1 ? "" : "s"}`}>{childCount}</span>
       <button class="row-action-add" type="button" title={`Add sub-type to ${node.label}`} aria-label={`Add sub-type to ${node.label}`} on:click={() => createSchemaTypeDraft(schemaTypeLayerId || projectSchemaLayerId(), node.id)}>+ Type</button>
-      <button class="row-action-add" type="button" title={`Add field to ${node.label}`} aria-label={`Add field to ${node.label}`} on:click={() => createSchemaFieldDraft(schemaTypeLayerId || projectSchemaLayerId(), node.id)}>+ Field</button>
+      <button class="row-action-add" type="button" title={`Add field to ${node.label}`} aria-label={`Add field to ${node.label}`} on:click={() => { openSchemaTypeDetail(node.id); createSchemaFieldDraft(schemaTypeLayerId || projectSchemaLayerId(), node.id); }}>+ Field</button>
       {#if !typeSource?.built_in}
         <button class="row-action-delete" type="button" title={`Delete ${node.label}`} aria-label={`Delete ${node.label}`} on:click={() => requestDeleteSchemaType(node.id)}>×</button>
       {/if}
@@ -5625,7 +5542,7 @@
         <NodeRow
           title={field.name}
           ariaLabel={`Field ${fieldId} — ${sourceBadgeLabel(fieldSource)}`}
-          onClick={() => openSchemaFieldDetail(fieldId, node.id)}
+          onClick={() => { openSchemaTypeDetail(node.id); openSchemaFieldDetail(fieldId, node.id); }}
         >
           {#snippet detailSlot()}
             <small>{fieldId}</small>

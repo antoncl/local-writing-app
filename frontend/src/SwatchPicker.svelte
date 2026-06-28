@@ -19,7 +19,7 @@
   // Viewport-relative popover position. Computed from the trigger's
   // bounding rect each time the popover opens (and on scroll/resize while
   // open) so the popover floats above ANY pane regardless of its overflow
-  // — necessary because the schema_field pane and the metadata pane both
+  // — necessary because the schema_type pane and the metadata pane both
   // clip their content, which otherwise hides or squashes the popover.
   let popoverLeft = 0;
   let popoverTop = 0;

@@ -397,25 +397,8 @@
     border-bottom: 1px solid var(--divider, #e2e8e5);
   }
 
-  /* L1 section headers */
-  .rail-group-head {
-    display: flex;
-    align-items: center;
-    gap: 8px;
-    padding: 12px 12px 4px;
-  }
-  .rail-group-label {
-    font-size: 10px;
-    font-weight: 800;
-    letter-spacing: 0.09em;
-    text-transform: uppercase;
-    color: var(--text-3, #74817b);
-  }
-  .rail-group-rule {
-    flex: 1;
-    height: 1px;
-    background: var(--divider, #e2e8e5);
-  }
+  /* L1 section headers live in styles.css (shared with the Detail Type
+     editor); only the Field row chrome is scoped per-component. */
 
   /* Field row: icon · name · value */
   .field-row {

@@ -2626,6 +2626,29 @@ button.row-action-add.active {
   color: var(--text-2, var(--text-2));
 }
 
+/* L1 group section header — shared between the MetadataPanel rail and the
+   Detail Type editor's field list. "Define looks like display." Padding
+   matches the per-row horizontal padding used by both .field-row and
+   .schema-field-row. */
+.rail-group-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 12px 12px 4px;
+}
+.rail-group-label {
+  font-size: 10px;
+  font-weight: 800;
+  letter-spacing: 0.09em;
+  text-transform: uppercase;
+  color: var(--text-3, var(--text-3));
+}
+.rail-group-rule {
+  flex: 1;
+  height: 1px;
+  background: var(--divider, var(--divider));
+}
+
 /* Schema-mode field rows (metadata revision, mockup B): the same
    icon · name vocabulary as the editor rail, plus a mono type chip and
    the source/inherited markers. "Define looks like display." */
@@ -2637,9 +2660,9 @@ button.row-action-add.active {
 .schema-field-row {
   display: flex;
   align-items: center;
-  gap: 9px;
+  gap: 10px;
   width: 100%;
-  padding: 6px 8px;
+  padding: 6px 12px;
   border: 1px solid transparent;
   border-radius: 8px;
   background: transparent;
@@ -2698,13 +2721,16 @@ button.schema-field-row:hover {
   justify-content: center;
   border-radius: 7px;
   background: var(--inset, #f1f5f3);
-  border: 1px dashed var(--border-strong, var(--border-strong));
+  border: 1px solid var(--divider, var(--divider));
   color: var(--text-2, var(--text-2));
   font-size: 14px;
 }
-.schema-field-row.inherited .sfr-tile {
-  border-style: solid;
-  border-color: var(--divider, var(--divider));
+/* In the inline editor the tile becomes the icon picker button — dashed
+   border signals "click to choose icon". The row-level tile (display) stays
+   solid, matching MetadataPanel's .fr-icon. */
+.sfi-icon-btn.sfr-tile {
+  border-style: dashed;
+  border-color: var(--border-strong, var(--border-strong));
 }
 .sfr-name {
   flex: 0 1 auto;
@@ -2727,13 +2753,6 @@ button.schema-field-row:hover {
   display: inline-flex;
   align-items: center;
   gap: 7px;
-}
-.sfr-group {
-  font-size: 10px;
-  font-weight: 700;
-  letter-spacing: 0.05em;
-  text-transform: uppercase;
-  color: var(--text-3, var(--text-3));
 }
 .sfr-inherited-label {
   font-size: 11px;
@@ -2771,6 +2790,9 @@ button.schema-field-row:hover {
   position: relative;
   flex: none;
 }
+/* The icon picker button wears the tile's shape (sfi-icon-btn.sfr-tile).
+   Border treatment (dashed "click to change") is on the .sfr-tile rule
+   above. */
 .sfi-icon-btn {
   padding: 0;
   cursor: pointer;

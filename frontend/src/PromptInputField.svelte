@@ -13,6 +13,7 @@
     NodePickerConfig,
     NodePickerRef,
     LoreEntrySummary,
+    MetadataFieldDefinition,
     MetadataSchema,
     PromptEntrySummary,
     PromptInputDefinition,
@@ -37,16 +38,19 @@
 
   const dispatch = createEventDispatcher<{ change: { value: string } }>();
 
-  function refStubField() {
-    const target: Record<string, string> = {};
-    const t = input.target as { kind?: unknown; entry_type?: unknown } | null | undefined;
-    if (t && typeof t.kind === "string") target.kind = t.kind;
-    if (t && typeof t.entry_type === "string") target.entry_type = t.entry_type;
+  function refStubField(): MetadataFieldDefinition {
+    // entity_ref / entity_ref_list inputs persist their picker config as a
+    // NodePickerConfig under `target` (post-#40). ReferencePicker reads it
+    // via `picker_config`, the same shape used on the field side.
+    const picker =
+      input.target && typeof input.target === "object"
+        ? (input.target as unknown as NodePickerConfig)
+        : null;
     return {
       name: input.label || input.name,
       type: input.type === "entity_ref_list" ? "entity_ref_list" : "entity_ref",
-      options: [] as string[],
-      target: Object.keys(target).length ? target : null,
+      options: [],
+      picker_config: picker,
     };
   }
 

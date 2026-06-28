@@ -1792,6 +1792,12 @@ class MetadataValidationTests(unittest.TestCase):
         self.assertEqual([i.name for i in rer.prompt.inputs], ["words", "beat"])
 
     def test_prompt_inputs_round_trip_entity_ref_with_target(self) -> None:
+        # Per #40 / decisions-inputs-fields-uniformity: entity_ref and
+        # entity_ref_list inputs carry their picker constraint as a
+        # NodePickerConfig under `target` — same wire shape as context_pick
+        # inputs and entity_ref metadata fields' `picker_config`. The legacy
+        # `{kind, entry_type}` shape was dropped pre-1.0 per the no-migrations
+        # policy.
         layer_id = self._project_layer_id()
         extras = PromptEntryTypeExtras(
             inputs=[
@@ -1799,14 +1805,14 @@ class MetadataValidationTests(unittest.TestCase):
                     name="character",
                     type="entity_ref",
                     label="Speaking character",
-                    target={"kind": "lore", "entry_type": "character"},
+                    target={"kinds": ["lore"], "entry_types": {"lore": ["character"]}},
                     required=True,
                 ),
                 PromptInputDefinition(
                     name="related",
                     type="entity_ref_list",
                     label="Related entries",
-                    target={"kind": "lore"},
+                    target={"kinds": ["lore"]},
                 ),
                 PromptInputDefinition(
                     name="words",
@@ -1833,11 +1839,14 @@ class MetadataValidationTests(unittest.TestCase):
         by_name = {i.name: i for i in inputs}
 
         self.assertEqual(by_name["character"].type, "entity_ref")
-        self.assertEqual(by_name["character"].target, {"kind": "lore", "entry_type": "character"})
+        self.assertEqual(
+            by_name["character"].target,
+            {"kinds": ["lore"], "entry_types": {"lore": ["character"]}},
+        )
         self.assertTrue(by_name["character"].required)
 
         self.assertEqual(by_name["related"].type, "entity_ref_list")
-        self.assertEqual(by_name["related"].target, {"kind": "lore"})
+        self.assertEqual(by_name["related"].target, {"kinds": ["lore"]})
 
         # Non-ref inputs untouched: target stays None.
         self.assertEqual(by_name["words"].type, "number")
@@ -1850,7 +1859,7 @@ class MetadataValidationTests(unittest.TestCase):
         self.assertEqual(disk_by_name["character"]["type"], "entity_ref")
         self.assertEqual(
             disk_by_name["character"]["target"],
-            {"kind": "lore", "entry_type": "character"},
+            {"kinds": ["lore"], "entry_types": {"lore": ["character"]}},
         )
 
     def test_default_schema_seeds_four_prompt_bases(self) -> None:

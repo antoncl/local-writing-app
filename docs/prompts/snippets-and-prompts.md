@@ -99,15 +99,20 @@ Supported `type` values:
 | `entity_ref` | `ReferencePicker` (single) | string id |
 | `entity_ref_list` | `ReferencePicker` (multi) | list of string ids |
 
-For `entity_ref` and `entity_ref_list`, an optional `target` filters the picker:
+For `entity_ref` and `entity_ref_list`, an optional `target` carries a `NodePickerConfig` that constrains the picker — same shape as `context_pick` inputs and `entity_ref` metadata fields' `picker_config`:
 
 ```yaml
 - name: character
   type: entity_ref
   label: Speaking character
-  target: { kind: lore, entry_type: character }
+  target:
+    kinds: [lore]
+    entry_types:
+      lore: [character]
   required: true
 ```
+
+Cardinality is implied by the type literal (`entity_ref` → single, `entity_ref_list` → multi); any `multiple` field on `target` is ignored for these types.
 
 Inside the template the value is the raw id (or list of ids). Wrap with `entry()` to walk into fields:
 

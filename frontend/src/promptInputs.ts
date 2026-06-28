@@ -19,11 +19,10 @@ export type EntryInputDraft = {
   defaultValue: string | undefined;
   options: string; // comma-separated for select
   required: boolean;
-  targetKind: "" | "scene" | "lore";
-  targetEntryType: string;
-  // Carries the per-input config for type === "context_pick". When the user
-  // picks any other type this draft field is ignored at serialize time
-  // (entryInputDraftsToCanonical drops it unless type matches).
+  // Picker constraint config. Applies to context_pick AND
+  // entity_ref / entity_ref_list — all three serialize their picker constraint
+  // into `PromptInputDefinition.target` as a NodePickerConfig (see #40 decision).
+  // For non-ref types this field is ignored at serialize time.
   nodePickerConfig: NodePickerConfig;
   nameDerived: boolean;
 };

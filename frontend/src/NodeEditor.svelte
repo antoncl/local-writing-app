@@ -241,12 +241,15 @@
   }
 
   function inputDefinitionToDraft(input: PromptInputDefinition): EntryInputDraft {
-    const targetKindRaw = (input.target as { kind?: unknown } | null | undefined)?.kind;
-    const targetEntryTypeRaw = (input.target as { entry_type?: unknown } | null | undefined)?.entry_type;
+    // entity_ref / entity_ref_list / context_pick all carry their picker
+    // constraint as a NodePickerConfig under `target` (post-#40). For other
+    // types, target is unused — start with an empty config.
+    const usesPicker =
+      input.type === "context_pick" || input.type === "entity_ref" || input.type === "entity_ref_list";
     const nodePickerConfig =
-      input.type === "context_pick" && input.target && typeof input.target === "object"
+      usesPicker && input.target && typeof input.target === "object"
         ? (input.target as unknown as import("./types").NodePickerConfig)
-        : ({ kinds: [], presets: [], multiple: true } as import("./types").NodePickerConfig);
+        : ({ kinds: [], presets: [] } as import("./types").NodePickerConfig);
     return {
       clientId: nextInputDraftId(),
       name: input.name,
@@ -255,8 +258,6 @@
       defaultValue: input.default === undefined || input.default === null ? undefined : String(input.default),
       options: (input.options ?? []).map((o) => o.value).join(", "),
       required: Boolean(input.required),
-      targetKind: targetKindRaw === "scene" || targetKindRaw === "lore" ? (targetKindRaw as "scene" | "lore") : "",
-      targetEntryType: typeof targetEntryTypeRaw === "string" ? targetEntryTypeRaw : "",
       nodePickerConfig,
       nameDerived: false,
     };
@@ -294,10 +295,13 @@
         };
         if (d.label) out.label = d.label;
         if (d.required) out.required = true;
-        if (d.type === "context_pick") {
-          // Serialize the rich config into `target`. Skip default / options
-          // (they don't apply); skip targetKind / targetEntryType (those
-          // are for entity_ref types).
+        if (d.type === "context_pick" || d.type === "entity_ref" || d.type === "entity_ref_list") {
+          // All three ref-shaped types serialize their picker constraint as
+          // a NodePickerConfig under `target` (per #40 — same wire shape on
+          // both surfaces). `multiple` is derived from the type literal at
+          // runtime (entity_ref → false, entity_ref_list → true), so any
+          // value the editor wrote is non-load-bearing for entity_ref types.
+          // Skip default / options for these types — they don't apply.
           out.target = d.nodePickerConfig as unknown as Record<string, import("./types").MetadataValue>;
           return out;
         }
@@ -317,10 +321,6 @@
             .filter(Boolean)
             .map((value) => ({ value }));
         }
-        const target: Record<string, string> = {};
-        if (d.targetKind) target.kind = d.targetKind;
-        if (d.targetEntryType) target.entry_type = d.targetEntryType;
-        if (Object.keys(target).length > 0) out.target = target;
         return out;
       });
   }
@@ -635,15 +635,19 @@
   }
 
   function refInputStubField(input: PromptInputDefinition): MetadataFieldDefinition {
-    const target: Record<string, string> = {};
-    const t = input.target as { kind?: unknown; entry_type?: unknown } | null | undefined;
-    if (t && typeof t.kind === "string") target.kind = t.kind;
-    if (t && typeof t.entry_type === "string") target.entry_type = t.entry_type;
+    // entity_ref / entity_ref_list inputs persist their picker config as a
+    // NodePickerConfig under `target` (post-#40). Surface it as
+    // `picker_config` for ReferencePicker, which is the same shape the field
+    // side uses.
+    const picker =
+      input.target && typeof input.target === "object"
+        ? (input.target as unknown as import("./types").NodePickerConfig)
+        : null;
     return {
       name: input.label || input.name,
       type: input.type === "entity_ref_list" ? "entity_ref_list" : "entity_ref",
       options: [],
-      target: Object.keys(target).length ? target : null,
+      picker_config: picker,
     };
   }
 

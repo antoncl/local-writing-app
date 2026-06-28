@@ -201,19 +201,20 @@ class PromptInputDefinition(BaseModel):
     @classmethod
     def _accept_bare_strings(cls, value: Any) -> Any:
         return _normalize_select_options(value)
-    # When type is entity_ref / entity_ref_list, `target` constrains which
-    # entries the dispatch-form picker offers. Same shape as the existing
-    # `target` on entity_ref metadata fields: {"kind": "scene"|"lore"} and
-    # optionally {"entry_type": "<sub-type-id>"}.
-    #
-    # When type is context_pick, `target` carries the per-input config that
-    # the runtime picker reads. Shape (see docs/context-picker.md):
+    # For entity_ref / entity_ref_list / context_pick inputs, `target`
+    # carries a NodePickerConfig — the same shape MetadataFieldDefinition
+    # uses for `picker_config`. Per decisions-inputs-fields-uniformity, all
+    # three types share one picker-constraint vocabulary:
     #   {
     #     "kinds": ["scene", "lore", "snippet", "assistant"],
     #     "entry_types": {"lore": ["character", "place"]},  # optional, per kind
-    #     "presets": ["full_outline", "full_text"],  # optional
-    #     "multiple": true,  # default true
+    #     "presets": ["full_outline", "full_text"],         # context_pick only
+    #     "multiple": true,                                  # context_pick only
+    #     "allow_target_marking": true,                      # context_pick only
     #   }
+    # For entity_ref / entity_ref_list, cardinality is implied by the type
+    # literal — any `multiple` field is ignored; presets and target marking
+    # are not surfaced. See docs/context-picker.md.
     target: dict[str, Any] | None = None
 
 

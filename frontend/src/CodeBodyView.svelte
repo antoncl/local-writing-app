@@ -154,9 +154,7 @@
         defaultValue: undefined,
         options: "",
         required: false,
-        targetKind: "",
-        targetEntryType: "",
-        nodePickerConfig: { kinds: [], presets: [], multiple: true },
+        nodePickerConfig: { kinds: [], presets: [] },
         nameDerived: true,
       },
     ];
@@ -704,26 +702,28 @@
                 <input value={draft.options} placeholder="quick, thorough" on:input={(e) => updateEntryInput(index, { options: (e.currentTarget as HTMLInputElement).value })} />
               </label>
             {/if}
-            {#if draft.type === "entity_ref" || draft.type === "entity_ref_list"}
-              <label>
-                Target kind
-                <select value={draft.targetKind} on:change={(e) => updateEntryInput(index, { targetKind: (e.currentTarget as HTMLSelectElement).value as "" | "scene" | "lore" })}>
-                  <option value="">Any</option>
-                  <option value="scene">Scene</option>
-                  <option value="lore">Lore</option>
-                </select>
-              </label>
-              <label>
-                Target entry type
-                <input value={draft.targetEntryType} placeholder="" on:input={(e) => updateEntryInput(index, { targetEntryType: (e.currentTarget as HTMLInputElement).value })} />
-              </label>
-            {/if}
             <label class="prompt-input-required">
               <input type="checkbox" checked={draft.required} on:change={(e) => updateEntryInput(index, { required: (e.currentTarget as HTMLInputElement).checked })} />
               Required
             </label>
             <button type="button" class="prompt-input-remove" title="Remove input" on:click={() => removeEntryInput(index)}>×</button>
           </div>
+          {#if draft.type === "entity_ref" || draft.type === "entity_ref_list"}
+            <!-- Picker constraint config — same NodePickerConfigEditor the
+                 metadata-field side uses (App.svelte:4666). mode="field"
+                 hides presets + scene binding (entity_ref doesn't have
+                 those concepts) and the Multiple toggle (cardinality is
+                 implied by the type literal). See decisions-inputs-fields-
+                 uniformity / #40. -->
+            <div class="prompt-input-picker">
+              <NodePickerConfigEditor
+                mode="field"
+                config={draft.nodePickerConfig}
+                metadataSchema={metadataSchema}
+                on:change={(event) => updateEntryInputNodePickerConfig(index, event.detail.config)}
+              />
+            </div>
+          {/if}
         </div>
       {/if}
     {/each}

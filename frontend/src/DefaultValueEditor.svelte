@@ -44,13 +44,27 @@
     <option value="false">False</option>
   </select>
 {:else if type === "number"}
-  <input
-    type="number"
-    value={value ?? ""}
-    placeholder="Unset"
-    aria-label={ariaLabel}
-    on:input={(e) => emit((e.currentTarget as HTMLInputElement).value)}
-  />
+  <!-- Wrapped so the explicit clear-to-unset button (#41) can sit
+       alongside the input. Empty input still IS unset; the button just
+       makes resetting from a typed value to unset obvious + cheap. -->
+  <span class="dve-clearable">
+    <input
+      type="number"
+      value={value ?? ""}
+      placeholder="Unset"
+      aria-label={ariaLabel}
+      on:input={(e) => emit((e.currentTarget as HTMLInputElement).value)}
+    />
+    {#if value !== undefined && value !== ""}
+      <button
+        type="button"
+        class="dve-clear"
+        title="Clear default (unset)"
+        aria-label="Clear default"
+        on:click={() => emit("")}
+      >×</button>
+    {/if}
+  </span>
 {:else if type === "select" || type === "multi_select"}
   <select
     value={value ?? ""}
@@ -64,12 +78,53 @@
   </select>
 {:else}
   <!-- text / long_text / date / color / entity_ref(_list) / tags / etc.:
-       typed picker for refs is a follow-up (#41 covers an explicit unset
-       affordance for text/number); empty = Unset. -->
-  <input
-    value={value ?? ""}
-    placeholder="Unset"
-    aria-label={ariaLabel}
-    on:input={(e) => emit((e.currentTarget as HTMLInputElement).value)}
-  />
+       typed picker for refs is a follow-up. Empty input = Unset; the
+       explicit clear button (#41) makes resetting from a typed value
+       back to unset obvious + cheap. -->
+  <span class="dve-clearable">
+    <input
+      value={value ?? ""}
+      placeholder="Unset"
+      aria-label={ariaLabel}
+      on:input={(e) => emit((e.currentTarget as HTMLInputElement).value)}
+    />
+    {#if value !== undefined && value !== ""}
+      <button
+        type="button"
+        class="dve-clear"
+        title="Clear default (unset)"
+        aria-label="Clear default"
+        on:click={() => emit("")}
+      >×</button>
+    {/if}
+  </span>
 {/if}
+
+<style>
+  .dve-clearable {
+    display: inline-flex;
+    align-items: stretch;
+    gap: 4px;
+    width: 100%;
+  }
+  .dve-clearable > input {
+    flex: 1;
+    min-width: 0;
+  }
+  .dve-clear {
+    flex: none;
+    appearance: none;
+    border: 1px solid var(--border);
+    background: var(--surface);
+    color: var(--text-3);
+    font-size: 14px;
+    line-height: 1;
+    padding: 0 7px;
+    border-radius: 4px;
+    cursor: pointer;
+  }
+  .dve-clear:hover {
+    color: var(--text);
+    border-color: var(--border-strong);
+  }
+</style>

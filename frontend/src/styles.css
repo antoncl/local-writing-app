@@ -3900,6 +3900,13 @@ button.schema-field-row:hover {
   margin-top: 8px;
 }
 
+/* select options editor sits below the grid within the same input row.
+   SelectOptionsEditor uses the same .sfi-options markup as the metadata-
+   field-side editor — this rule just spaces it from the grid above. */
+.entry-inputs-editor .prompt-input-options-editor {
+  margin-top: 8px;
+}
+
 /* Child combinator: this styling is for the row's primary labels
    (ID, Type, Default, etc.) only. Without `>`, the rule cascaded into
    deeply nested labels in NodePickerConfigEditor's tree, turning

@@ -23,6 +23,7 @@
   import GroupsManagerDialog from "./GroupsManagerDialog.svelte";
   import TagManagerDialog from "./TagManagerDialog.svelte";
   import SwatchPicker from "./SwatchPicker.svelte";
+  import SelectOptionsEditor, { type OptionDraft } from "./SelectOptionsEditor.svelte";
   import type {
     AIHealthResponse,
     AIPolicy,
@@ -295,7 +296,7 @@
   // stable `value` (the macro contract), a cosmetic `label`, a `color` swatch,
   // and `originalValue` (the value at load time, or null for a freshly-added
   // row) so a value rename can migrate stored data even after drag-reorder.
-  type OptionDraft = { value: string; label: string; color: string | null; originalValue: string | null };
+  // OptionDraft is defined and re-exported by SelectOptionsEditor.
   let schemaFieldOptionList: OptionDraft[] = [];
   let schemaFieldReadonlyTypeLabel = "";
   let selectedSchemaFieldId: string | null = null;
@@ -2261,16 +2262,6 @@
     return Object.keys(migration).length > 0 ? migration : null;
   }
 
-  // --- Option draft list editing (select / multi_select) -------------------
-  function addSchemaFieldOption() {
-    schemaFieldOptionList = [...schemaFieldOptionList, { value: "", label: "", color: null, originalValue: null }];
-  }
-  function removeSchemaFieldOption(index: number) {
-    schemaFieldOptionList = schemaFieldOptionList.filter((_, i) => i !== index);
-  }
-  function updateSchemaFieldOption(index: number, patch: Partial<{ value: string; label: string; color: string | null }>) {
-    schemaFieldOptionList = schemaFieldOptionList.map((draft, i) => (i === index ? { ...draft, ...patch } : draft));
-  }
   // Shared drop-position helper: before/after based on cursor vs row midpoint.
   // Mirrors the NodeRow tree-drag marker so every reorderable list reads the
   // same way (a 2px accent insertion line; see .drop-before/.drop-after CSS).
@@ -2319,29 +2310,6 @@
       await refreshMetadataSchema();
       status = "Reordered fields";
     });
-  }
-
-  let optionDragIndex: number | null = null;
-  let optionDropTarget: { index: number; position: "before" | "after" } | null = null;
-  function onOptionDragStart(index: number) {
-    optionDragIndex = index;
-  }
-  function onOptionDragOver(event: DragEvent, index: number) {
-    if (optionDragIndex === null || optionDragIndex === index) return;
-    event.preventDefault();
-    if (event.dataTransfer) event.dataTransfer.dropEffect = "move";
-    optionDropTarget = { index, position: dropPositionFromEvent(event) };
-  }
-  function clearOptionDrag() {
-    optionDragIndex = null;
-    optionDropTarget = null;
-  }
-  function onOptionDrop(index: number) {
-    const from = optionDragIndex;
-    const position = optionDropTarget?.position ?? "before";
-    clearOptionDrag();
-    if (from === null || from === index) return;
-    schemaFieldOptionList = reorderByPosition(schemaFieldOptionList, from, index, position);
   }
 
   function migrateMetadataOptionValues(metadata: EntryMetadata, fieldId: string, migration: Record<string, string> | null) {
@@ -4694,59 +4662,10 @@
               </div>
             {/if}
             {#if schemaFieldType === "select" || schemaFieldType === "multi_select"}
-              <div class="sfi-options" role="list" aria-label="Options">
-                {#each schemaFieldOptionList as option, index (index)}
-                  <div
-                    class="sfi-option-row"
-                    role="listitem"
-                    class:dragging={optionDragIndex === index}
-                    class:drop-before={optionDropTarget?.index === index && optionDropTarget?.position === "before"}
-                    class:drop-after={optionDropTarget?.index === index && optionDropTarget?.position === "after"}
-                    on:dragover={(event) => onOptionDragOver(event, index)}
-                    on:dragleave={() => { if (optionDropTarget?.index === index) optionDropTarget = null; }}
-                    on:drop|preventDefault={() => onOptionDrop(index)}
-                  >
-                    <span
-                      class="sfi-option-grip"
-                      role="button"
-                      tabindex="-1"
-                      aria-label="Drag to reorder"
-                      title="Drag to reorder"
-                      draggable="true"
-                      on:dragstart={() => onOptionDragStart(index)}
-                      on:dragend={clearOptionDrag}
-                    ><i class="ti ti-grip-vertical"></i></span>
-                    <SwatchPicker
-                      value={option.color}
-                      onChange={(id) => updateSchemaFieldOption(index, { color: id })}
-                    />
-                    <input
-                      class="sfi-option-value-input"
-                      value={option.value}
-                      placeholder="value"
-                      aria-label="Option value"
-                      on:input={(event) => updateSchemaFieldOption(index, { value: event.currentTarget.value })}
-                    />
-                    <input
-                      class="sfi-option-label"
-                      value={option.label}
-                      placeholder="label (optional)"
-                      aria-label="Option display label"
-                      on:input={(event) => updateSchemaFieldOption(index, { label: event.currentTarget.value })}
-                    />
-                    <button class="sfi-option-remove" type="button" title="Remove option" aria-label="Remove option" on:click={() => removeSchemaFieldOption(index)}>
-                      <i class="ti ti-x" aria-hidden="true"></i>
-                    </button>
-                  </div>
-                {/each}
-                <button class="add-affordance sfi-add-option" type="button" on:click={addSchemaFieldOption}>+ Add option</button>
-                {#if schemaFieldOptionList.length > 0}
-                  <p class="sfi-options-hint">
-                    <i class="ti ti-info-circle" aria-hidden="true"></i>
-                    drag to reorder; the <strong>value</strong> is the macro contract (renaming it migrates stored data), the label is cosmetic
-                  </p>
-                {/if}
-              </div>
+              <SelectOptionsEditor
+                options={schemaFieldOptionList}
+                on:change={(event) => (schemaFieldOptionList = event.detail.options)}
+              />
             {/if}
             <div class="sfi-footer">
               <span class="sfi-spacer"></span>
@@ -4985,40 +4904,12 @@
       {#if (schemaFieldType === "select" || schemaFieldType === "multi_select") && (!schemaFieldReadonly || schemaFieldOptionList.length)}
         <div class="schema-field-options">
           <span class="option-colors-label">Options</span>
-          <div class="sfi-options" role="list" aria-label="Options">
-            {#each schemaFieldOptionList as option, index (index)}
-              <div
-                class="sfi-option-row"
-                role="listitem"
-                class:dragging={optionDragIndex === index}
-                class:drop-before={optionDropTarget?.index === index && optionDropTarget?.position === "before"}
-                class:drop-after={optionDropTarget?.index === index && optionDropTarget?.position === "after"}
-                on:dragover={(event) => onOptionDragOver(event, index)}
-                on:dragleave={() => { if (optionDropTarget?.index === index) optionDropTarget = null; }}
-                on:drop|preventDefault={() => onOptionDrop(index)}
-              >
-                <span
-                  class="sfi-option-grip"
-                  role="button"
-                  tabindex="-1"
-                  aria-label="Drag to reorder"
-                  title="Drag to reorder"
-                  draggable={!schemaFieldReadonly}
-                  on:dragstart={() => onOptionDragStart(index)}
-                  on:dragend={clearOptionDrag}
-                ><i class="ti ti-grip-vertical"></i></span>
-                <SwatchPicker value={option.color} onChange={(id) => updateSchemaFieldOption(index, { color: id })} />
-                <input class="sfi-option-value-input" value={option.value} placeholder="value" aria-label="Option value" readonly={schemaFieldReadonly} on:input={(event) => updateSchemaFieldOption(index, { value: event.currentTarget.value })} />
-                <input class="sfi-option-label" value={option.label} placeholder="label (optional)" aria-label="Option display label" readonly={schemaFieldReadonly} on:input={(event) => updateSchemaFieldOption(index, { label: event.currentTarget.value })} />
-                {#if !schemaFieldReadonly}
-                  <button class="sfi-option-remove" type="button" title="Remove option" aria-label="Remove option" on:click={() => removeSchemaFieldOption(index)}><i class="ti ti-x" aria-hidden="true"></i></button>
-                {/if}
-              </div>
-            {/each}
-            {#if !schemaFieldReadonly}
-              <button class="add-affordance sfi-add-option" type="button" on:click={addSchemaFieldOption}>+ Add option</button>
-            {/if}
-          </div>
+          <SelectOptionsEditor
+            options={schemaFieldOptionList}
+            readonly={schemaFieldReadonly}
+            showMigrationHint={false}
+            on:change={(event) => (schemaFieldOptionList = event.detail.options)}
+          />
         </div>
       {/if}
       {#if !schemaFieldReadonly}

@@ -17,6 +17,7 @@
   import CodeEditor from "./CodeEditor.svelte";
   import NodePickerConfigEditor from "./NodePickerConfigEditor.svelte";
   import PromptInputField from "./PromptInputField.svelte";
+  import SelectOptionsEditor from "./SelectOptionsEditor.svelte";
   import { api } from "./api";
   import { formatCostEur, formatTokens } from "./money";
   import { coerceInputValue, type EntryInputDraft } from "./promptInputs";
@@ -152,7 +153,7 @@
         type: "text",
         label: "",
         defaultValue: undefined,
-        options: "",
+        options: [],
         required: false,
         nodePickerConfig: { kinds: [], presets: [] },
         nameDerived: true,
@@ -686,8 +687,8 @@
               {:else if draft.type === "select"}
                 <select value={draft.defaultValue ?? ""} on:change={(e) => setEntryInputDefault(index, (e.currentTarget as HTMLSelectElement).value)}>
                   <option value="">Unset</option>
-                  {#each draft.options.split(",").map((s) => s.trim()).filter(Boolean) as opt}
-                    <option value={opt}>{opt}</option>
+                  {#each draft.options.filter((o) => o.value.trim() !== "") as opt (opt.value)}
+                    <option value={opt.value}>{opt.label || opt.value}</option>
                   {/each}
                 </select>
               {:else}
@@ -696,18 +697,25 @@
                 <input value={draft.defaultValue ?? ""} placeholder="Unset" on:input={(e) => setEntryInputDefault(index, (e.currentTarget as HTMLInputElement).value)} />
               {/if}
             </label>
-            {#if draft.type === "select"}
-              <label class="prompt-input-options">
-                Options
-                <input value={draft.options} placeholder="quick, thorough" on:input={(e) => updateEntryInput(index, { options: (e.currentTarget as HTMLInputElement).value })} />
-              </label>
-            {/if}
             <label class="prompt-input-required">
               <input type="checkbox" checked={draft.required} on:change={(e) => updateEntryInput(index, { required: (e.currentTarget as HTMLInputElement).checked })} />
               Required
             </label>
             <button type="button" class="prompt-input-remove" title="Remove input" on:click={() => removeEntryInput(index)}>×</button>
           </div>
+          {#if draft.type === "select"}
+            <!-- Row-per-option editor — same SelectOptionsEditor the
+                 metadata-field side uses. Replaces the comma-string text
+                 box that round-tripped-lost labels and colors. See
+                 decisions-inputs-fields-uniformity. -->
+            <div class="prompt-input-options-editor">
+              <SelectOptionsEditor
+                options={draft.options}
+                showMigrationHint={false}
+                on:change={(event) => updateEntryInput(index, { options: event.detail.options })}
+              />
+            </div>
+          {/if}
           {#if draft.type === "entity_ref" || draft.type === "entity_ref_list"}
             <!-- Picker constraint config — same NodePickerConfigEditor the
                  metadata-field side uses (App.svelte:4666). mode="field"

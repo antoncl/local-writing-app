@@ -1,3 +1,4 @@
+import type { OptionDraft } from "./SelectOptionsEditor.svelte";
 import type { NodePickerConfig, PromptInputDefinition, PromptInputType } from "./types";
 
 // Editor-side form state for one declared input on a prompt. Persisted shape
@@ -17,7 +18,10 @@ export type EntryInputDraft = {
   // from a boolean false or an empty string). Any other value is the
   // author's explicit, type-matched default. See #24.
   defaultValue: string | undefined;
-  options: string; // comma-separated for select
+  // Row-shaped select options (value / label / color). Shared draft type
+  // with metadata fields' option editor (decisions-inputs-fields-uniformity).
+  // Empty for non-select types; non-select serialization drops it.
+  options: OptionDraft[];
   required: boolean;
   // Picker constraint config. Applies to context_pick AND
   // entity_ref / entity_ref_list — all three serialize their picker constraint

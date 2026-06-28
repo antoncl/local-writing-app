@@ -256,7 +256,14 @@
       type: input.type,
       label: input.label ?? "",
       defaultValue: input.default === undefined || input.default === null ? undefined : String(input.default),
-      options: (input.options ?? []).map((o) => o.value).join(", "),
+      // Structured option drafts (value / label / color). Mirrors the field-side
+      // editor — see SelectOptionsEditor + decisions-inputs-fields-uniformity.
+      options: (input.options ?? []).map((o) => ({
+        value: o.value,
+        label: o.label ?? "",
+        color: o.color ?? null,
+        originalValue: o.value,
+      })),
       required: Boolean(input.required),
       nodePickerConfig,
       nameDerived: false,
@@ -312,14 +319,17 @@
           out.default = defaultValueForStorage(d.defaultValue, d.type);
         }
         if (d.type === "select") {
-          // Emit SelectOption objects; colors aren't editable from the
-          // prompt-input draft surface today (Phase 3 adds them to the
-          // Detail Field editor for metadata-level selects).
+          // Emit SelectOption objects from the draft list, preserving the
+          // author's label + color picks (used to round-trip-lose them via
+          // the comma-string shape — see decisions-inputs-fields-uniformity).
           out.options = d.options
-            .split(",")
-            .map((s) => s.trim())
-            .filter(Boolean)
-            .map((value) => ({ value }));
+            .filter((o) => o.value.trim() !== "")
+            .map((o) => {
+              const item: import("./types").SelectOption = { value: o.value.trim() };
+              if (o.label) item.label = o.label;
+              if (o.color) item.color = o.color;
+              return item;
+            });
         }
         return out;
       });

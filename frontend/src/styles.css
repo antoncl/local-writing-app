@@ -3610,15 +3610,20 @@ button.schema-field-row:hover {
   border-color: var(--accent);
 }
 
+/* Accessor pill in the input row's header strip. Click-to-copy button,
+   mirrors .prompt-preview-field-accessor. */
 .prompt-input-accessor {
-  display: block;
-  margin-top: 2px;
+  background: transparent;
+  border: 1px solid transparent;
   color: var(--text-2);
+  cursor: pointer;
+  padding: 0;
   font-size: 11px;
   font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
   text-transform: none;
   letter-spacing: 0;
   font-weight: 400;
+  line-height: 1.4;
 }
 
 .prompt-input-accessor > code {
@@ -3626,6 +3631,12 @@ button.schema-field-row:hover {
   border: 1px solid var(--border);
   border-radius: 3px;
   padding: 0 4px;
+  white-space: nowrap;
+}
+
+.prompt-input-accessor:hover > code {
+  background: var(--accent-soft);
+  border-color: var(--accent);
 }
 
 /* Per-entry inputs editor (NodeEditor, prompt entries). Sits between
@@ -3952,6 +3963,17 @@ button.schema-field-row:hover {
 
 .entry-inputs-editor .prompt-input-row.drop-after::after {
   bottom: -2px;
+}
+
+/* Row header strip — holds the input.<id> accessor pill, right-aligned.
+   min-height reserves vertical space so the row doesn't shift when the
+   computed id materializes after the author types a label (#26). */
+.entry-inputs-editor .prompt-input-header {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  min-height: 18px;
+  margin-bottom: 4px;
 }
 
 .entry-inputs-editor .prompt-input-grid {

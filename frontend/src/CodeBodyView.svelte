@@ -633,6 +633,20 @@
             on:dragstart={(e) => handleInputDragStart(e, index)}
             on:dragend={handleInputDragEnd}
           >⋮⋮</span>
+          <!-- Header strip: accessor pill aligned right, out of the grid so
+               the grid row height stays constant whether or not the computed
+               id has materialized (see #26). Always rendered (min-height
+               reserved) so the row doesn't jump when the id first appears. -->
+          <div class="prompt-input-header">
+            {#if draft.name}
+              <button
+                type="button"
+                class="prompt-input-accessor"
+                title="Click to copy"
+                on:click|preventDefault={() => navigator.clipboard?.writeText(`{{ input.${draft.name} }}`).catch(() => {})}
+              ><code>&lbrace;&lbrace; input.{draft.name} &rbrace;&rbrace;</code></button>
+            {/if}
+          </div>
           <div class="prompt-input-grid">
             <label>
               Label
@@ -641,9 +655,6 @@
             <label>
               ID
               <input value={draft.name} placeholder="topic_to_brainstorm" on:input={(e) => updateEntryInputName(index, (e.currentTarget as HTMLInputElement).value)} />
-              {#if draft.name}
-                <small class="prompt-input-accessor"><code>&lbrace;&lbrace; input.{draft.name} &rbrace;&rbrace;</code></small>
-              {/if}
             </label>
             <label>
               Type

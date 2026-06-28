@@ -3,15 +3,14 @@
   import { api } from "./api";
   import CodeEditor from "./CodeEditor.svelte";
   import NodeEditor from "./NodeEditor.svelte";
-  import NodeRow from "./NodeRow.svelte";
   import DirectoryPickerModal from "./DirectoryPickerModal.svelte";
-  import NodeList from "./NodeList.svelte";
   import SchemaTypeEditor from "./SchemaTypeEditor.svelte";
   import SchemaTreePane from "./SchemaTreePane.svelte";
   import Tree, { type TreeConfig } from "./Tree.svelte";
   import Lore from "./Lore.svelte";
   import Assistants from "./Assistants.svelte";
   import Prompts from "./Prompts.svelte";
+  import Chats from "./Chats.svelte";
   import {
     buildNodeTypeTree,
     buildSchemaFieldSections,
@@ -1108,12 +1107,6 @@
     }
   }
 
-  function chatSessionPromptTitle(session: ChatSessionSummary): string {
-    if (!session.prompt_entry_id) return "";
-    const entry = promptEntries.find((p) => p.id === session.prompt_entry_id);
-    return entry?.title || "Unknown prompt";
-  }
-
   // "+ New Chat": create an empty session and open it in an editor pane.
   async function createNewChatSession(): Promise<void> {
     try {
@@ -1235,11 +1228,6 @@
     if (!layerId) return "Unknown";
     if (layerId === "built_in") return "Built-in";
     return metadataSchemaLayers.find((layer) => layer.id === layerId)?.label ?? "Unknown";
-  }
-
-  function assistantNameFor(assistantId: string): string {
-    if (!assistantId) return "";
-    return assistantEntries.find((a) => a.id === assistantId)?.title ?? "";
   }
 
   // Derived, not a function: consumers pass it as a prop, and a bare
@@ -3698,42 +3686,14 @@
       </div>
     </header>
     <div class="pane-content schema-list">
-      <NodeList isEmpty={chatSessions.length === 0}>
-        {#each chatSessions as session (session.id)}
-          <NodeRow
-            title={session.title || "Untitled chat"}
-            active={activeChatId === session.id}
-            onClick={() => run(() => openChatInEditorPane(session.id))}
-          >
-            {#snippet detailSlot()}
-              {#if session.prompt_entry_id || session.assistant_id}
-                <small class="chat-session-preset">
-                  {#if session.prompt_entry_id}
-                    <span class="chat-prompt-glyph" aria-hidden="true">✨</span>
-                    {chatSessionPromptTitle(session)}
-                  {/if}
-                  {#if session.prompt_entry_id && session.assistant_id} · {/if}
-                  {#if session.assistant_id}
-                    {assistantNameFor(session.assistant_id) || "(unknown)"}
-                  {/if}
-                </small>
-              {/if}
-              <small>
-              {session.message_count} message{session.message_count === 1 ? "" : "s"} · {session.updated_at.slice(0, 16).replace("T", " ")}
-              {#if (session.cost_usd_total ?? 0) > 0}
-                · <span class="chat-session-cost">{formatCostEur(session.cost_usd_total ?? 0)}</span>
-              {/if}
-            </small>
-            {/snippet}
-            {#snippet trailing()}
-              <button class="row-action-delete" type="button" title="Delete chat" on:click|stopPropagation={() => deleteChatSessionFromPane(session.id)}>×</button>
-            {/snippet}
-          </NodeRow>
-        {/each}
-        {#snippet whenEmpty()}
-          <p class="muted">No chats yet. Click + New Chat to start one.</p>
-        {/snippet}
-      </NodeList>
+      <Chats
+        sessions={chatSessions}
+        {activeChatId}
+        promptEntries={promptEntries}
+        assistantEntries={assistantEntries}
+        onOpenChat={(id) => run(() => openChatInEditorPane(id))}
+        onDeleteChat={(id) => deleteChatSessionFromPane(id)}
+      />
     </div>
     <button class="pane-resize" type="button" aria-label="Resize Chats pane" on:keydown={(event) => handlePaneResizeKeydown(event, "chats")} on:mousedown={(event) => startPaneResize(event, "chats")}></button>
   </section>

@@ -19,6 +19,8 @@
   // Toggle override off (revert to default folder).
   export let onClearOverride: () => void = () => {};
 
+  import Modal from "./Modal.svelte";
+
   function handleNameKeydown(event: KeyboardEvent) {
     if (event.key === "Enter") void onSubmit();
   }
@@ -28,12 +30,7 @@
 </script>
 
 {#if open}
-  <section class="modal-backdrop" aria-label="New project">
-    <div class="confirm-modal" role="dialog" aria-modal="true" aria-labelledby="new-project-title">
-      <header class="confirm-modal-header">
-        <h2 id="new-project-title">New Project</h2>
-      </header>
-
+  <Modal title="New Project" label="New project">
       <label>
         Project name
         <input
@@ -73,7 +70,7 @@
         </div>
       {/if}
 
-      <div class="confirm-modal-actions">
+      {#snippet actions()}
         <button type="button" on:click={onClose}>Cancel</button>
         <button
           class="primary"
@@ -81,7 +78,6 @@
           disabled={submitDisabled}
           on:click={onSubmit}
         >Create</button>
-      </div>
-    </div>
-  </section>
+      {/snippet}
+  </Modal>
 {/if}

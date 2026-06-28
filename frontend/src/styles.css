@@ -749,16 +749,6 @@ h3 {
   white-space: nowrap;
 }
 
-.modal-backdrop {
-  position: fixed;
-  inset: 0;
-  z-index: 2000;
-  display: grid;
-  place-items: center;
-  padding: 24px;
-  background: rgba(25, 40, 35, 0.28);
-}
-
 /* The directory picker can be opened FROM another modal (the New Project
    modal's "Override folder…" button), so its backdrop must sit ABOVE the
    plain modal backdrop or the parent modal blocks all interaction. */
@@ -772,69 +762,9 @@ h3 {
   background: rgba(25, 40, 35, 0.28);
 }
 
-.confirm-modal {
-  display: grid;
-  gap: 14px;
-  width: min(420px, calc(100vw - 48px));
-  padding: 18px;
-  border: 1px solid var(--border);
-  border-radius: 8px;
-  background: var(--surface);
-  box-shadow: 0 24px 60px rgba(25, 40, 35, 0.28);
-}
-
-.confirm-modal-header {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 12px;
-}
-
-.confirm-modal p {
-  margin: 0;
-  color: var(--text-2);
-  font-size: 14px;
-  line-height: 1.45;
-  white-space: pre-line;
-}
-
-.confirm-modal-details {
-  margin: 0;
-  padding-left: 20px;
-  color: var(--text-2);
-  font-size: 13px;
-  line-height: 1.5;
-  max-height: 200px;
-  overflow: auto;
-}
-
-.confirm-modal-undo {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  margin: 0 !important;
-  font-size: 12.5px;
-  font-weight: 600;
-  color: var(--danger, #9d2f2a);
-}
-.confirm-modal-dsa {
-  display: flex;
-  align-items: center;
-  gap: 7px;
-  font-size: 12.5px;
-  color: var(--text-2, var(--text-2));
-  cursor: pointer;
-}
-.confirm-modal-dsa input {
-  width: auto;
-  margin: 0;
-}
-
-.confirm-modal-actions {
-  display: flex;
-  justify-content: flex-end;
-  gap: 8px;
-}
+/* Modal chrome (.modal-backdrop / .confirm-modal*) now lives in Modal.svelte;
+   the confirm-only body bits (.confirm-modal-details / -undo / -dsa) moved into
+   ConfirmModal.svelte. */
 
 .directory-modal {
   display: grid;
@@ -2303,11 +2233,8 @@ button.row-action-add.active {
   border: 1px solid var(--danger-border);
 }
 
-.machine-settings-modal {
-  width: min(640px, calc(100vw - 48px));
-  max-height: calc(100vh - 80px);
-  overflow-y: auto;
-}
+/* .machine-settings-modal sizing moved to Modal's --modal-* custom props
+   (set via frameStyle in MachineSettingsDialog); descendant rules remain below. */
 
 .palette-editor {
   display: flex;

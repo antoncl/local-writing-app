@@ -5,6 +5,7 @@
   // draft; this component owns only the local mutations on the draft
   // it's been handed.
   import type { MachineSettingsDraft, MachineSettingsView, Swatch } from "./types";
+  import Modal from "./Modal.svelte";
 
   export let open: boolean = false;
   // The persisted view (read-only here — used for `config_path` and
@@ -51,11 +52,12 @@
 </script>
 
 {#if open && draft}
-  <section class="modal-backdrop" aria-label="Machine settings">
-    <div class="confirm-modal machine-settings-modal" role="dialog" aria-modal="true" aria-labelledby="machine-settings-title">
-      <header class="confirm-modal-header">
-        <h2 id="machine-settings-title">Machine Settings</h2>
-      </header>
+  <Modal
+    title="Machine Settings"
+    label="Machine settings"
+    frameClass="machine-settings-modal"
+    frameStyle="--modal-width: min(640px, calc(100vw - 48px)); --modal-max-height: calc(100vh - 80px); --modal-overflow-y: auto;"
+  >
       <p class="muted">Your AI subscriptions — provider accounts and keys.</p>
       <p class="muted">Stored locally at: <code>{settings?.config_path}</code></p>
 
@@ -159,10 +161,9 @@
         </div>
       </section>
 
-      <div class="confirm-modal-actions">
+      {#snippet actions()}
         <button type="button" on:click={onCancel}>Cancel</button>
         <button class="primary" type="button" on:click={onSave}>Save</button>
-      </div>
-    </div>
-  </section>
+      {/snippet}
+  </Modal>
 {/if}

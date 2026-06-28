@@ -339,8 +339,8 @@ h3 {
 
 /* `.entry-type-dot` removed — Phase 4 used it on lore rows, but per
    [[decisions-ui-widget-taxonomy]] whole-row color belongs on a Stripe
-   (.schema-row.has-row-stripe), not an inline Dot. The Dot pattern is
-   reserved for label clusters (e.g. .project-color-dot in the
+   (the NodeRow `.has-status-stripe` band), not an inline Dot. The Dot
+   pattern is reserved for label clusters (e.g. .project-color-dot in the
    switcher). */
 
 .top-bar .switcher-overlay {
@@ -584,65 +584,6 @@ h3 {
   gap: 16px;
 }
 
-.schema-layer-group {
-  display: grid;
-  gap: 8px;
-  padding: 8px;
-  border: 1px dashed var(--border);
-  border-radius: 6px;
-  background: var(--surface);
-}
-
-.schema-layer-group.active {
-  border-color: var(--accent);
-  background: var(--accent-soft);
-}
-
-.schema-layer-group.system {
-  border-style: solid;
-  background: var(--inset);
-}
-
-.schema-layer-heading {
-  display: grid;
-  grid-template-columns: minmax(0, 1fr) auto;
-  gap: 8px;
-  align-items: start;
-}
-
-.schema-layer-actions {
-  display: flex;
-  flex-wrap: wrap;
-  justify-content: end;
-  gap: 6px;
-}
-
-.schema-layer-title {
-  display: grid;
-  gap: 2px;
-  padding: 0;
-  border: 0;
-  background: transparent;
-  text-align: left;
-}
-
-.schema-layer-title:hover {
-  background: transparent;
-}
-
-.schema-layer-title small {
-  color: var(--text-3);
-  font-size: 11px;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.schema-layer-fields {
-  display: grid;
-  gap: 6px;
-}
-
 .schema-context-heading {
   display: grid;
   gap: 2px;
@@ -659,49 +600,6 @@ h3 {
 .schema-node-tree {
   display: grid;
   gap: 8px;
-}
-
-.schema-row {
-  display: grid;
-  grid-template-columns: auto minmax(0, 1fr) auto;
-  align-items: center;
-  gap: 8px;
-  width: 100%;
-  padding: 8px;
-  text-align: left;
-  position: relative;
-}
-
-/* Row stripe — left-edge 3px color band on schema-rows (lore pane and
-   any future NodeRow consumer). Set via inline `--row-stripe: <hex>`
-   and `class:has-row-stripe`. Matches the .tree-row.has-status-stripe
-   pattern; see [[decisions-ui-widget-taxonomy]] for the principle. */
-.schema-row.has-row-stripe::before {
-  content: "";
-  position: absolute;
-  left: 0;
-  top: 4px;
-  bottom: 4px;
-  width: 3px;
-  border-radius: 2px;
-  background: var(--row-stripe);
-}
-
-.schema-row.active {
-  border-color: var(--accent);
-  background: var(--accent-soft);
-}
-
-.schema-row.system-row {
-  border: 1px solid var(--divider);
-  border-radius: 6px;
-  background: var(--surface);
-  color: var(--text-2);
-}
-
-.schema-type-row {
-  margin-left: calc(var(--type-depth, 0) * 14px);
-  width: calc(100% - (var(--type-depth, 0) * 14px));
 }
 
 .schema-source-badge {
@@ -734,20 +632,6 @@ h3 {
 
 .muted-handle {
   opacity: 0.45;
-}
-
-.schema-row strong,
-.schema-row small {
-  display: block;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.schema-row small {
-  margin-top: 2px;
-  color: var(--text-3);
-  font-size: 11px;
 }
 
 /* Caret used inside group-header NodeRow leading slots (lore, prompts,

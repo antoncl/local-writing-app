@@ -8,3 +8,9 @@ __pycache__/
 *.egg-info/
 .cache/
 work/
+
+# Scratch / working files and throwaway test projects
+tmp/
+
+# Machine-specific Claude Code settings (launch.json is committed)
+.claude/settings.local.json

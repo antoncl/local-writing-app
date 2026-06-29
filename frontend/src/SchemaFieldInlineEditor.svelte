@@ -1,4 +1,4 @@
-<script lang="ts" context="module">
+<script lang="ts" module>
   import type { MetadataFieldType, MetadataFieldDefinition, NodePickerConfig } from "./types";
   import type { OptionDraft } from "./SelectOptionsEditor.svelte";
 
@@ -33,6 +33,7 @@
   // rename, refresh). Layer + readonly + which-field context still come in as
   // props (the parent computes them from the schema overview).
 
+  import { untrack } from "svelte";
   import IconPicker from "./IconPicker.svelte";
   import NodePickerConfigEditor from "./NodePickerConfigEditor.svelte";
   import SelectOptionsEditor from "./SelectOptionsEditor.svelte";
@@ -45,51 +46,84 @@
   } from "./fieldIcons";
   import { slugifyFieldId } from "./schemaTypeHelpers";
 
-  // --- Context from parent (read-only) ---
-  // `field` is the existing definition being edited, or null for a fresh draft.
-  // `selectedFieldId` is its stable key (null while creating) — drives the
-  // key-rename semantics + the Remove affordance.
-  export let field: MetadataFieldDefinition | null = null;
-  export let selectedFieldId: string | null = null;
-  export let readonly: boolean = false;
-  export let layerId: string = "";
+  interface Props {
+    // --- Context from parent (read-only) ---
+    // `field` is the existing definition being edited, or null for a fresh draft.
+    // `selectedFieldId` is its stable key (null while creating) — drives the
+    // key-rename semantics + the Remove affordance.
+    field?: MetadataFieldDefinition | null;
+    selectedFieldId?: string | null;
+    readonly?: boolean;
+    layerId?: string;
+    // --- Callback props (parent owns persistence) ---
+    onSave?: (payload: FieldDraftPayload) => void;
+    onCancel?: () => void;
+    onRemove?: () => void;
+  }
 
-  // --- Callback props (parent owns persistence) ---
-  export let onSave: (payload: FieldDraftPayload) => void = () => {};
-  export let onCancel: () => void = () => {};
-  export let onRemove: () => void = () => {};
+  let {
+    field = null,
+    selectedFieldId = null,
+    readonly = false,
+    layerId = "",
+    onSave = () => {},
+    onCancel = () => {},
+    onRemove = () => {},
+  }: Props = $props();
 
   // --- Draft state (initialized once at mount from `field`) ---
-  let type: MetadataFieldType = field?.type ?? "text";
-  let name: string = field?.name ?? "";
-  let id: string = selectedFieldId ?? "";
-  let icon: string | null = field?.icon ?? null;
-  let group: string = field?.group ?? "";
-  // Stringify the persisted default for the editor; null / undefined → "no
-  // default". A real `false` boolean default stays editable as "False".
-  let defaultValue: string | undefined =
-    field?.default === undefined || field?.default === null ? undefined : String(field.default);
-  // `originalValue` lets a later value rename migrate stored data even after
-  // the rows are reordered.
-  let options: OptionDraft[] = (field?.options ?? []).map((o) => ({
-    value: o.value,
-    label: o.label ?? "",
-    color: o.color ?? null,
-    originalValue: o.value,
-  }));
-  let computedFunction: "word_count" | "counter" = field?.computed?.function === "counter" ? "counter" : "word_count";
-  let computedScope: "siblings" | "manuscript" = field?.computed?.scope === "manuscript" ? "manuscript" : "siblings";
-  let pickerConfig: NodePickerConfig = field?.picker_config
-    ? {
-        kinds: [...(field.picker_config.kinds ?? [])],
-        entry_types: { ...(field.picker_config.entry_types ?? {}) },
-        presets: [...(field.picker_config.presets ?? [])],
-      }
-    : { kinds: ["lore"], entry_types: {} };
-  let typeMenuOpen = false;
-  let keyEditing = false;
-  let keyManual = false;
-  let iconPickerOpen = false;
+  // The host remounts a fresh instance per expanded row, so seeding once from
+  // the props is correct (a background schema refresh never clobbers edits).
+  // Read every prop inside one `untrack` block to avoid `state_referenced_locally`.
+  const seed = untrack(() => {
+    const f = field;
+    return {
+      type: (f?.type ?? "text") as MetadataFieldType,
+      name: f?.name ?? "",
+      id: selectedFieldId ?? "",
+      icon: f?.icon ?? null,
+      group: f?.group ?? "",
+      // Stringify the persisted default for the editor; null / undefined → "no
+      // default". A real `false` boolean default stays editable as "False".
+      defaultValue:
+        f?.default === undefined || f?.default === null ? undefined : String(f.default),
+      // `originalValue` lets a later value rename migrate stored data even after
+      // the rows are reordered.
+      options: (f?.options ?? []).map((o) => ({
+        value: o.value,
+        label: o.label ?? "",
+        color: o.color ?? null,
+        originalValue: o.value,
+      })) as OptionDraft[],
+      computedFunction: (f?.computed?.function === "counter" ? "counter" : "word_count") as
+        | "word_count"
+        | "counter",
+      computedScope: (f?.computed?.scope === "manuscript" ? "manuscript" : "siblings") as
+        | "siblings"
+        | "manuscript",
+      pickerConfig: (f?.picker_config
+        ? {
+            kinds: [...(f.picker_config.kinds ?? [])],
+            entry_types: { ...(f.picker_config.entry_types ?? {}) },
+            presets: [...(f.picker_config.presets ?? [])],
+          }
+        : { kinds: ["lore"], entry_types: {} }) as NodePickerConfig,
+    };
+  });
+  let type: MetadataFieldType = $state(seed.type);
+  let name: string = $state(seed.name);
+  let id: string = $state(seed.id);
+  let icon: string | null = $state(seed.icon);
+  let group: string = $state(seed.group);
+  let defaultValue: string | undefined = $state(seed.defaultValue);
+  let options: OptionDraft[] = $state(seed.options);
+  let computedFunction: "word_count" | "counter" = $state(seed.computedFunction);
+  let computedScope: "siblings" | "manuscript" = $state(seed.computedScope);
+  let pickerConfig: NodePickerConfig = $state(seed.pickerConfig);
+  let typeMenuOpen = $state(false);
+  let keyEditing = $state(false);
+  let keyManual = $state(false);
+  let iconPickerOpen = $state(false);
 
   // Keep the type-specific config blocks coherent when the user picks a
   // different type from the grid.
@@ -127,10 +161,10 @@
     onSave({ type, name, id, icon, group, defaultValue, options, computedFunction, computedScope, pickerConfig });
   }
 
-  $: saveDisabled = !layerId || !id.trim() || !name.trim();
+  const saveDisabled = $derived(!layerId || !id.trim() || !name.trim());
 </script>
 
-<svelte:window on:mousedown={handleDocumentMousedown} />
+<svelte:window onmousedown={handleDocumentMousedown} />
 
 <div class="schema-field-inline" role="group" aria-label="Field settings">
   <div class="sfi-head">
@@ -140,7 +174,7 @@
         class="sfr-tile sfi-icon-btn"
         aria-label="Choose icon"
         title="Choose icon"
-        on:click={() => (iconPickerOpen = !iconPickerOpen)}
+        onclick={() => (iconPickerOpen = !iconPickerOpen)}
       >
         <i class={fieldIconClass({ type, icon })} aria-hidden="true"></i>
       </button>
@@ -161,7 +195,7 @@
       value={name}
       placeholder="POV Character"
       aria-label="Field display name"
-      on:input={(event) => updateName(event.currentTarget.value)}
+      oninput={(event) => updateName(event.currentTarget.value)}
     />
     <div class="sfi-type-anchor">
       <button
@@ -171,7 +205,7 @@
         aria-haspopup="true"
         aria-expanded={typeMenuOpen}
         aria-label="Change field type"
-        on:click={() => (typeMenuOpen = !typeMenuOpen)}
+        onclick={() => (typeMenuOpen = !typeMenuOpen)}
       >
         <i class={`ti ti-${DEFAULT_FIELD_GLYPH[type] ?? "letter-case"}`} aria-hidden="true"></i>
         <span class="sfi-type-chip-label">{fieldTypeLabel(type)}</span>
@@ -186,7 +220,7 @@
               class:selected={type === choice}
               role="option"
               aria-selected={type === choice}
-              on:click={() => chooseType(choice)}
+              onclick={() => chooseType(choice)}
             >
               <i class={`ti ti-${DEFAULT_FIELD_GLYPH[choice] ?? "letter-case"}`} aria-hidden="true"></i>
               <span>{fieldTypeLabel(choice)}</span>
@@ -202,7 +236,7 @@
         value={group}
         placeholder="— none —"
         aria-label="Group section"
-        on:input={(event) => (group = event.currentTarget.value)}
+        oninput={(event) => (group = event.currentTarget.value)}
       />
     </label>
   </div>
@@ -213,13 +247,13 @@
         class="sfi-key-input"
         value={id}
         aria-label="Field key"
-        on:input={(event) => handleKeyInput(event.currentTarget.value)}
+        oninput={(event) => handleKeyInput(event.currentTarget.value)}
       />
       <span class="sfi-key-hint">{selectedFieldId ? "changing the key migrates existing values" : "auto-derived from the name"}</span>
     {:else if id}
       <span class="sfi-id">key <code>{id}</code></span>
       {#if !readonly}
-        <button type="button" class="sfi-key-rename" on:click={() => (keyEditing = true)}>
+        <button type="button" class="sfi-key-rename" onclick={() => (keyEditing = true)}>
           {selectedFieldId ? "rename (migrates)" : "edit key"}
         </button>
       {/if}
@@ -281,10 +315,10 @@
   <div class="sfi-footer">
     <span class="sfi-spacer"></span>
     {#if selectedFieldId}
-      <button class="link-danger" type="button" on:click={() => onRemove()}>Remove</button>
+      <button class="link-danger" type="button" onclick={() => onRemove()}>Remove</button>
     {/if}
-    <button class="sfi-cancel" type="button" on:click={() => onCancel()}>Cancel</button>
-    <button class="sfi-done" type="button" disabled={saveDisabled} on:click={emitSave}>Done</button>
+    <button class="sfi-cancel" type="button" onclick={() => onCancel()}>Cancel</button>
+    <button class="sfi-done" type="button" disabled={saveDisabled} onclick={emitSave}>Done</button>
   </div>
 </div>
 

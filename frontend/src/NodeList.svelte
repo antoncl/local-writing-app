@@ -35,29 +35,46 @@
   // of mode — header rows are typographic dividers, not interactive
   // cards. NodeRow reads this mode via context so consumers don't
   // have to plumb a per-row `variant` prop.
-  export let mode: "card" | "tree" = "card";
-  setContext("nodeListMode", { get current() { return mode; } });
+  interface Props {
+    mode?: "card" | "tree";
+    // When set, NodeList renders a SearchInput at the top. The caller
+    // is responsible for using the bound `searchValue` to filter the
+    // children it passes into the default slot.
+    searchPlaceholder?: string | null;
+    searchValue?: string;
+    // Pass-through to SearchInput. 0 (sync) is the default for both —
+    // exposed here so consumers can opt into debounced search without
+    // breaking the abstraction.
+    searchDebounceMs?: number;
+    // Caller-declared. NodeList renders the `whenEmpty` snippet (or its
+    // default message) when this is true. Differentiating "no items"
+    // vs "no matches" is the caller's job — they can swap the snippet's
+    // content based on whether a search is active.
+    isEmpty?: boolean;
+    // The list contents. Caller iterates NodeRows directly.
+    children?: Snippet;
+    // Custom empty state. Falls back to a muted "No entries." line.
+    whenEmpty?: Snippet;
+  }
 
-  // When set, NodeList renders a SearchInput at the top. The caller
-  // is responsible for using the bound `searchValue` to filter the
-  // children it passes into the default slot.
-  export let searchPlaceholder: string | null = null;
-  export let searchValue: string = "";
-  // Pass-through to SearchInput. 0 (sync) is the default for both —
-  // exposed here so consumers can opt into debounced search without
-  // breaking the abstraction.
-  export let searchDebounceMs: number = 0;
+  let {
+    mode = "card",
+    searchPlaceholder = null,
+    searchValue = $bindable(""),
+    searchDebounceMs = 0,
+    isEmpty = false,
+    children,
+    whenEmpty,
+  }: Props = $props();
 
-  // Caller-declared. NodeList renders the `whenEmpty` snippet (or its
-  // default message) when this is true. Differentiating "no items"
-  // vs "no matches" is the caller's job — they can swap the snippet's
-  // content based on whether a search is active.
-  export let isEmpty: boolean = false;
-
-  // The list contents. Caller iterates NodeRows directly.
-  export let children: Snippet | undefined = undefined;
-  // Custom empty state. Falls back to a muted "No entries." line.
-  export let whenEmpty: Snippet | undefined = undefined;
+  // NodeRow reads this via context so consumers don't plumb a per-row
+  // `variant`. The getter re-reads the reactive `mode` prop on every
+  // access, so a consumer flipping `mode` still propagates.
+  setContext("nodeListMode", {
+    get current() {
+      return mode;
+    },
+  });
 </script>
 
 <div class="node-list">

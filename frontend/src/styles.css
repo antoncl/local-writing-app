@@ -297,9 +297,6 @@ h3 {
   white-space: nowrap;
 }
 
-.pane-header h2.chat-title-clickable {
-  cursor: text;
-}
 /* .pane-status / .pane-status-saved co-located into App.svelte (#14). */
 
 .pane-header-actions {
@@ -369,10 +366,6 @@ h3 {
   gap: 16px;
 }
 
-.muted-handle {
-  opacity: 0.45;
-}
-
 /* Caret used inside group-header NodeRow leading slots (lore, prompts,
    future panes). The .lore-entry-group / .lore-group-header / friends
    were retired when the lore pane migrated to NodeList + NodeRow
@@ -407,21 +400,6 @@ h3 {
 .group-count-pill.active {
   background: var(--accent-soft);
   color: var(--accent-strong);
-}
-
-.lore-type-chip {
-  display: none;
-  overflow: hidden;
-  max-width: 92px;
-  padding: 2px 6px;
-  border: 1px solid var(--divider);
-  border-radius: 999px;
-  color: var(--text-2);
-  background: var(--inset);
-  font-size: 11px;
-  font-weight: 700;
-  text-overflow: ellipsis;
-  white-space: nowrap;
 }
 
 .drag-handle {
@@ -496,21 +474,6 @@ h3 {
   position: relative;
 }
 
-/* Status stripe — colored 3px bar along the left edge of scene tree
-   rows whose status field has an option color set. --status-stripe is
-   set inline by the renderTree snippet. Sits inside the row (no layout
-   shift) and clips with the row's padding-left indent. */
-.tree-row.has-status-stripe::before {
-  content: "";
-  position: absolute;
-  left: 0;
-  top: 2px;
-  bottom: 2px;
-  width: 3px;
-  border-radius: 2px;
-  background: var(--status-stripe);
-}
-
 .tree-row button {
   text-align: left;
   border-color: transparent;
@@ -525,7 +488,6 @@ h3 {
 .tree-row button:hover {
   background: var(--accent-soft);
 }
-
 
 .tree-rename-input {
   flex: 1;
@@ -554,24 +516,6 @@ h3 {
 .tree-add:hover,
 .tree-menu:hover {
   background: var(--accent-soft);
-}
-
-.tree-delete {
-  visibility: hidden;
-  padding: 2px 8px;
-  font-size: 14px;
-  color: var(--danger);
-  border-radius: 4px;
-  line-height: 1;
-}
-
-.tree-row:hover .tree-delete,
-.tree-delete:focus {
-  visibility: visible;
-}
-
-.tree-delete:hover {
-  background: var(--danger-soft);
 }
 
 .tree-handle {
@@ -619,35 +563,6 @@ h3 {
 
 .tree-menu-anchor {
   position: relative;
-}
-
-.tree-add-menu {
-  position: absolute;
-  right: 0;
-  top: calc(100% + 2px);
-  z-index: 1000;
-  display: flex;
-  flex-direction: column;
-  min-width: 140px;
-  border: 1px solid var(--divider);
-  border-radius: 6px;
-  background: var(--surface);
-  box-shadow: 0 6px 16px rgba(36, 48, 43, 0.18);
-  padding: 4px;
-}
-
-.tree-add-menu button {
-  width: 100%;
-  padding: 6px 10px;
-  font-size: 13px;
-  text-align: left;
-  border-color: transparent;
-  background: transparent;
-  cursor: pointer;
-}
-
-.tree-add-menu button:hover {
-  background: var(--accent-soft);
 }
 
 /* Add-child popover — opens from a row's +> affordance (or from a
@@ -754,13 +669,6 @@ button.row-action-add.active {
   padding: 0 22px;
 }
 
-.editor-actions {
-  display: flex;
-  gap: 8px;
-  align-items: center;
-  padding-top: 2px;
-}
-
 .editor-hint {
   color: var(--text-3);
   font-size: 12px;
@@ -774,34 +682,6 @@ button.row-action-add.active {
   display: grid;
   gap: 8px;
   padding-top: 2px;
-}
-
-.metadata-stripe {
-  display: flex;
-  align-items: stretch;
-  gap: 8px;
-}
-
-.metadata-toggle {
-  display: flex;
-  flex: 1;
-  justify-content: space-between;
-  gap: 10px;
-  min-width: 0;
-  text-align: left;
-}
-
-.metadata-custom-button {
-  flex-shrink: 0;
-}
-
-.metadata-toggle span {
-  color: var(--text-3);
-  overflow: hidden;
-  font-size: 12px;
-  font-weight: 400;
-  text-overflow: ellipsis;
-  white-space: nowrap;
 }
 
 .metadata-panel {
@@ -833,10 +713,6 @@ button.row-action-add.active {
   font-weight: 700;
 }
 
-.metadata-field-label {
-  display: block;
-}
-
 .scene-metadata input,
 .scene-metadata select,
 .scene-metadata textarea {
@@ -852,16 +728,6 @@ button.row-action-add.active {
 
 .scene-metadata input[type="checkbox"] {
   width: auto;
-}
-
-.metadata-fields {
-  display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
-  gap: 8px;
-}
-
-.metadata-fields .wide-field {
-  grid-column: 1 / -1;
 }
 
 /* .tag-picker* / .tag-field-control co-located into TagPicker.svelte (#14). */
@@ -991,7 +857,6 @@ button.row-action-add.active {
 /* ProseBodyView editor-overlay UI (.selection-toolbar/.slash-menu/.table-toolbar/
    .ai-inline-toolbar) co-located into ProseBodyView.svelte (#14). */
 
-
 .status {
   padding: 8px 18px;
   border-top: 1px solid var(--divider);
@@ -1045,61 +910,6 @@ button.row-action-add.active {
   font-size: 11px;
 }
 
-.schema-field-option-colors {
-  display: flex;
-  flex-direction: column;
-  gap: 4px;
-  padding: 8px 10px;
-  border: 1px solid var(--border);
-  border-radius: 6px;
-  background: var(--surface);
-}
-.schema-field-option-colors .option-colors-label {
-  font-size: 11px;
-  text-transform: uppercase;
-  letter-spacing: 0.04em;
-  color: var(--text-3);
-  margin-bottom: 2px;
-}
-.option-color-row {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  font-size: 13px;
-}
-.option-color-value {
-  flex: 1;
-  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
-  color: var(--text);
-}
-
-.default-models {
-  display: grid;
-  gap: 6px;
-  border: 1px solid var(--border);
-  border-radius: 6px;
-  padding: 8px 10px;
-}
-
-.default-models legend {
-  font-size: 12px;
-  color: var(--text-2);
-  padding: 0 4px;
-}
-
-.default-models .row {
-  display: grid;
-  grid-template-columns: 110px 1fr;
-  align-items: center;
-  gap: 8px;
-}
-
-.default-models .row span {
-  font-size: 13px;
-  color: var(--text-2);
-  text-transform: capitalize;
-}
-
 .schema-type-fields {
   display: grid;
   gap: 6px;
@@ -1121,11 +931,6 @@ button.row-action-add.active {
   color: var(--text-3);
 }
 
-.schema-type-field-list {
-  display: grid;
-  gap: 4px;
-}
-
 /* Type-editor identity line: kind pill + "extends <parent>". */
 .schema-type-identity {
   display: flex;
@@ -1145,11 +950,6 @@ button.row-action-add.active {
   font-weight: 600;
   color: var(--text-2, var(--text-2));
   text-transform: capitalize;
-}
-.kind-pill.kind-lore {
-  background: var(--k-lore-soft, #ececf6);
-  border-color: var(--k-lore-border, #c9cbe8);
-  color: var(--k-lore-text, #43448a);
 }
 .extends-label {
   display: inline-flex;
@@ -1459,9 +1259,6 @@ button.row-action-add.active {
 }
 
 /* Option rows: swatch · label (renames freely) · stable mono value. */
-.sfi-options-values input {
-  font-family: inherit;
-}
 .sfi-options {
   display: flex;
   flex-direction: column;
@@ -1723,9 +1520,6 @@ button.row-action-add.active {
   margin-top: 6px;
   color: var(--text-2);
 }
-.prompt-editor {
-  overflow-y: auto;
-}
 
 .prompt-fieldset {
   display: grid;
@@ -1755,108 +1549,12 @@ button.row-action-add.active {
   min-height: 64px;
 }
 
-.prompt-row {
-  display: grid;
-  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
-  gap: 8px;
-  align-items: end;
-}
-
-.assistants-roster {
-  display: grid;
-  gap: 10px;
-}
-
-.assistants-roster legend {
-  font-weight: 600;
-}
-
-.assistant-row {
-  display: grid;
-  gap: 6px;
-  padding: 8px;
-  border: 1px dashed var(--border);
-  border-radius: 6px;
-  background: var(--surface);
-}
-
-.assistant-grid {
-  display: grid;
-  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
-  gap: 6px 8px;
-}
-
-.assistant-row .danger {
-  justify-self: end;
-  background: transparent;
-  border: 1px solid var(--danger-border);
-  color: var(--danger);
-}
-
-.assistant-row .danger:hover {
-  background: var(--danger-soft);
-}
-
-.prompt-entry-section {
-  display: grid;
-  gap: 4px;
-  padding: 8px;
-  border: 1px solid var(--border);
-  border-radius: 6px;
-  background: var(--surface);
-}
-
-.prompt-entry-section > header {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 6px;
-  margin-bottom: 4px;
-}
-
-.prompt-entry-row {
-  display: block;
-  padding: 6px 8px;
-  border: 1px solid var(--border);
-  border-radius: 4px;
-  background: var(--surface);
-  text-align: left;
-  cursor: pointer;
-}
-
-.prompt-entry-row:hover {
-  background: var(--accent-soft);
-}
-
-.prompt-entry-row.active {
-  border-color: var(--accent);
-  background: var(--accent-soft);
-}
-
 .assistants-pane {
   min-width: 280px;
 }
 
-/* Dead `.assistants-pane .prompt-entry-row*` rules dropped (#14): .prompt-entry-row
-   is in no markup. (Base .prompt-entry-row* left for the orphan-CSS audit.) */
-
 /* .assistant-drag-handle* co-located into Assistants.svelte (#14);
    dead .assistant-row-wrap* rules dropped (wrapper replaced by NodeRow drag props). */
-
-
-.assistant-default-badge {
-  display: inline-block;
-  margin-left: 6px;
-  padding: 0 6px;
-  border-radius: 8px;
-  background: var(--accent);
-  color: var(--surface);
-  font-size: 10px;
-  font-weight: 600;
-  text-transform: uppercase;
-  letter-spacing: 0.05em;
-  vertical-align: middle;
-}
 
 /* .row-default-marker co-located into Assistants.svelte (#14). */
 

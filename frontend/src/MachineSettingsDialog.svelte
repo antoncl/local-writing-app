@@ -167,3 +167,153 @@
       {/snippet}
   </Modal>
 {/if}
+
+<style>
+  .palette-editor {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+    margin: 12px 0 4px;
+    padding: 12px;
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    background: var(--surface);
+  }
+
+  .palette-editor h3 {
+    margin: 0;
+    font-size: 14px;
+    font-weight: 600;
+  }
+
+  .palette-editor p.muted {
+    margin: 0 0 8px;
+    font-size: 12px;
+  }
+
+  .palette-row {
+    display: grid;
+    grid-template-columns: 22px 1fr 1.5fr 44px auto;
+    gap: 8px;
+    align-items: center;
+    font-size: 12px;
+  }
+
+  .palette-row.palette-header {
+    font-size: 11px;
+    color: var(--text-3);
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+    padding: 0 2px 4px;
+    border-bottom: 1px solid var(--divider);
+    margin-bottom: 4px;
+  }
+
+  .palette-swatch-dot {
+    display: inline-block;
+    width: 16px;
+    height: 16px;
+    border-radius: 50%;
+    border: 1px solid rgba(0, 0, 0, 0.18);
+  }
+
+  .palette-id-input,
+  .palette-label-input {
+    font-size: 12px;
+    padding: 3px 6px;
+    border: 1px solid var(--border);
+    border-radius: 4px;
+    min-width: 0;
+  }
+
+  .palette-id-input {
+    font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  }
+
+  .palette-color-input {
+    width: 44px;
+    height: 26px;
+    padding: 0;
+    border: 1px solid var(--border);
+    border-radius: 4px;
+    background: transparent;
+    cursor: pointer;
+  }
+
+  .palette-row-actions {
+    display: inline-flex;
+    gap: 2px;
+  }
+
+  .palette-row-btn {
+    appearance: none;
+    background: transparent;
+    border: 1px solid transparent;
+    border-radius: 4px;
+    padding: 2px 6px;
+    font-size: 11px;
+    color: var(--text-2);
+    cursor: pointer;
+    line-height: 1;
+  }
+
+  .palette-row-btn:hover:not(:disabled) {
+    background: var(--panel);
+    border-color: var(--border);
+  }
+
+  .palette-row-btn:disabled {
+    opacity: 0.35;
+    cursor: default;
+  }
+
+  .palette-row-delete:hover:not(:disabled) {
+    color: var(--danger);
+    background: var(--danger-soft);
+    border-color: var(--danger-border);
+  }
+
+  .palette-add-row {
+    margin-top: 8px;
+  }
+
+  .palette-add-row button {
+    font-size: 12px;
+    padding: 4px 10px;
+    border: 1px dashed var(--border-strong);
+    border-radius: 4px;
+    background: transparent;
+    cursor: pointer;
+    color: var(--text-2);
+  }
+
+  .palette-add-row button:hover {
+    border-style: solid;
+    background: var(--panel);
+  }
+
+  /* The frame's `.machine-settings-modal` class lives on Modal's own <div>
+     (child scope), so it must be :global; the code/label/input it anchors are
+     this dialog's slotted content and stay scoped. Sizing is handled by the
+     --modal-* custom props set via frameStyle, so there's no bare frame rule. */
+  :global(.machine-settings-modal) code {
+    font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+    font-size: 12px;
+    background: var(--inset);
+    padding: 1px 5px;
+    border-radius: 3px;
+  }
+
+  :global(.machine-settings-modal) label {
+    display: grid;
+    gap: 4px;
+    font-size: 13px;
+  }
+
+  :global(.machine-settings-modal) input {
+    font-size: 13px;
+    padding: 6px 8px;
+    border: 1px solid var(--border);
+    border-radius: 4px;
+  }
+</style>

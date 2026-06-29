@@ -1993,44 +1993,8 @@ button.row-action-add.active {
   min-width: 280px;
 }
 
-.assistant-row-wrap {
-  display: grid;
-  grid-template-columns: auto 1fr;
-  align-items: center;
-  gap: 2px;
-  border-top: 2px solid transparent;
-  border-bottom: 2px solid transparent;
-}
-
-.assistant-row-wrap.dragging {
-  opacity: 0.45;
-}
-
-.assistant-row-wrap.drop-before {
-  border-top-color: var(--accent);
-}
-
-.assistant-row-wrap.drop-after {
-  border-bottom-color: var(--accent);
-}
-
-.assistant-drag-handle {
-  display: inline-block;
-  padding: 0 4px;
-  color: var(--text-3);
-  cursor: grab;
-  user-select: none;
-  font-weight: 700;
-  letter-spacing: -2px;
-}
-
-.assistant-row-wrap:hover .assistant-drag-handle {
-  color: var(--text-3);
-}
-
-.assistant-drag-handle:active {
-  cursor: grabbing;
-}
+/* .assistant-drag-handle* co-located into Assistants.svelte (#14);
+   dead .assistant-row-wrap* rules dropped (wrapper replaced by NodeRow drag props). */
 
 .assistants-pane .prompt-entry-row {
   display: grid;
@@ -2060,21 +2024,7 @@ button.row-action-add.active {
   vertical-align: middle;
 }
 
-/* Trailing-slot marker that names the row as the resolved default
-   (e.g. the assistant returned by defaultAssistantEntryId()). One
-   per list at most — driven by the *resolved* default, not the
-   per-entry is_default field, so it can't disagree with itself. */
-.row-default-marker {
-  display: inline-flex;
-  align-items: center;
-  padding: 2px 9px;
-  border-radius: 999px;
-  background: var(--accent-soft);
-  color: var(--accent-strong);
-  font-size: 11px;
-  font-weight: 700;
-  white-space: nowrap;
-}
+/* .row-default-marker co-located into Assistants.svelte (#14). */
 
 /* .chat-session-preset / .chat-session-cost co-located into Chats.svelte (#14). */
 

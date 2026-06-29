@@ -193,3 +193,39 @@
     <p class="muted">No assistants defined yet. Click + Assistant to create one in the machine layer.</p>
   {/snippet}
 </NodeList>
+
+<style>
+  /* Drag handle + default marker are rendered into NodeRow's leading /
+     trailing snippets, so they carry this component's scope hash. The row
+     drag/drop visuals now come from NodeRow's `dragging`/`dropPosition`
+     props, so the old `.assistant-row-wrap` wrapper rules are gone. */
+  .assistant-drag-handle {
+    display: inline-block;
+    padding: 0 4px;
+    color: var(--text-3);
+    cursor: grab;
+    user-select: none;
+    font-weight: 700;
+    letter-spacing: -2px;
+  }
+
+  .assistant-drag-handle:active {
+    cursor: grabbing;
+  }
+
+  /* Trailing-slot marker that names the row as the resolved default
+     (e.g. the assistant returned by defaultAssistantEntryId()). One
+     per list at most — driven by the *resolved* default, not the
+     per-entry is_default field, so it can't disagree with itself. */
+  .row-default-marker {
+    display: inline-flex;
+    align-items: center;
+    padding: 2px 9px;
+    border-radius: 999px;
+    background: var(--accent-soft);
+    color: var(--accent-strong);
+    font-size: 11px;
+    font-weight: 700;
+    white-space: nowrap;
+  }
+</style>

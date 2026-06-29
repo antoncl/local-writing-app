@@ -35,3 +35,33 @@
     <span>{hit.excerpt}</span>
   </button>
 {/each}
+
+<style>
+  .inline-check {
+    display: flex;
+    grid-template-columns: none;
+    align-items: center;
+    gap: 7px;
+    margin-top: 8px;
+    color: var(--text-2);
+  }
+
+  .inline-check input {
+    width: auto;
+  }
+
+  .search-hit {
+    display: grid;
+    gap: 4px;
+    width: 100%;
+    text-align: left;
+    margin: 8px 0;
+    background: var(--surface);
+  }
+
+  .search-hit span {
+    color: var(--text-2);
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+</style>

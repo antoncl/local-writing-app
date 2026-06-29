@@ -230,7 +230,7 @@
       <NodePickerConfigEditor
         mode="field"
         config={pickerConfig}
-        on:change={(event) => (pickerConfig = event.detail.config)}
+        onChange={(next) => (pickerConfig = next)}
       />
     </div>
   {/if}

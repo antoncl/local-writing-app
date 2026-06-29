@@ -197,7 +197,7 @@
             <NodePickerConfigEditor
               mode="field"
               config={scopeDraft}
-              on:change={(event) => (scopeDraft = event.detail.config)}
+              onChange={(next) => (scopeDraft = next)}
             />
             <div class="sfi-footer">
               <span class="sfi-spacer"></span>

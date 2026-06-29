@@ -642,12 +642,12 @@
             label={draft.label}
             name={draft.name}
             required={draft.required}
-            on:change={(event) => updateEntryInputNodePickerConfig(index, event.detail.config)}
-            on:labelchange={(event) => updateEntryInputLabel(index, event.detail.value)}
-            on:namechange={(event) => updateEntryInputName(index, event.detail.value)}
-            on:requiredchange={(event) => updateEntryInput(index, { required: event.detail.value })}
-            on:typechange={(event) => updateEntryInput(index, { type: event.detail.value })}
-            on:remove={() => removeEntryInput(index)}
+            onChange={(config) => updateEntryInputNodePickerConfig(index, config)}
+            onLabelChange={(value) => updateEntryInputLabel(index, value)}
+            onNameChange={(value) => updateEntryInputName(index, value)}
+            onRequiredChange={(value) => updateEntryInput(index, { required: value })}
+            onTypeChange={(value) => updateEntryInput(index, { type: value })}
+            onRemove={() => removeEntryInput(index)}
           />
         </div>
       {:else}
@@ -745,7 +745,7 @@
                 <NodePickerConfigEditor
                   mode="field"
                   config={draft.nodePickerConfig}
-                  on:change={(event) => updateEntryInputNodePickerConfig(index, event.detail.config)}
+                  onChange={(config) => updateEntryInputNodePickerConfig(index, config)}
                 />
               </div>
             {/if}

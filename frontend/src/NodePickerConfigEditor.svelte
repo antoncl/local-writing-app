@@ -26,51 +26,69 @@
   // so leaf checkboxes update but parent indeterminate state goes
   // stale. Flat rendering sidesteps that entirely.
 
-  import { createEventDispatcher } from "svelte";
+  import { untrack } from "svelte";
   import type { NodePickerConfig, MetadataSchema, PromptInputType } from "./types";
   import { metadataSchemaStore } from "./stores/schema";
 
-  export let config: NodePickerConfig;
-  // metadataSchema is global per-project — read from the store, not a prop (#14 Step 2).
-  $: metadataSchema = $metadataSchemaStore;
-  // Where the editor is mounted. "prompt" (default) is the legacy
-  // surface — the widget owns the entire input row (label / id / type
-  // / required) and offers presets + scene-binding (prompt-only
-  // features). "field" embeds it inside the schema field-detail pane:
-  // host owns the row-level fields, presets + scene-binding are
-  // hidden, the tree is always expanded.
-  export let mode: "prompt" | "field" = "prompt";
-  // Read-only display — used by the schema-field editor when the field
-  // is a system / built-in definition. Inputs render disabled; the
-  // user can inspect the configured kinds + entry types but can't mutate
-  // them (and the host's Save button is disabled anyway).
-  export let readonly: boolean = false;
-  // Row-level fields (PR 2). The widget now owns the entire input row
-  // when type is context_pick, instead of being slotted inside the
-  // generic .prompt-input-grid in NodeEditor.
-  export let label: string = "";
-  export let name: string = "";
-  export let required: boolean = false;
+  interface Props {
+    config: NodePickerConfig;
+    // Where the editor is mounted. "prompt" (default) is the legacy
+    // surface — the widget owns the entire input row (label / id / type
+    // / required) and offers presets + scene-binding (prompt-only
+    // features). "field" embeds it inside the schema field-detail pane:
+    // host owns the row-level fields, presets + scene-binding are
+    // hidden, the tree is always expanded.
+    mode?: "prompt" | "field";
+    // Read-only display — used by the schema-field editor when the field
+    // is a system / built-in definition. Inputs render disabled; the
+    // user can inspect the configured kinds + entry types but can't mutate
+    // them (and the host's Save button is disabled anyway).
+    readonly?: boolean;
+    // Row-level fields (PR 2). The widget now owns the entire input row
+    // when type is context_pick, instead of being slotted inside the
+    // generic .prompt-input-grid in NodeEditor.
+    label?: string;
+    name?: string;
+    required?: boolean;
+    onChange?: (config: NodePickerConfig) => void;
+    onLabelChange?: (value: string) => void;
+    onNameChange?: (value: string) => void;
+    onRequiredChange?: (value: boolean) => void;
+    onTypeChange?: (value: PromptInputType) => void;
+    onRemove?: () => void;
+  }
 
-  const dispatch = createEventDispatcher<{
-    change: { config: NodePickerConfig };
-    labelchange: { value: string };
-    namechange: { value: string };
-    requiredchange: { value: boolean };
-    typechange: { value: PromptInputType };
-    remove: Record<string, never>;
-  }>();
+  let {
+    config,
+    mode = "prompt",
+    readonly = false,
+    label = "",
+    name = "",
+    required = false,
+    onChange,
+    onLabelChange,
+    onNameChange,
+    onRequiredChange,
+    onTypeChange,
+    onRemove,
+  }: Props = $props();
+
+  // metadataSchema is global per-project — read from the store, not a prop (#14 Step 2).
+  const metadataSchema = $derived($metadataSchemaStore);
 
   // Widget-level collapse state. Local to the component instance — resets
   // when the prompt entry (and therefore this widget) re-mounts. Default
   // to collapsed so a fresh prompt doesn't dump the full picker tree on
   // the author up-front; the row's summary chips communicate intent and
   // the chevron invites expansion when they need to configure it.
-  let collapsed = mode === "prompt";
+  let collapsed = $state(untrack(() => mode === "prompt"));
   function toggleWidgetCollapse() {
     collapsed = !collapsed;
   }
-  $: if (mode === "field") collapsed = false;
+  // Field mode never collapses (no chevron to expand it again).
+  $effect(() => {
+    if (mode === "field") collapsed = false;
+  });
 
   // Match NodeEditor's generic-grid type select. When the user
   // changes type away from context_pick, the parent's {#if} branch
@@ -134,7 +152,7 @@
   // user — everything else is expanded by default. Persists for the
   // lifetime of the editor instance (resets when the prompt entry
   // changes). Storage-stable: not persisted to the prompt config.
-  let collapsedIds: Set<string> = new Set();
+  let collapsedIds: Set<string> = $state(new Set());
 
   function toggleCollapse(id: string) {
     const next = new Set(collapsedIds);
@@ -310,7 +328,7 @@
   }
 
   function emit(patch: Partial<NodePickerConfig>) {
-    dispatch("change", { config: { ...config, ...patch } });
+    onChange?.({ ...config, ...patch });
   }
 
   // Imperative indeterminate setter — Svelte's `indeterminate={...}`
@@ -329,35 +347,31 @@
   }
 
   // Schema-derived trees: stable across config edits.
-  $: trees = {
+  const trees = $derived({
     scene: buildTree(metadataSchema, "scene"),
     lore: buildTree(metadataSchema, "lore"),
-  };
+  });
   // Pre-computed render lists per kind, including each node's checkbox
-  // state. The references to `config` and `collapsedIds` here are
-  // critical — Svelte 5's legacy `$:` tracking only sees variables
-  // read directly in the expression body, not inside function calls.
-  // Without explicit references, `selectionFor(...)` reading config
-  // from closure wouldn't trigger this block on config changes, and
-  // the tree would go stale (same trap as activePromptTitle hit
-  // earlier — see [[feedback-svelte5-reactivity-traps]]).
-  $: renderedByKind = ((_config, _collapsed) => ({
-    scene: flattenForRender(trees.scene, selectionFor("scene"), _collapsed),
-    lore: flattenForRender(trees.lore, selectionFor("lore"), _collapsed),
-  }))(config, collapsedIds);
+  // state. Runes `$derived` tracks reactive reads inside called functions
+  // (config / trees via selectionFor), so the legacy explicit-dependency
+  // IIFE workaround for `$:` is no longer needed (see
+  // [[feedback-svelte5-reactivity-traps]]).
+  const renderedByKind = $derived({
+    scene: flattenForRender(trees.scene, selectionFor("scene"), collapsedIds),
+    lore: flattenForRender(trees.lore, selectionFor("lore"), collapsedIds),
+  });
 
   // Per-kind picked-leaf totals (for the kind-bar count).
-  $: pickedCountByKind = ((_config) => ({
+  const pickedCountByKind = $derived({
     scene: selectionFor("scene").size,
     lore: selectionFor("lore").size,
-  }))(config);
+  });
 
-  // Chip projection — same Svelte 5 closure trap caveat applies; pass
-  // config explicitly to make tracking visible to `$:`.
-  $: chips = ((_config) => {
+  // Chip projection.
+  const chips = $derived.by(() => {
     const out: Chip[] = [];
     for (const { id: kind } of KINDS) {
-      const ids = _config.entry_types?.[kind] ?? [];
+      const ids = config.entry_types?.[kind] ?? [];
       for (const id of ids) {
         const node = nodeById(kind, id);
         if (!node) continue;
@@ -371,7 +385,7 @@
       }
     }
     for (const preset of PRESETS) {
-      if ((_config.presets ?? []).includes(preset.id)) {
+      if ((config.presets ?? []).includes(preset.id)) {
         out.push({
           kind: "preset",
           key: `preset:${preset.id}`,
@@ -380,20 +394,21 @@
         });
       }
     }
-    if (_config.allow_target_marking) {
+    if (config.allow_target_marking) {
       out.push({ kind: "marker", key: "marker", label: "marks scene" });
     }
     return out;
-  })(config);
+  });
 
-  $: hasAnySource =
-    (renderedByKind.scene.some((n) => n.state !== "unchecked")) ||
-    (renderedByKind.lore.some((n) => n.state !== "unchecked")) ||
-    (config.presets ?? []).length > 0;
+  const hasAnySource = $derived(
+    renderedByKind.scene.some((n) => n.state !== "unchecked") ||
+      renderedByKind.lore.some((n) => n.state !== "unchecked") ||
+      (config.presets ?? []).length > 0,
+  );
 
   // Only surface the ★-marking control when scenes are actually pickable —
   // marking is scene-only; showing it for lore-only inputs would be noise.
-  $: scenesPickable = renderedByKind.scene.some((n) => n.state !== "unchecked");
+  const scenesPickable = $derived(renderedByKind.scene.some((n) => n.state !== "unchecked"));
 
   // Collapsed-state pill strip. Aggregates by kind rather than listing
   // each entry type — gives "Scenes · 2" instead of "Chapter · Scene".
@@ -402,22 +417,22 @@
     | { key: string; kind: "preset"; label: string }
     | { key: string; kind: "marker"; label: string };
 
-  $: collapsedChips = ((_config, _pickedByKind) => {
+  const collapsedChips = $derived.by(() => {
     const out: CollapsedChip[] = [];
     for (const { id: k, label: kLabel } of KINDS) {
-      const n = _pickedByKind[k];
+      const n = pickedCountByKind[k];
       if (n > 0) out.push({ key: `count:${k}`, kind: "count", label: `${kLabel} · ${n}` });
     }
     for (const preset of PRESETS) {
-      if ((_config.presets ?? []).includes(preset.id)) {
+      if ((config.presets ?? []).includes(preset.id)) {
         out.push({ key: `preset:${preset.id}`, kind: "preset", label: preset.label });
       }
     }
-    if (_config.allow_target_marking) {
+    if (config.allow_target_marking) {
       out.push({ key: "marker", kind: "marker", label: "marks scene" });
     }
     return out;
-  })(config, pickedCountByKind);
+  });
 </script>
 
 <div class="ctx-config" class:collapsed class:embedded={mode === "field"}>
@@ -428,7 +443,7 @@
       class="ctx-row-chevron"
       aria-label={collapsed ? "Expand context picker" : "Collapse context picker"}
       aria-expanded={!collapsed}
-      on:click={toggleWidgetCollapse}
+      onclick={toggleWidgetCollapse}
     >{collapsed ? "▸" : "▾"}</button>
 
     <div class="ctx-row-id-stack">
@@ -437,7 +452,7 @@
         value={label}
         placeholder="Reference scenes"
         aria-label="Input label"
-        on:input={(e) => dispatch("labelchange", { value: (e.currentTarget as HTMLInputElement).value })}
+        oninput={(e) => onLabelChange?.((e.currentTarget as HTMLInputElement).value)}
       />
       <div class="ctx-row-accessor-row">
         <input
@@ -445,7 +460,7 @@
           value={name}
           placeholder="reference_scenes"
           aria-label="Input id"
-          on:input={(e) => dispatch("namechange", { value: (e.currentTarget as HTMLInputElement).value })}
+          oninput={(e) => onNameChange?.((e.currentTarget as HTMLInputElement).value)}
         />
         {#if name}
           <code class="ctx-row-accessor">&lbrace;&lbrace; input.{name} &rbrace;&rbrace;</code>
@@ -458,7 +473,7 @@
         class="ctx-row-type-select"
         value="context_pick"
         aria-label="Input type"
-        on:change={(e) => dispatch("typechange", { value: (e.currentTarget as HTMLSelectElement).value as PromptInputType })}
+        onchange={(e) => onTypeChange?.((e.currentTarget as HTMLSelectElement).value as PromptInputType)}
       >
         {#each INPUT_TYPES as t (t.value)}
           <option value={t.value}>{t.label}</option>
@@ -472,7 +487,7 @@
           class="ctx-check"
           type="checkbox"
           checked={required}
-          on:change={(e) => dispatch("requiredchange", { value: (e.currentTarget as HTMLInputElement).checked })}
+          onchange={(e) => onRequiredChange?.((e.currentTarget as HTMLInputElement).checked)}
         />
         <span>Required</span>
       </label>
@@ -481,7 +496,7 @@
           class="ctx-check"
           type="checkbox"
           checked={config.multiple !== false}
-          on:change={(e) => emit({ multiple: (e.currentTarget as HTMLInputElement).checked })}
+          onchange={(e) => emit({ multiple: (e.currentTarget as HTMLInputElement).checked })}
         />
         <span>Multiple</span>
       </label>
@@ -490,7 +505,7 @@
         class="ctx-row-remove"
         aria-label="Remove input"
         title="Remove input"
-        on:click={() => dispatch("remove", {})}
+        onclick={() => onRemove?.()}
       >×</button>
     </div>
   </div>
@@ -537,7 +552,7 @@
                 type="button"
                 class="ctx-chip-remove"
                 aria-label={`Remove ${chip.label}`}
-                on:click={() => removeEntryChip(chip.entryKind, chip.entryTypeId)}
+                onclick={() => removeEntryChip(chip.entryKind, chip.entryTypeId)}
               >✕</button>
             </span>
           {:else if chip.kind === "preset"}
@@ -547,7 +562,7 @@
                 type="button"
                 class="ctx-chip-remove"
                 aria-label={`Remove ${chip.label}`}
-                on:click={() => togglePreset(chip.presetId, false)}
+                onclick={() => togglePreset(chip.presetId, false)}
               >✕</button>
             </span>
           {:else}
@@ -558,7 +573,7 @@
                 type="button"
                 class="ctx-chip-remove"
                 aria-label="Disable scene marking"
-                on:click={() => toggleAllowTargetMarking(false)}
+                onclick={() => toggleAllowTargetMarking(false)}
               >✕</button>
             </span>
           {/if}
@@ -589,7 +604,7 @@
                     class="ctx-tree-chevron"
                     aria-label={item.collapsed ? `Expand ${item.name}` : `Collapse ${item.name}`}
                     aria-expanded={!item.collapsed}
-                    on:click={() => toggleCollapse(item.id)}
+                    onclick={() => toggleCollapse(item.id)}
                   >{item.collapsed ? "▸" : "▾"}</button>
                 {:else}
                   <span class="ctx-tree-chevron ctx-tree-chevron-leaf" aria-hidden="true"></span>
@@ -601,7 +616,7 @@
                     checked={item.state === "checked"}
                     use:indeterminateBinding={item.state === "indeterminate"}
                     disabled={!item.hasLeaves || readonly}
-                    on:change={() => toggleNode(kind.id, item.id)}
+                    onchange={() => toggleNode(kind.id, item.id)}
                   />
                   <span class="ctx-tree-name" class:root={item.depth === 0}>{item.name}</span>
                 </label>
@@ -627,7 +642,7 @@
             class="ctx-preset-pill-input"
             type="checkbox"
             checked={isOn}
-            on:change={(e) => togglePreset(preset.id, (e.currentTarget as HTMLInputElement).checked)}
+            onchange={(e) => togglePreset(preset.id, (e.currentTarget as HTMLInputElement).checked)}
           />
           <span class="ctx-preset-pill-check" aria-hidden="true"></span>
           <span class="ctx-preset-pill-label">{preset.label}</span>
@@ -648,7 +663,7 @@
               class="ctx-check"
               type="checkbox"
               checked={config.allow_target_marking === true}
-              on:change={(e) => toggleAllowTargetMarking((e.currentTarget as HTMLInputElement).checked)}
+              onchange={(e) => toggleAllowTargetMarking((e.currentTarget as HTMLInputElement).checked)}
             />
             <span class="ctx-scene-binding-title">Let the writer mark a primary scene</span>
           </label>

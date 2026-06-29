@@ -730,7 +730,7 @@
                 <SelectOptionsEditor
                   options={draft.options}
                   showMigrationHint={false}
-                  on:change={(event) => updateEntryInput(index, { options: event.detail.options })}
+                  onChange={(next) => updateEntryInput(index, { options: next })}
                 />
               </div>
             {/if}

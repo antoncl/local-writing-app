@@ -259,7 +259,7 @@
   {#if type === "select" || type === "multi_select"}
     <SelectOptionsEditor
       options={options}
-      on:change={(event) => (options = event.detail.options)}
+      onChange={(next) => (options = next)}
     />
   {/if}
   {#if type !== "computed"}

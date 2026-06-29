@@ -1,4 +1,4 @@
-<script lang="ts" context="module">
+<script lang="ts" module>
   // Shared option-draft shape. `originalValue` lets the host (a metadata
   // field) build an option-rename migration map from before/after even
   // after drag-reorder; surfaces that don't migrate (prompt inputs) leave
@@ -23,19 +23,24 @@
   // value / edit label / pick color / reorder). Host passes the current
   // list in via `options` and stores the new list on receipt.
 
-  import { createEventDispatcher } from "svelte";
   import SwatchPicker from "./SwatchPicker.svelte";
 
-  export let options: OptionDraft[] = [];
-  export let readonly: boolean = false;
-  // The "value is the macro contract, renaming migrates stored data" hint
-  // is field-only — prompt inputs have no stored-instance migration story.
-  export let showMigrationHint: boolean = true;
+  interface Props {
+    options?: OptionDraft[];
+    readonly?: boolean;
+    // The "value is the macro contract, renaming migrates stored data" hint
+    // is field-only — prompt inputs have no stored-instance migration story.
+    showMigrationHint?: boolean;
+    // Emitted whenever the list mutates (add / remove / edit / reorder). The
+    // host stores the new list and passes it back via `options` (#14 runes:
+    // callback prop replaces the old `change` event dispatcher).
+    onChange?: (options: OptionDraft[]) => void;
+  }
 
-  const dispatch = createEventDispatcher<{ change: { options: OptionDraft[] } }>();
+  let { options = [], readonly = false, showMigrationHint = true, onChange = () => {} }: Props = $props();
 
   function emit(next: OptionDraft[]) {
-    dispatch("change", { options: next });
+    onChange(next);
   }
 
   function addOption() {
@@ -52,8 +57,8 @@
 
   // --- Drag-reorder (local to this widget) ----------------------------
 
-  let dragIndex: number | null = null;
-  let dropTarget: { index: number; position: "before" | "after" } | null = null;
+  let dragIndex = $state<number | null>(null);
+  let dropTarget = $state<{ index: number; position: "before" | "after" } | null>(null);
 
   function dropPositionFromEvent(event: DragEvent): "before" | "after" {
     const rect = (event.currentTarget as HTMLElement).getBoundingClientRect();
@@ -107,9 +112,9 @@
       class:dragging={dragIndex === index}
       class:drop-before={dropTarget?.index === index && dropTarget?.position === "before"}
       class:drop-after={dropTarget?.index === index && dropTarget?.position === "after"}
-      on:dragover={(event) => onDragOver(event, index)}
-      on:dragleave={() => onDragLeave(index)}
-      on:drop|preventDefault={() => onDrop(index)}
+      ondragover={(event) => onDragOver(event, index)}
+      ondragleave={() => onDragLeave(index)}
+      ondrop={(event) => { event.preventDefault(); onDrop(index); }}
     >
       <span
         class="sfi-option-grip"
@@ -118,8 +123,8 @@
         aria-label="Drag to reorder"
         title="Drag to reorder"
         draggable={!readonly}
-        on:dragstart={() => onDragStart(index)}
-        on:dragend={clearDrag}
+        ondragstart={() => onDragStart(index)}
+        ondragend={clearDrag}
       ><i class="ti ti-grip-vertical"></i></span>
       <SwatchPicker
         value={option.color}
@@ -131,7 +136,7 @@
         placeholder="value"
         aria-label="Option value"
         readonly={readonly}
-        on:input={(event) => updateOption(index, { value: (event.currentTarget as HTMLInputElement).value })}
+        oninput={(event) => updateOption(index, { value: (event.currentTarget as HTMLInputElement).value })}
       />
       <input
         class="sfi-option-label"
@@ -139,7 +144,7 @@
         placeholder="label (optional)"
         aria-label="Option display label"
         readonly={readonly}
-        on:input={(event) => updateOption(index, { label: (event.currentTarget as HTMLInputElement).value })}
+        oninput={(event) => updateOption(index, { label: (event.currentTarget as HTMLInputElement).value })}
       />
       {#if !readonly}
         <button
@@ -147,13 +152,13 @@
           type="button"
           title="Remove option"
           aria-label="Remove option"
-          on:click={() => removeOption(index)}
+          onclick={() => removeOption(index)}
         ><i class="ti ti-x" aria-hidden="true"></i></button>
       {/if}
     </div>
   {/each}
   {#if !readonly}
-    <button class="add-affordance sfi-add-option" type="button" on:click={addOption}>+ Add option</button>
+    <button class="add-affordance sfi-add-option" type="button" onclick={addOption}>+ Add option</button>
   {/if}
   {#if showMigrationHint && options.length > 0}
     <p class="sfi-options-hint">

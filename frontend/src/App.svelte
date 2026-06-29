@@ -4,7 +4,7 @@
   import CodeEditor from "./CodeEditor.svelte";
   import NodeEditor from "./NodeEditor.svelte";
   import DirectoryPickerModal from "./DirectoryPickerModal.svelte";
-  import SchemaTypeEditor from "./SchemaTypeEditor.svelte";
+  import SchemaTypeEditor, { type TypeDraftPayload } from "./SchemaTypeEditor.svelte";
   import type { FieldDraftPayload } from "./SchemaFieldInlineEditor.svelte";
   import SchemaTreePane from "./SchemaTreePane.svelte";
   import Tree, { type TreeConfig } from "./Tree.svelte";
@@ -19,7 +19,6 @@
   import {
     buildNodeTypeTree,
     buildSchemaFieldSections,
-    slugifyFieldId,
     type NodeTypeTreeNode,
     type SchemaKind,
   } from "./schemaTypeHelpers";
@@ -121,7 +120,6 @@
     MetadataSchemaLayer,
     MetadataSchemaOverview,
     NodePickerConfig,
-    PromptContextStrategy,
     PromptEntryTypeExtras,
     PromptInputDefinition,
     ProjectInfo,
@@ -288,31 +286,29 @@
   let expandedSchemaFieldId: string | null = null;
   let schemaPaneOpen = false;
   let schemaTypePaneOpen = false;
+  // The save layer is shared with SchemaTreePane, so it stays here; the rest
+  // of the type draft (name/id/color + prompt defaults) now lives inside
+  // SchemaTypeEditor, which the host remounts per opened/created type via the
+  // draft token below and seeds from the schemaTypeInit* props (#14 Step 4).
   let schemaTypeLayerId = "";
-  let schemaTypeId = "";
-  let schemaTypeName = "";
   let schemaTypeKind: SchemaKind = "lore";
   let schemaTypeParent = "";
   let schemaTypeAbstract = false;
   let schemaTypeReadonly = false;
-  // Type-level palette swatch id. Empty string = "inherit from parent / no
-  // override". Saved as null when empty so backend inheritance kicks in.
-  let schemaTypeColor: string | null = null;
   let selectedSchemaTypeId: string | null = null;
   let draggedSchemaTypeId: string | null = null;
   let schemaSelectedEntryType: EntryTypeDefinition | null = null;
   let schemaNodeTypeTree: NodeTypeTreeNode[] = [];
+  // Seed values for a freshly (re)mounted SchemaTypeEditor draft. The token
+  // bumps on every create/open so the keyed component re-initialises cleanly.
+  let schemaTypeInitName = "";
+  let schemaTypeInitId = "";
+  let schemaTypeInitColor: string | null = null;
+  let schemaTypeInitPrompt: PromptEntryTypeExtras | null = null;
+  let schemaTypeDraftToken = 0;
   let promptsPaneOpen = false;
   let assistantsPaneOpen = false;
   let chatsPaneOpen = false;
-  let promptSystemPrompt = "";
-  let promptModelClass = "";
-  let promptProviderPolicy: AIPolicy | "" = "";
-  let promptContextTargetKind = "";
-  let promptContextTargetRequired = false;
-  let promptScanSurface = "";
-  let promptOutputKind = "";
-  let promptOutputReview = "";
   $: promptEntries = $promptEntriesStore;
   $: assistantEntries = $assistantEntriesStore;
   let newTodo = "";
@@ -1327,8 +1323,6 @@
 
   function createSchemaTypeDraft(layerId = projectSchemaLayerId(), parentTypeId = "") {
     selectedSchemaTypeId = null;
-    schemaTypeId = "";
-    schemaTypeName = "";
     const parentType = parentTypeId ? metadataSchema?.entry_types[parentTypeId] : null;
     schemaTypeKind =
       parentType?.kind === "scene"
@@ -1344,37 +1338,13 @@
     schemaTypeAbstract = false;
     schemaTypeReadonly = false;
     schemaTypeLayerId = layerId;
-    schemaTypeColor = null;
-    resetPromptExtrasForm();
+    schemaTypeInitName = "";
+    schemaTypeInitId = "";
+    schemaTypeInitColor = null;
+    schemaTypeInitPrompt = null;
+    schemaTypeDraftToken += 1;
     schemaTypePaneOpen = true;
     focusPane("schema_type");
-  }
-
-  function resetPromptExtrasForm() {
-    promptSystemPrompt = "";
-    promptModelClass = "";
-    promptProviderPolicy = "";
-    promptContextTargetKind = "";
-    promptContextTargetRequired = false;
-    promptScanSurface = "";
-    promptOutputKind = "";
-    promptOutputReview = "";
-  }
-
-  function loadPromptExtrasFromEntryType(entryType: EntryTypeDefinition | undefined | null) {
-    const extras = entryType?.prompt ?? null;
-    promptSystemPrompt = extras?.system_prompt ?? "";
-    promptModelClass = extras?.model_class ?? "";
-    promptProviderPolicy = extras?.provider_policy ?? "";
-    const contextStrategy = extras?.context_strategy ?? null;
-    promptContextTargetKind =
-      typeof contextStrategy?.target?.kind === "string" ? (contextStrategy.target.kind as string) : "";
-    promptContextTargetRequired = Boolean(contextStrategy?.target?.required);
-    promptScanSurface = (contextStrategy?.scan_surface ?? []).join(", ");
-    promptOutputKind =
-      typeof contextStrategy?.output?.kind === "string" ? (contextStrategy.output.kind as string) : "";
-    promptOutputReview =
-      typeof contextStrategy?.output?.review === "string" ? (contextStrategy.output.review as string) : "";
   }
 
   function openSchemaTypeDetail(typeId: string) {
@@ -1382,8 +1352,6 @@
     if (!entryType) return;
     const source = schemaTypeSource(typeId);
     selectedSchemaTypeId = typeId;
-    schemaTypeId = typeId;
-    schemaTypeName = entryType.name;
     schemaTypeKind =
       entryType.kind === "scene"
         ? "scene"
@@ -1396,19 +1364,15 @@
     schemaTypeAbstract = Boolean(entryType.abstract);
     schemaTypeReadonly = Boolean(source?.built_in);
     schemaTypeLayerId = source?.built_in ? projectSchemaLayerId() : (source?.layer_id ?? projectSchemaLayerId());
-    // Show own-color (pre-inheritance). null = "inherit from parent",
-    // which the SwatchPicker renders as the "None" cell.
-    schemaTypeColor = entryType.own_color ?? null;
-    loadPromptExtrasFromEntryType(entryType);
+    schemaTypeInitName = entryType.name;
+    schemaTypeInitId = typeId;
+    // Seed own-color (pre-inheritance). null = "inherit from parent", which
+    // the SwatchPicker renders as the "None" cell.
+    schemaTypeInitColor = entryType.own_color ?? null;
+    schemaTypeInitPrompt = entryType.prompt ?? null;
+    schemaTypeDraftToken += 1;
     schemaTypePaneOpen = true;
     focusPane("schema_type");
-  }
-
-  function updateSchemaTypeName(value: string) {
-    schemaTypeName = value;
-    if (!schemaTypeReadonly) {
-      schemaTypeId = slugifyFieldId(value);
-    }
   }
 
   function defaultSchemaParentType(kind: SchemaKind) {
@@ -1490,44 +1454,6 @@
     chatsPaneOpen = true;
     void refreshChatSessions();
     focusPane("chats");
-  }
-
-  function buildPromptExtras(): PromptEntryTypeExtras | null {
-    const scanSurface = promptScanSurface
-      .split(",")
-      .map((token) => token.trim())
-      .filter(Boolean);
-    const hasTarget = Boolean(promptContextTargetKind) || promptContextTargetRequired;
-    const hasOutput = Boolean(promptOutputKind) || Boolean(promptOutputReview);
-    const contextStrategy: PromptContextStrategy | null = scanSurface.length || hasTarget || hasOutput
-      ? {
-          ...(hasTarget
-            ? {
-                target: {
-                  ...(promptContextTargetRequired ? { required: true } : {}),
-                  ...(promptContextTargetKind ? { kind: promptContextTargetKind } : {}),
-                },
-              }
-            : {}),
-          ...(scanSurface.length ? { scan_surface: scanSurface } : {}),
-          ...(hasOutput
-            ? {
-                output: {
-                  ...(promptOutputKind ? { kind: promptOutputKind } : {}),
-                  ...(promptOutputReview ? { review: promptOutputReview } : {}),
-                },
-              }
-            : {}),
-        }
-      : null;
-
-    const extras: PromptEntryTypeExtras = {
-      ...(promptSystemPrompt.trim() ? { system_prompt: promptSystemPrompt } : {}),
-      ...(promptModelClass.trim() ? { model_class: promptModelClass.trim() } : {}),
-      ...(promptProviderPolicy ? { provider_policy: promptProviderPolicy } : {}),
-      ...(contextStrategy ? { context_strategy: contextStrategy } : {}),
-    };
-    return Object.keys(extras).length ? extras : null;
   }
 
   function startSchemaTypeDrag(typeId: string) {
@@ -1721,21 +1647,23 @@
     });
   }
 
-  async function saveSchemaType() {
+  // SchemaTypeEditor owns the editable draft (name/id/color + prompt defaults)
+  // and emits it here; App combines it with the read-only context it still
+  // holds (kind/parent/abstract/readonly/selected) + the bound save layer.
+  async function saveSchemaType(payload: TypeDraftPayload) {
     if (!schemaTypeLayerId) return;
     await run(async () => {
       const previousTypeId = selectedSchemaTypeId && !schemaTypeReadonly ? selectedSchemaTypeId : null;
-      const nextTypeId = schemaTypeId.trim();
+      const nextTypeId = payload.typeId.trim();
       const existing = previousTypeId ? metadataSchema?.entry_types[previousTypeId] : null;
-      const promptExtras = schemaTypeKind === "prompt" ? buildPromptExtras() : null;
       const nextType: EntryTypeDefinition = {
-        name: schemaTypeName.trim() || nextTypeId,
+        name: payload.name.trim() || nextTypeId,
         kind: schemaTypeKind,
         parent: schemaTypeParent || null,
         abstract: schemaTypeAbstract,
         fields: previousTypeId ? (existing?.own_fields ?? existing?.fields ?? []) : [],
-        color: schemaTypeColor || null,
-        ...(schemaTypeKind === "prompt" ? { prompt: promptExtras } : {}),
+        color: payload.color || null,
+        ...(schemaTypeKind === "prompt" ? { prompt: payload.promptExtras } : {}),
       };
       if (previousTypeId && previousTypeId !== nextTypeId) {
         status = "Renaming detail types is not available yet";
@@ -3354,15 +3282,15 @@
     {#snippet actions()}
       <button class="pin-button" type="button" on:mousedown={(event) => event.stopPropagation()} on:click={() => closeSchemaPane("schema_type")}>Close</button>
     {/snippet}
+    {#key schemaTypeDraftToken}
     <SchemaTypeEditor
-      bind:schemaTypeName
+      initialName={schemaTypeInitName}
+      initialTypeId={schemaTypeInitId}
+      initialColor={schemaTypeInitColor}
+      initialPrompt={schemaTypeInitPrompt}
       bind:schemaTypeLayerId
-      bind:schemaTypeColor
       bind:expandedSchemaFieldId
       bind:fieldDropTarget
-      bind:promptSystemPrompt
-      bind:promptOutputKind
-      schemaTypeId={schemaTypeId}
       schemaTypeKind={schemaTypeKind}
       schemaTypeParent={schemaTypeParent}
       schemaTypeReadonly={schemaTypeReadonly}
@@ -3380,7 +3308,6 @@
       availableGroupEntries={availableGroupEntries}
       NEW_FIELD_SENTINEL={NEW_FIELD_SENTINEL}
       projectSchemaLayerId={projectSchemaLayerId}
-      onTypeNameChange={updateSchemaTypeName}
       onSaveType={saveSchemaType}
       onSaveField={saveSchemaField}
       onCancelField={() => (expandedSchemaFieldId = null)}
@@ -3394,6 +3321,7 @@
       onFieldDrop={onFieldDrop}
       onClearFieldDrag={clearFieldDrag}
     />
+    {/key}
   </Pane>
 
   <Pane id="prompts" title="Prompts" paneClass="prompts-pane" hidden={!isProjectOpen || !promptsPaneOpen} style={paneStyle("prompts")} chrome={paneChrome}>

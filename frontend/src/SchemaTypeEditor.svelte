@@ -1,18 +1,34 @@
+<script lang="ts" context="module">
+  import type { PromptEntryTypeExtras } from "./types";
+
+  // Payload emitted on Save Type — the parent (App) owns persistence and
+  // combines this with the read-only context it still holds (kind/parent/
+  // abstract/readonly/selectedSchemaTypeId) + the bound save layer. Mirrors
+  // the SchemaFieldInlineEditor onSave(payload) shape (#14 Step 4).
+  export type TypeDraftPayload = {
+    typeId: string;
+    name: string;
+    color: string | null;
+    promptExtras: PromptEntryTypeExtras | null;
+  };
+</script>
+
 <script lang="ts">
   // The Detail Type editor's pane content — everything inside
   // `<section class="pane schema-type-pane">`. The pane chrome (header,
   // drag, resize, close) stays in App.svelte because it's part of its
   // pane-layout system.
   //
-  // Extracted from App.svelte (#14, second slice). The component owns
-  // no long-lived state: every draft field is a `bind:` prop so the
-  // parent's saveSchemaType / saveSchemaField / applyGroupToType still
-  // read them from their own scope. Async API handlers, drag-and-drop,
-  // and confirm-modal triggers come back as callback props so the
-  // parent retains its side-effects. The inline expand-in-place editor
-  // for an individual field is a separate component
-  // (SchemaFieldInlineEditor), invoked here via a snippet so both the
-  // per-row reveal and the new-draft slot share the same configuration.
+  // Extracted from App.svelte (#14). The editable type draft (name/id/color
+  // + prompt defaults) and the transient apply-group form are scoped state
+  // here, seeded once from the init* props — the host remounts this component
+  // per opened/created type via a draft-token `{#key}`, so the draft inits
+  // cleanly without two-way binds. The save layer stays a `bind:` prop
+  // because SchemaTreePane shares it. On save we emit onSaveType(payload);
+  // App keeps persistence/refresh/confirm + the read-only type context. The
+  // inline expand-in-place editor for an individual field is a separate
+  // component (SchemaFieldInlineEditor), invoked here via a snippet so both
+  // the per-row reveal and the new-draft slot share the same configuration.
 
   import SchemaFieldInlineEditor, { type FieldDraftPayload } from "./SchemaFieldInlineEditor.svelte";
   import SchemaFieldRow from "./SchemaFieldRow.svelte";
@@ -23,26 +39,49 @@
     groupOriginLabel,
     inheritedFromLabel,
     nodeTypeDisplayName,
+    slugifyFieldId,
     sourceBadgeLabel,
     sourceLayerIndex,
     suggestPrefixFromLabel,
     type SchemaFieldSection,
   } from "./schemaTypeHelpers";
   import type {
+    AIPolicy,
     EntryTypeDefinition,
     MetadataFieldDefinition,
     MetadataSchema,
     MetadataSchemaLayer,
     MetadataSchemaOverview,
+    PromptContextStrategy,
   } from "./types";
 
-  // --- Type draft state (two-way bound) ---
-  export let schemaTypeName: string = "";
-  export let schemaTypeLayerId: string = "";
-  export let schemaTypeColor: string | null = null;
+  // --- Type draft state (scoped — #14 Step 4). The host remounts this
+  // component per opened/created type (keyed on a draft token), so these
+  // initialise once from the init* props. The name→id slug and the prompt
+  // defaults are edited locally and emitted via onSaveType. ---
+  export let initialName: string = "";
+  export let initialTypeId: string = "";
+  export let initialColor: string | null = null;
 
-  // --- Type read-only context ---
-  export let schemaTypeId: string = "";
+  let draftName = initialName;
+  // Identifier tracks the name (slug) on edit, but only for editable types;
+  // for an existing type the canonical id may differ from slug(name), so it
+  // initialises from the prop rather than re-deriving. Renames are rejected
+  // at save time by the parent.
+  let draftTypeId = initialTypeId;
+  let draftColor = initialColor;
+
+  function handleNameInput(value: string) {
+    draftName = value;
+    if (!schemaTypeReadonly) draftTypeId = slugifyFieldId(value);
+  }
+
+  // The save layer is shared with SchemaTreePane (it defaults new types/fields
+  // to the open type's layer), so it stays a two-way bound prop, not scoped. ---
+  export let schemaTypeLayerId: string = "";
+
+  // --- Type read-only context (parent computes these in create/open and
+  // re-supplies them with the matching save payload) ---
   export let schemaTypeKind: "scene" | "lore" | "research" | "prompt" | "assistant" | "project" = "lore";
   export let schemaTypeParent: string = "";
   export let schemaTypeReadonly: boolean = false;
@@ -86,9 +125,72 @@
     }
   }
 
-  // --- Prompt-kind defaults (two-way bound) ---
-  export let promptSystemPrompt: string = "";
-  export let promptOutputKind: string = "";
+  // --- Prompt-kind defaults (scoped — #14 Step 4). Only the brief +
+  // output land have editing UI here; the rest round-trip through the draft
+  // so saving a prompt type preserves model_class / provider_policy /
+  // context target + scan surface set elsewhere. Initialised once from the
+  // init prompt extras prop. ---
+  export let initialPrompt: PromptEntryTypeExtras | null = null;
+
+  const initialContextStrategy = initialPrompt?.context_strategy ?? null;
+  let promptSystemPrompt = initialPrompt?.system_prompt ?? "";
+  let promptModelClass = initialPrompt?.model_class ?? "";
+  let promptProviderPolicy: AIPolicy | "" = initialPrompt?.provider_policy ?? "";
+  let promptContextTargetKind =
+    typeof initialContextStrategy?.target?.kind === "string" ? (initialContextStrategy.target.kind as string) : "";
+  let promptContextTargetRequired = Boolean(initialContextStrategy?.target?.required);
+  let promptScanSurface = (initialContextStrategy?.scan_surface ?? []).join(", ");
+  let promptOutputKind =
+    typeof initialContextStrategy?.output?.kind === "string" ? (initialContextStrategy.output.kind as string) : "";
+  let promptOutputReview =
+    typeof initialContextStrategy?.output?.review === "string" ? (initialContextStrategy.output.review as string) : "";
+
+  function buildPromptExtras(): PromptEntryTypeExtras | null {
+    const scanSurface = promptScanSurface
+      .split(",")
+      .map((token) => token.trim())
+      .filter(Boolean);
+    const hasTarget = Boolean(promptContextTargetKind) || promptContextTargetRequired;
+    const hasOutput = Boolean(promptOutputKind) || Boolean(promptOutputReview);
+    const contextStrategy: PromptContextStrategy | null = scanSurface.length || hasTarget || hasOutput
+      ? {
+          ...(hasTarget
+            ? {
+                target: {
+                  ...(promptContextTargetRequired ? { required: true } : {}),
+                  ...(promptContextTargetKind ? { kind: promptContextTargetKind } : {}),
+                },
+              }
+            : {}),
+          ...(scanSurface.length ? { scan_surface: scanSurface } : {}),
+          ...(hasOutput
+            ? {
+                output: {
+                  ...(promptOutputKind ? { kind: promptOutputKind } : {}),
+                  ...(promptOutputReview ? { review: promptOutputReview } : {}),
+                },
+              }
+            : {}),
+        }
+      : null;
+
+    const extras: PromptEntryTypeExtras = {
+      ...(promptSystemPrompt.trim() ? { system_prompt: promptSystemPrompt } : {}),
+      ...(promptModelClass.trim() ? { model_class: promptModelClass.trim() } : {}),
+      ...(promptProviderPolicy ? { provider_policy: promptProviderPolicy } : {}),
+      ...(contextStrategy ? { context_strategy: contextStrategy } : {}),
+    };
+    return Object.keys(extras).length ? extras : null;
+  }
+
+  function submitSaveType() {
+    onSaveType({
+      typeId: draftTypeId.trim(),
+      name: draftName,
+      color: draftColor,
+      promptExtras: schemaTypeKind === "prompt" ? buildPromptExtras() : null,
+    });
+  }
 
   // --- Schema context (read-only) ---
   // metadataSchema is global per-project — read from the store, not a prop (#14 Step 2).
@@ -109,8 +211,7 @@
   export let projectSchemaLayerId: () => string = () => "";
 
   // --- Callbacks (parent owns the side-effects: API calls, modals, drag) ---
-  export let onTypeNameChange: (value: string) => void = () => {};
-  export let onSaveType: () => void = () => {};
+  export let onSaveType: (payload: TypeDraftPayload) => void = () => {};
   export let onSaveField: (payload: FieldDraftPayload) => void = () => {};
   export let onCancelField: () => void = () => {};
   export let onRemoveField: () => void = () => {};
@@ -142,9 +243,9 @@
   {/if}
   <label>
     Type name
-    <input readonly={schemaTypeReadonly} value={schemaTypeName} placeholder="Faction" on:input={(event) => onTypeNameChange(event.currentTarget.value)} />
-    {#if schemaTypeId}
-      <small class="type-id-caption" title="Identifier used in YAML and template includes (generated from the type name)">id: <code>{schemaTypeId}</code></small>
+    <input readonly={schemaTypeReadonly} value={draftName} placeholder="Faction" on:input={(event) => handleNameInput(event.currentTarget.value)} />
+    {#if draftTypeId}
+      <small class="type-id-caption" title="Identifier used in YAML and template includes (generated from the type name)">id: <code>{draftTypeId}</code></small>
     {/if}
   </label>
   <div class="schema-type-identity">
@@ -157,8 +258,8 @@
   </div>
   <div class="schema-type-color-row">
     <span>Color</span>
-    <SwatchPicker bind:value={schemaTypeColor} />
-    {#if !schemaTypeColor && selectedSchemaTypeId}
+    <SwatchPicker bind:value={draftColor} />
+    {#if !draftColor && selectedSchemaTypeId}
       {@const inherited = metadataSchema?.entry_types[selectedSchemaTypeId]?.color}
       {#if inherited}
         <small class="muted">inherits <code>{inherited}</code> from parent</small>
@@ -345,7 +446,7 @@
 
   {#if !schemaTypeReadonly}
     <div class="button-row">
-      <button type="button" disabled={!schemaTypeLayerId || !schemaTypeId.trim() || !schemaTypeName.trim()} on:click={onSaveType}>Save Type</button>
+      <button type="button" disabled={!schemaTypeLayerId || !draftTypeId.trim() || !draftName.trim()} on:click={submitSaveType}>Save Type</button>
     </div>
   {/if}
 </div>

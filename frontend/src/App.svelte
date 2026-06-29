@@ -2530,6 +2530,17 @@
     return JSON.stringify(left ?? {}) === JSON.stringify(right ?? {});
   }
 
+  function bodiesEqual(left: string | null | undefined, right: string | null | undefined) {
+    // The backend normalizes every entry body on write (`body.rstrip() + "\n"`)
+    // but the read path only lstrips, so the round-tripped server baseline
+    // always carries a trailing newline the editor draft lacks. A raw `!==`
+    // would mark an untouched pane perpetually dirty, autosaving every 6s
+    // forever. Compare ignoring trailing whitespace (matching the backend's
+    // `rstrip`) so an unedited pane converges to clean; trailing whitespace
+    // can never persist anyway, so nothing meaningful is masked.
+    return (left ?? "").replace(/\s+$/, "") === (right ?? "").replace(/\s+$/, "");
+  }
+
   function isEditorPaneDirty(
     scene: EditableDocument | null,
     title: string,
@@ -2541,7 +2552,7 @@
   ) {
     if (!scene) return false;
     if (title !== scene.title) return true;
-    if (body !== scene.body) return true;
+    if (!bodiesEqual(body, scene.body)) return true;
     if (documentStatus(scene) ? status !== documentStatus(scene) : false) return true;
     if (entryType !== scene.entry_type) return true;
     if (!metadataEqual(metadata, scene.metadata ?? {})) return true;

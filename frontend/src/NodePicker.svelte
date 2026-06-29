@@ -14,6 +14,7 @@
   // server-side at template render time. See docs/context-picker.md.
 
   import { createEventDispatcher, tick } from "svelte";
+  import { metadataSchemaStore } from "./stores/schema";
   import type {
     NodePickerConfig,
     NodePickerRef,
@@ -45,7 +46,8 @@
   export let researchStructure: StructureDocument | null = null;
   export let loreEntries: LoreEntrySummary[] = [];
   export let promptEntries: PromptEntrySummary[] = [];
-  export let metadataSchema: MetadataSchema | null = null;
+  // metadataSchema is global per-project — read from the store, not a prop (#14 Step 2).
+  $: metadataSchema = $metadataSchemaStore;
   // Compact mode trims chrome so the picker fits inside the Inputs
   // dialog's narrow column. Composer-level renders use the default.
   export let compact: boolean = false;

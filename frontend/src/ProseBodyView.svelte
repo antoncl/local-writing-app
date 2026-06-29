@@ -47,6 +47,7 @@
   import { sanitizePastedHtml } from "./sanitizePastedHtml";
   import { ImplicitContextHighlight, REBUILD_META } from "./implicitContextHighlight";
   import { api } from "./api";
+  import { metadataSchemaStore } from "./stores/schema";
   import { formatCostEur } from "./money";
   import { coerceInputValue } from "./promptInputs";
   import { resolveColor } from "./colors";
@@ -114,7 +115,8 @@
   // ---------- Props ----------
   export let scene: EditableDocument | null = null;
   export let documentKind: DocumentKind = "scene";
-  export let metadataSchema: MetadataSchema | null = null;
+  // metadataSchema is global per-project — read from the store, not a prop (#14 Step 2).
+  $: metadataSchema = $metadataSchemaStore;
   export let promptEntries: PromptEntrySummary[] = [];
   export let loreEntries: LoreEntrySummary[] = [];
   export let availableScenes: { id: string; title: string }[] = [];

@@ -18,6 +18,7 @@
   import SchemaFieldRow from "./SchemaFieldRow.svelte";
   import SwatchPicker from "./SwatchPicker.svelte";
   import { fieldIconClass, fieldTypeLabel } from "./fieldIcons";
+  import { metadataSchemaStore } from "./stores/schema";
   import {
     groupOriginLabel,
     inheritedFromLabel,
@@ -88,7 +89,8 @@
   export let promptOutputKind: string = "";
 
   // --- Schema context (read-only) ---
-  export let metadataSchema: MetadataSchema | null = null;
+  // metadataSchema is global per-project — read from the store, not a prop (#14 Step 2).
+  $: metadataSchema = $metadataSchemaStore;
   export let metadataSchemaOverview: MetadataSchemaOverview | null = null;
   export let metadataSchemaLayers: MetadataSchemaLayer[] = [];
 
@@ -188,7 +190,6 @@
         selectedFieldId={selectedSchemaFieldId}
         readonly={schemaFieldReadonly}
         layerId={schemaFieldLayerId}
-        metadataSchema={metadataSchema}
         onChooseType={onChooseFieldType}
         onNameChange={onFieldNameChange}
         onKeyChange={onFieldKeyChange}

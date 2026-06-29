@@ -62,14 +62,16 @@
     nodeChildren,
     updateNodeTitleInTree,
   } from "./treeHelpers";
-  import type { MetadataSchema } from "./types";
+  import { metadataSchemaStore } from "./stores/schema";
 
   export let config: TreeConfig;
   // Reactive tree data — drives the render. Handlers read config.getStructure()
   // instead (see note on the type) so post-mutation reads aren't stale.
   export let structure: StructureDocument | null;
   export let collapsed: Record<string, boolean>;
-  export let schema: MetadataSchema | null;
+  // metadataSchema is global per-project — read it from the store instead of
+  // drilling it as a prop (#14 Step 2).
+  $: schema = $metadataSchemaStore;
   export let focusedDocument: { type: string; id: string } | null = null;
   export let pinnedKeys: Set<string>;
   export let draftTitles: Map<string, string>;

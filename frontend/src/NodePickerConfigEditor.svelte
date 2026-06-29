@@ -28,9 +28,11 @@
 
   import { createEventDispatcher } from "svelte";
   import type { NodePickerConfig, MetadataSchema, PromptInputType } from "./types";
+  import { metadataSchemaStore } from "./stores/schema";
 
   export let config: NodePickerConfig;
-  export let metadataSchema: MetadataSchema | null = null;
+  // metadataSchema is global per-project — read from the store, not a prop (#14 Step 2).
+  $: metadataSchema = $metadataSchemaStore;
   // Where the editor is mounted. "prompt" (default) is the legacy
   // surface — the widget owns the entire input row (label / id / type
   // / required) and offers presets + scene-binding (prompt-only

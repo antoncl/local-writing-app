@@ -1,5 +1,5 @@
 <script context="module" lang="ts">
-  import type { MetadataSchema, PromptEntrySummary } from "./types";
+  import type { PromptEntrySummary } from "./types";
 
   type PromptSubtypeNode = { id: string; label: string; children: PromptSubtypeNode[] };
 </script>
@@ -7,8 +7,10 @@
 <script lang="ts">
   import NodeRow from "./NodeRow.svelte";
   import NodeList from "./NodeList.svelte";
+  import { metadataSchemaStore } from "./stores/schema";
 
-  export let schema: MetadataSchema | null;
+  // metadataSchema is global per-project — read from the store, not a prop (#14 Step 2).
+  $: schema = $metadataSchemaStore;
   export let entries: PromptEntrySummary[];
   export let focusedDocument: { type: string; id: string } | null = null;
   export let pinnedKeys: Set<string>;

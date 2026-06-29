@@ -3375,7 +3375,6 @@
         config={manuscriptTree}
         {structure}
         collapsed={collapsedStructureNodes}
-        schema={metadataSchema}
         focusedDocument={focusedEditorPane?.document ?? null}
         pinnedKeys={pinnedEditorPaneKeys}
         draftTitles={draftTitleByScene}
@@ -3398,7 +3397,6 @@
     <div class="pane-content">
       <Lore
         entries={loreEntries}
-        schema={metadataSchema}
         focusedDocument={focusedEditorPane?.document ?? null}
         pinnedKeys={pinnedEditorPaneKeys}
         onOpenEntry={(id) => openLoreEntryInEditorPane(id)}
@@ -3413,7 +3411,6 @@
         config={researchTree}
         structure={researchStructure}
         collapsed={collapsedResearchNodes}
-        schema={metadataSchema}
         focusedDocument={focusedEditorPane?.document ?? null}
         pinnedKeys={pinnedEditorPaneKeys}
         draftTitles={draftTitleByScene}
@@ -3443,7 +3440,6 @@
       schemaNodeTypeTree={schemaNodeTypeTree}
       selectedSchemaTypeId={selectedSchemaTypeId}
       schemaTypeLayerId={schemaTypeLayerId}
-      metadataSchema={metadataSchema}
       metadataSchemaOverview={metadataSchemaOverview}
       projectSchemaLayerId={projectSchemaLayerId}
       onSwitchKind={switchSchemaKind}
@@ -3495,7 +3491,6 @@
       selectedSchemaFieldId={selectedSchemaFieldId}
       schemaFieldReadonly={schemaFieldReadonly}
       schemaFieldLayerId={schemaFieldLayerId}
-      metadataSchema={metadataSchema}
       metadataSchemaOverview={metadataSchemaOverview}
       metadataSchemaLayers={metadataSchemaLayers}
       typeOwnFieldEntries={typeOwnFieldEntries}
@@ -3531,7 +3526,6 @@
     {/snippet}
     <div class="pane-content schema-list">
       <Prompts
-        schema={metadataSchema}
         entries={promptEntries}
         focusedDocument={focusedEditorPane?.document ?? null}
         pinnedKeys={pinnedEditorPaneKeys}
@@ -3638,7 +3632,6 @@
         bind:this={editorPaneComponents[editorPane.id]}
         scene={editorPane.scene}
         documentKind={editorPane.document?.type ?? "scene"}
-        metadataSchema={metadataSchema}
         promptEntries={promptEntries}
         structure={structure}
         researchStructure={researchStructure}
@@ -3760,7 +3753,6 @@
 
   {#if tagsManagerOpen}
     <TagManagerDialog
-      metadataSchema={metadataSchema}
       on:changed={() => void refreshAfterTagChange()}
       on:close={() => (tagsManagerOpen = false)}
     />

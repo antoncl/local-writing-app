@@ -14,6 +14,7 @@
 -->
 <script lang="ts">
   import { createEventDispatcher } from "svelte";
+  import { metadataSchemaStore } from "./stores/schema";
   import CodeEditor from "./CodeEditor.svelte";
   import DefaultValueEditor from "./DefaultValueEditor.svelte";
   import NodePickerConfigEditor from "./NodePickerConfigEditor.svelte";
@@ -44,7 +45,8 @@
   // --- Read-only context from parent ---
   export let scene: EditableDocument | null = null;
   export let documentKind: DocumentKind = "prompt";
-  export let metadataSchema: MetadataSchema | null = null;
+  // metadataSchema is global per-project — read from the store, not a prop (#14 Step 2).
+  $: metadataSchema = $metadataSchemaStore;
   export let structure: StructureDocument | null = null;
   // Research tree (sibling to manuscript) — threaded to the picker.
   export let researchStructure: StructureDocument | null = null;
@@ -637,7 +639,6 @@
           >⋮⋮</span>
           <NodePickerConfigEditor
             config={draft.nodePickerConfig}
-            metadataSchema={metadataSchema}
             label={draft.label}
             name={draft.name}
             required={draft.required}
@@ -744,7 +745,6 @@
                 <NodePickerConfigEditor
                   mode="field"
                   config={draft.nodePickerConfig}
-                  metadataSchema={metadataSchema}
                   on:change={(event) => updateEntryInputNodePickerConfig(index, event.detail.config)}
                 />
               </div>
@@ -838,7 +838,6 @@
                 <PromptInputField
                   input={inputDef}
                   value={draft ?? ""}
-                  metadataSchema={metadataSchema}
                   excludeId={scene?.id ?? null}
                   ariaLabel={inputDef.label || inputDef.name}
                   structure={structure}

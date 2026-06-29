@@ -13,6 +13,7 @@
   import { formatCostEur } from "./money";
   import { resolveColor } from "./colors";
   import type { AssistantEntrySummary, Backlink, BodyShape, DocumentKind, EditableDocument, EntryBodyLanguage, EntryMetadata, EntryTypeDefinition, MetadataFieldDefinition, MetadataSchema, PromptEntrySummary, PromptInputDefinition } from "./types";
+  import { metadataSchemaStore } from "./stores/schema";
 
   // Effective body shape for an entry type. Falls back through the
   // legacy has_body / body_editor pair when body_shape is absent
@@ -27,7 +28,8 @@
 
   export let scene: EditableDocument | null = null;
   export let documentKind: DocumentKind = "scene";
-  export let metadataSchema: MetadataSchema | null = null;
+  // metadataSchema is global per-project — read from the store, not a prop (#14 Step 2).
+  $: metadataSchema = $metadataSchemaStore;
   export let promptEntries: PromptEntrySummary[] = [];
   // Data sources for context_pick inputs in the prompt preview / inputs
   // dialog. Optional — the picker degrades to "no items" when missing.
@@ -747,7 +749,6 @@
 {#snippet metaContent()}
   {#if metadataSchema}
     <MetadataPanel
-      metadataSchema={metadataSchema}
       entryType={entryType}
       status={status}
       metadata={metadata}
@@ -775,7 +776,6 @@
     {#key scene?.id ?? ""}
       <BacklinksPanel
         backlinks={backlinks}
-        metadataSchema={metadataSchema}
         loreEntries={loreEntries}
         structure={structure}
         on:navigate={(event) => dispatch("navigate", event.detail)}
@@ -859,7 +859,6 @@
       bind:entryInputDrafts
       {scene}
       {documentKind}
-      {metadataSchema}
       {structure}
       {researchStructure}
       {loreEntries}
@@ -882,7 +881,6 @@
       bind:characterCostUsd
       {scene}
       {documentKind}
-      {metadataSchema}
       {loreEntries}
       {promptEntries}
       {availableScenes}
@@ -899,7 +897,6 @@
     <ChatBodyView
       bind:this={chatBodyView}
       {scene}
-      {metadataSchema}
       {promptEntries}
       {assistantEntries}
       {loreEntries}
@@ -975,7 +972,6 @@
     assistantEntries={assistantEntries}
     error={inputsDialogError}
     estimate={inputsDialogEstimate}
-    metadataSchema={metadataSchema}
     structure={structure}
     researchStructure={researchStructure}
     loreEntries={loreEntries}

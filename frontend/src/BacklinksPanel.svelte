@@ -6,13 +6,14 @@
   import type {
     Backlink,
     LoreEntrySummary,
-    MetadataSchema,
     StructureDocument,
     StructureNode,
   } from "./types";
+  import { metadataSchemaStore } from "./stores/schema";
 
   export let backlinks: Backlink[] = [];
-  export let metadataSchema: MetadataSchema | null = null;
+  // metadataSchema is global per-project — read from the store, not a prop (#14 Step 2).
+  $: metadataSchema = $metadataSchemaStore;
   export let loreEntries: LoreEntrySummary[] = [];
   export let structure: StructureDocument | null = null;
 

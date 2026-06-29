@@ -19,7 +19,8 @@
   import { resolveColor } from "./colors";
   import { fieldTypeLabel } from "./fieldIcons";
   import { sourceBadgeLabel, type NodeTypeTreeNode, type SchemaKind } from "./schemaTypeHelpers";
-  import type { MetadataSchema, MetadataSchemaOverview } from "./types";
+  import type { MetadataSchemaOverview } from "./types";
+  import { metadataSchemaStore } from "./stores/schema";
 
   // --- Read-only state ---
   export let schemaFieldKind: SchemaKind = "scene";
@@ -27,7 +28,8 @@
   export let schemaNodeTypeTree: NodeTypeTreeNode[] = [];
   export let selectedSchemaTypeId: string | null = null;
   export let schemaTypeLayerId: string = "";
-  export let metadataSchema: MetadataSchema | null = null;
+  // metadataSchema is global per-project — read from the store, not a prop (#14 Step 2).
+  $: metadataSchema = $metadataSchemaStore;
   export let metadataSchemaOverview: MetadataSchemaOverview | null = null;
 
   // --- Drag state (two-way bound; shared with the parent's drop handler) ---

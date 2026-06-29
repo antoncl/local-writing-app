@@ -33,7 +33,6 @@
   export let estimate: InputsDialogEstimate | null = null;
 
   // Pass-throughs for PromptInputField
-  export let metadataSchema: MetadataSchema | null = null;
   export let structure: StructureDocument | null = null;
   // Research tree (sibling to manuscript) — threaded to the picker.
   export let researchStructure: StructureDocument | null = null;
@@ -84,7 +83,6 @@
           <PromptInputField
             input={input}
             value={drafts[input.name] ?? ""}
-            metadataSchema={metadataSchema}
             excludeId={excludeId}
             ariaLabel={input.label || input.name}
             structure={structure}

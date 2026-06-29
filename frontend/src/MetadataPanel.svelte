@@ -18,8 +18,12 @@
     PromptEntrySummary,
     StructureDocument,
   } from "./types";
+  import { metadataSchemaStore } from "./stores/schema";
 
-  export let metadataSchema: MetadataSchema;
+  // metadataSchema is global per-project — read from the store, not a prop (#14
+  // Step 2). This panel only mounts inside NodeEditor's `{#if metadataSchema}`
+  // guard, so the non-null assertion holds (matches the prior non-null prop).
+  $: metadataSchema = $metadataSchemaStore as MetadataSchema;
   export let entryType: string;
   export let status: string;
   export let metadata: EntryMetadata;
@@ -247,7 +251,6 @@
               <ReferencePicker
                 {field}
                 value={metadataReferenceValue(field, metadata[fieldId])}
-                metadataSchema={metadataSchema}
                 excludeId={excludeId}
                 ariaLabel={field.name}
                 structure={structure}

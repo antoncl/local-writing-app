@@ -32,15 +32,16 @@
     ChatSessionMessage,
     EditableDocument,
     LoreEntrySummary,
-    MetadataSchema,
     PromptEntrySummary,
     PromptInputDefinition,
     SaveChatSessionRequest,
     StructureDocument,
   } from "./types";
+  import { metadataSchemaStore } from "./stores/schema";
 
   export let scene: EditableDocument | null = null;
-  export let metadataSchema: MetadataSchema | null = null;
+  // metadataSchema is global per-project — read from the store, not a prop (#14 Step 2).
+  $: metadataSchema = $metadataSchemaStore;
   export let promptEntries: PromptEntrySummary[] = [];
   export let assistantEntries: AssistantEntrySummary[] = [];
   export let loreEntries: LoreEntrySummary[] = [];
@@ -64,7 +65,6 @@
 
   // Suppress unused-prop warnings for props Phase 4c+ wires in (preview
   // popover, inputs strip, future journal-scope rendering).
-  $: void metadataSchema;
   $: void loreEntries;
   $: void structure;
 
@@ -1028,7 +1028,6 @@
                 <PromptInputField
                   input={input}
                   value={chatInputDrafts[input.name] ?? ""}
-                  metadataSchema={metadataSchema}
                   excludeId={null}
                   ariaLabel={input.label || input.name}
                   structure={structure}

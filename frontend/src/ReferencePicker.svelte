@@ -21,15 +21,16 @@
     NodePickerRef,
     LoreEntrySummary,
     MetadataFieldDefinition,
-    MetadataSchema,
     PromptEntrySummary,
     StructureDocument,
     StructureNode,
   } from "./types";
+  import { metadataSchemaStore } from "./stores/schema";
 
   export let field: MetadataFieldDefinition;
   export let value: string | string[] | null | undefined;
-  export let metadataSchema: MetadataSchema | null = null;
+  // metadataSchema is global per-project — read from the store, not a prop (#14 Step 2).
+  $: metadataSchema = $metadataSchemaStore;
   export let excludeId: string | null = null;
   export let ariaLabel: string = "";
   // In-memory data sources used by the embedded NodePicker.
@@ -180,7 +181,6 @@
           researchStructure={researchStructure}
           loreEntries={loreEntries}
           promptEntries={promptEntries}
-          metadataSchema={metadataSchema}
           on:change={handlePickerChange}
         />
       </span>

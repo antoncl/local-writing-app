@@ -46,7 +46,6 @@
   export let selectedFieldId: string | null = null;
   export let readonly: boolean = false;
   export let layerId: string = "";
-  export let metadataSchema: MetadataSchema | null = null;
 
   // --- Callback props (parent owns the side-effects) ---
   // `onChooseType` keeps the type-specific config blocks coherent when
@@ -171,7 +170,6 @@
       <NodePickerConfigEditor
         mode="field"
         config={pickerConfig}
-        metadataSchema={metadataSchema}
         on:change={(event) => (pickerConfig = event.detail.config)}
       />
     </div>

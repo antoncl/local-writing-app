@@ -14,7 +14,6 @@
     NodePickerRef,
     LoreEntrySummary,
     MetadataFieldDefinition,
-    MetadataSchema,
     PromptEntrySummary,
     PromptInputDefinition,
     StructureDocument,
@@ -22,7 +21,6 @@
 
   export let input: PromptInputDefinition;
   export let value: string;
-  export let metadataSchema: MetadataSchema | null = null;
   export let excludeId: string | null = null;
   export let ariaLabel: string | undefined = undefined;
   // Data sources for the context_pick input type. Optional — the picker
@@ -133,7 +131,6 @@
   <ReferencePicker
     field={refStubField()}
     value={decodeRefValue(value)}
-    metadataSchema={metadataSchema}
     excludeId={excludeId}
     ariaLabel={ariaLabel ?? (input.label || input.name)}
     structure={structure}
@@ -151,7 +148,6 @@
     researchStructure={researchStructure}
     loreEntries={loreEntries}
     promptEntries={promptEntries}
-    metadataSchema={metadataSchema}
     on:change={(event) => dispatch("change", { value: JSON.stringify(event.detail.value) })}
   />
 {:else}

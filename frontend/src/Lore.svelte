@@ -18,9 +18,11 @@
   import NodeRow from "./NodeRow.svelte";
   import NodeList from "./NodeList.svelte";
   import { getSwatch, resolveColorForType } from "./colors";
+  import { metadataSchemaStore } from "./stores/schema";
 
   export let entries: LoreEntrySummary[];
-  export let schema: MetadataSchema | null;
+  // metadataSchema is global per-project — read from the store, not a prop (#14 Step 2).
+  $: schema = $metadataSchemaStore;
   export let focusedDocument: { type: string; id: string } | null = null;
   export let pinnedKeys: Set<string>;
   // Open an entry in an editor pane (App owns the pane set).

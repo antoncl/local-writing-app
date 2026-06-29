@@ -4,9 +4,7 @@
   import NodePickerConfigEditor from "./NodePickerConfigEditor.svelte";
   import ConfirmModal from "./ConfirmModal.svelte";
   import type { ConfirmationState } from "./ConfirmModal.svelte";
-  import type { MetadataSchema, NodePickerConfig, TagUsage } from "./types";
-
-  export let metadataSchema: MetadataSchema | null = null;
+  import type { NodePickerConfig, TagUsage } from "./types";
 
   const dispatch = createEventDispatcher<{ changed: void; close: void }>();
 
@@ -199,7 +197,6 @@
             <NodePickerConfigEditor
               mode="field"
               config={scopeDraft}
-              metadataSchema={metadataSchema}
               on:change={(event) => (scopeDraft = event.detail.config)}
             />
             <div class="sfi-footer">

@@ -52,6 +52,8 @@
     setProjectCost,
   } from "./stores/chats";
   import { todosStore, refreshTodos as storeRefreshTodos, setTodos } from "./stores/todos";
+  import { knownTagsStore, refreshKnownTags as storeRefreshKnownTags, setKnownTags } from "./stores/tags";
+  import { validationStore, setValidation } from "./stores/validation";
   import GroupsManagerDialog from "./GroupsManagerDialog.svelte";
   import TagManagerDialog from "./TagManagerDialog.svelte";
   import type { OptionDraft } from "./SelectOptionsEditor.svelte";
@@ -213,7 +215,7 @@
   // needed so the matcher resolves per-entry colors for the highlight
   // decorations (Phase 4 render target).
   $: implicitContextMatcher = compileMatcher(loreEntries, metadataSchema);
-  let knownTags: import("./types").ScopedTag[] = [];
+  $: knownTags = $knownTagsStore;
   let tagsManagerOpen = false;
   let focusedEditorPaneId: string | null = null;
   $: focusedEditorPane = editorPanes.find((pane) => pane.id === focusedEditorPaneId) ?? editorPanes[0] ?? null;
@@ -227,7 +229,7 @@
   let addMenuPosition: { top: number; right: number } | null = null;
   let draftTitleByScene = new Map<string, string>();
   $: todos = $todosStore;
-  let validation: ProjectValidation | null = null;
+  $: validation = $validationStore;
   let metadataSchema: MetadataSchema | null = null;
   let metadataSchemaOverview: MetadataSchemaOverview | null = null;
   let metadataSchemaLayers: MetadataSchemaLayer[] = [];
@@ -668,7 +670,7 @@
 
   function resetEditorWorkspace() {
     editorPanes = [];
-    knownTags = [];
+    setKnownTags([]);
     focusedEditorPaneId = null;
     nextEditorPaneIndex = 1;
     nextMetadataReloadToken = 1;
@@ -870,7 +872,7 @@
   }
 
   async function refreshKnownTags() {
-    knownTags = (await api.getKnownTags()).tags;
+    await storeRefreshKnownTags();
   }
 
   // A tag merge rewrites tag values across documents on disk; pull the new
@@ -1610,7 +1612,7 @@
         true,
       );
       await refreshMetadataSchema();
-      validation = await api.validateProject();
+      setValidation(await api.validateProject());
       selectedSchemaTypeId = typeId;
       status = `Moved ${entryType.name} under ${parentType.name}`;
     });
@@ -1742,7 +1744,7 @@
       // rename/removal); re-pull open panes so they reflect the cleaned data.
       await refreshOpenEditorPaneBaselines();
     }
-    validation = await api.validateProject();
+    setValidation(await api.validateProject());
     selectedSchemaFieldId = nextFieldId;
     // Collapse the inline editor on a successful save.
     expandedSchemaFieldId = null;
@@ -1764,7 +1766,7 @@
         [...typeGroupApplications, application],
       );
       await refreshMetadataSchema();
-      validation = await api.validateProject();
+      setValidation(await api.validateProject());
       groupApplyOpen = false;
       applyGroupId = "";
       applyGroupLabel = "";
@@ -1784,7 +1786,7 @@
         next,
       );
       await refreshMetadataSchema();
-      validation = await api.validateProject();
+      setValidation(await api.validateProject());
       status = "Removed group application";
     });
   }
@@ -1811,7 +1813,7 @@
       }
       metadataSchema = await api.upsertMetadataEntryType(schemaTypeLayerId, nextTypeId, nextType, Boolean(previousTypeId));
       await refreshMetadataSchema();
-      validation = await api.validateProject();
+      setValidation(await api.validateProject());
       selectedSchemaTypeId = nextTypeId;
       schemaFieldEntryType = nextTypeId;
       status = "Updated detail type";
@@ -1839,7 +1841,7 @@
     const deletedKind = schemaFieldKind;
     metadataSchema = await api.deleteMetadataEntryType(typeId);
     await refreshMetadataSchema();
-    validation = await api.validateProject();
+    setValidation(await api.validateProject());
     selectedSchemaTypeId = null;
     schemaTypePaneOpen = false;
     if (schemaFieldEntryType === typeId || !metadataSchema?.entry_types[schemaFieldEntryType]) {
@@ -1866,7 +1868,7 @@
     metadataSchema = await api.deleteMetadataField(fieldId, schemaFieldEntryType);
     await refreshMetadataSchema();
     await refreshOpenEditorPaneBaselines((metadata) => removeMetadataKey(metadata, fieldId));
-    validation = await api.validateProject();
+    setValidation(await api.validateProject());
     selectedSchemaFieldId = null;
     expandedSchemaFieldId = null;
     status = `Deleted ${fieldId}`;
@@ -3197,17 +3199,19 @@
 
   async function validateProject() {
     await run(async () => {
-      validation = await api.validateProject();
-      status = validation.valid ? "Project validation passed" : "Project validation found issues";
+      const result = await api.validateProject();
+      setValidation(result);
+      status = result.valid ? "Project validation passed" : "Project validation found issues";
     });
   }
 
   async function repairProject() {
     await run(async () => {
-      validation = await api.repairProject();
+      const result = await api.repairProject();
+      setValidation(result);
       await refreshStructure();
       await refreshTodos();
-      status = validation.valid ? "Project repair complete" : "Project repair complete with remaining issues";
+      status = result.valid ? "Project repair complete" : "Project repair complete with remaining issues";
     });
   }
 

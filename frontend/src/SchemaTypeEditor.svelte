@@ -14,7 +14,7 @@
   // (SchemaFieldInlineEditor), invoked here via a snippet so both the
   // per-row reveal and the new-draft slot share the same configuration.
 
-  import SchemaFieldInlineEditor from "./SchemaFieldInlineEditor.svelte";
+  import SchemaFieldInlineEditor, { type FieldDraftPayload } from "./SchemaFieldInlineEditor.svelte";
   import SchemaFieldRow from "./SchemaFieldRow.svelte";
   import SwatchPicker from "./SwatchPicker.svelte";
   import { fieldIconClass, fieldTypeLabel } from "./fieldIcons";
@@ -28,15 +28,12 @@
     suggestPrefixFromLabel,
     type SchemaFieldSection,
   } from "./schemaTypeHelpers";
-  import type { OptionDraft } from "./SelectOptionsEditor.svelte";
   import type {
     EntryTypeDefinition,
     MetadataFieldDefinition,
-    MetadataFieldType,
     MetadataSchema,
     MetadataSchemaLayer,
     MetadataSchemaOverview,
-    NodePickerConfig,
   } from "./types";
 
   // --- Type draft state (two-way bound) ---
@@ -51,21 +48,9 @@
   export let schemaTypeReadonly: boolean = false;
   export let selectedSchemaTypeId: string | null = null;
 
-  // --- Field draft state (passes through to SchemaFieldInlineEditor) ---
-  export let schemaFieldType: MetadataFieldType = "text";
-  export let schemaFieldName: string = "";
-  export let schemaFieldIcon: string | null = null;
-  export let schemaFieldId: string = "";
-  export let schemaFieldGroup: string = "";
-  export let schemaFieldDefault: string | undefined = undefined;
-  export let schemaFieldOptionList: OptionDraft[] = [];
-  export let schemaFieldComputedFunction: "word_count" | "counter" = "word_count";
-  export let schemaFieldComputedScope: "siblings" | "manuscript" = "siblings";
-  export let schemaFieldPickerConfig: NodePickerConfig = { kinds: [], entry_types: {} };
-  export let schemaFieldTypeMenuOpen: boolean = false;
-  export let schemaFieldKeyEditing: boolean = false;
-  export let schemaFieldKeyManual: boolean = false;
-  export let iconPickerOpen: boolean = false;
+  // --- Field-editor context (the draft itself lives inside
+  // SchemaFieldInlineEditor now — #14 Step 4). These are the read-only context
+  // the inline editor still needs, computed by the parent from the overview. ---
   export let selectedSchemaFieldId: string | null = null;
   export let schemaFieldReadonly: boolean = false;
   export let schemaFieldLayerId: string = "";
@@ -109,10 +94,7 @@
   // --- Callbacks (parent owns the side-effects: API calls, modals, drag) ---
   export let onTypeNameChange: (value: string) => void = () => {};
   export let onSaveType: () => void = () => {};
-  export let onChooseFieldType: (type: MetadataFieldType) => void = () => {};
-  export let onFieldNameChange: (value: string) => void = () => {};
-  export let onFieldKeyChange: (value: string) => void = () => {};
-  export let onSaveField: () => void = () => {};
+  export let onSaveField: (payload: FieldDraftPayload) => void = () => {};
   export let onCancelField: () => void = () => {};
   export let onRemoveField: () => void = () => {};
   export let onToggleFieldInline: (fieldId: string, entryTypeId: string) => void = () => {};
@@ -171,31 +153,15 @@
   {#if selectedSchemaTypeId}
     {@const fieldEntries = typeOwnFieldEntries}
     {@const inheritedEntries = typeInheritedFieldEntries}
-    {#snippet fieldInlineEditor()}
+    {#snippet fieldInlineEditor(field: MetadataFieldDefinition | null)}
       <SchemaFieldInlineEditor
-        bind:type={schemaFieldType}
-        bind:name={schemaFieldName}
-        bind:icon={schemaFieldIcon}
-        bind:id={schemaFieldId}
-        bind:group={schemaFieldGroup}
-        bind:defaultValue={schemaFieldDefault}
-        bind:options={schemaFieldOptionList}
-        bind:computedFunction={schemaFieldComputedFunction}
-        bind:computedScope={schemaFieldComputedScope}
-        bind:pickerConfig={schemaFieldPickerConfig}
-        bind:typeMenuOpen={schemaFieldTypeMenuOpen}
-        bind:keyEditing={schemaFieldKeyEditing}
-        bind:keyManual={schemaFieldKeyManual}
-        bind:iconPickerOpen={iconPickerOpen}
+        field={field}
         selectedFieldId={selectedSchemaFieldId}
         readonly={schemaFieldReadonly}
         layerId={schemaFieldLayerId}
-        onChooseType={onChooseFieldType}
-        onNameChange={onFieldNameChange}
-        onKeyChange={onFieldKeyChange}
-        on:save={onSaveField}
-        on:cancel={onCancelField}
-        on:remove={onRemoveField}
+        onSave={onSaveField}
+        onCancel={onCancelField}
+        onRemove={onRemoveField}
       />
     {/snippet}
     <section class="schema-type-fields" aria-label="Fields on this type">
@@ -235,7 +201,7 @@
               {/snippet}
             </SchemaFieldRow>
             {#if isExpanded}
-              {@render fieldInlineEditor()}
+              {@render fieldInlineEditor(field)}
             {/if}
           {/each}
         {/each}
@@ -267,7 +233,7 @@
           {/each}
         {/each}
         {#if expandedSchemaFieldId === NEW_FIELD_SENTINEL}
-          {@render fieldInlineEditor()}
+          {@render fieldInlineEditor(null)}
         {/if}
         {#if fieldEntries.length === 0 && inheritedEntries.length === 0 && expandedSchemaFieldId !== NEW_FIELD_SENTINEL}
           <p class="muted">No fields defined on this type.</p>

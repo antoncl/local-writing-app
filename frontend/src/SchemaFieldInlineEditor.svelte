@@ -1,20 +1,41 @@
-<script lang="ts">
-  // Expand-in-place field editor (metadata revision, mockup C) used by
-  // the Detail Type editor inside `<section class="pane schema-type-pane">`.
-  // One row's editor is open at a time, accent-striped, directly under
-  // its row.
-  //
-  // Extracted from App.svelte (#14, first slice). The component owns no
-  // long-lived state — every draft field is a `bind:` prop so the parent
-  // (App.svelte's saveSchemaField) still reads them from its own scope.
-  // Save/cancel/remove plus the two derived helpers (type change, name
-  // change) come back via callback props so the parent owns side-effects
-  // like option-value migrations and slug regeneration.
+<script lang="ts" context="module">
+  import type { MetadataFieldType, MetadataFieldDefinition, NodePickerConfig } from "./types";
+  import type { OptionDraft } from "./SelectOptionsEditor.svelte";
 
-  import { createEventDispatcher } from "svelte";
+  // The assembled field draft emitted on save. The parent (App.saveSchemaField)
+  // owns persistence (option migration, removed-value confirm, rename, refresh);
+  // this component owns the draft + form. (#14 Step 4 — field-editor self-containment.)
+  export type FieldDraftPayload = {
+    type: MetadataFieldType;
+    name: string;
+    id: string;
+    icon: string | null;
+    group: string;
+    defaultValue: string | undefined;
+    options: OptionDraft[];
+    computedFunction: "word_count" | "counter";
+    computedScope: "siblings" | "manuscript";
+    pickerConfig: NodePickerConfig;
+  };
+</script>
+
+<script lang="ts">
+  // Expand-in-place field editor (metadata revision, mockup C) used by the
+  // Detail Type editor inside `<section class="pane schema-type-pane">`. One
+  // row's editor is open at a time, accent-striped, directly under its row.
+  //
+  // Self-contained (#14 Step 4): the component owns the in-progress draft as
+  // plain local state, initialized once from the `field` prop. Because the host
+  // mounts a fresh instance per expanded row, the `let x = field?.…` init
+  // captures the right starting values and the user's edits below are never
+  // clobbered by a background schema refresh. On save it hands the assembled
+  // draft up via `onSave`; the parent owns the side-effects (migration, confirm,
+  // rename, refresh). Layer + readonly + which-field context still come in as
+  // props (the parent computes them from the schema overview).
+
   import IconPicker from "./IconPicker.svelte";
   import NodePickerConfigEditor from "./NodePickerConfigEditor.svelte";
-  import SelectOptionsEditor, { type OptionDraft } from "./SelectOptionsEditor.svelte";
+  import SelectOptionsEditor from "./SelectOptionsEditor.svelte";
   import DefaultValueEditor from "./DefaultValueEditor.svelte";
   import {
     DEFAULT_FIELD_GLYPH,
@@ -22,55 +43,94 @@
     fieldIconClass,
     fieldTypeLabel,
   } from "./fieldIcons";
-  import type { MetadataFieldType, MetadataSchema, NodePickerConfig } from "./types";
+  import { slugifyFieldId } from "./schemaTypeHelpers";
 
-  // --- Draft state (two-way bound; parent owns persistence) ---
-  export let type: MetadataFieldType = "text";
-  export let name: string = "";
-  export let icon: string | null = null;
-  export let id: string = "";
-  export let group: string = "";
-  export let defaultValue: string | undefined = undefined;
-  export let options: OptionDraft[] = [];
-  export let computedFunction: "word_count" | "counter" = "word_count";
-  export let computedScope: "siblings" | "manuscript" = "siblings";
-  export let pickerConfig: NodePickerConfig = { kinds: [], entry_types: {} };
-  export let typeMenuOpen: boolean = false;
-  export let keyEditing: boolean = false;
-  export let keyManual: boolean = false;
-  export let iconPickerOpen: boolean = false;
-
-  // --- Read-only context from parent ---
-  // null until the editor opens on an existing field; on a fresh draft it
-  // stays null and the Remove affordance is suppressed.
+  // --- Context from parent (read-only) ---
+  // `field` is the existing definition being edited, or null for a fresh draft.
+  // `selectedFieldId` is its stable key (null while creating) — drives the
+  // key-rename semantics + the Remove affordance.
+  export let field: MetadataFieldDefinition | null = null;
   export let selectedFieldId: string | null = null;
   export let readonly: boolean = false;
   export let layerId: string = "";
 
-  // --- Callback props (parent owns the side-effects) ---
-  // `onChooseType` keeps the type-specific config blocks coherent when
-  // the user picks a different type from the grid. `onNameChange` lets
-  // the parent re-derive the field key from the display name while a
-  // fresh draft hasn't manually edited the key. `onKeyChange` carries
-  // back the slugified key after a manual edit; both keep migration
-  // semantics with the parent.
-  export let onChooseType: (next: MetadataFieldType) => void = () => {};
-  export let onNameChange: (value: string) => void = () => {};
-  export let onKeyChange: (value: string) => void = () => {};
+  // --- Callback props (parent owns persistence) ---
+  export let onSave: (payload: FieldDraftPayload) => void = () => {};
+  export let onCancel: () => void = () => {};
+  export let onRemove: () => void = () => {};
 
-  const dispatch = createEventDispatcher<{
-    save: void;
-    cancel: void;
-    remove: void;
-  }>();
+  // --- Draft state (initialized once at mount from `field`) ---
+  let type: MetadataFieldType = field?.type ?? "text";
+  let name: string = field?.name ?? "";
+  let id: string = selectedFieldId ?? "";
+  let icon: string | null = field?.icon ?? null;
+  let group: string = field?.group ?? "";
+  // Stringify the persisted default for the editor; null / undefined → "no
+  // default". A real `false` boolean default stays editable as "False".
+  let defaultValue: string | undefined =
+    field?.default === undefined || field?.default === null ? undefined : String(field.default);
+  // `originalValue` lets a later value rename migrate stored data even after
+  // the rows are reordered.
+  let options: OptionDraft[] = (field?.options ?? []).map((o) => ({
+    value: o.value,
+    label: o.label ?? "",
+    color: o.color ?? null,
+    originalValue: o.value,
+  }));
+  let computedFunction: "word_count" | "counter" = field?.computed?.function === "counter" ? "counter" : "word_count";
+  let computedScope: "siblings" | "manuscript" = field?.computed?.scope === "manuscript" ? "manuscript" : "siblings";
+  let pickerConfig: NodePickerConfig = field?.picker_config
+    ? {
+        kinds: [...(field.picker_config.kinds ?? [])],
+        entry_types: { ...(field.picker_config.entry_types ?? {}) },
+        presets: [...(field.picker_config.presets ?? [])],
+      }
+    : { kinds: ["lore"], entry_types: {} };
+  let typeMenuOpen = false;
+  let keyEditing = false;
+  let keyManual = false;
+  let iconPickerOpen = false;
+
+  // Keep the type-specific config blocks coherent when the user picks a
+  // different type from the grid.
+  function chooseType(next: MetadataFieldType) {
+    type = next;
+    typeMenuOpen = false;
+    if (next === "computed" && computedFunction !== "counter" && computedFunction !== "word_count") {
+      computedFunction = "word_count";
+    }
+  }
+
+  // Auto-derive the stable key only while CREATING a field and only until the
+  // key is hand-edited. Once the field exists, the name renames freely and the
+  // key changes solely via the explicit "rename (migrates)" path.
+  function updateName(value: string) {
+    name = value;
+    if (!readonly && selectedFieldId === null && !keyManual) {
+      id = slugifyFieldId(value);
+    }
+  }
 
   function handleKeyInput(value: string) {
     keyManual = true;
-    onKeyChange(value);
+    id = slugifyFieldId(value);
+  }
+
+  // Click-outside closes the type grid + icon popover (was App-level).
+  function handleDocumentMousedown(event: MouseEvent) {
+    const target = event.target as HTMLElement | null;
+    if (iconPickerOpen && !target?.closest(".sfi-icon-anchor")) iconPickerOpen = false;
+    if (typeMenuOpen && !target?.closest(".sfi-type-anchor")) typeMenuOpen = false;
+  }
+
+  function emitSave() {
+    onSave({ type, name, id, icon, group, defaultValue, options, computedFunction, computedScope, pickerConfig });
   }
 
   $: saveDisabled = !layerId || !id.trim() || !name.trim();
 </script>
+
+<svelte:window on:mousedown={handleDocumentMousedown} />
 
 <div class="schema-field-inline" role="group" aria-label="Field settings">
   <div class="sfi-head">
@@ -101,7 +161,7 @@
       value={name}
       placeholder="POV Character"
       aria-label="Field display name"
-      on:input={(event) => onNameChange(event.currentTarget.value)}
+      on:input={(event) => updateName(event.currentTarget.value)}
     />
     <div class="sfi-type-anchor">
       <button
@@ -126,7 +186,7 @@
               class:selected={type === choice}
               role="option"
               aria-selected={type === choice}
-              on:click={() => onChooseType(choice)}
+              on:click={() => chooseType(choice)}
             >
               <i class={`ti ti-${DEFAULT_FIELD_GLYPH[choice] ?? "letter-case"}`} aria-hidden="true"></i>
               <span>{fieldTypeLabel(choice)}</span>
@@ -221,9 +281,9 @@
   <div class="sfi-footer">
     <span class="sfi-spacer"></span>
     {#if selectedFieldId}
-      <button class="link-danger" type="button" on:click={() => dispatch("remove")}>Remove</button>
+      <button class="link-danger" type="button" on:click={() => onRemove()}>Remove</button>
     {/if}
-    <button class="sfi-cancel" type="button" on:click={() => dispatch("cancel")}>Cancel</button>
-    <button class="sfi-done" type="button" disabled={saveDisabled} on:click={() => dispatch("save")}>Done</button>
+    <button class="sfi-cancel" type="button" on:click={() => onCancel()}>Cancel</button>
+    <button class="sfi-done" type="button" disabled={saveDisabled} on:click={emitSave}>Done</button>
   </div>
 </div>

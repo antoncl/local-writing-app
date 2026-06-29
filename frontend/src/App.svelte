@@ -5,6 +5,7 @@
   import NodeEditor from "./NodeEditor.svelte";
   import DirectoryPickerModal from "./DirectoryPickerModal.svelte";
   import SchemaTypeEditor from "./SchemaTypeEditor.svelte";
+  import type { FieldDraftPayload } from "./SchemaFieldInlineEditor.svelte";
   import SchemaTreePane from "./SchemaTreePane.svelte";
   import Tree, { type TreeConfig } from "./Tree.svelte";
   import Lore from "./Lore.svelte";
@@ -269,45 +270,13 @@
   let schemaFieldKind: SchemaKind = "scene";
   let schemaFieldLayerId = "";
   let schemaFieldEntryType = "scene";
-  let schemaFieldId = "";
-  let schemaFieldName = "";
-  // Holds the FULL resolved field type (multi_select / entity_ref_list /
-  // computed / color are first-class — chosen in the type grid, no more
-  // select+allow-multiple indirection).
-  let schemaFieldType: MetadataFieldType = "text";
-  // Type-grid popover (off the type chip in the inline editor).
-  let schemaFieldTypeMenuOpen = false;
-  // Computed-field authoring (only meaningful when type === "computed").
-  let schemaFieldComputedFunction: "word_count" | "counter" = "word_count";
-  let schemaFieldComputedScope: "siblings" | "manuscript" = "siblings";
-  let schemaFieldPickerConfig: NodePickerConfig = { kinds: [], entry_types: {} };
-  // Ordered list of select/multi_select options being authored. Single source
-  // of truth (replaces the old comma-string + side maps): each row carries its
-  // stable `value` (the macro contract), a cosmetic `label`, a `color` swatch,
-  // and `originalValue` (the value at load time, or null for a freshly-added
-  // row) so a value rename can migrate stored data even after drag-reorder.
-  // OptionDraft is defined and re-exported by SelectOptionsEditor.
-  let schemaFieldOptionList: OptionDraft[] = [];
-  // Default-value draft for the field editor (#38). String editor-side so
-  // the shared DefaultValueEditor can drive boolean / number / select /
-  // text uniformly; coerced into a type-matched MetadataValue at save time
-  // via schemaFieldDefaultForStorage. `undefined` = "no default" (the
-  // historic behaviour) — no `default` key is emitted on save.
-  let schemaFieldDefault: string | undefined = undefined;
+  // The field-editing DRAFT (type / name / key / options / default / picker /
+  // computed / icon + the inline editor's popover toggles) now lives inside
+  // SchemaFieldInlineEditor (#14 Step 4). App keeps only the context the parent
+  // computes from the schema overview: which field is open + whether it's a
+  // read-only (built-in) field. The draft arrives back as a payload on save.
   let selectedSchemaFieldId: string | null = null;
   let schemaFieldReadonly = false;
-  // L1 section label being edited for the current field (metadata revision).
-  let schemaFieldGroup = "";
-  // Per-field icon override (Tabler name, no prefix) — null = type default.
-  let schemaFieldIcon: string | null = null;
-  let iconPickerOpen = false;
-  // Stable-key handling (metadata revision, decision #10): a field's display
-  // name renames freely; its key (the Jinja/macro contract) is auto-derived
-  // only while creating, and afterwards changes only via an explicit rename
-  // (which migrates stored values). `keyEditing` reveals the key input;
-  // `keyManual` stops name→key auto-derivation once the key is hand-edited.
-  let schemaFieldKeyEditing = false;
-  let schemaFieldKeyManual = false;
   // L2 reusable-groups manager (modal).
   let groupsManagerOpen = false;
   // L2 "apply group" form state (in the type editor).
@@ -579,12 +548,6 @@
     if (addMenuOpenFor !== null && !inAnchorOrPopover) {
       addMenuOpenFor = null;
       addMenuPosition = null;
-    }
-    if (iconPickerOpen && !target?.closest(".sfi-icon-anchor")) {
-      iconPickerOpen = false;
-    }
-    if (schemaFieldTypeMenuOpen && !target?.closest(".sfi-type-anchor")) {
-      schemaFieldTypeMenuOpen = false;
     }
   }
 
@@ -1330,14 +1293,10 @@
   // shows the type's default glyph + label.
   // Switch the field type from the grid; keeps config state coherent so the
   // type-specific blocks below show sane defaults when first revealed.
-  function chooseSchemaFieldType(type: MetadataFieldType) {
-    schemaFieldType = type;
-    schemaFieldTypeMenuOpen = false;
-    if (type === "computed" && schemaFieldComputedFunction !== "counter" && schemaFieldComputedFunction !== "word_count") {
-      schemaFieldComputedFunction = "word_count";
-    }
-  }
-
+  // Open the inline editor on an existing field. App sets only the editing
+  // CONTEXT (which field, its source layer, read-only-ness, target entry type)
+  // — SchemaFieldInlineEditor initializes its own draft from the field def it
+  // receives as a prop (#14 Step 4).
   function openSchemaFieldDetail(fieldId: string, entryTypeId = schemaFieldEntryType) {
     const field = metadataSchema?.fields[fieldId];
     if (!field) return;
@@ -1345,58 +1304,15 @@
       ? entryTypeId
       : (entryTypeIdsForField(fieldId, schemaFieldKind)[0] ?? defaultSchemaEntryType(schemaFieldKind));
     selectedSchemaFieldId = fieldId;
-    schemaFieldId = fieldId;
-    schemaFieldName = field.name;
     schemaFieldReadonly = Boolean(metadataSchemaOverview?.field_sources[fieldId]?.built_in);
-    schemaFieldTypeMenuOpen = false;
-    schemaFieldPickerConfig = field.picker_config
-      ? { kinds: [...(field.picker_config.kinds ?? [])], entry_types: { ...(field.picker_config.entry_types ?? {}) }, presets: [...(field.picker_config.presets ?? [])] }
-      : { kinds: ["lore"], entry_types: {} };
-    // The full resolved type is stored directly — every type is first-class.
-    schemaFieldType = field.type;
-    schemaFieldComputedFunction = field.computed?.function === "counter" ? "counter" : "word_count";
-    schemaFieldComputedScope = field.computed?.scope === "manuscript" ? "manuscript" : "siblings";
-    // Load options into the ordered draft list. `originalValue` lets a later
-    // value rename migrate stored data even after the rows are reordered.
-    schemaFieldOptionList = field.options.map((o) => ({
-      value: o.value,
-      label: o.label ?? "",
-      color: o.color ?? null,
-      originalValue: o.value,
-    }));
-    // Stringify the persisted default for the editor; null / undefined →
-    // "no default". A real `false` boolean default stays editable as "False".
-    schemaFieldDefault =
-      field.default === undefined || field.default === null
-        ? undefined
-        : String(field.default);
-    schemaFieldKeyEditing = false;
-    schemaFieldKeyManual = false;
     schemaFieldLayerId = metadataSchemaOverview?.field_sources[fieldId]?.built_in ? projectSchemaLayerId() : (metadataSchemaOverview?.field_sources[fieldId]?.layer_id ?? projectSchemaLayerId());
     schemaFieldEntryType = targetEntryTypeId;
-    schemaFieldGroup = field.group ?? "";
-    schemaFieldIcon = field.icon ?? null;
-    iconPickerOpen = false;
     expandedSchemaFieldId = fieldId;
   }
 
   function createSchemaFieldDraft(layerId = projectSchemaLayerId(), entryTypeId = schemaFieldEntryType) {
     selectedSchemaFieldId = null;
-    schemaFieldId = "";
-    schemaFieldName = "";
-    schemaFieldType = "text";
     schemaFieldReadonly = false;
-    schemaFieldTypeMenuOpen = false;
-    schemaFieldComputedFunction = "word_count";
-    schemaFieldComputedScope = "siblings";
-    schemaFieldPickerConfig = { kinds: ["lore"], entry_types: {} };
-    schemaFieldOptionList = [];
-    schemaFieldDefault = undefined;
-    schemaFieldGroup = "";
-    schemaFieldIcon = null;
-    iconPickerOpen = false;
-    schemaFieldKeyEditing = false;
-    schemaFieldKeyManual = false;
     schemaFieldLayerId = layerId;
     schemaFieldEntryType = entryTypeId;
     expandedSchemaFieldId = NEW_FIELD_SENTINEL;
@@ -1649,45 +1565,35 @@
     });
   }
 
-  function schemaFieldSaveType(): MetadataFieldType {
-    // The type grid sets the full resolved type directly — no decomposition.
-    return schemaFieldType;
-  }
-
-  function updateSchemaFieldName(value: string) {
-    schemaFieldName = value;
-    // Auto-derive the stable key only while CREATING a field and only until
-    // the key is hand-edited. Once the field exists, the name renames freely
-    // and the key changes solely via the explicit "rename (migrates)" path.
-    if (!schemaFieldReadonly && selectedSchemaFieldId === null && !schemaFieldKeyManual) {
-      schemaFieldId = slugifyFieldId(value);
-    }
-  }
-
   // Coerce the editor-side string default onto the field-type's wire shape
   // (#38). Mirrors NodeEditor.defaultValueForStorage for prompt inputs;
   // returns undefined for empty (no default) and computed types.
-  function schemaFieldDefaultForStorage(): import("./types").MetadataValue | undefined {
-    const raw = schemaFieldDefault;
+  function schemaFieldDefaultForStorage(
+    type: MetadataFieldType,
+    raw: string | undefined,
+  ): import("./types").MetadataValue | undefined {
     if (raw === undefined || raw === "") return undefined;
-    if (schemaFieldType === "boolean") return raw === "true";
-    if (schemaFieldType === "number") {
+    if (type === "boolean") return raw === "true";
+    if (type === "number") {
       const n = Number(raw);
       return Number.isFinite(n) ? n : raw;
     }
     return raw;
   }
 
-  async function saveSchemaField() {
+  // The draft arrives assembled from SchemaFieldInlineEditor (#14 Step 4); App
+  // owns the persistence (option migration, removed-value confirm, rename,
+  // refresh) plus the editing context (layer / entry-type / previous id).
+  async function saveSchemaField(payload: FieldDraftPayload) {
     if (!schemaFieldLayerId) return;
     const layerId = schemaFieldLayerId;
     const entryType = schemaFieldEntryType;
     const previousFieldId = selectedSchemaFieldId && !selectedSchemaFieldId.startsWith("system:") ? selectedSchemaFieldId : null;
-    const nextFieldId = schemaFieldId.trim();
+    const nextFieldId = payload.id.trim();
     // Compose SelectOption objects from the ordered draft list (order is
     // preserved on save). Drop rows with an empty value; de-dupe by value.
     const seenValues = new Set<string>();
-    const options = schemaFieldOptionList
+    const options = payload.options
       .map((draft) => ({ ...draft, value: draft.value.trim() }))
       .filter((draft) => draft.value && !seenValues.has(draft.value) && seenValues.add(draft.value))
       .map((draft) => {
@@ -1702,31 +1608,31 @@
     // Migration: a row whose value changed from its loaded `originalValue`
     // rewrites stored entry data. Reorder-safe (keyed by originalValue, not
     // position); added rows have no originalValue so they never migrate.
-    const optionMigration = buildOptionMigrationFromDrafts();
-    const hasOptions = schemaFieldType === "select" || schemaFieldType === "multi_select";
-    const hasPicker = schemaFieldType === "entity_ref" || schemaFieldType === "entity_ref_list";
+    const optionMigration = buildOptionMigrationFromDrafts(payload.options);
+    const hasOptions = payload.type === "select" || payload.type === "multi_select";
+    const hasPicker = payload.type === "entity_ref" || payload.type === "entity_ref_list";
     const computedSpec: Record<string, string> | null =
-      schemaFieldType === "computed"
-        ? schemaFieldComputedFunction === "word_count"
+      payload.type === "computed"
+        ? payload.computedFunction === "word_count"
           ? { source: "body", function: "word_count" }
-          : { function: "counter", scope: schemaFieldComputedScope }
+          : { function: "counter", scope: payload.computedScope }
         : null;
     // Coerce the editor-side string default into the field-type's wire shape
     // (#38). Computed fields never carry a default. undefined / "" → omit
     // the key entirely so the field stays defaultless rather than seeding
     // a falsy value into new entries.
     const defaultValue =
-      schemaFieldType === "computed" ? undefined : schemaFieldDefaultForStorage();
+      payload.type === "computed" ? undefined : schemaFieldDefaultForStorage(payload.type, payload.defaultValue);
     const nextField: MetadataFieldDefinition = {
-      name: schemaFieldName.trim() || nextFieldId,
-      type: schemaFieldSaveType(),
+      name: payload.name.trim() || nextFieldId,
+      type: payload.type,
       options: hasOptions ? options : [],
-      ...(hasPicker ? { picker_config: schemaFieldPickerConfig } : {}),
+      ...(hasPicker ? { picker_config: payload.pickerConfig } : {}),
       ...(computedSpec ? { computed: computedSpec } : {}),
-      ...(schemaFieldGroup.trim() ? { group: schemaFieldGroup.trim() } : {}),
+      ...(payload.group.trim() ? { group: payload.group.trim() } : {}),
       // Per-field icon override (chosen in the IconPicker). null/empty =
       // fall back to the field-type default glyph.
-      ...(schemaFieldIcon ? { icon: schemaFieldIcon } : {}),
+      ...(payload.icon ? { icon: payload.icon } : {}),
       ...(defaultValue !== undefined ? { default: defaultValue } : {}),
     };
 
@@ -1883,7 +1789,7 @@
 
   function requestDeleteSchemaField() {
     if (!selectedSchemaFieldId || selectedSchemaFieldId.startsWith("system:") || schemaFieldReadonly) return;
-    const fieldName = schemaFieldName || selectedSchemaFieldId;
+    const fieldName = metadataSchema?.fields[selectedSchemaFieldId]?.name || selectedSchemaFieldId;
     requestConfirm({
       title: "Delete Detail Field",
       message: `Delete "${fieldName}"? This removes the field definition and removes that metadata value from every document using it.`,
@@ -1926,9 +1832,9 @@
   // value it was loaded with rewrites stored entry data. Keyed by the loaded
   // `originalValue`, so reordering rows never produces a spurious migration,
   // and freshly-added rows (originalValue null) never migrate.
-  function buildOptionMigrationFromDrafts(): Record<string, string> | null {
+  function buildOptionMigrationFromDrafts(drafts: OptionDraft[]): Record<string, string> | null {
     const migration: Record<string, string> = {};
-    for (const draft of schemaFieldOptionList) {
+    for (const draft of drafts) {
       const value = draft.value.trim();
       if (draft.originalValue && value && draft.originalValue !== value) {
         migration[draft.originalValue] = value;
@@ -3459,20 +3365,6 @@
       bind:schemaTypeName
       bind:schemaTypeLayerId
       bind:schemaTypeColor
-      bind:schemaFieldType
-      bind:schemaFieldName
-      bind:schemaFieldIcon
-      bind:schemaFieldId
-      bind:schemaFieldGroup
-      bind:schemaFieldDefault
-      bind:schemaFieldOptionList
-      bind:schemaFieldComputedFunction
-      bind:schemaFieldComputedScope
-      bind:schemaFieldPickerConfig
-      bind:schemaFieldTypeMenuOpen
-      bind:schemaFieldKeyEditing
-      bind:schemaFieldKeyManual
-      bind:iconPickerOpen
       bind:expandedSchemaFieldId
       bind:fieldDropTarget
       bind:groupApplyOpen
@@ -3501,9 +3393,6 @@
       projectSchemaLayerId={projectSchemaLayerId}
       onTypeNameChange={updateSchemaTypeName}
       onSaveType={saveSchemaType}
-      onChooseFieldType={chooseSchemaFieldType}
-      onFieldNameChange={updateSchemaFieldName}
-      onFieldKeyChange={(value) => (schemaFieldId = slugifyFieldId(value))}
       onSaveField={saveSchemaField}
       onCancelField={() => (expandedSchemaFieldId = null)}
       onRemoveField={requestDeleteSchemaField}

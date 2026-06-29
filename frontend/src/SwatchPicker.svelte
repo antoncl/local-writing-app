@@ -8,27 +8,30 @@
   // `paletteStore` that App.svelte fills on settings load.
 
   import { paletteStore, getSwatch } from "./colors";
-  import type { Swatch } from "./types";
 
-  export let value: string | null = null;
-  export let allowNone: boolean = true;
-  export let onChange: ((id: string | null) => void) | undefined = undefined;
+  interface Props {
+    value?: string | null;
+    allowNone?: boolean;
+    onChange?: (id: string | null) => void;
+  }
 
-  let open = false;
-  let anchor: HTMLButtonElement | undefined;
+  let { value = $bindable(null), allowNone = true, onChange }: Props = $props();
+
+  let open = $state(false);
+  let anchor: HTMLButtonElement | undefined = $state();
   // Viewport-relative popover position. Computed from the trigger's
   // bounding rect each time the popover opens (and on scroll/resize while
   // open) so the popover floats above ANY pane regardless of its overflow
   // — necessary because the schema_type pane and the metadata pane both
   // clip their content, which otherwise hides or squashes the popover.
-  let popoverLeft = 0;
-  let popoverTop = 0;
+  let popoverLeft = $state(0);
+  let popoverTop = $state(0);
 
   const POPOVER_WIDTH = 180;   // matches CSS min-width
   const POPOVER_GAP = 4;       // visual gap below the trigger
 
-  $: palette = $paletteStore;
-  $: current = getSwatch(value);
+  const palette = $derived($paletteStore);
+  const current = $derived(getSwatch(value));
 
   function positionPopover() {
     if (!anchor) return;
@@ -87,10 +90,10 @@
 </script>
 
 <svelte:window
-  on:click={onDocClick}
-  on:keydown={onKey}
-  on:scroll={onScrollOrResize}
-  on:resize={onScrollOrResize}
+  onclick={onDocClick}
+  onkeydown={onKey}
+  onscroll={onScrollOrResize}
+  onresize={onScrollOrResize}
 />
 
 <span class="swatch-picker">
@@ -101,7 +104,7 @@
     title={current ? current.label : "No color"}
     aria-label={current ? `Color: ${current.label}` : "Pick a color"}
     bind:this={anchor}
-    on:click|stopPropagation={toggle}
+    onclick={(e) => { e.stopPropagation(); toggle(); }}
   >
     {#if current}
       <span class="swatch-dot" style="background: {current.hex}"></span>
@@ -123,7 +126,7 @@
           class="swatch-clear"
           class:selected={!value}
           title="Clear color (inherit / no override)"
-          on:click|stopPropagation={() => select(null)}
+          onclick={(e) => { e.stopPropagation(); select(null); }}
         >
           <span class="swatch-dot swatch-dot-empty"></span>
           <span class="swatch-clear-label">Clear</span>
@@ -136,7 +139,7 @@
             class="swatch-cell"
             class:selected={s.id === value}
             title={s.label}
-            on:click|stopPropagation={() => select(s.id)}
+            onclick={(e) => { e.stopPropagation(); select(s.id); }}
           >
             <span class="swatch-dot" style="background: {s.hex}"></span>
           </button>

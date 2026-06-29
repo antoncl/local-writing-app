@@ -38,7 +38,6 @@
   import PromptInputField from "./PromptInputField.svelte";
   import TopBar from "./TopBar.svelte";
   import { installThemeWiring, themePreference, nextPreference, type ThemePreference } from "./theme";
-  import { compileMatcher } from "./implicitContextMatcher";
   import { renderChatContent } from "./chatMessageRender";
   import { setPalette, resolveColor } from "./colors";
   import { get } from "svelte/store";
@@ -85,6 +84,7 @@
     refreshSchema as storeRefreshSchema,
     setMetadataSchema,
   } from "./stores/schema";
+  import { implicitContextMatcherStore } from "./stores/derived";
   import GroupsManagerDialog from "./GroupsManagerDialog.svelte";
   import TagManagerDialog from "./TagManagerDialog.svelte";
   import type { OptionDraft } from "./SelectOptionsEditor.svelte";
@@ -239,13 +239,9 @@
   $: researchStructure = $researchStructureStore;
   let collapsedResearchNodes: Record<string, boolean> = {};
   $: loreEntries = $loreEntriesStore;
-  // Compiled matcher for implicit-context highlighting in editors.
-  // Rebuilds whenever the lore set changes. Cheap (sub-millisecond at
-  // Honorverse-scale per the benchmark) so we don't bother debouncing.
-  // Recompiles when loreEntries OR metadataSchema changes — schema is
-  // needed so the matcher resolves per-entry colors for the highlight
-  // decorations (Phase 4 render target).
-  $: implicitContextMatcher = compileMatcher(loreEntries, metadataSchema);
+  // Compiled matcher for implicit-context highlighting in editors. Derived in
+  // the store layer from lore + schema (see stores/derived.ts).
+  $: implicitContextMatcher = $implicitContextMatcherStore;
   $: knownTags = $knownTagsStore;
   let tagsManagerOpen = false;
   let focusedEditorPaneId: string | null = null;

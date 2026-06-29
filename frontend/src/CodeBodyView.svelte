@@ -712,7 +712,7 @@
                   type={draft.type}
                   value={draft.defaultValue}
                   options={draft.options}
-                  on:change={(event) => setEntryInputDefault(index, event.detail.value ?? "")}
+                  onChange={(next) => setEntryInputDefault(index, next ?? "")}
                 />
               </label>
               <label class="prompt-input-required">

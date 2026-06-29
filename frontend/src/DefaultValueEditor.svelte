@@ -14,20 +14,24 @@
   // can be embedded inside <label> rows and forms without coupling to
   // the persistence layer.
 
-  import { createEventDispatcher } from "svelte";
   import type { OptionDraft } from "./SelectOptionsEditor.svelte";
 
-  export let type: string;
-  export let value: string | undefined;
-  // SelectOption-shaped draft list; used to populate the dropdown for
-  // select / multi_select. Ignored for other types.
-  export let options: OptionDraft[] = [];
-  export let ariaLabel: string = "Default value";
+  interface Props {
+    type: string;
+    value: string | undefined;
+    // SelectOption-shaped draft list; used to populate the dropdown for
+    // select / multi_select. Ignored for other types.
+    options?: OptionDraft[];
+    ariaLabel?: string;
+    // Emitted on edit; "" means unset → surfaced as undefined (#24). (#14 runes:
+    // callback prop replaces the old `change` event dispatcher.)
+    onChange?: (value: string | undefined) => void;
+  }
 
-  const dispatch = createEventDispatcher<{ change: { value: string | undefined } }>();
+  let { type, value, options = [], ariaLabel = "Default value", onChange = () => {} }: Props = $props();
 
   function emit(raw: string) {
-    dispatch("change", { value: raw === "" ? undefined : raw });
+    onChange(raw === "" ? undefined : raw);
   }
 </script>
 
@@ -37,7 +41,7 @@
   <select
     value={value ?? ""}
     aria-label={ariaLabel}
-    on:change={(e) => emit((e.currentTarget as HTMLSelectElement).value)}
+    onchange={(e) => emit((e.currentTarget as HTMLSelectElement).value)}
   >
     <option value="">Unset</option>
     <option value="true">True</option>
@@ -53,7 +57,7 @@
       value={value ?? ""}
       placeholder="Unset"
       aria-label={ariaLabel}
-      on:input={(e) => emit((e.currentTarget as HTMLInputElement).value)}
+      oninput={(e) => emit((e.currentTarget as HTMLInputElement).value)}
     />
     {#if value !== undefined && value !== ""}
       <button
@@ -61,7 +65,7 @@
         class="dve-clear"
         title="Clear default (unset)"
         aria-label="Clear default"
-        on:click={() => emit("")}
+        onclick={() => emit("")}
       >×</button>
     {/if}
   </span>
@@ -69,7 +73,7 @@
   <select
     value={value ?? ""}
     aria-label={ariaLabel}
-    on:change={(e) => emit((e.currentTarget as HTMLSelectElement).value)}
+    onchange={(e) => emit((e.currentTarget as HTMLSelectElement).value)}
   >
     <option value="">Unset</option>
     {#each options.filter((o) => o.value.trim() !== "") as opt (opt.value)}
@@ -86,7 +90,7 @@
       value={value ?? ""}
       placeholder="Unset"
       aria-label={ariaLabel}
-      on:input={(e) => emit((e.currentTarget as HTMLInputElement).value)}
+      oninput={(e) => emit((e.currentTarget as HTMLInputElement).value)}
     />
     {#if value !== undefined && value !== ""}
       <button
@@ -94,7 +98,7 @@
         class="dve-clear"
         title="Clear default (unset)"
         aria-label="Clear default"
-        on:click={() => emit("")}
+        onclick={() => emit("")}
       >×</button>
     {/if}
   </span>

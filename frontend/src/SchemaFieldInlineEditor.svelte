@@ -274,7 +274,7 @@
         value={defaultValue}
         options={options}
         ariaLabel="Default for new entries"
-        on:change={(event) => (defaultValue = event.detail.value)}
+        onChange={(next) => (defaultValue = next)}
       />
     </label>
   {/if}

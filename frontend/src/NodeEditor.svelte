@@ -762,14 +762,14 @@
       implicitContextMatcher={implicitContextMatcher}
       excludeId={scene?.id ?? null}
       computedFieldString={computedFieldString}
-      on:entryTypeChange={(event) => updateEntryType(event.detail.entryType)}
-      on:statusChange={(event) => updateStatus(event.detail.status)}
-      on:metadataChange={(event) => {
-        metadata = event.detail.metadata;
+      onEntryTypeChange={(next) => updateEntryType(next)}
+      onStatusChange={(next) => updateStatus(next)}
+      onMetadataChange={(next) => {
+        metadata = next;
         emitChange();
       }}
-      on:customData={() => onCustomData?.({ entryType, kind: documentKind })}
-      on:navigate={(event) => onNavigate?.(event.detail)}
+      onCustomData={() => onCustomData?.({ entryType, kind: documentKind })}
+      onNavigate={(payload) => onNavigate?.(payload)}
     />
     {#key scene?.id ?? ""}
       <BacklinksPanel

@@ -1,5 +1,4 @@
 <script lang="ts">
-  import { createEventDispatcher } from "svelte";
   import MetadataLongTextEditor from "./MetadataLongTextEditor.svelte";
   import ProviderTierPicker from "./ProviderTierPicker.svelte";
   import ReferencePicker from "./ReferencePicker.svelte";
@@ -20,17 +19,59 @@
   } from "./types";
   import { metadataSchemaStore } from "./stores/schema";
 
+  interface Props {
+    entryType: string;
+    status: string;
+    metadata: EntryMetadata;
+    documentKind: DocumentKind;
+    documentLabel: string;
+    documentEntryTypes: [string, EntryTypeDefinition][];
+    metadataFieldIds: string[];
+    knownTags?: import("./types").ScopedTag[];
+    loreEntries?: LoreEntrySummary[];
+    promptEntries?: PromptEntrySummary[];
+    structure?: StructureDocument | null;
+    // Research tree (sibling to manuscript) — threaded to the picker.
+    researchStructure?: StructureDocument | null;
+    implicitContextMatcher?: import("./implicitContextMatcher").CompiledMatcher | null;
+    excludeId?: string | null;
+    computedFieldString?: (fieldId: string) => string;
+    // Outbound events as callback props (#14: MetadataPanel is runes — replaces
+    // its createEventDispatcher). NodeEditor (legacy parent) passes these.
+    onEntryTypeChange?: (entryType: string) => void;
+    onStatusChange?: (status: string) => void;
+    onMetadataChange?: (metadata: EntryMetadata) => void;
+    onCustomData?: () => void;
+    onNavigate?: (payload: { id: string; kind: string }) => void;
+  }
+
+  let {
+    entryType,
+    status,
+    metadata,
+    documentKind,
+    documentLabel,
+    documentEntryTypes,
+    metadataFieldIds,
+    knownTags = [],
+    loreEntries = [],
+    promptEntries = [],
+    structure = null,
+    researchStructure = null,
+    implicitContextMatcher = null,
+    excludeId = null,
+    computedFieldString = () => "",
+    onEntryTypeChange,
+    onStatusChange,
+    onMetadataChange,
+    onCustomData,
+    onNavigate,
+  }: Props = $props();
+
   // metadataSchema is global per-project — read from the store, not a prop (#14
   // Step 2). This panel only mounts inside NodeEditor's `{#if metadataSchema}`
   // guard, so the non-null assertion holds (matches the prior non-null prop).
-  $: metadataSchema = $metadataSchemaStore as MetadataSchema;
-  export let entryType: string;
-  export let status: string;
-  export let metadata: EntryMetadata;
-  export let documentKind: DocumentKind;
-  export let documentLabel: string;
-  export let documentEntryTypes: [string, EntryTypeDefinition][];
-  export let metadataFieldIds: string[];
+  const metadataSchema = $derived($metadataSchemaStore as MetadataSchema);
 
   // Assistants surface ai_provider / ai_capability_tier / ai_model via
   // the bespoke ProviderTierPicker rendered above the schema fields.
@@ -38,34 +79,18 @@
   // editors. (Moved here from NodeEditor so the picker decision and the
   // hide rule live in the same component.)
   const ASSISTANT_PICKER_FIELDS = new Set(["ai_provider", "ai_capability_tier", "ai_model"]);
-  $: visibleFieldIds =
+  const visibleFieldIds = $derived(
     documentKind === "assistant"
       ? metadataFieldIds.filter((id) => !ASSISTANT_PICKER_FIELDS.has(id))
-      : metadataFieldIds;
-  export let knownTags: import("./types").ScopedTag[] = [];
-  export let loreEntries: LoreEntrySummary[] = [];
-  export let promptEntries: PromptEntrySummary[] = [];
-  export let structure: StructureDocument | null = null;
-  // Research tree (sibling to manuscript) — threaded to the picker.
-  export let researchStructure: StructureDocument | null = null;
-  export let implicitContextMatcher: import("./implicitContextMatcher").CompiledMatcher | null = null;
-  export let excludeId: string | null = null;
-  export let computedFieldString: (fieldId: string) => string = () => "";
+      : metadataFieldIds,
+  );
 
-  const dispatch = createEventDispatcher<{
-    entryTypeChange: { entryType: string };
-    statusChange: { status: string };
-    metadataChange: { metadata: EntryMetadata };
-    customData: void;
-    navigate: { id: string; kind: string };
-  }>();
-
-  $: entryTypeDef = metadataSchema.entry_types[entryType] ?? null;
+  const entryTypeDef = $derived(metadataSchema.entry_types[entryType] ?? null);
   // Inheritance: a field present on the type but not in its own_fields is
   // inherited from the kind / parent. We only mark when own_fields is
   // explicitly present (older schemas omit it → treat all as own).
-  $: ownFieldSet = new Set(entryTypeDef?.own_fields ?? []);
-  $: hasOwnFields = Array.isArray(entryTypeDef?.own_fields);
+  const ownFieldSet = $derived(new Set(entryTypeDef?.own_fields ?? []));
+  const hasOwnFields = $derived(Array.isArray(entryTypeDef?.own_fields));
   function isInherited(fieldId: string): boolean {
     return hasOwnFields && !ownFieldSet.has(fieldId);
   }
@@ -92,7 +117,7 @@
     for (const [group, groupIds] of groups) out.push({ group, ids: groupIds });
     return out;
   }
-  $: sections = buildSections(visibleFieldIds, metadataSchema);
+  const sections = $derived(buildSections(visibleFieldIds, metadataSchema));
 
   // Wide field types take the full rail width (control wraps below the
   // name); compact types keep their control inline on the right.
@@ -148,19 +173,15 @@
   }
 
   function updateField(fieldId: string, field: MetadataFieldDefinition, value: MetadataValue) {
-    dispatch("metadataChange", {
-      metadata: { ...metadata, [fieldId]: normaliseFieldValue(field, value) },
-    });
+    onMetadataChange?.({ ...metadata, [fieldId]: normaliseFieldValue(field, value) });
   }
 
   function updateColor(value: string) {
-    dispatch("metadataChange", { metadata: { ...metadata, color: value } });
+    onMetadataChange?.({ ...metadata, color: value });
   }
 
   function updateAssistantProvider(provider: string, tier: string, model: string) {
-    dispatch("metadataChange", {
-      metadata: { ...metadata, ai_provider: provider, ai_capability_tier: tier, ai_model: model },
-    });
+    onMetadataChange?.({ ...metadata, ai_provider: provider, ai_capability_tier: tier, ai_model: model });
   }
 
   function hasMultiSelectOption(fieldId: string, option: string): boolean {
@@ -184,7 +205,7 @@
       <span class="rail-type-label">{documentLabel} type</span>
       <select
         value={entryType}
-        on:change={(event) => dispatch("entryTypeChange", { entryType: event.currentTarget.value })}
+        onchange={(event) => onEntryTypeChange?.(event.currentTarget.value)}
       >
         {#if entryType && !metadataSchema.entry_types[entryType]}
           <option value={entryType}>{entryType}</option>
@@ -194,7 +215,7 @@
         {/each}
       </select>
     </label>
-    <button class="rail-edit-type" type="button" on:click={() => dispatch("customData")}>
+    <button class="rail-edit-type" type="button" onclick={() => onCustomData?.()}>
       Edit type…
     </button>
   </div>
@@ -258,7 +279,7 @@
                 loreEntries={loreEntries}
                 promptEntries={promptEntries}
                 on:change={(event) => updateField(fieldId, field, event.detail.value)}
-                on:navigate={(event) => dispatch("navigate", event.detail)}
+                on:navigate={(event) => onNavigate?.(event.detail)}
               />
             {:else if field.type === "multi_select" && field.options.length > 0}
               <div class="multi-select-chips" aria-label={field.name}>
@@ -267,7 +288,7 @@
                     class:active={hasMultiSelectOption(fieldId, option.value)}
                     class="multi-select-chip"
                     type="button"
-                    on:click={() => toggleMultiSelectOption(fieldId, field, option.value)}
+                    onclick={() => toggleMultiSelectOption(fieldId, field, option.value)}
                   >
                     {option.label ?? option.value}
                   </button>
@@ -279,7 +300,7 @@
                 options={field.options}
                 ariaLabel={field.name}
                 placeholder="(no status)"
-                onChange={(value) => dispatch("statusChange", { status: value })}
+                onChange={(value) => onStatusChange?.(value)}
               />
             {:else if field.type === "select"}
               <ColoredSelect
@@ -297,7 +318,7 @@
                 class:on={on}
                 aria-checked={on}
                 aria-label={field.name}
-                on:click={() => updateField(fieldId, field, !on)}
+                onclick={() => updateField(fieldId, field, !on)}
               >
                 <span class="fr-toggle-knob"></span>
               </button>
@@ -306,7 +327,7 @@
                 type="number"
                 aria-label={field.name}
                 value={currentValue}
-                on:input={(event) => updateField(fieldId, field, event.currentTarget.value)}
+                oninput={(event) => updateField(fieldId, field, event.currentTarget.value)}
               />
             {:else if field.type === "computed"}
               <span class="fr-computed">{computedFieldString(fieldId)}<i class="ti ti-lock" aria-hidden="true"></i></span>
@@ -324,7 +345,7 @@
                 aria-label={field.name}
                 value={currentValue}
                 placeholder={field.type === "multi_select" ? "Comma-separated values" : ""}
-                on:input={(event) => updateField(fieldId, field, event.currentTarget.value)}
+                oninput={(event) => updateField(fieldId, field, event.currentTarget.value)}
               />
             {/if}
           </div>

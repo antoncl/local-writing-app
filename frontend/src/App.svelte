@@ -41,6 +41,16 @@
   import { compileMatcher } from "./implicitContextMatcher";
   import { renderChatContent } from "./chatMessageRender";
   import { setPalette, resolveColor } from "./colors";
+  import { get } from "svelte/store";
+  import {
+    chatSessionsStore,
+    projectCostTotalStore,
+    projectCostBreakdownStore,
+    refreshChatSessions as storeRefreshChatSessions,
+    refreshProjectCost as storeRefreshProjectCost,
+    setChatSessions,
+    setProjectCost,
+  } from "./stores/chats";
   import GroupsManagerDialog from "./GroupsManagerDialog.svelte";
   import TagManagerDialog from "./TagManagerDialog.svelte";
   import type { OptionDraft } from "./SelectOptionsEditor.svelte";
@@ -174,15 +184,15 @@
   // AI chat sessions. Per-chat state (history, composer, cost/TTL) lives
   // inside ChatBodyView now; App only tracks the session roster (Chats pane)
   // and which chat is currently open in an editor pane (active-row highlight).
-  let chatSessions: ChatSessionSummary[] = [];
+  $: chatSessions = $chatSessionsStore;
   let activeChatId: string | null = null;
   let activeChatTitle = "Untitled chat";
   // V2: project-wide cost rollup. Refreshed on project open and after
   // each chat save. `projectCostBreakdown` is the per-chat list returned
   // by /api/ai/project-cost; populated only when the user expands the
   // chip so common loads don't pay for full enumeration.
-  let projectCostTotal: number | null = null;
-  let projectCostBreakdown: { id: string; title: string; cost_usd: number }[] = [];
+  $: projectCostTotal = $projectCostTotalStore;
+  $: projectCostBreakdown = $projectCostBreakdownStore;
   let projectCostExpanded = false;
   let machineSettingsDraft: MachineSettingsDraft | null = null;
   let appState: AppState = { name: "needsProject" };
@@ -625,8 +635,7 @@
     aiDefaultProvider = nextProject.ai_default_provider ?? "";
     aiDefaultModelClass = nextProject.ai_default_model_class ?? "";
     aiHealthResult = null;
-    projectCostTotal = null;
-    projectCostBreakdown = [];
+    setProjectCost(null, []);
     projectCostExpanded = false;
     currentProjectColor = null;
     appState = { name: "projectOpen", project: nextProject };
@@ -653,14 +662,7 @@
   }
 
   async function refreshProjectCost(): Promise<void> {
-    try {
-      const result = await api.aiProjectCost();
-      projectCostTotal = result.total_usd;
-      projectCostBreakdown = result.chats ?? [];
-    } catch {
-      // Backend may be offline; leave the chip in its previous state
-      // rather than flickering to a stale "—".
-    }
+    await storeRefreshProjectCost();
   }
 
   function resetEditorWorkspace() {
@@ -673,7 +675,7 @@
     titleReloadsByPane = {};
     activeChatId = null;
     activeChatTitle = "Untitled chat";
-    chatSessions = [];
+    setChatSessions([]);
     // Preserve all pane configs. An earlier version stripped chat/preview/
     // prompts/assistants/chats out of `panes`, which made `panes.chats` etc.
     // undefined after a project switch — focusPane then created `{ z }` entries
@@ -1100,12 +1102,7 @@
   // streaming, cost/TTL, per-turn persistence — lives in ChatBodyView.
 
   async function refreshChatSessions() {
-    try {
-      const listing = await api.listChatSessions();
-      chatSessions = listing.sessions;
-    } catch {
-      chatSessions = [];
-    }
+    await storeRefreshChatSessions();
   }
 
   // "+ New Chat": create an empty session and open it in an editor pane.
@@ -1162,7 +1159,7 @@
   async function deleteChatSessionFromPane(chatId: string): Promise<void> {
     try {
       const listing = await api.deleteChatSession(chatId);
-      chatSessions = listing.sessions;
+      setChatSessions(listing.sessions);
       if (activeChatId === chatId) {
         activeChatId = null;
         activeChatTitle = "Untitled chat";
@@ -1180,7 +1177,7 @@
 
   async function hydrateChatSessionsForProject(): Promise<void> {
     await refreshChatSessions();
-    if (chatSessions.length === 0) {
+    if (get(chatSessionsStore).length === 0) {
       // Auto-create a first chat so the Chats pane always has somewhere to
       // write. Don't auto-open it — chats open into editor panes on demand.
       try {

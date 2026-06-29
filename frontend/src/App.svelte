@@ -67,6 +67,11 @@
     refreshLoreEntries as storeRefreshLoreEntries,
     setLoreEntries,
   } from "./stores/lore";
+  import {
+    promptEntriesStore,
+    refreshPromptEntries as storeRefreshPromptEntries,
+    setPromptEntries,
+  } from "./stores/prompts";
   import GroupsManagerDialog from "./GroupsManagerDialog.svelte";
   import TagManagerDialog from "./TagManagerDialog.svelte";
   import type { OptionDraft } from "./SelectOptionsEditor.svelte";
@@ -328,7 +333,7 @@
   let promptScanSurface = "";
   let promptOutputKind = "";
   let promptOutputReview = "";
-  let promptEntries: PromptEntrySummary[] = [];
+  $: promptEntries = $promptEntriesStore;
   let assistantEntries: AssistantEntrySummary[] = [];
   let newTodo = "";
   // Outline group-header collapse state, keyed by StructureNode.id.
@@ -864,7 +869,7 @@
   }
 
   async function refreshPromptEntries() {
-    promptEntries = (await api.listPromptEntries()).entries;
+    await storeRefreshPromptEntries();
   }
 
   // Persist a within-layer assistant reorder computed by Assistants.svelte.
@@ -895,7 +900,7 @@
     await refreshKnownTags();
     await run(async () => {
       setLoreEntries((await api.listLoreEntries()).entries);
-      promptEntries = (await api.listPromptEntries()).entries;
+      setPromptEntries((await api.listPromptEntries()).entries);
       await refreshOpenEditorPaneBaselines();
     });
   }
@@ -3138,7 +3143,7 @@
         setResearchStructure(await api.deleteResearchNode(node.id));
       }
     } else if (documentKind === "prompt") {
-      promptEntries = (await api.deletePromptEntry(pane.scene.id)).entries;
+      setPromptEntries((await api.deletePromptEntry(pane.scene.id)).entries);
     } else if (documentKind === "assistant") {
       assistantEntries = (await api.deleteAssistantEntry(pane.scene.id)).entries;
     } else if (documentKind === "chat") {

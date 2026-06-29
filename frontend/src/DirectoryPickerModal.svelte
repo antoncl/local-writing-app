@@ -53,3 +53,79 @@
     </div>
   </section>
 {/if}
+
+<style>
+  .directory-row {
+    display: block;
+    width: 100%;
+    min-height: 32px;
+    overflow: hidden;
+    text-align: left;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  /* The directory picker can be opened FROM another modal (the New Project
+     modal's "Override folder…" button), so its backdrop must sit ABOVE the
+     plain modal backdrop or the parent modal blocks all interaction. */
+  .directory-modal-backdrop {
+    position: fixed;
+    inset: 0;
+    z-index: 2200;
+    display: grid;
+    place-items: center;
+    padding: 24px;
+    background: rgba(25, 40, 35, 0.28);
+  }
+
+  .directory-modal {
+    display: grid;
+    grid-template-rows: auto auto minmax(0, 1fr);
+    gap: 12px;
+    width: min(680px, calc(100vw - 48px));
+    height: min(560px, calc(100vh - 48px));
+    padding: 16px;
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    background: var(--surface);
+    box-shadow: 0 24px 60px rgba(25, 40, 35, 0.28);
+  }
+
+  .directory-modal-header {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto;
+    gap: 12px;
+    align-items: start;
+  }
+
+  .directory-modal-header p {
+    margin: 4px 0 0;
+    overflow: hidden;
+    color: var(--text-2);
+    font-size: 13px;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .directory-modal-actions {
+    display: flex;
+    gap: 8px;
+  }
+
+  .directory-modal-list {
+    min-height: 0;
+    overflow: auto;
+    padding: 2px;
+    border: 1px solid var(--divider);
+    border-radius: 6px;
+    background: var(--surface);
+  }
+
+  .directory-modal-list .directory-row {
+    margin-bottom: 5px;
+  }
+
+  .directory-modal-list .directory-row:last-child {
+    margin-bottom: 0;
+  }
+</style>

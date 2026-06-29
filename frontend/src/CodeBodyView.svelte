@@ -13,7 +13,6 @@
   parent's save logic owns serialization.
 -->
 <script lang="ts">
-  import { createEventDispatcher } from "svelte";
   import { metadataSchemaStore } from "./stores/schema";
   import CodeEditor from "./CodeEditor.svelte";
   import DefaultValueEditor from "./DefaultValueEditor.svelte";
@@ -38,33 +37,49 @@
     StructureDocument,
   } from "./types";
 
-  // --- Inputs the parent owns (state lifted up) ---
-  export let rawBody = "";
-  export let entryInputDrafts: EntryInputDraft[] = [];
+  interface Props {
+    // --- Inputs the parent owns (state lifted up; bind:'d by NodeEditor) ---
+    rawBody?: string;
+    entryInputDrafts?: EntryInputDraft[];
+    // --- Read-only context from parent ---
+    scene?: EditableDocument | null;
+    documentKind?: DocumentKind;
+    structure?: StructureDocument | null;
+    // Research tree (sibling to manuscript) — threaded to the picker.
+    researchStructure?: StructureDocument | null;
+    loreEntries?: LoreEntrySummary[];
+    promptEntries?: PromptEntrySummary[];
+    availableScenes?: { id: string; title: string }[];
+    rawBodyLanguage?: EntryBodyLanguage;
+    loadedSceneId?: string | null;
+    // Shared id factory + slug helper — same counters/rules as NodeEditor's
+    // reseed path use, so clientIds don't collide and name slugification is
+    // consistent across the two creation sites.
+    nextInputDraftId: () => string;
+    entrySlugify: (value: string) => string;
+    // Outbound: declared-inputs changed (#14 — replaces inputsChange dispatch).
+    onInputsChange?: () => void;
+  }
 
-  // --- Read-only context from parent ---
-  export let scene: EditableDocument | null = null;
-  export let documentKind: DocumentKind = "prompt";
+  let {
+    rawBody = $bindable(""),
+    entryInputDrafts = $bindable([]),
+    scene = null,
+    documentKind = "prompt",
+    structure = null,
+    researchStructure = null,
+    loreEntries = [],
+    promptEntries = [],
+    availableScenes = [],
+    rawBodyLanguage = "markdown",
+    loadedSceneId = null,
+    nextInputDraftId,
+    entrySlugify,
+    onInputsChange,
+  }: Props = $props();
+
   // metadataSchema is global per-project — read from the store, not a prop (#14 Step 2).
-  $: metadataSchema = $metadataSchemaStore;
-  export let structure: StructureDocument | null = null;
-  // Research tree (sibling to manuscript) — threaded to the picker.
-  export let researchStructure: StructureDocument | null = null;
-  export let loreEntries: LoreEntrySummary[] = [];
-  export let promptEntries: PromptEntrySummary[] = [];
-  export let availableScenes: { id: string; title: string }[] = [];
-  export let rawBodyLanguage: EntryBodyLanguage = "markdown";
-  export let loadedSceneId: string | null = null;
-
-  // Shared id factory + slug helper — same counters/rules as NodeEditor's
-  // reseed path use, so clientIds don't collide and name slugification is
-  // consistent across the two creation sites.
-  export let nextInputDraftId: () => string;
-  export let entrySlugify: (value: string) => string;
-
-  const dispatch = createEventDispatcher<{
-    inputsChange: void;
-  }>();
+  const metadataSchema = $derived($metadataSchemaStore);
 
   const isPrompt = (): boolean => documentKind === "prompt" && !!scene;
 
@@ -73,11 +88,14 @@
   //     diverges, so a freshly-created prompt won't see noise. Click
   //     overwrites rawBody — CodeMirror keeps undo history, and the parent
   //     pane doesn't auto-save, so accidents are recoverable.
-  $: entryTypeDefaultBody =
+  const entryTypeDefaultBody = $derived(
     isPrompt() && metadataSchema && scene
       ? metadataSchema.entry_types[scene.entry_type]?.default_body ?? ""
-      : "";
-  $: canRestoreDefaultBody = entryTypeDefaultBody.length > 0 && rawBody !== entryTypeDefaultBody;
+      : "",
+  );
+  const canRestoreDefaultBody = $derived(
+    entryTypeDefaultBody.length > 0 && rawBody !== entryTypeDefaultBody,
+  );
 
   function restoreDefaultBody(): void {
     if (!canRestoreDefaultBody) return;
@@ -101,11 +119,11 @@
     }
   }
 
-  let wrapPrefs: Record<string, boolean> = loadWrapPrefs();
+  let wrapPrefs: Record<string, boolean> = $state(loadWrapPrefs());
 
-  $: wrapPrefKey = `${documentKind}:${scene?.entry_type ?? ""}`;
-  $: wrapDefault = documentKind === "prompt";
-  $: lineWrapEnabled = wrapPrefs[wrapPrefKey] ?? wrapDefault;
+  const wrapPrefKey = $derived(`${documentKind}:${scene?.entry_type ?? ""}`);
+  const wrapDefault = $derived(documentKind === "prompt");
+  const lineWrapEnabled = $derived(wrapPrefs[wrapPrefKey] ?? wrapDefault);
 
   function toggleLineWrap(): void {
     const next = { ...wrapPrefs, [wrapPrefKey]: !lineWrapEnabled };
@@ -119,9 +137,9 @@
   }
 
   // --- Cheatsheet popover ---
-  let cheatsheetPopoverOpen = false;
-  let helpButtonEl: HTMLButtonElement | undefined;
-  let popoverPos = { top: 0, right: 8 };
+  let cheatsheetPopoverOpen = $state(false);
+  let helpButtonEl: HTMLButtonElement | undefined = $state();
+  let popoverPos = $state({ top: 0, right: 8 });
 
   function toggleCheatsheetPopover(): void {
     if (!cheatsheetPopoverOpen && helpButtonEl) {
@@ -141,14 +159,14 @@
   }
 
   // --- Entry-inputs declaration editor ---
-  let entryInputsExpanded = false;
+  let entryInputsExpanded = $state(false);
   // Which input row is currently expanded for editing. Matches the schema
   // field-row pattern (App.svelte: expandedSchemaFieldId): one row open at a
   // time, click anywhere on a collapsed row to expand it. Inputs whose
   // clientId is the expanded one render their full editor body; the rest
   // render the compact row chrome only. context_pick rows ignore this state
   // — they own their entire row via NodePickerConfigEditor mode="prompt".
-  let expandedInputClientId: string | null = null;
+  let expandedInputClientId: string | null = $state(null);
 
   function toggleInputRow(clientId: string): void {
     expandedInputClientId = expandedInputClientId === clientId ? null : clientId;
@@ -189,7 +207,7 @@
     // Auto-expand new rows so the empty grid is visible immediately —
     // matches the field-row editor's create-then-edit-inline flow.
     expandedInputClientId = draft.clientId;
-    dispatch("inputsChange");
+    onInputsChange?.();
   }
 
   function removeEntryInput(index: number): void {
@@ -198,7 +216,7 @@
     if (removed && expandedInputClientId === removed.clientId) {
       expandedInputClientId = null;
     }
-    dispatch("inputsChange");
+    onInputsChange?.();
   }
 
   function updateEntryInputLabel(index: number, label: string): void {
@@ -208,14 +226,14 @@
       if (draft.nameDerived) next.name = entrySlugify(label);
       return next;
     });
-    dispatch("inputsChange");
+    onInputsChange?.();
   }
 
   function updateEntryInputName(index: number, name: string): void {
     entryInputDrafts = entryInputDrafts.map((draft, i) =>
       i !== index ? draft : { ...draft, name: entrySlugify(name), nameDerived: false },
     );
-    dispatch("inputsChange");
+    onInputsChange?.();
   }
 
   function updateEntryInput(
@@ -225,7 +243,7 @@
     entryInputDrafts = entryInputDrafts.map((draft, i) =>
       i !== index ? draft : { ...draft, ...patch },
     );
-    dispatch("inputsChange");
+    onInputsChange?.();
   }
 
   // Default-value setter for the type-aware controls. An empty string from
@@ -248,14 +266,14 @@
     const [moved] = next.splice(from, 1);
     next.splice(to, 0, moved);
     entryInputDrafts = next;
-    dispatch("inputsChange");
+    onInputsChange?.();
   }
 
   // Linear before/after reorder for the inputs list. Mirrors the tree's
   // drag-handle UX but without the "into" mode — inputs are a flat list.
-  let inputDragFromIndex: number | null = null;
-  let inputDragOverIndex: number | null = null;
-  let inputDragOverPosition: "before" | "after" | null = null;
+  let inputDragFromIndex: number | null = $state(null);
+  let inputDragOverIndex: number | null = $state(null);
+  let inputDragOverPosition: "before" | "after" | null = $state(null);
 
   function handleInputDragStart(event: DragEvent, index: number) {
     inputDragFromIndex = index;
@@ -297,42 +315,46 @@
   }
 
   // --- Inline prompt preview (prompts only) ---
-  let promptPreviewSceneId = "";
-  let promptPreviewInputDrafts: Record<string, string> = {};
-  let promptPreviewResult: AIPreviewResponse | null = null;
-  let promptPreviewRunning = false;
-  let promptPreviewError: string | null = null;
-  let promptPreviewPaneHeight = 280; // px; persisted only in memory for now.
-  let promptPreviewCollapsed = true;
+  let promptPreviewSceneId = $state("");
+  let promptPreviewInputDrafts: Record<string, string> = $state({});
+  let promptPreviewResult: AIPreviewResponse | null = $state(null);
+  let promptPreviewRunning = $state(false);
+  let promptPreviewError: string | null = $state(null);
+  let promptPreviewPaneHeight = $state(280); // px; persisted only in memory for now.
+  let promptPreviewCollapsed = $state(true);
   let promptPreviewDebounceTimer: ReturnType<typeof setTimeout> | null = null;
   let promptPreviewLastRenderKey = "";
   // Diagnostics pinned in the CodeEditor gutter — driven by render errors.
-  export let promptPreviewDiagnostics: {
+  // Internal state (NodeEditor doesn't bind it) — was a write-only export.
+  let promptPreviewDiagnostics: {
     line: number;
     col?: number;
     severity: "error" | "warning";
     message: string;
-  }[] = [];
+  }[] = $state([]);
 
   // Inputs are per-entry. Read scene.inputs directly so this reactive
   // re-fires when the entry's inputs change via the editor section below.
-  $: promptPreviewDeclaredInputs =
-    isPrompt() ? ((scene as unknown as PromptEntrySummary).inputs ?? []) : [];
+  const promptPreviewDeclaredInputs = $derived(
+    isPrompt() ? ((scene as unknown as PromptEntrySummary).inputs ?? []) : [],
+  );
 
   // Reset preview when the underlying entry changes. The default-filler
   // reactive below idempotently seeds any input that's still missing — needed
   // because the schema (which carries the input definitions) can arrive in a
   // different tick from the entry itself.
   let promptPreviewSeededEntryId: string | null = null;
-  $: if (loadedSceneId && loadedSceneId !== promptPreviewSeededEntryId) {
-    promptPreviewResult = null;
-    promptPreviewError = null;
-    promptPreviewLastRenderKey = "";
-    promptPreviewDiagnostics = [];
-    promptPreviewInputDrafts = seedInputDrafts(promptPreviewDeclaredInputs);
-    promptPreviewSeededEntryId = loadedSceneId;
-  }
-  $: {
+  $effect(() => {
+    if (loadedSceneId && loadedSceneId !== promptPreviewSeededEntryId) {
+      promptPreviewResult = null;
+      promptPreviewError = null;
+      promptPreviewLastRenderKey = "";
+      promptPreviewDiagnostics = [];
+      promptPreviewInputDrafts = seedInputDrafts(promptPreviewDeclaredInputs);
+      promptPreviewSeededEntryId = loadedSceneId;
+    }
+  });
+  $effect(() => {
     let changed = false;
     const next: Record<string, string> = { ...promptPreviewInputDrafts };
     for (const input of promptPreviewDeclaredInputs) {
@@ -348,13 +370,15 @@
       }
     }
     if (changed) promptPreviewInputDrafts = next;
-  }
-
-  $: promptPreviewMissingRequired = promptPreviewDeclaredInputs.filter((i) => {
-    if (!i.required) return false;
-    const v = promptPreviewInputDrafts[i.name];
-    return v === undefined || v === null || (typeof v === "string" && !v.trim());
   });
+
+  const promptPreviewMissingRequired = $derived(
+    promptPreviewDeclaredInputs.filter((i) => {
+      if (!i.required) return false;
+      const v = promptPreviewInputDrafts[i.name];
+      return v === undefined || v === null || (typeof v === "string" && !v.trim());
+    }),
+  );
 
   /** Render PreviewErrorInfo into a user-facing message for the inline
    * preview pane. Always returns a string — silent suppression hides the
@@ -415,12 +439,16 @@
   // Fallback scene binding for the preview's `scene` variable. The user
   // controls the explicit binding by marking a scene ★ in any context_pick
   // input — that wins backend-side (preview.py:_find_marked_target_scene_id).
-  $: if (isPrompt() && !promptPreviewSceneId && availableScenes.length > 0) {
-    promptPreviewSceneId = availableScenes[0].id;
-  }
+  $effect(() => {
+    if (isPrompt() && !promptPreviewSceneId && availableScenes.length > 0) {
+      promptPreviewSceneId = availableScenes[0].id;
+    }
+  });
 
   // Auto re-render on any preview-relevant change. Debounced.
-  $: schedulePromptPreviewRender(rawBody, promptPreviewSceneId, JSON.stringify(promptPreviewInputDrafts));
+  $effect(() => {
+    schedulePromptPreviewRender(rawBody, promptPreviewSceneId, JSON.stringify(promptPreviewInputDrafts));
+  });
 
   function schedulePromptPreviewRender(_body: string, _scene: string, _inputs: string): void {
     if (!isPrompt()) return;
@@ -530,7 +558,7 @@
         aria-checked={lineWrapEnabled}
         title={lineWrapEnabled ? "Soft-wrap is on — long lines wrap to fit. Click to turn off." : "Soft-wrap is off — long lines scroll horizontally. Click to turn on."}
         aria-label="Toggle line wrapping"
-        on:click={toggleLineWrap}
+        onclick={toggleLineWrap}
       >Wrap</button>
       {#if canRestoreDefaultBody}
         <button
@@ -538,7 +566,7 @@
           class="prompt-restore-default-button"
           title="Replace this body with the type's default template. Ctrl+Z to undo."
           aria-label="Restore default body"
-          on:click={restoreDefaultBody}
+          onclick={restoreDefaultBody}
         >Restore default body</button>
       {/if}
       <button
@@ -549,7 +577,7 @@
         title="Variables & helpers — what you can reference in &lbrace;&lbrace; … &rbrace;&rbrace; and &lbrace;% … %&rbrace;"
         aria-label="Show variables and helpers reference"
         aria-expanded={cheatsheetPopoverOpen}
-        on:click={toggleCheatsheetPopover}
+        onclick={toggleCheatsheetPopover}
       >?</button>
     </div>
   {/if}
@@ -561,7 +589,7 @@
       <header class="prompt-help-popover-header">
         <strong>Variables &amp; helpers</strong>
         <small>what you can reference in <code>&lbrace;&lbrace; … &rbrace;&rbrace;</code> and <code>&lbrace;% … %&rbrace;</code></small>
-        <button type="button" class="prompt-help-popover-close" aria-label="Close" on:click={() => (cheatsheetPopoverOpen = false)}>×</button>
+        <button type="button" class="prompt-help-popover-close" aria-label="Close" onclick={() => (cheatsheetPopoverOpen = false)}>×</button>
       </header>
       <div class="prompt-cheatsheet-body">
         <section>
@@ -625,8 +653,8 @@
           class:dragging={inputDragFromIndex === index}
           class:drop-before={inputDragOverIndex === index && inputDragOverPosition === "before"}
           class:drop-after={inputDragOverIndex === index && inputDragOverPosition === "after"}
-          on:dragover={(e) => handleInputDragOver(e, index)}
-          on:drop={(e) => handleInputDrop(e, index)}
+          ondragover={(e) => handleInputDragOver(e, index)}
+          ondrop={(e) => handleInputDrop(e, index)}
         >
           <span
             class="tree-handle prompt-input-handle"
@@ -634,8 +662,8 @@
             role="button"
             tabindex="-1"
             aria-label="Drag to reorder"
-            on:dragstart={(e) => handleInputDragStart(e, index)}
-            on:dragend={handleInputDragEnd}
+            ondragstart={(e) => handleInputDragStart(e, index)}
+            ondragend={handleInputDragEnd}
           >⋮⋮</span>
           <NodePickerConfigEditor
             config={draft.nodePickerConfig}
@@ -687,15 +715,15 @@
             <div class="prompt-input-grid">
               <label>
                 Label
-                <input value={draft.label} placeholder="Topic to brainstorm" on:input={(e) => updateEntryInputLabel(index, (e.currentTarget as HTMLInputElement).value)} />
+                <input value={draft.label} placeholder="Topic to brainstorm" oninput={(e) => updateEntryInputLabel(index, (e.currentTarget as HTMLInputElement).value)} />
               </label>
               <label>
                 ID
-                <input value={draft.name} placeholder="topic_to_brainstorm" on:input={(e) => updateEntryInputName(index, (e.currentTarget as HTMLInputElement).value)} />
+                <input value={draft.name} placeholder="topic_to_brainstorm" oninput={(e) => updateEntryInputName(index, (e.currentTarget as HTMLInputElement).value)} />
               </label>
               <label>
                 Type
-                <select value={draft.type} on:change={(e) => updateEntryInput(index, { type: (e.currentTarget as HTMLSelectElement).value as import("./types").PromptInputType, defaultValue: undefined })}>
+                <select value={draft.type} onchange={(e) => updateEntryInput(index, { type: (e.currentTarget as HTMLSelectElement).value as import("./types").PromptInputType, defaultValue: undefined })}>
                   <option value="text">Text</option>
                   <option value="long_text">Long Text</option>
                   <option value="number">Number</option>
@@ -716,10 +744,10 @@
                 />
               </label>
               <label class="prompt-input-required">
-                <input type="checkbox" checked={draft.required} on:change={(e) => updateEntryInput(index, { required: (e.currentTarget as HTMLInputElement).checked })} />
+                <input type="checkbox" checked={draft.required} onchange={(e) => updateEntryInput(index, { required: (e.currentTarget as HTMLInputElement).checked })} />
                 Required
               </label>
-              <button type="button" class="prompt-input-remove" title="Remove input" on:click={() => removeEntryInput(index)}>×</button>
+              <button type="button" class="prompt-input-remove" title="Remove input" onclick={() => removeEntryInput(index)}>×</button>
             </div>
             {#if draft.type === "select"}
               <!-- Row-per-option editor — same SelectOptionsEditor the
@@ -754,7 +782,7 @@
       {/if}
     {/each}
     <div class="entry-inputs-add">
-      <button type="button" on:click={addEntryInput}>+ Input</button>
+      <button type="button" onclick={addEntryInput}>+ Input</button>
     </div>
   </details>
 
@@ -769,7 +797,7 @@
       role="separator"
       aria-orientation="horizontal"
       aria-label="Resize prompt preview"
-      on:mousedown={startPromptPreviewResize}
+      onmousedown={startPromptPreviewResize}
     ></div>
   {/if}
   <section
@@ -782,7 +810,7 @@
         type="button"
         class="prompt-preview-toggle"
         aria-expanded={!promptPreviewCollapsed}
-        on:click={() => (promptPreviewCollapsed = !promptPreviewCollapsed)}
+        onclick={() => (promptPreviewCollapsed = !promptPreviewCollapsed)}
       >
         <span class="prompt-preview-caret" aria-hidden="true">{promptPreviewCollapsed ? "▸" : "▾"}</span>
         <strong>Preview</strong>
@@ -804,7 +832,7 @@
           {/if}
         {/if}
         {#if !promptPreviewCollapsed}
-          <button type="button" disabled={promptPreviewRunning || !rawBody.trim()} on:click={runPromptPreview}>
+          <button type="button" disabled={promptPreviewRunning || !rawBody.trim()} onclick={runPromptPreview}>
             {promptPreviewRunning ? "Rendering…" : "Render now"}
           </button>
         {/if}
@@ -832,7 +860,7 @@
                     type="button"
                     class="prompt-preview-field-accessor"
                     title="Click to copy"
-                    on:click|preventDefault={() => navigator.clipboard?.writeText(`{{ input.${inputDef.name} }}`).catch(() => {})}
+                    onclick={(e) => { e.preventDefault(); navigator.clipboard?.writeText(`{{ input.${inputDef.name} }}`).catch(() => {}); }}
                   ><code>&lbrace;&lbrace; input.{inputDef.name} &rbrace;&rbrace;</code></button>
                 </span>
                 <PromptInputField

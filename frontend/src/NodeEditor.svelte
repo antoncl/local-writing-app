@@ -866,7 +866,7 @@
       {loadedSceneId}
       {nextInputDraftId}
       {entrySlugify}
-      on:inputsChange={emitInputsChange}
+      onInputsChange={emitInputsChange}
     />
   {/if}
   {#if bodyShape === "prose"}

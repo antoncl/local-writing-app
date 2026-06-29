@@ -287,3 +287,178 @@
     <button class="sfi-done" type="button" disabled={saveDisabled} on:click={emitSave}>Done</button>
   </div>
 </div>
+
+<style>
+  /* Inline field-editor chrome co-located from styles.css (#14). These target
+     this component's own elements only — head row, icon picker button, name
+     input, the field-type chip + grid picker, the computed-config wrapper, and
+     the stable-key row. The form atoms shared with the other schema surfaces
+     (.sfi-field/-footer/-cancel/-done/-spacer/-options-hint), the container
+     .schema-field-inline (also worn by CodeBodyView's prompt-input editor), and
+     the .sfr-tile/.sfr-cog row atoms stay global. */
+  .sfi-head {
+    display: flex;
+    align-items: center;
+    gap: 9px;
+  }
+  .sfi-icon-anchor {
+    position: relative;
+    flex: none;
+  }
+  /* The icon picker button wears the tile's shape (.sfr-tile, global); this
+     adds the dashed "click to change" treatment over the solid display tile. */
+  .sfi-icon-btn.sfr-tile {
+    border-style: dashed;
+    border-color: var(--border-strong, var(--border-strong));
+  }
+  .sfi-icon-btn {
+    padding: 0;
+    cursor: pointer;
+  }
+  .sfi-icon-btn:hover {
+    border-color: var(--accent, #2f6f5e);
+    color: var(--accent-strong, #234e43);
+  }
+  .sfi-icon-pop {
+    position: absolute;
+    top: calc(100% + 6px);
+    left: 0;
+    z-index: 60;
+  }
+  .sfi-name {
+    flex: 1;
+    min-width: 0;
+    padding: 6px 9px;
+    border: 1px solid var(--border, var(--border));
+    border-radius: 8px;
+    background: var(--surface, #fff);
+    font-size: 13px;
+  }
+  /* Type chip + grid popover (the 11-type field-type picker). */
+  .sfi-type-anchor {
+    position: relative;
+    flex: none;
+  }
+  .sfi-type-chip {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    padding: 6px 9px;
+    border: 1px solid var(--border, var(--border));
+    border-radius: 8px;
+    background: var(--surface, #fff);
+    font-size: 12px;
+    color: var(--text-2, var(--text-2));
+    cursor: pointer;
+  }
+  .sfi-type-chip:hover,
+  .sfi-type-chip.open {
+    border-color: var(--accent, #2f6f5e);
+    color: var(--accent-strong, #234e43);
+  }
+  .sfi-type-chip-label {
+    font-weight: 500;
+  }
+  .sfi-type-chip-caret {
+    font-size: 13px;
+    opacity: 0.6;
+  }
+  .sfi-type-grid {
+    position: absolute;
+    top: calc(100% + 6px);
+    right: 0;
+    z-index: 60;
+    display: grid;
+    grid-template-columns: repeat(2, minmax(120px, 1fr));
+    gap: 4px;
+    padding: 6px;
+    border: 1px solid var(--border, var(--border));
+    border-radius: 10px;
+    background: var(--surface, #fff);
+    box-shadow: 0 8px 24px rgba(20, 40, 33, 0.16);
+  }
+  .sfi-type-cell {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 7px 9px;
+    border: 1px solid transparent;
+    border-radius: 8px;
+    background: transparent;
+    font-size: 12px;
+    color: var(--text-2, var(--text-2));
+    text-align: left;
+    cursor: pointer;
+  }
+  .sfi-type-cell i {
+    font-size: 15px;
+    color: var(--text-3, var(--text-3));
+  }
+  .sfi-type-cell:hover {
+    background: var(--inset, #f1f5f3);
+  }
+  .sfi-type-cell.selected {
+    border-color: var(--accent, #2f6f5e);
+    background: var(--inset, #f1f5f3);
+    color: var(--accent-strong, #234e43);
+    font-weight: 500;
+  }
+  .sfi-type-cell.selected i {
+    color: var(--accent, #2f6f5e);
+  }
+  .sfi-computed {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+  }
+  .sfi-controls {
+    display: flex;
+    align-items: center;
+    gap: 16px;
+    flex-wrap: wrap;
+  }
+  .sfi-id {
+    font-size: 11px;
+    color: var(--text-3, var(--text-3));
+  }
+  .sfi-id code {
+    font-size: 11px;
+    font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+    color: var(--text-2, var(--text-2));
+  }
+  /* Stable-key row (decision #10): key shown as quiet mono + rename affordance. */
+  .sfi-key-row {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    flex-wrap: wrap;
+  }
+  .sfi-key-rename {
+    border: 0;
+    background: transparent;
+    padding: 0;
+    font-size: 11px;
+    color: var(--accent, #2f6f5e);
+    cursor: pointer;
+  }
+  .sfi-key-rename:hover {
+    text-decoration: underline;
+  }
+  .sfi-key-tag {
+    font-size: 11px;
+    color: var(--text-3, var(--text-3));
+  }
+  .sfi-key-input {
+    width: 160px;
+    padding: 5px 8px;
+    border: 1px solid var(--accent, #2f6f5e);
+    border-radius: 8px;
+    background: var(--surface, #fff);
+    font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+    font-size: 12px;
+  }
+  .sfi-key-hint {
+    font-size: 11px;
+    color: var(--text-3, var(--text-3));
+  }
+</style>

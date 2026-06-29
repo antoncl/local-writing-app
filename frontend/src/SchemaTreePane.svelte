@@ -145,3 +145,79 @@
     {/snippet}
   </NodeRow>
 {/snippet}
+
+<style>
+  /* Detail-Types tree pane styles co-located from styles.css (#14). Own
+     template DOM (context heading, tree wrapper, kind tabs, and the type
+     pill rendered into NodeRow snippets) → scoped, no :global. */
+  .schema-context-heading {
+    display: grid;
+    gap: 2px;
+  }
+
+  .schema-context-heading small {
+    color: var(--text-3);
+    font-size: 11px;
+  }
+
+  /* Outer container around the Detail Types NodeList. The NodeList itself
+     handles row spacing; this wrapper is here to keep an aria-label hook
+     for the recursive tree. */
+  .schema-node-tree {
+    display: grid;
+    gap: 8px;
+  }
+
+  /* .schema-source-badge co-located into SchemaTypeEditor.svelte (#14). */
+
+  /* Mono type-pill on field rows in the Detail Types tree — mirrors the
+     Editorial Card spec ("Field types sit in mono pills"). Distinguishes
+     the field's type vocabulary (`text`, `select`, `entity_ref`…) from the
+     neutral count/affordance pills used elsewhere. Tooltip carries the
+     humanized label. */
+  .schema-field-type-pill {
+    display: inline-flex;
+    align-items: center;
+    padding: 1px 7px;
+    border-radius: 5px;
+    background: var(--inset);
+    color: var(--text-3);
+    font-family: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+    font-size: 10.5px;
+    font-weight: 600;
+    white-space: nowrap;
+  }
+
+  /* .migration-applied co-located into Project.svelte (#14). */
+
+  .schema-kind-tabs {
+    display: flex;
+    gap: 2px;
+    margin: 0 -10px 8px;
+    padding: 0 10px 6px;
+    border-bottom: 1px solid var(--divider);
+  }
+
+  .schema-kind-tabs button {
+    flex: 1;
+    padding: 6px 10px;
+    background: transparent;
+    border: 1px solid transparent;
+    border-bottom: 2px solid transparent;
+    border-radius: 4px 4px 0 0;
+    font-size: 12px;
+    color: var(--text-3);
+    cursor: pointer;
+  }
+
+  .schema-kind-tabs button:hover {
+    color: var(--text);
+    background: var(--inset);
+  }
+
+  .schema-kind-tabs button.active {
+    color: var(--accent-deep);
+    border-bottom-color: var(--accent-deep);
+    font-weight: 600;
+  }
+</style>

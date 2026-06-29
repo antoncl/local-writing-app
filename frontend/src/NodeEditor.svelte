@@ -60,8 +60,6 @@
     embeddedTodos: { todos: EmbeddedTodo[] };
     navigate: { id: string; kind: string };
     "open-chat": { entry: PromptEntrySummary; inputs: Record<string, unknown>; sceneId: string | null; assistantId: string };
-    renamed: void;
-    "cost-changed": void;
   }>();
 
 
@@ -907,8 +905,6 @@
       on:body-change={emitChange}
       on:focus={() => dispatch("focus")}
       on:open-chat={(event) => dispatch("open-chat", event.detail)}
-      on:renamed={() => dispatch("renamed")}
-      on:cost-changed={() => dispatch("cost-changed")}
     />
   {/if}
 

@@ -38,6 +38,7 @@
     StructureDocument,
   } from "./types";
   import { metadataSchemaStore } from "./stores/schema";
+  import { refreshChatSessions, refreshProjectCost } from "./stores/chats";
 
   export let scene: EditableDocument | null = null;
   // metadataSchema is global per-project — read from the store, not a prop (#14 Step 2).
@@ -55,12 +56,6 @@
     "body-change": void;
     focus: void;
     "open-chat": { entry: PromptEntrySummary; inputs: Record<string, unknown>; sceneId: string | null; assistantId: string };
-    // Fired after a title edit (from the pane header) persists, so the host
-    // can refresh the Chats-pane roster + summaries.
-    renamed: void;
-    // Fired after a cost-accumulating turn persists, so the host can refresh
-    // the project-wide cost rollup chip.
-    "cost-changed": void;
   }>();
 
   // Suppress unused-prop warnings for props Phase 4c+ wires in (preview
@@ -491,10 +486,10 @@
       // cost-total footer accurate without re-fetching.
       chatSession = saved;
       dispatch("body-change");
-      // A turn that accumulated cost moves the project-wide rollup chip.
-      // App owns that chip, so signal it to re-fetch (mirrors the old
-      // bespoke persistActiveChat's refreshProjectCost call).
-      if (hadCost) dispatch("cost-changed");
+      // A turn that accumulated cost moves the project-wide rollup chip. Write
+      // through the cost store directly; the chip re-renders reactively (no
+      // host signal needed — #14 Step 3).
+      if (hadCost) void refreshProjectCost();
     } catch (e) {
       chatError = `Couldn't save chat: ${(e as Error).message}`;
     }
@@ -502,8 +497,8 @@
 
   // Title rename feed from the pane header (NodeEditor owns the input;
   // ChatBodyView owns the title state so per-turn saves never revert it).
-  // Debounced so typing doesn't hammer the backend; `renamed` lets the host
-  // refresh the Chats roster once the new title lands.
+  // Debounced so typing doesn't hammer the backend; once the new title lands
+  // we refresh the Chats roster directly so the pane re-renders (#14 Step 3).
   let titleSaveTimer: ReturnType<typeof setTimeout> | null = null;
   export function setTitleFromPane(next: string): void {
     if (!loadedChatId) return;
@@ -512,7 +507,7 @@
     if (titleSaveTimer) clearTimeout(titleSaveTimer);
     titleSaveTimer = setTimeout(() => {
       titleSaveTimer = null;
-      void persistActiveChat().then(() => dispatch("renamed"));
+      void persistActiveChat().then(() => refreshChatSessions());
     }, 500);
   }
 

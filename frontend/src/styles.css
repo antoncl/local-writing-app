@@ -896,66 +896,7 @@ button.row-action-add.active {
   grid-column: 1 / -1;
 }
 
-.tag-picker-anchor {
-  position: relative;
-}
-
-.tag-field-control {
-  display: grid;
-  grid-template-columns: minmax(0, 1fr) auto;
-  gap: 6px;
-  align-items: end;
-}
-
-.tag-picker-toggle {
-  min-width: 32px;
-  padding-left: 0;
-  padding-right: 0;
-  border: 1px dashed var(--border-strong, var(--border-strong));
-  border-radius: 8px;
-  background: var(--inset, #f1f5f3);
-  color: var(--text-2, var(--text-2));
-  font-size: 15px;
-  line-height: 1;
-}
-.tag-picker-toggle:hover {
-  border-color: var(--accent, #2f6f5e);
-  color: var(--accent-strong, #234e43);
-  background: var(--surface, #fff);
-}
-
-.tag-picker {
-  position: fixed;
-  z-index: 10000;
-  display: flex;
-  flex-wrap: wrap;
-  gap: 6px;
-  max-width: min(360px, calc(100vw - 24px));
-  max-height: min(260px, calc(100vh - 24px));
-  overflow: auto;
-  padding: 8px;
-  border: 1px solid var(--divider);
-  border-radius: 6px;
-  background: var(--surface);
-  box-shadow: 0 10px 24px rgba(36, 48, 43, 0.18);
-}
-
-.tag-picker button {
-  padding: 4px 7px;
-  border-radius: 999px;
-  font-size: 12px;
-}
-
-.tag-picker button.active {
-  border-color: var(--accent);
-  color: var(--accent-deep);
-  background: var(--accent-soft);
-}
-
-.tag-picker span {
-  color: var(--text-3);
-  font-size: 12px;
-}
+/* .tag-picker* / .tag-field-control co-located into TagPicker.svelte (#14). */
 
 .multi-select-chips {
   display: flex;

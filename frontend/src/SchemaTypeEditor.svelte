@@ -1,4 +1,4 @@
-<script lang="ts" context="module">
+<script lang="ts" module>
   import type { PromptEntryTypeExtras } from "./types";
 
   // Payload emitted on Save Type — the parent (App) owns persistence and
@@ -30,6 +30,7 @@
   // component (SchemaFieldInlineEditor), invoked here via a snippet so both
   // the per-row reveal and the new-draft slot share the same configuration.
 
+  import { untrack } from "svelte";
   import SchemaFieldInlineEditor, { type FieldDraftPayload } from "./SchemaFieldInlineEditor.svelte";
   import SchemaFieldRow from "./SchemaFieldRow.svelte";
   import SwatchPicker from "./SwatchPicker.svelte";
@@ -55,60 +56,137 @@
     PromptContextStrategy,
   } from "./types";
 
-  // --- Type draft state (scoped — #14 Step 4). The host remounts this
-  // component per opened/created type (keyed on a draft token), so these
-  // initialise once from the init* props. The name→id slug and the prompt
-  // defaults are edited locally and emitted via onSaveType. ---
-  export let initialName: string = "";
-  export let initialTypeId: string = "";
-  export let initialColor: string | null = null;
+  // Props (#14 — first runes component). The save layer + the inline-editor
+  // reveal/drag state are two-way bound by the parent, so they're `$bindable`;
+  // everything else is one-way. The editable draft + prompt defaults below are
+  // `$state`, seeded once from the init* props (the host remounts per
+  // opened/created type via a draft-token `{#key}`).
+  interface Props {
+    initialName?: string;
+    initialTypeId?: string;
+    initialColor?: string | null;
+    initialPrompt?: PromptEntryTypeExtras | null;
+    // Two-way bound by the parent:
+    schemaTypeLayerId?: string;
+    expandedSchemaFieldId?: string | null;
+    fieldDropTarget?: { id: string; position: "before" | "after" } | null;
+    // Read-only type context (parent computes in create/open + re-supplies on save):
+    schemaTypeKind?: "scene" | "lore" | "research" | "prompt" | "assistant" | "project";
+    schemaTypeParent?: string;
+    schemaTypeReadonly?: boolean;
+    selectedSchemaTypeId?: string | null;
+    // Field-editor context (the draft lives inside SchemaFieldInlineEditor):
+    selectedSchemaFieldId?: string | null;
+    schemaFieldReadonly?: boolean;
+    schemaFieldLayerId?: string;
+    NEW_FIELD_SENTINEL?: string;
+    // Schema context + derived field-row groupings (computed in parent):
+    metadataSchemaOverview?: MetadataSchemaOverview | null;
+    metadataSchemaLayers?: MetadataSchemaLayer[];
+    typeOwnFieldEntries?: [string, MetadataFieldDefinition][];
+    typeInheritedFieldEntries?: [string, MetadataFieldDefinition][];
+    typeOwnFieldSections?: SchemaFieldSection[];
+    typeInheritedFieldSections?: SchemaFieldSection[];
+    typeGroupApplications?: Array<{ group_id: string; label: string; key_prefix: string }>;
+    availableGroupEntries?: [string, { name: string; icon?: string | null }][];
+    projectSchemaLayerId?: () => string;
+    // Callbacks (parent owns the side-effects: API calls, modals, drag):
+    onSaveType?: (payload: TypeDraftPayload) => void;
+    onSaveField?: (payload: FieldDraftPayload) => void;
+    onCancelField?: () => void;
+    onRemoveField?: () => void;
+    onToggleFieldInline?: (fieldId: string, entryTypeId: string) => void;
+    onCreateFieldDraft?: (layerId: string, entryTypeId?: string) => void;
+    onApplyGroup?: (application: { group_id: string; label: string; key_prefix: string }) => Promise<boolean>;
+    onRemoveGroupApplication?: (index: number) => void;
+    onFieldDragStart?: (fieldId: string) => void;
+    onFieldDragOver?: (event: DragEvent, fieldId: string) => void;
+    onFieldDrop?: (targetFieldId: string) => void;
+    onClearFieldDrag?: () => void;
+  }
 
-  let draftName = initialName;
-  // Identifier tracks the name (slug) on edit, but only for editable types;
-  // for an existing type the canonical id may differ from slug(name), so it
-  // initialises from the prop rather than re-deriving. Renames are rejected
-  // at save time by the parent.
-  let draftTypeId = initialTypeId;
-  let draftColor = initialColor;
+  let {
+    initialName = "",
+    initialTypeId = "",
+    initialColor = null,
+    initialPrompt = null,
+    schemaTypeLayerId = $bindable(""),
+    expandedSchemaFieldId = $bindable(null),
+    fieldDropTarget = $bindable(null),
+    schemaTypeKind = "lore",
+    schemaTypeParent = "",
+    schemaTypeReadonly = false,
+    selectedSchemaTypeId = null,
+    selectedSchemaFieldId = null,
+    schemaFieldReadonly = false,
+    schemaFieldLayerId = "",
+    NEW_FIELD_SENTINEL = "__new__",
+    metadataSchemaOverview = null,
+    metadataSchemaLayers = [],
+    typeOwnFieldEntries = [],
+    typeInheritedFieldEntries = [],
+    typeOwnFieldSections = [],
+    typeInheritedFieldSections = [],
+    typeGroupApplications = [],
+    availableGroupEntries = [],
+    projectSchemaLayerId = () => "",
+    onSaveType = () => {},
+    onSaveField = () => {},
+    onCancelField = () => {},
+    onRemoveField = () => {},
+    onToggleFieldInline = () => {},
+    onCreateFieldDraft = () => {},
+    onApplyGroup = async () => false,
+    onRemoveGroupApplication = () => {},
+    onFieldDragStart = () => {},
+    onFieldDragOver = () => {},
+    onFieldDrop = () => {},
+    onClearFieldDrag = () => {},
+  }: Props = $props();
+
+  // metadataSchema is global per-project — read from the store, not a prop (#14 Step 2).
+  const metadataSchema = $derived($metadataSchemaStore);
+
+  // --- Scoped draft + prompt-default state (#14 Step 4), seeded ONCE from the
+  // init* props. The host remounts this component per opened/created type (a
+  // draft-token `{#key}`), so capturing only the initial prop value is
+  // intentional — `untrack` makes that explicit and silences the
+  // state_referenced_locally lint for the deliberate one-time read. ---
+  const seed = untrack(() => {
+    const cs = initialPrompt?.context_strategy ?? null;
+    return {
+      name: initialName,
+      typeId: initialTypeId,
+      color: initialColor,
+      systemPrompt: initialPrompt?.system_prompt ?? "",
+      modelClass: initialPrompt?.model_class ?? "",
+      providerPolicy: (initialPrompt?.provider_policy ?? "") as AIPolicy | "",
+      contextTargetKind: typeof cs?.target?.kind === "string" ? (cs.target.kind as string) : "",
+      contextTargetRequired: Boolean(cs?.target?.required),
+      scanSurface: (cs?.scan_surface ?? []).join(", "),
+      outputKind: typeof cs?.output?.kind === "string" ? (cs.output.kind as string) : "",
+      outputReview: typeof cs?.output?.review === "string" ? (cs.output.review as string) : "",
+    };
+  });
+
+  let draftName = $state(seed.name);
+  // Identifier tracks the name (slug) on edit, but only for editable types; for
+  // an existing type the canonical id may differ from slug(name), so it inits
+  // from the prop rather than re-deriving. Renames are rejected at save by the parent.
+  let draftTypeId = $state(seed.typeId);
+  let draftColor = $state(seed.color);
 
   function handleNameInput(value: string) {
     draftName = value;
     if (!schemaTypeReadonly) draftTypeId = slugifyFieldId(value);
   }
 
-  // The save layer is shared with SchemaTreePane (it defaults new types/fields
-  // to the open type's layer), so it stays a two-way bound prop, not scoped. ---
-  export let schemaTypeLayerId: string = "";
-
-  // --- Type read-only context (parent computes these in create/open and
-  // re-supplies them with the matching save payload) ---
-  export let schemaTypeKind: "scene" | "lore" | "research" | "prompt" | "assistant" | "project" = "lore";
-  export let schemaTypeParent: string = "";
-  export let schemaTypeReadonly: boolean = false;
-  export let selectedSchemaTypeId: string | null = null;
-
-  // --- Field-editor context (the draft itself lives inside
-  // SchemaFieldInlineEditor now — #14 Step 4). These are the read-only context
-  // the inline editor still needs, computed by the parent from the overview. ---
-  export let selectedSchemaFieldId: string | null = null;
-  export let schemaFieldReadonly: boolean = false;
-  export let schemaFieldLayerId: string = "";
-
-  // --- Inline-editor reveal + drag state ---
-  // The "__new__" sentinel for a fresh-draft slot lives in the parent
-  // (NEW_FIELD_SENTINEL) and is passed in via the value of
-  // expandedSchemaFieldId; no separate prop is needed.
-  export let expandedSchemaFieldId: string | null = null;
-  export let NEW_FIELD_SENTINEL: string = "__new__";
-  export let fieldDropTarget: { id: string; position: "before" | "after" } | null = null;
-
-  // --- Reusable-groups apply form (scoped state — #14 Step 4). The form is
-  // transient (no init from a prop); the parent only persists the result via
-  // onApplyGroup and we reset on success. ---
-  let groupApplyOpen = false;
-  let applyGroupId = "";
-  let applyGroupLabel = "";
-  let applyGroupPrefix = "";
+  // --- Reusable-groups apply form (transient scoped state — #14 Step 4). The
+  // parent persists the result via onApplyGroup; we reset on success. ---
+  let groupApplyOpen = $state(false);
+  let applyGroupId = $state("");
+  let applyGroupLabel = $state("");
+  let applyGroupPrefix = $state("");
 
   async function submitGroupApply() {
     if (!applyGroupId) return;
@@ -125,25 +203,18 @@
     }
   }
 
-  // --- Prompt-kind defaults (scoped — #14 Step 4). Only the brief +
-  // output land have editing UI here; the rest round-trip through the draft
-  // so saving a prompt type preserves model_class / provider_policy /
-  // context target + scan surface set elsewhere. Initialised once from the
-  // init prompt extras prop. ---
-  export let initialPrompt: PromptEntryTypeExtras | null = null;
-
-  const initialContextStrategy = initialPrompt?.context_strategy ?? null;
-  let promptSystemPrompt = initialPrompt?.system_prompt ?? "";
-  let promptModelClass = initialPrompt?.model_class ?? "";
-  let promptProviderPolicy: AIPolicy | "" = initialPrompt?.provider_policy ?? "";
-  let promptContextTargetKind =
-    typeof initialContextStrategy?.target?.kind === "string" ? (initialContextStrategy.target.kind as string) : "";
-  let promptContextTargetRequired = Boolean(initialContextStrategy?.target?.required);
-  let promptScanSurface = (initialContextStrategy?.scan_surface ?? []).join(", ");
-  let promptOutputKind =
-    typeof initialContextStrategy?.output?.kind === "string" ? (initialContextStrategy.output.kind as string) : "";
-  let promptOutputReview =
-    typeof initialContextStrategy?.output?.review === "string" ? (initialContextStrategy.output.review as string) : "";
+  // --- Prompt-kind defaults (scoped — #14 Step 4). Only the brief + output land
+  // have editing UI here; the rest round-trip through the draft so saving a
+  // prompt type preserves model_class / provider_policy / context target +
+  // scan surface set elsewhere. ---
+  let promptSystemPrompt = $state(seed.systemPrompt);
+  let promptModelClass = $state(seed.modelClass);
+  let promptProviderPolicy = $state<AIPolicy | "">(seed.providerPolicy);
+  let promptContextTargetKind = $state(seed.contextTargetKind);
+  let promptContextTargetRequired = $state(seed.contextTargetRequired);
+  let promptScanSurface = $state(seed.scanSurface);
+  let promptOutputKind = $state(seed.outputKind);
+  let promptOutputReview = $state(seed.outputReview);
 
   function buildPromptExtras(): PromptEntryTypeExtras | null {
     const scanSurface = promptScanSurface
@@ -191,38 +262,6 @@
       promptExtras: schemaTypeKind === "prompt" ? buildPromptExtras() : null,
     });
   }
-
-  // --- Schema context (read-only) ---
-  // metadataSchema is global per-project — read from the store, not a prop (#14 Step 2).
-  $: metadataSchema = $metadataSchemaStore;
-  export let metadataSchemaOverview: MetadataSchemaOverview | null = null;
-  export let metadataSchemaLayers: MetadataSchemaLayer[] = [];
-
-  // --- Derived field-row groupings (computed in parent so its $: still
-  // tracks metadataSchema refreshes after a save) ---
-  export let typeOwnFieldEntries: [string, MetadataFieldDefinition][] = [];
-  export let typeInheritedFieldEntries: [string, MetadataFieldDefinition][] = [];
-  export let typeOwnFieldSections: SchemaFieldSection[] = [];
-  export let typeInheritedFieldSections: SchemaFieldSection[] = [];
-  export let typeGroupApplications: Array<{ group_id: string; label: string; key_prefix: string }> = [];
-  export let availableGroupEntries: [string, { name: string; icon?: string | null }][] = [];
-
-  // --- Layer used as the save target when adding a new field ---
-  export let projectSchemaLayerId: () => string = () => "";
-
-  // --- Callbacks (parent owns the side-effects: API calls, modals, drag) ---
-  export let onSaveType: (payload: TypeDraftPayload) => void = () => {};
-  export let onSaveField: (payload: FieldDraftPayload) => void = () => {};
-  export let onCancelField: () => void = () => {};
-  export let onRemoveField: () => void = () => {};
-  export let onToggleFieldInline: (fieldId: string, entryTypeId: string) => void = () => {};
-  export let onCreateFieldDraft: (layerId: string, entryTypeId?: string) => void = () => {};
-  export let onApplyGroup: (application: { group_id: string; label: string; key_prefix: string }) => Promise<boolean> = async () => false;
-  export let onRemoveGroupApplication: (index: number) => void = () => {};
-  export let onFieldDragStart: (fieldId: string) => void = () => {};
-  export let onFieldDragOver: (event: DragEvent, fieldId: string) => void = () => {};
-  export let onFieldDrop: (targetFieldId: string) => void = () => {};
-  export let onClearFieldDrag: () => void = () => {};
 </script>
 
 <div class="pane-content schema-editor">
@@ -243,7 +282,7 @@
   {/if}
   <label>
     Type name
-    <input readonly={schemaTypeReadonly} value={draftName} placeholder="Faction" on:input={(event) => handleNameInput(event.currentTarget.value)} />
+    <input readonly={schemaTypeReadonly} value={draftName} placeholder="Faction" oninput={(event) => handleNameInput(event.currentTarget.value)} />
     {#if draftTypeId}
       <small class="type-id-caption" title="Identifier used in YAML and template includes (generated from the type name)">id: <code>{draftTypeId}</code></small>
     {/if}
@@ -359,7 +398,7 @@
       </div>
       {#if !schemaTypeReadonly && expandedSchemaFieldId !== NEW_FIELD_SENTINEL}
         <div class="button-row">
-          <button class="add-affordance" type="button" on:click={() => onCreateFieldDraft(schemaTypeLayerId || projectSchemaLayerId(), selectedSchemaTypeId ?? undefined)}>+ Add field</button>
+          <button class="add-affordance" type="button" onclick={() => onCreateFieldDraft(schemaTypeLayerId || projectSchemaLayerId(), selectedSchemaTypeId ?? undefined)}>+ Add field</button>
         </div>
       {/if}
     </section>
@@ -379,7 +418,7 @@
                 <span class="ag-name">{groupDef?.name ?? application.group_id}</span>
                 <span class="ag-as">as <strong>{application.label || "—"}</strong></span>
                 <code class="ag-prefix">{application.key_prefix}</code>
-                <button class="link-danger ag-remove" type="button" on:click={() => onRemoveGroupApplication(index)}>Remove</button>
+                <button class="link-danger ag-remove" type="button" onclick={() => onRemoveGroupApplication(index)}>Remove</button>
               </div>
             {/each}
           </div>
@@ -400,24 +439,24 @@
               <input
                 value={applyGroupLabel}
                 placeholder="External"
-                on:input={(event) => {
+                oninput={(event) => {
                   applyGroupLabel = event.currentTarget.value;
                   if (!applyGroupPrefix.trim()) applyGroupPrefix = suggestPrefixFromLabel(applyGroupLabel);
                 }}
               />
             </label>
             <label class="sfi-field">Prefix
-              <input value={applyGroupPrefix} placeholder="external_" on:input={(event) => (applyGroupPrefix = event.currentTarget.value)} />
+              <input value={applyGroupPrefix} placeholder="external_" oninput={(event) => (applyGroupPrefix = event.currentTarget.value)} />
             </label>
             <div class="sfi-footer">
               <span class="sfi-spacer"></span>
-              <button class="sfi-cancel" type="button" on:click={() => (groupApplyOpen = false)}>Cancel</button>
-              <button class="sfi-done" type="button" disabled={!applyGroupId} on:click={submitGroupApply}>Apply</button>
+              <button class="sfi-cancel" type="button" onclick={() => (groupApplyOpen = false)}>Cancel</button>
+              <button class="sfi-done" type="button" disabled={!applyGroupId} onclick={submitGroupApply}>Apply</button>
             </div>
           </div>
         {:else}
           <div class="button-row">
-            <button class="add-affordance" type="button" on:click={() => { groupApplyOpen = true; applyGroupId = availableGroupEntries[0]?.[0] ?? ""; }}>+ Apply group</button>
+            <button class="add-affordance" type="button" onclick={() => { groupApplyOpen = true; applyGroupId = availableGroupEntries[0]?.[0] ?? ""; }}>+ Apply group</button>
           </div>
         {/if}
       </section>
@@ -446,7 +485,7 @@
 
   {#if !schemaTypeReadonly}
     <div class="button-row">
-      <button type="button" disabled={!schemaTypeLayerId || !draftTypeId.trim() || !draftName.trim()} on:click={submitSaveType}>Save Type</button>
+      <button type="button" disabled={!schemaTypeLayerId || !draftTypeId.trim() || !draftName.trim()} onclick={submitSaveType}>Save Type</button>
     </div>
   {/if}
 </div>

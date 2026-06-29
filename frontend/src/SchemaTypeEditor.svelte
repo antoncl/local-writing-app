@@ -15,6 +15,7 @@
   // per-row reveal and the new-draft slot share the same configuration.
 
   import SchemaFieldInlineEditor from "./SchemaFieldInlineEditor.svelte";
+  import SchemaFieldRow from "./SchemaFieldRow.svelte";
   import SwatchPicker from "./SwatchPicker.svelte";
   import { fieldIconClass, fieldTypeLabel } from "./fieldIcons";
   import {
@@ -212,29 +213,26 @@
           {#each section.entries as [fieldId, field]}
             {@const fieldSource = metadataSchemaOverview?.field_sources[fieldId]}
             {@const isExpanded = expandedSchemaFieldId === fieldId}
-            <button
-              class="schema-field-row"
-              class:expanded={isExpanded}
-              class:drop-before={fieldDropTarget?.id === fieldId && fieldDropTarget?.position === "before"}
-              class:drop-after={fieldDropTarget?.id === fieldId && fieldDropTarget?.position === "after"}
-              type="button"
+            <SchemaFieldRow
+              iconClass={fieldIconClass(field)}
+              name={field.name}
+              typeLabel={fieldTypeLabel(field.type)}
+              expanded={isExpanded}
               draggable={fieldEntries.length > 1 && !schemaTypeReadonly}
-              on:click={() => onToggleFieldInline(fieldId, selectedSchemaTypeId!)}
-              on:dragstart={() => onFieldDragStart(fieldId)}
-              on:dragover={(event) => onFieldDragOver(event, fieldId)}
-              on:dragleave={() => { if (fieldDropTarget?.id === fieldId) fieldDropTarget = null; }}
-              on:drop|preventDefault={() => onFieldDrop(fieldId)}
-              on:dragend={onClearFieldDrag}
+              dropBefore={fieldDropTarget?.id === fieldId && fieldDropTarget?.position === "before"}
+              dropAfter={fieldDropTarget?.id === fieldId && fieldDropTarget?.position === "after"}
+              onToggle={() => onToggleFieldInline(fieldId, selectedSchemaTypeId!)}
+              onDragStart={() => onFieldDragStart(fieldId)}
+              onDragOver={(event) => onFieldDragOver(event, fieldId)}
+              onDragLeave={() => { if (fieldDropTarget?.id === fieldId) fieldDropTarget = null; }}
+              onDrop={() => onFieldDrop(fieldId)}
+              onDragEnd={onClearFieldDrag}
             >
-              <span class="sfr-grip" title="Drag to reorder" aria-hidden="true"><i class="ti ti-grip-vertical"></i></span>
-              <span class="sfr-tile"><i class={fieldIconClass(field)} aria-hidden="true"></i></span>
-              <span class="sfr-name">{field.name}</span>
-              <span class="sfr-typechip">{fieldTypeLabel(field.type)}</span>
-              <span class="sfr-meta">
+              {#snippet meta()}
                 <span class="schema-source-badge" style={`--source-index: ${sourceLayerIndex(fieldSource, metadataSchemaLayers)}`}>{sourceBadgeLabel(fieldSource)}</span>
                 <i class={`ti sfr-cog ${isExpanded ? "ti-chevron-up" : "ti-settings"}`} aria-hidden="true"></i>
-              </span>
-            </button>
+              {/snippet}
+            </SchemaFieldRow>
             {#if isExpanded}
               {@render fieldInlineEditor()}
             {/if}
@@ -248,20 +246,23 @@
             </div>
           {/if}
           {#each section.entries as [fieldId, field]}
-            <div class="schema-field-row inherited" aria-label={`${field.name} (inherited)`}>
-              <span class="sfr-grip" aria-hidden="true"><i class="ti ti-grip-vertical"></i></span>
-              <span class="sfr-tile"><i class={fieldIconClass(field)} aria-hidden="true"></i></span>
-              <span class="sfr-name">{field.name}</span>
-              <span class="sfr-typechip">{fieldTypeLabel(field.type)}</span>
-              <span class="sfr-meta">
+            <SchemaFieldRow
+              interactive={false}
+              inherited
+              iconClass={fieldIconClass(field)}
+              name={field.name}
+              typeLabel={fieldTypeLabel(field.type)}
+              ariaLabel={`${field.name} (inherited)`}
+            >
+              {#snippet meta()}
                 {#if field.group_origin}
                   <span class="sfr-group-origin"><i class="ti ti-stack-2" aria-hidden="true"></i> {groupOriginLabel(field, metadataSchema)}</span>
                 {:else}
                   <span class="sfr-inherited-label">inherited from {inheritedFromLabel(selectedSchemaTypeId!, fieldId, metadataSchema)}</span>
                   <i class="ti ti-arrow-up-right sfr-cog" aria-hidden="true"></i>
                 {/if}
-              </span>
-            </div>
+              {/snippet}
+            </SchemaFieldRow>
           {/each}
         {/each}
         {#if expandedSchemaFieldId === NEW_FIELD_SENTINEL}

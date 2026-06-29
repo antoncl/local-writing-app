@@ -51,7 +51,7 @@
     setChatSessions,
     setProjectCost,
   } from "./stores/chats";
-  import { todosStore, refreshTodos as storeRefreshTodos } from "./stores/todos";
+  import { todosStore, refreshTodos as storeRefreshTodos, setTodos } from "./stores/todos";
   import GroupsManagerDialog from "./GroupsManagerDialog.svelte";
   import TagManagerDialog from "./TagManagerDialog.svelte";
   import type { OptionDraft } from "./SelectOptionsEditor.svelte";
@@ -2540,7 +2540,7 @@
       status = `Focused ${existingPane.scene?.title ?? "open chat"}`;
       return;
     }
-    const summary = chatSessions.find((s) => s.id === chatId);
+    const summary = get(chatSessionsStore).find((s) => s.id === chatId);
     let targetPane = editorPanes.find((pane) => !pane.pinned);
     if (!targetPane) {
       targetPane = addEditorPane();
@@ -3127,7 +3127,7 @@
     } else if (documentKind === "assistant") {
       assistantEntries = (await api.deleteAssistantEntry(pane.scene.id)).entries;
     } else if (documentKind === "chat") {
-      chatSessions = (await api.deleteChatSession(pane.scene.id)).sessions;
+      setChatSessions((await api.deleteChatSession(pane.scene.id)).sessions);
       if (activeChatId === pane.scene.id) activeChatId = null;
     } else {
       structure = await api.deleteScene(pane.scene.id);
@@ -3140,14 +3140,14 @@
   async function addTodo() {
     if (!newTodo.trim()) return;
     await run(async () => {
-      todos = (await api.createTodo(newTodo.trim(), activeScene?.id)).items;
+      setTodos((await api.createTodo(newTodo.trim(), activeScene?.id)).items);
       newTodo = "";
     });
   }
 
   async function toggleTodo(item: TodoItem) {
     await run(async () => {
-      todos = (await api.updateTodo(item.id, { status: item.status === "open" ? "done" : "open" })).items;
+      setTodos((await api.updateTodo(item.id, { status: item.status === "open" ? "done" : "open" })).items);
     });
   }
 
@@ -3155,13 +3155,13 @@
     const trimmed = text.trim();
     if (!trimmed || trimmed === item.text) return;
     await run(async () => {
-      todos = (await api.updateTodo(item.id, { text: trimmed })).items;
+      setTodos((await api.updateTodo(item.id, { text: trimmed })).items);
     });
   }
 
   async function deleteTodo(item: TodoItem) {
     await run(async () => {
-      todos = (await api.deleteTodo(item.id)).items;
+      setTodos((await api.deleteTodo(item.id)).items);
       status = "Deleted TODO";
     });
   }
@@ -3175,7 +3175,7 @@
       for (const item of completedTodos) {
         nextTodos = (await api.deleteTodo(item.id)).items;
       }
-      todos = nextTodos.filter((item) => !item.anchor_id);
+      setTodos(nextTodos.filter((item) => !item.anchor_id));
       for (const item of completedEmbeddedTodos) {
         editorPaneComponents[item.paneId]?.deleteEmbeddedTodo(item.id);
       }

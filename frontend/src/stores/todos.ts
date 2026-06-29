@@ -14,9 +14,11 @@ export async function refreshTodos(): Promise<void> {
   todosStore.set((await api.getTodos()).items.filter((item) => !item.anchor_id));
 }
 
-// Write-through from a mutation returning the full TodoDocument.
-export function setTodos(doc: { items: TodoItem[] }): void {
-  todosStore.set(doc.items.filter((item) => !item.anchor_id));
+// Write-through from a todo mutation. Sets the list verbatim (the mutation
+// callers pass exactly what the prior App.svelte assignments did — the
+// project-open/refresh path filters anchor_id, the per-mutation path does not).
+export function setTodos(items: TodoItem[]): void {
+  todosStore.set(items);
 }
 
 export function clearTodos(): void {

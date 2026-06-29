@@ -51,6 +51,7 @@
     setChatSessions,
     setProjectCost,
   } from "./stores/chats";
+  import { todosStore, refreshTodos as storeRefreshTodos } from "./stores/todos";
   import GroupsManagerDialog from "./GroupsManagerDialog.svelte";
   import TagManagerDialog from "./TagManagerDialog.svelte";
   import type { OptionDraft } from "./SelectOptionsEditor.svelte";
@@ -225,7 +226,7 @@
   // being clipped.
   let addMenuPosition: { top: number; right: number } | null = null;
   let draftTitleByScene = new Map<string, string>();
-  let todos: TodoItem[] = [];
+  $: todos = $todosStore;
   let validation: ProjectValidation | null = null;
   let metadataSchema: MetadataSchema | null = null;
   let metadataSchemaOverview: MetadataSchemaOverview | null = null;
@@ -885,7 +886,7 @@
   }
 
   async function refreshTodos() {
-    todos = (await api.getTodos()).items.filter((item) => !item.anchor_id);
+    await storeRefreshTodos();
   }
 
   async function refreshMetadataSchema() {

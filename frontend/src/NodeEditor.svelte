@@ -1,4 +1,5 @@
 <script lang="ts">
+
   import BacklinksPanel from "./BacklinksPanel.svelte";
   import MetadataPanel from "./MetadataPanel.svelte";
   import InputsDialog from "./InputsDialog.svelte";
@@ -25,72 +26,92 @@
     return "prose";
   }
 
-  export let scene: EditableDocument | null = null;
-  export let documentKind: DocumentKind = "scene";
-  // metadataSchema is global per-project — read from the store, not a prop (#14 Step 2).
-  $: metadataSchema = $metadataSchemaStore;
-  export let promptEntries: PromptEntrySummary[] = [];
   // Data sources for context_pick inputs in the prompt preview / inputs
-  // dialog. Optional — the picker degrades to "no items" when missing.
-  export let structure: import("./types").StructureDocument | null = null;
+  
   // Research tree, sibling to manuscript `structure`. Threaded through to
   // the context picker so context_pick / entity_ref fields can target
-  // research notes.
-  export let researchStructure: import("./types").StructureDocument | null = null;
-  export let loreEntries: import("./types").LoreEntrySummary[] = [];
-  export let knownTags: import("./types").ScopedTag[] = [];
+  
   // Optional matcher pass-through for the implicit-context highlight
-  // plugin on long-text metadata fields. App.svelte owns the compile.
-  export let implicitContextMatcher: import("./implicitContextMatcher").CompiledMatcher | null = null;
-  export let assistantEntries: AssistantEntrySummary[] = [];
-  export let defaultAssistantId: string = "";
+  
   // Scenes available for the inline prompt-preview scene picker. The pane is
-  // host-agnostic — App.svelte derives this from its structure tree.
-  export let availableScenes: { id: string; title: string }[] = [];
-  export let metadataReload: { token: number; metadata: EntryMetadata; status?: string; entryType: string } | null = null;
-  export let titleReload: { token: number; title: string } | null = null;
-  export let dirty = false;
-  export let todoStatusHint = "";
+  
 
   // Outbound events as callback props (#14: App is now runes — components can't
   // use on:event). NodeEditor stays legacy; these replace its dispatcher. Its
-  // INTERNAL on: listeners (to still-legacy MetadataPanel/*BodyView) are unchanged.
-  export let onChange: ((payload: { title: string; body: string; status: string; entryType: string; metadata: EntryMetadata; inputs?: PromptInputDefinition[] }) => void) | undefined = undefined;
-  export let onFocus: (() => void) | undefined = undefined;
-  export let onCustomData: ((payload: { entryType: string; kind: DocumentKind }) => void) | undefined = undefined;
-  export let onEmbeddedTodos: ((payload: { todos: EmbeddedTodo[] }) => void) | undefined = undefined;
-  export let onNavigate: ((payload: { id: string; kind: string }) => void) | undefined = undefined;
-  export let onOpenChat: ((payload: { entry: PromptEntrySummary; inputs: Record<string, unknown>; sceneId: string | null; assistantId: string }) => void) | undefined = undefined;
-
-
-  let proseBodyView: ProseBodyView | null = null;
-  let chatBodyView: ChatBodyView | null = null;
-  let loadedSceneId: string | null = null;
-  let rawBody = "";
-  let lastEmittedRawBody = "";
-  $: entryTypeDef = metadataSchema?.entry_types[entryType] ?? null;
-  $: bodyShape = deriveBodyShape(entryTypeDef);
-  $: rawBodyMode = bodyShape === "code";
-  $: rawBodyLanguage = (entryTypeDef?.body_language ?? "markdown") satisfies EntryBodyLanguage;
-  $: if (rawBodyMode && rawBody !== lastEmittedRawBody) {
-    lastEmittedRawBody = rawBody;
-    emitChange();
+  
+  interface Props {
+    scene?: EditableDocument | null;
+    documentKind?: DocumentKind;
+    promptEntries?: PromptEntrySummary[];
+    // dialog. Optional — the picker degrades to "no items" when missing.
+    structure?: import("./types").StructureDocument | null;
+    // research notes.
+    researchStructure?: import("./types").StructureDocument | null;
+    loreEntries?: import("./types").LoreEntrySummary[];
+    knownTags?: import("./types").ScopedTag[];
+    // plugin on long-text metadata fields. App.svelte owns the compile.
+    implicitContextMatcher?: import("./implicitContextMatcher").CompiledMatcher | null;
+    assistantEntries?: AssistantEntrySummary[];
+    defaultAssistantId?: string;
+    // host-agnostic — App.svelte derives this from its structure tree.
+    availableScenes?: { id: string; title: string }[];
+    metadataReload?: { token: number; metadata: EntryMetadata; status?: string; entryType: string } | null;
+    titleReload?: { token: number; title: string } | null;
+    dirty?: boolean;
+    todoStatusHint?: string;
+    // INTERNAL on: listeners (to still-legacy MetadataPanel/*BodyView) are unchanged.
+    onChange?: ((payload: { title: string; body: string; status: string; entryType: string; metadata: EntryMetadata; inputs?: PromptInputDefinition[] }) => void) | undefined;
+    onFocus?: (() => void) | undefined;
+    onCustomData?: ((payload: { entryType: string; kind: DocumentKind }) => void) | undefined;
+    onEmbeddedTodos?: ((payload: { todos: EmbeddedTodo[] }) => void) | undefined;
+    onNavigate?: ((payload: { id: string; kind: string }) => void) | undefined;
+    onOpenChat?: ((payload: { entry: PromptEntrySummary; inputs: Record<string, unknown>; sceneId: string | null; assistantId: string }) => void) | undefined;
   }
-  let title = "";
-  let status = "draft";
-  let entryType = "scene";
-  let metadata: EntryMetadata = {};
+
+  let {
+    scene = null,
+    documentKind = "scene",
+    promptEntries = [],
+    structure = null,
+    researchStructure = null,
+    loreEntries = [],
+    knownTags = [],
+    implicitContextMatcher = null,
+    assistantEntries = [],
+    defaultAssistantId = "",
+    availableScenes = [],
+    metadataReload = null,
+    titleReload = null,
+    dirty = false,
+    todoStatusHint = "",
+    onChange = undefined,
+    onFocus = undefined,
+    onCustomData = undefined,
+    onEmbeddedTodos = undefined,
+    onNavigate = undefined,
+    onOpenChat = undefined
+  }: Props = $props();
+
+
+  let proseBodyView: ProseBodyView | null = $state(null);
+  let chatBodyView: ChatBodyView | null = $state(null);
+  let loadedSceneId: string | null = $state(null);
+  let rawBody = $state("");
+  let lastEmittedRawBody = $state("");
+  let title = $state("");
+  let status = $state("draft");
+  let entryType = $state("scene");
+  let metadata: EntryMetadata = $state({});
   // Bound out from ProseBodyView so MetadataPanel's computedFieldString
   // (word_count) + the editor-hint string can read them.
-  let liveWordCount = 0;
-  let editorEmpty = true;
+  let liveWordCount = $state(0);
+  let editorEmpty = $state(true);
   // Metadata rail (body-spec Section A). Per body shape: prose/code open,
   // chat collapses to a 34px edge-tab, none turns the rail into the pane.
   // `railOpen` is the user-toggleable state for the side rail; reset per
   // scene load below. `railIsPane` means metadata renders as the main
   // content (none-shape: assistant / project / structure_node).
-  let railOpen = true;
-  $: railIsPane = bodyShape === "none";
+  let railOpen = $state(true);
 
   // Rail width is user-resizable via the left-edge drag handle, persisted
   // across sessions. Clamped so the rail can be made slimmer or wider but
@@ -101,9 +122,9 @@
     const stored = Number(localStorage.getItem("editorRailWidth"));
     return Number.isFinite(stored) && stored >= RAIL_MIN && stored <= RAIL_MAX ? stored : 280;
   }
-  let railWidth = loadRailWidth();
-  let railEl: HTMLElement | undefined;
-  let railResizing = false;
+  let railWidth = $state(loadRailWidth());
+  let railEl: HTMLElement | undefined = $state();
+  let railResizing = $state(false);
   let railRightEdge = 0;
   function startRailResize(event: MouseEvent) {
     event.preventDefault();
@@ -125,11 +146,11 @@
   // header chip stays in the shell (where the rest of the document header
   // lives). Cost state itself is owned by ProseBodyView since the AI
   // streaming machinery that produces it lives there.
-  let lastInvocationCostUsd: number | null = null;
-  let sceneSessionCostUsd = 0;
+  let lastInvocationCostUsd: number | null = $state(null);
+  let sceneSessionCostUsd = $state(0);
   // Per-character cost map for this scene, summed from the persisted
   // ai_invocations log. ProseBodyView owns the state; the footer reads it.
-  let characterCostUsd: Record<string, number> = {};
+  let characterCostUsd: Record<string, number> = $state({});
 
   type CharacterCostRow = { id: string; title: string; cost: number; color: string };
 
@@ -164,36 +185,19 @@
     rows.sort((a, b) => b.cost - a.cost);
     return rows;
   }
-  $: characterCostRowsView = characterCostRows(characterCostUsd, loreEntries, metadataSchema);
 
-  // All-time rollup costs surfaced as a single chip in the header hint.
-  // character_cost lives on lore character entries, project_cost on the
-  // project node — backend populates both via `computed_metadata`.
-  // Trust the computed field as the surface contract; render only when
-  // the kind matches and the number is non-zero.
-  $: rollupCostKind = (() => {
-    if (!scene) return null;
-    const computed = scene.computed_metadata as Record<string, unknown> | undefined;
-    if (documentKind === "lore" && typeof computed?.character_cost === "number" && computed.character_cost > 0) {
-      return { kind: "character" as const, value: computed.character_cost as number };
-    }
-    if (documentKind === "project" && typeof computed?.project_cost === "number" && computed.project_cost > 0) {
-      return { kind: "project" as const, value: computed.project_cost as number };
-    }
-    return null;
-  })();
-  let lastMetadataReloadToken = 0;
-  let lastTitleReloadToken = 0;
-  let backlinks: Backlink[] = [];
-  let lastBacklinksSceneId: string | null = null;
-  let inputsDialogEntry: PromptEntrySummary | null = null;
+  let lastMetadataReloadToken = $state(0);
+  let lastTitleReloadToken = $state(0);
+  let backlinks: Backlink[] = $state([]);
+  let lastBacklinksSceneId: string | null = $state(null);
+  let inputsDialogEntry: PromptEntrySummary | null = $state(null);
   // Inline error inside the inputs dialog — populated when a positional
   // arg (e.g. from `/roleplay Irene`) failed to resolve so the user can
   // see WHY the dialog opened instead of firing directly.
-  let inputsDialogError: string | null = null;
-  let inputsDialogDrafts: Record<string, string> = {};
+  let inputsDialogError: string | null = $state(null);
+  let inputsDialogDrafts: Record<string, string> = $state({});
   // "" means: use the user's default assistant (resolved server-side).
-  let inputsDialogAssistantId: string = "";
+  let inputsDialogAssistantId: string = $state("");
   // Tracked so the inputs-dialog "previously used" path can pre-fill drafts.
   let lastInvokedEntryId: string | null = null;
   let lastInvokedInputs: Record<string, unknown> = {};
@@ -205,7 +209,7 @@
     cost_usd: number | null;
     caching_style: "none" | "auto" | "explicit" | null;
     cache_blocks: { label: string; tokens: number; cache_break_after: boolean }[];
-  } | null = null;
+  } | null = $state(null);
   // Monotonic token guarding async preview races — bumps on every fetch;
   // late responses with a stale token drop their result.
   let inputsDialogEstimateToken = 0;
@@ -217,7 +221,7 @@
   // App.svelte stores it on the pane and persists on save. The actual
   // editor UI lives in CodeBodyView; this file owns the drafts state +
   // reseed-on-scene-change + canonical serialization for save.
-  let entryInputDrafts: EntryInputDraft[] = [];
+  let entryInputDrafts: EntryInputDraft[] = $state([]);
   let entryInputDraftCounter = 0;
   function nextInputDraftId(): string {
     entryInputDraftCounter += 1;
@@ -230,7 +234,6 @@
   // re-seed. We compare via scene id rather than reference because Svelte may
   // pass the same object reference between renders.
   let lastSeededSceneId: string | null = null;
-  $: maybeReseedInputs(scene, documentKind);
 
   function maybeReseedInputs(currentScene: typeof scene, currentKind: typeof documentKind): void {
     if (currentKind !== "prompt" || !currentScene) {
@@ -351,52 +354,9 @@
     });
   }
 
-  $: documentLabel = documentKind === "lore" ? "Entry" : documentKind === "structure_node" ? "Node" : documentKind === "chat" ? "Chat" : "Scene";
-  $: documentNameLabel = documentKind === "lore" ? "Name" : documentKind === "chat" ? "Title" : "Title";
-  // structure_node has no schema kind of its own — Acts/Chapters share
-  // kind="scene" in the metadata schema. Reuse the scene entry types so
-  // the type selector still lists Act/Chapter/Scene/etc.
-  $: documentEntryTypes = Object.entries(metadataSchema?.entry_types ?? {}).filter(([, definition]) => definition.kind === (documentKind === "structure_node" ? "scene" : documentKind) && !definition.abstract);
-  $: activeEntryType = metadataSchema?.entry_types[entryType] ?? metadataSchema?.entry_types[defaultEntryType()];
-  // Svelte 5 reactivity trap ([[feedback-svelte5-reactivity-traps]]):
-  // chaining `$: a = ...activeEntryType...` after `$: activeEntryType =
-  // ...` doesn't reliably refresh `a` when entryType changes — the
-  // effect that writes activeEntryType and the effect that reads it
-  // race during legacy_pre_effect scheduling, and `metadataFieldIds`
-  // can end up frozen on the entry type the component first mounted
-  // with (typically "scene"). Resolving the entry type INLINE from
-  // metadataSchema + entryType in one effect avoids the chain.
-  // Resolved INLINE from (metadataSchema, entryType) rather than chained
-  // through `activeEntryType`. Svelte 5's legacy reactivity raced on the
-  // chained derivation and metadataFieldIds could end up frozen on the
-  // entry-type the component first mounted with. The single derivation
-  // tracks both deps explicitly.
-  //
-  // `color` is filtered out because the dedicated SwatchPicker in the
-  // metadata-color-row above already edits metadata.color — letting the
-  // generic field switch render it too would produce a duplicate
-  // (untyped text input) row.
-  $: metadataFieldIds = ((metadataSchema?.entry_types[entryType] ?? metadataSchema?.entry_types[defaultEntryType()])?.fields ?? []).filter((fieldId) => fieldId !== "color");
-  $: hasBody = bodyShape !== "none";
 
-  $: if (metadataReload && metadataReload.token !== lastMetadataReloadToken) {
-    lastMetadataReloadToken = metadataReload.token;
-    status = metadataReload.status || defaultStatus();
-    entryType = metadataReload.entryType || defaultEntryType();
-    metadata = cloneMetadata(metadataReload.metadata);
-  }
 
-  $: if (titleReload && titleReload.token !== lastTitleReloadToken) {
-    lastTitleReloadToken = titleReload.token;
-    title = titleReload.title;
-  }
 
-  $: if (scene && scene.id !== lastBacklinksSceneId) {
-    void refreshBacklinks(scene.id);
-  } else if (!scene && lastBacklinksSceneId !== null) {
-    lastBacklinksSceneId = null;
-    backlinks = [];
-  }
 
   async function refreshBacklinks(sceneId: string) {
     lastBacklinksSceneId = sceneId;
@@ -410,43 +370,7 @@
     }
   }
 
-  // When a NEW entry opens (different id), sync the shell-owned fields
-  // synchronously. ProseBodyView's own scene reactive handles the editor
-  // body load. Setting entryType / title / metadata here (not inside an
-  // async function) is essential: an `await` would break Svelte 5's
-  // legacy reactive batching and metadataFieldIds would freeze on the
-  // previous entry-type's fields ([[feedback-svelte5-reactivity-traps]]).
-  $: if (scene && scene.id !== loadedSceneId) {
-    const nextEntryType = scene.entry_type || defaultEntryType();
-    title = scene.title;
-    status = documentStatus(scene);
-    entryType = nextEntryType;
-    metadata = cloneMetadata(scene.metadata);
-    // Read body shape from the FRESHLY-resolved entry-type (not the
-    // `bodyShape` reactive, which hasn't recomputed yet — and reading
-    // it would introduce a cyclical reactive dependency, since
-    // `bodyShape` depends on `entryType`).
-    const nextBodyShape = deriveBodyShape(metadataSchema?.entry_types[nextEntryType]);
-    if (nextBodyShape === "code") {
-      // Code body: hydrate rawBody directly. ProseBodyView is unmounted
-      // in this branch so no editor-side load runs.
-      rawBody = scene.body ?? "";
-      lastEmittedRawBody = rawBody;
-    }
-    loadedSceneId = scene.id;
-    // Chat starts with the rail collapsed to its edge-tab so the
-    // conversation owns full width; every other shape opens it.
-    railOpen = nextBodyShape !== "chat";
-  }
 
-  $: if (!scene && loadedSceneId !== null) {
-    loadedSceneId = null;
-    title = "";
-    status = defaultStatus();
-    entryType = defaultEntryType();
-    metadata = {};
-    liveWordCount = 0;
-  }
 
   // Compose the save event from the parent's title/status/metadata plus
   // whichever body view owns the current body content. ProseBodyView
@@ -621,15 +545,6 @@
     }
   }
 
-  // Reactive trigger: refetch when the dialog's prompt / drafts / assistant
-  // change. Per [[feedback-svelte5-reactivity-traps]], read each dep on its
-  // own line so Svelte tracks them — a function call alone wouldn't.
-  $: {
-    void inputsDialogEntry;
-    void inputsDialogDrafts;
-    void inputsDialogAssistantId;
-    void fetchInputsDialogEstimate();
-  }
 
   function refInputDraftValue(input: PromptInputDefinition, raw: string | undefined): string | string[] {
     if (input.type === "entity_ref_list") {
@@ -739,6 +654,137 @@
     }
   }
 
+  // metadataSchema is global per-project — read from the store, not a prop (#14 Step 2).
+  let metadataSchema = $derived($metadataSchemaStore);
+  $effect.pre(() => {
+    if (metadataReload && metadataReload.token !== lastMetadataReloadToken) {
+      lastMetadataReloadToken = metadataReload.token;
+      status = metadataReload.status || defaultStatus();
+      entryType = metadataReload.entryType || defaultEntryType();
+      metadata = cloneMetadata(metadataReload.metadata);
+    }
+  });
+  // When a NEW entry opens (different id), sync the shell-owned fields
+  // synchronously. ProseBodyView's own scene reactive handles the editor
+  // body load. Setting entryType / title / metadata here (not inside an
+  // async function) is essential: an `await` would break Svelte 5's
+  // legacy reactive batching and metadataFieldIds would freeze on the
+  // previous entry-type's fields ([[feedback-svelte5-reactivity-traps]]).
+  $effect.pre(() => {
+    if (scene && scene.id !== loadedSceneId) {
+      const nextEntryType = scene.entry_type || defaultEntryType();
+      title = scene.title;
+      status = documentStatus(scene);
+      entryType = nextEntryType;
+      metadata = cloneMetadata(scene.metadata);
+      // Read body shape from the FRESHLY-resolved entry-type (not the
+      // `bodyShape` reactive, which hasn't recomputed yet — and reading
+      // it would introduce a cyclical reactive dependency, since
+      // `bodyShape` depends on `entryType`).
+      const nextBodyShape = deriveBodyShape(metadataSchema?.entry_types[nextEntryType]);
+      if (nextBodyShape === "code") {
+        // Code body: hydrate rawBody directly. ProseBodyView is unmounted
+        // in this branch so no editor-side load runs.
+        rawBody = scene.body ?? "";
+        lastEmittedRawBody = rawBody;
+      }
+      loadedSceneId = scene.id;
+      // Chat starts with the rail collapsed to its edge-tab so the
+      // conversation owns full width; every other shape opens it.
+      railOpen = nextBodyShape !== "chat";
+    }
+  });
+  $effect.pre(() => {
+    if (!scene && loadedSceneId !== null) {
+      loadedSceneId = null;
+      title = "";
+      status = defaultStatus();
+      entryType = defaultEntryType();
+      metadata = {};
+      liveWordCount = 0;
+    }
+  });
+  let entryTypeDef = $derived(metadataSchema?.entry_types[entryType] ?? null);
+  let bodyShape = $derived(deriveBodyShape(entryTypeDef));
+  let rawBodyMode = $derived(bodyShape === "code");
+  let rawBodyLanguage = $derived((entryTypeDef?.body_language ?? "markdown") satisfies EntryBodyLanguage);
+  $effect.pre(() => {
+    if (rawBodyMode && rawBody !== lastEmittedRawBody) {
+      lastEmittedRawBody = rawBody;
+      emitChange();
+    }
+  });
+  let railIsPane = $derived(bodyShape === "none");
+  let characterCostRowsView = $derived(characterCostRows(characterCostUsd, loreEntries, metadataSchema));
+  // All-time rollup costs surfaced as a single chip in the header hint.
+  // character_cost lives on lore character entries, project_cost on the
+  // project node — backend populates both via `computed_metadata`.
+  // Trust the computed field as the surface contract; render only when
+  // the kind matches and the number is non-zero.
+  let rollupCostKind = $derived((() => {
+    if (!scene) return null;
+    const computed = scene.computed_metadata as Record<string, unknown> | undefined;
+    if (documentKind === "lore" && typeof computed?.character_cost === "number" && computed.character_cost > 0) {
+      return { kind: "character" as const, value: computed.character_cost as number };
+    }
+    if (documentKind === "project" && typeof computed?.project_cost === "number" && computed.project_cost > 0) {
+      return { kind: "project" as const, value: computed.project_cost as number };
+    }
+    return null;
+  })());
+  $effect.pre(() => {
+    maybeReseedInputs(scene, documentKind);
+  });
+  let documentLabel = $derived(documentKind === "lore" ? "Entry" : documentKind === "structure_node" ? "Node" : documentKind === "chat" ? "Chat" : "Scene");
+  let documentNameLabel = $derived(documentKind === "lore" ? "Name" : documentKind === "chat" ? "Title" : "Title");
+  // structure_node has no schema kind of its own — Acts/Chapters share
+  // kind="scene" in the metadata schema. Reuse the scene entry types so
+  // the type selector still lists Act/Chapter/Scene/etc.
+  let documentEntryTypes = $derived(Object.entries(metadataSchema?.entry_types ?? {}).filter(([, definition]) => definition.kind === (documentKind === "structure_node" ? "scene" : documentKind) && !definition.abstract));
+  let activeEntryType = $derived(metadataSchema?.entry_types[entryType] ?? metadataSchema?.entry_types[defaultEntryType()]);
+  // Svelte 5 reactivity trap ([[feedback-svelte5-reactivity-traps]]):
+  // chaining `$: a = ...activeEntryType...` after `$: activeEntryType =
+  // ...` doesn't reliably refresh `a` when entryType changes — the
+  // effect that writes activeEntryType and the effect that reads it
+  // race during legacy_pre_effect scheduling, and `metadataFieldIds`
+  // can end up frozen on the entry type the component first mounted
+  // with (typically "scene"). Resolving the entry type INLINE from
+  // metadataSchema + entryType in one effect avoids the chain.
+  // Resolved INLINE from (metadataSchema, entryType) rather than chained
+  // through `activeEntryType`. Svelte 5's legacy reactivity raced on the
+  // chained derivation and metadataFieldIds could end up frozen on the
+  // entry-type the component first mounted with. The single derivation
+  // tracks both deps explicitly.
+  //
+  // `color` is filtered out because the dedicated SwatchPicker in the
+  // metadata-color-row above already edits metadata.color — letting the
+  // generic field switch render it too would produce a duplicate
+  // (untyped text input) row.
+  let metadataFieldIds = $derived(((metadataSchema?.entry_types[entryType] ?? metadataSchema?.entry_types[defaultEntryType()])?.fields ?? []).filter((fieldId) => fieldId !== "color"));
+  let hasBody = $derived(bodyShape !== "none");
+  $effect.pre(() => {
+    if (titleReload && titleReload.token !== lastTitleReloadToken) {
+      lastTitleReloadToken = titleReload.token;
+      title = titleReload.title;
+    }
+  });
+  $effect.pre(() => {
+    if (scene && scene.id !== lastBacklinksSceneId) {
+      void refreshBacklinks(scene.id);
+    } else if (!scene && lastBacklinksSceneId !== null) {
+      lastBacklinksSceneId = null;
+      backlinks = [];
+    }
+  });
+  // Reactive trigger: refetch when the dialog's prompt / drafts / assistant
+  // change. Per [[feedback-svelte5-reactivity-traps]], read each dep on its
+  // own line so Svelte tracks them — a function call alone wouldn't.
+  $effect.pre(() => {
+    void inputsDialogEntry;
+    void inputsDialogDrafts;
+    void inputsDialogAssistantId;
+    void fetchInputsDialogEstimate();
+  });
 </script>
 
 <!-- Metadata + backlinks, rendered into either the side rail (prose/code/
@@ -782,7 +828,7 @@
   {/if}
 {/snippet}
 
-<svelte:window on:mousemove={onRailResizeMove} on:mouseup={endRailResize} />
+<svelte:window onmousemove={onRailResizeMove} onmouseup={endRailResize} />
 
 <div
   class="editor-panel"
@@ -796,7 +842,7 @@
       <div class="scene-title-row">
         <label class="title-label">
           {documentNameLabel}
-          <input class="title-input" aria-label={`${documentLabel} ${documentNameLabel.toLowerCase()}`} placeholder={documentNameLabel} bind:value={title} on:input={handleTitleInput} />
+          <input class="title-input" aria-label={`${documentLabel} ${documentNameLabel.toLowerCase()}`} placeholder={documentNameLabel} bind:value={title} oninput={handleTitleInput} />
         </label>
       </div>
       {#if todoStatusHint || (documentKind === "scene" && (lastInvocationCostUsd != null || characterCostRowsView.length > 0)) || rollupCostKind}
@@ -915,7 +961,7 @@
           type="button"
           title="Drag to resize details"
           aria-label="Resize details rail"
-          on:mousedown={startRailResize}
+          onmousedown={startRailResize}
         ></button>
         <div class="rail-head">
           <span class="rail-head-label">Details</span>
@@ -924,7 +970,7 @@
             type="button"
             title="Collapse details"
             aria-label="Collapse details"
-            on:click={() => (railOpen = false)}
+            onclick={() => (railOpen = false)}
           >
             <i class="ti ti-layout-sidebar-right-collapse" aria-hidden="true"></i>
           </button>
@@ -939,7 +985,7 @@
         type="button"
         title="Show details"
         aria-label="Show details"
-        on:click={() => (railOpen = true)}
+        onclick={() => (railOpen = true)}
       >
         <i class="ti ti-layout-sidebar-right-expand" aria-hidden="true"></i>
         <span class="rail-tab-label">Details</span>

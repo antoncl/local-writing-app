@@ -1232,4 +1232,341 @@
   .prompt-preview-cost {
     font-variant-numeric: tabular-nums;
   }
+
+  /* --- Editor toolbar, help/cheatsheet popover, and entry-inputs editor,
+     co-located from styles.css (#14). Child-DOM reaches use :global:
+     .code-editor/.cm-editor (CodeEditor), .danger (NodePickerConfigEditor),
+     .prompt-input-grid label controls (DefaultValueEditor). --- */
+  .raw-body-toolbar {
+    position: absolute;
+    top: 8px;
+    right: 8px;
+    z-index: 5;
+    display: flex;
+    align-items: center;
+    gap: 6px;
+  }
+  .prompt-help-button {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 22px;
+    height: 22px;
+    border-radius: 50%;
+    border: 1px solid var(--border);
+    background: var(--surface);
+    color: var(--text-2);
+    font-size: 12px;
+    font-weight: 600;
+    cursor: pointer;
+    padding: 0;
+    line-height: 1;
+    box-shadow: 0 1px 3px rgba(0, 0, 0, 0.06);
+  }
+  .prompt-help-button:hover,
+  .prompt-help-button.active {
+    background: var(--panel);
+    border-color: var(--text-2);
+    color: var(--text);
+  }
+  .prompt-restore-default-button,
+  .prompt-wrap-button {
+    display: inline-flex;
+    align-items: center;
+    height: 22px;
+    padding: 0 10px;
+    border-radius: 11px;
+    border: 1px solid var(--border);
+    background: var(--surface);
+    color: var(--text-2);
+    font-size: 11px;
+    font-weight: 500;
+    cursor: pointer;
+    line-height: 1;
+    box-shadow: 0 1px 3px rgba(0, 0, 0, 0.06);
+  }
+  .prompt-restore-default-button:hover,
+  .prompt-wrap-button:hover {
+    background: var(--panel);
+    border-color: var(--text-2);
+    color: var(--text);
+  }
+  .prompt-wrap-button.active {
+    background: var(--accent-soft);
+    border-color: var(--accent);
+    color: var(--accent-deep);
+  }
+  .prompt-help-popover {
+    position: fixed;
+    width: min(720px, calc(100vw - 24px));
+    max-height: 70vh;
+    overflow-y: auto;
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    box-shadow: 0 8px 24px rgba(0, 0, 0, 0.18);
+    padding: 12px 16px;
+    z-index: 100;
+    font-size: 13px;
+  }
+  .prompt-help-popover-header {
+    display: flex;
+    align-items: baseline;
+    gap: 10px;
+    margin: 0 0 10px;
+    padding-bottom: 8px;
+    border-bottom: 1px solid var(--divider);
+  }
+  .prompt-help-popover-header > strong {
+    color: var(--text);
+    font-size: 13px;
+  }
+  .prompt-help-popover-header > small {
+    color: var(--text-3);
+    font-size: 11px;
+    flex: 1;
+  }
+  .prompt-help-popover-header > small > code {
+    background: var(--inset);
+    border: 1px solid var(--border);
+    border-radius: 3px;
+    padding: 0 4px;
+    font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  }
+  .prompt-help-popover-close {
+    width: 22px;
+    height: 22px;
+    border-radius: 4px;
+    border: none;
+    background: transparent;
+    cursor: pointer;
+    font-size: 16px;
+    color: var(--text-3);
+    padding: 0;
+    line-height: 1;
+  }
+  .prompt-help-popover-close:hover {
+    background: var(--panel);
+    color: var(--text);
+  }
+  .prompt-cheatsheet-body {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 16px;
+    margin-top: 8px;
+  }
+  .prompt-cheatsheet-body h4 {
+    margin: 0 0 6px;
+    font-size: 12px;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+    color: var(--text-2);
+  }
+  .prompt-cheatsheet-body dl {
+    margin: 0;
+    display: grid;
+    gap: 4px 8px;
+  }
+  .prompt-cheatsheet-body dt {
+    margin: 0;
+  }
+  .prompt-cheatsheet-body dt > code {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 3px;
+    padding: 0 4px;
+    font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+    font-size: 12px;
+    color: var(--accent-deep);
+  }
+  .prompt-cheatsheet-body dd {
+    margin: 0 0 6px;
+    color: var(--text-2);
+    font-size: 12px;
+    line-height: 1.45;
+  }
+  .prompt-cheatsheet-body dd > code {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 3px;
+    padding: 0 3px;
+    font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+    font-size: 11px;
+    color: var(--accent-deep);
+  }
+  .entry-inputs-editor {
+    padding: 6px 12px;
+    background: var(--inset);
+    border-top: 1px solid var(--border);
+    font-size: 13px;
+  }
+  .entry-inputs-editor[open] {
+    max-height: 50vh;
+    overflow-y: auto;
+  }
+  .entry-inputs-editor > summary {
+    cursor: pointer;
+    user-select: none;
+    font-weight: 600;
+    color: var(--text);
+    display: flex;
+    align-items: baseline;
+    gap: 6px;
+  }
+  .entry-inputs-editor > summary > small {
+    color: var(--text-3);
+    font-weight: 400;
+  }
+  .entry-inputs-hint {
+    margin-left: auto;
+    font-size: 11px;
+  }
+  .entry-inputs-hint > code {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 3px;
+    padding: 0 4px;
+    font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  }
+  .entry-inputs-empty {
+    margin: 6px 0;
+    font-size: 12px;
+  }
+  .entry-inputs-add {
+    margin-top: 6px;
+  }
+  .entry-inputs-editor .prompt-input-row {
+    position: relative;
+    margin: 6px 0;
+    padding: 8px 8px 8px 22px;
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 4px;
+  }
+  .entry-inputs-editor .prompt-input-handle {
+    position: absolute;
+    top: 50%;
+    left: 4px;
+    transform: translateY(-50%);
+    font-size: 14px;
+  }
+  .entry-inputs-editor .prompt-input-row.dragging {
+    opacity: 0.45;
+  }
+  .entry-inputs-editor .prompt-input-row.drop-before::before,
+  .entry-inputs-editor .prompt-input-row.drop-after::after {
+    content: "";
+    position: absolute;
+    left: 4px;
+    right: 4px;
+    height: 2px;
+    background: var(--accent);
+    border-radius: 2px;
+    pointer-events: none;
+  }
+  .entry-inputs-editor .prompt-input-row.drop-before::before {
+    top: -2px;
+  }
+  .entry-inputs-editor .prompt-input-row.drop-after::after {
+    bottom: -2px;
+  }
+  .entry-inputs-editor .prompt-input-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
+    gap: 6px 10px;
+    align-items: end;
+  }
+  .entry-inputs-editor .prompt-input-row-context {
+    margin-bottom: 8px;
+  }
+  .entry-inputs-editor .prompt-input-picker {
+    margin-top: 8px;
+  }
+  .entry-inputs-editor .prompt-input-options-editor {
+    margin-top: 8px;
+  }
+  .entry-inputs-editor .prompt-input-inline {
+    margin-top: 2px;
+  }
+  .entry-inputs-editor .prompt-input-grid > label {
+    display: grid;
+    gap: 2px;
+    font-size: 10px;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+    color: var(--text-3);
+  }
+  .entry-inputs-editor .prompt-input-grid > label :global(input),
+  .entry-inputs-editor .prompt-input-grid > label :global(select) {
+    padding: 3px 6px;
+    border: 1px solid var(--border);
+    border-radius: 4px;
+    font-size: 12px;
+    background: var(--surface);
+  }
+  .entry-inputs-editor .prompt-input-required {
+    flex-direction: row;
+    align-items: center;
+    gap: 4px;
+  }
+  .entry-inputs-editor .prompt-input-required > input {
+    margin: 0;
+  }
+  .entry-inputs-editor .prompt-input-remove {
+    align-self: end;
+    border: 1px solid transparent;
+    background: transparent;
+    color: var(--text-3);
+    cursor: pointer;
+    font-size: 16px;
+    line-height: 1;
+    padding: 0 8px;
+    border-radius: 4px;
+  }
+  .entry-inputs-editor .prompt-input-remove:hover {
+    background: var(--danger-soft);
+    color: var(--danger);
+    border-color: var(--danger-border);
+  }
+  .prompt-input-row {
+    display: grid;
+    gap: 6px;
+    padding: 8px;
+    border: 1px dashed var(--border);
+    border-radius: 6px;
+    background: var(--surface);
+  }
+  .prompt-input-grid {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+    gap: 6px 8px;
+  }
+  .prompt-input-options {
+    grid-column: 1 / -1;
+  }
+  .prompt-input-row :global(.danger) {
+    justify-self: end;
+    background: transparent;
+    border: 1px solid var(--danger-border);
+    color: var(--danger);
+  }
+  .prompt-input-row :global(.danger):hover {
+    background: var(--danger-soft);
+  }
+  .raw-body-editor {
+    display: grid;
+    flex: 1;
+    min-height: 200px;
+  }
+  .raw-body-editor :global(.code-editor) {
+    display: grid;
+    height: 100%;
+    min-height: 0;
+  }
+  .raw-body-editor :global(.cm-editor) {
+    height: 100%;
+    min-height: 0;
+  }
 </style>

@@ -81,3 +81,38 @@
     {/snippet}
   </NodeRow>
 </section>
+
+<style>
+  .scene-backlinks {
+    padding-top: 8px;
+  }
+
+  .backlink-type-pill {
+    display: inline-flex;
+    align-items: center;
+    padding: 1px 8px;
+    border: 1px solid var(--divider);
+    border-radius: 999px;
+    background: var(--inset);
+    color: var(--text-2);
+    font-size: 10.5px;
+    font-weight: 600;
+    line-height: 1.5;
+    white-space: nowrap;
+  }
+
+  /* When the referenced node resolves to a swatch (instance → type chain
+     → kind-default), tint the pill so the type is identifiable at a
+     glance. Same color-mix recipe as ColoredSelect.has-color so the two
+     tinted-pill surfaces match. */
+  .backlink-type-pill.has-color {
+    background: color-mix(in srgb, var(--chip-base) 14%, white 86%);
+    border-color: color-mix(in srgb, var(--chip-base) 45%, var(--divider) 55%);
+    color: color-mix(in srgb, var(--chip-base) 65%, var(--text) 35%);
+  }
+
+  :global([data-theme="dark"]) .backlink-type-pill.has-color {
+    background: color-mix(in srgb, var(--chip-base) 22%, black 78%);
+    color: color-mix(in srgb, var(--chip-base) 70%, var(--text) 30%);
+  }
+</style>

@@ -18,6 +18,7 @@
   import DefaultValueEditor from "./DefaultValueEditor.svelte";
   import NodePickerConfigEditor from "./NodePickerConfigEditor.svelte";
   import PromptInputField from "./PromptInputField.svelte";
+  import SchemaFieldRow from "./SchemaFieldRow.svelte";
   import SelectOptionsEditor from "./SelectOptionsEditor.svelte";
   import { api } from "./api";
   import { DEFAULT_FIELD_GLYPH } from "./fieldIcons";
@@ -652,35 +653,34 @@
         {@const isExpanded = expandedInputClientId === draft.clientId}
         <!-- Collapsed-by-default row mirroring App.svelte's schema-field-row
              (decisions-inputs-fields-uniformity / #37). Click to expand into
-             the inline editor below; new rows auto-expand. Shared sfr-*
-             styling keeps the visual treatment identical across surfaces. -->
-        <button
-          class="schema-field-row prompt-input-row-collapsed"
-          type="button"
-          class:expanded={isExpanded}
-          class:dragging={inputDragFromIndex === index}
-          class:drop-before={inputDragOverIndex === index && inputDragOverPosition === "before"}
-          class:drop-after={inputDragOverIndex === index && inputDragOverPosition === "after"}
+             the inline editor below; new rows auto-expand. Composes the shared
+             SchemaFieldRow owner so the chrome stays identical across surfaces;
+             the meta snippet supplies the input-specific accessor pill + req
+             badge + cog (its classes stay in this component's scope). -->
+        <SchemaFieldRow
+          rowClass="prompt-input-row-collapsed"
+          iconClass={inputIconClass(draft.type)}
+          name={draft.label || draft.name || "(unnamed input)"}
+          typeLabel={INPUT_TYPE_LABEL[draft.type] ?? draft.type}
+          expanded={isExpanded}
           draggable={entryInputDrafts.length > 1}
-          aria-expanded={isExpanded}
-          on:click={() => toggleInputRow(draft.clientId)}
-          on:dragstart={(e) => handleInputDragStart(e, index)}
-          on:dragend={handleInputDragEnd}
-          on:dragover={(e) => handleInputDragOver(e, index)}
-          on:drop={(e) => handleInputDrop(e, index)}
+          dragging={inputDragFromIndex === index}
+          dropBefore={inputDragOverIndex === index && inputDragOverPosition === "before"}
+          dropAfter={inputDragOverIndex === index && inputDragOverPosition === "after"}
+          onToggle={() => toggleInputRow(draft.clientId)}
+          onDragStart={(e) => handleInputDragStart(e, index)}
+          onDragEnd={handleInputDragEnd}
+          onDragOver={(e) => handleInputDragOver(e, index)}
+          onDrop={(e) => handleInputDrop(e, index)}
         >
-          <span class="sfr-grip" title="Drag to reorder" aria-hidden="true"><i class="ti ti-grip-vertical"></i></span>
-          <span class="sfr-tile"><i class={inputIconClass(draft.type)} aria-hidden="true"></i></span>
-          <span class="sfr-name">{draft.label || draft.name || "(unnamed input)"}</span>
-          <span class="sfr-typechip">{INPUT_TYPE_LABEL[draft.type] ?? draft.type}</span>
-          <span class="sfr-meta">
+          {#snippet meta()}
             {#if draft.name}
               <code class="prompt-input-accessor-mini">&lbrace;&lbrace; input.{draft.name} &rbrace;&rbrace;</code>
             {/if}
             {#if draft.required}<span class="prompt-input-required-badge" title="Required">req</span>{/if}
             <i class={`ti sfr-cog ${isExpanded ? "ti-chevron-up" : "ti-settings"}`} aria-hidden="true"></i>
-          </span>
-        </button>
+          {/snippet}
+        </SchemaFieldRow>
         {#if isExpanded}
           <div class="schema-field-inline prompt-input-inline">
             <div class="prompt-input-grid">

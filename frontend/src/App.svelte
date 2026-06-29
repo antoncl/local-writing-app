@@ -3750,3 +3750,110 @@
 
 </main>
 
+<style>
+  .workspace {
+    position: relative;
+    width: 100vw;
+    height: calc(100vh - 40px);
+    margin-top: 40px;
+    overflow: hidden;
+  }
+
+  @media (max-width: 640px) {
+    .workspace {
+      display: grid;
+      height: auto;
+      min-height: 100vh;
+      gap: 12px;
+      padding: 12px;
+      overflow: auto;
+    }
+  }
+
+  /* Project pane content wrapper — slotted into <Pane>, so it's App's own DOM. */
+  .project-panel {
+    display: grid;
+    align-content: start;
+    gap: 10px;
+  }
+
+  /* Inline editor-pane save-status indicator (App renders editor panes inline). */
+  .pane-status {
+    color: var(--text-3);
+    font-size: 12px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .pane-status-saved {
+    color: var(--accent);
+  }
+
+  /* Ancestor-entry editor panes: tint the (shared) pane header + show a badge.
+     `.from-ancestor` is App-only, so scoping this here matches only App's inline
+     editor panes — other components' `.pane-header` is untouched. */
+  .editor-pane.from-ancestor .pane-header {
+    background: var(--star-soft);
+    border-bottom-color: var(--star-border);
+  }
+
+  .ancestor-badge {
+    display: inline-block;
+    margin-left: 8px;
+    padding: 1px 7px;
+    border-radius: 10px;
+    background: var(--star);
+    color: var(--surface);
+    font-size: 11px;
+    font-weight: 500;
+    vertical-align: middle;
+  }
+
+  .error-toast {
+    position: fixed;
+    right: 18px;
+    bottom: 18px;
+    z-index: 1000;
+    max-width: 420px;
+    padding: 10px 12px;
+    display: flex;
+    align-items: flex-start;
+    gap: 10px;
+    border: 1px solid var(--danger);
+    border-radius: 8px;
+    color: var(--danger);
+    background: var(--danger-soft);
+    box-shadow: 0 14px 30px rgba(36, 36, 36, 0.16);
+  }
+
+  .error-toast-body {
+    flex: 1;
+    min-width: 0;
+    line-height: 1.4;
+    word-wrap: break-word;
+  }
+
+  .error-toast-close {
+    flex: none;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 22px;
+    height: 22px;
+    margin: -2px -4px 0 0;
+    padding: 0;
+    border: 0;
+    border-radius: 6px;
+    background: transparent;
+    color: var(--danger);
+    font-size: 18px;
+    line-height: 1;
+    cursor: pointer;
+  }
+
+  .error-toast-close:hover {
+    background: rgba(180, 59, 53, 0.12);
+  }
+</style>
+

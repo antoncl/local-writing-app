@@ -258,13 +258,7 @@ h3 {
   font-size: 15px;
 }
 
-.workspace {
-  position: relative;
-  width: 100vw;
-  height: calc(100vh - 40px);
-  margin-top: 40px;
-  overflow: hidden;
-}
+/* .workspace (+ its @media) co-located into App.svelte (#14). */
 
 .pane {
   position: absolute;
@@ -306,16 +300,7 @@ h3 {
 .pane-header h2.chat-title-clickable {
   cursor: text;
 }
-.pane-status {
-  color: var(--text-3);
-  font-size: 12px;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-.pane-status-saved {
-  color: var(--accent);
-}
+/* .pane-status / .pane-status-saved co-located into App.svelte (#14). */
 
 .pane-header-actions {
   display: flex;
@@ -371,11 +356,7 @@ h3 {
   content: "";
 }
 
-.project-panel {
-  display: grid;
-  align-content: start;
-  gap: 10px;
-}
+/* .project-panel co-located into App.svelte (#14). */
 
 .schema-editor {
   display: grid;
@@ -729,22 +710,9 @@ button.row-action-add.active {
   min-height: 320px;
 }
 
-.editor-pane.from-ancestor .pane-header {
-  background: var(--star-soft);
-  border-bottom-color: var(--star-border);
-}
+/* .editor-pane.from-ancestor .pane-header co-located into App.svelte (#14). */
 
-.ancestor-badge {
-  display: inline-block;
-  margin-left: 8px;
-  padding: 1px 7px;
-  border-radius: 10px;
-  background: var(--star);
-  color: var(--surface);
-  font-size: 11px;
-  font-weight: 500;
-  vertical-align: middle;
-}
+/* .ancestor-badge co-located into App.svelte (#14). */
 
 .editor-panel {
   display: grid;
@@ -1032,62 +1000,9 @@ button.row-action-add.active {
 
 /* .search-hit* co-located into Search.svelte (#14). */
 
-.error-toast {
-  position: fixed;
-  right: 18px;
-  bottom: 18px;
-  z-index: 1000;
-  max-width: 420px;
-  padding: 10px 12px;
-  display: flex;
-  align-items: flex-start;
-  gap: 10px;
-  border: 1px solid var(--danger);
-  border-radius: 8px;
-  color: var(--danger);
-  background: var(--danger-soft);
-  box-shadow: 0 14px 30px rgba(36, 36, 36, 0.16);
-}
-
-.error-toast-body {
-  flex: 1;
-  min-width: 0;
-  line-height: 1.4;
-  word-wrap: break-word;
-}
-
-.error-toast-close {
-  flex: none;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  width: 22px;
-  height: 22px;
-  margin: -2px -4px 0 0;
-  padding: 0;
-  border: 0;
-  border-radius: 6px;
-  background: transparent;
-  color: var(--danger);
-  font-size: 18px;
-  line-height: 1;
-  cursor: pointer;
-}
-
-.error-toast-close:hover {
-  background: rgba(180, 59, 53, 0.12);
-}
+/* .error-toast* co-located into App.svelte (#14). */
 
 @media (max-width: 640px) {
-  .workspace {
-    display: grid;
-    height: auto;
-    min-height: 100vh;
-    gap: 12px;
-    padding: 12px;
-    overflow: auto;
-  }
-
   .pane {
     position: static;
     width: auto !important;
@@ -1922,22 +1837,12 @@ button.row-action-add.active {
   min-width: 280px;
 }
 
+/* Dead `.assistants-pane .prompt-entry-row*` rules dropped (#14): .prompt-entry-row
+   is in no markup. (Base .prompt-entry-row* left for the orphan-CSS audit.) */
+
 /* .assistant-drag-handle* co-located into Assistants.svelte (#14);
    dead .assistant-row-wrap* rules dropped (wrapper replaced by NodeRow drag props). */
 
-.assistants-pane .prompt-entry-row {
-  display: grid;
-  gap: 2px;
-}
-
-.assistants-pane .prompt-entry-row > span {
-  display: grid;
-  gap: 2px;
-}
-
-.assistants-pane .prompt-entry-row > span > small {
-  color: var(--text-3);
-}
 
 .assistant-default-badge {
   display: inline-block;

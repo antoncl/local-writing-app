@@ -78,6 +78,13 @@
     refreshAssistantEntries as storeRefreshAssistantEntries,
     setAssistantEntries,
   } from "./stores/assistants";
+  import {
+    metadataSchemaStore,
+    metadataSchemaOverviewStore,
+    metadataSchemaLayersStore,
+    refreshSchema as storeRefreshSchema,
+    setMetadataSchema,
+  } from "./stores/schema";
   import GroupsManagerDialog from "./GroupsManagerDialog.svelte";
   import TagManagerDialog from "./TagManagerDialog.svelte";
   import type { OptionDraft } from "./SelectOptionsEditor.svelte";
@@ -254,9 +261,9 @@
   let draftTitleByScene = new Map<string, string>();
   $: todos = $todosStore;
   $: validation = $validationStore;
-  let metadataSchema: MetadataSchema | null = null;
-  let metadataSchemaOverview: MetadataSchemaOverview | null = null;
-  let metadataSchemaLayers: MetadataSchemaLayer[] = [];
+  $: metadataSchema = $metadataSchemaStore;
+  $: metadataSchemaOverview = $metadataSchemaOverviewStore;
+  $: metadataSchemaLayers = $metadataSchemaLayersStore;
   let schemaFieldKind: SchemaKind = "scene";
   let schemaFieldLayerId = "";
   let schemaFieldEntryType = "scene";
@@ -912,16 +919,18 @@
   }
 
   async function refreshMetadataSchema() {
-    metadataSchemaOverview = await api.getMetadataSchemaOverview();
-    metadataSchema = metadataSchemaOverview.effective_schema;
-    metadataSchemaLayers = metadataSchemaOverview.layers;
-    if (!metadataSchema.entry_types[schemaFieldEntryType]) {
-      schemaFieldEntryType = metadataSchema.entry_types.scene ? "scene" : Object.keys(metadataSchema.entry_types)[0] ?? "scene";
+    // Store owns the trio; run the authoring fallback against the returned
+    // overview, not the `$:` aliases (which lag a flush after the store set).
+    const overview = await storeRefreshSchema();
+    const schema = overview.effective_schema;
+    const layers = overview.layers;
+    if (!schema.entry_types[schemaFieldEntryType]) {
+      schemaFieldEntryType = schema.entry_types.scene ? "scene" : Object.keys(schema.entry_types)[0] ?? "scene";
     }
-    if (!schemaFieldLayerId || !metadataSchemaLayers.some((layer) => layer.id === schemaFieldLayerId)) {
+    if (!schemaFieldLayerId || !layers.some((layer) => layer.id === schemaFieldLayerId)) {
       schemaFieldLayerId = projectSchemaLayerId();
     }
-    if (!schemaTypeLayerId || !metadataSchemaLayers.some((layer) => layer.id === schemaTypeLayerId)) {
+    if (!schemaTypeLayerId || !layers.some((layer) => layer.id === schemaTypeLayerId)) {
       schemaTypeLayerId = projectSchemaLayerId();
     }
   }
@@ -1242,7 +1251,10 @@
   }
 
   function projectSchemaLayerId() {
-    return metadataSchemaLayers[metadataSchemaLayers.length - 1]?.id ?? "";
+    // Read the store live — called from refreshMetadataSchema's fallback right
+    // after the store set, where the `$:` alias still lags a flush.
+    const layers = get(metadataSchemaLayersStore);
+    return layers[layers.length - 1]?.id ?? "";
   }
 
   function layerLabel(layerId: string | undefined | null) {
@@ -1620,7 +1632,7 @@
       return;
     }
     await run(async () => {
-      metadataSchema = await api.upsertMetadataEntryType(
+      setMetadataSchema(await api.upsertMetadataEntryType(
         source.layer_id,
         typeId,
         {
@@ -1628,7 +1640,7 @@
           parent: parentTypeId,
         },
         true,
-      );
+      ));
       await refreshMetadataSchema();
       setValidation(await api.validateProject());
       selectedSchemaTypeId = typeId;
@@ -1755,7 +1767,7 @@
     if (previousFieldId && previousFieldId !== nextFieldId) {
       await api.renameMetadataField(previousFieldId, nextFieldId, entryType);
     }
-    metadataSchema = await api.upsertMetadataField(layerId, nextFieldId, nextField, entryType, Boolean(previousFieldId), optionMigration);
+    setMetadataSchema(await api.upsertMetadataField(layerId, nextFieldId, nextField, entryType, Boolean(previousFieldId), optionMigration));
     await refreshMetadataSchema();
     if (previousFieldId) {
       // The backend rewrote entry data on disk (key rename + option
@@ -1778,11 +1790,11 @@
       key_prefix: (applyGroupPrefix.trim() || suggestPrefixFromLabel(applyGroupLabel) || `${applyGroupId}_`),
     };
     await run(async () => {
-      metadataSchema = await api.setEntryTypeGroupApplications(
+      setMetadataSchema(await api.setEntryTypeGroupApplications(
         schemaTypeLayerId || projectSchemaLayerId(),
         typeId,
         [...typeGroupApplications, application],
-      );
+      ));
       await refreshMetadataSchema();
       setValidation(await api.validateProject());
       groupApplyOpen = false;
@@ -1798,11 +1810,11 @@
     const typeId = selectedSchemaTypeId;
     const next = typeGroupApplications.filter((_, i) => i !== index);
     await run(async () => {
-      metadataSchema = await api.setEntryTypeGroupApplications(
+      setMetadataSchema(await api.setEntryTypeGroupApplications(
         schemaTypeLayerId || projectSchemaLayerId(),
         typeId,
         next,
-      );
+      ));
       await refreshMetadataSchema();
       setValidation(await api.validateProject());
       status = "Removed group application";
@@ -1829,7 +1841,7 @@
         status = "Renaming detail types is not available yet";
         return;
       }
-      metadataSchema = await api.upsertMetadataEntryType(schemaTypeLayerId, nextTypeId, nextType, Boolean(previousTypeId));
+      setMetadataSchema(await api.upsertMetadataEntryType(schemaTypeLayerId, nextTypeId, nextType, Boolean(previousTypeId)));
       await refreshMetadataSchema();
       setValidation(await api.validateProject());
       selectedSchemaTypeId = nextTypeId;
@@ -1857,7 +1869,7 @@
 
   async function deleteSchemaType(typeId: string) {
     const deletedKind = schemaFieldKind;
-    metadataSchema = await api.deleteMetadataEntryType(typeId);
+    setMetadataSchema(await api.deleteMetadataEntryType(typeId));
     await refreshMetadataSchema();
     setValidation(await api.validateProject());
     selectedSchemaTypeId = null;
@@ -1883,7 +1895,7 @@
   }
 
   async function deleteSchemaField(fieldId: string) {
-    metadataSchema = await api.deleteMetadataField(fieldId, schemaFieldEntryType);
+    setMetadataSchema(await api.deleteMetadataField(fieldId, schemaFieldEntryType));
     await refreshMetadataSchema();
     await refreshOpenEditorPaneBaselines((metadata) => removeMetadataKey(metadata, fieldId));
     setValidation(await api.validateProject());
@@ -1968,7 +1980,7 @@
     if (order.join(" ") === current.join(" ")) return;
     const layerId = schemaTypeLayerId || projectSchemaLayerId();
     await run(async () => {
-      metadataSchema = await api.setEntryTypeFieldOrder(layerId, selectedSchemaTypeId!, order);
+      setMetadataSchema(await api.setEntryTypeFieldOrder(layerId, selectedSchemaTypeId!, order));
       await refreshMetadataSchema();
       status = "Reordered fields";
     });
@@ -3742,7 +3754,7 @@
     <GroupsManagerDialog
       groups={metadataSchema.groups ?? {}}
       layerId={schemaTypeLayerId || projectSchemaLayerId()}
-      on:changed={(event) => { metadataSchema = event.detail.schema; void refreshMetadataSchema(); }}
+      on:changed={(event) => { setMetadataSchema(event.detail.schema); void refreshMetadataSchema(); }}
       on:close={() => (groupsManagerOpen = false)}
     />
   {/if}

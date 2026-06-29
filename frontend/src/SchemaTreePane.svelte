@@ -22,29 +22,49 @@
   import type { MetadataSchemaOverview } from "./types";
   import { metadataSchemaStore } from "./stores/schema";
 
-  // --- Read-only state ---
-  export let schemaFieldKind: SchemaKind = "scene";
-  export let schemaContextHeading: string = "";
-  export let schemaNodeTypeTree: NodeTypeTreeNode[] = [];
-  export let selectedSchemaTypeId: string | null = null;
-  export let schemaTypeLayerId: string = "";
+  interface Props {
+    // --- Read-only state ---
+    schemaFieldKind?: SchemaKind;
+    schemaContextHeading?: string;
+    schemaNodeTypeTree?: NodeTypeTreeNode[];
+    selectedSchemaTypeId?: string | null;
+    schemaTypeLayerId?: string;
+    metadataSchemaOverview?: MetadataSchemaOverview | null;
+    // --- Drag state (two-way bound; shared with the parent's drop handler) ---
+    draggedSchemaTypeId?: string | null;
+    // --- Callbacks (parent owns the side-effects) ---
+    projectSchemaLayerId?: () => string;
+    onSwitchKind?: (kind: SchemaKind) => void;
+    onCreateType?: (layerId: string, parentTypeId: string) => void;
+    onOpenType?: (typeId: string) => void;
+    onStartTypeDrag?: (typeId: string) => void;
+    onDropTypeOnParent?: (parentTypeId: string) => void;
+    onCreateField?: (layerId: string, entryTypeId: string) => void;
+    onDeleteType?: (typeId: string) => void;
+    onOpenField?: (fieldId: string, entryTypeId: string) => void;
+  }
+
+  let {
+    schemaFieldKind = "scene",
+    schemaContextHeading = "",
+    schemaNodeTypeTree = [],
+    selectedSchemaTypeId = null,
+    schemaTypeLayerId = "",
+    metadataSchemaOverview = null,
+    draggedSchemaTypeId = $bindable(null),
+    projectSchemaLayerId = () => "",
+    onSwitchKind = () => {},
+    onCreateType = () => {},
+    onOpenType = () => {},
+    onStartTypeDrag = () => {},
+    onDropTypeOnParent = () => {},
+    onCreateField = () => {},
+    onDeleteType = () => {},
+    onOpenField = () => {},
+  }: Props = $props();
+
   // metadataSchema is global per-project — read from the store, not a prop (#14 Step 2).
-  $: metadataSchema = $metadataSchemaStore;
-  export let metadataSchemaOverview: MetadataSchemaOverview | null = null;
-
-  // --- Drag state (two-way bound; shared with the parent's drop handler) ---
-  export let draggedSchemaTypeId: string | null = null;
-
-  // --- Callbacks (parent owns the side-effects) ---
-  export let projectSchemaLayerId: () => string = () => "";
-  export let onSwitchKind: (kind: SchemaKind) => void = () => {};
-  export let onCreateType: (layerId: string, parentTypeId: string) => void = () => {};
-  export let onOpenType: (typeId: string) => void = () => {};
-  export let onStartTypeDrag: (typeId: string) => void = () => {};
-  export let onDropTypeOnParent: (parentTypeId: string) => void = () => {};
-  export let onCreateField: (layerId: string, entryTypeId: string) => void = () => {};
-  export let onDeleteType: (typeId: string) => void = () => {};
-  export let onOpenField: (fieldId: string, entryTypeId: string) => void = () => {};
+  const metadataSchema = $derived($metadataSchemaStore);
 
   // The kind tabs, in display order. Mirrors the schema's kind universe.
   const SCHEMA_KINDS: Array<{ id: SchemaKind; label: string }> = [
@@ -69,7 +89,7 @@
         role="tab"
         aria-selected={schemaFieldKind === kind.id}
         class:active={schemaFieldKind === kind.id}
-        on:click={() => onSwitchKind(kind.id)}
+        onclick={() => onSwitchKind(kind.id)}
       >{kind.label}</button>
     {/each}
   </div>
@@ -119,10 +139,10 @@
   >
     {#snippet trailing()}
       <span class="group-count-pill" title={`${fieldEntries.length} field${fieldEntries.length === 1 ? "" : "s"}, ${node.children.length} sub-type${node.children.length === 1 ? "" : "s"}`}>{childCount}</span>
-      <button class="row-action-add" type="button" title={`Add sub-type to ${node.label}`} aria-label={`Add sub-type to ${node.label}`} on:click={() => onCreateType(schemaTypeLayerId || projectSchemaLayerId(), node.id)}>+ Type</button>
-      <button class="row-action-add" type="button" title={`Add field to ${node.label}`} aria-label={`Add field to ${node.label}`} on:click={() => { onOpenType(node.id); onCreateField(schemaTypeLayerId || projectSchemaLayerId(), node.id); }}>+ Field</button>
+      <button class="row-action-add" type="button" title={`Add sub-type to ${node.label}`} aria-label={`Add sub-type to ${node.label}`} onclick={() => onCreateType(schemaTypeLayerId || projectSchemaLayerId(), node.id)}>+ Type</button>
+      <button class="row-action-add" type="button" title={`Add field to ${node.label}`} aria-label={`Add field to ${node.label}`} onclick={() => { onOpenType(node.id); onCreateField(schemaTypeLayerId || projectSchemaLayerId(), node.id); }}>+ Field</button>
       {#if !typeSource?.built_in}
-        <button class="row-action-delete" type="button" title={`Delete ${node.label}`} aria-label={`Delete ${node.label}`} on:click={() => onDeleteType(node.id)}>×</button>
+        <button class="row-action-delete" type="button" title={`Delete ${node.label}`} aria-label={`Delete ${node.label}`} onclick={() => onDeleteType(node.id)}>×</button>
       {/if}
     {/snippet}
     {#snippet nested()}

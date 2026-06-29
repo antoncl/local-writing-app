@@ -72,6 +72,12 @@
     refreshPromptEntries as storeRefreshPromptEntries,
     setPromptEntries,
   } from "./stores/prompts";
+  import {
+    assistantEntriesStore,
+    defaultAssistantIdStore,
+    refreshAssistantEntries as storeRefreshAssistantEntries,
+    setAssistantEntries,
+  } from "./stores/assistants";
   import GroupsManagerDialog from "./GroupsManagerDialog.svelte";
   import TagManagerDialog from "./TagManagerDialog.svelte";
   import type { OptionDraft } from "./SelectOptionsEditor.svelte";
@@ -334,7 +340,7 @@
   let promptOutputKind = "";
   let promptOutputReview = "";
   $: promptEntries = $promptEntriesStore;
-  let assistantEntries: AssistantEntrySummary[] = [];
+  $: assistantEntries = $assistantEntriesStore;
   let newTodo = "";
   // Outline group-header collapse state, keyed by StructureNode.id.
   // Same shape as the other collapsed-* maps so the refactor stays
@@ -877,16 +883,12 @@
   // state update stay here; the drag UI lives in the component.
   async function reorderAssistantsInLayer(layerId: string, orderedIds: string[]) {
     await run(async () => {
-      assistantEntries = (await api.reorderAssistants(layerId, orderedIds)).entries;
+      setAssistantEntries((await api.reorderAssistants(layerId, orderedIds)).entries);
     });
   }
 
   async function refreshAssistantEntries() {
-    try {
-      assistantEntries = (await api.listAssistantEntries()).entries;
-    } catch {
-      // Backend may be unavailable; leave previous list in place.
-    }
+    await storeRefreshAssistantEntries();
   }
 
   async function refreshKnownTags() {
@@ -1249,12 +1251,10 @@
     return metadataSchemaLayers.find((layer) => layer.id === layerId)?.label ?? "Unknown";
   }
 
-  // Derived, not a function: consumers pass it as a prop, and a bare
-  // `defaultAssistantEntryId()` call in a prop expression wouldn't track its
-  // inner assistantEntries dependency (Svelte only static-analyzes the
-  // expression), so it'd stay stale at its initial empty value. See
-  // feedback_svelte5_reactivity_traps.
-  $: defaultAssistantId = assistantEntries.find((a) => Boolean(a.metadata?.is_default))?.id ?? "";
+  // Derived in the assistants store (not a function): consumers pass it as a
+  // prop, and a bare call in a prop expression wouldn't track its inner roster
+  // dependency. See feedback_svelte5_reactivity_traps.
+  $: defaultAssistantId = $defaultAssistantIdStore;
 
   // Set of "<docType>:<id>" keys for every node currently open in a
   // pinned editor pane. Derived reactively so the template can ask
@@ -3145,7 +3145,7 @@
     } else if (documentKind === "prompt") {
       setPromptEntries((await api.deletePromptEntry(pane.scene.id)).entries);
     } else if (documentKind === "assistant") {
-      assistantEntries = (await api.deleteAssistantEntry(pane.scene.id)).entries;
+      setAssistantEntries((await api.deleteAssistantEntry(pane.scene.id)).entries);
     } else if (documentKind === "chat") {
       setChatSessions((await api.deleteChatSession(pane.scene.id)).sessions);
       if (activeChatId === pane.scene.id) activeChatId = null;

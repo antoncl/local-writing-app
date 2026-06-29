@@ -86,6 +86,7 @@
   } from "./stores/schema";
   import { implicitContextMatcherStore } from "./stores/derived";
   import { loadProjectData } from "./stores/index";
+  import { focusedDocumentStore, pinnedKeysStore } from "./stores/editorFocus";
   import GroupsManagerDialog from "./GroupsManagerDialog.svelte";
   import TagManagerDialog from "./TagManagerDialog.svelte";
   import type { OptionDraft } from "./SelectOptionsEditor.svelte";
@@ -247,6 +248,10 @@
   let tagsManagerOpen = false;
   let focusedEditorPaneId: string | null = null;
   $: focusedEditorPane = editorPanes.find((pane) => pane.id === focusedEditorPaneId) ?? editorPanes[0] ?? null;
+  // Write-through the focused doc to the editor-focus store so the list panes
+  // read it directly instead of having it drilled in (#14 Step 2). App is the
+  // sole writer (projection of editorPanes).
+  $: focusedDocumentStore.set(focusedEditorPane?.document ?? null);
   $: activeScene = focusedEditorPane?.document?.type === "scene" ? focusedEditorPane.scene : null;
   let activeParentId: string | undefined = undefined;
   let addMenuOpenFor: string | null = null;
@@ -1274,6 +1279,8 @@
       .filter((pane) => pane.pinned && pane.document)
       .map((pane) => `${pane.document!.type}:${pane.document!.id}`),
   );
+  // Write-through to the editor-focus store (read by the list panes' pin-star).
+  $: pinnedKeysStore.set(pinnedEditorPaneKeys);
 
   function paneEntryFromAncestor(pane: EditorPaneState): boolean {
     const layerId = pane.scene?.source_layer_id;
@@ -3374,10 +3381,7 @@
       <Tree
         config={manuscriptTree}
         {structure}
-        collapsed={collapsedStructureNodes}
-        focusedDocument={focusedEditorPane?.document ?? null}
-        pinnedKeys={pinnedEditorPaneKeys}
-        draftTitles={draftTitleByScene}
+        collapsed={collapsedStructureNodes}        draftTitles={draftTitleByScene}
         sectionLabel="Scenes"
         emptyLabel="No scenes yet."
         {run}
@@ -3396,10 +3400,7 @@
     {/snippet}
     <div class="pane-content">
       <Lore
-        entries={loreEntries}
-        focusedDocument={focusedEditorPane?.document ?? null}
-        pinnedKeys={pinnedEditorPaneKeys}
-        onOpenEntry={(id) => openLoreEntryInEditorPane(id)}
+        entries={loreEntries}        onOpenEntry={(id) => openLoreEntryInEditorPane(id)}
         onMoveNoteToResearch={(entry) => requestMoveLoreNoteToResearch(entry)}
       />
     </div>
@@ -3410,10 +3411,7 @@
       <Tree
         config={researchTree}
         structure={researchStructure}
-        collapsed={collapsedResearchNodes}
-        focusedDocument={focusedEditorPane?.document ?? null}
-        pinnedKeys={pinnedEditorPaneKeys}
-        draftTitles={draftTitleByScene}
+        collapsed={collapsedResearchNodes}        draftTitles={draftTitleByScene}
         sectionLabel="Notes"
         emptyLabel="No topics or notes yet."
         {run}
@@ -3526,10 +3524,7 @@
     {/snippet}
     <div class="pane-content schema-list">
       <Prompts
-        entries={promptEntries}
-        focusedDocument={focusedEditorPane?.document ?? null}
-        pinnedKeys={pinnedEditorPaneKeys}
-        onOpenEntry={(id) => openPromptEntryInEditorPane(id)}
+        entries={promptEntries}        onOpenEntry={(id) => openPromptEntryInEditorPane(id)}
         onNewEntry={(entryType) => newPromptEntry(entryType)}
       />
     </div>
@@ -3542,10 +3537,7 @@
     {/snippet}
     <div class="pane-content schema-list">
       <Assistants
-        entries={assistantEntries}
-        focusedDocument={focusedEditorPane?.document ?? null}
-        pinnedKeys={pinnedEditorPaneKeys}
-        defaultAssistantId={defaultAssistantId}
+        entries={assistantEntries}        defaultAssistantId={defaultAssistantId}
         onOpenEntry={(id) => openAssistantEntryInEditorPane(id)}
         onReorder={reorderAssistantsInLayer}
       />

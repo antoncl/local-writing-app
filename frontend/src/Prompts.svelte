@@ -8,12 +8,14 @@
   import NodeRow from "./NodeRow.svelte";
   import NodeList from "./NodeList.svelte";
   import { metadataSchemaStore } from "./stores/schema";
+  import { focusedDocumentStore, pinnedKeysStore } from "./stores/editorFocus";
 
   // metadataSchema is global per-project — read from the store, not a prop (#14 Step 2).
   $: schema = $metadataSchemaStore;
   export let entries: PromptEntrySummary[];
-  export let focusedDocument: { type: string; id: string } | null = null;
-  export let pinnedKeys: Set<string>;
+  // Active-row highlight + pin-star read from the editor-focus store, not props (#14 Step 2).
+  $: focusedDocument = $focusedDocumentStore;
+  $: pinnedKeys = $pinnedKeysStore;
   // Open a prompt entry in an editor pane (App owns the pane set).
   export let onOpenEntry: (entryId: string) => void;
   // Create a new prompt entry of the given concrete sub-type.

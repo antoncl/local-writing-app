@@ -63,6 +63,7 @@
     updateNodeTitleInTree,
   } from "./treeHelpers";
   import { metadataSchemaStore } from "./stores/schema";
+  import { focusedDocumentStore, pinnedKeysStore } from "./stores/editorFocus";
 
   export let config: TreeConfig;
   // Reactive tree data — drives the render. Handlers read config.getStructure()
@@ -72,8 +73,9 @@
   // metadataSchema is global per-project — read it from the store instead of
   // drilling it as a prop (#14 Step 2).
   $: schema = $metadataSchemaStore;
-  export let focusedDocument: { type: string; id: string } | null = null;
-  export let pinnedKeys: Set<string>;
+  // Active-row highlight + pin-star read from the editor-focus store, not props (#14 Step 2).
+  $: focusedDocument = $focusedDocumentStore;
+  $: pinnedKeys = $pinnedKeysStore;
   export let draftTitles: Map<string, string>;
   export let sectionLabel: string;
   export let emptyLabel: string;

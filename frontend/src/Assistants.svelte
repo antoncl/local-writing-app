@@ -11,10 +11,12 @@
 <script lang="ts">
   import NodeRow from "./NodeRow.svelte";
   import NodeList from "./NodeList.svelte";
+  import { focusedDocumentStore, pinnedKeysStore } from "./stores/editorFocus";
 
   export let entries: AssistantEntrySummary[];
-  export let focusedDocument: { type: string; id: string } | null = null;
-  export let pinnedKeys: Set<string>;
+  // Active-row highlight + pin-star read from the editor-focus store, not props (#14 Step 2).
+  $: focusedDocument = $focusedDocumentStore;
+  $: pinnedKeys = $pinnedKeysStore;
   // App resolves the default-assistant id (it's also read by the chat pane), so
   // it's passed in rather than recomputed here.
   export let defaultAssistantId: string;

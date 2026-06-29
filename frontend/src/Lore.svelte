@@ -19,12 +19,14 @@
   import NodeList from "./NodeList.svelte";
   import { getSwatch, resolveColorForType } from "./colors";
   import { metadataSchemaStore } from "./stores/schema";
+  import { focusedDocumentStore, pinnedKeysStore } from "./stores/editorFocus";
 
   export let entries: LoreEntrySummary[];
   // metadataSchema is global per-project — read from the store, not a prop (#14 Step 2).
   $: schema = $metadataSchemaStore;
-  export let focusedDocument: { type: string; id: string } | null = null;
-  export let pinnedKeys: Set<string>;
+  // Active-row highlight + pin-star read from the editor-focus store, not props (#14 Step 2).
+  $: focusedDocument = $focusedDocumentStore;
+  $: pinnedKeys = $pinnedKeysStore;
   // Open an entry in an editor pane (App owns the pane set).
   export let onOpenEntry: (entryId: string) => void;
   // Migrate a lore note into the Research tree (App owns the confirm flow).

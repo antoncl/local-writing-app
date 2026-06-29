@@ -176,3 +176,201 @@
     </button>
   </div>
 </header>
+
+<style>
+  .top-bar {
+    position: fixed;
+    top: 0;
+    left: 0;
+    right: 0;
+    height: 40px;
+    z-index: 100;
+    display: flex;
+    align-items: center;
+    gap: 16px;
+    padding: 0 16px;
+    background: var(--surface);
+    border-bottom: 1px solid var(--border);
+    box-shadow: 0 1px 2px rgba(36, 36, 36, 0.04);
+  }
+
+  .top-bar .wordmark {
+    font-weight: 600;
+    font-size: 14px;
+    color: var(--text);
+    letter-spacing: 0.02em;
+    user-select: none;
+  }
+
+  .top-bar .switcher-wrap {
+    position: relative;
+  }
+
+  .top-bar .switcher-button {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    padding: 4px 10px;
+    border: 1px solid var(--divider);
+    background: var(--inset);
+    color: var(--text);
+    font-size: 13px;
+    border-radius: 6px;
+    cursor: pointer;
+    min-width: 200px;
+    max-width: 360px;
+  }
+
+  .top-bar .switcher-button:hover,
+  .top-bar .switcher-button.active {
+    background: var(--panel);
+    border-color: var(--border);
+  }
+
+  .top-bar .switcher-button .chevron {
+    font-size: 10px;
+    color: var(--text-3);
+  }
+
+  .top-bar .switcher-button .switcher-label {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    flex: 1;
+    text-align: left;
+  }
+
+  .top-bar .switcher-button .project-color-dot {
+    display: inline-block;
+    width: 10px;
+    height: 10px;
+    flex: none;
+    border-radius: 50%;
+    border: 1px solid rgba(0, 0, 0, 0.18);
+  }
+
+  /* `.entry-type-dot` removed — Phase 4 used it on lore rows, but per
+     [[decisions-ui-widget-taxonomy]] whole-row color belongs on a Stripe
+     (the NodeRow `.has-status-stripe` band), not an inline Dot. The Dot
+     pattern is reserved for label clusters (e.g. .project-color-dot in the
+     switcher). */
+
+  .top-bar .switcher-overlay {
+    position: fixed;
+    inset: 0;
+    z-index: 99;
+  }
+
+  .top-bar .switcher-menu {
+    position: absolute;
+    top: calc(100% + 4px);
+    left: 0;
+    z-index: 101;
+    min-width: 320px;
+    max-width: 480px;
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    box-shadow: 0 12px 28px rgba(36, 36, 36, 0.16);
+    padding: 6px;
+    display: grid;
+    gap: 1px;
+  }
+
+  .top-bar .switcher-section-label {
+    font-size: 11px;
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+    color: var(--text-3);
+    padding: 6px 10px 2px;
+    font-weight: 600;
+  }
+
+  .top-bar .switcher-item {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 8px 10px;
+    background: transparent;
+    border: 1px solid transparent;
+    border-radius: 4px;
+    color: var(--text);
+    font-size: 13px;
+    text-align: left;
+    cursor: pointer;
+    width: 100%;
+  }
+
+  .top-bar .switcher-item:hover {
+    background: var(--panel);
+  }
+
+  .top-bar .recent-item {
+    flex-direction: column;
+    align-items: stretch;
+    gap: 2px;
+  }
+
+  .top-bar .recent-title {
+    font-weight: 500;
+    color: var(--text);
+  }
+
+  .top-bar .recent-meta {
+    display: flex;
+    gap: 8px;
+    font-size: 11px;
+    color: var(--text-3);
+    justify-content: space-between;
+  }
+
+  .top-bar .recent-path {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  }
+
+  .top-bar .switcher-divider {
+    height: 1px;
+    background: var(--divider);
+    margin: 4px 0;
+  }
+
+  .top-bar .switcher-icon {
+    width: 18px;
+    text-align: center;
+  }
+
+  .top-bar .actions {
+    margin-left: auto;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+  }
+
+  .top-bar .action-button {
+    padding: 4px 10px;
+    font-size: 13px;
+    border: 1px solid var(--divider);
+    background: var(--surface);
+    border-radius: 6px;
+    cursor: pointer;
+    color: var(--text);
+  }
+
+  .top-bar .action-button:hover:not(:disabled) {
+    background: var(--panel);
+  }
+
+  .top-bar .action-button:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
+  }
+
+  .top-bar .icon-button {
+    padding: 4px 8px;
+    font-size: 16px;
+    line-height: 1;
+  }
+</style>

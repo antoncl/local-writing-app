@@ -156,6 +156,56 @@ Not "files under N lines." Instead: **every surface reduces to a canonical widge
 state lives in the reactive layer; touched components are on runes.** Line count
 is a derived smell, not the acceptance test.
 
+**Acceptance test:** the frontend would **pass a code review by a competent body of
+experienced Svelte/TypeScript developers.** The three criteria above are the *how*;
+"best practices" also covers idiomatic **file/folder structure** (below) and
+component-layout-in-file. `App.svelte` / `styles.css` shrinking is the derived smell
+clearing — a consequence of proper decomposition, not a separate metric. Runes is a
+means (it removes the reactivity-trap tax + dispatcher noise), never an end in itself.
+
+## Target file layout
+
+Today `frontend/src/` is a near-flat dump (47 `.svelte` + ~17 `.ts`, only `stores/`
+foldered) — itself a review failure. Target: split by responsibility under a single
+**`@/` → `src/` path alias** (vite `resolve.alias` + tsconfig `paths`; one alias covers
+both siblings, e.g. `@/lib/api`, `@/components/widgets/NodeRow.svelte`). Do the move as
+one isolated, early, mechanical commit (`git mv` + import rewrite, verified by
+`npm run build` + `svelte-check`) *before* the App/ProseBodyView decomposition, so new
+extracted files are born into the right homes.
+
+```
+src/
+  main.ts                      entry
+  App.svelte                   thin root shell (post-decomposition)
+  app.css                      global tokens/reset only (from styles.css, post co-location)
+  vendor.d.ts
+  lib/
+    api.ts  types.ts
+    stores/                    + focusTargetStore.ts moved in
+    utils/                     colors money markdown fieldIcons treeHelpers
+                               schemaTypeHelpers promptInputs chatMessageRender
+                               sanitizePastedHtml theme
+    editor-core/               implicitContextHighlight  implicitContextMatcher
+  components/
+    chrome/                    TopBar
+    panes/                     Pane Tree Lore Prompts Chats Assistants Project Search Todo
+    editor/                    NodeEditor MetadataPanel BacklinksPanel InputsDialog
+      body/                    ProseBodyView CodeBodyView ChatBodyView FieldsOnlyView
+    schema/                    SchemaTypeEditor SchemaTreePane SchemaFieldRow
+                               SchemaFieldInlineEditor SelectOptionsEditor
+                               DefaultValueEditor NodePickerConfigEditor
+    widgets/                   NodeRow NodeList NodePicker ReferencePicker ColoredSelect
+                               SwatchPicker IconPicker TagPicker ProviderTierPicker
+                               PromptInputField PlainTextEditor CodeEditor
+                               MetadataLongTextEditor SearchInput
+    dialogs/                   Modal ConfirmModal NewProjectModal DirectoryPickerModal
+                               MachineSettingsDialog GroupsManagerDialog TagManagerDialog
+```
+
+New files from decomposition land in the matching folder (e.g. P0 autosave controller →
+`lib/stores/editorPanes.svelte.ts` + `components/editor/EditorPaneHost.svelte`; P2
+ProseBodyView TipTap/toolbar/slash sidecars → `components/editor/body/prose/`).
+
 ## References
 
 - `memory/decisions_ui_widget_taxonomy.md` — the three core widgets + color parts.

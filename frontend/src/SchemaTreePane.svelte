@@ -105,14 +105,14 @@
     collapsed={childCount === 0}
     draggable={!typeSource?.built_in}
     onClick={() => onOpenType(node.id)}
-    on:dragstart={() => {
+    ondragstart={() => {
       if (!typeSource?.built_in) onStartTypeDrag(node.id);
     }}
-    on:dragend={() => (draggedSchemaTypeId = null)}
-    on:dragover={(event) => {
+    ondragend={() => (draggedSchemaTypeId = null)}
+    ondragover={(event) => {
       if (draggedSchemaTypeId && draggedSchemaTypeId !== node.id) event.preventDefault();
     }}
-    on:drop={(event) => {
+    ondrop={(event) => {
       event.preventDefault();
       onDropTypeOnParent(node.id);
     }}

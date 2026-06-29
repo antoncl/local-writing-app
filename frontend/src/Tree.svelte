@@ -430,10 +430,10 @@
       dragging={config.supportsDrag && draggedNodeId === node.id}
       dropPosition={config.supportsDrag && dragOverNodeId === node.id ? dragOverPosition : null}
       onClick={() => node.scene_id && run(() => config.openLeaf(node.scene_id!))}
-      on:mousedown={(event) => event.stopPropagation()}
-      on:keydown={(event) => handleRowKeydown(event, node)}
-      on:dragover={(event) => { if (config.supportsDrag) handleTreeDragOver(event, node); }}
-      on:drop={(event) => { if (config.supportsDrag) handleTreeDrop(event, node); }}
+      onmousedown={(event) => event.stopPropagation()}
+      onkeydown={(event) => handleRowKeydown(event, node)}
+      ondragover={(event) => { if (config.supportsDrag) handleTreeDragOver(event, node); }}
+      ondrop={(event) => { if (config.supportsDrag) handleTreeDrop(event, node); }}
     >
       {#snippet leading()}
         {#if config.supportsDrag}
@@ -464,9 +464,9 @@
       collapsed={leaf ? true : (!!collapsedMap[node.id] || childNodes.length === 0)}
       clickable={false}
       dataNodeId={node.id}
-      on:mousedown={(event) => event.stopPropagation()}
-      on:dragover={(event) => { if (config.supportsDrag) handleTreeDragOver(event, node); }}
-      on:drop={(event) => { if (config.supportsDrag) handleTreeDrop(event, node); }}
+      onmousedown={(event) => event.stopPropagation()}
+      ondragover={(event) => { if (config.supportsDrag) handleTreeDragOver(event, node); }}
+      ondrop={(event) => { if (config.supportsDrag) handleTreeDrop(event, node); }}
     >
       {#snippet titleSlot()}
         <input
@@ -502,10 +502,10 @@
       dataNodeId={node.id}
       onClick={() => config.onGroupClick(node.id)}
       onDblClick={() => handleGroupDblClick(node)}
-      on:mousedown={(event) => event.stopPropagation()}
-      on:keydown={(event) => handleRowKeydown(event, node)}
-      on:dragover={(event) => { if (config.supportsDrag) handleTreeDragOver(event, node); }}
-      on:drop={(event) => { if (config.supportsDrag) handleTreeDrop(event, node); }}
+      onmousedown={(event) => event.stopPropagation()}
+      onkeydown={(event) => handleRowKeydown(event, node)}
+      ondragover={(event) => { if (config.supportsDrag) handleTreeDragOver(event, node); }}
+      ondrop={(event) => { if (config.supportsDrag) handleTreeDrop(event, node); }}
     >
       {#snippet leading()}
         {#if config.supportsDrag}

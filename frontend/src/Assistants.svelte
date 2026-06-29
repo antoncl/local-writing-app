@@ -163,9 +163,9 @@
             dragging={dragId === entry.id}
             dropPosition={dropTarget?.id === entry.id ? (dropTarget?.position ?? null) : null}
             onClick={() => onOpenEntry(entry.id)}
-            on:dragover={(event) => onDragOver(event, entry)}
-            on:dragleave={onDragLeave}
-            on:drop={(event) => onDrop(event, entry)}
+            ondragover={(event) => onDragOver(event, entry)}
+            ondragleave={onDragLeave}
+            ondrop={(event) => onDrop(event, entry)}
           >
             {#snippet leading()}
               <span

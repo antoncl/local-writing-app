@@ -127,7 +127,7 @@
       title={group.label}
       depth={group.depth}
       onClick={() => toggleGroup(group.id)}
-      on:mousedown={(event) => event.stopPropagation()}
+      onmousedown={(event) => event.stopPropagation()}
     >
       {#snippet leading()}
         <span class:collapsed={collapsedGroups[group.id]} class="lore-group-caret">▾</span>
@@ -155,7 +155,7 @@
               pinned={pinnedKeys.has(`lore:${entry.id}`)}
               stripeColor={entrySwatch?.hex ?? null}
               onClick={() => onOpenEntry(entry.id)}
-              on:mousedown={(event) => event.stopPropagation()}
+              onmousedown={(event) => event.stopPropagation()}
             >
               {#snippet trailing()}
                 {#if entry.entry_type === "lore_note"}

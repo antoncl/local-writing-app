@@ -24,94 +24,141 @@
   type NodeListModeContext = { readonly current: "card" | "tree" };
   const nodeListMode = getContext<NodeListModeContext | undefined>("nodeListMode");
 
-  export let title: string = "";
-  // One-line secondary text under the title. Pass `detail` (string) OR
-  // the `detailSlot` snippet for richer content. Callers omit kind/type
-  // prefixes when the row's context already implies them (e.g. a lore
-  // entry inside a Character group doesn't say "Character · …").
-  export let detail: string | null = null;
-  export let active: boolean = false;
-  export let stripeColor: string | null = null;
-  // Tree indent. Resolved to `padding-left: depth * 14px`.
-  export let depth: number = 0;
-  export let onClick: ((event: MouseEvent) => void) | undefined = undefined;
-  export let onDblClick: ((event: MouseEvent) => void) | undefined = undefined;
-  // Identifier landed on the row's outer div as data-node-id, used by
-  // programmatic focus helpers (e.g. refocus-after-move) to find a
-  // specific row by node id without a per-pane custom selector.
-  export let dataNodeId: string | null = null;
-  // Drag visuals. Parent owns drag state and passes these in.
-  export let dragging: boolean = false;
-  export let dropPosition: "before" | "after" | "into" | null = null;
-  export let ariaLabel: string | null = null;
-  // Disable the click button (e.g. when inline-editing the title). The
-  // outer row still renders; just no clickable label.
-  export let clickable: boolean = true;
-  // Visual chrome. Optional override — if unset, NodeRow inherits the
-  // enclosing NodeList's mode via the `nodeListMode` context. Header
-  // rows (groupHeader=true) always render bare regardless of either.
-  // Kept for backward compat with the handful of NodeRow callers that
-  // were written before NodeList.mode landed; new code should set mode
-  // on the NodeList and leave this unset.
-  export let variant: "card" | "tree" | undefined = undefined;
-  // Override aria/dom role on the outer container.
-  export let role: string | null = null;
-  // Tag pills under the title. Bound explicitly to `metadata.tags` —
-  // do NOT pass aliases here (aliases live in the editor pane, not
-  // the row). Visible cap: TAG_VISIBLE_MAX; overflow becomes a +N chip.
-  export let tags: readonly string[] = [];
-  // Group-header treatment: serif title + a hairline rule under the
-  // row. Pair with variant="tree", a caret in leading, and a count
-  // pill in trailing. The "chapter divider" look from the Editorial
-  // Card direction.
-  export let groupHeader: boolean = false;
-  // When true, the children slot is fully suppressed — including its
-  // wrapper. Lets a group-header caller collapse the tier panel cleanly
-  // without it leaving a thin tinted strip from padding alone.
-  export let collapsed: boolean = false;
-  // Make the entire row a drag source. Set on the outer container; the
-  // caller wires drag handlers via on:dragstart / on:dragend forwarders.
-  // Lets a row support reorder without paying for a visible drag handle
-  // in the leading slot (which would visually distinguish it from rows
-  // that don't reorder, e.g. lore characters).
-  export let draggable: boolean = false;
-  // True when the node this row represents is currently open in a
-  // pinned editor pane. NodeRow renders a non-interactive star
-  // indicator; the actual pin/unpin toggle lives on the editor pane
-  // (its existing pane-header pin button). The indicator is uniform
-  // across every NodeRow consumer so users learn one pattern.
-  export let pinned: boolean = false;
+  interface Props {
+    title?: string;
+    // One-line secondary text under the title. Pass `detail` (string) OR
+    // the `detailSlot` snippet for richer content. Callers omit kind/type
+    // prefixes when the row's context already implies them (e.g. a lore
+    // entry inside a Character group doesn't say "Character · …").
+    detail?: string | null;
+    active?: boolean;
+    stripeColor?: string | null;
+    // Tree indent. Resolved to `padding-left: depth * 14px`.
+    depth?: number;
+    onClick?: (event: MouseEvent) => void;
+    onDblClick?: (event: MouseEvent) => void;
+    // Identifier landed on the row's outer div as data-node-id, used by
+    // programmatic focus helpers (e.g. refocus-after-move) to find a
+    // specific row by node id without a per-pane custom selector.
+    dataNodeId?: string | null;
+    // Drag visuals. Parent owns drag state and passes these in.
+    dragging?: boolean;
+    dropPosition?: "before" | "after" | "into" | null;
+    ariaLabel?: string | null;
+    // Disable the click button (e.g. when inline-editing the title). The
+    // outer row still renders; just no clickable label.
+    clickable?: boolean;
+    // Visual chrome. Optional override — if unset, NodeRow inherits the
+    // enclosing NodeList's mode via the `nodeListMode` context. Header
+    // rows (groupHeader=true) always render bare regardless of either.
+    // Kept for backward compat with the handful of NodeRow callers that
+    // were written before NodeList.mode landed; new code should set mode
+    // on the NodeList and leave this unset.
+    variant?: "card" | "tree" | undefined;
+    // Override aria/dom role on the outer container.
+    role?: string | null;
+    // Tag pills under the title. Bound explicitly to `metadata.tags` —
+    // do NOT pass aliases here (aliases live in the editor pane, not
+    // the row). Visible cap: TAG_VISIBLE_MAX; overflow becomes a +N chip.
+    tags?: readonly string[];
+    // Group-header treatment: serif title + a hairline rule under the
+    // row. Pair with variant="tree", a caret in leading, and a count
+    // pill in trailing. The "chapter divider" look from the Editorial
+    // Card direction.
+    groupHeader?: boolean;
+    // When true, the children slot is fully suppressed — including its
+    // wrapper. Lets a group-header caller collapse the tier panel cleanly
+    // without it leaving a thin tinted strip from padding alone.
+    collapsed?: boolean;
+    // Make the entire row a drag source. Set on the outer container; the
+    // caller wires drag handlers via the on*-drag handler props below.
+    // Lets a row support reorder without paying for a visible drag handle
+    // in the leading slot (which would visually distinguish it from rows
+    // that don't reorder, e.g. lore characters).
+    draggable?: boolean;
+    // True when the node this row represents is currently open in a
+    // pinned editor pane. NodeRow renders a non-interactive star
+    // indicator; the actual pin/unpin toggle lives on the editor pane
+    // (its existing pane-header pin button). The indicator is uniform
+    // across every NodeRow consumer so users learn one pattern.
+    pinned?: boolean;
 
-  // Snippet props.
-  export let leading: Snippet | undefined = undefined;
-  export let trailing: Snippet | undefined = undefined;
-  // Overrides the `detail` string prop when provided.
-  export let detailSlot: Snippet | undefined = undefined;
-  // Replace the entire title + detail area with custom content (e.g. a
-  // rename input). Suppresses the default <button>.
-  export let titleSlot: Snippet | undefined = undefined;
-  // Nested rows rendered after the main row. Indent is the caller's
-  // responsibility (they re-render NodeRow with `depth + 1`).
-  //
-  // Why `nested` and not `children`: Svelte 5 implicitly populates a
-  // `children` prop with ANY content between `<NodeRow>` tags — including
-  // bare `{#if}` blocks that only wrap a `{#snippet leading}`. That
-  // implicit value was non-null even when no real nested rows existed,
-  // which made the `.node-row-group-children` wrapper render as an empty
-  // tinted bar below leaf rows. Using a non-reserved prop name keeps the
-  // wrapper opt-in.
-  export let nested: Snippet | undefined = undefined;
+    // Root-element DOM event handlers. Previously bare `on:` forwarders;
+    // under runes the caller passes them as explicit props that we bind
+    // onto the outer <div>. Drag/drop reorder is wired through these.
+    onmousedown?: (event: MouseEvent) => void;
+    onkeydown?: (event: KeyboardEvent) => void;
+    ondragstart?: (event: DragEvent) => void;
+    ondragend?: (event: DragEvent) => void;
+    ondragover?: (event: DragEvent) => void;
+    ondragleave?: (event: DragEvent) => void;
+    ondrop?: (event: DragEvent) => void;
+
+    // Snippet props.
+    leading?: Snippet;
+    trailing?: Snippet;
+    // Overrides the `detail` string prop when provided.
+    detailSlot?: Snippet;
+    // Replace the entire title + detail area with custom content (e.g. a
+    // rename input). Suppresses the default <button>.
+    titleSlot?: Snippet;
+    // Nested rows rendered after the main row. Indent is the caller's
+    // responsibility (they re-render NodeRow with `depth + 1`).
+    //
+    // Why `nested` and not `children`: Svelte 5 implicitly populates a
+    // `children` prop with ANY content between `<NodeRow>` tags — including
+    // bare `{#if}` blocks that only wrap a `{#snippet leading}`. That
+    // implicit value was non-null even when no real nested rows existed,
+    // which made the `.node-row-group-children` wrapper render as an empty
+    // tinted bar below leaf rows. Using a non-reserved prop name keeps the
+    // wrapper opt-in.
+    nested?: Snippet;
+  }
+
+  let {
+    title = "",
+    detail = null,
+    active = false,
+    stripeColor = null,
+    depth = 0,
+    onClick,
+    onDblClick,
+    dataNodeId = null,
+    dragging = false,
+    dropPosition = null,
+    ariaLabel = null,
+    clickable = true,
+    variant = undefined,
+    role = null,
+    tags = [],
+    groupHeader = false,
+    collapsed = false,
+    draggable = false,
+    pinned = false,
+    onmousedown,
+    onkeydown,
+    ondragstart,
+    ondragend,
+    ondragover,
+    ondragleave,
+    ondrop,
+    leading,
+    trailing,
+    detailSlot,
+    titleSlot,
+    nested,
+  }: Props = $props();
 
   const TAG_VISIBLE_MAX = 2;
 
-  $: indentStyle = depth > 0 ? `padding-left: ${depth * 14}px` : "";
-  $: stripeStyle = stripeColor ? `--row-stripe: ${stripeColor}` : "";
-  $: rootStyle = [indentStyle, stripeStyle].filter(Boolean).join("; ");
+  const indentStyle = $derived(depth > 0 ? `padding-left: ${depth * 14}px` : "");
+  const stripeStyle = $derived(stripeColor ? `--row-stripe: ${stripeColor}` : "");
+  const rootStyle = $derived([indentStyle, stripeStyle].filter(Boolean).join("; "));
   // Effective mode: header rows always bare; otherwise explicit variant
   // prop wins, then enclosing NodeList's mode (via context), then card.
-  $: effectiveMode = groupHeader ? "tree" : (variant ?? nodeListMode?.current ?? "card");
-  $: visibleTags = tags.slice(0, TAG_VISIBLE_MAX);
-  $: hiddenTagCount = Math.max(0, tags.length - TAG_VISIBLE_MAX);
+  const effectiveMode = $derived(groupHeader ? "tree" : (variant ?? nodeListMode?.current ?? "card"));
+  const visibleTags = $derived(tags.slice(0, TAG_VISIBLE_MAX));
+  const hiddenTagCount = $derived(Math.max(0, tags.length - TAG_VISIBLE_MAX));
 </script>
 
 <!-- svelte-ignore a11y_no_static_element_interactions -->
@@ -133,14 +180,14 @@
   style={rootStyle}
   data-node-id={dataNodeId}
   draggable={draggable || undefined}
-  on:mousedown
-  on:keydown
-  on:dragstart
-  on:dragend
-  on:dragover
-  on:dragleave
-  on:drop
->{#if leading}{@render leading()}{/if}{#if titleSlot}{@render titleSlot()}{:else if clickable}<button type="button" class="node-row-click" on:click={onClick} on:dblclick={onDblClick}><span class="node-row-text"><strong>{title}</strong>{#if detailSlot}{@render detailSlot()}{:else if detail}<small>{detail}</small>{/if}{#if visibleTags.length > 0}<span class="node-row-tags">{#each visibleTags as tag}<span class="node-row-tag">{tag}</span>{/each}{#if hiddenTagCount > 0}<span class="node-row-tag node-row-tag-overflow">+{hiddenTagCount}</span>{/if}</span>{/if}</span></button>{:else}<span class="node-row-text"><strong>{title}</strong>{#if detailSlot}{@render detailSlot()}{:else if detail}<small>{detail}</small>{/if}{#if visibleTags.length > 0}<span class="node-row-tags">{#each visibleTags as tag}<span class="node-row-tag">{tag}</span>{/each}{#if hiddenTagCount > 0}<span class="node-row-tag node-row-tag-overflow">+{hiddenTagCount}</span>{/if}</span>{/if}</span>{/if}{#if pinned}<span class="node-row-pin-indicator" title="Open in a pinned editor" aria-label="Pinned in editor">★</span>{/if}{#if trailing}<span class="node-row-trailing">{@render trailing()}</span>{/if}</div>
+  {onmousedown}
+  {onkeydown}
+  {ondragstart}
+  {ondragend}
+  {ondragover}
+  {ondragleave}
+  {ondrop}
+>{#if leading}{@render leading()}{/if}{#if titleSlot}{@render titleSlot()}{:else if clickable}<button type="button" class="node-row-click" onclick={onClick} ondblclick={onDblClick}><span class="node-row-text"><strong>{title}</strong>{#if detailSlot}{@render detailSlot()}{:else if detail}<small>{detail}</small>{/if}{#if visibleTags.length > 0}<span class="node-row-tags">{#each visibleTags as tag}<span class="node-row-tag">{tag}</span>{/each}{#if hiddenTagCount > 0}<span class="node-row-tag node-row-tag-overflow">+{hiddenTagCount}</span>{/if}</span>{/if}</span></button>{:else}<span class="node-row-text"><strong>{title}</strong>{#if detailSlot}{@render detailSlot()}{:else if detail}<small>{detail}</small>{/if}{#if visibleTags.length > 0}<span class="node-row-tags">{#each visibleTags as tag}<span class="node-row-tag">{tag}</span>{/each}{#if hiddenTagCount > 0}<span class="node-row-tag node-row-tag-overflow">+{hiddenTagCount}</span>{/if}</span>{/if}</span>{/if}{#if pinned}<span class="node-row-pin-indicator" title="Open in a pinned editor" aria-label="Pinned in editor">★</span>{/if}{#if trailing}<span class="node-row-trailing">{@render trailing()}</span>{/if}</div>
 
 {#if nested && !collapsed}
   <div class="node-row-group-children">{@render nested()}</div>

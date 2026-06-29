@@ -33,7 +33,9 @@
   and outstanding-work-2026-06-25-phase-2 for the contract design.
 -->
 <script lang="ts">
-  import { createEventDispatcher, onMount } from "svelte";
+  import { preventDefault } from 'svelte/legacy';
+
+  import { onMount } from "svelte";
   import { Editor, Mark, mergeAttributes } from "@tiptap/core";
   import { Fragment, type Node as ProseMirrorNode } from "@tiptap/pm/model";
   import { TextSelection } from "@tiptap/pm/state";
@@ -112,42 +114,65 @@
   const SLASH_COMMAND_PATTERN = /^[a-zA-Z0-9_-]*$/;
   const SLASH_WITH_ARGS_PATTERN = /^([a-zA-Z0-9_-]+)\s+(.*)$/;
 
-  // ---------- Props ----------
-  export let scene: EditableDocument | null = null;
-  export let documentKind: DocumentKind = "scene";
-  // metadataSchema is global per-project — read from the store, not a prop (#14 Step 2).
-  $: metadataSchema = $metadataSchemaStore;
-  export let promptEntries: PromptEntrySummary[] = [];
-  export let loreEntries: LoreEntrySummary[] = [];
-  export let availableScenes: { id: string; title: string }[] = [];
-  export let implicitContextMatcher: import("./implicitContextMatcher").CompiledMatcher | null = null;
-  export let documentLabel: string = "Scene";
+  
 
   // bound out so MetadataPanel's computedFieldString and the editor-hint
-  // string in the parent can read them.
-  export let liveWordCount = 0;
-  export let editorEmpty = true;
+  
   // Per-scene continuation cost rollup. Bound out so the parent's header
   // chip can render it (the AI streaming machinery that produces these
-  // values lives here, but the chip lives in the shell header).
-  export let lastInvocationCostUsd: number | null = null;
-  export let sceneSessionCostUsd = 0;
+  
   // Per-character cost rollup for THIS scene, summed from the persisted
   // ai_invocations log. Bound out so NodeEditor's footer can render the
-  // per-character mini-chips next to the session chip.
-  export let characterCostUsd: Record<string, number> = {};
-
-  const dispatch = createEventDispatcher<{
-    "body-change": void;
-    focus: void;
-    "embedded-todos": { todos: EmbeddedTodo[] };
-    "open-chat": { entry: PromptEntrySummary; inputs: Record<string, unknown>; sceneId: string | null; assistantId: string };
-    "request-inputs-dialog": {
+  
+  interface Props {
+    // ---------- Props ----------
+    scene?: EditableDocument | null;
+    documentKind?: DocumentKind;
+    promptEntries?: PromptEntrySummary[];
+    loreEntries?: LoreEntrySummary[];
+    availableScenes?: { id: string; title: string }[];
+    implicitContextMatcher?: import("./implicitContextMatcher").CompiledMatcher | null;
+    documentLabel?: string;
+    // string in the parent can read them.
+    liveWordCount?: number;
+    editorEmpty?: boolean;
+    // values lives here, but the chip lives in the shell header).
+    lastInvocationCostUsd?: number | null;
+    sceneSessionCostUsd?: number;
+    // per-character mini-chips next to the session chip.
+    characterCostUsd?: Record<string, number>;
+    // Outbound events as callback props (#14: runes — replaces the dispatcher).
+    // NodeEditor (the funnel) passes these.
+    onBodyChange?: () => void;
+    onFocus?: () => void;
+    onEmbeddedTodos?: (payload: { todos: EmbeddedTodo[] }) => void;
+    onOpenChat?: (payload: { entry: PromptEntrySummary; inputs: Record<string, unknown>; sceneId: string | null; assistantId: string }) => void;
+    onRequestInputsDialog?: (payload: {
       entry: PromptEntrySummary;
       prefilledDrafts?: Record<string, string>;
       unresolved?: Array<{ name: string; label: string; token: string }>;
-    };
-  }>();
+    }) => void;
+  }
+
+  let {
+    scene = null,
+    documentKind = "scene",
+    promptEntries = [],
+    loreEntries = [],
+    availableScenes = [],
+    implicitContextMatcher = null,
+    documentLabel = "Scene",
+    liveWordCount = $bindable(0),
+    editorEmpty = $bindable(true),
+    lastInvocationCostUsd = $bindable(null),
+    sceneSessionCostUsd = $bindable(0),
+    characterCostUsd = $bindable({}),
+    onBodyChange,
+    onFocus,
+    onEmbeddedTodos,
+    onOpenChat,
+    onRequestInputsDialog,
+  }: Props = $props();
 
   // ---------- Custom TipTap extensions ----------
   const AISuggestion = Mark.create({
@@ -260,21 +285,21 @@
   });
 
   // ---------- State ----------
-  let editorFrame: HTMLDivElement;
-  let editorElement: HTMLDivElement;
-  let editor: Editor | null = null;
-  let loadedSceneId: string | null = null;
-  let selectionMenu: FloatingMenuState = { visible: false, x: 0, y: 0, wordCount: 0, placement: "above" };
-  let slashMenu: SlashMenuState = { visible: false, x: 0, y: 0, selectedIndex: 0, mode: "commands", gridRows: 1, gridCols: 1 };
-  let tableMenu: { visible: boolean; x: number; y: number } = { visible: false, x: 0, y: 0 };
-  let openToolbarMenuId: string | null = null;
+  let editorFrame = $state<HTMLDivElement>();
+  let editorElement = $state<HTMLDivElement>();
+  let editor: Editor | null = $state(null);
+  let loadedSceneId: string | null = $state(null);
+  let selectionMenu: FloatingMenuState = $state({ visible: false, x: 0, y: 0, wordCount: 0, placement: "above" });
+  let slashMenu: SlashMenuState = $state({ visible: false, x: 0, y: 0, selectedIndex: 0, mode: "commands", gridRows: 1, gridCols: 1 });
+  let tableMenu: { visible: boolean; x: number; y: number } = $state({ visible: false, x: 0, y: 0 });
+  let openToolbarMenuId: string | null = $state(null);
   let reconcilingTodoAnchors = false;
   let highlightedTodoId: string | null = null;
 
   // AI suggestion state. v1 supports a single pending suggestion at a time.
-  let aiGenerating = false;
-  let aiError: string | null = null;
-  let aiSuggestionId: string | null = null;
+  let aiGenerating = $state(false);
+  let aiError: string | null = $state(null);
+  let aiSuggestionId: string | null = $state(null);
   let aiSuggestionMeta: {
     provider: string;
     model: string;
@@ -283,11 +308,11 @@
     wordCount: number;
     usage?: ChatUsage | null;
     cost_usd?: number | null;
-  } | null = null;
+  } | null = $state(null);
   // V2: per-scene continuation cost rollup. Resets when you switch
   // scenes or reload the page. Frontend-only. Bound out as props above.
-  let lastSeenSceneIdForCost: string | null = null;
-  let aiToolbarPosition: { x: number; y: number; visible: boolean } = { x: 0, y: 0, visible: false };
+  let lastSeenSceneIdForCost: string | null = $state(null);
+  let aiToolbarPosition: { x: number; y: number; visible: boolean } = $state({ x: 0, y: 0, visible: false });
   let aiNextSuggestionId = 1;
   let aiSuggestionOriginal: string | null = null;
   let aiAnchorPos: number | null = null;
@@ -295,32 +320,9 @@
   let lastInvokedInputs: Record<string, unknown> = {};
   let lastInvokedAssistantId: string = "";
 
-  let slashFilterText = "";
+  let slashFilterText = $state("");
 
-  // ---------- Reactives ----------
-  $: slashCommands = editor && documentKind === "scene" ? getSlashCommands() : [];
-  $: parsedSlash = parseSlashBody(slashFilterText) ?? { command: slashFilterText, args: "" };
-  $: slashArgTokens = tokenizeSlashArgs(parsedSlash.args);
-  $: filteredSlashCommands = filterSlashCommands(slashCommands, parsedSlash.command, parsedSlash.args.length > 0);
-  $: activeSlashCommand = filteredSlashCommands[slashMenu.selectedIndex];
-  $: clampSlashSelectedIndex(filteredSlashCommands.length);
-  $: selectionToolbarActions = editor ? getSelectionToolbarActions() : [];
 
-  // Reset the per-scene cost tally when the active scene changes. Reading
-  // scene?.id directly so Svelte tracks the dependency
-  // ([[feedback-svelte5-reactivity-traps]] — function calls in `$:` don't).
-  $: {
-    const currentSceneId = scene?.id ?? null;
-    if (lastSeenSceneIdForCost !== currentSceneId) {
-      lastSeenSceneIdForCost = currentSceneId;
-      sceneSessionCostUsd = 0;
-      lastInvocationCostUsd = null;
-      characterCostUsd = {};
-      if (currentSceneId) {
-        void loadCharacterCostUsd(currentSceneId);
-      }
-    }
-  }
 
   async function loadCharacterCostUsd(sceneId: string): Promise<void> {
     try {
@@ -341,9 +343,6 @@
     }
   }
 
-  // Reactively poke the ImplicitContextHighlight extension when the
-  // matcher reference changes (lore added/edited at the App level).
-  $: if (editor) updateImplicitMatcher(implicitContextMatcher);
   function updateImplicitMatcher(next: typeof implicitContextMatcher): void {
     if (!editor) return;
     const ext = editor.extensionManager.extensions.find(
@@ -357,8 +356,6 @@
     view.dispatch(tr);
   }
 
-  // Suppress unused-warning for slashArgTokens (reserved for future slash UX).
-  $: void slashArgTokens;
 
   // ---------- Public methods (called via bind:this from parent) ----------
   export function getBody(): string {
@@ -402,7 +399,7 @@
 
   export function deleteEmbeddedTodo(todoId: string): void {
     if (removeTodoAnchors((anchorId) => anchorId === todoId)) {
-      dispatch("body-change");
+      onBodyChange?.();
     }
   }
 
@@ -867,7 +864,7 @@
               for (const { name } of resolved.unresolved) {
                 prefilled[name] = "";
               }
-              dispatch("request-inputs-dialog", {
+              onRequestInputsDialog?.({
                 entry,
                 prefilledDrafts: prefilled,
                 unresolved: resolved.unresolved,
@@ -884,24 +881,24 @@
   function setCellAlign(align: "left" | "center" | "right") {
     if (!editor) return;
     const { state, view } = editor;
-    const { $from } = state.selection;
+    const { $from: fromR } = state.selection;
     let tablePos = -1;
     let tableNode: ProseMirrorNode | null = null;
     let tableDepth = -1;
-    for (let d = $from.depth; d >= 0; d--) {
-      const node = $from.node(d);
+    for (let d = fromR.depth; d >= 0; d--) {
+      const node = fromR.node(d);
       if (node.type.name === "table") {
-        tablePos = $from.before(d);
+        tablePos = fromR.before(d);
         tableNode = node;
         tableDepth = d;
         break;
       }
     }
-    if (!tableNode || tablePos < 0 || $from.depth < tableDepth + 2) {
+    if (!tableNode || tablePos < 0 || fromR.depth < tableDepth + 2) {
       editor.chain().focus().setCellAttribute("align", align).run();
       return;
     }
-    const cellIndex = $from.index(tableDepth + 1);
+    const cellIndex = fromR.index(tableDepth + 1);
     let tr = state.tr;
     let rowPos = tablePos + 1;
     for (let i = 0; i < tableNode.childCount; i++) {
@@ -1113,22 +1110,22 @@
     if (!editor) return false;
     const { state, view } = editor;
     const { selection } = state;
-    const { $from, $to, from, to } = selection;
-    const parent = $from.parent;
+    const { $from: fromR, $to: toR, from, to } = selection;
+    const parent = fromR.parent;
     const paragraphType = state.schema.nodes.paragraph;
 
     if (
       selection.empty ||
       !paragraphType ||
-      !$from.sameParent($to) ||
-      $from.depth !== 1 ||
+      !fromR.sameParent(toR) ||
+      fromR.depth !== 1 ||
       !parent.isTextblock
     ) {
       return false;
     }
 
-    const parentStart = $from.start();
-    const parentEnd = $from.end();
+    const parentStart = fromR.start();
+    const parentEnd = fromR.end();
     if (from === parentStart && to === parentEnd) {
       return false;
     }
@@ -1146,7 +1143,7 @@
       createParagraphNode(afterContent),
     ].filter((n): n is NonNullable<typeof n> => n !== null);
 
-    const transaction = state.tr.replaceWith($from.before(), $from.after(), replacementNodes);
+    const transaction = state.tr.replaceWith(fromR.before(), fromR.after(), replacementNodes);
     view.dispatch(transaction.scrollIntoView());
     view.focus();
     return true;
@@ -1464,7 +1461,7 @@
     }
     const declared = effectivePromptInputs(entry);
     if (declared.length > 0 && !prefilledInputs) {
-      dispatch("request-inputs-dialog", { entry });
+      onRequestInputsDialog?.({ entry });
       return;
     }
     await runPromptEntryWithInputs(entry, prefilledInputs ?? {}, assistantId);
@@ -1481,7 +1478,7 @@
       lastInvokedEntryId = entry.id;
       lastInvokedInputs = inputs;
       lastInvokedAssistantId = assistantId;
-      dispatch("open-chat", { entry, inputs, sceneId: scene.id, assistantId });
+      onOpenChat?.({ entry, inputs, sceneId: scene.id, assistantId });
       return;
     }
     if (outputKind !== "append_to_body" && outputKind !== "replace_selection") {
@@ -1722,7 +1719,7 @@
   }
 
   function dispatchEmbeddedTodos() {
-    dispatch("embedded-todos", { todos: collectEmbeddedTodos() });
+    onEmbeddedTodos?.({ todos: collectEmbeddedTodos() });
   }
 
   function collectEmbeddedTodos(): EmbeddedTodo[] {
@@ -1772,7 +1769,7 @@
     });
     if (transaction.docChanged) {
       editor.view.dispatch(transaction);
-      dispatch("body-change");
+      onBodyChange?.();
     }
   }
 
@@ -1908,7 +1905,7 @@
       syncTodoAnchorDomState(true);
       updateLiveWordCount();
       dispatchEmbeddedTodos();
-      dispatch("body-change");
+      onBodyChange?.();
     }
     if (aiSuggestionId) updateAIToolbarPosition();
     refreshSlashFilterText();
@@ -1926,19 +1923,6 @@
     tableMenu = { ...tableMenu, visible: false };
   }
 
-  // ---------- Scene loading reactive ----------
-  // Loads the scene's body into the editor when:
-  //   - the editor is mounted AND
-  //   - the scene's id differs from the currently-loaded one
-  // Discriminating by id (not reference) preserves in-flight user edits
-  // across save→reload cycles where the parent passes a fresh scene
-  // object with the same id but a bumped revision.
-  $: if (editor && scene && scene.id !== loadedSceneId) {
-    void loadScene(scene);
-  }
-  $: if (!scene && loadedSceneId !== null) {
-    clearEditor();
-  }
 
   onMount(() => {
     const AlignedTableCell = TableCell.extend({
@@ -1989,7 +1973,7 @@
         handleKeyDown: handleEditorKeydown,
         handleDOMEvents: {
           focus: () => {
-            dispatch("focus");
+            onFocus?.();
             return false;
           },
         },
@@ -2014,7 +1998,62 @@
   // bind it via slot down the line; for now it stays in the parent and
   // reads scene-session totals through these props.
   // (No-op: the chip is rendered in NodeEditor's header, not here.)
-  void documentLabel;
+  $effect.pre(() => {
+    void documentLabel;
+  });
+  // metadataSchema is global per-project — read from the store, not a prop (#14 Step 2).
+  let metadataSchema = $derived($metadataSchemaStore);
+  // ---------- Reactives ----------
+  let slashCommands = $derived(editor && documentKind === "scene" ? getSlashCommands() : []);
+  let parsedSlash = $derived(parseSlashBody(slashFilterText) ?? { command: slashFilterText, args: "" });
+  let slashArgTokens = $derived(tokenizeSlashArgs(parsedSlash.args));
+  let filteredSlashCommands = $derived(filterSlashCommands(slashCommands, parsedSlash.command, parsedSlash.args.length > 0));
+  let activeSlashCommand = $derived(filteredSlashCommands[slashMenu.selectedIndex]);
+  $effect.pre(() => {
+    clampSlashSelectedIndex(filteredSlashCommands.length);
+  });
+  let selectionToolbarActions = $derived(editor ? getSelectionToolbarActions() : []);
+  // Reset the per-scene cost tally when the active scene changes. Reading
+  // scene?.id directly so Svelte tracks the dependency
+  // ([[feedback-svelte5-reactivity-traps]] — function calls in `$:` don't).
+  $effect.pre(() => {
+    const currentSceneId = scene?.id ?? null;
+    if (lastSeenSceneIdForCost !== currentSceneId) {
+      lastSeenSceneIdForCost = currentSceneId;
+      sceneSessionCostUsd = 0;
+      lastInvocationCostUsd = null;
+      characterCostUsd = {};
+      if (currentSceneId) {
+        void loadCharacterCostUsd(currentSceneId);
+      }
+    }
+  });
+  // Reactively poke the ImplicitContextHighlight extension when the
+  // matcher reference changes (lore added/edited at the App level).
+  $effect.pre(() => {
+    if (editor) updateImplicitMatcher(implicitContextMatcher);
+  });
+  // Suppress unused-warning for slashArgTokens (reserved for future slash UX).
+  $effect.pre(() => {
+    void slashArgTokens;
+  });
+  // ---------- Scene loading reactive ----------
+  // Loads the scene's body into the editor when:
+  //   - the editor is mounted AND
+  //   - the scene's id differs from the currently-loaded one
+  // Discriminating by id (not reference) preserves in-flight user edits
+  // across save→reload cycles where the parent passes a fresh scene
+  // object with the same id but a bumped revision.
+  $effect.pre(() => {
+    if (editor && scene && scene.id !== loadedSceneId) {
+      void loadScene(scene);
+    }
+  });
+  $effect.pre(() => {
+    if (!scene && loadedSceneId !== null) {
+      clearEditor();
+    }
+  });
 </script>
 
 <!-- svelte-ignore a11y_no_static_element_interactions -->
@@ -2023,7 +2062,7 @@
   class:lore-editor={documentKind === "lore"}
   class="editor-wrap"
   bind:this={editorFrame}
-  on:mousedown={(event) => {
+  onmousedown={(event) => {
     // Click landed on the wrap itself (the gutter around the centered
     // 780px column or below short content) — focus the editor at the
     // end of the doc so the cursor lands where the user expects.
@@ -2045,17 +2084,17 @@
         <span class="ai-toolbar-status">Generating…</span>
       {:else if aiError && !aiSuggestionId}
         <span class="ai-toolbar-status">⚠ {aiError}</span>
-        <button type="button" class="ai-toolbar-btn" on:mousedown|preventDefault={dismissAIError} title="Dismiss">
+        <button type="button" class="ai-toolbar-btn" onmousedown={preventDefault(dismissAIError)} title="Dismiss">
           <span aria-hidden="true">✕</span> Dismiss
         </button>
       {:else if aiSuggestionId}
-        <button type="button" class="ai-toolbar-btn ai-toolbar-accept" on:mousedown|preventDefault={acceptAISuggestion} title="Accept (keep the text)">
+        <button type="button" class="ai-toolbar-btn ai-toolbar-accept" onmousedown={preventDefault(acceptAISuggestion)} title="Accept (keep the text)">
           <span aria-hidden="true">✓</span> Accept
         </button>
-        <button type="button" class="ai-toolbar-btn" on:mousedown|preventDefault={retryAISuggestion} title="Retry (regenerate)" disabled={aiGenerating}>
+        <button type="button" class="ai-toolbar-btn" onmousedown={preventDefault(retryAISuggestion)} title="Retry (regenerate)" disabled={aiGenerating}>
           <span aria-hidden="true">↻</span> Retry
         </button>
-        <button type="button" class="ai-toolbar-btn ai-toolbar-discard" on:mousedown|preventDefault={revertAISuggestion} title="Discard (delete the text)">
+        <button type="button" class="ai-toolbar-btn ai-toolbar-discard" onmousedown={preventDefault(revertAISuggestion)} title="Discard (delete the text)">
           <span aria-hidden="true">✕</span> Discard
         </button>
         {#if aiSuggestionMeta}
@@ -2082,20 +2121,20 @@
       <span class="selection-count">{selectionMenu.wordCount} {selectionMenu.wordCount === 1 ? "word" : "words"}</span>
       {#each selectionToolbarActions as action}
         {#if action.kind === "button"}
-          <button type="button" on:mousedown|preventDefault={() => focusAndRun(action.run)}>{action.label}</button>
+          <button type="button" onmousedown={preventDefault(() => focusAndRun(action.run))}>{action.label}</button>
         {:else}
           <div class="toolbar-menu">
             <button
               class:open={openToolbarMenuId === action.id}
               type="button"
-              on:mousedown|preventDefault={() => toggleToolbarMenu(action.id)}
+              onmousedown={preventDefault(() => toggleToolbarMenu(action.id))}
             >
               {action.label}
             </button>
             {#if openToolbarMenuId === action.id}
               <div class:below={selectionMenu.placement === "below"} class="toolbar-menu-popover">
                 {#each action.items as item}
-                  <button type="button" on:mousedown|preventDefault={() => focusAndRun(item.run)}>{item.label}</button>
+                  <button type="button" onmousedown={preventDefault(() => focusAndRun(item.run))}>{item.label}</button>
                 {/each}
               </div>
             {/if}
@@ -2116,8 +2155,8 @@
                   class:active={rowIndex < slashMenu.gridRows && colIndex < slashMenu.gridCols}
                   type="button"
                   aria-label={`${rowIndex + 1} rows by ${colIndex + 1} columns`}
-                  on:mouseenter={() => (slashMenu = { ...slashMenu, gridRows: rowIndex + 1, gridCols: colIndex + 1 })}
-                  on:mousedown|preventDefault={() => insertTableFromGrid(rowIndex + 1, colIndex + 1)}
+                  onmouseenter={() => (slashMenu = { ...slashMenu, gridRows: rowIndex + 1, gridCols: colIndex + 1 })}
+                  onmousedown={preventDefault(() => insertTableFromGrid(rowIndex + 1, colIndex + 1))}
                 ></button>
               {/each}
             </div>
@@ -2138,8 +2177,8 @@
           <button
             class:active={index === slashMenu.selectedIndex}
             type="button"
-            on:mouseenter={() => (slashMenu = { ...slashMenu, selectedIndex: index })}
-            on:mousedown|preventDefault={() => runSlashCommand(command)}
+            onmouseenter={() => (slashMenu = { ...slashMenu, selectedIndex: index })}
+            onmousedown={preventDefault(() => runSlashCommand(command))}
           >
             <strong>{command.label}</strong>
             <span>{command.description}</span>
@@ -2151,22 +2190,22 @@
 
   {#if tableMenu.visible}
     <div class="table-toolbar" style={`left: ${tableMenu.x}px; top: ${tableMenu.y}px;`}>
-      <button type="button" title="Insert column before" on:mousedown|preventDefault={() => editor?.chain().focus().addColumnBefore().run()}>+ col ←</button>
-      <button type="button" title="Insert column after" on:mousedown|preventDefault={() => editor?.chain().focus().addColumnAfter().run()}>+ col →</button>
-      <button type="button" title="Delete column" on:mousedown|preventDefault={() => editor?.chain().focus().deleteColumn().run()}>− col</button>
+      <button type="button" title="Insert column before" onmousedown={preventDefault(() => editor?.chain().focus().addColumnBefore().run())}>+ col ←</button>
+      <button type="button" title="Insert column after" onmousedown={preventDefault(() => editor?.chain().focus().addColumnAfter().run())}>+ col →</button>
+      <button type="button" title="Delete column" onmousedown={preventDefault(() => editor?.chain().focus().deleteColumn().run())}>− col</button>
       <span class="table-toolbar-sep" aria-hidden="true"></span>
-      <button type="button" title="Insert row above" on:mousedown|preventDefault={() => editor?.chain().focus().addRowBefore().run()}>+ row ↑</button>
-      <button type="button" title="Insert row below" on:mousedown|preventDefault={() => editor?.chain().focus().addRowAfter().run()}>+ row ↓</button>
-      <button type="button" title="Delete row" on:mousedown|preventDefault={() => editor?.chain().focus().deleteRow().run()}>− row</button>
+      <button type="button" title="Insert row above" onmousedown={preventDefault(() => editor?.chain().focus().addRowBefore().run())}>+ row ↑</button>
+      <button type="button" title="Insert row below" onmousedown={preventDefault(() => editor?.chain().focus().addRowAfter().run())}>+ row ↓</button>
+      <button type="button" title="Delete row" onmousedown={preventDefault(() => editor?.chain().focus().deleteRow().run())}>− row</button>
       <span class="table-toolbar-sep" aria-hidden="true"></span>
-      <button type="button" title="Align left" on:mousedown|preventDefault={() => setCellAlign("left")}>⟵</button>
-      <button type="button" title="Align center" on:mousedown|preventDefault={() => setCellAlign("center")}>↔</button>
-      <button type="button" title="Align right" on:mousedown|preventDefault={() => setCellAlign("right")}>⟶</button>
+      <button type="button" title="Align left" onmousedown={preventDefault(() => setCellAlign("left"))}>⟵</button>
+      <button type="button" title="Align center" onmousedown={preventDefault(() => setCellAlign("center"))}>↔</button>
+      <button type="button" title="Align right" onmousedown={preventDefault(() => setCellAlign("right"))}>⟶</button>
       <span class="table-toolbar-sep" aria-hidden="true"></span>
-      <button type="button" title="Toggle header row" on:mousedown|preventDefault={() => editor?.chain().focus().toggleHeaderRow().run()}>Hdr row</button>
-      <button type="button" title="Toggle header column" on:mousedown|preventDefault={() => editor?.chain().focus().toggleHeaderColumn().run()}>Hdr col</button>
+      <button type="button" title="Toggle header row" onmousedown={preventDefault(() => editor?.chain().focus().toggleHeaderRow().run())}>Hdr row</button>
+      <button type="button" title="Toggle header column" onmousedown={preventDefault(() => editor?.chain().focus().toggleHeaderColumn().run())}>Hdr col</button>
       <span class="table-toolbar-sep" aria-hidden="true"></span>
-      <button type="button" title="Delete table" on:mousedown|preventDefault={() => editor?.chain().focus().deleteTable().run()}>Delete</button>
+      <button type="button" title="Delete table" onmousedown={preventDefault(() => editor?.chain().focus().deleteTable().run())}>Delete</button>
     </div>
   {/if}
 

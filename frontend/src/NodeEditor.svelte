@@ -720,12 +720,12 @@
   }
 
   // Handler for ProseBodyView's `request-inputs-dialog` event.
-  function handleRequestInputsDialog(event: CustomEvent<{
+  function handleRequestInputsDialog(payload: {
     entry: PromptEntrySummary;
     prefilledDrafts?: Record<string, string>;
     unresolved?: Array<{ name: string; label: string; token: string }>;
-  }>) {
-    const { entry, prefilledDrafts, unresolved } = event.detail;
+  }) {
+    const { entry, prefilledDrafts, unresolved } = payload;
     openInputsDialog(entry);
     if (prefilledDrafts) {
       for (const [name, value] of Object.entries(prefilledDrafts)) {
@@ -884,11 +884,11 @@
       {availableScenes}
       {implicitContextMatcher}
       {documentLabel}
-      on:body-change={emitChange}
-      on:focus={() => onFocus?.()}
-      on:embedded-todos={(event) => onEmbeddedTodos?.(event.detail)}
-      on:open-chat={(event) => onOpenChat?.(event.detail)}
-      on:request-inputs-dialog={handleRequestInputsDialog}
+      onBodyChange={emitChange}
+      onFocus={() => onFocus?.()}
+      onEmbeddedTodos={(payload) => onEmbeddedTodos?.(payload)}
+      onOpenChat={(payload) => onOpenChat?.(payload)}
+      onRequestInputsDialog={handleRequestInputsDialog}
     />
   {/if}
   {#if bodyShape === "chat"}

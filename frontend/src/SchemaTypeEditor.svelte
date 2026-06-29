@@ -365,3 +365,33 @@
     </div>
   {/if}
 </div>
+
+<style>
+  /* Field-row meta-cluster atoms co-located from styles.css (#14). These are
+     rendered in the `meta` snippets passed to SchemaFieldRow, so they carry
+     this component's scope, not the row's. The row chrome itself lives in
+     SchemaFieldRow.svelte; .sfr-cog stays global (shared with the input rows). */
+  .schema-source-badge {
+    padding: 2px 7px;
+    border-radius: 999px;
+    color: var(--accent-deep);
+    background: hsl(calc(145 + var(--source-index, 0) * 44), 48%, 88%);
+    font-size: 10px;
+    font-weight: 800;
+    white-space: nowrap;
+  }
+  .sfr-inherited-label {
+    font-size: 11px;
+    font-style: italic;
+    color: var(--text-3, var(--text-3));
+  }
+  /* L2 reusable groups in the type editor. */
+  .sfr-group-origin {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    font-size: 11px;
+    font-style: italic;
+    color: var(--k-lore-text, #43448a);
+  }
+</style>

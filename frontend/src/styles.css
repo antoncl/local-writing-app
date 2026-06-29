@@ -602,15 +602,7 @@ h3 {
   gap: 8px;
 }
 
-.schema-source-badge {
-  padding: 2px 7px;
-  border-radius: 999px;
-  color: var(--accent-deep);
-  background: hsl(calc(145 + var(--source-index, 0) * 44), 48%, 88%);
-  font-size: 10px;
-  font-weight: 800;
-  white-space: nowrap;
-}
+/* .schema-source-badge co-located into SchemaTypeEditor.svelte (#14). */
 
 /* Mono type-pill on field rows in the Detail Types tree — mirrors the
    Editorial Card spec ("Field types sit in mono pills"). Distinguishes
@@ -2491,42 +2483,16 @@ button.row-action-add.active {
   flex-direction: column;
   gap: 2px;
 }
-.schema-field-row {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  width: 100%;
-  padding: 6px 12px;
-  border: 1px solid transparent;
-  border-radius: 8px;
-  background: transparent;
-  text-align: left;
-  cursor: pointer;
-}
-button.schema-field-row:hover {
-  background: var(--surface, #fff);
-  border-color: var(--divider, var(--divider));
-}
-.schema-field-row.inherited {
-  opacity: 0.62;
-  cursor: default;
-}
-.sfr-grip {
-  flex: none;
-  display: inline-flex;
-  color: var(--border-strong, var(--border-strong));
-  font-size: 15px;
-  cursor: grab;
-}
-/* Drag-reorder insertion marker — a 2px accent line, matching the NodeRow
-   tree-drag marker so every reorderable list reads the same way. Applies to
-   schema field rows and select option rows. */
-.schema-field-row,
+/* Row chrome (.schema-field-row + .sfr-grip/-name/-typechip/-meta + states +
+   drop markers) co-located into SchemaFieldRow.svelte (#14). The drag-insertion
+   marker keeps its .sfi-option-row half here — SelectOptionsEditor still
+   hand-writes that row. .sfr-tile and .sfr-cog stay global: the tile is also
+   worn by SchemaFieldInlineEditor's icon button, and the cog is rendered inside
+   each consumer's meta snippet. .sfr-inherited-label / .schema-source-badge /
+   .sfr-group-origin moved to SchemaTypeEditor.svelte. */
 .sfi-option-row {
   position: relative;
 }
-.schema-field-row.drop-before::before,
-.schema-field-row.drop-after::after,
 .sfi-option-row.drop-before::before,
 .sfi-option-row.drop-after::after {
   content: "";
@@ -2538,11 +2504,9 @@ button.schema-field-row:hover {
   pointer-events: none;
   z-index: 2;
 }
-.schema-field-row.drop-before::before,
 .sfi-option-row.drop-before::before {
   top: -3px;
 }
-.schema-field-row.drop-after::after,
 .sfi-option-row.drop-after::after {
   bottom: -3px;
 }
@@ -2566,40 +2530,9 @@ button.schema-field-row:hover {
   border-style: dashed;
   border-color: var(--border-strong, var(--border-strong));
 }
-.sfr-name {
-  flex: 0 1 auto;
-  font-size: 13px;
-  color: var(--text, #242424);
-}
-.sfr-typechip {
-  flex: none;
-  padding: 1px 8px;
-  border-radius: 6px;
-  border: 1px solid var(--k-snippet, #7a5230);
-  background: var(--k-snippet-soft, #f3e6d6);
-  color: var(--k-snippet-text, #7a5230);
-  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
-  font-size: 11px;
-  font-weight: 600;
-}
-.sfr-meta {
-  margin-left: auto;
-  display: inline-flex;
-  align-items: center;
-  gap: 7px;
-}
-.sfr-inherited-label {
-  font-size: 11px;
-  font-style: italic;
-  color: var(--text-3, var(--text-3));
-}
 .sfr-cog {
   color: var(--text-3, var(--text-3));
   font-size: 14px;
-}
-.schema-field-row.expanded {
-  background: var(--surface, #fff);
-  border-color: var(--divider, var(--divider));
 }
 
 /* Expand-in-place field editor (metadata revision, mockup C). One row's
@@ -2923,15 +2856,7 @@ button.schema-field-row:hover {
   text-decoration: underline;
 }
 
-/* L2 reusable groups in the type editor. */
-.sfr-group-origin {
-  display: inline-flex;
-  align-items: center;
-  gap: 4px;
-  font-size: 11px;
-  font-style: italic;
-  color: var(--k-lore-text, #43448a);
-}
+/* .sfr-group-origin co-located into SchemaTypeEditor.svelte (#14). */
 .applied-groups {
   display: flex;
   flex-direction: column;
@@ -3732,40 +3657,10 @@ button.schema-field-row:hover {
   margin-top: 8px;
 }
 
-/* Inputs-side adoption of the schema-field-row collapsed pattern (#37).
-   The button itself is the shared .schema-field-row; this rule overlays
-   the inputs-specific dragging fade so the visual matches the previous
-   prompt-input-row treatment. drop-before / drop-after / hover come for
-   free from .schema-field-row. */
-.entry-inputs-editor .prompt-input-row-collapsed.dragging {
-  opacity: 0.45;
-}
-
-/* Compact accessor pill rendered in the collapsed row's meta strip.
-   Distinct from .prompt-input-accessor (the larger pill that lived in
-   the always-expanded header strip and is no longer used). */
-.prompt-input-accessor-mini {
-  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
-  font-size: 10.5px;
-  color: var(--text-3);
-  background: var(--inset);
-  border: 1px solid var(--divider);
-  border-radius: 4px;
-  padding: 1px 6px;
-}
-
-/* "req" badge surfaced in the collapsed row so the author can tell at a
-   glance which inputs are required without expanding them. */
-.prompt-input-required-badge {
-  font-size: 9.5px;
-  font-weight: 700;
-  text-transform: uppercase;
-  letter-spacing: 0.05em;
-  padding: 1px 6px;
-  border-radius: 999px;
-  background: var(--accent-soft, color-mix(in srgb, var(--accent) 14%, var(--surface)));
-  color: var(--accent-strong, var(--accent));
-}
+/* The collapsed input-row dragging fade is now the unified
+   .schema-field-row.dragging rule in SchemaFieldRow.svelte; the accessor pill
+   (.prompt-input-accessor-mini) and req badge (.prompt-input-required-badge)
+   co-located into CodeBodyView.svelte (#14). */
 
 /* Inline editor body, opens under the collapsed row when the user
    clicks to expand. Reuses .schema-field-inline chrome (border, accent

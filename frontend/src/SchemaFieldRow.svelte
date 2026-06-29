@@ -47,7 +47,7 @@
 
 {#if interactive}
   <button
-    class={`schema-field-row ${rowClass}`}
+    class="schema-field-row {rowClass}"
     class:expanded
     class:inherited
     class:dragging
@@ -71,7 +71,7 @@
     <span class="sfr-meta">{@render meta?.()}</span>
   </button>
 {:else}
-  <div class={`schema-field-row ${rowClass}`} class:inherited aria-label={ariaLabel || undefined}>
+  <div class="schema-field-row {rowClass}" class:inherited aria-label={ariaLabel || undefined}>
     <span class="sfr-grip" aria-hidden="true"><i class="ti ti-grip-vertical"></i></span>
     <span class="sfr-tile"><i class={iconClass} aria-hidden="true"></i></span>
     <span class="sfr-name">{name}</span>
@@ -79,3 +79,88 @@
     <span class="sfr-meta">{@render meta?.()}</span>
   </div>
 {/if}
+
+<style>
+  /* Row chrome co-located from styles.css (#14). `.sfr-tile` and `.sfr-cog`
+     stay global: the tile is also worn by SchemaFieldInlineEditor's icon
+     button, and the cog is rendered inside each consumer's `meta` snippet
+     (which carries the consumer's scope, not this one's). */
+  .schema-field-row {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    width: 100%;
+    padding: 6px 12px;
+    border: 1px solid transparent;
+    border-radius: 8px;
+    background: transparent;
+    text-align: left;
+    cursor: pointer;
+    position: relative;
+  }
+  button.schema-field-row:hover {
+    background: var(--surface, #fff);
+    border-color: var(--divider, var(--divider));
+  }
+  .schema-field-row.inherited {
+    opacity: 0.62;
+    cursor: default;
+  }
+  .schema-field-row.expanded {
+    background: var(--surface, #fff);
+    border-color: var(--divider, var(--divider));
+  }
+  /* Unified drag-fade (was .entry-inputs-editor .prompt-input-row-collapsed.dragging);
+     only activates when a consumer passes dragging=true. */
+  .schema-field-row.dragging {
+    opacity: 0.45;
+  }
+  /* Drag-reorder insertion marker — a 2px accent line, matching the NodeRow
+     tree-drag marker so every reorderable list reads the same way. */
+  .schema-field-row.drop-before::before,
+  .schema-field-row.drop-after::after {
+    content: "";
+    position: absolute;
+    left: 0;
+    right: 0;
+    height: 2px;
+    background: var(--accent, #2f6f5e);
+    pointer-events: none;
+    z-index: 2;
+  }
+  .schema-field-row.drop-before::before {
+    top: -3px;
+  }
+  .schema-field-row.drop-after::after {
+    bottom: -3px;
+  }
+  .sfr-grip {
+    flex: none;
+    display: inline-flex;
+    color: var(--border-strong, var(--border-strong));
+    font-size: 15px;
+    cursor: grab;
+  }
+  .sfr-name {
+    flex: 0 1 auto;
+    font-size: 13px;
+    color: var(--text, #242424);
+  }
+  .sfr-typechip {
+    flex: none;
+    padding: 1px 8px;
+    border-radius: 6px;
+    border: 1px solid var(--k-snippet, #7a5230);
+    background: var(--k-snippet-soft, #f3e6d6);
+    color: var(--k-snippet-text, #7a5230);
+    font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+    font-size: 11px;
+    font-weight: 600;
+  }
+  .sfr-meta {
+    margin-left: auto;
+    display: inline-flex;
+    align-items: center;
+    gap: 7px;
+  }
+</style>

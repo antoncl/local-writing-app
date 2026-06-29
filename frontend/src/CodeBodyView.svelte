@@ -904,3 +904,34 @@
     {/if}
   </section>
 {/if}
+
+<style>
+  /* Prompt-input row meta-cluster atoms co-located from styles.css (#14).
+     Rendered in the `meta` snippet passed to SchemaFieldRow, so they carry
+     this component's scope. The row chrome lives in SchemaFieldRow.svelte;
+     .sfr-cog stays global. */
+
+  /* Compact accessor pill rendered in the collapsed row's meta strip. */
+  .prompt-input-accessor-mini {
+    font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+    font-size: 10.5px;
+    color: var(--text-3);
+    background: var(--inset);
+    border: 1px solid var(--divider);
+    border-radius: 4px;
+    padding: 1px 6px;
+  }
+
+  /* "req" badge surfaced in the collapsed row so the author can tell at a
+     glance which inputs are required without expanding them. */
+  .prompt-input-required-badge {
+    font-size: 9.5px;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    padding: 1px 6px;
+    border-radius: 999px;
+    background: var(--accent-soft, color-mix(in srgb, var(--accent) 14%, var(--surface)));
+    color: var(--accent-strong, var(--accent));
+  }
+</style>

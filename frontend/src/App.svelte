@@ -85,6 +85,7 @@
     setMetadataSchema,
   } from "./stores/schema";
   import { implicitContextMatcherStore } from "./stores/derived";
+  import { loadProjectData } from "./stores/index";
   import GroupsManagerDialog from "./GroupsManagerDialog.svelte";
   import TagManagerDialog from "./TagManagerDialog.svelte";
   import type { OptionDraft } from "./SelectOptionsEditor.svelte";
@@ -914,12 +915,14 @@
     await storeRefreshTodos();
   }
 
-  async function refreshMetadataSchema() {
-    // Store owns the trio; run the authoring fallback against the returned
-    // overview, not the `$:` aliases (which lag a flush after the store set).
-    const overview = await storeRefreshSchema();
-    const schema = overview.effective_schema;
-    const layers = overview.layers;
+  // Re-point the schema-authoring editor's selection at still-valid targets
+  // after the schema store changes. App-local authoring state (not server-
+  // mirrored). Reads the store live (get) — callers invoke it right after the
+  // store set, where the `$:` aliases still lag a flush.
+  function syncSchemaAuthoringSelection() {
+    const schema = get(metadataSchemaStore);
+    if (!schema) return;
+    const layers = get(metadataSchemaLayersStore);
     if (!schema.entry_types[schemaFieldEntryType]) {
       schemaFieldEntryType = schema.entry_types.scene ? "scene" : Object.keys(schema.entry_types)[0] ?? "scene";
     }
@@ -929,6 +932,11 @@
     if (!schemaTypeLayerId || !layers.some((layer) => layer.id === schemaTypeLayerId)) {
       schemaTypeLayerId = projectSchemaLayerId();
     }
+  }
+
+  async function refreshMetadataSchema() {
+    await storeRefreshSchema();
+    syncSchemaAuthoringSelection();
   }
 
   async function openDirectoryPicker(event?: MouseEvent) {
@@ -1034,13 +1042,8 @@
     await run(async () => {
       const openedProject = await api.createProject(path, title, baseFolder ?? "");
       openProjectWorkspace(openedProject);
-      await refreshStructure();
-      await refreshResearchStructure();
-      await refreshLoreEntries();
-      await refreshPromptEntries();
-      await refreshMetadataSchema();
-      await refreshKnownTags();
-      await refreshTodos();
+      await loadProjectData();
+      syncSchemaAuthoringSelection();
       const initialSceneId = findFirstSceneId(get(structureStore)?.root);
       if (initialSceneId) {
         await openSceneInEditorPane(initialSceneId);
@@ -1054,13 +1057,8 @@
     await run(async () => {
       const openedProject = await api.openProject(path, "");
       openProjectWorkspace(openedProject);
-      await refreshStructure();
-      await refreshResearchStructure();
-      await refreshLoreEntries();
-      await refreshPromptEntries();
-      await refreshMetadataSchema();
-      await refreshKnownTags();
-      await refreshTodos();
+      await loadProjectData();
+      syncSchemaAuthoringSelection();
       await refreshRecents();
       status = `Opened ${openedProject.title}`;
     });

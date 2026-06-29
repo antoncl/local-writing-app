@@ -63,11 +63,28 @@
   export let NEW_FIELD_SENTINEL: string = "__new__";
   export let fieldDropTarget: { id: string; position: "before" | "after" } | null = null;
 
-  // --- Reusable-groups apply form (two-way bound) ---
-  export let groupApplyOpen: boolean = false;
-  export let applyGroupId: string = "";
-  export let applyGroupLabel: string = "";
-  export let applyGroupPrefix: string = "";
+  // --- Reusable-groups apply form (scoped state — #14 Step 4). The form is
+  // transient (no init from a prop); the parent only persists the result via
+  // onApplyGroup and we reset on success. ---
+  let groupApplyOpen = false;
+  let applyGroupId = "";
+  let applyGroupLabel = "";
+  let applyGroupPrefix = "";
+
+  async function submitGroupApply() {
+    if (!applyGroupId) return;
+    const application = {
+      group_id: applyGroupId,
+      label: applyGroupLabel.trim(),
+      key_prefix: applyGroupPrefix.trim() || suggestPrefixFromLabel(applyGroupLabel) || `${applyGroupId}_`,
+    };
+    if (await onApplyGroup(application)) {
+      groupApplyOpen = false;
+      applyGroupId = "";
+      applyGroupLabel = "";
+      applyGroupPrefix = "";
+    }
+  }
 
   // --- Prompt-kind defaults (two-way bound) ---
   export let promptSystemPrompt: string = "";
@@ -99,7 +116,7 @@
   export let onRemoveField: () => void = () => {};
   export let onToggleFieldInline: (fieldId: string, entryTypeId: string) => void = () => {};
   export let onCreateFieldDraft: (layerId: string, entryTypeId?: string) => void = () => {};
-  export let onApplyGroup: () => void = () => {};
+  export let onApplyGroup: (application: { group_id: string; label: string; key_prefix: string }) => Promise<boolean> = async () => false;
   export let onRemoveGroupApplication: (index: number) => void = () => {};
   export let onFieldDragStart: (fieldId: string) => void = () => {};
   export let onFieldDragOver: (event: DragEvent, fieldId: string) => void = () => {};
@@ -294,7 +311,7 @@
             <div class="sfi-footer">
               <span class="sfi-spacer"></span>
               <button class="sfi-cancel" type="button" on:click={() => (groupApplyOpen = false)}>Cancel</button>
-              <button class="sfi-done" type="button" disabled={!applyGroupId} on:click={onApplyGroup}>Apply</button>
+              <button class="sfi-done" type="button" disabled={!applyGroupId} on:click={submitGroupApply}>Apply</button>
             </div>
           </div>
         {:else}

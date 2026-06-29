@@ -79,8 +79,9 @@
   export let draftTitles: Map<string, string>;
   export let sectionLabel: string;
   export let emptyLabel: string;
-  // App's error-catching async wrapper.
-  export let run: (action: () => Promise<void>) => Promise<void>;
+  // App's error-catching async wrapper. Returns whether the action completed
+  // without throwing.
+  export let run: (action: () => Promise<void>) => Promise<boolean>;
   // Delete stays in App (it tears down editor panes pointing at the doomed
   // subtree before deleting); this component just requests it.
   export let onRequestDelete: (node: StructureNode) => void;

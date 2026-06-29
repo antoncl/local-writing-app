@@ -2,8 +2,9 @@
   import type { SearchHit } from "./types";
   import { api } from "./api";
 
-  // App's error-catching async wrapper (same one Tree uses).
-  export let run: (action: () => Promise<void>) => Promise<void>;
+  // App's error-catching async wrapper (same one Tree uses). Returns whether
+  // the action completed without throwing.
+  export let run: (action: () => Promise<void>) => Promise<boolean>;
   // Open a hit in an editor pane — App owns the pane set + the embedded-TODO
   // highlight that follows a scene hit.
   export let onOpenHit: (hit: SearchHit) => void;

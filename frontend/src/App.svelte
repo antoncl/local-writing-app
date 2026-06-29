@@ -20,7 +20,6 @@
     buildNodeTypeTree,
     buildSchemaFieldSections,
     slugifyFieldId,
-    suggestPrefixFromLabel,
     type NodeTypeTreeNode,
     type SchemaKind,
   } from "./schemaTypeHelpers";
@@ -279,11 +278,8 @@
   let schemaFieldReadonly = false;
   // L2 reusable-groups manager (modal).
   let groupsManagerOpen = false;
-  // L2 "apply group" form state (in the type editor).
-  let groupApplyOpen = false;
-  let applyGroupId = "";
-  let applyGroupLabel = "";
-  let applyGroupPrefix = "";
+  // L2 "apply group" form state now lives in SchemaTypeEditor (#14 Step 4);
+  // App only owns the persistence handler (applyGroupToType).
   // Expand-in-place field editing in the type editor: the field id whose
   // inline editor is open (one at a time), or the "__new__" sentinel while
   // adding a field. null = all rows collapsed. Replaces routing to the
@@ -825,12 +821,14 @@
     resizeDrag: startPaneResize,
   };
 
-  async function run(action: () => Promise<void>) {
+  async function run(action: () => Promise<void>): Promise<boolean> {
     error = "";
     try {
       await action();
+      return true;
     } catch (caught) {
       error = caught instanceof Error ? caught.message : String(caught);
+      return false;
     }
   }
 
@@ -1688,15 +1686,14 @@
     status = "Updated details schema";
   }
 
-  async function applyGroupToType() {
-    if (!selectedSchemaTypeId || !applyGroupId) return;
+  // The apply-group form lives in SchemaTypeEditor; it builds the application
+  // and awaits this handler, resetting its own form only on a true result.
+  async function applyGroupToType(
+    application: { group_id: string; label: string; key_prefix: string },
+  ): Promise<boolean> {
+    if (!selectedSchemaTypeId || !application.group_id) return false;
     const typeId = selectedSchemaTypeId;
-    const application = {
-      group_id: applyGroupId,
-      label: applyGroupLabel.trim(),
-      key_prefix: (applyGroupPrefix.trim() || suggestPrefixFromLabel(applyGroupLabel) || `${applyGroupId}_`),
-    };
-    await run(async () => {
+    return run(async () => {
       setMetadataSchema(await api.setEntryTypeGroupApplications(
         schemaTypeLayerId || projectSchemaLayerId(),
         typeId,
@@ -1704,10 +1701,6 @@
       ));
       await refreshMetadataSchema();
       setValidation(await api.validateProject());
-      groupApplyOpen = false;
-      applyGroupId = "";
-      applyGroupLabel = "";
-      applyGroupPrefix = "";
       status = "Applied group";
     });
   }
@@ -3367,10 +3360,6 @@
       bind:schemaTypeColor
       bind:expandedSchemaFieldId
       bind:fieldDropTarget
-      bind:groupApplyOpen
-      bind:applyGroupId
-      bind:applyGroupLabel
-      bind:applyGroupPrefix
       bind:promptSystemPrompt
       bind:promptOutputKind
       schemaTypeId={schemaTypeId}

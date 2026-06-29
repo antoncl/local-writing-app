@@ -1974,8 +1974,13 @@
     if (order.join(" ") === current.join(" ")) return;
     const layerId = schemaTypeLayerId || projectSchemaLayerId();
     await run(async () => {
+      // Reorder is layer-invariant: the backend guard requires an existing
+      // override at this layer, so it can't change the overview's
+      // field_sources / entry_type_sources / layers. Write through the new
+      // effective schema and re-validate the authoring selection locally —
+      // no overview refetch needed (the only schema site where that holds).
       setMetadataSchema(await api.setEntryTypeFieldOrder(layerId, selectedSchemaTypeId!, order));
-      await refreshMetadataSchema();
+      syncSchemaAuthoringSelection();
       status = "Reordered fields";
     });
   }

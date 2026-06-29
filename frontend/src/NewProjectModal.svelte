@@ -81,3 +81,21 @@
       {/snippet}
   </Modal>
 {/if}
+
+<style>
+  /* Link-styled button in the "no default folder" hint (slotted into Modal,
+     so it carries this component's scope). */
+  .inline-link {
+    background: transparent;
+    border: none;
+    padding: 0;
+    font: inherit;
+    color: var(--accent-deep);
+    text-decoration: underline;
+    cursor: pointer;
+  }
+
+  .inline-link:hover {
+    color: var(--accent);
+  }
+</style>

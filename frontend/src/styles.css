@@ -1718,19 +1718,7 @@ button.row-action-add.active {
 
 /* .project-empty-hint / .project-identity* / .disabled-section co-located into Project.svelte (#14). */
 
-.inline-link {
-  background: transparent;
-  border: none;
-  padding: 0;
-  font: inherit;
-  color: var(--accent-deep);
-  text-decoration: underline;
-  cursor: pointer;
-}
-
-.inline-link:hover {
-  color: var(--accent);
-}
+/* .inline-link co-located into NewProjectModal.svelte (#14). */
 
 .preview-result-error {
   margin: 0;

@@ -902,9 +902,8 @@
       {researchStructure}
       {defaultAssistantId}
       {implicitContextMatcher}
-      on:body-change={emitChange}
-      on:focus={() => onFocus?.()}
-      on:open-chat={(event) => onOpenChat?.(event.detail)}
+      onBodyChange={emitChange}
+      onFocus={() => onFocus?.()}
     />
   {/if}
 

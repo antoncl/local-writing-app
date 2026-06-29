@@ -18,7 +18,7 @@
   in App.svelte's chat pane (used to compare unified vs bespoke).
 -->
 <script lang="ts">
-  import { createEventDispatcher, onMount, tick } from "svelte";
+  import { onMount, tick } from "svelte";
   import { api } from "./api";
   import PlainTextEditor from "./PlainTextEditor.svelte";
   import PromptInputField from "./PromptInputField.svelte";
@@ -40,48 +40,58 @@
   import { metadataSchemaStore } from "./stores/schema";
   import { refreshChatSessions, refreshProjectCost } from "./stores/chats";
 
-  export let scene: EditableDocument | null = null;
-  // metadataSchema is global per-project — read from the store, not a prop (#14 Step 2).
-  $: metadataSchema = $metadataSchemaStore;
-  export let promptEntries: PromptEntrySummary[] = [];
-  export let assistantEntries: AssistantEntrySummary[] = [];
-  export let loreEntries: LoreEntrySummary[] = [];
-  export let structure: StructureDocument | null = null;
-  // Research tree (sibling to manuscript) — threaded to the picker.
-  export let researchStructure: StructureDocument | null = null;
-  export let defaultAssistantId: string = "";
-  export let implicitContextMatcher: import("./implicitContextMatcher").CompiledMatcher | null = null;
+  
+  interface Props {
+    scene?: EditableDocument | null;
+    promptEntries?: PromptEntrySummary[];
+    assistantEntries?: AssistantEntrySummary[];
+    loreEntries?: LoreEntrySummary[];
+    structure?: StructureDocument | null;
+    // Research tree (sibling to manuscript) — threaded to the picker.
+    researchStructure?: StructureDocument | null;
+    defaultAssistantId?: string;
+    implicitContextMatcher?: import("./implicitContextMatcher").CompiledMatcher | null;
+    // Outbound events as callback props (#14: runes — replaces the dispatcher).
+    // NB: this view declared an "open-chat" event historically but never
+    // dispatched it (the editor-pane open-chat flow comes from ProseBodyView),
+    // so it's intentionally dropped here.
+    onBodyChange?: () => void;
+    onFocus?: () => void;
+  }
 
-  const dispatch = createEventDispatcher<{
-    "body-change": void;
-    focus: void;
-    "open-chat": { entry: PromptEntrySummary; inputs: Record<string, unknown>; sceneId: string | null; assistantId: string };
-  }>();
+  let {
+    scene = null,
+    promptEntries = [],
+    assistantEntries = [],
+    loreEntries = [],
+    structure = null,
+    researchStructure = null,
+    defaultAssistantId = "",
+    implicitContextMatcher = null,
+    onBodyChange,
+    onFocus,
+  }: Props = $props();
 
-  // Suppress unused-prop warnings for props Phase 4c+ wires in (preview
-  // popover, inputs strip, future journal-scope rendering).
-  $: void loreEntries;
-  $: void structure;
 
-  let chatSession: ChatSession | null = null;
-  let loading = false;
-  let loadError: string | null = null;
+  let chatSession: ChatSession | null = $state(null);
+  let loading = $state(false);
+  let loadError: string | null = $state(null);
   let loadedChatId: string | null = null;
 
   // ---- chat working state (hydrated from chatSession on load) ----
-  let chatHistory: ChatMessage[] = [];
-  let chatRunning = false;
-  let chatError: string | null = null;
-  let chatLastMeta: { provider: string; model: string; latency_ms: number } | null = null;
-  let chatInput = "";
-  let chatScrollEl: HTMLDivElement | null = null;
+  let chatHistory: ChatMessage[] = $state([]);
+  let chatRunning = $state(false);
+  let chatError: string | null = $state(null);
+  let chatLastMeta: { provider: string; model: string; latency_ms: number } | null = $state(null);
+  let chatInput = $state("");
+  let chatScrollEl: HTMLDivElement | null = $state(null);
   // Holds the rendered template for a prompt-bound chat (filled by
   // renderAndLockPromptTemplate on first send) or — for legacy sessions
   // — the freeform system message that was authored before chats had
   // to be prompt-bound. Empty for fresh chats; never user-editable now.
-  let chatSystemPrompt = "";
-  let chatPromptEntryId = "";
-  let chatAssistantId = "";
+  let chatSystemPrompt = $state("");
+  let chatPromptEntryId = $state("");
+  let chatAssistantId = $state("");
   // Scene this chat was opened against (e.g. "invoke chat prompt" from a
   // prose scene). Passed as the target scene when rendering the template
   // at first-send so prompts that reference `scene` resolve it. "" for
@@ -89,42 +99,42 @@
   let chatTargetSceneId = "";
   let activeChatTitle = "Untitled chat";
   let activeChatPinned = false;
-  let activeChatJournal: ChatSessionJournalEntry[] = [];
-  let activeChatJournalFreshIds = new Set<string>();
-  let activeChatCacheWriteTimes: Record<string, string> = {};
+  let activeChatJournal: ChatSessionJournalEntry[] = $state([]);
+  let activeChatJournalFreshIds = $state(new Set<string>());
+  let activeChatCacheWriteTimes: Record<string, string> = $state({});
   // V2 cost accounting — pluck the delta off the streaming `done` event
   // and forward it to the backend on the next persistActiveChat.
   let pendingTurnCost: number | null = null;
   let pendingTurnCacheWriteSlots: string[] = [];
 
   // ---- prompt-picker UI state (composer chip → dropdown) ----
-  let promptPickerOpen = false;
-  let promptPickerSearch = "";
-  let promptPickerEl: HTMLDivElement | null = null;
-  let promptPickerBtnEl: HTMLButtonElement | null = null;
+  let promptPickerOpen = $state(false);
+  let promptPickerSearch = $state("");
+  let promptPickerEl: HTMLDivElement | null = $state(null);
+  let promptPickerBtnEl: HTMLButtonElement | null = $state(null);
 
   // ---- assistant-picker UI state (mirrors prompt picker; replaces native <select>) ----
-  let assistantPickerOpen = false;
-  let assistantPickerSearch = "";
-  let assistantPickerEl: HTMLDivElement | null = null;
-  let assistantPickerBtnEl: HTMLButtonElement | null = null;
+  let assistantPickerOpen = $state(false);
+  let assistantPickerSearch = $state("");
+  let assistantPickerEl: HTMLDivElement | null = $state(null);
+  let assistantPickerBtnEl: HTMLButtonElement | null = $state(null);
 
   // ---- 👁 preview popover state ----
   // The popover shows the rendered system_prompt — what the assistant
   // actually sees ahead of the conversation. For freeform chats that
   // IS the brief; for prompt-bound chats it's the post-render template.
   // Pure diagnostic — no fetch, just read-through of chatSystemPrompt.
-  let chatPreviewPopoverOpen = false;
-  let chatPreviewBtnEl: HTMLButtonElement | null = null;
-  let chatPreviewPopoverEl: HTMLDivElement | null = null;
+  let chatPreviewPopoverOpen = $state(false);
+  let chatPreviewBtnEl: HTMLButtonElement | null = $state(null);
+  let chatPreviewPopoverEl: HTMLDivElement | null = $state(null);
 
   // ---- declared-inputs state (filled before first send for prompt-bound chats) ----
   // Per-input draft values keyed by input.name. JSON-encoded for list-shaped
   // types so storage stays string-uniform. Hydrated from session.inputs;
   // persisted on every edit so a half-configured chat survives reload.
-  let chatInputDrafts: Record<string, string> = {};
+  let chatInputDrafts: Record<string, string> = $state({});
   // Collapse the strip after first send to reclaim space — user can re-expand.
-  let chatInputsHidden = false;
+  let chatInputsHidden = $state(false);
 
   // ---- cost-estimate + TTL strip state ----
   // Per-slot TTL in seconds; mirrors App.svelte's SLOT_TTL_SECONDS.
@@ -136,7 +146,7 @@
   // Tick counter — bumped every second by an onMount interval — so the
   // TTL chips' "remaining" recompute live. Anything else that wants a
   // 1Hz refresh can read this too.
-  let ttlTick = 0;
+  let ttlTick = $state(0);
   // Next-turn estimate. Recomputed whenever the inputs that drive it
   // change (prompt, assistant, drafts). Null when no prompt is bound —
   // a freeform brief renders no template so there's nothing to estimate
@@ -147,13 +157,12 @@
     cost_usd: number | null;
     caching_style: "none" | "auto" | "explicit" | null;
     cache_blocks: { label: string; tokens: number; cache_break_after: boolean }[];
-  } | null = null;
+  } | null = $state(null);
   // Stale-response guard: every fetch grabs ourToken = ++chatEstimateToken;
   // on resolve we drop the response if the token moved. Out-of-order
   // resolutions are common when the user types fast.
   let chatEstimateToken = 0;
 
-  $: void maybeLoadChat(scene?.id ?? null);
 
   async function maybeLoadChat(chatId: string | null): Promise<void> {
     if (!chatId) {
@@ -370,14 +379,7 @@
     return assistantEntries.find((a) => a.id === assistantId)?.title ?? "Unknown assistant";
   }
 
-  $: isLocked = chatHistory.length > 0;
 
-  // The prompt entry currently bound to the chat, if any. Used to drive
-  // declaredInputs + the first-send template render.
-  $: activePromptEntry = chatPromptEntryId
-    ? promptEntries.find((p) => p.id === chatPromptEntryId) ?? null
-    : null;
-  $: declaredInputs = activePromptEntry?.inputs ?? [];
 
   function defaultDraftFor(input: PromptInputDefinition): string {
     if (input.default !== undefined && input.default !== null) return String(input.default);
@@ -401,9 +403,6 @@
     }
     return !raw?.trim();
   }
-  $: missingRequiredInputs = declaredInputs.filter(
-    (i) => i.required && isInputMissing(i, chatInputDrafts[i.name]),
-  );
 
   function coerceChatInputValue(raw: string, type: PromptInputDefinition["type"]): unknown {
     const trimmed = raw.trim();
@@ -485,7 +484,7 @@
       // Refresh our local snapshot of the persisted session — keeps the
       // cost-total footer accurate without re-fetching.
       chatSession = saved;
-      dispatch("body-change");
+      onBodyChange?.();
       // A turn that accumulated cost moves the project-wide rollup chip. Write
       // through the cost store directly; the chip re-renders reactively (no
       // host signal needed — #14 Step 3).
@@ -784,23 +783,46 @@
       return { slot, label, ttlLabel, formatted, expired: remainingSec <= 0 };
     });
   }
-  $: ttlChips = ttlChipsFor(activeChatCacheWriteTimes, ttlTick);
 
-  // Re-fetch estimate when any input that drives it changes. Each dep
-  // read on its own line so Svelte tracks them (see
-  // [[feedback-svelte5-reactivity-traps]]).
-  $: {
-    chatPromptEntryId;
-    chatAssistantId;
-    chatInputDrafts;
-    promptEntries.length;
-    void fetchChatEstimate();
-  }
 
   // ---------- Public methods (called via bind:this from parent) ----------
   export function getBody(): string {
     return "";
   }
+  // metadataSchema is global per-project — read from the store, not a prop (#14 Step 2).
+  let metadataSchema = $derived($metadataSchemaStore);
+  // Suppress unused-prop warnings for props Phase 4c+ wires in (preview
+  // popover, inputs strip, future journal-scope rendering).
+  $effect.pre(() => {
+    void loreEntries;
+  });
+  $effect.pre(() => {
+    void structure;
+  });
+  $effect.pre(() => {
+    void maybeLoadChat(scene?.id ?? null);
+  });
+  let isLocked = $derived(chatHistory.length > 0);
+  // The prompt entry currently bound to the chat, if any. Used to drive
+  // declaredInputs + the first-send template render.
+  let activePromptEntry = $derived(chatPromptEntryId
+    ? promptEntries.find((p) => p.id === chatPromptEntryId) ?? null
+    : null);
+  let declaredInputs = $derived(activePromptEntry?.inputs ?? []);
+  let missingRequiredInputs = $derived(declaredInputs.filter(
+    (i) => i.required && isInputMissing(i, chatInputDrafts[i.name]),
+  ));
+  let ttlChips = $derived(ttlChipsFor(activeChatCacheWriteTimes, ttlTick));
+  // Re-fetch estimate when any input that drives it changes. Each dep
+  // read on its own line so Svelte tracks them (see
+  // [[feedback-svelte5-reactivity-traps]]).
+  $effect.pre(() => {
+    chatPromptEntryId;
+    chatAssistantId;
+    chatInputDrafts;
+    promptEntries.length;
+    void fetchChatEstimate();
+  });
 </script>
 
 <div class="chat-body-view" role="region" aria-label="Chat">
@@ -820,7 +842,7 @@
           class:cbv-chip-assigned={!!chatPromptEntryId}
           title={isLocked ? "Prompt is locked while this chat has messages." : "Pick a prompt"}
           bind:this={promptPickerBtnEl}
-          on:click={() => void toggleChatPromptPicker()}
+          onclick={() => void toggleChatPromptPicker()}
           disabled={isLocked && !chatPromptEntryId}
         >
           <span class="cbv-chip-glyph" aria-hidden="true">✨</span>
@@ -843,7 +865,7 @@
               <button
                 type="button"
                 class:cbv-picker-active={entry.id === chatPromptEntryId}
-                on:click={() => void pickPromptForChat(entry)}
+                onclick={() => void pickPromptForChat(entry)}
               >
                 <strong>{entry.title}</strong>
                 <small>{entry.entry_type}</small>
@@ -865,7 +887,7 @@
           class:cbv-chip-locked={isLocked}
           title={isLocked ? "Assistant is locked while this chat has messages." : "Pick an assistant"}
           bind:this={assistantPickerBtnEl}
-          on:click={() => void toggleAssistantPicker()}
+          onclick={() => void toggleAssistantPicker()}
           disabled={isLocked}
           aria-label="Assistant"
         >
@@ -888,7 +910,7 @@
             <button
               type="button"
               class:cbv-picker-active={chatAssistantId === ""}
-              on:click={() => void pickAssistantForChat("")}
+              onclick={() => void pickAssistantForChat("")}
             >
               <strong>Default</strong>
               <small>{assistantTitle("").replace(/^Default \(|\)$/g, "") || "machine default"}</small>
@@ -897,7 +919,7 @@
               <button
                 type="button"
                 class:cbv-picker-active={assistant.id === chatAssistantId}
-                on:click={() => void pickAssistantForChat(assistant.id)}
+                onclick={() => void pickAssistantForChat(assistant.id)}
               >
                 <strong>{assistant.title}</strong>
                 <small>{assistant.entry_type}</small>
@@ -919,7 +941,7 @@
           title="Preview what's sent — system message + attached context"
           aria-label="Preview what's sent"
           aria-expanded={chatPreviewPopoverOpen}
-          on:click={toggleChatPreviewPopover}
+          onclick={toggleChatPreviewPopover}
         >👁</button>
         {#if chatPreviewPopoverOpen}
           <div
@@ -935,7 +957,7 @@
                 type="button"
                 class="cbv-preview-popover-close"
                 aria-label="Close"
-                on:click={() => (chatPreviewPopoverOpen = false)}
+                onclick={() => (chatPreviewPopoverOpen = false)}
               >×</button>
             </header>
             <div class="cbv-preview-popover-body">
@@ -1009,7 +1031,7 @@
             type="button"
             class="cbv-inputs-toggle"
             aria-expanded={!chatInputsHidden}
-            on:click={() => (chatInputsHidden = !chatInputsHidden)}
+            onclick={() => (chatInputsHidden = !chatInputsHidden)}
           >{chatInputsHidden ? "▸ Show inputs" : "▾ Hide inputs"}</button>
         {/if}
         {#if !isLocked || !chatInputsHidden}
@@ -1099,7 +1121,7 @@
       value={chatInput}
       on:change={(e) => (chatInput = e.detail.value)}
       on:keydown={(e) => handleChatInputKeydown(e.detail)}
-      on:focus={() => dispatch("focus")}
+      on:focus={() => onFocus?.()}
       placeholder="Message… (Ctrl/⌘+Enter to send)"
       ariaLabel="Chat message"
       minHeight={60}
@@ -1108,7 +1130,7 @@
     />
 
     <div class="cbv-action-row">
-      <button type="button" disabled={!chatHistory.length || chatRunning} on:click={clearChat}>Clear</button>
+      <button type="button" disabled={!chatHistory.length || chatRunning} onclick={clearChat}>Clear</button>
       <button
         type="button"
         class="primary"
@@ -1120,7 +1142,7 @@
           : (!chatInput.trim() && activePromptEntry && chatHistory.length === 0)
             ? "Send the prompt as-is (no extra message)"
             : ""}
-        on:click={() => void sendChat()}
+        onclick={() => void sendChat()}
       >
         {chatRunning ? "Sending…" : "Send"}
       </button>

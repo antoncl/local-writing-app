@@ -63,3 +63,22 @@
     <p class="muted">No chats yet. Click + New Chat to start one.</p>
   {/snippet}
 </NodeList>
+
+<style>
+  /* Rendered inside NodeRow's detailSlot snippet, so these carry Chats'
+     scope hash — the old `.chats-pane` ancestor anchor (App's pane wrapper)
+     is no longer needed; scoping limits them to this component. */
+  .chat-prompt-glyph {
+    font-size: 14px;
+  }
+
+  .chat-session-preset {
+    color: var(--accent);
+    font-size: 11px;
+  }
+
+  .chat-session-cost {
+    color: var(--text-2, var(--text-2));
+    font-variant-numeric: tabular-nums;
+  }
+</style>

@@ -1823,9 +1823,7 @@ button.row-action-add.active {
 }
 /* .ai-inline-toolbar* co-located into ProseBodyView.svelte (#14). */
 
-.chat-prompt-glyph {
-  font-size: 14px;
-}
+/* .chat-prompt-glyph co-located into Chats.svelte (#14). */
 
 @media (max-width: 720px) {
   .prompt-cheatsheet-body {
@@ -2077,15 +2075,8 @@ button.row-action-add.active {
   font-weight: 700;
   white-space: nowrap;
 }
-.chats-pane .chat-session-preset {
-  color: var(--accent);
-  font-size: 11px;
-}
 
-.chats-pane .chat-session-cost {
-  color: var(--text-2, var(--text-2));
-  font-variant-numeric: tabular-nums;
-}
+/* .chat-session-preset / .chat-session-cost co-located into Chats.svelte (#14). */
 
 .editor-pane .hidden {
   display: none;

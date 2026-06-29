@@ -162,3 +162,90 @@
     </p>
   {/if}
 </div>
+
+<style>
+  /* Option-row chrome co-located from styles.css (#14): swatch · value · label ·
+     remove, the "+ add option" affordance, and the drag-reorder insertion
+     markers. All target this widget's own elements. .sfi-options-hint stays
+     global — it's shared with SchemaFieldInlineEditor's computed-field hint. */
+  .sfi-options {
+    display: flex;
+    flex-direction: column;
+    gap: 7px;
+  }
+  .sfi-option-row {
+    position: relative;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+  }
+  .sfi-option-row.dragging {
+    opacity: 0.5;
+  }
+  /* Drag-reorder insertion marker — a 2px accent line (matches SchemaFieldRow). */
+  .sfi-option-row.drop-before::before,
+  .sfi-option-row.drop-after::after {
+    content: "";
+    position: absolute;
+    left: 0;
+    right: 0;
+    height: 2px;
+    background: var(--accent, #2f6f5e);
+    pointer-events: none;
+    z-index: 2;
+  }
+  .sfi-option-row.drop-before::before {
+    top: -3px;
+  }
+  .sfi-option-row.drop-after::after {
+    bottom: -3px;
+  }
+  .sfi-option-grip {
+    flex: none;
+    display: inline-flex;
+    color: var(--border-strong, var(--border-strong));
+    font-size: 15px;
+    cursor: grab;
+  }
+  .sfi-option-value-input {
+    flex: 1;
+    min-width: 0;
+    padding: 5px 8px;
+    border: 1px solid var(--border, var(--border));
+    border-radius: 8px;
+    background: var(--surface, #fff);
+    font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+    font-size: 12px;
+  }
+  .sfi-option-label {
+    flex: 1;
+    min-width: 0;
+    padding: 5px 8px;
+    border: 1px solid var(--border, var(--border));
+    border-radius: 8px;
+    background: var(--surface, #fff);
+    font-size: 13px;
+  }
+  .sfi-option-remove {
+    flex: none;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 26px;
+    height: 26px;
+    padding: 0;
+    border: 1px solid transparent;
+    border-radius: 7px;
+    background: transparent;
+    color: var(--text-3, var(--text-3));
+    cursor: pointer;
+  }
+  .sfi-option-remove:hover {
+    border-color: var(--danger-border, #e2c4c2);
+    color: var(--danger, #7c1f18);
+    background: var(--danger-soft, #fff3f2);
+  }
+  .sfi-add-option {
+    align-self: flex-start;
+  }
+</style>

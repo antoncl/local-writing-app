@@ -54,6 +54,14 @@
   import { todosStore, refreshTodos as storeRefreshTodos, setTodos } from "./stores/todos";
   import { knownTagsStore, refreshKnownTags as storeRefreshKnownTags, setKnownTags } from "./stores/tags";
   import { validationStore, setValidation } from "./stores/validation";
+  import {
+    structureStore,
+    researchStructureStore,
+    refreshStructure as storeRefreshStructure,
+    refreshResearchStructure as storeRefreshResearchStructure,
+    setStructure,
+    setResearchStructure,
+  } from "./stores/structure";
   import GroupsManagerDialog from "./GroupsManagerDialog.svelte";
   import TagManagerDialog from "./TagManagerDialog.svelte";
   import type { OptionDraft } from "./SelectOptionsEditor.svelte";
@@ -201,11 +209,11 @@
   let appState: AppState = { name: "needsProject" };
   $: project = appState.name === "projectOpen" ? appState.project : null;
   $: isProjectOpen = appState.name === "projectOpen";
-  let structure: StructureDocument | null = null;
+  $: structure = $structureStore;
   // Research tree — parallel structure to the manuscript tree. Topics
   // are containers, notes are leaves with their own markdown file.
   // See docs/research-strategy.md.
-  let researchStructure: StructureDocument | null = null;
+  $: researchStructure = $researchStructureStore;
   let collapsedResearchNodes: Record<string, boolean> = {};
   let loreEntries: LoreEntrySummary[] = [];
   // Compiled matcher for implicit-context highlighting in editors.
@@ -839,11 +847,11 @@
   }
 
   async function refreshStructure() {
-    structure = await api.getStructure();
+    await storeRefreshStructure();
   }
 
   async function refreshResearchStructure() {
-    researchStructure = await api.getResearchStructure();
+    await storeRefreshResearchStructure();
   }
 
   async function refreshLoreEntries() {
@@ -1016,7 +1024,7 @@
       await refreshMetadataSchema();
       await refreshKnownTags();
       await refreshTodos();
-      const initialSceneId = findFirstSceneId(structure?.root);
+      const initialSceneId = findFirstSceneId(get(structureStore)?.root);
       if (initialSceneId) {
         await openSceneInEditorPane(initialSceneId);
       }
@@ -2068,7 +2076,7 @@
         await run(async () => {
           const result = await api.moveLoreNoteToResearch(entry.id);
           loreEntries = result.lore.entries;
-          researchStructure = result.tree;
+          setResearchStructure(result.tree);
           // Open the new note in the editor so the user sees the result.
           await openResearchNoteInEditorPane(result.note_id);
           status = result.dropped_fields.length > 0
@@ -2087,8 +2095,8 @@
   const manuscriptTree: TreeConfig = {
     kind: "scene",
     leafType: "scene",
-    getStructure: () => structure,
-    applyStructure: (next) => { structure = next; },
+    getStructure: () => get(structureStore),
+    applyStructure: (next) => { setStructure(next); },
     refresh: refreshStructure,
     api: {
       create: api.createStructureNode.bind(api),
@@ -2116,8 +2124,8 @@
   const researchTree: TreeConfig = {
     kind: "research",
     leafType: "note",
-    getStructure: () => researchStructure,
-    applyStructure: (next) => { researchStructure = next; },
+    getStructure: () => get(researchStructureStore),
+    applyStructure: (next) => { setResearchStructure(next); },
     refresh: refreshResearchStructure,
     api: {
       create: api.createResearchNode.bind(api),
@@ -3122,7 +3130,7 @@
       // unlinks the markdown file as part of the cascade.
       const node = researchStructure ? findNodeBySceneId(researchStructure.root, pane.scene.id) : null;
       if (node) {
-        researchStructure = await api.deleteResearchNode(node.id);
+        setResearchStructure(await api.deleteResearchNode(node.id));
       }
     } else if (documentKind === "prompt") {
       promptEntries = (await api.deletePromptEntry(pane.scene.id)).entries;
@@ -3132,7 +3140,7 @@
       setChatSessions((await api.deleteChatSession(pane.scene.id)).sessions);
       if (activeChatId === pane.scene.id) activeChatId = null;
     } else {
-      structure = await api.deleteScene(pane.scene.id);
+      setStructure(await api.deleteScene(pane.scene.id));
       await refreshTodos();
     }
     tearDownEditorPane(id);

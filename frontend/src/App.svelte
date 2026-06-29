@@ -62,6 +62,11 @@
     setStructure,
     setResearchStructure,
   } from "./stores/structure";
+  import {
+    loreEntriesStore,
+    refreshLoreEntries as storeRefreshLoreEntries,
+    setLoreEntries,
+  } from "./stores/lore";
   import GroupsManagerDialog from "./GroupsManagerDialog.svelte";
   import TagManagerDialog from "./TagManagerDialog.svelte";
   import type { OptionDraft } from "./SelectOptionsEditor.svelte";
@@ -215,7 +220,7 @@
   // See docs/research-strategy.md.
   $: researchStructure = $researchStructureStore;
   let collapsedResearchNodes: Record<string, boolean> = {};
-  let loreEntries: LoreEntrySummary[] = [];
+  $: loreEntries = $loreEntriesStore;
   // Compiled matcher for implicit-context highlighting in editors.
   // Rebuilds whenever the lore set changes. Cheap (sub-millisecond at
   // Honorverse-scale per the benchmark) so we don't bother debouncing.
@@ -855,7 +860,7 @@
   }
 
   async function refreshLoreEntries() {
-    loreEntries = (await api.listLoreEntries()).entries;
+    await storeRefreshLoreEntries();
   }
 
   async function refreshPromptEntries() {
@@ -889,7 +894,7 @@
   async function refreshAfterTagChange() {
     await refreshKnownTags();
     await run(async () => {
-      loreEntries = (await api.listLoreEntries()).entries;
+      setLoreEntries((await api.listLoreEntries()).entries);
       promptEntries = (await api.listPromptEntries()).entries;
       await refreshOpenEditorPaneBaselines();
     });
@@ -2075,7 +2080,7 @@
         });
         await run(async () => {
           const result = await api.moveLoreNoteToResearch(entry.id);
-          loreEntries = result.lore.entries;
+          setLoreEntries(result.lore.entries);
           setResearchStructure(result.tree);
           // Open the new note in the editor so the user sees the result.
           await openResearchNoteInEditorPane(result.note_id);
@@ -3124,7 +3129,7 @@
     const documentKind = pane.document?.type ?? "scene";
     const sceneTitle = pane.scene.title;
     if (documentKind === "lore") {
-      loreEntries = (await api.deleteLoreEntry(pane.scene.id)).entries;
+      setLoreEntries((await api.deleteLoreEntry(pane.scene.id)).entries);
     } else if (documentKind === "research") {
       // Delete the tree node that points at this note; the backend
       // unlinks the markdown file as part of the cascade.

@@ -20,29 +20,52 @@
   // index-based), this component is agnostic.
   import type { Snippet } from "svelte";
 
-  export let iconClass: string;
-  export let name: string;
-  export let typeLabel: string;
-  // Interactive rows are <button> (click-to-expand + drag); inherited /
-  // display-only rows are a plain <div>.
-  export let interactive: boolean = true;
-  export let draggable: boolean = false;
-  export let expanded: boolean = false;
-  export let inherited: boolean = false;
-  export let dragging: boolean = false;
-  export let dropBefore: boolean = false;
-  export let dropAfter: boolean = false;
-  // Extra class for surface-specific overrides, e.g. "prompt-input-row-collapsed".
-  export let rowClass: string = "";
-  export let ariaLabel: string = "";
-  export let meta: Snippet | undefined = undefined;
+  interface Props {
+    iconClass: string;
+    name: string;
+    typeLabel: string;
+    // Interactive rows are <button> (click-to-expand + drag); inherited /
+    // display-only rows are a plain <div>.
+    interactive?: boolean;
+    draggable?: boolean;
+    expanded?: boolean;
+    inherited?: boolean;
+    dragging?: boolean;
+    dropBefore?: boolean;
+    dropAfter?: boolean;
+    // Extra class for surface-specific overrides, e.g. "prompt-input-row-collapsed".
+    rowClass?: string;
+    ariaLabel?: string;
+    meta?: Snippet;
+    onToggle?: () => void;
+    onDragStart?: (event: DragEvent) => void;
+    onDragOver?: (event: DragEvent) => void;
+    onDragLeave?: (event: DragEvent) => void;
+    onDrop?: (event: DragEvent) => void;
+    onDragEnd?: (event: DragEvent) => void;
+  }
 
-  export let onToggle: () => void = () => {};
-  export let onDragStart: (event: DragEvent) => void = () => {};
-  export let onDragOver: (event: DragEvent) => void = () => {};
-  export let onDragLeave: (event: DragEvent) => void = () => {};
-  export let onDrop: (event: DragEvent) => void = () => {};
-  export let onDragEnd: (event: DragEvent) => void = () => {};
+  let {
+    iconClass,
+    name,
+    typeLabel,
+    interactive = true,
+    draggable = false,
+    expanded = false,
+    inherited = false,
+    dragging = false,
+    dropBefore = false,
+    dropAfter = false,
+    rowClass = "",
+    ariaLabel = "",
+    meta = undefined,
+    onToggle = () => {},
+    onDragStart = () => {},
+    onDragOver = () => {},
+    onDragLeave = () => {},
+    onDrop = () => {},
+    onDragEnd = () => {},
+  }: Props = $props();
 </script>
 
 {#if interactive}
@@ -57,12 +80,12 @@
     {draggable}
     aria-label={ariaLabel || undefined}
     aria-expanded={expanded}
-    on:click={onToggle}
-    on:dragstart={onDragStart}
-    on:dragover={onDragOver}
-    on:dragleave={onDragLeave}
-    on:drop|preventDefault={onDrop}
-    on:dragend={onDragEnd}
+    onclick={onToggle}
+    ondragstart={onDragStart}
+    ondragover={onDragOver}
+    ondragleave={onDragLeave}
+    ondrop={(event) => { event.preventDefault(); onDrop(event); }}
+    ondragend={onDragEnd}
   >
     <span class="sfr-grip" title="Drag to reorder" aria-hidden="true"><i class="ti ti-grip-vertical"></i></span>
     <span class="sfr-tile"><i class={iconClass} aria-hidden="true"></i></span>

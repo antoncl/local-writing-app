@@ -132,3 +132,133 @@
     <small class="inputs-dialog-hint">Ctrl/⌘+Enter to run · Esc to cancel</small>
   </div>
 </div>
+
+<style>
+  .inputs-dialog-backdrop {
+    position: fixed;
+    inset: 0;
+    background: rgba(15, 23, 32, 0.45);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    z-index: 1000;
+  }
+
+  .inputs-dialog {
+    background: var(--surface);
+    border-radius: 8px;
+    box-shadow: 0 12px 36px rgba(15, 23, 32, 0.25);
+    padding: 16px 20px;
+    min-width: 360px;
+    max-width: 520px;
+    display: grid;
+    gap: 12px;
+  }
+
+  .inputs-dialog-error {
+    background: var(--danger-soft);
+    border: 1px solid var(--danger-border);
+    color: var(--danger);
+    padding: 6px 10px;
+    border-radius: 4px;
+    font-size: 12px;
+  }
+
+  .inputs-dialog header {
+    display: grid;
+    gap: 2px;
+  }
+
+  .inputs-dialog header strong {
+    font-size: 15px;
+  }
+
+  .inputs-dialog header small {
+    color: var(--text-2);
+  }
+
+  .inputs-dialog-fields {
+    display: grid;
+    gap: 10px;
+  }
+
+  .inputs-dialog-fields label {
+    display: grid;
+    gap: 4px;
+    font-size: 13px;
+  }
+
+  .inputs-dialog-fields .required-marker {
+    color: var(--danger);
+  }
+
+  /* Form controls inside the fields are rendered by the child
+     PromptInputField (plus the own Assistant <select>), so the element
+     targets need :global to reach across the component boundary. */
+  .inputs-dialog-fields :global(textarea),
+  .inputs-dialog-fields :global(input[type="text"]),
+  .inputs-dialog-fields :global(input[type="number"]),
+  .inputs-dialog-fields :global(select) {
+    width: 100%;
+    box-sizing: border-box;
+  }
+
+  .inputs-dialog-fields :global(textarea) {
+    font-family: inherit;
+    resize: vertical;
+  }
+
+  .inputs-dialog-actions {
+    display: flex;
+    gap: 8px;
+    justify-content: flex-end;
+  }
+
+  .inputs-dialog-actions .primary {
+    background: var(--accent);
+    color: var(--surface);
+    border-color: var(--accent);
+  }
+
+  .inputs-dialog-actions .primary:hover {
+    background: var(--accent-strong);
+    border-color: var(--accent-strong);
+  }
+
+  .inputs-dialog-hint {
+    color: var(--text-3);
+    font-size: 11px;
+    text-align: right;
+  }
+
+  /* V2: pre-send token + cost strip above the chat composer. Compact
+     horizontal line — no card, reads as metadata rather than a UI element. */
+  .chat-estimate-strip {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 6px;
+    padding: 4px 8px 2px;
+    font-size: 0.78em;
+    color: var(--color-muted, #888);
+    cursor: default;
+  }
+
+  .chat-estimate-tokens,
+  .chat-estimate-cost {
+    font-variant-numeric: tabular-nums;
+  }
+
+  .chat-estimate-cost {
+    color: var(--color-text, #ccc);
+  }
+
+  .chat-estimate-sep {
+    opacity: 0.6;
+  }
+
+  .chat-estimate-chip {
+    font-variant-numeric: tabular-nums;
+    opacity: 0.85;
+  }
+</style>

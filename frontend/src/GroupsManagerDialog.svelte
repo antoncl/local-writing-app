@@ -253,8 +253,8 @@
                       value={member.icon ?? null}
                       defaultGlyph={DEFAULT_FIELD_GLYPH[member.type] ?? "letter-case"}
                       fieldLabel={member.name || "member"}
-                      on:select={(event) => updateMemberIcon(index, event.detail.icon)}
-                      on:close={() => (iconPickerFor = null)}
+                      onSelect={(icon) => updateMemberIcon(index, icon)}
+                      onClose={() => (iconPickerFor = null)}
                     />
                   </div>
                 {/if}

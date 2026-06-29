@@ -150,8 +150,8 @@
             value={icon}
             defaultGlyph={DEFAULT_FIELD_GLYPH[type] ?? "letter-case"}
             fieldLabel={name || "field"}
-            on:select={(event) => (icon = event.detail.icon)}
-            on:close={() => (iconPickerOpen = false)}
+            onSelect={(next) => (icon = next)}
+            onClose={() => (iconPickerOpen = false)}
           />
         </div>
       {/if}

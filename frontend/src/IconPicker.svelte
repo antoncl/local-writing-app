@@ -1,39 +1,39 @@
 <script lang="ts">
-  import { createEventDispatcher } from "svelte";
   import { CURATED_ICON_CATEGORIES, CURATED_ICONS } from "./fieldIcons";
 
-  // The current icon override (null/"" = inheriting the field-type default).
-  export let value: string | null = null;
-  // The type's default glyph (shown as the reset target).
-  export let defaultGlyph: string;
-  // Field display name, for the header.
-  export let fieldLabel: string = "field";
+  interface Props {
+    // The current icon override (null/"" = inheriting the field-type default).
+    value?: string | null;
+    // The type's default glyph (shown as the reset target).
+    defaultGlyph: string;
+    // Field display name, for the header.
+    fieldLabel?: string;
+    onSelect?: (icon: string | null) => void;
+    onClose?: () => void;
+  }
 
-  const dispatch = createEventDispatcher<{
-    select: { icon: string | null };
-    close: void;
-  }>();
+  let { value = null, defaultGlyph, fieldLabel = "field", onSelect, onClose }: Props = $props();
 
-  let query = "";
-  $: trimmed = query.trim().toLowerCase();
+  let query = $state("");
+  const trimmed = $derived(query.trim().toLowerCase());
   // When searching, show a single flat filtered list; otherwise the themed
   // category grid.
-  $: filtered = trimmed
-    ? CURATED_ICONS.filter((name) => name.includes(trimmed))
-    : [];
+  const filtered = $derived(
+    trimmed ? CURATED_ICONS.filter((name) => name.includes(trimmed)) : [],
+  );
 
   function choose(icon: string) {
-    dispatch("select", { icon });
+    onSelect?.(icon);
   }
   function reset() {
-    dispatch("select", { icon: null });
+    onSelect?.(null);
   }
 </script>
 
 <div class="icon-picker" role="dialog" aria-label={`Icon for ${fieldLabel}`}>
   <div class="ip-head">
     <span class="ip-title">Icon for <span class="ip-field">{fieldLabel}</span></span>
-    <button type="button" class="ip-reset" on:click={reset}>reset to default</button>
+    <button type="button" class="ip-reset" onclick={reset}>reset to default</button>
   </div>
   <div class="ip-body">
     <input
@@ -52,7 +52,7 @@
               class:on={value === name}
               title={name}
               aria-label={name}
-              on:click={() => choose(name)}
+              onclick={() => choose(name)}
             >
               <i class={`ti ti-${name}`} aria-hidden="true"></i>
             </button>
@@ -73,7 +73,7 @@
                 class:on={value === name}
                 title={name}
                 aria-label={name}
-                on:click={() => choose(name)}
+                onclick={() => choose(name)}
               >
                 <i class={`ti ti-${name}`} aria-hidden="true"></i>
               </button>
@@ -86,7 +86,7 @@
       <span class="ip-default">
         Default: <i class={`ti ti-${defaultGlyph}`} aria-hidden="true"></i> for this field type
       </span>
-      <button type="button" class="ip-done" on:click={() => dispatch("close")}>Done</button>
+      <button type="button" class="ip-done" onclick={() => onClose?.()}>Done</button>
     </div>
   </div>
 </div>

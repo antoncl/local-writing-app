@@ -1,0 +1,207 @@
+// Shared, pure helpers for the Detail Type editor (SchemaTypeEditor) and a
+// handful of remaining callers in App.svelte. Extracted alongside the
+// SchemaTypeEditor split (#14, second slice) so the component and the
+// parent's API-touching handlers (saveSchemaField, applyGroupToType, …)
+// both source the same definitions instead of duplicating them.
+//
+// Everything here is pure: schema/layer state is passed in as arguments
+// rather than read from a closure, so the helpers work the same whether
+// they're invoked from the component (where schema lives on props) or from
+// App.svelte (where it lives on its own `let` bindings).
+
+import type {
+  EntryTypeDefinition,
+  MetadataFieldDefinition,
+  MetadataSchema,
+  MetadataSchemaLayer,
+} from "@/lib/types";
+
+// The schema's kind universe (a Node's "class"). Narrower than the wider
+// DocumentKind, which also covers chat / snippet / structure_node — none
+// of which have their own schema-type tree.
+export type SchemaKind = "scene" | "lore" | "research" | "prompt" | "assistant" | "project";
+
+// Slugify a free-text label into a stable field/type id.
+export function slugifyFieldId(value: string): string {
+  return value
+    .trim()
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "_")
+    .replace(/^_+|_+$/g, "")
+    .replace(/^[0-9]/, "field_$&");
+}
+
+// Suggest a key prefix for a group application from its label.
+export function suggestPrefixFromLabel(label: string): string {
+  const slug = slugifyFieldId(label);
+  return slug ? `${slug}_` : "";
+}
+
+// Display name for a built-in or custom entry type.
+export function nodeTypeDisplayName(
+  typeId: string,
+  definition: EntryTypeDefinition | undefined,
+): string {
+  if (typeId === "scene") return "Scenes";
+  if (typeId === "lore_entry") return "Lore Entries";
+  if (typeId === "prompt") return "Prompts";
+  return definition?.name ?? typeId;
+}
+
+// Source-layer index (used as a CSS `--source-index`) for the colored
+// badge that distinguishes system, project, and machine layers.
+export function sourceLayerIndex(
+  source: { layer_id: string; built_in: boolean } | undefined | null,
+  layers: MetadataSchemaLayer[],
+): number {
+  if (!source || source.built_in) return 0;
+  return Math.max(0, layers.findIndex((layer) => layer.id === source.layer_id) + 1);
+}
+
+// Short text for the source badge ("System" / layer label / "Unknown").
+export function sourceBadgeLabel(
+  source: { layer_label: string; built_in: boolean } | undefined | null,
+): string {
+  return source?.built_in ? "System" : (source?.layer_label ?? "Unknown");
+}
+
+// The type a given field is inherited from (its defining entry-type's
+// display name) — for the "extends" jump label. Best-effort: the nearest
+// ancestor whose own_fields includes the field.
+export function inheritedFromLabel(
+  entryTypeId: string,
+  fieldId: string,
+  schema: MetadataSchema | null,
+): string {
+  let cursor = schema?.entry_types[entryTypeId]?.parent ?? null;
+  let guard = 0;
+  while (cursor && guard < 20) {
+    const def = schema?.entry_types[cursor];
+    if (!def) break;
+    if (Array.isArray(def.own_fields) ? def.own_fields.includes(fieldId) : def.fields?.includes(fieldId)) {
+      return nodeTypeDisplayName(cursor, def);
+    }
+    cursor = def.parent ?? null;
+    guard += 1;
+  }
+  return "parent";
+}
+
+// Display name for a group-derived field's origin marker.
+export function groupOriginLabel(
+  field: MetadataFieldDefinition,
+  schema: MetadataSchema | null,
+): string {
+  if (field.group) return field.group;
+  const def = field.group_origin ? schema?.groups?.[field.group_origin] : null;
+  return def?.name ?? "group";
+}
+
+// L1 grouping for the type editor field rows. Ungrouped fields render
+// first under no header, then each group in first-appearance order under
+// its own section header. Preserves the underlying entry order so drag-
+// reorder still operates on the stored sequence.
+export type SchemaFieldSection = {
+  group: string | null;
+  entries: [string, MetadataFieldDefinition][];
+};
+
+export function buildSchemaFieldSections(
+  entries: [string, MetadataFieldDefinition][],
+): SchemaFieldSection[] {
+  const ungrouped: [string, MetadataFieldDefinition][] = [];
+  const groups = new Map<string, [string, MetadataFieldDefinition][]>();
+  for (const entry of entries) {
+    const group = (entry[1].group ?? "").trim();
+    if (!group) {
+      ungrouped.push(entry);
+    } else {
+      if (!groups.has(group)) groups.set(group, []);
+      groups.get(group)!.push(entry);
+    }
+  }
+  const out: SchemaFieldSection[] = [];
+  if (ungrouped.length) out.push({ group: null, entries: ungrouped });
+  for (const [group, groupEntries] of groups) out.push({ group, entries: groupEntries });
+  return out;
+}
+
+// One entry type as a flat option (id + display label + nesting depth).
+export type NodeTypeOption = {
+  id: string;
+  label: string;
+  depth: number;
+  definition: EntryTypeDefinition;
+};
+
+// One entry type as a tree node for the Detail Types pane.
+export type NodeTypeTreeNode = NodeTypeOption & {
+  children: NodeTypeTreeNode[];
+  // Field entries baked into the tree at build time so the recursive
+  // renderNodeTypeCard snippet doesn't have to look them up via the
+  // metadataSchema closure — see [[feedback-svelte5-reactivity-traps]]
+  // trap 2: closures inside recursive snippets go stale after mutations
+  // (a new field on a deep subtype didn't appear in its type's children
+  // panel until a full reload).
+  fieldEntries: [string, MetadataFieldDefinition][];
+};
+
+// Build the per-kind entry-type tree the Detail Types pane renders.
+// Roots come first in a kind-specific order (the kind's canonical root —
+// lore_entry / prompt / research — or name-sorted for scene/assistant/
+// project); children sort by display name. Each node bakes in its own
+// field entries (see NodeTypeTreeNode).
+export function buildNodeTypeTree(
+  schema: MetadataSchema | null,
+  kind: SchemaKind,
+): NodeTypeTreeNode[] {
+  const entryTypes = schema?.entry_types ?? {};
+  const childrenByParent: Record<string, string[]> = {};
+  const roots: string[] = [];
+  for (const [typeId, definition] of Object.entries(entryTypes)) {
+    if (definition.kind !== kind) continue;
+    const parent = definition.parent;
+    if (parent && entryTypes[parent]?.kind === kind) {
+      childrenByParent[parent] = [...(childrenByParent[parent] ?? []), typeId];
+    } else {
+      roots.push(typeId);
+    }
+  }
+  const compareByName = (left: string, right: string) =>
+    nodeTypeDisplayName(left, entryTypes[left]).localeCompare(nodeTypeDisplayName(right, entryTypes[right]));
+  for (const children of Object.values(childrenByParent)) {
+    children.sort(compareByName);
+  }
+  const rootIds =
+    kind === "lore" && entryTypes.lore_entry
+      ? ["lore_entry"]
+      : kind === "prompt" && entryTypes.prompt
+        ? ["prompt"]
+        : kind === "research" && entryTypes.research
+          ? ["research"]
+          : roots.sort(compareByName);
+  const fieldsRegistry = schema?.fields ?? {};
+  const buildNode = (typeId: string, depth: number): NodeTypeTreeNode | null => {
+    const definition = entryTypes[typeId];
+    if (!definition || definition.kind !== kind) return null;
+    const children = (childrenByParent[typeId] ?? [])
+      .map((childId) => buildNode(childId, depth + 1))
+      .filter((child): child is NodeTypeTreeNode => Boolean(child));
+    const fieldIds = definition.own_fields ?? definition.fields ?? [];
+    const fieldEntries = fieldIds
+      .map((fieldId): [string, MetadataFieldDefinition] | null => {
+        const f = fieldsRegistry[fieldId];
+        return f ? [fieldId, f] : null;
+      })
+      .filter((entry): entry is [string, MetadataFieldDefinition] => Boolean(entry));
+    return {
+      id: typeId,
+      label: nodeTypeDisplayName(typeId, definition),
+      depth,
+      definition,
+      children,
+      fieldEntries,
+    };
+  };
+  return rootIds.map((typeId) => buildNode(typeId, 0)).filter((node): node is NodeTypeTreeNode => Boolean(node));
+}

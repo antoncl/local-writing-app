@@ -1,27 +1,27 @@
 <script lang="ts">
   import { onMount, tick } from "svelte";
-  import { api } from "./api";
-  import CodeEditor from "./CodeEditor.svelte";
-  import NodeEditor from "./NodeEditor.svelte";
-  import DirectoryPickerModal from "./DirectoryPickerModal.svelte";
-  import SchemaTypeEditor, { type TypeDraftPayload } from "./SchemaTypeEditor.svelte";
-  import type { FieldDraftPayload } from "./SchemaFieldInlineEditor.svelte";
-  import SchemaTreePane from "./SchemaTreePane.svelte";
-  import Tree, { type TreeConfig } from "./Tree.svelte";
-  import Lore from "./Lore.svelte";
-  import Assistants from "./Assistants.svelte";
-  import Prompts from "./Prompts.svelte";
-  import Chats from "./Chats.svelte";
-  import Project from "./Project.svelte";
-  import Search from "./Search.svelte";
-  import Todo, { type EmbeddedTodo } from "./Todo.svelte";
-  import Pane, { type PaneChrome } from "./Pane.svelte";
+  import { api } from "@/lib/api";
+  import CodeEditor from "@/components/widgets/CodeEditor.svelte";
+  import NodeEditor from "@/components/editor/NodeEditor.svelte";
+  import DirectoryPickerModal from "@/components/dialogs/DirectoryPickerModal.svelte";
+  import SchemaTypeEditor, { type TypeDraftPayload } from "@/components/schema/SchemaTypeEditor.svelte";
+  import type { FieldDraftPayload } from "@/components/schema/SchemaFieldInlineEditor.svelte";
+  import SchemaTreePane from "@/components/schema/SchemaTreePane.svelte";
+  import Tree, { type TreeConfig } from "@/components/panes/Tree.svelte";
+  import Lore from "@/components/panes/Lore.svelte";
+  import Assistants from "@/components/panes/Assistants.svelte";
+  import Prompts from "@/components/panes/Prompts.svelte";
+  import Chats from "@/components/panes/Chats.svelte";
+  import Project from "@/components/panes/Project.svelte";
+  import Search from "@/components/panes/Search.svelte";
+  import Todo, { type EmbeddedTodo } from "@/components/panes/Todo.svelte";
+  import Pane, { type PaneChrome } from "@/components/panes/Pane.svelte";
   import {
     buildNodeTypeTree,
     buildSchemaFieldSections,
     type NodeTypeTreeNode,
     type SchemaKind,
-  } from "./schemaTypeHelpers";
+  } from "@/lib/utils/schemaTypeHelpers";
   import {
     collectNodeIdSet,
     collectSceneIdSet,
@@ -29,16 +29,16 @@
     findNodeBySceneId,
     findStructureNodeById,
     isLeafNode,
-  } from "./treeHelpers";
-  import NewProjectModal from "./NewProjectModal.svelte";
-  import MachineSettingsDialog from "./MachineSettingsDialog.svelte";
-  import ConfirmModal from "./ConfirmModal.svelte";
-  import PlainTextEditor from "./PlainTextEditor.svelte";
-  import PromptInputField from "./PromptInputField.svelte";
-  import TopBar from "./TopBar.svelte";
-  import { installThemeWiring, themePreference, nextPreference, type ThemePreference } from "./theme";
-  import { renderChatContent } from "./chatMessageRender";
-  import { setPalette, resolveColor } from "./colors";
+  } from "@/lib/utils/treeHelpers";
+  import NewProjectModal from "@/components/dialogs/NewProjectModal.svelte";
+  import MachineSettingsDialog from "@/components/dialogs/MachineSettingsDialog.svelte";
+  import ConfirmModal from "@/components/dialogs/ConfirmModal.svelte";
+  import PlainTextEditor from "@/components/widgets/PlainTextEditor.svelte";
+  import PromptInputField from "@/components/widgets/PromptInputField.svelte";
+  import TopBar from "@/components/chrome/TopBar.svelte";
+  import { installThemeWiring, themePreference, nextPreference, type ThemePreference } from "@/lib/utils/theme";
+  import { renderChatContent } from "@/lib/utils/chatMessageRender";
+  import { setPalette, resolveColor } from "@/lib/utils/colors";
   import { get } from "svelte/store";
   import {
     chatSessionsStore,
@@ -48,10 +48,10 @@
     refreshProjectCost as storeRefreshProjectCost,
     setChatSessions,
     setProjectCost,
-  } from "./stores/chats";
-  import { todosStore, refreshTodos as storeRefreshTodos, setTodos } from "./stores/todos";
-  import { knownTagsStore, refreshKnownTags as storeRefreshKnownTags, setKnownTags } from "./stores/tags";
-  import { validationStore, setValidation } from "./stores/validation";
+  } from "@/lib/stores/chats";
+  import { todosStore, refreshTodos as storeRefreshTodos, setTodos } from "@/lib/stores/todos";
+  import { knownTagsStore, refreshKnownTags as storeRefreshKnownTags, setKnownTags } from "@/lib/stores/tags";
+  import { validationStore, setValidation } from "@/lib/stores/validation";
   import {
     structureStore,
     researchStructureStore,
@@ -59,36 +59,36 @@
     refreshResearchStructure as storeRefreshResearchStructure,
     setStructure,
     setResearchStructure,
-  } from "./stores/structure";
+  } from "@/lib/stores/structure";
   import {
     loreEntriesStore,
     refreshLoreEntries as storeRefreshLoreEntries,
     setLoreEntries,
-  } from "./stores/lore";
+  } from "@/lib/stores/lore";
   import {
     promptEntriesStore,
     refreshPromptEntries as storeRefreshPromptEntries,
     setPromptEntries,
-  } from "./stores/prompts";
+  } from "@/lib/stores/prompts";
   import {
     assistantEntriesStore,
     defaultAssistantIdStore,
     refreshAssistantEntries as storeRefreshAssistantEntries,
     setAssistantEntries,
-  } from "./stores/assistants";
+  } from "@/lib/stores/assistants";
   import {
     metadataSchemaStore,
     metadataSchemaOverviewStore,
     metadataSchemaLayersStore,
     refreshSchema as storeRefreshSchema,
     setMetadataSchema,
-  } from "./stores/schema";
-  import { implicitContextMatcherStore } from "./stores/derived";
-  import { loadProjectData } from "./stores/index";
-  import { focusedDocumentStore, pinnedKeysStore } from "./stores/editorFocus";
-  import GroupsManagerDialog from "./GroupsManagerDialog.svelte";
-  import TagManagerDialog from "./TagManagerDialog.svelte";
-  import type { OptionDraft } from "./SelectOptionsEditor.svelte";
+  } from "@/lib/stores/schema";
+  import { implicitContextMatcherStore } from "@/lib/stores/derived";
+  import { loadProjectData } from "@/lib/stores/index";
+  import { focusedDocumentStore, pinnedKeysStore } from "@/lib/stores/editorFocus";
+  import GroupsManagerDialog from "@/components/dialogs/GroupsManagerDialog.svelte";
+  import TagManagerDialog from "@/components/dialogs/TagManagerDialog.svelte";
+  import type { OptionDraft } from "@/components/schema/SelectOptionsEditor.svelte";
   import type {
     AIHealthResponse,
     AIPolicy,
@@ -131,7 +131,7 @@
     StructureNode,
     StructureNodeDeletePreview,
     TodoItem,
-  } from "./types";
+  } from "@/lib/types";
 
   type AppState =
     | { name: "needsProject" }
@@ -1352,7 +1352,7 @@
   function schemaFieldDefaultForStorage(
     type: MetadataFieldType,
     raw: string | undefined,
-  ): import("./types").MetadataValue | undefined {
+  ): import("@/lib/types").MetadataValue | undefined {
     if (raw === undefined || raw === "") return undefined;
     if (type === "boolean") return raw === "true";
     if (type === "number") {
@@ -1378,7 +1378,7 @@
       .map((draft) => ({ ...draft, value: draft.value.trim() }))
       .filter((draft) => draft.value && !seenValues.has(draft.value) && seenValues.add(draft.value))
       .map((draft) => {
-        const out: import("./types").SelectOption = { value: draft.value };
+        const out: import("@/lib/types").SelectOption = { value: draft.value };
         const label = draft.label.trim();
         // Only persist a label when it differs from the stable value
         // (label is cosmetic; value is the macro contract).

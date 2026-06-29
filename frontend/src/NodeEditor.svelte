@@ -1,5 +1,4 @@
 <script lang="ts">
-  import { createEventDispatcher } from "svelte";
   import BacklinksPanel from "./BacklinksPanel.svelte";
   import MetadataPanel from "./MetadataPanel.svelte";
   import InputsDialog from "./InputsDialog.svelte";
@@ -53,14 +52,15 @@
   export let dirty = false;
   export let todoStatusHint = "";
 
-  const dispatch = createEventDispatcher<{
-    change: { title: string; body: string; status: string; entryType: string; metadata: EntryMetadata; inputs?: PromptInputDefinition[] };
-    focus: void;
-    "custom-data": { entryType: string; kind: DocumentKind };
-    embeddedTodos: { todos: EmbeddedTodo[] };
-    navigate: { id: string; kind: string };
-    "open-chat": { entry: PromptEntrySummary; inputs: Record<string, unknown>; sceneId: string | null; assistantId: string };
-  }>();
+  // Outbound events as callback props (#14: App is now runes — components can't
+  // use on:event). NodeEditor stays legacy; these replace its dispatcher. Its
+  // INTERNAL on: listeners (to still-legacy MetadataPanel/*BodyView) are unchanged.
+  export let onChange: ((payload: { title: string; body: string; status: string; entryType: string; metadata: EntryMetadata; inputs?: PromptInputDefinition[] }) => void) | undefined = undefined;
+  export let onFocus: (() => void) | undefined = undefined;
+  export let onCustomData: ((payload: { entryType: string; kind: DocumentKind }) => void) | undefined = undefined;
+  export let onEmbeddedTodos: ((payload: { todos: EmbeddedTodo[] }) => void) | undefined = undefined;
+  export let onNavigate: ((payload: { id: string; kind: string }) => void) | undefined = undefined;
+  export let onOpenChat: ((payload: { entry: PromptEntrySummary; inputs: Record<string, unknown>; sceneId: string | null; assistantId: string }) => void) | undefined = undefined;
 
 
   let proseBodyView: ProseBodyView | null = null;
@@ -341,7 +341,7 @@
   function emitInputsChange(): void {
     if (!scene) return;
     const canonical = entryInputDraftsToCanonical(entryInputDrafts);
-    dispatch("change", {
+    onChange?.({
       title,
       body: rawBodyMode ? rawBody : (proseBodyView?.getBody() ?? ""),
       status,
@@ -462,7 +462,7 @@
 
   function emitChange() {
     if (!scene) return;
-    dispatch("change", {
+    onChange?.({
       title,
       body: rawBodyMode ? rawBody : (proseBodyView?.getBody() ?? ""),
       status,
@@ -768,15 +768,15 @@
         metadata = event.detail.metadata;
         emitChange();
       }}
-      on:customData={() => dispatch("custom-data", { entryType, kind: documentKind })}
-      on:navigate={(event) => dispatch("navigate", event.detail)}
+      on:customData={() => onCustomData?.({ entryType, kind: documentKind })}
+      on:navigate={(event) => onNavigate?.(event.detail)}
     />
     {#key scene?.id ?? ""}
       <BacklinksPanel
         backlinks={backlinks}
         loreEntries={loreEntries}
         structure={structure}
-        on:navigate={(event) => dispatch("navigate", event.detail)}
+        on:navigate={(event) => onNavigate?.(event.detail)}
       />
     {/key}
   {/if}
@@ -885,9 +885,9 @@
       {implicitContextMatcher}
       {documentLabel}
       on:body-change={emitChange}
-      on:focus={() => dispatch("focus")}
-      on:embedded-todos={(event) => dispatch("embeddedTodos", event.detail)}
-      on:open-chat={(event) => dispatch("open-chat", event.detail)}
+      on:focus={() => onFocus?.()}
+      on:embedded-todos={(event) => onEmbeddedTodos?.(event.detail)}
+      on:open-chat={(event) => onOpenChat?.(event.detail)}
       on:request-inputs-dialog={handleRequestInputsDialog}
     />
   {/if}
@@ -903,8 +903,8 @@
       {defaultAssistantId}
       {implicitContextMatcher}
       on:body-change={emitChange}
-      on:focus={() => dispatch("focus")}
-      on:open-chat={(event) => dispatch("open-chat", event.detail)}
+      on:focus={() => onFocus?.()}
+      on:open-chat={(event) => onOpenChat?.(event.detail)}
     />
   {/if}
 

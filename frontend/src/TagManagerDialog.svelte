@@ -1,12 +1,14 @@
 <script lang="ts">
-  import { createEventDispatcher, onMount } from "svelte";
+  import { onMount } from "svelte";
   import { api } from "./api";
   import NodePickerConfigEditor from "./NodePickerConfigEditor.svelte";
   import ConfirmModal from "./ConfirmModal.svelte";
   import type { ConfirmationState } from "./ConfirmModal.svelte";
   import type { NodePickerConfig, TagUsage } from "./types";
 
-  const dispatch = createEventDispatcher<{ changed: void; close: void }>();
+  // Callback props (#14: App is runes — no on:event on components).
+  export let onChanged: (() => void) | undefined = undefined;
+  export let onClose: (() => void) | undefined = undefined;
 
   let tags: TagUsage[] = [];
   let filter = "";
@@ -73,7 +75,7 @@
       await api.updateTagScope(name, scopeDraft);
       scopeEditing = null;
       await load();
-      dispatch("changed");
+      onChanged?.();
     } catch (e) {
       error = e instanceof Error ? e.message : String(e);
     } finally {
@@ -132,7 +134,7 @@
       selected = new Set();
       mergeTarget = "";
       await load();
-      dispatch("changed");
+      onChanged?.();
     } catch (e) {
       error = e instanceof Error ? e.message : String(e);
     } finally {
@@ -141,14 +143,14 @@
   }
 </script>
 
-<div class="gm-backdrop" role="presentation" on:mousedown={() => dispatch("close")}>
+<div class="gm-backdrop" role="presentation" on:mousedown={() => onClose?.()}>
   <div class="gm-dialog tm-dialog" role="dialog" aria-modal="true" aria-label="Tags" tabindex="-1" on:mousedown|stopPropagation>
     <header class="gm-head">
       <i class="ti ti-tag" aria-hidden="true"></i>
       <h2>Tags</h2>
       <span class="tm-count">{tags.length}</span>
       <input class="tm-filter" placeholder="Filter tags…" bind:value={filter} />
-      <button class="gm-close" type="button" on:click={() => dispatch("close")}>Close</button>
+      <button class="gm-close" type="button" on:click={() => onClose?.()}>Close</button>
     </header>
 
     {#if error}<p class="gm-error">{error}</p>{/if}

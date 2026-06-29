@@ -1,5 +1,4 @@
 <script lang="ts">
-  import { createEventDispatcher } from "svelte";
   import { api } from "./api";
   import IconPicker from "./IconPicker.svelte";
   import { fieldIconClass, DEFAULT_FIELD_GLYPH } from "./fieldIcons";
@@ -9,7 +8,9 @@
   export let groups: Record<string, MetadataGroupDefinition> = {};
   export let layerId: string;
 
-  const dispatch = createEventDispatcher<{ changed: { schema: MetadataSchema }; close: void }>();
+  // Callback props (#14: App is runes — no on:event on components).
+  export let onChanged: ((payload: { schema: MetadataSchema }) => void) | undefined = undefined;
+  export let onClose: (() => void) | undefined = undefined;
 
   const MEMBER_TYPES: { value: GroupMember["type"]; label: string }[] = [
     { value: "text", label: "Text" },
@@ -146,7 +147,7 @@
     error = "";
     try {
       const schema = await api.upsertMetadataGroup(layerId, id, group);
-      dispatch("changed", { schema });
+      onChanged?.({ schema });
       editingId = null;
     } catch (e) {
       error = e instanceof Error ? e.message : String(e);
@@ -160,7 +161,7 @@
     error = "";
     try {
       const schema = await api.deleteMetadataGroup(id);
-      dispatch("changed", { schema });
+      onChanged?.({ schema });
       editingId = null;
     } catch (e) {
       error = e instanceof Error ? e.message : String(e);
@@ -170,12 +171,12 @@
   }
 </script>
 
-<div class="gm-backdrop" role="presentation" on:mousedown={() => dispatch("close")}>
+<div class="gm-backdrop" role="presentation" on:mousedown={() => onClose?.()}>
   <div class="gm-dialog" role="dialog" aria-modal="true" aria-label="Reusable groups" tabindex="-1" on:mousedown|stopPropagation>
     <header class="gm-head">
       <i class="ti ti-stack-2" aria-hidden="true"></i>
       <h2>Reusable groups</h2>
-      <button class="gm-close" type="button" on:click={() => dispatch("close")}>Close</button>
+      <button class="gm-close" type="button" on:click={() => onClose?.()}>Close</button>
     </header>
 
     {#if error}

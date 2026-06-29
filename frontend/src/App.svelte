@@ -181,101 +181,68 @@
     onConfirm: () => Promise<void>;
   };
 
-  let projectPath = "";
-  let projectTitle = "Untitled Project";
-  let directoryPickerOpen = false;
-  let directoryListing: DirectoryListing | null = null;
-  let directoryPickerLoading = false;
+  let projectPath = $state("");
+  let projectTitle = $state("Untitled Project");
+  let directoryPickerOpen = $state(false);
+  let directoryListing: DirectoryListing | null = $state(null);
+  let directoryPickerLoading = $state(false);
   // Tracks why the directory picker was opened so the "Select This Folder"
   // button does the right thing on confirm. Null = picker not open.
   // "openProject" → immediately open the picked folder as a project.
   // "newProjectOverride" → set newProjectOverridePath (don't create yet).
   let directoryPickerMode: "openProject" | "newProjectOverride" | null = null;
 
-  let aiPolicy: AIPolicy = "off";
-  let aiDefaultProvider = "";
-  let aiDefaultModelClass = "";
-  let aiHealthResult: AIHealthResponse | null = null;
-  let aiHealthChecking = false;
+  let aiPolicy: AIPolicy = $state("off");
+  let aiDefaultProvider = $state("");
+  let aiDefaultModelClass = $state("");
+  let aiHealthResult: AIHealthResponse | null = $state(null);
+  let aiHealthChecking = $state(false);
 
-  let machineSettings: MachineSettingsView | null = null;
-  let machineSettingsOpen = false;
+  let machineSettings: MachineSettingsView | null = $state(null);
+  let machineSettingsOpen = $state(false);
 
   // Recent projects + default base folder come from machine settings.
   // Reloaded after open/create (which push onto the recents list) and after
   // machine-settings saves (which can change the default folder).
-  let recentProjects: RecentProject[] = [];
-  let defaultProjectsFolder = "";
+  let recentProjects: RecentProject[] = $state([]);
+  let defaultProjectsFolder = $state("");
 
   // New Project modal — separate from the path/title state used by the
   // (now-removed) inline create form. Kept self-contained so closing the
   // modal doesn't bleed into the rest of the app.
-  let newProjectModalOpen = false;
-  let newProjectName = "";
-  let newProjectOverrideFolder = false;
-  let newProjectOverridePath = "";
+  let newProjectModalOpen = $state(false);
+  let newProjectName = $state("");
+  let newProjectOverrideFolder = $state(false);
+  let newProjectOverridePath = $state("");
 
-  // AI chat sessions. Per-chat state (history, composer, cost/TTL) lives
-  // inside ChatBodyView now; App only tracks the session roster (Chats pane)
-  // and which chat is currently open in an editor pane (active-row highlight).
-  $: chatSessions = $chatSessionsStore;
-  let activeChatId: string | null = null;
+  let activeChatId: string | null = $state(null);
   let activeChatTitle = "Untitled chat";
-  // V2: project-wide cost rollup. Refreshed on project open and after
-  // each chat save. `projectCostBreakdown` is the per-chat list returned
-  // by /api/ai/project-cost; populated only when the user expands the
-  // chip so common loads don't pay for full enumeration.
-  $: projectCostTotal = $projectCostTotalStore;
-  $: projectCostBreakdown = $projectCostBreakdownStore;
-  let projectCostExpanded = false;
-  let machineSettingsDraft: MachineSettingsDraft | null = null;
-  let appState: AppState = { name: "needsProject" };
-  $: project = appState.name === "projectOpen" ? appState.project : null;
-  $: isProjectOpen = appState.name === "projectOpen";
-  $: structure = $structureStore;
-  // Research tree — parallel structure to the manuscript tree. Topics
-  // are containers, notes are leaves with their own markdown file.
-  // See docs/research-strategy.md.
-  $: researchStructure = $researchStructureStore;
-  let collapsedResearchNodes: Record<string, boolean> = {};
-  $: loreEntries = $loreEntriesStore;
-  // Compiled matcher for implicit-context highlighting in editors. Derived in
-  // the store layer from lore + schema (see stores/derived.ts).
-  $: implicitContextMatcher = $implicitContextMatcherStore;
-  $: knownTags = $knownTagsStore;
-  let tagsManagerOpen = false;
-  let focusedEditorPaneId: string | null = null;
-  $: focusedEditorPane = editorPanes.find((pane) => pane.id === focusedEditorPaneId) ?? editorPanes[0] ?? null;
-  // Write-through the focused doc to the editor-focus store so the list panes
-  // read it directly instead of having it drilled in (#14 Step 2). App is the
-  // sole writer (projection of editorPanes).
-  $: focusedDocumentStore.set(focusedEditorPane?.document ?? null);
-  $: activeScene = focusedEditorPane?.document?.type === "scene" ? focusedEditorPane.scene : null;
+  let projectCostExpanded = $state(false);
+  let machineSettingsDraft: MachineSettingsDraft | null = $state(null);
+  let appState = $state<AppState>({ name: "needsProject" });
+  let collapsedResearchNodes: Record<string, boolean> = $state({});
+  let tagsManagerOpen = $state(false);
+  let focusedEditorPaneId: string | null = $state(null);
   let activeParentId: string | undefined = undefined;
-  let addMenuOpenFor: string | null = null;
+  let addMenuOpenFor: string | null = $state(null);
   // Floating-popover coordinates captured at click time. `position: fixed`
   // on the popover sidesteps any ancestor `overflow: hidden` (panes,
   // tier panels) so the menu can extend below/above its anchor without
   // being clipped.
-  let addMenuPosition: { top: number; right: number } | null = null;
-  let draftTitleByScene = new Map<string, string>();
-  $: todos = $todosStore;
-  $: validation = $validationStore;
-  $: metadataSchema = $metadataSchemaStore;
-  $: metadataSchemaOverview = $metadataSchemaOverviewStore;
-  $: metadataSchemaLayers = $metadataSchemaLayersStore;
-  let schemaFieldKind: SchemaKind = "scene";
-  let schemaFieldLayerId = "";
-  let schemaFieldEntryType = "scene";
+  let addMenuPosition: { top: number; right: number } | null = $state(null);
+  let draftTitleByScene = $state(new Map<string, string>());
+  let schemaFieldKind = $state<SchemaKind>("scene");
+  let schemaFieldLayerId = $state("");
+  let schemaFieldEntryType = $state("scene");
   // The field-editing DRAFT (type / name / key / options / default / picker /
   // computed / icon + the inline editor's popover toggles) now lives inside
   // SchemaFieldInlineEditor (#14 Step 4). App keeps only the context the parent
   // computes from the schema overview: which field is open + whether it's a
   // read-only (built-in) field. The draft arrives back as a payload on save.
-  let selectedSchemaFieldId: string | null = null;
-  let schemaFieldReadonly = false;
+  let selectedSchemaFieldId: string | null = $state(null);
+  let schemaFieldReadonly = $state(false);
   // L2 reusable-groups manager (modal).
-  let groupsManagerOpen = false;
+  let groupsManagerOpen = $state(false);
   // L2 "apply group" form state now lives in SchemaTypeEditor (#14 Step 4);
   // App only owns the persistence handler (applyGroupToType).
   // Expand-in-place field editing in the type editor: the field id whose
@@ -283,40 +250,38 @@
   // adding a field. null = all rows collapsed. Replaces routing to the
   // separate Detail Field pane.
   const NEW_FIELD_SENTINEL = "__new__";
-  let expandedSchemaFieldId: string | null = null;
-  let schemaPaneOpen = false;
-  let schemaTypePaneOpen = false;
+  let expandedSchemaFieldId: string | null = $state(null);
+  let schemaPaneOpen = $state(false);
+  let schemaTypePaneOpen = $state(false);
   // The save layer is shared with SchemaTreePane, so it stays here; the rest
   // of the type draft (name/id/color + prompt defaults) now lives inside
   // SchemaTypeEditor, which the host remounts per opened/created type via the
   // draft token below and seeds from the schemaTypeInit* props (#14 Step 4).
-  let schemaTypeLayerId = "";
-  let schemaTypeKind: SchemaKind = "lore";
-  let schemaTypeParent = "";
+  let schemaTypeLayerId = $state("");
+  let schemaTypeKind: SchemaKind = $state("lore");
+  let schemaTypeParent = $state("");
   let schemaTypeAbstract = false;
-  let schemaTypeReadonly = false;
-  let selectedSchemaTypeId: string | null = null;
-  let draggedSchemaTypeId: string | null = null;
-  let schemaSelectedEntryType: EntryTypeDefinition | null = null;
-  let schemaNodeTypeTree: NodeTypeTreeNode[] = [];
+  let schemaTypeReadonly = $state(false);
+  let selectedSchemaTypeId: string | null = $state(null);
+  let draggedSchemaTypeId: string | null = $state(null);
+  let schemaSelectedEntryType: EntryTypeDefinition | null = $state(null);
+  let schemaNodeTypeTree: NodeTypeTreeNode[] = $state([]);
   // Seed values for a freshly (re)mounted SchemaTypeEditor draft. The token
   // bumps on every create/open so the keyed component re-initialises cleanly.
-  let schemaTypeInitName = "";
-  let schemaTypeInitId = "";
-  let schemaTypeInitColor: string | null = null;
-  let schemaTypeInitPrompt: PromptEntryTypeExtras | null = null;
-  let schemaTypeDraftToken = 0;
-  let promptsPaneOpen = false;
-  let assistantsPaneOpen = false;
-  let chatsPaneOpen = false;
-  $: promptEntries = $promptEntriesStore;
-  $: assistantEntries = $assistantEntriesStore;
-  let newTodo = "";
+  let schemaTypeInitName = $state("");
+  let schemaTypeInitId = $state("");
+  let schemaTypeInitColor: string | null = $state(null);
+  let schemaTypeInitPrompt: PromptEntryTypeExtras | null = $state(null);
+  let schemaTypeDraftToken = $state(0);
+  let promptsPaneOpen = $state(false);
+  let assistantsPaneOpen = $state(false);
+  let chatsPaneOpen = $state(false);
+  let newTodo = $state("");
   // Outline group-header collapse state, keyed by StructureNode.id.
   // Same shape as the other collapsed-* maps so the refactor stays
   // consistent across panes. Persisted per-project to localStorage so
   // the user's collapse choices survive reload.
-  let collapsedStructureNodes: Record<string, boolean> = {};
+  let collapsedStructureNodes: Record<string, boolean> = $state({});
   const TREE_COLLAPSE_LS_PREFIX = "treeCollapse:";
 
   function loadCollapsedStructureNodes(path: string): Record<string, boolean> {
@@ -339,8 +304,8 @@
       // Quota / private-browsing — silently degrade to in-memory only.
     }
   }
-  let confirmation: ConfirmationState | null = null;
-  let error = "";
+  let confirmation: ConfirmationState | null = $state(null);
+  let error = $state("");
   let status = "No project open";
   let nextZ = 10;
   let nextEditorPaneIndex = 1;
@@ -348,7 +313,7 @@
   let resizeState:
     | { id: PaneId; element: HTMLElement; startX: number; startY: number; startWidth: number; startHeight: number }
     | null = null;
-  let panes: Record<PaneId, PaneState> = {
+  let panes: Record<PaneId, PaneState> = $state({
     project: { title: "Project", x: 18, y: 18, width: 380, height: 340, z: 1 },
     outline: { title: "Draft", x: 18, y: 260, width: 300, height: 420, z: 2 },
     lore: { title: "Lore", x: 330, y: 260, width: 300, height: 320, z: 3 },
@@ -360,11 +325,11 @@
     chats: { title: "Chats", x: 330, y: 260, width: 320, height: 420, z: 3 },
     todo: { title: "TODO", x: 1126, y: 18, width: 310, height: 320, z: 4 },
     search: { title: "Search", x: 1126, y: 360, width: 310, height: 320, z: 5 },
-  };
-  let editorPanes: EditorPaneState[] = [];
+  });
+  let editorPanes: EditorPaneState[] = $state([]);
   let nextMetadataReloadToken = 1;
-  let metadataReloadsByPane: Record<string, MetadataReloadSignal> = {};
-  let titleReloadsByPane: Record<string, { token: number; title: string }> = {};
+  let metadataReloadsByPane: Record<string, MetadataReloadSignal> = $state({});
+  let titleReloadsByPane: Record<string, { token: number; title: string }> = $state({});
   let editorPaneComponents: Record<
     string,
     | {
@@ -373,14 +338,11 @@
         highlightEmbeddedTodo: (todoId: string) => void;
       }
     | undefined
-  > = {};
-  let embeddedTodosByPane: Record<string, EmbeddedTodo[]> = {};
-  let embeddedTodoStatusHintsByPane: Record<string, string> = {};
-  let allEmbeddedTodos: EmbeddedTodo[] = [];
+  > = $state({});
+  let embeddedTodosByPane: Record<string, EmbeddedTodo[]> = $state({});
+  let embeddedTodoStatusHintsByPane: Record<string, string> = $state({});
+  let allEmbeddedTodos: EmbeddedTodo[] = $state([]);
 
-  $: allEmbeddedTodos = Object.values(embeddedTodosByPane).flat();
-  $: embeddedTodoStatusHintsByPane = buildEmbeddedTodoStatusHintsByPane(embeddedTodosByPane);
-  $: draftTitleByScene = computeDraftTitleOverrides(editorPanes);
 
   function computeDraftTitleOverrides(panes: EditorPaneState[]): Map<string, string> {
     const map = new Map<string, string>();
@@ -394,50 +356,6 @@
     }
     return map;
   }
-  $: schemaSelectedEntryType = metadataSchema?.entry_types[schemaFieldEntryType] ?? metadataSchema?.entry_types.scene ?? null;
-  $: schemaFieldKind =
-    schemaSelectedEntryType?.kind === "lore"
-      ? "lore"
-      : schemaSelectedEntryType?.kind === "research"
-        ? "research"
-        : schemaSelectedEntryType?.kind === "prompt"
-          ? "prompt"
-          : schemaSelectedEntryType?.kind === "assistant"
-            ? "assistant"
-            : schemaSelectedEntryType?.kind === "project"
-              ? "project"
-              : "scene";
-  $: schemaNodeTypeTree = buildNodeTypeTree(metadataSchema, schemaFieldKind);
-  // The type-editor field rows. Explicitly reference metadataSchema so these
-  // recompute when the schema is refreshed after a save — fieldEntriesFor…
-  // reads it *inside* the function, which the template wouldn't track on its
-  // own (see feedback-svelte5-reactivity-traps).
-  $: typeOwnFieldEntries =
-    metadataSchema && selectedSchemaTypeId ? fieldEntriesForEntryType(selectedSchemaTypeId) : [];
-  $: typeInheritedFieldEntries =
-    metadataSchema && selectedSchemaTypeId ? inheritedFieldEntriesForEntryType(selectedSchemaTypeId) : [];
-  $: typeOwnFieldSections = buildSchemaFieldSections(typeOwnFieldEntries);
-  $: typeInheritedFieldSections = buildSchemaFieldSections(typeInheritedFieldEntries);
-  // L2 reusable groups: the applications on the selected type + the groups
-  // available to apply. Reference metadataSchema explicitly so these recompute
-  // after a save (see feedback-svelte5-reactivity-traps).
-  $: typeGroupApplications =
-    (metadataSchema && selectedSchemaTypeId
-      ? metadataSchema.entry_types[selectedSchemaTypeId]?.group_applications
-      : null) ?? [];
-  $: availableGroupEntries = Object.entries(metadataSchema?.groups ?? {});
-  $: schemaContextHeading =
-    schemaFieldKind === "lore"
-      ? "Lore Entry Types"
-      : schemaFieldKind === "research"
-        ? "Research Types"
-        : schemaFieldKind === "prompt"
-          ? "Prompt Types"
-          : schemaFieldKind === "assistant"
-            ? "Assistant Types"
-            : schemaFieldKind === "project"
-              ? "Project Types"
-              : "Scene Types";
 
   // Persisted "what was open" — survives reload (HMR or browser refresh) so
   // the user doesn't lose their seat. Cleared on a failed re-open so a
@@ -561,7 +479,6 @@
     };
   }
 
-  $: paneStyleMap = buildPaneStyleMap(panes);
 
   function buildPaneStyleMap(source: Record<PaneId, PaneState>): Record<string, string> {
     const result: Record<string, string> = {};
@@ -575,42 +492,6 @@
     return paneStyleMap[id] ?? "";
   }
 
-  // Reactive function: rebound whenever any visibility-deciding state changes.
-  // Templates that call `isPaneVisible(id)` track the function's identity — so
-  // when this `$:` recomputes, every callsite re-runs and the pane shows.
-  //
-  // Why this is necessary: function calls are opaque to Svelte's template
-  // dependency analyzer. A plain `function isPaneVisible(id)` that reads
-  // `chatsPaneOpen` inside doesn't tell the compiler that flipping
-  // `chatsPaneOpen` should re-evaluate `class:hidden-pane={!isPaneVisible("chats")}`.
-  // The `$:` rebinding gives the template a tracked dependency.
-  $: isPaneVisible = ((
-    _isProjectOpen,
-    _assistantsPaneOpen,
-    _schemaPaneOpen,
-    _schemaTypePaneOpen,
-    _promptsPaneOpen,
-    _chatsPaneOpen,
-    _editorPanes,
-  ) => (id: PaneId): boolean => {
-    if (id === "project") return true;
-    if (id === "assistants") return _assistantsPaneOpen;
-    if (!_isProjectOpen) return false;
-    if (id === "research") return true;
-    if (id === "schema") return _schemaPaneOpen;
-    if (id === "schema_type") return _schemaTypePaneOpen;
-    if (id === "prompts") return _promptsPaneOpen;
-    if (id === "chats") return _chatsPaneOpen;
-    return !isEditorPaneId(id) || _editorPanes.some((pane) => pane.id === id);
-  })(
-    isProjectOpen,
-    assistantsPaneOpen,
-    schemaPaneOpen,
-    schemaTypePaneOpen,
-    promptsPaneOpen,
-    chatsPaneOpen,
-    editorPanes,
-  );
 
   function isEditorPaneId(id: PaneId) {
     return id.startsWith("editor_");
@@ -640,7 +521,7 @@
   // Project-node color, surfaced on the top-bar switcher as a dot so the
   // user can tell at a glance which project they're in. Refreshed on
   // open + on save of the project node.
-  let currentProjectColor: string | null = null;
+  let currentProjectColor: string | null = $state(null);
   async function refreshCurrentProjectColor() {
     try {
       const node = await api.getProjectNode();
@@ -973,12 +854,6 @@
     return `${trimmed}${sep}${child}`;
   }
 
-  $: newProjectResolvedPath = (() => {
-    if (newProjectOverrideFolder && newProjectOverridePath) {
-      return joinPath(newProjectOverridePath, slugifyProjectName(newProjectName));
-    }
-    return joinPath(defaultProjectsFolder, slugifyProjectName(newProjectName));
-  })();
 
   async function confirmNewProject() {
     if (!newProjectName.trim()) {
@@ -1219,25 +1094,7 @@
     return metadataSchemaLayers.find((layer) => layer.id === layerId)?.label ?? "Unknown";
   }
 
-  // Derived in the assistants store (not a function): consumers pass it as a
-  // prop, and a bare call in a prop expression wouldn't track its inner roster
-  // dependency. See feedback_svelte5_reactivity_traps.
-  $: defaultAssistantId = $defaultAssistantIdStore;
 
-  // Set of "<docType>:<id>" keys for every node currently open in a
-  // pinned editor pane. Derived reactively so the template can ask
-  // `pinnedEditorPaneKeys.has(\`lore:${entry.id}\`)` and have Svelte
-  // re-evaluate the binding when any pane's .pinned flips. (A plain
-  // `function editorPanePinnedFor(...)` doesn't track editorPanes
-  // when called inside a template prop binding — Svelte 5 legacy
-  // reactivity only tracks deps read directly in the expression.)
-  $: pinnedEditorPaneKeys = new Set<string>(
-    editorPanes
-      .filter((pane) => pane.pinned && pane.document)
-      .map((pane) => `${pane.document!.type}:${pane.document!.id}`),
-  );
-  // Write-through to the editor-focus store (read by the list panes' pin-star).
-  $: pinnedKeysStore.set(pinnedEditorPaneKeys);
 
   function paneEntryFromAncestor(pane: EditorPaneState): boolean {
     const layerId = pane.scene?.source_layer_id;
@@ -1784,7 +1641,7 @@
 
   // --- Field row drag-reorder (own fields of a type) -----------------------
   let fieldDragId: string | null = null;
-  let fieldDropTarget: { id: string; position: "before" | "after" } | null = null;
+  let fieldDropTarget: { id: string; position: "before" | "after" } | null = $state(null);
   function onFieldDragStart(fieldId: string) {
     fieldDragId = fieldId;
   }
@@ -3159,6 +3016,165 @@
       }),
     );
   }
+  // AI chat sessions. Per-chat state (history, composer, cost/TTL) lives
+  // inside ChatBodyView now; App only tracks the session roster (Chats pane)
+  // and which chat is currently open in an editor pane (active-row highlight).
+  let chatSessions = $derived($chatSessionsStore);
+  // V2: project-wide cost rollup. Refreshed on project open and after
+  // each chat save. `projectCostBreakdown` is the per-chat list returned
+  // by /api/ai/project-cost; populated only when the user expands the
+  // chip so common loads don't pay for full enumeration.
+  let projectCostTotal = $derived($projectCostTotalStore);
+  let projectCostBreakdown = $derived($projectCostBreakdownStore);
+  let project = $derived(appState.name === "projectOpen" ? appState.project : null);
+  let isProjectOpen = $derived(appState.name === "projectOpen");
+  let structure = $derived($structureStore);
+  // Research tree — parallel structure to the manuscript tree. Topics
+  // are containers, notes are leaves with their own markdown file.
+  // See docs/research-strategy.md.
+  let researchStructure = $derived($researchStructureStore);
+  let loreEntries = $derived($loreEntriesStore);
+  // Compiled matcher for implicit-context highlighting in editors. Derived in
+  // the store layer from lore + schema (see stores/derived.ts).
+  let implicitContextMatcher = $derived($implicitContextMatcherStore);
+  let knownTags = $derived($knownTagsStore);
+  let focusedEditorPane = $derived(editorPanes.find((pane) => pane.id === focusedEditorPaneId) ?? editorPanes[0] ?? null);
+  // Write-through the focused doc to the editor-focus store so the list panes
+  // read it directly instead of having it drilled in (#14 Step 2). App is the
+  // sole writer (projection of editorPanes).
+  $effect.pre(() => {
+    focusedDocumentStore.set(focusedEditorPane?.document ?? null);
+  });
+  let activeScene = $derived(focusedEditorPane?.document?.type === "scene" ? focusedEditorPane.scene : null);
+  let todos = $derived($todosStore);
+  let validation = $derived($validationStore);
+  let metadataSchema = $derived($metadataSchemaStore);
+  let metadataSchemaOverview = $derived($metadataSchemaOverviewStore);
+  let metadataSchemaLayers = $derived($metadataSchemaLayersStore);
+  let promptEntries = $derived($promptEntriesStore);
+  let assistantEntries = $derived($assistantEntriesStore);
+  $effect.pre(() => {
+    allEmbeddedTodos = Object.values(embeddedTodosByPane).flat();
+  });
+  $effect.pre(() => {
+    embeddedTodoStatusHintsByPane = buildEmbeddedTodoStatusHintsByPane(embeddedTodosByPane);
+  });
+  $effect.pre(() => {
+    draftTitleByScene = computeDraftTitleOverrides(editorPanes);
+  });
+  $effect.pre(() => {
+    schemaSelectedEntryType = metadataSchema?.entry_types[schemaFieldEntryType] ?? metadataSchema?.entry_types.scene ?? null;
+  });
+  $effect.pre(() => {
+    schemaFieldKind =
+      schemaSelectedEntryType?.kind === "lore"
+        ? "lore"
+        : schemaSelectedEntryType?.kind === "research"
+          ? "research"
+          : schemaSelectedEntryType?.kind === "prompt"
+            ? "prompt"
+            : schemaSelectedEntryType?.kind === "assistant"
+              ? "assistant"
+              : schemaSelectedEntryType?.kind === "project"
+                ? "project"
+                : "scene";
+  });
+  $effect.pre(() => {
+    schemaNodeTypeTree = buildNodeTypeTree(metadataSchema, schemaFieldKind);
+  });
+  // The type-editor field rows. Explicitly reference metadataSchema so these
+  // recompute when the schema is refreshed after a save — fieldEntriesFor…
+  // reads it *inside* the function, which the template wouldn't track on its
+  // own (see feedback-svelte5-reactivity-traps).
+  let typeOwnFieldEntries =
+    $derived(metadataSchema && selectedSchemaTypeId ? fieldEntriesForEntryType(selectedSchemaTypeId) : []);
+  let typeInheritedFieldEntries =
+    $derived(metadataSchema && selectedSchemaTypeId ? inheritedFieldEntriesForEntryType(selectedSchemaTypeId) : []);
+  let typeOwnFieldSections = $derived(buildSchemaFieldSections(typeOwnFieldEntries));
+  let typeInheritedFieldSections = $derived(buildSchemaFieldSections(typeInheritedFieldEntries));
+  // L2 reusable groups: the applications on the selected type + the groups
+  // available to apply. Reference metadataSchema explicitly so these recompute
+  // after a save (see feedback-svelte5-reactivity-traps).
+  let typeGroupApplications =
+    $derived((metadataSchema && selectedSchemaTypeId
+      ? metadataSchema.entry_types[selectedSchemaTypeId]?.group_applications
+      : null) ?? []);
+  let availableGroupEntries = $derived(Object.entries(metadataSchema?.groups ?? {}));
+  let schemaContextHeading =
+    $derived(schemaFieldKind === "lore"
+      ? "Lore Entry Types"
+      : schemaFieldKind === "research"
+        ? "Research Types"
+        : schemaFieldKind === "prompt"
+          ? "Prompt Types"
+          : schemaFieldKind === "assistant"
+            ? "Assistant Types"
+            : schemaFieldKind === "project"
+              ? "Project Types"
+              : "Scene Types");
+  let paneStyleMap = $derived(buildPaneStyleMap(panes));
+  // Reactive function: rebound whenever any visibility-deciding state changes.
+  // Templates that call `isPaneVisible(id)` track the function's identity — so
+  // when this `$:` recomputes, every callsite re-runs and the pane shows.
+  //
+  // Why this is necessary: function calls are opaque to Svelte's template
+  // dependency analyzer. A plain `function isPaneVisible(id)` that reads
+  // `chatsPaneOpen` inside doesn't tell the compiler that flipping
+  // `chatsPaneOpen` should re-evaluate `class:hidden-pane={!isPaneVisible("chats")}`.
+  // The `$:` rebinding gives the template a tracked dependency.
+  let isPaneVisible = $derived(((
+    _isProjectOpen,
+    _assistantsPaneOpen,
+    _schemaPaneOpen,
+    _schemaTypePaneOpen,
+    _promptsPaneOpen,
+    _chatsPaneOpen,
+    _editorPanes,
+  ) => (id: PaneId): boolean => {
+    if (id === "project") return true;
+    if (id === "assistants") return _assistantsPaneOpen;
+    if (!_isProjectOpen) return false;
+    if (id === "research") return true;
+    if (id === "schema") return _schemaPaneOpen;
+    if (id === "schema_type") return _schemaTypePaneOpen;
+    if (id === "prompts") return _promptsPaneOpen;
+    if (id === "chats") return _chatsPaneOpen;
+    return !isEditorPaneId(id) || _editorPanes.some((pane) => pane.id === id);
+  })(
+    isProjectOpen,
+    assistantsPaneOpen,
+    schemaPaneOpen,
+    schemaTypePaneOpen,
+    promptsPaneOpen,
+    chatsPaneOpen,
+    editorPanes,
+  ));
+  let newProjectResolvedPath = $derived((() => {
+    if (newProjectOverrideFolder && newProjectOverridePath) {
+      return joinPath(newProjectOverridePath, slugifyProjectName(newProjectName));
+    }
+    return joinPath(defaultProjectsFolder, slugifyProjectName(newProjectName));
+  })());
+  // Derived in the assistants store (not a function): consumers pass it as a
+  // prop, and a bare call in a prop expression wouldn't track its inner roster
+  // dependency. See feedback_svelte5_reactivity_traps.
+  let defaultAssistantId = $derived($defaultAssistantIdStore);
+  // Set of "<docType>:<id>" keys for every node currently open in a
+  // pinned editor pane. Derived reactively so the template can ask
+  // `pinnedEditorPaneKeys.has(\`lore:${entry.id}\`)` and have Svelte
+  // re-evaluate the binding when any pane's .pinned flips. (A plain
+  // `function editorPanePinnedFor(...)` doesn't track editorPanes
+  // when called inside a template prop binding — Svelte 5 legacy
+  // reactivity only tracks deps read directly in the expression.)
+  let pinnedEditorPaneKeys = $derived(new Set<string>(
+    editorPanes
+      .filter((pane) => pane.pinned && pane.document)
+      .map((pane) => `${pane.document!.type}:${pane.document!.id}`),
+  ));
+  // Write-through to the editor-focus store (read by the list panes' pin-star).
+  $effect.pre(() => {
+    pinnedKeysStore.set(pinnedEditorPaneKeys);
+  });
 </script>
 
 <TopBar
@@ -3223,7 +3239,7 @@
 
   <Pane id="lore" title="Lore" paneClass="lore-pane" hidden={!isPaneVisible("lore")} style={paneStyle("lore")} chrome={paneChrome}>
     {#snippet actions()}
-      <button class="pin-button" type="button" title="Add entry" on:mousedown={(event) => event.stopPropagation()} on:click={() => newLoreEntry()}>+ Entry</button>
+      <button class="pin-button" type="button" title="Add entry" onmousedown={(event) => event.stopPropagation()} onclick={() => newLoreEntry()}>+ Entry</button>
     {/snippet}
     <div class="pane-content">
       <Lore
@@ -3253,10 +3269,10 @@
 
   <Pane id="schema" title="Detail Types" paneClass="schema-pane" hidden={!isProjectOpen || !schemaPaneOpen} style={paneStyle("schema")} chrome={paneChrome}>
     {#snippet actions()}
-      <button class="pin-button" type="button" on:mousedown={(event) => event.stopPropagation()} on:click={() => createSchemaTypeDraft()}>+ Type</button>
-      <button class="pin-button" type="button" on:mousedown={(event) => event.stopPropagation()} on:click={() => (groupsManagerOpen = true)}>Groups…</button>
-      <button class="pin-button" type="button" on:mousedown={(event) => event.stopPropagation()} on:click={() => (tagsManagerOpen = true)}>Tags…</button>
-      <button class="pin-button" type="button" on:mousedown={(event) => event.stopPropagation()} on:click={() => closeSchemaPane("schema")}>Close</button>
+      <button class="pin-button" type="button" onmousedown={(event) => event.stopPropagation()} onclick={() => createSchemaTypeDraft()}>+ Type</button>
+      <button class="pin-button" type="button" onmousedown={(event) => event.stopPropagation()} onclick={() => (groupsManagerOpen = true)}>Groups…</button>
+      <button class="pin-button" type="button" onmousedown={(event) => event.stopPropagation()} onclick={() => (tagsManagerOpen = true)}>Tags…</button>
+      <button class="pin-button" type="button" onmousedown={(event) => event.stopPropagation()} onclick={() => closeSchemaPane("schema")}>Close</button>
     {/snippet}
     <SchemaTreePane
       bind:draggedSchemaTypeId
@@ -3280,7 +3296,7 @@
 
   <Pane id="schema_type" title="Detail Type" paneClass="schema-type-pane" hidden={!isProjectOpen || !schemaTypePaneOpen} style={paneStyle("schema_type")} chrome={paneChrome}>
     {#snippet actions()}
-      <button class="pin-button" type="button" on:mousedown={(event) => event.stopPropagation()} on:click={() => closeSchemaPane("schema_type")}>Close</button>
+      <button class="pin-button" type="button" onmousedown={(event) => event.stopPropagation()} onclick={() => closeSchemaPane("schema_type")}>Close</button>
     {/snippet}
     {#key schemaTypeDraftToken}
     <SchemaTypeEditor
@@ -3326,7 +3342,7 @@
 
   <Pane id="prompts" title="Prompts" paneClass="prompts-pane" hidden={!isProjectOpen || !promptsPaneOpen} style={paneStyle("prompts")} chrome={paneChrome}>
     {#snippet actions()}
-      <button class="pin-button" type="button" on:mousedown={(event) => event.stopPropagation()} on:click={() => closeSchemaPane("prompts")}>Close</button>
+      <button class="pin-button" type="button" onmousedown={(event) => event.stopPropagation()} onclick={() => closeSchemaPane("prompts")}>Close</button>
     {/snippet}
     <div class="pane-content schema-list">
       <Prompts
@@ -3338,8 +3354,8 @@
 
   <Pane id="assistants" title="Assistants" paneClass="assistants-pane" hidden={!assistantsPaneOpen} style={paneStyle("assistants")} chrome={paneChrome}>
     {#snippet actions()}
-      <button class="pin-button" type="button" title="Add assistant" on:mousedown={(event) => event.stopPropagation()} on:click={() => newAssistantEntry()}>+ Assistant</button>
-      <button class="pin-button" type="button" on:mousedown={(event) => event.stopPropagation()} on:click={() => closeSchemaPane("assistants")}>Close</button>
+      <button class="pin-button" type="button" title="Add assistant" onmousedown={(event) => event.stopPropagation()} onclick={() => newAssistantEntry()}>+ Assistant</button>
+      <button class="pin-button" type="button" onmousedown={(event) => event.stopPropagation()} onclick={() => closeSchemaPane("assistants")}>Close</button>
     {/snippet}
     <div class="pane-content schema-list">
       <Assistants
@@ -3352,8 +3368,8 @@
 
   <Pane id="chats" title="Chats" paneClass="chats-pane" hidden={!isPaneVisible("chats")} style={paneStyle("chats")} chrome={paneChrome}>
     {#snippet actions()}
-      <button class="pin-button" type="button" title="Start a new chat" on:mousedown={(event) => event.stopPropagation()} on:click={() => createNewChatSession()}>+ New Chat</button>
-      <button class="pin-button" type="button" on:mousedown={(event) => event.stopPropagation()} on:click={() => closeSchemaPane("chats")}>Close</button>
+      <button class="pin-button" type="button" title="Start a new chat" onmousedown={(event) => event.stopPropagation()} onclick={() => createNewChatSession()}>+ New Chat</button>
+      <button class="pin-button" type="button" onmousedown={(event) => event.stopPropagation()} onclick={() => closeSchemaPane("chats")}>Close</button>
     {/snippet}
     <div class="pane-content schema-list">
       <Chats
@@ -3376,9 +3392,9 @@
       data-pane-id={editorPane.id}
       style={paneStyle(editorPane.id)}
       aria-label="Editor pane"
-      on:mousedown={() => focusPane(editorPane.id)}
+      onmousedown={() => focusPane(editorPane.id)}
     >
-      <header class="pane-header" role="button" tabindex="0" aria-label="Move Editor pane" on:keydown={(event) => handlePaneHeaderKeydown(event, editorPane.id)} on:mousedown={(event) => startPaneDrag(event, editorPane.id)}>
+      <header class="pane-header" role="button" tabindex="0" aria-label="Move Editor pane" onkeydown={(event) => handlePaneHeaderKeydown(event, editorPane.id)} onmousedown={(event) => startPaneDrag(event, editorPane.id)}>
         <h2>
           {editorPane.scene?.title ?? "Editor"}
           {#if paneEntryFromAncestor(editorPane)}
@@ -3400,8 +3416,8 @@
             type="button"
             disabled={!editorPane.scene}
             title={editorPane.document?.type === "lore" ? "Delete this entry" : "Delete this scene"}
-            on:mousedown={(event) => event.stopPropagation()}
-            on:click={() => requestDeleteEditorPaneScene(editorPane.id)}
+            onmousedown={(event) => event.stopPropagation()}
+            onclick={() => requestDeleteEditorPaneScene(editorPane.id)}
           >
             Delete
           </button>
@@ -3410,8 +3426,8 @@
             class="pin-button"
             type="button"
             title={editorPane.pinned ? "Unpin this pane" : "Pin this pane"}
-            on:mousedown={(event) => event.stopPropagation()}
-            on:click={() => toggleEditorPanePinned(editorPane.id)}
+            onmousedown={(event) => event.stopPropagation()}
+            onclick={() => toggleEditorPanePinned(editorPane.id)}
           >
             {editorPane.pinned ? "Pinned" : "Pin"}
           </button>
@@ -3419,8 +3435,8 @@
             class="pin-button"
             type="button"
             title="Close this editor pane"
-            on:mousedown={(event) => event.stopPropagation()}
-            on:click={() => closeEditorPane(editorPane.id)}
+            onmousedown={(event) => event.stopPropagation()}
+            onclick={() => closeEditorPane(editorPane.id)}
           >
             Close
           </button>
@@ -3443,23 +3459,23 @@
         titleReload={titleReloadsByPane[editorPane.id] ?? null}
         dirty={editorPane.dirty}
         todoStatusHint={editorPane.document?.type === "scene" && editorPane.scene && sceneEntryHasBody(editorPane.scene as Scene) ? (embeddedTodoStatusHintsByPane[editorPane.id] ?? "") : ""}
-        on:focus={() => focusPane(editorPane.id)}
-        on:change={(event) =>
+        onFocus={() => focusPane(editorPane.id)}
+        onChange={(detail) =>
           updateEditorPaneDraft(
             editorPane.id,
-            event.detail.title,
-            event.detail.body,
-            event.detail.status,
-            event.detail.entryType,
-            event.detail.metadata,
-            event.detail.inputs,
+            detail.title,
+            detail.body,
+            detail.status,
+            detail.entryType,
+            detail.metadata,
+            detail.inputs,
           )}
-        on:custom-data={(event) => openSchemaForCustomData(event.detail.entryType, event.detail.kind)}
-        on:embeddedTodos={(event) => updateEmbeddedTodosForPane(editorPane.id, event.detail.todos)}
-        on:navigate={(event) => navigateToBacklink(event.detail.id, event.detail.kind)}
-        on:open-chat={(event) => openChatFromPromptEntry(event.detail.entry, event.detail.inputs, event.detail.sceneId, event.detail.assistantId)}
+        onCustomData={(detail) => openSchemaForCustomData(detail.entryType, detail.kind)}
+        onEmbeddedTodos={(detail) => updateEmbeddedTodosForPane(editorPane.id, detail.todos)}
+        onNavigate={(detail) => navigateToBacklink(detail.id, detail.kind)}
+        onOpenChat={(detail) => openChatFromPromptEntry(detail.entry, detail.inputs, detail.sceneId, detail.assistantId)}
       />
-      <button class="pane-resize" type="button" aria-label="Resize Editor pane" on:keydown={(event) => handlePaneResizeKeydown(event, editorPane.id)} on:mousedown={(event) => startPaneResize(event, editorPane.id)}></button>
+      <button class="pane-resize" type="button" aria-label="Resize Editor pane" onkeydown={(event) => handlePaneResizeKeydown(event, editorPane.id)} onmousedown={(event) => startPaneResize(event, editorPane.id)}></button>
     </section>
   {/each}
 
@@ -3470,8 +3486,8 @@
         type="button"
         disabled={!todos.some((item) => item.status === "done") && !allEmbeddedTodos.some((item) => item.status === "done")}
         title="Delete all completed TODOs"
-        on:mousedown={(event) => event.stopPropagation()}
-        on:click={deleteCompletedTodos}
+        onmousedown={(event) => event.stopPropagation()}
+        onclick={deleteCompletedTodos}
       >
         Delete Done
       </button>
@@ -3542,15 +3558,15 @@
     <GroupsManagerDialog
       groups={metadataSchema.groups ?? {}}
       layerId={schemaTypeLayerId || projectSchemaLayerId()}
-      on:changed={(event) => { setMetadataSchema(event.detail.schema); void refreshMetadataSchema(); }}
-      on:close={() => (groupsManagerOpen = false)}
+      onChanged={(detail) => { setMetadataSchema(detail.schema); void refreshMetadataSchema(); }}
+      onClose={() => (groupsManagerOpen = false)}
     />
   {/if}
 
   {#if tagsManagerOpen}
     <TagManagerDialog
-      on:changed={() => void refreshAfterTagChange()}
-      on:close={() => (tagsManagerOpen = false)}
+      onChanged={() => void refreshAfterTagChange()}
+      onClose={() => (tagsManagerOpen = false)}
     />
   {/if}
 
@@ -3561,7 +3577,7 @@
         class="error-toast-close"
         type="button"
         aria-label="Dismiss error"
-        on:click={() => (error = "")}
+        onclick={() => (error = "")}
       >×</button>
     </section>
   {/if}

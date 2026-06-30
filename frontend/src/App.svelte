@@ -88,6 +88,7 @@
   import { focusedDocumentStore, pinnedKeysStore } from "@/lib/stores/editorFocus";
   import { paneLayout, isEditorPaneId } from "@/lib/stores/paneLayout.svelte";
   import { confirmService } from "@/lib/stores/confirmService.svelte";
+  import { projectChooser } from "@/lib/stores/projectChooser.svelte";
   import GroupsManagerDialog from "@/components/dialogs/GroupsManagerDialog.svelte";
   import TagManagerDialog from "@/components/dialogs/TagManagerDialog.svelte";
   import type { OptionDraft } from "@/components/schema/SelectOptionsEditor.svelte";
@@ -102,7 +103,6 @@
     ChatSessionJournalEntry,
     ChatSessionMessage,
     ChatSessionSummary,
-    DirectoryListing,
     DocumentKind,
     EditableDocument,
     EntryMetadata,
@@ -166,14 +166,6 @@
 
   let projectPath = $state("");
   let projectTitle = $state("Untitled Project");
-  let directoryPickerOpen = $state(false);
-  let directoryListing: DirectoryListing | null = $state(null);
-  let directoryPickerLoading = $state(false);
-  // Tracks why the directory picker was opened so the "Select This Folder"
-  // button does the right thing on confirm. Null = picker not open.
-  // "openProject" → immediately open the picked folder as a project.
-  // "newProjectOverride" → set newProjectOverridePath (don't create yet).
-  let directoryPickerMode: "openProject" | "newProjectOverride" | null = null;
 
   let aiPolicy: AIPolicy = $state("off");
   let aiDefaultProvider = $state("");
@@ -188,15 +180,9 @@
   // Reloaded after open/create (which push onto the recents list) and after
   // machine-settings saves (which can change the default folder).
   let recentProjects: RecentProject[] = $state([]);
-  let defaultProjectsFolder = $state("");
-
-  // New Project modal — separate from the path/title state used by the
-  // (now-removed) inline create form. Kept self-contained so closing the
-  // modal doesn't bleed into the rest of the app.
-  let newProjectModalOpen = $state(false);
-  let newProjectName = $state("");
-  let newProjectOverrideFolder = $state(false);
-  let newProjectOverridePath = $state("");
+  // The default base folder + the new-project / directory-picker UI live in the
+  // projectChooser controller (lib/stores/projectChooser). App pushes the
+  // machine-settings default in and injects the open/create lifecycle.
 
   let activeChatId: string | null = $state(null);
   let activeChatTitle = "Untitled chat";
@@ -362,6 +348,13 @@
     };
     // Confirm actions flow through App's run() so errors surface in `error`.
     confirmService.onRun = run;
+    // Project chooser drives only its modals; App owns the open/create
+    // lifecycle and feeds the picker its start dir + error sink.
+    projectChooser.onRun = run;
+    projectChooser.onError = (message) => { error = message; };
+    projectChooser.onOpenProject = (path) => void openProjectAt(path);
+    projectChooser.onCreateProject = createProjectAt;
+    projectChooser.getStartPath = () => projectPath;
     cleanupThemeWiring = installThemeWiring();
     document.addEventListener("mousedown", handleDocumentMousedown);
     // Eagerly fetch machine settings so the chat panel and inputs dialog
@@ -395,7 +388,7 @@
     try {
       machineSettings = await api.getMachineSettings();
       recentProjects = machineSettings.recent_projects ?? [];
-      defaultProjectsFolder = machineSettings.default_projects_folder ?? "";
+      projectChooser.defaultProjectsFolder = machineSettings.default_projects_folder ?? "";
       setPalette(machineSettings.palette ?? []);
     } catch {
       // Backend may be offline — leave machineSettings as null; pickers will
@@ -414,7 +407,7 @@
       const view = await api.getMachineSettings();
       machineSettings = view;
       recentProjects = view.recent_projects ?? [];
-      defaultProjectsFolder = view.default_projects_folder ?? "";
+      projectChooser.defaultProjectsFolder = view.default_projects_folder ?? "";
       setPalette(view.palette ?? []);
     } catch {
       // Non-fatal — recents stays stale until next reload.
@@ -608,96 +601,6 @@
     syncSchemaAuthoringSelection();
   }
 
-  async function openDirectoryPicker(event?: MouseEvent) {
-    event?.preventDefault();
-    event?.stopPropagation();
-    directoryPickerOpen = true;
-    await loadDirectory(projectPath.trim() || undefined);
-  }
-
-  async function loadDirectory(path?: string | null) {
-    await run(async () => {
-      directoryPickerLoading = true;
-      try {
-        directoryListing = await api.listDirectories(path ?? undefined);
-      } finally {
-        directoryPickerLoading = false;
-      }
-    });
-  }
-
-  function useDirectory(path: string) {
-    const mode = directoryPickerMode;
-    directoryPickerOpen = false;
-    directoryPickerMode = null;
-    if (mode === "openProject") {
-      void openProjectAt(path);
-    } else if (mode === "newProjectOverride") {
-      newProjectOverridePath = path;
-      newProjectOverrideFolder = true;
-    } else {
-      // Legacy fallback — preserved for any leftover callers.
-      projectPath = path;
-    }
-  }
-
-  function openDirectoryPickerForOpenProject() {
-    directoryPickerMode = "openProject";
-    void openDirectoryPicker();
-  }
-
-  function openDirectoryPickerForNewProjectOverride() {
-    directoryPickerMode = "newProjectOverride";
-    void openDirectoryPicker();
-  }
-
-  // ------ New Project modal -----------------------------------------------
-
-  function openNewProjectModal() {
-    newProjectName = "";
-    newProjectOverrideFolder = false;
-    newProjectOverridePath = "";
-    newProjectModalOpen = true;
-  }
-
-  function closeNewProjectModal() {
-    newProjectModalOpen = false;
-  }
-
-  // Slugify mirrors the Python slugifyFieldId convention used elsewhere —
-  // lowercase, [a-z0-9-]+, no consecutive separators, no leading/trailing
-  // dashes. Used to derive the project folder name from the title.
-  function slugifyProjectName(name: string): string {
-    const lowered = name.toLowerCase();
-    const cleaned = lowered.replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "");
-    return cleaned || "new-project";
-  }
-
-  function joinPath(base: string, child: string): string {
-    if (!base) return child;
-    const sep = base.includes("\\") ? "\\" : "/";
-    const trimmed = base.replace(/[/\\]+$/, "");
-    return `${trimmed}${sep}${child}`;
-  }
-
-
-  async function confirmNewProject() {
-    if (!newProjectName.trim()) {
-      error = "Project name is required.";
-      return;
-    }
-    const baseFolder = newProjectOverrideFolder && newProjectOverridePath
-      ? newProjectOverridePath
-      : defaultProjectsFolder;
-    if (!baseFolder) {
-      error = "No projects folder set. Open Settings to set a default.";
-      return;
-    }
-    const path = joinPath(baseFolder, slugifyProjectName(newProjectName));
-    closeNewProjectModal();
-    await createProjectAt(path, newProjectName.trim(), baseFolder);
-  }
-
   // Create a project at the given path with the given title. Optional
   // base folder lets callers override the default; omit to use the
   // project's parent folder (matches the backend's fallback).
@@ -777,7 +680,7 @@
       };
       machineSettings = await api.updateMachineSettings(update);
       recentProjects = machineSettings.recent_projects ?? [];
-      defaultProjectsFolder = machineSettings.default_projects_folder ?? "";
+      projectChooser.defaultProjectsFolder = machineSettings.default_projects_folder ?? "";
       setPalette(machineSettings.palette ?? []);
       machineSettingsOpen = false;
       status = "Saved machine settings";
@@ -2908,12 +2811,6 @@
     chatsPaneOpen,
     editorPanes,
   ));
-  let newProjectResolvedPath = $derived((() => {
-    if (newProjectOverrideFolder && newProjectOverridePath) {
-      return joinPath(newProjectOverridePath, slugifyProjectName(newProjectName));
-    }
-    return joinPath(defaultProjectsFolder, slugifyProjectName(newProjectName));
-  })());
   // Derived in the assistants store (not a function): consumers pass it as a
   // prop, and a bare call in a prop expression wouldn't track its inner roster
   // dependency. See feedback_svelte5_reactivity_traps.
@@ -2944,8 +2841,8 @@
   themePref={$themePreference}
   onCycleTheme={() => themePreference.update((p) => nextPreference(p))}
   onSelectRecent={(path) => void openProjectAt(path)}
-  onOpenFolder={openDirectoryPickerForOpenProject}
-  onNewProject={openNewProjectModal}
+  onOpenFolder={() => projectChooser.openForOpenProject()}
+  onNewProject={() => projectChooser.openNewProject()}
   onOpenAssistants={openAssistantsPane}
   onOpenSettings={openMachineSettings}
   onOpenDetailTypes={openDetailTypesPane}
@@ -3277,12 +3174,12 @@
   </Pane>
 
   <DirectoryPickerModal
-    open={directoryPickerOpen}
-    listing={directoryListing}
-    loading={directoryPickerLoading}
-    onClose={() => (directoryPickerOpen = false)}
-    onNavigate={(path) => loadDirectory(path)}
-    onSelect={(path) => useDirectory(path)}
+    open={projectChooser.pickerOpen}
+    listing={projectChooser.listing}
+    loading={projectChooser.pickerLoading}
+    onClose={() => projectChooser.closePicker()}
+    onNavigate={(path) => projectChooser.loadDirectory(path)}
+    onSelect={(path) => projectChooser.useDirectory(path)}
   />
 
   <ConfirmModal
@@ -3292,17 +3189,17 @@
   />
 
   <NewProjectModal
-    open={newProjectModalOpen}
-    bind:name={newProjectName}
-    bind:overrideFolder={newProjectOverrideFolder}
-    bind:overridePath={newProjectOverridePath}
-    resolvedPath={newProjectResolvedPath}
-    {defaultProjectsFolder}
-    onClose={closeNewProjectModal}
-    onSubmit={confirmNewProject}
-    onOpenOverrideFolderPicker={openDirectoryPickerForNewProjectOverride}
+    open={projectChooser.newProjectOpen}
+    bind:name={projectChooser.newProjectName}
+    bind:overrideFolder={projectChooser.overrideFolder}
+    bind:overridePath={projectChooser.overridePath}
+    resolvedPath={projectChooser.resolvedNewProjectPath}
+    defaultProjectsFolder={projectChooser.defaultProjectsFolder}
+    onClose={() => projectChooser.closeNewProject()}
+    onSubmit={() => projectChooser.confirmNewProject()}
+    onOpenOverrideFolderPicker={() => projectChooser.openForNewProjectOverride()}
     onOpenSettings={openMachineSettings}
-    onClearOverride={() => { newProjectOverrideFolder = false; newProjectOverridePath = ""; }}
+    onClearOverride={() => projectChooser.clearOverride()}
   />
 
   <MachineSettingsDialog

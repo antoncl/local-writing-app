@@ -5,7 +5,7 @@
   import NodeEditor from "@/components/editor/NodeEditor.svelte";
   import DirectoryPickerModal from "@/components/dialogs/DirectoryPickerModal.svelte";
   import SchemaPanes from "@/components/schema/SchemaPanes.svelte";
-  import Tree, { type TreeConfig } from "@/components/panes/Tree.svelte";
+  import Tree from "@/components/panes/Tree.svelte";
   import Lore from "@/components/panes/Lore.svelte";
   import Assistants from "@/components/panes/Assistants.svelte";
   import Prompts from "@/components/panes/Prompts.svelte";
@@ -14,14 +14,7 @@
   import Search from "@/components/panes/Search.svelte";
   import Todo from "@/components/panes/Todo.svelte";
   import Pane, { type PaneChrome } from "@/components/panes/Pane.svelte";
-  import {
-    collectNodeIdSet,
-    collectSceneIdSet,
-    entryTypeName,
-    findNodeBySceneId,
-    findStructureNodeById,
-    isLeafNode,
-  } from "@/lib/utils/treeHelpers";
+  import { isLeafNode } from "@/lib/utils/treeHelpers";
   import NewProjectModal from "@/components/dialogs/NewProjectModal.svelte";
   import MachineSettingsDialog from "@/components/dialogs/MachineSettingsDialog.svelte";
   import ConfirmModal from "@/components/dialogs/ConfirmModal.svelte";
@@ -52,18 +45,13 @@
     structureStore,
     researchStructureStore,
     refreshStructure as storeRefreshStructure,
-    refreshResearchStructure as storeRefreshResearchStructure,
-    setStructure,
-    setResearchStructure,
   } from "@/lib/stores/structure";
   import {
     loreEntriesStore,
-    refreshLoreEntries as storeRefreshLoreEntries,
     setLoreEntries,
   } from "@/lib/stores/lore";
   import {
     promptEntriesStore,
-    refreshPromptEntries as storeRefreshPromptEntries,
     setPromptEntries,
   } from "@/lib/stores/prompts";
   import {
@@ -89,6 +77,7 @@
   import { projectSession } from "@/lib/stores/projectSession.svelte";
   import { aiSettings } from "@/lib/stores/aiSettings.svelte";
   import { todoActions } from "@/lib/stores/todoActions.svelte";
+  import { treeActions } from "@/lib/stores/treeActions.svelte";
   import TagManagerDialog from "@/components/dialogs/TagManagerDialog.svelte";
   import type {
     AssistantEntrySummary,
@@ -97,7 +86,6 @@
     ChatSessionJournalEntry,
     ChatSessionMessage,
     ChatSessionSummary,
-    LoreEntrySummary,
     PromptEntrySummary,
     Scene,
     NodePickerConfig,
@@ -107,16 +95,16 @@
     SearchHit,
     StructureDocument,
     StructureNode,
-    StructureNodeDeletePreview,
     TodoItem,
   } from "@/lib/types";
 
   type AppState =
     | { name: "needsProject" }
     | { name: "projectOpen"; project: ProjectInfo };
-  // TreeConfig (the per-kind manuscript/research tree contract) + the tree
-  // rendering and inline CRUD now live in Tree.svelte; App owns the structure
-  // data, the editor-pane coupling (delete, dblclick-open), and collapse state.
+  // The tree rendering + inline CRUD live in Tree.svelte; the per-kind
+  // TreeConfig contracts, node create/cascade-delete/collapse/add-menu actions,
+  // and the lore→research migration live in the treeActions controller
+  // (lib/stores/treeActions). App owns only the structure data it passes down.
 
   let projectPath = $state("");
   let projectTitle = $state("Untitled Project");
@@ -136,15 +124,8 @@
   let activeChatTitle = "Untitled chat";
   let projectCostExpanded = $state(false);
   let appState = $state<AppState>({ name: "needsProject" });
-  let collapsedResearchNodes: Record<string, boolean> = $state({});
   let tagsManagerOpen = $state(false);
   let activeParentId: string | undefined = undefined;
-  let addMenuOpenFor: string | null = $state(null);
-  // Floating-popover coordinates captured at click time. `position: fixed`
-  // on the popover sidesteps any ancestor `overflow: hidden` (panes,
-  // tier panels) so the menu can extend below/above its anchor without
-  // being clipped.
-  let addMenuPosition: { top: number; right: number } | null = $state(null);
   let draftTitleByScene = $state(new Map<string, string>());
   // The schema-authoring surface (state, the entry-type→kind→tree cascade, and
   // all persistence handlers) lives in SchemaPanes.svelte (#14 P0). App holds
@@ -153,33 +134,6 @@
   let promptsPaneOpen = $state(false);
   let assistantsPaneOpen = $state(false);
   let chatsPaneOpen = $state(false);
-  // Outline group-header collapse state, keyed by StructureNode.id.
-  // Same shape as the other collapsed-* maps so the refactor stays
-  // consistent across panes. Persisted per-project to localStorage so
-  // the user's collapse choices survive reload.
-  let collapsedStructureNodes: Record<string, boolean> = $state({});
-  const TREE_COLLAPSE_LS_PREFIX = "treeCollapse:";
-
-  function loadCollapsedStructureNodes(path: string): Record<string, boolean> {
-    if (!path) return {};
-    try {
-      const raw = localStorage.getItem(TREE_COLLAPSE_LS_PREFIX + path);
-      if (!raw) return {};
-      const parsed = JSON.parse(raw);
-      return parsed && typeof parsed === "object" ? parsed : {};
-    } catch {
-      return {};
-    }
-  }
-
-  function saveCollapsedStructureNodes(path: string, state: Record<string, boolean>): void {
-    if (!path) return;
-    try {
-      localStorage.setItem(TREE_COLLAPSE_LS_PREFIX + path, JSON.stringify(state));
-    } catch {
-      // Quota / private-browsing — silently degrade to in-memory only.
-    }
-  }
   let error = $state("");
   let status = "No project open";
   // The editor-pane MDI surface (open panes, drafts, autosave lifecycle, the
@@ -221,6 +175,11 @@
     todoActions.run = run;
     todoActions.setStatus = (message) => { status = message; };
     todoActions.getActiveSceneId = () => activeScene?.id;
+    // Tree/node CRUD (create, cascade-delete, lore→research migrate, collapse,
+    // add-menu) funnels through App's run()/status; editor-pane coupling lives
+    // in the editorPanes module the controller imports directly.
+    treeActions.run = run;
+    treeActions.setStatus = (message) => { status = message; };
     // Confirm actions flow through App's run() so errors surface in `error`.
     confirmService.onRun = run;
     // Project chooser drives only its modals; the projectSession controller
@@ -257,9 +216,8 @@
   function handleDocumentMousedown(event: MouseEvent) {
     const target = event.target as HTMLElement | null;
     const inAnchorOrPopover = target?.closest(".tree-menu-anchor, .row-add-popover");
-    if (addMenuOpenFor !== null && !inAnchorOrPopover) {
-      addMenuOpenFor = null;
-      addMenuPosition = null;
+    if (treeActions.addMenuOpenFor !== null && !inAnchorOrPopover) {
+      treeActions.closeAddMenu();
     }
   }
 
@@ -270,7 +228,7 @@
   function openProjectWorkspace(nextProject: ProjectInfo) {
     resetEditorWorkspace();
     projectPath = nextProject.root_path;
-    collapsedStructureNodes = loadCollapsedStructureNodes(projectPath);
+    treeActions.loadCollapseForProject(projectPath);
     projectTitle = nextProject.title;
     aiSettings.seedFromProject(nextProject);
     setProjectCost(null, []);
@@ -329,18 +287,6 @@
 
   async function refreshStructure() {
     await storeRefreshStructure();
-  }
-
-  async function refreshResearchStructure() {
-    await storeRefreshResearchStructure();
-  }
-
-  async function refreshLoreEntries() {
-    await storeRefreshLoreEntries();
-  }
-
-  async function refreshPromptEntries() {
-    await storeRefreshPromptEntries();
   }
 
   // Persist a within-layer assistant reorder computed by Assistants.svelte.
@@ -519,279 +465,6 @@
     focusPane("chats");
   }
 
-  async function newScene(parentId?: string) {
-    await run(async () => {
-      const scene = await api.createScene("New Scene", parentId);
-      await refreshStructure();
-      await editorPanes.openScene(scene.id);
-    });
-  }
-
-  function defaultChildEntryType(parentType: string): string | null {
-    if (parentType === "root") return "act";
-    if (parentType === "act") return "chapter";
-    if (parentType === "chapter") return "scene";
-    return null;
-  }
-
-  // Slice 5: migrate a single lore_note to a research/note. Confirms
-  // before running because the v1 note schema is minimal — aliases /
-  // related_entries / context_policy on the source are intentionally
-  // dropped. The cascade preview surfaces what'll be lost so the user
-  // can cancel.
-  async function requestMoveLoreNoteToResearch(entry: LoreEntrySummary) {
-    const droppable: string[] = [];
-    const meta = entry.metadata ?? {};
-    if (Array.isArray(meta.aliases) && meta.aliases.length > 0) droppable.push("aliases");
-    if (Array.isArray(meta.related_entries) && meta.related_entries.length > 0) droppable.push("related_entries");
-    if (typeof meta.context_policy === "string" && meta.context_policy && meta.context_policy !== "auto") {
-      droppable.push("context_policy");
-    }
-    const cascadeNote = droppable.length > 0
-      ? `\n\nThe following metadata will be dropped (research notes only carry title + body + tags): ${droppable.join(", ")}.`
-      : "";
-    confirmService.request({
-      title: "Move to Research",
-      message: `Move "${entry.title}" out of Lore and into the Research tree?${cascadeNote}`,
-      details: [],
-      confirmLabel: "Move to Research",
-      destructive: droppable.length > 0,
-      onConfirm: async () => {
-        // Close the lore entry's editor pane first so it doesn't dangle
-        // on a deleted file. The new research note will open in its own
-        // pane after the migration.
-        editorPanes.panes.forEach((pane) => {
-          if (pane.document?.type === "lore" && pane.document.id === entry.id) {
-            editorPanes.tearDown(pane.id);
-          }
-        });
-        await run(async () => {
-          const result = await api.moveLoreNoteToResearch(entry.id);
-          setLoreEntries(result.lore.entries);
-          setResearchStructure(result.tree);
-          // Open the new note in the editor so the user sees the result.
-          await editorPanes.openResearchNote(result.note_id);
-          status = result.dropped_fields.length > 0
-            ? `Moved "${entry.title}" to Research (dropped ${result.dropped_fields.join(", ")})`
-            : `Moved "${entry.title}" to Research`;
-        });
-      },
-    });
-  }
-
-  // Tree configs — the per-kind contract consumed by Tree.svelte. Function
-  // declarations referenced below are hoisted. App keeps these (plus the
-  // delete/collapse/dblclick callbacks they wire) because they touch
-  // editor-pane and persisted-collapse state that lives here.
-  const manuscriptTree: TreeConfig = {
-    kind: "scene",
-    leafType: "scene",
-    getStructure: () => get(structureStore),
-    applyStructure: (next) => { setStructure(next); },
-    refresh: refreshStructure,
-    api: {
-      create: api.createStructureNode.bind(api),
-      rename: api.renameStructureNode.bind(api),
-      move: api.moveStructureNode.bind(api),
-      cascadePreview: api.cascadeDeletePreview.bind(api),
-      delete: api.deleteStructureNode.bind(api),
-    },
-    openLeaf: (sceneId) => editorPanes.openScene(sceneId),
-    onGroupClick: (nodeId) => deferStructureNodeCollapse(nodeId),
-    onGroupDblClick: (nodeId) => handleStructureNodeDblClick(nodeId),
-    cascadeLabels: {
-      leaf: { singular: "scene", plural: "scenes" },
-      container: { singular: "sub-container", plural: "sub-containers" },
-    },
-    afterDelete: () => refreshTodos(),
-    afterRename: (nodeId, title) => editorPanes.syncRename(nodeId, title),
-    supportsDrag: true,
-    showStatusStripe: true,
-    containerHasEditor: true,
-    inlineRenameOnLeafCreate: true,
-    rootAddMenuKey: "__root__",
-  };
-
-  const researchTree: TreeConfig = {
-    kind: "research",
-    leafType: "note",
-    getStructure: () => get(researchStructureStore),
-    applyStructure: (next) => { setResearchStructure(next); },
-    refresh: refreshResearchStructure,
-    api: {
-      create: api.createResearchNode.bind(api),
-      rename: api.renameResearchNode.bind(api),
-      cascadePreview: api.cascadeResearchDeletePreview.bind(api),
-      delete: api.deleteResearchNode.bind(api),
-    },
-    openLeaf: (sceneId) => editorPanes.openResearchNote(sceneId),
-    onGroupClick: (nodeId) => {
-      collapsedResearchNodes = {
-        ...collapsedResearchNodes,
-        [nodeId]: !collapsedResearchNodes[nodeId],
-      };
-    },
-    // Research has no container editor to open, so a group double-click renames.
-    groupDblClickRenames: true,
-    cascadeLabels: {
-      leaf: { singular: "note", plural: "notes" },
-      container: { singular: "topic", plural: "topics" },
-    },
-    supportsDrag: false,
-    showStatusStripe: false,
-    containerHasEditor: false,
-    inlineRenameOnLeafCreate: false,
-    rootAddMenuKey: "__research_root__",
-  };
-
-  // Generic cascade-delete confirmation. Manuscript and research differ
-  // only in noun choice ("scene"/"sub-container" vs "note"/"topic"), so
-  // config.cascadeLabels covers it. The actual delete fans out through
-  // performTreeDelete, which closes any editor panes that point at the
-  // doomed subtree before calling the kind-specific delete API.
-  async function requestDeleteTreeNode(config: TreeConfig, node: StructureNode) {
-    let preview: StructureNodeDeletePreview | null = null;
-    try {
-      preview = await config.api.cascadePreview(node.id);
-    } catch (error) {
-      console.warn("Failed to fetch cascade preview", error);
-    }
-    const typeName = entryTypeName(node.type, metadataSchema);
-    const leafCount = preview?.descendant_scene_count ?? 0;
-    const containerCount = preview?.descendant_container_count ?? 0;
-    const leafLabels = config.cascadeLabels.leaf;
-    const containerLabels = config.cascadeLabels.container;
-    const cascadeParts: string[] = [];
-    if (leafCount > 0) cascadeParts.push(`${leafCount} ${leafCount === 1 ? leafLabels.singular : leafLabels.plural}`);
-    if (containerCount > 0) cascadeParts.push(`${containerCount} ${containerCount === 1 ? containerLabels.singular : containerLabels.plural}`);
-    const backlinks = preview?.backlinks ?? [];
-
-    let message = `Delete ${typeName} "${node.title}"?`;
-    if (cascadeParts.length > 0) {
-      message += `\n\nThis will also permanently remove ${cascadeParts.join(" and ")} inside it.`;
-    } else if (node.scene_id) {
-      message += ` This removes the ${leafLabels.singular} file from the project.`;
-    } else {
-      message += ` This removes the ${containerLabels.singular} from the project.`;
-    }
-    if (backlinks.length > 0) {
-      message += `\n\n${backlinks.length} ${backlinks.length === 1 ? "entry references" : "entries reference"} content that will be deleted — those links will break:`;
-    }
-
-    confirmService.request({
-      title: `Delete ${typeName}`,
-      message,
-      details: backlinks.map((link) => `${link.title} — ${link.field_name}`),
-      confirmLabel: `Delete ${typeName}`,
-      destructive: true,
-      onConfirm: () => performTreeDelete(config, node),
-    });
-  }
-
-  async function performTreeDelete(config: TreeConfig, node: StructureNode) {
-    // Close editor panes whose underlying leaf is doomed before the API
-    // call so the panes don't dangle on a missing scene/note.
-    const doomedSceneIds = collectSceneIdSet(node);
-    editorPanes.panes.forEach((pane) => {
-      if (
-        pane.scene
-        && pane.document?.type === config.kind
-        && doomedSceneIds.has(pane.scene.id)
-      ) {
-        editorPanes.tearDown(pane.id);
-      }
-    });
-    if (config.containerHasEditor) {
-      // Manuscript Acts/Chapters can open as structure_node editor panes
-      // — close those too if their node id falls inside the doomed subtree.
-      const doomedNodeIds = collectNodeIdSet(node);
-      editorPanes.panes.forEach((pane) => {
-        if (pane.document?.type === "structure_node" && doomedNodeIds.has(pane.document.id)) {
-          editorPanes.tearDown(pane.id);
-        }
-      });
-    }
-    const next = await config.api.delete(node.id);
-    config.applyStructure(next);
-    if (config.afterDelete) {
-      await config.afterDelete();
-    }
-    status = "Deleted";
-  }
-
-  function toggleAddMenu(nodeId: string, event?: MouseEvent) {
-    if (addMenuOpenFor === nodeId) {
-      addMenuOpenFor = null;
-      addMenuPosition = null;
-      return;
-    }
-    addMenuOpenFor = nodeId;
-    const anchor = event?.currentTarget;
-    if (anchor instanceof HTMLElement) {
-      const rect = anchor.getBoundingClientRect();
-      // The popover anchors to the button's right edge and drops below.
-      // If there isn't room below (less than 200px before the viewport
-      // bottom), flip above the button instead.
-      const popoverHeight = 180;
-      const fitsBelow = window.innerHeight - rect.bottom > popoverHeight;
-      addMenuPosition = {
-        top: fitsBelow ? rect.bottom + 4 : rect.top - popoverHeight - 4,
-        right: window.innerWidth - rect.right,
-      };
-    } else {
-      addMenuPosition = null;
-    }
-  }
-
-  // Tree.svelte's add menus close through this so its open/position state
-  // (kept here, shared across both trees + closed by the document-level
-  // click-outside handler) stays the single source of truth.
-  function closeAddMenu() {
-    addMenuOpenFor = null;
-    addMenuPosition = null;
-  }
-
-  function toggleStructureNodeCollapse(nodeId: string) {
-    collapsedStructureNodes = {
-      ...collapsedStructureNodes,
-      [nodeId]: !collapsedStructureNodes[nodeId],
-    };
-    saveCollapsedStructureNodes(projectPath, collapsedStructureNodes);
-  }
-
-  // Tree-row click → defer the collapse toggle past the browser's dblclick
-  // recognition window so a fast second click can cancel it and open the
-  // editor instead. Without the defer the user sees the row visibly toggle
-  // collapsed-state for ~100ms before the editor opens on top.
-  const DBLCLICK_GUARD_MS = 300;
-  let pendingCollapseTimeoutId: ReturnType<typeof setTimeout> | null = null;
-
-  function deferStructureNodeCollapse(nodeId: string) {
-    if (pendingCollapseTimeoutId !== null) {
-      clearTimeout(pendingCollapseTimeoutId);
-    }
-    pendingCollapseTimeoutId = setTimeout(() => {
-      pendingCollapseTimeoutId = null;
-      toggleStructureNodeCollapse(nodeId);
-    }, DBLCLICK_GUARD_MS);
-  }
-
-  function handleStructureNodeDblClick(nodeId: string) {
-    if (pendingCollapseTimeoutId !== null) {
-      clearTimeout(pendingCollapseTimeoutId);
-      pendingCollapseTimeoutId = null;
-    }
-    void run(() => editorPanes.openStructureNode(nodeId));
-  }
-
-  async function newLoreEntry() {
-    await run(async () => {
-      const entry = await api.createLoreEntry("New Entry", "lore_note");
-      await refreshLoreEntries();
-      await editorPanes.openLore(entry.id);
-    });
-  }
-
   function sceneEntryHasBody(scene: Scene): boolean {
     const entryDefinition = metadataSchema?.entry_types[scene.entry_type];
     return entryDefinition?.has_body ?? true;
@@ -803,22 +476,6 @@
     } else {
       void run(() => editorPanes.openScene(id));
     }
-  }
-
-  async function newPromptEntry(entryType: string) {
-    await run(async () => {
-      const created = await api.createPromptEntry(`Untitled Prompt`, entryType);
-      await refreshPromptEntries();
-      await editorPanes.openPrompt(created.id);
-    });
-  }
-
-  async function newAssistantEntry() {
-    await run(async () => {
-      const created = await api.createAssistantEntry("Untitled assistant");
-      await refreshAssistantEntries();
-      await editorPanes.openAssistant(created.id);
-    });
   }
 
   function metadataListText(value: unknown) {
@@ -993,29 +650,29 @@
   <Pane id="outline" title="Draft" paneClass="outline-pane" hidden={!isPaneVisible("outline")} style={paneStyle("outline")} chrome={paneChrome}>
     <div class="pane-content">
       <Tree
-        config={manuscriptTree}
+        config={treeActions.manuscriptTree}
         {structure}
-        collapsed={collapsedStructureNodes}        draftTitles={draftTitleByScene}
+        collapsed={treeActions.collapsedStructureNodes}        draftTitles={draftTitleByScene}
         sectionLabel="Scenes"
         emptyLabel="No scenes yet."
         {run}
-        onRequestDelete={(node) => requestDeleteTreeNode(manuscriptTree, node)}
-        {addMenuOpenFor}
-        {addMenuPosition}
-        onToggleAddMenu={toggleAddMenu}
-        onCloseAddMenu={closeAddMenu}
+        onRequestDelete={(node) => treeActions.requestDeleteTreeNode(treeActions.manuscriptTree, node)}
+        addMenuOpenFor={treeActions.addMenuOpenFor}
+        addMenuPosition={treeActions.addMenuPosition}
+        onToggleAddMenu={(nodeId, event) => treeActions.toggleAddMenu(nodeId, event)}
+        onCloseAddMenu={() => treeActions.closeAddMenu()}
       />
     </div>
   </Pane>
 
   <Pane id="lore" title="Lore" paneClass="lore-pane" hidden={!isPaneVisible("lore")} style={paneStyle("lore")} chrome={paneChrome}>
     {#snippet actions()}
-      <button class="pin-button" type="button" title="Add entry" onmousedown={(event) => event.stopPropagation()} onclick={() => newLoreEntry()}>+ Entry</button>
+      <button class="pin-button" type="button" title="Add entry" onmousedown={(event) => event.stopPropagation()} onclick={() => treeActions.newLoreEntry()}>+ Entry</button>
     {/snippet}
     <div class="pane-content">
       <Lore
         entries={loreEntries}        onOpenEntry={(id) => editorPanes.openLore(id)}
-        onMoveNoteToResearch={(entry) => requestMoveLoreNoteToResearch(entry)}
+        onMoveNoteToResearch={(entry) => treeActions.requestMoveLoreNoteToResearch(entry)}
       />
     </div>
   </Pane>
@@ -1023,17 +680,17 @@
   <Pane id="research" title="Research" paneClass="research-pane" hidden={!isPaneVisible("research")} style={paneStyle("research")} chrome={paneChrome}>
     <div class="pane-content">
       <Tree
-        config={researchTree}
+        config={treeActions.researchTree}
         structure={researchStructure}
-        collapsed={collapsedResearchNodes}        draftTitles={draftTitleByScene}
+        collapsed={treeActions.collapsedResearchNodes}        draftTitles={draftTitleByScene}
         sectionLabel="Notes"
         emptyLabel="No topics or notes yet."
         {run}
-        onRequestDelete={(node) => requestDeleteTreeNode(researchTree, node)}
-        {addMenuOpenFor}
-        {addMenuPosition}
-        onToggleAddMenu={toggleAddMenu}
-        onCloseAddMenu={closeAddMenu}
+        onRequestDelete={(node) => treeActions.requestDeleteTreeNode(treeActions.researchTree, node)}
+        addMenuOpenFor={treeActions.addMenuOpenFor}
+        addMenuPosition={treeActions.addMenuPosition}
+        onToggleAddMenu={(nodeId, event) => treeActions.toggleAddMenu(nodeId, event)}
+        onCloseAddMenu={() => treeActions.closeAddMenu()}
       />
     </div>
   </Pane>
@@ -1055,14 +712,14 @@
     <div class="pane-content schema-list">
       <Prompts
         entries={promptEntries}        onOpenEntry={(id) => editorPanes.openPrompt(id)}
-        onNewEntry={(entryType) => newPromptEntry(entryType)}
+        onNewEntry={(entryType) => treeActions.newPromptEntry(entryType)}
       />
     </div>
   </Pane>
 
   <Pane id="assistants" title="Assistants" paneClass="assistants-pane" hidden={!assistantsPaneOpen} style={paneStyle("assistants")} chrome={paneChrome}>
     {#snippet actions()}
-      <button class="pin-button" type="button" title="Add assistant" onmousedown={(event) => event.stopPropagation()} onclick={() => newAssistantEntry()}>+ Assistant</button>
+      <button class="pin-button" type="button" title="Add assistant" onmousedown={(event) => event.stopPropagation()} onclick={() => treeActions.newAssistantEntry()}>+ Assistant</button>
       <button class="pin-button" type="button" onmousedown={(event) => event.stopPropagation()} onclick={() => closeListPane("assistants")}>Close</button>
     {/snippet}
     <div class="pane-content schema-list">

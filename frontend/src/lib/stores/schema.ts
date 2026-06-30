@@ -8,7 +8,7 @@
 // The schema-authoring fallback (which entry_type/layer the editor points at)
 // stays in App.svelte — it's UI-local authoring state, not server-mirrored.
 
-import { writable } from "svelte/store";
+import { get, writable } from "svelte/store";
 import { api } from "@/lib/api";
 import type {
   MetadataSchema,
@@ -19,6 +19,15 @@ import type {
 export const metadataSchemaStore = writable<MetadataSchema | null>(null);
 export const metadataSchemaOverviewStore = writable<MetadataSchemaOverview | null>(null);
 export const metadataSchemaLayersStore = writable<MetadataSchemaLayer[]>([]);
+
+// The project-local (nearest) schema layer — the last entry in the merged layer
+// stack. Defaults for new types/fields land here, and authoring selection falls
+// back to it. Reads the store live (`get`) so callers invoked right after a
+// store set still see the fresh value (the `$store` alias lags a flush).
+export function projectSchemaLayerId(): string {
+  const layers = get(metadataSchemaLayersStore);
+  return layers[layers.length - 1]?.id ?? "";
+}
 
 // Fan one overview payload into all three slices. The single source of truth for
 // keeping the trio coherent.

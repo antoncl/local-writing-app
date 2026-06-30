@@ -415,31 +415,15 @@ h3 {
   font-size: 13px;
 }
 
-.tree-row {
-  display: flex;
-  align-items: center;
-  gap: 2px;
-  margin: 2px 0;
-  position: relative;
-}
-
-.tree-row button {
-  text-align: left;
-  border-color: transparent;
-  background: transparent;
-}
-
-.tree-row .tree-title {
-  flex: 1;
-  min-width: 0;
-}
-
-.tree-row button:hover {
-  background: var(--accent-soft);
-}
-
-/* .tree-rename-input / .tree-add-controls co-located into Tree.svelte (#14);
-   the dead .tree-add/.tree-menu rules (no markup rendered them) were removed. */
+/* The `.tree-row*` rules were REMOVED (#14). NodeRow fully styles its own
+   tree-mode rows (`.node-row.variant-tree`) and drag states (`.node-row.dragging`
+   / `.drop-before/after::before/::after` / `.drop-into`) in its scoped <style>,
+   which supersede these — and on drop-before/after/into the global border/outline
+   double-painted alongside NodeRow's ::before bar + box-shadow ring. `.tree-row`
+   is now just a marker class on NodeRow's root. `.tree-rename-input` (flex:1) +
+   `.tree-add-controls` co-located into Tree.svelte; the dead `.tree-add`/
+   `.tree-menu` were removed. `.tree-handle` stays global — shared between Tree's
+   drag grip and EntryInputsEditor. */
 
 .tree-handle {
   display: inline-block;
@@ -453,35 +437,8 @@ h3 {
   letter-spacing: -2px;
 }
 
-.tree-row:hover .tree-handle {
-  color: var(--text-3);
-}
-
 .tree-handle:active {
   cursor: grabbing;
-}
-
-.tree-row.dragging {
-  opacity: 0.45;
-}
-
-.tree-row.drop-before {
-  border-top: 2px solid var(--accent);
-  margin-top: 0;
-  padding-top: 0;
-}
-
-.tree-row.drop-after {
-  border-bottom: 2px solid var(--accent);
-  margin-bottom: 0;
-  padding-bottom: 0;
-}
-
-.tree-row.drop-into {
-  background: var(--accent-drop);
-  outline: 2px solid var(--accent);
-  outline-offset: -2px;
-  border-radius: 4px;
 }
 
 /* .tree-menu-anchor / .row-add-popover co-located into Tree.svelte (#14).

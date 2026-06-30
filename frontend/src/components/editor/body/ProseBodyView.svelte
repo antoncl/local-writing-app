@@ -50,7 +50,12 @@
     type SlashCommand,
     type SlashMenuState,
   } from "@/lib/editor-core/slashMenu";
+  import {
+    type FloatingMenuState,
+    type ToolbarAction,
+  } from "@/lib/editor-core/selectionToolbar";
   import ProseSlashMenu from "./ProseSlashMenu.svelte";
+  import ProseSelectionToolbar from "./ProseSelectionToolbar.svelte";
   import { api } from "@/lib/api";
   import { metadataSchemaStore } from "@/lib/stores/schema";
   import { formatCostEur } from "@/lib/utils/money";
@@ -67,30 +72,6 @@
   } from "@/lib/types";
 
   // ---------- Local types ----------
-  type FloatingMenuState = {
-    visible: boolean;
-    x: number;
-    y: number;
-    wordCount: number;
-    placement: "above" | "below";
-  };
-  type ToolbarButtonAction = {
-    kind: "button";
-    id: string;
-    label: string;
-    run: () => void | Promise<void>;
-  };
-  type ToolbarMenuAction = {
-    kind: "menu";
-    id: string;
-    label: string;
-    items: Array<{
-      id: string;
-      label: string;
-      run: () => void | Promise<void>;
-    }>;
-  };
-  type ToolbarAction = ToolbarButtonAction | ToolbarMenuAction;
   type BlockWrapType = "blockquote" | "bulletList" | "orderedList";
 
   // ---------- Constants ----------
@@ -1897,33 +1878,13 @@
       {/if}
     </div>
   {/if}
-  {#if selectionMenu.visible}
-    <div class:below={selectionMenu.placement === "below"} class="selection-toolbar" style={`left: ${selectionMenu.x}px; top: ${selectionMenu.y}px;`}>
-      <span class="selection-count">{selectionMenu.wordCount} {selectionMenu.wordCount === 1 ? "word" : "words"}</span>
-      {#each selectionToolbarActions as action}
-        {#if action.kind === "button"}
-          <button type="button" onmousedown={preventDefault(() => focusAndRun(action.run))}>{action.label}</button>
-        {:else}
-          <div class="toolbar-menu">
-            <button
-              class:open={openToolbarMenuId === action.id}
-              type="button"
-              onmousedown={preventDefault(() => toggleToolbarMenu(action.id))}
-            >
-              {action.label}
-            </button>
-            {#if openToolbarMenuId === action.id}
-              <div class:below={selectionMenu.placement === "below"} class="toolbar-menu-popover">
-                {#each action.items as item}
-                  <button type="button" onmousedown={preventDefault(() => focusAndRun(item.run))}>{item.label}</button>
-                {/each}
-              </div>
-            {/if}
-          </div>
-        {/if}
-      {/each}
-    </div>
-  {/if}
+  <ProseSelectionToolbar
+    menu={selectionMenu}
+    actions={selectionToolbarActions}
+    openMenuId={openToolbarMenuId}
+    onRun={focusAndRun}
+    onToggleMenu={toggleToolbarMenu}
+  />
 
   <ProseSlashMenu
     menu={slashMenu}
@@ -1966,99 +1927,6 @@
      styling (.editor-body prose/table, .ai-suggestion / .character-mark /
      .todo-anchor marks) stays global — .editor-body is shared across four
      editor components. */
-  .selection-toolbar {
-    position: fixed;
-    z-index: 20;
-    display: flex;
-    align-items: center;
-    max-width: min(720px, calc(100% - 24px));
-    overflow: visible;
-    border: 1px solid var(--toolbar-border);
-    border-radius: 7px;
-    background: var(--toolbar-surface);
-    box-shadow: 0 14px 28px rgba(25, 40, 35, 0.22);
-    transform: translate(-50%, calc(-100% - 8px));
-  }
-
-  .selection-toolbar.below {
-    transform: translate(-50%, 0);
-  }
-
-  .selection-toolbar button,
-  .selection-count {
-    height: 34px;
-    border: 0;
-    border-right: 1px solid var(--toolbar-divider);
-    border-radius: 0;
-    background: transparent;
-    color: var(--toolbar-text);
-    font-size: 13px;
-    font-weight: 700;
-    white-space: nowrap;
-  }
-
-  .selection-toolbar button {
-    min-width: 38px;
-    padding: 0 10px;
-  }
-
-  .selection-toolbar button:hover {
-    background: var(--toolbar-hover);
-  }
-
-  .selection-toolbar button.open {
-    background: var(--toolbar-hover);
-  }
-
-  .selection-count {
-    display: inline-flex;
-    align-items: center;
-    padding: 0 12px;
-    color: var(--divider);
-  }
-
-  .toolbar-menu {
-    position: relative;
-  }
-
-  .toolbar-menu > button::after {
-    content: " ▾";
-    font-size: 11px;
-  }
-
-  .toolbar-menu-popover {
-    position: absolute;
-    left: 0;
-    bottom: calc(100% + 6px);
-    z-index: 30;
-    display: grid;
-    min-width: 144px;
-    overflow: hidden;
-    border: 1px solid var(--toolbar-border);
-    border-radius: 7px;
-    background: var(--toolbar-surface);
-    box-shadow: 0 14px 28px rgba(25, 40, 35, 0.22);
-  }
-
-  .toolbar-menu-popover.below {
-    top: calc(100% + 6px);
-    bottom: auto;
-  }
-
-  .toolbar-menu-popover button {
-    justify-content: start;
-    width: 100%;
-    min-width: 0;
-    height: 32px;
-    border-right: 0;
-    border-bottom: 1px solid var(--toolbar-divider);
-    text-align: left;
-  }
-
-  .toolbar-menu-popover button:last-child {
-    border-bottom: 0;
-  }
-
   .table-toolbar {
     position: absolute;
     z-index: 22;

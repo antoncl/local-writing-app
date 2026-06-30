@@ -76,6 +76,7 @@
   import { loadProjectData } from "@/lib/stores/index";
   import { focusedDocumentStore, pinnedKeysStore } from "@/lib/stores/editorFocus";
   import { paneLayout, isEditorPaneId } from "@/lib/stores/paneLayout.svelte";
+  import { AutosaveScheduler } from "@/lib/editor-core/autosave";
   import { confirmService } from "@/lib/stores/confirmService.svelte";
   import { projectChooser } from "@/lib/stores/projectChooser.svelte";
   import TagManagerDialog from "@/components/dialogs/TagManagerDialog.svelte";
@@ -320,6 +321,7 @@
     })();
     return () => {
       paneLayout.dispose();
+      autosave.dispose();
       document.removeEventListener("mousedown", handleDocumentMousedown);
       cleanupThemeWiring?.();
     };
@@ -1488,49 +1490,26 @@
     return pane;
   }
 
-  // Auto-save: per-pane debounce. Each pane's pending timer lives in
-  // autoSaveTimers; rescheduled on every draft change, cancelled on
-  // manual save / pane teardown. Chats persist per-turn from inside
-  // ChatBodyView, so they skip the timer entirely.
+  // Auto-save: per-pane debounce. The timing lives in a generic
+  // AutosaveScheduler (lib/editor-core/autosave); the editor-specific hooks are
+  // injected here so the scheduler stays domain-agnostic. Chats persist per-turn
+  // from inside ChatBodyView, so `shouldSave` excludes them from the timer.
   const AUTO_SAVE_IDLE_MS = 6000;
   const SAVED_INDICATOR_MS = 2000;
-  const autoSaveTimers = new Map<string, ReturnType<typeof setTimeout>>();
-  const savedIndicatorTimers = new Map<string, ReturnType<typeof setTimeout>>();
-
-  function cancelAutoSave(id: string) {
-    const timer = autoSaveTimers.get(id);
-    if (timer !== undefined) {
-      clearTimeout(timer);
-      autoSaveTimers.delete(id);
-    }
-  }
-
-  function scheduleAutoSave(id: string) {
-    cancelAutoSave(id);
-    const pane = editorPanes.find((candidate) => candidate.id === id);
-    if (!pane?.dirty || pane.saving) return;
-    if (pane.document?.type === "chat") return;
-    const timer = setTimeout(() => {
-      autoSaveTimers.delete(id);
-      const current = editorPanes.find((candidate) => candidate.id === id);
-      if (!current?.dirty || current.saving) return;
-      if (current.document?.type === "chat") return;
-      void run(() => saveEditorPane(id));
-    }, AUTO_SAVE_IDLE_MS);
-    autoSaveTimers.set(id, timer);
-  }
-
-  function flashSavedIndicator(id: string) {
-    const existing = savedIndicatorTimers.get(id);
-    if (existing !== undefined) clearTimeout(existing);
-    const timer = setTimeout(() => {
-      savedIndicatorTimers.delete(id);
+  const autosave = new AutosaveScheduler({
+    idleMs: AUTO_SAVE_IDLE_MS,
+    indicatorMs: SAVED_INDICATOR_MS,
+    shouldSave: (id) => {
+      const pane = editorPanes.find((candidate) => candidate.id === id);
+      return Boolean(pane?.dirty) && !pane?.saving && pane?.document?.type !== "chat";
+    },
+    save: (id) => void run(() => saveEditorPane(id)),
+    clearIndicator: (id) => {
       editorPanes = editorPanes.map((pane) =>
         pane.id === id ? { ...pane, recentlySaved: false } : pane,
       );
-    }, SAVED_INDICATOR_MS);
-    savedIndicatorTimers.set(id, timer);
-  }
+    },
+  });
 
   function updateEditorPaneDraft(id: string, title: string, body: string, status: string, entryType: string, metadata: EntryMetadata, inputs?: PromptInputDefinition[]) {
     editorPanes = editorPanes.map((pane) => {
@@ -1550,7 +1529,7 @@
         draftInputs: JSON.parse(JSON.stringify(nextInputs ?? [])),
       };
     });
-    scheduleAutoSave(id);
+    autosave.schedule(id);
   }
 
   function cloneMetadata(metadata: EntryMetadata) {
@@ -1667,12 +1646,8 @@
   }
 
   function tearDownEditorPane(id: string) {
-    cancelAutoSave(id);
-    const savedIndicatorTimer = savedIndicatorTimers.get(id);
-    if (savedIndicatorTimer !== undefined) {
-      clearTimeout(savedIndicatorTimer);
-      savedIndicatorTimers.delete(id);
-    }
+    autosave.cancel(id);
+    autosave.cancelSavedIndicator(id);
     const remainingEditorPanes = editorPanes.filter((candidate) => candidate.id !== id);
     editorPanes = remainingEditorPanes;
     const { [id]: _closedTodos, ...remainingEmbeddedTodos } = embeddedTodosByPane;
@@ -1695,7 +1670,7 @@
     // PUT /api/nodes/{id} path; the pane's draft-* fields aren't the
     // source of truth for chat state. Treat saveEditorPane as a no-op.
     if (documentKind === "chat") return;
-    cancelAutoSave(id);
+    autosave.cancel(id);
     setEditorPaneSaving(id, true);
     try {
       const draftDocument = {
@@ -1758,8 +1733,8 @@
           recentlySaved: !paneStillDirty,
         };
       });
-      if (paneStillDirty) scheduleAutoSave(id);
-      else flashSavedIndicator(id);
+      if (paneStillDirty) autosave.schedule(id);
+      else autosave.flashSaved(id);
       if (documentKind === "lore") {
         await refreshLoreEntries();
         await refreshKnownTags();

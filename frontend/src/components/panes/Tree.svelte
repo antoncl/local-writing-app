@@ -551,3 +551,62 @@
     </NodeRow>
   {/if}
 {/snippet}
+
+<style>
+  /* Tree-pane chrome co-located from styles.css (#14). The shared row
+     framework (.tree-row* / .tree-handle* drag vocab) and shared utilities
+     (button.row-action-add) stay global. App.svelte `closest()`-queries
+     .tree-menu-anchor / .row-add-popover by class name only — scoping keeps
+     the class, so outside-click detection is unaffected. */
+  .section-title {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 8px;
+  }
+
+  .tree-rename-input {
+    flex: 1;
+    min-width: 0;
+    padding: 2px 6px;
+    font-size: 14px;
+    border: 1px solid var(--accent);
+    border-radius: 4px;
+    background: var(--surface);
+  }
+
+  .tree-add-controls {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+  }
+
+  .tree-menu-anchor {
+    position: relative;
+  }
+
+  /* Add-child popover — opens from a row's +> affordance (or the pane's
+     section-title +> button). Editorial Card surface; positioned `fixed` so an
+     ancestor `overflow: hidden` can't clip it (top/right set inline at click
+     time). Hosts a NodeList of NodeRows so creation uses the same widget. */
+  .row-add-popover {
+    position: fixed;
+    z-index: 1000;
+    min-width: 200px;
+    padding: 8px;
+    border: 1px solid var(--border);
+    border-radius: 11px;
+    background: var(--surface);
+    box-shadow: 0 6px 18px var(--shadow2);
+  }
+
+  .row-add-popover-heading {
+    display: block;
+    padding: 2px 8px 6px;
+    font-size: 11px;
+    font-weight: 700;
+    letter-spacing: 0.07em;
+    text-transform: uppercase;
+    color: var(--text-3);
+  }
+</style>

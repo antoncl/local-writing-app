@@ -407,12 +407,7 @@ h3 {
 
 /* .validation-panel / .validation-actions co-located into Project.svelte (#14). */
 
-.section-title {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  margin-bottom: 8px;
-}
+/* .section-title co-located into Tree.svelte (#14). */
 
 .muted,
 .status {
@@ -443,34 +438,8 @@ h3 {
   background: var(--accent-soft);
 }
 
-.tree-rename-input {
-  flex: 1;
-  min-width: 0;
-  padding: 2px 6px;
-  font-size: 14px;
-  border: 1px solid var(--accent);
-  border-radius: 4px;
-  background: var(--surface);
-}
-
-.tree-add-controls {
-  display: flex;
-  align-items: center;
-  gap: 4px;
-}
-
-.tree-add,
-.tree-menu {
-  padding: 2px 8px;
-  font-size: 12px;
-  color: var(--accent-deep);
-  border-radius: 4px;
-}
-
-.tree-add:hover,
-.tree-menu:hover {
-  background: var(--accent-soft);
-}
+/* .tree-rename-input / .tree-add-controls co-located into Tree.svelte (#14);
+   the dead .tree-add/.tree-menu rules (no markup rendered them) were removed. */
 
 .tree-handle {
   display: inline-block;
@@ -515,26 +484,9 @@ h3 {
   border-radius: 4px;
 }
 
-.tree-menu-anchor {
-  position: relative;
-}
-
-/* Add-child popover — opens from a row's +> affordance (or from a
-   pane's section-title +> button). Editorial Card surface: soft border,
-   soft shadow, rounded corners. Hosts a NodeList of NodeRows so the
-   creation choices use the same widget the user sees everywhere.
-   Positioned `fixed` so ancestor `overflow: hidden` (pane / tier panel)
-   can't clip it; the actual top/right are set inline at click time. */
-.row-add-popover {
-  position: fixed;
-  z-index: 1000;
-  min-width: 200px;
-  padding: 8px;
-  border: 1px solid var(--border);
-  border-radius: 11px;
-  background: var(--surface);
-  box-shadow: 0 6px 18px var(--shadow2);
-}
+/* .tree-menu-anchor / .row-add-popover co-located into Tree.svelte (#14).
+   (App.svelte only `closest()`-queries these by class name for outside-click
+   detection — scoping adds a hash but keeps the class, so the query still works.) */
 
 /* `.row-action-add` button styling for callers outside a NodeRow
    trailing slot (e.g. pane section-title). NodeRow's own trailing
@@ -564,15 +516,7 @@ button.row-action-add.active {
   border-color: var(--accent);
 }
 
-.row-add-popover-heading {
-  display: block;
-  padding: 2px 8px 6px;
-  font-size: 11px;
-  font-weight: 700;
-  letter-spacing: 0.07em;
-  text-transform: uppercase;
-  color: var(--text-3);
-}
+/* .row-add-popover-heading co-located into Tree.svelte (#14). */
 
 .editor-pane {
   min-width: 440px;

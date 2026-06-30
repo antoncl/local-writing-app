@@ -2,6 +2,8 @@
   import { createEventDispatcher } from "svelte";
   import NodeList from "@/components/widgets/NodeList.svelte";
   import NodeRow from "@/components/widgets/NodeRow.svelte";
+  import GroupCaret from "@/components/widgets/GroupCaret.svelte";
+  import CountPill from "@/components/widgets/CountPill.svelte";
   import { resolveColor } from "@/lib/utils/colors";
   import type {
     Backlink,
@@ -53,10 +55,10 @@
     onClick={() => (expanded = !expanded)}
   >
     {#snippet leading()}
-      <span class:collapsed={!expanded} class="lore-group-caret" aria-hidden="true">▾</span>
+      <GroupCaret collapsed={!expanded} />
     {/snippet}
     {#snippet trailing()}
-      <span class="group-count-pill">{backlinks.length}</span>
+      <CountPill count={backlinks.length} />
     {/snippet}
     {#snippet nested()}
       <NodeList mode="tree" isEmpty={backlinks.length === 0}>

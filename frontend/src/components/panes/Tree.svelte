@@ -50,6 +50,8 @@
   import { api } from "@/lib/api";
   import NodeRow from "@/components/widgets/NodeRow.svelte";
   import NodeList from "@/components/widgets/NodeList.svelte";
+  import GroupCaret from "@/components/widgets/GroupCaret.svelte";
+  import CountPill from "@/components/widgets/CountPill.svelte";
   import { getSwatch } from "@/lib/utils/colors";
   import {
     entryTypeChoicesByKind,
@@ -519,10 +521,10 @@
             on:dragend={handleTreeDragEnd}
           >⋮⋮</span>
         {/if}
-        <span class:collapsed={isCollapsed} class="lore-group-caret">▾</span>
+        <GroupCaret collapsed={isCollapsed} />
       {/snippet}
       {#snippet trailing()}
-        <span class="group-count-pill">{childNodes.length}</span>
+        <CountPill count={childNodes.length} />
         <div class="tree-menu-anchor">
           <button class="row-action-add" class:active={addMenuOpenFor === node.id} title="Add child" on:click|stopPropagation={(event) => onToggleAddMenu(node.id, event)}>+&gt;</button>
           {#if addMenuOpenFor === node.id}

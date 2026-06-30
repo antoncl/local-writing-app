@@ -17,6 +17,8 @@
 <script lang="ts">
   import NodeRow from "@/components/widgets/NodeRow.svelte";
   import NodeList from "@/components/widgets/NodeList.svelte";
+  import GroupCaret from "@/components/widgets/GroupCaret.svelte";
+  import CountPill from "@/components/widgets/CountPill.svelte";
   import { getSwatch, resolveColorForType } from "@/lib/utils/colors";
   import { metadataSchemaStore } from "@/lib/stores/schema";
   import { focusedDocumentStore, pinnedKeysStore } from "@/lib/stores/editorFocus";
@@ -130,10 +132,10 @@
       onmousedown={(event) => event.stopPropagation()}
     >
       {#snippet leading()}
-        <span class:collapsed={collapsedGroups[group.id]} class="lore-group-caret">▾</span>
+        <GroupCaret collapsed={collapsedGroups[group.id]} />
       {/snippet}
       {#snippet trailing()}
-        <span class="group-count-pill">{group.entries.length}</span>
+        <CountPill count={group.entries.length} />
       {/snippet}
       {#snippet nested()}
         {#if !collapsedGroups[group.id]}

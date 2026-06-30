@@ -16,6 +16,7 @@
 
   import NodeList from "@/components/widgets/NodeList.svelte";
   import NodeRow from "@/components/widgets/NodeRow.svelte";
+  import CountPill from "@/components/widgets/CountPill.svelte";
   import { resolveColor } from "@/lib/utils/colors";
   import { fieldTypeLabel } from "@/lib/utils/fieldIcons";
   import { sourceBadgeLabel, type NodeTypeTreeNode, type SchemaKind } from "@/lib/utils/schemaTypeHelpers";
@@ -138,7 +139,7 @@
     }}
   >
     {#snippet trailing()}
-      <span class="group-count-pill" title={`${fieldEntries.length} field${fieldEntries.length === 1 ? "" : "s"}, ${node.children.length} sub-type${node.children.length === 1 ? "" : "s"}`}>{childCount}</span>
+      <CountPill count={childCount} title={`${fieldEntries.length} field${fieldEntries.length === 1 ? "" : "s"}, ${node.children.length} sub-type${node.children.length === 1 ? "" : "s"}`} />
       <button class="row-action-add" type="button" title={`Add sub-type to ${node.label}`} aria-label={`Add sub-type to ${node.label}`} onclick={() => onCreateType(schemaTypeLayerId || projectSchemaLayerId(), node.id)}>+ Type</button>
       <button class="row-action-add" type="button" title={`Add field to ${node.label}`} aria-label={`Add field to ${node.label}`} onclick={() => { onOpenType(node.id); onCreateField(schemaTypeLayerId || projectSchemaLayerId(), node.id); }}>+ Field</button>
       {#if !typeSource?.built_in}

@@ -15,6 +15,8 @@
   import NodePicker from "@/components/widgets/NodePicker.svelte";
   import NodeList from "@/components/widgets/NodeList.svelte";
   import NodeRow from "@/components/widgets/NodeRow.svelte";
+  import GroupCaret from "@/components/widgets/GroupCaret.svelte";
+  import CountPill from "@/components/widgets/CountPill.svelte";
   import { resolveColor } from "@/lib/utils/colors";
   import type {
     NodePickerConfig,
@@ -166,10 +168,10 @@
     onClick={() => (expanded = !expanded)}
   >
     {#snippet leading()}
-      <span class:collapsed={!expanded} class="lore-group-caret" aria-hidden="true">▾</span>
+      <GroupCaret collapsed={!expanded} />
     {/snippet}
     {#snippet trailing()}
-      <span class="group-count-pill">{selectedRefs.length}</span>
+      <CountPill count={selectedRefs.length} />
       <span class="reference-picker-trigger">
         <NodePicker
           hideChips

@@ -11,6 +11,8 @@
 <script lang="ts">
   import NodeRow from "@/components/widgets/NodeRow.svelte";
   import NodeList from "@/components/widgets/NodeList.svelte";
+  import GroupCaret from "@/components/widgets/GroupCaret.svelte";
+  import CountPill from "@/components/widgets/CountPill.svelte";
   import { focusedDocumentStore, pinnedKeysStore } from "@/lib/stores/editorFocus";
 
   export let entries: AssistantEntrySummary[];
@@ -149,10 +151,10 @@
       onClick={() => toggleGroup(group.layerId)}
     >
       {#snippet leading()}
-        <span class:collapsed={userCollapsed || isEmpty} class="lore-group-caret">▾</span>
+        <GroupCaret collapsed={userCollapsed || isEmpty} />
       {/snippet}
       {#snippet trailing()}
-        <span class="group-count-pill">{group.entries.length}</span>
+        <CountPill count={group.entries.length} />
       {/snippet}
       {#snippet nested()}
         {#each group.entries as entry (entry.id)}

@@ -7,6 +7,8 @@
 <script lang="ts">
   import NodeRow from "@/components/widgets/NodeRow.svelte";
   import NodeList from "@/components/widgets/NodeList.svelte";
+  import GroupCaret from "@/components/widgets/GroupCaret.svelte";
+  import CountPill from "@/components/widgets/CountPill.svelte";
   import { metadataSchemaStore } from "@/lib/stores/schema";
   import { focusedDocumentStore, pinnedKeysStore } from "@/lib/stores/editorFocus";
 
@@ -83,10 +85,10 @@
     onClick={() => toggleGroup(node.id)}
   >
     {#snippet leading()}
-      <span class:collapsed={isCollapsed} class="lore-group-caret">▾</span>
+      <GroupCaret collapsed={isCollapsed} />
     {/snippet}
     {#snippet trailing()}
-      <span class="group-count-pill">{subtypeEntries.length}</span>
+      <CountPill count={subtypeEntries.length} />
       <button class="pin-button" type="button" on:click|stopPropagation={() => onNewEntry(node.id)}>+ Entry</button>
     {/snippet}
     {#snippet nested()}

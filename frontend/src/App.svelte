@@ -28,7 +28,6 @@
     chatSessionsStore,
     projectCostTotalStore,
     projectCostBreakdownStore,
-    refreshChatSessions as storeRefreshChatSessions,
     refreshProjectCost as storeRefreshProjectCost,
     setChatSessions,
     setProjectCost,
@@ -78,15 +77,10 @@
   import { aiSettings } from "@/lib/stores/aiSettings.svelte";
   import { todoActions } from "@/lib/stores/todoActions.svelte";
   import { treeActions } from "@/lib/stores/treeActions.svelte";
+  import { chatSessions } from "@/lib/stores/chatSessions.svelte";
   import TagManagerDialog from "@/components/dialogs/TagManagerDialog.svelte";
   import type {
     AssistantEntrySummary,
-    ChatMessage,
-    ChatSession,
-    ChatSessionJournalEntry,
-    ChatSessionMessage,
-    ChatSessionSummary,
-    PromptEntrySummary,
     Scene,
     NodePickerConfig,
     PaneId,
@@ -120,8 +114,8 @@
   // and injects the cross-subsystem workspace wiring as onOpenWorkspace.
 
   // Which chat is open in an editor pane lives on the editorPanes controller
-  // (editorPanes.activeChatId) — it's a projection of the editor surface.
-  let activeChatTitle = "Untitled chat";
+  // (editorPanes.activeChatId); the chat-session roster + openers live in the
+  // chatSessions controller (lib/stores/chatSessions).
   let projectCostExpanded = $state(false);
   let appState = $state<AppState>({ name: "needsProject" });
   let tagsManagerOpen = $state(false);
@@ -180,6 +174,11 @@
     // in the editorPanes module the controller imports directly.
     treeActions.run = run;
     treeActions.setStatus = (message) => { status = message; };
+    // Chat-session roster sync + the openers/creators that route a chat into an
+    // editor pane; editor coupling lives in the editorPanes module it imports.
+    chatSessions.run = run;
+    chatSessions.setStatus = (message) => { status = message; };
+    chatSessions.setError = (message) => { error = message; };
     // Confirm actions flow through App's run() so errors surface in `error`.
     confirmService.onRun = run;
     // Project chooser drives only its modals; the projectSession controller
@@ -236,7 +235,7 @@
     appState = { name: "projectOpen", project: nextProject };
     paneLayout.fitToViewport();
     focusPane("outline");
-    void hydrateChatSessionsForProject();
+    void chatSessions.hydrateForProject();
     void refreshProjectCost();
     void aiSettings.refreshProjectColor();
   }
@@ -248,7 +247,6 @@
   function resetEditorWorkspace() {
     editorPanes.reset();
     setKnownTags([]);
-    activeChatTitle = "Untitled chat";
     setChatSessions([]);
     // Preserve all pane configs. An earlier version stripped chat/preview/
     // prompts/assistants/chats out of `panes`, which made `panes.chats` etc.
@@ -322,101 +320,6 @@
     await storeRefreshTodos();
   }
 
-  // --- Chat sessions (Phase 4: ChatBodyView owns per-chat state) ---------
-  //
-  // App keeps the session roster (Chats pane) in sync and routes opens into
-  // editor panes. Everything inside a conversation — history, composer,
-  // streaming, cost/TTL, per-turn persistence — lives in ChatBodyView.
-
-  async function refreshChatSessions() {
-    await storeRefreshChatSessions();
-  }
-
-  // "+ New Chat": create an empty session and open it in an editor pane.
-  async function createNewChatSession(): Promise<void> {
-    try {
-      const session = await api.createChatSession({});
-      await refreshChatSessions();
-      await editorPanes.openChat(session.id);
-    } catch (e) {
-      error = `Couldn't create chat: ${(e as Error).message}`;
-    }
-  }
-
-  // "Invoke chat prompt" from a prose scene: ProseBodyView emits open-chat
-  // once its inputs dialog resolves. Create a prompt-bound chat session
-  // tied to the originating scene (so the first-send render resolves the
-  // `scene` binding), seed the resolved inputs as drafts so the user's
-  // dialog entries carry over, and open it in an editor pane.
-  async function openChatFromPromptEntry(
-    entry: PromptEntrySummary,
-    inputs: Record<string, unknown>,
-    sceneId: string | null,
-    assistantId: string = "",
-  ): Promise<void> {
-    await run(async () => {
-      const session = await api.createChatSession({
-        prompt_entry_id: entry.id,
-        assistant_id: assistantId,
-        title: entry.title,
-        target_scene_id: sceneId ?? "",
-      });
-      if (Object.keys(inputs).length > 0) {
-        // Persist resolved inputs via the unified node path so ChatBodyView
-        // restores them as drafts on load. Echo target_scene_id so it's
-        // never dropped (backend also falls back to the persisted value).
-        await api.saveNode<ChatSession>(session.id, {
-          title: session.title,
-          prompt_entry_id: session.prompt_entry_id,
-          assistant_id: session.assistant_id,
-          system_prompt: session.system_prompt,
-          target_scene_id: session.target_scene_id ?? "",
-          pinned: session.pinned,
-          context_items: [],
-          messages: [],
-          inputs,
-        });
-      }
-      await refreshChatSessions();
-      await editorPanes.openChat(session.id);
-      status = `Opened ${entry.title} as a chat`;
-    });
-  }
-
-  async function deleteChatSessionFromPane(chatId: string): Promise<void> {
-    try {
-      const listing = await api.deleteChatSession(chatId);
-      setChatSessions(listing.sessions);
-      if (editorPanes.activeChatId === chatId) {
-        editorPanes.activeChatId = null;
-        activeChatTitle = "Untitled chat";
-      }
-      // Tear down any editor pane still pointing at the deleted chat.
-      for (const pane of editorPanes.panes.filter(
-        (candidate) => candidate.document?.type === "chat" && candidate.document.id === chatId,
-      )) {
-        editorPanes.tearDown(pane.id);
-      }
-    } catch (e) {
-      error = `Couldn't delete chat: ${(e as Error).message}`;
-    }
-  }
-
-  async function hydrateChatSessionsForProject(): Promise<void> {
-    await refreshChatSessions();
-    if (get(chatSessionsStore).length === 0) {
-      // Auto-create a first chat so the Chats pane always has somewhere to
-      // write. Don't auto-open it — chats open into editor panes on demand.
-      try {
-        await api.createChatSession({});
-        await refreshChatSessions();
-      } catch {
-        // Backend may be offline at boot — leave the list empty; the user
-        // can retry via + New Chat.
-      }
-    }
-  }
-
   function titleMatchesQuery(title: string, query: string): boolean {
     const q = query.trim().toLowerCase();
     if (!q) return true;
@@ -461,7 +364,7 @@
 
   function openChatsPane() {
     chatsPaneOpen = true;
-    void refreshChatSessions();
+    void chatSessions.refresh();
     focusPane("chats");
   }
 
@@ -506,7 +409,7 @@
   // AI chat sessions. Per-chat state (history, composer, cost/TTL) lives
   // inside ChatBodyView now; App only tracks the session roster (Chats pane)
   // and which chat is currently open in an editor pane (active-row highlight).
-  let chatSessions = $derived($chatSessionsStore);
+  let chatSessionList = $derived($chatSessionsStore);
   // V2: project-wide cost rollup. Refreshed on project open and after
   // each chat save. `projectCostBreakdown` is the per-chat list returned
   // by /api/ai/project-cost; populated only when the user expands the
@@ -733,17 +636,17 @@
 
   <Pane id="chats" title="Chats" paneClass="chats-pane" hidden={!isPaneVisible("chats")} style={paneStyle("chats")} chrome={paneChrome}>
     {#snippet actions()}
-      <button class="pin-button" type="button" title="Start a new chat" onmousedown={(event) => event.stopPropagation()} onclick={() => createNewChatSession()}>+ New Chat</button>
+      <button class="pin-button" type="button" title="Start a new chat" onmousedown={(event) => event.stopPropagation()} onclick={() => chatSessions.createNewChatSession()}>+ New Chat</button>
       <button class="pin-button" type="button" onmousedown={(event) => event.stopPropagation()} onclick={() => closeListPane("chats")}>Close</button>
     {/snippet}
     <div class="pane-content schema-list">
       <Chats
-        sessions={chatSessions}
+        sessions={chatSessionList}
         activeChatId={editorPanes.activeChatId}
         promptEntries={promptEntries}
         assistantEntries={assistantEntries}
         onOpenChat={(id) => run(() => editorPanes.openChat(id))}
-        onDeleteChat={(id) => deleteChatSessionFromPane(id)}
+        onDeleteChat={(id) => chatSessions.deleteChatSessionFromPane(id)}
       />
     </div>
   </Pane>
@@ -837,7 +740,7 @@
           )}
         onCustomData={(detail) => schemaPanes?.openForCustomData(detail.entryType, detail.kind)}
         onNavigate={(detail) => navigateToBacklink(detail.id, detail.kind)}
-        onOpenChat={(detail) => openChatFromPromptEntry(detail.entry, detail.inputs, detail.sceneId, detail.assistantId)}
+        onOpenChat={(detail) => chatSessions.openChatFromPromptEntry(detail.entry, detail.inputs, detail.sceneId, detail.assistantId)}
       />
       <button class="pane-resize" type="button" aria-label="Resize Editor pane" onkeydown={(event) => paneLayout.resizeKeydown(event, editorPane.id)} onmousedown={(event) => paneLayout.startResize(event, editorPane.id)}></button>
     </section>

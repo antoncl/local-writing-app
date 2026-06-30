@@ -87,6 +87,7 @@
   import { loadProjectData } from "@/lib/stores/index";
   import { focusedDocumentStore, pinnedKeysStore } from "@/lib/stores/editorFocus";
   import { paneLayout, isEditorPaneId } from "@/lib/stores/paneLayout.svelte";
+  import { confirmService } from "@/lib/stores/confirmService.svelte";
   import GroupsManagerDialog from "@/components/dialogs/GroupsManagerDialog.svelte";
   import TagManagerDialog from "@/components/dialogs/TagManagerDialog.svelte";
   import type { OptionDraft } from "@/components/schema/SelectOptionsEditor.svelte";
@@ -161,17 +162,6 @@
     // True for ~2s after a successful save so the pane chip can briefly
     // show "Saved". Reset whenever the pane becomes dirty again.
     recentlySaved: boolean;
-  };
-
-  type ConfirmationState = {
-    title: string;
-    message: string;
-    details?: string[];
-    confirmLabel: string;
-    destructive: boolean;
-    cannotBeUndone?: boolean;
-    dontShowAgainKey?: string;
-    onConfirm: () => Promise<void>;
   };
 
   let projectPath = $state("");
@@ -297,7 +287,6 @@
       // Quota / private-browsing — silently degrade to in-memory only.
     }
   }
-  let confirmation: ConfirmationState | null = $state(null);
   let error = $state("");
   let status = "No project open";
   let editorPanes: EditorPaneState[] = $state([]);
@@ -371,6 +360,8 @@
         focusedEditorPaneId = id;
       }
     };
+    // Confirm actions flow through App's run() so errors surface in `error`.
+    confirmService.onRun = run;
     cleanupThemeWiring = installThemeWiring();
     document.addEventListener("mousedown", handleDocumentMousedown);
     // Eagerly fetch machine settings so the chat panel and inputs dialog
@@ -1264,7 +1255,7 @@
     const persist = () => persistSchemaField({ layerId, entryType, previousFieldId, nextFieldId, nextField, optionMigration });
 
     if (removedValues.length > 0) {
-      requestConfirm({
+      confirmService.request({
         title: removedValues.length > 1 ? "Remove these option values?" : "Remove this option value?",
         message: `Removing ${removedValues.join(", ")} will clear ${removedValues.length > 1 ? "them" : "it"} from every document that currently uses ${removedValues.length > 1 ? "them" : "it"}.`,
         confirmLabel: "Remove & save",
@@ -1376,7 +1367,7 @@
     const source = schemaTypeSource(typeId);
     if (source?.built_in) return;
     const typeName = definition.name || typeId;
-    requestConfirm({
+    confirmService.request({
       title: "Delete Detail Type",
       message: `Delete "${typeName}"? Existing documents using this type must be changed first.`,
       confirmLabel: "Delete Type",
@@ -1403,7 +1394,7 @@
   function requestDeleteSchemaField() {
     if (!selectedSchemaFieldId || selectedSchemaFieldId.startsWith("system:") || schemaFieldReadonly) return;
     const fieldName = metadataSchema?.fields[selectedSchemaFieldId]?.name || selectedSchemaFieldId;
-    requestConfirm({
+    confirmService.request({
       title: "Delete Detail Field",
       message: `Delete "${fieldName}"? This removes the field definition and removes that metadata value from every document using it.`,
       confirmLabel: "Delete Field",
@@ -1605,7 +1596,7 @@
     const cascadeNote = droppable.length > 0
       ? `\n\nThe following metadata will be dropped (research notes only carry title + body + tags): ${droppable.join(", ")}.`
       : "";
-    confirmation = {
+    confirmService.request({
       title: "Move to Research",
       message: `Move "${entry.title}" out of Lore and into the Research tree?${cascadeNote}`,
       details: [],
@@ -1631,7 +1622,7 @@
             : `Moved "${entry.title}" to Research`;
         });
       },
-    };
+    });
   }
 
 
@@ -1734,14 +1725,14 @@
       message += `\n\n${backlinks.length} ${backlinks.length === 1 ? "entry references" : "entries reference"} content that will be deleted — those links will break:`;
     }
 
-    confirmation = {
+    confirmService.request({
       title: `Delete ${typeName}`,
       message,
       details: backlinks.map((link) => `${link.title} — ${link.field_name}`),
       confirmLabel: `Delete ${typeName}`,
       destructive: true,
       onConfirm: () => performTreeDelete(config, node),
-    };
+    });
   }
 
   async function performTreeDelete(config: TreeConfig, node: StructureNode) {
@@ -2589,51 +2580,14 @@
         ? `${baseMessage}\n\n${backlinks.length} ${backlinks.length === 1 ? "entry references" : "entries reference"} this — those links will become broken:`
         : baseMessage;
     const details = backlinks.map((link) => `${link.title} — ${link.field_name}`);
-    confirmation = {
+    confirmService.request({
       title: titleLabel,
       message,
       details,
       confirmLabel: titleLabel,
       destructive: true,
       onConfirm: () => deleteEditorPaneScene(id),
-    };
-  }
-
-  async function confirmModalAction(dontShowAgain = false) {
-    const currentConfirmation = confirmation;
-    if (!currentConfirmation) return;
-    confirmation = null;
-    if (dontShowAgain && currentConfirmation.dontShowAgainKey) {
-      suppressConfirm(currentConfirmation.dontShowAgainKey);
-    }
-    await run(currentConfirmation.onConfirm);
-  }
-
-  // Per-operation "don't show this again" suppression (localStorage).
-  const CONFIRM_SUPPRESS_PREFIX = "confirmSuppress:";
-  function isConfirmSuppressed(key: string): boolean {
-    try {
-      return localStorage.getItem(CONFIRM_SUPPRESS_PREFIX + key) === "1";
-    } catch {
-      return false;
-    }
-  }
-  function suppressConfirm(key: string) {
-    try {
-      localStorage.setItem(CONFIRM_SUPPRESS_PREFIX + key, "1");
-    } catch {
-      // ignore storage failures — worst case, we ask again next time.
-    }
-  }
-  // Gate a destructive action behind the confirm modal, honouring a
-  // per-op-type "don't show again" suppression. If suppressed, runs the
-  // action immediately; otherwise opens the modal.
-  function requestConfirm(options: Omit<ConfirmationState, "onConfirm"> & { onConfirm: () => Promise<void> }) {
-    if (options.dontShowAgainKey && isConfirmSuppressed(options.dontShowAgainKey)) {
-      void run(options.onConfirm);
-      return;
-    }
-    confirmation = options;
+    });
   }
 
   async function deleteEditorPaneScene(id: string) {
@@ -3332,9 +3286,9 @@
   />
 
   <ConfirmModal
-    state={confirmation}
-    onCancel={() => (confirmation = null)}
-    onConfirm={(dontShowAgain) => confirmModalAction(dontShowAgain)}
+    state={confirmService.active}
+    onCancel={() => confirmService.dismiss()}
+    onConfirm={(dontShowAgain) => confirmService.resolve(dontShowAgain)}
   />
 
   <NewProjectModal

@@ -76,45 +76,32 @@
   import { loadProjectData } from "@/lib/stores/index";
   import { focusedDocumentStore, pinnedKeysStore } from "@/lib/stores/editorFocus";
   import { paneLayout, isEditorPaneId } from "@/lib/stores/paneLayout.svelte";
-  import { AutosaveScheduler } from "@/lib/editor-core/autosave";
   import {
-    type DocumentRef,
     type EditorPaneState,
-    createEmptyEditorPane,
-    documentStatus,
-    isEditorPaneDirty,
     computeDraftTitleOverrides,
   } from "@/lib/editor-core/editorPaneModel";
+  import { editorPanes } from "@/lib/stores/editorPanes.svelte";
   import { confirmService } from "@/lib/stores/confirmService.svelte";
   import { projectChooser } from "@/lib/stores/projectChooser.svelte";
   import TagManagerDialog from "@/components/dialogs/TagManagerDialog.svelte";
   import type {
     AIHealthResponse,
     AIPolicy,
-    AssistantEntry,
     AssistantEntrySummary,
-    Backlink,
     ChatMessage,
     ChatSession,
     ChatSessionJournalEntry,
     ChatSessionMessage,
     ChatSessionSummary,
-    EditableDocument,
-    EntryMetadata,
-    LoreEntry,
     LoreEntrySummary,
-    PromptEntry,
     PromptEntrySummary,
-    ResearchNote,
     Scene,
     MachineSettingsDraft,
     MachineSettingsUpdate,
     MachineSettingsView,
     NodePickerConfig,
     PaneId,
-    PromptInputDefinition,
     ProjectInfo,
-    ProjectNode,
     RecentProject,
     ProjectValidation,
     SearchHit,
@@ -130,7 +117,6 @@
   // TreeConfig (the per-kind manuscript/research tree contract) + the tree
   // rendering and inline CRUD now live in Tree.svelte; App owns the structure
   // data, the editor-pane coupling (delete, dblclick-open), and collapse state.
-  type MetadataReloadSignal = { token: number; metadata: EntryMetadata; status: string; entryType: string };
 
   let projectPath = $state("");
   let projectTitle = $state("Untitled Project");
@@ -152,14 +138,14 @@
   // projectChooser controller (lib/stores/projectChooser). App pushes the
   // machine-settings default in and injects the open/create lifecycle.
 
-  let activeChatId: string | null = $state(null);
+  // Which chat is open in an editor pane lives on the editorPanes controller
+  // (editorPanes.activeChatId) — it's a projection of the editor surface.
   let activeChatTitle = "Untitled chat";
   let projectCostExpanded = $state(false);
   let machineSettingsDraft: MachineSettingsDraft | null = $state(null);
   let appState = $state<AppState>({ name: "needsProject" });
   let collapsedResearchNodes: Record<string, boolean> = $state({});
   let tagsManagerOpen = $state(false);
-  let focusedEditorPaneId: string | null = $state(null);
   let activeParentId: string | undefined = undefined;
   let addMenuOpenFor: string | null = $state(null);
   // Floating-popover coordinates captured at click time. `position: fixed`
@@ -205,24 +191,9 @@
   }
   let error = $state("");
   let status = "No project open";
-  let editorPanes: EditorPaneState[] = $state([]);
-  let nextMetadataReloadToken = 1;
-  let metadataReloadsByPane: Record<string, MetadataReloadSignal> = $state({});
-  let titleReloadsByPane: Record<string, { token: number; title: string }> = $state({});
-  let editorPaneComponents: Record<
-    string,
-    | {
-        updateEmbeddedTodo: (todoId: string, updates: { status?: "open" | "done"; note?: string }) => void;
-        deleteEmbeddedTodo: (todoId: string) => void;
-        highlightEmbeddedTodo: (todoId: string) => void;
-      }
-    | undefined
-  > = $state({});
-  let embeddedTodosByPane: Record<string, EmbeddedTodo[]> = $state({});
-  let embeddedTodoStatusHintsByPane: Record<string, string> = $state({});
-  let allEmbeddedTodos: EmbeddedTodo[] = $state([]);
-
-
+  // The editor-pane MDI surface (open panes, drafts, autosave lifecycle, the
+  // open*/embedded-TODO bridge) lives in the editorPanes controller
+  // (lib/stores/editorPanes). App keeps only the projections it renders.
 
   // Persisted "what was open" — survives reload (HMR or browser refresh) so
   // the user doesn't lose their seat. Cleared on a failed re-open so a
@@ -260,8 +231,19 @@
     // Raising the focused editor pane must also update focusedEditorPaneId; the
     // pane-layout controller stays ignorant of editor state and calls back here.
     paneLayout.onRaise = (id) => {
-      if (isEditorPaneId(id) && editorPanes.some((pane) => pane.id === id)) {
-        focusedEditorPaneId = id;
+      if (isEditorPaneId(id) && editorPanes.panes.some((pane) => pane.id === id)) {
+        editorPanes.focusedEditorPaneId = id;
+      }
+    };
+    // The editor-pane controller funnels errors/status through App and writes the
+    // project-node title back into the top bar; it owns everything else itself.
+    editorPanes.run = run;
+    editorPanes.setStatus = (message) => { status = message; };
+    editorPanes.setError = (message) => { error = message; };
+    editorPanes.onProjectNodeSaved = (title) => {
+      projectTitle = title;
+      if (appState.name === "projectOpen") {
+        appState = { ...appState, project: { ...appState.project, title } };
       }
     };
     // Confirm actions flow through App's run() so errors surface in `error`.
@@ -297,7 +279,7 @@
     })();
     return () => {
       paneLayout.dispose();
-      autosave.dispose();
+      editorPanes.dispose();
       document.removeEventListener("mousedown", handleDocumentMousedown);
       cleanupThemeWiring?.();
     };
@@ -383,14 +365,8 @@
   }
 
   function resetEditorWorkspace() {
-    editorPanes = [];
+    editorPanes.reset();
     setKnownTags([]);
-    focusedEditorPaneId = null;
-    paneLayout.resetEditorIndex();
-    nextMetadataReloadToken = 1;
-    metadataReloadsByPane = {};
-    titleReloadsByPane = {};
-    activeChatId = null;
     activeChatTitle = "Untitled chat";
     setChatSessions([]);
     // Preserve all pane configs. An earlier version stripped chat/preview/
@@ -469,7 +445,7 @@
     await run(async () => {
       setLoreEntries((await api.listLoreEntries()).entries);
       setPromptEntries((await api.listPromptEntries()).entries);
-      await refreshOpenEditorPaneBaselines();
+      await editorPanes.refreshOpenEditorPaneBaselines();
     });
   }
 
@@ -488,7 +464,7 @@
       schemaPanes?.syncSelection();
       const initialSceneId = findFirstSceneId(get(structureStore)?.root);
       if (initialSceneId) {
-        await openSceneInEditorPane(initialSceneId);
+        await editorPanes.openScene(initialSceneId);
       }
       await refreshRecents();
       status = `Created ${openedProject.title}`;
@@ -578,7 +554,7 @@
     try {
       const session = await api.createChatSession({});
       await refreshChatSessions();
-      await openChatInEditorPane(session.id);
+      await editorPanes.openChat(session.id);
     } catch (e) {
       error = `Couldn't create chat: ${(e as Error).message}`;
     }
@@ -619,7 +595,7 @@
         });
       }
       await refreshChatSessions();
-      await openChatInEditorPane(session.id);
+      await editorPanes.openChat(session.id);
       status = `Opened ${entry.title} as a chat`;
     });
   }
@@ -628,15 +604,15 @@
     try {
       const listing = await api.deleteChatSession(chatId);
       setChatSessions(listing.sessions);
-      if (activeChatId === chatId) {
-        activeChatId = null;
+      if (editorPanes.activeChatId === chatId) {
+        editorPanes.activeChatId = null;
         activeChatTitle = "Untitled chat";
       }
       // Tear down any editor pane still pointing at the deleted chat.
-      for (const pane of editorPanes.filter(
+      for (const pane of editorPanes.panes.filter(
         (candidate) => candidate.document?.type === "chat" && candidate.document.id === chatId,
       )) {
-        tearDownEditorPane(pane.id);
+        editorPanes.tearDown(pane.id);
       }
     } catch (e) {
       error = `Couldn't delete chat: ${(e as Error).message}`;
@@ -731,7 +707,7 @@
     await run(async () => {
       const scene = await api.createScene("New Scene", parentId);
       await refreshStructure();
-      await openSceneInEditorPane(scene.id);
+      await editorPanes.openScene(scene.id);
     });
   }
 
@@ -740,47 +716,6 @@
     if (parentType === "act") return "chapter";
     if (parentType === "chapter") return "scene";
     return null;
-  }
-
-  async function openResearchNoteInEditorPane(noteId: string) {
-    const existingPane = editorPanes.find((pane) => pane.document?.type === "research" && pane.document.id === noteId);
-    if (existingPane) {
-      focusedEditorPaneId = existingPane.id;
-      focusPane(existingPane.id);
-      status = `Focused ${existingPane.scene?.title ?? "open note"}`;
-      return;
-    }
-
-    let targetPane = editorPanes.find((pane) => !pane.pinned);
-    if (!targetPane) {
-      targetPane = addEditorPane();
-    }
-
-    if (targetPane.dirty) {
-      await saveEditorPane(targetPane.id);
-    }
-
-    const note = await api.getResearchNote(noteId);
-    editorPanes = editorPanes.map((pane) =>
-      pane.id === targetPane.id
-        ? {
-            ...pane,
-            document: { type: "research", id: note.id },
-            scene: note,
-            dirty: false,
-            draftTitle: note.title,
-            draftMarkdown: note.body,
-            draftStatus: "",
-            draftEntryType: note.entry_type,
-            draftMetadata: cloneMetadata(note.metadata),
-            saving: false,
-            recentlySaved: false,
-          }
-        : pane,
-    );
-    focusedEditorPaneId = targetPane.id;
-    focusPane(targetPane.id);
-    status = `Loaded ${note.title}`;
   }
 
   // Slice 5: migrate a single lore_note to a research/note. Confirms
@@ -809,9 +744,9 @@
         // Close the lore entry's editor pane first so it doesn't dangle
         // on a deleted file. The new research note will open in its own
         // pane after the migration.
-        editorPanes.forEach((pane) => {
+        editorPanes.panes.forEach((pane) => {
           if (pane.document?.type === "lore" && pane.document.id === entry.id) {
-            tearDownEditorPane(pane.id);
+            editorPanes.tearDown(pane.id);
           }
         });
         await run(async () => {
@@ -819,7 +754,7 @@
           setLoreEntries(result.lore.entries);
           setResearchStructure(result.tree);
           // Open the new note in the editor so the user sees the result.
-          await openResearchNoteInEditorPane(result.note_id);
+          await editorPanes.openResearchNote(result.note_id);
           status = result.dropped_fields.length > 0
             ? `Moved "${entry.title}" to Research (dropped ${result.dropped_fields.join(", ")})`
             : `Moved "${entry.title}" to Research`;
@@ -827,7 +762,6 @@
       },
     });
   }
-
 
   // Tree configs — the per-kind contract consumed by Tree.svelte. Function
   // declarations referenced below are hoisted. App keeps these (plus the
@@ -846,7 +780,7 @@
       cascadePreview: api.cascadeDeletePreview.bind(api),
       delete: api.deleteStructureNode.bind(api),
     },
-    openLeaf: (sceneId) => openSceneInEditorPane(sceneId),
+    openLeaf: (sceneId) => editorPanes.openScene(sceneId),
     onGroupClick: (nodeId) => deferStructureNodeCollapse(nodeId),
     onGroupDblClick: (nodeId) => handleStructureNodeDblClick(nodeId),
     cascadeLabels: {
@@ -854,7 +788,7 @@
       container: { singular: "sub-container", plural: "sub-containers" },
     },
     afterDelete: () => refreshTodos(),
-    afterRename: (nodeId, title) => syncRenameIntoEditorPanes(nodeId, title),
+    afterRename: (nodeId, title) => editorPanes.syncRename(nodeId, title),
     supportsDrag: true,
     showStatusStripe: true,
     containerHasEditor: true,
@@ -874,7 +808,7 @@
       cascadePreview: api.cascadeResearchDeletePreview.bind(api),
       delete: api.deleteResearchNode.bind(api),
     },
-    openLeaf: (sceneId) => openResearchNoteInEditorPane(sceneId),
+    openLeaf: (sceneId) => editorPanes.openResearchNote(sceneId),
     onGroupClick: (nodeId) => {
       collapsedResearchNodes = {
         ...collapsedResearchNodes,
@@ -942,22 +876,22 @@
     // Close editor panes whose underlying leaf is doomed before the API
     // call so the panes don't dangle on a missing scene/note.
     const doomedSceneIds = collectSceneIdSet(node);
-    editorPanes.forEach((pane) => {
+    editorPanes.panes.forEach((pane) => {
       if (
         pane.scene
         && pane.document?.type === config.kind
         && doomedSceneIds.has(pane.scene.id)
       ) {
-        tearDownEditorPane(pane.id);
+        editorPanes.tearDown(pane.id);
       }
     });
     if (config.containerHasEditor) {
       // Manuscript Acts/Chapters can open as structure_node editor panes
       // — close those too if their node id falls inside the doomed subtree.
       const doomedNodeIds = collectNodeIdSet(node);
-      editorPanes.forEach((pane) => {
+      editorPanes.panes.forEach((pane) => {
         if (pane.document?.type === "structure_node" && doomedNodeIds.has(pane.document.id)) {
-          tearDownEditorPane(pane.id);
+          editorPanes.tearDown(pane.id);
         }
       });
     }
@@ -1001,44 +935,6 @@
     addMenuPosition = null;
   }
 
-  async function syncRenameIntoEditorPanes(nodeId: string, newTitle: string) {
-    if (!structure) return;
-    const renamedNode = findStructureNodeById(structure.root, nodeId);
-    if (!renamedNode?.scene_id) return;
-    const sceneId = renamedNode.scene_id;
-    // The rename rewrote the scene file's front-matter, bumping the
-    // mtime-derived revision. Any open editor pane still holds the
-    // pre-rename revision; the next save would 409. Refetch the scene
-    // for its new revision string. The user's in-progress body lives
-    // on pane.draftMarkdown — we only swap revision (and title, which
-    // we already set above) into pane.scene.
-    let refreshedRevision: string | null = null;
-    try {
-      const refreshed = await api.getScene(sceneId);
-      refreshedRevision = refreshed.revision;
-    } catch (e) {
-      // Pane closed or scene gone — fall through; nothing to sync.
-    }
-    const nextReloads = { ...titleReloadsByPane };
-    editorPanes = editorPanes.map((pane) => {
-      if (!pane.scene || pane.scene.id !== sceneId) return pane;
-      const nextScene = {
-        ...pane.scene,
-        title: newTitle,
-        ...(refreshedRevision !== null ? { revision: refreshedRevision } : {}),
-      };
-      if (pane.dirty) {
-        return { ...pane, scene: nextScene };
-      }
-      nextReloads[pane.id] = {
-        token: (nextReloads[pane.id]?.token ?? 0) + 1,
-        title: newTitle,
-      };
-      return { ...pane, scene: nextScene, draftTitle: newTitle };
-    });
-    titleReloadsByPane = nextReloads;
-  }
-
   function toggleStructureNodeCollapse(nodeId: string) {
     collapsedStructureNodes = {
       ...collapsedStructureNodes,
@@ -1069,112 +965,15 @@
       clearTimeout(pendingCollapseTimeoutId);
       pendingCollapseTimeoutId = null;
     }
-    void run(() => openStructureNodeInEditorPane(nodeId));
+    void run(() => editorPanes.openStructureNode(nodeId));
   }
 
   async function newLoreEntry() {
     await run(async () => {
       const entry = await api.createLoreEntry("New Entry", "lore_note");
       await refreshLoreEntries();
-      await openLoreEntryInEditorPane(entry.id);
+      await editorPanes.openLore(entry.id);
     });
-  }
-
-  async function openProjectNodeInEditorPane() {
-    // Singleton — focus the existing pane if it's already showing the
-    // project node, otherwise reuse a non-pinned pane (or open one).
-    const existingPane = editorPanes.find((pane) => pane.document?.type === "project");
-    if (existingPane) {
-      focusedEditorPaneId = existingPane.id;
-      focusPane(existingPane.id);
-      status = `Focused ${existingPane.scene?.title ?? "project"}`;
-      return;
-    }
-
-    await run(async () => {
-      let targetPane = editorPanes.find((pane) => !pane.pinned);
-      if (!targetPane) {
-        targetPane = addEditorPane();
-      }
-      if (targetPane.dirty) {
-        await saveEditorPane(targetPane.id);
-      }
-
-      const node = await api.getProjectNode();
-      // The editor pane uses Scene-compatible shape; project nodes have no
-      // `status` so default to "" and let the documentKind branch hide it.
-      const sceneShaped = {
-        ...node,
-        status: "",
-        source_layer_id: "",
-        source_layer_label: "",
-      } as unknown as Scene;
-      editorPanes = editorPanes.map((pane) =>
-        pane.id === targetPane!.id
-          ? {
-              ...pane,
-              document: { type: "project", id: node.id },
-              scene: sceneShaped,
-              dirty: false,
-              draftTitle: node.title,
-              draftMarkdown: node.body,
-              draftStatus: "",
-              draftEntryType: node.entry_type,
-              draftMetadata: cloneMetadata(node.metadata as EntryMetadata),
-              saving: false,
-              recentlySaved: false,
-            }
-          : pane,
-      );
-      focusedEditorPaneId = targetPane!.id;
-      focusPane(targetPane!.id);
-      status = `Loaded ${node.title}`;
-    });
-  }
-
-  async function openSceneInEditorPane(sceneId: string) {
-    const existingPane = editorPanes.find((pane) => pane.document?.type === "scene" && pane.document.id === sceneId);
-    if (existingPane) {
-      focusedEditorPaneId = existingPane.id;
-      focusPane(existingPane.id);
-      status = `Focused ${existingPane.scene?.title ?? "open scene"}`;
-      return;
-    }
-
-    let targetPane = editorPanes.find((pane) => !pane.pinned);
-    if (!targetPane) {
-      targetPane = addEditorPane();
-    }
-
-    if (targetPane.dirty) {
-      await saveEditorPane(targetPane.id);
-    }
-
-    const scene = await api.getScene(sceneId);
-    editorPanes = editorPanes.map((pane) =>
-      pane.id === targetPane.id
-        ? {
-            ...pane,
-            document: { type: "scene", id: scene.id },
-            scene,
-            dirty: false,
-            draftTitle: scene.title,
-            draftMarkdown: scene.body,
-            draftStatus: scene.status,
-            draftEntryType: scene.entry_type,
-            draftMetadata: cloneMetadata(scene.metadata),
-            saving: false,
-            recentlySaved: false,
-          }
-        : pane,
-    );
-    focusedEditorPaneId = targetPane.id;
-    focusPane(targetPane.id);
-    status = `Loaded ${scene.title}`;
-    if (!sceneEntryHasBody(scene)) {
-      await tick();
-      paneLayout.fitEditorPaneToContent(targetPane.id);
-    }
   }
 
   function sceneEntryHasBody(scene: Scene): boolean {
@@ -1182,574 +981,34 @@
     return entryDefinition?.has_body ?? true;
   }
 
-  // Opens a manuscript-tree structure node (Act, Chapter, leaf-Scene-as-
-  // node) in an editor pane. Mirrors the universal model: every NodeRow
-  // opens its node's editor on double-click, regardless of whether the
-  // node has children. For now the editor is title-only — body and
-  // user-metadata for structure nodes are a follow-up; renames go
-  // through api.renameStructureNode in saveEditorPane.
-  async function openStructureNodeInEditorPane(nodeId: string) {
-    const existingPane = editorPanes.find(
-      (pane) => pane.document?.type === "structure_node" && pane.document.id === nodeId,
-    );
-    if (existingPane) {
-      focusedEditorPaneId = existingPane.id;
-      focusPane(existingPane.id);
-      status = `Focused ${existingPane.scene?.title ?? "structure node"}`;
-      return;
-    }
-    if (!structure) return;
-    const node = findStructureNodeById(structure.root, nodeId);
-    if (!node) return;
-    // Acts/Chapters are kind="scene" with a different entry_type — their
-    // metadata + body + status live in the underlying scene .md file, so
-    // fetch it and round-trip via the regular scene endpoints. document.id
-    // stays the node id (the open-pane lookup matches on it); pane.scene
-    // carries the real Scene so saveEditorPane's structure_node branch can
-    // hand the right base_revision to api.saveScene.
-    if (!node.scene_id) {
-      error = `Node ${node.title} has no underlying scene to edit.`;
-      return;
-    }
-    let targetPane = editorPanes.find((pane) => !pane.pinned);
-    if (!targetPane) {
-      targetPane = addEditorPane();
-    }
-    if (targetPane.dirty) {
-      await saveEditorPane(targetPane.id);
-    }
-    const scene = await api.getScene(node.scene_id);
-    editorPanes = editorPanes.map((pane) =>
-      pane.id === targetPane!.id
-        ? {
-            ...pane,
-            document: { type: "structure_node", id: node.id },
-            scene,
-            dirty: false,
-            draftTitle: scene.title,
-            draftMarkdown: scene.body,
-            draftStatus: scene.status,
-            draftEntryType: scene.entry_type,
-            draftMetadata: cloneMetadata(scene.metadata),
-            saving: false,
-            recentlySaved: false,
-          }
-        : pane,
-    );
-    focusedEditorPaneId = targetPane!.id;
-    focusPane(targetPane!.id);
-    status = `Loaded ${scene.title}`;
-  }
-
   function navigateToBacklink(id: string, kind: string) {
     if (kind === "lore") {
-      void run(() => openLoreEntryInEditorPane(id));
+      void run(() => editorPanes.openLore(id));
     } else {
-      void run(() => openSceneInEditorPane(id));
+      void run(() => editorPanes.openScene(id));
     }
-  }
-
-  // Open a chat session in the editor-pane system. Mirrors the structure-
-  // node pattern: synthesize a Scene-shaped record so the existing pane
-  // plumbing works without a parallel field. NodeEditor sees entry_type
-  // "chat_session" → body_shape "chat" → mounts ChatBodyView, which then
-  // fetches the full ChatSession itself via /api/nodes/{id}.
-  // saveEditorPane is a no-op for chats (ChatBodyView persists per-turn);
-  // deleteEditorPaneScene routes through api.deleteChatSession.
-  async function openChatInEditorPane(chatId: string) {
-    const existingPane = editorPanes.find(
-      (pane) => pane.document?.type === "chat" && pane.document.id === chatId,
-    );
-    if (existingPane) {
-      focusedEditorPaneId = existingPane.id;
-      focusPane(existingPane.id);
-      status = `Focused ${existingPane.scene?.title ?? "open chat"}`;
-      return;
-    }
-    const summary = get(chatSessionsStore).find((s) => s.id === chatId);
-    let targetPane = editorPanes.find((pane) => !pane.pinned);
-    if (!targetPane) {
-      targetPane = addEditorPane();
-    }
-    if (targetPane.dirty) {
-      await saveEditorPane(targetPane.id);
-    }
-    const sceneShaped = {
-      id: chatId,
-      title: summary?.title || "Untitled chat",
-      body: "",
-      revision: "",
-      status: "",
-      entry_type: "chat_session",
-      metadata: {},
-      computed_metadata: {},
-    } as unknown as EditableDocument;
-    editorPanes = editorPanes.map((pane) =>
-      pane.id === targetPane!.id
-        ? {
-            ...pane,
-            document: { type: "chat", id: chatId },
-            scene: sceneShaped,
-            dirty: false,
-            draftTitle: sceneShaped.title,
-            draftMarkdown: "",
-            draftStatus: "",
-            draftEntryType: "chat_session",
-            draftMetadata: {},
-            saving: false,
-            recentlySaved: false,
-          }
-        : pane,
-    );
-    focusedEditorPaneId = targetPane!.id;
-    focusPane(targetPane!.id);
-    status = `Loaded ${sceneShaped.title}`;
-    activeChatId = chatId;
-  }
-
-  async function openPromptEntryInEditorPane(entryId: string) {
-    const existingPane = editorPanes.find((pane) => pane.document?.type === "prompt" && pane.document.id === entryId);
-    if (existingPane) {
-      focusedEditorPaneId = existingPane.id;
-      focusPane(existingPane.id);
-      status = `Focused ${existingPane.scene?.title ?? "open prompt"}`;
-      return;
-    }
-    let targetPane = editorPanes.find((pane) => !pane.pinned);
-    if (!targetPane) targetPane = addEditorPane();
-    if (targetPane.dirty) await saveEditorPane(targetPane.id);
-    const entry = await api.getPromptEntry(entryId);
-    editorPanes = editorPanes.map((pane) =>
-      pane.id === targetPane.id
-        ? {
-            ...pane,
-            document: { type: "prompt", id: entry.id },
-            scene: entry,
-            dirty: false,
-            draftTitle: entry.title,
-            draftMarkdown: entry.body,
-            draftStatus: "",
-            draftEntryType: entry.entry_type,
-            draftMetadata: cloneMetadata(entry.metadata),
-            draftInputs: JSON.parse(JSON.stringify(entry.inputs ?? [])),
-            saving: false,
-            recentlySaved: false,
-          }
-        : pane,
-    );
-    focusedEditorPaneId = targetPane.id;
-    focusPane(targetPane.id);
-    status = `Loaded ${entry.title}`;
   }
 
   async function newPromptEntry(entryType: string) {
     await run(async () => {
       const created = await api.createPromptEntry(`Untitled Prompt`, entryType);
       await refreshPromptEntries();
-      await openPromptEntryInEditorPane(created.id);
+      await editorPanes.openPrompt(created.id);
     });
-  }
-
-  async function openAssistantEntryInEditorPane(entryId: string) {
-    const existingPane = editorPanes.find((pane) => pane.document?.type === "assistant" && pane.document.id === entryId);
-    if (existingPane) {
-      focusedEditorPaneId = existingPane.id;
-      focusPane(existingPane.id);
-      status = `Focused ${existingPane.scene?.title ?? "open assistant"}`;
-      return;
-    }
-    let targetPane = editorPanes.find((pane) => !pane.pinned);
-    if (!targetPane) targetPane = addEditorPane();
-    if (targetPane.dirty) await saveEditorPane(targetPane.id);
-    const entry = await api.getAssistantEntry(entryId);
-    editorPanes = editorPanes.map((pane) =>
-      pane.id === targetPane.id
-        ? {
-            ...pane,
-            document: { type: "assistant", id: entry.id },
-            scene: entry,
-            dirty: false,
-            draftTitle: entry.title,
-            draftMarkdown: "",
-            draftStatus: "",
-            draftEntryType: entry.entry_type,
-            draftMetadata: cloneMetadata(entry.metadata),
-            saving: false,
-            recentlySaved: false,
-          }
-        : pane,
-    );
-    focusedEditorPaneId = targetPane.id;
-    focusPane(targetPane.id);
-    status = `Loaded ${entry.title}`;
   }
 
   async function newAssistantEntry() {
     await run(async () => {
       const created = await api.createAssistantEntry("Untitled assistant");
       await refreshAssistantEntries();
-      await openAssistantEntryInEditorPane(created.id);
+      await editorPanes.openAssistant(created.id);
     });
   }
-
-  async function openLoreEntryInEditorPane(entryId: string) {
-    const existingPane = editorPanes.find((pane) => pane.document?.type === "lore" && pane.document.id === entryId);
-    if (existingPane) {
-      focusedEditorPaneId = existingPane.id;
-      focusPane(existingPane.id);
-      status = `Focused ${existingPane.scene?.title ?? "open entry"}`;
-      return;
-    }
-
-    let targetPane = editorPanes.find((pane) => !pane.pinned);
-    if (!targetPane) {
-      targetPane = addEditorPane();
-    }
-
-    if (targetPane.dirty) {
-      await saveEditorPane(targetPane.id);
-    }
-
-    const entry = await api.getLoreEntry(entryId);
-    editorPanes = editorPanes.map((pane) =>
-      pane.id === targetPane.id
-        ? {
-            ...pane,
-            document: { type: "lore", id: entry.id },
-            scene: entry,
-            dirty: false,
-            draftTitle: entry.title,
-            draftMarkdown: entry.body,
-            draftStatus: "",
-            draftEntryType: entry.entry_type,
-            draftMetadata: cloneMetadata(entry.metadata),
-            saving: false,
-            recentlySaved: false,
-          }
-        : pane,
-    );
-    focusedEditorPaneId = targetPane.id;
-    focusPane(targetPane.id);
-    status = `Loaded ${entry.title}`;
-  }
-
 
   function metadataListText(value: unknown) {
     if (Array.isArray(value)) return value.map((item) => String(item).trim()).filter(Boolean).join(", ");
     if (typeof value === "string") return value.trim();
     return "";
-  }
-
-  function addEditorPane() {
-    const id = paneLayout.allocateEditorPane(editorPanes.length);
-    const pane = createEmptyEditorPane(id);
-    editorPanes = [...editorPanes, pane];
-    return pane;
-  }
-
-  // Auto-save: per-pane debounce. The timing lives in a generic
-  // AutosaveScheduler (lib/editor-core/autosave); the editor-specific hooks are
-  // injected here so the scheduler stays domain-agnostic. Chats persist per-turn
-  // from inside ChatBodyView, so `shouldSave` excludes them from the timer.
-  const AUTO_SAVE_IDLE_MS = 6000;
-  const SAVED_INDICATOR_MS = 2000;
-  const autosave = new AutosaveScheduler({
-    idleMs: AUTO_SAVE_IDLE_MS,
-    indicatorMs: SAVED_INDICATOR_MS,
-    shouldSave: (id) => {
-      const pane = editorPanes.find((candidate) => candidate.id === id);
-      return Boolean(pane?.dirty) && !pane?.saving && pane?.document?.type !== "chat";
-    },
-    save: (id) => void run(() => saveEditorPane(id)),
-    clearIndicator: (id) => {
-      editorPanes = editorPanes.map((pane) =>
-        pane.id === id ? { ...pane, recentlySaved: false } : pane,
-      );
-    },
-  });
-
-  function updateEditorPaneDraft(id: string, title: string, body: string, status: string, entryType: string, metadata: EntryMetadata, inputs?: PromptInputDefinition[]) {
-    editorPanes = editorPanes.map((pane) => {
-      if (pane.id !== id) return pane;
-      const nextInputs = inputs ?? pane.draftInputs;
-      const nextDirty = isEditorPaneDirty(pane.scene, title, body, status, entryType, metadata, nextInputs);
-      return {
-        ...pane,
-        dirty: nextDirty,
-        // New edits invalidate any "Saved" feedback still on screen.
-        recentlySaved: nextDirty ? false : pane.recentlySaved,
-        draftTitle: title,
-        draftMarkdown: body,
-        draftStatus: status,
-        draftEntryType: entryType,
-        draftMetadata: cloneMetadata(metadata),
-        draftInputs: JSON.parse(JSON.stringify(nextInputs ?? [])),
-      };
-    });
-    autosave.schedule(id);
-  }
-
-  function cloneMetadata(metadata: EntryMetadata) {
-    return JSON.parse(JSON.stringify(metadata ?? {})) as EntryMetadata;
-  }
-
-  async function refreshOpenEditorPaneBaselines(transformDraftMetadata?: (metadata: EntryMetadata) => EntryMetadata) {
-    const documentRefs = Array.from(
-      new Map(
-        editorPanes
-          .map((pane) => pane.document)
-          .filter((document): document is DocumentRef => Boolean(document))
-          .map((document) => [`${document.type}:${document.id}`, document]),
-      ).values(),
-    );
-    if (documentRefs.length === 0) return;
-    const refreshedDocuments = await Promise.all(
-      documentRefs.map((document) =>
-        document.type === "lore"
-          ? api.getLoreEntry(document.id)
-          : document.type === "prompt"
-            ? api.getPromptEntry(document.id)
-            : api.getScene(document.id),
-      ),
-    );
-    const refreshedByKey = new Map(refreshedDocuments.map((document, index) => [`${documentRefs[index].type}:${document.id}`, document]));
-    const nextReloads: Record<string, MetadataReloadSignal> = {};
-    editorPanes = editorPanes.map((pane) => {
-      if (!pane.scene || !pane.document) return pane;
-      const refreshedDocument = refreshedByKey.get(`${pane.document.type}:${pane.scene.id}`);
-      if (!refreshedDocument) return pane;
-      const draftMetadata = transformDraftMetadata ? transformDraftMetadata(refreshedDocument.metadata) : refreshedDocument.metadata;
-      nextReloads[pane.id] = {
-        token: nextMetadataReloadToken,
-        metadata: cloneMetadata(draftMetadata),
-        status: documentStatus(refreshedDocument),
-        entryType: refreshedDocument.entry_type,
-      };
-      nextMetadataReloadToken += 1;
-      return {
-        ...pane,
-        scene: refreshedDocument,
-        draftMetadata: cloneMetadata(draftMetadata),
-        draftStatus: documentStatus(refreshedDocument),
-        dirty: isEditorPaneDirty(
-          refreshedDocument,
-          pane.draftTitle,
-          pane.draftMarkdown,
-          pane.draftStatus,
-          pane.draftEntryType,
-          draftMetadata,
-        ),
-      };
-    });
-    metadataReloadsByPane = { ...metadataReloadsByPane, ...nextReloads };
-  }
-
-  function toggleEditorPanePinned(id: string) {
-    editorPanes = editorPanes.map((pane) => (pane.id === id ? { ...pane, pinned: !pane.pinned } : pane));
-  }
-
-  async function closeEditorPane(id: string) {
-    const pane = editorPanes.find((candidate) => candidate.id === id);
-    if (!pane) return;
-    await run(async () => {
-      if (pane.dirty) {
-        await saveEditorPane(id);
-      }
-      tearDownEditorPane(id);
-    });
-  }
-
-  function tearDownEditorPane(id: string) {
-    autosave.cancel(id);
-    autosave.cancelSavedIndicator(id);
-    const remainingEditorPanes = editorPanes.filter((candidate) => candidate.id !== id);
-    editorPanes = remainingEditorPanes;
-    const { [id]: _closedTodos, ...remainingEmbeddedTodos } = embeddedTodosByPane;
-    embeddedTodosByPane = remainingEmbeddedTodos;
-    const { [id]: _closedReload, ...remainingReloads } = metadataReloadsByPane;
-    metadataReloadsByPane = remainingReloads;
-    const { [id]: _closedTitleReload, ...remainingTitleReloads } = titleReloadsByPane;
-    titleReloadsByPane = remainingTitleReloads;
-    paneLayout.removePane(id);
-    if (focusedEditorPaneId === id) {
-      focusedEditorPaneId = remainingEditorPanes[0]?.id ?? null;
-    }
-  }
-
-  async function saveEditorPane(id: string) {
-    const pane = editorPanes.find((candidate) => candidate.id === id);
-    if (!pane?.scene) return;
-    const documentKind = pane.document?.type ?? "scene";
-    // Chats persist per-turn from within ChatBodyView via the unified
-    // PUT /api/nodes/{id} path; the pane's draft-* fields aren't the
-    // source of truth for chat state. Treat saveEditorPane as a no-op.
-    if (documentKind === "chat") return;
-    autosave.cancel(id);
-    setEditorPaneSaving(id, true);
-    try {
-      const draftDocument = {
-        ...pane.scene,
-        title: pane.draftTitle,
-        ...(documentKind === "scene" ? { status: pane.draftStatus } : {}),
-        entry_type: pane.draftEntryType,
-        metadata: cloneMetadata(pane.draftMetadata),
-        ...(documentKind === "prompt" ? { inputs: pane.draftInputs } : {}),
-      };
-      let savedDocument: EditableDocument;
-      if (documentKind === "lore") {
-        savedDocument = await api.saveLoreEntry(draftDocument as LoreEntry, pane.draftMarkdown);
-      } else if (documentKind === "research") {
-        savedDocument = await api.saveResearchNote(draftDocument as ResearchNote, pane.draftMarkdown);
-      } else if (documentKind === "prompt") {
-        savedDocument = await api.savePromptEntry(draftDocument as PromptEntry, pane.draftMarkdown);
-      } else if (documentKind === "assistant") {
-        savedDocument = await api.saveAssistantEntry(draftDocument as AssistantEntry);
-      } else if (documentKind === "project") {
-        // Project node is the project.md singleton; round-trip via the
-        // dedicated endpoint and re-shape into the editor pane's
-        // Scene-compatible draft.
-        savedDocument = await api.saveProjectNode(draftDocument as ProjectNode, pane.draftMarkdown) as unknown as EditableDocument;
-      } else if (documentKind === "structure_node") {
-        // Acts/Chapters are scenes with a non-"scene" entry_type — their
-        // metadata + body + status round-trip via the scene endpoints.
-        // The structure tree's per-node title is a projection of the
-        // scene title, so refreshStructure below will pick up renames.
-        savedDocument = await api.saveScene(draftDocument as Scene, pane.draftMarkdown);
-      } else {
-        savedDocument = await api.saveScene(draftDocument as Scene, pane.draftMarkdown);
-      }
-      // Keep the pane's current draft-* fields rather than snapping them to
-      // savedDocument: if the user kept typing while the save was in flight
-      // (easy under the 6s auto-save debounce), those keystrokes live in
-      // the draft fields and would otherwise be silently overwritten.
-      // Recompute `dirty` against savedDocument so the next debounce picks
-      // up the interim edits.
-      let paneStillDirty = false;
-      editorPanes = editorPanes.map((candidate) => {
-        if (candidate.id !== id) return candidate;
-        paneStillDirty = isEditorPaneDirty(
-          savedDocument,
-          candidate.draftTitle,
-          candidate.draftMarkdown,
-          candidate.draftStatus,
-          candidate.draftEntryType,
-          candidate.draftMetadata,
-          candidate.draftInputs,
-        );
-        return {
-          ...candidate,
-          document: { type: documentKind, id: savedDocument.id },
-          scene: savedDocument,
-          dirty: paneStillDirty,
-          saving: false,
-          // Only show "Saved" feedback if the pane is genuinely caught up;
-          // flashing it while drafts are still pending would be misleading.
-          recentlySaved: !paneStillDirty,
-        };
-      });
-      if (paneStillDirty) autosave.schedule(id);
-      else autosave.flashSaved(id);
-      if (documentKind === "lore") {
-        await refreshLoreEntries();
-        await refreshKnownTags();
-      } else if (documentKind === "research") {
-        // save_research_note already syncs the title into the research tree
-        // server-side; refresh so the pane reflects it.
-        await refreshResearchStructure();
-        await refreshKnownTags();
-      } else if (documentKind === "prompt") {
-        await refreshPromptEntries();
-      } else if (documentKind === "assistant") {
-        await refreshAssistantEntries();
-      } else if (documentKind === "project") {
-        // Title may have changed; reflect it on the top bar and pane.
-        projectTitle = savedDocument.title;
-        if (appState.name === "projectOpen") {
-          appState = {
-            ...appState,
-            project: { ...appState.project, title: savedDocument.title },
-          };
-        }
-      } else {
-        await refreshStructure();
-        await refreshTodos();
-        await refreshKnownTags();
-      }
-      status = `Saved ${savedDocument.title}`;
-    } catch (caught) {
-      setEditorPaneSaving(id, false);
-      throw caught;
-    }
-  }
-
-  function setEditorPaneSaving(id: string, saving: boolean) {
-    editorPanes = editorPanes.map((pane) => (pane.id === id ? { ...pane, saving } : pane));
-  }
-
-  async function requestDeleteEditorPaneScene(id: string) {
-    const pane = editorPanes.find((candidate) => candidate.id === id);
-    if (!pane?.scene) return;
-    const documentKind = pane.document?.type ?? "scene";
-    const sceneTitle = pane.scene.title;
-    const sceneId = pane.scene.id;
-    let backlinks: Backlink[] = [];
-    try {
-      backlinks = (await api.listBacklinks(sceneId)).backlinks;
-    } catch (error) {
-      console.warn("Failed to fetch backlinks", error);
-    }
-    const fileLabel = documentKind === "scene" ? "scene" : documentKind === "lore" ? "entry" : documentKind === "research" ? "note" : "prompt";
-    const titleLabel =
-      documentKind === "scene"
-        ? "Delete Scene"
-        : documentKind === "lore"
-          ? "Delete Entry"
-          : documentKind === "research"
-            ? "Delete Note"
-            : "Delete Prompt";
-    const baseMessage = `Delete "${sceneTitle}"? This removes the ${fileLabel} file from the project.`;
-    const message =
-      backlinks.length > 0
-        ? `${baseMessage}\n\n${backlinks.length} ${backlinks.length === 1 ? "entry references" : "entries reference"} this — those links will become broken:`
-        : baseMessage;
-    const details = backlinks.map((link) => `${link.title} — ${link.field_name}`);
-    confirmService.request({
-      title: titleLabel,
-      message,
-      details,
-      confirmLabel: titleLabel,
-      destructive: true,
-      onConfirm: () => deleteEditorPaneScene(id),
-    });
-  }
-
-  async function deleteEditorPaneScene(id: string) {
-    const pane = editorPanes.find((candidate) => candidate.id === id);
-    if (!pane?.scene) return;
-    const documentKind = pane.document?.type ?? "scene";
-    const sceneTitle = pane.scene.title;
-    if (documentKind === "lore") {
-      setLoreEntries((await api.deleteLoreEntry(pane.scene.id)).entries);
-    } else if (documentKind === "research") {
-      // Delete the tree node that points at this note; the backend
-      // unlinks the markdown file as part of the cascade.
-      const node = researchStructure ? findNodeBySceneId(researchStructure.root, pane.scene.id) : null;
-      if (node) {
-        setResearchStructure(await api.deleteResearchNode(node.id));
-      }
-    } else if (documentKind === "prompt") {
-      setPromptEntries((await api.deletePromptEntry(pane.scene.id)).entries);
-    } else if (documentKind === "assistant") {
-      setAssistantEntries((await api.deleteAssistantEntry(pane.scene.id)).entries);
-    } else if (documentKind === "chat") {
-      setChatSessions((await api.deleteChatSession(pane.scene.id)).sessions);
-      if (activeChatId === pane.scene.id) activeChatId = null;
-    } else {
-      setStructure(await api.deleteScene(pane.scene.id));
-      await refreshTodos();
-    }
-    tearDownEditorPane(id);
-    status = `Deleted ${sceneTitle}`;
   }
 
   async function addTodo() {
@@ -1783,7 +1042,7 @@
 
   async function deleteCompletedTodos() {
     const completedTodos = todos.filter((item) => item.status === "done");
-    const completedEmbeddedTodos = allEmbeddedTodos.filter((item) => item.status === "done");
+    const completedEmbeddedTodos = editorPanes.allEmbeddedTodos.filter((item) => item.status === "done");
     if (completedTodos.length === 0 && completedEmbeddedTodos.length === 0) return;
     await run(async () => {
       let nextTodos = todos;
@@ -1792,7 +1051,7 @@
       }
       setTodos(nextTodos.filter((item) => !item.anchor_id));
       for (const item of completedEmbeddedTodos) {
-        editorPaneComponents[item.paneId]?.deleteEmbeddedTodo(item.id);
+        editorPanes.deleteEmbeddedTodo(item);
       }
       const deletedCount = completedTodos.length + completedEmbeddedTodos.length;
       status = `Deleted ${deletedCount} completed TODO${deletedCount === 1 ? "" : "s"}`;
@@ -1832,83 +1091,30 @@
     if (hit.file_id === "project") return;
     await run(async () => {
       if (hit.kind === "lore") {
-        await openLoreEntryInEditorPane(hit.file_id);
+        await editorPanes.openLore(hit.file_id);
       } else {
-        await openSceneInEditorPane(hit.file_id);
+        await editorPanes.openScene(hit.file_id);
       }
       if (hit.kind === "scene" && hit.todo_id) {
-        window.setTimeout(() => highlightEmbeddedTodoInOpenPane(hit.file_id, hit.todo_id!), 0);
+        window.setTimeout(() => editorPanes.highlightEmbeddedTodoInOpenPane(hit.file_id, hit.todo_id!), 0);
       }
     });
   }
 
   async function openEmbeddedTodo(item: EmbeddedTodo) {
     await run(async () => {
-      await openSceneInEditorPane(item.sceneId);
-      window.setTimeout(() => highlightEmbeddedTodoInOpenPane(item.sceneId, item.id), 0);
+      await editorPanes.openScene(item.sceneId);
+      window.setTimeout(() => editorPanes.highlightEmbeddedTodoInOpenPane(item.sceneId, item.id), 0);
     });
   }
 
   async function openFileTodo(item: TodoItem) {
     if (!item.scene_id) return;
     await run(async () => {
-      await openSceneInEditorPane(item.scene_id!);
+      await editorPanes.openScene(item.scene_id!);
     });
   }
 
-  function highlightEmbeddedTodoInOpenPane(sceneId: string, todoId: string) {
-    const pane = editorPanes.find((candidate) => candidate.scene?.id === sceneId);
-    if (!pane) return;
-    editorPaneComponents[pane.id]?.highlightEmbeddedTodo(todoId);
-  }
-
-  function updateEmbeddedTodosForPane(id: string, embeddedTodos: Array<{ id: string; text: string; status: "open" | "done"; note: string }>) {
-    const pane = editorPanes.find((candidate) => candidate.id === id);
-    if (!pane?.scene || pane.document?.type !== "scene") {
-      const { [id]: _removed, ...remainingTodos } = embeddedTodosByPane;
-      embeddedTodosByPane = remainingTodos;
-      return;
-    }
-    embeddedTodosByPane = {
-      ...embeddedTodosByPane,
-      [id]: embeddedTodos.map((item) => ({
-        ...item,
-        paneId: id,
-        sceneId: pane.scene!.id,
-        sceneTitle: pane.scene!.title,
-      })),
-    };
-  }
-
-  function toggleEmbeddedTodo(item: EmbeddedTodo) {
-    editorPaneComponents[item.paneId]?.updateEmbeddedTodo(item.id, {
-      status: item.status === "open" ? "done" : "open",
-    });
-  }
-
-  function updateEmbeddedTodoNote(item: EmbeddedTodo, note: string) {
-    if (note === item.note) return;
-    editorPaneComponents[item.paneId]?.updateEmbeddedTodo(item.id, { note });
-  }
-
-  function deleteEmbeddedTodo(item: EmbeddedTodo) {
-    editorPaneComponents[item.paneId]?.deleteEmbeddedTodo(item.id);
-  }
-
-  function buildEmbeddedTodoStatusHintsByPane(itemsByPane: Record<string, EmbeddedTodo[]>) {
-    return Object.fromEntries(
-      Object.entries(itemsByPane).map(([paneId, items]) => {
-        const openCount = items.filter((item) => item.status === "open").length;
-        const doneCount = items.length - openCount;
-        return [
-          paneId,
-          items.length === 0
-            ? ""
-            : `${openCount} open embedded TODO${openCount === 1 ? "" : "s"} · ${doneCount} completed.`,
-        ];
-      }),
-    );
-  }
   // AI chat sessions. Per-chat state (history, composer, cost/TTL) lives
   // inside ChatBodyView now; App only tracks the session roster (Chats pane)
   // and which chat is currently open in an editor pane (active-row highlight).
@@ -1931,7 +1137,7 @@
   // the store layer from lore + schema (see stores/derived.ts).
   let implicitContextMatcher = $derived($implicitContextMatcherStore);
   let knownTags = $derived($knownTagsStore);
-  let focusedEditorPane = $derived(editorPanes.find((pane) => pane.id === focusedEditorPaneId) ?? editorPanes[0] ?? null);
+  let focusedEditorPane = $derived(editorPanes.panes.find((pane) => pane.id === editorPanes.focusedEditorPaneId) ?? editorPanes.panes[0] ?? null);
   // Write-through the focused doc to the editor-focus store so the list panes
   // read it directly instead of having it drilled in (#14 Step 2). App is the
   // sole writer (projection of editorPanes).
@@ -1945,13 +1151,7 @@
   let promptEntries = $derived($promptEntriesStore);
   let assistantEntries = $derived($assistantEntriesStore);
   $effect.pre(() => {
-    allEmbeddedTodos = Object.values(embeddedTodosByPane).flat();
-  });
-  $effect.pre(() => {
-    embeddedTodoStatusHintsByPane = buildEmbeddedTodoStatusHintsByPane(embeddedTodosByPane);
-  });
-  $effect.pre(() => {
-    draftTitleByScene = computeDraftTitleOverrides(editorPanes);
+    draftTitleByScene = computeDraftTitleOverrides(editorPanes.panes);
   });
   // Reactive function: rebound whenever any visibility-deciding state changes.
   // Templates that call `isPaneVisible(id)` track the function's identity — so
@@ -1983,7 +1183,7 @@
     assistantsPaneOpen,
     promptsPaneOpen,
     chatsPaneOpen,
-    editorPanes,
+    editorPanes.panes,
   ));
   // Derived in the assistants store (not a function): consumers pass it as a
   // prop, and a bare call in a prop expression wouldn't track its inner roster
@@ -1997,7 +1197,7 @@
   // when called inside a template prop binding — Svelte 5 legacy
   // reactivity only tracks deps read directly in the expression.)
   let pinnedEditorPaneKeys = $derived(new Set<string>(
-    editorPanes
+    editorPanes.panes
       .filter((pane) => pane.pinned && pane.document)
       .map((pane) => `${pane.document!.type}:${pane.document!.id}`),
   ));
@@ -2020,7 +1220,7 @@
   onOpenAssistants={openAssistantsPane}
   onOpenSettings={openMachineSettings}
   onOpenDetailTypes={() => schemaPanes?.openDetailTypes()}
-  onOpenProjectNode={() => void openProjectNodeInEditorPane()}
+  onOpenProjectNode={() => void editorPanes.openProjectNode()}
 />
 
 <main class="workspace">
@@ -2073,7 +1273,7 @@
     {/snippet}
     <div class="pane-content">
       <Lore
-        entries={loreEntries}        onOpenEntry={(id) => openLoreEntryInEditorPane(id)}
+        entries={loreEntries}        onOpenEntry={(id) => editorPanes.openLore(id)}
         onMoveNoteToResearch={(entry) => requestMoveLoreNoteToResearch(entry)}
       />
     </div>
@@ -2103,7 +1303,7 @@
     {paneChrome}
     {run}
     setStatus={(message) => (status = message)}
-    {refreshOpenEditorPaneBaselines}
+    refreshOpenEditorPaneBaselines={(transform) => editorPanes.refreshOpenEditorPaneBaselines(transform)}
     onOpenTagsManager={() => (tagsManagerOpen = true)}
   />
 
@@ -2113,7 +1313,7 @@
     {/snippet}
     <div class="pane-content schema-list">
       <Prompts
-        entries={promptEntries}        onOpenEntry={(id) => openPromptEntryInEditorPane(id)}
+        entries={promptEntries}        onOpenEntry={(id) => editorPanes.openPrompt(id)}
         onNewEntry={(entryType) => newPromptEntry(entryType)}
       />
     </div>
@@ -2127,7 +1327,7 @@
     <div class="pane-content schema-list">
       <Assistants
         entries={assistantEntries}        defaultAssistantId={defaultAssistantId}
-        onOpenEntry={(id) => openAssistantEntryInEditorPane(id)}
+        onOpenEntry={(id) => editorPanes.openAssistant(id)}
         onReorder={reorderAssistantsInLayer}
       />
     </div>
@@ -2141,16 +1341,16 @@
     <div class="pane-content schema-list">
       <Chats
         sessions={chatSessions}
-        {activeChatId}
+        activeChatId={editorPanes.activeChatId}
         promptEntries={promptEntries}
         assistantEntries={assistantEntries}
-        onOpenChat={(id) => run(() => openChatInEditorPane(id))}
+        onOpenChat={(id) => run(() => editorPanes.openChat(id))}
         onDeleteChat={(id) => deleteChatSessionFromPane(id)}
       />
     </div>
   </Pane>
 
-  {#each editorPanes as editorPane (editorPane.id)}
+  {#each editorPanes.panes as editorPane (editorPane.id)}
     <!-- svelte-ignore a11y_no_noninteractive_element_interactions -->
     <section
       class:hidden-pane={!isPaneVisible(editorPane.id)}
@@ -2184,7 +1384,7 @@
             disabled={!editorPane.scene}
             title={editorPane.document?.type === "lore" ? "Delete this entry" : "Delete this scene"}
             onmousedown={(event) => event.stopPropagation()}
-            onclick={() => requestDeleteEditorPaneScene(editorPane.id)}
+            onclick={() => editorPanes.requestDeleteScene(editorPane.id)}
           >
             Delete
           </button>
@@ -2194,7 +1394,7 @@
             type="button"
             title={editorPane.pinned ? "Unpin this pane" : "Pin this pane"}
             onmousedown={(event) => event.stopPropagation()}
-            onclick={() => toggleEditorPanePinned(editorPane.id)}
+            onclick={() => editorPanes.togglePinned(editorPane.id)}
           >
             {editorPane.pinned ? "Pinned" : "Pin"}
           </button>
@@ -2203,14 +1403,14 @@
             type="button"
             title="Close this editor pane"
             onmousedown={(event) => event.stopPropagation()}
-            onclick={() => closeEditorPane(editorPane.id)}
+            onclick={() => editorPanes.close(editorPane.id)}
           >
             Close
           </button>
         </div>
       </header>
       <NodeEditor
-        bind:this={editorPaneComponents[editorPane.id]}
+        bind:this={editorPanes.editorPaneComponents[editorPane.id]}
         scene={editorPane.scene}
         documentKind={editorPane.document?.type ?? "scene"}
         promptEntries={promptEntries}
@@ -2222,13 +1422,13 @@
         assistantEntries={assistantEntries}
         defaultAssistantId={defaultAssistantId}
         availableScenes={flattenStructureScenes(structure?.root)}
-        metadataReload={metadataReloadsByPane[editorPane.id] ?? null}
-        titleReload={titleReloadsByPane[editorPane.id] ?? null}
+        metadataReload={editorPanes.metadataReloadsByPane[editorPane.id] ?? null}
+        titleReload={editorPanes.titleReloadsByPane[editorPane.id] ?? null}
         dirty={editorPane.dirty}
-        todoStatusHint={editorPane.document?.type === "scene" && editorPane.scene && sceneEntryHasBody(editorPane.scene as Scene) ? (embeddedTodoStatusHintsByPane[editorPane.id] ?? "") : ""}
+        todoStatusHint={editorPane.document?.type === "scene" && editorPane.scene && sceneEntryHasBody(editorPane.scene as Scene) ? (editorPanes.embeddedTodoStatusHintsByPane[editorPane.id] ?? "") : ""}
         onFocus={() => focusPane(editorPane.id)}
         onChange={(detail) =>
-          updateEditorPaneDraft(
+          editorPanes.updateEditorPaneDraft(
             editorPane.id,
             detail.title,
             detail.body,
@@ -2238,7 +1438,7 @@
             detail.inputs,
           )}
         onCustomData={(detail) => schemaPanes?.openForCustomData(detail.entryType, detail.kind)}
-        onEmbeddedTodos={(detail) => updateEmbeddedTodosForPane(editorPane.id, detail.todos)}
+        onEmbeddedTodos={(detail) => editorPanes.updateEmbeddedTodosForPane(editorPane.id, detail.todos)}
         onNavigate={(detail) => navigateToBacklink(detail.id, detail.kind)}
         onOpenChat={(detail) => openChatFromPromptEntry(detail.entry, detail.inputs, detail.sceneId, detail.assistantId)}
       />
@@ -2251,7 +1451,7 @@
       <button
         class="pin-button danger"
         type="button"
-        disabled={!todos.some((item) => item.status === "done") && !allEmbeddedTodos.some((item) => item.status === "done")}
+        disabled={!todos.some((item) => item.status === "done") && !editorPanes.allEmbeddedTodos.some((item) => item.status === "done")}
         title="Delete all completed TODOs"
         onmousedown={(event) => event.stopPropagation()}
         onclick={deleteCompletedTodos}
@@ -2262,7 +1462,7 @@
     <div class="pane-content">
       <Todo
         {todos}
-        embeddedTodos={allEmbeddedTodos}
+        embeddedTodos={editorPanes.allEmbeddedTodos}
         bind:newTodo
         onAddTodo={addTodo}
         onToggleTodo={toggleTodo}
@@ -2270,10 +1470,10 @@
         onDeleteTodo={deleteTodo}
         onTodoTextKeydown={handleTodoTextKeydown}
         onOpenFileTodo={openFileTodo}
-        onToggleEmbeddedTodo={toggleEmbeddedTodo}
-        onUpdateEmbeddedTodoNote={updateEmbeddedTodoNote}
+        onToggleEmbeddedTodo={(item) => editorPanes.toggleEmbeddedTodo(item)}
+        onUpdateEmbeddedTodoNote={(item, note) => editorPanes.updateEmbeddedTodoNote(item, note)}
         onOpenEmbeddedTodo={openEmbeddedTodo}
-        onDeleteEmbeddedTodo={deleteEmbeddedTodo}
+        onDeleteEmbeddedTodo={(item) => editorPanes.deleteEmbeddedTodo(item)}
       />
     </div>
   </Pane>
@@ -2339,7 +1539,6 @@
       >×</button>
     </section>
   {/if}
-
 
 </main>
 

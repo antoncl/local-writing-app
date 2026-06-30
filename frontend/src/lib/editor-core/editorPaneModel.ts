@@ -80,6 +80,13 @@ export function metadataEqual(left: EntryMetadata, right: EntryMetadata): boolea
   return JSON.stringify(left ?? {}) === JSON.stringify(right ?? {});
 }
 
+// Deep-clone a metadata object so draft edits never alias the server baseline
+// (or vice versa). Shared by App's general metadata handling and the
+// editor-panes controller, which clones on every draft update and save.
+export function cloneMetadata(metadata: EntryMetadata): EntryMetadata {
+  return JSON.parse(JSON.stringify(metadata ?? {})) as EntryMetadata;
+}
+
 // Whether the live drafts differ from the server baseline. The single source of
 // truth for autosave eligibility.
 export function isEditorPaneDirty(

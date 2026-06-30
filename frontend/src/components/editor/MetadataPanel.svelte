@@ -362,6 +362,31 @@
     padding: 4px 0 12px;
   }
 
+  /* Generic form-control styling for the metadata subtree, co-located from
+     styles.css (#14). The controls are rendered by child pickers (SwatchPicker
+     / ColoredSelect / ReferencePicker / TagPicker / ProviderTierPicker /
+     MetadataLongTextEditor) plus the own .rail-type select, so the element
+     targets are :global; the .scene-metadata ancestor keeps this scope. */
+  .scene-metadata :global(label) {
+    color: var(--text-2);
+    font-size: 12px;
+    font-weight: 700;
+  }
+  .scene-metadata :global(input),
+  .scene-metadata :global(select),
+  .scene-metadata :global(textarea) {
+    margin-top: 4px;
+    font-size: 13px;
+    font-weight: 400;
+  }
+  .scene-metadata :global(input[readonly]) {
+    color: var(--text-3);
+    background: var(--app-bg);
+  }
+  .scene-metadata :global(input[type="checkbox"]) {
+    width: auto;
+  }
+
   /* Type header */
   .rail-type {
     display: flex;
@@ -554,6 +579,9 @@
     font-size: 12px;
     color: var(--text-2, #4d5753);
     cursor: pointer;
+  }
+  .multi-select-chip:hover {
+    background: var(--inset, #eef3f1);
   }
   .multi-select-chip.active {
     background: var(--accent-soft, #edf6f2);

@@ -603,11 +603,10 @@ button.row-action-add.active {
   gap: 12px;
 }
 
-.scene-metadata {
-  display: grid;
-  gap: 8px;
-  padding-top: 2px;
-}
+/* .scene-metadata (+ its label/input/select/textarea form-control rules and
+   the .multi-select-chip* family) co-located into MetadataPanel.svelte (#14).
+   `.metadata-field` below stays global (SHARED with CodeBodyView /
+   DefaultValueEditor / ReferencePicker); `.metadata-panel` is NodePicker's. */
 
 .metadata-panel {
   display: grid;
@@ -624,12 +623,6 @@ button.row-action-add.active {
 
 /* .scene-backlinks / .backlink-type-pill* co-located into BacklinksPanel.svelte (#14). */
 
-.scene-metadata label {
-  color: var(--text-2);
-  font-size: 12px;
-  font-weight: 700;
-}
-
 .metadata-field {
   display: grid;
   gap: 5px;
@@ -638,50 +631,7 @@ button.row-action-add.active {
   font-weight: 700;
 }
 
-.scene-metadata input,
-.scene-metadata select,
-.scene-metadata textarea {
-  margin-top: 4px;
-  font-size: 13px;
-  font-weight: 400;
-}
-
-.scene-metadata input[readonly] {
-  color: var(--text-3);
-  background: var(--app-bg);
-}
-
-.scene-metadata input[type="checkbox"] {
-  width: auto;
-}
-
 /* .tag-picker* / .tag-field-control co-located into TagPicker.svelte (#14). */
-
-.multi-select-chips {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 6px;
-}
-
-.multi-select-chip {
-  padding: 4px 10px;
-  border: 1px solid var(--divider);
-  border-radius: 999px;
-  background: var(--surface);
-  font-size: 12px;
-  color: var(--text-2);
-  cursor: pointer;
-}
-
-.multi-select-chip:hover {
-  background: var(--inset);
-}
-
-.multi-select-chip.active {
-  border-color: var(--accent);
-  background: var(--accent-soft);
-  color: var(--accent-deep);
-}
 
 .editor-wrap {
   position: relative;

@@ -765,6 +765,30 @@ class UpdateTodoRequest(BaseModel):
     scene_id: str | None = None
 
 
+class EmbeddedTodo(BaseModel):
+    """An in-prose TODO marker, enumerated by scanning scene bodies. Unlike
+    todo.yaml items these live inline in the markdown (status + note baked into
+    an HTML-comment marker); this is a rebuildable index over scenes, never
+    owned by a live editor pane (GH #45)."""
+
+    todo_id: str
+    scene_id: str
+    status: Literal["open", "done"] = "open"
+    note: str = ""
+    text: str = ""
+    line: int = 1
+    scene_path: str = ""
+
+
+class EmbeddedTodoList(BaseModel):
+    items: list[EmbeddedTodo] = Field(default_factory=list)
+
+
+class UpdateEmbeddedTodoRequest(BaseModel):
+    status: Literal["open", "done"] | None = None
+    note: str | None = None
+
+
 class ReferenceCandidate(BaseModel):
     id: str
     title: str

@@ -2,20 +2,18 @@
   ProseBodyView — body region for entry types with body_shape === "prose"
   (today: scenes and lore). Owns the TipTap editor, all custom extensions
   (AISuggestion / CharacterMark / TodoAnchor), the slash menu, selection
-  toolbar, table toolbar, AI inline suggestion flow, embedded TODO mark
-  reconciliation, and the inline prompt invocation pipeline (the half
-  that fires from the editor — selection-toolbar Revise, slash AI
-  commands, and the AI suggestion Retry button).
+  toolbar, table toolbar, and embedded TODO mark reconciliation.
 
-  Why prompt invocation lives here: runPromptEntry → runPromptEntryWithInputs
-  streams AI deltas into the editor doc, mutates the TipTap state with
-  the AISuggestion mark, and tracks the in-flight suggestion. Keeping
-  the orchestrator next to the target is simpler than threading event /
-  method plumbing for every keystroke of streaming. The inputs DIALOG
-  (modal UI + draft state) stays in NodeEditor — ProseBodyView dispatches
-  `request-inputs-dialog` when it needs the user to fill inputs, and
-  NodeEditor calls back via `proseBodyView.runPromptEntryWithInputs(...)`
-  from submitInputsDialog.
+  The inline AI-suggestion pipeline (fire a prompt → stream deltas into the
+  doc as a pending suggestion → accept/revert/retry) lives in its own
+  AiSuggestionController (lib/editor-core/aiSuggestion.svelte.ts); this
+  component instantiates one (`aiSuggestion`), injecting live editor / scene /
+  prompt-context accessors plus the cost-prop sinks. The editor surfaces that
+  drive it — slash AI commands, the selection-toolbar Revise list, and the
+  Ctrl+J keymap — call `aiSuggestion.runPromptEntry(...)`. The inputs DIALOG
+  (modal UI + draft state) stays in NodeEditor — the controller fires
+  `onRequestInputsDialog` when it needs inputs, and NodeEditor calls back via
+  `proseBodyView.runPromptEntryWithInputsExternal(...)` from submitInputsDialog.
 
   See decisions-node-editor-modularization for the architectural plan
   and outstanding-work-2026-06-25-phase-2 for the contract design.
@@ -53,7 +51,6 @@
     type FloatingMenuState,
     type ToolbarAction,
   } from "@/lib/editor-core/selectionToolbar";
-  import type { AiSuggestionMeta, AiToolbarPosition } from "@/lib/editor-core/aiToolbar";
   import ProseSlashMenu from "./ProseSlashMenu.svelte";
   import ProseSelectionToolbar from "./ProseSelectionToolbar.svelte";
   import ProseTableToolbar from "./ProseTableToolbar.svelte";
@@ -62,19 +59,15 @@
   import { metadataSchemaStore } from "@/lib/stores/schema";
   import {
     type PromptResolutionContext,
-    effectiveOutputKind,
-    effectivePromptInputs,
-    findPromptEntry,
     promptEntriesForSurface,
     promptEntryDescription,
     defaultPromptForSurface,
     resolvePromptPositionalArgs,
-    isRoleplayPromptEntry,
-    characterIdFromInputValue,
   } from "@/lib/editor-core/promptResolution";
+  import { AiSuggestionController } from "@/lib/editor-core/aiSuggestion.svelte";
+  import { countWords } from "@/lib/utils/wordCount";
   import { resolveColor } from "@/lib/utils/colors";
   import type {
-    ChatUsage,
     DocumentKind,
     EditableDocument,
     LoreEntrySummary,
@@ -83,10 +76,6 @@
 
   // ---------- Local types ----------
   type BlockWrapType = "blockquote" | "bulletList" | "orderedList";
-
-  // ---------- Constants ----------
-  const REVISE_CONTEXT_CHARS = 600;
-  const WORD_PATTERN = /[A-Za-z0-9]+(?:['-][A-Za-z0-9]+)?/g;
 
   
 
@@ -190,21 +179,34 @@
   let reconcilingTodoAnchors = false;
   let highlightedTodoId: string | null = null;
 
-  // AI suggestion state. v1 supports a single pending suggestion at a time.
-  let aiGenerating = $state(false);
-  let aiError: string | null = $state(null);
-  let aiSuggestionId: string | null = $state(null);
-  let aiSuggestionMeta: AiSuggestionMeta | null = $state(null);
   // V2: per-scene continuation cost rollup. Resets when you switch
   // scenes or reload the page. Frontend-only. Bound out as props above.
   let lastSeenSceneIdForCost: string | null = $state(null);
-  let aiToolbarPosition: AiToolbarPosition = $state({ x: 0, y: 0, visible: false });
-  let aiNextSuggestionId = 1;
-  let aiSuggestionOriginal: string | null = null;
-  let aiAnchorPos: number | null = null;
-  let lastInvokedEntryId: string | null = null;
-  let lastInvokedInputs: Record<string, unknown> = {};
-  let lastInvokedAssistantId: string = "";
+
+  // The inline AI-suggestion pipeline (fire prompt → stream into the doc →
+  // accept/revert/retry). Owns its own AI `$state`; the host reads it for the
+  // toolbar (`aiSuggestion.generating`/`.error`/...) and writes the bindable
+  // cost props through the injected sinks. Getters are used (not one-time
+  // values) because `scene`/`editor`/`promptCtx` change over the pane's life.
+  const aiSuggestion = new AiSuggestionController({
+    getEditor: () => editor,
+    getEditorFrame: () => editorFrame,
+    getScene: () => scene,
+    getDocumentKind: () => documentKind,
+    getPromptCtx: () => promptCtx,
+    onInvocationCost: (cost) => {
+      lastInvocationCostUsd = cost;
+      sceneSessionCostUsd += cost;
+    },
+    addCharacterCost: (characterId, cost) => {
+      characterCostUsd = {
+        ...characterCostUsd,
+        [characterId]: (characterCostUsd[characterId] ?? 0) + cost,
+      };
+    },
+    onRequestInputsDialog: (payload) => onRequestInputsDialog?.(payload),
+    onOpenChat: (payload) => onOpenChat?.(payload),
+  });
 
   let slashFilterText = $state("");
 
@@ -252,12 +254,7 @@
   export async function loadScene(nextScene: EditableDocument): Promise<void> {
     const sceneId = nextScene.id;
     // Drop any pending AI suggestion state when changing documents.
-    aiSuggestionId = null;
-    aiSuggestionMeta = null;
-    aiSuggestionOriginal = null;
-    aiAnchorPos = null;
-    aiError = null;
-    aiToolbarPosition = { x: 0, y: 0, visible: false };
+    aiSuggestion.reset();
     const html = await sceneMarkdownToHtml(nextScene.body || "");
     if (!editor || scene?.id !== sceneId) return;
     editor.commands.setContent(html || "<p></p>", false);
@@ -298,14 +295,10 @@
     inputs: Record<string, unknown>,
     assistantId: string = "",
   ): Promise<void> {
-    await runPromptEntryWithInputs(entry, inputs, assistantId);
+    await aiSuggestion.runPromptEntryWithInputs(entry, inputs, assistantId);
   }
 
   // ---------- Helpers ----------
-  function countWords(text: string) {
-    return Array.from(text.matchAll(WORD_PATTERN)).length;
-  }
-
   function clamp(value: number, min: number, max: number) {
     return Math.min(Math.max(value, min), max);
   }
@@ -523,7 +516,7 @@
                   unresolved: [] as Array<{ name: string; label: string; token: string }>,
                 };
             if (resolved.inputs && resolved.satisfied) {
-              void runPromptEntry(entry, resolved.inputs);
+              void aiSuggestion.runPromptEntry(entry, resolved.inputs);
             } else if (resolved.inputs) {
               // Partial: ask the parent to open the dialog with the resolved
               // drafts populated; unresolved tokens get cleared on the parent
@@ -541,7 +534,7 @@
                 unresolved: resolved.unresolved,
               });
             } else {
-              void runPromptEntry(entry);
+              void aiSuggestion.runPromptEntry(entry);
             }
           },
         })),
@@ -836,7 +829,7 @@
               kind: "button",
               id: `ai-revise:${reviseEntries[0].id}`,
               label: `✨ ${reviseEntries[0].title}`,
-              run: () => focusAndRun(() => runPromptEntry(reviseEntries[0])),
+              run: () => focusAndRun(() => aiSuggestion.runPromptEntry(reviseEntries[0])),
             }
           : {
               kind: "menu",
@@ -845,7 +838,7 @@
               items: reviseEntries.map((entry) => ({
                 id: `ai-revise:${entry.id}`,
                 label: entry.title,
-                run: () => focusAndRun(() => runPromptEntry(entry)),
+                run: () => focusAndRun(() => aiSuggestion.runPromptEntry(entry)),
               })),
             };
     return [
@@ -925,395 +918,6 @@
         run: markSelectionAsTodo,
       },
     ];
-  }
-
-  // ---------- AI inline suggestion ----------
-  function updateAIToolbarPosition() {
-    if (!editor || !editorFrame) {
-      if (aiToolbarPosition.visible) aiToolbarPosition = { x: 0, y: 0, visible: false };
-      return;
-    }
-    let pos: number | null = null;
-    if (aiSuggestionId) {
-      const range = findAISuggestionRange(aiSuggestionId);
-      if (range) pos = range.from;
-    } else if (aiAnchorPos !== null) {
-      const docSize = editor.state.doc.content.size;
-      pos = Math.max(0, Math.min(aiAnchorPos, docSize));
-    }
-    if (pos === null) {
-      if (aiToolbarPosition.visible) aiToolbarPosition = { x: 0, y: 0, visible: false };
-      return;
-    }
-    try {
-      const coords = editor.view.coordsAtPos(pos);
-      const frameBounds = editorFrame.getBoundingClientRect();
-      aiToolbarPosition = {
-        x: coords.left - frameBounds.left + editorFrame.scrollLeft,
-        y: coords.top - frameBounds.top + editorFrame.scrollTop,
-        visible: true,
-      };
-    } catch {
-      aiToolbarPosition = { x: 0, y: 0, visible: false };
-    }
-  }
-
-  function dismissAIError() {
-    aiError = null;
-    aiAnchorPos = null;
-    aiToolbarPosition = { x: 0, y: 0, visible: false };
-  }
-
-  function findAISuggestionRange(suggestionId: string): { from: number; to: number } | null {
-    if (!editor) return null;
-    let from = -1;
-    let to = -1;
-    editor.state.doc.descendants((node, pos) => {
-      if (!node.isText) return true;
-      const has = node.marks.some(
-        (m) => m.type.name === "aiSuggestion" && m.attrs.suggestionId === suggestionId,
-      );
-      if (has) {
-        if (from === -1) from = pos;
-        to = pos + node.nodeSize;
-      }
-      return true;
-    });
-    return from === -1 ? null : { from, to };
-  }
-
-  function renderStreamingSuggestion(startPos: number, fullText: string, suggestionId: string) {
-    if (!editor) return;
-    type Inline = { type: "text"; text: string } | { type: "hardBreak" };
-    const paragraphs = fullText
-      .split(/\n{2,}/)
-      .map((para) => {
-        const content: Inline[] = [];
-        const lines = para.split(/\n/);
-        lines.forEach((line, i) => {
-          if (i > 0) content.push({ type: "hardBreak" });
-          if (line) content.push({ type: "text", text: line });
-        });
-        return { type: "paragraph", content };
-      })
-      .filter((p) => p.content.length > 0);
-    if (paragraphs.length === 0) return;
-    const existing = findAISuggestionRange(suggestionId);
-    const from = existing ? existing.from : startPos;
-    const to = existing ? existing.to : startPos;
-    editor
-      .chain()
-      .setTextSelection({ from, to })
-      .deleteRange({ from, to })
-      .insertContent(paragraphs)
-      .run();
-    const endPos = editor.state.selection.from;
-    editor
-      .chain()
-      .setTextSelection({ from, to: endPos })
-      .setMark("aiSuggestion", { suggestionId })
-      .setTextSelection(endPos)
-      .run();
-    updateAIToolbarPosition();
-  }
-
-  function acceptAISuggestion() {
-    if (!editor || !aiSuggestionId) return;
-    const range = findAISuggestionRange(aiSuggestionId);
-    const lastEntry = findPromptEntry(promptCtx, lastInvokedEntryId);
-    const characterId =
-      range && isRoleplayPromptEntry(promptCtx, lastEntry)
-        ? characterIdFromInputValue(lastInvokedInputs.character)
-        : null;
-    if (range) {
-      let chain = editor.chain().focus().setTextSelection(range).unsetMark("aiSuggestion");
-      if (characterId) {
-        chain = chain.setMark("character", { characterId });
-      }
-      chain.setTextSelection(range.to).run();
-    }
-    persistAcceptedInvocation(lastEntry, characterId);
-    aiSuggestionId = null;
-    aiSuggestionMeta = null;
-    aiSuggestionOriginal = null;
-    aiAnchorPos = null;
-    aiError = null;
-    aiToolbarPosition = { x: 0, y: 0, visible: false };
-  }
-
-  function persistAcceptedInvocation(
-    entry: PromptEntrySummary | null,
-    characterId: string | null,
-  ) {
-    // Telemetry write — the `cost` computed field on the scene and the
-    // per-character cost row in the footer both project from this log.
-    // Fire-and-forget; a failed POST shouldn't block accept.
-    if (!scene || !aiSuggestionMeta) return;
-    const meta = aiSuggestionMeta;
-    const cost = meta.cost_usd;
-    if (characterId && typeof cost === "number") {
-      // Optimistic per-character rollup. The next scene-load reconciles
-      // against the backend; for this session we trust the local write.
-      characterCostUsd = {
-        ...characterCostUsd,
-        [characterId]: (characterCostUsd[characterId] ?? 0) + cost,
-      };
-    }
-    api
-      .aiAppendInvocation({
-        prompt_entry_id: entry?.id ?? lastInvokedEntryId ?? "",
-        prompt_entry_type: entry?.entry_type ?? "",
-        scene_id: scene.id,
-        character_id: characterId ?? "",
-        provider: meta.provider ?? "",
-        model: meta.model ?? "",
-        usage: meta.usage ?? null,
-        cost_usd: meta.cost_usd ?? null,
-      })
-      .catch((err) => {
-        console.warn("Failed to persist AI invocation telemetry:", err);
-      });
-  }
-
-  function revertAISuggestion() {
-    if (!editor || !aiSuggestionId) return;
-    const range = findAISuggestionRange(aiSuggestionId);
-    if (range) {
-      if (aiSuggestionOriginal !== null) {
-        editor
-          .chain()
-          .focus()
-          .setTextSelection(range)
-          .deleteSelection()
-          .insertContent(aiSuggestionOriginal)
-          .run();
-      } else {
-        editor.chain().focus().deleteRange(range).run();
-      }
-    }
-    aiSuggestionId = null;
-    aiSuggestionMeta = null;
-    aiSuggestionOriginal = null;
-    aiAnchorPos = null;
-    aiError = null;
-    aiToolbarPosition = { x: 0, y: 0, visible: false };
-  }
-
-  async function retryAISuggestion() {
-    if (!aiSuggestionId || aiGenerating || !editor) return;
-    const wasRevision = aiSuggestionOriginal !== null;
-    const original = aiSuggestionOriginal;
-    const range = findAISuggestionRange(aiSuggestionId);
-    const entry = findPromptEntry(promptCtx, lastInvokedEntryId);
-    if (!entry) {
-      aiError = "Original prompt is no longer available.";
-      return;
-    }
-
-    revertAISuggestion();
-
-    if (wasRevision && original && range) {
-      const restoredTo = range.from + original.length;
-      editor.chain().focus().setTextSelection({ from: range.from, to: restoredTo }).run();
-    }
-    await runPromptEntry(entry, lastInvokedInputs, lastInvokedAssistantId);
-  }
-
-  // ---------- Prompt invocation pipeline ----------
-  async function runPromptEntry(
-    entry: PromptEntrySummary,
-    prefilledInputs?: Record<string, unknown>,
-    assistantId: string = "",
-  ) {
-    if (!editor || !scene || aiGenerating || documentKind !== "scene") return;
-    if (aiSuggestionId) {
-      aiError = "Accept or revert the pending suggestion before generating another.";
-      return;
-    }
-    const declared = effectivePromptInputs(entry);
-    if (declared.length > 0 && !prefilledInputs) {
-      onRequestInputsDialog?.({ entry });
-      return;
-    }
-    await runPromptEntryWithInputs(entry, prefilledInputs ?? {}, assistantId);
-  }
-
-  async function runPromptEntryWithInputs(
-    entry: PromptEntrySummary,
-    inputs: Record<string, unknown>,
-    assistantId: string = "",
-  ) {
-    if (!editor || !scene) return;
-    const outputKind = effectiveOutputKind(promptCtx, entry);
-    if (outputKind === "chat_panel") {
-      lastInvokedEntryId = entry.id;
-      lastInvokedInputs = inputs;
-      lastInvokedAssistantId = assistantId;
-      onOpenChat?.({ entry, inputs, sceneId: scene.id, assistantId });
-      return;
-    }
-    if (outputKind !== "append_to_body" && outputKind !== "replace_selection") {
-      aiError = `Output kind "${outputKind ?? "(unset)"}" is not yet supported for inline dispatch.`;
-      updateAIToolbarPosition();
-      return;
-    }
-
-    let selectionText: string | undefined;
-    let textBefore: string;
-    let textAfter: string;
-    let from: number;
-    let to: number;
-
-    if (outputKind === "replace_selection") {
-      const sel = editor.state.selection;
-      from = sel.from;
-      to = sel.to;
-      if (from === to) {
-        aiAnchorPos = from;
-        aiError = "Select text to revise.";
-        updateAIToolbarPosition();
-        return;
-      }
-      selectionText = editor.state.doc.textBetween(from, to, "\n\n", " ");
-      if (!selectionText.trim()) {
-        aiAnchorPos = from;
-        aiError = "Select non-empty text to revise.";
-        updateAIToolbarPosition();
-        return;
-      }
-      const docSize = editor.state.doc.content.size;
-      const beforeStart = Math.max(0, from - REVISE_CONTEXT_CHARS);
-      const afterEnd = Math.min(docSize, to + REVISE_CONTEXT_CHARS);
-      textBefore = editor.state.doc.textBetween(beforeStart, from, "\n\n", " ");
-      textAfter = editor.state.doc.textBetween(to, afterEnd, "\n\n", " ");
-    } else {
-      from = editor.state.selection.from;
-      to = from;
-      const docSize = editor.state.doc.content.size;
-      textBefore = editor.state.doc.textBetween(0, from, "\n\n", " ");
-      textAfter = editor.state.doc.textBetween(from, docSize, "\n\n", " ");
-    }
-
-    aiError = null;
-    aiAnchorPos = from;
-    aiGenerating = true;
-    lastInvokedEntryId = entry.id;
-    lastInvokedInputs = inputs;
-    lastInvokedAssistantId = assistantId;
-    updateAIToolbarPosition();
-
-    const suggestionId = `ai-${aiNextSuggestionId++}`;
-    let startPos = from;
-    let streamingActive = false;
-    let accumulated = "";
-    let lastMeta: {
-      provider: string;
-      model: string;
-      latency_ms: number;
-      truncated: boolean;
-      usage?: ChatUsage | null;
-      cost_usd?: number | null;
-    } | null = null;
-    let streamErrored = false;
-
-    const ensureStreamingStarted = () => {
-      if (streamingActive || !editor) return;
-      if (outputKind === "replace_selection") {
-        const currentText = editor.state.doc.textBetween(from, to, "\n\n", " ");
-        if (currentText !== selectionText) {
-          aiError = "Document changed during the AI call. Re-select the text and retry.";
-          streamErrored = true;
-          return;
-        }
-        editor.chain().focus().setTextSelection({ from, to }).deleteSelection().run();
-        startPos = editor.state.selection.from;
-        aiSuggestionOriginal = selectionText!;
-      } else {
-        startPos = editor.state.selection.from;
-      }
-      aiSuggestionId = suggestionId;
-      streamingActive = true;
-    };
-
-    try {
-      for await (const ev of api.aiGenerateStream({
-        template_source: entry.body,
-        target_scene_id: scene.id,
-        session_id: scene.id,
-        inputs,
-        text_before: textBefore,
-        text_after: textAfter,
-        ...(selectionText !== undefined ? { selection: selectionText } : {}),
-        ...(assistantId ? { assistant_id: assistantId } : {}),
-        commit: false,
-      })) {
-        if (ev.type === "delta") {
-          accumulated += ev.text;
-          ensureStreamingStarted();
-          if (streamErrored) break;
-          if (!editor) break;
-          renderStreamingSuggestion(startPos, accumulated, suggestionId);
-        } else if (ev.type === "done") {
-          lastMeta = {
-            provider: ev.provider,
-            model: ev.model,
-            latency_ms: ev.latency_ms,
-            truncated: ev.truncated,
-            usage: ev.usage ?? null,
-            cost_usd: ev.cost_usd ?? null,
-          };
-        } else if (ev.type === "error") {
-          aiError = ev.error || "Unknown error";
-          streamErrored = true;
-          if (streamingActive && editor) {
-            const range = findAISuggestionRange(suggestionId);
-            if (range) {
-              if (outputKind === "replace_selection" && aiSuggestionOriginal) {
-                editor
-                  .chain()
-                  .setTextSelection({ from: range.from, to: range.to })
-                  .deleteSelection()
-                  .insertContent(aiSuggestionOriginal)
-                  .run();
-              } else {
-                editor
-                  .chain()
-                  .setTextSelection({ from: range.from, to: range.to })
-                  .deleteSelection()
-                  .run();
-              }
-            }
-            aiSuggestionId = null;
-            aiSuggestionOriginal = null;
-          }
-        }
-      }
-      if (!streamErrored) {
-        if (!accumulated.trim()) {
-          aiError = "Model returned empty output.";
-        } else if (lastMeta) {
-          aiSuggestionMeta = {
-            provider: lastMeta.provider,
-            model: lastMeta.model,
-            latency_ms: lastMeta.latency_ms,
-            truncated: lastMeta.truncated,
-            wordCount: countWords(accumulated),
-            usage: lastMeta.usage,
-            cost_usd: lastMeta.cost_usd,
-          };
-          if (typeof lastMeta.cost_usd === "number") {
-            lastInvocationCostUsd = lastMeta.cost_usd;
-            sceneSessionCostUsd += lastMeta.cost_usd;
-          }
-          aiAnchorPos = null;
-        }
-      }
-    } catch (e) {
-      aiError = (e as Error).message;
-    } finally {
-      aiGenerating = false;
-      updateAIToolbarPosition();
-    }
   }
 
   // ---------- TODO anchors ----------
@@ -1405,13 +1009,13 @@
     if (event.key.toLowerCase() === "j" && (event.ctrlKey || event.metaKey) && !event.altKey && !event.shiftKey) {
       event.preventDefault();
       const entry = defaultPromptForSurface(promptCtx, "append_to_body");
-      if (entry) void runPromptEntry(entry);
+      if (entry) void aiSuggestion.runPromptEntry(entry);
       return true;
     }
     if (event.key.toLowerCase() === "j" && (event.ctrlKey || event.metaKey) && !event.altKey && event.shiftKey) {
       event.preventDefault();
       const entry = defaultPromptForSurface(promptCtx, "replace_selection");
-      if (entry) void runPromptEntry(entry);
+      if (entry) void aiSuggestion.runPromptEntry(entry);
       return true;
     }
 
@@ -1523,14 +1127,14 @@
       updateLiveWordCount();
       onBodyChange?.();
     }
-    if (aiSuggestionId) updateAIToolbarPosition();
+    if (aiSuggestion.suggestionId) aiSuggestion.updateToolbarPosition();
     refreshSlashFilterText();
   }
 
   function handleEditorSelectionUpdate() {
     updateSelectionMenu();
     updateTableMenu();
-    if (aiSuggestionId) updateAIToolbarPosition();
+    if (aiSuggestion.suggestionId) aiSuggestion.updateToolbarPosition();
     refreshSlashFilterText();
   }
 
@@ -1697,15 +1301,15 @@
   }}
 >
   <ProseAIToolbar
-    position={aiToolbarPosition}
-    generating={aiGenerating}
-    suggestionId={aiSuggestionId}
-    error={aiError}
-    meta={aiSuggestionMeta}
-    onAccept={acceptAISuggestion}
-    onRetry={retryAISuggestion}
-    onDiscard={revertAISuggestion}
-    onDismissError={dismissAIError}
+    position={aiSuggestion.toolbarPosition}
+    generating={aiSuggestion.generating}
+    suggestionId={aiSuggestion.suggestionId}
+    error={aiSuggestion.error}
+    meta={aiSuggestion.meta}
+    onAccept={() => aiSuggestion.accept()}
+    onRetry={() => aiSuggestion.retry()}
+    onDiscard={() => aiSuggestion.revert()}
+    onDismissError={() => aiSuggestion.dismissError()}
   />
   <ProseSelectionToolbar
     menu={selectionMenu}

@@ -1,0 +1,44 @@
+# Git pre-commit / pre-push gates. Mirrors the in-session Claude Code hook
+# (.claude/hooks/check_edited_file.py) so the same standards apply to commits
+# made outside a Claude session. All hooks are `local` so nothing is downloaded
+# and the existing backend venv / npm are reused.
+#
+# One-time setup (per clone):
+#   backend/.venv/Scripts/python.exe -m pip install -e "backend[dev]"
+#   backend/.venv/Scripts/pre-commit install
+#   backend/.venv/Scripts/pre-commit install -t pre-push
+#
+# Fast checks run at commit; slow whole-project checks run at push.
+repos:
+  - repo: local
+    hooks:
+      # --- commit stage (fast, staged files) ---
+      - id: ruff
+        name: ruff (backend lint)
+        entry: python scripts/venv_run.py -m ruff check --force-exclude
+        language: system
+        types_or: [python]
+        files: ^backend/
+
+      - id: file-size-guard
+        name: file-size guard (split before ~1500 LOC)
+        entry: python scripts/check_file_size.py
+        language: system
+        files: \.(py|svelte|ts|tsx)$
+
+      # --- push stage (slow, whole project) ---
+      - id: svelte-check
+        name: svelte-check (frontend types/templates)
+        entry: npm run check --prefix frontend
+        language: system
+        pass_filenames: false
+        always_run: true
+        stages: [pre-push]
+
+      - id: pytest
+        name: pytest (backend)
+        entry: python scripts/venv_run.py -m pytest backend/tests -q
+        language: system
+        pass_filenames: false
+        always_run: true
+        stages: [pre-push]

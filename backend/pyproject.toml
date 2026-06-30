@@ -17,6 +17,7 @@ dependencies = [
 [project.optional-dependencies]
 dev = [
   "ruff>=0.15",
+  "pre-commit>=4.0",
 ]
 
 [tool.setuptools.packages.find]

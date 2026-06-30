@@ -594,40 +594,11 @@ button.row-action-add.active {
 
 /* .ancestor-badge co-located into App.svelte (#14). */
 
-.editor-panel {
-  display: grid;
-  /* When a prompt-preview pane is present the implicit grid creates extra
-     auto-sized rows for the resize handle and the preview pane between the
-     1fr editor row and the auto footer. */
-  grid-template-rows: auto 1fr auto;
-  grid-auto-rows: auto;
-  min-width: 0;
-  min-height: 0;
-  background: var(--surface);
-}
-
-.editor-panel.body-hidden {
-  display: flex;
-  flex-direction: column;
-}
-
-/* Metadata rail (body-spec Section A). When present, the editor becomes a
-   two-column grid: the existing header/body/footer stack stays in column 1,
-   the recessed rail spans all rows in column 2. Every other direct child is
-   pinned to column 1 so the implicit grid never flows a body view into the
-   rail column. */
-.editor-panel.has-rail {
-  grid-template-columns: minmax(0, 1fr) auto;
-}
-.editor-panel.has-rail > * {
-  grid-column: 1;
-  min-width: 0;
-}
-.editor-panel.has-rail > .editor-rail,
-.editor-panel.has-rail > .rail-tab {
-  grid-column: 2;
-  grid-row: 1 / -1;
-}
+/* .editor-panel + its rail-grid placement rules co-located into
+   NodeEditor.svelte (#14), joining the rail styling already scoped there.
+   The .editor-pane-meta > .scene-metadata centering below stays global —
+   it bridges NodeEditor's wrapper and MetadataPanel's root (a cross-component
+   layout rule), to be revisited in the MetadataPanel reconciliation. */
 .editor-pane-meta > .scene-metadata {
   max-width: 720px;
   margin: 0 auto;
@@ -857,23 +828,10 @@ button.row-action-add.active {
 
 /* .palette-* + .machine-settings-modal descendant styling co-located into MachineSettingsDialog.svelte (#14). */
 
-/* .schema-type-color-row co-located into SchemaTypeEditor.svelte (#14);
-   .metadata-color-row (NodeEditor's, identical chrome) stays global until
-   that component's co-location pass. */
-.metadata-color-row {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  font-size: 13px;
-}
-.metadata-color-row > span:first-child {
-  min-width: 80px;
-  color: var(--text-2);
-}
-.metadata-color-row small {
-  color: var(--text-3);
-  font-size: 11px;
-}
+/* .schema-type-color-row co-located into SchemaTypeEditor.svelte (#14).
+   The former `.metadata-color-row` twin was DEAD (only ever referenced in a
+   JS comment, never rendered — MetadataPanel uses its own scoped
+   `.field-row.color-row`) and was deleted. */
 
 /* .schema-type-fields / -header / .schema-type-identity / .kind-pill /
    .extends-label / .extends-pill co-located into SchemaTypeEditor.svelte (#14). */

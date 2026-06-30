@@ -1024,6 +1024,43 @@
      row), co-located from styles.css (#14). Own Svelte-template DOM → scoped,
      no :global. The shared editor-content layer (.editor-body* prose/table +
      marks) and pane chrome (.editor-pane/.pane*) stay global. */
+
+  /* Editor-panel grid + rail placement (body-spec Section A). When the rail is
+     present the panel is a two-column grid: header/body/footer stack in column
+     1, the recessed rail spans all rows in column 2. `> :global(*)` pins EVERY
+     direct child to column 1 — the body views (CodeBodyView/ProseBodyView/…)
+     are child components, so a scoped `> *` would miss them; the own
+     `.editor-rail`/`.rail-tab` overrides (scoped, higher specificity) reclaim
+     column 2. */
+  .editor-panel {
+    display: grid;
+    /* A prompt-preview pane adds auto-sized rows (resize handle + preview)
+       between the 1fr editor row and the auto footer. */
+    grid-template-rows: auto 1fr auto;
+    grid-auto-rows: auto;
+    min-width: 0;
+    min-height: 0;
+    background: var(--surface);
+  }
+
+  .editor-panel.body-hidden {
+    display: flex;
+    flex-direction: column;
+  }
+
+  .editor-panel.has-rail {
+    grid-template-columns: minmax(0, 1fr) auto;
+  }
+  .editor-panel.has-rail > :global(*) {
+    grid-column: 1;
+    min-width: 0;
+  }
+  .editor-panel.has-rail > .editor-rail,
+  .editor-panel.has-rail > .rail-tab {
+    grid-column: 2;
+    grid-row: 1 / -1;
+  }
+
   .editor-rail {
     display: flex;
     flex-direction: column;

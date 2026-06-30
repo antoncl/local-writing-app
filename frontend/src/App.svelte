@@ -30,7 +30,7 @@
   import TopBar from "@/components/chrome/TopBar.svelte";
   import { installThemeWiring, themePreference, nextPreference, type ThemePreference } from "@/lib/utils/theme";
   import { renderChatContent } from "@/lib/utils/chatMessageRender";
-  import { setPalette, resolveColor } from "@/lib/utils/colors";
+  import { resolveColor } from "@/lib/utils/colors";
   import { get } from "svelte/store";
   import {
     chatSessionsStore,
@@ -73,7 +73,6 @@
     projectSchemaLayerId,
   } from "@/lib/stores/schema";
   import { implicitContextMatcherStore } from "@/lib/stores/derived";
-  import { loadProjectData } from "@/lib/stores/index";
   import { focusedDocumentStore, pinnedKeysStore } from "@/lib/stores/editorFocus";
   import { paneLayout, isEditorPaneId } from "@/lib/stores/paneLayout.svelte";
   import {
@@ -83,6 +82,7 @@
   import { editorPanes } from "@/lib/stores/editorPanes.svelte";
   import { confirmService } from "@/lib/stores/confirmService.svelte";
   import { projectChooser } from "@/lib/stores/projectChooser.svelte";
+  import { projectSession } from "@/lib/stores/projectSession.svelte";
   import TagManagerDialog from "@/components/dialogs/TagManagerDialog.svelte";
   import type {
     AIHealthResponse,
@@ -96,13 +96,9 @@
     LoreEntrySummary,
     PromptEntrySummary,
     Scene,
-    MachineSettingsDraft,
-    MachineSettingsUpdate,
-    MachineSettingsView,
     NodePickerConfig,
     PaneId,
     ProjectInfo,
-    RecentProject,
     ProjectValidation,
     SearchHit,
     StructureDocument,
@@ -127,22 +123,15 @@
   let aiHealthResult: AIHealthResponse | null = $state(null);
   let aiHealthChecking = $state(false);
 
-  let machineSettings: MachineSettingsView | null = $state(null);
-  let machineSettingsOpen = $state(false);
-
-  // Recent projects + default base folder come from machine settings.
-  // Reloaded after open/create (which push onto the recents list) and after
-  // machine-settings saves (which can change the default folder).
-  let recentProjects: RecentProject[] = $state([]);
-  // The default base folder + the new-project / directory-picker UI live in the
-  // projectChooser controller (lib/stores/projectChooser). App pushes the
-  // machine-settings default in and injects the open/create lifecycle.
+  // Machine settings (the dialog state, recents, last-opened persistence) and
+  // the open/create/rehydrate flow live in the projectSession controller
+  // (lib/stores/projectSession). App keeps project IDENTITY (appState below)
+  // and injects the cross-subsystem workspace wiring as onOpenWorkspace.
 
   // Which chat is open in an editor pane lives on the editorPanes controller
   // (editorPanes.activeChatId) — it's a projection of the editor surface.
   let activeChatTitle = "Untitled chat";
   let projectCostExpanded = $state(false);
-  let machineSettingsDraft: MachineSettingsDraft | null = $state(null);
   let appState = $state<AppState>({ name: "needsProject" });
   let collapsedResearchNodes: Record<string, boolean> = $state({});
   let tagsManagerOpen = $state(false);
@@ -195,35 +184,6 @@
   // open*/embedded-TODO bridge) lives in the editorPanes controller
   // (lib/stores/editorPanes). App keeps only the projections it renders.
 
-  // Persisted "what was open" — survives reload (HMR or browser refresh) so
-  // the user doesn't lose their seat. Cleared on a failed re-open so a
-  // moved/deleted folder doesn't keep erroring every load.
-  const LAST_PROJECT_KEY = "lastOpenedProjectPath";
-
-  function rememberLastProject(path: string): void {
-    try {
-      localStorage.setItem(LAST_PROJECT_KEY, path);
-    } catch {
-      // Storage disabled / quota — rehydrate just won't work; not fatal.
-    }
-  }
-
-  function forgetLastProject(): void {
-    try {
-      localStorage.removeItem(LAST_PROJECT_KEY);
-    } catch {
-      // ignore
-    }
-  }
-
-  function readLastProject(): string | null {
-    try {
-      return localStorage.getItem(LAST_PROJECT_KEY);
-    } catch {
-      return null;
-    }
-  }
-
   let cleanupThemeWiring: (() => void) | null = null;
 
   onMount(() => {
@@ -248,35 +208,29 @@
     };
     // Confirm actions flow through App's run() so errors surface in `error`.
     confirmService.onRun = run;
-    // Project chooser drives only its modals; App owns the open/create
-    // lifecycle and feeds the picker its start dir + error sink.
+    // Project chooser drives only its modals; the projectSession controller
+    // owns the open/create lifecycle. App feeds the picker its start dir +
+    // error sink and routes its chosen path/title into projectSession.
     projectChooser.onRun = run;
     projectChooser.onError = (message) => { error = message; };
-    projectChooser.onOpenProject = (path) => void openProjectAt(path);
-    projectChooser.onCreateProject = createProjectAt;
+    projectChooser.onOpenProject = (path) => void projectSession.openProjectAt(path);
+    projectChooser.onCreateProject = (path, title, baseFolder) =>
+      projectSession.createProjectAt(path, title, baseFolder);
     projectChooser.getStartPath = () => projectPath;
+    // The projectSession controller owns machine settings + the open/create/
+    // rehydrate flow; App injects status/run and the cross-subsystem workspace
+    // wiring (openProjectWorkspace) + the post-load schema sync.
+    projectSession.run = run;
+    projectSession.setStatus = (message) => { status = message; };
+    projectSession.onOpenWorkspace = openProjectWorkspace;
+    projectSession.onProjectDataLoaded = () => schemaPanes?.syncSelection();
     cleanupThemeWiring = installThemeWiring();
     document.addEventListener("mousedown", handleDocumentMousedown);
-    // Eagerly fetch machine settings so the chat panel and inputs dialog
-    // can show the assistant roster without a round-trip when first opened.
-    // Failure is non-fatal — both UIs fall back to "default assistant".
-    void (async () => {
-      await loadMachineSettings();
-      // Auto-rehydrate the last-opened project so an HMR reload (or a
-      // plain F5) doesn't drop the user back to "No project open." Run
-      // after machine settings so recents are populated; on failure
-      // (path moved / deleted) clear the key so next load starts fresh.
-      // openProjectAt() routes errors through run() which swallows them
-      // — verify success by checking appState afterwards rather than
-      // relying on a thrown exception.
-      const lastPath = readLastProject();
-      if (lastPath) {
-        await openProjectAt(lastPath);
-        if (appState.name !== "projectOpen") {
-          forgetLastProject();
-        }
-      }
-    })();
+    // Eagerly fetch machine settings (so the chat panel + inputs dialog can show
+    // the assistant roster without a round-trip) and auto-rehydrate the
+    // last-opened project so an HMR reload / plain F5 doesn't drop the user back
+    // to "No project open." Failure is non-fatal.
+    void projectSession.rehydrate();
     return () => {
       paneLayout.dispose();
       editorPanes.dispose();
@@ -284,36 +238,6 @@
       cleanupThemeWiring?.();
     };
   });
-
-  async function loadMachineSettings() {
-    try {
-      machineSettings = await api.getMachineSettings();
-      recentProjects = machineSettings.recent_projects ?? [];
-      projectChooser.defaultProjectsFolder = machineSettings.default_projects_folder ?? "";
-      setPalette(machineSettings.palette ?? []);
-    } catch {
-      // Backend may be offline — leave machineSettings as null; pickers will
-      // hide and the request falls back to the backend's default assistant.
-    }
-    // The file-backed assistant index is canonical for the chat-panel and
-    // inputs-dialog pickers; load it eagerly alongside machine settings.
-    await refreshAssistantEntries();
-  }
-
-  // Re-pull machine settings just to refresh the recents list. Called after
-  // open/create routes — they touch_recent_project server-side; the UI
-  // needs the new list to render the switcher dropdown.
-  async function refreshRecents() {
-    try {
-      const view = await api.getMachineSettings();
-      machineSettings = view;
-      recentProjects = view.recent_projects ?? [];
-      projectChooser.defaultProjectsFolder = view.default_projects_folder ?? "";
-      setPalette(view.palette ?? []);
-    } catch {
-      // Non-fatal — recents stays stale until next reload.
-    }
-  }
 
   function handleDocumentMousedown(event: MouseEvent) {
     const target = event.target as HTMLElement | null;
@@ -324,9 +248,12 @@
     }
   }
 
+  // The cross-subsystem workspace wiring, injected into projectSession as
+  // onOpenWorkspace and run before loadProjectData. projectSession owns the
+  // last-opened-project persistence; this just resets and re-seeds App's
+  // many editor/AI/cost/color/chat subsystems for the newly opened project.
   function openProjectWorkspace(nextProject: ProjectInfo) {
     resetEditorWorkspace();
-    rememberLastProject(nextProject.root_path);
     projectPath = nextProject.root_path;
     collapsedStructureNodes = loadCollapsedStructureNodes(projectPath);
     projectTitle = nextProject.title;
@@ -453,35 +380,6 @@
     await storeRefreshTodos();
   }
 
-  // Create a project at the given path with the given title. Optional
-  // base folder lets callers override the default; omit to use the
-  // project's parent folder (matches the backend's fallback).
-  async function createProjectAt(path: string, title: string, baseFolder?: string) {
-    await run(async () => {
-      const openedProject = await api.createProject(path, title, baseFolder ?? "");
-      openProjectWorkspace(openedProject);
-      await loadProjectData();
-      schemaPanes?.syncSelection();
-      const initialSceneId = findFirstSceneId(get(structureStore)?.root);
-      if (initialSceneId) {
-        await editorPanes.openScene(initialSceneId);
-      }
-      await refreshRecents();
-      status = `Created ${openedProject.title}`;
-    });
-  }
-
-  async function openProjectAt(path: string) {
-    await run(async () => {
-      const openedProject = await api.openProject(path, "");
-      openProjectWorkspace(openedProject);
-      await loadProjectData();
-      schemaPanes?.syncSelection();
-      await refreshRecents();
-      status = `Opened ${openedProject.title}`;
-    });
-  }
-
   async function updateProjectAISettings() {
     if (!isProjectOpen) return;
     await run(async () => {
@@ -495,47 +393,6 @@
       aiDefaultProvider = updatedProject.ai_default_provider ?? "";
       aiDefaultModelClass = updatedProject.ai_default_model_class ?? "";
       status = "Updated AI settings";
-    });
-  }
-
-  async function openMachineSettings() {
-    await run(async () => {
-      machineSettings = await api.getMachineSettings();
-      machineSettingsDraft = {
-        anthropic_api_key: machineSettings.providers.anthropic_api_key,
-        openai_api_key: machineSettings.providers.openai_api_key,
-        openrouter_api_key: machineSettings.providers.openrouter_api_key,
-        ollama_host: machineSettings.providers.ollama_host,
-        default_provider: machineSettings.default_provider,
-        default_models: { ...machineSettings.default_models },
-        default_projects_folder: machineSettings.default_projects_folder ?? "",
-        palette: (machineSettings.palette ?? []).map((s) => ({ ...s })),
-      };
-      machineSettingsOpen = true;
-    });
-  }
-
-  async function saveMachineSettings() {
-    if (!machineSettings || !machineSettingsDraft) return;
-    await run(async () => {
-      const update: MachineSettingsUpdate = {
-        providers: {
-          anthropic_api_key: machineSettingsDraft!.anthropic_api_key,
-          openai_api_key: machineSettingsDraft!.openai_api_key,
-          openrouter_api_key: machineSettingsDraft!.openrouter_api_key,
-          ollama_host: machineSettingsDraft!.ollama_host,
-        },
-        default_provider: machineSettingsDraft!.default_provider,
-        default_models: machineSettingsDraft!.default_models,
-        default_projects_folder: machineSettingsDraft!.default_projects_folder,
-        palette: machineSettingsDraft!.palette,
-      };
-      machineSettings = await api.updateMachineSettings(update);
-      recentProjects = machineSettings.recent_projects ?? [];
-      projectChooser.defaultProjectsFolder = machineSettings.default_projects_folder ?? "";
-      setPalette(machineSettings.palette ?? []);
-      machineSettingsOpen = false;
-      status = "Saved machine settings";
     });
   }
 
@@ -691,16 +548,6 @@
     chatsPaneOpen = true;
     void refreshChatSessions();
     focusPane("chats");
-  }
-
-  function findFirstSceneId(node: StructureNode | null | undefined): string | null {
-    if (!node) return null;
-    if (node.scene_id && isLeafNode(node)) return node.scene_id;
-    for (const child of node.children ?? []) {
-      const sceneId = findFirstSceneId(child);
-      if (sceneId) return sceneId;
-    }
-    return null;
   }
 
   async function newScene(parentId?: string) {
@@ -1210,15 +1057,15 @@
 <TopBar
   currentTitle={isProjectOpen ? projectTitle : null}
   currentProjectColor={currentProjectColor}
-  {recentProjects}
+  recentProjects={projectSession.recentProjects}
   projectOpen={isProjectOpen}
   themePref={$themePreference}
   onCycleTheme={() => themePreference.update((p) => nextPreference(p))}
-  onSelectRecent={(path) => void openProjectAt(path)}
+  onSelectRecent={(path) => void projectSession.openProjectAt(path)}
   onOpenFolder={() => projectChooser.openForOpenProject()}
   onNewProject={() => projectChooser.openNewProject()}
   onOpenAssistants={openAssistantsPane}
-  onOpenSettings={openMachineSettings}
+  onOpenSettings={() => void projectSession.openMachineSettings()}
   onOpenDetailTypes={() => schemaPanes?.openDetailTypes()}
   onOpenProjectNode={() => void editorPanes.openProjectNode()}
 />
@@ -1509,16 +1356,16 @@
     onClose={() => projectChooser.closeNewProject()}
     onSubmit={() => projectChooser.confirmNewProject()}
     onOpenOverrideFolderPicker={() => projectChooser.openForNewProjectOverride()}
-    onOpenSettings={openMachineSettings}
+    onOpenSettings={() => void projectSession.openMachineSettings()}
     onClearOverride={() => projectChooser.clearOverride()}
   />
 
   <MachineSettingsDialog
-    open={machineSettingsOpen}
-    settings={machineSettings}
-    bind:draft={machineSettingsDraft}
-    onCancel={() => (machineSettingsOpen = false)}
-    onSave={saveMachineSettings}
+    open={projectSession.machineSettingsOpen}
+    settings={projectSession.machineSettings}
+    bind:draft={projectSession.machineSettingsDraft}
+    onCancel={() => (projectSession.machineSettingsOpen = false)}
+    onSave={() => void projectSession.saveMachineSettings()}
   />
 
   {#if tagsManagerOpen}

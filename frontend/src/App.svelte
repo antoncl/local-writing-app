@@ -30,7 +30,6 @@
   import TopBar from "@/components/chrome/TopBar.svelte";
   import { installThemeWiring, themePreference, nextPreference, type ThemePreference } from "@/lib/utils/theme";
   import { renderChatContent } from "@/lib/utils/chatMessageRender";
-  import { resolveColor } from "@/lib/utils/colors";
   import { get } from "svelte/store";
   import {
     chatSessionsStore,
@@ -83,10 +82,9 @@
   import { confirmService } from "@/lib/stores/confirmService.svelte";
   import { projectChooser } from "@/lib/stores/projectChooser.svelte";
   import { projectSession } from "@/lib/stores/projectSession.svelte";
+  import { aiSettings } from "@/lib/stores/aiSettings.svelte";
   import TagManagerDialog from "@/components/dialogs/TagManagerDialog.svelte";
   import type {
-    AIHealthResponse,
-    AIPolicy,
     AssistantEntrySummary,
     ChatMessage,
     ChatSession,
@@ -117,11 +115,10 @@
   let projectPath = $state("");
   let projectTitle = $state("Untitled Project");
 
-  let aiPolicy: AIPolicy = $state("off");
-  let aiDefaultProvider = $state("");
-  let aiDefaultModelClass = $state("");
-  let aiHealthResult: AIHealthResponse | null = $state(null);
-  let aiHealthChecking = $state(false);
+  // AI policy/provider/model-class, the provider health check, and the top-bar
+  // project-color dot now live in the aiSettings controller (lib/stores/
+  // aiSettings). App keeps project IDENTITY (appState) and folds the saved
+  // project back via aiSettings.onProjectUpdated.
 
   // Machine settings (the dialog state, recents, last-opened persistence) and
   // the open/create/rehydrate flow live in the projectSession controller
@@ -206,6 +203,14 @@
         appState = { ...appState, project: { ...appState.project, title } };
       }
     };
+    // AI settings save through App's run()/status; project identity (appState)
+    // stays in App, so the save folds the updated project back via onProjectUpdated.
+    aiSettings.run = run;
+    aiSettings.setStatus = (message) => { status = message; };
+    aiSettings.isProjectOpen = () => isProjectOpen;
+    aiSettings.onProjectUpdated = (project) => {
+      appState = { name: "projectOpen", project };
+    };
     // Confirm actions flow through App's run() so errors surface in `error`.
     confirmService.onRun = run;
     // Project chooser drives only its modals; the projectSession controller
@@ -257,34 +262,15 @@
     projectPath = nextProject.root_path;
     collapsedStructureNodes = loadCollapsedStructureNodes(projectPath);
     projectTitle = nextProject.title;
-    aiPolicy = nextProject.ai_policy;
-    aiDefaultProvider = nextProject.ai_default_provider ?? "";
-    aiDefaultModelClass = nextProject.ai_default_model_class ?? "";
-    aiHealthResult = null;
+    aiSettings.seedFromProject(nextProject);
     setProjectCost(null, []);
     projectCostExpanded = false;
-    currentProjectColor = null;
     appState = { name: "projectOpen", project: nextProject };
     paneLayout.fitToViewport();
     focusPane("outline");
     void hydrateChatSessionsForProject();
     void refreshProjectCost();
-    void refreshCurrentProjectColor();
-  }
-
-  // Project-node color, surfaced on the top-bar switcher as a dot so the
-  // user can tell at a glance which project they're in. Refreshed on
-  // open + on save of the project node.
-  let currentProjectColor: string | null = $state(null);
-  async function refreshCurrentProjectColor() {
-    try {
-      const node = await api.getProjectNode();
-      const instance = typeof node?.metadata?.color === "string" ? node.metadata.color : null;
-      const swatch = resolveColor(instance, node?.entry_type, "project", metadataSchema);
-      currentProjectColor = swatch?.hex ?? null;
-    } catch {
-      currentProjectColor = null;
-    }
+    void aiSettings.refreshProjectColor();
   }
 
   async function refreshProjectCost(): Promise<void> {
@@ -378,22 +364,6 @@
 
   async function refreshTodos() {
     await storeRefreshTodos();
-  }
-
-  async function updateProjectAISettings() {
-    if (!isProjectOpen) return;
-    await run(async () => {
-      const updatedProject = await api.updateProjectSettings({
-        ai_policy: aiPolicy,
-        ai_default_provider: aiDefaultProvider || null,
-        ai_default_model_class: aiDefaultModelClass || null,
-      });
-      appState = { name: "projectOpen", project: updatedProject };
-      aiPolicy = updatedProject.ai_policy;
-      aiDefaultProvider = updatedProject.ai_default_provider ?? "";
-      aiDefaultModelClass = updatedProject.ai_default_model_class ?? "";
-      status = "Updated AI settings";
-    });
   }
 
   // --- Chat sessions (Phase 4: ChatBodyView owns per-chat state) ---------
@@ -506,17 +476,6 @@
       flattenStructureScenes(child, acc);
     }
     return acc;
-  }
-
-  async function runAIHealthCheck() {
-    await run(async () => {
-      aiHealthChecking = true;
-      try {
-        aiHealthResult = await api.aiHealth(aiDefaultProvider || undefined);
-      } finally {
-        aiHealthChecking = false;
-      }
-    });
   }
 
   function paneEntryFromAncestor(pane: EditorPaneState): boolean {
@@ -1056,7 +1015,7 @@
 
 <TopBar
   currentTitle={isProjectOpen ? projectTitle : null}
-  currentProjectColor={currentProjectColor}
+  currentProjectColor={aiSettings.projectColor}
   recentProjects={projectSession.recentProjects}
   projectOpen={isProjectOpen}
   themePref={$themePreference}
@@ -1079,17 +1038,17 @@
         {projectPath}
         {projectCostTotal}
         {projectCostBreakdown}
-        {aiHealthResult}
-        {aiHealthChecking}
+        aiHealthResult={aiSettings.healthResult}
+        aiHealthChecking={aiSettings.healthChecking}
         {validation}
-        bind:aiPolicy
-        bind:aiDefaultProvider
-        bind:aiDefaultModelClass
+        bind:aiPolicy={aiSettings.policy}
+        bind:aiDefaultProvider={aiSettings.defaultProvider}
+        bind:aiDefaultModelClass={aiSettings.defaultModelClass}
         bind:projectCostExpanded
         onValidate={validateProject}
         onOpenChats={openChatsPane}
-        onSaveAISettings={updateProjectAISettings}
-        onHealthCheck={runAIHealthCheck}
+        onSaveAISettings={() => aiSettings.save()}
+        onHealthCheck={() => aiSettings.runHealthCheck()}
         onOpenPrompts={openPromptsPane}
         onRepair={repairProject}
       />

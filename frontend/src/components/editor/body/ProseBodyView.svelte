@@ -24,7 +24,7 @@
   import { preventDefault } from 'svelte/legacy';
 
   import { onMount } from "svelte";
-  import { Editor, Mark, mergeAttributes } from "@tiptap/core";
+  import { Editor } from "@tiptap/core";
   import { Fragment, type Node as ProseMirrorNode } from "@tiptap/pm/model";
   import { TextSelection } from "@tiptap/pm/state";
   import type { EditorView } from "@tiptap/pm/view";
@@ -36,6 +36,14 @@
   import { editorHtmlToSceneMarkdown, sceneMarkdownToHtml } from "@/lib/utils/markdown";
   import { sanitizePastedHtml } from "@/lib/utils/sanitizePastedHtml";
   import { ImplicitContextHighlight, REBUILD_META } from "@/lib/editor-core/implicitContextHighlight";
+  import { AISuggestion, TodoAnchor, createCharacterMark } from "@/lib/editor-core/proseMarks";
+  import {
+    parseSlashBody,
+    parseTableDims,
+    tokenizeSlashArgs,
+    matchesSlashFilter,
+    filterSlashCommands,
+  } from "@/lib/editor-core/slashParsing";
   import { api } from "@/lib/api";
   import { metadataSchemaStore } from "@/lib/stores/schema";
   import { formatCostEur } from "@/lib/utils/money";
@@ -99,8 +107,6 @@
   const TABLE_GRID_MAX_COLS = 8;
   const REVISE_CONTEXT_CHARS = 600;
   const WORD_PATTERN = /[A-Za-z0-9]+(?:['-][A-Za-z0-9]+)?/g;
-  const SLASH_COMMAND_PATTERN = /^[a-zA-Z0-9_-]*$/;
-  const SLASH_WITH_ARGS_PATTERN = /^([a-zA-Z0-9_-]+)\s+(.*)$/;
 
   
 
@@ -161,29 +167,8 @@
   }: Props = $props();
 
   // ---------- Custom TipTap extensions ----------
-  const AISuggestion = Mark.create({
-    name: "aiSuggestion",
-    inclusive: false,
-    excludes: "",
-    addAttributes() {
-      return {
-        suggestionId: {
-          default: null,
-          parseHTML: (element) => element.getAttribute("data-ai-suggestion-id"),
-          renderHTML: (attributes) => {
-            if (!attributes.suggestionId) return {};
-            return { "data-ai-suggestion-id": attributes.suggestionId };
-          },
-        },
-      };
-    },
-    parseHTML() {
-      return [{ tag: "span[data-ai-suggestion-id]" }];
-    },
-    renderHTML({ HTMLAttributes }) {
-      return ["span", mergeAttributes(HTMLAttributes, { class: "ai-suggestion" }), 0];
-    },
-  });
+  // AISuggestion / TodoAnchor are imported verbatim. CharacterMark needs the
+  // reactive lore/schema lookups below, so it's built from the factory.
 
   // Per-character mark color. Walks the full resolver: instance
   // (metadata.color on the lore entry) → entry-type color → parent
@@ -208,66 +193,9 @@
     return entry?.title || "Unresolved character";
   }
 
-  const CharacterMark = Mark.create({
-    name: "character",
-    inclusive: false,
-    excludes: "",
-    addAttributes() {
-      return {
-        characterId: {
-          default: null,
-          parseHTML: (element) => element.getAttribute("data-character"),
-          renderHTML: (attributes) => {
-            if (!attributes.characterId) return {};
-            const id = String(attributes.characterId);
-            return {
-              "data-character": id,
-              title: characterTitleFromId(id),
-              style: `--character-color: ${characterColorFromId(id)}`,
-            };
-          },
-        },
-      };
-    },
-    parseHTML() {
-      return [{ tag: "span[data-character]" }];
-    },
-    renderHTML({ HTMLAttributes }) {
-      return ["span", mergeAttributes(HTMLAttributes, { class: "character-mark" }), 0];
-    },
-  });
-
-  const TodoAnchor = Mark.create({
-    name: "todoAnchor",
-    inclusive: false,
-    addAttributes() {
-      return {
-        anchorId: {
-          default: null,
-          parseHTML: (element) => element.getAttribute("data-todo-id") ?? element.getAttribute("data-todo-anchor-id"),
-          renderHTML: (attributes) => {
-            if (!attributes.anchorId) return {};
-            return { "data-todo-id": attributes.anchorId };
-          },
-        },
-        status: {
-          default: "open",
-          parseHTML: (element) => (element.getAttribute("data-todo-status") === "done" ? "done" : "open"),
-          renderHTML: (attributes) => ({ "data-todo-status": attributes.status === "done" ? "done" : "open" }),
-        },
-        note: {
-          default: "",
-          parseHTML: (element) => element.getAttribute("data-todo-note") ?? "",
-          renderHTML: (attributes) => ({ "data-todo-note": attributes.note ?? "" }),
-        },
-      };
-    },
-    parseHTML() {
-      return [{ tag: "span[data-todo-id]" }, { tag: "span[data-todo-anchor-id]" }];
-    },
-    renderHTML({ HTMLAttributes }) {
-      return ["span", mergeAttributes(HTMLAttributes, { class: "todo-anchor" }), 0];
-    },
+  const CharacterMark = createCharacterMark({
+    colorForId: characterColorFromId,
+    titleForId: characterTitleFromId,
   });
 
   // ---------- State ----------
@@ -581,42 +509,6 @@
   }
 
   // ---------- Slash menu ----------
-  function parseSlashBody(text: string): { command: string; args: string } | null {
-    if (SLASH_COMMAND_PATTERN.test(text)) return { command: text, args: "" };
-    const m = text.match(SLASH_WITH_ARGS_PATTERN);
-    if (m) return { command: m[1], args: m[2] };
-    return null;
-  }
-
-  function parseTableDims(token: string): { rows: number; cols: number } | null {
-    const m = token.match(/^(\d+)\s*[x×]\s*(\d+)$/i);
-    if (!m) return null;
-    const rows = Math.min(100, Math.max(1, parseInt(m[1], 10)));
-    const cols = Math.min(100, Math.max(1, parseInt(m[2], 10)));
-    return { rows, cols };
-  }
-
-  function tokenizeSlashArgs(input: string): string[] {
-    const tokens: string[] = [];
-    let i = 0;
-    while (i < input.length) {
-      while (i < input.length && /\s/.test(input[i])) i++;
-      if (i >= input.length) break;
-      if (input[i] === '"' || input[i] === "'") {
-        const quote = input[i++];
-        let token = "";
-        while (i < input.length && input[i] !== quote) token += input[i++];
-        if (i < input.length) i++;
-        tokens.push(token);
-      } else {
-        let token = "";
-        while (i < input.length && !/\s/.test(input[i])) token += input[i++];
-        tokens.push(token);
-      }
-    }
-    return tokens;
-  }
-
   function isSlashTriggerContext() {
     if (documentKind !== "scene") return false;
     if (!editor) return false;
@@ -638,25 +530,6 @@
   function refreshSlashFilterText() {
     const next = editor && documentKind === "scene" ? readSlashFilterText() : "";
     if (next !== slashFilterText) slashFilterText = next;
-  }
-
-  function matchesSlashFilter(haystack: string, needle: string): boolean {
-    const lower = needle.toLowerCase();
-    return haystack.toLowerCase().split(/\s+/).some((word) => word.startsWith(lower));
-  }
-
-  function filterSlashCommands(commands: SlashCommand[], command: string, argsPresent: boolean): SlashCommand[] {
-    if (!command) return commands;
-    const lower = command.toLowerCase();
-    if (argsPresent) {
-      const exact = commands.filter((cmd) => cmd.label.toLowerCase() === lower);
-      if (exact.length > 0) return exact;
-    }
-    return commands.filter((cmd) =>
-      matchesSlashFilter(cmd.label, command) ||
-      matchesSlashFilter(cmd.description, command) ||
-      matchesSlashFilter(cmd.group, command),
-    );
   }
 
   function clampSlashSelectedIndex(count: number) {

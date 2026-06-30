@@ -288,7 +288,7 @@
     {/if}
   </label>
   <div class="schema-type-identity">
-    <span class={`kind-pill kind-${schemaTypeKind}`}>{schemaTypeKind}</span>
+    <span class="kind-pill kind-{schemaTypeKind}">{schemaTypeKind}</span>
     {#if schemaTypeParent}
       {@const parentDef = metadataSchema?.entry_types[schemaTypeParent]}
       <span class="extends-label"><i class="ti ti-arrow-up" aria-hidden="true"></i> extends</span>
@@ -517,5 +517,185 @@
     font-size: 11px;
     font-style: italic;
     color: var(--k-lore-text, #43448a);
+  }
+
+  /* Type-editor layout chrome co-located from styles.css (#14). The shared
+     `.rail-group-*` L1 group header (also used by MetadataPanel) and the
+     `.sfi-*`/`.sfr-tile`/`.sfr-cog` form atoms stay global; the
+     `.group-apply-form .sfi-*` rules below are own-markup overrides. */
+  .schema-editor {
+    display: grid;
+    gap: 8px;
+  }
+  .schema-target-layer {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 8px;
+    padding: 8px;
+    border: 1px dashed var(--border);
+    border-radius: 6px;
+    color: var(--text-2);
+    background: var(--surface);
+    font-size: 12px;
+  }
+
+  /* Identity line: kind pill + "extends <parent>". */
+  .schema-type-identity {
+    display: flex;
+    align-items: center;
+    gap: 7px;
+    flex-wrap: wrap;
+    margin: 2px 0 4px;
+  }
+  .kind-pill {
+    display: inline-flex;
+    align-items: center;
+    padding: 1px 9px;
+    border-radius: 999px;
+    border: 1px solid var(--border);
+    background: var(--surface, #fff);
+    font-size: 11px;
+    font-weight: 600;
+    color: var(--text-2);
+    text-transform: capitalize;
+  }
+  .extends-label {
+    display: inline-flex;
+    align-items: center;
+    gap: 3px;
+    font-size: 11px;
+    color: var(--text-3);
+  }
+  .extends-pill {
+    display: inline-flex;
+    align-items: center;
+    padding: 1px 9px;
+    border-radius: 999px;
+    border: 1px solid var(--border);
+    background: var(--surface, #fff);
+    font-size: 11px;
+    font-weight: 600;
+    color: var(--text-2);
+  }
+
+  /* Color row (label · swatch · inherited hint). */
+  .schema-type-color-row {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    font-size: 13px;
+  }
+  .schema-type-color-row > span:first-child {
+    min-width: 80px;
+    color: var(--text-2);
+  }
+  .schema-type-color-row small {
+    color: var(--text-3);
+    font-size: 11px;
+  }
+
+  /* Fields / reusable-groups sections. */
+  .schema-type-fields {
+    display: grid;
+    gap: 6px;
+    margin: 4px 0 8px;
+    padding: 8px 10px;
+    border: 1px solid var(--divider);
+    border-radius: 6px;
+    background: var(--inset);
+  }
+  .schema-type-fields-header {
+    display: flex;
+    align-items: baseline;
+    gap: 6px;
+    font-size: 13px;
+  }
+  .schema-type-fields-header small {
+    color: var(--text-3);
+  }
+  .schema-field-rows {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+  }
+
+  /* Applied reusable-group rows. */
+  .applied-groups {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+  }
+  .applied-group {
+    display: flex;
+    align-items: center;
+    gap: 9px;
+    padding: 5px 4px;
+  }
+  .ag-name {
+    font-size: 13px;
+    font-weight: 600;
+    color: var(--text, #242424);
+  }
+  .ag-as {
+    font-size: 12px;
+    color: var(--text-3);
+  }
+  .ag-prefix {
+    font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+    font-size: 11px;
+    color: var(--text-3);
+  }
+  .ag-remove {
+    margin-left: auto;
+  }
+  .group-apply-form {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: flex-end;
+    gap: 10px;
+    padding: 10px;
+    border: 1px solid var(--divider);
+    border-radius: 8px;
+    background: var(--inset, #f1f5f3);
+    box-shadow: inset 3px 0 0 0 var(--accent, #2f6f5e);
+  }
+  .group-apply-form .sfi-field {
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 4px;
+  }
+  .group-apply-form .sfi-field select,
+  .group-apply-form .sfi-field input {
+    padding: 5px 8px;
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    background: var(--surface, #fff);
+    font-size: 13px;
+  }
+  .group-apply-form .sfi-footer {
+    flex-basis: 100%;
+  }
+
+  /* Prompt-defaults fieldset (prompt kinds only). */
+  .prompt-fieldset {
+    display: grid;
+    gap: 8px;
+    padding: 10px 12px;
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    background: var(--surface);
+  }
+  .prompt-fieldset legend {
+    padding: 0 6px;
+    font-weight: 600;
+    color: var(--accent);
+  }
+  .prompt-fieldset textarea {
+    resize: vertical;
+    width: 100%;
+    box-sizing: border-box;
+    font-family: inherit;
+    min-height: 64px;
   }
 </style>

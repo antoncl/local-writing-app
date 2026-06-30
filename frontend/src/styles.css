@@ -355,10 +355,7 @@ h3 {
 
 /* .project-panel co-located into App.svelte (#14). */
 
-.schema-editor {
-  display: grid;
-  gap: 8px;
-}
+/* .schema-editor co-located into SchemaTypeEditor.svelte (#14). */
 
 .schema-list {
   display: grid;
@@ -860,83 +857,26 @@ button.row-action-add.active {
 
 /* .palette-* + .machine-settings-modal descendant styling co-located into MachineSettingsDialog.svelte (#14). */
 
-.schema-type-color-row,
+/* .schema-type-color-row co-located into SchemaTypeEditor.svelte (#14);
+   .metadata-color-row (NodeEditor's, identical chrome) stays global until
+   that component's co-location pass. */
 .metadata-color-row {
   display: flex;
   align-items: center;
   gap: 10px;
   font-size: 13px;
 }
-.schema-type-color-row > span:first-child,
 .metadata-color-row > span:first-child {
   min-width: 80px;
   color: var(--text-2);
 }
-.schema-type-color-row small,
 .metadata-color-row small {
   color: var(--text-3);
   font-size: 11px;
 }
 
-.schema-type-fields {
-  display: grid;
-  gap: 6px;
-  margin: 4px 0 8px;
-  padding: 8px 10px;
-  border: 1px solid var(--divider);
-  border-radius: 6px;
-  background: var(--inset);
-}
-
-.schema-type-fields-header {
-  display: flex;
-  align-items: baseline;
-  gap: 6px;
-  font-size: 13px;
-}
-
-.schema-type-fields-header small {
-  color: var(--text-3);
-}
-
-/* Type-editor identity line: kind pill + "extends <parent>". */
-.schema-type-identity {
-  display: flex;
-  align-items: center;
-  gap: 7px;
-  flex-wrap: wrap;
-  margin: 2px 0 4px;
-}
-.kind-pill {
-  display: inline-flex;
-  align-items: center;
-  padding: 1px 9px;
-  border-radius: 999px;
-  border: 1px solid var(--border, var(--border));
-  background: var(--surface, #fff);
-  font-size: 11px;
-  font-weight: 600;
-  color: var(--text-2, var(--text-2));
-  text-transform: capitalize;
-}
-.extends-label {
-  display: inline-flex;
-  align-items: center;
-  gap: 3px;
-  font-size: 11px;
-  color: var(--text-3, var(--text-3));
-}
-.extends-pill {
-  display: inline-flex;
-  align-items: center;
-  padding: 1px 9px;
-  border-radius: 999px;
-  border: 1px solid var(--border, var(--border));
-  background: var(--surface, #fff);
-  font-size: 11px;
-  font-weight: 600;
-  color: var(--text-2, var(--text-2));
-}
+/* .schema-type-fields / -header / .schema-type-identity / .kind-pill /
+   .extends-label / .extends-pill co-located into SchemaTypeEditor.svelte (#14). */
 
 /* L1 group section header — shared between the MetadataPanel rail and the
    Detail Type editor's field list. "Define looks like display." Padding
@@ -961,14 +901,8 @@ button.row-action-add.active {
   background: var(--divider, var(--divider));
 }
 
-/* Schema-mode field rows (metadata revision, mockup B): the same
-   icon · name vocabulary as the editor rail, plus a mono type chip and
-   the source/inherited markers. "Define looks like display." */
-.schema-field-rows {
-  display: flex;
-  flex-direction: column;
-  gap: 2px;
-}
+/* .schema-field-rows (the mockup-B field-row container) co-located into
+   SchemaTypeEditor.svelte (#14). */
 /* Row chrome (.schema-field-row + .sfr-grip/-name/-typechip/-meta + states +
    drop markers) co-located into SchemaFieldRow.svelte (#14); the .sfi-option-*
    family (incl. its own drop markers) into SelectOptionsEditor.svelte. .sfr-tile
@@ -1094,62 +1028,8 @@ button.row-action-add.active {
   text-decoration: underline;
 }
 
-/* .sfr-group-origin co-located into SchemaTypeEditor.svelte (#14). */
-.applied-groups {
-  display: flex;
-  flex-direction: column;
-  gap: 4px;
-}
-.applied-group {
-  display: flex;
-  align-items: center;
-  gap: 9px;
-  padding: 5px 4px;
-}
-.ag-name {
-  font-size: 13px;
-  font-weight: 600;
-  color: var(--text, #242424);
-}
-.ag-as {
-  font-size: 12px;
-  color: var(--text-3, var(--text-3));
-}
-.ag-prefix {
-  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
-  font-size: 11px;
-  color: var(--text-3, var(--text-3));
-}
-.ag-remove {
-  margin-left: auto;
-}
-.group-apply-form {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: flex-end;
-  gap: 10px;
-  padding: 10px;
-  border: 1px solid var(--divider, var(--divider));
-  border-radius: 8px;
-  background: var(--inset, #f1f5f3);
-  box-shadow: inset 3px 0 0 0 var(--accent, #2f6f5e);
-}
-.group-apply-form .sfi-field {
-  flex-direction: column;
-  align-items: flex-start;
-  gap: 4px;
-}
-.group-apply-form .sfi-field select,
-.group-apply-form .sfi-field input {
-  padding: 5px 8px;
-  border: 1px solid var(--border, var(--border));
-  border-radius: 8px;
-  background: var(--surface, #fff);
-  font-size: 13px;
-}
-.group-apply-form .sfi-footer {
-  flex-basis: 100%;
-}
+/* .sfr-group-origin / .applied-group* / .ag-* / .group-apply-form (+ its
+   .sfi-* descendant overrides) co-located into SchemaTypeEditor.svelte (#14). */
 
 /* .project-empty-hint / .project-identity* / .disabled-section co-located into Project.svelte (#14). */
 
@@ -1244,33 +1124,7 @@ button.row-action-add.active {
   color: var(--text-2);
 }
 
-.prompt-fieldset {
-  display: grid;
-  gap: 8px;
-  padding: 10px 12px;
-  border: 1px solid var(--border);
-  border-radius: 6px;
-  background: var(--surface);
-}
-
-.prompt-fieldset legend {
-  padding: 0 6px;
-  font-weight: 600;
-  color: var(--accent);
-}
-
-.prompt-fieldset .muted {
-  margin: 0;
-  font-size: 12px;
-}
-
-.prompt-fieldset textarea {
-  resize: vertical;
-  width: 100%;
-  box-sizing: border-box;
-  font-family: inherit;
-  min-height: 64px;
-}
+/* .prompt-fieldset (+ legend / textarea) co-located into SchemaTypeEditor.svelte (#14). */
 
 .assistants-pane {
   min-width: 280px;

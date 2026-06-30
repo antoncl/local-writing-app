@@ -60,16 +60,25 @@
   import ProseAIToolbar from "./ProseAIToolbar.svelte";
   import { api } from "@/lib/api";
   import { metadataSchemaStore } from "@/lib/stores/schema";
-  import { coerceInputValue } from "@/lib/utils/promptInputs";
+  import {
+    type PromptResolutionContext,
+    effectiveOutputKind,
+    effectivePromptInputs,
+    findPromptEntry,
+    promptEntriesForSurface,
+    promptEntryDescription,
+    defaultPromptForSurface,
+    resolvePromptPositionalArgs,
+    isRoleplayPromptEntry,
+    characterIdFromInputValue,
+  } from "@/lib/editor-core/promptResolution";
   import { resolveColor } from "@/lib/utils/colors";
   import type {
     ChatUsage,
     DocumentKind,
     EditableDocument,
     LoreEntrySummary,
-    MetadataSchema,
     PromptEntrySummary,
-    PromptInputDefinition,
   } from "@/lib/types";
 
   // ---------- Local types ----------
@@ -323,154 +332,6 @@
     editorEmpty = firstNode.type.name === "paragraph" && firstNode.content.size === 0;
   }
 
-  function effectiveOutputKind(entry: PromptEntrySummary): string | null {
-    const definition = metadataSchema?.entry_types[entry.entry_type];
-    const output = definition?.prompt?.context_strategy?.output;
-    if (!output || typeof output.kind !== "string") return null;
-    return output.kind;
-  }
-
-  function promptEntriesForSurface(surface: "append_to_body" | "replace_selection" | "chat_panel"): PromptEntrySummary[] {
-    if (!metadataSchema) return [];
-    return promptEntries
-      .filter((entry) => effectiveOutputKind(entry) === surface)
-      .sort((a, b) => a.title.localeCompare(b.title, undefined, { sensitivity: "base" }));
-  }
-
-  function promptEntryDescription(entry: PromptEntrySummary): string {
-    const typeName = metadataSchema?.entry_types[entry.entry_type]?.name ?? entry.entry_type;
-    return typeName;
-  }
-
-  function effectivePromptInputs(entry: PromptEntrySummary) {
-    return entry.inputs ?? [];
-  }
-
-  function findPromptEntry(entryId: string | null): PromptEntrySummary | null {
-    if (!entryId) return null;
-    return promptEntries.find((entry) => entry.id === entryId) ?? null;
-  }
-
-  function defaultPromptForSurface(surface: "append_to_body" | "replace_selection"): PromptEntrySummary | null {
-    return promptEntriesForSurface(surface)[0] ?? null;
-  }
-
-  // Resolve a positional-string token against a context_pick input.
-  function resolveContextPickToken(
-    token: string,
-    target: { kind?: string; entry_type?: string } | null | undefined,
-  ): string | null {
-    const lower = token.toLowerCase();
-    const wantKind = target?.kind;
-    const wantEntryType = target?.entry_type;
-
-    type Cand = { id: string; kind: "lore" | "scene"; title: string; entry_type?: string };
-    const candidates: Cand[] = [];
-
-    if (!wantKind || wantKind === "lore") {
-      for (const lore of loreEntries) {
-        if (lore.title.toLowerCase() !== lower) continue;
-        if (wantEntryType && lore.entry_type !== wantEntryType) continue;
-        candidates.push({ id: lore.id, kind: "lore", title: lore.title, entry_type: lore.entry_type });
-      }
-    }
-    if (!wantKind || wantKind === "scene") {
-      for (const sc of availableScenes) {
-        if (sc.title.toLowerCase() !== lower) continue;
-        candidates.push({ id: sc.id, kind: "scene", title: sc.title });
-      }
-    }
-
-    if (candidates.length !== 1) return null;
-    const c = candidates[0];
-    const ref: { id: string; kind: string; title: string; entry_type?: string } = {
-      id: c.id,
-      kind: c.kind,
-      title: c.title,
-    };
-    if (c.entry_type) ref.entry_type = c.entry_type;
-    return JSON.stringify([ref]);
-  }
-
-  function resolvePromptPositionalArgs(
-    entry: PromptEntrySummary,
-    args: string[],
-  ): {
-    inputs: Record<string, unknown> | undefined;
-    satisfied: boolean;
-    unresolved: Array<{ name: string; label: string; token: string }>;
-  } {
-    const declared = effectivePromptInputs(entry);
-    if (declared.length === 0 || args.length === 0) {
-      return { inputs: undefined, satisfied: false, unresolved: [] };
-    }
-    const inputs: Record<string, unknown> = {};
-    const filledNames = new Set<string>();
-    const unresolved: Array<{ name: string; label: string; token: string }> = [];
-    const limit = Math.min(declared.length, args.length);
-    for (let i = 0; i < limit; i++) {
-      const input = declared[i];
-      const raw = args[i];
-      const label = input.label || input.name;
-      if (input.type === "context_pick") {
-        const target = input.target as { kind?: string; entry_type?: string } | null | undefined;
-        const resolved = resolveContextPickToken(raw, target);
-        if (resolved === null) {
-          unresolved.push({ name: input.name, label, token: raw });
-          continue;
-        }
-        inputs[input.name] = resolved;
-        filledNames.add(input.name);
-      } else {
-        const coerced = coerceInputValue(raw, input.type);
-        if (coerced === null || coerced === "") {
-          unresolved.push({ name: input.name, label, token: raw });
-          continue;
-        }
-        inputs[input.name] = coerced;
-        filledNames.add(input.name);
-      }
-    }
-    const missingRequired = declared.some(
-      (input) => input.required && !filledNames.has(input.name),
-    );
-    return {
-      inputs,
-      satisfied: !missingRequired && unresolved.length === 0,
-      unresolved,
-    };
-  }
-
-  // True iff the prompt entry-type chain includes `roleplay` (so any
-  // future sub-type of roleplay still gets character-tagged on Accept).
-  function isRoleplayPromptEntry(entry: PromptEntrySummary | null | undefined): boolean {
-    if (!entry || !metadataSchema) return false;
-    let cursor: string | undefined = entry.entry_type;
-    const seen = new Set<string>();
-    while (cursor && !seen.has(cursor)) {
-      if (cursor === "roleplay") return true;
-      seen.add(cursor);
-      cursor = metadataSchema.entry_types[cursor]?.parent ?? undefined;
-    }
-    return false;
-  }
-
-  // Pull the first lore id from a context_pick input value.
-  function characterIdFromInputValue(value: unknown): string | null {
-    if (typeof value !== "string") return null;
-    const trimmed = value.trim();
-    if (!trimmed.startsWith("[")) return null;
-    try {
-      const parsed = JSON.parse(trimmed);
-      if (!Array.isArray(parsed) || parsed.length === 0) return null;
-      const first = parsed[0];
-      if (first && typeof first === "object" && typeof first.id === "string") return first.id;
-      return null;
-    } catch {
-      return null;
-    }
-  }
-
   // ---------- Slash menu ----------
   function isSlashTriggerContext() {
     if (documentKind !== "scene") return false;
@@ -646,16 +507,16 @@
           }
         },
       },
-      ...promptEntriesForSurface("append_to_body")
+      ...promptEntriesForSurface(promptCtx, "append_to_body")
         .map((entry) => ({
           group: "AI",
           label: entry.title,
-          description: promptEntryDescription(entry),
+          description: promptEntryDescription(promptCtx, entry),
           autocompleteTo: entry.entry_type,
           run: (args?: string[]) => {
             clearSlashTrigger();
             const resolved = args && args.length > 0
-              ? resolvePromptPositionalArgs(entry, args)
+              ? resolvePromptPositionalArgs(promptCtx, entry, args)
               : {
                   inputs: undefined as Record<string, unknown> | undefined,
                   satisfied: false,
@@ -966,7 +827,7 @@
 
   function getSelectionToolbarActions(): ToolbarAction[] {
     if (!editor) return [];
-    const reviseEntries = promptEntriesForSurface("replace_selection");
+    const reviseEntries = promptEntriesForSurface(promptCtx, "replace_selection");
     const reviseAction: ToolbarAction | null =
       reviseEntries.length === 0
         ? null
@@ -1159,9 +1020,9 @@
   function acceptAISuggestion() {
     if (!editor || !aiSuggestionId) return;
     const range = findAISuggestionRange(aiSuggestionId);
-    const lastEntry = findPromptEntry(lastInvokedEntryId);
+    const lastEntry = findPromptEntry(promptCtx, lastInvokedEntryId);
     const characterId =
-      range && isRoleplayPromptEntry(lastEntry)
+      range && isRoleplayPromptEntry(promptCtx, lastEntry)
         ? characterIdFromInputValue(lastInvokedInputs.character)
         : null;
     if (range) {
@@ -1243,7 +1104,7 @@
     const wasRevision = aiSuggestionOriginal !== null;
     const original = aiSuggestionOriginal;
     const range = findAISuggestionRange(aiSuggestionId);
-    const entry = findPromptEntry(lastInvokedEntryId);
+    const entry = findPromptEntry(promptCtx, lastInvokedEntryId);
     if (!entry) {
       aiError = "Original prompt is no longer available.";
       return;
@@ -1283,7 +1144,7 @@
     assistantId: string = "",
   ) {
     if (!editor || !scene) return;
-    const outputKind = effectiveOutputKind(entry);
+    const outputKind = effectiveOutputKind(promptCtx, entry);
     if (outputKind === "chat_panel") {
       lastInvokedEntryId = entry.id;
       lastInvokedInputs = inputs;
@@ -1543,13 +1404,13 @@
 
     if (event.key.toLowerCase() === "j" && (event.ctrlKey || event.metaKey) && !event.altKey && !event.shiftKey) {
       event.preventDefault();
-      const entry = defaultPromptForSurface("append_to_body");
+      const entry = defaultPromptForSurface(promptCtx, "append_to_body");
       if (entry) void runPromptEntry(entry);
       return true;
     }
     if (event.key.toLowerCase() === "j" && (event.ctrlKey || event.metaKey) && !event.altKey && event.shiftKey) {
       event.preventDefault();
-      const entry = defaultPromptForSurface("replace_selection");
+      const entry = defaultPromptForSurface(promptCtx, "replace_selection");
       if (entry) void runPromptEntry(entry);
       return true;
     }
@@ -1758,6 +1619,14 @@
   });
   // metadataSchema is global per-project — read from the store, not a prop (#14 Step 2).
   let metadataSchema = $derived($metadataSchemaStore);
+  // Snapshot consumed by the pure prompt-resolution helpers (slash menu,
+  // selection toolbar, and the AI pipeline all read it).
+  let promptCtx = $derived<PromptResolutionContext>({
+    metadataSchema,
+    promptEntries,
+    loreEntries,
+    availableScenes,
+  });
   // ---------- Reactives ----------
   let slashCommands = $derived(editor && documentKind === "scene" ? getSlashCommands() : []);
   let parsedSlash = $derived(parseSlashBody(slashFilterText) ?? { command: slashFilterText, args: "" });

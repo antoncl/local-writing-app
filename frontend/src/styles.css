@@ -373,18 +373,7 @@ h3 {
   letter-spacing: -2px;
 }
 
-.schema-target-layer {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 8px;
-  padding: 8px;
-  border: 1px dashed var(--border);
-  border-radius: 6px;
-  color: var(--text-2);
-  background: var(--surface);
-  font-size: 12px;
-}
+/* .schema-target-layer co-located into SchemaTypeEditor.svelte (#14). */
 
 .path-picker-row {
   display: grid;
@@ -1027,11 +1016,9 @@ button.row-action-add.active {
 
 /* .chat-prompt-glyph co-located into Chats.svelte (#14). */
 
-@media (max-width: 720px) {
-  .prompt-cheatsheet-body {
-    grid-template-columns: 1fr;
-  }
-}
+/* .prompt-cheatsheet-body (+ its narrow-screen @media override) co-located
+   into CodeBodyView.svelte (#14). */
+
 /* Implicit-context highlight + hover popup. Applied by the ProseMirror
    plugin in implicitContextHighlight.ts. Underlines lore-name matches
    inline as the user types so they see what the send-time expander

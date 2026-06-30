@@ -438,6 +438,11 @@
     font-size: 11px;
     color: var(--accent-deep);
   }
+  @media (max-width: 720px) {
+    .prompt-cheatsheet-body {
+      grid-template-columns: 1fr;
+    }
+  }
   .raw-body-editor {
     display: grid;
     flex: 1;

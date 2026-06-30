@@ -56,6 +56,7 @@
   } from "@/lib/editor-core/selectionToolbar";
   import ProseSlashMenu from "./ProseSlashMenu.svelte";
   import ProseSelectionToolbar from "./ProseSelectionToolbar.svelte";
+  import ProseTableToolbar from "./ProseTableToolbar.svelte";
   import { api } from "@/lib/api";
   import { metadataSchemaStore } from "@/lib/stores/schema";
   import { formatCostEur } from "@/lib/utils/money";
@@ -1896,26 +1897,7 @@
     onHoverGrid={(rows, cols) => (slashMenu = { ...slashMenu, gridRows: rows, gridCols: cols })}
   />
 
-  {#if tableMenu.visible}
-    <div class="table-toolbar" style={`left: ${tableMenu.x}px; top: ${tableMenu.y}px;`}>
-      <button type="button" title="Insert column before" onmousedown={preventDefault(() => editor?.chain().focus().addColumnBefore().run())}>+ col ←</button>
-      <button type="button" title="Insert column after" onmousedown={preventDefault(() => editor?.chain().focus().addColumnAfter().run())}>+ col →</button>
-      <button type="button" title="Delete column" onmousedown={preventDefault(() => editor?.chain().focus().deleteColumn().run())}>− col</button>
-      <span class="table-toolbar-sep" aria-hidden="true"></span>
-      <button type="button" title="Insert row above" onmousedown={preventDefault(() => editor?.chain().focus().addRowBefore().run())}>+ row ↑</button>
-      <button type="button" title="Insert row below" onmousedown={preventDefault(() => editor?.chain().focus().addRowAfter().run())}>+ row ↓</button>
-      <button type="button" title="Delete row" onmousedown={preventDefault(() => editor?.chain().focus().deleteRow().run())}>− row</button>
-      <span class="table-toolbar-sep" aria-hidden="true"></span>
-      <button type="button" title="Align left" onmousedown={preventDefault(() => setCellAlign("left"))}>⟵</button>
-      <button type="button" title="Align center" onmousedown={preventDefault(() => setCellAlign("center"))}>↔</button>
-      <button type="button" title="Align right" onmousedown={preventDefault(() => setCellAlign("right"))}>⟶</button>
-      <span class="table-toolbar-sep" aria-hidden="true"></span>
-      <button type="button" title="Toggle header row" onmousedown={preventDefault(() => editor?.chain().focus().toggleHeaderRow().run())}>Hdr row</button>
-      <button type="button" title="Toggle header column" onmousedown={preventDefault(() => editor?.chain().focus().toggleHeaderColumn().run())}>Hdr col</button>
-      <span class="table-toolbar-sep" aria-hidden="true"></span>
-      <button type="button" title="Delete table" onmousedown={preventDefault(() => editor?.chain().focus().deleteTable().run())}>Delete</button>
-    </div>
-  {/if}
+  <ProseTableToolbar menu={tableMenu} {editor} onAlign={setCellAlign} />
 
   <div bind:this={editorElement}></div>
 </div>
@@ -1927,55 +1909,6 @@
      styling (.editor-body prose/table, .ai-suggestion / .character-mark /
      .todo-anchor marks) stays global — .editor-body is shared across four
      editor components. */
-  .table-toolbar {
-    position: absolute;
-    z-index: 22;
-    display: flex;
-    align-items: center;
-    overflow: visible;
-    border: 1px solid var(--toolbar-border);
-    border-radius: 7px;
-    background: var(--toolbar-surface);
-    box-shadow: 0 14px 28px rgba(25, 40, 35, 0.22);
-    white-space: nowrap;
-  }
-
-  .table-toolbar button {
-    height: 34px;
-    min-width: 38px;
-    padding: 0 10px;
-    border: 0;
-    border-right: 1px solid var(--toolbar-divider);
-    border-radius: 0;
-    background: transparent;
-    color: var(--toolbar-text);
-    font-size: 13px;
-    font-weight: 700;
-    cursor: pointer;
-  }
-
-  .table-toolbar button:first-child {
-    border-top-left-radius: 6px;
-    border-bottom-left-radius: 6px;
-  }
-
-  .table-toolbar button:last-child {
-    border-right: 0;
-    border-top-right-radius: 6px;
-    border-bottom-right-radius: 6px;
-  }
-
-  .table-toolbar button:hover {
-    background: var(--toolbar-hover);
-  }
-
-  .table-toolbar-sep {
-    display: inline-block;
-    width: 1px;
-    height: 22px;
-    background: var(--toolbar-divider);
-  }
-
   .ai-inline-toolbar {
     position: absolute;
     display: inline-flex;

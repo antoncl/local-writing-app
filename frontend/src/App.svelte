@@ -86,6 +86,7 @@
   import { implicitContextMatcherStore } from "@/lib/stores/derived";
   import { loadProjectData } from "@/lib/stores/index";
   import { focusedDocumentStore, pinnedKeysStore } from "@/lib/stores/editorFocus";
+  import { paneLayout, isEditorPaneId } from "@/lib/stores/paneLayout.svelte";
   import GroupsManagerDialog from "@/components/dialogs/GroupsManagerDialog.svelte";
   import TagManagerDialog from "@/components/dialogs/TagManagerDialog.svelte";
   import type { OptionDraft } from "@/components/schema/SelectOptionsEditor.svelte";
@@ -120,6 +121,7 @@
     MetadataSchemaLayer,
     MetadataSchemaOverview,
     NodePickerConfig,
+    PaneId,
     PromptEntryTypeExtras,
     PromptInputDefinition,
     ProjectInfo,
@@ -140,16 +142,7 @@
   // TreeConfig (the per-kind manuscript/research tree contract) + the tree
   // rendering and inline CRUD now live in Tree.svelte; App owns the structure
   // data, the editor-pane coupling (delete, dblclick-open), and collapse state.
-  type PaneId = "project" | "outline" | "lore" | "todo" | "search" | string;
   type MetadataReloadSignal = { token: number; metadata: EntryMetadata; status: string; entryType: string };
-  type PaneState = {
-    title: string;
-    x: number;
-    y: number;
-    width: number;
-    height: number;
-    z: number;
-  };
   type EditorPaneState = {
     id: string;
     document: DocumentRef | null;
@@ -307,25 +300,6 @@
   let confirmation: ConfirmationState | null = $state(null);
   let error = $state("");
   let status = "No project open";
-  let nextZ = 10;
-  let nextEditorPaneIndex = 1;
-  let dragState: { id: PaneId; element: HTMLElement; offsetX: number; offsetY: number } | null = null;
-  let resizeState:
-    | { id: PaneId; element: HTMLElement; startX: number; startY: number; startWidth: number; startHeight: number }
-    | null = null;
-  let panes: Record<PaneId, PaneState> = $state({
-    project: { title: "Project", x: 18, y: 18, width: 380, height: 340, z: 1 },
-    outline: { title: "Draft", x: 18, y: 260, width: 300, height: 420, z: 2 },
-    lore: { title: "Lore", x: 330, y: 260, width: 300, height: 320, z: 3 },
-    research: { title: "Research", x: 650, y: 260, width: 300, height: 320, z: 3 },
-    schema: { title: "Detail Types", x: 330, y: 260, width: 360, height: 420, z: 3 },
-    schema_type: { title: "Detail Type", x: 708, y: 260, width: 440, height: 560, z: 4 },
-    prompts: { title: "Prompts", x: 330, y: 260, width: 360, height: 420, z: 3 },
-    assistants: { title: "Assistants", x: 330, y: 260, width: 340, height: 420, z: 3 },
-    chats: { title: "Chats", x: 330, y: 260, width: 320, height: 420, z: 3 },
-    todo: { title: "TODO", x: 1126, y: 18, width: 310, height: 320, z: 4 },
-    search: { title: "Search", x: 1126, y: 360, width: 310, height: 320, z: 5 },
-  });
   let editorPanes: EditorPaneState[] = $state([]);
   let nextMetadataReloadToken = 1;
   let metadataReloadsByPane: Record<string, MetadataReloadSignal> = $state({});
@@ -389,7 +363,14 @@
   let cleanupThemeWiring: (() => void) | null = null;
 
   onMount(() => {
-    fitPanesToViewport();
+    paneLayout.fitToViewport();
+    // Raising the focused editor pane must also update focusedEditorPaneId; the
+    // pane-layout controller stays ignorant of editor state and calls back here.
+    paneLayout.onRaise = (id) => {
+      if (isEditorPaneId(id) && editorPanes.some((pane) => pane.id === id)) {
+        focusedEditorPaneId = id;
+      }
+    };
     cleanupThemeWiring = installThemeWiring();
     document.addEventListener("mousedown", handleDocumentMousedown);
     // Eagerly fetch machine settings so the chat panel and inputs dialog
@@ -413,10 +394,7 @@
       }
     })();
     return () => {
-      document.removeEventListener("mousemove", movePane);
-      document.removeEventListener("mouseup", stopPaneDrag);
-      document.removeEventListener("mousemove", resizePane);
-      document.removeEventListener("mouseup", stopPaneResize);
+      paneLayout.dispose();
       document.removeEventListener("mousedown", handleDocumentMousedown);
       cleanupThemeWiring?.();
     };
@@ -480,23 +458,6 @@
   }
 
 
-  function buildPaneStyleMap(source: Record<PaneId, PaneState>): Record<string, string> {
-    const result: Record<string, string> = {};
-    for (const [id, pane] of Object.entries(source)) {
-      result[id] = `left: ${pane.x}px; top: ${pane.y}px; width: ${pane.width}px; height: ${pane.height}px; z-index: ${pane.z};`;
-    }
-    return result;
-  }
-
-  function paneStyle(id: PaneId) {
-    return paneStyleMap[id] ?? "";
-  }
-
-
-  function isEditorPaneId(id: PaneId) {
-    return id.startsWith("editor_");
-  }
-
   function openProjectWorkspace(nextProject: ProjectInfo) {
     resetEditorWorkspace();
     rememberLastProject(nextProject.root_path);
@@ -511,7 +472,7 @@
     projectCostExpanded = false;
     currentProjectColor = null;
     appState = { name: "projectOpen", project: nextProject };
-    fitPanesToViewport();
+    paneLayout.fitToViewport();
     focusPane("outline");
     void hydrateChatSessionsForProject();
     void refreshProjectCost();
@@ -541,7 +502,7 @@
     editorPanes = [];
     setKnownTags([]);
     focusedEditorPaneId = null;
-    nextEditorPaneIndex = 1;
+    paneLayout.resetEditorIndex();
     nextMetadataReloadToken = 1;
     metadataReloadsByPane = {};
     titleReloadsByPane = {};
@@ -556,146 +517,20 @@
     // pure UI state; nothing project-specific lives here.
   }
 
-  function fitPanesToViewport() {
-    const margin = 8;
-    panes = Object.fromEntries(
-      Object.entries(panes).map(([id, pane]) => [
-        id,
-        {
-          ...pane,
-          x: Math.min(pane.x, Math.max(margin, window.innerWidth - pane.width - margin)),
-          y: Math.min(pane.y, Math.max(margin, window.innerHeight - 48)),
-        },
-      ]),
-    ) as Record<PaneId, PaneState>;
-  }
+  // Thin adapters onto the pane-layout window manager (lib/stores/paneLayout):
+  // App keeps its local vocabulary while the geometry/drag/resize logic lives in
+  // the controller. raise() also runs onRaise (wired in onMount) to track focus.
+  const focusPane = (id: PaneId) => paneLayout.raise(id);
+  const paneStyle = (id: PaneId) => paneLayout.styleFor(id);
 
-  function focusPane(id: PaneId) {
-    if (isEditorPaneId(id) && editorPanes.some((pane) => pane.id === id)) {
-      focusedEditorPaneId = id;
-    }
-    nextZ += 1;
-    const z = nextZ;
-    panes = {
-      ...panes,
-      [id]: { ...panes[id], z },
-    };
-    const pane = document.querySelector<HTMLElement>(`.pane[data-pane-id="${id}"]`);
-    if (pane) pane.style.zIndex = String(z);
-  }
-
-  function startPaneDrag(event: MouseEvent, id: PaneId) {
-    if (event.button !== 0) return;
-    event.preventDefault();
-    event.stopPropagation();
-    const element = (event.currentTarget as HTMLElement).closest<HTMLElement>(".pane");
-    if (!element) return;
-    focusPane(id);
-    dragState = {
-      id,
-      element,
-      offsetX: event.clientX - element.offsetLeft,
-      offsetY: event.clientY - element.offsetTop,
-    };
-    document.addEventListener("mousemove", movePane);
-    document.addEventListener("mouseup", stopPaneDrag, { once: true });
-  }
-
-  function movePane(event: MouseEvent) {
-    if (!dragState) return;
-    const margin = 8;
-    const pane = panes[dragState.id];
-    const maxX = Math.max(margin, window.innerWidth - 88);
-    const maxY = Math.max(margin, window.innerHeight - 48);
-    const x = Math.min(Math.max(margin, event.clientX - dragState.offsetX), maxX);
-    const y = Math.min(Math.max(margin, event.clientY - dragState.offsetY), maxY);
-    dragState.element.style.left = `${x}px`;
-    dragState.element.style.top = `${y}px`;
-    panes = {
-      ...panes,
-      [dragState.id]: { ...pane, x, y },
-    };
-  }
-
-  function stopPaneDrag() {
-    dragState = null;
-    document.removeEventListener("mousemove", movePane);
-    document.removeEventListener("mouseup", stopPaneDrag);
-  }
-
-  function startPaneResize(event: MouseEvent, id: PaneId) {
-    if (event.button !== 0) return;
-    event.preventDefault();
-    event.stopPropagation();
-    const element = (event.currentTarget as HTMLElement).closest<HTMLElement>(".pane");
-    if (!element) return;
-    focusPane(id);
-    resizeState = {
-      id,
-      element,
-      startX: event.clientX,
-      startY: event.clientY,
-      startWidth: element.offsetWidth,
-      startHeight: element.offsetHeight,
-    };
-    document.addEventListener("mousemove", resizePane);
-    document.addEventListener("mouseup", stopPaneResize, { once: true });
-  }
-
-  function resizePane(event: MouseEvent) {
-    if (!resizeState) return;
-    const minWidth = isEditorPaneId(resizeState.id) ? 440 : 240;
-    const minHeight = isEditorPaneId(resizeState.id) ? 320 : 170;
-    const width = Math.max(minWidth, resizeState.startWidth + event.clientX - resizeState.startX);
-    const height = Math.max(minHeight, resizeState.startHeight + event.clientY - resizeState.startY);
-    resizeState.element.style.width = `${width}px`;
-    resizeState.element.style.height = `${height}px`;
-    panes = {
-      ...panes,
-      [resizeState.id]: { ...panes[resizeState.id], width, height },
-    };
-  }
-
-  function stopPaneResize() {
-    resizeState = null;
-    document.removeEventListener("mousemove", resizePane);
-    document.removeEventListener("mouseup", stopPaneResize);
-  }
-
-  function handlePaneHeaderKeydown(event: KeyboardEvent, id: PaneId) {
-    if (event.key !== "Enter" && event.key !== " ") return;
-    event.preventDefault();
-    focusPane(id);
-  }
-
-  function handlePaneResizeKeydown(event: KeyboardEvent, id: PaneId) {
-    const step = event.shiftKey ? 40 : 12;
-    const pane = panes[id];
-    let width = pane.width;
-    let height = pane.height;
-    if (event.key === "ArrowRight") width += step;
-    else if (event.key === "ArrowLeft") width -= step;
-    else if (event.key === "ArrowDown") height += step;
-    else if (event.key === "ArrowUp") height -= step;
-    else return;
-
-    event.preventDefault();
-    const minWidth = isEditorPaneId(id) ? 440 : 240;
-    const minHeight = isEditorPaneId(id) ? 320 : 170;
-    panes = {
-      ...panes,
-      [id]: { ...pane, width: Math.max(minWidth, width), height: Math.max(minHeight, height) },
-    };
-  }
-
-  // The shared chrome controller handed to every <Pane>. The handlers are
-  // stable function declarations, so a plain object (not reactive) is fine.
+  // The shared chrome controller handed to every <Pane>; each pane calls these
+  // with its own id. Stable object — the handlers don't change.
   const paneChrome: PaneChrome = {
     focus: focusPane,
-    headerKeydown: handlePaneHeaderKeydown,
-    headerDrag: startPaneDrag,
-    resizeKeydown: handlePaneResizeKeydown,
-    resizeDrag: startPaneResize,
+    headerKeydown: (event, id) => paneLayout.headerKeydown(event, id),
+    headerDrag: (event, id) => paneLayout.startDrag(event, id),
+    resizeKeydown: (event, id) => paneLayout.resizeKeydown(event, id),
+    resizeDrag: (event, id) => paneLayout.startResize(event, id),
   };
 
   async function run(action: () => Promise<void>): Promise<boolean> {
@@ -2144,7 +1979,7 @@
     status = `Loaded ${scene.title}`;
     if (!sceneEntryHasBody(scene)) {
       await tick();
-      fitEditorPaneToContent(targetPane.id);
+      paneLayout.fitEditorPaneToContent(targetPane.id);
     }
   }
 
@@ -2218,31 +2053,6 @@
     } else {
       void run(() => openSceneInEditorPane(id));
     }
-  }
-
-  function fitEditorPaneToContent(paneId: string) {
-    setTimeout(() => {
-      const paneEl = document.querySelector<HTMLElement>(`[data-pane-id="${paneId}"]`);
-      if (!paneEl) return;
-      const headerEl = paneEl.querySelector<HTMLElement>(".pane-header");
-      const panelEl = paneEl.querySelector<HTMLElement>(".editor-panel");
-      if (!headerEl || !panelEl) return;
-      let contentHeight = 0;
-      for (const child of Array.from(panelEl.children)) {
-        const el = child as HTMLElement;
-        if (el.offsetParent === null) continue;
-        contentHeight += el.getBoundingClientRect().height;
-      }
-      const totalHeight = headerEl.getBoundingClientRect().height + contentHeight + 24;
-      const current = panes[paneId];
-      if (!current || totalHeight < 120) return;
-      const newHeight = Math.round(totalHeight);
-      panes = {
-        ...panes,
-        [paneId]: { ...current, height: newHeight },
-      };
-      paneEl.style.height = `${newHeight}px`;
-    }, 100);
   }
 
   // Open a chat session in the editor-pane system. Mirrors the structure-
@@ -2437,21 +2247,7 @@
   }
 
   function addEditorPane() {
-    const id = `editor_${nextEditorPaneIndex}`;
-    nextEditorPaneIndex += 1;
-    const offset = Math.min(160, editorPanes.length * 28);
-    panes = {
-      ...panes,
-      [id]: {
-        title: "Editor",
-        x: 342 + offset,
-        y: 18 + offset,
-        width: 760,
-        height: 662,
-        z: nextZ + 1,
-      },
-    };
-    nextZ += 1;
+    const id = paneLayout.allocateEditorPane(editorPanes.length);
     const pane = createEmptyEditorPane(id);
     editorPanes = [...editorPanes, pane];
     return pane;
@@ -2650,8 +2446,7 @@
     metadataReloadsByPane = remainingReloads;
     const { [id]: _closedTitleReload, ...remainingTitleReloads } = titleReloadsByPane;
     titleReloadsByPane = remainingTitleReloads;
-    const { [id]: _closedPane, ...remainingPanes } = panes;
-    panes = remainingPanes;
+    paneLayout.removePane(id);
     if (focusedEditorPaneId === id) {
       focusedEditorPaneId = remainingEditorPanes[0]?.id ?? null;
     }
@@ -3123,7 +2918,6 @@
             : schemaFieldKind === "project"
               ? "Project Types"
               : "Scene Types");
-  let paneStyleMap = $derived(buildPaneStyleMap(panes));
   // Reactive function: rebound whenever any visibility-deciding state changes.
   // Templates that call `isPaneVisible(id)` track the function's identity — so
   // when this `$:` recomputes, every callsite re-runs and the pane shows.
@@ -3405,7 +3199,7 @@
       aria-label="Editor pane"
       onmousedown={() => focusPane(editorPane.id)}
     >
-      <header class="pane-header" role="button" tabindex="0" aria-label="Move Editor pane" onkeydown={(event) => handlePaneHeaderKeydown(event, editorPane.id)} onmousedown={(event) => startPaneDrag(event, editorPane.id)}>
+      <header class="pane-header" role="button" tabindex="0" aria-label="Move Editor pane" onkeydown={(event) => paneLayout.headerKeydown(event, editorPane.id)} onmousedown={(event) => paneLayout.startDrag(event, editorPane.id)}>
         <h2>
           {editorPane.scene?.title ?? "Editor"}
           {#if paneEntryFromAncestor(editorPane)}
@@ -3486,7 +3280,7 @@
         onNavigate={(detail) => navigateToBacklink(detail.id, detail.kind)}
         onOpenChat={(detail) => openChatFromPromptEntry(detail.entry, detail.inputs, detail.sceneId, detail.assistantId)}
       />
-      <button class="pane-resize" type="button" aria-label="Resize Editor pane" onkeydown={(event) => handlePaneResizeKeydown(event, editorPane.id)} onmousedown={(event) => startPaneResize(event, editorPane.id)}></button>
+      <button class="pane-resize" type="button" aria-label="Resize Editor pane" onkeydown={(event) => paneLayout.resizeKeydown(event, editorPane.id)} onmousedown={(event) => paneLayout.startResize(event, editorPane.id)}></button>
     </section>
   {/each}
 

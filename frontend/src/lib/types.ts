@@ -1,3 +1,17 @@
+// Floating-pane window-manager types, owned by lib/stores/paneLayout. PaneId is
+// the open-set of pane keys (the fixed singletons plus dynamic `editor_*` ids);
+// PaneState is one pane's position/size/z-order.
+export type PaneId = "project" | "outline" | "lore" | "todo" | "search" | string;
+
+export type PaneState = {
+  title: string;
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+  z: number;
+};
+
 export type StructureNode = {
   id: string;
   type: string;

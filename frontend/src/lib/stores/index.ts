@@ -8,7 +8,7 @@ import { refreshLoreEntries, clearLore } from "@/lib/stores/lore";
 import { refreshPromptEntries, clearPrompts } from "@/lib/stores/prompts";
 import { refreshSchema, clearSchema } from "@/lib/stores/schema";
 import { refreshKnownTags, clearKnownTags } from "@/lib/stores/tags";
-import { refreshTodos, clearTodos } from "@/lib/stores/todos";
+import { refreshTodos, refreshEmbeddedTodos, clearTodos } from "@/lib/stores/todos";
 import { clearValidation } from "@/lib/stores/validation";
 import { clearChats } from "@/lib/stores/chats";
 import { clearAssistants } from "@/lib/stores/assistants";
@@ -28,6 +28,7 @@ export async function loadProjectData(): Promise<void> {
     refreshSchema(),
     refreshKnownTags(),
     refreshTodos(),
+    refreshEmbeddedTodos(),
   ]);
 }
 

@@ -5,13 +5,22 @@
 
 import { writable } from "svelte/store";
 import { api } from "@/lib/api";
-import type { TodoItem } from "@/lib/types";
+import type { EmbeddedTodoRecord, TodoItem } from "@/lib/types";
 
 export const todosStore = writable<TodoItem[]>([]);
+
+// The rebuildable embedded-todo index (in-prose markers across all scenes,
+// GH #45). Editor-pane independent — scanned from disk, refreshed on project
+// open, after any scene save, and after any embedded-todo mutation.
+export const embeddedTodosStore = writable<EmbeddedTodoRecord[]>([]);
 
 // Top-level todos only — `anchor_id` items live inline in scene prose.
 export async function refreshTodos(): Promise<void> {
   todosStore.set((await api.getTodos()).items.filter((item) => !item.anchor_id));
+}
+
+export async function refreshEmbeddedTodos(): Promise<void> {
+  embeddedTodosStore.set((await api.getEmbeddedTodos()).items);
 }
 
 // Write-through from a todo mutation. Sets the list verbatim (the mutation
@@ -23,4 +32,5 @@ export function setTodos(items: TodoItem[]): void {
 
 export function clearTodos(): void {
   todosStore.set([]);
+  embeddedTodosStore.set([]);
 }

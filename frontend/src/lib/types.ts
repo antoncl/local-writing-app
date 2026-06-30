@@ -418,6 +418,22 @@ export type TodoDocument = {
   items: TodoItem[];
 };
 
+// An in-prose embedded TODO, enumerated by scanning scene bodies (GH #45).
+// Editor-pane independent — a rebuildable index over scenes.
+export type EmbeddedTodoRecord = {
+  todo_id: string;
+  scene_id: string;
+  status: "open" | "done";
+  note: string;
+  text: string;
+  line: number;
+  scene_path: string;
+};
+
+export type EmbeddedTodoList = {
+  items: EmbeddedTodoRecord[];
+};
+
 export type ProjectValidation = {
   valid: boolean;
   warnings: string[];

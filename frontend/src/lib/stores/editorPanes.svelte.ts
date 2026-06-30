@@ -47,7 +47,7 @@ import { refreshLoreEntries, setLoreEntries } from "@/lib/stores/lore";
 import { refreshPromptEntries, setPromptEntries } from "@/lib/stores/prompts";
 import { refreshAssistantEntries, setAssistantEntries } from "@/lib/stores/assistants";
 import { refreshKnownTags } from "@/lib/stores/tags";
-import { refreshTodos } from "@/lib/stores/todos";
+import { refreshTodos, refreshEmbeddedTodos } from "@/lib/stores/todos";
 import { chatSessionsStore, refreshChatSessions, setChatSessions } from "@/lib/stores/chats";
 import type {
   AssistantEntry,
@@ -61,58 +61,38 @@ import type {
   ResearchNote,
   Scene,
 } from "@/lib/types";
-import type { EmbeddedTodo } from "@/components/panes/Todo.svelte";
 
 // Signal that tells a pane's MetadataPanel/title to re-seed from a refreshed
 // server baseline (token forces the reactive re-read even when the value is
 // structurally equal).
 export type MetadataReloadSignal = { token: number; metadata: EntryMetadata; status: string; entryType: string };
 
-// A handle to a mounted NodeEditor so the controller can drive its embedded-TODO
-// editing commands (the TipTap doc lives inside the view). Populated by the
-// `bind:this` in App's editor-pane loop.
+// A handle to a mounted NodeEditor so the controller can drive its scene-reload
+// (re-seed the TipTap doc from a server scene) and scroll-to-todo highlight (the
+// TipTap doc lives inside the view). Populated by the `bind:this` in App's
+// editor-pane loop. Embedded-TODO *mutations* no longer route through here — they
+// go through intentful backend endpoints and reconcile the open pane (GH #45).
 interface EditorPaneComponentHandle {
-  updateEmbeddedTodo: (todoId: string, updates: { status?: "open" | "done"; note?: string }) => void;
-  deleteEmbeddedTodo: (todoId: string) => void;
+  reloadScene: (scene: EditableDocument) => void | Promise<void>;
   highlightEmbeddedTodo: (todoId: string) => void;
 }
 
 const AUTO_SAVE_IDLE_MS = 6000;
 const SAVED_INDICATOR_MS = 2000;
 
-function buildEmbeddedTodoStatusHintsByPane(itemsByPane: Record<string, EmbeddedTodo[]>): Record<string, string> {
-  return Object.fromEntries(
-    Object.entries(itemsByPane).map(([paneId, items]) => {
-      const openCount = items.filter((item) => item.status === "open").length;
-      const doneCount = items.length - openCount;
-      return [
-        paneId,
-        items.length === 0
-          ? ""
-          : `${openCount} open embedded TODO${openCount === 1 ? "" : "s"} · ${doneCount} completed.`,
-      ];
-    }),
-  );
-}
-
 class EditorPanesController {
   // The open editor panes. Reassigned (not deep-mutated) to trigger reactivity —
   // the drafts ARE the pending buffer, no separate queue.
   panes = $state<EditorPaneState[]>([]);
   focusedEditorPaneId = $state<string | null>(null);
-  // bind:this handles for the mounted NodeEditors (embedded-TODO commands).
+  // bind:this handles for the mounted NodeEditors (scene reload + todo highlight).
   editorPaneComponents = $state<Record<string, EditorPaneComponentHandle | undefined>>({});
-  // Per-pane reload signals + embedded-TODO projections.
+  // Per-pane reload signals.
   metadataReloadsByPane = $state<Record<string, MetadataReloadSignal>>({});
   titleReloadsByPane = $state<Record<string, { token: number; title: string }>>({});
-  embeddedTodosByPane = $state<Record<string, EmbeddedTodo[]>>({});
   // Which chat node is currently open in a pane (drives the Chats pane's active
   // row highlight). Lives here because it's a projection of the editor surface.
   activeChatId = $state<string | null>(null);
-
-  // Flattened views derived from embeddedTodosByPane (the Todo pane reads these).
-  allEmbeddedTodos = $derived(Object.values(this.embeddedTodosByPane).flat());
-  embeddedTodoStatusHintsByPane = $derived(buildEmbeddedTodoStatusHintsByPane(this.embeddedTodosByPane));
 
   // Monotonic token source for metadata-reload signals (plain — not reactive).
   nextMetadataReloadToken = 1;
@@ -281,8 +261,6 @@ class EditorPanesController {
     this.#autosave.cancelSavedIndicator(id);
     const remainingEditorPanes = this.panes.filter((candidate) => candidate.id !== id);
     this.panes = remainingEditorPanes;
-    const { [id]: _closedTodos, ...remainingEmbeddedTodos } = this.embeddedTodosByPane;
-    this.embeddedTodosByPane = remainingEmbeddedTodos;
     const { [id]: _closedReload, ...remainingReloads } = this.metadataReloadsByPane;
     this.metadataReloadsByPane = remainingReloads;
     const { [id]: _closedTitleReload, ...remainingTitleReloads } = this.titleReloadsByPane;
@@ -384,6 +362,11 @@ class EditorPanesController {
       } else {
         await refreshStructure();
         await refreshTodos();
+        // Embedded (in-prose) todos are a rebuildable index over scene bodies;
+        // a scene save may add/remove/edit markers, so re-scan (GH #45).
+        if (documentKind === "scene" || documentKind === "structure_node") {
+          await refreshEmbeddedTodos();
+        }
         await refreshKnownTags();
       }
       this.setStatus(`Saved ${savedDocument.title}`);
@@ -820,45 +803,47 @@ class EditorPanesController {
     this.setStatus(`Loaded ${note.title}`);
   }
 
-  // ---- Embedded-TODO bridge -------------------------------------------------
-  // Embedded TODOs live inside the scene's TipTap doc, so editing them goes
-  // through the mounted NodeEditor handle; the controller mirrors the resulting
-  // per-pane lists into embeddedTodosByPane for the Todo pane to read.
+  // ---- Open-pane reconciliation (GH #45) ------------------------------------
+  // Embedded-TODO mutations go through intentful backend endpoints (driven by
+  // the todoActions controller), NOT the live editor — embedded todos are a
+  // rebuildable index over scenes, not state owned by a pane. But when the
+  // mutated scene is ALSO open in a pane, that pane's stale baseline would
+  // clobber the on-disk change on its next autosave. So the Todo-pane mutators
+  // flushSceneIfDirty() BEFORE the write (persist unsaved prose first — no data
+  // loss) and reconcileSceneFromServer() AFTER (snap baseline + draft to the
+  // returned scene and re-seed the TipTap doc so the prose reflects the change).
 
-  updateEmbeddedTodosForPane(
-    id: string,
-    embeddedTodos: Array<{ id: string; text: string; status: "open" | "done"; note: string }>,
-  ): void {
-    const pane = this.panes.find((candidate) => candidate.id === id);
-    if (!pane?.scene || pane.document?.type !== "scene") {
-      const { [id]: _removed, ...remainingTodos } = this.embeddedTodosByPane;
-      this.embeddedTodosByPane = remainingTodos;
-      return;
-    }
-    this.embeddedTodosByPane = {
-      ...this.embeddedTodosByPane,
-      [id]: embeddedTodos.map((item) => ({
-        ...item,
-        paneId: id,
-        sceneId: pane.scene!.id,
-        sceneTitle: pane.scene!.title,
-      })),
-    };
+  paneForScene(sceneId: string): EditorPaneState | undefined {
+    return this.panes.find(
+      (pane) => pane.scene?.id === sceneId && pane.document?.type === "scene",
+    );
   }
 
-  toggleEmbeddedTodo(item: EmbeddedTodo): void {
-    this.editorPaneComponents[item.paneId]?.updateEmbeddedTodo(item.id, {
-      status: item.status === "open" ? "done" : "open",
-    });
+  async flushSceneIfDirty(sceneId: string): Promise<void> {
+    const pane = this.paneForScene(sceneId);
+    if (pane?.dirty) await this.saveEditorPane(pane.id);
   }
 
-  updateEmbeddedTodoNote(item: EmbeddedTodo, note: string): void {
-    if (note === item.note) return;
-    this.editorPaneComponents[item.paneId]?.updateEmbeddedTodo(item.id, { note });
-  }
-
-  deleteEmbeddedTodo(item: EmbeddedTodo): void {
-    this.editorPaneComponents[item.paneId]?.deleteEmbeddedTodo(item.id);
+  async reconcileSceneFromServer(scene: Scene): Promise<void> {
+    const pane = this.paneForScene(scene.id);
+    if (!pane) return;
+    this.#autosave.cancel(pane.id);
+    this.panes = this.panes.map((candidate) =>
+      candidate.id === pane.id
+        ? {
+            ...candidate,
+            scene,
+            dirty: false,
+            draftTitle: scene.title,
+            draftMarkdown: scene.body,
+            draftStatus: scene.status,
+            draftEntryType: scene.entry_type,
+            draftMetadata: cloneMetadata(scene.metadata),
+            recentlySaved: false,
+          }
+        : candidate,
+    );
+    await this.editorPaneComponents[pane.id]?.reloadScene(scene);
   }
 
   highlightEmbeddedTodoInOpenPane(sceneId: string, todoId: string): void {

@@ -1,25 +1,12 @@
-<script context="module" lang="ts">
-  // Embedded TODOs are extracted by App from open scene editor panes (the
-  // note/status live on the editor pane component, hence paneId). This view
-  // renders them above the file-level TODOs; App owns every mutation (they all
-  // route through api or the editor pane components) and passes them as
-  // callbacks. The shape lives here with its renderer.
-  export type EmbeddedTodo = {
-    id: string;
-    text: string;
-    status: "open" | "done";
-    note: string;
-    paneId: string;
-    sceneId: string;
-    sceneTitle: string;
-  };
-</script>
-
 <script lang="ts">
-  import type { TodoItem } from "@/lib/types";
+  import type { EmbeddedTodoRecord, TodoItem } from "@/lib/types";
 
+  // Embedded (in-prose) TODOs are a rebuildable index over scenes (GH #45),
+  // editor-pane independent. This view renders them above the file-level TODOs;
+  // every mutation routes through the todoActions controller (intentful backend
+  // endpoints) and is passed in as a callback.
   export let todos: TodoItem[];
-  export let embeddedTodos: EmbeddedTodo[];
+  export let embeddedTodos: EmbeddedTodoRecord[];
   // Two-way: the "Add" textarea. App clears it on a successful create (only
   // inside its run() success path), so it stays App-owned and binds down.
   export let newTodo: string;
@@ -30,10 +17,10 @@
   export let onDeleteTodo: (item: TodoItem) => void;
   export let onTodoTextKeydown: (event: KeyboardEvent, item: TodoItem) => void;
   export let onOpenFileTodo: (item: TodoItem) => void;
-  export let onToggleEmbeddedTodo: (item: EmbeddedTodo) => void;
-  export let onUpdateEmbeddedTodoNote: (item: EmbeddedTodo, note: string) => void;
-  export let onOpenEmbeddedTodo: (item: EmbeddedTodo) => void;
-  export let onDeleteEmbeddedTodo: (item: EmbeddedTodo) => void;
+  export let onToggleEmbeddedTodo: (item: EmbeddedTodoRecord) => void;
+  export let onUpdateEmbeddedTodoNote: (item: EmbeddedTodoRecord, note: string) => void;
+  export let onOpenEmbeddedTodo: (item: EmbeddedTodoRecord) => void;
+  export let onDeleteEmbeddedTodo: (item: EmbeddedTodoRecord) => void;
 </script>
 
 <div class="todo-entry">
@@ -41,9 +28,9 @@
   <button on:click={onAddTodo}>Add</button>
 </div>
 {#if embeddedTodos.length > 0}
-  <div class="todo-section-label">Embedded TODOs from open scenes</div>
+  <div class="todo-section-label">Embedded TODOs</div>
 {/if}
-{#each embeddedTodos as item}
+{#each embeddedTodos as item (item.scene_id + ":" + item.todo_id)}
   <div class:done={item.status === "done"} class="todo-item">
     <input class="todo-checkbox" type="checkbox" checked={item.status === "done"} aria-label="Toggle embedded TODO" on:change={() => onToggleEmbeddedTodo(item)} />
     <div class="todo-text-stack">
@@ -57,7 +44,7 @@
         on:blur={(event) => onUpdateEmbeddedTodoNote(item, event.currentTarget.value)}
       ></textarea>
       <button class="todo-link" type="button" on:click={() => onOpenEmbeddedTodo(item)}>
-        <strong>{item.sceneTitle}</strong>
+        <strong>{item.scene_path}</strong>
         <span>{item.text}</span>
       </button>
     </div>

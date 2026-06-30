@@ -12,7 +12,7 @@
   import Chats from "@/components/panes/Chats.svelte";
   import Project from "@/components/panes/Project.svelte";
   import Search from "@/components/panes/Search.svelte";
-  import Todo, { type EmbeddedTodo } from "@/components/panes/Todo.svelte";
+  import Todo from "@/components/panes/Todo.svelte";
   import Pane, { type PaneChrome } from "@/components/panes/Pane.svelte";
   import {
     collectNodeIdSet,
@@ -40,7 +40,12 @@
     setChatSessions,
     setProjectCost,
   } from "@/lib/stores/chats";
-  import { todosStore, refreshTodos as storeRefreshTodos, setTodos } from "@/lib/stores/todos";
+  import {
+    todosStore,
+    embeddedTodosStore,
+    refreshTodos as storeRefreshTodos,
+    refreshEmbeddedTodos as storeRefreshEmbeddedTodos,
+  } from "@/lib/stores/todos";
   import { knownTagsStore, refreshKnownTags as storeRefreshKnownTags, setKnownTags } from "@/lib/stores/tags";
   import { validationStore, setValidation } from "@/lib/stores/validation";
   import {
@@ -83,6 +88,7 @@
   import { projectChooser } from "@/lib/stores/projectChooser.svelte";
   import { projectSession } from "@/lib/stores/projectSession.svelte";
   import { aiSettings } from "@/lib/stores/aiSettings.svelte";
+  import { todoActions } from "@/lib/stores/todoActions.svelte";
   import TagManagerDialog from "@/components/dialogs/TagManagerDialog.svelte";
   import type {
     AssistantEntrySummary,
@@ -147,7 +153,6 @@
   let promptsPaneOpen = $state(false);
   let assistantsPaneOpen = $state(false);
   let chatsPaneOpen = $state(false);
-  let newTodo = $state("");
   // Outline group-header collapse state, keyed by StructureNode.id.
   // Same shape as the other collapsed-* maps so the refactor stays
   // consistent across panes. Persisted per-project to localStorage so
@@ -211,6 +216,11 @@
     aiSettings.onProjectUpdated = (project) => {
       appState = { name: "projectOpen", project };
     };
+    // Todo + search actions funnel through App's run()/status; a new todo scopes
+    // to the focused scene (or stays project-level when none is open).
+    todoActions.run = run;
+    todoActions.setStatus = (message) => { status = message; };
+    todoActions.getActiveSceneId = () => activeScene?.id;
     // Confirm actions flow through App's run() so errors surface in `error`.
     confirmService.onRun = run;
     // Project chooser drives only its modals; the projectSession controller
@@ -817,64 +827,6 @@
     return "";
   }
 
-  async function addTodo() {
-    if (!newTodo.trim()) return;
-    await run(async () => {
-      setTodos((await api.createTodo(newTodo.trim(), activeScene?.id)).items);
-      newTodo = "";
-    });
-  }
-
-  async function toggleTodo(item: TodoItem) {
-    await run(async () => {
-      setTodos((await api.updateTodo(item.id, { status: item.status === "open" ? "done" : "open" })).items);
-    });
-  }
-
-  async function updateTodoText(item: TodoItem, text: string) {
-    const trimmed = text.trim();
-    if (!trimmed || trimmed === item.text) return;
-    await run(async () => {
-      setTodos((await api.updateTodo(item.id, { text: trimmed })).items);
-    });
-  }
-
-  async function deleteTodo(item: TodoItem) {
-    await run(async () => {
-      setTodos((await api.deleteTodo(item.id)).items);
-      status = "Deleted TODO";
-    });
-  }
-
-  async function deleteCompletedTodos() {
-    const completedTodos = todos.filter((item) => item.status === "done");
-    const completedEmbeddedTodos = editorPanes.allEmbeddedTodos.filter((item) => item.status === "done");
-    if (completedTodos.length === 0 && completedEmbeddedTodos.length === 0) return;
-    await run(async () => {
-      let nextTodos = todos;
-      for (const item of completedTodos) {
-        nextTodos = (await api.deleteTodo(item.id)).items;
-      }
-      setTodos(nextTodos.filter((item) => !item.anchor_id));
-      for (const item of completedEmbeddedTodos) {
-        editorPanes.deleteEmbeddedTodo(item);
-      }
-      const deletedCount = completedTodos.length + completedEmbeddedTodos.length;
-      status = `Deleted ${deletedCount} completed TODO${deletedCount === 1 ? "" : "s"}`;
-    });
-  }
-
-  function handleTodoTextKeydown(event: KeyboardEvent, item: TodoItem) {
-    const input = event.currentTarget as HTMLTextAreaElement;
-    if (event.key === "Enter" && event.ctrlKey) {
-      event.preventDefault();
-      input.blur();
-    } else if (event.key === "Escape") {
-      input.value = item.text;
-      input.blur();
-    }
-  }
-
   async function validateProject() {
     await run(async () => {
       const result = await api.validateProject();
@@ -889,35 +841,8 @@
       setValidation(result);
       await refreshStructure();
       await refreshTodos();
+      await storeRefreshEmbeddedTodos();
       status = result.valid ? "Project repair complete" : "Project repair complete with remaining issues";
-    });
-  }
-
-  async function openSearchHit(hit: SearchHit) {
-    if (hit.file_id === "project") return;
-    await run(async () => {
-      if (hit.kind === "lore") {
-        await editorPanes.openLore(hit.file_id);
-      } else {
-        await editorPanes.openScene(hit.file_id);
-      }
-      if (hit.kind === "scene" && hit.todo_id) {
-        window.setTimeout(() => editorPanes.highlightEmbeddedTodoInOpenPane(hit.file_id, hit.todo_id!), 0);
-      }
-    });
-  }
-
-  async function openEmbeddedTodo(item: EmbeddedTodo) {
-    await run(async () => {
-      await editorPanes.openScene(item.sceneId);
-      window.setTimeout(() => editorPanes.highlightEmbeddedTodoInOpenPane(item.sceneId, item.id), 0);
-    });
-  }
-
-  async function openFileTodo(item: TodoItem) {
-    if (!item.scene_id) return;
-    await run(async () => {
-      await editorPanes.openScene(item.scene_id!);
     });
   }
 
@@ -952,6 +877,16 @@
   });
   let activeScene = $derived(focusedEditorPane?.document?.type === "scene" ? focusedEditorPane.scene : null);
   let todos = $derived($todosStore);
+  // The rebuildable embedded-todo index (GH #45); the Todo pane reads it directly,
+  // and each editor pane derives its own status hint from the matching scene.
+  let embeddedTodos = $derived($embeddedTodosStore);
+  function embeddedHintForScene(sceneId: string): string {
+    const items = embeddedTodos.filter((item) => item.scene_id === sceneId);
+    if (items.length === 0) return "";
+    const open = items.filter((item) => item.status === "open").length;
+    const done = items.length - open;
+    return `${open} open embedded TODO${open === 1 ? "" : "s"} · ${done} completed.`;
+  }
   let validation = $derived($validationStore);
   let metadataSchema = $derived($metadataSchemaStore);
   let promptEntries = $derived($promptEntriesStore);
@@ -1231,7 +1166,7 @@
         metadataReload={editorPanes.metadataReloadsByPane[editorPane.id] ?? null}
         titleReload={editorPanes.titleReloadsByPane[editorPane.id] ?? null}
         dirty={editorPane.dirty}
-        todoStatusHint={editorPane.document?.type === "scene" && editorPane.scene && sceneEntryHasBody(editorPane.scene as Scene) ? (editorPanes.embeddedTodoStatusHintsByPane[editorPane.id] ?? "") : ""}
+        todoStatusHint={editorPane.document?.type === "scene" && editorPane.scene && sceneEntryHasBody(editorPane.scene as Scene) ? embeddedHintForScene(editorPane.scene.id) : ""}
         onFocus={() => focusPane(editorPane.id)}
         onChange={(detail) =>
           editorPanes.updateEditorPaneDraft(
@@ -1244,7 +1179,6 @@
             detail.inputs,
           )}
         onCustomData={(detail) => schemaPanes?.openForCustomData(detail.entryType, detail.kind)}
-        onEmbeddedTodos={(detail) => editorPanes.updateEmbeddedTodosForPane(editorPane.id, detail.todos)}
         onNavigate={(detail) => navigateToBacklink(detail.id, detail.kind)}
         onOpenChat={(detail) => openChatFromPromptEntry(detail.entry, detail.inputs, detail.sceneId, detail.assistantId)}
       />
@@ -1257,10 +1191,10 @@
       <button
         class="pin-button danger"
         type="button"
-        disabled={!todos.some((item) => item.status === "done") && !editorPanes.allEmbeddedTodos.some((item) => item.status === "done")}
+        disabled={!todos.some((item) => item.status === "done") && !embeddedTodos.some((item) => item.status === "done")}
         title="Delete all completed TODOs"
         onmousedown={(event) => event.stopPropagation()}
-        onclick={deleteCompletedTodos}
+        onclick={() => todoActions.deleteCompletedTodos()}
       >
         Delete Done
       </button>
@@ -1268,25 +1202,25 @@
     <div class="pane-content">
       <Todo
         {todos}
-        embeddedTodos={editorPanes.allEmbeddedTodos}
-        bind:newTodo
-        onAddTodo={addTodo}
-        onToggleTodo={toggleTodo}
-        onUpdateTodoText={updateTodoText}
-        onDeleteTodo={deleteTodo}
-        onTodoTextKeydown={handleTodoTextKeydown}
-        onOpenFileTodo={openFileTodo}
-        onToggleEmbeddedTodo={(item) => editorPanes.toggleEmbeddedTodo(item)}
-        onUpdateEmbeddedTodoNote={(item, note) => editorPanes.updateEmbeddedTodoNote(item, note)}
-        onOpenEmbeddedTodo={openEmbeddedTodo}
-        onDeleteEmbeddedTodo={(item) => editorPanes.deleteEmbeddedTodo(item)}
+        {embeddedTodos}
+        bind:newTodo={todoActions.newTodo}
+        onAddTodo={() => todoActions.addTodo()}
+        onToggleTodo={(item) => todoActions.toggleTodo(item)}
+        onUpdateTodoText={(item, text) => todoActions.updateTodoText(item, text)}
+        onDeleteTodo={(item) => todoActions.deleteTodo(item)}
+        onTodoTextKeydown={(event, item) => todoActions.handleTodoTextKeydown(event, item)}
+        onOpenFileTodo={(item) => todoActions.openFileTodo(item)}
+        onToggleEmbeddedTodo={(item) => todoActions.toggleEmbeddedTodo(item)}
+        onUpdateEmbeddedTodoNote={(item, note) => todoActions.updateEmbeddedTodoNote(item, note)}
+        onOpenEmbeddedTodo={(item) => todoActions.openEmbeddedTodo(item)}
+        onDeleteEmbeddedTodo={(item) => todoActions.deleteEmbeddedTodo(item)}
       />
     </div>
   </Pane>
 
   <Pane id="search" title="Search" paneClass="search-pane" hidden={!isPaneVisible("search")} style={paneStyle("search")} chrome={paneChrome}>
     <div class="pane-content">
-      <Search {run} onOpenHit={openSearchHit} />
+      <Search {run} onOpenHit={(hit) => todoActions.openSearchHit(hit)} />
     </div>
   </Pane>
 

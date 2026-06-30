@@ -7,7 +7,6 @@
   import CodeBodyView from "@/components/editor/body/CodeBodyView.svelte";
   import ProseBodyView from "@/components/editor/body/ProseBodyView.svelte";
   import ChatBodyView from "@/components/editor/body/ChatBodyView.svelte";
-  import type { EmbeddedTodo } from "@/components/editor/body/ProseBodyView.svelte";
   import { coerceInputValue, type EntryInputDraft } from "@/lib/utils/promptInputs";
   import { api } from "@/lib/api";
   import { formatCostEur } from "@/lib/utils/money";
@@ -63,7 +62,6 @@
     onChange?: ((payload: { title: string; body: string; status: string; entryType: string; metadata: EntryMetadata; inputs?: PromptInputDefinition[] }) => void) | undefined;
     onFocus?: (() => void) | undefined;
     onCustomData?: ((payload: { entryType: string; kind: DocumentKind }) => void) | undefined;
-    onEmbeddedTodos?: ((payload: { todos: EmbeddedTodo[] }) => void) | undefined;
     onNavigate?: ((payload: { id: string; kind: string }) => void) | undefined;
     onOpenChat?: ((payload: { entry: PromptEntrySummary; inputs: Record<string, unknown>; sceneId: string | null; assistantId: string }) => void) | undefined;
   }
@@ -87,7 +85,6 @@
     onChange = undefined,
     onFocus = undefined,
     onCustomData = undefined,
-    onEmbeddedTodos = undefined,
     onNavigate = undefined,
     onOpenChat = undefined
   }: Props = $props();
@@ -618,16 +615,13 @@
     await proseBodyView?.runPromptEntryWithInputsExternal(entry, values, pickedAssistantId);
   }
 
-  // Embedded-TODO exports — forwarded to ProseBodyView. App.svelte calls
-  // these via `editorPaneComponents[pane.id].xxx(...)`; keeping them
-  // exported on NodeEditor preserves the existing pane-component
-  // contract without an App-side change.
-  export function updateEmbeddedTodo(todoId: string, updates: { status?: "open" | "done"; note?: string }) {
-    proseBodyView?.updateEmbeddedTodo(todoId, updates);
-  }
-
-  export function deleteEmbeddedTodo(todoId: string) {
-    proseBodyView?.deleteEmbeddedTodo(todoId);
+  // Editor-pane handle exports — forwarded to ProseBodyView and called by the
+  // editorPanes controller via `editorPaneComponents[pane.id].xxx(...)`.
+  // reloadScene re-seeds the TipTap doc from a server scene (the controller
+  // calls it to reconcile an open pane after an out-of-band embedded-TODO
+  // mutation, GH #45); highlightEmbeddedTodo scrolls to a marker.
+  export function reloadScene(nextScene: EditableDocument) {
+    return proseBodyView?.loadScene(nextScene);
   }
 
   export function highlightEmbeddedTodo(todoId: string) {
@@ -932,7 +926,6 @@
       {documentLabel}
       onBodyChange={emitChange}
       onFocus={() => onFocus?.()}
-      onEmbeddedTodos={(payload) => onEmbeddedTodos?.(payload)}
       onOpenChat={(payload) => onOpenChat?.(payload)}
       onRequestInputsDialog={handleRequestInputsDialog}
     />

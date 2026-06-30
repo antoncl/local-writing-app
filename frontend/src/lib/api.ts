@@ -23,6 +23,7 @@ import type {
   ChatSessionList,
   CreateChatSessionRequest,
   DirectoryListing,
+  EmbeddedTodoList,
   EntryTypeDefinition,
   GroupApplication,
   KnownTags,
@@ -670,6 +671,23 @@ export const api = {
   },
   deleteTodo(todoId: string) {
     return request<TodoDocument>(`/todos/${todoId}`, {
+      method: "DELETE",
+    });
+  },
+  // Embedded (in-prose) todos: a rebuildable index over scenes, plus intentful
+  // single-marker mutators that rewrite one marker without a full body save
+  // (GH #45). The mutators return the updated scene so an open pane reconciles.
+  getEmbeddedTodos() {
+    return request<EmbeddedTodoList>("/todos/embedded");
+  },
+  updateEmbeddedTodo(sceneId: string, todoId: string, updates: { status?: "open" | "done"; note?: string }) {
+    return request<Scene>(`/scenes/${sceneId}/todos/${todoId}`, {
+      method: "PATCH",
+      body: JSON.stringify(updates),
+    });
+  },
+  deleteEmbeddedTodo(sceneId: string, todoId: string) {
+    return request<Scene>(`/scenes/${sceneId}/todos/${todoId}`, {
       method: "DELETE",
     });
   },

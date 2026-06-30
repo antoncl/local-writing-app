@@ -1,15 +1,3 @@
-<script lang="ts" module>
-  // Re-exported by NodeEditor / App.svelte for the embedded-todos dispatch
-  // shape. Lives in <script module> because Svelte 5 disallows type exports
-  // from instance scripts.
-  export type EmbeddedTodo = {
-    id: string;
-    text: string;
-    status: "open" | "done";
-    note: string;
-  };
-</script>
-
 <!--
   ProseBodyView — body region for entry types with body_shape === "prose"
   (today: scenes and lore). Owns the TipTap editor, all custom extensions
@@ -145,7 +133,6 @@
     // NodeEditor (the funnel) passes these.
     onBodyChange?: () => void;
     onFocus?: () => void;
-    onEmbeddedTodos?: (payload: { todos: EmbeddedTodo[] }) => void;
     onOpenChat?: (payload: { entry: PromptEntrySummary; inputs: Record<string, unknown>; sceneId: string | null; assistantId: string }) => void;
     onRequestInputsDialog?: (payload: {
       entry: PromptEntrySummary;
@@ -169,7 +156,6 @@
     characterCostUsd = $bindable({}),
     onBodyChange,
     onFocus,
-    onEmbeddedTodos,
     onOpenChat,
     onRequestInputsDialog,
   }: Props = $props();
@@ -379,7 +365,6 @@
     enforceUniqueTodoAnchors();
     syncTodoAnchorDomState(true);
     updateLiveWordCount();
-    dispatchEmbeddedTodos();
     syncEditorEmpty();
     updateSelectionMenu();
     updateTableMenu();
@@ -390,17 +375,6 @@
     loadedSceneId = null;
     liveWordCount = 0;
     syncEditorEmpty();
-  }
-
-  export function updateEmbeddedTodo(todoId: string, updates: { status?: "open" | "done"; note?: string }): void {
-    if (!editor) return;
-    updateTodoMark(todoId, updates);
-  }
-
-  export function deleteEmbeddedTodo(todoId: string): void {
-    if (removeTodoAnchors((anchorId) => anchorId === todoId)) {
-      onBodyChange?.();
-    }
   }
 
   export function highlightEmbeddedTodo(todoId: string): void {
@@ -1718,60 +1692,6 @@
     }
   }
 
-  function dispatchEmbeddedTodos() {
-    onEmbeddedTodos?.({ todos: collectEmbeddedTodos() });
-  }
-
-  function collectEmbeddedTodos(): EmbeddedTodo[] {
-    const todosById = new Map<string, EmbeddedTodo>();
-    if (!editor) return [];
-    const markType = editor.state.schema.marks.todoAnchor;
-    if (!markType) return [];
-    editor.state.doc.descendants((node) => {
-      if (!node.isText) return true;
-      for (const mark of node.marks) {
-        if (mark.type !== markType) continue;
-        const id = String(mark.attrs.anchorId ?? "");
-        if (!id) continue;
-        const existing = todosById.get(id);
-        const text = node.textContent;
-        todosById.set(id, {
-          id,
-          text: existing ? `${existing.text}${text}` : text,
-          status: mark.attrs.status === "done" ? "done" : "open",
-          note: String(mark.attrs.note ?? ""),
-        });
-      }
-      return true;
-    });
-    return Array.from(todosById.values());
-  }
-
-  function updateTodoMark(todoId: string, updates: { status?: "open" | "done"; note?: string }) {
-    if (!editor || reconcilingTodoAnchors) return;
-    const markType = editor.state.schema.marks.todoAnchor;
-    if (!markType) return;
-    let transaction = editor.state.tr;
-    editor.state.doc.descendants((node, position) => {
-      if (!node.isText) return true;
-      for (const mark of node.marks) {
-        if (mark.type !== markType || mark.attrs.anchorId !== todoId) continue;
-        const attrs = {
-          ...mark.attrs,
-          status: updates.status ?? mark.attrs.status,
-          note: updates.note ?? mark.attrs.note,
-        };
-        transaction = transaction
-          .removeMark(position, position + node.nodeSize, mark)
-          .addMark(position, position + node.nodeSize, markType.create(attrs));
-      }
-      return true;
-    });
-    if (transaction.docChanged) {
-      editor.view.dispatch(transaction);
-      onBodyChange?.();
-    }
-  }
 
   // ---------- Editor lifecycle ----------
   function isEmptyTextblock(view: EditorView) {
@@ -1895,16 +1815,15 @@
   // compose its full save payload (title + body + status + ...).
   function handleEditorUpdate() {
     if (!enforceUniqueTodoAnchors()) {
-      // Skip the body-change emit if the reconciler made a doc change —
-      // it queues its own emit via the dispatch in deleteEmbeddedTodo /
-      // updateTodoMark flows. The non-reconciler edits below need it.
+      // Skip the body-change emit when the unique-anchor reconciler made a doc
+      // change — its own transaction re-fires onUpdate, so the non-reconciler
+      // edits below run on that second pass.
       syncEditorEmpty();
       updateSelectionMenu();
       updateTableMenu();
       updateSlashMenuFromContent();
       syncTodoAnchorDomState(true);
       updateLiveWordCount();
-      dispatchEmbeddedTodos();
       onBodyChange?.();
     }
     if (aiSuggestionId) updateAIToolbarPosition();

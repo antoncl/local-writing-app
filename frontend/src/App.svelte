@@ -77,6 +77,14 @@
   import { focusedDocumentStore, pinnedKeysStore } from "@/lib/stores/editorFocus";
   import { paneLayout, isEditorPaneId } from "@/lib/stores/paneLayout.svelte";
   import { AutosaveScheduler } from "@/lib/editor-core/autosave";
+  import {
+    type DocumentRef,
+    type EditorPaneState,
+    createEmptyEditorPane,
+    documentStatus,
+    isEditorPaneDirty,
+    computeDraftTitleOverrides,
+  } from "@/lib/editor-core/editorPaneModel";
   import { confirmService } from "@/lib/stores/confirmService.svelte";
   import { projectChooser } from "@/lib/stores/projectChooser.svelte";
   import TagManagerDialog from "@/components/dialogs/TagManagerDialog.svelte";
@@ -119,30 +127,10 @@
   type AppState =
     | { name: "needsProject" }
     | { name: "projectOpen"; project: ProjectInfo };
-  type DocumentRef = { type: "scene" | "lore" | "prompt" | "assistant" | "project" | "structure_node" | "chat" | "research"; id: string };
   // TreeConfig (the per-kind manuscript/research tree contract) + the tree
   // rendering and inline CRUD now live in Tree.svelte; App owns the structure
   // data, the editor-pane coupling (delete, dblclick-open), and collapse state.
   type MetadataReloadSignal = { token: number; metadata: EntryMetadata; status: string; entryType: string };
-  type EditorPaneState = {
-    id: string;
-    document: DocumentRef | null;
-    scene: EditableDocument | null;
-    pinned: boolean;
-    dirty: boolean;
-    draftTitle: string;
-    draftMarkdown: string;
-    draftStatus: string;
-    draftEntryType: string;
-    draftMetadata: EntryMetadata;
-    // Per-entry prompt inputs. Only meaningful when document.type === "prompt";
-    // ignored for other kinds. Persisted in the entry's YAML on save.
-    draftInputs: PromptInputDefinition[];
-    saving: boolean;
-    // True for ~2s after a successful save so the pane chip can briefly
-    // show "Saved". Reset whenever the pane becomes dirty again.
-    recentlySaved: boolean;
-  };
 
   let projectPath = $state("");
   let projectTitle = $state("Untitled Project");
@@ -235,18 +223,6 @@
   let allEmbeddedTodos: EmbeddedTodo[] = $state([]);
 
 
-  function computeDraftTitleOverrides(panes: EditorPaneState[]): Map<string, string> {
-    const map = new Map<string, string>();
-    for (const pane of panes) {
-      const sceneId = pane.scene?.id;
-      if (!sceneId) continue;
-      const trimmed = pane.draftTitle.trim();
-      if (trimmed && trimmed !== pane.scene?.title) {
-        map.set(sceneId, trimmed);
-      }
-    }
-    return map;
-  }
 
   // Persisted "what was open" — survives reload (HMR or browser refresh) so
   // the user doesn't lose their seat. Cleared on a failed re-open so a
@@ -365,25 +341,6 @@
       addMenuPosition = null;
     }
   }
-
-  function createEmptyEditorPane(id: string): EditorPaneState {
-    return {
-      id,
-      document: null,
-      scene: null,
-      pinned: false,
-      dirty: false,
-      draftTitle: "",
-      draftMarkdown: "",
-      draftStatus: "draft",
-      draftEntryType: "scene",
-      draftMetadata: {},
-      draftInputs: [],
-      saving: false,
-      recentlySaved: false,
-    };
-  }
-
 
   function openProjectWorkspace(nextProject: ProjectInfo) {
     resetEditorWorkspace();
@@ -1534,49 +1491,6 @@
 
   function cloneMetadata(metadata: EntryMetadata) {
     return JSON.parse(JSON.stringify(metadata ?? {})) as EntryMetadata;
-  }
-
-  function metadataEqual(left: EntryMetadata, right: EntryMetadata) {
-    return JSON.stringify(left ?? {}) === JSON.stringify(right ?? {});
-  }
-
-  function bodiesEqual(left: string | null | undefined, right: string | null | undefined) {
-    // The backend normalizes every entry body on write (`body.rstrip() + "\n"`)
-    // but the read path only lstrips, so the round-tripped server baseline
-    // always carries a trailing newline the editor draft lacks. A raw `!==`
-    // would mark an untouched pane perpetually dirty, autosaving every 6s
-    // forever. Compare ignoring trailing whitespace (matching the backend's
-    // `rstrip`) so an unedited pane converges to clean; trailing whitespace
-    // can never persist anyway, so nothing meaningful is masked.
-    return (left ?? "").replace(/\s+$/, "") === (right ?? "").replace(/\s+$/, "");
-  }
-
-  function isEditorPaneDirty(
-    scene: EditableDocument | null,
-    title: string,
-    body: string,
-    status: string,
-    entryType: string,
-    metadata: EntryMetadata,
-    inputs?: PromptInputDefinition[],
-  ) {
-    if (!scene) return false;
-    if (title !== scene.title) return true;
-    if (!bodiesEqual(body, scene.body)) return true;
-    if (documentStatus(scene) ? status !== documentStatus(scene) : false) return true;
-    if (entryType !== scene.entry_type) return true;
-    if (!metadataEqual(metadata, scene.metadata ?? {})) return true;
-    // Prompt-only: inputs are a per-entry array of definitions. Compare the
-    // serialised form so reordering / type changes are detected.
-    const sceneInputs = (scene as { inputs?: PromptInputDefinition[] }).inputs;
-    if (inputs !== undefined && sceneInputs !== undefined) {
-      if (JSON.stringify(inputs) !== JSON.stringify(sceneInputs)) return true;
-    }
-    return false;
-  }
-
-  function documentStatus(document: EditableDocument | null) {
-    return document && "status" in document ? document.status : "";
   }
 
   async function refreshOpenEditorPaneBaselines(transformDraftMetadata?: (metadata: EntryMetadata) => EntryMetadata) {

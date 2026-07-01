@@ -121,5 +121,96 @@ class LoreMutationScanTests(unittest.TestCase):
         self.assertEqual(getattr(ctx.exception, "status_code", None), 404)
 
 
+class LoreMutationResolverTests(unittest.TestCase):
+    """The mutations index + effective_state resolver (#51). Proves the #33
+    acceptance shape at the service level: an earlier scene sees the old value,
+    a later scene the new one, resolution is position-granular within a scene,
+    and the latest-started record wins."""
+
+    def setUp(self) -> None:
+        self.temp_dir = TemporaryDirectory()
+        self.root = Path(self.temp_dir.name) / "project"
+        svc.__init__()
+        svc.create_project(self.root, "Resolver Tests")
+        self.client = TestClient(app)
+        # Three scenes in manuscript order: s1 (before), s2 (rank->Captain),
+        # s3 (rank->Commodore).
+        self.s1 = self._new_scene("Scene One", "Honor commands the fleet.")
+        self.s2 = self._new_scene(
+            "Scene Two",
+            "Before. <!-- mutate:entity=honor;field=rank;value=Captain;id=m1 --> After.",
+        )
+        self.s3 = self._new_scene(
+            "Scene Three",
+            "Later still. <!-- mutate:entity=honor;field=rank;value=Commodore;id=m2 -->",
+        )
+
+    def tearDown(self) -> None:
+        self.temp_dir.cleanup()
+
+    def _new_scene(self, title: str, body: str) -> str:
+        created = self.client.post("/api/scenes", json={"title": title})
+        self.assertEqual(created.status_code, 200, created.text)
+        scene_id = created.json()["id"]
+        saved = self.client.put(
+            f"/api/scenes/{scene_id}", json={"title": title, "body": body}
+        )
+        self.assertEqual(saved.status_code, 200, saved.text)
+        return scene_id
+
+    # --- index ------------------------------------------------------------
+
+    def test_index_orders_records_by_manuscript_position(self) -> None:
+        index = svc.build_mutations_index()
+        records = index.by_entity["honor"]
+        self.assertEqual([m.marker_id for m in records], ["m1", "m2"])
+        # Manuscript order reflects scene-creation order here.
+        self.assertLess(index.scene_order[self.s1], index.scene_order[self.s2])
+        self.assertLess(index.scene_order[self.s2], index.scene_order[self.s3])
+
+    def test_index_version_changes_when_a_marker_changes(self) -> None:
+        before = svc.build_mutations_index().version
+        svc.update_mutation(
+            self.s2, "m1", UpdateMutationRequest(value="Commander")
+        )
+        self.assertNotEqual(before, svc.build_mutations_index().version)
+
+    # --- effective_state: manuscript-order redaction (#33) ---------------
+
+    def test_earlier_scene_sees_no_override(self) -> None:
+        self.assertEqual(svc.effective_state("honor", self.s1), {})
+
+    def test_mutation_scene_and_after_see_new_value(self) -> None:
+        self.assertEqual(svc.effective_state("honor", self.s2), {"rank": "Captain"})
+
+    def test_latest_started_record_wins(self) -> None:
+        # By scene 3 the later rank record shadows the earlier one.
+        self.assertEqual(svc.effective_state("honor", self.s3), {"rank": "Commodore"})
+
+    def test_unknown_scene_yields_base_only(self) -> None:
+        self.assertEqual(svc.effective_state("honor", "does-not-exist"), {})
+
+    def test_unmutated_entity_yields_empty(self) -> None:
+        self.assertEqual(svc.effective_state("nimitz", self.s2), {})
+
+    # --- position-granular resolution within a scene ----------------------
+
+    def test_position_before_marker_is_not_live(self) -> None:
+        index = svc.build_mutations_index()
+        offset = index.by_entity["honor"][0].offset
+        # A cursor just before the marker sees the old (base) value.
+        self.assertEqual(
+            svc.effective_state("honor", self.s2, position=offset - 1, index=index), {}
+        )
+
+    def test_position_at_or_after_marker_is_live(self) -> None:
+        index = svc.build_mutations_index()
+        offset = index.by_entity["honor"][0].offset
+        self.assertEqual(
+            svc.effective_state("honor", self.s2, position=offset, index=index),
+            {"rank": "Captain"},
+        )
+
+
 if __name__ == "__main__":
     unittest.main()

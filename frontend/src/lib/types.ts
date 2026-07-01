@@ -251,6 +251,7 @@ export type PromptInputType =
   | "entity_ref"
   | "entity_ref_list"
   | "context_pick"
+  | "scene_ref"
   | "color";
 
 // Shape carried in PromptInputDefinition.target when type === "context_pick".

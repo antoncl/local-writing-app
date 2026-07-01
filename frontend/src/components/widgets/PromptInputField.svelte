@@ -39,11 +39,16 @@
   function refStubField(): MetadataFieldDefinition {
     // entity_ref / entity_ref_list inputs persist their picker config as a
     // NodePickerConfig under `target` (post-#40). ReferencePicker reads it
-    // via `picker_config`, the same shape used on the field side.
+    // via `picker_config`, the same shape used on the field side. A scene_ref
+    // (#60) is a single scene reference — always constrained to scenes, so it
+    // borrows the single-ref widget with a fixed `{ kinds: ["scene"] }` config.
     const picker =
       input.target && typeof input.target === "object"
         ? (input.target as unknown as NodePickerConfig)
         : null;
+    if (input.type === "scene_ref") {
+      return { name: input.label || input.name, type: "entity_ref", options: [], picker_config: { kinds: ["scene"] } };
+    }
     return {
       name: input.label || input.name,
       type: input.type === "entity_ref_list" ? "entity_ref_list" : "entity_ref",
@@ -127,7 +132,7 @@
       <option value={option.value}>{option.label ?? option.value}</option>
     {/each}
   </select>
-{:else if input.type === "entity_ref" || input.type === "entity_ref_list"}
+{:else if input.type === "entity_ref" || input.type === "entity_ref_list" || input.type === "scene_ref"}
   <ReferencePicker
     field={refStubField()}
     value={decodeRefValue(value)}

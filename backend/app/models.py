@@ -194,6 +194,9 @@ PromptInputType = Literal[
     "entity_ref",
     "entity_ref_list",
     "context_pick",
+    # A single scene reference used as the mutation *resolution scene* (#60) —
+    # a setting, not injected content (distinct from context_pick, ADR-0012).
+    "scene_ref",
     "color",
 ]
 

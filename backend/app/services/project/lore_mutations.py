@@ -11,11 +11,12 @@ it sees the old value, prose after it the new; ADR-0003). The scene is
 authoritative and the marker travels with the prose, so moving/deleting a scene
 moves/deletes its mutations with it — no orphan management (ADR-0001).
 
-This mixin owns the marker pattern, the per-scene scan, and the intentful
-single-marker mutators (rewrite/remove without a full body save). The
-project-wide index and the effective-state resolver that read these markers
-live in a separate slice (#51). `ProjectService` composes it; shared helpers
-(`read_scene`, `_path_for_node_id`, `_write_scene_file`) resolve via MRO.
+This mixin owns the marker pattern and the per-scene scan; the atomic
+single-marker rewrite/remove machinery (without a full body save) is shared with
+the other in-prose marker kinds via `MarkerMixin`. The project-wide index and the
+effective-state resolver that read these markers live in a separate slice (#51).
+`ProjectService` composes it; shared helpers (`read_scene`, `_path_for_node_id`,
+`_write_scene_file`) resolve via MRO.
 
 `MUTATION_MARKER_PATTERN` lives here (its single home, alongside the code that
 rewrites markers with it), mirroring `EMBEDDED_TODO_PATTERN`.
@@ -37,6 +38,7 @@ from app.models import (
     UpdateMutationRequest,
 )
 from app.services.project.errors import ProjectServiceError
+from app.services.project.markers import MarkerMixin
 
 MUTATION_MARKER_PATTERN = re.compile(
     r"<!--\s*mutate:entity=([A-Za-z0-9_-]+);field=([A-Za-z0-9_.-]+);"
@@ -66,7 +68,7 @@ class MutationsIndex:
     scene_order: dict[str, int] = dc_field(default_factory=dict)
 
 
-class LoreMutationsMixin:
+class LoreMutationsMixin(MarkerMixin):
     def _scan_scene_mutations(self, scene: Scene) -> Iterator[MutationMarker]:
         """Yield every mutation marker in one scene body, in prose order,
         carrying each marker's char offset (needed for position-granular
@@ -77,16 +79,19 @@ class LoreMutationsMixin:
         """Regex-walk one raw body for markers. Split from `_scan_scene_mutations`
         so validation (#53) can scan a body it already read (front-matter walk)
         without materializing a Scene."""
-        for match in MUTATION_MARKER_PATTERN.finditer(body):
-            yield MutationMarker(
+        return self._scan_body_markers(
+            body,
+            MUTATION_MARKER_PATTERN,
+            lambda match, line: MutationMarker(
                 marker_id=match.group(4),
                 entity_id=match.group(1),
                 field=match.group(2),
                 value=unquote(match.group(3)),
                 scene_id=scene_id,
                 offset=match.start(),
-                line=body[: match.start()].count("\n") + 1,
-            )
+                line=line,
+            ),
+        )
 
     # ----- validation (#53) ----------------------------------------------
 
@@ -272,56 +277,45 @@ class LoreMutationsMixin:
     ) -> Scene:
         """Rewrite a single mutation marker's entity/field/value in place, without
         a full body save. Returns the updated scene so an open editor pane can
-        reconcile."""
-        scene = self.read_scene(scene_id)
-        new_body, found = self._rewrite_mutation(scene.body, marker_id, request)
-        if not found:
-            raise ProjectServiceError(
-                f"Mutation {marker_id} does not exist in scene {scene.id}.", 404
-            )
-        # Like save_scene, a marker edit never blocks on value validity — the
-        # editor supplies typed values; validate_project reports strays.
-        path = self._path_for_node_id(scene.id, "scene")
-        self._write_scene_file(path, scene.model_copy(update={"body": new_body}))
-        return self.read_scene(scene.id)
+        reconcile. Like save_scene, a marker edit never blocks on value
+        validity — the editor supplies typed values; validate_project reports
+        strays."""
+        return self._apply_scene_marker_edit(
+            scene_id,
+            "Mutation",
+            marker_id,
+            lambda body: self._rewrite_single_marker(
+                body,
+                MUTATION_MARKER_PATTERN,
+                4,
+                marker_id,
+                lambda match: self._render_mutation(match, marker_id, request),
+            ),
+        )
 
     def delete_mutation(self, scene_id: str, marker_id: str) -> Scene:
         """Remove a single mutation marker. The marker wraps no prose, so removal
         just drops the comment. Returns the updated scene."""
-        scene = self.read_scene(scene_id)
-        found = False
+        return self._apply_scene_marker_edit(
+            scene_id,
+            "Mutation",
+            marker_id,
+            lambda body: self._rewrite_single_marker(
+                body,
+                MUTATION_MARKER_PATTERN,
+                4,
+                marker_id,
+                lambda match: "",  # point marker: removal drops the comment
+            ),
+        )
 
-        def replace(match: re.Match[str]) -> str:
-            nonlocal found
-            if match.group(4) != marker_id:
-                return match.group(0)
-            found = True
-            return ""
-
-        new_body = MUTATION_MARKER_PATTERN.sub(replace, scene.body)
-        if not found:
-            raise ProjectServiceError(
-                f"Mutation {marker_id} does not exist in scene {scene.id}.", 404
-            )
-        path = self._path_for_node_id(scene.id, "scene")
-        self._write_scene_file(path, scene.model_copy(update={"body": new_body}))
-        return self.read_scene(scene.id)
-
-    def _rewrite_mutation(
-        self, body: str, marker_id: str, request: UpdateMutationRequest
-    ) -> tuple[str, bool]:
-        found = False
-
-        def replace(match: re.Match[str]) -> str:
-            nonlocal found
-            if match.group(4) != marker_id:
-                return match.group(0)
-            found = True
-            entity = request.entity_id or match.group(1)
-            field = request.field or match.group(2)
-            # Re-encode only when a new value is supplied; otherwise keep the
-            # existing encoded value verbatim to avoid gratuitous diffs.
-            value = quote(request.value, safe="") if request.value is not None else match.group(3)
-            return f"<!-- mutate:entity={entity};field={field};value={value};id={marker_id} -->"
-
-        return MUTATION_MARKER_PATTERN.sub(replace, body), found
+    def _render_mutation(
+        self, match: re.Match[str], marker_id: str, request: UpdateMutationRequest
+    ) -> str:
+        """Rebuild a mutation marker from a match, applying `request`."""
+        entity = request.entity_id or match.group(1)
+        field = request.field or match.group(2)
+        # Re-encode only when a new value is supplied; otherwise keep the existing
+        # encoded value verbatim to avoid gratuitous diffs.
+        value = quote(request.value, safe="") if request.value is not None else match.group(3)
+        return f"<!-- mutate:entity={entity};field={field};value={value};id={marker_id} -->"

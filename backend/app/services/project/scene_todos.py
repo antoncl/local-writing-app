@@ -3,9 +3,10 @@
 In-scene TODO markers are HTML-comment anchors embedded in scene markdown.
 This mixin reads those anchors out of scenes and repairs orphaned / duplicated
 anchor comments — distinct from the project-level todo.yaml list (TodosMixin).
-`ProjectService` composes it; shared tooling (`read_scene`, `_write_scene_file`,
-`_path_for_node_id`, markdown IO, `_atomic_write`, the todo.yaml accessors)
-resolves via MRO.
+`ProjectService` composes it; the atomic capture-group substitution write is
+shared with the other in-prose marker kinds via `MarkerMixin`, and shared tooling
+(`read_scene`, `_write_scene_file`, `_path_for_node_id`, markdown IO,
+`_atomic_write`, the todo.yaml accessors) resolves via MRO.
 """
 
 from __future__ import annotations
@@ -13,13 +14,14 @@ from __future__ import annotations
 import re
 
 from app.services.project.errors import ProjectServiceError
+from app.services.project.markers import MarkerMixin
 
 TODO_ANCHOR_PATTERN = re.compile(
     r"<!--\s*todo-anchor:id=([A-Za-z0-9_-]+)\s*-->([\s\S]*?)<!--\s*/todo-anchor\s*-->",
 )
 
 
-class SceneTodoAnchorsMixin:
+class SceneTodoAnchorsMixin(MarkerMixin):
     def _extract_todo_anchor_ids(self, markdown: str) -> set[str]:
         return {match.group(1) for match in TODO_ANCHOR_PATTERN.finditer(markdown)}
 
@@ -78,33 +80,14 @@ class SceneTodoAnchorsMixin:
             self._write_yaml(root / "todo.yaml", todos.model_dump())
 
     def _remove_scene_anchor_comments(self, scene_id: str, anchor_ids: set[str]) -> None:
-        try:
-            path = self._path_for_node_id(scene_id, "scene")
-        except ProjectServiceError:
-            return
-        front_matter, body = self._read_markdown_with_front_matter(path)
-
         def replace_anchor(match: re.Match[str]) -> str:
             anchor_id = match.group(1)
             content = match.group(2)
             return content if anchor_id in anchor_ids else match.group(0)
 
-        repaired_body = TODO_ANCHOR_PATTERN.sub(replace_anchor, body)
-        if repaired_body == body:
-            return
-
-        if front_matter:
-            scene = self.read_scene(scene_id)
-            self._write_scene_file(path, scene.model_copy(update={"body": repaired_body}))
-        else:
-            self._atomic_write(path, repaired_body)
+        self._apply_scene_marker_repair(scene_id, TODO_ANCHOR_PATTERN, replace_anchor)
 
     def _remove_duplicate_scene_anchor_comments(self, scene_id: str) -> None:
-        try:
-            path = self._path_for_node_id(scene_id, "scene")
-        except ProjectServiceError:
-            return
-        front_matter, body = self._read_markdown_with_front_matter(path)
         seen_anchor_ids: set[str] = set()
 
         def replace_duplicate(match: re.Match[str]) -> str:
@@ -115,11 +98,4 @@ class SceneTodoAnchorsMixin:
             seen_anchor_ids.add(anchor_id)
             return match.group(0)
 
-        repaired_body = TODO_ANCHOR_PATTERN.sub(replace_duplicate, body)
-        if repaired_body == body:
-            return
-        if front_matter:
-            scene = self.read_scene(scene_id)
-            self._write_scene_file(path, scene.model_copy(update={"body": repaired_body}))
-        else:
-            self._atomic_write(path, repaired_body)
+        self._apply_scene_marker_repair(scene_id, TODO_ANCHOR_PATTERN, replace_duplicate)

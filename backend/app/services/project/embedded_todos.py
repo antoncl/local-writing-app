@@ -8,12 +8,12 @@ living inline in scene markdown:
 Unlike the todo.yaml list (TodosMixin) or the todo-anchor markers that LINK a
 todo.yaml item to a scene position (SceneTodoAnchorsMixin), these own their
 state inline. They are a **rebuildable index over scenes** — enumerable by
-scanning, never owned by a live editor pane. This mixin owns the marker pattern,
-the index read, and the intentful single-marker mutators (rewrite/remove without
-a full body save). `ProjectService` composes it; shared helpers
-(`_require_project`, `_scene_display_paths`, `_read_markdown_with_front_matter`,
-`_node_id_for_path`, `read_scene`, `_path_for_node_id`, `_write_scene_file`)
-resolve via MRO.
+scanning, never owned by a live editor pane. This mixin owns the marker pattern
+and the index read; the atomic single-marker rewrite/remove machinery is shared
+with the other in-prose marker kinds via `MarkerMixin`. `ProjectService`
+composes it; shared helpers (`_require_project`, `_scene_display_paths`,
+`_read_markdown_with_front_matter`, `_node_id_for_path`, `read_scene`,
+`_path_for_node_id`, `_write_scene_file`) resolve via MRO.
 
 `EMBEDDED_TODO_PATTERN` lives here (SearchMixin imports it) so the pattern has a
 single home alongside the code that rewrites markers with it.
@@ -31,14 +31,14 @@ from app.models import (
     Scene,
     UpdateEmbeddedTodoRequest,
 )
-from app.services.project.errors import ProjectServiceError
+from app.services.project.markers import MarkerMixin
 
 EMBEDDED_TODO_PATTERN = re.compile(
     r"<!--\s*embedded-todo:id=([A-Za-z0-9_-]+);status=(open|done);note=([^\s]*)\s*-->([\s\S]*?)<!--\s*/embedded-todo\s*-->",
 )
 
 
-class EmbeddedTodosMixin:
+class EmbeddedTodosMixin(MarkerMixin):
     def _scan_embedded_todos(self) -> Iterator[EmbeddedTodo]:
         """Yield every embedded todo across all scenes, by scanning the files.
         The single source for both the index read and search's todo scan."""
@@ -47,16 +47,20 @@ class EmbeddedTodosMixin:
         for path in (root / "scenes").rglob("*.md"):
             front_matter, body = self._read_markdown_with_front_matter(path, strict=True)
             scene_id = self._node_id_for_path(path, front_matter)
-            for match in EMBEDDED_TODO_PATTERN.finditer(body):
-                yield EmbeddedTodo(
+            scene_path = scene_paths.get(scene_id, str(path.relative_to(root)))
+            yield from self._scan_body_markers(
+                body,
+                EMBEDDED_TODO_PATTERN,
+                lambda match, line, scene_id=scene_id, scene_path=scene_path: EmbeddedTodo(
                     todo_id=match.group(1),
                     scene_id=scene_id,
                     status=match.group(2),
                     note=unquote(match.group(3)),
                     text=re.sub(r"\s+", " ", match.group(4)).strip(),
-                    line=body[: match.start()].count("\n") + 1,
-                    scene_path=scene_paths.get(scene_id, str(path.relative_to(root))),
-                )
+                    line=line,
+                    scene_path=scene_path,
+                ),
+            )
 
     def read_embedded_todos(self) -> EmbeddedTodoList:
         """The rebuildable embedded-todo index — editor-pane independent."""
@@ -68,56 +72,46 @@ class EmbeddedTodosMixin:
         """Rewrite a single embedded-todo marker's status and/or note in place,
         without a full body save. Returns the updated scene so an open editor
         pane can reconcile."""
-        scene = self.read_scene(scene_id)
-        new_body, found = self._rewrite_embedded_todo(scene.body, todo_id, request)
-        if not found:
-            raise ProjectServiceError(
-                f"Embedded TODO {todo_id} does not exist in scene {scene.id}.", 404
-            )
-        path = self._path_for_node_id(scene.id, "scene")
-        self._write_scene_file(path, scene.model_copy(update={"body": new_body}))
-        return self.read_scene(scene.id)
+        return self._apply_scene_marker_edit(
+            scene_id,
+            "Embedded TODO",
+            todo_id,
+            lambda body: self._rewrite_single_marker(
+                body,
+                EMBEDDED_TODO_PATTERN,
+                1,
+                todo_id,
+                lambda match: self._render_embedded_todo(match, request),
+            ),
+        )
 
     def delete_embedded_todo(self, scene_id: str, todo_id: str) -> Scene:
         """Remove a single embedded-todo marker, unwrapping its wrapped prose so
         the text survives. Returns the updated scene."""
-        scene = self.read_scene(scene_id)
-        found = False
+        return self._apply_scene_marker_edit(
+            scene_id,
+            "Embedded TODO",
+            todo_id,
+            lambda body: self._rewrite_single_marker(
+                body,
+                EMBEDDED_TODO_PATTERN,
+                1,
+                todo_id,
+                lambda match: match.group(4),  # unwrap the wrapped prose
+            ),
+        )
 
-        def replace(match: re.Match[str]) -> str:
-            nonlocal found
-            if match.group(1) != todo_id:
-                return match.group(0)
-            found = True
-            return match.group(4)
-
-        new_body = EMBEDDED_TODO_PATTERN.sub(replace, scene.body)
-        if not found:
-            raise ProjectServiceError(
-                f"Embedded TODO {todo_id} does not exist in scene {scene.id}.", 404
-            )
-        path = self._path_for_node_id(scene.id, "scene")
-        self._write_scene_file(path, scene.model_copy(update={"body": new_body}))
-        return self.read_scene(scene.id)
-
-    def _rewrite_embedded_todo(
-        self, body: str, todo_id: str, request: UpdateEmbeddedTodoRequest
-    ) -> tuple[str, bool]:
-        found = False
-
-        def replace(match: re.Match[str]) -> str:
-            nonlocal found
-            if match.group(1) != todo_id:
-                return match.group(0)
-            found = True
-            status = request.status or match.group(2)
-            # Re-encode only when a new note is supplied; otherwise keep the
-            # existing encoded note verbatim to avoid gratuitous diffs.
-            note = quote(request.note, safe="") if request.note is not None else match.group(3)
-            content = match.group(4)
-            return (
-                f"<!-- embedded-todo:id={todo_id};status={status};note={note} -->"
-                f"{content}<!-- /embedded-todo -->"
-            )
-
-        return EMBEDDED_TODO_PATTERN.sub(replace, body), found
+    def _render_embedded_todo(
+        self, match: re.Match[str], request: UpdateEmbeddedTodoRequest
+    ) -> str:
+        """Rebuild an embedded-todo marker from a match, applying `request`."""
+        todo_id = match.group(1)
+        status = request.status or match.group(2)
+        # Re-encode only when a new note is supplied; otherwise keep the existing
+        # encoded note verbatim to avoid gratuitous diffs.
+        note = quote(request.note, safe="") if request.note is not None else match.group(3)
+        content = match.group(4)
+        return (
+            f"<!-- embedded-todo:id={todo_id};status={status};note={note} -->"
+            f"{content}<!-- /embedded-todo -->"
+        )

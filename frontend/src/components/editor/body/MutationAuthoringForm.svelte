@@ -1,76 +1,127 @@
 <script lang="ts" module>
-  export type MutationDraft = { entity: string; field: string; value: string };
+  export type MutationDraft = { entity: string; field: string; value: string; markerId?: string };
 </script>
 
 <script lang="ts">
-  // Authoring form for the `/mutate` slash command (#33, #56). Picks a lore
-  // entity, one or more of its fields (a promotion sets rank + title + uniform
-  // → N independent markers, §2.1), and a value per field using that field
-  // type's own input. Emits one MutationDraft per selected field; the caller
-  // inserts a pill (with a client-minted id) for each at the cursor.
-  import type { LoreEntrySummary, MetadataFieldDefinition, MetadataSchema } from "@/lib/types";
+  // Authoring/edit form for lore mutations (#33, #56). Reuses the node editor's
+  // field-editing widgets — ReferencePicker (→ NodePicker) to pick the entity,
+  // and FieldValueEditor per field so every value uses that field type's own
+  // control (the inputs-uniformity principle). Create mode sets one or more
+  // fields (→ N markers). Edit mode (given `initial`) edits one existing marker
+  // and can delete it.
+  import { untrack } from "svelte";
+  import ReferencePicker from "@/components/widgets/ReferencePicker.svelte";
+  import FieldValueEditor from "@/components/widgets/FieldValueEditor.svelte";
+  import type {
+    LoreEntrySummary,
+    MetadataFieldDefinition,
+    MetadataSchema,
+    MetadataValue,
+    PromptEntrySummary,
+    ScopedTag,
+    StructureDocument,
+  } from "@/lib/types";
 
   let {
     loreEntries = [],
+    promptEntries = [],
     schema = null,
+    structure = null,
+    researchStructure = null,
+    knownTags = [],
+    implicitContextMatcher = null,
+    initial = null,
+    presetEntityId = "",
     onSubmit,
+    onDelete,
     onCancel,
   }: {
     loreEntries: LoreEntrySummary[];
+    promptEntries?: PromptEntrySummary[];
     schema: MetadataSchema | null;
+    structure?: StructureDocument | null;
+    researchStructure?: StructureDocument | null;
+    knownTags?: ScopedTag[];
+    implicitContextMatcher?: import("@/lib/editor-core/implicitContextMatcher").CompiledMatcher | null;
+    initial?: MutationDraft | null;
+    /** Pre-selected entity id for create mode (e.g. from `/mutate Alice`). */
+    presetEntityId?: string;
     onSubmit: (drafts: MutationDraft[]) => void;
+    onDelete?: (markerId: string) => void;
     onCancel: () => void;
   } = $props();
 
-  let entityId = $state("");
-  // field id -> { selected, value }
-  let picks = $state<Record<string, { on: boolean; value: string }>>({});
+  const editing = $derived(Boolean(initial?.markerId));
+
+  // The dialog re-mounts on each open ({#if} in the parent), so capturing the
+  // initial prop values once is intentional (untrack silences the lint).
+  let entityId = $state(untrack(() => initial?.entity ?? presetEntityId ?? ""));
+  // field id -> { on, value }. Value is a normalized MetadataValue from the editor.
+  let picks = $state<Record<string, { on: boolean; value: MetadataValue }>>(
+    untrack(() => (initial ? { [initial.field]: { on: true, value: initial.value } } : {})),
+  );
 
   const entity = $derived(loreEntries.find((e) => e.id === entityId) ?? null);
 
-  // The entity's mutable fields: its resolved schema fields (minus computed,
-  // which are derived) plus the intrinsic `title` (the name-change case). No
-  // schema-edit step — every field is mutable (ADR-0004).
-  const fieldOptions = $derived.by((): Array<{ id: string; label: string; def: MetadataFieldDefinition | null }> => {
+  // Intrinsic node fields (not schema fields) that are always mutable.
+  const INTRINSIC: Array<{ id: string; def: MetadataFieldDefinition }> = [
+    { id: "title", def: { name: "Title (name)", type: "text", options: [] } as MetadataFieldDefinition },
+    { id: "body", def: { name: "Body", type: "long_text", options: [] } as MetadataFieldDefinition },
+  ];
+
+  // The entity's mutable fields: intrinsic title/body + its resolved schema
+  // fields, minus computed (derived) and collection types (multi_select / tags /
+  // entity_ref_list are additive-flavored — v1.1). In edit mode, just the one.
+  const fieldOptions = $derived.by((): Array<{ id: string; label: string; def: MetadataFieldDefinition }> => {
     if (!entity) return [];
+    if (initial) {
+      const def = schema?.fields[initial.field] ?? INTRINSIC.find((f) => f.id === initial.field)?.def
+        ?? ({ name: initial.field, type: "text", options: [] } as MetadataFieldDefinition);
+      return [{ id: initial.field, label: def.name ?? initial.field, def }];
+    }
+    const opts = INTRINSIC.map((f) => ({ id: f.id, label: f.def.name, def: f.def }));
     const ids = schema?.entry_types[entity.entry_type]?.fields ?? [];
-    const opts: Array<{ id: string; label: string; def: MetadataFieldDefinition | null }> = [
-      { id: "title", label: "Title (name)", def: null },
-    ];
     for (const id of ids) {
-      const def = schema?.fields[id] ?? null;
-      // Computed fields are derived; collection fields (multi_select / tags /
-      // entity_ref_list) are additive-flavored and land in v1.1 — offering them
-      // here would only produce a save-blocking 422 on a scalar value.
-      if (def && ["computed", "multi_select", "tags", "entity_ref_list"].includes(def.type)) continue;
-      opts.push({ id, label: def?.name ?? id, def });
+      const def = schema?.fields[id];
+      if (!def) continue;
+      if (["computed", "multi_select", "tags", "entity_ref_list"].includes(def.type)) continue;
+      opts.push({ id, label: def.name ?? id, def });
     }
     return opts;
   });
 
-  // Lore entries offered for an entity_ref field's picker, honoring its
-  // picker_config target kinds/entry_types when present.
-  function refCandidates(def: MetadataFieldDefinition | null) {
-    const kinds = def?.picker_config?.kinds;
-    const entryTypes = def?.picker_config?.entry_types;
-    return loreEntries.filter((e) => {
-      if (kinds && kinds.length > 0 && !kinds.includes("lore")) return false;
-      const allowed = entryTypes?.lore;
-      if (allowed && allowed.length > 0 && !allowed.includes(e.entry_type)) return false;
-      return true;
-    });
+  const entityRefField = {
+    name: "Entity",
+    type: "entity_ref",
+    options: [],
+    picker_config: { kinds: ["lore"] },
+  } as MetadataFieldDefinition;
+
+  function isFilled(value: MetadataValue): boolean {
+    if (value === null || value === undefined || value === "") return false;
+    if (Array.isArray(value)) return value.length > 0;
+    return true;
+  }
+
+  function toMarkerString(value: MetadataValue): string {
+    if (value === null || value === undefined) return "";
+    if (typeof value === "boolean") return value ? "true" : "false";
+    return String(value);
   }
 
   const canSubmit = $derived(
-    Boolean(entity) &&
-      fieldOptions.some((f) => picks[f.id]?.on && (picks[f.id]?.value ?? "").length > 0),
+    Boolean(entity) && fieldOptions.some((f) => picks[f.id]?.on && isFilled(picks[f.id]?.value)),
   );
+
+  function selectEntity(value: string | string[]) {
+    entityId = Array.isArray(value) ? (value[0] ?? "") : value;
+  }
 
   function toggle(id: string, on: boolean) {
     picks[id] = { on, value: picks[id]?.value ?? "" };
   }
 
-  function setValue(id: string, value: string) {
+  function setValue(id: string, value: MetadataValue) {
     picks[id] = { on: picks[id]?.on ?? true, value };
   }
 
@@ -79,8 +130,13 @@
     const drafts: MutationDraft[] = [];
     for (const f of fieldOptions) {
       const pick = picks[f.id];
-      if (pick?.on && (pick.value ?? "").length > 0) {
-        drafts.push({ entity: entity.id, field: f.id, value: pick.value });
+      if (pick?.on && isFilled(pick.value)) {
+        drafts.push({
+          entity: entity.id,
+          field: f.id,
+          value: toMarkerString(pick.value),
+          ...(initial?.markerId ? { markerId: initial.markerId } : {}),
+        });
       }
     }
     if (drafts.length > 0) onSubmit(drafts);
@@ -109,19 +165,23 @@
     onclick={(e) => e.stopPropagation()}
   >
     <header class="mutation-head">
-      <h3>Record lore mutation</h3>
+      <h3>{editing ? "Edit mutation" : "Record lore mutation"}</h3>
       <p>The change takes effect here and in every later scene.</p>
     </header>
 
-    <label class="mutation-row">
+    <div class="mutation-row">
       <span class="mutation-label">Entity</span>
-      <select bind:value={entityId}>
-        <option value="" disabled>Pick a lore entry…</option>
-        {#each loreEntries as e (e.id)}
-          <option value={e.id}>{e.title || e.id}</option>
-        {/each}
-      </select>
-    </label>
+      <ReferencePicker
+        field={entityRefField}
+        value={entityId}
+        ariaLabel="Entity"
+        loreEntries={loreEntries}
+        promptEntries={promptEntries}
+        structure={structure}
+        researchStructure={researchStructure}
+        on:change={(e) => selectEntity(e.detail.value)}
+      />
+    </div>
 
     {#if entity}
       <div class="mutation-fields">
@@ -131,57 +191,28 @@
               <input
                 type="checkbox"
                 checked={picks[f.id]?.on ?? false}
+                disabled={editing}
                 onchange={(e) => toggle(f.id, e.currentTarget.checked)}
               />
               <span>{f.label}</span>
             </label>
             {#if picks[f.id]?.on}
-              {#if f.def?.type === "select"}
-                <select
+              <div class="mutation-value">
+                <FieldValueEditor
+                  field={f.def}
                   value={picks[f.id]?.value ?? ""}
-                  onchange={(e) => setValue(f.id, e.currentTarget.value)}
-                >
-                  <option value="" disabled>Choose…</option>
-                  {#each f.def.options ?? [] as opt}
-                    {@const optValue = typeof opt === "string" ? opt : opt.value}
-                    {@const optLabel = typeof opt === "string" ? opt : (opt.label ?? opt.value)}
-                    <option value={optValue}>{optLabel}</option>
-                  {/each}
-                </select>
-              {:else if f.def?.type === "entity_ref"}
-                <select
-                  value={picks[f.id]?.value ?? ""}
-                  onchange={(e) => setValue(f.id, e.currentTarget.value)}
-                >
-                  <option value="" disabled>Choose…</option>
-                  {#each refCandidates(f.def) as e (e.id)}
-                    <option value={e.id}>{e.title || e.id}</option>
-                  {/each}
-                </select>
-              {:else if f.def?.type === "boolean"}
-                <select
-                  value={picks[f.id]?.value ?? ""}
-                  onchange={(e) => setValue(f.id, e.currentTarget.value)}
-                >
-                  <option value="" disabled>Choose…</option>
-                  <option value="true">true</option>
-                  <option value="false">false</option>
-                </select>
-              {:else if f.def?.type === "number"}
-                <input
-                  type="number"
-                  value={picks[f.id]?.value ?? ""}
-                  oninput={(e) => setValue(f.id, e.currentTarget.value)}
-                  placeholder="New value"
+                  ariaLabel={f.label}
+                  loreEntries={loreEntries}
+                  promptEntries={promptEntries}
+                  structure={structure}
+                  researchStructure={researchStructure}
+                  implicitContextMatcher={implicitContextMatcher}
+                  knownTags={knownTags}
+                  documentKind="lore"
+                  entryType={entity.entry_type}
+                  onChange={(v) => setValue(f.id, v)}
                 />
-              {:else}
-                <input
-                  type="text"
-                  value={picks[f.id]?.value ?? ""}
-                  oninput={(e) => setValue(f.id, e.currentTarget.value)}
-                  placeholder="New value"
-                />
-              {/if}
+              </div>
             {/if}
           </div>
         {/each}
@@ -189,9 +220,13 @@
     {/if}
 
     <footer class="mutation-foot">
+      {#if editing && initial?.markerId}
+        <button type="button" class="danger" onclick={() => onDelete?.(initial.markerId!)}>Delete</button>
+      {/if}
+      <span class="mutation-foot-spacer"></span>
       <button type="button" class="ghost" onclick={onCancel}>Cancel</button>
       <button type="button" class="primary" disabled={!canSubmit} onclick={submit}>
-        Insert mutation
+        {editing ? "Save" : "Insert mutation"}
       </button>
     </footer>
   </div>
@@ -208,7 +243,7 @@
     background: rgba(0, 0, 0, 0.28);
   }
   .mutation-card {
-    width: min(440px, 92vw);
+    width: min(460px, 92vw);
     max-height: 82vh;
     overflow-y: auto;
     background: var(--surface);
@@ -238,28 +273,18 @@
     font-weight: 600;
     color: var(--text-2);
   }
-  select,
-  input {
-    padding: 6px 8px;
-    border: 1px solid var(--border);
-    border-radius: 6px;
-    background: var(--surface);
-    color: var(--text);
-    font: inherit;
-  }
   .mutation-fields {
     display: flex;
     flex-direction: column;
-    gap: 8px;
+    gap: 10px;
     border-top: 1px solid var(--border);
     padding-top: 12px;
     margin-bottom: 12px;
   }
   .mutation-field {
-    display: grid;
-    grid-template-columns: 1fr 1fr;
-    align-items: center;
-    gap: 8px;
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
   }
   .mutation-check {
     display: flex;
@@ -269,10 +294,21 @@
     color: var(--text);
     cursor: pointer;
   }
+  .mutation-value {
+    display: flex;
+    padding-left: 22px;
+  }
+  .mutation-value > :global(*) {
+    flex: 1 1 auto;
+    min-width: 0;
+  }
   .mutation-foot {
     display: flex;
-    justify-content: flex-end;
+    align-items: center;
     gap: 8px;
+  }
+  .mutation-foot-spacer {
+    flex: 1 1 auto;
   }
   button {
     padding: 7px 14px;
@@ -284,6 +320,11 @@
   button.ghost {
     background: transparent;
     color: var(--text-2);
+  }
+  button.danger {
+    background: transparent;
+    color: #b4442f;
+    border-color: color-mix(in oklab, #b4442f 40%, transparent);
   }
   button.primary {
     background: var(--accent);

@@ -1,10 +1,8 @@
 <script lang="ts">
-  import MetadataLongTextEditor from "@/components/widgets/MetadataLongTextEditor.svelte";
+  import FieldValueEditor from "@/components/widgets/FieldValueEditor.svelte";
   import ProviderTierPicker from "@/components/widgets/ProviderTierPicker.svelte";
-  import ReferencePicker from "@/components/widgets/ReferencePicker.svelte";
   import SwatchPicker from "@/components/widgets/SwatchPicker.svelte";
   import ColoredSelect from "@/components/widgets/ColoredSelect.svelte";
-  import TagPicker from "@/components/widgets/TagPicker.svelte";
   import { fieldIconClass } from "@/lib/utils/fieldIcons";
   import type {
     DocumentKind,
@@ -137,64 +135,12 @@
     return String(value);
   }
 
-  function metadataValueList(value: MetadataValue | undefined): string[] {
-    if (Array.isArray(value)) return value.map((item) => String(item).trim()).filter(Boolean);
-    if (value === null || value === undefined || value === "") return [];
-    return String(value)
-      .split(",")
-      .map((item) => item.trim())
-      .filter(Boolean);
-  }
-
-  function metadataReferenceValue(field: MetadataFieldDefinition, value: MetadataValue | undefined): string | string[] {
-    if (field.type === "entity_ref_list") return metadataValueList(value);
-    if (value === null || value === undefined) return "";
-    if (typeof value === "object") return "";
-    return String(value);
-  }
-
-  function normaliseFieldValue(field: MetadataFieldDefinition, value: MetadataValue): MetadataValue {
-    if (field.type === "multi_select" || field.type === "tags" || field.type === "entity_ref_list") {
-      if (Array.isArray(value)) return value.map((item) => String(item).trim()).filter(Boolean);
-      return String(value ?? "")
-        .split(",")
-        .map((item) => item.trim())
-        .filter(Boolean);
-    }
-    if (field.type === "number") {
-      if (value === "" || value === null) return null;
-      const parsed = Number(value);
-      return Number.isFinite(parsed) ? parsed : null;
-    }
-    if (field.type === "boolean") {
-      return Boolean(value);
-    }
-    return value === null ? "" : String(value);
-  }
-
-  function updateField(fieldId: string, field: MetadataFieldDefinition, value: MetadataValue) {
-    onMetadataChange?.({ ...metadata, [fieldId]: normaliseFieldValue(field, value) });
-  }
-
   function updateColor(value: string) {
     onMetadataChange?.({ ...metadata, color: value });
   }
 
   function updateAssistantProvider(provider: string, tier: string, model: string) {
     onMetadataChange?.({ ...metadata, ai_provider: provider, ai_capability_tier: tier, ai_model: model });
-  }
-
-  function hasMultiSelectOption(fieldId: string, option: string): boolean {
-    const key = option.toLowerCase();
-    return metadataValueList(metadata[fieldId]).some((item) => item.toLowerCase() === key);
-  }
-
-  function toggleMultiSelectOption(fieldId: string, field: MetadataFieldDefinition, option: string) {
-    const current = metadataValueList(metadata[fieldId]);
-    const key = option.toLowerCase();
-    const hasIt = current.some((item) => item.toLowerCase() === key);
-    const next = hasIt ? current.filter((item) => item.toLowerCase() !== key) : [...current, option];
-    updateField(fieldId, field, next);
   }
 </script>
 
@@ -256,45 +202,12 @@
     {#each section.ids as fieldId}
       {#if metadataSchema.fields[fieldId]}
         {@const field = metadataSchema.fields[fieldId]}
-        {@const currentValue = metadataValueString(metadata[fieldId])}
         <div class="field-row" class:wide={isWide(field)} class:inherited={isInherited(fieldId)}>
           <span class="fr-icon"><i class={fieldIconClass(field)} aria-hidden="true"></i></span>
           <span class="fr-name">{field.name}</span>
           <div class="fr-val">
-            {#if field.type === "long_text"}
-              <MetadataLongTextEditor
-                ariaLabel={field.name}
-                value={currentValue}
-                matcher={implicitContextMatcher}
-                on:change={(event) => updateField(fieldId, field, event.detail.value)}
-              />
-            {:else if field.type === "entity_ref" || field.type === "entity_ref_list"}
-              <ReferencePicker
-                {field}
-                value={metadataReferenceValue(field, metadata[fieldId])}
-                excludeId={excludeId}
-                ariaLabel={field.name}
-                structure={structure}
-                researchStructure={researchStructure}
-                loreEntries={loreEntries}
-                promptEntries={promptEntries}
-                on:change={(event) => updateField(fieldId, field, event.detail.value)}
-                on:navigate={(event) => onNavigate?.(event.detail)}
-              />
-            {:else if field.type === "multi_select" && field.options.length > 0}
-              <div class="multi-select-chips" aria-label={field.name}>
-                {#each field.options as option}
-                  <button
-                    class:active={hasMultiSelectOption(fieldId, option.value)}
-                    class="multi-select-chip"
-                    type="button"
-                    onclick={() => toggleMultiSelectOption(fieldId, field, option.value)}
-                  >
-                    {option.label ?? option.value}
-                  </button>
-                {/each}
-              </div>
-            {:else if fieldId === "status"}
+            {#if fieldId === "status"}
+              <!-- status is stored off `metadata` and edited via onStatusChange. -->
               <ColoredSelect
                 value={status}
                 options={field.options}
@@ -302,50 +215,24 @@
                 placeholder="(no status)"
                 onChange={(value) => onStatusChange?.(value)}
               />
-            {:else if field.type === "select"}
-              <ColoredSelect
-                value={currentValue}
-                options={field.options}
-                ariaLabel={field.name}
-                onChange={(v) => updateField(fieldId, field, v)}
-              />
-            {:else if field.type === "boolean"}
-              {@const on = Boolean(metadata[fieldId])}
-              <button
-                type="button"
-                role="switch"
-                class="fr-toggle"
-                class:on={on}
-                aria-checked={on}
-                aria-label={field.name}
-                onclick={() => updateField(fieldId, field, !on)}
-              >
-                <span class="fr-toggle-knob"></span>
-              </button>
-            {:else if field.type === "number"}
-              <input
-                type="number"
-                aria-label={field.name}
-                value={currentValue}
-                oninput={(event) => updateField(fieldId, field, event.currentTarget.value)}
-              />
             {:else if field.type === "computed"}
               <span class="fr-computed">{computedFieldString(fieldId)}<i class="ti ti-lock" aria-hidden="true"></i></span>
-            {:else if field.type === "tags"}
-              <TagPicker
-                value={currentValue}
-                knownTags={knownTags}
-                scopeKind={documentKind}
-                scopeEntryType={entryType}
-                ariaLabel={field.name}
-                on:change={(event) => updateField(fieldId, field, event.detail.value)}
-              />
             {:else}
-              <input
-                aria-label={field.name}
-                value={currentValue}
-                placeholder={field.type === "multi_select" ? "Comma-separated values" : ""}
-                oninput={(event) => updateField(fieldId, field, event.currentTarget.value)}
+              <FieldValueEditor
+                {field}
+                value={metadata[fieldId]}
+                ariaLabel={field.name}
+                loreEntries={loreEntries}
+                promptEntries={promptEntries}
+                structure={structure}
+                researchStructure={researchStructure}
+                implicitContextMatcher={implicitContextMatcher}
+                excludeId={excludeId}
+                knownTags={knownTags}
+                documentKind={documentKind}
+                entryType={entryType}
+                onChange={(v) => onMetadataChange?.({ ...metadata, [fieldId]: v })}
+                onNavigate={(payload) => onNavigate?.(payload)}
               />
             {/if}
           </div>
@@ -532,60 +419,5 @@
   .fr-val :global(input[type="checkbox"]) {
     width: auto;
     padding: 0;
-  }
-
-  /* Boolean toggle switch — matches the on/off glyph better than a checkbox. */
-  .fr-toggle {
-    flex: none;
-    width: 34px;
-    height: 20px;
-    padding: 0;
-    border-radius: 999px;
-    border: 1px solid var(--border, #cbd6d2);
-    background: var(--inset, #f1f5f3);
-    cursor: pointer;
-    position: relative;
-    transition: background-color 120ms ease, border-color 120ms ease;
-  }
-  .fr-toggle-knob {
-    position: absolute;
-    top: 1px;
-    left: 1px;
-    width: 16px;
-    height: 16px;
-    border-radius: 50%;
-    background: #fff;
-    box-shadow: 0 1px 2px rgba(20, 40, 33, 0.28);
-    transition: transform 120ms ease;
-  }
-  .fr-toggle.on {
-    background: var(--accent, #2f6f5e);
-    border-color: var(--accent, #2f6f5e);
-  }
-  .fr-toggle.on .fr-toggle-knob {
-    transform: translateX(14px);
-  }
-
-  .multi-select-chips {
-    display: flex;
-    flex-wrap: wrap;
-    gap: 6px;
-  }
-  .multi-select-chip {
-    padding: 2px 9px;
-    border: 1px solid var(--border, #cbd6d2);
-    border-radius: 999px;
-    background: var(--surface, #fff);
-    font-size: 12px;
-    color: var(--text-2, #4d5753);
-    cursor: pointer;
-  }
-  .multi-select-chip:hover {
-    background: var(--inset, #eef3f1);
-  }
-  .multi-select-chip.active {
-    background: var(--accent-soft, #edf6f2);
-    border-color: var(--accent, #2f6f5e);
-    color: var(--accent-strong, #234e43);
   }
 </style>

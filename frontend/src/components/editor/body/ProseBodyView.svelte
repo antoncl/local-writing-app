@@ -516,9 +516,14 @@
         label: "Mutate lore",
         description: "Record a mid-scene change to a lore field (rank, title, …).",
         autocompleteTo: "mutate",
-        run: () => {
+        run: (args) => {
           clearSlashTrigger();
-          openMutationDialog();
+          // `/mutate Alice` pre-selects the entity by (case-insensitive) title.
+          const name = (args ?? []).join(" ").trim().toLowerCase();
+          const match = name
+            ? loreEntries.find((entry) => (entry.title ?? "").toLowerCase() === name)
+            : null;
+          openMutationDialog(match?.id ?? "");
         },
       },
       ...promptEntriesForSurface(promptCtx, "append_to_body")
@@ -965,31 +970,83 @@
     return `mut_${randomId.slice(0, 12)}`;
   }
 
-  // `/mutate` authoring dialog (#33). Opened from the slash menu; inserts one
-  // mutation pill (client-minted id) per selected field at the cursor. The
-  // marker round-trips to a scene-body comment via the turndown rule on save.
+  // `/mutate` authoring dialog (#33). Create mode inserts one pill (client-minted
+  // id) per selected field at the cursor; clicking a pill opens edit mode, which
+  // rewrites/removes the node in place. Markers round-trip to scene-body comments
+  // via the turndown rule on save.
   let mutationDialogOpen = $state(false);
+  let mutationPresetEntityId = $state("");
+  let mutationEditInitial = $state<MutationDraft | null>(null);
 
-  function openMutationDialog() {
+  function openMutationDialog(presetEntityId = "") {
+    mutationEditInitial = null;
+    mutationPresetEntityId = presetEntityId;
     mutationDialogOpen = true;
   }
 
-  function insertMutations(drafts: MutationDraft[]) {
+  function openMutationEdit(initial: MutationDraft) {
+    mutationPresetEntityId = "";
+    mutationEditInitial = initial;
+    mutationDialogOpen = true;
+  }
+
+  function findMutationNodePos(markerId: string): number | null {
+    if (!editor) return null;
+    let hit: number | null = null;
+    editor.state.doc.descendants((node, pos) => {
+      if (hit !== null) return false;
+      if (node.type.name === "mutation" && node.attrs.markerId === markerId) hit = pos;
+      return hit === null;
+    });
+    return hit;
+  }
+
+  function handleMutationSubmit(drafts: MutationDraft[]) {
     mutationDialogOpen = false;
     if (!editor || drafts.length === 0) return;
-    const chain = editor.chain().focus();
     for (const draft of drafts) {
-      chain.insertContent({
-        type: "mutation",
-        attrs: {
-          entity: draft.entity,
-          field: draft.field,
-          value: draft.value,
-          markerId: createMutationId(),
-        },
-      });
+      if (draft.markerId) {
+        const pos = findMutationNodePos(draft.markerId);
+        if (pos !== null) {
+          editor
+            .chain()
+            .focus()
+            .command(({ tr }) => {
+              tr.setNodeMarkup(pos, undefined, {
+                entity: draft.entity,
+                field: draft.field,
+                value: draft.value,
+                markerId: draft.markerId,
+              });
+              return true;
+            })
+            .run();
+        }
+      } else {
+        editor
+          .chain()
+          .focus()
+          .insertContent({
+            type: "mutation",
+            attrs: {
+              entity: draft.entity,
+              field: draft.field,
+              value: draft.value,
+              markerId: createMutationId(),
+            },
+          })
+          .run();
+      }
     }
-    chain.run();
+  }
+
+  function deleteMutationNode(markerId: string) {
+    mutationDialogOpen = false;
+    const pos = findMutationNodePos(markerId);
+    if (editor && pos !== null) {
+      const node = editor.state.doc.nodeAt(pos);
+      if (node) editor.chain().focus().deleteRange({ from: pos, to: pos + node.nodeSize }).run();
+    }
   }
 
   function selectedPlainText() {
@@ -1245,6 +1302,19 @@
           spellcheck: "true",
         },
         handleKeyDown: handleEditorKeydown,
+        handleClickOn: (_view, _pos, node) => {
+          // Click a mutation pill → edit it (rewrite/remove the node in place).
+          if (node.type.name === "mutation") {
+            openMutationEdit({
+              markerId: String(node.attrs.markerId ?? ""),
+              entity: String(node.attrs.entity ?? ""),
+              field: String(node.attrs.field ?? ""),
+              value: String(node.attrs.value ?? ""),
+            });
+            return true;
+          }
+          return false;
+        },
         handleDOMEvents: {
           focus: () => {
             onFocus?.();
@@ -1392,7 +1462,11 @@
   <MutationAuthoringForm
     {loreEntries}
     schema={metadataSchema}
-    onSubmit={insertMutations}
+    implicitContextMatcher={implicitContextMatcher}
+    initial={mutationEditInitial}
+    presetEntityId={mutationPresetEntityId}
+    onSubmit={handleMutationSubmit}
+    onDelete={deleteMutationNode}
     onCancel={() => (mutationDialogOpen = false)}
   />
 {/if}

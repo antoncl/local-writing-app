@@ -127,9 +127,12 @@ class MetadataSchemaMixin:
         entry_type_id = request.entry_type_id.strip()
         if not re.fullmatch(r"[A-Za-z][A-Za-z0-9_]*", entry_type_id):
             raise ProjectServiceError("Node type ID must start with a letter and contain only letters, numbers, and underscores.", 422)
-        if request.entry_type.kind not in {"scene", "lore", "prompt", "assistant", "project", "chat"}:
+        if request.entry_type.kind not in {
+            "scene", "lore", "prompt", "assistant", "project", "chat", "transformation"
+        }:
             raise ProjectServiceError(
-                "Node type kind must be scene, lore, prompt, assistant, project, or chat.", 422
+                "Node type kind must be scene, lore, prompt, assistant, project, chat, or transformation.",
+                422,
             )
         if request.entry_type.prompt is not None and request.entry_type.kind != "prompt":
             raise ProjectServiceError("Prompt configuration is only valid on prompt node types.", 422)

@@ -43,6 +43,7 @@ from app.models import (
     CreateSceneRequest,
     CreateStructureNodeRequest,
     CreateTodoRequest,
+    CreateTransformationEntryRequest,
     DeleteMetadataEntryTypeRequest,
     DeleteMetadataFieldRequest,
     DeleteMetadataGroupRequest,
@@ -88,6 +89,7 @@ from app.models import (
     SavePromptEntryRequest,
     SaveResearchNoteRequest,
     SaveSceneRequest,
+    SaveTransformationEntryRequest,
     Scene,
     SearchRequest,
     SearchResponse,
@@ -97,6 +99,8 @@ from app.models import (
     StructureNodeDeletePreview,
     TagsOverview,
     TodoDocument,
+    TransformationEntry,
+    TransformationEntryList,
     UpdateEmbeddedTodoRequest,
     UpdateMutationRequest,
     UpdateProjectSettingsRequest,
@@ -595,6 +599,39 @@ def save_prompt_entry(entry_id: str, request: SavePromptEntryRequest) -> PromptE
 def delete_prompt_entry(entry_id: str) -> PromptEntryList:
     with translate_errors():
         return service.delete_prompt_entry(entry_id)
+
+
+@app.get("/api/transformations", response_model=TransformationEntryList)
+def list_transformation_entries() -> TransformationEntryList:
+    """Reusable transformation sets (#62) — the Transformations pane list."""
+    with translate_errors():
+        return service.list_transformation_entries()
+
+
+@app.post("/api/transformations", response_model=TransformationEntry)
+def create_transformation_entry(request: CreateTransformationEntryRequest) -> TransformationEntry:
+    with translate_errors():
+        return service.create_transformation_entry(request)
+
+
+@app.get("/api/transformations/{entry_id}", response_model=TransformationEntry)
+def get_transformation_entry(entry_id: str) -> TransformationEntry:
+    with translate_errors():
+        return service.read_transformation_entry(entry_id)
+
+
+@app.put("/api/transformations/{entry_id}", response_model=TransformationEntry)
+def save_transformation_entry(
+    entry_id: str, request: SaveTransformationEntryRequest
+) -> TransformationEntry:
+    with translate_errors():
+        return service.save_transformation_entry(entry_id, request)
+
+
+@app.delete("/api/transformations/{entry_id}", response_model=TransformationEntryList)
+def delete_transformation_entry(entry_id: str) -> TransformationEntryList:
+    with translate_errors():
+        return service.delete_transformation_entry(entry_id)
 
 
 @app.get("/api/assistants", response_model=AssistantEntryList)

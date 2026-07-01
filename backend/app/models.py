@@ -696,6 +696,59 @@ class SavePromptEntryRequest(BaseModel):
     inputs: list[PromptInputDefinition] = Field(default_factory=list)
 
 
+class TransformationRow(BaseModel):
+    """One field-change row of a reusable transformation set (#62): a
+    `(field, op, value)` triple applied to a chosen entity at apply time. The
+    entity is NOT stored — the set is a template bound to an entity on use. Op is
+    the collection operator (replace / add / remove) shared with #58 markers."""
+
+    field: str
+    op: str = "replace"
+    value: str = ""
+
+
+class TransformationEntrySummary(BaseModel):
+    id: str
+    title: str
+    entry_type: str = "transformation"
+    # The lore entry-type the rows target (e.g. "character"); scopes the apply
+    # picker so only matching sets are offered for a given entity (#62).
+    target_entry_type: str = ""
+    row_count: int = 0
+    source_layer_id: str = ""
+    source_layer_label: str = ""
+
+
+class TransformationEntry(BaseModel):
+    id: str
+    title: str
+    revision: str
+    entry_type: str = "transformation"
+    target_entry_type: str = ""
+    rows: list[TransformationRow] = Field(default_factory=list)
+    source_layer_id: str = ""
+    source_layer_label: str = ""
+
+
+class TransformationEntryList(BaseModel):
+    entries: list[TransformationEntrySummary] = Field(default_factory=list)
+
+
+class CreateTransformationEntryRequest(BaseModel):
+    title: str = Field(min_length=1)
+    entry_type: str = "transformation"
+    target_entry_type: str = ""
+    rows: list[TransformationRow] = Field(default_factory=list)
+
+
+class SaveTransformationEntryRequest(BaseModel):
+    title: str = Field(min_length=1)
+    base_revision: str | None = None
+    entry_type: str = "transformation"
+    target_entry_type: str = ""
+    rows: list[TransformationRow] = Field(default_factory=list)
+
+
 class AssistantEntrySummary(BaseModel):
     id: str
     title: str

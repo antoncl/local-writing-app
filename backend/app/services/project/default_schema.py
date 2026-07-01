@@ -115,6 +115,16 @@ DEFAULT_METADATA_SCHEMA: dict[str, Any] = {
             "fields": ["tags"],
             "has_body": True,
         },
+        "transformation": {
+            # Reusable transformation set (#62): a body-less bundle of
+            # (field, op, value) rows + a target lore entry-type. Concrete (not
+            # abstract) so sets can be created directly; entry_type sub-classing
+            # (e.g. shapeshift vs promotion families) stays available but unused.
+            "name": "Transformation",
+            "kind": "transformation",
+            "fields": [],
+            "has_body": False,
+        },
         "prompt": {
             "name": "Prompt",
             "kind": "prompt",

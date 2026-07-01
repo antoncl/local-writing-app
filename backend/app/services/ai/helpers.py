@@ -381,6 +381,12 @@ def register_helpers(
         )
     )
     env.globals["entry"] = lambda value: _coerce_entry_ref(project, schema, value)
+    env.globals["base"] = lambda entity, field: _base_field(project, schema, entity, field)
+    env.globals["effective"] = (
+        lambda entity, field, scene, position=None: _effective_field(
+            project, schema, entity, field, scene, position
+        )
+    )
     env.globals["full_outline"] = lambda: _full_outline(project)
     env.globals["full_text"] = lambda: _full_text(project)
     env.globals["character_thread"] = (
@@ -462,6 +468,58 @@ def _safe_read_lore(project: ProjectService, entry_id: str) -> Any:
         return project.read_lore_entry(entry_id)
     except Exception:
         return None
+
+
+def _scene_id_of(scene: Any) -> str | None:
+    """The scene id from whatever a template passed as `scene` — a plain id
+    string, a Scene/dict, or an EntryRef."""
+    if isinstance(scene, str):
+        return scene or None
+    return _attr_or_item(scene, "id")
+
+
+def _entity_id_of(project: ProjectService, schema: Any, entity: Any) -> str | None:
+    """The lore id from whatever a template passed as `entity` — an id string,
+    an EntryRef, or a context_pick value (via `_coerce_entry_ref`)."""
+    if isinstance(entity, str):
+        return entity or None
+    ref = _coerce_entry_ref(project, schema, entity)
+    return ref.id if ref is not None else None
+
+
+def _base_field(project: ProjectService, schema: Any, entity: Any, field: str) -> Any:
+    """The entry's **base** (book-start) value for `field` — the stored lore
+    value, ignoring any mutation. Backs the `base()` Jinja helper so a template
+    can show "then vs. now" (ADR-0006)."""
+    entity_id = _entity_id_of(project, schema, entity)
+    if not entity_id:
+        return None
+    return _get_field(_safe_read_lore(project, entity_id), field)
+
+
+def _effective_field(
+    project: ProjectService,
+    schema: Any,
+    entity: Any,
+    field: str,
+    scene: Any,
+    position: int | None = None,
+) -> Any:
+    """The **effective** value of `field` for `entity` as of `scene` — the live
+    mutation if one applies there, else the base value. Backs the `effective()`
+    Jinja helper; this is the field-query surface that carries structured fields
+    like `rank` that the `<lore>` block does not render (§4.2, ADR-0006)."""
+    entity_id = _entity_id_of(project, schema, entity)
+    scene_id = _scene_id_of(scene)
+    if not entity_id or not scene_id:
+        return _base_field(project, schema, entity, field)
+    try:
+        overrides = project.effective_state(entity_id, scene_id, position)
+    except Exception:
+        overrides = {}
+    if field in overrides:
+        return overrides[field]
+    return _get_field(_safe_read_lore(project, entity_id), field)
 
 
 # ----- `pov(scene)` --------------------------------------------------------
@@ -635,7 +693,7 @@ def _relevant_lore(
     if session is None or partition == "all":
         if session is not None:
             _snapshot_revisions(project, ids, session)
-        return _format_lore_block(project, ids)
+        return _format_lore_block(project, ids, scene=scene)
 
     stable_ids: list[str] = []
     volatile_ids: list[str] = []
@@ -651,7 +709,7 @@ def _relevant_lore(
             volatile_ids.append(entry_id)
 
     selected = stable_ids if partition == "stable" else volatile_ids
-    return _format_lore_block(project, selected)
+    return _format_lore_block(project, selected, scene=scene)
 
 
 def _snapshot_revisions(
@@ -769,41 +827,82 @@ def _name_appears(name: str, words: set[str], haystack_lower: str) -> bool:
     return name_lower in words
 
 
-def _format_lore_block(project: ProjectService, entry_ids: list[str]) -> str:
+def _format_lore_block(
+    project: ProjectService,
+    entry_ids: list[str],
+    scene: Any = None,
+    position: int | None = None,
+    index: Any = None,
+) -> str:
     """Render lore entries as an XML block.
 
     Each entry becomes `<{entry_type} name="..." aliases="...">body</...>`,
     all wrapped in `<lore>...</lore>`. Anthropic specifically recommends XML
     tags for context structure; the format helps models locate entities
     unambiguously without losing the natural prose body.
+
+    This is the single field-value choke-point through which both explicit and
+    implicit lore context flow (ADR-0006). When `scene` is given, each entry's
+    rendered fields (name/aliases/body/summary) are resolved to their
+    **effective value at that (scene, position)** via `effective_state`, so an
+    earlier scene sees the old value and a later one the new — the redaction the
+    feature exists for (#33). Without a scene it renders base state unchanged
+    (e.g. the chat journal path until a resolution scene is supplied, §4.2).
+    Pass a prebuilt mutations `index` to avoid a re-scan per call.
     """
     if not entry_ids:
         return ""
+    scene_id = _scene_id_of(scene) if scene is not None else None
+    if scene_id and index is None:
+        try:
+            index = project.build_mutations_index()
+        except Exception:
+            index = None
     chunks: list[str] = []
     for entry_id in entry_ids:
         entry = _safe_read_lore(project, entry_id)
         if entry is None:
             continue
+        overrides: dict[str, str] = {}
+        if scene_id and index is not None:
+            try:
+                overrides = project.effective_state(entry_id, scene_id, position, index)
+            except Exception:
+                overrides = {}
         entry_type = _attr_or_item(entry, "entry_type") or "lore_entry"
         tag = _xml_safe_tag(entry_type)
-        title = str(_attr_or_item(entry, "title") or entry_id)
-        aliases_raw = _get_field(entry, "aliases") or []
-        if isinstance(aliases_raw, list):
-            aliases = [str(a).strip() for a in aliases_raw if str(a).strip()]
-        else:
-            aliases = []
-
-        body = _attr_or_item(entry, "body") or ""
-        body = str(body).strip()
-        if not body:
-            summary = _get_field(entry, "summary")
-            if isinstance(summary, str) and summary.strip():
-                body = summary.strip()
-
+        title = str(overrides.get("title") or _attr_or_item(entry, "title") or entry_id)
+        aliases = _effective_aliases(entry, overrides)
+        body = _effective_body(entry, overrides)
         chunks.append(_render_lore_xml_entry(tag, title, aliases, body))
     if not chunks:
         return ""
     return "<lore>\n" + "\n\n".join(chunks) + "\n</lore>"
+
+
+def _effective_aliases(entry: Any, overrides: dict[str, str]) -> list[str]:
+    """Aliases for the XML block, honoring a live `aliases` mutation (a
+    comma-separated string in the marker) over the base list."""
+    if "aliases" in overrides:
+        return [a.strip() for a in str(overrides["aliases"]).split(",") if a.strip()]
+    raw = _get_field(entry, "aliases") or []
+    if isinstance(raw, list):
+        return [str(a).strip() for a in raw if str(a).strip()]
+    return []
+
+
+def _effective_body(entry: Any, overrides: dict[str, str]) -> str:
+    """Body for the XML block: a live `body` mutation, else base body, else a
+    (possibly mutated) summary."""
+    if "body" in overrides:
+        body = str(overrides["body"]).strip()
+    else:
+        body = str(_attr_or_item(entry, "body") or "").strip()
+    if not body:
+        summary = overrides["summary"] if "summary" in overrides else _get_field(entry, "summary")
+        if isinstance(summary, str) and summary.strip():
+            body = summary.strip()
+    return body
 
 
 def _render_lore_xml_entry(

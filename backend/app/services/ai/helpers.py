@@ -372,19 +372,34 @@ def register_helpers(
     except Exception:
         schema = None
 
+    # Lazily built at most once per env, then shared by every mutation-aware
+    # helper (`effective`, `relevant_lore`) so a template that resolves N entries
+    # or scrubs many fields walks the manuscript once, not once per call — the
+    # AI hot path (§3.3, ADR-0006). Templates that touch no mutations never build
+    # it. Envs are per-render, so there's no cross-render staleness.
+    _mutations_index_slot: list[Any] = []
+
+    def _mutations_index() -> Any:
+        if not _mutations_index_slot:
+            try:
+                _mutations_index_slot.append(project.build_mutations_index())
+            except Exception:
+                _mutations_index_slot.append(None)
+        return _mutations_index_slot[0]
+
     env.globals["last_words"] = last_words
     env.globals["pov"] = lambda scene: _pov(project, schema, scene)
     env.globals["scenes_before"] = lambda scene: _scenes_before(project, scene)
     env.globals["relevant_lore"] = (
         lambda scene, mode="implicit", partition="all": _relevant_lore(
-            project, scene, mode, partition, session, journal
+            project, scene, mode, partition, session, journal, index=_mutations_index()
         )
     )
     env.globals["entry"] = lambda value: _coerce_entry_ref(project, schema, value)
     env.globals["base"] = lambda entity, field: _base_field(project, schema, entity, field)
     env.globals["effective"] = (
         lambda entity, field, scene, position=None: _effective_field(
-            project, schema, entity, field, scene, position
+            project, schema, entity, field, scene, position, index=_mutations_index()
         )
     )
     env.globals["full_outline"] = lambda: _full_outline(project)
@@ -504,6 +519,7 @@ def _effective_field(
     field: str,
     scene: Any,
     position: int | None = None,
+    index: Any = None,
 ) -> Any:
     """The **effective** value of `field` for `entity` as of `scene` — the live
     mutation if one applies there, else the base value. Backs the `effective()`
@@ -514,7 +530,7 @@ def _effective_field(
     if not entity_id or not scene_id:
         return _base_field(project, schema, entity, field)
     try:
-        overrides = project.effective_state(entity_id, scene_id, position)
+        overrides = project.effective_state(entity_id, scene_id, position, index)
     except Exception:
         overrides = {}
     if field in overrides:
@@ -622,6 +638,7 @@ def _relevant_lore(
     partition: str = "all",
     session: AISession | None = None,
     journal: list[Any] | None = None,
+    index: Any = None,
 ) -> str:
     """Return a markdown block of lore entries relevant to `scene`.
 
@@ -698,7 +715,7 @@ def _relevant_lore(
     if session is None or partition == "all":
         if session is not None:
             _snapshot_revisions(project, ids, session)
-        return _format_lore_block(project, ids, scene=scene)
+        return _format_lore_block(project, ids, scene=scene, index=index)
 
     stable_ids: list[str] = []
     volatile_ids: list[str] = []
@@ -714,7 +731,7 @@ def _relevant_lore(
             volatile_ids.append(entry_id)
 
     selected = stable_ids if partition == "stable" else volatile_ids
-    return _format_lore_block(project, selected, scene=scene)
+    return _format_lore_block(project, selected, scene=scene, index=index)
 
 
 def _snapshot_revisions(
@@ -876,7 +893,11 @@ def _format_lore_block(
                 overrides = {}
         entry_type = _attr_or_item(entry, "entry_type") or "lore_entry"
         tag = _xml_safe_tag(entry_type)
-        title = str(overrides.get("title") or _attr_or_item(entry, "title") or entry_id)
+        title = str(
+            overrides["title"]
+            if "title" in overrides
+            else (_attr_or_item(entry, "title") or entry_id)
+        )
         aliases = _effective_aliases(entry, overrides)
         body = _effective_body(entry, overrides)
         chunks.append(_render_lore_xml_entry(tag, title, aliases, body))

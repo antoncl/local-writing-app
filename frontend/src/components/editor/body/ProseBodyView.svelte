@@ -34,6 +34,11 @@
   import { sanitizePastedHtml } from "@/lib/utils/sanitizePastedHtml";
   import { ImplicitContextHighlight, REBUILD_META } from "@/lib/editor-core/implicitContextHighlight";
   import { AISuggestion, TodoAnchor, createCharacterMark, createMutationMark } from "@/lib/editor-core/proseMarks";
+  import {
+    applyMutationDrafts,
+    dedupeMutationIds,
+    removeMutationNode,
+  } from "@/lib/editor-core/mutationNodes";
   import MutationAuthoringForm, { type MutationDraft } from "./MutationAuthoringForm.svelte";
   import {
     parseSlashBody,
@@ -188,6 +193,7 @@
   let tableMenu: { visible: boolean; x: number; y: number } = $state({ visible: false, x: 0, y: 0 });
   let openToolbarMenuId: string | null = $state(null);
   let reconcilingTodoAnchors = false;
+  let reconcilingMutationIds = false;
   let highlightedTodoId: string | null = null;
 
   // V2: per-scene continuation cost rollup. Resets when you switch
@@ -965,11 +971,6 @@
     return `todo_${randomId.slice(0, 12)}`;
   }
 
-  function createMutationId() {
-    const randomId = globalThis.crypto?.randomUUID?.().replace(/-/g, "") ?? Math.random().toString(16).slice(2);
-    return `mut_${randomId.slice(0, 12)}`;
-  }
-
   // `/mutate` authoring dialog (#33). Create mode inserts one pill (client-minted
   // id) per selected field at the cursor; clicking a pill opens edit mode, which
   // rewrites/removes the node in place. Markers round-trip to scene-body comments
@@ -990,63 +991,24 @@
     mutationDialogOpen = true;
   }
 
-  function findMutationNodePos(markerId: string): number | null {
-    if (!editor) return null;
-    let hit: number | null = null;
-    editor.state.doc.descendants((node, pos) => {
-      if (hit !== null) return false;
-      if (node.type.name === "mutation" && node.attrs.markerId === markerId) hit = pos;
-      return hit === null;
-    });
-    return hit;
+  // Re-entrancy guard lives here (the dispatch re-fires onUpdate); the doc work
+  // is in `dedupeMutationIds`.
+  function enforceUniqueMutationIds() {
+    if (!editor || reconcilingMutationIds) return false;
+    reconcilingMutationIds = true;
+    const changed = dedupeMutationIds(editor);
+    reconcilingMutationIds = false;
+    return changed;
   }
 
   function handleMutationSubmit(drafts: MutationDraft[]) {
     mutationDialogOpen = false;
-    if (!editor || drafts.length === 0) return;
-    for (const draft of drafts) {
-      if (draft.markerId) {
-        const pos = findMutationNodePos(draft.markerId);
-        if (pos !== null) {
-          editor
-            .chain()
-            .focus()
-            .command(({ tr }) => {
-              tr.setNodeMarkup(pos, undefined, {
-                entity: draft.entity,
-                field: draft.field,
-                value: draft.value,
-                markerId: draft.markerId,
-              });
-              return true;
-            })
-            .run();
-        }
-      } else {
-        editor
-          .chain()
-          .focus()
-          .insertContent({
-            type: "mutation",
-            attrs: {
-              entity: draft.entity,
-              field: draft.field,
-              value: draft.value,
-              markerId: createMutationId(),
-            },
-          })
-          .run();
-      }
-    }
+    if (editor) applyMutationDrafts(editor, drafts);
   }
 
   function deleteMutationNode(markerId: string) {
     mutationDialogOpen = false;
-    const pos = findMutationNodePos(markerId);
-    if (editor && pos !== null) {
-      const node = editor.state.doc.nodeAt(pos);
-      if (node) editor.chain().focus().deleteRange({ from: pos, to: pos + node.nodeSize }).run();
-    }
+    if (editor) removeMutationNode(editor, markerId);
   }
 
   function selectedPlainText() {
@@ -1225,8 +1187,8 @@
   // emit one `body-change` event to the parent (NodeEditor) so it can
   // compose its full save payload (title + body + status + ...).
   function handleEditorUpdate() {
-    if (!enforceUniqueTodoAnchors()) {
-      // Skip the body-change emit when the unique-anchor reconciler made a doc
+    if (!enforceUniqueMutationIds() && !enforceUniqueTodoAnchors()) {
+      // Skip the body-change emit when a unique-id reconciler made a doc
       // change — its own transaction re-fires onUpdate, so the non-reconciler
       // edits below run on that second pass.
       syncEditorEmpty();

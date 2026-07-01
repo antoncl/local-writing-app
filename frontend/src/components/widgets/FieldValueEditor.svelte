@@ -66,6 +66,20 @@
     return String(v);
   }
 
+  function metadataValueBool(v: MetadataValue | undefined): boolean {
+    // The /mutate form carries values as strings, so a stored `false` arrives as
+    // "false" — `Boolean("false")` is truthy. Coerce the string form explicitly
+    // (mirrors the backend's `_coerce_mutation_value`) so the toggle reflects the
+    // real value.
+    if (typeof v === "boolean") return v;
+    if (typeof v === "number") return v !== 0;
+    if (typeof v === "string") {
+      const s = v.trim().toLowerCase();
+      return s === "true" || s === "1" || s === "yes" || s === "on";
+    }
+    return Boolean(v);
+  }
+
   function metadataValueList(v: MetadataValue | undefined): string[] {
     if (Array.isArray(v)) return v.map((item) => String(item).trim()).filter(Boolean);
     if (v === null || v === undefined || v === "") return [];
@@ -95,7 +109,7 @@
       const parsed = Number(v);
       return Number.isFinite(parsed) ? parsed : null;
     }
-    if (f.type === "boolean") return Boolean(v);
+    if (f.type === "boolean") return metadataValueBool(v);
     return v === null ? "" : String(v);
   }
 
@@ -152,7 +166,7 @@
 {:else if field.type === "select"}
   <ColoredSelect value={currentValue} options={field.options} ariaLabel={label} onChange={(v) => emit(v)} />
 {:else if field.type === "boolean"}
-  {@const on = Boolean(value)}
+  {@const on = metadataValueBool(value)}
   <button
     type="button"
     role="switch"

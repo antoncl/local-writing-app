@@ -101,7 +101,8 @@ class LoreMutationsMixin(MarkerMixin):
         """Validate every mutation value in a scene body against its target
         field's constraints — a mutation value IS a field value (ADR-0007), so it
         reuses `_validate_metadata_field_value`, the same validator base values
-        run through. Called at save_scene and in validate_project."""
+        run through. Called from validate_project (save_scene never blocks on
+        mutation validity — the editor supplies typed values)."""
         errors: list[str] = []
         fields = getattr(schema, "fields", {})
         entry_types = getattr(schema, "entry_types", {})

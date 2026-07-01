@@ -62,6 +62,15 @@ MUTATION_MARKER_PATTERN = re.compile(
 # (#58). Every other type stays replace-only.
 COLLECTION_FIELD_TYPES = frozenset({"multi_select", "tags", "entity_ref_list"})
 
+# Interval-close marker (#59): a separate point marker at the close position that
+# ends the record `ref` — the record is live iff `start ≤ pos < close` (close
+# exclusive, ADR-0010). Op-agnostic; carries its own id so it edits/deletes like
+# any marker. Distinct grammar from a start marker (`close;ref=` vs `entity=`),
+# so the two patterns never overlap.
+MUTATION_CLOSE_PATTERN = re.compile(
+    r"<!--\s*mutate:close;ref=(?P<ref>[A-Za-z0-9_-]+);id=(?P<id>[A-Za-z0-9_-]+)\s*-->",
+)
+
 # Sentinel position: resolve at end of scene (every in-scene marker counts as
 # live). Only `replace_selection` passes a real cursor offset; every other
 # surface resolves at end-of-scene (ADR-0003).
@@ -107,16 +116,33 @@ def _render_mutation_marker(
 
 
 @dataclass
+class MutationClose:
+    """A parsed interval-close marker (#59) — ends the start record `ref` at this
+    prose point. Manuscript position is resolved during index build."""
+
+    close_id: str
+    ref: str
+    scene_id: str
+    offset: int = 0
+    line: int = 1
+
+
+@dataclass
 class MutationsIndex:
     """Project-wide mutation index (#51). Rebuildable from scene files; each
     entity's list is pre-ordered by manuscript position then prose offset, so
     the resolver slices O(applicable) rather than re-scanning. `version` changes
     whenever any marker changes, letting the AI cache layer key volatile lore on
-    it instead of the (now-insufficient) lore file revision (ADR-0006)."""
+    it instead of the (now-insufficient) lore file revision (ADR-0006).
+
+    `closes_by_start` maps a start marker id → the (manuscript-position, offset)
+    of the governing close for it (#59), so the resolver can bound each record's
+    interval without re-scanning."""
 
     version: str = ""
     by_entity: dict[str, list[MutationMarker]] = dc_field(default_factory=dict)
     scene_order: dict[str, int] = dc_field(default_factory=dict)
+    closes_by_start: dict[str, tuple[int, int]] = dc_field(default_factory=dict)
 
 
 class LoreMutationsMixin(MarkerMixin):
@@ -125,6 +151,20 @@ class LoreMutationsMixin(MarkerMixin):
         carrying each marker's char offset (needed for position-granular
         resolution). The single per-scene scan the index (#51) walks."""
         yield from self._iter_body_mutations(scene.body, scene.id)
+
+    def _iter_body_closes(self, body: str, scene_id: str) -> Iterator[MutationClose]:
+        """Regex-walk one raw body for interval-close markers (#59)."""
+        return self._scan_body_markers(
+            body,
+            MUTATION_CLOSE_PATTERN,
+            lambda match, line: MutationClose(
+                close_id=match.group("id"),
+                ref=match.group("ref"),
+                scene_id=scene_id,
+                offset=match.start(),
+                line=line,
+            ),
+        )
 
     def _iter_body_mutations(self, body: str, scene_id: str) -> Iterator[MutationMarker]:
         """Regex-walk one raw body for markers. Split from `_scan_scene_mutations`
@@ -272,6 +312,7 @@ class LoreMutationsMixin(MarkerMixin):
         scene_order = self._scene_order()
         scene_paths = self._scene_display_paths()
         by_entity: dict[str, list[MutationMarker]] = {}
+        closes: list[MutationClose] = []
         for scene_id in scene_order:
             try:
                 scene = self.read_scene(scene_id)
@@ -280,19 +321,79 @@ class LoreMutationsMixin(MarkerMixin):
             for marker in self._scan_scene_mutations(scene):
                 marker.scene_path = scene_paths.get(scene_id, marker.scene_path)
                 by_entity.setdefault(marker.entity_id, []).append(marker)
+            closes.extend(self._iter_body_closes(scene.body, scene_id))
         for records in by_entity.values():
             records.sort(key=lambda m: (scene_order.get(m.scene_id, 0), m.offset))
+        closes_by_start = self._resolve_closes(closes, by_entity, scene_order)
         return MutationsIndex(
-            version=self._mutations_version(by_entity),
+            version=self._mutations_version(by_entity, closes_by_start),
             by_entity=by_entity,
             scene_order=scene_order,
+            closes_by_start=closes_by_start,
         )
+
+    @staticmethod
+    def _resolve_closes(
+        closes: list[MutationClose],
+        by_entity: dict[str, list[MutationMarker]],
+        scene_order: dict[str, int],
+    ) -> dict[str, tuple[int, int]]:
+        """Map each start marker id → the (manuscript-position, offset) of its
+        governing close: the earliest close positioned at/after the start (#59).
+        A close before its start marks an empty interval, so it is ignored; a
+        close whose scene isn't in the manuscript is dropped."""
+        start_pos: dict[str, tuple[int, int]] = {
+            m.marker_id: (scene_order[m.scene_id], m.offset)
+            for records in by_entity.values()
+            for m in records
+            if m.scene_id in scene_order
+        }
+        governing: dict[str, tuple[int, int]] = {}
+        for close in closes:
+            if close.scene_id not in scene_order:
+                continue
+            start = start_pos.get(close.ref)
+            close_at = (scene_order[close.scene_id], close.offset)
+            if start is None or close_at < start:
+                continue
+            current = governing.get(close.ref)
+            if current is None or close_at < current:
+                governing[close.ref] = close_at
+        return governing
 
     def entity_mutations(self, entity_id: str) -> MutationMarkerList:
         """The manuscript-ordered mutation timeline for one entity (#54) — the
         pre-ordered per-entity slice of the index, for the lore-card list."""
         index = self.build_mutations_index()
         return MutationMarkerList(items=list(index.by_entity.get(entity_id, [])))
+
+    def live_mutations(
+        self,
+        entity_id: str,
+        scene_id: str,
+        position: int | None = END_OF_SCENE,
+        index: MutationsIndex | None = None,
+    ) -> MutationMarkerList:
+        """The entity's start records still **open** (live, not yet closed) at
+        (scene, position) — the source for the `/mutate close` picker (#59). Base
+        records have no marker id and aren't included (they're not closeable)."""
+        idx = index or self.build_mutations_index()
+        records = idx.by_entity.get(entity_id) or []
+        target_pos = idx.scene_order.get(scene_id)
+        if target_pos is None:
+            return MutationMarkerList(items=[])
+        live = [
+            marker
+            for marker in records
+            if self._marker_is_live(
+                marker,
+                idx.scene_order,
+                target_pos,
+                position,
+                idx.closes_by_start.get(marker.marker_id),
+            )
+        ]
+        return MutationMarkerList(items=live)
 
     def effective_state(
         self,
@@ -327,7 +428,8 @@ class LoreMutationsMixin(MarkerMixin):
             return {}
         live_by_field: dict[str, list[MutationMarker]] = {}
         for marker in records:  # pre-sorted ascending, so the last live wins
-            if self._marker_is_live(marker, idx.scene_order, target_pos, position):
+            close = idx.closes_by_start.get(marker.marker_id)
+            if self._marker_is_live(marker, idx.scene_order, target_pos, position, close):
                 live_by_field.setdefault(marker.field, []).append(marker)
         effective: dict[str, str | list[str]] = {}
         base: dict[str, object] | None = None
@@ -378,15 +480,39 @@ class LoreMutationsMixin(MarkerMixin):
         scene_order: dict[str, int],
         target_pos: int,
         position: int | None,
+        close: tuple[int, int] | None = None,
     ) -> bool:
         marker_pos = scene_order.get(marker.scene_id)
         if marker_pos is None or marker_pos > target_pos:
             return False
-        if marker_pos < target_pos:
-            return True
-        return position is END_OF_SCENE or marker.offset <= position
+        if marker_pos == target_pos and not (
+            position is END_OF_SCENE or marker.offset <= position
+        ):
+            return False  # same scene, cursor before the marker → not yet started
+        # Started (start ≤ target). A close narrows the upper bound: live iff the
+        # resolution point is strictly before the close (exclusive, #59).
+        return close is None or self._target_before_close(close, target_pos, position)
 
-    def _mutations_version(self, by_entity: dict[str, list[MutationMarker]]) -> str:
+    @staticmethod
+    def _target_before_close(
+        close: tuple[int, int], target_pos: int, position: int | None
+    ) -> bool:
+        close_pos, close_offset = close
+        if close_pos > target_pos:
+            return True  # close is in a later scene
+        if close_pos < target_pos:
+            return False  # close already passed
+        # Same scene as the resolution point: end-of-scene sits at/after any
+        # in-scene close; a cursor is before it iff its offset is smaller.
+        if position is END_OF_SCENE:
+            return False
+        return position < close_offset
+
+    def _mutations_version(
+        self,
+        by_entity: dict[str, list[MutationMarker]],
+        closes_by_start: dict[str, tuple[int, int]],
+    ) -> str:
         digest = hashlib.sha1()  # noqa: S324 - cache key, not security
         for entity_id in sorted(by_entity):
             for marker in by_entity[entity_id]:
@@ -395,6 +521,9 @@ class LoreMutationsMixin(MarkerMixin):
                     f"\x1f{marker.field}\x1f{marker.op}\x1f{marker.value}"
                     f"\x1f{marker.name}\x1f{marker.group}\x1f{marker.marker_id}\x1e".encode()
                 )
+        for start_id in sorted(closes_by_start):
+            close_pos, close_offset = closes_by_start[start_id]
+            digest.update(f"close\x1f{start_id}\x1f{close_pos}\x1f{close_offset}\x1e".encode())
         return digest.hexdigest()[:16]
 
     # ----- intentful single-marker mutators (#50) ------------------------

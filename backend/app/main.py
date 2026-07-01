@@ -510,6 +510,16 @@ def list_entity_mutations(entity_id: str) -> MutationMarkerList:
         return service.entity_mutations(entity_id)
 
 
+@app.get("/api/lore/{entity_id}/live-mutations", response_model=MutationMarkerList)
+def list_live_entity_mutations(
+    entity_id: str, scene: str, pos: int | None = None
+) -> MutationMarkerList:
+    """The entity's start records still open (live, not yet closed) at (scene,
+    position) — the source for the `/mutate close` picker (#59)."""
+    with translate_errors():
+        return service.live_mutations(entity_id, scene, pos)
+
+
 @app.get("/api/lore/{entity_id}/effective", response_model=EffectiveStateResponse)
 def get_entity_effective_state(
     entity_id: str, scene: str, pos: int | None = None

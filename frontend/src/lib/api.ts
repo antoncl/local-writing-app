@@ -23,7 +23,9 @@ import type {
   ChatSessionList,
   CreateChatSessionRequest,
   DirectoryListing,
+  EffectiveStateResponse,
   EmbeddedTodoList,
+  MutationMarkerList,
   EntryTypeDefinition,
   GroupApplication,
   KnownTags,
@@ -688,6 +690,30 @@ export const api = {
   },
   deleteEmbeddedTodo(sceneId: string, todoId: string) {
     return request<Scene>(`/scenes/${sceneId}/todos/${todoId}`, {
+      method: "DELETE",
+    });
+  },
+  // Mid-scene lore mutations (#33). The timeline is the manuscript-ordered list
+  // for a lore entity; effective state resolves its overrides at a (scene,
+  // position) for the time-slider. Editing markers goes through the scene
+  // (PATCH/DELETE), like embedded todos.
+  getEntityMutations(entityId: string) {
+    return request<MutationMarkerList>(`/lore/${entityId}/mutations`);
+  },
+  getEntityEffectiveState(entityId: string, sceneId: string, pos?: number) {
+    const query = pos === undefined ? "" : `&pos=${pos}`;
+    return request<EffectiveStateResponse>(
+      `/lore/${entityId}/effective?scene=${encodeURIComponent(sceneId)}${query}`,
+    );
+  },
+  updateMutation(sceneId: string, markerId: string, updates: { entity_id?: string; field?: string; value?: string }) {
+    return request<Scene>(`/scenes/${sceneId}/mutations/${markerId}`, {
+      method: "PATCH",
+      body: JSON.stringify(updates),
+    });
+  },
+  deleteMutation(sceneId: string, markerId: string) {
+    return request<Scene>(`/scenes/${sceneId}/mutations/${markerId}`, {
       method: "DELETE",
     });
   },

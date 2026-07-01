@@ -434,6 +434,30 @@ export type EmbeddedTodoList = {
   items: EmbeddedTodoRecord[];
 };
 
+// Mid-scene lore mutation records (#33). A marker sets one field of one lore
+// entry to a new value at a prose position; the timeline is manuscript-ordered.
+export type MutationMarkerRecord = {
+  marker_id: string;
+  entity_id: string;
+  field: string;
+  value: string;
+  scene_id: string;
+  offset: number;
+  line: number;
+  scene_path: string;
+};
+
+export type MutationMarkerList = {
+  items: MutationMarkerRecord[];
+};
+
+export type EffectiveStateResponse = {
+  entity_id: string;
+  scene_id: string;
+  position: number | null;
+  values: Record<string, string>;
+};
+
 export type ProjectValidation = {
   valid: boolean;
   warnings: string[];

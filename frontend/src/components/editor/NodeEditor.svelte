@@ -1,6 +1,7 @@
 <script lang="ts">
 
   import BacklinksPanel from "@/components/editor/BacklinksPanel.svelte";
+  import MutationTimeline from "@/components/editor/MutationTimeline.svelte";
   import MetadataPanel from "@/components/editor/MetadataPanel.svelte";
   import InputsDialog from "@/components/editor/InputsDialog.svelte";
   import FieldsOnlyView from "@/components/editor/body/FieldsOnlyView.svelte";
@@ -819,6 +820,11 @@
         on:navigate={(event) => onNavigate?.(event.detail)}
       />
     {/key}
+    {#if documentKind === "lore" && scene?.id}
+      {#key scene.id}
+        <MutationTimeline entityId={scene.id} onNavigate={(payload) => onNavigate?.(payload)} />
+      {/key}
+    {/if}
   {/if}
 {/snippet}
 

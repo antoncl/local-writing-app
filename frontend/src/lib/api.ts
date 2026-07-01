@@ -695,8 +695,10 @@ export const api = {
   },
   // Mid-scene lore mutations (#33). The timeline is the manuscript-ordered list
   // for a lore entity; effective state resolves its overrides at a (scene,
-  // position) for the time-slider. Editing markers goes through the scene
-  // (PATCH/DELETE), like embedded todos.
+  // position) for the time-slider. NOTE: the editor rewrites/removes pills
+  // directly in the ProseMirror doc + body save, so updateMutation/deleteMutation
+  // below are currently unused by the app — they mirror the backend PATCH/DELETE
+  // routes (exercised by backend tests) and are kept for parity / future callers.
   getEntityMutations(entityId: string) {
     return request<MutationMarkerList>(`/lore/${entityId}/mutations`);
   },

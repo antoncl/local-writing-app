@@ -464,6 +464,13 @@ def delete_embedded_todo(scene_id: str, todo_id: str) -> Scene:
         return service.delete_embedded_todo(scene_id, todo_id)
 
 
+# The two single-marker mutation routes below are the intentful API mirror of the
+# embedded-todo update/delete routes (#54), exercised by the backend tests
+# (test_lore_mutation_routes / test_lore_mutations). The in-app editor does NOT
+# call them — it rewrites/removes mutation pills directly in the ProseMirror doc
+# and saves the whole body — so they're currently only a programmatic/test surface.
+# Kept for parity and future non-editor callers; they return the re-read Scene so
+# any open pane could reconcile if one ever did use them.
 @app.patch("/api/scenes/{scene_id}/mutations/{marker_id}", response_model=Scene)
 def update_mutation(scene_id: str, marker_id: str, request: UpdateMutationRequest) -> Scene:
     """Rewrite a single in-prose lore-mutation marker without a full body save (#33)."""

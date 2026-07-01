@@ -863,6 +863,32 @@ button.row-action-add.active {
   padding: 0 1px;
   border-radius: 2px;
 }
+
+/* Mid-scene lore-mutation pill (#33). A point marker ("the change happens
+   here"), so it's a compact inline chip — a distinct violet, deliberately
+   unlike the teal character/context marks and the amber TODO anchors. The
+   inline text is compact ("⤳ Captain"); the full "Entity · field → value"
+   sits in the native title tooltip (a richer detail box is layered on later). */
+.editor-body .mutation-pill {
+  --mutation-color: #7c5cbf;
+  display: inline-flex;
+  align-items: center;
+  font-size: 0.82em;
+  font-weight: 600;
+  line-height: 1.2;
+  padding: 0 6px;
+  margin: 0 1px;
+  border-radius: 999px;
+  color: var(--mutation-color);
+  background: color-mix(in oklab, var(--mutation-color) 14%, transparent);
+  border: 1px solid color-mix(in oklab, var(--mutation-color) 42%, transparent);
+  cursor: pointer;
+  white-space: nowrap;
+  user-select: none;
+}
+.editor-body .mutation-pill:hover {
+  background: color-mix(in oklab, var(--mutation-color) 26%, transparent);
+}
 /* .ai-inline-toolbar* co-located into ProseBodyView.svelte (#14). */
 
 /* .chat-prompt-glyph co-located into Chats.svelte (#14). */

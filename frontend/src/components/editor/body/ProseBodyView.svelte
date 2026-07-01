@@ -33,7 +33,8 @@
   import { editorHtmlToSceneMarkdown, sceneMarkdownToHtml } from "@/lib/utils/markdown";
   import { sanitizePastedHtml } from "@/lib/utils/sanitizePastedHtml";
   import { ImplicitContextHighlight, REBUILD_META } from "@/lib/editor-core/implicitContextHighlight";
-  import { AISuggestion, TodoAnchor, createCharacterMark } from "@/lib/editor-core/proseMarks";
+  import { AISuggestion, TodoAnchor, createCharacterMark, createMutationMark } from "@/lib/editor-core/proseMarks";
+  import MutationAuthoringForm, { type MutationDraft } from "./MutationAuthoringForm.svelte";
   import {
     parseSlashBody,
     parseTableDims,
@@ -166,6 +167,16 @@
     colorForId: characterColorFromId,
     titleForId: characterTitleFromId,
   });
+
+  // Mutation pill label ("Honor · rank → Captain"), read live at render time
+  // from the reactive lore lookup (mirrors CharacterMark's resolvers).
+  function mutationLabelFromMarker(entityId: string, field: string, value: string): string {
+    const entry = loreEntries.find((e) => e.id === entityId);
+    const name = entry?.title || entityId || "entity";
+    return `${name} · ${field} → ${value}`;
+  }
+
+  const MutationMark = createMutationMark({ labelForMarker: mutationLabelFromMarker });
 
   // ---------- State ----------
   let editorFrame = $state<HTMLDivElement>();
@@ -498,6 +509,16 @@
           } else {
             openTableGrid();
           }
+        },
+      },
+      {
+        group: "Insert",
+        label: "Mutate lore",
+        description: "Record a mid-scene change to a lore field (rank, title, …).",
+        autocompleteTo: "mutate",
+        run: () => {
+          clearSlashTrigger();
+          openMutationDialog();
         },
       },
       ...promptEntriesForSurface(promptCtx, "append_to_body")
@@ -939,6 +960,38 @@
     return `todo_${randomId.slice(0, 12)}`;
   }
 
+  function createMutationId() {
+    const randomId = globalThis.crypto?.randomUUID?.().replace(/-/g, "") ?? Math.random().toString(16).slice(2);
+    return `mut_${randomId.slice(0, 12)}`;
+  }
+
+  // `/mutate` authoring dialog (#33). Opened from the slash menu; inserts one
+  // mutation pill (client-minted id) per selected field at the cursor. The
+  // marker round-trips to a scene-body comment via the turndown rule on save.
+  let mutationDialogOpen = $state(false);
+
+  function openMutationDialog() {
+    mutationDialogOpen = true;
+  }
+
+  function insertMutations(drafts: MutationDraft[]) {
+    mutationDialogOpen = false;
+    if (!editor || drafts.length === 0) return;
+    const chain = editor.chain().focus();
+    for (const draft of drafts) {
+      chain.insertContent({
+        type: "mutation",
+        attrs: {
+          entity: draft.entity,
+          field: draft.field,
+          value: draft.value,
+          markerId: createMutationId(),
+        },
+      });
+    }
+    chain.run();
+  }
+
   function selectedPlainText() {
     if (!editor) return "";
     const { selection } = editor.state;
@@ -1177,6 +1230,7 @@
         StarterKit.configure({ heading: { levels: [1, 2, 3] } }),
         AISuggestion,
         CharacterMark,
+        MutationMark,
         TodoAnchor,
         Table.configure({ resizable: true }),
         TableRow,
@@ -1333,3 +1387,12 @@
 
   <div bind:this={editorElement}></div>
 </div>
+
+{#if mutationDialogOpen}
+  <MutationAuthoringForm
+    {loreEntries}
+    schema={metadataSchema}
+    onSubmit={insertMutations}
+    onCancel={() => (mutationDialogOpen = false)}
+  />
+{/if}

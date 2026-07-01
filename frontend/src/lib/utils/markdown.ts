@@ -35,6 +35,23 @@ turndown.addRule("characterMark", {
     return `<!-- character:id=${id} -->${content}<!-- /character -->`;
   },
 });
+turndown.addRule("mutationMark", {
+  filter: (node: Node) => {
+    if (!(node instanceof HTMLElement)) return false;
+    return node.tagName === "SPAN" && Boolean(node.dataset.mutationEntity);
+  },
+  replacement: (_content: string, node: Node) => {
+    const element = node as HTMLElement;
+    const entity = element.dataset.mutationEntity;
+    const field = element.dataset.mutationField;
+    const markerId = element.dataset.mutationId;
+    if (!entity || !field || !markerId) return "";
+    // Value is url-encoded so it survives the markdown round-trip (matches the
+    // backend marker grammar + embedded-todo note encoding).
+    const value = encodeURIComponent(element.dataset.mutationValue ?? "");
+    return `<!-- mutate:entity=${entity};field=${field};value=${value};id=${markerId} -->`;
+  },
+});
 turndown.addRule("simpleMarkdownTable", {
   filter: "table",
   replacement: (_content: string, node: Node) => {
@@ -74,7 +91,7 @@ turndown.addRule("simpleMarkdownTable", {
 });
 
 export async function sceneMarkdownToHtml(markdown: string): Promise<string> {
-  const prepared = markEmbeddedCharacters(markEmbeddedTodos(markdown || ""));
+  const prepared = markEmbeddedMutations(markEmbeddedCharacters(markEmbeddedTodos(markdown || "")));
   return (await marked.parse(prepared)) || "<p></p>";
 }
 
@@ -115,6 +132,23 @@ function markEmbeddedCharacters(markdown: string): string {
     /<!--\s*character:id=([A-Za-z0-9_-]+)\s*-->([\s\S]*?)<!--\s*\/character\s*-->/g,
     (_match, characterId: string, content: string) => {
       return `<span data-character="${escapeAttribute(characterId)}">${content}</span>`;
+    },
+  );
+}
+
+function markEmbeddedMutations(markdown: string): string {
+  // A mutation marker is a self-contained point comment (no wrapped prose) →
+  // an empty atom span the MutationMark node parses. Value is url-decoded into
+  // the data attribute for display; turndown re-encodes it on save.
+  return markdown.replace(
+    /<!--\s*mutate:entity=([A-Za-z0-9_-]+);field=([A-Za-z0-9_.-]+);value=([^;\s]*);id=([A-Za-z0-9_-]+)\s*-->/g,
+    (_match, entity: string, field: string, value: string, markerId: string) => {
+      return (
+        `<span data-mutation-entity="${escapeAttribute(entity)}"` +
+        ` data-mutation-field="${escapeAttribute(field)}"` +
+        ` data-mutation-value="${escapeAttribute(decodeNote(value))}"` +
+        ` data-mutation-id="${escapeAttribute(markerId)}"></span>`
+      );
     },
   );
 }

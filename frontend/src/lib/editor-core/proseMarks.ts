@@ -5,7 +5,7 @@
 //   render time, so it's built via a factory that takes those resolvers — the
 //   component keeps ownership of the reactive lore/schema lookups and passes
 //   them in (same pattern as ImplicitContextHighlight's matcher option).
-import { Mark, mergeAttributes } from "@tiptap/core";
+import { Mark, mergeAttributes, Node } from "@tiptap/core";
 
 export const AISuggestion = Mark.create({
   name: "aiSuggestion",
@@ -70,6 +70,71 @@ export function createCharacterMark({ colorForId, titleForId }: CharacterMarkRes
     },
     renderHTML({ HTMLAttributes }) {
       return ["span", mergeAttributes(HTMLAttributes, { class: "character-mark" }), 0];
+    },
+  });
+}
+
+export interface MutationMarkResolvers {
+  /** Human label for the pill, e.g. "Honor → Captain". Read at render time so
+   *  the pill stays live against the reactive lore/schema stores. */
+  labelForMarker: (entityId: string, field: string, value: string) => string;
+}
+
+/**
+ * Build the mid-scene lore-mutation pill (#33). Unlike CharacterMark it wraps no
+ * prose — a mutation is a *point* ("the change happens here"), so it's an inline
+ * atom Node, not a Mark. It round-trips to a self-contained scene-body comment
+ * `<!-- mutate:entity=..;field=..;value=..;id=.. -->` (see lib/utils/markdown).
+ * The label resolver is read at renderHTML time (mirrors CharacterMark).
+ */
+export function createMutationMark({ labelForMarker }: MutationMarkResolvers) {
+  return Node.create({
+    name: "mutation",
+    inline: true,
+    group: "inline",
+    atom: true,
+    selectable: true,
+    addAttributes() {
+      return {
+        entity: {
+          default: null,
+          parseHTML: (element) => element.getAttribute("data-mutation-entity"),
+          renderHTML: (attributes) =>
+            attributes.entity ? { "data-mutation-entity": String(attributes.entity) } : {},
+        },
+        field: {
+          default: null,
+          parseHTML: (element) => element.getAttribute("data-mutation-field"),
+          renderHTML: (attributes) =>
+            attributes.field ? { "data-mutation-field": String(attributes.field) } : {},
+        },
+        value: {
+          default: "",
+          parseHTML: (element) => element.getAttribute("data-mutation-value") ?? "",
+          renderHTML: (attributes) => ({ "data-mutation-value": String(attributes.value ?? "") }),
+        },
+        markerId: {
+          default: null,
+          parseHTML: (element) => element.getAttribute("data-mutation-id"),
+          renderHTML: (attributes) =>
+            attributes.markerId ? { "data-mutation-id": String(attributes.markerId) } : {},
+        },
+      };
+    },
+    parseHTML() {
+      return [{ tag: "span[data-mutation-entity]" }];
+    },
+    renderHTML({ node, HTMLAttributes }) {
+      const value = String(node.attrs.value ?? "");
+      // Full label goes in the tooltip; the inline pill stays compact so prose
+      // reads cleanly — it just marks "the change happens here".
+      const full = labelForMarker(
+        String(node.attrs.entity ?? ""),
+        String(node.attrs.field ?? ""),
+        value,
+      );
+      const compact = value ? `⤳ ${value}` : "⤳";
+      return ["span", mergeAttributes(HTMLAttributes, { class: "mutation-pill", title: full }), compact];
     },
   });
 }

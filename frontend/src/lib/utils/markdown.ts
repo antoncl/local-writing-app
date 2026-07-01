@@ -46,10 +46,21 @@ turndown.addRule("mutationMark", {
     const field = element.dataset.mutationField;
     const markerId = element.dataset.mutationId;
     if (!entity || !field || !markerId) return "";
-    // Value is url-encoded so it survives the markdown round-trip (matches the
-    // backend marker grammar + embedded-todo note encoding).
+    // Value/name are url-encoded so they survive the markdown round-trip (matches
+    // the backend marker grammar + embedded-todo note encoding). Optional op/name/
+    // group are emitted only when non-default, in canonical order — v1.0 markers
+    // stay byte-stable (mirrors lore_mutations._render_mutation_marker).
+    const op = element.dataset.mutationOp || "replace";
     const value = encodeURIComponent(element.dataset.mutationValue ?? "");
-    return `<!-- mutate:entity=${entity};field=${field};value=${value};id=${markerId} -->`;
+    const name = element.dataset.mutationName ?? "";
+    const group = element.dataset.mutationGroup ?? "";
+    const parts = [`entity=${entity}`, `field=${field}`];
+    if (op && op !== "replace") parts.push(`op=${op}`);
+    parts.push(`value=${value}`);
+    if (name) parts.push(`name=${encodeURIComponent(name)}`);
+    if (group) parts.push(`group=${group}`);
+    parts.push(`id=${markerId}`);
+    return `<!-- mutate:${parts.join(";")} -->`;
   },
 });
 turndown.addRule("simpleMarkdownTable", {
@@ -138,15 +149,32 @@ function markEmbeddedCharacters(markdown: string): string {
 
 function markEmbeddedMutations(markdown: string): string {
   // A mutation marker is a self-contained point comment (no wrapped prose) →
-  // an empty atom span the MutationMark node parses. Value is url-decoded into
-  // the data attribute for display; turndown re-encodes it on save.
+  // an empty atom span the MutationMark node parses. Value/name are url-decoded
+  // into the data attributes for display; turndown re-encodes them on save. The
+  // optional op/name/group groups mirror the backend grammar (lore_mutations),
+  // and are absent on v1.0 markers.
   return markdown.replace(
-    /<!--\s*mutate:entity=([A-Za-z0-9_-]+);field=([A-Za-z0-9_.-]+);value=([^;\s]*);id=([A-Za-z0-9_-]+)\s*-->/g,
-    (_match, entity: string, field: string, value: string, markerId: string) => {
+    /<!--\s*mutate:entity=([A-Za-z0-9_-]+);field=([A-Za-z0-9_.-]+);(?:op=(add|remove|replace);)?value=([^;\s]*)(?:;name=([^;\s]*))?(?:;group=([A-Za-z0-9_-]+))?;id=([A-Za-z0-9_-]+)\s*-->/g,
+    (
+      _match,
+      entity: string,
+      field: string,
+      op: string | undefined,
+      value: string,
+      name: string | undefined,
+      group: string | undefined,
+      markerId: string,
+    ) => {
+      const opAttr = op && op !== "replace" ? ` data-mutation-op="${escapeAttribute(op)}"` : "";
+      const nameAttr = name ? ` data-mutation-name="${escapeAttribute(decodeNote(name))}"` : "";
+      const groupAttr = group ? ` data-mutation-group="${escapeAttribute(group)}"` : "";
       return (
         `<span data-mutation-entity="${escapeAttribute(entity)}"` +
         ` data-mutation-field="${escapeAttribute(field)}"` +
+        opAttr +
         ` data-mutation-value="${escapeAttribute(decodeNote(value))}"` +
+        nameAttr +
+        groupAttr +
         ` data-mutation-id="${escapeAttribute(markerId)}"></span>`
       );
     },

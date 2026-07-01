@@ -24,7 +24,15 @@
   let expanded = $state(false);
   // 0 = base (book start); 1..N = effective state as of the i-th mutation.
   let sliderIndex = $state(0);
-  let effective = $state<Record<string, string>>({});
+  // Scalar fields resolve to a string, collection fields to a string[] (ADR-0009).
+  let effective = $state<Record<string, string | string[]>>({});
+  const displayValue = (value: string | string[]) => (Array.isArray(value) ? value.join(", ") : value);
+  // Auto-label a mutation row from its op (#58): add +item, remove −item, else →.
+  const rowTitle = (m: { field: string; op?: string; value: string }) => {
+    if (m.op === "add") return `${m.field} +${m.value}`;
+    if (m.op === "remove") return `${m.field} −${m.value}`;
+    return `${m.field} → ${m.value}`;
+  };
 
   // Refetch the timeline whenever the entity changes.
   $effect(() => {
@@ -109,7 +117,7 @@
                 <li class="muted">No overrides yet.</li>
               {:else}
                 {#each effectiveRows as [field, value] (field)}
-                  <li><span class="mut-field">{field}</span> = <span class="mut-value">{value}</span></li>
+                  <li><span class="mut-field">{field}</span> = <span class="mut-value">{displayValue(value)}</span></li>
                 {/each}
               {/if}
             </ul>
@@ -119,7 +127,7 @@
         <NodeList mode="tree" isEmpty={false}>
           {#each mutations as marker, i (marker.marker_id)}
             <NodeRow
-              title={`${marker.field} → ${marker.value}`}
+              title={marker.name || rowTitle(marker)}
               detail={marker.scene_path}
               onClick={() => {
                 void scrubTo(i + 1);

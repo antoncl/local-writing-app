@@ -11,7 +11,12 @@ export interface MutationNodeDraft {
   markerId?: string | null;
   entity: string;
   field: string;
+  /** Collection operator (#58): "replace" (default) | "add" | "remove". */
+  op?: string;
   value: string;
+  /** Optional human label + co-authored-set tie (#65). */
+  name?: string;
+  group?: string;
 }
 
 export function createMutationId(): string {
@@ -70,7 +75,10 @@ export function applyMutationDrafts(editor: Editor, drafts: MutationNodeDraft[])
           tr.setNodeMarkup(pos, undefined, {
             entity: draft.entity,
             field: draft.field,
+            op: draft.op ?? "replace",
             value: draft.value,
+            name: draft.name ?? "",
+            group: draft.group ?? "",
             markerId: draft.markerId,
           });
           return true;
@@ -85,7 +93,10 @@ export function applyMutationDrafts(editor: Editor, drafts: MutationNodeDraft[])
           attrs: {
             entity: draft.entity,
             field: draft.field,
+            op: draft.op ?? "replace",
             value: draft.value,
+            name: draft.name ?? "",
+            group: draft.group ?? "",
             markerId: createMutationId(),
           },
         })

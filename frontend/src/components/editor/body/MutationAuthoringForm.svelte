@@ -1,5 +1,13 @@
 <script lang="ts" module>
-  export type MutationDraft = { entity: string; field: string; value: string; markerId?: string };
+  export type MutationDraft = {
+    entity: string;
+    field: string;
+    op?: string; // "replace" (default) | "add" | "remove" (#58)
+    value: string;
+    markerId?: string;
+    name?: string;
+    group?: string;
+  };
 </script>
 
 <script lang="ts">
@@ -53,6 +61,9 @@
 
   const editing = $derived(Boolean(initial?.markerId));
 
+  const COLLECTION_TYPES = ["multi_select", "tags", "entity_ref_list"];
+  const isCollectionType = (type: string) => COLLECTION_TYPES.includes(type);
+
   // The dialog re-mounts on each open ({#if} in the parent), so capturing the
   // initial prop values once is intentional (untrack silences the lint).
   let entityId = $state(untrack(() => initial?.entity ?? presetEntityId ?? ""));
@@ -60,8 +71,36 @@
   let picks = $state<Record<string, { on: boolean; value: MetadataValue }>>(
     untrack(() => (initial ? { [initial.field]: { on: true, value: initial.value } } : {})),
   );
+  // field id -> collection op ("replace" | "add" | "remove"). Only meaningful for
+  // collection fields; scalar fields are always replace (#58).
+  let ops = $state<Record<string, string>>(
+    untrack(() => (initial?.op && initial.field ? { [initial.field]: initial.op } : {})),
+  );
 
   const entity = $derived(loreEntries.find((e) => e.id === entityId) ?? null);
+
+  // The item-widget field def for an add/remove op: a collection resolves to its
+  // single-element type (entity_ref_list → entity_ref, multi_select → select,
+  // tags → text), so each add/remove marker carries one element (doc §1.5).
+  function itemFieldDef(def: MetadataFieldDefinition): MetadataFieldDefinition {
+    if (def.type === "entity_ref_list") return { ...def, type: "entity_ref" };
+    if (def.type === "multi_select") return { ...def, type: "select" };
+    return { ...def, type: "text" };
+  }
+
+  // The effective field def for a field's current op: item widget for add/remove,
+  // the whole-collection widget for replace (and always for scalars).
+  function effectiveDef(id: string, def: MetadataFieldDefinition): MetadataFieldDefinition {
+    const op = ops[id] ?? "replace";
+    return isCollectionType(def.type) && op !== "replace" ? itemFieldDef(def) : def;
+  }
+
+  function setOp(id: string, op: string) {
+    ops[id] = op;
+    // The value shape differs between replace (whole) and add/remove (one item),
+    // so reset the pending value when the op changes.
+    picks[id] = { on: picks[id]?.on ?? true, value: "" };
+  }
 
   // Intrinsic node fields (not schema fields) that are always mutable.
   const INTRINSIC: Array<{ id: string; def: MetadataFieldDefinition }> = [
@@ -70,8 +109,9 @@
   ];
 
   // The entity's mutable fields: intrinsic title/body + its resolved schema
-  // fields, minus computed (derived) and collection types (multi_select / tags /
-  // entity_ref_list are additive-flavored — v1.1). In edit mode, just the one.
+  // fields, minus computed (derived). Collection fields (multi_select / tags /
+  // entity_ref_list) are included and gain an add/remove/replace op selector
+  // (#58). In edit mode, just the one.
   const fieldOptions = $derived.by((): Array<{ id: string; label: string; def: MetadataFieldDefinition }> => {
     if (!entity) return [];
     if (initial) {
@@ -84,7 +124,7 @@
     for (const id of ids) {
       const def = schema?.fields[id];
       if (!def) continue;
-      if (["computed", "multi_select", "tags", "entity_ref_list"].includes(def.type)) continue;
+      if (def.type === "computed") continue;
       opts.push({ id, label: def.name ?? id, def });
     }
     return opts;
@@ -130,10 +170,19 @@
     const drafts: MutationDraft[] = [];
     for (const f of fieldOptions) {
       const pick = picks[f.id];
-      if (pick?.on && isFilled(pick.value)) {
+      if (!pick?.on || !isFilled(pick.value)) continue;
+      const op = isCollectionType(f.def.type) ? (ops[f.id] ?? "replace") : "replace";
+      if (op !== "replace" && Array.isArray(pick.value)) {
+        // add/remove carry one element each; an array-valued item widget mints
+        // one marker per element (doc §1.2).
+        for (const item of pick.value) {
+          drafts.push({ entity: entity.id, field: f.id, op, value: toMarkerString(item) });
+        }
+      } else {
         drafts.push({
           entity: entity.id,
           field: f.id,
+          op,
           value: toMarkerString(pick.value),
           ...(initial?.markerId ? { markerId: initial.markerId } : {}),
         });
@@ -195,11 +244,23 @@
                 onchange={(e) => toggle(f.id, e.currentTarget.checked)}
               />
               <span>{f.label}</span>
+              {#if picks[f.id]?.on && isCollectionType(f.def.type)}
+                <select
+                  class="mutation-op"
+                  aria-label="{f.label} operation"
+                  value={ops[f.id] ?? "replace"}
+                  onchange={(e) => setOp(f.id, e.currentTarget.value)}
+                >
+                  <option value="replace">Replace all</option>
+                  <option value="add">Add item</option>
+                  <option value="remove">Remove item</option>
+                </select>
+              {/if}
             </label>
             {#if picks[f.id]?.on}
               <div class="mutation-value">
                 <FieldValueEditor
-                  field={f.def}
+                  field={effectiveDef(f.id, f.def)}
                   value={picks[f.id]?.value ?? ""}
                   ariaLabel={f.label}
                   loreEntries={loreEntries}
@@ -293,6 +354,16 @@
     font-size: 0.9rem;
     color: var(--text);
     cursor: pointer;
+  }
+  .mutation-op {
+    margin-left: auto;
+    font: inherit;
+    font-size: 0.78rem;
+    padding: 2px 6px;
+    border-radius: 5px;
+    border: 1px solid var(--border);
+    background: var(--surface);
+    color: var(--text-2);
   }
   .mutation-value {
     display: flex;

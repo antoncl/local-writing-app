@@ -440,7 +440,10 @@ export type MutationMarkerRecord = {
   marker_id: string;
   entity_id: string;
   field: string;
+  op: string; // "replace" (default) | "add" | "remove" (#58)
   value: string;
+  name: string; // optional human label (#65)
+  group: string; // co-authored-set tie (#65)
   scene_id: string;
   offset: number;
   line: number;
@@ -455,7 +458,8 @@ export type EffectiveStateResponse = {
   entity_id: string;
   scene_id: string;
   position: number | null;
-  values: Record<string, string>;
+  // Scalar fields resolve to a string; collection fields to a string[] (ADR-0009).
+  values: Record<string, string | string[]>;
 };
 
 export type ProjectValidation = {

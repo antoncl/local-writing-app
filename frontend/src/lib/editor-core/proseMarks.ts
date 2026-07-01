@@ -77,7 +77,14 @@ export function createCharacterMark({ colorForId, titleForId }: CharacterMarkRes
 export interface MutationMarkResolvers {
   /** Human label for the pill, e.g. "Honor → Captain". Read at render time so
    *  the pill stays live against the reactive lore/schema stores. */
-  labelForMarker: (entityId: string, field: string, value: string) => string;
+  labelForMarker: (entityId: string, field: string, value: string, op?: string) => string;
+}
+
+// Compact pill glyph for a collection op (#58): add prefixes +, remove −.
+function opGlyph(op: string): string {
+  if (op === "add") return "+";
+  if (op === "remove") return "−";
+  return "";
 }
 
 /**
@@ -108,10 +115,30 @@ export function createMutationMark({ labelForMarker }: MutationMarkResolvers) {
           renderHTML: (attributes) =>
             attributes.field ? { "data-mutation-field": String(attributes.field) } : {},
         },
+        op: {
+          default: "replace",
+          parseHTML: (element) => element.getAttribute("data-mutation-op") || "replace",
+          renderHTML: (attributes) =>
+            attributes.op && attributes.op !== "replace"
+              ? { "data-mutation-op": String(attributes.op) }
+              : {},
+        },
         value: {
           default: "",
           parseHTML: (element) => element.getAttribute("data-mutation-value") ?? "",
           renderHTML: (attributes) => ({ "data-mutation-value": String(attributes.value ?? "") }),
+        },
+        name: {
+          default: "",
+          parseHTML: (element) => element.getAttribute("data-mutation-name") ?? "",
+          renderHTML: (attributes) =>
+            attributes.name ? { "data-mutation-name": String(attributes.name) } : {},
+        },
+        group: {
+          default: "",
+          parseHTML: (element) => element.getAttribute("data-mutation-group") ?? "",
+          renderHTML: (attributes) =>
+            attributes.group ? { "data-mutation-group": String(attributes.group) } : {},
         },
         markerId: {
           default: null,
@@ -126,14 +153,20 @@ export function createMutationMark({ labelForMarker }: MutationMarkResolvers) {
     },
     renderHTML({ node, HTMLAttributes }) {
       const value = String(node.attrs.value ?? "");
+      const op = String(node.attrs.op ?? "replace");
+      const name = String(node.attrs.name ?? "");
       // Full label goes in the tooltip; the inline pill stays compact so prose
-      // reads cleanly — it just marks "the change happens here".
+      // reads cleanly — it just marks "the change happens here". A collection op
+      // shows its +/− glyph; a named change prefers the name.
       const full = labelForMarker(
         String(node.attrs.entity ?? ""),
         String(node.attrs.field ?? ""),
         value,
+        op,
       );
-      const compact = value ? `⤳ ${value}` : "⤳";
+      const glyph = opGlyph(op);
+      const body = name || (glyph ? `${glyph}${value}` : value);
+      const compact = body ? `⤳ ${body}` : "⤳";
       return ["span", mergeAttributes(HTMLAttributes, { class: "mutation-pill", title: full }), compact];
     },
   });

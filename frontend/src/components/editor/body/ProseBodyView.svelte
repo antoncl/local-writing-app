@@ -1271,7 +1271,10 @@
               markerId: String(node.attrs.markerId ?? ""),
               entity: String(node.attrs.entity ?? ""),
               field: String(node.attrs.field ?? ""),
+              op: String(node.attrs.op ?? "replace"),
               value: String(node.attrs.value ?? ""),
+              name: String(node.attrs.name ?? ""),
+              group: String(node.attrs.group ?? ""),
             });
             return true;
           }

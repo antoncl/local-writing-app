@@ -64,6 +64,12 @@
   const COLLECTION_TYPES = ["multi_select", "tags", "entity_ref_list"];
   const isCollectionType = (type: string) => COLLECTION_TYPES.includes(type);
 
+  // Name-ish fields carry the scene-granular resolution caveat (#61): a rename
+  // resolves per scene, so detection uses one name for the whole scene of the
+  // change. Surfaced inline exactly when the writer picks such a field.
+  const NAME_FIELDS = ["title", "name", "aliases"];
+  const isNameField = (id: string) => NAME_FIELDS.includes(id);
+
   // The dialog re-mounts on each open ({#if} in the parent), so capturing the
   // initial prop values once is intentional (untrack silences the lint).
   let entityId = $state(untrack(() => initial?.entity ?? presetEntityId ?? ""));
@@ -274,6 +280,17 @@
                   onChange={(v) => setValue(f.id, v)}
                 />
               </div>
+              {#if isNameField(f.id)}
+                <p class="mutation-note">
+                  Name changes resolve <strong>per scene</strong>: within the scene of the change,
+                  auto-detection uses one name for the whole scene.
+                  <a
+                    href="https://github.com/antoncl/local-writing-app/blob/master/docs/mutations.md#how-resolution-works--and-its-one-limit"
+                    target="_blank"
+                    rel="noopener"
+                  >How resolution works ↗</a>
+                </p>
+              {/if}
             {/if}
           </div>
         {/each}
@@ -368,6 +385,17 @@
   .mutation-value {
     display: flex;
     padding-left: 22px;
+  }
+  .mutation-note {
+    margin: 4px 0 0;
+    padding-left: 22px;
+    font-size: 0.74rem;
+    line-height: 1.35;
+    color: var(--text-3);
+  }
+  .mutation-note a {
+    color: var(--accent);
+    white-space: nowrap;
   }
   .mutation-value > :global(*) {
     flex: 1 1 auto;

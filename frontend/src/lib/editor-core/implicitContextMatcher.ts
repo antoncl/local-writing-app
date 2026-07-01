@@ -58,10 +58,17 @@ function buildPreview(body: string, max = 120): string {
 }
 
 /** Build a matcher from the current lore set. Returns an empty matcher
- *  when the set is empty (caller can early-exit scans). */
+ *  when the set is empty (caller can early-exit scans).
+ *
+ *  `effectiveNames` (#61), when given, overrides an entry's matched name-set
+ *  with its effective title + aliases as of a resolution scene — so a renamed
+ *  entity is detected under its as-of-scene name in that scene's prose. The
+ *  hover `lookup` still uses base title/preview/color (the card content). Entries
+ *  absent from the map fall back to their base names. */
 export function compileMatcher(
   entries: LoreEntrySummary[],
   schema: MetadataSchema | null = null,
+  effectiveNames: Record<string, string[]> | null = null,
 ): CompiledMatcher {
   // Map name (lowercased) → id, sorted by name-length DESC. Length-desc
   // alternation makes the regex pick the longest match at a given start
@@ -80,6 +87,13 @@ export function compileMatcher(
       entryType: entry.entry_type ?? "",
       colorHex: swatch?.hex ?? null,
     });
+    const effective = effectiveNames?.[entry.id];
+    if (effective && effective.length > 0) {
+      for (const name of effective) {
+        if (name && name.trim()) refs.push({ name: name.trim(), id: entry.id });
+      }
+      continue;
+    }
     refs.push({ name: entry.title, id: entry.id });
     for (const alias of readAliases(entry.metadata as Record<string, unknown>)) {
       refs.push({ name: alias, id: entry.id });

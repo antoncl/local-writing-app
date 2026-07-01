@@ -33,6 +33,7 @@
   import { editorHtmlToSceneMarkdown, sceneMarkdownToHtml } from "@/lib/utils/markdown";
   import { sanitizePastedHtml } from "@/lib/utils/sanitizePastedHtml";
   import { ImplicitContextHighlight, REBUILD_META } from "@/lib/editor-core/implicitContextHighlight";
+  import { createSceneEffectiveMatcher } from "@/lib/editor-core/sceneEffectiveMatcher.svelte";
   import {
     AISuggestion,
     TodoAnchor,
@@ -1384,10 +1385,19 @@
       }
     }
   });
-  // Reactively poke the ImplicitContextHighlight extension when the
-  // matcher reference changes (lore added/edited at the App level).
+  // Scene-local effective-name matcher (#61): the open scene highlights entities
+  // under their as-of-scene names, falling back to the global (base-name) matcher
+  // while loading / for non-scene bodies. See the controller for invalidation.
+  const sceneMatcher = createSceneEffectiveMatcher({
+    sceneId: () => (documentKind === "scene" ? scene?.id ?? null : null),
+    entries: () => loreEntries,
+    schema: () => metadataSchema,
+    invalidateOn: () => implicitContextMatcher,
+  });
+  // Reactively poke the ImplicitContextHighlight extension when the effective
+  // matcher reference changes (scene switch, lore added/edited at the App level).
   $effect.pre(() => {
-    if (editor) updateImplicitMatcher(implicitContextMatcher);
+    if (editor) updateImplicitMatcher(sceneMatcher.current ?? implicitContextMatcher);
   });
   // Suppress unused-warning for slashArgTokens (reserved for future slash UX).
   $effect.pre(() => {

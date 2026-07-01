@@ -33,3 +33,15 @@ patterns and is compile-rare (only when a name/alias base or mutation changes). 
   resolved values."
 - Both matcher consumers pick the matcher for the scene's segment; segment set invalidates with the
   mutations-index version.
+
+## Amendment (v1.1, 2026-07-01) — per-resolution-scene, not precompiled segments
+Verified against the shipped consumers: neither scans the whole manuscript. Backend `_alias_match`
+(`services/ai/helpers.py:748`) scans the **chat user message** at the chat's **one** resolution
+scene (ADR-0012); the frontend highlighter (`implicitContextMatcher.ts:62`) scans **one open
+scene's** prose. So the "N+1 segments across the manuscript" framing collapses to the primitive both
+actually need: **the effective name-set as-of scene X**. v1.1 delivers a small
+`GET /api/scenes/{id}/effective-names` read and feeds it to both consumers, rather than precompiling
+per-segment matchers. Resolution is **scene-granular** (a mid-scene rename uses the scene's
+end-of-scene name-set) — documented limitation. The full segment machinery would only be warranted
+if something ever scanned many scenes in one pass; nothing does. See
+`mid-scene-lore-mutations-v1.1.md` §4.

@@ -281,7 +281,9 @@ class ProjectLifecycleMixin:
                 status = str(front_matter.get("status") or "draft")
                 if metadata_schema:
                     errors.extend(self._validate_scene_metadata(scene_id, str(entry_type or "scene"), status, metadata, metadata_schema, node_index))
-                    errors.extend(self._validate_scene_mutations(scene_id, body, metadata_schema, node_index))
+                    # Mutation-value issues are advisory (never block a save), so
+                    # they surface as warnings, not errors.
+                    warnings.extend(self._validate_scene_mutations(scene_id, body, metadata_schema, node_index))
             except ProjectServiceError as exc:
                 errors.append(exc.message)
 

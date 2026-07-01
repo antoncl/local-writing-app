@@ -358,22 +358,20 @@ class ManuscriptMixin:
             entry_type=request.entry_type,
             metadata=metadata,
         )
-        node_index = self._build_node_index()
         metadata_errors = self._validate_scene_metadata(
             node_id,
             scene.entry_type,
             scene.status,
             scene.metadata,
             schema,
-            node_index,
+            self._build_node_index(),
         )
-        # A mutation marker's value is a field value (ADR-0007) — validate it on
-        # the same save, so a bad value is rejected like any invalid metadata.
-        mutation_errors = self._validate_scene_mutations(
-            node_id, request.body, schema, node_index
-        )
-        if metadata_errors or mutation_errors:
-            raise ProjectServiceError(" ".join(metadata_errors + mutation_errors), 422)
+        if metadata_errors:
+            raise ProjectServiceError(" ".join(metadata_errors), 422)
+        # Mutation markers live in the prose — a bad value must NEVER block the
+        # scene save (that's user-hostile). The authoring UI's typed widgets keep
+        # values well-formed at the source; project validation surfaces any stray
+        # ones as advisory warnings (see validate_project).
         self._write_scene_file(path, scene)
         path = self._maybe_rename_node_file(path, request.title)
         self._update_scene_title_in_structure(node_id, request.title)

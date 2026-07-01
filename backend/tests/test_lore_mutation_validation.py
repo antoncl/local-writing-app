@@ -1,9 +1,9 @@
-"""Validation tests for mutation values (#53, #33).
+"""Advisory validation tests for mutation values (#53, #33).
 
-A mutation value is a field value (ADR-0007): it must target a real lore entity,
-name a field defined for that entity's entry_type, and satisfy that field's
-constraints — exactly as a base value does. Enforced on three paths that share
-one scan — `save_scene` (PUT), `update_mutation` (PATCH), and `validate_project`.
+A mutation value is a field value (ADR-0007), but validation is **advisory** — a
+bad value NEVER blocks a scene save (that would be user-hostile). Saves always
+succeed; `validate_project` surfaces strays as warnings. The authoring UI's typed
+widgets keep values well-formed at the source.
 """
 
 from __future__ import annotations
@@ -35,15 +35,13 @@ def _define_field(field_id: str, field_type: str, entry_type: str = "character")
     )
 
 
-class MutationSaveValidationTests(unittest.TestCase):
+class MutationAdvisoryValidationTests(unittest.TestCase):
     def setUp(self) -> None:
         self.temp_dir = TemporaryDirectory()
         self.root = Path(self.temp_dir.name) / "project"
         svc.__init__()
         svc.create_project(self.root, "Mutation Validation Tests")
-        # Real character + a couple of character-scoped fields to mutate against.
         _define_field("rank", "number")
-        _define_field("mentor", "entity_ref")
         self.char = svc.create_lore_entry(
             CreateLoreEntryRequest(title="Rey", entry_type="character")
         ).id
@@ -53,10 +51,9 @@ class MutationSaveValidationTests(unittest.TestCase):
     def tearDown(self) -> None:
         self.temp_dir.cleanup()
 
-    def _marker(self, field: str, value: str, entity: str | None = None, marker_id: str = "m1") -> str:
+    def _marker(self, field: str, value: str, entity: str | None = None) -> str:
         return (
-            f"<!-- mutate:entity={entity or self.char};field={field};"
-            f"value={value};id={marker_id} -->"
+            f"<!-- mutate:entity={entity or self.char};field={field};value={value};id=m1 -->"
         )
 
     def _save(self, body: str):
@@ -64,84 +61,43 @@ class MutationSaveValidationTests(unittest.TestCase):
             f"/api/scenes/{self.scene_id}", json={"title": "Chapter One", "body": body}
         )
 
-    # --- accepted --------------------------------------------------------
+    def _warnings(self) -> list[str]:
+        return svc.validate_project().warnings
 
-    def test_valid_select_value_saves(self) -> None:
-        # context_policy is a built-in select on lore entries.
-        self.assertEqual(self._save(self._marker("context_policy", "manual_only")).status_code, 200)
+    # --- saves never block ------------------------------------------------
 
-    def test_number_string_is_coerced_and_saves(self) -> None:
+    def test_bad_select_value_still_saves(self) -> None:
+        self.assertEqual(self._save(self._marker("context_policy", "bogus")).status_code, 200)
+
+    def test_non_numeric_number_still_saves(self) -> None:
+        self.assertEqual(self._save(self._marker("rank", "abc")).status_code, 200)
+
+    def test_unknown_entity_still_saves(self) -> None:
+        self.assertEqual(self._save(self._marker("rank", "5", entity="lore_ghost")).status_code, 200)
+
+    def test_valid_marker_saves_with_no_warnings(self) -> None:
         self.assertEqual(self._save(self._marker("rank", "5")).status_code, 200)
+        self.assertFalse([w for w in self._warnings() if "mutation" in w])
 
-    def test_intrinsic_title_saves(self) -> None:
-        self.assertEqual(self._save(self._marker("title", "Master%20Rey")).status_code, 200)
+    # --- validate_project reports strays as warnings ---------------------
 
-    # --- rejected --------------------------------------------------------
-
-    def test_select_value_outside_options_is_422(self) -> None:
-        response = self._save(self._marker("context_policy", "bogus"))
-        self.assertEqual(response.status_code, 422, response.text)
-        self.assertIn("one of", response.text)
-
-    def test_non_numeric_number_value_is_422(self) -> None:
-        response = self._save(self._marker("rank", "abc"))
-        self.assertEqual(response.status_code, 422, response.text)
-        self.assertIn("must be a number", response.text)
-
-    def test_unknown_field_is_422(self) -> None:
-        response = self._save(self._marker("nonexistent_field", "x"))
-        self.assertEqual(response.status_code, 422, response.text)
-
-    def test_field_from_another_entry_type_is_422(self) -> None:
-        # `status` is a scene field, not a character field — parity with base
-        # metadata validation (ADR-0007).
-        response = self._save(self._marker("status", "draft"))
-        self.assertEqual(response.status_code, 422, response.text)
-        self.assertIn("not defined for entry_type", response.text)
-
-    def test_unknown_entity_is_422(self) -> None:
-        response = self._save(self._marker("rank", "5", entity="lore_ghost"))
-        self.assertEqual(response.status_code, 422, response.text)
-        self.assertIn("unknown lore entity", response.text)
-
-    def test_entity_ref_to_missing_entity_is_422(self) -> None:
-        response = self._save(self._marker("mentor", "lore_does_not_exist"))
-        self.assertEqual(response.status_code, 422, response.text)
-
-    def test_a_bad_marker_blocks_the_whole_save(self) -> None:
+    def test_bad_select_value_is_a_warning(self) -> None:
         self._save(self._marker("context_policy", "bogus"))
-        self.assertEqual(svc.read_scene(self.scene_id).body, "")
+        self.assertTrue(any("context_policy" in w and "one of" in w for w in self._warnings()))
 
+    def test_field_from_another_entry_type_is_a_warning(self) -> None:
+        # `status` is a scene field, not a character field.
+        self._save(self._marker("status", "draft"))
+        self.assertTrue(any("not defined for entry_type" in w for w in self._warnings()))
 
-class MutationProjectValidationTests(unittest.TestCase):
-    """validate_project reports a bad marker already on disk (written outside
-    the save guard)."""
+    def test_unknown_entity_is_a_warning(self) -> None:
+        self._save(self._marker("rank", "5", entity="lore_ghost"))
+        self.assertTrue(any("unknown lore entity" in w for w in self._warnings()))
 
-    def setUp(self) -> None:
-        self.temp_dir = TemporaryDirectory()
-        self.root = Path(self.temp_dir.name) / "project"
-        svc.__init__()
-        svc.create_project(self.root, "Project Validation Tests")
-        self.char = svc.create_lore_entry(
-            CreateLoreEntryRequest(title="Rey", entry_type="character")
-        ).id
-        self.client = TestClient(app)
-        self.scene_id = self.client.post("/api/scenes", json={"title": "Chapter One"}).json()["id"]
-
-    def tearDown(self) -> None:
-        self.temp_dir.cleanup()
-
-    def test_validate_project_flags_bad_marker_on_disk(self) -> None:
-        path = svc._path_for_node_id(self.scene_id, "scene")
-        marker = (
-            f"<!-- mutate:entity={self.char};field=context_policy;value=bogus;id=m1 -->"
-        )
-        path.write_text(path.read_text() + "\n" + marker, encoding="utf-8")
+    def test_warnings_do_not_appear_in_errors(self) -> None:
+        self._save(self._marker("context_policy", "bogus"))
         report = svc.validate_project()
-        self.assertTrue(
-            any("context_policy" in err and "one of" in err for err in report.errors),
-            report.errors,
-        )
+        self.assertFalse(any("context_policy" in e for e in report.errors), report.errors)
 
 
 if __name__ == "__main__":

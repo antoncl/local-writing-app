@@ -279,14 +279,8 @@ class LoreMutationsMixin:
             raise ProjectServiceError(
                 f"Mutation {marker_id} does not exist in scene {scene.id}.", 404
             )
-        # A PATCH rewrites the value in place, bypassing save_scene — so validate
-        # the rewritten marker here too, or an invalid value would slip past the
-        # save-time guard (parity with save_scene, ADR-0007).
-        errors = self._validate_scene_mutations(
-            scene.id, new_body, self.read_metadata_schema(), self._build_node_index()
-        )
-        if errors:
-            raise ProjectServiceError(" ".join(errors), 422)
+        # Like save_scene, a marker edit never blocks on value validity — the
+        # editor supplies typed values; validate_project reports strays.
         path = self._path_for_node_id(scene.id, "scene")
         self._write_scene_file(path, scene.model_copy(update={"body": new_body}))
         return self.read_scene(scene.id)

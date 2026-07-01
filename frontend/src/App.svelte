@@ -9,6 +9,7 @@
   import Lore from "@/components/panes/Lore.svelte";
   import Assistants from "@/components/panes/Assistants.svelte";
   import Prompts from "@/components/panes/Prompts.svelte";
+  import Transformations from "@/components/panes/Transformations.svelte";
   import Chats from "@/components/panes/Chats.svelte";
   import Project from "@/components/panes/Project.svelte";
   import Search from "@/components/panes/Search.svelte";
@@ -126,6 +127,7 @@
   // only the instance ref so it can drive the three entry points.
   let schemaPanes: SchemaPanes | undefined = $state();
   let promptsPaneOpen = $state(false);
+  let transformationsPaneOpen = $state(false);
   let assistantsPaneOpen = $state(false);
   let chatsPaneOpen = $state(false);
   let error = $state("");
@@ -356,6 +358,11 @@
     focusPane("prompts");
   }
 
+  function openTransformationsPane() {
+    transformationsPaneOpen = true;
+    focusPane("transformations");
+  }
+
   function openAssistantsPane() {
     assistantsPaneOpen = true;
     void refreshAssistantEntries();
@@ -545,6 +552,7 @@
         onSaveAISettings={() => aiSettings.save()}
         onHealthCheck={() => aiSettings.runHealthCheck()}
         onOpenPrompts={openPromptsPane}
+        onOpenTransformations={openTransformationsPane}
         onRepair={repairProject}
       />
     </div>
@@ -616,6 +624,21 @@
       <Prompts
         entries={promptEntries}        onOpenEntry={(id) => editorPanes.openPrompt(id)}
         onNewEntry={(entryType) => treeActions.newPromptEntry(entryType)}
+      />
+    </div>
+  </Pane>
+
+  <Pane id="transformations" title="Transformations" paneClass="prompts-pane" hidden={!isProjectOpen || !transformationsPaneOpen} style={paneStyle("transformations")} chrome={paneChrome}>
+    {#snippet actions()}
+      <button class="pin-button" type="button" onmousedown={(event) => event.stopPropagation()} onclick={() => (transformationsPaneOpen = false)}>Close</button>
+    {/snippet}
+    <div class="pane-content schema-list">
+      <Transformations
+        loreEntries={loreEntries}
+        promptEntries={promptEntries}
+        structure={structure}
+        researchStructure={researchStructure}
+        knownTags={knownTags}
       />
     </div>
   </Pane>

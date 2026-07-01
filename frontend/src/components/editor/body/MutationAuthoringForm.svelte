@@ -20,7 +20,10 @@
   import { untrack } from "svelte";
   import ReferencePicker from "@/components/widgets/ReferencePicker.svelte";
   import FieldValueEditor from "@/components/widgets/FieldValueEditor.svelte";
+  import { api } from "@/lib/api";
+  import { createMutationId } from "@/lib/editor-core/mutationNodes";
   import type {
+    TransformationEntrySummary,
     LoreEntrySummary,
     MetadataFieldDefinition,
     MetadataSchema,
@@ -84,6 +87,56 @@
   );
 
   const entity = $derived(loreEntries.find((e) => e.id === entityId) ?? null);
+
+  // #62 in-flow: apply a saved transformation set, or capture the composed change
+  // as a new reusable set. Both only in create mode. §6: an optional name labels
+  // the change (shared across the co-authored group).
+  let mode = $state<"manual" | "apply">("manual");
+  let changeName = $state("");
+  let saveAsSet = $state(false);
+  let allSets = $state<TransformationEntrySummary[]>([]);
+  // Type-scoped picker: only sets whose target matches the picked entity's type.
+  const applicableSets = $derived(
+    entity ? allSets.filter((s) => s.target_entry_type === entity.entry_type) : [],
+  );
+
+  $effect(() => {
+    if (editing) return;
+    let cancelled = false;
+    api
+      .listTransformationEntries()
+      .then((res) => {
+        if (!cancelled) allSets = res.entries;
+      })
+      .catch(() => {
+        if (!cancelled) allSets = [];
+      });
+    return () => {
+      cancelled = true;
+    };
+  });
+
+  async function applySet(setId: string) {
+    if (!entity) return;
+    let full;
+    try {
+      full = await api.getTransformationEntry(setId);
+    } catch {
+      return;
+    }
+    // Expand to N independent inline markers as a co-authored group (shared name
+    // + group default to the set's title) — a stamp, individually editable after.
+    const group = createMutationId();
+    const drafts: MutationDraft[] = full.rows.map((row) => ({
+      entity: entity!.id,
+      field: row.field,
+      op: row.op || "replace",
+      value: row.value,
+      name: full.title,
+      group,
+    }));
+    if (drafts.length > 0) onSubmit(drafts);
+  }
 
   // The item-widget field def for an add/remove op: a collection resolves to its
   // single-element type (entity_ref_list → entity_ref, multi_select → select,
@@ -174,27 +227,55 @@
   function submit() {
     if (!entity) return;
     const drafts: MutationDraft[] = [];
+    const rows: { field: string; op: string; value: string }[] = [];
     for (const f of fieldOptions) {
       const pick = picks[f.id];
       if (!pick?.on || !isFilled(pick.value)) continue;
       const op = isCollectionType(f.def.type) ? (ops[f.id] ?? "replace") : "replace";
-      if (op !== "replace" && Array.isArray(pick.value)) {
-        // add/remove carry one element each; an array-valued item widget mints
-        // one marker per element (doc §1.2).
-        for (const item of pick.value) {
-          drafts.push({ entity: entity.id, field: f.id, op, value: toMarkerString(item) });
-        }
-      } else {
+      // add/remove carry one element each; an array-valued item widget mints one
+      // marker per element (doc §1.2). replace carries the whole value.
+      const values =
+        op !== "replace" && Array.isArray(pick.value)
+          ? pick.value.map((item) => toMarkerString(item))
+          : [toMarkerString(pick.value)];
+      for (const value of values) {
         drafts.push({
           entity: entity.id,
           field: f.id,
           op,
-          value: toMarkerString(pick.value),
-          ...(initial?.markerId ? { markerId: initial.markerId } : {}),
+          value,
+          ...(initial?.markerId
+            ? { markerId: initial.markerId, name: initial.name, group: initial.group }
+            : {}),
         });
+        rows.push({ field: f.id, op, value });
       }
     }
-    if (drafts.length > 0) onSubmit(drafts);
+    if (drafts.length === 0) return;
+    if (!editing) {
+      // Co-authored group (§6): a shared name + group tie a plural change into one
+      // nameable, close-together unit. Each record's interval stays independent.
+      const named = changeName.trim();
+      if (named || drafts.length > 1) {
+        const group = createMutationId();
+        for (const draft of drafts) {
+          draft.group = group;
+          if (named) draft.name = named;
+        }
+      }
+      // Capture (§5.3): also save the composed change as a reusable set — the
+      // entity is dropped (rows + target entry-type only), so it's a template.
+      if (saveAsSet) {
+        void api
+          .createTransformationEntry({
+            title: named || "Untitled set",
+            target_entry_type: entity.entry_type,
+            rows,
+          })
+          .catch(() => {});
+      }
+    }
+    onSubmit(drafts);
   }
 
   function onKeydown(event: KeyboardEvent) {
@@ -238,7 +319,25 @@
       />
     </div>
 
-    {#if entity}
+    {#if entity && !editing && applicableSets.length > 0}
+      <div class="mutation-mode" role="tablist">
+        <button type="button" class:active={mode === "manual"} onclick={() => (mode = "manual")}>Set fields manually</button>
+        <button type="button" class:active={mode === "apply"} onclick={() => (mode = "apply")}>Apply a saved set</button>
+      </div>
+    {/if}
+
+    {#if entity && mode === "apply" && !editing}
+      <ul class="set-list">
+        {#each applicableSets as set (set.id)}
+          <li>
+            <button type="button" class="set-row" onclick={() => applySet(set.id)}>
+              <span class="set-name">{set.title}</span>
+              <span class="set-count">{set.row_count} field{set.row_count === 1 ? "" : "s"}</span>
+            </button>
+          </li>
+        {/each}
+      </ul>
+    {:else if entity}
       <div class="mutation-fields">
         {#each fieldOptions as f (f.id)}
           <div class="mutation-field">
@@ -295,6 +394,22 @@
           </div>
         {/each}
       </div>
+      {#if !editing}
+        <div class="mutation-capture">
+          <label class="mutation-label" for="mutation-change-name">Name this change (optional)</label>
+          <input
+            id="mutation-change-name"
+            class="mutation-name-input"
+            value={changeName}
+            placeholder="e.g. Full Moon transformation"
+            oninput={(e) => (changeName = e.currentTarget.value)}
+          />
+          <label class="mutation-check">
+            <input type="checkbox" checked={saveAsSet} onchange={(e) => (saveAsSet = e.currentTarget.checked)} />
+            <span>Save as a reusable set for {entity.entry_type}</span>
+          </label>
+        </div>
+      {/if}
     {/if}
 
     <footer class="mutation-foot">
@@ -303,9 +418,11 @@
       {/if}
       <span class="mutation-foot-spacer"></span>
       <button type="button" class="ghost" onclick={onCancel}>Cancel</button>
-      <button type="button" class="primary" disabled={!canSubmit} onclick={submit}>
-        {editing ? "Save" : "Insert mutation"}
-      </button>
+      {#if !(mode === "apply" && !editing)}
+        <button type="button" class="primary" disabled={!canSubmit} onclick={submit}>
+          {editing ? "Save" : "Insert mutation"}
+        </button>
+      {/if}
     </footer>
   </div>
 </div>
@@ -396,6 +513,68 @@
   .mutation-note a {
     color: var(--accent);
     white-space: nowrap;
+  }
+  .mutation-mode {
+    display: flex;
+    gap: 4px;
+    margin-bottom: 12px;
+  }
+  .mutation-mode button {
+    flex: 1 1 0;
+    padding: 6px 10px;
+    font-size: 0.82rem;
+    background: transparent;
+    color: var(--text-2);
+  }
+  .mutation-mode button.active {
+    background: color-mix(in oklab, var(--accent) 14%, transparent);
+    border-color: var(--accent);
+    color: var(--text);
+    font-weight: 600;
+  }
+  .set-list {
+    list-style: none;
+    margin: 0 0 12px;
+    padding: 0;
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+  }
+  .set-row {
+    display: flex;
+    align-items: baseline;
+    justify-content: space-between;
+    gap: 10px;
+    width: 100%;
+    padding: 8px 10px;
+    text-align: left;
+    background: transparent;
+    color: var(--text);
+  }
+  .set-row:hover {
+    background: var(--surface-2, rgba(0, 0, 0, 0.04));
+  }
+  .set-count {
+    font-size: 0.76rem;
+    color: var(--text-3);
+    flex: 0 0 auto;
+  }
+  .mutation-capture {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    border-top: 1px solid var(--border);
+    padding-top: 12px;
+    margin-bottom: 12px;
+  }
+  .mutation-name-input {
+    padding: 6px 8px;
+    border-radius: 6px;
+    border: 1px solid var(--border);
+    background: var(--surface);
+    color: var(--text);
+    font: inherit;
+    font-size: 0.85rem;
   }
   .mutation-value > :global(*) {
     flex: 1 1 auto;

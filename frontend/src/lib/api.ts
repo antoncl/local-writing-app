@@ -47,6 +47,9 @@ import type {
   SaveProjectNodeRequest,
   PromptEntry,
   PromptEntryList,
+  TransformationEntry,
+  TransformationEntryList,
+  TransformationRow,
   ReferenceCandidatesResponse,
   ReferenceResolveResponse,
   ResearchNote,
@@ -584,6 +587,40 @@ export const api = {
   },
   deletePromptEntry(entryId: string) {
     return request<PromptEntryList>(`/prompts/${entryId}`, {
+      method: "DELETE",
+    });
+  },
+  // Reusable transformation sets (#62).
+  listTransformationEntries() {
+    return request<TransformationEntryList>("/transformations");
+  },
+  createTransformationEntry(payload: {
+    title: string;
+    target_entry_type: string;
+    rows: TransformationRow[];
+  }) {
+    return request<TransformationEntry>("/transformations", {
+      method: "POST",
+      body: JSON.stringify({ ...payload, entry_type: "transformation" }),
+    });
+  },
+  getTransformationEntry(entryId: string) {
+    return request<TransformationEntry>(`/transformations/${entryId}`);
+  },
+  saveTransformationEntry(entry: TransformationEntry) {
+    return request<TransformationEntry>(`/transformations/${entry.id}`, {
+      method: "PUT",
+      body: JSON.stringify({
+        title: entry.title,
+        base_revision: entry.revision,
+        entry_type: entry.entry_type,
+        target_entry_type: entry.target_entry_type,
+        rows: entry.rows,
+      }),
+    });
+  },
+  deleteTransformationEntry(entryId: string) {
+    return request<TransformationEntryList>(`/transformations/${entryId}`, {
       method: "DELETE",
     });
   },

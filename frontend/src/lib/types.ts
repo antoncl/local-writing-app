@@ -258,7 +258,7 @@ export type PromptInputType =
 // Matches the backend convention documented in
 // docs/context-picker.md and the inline comment on models.py.
 export type NodePickerConfig = {
-  kinds?: ("scene" | "lore" | "snippet" | "assistant" | "research")[];
+  kinds?: ("scene" | "lore" | "snippet" | "assistant" | "research" | "transformation")[];
   entry_types?: Record<string, string[]>;   // kind -> sub-type ids
   presets?: ("full_outline" | "full_text")[];
   multiple?: boolean;
@@ -453,6 +453,40 @@ export type MutationMarkerRecord = {
 
 export type MutationMarkerList = {
   items: MutationMarkerRecord[];
+};
+
+// Reusable transformation set (#62): a body-less Node kind — an ordered list of
+// (field, op, value) rows + a target lore entry-type. The entity is bound at
+// apply time (a template), and applying expands to independent inline markers.
+export type TransformationRow = {
+  field: string;
+  op: string; // "replace" | "add" | "remove"
+  value: string;
+};
+
+export type TransformationEntrySummary = {
+  id: string;
+  title: string;
+  entry_type: string;
+  target_entry_type: string;
+  row_count: number;
+  source_layer_id: string;
+  source_layer_label: string;
+};
+
+export type TransformationEntry = {
+  id: string;
+  title: string;
+  revision: string;
+  entry_type: string;
+  target_entry_type: string;
+  rows: TransformationRow[];
+  source_layer_id: string;
+  source_layer_label: string;
+};
+
+export type TransformationEntryList = {
+  entries: TransformationEntrySummary[];
 };
 
 export type EffectiveStateResponse = {

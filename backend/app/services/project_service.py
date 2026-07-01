@@ -29,6 +29,7 @@ from app.services.project.embedded_todos import EmbeddedTodosMixin
 from app.services.project.errors import ProjectServiceError
 from app.services.project.lifecycle import ProjectLifecycleMixin
 from app.services.project.lore import LoreEntriesMixin
+from app.services.project.lore_mutations import LoreMutationsMixin
 from app.services.project.manuscript import ManuscriptMixin
 from app.services.project.metadata_values import MetadataValuesMixin
 from app.services.project.node_ops import NodeOpsMixin
@@ -50,6 +51,7 @@ class ProjectService(
     ComputedMetadataMixin,
     EmbeddedTodosMixin,
     LoreEntriesMixin,
+    LoreMutationsMixin,
     ManuscriptMixin,
     MetadataSchemaMixin,
     MetadataValuesMixin,

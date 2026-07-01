@@ -789,6 +789,38 @@ class UpdateEmbeddedTodoRequest(BaseModel):
     note: str | None = None
 
 
+class MutationMarker(BaseModel):
+    """A mid-scene lore mutation (#33). A self-contained HTML-comment marker in a
+    scene body that sets one field of one lore entry to a new value *at the
+    marker's prose position*:
+
+        <!-- mutate:entity=ID;field=KEY;value=ENCODED;id=MARKER_ID -->
+
+    Unlike a base metadata value, its effect is scoped to (scene, position) and
+    later manuscript positions — it is the record the resolver (#51) slices. Like
+    embedded todos these are a rebuildable index over scenes, never owned by a
+    live editor pane; the marker id is minted client-side at insertion (ADR-0001)."""
+
+    marker_id: str
+    entity_id: str
+    field: str
+    value: str = ""
+    scene_id: str
+    offset: int = 0  # char offset of the marker in the scene body (position-granular)
+    line: int = 1
+    scene_path: str = ""
+
+
+class MutationMarkerList(BaseModel):
+    items: list[MutationMarker] = Field(default_factory=list)
+
+
+class UpdateMutationRequest(BaseModel):
+    entity_id: str | None = None
+    field: str | None = None
+    value: str | None = None
+
+
 class ReferenceCandidate(BaseModel):
     id: str
     title: str

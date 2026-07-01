@@ -5,6 +5,15 @@ markdown, carrying the new value at the point of change:
 
     <!-- mutate:entity=<lore-id>;field=<field-key>;value=<url-encoded>;id=<marker-id> -->
 
+v1.1 extends the grammar with three forward-compatible optional attributes
+(absent on v1.0 markers, so old markers parse unchanged):
+
+    ;op=<add|remove|replace>   collection operator (#58); absent ⇒ replace
+    ;name=<url-encoded>        human label for the change (#65)
+    ;group=<group-id>          co-authored-set tie for a shared name (#65)
+
+Canonical order is `entity;field;op?;value;name?;group?;id`.
+
 Unlike embedded todos this marker wraps **no prose** — it is a point marker
 whose position within the scene body is semantically load-bearing (prose before
 it sees the old value, prose after it the new; ADR-0003). The scene is
@@ -41,9 +50,17 @@ from app.services.project.errors import ProjectServiceError
 from app.services.project.markers import MarkerMixin
 
 MUTATION_MARKER_PATTERN = re.compile(
-    r"<!--\s*mutate:entity=([A-Za-z0-9_-]+);field=([A-Za-z0-9_.-]+);"
-    r"value=([^;\s]*);id=([A-Za-z0-9_-]+)\s*-->",
+    r"<!--\s*mutate:entity=(?P<entity>[A-Za-z0-9_-]+);field=(?P<field>[A-Za-z0-9_.-]+);"
+    r"(?:op=(?P<op>add|remove|replace);)?"
+    r"value=(?P<value>[^;\s]*)"
+    r"(?:;name=(?P<name>[^;\s]*))?"
+    r"(?:;group=(?P<group>[A-Za-z0-9_-]+))?"
+    r";id=(?P<id>[A-Za-z0-9_-]+)\s*-->",
 )
+
+# Field types whose values are collections; only these accept add/remove ops
+# (#58). Every other type stays replace-only.
+COLLECTION_FIELD_TYPES = frozenset({"multi_select", "tags", "entity_ref_list"})
 
 # Sentinel position: resolve at end of scene (every in-scene marker counts as
 # live). Only `replace_selection` passes a real cursor offset; every other
@@ -53,6 +70,40 @@ END_OF_SCENE: int | None = None
 # Node-intrinsic fields a mutation may target that are not schema fields: the
 # entry's own title/body. Free text, so no value constraints to validate.
 INTRINSIC_MUTABLE_FIELDS = frozenset({"title", "body"})
+
+
+def _split_collection_value(value: str) -> list[str]:
+    """Split a whole-collection `replace` marker value (comma-joined, mirroring
+    the frontend's `String(array)` serialization) into its elements."""
+    return [item.strip() for item in value.split(",") if item.strip()]
+
+
+def _as_str_list(value: object) -> list[str]:
+    """Coerce a stored base field value to a list of non-empty strings — a real
+    list (multi_select/tags/entity_ref_list base) or a comma-joined string."""
+    if isinstance(value, list):
+        return [str(item).strip() for item in value if str(item).strip()]
+    if isinstance(value, str):
+        return _split_collection_value(value)
+    return []
+
+
+def _render_mutation_marker(
+    entity: str, field: str, op: str, value: str, name: str, group: str, marker_id: str
+) -> str:
+    """Assemble a mutation marker in canonical order (`entity;field;op?;value;
+    name?;group?;id`), omitting optional attributes at their defaults so v1.0
+    markers round-trip byte-stable. `value` and `name` are already url-encoded."""
+    parts = [f"entity={entity}", f"field={field}"]
+    if op and op != "replace":
+        parts.append(f"op={op}")
+    parts.append(f"value={value}")
+    if name:
+        parts.append(f"name={name}")
+    if group:
+        parts.append(f"group={group}")
+    parts.append(f"id={marker_id}")
+    return f"<!-- mutate:{';'.join(parts)} -->"
 
 
 @dataclass
@@ -83,10 +134,13 @@ class LoreMutationsMixin(MarkerMixin):
             body,
             MUTATION_MARKER_PATTERN,
             lambda match, line: MutationMarker(
-                marker_id=match.group(4),
-                entity_id=match.group(1),
-                field=match.group(2),
-                value=unquote(match.group(3)),
+                marker_id=match.group("id"),
+                entity_id=match.group("entity"),
+                field=match.group("field"),
+                op=match.group("op") or "replace",
+                value=unquote(match.group("value")),
+                name=unquote(match.group("name") or ""),
+                group=match.group("group") or "",
                 scene_id=scene_id,
                 offset=match.start(),
                 line=line,
@@ -134,7 +188,26 @@ class LoreMutationsMixin(MarkerMixin):
                     f"{label} field {marker.field} is not defined for entry_type {entry_type}."
                 )
                 continue
-            value = self._coerce_mutation_value(marker.value, getattr(field, "type", ""))
+            field_type = getattr(field, "type", "")
+            is_collection = field_type in COLLECTION_FIELD_TYPES
+            if marker.op in {"add", "remove"} and not is_collection:
+                errors.append(
+                    f"{label} op {marker.op} is only valid on collection fields "
+                    f"(multi_select/tags/entity_ref_list), not {field_type}."
+                )
+                continue
+            if is_collection:
+                # A collection value is validated as a list: add/remove carry one
+                # element (validate that element), replace carries the whole
+                # comma-joined value (ADR-0009). The item validator already
+                # item-checks the three collection types.
+                value: object = (
+                    [marker.value]
+                    if marker.op in {"add", "remove"}
+                    else _split_collection_value(marker.value)
+                )
+            else:
+                value = self._coerce_mutation_value(marker.value, field_type)
             errors.extend(
                 self._validate_metadata_field_value(
                     label, marker.field, value, field, node_index=node_index
@@ -145,9 +218,17 @@ class LoreMutationsMixin(MarkerMixin):
     def _coerce_mutation_value(self, value: str, field_type: str) -> object:
         """Coerce a marker's url-decoded string to the field's native type so the
         base-value validator sees what it expects. Uncoercible input is left as
-        the string, letting the validator flag it (e.g. "must be a number")."""
+        the string, letting the validator flag it (e.g. "must be a number").
+
+        For a collection field this is the field-type-aware boundary that splits
+        a whole-`replace` marker's comma-joined value back into a `list[str]`
+        (ADR-0009) — the resolver returns collection add/remove results as lists
+        directly, but can't classify a pure-replace field without the schema, so
+        the split happens here where the type is known."""
         if value == "":
             return value
+        if field_type in COLLECTION_FIELD_TYPES:
+            return _split_collection_value(value)
         if field_type == "number":
             try:
                 return int(value) if re.fullmatch(r"-?\d+", value) else float(value)
@@ -219,13 +300,16 @@ class LoreMutationsMixin(MarkerMixin):
         scene_id: str,
         position: int | None = END_OF_SCENE,
         index: MutationsIndex | None = None,
-    ) -> dict[str, str]:
+    ) -> dict[str, str | list[str]]:
         """Effective mutation overrides for `entity_id` as of (scene, position).
 
         Returns only the fields carrying a **live** mutation, each mapped to its
         winning value; the caller overlays these onto the entry's base field
-        values (ADR-0003, ADR-0006). v1.0 is replace-only, open-ended: among the
-        records live at (scene, position), the latest-started per field wins.
+        values (ADR-0003, ADR-0006). Scalar fields resolve to a **string** —
+        among the records live at (scene, position), the latest-started replace
+        wins. Collection fields (multi_select / tags / entity_ref_list) resolve
+        to a **`list[str]`** = `(base ∪ live adds) ∖ live removes`, remove-wins
+        (ADR-0009); the datatype matches the field.
 
         A record is live iff its start is at or before the resolution point in
         manuscript order — earlier scene always, same scene only if its marker
@@ -241,11 +325,52 @@ class LoreMutationsMixin(MarkerMixin):
         if target_pos is None:
             # Scene not in the manuscript → no manuscript position → base only.
             return {}
-        effective: dict[str, str] = {}
+        live_by_field: dict[str, list[MutationMarker]] = {}
         for marker in records:  # pre-sorted ascending, so the last live wins
             if self._marker_is_live(marker, idx.scene_order, target_pos, position):
-                effective[marker.field] = marker.value
+                live_by_field.setdefault(marker.field, []).append(marker)
+        effective: dict[str, str | list[str]] = {}
+        base: dict[str, object] | None = None
+        for field, live in live_by_field.items():
+            if any(m.op in {"add", "remove"} for m in live):
+                # Collection field — needs the entry's base list to resolve the
+                # set. Read it lazily, once, only when an add/remove is in play.
+                if base is None:
+                    base = self._entity_base_values(entity_id)
+                effective[field] = self._resolve_collection(field, live, base)
+            else:
+                effective[field] = live[-1].value
         return effective
+
+    def _entity_base_values(self, entity_id: str) -> dict[str, object]:
+        """The entry's stored (book-start) metadata, for collection resolution.
+        Empty on any read failure (resolution then treats base as empty)."""
+        try:
+            entry = self.read_lore_entry(entity_id)
+        except ProjectServiceError:
+            return {}
+        return dict(getattr(entry, "metadata", {}) or {})
+
+    @staticmethod
+    def _resolve_collection(
+        field: str, live: list[MutationMarker], base: dict[str, object]
+    ) -> list[str]:
+        """Resolve one collection field: `(base ∪ live adds) ∖ live removes`,
+        remove-wins, set-deduped, order-stable (base order, then adds in start
+        order). A live whole-`replace` resets the base to its own value first."""
+        replaces = [m for m in live if m.op == "replace"]
+        if replaces:
+            base_list = _split_collection_value(replaces[-1].value)
+        else:
+            base_list = _as_str_list(base.get(field))
+        removes = {m.value for m in live if m.op == "remove"}
+        result: list[str] = []
+        seen: set[str] = set()
+        for item in [*base_list, *(m.value for m in live if m.op == "add")]:
+            if item and item not in seen:
+                seen.add(item)
+                result.append(item)
+        return [item for item in result if item not in removes]
 
     def _marker_is_live(
         self,
@@ -267,7 +392,8 @@ class LoreMutationsMixin(MarkerMixin):
             for marker in by_entity[entity_id]:
                 digest.update(
                     f"{entity_id}\x1f{marker.scene_id}\x1f{marker.offset}"
-                    f"\x1f{marker.field}\x1f{marker.value}\x1f{marker.marker_id}\x1e".encode()
+                    f"\x1f{marker.field}\x1f{marker.op}\x1f{marker.value}"
+                    f"\x1f{marker.name}\x1f{marker.group}\x1f{marker.marker_id}\x1e".encode()
                 )
         return digest.hexdigest()[:16]
 
@@ -288,7 +414,7 @@ class LoreMutationsMixin(MarkerMixin):
             lambda body: self._rewrite_single_marker(
                 body,
                 MUTATION_MARKER_PATTERN,
-                4,
+                "id",
                 marker_id,
                 lambda match: self._render_mutation(match, marker_id, request),
             ),
@@ -304,7 +430,7 @@ class LoreMutationsMixin(MarkerMixin):
             lambda body: self._rewrite_single_marker(
                 body,
                 MUTATION_MARKER_PATTERN,
-                4,
+                "id",
                 marker_id,
                 lambda match: "",  # point marker: removal drops the comment
             ),
@@ -313,10 +439,19 @@ class LoreMutationsMixin(MarkerMixin):
     def _render_mutation(
         self, match: re.Match[str], marker_id: str, request: UpdateMutationRequest
     ) -> str:
-        """Rebuild a mutation marker from a match, applying `request`."""
-        entity = request.entity_id or match.group(1)
-        field = request.field or match.group(2)
+        """Rebuild a mutation marker from a match, applying `request`. Preserves
+        the optional op/name/group attributes (only re-emitted when non-default),
+        so an edit that doesn't touch them keeps the marker byte-stable."""
+        entity = request.entity_id or match.group("entity")
+        field = request.field or match.group("field")
+        op = request.op or match.group("op") or "replace"
         # Re-encode only when a new value is supplied; otherwise keep the existing
         # encoded value verbatim to avoid gratuitous diffs.
-        value = quote(request.value, safe="") if request.value is not None else match.group(3)
-        return f"<!-- mutate:entity={entity};field={field};value={value};id={marker_id} -->"
+        value = quote(request.value, safe="") if request.value is not None else match.group("value")
+        name = (
+            quote(request.name, safe="")
+            if request.name is not None
+            else (match.group("name") or "")
+        )
+        group = request.group if request.group is not None else (match.group("group") or "")
+        return _render_mutation_marker(entity, field, op, value, name, group, marker_id)

@@ -534,12 +534,16 @@ def _effective_field(
     except Exception:
         overrides = {}
     if field in overrides:
-        # Markers store values as strings; coerce to the field's native type so
-        # `effective(...)` matches `base(...)` (a number stays a number, a bool a
-        # bool) and template comparisons don't break in mutated scenes.
+        value = overrides[field]
+        # Collection fields already resolve to a list (ADR-0009) — hand it back
+        # as-is. Scalar markers store strings; coerce to the field's native type
+        # so `effective(...)` matches `base(...)` (a number stays a number, a bool
+        # a bool) and template comparisons don't break in mutated scenes.
+        if isinstance(value, list):
+            return value
         field_def = getattr(schema, "fields", {}).get(field) if schema is not None else None
         field_type = getattr(field_def, "type", "") if field_def is not None else ""
-        return project._coerce_mutation_value(overrides[field], field_type)
+        return project._coerce_mutation_value(value, field_type)
     return _get_field(_safe_read_lore(project, entity_id), field)
 
 
@@ -885,7 +889,7 @@ def _format_lore_block(
         entry = _safe_read_lore(project, entry_id)
         if entry is None:
             continue
-        overrides: dict[str, str] = {}
+        overrides: dict[str, str | list[str]] = {}
         if scene_id and index is not None:
             try:
                 overrides = project.effective_state(entry_id, scene_id, position, index)
@@ -906,18 +910,21 @@ def _format_lore_block(
     return "<lore>\n" + "\n\n".join(chunks) + "\n</lore>"
 
 
-def _effective_aliases(entry: Any, overrides: dict[str, str]) -> list[str]:
-    """Aliases for the XML block, honoring a live `aliases` mutation (a
-    comma-separated string in the marker) over the base list."""
+def _effective_aliases(entry: Any, overrides: dict[str, str | list[str]]) -> list[str]:
+    """Aliases for the XML block, honoring a live `aliases` mutation over the
+    base list. A collection override resolves to a `list[str]` (ADR-0009); a
+    legacy whole-`replace` override is a comma-separated string."""
     if "aliases" in overrides:
-        return [a.strip() for a in str(overrides["aliases"]).split(",") if a.strip()]
+        raw = overrides["aliases"]
+        items = raw if isinstance(raw, list) else str(raw).split(",")
+        return [str(a).strip() for a in items if str(a).strip()]
     raw = _get_field(entry, "aliases") or []
     if isinstance(raw, list):
         return [str(a).strip() for a in raw if str(a).strip()]
     return []
 
 
-def _effective_body(entry: Any, overrides: dict[str, str]) -> str:
+def _effective_body(entry: Any, overrides: dict[str, str | list[str]]) -> str:
     """Body for the XML block: a live `body` mutation, else base body, else a
     (possibly mutated) summary."""
     if "body" in overrides:

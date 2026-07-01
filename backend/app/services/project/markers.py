@@ -56,7 +56,7 @@ class MarkerMixin:
         self,
         body: str,
         pattern: re.Pattern[str],
-        id_group: int,
+        id_group: int | str,
         marker_id: str,
         render: Callable[[re.Match[str]], str],
     ) -> tuple[str, bool]:

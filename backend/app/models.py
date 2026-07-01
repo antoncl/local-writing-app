@@ -804,7 +804,16 @@ class MutationMarker(BaseModel):
     marker_id: str
     entity_id: str
     field: str
+    # Collection operator (#58). `replace` (v1.0 default, absent from the marker)
+    # sets the whole field; `add`/`remove` accumulate/drop one collection element
+    # (gated to multi_select / tags / entity_ref_list at validation time).
+    op: str = "replace"
     value: str = ""
+    # Optional human label for the change (#65), shared across a co-authored set
+    # via `group`. Both are display/close-together conveniences, not lifetime
+    # frames — each record's interval stays independent (ADR-0015).
+    name: str = ""
+    group: str = ""
     scene_id: str
     offset: int = 0  # char offset of the marker in the scene body (position-granular)
     line: int = 1
@@ -818,18 +827,25 @@ class MutationMarkerList(BaseModel):
 class UpdateMutationRequest(BaseModel):
     entity_id: str | None = None
     field: str | None = None
+    op: str | None = None
     value: str | None = None
+    name: str | None = None
+    group: str | None = None
 
 
 class EffectiveStateResponse(BaseModel):
     """Effective mutation overrides for one lore entity as of a (scene,
     position) — the fields with a live mutation there, each mapped to its
-    winning value. Drives the lore-card time-slider re-render (#33)."""
+    winning value. Drives the lore-card time-slider re-render (#33).
+
+    Scalar fields resolve to a string; collection fields (multi_select / tags /
+    entity_ref_list) resolve to a `list[str]` — the datatype matches the field
+    (ADR-0009)."""
 
     entity_id: str
     scene_id: str
     position: int | None = None
-    values: dict[str, str] = Field(default_factory=dict)
+    values: dict[str, str | list[str]] = Field(default_factory=dict)
 
 
 class ReferenceCandidate(BaseModel):

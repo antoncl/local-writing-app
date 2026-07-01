@@ -24,6 +24,9 @@ from pathlib import Path
 
 REPO = Path(__file__).resolve().parents[2]
 SIZE_GUARD = REPO / "scripts" / "check_file_size.py"
+# Advisory complexity rules — flagged, never blocking, while the existing count
+# is burned down (see backend/pyproject.toml for thresholds).
+COMPLEXITY_RULES = "PLR0912,PLR0913,PLR0915,C901"
 # Windows venv layout (matches .claude/launch.json + CLAUDE.md). On a POSIX
 # checkout this would be backend/.venv/bin/python.
 VENV_PYTHON = REPO / "backend" / ".venv" / "Scripts" / "python.exe"
@@ -65,6 +68,12 @@ def main() -> int:
         code, out = run([str(VENV_PYTHON), "-m", "ruff", "check", str(path)])
         if code != 0 and out:
             messages.append("ruff:\n" + out)
+        # advisory: complexity hints (non-blocking — the hook always exits 0)
+        ccode, cout = run(
+            [str(VENV_PYTHON), "-m", "ruff", "check", "--no-cache", "--select", COMPLEXITY_RULES, str(path)]
+        )
+        if ccode != 0 and cout:
+            messages.append("complexity (advisory - consider simplifying):\n" + cout)
 
     if messages:
         print("Quality gate on the file you just edited:")

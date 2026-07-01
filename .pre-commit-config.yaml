@@ -26,6 +26,17 @@ repos:
         language: system
         files: \.(py|svelte|ts|tsx)$
 
+      - id: ruff-complexity
+        name: ruff complexity (advisory, non-blocking)
+        # --exit-zero: never fails the commit; verbose: always print the hints
+        # so complexity stays visible while we burn the count down, then promote
+        # these rules into the blocking `select` in backend/pyproject.toml.
+        entry: python scripts/venv_run.py -m ruff check --exit-zero --no-cache --select PLR0912,PLR0913,PLR0915,C901
+        language: system
+        types_or: [python]
+        files: ^backend/
+        verbose: true
+
       # --- push stage (slow, whole project) ---
       - id: svelte-check
         name: svelte-check (frontend types/templates)

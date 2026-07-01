@@ -30,9 +30,20 @@ target-version = "py311"
 [tool.ruff.lint]
 # Bug-catchers (F, B) first; the rest keep imports/idioms tidy.
 # E501 (line length) is stylistic, not a bug source — left off.
+# NOTE: the complexity rules (PLR0912/13/15, C901) are NOT in this blocking
+# select — they run ADVISORY (non-blocking) via the quality-gate hooks while we
+# burn down the existing hits; promote them into `select` once the count is 0.
 select = ["E", "F", "W", "I", "B", "UP", "C4", "SIM"]
 ignore = [
   "E501",   # line length — stylistic, not a bug source
   "UP042",  # str+Enum -> StrEnum changes str(member); the mix is deliberate
 ]
+
+# Thresholds for the advisory complexity rules (see the hooks). Args bumped
+# from the default 5 — service methods / FastAPI routes legitimately take more.
+[tool.ruff.lint.pylint]
+max-args = 8
+
+[tool.ruff.lint.mccabe]
+max-complexity = 10
 

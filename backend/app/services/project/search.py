@@ -10,16 +10,15 @@ Method bodies moved verbatim. Shared helpers they call (`self._require_project`,
 `self._read_markdown_with_front_matter`, `self._node_id_for_path`,
 `self.read_metadata_schema`, `self._build_node_index`,
 `self._normalise_metadata`, `self.read_structure`) resolve through the MRO at
-call time. `EMBEDDED_TODO_PATTERN` moves here too — search was its only user
-(the `TODO_ANCHOR_PATTERN` / `WORD_PATTERN` constants stay in core, where the
-anchor and word-count helpers live).
+call time. The embedded-todo scan now delegates to `self._scan_embedded_todos()`
+(EmbeddedTodosMixin), which owns `EMBEDDED_TODO_PATTERN` alongside the marker
+mutators (GH #45).
 """
 
 from __future__ import annotations
 
 import re
 from typing import Any
-from urllib.parse import unquote
 
 from app.models import (
     MetadataSchema,
@@ -29,10 +28,6 @@ from app.models import (
     StructureNode,
 )
 from app.services.project.node_index import NodeIndex
-
-EMBEDDED_TODO_PATTERN = re.compile(
-    r"<!--\s*embedded-todo:id=([A-Za-z0-9_-]+);status=(open|done);note=([^\s]*)\s*-->([\s\S]*?)<!--\s*/embedded-todo\s*-->",
-)
 
 
 class SearchMixin:
@@ -62,26 +57,21 @@ class SearchMixin:
                         )
                     )
 
-            for path in (root / "scenes").rglob("*.md"):
-                front_matter, body = self._read_markdown_with_front_matter(path, strict=True)
-                scene_id = self._node_id_for_path(path, front_matter)
-                for match in EMBEDDED_TODO_PATTERN.finditer(body):
-                    if match.group(2) != "open":
-                        continue
-                    note = unquote(match.group(3))
-                    prose = re.sub(r"\s+", " ", match.group(4)).strip()
-                    excerpt = note or prose
-                    if pattern is None or pattern.search(f"{note} {prose}"):
-                        hits.append(
-                            SearchHit(
-                                kind="scene",
-                                file_id=scene_id,
-                                path=scene_paths.get(scene_id, str(path.relative_to(root))),
-                                line=body[: match.start()].count("\n") + 1,
-                                excerpt=excerpt,
-                                todo_id=match.group(1),
-                            )
+            for todo in self._scan_embedded_todos():
+                if todo.status != "open":
+                    continue
+                excerpt = todo.note or todo.text
+                if pattern is None or pattern.search(f"{todo.note} {todo.text}"):
+                    hits.append(
+                        SearchHit(
+                            kind="scene",
+                            file_id=todo.scene_id,
+                            path=todo.scene_path,
+                            line=todo.line,
+                            excerpt=excerpt,
+                            todo_id=todo.todo_id,
                         )
+                    )
 
         if pattern is not None:
             schema = self.read_metadata_schema()

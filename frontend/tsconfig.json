@@ -8,7 +8,11 @@
     "useDefineForClassFields": true,
     "allowSyntheticDefaultImports": true,
     "types": ["svelte"],
-    "verbatimModuleSyntax": true
+    "verbatimModuleSyntax": true,
+    "baseUrl": ".",
+    "paths": {
+      "@/*": ["src/*"]
+    }
   },
   "include": ["src/**/*.ts", "src/**/*.svelte"],
   "references": []

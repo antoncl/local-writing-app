@@ -49,6 +49,39 @@ re-run `ruff check` and the tests after `--fix`, don't assume one pass is clean.
 Note: bare `uvicorn` without `--reload` does **not** pick up Python changes —
 restart it after editing backend code.
 
+## Automated quality gates
+
+The standards below are **machine-enforced** — they no longer depend on
+remembering to run a command (a rule that lives only in prose drifts under
+context pressure; that is how `App.svelte` reached ~4900 lines). Three layers,
+weakest → strongest:
+
+1. **In-session** — a Claude Code `PostToolUse` hook
+   (`.claude/hooks/check_edited_file.py`, wired in `.claude/settings.json`) runs
+   the file-size guard + `ruff` on **every file you edit** and feeds any
+   violation straight back into context. Fix it before declaring the task done.
+2. **Git hooks** (`.pre-commit-config.yaml`) — *commit* runs `ruff` + the
+   file-size guard on staged files; *push* runs `svelte-check` + `pytest`.
+   One-time setup per clone:
+   `backend/.venv/Scripts/python.exe -m pip install -e "backend[dev]"`, then
+   `backend/.venv/Scripts/pre-commit install` and `… install -t pre-push`.
+
+The **file-size guard** (`scripts/check_file_size.py`) is the enforced half of
+"no monolithic files": warns ≥1200, **fails ≥1500** lines on `.py/.svelte/.ts`.
+Files knowingly over the cap are listed in that script's `GRANDFATHERED` set
+(currently `main.py`, `test_metadata_validation.py`) — split them when you next
+work there, then delete the entry. The manual gates still apply when iterating
+(`ruff check backend` + `pytest backend/tests`; `npm run check`).
+
+**Where do I stop splitting? Match the target shapes, don't guess:**
+- a new **endpoint** = a thin route in `main.py` → logic in a `services/<area>.py`
+  mixin (composed onto `ProjectService` via MRO) → request/response models in
+  `models.py`. No business logic in `main.py`.
+- a new **pane / list UI** = compose `NodeList` + `NodeRow` with a scoped
+  `<style>`; domain state lives in a `lib/stores/*.svelte.ts` rune controller,
+  not the component. A bespoke list that won't reduce to those widgets is the
+  smell to question, not to hand-roll.
+
 ## Architecture
 
 ### Project format (on disk)

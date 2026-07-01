@@ -22,6 +22,7 @@ from app.services.project.ai_invocations import AiInvocationsMixin
 from app.services.project.assistants import AssistantEntriesMixin
 from app.services.project.chats import ChatSessionsMixin
 from app.services.project.computed_metadata import ComputedMetadataMixin
+from app.services.project.embedded_todos import EmbeddedTodosMixin
 
 # Re-exported so the historic import path
 # `from app.services.project_service import ProjectServiceError` keeps working.
@@ -47,6 +48,7 @@ class ProjectService(
     AssistantEntriesMixin,
     ChatSessionsMixin,
     ComputedMetadataMixin,
+    EmbeddedTodosMixin,
     LoreEntriesMixin,
     ManuscriptMixin,
     MetadataSchemaMixin,

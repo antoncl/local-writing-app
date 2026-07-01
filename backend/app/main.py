@@ -47,6 +47,7 @@ from app.models import (
     DeleteMetadataFieldRequest,
     DeleteMetadataGroupRequest,
     DirectoryListing,
+    EmbeddedTodoList,
     KnownTags,
     LoreEntry,
     LoreEntryList,
@@ -94,6 +95,7 @@ from app.models import (
     StructureNodeDeletePreview,
     TagsOverview,
     TodoDocument,
+    UpdateEmbeddedTodoRequest,
     UpdateProjectSettingsRequest,
     UpdateTagScopeRequest,
     UpdateTodoRequest,
@@ -445,6 +447,20 @@ def delete_scene(scene_id: str) -> StructureDocument:
         return service.delete_scene(scene_id)
 
 
+@app.patch("/api/scenes/{scene_id}/todos/{todo_id}", response_model=Scene)
+def update_embedded_todo(scene_id: str, todo_id: str, request: UpdateEmbeddedTodoRequest) -> Scene:
+    """Rewrite a single in-prose embedded-todo marker without a full body save."""
+    with translate_errors():
+        return service.update_embedded_todo(scene_id, todo_id, request)
+
+
+@app.delete("/api/scenes/{scene_id}/todos/{todo_id}", response_model=Scene)
+def delete_embedded_todo(scene_id: str, todo_id: str) -> Scene:
+    """Remove a single in-prose embedded-todo marker, keeping its wrapped text."""
+    with translate_errors():
+        return service.delete_embedded_todo(scene_id, todo_id)
+
+
 @app.get("/api/lore", response_model=LoreEntryList)
 def list_lore_entries() -> LoreEntryList:
     with translate_errors():
@@ -666,6 +682,13 @@ def delete_node(node_id: str):
 def get_todos() -> TodoDocument:
     with translate_errors():
         return service.read_todos()
+
+
+@app.get("/api/todos/embedded", response_model=EmbeddedTodoList)
+def get_embedded_todos() -> EmbeddedTodoList:
+    """The rebuildable index of in-prose embedded todos across all scenes."""
+    with translate_errors():
+        return service.read_embedded_todos()
 
 
 @app.post("/api/todos", response_model=TodoDocument)

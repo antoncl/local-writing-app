@@ -44,7 +44,7 @@ export function dedupeMutationIds(editor: Editor): boolean {
   let transaction = editor.state.tr;
   let changed = false;
   editor.state.doc.descendants((node, pos) => {
-    if (node.type.name !== "mutation") return true;
+    if (node.type.name !== "mutation" && node.type.name !== "mutationClose") return true;
     const id = String(node.attrs.markerId ?? "");
     if (!id || seen.has(id)) {
       const freshId = createMutationId();
@@ -103,6 +103,50 @@ export function applyMutationDrafts(editor: Editor, drafts: MutationNodeDraft[])
         .run();
     }
   }
+}
+
+/** Auto-label for a mutation record from its own attributes (#58/#65): the user
+ *  name if set, else `field → value` (add/remove show +/−). Shared by the close
+ *  pill and any list surface that renders a record without its schema. */
+export function mutationRecordLabel(attrs: {
+  name?: unknown;
+  op?: unknown;
+  field?: unknown;
+  value?: unknown;
+}): string {
+  const name = String(attrs.name ?? "");
+  if (name) return name;
+  const op = String(attrs.op ?? "replace");
+  const field = String(attrs.field ?? "");
+  const value = String(attrs.value ?? "");
+  if (op === "add") return `${field} +${value}`;
+  if (op === "remove") return `${field} −${value}`;
+  return `${field} → ${value}`;
+}
+
+/** Label for a close pill (#59): the referenced start record's name / auto-label,
+ *  found live in the open doc so it tracks edits to that marker. */
+export function closeLabelFromDoc(editor: Editor, ref: string): string {
+  if (!ref) return "";
+  let label = "";
+  editor.state.doc.descendants((node) => {
+    if (label) return false;
+    if (node.type.name === "mutation" && String(node.attrs.markerId ?? "") === ref) {
+      label = mutationRecordLabel(node.attrs);
+      return false;
+    }
+    return true;
+  });
+  return label;
+}
+
+/** Insert an interval-close node at the cursor, ending the record `ref` (#59). */
+export function insertMutationClose(editor: Editor, ref: string): void {
+  editor
+    .chain()
+    .focus()
+    .insertContent({ type: "mutationClose", attrs: { ref, markerId: createMutationId() } })
+    .run();
 }
 
 export function removeMutationNode(editor: Editor, markerId: string): void {

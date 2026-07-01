@@ -10,6 +10,7 @@
   import GroupCaret from "@/components/widgets/GroupCaret.svelte";
   import CountPill from "@/components/widgets/CountPill.svelte";
   import { api } from "@/lib/api";
+  import { mutationRecordLabel } from "@/lib/editor-core/mutationNodes";
   import type { MutationMarkerRecord } from "@/lib/types";
 
   let {
@@ -27,12 +28,6 @@
   // Scalar fields resolve to a string, collection fields to a string[] (ADR-0009).
   let effective = $state<Record<string, string | string[]>>({});
   const displayValue = (value: string | string[]) => (Array.isArray(value) ? value.join(", ") : value);
-  // Auto-label a mutation row from its op (#58): add +item, remove −item, else →.
-  const rowTitle = (m: { field: string; op?: string; value: string }) => {
-    if (m.op === "add") return `${m.field} +${m.value}`;
-    if (m.op === "remove") return `${m.field} −${m.value}`;
-    return `${m.field} → ${m.value}`;
-  };
 
   // Refetch the timeline whenever the entity changes.
   $effect(() => {
@@ -127,7 +122,7 @@
         <NodeList mode="tree" isEmpty={false}>
           {#each mutations as marker, i (marker.marker_id)}
             <NodeRow
-              title={marker.name || rowTitle(marker)}
+              title={mutationRecordLabel(marker)}
               detail={marker.scene_path}
               onClick={() => {
                 void scrubTo(i + 1);

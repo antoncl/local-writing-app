@@ -702,6 +702,14 @@ export const api = {
   getEntityMutations(entityId: string) {
     return request<MutationMarkerList>(`/lore/${entityId}/mutations`);
   },
+  // The entity's records still open (live, not yet closed) at (scene, pos) — the
+  // source for the `/mutate close` picker (#59).
+  getLiveEntityMutations(entityId: string, sceneId: string, pos?: number) {
+    const query = pos === undefined ? "" : `&pos=${pos}`;
+    return request<MutationMarkerList>(
+      `/lore/${entityId}/live-mutations?scene=${encodeURIComponent(sceneId)}${query}`,
+    );
+  },
   getEntityEffectiveState(entityId: string, sceneId: string, pos?: number) {
     const query = pos === undefined ? "" : `&pos=${pos}`;
     return request<EffectiveStateResponse>(

@@ -63,6 +63,19 @@ turndown.addRule("mutationMark", {
     return `<!-- mutate:${parts.join(";")} -->`;
   },
 });
+turndown.addRule("mutationCloseMark", {
+  filter: (node: Node) => {
+    if (!(node instanceof HTMLElement)) return false;
+    return node.tagName === "SPAN" && Boolean(node.dataset.mutationCloseRef);
+  },
+  replacement: (_content: string, node: Node) => {
+    const element = node as HTMLElement;
+    const ref = element.dataset.mutationCloseRef;
+    const markerId = element.dataset.mutationId;
+    if (!ref || !markerId) return "";
+    return `<!-- mutate:close;ref=${ref};id=${markerId} -->`;
+  },
+});
 turndown.addRule("simpleMarkdownTable", {
   filter: "table",
   replacement: (_content: string, node: Node) => {
@@ -102,7 +115,9 @@ turndown.addRule("simpleMarkdownTable", {
 });
 
 export async function sceneMarkdownToHtml(markdown: string): Promise<string> {
-  const prepared = markEmbeddedMutations(markEmbeddedCharacters(markEmbeddedTodos(markdown || "")));
+  const prepared = markEmbeddedMutationCloses(
+    markEmbeddedMutations(markEmbeddedCharacters(markEmbeddedTodos(markdown || ""))),
+  );
   return (await marked.parse(prepared)) || "<p></p>";
 }
 
@@ -175,6 +190,21 @@ function markEmbeddedMutations(markdown: string): string {
         ` data-mutation-value="${escapeAttribute(decodeNote(value))}"` +
         nameAttr +
         groupAttr +
+        ` data-mutation-id="${escapeAttribute(markerId)}"></span>`
+      );
+    },
+  );
+}
+
+function markEmbeddedMutationCloses(markdown: string): string {
+  // Interval-close marker (#59): a self-contained point comment → empty atom span
+  // the MutationClose node parses. Distinct grammar (close;ref=) from a start
+  // marker, so this runs after markEmbeddedMutations without overlap.
+  return markdown.replace(
+    /<!--\s*mutate:close;ref=([A-Za-z0-9_-]+);id=([A-Za-z0-9_-]+)\s*-->/g,
+    (_match, ref: string, markerId: string) => {
+      return (
+        `<span data-mutation-close-ref="${escapeAttribute(ref)}"` +
         ` data-mutation-id="${escapeAttribute(markerId)}"></span>`
       );
     },

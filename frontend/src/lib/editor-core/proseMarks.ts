@@ -172,6 +172,56 @@ export function createMutationMark({ labelForMarker }: MutationMarkResolvers) {
   });
 }
 
+export interface MutationCloseResolvers {
+  /** Human label for the record a close ends (its name / auto-label), resolved
+   *  live so the pill tracks edits to the referenced start marker. */
+  labelForClose: (ref: string) => string;
+}
+
+/**
+ * Build the interval-close pill (#59). A point node that round-trips to
+ * `<!-- mutate:close;ref=..;id=.. -->` — it ends the record `ref` at this prose
+ * position (live iff start ≤ pos < close). Rendered as a distinct "closes X" pill.
+ */
+export function createMutationCloseMark({ labelForClose }: MutationCloseResolvers) {
+  return Node.create({
+    name: "mutationClose",
+    inline: true,
+    group: "inline",
+    atom: true,
+    selectable: true,
+    addAttributes() {
+      return {
+        ref: {
+          default: null,
+          parseHTML: (element) => element.getAttribute("data-mutation-close-ref"),
+          renderHTML: (attributes) =>
+            attributes.ref ? { "data-mutation-close-ref": String(attributes.ref) } : {},
+        },
+        markerId: {
+          default: null,
+          parseHTML: (element) => element.getAttribute("data-mutation-id"),
+          renderHTML: (attributes) =>
+            attributes.markerId ? { "data-mutation-id": String(attributes.markerId) } : {},
+        },
+      };
+    },
+    parseHTML() {
+      return [{ tag: "span[data-mutation-close-ref]" }];
+    },
+    renderHTML({ node, HTMLAttributes }) {
+      const label = labelForClose(String(node.attrs.ref ?? ""));
+      const full = label ? `Closes ${label}` : "Closes a mutation";
+      const compact = label ? `⤳✕ ${label}` : "⤳✕";
+      return [
+        "span",
+        mergeAttributes(HTMLAttributes, { class: "mutation-pill mutation-pill-close", title: full }),
+        compact,
+      ];
+    },
+  });
+}
+
 export const TodoAnchor = Mark.create({
   name: "todoAnchor",
   inclusive: false,

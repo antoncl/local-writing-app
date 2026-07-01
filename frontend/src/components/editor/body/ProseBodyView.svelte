@@ -33,13 +33,22 @@
   import { editorHtmlToSceneMarkdown, sceneMarkdownToHtml } from "@/lib/utils/markdown";
   import { sanitizePastedHtml } from "@/lib/utils/sanitizePastedHtml";
   import { ImplicitContextHighlight, REBUILD_META } from "@/lib/editor-core/implicitContextHighlight";
-  import { AISuggestion, TodoAnchor, createCharacterMark, createMutationMark } from "@/lib/editor-core/proseMarks";
+  import {
+    AISuggestion,
+    TodoAnchor,
+    createCharacterMark,
+    createMutationMark,
+    createMutationCloseMark,
+  } from "@/lib/editor-core/proseMarks";
   import {
     applyMutationDrafts,
+    closeLabelFromDoc,
     dedupeMutationIds,
+    insertMutationClose,
     removeMutationNode,
   } from "@/lib/editor-core/mutationNodes";
   import MutationAuthoringForm, { type MutationDraft } from "./MutationAuthoringForm.svelte";
+  import MutationCloseForm from "./MutationCloseForm.svelte";
   import {
     parseSlashBody,
     parseTableDims,
@@ -182,6 +191,12 @@
   }
 
   const MutationMark = createMutationMark({ labelForMarker: mutationLabelFromMarker });
+
+  // Close-pill label (#59): the referenced start record's name / auto-label,
+  // found live in the open doc so it tracks edits to that marker.
+  const MutationCloseMark = createMutationCloseMark({
+    labelForClose: (ref) => (editor ? closeLabelFromDoc(editor, ref) : ""),
+  });
 
   // ---------- State ----------
   let editorFrame = $state<HTMLDivElement>();
@@ -524,12 +539,16 @@
         autocompleteTo: "mutate",
         run: (args) => {
           clearSlashTrigger();
-          // `/mutate Alice` pre-selects the entity by (case-insensitive) title.
-          const name = (args ?? []).join(" ").trim().toLowerCase();
+          const parts = args ?? [];
+          // `/mutate close [Name]` opens the close picker (#59); otherwise
+          // `/mutate [Alice]` pre-selects the entity by (case-insensitive) title.
+          const closing = parts[0]?.trim().toLowerCase() === "close";
+          const name = (closing ? parts.slice(1) : parts).join(" ").trim().toLowerCase();
           const match = name
             ? loreEntries.find((entry) => (entry.title ?? "").toLowerCase() === name)
             : null;
-          openMutationDialog(match?.id ?? "");
+          if (closing) openMutationCloseDialog(match?.id ?? "");
+          else openMutationDialog(match?.id ?? "");
         },
       },
       ...promptEntriesForSurface(promptCtx, "append_to_body")
@@ -978,11 +997,24 @@
   let mutationDialogOpen = $state(false);
   let mutationPresetEntityId = $state("");
   let mutationEditInitial = $state<MutationDraft | null>(null);
+  // The `/mutate close` picker (#59) — a separate dialog from the authoring form.
+  let mutationCloseDialogOpen = $state(false);
+  let mutationClosePresetEntityId = $state("");
 
   function openMutationDialog(presetEntityId = "") {
     mutationEditInitial = null;
     mutationPresetEntityId = presetEntityId;
     mutationDialogOpen = true;
+  }
+
+  function openMutationCloseDialog(presetEntityId = "") {
+    mutationClosePresetEntityId = presetEntityId;
+    mutationCloseDialogOpen = true;
+  }
+
+  function handleMutationClosePick(ref: string) {
+    mutationCloseDialogOpen = false;
+    if (editor) insertMutationClose(editor, ref);
   }
 
   function openMutationEdit(initial: MutationDraft) {
@@ -1250,6 +1282,7 @@
         AISuggestion,
         CharacterMark,
         MutationMark,
+        MutationCloseMark,
         TodoAnchor,
         Table.configure({ resizable: true }),
         TableRow,
@@ -1264,7 +1297,7 @@
           spellcheck: "true",
         },
         handleKeyDown: handleEditorKeydown,
-        handleClickOn: (_view, _pos, node) => {
+        handleClickOn: (_view, pos, node) => {
           // Click a mutation pill → edit it (rewrite/remove the node in place).
           if (node.type.name === "mutation") {
             openMutationEdit({
@@ -1276,6 +1309,12 @@
               name: String(node.attrs.name ?? ""),
               group: String(node.attrs.group ?? ""),
             });
+            return true;
+          }
+          // Click a close pill → delete it (reopens the interval). It carries no
+          // editable fields of its own beyond the record it references.
+          if (node.type.name === "mutationClose") {
+            editor?.chain().focus().deleteRange({ from: pos, to: pos + node.nodeSize }).run();
             return true;
           }
           return false;
@@ -1433,5 +1472,15 @@
     onSubmit={handleMutationSubmit}
     onDelete={deleteMutationNode}
     onCancel={() => (mutationDialogOpen = false)}
+  />
+{/if}
+
+{#if mutationCloseDialogOpen}
+  <MutationCloseForm
+    {loreEntries}
+    sceneId={scene?.id ?? ""}
+    presetEntityId={mutationClosePresetEntityId}
+    onPick={handleMutationClosePick}
+    onCancel={() => (mutationCloseDialogOpen = false)}
   />
 {/if}

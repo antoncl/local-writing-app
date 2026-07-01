@@ -47,6 +47,10 @@ MUTATION_MARKER_PATTERN = re.compile(
 # surface resolves at end-of-scene (ADR-0003).
 END_OF_SCENE: int | None = None
 
+# Node-intrinsic fields a mutation may target that are not schema fields: the
+# entry's own title/body. Free text, so no value constraints to validate.
+INTRINSIC_MUTABLE_FIELDS = frozenset({"title", "body"})
+
 
 @dataclass
 class MutationsIndex:
@@ -66,17 +70,72 @@ class LoreMutationsMixin:
         """Yield every mutation marker in one scene body, in prose order,
         carrying each marker's char offset (needed for position-granular
         resolution). The single per-scene scan the index (#51) walks."""
-        body = scene.body
+        yield from self._iter_body_mutations(scene.body, scene.id)
+
+    def _iter_body_mutations(self, body: str, scene_id: str) -> Iterator[MutationMarker]:
+        """Regex-walk one raw body for markers. Split from `_scan_scene_mutations`
+        so validation (#53) can scan a body it already read (front-matter walk)
+        without materializing a Scene."""
         for match in MUTATION_MARKER_PATTERN.finditer(body):
             yield MutationMarker(
                 marker_id=match.group(4),
                 entity_id=match.group(1),
                 field=match.group(2),
                 value=unquote(match.group(3)),
-                scene_id=scene.id,
+                scene_id=scene_id,
                 offset=match.start(),
                 line=body[: match.start()].count("\n") + 1,
             )
+
+    # ----- validation (#53) ----------------------------------------------
+
+    def _validate_scene_mutations(
+        self, scene_id: str, body: str, schema: object, node_index: object
+    ) -> list[str]:
+        """Validate every mutation value in a scene body against its target
+        field's constraints — a mutation value IS a field value (ADR-0007), so it
+        reuses `_validate_metadata_field_value`, the same validator base values
+        run through. Called at save_scene and in validate_project."""
+        errors: list[str] = []
+        fields = getattr(schema, "fields", {})
+        for marker in self._iter_body_mutations(body, scene_id):
+            label = (
+                f"Scene {scene_id} mutation of {marker.entity_id}.{marker.field}"
+            )
+            if marker.field in INTRINSIC_MUTABLE_FIELDS:
+                # title/body are the node's own free-text fields (not schema
+                # fields but always present and mutable — the #33 name-change
+                # case mutates `title`); no constraints to check.
+                continue
+            field = fields.get(marker.field)
+            if field is None:
+                errors.append(f"{label} targets unknown field {marker.field}.")
+                continue
+            value = self._coerce_mutation_value(marker.value, getattr(field, "type", ""))
+            errors.extend(
+                self._validate_metadata_field_value(
+                    label, marker.field, value, field, node_index=node_index
+                )
+            )
+        return errors
+
+    def _coerce_mutation_value(self, value: str, field_type: str) -> object:
+        """Coerce a marker's url-decoded string to the field's native type so the
+        base-value validator sees what it expects. Uncoercible input is left as
+        the string, letting the validator flag it (e.g. "must be a number")."""
+        if value == "":
+            return value
+        if field_type == "number":
+            try:
+                return int(value) if re.fullmatch(r"-?\d+", value) else float(value)
+            except ValueError:
+                return value
+        if field_type == "boolean":
+            lowered = value.strip().lower()
+            if lowered in {"true", "false"}:
+                return lowered == "true"
+            return value
+        return value
 
     # ----- index + resolver (#51) ----------------------------------------
 

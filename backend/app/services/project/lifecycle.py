@@ -272,7 +272,7 @@ class ProjectLifecycleMixin:
             scene_id = entry.id
             path = entry.path
             try:
-                front_matter, _ = self._read_markdown_with_front_matter(path, strict=True)
+                front_matter, body = self._read_markdown_with_front_matter(path, strict=True)
                 entry_type = front_matter.get("entry_type", "scene")
                 if entry_type is not None and not isinstance(entry_type, str):
                     errors.append(f"Scene {scene_id} has invalid entry_type; it must be text.")
@@ -281,6 +281,7 @@ class ProjectLifecycleMixin:
                 status = str(front_matter.get("status") or "draft")
                 if metadata_schema:
                     errors.extend(self._validate_scene_metadata(scene_id, str(entry_type or "scene"), status, metadata, metadata_schema, node_index))
+                    errors.extend(self._validate_scene_mutations(scene_id, body, metadata_schema, node_index))
             except ProjectServiceError as exc:
                 errors.append(exc.message)
 

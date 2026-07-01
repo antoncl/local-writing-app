@@ -20,7 +20,11 @@ from fastapi.testclient import TestClient
 
 from app.main import app
 from app.main import service as svc
-from app.models import CreateLoreEntryRequest
+from app.models import (
+    CreateLoreEntryRequest,
+    MetadataFieldDefinition,
+    UpsertMetadataFieldRequest,
+)
 from app.services.ai.helpers import _format_lore_block, create_environment_for_project
 
 
@@ -30,6 +34,17 @@ class MutationResolutionTests(unittest.TestCase):
         self.root = Path(self.temp_dir.name) / "project"
         svc.__init__()
         svc.create_project(self.root, "Mutation Resolution Tests")
+        # `rank` is a user-defined field on characters; define it so the rank
+        # mutation validates (#53).
+        layers = svc.read_metadata_schema_layers()
+        svc.upsert_metadata_field(
+            UpsertMetadataFieldRequest(
+                layer_id=layers.layers[-1].id,
+                field_id="rank",
+                field=MetadataFieldDefinition(name="Rank", type="text"),
+                entry_type="character",
+            )
+        )
         self.client = TestClient(app)
 
         honor = svc.create_lore_entry(CreateLoreEntryRequest(title="Commodore Honor"))

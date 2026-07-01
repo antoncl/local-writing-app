@@ -17,7 +17,25 @@ from fastapi.testclient import TestClient
 
 from app.main import app
 from app.main import service as svc
-from app.models import UpdateMutationRequest
+from app.models import (
+    MetadataFieldDefinition,
+    UpdateMutationRequest,
+    UpsertMetadataFieldRequest,
+)
+
+
+def _define_rank_field() -> None:
+    """Define a `rank` text field in the open project's own schema layer, so
+    `honor.rank` mutations validate as real field values (#53)."""
+    layers = svc.read_metadata_schema_layers()
+    svc.upsert_metadata_field(
+        UpsertMetadataFieldRequest(
+            layer_id=layers.layers[-1].id,
+            field_id="rank",
+            field=MetadataFieldDefinition(name="Rank", type="text"),
+            entry_type="character",
+        )
+    )
 
 # Two co-authored markers (a promotion sets rank + title) plus a value that
 # needs url-decoding, to prove the encode/decode round-trip.
@@ -35,6 +53,7 @@ class LoreMutationScanTests(unittest.TestCase):
         self.root = Path(self.temp_dir.name) / "project"
         svc.__init__()
         svc.create_project(self.root, "Lore Mutation Tests")
+        _define_rank_field()
         self.client = TestClient(app)
         scene = self.client.post("/api/scenes", json={"title": "Chapter One"})
         self.assertEqual(scene.status_code, 200, scene.text)
@@ -132,6 +151,7 @@ class LoreMutationResolverTests(unittest.TestCase):
         self.root = Path(self.temp_dir.name) / "project"
         svc.__init__()
         svc.create_project(self.root, "Resolver Tests")
+        _define_rank_field()
         self.client = TestClient(app)
         # Three scenes in manuscript order: s1 (before), s2 (rank->Captain),
         # s3 (rank->Commodore).

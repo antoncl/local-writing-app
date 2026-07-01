@@ -47,6 +47,7 @@ from app.models import (
     DeleteMetadataFieldRequest,
     DeleteMetadataGroupRequest,
     DirectoryListing,
+    EffectiveStateResponse,
     EmbeddedTodoList,
     KnownTags,
     LoreEntry,
@@ -60,6 +61,7 @@ from app.models import (
     MoveLoreNoteToResearchResponse,
     MoveMetadataFieldRequest,
     MoveStructureNodeRequest,
+    MutationMarkerList,
     OpenProjectRequest,
     PreviewCacheBlock,
     PreviewContentBlock,
@@ -96,6 +98,7 @@ from app.models import (
     TagsOverview,
     TodoDocument,
     UpdateEmbeddedTodoRequest,
+    UpdateMutationRequest,
     UpdateProjectSettingsRequest,
     UpdateTagScopeRequest,
     UpdateTodoRequest,
@@ -461,6 +464,20 @@ def delete_embedded_todo(scene_id: str, todo_id: str) -> Scene:
         return service.delete_embedded_todo(scene_id, todo_id)
 
 
+@app.patch("/api/scenes/{scene_id}/mutations/{marker_id}", response_model=Scene)
+def update_mutation(scene_id: str, marker_id: str, request: UpdateMutationRequest) -> Scene:
+    """Rewrite a single in-prose lore-mutation marker without a full body save (#33)."""
+    with translate_errors():
+        return service.update_mutation(scene_id, marker_id, request)
+
+
+@app.delete("/api/scenes/{scene_id}/mutations/{marker_id}", response_model=Scene)
+def delete_mutation(scene_id: str, marker_id: str) -> Scene:
+    """Remove a single in-prose lore-mutation marker (#33)."""
+    with translate_errors():
+        return service.delete_mutation(scene_id, marker_id)
+
+
 @app.get("/api/lore", response_model=LoreEntryList)
 def list_lore_entries() -> LoreEntryList:
     with translate_errors():
@@ -477,6 +494,26 @@ def create_lore_entry(request: CreateLoreEntryRequest) -> LoreEntry:
 def get_lore_entry(entry_id: str) -> LoreEntry:
     with translate_errors():
         return service.read_lore_entry(entry_id)
+
+
+@app.get("/api/lore/{entity_id}/mutations", response_model=MutationMarkerList)
+def list_entity_mutations(entity_id: str) -> MutationMarkerList:
+    """Manuscript-ordered mutation timeline for a lore entity (#33)."""
+    with translate_errors():
+        return service.entity_mutations(entity_id)
+
+
+@app.get("/api/lore/{entity_id}/effective", response_model=EffectiveStateResponse)
+def get_entity_effective_state(
+    entity_id: str, scene: str, pos: int | None = None
+) -> EffectiveStateResponse:
+    """Effective mutation overrides for a lore entity as of (scene, position) —
+    drives the lore-card time-slider (#33)."""
+    with translate_errors():
+        values = service.effective_state(entity_id, scene, pos)
+        return EffectiveStateResponse(
+            entity_id=entity_id, scene_id=scene, position=pos, values=values
+        )
 
 
 @app.put("/api/lore/{entry_id}", response_model=LoreEntry)

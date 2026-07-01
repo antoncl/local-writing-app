@@ -32,6 +32,7 @@ from urllib.parse import quote, unquote
 
 from app.models import (
     MutationMarker,
+    MutationMarkerList,
     Scene,
     UpdateMutationRequest,
 )
@@ -183,6 +184,12 @@ class LoreMutationsMixin:
             by_entity=by_entity,
             scene_order=scene_order,
         )
+
+    def entity_mutations(self, entity_id: str) -> MutationMarkerList:
+        """The manuscript-ordered mutation timeline for one entity (#54) — the
+        pre-ordered per-entity slice of the index, for the lore-card list."""
+        index = self.build_mutations_index()
+        return MutationMarkerList(items=list(index.by_entity.get(entity_id, [])))
 
     def effective_state(
         self,

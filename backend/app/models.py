@@ -821,6 +821,17 @@ class UpdateMutationRequest(BaseModel):
     value: str | None = None
 
 
+class EffectiveStateResponse(BaseModel):
+    """Effective mutation overrides for one lore entity as of a (scene,
+    position) — the fields with a live mutation there, each mapped to its
+    winning value. Drives the lore-card time-slider re-render (#33)."""
+
+    entity_id: str
+    scene_id: str
+    position: int | None = None
+    values: dict[str, str] = Field(default_factory=dict)
+
+
 class ReferenceCandidate(BaseModel):
     id: str
     title: str

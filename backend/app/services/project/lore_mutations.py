@@ -367,6 +367,34 @@ class LoreMutationsMixin(MarkerMixin):
         index = self.build_mutations_index()
         return MutationMarkerList(items=list(index.by_entity.get(entity_id, [])))
 
+    def effective_names(self, scene_id: str) -> dict[str, list[str]]:
+        """Each lore entry's **effective** name-set (title + aliases) as of the
+        end of `scene_id` — the primitive the effective-name-aware matcher (#61)
+        needs. A renamed entity resolves under its as-of-scene name; unmutated
+        entries return their base names. Resolution is **scene-granular** (the
+        end-of-scene name-set covers the whole scene; ADR-0008 amended)."""
+        index = self.build_mutations_index()
+        names: dict[str, list[str]] = {}
+        try:
+            entries = self.list_lore_entries().entries
+        except ProjectServiceError:
+            return {}
+        for summary in entries:
+            entity_id = getattr(summary, "id", "")
+            if not entity_id:
+                continue
+            overrides = self.effective_state(entity_id, scene_id, index=index)
+            title = str(overrides.get("title") or getattr(summary, "title", "") or "").strip()
+            metadata = getattr(summary, "metadata", {}) or {}
+            if "aliases" in overrides:
+                aliases = _as_str_list(overrides["aliases"])
+            else:
+                aliases = _as_str_list(metadata.get("aliases"))
+            name_set = [name for name in [title, *aliases] if name]
+            if name_set:
+                names[entity_id] = name_set
+        return names
+
     def live_mutations(
         self,
         entity_id: str,

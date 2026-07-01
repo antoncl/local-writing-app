@@ -702,6 +702,11 @@ export const api = {
   getEntityMutations(entityId: string) {
     return request<MutationMarkerList>(`/lore/${entityId}/mutations`);
   },
+  // Each lore entry's effective name-set (title + aliases) as of a scene — the
+  // source for the effective-name-aware implicit-context matcher (#61).
+  getSceneEffectiveNames(sceneId: string) {
+    return request<Record<string, string[]>>(`/scenes/${encodeURIComponent(sceneId)}/effective-names`);
+  },
   // The entity's records still open (live, not yet closed) at (scene, pos) — the
   // source for the `/mutate close` picker (#59).
   getLiveEntityMutations(entityId: string, sceneId: string, pos?: number) {

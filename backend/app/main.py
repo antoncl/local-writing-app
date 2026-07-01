@@ -438,6 +438,14 @@ def get_scene(scene_id: str) -> Scene:
         return service.read_scene(scene_id)
 
 
+@app.get("/api/scenes/{scene_id}/effective-names")
+def get_scene_effective_names(scene_id: str) -> dict[str, list[str]]:
+    """Each lore entry's effective name-set (title + aliases) as of this scene —
+    the source for the effective-name-aware implicit-context matcher (#61)."""
+    with translate_errors():
+        return service.effective_names(scene_id)
+
+
 @app.put("/api/scenes/{scene_id}", response_model=Scene)
 def save_scene(scene_id: str, request: SaveSceneRequest) -> Scene:
     with translate_errors():
@@ -1260,6 +1268,9 @@ def _prepare_chat_send_payload(
         explicit_picks=chat.context_items,
         source="user_message",
         turn=turn,
+        # The chat's anchored scene is its mutation resolution scene (#60/#61),
+        # so a renamed entity is detected under its as-of-scene name.
+        scene=chat.target_scene_id or None,
     )
     if new_entries:
         extended_journal = list(chat.journal) + new_entries

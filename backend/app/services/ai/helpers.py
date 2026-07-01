@@ -518,7 +518,12 @@ def _effective_field(
     except Exception:
         overrides = {}
     if field in overrides:
-        return overrides[field]
+        # Markers store values as strings; coerce to the field's native type so
+        # `effective(...)` matches `base(...)` (a number stays a number, a bool a
+        # bool) and template comparisons don't break in mutated scenes.
+        field_def = getattr(schema, "fields", {}).get(field) if schema is not None else None
+        field_type = getattr(field_def, "type", "") if field_def is not None else ""
+        return project._coerce_mutation_value(overrides[field], field_type)
     return _get_field(_safe_read_lore(project, entity_id), field)
 
 

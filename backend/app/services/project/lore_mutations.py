@@ -99,10 +99,19 @@ class LoreMutationsMixin:
         run through. Called at save_scene and in validate_project."""
         errors: list[str] = []
         fields = getattr(schema, "fields", {})
+        entry_types = getattr(schema, "entry_types", {})
+        by_id = getattr(node_index, "by_id", {})
         for marker in self._iter_body_mutations(body, scene_id):
             label = (
                 f"Scene {scene_id} mutation of {marker.entity_id}.{marker.field}"
             )
+            # Parity with base metadata validation (ADR-0007): the entity must
+            # exist and be a lore entry, and the field must be defined for its
+            # entry_type — not merely present somewhere in the global schema.
+            index_entry = by_id.get(marker.entity_id)
+            if index_entry is None or getattr(index_entry, "kind", None) != "lore":
+                errors.append(f"{label} targets unknown lore entity {marker.entity_id}.")
+                continue
             if marker.field in INTRINSIC_MUTABLE_FIELDS:
                 # title/body are the node's own free-text fields (not schema
                 # fields but always present and mutable — the #33 name-change
@@ -111,6 +120,13 @@ class LoreMutationsMixin:
             field = fields.get(marker.field)
             if field is None:
                 errors.append(f"{label} targets unknown field {marker.field}.")
+                continue
+            entry_type = getattr(index_entry, "entry_type", "")
+            allowed = getattr(entry_types.get(entry_type), "fields", None) or []
+            if marker.field not in allowed:
+                errors.append(
+                    f"{label} field {marker.field} is not defined for entry_type {entry_type}."
+                )
                 continue
             value = self._coerce_mutation_value(marker.value, getattr(field, "type", ""))
             errors.extend(
@@ -263,6 +279,14 @@ class LoreMutationsMixin:
             raise ProjectServiceError(
                 f"Mutation {marker_id} does not exist in scene {scene.id}.", 404
             )
+        # A PATCH rewrites the value in place, bypassing save_scene — so validate
+        # the rewritten marker here too, or an invalid value would slip past the
+        # save-time guard (parity with save_scene, ADR-0007).
+        errors = self._validate_scene_mutations(
+            scene.id, new_body, self.read_metadata_schema(), self._build_node_index()
+        )
+        if errors:
+            raise ProjectServiceError(" ".join(errors), 422)
         path = self._path_for_node_id(scene.id, "scene")
         self._write_scene_file(path, scene.model_copy(update={"body": new_body}))
         return self.read_scene(scene.id)

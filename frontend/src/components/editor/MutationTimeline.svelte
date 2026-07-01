@@ -49,6 +49,10 @@
     };
   });
 
+  // Monotonic token so out-of-order / wrong-entity responses from rapid
+  // scrubbing (or an entity switch mid-flight) can't overwrite the latest.
+  let scrubSeq = 0;
+
   async function scrubTo(index: number) {
     sliderIndex = index;
     if (index === 0) {
@@ -57,13 +61,15 @@
     }
     const marker = mutations[index - 1];
     if (!marker) return;
+    const seq = ++scrubSeq;
+    const forEntity = entityId;
     try {
       // Resolve at the marker's own position so it counts as live (offset <=
       // position), giving the effective state "as of" this change.
       const res = await api.getEntityEffectiveState(entityId, marker.scene_id, marker.offset);
-      effective = res.values;
+      if (seq === scrubSeq && forEntity === entityId) effective = res.values;
     } catch {
-      effective = {};
+      if (seq === scrubSeq && forEntity === entityId) effective = {};
     }
   }
 

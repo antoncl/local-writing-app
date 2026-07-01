@@ -39,11 +39,27 @@
     ];
     for (const id of ids) {
       const def = schema?.fields[id] ?? null;
-      if (def?.type === "computed") continue;
+      // Computed fields are derived; collection fields (multi_select / tags /
+      // entity_ref_list) are additive-flavored and land in v1.1 — offering them
+      // here would only produce a save-blocking 422 on a scalar value.
+      if (def && ["computed", "multi_select", "tags", "entity_ref_list"].includes(def.type)) continue;
       opts.push({ id, label: def?.name ?? id, def });
     }
     return opts;
   });
+
+  // Lore entries offered for an entity_ref field's picker, honoring its
+  // picker_config target kinds/entry_types when present.
+  function refCandidates(def: MetadataFieldDefinition | null) {
+    const kinds = def?.picker_config?.kinds;
+    const entryTypes = def?.picker_config?.entry_types;
+    return loreEntries.filter((e) => {
+      if (kinds && kinds.length > 0 && !kinds.includes("lore")) return false;
+      const allowed = entryTypes?.lore;
+      if (allowed && allowed.length > 0 && !allowed.includes(e.entry_type)) return false;
+      return true;
+    });
+  }
 
   const canSubmit = $derived(
     Boolean(entity) &&
@@ -128,7 +144,18 @@
                   <option value="" disabled>Choose…</option>
                   {#each f.def.options ?? [] as opt}
                     {@const optValue = typeof opt === "string" ? opt : opt.value}
-                    <option value={optValue}>{optValue}</option>
+                    {@const optLabel = typeof opt === "string" ? opt : (opt.label ?? opt.value)}
+                    <option value={optValue}>{optLabel}</option>
+                  {/each}
+                </select>
+              {:else if f.def?.type === "entity_ref"}
+                <select
+                  value={picks[f.id]?.value ?? ""}
+                  onchange={(e) => setValue(f.id, e.currentTarget.value)}
+                >
+                  <option value="" disabled>Choose…</option>
+                  {#each refCandidates(f.def) as e (e.id)}
+                    <option value={e.id}>{e.title || e.id}</option>
                   {/each}
                 </select>
               {:else if f.def?.type === "boolean"}

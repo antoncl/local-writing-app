@@ -47,7 +47,9 @@ class MutationResolutionTests(unittest.TestCase):
         )
         self.client = TestClient(app)
 
-        honor = svc.create_lore_entry(CreateLoreEntryRequest(title="Commodore Honor"))
+        honor = svc.create_lore_entry(
+            CreateLoreEntryRequest(title="Commodore Honor", entry_type="character")
+        )
         self.honor = honor.id
 
         # s1 precedes the change; s2 promotes Honor (title + rank), mid-scene.
@@ -109,6 +111,27 @@ class MutationResolutionTests(unittest.TestCase):
         render = env.from_string("{{ base(hid, 'title') }}").render
         # base() is scene-independent: always the stored (book-start) value.
         self.assertEqual(render(hid=self.honor), "Commodore Honor")
+
+    def test_effective_coerces_to_field_native_type(self) -> None:
+        # A number field resolves to an int, not the marker's "600" string, so
+        # template comparisons behave the same as with a base value.
+        layers = svc.read_metadata_schema_layers()
+        svc.upsert_metadata_field(
+            UpsertMetadataFieldRequest(
+                layer_id=layers.layers[-1].id,
+                field_id="strength",
+                field=MetadataFieldDefinition(name="Strength", type="number"),
+                entry_type="character",
+            )
+        )
+        scene = self._new_scene(
+            "Scene Three",
+            f"Grew stronger. <!-- mutate:entity={self.honor};field=strength;value=600;id=s1 -->",
+        )
+        env = create_environment_for_project(svc)
+        value = env.globals["effective"](self.honor, "strength", scene)
+        self.assertEqual(value, 600)
+        self.assertIsInstance(value, int)
 
 
 if __name__ == "__main__":

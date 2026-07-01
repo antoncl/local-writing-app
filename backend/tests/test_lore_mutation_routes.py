@@ -111,6 +111,13 @@ class MutationRouteTests(unittest.TestCase):
         timeline = self.client.get(f"/api/lore/{self.honor}/mutations").json()["items"]
         self.assertEqual(timeline, [])
 
+    def test_patch_to_unknown_entity_is_422(self) -> None:
+        # PATCH rewrites in place, bypassing save_scene — it must validate too.
+        response = self.client.patch(
+            f"/api/scenes/{self.s2}/mutations/m1", json={"entity_id": "lore_ghost"}
+        )
+        self.assertEqual(response.status_code, 422, response.text)
+
     def test_patch_missing_marker_is_404(self) -> None:
         response = self.client.patch(
             f"/api/scenes/{self.s2}/mutations/nope", json={"value": "x"}

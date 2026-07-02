@@ -13,9 +13,11 @@
     value?: string | null;
     allowNone?: boolean;
     onChange?: (id: string | null) => void;
+    /** Read-only display (#64): the swatch chip renders, the popover never opens. */
+    readOnly?: boolean;
   }
 
-  let { value = $bindable(null), allowNone = true, onChange }: Props = $props();
+  let { value = $bindable(null), allowNone = true, onChange, readOnly = false }: Props = $props();
 
   let open = $state(false);
   let anchor: HTMLButtonElement | undefined = $state();
@@ -54,6 +56,7 @@
   }
 
   function toggle() {
+    if (readOnly) return;
     if (!open) positionPopover();
     open = !open;
   }
@@ -101,8 +104,10 @@
     type="button"
     class="swatch-trigger"
     class:empty={!current}
+    class:read-only={readOnly}
     title={current ? current.label : "No color"}
     aria-label={current ? `Color: ${current.label}` : "Pick a color"}
+    disabled={readOnly}
     bind:this={anchor}
     onclick={(e) => { e.stopPropagation(); toggle(); }}
   >
@@ -170,6 +175,8 @@
     transition: border-color 80ms linear;
   }
   .swatch-trigger:hover { border-color: var(--ctx-accent, #3f7d68); }
+  .swatch-trigger.read-only { cursor: default; }
+  .swatch-trigger.read-only:hover { border-color: var(--ctx-border, #cdd8d3); }
   .swatch-trigger.empty .swatch-dot { background: transparent; }
 
   .swatch-dot {

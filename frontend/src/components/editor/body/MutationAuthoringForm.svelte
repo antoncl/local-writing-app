@@ -18,6 +18,13 @@
     type MutationRow,
   } from "@/components/editor/body/MutationFieldRows.svelte";
   import { api } from "@/lib/api";
+  import {
+    asMembershipList,
+    collectionRowsFromEdit,
+    composeCollectionValue,
+    diffCollectionMembership,
+    type CollectionRecord,
+  } from "@/lib/editor-core/mutationListEdit";
   import type {
     MutationRowDraft,
     MutationUnitDraft,
@@ -43,6 +50,7 @@
     implicitContextMatcher = null,
     initial = null,
     presetEntityId = "",
+    sceneId = "",
     onSubmit,
     onDelete,
     onCancel,
@@ -57,6 +65,8 @@
     initial?: MutationUnitDraft | null;
     /** Pre-selected entity id for create mode (e.g. from `/mutate Alice`). */
     presetEntityId?: string;
+    /** The authoring scene — the list-edit baseline resolves here (#71). */
+    sceneId?: string;
     onSubmit: (draft: MutationUnitDraft) => void;
     onDelete?: (markerId: string) => void;
     onCancel: () => void;
@@ -65,25 +75,101 @@
   const editing = $derived(Boolean(initial?.markerId));
 
   // Form rows carry the unit's row ids through the edit round-trip (#69) so an
-  // unchanged row keeps its id — and with it any close targeting it.
-  type FormRow = MutationRow & { id?: string };
+  // unchanged row keeps its id — and with it any close targeting it. A
+  // collection field's records collapse into ONE list-edit row (#71): value is
+  // the composed membership, `baseline` the diff base (also flips
+  // MutationFieldRows into list-edit mode), `collectionRecords` the unit's own
+  // records so an unchanged delta keeps its id on re-save.
+  type FormRow = MutationRow & { id?: string; collectionRecords?: CollectionRecord[] };
 
   // The dialog re-mounts on each open ({#if} in the parent), so capturing the
   // initial prop values once is intentional (untrack silences the lint).
   let entityId = $state(untrack(() => initial?.entity ?? presetEntityId ?? ""));
-  let rows = $state<FormRow[]>(
-    untrack(
-      () =>
-        initial?.rows.map((row) => ({
+  let rows = $state<FormRow[]>([]);
+
+  const entity = $derived(loreEntries.find((e) => e.id === entityId) ?? null);
+
+  // The list-edit baseline (#71, ADR-0017): the entity's EFFECTIVE overrides in
+  // this scene, excluding the edited unit's own rows so the diff can't count
+  // itself. The scene was flushed before the dialog opened (GH-#45 spine), so
+  // the saved index is current. Resolution is end-of-scene (ADR-0003: only
+  // replace_selection carries a real cursor offset). `null` = still loading —
+  // the rows area waits so every seeded baseline is deterministic.
+  let effectiveValues = $state<Record<string, string | string[]> | null>(null);
+
+  $effect(() => {
+    const id = entityId;
+    if (!id || !sceneId) {
+      effectiveValues = {};
+      return;
+    }
+    let cancelled = false;
+    effectiveValues = null;
+    const exclude = (initial?.rows ?? [])
+      .map((row) => row.id ?? "")
+      .filter(Boolean) as string[];
+    api
+      .getEntityEffectiveState(id, sceneId, undefined, exclude)
+      .then((res) => {
+        if (!cancelled) effectiveValues = res.values ?? {};
+      })
+      .catch(() => {
+        if (!cancelled) effectiveValues = {};
+      });
+    return () => {
+      cancelled = true;
+    };
+  });
+
+  const baselineReady = $derived(!entity || effectiveValues !== null);
+
+  // Effective membership for one collection field: the live override if any,
+  // else the entry's base value.
+  function collectionBaseline(field: string): string[] {
+    const effective = effectiveValues?.[field];
+    if (effective !== undefined) return asMembershipList(effective);
+    return asMembershipList((entity?.metadata ?? {})[field]);
+  }
+
+  // Seed the form rows once the baseline is known (edit mode): scalar/text
+  // records map 1:1; a collection field's records collapse into one list row.
+  let rowsSeeded = $state(false);
+  $effect(() => {
+    if (rowsSeeded || !baselineReady) return;
+    rowsSeeded = true;
+    if (!initial) return;
+    const seeded: FormRow[] = [];
+    const collections = new Map<string, { row: FormRow; records: CollectionRecord[] }>();
+    for (const row of initial.rows) {
+      const def = fieldDefFor(row.field, schema);
+      if (isCollectionType(def.type)) {
+        let slot = collections.get(row.field);
+        if (!slot) {
+          slot = {
+            row: { field: row.field, op: "replace", value: [], collectionRecords: [] },
+            records: [],
+          };
+          collections.set(row.field, slot);
+          seeded.push(slot.row);
+        }
+        slot.records.push({ id: row.id ?? undefined, op: row.op || "replace", value: row.value });
+      } else {
+        seeded.push({
           id: row.id ?? undefined,
           field: row.field,
           op: row.op || "replace",
           value: row.value,
-        })) ?? [],
-    ),
-  );
-
-  const entity = $derived(loreEntries.find((e) => e.id === entityId) ?? null);
+        });
+      }
+    }
+    for (const [field, slot] of collections) {
+      const baseline = collectionBaseline(field);
+      slot.row.baseline = baseline;
+      slot.row.value = composeCollectionValue(baseline, slot.records);
+      slot.row.collectionRecords = slot.records;
+    }
+    rows = seeded;
+  });
 
   // #62 in-flow: apply a saved mutation set, or capture the composed change
   // as a new reusable set. Both only in create mode. §6: an optional name labels
@@ -156,7 +242,17 @@
     return String(value);
   }
 
-  const canSubmit = $derived(Boolean(entity) && rows.some((r) => isFilled(r.value)));
+  // A list-edit row contributes when its membership diff is non-empty (an
+  // emptied list = N removes, still a real change); other rows when filled.
+  function rowContributes(row: FormRow): boolean {
+    if (row.baseline !== undefined) {
+      const diff = diffCollectionMembership(row.baseline, asMembershipList(row.value));
+      return diff.adds.length > 0 || diff.removes.length > 0;
+    }
+    return isFilled(row.value);
+  }
+
+  const canSubmit = $derived(Boolean(entity) && rows.some(rowContributes));
 
   function selectEntity(value: string | string[]) {
     const next = Array.isArray(value) ? (value[0] ?? "") : value;
@@ -164,24 +260,55 @@
     entityId = next;
   }
 
+  // A fresh row for a field: collection fields open in list-edit mode (#71),
+  // seeded with the effective membership; everything else starts blank.
+  function seedRowFor(fieldId: string): FormRow {
+    const def = fieldDefFor(fieldId, schema);
+    if (isCollectionType(def.type)) {
+      const baseline = collectionBaseline(fieldId);
+      return { field: fieldId, op: "replace", value: [...baseline], baseline, collectionRecords: [] };
+    }
+    return { field: fieldId, op: "replace", value: "" };
+  }
+
   function addRow() {
     // Default to the first field not already used, so consecutive adds don't
     // stack on "title".
     const used = new Set(rows.map((r) => r.field));
     const next = fieldOptions.find((f) => !used.has(f.id)) ?? fieldOptions[0];
-    rows = [...rows, { field: next?.id ?? "title", op: "replace", value: "" }];
+    rows = [...rows, seedRowFor(next?.id ?? "title")];
   }
   function removeRow(index: number) {
     rows = rows.filter((_, i) => i !== index);
   }
   function setRow(index: number, patch: Partial<MutationRow>) {
-    rows = rows.map((r, i) => (i === index ? { ...r, ...patch } : r));
+    rows = rows.map((r, i) => {
+      if (i !== index) return r;
+      // Switching field re-seeds the row for the new field's authoring mode.
+      if (patch.field && patch.field !== r.field) return seedRowFor(patch.field);
+      return { ...r, ...patch };
+    });
   }
 
   function submit() {
     if (!entity) return;
     const unitRows: MutationRowDraft[] = [];
     for (const row of rows) {
+      // List-edit rows (#71): diff the edited membership against the baseline
+      // and emit plain add/remove records into this unit; deltas unchanged
+      // since the last edit keep their record ids.
+      if (row.baseline !== undefined) {
+        if (!rowContributes(row)) continue;
+        unitRows.push(
+          ...collectionRowsFromEdit(
+            row.field,
+            row.baseline,
+            asMembershipList(row.value),
+            row.collectionRecords ?? [],
+          ),
+        );
+        continue;
+      }
       if (!isFilled(row.value)) continue;
       const def = fieldDefFor(row.field, schema);
       const op =
@@ -279,6 +406,8 @@
         </li>
       {/each}
     </ul>
+  {:else if entity && !baselineReady}
+    <p class="mutation-loading">Loading current values…</p>
   {:else if entity}
     <MutationFieldRows
       rows={rows}
@@ -341,6 +470,11 @@
     font-size: 0.78rem;
     font-weight: 600;
     color: var(--text-2);
+  }
+  .mutation-loading {
+    margin: 0 0 12px;
+    font-size: 0.82rem;
+    color: var(--text-3);
   }
   .mutation-check {
     display: flex;

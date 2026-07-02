@@ -42,16 +42,11 @@
     createMutationCloseMark,
   } from "@/lib/editor-core/proseMarks";
   import {
-    applyMutationUnitDraft,
     closeLabelFromDoc,
     dedupeMutationIds,
-    insertMutationClose,
-    removeMutationNode,
     unitRows,
-    type MutationUnitDraft,
   } from "@/lib/editor-core/mutationNodes";
-  import MutationAuthoringForm from "./MutationAuthoringForm.svelte";
-  import MutationCloseForm from "./MutationCloseForm.svelte";
+  import MutationDialogs from "./MutationDialogs.svelte";
   import {
     parseSlashBody,
     parseTableDims,
@@ -550,8 +545,8 @@
           const match = name
             ? loreEntries.find((entry) => (entry.title ?? "").toLowerCase() === name)
             : null;
-          if (closing) openMutationCloseDialog(match?.id ?? "");
-          else openMutationDialog(match?.id ?? "");
+          if (closing) mutationDialogs?.openClose(match?.id ?? "");
+          else void mutationDialogs?.openAuthoring(match?.id ?? "");
         },
       },
       ...promptEntriesForSurface(promptCtx, "append_to_body")
@@ -993,39 +988,10 @@
     return `todo_${randomId.slice(0, 12)}`;
   }
 
-  // `/mutate` authoring dialog (#33, #69). Create mode inserts ONE unit pill
-  // (client-minted ids) carrying every selected field row at the cursor;
-  // clicking a pill opens edit mode on the whole unit, which rewrites/removes
-  // the node in place. Units round-trip to scene-body comments (single-line or
-  // multi-line carrier) via the turndown rule on save.
-  let mutationDialogOpen = $state(false);
-  let mutationPresetEntityId = $state("");
-  let mutationEditInitial = $state<MutationUnitDraft | null>(null);
-  // The `/mutate close` picker (#59) — a separate dialog from the authoring form.
-  let mutationCloseDialogOpen = $state(false);
-  let mutationClosePresetEntityId = $state("");
-
-  function openMutationDialog(presetEntityId = "") {
-    mutationEditInitial = null;
-    mutationPresetEntityId = presetEntityId;
-    mutationDialogOpen = true;
-  }
-
-  function openMutationCloseDialog(presetEntityId = "") {
-    mutationClosePresetEntityId = presetEntityId;
-    mutationCloseDialogOpen = true;
-  }
-
-  function handleMutationClosePick(ref: string) {
-    mutationCloseDialogOpen = false;
-    if (editor) insertMutationClose(editor, ref);
-  }
-
-  function openMutationEdit(initial: MutationUnitDraft) {
-    mutationPresetEntityId = "";
-    mutationEditInitial = initial;
-    mutationDialogOpen = true;
-  }
+  // The `/mutate` dialogs (#33, #69) live in MutationDialogs (state + submit
+  // wiring); this component keeps only the pill-click and slash entry points,
+  // reached through the bound instance's open* methods.
+  let mutationDialogs = $state<MutationDialogs | null>(null);
 
   // Re-entrancy guard lives here (the dispatch re-fires onUpdate); the doc work
   // is in `dedupeMutationIds`.
@@ -1035,16 +1001,6 @@
     const changed = dedupeMutationIds(editor);
     reconcilingMutationIds = false;
     return changed;
-  }
-
-  function handleMutationSubmit(draft: MutationUnitDraft) {
-    mutationDialogOpen = false;
-    if (editor) applyMutationUnitDraft(editor, draft);
-  }
-
-  function deleteMutationNode(markerId: string) {
-    mutationDialogOpen = false;
-    if (editor) removeMutationNode(editor, markerId);
   }
 
   function selectedPlainText() {
@@ -1304,7 +1260,7 @@
         handleClickOn: (_view, pos, node) => {
           // Click a mutation pill → edit the whole unit (#69) in place.
           if (node.type.name === "mutation") {
-            openMutationEdit({
+            void mutationDialogs?.openEdit({
               markerId: String(node.attrs.markerId ?? ""),
               entity: String(node.attrs.entity ?? ""),
               name: String(node.attrs.name ?? ""),
@@ -1473,25 +1429,12 @@
   <div bind:this={editorElement}></div>
 </div>
 
-{#if mutationDialogOpen}
-  <MutationAuthoringForm
-    {loreEntries}
-    schema={metadataSchema}
-    implicitContextMatcher={implicitContextMatcher}
-    initial={mutationEditInitial}
-    presetEntityId={mutationPresetEntityId}
-    onSubmit={handleMutationSubmit}
-    onDelete={deleteMutationNode}
-    onCancel={() => (mutationDialogOpen = false)}
-  />
-{/if}
-
-{#if mutationCloseDialogOpen}
-  <MutationCloseForm
-    {loreEntries}
-    sceneId={scene?.id ?? ""}
-    presetEntityId={mutationClosePresetEntityId}
-    onPick={handleMutationClosePick}
-    onCancel={() => (mutationCloseDialogOpen = false)}
-  />
-{/if}
+<MutationDialogs
+  bind:this={mutationDialogs}
+  getEditor={() => editor}
+  sceneId={scene?.id ?? ""}
+  isScene={documentKind === "scene"}
+  {loreEntries}
+  schema={metadataSchema}
+  implicitContextMatcher={implicitContextMatcher}
+/>

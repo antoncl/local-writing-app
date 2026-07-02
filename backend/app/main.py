@@ -534,12 +534,15 @@ def list_live_entity_mutations(
 
 @app.get("/api/lore/{entity_id}/effective", response_model=EffectiveStateResponse)
 def get_entity_effective_state(
-    entity_id: str, scene: str, pos: int | None = None
+    entity_id: str, scene: str, pos: int | None = None, exclude: str = ""
 ) -> EffectiveStateResponse:
     """Effective mutation overrides for a lore entity as of (scene, position) —
-    drives the lore-card time-slider (#33)."""
+    drives the lore-card time-slider (#33). `exclude` (comma-separated record
+    ids) skips those records: the list-edit authoring baseline when re-editing
+    a unit (#71, ADR-0017)."""
     with translate_errors():
-        values = service.effective_state(entity_id, scene, pos)
+        excluded = {part.strip() for part in exclude.split(",") if part.strip()}
+        values = service.effective_state(entity_id, scene, pos, exclude=excluded)
         return EffectiveStateResponse(
             entity_id=entity_id, scene_id=scene, position=pos, values=values
         )

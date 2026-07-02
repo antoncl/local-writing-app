@@ -4,7 +4,18 @@
   // change; the same shape a saved set stores and a marker carries.
   import type { MetadataFieldDefinition, MetadataSchema, MetadataValue } from "@/lib/types";
 
-  export type MutationRow = { field: string; op: string; value: MetadataValue };
+  export type MutationRow = {
+    field: string;
+    op: string;
+    value: MetadataValue;
+    /** List-edit mode for a collection row (#71, ADR-0017): the effective
+     *  membership at the authoring position that the widget was seeded with.
+     *  When present the row shows the field's own list widget (no op selector)
+     *  and a live +/− chip strip of the records the diff will emit. Absent in
+     *  the set editor, which keeps authoring literal (field, op, value) rows —
+     *  a template has no entity, so there is no baseline to diff against. */
+    baseline?: string[];
+  };
 
   export const COLLECTION_TYPES = ["multi_select", "tags", "entity_ref_list"];
   export const isCollectionType = (type: string) => COLLECTION_TYPES.includes(type);
@@ -48,9 +59,10 @@
 
   // The item-widget field def for an add/remove op: a collection resolves to
   // its single-element type (entity_ref_list → entity_ref, multi_select →
-  // select, tags → text), so each add/remove marker carries one element.
+  // select, tags → text), so each add/remove marker carries one element. A
+  // list-edit row (baseline present, #71) always uses the field's own widget.
   export function effectiveFieldDef(row: MutationRow, def: MetadataFieldDefinition): MetadataFieldDefinition {
-    if (!isCollectionType(def.type) || row.op === "replace") return def;
+    if (!isCollectionType(def.type) || row.baseline !== undefined || row.op === "replace") return def;
     if (def.type === "entity_ref_list") return { ...def, type: "entity_ref" };
     if (def.type === "multi_select") return { ...def, type: "select" };
     return { ...def, type: "text" };
@@ -62,6 +74,10 @@
   // op selector + remove), with the value editor on its own full-width line
   // below the caption — long_text gets room instead of a squeezed inline slot.
   import FieldValueEditor from "@/components/widgets/FieldValueEditor.svelte";
+  import {
+    asMembershipList,
+    diffCollectionMembership,
+  } from "@/lib/editor-core/mutationListEdit";
   import type { LoreEntrySummary, PromptEntrySummary, ScopedTag, StructureDocument } from "@/lib/types";
 
   let {
@@ -105,6 +121,22 @@
   function labelFor(fieldId: string): string {
     return fieldOptions.find((f) => f.id === fieldId)?.label ?? fieldId;
   }
+
+  // List-edit transparency chips (#71): the add/remove records the diff will
+  // emit, kept visible while the list is edited — the author still authors
+  // deltas; the widget just compiles them. Entity-ref values display as the
+  // entry's title (the stored record still carries the id).
+  function listEditChips(row: MutationRow): { op: "add" | "remove"; label: string }[] {
+    if (row.baseline === undefined) return [];
+    const isRefList = fieldDefFor(row.field, schema).type === "entity_ref_list";
+    const label = (value: string) =>
+      isRefList ? (loreEntries.find((e) => e.id === value)?.title ?? value) : value;
+    const { adds, removes } = diffCollectionMembership(row.baseline, asMembershipList(row.value));
+    return [
+      ...adds.map((value) => ({ op: "add" as const, label: label(value) })),
+      ...removes.map((value) => ({ op: "remove" as const, label: label(value) })),
+    ];
+  }
 </script>
 
 <div class="mrow-list">
@@ -126,16 +158,21 @@
           <span class="mrow-label">{labelFor(row.field)}</span>
         {/if}
         {#if isCollectionType(fieldDefFor(row.field, schema).type)}
-          <select
-            class="mrow-op"
-            aria-label="{labelFor(row.field)} operation"
-            value={row.op}
-            onchange={(e) => onRowChange(i, { op: e.currentTarget.value, value: "" })}
-          >
-            <option value="replace">Replace all</option>
-            <option value="add">Add item</option>
-            <option value="remove">Remove item</option>
-          </select>
+          <!-- List-edit rows (#71) drop the op selector: the author edits the
+               list; the diff emits the add/remove records (chips below). The
+               selector remains only where no baseline exists (set editor). -->
+          {#if row.baseline === undefined}
+            <select
+              class="mrow-op"
+              aria-label="{labelFor(row.field)} operation"
+              value={row.op}
+              onchange={(e) => onRowChange(i, { op: e.currentTarget.value, value: "" })}
+            >
+              <option value="replace">Replace all</option>
+              <option value="add">Add item</option>
+              <option value="remove">Remove item</option>
+            </select>
+          {/if}
         {:else if isTextAppendType(fieldDefFor(row.field, schema).type)}
           <!-- Same string shape either way, so the typed value survives an op flip. -->
           <select
@@ -169,6 +206,20 @@
           onChange={(v) => onRowChange(i, { value: v })}
         />
       </div>
+      {#if row.baseline !== undefined}
+        {@const chips = listEditChips(row)}
+        {#if chips.length > 0}
+          <div class="mrow-chips" aria-label="Derived records">
+            {#each chips as chip (chip.op + chip.label)}
+              <span class="mrow-chip" class:remove={chip.op === "remove"}>
+                {chip.op === "add" ? "+" : "−"}{chip.label}
+              </span>
+            {/each}
+          </div>
+        {:else}
+          <p class="mrow-chips-empty">No changes to this list yet.</p>
+        {/if}
+      {/if}
       {#if showNameFieldNote && isNameField(row.field)}
         <p class="mrow-note">
           Name changes resolve <strong>per scene</strong>: within the scene of the change,
@@ -248,6 +299,30 @@
      estate; the 260px cap is for the metadata rail. */
   .mrow-value :global(.metadata-long-text-body) {
     max-height: 48vh;
+  }
+  .mrow-chips {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 4px;
+  }
+  .mrow-chip {
+    font-size: 0.74rem;
+    padding: 1px 7px;
+    border-radius: 999px;
+    border: 1px solid color-mix(in oklab, var(--mutation-color, #7c5cbf) 45%, transparent);
+    background: color-mix(in oklab, var(--mutation-color, #7c5cbf) 12%, transparent);
+    color: var(--text-2);
+    white-space: nowrap;
+  }
+  .mrow-chip.remove {
+    border-style: dashed;
+    text-decoration: line-through;
+    text-decoration-color: color-mix(in oklab, var(--text-3) 60%, transparent);
+  }
+  .mrow-chips-empty {
+    margin: 0;
+    font-size: 0.74rem;
+    color: var(--text-3);
   }
   .mrow-note {
     margin: 0;

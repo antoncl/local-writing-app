@@ -752,10 +752,14 @@ export const api = {
       `/lore/${entityId}/live-mutations?scene=${encodeURIComponent(sceneId)}${query}`,
     );
   },
-  getEntityEffectiveState(entityId: string, sceneId: string, pos?: number) {
-    const query = pos === undefined ? "" : `&pos=${pos}`;
+  getEntityEffectiveState(entityId: string, sceneId: string, pos?: number, exclude?: string[]) {
+    // `exclude` skips record ids — the list-edit authoring baseline when
+    // re-editing a unit (#71, ADR-0017).
+    const posQuery = pos === undefined ? "" : `&pos=${pos}`;
+    const excludeQuery =
+      exclude && exclude.length > 0 ? `&exclude=${encodeURIComponent(exclude.join(","))}` : "";
     return request<EffectiveStateResponse>(
-      `/lore/${entityId}/effective?scene=${encodeURIComponent(sceneId)}${query}`,
+      `/lore/${entityId}/effective?scene=${encodeURIComponent(sceneId)}${posQuery}${excludeQuery}`,
     );
   },
   updateMutation(sceneId: string, markerId: string, updates: { entity_id?: string; field?: string; value?: string }) {

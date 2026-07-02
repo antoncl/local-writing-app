@@ -226,6 +226,26 @@ class CarrierResolutionTests(MutationUnitTestBase):
         live_after = svc.live_mutations(self.honor, self.scene_id)
         self.assertEqual(live_after.items, [])
 
+    def test_effective_state_exclude_skips_records(self) -> None:
+        # The list-edit baseline (#71, ADR-0017): re-editing a unit resolves the
+        # effective value WITHOUT the unit's own rows.
+        self._save_body(f"Honor rose. {self._carrier()}")
+        state = svc.effective_state(
+            self.honor, self.scene_id, exclude={"r1", "r2"}
+        )
+        self.assertEqual(state, {})
+        partial = svc.effective_state(self.honor, self.scene_id, exclude={"r1"})
+        self.assertEqual(partial, {"title": "Lady Dame"})
+
+    def test_effective_route_accepts_exclude_param(self) -> None:
+        self._save_body(f"Honor rose. {self._carrier()}")
+        response = self.client.get(
+            f"/api/lore/{self.honor}/effective",
+            params={"scene": self.scene_id, "exclude": "r1,r2"},
+        )
+        self.assertEqual(response.status_code, 200, response.text)
+        self.assertEqual(response.json()["values"], {})
+
     def test_index_version_tracks_unit_name(self) -> None:
         self._save_body(f"Honor rose. {self._carrier('Promotion')}")
         before = svc.build_mutations_index().version

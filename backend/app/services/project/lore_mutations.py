@@ -592,6 +592,7 @@ class LoreMutationsMixin(MarkerMixin):
         scene_id: str,
         position: int | None = END_OF_SCENE,
         index: MutationsIndex | None = None,
+        exclude: frozenset[str] | set[str] = frozenset(),
     ) -> dict[str, str | list[str]]:
         """Effective mutation overrides for `entity_id` as of (scene, position).
 
@@ -612,7 +613,11 @@ class LoreMutationsMixin(MarkerMixin):
         sits at/before `position` (so prose before a marker sees the old value,
         prose after it the new). `position=END_OF_SCENE` counts every in-scene
         marker as live. Pass a prebuilt `index` to resolve many entries without
-        re-scanning."""
+        re-scanning.
+
+        `exclude` skips the given record ids entirely — the list-edit authoring
+        baseline (ADR-0017): re-editing a unit diffs against the effective value
+        WITHOUT the unit's own rows, so the diff cannot count itself."""
         idx = index or self.build_mutations_index()
         records = idx.by_entity.get(entity_id)
         if not records:
@@ -621,11 +626,9 @@ class LoreMutationsMixin(MarkerMixin):
         if target_pos is None:
             # Scene not in the manuscript → no manuscript position → base only.
             return {}
-        live_by_field: dict[str, list[MutationMarker]] = {}
-        for marker in records:  # pre-sorted ascending, so the last live wins
-            close = idx.closes_by_start.get(marker.marker_id)
-            if self._marker_is_live(marker, idx.scene_order, target_pos, position, close):
-                live_by_field.setdefault(marker.field, []).append(marker)
+        live_by_field = self._live_records_by_field(
+            idx, records, target_pos, position, exclude
+        )
         effective: dict[str, str | list[str]] = {}
         base: dict[str, object] | None = None
         field_types: dict[str, str] | None = None
@@ -648,6 +651,26 @@ class LoreMutationsMixin(MarkerMixin):
             else:
                 effective[field] = live[-1].value
         return effective
+
+    def _live_records_by_field(
+        self,
+        idx: MutationsIndex,
+        records: list[MutationMarker],
+        target_pos: int,
+        position: int | None,
+        exclude: frozenset[str] | set[str],
+    ) -> dict[str, list[MutationMarker]]:
+        """Group the records live at the resolution point by field. `records`
+        is pre-sorted ascending, so each field's last entry is the latest
+        started (the replace winner)."""
+        live_by_field: dict[str, list[MutationMarker]] = {}
+        for marker in records:
+            if marker.marker_id in exclude:
+                continue
+            close = idx.closes_by_start.get(marker.marker_id)
+            if self._marker_is_live(marker, idx.scene_order, target_pos, position, close):
+                live_by_field.setdefault(marker.field, []).append(marker)
+        return live_by_field
 
     def _mutation_field_types(self) -> dict[str, str]:
         """field id -> type for mutation resolution: the schema's fields plus

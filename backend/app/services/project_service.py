@@ -32,6 +32,7 @@ from app.services.project.lore import LoreEntriesMixin
 from app.services.project.lore_mutations import LoreMutationsMixin
 from app.services.project.manuscript import ManuscriptMixin
 from app.services.project.metadata_values import MetadataValuesMixin
+from app.services.project.mutation_sets import MutationSetEntriesMixin
 from app.services.project.node_ops import NodeOpsMixin
 from app.services.project.project_node import ProjectNodeMixin
 from app.services.project.prompts import PromptEntriesMixin
@@ -42,7 +43,6 @@ from app.services.project.schema import MetadataSchemaMixin
 from app.services.project.search import SearchMixin
 from app.services.project.tags import TagsMixin
 from app.services.project.todos import TodosMixin
-from app.services.project.transformations import TransformationEntriesMixin
 
 
 class ProjectService(
@@ -66,7 +66,7 @@ class ProjectService(
     SearchMixin,
     TagsMixin,
     TodosMixin,
-    TransformationEntriesMixin,
+    MutationSetEntriesMixin,
 ):
     def __init__(self) -> None:
         self.root_path: Path | None = None

@@ -1,25 +1,25 @@
 <script lang="ts">
-  // Transformations pane (#62): the browse/curate home for reusable transformation
+  // Mutations pane (#62): the browse/curate home for reusable mutation
   // sets. A flat NodeList grouped by target entry-type; the editor dialog handles
   // create/edit. Sets are also created in-flow via the /mutate "save as reusable
   // set" checkbox — this pane is the full management surface.
   import NodeList from "@/components/widgets/NodeList.svelte";
   import NodeRow from "@/components/widgets/NodeRow.svelte";
   import CountPill from "@/components/widgets/CountPill.svelte";
-  import TransformationSetEditor from "@/components/editor/body/TransformationSetEditor.svelte";
+  import MutationSetEditor from "@/components/editor/body/MutationSetEditor.svelte";
   import { api } from "@/lib/api";
   import { metadataSchemaStore } from "@/lib/stores/schema";
   import {
-    refreshTransformationEntries,
-    setTransformationEntries,
-    transformationEntriesStore,
-  } from "@/lib/stores/transformations";
+    refreshMutationSetEntries,
+    setMutationSetEntries,
+    mutationSetEntriesStore,
+  } from "@/lib/stores/mutationSets";
   import type {
     LoreEntrySummary,
     PromptEntrySummary,
     ScopedTag,
     StructureDocument,
-    TransformationEntry,
+    MutationSetEntry,
   } from "@/lib/types";
 
   let {
@@ -38,9 +38,9 @@
 
   const schema = $derived($metadataSchemaStore);
 
-  const entries = $derived($transformationEntriesStore);
+  const entries = $derived($mutationSetEntriesStore);
   let editorOpen = $state(false);
-  let editing = $state<TransformationEntry | null>(null);
+  let editing = $state<MutationSetEntry | null>(null);
   let error = $state("");
 
   function typeLabel(id: string): string {
@@ -54,7 +54,7 @@
   async function openEdit(id: string) {
     error = "";
     try {
-      editing = await api.getTransformationEntry(id);
+      editing = await api.getMutationSetEntry(id);
       editorOpen = true;
     } catch (err) {
       editing = null;
@@ -64,19 +64,19 @@
   async function remove(id: string) {
     error = "";
     try {
-      setTransformationEntries((await api.deleteTransformationEntry(id)).entries);
+      setMutationSetEntries((await api.deleteMutationSetEntry(id)).entries);
     } catch (err) {
       error = `Could not delete the set: ${err instanceof Error ? err.message : err}`;
-      await refreshTransformationEntries().catch(() => {});
+      await refreshMutationSetEntries().catch(() => {});
     }
   }
   async function onSaved() {
     editorOpen = false;
-    await refreshTransformationEntries().catch(() => {});
+    await refreshMutationSetEntries().catch(() => {});
   }
 </script>
 
-<div class="transformations-pane">
+<div class="mutations-pane">
   <div class="tset-toolbar">
     <button type="button" class="pin-button" onclick={openNew}>+ New set</button>
   </div>
@@ -102,13 +102,13 @@
       </NodeRow>
     {/each}
     {#snippet whenEmpty()}
-      <p class="muted">No transformation sets yet. Create one here, or tick “Save as a reusable set” in /mutate.</p>
+      <p class="muted">No mutation sets yet. Create one here, or tick “Save as a reusable set” in /mutate.</p>
     {/snippet}
   </NodeList>
 </div>
 
 {#if editorOpen}
-  <TransformationSetEditor
+  <MutationSetEditor
     initial={editing}
     schema={schema}
     loreEntries={loreEntries}

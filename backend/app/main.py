@@ -38,12 +38,12 @@ from app.models import (
     CreateAssistantEntryRequest,
     CreateChatSessionRequest,
     CreateLoreEntryRequest,
+    CreateMutationSetEntryRequest,
     CreateProjectRequest,
     CreatePromptEntryRequest,
     CreateSceneRequest,
     CreateStructureNodeRequest,
     CreateTodoRequest,
-    CreateTransformationEntryRequest,
     DeleteMetadataEntryTypeRequest,
     DeleteMetadataFieldRequest,
     DeleteMetadataGroupRequest,
@@ -63,6 +63,8 @@ from app.models import (
     MoveMetadataFieldRequest,
     MoveStructureNodeRequest,
     MutationMarkerList,
+    MutationSetEntry,
+    MutationSetEntryList,
     OpenProjectRequest,
     PreviewCacheBlock,
     PreviewContentBlock,
@@ -85,11 +87,11 @@ from app.models import (
     SaveAssistantEntryRequest,
     SaveChatSessionRequest,
     SaveLoreEntryRequest,
+    SaveMutationSetEntryRequest,
     SaveProjectNodeRequest,
     SavePromptEntryRequest,
     SaveResearchNoteRequest,
     SaveSceneRequest,
-    SaveTransformationEntryRequest,
     Scene,
     SearchRequest,
     SearchResponse,
@@ -99,8 +101,6 @@ from app.models import (
     StructureNodeDeletePreview,
     TagsOverview,
     TodoDocument,
-    TransformationEntry,
-    TransformationEntryList,
     UpdateEmbeddedTodoRequest,
     UpdateMutationRequest,
     UpdateProjectSettingsRequest,
@@ -601,37 +601,37 @@ def delete_prompt_entry(entry_id: str) -> PromptEntryList:
         return service.delete_prompt_entry(entry_id)
 
 
-@app.get("/api/transformations", response_model=TransformationEntryList)
-def list_transformation_entries() -> TransformationEntryList:
-    """Reusable transformation sets (#62) — the Transformations pane list."""
+@app.get("/api/mutation-sets", response_model=MutationSetEntryList)
+def list_mutation_set_entries() -> MutationSetEntryList:
+    """Reusable mutation sets (#62) — the Mutations pane list."""
     with translate_errors():
-        return service.list_transformation_entries()
+        return service.list_mutation_set_entries()
 
 
-@app.post("/api/transformations", response_model=TransformationEntry)
-def create_transformation_entry(request: CreateTransformationEntryRequest) -> TransformationEntry:
+@app.post("/api/mutation-sets", response_model=MutationSetEntry)
+def create_mutation_set_entry(request: CreateMutationSetEntryRequest) -> MutationSetEntry:
     with translate_errors():
-        return service.create_transformation_entry(request)
+        return service.create_mutation_set_entry(request)
 
 
-@app.get("/api/transformations/{entry_id}", response_model=TransformationEntry)
-def get_transformation_entry(entry_id: str) -> TransformationEntry:
+@app.get("/api/mutation-sets/{entry_id}", response_model=MutationSetEntry)
+def get_mutation_set_entry(entry_id: str) -> MutationSetEntry:
     with translate_errors():
-        return service.read_transformation_entry(entry_id)
+        return service.read_mutation_set_entry(entry_id)
 
 
-@app.put("/api/transformations/{entry_id}", response_model=TransformationEntry)
-def save_transformation_entry(
-    entry_id: str, request: SaveTransformationEntryRequest
-) -> TransformationEntry:
+@app.put("/api/mutation-sets/{entry_id}", response_model=MutationSetEntry)
+def save_mutation_set_entry(
+    entry_id: str, request: SaveMutationSetEntryRequest
+) -> MutationSetEntry:
     with translate_errors():
-        return service.save_transformation_entry(entry_id, request)
+        return service.save_mutation_set_entry(entry_id, request)
 
 
-@app.delete("/api/transformations/{entry_id}", response_model=TransformationEntryList)
-def delete_transformation_entry(entry_id: str) -> TransformationEntryList:
+@app.delete("/api/mutation-sets/{entry_id}", response_model=MutationSetEntryList)
+def delete_mutation_set_entry(entry_id: str) -> MutationSetEntryList:
     with translate_errors():
-        return service.delete_transformation_entry(entry_id)
+        return service.delete_mutation_set_entry(entry_id)
 
 
 @app.get("/api/assistants", response_model=AssistantEntryList)

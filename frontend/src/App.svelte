@@ -9,7 +9,7 @@
   import Lore from "@/components/panes/Lore.svelte";
   import Assistants from "@/components/panes/Assistants.svelte";
   import Prompts from "@/components/panes/Prompts.svelte";
-  import Transformations from "@/components/panes/Transformations.svelte";
+  import Mutations from "@/components/panes/Mutations.svelte";
   import Chats from "@/components/panes/Chats.svelte";
   import Project from "@/components/panes/Project.svelte";
   import Search from "@/components/panes/Search.svelte";
@@ -127,7 +127,7 @@
   // only the instance ref so it can drive the three entry points.
   let schemaPanes: SchemaPanes | undefined = $state();
   let promptsPaneOpen = $state(false);
-  let transformationsPaneOpen = $state(false);
+  let mutationsPaneOpen = $state(false);
   let assistantsPaneOpen = $state(false);
   let chatsPaneOpen = $state(false);
   let error = $state("");
@@ -358,9 +358,9 @@
     focusPane("prompts");
   }
 
-  function openTransformationsPane() {
-    transformationsPaneOpen = true;
-    focusPane("transformations");
+  function openMutationsPane() {
+    mutationsPaneOpen = true;
+    focusPane("mutations");
   }
 
   function openAssistantsPane() {
@@ -552,7 +552,7 @@
         onSaveAISettings={() => aiSettings.save()}
         onHealthCheck={() => aiSettings.runHealthCheck()}
         onOpenPrompts={openPromptsPane}
-        onOpenTransformations={openTransformationsPane}
+        onOpenMutations={openMutationsPane}
         onRepair={repairProject}
       />
     </div>
@@ -628,12 +628,12 @@
     </div>
   </Pane>
 
-  <Pane id="transformations" title="Transformations" paneClass="prompts-pane" hidden={!isProjectOpen || !transformationsPaneOpen} style={paneStyle("transformations")} chrome={paneChrome}>
+  <Pane id="mutations" title="Mutations" paneClass="prompts-pane" hidden={!isProjectOpen || !mutationsPaneOpen} style={paneStyle("mutations")} chrome={paneChrome}>
     {#snippet actions()}
-      <button class="pin-button" type="button" onmousedown={(event) => event.stopPropagation()} onclick={() => (transformationsPaneOpen = false)}>Close</button>
+      <button class="pin-button" type="button" onmousedown={(event) => event.stopPropagation()} onclick={() => (mutationsPaneOpen = false)}>Close</button>
     {/snippet}
     <div class="pane-content schema-list">
-      <Transformations
+      <Mutations
         loreEntries={loreEntries}
         promptEntries={promptEntries}
         structure={structure}

@@ -61,6 +61,6 @@ split the scene at the rename, or record the rename at the very start/end of the
 ## Reusing a set of changes (v1.1)
 
 A recurring transformation (a werewolf's dusk change: appearance + abilities + name) can be saved as
-a **transformation set** and re-applied to any character in one step, instead of retyping it. See the
+a **mutation set** and re-applied to any character in one step, instead of retyping it. See the
 v1.1 notes; the short version: mark a change "reusable" when you author it, or manage sets in the
-Transformations list, then `/mutate` → pick a character → **apply a set**.
+Mutations list, then `/mutate` → pick a character → **apply a set**.

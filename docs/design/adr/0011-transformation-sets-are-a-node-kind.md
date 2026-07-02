@@ -1,8 +1,15 @@
 # ADR-0011: Transformation sets are a first-class Node kind
 
-- Status: Accepted (v1.1) — 0.4.0, 2026-07-01
+- Status: Accepted (v1.1) — 0.4.0, 2026-07-01 · **Amended 2026-07-02: renamed to "mutation set"**
 - Feature: #33 mid-scene lore mutations · Doc: `mid-scene-lore-mutations-v1.1.md` §5 · Issue: #62
 - Governed by: `memory/architecture_class_instance_model.md`, `docs/metadata-strategy.md`
+
+> **Naming amendment (2026-07-02).** The working term "transformation set" shipped and immediately
+> confused in use: every other surface says *mutation*, so a second word-family for the same feature
+> read as a different feature. Renamed everywhere — user-facing ("Mutations" pane, "mutation set"),
+> kind slug (`mutation_set`), folder (`mutation-sets/`), API (`/api/mutation-sets`), and code symbols
+> (`MutationSet*`). Pre-1.0, so no storage migration; existing `transformations/` folders are simply
+> recreated. The decision below is otherwise unchanged; original wording kept for the record.
 
 ## Decision
 A **transformation set** — a reusable, named bundle of field mutations re-applied to a chosen entity

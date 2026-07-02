@@ -1,6 +1,6 @@
-"""Transformation-set Node kind CRUD (#62). A reusable, body-less kind: an
+"""Mutation-set Node kind CRUD (#62). A reusable, body-less kind: an
 ordered list of (field, op, value) rows + a target lore entry-type, stored in
-front matter under `transformations/`. The entity is bound at apply time, so a
+front matter under `mutation-sets/`. The entity is bound at apply time, so a
 set is a template. Exercises the routes end-to-end.
 """
 
@@ -16,12 +16,12 @@ from app.main import app
 from app.main import service as svc
 
 
-class TransformationCrudTests(unittest.TestCase):
+class MutationSetCrudTests(unittest.TestCase):
     def setUp(self) -> None:
         self.temp_dir = TemporaryDirectory()
         self.root = Path(self.temp_dir.name) / "project"
         svc.__init__()
-        svc.create_project(self.root, "Transformation Tests")
+        svc.create_project(self.root, "Mutation Set Tests")
         self.client = TestClient(app)
 
     def tearDown(self) -> None:
@@ -29,7 +29,7 @@ class TransformationCrudTests(unittest.TestCase):
 
     def _create(self, title: str, target: str, rows: list[dict]) -> dict:
         res = self.client.post(
-            "/api/transformations",
+            "/api/mutation-sets",
             json={"title": title, "target_entry_type": target, "rows": rows},
         )
         self.assertEqual(res.status_code, 200, res.text)
@@ -44,18 +44,18 @@ class TransformationCrudTests(unittest.TestCase):
                 {"field": "clues", "op": "add", "value": "fur"},
             ],
         )
-        self.assertTrue(created["id"].startswith("transformation"))
+        self.assertTrue(created["id"].startswith("mutation_set"))
         self.assertEqual(created["target_entry_type"], "character")
         self.assertEqual([r["field"] for r in created["rows"]], ["title", "clues"])
         self.assertEqual(created["rows"][1]["op"], "add")
 
-        got = self.client.get(f"/api/transformations/{created['id']}")
+        got = self.client.get(f"/api/mutation-sets/{created['id']}")
         self.assertEqual(got.status_code, 200, got.text)
         self.assertEqual(got.json()["rows"], created["rows"])
 
-    def test_stored_body_less_under_transformations_folder(self) -> None:
+    def test_stored_body_less_under_mutation_sets_folder(self) -> None:
         created = self._create("Promotion", "character", [{"field": "rank", "value": "Captain"}])
-        files = list((self.root / "transformations").glob("*.md"))
+        files = list((self.root / "mutation-sets").glob("*.md"))
         self.assertEqual(len(files), 1)
         text = files[0].read_text(encoding="utf-8")
         # Rows + target live in front matter; there is no prose body.
@@ -66,7 +66,7 @@ class TransformationCrudTests(unittest.TestCase):
     def test_list_reports_row_count_and_target(self) -> None:
         self._create("Full Moon", "character", [{"field": "title", "value": "The Wolf"}])
         self._create("Relocate", "place", [{"field": "title", "value": "Ruins"}, {"field": "status", "value": "razed"}])
-        listing = self.client.get("/api/transformations").json()["entries"]
+        listing = self.client.get("/api/mutation-sets").json()["entries"]
         by_title = {e["title"]: e for e in listing}
         self.assertEqual(by_title["Full Moon"]["row_count"], 1)
         self.assertEqual(by_title["Relocate"]["row_count"], 2)
@@ -75,7 +75,7 @@ class TransformationCrudTests(unittest.TestCase):
     def test_save_updates_rows(self) -> None:
         created = self._create("Full Moon", "character", [{"field": "title", "value": "The Wolf"}])
         res = self.client.put(
-            f"/api/transformations/{created['id']}",
+            f"/api/mutation-sets/{created['id']}",
             json={
                 "title": "Full Moon",
                 "target_entry_type": "character",
@@ -91,17 +91,17 @@ class TransformationCrudTests(unittest.TestCase):
 
     def test_delete_removes_the_set(self) -> None:
         created = self._create("Full Moon", "character", [{"field": "title", "value": "The Wolf"}])
-        res = self.client.delete(f"/api/transformations/{created['id']}")
+        res = self.client.delete(f"/api/mutation-sets/{created['id']}")
         self.assertEqual(res.status_code, 200, res.text)
         self.assertEqual(res.json()["entries"], [])
-        self.assertEqual(self.client.get(f"/api/transformations/{created['id']}").status_code, 404)
+        self.assertEqual(self.client.get(f"/api/mutation-sets/{created['id']}").status_code, 404)
 
-    def test_transformation_node_is_indexed_by_kind(self) -> None:
+    def test_mutation_set_node_is_indexed_by_kind(self) -> None:
         created = self._create("Full Moon", "character", [{"field": "title", "value": "The Wolf"}])
         index = svc._build_node_index()
         entry = index.by_id.get(created["id"])
         self.assertIsNotNone(entry)
-        self.assertEqual(entry.kind, "transformation")
+        self.assertEqual(entry.kind, "mutation_set")
 
 
 if __name__ == "__main__":

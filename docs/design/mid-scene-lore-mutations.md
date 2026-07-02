@@ -333,7 +333,7 @@ is composition over shipped patterns — evidence the feature does not warrant a
   type-inference). Required for the feature to be complete; phased here only to keep v1.0 lean.
 - **Interval close** (end + close-by-identity, incl. out-of-order retraction) — werewolf
   revert, red-herring, scene/sequence-scoped sub-goals.
-- Roleplay **scene-picker** verification (§6); **reusable transformation sets** (a saved
+- Roleplay **scene-picker** verification (§6); **reusable mutation sets** (a saved
   plural-field bundle re-applied for recurring werewolf — DRY at authoring time over inline
   Model-A markers).
 

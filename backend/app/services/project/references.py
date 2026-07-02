@@ -57,10 +57,10 @@ class ReferencesMixin:
                 ("lore", "lore", "lore_note"),
                 ("prompt", "prompts", "prompt"),
                 ("assistant", "assistants", "assistant"),
-                # Reusable transformation sets (#62): body-less Node files under
-                # `transformations/`. Layered like lore/prompts (a werewolf
+                # Reusable mutation sets (#62): body-less Node files under
+                # `mutation-sets/`. Layered like lore/prompts (a werewolf
                 # transform can live at any project level).
-                ("transformation", "transformations", "transformation"),
+                ("mutation_set", "mutation-sets", "mutation_set"),
             ]:
                 # Scenes stay book-scoped — only walk the current project's scenes folder.
                 if kind == "scene" and not is_current_project:
@@ -249,14 +249,14 @@ class ReferencesMixin:
             "lore": "lore",
             "prompt": "prompts",
             "research": "research/notes",
-            "transformation": "transformations",
+            "mutation_set": "mutation-sets",
         }
         label_by_kind = {
             "scene": "Scene",
             "lore": "Lore Entry",
             "prompt": "Prompt",
             "research": "Research Note",
-            "transformation": "Transformation",
+            "mutation_set": "Mutation set",
         }
         fallback_folder = folder_by_kind.get(kind, "lore")
         fallback_path = root / fallback_folder / f"{node_id}.md"

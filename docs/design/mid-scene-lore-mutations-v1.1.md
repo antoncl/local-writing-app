@@ -20,7 +20,7 @@ the cases a replace-only spine can't express:
 | #59 | Interval **close** (out-of-order) | werewolf revert, red-herring retraction, scene-scoped sub-goals |
 | #60 | `scene_ref` resolution input on the roleplay prompt | interrogate the timeline ("your rank as of scene 5?"); supplies the chat/implicit resolution scene |
 | #61 | Effective-**name**-aware matcher | a renamed entity is auto-detected under its effective name at each scene |
-| #62 | Reusable **transformation sets** (new Node kind) | DRY authoring of a recurring multi-field transform (werewolf) |
+| #62 | Reusable **mutation sets** (new Node kind) | DRY authoring of a recurring multi-field transform (werewolf) |
 
 All five stay within the Model-A / independent-interval / resolver-mediated architecture — they are
 **additive grammar + one new Node kind**, no storage-format migration (pre-1.0 rule holds).
@@ -176,9 +176,9 @@ touchpoints, both part of shipping #61:
    uses one name for the whole scene") linking to that guide section. A rename is exactly when a
    writer should be reminded, so the reminder rides the authoring surface.
 
-## 5. Reusable transformation sets (#62) — a new Node kind
+## 5. Reusable mutation sets (#62) — a new Node kind
 
-A **transformation set** is a saved, reusable bundle of field mutations (the recurring werewolf
+A **mutation set** is a saved, reusable bundle of field mutations (the recurring werewolf
 transform: appearance + abilities + name), applied to a chosen entity in one gesture. It **expands to
 ordinary inline Model-A markers** — no new storage for the markers, no "linked mutation"
 (single-point-edit of a live state stays out of scope, v0.4.0 §8).
@@ -186,14 +186,16 @@ ordinary inline Model-A markers** — no new storage for the markers, no "linked
 ### 5.1 Why a Node kind and not a sub-type (ADR-0011)
 Checked against `architecture_class_instance_model` (the snippet lesson): a new `kind` is warranted
 only when **storage shape genuinely differs** *and* a **new routing surface** is needed — otherwise
-write a sub-type. A transformation set:
+write a sub-type. A mutation set:
 - has a genuinely different storage shape — an **ordered list of `(field, op, value)` rows** plus a
   target entry-type; no prose body, no reference graph like lore/scene;
 - maps onto **no existing kind** (it's not an AI invocation → not `prompt`; not a world fact → not
   `lore`);
 - needs a **new routing surface** — its own list pane + editor.
 
-So it clears the bar as a first-class kind: **`kind: transformation`** (working slug). Sub-classing
+So it clears the bar as a first-class kind: **`kind: mutation_set`** (shipped slug; the design's
+working slug `transformation` was renamed post-implementation for vocabulary consistency —
+user-facing everything says "mutation"). Sub-classing
 via `entry_type` stays available (e.g. a "shapeshift" vs "promotion" family) but isn't required.
 **Implementation gate:** before adding the slug to the whitelist in
 `_validate_metadata_schema_definition`, re-read `docs/metadata-strategy.md` § Class–instance model
@@ -208,24 +210,24 @@ via `entry_type` stays available (e.g. a "shapeshift" vs "promotion" family) but
   to Remus, or to a new werewolf, unchanged.
 
 ### 5.3 Authoring, discovery & application
-**Two ways to create a set — both just produce a `transformation` node:**
+**Two ways to create a set — both just produce a `mutation_set` node:**
 - **In-flow capture (the "reusable?" checkbox).** In the `/mutate` form, once the field-change(s) for
   an entity are composed, a **"Save as reusable set"** checkbox + a name. On insert it (a) drops the
-  concrete markers for *this* entity as usual **and** (b) saves a `transformation` node holding the
+  concrete markers for *this* entity as usual **and** (b) saves a `mutation_set` node holding the
   `(field, op, value)` rows + the entity's **entry-type** — the specific entity is dropped, so it
   becomes a template. Author-once, promote-in-place.
-- **The Transformations pane.** Because sets are a Node kind, they get their own list pane (like
+- **The Mutations pane.** Because sets are a Node kind, they get their own list pane (like
   Lore / Prompts) — the browse/curate/rename/delete home. NodeList + NodeEditor; rows reuse
   `FieldValueEditor`.
 
 **Discovery — the picker is type-scoped.** At apply time only sets whose **target entry-type matches
 the chosen entity's type** are offered (mutate a *character* → see "Full Moon", "Promotion"; never a
 *location* set). This is the answer to "how does the user know which sets apply" — the list is always
-relevant, not an undifferentiated pile. The Transformations pane is the full browse surface.
+relevant, not an undifferentiated pile. The Mutations pane is the full browse surface.
 
 **Application.** In `/mutate`, after picking the entity, choose a mode — **"Set fields manually"** or
 **"Apply a saved set."** The latter shows the type-scoped picker (existing `NodePicker` constrained to
-`kind: transformation`, filtered by the entity's entry-type). Picking one **expands the set into N
+`kind: mutation_set`, filtered by the entity's entry-type). Picking one **expands the set into N
 independent inline markers** at the cursor as a **co-authored group whose shared name + `group=`
 default to the set's title** (§6) — so an applied "Full Moon" is later closeable in one gesture as
 "«Full Moon»" (§2.4). After expansion they are ordinary markers — individually editable/closeable;
@@ -237,7 +239,7 @@ the set is a **stamp, not a live link**.
 - **The lore-card mutation list** → **read-only / navigate**: click a row to jump to the marker in
   its scene, then edit via the pill. (The list is not itself an editor — editing lives in the prose,
   ADR-0006.)
-- **The Transformations pane** (the `transformation` node's own editor) → edits the **template**;
+- **The Mutations pane** (the `mutation_set` node's own editor) → edits the **template**;
   changes affect **future** applications only.
 
 Editing an applied occurrence never flows back to the template, and template edits never touch past
@@ -257,7 +259,7 @@ naming is never required.
 
 **Granularity — the name is a label, shared across a co-authored group, NOT a lifetime frame.**
 A single mutation's name labels its own marker. A co-authored set (a plural `/mutate`, or an applied
-transformation set §5) **shares one name** across its members via a `group=<id>` tie, so the set is a
+mutation set §5) **shares one name** across its members via a `group=<id>` tie, so the set is a
 single nameable, close-together unit. This is v1.0 §5.2's "soft group label" made user-editable and
 first-class — and it stays a **label + create/close-together convenience only**: each record's
 interval is still independent (ADR-0002). Naming a group is **not** a stack or a frame; the werewolf
@@ -265,7 +267,7 @@ who learns a clue mid-transform still keeps the clue after the transform's recor
 
 **Where it surfaces:**
 - **Authoring (`/mutate`):** an optional "name this change" field; one name per plural set. A
-  transformation set (§5) defaults the group name to the set's title.
+  mutation set (§5) defaults the group name to the set's title.
 - **Close (`/mutate close`, §2.4):** the live-record picker lists **by name** ("close «Full Moon»")
   instead of raw ids / auto-labels — the biggest payoff.
 - **Display:** the pill detail box (v1.0 §5.1), the scrubber stop tooltips, and the timeline list
@@ -301,7 +303,7 @@ visual language. Not designed here; opened as its own pass.
   `dict[str, str | list[str]]` (datatype matches the field).
 - **0010** — Interval **close** is a separate close-marker referencing a start id; live iff
   `start ≤ pos < close`; revert is recomputed, not stored.
-- **0011** — **Transformation sets are a first-class Node kind** (`transformation`) — distinct
+- **0011** — **Mutation sets are a first-class Node kind** (`mutation_set`) — distinct
   storage shape + routing surface; expands to inline markers, not a linked mutation.
 - **0012** — Resolution scene is an explicit **`scene_ref`** prompt input (single-select, not
   `context_pick`), defaulting to the current scene.

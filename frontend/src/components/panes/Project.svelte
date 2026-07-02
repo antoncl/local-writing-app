@@ -25,7 +25,7 @@
   export let onSaveAISettings: () => void;
   export let onHealthCheck: () => void;
   export let onOpenPrompts: () => void;
-  export let onOpenTransformations: () => void;
+  export let onOpenMutations: () => void;
   export let onRepair: () => void;
 </script>
 
@@ -108,7 +108,7 @@
     </div>
     <div class="button-row">
       <button type="button" on:click={onOpenPrompts}>Prompts…</button>
-      <button type="button" on:click={onOpenTransformations}>Transformations…</button>
+      <button type="button" on:click={onOpenMutations}>Mutations…</button>
     </div>
     {#if aiHealthResult}
       <p class="ai-health-result" class:ok={aiHealthResult.ok} class:fail={!aiHealthResult.ok}>

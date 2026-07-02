@@ -47,9 +47,9 @@ import type {
   SaveProjectNodeRequest,
   PromptEntry,
   PromptEntryList,
-  TransformationEntry,
-  TransformationEntryList,
-  TransformationRow,
+  MutationSetEntry,
+  MutationSetEntryList,
+  MutationSetRow,
   ReferenceCandidatesResponse,
   ReferenceResolveResponse,
   ResearchNote,
@@ -590,25 +590,25 @@ export const api = {
       method: "DELETE",
     });
   },
-  // Reusable transformation sets (#62).
-  listTransformationEntries() {
-    return request<TransformationEntryList>("/transformations");
+  // Reusable mutation sets (#62).
+  listMutationSetEntries() {
+    return request<MutationSetEntryList>("/mutation-sets");
   },
-  createTransformationEntry(payload: {
+  createMutationSetEntry(payload: {
     title: string;
     target_entry_type: string;
-    rows: TransformationRow[];
+    rows: MutationSetRow[];
   }) {
-    return request<TransformationEntry>("/transformations", {
+    return request<MutationSetEntry>("/mutation-sets", {
       method: "POST",
-      body: JSON.stringify({ ...payload, entry_type: "transformation" }),
+      body: JSON.stringify({ ...payload, entry_type: "mutation_set" }),
     });
   },
-  getTransformationEntry(entryId: string) {
-    return request<TransformationEntry>(`/transformations/${entryId}`);
+  getMutationSetEntry(entryId: string) {
+    return request<MutationSetEntry>(`/mutation-sets/${entryId}`);
   },
-  saveTransformationEntry(entry: TransformationEntry) {
-    return request<TransformationEntry>(`/transformations/${entry.id}`, {
+  saveMutationSetEntry(entry: MutationSetEntry) {
+    return request<MutationSetEntry>(`/mutation-sets/${entry.id}`, {
       method: "PUT",
       body: JSON.stringify({
         title: entry.title,
@@ -619,8 +619,8 @@ export const api = {
       }),
     });
   },
-  deleteTransformationEntry(entryId: string) {
-    return request<TransformationEntryList>(`/transformations/${entryId}`, {
+  deleteMutationSetEntry(entryId: string) {
+    return request<MutationSetEntryList>(`/mutation-sets/${entryId}`, {
       method: "DELETE",
     });
   },

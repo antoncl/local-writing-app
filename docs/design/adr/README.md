@@ -20,7 +20,7 @@ Design docs: [`../mid-scene-lore-mutations.md`](../mid-scene-lore-mutations.md) 
 ### v1.1
 - [0009](0009-collection-add-remove-and-list-contract.md) — Collection add/remove ops; `effective_state` returns typed lists (#58)
 - [0010](0010-interval-close-marker.md) — Interval close is a separate close-marker (#59)
-- [0011](0011-transformation-sets-are-a-node-kind.md) — Transformation sets are a first-class Node kind (#62)
+- [0011](0011-transformation-sets-are-a-node-kind.md) — Mutation sets are a first-class Node kind (#62; **amended** — renamed from "transformation set")
 - [0012](0012-scene-ref-resolution-input.md) — Resolution scene is a `scene_ref` prompt input (#60)
 - [0015](0015-user-nameable-mutations.md) — Mutations carry an optional user name — a label, not a frame (#65)
 

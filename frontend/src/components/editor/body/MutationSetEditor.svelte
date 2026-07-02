@@ -1,5 +1,5 @@
 <script lang="ts">
-  // Create/edit dialog for a reusable transformation set (#62). A set targets a
+  // Create/edit dialog for a reusable mutation set (#62). A set targets a
   // lore entry-type; each row is (field, op, value) scoped to that type's fields
   // (reusing the /mutate field-picker + FieldValueEditor — the inputs-uniformity
   // principle). The entity is bound only at apply time, so the set is a template.
@@ -14,7 +14,7 @@
     PromptEntrySummary,
     ScopedTag,
     StructureDocument,
-    TransformationEntry,
+    MutationSetEntry,
   } from "@/lib/types";
 
   let {
@@ -28,7 +28,7 @@
     onSaved,
     onCancel,
   }: {
-    initial?: TransformationEntry | null;
+    initial?: MutationSetEntry | null;
     schema: MetadataSchema | null;
     loreEntries?: LoreEntrySummary[];
     promptEntries?: PromptEntrySummary[];
@@ -118,14 +118,14 @@
     const payloadRows = rows.map((r) => ({ field: r.field, op: r.op, value: toMarkerString(r.value) }));
     try {
       if (initial) {
-        await api.saveTransformationEntry({
+        await api.saveMutationSetEntry({
           ...initial,
           title: title.trim(),
           target_entry_type: targetType,
           rows: payloadRows,
         });
       } else {
-        await api.createTransformationEntry({
+        await api.createMutationSetEntry({
           title: title.trim(),
           target_entry_type: targetType,
           rows: payloadRows,
@@ -149,9 +149,9 @@
 
 <div class="tset-overlay" role="presentation" onclick={onCancel}>
   <!-- svelte-ignore a11y_click_events_have_key_events, a11y_no_static_element_interactions -->
-  <div class="tset-card" role="dialog" aria-label="Edit transformation set" tabindex="-1" onclick={(e) => e.stopPropagation()}>
+  <div class="tset-card" role="dialog" aria-label="Edit mutation set" tabindex="-1" onclick={(e) => e.stopPropagation()}>
     <header class="tset-head">
-      <h3>{initial ? "Edit set" : "New transformation set"}</h3>
+      <h3>{initial ? "Edit set" : "New mutation set"}</h3>
       <p>A reusable bundle of field changes, applied to any matching entity in one gesture.</p>
     </header>
 

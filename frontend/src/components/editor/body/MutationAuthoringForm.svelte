@@ -23,7 +23,7 @@
   import { api } from "@/lib/api";
   import { createMutationId } from "@/lib/editor-core/mutationNodes";
   import type {
-    TransformationEntrySummary,
+    MutationSetEntrySummary,
     LoreEntrySummary,
     MetadataFieldDefinition,
     MetadataSchema,
@@ -88,13 +88,13 @@
 
   const entity = $derived(loreEntries.find((e) => e.id === entityId) ?? null);
 
-  // #62 in-flow: apply a saved transformation set, or capture the composed change
+  // #62 in-flow: apply a saved mutation set, or capture the composed change
   // as a new reusable set. Both only in create mode. §6: an optional name labels
   // the change (shared across the co-authored group).
   let mode = $state<"manual" | "apply">("manual");
   let changeName = $state("");
   let saveAsSet = $state(false);
-  let allSets = $state<TransformationEntrySummary[]>([]);
+  let allSets = $state<MutationSetEntrySummary[]>([]);
   // Type-scoped picker: only sets whose target matches the picked entity's type.
   const applicableSets = $derived(
     entity ? allSets.filter((s) => s.target_entry_type === entity.entry_type) : [],
@@ -104,7 +104,7 @@
     if (editing) return;
     let cancelled = false;
     api
-      .listTransformationEntries()
+      .listMutationSetEntries()
       .then((res) => {
         if (!cancelled) allSets = res.entries;
       })
@@ -120,7 +120,7 @@
     if (!entity) return;
     let full;
     try {
-      full = await api.getTransformationEntry(setId);
+      full = await api.getMutationSetEntry(setId);
     } catch {
       return;
     }
@@ -267,7 +267,7 @@
       // entity is dropped (rows + target entry-type only), so it's a template.
       if (saveAsSet) {
         void api
-          .createTransformationEntry({
+          .createMutationSetEntry({
             title: named || "Untitled set",
             target_entry_type: entity.entry_type,
             rows,

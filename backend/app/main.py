@@ -1133,6 +1133,7 @@ async def ai_preview(request: AIPreviewRequest) -> AIPreviewResponse:
                 text_after=request.text_after,
                 selection=request.selection,
                 commit=request.commit,
+                resolution_scene_id=request.resolution_scene_id,
             )
         except PreviewError as exc:
             return AIPreviewResponse(
@@ -1458,6 +1459,7 @@ async def ai_generate(request: AIGenerateRequest) -> AIGenerateResponse:
                 text_after=request.text_after,
                 selection=request.selection,
                 commit=request.commit,
+                resolution_scene_id=request.resolution_scene_id,
             )
         except PreviewError as exc:
             raise HTTPException(
@@ -1704,6 +1706,7 @@ async def ai_generate_stream(request: AIGenerateRequest) -> StreamingResponse:
                 text_after=request.text_after,
                 selection=request.selection,
                 commit=request.commit,
+                resolution_scene_id=request.resolution_scene_id,
             )
         except PreviewError as exc:
             raise HTTPException(

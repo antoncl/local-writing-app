@@ -10,6 +10,7 @@
 // row's id); ≥2 rows serialize to the multi-line carrier comment with a
 // distinct head id.
 import type { Editor } from "@tiptap/core";
+import type { Transaction } from "@tiptap/pm/state";
 
 /** One field change inside a mutation unit. `id` is the row's marker id —
  *  independently addressable by `close;ref=` (ADR-0002 lifetimes hold). */
@@ -73,8 +74,34 @@ export function findMutationNodePos(editor: Editor, markerId: string): number | 
 // one-row unit's markerId IS its row's id; a multi-row unit's head id is its
 // own claimed id, distinct from every row. Returns whether the doc changed;
 // the caller guards re-entrancy.
+/** True when a transaction inserts any `mutation`/`mutationClose` node — the only
+ *  way a duplicate id can enter the doc (paste, drop, redo, programmatic insert).
+ *  Pills are atomic and dialog/paste-only: plain typing produces text steps and
+ *  never trips this, so the per-keystroke path can skip the full-document
+ *  `dedupeMutationIds` walk. Cost is O(inserted slice), not O(doc). */
+export function transactionInsertsMutation(transaction: Transaction): boolean {
+  return transaction.steps.some((step) => {
+    const slice = (step as { slice?: { content: { descendants: (f: (node: { type: { name: string } }) => boolean | void) => void } } }).slice;
+    if (!slice) return false;
+    let found = false;
+    slice.content.descendants((node) => {
+      if (node.type.name === "mutation" || node.type.name === "mutationClose") {
+        found = true;
+        return false;
+      }
+      return !found;
+    });
+    return found;
+  });
+}
+
 export function dedupeMutationIds(editor: Editor): boolean {
   const seen = new Set<string>();
+  // Old→new for every start id we reassign, so a `close;ref=` pill pasted with
+  // its start (whose ids just got remapped) is re-pointed at the fresh id
+  // instead of orphaning to the original. A close sits after its start in doc
+  // order, so the remap is recorded by the time we reach the close.
+  const remap = new Map<string, string>();
   let transaction = editor.state.tr;
   let changed = false;
   const claim = (id: string): string | null => {
@@ -88,9 +115,21 @@ export function dedupeMutationIds(editor: Editor): boolean {
   };
   editor.state.doc.descendants((node, pos) => {
     if (node.type.name === "mutationClose") {
+      const attrs = { ...node.attrs };
+      let touched = false;
       const fresh = claim(String(node.attrs.markerId ?? ""));
       if (fresh) {
-        transaction = transaction.setNodeMarkup(pos, undefined, { ...node.attrs, markerId: fresh });
+        attrs.markerId = fresh;
+        touched = true;
+      }
+      const ref = String(node.attrs.ref ?? "");
+      const remappedRef = remap.get(ref);
+      if (remappedRef && remappedRef !== ref) {
+        attrs.ref = remappedRef;
+        touched = true;
+      }
+      if (touched) {
+        transaction = transaction.setNodeMarkup(pos, undefined, attrs);
         changed = true;
       }
       return true;
@@ -102,11 +141,13 @@ export function dedupeMutationIds(editor: Editor): boolean {
       const fresh = claim(row.id);
       if (!fresh) return row;
       touched = true;
+      if (row.id) remap.set(row.id, fresh);
       return { ...row, id: fresh };
     });
     let markerId = String(node.attrs.markerId ?? "");
     if (nextRows.length === 1) {
-      // Degenerate form: the unit id mirrors the sole row's id.
+      // Degenerate form: the unit id mirrors the sole row's id (its remap, if
+      // any, was already recorded against the row id above).
       if (markerId !== nextRows[0].id) {
         markerId = nextRows[0].id;
         touched = true;
@@ -114,6 +155,7 @@ export function dedupeMutationIds(editor: Editor): boolean {
     } else {
       const fresh = claim(markerId);
       if (fresh) {
+        if (markerId) remap.set(markerId, fresh);
         markerId = fresh;
         touched = true;
       }

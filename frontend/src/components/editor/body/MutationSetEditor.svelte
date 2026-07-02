@@ -8,6 +8,8 @@
   import MutationDialogShell from "@/components/editor/body/MutationDialogShell.svelte";
   import MutationFieldRows, {
     buildFieldOptions,
+    defaultOpForField,
+    toMarkerString,
     type MutationRow,
   } from "@/components/editor/body/MutationFieldRows.svelte";
   import { api } from "@/lib/api";
@@ -59,19 +61,14 @@
   const fieldOptions = $derived(buildFieldOptions(schema, targetType));
 
   function addRow() {
-    rows = [...rows, { field: fieldOptions[0]?.id ?? "title", op: "replace", value: "" }];
+    const field = fieldOptions[0]?.id ?? "title";
+    rows = [...rows, { field, op: defaultOpForField(field, schema), value: "" }];
   }
   function removeRow(index: number) {
     rows = rows.filter((_, i) => i !== index);
   }
   function setRow(index: number, patch: Partial<MutationRow>) {
     rows = rows.map((r, i) => (i === index ? { ...r, ...patch } : r));
-  }
-
-  function toMarkerString(value: MetadataValue): string {
-    if (value === null || value === undefined) return "";
-    if (typeof value === "boolean") return value ? "true" : "false";
-    return String(value);
   }
 
   const canSave = $derived(title.trim().length > 0 && targetType.length > 0 && rows.length > 0);

@@ -140,6 +140,16 @@ def _as_str_list(value: object) -> list[str]:
     return []
 
 
+def _last_replace_index(live: list[MutationMarker]) -> int:
+    """Index of the latest `replace` in a manuscript-ordered live-record list, or
+    -1 if none. A replace resets the base and moots every earlier add/remove, so
+    resolution only applies the records after this index."""
+    for i in range(len(live) - 1, -1, -1):
+        if live[i].op == "replace":
+            return i
+    return -1
+
+
 def _render_mutation_marker(
     entity: str, field: str, op: str, value: str, name: str, group: str, marker_id: str
 ) -> str:
@@ -542,12 +552,23 @@ class LoreMutationsMixin(MarkerMixin):
             entries = self.list_lore_entries().entries
         except ProjectServiceError:
             return {}
+        # The schema is identical across every entry — read it once and thread it
+        # in, rather than re-parsing it inside each per-entry effective_state.
+        field_types = self._mutation_field_types()
         for summary in entries:
             entity_id = getattr(summary, "id", "")
             if not entity_id:
                 continue
-            overrides = self.effective_state(entity_id, scene_id, index=index)
-            title = str(overrides.get("title") or getattr(summary, "title", "") or "").strip()
+            overrides = self.effective_state(
+                entity_id, scene_id, index=index, field_types=field_types
+            )
+            # A live title mutation wins even when it blanks the name (an
+            # intentional rename to empty); only fall back to the base title
+            # when no title mutation is in play (`or` would swallow "").
+            if "title" in overrides:
+                title = str(overrides["title"] or "").strip()
+            else:
+                title = str(getattr(summary, "title", "") or "").strip()
             metadata = getattr(summary, "metadata", {}) or {}
             if "aliases" in overrides:
                 aliases = _as_str_list(overrides["aliases"])
@@ -593,6 +614,7 @@ class LoreMutationsMixin(MarkerMixin):
         position: int | None = END_OF_SCENE,
         index: MutationsIndex | None = None,
         exclude: frozenset[str] | set[str] = frozenset(),
+        field_types: dict[str, str] | None = None,
     ) -> dict[str, str | list[str]]:
         """Effective mutation overrides for `entity_id` as of (scene, position).
 
@@ -617,7 +639,11 @@ class LoreMutationsMixin(MarkerMixin):
 
         `exclude` skips the given record ids entirely — the list-edit authoring
         baseline (ADR-0017): re-editing a unit diffs against the effective value
-        WITHOUT the unit's own rows, so the diff cannot count itself."""
+        WITHOUT the unit's own rows, so the diff cannot count itself.
+
+        `field_types` (field id -> type) may be passed to resolve many entries
+        without re-reading the schema per call (see `effective_names`); when
+        omitted it is read lazily, once, on the first add/remove op."""
         idx = index or self.build_mutations_index()
         records = idx.by_entity.get(entity_id)
         if not records:
@@ -631,7 +657,6 @@ class LoreMutationsMixin(MarkerMixin):
         )
         effective: dict[str, str | list[str]] = {}
         base: dict[str, object] | None = None
-        field_types: dict[str, str] | None = None
         for field, live in live_by_field.items():
             if any(m.op in {"add", "remove"} for m in live):
                 # add/remove needs the entry's base value and the field's type
@@ -705,16 +730,19 @@ class LoreMutationsMixin(MarkerMixin):
     ) -> list[str]:
         """Resolve one collection field: `(base ∪ live adds) ∖ live removes`,
         remove-wins, set-deduped, order-stable (base order, then adds in start
-        order). A live whole-`replace` resets the base to its own value first."""
-        replaces = [m for m in live if m.op == "replace"]
-        if replaces:
-            base_list = _split_collection_value(replaces[-1].value)
+        order). A live whole-`replace` resets the base to its own value first —
+        and supersedes any earlier add/remove: `live` is in manuscript order, so
+        only adds/removes authored AFTER the latest replace still apply."""
+        cut = _last_replace_index(live)
+        if cut >= 0:
+            base_list = _split_collection_value(live[cut].value)
         else:
             base_list = _as_str_list(base.get(field))
-        removes = {m.value for m in live if m.op == "remove"}
+        tail = live[cut + 1 :]
+        removes = {m.value for m in tail if m.op == "remove"}
         result: list[str] = []
         seen: set[str] = set()
-        for item in [*base_list, *(m.value for m in live if m.op == "add")]:
+        for item in [*base_list, *(m.value for m in tail if m.op == "add")]:
             if item and item not in seen:
                 seen.add(item)
                 result.append(item)
@@ -727,10 +755,11 @@ class LoreMutationsMixin(MarkerMixin):
         """Resolve one text field with live appends: base text (or the latest
         live whole-`replace`, which resets it — same rule as collections) plus
         live adds in start order. Fragments join with a space for `text`, a
-        paragraph break for `long_text`. Empty fragments drop out."""
-        replaces = [m for m in live if m.op == "replace"]
-        base_text = replaces[-1].value if replaces else str(base.get(field) or "")
-        adds = [m.value for m in live if m.op == "add"]
+        paragraph break for `long_text`. Empty fragments drop out. Only appends
+        authored AFTER the latest replace survive it (`live` is manuscript-ordered)."""
+        cut = _last_replace_index(live)
+        base_text = live[cut].value if cut >= 0 else str(base.get(field) or "")
+        adds = [m.value for m in live[cut + 1 :] if m.op == "add"]
         separator = "\n\n" if field_type == "long_text" else " "
         # Stored bodies end in a newline; trim fragment edges so the separator
         # alone spaces the joints (inner newlines are preserved).

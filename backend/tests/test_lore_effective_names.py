@@ -14,7 +14,7 @@ from fastapi.testclient import TestClient
 
 from app.main import app
 from app.main import service as svc
-from app.models import CreateLoreEntryRequest
+from app.models import CreateLoreEntryRequest, SaveLoreEntryRequest
 from app.services.ai.helpers import _alias_match
 
 
@@ -58,6 +58,23 @@ class EffectiveNamesTests(unittest.TestCase):
         res = self.client.get(f"/api/scenes/{self.s2}/effective-names")
         self.assertEqual(res.status_code, 200, res.text)
         self.assertEqual(res.json(), {self.remus: ["The Wolf"]})
+
+    def test_rename_to_empty_title_does_not_resurface_base_name(self) -> None:
+        # Blanking the title is an intentional rename; the base "Remus" must NOT
+        # come back via an `or` fallback (#4). An alias keeps the entry in the
+        # name-set so we can assert the old title is gone, not just the entry.
+        svc.save_lore_entry(
+            self.remus,
+            SaveLoreEntryRequest(
+                title="Remus", body="", entry_type="character",
+                metadata={"aliases": ["Grey"]},
+            ),
+        )
+        scene = self._new_scene(
+            "Blank",
+            f"<!-- mutate:entity={self.remus};field=title;value=;id=b1 -->",
+        )
+        self.assertEqual(svc.effective_names(scene), {self.remus: ["Grey"]})
 
     # --- matcher uses effective names -------------------------------------
 

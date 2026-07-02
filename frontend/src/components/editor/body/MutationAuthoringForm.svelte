@@ -14,6 +14,7 @@
     isCollectionType,
     isTextAppendType,
     fieldDefFor,
+    toMarkerString,
     type FieldOption,
     type MutationRow,
   } from "@/components/editor/body/MutationFieldRows.svelte";
@@ -234,12 +235,6 @@
     if (value === null || value === undefined || value === "") return false;
     if (Array.isArray(value)) return value.length > 0;
     return true;
-  }
-
-  function toMarkerString(value: MetadataValue): string {
-    if (value === null || value === undefined) return "";
-    if (typeof value === "boolean") return value ? "true" : "false";
-    return String(value);
   }
 
   // A list-edit row contributes when its membership diff is non-empty (an

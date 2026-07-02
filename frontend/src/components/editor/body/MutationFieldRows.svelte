@@ -37,6 +37,22 @@
 
   export type FieldOption = { id: string; label: string; def: MetadataFieldDefinition };
 
+  // Serialize one row value to a marker string (shared by both mutation
+  // dialogs). Collections are never passed here as a whole array — they author
+  // as single-element add/remove rows — so a bare String() is comma-safe.
+  export function toMarkerString(value: MetadataValue): string {
+    if (value === null || value === undefined) return "";
+    if (typeof value === "boolean") return value ? "true" : "false";
+    return String(value);
+  }
+
+  // The default op for a freshly (re)targeted row: collections author as
+  // add/remove (ADR-0017, no whole-list replace in the UI), everything else
+  // starts at replace.
+  export function defaultOpForField(fieldId: string, schema: MetadataSchema | null): string {
+    return isCollectionType(fieldDefFor(fieldId, schema).type) ? "add" : "replace";
+  }
+
   // The mutable fields for an entry type: intrinsic title/body + its resolved
   // schema fields, minus computed (derived).
   export function buildFieldOptions(schema: MetadataSchema | null, entryType: string): FieldOption[] {
@@ -148,7 +164,12 @@
             class="mrow-field"
             aria-label="Field"
             value={row.field}
-            onchange={(e) => onRowChange(i, { field: e.currentTarget.value, op: "replace", value: "" })}
+            onchange={(e) =>
+              onRowChange(i, {
+                field: e.currentTarget.value,
+                op: defaultOpForField(e.currentTarget.value, schema),
+                value: "",
+              })}
           >
             {#each fieldOptions as f (f.id)}
               <option value={f.id}>{f.label}</option>
@@ -162,13 +183,17 @@
                list; the diff emits the add/remove records (chips below). The
                selector remains only where no baseline exists (set editor). -->
           {#if row.baseline === undefined}
+            <!-- Collections author as add/remove single-element rows (ADR-0017);
+                 no whole-list "replace" in the UI — it packs multiple elements
+                 into one comma-joined value that can't round-trip a member
+                 containing a comma. Hand-authored replace markers must
+                 url-encode internal commas (docs/mutations.md). -->
             <select
               class="mrow-op"
               aria-label="{labelFor(row.field)} operation"
               value={row.op}
               onchange={(e) => onRowChange(i, { op: e.currentTarget.value, value: "" })}
             >
-              <option value="replace">Replace all</option>
               <option value="add">Add item</option>
               <option value="remove">Remove item</option>
             </select>

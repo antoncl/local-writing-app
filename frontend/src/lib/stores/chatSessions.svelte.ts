@@ -13,6 +13,7 @@
 import { get } from "svelte/store";
 import { api } from "@/lib/api";
 import { editorPanes } from "@/lib/stores/editorPanes.svelte";
+import { resolutionSceneIdFromInputs } from "@/lib/editor-core/promptResolution";
 import {
   chatSessionsStore,
   refreshChatSessions,
@@ -56,11 +57,16 @@ class ChatSessions {
     assistantId: string = "",
   ): Promise<void> {
     await this.run(async () => {
+      // A `scene_ref` input (ADR-0012) sets the chat's resolution scene,
+      // overriding the originating scene; it then drives per-turn journal
+      // resolution (backend reads chat.target_scene_id) and the first-send
+      // render alike.
+      const resolutionScene = resolutionSceneIdFromInputs(entry, inputs) || (sceneId ?? "");
       const session = await api.createChatSession({
         prompt_entry_id: entry.id,
         assistant_id: assistantId,
         title: entry.title,
-        target_scene_id: sceneId ?? "",
+        target_scene_id: resolutionScene,
       });
       if (Object.keys(inputs).length > 0) {
         // Persist resolved inputs via the unified node path so ChatBodyView
@@ -71,7 +77,7 @@ class ChatSessions {
           prompt_entry_id: session.prompt_entry_id,
           assistant_id: session.assistant_id,
           system_prompt: session.system_prompt,
-          target_scene_id: session.target_scene_id ?? "",
+          target_scene_id: session.target_scene_id ?? resolutionScene,
           pinned: session.pinned,
           context_items: [],
           messages: [],

@@ -23,7 +23,7 @@
   import { onMount } from "svelte";
   import { Editor } from "@tiptap/core";
   import { Fragment, type Node as ProseMirrorNode } from "@tiptap/pm/model";
-  import { TextSelection } from "@tiptap/pm/state";
+  import { TextSelection, type Transaction } from "@tiptap/pm/state";
   import type { EditorView } from "@tiptap/pm/view";
   import StarterKit from "@tiptap/starter-kit";
   import Table from "@tiptap/extension-table";
@@ -44,6 +44,7 @@
   import {
     closeLabelFromDoc,
     dedupeMutationIds,
+    transactionInsertsMutation,
     unitRows,
   } from "@/lib/editor-core/mutationNodes";
   import MutationDialogs from "./MutationDialogs.svelte";
@@ -995,8 +996,12 @@
 
   // Re-entrancy guard lives here (the dispatch re-fires onUpdate); the doc work
   // is in `dedupeMutationIds`.
-  function enforceUniqueMutationIds() {
+  function enforceUniqueMutationIds(transaction?: Transaction) {
     if (!editor || reconcilingMutationIds) return false;
+    // Duplicate ids only enter via inserted pills (paste/drop/redo); plain
+    // typing can't, so skip the full-doc dedup walk on the keystroke hot path.
+    // Undefined transaction (non-onUpdate callers) falls through and dedups.
+    if (transaction && !transactionInsertsMutation(transaction)) return false;
     reconcilingMutationIds = true;
     const changed = dedupeMutationIds(editor);
     reconcilingMutationIds = false;
@@ -1178,8 +1183,8 @@
   // Body-change orchestration: TipTap's onUpdate fires per keystroke. We
   // emit one `body-change` event to the parent (NodeEditor) so it can
   // compose its full save payload (title + body + status + ...).
-  function handleEditorUpdate() {
-    if (!enforceUniqueMutationIds() && !enforceUniqueTodoAnchors()) {
+  function handleEditorUpdate(transaction?: Transaction) {
+    if (!enforceUniqueMutationIds(transaction) && !enforceUniqueTodoAnchors()) {
       // Skip the body-change emit when a unique-id reconciler made a doc
       // change — its own transaction re-fires onUpdate, so the non-reconciler
       // edits below run on that second pass.
@@ -1287,7 +1292,7 @@
         // round-trip through our Markdown serializer. Strip at paste time.
         transformPastedHTML: (html) => sanitizePastedHtml(html),
       },
-      onUpdate: handleEditorUpdate,
+      onUpdate: ({ transaction }) => handleEditorUpdate(transaction),
       onSelectionUpdate: handleEditorSelectionUpdate,
       onBlur: handleEditorBlur,
     });

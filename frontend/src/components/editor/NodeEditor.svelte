@@ -11,6 +11,7 @@
   import ProseBodyView from "@/components/editor/body/ProseBodyView.svelte";
   import ChatBodyView from "@/components/editor/body/ChatBodyView.svelte";
   import { coerceInputValue, type EntryInputDraft } from "@/lib/utils/promptInputs";
+  import { resolutionSceneIdFromInputs } from "@/lib/editor-core/promptResolution";
   import { api } from "@/lib/api";
   import { formatCostEur } from "@/lib/utils/money";
   import { sceneMarkdownToHtml } from "@/lib/utils/markdown";
@@ -562,6 +563,7 @@
         template_source: entry.body,
         target_scene_id: scene?.id ?? "",
         inputs,
+        resolution_scene_id: resolutionSceneIdFromInputs(entry, inputs),
         commit: false,
         assistant_id: inputsDialogAssistantId || null,
       });

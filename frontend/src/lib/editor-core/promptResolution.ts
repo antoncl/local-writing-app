@@ -176,6 +176,23 @@ export function isRoleplayPromptEntry(
   return false;
 }
 
+// The mutation resolution scene from a `scene_ref` input (ADR-0012): the first
+// scene_ref input with a non-empty value wins. Returns "" when the prompt has
+// no scene_ref input or it is unset — the backend then falls back to the
+// caller's target scene. Callers pass this as `resolution_scene_id`.
+export function resolutionSceneIdFromInputs(
+  entry: PromptEntrySummary | null | undefined,
+  inputs: Record<string, unknown> | undefined,
+): string {
+  if (!entry || !inputs) return "";
+  for (const def of entry.inputs ?? []) {
+    if (def.type !== "scene_ref") continue;
+    const value = inputs[def.name];
+    if (typeof value === "string" && value.trim()) return value.trim();
+  }
+  return "";
+}
+
 // Pull the first lore id from a context_pick input value.
 export function characterIdFromInputValue(value: unknown): string | null {
   if (typeof value !== "string") return null;

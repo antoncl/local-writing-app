@@ -642,6 +642,9 @@ export type AIPreviewRequest = {
   text_before?: string;
   text_after?: string;
   commit?: boolean;
+  // Explicit mutation resolution scene from a `scene_ref` input (ADR-0012);
+  // overrides target_scene_id for effective-state resolution.
+  resolution_scene_id?: string;
   // V2: when set, preview response includes estimated_cost_usd + caching_style.
   assistant_id?: string | null;
 };
@@ -751,6 +754,9 @@ export type AIGenerateRequest = {
   text_after?: string;
   selection?: string;
   commit?: boolean;
+  // Explicit mutation resolution scene from a `scene_ref` input (ADR-0012);
+  // overrides target_scene_id for effective-state resolution.
+  resolution_scene_id?: string;
   provider?: string | null;
   model?: string | null;
   assistant_id?: string | null;

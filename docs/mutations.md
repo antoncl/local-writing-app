@@ -78,6 +78,12 @@ contains at that point in the story*; add and remove items as usual. Small `+ite
 under the widget show exactly what will be recorded — you author the edit, the app derives the
 add/remove records. Ending (closing) a unit later reverts those records like any other change.
 
+Collections are always authored (and stored in mutation sets) as **per-item add/remove** — there is
+no whole-list "replace" in the UI. That is deliberate: a whole-list value packs several members into
+one comma-joined marker value, which cannot round-trip a member that itself contains a comma. If you
+**hand-write** a `op=replace` marker on a collection field, url-encode any comma inside a member
+(`%2C`); each add/remove marker carries a single member and needs no such care.
+
 There is one contract to write by: **every appended fragment must stand alone.** Each change is an
 independent interval — it can be *closed* (ended) on its own, at any later point in the story.
 If fragment B leans on fragment A ("She trusts John." → "But only him."), closing A leaves B

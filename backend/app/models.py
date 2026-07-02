@@ -1111,6 +1111,9 @@ class AIPreviewRequest(BaseModel):
     text_after: str = ""
     selection: str = ""
     commit: bool = False
+    # Explicit mutation resolution scene from a `scene_ref` input (ADR-0012);
+    # the frontend resolves the input value here. Overrides target_scene_id.
+    resolution_scene_id: str = ""
     # When set, the cost estimate uses this assistant's provider/model.
     # Omit for previews that aren't bound to an assistant (e.g. the
     # prompt-editor preview pane) — token counts still come back, only
@@ -1253,6 +1256,9 @@ class AIGenerateRequest(BaseModel):
     text_after: str = ""
     selection: str = ""
     commit: bool = False
+    # Explicit mutation resolution scene from a `scene_ref` input (ADR-0012);
+    # the frontend resolves the input value here. Overrides target_scene_id.
+    resolution_scene_id: str = ""
     provider: str | None = None
     model: str | None = None
     assistant_id: str | None = None

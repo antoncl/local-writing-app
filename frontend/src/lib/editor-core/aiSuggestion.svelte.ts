@@ -22,6 +22,7 @@ import {
   findPromptEntry,
   isRoleplayPromptEntry,
   characterIdFromInputValue,
+  resolutionSceneIdFromInputs,
 } from "@/lib/editor-core/promptResolution";
 import type {
   ChatUsage,
@@ -410,6 +411,7 @@ export class AiSuggestionController {
         target_scene_id: scene.id,
         session_id: scene.id,
         inputs,
+        resolution_scene_id: resolutionSceneIdFromInputs(entry, inputs),
         text_before: textBefore,
         text_after: textAfter,
         ...(selectionText !== undefined ? { selection: selectionText } : {}),

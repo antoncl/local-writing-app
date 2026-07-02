@@ -151,6 +151,28 @@ class CollectionMutationTests(unittest.TestCase):
         self.assertEqual(svc.effective_state(self.honor, scene), {"clues": "knife,rope"})
         self.assertEqual(svc._coerce_mutation_value("knife,rope", "tags"), ["knife", "rope"])
 
+    def test_add_remove_before_replace_are_superseded(self) -> None:
+        # Prose order: a remove and an add, then a later whole-replace. The
+        # replace resets the base, so the earlier ops are moot — only records
+        # after the winning replace apply (#2 ordering regression).
+        scene = self._new_scene(
+            "Scene Two",
+            self._marker("clues", "remove", "knife", "c1")
+            + self._marker("clues", "add", "stray", "c2")
+            + f"<!-- mutate:entity={self.honor};field=clues;value=knife%2Crope;id=c3 -->",
+        )
+        self.assertEqual(svc.effective_state(self.honor, scene), {"clues": ["knife", "rope"]})
+
+    def test_add_after_replace_still_applies(self) -> None:
+        # An append authored after the replace survives it (guards against
+        # over-filtering the post-replace tail).
+        scene = self._new_scene(
+            "Scene Two",
+            f"<!-- mutate:entity={self.honor};field=clues;value=knife;id=c1 -->"
+            + self._marker("clues", "add", "rope", "c2"),
+        )
+        self.assertEqual(svc.effective_state(self.honor, scene), {"clues": ["knife", "rope"]})
+
     def test_earlier_scene_sees_no_collection_override(self) -> None:
         self._new_scene("Scene Two", self._marker("clues", "add", "torn%20glove", "c1"))
         self.assertEqual(svc.effective_state(self.honor, self.s1), {})

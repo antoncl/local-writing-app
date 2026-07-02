@@ -1,10 +1,17 @@
 <script lang="ts">
-  // `/mutate close` picker (#59). Lists an entity's records still open (live) at
-  // the current scene, by name / auto-label; picking one inserts a close marker
-  // at the cursor. Base values aren't listed — they have no marker to close.
+  // `/mutate close` picker (#59, #70). Lists an entity's records still open
+  // (live) at the current scene, grouped by unit (ADR-0016): picking a unit
+  // inserts close;ref=<unit-id> — index-expanded to end every live row — while
+  // a multi-row unit expands so one row can be closed on its own (the
+  // werewolf's mid-transform clue outlives the transform). Base values aren't
+  // listed — they have no marker to close.
   import { untrack } from "svelte";
   import ReferencePicker from "@/components/widgets/ReferencePicker.svelte";
   import { mutationRecordLabel } from "@/lib/editor-core/mutationNodes";
+  import {
+    groupMutationUnits,
+    mutationUnitGroupLabel,
+  } from "@/lib/editor-core/mutationUnits";
   import { api } from "@/lib/api";
   import type {
     LoreEntrySummary,
@@ -37,6 +44,17 @@
   let entityId = $state(untrack(() => presetEntityId ?? ""));
   let records = $state<MutationMarkerRecord[]>([]);
   let loading = $state(false);
+  // Multi-row units expanded to show their individually-closeable rows.
+  let expandedUnits = $state<Set<string>>(new Set());
+
+  const units = $derived(groupMutationUnits(records));
+
+  function toggleExpanded(unitId: string) {
+    const next = new Set(expandedUnits);
+    if (next.has(unitId)) next.delete(unitId);
+    else next.add(unitId);
+    expandedUnits = next;
+  }
 
   const entityRefField = {
     name: "Entity",
@@ -111,15 +129,42 @@
       <ul class="close-list">
         {#if loading}
           <li class="muted">Loading…</li>
-        {:else if records.length === 0}
+        {:else if units.length === 0}
           <li class="muted">No open changes here to close.</li>
         {:else}
-          {#each records as m (m.marker_id)}
+          {#each units as unit (unit.unitId)}
             <li>
-              <button type="button" class="close-row" onclick={() => onPick(m.marker_id)}>
-                <span class="close-name">{mutationRecordLabel(m)}</span>
-                <span class="close-scene">{m.scene_path}</span>
-              </button>
+              <div class="close-unit">
+                <button type="button" class="close-row" onclick={() => onPick(unit.unitId)}>
+                  <span class="close-name">
+                    {mutationUnitGroupLabel(unit)}
+                    {#if unit.records.length > 1}
+                      <span class="close-count">closes all {unit.records.length}</span>
+                    {/if}
+                  </span>
+                  <span class="close-scene">{unit.records[0]?.scene_path}</span>
+                </button>
+                {#if unit.records.length > 1}
+                  <button
+                    type="button"
+                    class="close-expand"
+                    aria-label={expandedUnits.has(unit.unitId) ? "Hide rows" : "Close one row only"}
+                    title={expandedUnits.has(unit.unitId) ? "Hide rows" : "Close one row only"}
+                    onclick={() => toggleExpanded(unit.unitId)}
+                  >{expandedUnits.has(unit.unitId) ? "▾" : "▸"}</button>
+                {/if}
+              </div>
+              {#if unit.records.length > 1 && expandedUnits.has(unit.unitId)}
+                <ul class="close-rows">
+                  {#each unit.records as m (m.marker_id)}
+                    <li>
+                      <button type="button" class="close-row close-row-sub" onclick={() => onPick(m.marker_id)}>
+                        <span class="close-name">{mutationRecordLabel({ ...m, name: "" })}</span>
+                      </button>
+                    </li>
+                  {/each}
+                </ul>
+              {/if}
             </li>
           {/each}
         {/if}
@@ -206,6 +251,40 @@
     font-size: 0.76rem;
     color: var(--text-3);
     flex: 0 0 auto;
+  }
+  .close-unit {
+    display: flex;
+    align-items: stretch;
+    gap: 4px;
+  }
+  .close-unit .close-row {
+    flex: 1 1 auto;
+  }
+  .close-count {
+    margin-left: 8px;
+    font-size: 0.72rem;
+    color: var(--mutation-color, #7c5cbf);
+  }
+  .close-expand {
+    flex: none;
+    width: 28px;
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    background: transparent;
+    color: var(--text-3);
+    cursor: pointer;
+  }
+  .close-rows {
+    list-style: none;
+    margin: 4px 0 0;
+    padding: 0 0 0 16px;
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+  }
+  .close-row-sub {
+    padding: 5px 9px;
+    font-size: 0.85rem;
   }
   .muted {
     color: var(--text-3);

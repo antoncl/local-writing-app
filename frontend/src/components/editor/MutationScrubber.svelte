@@ -1,43 +1,54 @@
 <script lang="ts">
   // The time-travel strip docked at the bottom of a lore card (#64, ADR-0013).
   // Discrete stops — stop 0 = base/edit (home), then one stop per mutation
-  // point; effective state is constant BETWEEN markers so there is nothing to
-  // interpolate. Position is the mode: the rest position (stop 0) means the
-  // card is editable, any stop ≥ 1 flips it to a read-only effective overlay.
-  // Scrub state lives in NodeEditor (the card shell); this strip only renders
-  // the stops and emits the chosen one.
+  // UNIT (#70, ADR-0016: fewer, more meaningful stops; the tooltip lists the
+  // rows changing there); effective state is constant BETWEEN points so there
+  // is nothing to interpolate. Position is the mode: the rest position (stop
+  // 0) means the card is editable, any stop ≥ 1 flips it to a read-only
+  // effective overlay. Scrub state lives in NodeEditor (the card shell); this
+  // strip only renders the stops and emits the chosen one.
   import { mutationRecordLabel } from "@/lib/editor-core/mutationNodes";
-  import type { MutationMarkerRecord } from "@/lib/types";
+  import {
+    mutationUnitGroupLabel,
+    type MutationUnitGroup,
+  } from "@/lib/editor-core/mutationUnits";
 
   let {
-    markers,
+    units,
     index,
     onScrub,
   }: {
-    markers: MutationMarkerRecord[];
-    /** 0 = base (editable); i ≥ 1 = as of markers[i-1]. */
+    units: MutationUnitGroup[];
+    /** 0 = base (editable); i ≥ 1 = as of units[i-1]. */
     index: number;
     onScrub: (index: number) => void;
   } = $props();
 
   // Per-stop labels: originating scene, disambiguated when one scene holds
-  // several of this entity's mutations ("Scene 5 · #2").
+  // several of this entity's units ("Scene 5 · #2").
   const stopLabels = $derived.by(() => {
+    const scenePath = (unit: MutationUnitGroup) => unit.records[0]?.scene_path ?? "";
     const totals = new Map<string, number>();
-    for (const marker of markers) {
-      totals.set(marker.scene_path, (totals.get(marker.scene_path) ?? 0) + 1);
+    for (const unit of units) {
+      totals.set(scenePath(unit), (totals.get(scenePath(unit)) ?? 0) + 1);
     }
     const seen = new Map<string, number>();
-    return markers.map((marker) => {
-      const nth = (seen.get(marker.scene_path) ?? 0) + 1;
-      seen.set(marker.scene_path, nth);
-      const path = marker.scene_path || "scene";
-      return (totals.get(marker.scene_path) ?? 1) > 1 ? `${path} · #${nth}` : path;
+    return units.map((unit) => {
+      const path = scenePath(unit);
+      const nth = (seen.get(path) ?? 0) + 1;
+      seen.set(path, nth);
+      return (totals.get(path) ?? 1) > 1 ? `${path || "scene"} · #${nth}` : path || "scene";
     });
   });
 
   function stopTooltip(i: number): string {
-    return `${stopLabels[i]} — ${mutationRecordLabel(markers[i])}`;
+    const unit = units[i];
+    const label = mutationUnitGroupLabel(unit);
+    const rows =
+      unit.records.length > 1
+        ? ` — ${unit.records.map((record) => mutationRecordLabel({ ...record, name: "" })).join(", ")}`
+        : "";
+    return `${stopLabels[i]} — ${label}${rows}`;
   }
 </script>
 
@@ -53,7 +64,7 @@
     <i class="ti ti-home" aria-hidden="true"></i>
   </button>
   <div class="scrub-track">
-    {#each markers as marker, i (marker.marker_id)}
+    {#each units as unit, i (unit.unitId)}
       <button
         type="button"
         class="scrub-stop"

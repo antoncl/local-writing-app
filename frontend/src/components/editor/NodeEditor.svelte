@@ -3,6 +3,7 @@
   import BacklinksPanel from "@/components/editor/BacklinksPanel.svelte";
   import MutationTimeline from "@/components/editor/MutationTimeline.svelte";
   import MutationScrubber from "@/components/editor/MutationScrubber.svelte";
+  import { LoreScrubController } from "@/lib/stores/loreScrub.svelte";
   import MetadataPanel from "@/components/editor/MetadataPanel.svelte";
   import InputsDialog from "@/components/editor/InputsDialog.svelte";
   import FieldsOnlyView from "@/components/editor/body/FieldsOnlyView.svelte";
@@ -14,7 +15,7 @@
   import { formatCostEur } from "@/lib/utils/money";
   import { sceneMarkdownToHtml } from "@/lib/utils/markdown";
   import { resolveColor } from "@/lib/utils/colors";
-  import type { AssistantEntrySummary, Backlink, BodyShape, DocumentKind, EditableDocument, EntryBodyLanguage, EntryMetadata, EntryTypeDefinition, MetadataFieldDefinition, MetadataSchema, MutationMarkerRecord, PromptEntrySummary, PromptInputDefinition } from "@/lib/types";
+  import type { AssistantEntrySummary, Backlink, BodyShape, DocumentKind, EditableDocument, EntryBodyLanguage, EntryMetadata, EntryTypeDefinition, MetadataFieldDefinition, MetadataSchema, PromptEntrySummary, PromptInputDefinition } from "@/lib/types";
   import { metadataSchemaStore } from "@/lib/stores/schema";
   import { mutationsVersion } from "@/lib/stores/mutationsVersion.svelte";
 
@@ -114,49 +115,24 @@
   // content (none-shape: assistant / project / structure_node).
   let railOpen = $state(true);
 
-  // ---- Time-travel scrub state (#64, ADR-0013) -------------------------------
-  // The lore card owns its scrub position: 0 = base/book-start (fully editable,
-  // today's card), i ≥ 1 = a read-only effective overlay as of the i-th
-  // mutation point. The ordered points feed both the bottom scrubber strip and
-  // the rail's mutation list — two views of one dataset, fetched once here.
-  let scrubMarkers = $state<MutationMarkerRecord[]>([]);
-  let scrubIndex = $state(0);
-  // Override map of ONLY the mutated fields at the scrub point (may include
-  // the intrinsic `title` / `body`). Membership = "changed by here".
-  let effectiveOverrides = $state<Record<string, string | string[]> | null>(null);
-  let scrubbed = $derived(documentKind === "lore" && scrubIndex > 0);
+  // ---- Time-travel scrub state (#64, ADR-0013; per-unit stops #70) -----------
+  // State + fetch + resolve live in LoreScrubController; the card keeps only
+  // the reload trigger (entity switch or an index-touching save, #63 — either
+  // may have moved/removed stops, so position resets to base).
+  const scrub = new LoreScrubController();
+  let scrubbed = $derived(documentKind === "lore" && scrub.index > 0);
 
-  // Fetch the entity's ordered mutation points; refetch when the entity
-  // changes or a scene save touches the mutations index (#63). Either event
-  // may have moved/removed stops, so the scrub position resets to base.
   $effect(() => {
     const id = documentKind === "lore" ? (scene?.id ?? null) : null;
     void mutationsVersion.value;
-    scrubIndex = 0;
-    effectiveOverrides = null;
-    if (!id) {
-      scrubMarkers = [];
-      return;
-    }
-    let cancelled = false;
-    api
-      .getEntityMutations(id)
-      .then((res) => {
-        if (!cancelled) scrubMarkers = res.items;
-      })
-      .catch(() => {
-        if (!cancelled) scrubMarkers = [];
-      });
-    return () => {
-      cancelled = true;
-    };
+    return scrub.load(id);
   });
 
   // Effective intrinsics at the scrub point. Title/body may be mutated too
   // (ADR-0009 amendment) — scope is total, the whole card travels.
-  let titleMutated = $derived(scrubbed && effectiveOverrides != null && "title" in effectiveOverrides);
-  let effectiveTitle = $derived(titleMutated ? String(effectiveOverrides?.title ?? "") : title);
-  let bodyMutated = $derived(scrubbed && effectiveOverrides != null && "body" in effectiveOverrides);
+  let titleMutated = $derived(scrubbed && scrub.overrides != null && "title" in scrub.overrides);
+  let effectiveTitle = $derived(titleMutated ? String(scrub.overrides?.title ?? "") : title);
+  let bodyMutated = $derived(scrubbed && scrub.overrides != null && "body" in scrub.overrides);
 
   // The read-only body overlay (§4.4, buffer-safe): rendered-markdown of the
   // effective body. The TipTap buffer underneath is never touched — unsaved
@@ -169,7 +145,7 @@
       overlayBodyHtml = "";
       return;
     }
-    const overrideBody = bodyMutated ? String(effectiveOverrides?.body ?? "") : null;
+    const overrideBody = bodyMutated ? String(scrub.overrides?.body ?? "") : null;
     const markdown = overrideBody ?? proseBodyView?.getBody() ?? scene?.body ?? "";
     let cancelled = false;
     void sceneMarkdownToHtml(markdown).then((html) => {
@@ -179,34 +155,6 @@
       cancelled = true;
     };
   });
-
-  // Monotonic token so out-of-order responses from rapid scrubbing (or an
-  // entity switch mid-flight) can't overwrite the latest position.
-  let scrubSeq = 0;
-
-  async function scrubTo(index: number) {
-    scrubIndex = index;
-    if (index === 0) {
-      effectiveOverrides = null;
-      return;
-    }
-    const marker = scrubMarkers[index - 1];
-    const forEntity = scene?.id ?? null;
-    if (!marker || !forEntity) return;
-    const seq = ++scrubSeq;
-    try {
-      // Resolve at the marker's own position so it counts as live (offset <=
-      // position), giving the effective state "as of" this change.
-      const res = await api.getEntityEffectiveState(forEntity, marker.scene_id, marker.offset);
-      if (seq === scrubSeq && scene?.id === forEntity) effectiveOverrides = res.values;
-    } catch {
-      // Can't resolve → don't pretend: fall back to the editable base.
-      if (seq === scrubSeq && scene?.id === forEntity) {
-        scrubIndex = 0;
-        effectiveOverrides = null;
-      }
-    }
-  }
 
   // Rail width is user-resizable via the left-edge drag handle, persisted
   // across sessions. Clamped so the rail can be made slimmer or wider but
@@ -900,7 +848,7 @@
       implicitContextMatcher={implicitContextMatcher}
       excludeId={scene?.id ?? null}
       computedFieldString={computedFieldString}
-      effectiveOverrides={scrubbed ? effectiveOverrides : null}
+      effectiveOverrides={scrubbed ? scrub.overrides : null}
       readOnly={scrubbed}
       onEntryTypeChange={(next) => updateEntryType(next)}
       onStatusChange={(next) => updateStatus(next)}
@@ -921,9 +869,9 @@
     {/key}
     {#if documentKind === "lore" && scene?.id}
       <MutationTimeline
-        mutations={scrubMarkers}
-        activeIndex={scrubIndex}
-        onSelect={(index) => void scrubTo(index)}
+        units={scrub.units}
+        activeIndex={scrub.index}
+        onSelect={(index) => void scrub.scrubTo(index)}
         onNavigate={(payload) => onNavigate?.(payload)}
       />
     {/if}
@@ -1032,7 +980,7 @@
         {#if bodyMutated}
           <div class="effective-body-ribbon">
             <span aria-hidden="true">⤳</span>
-            Body as of {scrubMarkers[scrubIndex - 1]?.scene_path || "scene"} — mutated
+            Body as of {scrub.units[scrub.index - 1]?.records[0]?.scene_path || "scene"} — mutated
           </div>
         {/if}
         <div class="effective-body-content">
@@ -1119,8 +1067,8 @@
     {/if}
   {/if}
 
-  {#if documentKind === "lore" && scene && scrubMarkers.length > 0}
-    <MutationScrubber markers={scrubMarkers} index={scrubIndex} onScrub={(index) => void scrubTo(index)} />
+  {#if documentKind === "lore" && scene && scrub.units.length > 0}
+    <MutationScrubber units={scrub.units} index={scrub.index} onScrub={(index) => void scrub.scrubTo(index)} />
   {/if}
 
   <footer class="status">

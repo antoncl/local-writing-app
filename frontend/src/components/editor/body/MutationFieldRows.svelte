@@ -247,10 +247,16 @@
     padding-top: 12px;
     margin-bottom: 12px;
   }
+  /* Each field-change row wears a hairline frame (#70): under the entity
+     header the framed rows read as the unit — a frame, not a card explosion. */
   .mrow {
     display: flex;
     flex-direction: column;
     gap: 6px;
+    border: 1px solid var(--divider, var(--border));
+    border-radius: 8px;
+    background: var(--inset, color-mix(in oklab, var(--text) 3%, transparent));
+    padding: 8px 10px;
   }
   .mrow-head {
     display: flex;

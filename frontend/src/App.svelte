@@ -824,6 +824,7 @@
     state={confirmService.active}
     onCancel={() => confirmService.dismiss()}
     onConfirm={(dontShowAgain) => confirmService.resolve(dontShowAgain)}
+    onSecondary={() => confirmService.resolveSecondary()}
   />
 
   <NewProjectModal

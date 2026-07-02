@@ -248,11 +248,56 @@ class EditorPanesController {
   async close(id: string): Promise<void> {
     const pane = this.panes.find((candidate) => candidate.id === id);
     if (!pane) return;
-    await this.run(async () => {
-      if (pane.dirty) {
-        await this.saveEditorPane(id);
-      }
+    if (!pane.dirty) {
       this.tearDown(id);
+      return;
+    }
+    // Flush before closing (autosave invariant 2). A revision conflict must NOT
+    // trap the pane — the file legitimately changes under an open pane in a
+    // local-first app (second window, external editor, another write path) —
+    // so offer a recovery choice instead of an un-closeable error loop.
+    let conflict = false;
+    const ok = await this.run(async () => {
+      try {
+        await this.saveEditorPane(id);
+      } catch (error) {
+        if (error instanceof Error && error.message.includes("changed on disk")) {
+          conflict = true;
+          return;
+        }
+        throw error;
+      }
+    });
+    if (conflict) {
+      this.#offerCloseConflictRecovery(id);
+      return;
+    }
+    if (ok) this.tearDown(id);
+  }
+
+  // The document changed on disk while this pane held unsaved edits and the
+  // close-flush 409'd. Let the user pick a side; Cancel keeps the pane open
+  // (e.g. to copy text out first).
+  #offerCloseConflictRecovery(id: string): void {
+    const pane = this.panes.find((candidate) => candidate.id === id);
+    const title = pane?.draftTitle || pane?.scene?.title || "This document";
+    confirmService.request({
+      title: "Changed on disk",
+      message:
+        `"${title}" was modified outside this pane while it had unsaved changes — ` +
+        "another window, another surface, or the file itself. Overwrite the on-disk " +
+        "version with this pane's content, or discard this pane's changes and keep " +
+        "what is on disk?",
+      confirmLabel: "Overwrite and close",
+      destructive: true,
+      secondaryLabel: "Discard changes and close",
+      onSecondary: () => {
+        this.tearDown(id);
+      },
+      onConfirm: async () => {
+        await this.saveEditorPane(id, { force: true });
+        this.tearDown(id);
+      },
     });
   }
 
@@ -271,7 +316,7 @@ class EditorPanesController {
     }
   }
 
-  async saveEditorPane(id: string): Promise<void> {
+  async saveEditorPane(id: string, options: { force?: boolean } = {}): Promise<void> {
     const pane = this.panes.find((candidate) => candidate.id === id);
     if (!pane?.scene) return;
     const documentKind = pane.document?.type ?? "scene";
@@ -284,6 +329,9 @@ class EditorPanesController {
     try {
       const draftDocument = {
         ...pane.scene,
+        // force: user chose "overwrite what's on disk" after a revision
+        // conflict — an empty revision makes the backend skip the check.
+        ...(options.force ? { revision: "" } : {}),
         title: pane.draftTitle,
         ...(documentKind === "scene" ? { status: pane.draftStatus } : {}),
         entry_type: pane.draftEntryType,

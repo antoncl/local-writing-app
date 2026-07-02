@@ -1,8 +1,17 @@
 # ADR-0009: Collection mutations use add/remove; effective_state returns typed lists
 
-- Status: Accepted (v1.1) — 0.4.0, 2026-07-01
+- Status: Accepted (v1.1) — 0.4.0, 2026-07-01 · **Amended 2026-07-02: text append**
 - Feature: #33 mid-scene lore mutations · Doc: `mid-scene-lore-mutations-v1.1.md` §1 · Issue: #58
 - Refines: ADR-0002 (combine rule), ADR-0006 (contract), ADR-0007 (validation)
+
+> **Amendment (2026-07-02) — `op=add` extends to text fields as append.** `text` and `long_text`
+> (including the intrinsic `title`/`body`) also accept `op=add`: the effective value is the base
+> text (or the latest live whole-`replace`, which resets it — the same reset rule as collections)
+> with live adds concatenated **in start order**, joined by a space for `text` and a paragraph
+> break (`\n\n`) for `long_text`. Fragment edges are trimmed so the separator alone spaces the
+> joints. `remove` stays collection-only — there is no principled "subtract a substring".
+> `effective_state`'s contract is unchanged (text resolves to `str`). The op selector shows
+> Replace/Append on text fields, Replace-all/Add/Remove on collections.
 
 ## Decision
 Collection fields (`multi_select`, `tags`, `entity_ref_list` — the only three) get **two**

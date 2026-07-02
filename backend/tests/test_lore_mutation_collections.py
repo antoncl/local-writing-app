@@ -157,11 +157,20 @@ class CollectionMutationTests(unittest.TestCase):
 
     # --- validation -------------------------------------------------------
 
-    def test_add_on_scalar_field_is_a_warning(self) -> None:
+    def test_add_on_non_text_scalar_field_is_a_warning(self) -> None:
         # Mutation validation is advisory (#53): strays surface as warnings.
-        self._new_scene("Scene Two", self._marker("rank", "add", "Captain", "r1"))
+        # text/long_text accept add as append (ADR-0009 amendment), so the
+        # gate is exercised on a select field.
+        _define_field("mood", "select", "Mood")
+        self._new_scene("Scene Two", self._marker("mood", "add", "grim", "m1"))
         warnings = svc.validate_project().warnings
-        self.assertTrue(any("only valid on collection fields" in w for w in warnings))
+        self.assertTrue(any("only valid on collection or text fields" in w for w in warnings))
+
+    def test_remove_on_text_field_is_a_warning(self) -> None:
+        # Append is additive-only: remove stays gated to collection fields.
+        self._new_scene("Scene Two", self._marker("rank", "remove", "Captain", "r1"))
+        warnings = svc.validate_project().warnings
+        self.assertTrue(any("op remove is only valid on collection fields" in w for w in warnings))
 
     def test_add_element_is_item_validated(self) -> None:
         _define_field("friends", "entity_ref_list", "Friends")

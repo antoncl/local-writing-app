@@ -9,6 +9,11 @@
   export const COLLECTION_TYPES = ["multi_select", "tags", "entity_ref_list"];
   export const isCollectionType = (type: string) => COLLECTION_TYPES.includes(type);
 
+  // Scalar text types that accept an additive `add` (append) op — the backend
+  // resolves base + appends in start order (ADR-0009 amendment).
+  export const TEXT_APPEND_TYPES = ["text", "long_text"];
+  export const isTextAppendType = (type: string) => TEXT_APPEND_TYPES.includes(type);
+
   // Name-ish fields carry the scene-granular resolution caveat (#61).
   const NAME_FIELDS = ["title", "name", "aliases"];
   export const isNameField = (id: string) => NAME_FIELDS.includes(id);
@@ -130,6 +135,17 @@
             <option value="replace">Replace all</option>
             <option value="add">Add item</option>
             <option value="remove">Remove item</option>
+          </select>
+        {:else if isTextAppendType(fieldDefFor(row.field, schema).type)}
+          <!-- Same string shape either way, so the typed value survives an op flip. -->
+          <select
+            class="mrow-op"
+            aria-label="{labelFor(row.field)} operation"
+            value={row.op}
+            onchange={(e) => onRowChange(i, { op: e.currentTarget.value })}
+          >
+            <option value="replace">Replace</option>
+            <option value="add">Append</option>
           </select>
         {/if}
         <span class="mrow-spacer"></span>

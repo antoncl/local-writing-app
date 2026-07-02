@@ -58,9 +58,14 @@ MUTATION_MARKER_PATTERN = re.compile(
     r";id=(?P<id>[A-Za-z0-9_-]+)\s*-->",
 )
 
-# Field types whose values are collections; only these accept add/remove ops
-# (#58). Every other type stays replace-only.
+# Field types whose values are collections; these accept add/remove ops (#58).
 COLLECTION_FIELD_TYPES = frozenset({"multi_select", "tags", "entity_ref_list"})
+
+# Scalar text types that accept an additive `add` (append) op: the effective
+# value is the base (or latest live replace) with live adds concatenated in
+# start order — a space between text fragments, a paragraph break for
+# long_text. `remove` stays collection-only; every other type is replace-only.
+TEXT_APPEND_FIELD_TYPES = frozenset({"text", "long_text"})
 
 # Interval-close marker (#59): a separate point marker at the close position that
 # ends the record `ref` — the record is live iff `start ≤ pos < close` (close
@@ -230,10 +235,18 @@ class LoreMutationsMixin(MarkerMixin):
                 continue
             field_type = getattr(field, "type", "")
             is_collection = field_type in COLLECTION_FIELD_TYPES
-            if marker.op in {"add", "remove"} and not is_collection:
+            if marker.op == "remove" and not is_collection:
                 errors.append(
-                    f"{label} op {marker.op} is only valid on collection fields "
+                    f"{label} op remove is only valid on collection fields "
                     f"(multi_select/tags/entity_ref_list), not {field_type}."
+                )
+                continue
+            if marker.op == "add" and not (
+                is_collection or field_type in TEXT_APPEND_FIELD_TYPES
+            ):
+                errors.append(
+                    f"{label} op add is only valid on collection or text fields "
+                    f"(multi_select/tags/entity_ref_list/text/long_text), not {field_type}."
                 )
                 continue
             if is_collection:
@@ -438,7 +451,11 @@ class LoreMutationsMixin(MarkerMixin):
         among the records live at (scene, position), the latest-started replace
         wins. Collection fields (multi_select / tags / entity_ref_list) resolve
         to a **`list[str]`** = `(base ∪ live adds) ∖ live removes`, remove-wins
-        (ADR-0009); the datatype matches the field.
+        (ADR-0009); the datatype matches the field. Text fields (text /
+        long_text, incl. intrinsic title/body) additionally accept `add` as
+        **append**: base (or latest live replace) + live adds in start order,
+        space-joined for text, paragraph-joined for long_text (ADR-0009
+        amendment).
 
         A record is live iff its start is at or before the resolution point in
         manuscript order — earlier scene always, same scene only if its marker
@@ -461,25 +478,53 @@ class LoreMutationsMixin(MarkerMixin):
                 live_by_field.setdefault(marker.field, []).append(marker)
         effective: dict[str, str | list[str]] = {}
         base: dict[str, object] | None = None
+        field_types: dict[str, str] | None = None
         for field, live in live_by_field.items():
             if any(m.op in {"add", "remove"} for m in live):
-                # Collection field — needs the entry's base list to resolve the
-                # set. Read it lazily, once, only when an add/remove is in play.
+                # add/remove needs the entry's base value and the field's type
+                # (collection set-resolve vs text append). Both read lazily,
+                # once, only when such an op is in play.
                 if base is None:
                     base = self._entity_base_values(entity_id)
-                effective[field] = self._resolve_collection(field, live, base)
+                if field_types is None:
+                    field_types = self._mutation_field_types()
+                field_type = field_types.get(field, "text")
+                if field_type in COLLECTION_FIELD_TYPES:
+                    effective[field] = self._resolve_collection(field, live, base)
+                else:
+                    effective[field] = self._resolve_text_append(
+                        field, field_type, live, base
+                    )
             else:
                 effective[field] = live[-1].value
         return effective
 
+    def _mutation_field_types(self) -> dict[str, str]:
+        """field id -> type for mutation resolution: the schema's fields plus
+        the intrinsic title (text) / body (long_text). Empty schema on a read
+        failure — unknown fields then resolve as plain text."""
+        types = {"title": "text", "body": "long_text"}
+        try:
+            schema = self.read_metadata_schema()
+        except ProjectServiceError:
+            return types
+        for field_id, field in (getattr(schema, "fields", None) or {}).items():
+            types[field_id] = getattr(field, "type", "text")
+        return types
+
     def _entity_base_values(self, entity_id: str) -> dict[str, object]:
-        """The entry's stored (book-start) metadata, for collection resolution.
-        Empty on any read failure (resolution then treats base as empty)."""
+        """The entry's stored (book-start) values for add/remove resolution:
+        its metadata plus the intrinsic title/body (text appends may target
+        them). Empty on any read failure (resolution then treats base as
+        empty)."""
         try:
             entry = self.read_lore_entry(entity_id)
         except ProjectServiceError:
             return {}
-        return dict(getattr(entry, "metadata", {}) or {})
+        values = dict(getattr(entry, "metadata", {}) or {})
+        values.setdefault("title", getattr(entry, "title", "") or "")
+        values.setdefault("body", getattr(entry, "body", "") or "")
+        return values
 
     @staticmethod
     def _resolve_collection(
@@ -501,6 +546,24 @@ class LoreMutationsMixin(MarkerMixin):
                 seen.add(item)
                 result.append(item)
         return [item for item in result if item not in removes]
+
+    @staticmethod
+    def _resolve_text_append(
+        field: str, field_type: str, live: list[MutationMarker], base: dict[str, object]
+    ) -> str:
+        """Resolve one text field with live appends: base text (or the latest
+        live whole-`replace`, which resets it — same rule as collections) plus
+        live adds in start order. Fragments join with a space for `text`, a
+        paragraph break for `long_text`. Empty fragments drop out."""
+        replaces = [m for m in live if m.op == "replace"]
+        base_text = replaces[-1].value if replaces else str(base.get(field) or "")
+        adds = [m.value for m in live if m.op == "add"]
+        separator = "\n\n" if field_type == "long_text" else " "
+        # Stored bodies end in a newline; trim fragment edges so the separator
+        # alone spaces the joints (inner newlines are preserved).
+        return separator.join(
+            part.strip() for part in [base_text, *adds] if part.strip()
+        )
 
     def _marker_is_live(
         self,

@@ -23,6 +23,7 @@
   import MutationFieldRows, {
     buildFieldOptions,
     isCollectionType,
+    isTextAppendType,
     fieldDefFor,
     type FieldOption,
     type MutationRow,
@@ -193,7 +194,10 @@
     for (const row of rows) {
       if (!isFilled(row.value)) continue;
       const def = fieldDefFor(row.field, schema);
-      const op = isCollectionType(def.type) ? row.op || "replace" : "replace";
+      const op =
+        isCollectionType(def.type) || isTextAppendType(def.type)
+          ? row.op || "replace"
+          : "replace";
       // add/remove carry one element each; an array-valued item widget mints one
       // marker per element (doc §1.2). replace carries the whole value.
       const values =

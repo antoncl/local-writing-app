@@ -1,6 +1,6 @@
 [project]
 name = "local-writing-service"
-version = "0.1.0"
+version = "0.4.0"
 description = "Local application service for a private fiction writing app"
 requires-python = ">=3.11"
 dependencies = [

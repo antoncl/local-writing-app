@@ -118,7 +118,7 @@ from app.services.ai.profiles import CapabilityTier, ModelDescriptor
 from app.services.ai.profiles.registry import known_provider_names, profile_for
 from app.services.project_service import ProjectService, ProjectServiceError
 
-app = FastAPI(title="Local Writing Service", version="0.1.0")
+app = FastAPI(title="Local Writing Service", version="0.4.0")
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["http://127.0.0.1:5173", "http://localhost:5173"],

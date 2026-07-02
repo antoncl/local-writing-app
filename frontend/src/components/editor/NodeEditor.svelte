@@ -12,6 +12,7 @@
   import { coerceInputValue, type EntryInputDraft } from "@/lib/utils/promptInputs";
   import { api } from "@/lib/api";
   import { formatCostEur } from "@/lib/utils/money";
+  import { sceneMarkdownToHtml } from "@/lib/utils/markdown";
   import { resolveColor } from "@/lib/utils/colors";
   import type { AssistantEntrySummary, Backlink, BodyShape, DocumentKind, EditableDocument, EntryBodyLanguage, EntryMetadata, EntryTypeDefinition, MetadataFieldDefinition, MetadataSchema, MutationMarkerRecord, PromptEntrySummary, PromptInputDefinition } from "@/lib/types";
   import { metadataSchemaStore } from "@/lib/stores/schema";
@@ -146,6 +147,34 @@
       .catch(() => {
         if (!cancelled) scrubMarkers = [];
       });
+    return () => {
+      cancelled = true;
+    };
+  });
+
+  // Effective intrinsics at the scrub point. Title/body may be mutated too
+  // (ADR-0009 amendment) — scope is total, the whole card travels.
+  let titleMutated = $derived(scrubbed && effectiveOverrides != null && "title" in effectiveOverrides);
+  let effectiveTitle = $derived(titleMutated ? String(effectiveOverrides?.title ?? "") : title);
+  let bodyMutated = $derived(scrubbed && effectiveOverrides != null && "body" in effectiveOverrides);
+
+  // The read-only body overlay (§4.4, buffer-safe): rendered-markdown of the
+  // effective body. The TipTap buffer underneath is never touched — unsaved
+  // base edits survive a scrub round-trip untouched. Base body reads from the
+  // LIVE buffer (not the saved baseline) so an unmutated scrub shows exactly
+  // what the writer sees at stop 0.
+  let overlayBodyHtml = $state("");
+  $effect(() => {
+    if (!scrubbed || bodyShape !== "prose") {
+      overlayBodyHtml = "";
+      return;
+    }
+    const overrideBody = bodyMutated ? String(effectiveOverrides?.body ?? "") : null;
+    const markdown = overrideBody ?? proseBodyView?.getBody() ?? scene?.body ?? "";
+    let cancelled = false;
+    void sceneMarkdownToHtml(markdown).then((html) => {
+      if (!cancelled) overlayBodyHtml = html;
+    });
     return () => {
       cancelled = true;
     };
@@ -914,8 +943,14 @@
     {#if scene}
       <div class="scene-title-row">
         <label class="title-label">
-          {documentNameLabel}
-          <input class="title-input" aria-label={`${documentLabel} ${documentNameLabel.toLowerCase()}`} placeholder={documentNameLabel} bind:value={title} oninput={handleTitleInput} />
+          {documentNameLabel}{#if titleMutated}<span class="title-mutated-marker" title="Changed by here">⤳</span>{/if}
+          {#if scrubbed}
+            <!-- Effective title as of the scrub point — read-only; the draft
+                 title stays untouched underneath (stop 0 restores it). -->
+            <input class="title-input" class:mutated={titleMutated} readonly aria-label={`${documentLabel} ${documentNameLabel.toLowerCase()} (effective, read-only)`} value={effectiveTitle} />
+          {:else}
+            <input class="title-input" aria-label={`${documentLabel} ${documentNameLabel.toLowerCase()}`} placeholder={documentNameLabel} bind:value={title} oninput={handleTitleInput} />
+          {/if}
         </label>
       </div>
       {#if todoStatusHint || (documentKind === "scene" && (lastInvocationCostUsd != null || characterCostRowsView.length > 0)) || rollupCostKind}
@@ -989,8 +1024,26 @@
     />
   {/if}
   {#if bodyShape === "prose"}
-    <ProseBodyView
-      bind:this={proseBodyView}
+    {#if scrubbed}
+      <!-- The effective body as of the scrub point (§4.4). An overlay layer:
+           the editable TipTap buffer stays mounted (hidden) underneath, so
+           unsaved base edits survive the scrub round-trip untouched. -->
+      <div class="effective-body" aria-label="Effective body (read-only)">
+        {#if bodyMutated}
+          <div class="effective-body-ribbon">
+            <span aria-hidden="true">⤳</span>
+            Body as of {scrubMarkers[scrubIndex - 1]?.scene_path || "scene"} — mutated
+          </div>
+        {/if}
+        <div class="effective-body-content">
+          <!-- eslint-disable-next-line svelte/no-at-html-tags — sceneMarkdownToHtml output, same trust level as the editor load path -->
+          {@html overlayBodyHtml}
+        </div>
+      </div>
+    {/if}
+    <div class="prose-body-host" class:hidden={scrubbed}>
+      <ProseBodyView
+        bind:this={proseBodyView}
       bind:liveWordCount
       bind:editorEmpty
       bind:lastInvocationCostUsd
@@ -1007,7 +1060,8 @@
       onFocus={() => onFocus?.()}
       onOpenChat={(payload) => onOpenChat?.(payload)}
       onRequestInputsDialog={handleRequestInputsDialog}
-    />
+      />
+    </div>
   {/if}
   {#if bodyShape === "chat"}
     <ChatBodyView
@@ -1290,6 +1344,58 @@
     grid-template-columns: minmax(0, 1fr);
     gap: 4px;
     align-items: start;
+  }
+
+  /* ---- Time-travel overlay chrome (#64) ---------------------------------- */
+  /* Keeps ProseBodyView a direct grid child of .editor-panel when visible;
+     display:none while scrubbed preserves the mounted TipTap buffer. */
+  .prose-body-host {
+    display: contents;
+  }
+  .prose-body-host.hidden {
+    display: none;
+  }
+
+  .title-mutated-marker {
+    margin-left: 4px;
+    color: var(--mutation-color, #7c5cbf);
+    font-weight: 700;
+  }
+  .title-input[readonly] {
+    background: var(--inset, #f1f5f3);
+    cursor: default;
+  }
+  .title-input.mutated {
+    color: var(--mutation-color, #7c5cbf);
+    font-weight: 600;
+  }
+
+  .effective-body {
+    min-height: 0;
+    overflow-y: auto;
+    display: flex;
+    flex-direction: column;
+  }
+  .effective-body-ribbon {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    padding: 4px 24px;
+    font-size: 11.5px;
+    font-weight: 600;
+    color: var(--mutation-color, #7c5cbf);
+    background: color-mix(in srgb, var(--mutation-color, #7c5cbf) 10%, transparent);
+    border-bottom: 1px solid color-mix(in srgb, var(--mutation-color, #7c5cbf) 30%, transparent);
+  }
+  .effective-body-content {
+    padding: 12px 24px 24px;
+    max-width: 72ch;
+    font-size: 15px;
+    line-height: 1.65;
+    color: var(--text, #242424);
+  }
+  .effective-body-content :global(p) {
+    margin: 0 0 0.9em;
   }
 
   .title-label {

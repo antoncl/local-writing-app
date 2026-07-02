@@ -18,21 +18,30 @@ generation is given only what is knowable at *its* place in the book.
 
 ## Recording a change
 
-In a scene, type `/mutate`, pick the entry, pick the field(s), and enter the new value(s). It drops a
-small marker (a violet **⤳** pill) at the cursor. One `/mutate` can set several fields at once (a
-promotion = rank + title + uniform). You can **name** a change ("Honor's promotion") — purely a
-memory aid to recognise it later; leave it blank and it labels itself ("rank → Captain").
+In a scene, type `/mutate`, pick the entry, pick the field(s), and enter the new value(s). It drops
+**one** small marker (a violet **⤳** pill) at the cursor — one authored change is one **unit**,
+however many fields it touches (a promotion = rank + title + uniform → one pill, showing a `·3`
+count). You can **name** a change ("Honor's promotion") — purely a memory aid to recognise it
+later; leave it blank and it labels itself ("rank → Captain", or "3 changes").
+
+Click a pill to edit the **whole unit**: add or remove field changes, change values, rename it, or
+delete it. Each field change inside a unit keeps its own identity — you can still end one of them
+on its own later (see closing, below).
 
 The marker lives in the scene, so moving or deleting the scene moves or deletes its changes — there
-is nothing separate to keep in sync.
+is nothing separate to keep in sync. In the Markdown file a unit is a single readable comment,
+whether it changes one field or five.
 
 ## Seeing the timeline
 
-Open the lore entry. When it has changes, a **scrubber** appears along the bottom of the card. Drag
-it and the whole card shows the entry **as of that point** — title, body, and every field reflect
-their effective values there, with changed fields marked in the mutation violet and a small **⤳**.
-Slide back to the start to edit the base (book-start) values again. This is your trust surface: you
-can *see* "Honor as of Scene 5" and confirm nothing from the future has leaked backward.
+Open the lore entry. When it has changes, a **scrubber** appears along the bottom of the card —
+**one stop per unit** (one authored change), not one per field, so the stops stay meaningful; the
+tooltip lists what changes there. Pick a stop and the whole card shows the entry **as of that
+point** — title, body, and every field reflect their effective values there, with changed fields
+marked in the mutation violet and a small **⤳**. Slide back to the start to edit the base
+(book-start) values again. This is your trust surface: you can *see* "Honor as of Scene 5" and
+confirm nothing from the future has leaked backward. The rail's Mutations list mirrors the same
+stops, one row per unit.
 
 ## How resolution works — and its one limit
 
@@ -61,16 +70,24 @@ split the scene at the rename, or record the rename at the very start/end of the
 ## Appending, and why fragments must stand alone (v1.1)
 
 Text fields (including an entry's body) can take an **Append** change instead of a replace: the
-fragment is added after whatever the field says at that point. Collections (tags, references,
-multi-selects) similarly take **Add item** / **Remove item**.
+fragment is added after whatever the field says at that point.
+
+Collections (tags, references, multi-selects) are simpler than that: you just **edit the list**.
+The `/mutate` dialog shows the field's normal widget, pre-filled with what the list *effectively
+contains at that point in the story*; add and remove items as usual. Small `+item` / `−item` chips
+under the widget show exactly what will be recorded — you author the edit, the app derives the
+add/remove records. Ending (closing) a unit later reverts those records like any other change.
 
 There is one contract to write by: **every appended fragment must stand alone.** Each change is an
 independent interval — it can be *closed* (ended) on its own, at any later point in the story.
 If fragment B leans on fragment A ("She trusts John." → "But only him."), closing A leaves B
 reading nonsense — the app resolves the remaining fragments correctly, but it cannot know that B's
 *meaning* depended on A. Write each append as if its neighbors might not be there, or author
-dependent changes as **one** named change (one `/mutate`, several fields — closeable together in
-one gesture).
+dependent changes as **one** named unit (one `/mutate`, several fields).
+
+Closing honours the same shape: `/mutate close` lists the open changes **by unit** — picking a
+unit ends everything it changed, in one gesture, while a multi-field unit can be expanded to end
+just one of its rows (the werewolf's mid-transform clue can outlive the transform).
 
 Collections are safer: adds and removes combine as set operations, so closing any one of them
 still leaves a coherent set. The stand-alone rule matters mainly for appended prose.

@@ -1,0 +1,159 @@
+<script lang="ts">
+  // The time-travel strip docked at the bottom of a lore card (#64, ADR-0013).
+  // Discrete stops — stop 0 = base/edit (home), then one stop per mutation
+  // point; effective state is constant BETWEEN markers so there is nothing to
+  // interpolate. Position is the mode: the rest position (stop 0) means the
+  // card is editable, any stop ≥ 1 flips it to a read-only effective overlay.
+  // Scrub state lives in NodeEditor (the card shell); this strip only renders
+  // the stops and emits the chosen one.
+  import { mutationRecordLabel } from "@/lib/editor-core/mutationNodes";
+  import type { MutationMarkerRecord } from "@/lib/types";
+
+  let {
+    markers,
+    index,
+    onScrub,
+  }: {
+    markers: MutationMarkerRecord[];
+    /** 0 = base (editable); i ≥ 1 = as of markers[i-1]. */
+    index: number;
+    onScrub: (index: number) => void;
+  } = $props();
+
+  // Per-stop labels: originating scene, disambiguated when one scene holds
+  // several of this entity's mutations ("Scene 5 · #2").
+  const stopLabels = $derived.by(() => {
+    const totals = new Map<string, number>();
+    for (const marker of markers) {
+      totals.set(marker.scene_path, (totals.get(marker.scene_path) ?? 0) + 1);
+    }
+    const seen = new Map<string, number>();
+    return markers.map((marker) => {
+      const nth = (seen.get(marker.scene_path) ?? 0) + 1;
+      seen.set(marker.scene_path, nth);
+      const path = marker.scene_path || "scene";
+      return (totals.get(marker.scene_path) ?? 1) > 1 ? `${path} · #${nth}` : path;
+    });
+  });
+
+  function stopTooltip(i: number): string {
+    return `${stopLabels[i]} — ${mutationRecordLabel(markers[i])}`;
+  }
+</script>
+
+<div class="mutation-scrubber-strip" role="group" aria-label="Effective-state scrubber">
+  <button
+    type="button"
+    class="scrub-stop scrub-base"
+    class:current={index === 0}
+    title="Base — book start (editable)"
+    aria-label="Base — book start"
+    onclick={() => onScrub(0)}
+  >
+    <i class="ti ti-home" aria-hidden="true"></i>
+  </button>
+  <div class="scrub-track">
+    {#each markers as marker, i (marker.marker_id)}
+      <button
+        type="button"
+        class="scrub-stop"
+        class:current={index === i + 1}
+        class:passed={index > i + 1}
+        title={stopTooltip(i)}
+        aria-label={`As of ${stopLabels[i]}`}
+        onclick={() => onScrub(i + 1)}
+      ></button>
+    {/each}
+  </div>
+  <span class="scrub-asof" class:scrubbed={index > 0}>
+    {#if index === 0}
+      Base — book start
+    {:else}
+      As of {stopLabels[index - 1]} · read-only
+    {/if}
+  </span>
+</div>
+
+<style>
+  .mutation-scrubber-strip {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 6px 14px;
+    border-top: 1px solid var(--divider, #e2e8e5);
+    background: var(--inset, #f7faf8);
+    min-width: 0;
+  }
+
+  .scrub-stop {
+    flex: none;
+    width: 14px;
+    height: 14px;
+    padding: 0;
+    border-radius: 50%;
+    border: 2px solid color-mix(in srgb, var(--mutation-color, #7c5cbf) 42%, transparent);
+    background: var(--surface, #fff);
+    cursor: pointer;
+    transition: border-color 80ms linear, background-color 80ms linear;
+  }
+  .scrub-stop:hover {
+    border-color: var(--mutation-color, #7c5cbf);
+  }
+  .scrub-stop.passed {
+    background: color-mix(in srgb, var(--mutation-color, #7c5cbf) 30%, var(--surface, #fff));
+  }
+  .scrub-stop.current {
+    background: var(--mutation-color, #7c5cbf);
+    border-color: var(--mutation-color, #7c5cbf);
+  }
+
+  /* Stop 0 — home/base. A touch larger, carries the edit affordance. */
+  .scrub-base {
+    width: 20px;
+    height: 20px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    border-radius: 6px;
+    font-size: 12px;
+    color: var(--text-2, #4d5753);
+  }
+  .scrub-base.current {
+    color: #fff;
+  }
+
+  .scrub-track {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    position: relative;
+    padding: 0 2px;
+    overflow-x: auto;
+    scrollbar-width: none;
+  }
+  /* The connecting rail behind the dots. */
+  .scrub-track::before {
+    content: "";
+    position: absolute;
+    left: 0;
+    right: 0;
+    top: 50%;
+    height: 2px;
+    background: color-mix(in srgb, var(--mutation-color, #7c5cbf) 24%, transparent);
+  }
+  .scrub-track .scrub-stop {
+    position: relative;
+  }
+
+  .scrub-asof {
+    margin-left: auto;
+    flex: none;
+    font-size: 11px;
+    color: var(--text-3, #74817b);
+    white-space: nowrap;
+  }
+  .scrub-asof.scrubbed {
+    color: var(--mutation-color, #7c5cbf);
+    font-weight: 600;
+  }
+</style>

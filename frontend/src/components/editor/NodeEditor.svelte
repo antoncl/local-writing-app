@@ -2,6 +2,7 @@
 
   import BacklinksPanel from "@/components/editor/BacklinksPanel.svelte";
   import MutationTimeline from "@/components/editor/MutationTimeline.svelte";
+  import MutationScrubber from "@/components/editor/MutationScrubber.svelte";
   import MetadataPanel from "@/components/editor/MetadataPanel.svelte";
   import InputsDialog from "@/components/editor/InputsDialog.svelte";
   import FieldsOnlyView from "@/components/editor/body/FieldsOnlyView.svelte";
@@ -12,8 +13,9 @@
   import { api } from "@/lib/api";
   import { formatCostEur } from "@/lib/utils/money";
   import { resolveColor } from "@/lib/utils/colors";
-  import type { AssistantEntrySummary, Backlink, BodyShape, DocumentKind, EditableDocument, EntryBodyLanguage, EntryMetadata, EntryTypeDefinition, MetadataFieldDefinition, MetadataSchema, PromptEntrySummary, PromptInputDefinition } from "@/lib/types";
+  import type { AssistantEntrySummary, Backlink, BodyShape, DocumentKind, EditableDocument, EntryBodyLanguage, EntryMetadata, EntryTypeDefinition, MetadataFieldDefinition, MetadataSchema, MutationMarkerRecord, PromptEntrySummary, PromptInputDefinition } from "@/lib/types";
   import { metadataSchemaStore } from "@/lib/stores/schema";
+  import { mutationsVersion } from "@/lib/stores/mutationsVersion.svelte";
 
   // Effective body shape for an entry type. Falls back through the
   // legacy has_body / body_editor pair when body_shape is absent
@@ -110,6 +112,72 @@
   // scene load below. `railIsPane` means metadata renders as the main
   // content (none-shape: assistant / project / structure_node).
   let railOpen = $state(true);
+
+  // ---- Time-travel scrub state (#64, ADR-0013) -------------------------------
+  // The lore card owns its scrub position: 0 = base/book-start (fully editable,
+  // today's card), i ≥ 1 = a read-only effective overlay as of the i-th
+  // mutation point. The ordered points feed both the bottom scrubber strip and
+  // the rail's mutation list — two views of one dataset, fetched once here.
+  let scrubMarkers = $state<MutationMarkerRecord[]>([]);
+  let scrubIndex = $state(0);
+  // Override map of ONLY the mutated fields at the scrub point (may include
+  // the intrinsic `title` / `body`). Membership = "changed by here".
+  let effectiveOverrides = $state<Record<string, string | string[]> | null>(null);
+  let scrubbed = $derived(documentKind === "lore" && scrubIndex > 0);
+
+  // Fetch the entity's ordered mutation points; refetch when the entity
+  // changes or a scene save touches the mutations index (#63). Either event
+  // may have moved/removed stops, so the scrub position resets to base.
+  $effect(() => {
+    const id = documentKind === "lore" ? (scene?.id ?? null) : null;
+    void mutationsVersion.value;
+    scrubIndex = 0;
+    effectiveOverrides = null;
+    if (!id) {
+      scrubMarkers = [];
+      return;
+    }
+    let cancelled = false;
+    api
+      .getEntityMutations(id)
+      .then((res) => {
+        if (!cancelled) scrubMarkers = res.items;
+      })
+      .catch(() => {
+        if (!cancelled) scrubMarkers = [];
+      });
+    return () => {
+      cancelled = true;
+    };
+  });
+
+  // Monotonic token so out-of-order responses from rapid scrubbing (or an
+  // entity switch mid-flight) can't overwrite the latest position.
+  let scrubSeq = 0;
+
+  async function scrubTo(index: number) {
+    scrubIndex = index;
+    if (index === 0) {
+      effectiveOverrides = null;
+      return;
+    }
+    const marker = scrubMarkers[index - 1];
+    const forEntity = scene?.id ?? null;
+    if (!marker || !forEntity) return;
+    const seq = ++scrubSeq;
+    try {
+      // Resolve at the marker's own position so it counts as live (offset <=
+      // position), giving the effective state "as of" this change.
+      const res = await api.getEntityEffectiveState(forEntity, marker.scene_id, marker.offset);
+      if (seq === scrubSeq && scene?.id === forEntity) effectiveOverrides = res.values;
+    } catch {
+      // Can't resolve → don't pretend: fall back to the editable base.
+      if (seq === scrubSeq && scene?.id === forEntity) {
+        scrubIndex = 0;
+        effectiveOverrides = null;
+      }
+    }
+  }
 
   // Rail width is user-resizable via the left-edge drag handle, persisted
   // across sessions. Clamped so the rail can be made slimmer or wider but
@@ -803,6 +871,8 @@
       implicitContextMatcher={implicitContextMatcher}
       excludeId={scene?.id ?? null}
       computedFieldString={computedFieldString}
+      effectiveOverrides={scrubbed ? effectiveOverrides : null}
+      readOnly={scrubbed}
       onEntryTypeChange={(next) => updateEntryType(next)}
       onStatusChange={(next) => updateStatus(next)}
       onMetadataChange={(next) => {
@@ -821,9 +891,12 @@
       />
     {/key}
     {#if documentKind === "lore" && scene?.id}
-      {#key scene.id}
-        <MutationTimeline entityId={scene.id} onNavigate={(payload) => onNavigate?.(payload)} />
-      {/key}
+      <MutationTimeline
+        mutations={scrubMarkers}
+        activeIndex={scrubIndex}
+        onSelect={(index) => void scrubTo(index)}
+        onNavigate={(payload) => onNavigate?.(payload)}
+      />
     {/if}
   {/if}
 {/snippet}
@@ -990,6 +1063,10 @@
         <span class="rail-tab-label">Details</span>
       </button>
     {/if}
+  {/if}
+
+  {#if documentKind === "lore" && scene && scrubMarkers.length > 0}
+    <MutationScrubber markers={scrubMarkers} index={scrubIndex} onScrub={(index) => void scrubTo(index)} />
   {/if}
 
   <footer class="status">

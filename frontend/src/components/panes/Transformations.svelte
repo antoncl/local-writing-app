@@ -9,13 +9,17 @@
   import TransformationSetEditor from "@/components/editor/body/TransformationSetEditor.svelte";
   import { api } from "@/lib/api";
   import { metadataSchemaStore } from "@/lib/stores/schema";
+  import {
+    refreshTransformationEntries,
+    setTransformationEntries,
+    transformationEntriesStore,
+  } from "@/lib/stores/transformations";
   import type {
     LoreEntrySummary,
     PromptEntrySummary,
     ScopedTag,
     StructureDocument,
     TransformationEntry,
-    TransformationEntrySummary,
   } from "@/lib/types";
 
   let {
@@ -34,20 +38,10 @@
 
   const schema = $derived($metadataSchemaStore);
 
-  let entries = $state<TransformationEntrySummary[]>([]);
+  const entries = $derived($transformationEntriesStore);
   let editorOpen = $state(false);
   let editing = $state<TransformationEntry | null>(null);
-
-  async function refresh() {
-    try {
-      entries = (await api.listTransformationEntries()).entries;
-    } catch {
-      entries = [];
-    }
-  }
-  $effect(() => {
-    void refresh();
-  });
+  let error = $state("");
 
   function typeLabel(id: string): string {
     return schema?.entry_types[id]?.name || id || "any type";
@@ -58,23 +52,27 @@
     editorOpen = true;
   }
   async function openEdit(id: string) {
+    error = "";
     try {
       editing = await api.getTransformationEntry(id);
       editorOpen = true;
-    } catch {
+    } catch (err) {
       editing = null;
+      error = `Could not open the set: ${err instanceof Error ? err.message : err}`;
     }
   }
   async function remove(id: string) {
+    error = "";
     try {
-      entries = (await api.deleteTransformationEntry(id)).entries;
-    } catch {
-      await refresh();
+      setTransformationEntries((await api.deleteTransformationEntry(id)).entries);
+    } catch (err) {
+      error = `Could not delete the set: ${err instanceof Error ? err.message : err}`;
+      await refreshTransformationEntries().catch(() => {});
     }
   }
   async function onSaved() {
     editorOpen = false;
-    await refresh();
+    await refreshTransformationEntries().catch(() => {});
   }
 </script>
 
@@ -82,6 +80,9 @@
   <div class="tset-toolbar">
     <button type="button" class="pin-button" onclick={openNew}>+ New set</button>
   </div>
+  {#if error}
+    <p class="pane-error" role="alert">{error}</p>
+  {/if}
   <NodeList isEmpty={entries.length === 0}>
     {#each entries as entry (entry.id)}
       <NodeRow title={entry.title} detail={`for ${typeLabel(entry.target_entry_type)}`} onClick={() => openEdit(entry.id)}>
@@ -130,6 +131,12 @@
     color: var(--text-3);
     font-size: 0.85rem;
     padding: 8px;
+  }
+  .pane-error {
+    color: var(--danger, #b4442f);
+    font-size: 0.85rem;
+    padding: 0 8px 4px;
+    margin: 0;
   }
   .row-action-delete {
     border: none;

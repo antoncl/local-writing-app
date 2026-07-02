@@ -10,9 +10,27 @@ v1.1 extends the grammar with three forward-compatible optional attributes
 
     ;op=<add|remove|replace>   collection operator (#58); absent ⇒ replace
     ;name=<url-encoded>        human label for the change (#65)
-    ;group=<group-id>          co-authored-set tie for a shared name (#65)
+    ;group=<group-id>          co-authored-set tie for a shared name (#65, legacy)
 
 Canonical order is `entity;field;op?;value;name?;group?;id`.
+
+The mutation-unit rework (#69, ADR-0016) adds the **carrier** form: one authored
+change touching N fields is ONE multi-line comment — a head (entity, optional
+name, unit id) plus one `field=` row per line, each row keeping its own id:
+
+    <!-- mutate:entity=<lore-id>[;name=<url-encoded>];id=<unit-id>
+    field=<key>[;op=<op>];value=<url-encoded>;id=<row-id>
+    -->
+
+The single-line marker is the **degenerate one-row form** of that grammar, not a
+legacy case: rendering emits it for one-row units (head folded into the sole
+row, unit id dropped), the carrier for ≥ 2 rows. Rows stay independent records —
+the unit is authoring/presentation granularity, never lifetime granularity
+(ADR-0002 holds). Every record carries `unit_id`/`unit_name`: its own id for a
+standalone single-line marker, the shared `group=` for legacy co-authored sets
+(subsumed; still parses, never re-emitted by new authoring), the head id for
+carrier rows. `close;ref=<unit-id>` is index-time sugar that ends every live row
+of the unit — expanded in `_resolve_closes` to per-row ends that merely coincide.
 
 Unlike embedded todos this marker wraps **no prose** — it is a point marker
 whose position within the scene body is semantically load-bearing (prose before
@@ -56,6 +74,26 @@ MUTATION_MARKER_PATTERN = re.compile(
     r"(?:;name=(?P<name>[^;\s]*))?"
     r"(?:;group=(?P<group>[A-Za-z0-9_-]+))?"
     r";id=(?P<id>[A-Za-z0-9_-]+)\s*-->",
+)
+
+# Carrier marker (#69, ADR-0016): head line + one field row per line. The rows
+# capture is deliberately loose (whole lines) — each line is re-matched against
+# MUTATION_CARRIER_ROW_PATTERN, and a carrier with ANY malformed row does not
+# parse as a unit at all (stays an inert comment), so a rewrite can never
+# silently drop a hand-authored line it failed to understand.
+MUTATION_CARRIER_PATTERN = re.compile(
+    r"<!--[ \t]*mutate:entity=(?P<entity>[A-Za-z0-9_-]+)"
+    r"(?:;name=(?P<name>[^;\s]*))?"
+    r";id=(?P<id>[A-Za-z0-9_-]+)[ \t]*\r?\n"
+    r"(?P<rows>(?:[ \t]*field=[^\r\n]*\r?\n)+)"
+    r"[ \t]*-->",
+)
+
+MUTATION_CARRIER_ROW_PATTERN = re.compile(
+    r"field=(?P<field>[A-Za-z0-9_.-]+);"
+    r"(?:op=(?P<op>add|remove|replace);)?"
+    r"value=(?P<value>[^;\s]*)"
+    r";id=(?P<id>[A-Za-z0-9_-]+)",
 )
 
 # Field types whose values are collections; these accept add/remove ops (#58).
@@ -121,6 +159,72 @@ def _render_mutation_marker(
 
 
 @dataclass
+class CarrierRow:
+    """One `field=` row of a carrier marker (#69), value kept url-encoded
+    verbatim so untouched rows round-trip byte-stable through a rewrite."""
+
+    field: str
+    op: str  # "replace" when the marker omits op=
+    raw_value: str
+    row_id: str
+
+
+def _parse_carrier_rows(match: re.Match[str]) -> list[CarrierRow] | None:
+    """Parse a carrier match's row block. `None` when any row is malformed —
+    the whole comment then stays an inert (never-rewritten) comment."""
+    rows: list[CarrierRow] = []
+    for line in match.group("rows").splitlines():
+        text = line.strip()
+        if not text:
+            continue
+        row = MUTATION_CARRIER_ROW_PATTERN.fullmatch(text)
+        if row is None:
+            return None
+        rows.append(
+            CarrierRow(
+                field=row.group("field"),
+                op=row.group("op") or "replace",
+                raw_value=row.group("value"),
+                row_id=row.group("id"),
+            )
+        )
+    return rows or None
+
+
+def _render_carrier_row(row: CarrierRow) -> str:
+    parts = [f"field={row.field}"]
+    if row.op and row.op != "replace":
+        parts.append(f"op={row.op}")
+    parts.append(f"value={row.raw_value}")
+    parts.append(f"id={row.row_id}")
+    return ";".join(parts)
+
+
+def _render_mutation_unit(
+    entity: str, raw_name: str, unit_id: str, rows: list[CarrierRow]
+) -> str:
+    """Render a unit in canonical form: the multi-line carrier for ≥ 2 rows, the
+    degenerate single-line marker for one (head folded into the sole row — the
+    unit id drops away and the row id is the marker id, so an edit that leaves
+    one row deterministically canonicalizes back to single-line; ADR-0016)."""
+    if len(rows) == 1:
+        row = rows[0]
+        return _render_mutation_marker(
+            entity, row.field, row.op, row.raw_value, raw_name, "", row.row_id
+        )
+    head = [f"entity={entity}"]
+    if raw_name:
+        head.append(f"name={raw_name}")
+    head.append(f"id={unit_id}")
+    lines = [
+        f"<!-- mutate:{';'.join(head)}",
+        *(_render_carrier_row(row) for row in rows),
+        "-->",
+    ]
+    return "\n".join(lines)
+
+
+@dataclass
 class MutationClose:
     """A parsed interval-close marker (#59) — ends the start record `ref` at this
     prose point. Manuscript position is resolved during index build."""
@@ -172,25 +276,62 @@ class LoreMutationsMixin(MarkerMixin):
         )
 
     def _iter_body_mutations(self, body: str, scene_id: str) -> Iterator[MutationMarker]:
-        """Regex-walk one raw body for markers. Split from `_scan_scene_mutations`
-        so validation (#53) can scan a body it already read (front-matter walk)
-        without materializing a Scene."""
-        return self._scan_body_markers(
-            body,
-            MUTATION_MARKER_PATTERN,
-            lambda match, line: MutationMarker(
-                marker_id=match.group("id"),
-                entity_id=match.group("entity"),
-                field=match.group("field"),
-                op=match.group("op") or "replace",
-                value=unquote(match.group("value")),
-                name=unquote(match.group("name") or ""),
-                group=match.group("group") or "",
-                scene_id=scene_id,
-                offset=match.start(),
-                line=line,
-            ),
-        )
+        """Regex-walk one raw body for markers — single-line AND carrier (#69) —
+        yielding one per-row record each, merged into prose order. Split from
+        `_scan_scene_mutations` so validation (#53) can scan a body it already
+        read (front-matter walk) without materializing a Scene.
+
+        Every record carries `unit_id`/`unit_name` (ADR-0016): own id for a
+        standalone marker, the legacy `group=` for co-authored sets, the head id
+        for carrier rows. Carrier rows share the carrier's prose offset — the
+        unit is one prose point, so its rows resolve together (ADR-0003)."""
+
+        def single(match: re.Match[str], line: int) -> list[MutationMarker]:
+            name = unquote(match.group("name") or "")
+            return [
+                MutationMarker(
+                    marker_id=match.group("id"),
+                    entity_id=match.group("entity"),
+                    field=match.group("field"),
+                    op=match.group("op") or "replace",
+                    value=unquote(match.group("value")),
+                    name=name,
+                    group=match.group("group") or "",
+                    unit_id=match.group("group") or match.group("id"),
+                    unit_name=name,
+                    scene_id=scene_id,
+                    offset=match.start(),
+                    line=line,
+                )
+            ]
+
+        def carrier(match: re.Match[str], line: int) -> list[MutationMarker]:
+            rows = _parse_carrier_rows(match)
+            if rows is None:
+                return []
+            unit_name = unquote(match.group("name") or "")
+            return [
+                MutationMarker(
+                    marker_id=row.row_id,
+                    entity_id=match.group("entity"),
+                    field=row.field,
+                    op=row.op,
+                    value=unquote(row.raw_value),
+                    unit_id=match.group("id"),
+                    unit_name=unit_name,
+                    scene_id=scene_id,
+                    offset=match.start(),
+                    line=line + 1 + index,
+                )
+                for index, row in enumerate(rows)
+            ]
+
+        groups = [
+            *self._scan_body_markers(body, MUTATION_MARKER_PATTERN, single),
+            *self._scan_body_markers(body, MUTATION_CARRIER_PATTERN, carrier),
+        ]
+        for group in sorted((g for g in groups if g), key=lambda g: g[0].offset):
+            yield from group
 
     # ----- validation (#53) ----------------------------------------------
 
@@ -354,24 +495,33 @@ class LoreMutationsMixin(MarkerMixin):
         """Map each start marker id → the (manuscript-position, offset) of its
         governing close: the earliest close positioned at/after the start (#59).
         A close before its start marks an empty interval, so it is ignored; a
-        close whose scene isn't in the manuscript is dropped."""
-        start_pos: dict[str, tuple[int, int]] = {
-            m.marker_id: (scene_order[m.scene_id], m.offset)
-            for records in by_entity.values()
-            for m in records
-            if m.scene_id in scene_order
-        }
+        close whose scene isn't in the manuscript is dropped.
+
+        `close;ref=<unit-id>` is expanded here (ADR-0016): it resolves as one
+        close per row of the unit — per-row liveness ends that merely coincide,
+        no shared-lifetime semantics. A standalone marker's unit id IS its row
+        id, so both spellings resolve identically for one-row units."""
+        start_pos: dict[str, tuple[int, int]] = {}
+        rows_by_unit: dict[str, list[str]] = {}
+        for records in by_entity.values():
+            for m in records:
+                if m.scene_id not in scene_order:
+                    continue
+                start_pos[m.marker_id] = (scene_order[m.scene_id], m.offset)
+                if m.unit_id:
+                    rows_by_unit.setdefault(m.unit_id, []).append(m.marker_id)
         governing: dict[str, tuple[int, int]] = {}
         for close in closes:
             if close.scene_id not in scene_order:
                 continue
-            start = start_pos.get(close.ref)
             close_at = (scene_order[close.scene_id], close.offset)
-            if start is None or close_at < start:
-                continue
-            current = governing.get(close.ref)
-            if current is None or close_at < current:
-                governing[close.ref] = close_at
+            for ref in rows_by_unit.get(close.ref) or [close.ref]:
+                start = start_pos.get(ref)
+                if start is None or close_at < start:
+                    continue
+                current = governing.get(ref)
+                if current is None or close_at < current:
+                    governing[ref] = close_at
         return governing
 
     def entity_mutations(self, entity_id: str) -> MutationMarkerList:
@@ -610,7 +760,8 @@ class LoreMutationsMixin(MarkerMixin):
                 digest.update(
                     f"{entity_id}\x1f{marker.scene_id}\x1f{marker.offset}"
                     f"\x1f{marker.field}\x1f{marker.op}\x1f{marker.value}"
-                    f"\x1f{marker.name}\x1f{marker.group}\x1f{marker.marker_id}\x1e".encode()
+                    f"\x1f{marker.name}\x1f{marker.group}\x1f{marker.marker_id}"
+                    f"\x1f{marker.unit_id}\x1f{marker.unit_name}\x1e".encode()
                 )
         for start_id in sorted(closes_by_start):
             close_pos, close_offset = closes_by_start[start_id]
@@ -622,39 +773,103 @@ class LoreMutationsMixin(MarkerMixin):
     def update_mutation(
         self, scene_id: str, marker_id: str, request: UpdateMutationRequest
     ) -> Scene:
-        """Rewrite a single mutation marker's entity/field/value in place, without
-        a full body save. Returns the updated scene so an open editor pane can
-        reconcile. Like save_scene, a marker edit never blocks on value
-        validity — the editor supplies typed values; validate_project reports
-        strays."""
+        """Rewrite a single mutation record's entity/field/value in place, without
+        a full body save — a standalone marker, or one row inside a carrier
+        (ADR-0016: PATCH keeps addressing rows; the whole carrier is rewritten
+        around the edited row, untouched rows byte-stable). A `name` on the
+        request lands where the grammar keeps it: the marker itself when
+        single-line, the carrier head when the row lives in one. Returns the
+        updated scene so an open editor pane can reconcile. Like save_scene, a
+        marker edit never blocks on value validity — the editor supplies typed
+        values; validate_project reports strays."""
         return self._apply_scene_marker_edit(
             scene_id,
             "Mutation",
             marker_id,
-            lambda body: self._rewrite_single_marker(
-                body,
-                MUTATION_MARKER_PATTERN,
-                "id",
-                marker_id,
-                lambda match: self._render_mutation(match, marker_id, request),
-            ),
+            lambda body: self._rewrite_mutation_record(body, marker_id, request),
         )
 
     def delete_mutation(self, scene_id: str, marker_id: str) -> Scene:
-        """Remove a single mutation marker. The marker wraps no prose, so removal
-        just drops the comment. Returns the updated scene."""
+        """Remove a mutation record: a standalone marker, one carrier row (a
+        carrier left with one row canonicalizes back to single-line; left with
+        none it drops entirely), or — when `marker_id` is a carrier's head id —
+        the whole unit and all its rows (ADR-0016). Markers wrap no prose, so
+        removal just drops comment text. Returns the updated scene."""
         return self._apply_scene_marker_edit(
             scene_id,
             "Mutation",
             marker_id,
-            lambda body: self._rewrite_single_marker(
-                body,
-                MUTATION_MARKER_PATTERN,
-                "id",
-                marker_id,
-                lambda match: "",  # point marker: removal drops the comment
+            lambda body: self._rewrite_mutation_record(body, marker_id, None),
+        )
+
+    def _rewrite_mutation_record(
+        self, body: str, marker_id: str, request: UpdateMutationRequest | None
+    ) -> tuple[str, bool]:
+        """The single-record rewrite behind update/delete (`request=None` ⇒
+        delete): try the single-line grammar first, then the carrier rows."""
+        new_body, found = self._rewrite_single_marker(
+            body,
+            MUTATION_MARKER_PATTERN,
+            "id",
+            marker_id,
+            lambda match: (
+                self._render_mutation(match, marker_id, request) if request else ""
             ),
         )
+        if found:
+            return new_body, found
+        return self._rewrite_carrier_record(body, marker_id, request)
+
+    def _rewrite_carrier_record(
+        self, body: str, marker_id: str, request: UpdateMutationRequest | None
+    ) -> tuple[str, bool]:
+        """Rewrite/delete one row inside a carrier marker (#69), or delete a
+        whole carrier by its head id. Rows other than the target keep their
+        url-encoded values verbatim; the result renders in canonical form, so
+        a one-row survivor degenerates to a single-line marker."""
+        found = False
+
+        def replace(match: re.Match[str]) -> str:
+            nonlocal found
+            if found:
+                return match.group(0)
+            rows = _parse_carrier_rows(match)
+            if rows is None:
+                return match.group(0)
+            if request is None and marker_id == match.group("id"):
+                found = True  # deleting the unit drops the carrier wholesale
+                return ""
+            index = next(
+                (i for i, row in enumerate(rows) if row.row_id == marker_id), None
+            )
+            if index is None:
+                return match.group(0)
+            found = True
+            if request is None:
+                del rows[index]
+                if not rows:
+                    return ""
+            else:
+                row = rows[index]
+                rows[index] = CarrierRow(
+                    field=request.field or row.field,
+                    op=request.op or row.op,
+                    raw_value=(
+                        quote(request.value, safe="")
+                        if request.value is not None
+                        else row.raw_value
+                    ),
+                    row_id=marker_id,
+                )
+            entity = (request.entity_id if request else None) or match.group("entity")
+            raw_name = (
+                quote(request.name, safe="")
+                if request is not None and request.name is not None
+                else (match.group("name") or "")
+            )
+            return _render_mutation_unit(entity, raw_name, match.group("id"), rows)
+
+        return MUTATION_CARRIER_PATTERN.sub(replace, body), found
 
     def _render_mutation(
         self, match: re.Match[str], marker_id: str, request: UpdateMutationRequest

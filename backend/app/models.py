@@ -870,6 +870,14 @@ class MutationMarker(BaseModel):
     # frames — each record's interval stays independent (ADR-0015).
     name: str = ""
     group: str = ""
+    # Mutation-unit tie (#69, ADR-0016): the authored change this record belongs
+    # to — the record's own id for a standalone single-line marker, the legacy
+    # `group=` for old co-authored sets, the carrier head's id for multi-row
+    # units. Authoring/presentation granularity only (pill, timeline, scrubber,
+    # close picker group by it); each record's lifetime stays its own
+    # (ADR-0002). `unit_name` is the unit's human label from the head.
+    unit_id: str = ""
+    unit_name: str = ""
     scene_id: str
     offset: int = 0  # char offset of the marker in the scene body (position-granular)
     line: int = 1

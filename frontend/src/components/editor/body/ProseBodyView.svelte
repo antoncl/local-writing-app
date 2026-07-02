@@ -42,13 +42,15 @@
     createMutationCloseMark,
   } from "@/lib/editor-core/proseMarks";
   import {
-    applyMutationDrafts,
+    applyMutationUnitDraft,
     closeLabelFromDoc,
     dedupeMutationIds,
     insertMutationClose,
     removeMutationNode,
+    unitRows,
+    type MutationUnitDraft,
   } from "@/lib/editor-core/mutationNodes";
-  import MutationAuthoringForm, { type MutationDraft } from "./MutationAuthoringForm.svelte";
+  import MutationAuthoringForm from "./MutationAuthoringForm.svelte";
   import MutationCloseForm from "./MutationCloseForm.svelte";
   import {
     parseSlashBody,
@@ -991,13 +993,14 @@
     return `todo_${randomId.slice(0, 12)}`;
   }
 
-  // `/mutate` authoring dialog (#33). Create mode inserts one pill (client-minted
-  // id) per selected field at the cursor; clicking a pill opens edit mode, which
-  // rewrites/removes the node in place. Markers round-trip to scene-body comments
-  // via the turndown rule on save.
+  // `/mutate` authoring dialog (#33, #69). Create mode inserts ONE unit pill
+  // (client-minted ids) carrying every selected field row at the cursor;
+  // clicking a pill opens edit mode on the whole unit, which rewrites/removes
+  // the node in place. Units round-trip to scene-body comments (single-line or
+  // multi-line carrier) via the turndown rule on save.
   let mutationDialogOpen = $state(false);
   let mutationPresetEntityId = $state("");
-  let mutationEditInitial = $state<MutationDraft | null>(null);
+  let mutationEditInitial = $state<MutationUnitDraft | null>(null);
   // The `/mutate close` picker (#59) — a separate dialog from the authoring form.
   let mutationCloseDialogOpen = $state(false);
   let mutationClosePresetEntityId = $state("");
@@ -1018,7 +1021,7 @@
     if (editor) insertMutationClose(editor, ref);
   }
 
-  function openMutationEdit(initial: MutationDraft) {
+  function openMutationEdit(initial: MutationUnitDraft) {
     mutationPresetEntityId = "";
     mutationEditInitial = initial;
     mutationDialogOpen = true;
@@ -1034,9 +1037,9 @@
     return changed;
   }
 
-  function handleMutationSubmit(drafts: MutationDraft[]) {
+  function handleMutationSubmit(draft: MutationUnitDraft) {
     mutationDialogOpen = false;
-    if (editor) applyMutationDrafts(editor, drafts);
+    if (editor) applyMutationUnitDraft(editor, draft);
   }
 
   function deleteMutationNode(markerId: string) {
@@ -1299,16 +1302,14 @@
         },
         handleKeyDown: handleEditorKeydown,
         handleClickOn: (_view, pos, node) => {
-          // Click a mutation pill → edit it (rewrite/remove the node in place).
+          // Click a mutation pill → edit the whole unit (#69) in place.
           if (node.type.name === "mutation") {
             openMutationEdit({
               markerId: String(node.attrs.markerId ?? ""),
               entity: String(node.attrs.entity ?? ""),
-              field: String(node.attrs.field ?? ""),
-              op: String(node.attrs.op ?? "replace"),
-              value: String(node.attrs.value ?? ""),
               name: String(node.attrs.name ?? ""),
               group: String(node.attrs.group ?? ""),
+              rows: unitRows(node.attrs),
             });
             return true;
           }

@@ -43,24 +43,39 @@ turndown.addRule("mutationMark", {
   replacement: (_content: string, node: Node) => {
     const element = node as HTMLElement;
     const entity = element.dataset.mutationEntity;
-    const field = element.dataset.mutationField;
     const markerId = element.dataset.mutationId;
-    if (!entity || !field || !markerId) return "";
-    // Value/name are url-encoded so they survive the markdown round-trip (matches
-    // the backend marker grammar + embedded-todo note encoding). Optional op/name/
-    // group are emitted only when non-default, in canonical order — v1.0 markers
-    // stay byte-stable (mirrors lore_mutations._render_mutation_marker).
-    const op = element.dataset.mutationOp || "replace";
-    const value = encodeURIComponent(element.dataset.mutationValue ?? "");
+    if (!entity || !markerId) return "";
+    // A pill is a mutation unit (#69, ADR-0016): its rows serialize to the
+    // single-line marker when there is one (head folded into the sole row —
+    // v1.0/v1.1 markers stay byte-stable) and to the multi-line carrier
+    // comment when there are more. Values/names are url-encoded so they
+    // survive the markdown round-trip; optional op/name/group are emitted only
+    // when non-default, in canonical order (mirrors lore_mutations).
+    const rows = mutationRowsFromElement(element);
+    if (rows.length === 0) return "";
     const name = element.dataset.mutationName ?? "";
-    const group = element.dataset.mutationGroup ?? "";
-    const parts = [`entity=${entity}`, `field=${field}`];
-    if (op && op !== "replace") parts.push(`op=${op}`);
-    parts.push(`value=${value}`);
-    if (name) parts.push(`name=${encodeURIComponent(name)}`);
-    if (group) parts.push(`group=${group}`);
-    parts.push(`id=${markerId}`);
-    return `<!-- mutate:${parts.join(";")} -->`;
+    if (rows.length === 1) {
+      const row = rows[0];
+      const group = element.dataset.mutationGroup ?? "";
+      const parts = [`entity=${entity}`, `field=${row.field}`];
+      if (row.op && row.op !== "replace") parts.push(`op=${row.op}`);
+      parts.push(`value=${encodeURIComponent(row.value)}`);
+      if (name) parts.push(`name=${encodeURIComponent(name)}`);
+      if (group) parts.push(`group=${group}`);
+      parts.push(`id=${row.id || markerId}`);
+      return `<!-- mutate:${parts.join(";")} -->`;
+    }
+    const head = [`entity=${entity}`];
+    if (name) head.push(`name=${encodeURIComponent(name)}`);
+    head.push(`id=${markerId}`);
+    const lines = rows.map((row) => {
+      const parts = [`field=${row.field}`];
+      if (row.op && row.op !== "replace") parts.push(`op=${row.op}`);
+      parts.push(`value=${encodeURIComponent(row.value)}`);
+      parts.push(`id=${row.id}`);
+      return parts.join(";");
+    });
+    return `<!-- mutate:${head.join(";")}\n${lines.join("\n")}\n-->`;
   },
 });
 turndown.addRule("mutationCloseMark", {
@@ -162,13 +177,92 @@ function markEmbeddedCharacters(markdown: string): string {
   );
 }
 
+interface MutationRowShape {
+  id: string;
+  field: string;
+  op: string;
+  value: string;
+}
+
+/** Read a mutation pill span's rows: the JSON `data-mutation-rows` attr (#69),
+ *  falling back to the pre-#69 one-field-per-span shape for pasted HTML. */
+function mutationRowsFromElement(element: HTMLElement): MutationRowShape[] {
+  const raw = element.dataset.mutationRows;
+  if (raw) {
+    try {
+      const parsed = JSON.parse(raw);
+      if (Array.isArray(parsed)) {
+        return parsed.map((row) => ({
+          id: String(row?.id ?? ""),
+          field: String(row?.field ?? ""),
+          op: String(row?.op || "replace"),
+          value: String(row?.value ?? ""),
+        }));
+      }
+    } catch {
+      // fall through to the legacy shape
+    }
+  }
+  const field = element.dataset.mutationField;
+  if (!field) return [];
+  return [
+    {
+      id: element.dataset.mutationId ?? "",
+      field,
+      op: element.dataset.mutationOp || "replace",
+      value: element.dataset.mutationValue ?? "",
+    },
+  ];
+}
+
+function mutationSpan(
+  entity: string,
+  name: string,
+  group: string,
+  unitId: string,
+  rows: MutationRowShape[],
+): string {
+  const nameAttr = name ? ` data-mutation-name="${escapeAttribute(name)}"` : "";
+  const groupAttr = group ? ` data-mutation-group="${escapeAttribute(group)}"` : "";
+  return (
+    `<span data-mutation-entity="${escapeAttribute(entity)}"` +
+    nameAttr +
+    groupAttr +
+    ` data-mutation-rows="${escapeAttribute(JSON.stringify(rows))}"` +
+    ` data-mutation-id="${escapeAttribute(unitId)}"></span>`
+  );
+}
+
+// One field row of a carrier comment (#69) — mirrors the backend's
+// MUTATION_CARRIER_ROW_PATTERN; keep in lockstep with lore_mutations.py.
+const CARRIER_ROW_PATTERN =
+  /^field=([A-Za-z0-9_.-]+);(?:op=(add|remove|replace);)?value=([^;\s]*);id=([A-Za-z0-9_-]+)$/;
+
 function markEmbeddedMutations(markdown: string): string {
   // A mutation marker is a self-contained point comment (no wrapped prose) →
-  // an empty atom span the MutationMark node parses. Value/name are url-decoded
-  // into the data attributes for display; turndown re-encodes them on save. The
-  // optional op/name/group groups mirror the backend grammar (lore_mutations),
-  // and are absent on v1.0 markers.
-  return markdown.replace(
+  // an empty atom span the MutationMark node parses. Values/names are
+  // url-decoded into the data attributes for display; turndown re-encodes them
+  // on save. Two grammars (#69, ADR-0016): the multi-line carrier (one unit,
+  // N field rows) runs first — its head can never match the single-line form —
+  // then the single-line marker, loaded as a one-row unit whose unit id IS the
+  // marker id. A carrier with any malformed row is left as an inert comment
+  // (mirrors the backend: rewrites must never drop a hand-authored line).
+  const withCarriers = markdown.replace(
+    /<!--[ \t]*mutate:entity=([A-Za-z0-9_-]+)(?:;name=([^;\s]*))?;id=([A-Za-z0-9_-]+)[ \t]*\r?\n((?:[ \t]*field=[^\r\n]*\r?\n)+)[ \t]*-->/g,
+    (match, entity: string, name: string | undefined, unitId: string, rowsBlock: string) => {
+      const rows: MutationRowShape[] = [];
+      for (const line of rowsBlock.split(/\r?\n/)) {
+        const text = line.trim();
+        if (!text) continue;
+        const row = CARRIER_ROW_PATTERN.exec(text);
+        if (!row) return match;
+        rows.push({ id: row[4], field: row[1], op: row[2] || "replace", value: decodeNote(row[3]) });
+      }
+      if (rows.length === 0) return match;
+      return mutationSpan(entity, decodeNote(name ?? ""), "", unitId, rows);
+    },
+  );
+  return withCarriers.replace(
     /<!--\s*mutate:entity=([A-Za-z0-9_-]+);field=([A-Za-z0-9_.-]+);(?:op=(add|remove|replace);)?value=([^;\s]*)(?:;name=([^;\s]*))?(?:;group=([A-Za-z0-9_-]+))?;id=([A-Za-z0-9_-]+)\s*-->/g,
     (
       _match,
@@ -180,18 +274,10 @@ function markEmbeddedMutations(markdown: string): string {
       group: string | undefined,
       markerId: string,
     ) => {
-      const opAttr = op && op !== "replace" ? ` data-mutation-op="${escapeAttribute(op)}"` : "";
-      const nameAttr = name ? ` data-mutation-name="${escapeAttribute(decodeNote(name))}"` : "";
-      const groupAttr = group ? ` data-mutation-group="${escapeAttribute(group)}"` : "";
-      return (
-        `<span data-mutation-entity="${escapeAttribute(entity)}"` +
-        ` data-mutation-field="${escapeAttribute(field)}"` +
-        opAttr +
-        ` data-mutation-value="${escapeAttribute(decodeNote(value))}"` +
-        nameAttr +
-        groupAttr +
-        ` data-mutation-id="${escapeAttribute(markerId)}"></span>`
-      );
+      const rows: MutationRowShape[] = [
+        { id: markerId, field, op: op || "replace", value: decodeNote(value) },
+      ];
+      return mutationSpan(entity, decodeNote(name ?? ""), group ?? "", markerId, rows);
     },
   );
 }

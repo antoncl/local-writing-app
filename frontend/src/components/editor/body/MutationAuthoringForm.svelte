@@ -1,22 +1,11 @@
-<script lang="ts" module>
-  export type MutationDraft = {
-    entity: string;
-    field: string;
-    op?: string; // "replace" (default) | "add" | "remove" (#58)
-    value: string;
-    markerId?: string;
-    name?: string;
-    group?: string;
-  };
-</script>
-
 <script lang="ts">
-  // Authoring/edit form for lore mutations (#33, #56). Composes
+  // Authoring/edit form for lore mutations (#33, #56, #69). Composes
   // MutationDialogShell + MutationFieldRows — the same chrome and row widget
   // as the Mutations-pane set editor, so authoring a change and authoring a
   // set are one UX: "+ Add field change" rows of (field, op, value).
-  // Create mode sets one or more fields (→ N markers). Edit mode (given
-  // `initial`) edits one existing marker and can delete it.
+  // One submit = ONE mutation unit (ADR-0016): entity + optional name + N
+  // rows → one pill. Edit mode (given `initial`) edits the whole unit —
+  // add/remove/change rows, rename — or deletes it.
   import { untrack } from "svelte";
   import ReferencePicker from "@/components/widgets/ReferencePicker.svelte";
   import MutationDialogShell from "@/components/editor/body/MutationDialogShell.svelte";
@@ -29,7 +18,10 @@
     type MutationRow,
   } from "@/components/editor/body/MutationFieldRows.svelte";
   import { api } from "@/lib/api";
-  import { createMutationId } from "@/lib/editor-core/mutationNodes";
+  import type {
+    MutationRowDraft,
+    MutationUnitDraft,
+  } from "@/lib/editor-core/mutationNodes";
   import type {
     LoreEntrySummary,
     MetadataFieldDefinition,
@@ -62,22 +54,32 @@
     researchStructure?: StructureDocument | null;
     knownTags?: ScopedTag[];
     implicitContextMatcher?: import("@/lib/editor-core/implicitContextMatcher").CompiledMatcher | null;
-    initial?: MutationDraft | null;
+    initial?: MutationUnitDraft | null;
     /** Pre-selected entity id for create mode (e.g. from `/mutate Alice`). */
     presetEntityId?: string;
-    onSubmit: (drafts: MutationDraft[]) => void;
+    onSubmit: (draft: MutationUnitDraft) => void;
     onDelete?: (markerId: string) => void;
     onCancel: () => void;
   } = $props();
 
   const editing = $derived(Boolean(initial?.markerId));
 
+  // Form rows carry the unit's row ids through the edit round-trip (#69) so an
+  // unchanged row keeps its id — and with it any close targeting it.
+  type FormRow = MutationRow & { id?: string };
+
   // The dialog re-mounts on each open ({#if} in the parent), so capturing the
   // initial prop values once is intentional (untrack silences the lint).
   let entityId = $state(untrack(() => initial?.entity ?? presetEntityId ?? ""));
-  let rows = $state<MutationRow[]>(
-    untrack(() =>
-      initial ? [{ field: initial.field, op: initial.op || "replace", value: initial.value }] : [],
+  let rows = $state<FormRow[]>(
+    untrack(
+      () =>
+        initial?.rows.map((row) => ({
+          id: row.id ?? undefined,
+          field: row.field,
+          op: row.op || "replace",
+          value: row.value,
+        })) ?? [],
     ),
   );
 
@@ -87,7 +89,7 @@
   // as a new reusable set. Both only in create mode. §6: an optional name labels
   // the change (shared across the co-authored group).
   let mode = $state<"manual" | "apply">("manual");
-  let changeName = $state("");
+  let changeName = $state(untrack(() => initial?.name ?? ""));
   let saveAsSet = $state(false);
   let allSets = $state<MutationSetEntrySummary[]>([]);
   // Type-scoped picker: only sets whose target matches the picked entity's type.
@@ -119,32 +121,21 @@
     } catch {
       return;
     }
-    // Expand to N independent inline markers as a co-authored group (shared name
-    // + group default to the set's title) — a stamp, individually editable after.
-    const group = createMutationId();
-    const drafts: MutationDraft[] = full.rows.map((row) => ({
-      entity: entity!.id,
+    // Stamp the set as ONE unit named after it (#69) — rows stay individually
+    // editable/closeable after.
+    const unitRows: MutationRowDraft[] = full.rows.map((row) => ({
       field: row.field,
       op: row.op || "replace",
       value: row.value,
-      name: full.title,
-      group,
     }));
-    if (drafts.length > 0) onSubmit(drafts);
+    if (unitRows.length > 0) onSubmit({ entity: entity.id, name: full.title, rows: unitRows });
   }
 
-  // In edit mode the one field is fixed; otherwise fields scope to the entity's
-  // resolved entry type.
-  const fieldOptions = $derived.by((): FieldOption[] => {
-    if (!entity) return [];
-    if (initial) {
-      const def =
-        schema?.fields[initial.field] ??
-        (fieldDefFor(initial.field, schema) as MetadataFieldDefinition);
-      return [{ id: initial.field, label: def.name ?? initial.field, def }];
-    }
-    return buildFieldOptions(schema, entity.entry_type);
-  });
+  // Fields scope to the entity's resolved entry type (edit mode included — the
+  // whole unit is editable, #69).
+  const fieldOptions = $derived.by((): FieldOption[] =>
+    entity ? buildFieldOptions(schema, entity.entry_type) : [],
+  );
 
   const entityRefField = {
     name: "Entity",
@@ -189,8 +180,7 @@
 
   function submit() {
     if (!entity) return;
-    const drafts: MutationDraft[] = [];
-    const setRows: { field: string; op: string; value: string }[] = [];
+    const unitRows: MutationRowDraft[] = [];
     for (const row of rows) {
       if (!isFilled(row.value)) continue;
       const def = fieldDefFor(row.field, schema);
@@ -198,50 +188,47 @@
         isCollectionType(def.type) || isTextAppendType(def.type)
           ? row.op || "replace"
           : "replace";
-      // add/remove carry one element each; an array-valued item widget mints one
-      // marker per element (doc §1.2). replace carries the whole value.
+      // add/remove carry one element each; an array-valued item widget expands
+      // to one row per element (doc §1.2) — all inside this ONE unit (#69).
+      // replace carries the whole value. The form row's id survives only a 1:1
+      // expansion; fan-out rows are new records and mint fresh ids downstream.
       const values =
         op !== "replace" && Array.isArray(row.value)
           ? row.value.map((item) => toMarkerString(item))
           : [toMarkerString(row.value)];
       for (const value of values) {
-        drafts.push({
-          entity: entity.id,
+        unitRows.push({
+          ...(values.length === 1 && row.id ? { id: row.id } : {}),
           field: row.field,
           op,
           value,
-          ...(initial?.markerId
-            ? { markerId: initial.markerId, name: initial.name, group: initial.group }
-            : {}),
         });
-        setRows.push({ field: row.field, op, value });
       }
     }
-    if (drafts.length === 0) return;
-    if (!editing) {
-      // Co-authored group (§6): a shared name + group tie a plural change into one
-      // nameable, close-together unit. Each record's interval stays independent.
-      const named = changeName.trim();
-      if (named || drafts.length > 1) {
-        const group = createMutationId();
-        for (const draft of drafts) {
-          draft.group = group;
-          if (named) draft.name = named;
-        }
-      }
-      // Capture (§5.3): also save the composed change as a reusable set — the
-      // entity is dropped (rows + target entry-type only), so it's a template.
-      if (saveAsSet) {
-        void api
-          .createMutationSetEntry({
-            title: named || "Untitled set",
-            target_entry_type: entity.entry_type,
-            rows: setRows,
-          })
-          .catch(() => {});
-      }
+    if (unitRows.length === 0) return;
+    const named = changeName.trim();
+    // Capture (§5.3): also save the composed change as a reusable set — the
+    // entity is dropped (rows + target entry-type only), so it's a template.
+    if (!editing && saveAsSet) {
+      void api
+        .createMutationSetEntry({
+          title: named || "Untitled set",
+          target_entry_type: entity.entry_type,
+          rows: unitRows.map((row) => ({
+            field: row.field,
+            op: row.op || "replace",
+            value: row.value,
+          })),
+        })
+        .catch(() => {});
     }
-    onSubmit(drafts);
+    onSubmit({
+      markerId: initial?.markerId ?? undefined,
+      entity: entity.id,
+      name: named,
+      group: initial?.group ?? "",
+      rows: unitRows,
+    });
   }
 
   function onKeydown(event: KeyboardEvent) {
@@ -298,8 +285,8 @@
       schema={schema}
       entryType={entity.entry_type}
       fieldOptions={fieldOptions}
-      fieldEditable={!editing}
-      showAdd={!editing}
+      fieldEditable={true}
+      showAdd={true}
       showNameFieldNote={true}
       loreEntries={loreEntries}
       promptEntries={promptEntries}
@@ -311,22 +298,22 @@
       onRowRemove={removeRow}
       onRowAdd={addRow}
     />
-    {#if !editing}
-      <div class="mutation-capture">
-        <label class="mutation-label" for="mutation-change-name">Name this change (optional)</label>
-        <input
-          id="mutation-change-name"
-          class="mutation-name-input"
-          value={changeName}
-          placeholder="e.g. Full Moon transformation"
-          oninput={(e) => (changeName = e.currentTarget.value)}
-        />
+    <div class="mutation-capture">
+      <label class="mutation-label" for="mutation-change-name">Name this change (optional)</label>
+      <input
+        id="mutation-change-name"
+        class="mutation-name-input"
+        value={changeName}
+        placeholder="e.g. Full Moon transformation"
+        oninput={(e) => (changeName = e.currentTarget.value)}
+      />
+      {#if !editing}
         <label class="mutation-check">
           <input type="checkbox" checked={saveAsSet} onchange={(e) => (saveAsSet = e.currentTarget.checked)} />
           <span>Save as a reusable set for {entity.entry_type}</span>
         </label>
-      </div>
-    {/if}
+      {/if}
+    </div>
   {/if}
 
   {#snippet footer()}

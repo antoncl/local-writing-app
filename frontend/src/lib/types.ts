@@ -444,7 +444,9 @@ export type MutationMarkerRecord = {
   op: string; // "replace" (default) | "add" | "remove" (#58)
   value: string;
   name: string; // optional human label (#65)
-  group: string; // co-authored-set tie (#65)
+  group: string; // co-authored-set tie (#65, legacy)
+  unit_id: string; // the authored unit this record belongs to (#69, ADR-0016)
+  unit_name: string; // the unit's human label from the carrier head
   scene_id: string;
   offset: number;
   line: number;

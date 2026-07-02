@@ -50,6 +50,7 @@ def expand_context(
     *,
     source: JournalSource = "user_message",
     turn: int = 0,
+    scene: str | None = None,
 ) -> list[ChatSessionJournalEntry]:
     """Scan `text`, expand depth-1, return NEW journal entries.
 
@@ -67,8 +68,9 @@ def expand_context(
     if not isinstance(text, str) or not text.strip():
         return []
 
-    # Direct textual matches against title + aliases.
-    direct_ids = _alias_match(project, text)
+    # Direct textual matches against title + aliases, resolved under each
+    # entity's effective name-set as of the chat's resolution scene (#61).
+    direct_ids = _alias_match(project, text, scene=scene)
     if not direct_ids:
         return []
 
@@ -76,7 +78,7 @@ def expand_context(
     # Note: this also re-finds names from `text` if they happen to appear
     # in any direct match's body, so we'll need to subtract direct_ids
     # below.
-    depth1_ids = _textual_one_hop(project, direct_ids)
+    depth1_ids = _textual_one_hop(project, direct_ids, scene=scene)
 
     # What's already pinned via explicit picks or earlier journal turns?
     in_scope: set[str] = set()

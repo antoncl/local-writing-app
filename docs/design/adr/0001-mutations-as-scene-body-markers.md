@@ -1,7 +1,11 @@
 # ADR-0001: Mutations stored as self-contained scene-body markers (Model A)
 
-- Status: Accepted — 0.4.0 planning, 2026-07-01
+- Status: Accepted — 0.4.0 planning, 2026-07-01 · **Amended 2026-07-02: multi-row carrier (ADR-0016)**
 - Feature: #33 mid-scene lore mutations · Doc: `docs/design/mid-scene-lore-mutations.md` §3
+
+> **Amendment (2026-07-02, ADR-0016)** — the grammar gains a **multi-line carrier form** for a
+> multi-field authored change (one comment: head + one `field=` row per line, each row with its
+> own id). The single-line marker below is the degenerate one-row form and parses unchanged.
 
 ## Decision
 Store each mutation as a **self-contained HTML-comment marker in the scene body**, at the prose

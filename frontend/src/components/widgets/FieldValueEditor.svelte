@@ -26,6 +26,10 @@
     value: MetadataValue;
     /** Emits the NORMALIZED value (number stays a number, list a list, …). */
     onChange: (value: MetadataValue) => void;
+    /** Read-only mode (#64, ADR-0013): each type renders a static display
+     *  through the same widget vocabulary (chips, pills, swatch, toggle) —
+     *  never a raw string dump. `onChange` is never called. */
+    readOnly?: boolean;
     ariaLabel?: string;
     loreEntries?: LoreEntrySummary[];
     promptEntries?: PromptEntrySummary[];
@@ -43,6 +47,7 @@
     field,
     value,
     onChange,
+    readOnly = false,
     ariaLabel,
     loreEntries = [],
     promptEntries = [],
@@ -128,18 +133,31 @@
     const hasIt = current.some((item) => item.toLowerCase() === key);
     emit(hasIt ? current.filter((item) => item.toLowerCase() !== key) : [...current, option]);
   }
+
+  function optionLabel(raw: string): string {
+    const key = raw.toLowerCase();
+    const match = field.options.find((option) => option.value.toLowerCase() === key);
+    return match?.label ?? raw;
+  }
 </script>
 
 {#if field.type === "long_text"}
-  <MetadataLongTextEditor
-    ariaLabel={label}
-    value={currentValue}
-    matcher={implicitContextMatcher}
-    on:change={(event) => emit(event.detail.value)}
-  />
+  {#if readOnly}
+    <div class="fv-static fv-static-longtext" aria-label={label}>
+      {#if currentValue}{currentValue}{:else}<span class="fv-empty">—</span>{/if}
+    </div>
+  {:else}
+    <MetadataLongTextEditor
+      ariaLabel={label}
+      value={currentValue}
+      matcher={implicitContextMatcher}
+      on:change={(event) => emit(event.detail.value)}
+    />
+  {/if}
 {:else if field.type === "entity_ref" || field.type === "entity_ref_list"}
   <ReferencePicker
     {field}
+    {readOnly}
     value={metadataReferenceValue(field, value)}
     excludeId={excludeId}
     ariaLabel={label}
@@ -151,20 +169,32 @@
     on:navigate={(event) => onNavigate?.(event.detail)}
   />
 {:else if field.type === "multi_select" && field.options.length > 0}
-  <div class="multi-select-chips" aria-label={label}>
-    {#each field.options as option}
-      <button
-        class:active={hasOption(option.value)}
-        class="multi-select-chip"
-        type="button"
-        onclick={() => toggleOption(option.value)}
-      >
-        {option.label ?? option.value}
-      </button>
-    {/each}
-  </div>
+  {#if readOnly}
+    <!-- Only the selected options — the read-only question is "what IS the
+         value", not "what could it be". -->
+    <div class="multi-select-chips" aria-label={label}>
+      {#each metadataValueList(value) as selected (selected)}
+        <span class="multi-select-chip active static">{optionLabel(selected)}</span>
+      {:else}
+        <span class="fv-empty">—</span>
+      {/each}
+    </div>
+  {:else}
+    <div class="multi-select-chips" aria-label={label}>
+      {#each field.options as option}
+        <button
+          class:active={hasOption(option.value)}
+          class="multi-select-chip"
+          type="button"
+          onclick={() => toggleOption(option.value)}
+        >
+          {option.label ?? option.value}
+        </button>
+      {/each}
+    </div>
+  {/if}
 {:else if field.type === "select"}
-  <ColoredSelect value={currentValue} options={field.options} ariaLabel={label} onChange={(v) => emit(v)} />
+  <ColoredSelect value={currentValue} options={field.options} ariaLabel={label} {readOnly} onChange={(v) => emit(v)} />
 {:else if field.type === "boolean"}
   {@const on = metadataValueBool(value)}
   <button
@@ -174,23 +204,44 @@
     class:on={on}
     aria-checked={on}
     aria-label={label}
-    onclick={() => emit(!on)}
+    disabled={readOnly}
+    onclick={readOnly ? undefined : () => emit(!on)}
   >
     <span class="fr-toggle-knob"></span>
   </button>
 {:else if field.type === "number"}
-  <input type="number" aria-label={label} value={currentValue} oninput={(event) => emit(event.currentTarget.value)} />
+  {#if readOnly}
+    <span class="fv-static" aria-label={label}>
+      {#if currentValue}{currentValue}{:else}<span class="fv-empty">—</span>{/if}
+    </span>
+  {:else}
+    <input type="number" aria-label={label} value={currentValue} oninput={(event) => emit(event.currentTarget.value)} />
+  {/if}
 {:else if field.type === "tags"}
-  <TagPicker
-    value={currentValue}
-    knownTags={knownTags}
-    scopeKind={documentKind}
-    scopeEntryType={entryType}
-    ariaLabel={label}
-    on:change={(event) => emit(event.detail.value)}
-  />
+  {#if readOnly}
+    <div class="multi-select-chips" aria-label={label}>
+      {#each metadataValueList(value) as tag (tag)}
+        <span class="multi-select-chip active static">{tag}</span>
+      {:else}
+        <span class="fv-empty">—</span>
+      {/each}
+    </div>
+  {:else}
+    <TagPicker
+      value={currentValue}
+      knownTags={knownTags}
+      scopeKind={documentKind}
+      scopeEntryType={entryType}
+      ariaLabel={label}
+      on:change={(event) => emit(event.detail.value)}
+    />
+  {/if}
 {:else if field.type === "color"}
-  <SwatchPicker value={currentValue || null} onChange={(id) => emit(id ?? "")} />
+  <SwatchPicker value={currentValue || null} {readOnly} onChange={(id) => emit(id ?? "")} />
+{:else if readOnly}
+  <span class="fv-static" aria-label={label}>
+    {#if currentValue}{currentValue}{:else}<span class="fv-empty">—</span>{/if}
+  </span>
 {:else}
   <input aria-label={label} value={currentValue} oninput={(event) => emit(event.currentTarget.value)} />
 {/if}
@@ -259,5 +310,24 @@
     background: var(--accent-soft, #edf6f2);
     border-color: var(--accent, #2f6f5e);
     color: var(--accent-strong, #234e43);
+  }
+  .multi-select-chip.static {
+    cursor: default;
+  }
+
+  /* Read-only static values (#64). Sized to sit where the input would. */
+  .fv-static {
+    font-size: 13px;
+    padding: 5px 2px;
+    color: var(--text, #242424);
+    min-width: 0;
+    overflow-wrap: anywhere;
+  }
+  .fv-static-longtext {
+    white-space: pre-wrap;
+    line-height: 1.5;
+  }
+  .fv-empty {
+    color: var(--text-3, #6c7872);
   }
 </style>

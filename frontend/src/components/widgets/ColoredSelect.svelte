@@ -17,6 +17,9 @@
   export let placeholder: string = "(none)";
   export let ariaLabel: string = "";
   export let onChange: ((value: string) => void) | undefined = undefined;
+  // Read-only display (#64): the trigger pill renders identically (dot +
+  // label + tint) but is inert — no popover, no hover affordance, no caret.
+  export let readOnly: boolean = false;
 
   let open = false;
   let anchor: HTMLButtonElement | undefined;
@@ -32,6 +35,7 @@
   $: anyColored = options.some((o) => !!o.color);
 
   function toggle() {
+    if (readOnly) return;
     open = !open;
     if (open && anchor) {
       const r = anchor.getBoundingClientRect();
@@ -86,9 +90,11 @@
     type="button"
     class="colored-select-trigger"
     class:has-color={!!currentSwatch}
+    class:read-only={readOnly}
     aria-label={ariaLabel || current?.label || current?.value || placeholder}
-    aria-haspopup="listbox"
+    aria-haspopup={readOnly ? undefined : "listbox"}
     aria-expanded={open}
+    disabled={readOnly}
     bind:this={anchor}
     style={pillStyle()}
     on:click|stopPropagation={toggle}
@@ -101,7 +107,9 @@
     {:else}
       <span class="colored-select-placeholder">{placeholder}</span>
     {/if}
-    <span class="colored-select-caret" aria-hidden="true">▾</span>
+    {#if !readOnly}
+      <span class="colored-select-caret" aria-hidden="true">▾</span>
+    {/if}
   </button>
 
   {#if open && menuPos}
@@ -171,6 +179,15 @@
   }
   .colored-select-trigger:hover {
     border-color: var(--ctx-accent, var(--accent));
+  }
+  .colored-select-trigger.read-only {
+    cursor: default;
+  }
+  .colored-select-trigger.read-only:hover {
+    border-color: var(--ctx-border, var(--border));
+  }
+  .colored-select-trigger.read-only.has-color:hover {
+    border-color: color-mix(in srgb, var(--chip-base) 40%, var(--ctx-border, var(--border)) 60%);
   }
   /* When the selected option has a color, render the whole trigger as a
      soft-tinted pill so the status is loud at a glance. */

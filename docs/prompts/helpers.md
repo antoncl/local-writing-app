@@ -335,6 +335,29 @@ This is the canonical pattern for cache-coherent assembly: stable lore above the
 - The scope, like `scenes_before`, is the entire project for now and narrows to the current book under nesting.
 - Calling `relevant_lore` twice in a render (e.g., for stable + volatile) re-resolves the relevant set both times. Cheap for now; a future pass may cache it within a single render.
 
+### The `scene` argument is also the mutation resolution scene
+
+The `scene` you pass is what mid-scene lore mutations (#33) resolve **against** — each
+returned entry's fields show their *effective value as of that scene* (an earlier scene
+sees the old value, a later one the new). The same is true of the `effective(entity, field, scene)`
+helper.
+
+`scene` accepts a scene **object** *or* a plain scene **id string**, so a prompt can take an
+explicit resolution scene via a **`scene_ref` input** (#60) and thread it in — falling back to
+the current/anchored `scene`, and to nothing (base / end-of-book) in a general chat:
+
+```jinja
+{# A roleplay prompt with a `scene_ref` input named `as_of`: #}
+{{ relevant_lore(input.as_of or scene) }}
+
+{# Query one field as of the picked scene: #}
+Your rank as of this point: {{ effective(character, "rank", input.as_of or scene) }}
+```
+
+Unlike `context_pick`, a `scene_ref` value injects **no content** — it is only the resolution
+setting (ADR-0012). An empty `scene_ref` and no anchored `scene` resolves at **end-of-book**
+(full knowledge), the safe default for a non-manuscript chat.
+
 ## Sessions
 
 A session lets `relevant_lore`'s `stable` / `volatile` partition distinguish entries that have been seen unchanged from entries that are new or have been edited since the prior call. It's the engine's answer to the cache-coherence objection in the [strategy doc](README.md).

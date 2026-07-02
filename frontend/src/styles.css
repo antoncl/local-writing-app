@@ -889,6 +889,16 @@ button.row-action-add.active {
 .editor-body .mutation-pill:hover {
   background: color-mix(in oklab, var(--mutation-color) 26%, transparent);
 }
+/* Interval-close pill (#59) — same violet family, but hollow (dashed border,
+   no fill) to read as "this ends a change" rather than "a change happens here". */
+.editor-body .mutation-pill-close {
+  background: transparent;
+  border-style: dashed;
+  font-weight: 500;
+}
+.editor-body .mutation-pill-close:hover {
+  background: color-mix(in oklab, var(--mutation-color) 14%, transparent);
+}
 /* .ai-inline-toolbar* co-located into ProseBodyView.svelte (#14). */
 
 /* .chat-prompt-glyph co-located into Chats.svelte (#14). */

@@ -20,6 +20,7 @@
 <script lang="ts">
   import { onMount, tick } from "svelte";
   import { api } from "@/lib/api";
+  import { resolutionSceneIdFromInputs } from "@/lib/editor-core/promptResolution";
   import PlainTextEditor from "@/components/widgets/PlainTextEditor.svelte";
   import PromptInputField from "@/components/widgets/PromptInputField.svelte";
   import { renderChatContent } from "@/lib/utils/chatMessageRender";
@@ -662,6 +663,7 @@
         template_source: entry.body,
         target_scene_id: chatTargetSceneId,
         inputs,
+        resolution_scene_id: resolutionSceneIdFromInputs(entry, inputs),
         commit: false,
       });
       // Render errors come back as 200 + preview.error from /api/ai/preview
@@ -738,6 +740,7 @@
         template_source: entry.body,
         target_scene_id: chatTargetSceneId,
         inputs,
+        resolution_scene_id: resolutionSceneIdFromInputs(entry, inputs),
         commit: false,
         assistant_id: chatAssistantId || null,
       });

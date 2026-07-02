@@ -35,6 +35,9 @@
   $: metadataSchema = $metadataSchemaStore;
   export let excludeId: string | null = null;
   export let ariaLabel: string = "";
+  // Read-only display (#64): resolved reference rows stay visible + navigable,
+  // but the Add/Change trigger and per-row remove buttons are hidden.
+  export let readOnly: boolean = false;
   // In-memory data sources used by the embedded NodePicker.
   export let structure: StructureDocument | null = null;
   // Research tree (sibling to manuscript) — threaded to the picker.
@@ -172,20 +175,22 @@
     {/snippet}
     {#snippet trailing()}
       <CountPill count={selectedRefs.length} />
-      <span class="reference-picker-trigger">
-        <NodePicker
-          hideChips
-          config={pickerConfig}
-          value={selectedRefs.filter((r) => !r.missing)}
-          excludeIds={pickerExcludeIds}
-          label={multi || selectedRefs.length === 0 ? "Add" : "Change"}
-          structure={structure}
-          researchStructure={researchStructure}
-          loreEntries={loreEntries}
-          promptEntries={promptEntries}
-          on:change={handlePickerChange}
-        />
-      </span>
+      {#if !readOnly}
+        <span class="reference-picker-trigger">
+          <NodePicker
+            hideChips
+            config={pickerConfig}
+            value={selectedRefs.filter((r) => !r.missing)}
+            excludeIds={pickerExcludeIds}
+            label={multi || selectedRefs.length === 0 ? "Add" : "Change"}
+            structure={structure}
+            researchStructure={researchStructure}
+            loreEntries={loreEntries}
+            promptEntries={promptEntries}
+            on:change={handlePickerChange}
+          />
+        </span>
+      {/if}
     {/snippet}
     {#snippet nested()}
       <NodeList mode="tree" isEmpty={selectedRefs.length === 0}>
@@ -206,13 +211,15 @@
                 class:missing={ref.missing}
                 style={hex ? `--chip-base: ${hex}` : ""}
               >{ref.missing ? "Missing" : entryTypeName(ref.entry_type, ref.kind)}</span>
-              <button
-                type="button"
-                class="row-action-delete"
-                aria-label="Remove {ref.title}"
-                title="Remove"
-                on:click={() => removeId(ref.id)}
-              >×</button>
+              {#if !readOnly}
+                <button
+                  type="button"
+                  class="row-action-delete"
+                  aria-label="Remove {ref.title}"
+                  title="Remove"
+                  on:click={() => removeId(ref.id)}
+                >×</button>
+              {/if}
             {/snippet}
           </NodeRow>
         {/each}

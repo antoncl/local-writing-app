@@ -365,6 +365,30 @@ class PreviewEndpointTests(unittest.TestCase):
         text = response.json()["messages"][0]["blocks"][0]["text"]
         self.assertEqual(text, "Aftermath")
 
+    def test_resolution_scene_id_overrides_target_scene_id(self) -> None:
+        # A `scene_ref` input (ADR-0012) — the frontend resolves its value into
+        # resolution_scene_id — sets the effective resolution scene, overriding
+        # the caller's implicit target_scene_id. Templates see it as `scene`.
+        second_struct = self.service.create_structure_node(
+            CreateStructureNodeRequest(title="Aftermath", entry_type="scene"),
+        )
+        second_scene_id = next(
+            n.scene_id
+            for n in second_struct.root.children
+            if n.type == "scene" and n.title == "Aftermath"
+        )
+        response = self.client.post(
+            "/api/ai/preview",
+            json={
+                "template_source": '{% role "user" %}{{ scene.title }}{% endrole %}',
+                "target_scene_id": self.scene_id,
+                "resolution_scene_id": second_scene_id,
+            },
+        )
+        self.assertEqual(response.status_code, 200, response.text)
+        text = response.json()["messages"][0]["blocks"][0]["text"]
+        self.assertEqual(text, "Aftermath")
+
     def test_unmarked_context_pick_does_not_override_target_scene_id(self) -> None:
         # Picked scenes without target=true should NOT change the binding —
         # the caller's target_scene_id remains authoritative.

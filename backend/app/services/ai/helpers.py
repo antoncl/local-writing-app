@@ -534,12 +534,16 @@ def _effective_field(
     except Exception:
         overrides = {}
     if field in overrides:
-        # Markers store values as strings; coerce to the field's native type so
-        # `effective(...)` matches `base(...)` (a number stays a number, a bool a
-        # bool) and template comparisons don't break in mutated scenes.
+        value = overrides[field]
+        # Collection fields already resolve to a list (ADR-0009) — hand it back
+        # as-is. Scalar markers store strings; coerce to the field's native type
+        # so `effective(...)` matches `base(...)` (a number stays a number, a bool
+        # a bool) and template comparisons don't break in mutated scenes.
+        if isinstance(value, list):
+            return value
         field_def = getattr(schema, "fields", {}).get(field) if schema is not None else None
         field_type = getattr(field_def, "type", "") if field_def is not None else ""
-        return project._coerce_mutation_value(overrides[field], field_type)
+        return project._coerce_mutation_value(value, field_type)
     return _get_field(_safe_read_lore(project, entity_id), field)
 
 
@@ -681,7 +685,7 @@ def _relevant_lore(
             # scan on the scene summary.
             summary = _get_field(scene, "summary") or ""
             if isinstance(summary, str) and summary.strip():
-                found |= _alias_match(project, summary)
+                found |= _alias_match(project, summary, scene=scene)
         else:
             # Chat-session use: the send-time context expander has already
             # populated the journal with textual detections (incl. depth-1).
@@ -702,7 +706,7 @@ def _relevant_lore(
         # Textual depth-1 only runs when the journal is absent; otherwise
         # the journal already carries those expansions.
         if journal is None:
-            expanded |= _textual_one_hop(project, found)
+            expanded |= _textual_one_hop(project, found, scene=scene)
         ids = sorted(expanded)
 
     # Chokepoint filter: drop any "never"-policy entries that may have
@@ -745,38 +749,68 @@ def _snapshot_revisions(
         session.snapshot(entry_id, revision)
 
 
-def _alias_match(project: ProjectService, text: str) -> set[str]:
+def _alias_match(project: ProjectService, text: str, scene: Any = None) -> set[str]:
     """Return lore IDs whose title or aliases appear as words in `text`.
 
     Honors `context_policy`: entries marked `manual_only` or `never` are
     skipped here — the matcher only ever pulls in `auto` (default) entries.
     `always`-policy entries are surfaced by `_always_included_lore_ids`,
     not here.
-    """
+
+    When a `scene` (resolution scene) is given, each entry is matched under its
+    **effective** name-set as of that scene (#61) — a renamed entity is detected
+    under its as-of-scene name, not its base title. Without a scene, base names
+    are used (the prior behavior). Resolution is scene-granular (ADR-0008)."""
     try:
         listing = project.list_lore_entries()
     except Exception:
         return set()
+    effective = _effective_name_map(project, scene)
     haystack_lower = text.lower()
     words = set(re.findall(r"[a-z0-9'-]+", haystack_lower))
     matched: set[str] = set()
     for summary in listing.entries:
         if _entry_context_policy(summary) != "auto":
             continue
-        candidates: list[str] = []
-        title = _attr_or_item(summary, "title")
-        if isinstance(title, str):
-            candidates.append(title)
-        aliases = _get_field(summary, "aliases") or []
-        if isinstance(aliases, list):
-            candidates.extend(str(a) for a in aliases if a)
+        entry_id = _attr_or_item(summary, "id")
+        candidates = _entry_name_candidates(summary, entry_id, effective)
         for name in candidates:
             if _name_appears(name, words, haystack_lower):
-                entry_id = _attr_or_item(summary, "id")
                 if entry_id:
                     matched.add(entry_id)
                 break
     return matched
+
+
+def _effective_name_map(project: ProjectService, scene: Any) -> dict[str, list[str]]:
+    """The `{entity_id: [effective names]}` map as of `scene`, or `{}` when no
+    scene is given / the read fails (matcher then falls back to base names)."""
+    if scene is None:
+        return {}
+    scene_id = _scene_id_of(scene)
+    if not scene_id:
+        return {}
+    try:
+        return project.effective_names(scene_id)
+    except Exception:
+        return {}
+
+
+def _entry_name_candidates(
+    summary: Any, entry_id: str | None, effective: dict[str, list[str]]
+) -> list[str]:
+    """Names to match one entry by: its effective name-set when the resolution
+    scene supplied one, else its base title + aliases."""
+    if entry_id and entry_id in effective:
+        return list(effective[entry_id])
+    candidates: list[str] = []
+    title = _attr_or_item(summary, "title")
+    if isinstance(title, str):
+        candidates.append(title)
+    aliases = _get_field(summary, "aliases") or []
+    if isinstance(aliases, list):
+        candidates.extend(str(a) for a in aliases if a)
+    return candidates
 
 
 def _always_included_lore_ids(project: ProjectService) -> set[str]:
@@ -809,7 +843,7 @@ def _lore_ids_with_policy(project: ProjectService, policy: str) -> set[str]:
 
 
 def _textual_one_hop(
-    project: ProjectService, entry_ids: set[str]
+    project: ProjectService, entry_ids: set[str], scene: Any = None
 ) -> set[str]:
     """Scan the body of each given entry for further textual name matches.
 
@@ -833,7 +867,7 @@ def _textual_one_hop(
             bodies.append(body)
     if not bodies:
         return set()
-    return _alias_match(project, "\n".join(bodies))
+    return _alias_match(project, "\n".join(bodies), scene=scene)
 
 
 def _name_appears(name: str, words: set[str], haystack_lower: str) -> bool:
@@ -885,7 +919,7 @@ def _format_lore_block(
         entry = _safe_read_lore(project, entry_id)
         if entry is None:
             continue
-        overrides: dict[str, str] = {}
+        overrides: dict[str, str | list[str]] = {}
         if scene_id and index is not None:
             try:
                 overrides = project.effective_state(entry_id, scene_id, position, index)
@@ -906,18 +940,21 @@ def _format_lore_block(
     return "<lore>\n" + "\n\n".join(chunks) + "\n</lore>"
 
 
-def _effective_aliases(entry: Any, overrides: dict[str, str]) -> list[str]:
-    """Aliases for the XML block, honoring a live `aliases` mutation (a
-    comma-separated string in the marker) over the base list."""
+def _effective_aliases(entry: Any, overrides: dict[str, str | list[str]]) -> list[str]:
+    """Aliases for the XML block, honoring a live `aliases` mutation over the
+    base list. A collection override resolves to a `list[str]` (ADR-0009); a
+    legacy whole-`replace` override is a comma-separated string."""
     if "aliases" in overrides:
-        return [a.strip() for a in str(overrides["aliases"]).split(",") if a.strip()]
+        raw = overrides["aliases"]
+        items = raw if isinstance(raw, list) else str(raw).split(",")
+        return [str(a).strip() for a in items if str(a).strip()]
     raw = _get_field(entry, "aliases") or []
     if isinstance(raw, list):
         return [str(a).strip() for a in raw if str(a).strip()]
     return []
 
 
-def _effective_body(entry: Any, overrides: dict[str, str]) -> str:
+def _effective_body(entry: Any, overrides: dict[str, str | list[str]]) -> str:
     """Body for the XML block: a live `body` mutation, else base body, else a
     (possibly mutated) summary."""
     if "body" in overrides:

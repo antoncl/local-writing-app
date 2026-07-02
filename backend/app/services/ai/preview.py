@@ -138,17 +138,20 @@ def build_preview(
     text_after: str,
     commit: bool,
     selection: str = "",
+    resolution_scene_id: str = "",
 ) -> tuple[RenderedTemplate, str | None]:
     """Render the template and return (output, session_id_used).
 
     `session_id_used` is None when no session was bound (caller did not supply
     one), so the response surface can report 'no caching' to the user.
     """
-    # A scene marked ★ in any context_pick input wins over the caller's
-    # implicit target_scene_id. This is the NC-style pattern: the user
-    # picks the focus scene in the context picker (per-invocation) instead
-    # of relying on dispatch context.
-    effective_scene_id = _find_marked_target_scene_id(inputs) or target_scene_id
+    # Mutation resolution scene, in precedence order (ADR-0012): an explicit
+    # `scene_ref` input (the frontend resolves the input value into
+    # `resolution_scene_id`) wins, then a scene marked ★ in a context_pick
+    # input, then the caller's implicit target_scene_id.
+    effective_scene_id = (
+        resolution_scene_id or _find_marked_target_scene_id(inputs) or target_scene_id
+    )
 
     if effective_scene_id:
         try:

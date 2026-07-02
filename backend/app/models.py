@@ -194,6 +194,9 @@ PromptInputType = Literal[
     "entity_ref",
     "entity_ref_list",
     "context_pick",
+    # A single scene reference used as the mutation *resolution scene* (#60) —
+    # a setting, not injected content (distinct from context_pick, ADR-0012).
+    "scene_ref",
     "color",
 ]
 
@@ -693,6 +696,59 @@ class SavePromptEntryRequest(BaseModel):
     inputs: list[PromptInputDefinition] = Field(default_factory=list)
 
 
+class MutationSetRow(BaseModel):
+    """One field-change row of a reusable mutation set (#62): a
+    `(field, op, value)` triple applied to a chosen entity at apply time. The
+    entity is NOT stored — the set is a template bound to an entity on use. Op is
+    the collection operator (replace / add / remove) shared with #58 markers."""
+
+    field: str
+    op: str = "replace"
+    value: str = ""
+
+
+class MutationSetEntrySummary(BaseModel):
+    id: str
+    title: str
+    entry_type: str = "mutation_set"
+    # The lore entry-type the rows target (e.g. "character"); scopes the apply
+    # picker so only matching sets are offered for a given entity (#62).
+    target_entry_type: str = ""
+    row_count: int = 0
+    source_layer_id: str = ""
+    source_layer_label: str = ""
+
+
+class MutationSetEntry(BaseModel):
+    id: str
+    title: str
+    revision: str
+    entry_type: str = "mutation_set"
+    target_entry_type: str = ""
+    rows: list[MutationSetRow] = Field(default_factory=list)
+    source_layer_id: str = ""
+    source_layer_label: str = ""
+
+
+class MutationSetEntryList(BaseModel):
+    entries: list[MutationSetEntrySummary] = Field(default_factory=list)
+
+
+class CreateMutationSetEntryRequest(BaseModel):
+    title: str = Field(min_length=1)
+    entry_type: str = "mutation_set"
+    target_entry_type: str = ""
+    rows: list[MutationSetRow] = Field(default_factory=list)
+
+
+class SaveMutationSetEntryRequest(BaseModel):
+    title: str = Field(min_length=1)
+    base_revision: str | None = None
+    entry_type: str = "mutation_set"
+    target_entry_type: str = ""
+    rows: list[MutationSetRow] = Field(default_factory=list)
+
+
 class AssistantEntrySummary(BaseModel):
     id: str
     title: str
@@ -804,7 +860,24 @@ class MutationMarker(BaseModel):
     marker_id: str
     entity_id: str
     field: str
+    # Collection operator (#58). `replace` (v1.0 default, absent from the marker)
+    # sets the whole field; `add`/`remove` accumulate/drop one collection element
+    # (gated to multi_select / tags / entity_ref_list at validation time).
+    op: str = "replace"
     value: str = ""
+    # Optional human label for the change (#65), shared across a co-authored set
+    # via `group`. Both are display/close-together conveniences, not lifetime
+    # frames — each record's interval stays independent (ADR-0015).
+    name: str = ""
+    group: str = ""
+    # Mutation-unit tie (#69, ADR-0016): the authored change this record belongs
+    # to — the record's own id for a standalone single-line marker, the legacy
+    # `group=` for old co-authored sets, the carrier head's id for multi-row
+    # units. Authoring/presentation granularity only (pill, timeline, scrubber,
+    # close picker group by it); each record's lifetime stays its own
+    # (ADR-0002). `unit_name` is the unit's human label from the head.
+    unit_id: str = ""
+    unit_name: str = ""
     scene_id: str
     offset: int = 0  # char offset of the marker in the scene body (position-granular)
     line: int = 1
@@ -818,18 +891,25 @@ class MutationMarkerList(BaseModel):
 class UpdateMutationRequest(BaseModel):
     entity_id: str | None = None
     field: str | None = None
+    op: str | None = None
     value: str | None = None
+    name: str | None = None
+    group: str | None = None
 
 
 class EffectiveStateResponse(BaseModel):
     """Effective mutation overrides for one lore entity as of a (scene,
     position) — the fields with a live mutation there, each mapped to its
-    winning value. Drives the lore-card time-slider re-render (#33)."""
+    winning value. Drives the lore-card time-slider re-render (#33).
+
+    Scalar fields resolve to a string; collection fields (multi_select / tags /
+    entity_ref_list) resolve to a `list[str]` — the datatype matches the field
+    (ADR-0009)."""
 
     entity_id: str
     scene_id: str
     position: int | None = None
-    values: dict[str, str] = Field(default_factory=dict)
+    values: dict[str, str | list[str]] = Field(default_factory=dict)
 
 
 class ReferenceCandidate(BaseModel):
@@ -1031,6 +1111,9 @@ class AIPreviewRequest(BaseModel):
     text_after: str = ""
     selection: str = ""
     commit: bool = False
+    # Explicit mutation resolution scene from a `scene_ref` input (ADR-0012);
+    # the frontend resolves the input value here. Overrides target_scene_id.
+    resolution_scene_id: str = ""
     # When set, the cost estimate uses this assistant's provider/model.
     # Omit for previews that aren't bound to an assistant (e.g. the
     # prompt-editor preview pane) — token counts still come back, only
@@ -1173,6 +1256,9 @@ class AIGenerateRequest(BaseModel):
     text_after: str = ""
     selection: str = ""
     commit: bool = False
+    # Explicit mutation resolution scene from a `scene_ref` input (ADR-0012);
+    # the frontend resolves the input value here. Overrides target_scene_id.
+    resolution_scene_id: str = ""
     provider: str | None = None
     model: str | None = None
     assistant_id: str | None = None

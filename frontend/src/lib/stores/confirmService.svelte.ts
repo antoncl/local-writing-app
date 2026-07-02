@@ -20,6 +20,10 @@ export type ConfirmationRequest = {
   cannotBeUndone?: boolean;
   dontShowAgainKey?: string;
   onConfirm: () => Promise<void>;
+  // Optional second resolution (e.g. "Discard changes and close" next to
+  // "Overwrite and close"). Cancel/backdrop still means "do neither".
+  secondaryLabel?: string;
+  onSecondary?: () => Promise<void> | void;
 };
 
 const SUPPRESS_PREFIX = "confirmSuppress:";
@@ -73,6 +77,16 @@ class ConfirmService {
       this.#suppress(current.dontShowAgainKey);
     }
     await this.onRun(current.onConfirm);
+  }
+
+  // Run the secondary resolution (when the request carries one).
+  async resolveSecondary() {
+    const current = this.active;
+    if (!current?.onSecondary) return;
+    this.active = null;
+    await this.onRun(async () => {
+      await current.onSecondary?.();
+    });
   }
 
   // Dismiss without running the action (cancel / backdrop).

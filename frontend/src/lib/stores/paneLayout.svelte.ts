@@ -32,6 +32,7 @@ class PaneLayout {
     schema: { title: "Detail Types", x: 330, y: 260, width: 360, height: 420, z: 3 },
     schema_type: { title: "Detail Type", x: 708, y: 260, width: 440, height: 560, z: 4 },
     prompts: { title: "Prompts", x: 330, y: 260, width: 360, height: 420, z: 3 },
+    mutations: { title: "Reusable mutations", x: 360, y: 280, width: 360, height: 420, z: 3 },
     assistants: { title: "Assistants", x: 330, y: 260, width: 340, height: 420, z: 3 },
     chats: { title: "Chats", x: 330, y: 260, width: 320, height: 420, z: 3 },
     todo: { title: "TODO", x: 1126, y: 18, width: 310, height: 320, z: 4 },

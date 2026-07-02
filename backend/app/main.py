@@ -38,6 +38,7 @@ from app.models import (
     CreateAssistantEntryRequest,
     CreateChatSessionRequest,
     CreateLoreEntryRequest,
+    CreateMutationSetEntryRequest,
     CreateProjectRequest,
     CreatePromptEntryRequest,
     CreateSceneRequest,
@@ -62,6 +63,8 @@ from app.models import (
     MoveMetadataFieldRequest,
     MoveStructureNodeRequest,
     MutationMarkerList,
+    MutationSetEntry,
+    MutationSetEntryList,
     OpenProjectRequest,
     PreviewCacheBlock,
     PreviewContentBlock,
@@ -84,6 +87,7 @@ from app.models import (
     SaveAssistantEntryRequest,
     SaveChatSessionRequest,
     SaveLoreEntryRequest,
+    SaveMutationSetEntryRequest,
     SaveProjectNodeRequest,
     SavePromptEntryRequest,
     SaveResearchNoteRequest,
@@ -438,6 +442,14 @@ def get_scene(scene_id: str) -> Scene:
         return service.read_scene(scene_id)
 
 
+@app.get("/api/scenes/{scene_id}/effective-names")
+def get_scene_effective_names(scene_id: str) -> dict[str, list[str]]:
+    """Each lore entry's effective name-set (title + aliases) as of this scene —
+    the source for the effective-name-aware implicit-context matcher (#61)."""
+    with translate_errors():
+        return service.effective_names(scene_id)
+
+
 @app.put("/api/scenes/{scene_id}", response_model=Scene)
 def save_scene(scene_id: str, request: SaveSceneRequest) -> Scene:
     with translate_errors():
@@ -510,14 +522,27 @@ def list_entity_mutations(entity_id: str) -> MutationMarkerList:
         return service.entity_mutations(entity_id)
 
 
+@app.get("/api/lore/{entity_id}/live-mutations", response_model=MutationMarkerList)
+def list_live_entity_mutations(
+    entity_id: str, scene: str, pos: int | None = None
+) -> MutationMarkerList:
+    """The entity's start records still open (live, not yet closed) at (scene,
+    position) — the source for the `/mutate close` picker (#59)."""
+    with translate_errors():
+        return service.live_mutations(entity_id, scene, pos)
+
+
 @app.get("/api/lore/{entity_id}/effective", response_model=EffectiveStateResponse)
 def get_entity_effective_state(
-    entity_id: str, scene: str, pos: int | None = None
+    entity_id: str, scene: str, pos: int | None = None, exclude: str = ""
 ) -> EffectiveStateResponse:
     """Effective mutation overrides for a lore entity as of (scene, position) —
-    drives the lore-card time-slider (#33)."""
+    drives the lore-card time-slider (#33). `exclude` (comma-separated record
+    ids) skips those records: the list-edit authoring baseline when re-editing
+    a unit (#71, ADR-0017)."""
     with translate_errors():
-        values = service.effective_state(entity_id, scene, pos)
+        excluded = {part.strip() for part in exclude.split(",") if part.strip()}
+        values = service.effective_state(entity_id, scene, pos, exclude=excluded)
         return EffectiveStateResponse(
             entity_id=entity_id, scene_id=scene, position=pos, values=values
         )
@@ -577,6 +602,39 @@ def save_prompt_entry(entry_id: str, request: SavePromptEntryRequest) -> PromptE
 def delete_prompt_entry(entry_id: str) -> PromptEntryList:
     with translate_errors():
         return service.delete_prompt_entry(entry_id)
+
+
+@app.get("/api/mutation-sets", response_model=MutationSetEntryList)
+def list_mutation_set_entries() -> MutationSetEntryList:
+    """Reusable mutation sets (#62) — the Mutations pane list."""
+    with translate_errors():
+        return service.list_mutation_set_entries()
+
+
+@app.post("/api/mutation-sets", response_model=MutationSetEntry)
+def create_mutation_set_entry(request: CreateMutationSetEntryRequest) -> MutationSetEntry:
+    with translate_errors():
+        return service.create_mutation_set_entry(request)
+
+
+@app.get("/api/mutation-sets/{entry_id}", response_model=MutationSetEntry)
+def get_mutation_set_entry(entry_id: str) -> MutationSetEntry:
+    with translate_errors():
+        return service.read_mutation_set_entry(entry_id)
+
+
+@app.put("/api/mutation-sets/{entry_id}", response_model=MutationSetEntry)
+def save_mutation_set_entry(
+    entry_id: str, request: SaveMutationSetEntryRequest
+) -> MutationSetEntry:
+    with translate_errors():
+        return service.save_mutation_set_entry(entry_id, request)
+
+
+@app.delete("/api/mutation-sets/{entry_id}", response_model=MutationSetEntryList)
+def delete_mutation_set_entry(entry_id: str) -> MutationSetEntryList:
+    with translate_errors():
+        return service.delete_mutation_set_entry(entry_id)
 
 
 @app.get("/api/assistants", response_model=AssistantEntryList)
@@ -1075,6 +1133,7 @@ async def ai_preview(request: AIPreviewRequest) -> AIPreviewResponse:
                 text_after=request.text_after,
                 selection=request.selection,
                 commit=request.commit,
+                resolution_scene_id=request.resolution_scene_id,
             )
         except PreviewError as exc:
             return AIPreviewResponse(
@@ -1250,6 +1309,9 @@ def _prepare_chat_send_payload(
         explicit_picks=chat.context_items,
         source="user_message",
         turn=turn,
+        # The chat's anchored scene is its mutation resolution scene (#60/#61),
+        # so a renamed entity is detected under its as-of-scene name.
+        scene=chat.target_scene_id or None,
     )
     if new_entries:
         extended_journal = list(chat.journal) + new_entries
@@ -1397,6 +1459,7 @@ async def ai_generate(request: AIGenerateRequest) -> AIGenerateResponse:
                 text_after=request.text_after,
                 selection=request.selection,
                 commit=request.commit,
+                resolution_scene_id=request.resolution_scene_id,
             )
         except PreviewError as exc:
             raise HTTPException(
@@ -1643,6 +1706,7 @@ async def ai_generate_stream(request: AIGenerateRequest) -> StreamingResponse:
                 text_after=request.text_after,
                 selection=request.selection,
                 commit=request.commit,
+                resolution_scene_id=request.resolution_scene_id,
             )
         except PreviewError as exc:
             raise HTTPException(

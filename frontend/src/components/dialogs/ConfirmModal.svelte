@@ -16,6 +16,10 @@
     // receives its value in onConfirm and persists suppression per key.
     dontShowAgainKey?: string;
     onConfirm: () => Promise<void> | void;
+    // Optional second resolution rendered next to the primary (e.g.
+    // "Discard changes and close"); Cancel still means "do neither".
+    secondaryLabel?: string;
+    onSecondary?: () => Promise<void> | void;
   };
 </script>
 
@@ -25,6 +29,7 @@
   export let state: ConfirmationState | null = null;
   export let onCancel: () => void = () => {};
   export let onConfirm: (dontShowAgain: boolean) => void | Promise<void> = () => {};
+  export let onSecondary: () => void | Promise<void> = () => {};
 
   // Reset the checkbox whenever a new confirmation opens (depends only on
   // `state`, so ticking the box itself doesn't re-trigger the reset).
@@ -53,6 +58,9 @@
     {/if}
     {#snippet actions()}
       <button type="button" on:click={onCancel}>Cancel</button>
+      {#if state.secondaryLabel}
+        <button type="button" on:click={() => onSecondary()}>{state.secondaryLabel}</button>
+      {/if}
       <button
         class:danger-primary={state.destructive}
         class:primary={!state.destructive}

@@ -59,6 +59,7 @@
     entity_ref: "Entity Reference",
     entity_ref_list: "Entity Reference List",
     context_pick: "Context Picker",
+    scene_ref: "Scene Reference",
     color: "Colour",
   };
 
@@ -289,6 +290,7 @@
                 <option value="entity_ref">Entity Reference</option>
                 <option value="entity_ref_list">Entity Reference List</option>
                 <option value="context_pick">Context Picker</option>
+                <option value="scene_ref">Scene Reference</option>
               </select>
             </label>
             <label>

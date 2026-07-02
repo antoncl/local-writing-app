@@ -34,6 +34,12 @@
     implicitContextMatcher?: import("@/lib/editor-core/implicitContextMatcher").CompiledMatcher | null;
     excludeId?: string | null;
     computedFieldString?: (fieldId: string) => string;
+    // Time-travel overlay (#64, ADR-0013): when scrubbed to a mutation point the
+    // rail renders effective values read-only. `effectiveOverrides` holds ONLY
+    // the mutated fields (the backend override map) — membership IS the "this
+    // changed by here" signal, no diffing. Base values render for the rest.
+    effectiveOverrides?: Record<string, string | string[]> | null;
+    readOnly?: boolean;
     // Outbound events as callback props (#14: MetadataPanel is runes — replaces
     // its createEventDispatcher). NodeEditor (legacy parent) passes these.
     onEntryTypeChange?: (entryType: string) => void;
@@ -59,6 +65,8 @@
     implicitContextMatcher = null,
     excludeId = null,
     computedFieldString = () => "",
+    effectiveOverrides = null,
+    readOnly = false,
     onEntryTypeChange,
     onStatusChange,
     onMetadataChange,
@@ -135,6 +143,14 @@
     return String(value);
   }
 
+  function isMutated(fieldId: string): boolean {
+    return effectiveOverrides != null && fieldId in effectiveOverrides;
+  }
+
+  function displayValue(fieldId: string): MetadataValue {
+    return isMutated(fieldId) ? (effectiveOverrides?.[fieldId] ?? "") : metadata[fieldId];
+  }
+
   function updateColor(value: string) {
     onMetadataChange?.({ ...metadata, color: value });
   }
@@ -151,6 +167,7 @@
       <span class="rail-type-label">{documentLabel} type</span>
       <select
         value={entryType}
+        disabled={readOnly}
         onchange={(event) => onEntryTypeChange?.(event.currentTarget.value)}
       >
         {#if entryType && !metadataSchema.entry_types[entryType]}
@@ -166,15 +183,16 @@
     </button>
   </div>
 
-  <div class="field-row color-row">
+  <div class="field-row color-row" class:mutated={isMutated("color")}>
     <span class="fr-icon"><i class="ti ti-palette" aria-hidden="true"></i></span>
-    <span class="fr-name">Colour</span>
+    <span class="fr-name">Colour{#if isMutated("color")}<span class="fr-mutated-marker" title="Changed by here">⤳</span>{/if}</span>
     <span class="fr-val">
       <SwatchPicker
-        value={metadataValueString(metadata.color) || null}
+        value={metadataValueString(displayValue("color")) || null}
+        {readOnly}
         onChange={(id) => updateColor(id ?? "")}
       />
-      {#if !metadataValueString(metadata.color)}
+      {#if !metadataValueString(displayValue("color"))}
         {@const inherited = metadataSchema.entry_types[entryType]?.color}
         <small class="muted">{inherited ? `inherits ${inherited}` : "type / kind default"}</small>
       {/if}
@@ -202,17 +220,18 @@
     {#each section.ids as fieldId}
       {#if metadataSchema.fields[fieldId]}
         {@const field = metadataSchema.fields[fieldId]}
-        <div class="field-row" class:wide={isWide(field)} class:inherited={isInherited(fieldId)}>
+        <div class="field-row" class:wide={isWide(field)} class:inherited={isInherited(fieldId)} class:mutated={isMutated(fieldId)}>
           <span class="fr-icon"><i class={fieldIconClass(field)} aria-hidden="true"></i></span>
-          <span class="fr-name">{field.name}</span>
+          <span class="fr-name">{field.name}{#if isMutated(fieldId)}<span class="fr-mutated-marker" title="Changed by here">⤳</span>{/if}</span>
           <div class="fr-val">
             {#if fieldId === "status"}
               <!-- status is stored off `metadata` and edited via onStatusChange. -->
               <ColoredSelect
-                value={status}
+                value={isMutated("status") ? metadataValueString(effectiveOverrides?.["status"]) : status}
                 options={field.options}
                 ariaLabel={field.name}
                 placeholder="(no status)"
+                {readOnly}
                 onChange={(value) => onStatusChange?.(value)}
               />
             {:else if field.type === "computed"}
@@ -220,7 +239,8 @@
             {:else}
               <FieldValueEditor
                 {field}
-                value={metadata[fieldId]}
+                {readOnly}
+                value={displayValue(fieldId)}
                 ariaLabel={field.name}
                 loreEntries={loreEntries}
                 promptEntries={promptEntries}
@@ -381,6 +401,31 @@
   .field-row.inherited .fr-icon,
   .field-row.inherited .fr-name {
     opacity: 0.62;
+  }
+
+  /* Mutated-by-here rows (#64): the in-prose mutation pill's vocabulary —
+     violet + a miniaturized ⤳ beside the name, like a required-field
+     asterisk. Unchanged rows render plain read-only. --mutation-color is
+     scoped to .mutation-pill in styles.css, so fall back to the literal. */
+  .fr-mutated-marker {
+    margin-left: 4px;
+    color: var(--mutation-color, #7c5cbf);
+    font-weight: 700;
+    font-size: 12px;
+  }
+  .field-row.mutated .fr-name {
+    color: var(--mutation-color, #7c5cbf);
+    font-weight: 600;
+  }
+  .field-row.mutated .fr-val :global(.fv-static),
+  .field-row.mutated .fr-val :global(.fv-static-longtext) {
+    color: var(--mutation-color, #7c5cbf);
+  }
+  /* Chips in a mutated row pick up the pill's tint recipe (14% bg / 42% border). */
+  .field-row.mutated .fr-val :global(.multi-select-chip.static) {
+    background: color-mix(in srgb, var(--mutation-color, #7c5cbf) 14%, transparent);
+    border-color: color-mix(in srgb, var(--mutation-color, #7c5cbf) 42%, transparent);
+    color: var(--mutation-color, #7c5cbf);
   }
 
   .fr-computed {

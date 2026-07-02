@@ -47,6 +47,9 @@ import type {
   SaveProjectNodeRequest,
   PromptEntry,
   PromptEntryList,
+  MutationSetEntry,
+  MutationSetEntryList,
+  MutationSetRow,
   ReferenceCandidatesResponse,
   ReferenceResolveResponse,
   ResearchNote,
@@ -587,6 +590,40 @@ export const api = {
       method: "DELETE",
     });
   },
+  // Reusable mutation sets (#62).
+  listMutationSetEntries() {
+    return request<MutationSetEntryList>("/mutation-sets");
+  },
+  createMutationSetEntry(payload: {
+    title: string;
+    target_entry_type: string;
+    rows: MutationSetRow[];
+  }) {
+    return request<MutationSetEntry>("/mutation-sets", {
+      method: "POST",
+      body: JSON.stringify({ ...payload, entry_type: "mutation_set" }),
+    });
+  },
+  getMutationSetEntry(entryId: string) {
+    return request<MutationSetEntry>(`/mutation-sets/${entryId}`);
+  },
+  saveMutationSetEntry(entry: MutationSetEntry) {
+    return request<MutationSetEntry>(`/mutation-sets/${entry.id}`, {
+      method: "PUT",
+      body: JSON.stringify({
+        title: entry.title,
+        base_revision: entry.revision,
+        entry_type: entry.entry_type,
+        target_entry_type: entry.target_entry_type,
+        rows: entry.rows,
+      }),
+    });
+  },
+  deleteMutationSetEntry(entryId: string) {
+    return request<MutationSetEntryList>(`/mutation-sets/${entryId}`, {
+      method: "DELETE",
+    });
+  },
   listAssistantEntries() {
     return request<AssistantEntryList>("/assistants");
   },
@@ -702,10 +739,27 @@ export const api = {
   getEntityMutations(entityId: string) {
     return request<MutationMarkerList>(`/lore/${entityId}/mutations`);
   },
-  getEntityEffectiveState(entityId: string, sceneId: string, pos?: number) {
+  // Each lore entry's effective name-set (title + aliases) as of a scene — the
+  // source for the effective-name-aware implicit-context matcher (#61).
+  getSceneEffectiveNames(sceneId: string) {
+    return request<Record<string, string[]>>(`/scenes/${encodeURIComponent(sceneId)}/effective-names`);
+  },
+  // The entity's records still open (live, not yet closed) at (scene, pos) — the
+  // source for the `/mutate close` picker (#59).
+  getLiveEntityMutations(entityId: string, sceneId: string, pos?: number) {
     const query = pos === undefined ? "" : `&pos=${pos}`;
+    return request<MutationMarkerList>(
+      `/lore/${entityId}/live-mutations?scene=${encodeURIComponent(sceneId)}${query}`,
+    );
+  },
+  getEntityEffectiveState(entityId: string, sceneId: string, pos?: number, exclude?: string[]) {
+    // `exclude` skips record ids — the list-edit authoring baseline when
+    // re-editing a unit (#71, ADR-0017).
+    const posQuery = pos === undefined ? "" : `&pos=${pos}`;
+    const excludeQuery =
+      exclude && exclude.length > 0 ? `&exclude=${encodeURIComponent(exclude.join(","))}` : "";
     return request<EffectiveStateResponse>(
-      `/lore/${entityId}/effective?scene=${encodeURIComponent(sceneId)}${query}`,
+      `/lore/${entityId}/effective?scene=${encodeURIComponent(sceneId)}${posQuery}${excludeQuery}`,
     );
   },
   updateMutation(sceneId: string, markerId: string, updates: { entity_id?: string; field?: string; value?: string }) {

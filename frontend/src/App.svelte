@@ -9,6 +9,7 @@
   import Lore from "@/components/panes/Lore.svelte";
   import Assistants from "@/components/panes/Assistants.svelte";
   import Prompts from "@/components/panes/Prompts.svelte";
+  import Mutations from "@/components/panes/Mutations.svelte";
   import Chats from "@/components/panes/Chats.svelte";
   import Project from "@/components/panes/Project.svelte";
   import Search from "@/components/panes/Search.svelte";
@@ -125,7 +126,10 @@
   // all persistence handlers) lives in SchemaPanes.svelte (#14 P0). App holds
   // only the instance ref so it can drive the three entry points.
   let schemaPanes: SchemaPanes | undefined = $state();
+  // Instance ref so the pane handle bar's "+ New set" can open the editor.
+  let mutationsPane: Mutations | undefined = $state();
   let promptsPaneOpen = $state(false);
+  let mutationsPaneOpen = $state(false);
   let assistantsPaneOpen = $state(false);
   let chatsPaneOpen = $state(false);
   let error = $state("");
@@ -356,6 +360,11 @@
     focusPane("prompts");
   }
 
+  function openMutationsPane() {
+    mutationsPaneOpen = true;
+    focusPane("mutations");
+  }
+
   function openAssistantsPane() {
     assistantsPaneOpen = true;
     void refreshAssistantEntries();
@@ -545,6 +554,7 @@
         onSaveAISettings={() => aiSettings.save()}
         onHealthCheck={() => aiSettings.runHealthCheck()}
         onOpenPrompts={openPromptsPane}
+        onOpenMutations={openMutationsPane}
         onRepair={repairProject}
       />
     </div>
@@ -616,6 +626,23 @@
       <Prompts
         entries={promptEntries}        onOpenEntry={(id) => editorPanes.openPrompt(id)}
         onNewEntry={(entryType) => treeActions.newPromptEntry(entryType)}
+      />
+    </div>
+  </Pane>
+
+  <Pane id="mutations" title="Reusable mutations" paneClass="prompts-pane" hidden={!isProjectOpen || !mutationsPaneOpen} style={paneStyle("mutations")} chrome={paneChrome}>
+    {#snippet actions()}
+      <button class="pin-button" type="button" title="New mutation set" onmousedown={(event) => event.stopPropagation()} onclick={() => mutationsPane?.openNew()}>+ New set</button>
+      <button class="pin-button" type="button" onmousedown={(event) => event.stopPropagation()} onclick={() => (mutationsPaneOpen = false)}>Close</button>
+    {/snippet}
+    <div class="pane-content schema-list">
+      <Mutations
+        bind:this={mutationsPane}
+        loreEntries={loreEntries}
+        promptEntries={promptEntries}
+        structure={structure}
+        researchStructure={researchStructure}
+        knownTags={knownTags}
       />
     </div>
   </Pane>
@@ -797,6 +824,7 @@
     state={confirmService.active}
     onCancel={() => confirmService.dismiss()}
     onConfirm={(dontShowAgain) => confirmService.resolve(dontShowAgain)}
+    onSecondary={() => confirmService.resolveSecondary()}
   />
 
   <NewProjectModal

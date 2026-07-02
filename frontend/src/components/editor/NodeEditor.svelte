@@ -2,6 +2,8 @@
 
   import BacklinksPanel from "@/components/editor/BacklinksPanel.svelte";
   import MutationTimeline from "@/components/editor/MutationTimeline.svelte";
+  import MutationScrubber from "@/components/editor/MutationScrubber.svelte";
+  import { LoreScrubController } from "@/lib/stores/loreScrub.svelte";
   import MetadataPanel from "@/components/editor/MetadataPanel.svelte";
   import InputsDialog from "@/components/editor/InputsDialog.svelte";
   import FieldsOnlyView from "@/components/editor/body/FieldsOnlyView.svelte";
@@ -9,11 +11,14 @@
   import ProseBodyView from "@/components/editor/body/ProseBodyView.svelte";
   import ChatBodyView from "@/components/editor/body/ChatBodyView.svelte";
   import { coerceInputValue, type EntryInputDraft } from "@/lib/utils/promptInputs";
+  import { resolutionSceneIdFromInputs } from "@/lib/editor-core/promptResolution";
   import { api } from "@/lib/api";
   import { formatCostEur } from "@/lib/utils/money";
+  import { sceneMarkdownToHtml } from "@/lib/utils/markdown";
   import { resolveColor } from "@/lib/utils/colors";
   import type { AssistantEntrySummary, Backlink, BodyShape, DocumentKind, EditableDocument, EntryBodyLanguage, EntryMetadata, EntryTypeDefinition, MetadataFieldDefinition, MetadataSchema, PromptEntrySummary, PromptInputDefinition } from "@/lib/types";
   import { metadataSchemaStore } from "@/lib/stores/schema";
+  import { mutationsVersion } from "@/lib/stores/mutationsVersion.svelte";
 
   // Effective body shape for an entry type. Falls back through the
   // legacy has_body / body_editor pair when body_shape is absent
@@ -110,6 +115,47 @@
   // scene load below. `railIsPane` means metadata renders as the main
   // content (none-shape: assistant / project / structure_node).
   let railOpen = $state(true);
+
+  // ---- Time-travel scrub state (#64, ADR-0013; per-unit stops #70) -----------
+  // State + fetch + resolve live in LoreScrubController; the card keeps only
+  // the reload trigger (entity switch or an index-touching save, #63 — either
+  // may have moved/removed stops, so position resets to base).
+  const scrub = new LoreScrubController();
+  let scrubbed = $derived(documentKind === "lore" && scrub.index > 0);
+
+  $effect(() => {
+    const id = documentKind === "lore" ? (scene?.id ?? null) : null;
+    void mutationsVersion.value;
+    return scrub.load(id);
+  });
+
+  // Effective intrinsics at the scrub point. Title/body may be mutated too
+  // (ADR-0009 amendment) — scope is total, the whole card travels.
+  let titleMutated = $derived(scrubbed && scrub.overrides != null && "title" in scrub.overrides);
+  let effectiveTitle = $derived(titleMutated ? String(scrub.overrides?.title ?? "") : title);
+  let bodyMutated = $derived(scrubbed && scrub.overrides != null && "body" in scrub.overrides);
+
+  // The read-only body overlay (§4.4, buffer-safe): rendered-markdown of the
+  // effective body. The TipTap buffer underneath is never touched — unsaved
+  // base edits survive a scrub round-trip untouched. Base body reads from the
+  // LIVE buffer (not the saved baseline) so an unmutated scrub shows exactly
+  // what the writer sees at stop 0.
+  let overlayBodyHtml = $state("");
+  $effect(() => {
+    if (!scrubbed || bodyShape !== "prose") {
+      overlayBodyHtml = "";
+      return;
+    }
+    const overrideBody = bodyMutated ? String(scrub.overrides?.body ?? "") : null;
+    const markdown = overrideBody ?? proseBodyView?.getBody() ?? scene?.body ?? "";
+    let cancelled = false;
+    void sceneMarkdownToHtml(markdown).then((html) => {
+      if (!cancelled) overlayBodyHtml = html;
+    });
+    return () => {
+      cancelled = true;
+    };
+  });
 
   // Rail width is user-resizable via the left-edge drag handle, persisted
   // across sessions. Clamped so the rail can be made slimmer or wider but
@@ -517,6 +563,7 @@
         template_source: entry.body,
         target_scene_id: scene?.id ?? "",
         inputs,
+        resolution_scene_id: resolutionSceneIdFromInputs(entry, inputs),
         commit: false,
         assistant_id: inputsDialogAssistantId || null,
       });
@@ -803,6 +850,8 @@
       implicitContextMatcher={implicitContextMatcher}
       excludeId={scene?.id ?? null}
       computedFieldString={computedFieldString}
+      effectiveOverrides={scrubbed ? scrub.overrides : null}
+      readOnly={scrubbed}
       onEntryTypeChange={(next) => updateEntryType(next)}
       onStatusChange={(next) => updateStatus(next)}
       onMetadataChange={(next) => {
@@ -821,9 +870,12 @@
       />
     {/key}
     {#if documentKind === "lore" && scene?.id}
-      {#key scene.id}
-        <MutationTimeline entityId={scene.id} onNavigate={(payload) => onNavigate?.(payload)} />
-      {/key}
+      <MutationTimeline
+        units={scrub.units}
+        activeIndex={scrub.index}
+        onSelect={(index) => void scrub.scrubTo(index)}
+        onNavigate={(payload) => onNavigate?.(payload)}
+      />
     {/if}
   {/if}
 {/snippet}
@@ -841,8 +893,14 @@
     {#if scene}
       <div class="scene-title-row">
         <label class="title-label">
-          {documentNameLabel}
-          <input class="title-input" aria-label={`${documentLabel} ${documentNameLabel.toLowerCase()}`} placeholder={documentNameLabel} bind:value={title} oninput={handleTitleInput} />
+          {documentNameLabel}{#if titleMutated}<span class="title-mutated-marker" title="Changed by here">⤳</span>{/if}
+          {#if scrubbed}
+            <!-- Effective title as of the scrub point — read-only; the draft
+                 title stays untouched underneath (stop 0 restores it). -->
+            <input class="title-input" class:mutated={titleMutated} readonly aria-label={`${documentLabel} ${documentNameLabel.toLowerCase()} (effective, read-only)`} value={effectiveTitle} />
+          {:else}
+            <input class="title-input" aria-label={`${documentLabel} ${documentNameLabel.toLowerCase()}`} placeholder={documentNameLabel} bind:value={title} oninput={handleTitleInput} />
+          {/if}
         </label>
       </div>
       {#if todoStatusHint || (documentKind === "scene" && (lastInvocationCostUsd != null || characterCostRowsView.length > 0)) || rollupCostKind}
@@ -916,8 +974,26 @@
     />
   {/if}
   {#if bodyShape === "prose"}
-    <ProseBodyView
-      bind:this={proseBodyView}
+    {#if scrubbed}
+      <!-- The effective body as of the scrub point (§4.4). An overlay layer:
+           the editable TipTap buffer stays mounted (hidden) underneath, so
+           unsaved base edits survive the scrub round-trip untouched. -->
+      <div class="effective-body" aria-label="Effective body (read-only)">
+        {#if bodyMutated}
+          <div class="effective-body-ribbon">
+            <span aria-hidden="true">⤳</span>
+            Body as of {scrub.units[scrub.index - 1]?.records[0]?.scene_path || "scene"} — mutated
+          </div>
+        {/if}
+        <div class="effective-body-content">
+          <!-- eslint-disable-next-line svelte/no-at-html-tags — sceneMarkdownToHtml output, same trust level as the editor load path -->
+          {@html overlayBodyHtml}
+        </div>
+      </div>
+    {/if}
+    <div class="prose-body-host" class:hidden={scrubbed}>
+      <ProseBodyView
+        bind:this={proseBodyView}
       bind:liveWordCount
       bind:editorEmpty
       bind:lastInvocationCostUsd
@@ -934,7 +1010,8 @@
       onFocus={() => onFocus?.()}
       onOpenChat={(payload) => onOpenChat?.(payload)}
       onRequestInputsDialog={handleRequestInputsDialog}
-    />
+      />
+    </div>
   {/if}
   {#if bodyShape === "chat"}
     <ChatBodyView
@@ -990,6 +1067,10 @@
         <span class="rail-tab-label">Details</span>
       </button>
     {/if}
+  {/if}
+
+  {#if documentKind === "lore" && scene && scrub.units.length > 0}
+    <MutationScrubber units={scrub.units} index={scrub.index} onScrub={(index) => void scrub.scrubTo(index)} />
   {/if}
 
   <footer class="status">
@@ -1213,6 +1294,58 @@
     grid-template-columns: minmax(0, 1fr);
     gap: 4px;
     align-items: start;
+  }
+
+  /* ---- Time-travel overlay chrome (#64) ---------------------------------- */
+  /* Keeps ProseBodyView a direct grid child of .editor-panel when visible;
+     display:none while scrubbed preserves the mounted TipTap buffer. */
+  .prose-body-host {
+    display: contents;
+  }
+  .prose-body-host.hidden {
+    display: none;
+  }
+
+  .title-mutated-marker {
+    margin-left: 4px;
+    color: var(--mutation-color, #7c5cbf);
+    font-weight: 700;
+  }
+  .title-input[readonly] {
+    background: var(--inset, #f1f5f3);
+    cursor: default;
+  }
+  .title-input.mutated {
+    color: var(--mutation-color, #7c5cbf);
+    font-weight: 600;
+  }
+
+  .effective-body {
+    min-height: 0;
+    overflow-y: auto;
+    display: flex;
+    flex-direction: column;
+  }
+  .effective-body-ribbon {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    padding: 4px 24px;
+    font-size: 11.5px;
+    font-weight: 600;
+    color: var(--mutation-color, #7c5cbf);
+    background: color-mix(in srgb, var(--mutation-color, #7c5cbf) 10%, transparent);
+    border-bottom: 1px solid color-mix(in srgb, var(--mutation-color, #7c5cbf) 30%, transparent);
+  }
+  .effective-body-content {
+    padding: 12px 24px 24px;
+    max-width: 72ch;
+    font-size: 15px;
+    line-height: 1.65;
+    color: var(--text, #242424);
+  }
+  .effective-body-content :global(p) {
+    margin: 0 0 0.9em;
   }
 
   .title-label {

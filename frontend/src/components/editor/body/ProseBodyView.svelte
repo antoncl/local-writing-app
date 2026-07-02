@@ -23,7 +23,7 @@
   import { onMount } from "svelte";
   import { Editor } from "@tiptap/core";
   import { Fragment, type Node as ProseMirrorNode } from "@tiptap/pm/model";
-  import { TextSelection } from "@tiptap/pm/state";
+  import { TextSelection, type Transaction } from "@tiptap/pm/state";
   import type { EditorView } from "@tiptap/pm/view";
   import StarterKit from "@tiptap/starter-kit";
   import Table from "@tiptap/extension-table";
@@ -33,13 +33,21 @@
   import { editorHtmlToSceneMarkdown, sceneMarkdownToHtml } from "@/lib/utils/markdown";
   import { sanitizePastedHtml } from "@/lib/utils/sanitizePastedHtml";
   import { ImplicitContextHighlight, REBUILD_META } from "@/lib/editor-core/implicitContextHighlight";
-  import { AISuggestion, TodoAnchor, createCharacterMark, createMutationMark } from "@/lib/editor-core/proseMarks";
+  import { createSceneEffectiveMatcher } from "@/lib/editor-core/sceneEffectiveMatcher.svelte";
   import {
-    applyMutationDrafts,
+    AISuggestion,
+    TodoAnchor,
+    createCharacterMark,
+    createMutationMark,
+    createMutationCloseMark,
+  } from "@/lib/editor-core/proseMarks";
+  import {
+    closeLabelFromDoc,
     dedupeMutationIds,
-    removeMutationNode,
+    transactionInsertsMutation,
+    unitRows,
   } from "@/lib/editor-core/mutationNodes";
-  import MutationAuthoringForm, { type MutationDraft } from "./MutationAuthoringForm.svelte";
+  import MutationDialogs from "./MutationDialogs.svelte";
   import {
     parseSlashBody,
     parseTableDims,
@@ -182,6 +190,12 @@
   }
 
   const MutationMark = createMutationMark({ labelForMarker: mutationLabelFromMarker });
+
+  // Close-pill label (#59): the referenced start record's name / auto-label,
+  // found live in the open doc so it tracks edits to that marker.
+  const MutationCloseMark = createMutationCloseMark({
+    labelForClose: (ref) => (editor ? closeLabelFromDoc(editor, ref) : ""),
+  });
 
   // ---------- State ----------
   let editorFrame = $state<HTMLDivElement>();
@@ -524,12 +538,16 @@
         autocompleteTo: "mutate",
         run: (args) => {
           clearSlashTrigger();
-          // `/mutate Alice` pre-selects the entity by (case-insensitive) title.
-          const name = (args ?? []).join(" ").trim().toLowerCase();
+          const parts = args ?? [];
+          // `/mutate close [Name]` opens the close picker (#59); otherwise
+          // `/mutate [Alice]` pre-selects the entity by (case-insensitive) title.
+          const closing = parts[0]?.trim().toLowerCase() === "close";
+          const name = (closing ? parts.slice(1) : parts).join(" ").trim().toLowerCase();
           const match = name
             ? loreEntries.find((entry) => (entry.title ?? "").toLowerCase() === name)
             : null;
-          openMutationDialog(match?.id ?? "");
+          if (closing) mutationDialogs?.openClose(match?.id ?? "");
+          else void mutationDialogs?.openAuthoring(match?.id ?? "");
         },
       },
       ...promptEntriesForSurface(promptCtx, "append_to_body")
@@ -971,44 +989,23 @@
     return `todo_${randomId.slice(0, 12)}`;
   }
 
-  // `/mutate` authoring dialog (#33). Create mode inserts one pill (client-minted
-  // id) per selected field at the cursor; clicking a pill opens edit mode, which
-  // rewrites/removes the node in place. Markers round-trip to scene-body comments
-  // via the turndown rule on save.
-  let mutationDialogOpen = $state(false);
-  let mutationPresetEntityId = $state("");
-  let mutationEditInitial = $state<MutationDraft | null>(null);
-
-  function openMutationDialog(presetEntityId = "") {
-    mutationEditInitial = null;
-    mutationPresetEntityId = presetEntityId;
-    mutationDialogOpen = true;
-  }
-
-  function openMutationEdit(initial: MutationDraft) {
-    mutationPresetEntityId = "";
-    mutationEditInitial = initial;
-    mutationDialogOpen = true;
-  }
+  // The `/mutate` dialogs (#33, #69) live in MutationDialogs (state + submit
+  // wiring); this component keeps only the pill-click and slash entry points,
+  // reached through the bound instance's open* methods.
+  let mutationDialogs = $state<MutationDialogs | null>(null);
 
   // Re-entrancy guard lives here (the dispatch re-fires onUpdate); the doc work
   // is in `dedupeMutationIds`.
-  function enforceUniqueMutationIds() {
+  function enforceUniqueMutationIds(transaction?: Transaction) {
     if (!editor || reconcilingMutationIds) return false;
+    // Duplicate ids only enter via inserted pills (paste/drop/redo); plain
+    // typing can't, so skip the full-doc dedup walk on the keystroke hot path.
+    // Undefined transaction (non-onUpdate callers) falls through and dedups.
+    if (transaction && !transactionInsertsMutation(transaction)) return false;
     reconcilingMutationIds = true;
     const changed = dedupeMutationIds(editor);
     reconcilingMutationIds = false;
     return changed;
-  }
-
-  function handleMutationSubmit(drafts: MutationDraft[]) {
-    mutationDialogOpen = false;
-    if (editor) applyMutationDrafts(editor, drafts);
-  }
-
-  function deleteMutationNode(markerId: string) {
-    mutationDialogOpen = false;
-    if (editor) removeMutationNode(editor, markerId);
   }
 
   function selectedPlainText() {
@@ -1186,8 +1183,8 @@
   // Body-change orchestration: TipTap's onUpdate fires per keystroke. We
   // emit one `body-change` event to the parent (NodeEditor) so it can
   // compose its full save payload (title + body + status + ...).
-  function handleEditorUpdate() {
-    if (!enforceUniqueMutationIds() && !enforceUniqueTodoAnchors()) {
+  function handleEditorUpdate(transaction?: Transaction) {
+    if (!enforceUniqueMutationIds(transaction) && !enforceUniqueTodoAnchors()) {
       // Skip the body-change emit when a unique-id reconciler made a doc
       // change — its own transaction re-fires onUpdate, so the non-reconciler
       // edits below run on that second pass.
@@ -1250,6 +1247,7 @@
         AISuggestion,
         CharacterMark,
         MutationMark,
+        MutationCloseMark,
         TodoAnchor,
         Table.configure({ resizable: true }),
         TableRow,
@@ -1264,15 +1262,22 @@
           spellcheck: "true",
         },
         handleKeyDown: handleEditorKeydown,
-        handleClickOn: (_view, _pos, node) => {
-          // Click a mutation pill → edit it (rewrite/remove the node in place).
+        handleClickOn: (_view, pos, node) => {
+          // Click a mutation pill → edit the whole unit (#69) in place.
           if (node.type.name === "mutation") {
-            openMutationEdit({
+            void mutationDialogs?.openEdit({
               markerId: String(node.attrs.markerId ?? ""),
               entity: String(node.attrs.entity ?? ""),
-              field: String(node.attrs.field ?? ""),
-              value: String(node.attrs.value ?? ""),
+              name: String(node.attrs.name ?? ""),
+              group: String(node.attrs.group ?? ""),
+              rows: unitRows(node.attrs),
             });
+            return true;
+          }
+          // Click a close pill → delete it (reopens the interval). It carries no
+          // editable fields of its own beyond the record it references.
+          if (node.type.name === "mutationClose") {
+            editor?.chain().focus().deleteRange({ from: pos, to: pos + node.nodeSize }).run();
             return true;
           }
           return false;
@@ -1287,7 +1292,7 @@
         // round-trip through our Markdown serializer. Strip at paste time.
         transformPastedHTML: (html) => sanitizePastedHtml(html),
       },
-      onUpdate: handleEditorUpdate,
+      onUpdate: ({ transaction }) => handleEditorUpdate(transaction),
       onSelectionUpdate: handleEditorSelectionUpdate,
       onBlur: handleEditorBlur,
     });
@@ -1342,10 +1347,19 @@
       }
     }
   });
-  // Reactively poke the ImplicitContextHighlight extension when the
-  // matcher reference changes (lore added/edited at the App level).
+  // Scene-local effective-name matcher (#61): the open scene highlights entities
+  // under their as-of-scene names, falling back to the global (base-name) matcher
+  // while loading / for non-scene bodies. See the controller for invalidation.
+  const sceneMatcher = createSceneEffectiveMatcher({
+    sceneId: () => (documentKind === "scene" ? scene?.id ?? null : null),
+    entries: () => loreEntries,
+    schema: () => metadataSchema,
+    invalidateOn: () => implicitContextMatcher,
+  });
+  // Reactively poke the ImplicitContextHighlight extension when the effective
+  // matcher reference changes (scene switch, lore added/edited at the App level).
   $effect.pre(() => {
-    if (editor) updateImplicitMatcher(implicitContextMatcher);
+    if (editor) updateImplicitMatcher(sceneMatcher.current ?? implicitContextMatcher);
   });
   // Suppress unused-warning for slashArgTokens (reserved for future slash UX).
   $effect.pre(() => {
@@ -1420,15 +1434,12 @@
   <div bind:this={editorElement}></div>
 </div>
 
-{#if mutationDialogOpen}
-  <MutationAuthoringForm
-    {loreEntries}
-    schema={metadataSchema}
-    implicitContextMatcher={implicitContextMatcher}
-    initial={mutationEditInitial}
-    presetEntityId={mutationPresetEntityId}
-    onSubmit={handleMutationSubmit}
-    onDelete={deleteMutationNode}
-    onCancel={() => (mutationDialogOpen = false)}
-  />
-{/if}
+<MutationDialogs
+  bind:this={mutationDialogs}
+  getEditor={() => editor}
+  sceneId={scene?.id ?? ""}
+  isScene={documentKind === "scene"}
+  {loreEntries}
+  schema={metadataSchema}
+  implicitContextMatcher={implicitContextMatcher}
+/>

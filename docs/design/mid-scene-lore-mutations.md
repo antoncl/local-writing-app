@@ -110,8 +110,9 @@ central pointer table.
   stable ids for edit/delete and v1.1 close *references* an id, which settles it.
 - **Forward-compatible grammar.** v1.0 markers are "set a scalar" (op implicit). Later
   additions are purely additive to the grammar, leaving v1.0 markers untouched:
-  - additive → an `op=add` (or inferred from a collection-typed field);
-  - close → a separate close-marker referencing an `id`;
+  - additive → an `op=add` (v1.1 also `op=remove`; see the v1.1 doc §1);
+  - close → a separate close-marker referencing an `id` (v1.1 doc §2);
+  - naming → an optional `name=` label (+ `group=` for co-authored sets), a label not a frame (v1.1 doc §6);
   - per-knower → an optional `knower=<lore-id>` scope.
 
 ### 3.3 Performance & the index
@@ -323,13 +324,16 @@ is composition over shipped patterns — evidence the feature does not warrant a
   verification).
 
 **v1.1 — richer combine & lifetime (the cases that drove the design):**
+> Now specified in its own doc: [`mid-scene-lore-mutations-v1.1.md`](./mid-scene-lore-mutations-v1.1.md)
+> (covers #58–62; the time-sensitive lore entry #63/#64 is a separate design pass). The forward-compat
+> grammar hooks in §3.2 are resolved there (`op=add`/`op=remove`, the close-marker).
 - **Additive** (accumulation) — clue accumulation. **Field type gates it**: where accumulation
   is meaningless (e.g. boolean) it's replace-only; where it makes sense, a **per-mutation toggle**
   (replace vs. add) lets the writer choose at authoring time (not a global setting, not pure
   type-inference). Required for the feature to be complete; phased here only to keep v1.0 lean.
 - **Interval close** (end + close-by-identity, incl. out-of-order retraction) — werewolf
   revert, red-herring, scene/sequence-scoped sub-goals.
-- Roleplay **scene-picker** verification (§6); **reusable transformation sets** (a saved
+- Roleplay **scene-picker** verification (§6); **reusable mutation sets** (a saved
   plural-field bundle re-applied for recurring werewolf — DRY at authoring time over inline
   Model-A markers).
 
@@ -346,6 +350,10 @@ is composition over shipped patterns — evidence the feature does not warrant a
   tool; the planner itself is out.
 - **Linked/shared mutation** (single-point-edit of a recurring state — the only true pull
   toward a pointer model) — opt-in later if it ever earns its keep; does not change v1 storage.
+  Tracked as **[#66](https://github.com/antoncl/local-writing-app/issues/66)** (v2). Anton expects
+  this to become a common user request once the app is public — it is deferred on *cost* (a stamped
+  marker would have to remember its source, breaking scene self-authority, ADR-0001), not on doubt
+  about demand.
 
 ## 9. Resolved in review (2026-07-01)
 1. **Time-slider in v1.0 — YES**, minimal stepped scrubber. Rationale: it's needed to test whether

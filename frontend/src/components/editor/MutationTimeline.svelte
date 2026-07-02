@@ -11,6 +11,7 @@
   import CountPill from "@/components/widgets/CountPill.svelte";
   import { api } from "@/lib/api";
   import { mutationRecordLabel } from "@/lib/editor-core/mutationNodes";
+  import { mutationsVersion } from "@/lib/stores/mutationsVersion.svelte";
   import type { MutationMarkerRecord } from "@/lib/types";
 
   let {
@@ -29,9 +30,11 @@
   let effective = $state<Record<string, string | string[]>>({});
   const displayValue = (value: string | string[]) => (Array.isArray(value) ? value.join(", ") : value);
 
-  // Refetch the timeline whenever the entity changes.
+  // Refetch the timeline whenever the entity changes — or a scene save touches
+  // the mutations index (#63): stops may have moved, so scrub resets to base.
   $effect(() => {
     const id = entityId;
+    void mutationsVersion.value;
     sliderIndex = 0;
     effective = {};
     if (!id) {

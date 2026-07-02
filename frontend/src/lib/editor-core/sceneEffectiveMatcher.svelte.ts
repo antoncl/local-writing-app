@@ -7,9 +7,10 @@
 //
 // Returns null while loading / when there's no scene, so the caller falls back
 // to the global base-name matcher. Recomputes when any accessor changes (scene
-// switch, lore edit via `invalidateOn`); live mutation-edit invalidation arrives
-// with the #63 mutations-version signal.
+// switch, lore edit via `invalidateOn`) and when a scene save touches the
+// mutations index (the #63 mutations-version signal).
 import { api } from "@/lib/api";
+import { mutationsVersion } from "@/lib/stores/mutationsVersion.svelte";
 import { compileMatcher, type CompiledMatcher } from "@/lib/editor-core/implicitContextMatcher";
 import type { LoreEntrySummary, MetadataSchema } from "@/lib/types";
 
@@ -27,6 +28,7 @@ export function createSceneEffectiveMatcher(opts: {
     const entries = opts.entries();
     const schema = opts.schema();
     opts.invalidateOn?.();
+    void mutationsVersion.value;
     if (!sceneId) {
       matcher = null;
       return;

@@ -49,6 +49,7 @@ import { refreshAssistantEntries, setAssistantEntries } from "@/lib/stores/assis
 import { refreshKnownTags } from "@/lib/stores/tags";
 import { refreshTodos, refreshEmbeddedTodos } from "@/lib/stores/todos";
 import { chatSessionsStore, refreshChatSessions, setChatSessions } from "@/lib/stores/chats";
+import { bodyHasMutationMarkers, mutationsVersion } from "@/lib/stores/mutationsVersion.svelte";
 import type {
   AssistantEntry,
   Backlink,
@@ -326,6 +327,9 @@ class EditorPanesController {
     if (documentKind === "chat") return;
     this.#autosave.cancel(id);
     this.setEditorPaneSaving(id, true);
+    // Snapshot the pre-save baseline body for the mutations-version check below
+    // (pane.scene is replaced by the save reconciliation).
+    const baselineBody = pane.scene.body ?? "";
     try {
       const draftDocument = {
         ...pane.scene,
@@ -414,6 +418,13 @@ class EditorPanesController {
         // a scene save may add/remove/edit markers, so re-scan (GH #45).
         if (documentKind === "scene" || documentKind === "structure_node") {
           await refreshEmbeddedTodos();
+          // Mutations are likewise an index over scene bodies (#63, ADR-0014):
+          // a save that touches a marker-bearing scene (before or after the
+          // edit — covers add, remove, edit, and offset shifts) invalidates
+          // every open mutations reader.
+          if (bodyHasMutationMarkers(baselineBody) || bodyHasMutationMarkers(pane.draftMarkdown)) {
+            mutationsVersion.bump();
+          }
         }
         await refreshKnownTags();
       }

@@ -1,6 +1,6 @@
 # ADR-0017: Collection mutations are authored as list edits, diffed against the effective baseline
 
-- Status: Proposed — 0.4.0 authoring rework, 2026-07-02
+- Status: Accepted — 0.4.0 authoring rework, 2026-07-02
 - Feature: #33 mid-scene lore mutations · Doc: `mutation-unit-authoring.md` §3 · Issue: #71
 - Layers over: ADR-0009 (storage/resolution unchanged) · Uses: ADR-0003 (position-granular
   effective state)

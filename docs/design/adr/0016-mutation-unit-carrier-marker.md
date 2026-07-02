@@ -1,6 +1,6 @@
 # ADR-0016: The mutation unit — one carrier marker, one pill; rows keep their own lifetimes
 
-- Status: Proposed — 0.4.0 authoring rework, 2026-07-02
+- Status: Accepted — 0.4.0 authoring rework, 2026-07-02
 - Feature: #33 mid-scene lore mutations · Doc: `mutation-unit-authoring.md` §2 · Issues: #69, #70
 - Amends: ADR-0001 (marker grammar) · Extends: ADR-0010 (close ref) · Subsumes: ADR-0015 `group=`
 - Guards: ADR-0002 (independent intervals)

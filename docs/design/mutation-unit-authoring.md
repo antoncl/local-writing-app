@@ -1,6 +1,6 @@
 # Design: The mutation unit — authoring rework
 
-> Status: **DRAFT for review** · Issues: [#69](https://github.com/antoncl/local-writing-app/issues/69)
+> Status: **ACCEPTED** (Anton, 2026-07-02) · Issues: [#69](https://github.com/antoncl/local-writing-app/issues/69)
 > (one carrier marker / one pill), [#70](https://github.com/antoncl/local-writing-app/issues/70)
 > (visual frame per unit), [#71](https://github.com/antoncl/local-writing-app/issues/71)
 > (collections authored as list edits) · Milestone: 0.4.0

@@ -1,8 +1,14 @@
 # ADR-0015: Mutations carry an optional user name (a label, not a frame)
 
-- Status: Accepted (v1.1) — 0.4.0, 2026-07-01
+- Status: Accepted (v1.1) — 0.4.0, 2026-07-01 · **Amended 2026-07-02: `group=` subsumed (ADR-0016)**
 - Feature: #33 mid-scene lore mutations · Doc: `mid-scene-lore-mutations-v1.1.md` §6 · Issue: #65
 - Extends: ADR-0001 (marker grammar) · Guards: ADR-0002 (independent interval)
+
+> **Amendment (2026-07-02, ADR-0016)** — the multi-row **carrier subsumes `group=`**: the carrier
+> *is* the co-authored unit, and `name=` lives once on its head instead of duplicated per member.
+> Legacy `group=` markers parse forever and map to a unit tie in the index; new authoring never
+> emits `group=`. The name's semantics are unchanged: a label, not a frame — lifetimes stay
+> per-row (rows keep their own ids).
 
 ## Decision
 A mutation may carry an optional **user name** — a human label for the change ("Honor's promotion",

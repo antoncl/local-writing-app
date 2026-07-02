@@ -1,8 +1,12 @@
 # ADR-0010: Interval close is a separate close-marker
 
-- Status: Accepted (v1.1) — 0.4.0, 2026-07-01
+- Status: Accepted (v1.1) — 0.4.0, 2026-07-01 · **Amended 2026-07-02: unit ref (ADR-0016)**
 - Feature: #33 mid-scene lore mutations · Doc: `mid-scene-lore-mutations-v1.1.md` §2 · Issue: #59
 - Implements: the "optional end" of ADR-0002's independent-interval model
+
+> **Amendment (2026-07-02, ADR-0016)** — `ref=` may also name a **unit id**: sugar that ends every
+> live row of that unit at the close point, expanded at index time into per-row liveness ends that
+> merely coincide. Liveness stays per-record; the dangling-close reconcile extends to unit refs.
 
 ## Decision
 An interval is closed by a **separate marker at the close position**, referencing the start

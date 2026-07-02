@@ -28,3 +28,8 @@ Design docs: [`../mid-scene-lore-mutations.md`](../mid-scene-lore-mutations.md) 
 Design doc: [`../time-sensitive-lore-entry.md`](../time-sensitive-lore-entry.md)
 - [0013](0013-time-travel-aware-lore-entry.md) — Lore entry is time-travel-aware; whole-card read-only effective overlay (#64)
 - [0014](0014-mutations-version-cross-pane-signal.md) — `mutationsVersion` cross-pane freshness signal (#63)
+
+### Authoring rework — the mutation unit
+Design doc: [`../mutation-unit-authoring.md`](../mutation-unit-authoring.md)
+- [0016](0016-mutation-unit-carrier-marker.md) — The mutation unit: one carrier marker, one pill; rows keep their own lifetimes (#69, #70; amends 0001/0010, subsumes 0015 `group=`)
+- [0017](0017-collection-mutations-authored-as-list-edits.md) — Collection mutations authored as list edits, diffed against the effective baseline (#71)

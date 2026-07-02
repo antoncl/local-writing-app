@@ -47,7 +47,8 @@
     return schema?.entry_types[id]?.name || id || "any type";
   }
 
-  function openNew() {
+  // Called from App's pane handle bar ("+ New set") via bind:this.
+  export function openNew() {
     editing = null;
     editorOpen = true;
   }
@@ -77,9 +78,6 @@
 </script>
 
 <div class="mutations-pane">
-  <div class="tset-toolbar">
-    <button type="button" class="pin-button" onclick={openNew}>+ New set</button>
-  </div>
   {#if error}
     <p class="pane-error" role="alert">{error}</p>
   {/if}
@@ -122,11 +120,6 @@
 {/if}
 
 <style>
-  .tset-toolbar {
-    display: flex;
-    justify-content: flex-end;
-    padding: 4px 6px;
-  }
   .muted {
     color: var(--text-3);
     font-size: 0.85rem;

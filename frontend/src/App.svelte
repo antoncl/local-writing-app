@@ -126,6 +126,8 @@
   // all persistence handlers) lives in SchemaPanes.svelte (#14 P0). App holds
   // only the instance ref so it can drive the three entry points.
   let schemaPanes: SchemaPanes | undefined = $state();
+  // Instance ref so the pane handle bar's "+ New set" can open the editor.
+  let mutationsPane: Mutations | undefined = $state();
   let promptsPaneOpen = $state(false);
   let mutationsPaneOpen = $state(false);
   let assistantsPaneOpen = $state(false);
@@ -628,12 +630,14 @@
     </div>
   </Pane>
 
-  <Pane id="mutations" title="Mutations" paneClass="prompts-pane" hidden={!isProjectOpen || !mutationsPaneOpen} style={paneStyle("mutations")} chrome={paneChrome}>
+  <Pane id="mutations" title="Reusable mutations" paneClass="prompts-pane" hidden={!isProjectOpen || !mutationsPaneOpen} style={paneStyle("mutations")} chrome={paneChrome}>
     {#snippet actions()}
+      <button class="pin-button" type="button" title="New mutation set" onmousedown={(event) => event.stopPropagation()} onclick={() => mutationsPane?.openNew()}>+ New set</button>
       <button class="pin-button" type="button" onmousedown={(event) => event.stopPropagation()} onclick={() => (mutationsPaneOpen = false)}>Close</button>
     {/snippet}
     <div class="pane-content schema-list">
       <Mutations
+        bind:this={mutationsPane}
         loreEntries={loreEntries}
         promptEntries={promptEntries}
         structure={structure}

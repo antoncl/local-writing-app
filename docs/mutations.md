@@ -58,6 +58,27 @@ split the scene at the rename, or record the rename at the very start/end of the
 > This limit is called out here rather than left implicit; when authoring a name/alias change the
 > `/mutate` form also flags it inline with a link back to this section.
 
+## Appending, and why fragments must stand alone (v1.1)
+
+Text fields (including an entry's body) can take an **Append** change instead of a replace: the
+fragment is added after whatever the field says at that point. Collections (tags, references,
+multi-selects) similarly take **Add item** / **Remove item**.
+
+There is one contract to write by: **every appended fragment must stand alone.** Each change is an
+independent interval — it can be *closed* (ended) on its own, at any later point in the story.
+If fragment B leans on fragment A ("She trusts John." → "But only him."), closing A leaves B
+reading nonsense — the app resolves the remaining fragments correctly, but it cannot know that B's
+*meaning* depended on A. Write each append as if its neighbors might not be there, or author
+dependent changes as **one** named change (one `/mutate`, several fields — closeable together in
+one gesture).
+
+Collections are safer: adds and removes combine as set operations, so closing any one of them
+still leaves a coherent set. The stand-alone rule matters mainly for appended prose.
+
+> A real fix (declared dependencies between changes, cascading closes) is deliberately deferred to
+> the v2 linked-mutations design — tracked in
+> [#73](https://github.com/antoncl/local-writing-app/issues/73).
+
 ## Reusing a set of changes (v1.1)
 
 A recurring transformation (a werewolf's dusk change: appearance + abilities + name) can be saved as

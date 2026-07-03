@@ -294,7 +294,7 @@ def _migrate_default_models_to_files_if_empty(settings: MachineSettings) -> None
         front: dict[str, Any] = {
             "id": assistant_id,
             "title": title,
-            "entry_type": "assistant",
+            "entry_type": "assistant:assistant",
             "metadata": metadata,
         }
         front_text = yaml.safe_dump(front, sort_keys=False, allow_unicode=True).strip()

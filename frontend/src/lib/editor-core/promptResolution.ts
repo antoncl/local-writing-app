@@ -169,7 +169,7 @@ export function isRoleplayPromptEntry(
   let cursor: string | undefined = entry.entry_type;
   const seen = new Set<string>();
   while (cursor && !seen.has(cursor)) {
-    if (cursor === "roleplay") return true;
+    if (cursor === "prompt:roleplay") return true;
     seen.add(cursor);
     cursor = ctx.metadataSchema.entry_types[cursor]?.parent ?? undefined;
   }

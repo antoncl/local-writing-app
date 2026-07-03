@@ -35,13 +35,13 @@ class ProjectNodeMixin:
                 title=str(manifest.get("title") or self.title or "Untitled Project"),
                 body="",
                 revision="",
-                entry_type="project",
+                entry_type="project:project",
                 metadata={},
             )
         front_matter, body = self._read_markdown_with_front_matter(path, strict=True)
         title = str(front_matter.get("title") or self.title or "Untitled Project")
-        raw_entry_type = front_matter.get("entry_type") or "project"
-        entry_type = raw_entry_type if isinstance(raw_entry_type, str) else "project"
+        raw_entry_type = front_matter.get("entry_type") or "project:project"
+        entry_type = raw_entry_type if isinstance(raw_entry_type, str) else "project:project"
         metadata = self._normalise_metadata(front_matter.get("metadata"), path)
         return ProjectNode(
             id="project",

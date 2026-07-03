@@ -44,8 +44,8 @@ class LoreEntriesMixin:
                 front_matter, body = self._read_markdown_with_front_matter(entry.path, strict=True)
             except ProjectServiceError:
                 continue
-            raw_entry_type = front_matter.get("entry_type") or "lore_note"
-            entry_type = raw_entry_type if isinstance(raw_entry_type, str) else "lore_note"
+            raw_entry_type = front_matter.get("entry_type") or "lore:lore_note"
+            entry_type = raw_entry_type if isinstance(raw_entry_type, str) else "lore:lore_note"
             entries.append(
                 LoreEntrySummary(
                     id=entry.id,
@@ -62,7 +62,7 @@ class LoreEntriesMixin:
 
     def create_lore_entry(self, request: CreateLoreEntryRequest) -> LoreEntry:
         root = self._require_project()
-        entry_type = request.entry_type or "lore_note"
+        entry_type = request.entry_type or "lore:lore_note"
         schema = self.read_metadata_schema()
         initial_metadata = self._initial_metadata_from_defaults(entry_type, schema)
         metadata_errors = self._validate_lore_entry_metadata(
@@ -95,7 +95,7 @@ class LoreEntriesMixin:
             path = self._path_for_node_id(entry_id, "lore")
         front_matter, body = self._read_markdown_with_front_matter(path, strict=True)
         node_id = self._node_id_for_path(path, front_matter)
-        raw_entry_type = front_matter.get("entry_type") or "lore_note"
+        raw_entry_type = front_matter.get("entry_type") or "lore:lore_note"
         if not isinstance(raw_entry_type, str):
             raise ProjectServiceError(f"Lore Entry {node_id} has invalid entry_type; it must be text.", 422)
         entry_type = raw_entry_type

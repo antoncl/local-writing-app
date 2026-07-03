@@ -73,7 +73,7 @@ class TreeActions {
   // ---- Node creation ----
   async newLoreEntry(): Promise<void> {
     await this.run(async () => {
-      const entry = await api.createLoreEntry("New Entry", "lore_note");
+      const entry = await api.createLoreEntry("New Entry", "lore:lore_note");
       await refreshLoreEntries();
       await editorPanes.openLore(entry.id);
     });
@@ -307,7 +307,7 @@ class TreeActions {
   // kind-specific api + the editor-pane / collapse callbacks that live here.
   manuscriptTree: TreeConfig = {
     kind: "scene",
-    leafType: "scene",
+    leafType: "scene:scene",
     getStructure: () => get(structureStore),
     applyStructure: (next) => { setStructure(next); },
     refresh: refreshStructure,
@@ -336,7 +336,7 @@ class TreeActions {
 
   researchTree: TreeConfig = {
     kind: "research",
-    leafType: "note",
+    leafType: "research:note",
     getStructure: () => get(researchStructureStore),
     applyStructure: (next) => { setResearchStructure(next); },
     refresh: refreshResearchStructure,

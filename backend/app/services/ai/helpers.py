@@ -925,8 +925,11 @@ def _format_lore_block(
                 overrides = project.effective_state(entry_id, scene_id, position, index)
             except Exception:
                 overrides = {}
-        entry_type = _attr_or_item(entry, "entry_type") or "lore_entry"
-        tag = _xml_safe_tag(entry_type)
+        entry_type = _attr_or_item(entry, "entry_type") or "lore:lore_entry"
+        # Tag from the bare local key, not the kind-qualified FQN — a
+        # `<character>` tag reads cleaner to the model than `<lore_character>`,
+        # and the `:` isn't XML-tag-legal (mirrors context_presets.py).
+        tag = _xml_safe_tag(str(entry_type).rsplit(":", 1)[-1])
         title = str(
             overrides["title"]
             if "title" in overrides

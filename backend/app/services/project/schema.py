@@ -125,8 +125,6 @@ class MetadataSchemaMixin:
             raise ProjectServiceError("Unknown metadata schema layer.", 404)
 
         entry_type_id = request.entry_type_id.strip()
-        if not re.fullmatch(r"[A-Za-z][A-Za-z0-9_]*", entry_type_id):
-            raise ProjectServiceError("Node type ID must start with a letter and contain only letters, numbers, and underscores.", 422)
         if request.entry_type.kind not in {
             "scene", "lore", "prompt", "assistant", "project", "chat", "mutation_set"
         }:
@@ -134,6 +132,24 @@ class MetadataSchemaMixin:
                 "Node type kind must be scene, lore, prompt, assistant, project, chat, or mutation_set.",
                 422,
             )
+        # Entry-type identity is the kind-qualified FQN `kind:key` (#77): that
+        # FQN is the dict key, the stored id, and the value written into a
+        # node's `entry_type` front matter. Accept either the full FQN or a
+        # bare local key (qualified here with the declared kind) so callers may
+        # send either; the local part is the stable machine handle.
+        fqn = entry_type_id if ":" in entry_type_id else f"{request.entry_type.kind}:{entry_type_id}"
+        match = re.fullmatch(r"([a-z][a-z0-9_]*):([A-Za-z][A-Za-z0-9_]*)", fqn)
+        if not match:
+            raise ProjectServiceError(
+                "Node type ID must be `kind:key`, where key starts with a letter and contains only letters, numbers, and underscores.",
+                422,
+            )
+        if match.group(1) != request.entry_type.kind:
+            raise ProjectServiceError(
+                f"Node type id kind prefix '{match.group(1)}' must match the node kind '{request.entry_type.kind}'.",
+                422,
+            )
+        entry_type_id = fqn
         if request.entry_type.prompt is not None and request.entry_type.kind != "prompt":
             raise ProjectServiceError("Prompt configuration is only valid on prompt node types.", 422)
         if request.entry_type.parent == entry_type_id:
@@ -1008,6 +1024,19 @@ class MetadataSchemaMixin:
     def _validate_metadata_schema_definition(self, schema: MetadataSchema) -> list[str]:
         errors: list[str] = []
         for entry_type_id, entry_type in schema.entry_types.items():
+            # Identity is the kind-qualified FQN `kind:key` (#77): the dict key
+            # must be `<kind>:<local>` and its prefix must match the type's own
+            # `kind`. This is the backstop that keeps a hand-edited layer from
+            # reintroducing a bare (ambiguous) key or crossing a key into the
+            # wrong kind.
+            fqn_match = re.fullmatch(r"([a-z][a-z0-9_]*):([A-Za-z][A-Za-z0-9_]*)", entry_type_id)
+            if not fqn_match:
+                errors.append(f"Metadata entry_type key {entry_type_id!r} must be kind-qualified as `kind:key`.")
+            elif fqn_match.group(1) != entry_type.kind:
+                errors.append(
+                    f"Metadata entry_type {entry_type_id} has kind prefix '{fqn_match.group(1)}' "
+                    f"but declares kind '{entry_type.kind}'."
+                )
             if entry_type.parent and entry_type.parent not in schema.entry_types:
                 errors.append(f"Metadata entry_type {entry_type_id} references unknown parent {entry_type.parent}.")
             if entry_type.parent and entry_type.parent in schema.entry_types:

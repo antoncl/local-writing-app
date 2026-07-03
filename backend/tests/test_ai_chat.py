@@ -405,14 +405,14 @@ class ChatStreamEndpointTests(unittest.TestCase):
         # this exercises the param wiring.
         from app.models import CreateAssistantEntryRequest, SaveAssistantEntryRequest
         created = global_service.create_assistant_entry(
-            CreateAssistantEntryRequest(title="Thinker", entry_type="assistant")
+            CreateAssistantEntryRequest(title="Thinker", entry_type="assistant:assistant")
         )
         global_service.save_assistant_entry(
             created.id,
             SaveAssistantEntryRequest(
                 title="Thinker",
                 base_revision=created.revision,
-                entry_type="assistant",
+                entry_type="assistant:assistant",
                 metadata={
                     "ai_provider": "anthropic",
                     "ai_model": "claude-haiku-4-5-20251001",
@@ -506,13 +506,13 @@ class ChatEndpointJournalTests(unittest.TestCase):
 
         # Lore: Honor (with alias) → body mentions Pavel (depth-1); Nimitz unrelated.
         honor = global_service.create_lore_entry(
-            CreateLoreEntryRequest(title="Honor Harrington", entry_type="character")
+            CreateLoreEntryRequest(title="Honor Harrington", entry_type="lore:character")
         )
         nimitz = global_service.create_lore_entry(
-            CreateLoreEntryRequest(title="Nimitz", entry_type="character")
+            CreateLoreEntryRequest(title="Nimitz", entry_type="lore:character")
         )
         pavel = global_service.create_lore_entry(
-            CreateLoreEntryRequest(title="Pavel Young", entry_type="character")
+            CreateLoreEntryRequest(title="Pavel Young", entry_type="lore:character")
         )
 
         def _save(entry_id: str, metadata: dict, body: str) -> None:
@@ -521,7 +521,7 @@ class ChatEndpointJournalTests(unittest.TestCase):
                 entry_id,
                 SaveLoreEntryRequest(
                     title=existing.title, body=body,
-                    base_revision=existing.revision, entry_type="character",
+                    base_revision=existing.revision, entry_type="lore:character",
                     metadata=metadata,
                 ),
             )

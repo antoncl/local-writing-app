@@ -47,7 +47,10 @@ def _render_outline_node(node: dict, *, indent: int) -> str:
     pad = "  " * indent
     title = quoteattr(str(node.get("title") or ""))
     entry_type = str(node.get("entry_type") or "node") or "node"
-    tag = _xml_safe_tag(entry_type)
+    # The outline XML tag uses the bare local key (`scene`, `act`), not the
+    # kind-qualified FQN (`scene:scene`) — the colon isn't XML-tag-legal and a
+    # `<scene>` tag reads better for the model than `<scene_scene>`.
+    tag = _xml_safe_tag(entry_type.rsplit(":", 1)[-1])
     summary = (node.get("summary") or "").strip()
     children = node.get("children") or []
     attrs = [f"title={title}"]

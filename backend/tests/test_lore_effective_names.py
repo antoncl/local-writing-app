@@ -25,7 +25,7 @@ class EffectiveNamesTests(unittest.TestCase):
         svc.__init__()
         svc.create_project(self.root, "Effective Names Tests")
         self.remus = svc.create_lore_entry(
-            CreateLoreEntryRequest(title="Remus", entry_type="character")
+            CreateLoreEntryRequest(title="Remus", entry_type="lore:character")
         ).id
         self.client = TestClient(app)
         self.s1 = self._new_scene("One", "The village is quiet.")
@@ -66,7 +66,7 @@ class EffectiveNamesTests(unittest.TestCase):
         svc.save_lore_entry(
             self.remus,
             SaveLoreEntryRequest(
-                title="Remus", body="", entry_type="character",
+                title="Remus", body="", entry_type="lore:character",
                 metadata={"aliases": ["Grey"]},
             ),
         )

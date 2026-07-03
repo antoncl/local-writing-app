@@ -92,8 +92,8 @@
   function flattenScenesAll(node: StructureNode | null | undefined): Map<string, { id: string; title: string; entry_type: string }> {
     const out = new Map<string, { id: string; title: string; entry_type: string }>();
     const walk = (n: StructureNode) => {
-      if (n.type === "scene" && n.scene_id) {
-        const entryType = (n as unknown as { entry_type?: string }).entry_type ?? "scene";
+      if (n.type === "scene:scene" && n.scene_id) {
+        const entryType = (n as unknown as { entry_type?: string }).entry_type ?? "scene:scene";
         out.set(n.scene_id, { id: n.scene_id, title: n.title, entry_type: entryType });
       }
       for (const child of n.children ?? []) walk(child);

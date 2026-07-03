@@ -22,7 +22,7 @@ def test_context_pick_input_validates_with_kinds_and_presets():
             "required": False,
             "target": {
                 "kinds": ["scene", "lore"],
-                "entry_types": {"lore": ["character", "place"]},
+                "entry_types": {"lore": ["lore:character", "lore:place"]},
                 "presets": ["full_outline"],
                 "multiple": True,
             },
@@ -32,7 +32,7 @@ def test_context_pick_input_validates_with_kinds_and_presets():
     assert spec.target is not None
     assert spec.target["kinds"] == ["scene", "lore"]
     assert spec.target["presets"] == ["full_outline"]
-    assert spec.target["entry_types"]["lore"] == ["character", "place"]
+    assert spec.target["entry_types"]["lore"] == ["lore:character", "lore:place"]
 
 
 def test_context_pick_input_allows_empty_target():
@@ -76,13 +76,13 @@ def test_context_pick_roundtrips_through_prompt_save(tmp_path, monkeypatch):
     info = service.create_project(tmp_path / "project", "Demo")
     assert info.title == "Demo"
     created = service.create_prompt_entry(
-        type("R", (), {"title": "Pick demo", "entry_type": "snippet"})()
+        type("R", (), {"title": "Pick demo", "entry_type": "prompt:snippet"})()
     )
     request = SavePromptEntryRequest(
         title="Pick demo",
         body="Body",
         base_revision=created.revision,
-        entry_type="snippet",
+        entry_type="prompt:snippet",
         metadata={},
         inputs=[
             PromptInputDefinition(

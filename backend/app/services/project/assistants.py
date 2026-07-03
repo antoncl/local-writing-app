@@ -50,8 +50,8 @@ class AssistantEntriesMixin:
                 front_matter, _body = self._read_markdown_with_front_matter(entry.path, strict=True)
             except ProjectServiceError:
                 continue
-            raw_entry_type = front_matter.get("entry_type") or "assistant"
-            entry_type = raw_entry_type if isinstance(raw_entry_type, str) else "assistant"
+            raw_entry_type = front_matter.get("entry_type") or "assistant:assistant"
+            entry_type = raw_entry_type if isinstance(raw_entry_type, str) else "assistant:assistant"
             entries.append(
                 AssistantEntrySummary(
                     id=entry.id,
@@ -138,7 +138,7 @@ class AssistantEntriesMixin:
         path = index_entry.path
         front_matter, _body = self._read_markdown_with_front_matter(path, strict=True)
         node_id = self._node_id_for_path(path, front_matter)
-        raw_entry_type = front_matter.get("entry_type") or "assistant"
+        raw_entry_type = front_matter.get("entry_type") or "assistant:assistant"
         if not isinstance(raw_entry_type, str):
             raise ProjectServiceError(f"Assistant {node_id} has invalid entry_type; it must be text.", 422)
         return AssistantEntry(
@@ -251,12 +251,12 @@ class AssistantEntriesMixin:
             front_matter, _body = self._read_markdown_with_front_matter(entry.path, strict=True)
         except ProjectServiceError:
             return None
-        raw_entry_type = front_matter.get("entry_type") or "assistant"
+        raw_entry_type = front_matter.get("entry_type") or "assistant:assistant"
         return AssistantEntry(
             id=entry.id,
             title=str(front_matter.get("title") or entry.id),
             revision=self._revision(entry.path),
-            entry_type=raw_entry_type if isinstance(raw_entry_type, str) else "assistant",
+            entry_type=raw_entry_type if isinstance(raw_entry_type, str) else "assistant:assistant",
             metadata=self._normalise_metadata(front_matter.get("metadata"), entry.path),
             source_layer_id=entry.source_layer_id,
             source_layer_label=entry.source_layer_label,

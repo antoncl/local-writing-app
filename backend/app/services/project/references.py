@@ -49,18 +49,18 @@ class ReferencesMixin:
             layer_label = self._layer_label_for_folder(root, folder, layer_index)
             is_current_project = folder == root
             for kind, folder_name, default_entry_type in [
-                ("scene", "scenes", "scene"),
+                ("scene", "scenes", "scene:scene"),
                 # Research notes walk `research/notes/`. Treated like lore
                 # (cross-layer) rather than scenes (book-scoped) — universe-
                 # or series-level research notes are a natural use case.
-                ("research", "research/notes", "note"),
-                ("lore", "lore", "lore_note"),
-                ("prompt", "prompts", "prompt"),
-                ("assistant", "assistants", "assistant"),
+                ("research", "research/notes", "research:note"),
+                ("lore", "lore", "lore:lore_note"),
+                ("prompt", "prompts", "prompt:prompt"),
+                ("assistant", "assistants", "assistant:assistant"),
                 # Reusable mutation sets (#62): body-less Node files under
                 # `mutation-sets/`. Layered like lore/prompts (a werewolf
                 # transform can live at any project level).
-                ("mutation_set", "mutation-sets", "mutation_set"),
+                ("mutation_set", "mutation-sets", "mutation_set:mutation_set"),
             ]:
                 # Scenes stay book-scoped — only walk the current project's scenes folder.
                 if kind == "scene" and not is_current_project:
@@ -123,7 +123,7 @@ class ReferencesMixin:
             entry = NodeIndexEntry(
                 id=chat_id,
                 kind="chat",
-                entry_type="chat_session",
+                entry_type="chat:chat_session",
                 path=path,
                 title=title,
                 source_layer_id=layer_id,
@@ -153,7 +153,7 @@ class ReferencesMixin:
             folder=machine_dir,
             folder_name="assistants",
             kind="assistant",
-            default_entry_type="assistant",
+            default_entry_type="assistant:assistant",
             layer_id=self._metadata_schema_layer_id(machine_dir),
             layer_label="Machine",
             index=index,

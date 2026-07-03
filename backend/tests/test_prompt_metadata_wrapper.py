@@ -31,7 +31,7 @@ class PromptMetadataWrapperTests(unittest.TestCase):
 
     def test_created_prompt_omits_empty_metadata(self) -> None:
         created = global_service.create_prompt_entry(
-            type("R", (), {"title": "No Wrapper", "entry_type": "general"})()
+            type("R", (), {"title": "No Wrapper", "entry_type": "prompt:general"})()
         )
         raw = self._raw_file(created.id)
         self.assertNotIn("metadata:", raw)
@@ -40,7 +40,7 @@ class PromptMetadataWrapperTests(unittest.TestCase):
 
     def test_saved_prompt_omits_empty_metadata(self) -> None:
         created = global_service.create_prompt_entry(
-            type("R", (), {"title": "Saved Empty", "entry_type": "general"})()
+            type("R", (), {"title": "Saved Empty", "entry_type": "prompt:general"})()
         )
         global_service.save_prompt_entry(
             created.id,
@@ -48,7 +48,7 @@ class PromptMetadataWrapperTests(unittest.TestCase):
                 title="Saved Empty",
                 body="Hello {{ scene.title }}",
                 base_revision=created.revision,
-                entry_type="general",
+                entry_type="prompt:general",
                 metadata={},
             ),
         )
@@ -56,7 +56,7 @@ class PromptMetadataWrapperTests(unittest.TestCase):
 
     def test_non_empty_metadata_is_still_written(self) -> None:
         created = global_service.create_prompt_entry(
-            type("R", (), {"title": "Has Meta", "entry_type": "general"})()
+            type("R", (), {"title": "Has Meta", "entry_type": "prompt:general"})()
         )
         global_service.save_prompt_entry(
             created.id,
@@ -64,7 +64,7 @@ class PromptMetadataWrapperTests(unittest.TestCase):
                 title="Has Meta",
                 body="Body",
                 base_revision=created.revision,
-                entry_type="general",
+                entry_type="prompt:general",
                 metadata={"author_note": "keep me"},
             ),
         )

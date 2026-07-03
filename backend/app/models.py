@@ -392,7 +392,7 @@ class UpsertMetadataFieldRequest(BaseModel):
     layer_id: str = Field(min_length=1)
     field_id: str = Field(min_length=1)
     field: MetadataFieldDefinition
-    entry_type: str = "scene"
+    entry_type: str = "scene:scene"
     allow_existing: bool = True
     # Explicit old-value → new-value rename map for select/multi_select
     # options, computed client-side keyed by each option's original value.
@@ -415,18 +415,18 @@ class DeleteMetadataEntryTypeRequest(BaseModel):
 class MoveMetadataFieldRequest(BaseModel):
     field_id: str = Field(min_length=1)
     target_layer_id: str = Field(min_length=1)
-    entry_type: str = "scene"
+    entry_type: str = "scene:scene"
 
 
 class RenameMetadataFieldRequest(BaseModel):
     old_field_id: str = Field(min_length=1)
     new_field_id: str = Field(min_length=1)
-    entry_type: str = "scene"
+    entry_type: str = "scene:scene"
 
 
 class DeleteMetadataFieldRequest(BaseModel):
     field_id: str = Field(min_length=1)
-    entry_type: str = "scene"
+    entry_type: str = "scene:scene"
 
 
 class UpsertMetadataGroupRequest(BaseModel):
@@ -460,7 +460,7 @@ class Scene(BaseModel):
     body: str
     revision: str
     status: str = "draft"
-    entry_type: str = "scene"
+    entry_type: str = "scene:scene"
     metadata: dict[str, MetadataValue] = Field(default_factory=dict)
     computed_metadata: dict[str, MetadataValue] = Field(default_factory=dict)
     source_layer_id: str = ""
@@ -501,7 +501,7 @@ class ResearchNote(BaseModel):
     title: str
     body: str = ""
     revision: str = ""
-    entry_type: str = "note"
+    entry_type: str = "research:note"
     metadata: dict[str, MetadataValue] = Field(default_factory=dict)
 
 
@@ -509,7 +509,7 @@ class SaveResearchNoteRequest(BaseModel):
     title: str = Field(min_length=1)
     body: str = ""
     base_revision: str | None = None
-    entry_type: str = "note"
+    entry_type: str = "research:note"
     metadata: dict[str, MetadataValue] = Field(default_factory=dict)
 
 
@@ -533,7 +533,7 @@ class SaveSceneRequest(BaseModel):
     body: str
     base_revision: str | None = None
     status: str = "draft"
-    entry_type: str = "scene"
+    entry_type: str = "scene:scene"
     metadata: dict[str, MetadataValue] = Field(default_factory=dict)
 
 
@@ -550,7 +550,7 @@ class ProjectNode(BaseModel):
     title: str
     body: str = ""
     revision: str = ""
-    entry_type: str = "project"
+    entry_type: str = "project:project"
     metadata: dict[str, MetadataValue] = Field(default_factory=dict)
     computed_metadata: dict[str, MetadataValue] = Field(default_factory=dict)
 
@@ -559,7 +559,7 @@ class SaveProjectNodeRequest(BaseModel):
     title: str = Field(min_length=1)
     body: str = ""
     base_revision: str | None = None
-    entry_type: str = "project"
+    entry_type: str = "project:project"
     metadata: dict[str, MetadataValue] = Field(default_factory=dict)
 
 
@@ -567,7 +567,7 @@ class LoreEntrySummary(BaseModel):
     id: str
     title: str
     body: str = ""
-    entry_type: str = "lore_note"
+    entry_type: str = "lore:lore_note"
     metadata: dict[str, MetadataValue] = Field(default_factory=dict)
     source_layer_id: str = ""
     source_layer_label: str = ""
@@ -578,7 +578,7 @@ class LoreEntry(BaseModel):
     title: str
     body: str
     revision: str
-    entry_type: str = "lore_note"
+    entry_type: str = "lore:lore_note"
     metadata: dict[str, MetadataValue] = Field(default_factory=dict)
     computed_metadata: dict[str, MetadataValue] = Field(default_factory=dict)
     source_layer_id: str = ""
@@ -638,14 +638,14 @@ class MergeTagsRequest(BaseModel):
 
 class CreateLoreEntryRequest(BaseModel):
     title: str = Field(min_length=1)
-    entry_type: str = "lore_note"
+    entry_type: str = "lore:lore_note"
 
 
 class SaveLoreEntryRequest(BaseModel):
     title: str = Field(min_length=1)
     body: str
     base_revision: str | None = None
-    entry_type: str = "lore_note"
+    entry_type: str = "lore:lore_note"
     metadata: dict[str, MetadataValue] = Field(default_factory=dict)
 
 
@@ -653,7 +653,7 @@ class PromptEntrySummary(BaseModel):
     id: str
     title: str
     body: str = ""
-    entry_type: str = "prompt"
+    entry_type: str = "prompt:prompt"
     metadata: dict[str, MetadataValue] = Field(default_factory=dict)
     # Per-entry input declarations. Each prompt declares the parameters its
     # template body references via `{{ input.<name> }}`. Used to be on the
@@ -670,7 +670,7 @@ class PromptEntry(BaseModel):
     title: str
     body: str
     revision: str
-    entry_type: str = "prompt"
+    entry_type: str = "prompt:prompt"
     metadata: dict[str, MetadataValue] = Field(default_factory=dict)
     inputs: list[PromptInputDefinition] = Field(default_factory=list)
     computed_metadata: dict[str, MetadataValue] = Field(default_factory=dict)
@@ -684,14 +684,14 @@ class PromptEntryList(BaseModel):
 
 class CreatePromptEntryRequest(BaseModel):
     title: str = Field(min_length=1)
-    entry_type: str = "prompt"
+    entry_type: str = "prompt:prompt"
 
 
 class SavePromptEntryRequest(BaseModel):
     title: str = Field(min_length=1)
     body: str
     base_revision: str | None = None
-    entry_type: str = "prompt"
+    entry_type: str = "prompt:prompt"
     metadata: dict[str, MetadataValue] = Field(default_factory=dict)
     inputs: list[PromptInputDefinition] = Field(default_factory=list)
 
@@ -710,7 +710,7 @@ class MutationSetRow(BaseModel):
 class MutationSetEntrySummary(BaseModel):
     id: str
     title: str
-    entry_type: str = "mutation_set"
+    entry_type: str = "mutation_set:mutation_set"
     # The lore entry-type the rows target (e.g. "character"); scopes the apply
     # picker so only matching sets are offered for a given entity (#62).
     target_entry_type: str = ""
@@ -723,7 +723,7 @@ class MutationSetEntry(BaseModel):
     id: str
     title: str
     revision: str
-    entry_type: str = "mutation_set"
+    entry_type: str = "mutation_set:mutation_set"
     target_entry_type: str = ""
     rows: list[MutationSetRow] = Field(default_factory=list)
     source_layer_id: str = ""
@@ -736,7 +736,7 @@ class MutationSetEntryList(BaseModel):
 
 class CreateMutationSetEntryRequest(BaseModel):
     title: str = Field(min_length=1)
-    entry_type: str = "mutation_set"
+    entry_type: str = "mutation_set:mutation_set"
     target_entry_type: str = ""
     rows: list[MutationSetRow] = Field(default_factory=list)
 
@@ -744,7 +744,7 @@ class CreateMutationSetEntryRequest(BaseModel):
 class SaveMutationSetEntryRequest(BaseModel):
     title: str = Field(min_length=1)
     base_revision: str | None = None
-    entry_type: str = "mutation_set"
+    entry_type: str = "mutation_set:mutation_set"
     target_entry_type: str = ""
     rows: list[MutationSetRow] = Field(default_factory=list)
 
@@ -752,7 +752,7 @@ class SaveMutationSetEntryRequest(BaseModel):
 class AssistantEntrySummary(BaseModel):
     id: str
     title: str
-    entry_type: str = "assistant"
+    entry_type: str = "assistant:assistant"
     metadata: dict[str, MetadataValue] = Field(default_factory=dict)
     source_layer_id: str = ""
     source_layer_label: str = ""
@@ -762,7 +762,7 @@ class AssistantEntry(BaseModel):
     id: str
     title: str
     revision: str
-    entry_type: str = "assistant"
+    entry_type: str = "assistant:assistant"
     metadata: dict[str, MetadataValue] = Field(default_factory=dict)
     source_layer_id: str = ""
     source_layer_label: str = ""
@@ -774,7 +774,7 @@ class AssistantEntryList(BaseModel):
 
 class CreateAssistantEntryRequest(BaseModel):
     title: str = Field(min_length=1)
-    entry_type: str = "assistant"
+    entry_type: str = "assistant:assistant"
     # "" → machine layer (the default). Otherwise the layer-id (project root
     # hash) where the file should land.
     layer_id: str = ""
@@ -783,7 +783,7 @@ class CreateAssistantEntryRequest(BaseModel):
 class SaveAssistantEntryRequest(BaseModel):
     title: str = Field(min_length=1)
     base_revision: str | None = None
-    entry_type: str = "assistant"
+    entry_type: str = "assistant:assistant"
     metadata: dict[str, MetadataValue] = Field(default_factory=dict)
 
 

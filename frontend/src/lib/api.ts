@@ -433,25 +433,25 @@ export const api = {
       body: JSON.stringify({ entry_type_id: entryTypeId }),
     });
   },
-  upsertMetadataField(layerId: string, fieldId: string, field: MetadataFieldDefinition, entryType = "scene", allowExisting = true, optionMigration: Record<string, string> | null = null) {
+  upsertMetadataField(layerId: string, fieldId: string, field: MetadataFieldDefinition, entryType = "scene:scene", allowExisting = true, optionMigration: Record<string, string> | null = null) {
     return request<MetadataSchema>("/metadata/schema/fields", {
       method: "PUT",
       body: JSON.stringify({ layer_id: layerId, field_id: fieldId, field, entry_type: entryType, allow_existing: allowExisting, option_migration: optionMigration }),
     });
   },
-  moveMetadataField(fieldId: string, targetLayerId: string, entryType = "scene") {
+  moveMetadataField(fieldId: string, targetLayerId: string, entryType = "scene:scene") {
     return request<MetadataSchema>("/metadata/schema/fields/move", {
       method: "POST",
       body: JSON.stringify({ field_id: fieldId, target_layer_id: targetLayerId, entry_type: entryType }),
     });
   },
-  renameMetadataField(oldFieldId: string, newFieldId: string, entryType = "scene") {
+  renameMetadataField(oldFieldId: string, newFieldId: string, entryType = "scene:scene") {
     return request<MetadataSchema>("/metadata/schema/fields/rename", {
       method: "POST",
       body: JSON.stringify({ old_field_id: oldFieldId, new_field_id: newFieldId, entry_type: entryType }),
     });
   },
-  deleteMetadataField(fieldId: string, entryType = "scene") {
+  deleteMetadataField(fieldId: string, entryType = "scene:scene") {
     return request<MetadataSchema>("/metadata/schema/fields", {
       method: "DELETE",
       body: JSON.stringify({ field_id: fieldId, entry_type: entryType }),
@@ -525,7 +525,7 @@ export const api = {
   listLoreEntries() {
     return request<LoreEntryList>("/lore");
   },
-  createLoreEntry(title: string, entryType = "lore_note") {
+  createLoreEntry(title: string, entryType = "lore:lore_note") {
     return request<LoreEntry>("/lore", {
       method: "POST",
       body: JSON.stringify({ title, entry_type: entryType }),
@@ -601,7 +601,7 @@ export const api = {
   }) {
     return request<MutationSetEntry>("/mutation-sets", {
       method: "POST",
-      body: JSON.stringify({ ...payload, entry_type: "mutation_set" }),
+      body: JSON.stringify({ ...payload, entry_type: "mutation_set:mutation_set" }),
     });
   },
   getMutationSetEntry(entryId: string) {
@@ -630,7 +630,7 @@ export const api = {
   createAssistantEntry(title: string, layerId: string = "") {
     return request<AssistantEntry>("/assistants", {
       method: "POST",
-      body: JSON.stringify({ title, entry_type: "assistant", layer_id: layerId }),
+      body: JSON.stringify({ title, entry_type: "assistant:assistant", layer_id: layerId }),
     });
   },
   getAssistantEntry(entryId: string) {

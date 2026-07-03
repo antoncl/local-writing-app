@@ -160,7 +160,7 @@
               onmousedown={(event) => event.stopPropagation()}
             >
               {#snippet trailing()}
-                {#if entry.entry_type === "lore_note"}
+                {#if entry.entry_type === "lore:lore_note"}
                   <button
                     class="row-action-add"
                     type="button"

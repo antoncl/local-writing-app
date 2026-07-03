@@ -78,7 +78,7 @@ class ResearchNotesMixin:
                 raise ProjectServiceError(
                     f"Parent node {request.parent_id} does not exist.", 404
                 )
-            if parent.type == "note":
+            if parent.type == "research:note":
                 raise ProjectServiceError(
                     "Cannot add a child under a research note.", 422
                 )
@@ -147,7 +147,7 @@ class ResearchNotesMixin:
             raise ProjectServiceError(
                 f"Target parent {target_parent_id} does not exist.", 404
             )
-        if target_parent.type == "note":
+        if target_parent.type == "research:note":
             raise ProjectServiceError("Cannot move a node under a research note.", 422)
         if TreeStructureService.contains_node(node, target_parent_id):
             raise ProjectServiceError(
@@ -182,7 +182,7 @@ class ResearchNotesMixin:
         def walk(n: StructureNode, is_target: bool) -> None:
             nonlocal descendant_leaf_count, descendant_container_count
             if not is_target:
-                if n.type == "note":
+                if n.type == "research:note":
                     descendant_leaf_count += 1
                 else:
                     descendant_container_count += 1
@@ -257,7 +257,7 @@ class ResearchNotesMixin:
         front_matter, body = self._read_markdown_with_front_matter(path, strict=True)
         node_id = self._node_id_for_path(path, front_matter)
         title = str(front_matter.get("title") or node_id)
-        raw_entry_type = front_matter.get("entry_type") or "note"
+        raw_entry_type = front_matter.get("entry_type") or "research:note"
         if not isinstance(raw_entry_type, str):
             raise ProjectServiceError(
                 f"Research note {node_id} has invalid entry_type; it must be text.", 422
@@ -288,7 +288,7 @@ class ResearchNotesMixin:
             )
         node_id = self._node_id_for_path(path, front_matter)
         schema = self.read_metadata_schema()
-        entry_type = request.entry_type or "note"
+        entry_type = request.entry_type or "research:note"
         if entry_type not in schema.entry_types:
             raise ProjectServiceError(f"Unknown entry type {entry_type}.", 404)
         clean_metadata = self._strip_unknown_metadata_fields(
@@ -332,7 +332,7 @@ class ResearchNotesMixin:
         if index_entry is None or index_entry.kind != "lore":
             raise ProjectServiceError(f"Lore entry {lore_id} does not exist.", 404)
         source = self.read_lore_entry(lore_id)
-        if source.entry_type != "lore_note":
+        if source.entry_type != "lore:lore_note":
             raise ProjectServiceError(
                 f"Only lore_note entries can be moved to research; got {source.entry_type}.",
                 422,
@@ -353,7 +353,7 @@ class ResearchNotesMixin:
             id=note_id,
             title=source.title,
             body=source.body,
-            entry_type="note",
+            entry_type="research:note",
             metadata=preserved_metadata,
         )
         self._write_research_note_file(

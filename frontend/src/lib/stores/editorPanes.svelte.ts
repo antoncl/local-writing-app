@@ -712,7 +712,7 @@ class EditorPanesController {
       body: "",
       revision: "",
       status: "",
-      entry_type: "chat_session",
+      entry_type: "chat:chat_session",
       metadata: {},
       computed_metadata: {},
     } as unknown as EditableDocument;
@@ -726,7 +726,7 @@ class EditorPanesController {
             draftTitle: sceneShaped.title,
             draftMarkdown: "",
             draftStatus: "",
-            draftEntryType: "chat_session",
+            draftEntryType: "chat:chat_session",
             draftMetadata: {},
             saving: false,
             recentlySaved: false,

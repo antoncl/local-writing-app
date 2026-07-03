@@ -125,7 +125,7 @@
 
   // --- Derived: the entry-type → kind → tree cascade --------------------------
   $effect.pre(() => {
-    schemaSelectedEntryType = metadataSchema?.entry_types[schemaFieldEntryType] ?? metadataSchema?.entry_types.scene ?? null;
+    schemaSelectedEntryType = metadataSchema?.entry_types[schemaFieldEntryType] ?? metadataSchema?.entry_types["scene:scene"] ?? null;
   });
   $effect.pre(() => {
     schemaFieldKind =
@@ -195,7 +195,7 @@
     if (!schema) return;
     const layers = get(metadataSchemaLayersStore);
     if (!schema.entry_types[schemaFieldEntryType]) {
-      schemaFieldEntryType = schema.entry_types.scene ? "scene" : Object.keys(schema.entry_types)[0] ?? "scene";
+      schemaFieldEntryType = schema.entry_types["scene:scene"] ? "scene:scene" : Object.keys(schema.entry_types)[0] ?? "scene:scene";
     }
     if (!schemaFieldLayerId || !layers.some((layer) => layer.id === schemaFieldLayerId)) {
       schemaFieldLayerId = projectSchemaLayerId();
@@ -292,7 +292,7 @@
             : parentType?.kind === "assistant"
               ? "assistant"
               : schemaFieldKind;
-    schemaTypeParent = parentTypeId || (schemaSelectedEntryType?.abstract || schemaFieldEntryType !== "scene" ? schemaFieldEntryType : defaultSchemaParentType(schemaFieldKind));
+    schemaTypeParent = parentTypeId || (schemaSelectedEntryType?.abstract || schemaFieldEntryType !== "scene:scene" ? schemaFieldEntryType : defaultSchemaParentType(schemaFieldKind));
     schemaTypeAbstract = false;
     schemaTypeReadonly = false;
     schemaTypeLayerId = layerId;
@@ -334,9 +334,9 @@
   }
 
   function defaultSchemaParentType(kind: SchemaKind) {
-    if (kind === "lore" && metadataSchema?.entry_types.lore_entry) return "lore_entry";
-    if (kind === "prompt" && metadataSchema?.entry_types.prompt) return "prompt";
-    if (kind === "research" && metadataSchema?.entry_types.research) return "research";
+    if (kind === "lore" && metadataSchema?.entry_types["lore:lore_entry"]) return "lore:lore_entry";
+    if (kind === "prompt" && metadataSchema?.entry_types["prompt:prompt"]) return "prompt:prompt";
+    if (kind === "research" && metadataSchema?.entry_types["research:research"]) return "research:research";
     return "";
   }
 
@@ -379,7 +379,7 @@
   }
 
   function defaultSchemaEntryType(kind: SchemaKind) {
-    const fallback = kind === "lore" ? "lore_note" : kind === "research" ? "note" : kind === "prompt" ? "prompt" : kind === "assistant" ? "assistant" : kind === "project" ? "project" : "scene";
+    const fallback = kind === "lore" ? "lore:lore_note" : kind === "research" ? "research:note" : kind === "prompt" ? "prompt:prompt" : kind === "assistant" ? "assistant:assistant" : kind === "project" ? "project:project" : "scene:scene";
     return Object.entries(metadataSchema?.entry_types ?? {}).find(([, definition]) => definition.kind === kind)?.[0] ?? fallback;
   }
 
@@ -592,7 +592,11 @@
     if (!schemaTypeLayerId) return;
     await run(async () => {
       const previousTypeId = selectedSchemaTypeId && !schemaTypeReadonly ? selectedSchemaTypeId : null;
-      const nextTypeId = payload.typeId.trim();
+      // Entry-type identity is the kind-qualified FQN `kind:key` (#77). A new
+      // type's id is entered bare (the local key); qualify it with the kind so
+      // the stored id — and everything keyed off it downstream — is the FQN.
+      const rawTypeId = payload.typeId.trim();
+      const nextTypeId = rawTypeId.includes(":") ? rawTypeId : `${schemaTypeKind}:${rawTypeId}`;
       const existing = previousTypeId ? metadataSchema?.entry_types[previousTypeId] : null;
       const nextType: EntryTypeDefinition = {
         name: payload.name.trim() || nextTypeId,

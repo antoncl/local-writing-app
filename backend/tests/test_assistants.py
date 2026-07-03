@@ -322,7 +322,7 @@ class FileBackedAssistantsTests(unittest.TestCase):
     def test_create_assistant_endpoint_lands_in_machine_layer(self) -> None:
         create = self.client.post(
             "/api/assistants",
-            json={"title": "New one", "entry_type": "assistant"},
+            json={"title": "New one", "entry_type": "assistant:assistant"},
         )
         self.assertEqual(create.status_code, 200, create.text)
         entry = create.json()

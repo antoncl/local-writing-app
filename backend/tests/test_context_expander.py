@@ -32,13 +32,13 @@ def project(tmp_path, monkeypatch):
     svc.create_project(tmp_path / "project", "Demo")
 
     honor = svc.create_lore_entry(
-        CreateLoreEntryRequest(title="Honor Harrington", entry_type="character")
+        CreateLoreEntryRequest(title="Honor Harrington", entry_type="lore:character")
     )
     nimitz = svc.create_lore_entry(
-        CreateLoreEntryRequest(title="Nimitz", entry_type="character")
+        CreateLoreEntryRequest(title="Nimitz", entry_type="lore:character")
     )
     pavel = svc.create_lore_entry(
-        CreateLoreEntryRequest(title="Pavel Young", entry_type="character")
+        CreateLoreEntryRequest(title="Pavel Young", entry_type="lore:character")
     )
 
     def _save(entry_id, *, metadata, body):
@@ -49,7 +49,7 @@ def project(tmp_path, monkeypatch):
                 title=existing.title,
                 body=body,
                 base_revision=existing.revision,
-                entry_type="character",
+                entry_type="lore:character",
                 metadata=metadata,
             ),
         )
@@ -92,7 +92,7 @@ def test_direct_match_labeled_with_caller_source(project):
     assert honor.source == "user_message"
     assert honor.added_at_turn == 3
     assert honor.title == "Honor Harrington"
-    assert honor.entry_type == "character"
+    assert honor.entry_type == "lore:character"
     assert pavel.source == "depth1_expansion"
     assert pavel.added_at_turn == 3
 
@@ -145,7 +145,7 @@ def test_depth1_does_not_recurse(project):
     # but no further. We assert by adding a fourth character mentioned
     # only in Pavel's body and confirming it is NOT pulled.
     anders = project.create_lore_entry(
-        CreateLoreEntryRequest(title="Anders Pierce", entry_type="character")
+        CreateLoreEntryRequest(title="Anders Pierce", entry_type="lore:character")
     )
     existing = project.read_lore_entry(anders.id)
     project.save_lore_entry(
@@ -154,7 +154,7 @@ def test_depth1_does_not_recurse(project):
             title=existing.title,
             body="Some text.",
             base_revision=existing.revision,
-            entry_type="character",
+            entry_type="lore:character",
             metadata={"aliases": []},
         ),
     )
@@ -165,7 +165,7 @@ def test_depth1_does_not_recurse(project):
             title=pavel.title,
             body="Disgraced Captain. Friend of Anders Pierce.",
             base_revision=pavel.revision,
-            entry_type="character",
+            entry_type="lore:character",
             metadata={"aliases": []},
         ),
     )

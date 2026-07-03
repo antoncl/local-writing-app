@@ -37,7 +37,7 @@ class TextAppendMutationTests(unittest.TestCase):
                 layer_id=layers.layers[-1].id,
                 field_id="rank",
                 field=MetadataFieldDefinition(name="Rank", type="text"),
-                entry_type="character",
+                entry_type="lore:character",
             )
         )
         svc.upsert_metadata_field(
@@ -45,16 +45,16 @@ class TextAppendMutationTests(unittest.TestCase):
                 layer_id=layers.layers[-1].id,
                 field_id="notes",
                 field=MetadataFieldDefinition(name="Notes", type="long_text"),
-                entry_type="character",
+                entry_type="lore:character",
             )
         )
         self.honor = svc.create_lore_entry(
-            CreateLoreEntryRequest(title="Honor", entry_type="character")
+            CreateLoreEntryRequest(title="Honor", entry_type="lore:character")
         ).id
         svc.save_lore_entry(
             self.honor,
             SaveLoreEntryRequest(
-                title="Honor", body="She is wary of strangers.", entry_type="character",
+                title="Honor", body="She is wary of strangers.", entry_type="lore:character",
                 metadata={"rank": "Sergeant", "notes": "Keeps a journal."},
             ),
         )

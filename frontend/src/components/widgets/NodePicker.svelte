@@ -201,13 +201,13 @@
     const allowed = new Set(config.entry_types?.scene ?? []);
     const out: Array<{ id: string; title: string; entry_type: string }> = [];
     const walk = (n: StructureNode) => {
-      // StructureNode uses `type` ("scene" / "act" / "chapter" / "root").
-      // An earlier read used `n.kind`, which is always undefined — so
-      // the scene list was silently empty. scene_id is the canonical id
-      // for the scene itself (the structure node has its own id for the
-      // outline position).
-      if (n.type === "scene" && n.scene_id) {
-        const sceneType = (n as unknown as { entry_type?: string }).entry_type ?? "scene";
+      // StructureNode uses `type` — the FQN entry_type ("scene:scene" /
+      // "scene:act" / "scene:chapter") or the "root" sentinel. An earlier read
+      // used `n.kind`, which is always undefined — so the scene list was
+      // silently empty. scene_id is the canonical id for the scene itself (the
+      // structure node has its own id for the outline position).
+      if (n.type === "scene:scene" && n.scene_id) {
+        const sceneType = (n as unknown as { entry_type?: string }).entry_type ?? "scene:scene";
         if (allowed.size === 0 || allowed.has(sceneType)) {
           out.push({ id: n.scene_id, title: n.title, entry_type: sceneType });
         }
@@ -231,7 +231,7 @@
     const allowed = new Set(config.entry_types?.research ?? []);
     const out: Array<{ id: string; title: string; entry_type: string }> = [];
     const walk = (n: StructureNode) => {
-      if (n.type === "note" && n.scene_id) {
+      if (n.type === "research:note" && n.scene_id) {
         if (allowed.size === 0 || allowed.has(n.type)) {
           out.push({ id: n.scene_id, title: n.title, entry_type: n.type });
         }

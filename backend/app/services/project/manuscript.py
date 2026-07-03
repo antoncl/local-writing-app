@@ -102,7 +102,7 @@ class ManuscriptMixin:
         root = self._require_project()
         scene_id = self._new_id("scene")
         schema = self.read_metadata_schema()
-        initial_metadata = self._initial_metadata_from_defaults("scene", schema)
+        initial_metadata = self._initial_metadata_from_defaults("scene:scene", schema)
         # `status` is a top-level Scene field (not in metadata), so resolve
         # its default separately when one is authored — otherwise keep the
         # historic "draft" floor so existing flows are unchanged.
@@ -114,7 +114,7 @@ class ManuscriptMixin:
             body="",
             revision="",
             status=initial_status,
-            entry_type="scene",
+            entry_type="scene:scene",
             metadata=initial_metadata,
         )
         self._write_scene_file(self._filepath_for_new_node(root / "scenes", request.title), scene)
@@ -122,7 +122,7 @@ class ManuscriptMixin:
         structure = self.read_structure()
         scene_node = StructureNode(
             id=self._new_id("node"),
-            type="scene",
+            type="scene:scene",
             title=request.title,
             scene_id=scene_id,
         )
@@ -307,7 +307,7 @@ class ManuscriptMixin:
         node_id = self._node_id_for_path(path, front_matter)
         title = str(front_matter.get("title") or node_id)
         status = str(front_matter.get("status") or "draft")
-        raw_entry_type = front_matter.get("entry_type") or "scene"
+        raw_entry_type = front_matter.get("entry_type") or "scene:scene"
         if not isinstance(raw_entry_type, str):
             raise ProjectServiceError(f"Scene {node_id} has invalid entry_type; it must be text.", 422)
         entry_type = raw_entry_type
@@ -398,7 +398,7 @@ class ManuscriptMixin:
         return self.read_structure()
 
     def _is_leaf_node(self, node: StructureNode) -> bool:
-        return node.type == "scene"
+        return node.type == "scene:scene"
 
     def _first_container(self, node: StructureNode) -> StructureNode:
         if not self._is_leaf_node(node):

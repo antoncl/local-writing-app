@@ -12,9 +12,11 @@
 -->
 <script lang="ts">
   import "@xyflow/svelte/dist/style.css";
-  import { SvelteFlow, Background, Controls, Panel, type Node, type Edge } from "@xyflow/svelte";
+  import { SvelteFlow, Background, Controls, type ColorMode, type Node, type Edge } from "@xyflow/svelte";
   import { untrack } from "svelte";
+  import { themePreference } from "@/lib/utils/theme";
   import ViewFlowNode from "./view/ViewFlowNode.svelte";
+  import FitView from "./view/FitView.svelte";
   import { setDesignerContext, type DesignerContext } from "./view/designerContext";
   import { api } from "@/lib/api";
   import { metadataSchemaStore } from "@/lib/stores/schema";
@@ -63,6 +65,9 @@
   }: Props = $props();
 
   let schema = $derived($metadataSchemaStore);
+  // Svelte Flow ships light-only chrome; drive its theme from the app's. The
+  // preference values ("system"/"light"/"dark") map straight to ColorMode.
+  let colorMode = $derived($themePreference as ColorMode);
 
   // The view node's editable state. `title` is fed from the pane header.
   let loadedViewId = $state<string | null>(null);
@@ -379,6 +384,7 @@
         bind:nodes={flowNodes}
         bind:edges={flowEdges}
         {nodeTypes}
+        {colorMode}
         {isValidConnection}
         onconnect={normalizeEdges}
         fitView
@@ -386,12 +392,13 @@
       >
         <Background />
         <Controls />
-        {#if flowNodes.length <= 1}
-          <Panel position="top-center">
-            <div class="empty-hint">Add a leaf from the palette, then wire it into <strong>View result</strong>.</div>
-          </Panel>
-        {/if}
+        <FitView trigger={`${loadedViewId}:${flowNodes.length}`} />
       </SvelteFlow>
+      {#if flowNodes.length <= 1}
+        <!-- Overlay, NOT a Svelte Flow <Panel>: a Panel captures pointer events
+             over the canvas and blocks the handles (no crosshair / no connect). -->
+        <div class="empty-hint">Add a leaf from the palette, then wire it into <strong>View result</strong>.</div>
+      {/if}
     </div>
 
     <aside class="preview">
@@ -447,7 +454,7 @@
     align-items: center;
     gap: 6px;
     font-size: 12px;
-    color: var(--text-muted, #6b7280);
+    color: var(--text-3, #6b7280);
   }
   .kind-pick select {
     padding: 3px 6px;
@@ -499,18 +506,27 @@
     min-width: 0;
     min-height: 0;
     position: relative;
+    /* Clip the flow so a node can never paint over the toolbar/preview. */
+    overflow: hidden;
   }
   /* Svelte Flow needs an explicitly sized parent. */
   .canvas :global(.svelte-flow) {
     height: 100%;
   }
   .empty-hint {
+    position: absolute;
+    top: 12px;
+    left: 50%;
+    transform: translateX(-50%);
+    z-index: 4;
+    /* Must not intercept pointer events — the handles live under it. */
+    pointer-events: none;
     background: var(--inset, #f2f4f7);
     border: 1px dashed var(--border-strong, #cbd0d8);
     border-radius: 8px;
     padding: 6px 12px;
     font-size: 12px;
-    color: var(--text-muted, #6b7280);
+    color: var(--text-3, #6b7280);
   }
   .preview {
     width: 260px;
@@ -529,12 +545,12 @@
     font-size: 11px;
     text-transform: uppercase;
     letter-spacing: 0.04em;
-    color: var(--text-muted, #6b7280);
+    color: var(--text-3, #6b7280);
     border-bottom: 1px solid var(--border, #e2e5ea);
   }
   .count {
     font-variant-numeric: tabular-nums;
-    color: var(--text-muted, #6b7280);
+    color: var(--text-3, #6b7280);
   }
   .preview-list {
     flex: 1;
@@ -544,7 +560,7 @@
   .preview-empty {
     padding: 12px;
     font-size: 12px;
-    color: var(--text-muted, #6b7280);
+    color: var(--text-3, #6b7280);
   }
   .pgroup {
     margin-bottom: 8px;

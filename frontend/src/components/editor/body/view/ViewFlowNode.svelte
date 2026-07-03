@@ -243,7 +243,7 @@
   .vnode-del {
     border: none;
     background: transparent;
-    color: var(--text-muted, #6b7280);
+    color: var(--text-3, #6b7280);
     font-size: 15px;
     line-height: 1;
     cursor: pointer;
@@ -255,7 +255,7 @@
   .port-legend {
     padding: 0 8px 4px;
     font-size: 10px;
-    color: var(--text-muted, #6b7280);
+    color: var(--text-3, #6b7280);
   }
   .port-legend .dot {
     display: inline-block;
@@ -300,10 +300,12 @@
   .vfield.rank {
     max-width: 62px;
   }
-  /* keep the flow-node ports visually distinct */
+  /* keep the flow-node ports visually distinct + above node content so the
+     whole handle (not just the half sticking out) is grabbable/hoverable. */
   .vnode :global(.port) {
-    width: 9px;
-    height: 9px;
+    width: 10px;
+    height: 10px;
+    z-index: 5;
     background: var(--accent, #4361ee);
     border: 1px solid var(--panel, #fff);
   }

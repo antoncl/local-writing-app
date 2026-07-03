@@ -260,8 +260,9 @@ export function exprToGraph(expr: ViewExpr | null | undefined): ViewGraph {
     }
     delete (n.data as { _depth?: number })._depth;
   }
-  // Center the output vertically-ish against the spread of rows.
-  outputNode.position.y = ((rowCursor.value - 1) * ROW_HEIGHT) / 2;
+  // Center the output vertically against the spread of rows (never negative —
+  // fitView reframes anyway, but keep coordinates in a sane positive range).
+  outputNode.position.y = Math.max(0, ((rowCursor.value - 1) * ROW_HEIGHT) / 2);
 
   return { nodes, edges };
 

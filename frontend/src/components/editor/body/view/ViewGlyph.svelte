@@ -80,7 +80,7 @@
     stroke-width: 1.1;
   }
   .sym {
-    color: var(--text-muted, #6b7280);
+    color: var(--text-3, #6b7280);
     font-weight: 600;
   }
 </style>

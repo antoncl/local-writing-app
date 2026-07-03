@@ -53,6 +53,54 @@ describe("leaves", () => {
   });
 });
 
+// The backend (Pydantic) serializes a ViewExpr with *every* slot present —
+// unset ones as explicit `null`, not omitted. The evaluator must treat those
+// nulls as "unset" and not misfire on the first slot it checks. Regression for
+// the step-4 bug where a saved `descendants_of` view matched nothing because
+// `expr.type` (null) tripped the `!== undefined` guard.
+describe("backend-dense exprs (explicit null slots)", () => {
+  const NULLS = {
+    union: null,
+    intersect: null,
+    difference: null,
+    complement: null,
+    annotate: null,
+    of: null,
+    type: null,
+    descendants_of: null,
+    tagged: null,
+    field: null,
+    hand_picked: null,
+    view_ref: null,
+  } as const;
+  // Cast through `unknown`: the ViewExpr/ViewSort types model unset slots as
+  // `undefined`, but the backend serializes them as explicit `null`. This test
+  // exercises exactly that runtime shape, which the authoring types don't (and
+  // needn't) admit.
+  const dense = (overlay: Record<string, unknown>): ViewSpec => ({
+    kind: "lore",
+    expr: { ...NULLS, ...overlay } as unknown as ViewSpec["expr"],
+    sort: { by: "manual", field_key: null, dir: "asc" } as unknown as ViewSpec["sort"],
+  });
+
+  it("descendants_of survives sibling nulls", () => {
+    expect(ids(dense({ descendants_of: "lore:deity" }))).toEqual(["c", "e"]);
+  });
+  it("tagged survives sibling nulls", () => {
+    expect(ids(dense({ tagged: "gotham" }))).toEqual(["b", "c"]);
+  });
+  it("field survives sibling nulls", () => {
+    expect(ids(dense({ field: { key: "pov", op: "eq", value: "honor" } }))).toEqual(["a"]);
+  });
+  it("color-only annotate (label null) makes no group", () => {
+    const spec = dense({ annotate: { label: null, color: "red", rank: null }, of: { ...NULLS, tagged: "gotham" } });
+    const result = evaluateView(spec, NODES, { schema: SCHEMA });
+    expect(result.groups).toBeNull();
+    expect(result.annotations.get("b")?.color).toBe("red");
+    expect(result.annotations.get("b")?.labels).toEqual([]);
+  });
+});
+
 describe("field predicates", () => {
   it("eq", () => {
     expect(ids({ kind: "lore", expr: { field: { key: "pov", op: "eq", value: "honor" } } })).toEqual(["a"]);

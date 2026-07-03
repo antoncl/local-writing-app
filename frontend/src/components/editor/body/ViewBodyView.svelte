@@ -21,6 +21,7 @@
   import { api } from "@/lib/api";
   import { metadataSchemaStore } from "@/lib/stores/schema";
   import { evaluateView, type EvalNode } from "@/lib/views/evaluateView";
+  import { structureToEvalNodes } from "@/lib/views/structureNodes";
   import {
     exprToGraph,
     graphToExpr,
@@ -156,6 +157,7 @@
     if (k === "lore") return loreEntries;
     if (k === "assistant") return assistantEntries;
     if (k === "prompt") return promptEntries;
+    if (k === "scene") return structureToEvalNodes(structure);
     return [];
   }
   let preview = $derived(

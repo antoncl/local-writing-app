@@ -129,26 +129,30 @@ function evalExpr<T extends EvalNode>(state: RunState<T>, expr: ViewExpr): Set<s
 }
 
 function evalLeaf<T extends EvalNode>(state: RunState<T>, expr: ViewExpr): Set<string> {
-  if (expr.type !== undefined) {
+  // Match against `!= null`, not `!== undefined`: the backend serializes a
+  // ViewExpr with *every* slot present (unset ones as explicit `null`, Pydantic
+  // default dump), so an omitted-vs-null asymmetry would misfire on the first
+  // slot. `null` and `undefined` both mean "this leaf isn't set".
+  if (expr.type != null) {
     return idsWhere(state, (n) => n.entry_type === expr.type);
   }
-  if (expr.descendants_of !== undefined) {
+  if (expr.descendants_of != null) {
     const family = descendantFqns(state, expr.descendants_of);
     return idsWhere(state, (n) => family.has(n.entry_type));
   }
-  if (expr.tagged !== undefined) {
+  if (expr.tagged != null) {
     const tag = expr.tagged;
     return idsWhere(state, (n) => nodeTags(n).includes(tag));
   }
-  if (expr.field !== undefined) {
+  if (expr.field != null) {
     const pred = expr.field;
     return idsWhere(state, (n) => matchesField(n, pred));
   }
-  if (expr.hand_picked !== undefined) {
+  if (expr.hand_picked != null) {
     const picked = new Set(expr.hand_picked);
     return idsWhere(state, (n) => picked.has(n.id));
   }
-  if (expr.view_ref !== undefined) {
+  if (expr.view_ref != null) {
     return evalViewRef(state, expr.view_ref);
   }
   // Empty expr node: no constraint → whole universe (defensive; the grammar
@@ -175,12 +179,15 @@ function stampAnnotation<T extends EvalNode>(
   members: Set<string>,
   payload: { label?: string; color?: string; rank?: number },
 ): void {
-  if (payload.label !== undefined) {
+  // `!= null` throughout: the backend dumps an unset payload slot as explicit
+  // `null` (a color-only Highlight carries `label: null`), which must read as
+  // "no label", not as a null-named group.
+  if (payload.label != null) {
     const label = payload.label;
     const existing = state.groupMeta.get(label);
     if (existing) {
-      if (payload.rank !== undefined) existing.rank = payload.rank;
-      if (payload.color !== undefined) existing.color = payload.color;
+      if (payload.rank != null) existing.rank = payload.rank;
+      if (payload.color != null) existing.color = payload.color;
     } else {
       state.groupMeta.set(label, {
         label,
@@ -191,12 +198,12 @@ function stampAnnotation<T extends EvalNode>(
   }
   for (const id of members) {
     const ann = state.annotations.get(id) ?? { labels: [], color: null };
-    if (payload.label !== undefined && !ann.labels.includes(payload.label)) {
+    if (payload.label != null && !ann.labels.includes(payload.label)) {
       ann.labels.push(payload.label);
     }
     // Later annotate colors override earlier ones (precedence: view color over
     // type color for the rows it covers, doc §1.3).
-    if (payload.color !== undefined) ann.color = payload.color;
+    if (payload.color != null) ann.color = payload.color;
     state.annotations.set(id, ann);
   }
 }

@@ -1,9 +1,13 @@
 <script context="module" lang="ts">
   import type { AssistantEntrySummary } from "@/lib/types";
 
-  type AssistantLayerGroup = {
-    layerId: string;
-    layerLabel: string;
+  // A unified render bucket. `label: null` is the headerless flat list; a
+  // `layerId` marks a drag-reorderable layer group (default view only).
+  type AssistantDisplayGroup = {
+    id: string;
+    label: string | null;
+    color: string | null;
+    layerId: string | null;
     entries: AssistantEntrySummary[];
   };
 </script>
@@ -13,10 +17,21 @@
   import NodeList from "@/components/widgets/NodeList.svelte";
   import GroupCaret from "@/components/widgets/GroupCaret.svelte";
   import CountPill from "@/components/widgets/CountPill.svelte";
-  import { defaultView, evaluateView } from "@/lib/views/evaluateView";
+  import { getSwatch } from "@/lib/utils/colors";
+  import { evaluateView, type ViewGroup } from "@/lib/views/evaluateView";
+  import { paneViews } from "@/lib/stores/paneViews.svelte";
+  import { metadataSchemaStore } from "@/lib/stores/schema";
   import { focusedDocumentStore, pinnedKeysStore } from "@/lib/stores/editorFocus";
+  import type { ViewPresentation, ViewSpec } from "@/lib/types";
 
   export let entries: AssistantEntrySummary[];
+  // The view to render through + its presentation, computed by App from the
+  // pane's selected view (paneViews) — the reactivity bridge for this legacy
+  // `$:` pane. Defaults keep the standalone default: whole `assistant` universe
+  // in stored (manual drag) order, grouped by layer.
+  export let viewSpec: ViewSpec = { kind: "assistant", expr: null, sort: { by: "manual" } };
+  export let presentation: ViewPresentation | null = null;
+  $: schema = $metadataSchemaStore;
   // Active-row highlight + pin-star read from the editor-focus store, not props (#14 Step 2).
   $: focusedDocument = $focusedDocumentStore;
   $: pinnedKeys = $pinnedKeysStore;
@@ -33,19 +48,43 @@
   // Per-group collapse — pane-local, not persisted (same as the Lore pane).
   let collapsedGroups: Record<string, boolean> = {};
 
-  // Every NodeList is backed by a view (ADR-0022). The Assistants pane's
-  // implicit default is the whole `assistant` universe in stored (manual drag)
-  // order — the evaluator's `manual` sort preserves that order, which the
-  // per-layer grouping + dynamic default read (doc §1.5/§6.3). Behavior-
-  // identical today; the step-4 switcher swaps `assistantView`.
-  const assistantView = defaultView("assistant");
-  $: viewEntries = evaluateView(assistantView, entries).nodes;
-  $: groupedEntries = groupByLayer(viewEntries);
+  // Every NodeList is backed by a view (ADR-0022). Evaluate the selected view,
+  // then present: a view with label annotations carries its own hard groups; a
+  // flat view is one headerless list; otherwise the intrinsic per-layer grouping
+  // (the only mode where drag-reorder — the manual sort — applies, §6.3).
+  $: viewResult = evaluateView(viewSpec, entries, { schema, resolveView: paneViews.resolveView });
+  $: annotations = viewResult.annotations;
+  // Drag-reorder is manual order, meaningful only on the implicit default view.
+  $: canReorder = presentation === null && viewResult.groups === null;
+  $: displayGroups = buildDisplayGroups(viewResult.groups, viewResult.nodes, presentation === "flat", canReorder);
 
   // Drag-drop state for reordering assistants within a layer. Never escapes.
   let dragId: string | null = null;
   let dragLayerId: string | null = null;
   let dropTarget: { id: string; position: "before" | "after" } | null = null;
+
+  function buildDisplayGroups(
+    labelGroups: ViewGroup<AssistantEntrySummary>[] | null,
+    items: AssistantEntrySummary[],
+    flat: boolean,
+    layerGrouped: boolean,
+  ): AssistantDisplayGroup[] {
+    if (labelGroups) {
+      return labelGroups
+        .map((g) => ({
+          id: g.key,
+          label: g.label ?? "Everything else",
+          color: g.color,
+          layerId: null,
+          entries: g.nodes,
+        }))
+        .filter((g) => g.entries.length > 0);
+    }
+    if (flat) {
+      return [{ id: "__flat__", label: null, color: null, layerId: null, entries: items }];
+    }
+    return groupByLayer(items, layerGrouped);
+  }
 
   function toggleGroup(groupId: string) {
     collapsedGroups = {
@@ -95,7 +134,7 @@
       endDrag();
       return;
     }
-    const group = groupedEntries.find((g) => g.layerId === layerId);
+    const group = displayGroups.find((g) => g.layerId === layerId);
     if (!group) {
       endDrag();
       return;
@@ -118,8 +157,8 @@
     await onReorder(layerId, orderedIds);
   }
 
-  function groupByLayer(items: AssistantEntrySummary[]): AssistantLayerGroup[] {
-    const groups = new Map<string, AssistantLayerGroup>();
+  function groupByLayer(items: AssistantEntrySummary[], layerGrouped: boolean): AssistantDisplayGroup[] {
+    const groups = new Map<string, AssistantDisplayGroup>();
     for (const entry of items) {
       const key = entry.source_layer_id || "";
       const label = entry.source_layer_label || "Unknown";
@@ -127,15 +166,21 @@
       if (existing) {
         existing.entries.push(entry);
       } else {
-        groups.set(key, { layerId: key, layerLabel: label, entries: [entry] });
+        groups.set(key, { id: key, label, color: null, layerId: layerGrouped ? key : null, entries: [entry] });
       }
     }
     // Machine layer first; then alphabetical by label.
     return Array.from(groups.values()).sort((a, b) => {
-      if (a.layerLabel === "Machine") return -1;
-      if (b.layerLabel === "Machine") return 1;
-      return a.layerLabel.localeCompare(b.layerLabel);
+      if (a.label === "Machine") return -1;
+      if (b.label === "Machine") return 1;
+      return (a.label ?? "").localeCompare(b.label ?? "");
     });
+  }
+
+  // View soft-color annotation → row stripe (assistants carry no type color).
+  function stripeFor(entry: AssistantEntrySummary): string | null {
+    const viewColor = annotations.get(entry.id)?.color ?? null;
+    return viewColor ? getSwatch(viewColor)?.hex ?? null : null;
   }
 
   function assistantSubtitle(entry: AssistantEntrySummary): string {
@@ -149,62 +194,76 @@
 </script>
 
 <NodeList isEmpty={entries.length === 0}>
-  {#each groupedEntries as group (group.layerId)}
-    {@const userCollapsed = !!collapsedGroups[group.layerId]}
-    {@const isEmpty = group.entries.length === 0}
-    <NodeRow
-      groupHeader
-      collapsed={userCollapsed || isEmpty}
-      title={group.layerLabel}
-      onClick={() => toggleGroup(group.layerId)}
-    >
-      {#snippet leading()}
-        <GroupCaret collapsed={userCollapsed || isEmpty} />
-      {/snippet}
-      {#snippet trailing()}
-        <CountPill count={group.entries.length} />
-      {/snippet}
-      {#snippet nested()}
-        {#each group.entries as entry (entry.id)}
-          <NodeRow
-            title={entry.title}
-            active={focusedDocument?.type === "assistant" && focusedDocument.id === entry.id}
-            pinned={pinnedKeys.has(`assistant:${entry.id}`)}
-            dragging={dragId === entry.id}
-            dropPosition={dropTarget?.id === entry.id ? (dropTarget?.position ?? null) : null}
-            onClick={() => onOpenEntry(entry.id)}
-            ondragover={(event) => onDragOver(event, entry)}
-            ondragleave={onDragLeave}
-            ondrop={(event) => onDrop(event, entry)}
-          >
-            {#snippet leading()}
-              <span
-                class="assistant-drag-handle"
-                draggable="true"
-                role="button"
-                tabindex="-1"
-                aria-label="Drag to reorder"
-                on:dragstart={(event) => startDrag(event, entry)}
-                on:dragend={endDrag}
-              >⋮⋮</span>
-            {/snippet}
-            {#snippet detailSlot()}
-              <small>{assistantSubtitle(entry)}</small>
-            {/snippet}
-            {#snippet trailing()}
-              {#if entry.id === defaultAssistantId}
-                <span class="row-default-marker" aria-label="Default assistant" title="Default assistant">★ default</span>
-              {/if}
-            {/snippet}
-          </NodeRow>
-        {/each}
-      {/snippet}
-    </NodeRow>
+  {#each displayGroups as group (group.id)}
+    {#if group.label === null}
+      {#each group.entries as entry (entry.id)}
+        {@render assistantRow(entry, group.layerId)}
+      {/each}
+    {:else}
+      {@const userCollapsed = !!collapsedGroups[group.id]}
+      {@const isEmpty = group.entries.length === 0}
+      <NodeRow
+        groupHeader
+        collapsed={userCollapsed || isEmpty}
+        title={group.label}
+        stripeColor={group.color ? getSwatch(group.color)?.hex ?? null : null}
+        onClick={() => toggleGroup(group.id)}
+      >
+        {#snippet leading()}
+          <GroupCaret collapsed={userCollapsed || isEmpty} />
+        {/snippet}
+        {#snippet trailing()}
+          <CountPill count={group.entries.length} />
+        {/snippet}
+        {#snippet nested()}
+          {#each group.entries as entry (entry.id)}
+            {@render assistantRow(entry, group.layerId)}
+          {/each}
+        {/snippet}
+      </NodeRow>
+    {/if}
   {/each}
   {#snippet whenEmpty()}
     <p class="muted">No assistants defined yet. Click + Assistant to create one in the machine layer.</p>
   {/snippet}
 </NodeList>
+
+{#snippet assistantRow(entry: AssistantEntrySummary, layerId: string | null)}
+  <NodeRow
+    title={entry.title}
+    active={focusedDocument?.type === "assistant" && focusedDocument.id === entry.id}
+    pinned={pinnedKeys.has(`assistant:${entry.id}`)}
+    stripeColor={stripeFor(entry)}
+    dragging={dragId === entry.id}
+    dropPosition={dropTarget?.id === entry.id ? (dropTarget?.position ?? null) : null}
+    onClick={() => onOpenEntry(entry.id)}
+    ondragover={layerId !== null ? (event) => onDragOver(event, entry) : undefined}
+    ondragleave={layerId !== null ? onDragLeave : undefined}
+    ondrop={layerId !== null ? (event) => onDrop(event, entry) : undefined}
+  >
+    {#snippet leading()}
+      {#if layerId !== null}
+        <span
+          class="assistant-drag-handle"
+          draggable="true"
+          role="button"
+          tabindex="-1"
+          aria-label="Drag to reorder"
+          on:dragstart={(event) => startDrag(event, entry)}
+          on:dragend={endDrag}
+        >⋮⋮</span>
+      {/if}
+    {/snippet}
+    {#snippet detailSlot()}
+      <small>{assistantSubtitle(entry)}</small>
+    {/snippet}
+    {#snippet trailing()}
+      {#if entry.id === defaultAssistantId}
+        <span class="row-default-marker" aria-label="Default assistant" title="Default assistant">★ default</span>
+      {/if}
+    {/snippet}
+  </NodeRow>
+{/snippet}
 
 <style>
   /* Drag handle + default marker are rendered into NodeRow's leading /

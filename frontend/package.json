@@ -21,6 +21,7 @@
     "@tiptap/extension-table-header": "^2.10.4",
     "@tiptap/extension-table-row": "^2.10.4",
     "@tiptap/starter-kit": "^2.10.4",
+    "@xyflow/svelte": "^1.6.1",
     "codemirror": "^6.0.1",
     "dompurify": "^3.4.11",
     "katex": "^0.17.0",

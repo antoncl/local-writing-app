@@ -314,6 +314,9 @@ DEFAULT_METADATA_SCHEMA: dict[str, Any] = {
             "kind": "view",
             "fields": [],
             "has_body": False,
+            # Routes the NodeEditor to the Svelte Flow view designer body
+            # (0.5.0 step 3, #80) instead of the inert none-shape.
+            "body_shape": "view",
         },
     },
     "fields": {

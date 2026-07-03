@@ -83,7 +83,7 @@ export type ResearchNote = {
   source_layer_label?: string;
 };
 
-export type EditableDocument = Scene | LoreEntry | PromptEntry | AssistantEntry | ResearchNote;
+export type EditableDocument = Scene | LoreEntry | PromptEntry | AssistantEntry | ResearchNote | ViewNode;
 
 // Document-kind discriminator shared across editor components. Broader than
 // MetadataSchema.entry_types[*].kind: includes the synthetic shapes the
@@ -97,7 +97,8 @@ export type DocumentKind =
   | "research"
   | "chat"
   | "project"
-  | "structure_node";
+  | "structure_node"
+  | "view";
 
 export type LoreEntryList = {
   entries: LoreEntrySummary[];
@@ -293,6 +294,56 @@ export type ViewSort = {
 // `expr` absent/null = the whole universe of `kind`.
 export type ViewSpec = { kind: string; expr?: ViewExpr | null; sort?: ViewSort | null };
 
+// How a view's result list is laid out (doc §3.1). Orthogonal to membership.
+export type ViewPresentation = "tree" | "grouped" | "flat";
+
+// A saved view as an editable node (0.5.0 step 3, #80). Frontmatter-only —
+// the "body" is the ViewSpec, edited by the view designer (ViewBodyView), not
+// a prose/code body. Mirrors backend ViewNode (models_views.py). Carries the
+// metadata/computed_metadata slots so it satisfies EditableDocument
+// structurally; both are empty in v1 (the view has no schema fields).
+export type ViewNode = {
+  id: string;
+  title: string;
+  revision: string;
+  entry_type: string; // "view:view"
+  spec: ViewSpec;
+  presentation: ViewPresentation;
+  // EditableDocument compatibility — a view carries no prose body or fields.
+  body?: string;
+  metadata?: EntryMetadata;
+  computed_metadata?: EntryMetadata;
+  source_layer_id?: string;
+  source_layer_label?: string;
+};
+
+export type ViewNodeSummary = {
+  id: string;
+  title: string;
+  entry_type: string;
+  view_kind: string;
+  presentation: ViewPresentation;
+  source_layer_id?: string;
+  source_layer_label?: string;
+};
+
+export type ViewNodeList = { entries: ViewNodeSummary[] };
+
+export type CreateViewRequest = {
+  title: string;
+  entry_type?: string;
+  spec: ViewSpec;
+  presentation?: ViewPresentation;
+};
+
+export type SaveViewRequest = {
+  title: string;
+  base_revision?: string | null;
+  entry_type?: string;
+  spec: ViewSpec;
+  presentation?: ViewPresentation;
+};
+
 // A saved-view reference used as a picker source (carries the view's own kind).
 export type ViewRef = { view: string };
 
@@ -355,7 +406,7 @@ export type PromptEntryTypeExtras = {
 
 export type EntryBodyEditor = "wysiwyg" | "code";
 export type EntryBodyLanguage = "markdown" | "jinja2" | "plain";
-export type BodyShape = "prose" | "code" | "chat" | "none";
+export type BodyShape = "prose" | "code" | "chat" | "none" | "view";
 
 export type EntryTypeDefinition = {
   name: string;

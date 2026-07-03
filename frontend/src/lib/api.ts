@@ -58,6 +58,10 @@ import type {
   StructureDocument,
   StructureNodeDeletePreview,
   TodoDocument,
+  CreateViewRequest,
+  SaveViewRequest,
+  ViewNode,
+  ViewNodeList,
 } from "@/lib/types";
 
 const baseUrl = "http://127.0.0.1:8787/api";
@@ -656,6 +660,32 @@ export const api = {
     return request<AssistantEntryList>("/assistants/order", {
       method: "POST",
       body: JSON.stringify({ layer_id: layerId, ordered_ids: orderedIds }),
+    });
+  },
+  // Saved-view nodes (0.5.0 #78 backend / #80 designer). A view is a
+  // frontmatter-only node carrying a ViewSpec; the designer (ViewBodyView)
+  // reads getView and persists via saveView.
+  listViews() {
+    return request<ViewNodeList>("/views");
+  },
+  createView(payload: CreateViewRequest) {
+    return request<ViewNode>("/views", {
+      method: "POST",
+      body: JSON.stringify(payload),
+    });
+  },
+  getView(viewId: string) {
+    return request<ViewNode>(`/views/${encodeURIComponent(viewId)}`);
+  },
+  saveView(viewId: string, payload: SaveViewRequest) {
+    return request<ViewNode>(`/views/${encodeURIComponent(viewId)}`, {
+      method: "PUT",
+      body: JSON.stringify(payload),
+    });
+  },
+  deleteView(viewId: string) {
+    return request<ViewNodeList>(`/views/${encodeURIComponent(viewId)}`, {
+      method: "DELETE",
     });
   },
   // Unified node-CRUD shim (Phase 3c). Returns the kind-specific

@@ -555,6 +555,7 @@
         onHealthCheck={() => aiSettings.runHealthCheck()}
         onOpenPrompts={openPromptsPane}
         onOpenMutations={openMutationsPane}
+        onNewView={() => void editorPanes.createAndOpenView()}
         onRepair={repairProject}
       />
     </div>

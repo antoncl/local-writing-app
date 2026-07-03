@@ -10,6 +10,7 @@
   import CodeBodyView from "@/components/editor/body/CodeBodyView.svelte";
   import ProseBodyView from "@/components/editor/body/ProseBodyView.svelte";
   import ChatBodyView from "@/components/editor/body/ChatBodyView.svelte";
+  import ViewBodyView from "@/components/editor/body/ViewBodyView.svelte";
   import { coerceInputValue, type EntryInputDraft } from "@/lib/utils/promptInputs";
   import { resolutionSceneIdFromInputs } from "@/lib/editor-core/promptResolution";
   import { api } from "@/lib/api";
@@ -98,6 +99,7 @@
 
   let proseBodyView: ProseBodyView | null = $state(null);
   let chatBodyView: ChatBodyView | null = $state(null);
+  let viewBodyView: ViewBodyView | null = $state(null);
   let loadedSceneId: string | null = $state(null);
   let rawBody = $state("");
   let lastEmittedRawBody = $state("");
@@ -426,6 +428,7 @@
   function handleTitleInput() {
     emitChange();
     if (documentKind === "chat") chatBodyView?.setTitleFromPane(title);
+    if (documentKind === "view") viewBodyView?.setTitleFromPane(title);
   }
 
   function emitChange() {
@@ -718,7 +721,7 @@
       title = scene.title;
       status = documentStatus(scene);
       entryType = nextEntryType;
-      metadata = cloneMetadata(scene.metadata);
+      metadata = cloneMetadata(scene.metadata ?? {});
       // Read body shape from the FRESHLY-resolved entry-type (not the
       // `bodyShape` reactive, which hasn't recomputed yet — and reading
       // it would introduce a cyclical reactive dependency, since
@@ -731,9 +734,9 @@
         lastEmittedRawBody = rawBody;
       }
       loadedSceneId = scene.id;
-      // Chat starts with the rail collapsed to its edge-tab so the
-      // conversation owns full width; every other shape opens it.
-      railOpen = nextBodyShape !== "chat";
+      // Chat and the view designer start with the rail collapsed to its
+      // edge-tab so the body owns full width; every other shape opens it.
+      railOpen = nextBodyShape !== "chat" && nextBodyShape !== "view";
     }
   });
   $effect.pre(() => {
@@ -1024,6 +1027,19 @@
       {researchStructure}
       {defaultAssistantId}
       {implicitContextMatcher}
+      onBodyChange={emitChange}
+      onFocus={() => onFocus?.()}
+    />
+  {/if}
+  {#if bodyShape === "view"}
+    <ViewBodyView
+      bind:this={viewBodyView}
+      {scene}
+      {loreEntries}
+      {promptEntries}
+      {assistantEntries}
+      {structure}
+      {researchStructure}
       onBodyChange={emitChange}
       onFocus={() => onFocus?.()}
     />

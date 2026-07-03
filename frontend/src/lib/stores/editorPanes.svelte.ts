@@ -325,6 +325,10 @@ class EditorPanesController {
     // PUT /api/nodes/{id} path; the pane's draft-* fields aren't the
     // source of truth for chat state. Treat saveEditorPane as a no-op.
     if (documentKind === "chat") return;
+    // Views persist from within ViewBodyView via PUT /api/views/{id} (the
+    // designer owns the ViewSpec); the pane's draft-* fields aren't the source
+    // of truth for view state. Same no-op precedent as chats.
+    if (documentKind === "view") return;
     this.#autosave.cancel(id);
     this.setEditorPaneSaving(id, true);
     // Snapshot the pre-save baseline body for the mutations-version check below
@@ -798,6 +802,51 @@ class EditorPanesController {
     this.focusedEditorPaneId = targetPane.id;
     paneLayout.raise(targetPane.id);
     this.setStatus(`Loaded ${entry.title}`);
+  }
+
+  async openView(viewId: string): Promise<void> {
+    const existingPane = this.panes.find((pane) => pane.document?.type === "view" && pane.document.id === viewId);
+    if (existingPane) {
+      this.#focusExisting(existingPane, "open view");
+      return;
+    }
+    const targetPane = await this.#acquireTargetPane();
+    const node = await api.getView(viewId);
+    this.panes = this.panes.map((pane) =>
+      pane.id === targetPane.id
+        ? {
+            ...pane,
+            document: { type: "view", id: node.id },
+            scene: node,
+            dirty: false,
+            draftTitle: node.title,
+            // A view is frontmatter-only — no prose body, status, or fields.
+            // The ViewBodyView owns the spec and persists it directly, mirroring
+            // the chat precedent (saveEditorPane is a no-op for views).
+            draftMarkdown: "",
+            draftStatus: "",
+            draftEntryType: node.entry_type,
+            draftMetadata: {},
+            saving: false,
+            recentlySaved: false,
+          }
+        : pane,
+    );
+    this.focusedEditorPaneId = targetPane.id;
+    paneLayout.raise(targetPane.id);
+    this.setStatus(`Loaded ${node.title}`);
+  }
+
+  // Temporary entry point for step 3 (#80): mint a blank view and open the
+  // designer on it. The real "New view…" affordance arrives with the pane
+  // view-switchers in step 4 (#81, doc §5); this button will retire then.
+  async createAndOpenView(kind = "lore"): Promise<void> {
+    const node = await api.createView({
+      title: "New view",
+      spec: { kind, expr: null, sort: { by: "manual" } },
+      presentation: "flat",
+    });
+    await this.openView(node.id);
   }
 
   async openLore(entryId: string): Promise<void> {

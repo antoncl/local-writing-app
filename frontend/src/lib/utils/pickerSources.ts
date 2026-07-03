@@ -6,7 +6,13 @@
 // new stored shape. Mirrors the backend reducer in models.py
 // (`_sources_membership` / `_membership_to_sources`).
 
-import type { NodePickerConfig, ViewExpr, ViewSource, ViewSpec } from "@/lib/types";
+import type { NodePickerConfig, ViewExpr, ViewRef, ViewSource, ViewSpec } from "@/lib/types";
+
+/** A picker source that references a saved view node, vs. an inline ViewSpec.
+ * ViewSpec always carries a `kind`; ViewRef carries only `view`. */
+export function isViewRef(source: ViewSource): source is ViewRef {
+  return "view" in source && !("kind" in source);
+}
 
 function exprEntryTypeLeaves(expr: ViewExpr | null | undefined): string[] | null {
   if (!expr) return null;
@@ -42,16 +48,24 @@ export function pickerMembership(config: NodePickerConfig | null | undefined): {
 
 /** Inverse of {@link pickerMembership}: one degenerate ViewSpec source per kind
  * (kind-only, a single `type` leaf, or a `union` of `type` leaves).
- * Deterministic so equal membership yields an equal source list. */
+ * Deterministic so equal membership yields an equal source list.
+ *
+ * The checkbox-tree editor only authors these degenerate type-leaf sources, so
+ * it re-encodes them wholesale on every toggle. `existing` carries the config's
+ * current `sources` so any saved-view refs (which the tree can't represent) are
+ * PRESERVED across that re-encode instead of silently dropped (#82 / ADR-0023). */
 export function membershipToSources(
   kinds: string[],
   entryTypes: Record<string, string[]>,
+  existing?: ViewSource[] | null,
 ): ViewSource[] {
   const orderedKinds = Array.from(new Set([...kinds, ...Object.keys(entryTypes)]));
-  return orderedKinds.map((kind): ViewSpec => {
+  const degenerate = orderedKinds.map((kind): ViewSpec => {
     const fqns = entryTypes[kind] ?? [];
     if (fqns.length === 0) return { kind };
     if (fqns.length === 1) return { kind, expr: { type: fqns[0] } };
     return { kind, expr: { union: fqns.map((f) => ({ type: f })) } };
   });
+  const viewRefs = (existing ?? []).filter(isViewRef);
+  return [...degenerate, ...viewRefs];
 }

@@ -254,12 +254,58 @@ export type PromptInputType =
   | "scene_ref"
   | "color";
 
-// Shape carried in PromptInputDefinition.target when type === "context_pick".
-// Matches the backend convention documented in
-// docs/context-picker.md and the inline comment on models.py.
+// ViewSpec — the kind-anchored set-algebra membership language (0.5.0, #35/#78).
+// Mirrors the backend Pydantic models; entry_type references are FQN
+// ("lore:character", per #77). See docs/design/views-and-filters.md §1–2. There
+// is no frontend evaluator in step 1 — these types describe the stored shape.
+export type ViewFieldPredicate = {
+  key: string;
+  op: "eq" | "neq" | "includes" | "not_includes" | "set" | "unset";
+  value?: unknown;
+};
+
+export type ViewAnnotatePayload = { label?: string; color?: string; rank?: number };
+
+// One node in a view's set-algebra tree: exactly one primary slot is set
+// (a combinator, an annotate pass-through paired with `of`, or a leaf).
+export type ViewExpr = {
+  union?: ViewExpr[];
+  intersect?: ViewExpr[];
+  difference?: { keep: ViewExpr; remove: ViewExpr };
+  complement?: ViewExpr;
+  annotate?: ViewAnnotatePayload;
+  of?: ViewExpr;
+  type?: string; // exact entry_type FQN
+  descendants_of?: string; // entry_type FQN + every inheriting type
+  tagged?: string;
+  field?: ViewFieldPredicate;
+  hand_picked?: string[];
+  view_ref?: string; // a saved view node id
+};
+
+export type ViewSort = {
+  by: "manual" | "title" | "field";
+  field_key?: string;
+  dir?: "asc" | "desc";
+};
+
+// The portable view core: an anchor `kind` + membership expr + ordering.
+// `expr` absent/null = the whole universe of `kind`.
+export type ViewSpec = { kind: string; expr?: ViewExpr | null; sort?: ViewSort | null };
+
+// A saved-view reference used as a picker source (carries the view's own kind).
+export type ViewRef = { view: string };
+
+// A picker membership source: an inline ViewSpec or a saved-view ref.
+export type ViewSource = ViewSpec | ViewRef;
+
+// Shape carried in PromptInputDefinition.target when type === "context_pick",
+// and in entity_ref fields' `picker_config`. Split into membership (`sources`:
+// one ViewSpec-or-ref per kind, unioned) and mechanics (ADR-0023). Read the
+// legacy `{kinds, entryTypes}` subset via `pickerMembership()` in
+// lib/utils/pickerSources.ts — there is no evaluator in 0.5.0 step 1.
 export type NodePickerConfig = {
-  kinds?: ("scene" | "lore" | "snippet" | "assistant" | "research" | "mutation_set")[];
-  entry_types?: Record<string, string[]>;   // kind -> sub-type ids
+  sources?: ViewSource[];
   presets?: ("full_outline" | "full_text")[];
   multiple?: boolean;
   // When true, the runtime picker shows a ★ toggle on each picked

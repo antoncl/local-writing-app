@@ -110,6 +110,12 @@ from app.models import (
     UpsertMetadataFieldRequest,
     UpsertMetadataGroupRequest,
 )
+from app.models_views import (
+    CreateViewRequest,
+    SaveViewRequest,
+    ViewNode,
+    ViewNodeList,
+)
 from app.services import machine_settings as machine_settings_service
 from app.services.ai import providers as ai_providers
 from app.services.ai import tokens as ai_tokens
@@ -635,6 +641,37 @@ def save_mutation_set_entry(
 def delete_mutation_set_entry(entry_id: str) -> MutationSetEntryList:
     with translate_errors():
         return service.delete_mutation_set_entry(entry_id)
+
+
+@app.get("/api/views", response_model=ViewNodeList)
+def list_views() -> ViewNodeList:
+    """Saved views (0.5.0, #35/#78) — frontmatter-only `view` nodes."""
+    with translate_errors():
+        return service.list_views()
+
+
+@app.post("/api/views", response_model=ViewNode)
+def create_view(request: CreateViewRequest) -> ViewNode:
+    with translate_errors():
+        return service.create_view(request)
+
+
+@app.get("/api/views/{view_id}", response_model=ViewNode)
+def get_view(view_id: str) -> ViewNode:
+    with translate_errors():
+        return service.read_view(view_id)
+
+
+@app.put("/api/views/{view_id}", response_model=ViewNode)
+def save_view(view_id: str, request: SaveViewRequest) -> ViewNode:
+    with translate_errors():
+        return service.save_view(view_id, request)
+
+
+@app.delete("/api/views/{view_id}", response_model=ViewNodeList)
+def delete_view(view_id: str) -> ViewNodeList:
+    with translate_errors():
+        return service.delete_view(view_id)
 
 
 @app.get("/api/assistants", response_model=AssistantEntryList)

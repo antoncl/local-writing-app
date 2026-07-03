@@ -29,6 +29,7 @@
   import { untrack } from "svelte";
   import type { NodePickerConfig, MetadataSchema, PromptInputType } from "@/lib/types";
   import { metadataSchemaStore } from "@/lib/stores/schema";
+  import { membershipToSources, pickerMembership } from "@/lib/utils/pickerSources";
 
   interface Props {
     config: NodePickerConfig;
@@ -75,6 +76,11 @@
 
   // metadataSchema is global per-project — read from the store, not a prop (#14 Step 2).
   const metadataSchema = $derived($metadataSchemaStore);
+  // The editor authors the degenerate type-leaf subset (ADR-0023). It thinks in
+  // legacy {kinds, entryTypes}, bridging to the stored `sources` shape here:
+  // reads reduce via `pickerMembership`, `writeSelection` re-encodes via
+  // `membershipToSources`. The full Venn graph ships later, for the designer.
+  const membership = $derived(pickerMembership(config));
 
   // Widget-level collapse state. Local to the component instance — resets
   // when the prompt entry (and therefore this widget) re-mounts. Default
@@ -248,14 +254,14 @@
   }
 
   function selectionFor(kind: Kind): Set<string> {
-    const explicit = config.entry_types?.[kind];
+    const explicit = membership.entryTypes[kind];
     if (explicit && explicit.length > 0) return new Set(explicit);
-    // Legacy fallback: a config with `kinds` set but no `entry_types[kind]`
+    // Legacy fallback: a source with `kind` set but no entry_type leaf
     // historically meant "all sub-types of that kind allowed" at runtime.
     // Reflect that as "all concrete leaves checked" in the editor so the
     // displayed selection matches the runtime behaviour. The first toggle
     // promotes the config to explicit positive selection.
-    if (config.kinds?.includes(kind)) {
+    if (membership.kinds.includes(kind)) {
       return new Set(trees[kind].flatMap((root) => concreteLeaves(root)));
     }
     return new Set();
@@ -294,8 +300,8 @@
   }
 
   function writeSelection(kind: Kind, next: Set<string>) {
-    const nextEntryTypes: Record<string, string[]> = { ...(config.entry_types ?? {}) };
-    const nextKinds = new Set(config.kinds ?? []);
+    const nextEntryTypes: Record<string, string[]> = { ...membership.entryTypes };
+    const nextKinds = new Set(membership.kinds);
     if (next.size === 0) {
       delete nextEntryTypes[kind];
       nextKinds.delete(kind);
@@ -303,7 +309,8 @@
       nextEntryTypes[kind] = Array.from(next).sort();
       nextKinds.add(kind);
     }
-    emit({ entry_types: nextEntryTypes, kinds: Array.from(nextKinds) });
+    // Re-encode the degenerate membership as `sources` (the stored shape, #78).
+    emit({ sources: membershipToSources(Array.from(nextKinds), nextEntryTypes) });
   }
 
   function togglePreset(id: "full_outline" | "full_text", checked: boolean) {
@@ -371,7 +378,7 @@
   const chips = $derived.by(() => {
     const out: Chip[] = [];
     for (const { id: kind } of KINDS) {
-      const ids = config.entry_types?.[kind] ?? [];
+      const ids = membership.entryTypes[kind] ?? [];
       for (const id of ids) {
         const node = nodeById(kind, id);
         if (!node) continue;

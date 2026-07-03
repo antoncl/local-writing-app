@@ -77,7 +77,7 @@
       defaultValue: undefined,
       options: [],
       required: false,
-      nodePickerConfig: { kinds: [], presets: [] },
+      nodePickerConfig: { sources: [], presets: [] },
       nameDerived: true,
     };
     entryInputDrafts = [...entryInputDrafts, draft];

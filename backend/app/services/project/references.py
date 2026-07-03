@@ -61,6 +61,10 @@ class ReferencesMixin:
                 # `mutation-sets/`. Layered like lore/prompts (a werewolf
                 # transform can live at any project level).
                 ("mutation_set", "mutation-sets", "mutation_set:mutation_set"),
+                # Saved views (0.5.0, #35/#78): body-less Node files under
+                # `views/`, each carrying a ViewSpec in front matter. Layered
+                # like mutation sets — a view can live at any project level.
+                ("view", "views", "view:view"),
             ]:
                 # Scenes stay book-scoped — only walk the current project's scenes folder.
                 if kind == "scene" and not is_current_project:
@@ -250,6 +254,7 @@ class ReferencesMixin:
             "prompt": "prompts",
             "research": "research/notes",
             "mutation_set": "mutation-sets",
+            "view": "views",
         }
         label_by_kind = {
             "scene": "Scene",
@@ -257,6 +262,7 @@ class ReferencesMixin:
             "prompt": "Prompt",
             "research": "Research Note",
             "mutation_set": "Mutation set",
+            "view": "View",
         }
         fallback_folder = folder_by_kind.get(kind, "lore")
         fallback_path = root / fallback_folder / f"{node_id}.md"

@@ -173,8 +173,7 @@ DEFAULT_METADATA_SCHEMA: dict[str, Any] = {
                     "label": "Character",
                     "required": True,
                     "target": {
-                        "kinds": ["lore"],
-                        "entry_types": {"lore": ["lore:character"]},
+                        "sources": [{"kind": "lore", "expr": {"type": "lore:character"}}],
                         "multiple": False,
                         "presets": [],
                     },
@@ -305,6 +304,17 @@ DEFAULT_METADATA_SCHEMA: dict[str, Any] = {
             "body_shape": "chat",
             "color": "graphite",
         },
+        "view:view": {
+            # Saved view (0.5.0, #35/#78): a frontmatter-only node carrying a
+            # ViewSpec (kind + set-algebra expr + sort). Concrete so views are
+            # created directly; body-less (the spec lives in front matter, not a
+            # prose body). No schema fields in v1 — the view designer edits the
+            # spec, not metadata. See ADR-0021.
+            "name": "View",
+            "kind": "view",
+            "fields": [],
+            "has_body": False,
+        },
     },
     "fields": {
         "status": {
@@ -356,27 +366,27 @@ DEFAULT_METADATA_SCHEMA: dict[str, Any] = {
         "characters": {
             "name": "Characters",
             "type": "entity_ref_list",
-            "picker_config": {"kinds": ["lore"], "entry_types": {"lore": ["lore:character"]}},
+            "picker_config": {"sources": [{"kind": "lore", "expr": {"type": "lore:character"}}]},
         },
         "pov": {
             "name": "POV",
             "type": "entity_ref",
-            "picker_config": {"kinds": ["lore"], "entry_types": {"lore": ["lore:character"]}},
+            "picker_config": {"sources": [{"kind": "lore", "expr": {"type": "lore:character"}}]},
         },
         "locations": {
             "name": "Locations",
             "type": "entity_ref_list",
-            "picker_config": {"kinds": ["lore"], "entry_types": {"lore": ["lore:place"]}},
+            "picker_config": {"sources": [{"kind": "lore", "expr": {"type": "lore:place"}}]},
         },
         "home_place": {
             "name": "Home Place",
             "type": "entity_ref",
-            "picker_config": {"kinds": ["lore"], "entry_types": {"lore": ["lore:place"]}},
+            "picker_config": {"sources": [{"kind": "lore", "expr": {"type": "lore:place"}}]},
         },
         "related_entries": {
             "name": "Related Entries",
             "type": "entity_ref_list",
-            "picker_config": {"kinds": ["lore"]},
+            "picker_config": {"sources": [{"kind": "lore"}]},
         },
         "word_count": {
             "name": "Word Count",
@@ -429,7 +439,7 @@ DEFAULT_METADATA_SCHEMA: dict[str, Any] = {
         "preferred_assistant_id": {
             "name": "Preferred assistant",
             "type": "entity_ref",
-            "picker_config": {"kinds": ["assistant"]},
+            "picker_config": {"sources": [{"kind": "assistant"}]},
         },
         "author": {"name": "Author", "type": "text"},
         "language": {"name": "Language", "type": "text"},

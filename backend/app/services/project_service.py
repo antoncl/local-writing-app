@@ -43,6 +43,7 @@ from app.services.project.schema import MetadataSchemaMixin
 from app.services.project.search import SearchMixin
 from app.services.project.tags import TagsMixin
 from app.services.project.todos import TodosMixin
+from app.services.project.views import ViewsMixin
 
 
 class ProjectService(
@@ -67,6 +68,7 @@ class ProjectService(
     TagsMixin,
     TodosMixin,
     MutationSetEntriesMixin,
+    ViewsMixin,
 ):
     def __init__(self) -> None:
         self.root_path: Path | None = None

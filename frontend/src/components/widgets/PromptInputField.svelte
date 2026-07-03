@@ -47,7 +47,7 @@
         ? (input.target as unknown as NodePickerConfig)
         : null;
     if (input.type === "scene_ref") {
-      return { name: input.label || input.name, type: "entity_ref", options: [], picker_config: { kinds: ["scene"] } };
+      return { name: input.label || input.name, type: "entity_ref", options: [], picker_config: { sources: [{ kind: "scene" }] } };
     }
     return {
       name: input.label || input.name,

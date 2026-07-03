@@ -18,6 +18,7 @@
   import GroupCaret from "@/components/widgets/GroupCaret.svelte";
   import CountPill from "@/components/widgets/CountPill.svelte";
   import { resolveColor } from "@/lib/utils/colors";
+  import { pickerMembership } from "@/lib/utils/pickerSources";
   import type {
     NodePickerConfig,
     NodePickerRef,
@@ -58,13 +59,15 @@
   // entity_ref_list → true) and overrides any cfg.multiple — the field
   // type is the authority on cardinality, not the picker config.
   $: pickerConfig = ({ ...(field.picker_config ?? {}), multiple: multi } as NodePickerConfig);
+  // Legacy membership subset reduced from the config's `sources` (#78).
+  $: pickerFilter = pickerMembership(pickerConfig);
   // First configured kind, used when computing fallback ref hydration
   // for selected ids the in-memory indices don't resolve to a known
   // entry (e.g. a freshly-saved id whose index hasn't refreshed).
-  $: targetKind = (pickerConfig.kinds?.[0] ?? "") as NodePickerRef["kind"] | "";
+  $: targetKind = (pickerFilter.kinds[0] ?? "") as NodePickerRef["kind"] | "";
   $: targetEntryType = (() => {
     if (!targetKind) return "";
-    const allowed = pickerConfig.entry_types?.[targetKind] ?? [];
+    const allowed = pickerFilter.entryTypes[targetKind] ?? [];
     return allowed.length === 1 ? allowed[0] : "";
   })();
 

@@ -26,6 +26,7 @@ from app.models import (
     SaveSceneRequest,
     Scene,
 )
+from app.models_views import SaveViewRequest, ViewNode
 from app.services.project.errors import ProjectServiceError
 
 
@@ -41,7 +42,7 @@ class NodeOpsMixin:
 
     def read_node(
         self, node_id: str
-    ) -> Scene | LoreEntry | PromptEntry | AssistantEntry | ChatSession:
+    ) -> Scene | LoreEntry | PromptEntry | AssistantEntry | ChatSession | ViewNode:
         """Unified node-read entrypoint.
 
         Resolves the kind via the node index and dispatches to the
@@ -69,6 +70,8 @@ class NodeOpsMixin:
             return self.read_assistant_entry(node_id)
         if entry.kind == "chat":
             return self.read_chat_session(node_id)
+        if entry.kind == "view":
+            return self.read_view(node_id)
         raise ProjectServiceError(
             f"Unsupported node kind {entry.kind!r} for node {node_id}.", 422
         )
@@ -80,8 +83,9 @@ class NodeOpsMixin:
         | SaveLoreEntryRequest
         | SavePromptEntryRequest
         | SaveAssistantEntryRequest
-        | SaveChatSessionRequest,
-    ) -> Scene | LoreEntry | PromptEntry | AssistantEntry | ChatSession:
+        | SaveChatSessionRequest
+        | SaveViewRequest,
+    ) -> Scene | LoreEntry | PromptEntry | AssistantEntry | ChatSession | ViewNode:
         """Unified node-save entrypoint (Phase 3b-iii).
 
         Resolves the kind via the node index and dispatches to the
@@ -122,6 +126,10 @@ class NodeOpsMixin:
             if not isinstance(request, SaveChatSessionRequest):
                 raise _mismatch()
             return self.save_chat_session(node_id, request)
+        if entry.kind == "view":
+            if not isinstance(request, SaveViewRequest):
+                raise _mismatch()
+            return self.save_view(node_id, request)
         raise ProjectServiceError(
             f"Unsupported node kind {entry.kind!r} for node {node_id}.", 422
         )
@@ -153,6 +161,9 @@ class NodeOpsMixin:
             return
         if entry.kind == "chat":
             self.delete_chat_session(node_id)
+            return
+        if entry.kind == "view":
+            self.delete_view(node_id)
             return
         raise ProjectServiceError(
             f"Unsupported node kind {entry.kind!r} for node {node_id}.", 422

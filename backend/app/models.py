@@ -4,6 +4,12 @@ from typing import Any, Literal
 
 from pydantic import BaseModel, Field, field_validator
 
+# View / picker models live in models_views.py (this file is at the size cap).
+# NodePickerConfig is imported here because the metadata-field + tag-scope models
+# below annotate against it; the ViewSpec grammar and `view` node models are
+# imported from app.models_views directly by their few users.
+from app.models_views import NodePickerConfig
+
 
 class SelectOption(BaseModel):
     """One choice in a select / multi_select field, or a select prompt input.
@@ -109,33 +115,6 @@ class StructureDocument(BaseModel):
 
 
 MetadataValue = str | int | float | bool | None | list[Any] | dict[str, Any]
-
-
-class NodePickerConfig(BaseModel):
-    """Per-field constraint for which nodes the picker offers, replacing
-    the legacy flat `target: {kind, entry_type}` shape. Matches the
-    runtime NodePicker (formerly ContextPicker) config used for
-    context_pick prompt inputs, so entity_ref metadata fields and
-    prompt-side picks now share one vocabulary.
-
-    Wire format mirrors the frontend's NodePickerConfig type and the
-    PromptInputDefinition.target shape used by context_pick inputs."""
-
-    # Allowed kinds. Empty = no kind constraint (anything pickable).
-    kinds: list[str] = Field(default_factory=list)
-    # Optional per-kind whitelist of entry_type ids. Missing key for a
-    # kind means "any entry_type of that kind is allowed."
-    entry_types: dict[str, list[str]] = Field(default_factory=dict)
-    # Presets a context-pick UI may surface (full_outline, full_text…).
-    # Unused for entity_ref metadata fields but kept on the shared
-    # model so the same shape serializes both surfaces.
-    presets: list[str] = Field(default_factory=list)
-    # Multi-pick. None defers to the field type (entity_ref → false,
-    # entity_ref_list → true).
-    multiple: bool | None = None
-    # Author opt-in for context-pick target-marking. Unused for
-    # entity_ref metadata fields.
-    allow_target_marking: bool | None = None
 
 
 class MetadataFieldDefinition(BaseModel):

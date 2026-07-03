@@ -25,6 +25,7 @@
     StructureNode,
   } from "@/lib/types";
   import { resolveColor } from "@/lib/utils/colors";
+  import { pickerMembership } from "@/lib/utils/pickerSources";
 
   // Resolve a ref's color via the full chain: instance (not carried on
   // NodePickerRef today — that's a Phase 4 surface) → entry-type → parent
@@ -75,10 +76,13 @@
   const COLLAPSE_THRESHOLD_DEFAULT = 20;
   const COLLAPSE_THRESHOLD_COMPACT = 5;
 
+  // Membership (kinds + per-kind entry_type whitelist) reduced from the
+  // config's `sources` — the pre-evaluator degenerate subset (#78).
+  $: membership = pickerMembership(config);
   // Allowed presets per the author config — empty means no presets shown.
   $: allowedPresets = config.presets ?? [];
   // Allowed kinds per the author config — empty means no browse section.
-  $: allowedKinds = (config.kinds ?? []) as Category[];
+  $: allowedKinds = membership.kinds as Category[];
   $: allowMultiple = config.multiple !== false;
 
   const PRESET_META: Record<string, { title: string; tooltip: string }> = {
@@ -198,7 +202,7 @@
   // editor's checkbox actually does something (was a silent no-op).
   function flattenScenes(node: StructureNode | undefined): Array<{ id: string; title: string; entry_type: string }> {
     if (!node) return [];
-    const allowed = new Set(config.entry_types?.scene ?? []);
+    const allowed = new Set(membership.entryTypes.scene ?? []);
     const out: Array<{ id: string; title: string; entry_type: string }> = [];
     const walk = (n: StructureNode) => {
       // StructureNode uses `type` — the FQN entry_type ("scene:scene" /
@@ -228,7 +232,7 @@
   // research tree uses `note_id` — see TreeStructureService).
   function flattenResearchNotes(node: StructureNode | undefined): Array<{ id: string; title: string; entry_type: string }> {
     if (!node) return [];
-    const allowed = new Set(config.entry_types?.research ?? []);
+    const allowed = new Set(membership.entryTypes.research ?? []);
     const out: Array<{ id: string; title: string; entry_type: string }> = [];
     const walk = (n: StructureNode) => {
       if (n.type === "research:note" && n.scene_id) {
@@ -254,7 +258,7 @@
   // Lore grouped by sub-type, respecting `config.entry_types.lore` filter
   // when set. Empty filter = all sub-types allowed.
   $: loreGroups = (() => {
-    const allowed = new Set(config.entry_types?.lore ?? []);
+    const allowed = new Set(membership.entryTypes.lore ?? []);
     const visible = loreEntries.filter((entry) => {
       // context_policy = "never" hides the entry from every explicit
       // picker. The entry still exists (browsable in the Lore pane);
@@ -280,7 +284,7 @@
   // entries that match the search.
   $: snippetEntries = filterByTitle(
     promptEntries.filter((p) => {
-      const allowed = new Set(config.entry_types?.snippet ?? []);
+      const allowed = new Set(membership.entryTypes.snippet ?? []);
       return allowed.size === 0 || allowed.has(p.entry_type);
     }),
     search,

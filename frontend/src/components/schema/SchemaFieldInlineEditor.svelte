@@ -103,11 +103,10 @@
         | "manuscript",
       pickerConfig: (f?.picker_config
         ? {
-            kinds: [...(f.picker_config.kinds ?? [])],
-            entry_types: { ...(f.picker_config.entry_types ?? {}) },
+            sources: [...(f.picker_config.sources ?? [])],
             presets: [...(f.picker_config.presets ?? [])],
           }
-        : { kinds: ["lore"], entry_types: {} }) as NodePickerConfig,
+        : { sources: [{ kind: "lore" }] }) as NodePickerConfig,
     };
   });
   let type: MetadataFieldType = $state(seed.type);

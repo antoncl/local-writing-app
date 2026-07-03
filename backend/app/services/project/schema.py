@@ -29,6 +29,7 @@ from app.models import (
     DeleteMetadataEntryTypeRequest,
     DeleteMetadataFieldRequest,
     DeleteMetadataGroupRequest,
+    EntryTypeDefinition,
     MetadataDefinitionSource,
     MetadataFieldDefinition,
     MetadataSchema,
@@ -47,6 +48,28 @@ from app.services.project.default_schema import DEFAULT_METADATA_SCHEMA
 from app.services.project.errors import ProjectServiceError
 
 
+def _entry_type_ancestry(
+    entry_types: dict[str, EntryTypeDefinition], entry_type_id: str
+) -> list[str]:
+    """Walk the `parent:` chain of an entry_type FQN: the type itself, then each
+    ancestor, nearest first. Unknown ids resolve to just themselves. Cycle-safe
+    (schema CRUD already rejects self-parent, but a `seen` guard keeps this total).
+
+    The single canonical answer to "is X a kind-of Y" — the backend `is_a` Jinja
+    helper resolves membership against this chain, and the frontend view
+    `descendants_of` leaf walks the same `parent:` links in the schema payload
+    (ADR-0026). Built once here, not duplicated per consumer."""
+    chain: list[str] = []
+    seen: set[str] = set()
+    current: str | None = entry_type_id
+    while isinstance(current, str) and current not in seen:
+        chain.append(current)
+        seen.add(current)
+        definition = entry_types.get(current)
+        current = definition.parent if definition is not None else None
+    return chain
+
+
 class MetadataSchemaMixin:
     def read_metadata_schema(self) -> MetadataSchema:
         root = self._require_project()
@@ -57,6 +80,20 @@ class MetadataSchemaMixin:
                 self._merge_metadata_schema_layer(data, layer_data)
         data = self._resolve_metadata_schema_inheritance(data)
         return MetadataSchema.model_validate(data)
+
+    def entry_type_ancestry(
+        self,
+        entry_type_id: str,
+        *,
+        schema: MetadataSchema | None = None,
+    ) -> list[str]:
+        """The inheritance chain of an entry_type FQN (self first, then ancestors
+        via `parent:`). Pass `schema` to reuse an already-read schema on a hot
+        path (the AI template render); otherwise it reads the effective schema.
+        The shared ancestry primitive behind the `is_a` helper (ADR-0026)."""
+        if schema is None:
+            schema = self.read_metadata_schema()
+        return _entry_type_ancestry(schema.entry_types, entry_type_id)
 
     def read_metadata_schema_layers(self) -> MetadataSchemaLayers:
         root = self._require_project()

@@ -205,6 +205,88 @@ class _HelperFixtureBase(unittest.TestCase):
         return None
 
 
+class EntryTypeAncestryTests(_HelperFixtureBase):
+    """The shared `entry_type_ancestry` primitive + the `is_a` Jinja helper
+    (ADR-0026 / #83). A `lore:deity` sub-type inherits `lore:character`."""
+
+    def setUp(self) -> None:
+        super().setUp()
+        # Add a sub-type deity → character to exercise inheritance.
+        schema_path = self.root / "metadata.schema.yaml"
+        data = self.service._read_yaml(schema_path)
+        data["entry_types"]["lore:deity"] = {
+            "name": "Deity",
+            "kind": "lore",
+            "parent": "lore:character",
+        }
+        self.service._write_yaml(schema_path, data)
+        self.athena = self._make_lore(
+            title="Athena",
+            entry_type="lore:deity",
+            metadata={"aliases": []},
+            body="Goddess of wisdom.",
+        )
+
+    def test_ancestry_walks_parent_chain(self) -> None:
+        # Full chain incl. the built-in base type character inherits from.
+        self.assertEqual(
+            self.service.entry_type_ancestry("lore:deity"),
+            ["lore:deity", "lore:character", "lore:lore_entry"],
+        )
+
+    def test_ancestry_of_seeded_type_reaches_base(self) -> None:
+        self.assertEqual(
+            self.service.entry_type_ancestry("lore:character"),
+            ["lore:character", "lore:lore_entry"],
+        )
+
+    def test_ancestry_of_unknown_type_is_itself(self) -> None:
+        self.assertEqual(self.service.entry_type_ancestry("lore:nope"), ["lore:nope"])
+
+    def _render_is_a(self, entry_obj, fqn: str) -> str:
+        env = create_environment_for_project(self.service)
+        out = render_template(
+            '{% role "system" %}'
+            '{% if is_a(entry, "' + fqn + '") %}yes{% else %}no{% endif %}'
+            "{% endrole %}",
+            context={"entry": entry_obj},
+            env=env,
+        )
+        return out.messages[0].text
+
+    def test_is_a_true_for_exact_type(self) -> None:
+        honor = self.service.read_lore_entry(self.honor["id"])
+        self.assertEqual(self._render_is_a(honor, "lore:character"), "yes")
+
+    def test_is_a_true_for_descendant(self) -> None:
+        athena = self.service.read_lore_entry(self.athena["id"])
+        # deity inherits character → is_a(deity, "lore:character") holds.
+        self.assertEqual(self._render_is_a(athena, "lore:character"), "yes")
+        self.assertEqual(self._render_is_a(athena, "lore:deity"), "yes")
+
+    def test_is_a_false_for_unrelated_type(self) -> None:
+        manticore = self.service.read_lore_entry(self.manticore["id"])
+        self.assertEqual(self._render_is_a(manticore, "lore:character"), "no")
+
+    def test_is_a_false_for_empty_or_missing_arg(self) -> None:
+        from app.services.ai.helpers import _is_a
+
+        schema = self.service.read_metadata_schema()
+        honor = self.service.read_lore_entry(self.honor["id"])
+        self.assertFalse(_is_a(self.service, schema, honor, ""))
+        self.assertFalse(_is_a(self.service, schema, honor, None))
+        self.assertFalse(_is_a(self.service, schema, None, "lore:character"))
+
+    def test_is_a_falls_back_to_exact_match_without_schema(self) -> None:
+        from app.services.ai.helpers import _is_a
+
+        honor = self.service.read_lore_entry(self.honor["id"])
+        self.assertTrue(_is_a(self.service, None, honor, "lore:character"))
+        # No schema → no inheritance resolution, so a descendant match fails.
+        athena = self.service.read_lore_entry(self.athena["id"])
+        self.assertFalse(_is_a(self.service, None, athena, "lore:character"))
+
+
 class PovHelperTests(_HelperFixtureBase):
     def test_pov_resolves_lore_entity_to_dict(self) -> None:
         scene = self.service.read_scene(self.scene_two_node.scene_id)

@@ -407,6 +407,7 @@ def register_helpers(
     env.globals["character_thread"] = (
         lambda scene, character: _character_thread(project, schema, scene, character)
     )
+    env.globals["is_a"] = lambda node, entry_type: _is_a(project, schema, node, entry_type)
 
 
 def create_environment_for_project(
@@ -423,6 +424,24 @@ def create_environment_for_project(
 
 
 # ----- Internal: data access -----------------------------------------------
+
+
+def _is_a(project: ProjectService, schema: Any, node: Any, entry_type_fqn: Any) -> bool:
+    """`is_a(node, "lore:character")` → true when the node's entry_type equals or
+    descends from the given FQN via the schema `parent:` chain (ADR-0026).
+
+    Inheritance-aware, unlike `entry.entry_type == "..."`: a `lore:deity` that
+    inherits `lore:character` satisfies `is_a(entry, "lore:character")`. Falls
+    back to exact match when the schema is unavailable. Templates use it to branch
+    prompt logic on a type family."""
+    if not isinstance(entry_type_fqn, str) or not entry_type_fqn:
+        return False
+    node_type = _get_field(node, "entry_type")
+    if not isinstance(node_type, str) or not node_type:
+        return False
+    if schema is None:
+        return node_type == entry_type_fqn
+    return entry_type_fqn in project.entry_type_ancestry(node_type, schema=schema)
 
 
 def _get_field(node: Any, key: str) -> Any:

@@ -7,7 +7,8 @@
     "dev": "vite --host 127.0.0.1 --configLoader runner",
     "build": "vite build --configLoader runner",
     "preview": "vite preview --host 127.0.0.1 --configLoader runner",
-    "check": "svelte-check --tsconfig ./tsconfig.json"
+    "check": "svelte-check --tsconfig ./tsconfig.json",
+    "test": "vitest run"
   },
   "dependencies": {
     "@codemirror/lang-json": "^6.0.1",
@@ -32,6 +33,7 @@
     "@sveltejs/vite-plugin-svelte": "^5.0.3",
     "svelte-check": "^4.7.1",
     "typescript": "^5.7.2",
-    "vite": "^6.0.7"
+    "vite": "^6.0.7",
+    "vitest": "^3.2.6"
   }
 }

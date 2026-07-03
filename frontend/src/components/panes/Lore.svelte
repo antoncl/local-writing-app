@@ -20,6 +20,7 @@
   import GroupCaret from "@/components/widgets/GroupCaret.svelte";
   import CountPill from "@/components/widgets/CountPill.svelte";
   import { getSwatch, resolveColorForType } from "@/lib/utils/colors";
+  import { defaultView, evaluateView } from "@/lib/views/evaluateView";
   import { metadataSchemaStore } from "@/lib/stores/schema";
   import { focusedDocumentStore, pinnedKeysStore } from "@/lib/stores/editorFocus";
 
@@ -39,7 +40,14 @@
   let searchQuery = "";
   let collapsedGroups: Record<string, boolean> = {};
 
-  $: filteredEntries = filterEntries(entries, searchQuery);
+  // Every NodeList is backed by a view (ADR-0022). The Lore pane's implicit
+  // default is the whole `lore` universe in stored order; the pane's own
+  // search + group-by-entry_type presentation rides on top of the membership
+  // the evaluator returns. Behavior-identical today (default view = no filter);
+  // the step-4 switcher swaps `loreView` for a user-selected one.
+  const loreView = defaultView("lore");
+  $: viewEntries = evaluateView(loreView, entries, { schema }).nodes;
+  $: filteredEntries = filterEntries(viewEntries, searchQuery);
   $: groupedEntries = groupByType(filteredEntries, schema);
 
   function filterEntries(items: LoreEntrySummary[], query: string) {

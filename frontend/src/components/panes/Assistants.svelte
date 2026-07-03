@@ -13,6 +13,7 @@
   import NodeList from "@/components/widgets/NodeList.svelte";
   import GroupCaret from "@/components/widgets/GroupCaret.svelte";
   import CountPill from "@/components/widgets/CountPill.svelte";
+  import { defaultView, evaluateView } from "@/lib/views/evaluateView";
   import { focusedDocumentStore, pinnedKeysStore } from "@/lib/stores/editorFocus";
 
   export let entries: AssistantEntrySummary[];
@@ -32,7 +33,14 @@
   // Per-group collapse — pane-local, not persisted (same as the Lore pane).
   let collapsedGroups: Record<string, boolean> = {};
 
-  $: groupedEntries = groupByLayer(entries);
+  // Every NodeList is backed by a view (ADR-0022). The Assistants pane's
+  // implicit default is the whole `assistant` universe in stored (manual drag)
+  // order — the evaluator's `manual` sort preserves that order, which the
+  // per-layer grouping + dynamic default read (doc §1.5/§6.3). Behavior-
+  // identical today; the step-4 switcher swaps `assistantView`.
+  const assistantView = defaultView("assistant");
+  $: viewEntries = evaluateView(assistantView, entries).nodes;
+  $: groupedEntries = groupByLayer(viewEntries);
 
   // Drag-drop state for reordering assistants within a layer. Never escapes.
   let dragId: string | null = null;

@@ -505,7 +505,6 @@ class PreviewCostEstimateTests(unittest.TestCase):
             "metadata:\n"
             "  ai_provider: anthropic\n"
             "  ai_model: claude-sonnet-4-6\n"
-            "  is_default: true\n"
             "---\n",
             encoding="utf-8",
         )

@@ -134,7 +134,7 @@ DEFAULT_METADATA_SCHEMA: dict[str, Any] = {
             "name": "Prompt",
             "kind": "prompt",
             "abstract": True,
-            "fields": ["preferred_assistant_id", "color"],
+            "fields": ["preferred_assistant_id", "assistant_tags", "color"],
             "has_body": True,
             "body_editor": "code",
             "body_language": "jinja2",
@@ -263,7 +263,7 @@ DEFAULT_METADATA_SCHEMA: dict[str, Any] = {
                 "ai_max_tokens",
                 "ai_thinking",
                 "summary",
-                "is_default",
+                "tags",
                 "color",
             ],
             "has_body": False,
@@ -438,12 +438,16 @@ DEFAULT_METADATA_SCHEMA: dict[str, Any] = {
         "ai_temperature": {"name": "Temperature", "type": "number"},
         "ai_max_tokens": {"name": "Max output tokens", "type": "number"},
         "ai_thinking": {"name": "Show thinking", "type": "boolean"},
-        "is_default": {"name": "Default", "type": "boolean"},
         "preferred_assistant_id": {
             "name": "Preferred assistant",
             "type": "entity_ref",
             "picker_config": {"sources": [{"kind": "assistant"}]},
         },
+        # A prompt's soft assistant scope (ADR-0024): the picker surfaces
+        # assistants carrying any of these tags first, and the dynamic default
+        # is the topmost matching one. A degenerate `tagged:` source over
+        # kind:assistant, expressed with the existing tags widget/infra.
+        "assistant_tags": {"name": "Preferred assistant tags", "type": "tags"},
         "author": {"name": "Author", "type": "text"},
         "language": {"name": "Language", "type": "text"},
         "genre": {"name": "Genre", "type": "text"},

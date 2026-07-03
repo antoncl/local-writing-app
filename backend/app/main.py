@@ -904,8 +904,8 @@ def _resolve_call_params(
 
     Priority for each field, highest first:
       1. Explicit override on the request (provider, model, max_tokens).
-      2. The assistant indicated by assistant_id, or the entry flagged
-         is_default in the file-backed roster.
+      2. The assistant indicated by assistant_id, or the topmost assistant
+         in the file-backed roster when none is given (ADR-0024).
       3. The legacy default_provider / default_models matrix on settings.
 
     Temperature has no fallback: when the assistant doesn't set it (or

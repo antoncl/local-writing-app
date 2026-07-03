@@ -9,12 +9,14 @@ import type { AssistantEntrySummary } from "@/lib/types";
 
 export const assistantEntriesStore = writable<AssistantEntrySummary[]>([]);
 
-// The id of the entry flagged `is_default`, or "" if none. A derived store (not
-// a function) so consumers track the inner roster dependency — see
+// The dynamic default assistant id: the **topmost** entry in roster (manual
+// drag) order, or "" if none. The ★ is_default flag is retired (ADR-0024) —
+// manual order already expresses global preference. A derived store (not a
+// function) so consumers track the inner roster dependency — see
 // feedback_svelte5_reactivity_traps; this is what App's `$:` derivation did.
 export const defaultAssistantIdStore = derived(
   assistantEntriesStore,
-  ($entries) => $entries.find((a) => Boolean(a.metadata?.is_default))?.id ?? "",
+  ($entries) => $entries[0]?.id ?? "",
 );
 
 // Refresh swallows errors (backend may be unavailable) and leaves the previous

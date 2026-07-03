@@ -257,8 +257,9 @@ def touch_recent_project(root_path: Path, title: str) -> None:
 def _migrate_default_models_to_files_if_empty(settings: MachineSettings) -> None:
     """When no assistant files exist but `default_models` does, materialize
     the matrix as files (one per non-empty pair). Subsequent runs see the
-    files and skip. The pair matching `default_provider` is flagged
-    is_default."""
+    files and skip. The pair matching `default_provider` is seeded first so it
+    is the **topmost** (dynamic default) assistant — the ★ is_default flag is
+    retired (ADR-0024)."""
     folder = assistants_dir()
     if folder.exists() and any(folder.glob("*.md")):
         return
@@ -269,6 +270,9 @@ def _migrate_default_models_to_files_if_empty(settings: MachineSettings) -> None
     ]
     if not pairs:
         return
+    # Topmost = dynamic default: put the default_provider's pair first (stable
+    # sort keeps the rest in order).
+    pairs.sort(key=lambda pm: pm[0] != settings.default_provider)
     folder.mkdir(parents=True, exist_ok=True)
     seen_slugs: set[str] = set()
     for provider, model in pairs:
@@ -289,8 +293,6 @@ def _migrate_default_models_to_files_if_empty(settings: MachineSettings) -> None
             # models (e.g. claude-opus-4-7) reject an explicit temperature.
             "ai_max_tokens": 4096,
         }
-        if provider == settings.default_provider:
-            metadata["is_default"] = True
         front: dict[str, Any] = {
             "id": assistant_id,
             "title": title,

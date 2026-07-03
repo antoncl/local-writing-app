@@ -46,6 +46,14 @@ repos:
         always_run: true
         stages: [pre-push]
 
+      - id: vitest
+        name: vitest (frontend unit tests)
+        entry: npm test --prefix frontend
+        language: system
+        pass_filenames: false
+        always_run: true
+        stages: [pre-push]
+
       - id: pytest
         name: pytest (backend)
         entry: python scripts/venv_run.py -m pytest backend/tests -q

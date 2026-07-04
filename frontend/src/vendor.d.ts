@@ -1,3 +1,5 @@
+/// <reference types="vite/client" />
+
 declare module "turndown" {
   type TurndownRule = {
     filter: string | string[] | ((node: Node) => boolean);

@@ -64,7 +64,10 @@ import type {
   ViewNodeList,
 } from "@/lib/types";
 
-const baseUrl = "http://127.0.0.1:8787/api";
+// Backend base URL. Defaults to the shared dev backend on :8787; an isolated
+// instance (e.g. Claude's testbench on :8788) overrides it via VITE_API_BASE
+// with `vite --mode claude` loading `.env.claude`.
+const baseUrl = import.meta.env.VITE_API_BASE ?? "http://127.0.0.1:8787/api";
 
 /** Error subclass that carries the raw response detail so structured callers
  * can extract fields (e.g. PreviewError's line/col). `.message` still reads as

@@ -30,6 +30,7 @@ from app.models import (
     AITierResolution,
     AssistantEntry,
     AssistantEntryList,
+    AssistantTagList,
     BacklinksResponse,
     ChatSession,
     ChatSessionList,
@@ -95,6 +96,7 @@ from app.models import (
     Scene,
     SearchRequest,
     SearchResponse,
+    SetAssistantTagColorRequest,
     SetFieldOrderRequest,
     SetGroupApplicationsRequest,
     StructureDocument,
@@ -1049,6 +1051,18 @@ def update_machine_settings(request: MachineSettingsUpdate) -> MachineSettingsVi
     machine_settings_service.save_settings(updated)
     masked = machine_settings_service.mask_credentials(updated)
     return _build_settings_view(masked)
+
+
+@app.get("/api/assistant-tags", response_model=AssistantTagList)
+def get_assistant_tags() -> AssistantTagList:
+    # Machine-global (assistants live machine-globally), so this is not scoped
+    # to the open project (#88).
+    return AssistantTagList(tags=machine_settings_service.load_assistant_tags())
+
+
+@app.put("/api/assistant-tags/{name}", response_model=AssistantTagList)
+def set_assistant_tag_color(name: str, request: SetAssistantTagColorRequest) -> AssistantTagList:
+    return AssistantTagList(tags=machine_settings_service.set_assistant_tag_color(name, request.color))
 
 
 # --- AI: health check ---

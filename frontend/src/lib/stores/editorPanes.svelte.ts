@@ -22,6 +22,7 @@
 import { tick } from "svelte";
 import { get } from "svelte/store";
 import { api } from "@/lib/api";
+import { refreshAssistantTags } from "@/lib/stores/assistantTags";
 import { paneLayout } from "@/lib/stores/paneLayout.svelte";
 import { AutosaveScheduler } from "@/lib/editor-core/autosave";
 import {
@@ -354,8 +355,11 @@ class EditorPanesController {
         savedDocument = await api.saveResearchNote(draftDocument as ResearchNote, pane.draftMarkdown);
       } else if (documentKind === "prompt") {
         savedDocument = await api.savePromptEntry(draftDocument as PromptEntry, pane.draftMarkdown);
+        // A prompt's assistant_tags may have registered new machine tags (#88).
+        void refreshAssistantTags();
       } else if (documentKind === "assistant") {
         savedDocument = await api.saveAssistantEntry(draftDocument as AssistantEntry);
+        void refreshAssistantTags();
       } else if (documentKind === "project") {
         // Project node is the project.md singleton; round-trip via the
         // dedicated endpoint and re-shape into the editor pane's

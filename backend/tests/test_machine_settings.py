@@ -12,6 +12,39 @@ from app.main import service as global_service
 from app.services import machine_settings as ms
 
 
+class AssistantTagsServiceTests(unittest.TestCase):
+    """Machine-global assistant-tag vocabulary (#88) — register, color, persist."""
+
+    def test_register_adds_new_tags_without_color(self) -> None:
+        tags = ms.register_assistant_tags(["Roleplay", "  Editor  ", ""])
+        by_name = {t.name: t for t in tags}
+        self.assertEqual(set(by_name), {"Roleplay", "Editor"})  # blank dropped, trimmed
+        self.assertIsNone(by_name["Roleplay"].color)
+
+    def test_register_is_idempotent_and_never_clobbers_color(self) -> None:
+        ms.register_assistant_tags(["Roleplay"])
+        ms.set_assistant_tag_color("Roleplay", "rose")
+        # Re-registering the same tag (e.g. saving the assistant again) keeps color.
+        tags = ms.register_assistant_tags(["Roleplay", "Editor"])
+        by_name = {t.name: t for t in tags}
+        self.assertEqual(by_name["Roleplay"].color, "rose")
+        self.assertIsNone(by_name["Editor"].color)
+
+    def test_set_color_registers_an_unknown_tag(self) -> None:
+        tags = ms.set_assistant_tag_color("Brand New", "teal")
+        self.assertEqual([(t.name, t.color) for t in tags], [("Brand New", "teal")])
+
+    def test_set_color_none_clears(self) -> None:
+        ms.set_assistant_tag_color("Roleplay", "rose")
+        tags = ms.set_assistant_tag_color("Roleplay", None)
+        self.assertIsNone({t.name: t for t in tags}["Roleplay"].color)
+
+    def test_tag_names_from_field_handles_list_and_csv(self) -> None:
+        self.assertEqual(ms.tag_names_from_field(["a", " b "]), ["a", "b"])
+        self.assertEqual(ms.tag_names_from_field("a, b ,"), ["a", "b"])
+        self.assertEqual(ms.tag_names_from_field(None), [])
+
+
 class RecentProjectsServiceTests(unittest.TestCase):
     """touch_recent_project semantics — dedupe, cap, order."""
 

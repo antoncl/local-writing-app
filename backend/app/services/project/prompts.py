@@ -143,6 +143,11 @@ class PromptEntriesMixin:
             omit_empty_metadata=True,
         )
         self._maybe_rename_node_file(path, request.title)
+        # A prompt's `assistant_tags` (its soft assistant scope) feed the same
+        # machine-global vocabulary as assistants' own tags (#88).
+        from app.services import machine_settings as ms_service
+
+        ms_service.register_assistant_tags(ms_service.tag_names_from_field(metadata.get("assistant_tags")))
         return self.read_prompt_entry(node_id)
 
     @staticmethod

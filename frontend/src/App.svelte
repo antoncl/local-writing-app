@@ -40,6 +40,7 @@
     refreshEmbeddedTodos as storeRefreshEmbeddedTodos,
   } from "@/lib/stores/todos";
   import { knownTagsStore, refreshKnownTags as storeRefreshKnownTags, setKnownTags } from "@/lib/stores/tags";
+  import { assistantTagsStore, refreshAssistantTags, assistantTagsAsScoped } from "@/lib/stores/assistantTags";
   import { validationStore, setValidation } from "@/lib/stores/validation";
   import {
     structureStore,
@@ -86,6 +87,7 @@
   import { treeActions } from "@/lib/stores/treeActions.svelte";
   import { chatSessions } from "@/lib/stores/chatSessions.svelte";
   import TagManagerDialog from "@/components/dialogs/TagManagerDialog.svelte";
+  import AssistantTagManager from "@/components/dialogs/AssistantTagManager.svelte";
   import type {
     AssistantEntrySummary,
     Scene,
@@ -126,6 +128,7 @@
   let projectCostExpanded = $state(false);
   let appState = $state<AppState>({ name: "needsProject" });
   let tagsManagerOpen = $state(false);
+  let assistantTagManagerOpen = $state(false);
   // Sentinel key for the Lore "+ Entry" type-picker, reusing the tree add-menu
   // machinery (treeActions.toggleAddMenu / addMenuPosition / closeAddMenu). Lore
   // groups dynamically so it has no per-type "+ Entry" like Prompts — the
@@ -220,6 +223,9 @@
     // last-opened project so an HMR reload / plain F5 doesn't drop the user back
     // to "No project open." Failure is non-fatal.
     void projectSession.rehydrate();
+    // Assistant tags are machine-global (like the roster) — load once at startup
+    // so colored chips + suggestions are ready before a project opens (#88).
+    void refreshAssistantTags();
     return () => {
       paneLayout.dispose();
       editorPanes.dispose();
@@ -255,6 +261,7 @@
     void refreshProjectCost();
     void aiSettings.refreshProjectColor();
     void paneViews.loadForProject(projectPath);
+    void refreshAssistantTags();
   }
 
   async function refreshProjectCost(): Promise<void> {
@@ -463,6 +470,9 @@
   // the store layer from lore + schema (see stores/derived.ts).
   let implicitContextMatcher = $derived($implicitContextMatcherStore);
   let knownTags = $derived($knownTagsStore);
+  // Assistant/prompt editors additionally offer the machine-global assistant-tag
+  // vocabulary (#88, empty scope → suggest on every field of those editors).
+  let assistantTagScoped = $derived(assistantTagsAsScoped($assistantTagsStore));
   let focusedEditorPane = $derived(editorPanes.panes.find((pane) => pane.id === editorPanes.focusedEditorPaneId) ?? editorPanes.panes[0] ?? null);
   // Write-through the focused doc to the editor-focus store so the list panes
   // read it directly instead of having it drilled in (#14 Step 2). App is the
@@ -745,6 +755,7 @@
     {#snippet actions()}
       <ViewSwitcher kind="assistant" />
       <button class="pin-button" type="button" title="Add assistant" onmousedown={(event) => event.stopPropagation()} onclick={() => treeActions.newAssistantEntry()}>+ Assistant</button>
+      <button class="pin-button" type="button" title="Assistant tag colors" onmousedown={(event) => event.stopPropagation()} onclick={() => (assistantTagManagerOpen = true)}>Tags…</button>
       <button class="pin-button" type="button" onmousedown={(event) => event.stopPropagation()} onclick={() => closeListPane("assistants")}>Close</button>
     {/snippet}
     <div class="pane-content schema-list">
@@ -843,7 +854,9 @@
         structure={structure}
         researchStructure={researchStructure}
         loreEntries={loreEntries}
-        knownTags={knownTags}
+        knownTags={editorPane.document?.type === "assistant" || editorPane.document?.type === "prompt"
+          ? [...knownTags, ...assistantTagScoped]
+          : knownTags}
         implicitContextMatcher={implicitContextMatcher}
         assistantEntries={assistantEntries}
         defaultAssistantId={defaultAssistantId}
@@ -952,6 +965,10 @@
       onChanged={() => void refreshAfterTagChange()}
       onClose={() => (tagsManagerOpen = false)}
     />
+  {/if}
+
+  {#if assistantTagManagerOpen}
+    <AssistantTagManager onClose={() => (assistantTagManagerOpen = false)} />
   {/if}
 
   {#if error}

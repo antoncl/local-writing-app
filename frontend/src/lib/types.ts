@@ -179,6 +179,18 @@ export type KnownTags = {
   tags: ScopedTag[];
 };
 
+// The machine-global assistant-tag vocabulary (#88). Assistants live
+// machine-globally, so this is separate from a project's scoped KnownTags.
+// `color` is a palette swatch id (or null when unassigned).
+export type AssistantTag = {
+  name: string;
+  color: string | null;
+};
+
+export type AssistantTagList = {
+  tags: AssistantTag[];
+};
+
 export type TagUsage = {
   name: string;
   scope: NodePickerConfig;

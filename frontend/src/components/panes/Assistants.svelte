@@ -12,6 +12,8 @@
   import NodeList from "@/components/widgets/NodeList.svelte";
   import ViewGroupedList from "@/components/widgets/ViewGroupedList.svelte";
   import { getSwatch } from "@/lib/utils/colors";
+  import { assistantTagsStore, assistantTagColorHexes } from "@/lib/stores/assistantTags";
+  import { assistantTagsOf } from "@/lib/chat/assistantScope";
   import { evaluateView } from "@/lib/views/evaluateView";
   import { paneViews } from "@/lib/stores/paneViews.svelte";
   import { metadataSchemaStore } from "@/lib/stores/schema";
@@ -41,6 +43,13 @@
 
   // Per-group collapse — pane-local, not persisted (same as the Lore pane).
   let collapsedGroups: Record<string, boolean> = {};
+
+  // Colored tag chips: name → hex from the machine-global assistant-tag
+  // vocabulary (#88). Uncolored tags fall back to the neutral chip.
+  $: assistantTagColors = assistantTagColorHexes($assistantTagsStore);
+  // Reactive (not const) so the function reference changes when colors update,
+  // re-rendering the rows' chips.
+  $: tagHexFor = (tag: string): string | null => assistantTagColors.get(tag) ?? null;
 
   // Every NodeList is backed by a view (ADR-0022). Evaluate the selected view,
   // then present: a view with label annotations carries its own hard groups; a
@@ -201,6 +210,8 @@
   <NodeRow
     title={entry.title}
     {depth}
+    tags={assistantTagsOf(entry)}
+    tagColor={tagHexFor}
     active={focusedDocument?.type === "assistant" && focusedDocument.id === entry.id}
     pinned={pinnedKeys.has(`assistant:${entry.id}`)}
     stripeColor={stripeFor(entry)}

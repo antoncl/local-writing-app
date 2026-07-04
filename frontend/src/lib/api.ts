@@ -17,6 +17,7 @@ import type {
   CreateAIInvocationRequest,
   ChatSessionJournalEntry,
   ChatUsage,
+  AssistantTagList,
   BacklinksResponse,
   ProjectCostResponse,
   ChatSession,
@@ -412,6 +413,15 @@ export const api = {
   },
   getKnownTags() {
     return request<KnownTags>("/tags");
+  },
+  getAssistantTags() {
+    return request<AssistantTagList>("/assistant-tags");
+  },
+  setAssistantTagColor(name: string, color: string | null) {
+    return request<AssistantTagList>(`/assistant-tags/${encodeURIComponent(name)}`, {
+      method: "PUT",
+      body: JSON.stringify({ color }),
+    });
   },
   getTagsOverview() {
     return request<TagsOverview>("/tags/overview");

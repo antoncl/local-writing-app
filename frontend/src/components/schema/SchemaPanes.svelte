@@ -752,7 +752,11 @@
     const position = fieldDropTarget?.position ?? "before";
     clearFieldDrag();
     if (!draggedId || draggedId === targetFieldId || !selectedSchemaTypeId) return;
-    const current = typeOwnFieldEntries.map(([id]) => id);
+    // Send the FULL resolved order (display_order spans membership now, #89), so
+    // reordering an own field keeps every inherited field in place instead of
+    // hoisting the own block above them. Both ids are members of this list.
+    const resolved = metadataSchema?.entry_types[selectedSchemaTypeId]?.fields;
+    const current = resolved && resolved.length ? [...resolved] : typeOwnFieldEntries.map(([id]) => id);
     const order = reorderByPosition(current, current.indexOf(draggedId), current.indexOf(targetFieldId), position);
     if (order.join(" ") === current.join(" ")) return;
     const layerId = schemaTypeLayerId || projectSchemaLayerId();

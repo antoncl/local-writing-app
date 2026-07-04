@@ -297,6 +297,26 @@ export type ViewSpec = { kind: string; expr?: ViewExpr | null; sort?: ViewSort |
 // How a view's result list is laid out (doc §3.1). Orthogonal to membership.
 export type ViewPresentation = "tree" | "grouped" | "flat";
 
+// The view designer's persisted canvas graph (nodes + wiring). Non-semantic
+// presentation state — the evaluator ignores it; it exists so reopening a view
+// restores the author's arrangement instead of re-deriving an auto-layout from
+// the semantic `expr`. `cfg` is a node's ViewNodeData (kept loose here to avoid
+// a types.ts ← viewGraph.ts import cycle). Mirrors backend ViewLayout.
+export type ViewLayoutNode = {
+  id: string;
+  kind: string;
+  position: { x: number; y: number };
+  cfg: Record<string, unknown>;
+};
+export type ViewLayoutEdge = {
+  id: string;
+  source: string;
+  target: string;
+  source_handle?: string | null;
+  target_handle?: string | null;
+};
+export type ViewLayout = { nodes: ViewLayoutNode[]; edges: ViewLayoutEdge[] };
+
 // A saved view as an editable node (0.5.0 step 3, #80). Frontmatter-only —
 // the "body" is the ViewSpec, edited by the view designer (ViewBodyView), not
 // a prose/code body. Mirrors backend ViewNode (models_views.py). Carries the
@@ -309,6 +329,8 @@ export type ViewNode = {
   entry_type: string; // "view:view"
   spec: ViewSpec;
   presentation: ViewPresentation;
+  // Designer canvas layout (positions + wiring); absent for designer-less views.
+  layout?: ViewLayout | null;
   // EditableDocument compatibility — a view carries no prose body or fields.
   body?: string;
   metadata?: EntryMetadata;
@@ -334,6 +356,7 @@ export type CreateViewRequest = {
   entry_type?: string;
   spec: ViewSpec;
   presentation?: ViewPresentation;
+  layout?: ViewLayout | null;
 };
 
 export type SaveViewRequest = {
@@ -342,6 +365,7 @@ export type SaveViewRequest = {
   entry_type?: string;
   spec: ViewSpec;
   presentation?: ViewPresentation;
+  layout?: ViewLayout | null;
 };
 
 // A saved-view reference used as a picker source (carries the view's own kind).

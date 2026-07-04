@@ -296,6 +296,37 @@ class NodePickerConfig(BaseModel):
 ViewPresentation = Literal["tree", "grouped", "flat"]
 
 
+class ViewLayoutNode(BaseModel):
+    """A designer node's visual state: its kind, canvas position, and config.
+    Persisted so reopening restores the exact graph the author arranged rather
+    than re-deriving a fresh auto-layout from the semantic `expr`. `cfg` is the
+    node's ViewNodeData (kept loose — non-semantic designer state)."""
+
+    id: str
+    kind: str
+    position: dict[str, float] = Field(default_factory=dict)
+    cfg: dict[str, Any] = Field(default_factory=dict)
+
+
+class ViewLayoutEdge(BaseModel):
+    id: str
+    source: str
+    target: str
+    source_handle: str | None = None
+    target_handle: str | None = None
+
+
+class ViewLayout(BaseModel):
+    """The view designer's visual graph (nodes + edges). Non-semantic
+    presentation state parallel to `presentation`; the evaluator ignores it and
+    it lives off `ViewSpec` (the portable semantic core) on purpose. Absent for
+    views authored without the designer — the frontend falls back to laying the
+    `expr` out automatically."""
+
+    nodes: list[ViewLayoutNode] = Field(default_factory=list)
+    edges: list[ViewLayoutEdge] = Field(default_factory=list)
+
+
 class ViewNodeSummary(BaseModel):
     id: str
     title: str
@@ -315,6 +346,9 @@ class ViewNode(BaseModel):
     entry_type: str = "view:view"
     spec: ViewSpec
     presentation: ViewPresentation = "flat"
+    # Designer canvas layout (positions + wiring). None for views never opened
+    # in / saved from the designer — the frontend auto-lays-out the expr then.
+    layout: ViewLayout | None = None
     source_layer_id: str = ""
     source_layer_label: str = ""
 
@@ -328,6 +362,7 @@ class CreateViewRequest(BaseModel):
     entry_type: str = "view:view"
     spec: ViewSpec
     presentation: ViewPresentation = "flat"
+    layout: ViewLayout | None = None
 
 
 class SaveViewRequest(BaseModel):
@@ -336,3 +371,4 @@ class SaveViewRequest(BaseModel):
     entry_type: str = "view:view"
     spec: ViewSpec
     presentation: ViewPresentation = "flat"
+    layout: ViewLayout | None = None

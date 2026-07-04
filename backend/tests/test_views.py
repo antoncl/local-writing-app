@@ -62,6 +62,42 @@ class ViewCrudTests(unittest.TestCase):
         self.assertEqual(got.status_code, 200, got.text)
         self.assertEqual(got.json()["spec"], created["spec"])
 
+    def test_designer_layout_persists_and_roundtrips(self) -> None:
+        # A view created without the designer has no layout yet.
+        created = self._create("Tagged", {"kind": "lore", "expr": {"tagged": "gotham"}})
+        self.assertIsNone(created.get("layout"))
+
+        layout = {
+            "nodes": [
+                {"id": "output", "kind": "output", "position": {"x": 300.0, "y": 40.0}, "cfg": {}},
+                {"id": "n1", "kind": "tagged", "position": {"x": 40.0, "y": 120.0}, "cfg": {"tagged": "gotham"}},
+            ],
+            "edges": [
+                {"id": "e1", "source": "n1", "target": "output", "source_handle": "out", "target_handle": "in"},
+            ],
+        }
+        saved = self.client.put(
+            f"/api/views/{created['id']}",
+            json={
+                "title": "Tagged",
+                "base_revision": created["revision"],
+                "spec": {"kind": "lore", "expr": {"tagged": "gotham"}},
+                "presentation": "flat",
+                "layout": layout,
+            },
+        )
+        self.assertEqual(saved.status_code, 200, saved.text)
+
+        got = self.client.get(f"/api/views/{created['id']}").json()
+        leaf = got["layout"]["nodes"][1]
+        self.assertEqual(leaf["kind"], "tagged")  # not collapsed to a "type" node
+        self.assertEqual(leaf["position"], {"x": 40.0, "y": 120.0})  # exact positions kept
+        self.assertEqual(leaf["cfg"], {"tagged": "gotham"})
+        self.assertEqual(got["layout"]["edges"][0]["target_handle"], "in")
+        # Persisted into the view file's front matter.
+        text = next((self.root / "views").glob("*.md")).read_text(encoding="utf-8")
+        self.assertIn("layout:", text)
+
     def test_stored_body_less_under_views_folder(self) -> None:
         created = self._create("Cast", {"kind": "lore", "expr": {"type": "lore:character"}})
         files = list((self.root / "views").glob("*.md"))

@@ -19,6 +19,7 @@ from app.models_views import (
     CreateViewRequest,
     SaveViewRequest,
     ViewExpr,
+    ViewLayout,
     ViewNode,
     ViewNodeList,
     ViewNodeSummary,
@@ -67,6 +68,7 @@ class ViewsMixin:
             request.entry_type,
             request.spec,
             request.presentation,
+            request.layout,
         )
         return self.read_view(view_id)
 
@@ -88,6 +90,7 @@ class ViewsMixin:
             entry_type=self._view_entry_type(front_matter),
             spec=spec,
             presentation=self._view_presentation(front_matter),
+            layout=self._parse_view_layout(front_matter.get("layout")),
             source_layer_id=index_entry.source_layer_id if index_entry else "",
             source_layer_label=index_entry.source_layer_label if index_entry else "",
         )
@@ -108,6 +111,7 @@ class ViewsMixin:
             request.entry_type,
             request.spec,
             request.presentation,
+            request.layout,
         )
         self._maybe_rename_node_file(path, request.title)
         return self.read_view(node_id)
@@ -128,7 +132,18 @@ class ViewsMixin:
         entry_type: str,
         spec: ViewSpec,
         presentation: ViewPresentation,
+        layout: ViewLayout | None = None,
     ) -> None:
+        # exclude_none keeps the on-disk spec compact — a leaf serializes as
+        # `{type: lore:character}`, not every unset ViewExpr slot.
+        extra: dict[str, Any] = {
+            "spec": spec.model_dump(exclude_none=True),
+            "presentation": presentation,
+        }
+        # Only write layout when the designer supplied one — keeps designer-less
+        # / programmatic views clean (they fall back to auto-layout on open).
+        if layout is not None:
+            extra["layout"] = layout.model_dump(exclude_none=True)
         self._write_node_entry_file(
             path,
             node_id,
@@ -136,12 +151,7 @@ class ViewsMixin:
             entry_type,
             {},
             "",  # body-less: the spec lives in front matter, not a prose body
-            # exclude_none keeps the on-disk spec compact — a leaf serializes as
-            # `{type: lore:character}`, not every unset ViewExpr slot.
-            extra={
-                "spec": spec.model_dump(exclude_none=True),
-                "presentation": presentation,
-            },
+            extra=extra,
             omit_empty_metadata=True,
         )
 
@@ -163,6 +173,19 @@ class ViewsMixin:
             return None
         try:
             return ViewSpec.model_validate(raw)
+        except ValidationError:
+            return None
+
+    @staticmethod
+    def _parse_view_layout(raw: Any) -> ViewLayout | None:
+        """Parse the optional designer layout blob; a malformed one is dropped
+        (the designer just auto-lays-out the expr) rather than failing the read."""
+        from pydantic import ValidationError
+
+        if not isinstance(raw, dict):
+            return None
+        try:
+            return ViewLayout.model_validate(raw)
         except ValidationError:
             return None
 

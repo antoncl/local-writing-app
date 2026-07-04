@@ -39,6 +39,7 @@
     MetadataFieldDefinition,
     PromptEntrySummary,
     StructureDocument,
+    ViewLayout,
     ViewNode,
     ViewSort,
     ViewSpec,
@@ -106,18 +107,14 @@
     kind = node.spec?.kind ?? "lore";
     sort = node.spec?.sort ?? { by: "manual" };
     presentation = node.presentation ?? "flat";
-    const g = exprToGraph(node.spec?.expr);
-    flowNodes = g.nodes.map((n) => toFlowNode(n.id, n.kind, n.data, n.position));
+    // Prefer the persisted designer layout (exact positions the author left);
+    // fall back to laying out the semantic expr for designer-less / legacy views.
     // Handle ids are explicit so Svelte Flow renders these edges once the new
     // nodes' handle bounds are measured (its layout pass is a derived that
     // recomputes after measurement — no manual defer needed).
-    flowEdges = g.edges.map((e) => ({
-      id: e.id,
-      source: e.source,
-      target: e.target,
-      sourceHandle: e.sourceHandle ?? undefined,
-      targetHandle: e.targetHandle ?? undefined,
-    }));
+    const graph = hydrateGraph(node);
+    flowNodes = graph.nodes;
+    flowEdges = graph.edges;
     void loadSavedViews(kind, id);
     // Let the derived spec settle before re-enabling persistence.
     queueMicrotask(() => (hydrating = false));
@@ -125,6 +122,60 @@
 
   function toFlowNode(id: string, k: GraphNodeKind, cfg: ViewNodeData, position: { x: number; y: number }): Node<FlowData> {
     return { id, type: "viewNode", position, data: { kind: k, cfg }, deletable: k !== "output" };
+  }
+
+  // Build the canvas graph for a view: from its persisted designer `layout`
+  // (author's exact positions + wiring) when present, else auto-laid-out from
+  // the semantic `expr` (designer-less / legacy / backend-authored views).
+  function hydrateGraph(node: ViewNode): { nodes: Node<FlowData>[]; edges: Edge[] } {
+    const layout = node.layout;
+    if (layout && layout.nodes.length > 0) {
+      return {
+        nodes: layout.nodes.map((n) =>
+          toFlowNode(n.id, n.kind as GraphNodeKind, (n.cfg ?? {}) as ViewNodeData, n.position),
+        ),
+        edges: layout.edges.map((e) => ({
+          id: e.id,
+          source: e.source,
+          target: e.target,
+          sourceHandle: e.source_handle ?? undefined,
+          targetHandle: e.target_handle ?? undefined,
+        })),
+      };
+    }
+    const g = exprToGraph(node.spec?.expr);
+    return {
+      nodes: g.nodes.map((n) => toFlowNode(n.id, n.kind, n.data, n.position)),
+      edges: g.edges.map((e) => ({
+        id: e.id,
+        source: e.source,
+        target: e.target,
+        sourceHandle: e.sourceHandle ?? undefined,
+        targetHandle: e.targetHandle ?? undefined,
+      })),
+    };
+  }
+
+  // Serialize the live canvas (positions + wiring) for persistence. Parallel to
+  // toGraph()/graphToExpr, but lossless — keeps every node incl. unwired ones,
+  // their positions, and full edge handles, none of which survive the semantic
+  // expr round-trip.
+  function toLayout(): ViewLayout {
+    return {
+      nodes: flowNodes.map((n) => ({
+        id: n.id,
+        kind: n.data.kind,
+        position: n.position,
+        cfg: (n.data.cfg ?? {}) as Record<string, unknown>,
+      })),
+      edges: flowEdges.map((e) => ({
+        id: e.id,
+        source: e.source,
+        target: e.target,
+        source_handle: e.sourceHandle ?? null,
+        target_handle: e.targetHandle ?? null,
+      })),
+    };
   }
 
   async function loadSavedViews(forKind: string, selfId: string | null): Promise<void> {
@@ -288,7 +339,9 @@
   let saveTimer: ReturnType<typeof setTimeout> | null = null;
   let lastSaved = "";
   $effect(() => {
-    const snapshot = JSON.stringify({ title, spec, presentation });
+    // Layout is in the snapshot so a position-only drag (which leaves `spec`
+    // unchanged) still triggers a persist.
+    const snapshot = JSON.stringify({ title, spec, presentation, layout: toLayout() });
     if (hydrating || !loadedViewId) {
       lastSaved = snapshot;
       return;
@@ -308,6 +361,7 @@
         base_revision: revision,
         spec,
         presentation,
+        layout: toLayout(),
       });
       revision = saved.revision;
       lastSaved = snapshot;

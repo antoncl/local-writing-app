@@ -398,6 +398,8 @@ Each step lands green (ruff + pytest + svelte-check + browser-verify) before the
 - Type-aware Jinja helpers on a shared ancestry primitive (§8.1).
 - **The approachable flow: injectors, filters, named-handle grouping, denormalized output
   (§12; ADR-0027 — amends set-algebra/annotate/sort ADRs, #91).**
+- **Nest: relational trees denormalized from lore links; the designer's first legal (classified)
+  cycle (§13; ADR-0028 — 0.5.4, amends evaluator/output/palette ADRs).**
 
 ## 12. The approachable flow (#91 — paradigm overhaul)
 
@@ -445,3 +447,58 @@ grammar or stored spec caps depth; only the renderer does. **Rendering:** 1-hand
 *inside* a Filter (derived from the field); Type is offered only for kinds with >1 entry_type;
 "Views over" hides when the anchor kind comes from pane context; group order is handle order.
 See ADR-0027 for the full decision, rejected alternative, and consequences.
+
+## 13. Relational trees — the Nest node (0.5.4; ADR-0028)
+
+§12's named handles + sub-flows give grouping and *shallow* nesting from **wiring**. Writers,
+though, already model deep hierarchy in their **data**: a Country card's `continent` field
+points at a Continent; a City is tagged with its Country; a person references their parent.
+**Nest** (grammar keyword `nest`) turns those links into a tree — a 1-to-many join, denormalized
+into rows. It is the authoring surface for depth > 1
+(`decisions_view_trees_are_path_denormalization.md`), and unlike a Filter it is **not sugar**:
+set-membership leaves cannot express relationships, so it is a first-class operator in the
+ViewSpec.
+
+**Two handles, real parents.** Nest's two input handles — **Parents** (upper) and **Children**
+(lower), both on the node's left edge like the Difference node's keep/remove — say what to wire:
+parent cards into one, child cards into the other. For each matching child it emits a row whose
+path gains a segment for its parent — with the parent's real `nodeId`, so it renders
+as a genuine collapsible `NodeRow`, not a synthetic bucket. A child matching two parents appears
+under both (`(node, path)` dedupe); a childless parent stays; an orphan child drops with a
+surfaced count.
+
+**One match rule, three link styles.** The rule has two axes — **direction** (`child→parent`
+if the child holds the reference, `parent→children` if the parent does) and **match-by**
+(`ref` for an `entity_ref`/id field, `title` for child-tag-equals-parent-title). One node,
+one `{ field, direction, by }` picker — not three nodes. (`context_pick` is excluded: it is
+per-prompt runtime, not authored structure.)
+
+**Recursion is a self-loop.** Wire the node's output back into its own **Parents** handle and it
+iterates — **frontier BFS**: each pass takes the most recent additions as parents, attaches
+their children a level deeper, and stops when a pass adds nothing (**NOP**). One node traverses
+an unknown-depth homogeneous hierarchy (family tree, nested Locations); chained distinct nodes
+handle heterogeneous levels (Continent→Country→City). Seed **Parents** with the roots
+(`field: unset` on the ref) and **Children** with the universe; seeding Parents with the
+universe yields a thicket (a subtree per node), so the UI guides the Parents seed to roots.
+
+**Three guards.** *(1) Flow-graph cycles* — the designer's old blanket "no cycles" block
+predated this node and only kept the graph a compilable DAG; it is **downgraded from block to
+classifier**. Detection stays (general, any length — a recursion loop is a back-edge, not
+necessarily a self-edge): a cycle **through the node's Parents handle is a legal recursion**; a
+cycle with **no Nest on it → warn** (otherwise the compiler silently drops the back-edge).
+*(2) Data cycles* — the evaluator keeps a **mandatory ancestor-path guard**: a child already
+among its own ancestors on a path is dropped and counted. Load-bearing, because lore links are
+freeform (no UI acyclicity, unlike draft and research), and it is what **guarantees
+termination**: no path repeats a node, so length ≤ |nodes|, so a NOP always arrives even on a
+mistyped family tree. *(3) Runaway fan-out* — termination isn't tractability: the ancestor
+guard bounds path *length*, not path *count*, which goes combinatorial in a dense match
+(the universe→universe cross-product). So a **materialized-row ceiling at `K · N`** (N =
+universe size, K a small constant) hard-stops, truncates, and warns — never tripping on a real
+tree (strict tree = exactly N rows) but catching the cross-product blow-up within a pass or two.
+The early tell is a BFS frontier that *grows* instead of shrinking.
+
+**0.5.4 cut line.** Recursion detection is general, but only the **direct self-loop** (loop
+body = the node alone) is *supported*; a multi-node loop (`nest → Filter → nest`, transforming
+the frontier between passes) is warned and deferred to a later increment. Child-eligibility
+filtering meanwhile goes on the **children** input, outside the loop. See ADR-0028 for the
+grammar construct, evaluation, and consequences.

@@ -554,7 +554,7 @@
       </button>
 
     {#if open}
-      <div class="ctx-menu" role="menu" style={menuStyle} use:portalToBody>
+      <div class="ctx-menu" class:compact role="menu" style={menuStyle} use:portalToBody>
         <label class="ctx-search-wrap" class:has-query={search.length > 0}>
           <svg class="ctx-search-icon" width="14" height="14" viewBox="0 0 14 14" fill="none" aria-hidden="true">
             <circle cx="6" cy="6" r="4.2" stroke="currentColor" stroke-width="1.6" />
@@ -645,7 +645,12 @@
 </div>
 
 <style>
-  .ctx-picker {
+  /* The menu portals to <body> (to escape a transformed Svelte Flow ancestor
+     that would trap its `position: fixed`), so it lands OUTSIDE .ctx-picker and
+     must carry its own --ctx-* tokens — otherwise every var() falls back to
+     nothing (transparent surface, no borders, unstyled text). */
+  .ctx-picker,
+  .ctx-menu {
     /* Light theme tokens — mirrored to the config editor's set so the
        two surfaces share vocabulary. Adds a kind-color quartet for chip
        and monogram coloring. Dark set lives under [data-theme=dark]. */
@@ -676,7 +681,8 @@
     color: var(--ctx-text);
   }
 
-  :global([data-theme="dark"]) .ctx-picker {
+  :global([data-theme="dark"]) .ctx-picker,
+  :global([data-theme="dark"]) .ctx-menu {
     --ctx-surface: #18211d;
     --ctx-panel: #141c18;
     --ctx-panel-2: #1e2823;
@@ -902,7 +908,9 @@
     gap: 7px;
   }
 
-  .compact .ctx-menu {
+  /* `compact` is set on the menu itself (not just the picker root) so it still
+     applies once the menu portals to <body>. */
+  .ctx-menu.compact {
     width: 280px;
     padding: 8px;
     gap: 6px;
@@ -1097,7 +1105,7 @@
     line-height: 1;
   }
 
-  .compact .ctx-item-mono {
+  .ctx-menu.compact .ctx-item-mono {
     width: 19px;
     height: 19px;
     font-size: 10.5px;

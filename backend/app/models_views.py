@@ -66,12 +66,59 @@ class DifferenceOp(BaseModel):
     remove: ViewExpr
 
 
+NestDirection = Literal["child_to_parent", "parent_to_children"]
+NestMatchBy = Literal["ref", "title"]
+
+
+class NestMatch(BaseModel):
+    """The parameterized link rule a `nest` denormalizes (ADR-0028 §B). The three
+    ways a writer expresses a parent/child link collapse to one rule with two
+    axes: `direction` — which card holds the link (`child_to_parent`: the child
+    holds an `entity_ref` to its parent; `parent_to_children`: the parent holds
+    the refs) — and `by` — `ref` (an `entity_ref`/id field) or `title` (the
+    child's tag equals the parent's title). `field` names the metadata field
+    carrying the link. `context_pick` fields are deliberately NOT joinable
+    (per-prompt runtime, not authored structure, ADR-0028 § Consequences); that
+    exclusion is enforced at authoring time by the match-rule picker (field-type
+    info isn't reachable here — the same reason `FieldPredicate.value` stays
+    loose)."""
+
+    field: str = Field(min_length=1)
+    direction: NestDirection
+    by: NestMatchBy = "ref"
+
+
+class NestOp(BaseModel):
+    """The `nest` operator: denormalize a user-authored tree out of the links
+    writers already put in their lore (ADR-0028). Two role-carrying inputs —
+    `parents` (seed the roots) and `children` (the candidate set) — plus a match
+    rule; each child that matches a parent emits a `(node, path)` row whose path
+    gains a real-node parent segment. `recursive` marks the canvas self-loop
+    (output → own parents handle) that iterates a frontier BFS to traverse an
+    unknown-depth homogeneous hierarchy (a family tree, nested Locations). A
+    FIRST-CLASS relational operator, not sugar: it produces paths from data
+    relationships that set-membership leaves cannot express, so — unlike the
+    ADR-0027 Filters — it does NOT lower to set algebra (§F).
+
+    `parents`/`children` are optional: an unconnected handle means the whole
+    universe (the evaluator's `null expr = universe` convention). Seed `parents`
+    with the roots (a `field: {op: unset}` leaf) for a clean tree; leaving it the
+    universe yields a *thicket* (a subtree rooted at every node, ADR-0028 §C).
+    `match` is required — without a rule there is no join."""
+
+    parents: ViewExpr | None = None
+    children: ViewExpr | None = None
+    match: NestMatch
+    recursive: bool = False
+
+
 # The mutually-exclusive "primary" slots on a ViewExpr node: exactly one is set.
 _VIEW_EXPR_PRIMARY_SLOTS: tuple[str, ...] = (
     "union",
     "intersect",
     "difference",
     "complement",
+    "nest",
     "annotate",
     "type",
     "descendants_of",
@@ -84,16 +131,20 @@ _VIEW_EXPR_PRIMARY_SLOTS: tuple[str, ...] = (
 
 class ViewExpr(BaseModel):
     """One node in a view's set-algebra tree. Exactly one primary slot is set: a
-    combinator (union / intersect / difference / complement), an `annotate`
-    pass-through (paired with `of`), or a leaf (type / descendants_of / tagged /
-    field / hand_picked / view_ref). Validated structurally — there is no
-    evaluator in 0.5.0 step 1."""
+    combinator (union / intersect / difference / complement), the `nest`
+    relational operator (ADR-0028; produces denormalized parent/child rows, not
+    just a set), an `annotate` pass-through (paired with `of`), or a leaf (type /
+    descendants_of / tagged / field / hand_picked / view_ref). Validated
+    structurally — the backend has no evaluator (eval is frontend-side)."""
 
     # Combinators
     union: list[ViewExpr] | None = None
     intersect: list[ViewExpr] | None = None
     difference: DifferenceOp | None = None
     complement: ViewExpr | None = None
+    # Nest: relational join → denormalized parent/child rows (ADR-0028). Carries
+    # its own inputs (parents/children), like `difference` — not via `of`.
+    nest: NestOp | None = None
     # Annotate pass-through: the payload plus the input set it forwards unchanged.
     annotate: AnnotatePayload | None = None
     of: ViewExpr | None = None
@@ -186,8 +237,9 @@ class ViewRef(BaseModel):
     view: str = Field(min_length=1)
 
 
-# Resolve the mutually-recursive forward refs (ViewExpr ↔ DifferenceOp, self).
+# Resolve the mutually-recursive forward refs (ViewExpr ↔ DifferenceOp/NestOp, self).
 DifferenceOp.model_rebuild()
+NestOp.model_rebuild()
 ViewExpr.model_rebuild()
 
 

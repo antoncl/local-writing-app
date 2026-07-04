@@ -26,7 +26,7 @@
 // (nothing wired). The sentinels let filters-off-`All` and set ops fold to the
 // minimal shipped `expr` without a universe leaf in the grammar.
 
-import type { ViewExpr, ViewFieldPredicate, ViewGroupSpec, ViewSort, ViewSpec } from "@/lib/types";
+import type { ViewExpr, ViewFieldPredicate, ViewGroupSpec, ViewNestMatch, ViewNestOp, ViewSort, ViewSpec } from "@/lib/types";
 
 export type LeafKind = "type" | "descendants_of" | "tagged" | "field" | "hand_picked" | "view_ref";
 export type CombinatorKind = "union" | "intersect" | "difference" | "complement";
@@ -34,14 +34,22 @@ export type CombinatorKind = "union" | "intersect" | "difference" | "complement"
 // ones; hand_picked / view_ref stay injector-only).
 export type PredicateKind = "type" | "descendants_of" | "tagged" | "field";
 // "output" is the single sink (the View); its named handles are the groups.
+// "nest" is the relational operator (ADR-0028): two input handles
+// (parents/children), one output; a self-loop into `parents` = recursion.
 export type GraphNodeKind =
   | "output"
   | "all"
   | "filter"
   | "sorter"
   | "highlight"
+  | "nest"
   | CombinatorKind
   | LeafKind;
+
+// The two named input handles on a Nest node (ADR-0028 §A) — mirrors the
+// Difference node's keep/remove roles.
+export const NEST_PARENTS_HANDLE = "parents";
+export const NEST_CHILDREN_HANDLE = "children";
 
 // A named input handle on the View (output) node = one group. `name` is the
 // group label; handle order (the array order) = group order. `color` tints the
@@ -65,6 +73,9 @@ export type ViewNodeData = {
   filter_mode?: "keep" | "drop";
   // sorter
   sort?: ViewSort;
+  // nest (relational op) — the match rule; recursion is topology (a self-loop
+  // into the `parents` handle), lowered to `recursive` at serialize time.
+  match?: ViewNestMatch;
   // highlight (color-only annotate)
   color?: string;
   // output (View) — the named handles / groups
@@ -109,7 +120,7 @@ export function isInjectorKind(kind: GraphNodeKind): boolean {
 
 // How many upstream inputs a node kind accepts. Injectors are sources (none);
 // the View (output) is n-ary across its handles.
-export function inputArity(kind: GraphNodeKind): "none" | "one" | "many" | "keep_remove" {
+export function inputArity(kind: GraphNodeKind): "none" | "one" | "many" | "keep_remove" | "parents_children" {
   switch (kind) {
     case "union":
     case "intersect":
@@ -117,6 +128,8 @@ export function inputArity(kind: GraphNodeKind): "none" | "one" | "many" | "keep
       return "many";
     case "difference":
       return "keep_remove";
+    case "nest":
+      return "parents_children";
     case "complement":
     case "filter":
     case "sorter":
@@ -144,6 +157,43 @@ export function wouldCycle(edges: ViewGraphEdge[], source: string, target: strin
     for (const e of edges) if (e.source === cur) stack.push(e.target);
   }
   return false;
+}
+
+// How a would-be edge relates to the graph's acyclicity (ADR-0028 §D). The old
+// connect-time hard *block* on any cycle is retired and repurposed as a
+// classifier: a cycle is only meaningful when it feeds a Nest's `parents` handle
+// (recursion). Verdicts:
+//  - "ok" — no cycle; wire it.
+//  - "nest-recursion" — a direct self-loop into a Nest's `parents` handle: the
+//    supported v1 recursion. Allow.
+//  - "nest-recursion-unsupported" — a *multi-node* cycle feeding a Nest's
+//    `parents` (a frontier transform, ADR-0028 §E). Detected, deferred to v2 →
+//    warn, don't wire.
+//  - "meaningless-cycle" — a cycle with no Nest on it: the evaluator's `seen`
+//    guard would silently drop the back-edge → a wrong result. Warn, don't wire.
+export type ConnectionVerdict = "ok" | "nest-recursion" | "nest-recursion-unsupported" | "meaningless-cycle";
+
+export function classifyConnection(
+  byId: Map<string, ViewGraphNode>,
+  edges: ViewGraphEdge[],
+  source: string,
+  target: string,
+  targetHandle: string | null | undefined,
+): ConnectionVerdict {
+  if (!wouldCycle(edges, source, target)) return "ok";
+  // The distinguishing signal (ADR-0028 §D): does the back-edge feed a Nest's
+  // `parents` handle? If so it is a recursion (self-loop = supported; longer =
+  // v2). Otherwise the cycle is meaningless.
+  const feedsNestParents = byId.get(target)?.kind === "nest" && targetHandle === NEST_PARENTS_HANDLE;
+  if (feedsNestParents) return source === target ? "nest-recursion" : "nest-recursion-unsupported";
+  return "meaningless-cycle";
+}
+
+// Whether a verdict permits the wiring (only clean edges and the supported
+// direct self-loop recursion). The component blocks the rest and surfaces the
+// verdict as a warning (stage 5 / #110).
+export function connectionAllowed(verdict: ConnectionVerdict): boolean {
+  return verdict === "ok" || verdict === "nest-recursion";
 }
 
 // --- the three-valued lowering algebra -----------------------------------
@@ -200,6 +250,36 @@ function differenceBuilt(keep: Built, remove: Built): Built {
   return built({ difference: { keep: keep.expr, remove: remove.expr } });
 }
 
+// Lower a Nest node (ADR-0028). Reads its two named input handles — `parents`
+// (upper) and `children` (lower) — and its match rule. Recursion is *topology*:
+// a self-loop edge (source === this node) into the `parents` handle lowers to
+// `recursive: true`; the self-edge is excluded from the parents input so it does
+// not recurse forever. An unwired handle materializes to null = the whole
+// universe (the evaluator's convention; an unseeded `parents` yields a thicket).
+// A Nest with no match rule can't join → EMPTY (nothing to show mid-compose).
+function nestBuilt(graph: ViewGraph, byId: Map<string, ViewGraphNode>, node: ViewGraphNode, seen: Set<string>): Built {
+  const match = node.data.match;
+  if (!match?.field || !match.direction) return EMPTY;
+
+  const ups = upstreamOf(graph, node.id);
+  const parentEdges = ups.filter((e) => e.targetHandle === NEST_PARENTS_HANDLE);
+  const childEdges = ups.filter((e) => e.targetHandle === NEST_CHILDREN_HANDLE);
+  const recursive = parentEdges.some((e) => e.source === node.id); // self-loop
+
+  const lowerEdges = (edges: ViewGraphEdge[]): Built =>
+    unionBuilt(edges.filter((e) => e.source !== node.id).map((e) => buildNode(graph, byId, e.source, seen)));
+  const parents = lowerEdges(parentEdges);
+  const children = lowerEdges(childEdges);
+
+  const nest: ViewNestOp = { match: { field: match.field, direction: match.direction, by: match.by ?? "ref" } };
+  const p = materialize(parents);
+  if (p) nest.parents = p;
+  const c = materialize(children);
+  if (c) nest.children = c;
+  if (recursive) nest.recursive = true;
+  return built({ nest });
+}
+
 // --- graph → spec / expr -------------------------------------------------
 
 function upstreamOf(graph: ViewGraph, nodeId: string): ViewGraphEdge[] {
@@ -246,6 +326,8 @@ function buildNode(
       }
       case "complement":
         return complementBuilt(soleChild(graph, byId, nodeId, seen));
+      case "nest":
+        return nestBuilt(graph, byId, node, seen);
       case "filter":
         return filterBuilt(soleChild(graph, byId, nodeId, seen), node);
       case "sorter":
@@ -457,6 +539,16 @@ export function specToGraph(spec: ViewSpec | null | undefined): ViewGraph {
       const id = addNode("complement", depth, {});
       const innerId = walk(e.complement, depth + 1);
       if (innerId) link(innerId, id);
+      return id;
+    }
+    if (e.nest) {
+      const id = addNode("nest", depth, { match: e.nest.match });
+      const parentsId = e.nest.parents ? walk(e.nest.parents, depth + 1) : null;
+      const childrenId = e.nest.children ? walk(e.nest.children, depth + 1) : null;
+      if (parentsId) link(parentsId, id, NEST_PARENTS_HANDLE);
+      if (childrenId) link(childrenId, id, NEST_CHILDREN_HANDLE);
+      // Recursion is the canvas self-loop: output → own `parents` handle.
+      if (e.nest.recursive) link(id, id, NEST_PARENTS_HANDLE);
       return id;
     }
     if (e.annotate && e.of) {

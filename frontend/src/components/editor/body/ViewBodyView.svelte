@@ -17,20 +17,22 @@
   import { themePreference } from "@/lib/utils/theme";
   import ViewFlowNode from "./view/ViewFlowNode.svelte";
   import FitView from "./view/FitView.svelte";
-  import GroupCaret from "@/components/widgets/GroupCaret.svelte";
+  import GroupTree from "@/components/widgets/GroupTree.svelte";
   import { setDesignerContext, type DesignerContext } from "./view/designerContext";
   import { api } from "@/lib/api";
   import { metadataSchemaStore } from "@/lib/stores/schema";
-  import { evaluateView, type EvalNode } from "@/lib/views/evaluateView";
+  import { evaluateView, nestWarnings, type EvalNode } from "@/lib/views/evaluateView";
   import { structureToEvalNodes } from "@/lib/views/structureNodes";
   import {
     specToGraph,
     graphToSpec,
     inputArity,
-    wouldCycle,
+    classifyConnection,
+    connectionAllowed,
     OUTPUT_NODE_ID,
     type GraphNodeKind,
     type ViewGraph,
+    type ViewGraphNode,
     type ViewNodeData,
   } from "@/lib/views/viewGraph";
   import type {
@@ -221,6 +223,9 @@
       resolveView: (viewId: string) => viewSpecs.get(viewId) ?? null,
     }),
   );
+  // Nest diagnostics surfaced as warnings so a truncated/lossy tree is never
+  // silent (ADR-0028 §D, #110).
+  let warnings = $derived(nestWarnings(preview.diagnostics));
 
   // ---- schema-derived leaf-config options for the current kind ----
   let entryTypeOptions = $derived(
@@ -228,6 +233,15 @@
       .filter(([, def]) => def.kind === kind && !def.abstract)
       .map(([fqn, def]) => ({ fqn, name: def.name })),
   );
+  // Every node carries a top-level `title` (not a schema metadata field), so the
+  // schema-driven field list never lists it — yet filtering / sorting by title
+  // is a common need. Surface it as a synthetic, always-available field pinned
+  // first; the evaluator reads `node.title` for the `title` key (see fieldValue).
+  const TITLE_FIELD: { key: string; name: string; def: MetadataFieldDefinition } = {
+    key: "title",
+    name: "Title",
+    def: { name: "Title", type: "text", options: [] },
+  };
   let fieldOptions = $derived(buildFieldOptions());
   function buildFieldOptions(): { key: string; name: string; def: MetadataFieldDefinition }[] {
     const keys = new Set<string>();
@@ -240,7 +254,8 @@
       const def = schema?.fields?.[k];
       if (def) out.push({ key: k, name: def.name ?? k, def });
     }
-    return out.sort((a, b) => a.name.localeCompare(b.name));
+    out.sort((a, b) => a.name.localeCompare(b.name));
+    return [TITLE_FIELD, ...out];
   }
   // Tags present in this kind's universe (contextual — avoids a separate store).
   let tagOptions = $derived(collectTags(universe));
@@ -265,7 +280,7 @@
       kind,
       entryTypes: entryTypeOptions,
       fields: fieldOptions,
-      fieldByKey: (key: string) => schema?.fields?.[key] ?? null,
+      fieldByKey: (key: string) => (key === TITLE_FIELD.key ? TITLE_FIELD.def : schema?.fields?.[key] ?? null),
       tags: tagOptions,
       savedViews,
       loreEntries,
@@ -310,6 +325,7 @@
     { kind: "intersect", label: "Intersect" },
     { kind: "difference", label: "Difference" },
     { kind: "complement", label: "Complement" },
+    { kind: "nest", label: "Nest" },
   ];
   // Arrange — per-segment Sort + the color Highlight overlay.
   const ARRANGE: { kind: GraphNodeKind; label: string }[] = [
@@ -320,6 +336,7 @@
   function defaultCfg(k: GraphNodeKind): ViewNodeData {
     if (k === "filter") return { filter_mode: "keep", filter_kind: hasTypeChoice ? "type" : "tagged" };
     if (k === "sorter") return { sort: { by: "title", dir: "asc" } };
+    if (k === "nest") return { match: { field: "", direction: "child_to_parent", by: "ref" } };
     return {};
   }
   function addNode(k: GraphNodeKind): void {
@@ -329,12 +346,27 @@
   }
 
   // ---- connection wiring ----
-  function isValidConnection(conn: { source?: string | null; target?: string | null }): boolean {
-    if (!conn.source || !conn.target || conn.source === conn.target) return false;
+  // Cycles are no longer a blanket block (ADR-0028 §D): a self-loop into a
+  // Nest's `parents` handle is legal recursion. Route every would-be edge
+  // through the classifier and permit only clean edges + supported recursion.
+  function isValidConnection(conn: {
+    source?: string | null;
+    target?: string | null;
+    targetHandle?: string | null;
+  }): boolean {
+    if (!conn.source || !conn.target) return false;
     const target = flowNodes.find((n) => n.id === conn.target);
     if (!target || inputArity(target.data.kind) === "none") return false;
-    const edges = flowEdges.map((e) => ({ id: e.id, source: e.source, target: e.target, targetHandle: e.targetHandle ?? null }));
-    return !wouldCycle(edges, conn.source, conn.target);
+    const byId = new Map<string, ViewGraphNode>(
+      flowNodes.map((n) => [n.id, { id: n.id, kind: n.data.kind, position: n.position, data: n.data.cfg ?? {} }]),
+    );
+    const edges = flowEdges.map((e) => ({
+      id: e.id,
+      source: e.source,
+      target: e.target,
+      targetHandle: e.targetHandle ?? null,
+    }));
+    return connectionAllowed(classifyConnection(byId, edges, conn.source, conn.target, conn.targetHandle ?? null));
   }
   // After a connection auto-adds, trim single-input handles to their newest edge
   // (union/intersect keep all). Newest wins so a re-wire replaces cleanly.
@@ -345,9 +377,14 @@
       const e = flowEdges[i];
       const target = flowNodes.find((n) => n.id === e.target);
       // union/intersect and the View (its handles each union) accept many wires;
-      // everything else keeps only its newest edge per target handle.
+      // Nest too — its `parents` handle takes both the roots seed AND the
+      // recursion self-loop, and each handle unions its sources (ADR-0028).
+      // Everything else keeps only its newest edge per target handle.
       const many =
-        target?.data.kind === "union" || target?.data.kind === "intersect" || target?.data.kind === "output";
+        target?.data.kind === "union" ||
+        target?.data.kind === "intersect" ||
+        target?.data.kind === "output" ||
+        target?.data.kind === "nest";
       const key = `${e.target}::${e.targetHandle ?? "in"}`;
       if (!many) {
         if (seen.has(key)) continue;
@@ -405,8 +442,9 @@
     return preview.annotations.get(id)?.color ?? null;
   }
 
-  // Preview group collapse (per group key) — reuse the GroupCaret affordance the
-  // panes use so the designer preview matches (#84 rollup).
+  // Preview group collapse (per group key). The preview renders through the same
+  // GroupTree the panes use, so nested `nest` trees (depth > 1) show correctly
+  // and the preview is WYSIWYG (#84 rollup; ADR-0028).
   let collapsedPreview = $state<Record<string, boolean>>({});
   function togglePreviewGroup(key: string): void {
     collapsedPreview = { ...collapsedPreview, [key]: !collapsedPreview[key] };
@@ -500,30 +538,23 @@
         <span>Preview</span>
         <span class="count">{preview.nodes.length} / {universe.length}</span>
       </header>
+      {#if warnings.length > 0}
+        <ul class="preview-warnings" role="alert">
+          {#each warnings as w (w)}
+            <li>⚠ {w}</li>
+          {/each}
+        </ul>
+      {/if}
+      {#snippet previewLeaf(node: EvalNode, depth: number)}
+        <div class="prow" style={`padding-left:${11 + depth * 12}px;${annColor(node.id) ? `--tint:${annColor(node.id)}` : ""}`}>
+          {node.title}
+        </div>
+      {/snippet}
       <div class="preview-list">
         {#if universe.length === 0}
           <p class="preview-empty">No <code>{kind}</code> nodes in this project to preview.</p>
         {:else if preview.groups}
-          {#each preview.groups as group (group.key)}
-            <div class="pgroup">
-              <button
-                type="button"
-                class="pgroup-head"
-                style={group.color ? `--tint:${group.color}` : ""}
-                aria-expanded={!collapsedPreview[group.key]}
-                onclick={() => togglePreviewGroup(group.key)}
-              >
-                <GroupCaret collapsed={collapsedPreview[group.key]} />
-                <span class="pgroup-label">{group.label ?? "Everything else"}</span>
-                <span class="count">{group.nodes.length}</span>
-              </button>
-              {#if !collapsedPreview[group.key]}
-                {#each group.nodes as n (n.id)}
-                  <div class="prow" style={annColor(n.id) ? `--tint:${annColor(n.id)}` : ""}>{n.title}</div>
-                {/each}
-              {/if}
-            </div>
-          {/each}
+          <GroupTree groups={preview.groups} collapsed={collapsedPreview} onToggle={togglePreviewGroup} leaf={previewLeaf} />
         {:else}
           {#each preview.nodes as n (n.id)}
             <div class="prow" style={annColor(n.id) ? `--tint:${annColor(n.id)}` : ""}>{n.title}</div>
@@ -662,6 +693,19 @@
     font-variant-numeric: tabular-nums;
     color: var(--text-3, #6b7280);
   }
+  .preview-warnings {
+    margin: 0;
+    padding: 6px 12px;
+    list-style: none;
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+    font-size: 11px;
+    line-height: 1.35;
+    color: var(--warn-text, #92400e);
+    background: var(--warn-soft, #fef3c7);
+    border-bottom: 1px solid var(--border, #e2e5ea);
+  }
   .preview-list {
     flex: 1;
     overflow-y: auto;
@@ -671,34 +715,6 @@
     padding: 12px;
     font-size: 12px;
     color: var(--text-3, #6b7280);
-  }
-  .pgroup {
-    margin-bottom: 8px;
-  }
-  .pgroup-head {
-    display: flex;
-    align-items: center;
-    gap: 4px;
-    width: 100%;
-    padding: 3px 8px;
-    font-size: 11px;
-    font-weight: 600;
-    text-align: left;
-    color: var(--text, #1f2430);
-    border: none;
-    border-left: 3px solid var(--tint, var(--border-strong, #cbd0d8));
-    background: var(--panel, #fff);
-    border-radius: 4px;
-    cursor: pointer;
-  }
-  .pgroup-label {
-    flex: 1;
-    white-space: nowrap;
-    overflow: hidden;
-    text-overflow: ellipsis;
-  }
-  .pgroup-head:hover {
-    background: var(--inset, #f2f4f7);
   }
   .prow {
     padding: 4px 8px 4px 11px;

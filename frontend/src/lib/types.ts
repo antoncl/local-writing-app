@@ -267,13 +267,37 @@ export type ViewFieldPredicate = {
 
 export type ViewAnnotatePayload = { label?: string; color?: string; rank?: number };
 
+// The parameterized link rule a `nest` denormalizes (ADR-0028 §B). `direction`
+// says which card holds the link value; `by` says whether it identifies the
+// other card by `ref` (an entity_ref/id field) or `title` (a tag == title).
+// `field` names the metadata field carrying the link. `context_pick` fields are
+// not offered (per-prompt runtime, not authored structure).
+export type ViewNestMatch = {
+  field: string;
+  direction: "child_to_parent" | "parent_to_children";
+  by: "ref" | "title";
+};
+
+// The `nest` relational operator (ADR-0028): denormalize a user-authored tree
+// from lore links. `parents`/`children` are the two input sets (absent = the
+// whole universe); `match` is the join rule; `recursive` marks the canvas
+// self-loop (frontier BFS over an unknown-depth homogeneous hierarchy).
+export type ViewNestOp = {
+  parents?: ViewExpr | null;
+  children?: ViewExpr | null;
+  match: ViewNestMatch;
+  recursive?: boolean;
+};
+
 // One node in a view's set-algebra tree: exactly one primary slot is set
-// (a combinator, an annotate pass-through paired with `of`, or a leaf).
+// (a combinator, the `nest` relational op, an annotate pass-through paired with
+// `of`, or a leaf).
 export type ViewExpr = {
   union?: ViewExpr[];
   intersect?: ViewExpr[];
   difference?: { keep: ViewExpr; remove: ViewExpr };
   complement?: ViewExpr;
+  nest?: ViewNestOp;
   annotate?: ViewAnnotatePayload;
   of?: ViewExpr;
   type?: string; // exact entry_type FQN

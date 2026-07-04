@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { MetadataSchema, StructureDocument, StructureNode, ViewSpec } from "@/lib/types";
-import { defaultView, evaluateView, treeNodeIds, type EvalNode, type ViewGroup } from "@/lib/views/evaluateView";
+import { defaultView, evaluateView, nestWarnings, treeNodeIds, type EvalNode, type ViewGroup } from "@/lib/views/evaluateView";
 import { structureToEvalNodes } from "@/lib/views/structureNodes";
 
 // A tiny lore-like roster. Order is load-bearing (manual sort == input order).
@@ -51,6 +51,23 @@ describe("leaves", () => {
   });
   it("hand_picked: explicit ids, in universe order", () => {
     expect(ids({ kind: "lore", expr: { hand_picked: ["e", "a"] } })).toEqual(["a", "e"]);
+  });
+
+  // `title` is a top-level node property, not metadata — a field predicate on it
+  // must read node.title, not the absent metadata.title (regression for the
+  // missing-Title field the picker now surfaces).
+  it("field predicate on `title` reads the node title", () => {
+    expect(ids({ kind: "lore", expr: { field: { key: "title", op: "eq", value: "Alice" } } })).toEqual(["b"]);
+    expect(ids({ kind: "lore", expr: { field: { key: "title", op: "set" } } })).toEqual(["a", "b", "c", "d", "e"]);
+  });
+
+  it("field sort on `title` orders by the node title", () => {
+    const sorted = evaluateView(
+      { kind: "lore", sort: { by: "field", field_key: "title", dir: "asc" } },
+      NODES,
+      { schema: SCHEMA },
+    ).nodes.map((n) => n.title);
+    expect(sorted).toEqual(["Alice", "Cass", "Kitchen", "Mara", "Zed"]);
   });
 });
 
@@ -531,5 +548,194 @@ describe("tree presentation (#101)", () => {
     expect(treeNodeIds(tree().groups)).toEqual(
       new Set(["act1", "ch1", "s1", "s2", "ch2", "act2", "ch3", "s3"]),
     );
+  });
+});
+
+// --- nest: relational denormalization from lore links (ADR-0028, #107) -----
+
+// Compact a group tree the same way the sub-flow suite does: a container is
+// `[label, children]`, a leaf level is `[label, [memberIds]]`.
+const nrows = (groups: ViewGroup[] | null): unknown =>
+  groups?.map((g) => (g.children.length ? [g.label, nrows(g.children)] : [g.label, g.nodes.map((n) => n.id)]));
+
+// Nested locations via a `parent` entity_ref (child → parent). Aeria is a root
+// (no parent); nowhere points at a ghost id → orphan.
+const LOCS: EvalNode[] = [
+  { id: "aeria", entry_type: "lore:location", title: "Aeria", metadata: {} },
+  { id: "valen", entry_type: "lore:location", title: "Valen", metadata: { parent: "aeria" } },
+  { id: "dawn", entry_type: "lore:location", title: "Dawnhold", metadata: { parent: "valen" } },
+  { id: "nowhere", entry_type: "lore:location", title: "Nowhere", metadata: { parent: "ghost" } },
+];
+const roots = { field: { key: "parent", op: "unset" as const } };
+const nestLocs = (recursive: boolean): ViewSpec => ({
+  kind: "lore",
+  expr: { nest: { parents: roots, match: { field: "parent", direction: "child_to_parent", by: "ref" }, recursive } },
+});
+
+describe("nest — child→parent by ref", () => {
+  it("recursive self-loop walks an unknown-depth hierarchy; parents are real-node headers", () => {
+    const res = evaluateView(nestLocs(true), LOCS);
+    expect(nrows(res.groups)).toEqual([["Aeria", [["Valen", ["dawn"]]]]]);
+    // Parent segments carry identity (nodeId set) → collapsible NodeRows.
+    expect(res.groups![0].nodeId).toBe("aeria");
+    expect(res.groups![0].children[0].nodeId).toBe("valen");
+    // Flat membership includes the interior parents, ancestors before leaf.
+    expect(res.nodes.map((n) => n.id)).toEqual(["aeria", "valen", "dawn"]);
+  });
+
+  it("non-recursive attaches exactly one level (grandchildren stay orphans)", () => {
+    const res = evaluateView(nestLocs(false), LOCS);
+    expect(nrows(res.groups)).toEqual([["Aeria", ["valen"]]]);
+    // dawn (a grandchild) and nowhere never attach in a single pass.
+    expect(res.diagnostics?.orphansDropped).toBe(2);
+  });
+
+  it("counts orphans (children matching no parent) and drops them", () => {
+    const res = evaluateView(nestLocs(true), LOCS);
+    expect(res.nodes.some((n) => n.id === "nowhere")).toBe(false);
+    expect(res.diagnostics?.orphansDropped).toBe(1);
+    expect(res.diagnostics?.cyclicLinksSkipped).toBe(0);
+  });
+
+  it("a childless root stays (renders as a leaf, not a header)", () => {
+    const lone: EvalNode[] = [{ id: "solo", entry_type: "lore:location", title: "Solo", metadata: {} }];
+    const res = evaluateView(nestLocs(true), lone);
+    // No paths → flat list, solo present.
+    expect(res.nodes.map((n) => n.id)).toEqual(["solo"]);
+  });
+});
+
+describe("nest — many-to-many & data cycles", () => {
+  it("a child under two parents appears under both (dedupe is per (node, path))", () => {
+    const FAM: EvalNode[] = [
+      { id: "gp", entry_type: "lore:character", title: "Grandpa", metadata: {} },
+      { id: "mom", entry_type: "lore:character", title: "Mom", metadata: { parents: ["gp"] } },
+      { id: "dad", entry_type: "lore:character", title: "Dad", metadata: { parents: ["gp"] } },
+      { id: "kid", entry_type: "lore:character", title: "Kid", metadata: { parents: ["mom", "dad"] } },
+    ];
+    const res = evaluateView(
+      {
+        kind: "lore",
+        expr: {
+          nest: {
+            parents: { field: { key: "parents", op: "unset" } },
+            match: { field: "parents", direction: "child_to_parent", by: "ref" },
+            recursive: true,
+          },
+        },
+      },
+      FAM,
+    );
+    expect(nrows(res.groups)).toEqual([["Grandpa", [["Mom", ["kid"]], ["Dad", ["kid"]]]]]);
+  });
+
+  it("the ancestor-path guard drops cyclic links and still terminates (thicket seed)", () => {
+    const CYC: EvalNode[] = [
+      { id: "a", entry_type: "lore:location", title: "A", metadata: { parent: "b" } },
+      { id: "b", entry_type: "lore:location", title: "B", metadata: { parent: "a" } },
+    ];
+    // Seed parents = whole universe (no roots exist) → both expand, hitting the
+    // A↔B cycle; the guard drops the back-edges. Reaching here proves termination.
+    const res = evaluateView(
+      { kind: "lore", expr: { nest: { match: { field: "parent", direction: "child_to_parent", by: "ref" }, recursive: true } } },
+      CYC,
+    );
+    expect(res.diagnostics?.cyclicLinksSkipped).toBe(2);
+    expect(nrows(res.groups)).toEqual([["A", ["b"]], ["B", ["a"]]]);
+  });
+
+  it("runaway fan-out trips the K·N ceiling, hard-stops, and truncates", () => {
+    // 5 nodes each referencing the other 4 as parents → a near-complete relation;
+    // simple paths blow past K·N (8·5). Must terminate with the truncation flag.
+    const FULL: EvalNode[] = Array.from({ length: 5 }, (_, i) => ({
+      id: `f${i}`,
+      entry_type: "lore:location",
+      title: `F${i}`,
+      metadata: { parent: Array.from({ length: 5 }, (_, j) => `f${j}`).filter((id) => id !== `f${i}`) },
+    }));
+    const res = evaluateView(
+      { kind: "lore", expr: { nest: { match: { field: "parent", direction: "child_to_parent", by: "ref" }, recursive: true } } },
+      FULL,
+    );
+    expect(res.diagnostics?.fanoutTruncated).toBe(true);
+  });
+});
+
+describe("nest — other match modes", () => {
+  it("by title: a child's tag equals the parent's title (case-insensitive)", () => {
+    const TITLED: EvalNode[] = [
+      { id: "stark", entry_type: "lore:faction", title: "Stark", metadata: {} },
+      { id: "arya", entry_type: "lore:character", title: "Arya", metadata: { house: ["stark"] } },
+    ];
+    const res = evaluateView(
+      {
+        kind: "lore",
+        expr: {
+          nest: {
+            parents: { field: { key: "house", op: "unset" } }, // Stark has no house tag → a root
+            match: { field: "house", direction: "child_to_parent", by: "title" },
+            recursive: true,
+          },
+        },
+      },
+      TITLED,
+    );
+    expect(nrows(res.groups)).toEqual([["Stark", ["arya"]]]);
+  });
+
+  it("parent→children: the parent card holds the refs to its children", () => {
+    const TEAMS: EvalNode[] = [
+      { id: "team", entry_type: "lore:group", title: "Team", metadata: { members: ["alice", "bob"] } },
+      { id: "alice", entry_type: "lore:character", title: "Alice", metadata: {} },
+      { id: "bob", entry_type: "lore:character", title: "Bob", metadata: {} },
+    ];
+    const res = evaluateView(
+      {
+        kind: "lore",
+        expr: {
+          nest: {
+            parents: { type: "lore:group" },
+            match: { field: "members", direction: "parent_to_children", by: "ref" },
+          },
+        },
+      },
+      TEAMS,
+    );
+    expect(nrows(res.groups)).toEqual([["Team", ["alice", "bob"]]]);
+  });
+
+  it("does not run for non-relational views (diagnostics stays absent)", () => {
+    const res = evaluateView({ kind: "lore", expr: { type: "lore:character" } }, NODES);
+    expect(res.diagnostics).toBeUndefined();
+  });
+});
+
+describe("nestWarnings — surfacing diagnostics (#110)", () => {
+  it("no diagnostics → no warnings", () => {
+    expect(nestWarnings(undefined)).toEqual([]);
+    expect(nestWarnings({ cyclicLinksSkipped: 0, orphansDropped: 0, fanoutTruncated: false })).toEqual([]);
+  });
+
+  it("fan-out truncation warns first, with the likely cause", () => {
+    const w = nestWarnings({ cyclicLinksSkipped: 3, orphansDropped: 2, fanoutTruncated: true });
+    expect(w).toHaveLength(3);
+    expect(w[0]).toMatch(/fan-out/i); // most severe first
+    expect(w[0]).toMatch(/roots/i); // names the likely cause / fix
+  });
+
+  it("pluralizes cyclic-link and orphan counts", () => {
+    expect(nestWarnings({ cyclicLinksSkipped: 1, orphansDropped: 1, fanoutTruncated: false })).toEqual([
+      "1 cyclic link skipped (a card is its own ancestor).",
+      "1 unmatched child dropped (matched no parent).",
+    ]);
+    expect(nestWarnings({ cyclicLinksSkipped: 2, orphansDropped: 3, fanoutTruncated: false })).toEqual([
+      "2 cyclic links skipped (a card is its own ancestor).",
+      "3 unmatched children dropped (matched no parent).",
+    ]);
+  });
+
+  it("threads through a real evaluation (orphan drop → a warning)", () => {
+    const res = evaluateView(nestLocs(true), LOCS);
+    expect(nestWarnings(res.diagnostics)).toEqual(["1 unmatched child dropped (matched no parent)."]);
   });
 });

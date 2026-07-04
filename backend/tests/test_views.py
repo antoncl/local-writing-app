@@ -15,7 +15,7 @@ from fastapi.testclient import TestClient
 from app.main import app
 from app.main import service as svc
 from app.models import NodePickerConfig
-from app.models_views import ViewExpr, ViewSpec
+from app.models_views import NestMatch, NestOp, ViewExpr, ViewSpec
 
 
 class ViewCrudTests(unittest.TestCase):
@@ -237,6 +237,118 @@ class ViewSpecModelTests(unittest.TestCase):
                 expr={"type": "lore:character"},
                 groups=[{"name": "Cast", "expr": {"type": "lore:character"}}],
             )
+
+
+class NestGrammarTests(unittest.TestCase):
+    """The `nest` relational operator (ADR-0028 / #106) — structural validation."""
+
+    def _nest(self, **over: object) -> dict:
+        base = {
+            "parents": {"field": {"key": "parent", "op": "unset"}},
+            "children": {"type": "lore:location"},
+            "match": {"field": "parent", "direction": "child_to_parent", "by": "ref"},
+        }
+        base.update(over)
+        return base
+
+    def test_valid_nest_expr_and_defaults(self) -> None:
+        expr = ViewExpr(nest=self._nest())
+        assert expr.nest is not None
+        self.assertEqual(expr.nest.match.direction, "child_to_parent")
+        self.assertEqual(expr.nest.match.by, "ref")  # `by` defaults to ref
+        self.assertFalse(expr.nest.recursive)  # non-recursive by default
+        self.assertEqual(expr.nest.children.type, "lore:location")
+
+    def test_recursive_self_loop_flag(self) -> None:
+        expr = ViewExpr(nest=self._nest(recursive=True))
+        assert expr.nest is not None
+        self.assertTrue(expr.nest.recursive)
+
+    def test_match_by_title(self) -> None:
+        m = NestMatch(field="house", direction="parent_to_children", by="title")
+        self.assertEqual(m.by, "title")
+        self.assertEqual(m.direction, "parent_to_children")
+
+    def test_invalid_direction_rejected(self) -> None:
+        with self.assertRaises(ValueError):
+            NestMatch(field="parent", direction="sideways", by="ref")
+
+    def test_invalid_match_by_rejected(self) -> None:
+        with self.assertRaises(ValueError):
+            NestMatch(field="parent", direction="child_to_parent", by="context_pick")
+
+    def test_empty_match_field_rejected(self) -> None:
+        with self.assertRaises(ValueError):
+            NestMatch(field="", direction="child_to_parent", by="ref")
+
+    def test_nest_requires_match(self) -> None:
+        # match is the one required field — without a rule there is no join.
+        with self.assertRaises(ValueError):
+            NestOp(parents={"field": {"key": "parent", "op": "unset"}})
+
+    def test_nest_handles_optional_default_to_universe(self) -> None:
+        # An unconnected handle = the whole universe (None).
+        op = NestOp(match={"field": "parent", "direction": "child_to_parent"})
+        self.assertIsNone(op.parents)
+        self.assertIsNone(op.children)
+
+    def test_nest_is_exclusive_primary_slot(self) -> None:
+        # nest + another primary slot violates exactly-one.
+        with self.assertRaises(ValueError):
+            ViewExpr(nest=self._nest(), type="lore:location")
+
+
+class NestApiTests(ViewCrudTests):
+    """Nest specs must round-trip through the CRUD API and be cycle-checked."""
+
+    def test_nest_spec_roundtrips(self) -> None:
+        spec = {
+            "kind": "lore",
+            "expr": {
+                "nest": {
+                    "parents": {"field": {"key": "parent", "op": "unset"}},
+                    "children": {"descendants_of": "lore:location"},
+                    "match": {"field": "parent", "direction": "child_to_parent", "by": "ref"},
+                    "recursive": True,
+                }
+            },
+        }
+        created = self._create("Nested locations", spec)
+        got = self.client.get(f"/api/views/{created['id']}").json()
+        self.assertEqual(got["spec"]["expr"]["nest"]["recursive"], True)
+        self.assertEqual(
+            got["spec"]["expr"]["nest"]["match"]["direction"], "child_to_parent"
+        )
+        self.assertEqual(got["spec"], created["spec"])
+
+    def test_view_ref_inside_nest_is_cycle_checked(self) -> None:
+        # A view_ref buried in a nest input must be walked by the cycle guard,
+        # else A -> B -> A slips through when the ref lives inside nest.children.
+        b = self._create("B", {"kind": "lore", "expr": {"type": "lore:location"}})
+        a = self._create(
+            "A",
+            {
+                "kind": "lore",
+                "expr": {
+                    "nest": {
+                        "parents": {"field": {"key": "parent", "op": "unset"}},
+                        "children": {"view_ref": b["id"]},
+                        "match": {"field": "parent", "direction": "child_to_parent"},
+                    }
+                },
+            },
+        )
+        got_b = self.client.get(f"/api/views/{b['id']}").json()
+        res = self.client.put(
+            f"/api/views/{b['id']}",
+            json={
+                "title": "B",
+                "base_revision": got_b["revision"],
+                "spec": {"kind": "lore", "expr": {"view_ref": a["id"]}},
+            },
+        )
+        self.assertEqual(res.status_code, 422, res.text)
+        self.assertIn("cycle", res.text.lower())
 
 
 class NodePickerConfigSourcesTests(unittest.TestCase):

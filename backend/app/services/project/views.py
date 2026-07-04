@@ -206,6 +206,9 @@ class ViewsMixin:
             if node.difference is not None:
                 walk(node.difference.keep)
                 walk(node.difference.remove)
+            if node.nest is not None:
+                walk(node.nest.parents)
+                walk(node.nest.children)
             walk(node.complement)
             if node.annotate is not None:
                 walk(node.of)

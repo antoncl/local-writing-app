@@ -1,11 +1,14 @@
 import { describe, expect, it } from "vitest";
 import type { ViewExpr } from "@/lib/types";
 import {
+  classifyConnection,
+  connectionAllowed,
   exprToGraph,
   graphToExpr,
   graphToSpec,
   specToGraph,
   OUTPUT_NODE_ID,
+  type ConnectionVerdict,
   type ViewGraph,
   type ViewGraphNode,
 } from "./viewGraph";
@@ -265,6 +268,89 @@ describe("sorter (per-segment sort)", () => {
       { name: "Cast", expr: { type: "lore:character" }, sort: { by: "title", dir: "asc" } },
       { name: "Gods", expr: { descendants_of: "lore:deity" } },
     ]);
+  });
+});
+
+describe("nest lowering + self-loop recursion (ADR-0028)", () => {
+  const match = { field: "parent", direction: "child_to_parent" as const, by: "ref" as const };
+
+  it("round-trips a nest (parents + children + match)", () => {
+    const expr: ViewExpr = {
+      nest: { parents: { field: { key: "parent", op: "unset" } }, children: { type: "lore:location" }, match },
+    };
+    expect(roundTrip(expr)).toEqual(expr);
+  });
+
+  it("round-trips a recursive nest — the self-loop lowers to recursive:true", () => {
+    const expr: ViewExpr = {
+      nest: { parents: { field: { key: "parent", op: "unset" } }, match, recursive: true },
+    };
+    expect(roundTrip(expr)).toEqual(expr);
+    // The recursion is carried as a real self-loop edge on the canvas.
+    const graph = exprToGraph(expr);
+    const nst = graph.nodes.find((n) => n.kind === "nest")!;
+    expect(graph.edges.some((e) => e.source === nst.id && e.target === nst.id && e.targetHandle === "parents")).toBe(true);
+  });
+
+  it("an unconfigured nest (no match) lowers to nothing", () => {
+    const nst = node("nest", {}, 0);
+    const graph: ViewGraph = { nodes: [out(), nst], edges: [edge(nst.id, OUTPUT_NODE_ID)] };
+    expect(graphToExpr(graph)).toBeNull();
+  });
+
+  it("defaults match.by to ref when omitted", () => {
+    const nst = node("nest", { match: { field: "p", direction: "child_to_parent" } as never }, 0);
+    const graph: ViewGraph = { nodes: [out(), nst], edges: [edge(nst.id, OUTPUT_NODE_ID)] };
+    expect(graphToExpr(graph)).toEqual({ nest: { match: { field: "p", direction: "child_to_parent", by: "ref" } } });
+  });
+});
+
+describe("cycle classifier — recursion vs meaningless (ADR-0028 §D)", () => {
+  const match = { field: "parent", direction: "child_to_parent" as const, by: "ref" as const };
+
+  it("a direct self-loop into a nest's parents handle = allowed recursion", () => {
+    const nst = node("nest", { match }, 0);
+    const byId = new Map([[nst.id, nst]]);
+    expect(classifyConnection(byId, [], nst.id, nst.id, "parents")).toBe("nest-recursion");
+  });
+
+  it("a self-loop into a nest's children handle is NOT recursion", () => {
+    const nst = node("nest", { match }, 0);
+    const byId = new Map([[nst.id, nst]]);
+    expect(classifyConnection(byId, [], nst.id, nst.id, "children")).toBe("meaningless-cycle");
+  });
+
+  it("a cycle with no nest on it is meaningless", () => {
+    const a = node("intersect", {}, 0);
+    const b = node("union", {}, 100);
+    const byId = new Map([[a.id, a], [b.id, b]]);
+    // a→b already wired; closing b→a forms a nest-free cycle.
+    expect(classifyConnection(byId, [edge(a.id, b.id)], b.id, a.id, "in")).toBe("meaningless-cycle");
+  });
+
+  it("a multi-node cycle feeding a nest's parents is detected but unsupported (v2)", () => {
+    const nst = node("nest", { match }, 0);
+    const f = node("filter", {}, 100);
+    const byId = new Map([[nst.id, nst], [f.id, f]]);
+    // nest→filter already wired; closing filter→nest.parents is a frontier loop.
+    expect(classifyConnection(byId, [edge(nst.id, f.id)], f.id, nst.id, "parents")).toBe("nest-recursion-unsupported");
+  });
+
+  it("a plain acyclic edge is ok", () => {
+    const src = node("type", { type: "lore:character" }, 0);
+    const nst = node("nest", { match }, 100);
+    const byId = new Map([[src.id, src], [nst.id, nst]]);
+    expect(classifyConnection(byId, [], src.id, nst.id, "children")).toBe("ok");
+  });
+
+  it("connectionAllowed permits only clean edges + supported recursion", () => {
+    const verdicts: [ConnectionVerdict, boolean][] = [
+      ["ok", true],
+      ["nest-recursion", true],
+      ["nest-recursion-unsupported", false],
+      ["meaningless-cycle", false],
+    ];
+    for (const [v, allowed] of verdicts) expect(connectionAllowed(v)).toBe(allowed);
   });
 });
 

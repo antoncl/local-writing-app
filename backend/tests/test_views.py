@@ -117,6 +117,10 @@ class ViewCrudTests(unittest.TestCase):
         entries = {e["title"]: e for e in res.json()["entries"]}
         self.assertEqual(entries["Cast"]["view_kind"], "lore")
         self.assertEqual(entries["Scenes"]["view_kind"], "scene")
+        # The summary carries the full spec (#95) so a client needn't refetch
+        # each view to evaluate it (serialized dense, like the getView endpoint).
+        self.assertEqual(entries["Cast"]["spec"]["kind"], "lore")
+        self.assertEqual(entries["Cast"]["spec"]["expr"]["type"], "lore:character")
 
     def test_save_updates_spec_and_conflict_guard(self) -> None:
         created = self._create("V", {"kind": "lore", "expr": {"type": "lore:character"}})

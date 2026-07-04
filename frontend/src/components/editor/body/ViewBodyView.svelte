@@ -189,10 +189,10 @@
       const list = await api.listViews();
       const same = list.entries.filter((v) => v.view_kind === forKind && v.id !== selfId);
       savedViews = same.map((v) => ({ id: v.id, title: v.title }));
-      // Prefetch specs so the preview can resolve view_ref leaves synchronously.
-      const specs = await Promise.all(same.map((v) => api.getView(v.id).then((n) => [v.id, n.spec] as const).catch(() => null)));
+      // The list summary carries each view's spec (#95), so the preview resolves
+      // view_ref leaves synchronously — no per-view fetch.
       const map = new Map<string, ViewSpec>();
-      for (const entry of specs) if (entry) map.set(entry[0], entry[1]);
+      for (const v of same) if (v.spec) map.set(v.id, v.spec);
       viewSpecs = map;
     } catch {
       savedViews = [];

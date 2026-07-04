@@ -393,6 +393,9 @@ export type ViewNodeSummary = {
   entry_type: string;
   view_kind: string;
   presentation: ViewPresentation;
+  // The full spec ships with the list summary (#95) so evaluating a listed view
+  // — including resolving its view_ref leaves — needs no second per-view fetch.
+  spec?: ViewSpec | null;
   source_layer_id?: string;
   source_layer_label?: string;
 };

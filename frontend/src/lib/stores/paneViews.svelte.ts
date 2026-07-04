@@ -77,17 +77,10 @@ class PaneViewsController {
     }
     this.views = byKind;
 
-    // Prefetch specs so evaluation (incl. view_ref) is synchronous.
-    const pairs = await Promise.all(
-      entries.map((v) =>
-        api
-          .getView(v.id)
-          .then((n) => [v.id, n.spec] as const)
-          .catch(() => null),
-      ),
-    );
+    // The list summary already carries each view's spec (#95), so evaluation
+    // (incl. resolving view_ref leaves) is synchronous with no per-view fetch.
     const map = new Map<string, ViewSpec>();
-    for (const p of pairs) if (p) map.set(p[0], p[1]);
+    for (const v of entries) if (v.spec) map.set(v.id, v.spec);
     this.specs = map;
 
     // Drop any selection that no longer resolves.

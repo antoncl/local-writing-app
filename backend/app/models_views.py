@@ -415,6 +415,10 @@ class ViewNodeSummary(BaseModel):
     # on the summary so a pane can group/offer views by the kind they target.
     view_kind: str = ""
     presentation: ViewPresentation = "flat"
+    # The full spec, so a client that lists views already holds everything it
+    # needs to evaluate them (incl. resolving view_ref leaves) without a second
+    # per-view fetch — list_views already parses it (#95). None if malformed.
+    spec: ViewSpec | None = None
     source_layer_id: str = ""
     source_layer_label: str = ""
 

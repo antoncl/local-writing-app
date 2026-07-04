@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
-import type { MetadataSchema, ViewSpec } from "@/lib/types";
-import { defaultView, evaluateView, type EvalNode } from "@/lib/views/evaluateView";
+import type { MetadataSchema, StructureDocument, StructureNode, ViewSpec } from "@/lib/types";
+import { defaultView, evaluateView, type EvalNode, type ViewGroup } from "@/lib/views/evaluateView";
+import { structureToEvalNodes } from "@/lib/views/structureNodes";
 
 // A tiny lore-like roster. Order is load-bearing (manual sort == input order).
 const NODES: EvalNode[] = [
@@ -317,5 +318,102 @@ describe("view_ref", () => {
       resolveView: (id) => cyclic[id] ?? null,
     });
     expect(res.nodes).toEqual([]);
+  });
+});
+
+// --- tree presentation (#101) ----------------------------------------------
+
+// A small manuscript: two acts, chapters, scenes, plus one empty chapter. Tags
+// live in computed_metadata so `tagged` leaves apply (structureToEvalNodes maps
+// computed_metadata → EvalNode.metadata).
+const sn = (
+  id: string,
+  type: string,
+  title: string,
+  children: StructureNode[] = [],
+  tags: string[] = [],
+): StructureNode => ({ id, type, title, children, computed_metadata: { tags } });
+
+const MANUSCRIPT: StructureDocument = {
+  root: sn("root", "manuscript:base", "Book", [
+    sn("act1", "manuscript:act", "Act 1", [
+      sn("ch1", "manuscript:chapter", "Ch 1", [
+        sn("s1", "manuscript:scene", "Scene 1", [], ["honor"]),
+        sn("s2", "manuscript:scene", "Scene 2", []),
+      ]),
+      sn("ch2", "manuscript:chapter", "Ch 2 (empty)", []),
+    ]),
+    sn("act2", "manuscript:act", "Act 2", [
+      sn("ch3", "manuscript:chapter", "Ch 3", [sn("s3", "manuscript:scene", "Scene 3", [], ["honor"])]),
+    ]),
+  ]),
+};
+
+// Compact a group tree for readable assertions: a leaf is its bare label; a
+// container is `[label, [children...]]`.
+const shape = (groups: ViewGroup[]): unknown =>
+  groups.map((g) => (g.children.length ? [g.label, shape(g.children)] : g.label));
+
+const tree = (expr: ViewSpec["expr"] = null) => {
+  const nodes = structureToEvalNodes(MANUSCRIPT);
+  return evaluateView({ kind: "manuscript", presentation: "tree", expr }, nodes);
+};
+
+describe("tree presentation (#101)", () => {
+  it("structureToEvalNodes carries each node's ancestry outer→inner", () => {
+    const nodes = structureToEvalNodes(MANUSCRIPT);
+    const byId = Object.fromEntries(nodes.map((n) => [n.id, n.ancestry?.map((s) => s.key)]));
+    expect(byId.act1).toEqual([]);
+    expect(byId.ch1).toEqual(["act1"]);
+    expect(byId.s1).toEqual(["act1", "ch1"]);
+    expect(byId.s3).toEqual(["act2", "ch3"]);
+  });
+
+  it("an unfiltered view nests the whole structure, keeping empty containers", () => {
+    expect(shape(tree().groups!)).toEqual([
+      ["Act 1", [
+        ["Ch 1", ["Scene 1", "Scene 2"]],
+        "Ch 2 (empty)", // empty container (a member) still appears, childless
+      ]],
+      ["Act 2", [["Ch 3", ["Scene 3"]]]],
+    ]);
+  });
+
+  it("ancestor segments are real nodes (nodeId set) → render as NodeRows", () => {
+    const act1 = tree().groups![0];
+    expect(act1.nodeId).toBe("act1");
+    expect(act1.children[0].nodeId).toBe("ch1");
+    expect(act1.children[0].children[0].nodeId).toBe("s1");
+  });
+
+  it("a filtered view keeps a match's ancestors and prunes empty branches", () => {
+    // Only the honor-tagged scenes survive; ch2 (no match) and its siblings drop.
+    expect(shape(tree({ tagged: "honor" }).groups!)).toEqual([
+      ["Act 1", [["Ch 1", ["Scene 1"]]]], // s2 gone, ch2 gone
+      ["Act 2", [["Ch 3", ["Scene 3"]]]],
+    ]);
+  });
+
+  it("a matched container and its matched scene merge into one branch (no double appearance)", () => {
+    // ch1 itself is tagged AND its scene s1 is tagged: ch1 appears once, with s1 nested.
+    const withTag: StructureDocument = {
+      root: sn("root", "manuscript:base", "Book", [
+        sn("act1", "manuscript:act", "Act 1", [
+          sn("ch1", "manuscript:chapter", "Ch 1", [sn("s1", "manuscript:scene", "Scene 1", [], ["x"])], ["x"]),
+        ]),
+      ]),
+    };
+    const res = evaluateView(
+      { kind: "manuscript", presentation: "tree", expr: { tagged: "x" } },
+      structureToEvalNodes(withTag),
+    );
+    expect(shape(res.groups!)).toEqual([["Act 1", [["Ch 1", ["Scene 1"]]]]]);
+    // ch1 occurs exactly once across the tree.
+    const act1 = res.groups![0];
+    expect(act1.children.filter((g) => g.nodeId === "ch1")).toHaveLength(1);
+  });
+
+  it("flat membership still lists every matching node (containers + leaves)", () => {
+    expect(tree({ tagged: "honor" }).nodes.map((n) => n.id)).toEqual(["s1", "s3"]);
   });
 });

@@ -312,6 +312,10 @@ export type ViewSpec = {
   expr?: ViewExpr | null;
   groups?: ViewGroupSpec[] | null;
   sort?: ViewSort | null;
+  // Layout of the result list (doc §3.1). `"tree"` nests members by structural
+  // ancestry (the evaluator reads each node's `ancestry`, #101); absent/other
+  // values keep the flat-or-handle-grouped behavior. Orthogonal to membership.
+  presentation?: ViewPresentation | null;
 };
 
 // How a view's result list is laid out (doc §3.1). Orthogonal to membership.

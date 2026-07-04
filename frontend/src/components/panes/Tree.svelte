@@ -87,6 +87,11 @@
   // tree keeps its structural shape, ADR-0022). Null/empty on trees without a
   // switcher (Research) or when the default view is selected.
   export let colorAnnotations: Map<string, string | null> | null = null;
+  // Membership pruning (#101): the set of structure-node ids to show — the
+  // selected view's matches plus the ancestors kept to reach them. `null` = the
+  // whole-universe default → show the full tree. A node absent from the set (and
+  // therefore all of its descendants) is hidden, narrowing the tree to matches.
+  export let visibleIds: Set<string> | null = null;
   // App's error-catching async wrapper. Returns whether the action completed
   // without throwing.
   export let run: (action: () => Promise<void>) => Promise<boolean>;
@@ -106,6 +111,13 @@
   let draggedNodeId: string | null = null;
   let dragOverNodeId: string | null = null;
   let dragOverPosition: "before" | "after" | "into" | null = null;
+
+  // Children to render under `node`, pruned to the selected view's membership
+  // (#101). `visibleIds === null` (the default view) shows every child.
+  function visibleChildren(node: StructureNode): StructureNode[] {
+    const kids = nodeChildren(node);
+    return visibleIds ? kids.filter((c) => visibleIds!.has(c.id)) : kids;
+  }
 
   function renderNodeTitle(node: StructureNode): string {
     const template = schema?.entry_types[node.type]?.display_template ?? "{title}";
@@ -394,7 +406,7 @@
 </div>
 <NodeList isEmpty={!structure || nodeChildren(structure.root).length === 0}>
   {#if structure}
-    {#each nodeChildren(structure.root) as child (child.id)}
+    {#each visibleChildren(structure.root) as child (child.id)}
       {@render renderTree(child)}
     {/each}
   {/if}
@@ -408,7 +420,7 @@
 </NodeList>
 
 {#snippet renderTree(node: StructureNode)}
-  {@const childNodes = nodeChildren(node)}
+  {@const childNodes = visibleChildren(node)}
   {@const leaf = node.type === config.leafType}
   {@const editing = editingNodeId === node.id}
   {@const collapsedMap = collapsed}

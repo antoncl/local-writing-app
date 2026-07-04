@@ -105,6 +105,24 @@ export function defaultView(kind: string): ViewSpec {
   return { kind, expr: null, sort: { by: "manual" } };
 }
 
+// Every node id present in a tree result's group hierarchy — the surviving
+// members plus the ancestors kept to reach them (#101). Drives the Draft tree's
+// membership pruning: a structure node absent from this set is hidden, so a
+// filter narrows the tree to matches and their ancestors and drops empty
+// branches. (`nodes` is scanned too so it also works on handle-grouped results.)
+export function treeNodeIds<T extends EvalNode>(groups: ViewGroup<T>[] | null): Set<string> {
+  const ids = new Set<string>();
+  const walk = (gs: ViewGroup<T>[]): void => {
+    for (const g of gs) {
+      if (g.nodeId) ids.add(g.nodeId);
+      for (const n of g.nodes) ids.add(n.id);
+      walk(g.children);
+    }
+  };
+  if (groups) walk(groups);
+  return ids;
+}
+
 type RunState<T extends EvalNode> = {
   universe: T[];
   order: Map<string, number>; // id → universe index, for stable set→list

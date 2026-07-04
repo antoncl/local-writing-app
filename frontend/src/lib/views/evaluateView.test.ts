@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { MetadataSchema, StructureDocument, StructureNode, ViewSpec } from "@/lib/types";
-import { defaultView, evaluateView, type EvalNode, type ViewGroup } from "@/lib/views/evaluateView";
+import { defaultView, evaluateView, treeNodeIds, type EvalNode, type ViewGroup } from "@/lib/views/evaluateView";
 import { structureToEvalNodes } from "@/lib/views/structureNodes";
 
 // A tiny lore-like roster. Order is load-bearing (manual sort == input order).
@@ -415,5 +415,16 @@ describe("tree presentation (#101)", () => {
 
   it("flat membership still lists every matching node (containers + leaves)", () => {
     expect(tree({ tagged: "honor" }).nodes.map((n) => n.id)).toEqual(["s1", "s3"]);
+  });
+
+  it("treeNodeIds collects matches + kept ancestors, dropping pruned branches", () => {
+    // Filtered tree keeps s1/s3 and their ancestors; s2 and ch2 are gone.
+    expect(treeNodeIds(tree({ tagged: "honor" }).groups)).toEqual(
+      new Set(["act1", "ch1", "s1", "act2", "ch3", "s3"]),
+    );
+    // Unfiltered → every structure node is visible.
+    expect(treeNodeIds(tree().groups)).toEqual(
+      new Set(["act1", "ch1", "s1", "s2", "ch2", "act2", "ch3", "s3"]),
+    );
   });
 });

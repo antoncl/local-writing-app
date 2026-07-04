@@ -206,7 +206,20 @@
       edges: flowEdges.map((e) => ({ id: e.id, source: e.source, target: e.target, targetHandle: e.targetHandle ?? null })),
     };
   }
-  let spec = $derived<ViewSpec>(graphToSpec(toGraph(), { kind, sort }));
+  // Memoize the lowered spec by structural equality. Dragging a node mutates
+  // flowNodes' positions every animation frame, but positions only feed n-ary
+  // child ORDERING in graphToSpec, which rarely changes mid-drag. Returning the
+  // SAME spec reference when the lowering is unchanged stops `preview` — a
+  // $derived that re-evaluates the whole universe — from recomputing every drag
+  // frame (#96). The autosave effect still tracks positions via toLayout().
+  let specMemo: { key: string; spec: ViewSpec } | null = null;
+  let spec = $derived.by<ViewSpec>(() => {
+    const next = graphToSpec(toGraph(), { kind, sort });
+    const key = JSON.stringify(next);
+    if (specMemo && specMemo.key === key) return specMemo.spec;
+    specMemo = { key, spec: next };
+    return next;
+  });
 
   // ---- preview universe for the anchor kind ----
   let universe = $derived<EvalNode[]>(universeFor(kind));

@@ -17,8 +17,9 @@
   import NodeList from "@/components/widgets/NodeList.svelte";
   import GroupCaret from "@/components/widgets/GroupCaret.svelte";
   import CountPill from "@/components/widgets/CountPill.svelte";
+  import GroupTree from "@/components/widgets/GroupTree.svelte";
   import { getSwatch } from "@/lib/utils/colors";
-  import { evaluateView, type ViewGroup } from "@/lib/views/evaluateView";
+  import { evaluateView } from "@/lib/views/evaluateView";
   import { paneViews } from "@/lib/stores/paneViews.svelte";
   import { metadataSchemaStore } from "@/lib/stores/schema";
   import { focusedDocumentStore, pinnedKeysStore } from "@/lib/stores/editorFocus";
@@ -56,30 +57,24 @@
   $: annotations = viewResult.annotations;
   // Drag-reorder is manual order, meaningful only on the implicit default view.
   $: canReorder = presentation === null && viewResult.groups === null;
-  $: displayGroups = buildDisplayGroups(viewResult.groups, viewResult.nodes, presentation === "flat", canReorder);
+  // A view with named-handle / structural groups renders through the recursive
+  // GroupTree (read-only — no layer drag). Otherwise the intrinsic flat / layer
+  // buckets apply (the only mode where drag-reorder is meaningful).
+  $: viewGroups = viewResult.groups;
+  $: displayGroups = viewGroups ? [] : buildDisplayGroups(viewResult.nodes, presentation === "flat", canReorder);
 
   // Drag-drop state for reordering assistants within a layer. Never escapes.
   let dragId: string | null = null;
   let dragLayerId: string | null = null;
   let dropTarget: { id: string; position: "before" | "after" } | null = null;
 
+  // The non-view grouping: the intrinsic flat / per-layer buckets. A view that
+  // carries its own groups bypasses this and renders through GroupTree.
   function buildDisplayGroups(
-    labelGroups: ViewGroup<AssistantEntrySummary>[] | null,
     items: AssistantEntrySummary[],
     flat: boolean,
     layerGrouped: boolean,
   ): AssistantDisplayGroup[] {
-    if (labelGroups) {
-      return labelGroups
-        .map((g) => ({
-          id: g.key,
-          label: g.label ?? "Everything else",
-          color: g.color,
-          layerId: null,
-          entries: g.nodes,
-        }))
-        .filter((g) => g.entries.length > 0);
-    }
     if (flat) {
       return [{ id: "__flat__", label: null, color: null, layerId: null, entries: items }];
     }
@@ -194,43 +189,54 @@
 </script>
 
 <NodeList isEmpty={entries.length === 0}>
-  {#each displayGroups as group (group.id)}
-    {#if group.label === null}
-      {#each group.entries as entry (entry.id)}
-        {@render assistantRow(entry, group.layerId)}
-      {/each}
-    {:else}
-      {@const userCollapsed = !!collapsedGroups[group.id]}
-      {@const isEmpty = group.entries.length === 0}
-      <NodeRow
-        groupHeader
-        collapsed={userCollapsed || isEmpty}
-        title={group.label}
-        stripeColor={group.color ? getSwatch(group.color)?.hex ?? null : null}
-        onClick={() => toggleGroup(group.id)}
-      >
-        {#snippet leading()}
-          <GroupCaret collapsed={userCollapsed || isEmpty} />
-        {/snippet}
-        {#snippet trailing()}
-          <CountPill count={group.entries.length} />
-        {/snippet}
-        {#snippet nested()}
-          {#each group.entries as entry (entry.id)}
-            {@render assistantRow(entry, group.layerId)}
-          {/each}
-        {/snippet}
-      </NodeRow>
-    {/if}
-  {/each}
+  {#if viewGroups}
+    <GroupTree groups={viewGroups} collapsed={collapsedGroups} onToggle={toggleGroup} leaf={assistantLeaf} />
+  {:else}
+    {#each displayGroups as group (group.id)}
+      {#if group.label === null}
+        {#each group.entries as entry (entry.id)}
+          {@render assistantRow(entry, group.layerId, 0)}
+        {/each}
+      {:else}
+        {@const userCollapsed = !!collapsedGroups[group.id]}
+        {@const isEmpty = group.entries.length === 0}
+        <NodeRow
+          groupHeader
+          collapsed={userCollapsed || isEmpty}
+          title={group.label}
+          stripeColor={group.color ? getSwatch(group.color)?.hex ?? null : null}
+          onClick={() => toggleGroup(group.id)}
+        >
+          {#snippet leading()}
+            <GroupCaret collapsed={userCollapsed || isEmpty} />
+          {/snippet}
+          {#snippet trailing()}
+            <CountPill count={group.entries.length} />
+          {/snippet}
+          {#snippet nested()}
+            {#each group.entries as entry (entry.id)}
+              {@render assistantRow(entry, group.layerId, 0)}
+            {/each}
+          {/snippet}
+        </NodeRow>
+      {/if}
+    {/each}
+  {/if}
   {#snippet whenEmpty()}
     <p class="muted">No assistants defined yet. Click + Assistant to create one in the machine layer.</p>
   {/snippet}
 </NodeList>
 
-{#snippet assistantRow(entry: AssistantEntrySummary, layerId: string | null)}
+<!-- GroupTree leaf: a view's grouped rows are read-only (layer drag is only for
+     the intrinsic default view), so this passes layerId null. -->
+{#snippet assistantLeaf(entry: AssistantEntrySummary, depth: number)}
+  {@render assistantRow(entry, null, depth)}
+{/snippet}
+
+{#snippet assistantRow(entry: AssistantEntrySummary, layerId: string | null, depth: number)}
   <NodeRow
     title={entry.title}
+    {depth}
     active={focusedDocument?.type === "assistant" && focusedDocument.id === entry.id}
     pinned={pinnedKeys.has(`assistant:${entry.id}`)}
     stripeColor={stripeFor(entry)}

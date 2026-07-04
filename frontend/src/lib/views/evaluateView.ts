@@ -123,6 +123,22 @@ export function treeNodeIds<T extends EvalNode>(groups: ViewGroup<T>[] | null): 
   return ids;
 }
 
+// Filter a group tree to members whose id is in `keep`, pruning any branch with
+// no survivors (a group stays if it keeps a direct node OR a surviving child).
+// Pure; panes use it to apply a text search over an already-computed group tree
+// without re-evaluating (#101). A container's own `nodeId` doesn't keep it
+// alive — only surviving descendants do, matching the tree's self-prune rule.
+export function filterGroups<T extends EvalNode>(groups: ViewGroup<T>[], keep: Set<string>): ViewGroup<T>[] {
+  const out: ViewGroup<T>[] = [];
+  for (const g of groups) {
+    const nodes = g.nodes.filter((n) => keep.has(n.id));
+    const children = filterGroups(g.children, keep);
+    if (nodes.length === 0 && children.length === 0) continue;
+    out.push({ ...g, nodes, children });
+  }
+  return out;
+}
+
 type RunState<T extends EvalNode> = {
   universe: T[];
   order: Map<string, number>; // id → universe index, for stable set→list
@@ -163,11 +179,16 @@ export function evaluateView<T extends EvalNode>(
   }
 
   const groups = spec.groups && spec.groups.length > 0 ? spec.groups : null;
+  // Both paths yield denormalized `(node, path)` rows. `evalSource` carries
+  // nesting: a handle whose source is a bare grouped `view_ref` contributes that
+  // view's group structure (multi-segment paths), and a `union` concatenates its
+  // operands' rows preserving each row's path. A top-level bare grouped view_ref
+  // (no handles) likewise inherits the referenced view's groups directly.
   const rows = groups
     ? evalGroups(state, groups, spec.sort)
-    : evalSegment(state, spec.expr ?? null, spec.sort).map((node) => ({ node, path: [] as PathSegment[] }));
+    : evalSource(state, spec.expr ?? null, spec.sort);
 
-  return normalize(state, rows, groups);
+  return normalize(state, rows);
 }
 
 // Evaluate one membership segment: a `null` expr is the whole universe. Returns
@@ -182,9 +203,57 @@ function evalSegment<T extends EvalNode>(
   return sortNodes(members, sort);
 }
 
-// Evaluate each named handle in order into rows. Same-name handles union+dedupe
-// (ADR-0027 §D); dedupe key is the identical `(node, path)` pair. Per-group sort
-// falls back to the ViewSpec-level sort.
+// A stable dedupe key for a `(node, path)` row — the node id plus the ordered
+// path-segment keys. Rows sharing a node id but differing in path are kept
+// distinct (a node reachable via two branches appears under each).
+function rowKey<T extends EvalNode>(node: T, path: PathSegment[]): string {
+  return JSON.stringify([node.id, path.map((s) => s.key)]);
+}
+
+// Evaluate a membership expression into denormalized `(node, path)` rows. This
+// is the row-level counterpart to `evalExpr` (which returns a flat `Set<id>` for
+// the filter algebra) and the seam where PATHS originate (#101):
+//  - `union` concatenates its operands' rows, preserving each row's path and
+//    deduping per `(node, path)` — so combining two grouped sub-flows yields
+//    their rows back-to-back (ADR-0027 §E; matches the denormalized set model).
+//  - a *bare* `view_ref` to a grouped view contributes that view's group
+//    structure as nested path segments (sub-flow → handle). A ref buried inside
+//    the set algebra (intersect/difference/…) has no grouping to preserve and
+//    flattens through `evalExpr` as before.
+//  - everything else resolves to flat rows (empty path) via `evalSegment`.
+function evalSource<T extends EvalNode>(
+  state: RunState<T>,
+  expr: ViewExpr | null | undefined,
+  sort: ViewSort | null | undefined,
+): ViewRow<T>[] {
+  if (expr) {
+    if (expr.union) {
+      const rows: ViewRow<T>[] = [];
+      const seen = new Set<string>();
+      for (const sub of expr.union) {
+        for (const r of evalSource(state, sub, sort)) {
+          const key = rowKey(r.node, r.path);
+          if (seen.has(key)) continue; // dedupe identical (node, path)
+          seen.add(key);
+          rows.push(r);
+        }
+      }
+      return rows;
+    }
+    if (isBareViewRef(expr)) {
+      const nested = evalViewRefRows(state, expr.view_ref as string, sort);
+      if (nested) return nested; // grouped/tree ref → nested rows; null → flat
+    }
+  }
+  return evalSegment(state, expr, sort).map((node) => ({ node, path: [] as PathSegment[] }));
+}
+
+// Evaluate each named handle in order into rows. Each handle prepends its own
+// segment onto its source rows (`evalSource`), so a handle fed by a grouped
+// sub-flow nests that flow's groups *under* the handle name (multi-segment
+// paths), while a plain handle yields the depth-1 case. Same-name handles
+// union+dedupe (ADR-0027 §D); dedupe key is the whole `(node, path)`. Per-group
+// sort falls back to the ViewSpec-level sort.
 function evalGroups<T extends EvalNode>(
   state: RunState<T>,
   groups: ViewGroupSpec[],
@@ -193,13 +262,13 @@ function evalGroups<T extends EvalNode>(
   const rows: ViewRow<T>[] = [];
   const seen = new Set<string>();
   for (const g of groups) {
-    const members = evalSegment(state, g.expr ?? null, g.sort ?? fallbackSort);
     const seg: PathSegment = { key: g.name, label: g.name, nodeId: null, color: g.color ?? null };
-    for (const node of members) {
-      const key = JSON.stringify([node.id, g.name]);
+    for (const r of evalSource(state, g.expr ?? null, g.sort ?? fallbackSort)) {
+      const path = [seg, ...r.path];
+      const key = rowKey(r.node, path);
       if (seen.has(key)) continue; // dedupe identical (node, path)
       seen.add(key);
-      rows.push({ node, path: [seg] });
+      rows.push({ node: r.node, path });
     }
   }
   return rows;
@@ -210,11 +279,11 @@ function evalGroups<T extends EvalNode>(
 // row's `path` (ADR-0027 §E): a row with an empty remaining path is a direct
 // member at that level; otherwise it recurses under its next segment. Depth is
 // carried by the path — the depth-1 handle case falls out as the shallow one.
-// `groups` is null for the flat/pipeline case (0–1 populated top-level group).
+// Whether to group is read from the rows themselves: with no paths it is the
+// flat/pipeline case (`groups: null`).
 function normalize<T extends EvalNode>(
   state: RunState<T>,
   rows: ViewRow<T>[],
-  groups: ViewGroupSpec[] | null,
 ): ViewResult<T> {
   const seenId = new Set<string>();
   const nodes: T[] = [];
@@ -224,15 +293,31 @@ function normalize<T extends EvalNode>(
     nodes.push(r.node);
   }
 
-  if (!groups) return { nodes, annotations: state.annotations, groups: null };
-
-  const built = buildLevel(rows);
-  // 0–1 populated top-level handle → the flat/pipeline case (handle name = list
-  // title). Only collapses at the root and only when nothing sits ungrouped.
-  if (built.nodes.length === 0 && built.children.length <= 1) {
+  // No row carries a path → nothing to nest (default/flat view).
+  if (!rows.some((r) => r.path.length > 0)) {
     return { nodes, annotations: state.annotations, groups: null };
   }
-  return { nodes, annotations: state.annotations, groups: built.children };
+
+  const built = buildLevel(rows);
+  let groups = built.children;
+  // "Top level not considered": a single synthetic wrapper with no ungrouped
+  // direct members and children of its own is a passthrough strip (a handle over
+  // a grouped sub-flow) — drop it and surface the sub-flow's groups directly.
+  if (
+    built.nodes.length === 0 &&
+    groups.length === 1 &&
+    groups[0].nodeId === null &&
+    groups[0].nodes.length === 0 &&
+    groups[0].children.length > 0
+  ) {
+    groups = groups[0].children;
+  }
+  // A lone leaf group (one handle, no nesting) renders as a flat list — its name
+  // is the list title, not a group header. Ungrouped direct members keep groups.
+  if (built.nodes.length === 0 && groups.length <= 1 && groups.every((g) => g.children.length === 0)) {
+    return { nodes, annotations: state.annotations, groups: null };
+  }
+  return { nodes, annotations: state.annotations, groups };
 }
 
 // Recursively bucket rows by their leading path segment. Rows with an empty
@@ -380,6 +465,47 @@ function evalViewRef<T extends EvalNode>(state: RunState<T>, viewId: string): Se
     }
     if (ref.expr) return evalExpr(state, ref.expr);
     return new Set(state.order.keys()); // no primary slot -> pass-through
+  } finally {
+    state.viewStack.pop();
+  }
+}
+
+// A `view_ref` with no other primary slot set — a sub-flow wired *directly* to a
+// source (its group structure can be preserved). A ref buried in the set algebra
+// fails this and flattens through `evalExpr` (`!= null`: dense-null dumps).
+function isBareViewRef(expr: ViewExpr): boolean {
+  return (
+    expr.view_ref != null &&
+    expr.union == null &&
+    expr.intersect == null &&
+    expr.difference == null &&
+    expr.complement == null &&
+    expr.annotate == null &&
+    expr.type == null &&
+    expr.descendants_of == null &&
+    expr.tagged == null &&
+    expr.field == null &&
+    expr.hand_picked == null
+  );
+}
+
+// Nest a grouped/handle sub-flow: evaluate the referenced view's handles into
+// rows *with their paths* so the caller can splice them under its own segment
+// (sub-flow → handle, #101). Returns null when the ref has no group structure to
+// preserve (flat, tree, or unresolved) — the caller then flattens to membership.
+// An empty array (cycle, or a grouped ref with no members) short-circuits to "no
+// rows", contributing nothing.
+function evalViewRefRows<T extends EvalNode>(
+  state: RunState<T>,
+  viewId: string,
+  sort: ViewSort | null | undefined,
+): ViewRow<T>[] | null {
+  if (state.viewStack.includes(viewId)) return []; // cycle: contribute nothing
+  const ref = state.resolveView?.(viewId);
+  if (!ref || !ref.groups || ref.groups.length === 0) return null; // flat/unresolved → flatten
+  state.viewStack.push(viewId);
+  try {
+    return evalGroups(state, ref.groups, ref.sort ?? sort);
   } finally {
     state.viewStack.pop();
   }

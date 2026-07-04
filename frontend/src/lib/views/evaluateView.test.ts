@@ -321,6 +321,111 @@ describe("view_ref", () => {
   });
 });
 
+// --- sub-flow nesting: a bare view_ref to a GROUPED view contributes its group
+// structure instead of flattening (#101). This is the "sub-flow → handle" path.
+describe("sub-flow nesting (#101)", () => {
+  // castAndGods: two handles; heroes/gods: one handle each (still grouped specs).
+  const saved: Record<string, ViewSpec> = {
+    "cast-and-gods": {
+      kind: "lore",
+      groups: [
+        { name: "Cast", expr: { type: "lore:character" } }, // a, b
+        { name: "Gods", expr: { descendants_of: "lore:deity" } }, // c, e
+      ],
+    },
+    heroes: { kind: "lore", groups: [{ name: "Heroes", expr: { type: "lore:character" } }] }, // a, b
+    gods: { kind: "lore", groups: [{ name: "Gods", expr: { descendants_of: "lore:deity" } }] }, // c, e
+    overlap: {
+      kind: "lore",
+      groups: [
+        { name: "Gotham", expr: { tagged: "gotham" } }, // b, c
+        { name: "Gods", expr: { descendants_of: "lore:deity" } }, // c, e
+      ],
+    },
+    flat: { kind: "lore", expr: { type: "lore:character" } }, // no group structure
+  };
+  const ctx = { schema: SCHEMA, resolveView: (id: string) => saved[id] ?? null };
+  // Compact a group tree to [label, [child ids]] rows for readable assertions.
+  const rows = (groups: ViewGroup[] | null): unknown =>
+    groups?.map((g) => (g.children.length ? [g.label, rows(g.children)] : [g.label, g.nodes.map((n) => n.id)]));
+
+  it("a top-level bare grouped view_ref inherits the sub-view's groups (no wrapper)", () => {
+    const res = evaluateView({ kind: "lore", expr: { view_ref: "cast-and-gods" } }, NODES, ctx);
+    expect(rows(res.groups)).toEqual([
+      ["Cast", ["a", "b"]],
+      ["Gods", ["c", "e"]],
+    ]);
+    expect(res.nodes.map((n) => n.id)).toEqual(["a", "b", "c", "e"]); // flat membership preserved
+  });
+
+  it("a handle fed by a grouped view_ref nests it under the handle name", () => {
+    const spec: ViewSpec = {
+      kind: "lore",
+      groups: [
+        { name: "By type", expr: { view_ref: "cast-and-gods" } },
+        { name: "Places", expr: { type: "lore:location" } }, // d
+      ],
+    };
+    const res = evaluateView(spec, NODES, ctx);
+    expect(rows(res.groups)).toEqual([
+      ["By type", [
+        ["Cast", ["a", "b"]],
+        ["Gods", ["c", "e"]],
+      ]],
+      ["Places", ["d"]],
+    ]);
+  });
+
+  it("a lone handle over a grouped sub-flow drops the wrapper (top level not considered)", () => {
+    const spec: ViewSpec = { kind: "lore", groups: [{ name: "By type", expr: { view_ref: "cast-and-gods" } }] };
+    const res = evaluateView(spec, NODES, ctx);
+    expect(rows(res.groups)).toEqual([
+      ["Cast", ["a", "b"]],
+      ["Gods", ["c", "e"]],
+    ]);
+  });
+
+  it("union of two grouped view_refs concatenates their rows, preserving paths", () => {
+    // Anton's semantic: in the denormalized model a union is a concatenation of
+    // (node, path) rows — each operand keeps its own group structure.
+    const res = evaluateView(
+      { kind: "lore", expr: { union: [{ view_ref: "heroes" }, { view_ref: "gods" }] } },
+      NODES,
+      ctx,
+    );
+    expect(rows(res.groups)).toEqual([
+      ["Heroes", ["a", "b"]],
+      ["Gods", ["c", "e"]],
+    ]);
+  });
+
+  it("a node in two sub-groups appears under both (dedupe is per (node, path))", () => {
+    const res = evaluateView({ kind: "lore", expr: { view_ref: "overlap" } }, NODES, ctx);
+    expect(rows(res.groups)).toEqual([
+      ["Gotham", ["b", "c"]],
+      ["Gods", ["c", "e"]], // c appears under both branches
+    ]);
+    expect(res.nodes.map((n) => n.id)).toEqual(["b", "c", "e"]); // once in flat membership
+  });
+
+  it("a view_ref buried in the set algebra flattens (no group structure to preserve)", () => {
+    const res = evaluateView(
+      { kind: "lore", expr: { intersect: [{ view_ref: "cast-and-gods" }, { tagged: "gotham" }] } },
+      NODES,
+      ctx,
+    );
+    expect(res.groups).toBeNull();
+    // cast-and-gods flattens to {a,b,c,e}; ∩ gotham {b,c} → b, c (c is a deity).
+    expect(res.nodes.map((n) => n.id)).toEqual(["b", "c"]);
+  });
+
+  it("a bare view_ref to a FLAT view stays flat", () => {
+    const res = evaluateView({ kind: "lore", expr: { view_ref: "flat" } }, NODES, ctx);
+    expect(res.groups).toBeNull();
+    expect(res.nodes.map((n) => n.id)).toEqual(["a", "b"]);
+  });
+});
+
 // --- tree presentation (#101) ----------------------------------------------
 
 // A small manuscript: two acts, chapters, scenes, plus one empty chapter. Tags

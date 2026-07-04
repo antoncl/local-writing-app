@@ -113,13 +113,15 @@ export function entryTypeName(typeId: string, schema: MetadataSchema | null): st
 }
 
 // Entry-type choices for a kind's "+ Add child" menu. Drops abstract parents
-// (they can't be instantiated) and sorts by name.
+// (they can't be instantiated) and deprecated types (e.g. `lore:lore_note`,
+// superseded by the research kind — readable but no longer creatable, #67),
+// and sorts by name.
 export function entryTypeChoicesByKind(
   schema: MetadataSchema | null,
   kind: string,
 ): Array<{ id: string; name: string }> {
   return Object.entries(schema?.entry_types ?? {})
-    .filter(([, definition]) => definition.kind === kind && !definition.abstract)
+    .filter(([, definition]) => definition.kind === kind && !definition.abstract && !definition.deprecated)
     .map(([id, definition]) => ({ id, name: definition.name }))
     .sort((a, b) => a.name.localeCompare(b.name));
 }

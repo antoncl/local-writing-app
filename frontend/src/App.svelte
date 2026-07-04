@@ -15,7 +15,7 @@
   import Search from "@/components/panes/Search.svelte";
   import Todo from "@/components/panes/Todo.svelte";
   import Pane, { type PaneChrome } from "@/components/panes/Pane.svelte";
-  import { isLeafNode } from "@/lib/utils/treeHelpers";
+  import { isLeafNode, entryTypeChoicesByKind } from "@/lib/utils/treeHelpers";
   import NewProjectModal from "@/components/dialogs/NewProjectModal.svelte";
   import MachineSettingsDialog from "@/components/dialogs/MachineSettingsDialog.svelte";
   import ConfirmModal from "@/components/dialogs/ConfirmModal.svelte";
@@ -69,6 +69,8 @@
   import { evaluateView, treeNodeIds } from "@/lib/views/evaluateView";
   import { structureToEvalNodes } from "@/lib/views/structureNodes";
   import ViewSwitcher from "@/components/widgets/ViewSwitcher.svelte";
+  import NodeList from "@/components/widgets/NodeList.svelte";
+  import NodeRow from "@/components/widgets/NodeRow.svelte";
   import { focusedDocumentStore, pinnedKeysStore } from "@/lib/stores/editorFocus";
   import { paneLayout, isEditorPaneId } from "@/lib/stores/paneLayout.svelte";
   import {
@@ -124,6 +126,12 @@
   let projectCostExpanded = $state(false);
   let appState = $state<AppState>({ name: "needsProject" });
   let tagsManagerOpen = $state(false);
+  // Sentinel key for the Lore "+ Entry" type-picker, reusing the tree add-menu
+  // machinery (treeActions.toggleAddMenu / addMenuPosition / closeAddMenu). Lore
+  // groups dynamically so it has no per-type "+ Entry" like Prompts — the
+  // pane-header button offers the choice instead. Deprecated types (Note) are
+  // filtered out by entryTypeChoicesByKind, so notes can't be created (#67).
+  const LORE_ADD_MENU_KEY = "lore:new";
   let activeParentId: string | undefined = undefined;
   let draftTitleByScene = $state(new Map<string, string>());
   // The schema-authoring surface (state, the entry-type→kind→tree cascade, and
@@ -637,7 +645,34 @@
   <Pane id="lore" title="Lore" paneClass="lore-pane" hidden={!isPaneVisible("lore")} style={paneStyle("lore")} chrome={paneChrome}>
     {#snippet actions()}
       <ViewSwitcher kind="lore" />
-      <button class="pin-button" type="button" title="Add entry" onmousedown={(event) => event.stopPropagation()} onclick={() => treeActions.newLoreEntry()}>+ Entry</button>
+      <div class="tree-menu-anchor">
+        <button
+          class="pin-button"
+          type="button"
+          title="Add entry"
+          onmousedown={(event) => event.stopPropagation()}
+          onclick={(event) => treeActions.toggleAddMenu(LORE_ADD_MENU_KEY, event)}
+        >+ Entry</button>
+        {#if treeActions.addMenuOpenFor === LORE_ADD_MENU_KEY}
+          <div
+            class="row-add-popover"
+            style={treeActions.addMenuPosition ? `top: ${treeActions.addMenuPosition.top}px; right: ${treeActions.addMenuPosition.right}px` : ""}
+          >
+            <span class="row-add-popover-heading">New entry</span>
+            <NodeList isEmpty={entryTypeChoicesByKind(metadataSchema, "lore").length === 0}>
+              {#each entryTypeChoicesByKind(metadataSchema, "lore") as choice (choice.id)}
+                <NodeRow
+                  title={choice.name}
+                  onClick={() => { treeActions.newLoreEntry(choice.id); treeActions.closeAddMenu(); }}
+                />
+              {/each}
+              {#snippet whenEmpty()}
+                <p class="muted">No entry types defined.</p>
+              {/snippet}
+            </NodeList>
+          </div>
+        {/if}
+      </div>
     {/snippet}
     <div class="pane-content">
       <Lore

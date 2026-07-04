@@ -461,6 +461,9 @@ export type EntryTypeDefinition = {
   kind: string;
   parent?: string | null;
   abstract?: boolean;
+  // Superseded types kept readable for legacy projects but no longer offered
+  // for new-entry creation (e.g. `lore:lore_note` → Research kind, #67).
+  deprecated?: boolean;
   fields: string[];
   own_fields?: string[];
   display_template?: string;

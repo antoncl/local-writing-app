@@ -532,7 +532,7 @@ export const api = {
   listLoreEntries() {
     return request<LoreEntryList>("/lore");
   },
-  createLoreEntry(title: string, entryType = "lore:lore_note") {
+  createLoreEntry(title: string, entryType: string) {
     return request<LoreEntry>("/lore", {
       method: "POST",
       body: JSON.stringify({ title, entry_type: entryType }),

@@ -98,6 +98,9 @@
   let expandedSchemaFieldId: string | null = $state(null);
   let schemaPaneOpen = $state(false);
   let schemaTypePaneOpen = $state(false);
+  // Bound from SchemaTypeEditor: true while the type draft has unsaved edits,
+  // so closing the pane warns first (#68).
+  let schemaTypeDirty = $state(false);
   // The save layer is shared with SchemaTreePane, so it stays here; the rest of
   // the type draft (name/id/color + prompt defaults) lives inside
   // SchemaTypeEditor, which we remount per opened/created type via the draft
@@ -390,8 +393,25 @@
   }
 
   function closeSchemaPane(id: "schema" | "schema_type") {
-    if (id === "schema") schemaPaneOpen = false;
-    else schemaTypePaneOpen = false;
+    if (id === "schema") {
+      schemaPaneOpen = false;
+      return;
+    }
+    // Warn before discarding unsaved detail-type edits (#68). Cancel/backdrop
+    // keeps editing; only "Discard changes" actually closes.
+    if (schemaTypeDirty) {
+      confirmService.request({
+        title: "Discard changes?",
+        message: "This detail type has unsaved changes. Closing the editor will discard them.",
+        confirmLabel: "Discard changes",
+        destructive: true,
+        onConfirm: async () => {
+          schemaTypePaneOpen = false;
+        },
+      });
+      return;
+    }
+    schemaTypePaneOpen = false;
   }
 
   function startSchemaTypeDrag(typeId: string) {
@@ -588,9 +608,9 @@
   // SchemaTypeEditor owns the editable draft (name/id/color + prompt defaults)
   // and emits it here; we combine it with the read-only context we still hold
   // (kind/parent/abstract/readonly/selected) + the bound save layer.
-  async function saveSchemaType(payload: TypeDraftPayload) {
-    if (!schemaTypeLayerId) return;
-    await run(async () => {
+  async function saveSchemaType(payload: TypeDraftPayload): Promise<boolean> {
+    if (!schemaTypeLayerId) return false;
+    return await run(async () => {
       const previousTypeId = selectedSchemaTypeId && !schemaTypeReadonly ? selectedSchemaTypeId : null;
       // Entry-type identity is the kind-qualified FQN `kind:key` (#77). A new
       // type's id is entered bare (the local key); qualify it with the kind so
@@ -789,6 +809,7 @@
     bind:schemaTypeLayerId
     bind:expandedSchemaFieldId
     bind:fieldDropTarget
+    bind:dirty={schemaTypeDirty}
     schemaTypeKind={schemaTypeKind}
     schemaTypeParent={schemaTypeParent}
     schemaTypeReadonly={schemaTypeReadonly}

@@ -70,6 +70,8 @@
     schemaTypeLayerId?: string;
     expandedSchemaFieldId?: string | null;
     fieldDropTarget?: { id: string; position: "before" | "after" } | null;
+    // Unsaved-changes flag the host reads to guard closing the pane (#68).
+    dirty?: boolean;
     // Read-only type context (parent computes in create/open + re-supplies on save):
     schemaTypeKind?: "scene" | "lore" | "research" | "prompt" | "assistant" | "project";
     schemaTypeParent?: string;
@@ -91,7 +93,7 @@
     availableGroupEntries?: [string, { name: string; icon?: string | null }][];
     projectSchemaLayerId?: () => string;
     // Callbacks (parent owns the side-effects: API calls, modals, drag):
-    onSaveType?: (payload: TypeDraftPayload) => void;
+    onSaveType?: (payload: TypeDraftPayload) => void | Promise<boolean | void>;
     onSaveField?: (payload: FieldDraftPayload) => void;
     onCancelField?: () => void;
     onRemoveField?: () => void;
@@ -113,6 +115,7 @@
     schemaTypeLayerId = $bindable(""),
     expandedSchemaFieldId = $bindable(null),
     fieldDropTarget = $bindable(null),
+    dirty = $bindable(false),
     schemaTypeKind = "lore",
     schemaTypeParent = "",
     schemaTypeReadonly = false,
@@ -216,6 +219,45 @@
   let promptOutputKind = $state(seed.outputKind);
   let promptOutputReview = $state(seed.outputReview);
 
+  // --- Unsaved-changes tracking (#68) --------------------------------------
+  // Field + group edits persist immediately through the parent; only the
+  // type-level draft (name/id/color + prompt defaults) is unsaved until Save
+  // Type. `baseline` starts at the seed and re-snapshots on a successful save,
+  // so `dirty` clears without a remount. The host binds `dirty` and warns
+  // before closing the pane while it's set.
+  let baseline = $state({ ...seed });
+  function snapshotDraft() {
+    return {
+      name: draftName,
+      typeId: draftTypeId,
+      color: draftColor,
+      systemPrompt: promptSystemPrompt,
+      modelClass: promptModelClass,
+      providerPolicy: promptProviderPolicy,
+      contextTargetKind: promptContextTargetKind,
+      contextTargetRequired: promptContextTargetRequired,
+      scanSurface: promptScanSurface,
+      outputKind: promptOutputKind,
+      outputReview: promptOutputReview,
+    };
+  }
+  const isDirty = $derived(
+    draftName !== baseline.name ||
+      draftTypeId !== baseline.typeId ||
+      draftColor !== baseline.color ||
+      promptSystemPrompt !== baseline.systemPrompt ||
+      promptModelClass !== baseline.modelClass ||
+      promptProviderPolicy !== baseline.providerPolicy ||
+      promptContextTargetKind !== baseline.contextTargetKind ||
+      promptContextTargetRequired !== baseline.contextTargetRequired ||
+      promptScanSurface !== baseline.scanSurface ||
+      promptOutputKind !== baseline.outputKind ||
+      promptOutputReview !== baseline.outputReview,
+  );
+  $effect(() => {
+    dirty = isDirty;
+  });
+
   function buildPromptExtras(): PromptEntryTypeExtras | null {
     const scanSurface = promptScanSurface
       .split(",")
@@ -254,13 +296,16 @@
     return Object.keys(extras).length ? extras : null;
   }
 
-  function submitSaveType() {
-    onSaveType({
+  async function submitSaveType() {
+    const saved = await onSaveType({
       typeId: draftTypeId.trim(),
       name: draftName,
       color: draftColor,
       promptExtras: schemaTypeKind === "prompt" ? buildPromptExtras() : null,
     });
+    // Re-baseline on success so `dirty` clears without a remount (a failed save
+    // — e.g. a blocked rename — returns false and keeps the changes flagged).
+    if (saved !== false) baseline = snapshotDraft();
   }
 </script>
 

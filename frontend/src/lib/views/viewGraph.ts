@@ -292,7 +292,10 @@ export function exprToGraph(expr: ViewExpr | null | undefined): ViewGraph {
       return id;
     }
     if (e.annotate && e.of) {
-      const isGroup = e.annotate.label !== undefined;
+      // A color-only Highlight carries label null; a Group carries a (possibly
+      // empty) label string. `!= null` matches the evaluator's discrimination
+      // and survives the backend's dense-null serialization (label: null).
+      const isGroup = e.annotate.label != null;
       const id = addNode(isGroup ? "group" : "highlight", depth, {
         label: e.annotate.label,
         rank: e.annotate.rank,
@@ -302,13 +305,16 @@ export function exprToGraph(expr: ViewExpr | null | undefined): ViewGraph {
       if (innerId) link(innerId, id);
       return id;
     }
-    // leaves
-    if (e.type !== undefined) return addNode("type", depth, { type: e.type });
-    if (e.descendants_of !== undefined) return addNode("descendants_of", depth, { descendants_of: e.descendants_of });
-    if (e.tagged !== undefined) return addNode("tagged", depth, { tagged: e.tagged });
-    if (e.field !== undefined) return addNode("field", depth, { field: e.field });
-    if (e.hand_picked !== undefined) return addNode("hand_picked", depth, { hand_picked: e.hand_picked });
-    if (e.view_ref !== undefined) return addNode("view_ref", depth, { view_ref: e.view_ref });
+    // Leaves. Use `!= null` (not `!== undefined`): the backend serializes
+    // ViewExpr densely, so every unused slot arrives as `null`, not absent —
+    // `!== undefined` would match the first check (type) for every leaf and
+    // turn tags/fields/etc. into "type" nodes.
+    if (e.type != null) return addNode("type", depth, { type: e.type });
+    if (e.descendants_of != null) return addNode("descendants_of", depth, { descendants_of: e.descendants_of });
+    if (e.tagged != null) return addNode("tagged", depth, { tagged: e.tagged });
+    if (e.field != null) return addNode("field", depth, { field: e.field });
+    if (e.hand_picked != null) return addNode("hand_picked", depth, { hand_picked: e.hand_picked });
+    if (e.view_ref != null) return addNode("view_ref", depth, { view_ref: e.view_ref });
     return null;
   }
 

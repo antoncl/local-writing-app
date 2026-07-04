@@ -32,6 +32,27 @@ describe("viewGraph serialization", () => {
     for (const leaf of leaves) expect(roundTrip(leaf)).toEqual(leaf);
   });
 
+  it("rebuilds leaf kinds from a dense-null expr (backend API shape)", () => {
+    // The backend serializes ViewExpr densely: every unused slot is present as
+    // null, not omitted. exprToGraph must key off `!= null`, not `!== undefined`
+    // — otherwise every leaf matches the `type` slot (type: null) and reloads as
+    // a "type" node. Regression for the "everything is a type-picker" bug.
+    const dense = (o: Partial<ViewExpr>): ViewExpr =>
+      ({
+        union: null, intersect: null, difference: null, complement: null,
+        annotate: null, of: null, type: null, descendants_of: null,
+        tagged: null, field: null, hand_picked: null, view_ref: null, ...o,
+      }) as unknown as ViewExpr;
+    const expr = dense({
+      union: [
+        dense({ annotate: { label: "Anthropic", rank: 10 }, of: dense({ type: "assistant:assistant" }) }),
+        dense({ annotate: { label: "OpenAI", rank: -3 }, of: dense({ tagged: "OpenAI" }) }),
+      ],
+    });
+    const kinds = exprToGraph(expr).nodes.map((n) => n.kind).sort();
+    expect(kinds).toEqual(["group", "group", "output", "tagged", "type", "union"]);
+  });
+
   it("round-trips a union of two leaves", () => {
     const expr: ViewExpr = { union: [{ type: "lore:character" }, { tagged: "villain" }] };
     expect(roundTrip(expr)).toEqual(expr);

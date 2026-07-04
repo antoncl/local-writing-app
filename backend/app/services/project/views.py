@@ -213,6 +213,19 @@ class ViewsMixin:
         walk(expr)
         return refs
 
+    @classmethod
+    def _spec_view_refs(cls, spec: ViewSpec | None) -> set[str]:
+        """Every view_ref reachable from a ViewSpec — the top-level `expr` AND
+        every named-handle group's `expr`. A ViewSpec is expr-XOR-groups, so a
+        grouped view (named handles) carries its refs only under `groups`;
+        walking `expr` alone would let a grouped view's ref cycles slip through."""
+        if spec is None:
+            return set()
+        refs = cls._collect_view_refs(spec.expr)
+        for group in spec.groups or ():
+            refs |= cls._collect_view_refs(group.expr)
+        return refs
+
     def _check_view_ref_cycles(self, view_id: str | None, spec: ViewSpec) -> None:
         """Reject a save whose view_ref graph would contain a cycle reachable
         from the view being written. Views are nodes, so ref cycles are real and
@@ -226,11 +239,11 @@ class ViewsMixin:
             except ProjectServiceError:
                 continue
             existing = self._parse_view_spec(front_matter.get("spec"))
-            graph[entry.id] = self._collect_view_refs(existing.expr) if existing else set()
+            graph[entry.id] = self._spec_view_refs(existing)
 
         # A new view has no id yet — a placeholder node nothing else references.
         start = view_id or "__new__"
-        graph[start] = self._collect_view_refs(spec.expr)
+        graph[start] = self._spec_view_refs(spec)
 
         on_path: list[str] = []
         on_path_set: set[str] = set()

@@ -45,10 +45,13 @@ class FieldPredicate(BaseModel):
 
 
 class AnnotatePayload(BaseModel):
-    """Stamped by an `annotate` pass-through node (never filters). `label` drives
-    hard grouping (`rank` orders the groups); `color` is a soft in-place tint on
-    the existing NodeRow color-part system. At least one of label/color is set
-    (enforced on ViewExpr). Doc §1.3, ADR-0019."""
+    """Stamped by an `annotate` pass-through node (never filters). `color` is a
+    soft in-place tint on the existing NodeRow color-part system (Highlight).
+    `label`/`rank` are INERT since #91/ADR-0027 — grouping is now the View's
+    named handles (`ViewSpec.groups`), not annotate label+rank. The fields are
+    retained only so an existing spec round-trips; do NOT re-wire grouping off
+    them (that reintroduces the rank/predicate power-user trap #91 rejected). At
+    least one of label/color is set (enforced on ViewExpr). Doc §1.3, §12."""
 
     label: str | None = None
     color: str | None = None

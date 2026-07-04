@@ -268,6 +268,14 @@ describe("sort", () => {
       "e", "c",
     ]);
   });
+  it("by field desc keeps empty/unset values last (not floated to the top)", () => {
+    // power: c=9, e=3; a/b/d unset. desc orders the populated rows, empties stay
+    // last in input order — regression for the `dir * compareScalar` flip that
+    // sent blanks to the top of a descending sort.
+    expect(ids({ kind: "lore", sort: { by: "field", field_key: "power", dir: "desc" } })).toEqual([
+      "c", "e", "a", "b", "d",
+    ]);
+  });
 });
 
 describe("view_ref", () => {
@@ -280,6 +288,26 @@ describe("view_ref", () => {
     expect(evaluateView({ kind: "lore", expr: { view_ref: "cast-view" } }, NODES, ctx).nodes.map((n) => n.id)).toEqual([
       "a", "b",
     ]);
+  });
+
+  it("embeds a GROUPED saved view's flat membership (union of handles, not the universe)", () => {
+    // Regression: a view_ref to a grouped view (expr null, groups set — the shape
+    // graphToSpec emits for any 2+ handle view) used to fall through to the whole
+    // kind roster because evalViewRef read only ref.expr.
+    const withGroups: Record<string, ViewSpec> = {
+      "cast-and-gods": {
+        kind: "lore",
+        groups: [
+          { name: "Cast", expr: { type: "lore:character" } }, // a, b
+          { name: "Gods", expr: { descendants_of: "lore:deity" } }, // c, e
+        ],
+      },
+    };
+    const res = evaluateView({ kind: "lore", expr: { view_ref: "cast-and-gods" } }, NODES, {
+      schema: SCHEMA,
+      resolveView: (id) => withGroups[id] ?? null,
+    });
+    expect(res.nodes.map((n) => n.id)).toEqual(["a", "b", "c", "e"]); // NOT d (location)
   });
 
   it("a cycle contributes nothing rather than looping", () => {

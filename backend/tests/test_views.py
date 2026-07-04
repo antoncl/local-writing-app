@@ -160,6 +160,27 @@ class ViewCrudTests(unittest.TestCase):
         self.assertEqual(res.status_code, 422, res.text)
         self.assertIn("cycle", res.text.lower())
 
+    def test_view_ref_cycle_via_groups_rejected_at_save(self) -> None:
+        # A named-handle view carries its refs under `groups`, not `expr`. The
+        # cycle guard must walk groups too, else A -> B -> A slips through when
+        # the ref lives inside a group handle.
+        b = self._create("B", {"kind": "lore", "expr": {"type": "lore:character"}})
+        a = self._create(
+            "A", {"kind": "lore", "groups": [{"name": "g", "expr": {"view_ref": b["id"]}}]}
+        )
+        got_b = self.client.get(f"/api/views/{b['id']}").json()
+        # Edit B to reference A via a group → A -> B -> A is a cycle.
+        res = self.client.put(
+            f"/api/views/{b['id']}",
+            json={
+                "title": "B",
+                "base_revision": got_b["revision"],
+                "spec": {"kind": "lore", "groups": [{"name": "g", "expr": {"view_ref": a["id"]}}]},
+            },
+        )
+        self.assertEqual(res.status_code, 422, res.text)
+        self.assertIn("cycle", res.text.lower())
+
     def test_invalid_expr_rejected(self) -> None:
         # Two primary slots set → structural validation rejects it.
         res = self.client.post(

@@ -125,10 +125,16 @@
       pid
     );
   }
+  // NodePicker's Category enum has no "prompt" — it surfaces the prompt roster
+  // under "snippet". Map the anchor kind so hand-picking a prompt-kind view
+  // renders its browse group instead of "No pickable items".
+  function pickerCategory(k: string): NodePickerRef["kind"] {
+    return (k === "prompt" ? "snippet" : k) as NodePickerRef["kind"];
+  }
   let pickerRefs = $derived<NodePickerRef[]>(
     (cfg.hand_picked ?? []).map((pid) => ({
       id: pid,
-      kind: (ctx.kind as NodePickerRef["kind"]) ?? "lore",
+      kind: pickerCategory(ctx.kind) ?? "lore",
       title: refTitle(pid),
     })),
   );
@@ -326,7 +332,7 @@
          picker menu itself is portaled to <body>). -->
     <div class="vfield-value nodrag" role="presentation" use:stopPointerdown>
       <NodePicker
-        config={{ sources: [{ kind: ctx.kind }] }}
+        config={{ sources: [{ kind: pickerCategory(ctx.kind) }] }}
         value={pickerRefs}
         label="Pick nodes"
         compact

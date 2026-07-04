@@ -93,7 +93,10 @@
 
   // Saved views of the same kind (for the view_ref leaf + preview resolution).
   let savedViews = $state<{ id: string; title: string }[]>([]);
-  let viewSpecs = new Map<string, ViewSpec>();
+  // $state so the `preview` derived re-resolves view_ref leaves once the specs
+  // finish loading async (mirrors paneViews.svelte.ts); a plain `let` leaves the
+  // reassignment untracked and the preview shows referenced views as empty.
+  let viewSpecs = $state(new Map<string, ViewSpec>());
 
   // ---- hydrate from the opened view node ----
   $effect(() => {

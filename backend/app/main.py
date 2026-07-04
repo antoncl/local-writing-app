@@ -126,7 +126,7 @@ from app.services.ai.profiles import CapabilityTier, ModelDescriptor
 from app.services.ai.profiles.registry import known_provider_names, profile_for
 from app.services.project_service import ProjectService, ProjectServiceError
 
-app = FastAPI(title="Local Writing Service", version="0.5.0")
+app = FastAPI(title="Local Writing Service", version="0.5.4")
 app.add_middleware(
     CORSMiddleware,
     # 5173 = the default Vite dev server; 5174 = the isolated "claude" frontend

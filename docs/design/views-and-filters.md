@@ -33,6 +33,10 @@ keeps cross-kind "smart folders" out of scope (per #35).
 
 ### 1.2 Operations
 
+> **Amended by §12 / ADR-0027 (#91).** The combinators below are retained but **demoted to
+> the power tier**. The common case is authored with **injectors + filters** (a pipeline);
+> explicit Operations appear only when the graph branches across differently-sourced sets.
+
 Four combinators, each a node in the composition graph:
 
 | Op | Glyph | Semantics |
@@ -46,6 +50,12 @@ Difference is the op most likely to confuse exactly the users this design target
 port-role labelling + filled-lobe glyph is a hard requirement, not polish.
 
 ### 1.3 Annotate — labels and colors (grouping dissolves into the graph)
+
+> **Amended by §12 / ADR-0027 (#91).** The **label → grouping** half below is superseded:
+> grouping is now the **View's named handles** (same handle unions+dedupes; handles concatenate
+> in order; handle order = group order — the `rank` field is retired), and the standalone
+> **Group** node and implicit "everything else" bucket retire with it. The **color → Highlight**
+> half and the tint-for-depth rule survive unchanged.
 
 A fifth node type, **annotate** (internal/ADR name), is a *pass-through*: it stamps the
 members of its input set with a payload and forwards the set unchanged. It never filters.
@@ -124,7 +134,11 @@ Notes:
 Orthogonal to membership, per the epic. v1 vocabulary: by field (any comparable field,
 asc/desc), by title, by **manual/stored order** — the last is load-bearing for
 Assistants, where drag-reorder is the ranking the dynamic default reads (§6.3). Sort
-applies within each group; group order comes from annotate ranks (§1.3).
+applies within each group; group order comes from handle order (§12, ADR-0027).
+
+> **Amended by §12 / ADR-0027 (#91).** Sort is **per-segment**: a **Sorter node** in a branch
+> sorts that segment before it reaches its handle. This ViewSpec-level `sort` remains the
+> fallback when no per-branch Sorter is present.
 
 ## 2. ViewSpec — one membership language, two carriers
 
@@ -228,6 +242,10 @@ non-matching chapter/act ancestors kept visible). Membership-filtering the tree 
 deferred to a later slice, deliberately.
 
 ## 4. Authoring UI — the view designer
+
+> **Amended by §12 / ADR-0027 (#91).** The palette gains **roles** — injector (incl. universal
+> `All`) · filter · operation (power tier) · sorter · View with named handles — so the 90% case
+> reads as a pipeline. See §12 for the paradigm.
 
 - **Svelte Flow** (`@xyflow/svelte` 1.0) — verified a full Svelte 5 rewrite, stores
   converted to runes. Adopted for the designer canvas. (Likely double duty in the 0.6.0
@@ -378,3 +396,52 @@ Each step lands green (ruff + pytest + svelte-check + browser-verify) before the
 - NodePickerConfig = sources (ViewSpecs/refs) + mechanics (§6.1).
 - Assistant dynamic default = topmost matching; ★ flag retired (§6.3).
 - Type-aware Jinja helpers on a shared ancestry primitive (§8.1).
+- **The approachable flow: injectors, filters, named-handle grouping, denormalized output
+  (§12; ADR-0027 — amends set-algebra/annotate/sort ADRs, #91).**
+
+## 12. The approachable flow (#91 — paradigm overhaul)
+
+The Venn-glyph graph (§0–1) is the right *foundation* but a hostile *front door*: a bare leaf
+reads as "the whole universe," and the simplest narrowing needs an explicit Intersect. #91
+keeps the set-algebra foundation and makes the authoring surface approachable — **not** by
+reverting to a boolean filter builder (predicate logic in a costume; rejected — see ADR-0027),
+but by giving the palette **roles** so the 90% case reads as a pipeline and the algebra appears
+only when the graph branches.
+
+**Palette roles.**
+
+- **Injector** — a source (no input) emitting a set: the §1.4 leaves **plus a universal
+  `All`** (the whole kind universe).
+- **Filter** — a transform (set in → narrowed set out) on the same predicates. **Series = AND,
+  parallel = OR** (topology, never keywords). A filter is **sugar**: `keep: p` →
+  `intersect(input, inject(p))`, `drop: p` → `difference(input, inject(p))`. It lives in the
+  designer `layout` and lowers to the §2 `expr` on save — the evaluator and grammar are
+  unchanged.
+- **Operation** — the §1.2 combinators, **power tier only**.
+- **Sorter** — sorts one branch/segment (§1.5, amended).
+- **View** — the output, with **N named input handles**.
+
+**Named handles = grouping, and dedupe made visible.** Handles are ordered top-to-bottom.
+*Same handle* → union + dedupe (one group; a flat OR is "both branches into one handle").
+*Across handles* → ordered concatenation, each handle a group, **handle order = group order**
+(drag to reorder; no `rank`). A node may sit under several handles (multi-membership). The
+handle's **name is the group label**. This supersedes §1.3's label+rank grouping; Highlight
+(color) survives.
+
+**Denormalized output — grouping and trees are one mechanism.** `evaluateView` returns rows
+**`(node, path)`**, `path` = handle / sub-flow names outer→inner. **Dedupe on identical
+`(node, path)`**; **normalize by `path`** (0–1 segments → flat/grouped; deeper → nesting — the
+RPG-II level-break). Handle / sub-flow order = sibling order per level. Trees fall *out* of
+named handles + named sub-flows — no separate subsystem.
+
+**0.5.0 cut line.** The row/`path` contract carries arbitrary depth from day one, but **v1
+emits depth ≤ 1**: a sub-flow / view-ref feeding a handle contributes its *result set* (flat,
+deduped — today's view-ref behavior). A sub-flow contributing its *own group structure* (real
+nesting) is the later increment — a renderer that walks paths deeper than one. Nothing in the
+grammar or stored spec caps depth; only the renderer does. **Rendering:** 1-handle View → flat
+(handle name = the list's title); 2+ handles → groups.
+
+**What this closes.** The four #91 polish items dissolve structurally: the comparator lives
+*inside* a Filter (derived from the field); Type is offered only for kinds with >1 entry_type;
+"Views over" hides when the anchor kind comes from pane context; group order is handle order.
+See ADR-0027 for the full decision, rejected alternative, and consequences.

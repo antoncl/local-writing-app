@@ -45,3 +45,4 @@ Design doc: [`../views-and-filters.md`](../views-and-filters.md) · Prerequisite
 - [0024](0024-assistant-dynamic-default-topmost-matching.md) — Assistant dynamic default = topmost matching; ★ default flag retired (#35 Q6)
 - [0025](0025-views-evaluate-frontend-side.md) — Views evaluate frontend-side; SQLite index rejected (measured)
 - [0026](0026-type-aware-jinja-helpers.md) — Type-aware Jinja helpers (`is_a`) on a shared entry_type-ancestry primitive
+- [0027](0027-approachable-flow-injectors-filters-named-handles.md) — The approachable flow: injector/filter roles + named-handle grouping + denormalized `(node, path)` output (#91; amends 0018/0019/0021/0025)

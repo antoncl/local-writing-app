@@ -95,4 +95,10 @@ describe("ttlChipsFor", () => {
     expect(chip.expired).toBe(false);
     expect(chip.formatted).toMatch(/^\d+s$/);
   });
+
+  it("treats a malformed timestamp as expired (no 'NaNs' chip)", () => {
+    const [chip] = ttlChipsFor({ system: "" }, 0);
+    expect(chip.expired).toBe(true);
+    expect(chip.formatted).toBe("expired");
+  });
 });

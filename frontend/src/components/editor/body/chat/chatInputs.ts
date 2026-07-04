@@ -4,8 +4,8 @@
 import type { PromptEntrySummary, PromptInputDefinition } from "@/lib/types";
 
 // ---- cost-estimate + TTL strip state ----
-// Per-slot TTL in seconds; mirrors App.svelte's SLOT_TTL_SECONDS.
-// Drives the TTL countdown chips. Slots not in this table get 5 min.
+// Per-slot TTL in seconds; drives the TTL countdown chips. Slots not in this
+// table get 5 min. Single source of truth (the App.svelte copy was retired).
 export const SLOT_TTL_SECONDS: Record<string, number> = {
   system: 3600,
   lore: 300,
@@ -62,15 +62,18 @@ export type TtlChip = {
   expired: boolean;
 };
 
-// Per-slot TTL chips. Caller passes ttlTick so chips recompute live, and
-// activeChatCacheWriteTimes so they refresh when a new turn stamps a slot.
+// Per-slot TTL chips. The caller threads a live `_tick` (unused in the body) as
+// a reactive dependency so the chips recompute each second; `times` refreshes
+// them when a new turn stamps a slot.
 export function ttlChipsFor(times: Record<string, string>, _tick: number): TtlChip[] {
   if (!times || Object.keys(times).length === 0) return [];
   const now = Date.now();
   return Object.entries(times).map(([slot, iso]) => {
     const writtenAt = Date.parse(iso);
     const ttl = (SLOT_TTL_SECONDS[slot] ?? 300) * 1000;
-    const remainingMs = writtenAt + ttl - now;
+    // A malformed/empty stored timestamp parses to NaN; treat it as expired
+    // rather than rendering a "NaNs" chip that never counts down.
+    const remainingMs = Number.isNaN(writtenAt) ? 0 : writtenAt + ttl - now;
     const remainingSec = Math.max(0, Math.round(remainingMs / 1000));
     const label = slot.charAt(0).toUpperCase() + slot.slice(1);
     const ttlLabel = ttl >= 3600_000 ? "1h" : "5m";

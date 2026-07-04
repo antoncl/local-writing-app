@@ -261,7 +261,6 @@
     void refreshProjectCost();
     void aiSettings.refreshProjectColor();
     void paneViews.loadForProject(projectPath);
-    void refreshAssistantTags();
   }
 
   async function refreshProjectCost(): Promise<void> {

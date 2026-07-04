@@ -11,11 +11,12 @@
 //    Complement is `universe ∖ A`; an absent/empty `expr` = the whole universe.
 //  - Grouping is the View's **named-handle** structure (`spec.groups`), not the
 //    old `annotate(label, rank)` node (retired for #91). Each group is one named
-//    handle: its `name` is the group label and the row `path` segment; same-name
-//    groups union + dedupe. Evaluation emits rows `(node, path)`; dedupe is on
-//    identical `(node, path)`; the normalize pass turns 0–1 distinct paths into a
-//    flat list and 2+ into groups (depth ≤ 1 in v1 — deeper nesting is a later
-//    renderer increment on the same row contract).
+//    handle: its `name` is the group label and a row `path` segment; same-name
+//    groups union + dedupe. Evaluation emits rows `(node, path)`; the normalize
+//    pass rebuilds nesting from the paths — arbitrary depth, with the depth-1
+//    handle case falling out as the shallow one (ADR-0027 §E). A
+//    `presentation: "tree"` view (#101) instead nests members by their
+//    structural `ancestry`, rebuilt by `buildStructureTree`.
 //  - Membership is a `Set<id>` per segment; the segment list is the universe
 //    filtered to that set, preserving **input order** — exactly the `manual`
 //    sort the Assistants drag order relies on (ADR-0022, doc §1.5).
@@ -42,24 +43,40 @@ export type EvalNode = {
   entry_type: string;
   title: string;
   metadata?: Record<string, unknown> | null;
+  // Tree presentation only (#101): the node's structural ancestry, outer→inner
+  // (the container nodes above it). Set by the structure adapter
+  // (`structureToEvalNodes`); other callers omit it and non-tree presentations
+  // ignore it. Members nest under their ancestry; empty branches self-prune.
+  ancestry?: PathSegment[] | null;
 };
 
 // Per-node stamp from a color `annotate` (Highlight) node. Drives the NodeRow
 // color part (doc §1.3). Grouping no longer stamps here — it lives in handles.
 export type ViewAnnotation = { color: string | null };
 
-// A denormalized evaluator row: a member node tagged with its `path` — the
-// handle / sub-flow names outer→inner (ADR-0027 §E). v1 emits depth ≤ 1, so
-// `path` is `[]` (flat) or `[groupName]` (one handle).
-export type ViewRow<T extends EvalNode = EvalNode> = { node: T; path: string[] };
+// One nesting level in a row's `path` (ADR-0027 §E, #101). `nodeId` set => the
+// segment IS a real node (a structure container) and renders as a collapsible
+// NodeRow; `null` => a synthetic group label (a named handle). `color` is an
+// optional group tint (handles carry one; structure segments don't).
+export type PathSegment = { key: string; label: string; nodeId: string | null; color?: string | null };
 
-// A hard group derived from a named handle (`spec.groups`), in handle order.
-// `label` is the handle name; `color` an optional group tint.
+// A denormalized evaluator row: a member node tagged with its `path` — the
+// nesting segments outer→inner (handle names for grouped views, or structural
+// ancestry for tree views). The normalize pass reconstructs nesting from paths.
+export type ViewRow<T extends EvalNode = EvalNode> = { node: T; path: PathSegment[] };
+
+// A group in the normalized result — recursive (ADR-0027 §E, #101). `nodeId`
+// set => this group is a real container node (render its header as a NodeRow);
+// `null` => a synthetic named-handle bucket. `nodes` are the direct member
+// leaves at this level (flat, ordered); `children` are nested sub-groups
+// (empty for the depth-1 handle-grouped case).
 export type ViewGroup<T extends EvalNode = EvalNode> = {
   key: string;
   label: string | null;
   color: string | null;
+  nodeId: string | null;
   nodes: T[];
+  children: ViewGroup<T>[];
 };
 
 export type ViewResult<T extends EvalNode = EvalNode> = {
@@ -86,6 +103,40 @@ export type EvalContext = {
 // in stored/manual order. The seam every NodeList routes through (ADR-0022).
 export function defaultView(kind: string): ViewSpec {
   return { kind, expr: null, sort: { by: "manual" } };
+}
+
+// Every node id present in a tree result's group hierarchy — the surviving
+// members plus the ancestors kept to reach them (#101). Drives the Draft tree's
+// membership pruning: a structure node absent from this set is hidden, so a
+// filter narrows the tree to matches and their ancestors and drops empty
+// branches. (`nodes` is scanned too so it also works on handle-grouped results.)
+export function treeNodeIds<T extends EvalNode>(groups: ViewGroup<T>[] | null): Set<string> {
+  const ids = new Set<string>();
+  const walk = (gs: ViewGroup<T>[]): void => {
+    for (const g of gs) {
+      if (g.nodeId) ids.add(g.nodeId);
+      for (const n of g.nodes) ids.add(n.id);
+      walk(g.children);
+    }
+  };
+  if (groups) walk(groups);
+  return ids;
+}
+
+// Filter a group tree to members whose id is in `keep`, pruning any branch with
+// no survivors (a group stays if it keeps a direct node OR a surviving child).
+// Pure; panes use it to apply a text search over an already-computed group tree
+// without re-evaluating (#101). A container's own `nodeId` doesn't keep it
+// alive — only surviving descendants do, matching the tree's self-prune rule.
+export function filterGroups<T extends EvalNode>(groups: ViewGroup<T>[], keep: Set<string>): ViewGroup<T>[] {
+  const out: ViewGroup<T>[] = [];
+  for (const g of groups) {
+    const nodes = g.nodes.filter((n) => keep.has(n.id));
+    const children = filterGroups(g.children, keep);
+    if (nodes.length === 0 && children.length === 0) continue;
+    out.push({ ...g, nodes, children });
+  }
+  return out;
 }
 
 type RunState<T extends EvalNode> = {
@@ -115,12 +166,29 @@ export function evaluateView<T extends EvalNode>(
     viewStack: [],
   };
 
+  // Tree presentation (#101): members nest by their structural `ancestry`, not
+  // by named handles. Containers materialize from ancestry segments, so a
+  // filtered tree keeps a match's ancestors and prunes empty branches for free.
+  if (spec.presentation === "tree") {
+    const members = evalSegment(state, spec.expr ?? null, spec.sort);
+    return {
+      nodes: members,
+      annotations: state.annotations,
+      groups: buildStructureTree(members),
+    };
+  }
+
   const groups = spec.groups && spec.groups.length > 0 ? spec.groups : null;
+  // Both paths yield denormalized `(node, path)` rows. `evalSource` carries
+  // nesting: a handle whose source is a bare grouped `view_ref` contributes that
+  // view's group structure (multi-segment paths), and a `union` concatenates its
+  // operands' rows preserving each row's path. A top-level bare grouped view_ref
+  // (no handles) likewise inherits the referenced view's groups directly.
   const rows = groups
     ? evalGroups(state, groups, spec.sort)
-    : evalSegment(state, spec.expr ?? null, spec.sort).map((node) => ({ node, path: [] as string[] }));
+    : evalSource(state, spec.expr ?? null, spec.sort);
 
-  return normalize(state, rows, groups);
+  return normalize(state, rows);
 }
 
 // Evaluate one membership segment: a `null` expr is the whole universe. Returns
@@ -135,9 +203,57 @@ function evalSegment<T extends EvalNode>(
   return sortNodes(members, sort);
 }
 
-// Evaluate each named handle in order into rows. Same-name handles union+dedupe
-// (ADR-0027 §D); dedupe key is the identical `(node, path)` pair. Per-group sort
-// falls back to the ViewSpec-level sort.
+// A stable dedupe key for a `(node, path)` row — the node id plus the ordered
+// path-segment keys. Rows sharing a node id but differing in path are kept
+// distinct (a node reachable via two branches appears under each).
+function rowKey<T extends EvalNode>(node: T, path: PathSegment[]): string {
+  return JSON.stringify([node.id, path.map((s) => s.key)]);
+}
+
+// Evaluate a membership expression into denormalized `(node, path)` rows. This
+// is the row-level counterpart to `evalExpr` (which returns a flat `Set<id>` for
+// the filter algebra) and the seam where PATHS originate (#101):
+//  - `union` concatenates its operands' rows, preserving each row's path and
+//    deduping per `(node, path)` — so combining two grouped sub-flows yields
+//    their rows back-to-back (ADR-0027 §E; matches the denormalized set model).
+//  - a *bare* `view_ref` to a grouped view contributes that view's group
+//    structure as nested path segments (sub-flow → handle). A ref buried inside
+//    the set algebra (intersect/difference/…) has no grouping to preserve and
+//    flattens through `evalExpr` as before.
+//  - everything else resolves to flat rows (empty path) via `evalSegment`.
+function evalSource<T extends EvalNode>(
+  state: RunState<T>,
+  expr: ViewExpr | null | undefined,
+  sort: ViewSort | null | undefined,
+): ViewRow<T>[] {
+  if (expr) {
+    if (expr.union) {
+      const rows: ViewRow<T>[] = [];
+      const seen = new Set<string>();
+      for (const sub of expr.union) {
+        for (const r of evalSource(state, sub, sort)) {
+          const key = rowKey(r.node, r.path);
+          if (seen.has(key)) continue; // dedupe identical (node, path)
+          seen.add(key);
+          rows.push(r);
+        }
+      }
+      return rows;
+    }
+    if (isBareViewRef(expr)) {
+      const nested = evalViewRefRows(state, expr.view_ref as string, sort);
+      if (nested) return nested; // grouped/tree ref → nested rows; null → flat
+    }
+  }
+  return evalSegment(state, expr, sort).map((node) => ({ node, path: [] as PathSegment[] }));
+}
+
+// Evaluate each named handle in order into rows. Each handle prepends its own
+// segment onto its source rows (`evalSource`), so a handle fed by a grouped
+// sub-flow nests that flow's groups *under* the handle name (multi-segment
+// paths), while a plain handle yields the depth-1 case. Same-name handles
+// union+dedupe (ADR-0027 §D); dedupe key is the whole `(node, path)`. Per-group
+// sort falls back to the ViewSpec-level sort.
 function evalGroups<T extends EvalNode>(
   state: RunState<T>,
   groups: ViewGroupSpec[],
@@ -146,24 +262,28 @@ function evalGroups<T extends EvalNode>(
   const rows: ViewRow<T>[] = [];
   const seen = new Set<string>();
   for (const g of groups) {
-    const members = evalSegment(state, g.expr ?? null, g.sort ?? fallbackSort);
-    for (const node of members) {
-      const key = JSON.stringify([node.id, g.name]);
+    const seg: PathSegment = { key: g.name, label: g.name, nodeId: null, color: g.color ?? null };
+    for (const r of evalSource(state, g.expr ?? null, g.sort ?? fallbackSort)) {
+      const path = [seg, ...r.path];
+      const key = rowKey(r.node, path);
       if (seen.has(key)) continue; // dedupe identical (node, path)
       seen.add(key);
-      rows.push({ node, path: [g.name] });
+      rows.push({ node: r.node, path });
     }
   }
   return rows;
 }
 
 // Normalize rows → a render-ready result. Flat membership (dedupe by id, row
-// order) is always exposed as `nodes`. Grouping (v1: depth ≤ 1) is emitted only
-// when 2+ distinct handles carry members; 0–1 renders flat (`groups: null`).
+// order) is always exposed as `nodes`. Grouping reconstructs nesting from each
+// row's `path` (ADR-0027 §E): a row with an empty remaining path is a direct
+// member at that level; otherwise it recurses under its next segment. Depth is
+// carried by the path — the depth-1 handle case falls out as the shallow one.
+// Whether to group is read from the rows themselves: with no paths it is the
+// flat/pipeline case (`groups: null`).
 function normalize<T extends EvalNode>(
   state: RunState<T>,
   rows: ViewRow<T>[],
-  groups: ViewGroupSpec[] | null,
 ): ViewResult<T> {
   const seenId = new Set<string>();
   const nodes: T[] = [];
@@ -173,20 +293,105 @@ function normalize<T extends EvalNode>(
     nodes.push(r.node);
   }
 
-  if (!groups) return { nodes, annotations: state.annotations, groups: null };
-
-  const built: ViewGroup<T>[] = [];
-  const emitted = new Set<string>();
-  for (const g of groups) {
-    if (emitted.has(g.name)) continue; // same-name handles already merged in rows
-    emitted.add(g.name);
-    const bucket = rows.filter((r) => r.path[0] === g.name).map((r) => r.node);
-    if (bucket.length === 0) continue;
-    built.push({ key: `group:${g.name}`, label: g.name, color: g.color ?? null, nodes: bucket });
+  // No row carries a path → nothing to nest (default/flat view).
+  if (!rows.some((r) => r.path.length > 0)) {
+    return { nodes, annotations: state.annotations, groups: null };
   }
-  // 0–1 populated handle → the flat/pipeline case (handle name = list title).
-  if (built.length <= 1) return { nodes, annotations: state.annotations, groups: null };
-  return { nodes, annotations: state.annotations, groups: built };
+
+  const built = buildLevel(rows);
+  let groups = built.children;
+  // "Top level not considered": a single synthetic wrapper with no ungrouped
+  // direct members and children of its own is a passthrough strip (a handle over
+  // a grouped sub-flow) — drop it and surface the sub-flow's groups directly.
+  if (
+    built.nodes.length === 0 &&
+    groups.length === 1 &&
+    groups[0].nodeId === null &&
+    groups[0].nodes.length === 0 &&
+    groups[0].children.length > 0
+  ) {
+    groups = groups[0].children;
+  }
+  // A lone leaf group (one handle, no nesting) renders as a flat list — its name
+  // is the list title, not a group header. Ungrouped direct members keep groups.
+  if (built.nodes.length === 0 && groups.length <= 1 && groups.every((g) => g.children.length === 0)) {
+    return { nodes, annotations: state.annotations, groups: null };
+  }
+  return { nodes, annotations: state.annotations, groups };
+}
+
+// Recursively bucket rows by their leading path segment. Rows with an empty
+// remaining path are direct members at this level (deduped by id, in first-seen
+// order); the rest recurse under a child group keyed by the next segment, with
+// that segment consumed. Same segment key → one merged group (first-seen order).
+function buildLevel<T extends EvalNode>(rows: ViewRow<T>[]): { nodes: T[]; children: ViewGroup<T>[] } {
+  const directIds = new Set<string>();
+  const nodes: T[] = [];
+  const childOrder: string[] = [];
+  const childBuckets = new Map<string, { seg: PathSegment; rows: ViewRow<T>[] }>();
+
+  for (const r of rows) {
+    if (r.path.length === 0) {
+      if (directIds.has(r.node.id)) continue;
+      directIds.add(r.node.id);
+      nodes.push(r.node);
+      continue;
+    }
+    const seg = r.path[0];
+    let bucket = childBuckets.get(seg.key);
+    if (!bucket) {
+      bucket = { seg, rows: [] };
+      childBuckets.set(seg.key, bucket);
+      childOrder.push(seg.key);
+    }
+    bucket.rows.push({ node: r.node, path: r.path.slice(1) });
+  }
+
+  const children = childOrder.map((key) => {
+    const { seg, rows: sub } = childBuckets.get(key)!;
+    const inner = buildLevel(sub);
+    return {
+      key: seg.nodeId ? `node:${seg.nodeId}` : `group:${seg.key}`,
+      label: seg.label,
+      color: seg.color ?? null,
+      nodeId: seg.nodeId,
+      nodes: inner.nodes,
+      children: inner.children,
+    };
+  });
+  return { nodes, children };
+}
+
+// Build a nested group tree from members' structural `ancestry` (#101). Every
+// member — container or leaf — becomes a `nodeId` group at its position; leaves
+// are simply childless groups (tree uniformity: every tree node is a real Node).
+// Ancestor groups materialize on demand from the ancestry segments, so a
+// filtered set keeps the ancestors of surviving members and drops empty
+// branches for free. Members are processed in input order → sibling order =
+// document/manual order. A container that is itself a member and an ancestor of
+// other members merges to one group (keyed by id) — no double appearance.
+function buildStructureTree<T extends EvalNode>(members: T[]): ViewGroup<T>[] {
+  const root: ViewGroup<T>[] = [];
+  const index = new Map<string, ViewGroup<T>>(); // node id → its group
+
+  const ensureGroup = (seg: PathSegment, siblings: ViewGroup<T>[]): ViewGroup<T> => {
+    let g = index.get(seg.key);
+    if (!g) {
+      g = { key: `node:${seg.key}`, label: seg.label, color: seg.color ?? null, nodeId: seg.nodeId, nodes: [], children: [] };
+      index.set(seg.key, g);
+      siblings.push(g);
+    }
+    return g;
+  };
+
+  for (const m of members) {
+    let siblings = root;
+    for (const seg of m.ancestry ?? []) {
+      siblings = ensureGroup(seg, siblings).children;
+    }
+    ensureGroup({ key: m.id, label: m.title, nodeId: m.id }, siblings);
+  }
+  return root;
 }
 
 function evalExpr<T extends EvalNode>(state: RunState<T>, expr: ViewExpr): Set<string> {
@@ -260,6 +465,47 @@ function evalViewRef<T extends EvalNode>(state: RunState<T>, viewId: string): Se
     }
     if (ref.expr) return evalExpr(state, ref.expr);
     return new Set(state.order.keys()); // no primary slot -> pass-through
+  } finally {
+    state.viewStack.pop();
+  }
+}
+
+// A `view_ref` with no other primary slot set — a sub-flow wired *directly* to a
+// source (its group structure can be preserved). A ref buried in the set algebra
+// fails this and flattens through `evalExpr` (`!= null`: dense-null dumps).
+function isBareViewRef(expr: ViewExpr): boolean {
+  return (
+    expr.view_ref != null &&
+    expr.union == null &&
+    expr.intersect == null &&
+    expr.difference == null &&
+    expr.complement == null &&
+    expr.annotate == null &&
+    expr.type == null &&
+    expr.descendants_of == null &&
+    expr.tagged == null &&
+    expr.field == null &&
+    expr.hand_picked == null
+  );
+}
+
+// Nest a grouped/handle sub-flow: evaluate the referenced view's handles into
+// rows *with their paths* so the caller can splice them under its own segment
+// (sub-flow → handle, #101). Returns null when the ref has no group structure to
+// preserve (flat, tree, or unresolved) — the caller then flattens to membership.
+// An empty array (cycle, or a grouped ref with no members) short-circuits to "no
+// rows", contributing nothing.
+function evalViewRefRows<T extends EvalNode>(
+  state: RunState<T>,
+  viewId: string,
+  sort: ViewSort | null | undefined,
+): ViewRow<T>[] | null {
+  if (state.viewStack.includes(viewId)) return []; // cycle: contribute nothing
+  const ref = state.resolveView?.(viewId);
+  if (!ref || !ref.groups || ref.groups.length === 0) return null; // flat/unresolved → flatten
+  state.viewStack.push(viewId);
+  try {
+    return evalGroups(state, ref.groups, ref.sort ?? sort);
   } finally {
     state.viewStack.pop();
   }

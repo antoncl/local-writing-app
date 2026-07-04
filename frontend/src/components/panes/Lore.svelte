@@ -19,8 +19,9 @@
   import NodeList from "@/components/widgets/NodeList.svelte";
   import GroupCaret from "@/components/widgets/GroupCaret.svelte";
   import CountPill from "@/components/widgets/CountPill.svelte";
+  import GroupTree from "@/components/widgets/GroupTree.svelte";
   import { getSwatch, resolveColorForType } from "@/lib/utils/colors";
-  import { evaluateView, type ViewGroup } from "@/lib/views/evaluateView";
+  import { evaluateView, filterGroups, type ViewGroup } from "@/lib/views/evaluateView";
   import { paneViews } from "@/lib/stores/paneViews.svelte";
   import { metadataSchemaStore } from "@/lib/stores/schema";
   import { focusedDocumentStore, pinnedKeysStore } from "@/lib/stores/editorFocus";
@@ -56,7 +57,14 @@
   $: viewResult = evaluateView(viewSpec, entries, { schema, resolveView: paneViews.resolveView });
   $: annotations = viewResult.annotations;
   $: filteredEntries = filterEntries(viewResult.nodes, searchQuery);
-  $: displayGroups = buildDisplayGroups(viewResult.groups, filteredEntries, schema, presentation === "flat");
+  // A view with named-handle / structural groups renders through the recursive
+  // GroupTree; search prunes the tree to the matching set. Otherwise Lore falls
+  // back to its own flat / by-entry_type buckets (depth-1, no nesting).
+  $: viewGroups = viewResult.groups
+    ? filterGroups(viewResult.groups, new Set(filteredEntries.map((e) => e.id)))
+    : null;
+  $: displayGroups = viewGroups ? [] : buildDisplayGroups(filteredEntries, schema, presentation === "flat");
+  $: isEmpty = viewGroups ? viewGroups.length === 0 : displayGroups.length === 0;
 
   function filterEntries(items: LoreEntrySummary[], query: string) {
     const normalizedQuery = query.trim().toLowerCase();
@@ -64,26 +72,13 @@
     return items.filter((entry) => entrySearchText(entry).includes(normalizedQuery));
   }
 
+  // The non-view grouping: Lore's intrinsic flat / by-entry_type buckets. A view
+  // that carries its own groups bypasses this and renders through GroupTree.
   function buildDisplayGroups(
-    labelGroups: ViewGroup<LoreEntrySummary>[] | null,
     items: LoreEntrySummary[],
     currentSchema: MetadataSchema | null,
     flat: boolean,
   ): LoreEntryGroup[] {
-    // A view with label annotations dictates the grouping — honor its rank order,
-    // filtering each bucket to the searched set (empty buckets drop out).
-    if (labelGroups) {
-      const inSet = new Set(items.map((e) => e.id));
-      return labelGroups
-        .map((g) => ({
-          id: g.key,
-          label: g.label ?? "Everything else",
-          color: g.color,
-          entries: g.nodes.filter((n) => inSet.has(n.id)),
-          depth: 0,
-        }))
-        .filter((g) => g.entries.length > 0);
-    }
     // Flat presentation: one headerless list.
     if (flat) {
       return [{ id: "__flat__", label: null, color: null, entries: items, depth: 0 }];
@@ -174,39 +169,43 @@
 <NodeList
   searchPlaceholder="Search entries, tags, aliases"
   bind:searchValue={searchQuery}
-  isEmpty={displayGroups.length === 0}
+  {isEmpty}
 >
-  {#each displayGroups as group (group.id)}
-    {#if group.label === null}
-      {#each group.entries as entry (entry.id)}
-        {@render entryRow(entry, 0)}
-      {/each}
-    {:else}
-      <NodeRow
-        groupHeader
-        collapsed={!!collapsedGroups[group.id]}
-        title={group.label}
-        depth={group.depth}
-        stripeColor={group.color ? getSwatch(group.color)?.hex ?? null : null}
-        onClick={() => toggleGroup(group.id)}
-        onmousedown={(event) => event.stopPropagation()}
-      >
-        {#snippet leading()}
-          <GroupCaret collapsed={collapsedGroups[group.id]} />
-        {/snippet}
-        {#snippet trailing()}
-          <CountPill count={group.entries.length} />
-        {/snippet}
-        {#snippet nested()}
-          {#if !collapsedGroups[group.id]}
-            {#each group.entries as entry (entry.id)}
-              {@render entryRow(entry, group.depth + 1)}
-            {/each}
-          {/if}
-        {/snippet}
-      </NodeRow>
-    {/if}
-  {/each}
+  {#if viewGroups}
+    <GroupTree groups={viewGroups} collapsed={collapsedGroups} onToggle={toggleGroup} leaf={entryRow} />
+  {:else}
+    {#each displayGroups as group (group.id)}
+      {#if group.label === null}
+        {#each group.entries as entry (entry.id)}
+          {@render entryRow(entry, 0)}
+        {/each}
+      {:else}
+        <NodeRow
+          groupHeader
+          collapsed={!!collapsedGroups[group.id]}
+          title={group.label}
+          depth={group.depth}
+          stripeColor={group.color ? getSwatch(group.color)?.hex ?? null : null}
+          onClick={() => toggleGroup(group.id)}
+          onmousedown={(event) => event.stopPropagation()}
+        >
+          {#snippet leading()}
+            <GroupCaret collapsed={collapsedGroups[group.id]} />
+          {/snippet}
+          {#snippet trailing()}
+            <CountPill count={group.entries.length} />
+          {/snippet}
+          {#snippet nested()}
+            {#if !collapsedGroups[group.id]}
+              {#each group.entries as entry (entry.id)}
+                {@render entryRow(entry, group.depth + 1)}
+              {/each}
+            {/if}
+          {/snippet}
+        </NodeRow>
+      {/if}
+    {/each}
+  {/if}
   {#snippet whenEmpty()}
     {#if entries.length === 0}
       <p class="muted">No entries yet.</p>

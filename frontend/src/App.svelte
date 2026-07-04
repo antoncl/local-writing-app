@@ -66,7 +66,7 @@
   } from "@/lib/stores/schema";
   import { implicitContextMatcherStore } from "@/lib/stores/derived";
   import { paneViews } from "@/lib/stores/paneViews.svelte";
-  import { evaluateView } from "@/lib/views/evaluateView";
+  import { evaluateView, treeNodeIds } from "@/lib/views/evaluateView";
   import { structureToEvalNodes } from "@/lib/views/structureNodes";
   import ViewSwitcher from "@/components/widgets/ViewSwitcher.svelte";
   import { focusedDocumentStore, pinnedKeysStore } from "@/lib/stores/editorFocus";
@@ -497,6 +497,19 @@
     for (const [id, ann] of result.annotations) map.set(id, ann.color);
     return map;
   });
+  // Draft membership pruning (#101): when the selected view carries a filter,
+  // narrow the tree to matching scenes + their kept ancestors (evaluate as a
+  // `tree` and collect the surviving node ids). `null` = the whole-universe
+  // default → no pruning, full structural tree.
+  let draftVisibleIds = $derived.by(() => {
+    const spec = paneViews.specFor("scene");
+    if (!spec.expr && !(spec.groups && spec.groups.length)) return null;
+    const result = evaluateView({ ...spec, presentation: "tree" }, structureToEvalNodes(structure), {
+      schema: metadataSchema,
+      resolveView: paneViews.resolveView,
+    });
+    return treeNodeIds(result.groups);
+  });
   $effect.pre(() => {
     draftTitleByScene = computeDraftTitleOverrides(editorPanes.panes);
   });
@@ -607,6 +620,7 @@
         config={treeActions.manuscriptTree}
         {structure}
         colorAnnotations={draftColorAnnotations}
+        visibleIds={draftVisibleIds}
         collapsed={treeActions.collapsedStructureNodes}        draftTitles={draftTitleByScene}
         sectionLabel="Scenes"
         emptyLabel="No scenes yet."

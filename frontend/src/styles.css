@@ -137,6 +137,38 @@ body {
   background-size: 28px 28px;
 }
 
+/* Themed scrollbars. `color-scheme` (set per theme on :root) is supposed to
+   give native dark scrollbars for free, but Windows Chromium ignores it for
+   the classic overlay scrollbar — so paint them from tokens explicitly.
+   Firefox honors `scrollbar-color`; WebKit/Blink use the ::-webkit-scrollbar
+   pseudo-elements. Both derive from theme tokens, so they follow dark mode.
+   Components that hide their own scrollbar (`scrollbar-width: none`) still win. */
+* {
+  scrollbar-color: var(--tier3) transparent;
+}
+::-webkit-scrollbar {
+  width: 12px;
+  height: 12px;
+}
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+::-webkit-scrollbar-thumb {
+  background: var(--tier3);
+  /* Transparent border + padding-box clip insets the thumb so it reads as a
+     rounded pill floating in the track rather than a full-width slab. */
+  border: 3px solid transparent;
+  background-clip: padding-box;
+  border-radius: 8px;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: var(--border-strong);
+  background-clip: padding-box;
+}
+::-webkit-scrollbar-corner {
+  background: transparent;
+}
+
 button,
 input,
 select,

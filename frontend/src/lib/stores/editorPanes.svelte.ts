@@ -854,10 +854,11 @@ class EditorPanesController {
     this.setStatus(`Loaded ${node.title}`);
   }
 
-  // Temporary entry point for step 3 (#80): mint a blank view and open the
-  // designer on it. The real "New view…" affordance arrives with the pane
-  // view-switchers in step 4 (#81, doc §5); this button will retire then.
-  async createAndOpenView(kind = "lore"): Promise<void> {
+  // Mint a blank view anchored to `kind` and open the designer on it. Callers
+  // are the per-pane ViewSwitchers (#81), which pass their pane's anchor kind
+  // ("lore" / "scene" / "assistant") — `kind` is required so a view can never
+  // silently default to the wrong anchor (the field/type pickers key off it).
+  async createAndOpenView(kind: string): Promise<void> {
     const node = await api.createView({
       title: "New view",
       spec: { kind, expr: null, sort: { by: "manual" } },

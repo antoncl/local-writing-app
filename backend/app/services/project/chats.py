@@ -207,7 +207,7 @@ class ChatSessionsMixin:
             self.append_ai_invocation(
                 CreateAIInvocationRequest(
                     prompt_entry_id=request.prompt_entry_id,
-                    prompt_entry_type="chat",
+                    prompt_entry_type="chat:chat_session",
                     scene_id=existing.target_scene_id,
                     chat_session_id=existing.id,
                     provider=provider,

@@ -42,13 +42,13 @@ class MutationResolutionTests(unittest.TestCase):
                 layer_id=layers.layers[-1].id,
                 field_id="rank",
                 field=MetadataFieldDefinition(name="Rank", type="text"),
-                entry_type="character",
+                entry_type="lore:character",
             )
         )
         self.client = TestClient(app)
 
         honor = svc.create_lore_entry(
-            CreateLoreEntryRequest(title="Commodore Honor", entry_type="character")
+            CreateLoreEntryRequest(title="Commodore Honor", entry_type="lore:character")
         )
         self.honor = honor.id
 
@@ -121,7 +121,7 @@ class MutationResolutionTests(unittest.TestCase):
                 layer_id=layers.layers[-1].id,
                 field_id="strength",
                 field=MetadataFieldDefinition(name="Strength", type="number"),
-                entry_type="character",
+                entry_type="lore:character",
             )
         )
         scene = self._new_scene(

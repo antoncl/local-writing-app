@@ -66,7 +66,7 @@ def _create_project_node_file(root: Path) -> None:
         {
             "id": "project",
             "title": title,
-            "entry_type": "project",
+            "entry_type": "project:project",
             "metadata": {},
         },
         sort_keys=False,

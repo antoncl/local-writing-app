@@ -34,12 +34,12 @@ class MutationRouteTests(unittest.TestCase):
                 layer_id=layers.layers[-1].id,
                 field_id="rank",
                 field=MetadataFieldDefinition(name="Rank", type="text"),
-                entry_type="character",
+                entry_type="lore:character",
             )
         )
         self.client = TestClient(app)
         self.honor = svc.create_lore_entry(
-            CreateLoreEntryRequest(title="Honor", entry_type="character")
+            CreateLoreEntryRequest(title="Honor", entry_type="lore:character")
         ).id
         self.s1 = self._new_scene("Scene One", "Honor commands.")
         self.s2 = self._new_scene(

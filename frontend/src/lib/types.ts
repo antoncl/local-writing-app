@@ -83,7 +83,7 @@ export type ResearchNote = {
   source_layer_label?: string;
 };
 
-export type EditableDocument = Scene | LoreEntry | PromptEntry | AssistantEntry | ResearchNote;
+export type EditableDocument = Scene | LoreEntry | PromptEntry | AssistantEntry | ResearchNote | ViewNode;
 
 // Document-kind discriminator shared across editor components. Broader than
 // MetadataSchema.entry_types[*].kind: includes the synthetic shapes the
@@ -97,7 +97,8 @@ export type DocumentKind =
   | "research"
   | "chat"
   | "project"
-  | "structure_node";
+  | "structure_node"
+  | "view";
 
 export type LoreEntryList = {
   entries: LoreEntrySummary[];
@@ -254,12 +255,152 @@ export type PromptInputType =
   | "scene_ref"
   | "color";
 
-// Shape carried in PromptInputDefinition.target when type === "context_pick".
-// Matches the backend convention documented in
-// docs/context-picker.md and the inline comment on models.py.
+// ViewSpec — the kind-anchored set-algebra membership language (0.5.0, #35/#78).
+// Mirrors the backend Pydantic models; entry_type references are FQN
+// ("lore:character", per #77). See docs/design/views-and-filters.md §1–2. There
+// is no frontend evaluator in step 1 — these types describe the stored shape.
+export type ViewFieldPredicate = {
+  key: string;
+  op: "eq" | "neq" | "includes" | "not_includes" | "set" | "unset";
+  value?: unknown;
+};
+
+export type ViewAnnotatePayload = { label?: string; color?: string; rank?: number };
+
+// One node in a view's set-algebra tree: exactly one primary slot is set
+// (a combinator, an annotate pass-through paired with `of`, or a leaf).
+export type ViewExpr = {
+  union?: ViewExpr[];
+  intersect?: ViewExpr[];
+  difference?: { keep: ViewExpr; remove: ViewExpr };
+  complement?: ViewExpr;
+  annotate?: ViewAnnotatePayload;
+  of?: ViewExpr;
+  type?: string; // exact entry_type FQN
+  descendants_of?: string; // entry_type FQN + every inheriting type
+  tagged?: string;
+  field?: ViewFieldPredicate;
+  hand_picked?: string[];
+  view_ref?: string; // a saved view node id
+};
+
+export type ViewSort = {
+  by: "manual" | "title" | "field";
+  field_key?: string;
+  dir?: "asc" | "desc";
+};
+
+// One named group = one named input handle on the View node (ADR-0027 §D/§E,
+// #91). `name` is the group label and the row `path` segment; `expr` is the
+// group's membership (absent/null = the whole universe); `sort` sorts this
+// segment; `color` is an optional group tint. Group order = handle order = this
+// list's order. Same-name groups union + dedupe.
+export type ViewGroupSpec = {
+  name: string;
+  expr?: ViewExpr | null;
+  sort?: ViewSort | null;
+  color?: string | null;
+};
+
+// The portable view core: an anchor `kind` + membership + ordering. Membership
+// is EITHER a single `expr` (flat view) OR an ordered `groups` list (named
+// handles; 2+ populated handles render as groups — ADR-0027). `expr`/`groups`
+// both absent/null = the whole universe of `kind`. `sort` is the fallback when a
+// group carries no per-segment sort.
+export type ViewSpec = {
+  kind: string;
+  expr?: ViewExpr | null;
+  groups?: ViewGroupSpec[] | null;
+  sort?: ViewSort | null;
+};
+
+// How a view's result list is laid out (doc §3.1). Orthogonal to membership.
+export type ViewPresentation = "tree" | "grouped" | "flat";
+
+// The view designer's persisted canvas graph (nodes + wiring). Non-semantic
+// presentation state — the evaluator ignores it; it exists so reopening a view
+// restores the author's arrangement instead of re-deriving an auto-layout from
+// the semantic `expr`. `cfg` is a node's ViewNodeData (kept loose here to avoid
+// a types.ts ← viewGraph.ts import cycle). Mirrors backend ViewLayout.
+export type ViewLayoutNode = {
+  id: string;
+  kind: string;
+  position: { x: number; y: number };
+  cfg: Record<string, unknown>;
+};
+export type ViewLayoutEdge = {
+  id: string;
+  source: string;
+  target: string;
+  source_handle?: string | null;
+  target_handle?: string | null;
+};
+export type ViewLayout = { nodes: ViewLayoutNode[]; edges: ViewLayoutEdge[] };
+
+// A saved view as an editable node (0.5.0 step 3, #80). Frontmatter-only —
+// the "body" is the ViewSpec, edited by the view designer (ViewBodyView), not
+// a prose/code body. Mirrors backend ViewNode (models_views.py). Carries the
+// metadata/computed_metadata slots so it satisfies EditableDocument
+// structurally; both are empty in v1 (the view has no schema fields).
+export type ViewNode = {
+  id: string;
+  title: string;
+  revision: string;
+  entry_type: string; // "view:view"
+  spec: ViewSpec;
+  presentation: ViewPresentation;
+  // Designer canvas layout (positions + wiring); absent for designer-less views.
+  layout?: ViewLayout | null;
+  // EditableDocument compatibility — a view carries no prose body or fields.
+  body?: string;
+  metadata?: EntryMetadata;
+  computed_metadata?: EntryMetadata;
+  source_layer_id?: string;
+  source_layer_label?: string;
+};
+
+export type ViewNodeSummary = {
+  id: string;
+  title: string;
+  entry_type: string;
+  view_kind: string;
+  presentation: ViewPresentation;
+  source_layer_id?: string;
+  source_layer_label?: string;
+};
+
+export type ViewNodeList = { entries: ViewNodeSummary[] };
+
+export type CreateViewRequest = {
+  title: string;
+  entry_type?: string;
+  spec: ViewSpec;
+  presentation?: ViewPresentation;
+  layout?: ViewLayout | null;
+};
+
+export type SaveViewRequest = {
+  title: string;
+  base_revision?: string | null;
+  entry_type?: string;
+  spec: ViewSpec;
+  presentation?: ViewPresentation;
+  layout?: ViewLayout | null;
+};
+
+// A saved-view reference used as a picker source (carries the view's own kind).
+export type ViewRef = { view: string };
+
+// A picker membership source: an inline ViewSpec or a saved-view ref.
+export type ViewSource = ViewSpec | ViewRef;
+
+// Shape carried in PromptInputDefinition.target when type === "context_pick",
+// and in entity_ref fields' `picker_config`. Split into membership (`sources`:
+// one ViewSpec-or-ref per kind, unioned) and mechanics (ADR-0023). Read the
+// legacy `{kinds, entryTypes}` subset via `pickerMembership()` in
+// lib/utils/pickerSources.ts — there is no evaluator in 0.5.0 step 1.
 export type NodePickerConfig = {
-  kinds?: ("scene" | "lore" | "snippet" | "assistant" | "research" | "mutation_set")[];
-  entry_types?: Record<string, string[]>;   // kind -> sub-type ids
+  sources?: ViewSource[];
   presets?: ("full_outline" | "full_text")[];
   multiple?: boolean;
   // When true, the runtime picker shows a ★ toggle on each picked
@@ -309,7 +450,7 @@ export type PromptEntryTypeExtras = {
 
 export type EntryBodyEditor = "wysiwyg" | "code";
 export type EntryBodyLanguage = "markdown" | "jinja2" | "plain";
-export type BodyShape = "prose" | "code" | "chat" | "none";
+export type BodyShape = "prose" | "code" | "chat" | "none" | "view";
 
 export type EntryTypeDefinition = {
   name: string;

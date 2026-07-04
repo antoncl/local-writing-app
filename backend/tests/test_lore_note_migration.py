@@ -39,7 +39,7 @@ class MoveLoreNoteToResearchTests(unittest.TestCase):
         metadata: dict | None = None,
     ) -> str:
         entry = global_service.create_lore_entry(
-            CreateLoreEntryRequest(title=title, entry_type="lore_note")
+            CreateLoreEntryRequest(title=title, entry_type="lore:lore_note")
         )
         # The service.read_lore_entry pulls the current revision.
         current = global_service.read_lore_entry(entry.id)
@@ -49,7 +49,7 @@ class MoveLoreNoteToResearchTests(unittest.TestCase):
                 title=title,
                 body=body,
                 base_revision=current.revision,
-                entry_type="lore_note",
+                entry_type="lore:lore_note",
                 metadata=metadata or {},
             ),
         )
@@ -73,7 +73,7 @@ class MoveLoreNoteToResearchTests(unittest.TestCase):
         self.assertEqual(len(note_files), 1)
         content = note_files[0].read_text(encoding="utf-8")
         self.assertIn("title: Lancashire mills", content)
-        self.assertIn("entry_type: note", content)
+        self.assertIn("entry_type: research:note", content)
         self.assertIn("- industrial", content)
         self.assertIn("- labor", content)
         self.assertIn("Mills employed children from age 8.", content)
@@ -137,7 +137,7 @@ class MoveLoreNoteToResearchTests(unittest.TestCase):
 
     def test_422_when_entry_is_not_a_lore_note(self) -> None:
         entry = global_service.create_lore_entry(
-            CreateLoreEntryRequest(title="Honor", entry_type="character")
+            CreateLoreEntryRequest(title="Honor", entry_type="lore:character")
         )
         response = self.client.post(
             f"/api/lore/{entry.id}/move-to-research"
@@ -167,7 +167,7 @@ class MoveLoreNoteToResearchTests(unittest.TestCase):
         from app.models import CreateStructureNodeRequest
 
         global_service.create_research_node(
-            CreateStructureNodeRequest(title="Existing", entry_type="note")
+            CreateStructureNodeRequest(title="Existing", entry_type="research:note")
         )
         lore_id = self._make_lore_note(title="Imported")
         body = self.client.post(

@@ -28,13 +28,13 @@ class ProjectNodeServiceTests(unittest.TestCase):
         self.assertTrue(path.exists())
         text = path.read_text(encoding="utf-8")
         self.assertIn("title: Honor's First Command", text)
-        self.assertIn("entry_type: project", text)
+        self.assertIn("entry_type: project:project", text)
 
     def test_read_project_node_returns_title_and_metadata(self) -> None:
         node = self.service.read_project_node()
         self.assertEqual(node.id, "project")
         self.assertEqual(node.title, "Honor's First Command")
-        self.assertEqual(node.entry_type, "project")
+        self.assertEqual(node.entry_type, "project:project")
         self.assertEqual(node.body, "")
         self.assertEqual(node.metadata, {})
 
@@ -128,7 +128,7 @@ class ProjectNodeMigrationTests(unittest.TestCase):
         self.assertTrue(project_md.exists())
         node = reopened.read_project_node()
         self.assertEqual(node.title, "Legacy Project")
-        self.assertEqual(node.entry_type, "project")
+        self.assertEqual(node.entry_type, "project:project")
 
 
 class ProjectNodeEndpointTests(unittest.TestCase):
@@ -150,7 +150,7 @@ class ProjectNodeEndpointTests(unittest.TestCase):
         body = response.json()
         self.assertEqual(body["id"], "project")
         self.assertEqual(body["title"], "Pegasus Drift")
-        self.assertEqual(body["entry_type"], "project")
+        self.assertEqual(body["entry_type"], "project:project")
 
     def test_put_persists_metadata(self) -> None:
         current = self.client.get("/api/project/node").json()

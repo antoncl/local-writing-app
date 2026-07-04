@@ -142,8 +142,8 @@ class MutationSetEntriesMixin:
 
     @staticmethod
     def _mutation_set_entry_type(front_matter: dict[str, Any]) -> str:
-        raw = front_matter.get("entry_type") or "mutation_set"
-        return raw if isinstance(raw, str) else "mutation_set"
+        raw = front_matter.get("entry_type") or "mutation_set:mutation_set"
+        return raw if isinstance(raw, str) else "mutation_set:mutation_set"
 
     @staticmethod
     def _parse_mutation_set_rows(raw: Any) -> list[MutationSetRow]:

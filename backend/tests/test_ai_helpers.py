@@ -60,26 +60,26 @@ class _HelperFixtureBase(unittest.TestCase):
         # Lore: Honor Harrington (character), Manticore (place), Nimitz (character)
         self.honor = self._make_lore(
             title="Honor Harrington",
-            entry_type="character",
+            entry_type="lore:character",
             metadata={"aliases": ["The Salamander"], "home_place": None},
             body="Captain of the Fearless. Treecat-adopted.",
         )
         self.manticore = self._make_lore(
             title="Manticore",
-            entry_type="place",
+            entry_type="lore:place",
             metadata={"aliases": ["Star Kingdom"]},
             body="A binary star system; the capital world of the Star Kingdom.",
         )
         self.nimitz = self._make_lore(
             title="Nimitz",
-            entry_type="character",
+            entry_type="lore:character",
             metadata={"aliases": []},
             body="Honor's treecat companion.",
         )
         # Link Honor → Nimitz via related_entries (the ref graph hop)
         self._update_lore(
             self.honor["id"],
-            entry_type="character",
+            entry_type="lore:character",
             metadata={
                 "aliases": ["The Salamander"],
                 "related_entries": [self.nimitz["id"]],
@@ -89,18 +89,18 @@ class _HelperFixtureBase(unittest.TestCase):
 
         # Manuscript structure: Act → Scene 1, Scene 2
         structure = self.service.create_structure_node(
-            CreateStructureNodeRequest(title="Act One", entry_type="act")
+            CreateStructureNodeRequest(title="Act One", entry_type="scene:act")
         )
-        self.act_node = next(c for c in structure.root.children if c.type == "act")
+        self.act_node = next(c for c in structure.root.children if c.type == "scene:act")
         s1 = self.service.create_structure_node(
             CreateStructureNodeRequest(
-                title="The Departure", entry_type="scene", parent_id=self.act_node.id
+                title="The Departure", entry_type="scene:scene", parent_id=self.act_node.id
             )
         )
         self.scene_one_node = self._latest_scene_under(s1.root, self.act_node.id)
         s2 = self.service.create_structure_node(
             CreateStructureNodeRequest(
-                title="The Arrival", entry_type="scene", parent_id=self.act_node.id
+                title="The Arrival", entry_type="scene:scene", parent_id=self.act_node.id
             )
         )
         self.scene_two_node = self._latest_scene_under(s2.root, self.act_node.id)
@@ -109,7 +109,7 @@ class _HelperFixtureBase(unittest.TestCase):
         self._update_scene(
             self.scene_one_node.scene_id,
             title="The Departure",
-            entry_type="scene",
+            entry_type="scene:scene",
             metadata={
                 "summary": "Honor takes the Salamander into battle.",
                 "characters": [self.honor["id"]],
@@ -120,7 +120,7 @@ class _HelperFixtureBase(unittest.TestCase):
         self._update_scene(
             self.scene_two_node.scene_id,
             title="The Arrival",
-            entry_type="scene",
+            entry_type="scene:scene",
             metadata={
                 "summary": "The fleet returns to Star Kingdom under quiet stars.",
                 "characters": [],
@@ -145,14 +145,14 @@ class _HelperFixtureBase(unittest.TestCase):
         data.setdefault("fields", {})["home_place"] = {
             "name": "Home Place",
             "type": "entity_ref",
-            "target": {"entry_type": "place"},
+            "target": {"entry_type": "lore:place"},
         }
-        character = data["entry_types"].get("character") or {}
+        character = data["entry_types"].get("lore:character") or {}
         fields = list(character.get("fields") or [])
         if "home_place" not in fields:
             fields.insert(0, "home_place")
             character["fields"] = fields
-            data["entry_types"]["character"] = character
+            data["entry_types"]["lore:character"] = character
         self.service._write_yaml(schema_path, data)
 
     def _make_lore(self, *, title: str, entry_type: str, metadata: dict, body: str) -> dict:
@@ -203,6 +203,88 @@ class _HelperFixtureBase(unittest.TestCase):
             if found:
                 return found
         return None
+
+
+class EntryTypeAncestryTests(_HelperFixtureBase):
+    """The shared `entry_type_ancestry` primitive + the `is_a` Jinja helper
+    (ADR-0026 / #83). A `lore:deity` sub-type inherits `lore:character`."""
+
+    def setUp(self) -> None:
+        super().setUp()
+        # Add a sub-type deity → character to exercise inheritance.
+        schema_path = self.root / "metadata.schema.yaml"
+        data = self.service._read_yaml(schema_path)
+        data["entry_types"]["lore:deity"] = {
+            "name": "Deity",
+            "kind": "lore",
+            "parent": "lore:character",
+        }
+        self.service._write_yaml(schema_path, data)
+        self.athena = self._make_lore(
+            title="Athena",
+            entry_type="lore:deity",
+            metadata={"aliases": []},
+            body="Goddess of wisdom.",
+        )
+
+    def test_ancestry_walks_parent_chain(self) -> None:
+        # Full chain incl. the built-in base type character inherits from.
+        self.assertEqual(
+            self.service.entry_type_ancestry("lore:deity"),
+            ["lore:deity", "lore:character", "lore:lore_entry"],
+        )
+
+    def test_ancestry_of_seeded_type_reaches_base(self) -> None:
+        self.assertEqual(
+            self.service.entry_type_ancestry("lore:character"),
+            ["lore:character", "lore:lore_entry"],
+        )
+
+    def test_ancestry_of_unknown_type_is_itself(self) -> None:
+        self.assertEqual(self.service.entry_type_ancestry("lore:nope"), ["lore:nope"])
+
+    def _render_is_a(self, entry_obj, fqn: str) -> str:
+        env = create_environment_for_project(self.service)
+        out = render_template(
+            '{% role "system" %}'
+            '{% if is_a(entry, "' + fqn + '") %}yes{% else %}no{% endif %}'
+            "{% endrole %}",
+            context={"entry": entry_obj},
+            env=env,
+        )
+        return out.messages[0].text
+
+    def test_is_a_true_for_exact_type(self) -> None:
+        honor = self.service.read_lore_entry(self.honor["id"])
+        self.assertEqual(self._render_is_a(honor, "lore:character"), "yes")
+
+    def test_is_a_true_for_descendant(self) -> None:
+        athena = self.service.read_lore_entry(self.athena["id"])
+        # deity inherits character → is_a(deity, "lore:character") holds.
+        self.assertEqual(self._render_is_a(athena, "lore:character"), "yes")
+        self.assertEqual(self._render_is_a(athena, "lore:deity"), "yes")
+
+    def test_is_a_false_for_unrelated_type(self) -> None:
+        manticore = self.service.read_lore_entry(self.manticore["id"])
+        self.assertEqual(self._render_is_a(manticore, "lore:character"), "no")
+
+    def test_is_a_false_for_empty_or_missing_arg(self) -> None:
+        from app.services.ai.helpers import _is_a
+
+        schema = self.service.read_metadata_schema()
+        honor = self.service.read_lore_entry(self.honor["id"])
+        self.assertFalse(_is_a(self.service, schema, honor, ""))
+        self.assertFalse(_is_a(self.service, schema, honor, None))
+        self.assertFalse(_is_a(self.service, schema, None, "lore:character"))
+
+    def test_is_a_falls_back_to_exact_match_without_schema(self) -> None:
+        from app.services.ai.helpers import _is_a
+
+        honor = self.service.read_lore_entry(self.honor["id"])
+        self.assertTrue(_is_a(self.service, None, honor, "lore:character"))
+        # No schema → no inheritance resolution, so a descendant match fails.
+        athena = self.service.read_lore_entry(self.athena["id"])
+        self.assertFalse(_is_a(self.service, None, athena, "lore:character"))
 
 
 class PovHelperTests(_HelperFixtureBase):
@@ -302,13 +384,13 @@ class RelevantLoreHelperTests(_HelperFixtureBase):
         # even though no entity_ref links Honor → Pavel.
         self._make_lore(
             title="Pavel Young",
-            entry_type="character",
+            entry_type="lore:character",
             metadata={"aliases": []},
             body="Captain who hates Honor.",
         )
         self._update_lore(
             self.honor["id"],
-            entry_type="character",
+            entry_type="lore:character",
             metadata={
                 "aliases": ["The Salamander"],
                 "related_entries": [self.nimitz["id"]],  # NOT Pavel
@@ -337,19 +419,19 @@ class RelevantLoreHelperTests(_HelperFixtureBase):
         # should NOT be pulled in — textual expansion stops at depth 1.
         self._make_lore(
             title="Anders Pierce",
-            entry_type="character",
+            entry_type="lore:character",
             metadata={"aliases": []},
             body="Some other captain.",
         )
         self._make_lore(
             title="Pavel Young",
-            entry_type="character",
+            entry_type="lore:character",
             metadata={"aliases": []},
             body="Captain. Friend of Anders Pierce.",  # mentions Anders
         )
         self._update_lore(
             self.honor["id"],
-            entry_type="character",
+            entry_type="lore:character",
             metadata={
                 "aliases": ["The Salamander"],
                 "related_entries": [self.nimitz["id"]],
@@ -411,7 +493,7 @@ class RelevantLoreHelperTests(_HelperFixtureBase):
             ChatSessionJournalEntry(
                 entry_id=self.manticore["id"],
                 title="Manticore",
-                entry_type="place",
+                entry_type="lore:place",
                 added_at_turn=2,
                 source="user_message",
             )
@@ -438,13 +520,13 @@ class RelevantLoreHelperTests(_HelperFixtureBase):
         # would arrive via textual depth-1. With empty journal, he should NOT.
         self._make_lore(
             title="Pavel Young",
-            entry_type="character",
+            entry_type="lore:character",
             metadata={"aliases": []},
             body="Disgraced Captain.",
         )
         self._update_lore(
             self.honor["id"],
-            entry_type="character",
+            entry_type="lore:character",
             metadata={
                 "aliases": ["The Salamander"],
                 "related_entries": [self.nimitz["id"]],
@@ -512,7 +594,7 @@ class ContextPolicyTests(_HelperFixtureBase):
         # NOT in the summary. Default would be excluded; "always" pulls in.
         pavel = self._make_lore(
             title="Pavel Young",
-            entry_type="character",
+            entry_type="lore:character",
             metadata={"aliases": []},
             body="Captain who hates Honor.",
         )
@@ -529,7 +611,7 @@ class ContextPolicyTests(_HelperFixtureBase):
         self._update_scene(
             self.scene_one_node.scene_id,
             title="The Departure",
-            entry_type="scene",
+            entry_type="scene:scene",
             metadata={
                 "summary": "Honor takes the Salamander into Star Kingdom space.",
                 "characters": [self.honor["id"]],
@@ -549,7 +631,7 @@ class ContextPolicyTests(_HelperFixtureBase):
         self._update_scene(
             self.scene_one_node.scene_id,
             title="The Departure",
-            entry_type="scene",
+            entry_type="scene:scene",
             metadata={
                 "summary": "Honor takes the Salamander into battle.",
                 "characters": [self.honor["id"]],
@@ -617,7 +699,7 @@ class SessionPartitionTests(_HelperFixtureBase):
         # Edit Honor's body; her revision changes, Nimitz's doesn't.
         self._update_lore(
             self.honor["id"],
-            entry_type="character",
+            entry_type="lore:character",
             metadata={
                 "aliases": ["The Salamander"],
                 "related_entries": [self.nimitz["id"]],
@@ -640,7 +722,7 @@ class SessionPartitionTests(_HelperFixtureBase):
 
         self._update_lore(
             self.honor["id"],
-            entry_type="character",
+            entry_type="lore:character",
             metadata={
                 "aliases": ["The Salamander"],
                 "related_entries": [self.nimitz["id"]],
@@ -710,7 +792,7 @@ class XmlOutputStructureTests(_HelperFixtureBase):
         # we can't test angle brackets through the normal path).
         self._update_lore(
             self.honor["id"],
-            entry_type="character",
+            entry_type="lore:character",
             metadata={
                 "aliases": ["The Salamander"],
                 "related_entries": [self.nimitz["id"]],
@@ -725,7 +807,7 @@ class XmlOutputStructureTests(_HelperFixtureBase):
         # Title with a double-quote forces quoteattr to switch to single-quoting
         self._update_lore(
             self.honor["id"],
-            entry_type="character",
+            entry_type="lore:character",
             metadata={"aliases": []},
             body="body",
         )
@@ -736,7 +818,7 @@ class XmlOutputStructureTests(_HelperFixtureBase):
                 title='Honor "The Salamander" Harrington',
                 body="body",
                 base_revision=existing.revision,
-                entry_type="character",
+                entry_type="lore:character",
                 metadata={"aliases": []},
             ),
         )
@@ -790,7 +872,7 @@ class EntryRefTests(_HelperFixtureBase):
         # Link Honor's home_place → Manticore so we have a single-ref to chase.
         self._update_lore(
             self.honor["id"],
-            entry_type="character",
+            entry_type="lore:character",
             metadata={
                 "aliases": ["The Salamander"],
                 "related_entries": [self.nimitz["id"]],
@@ -858,7 +940,7 @@ class EntryRefTests(_HelperFixtureBase):
         # cycle via related_entries.
         self._update_lore(
             self.nimitz["id"],
-            entry_type="character",
+            entry_type="lore:character",
             metadata={"aliases": [], "related_entries": [self.honor["id"]]},
             body="Honor's treecat.",
         )
@@ -888,7 +970,7 @@ class EntryRefTests(_HelperFixtureBase):
         # final EntryRef refuses to load and `.title` falls back to the raw id.
         self._update_lore(
             self.nimitz["id"],
-            entry_type="character",
+            entry_type="lore:character",
             metadata={"aliases": [], "related_entries": [self.honor["id"]]},
             body="Honor's treecat.",
         )
@@ -999,9 +1081,9 @@ class ResearchNoteEntryRefTests(unittest.TestCase):
         # Create a research note via the structure CRUD (the route the
         # frontend uses). Capture the leaf's note id from the returned tree.
         tree = self.service.create_research_node(
-            CreateStructureNodeRequest(title="Lancashire mill towns", entry_type="note")
+            CreateStructureNodeRequest(title="Lancashire mill towns", entry_type="research:note")
         )
-        leaf = next(child for child in tree.root.children if child.type == "note")
+        leaf = next(child for child in tree.root.children if child.type == "research:note")
         self.note_id = leaf.scene_id
         # Populate the note's body via save_research_note so EntryRef has
         # content to surface.
@@ -1014,7 +1096,7 @@ class ResearchNoteEntryRefTests(unittest.TestCase):
                 title="Lancashire mill towns",
                 body="Mills employed children from age 8.",
                 base_revision=note.revision,
-                entry_type="note",
+                entry_type="research:note",
                 metadata={"tags": ["industrial", "labor"]},
             ),
         )
@@ -1051,7 +1133,7 @@ class ResearchNoteEntryRefTests(unittest.TestCase):
             context={},
             env=env,
         )
-        self.assertEqual(out.messages[0].text, "note")
+        self.assertEqual(out.messages[0].text, "research:note")
 
     def test_entry_resolves_research_note_found(self) -> None:
         env = create_environment_for_project(self.service)

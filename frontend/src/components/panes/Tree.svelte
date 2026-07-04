@@ -81,6 +81,12 @@
   export let draftTitles: Map<string, string>;
   export let sectionLabel: string;
   export let emptyLabel: string;
+  // Per-node view color annotations (0.5.0 step 4, #81). Keyed by structure
+  // node id → swatch id/hex. App computes these by evaluating the Draft pane's
+  // selected view over the flattened structure (color annotations only — the
+  // tree keeps its structural shape, ADR-0022). Null/empty on trees without a
+  // switcher (Research) or when the default view is selected.
+  export let colorAnnotations: Map<string, string | null> | null = null;
   // App's error-catching async wrapper. Returns whether the action completed
   // without throwing.
   export let run: (action: () => Promise<void>) => Promise<boolean>;
@@ -411,6 +417,10 @@
     const opt = node.status ? schema?.fields?.status?.options?.find((o) => o.value === node.status) : null;
     return opt?.color ? getSwatch(opt.color)?.hex ?? null : null;
   })()}
+  {@const viewStripeHex = (() => {
+    const c = colorAnnotations?.get(node.id) ?? null;
+    return c ? getSwatch(c)?.hex ?? null : null;
+  })()}
   {@const isActive = (
     (!!node.scene_id && focusedDocument?.type === config.kind && focusedDocument.id === node.scene_id)
     || (config.containerHasEditor && focusedDocument?.type === "structure_node" && focusedDocument.id === node.id)
@@ -429,6 +439,7 @@
       title={renderNodeTitle(node)}
       active={isActive}
       pinned={isPinned}
+      stripeColor={viewStripeHex}
       dragging={config.supportsDrag && draggedNodeId === node.id}
       dropPosition={config.supportsDrag && dragOverNodeId === node.id ? dragOverPosition : null}
       onClick={() => node.scene_id && run(() => config.openLeaf(node.scene_id!))}
@@ -460,7 +471,7 @@
       groupHeader={!leaf}
       role="treeitem"
       ariaLabel={node.title}
-      stripeColor={leaf ? null : stripeHex}
+      stripeColor={viewStripeHex ?? (leaf ? null : stripeHex)}
       dragging={config.supportsDrag && draggedNodeId === node.id}
       dropPosition={config.supportsDrag && dragOverNodeId === node.id ? dragOverPosition : null}
       collapsed={leaf ? true : (!!collapsedMap[node.id] || childNodes.length === 0)}
@@ -498,6 +509,7 @@
       title={renderNodeTitle(node)}
       active={isActive}
       pinned={isPinned}
+      stripeColor={viewStripeHex ?? stripeHex}
       dragging={config.supportsDrag && draggedNodeId === node.id}
       dropPosition={config.supportsDrag && dragOverNodeId === node.id ? dragOverPosition : null}
       collapsed={isCollapsed}

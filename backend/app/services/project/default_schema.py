@@ -4,6 +4,11 @@ The minimal schema the app ships before any project/layer
 `metadata.schema.yaml` is merged on top (see CLAUDE.md "Layered metadata
 schema"). Lives in its own module so the schema slice (project/schema.py)
 can import it without an import cycle back into project_service.
+
+Entry-type identity is the kind-qualified FQN `kind:key` (#77): the dict
+key here, the `parent` reference, and the value stored in a node's
+`entry_type` front matter all use that form (e.g. `lore:character`). The
+bare `name` is the display label; the `kind` field mirrors the key prefix.
 """
 
 from __future__ import annotations
@@ -13,7 +18,7 @@ from typing import Any
 DEFAULT_METADATA_SCHEMA: dict[str, Any] = {
     "version": 1,
     "entry_types": {
-        "manuscript_structure": {
+        "scene:manuscript_structure": {
             "name": "Manuscript",
             "kind": "scene",
             "abstract": True,
@@ -21,27 +26,27 @@ DEFAULT_METADATA_SCHEMA: dict[str, Any] = {
             "display_template": "{number}. {title}",
             "has_body": False,
         },
-        "act": {
+        "scene:act": {
             "name": "Act",
             "kind": "scene",
-            "parent": "manuscript_structure",
+            "parent": "scene:manuscript_structure",
             "fields": [],
         },
-        "chapter": {
+        "scene:chapter": {
             "name": "Chapter",
             "kind": "scene",
-            "parent": "manuscript_structure",
+            "parent": "scene:manuscript_structure",
             "fields": [],
         },
-        "scene": {
+        "scene:scene": {
             "name": "Scene",
             "kind": "scene",
-            "parent": "manuscript_structure",
+            "parent": "scene:manuscript_structure",
             "fields": ["status", "pov", "characters", "locations", "dynamics", "word_count", "cost"],
             "has_body": True,
             "color": "forest",
         },
-        "lore_entry": {
+        "lore:lore_entry": {
             # Abstract base for every lore kind — carries the fields every
             # entry shares (aliases for matching, tags for filtering,
             # related_entries for cross-links, color for per-entry tint,
@@ -53,39 +58,39 @@ DEFAULT_METADATA_SCHEMA: dict[str, Any] = {
             "fields": ["aliases", "tags", "related_entries", "color", "context_policy"],
             "color": "slate-blue",
         },
-        "character": {
+        "lore:character": {
             "name": "Character",
             "kind": "lore",
-            "parent": "lore_entry",
+            "parent": "lore:lore_entry",
             "fields": ["character_cost"],
         },
-        "place": {
+        "lore:place": {
             # Display label is "Location" (matches the `locations` field on
-            # scene and the user's mental model); the entry-type id stays
-            # "place" so existing project YAML and metadata refs keep
-            # resolving — id is a backend identifier, display is UX.
+            # scene and the user's mental model); the entry-type local key
+            # stays "place" so existing project YAML and metadata refs keep
+            # resolving — the key is a backend identifier, display is UX.
             "name": "Location",
             "kind": "lore",
-            "parent": "lore_entry",
+            "parent": "lore:lore_entry",
             "fields": [],
         },
-        "item": {
+        "lore:item": {
             "name": "Item",
             "kind": "lore",
-            "parent": "lore_entry",
+            "parent": "lore:lore_entry",
             "fields": [],
         },
-        "lore_note": {
+        "lore:lore_note": {
             "name": "Note",
             "kind": "lore",
-            "parent": "lore_entry",
+            "parent": "lore:lore_entry",
             "fields": [],
             # Deprecated by the research kind (docs/research-strategy.md
             # slice 5). Kept readable for legacy projects; UI filters this
-            # flag so new entries can't be created as `lore_note`.
+            # flag so new entries can't be created as `lore:lore_note`.
             "deprecated": True,
         },
-        "research": {
+        "research:research": {
             # Abstract parent for the research-kind tree. Mirrors
             # `manuscript_structure` for the manuscript tree: not
             # instantiated directly, used as the shared parent so the
@@ -97,25 +102,25 @@ DEFAULT_METADATA_SCHEMA: dict[str, Any] = {
             "fields": [],
             "has_body": False,
         },
-        "topic": {
+        "research:topic": {
             "name": "Topic",
             "kind": "research",
-            "parent": "research",
+            "parent": "research:research",
             "fields": [],
             "has_body": False,
         },
-        "note": {
+        "research:note": {
             # Research note — prose body + tags. Aliases / related_entries
             # / context_policy are intentionally left off v1 (per the
             # research-strategy decisions); notes participate in AI
             # context via the explicit picker for now.
             "name": "Note",
             "kind": "research",
-            "parent": "research",
+            "parent": "research:research",
             "fields": ["tags"],
             "has_body": True,
         },
-        "mutation_set": {
+        "mutation_set:mutation_set": {
             # Reusable mutation set (#62): a body-less bundle of
             # (field, op, value) rows + a target lore entry-type. Concrete (not
             # abstract) so sets can be created directly; entry_type sub-classing
@@ -125,20 +130,20 @@ DEFAULT_METADATA_SCHEMA: dict[str, Any] = {
             "fields": [],
             "has_body": False,
         },
-        "prompt": {
+        "prompt:prompt": {
             "name": "Prompt",
             "kind": "prompt",
             "abstract": True,
-            "fields": ["preferred_assistant_id", "color"],
+            "fields": ["preferred_assistant_id", "assistant_tags", "color"],
             "has_body": True,
             "body_editor": "code",
             "body_language": "jinja2",
             "color": "warm-brown",
         },
-        "continuation": {
+        "prompt:continuation": {
             "name": "Continuation",
             "kind": "prompt",
-            "parent": "prompt",
+            "parent": "prompt:prompt",
             "fields": [],
             "has_body": True,
             "prompt": {
@@ -149,7 +154,7 @@ DEFAULT_METADATA_SCHEMA: dict[str, Any] = {
                 },
             },
         },
-        "roleplay": {
+        "prompt:roleplay": {
             # Continuation sub-type for two-character roleplay in one scene.
             # `default_body` provides a working starter template and
             # `default_inputs` seeds the `character: context_pick` input
@@ -158,7 +163,7 @@ DEFAULT_METADATA_SCHEMA: dict[str, Any] = {
             # strategy is inherited from `continuation`.
             "name": "Roleplay",
             "kind": "prompt",
-            "parent": "continuation",
+            "parent": "prompt:continuation",
             "fields": [],
             "has_body": True,
             "default_inputs": [
@@ -168,8 +173,7 @@ DEFAULT_METADATA_SCHEMA: dict[str, Any] = {
                     "label": "Character",
                     "required": True,
                     "target": {
-                        "kinds": ["lore"],
-                        "entry_types": {"lore": ["character"]},
+                        "sources": [{"kind": "lore", "expr": {"type": "lore:character"}}],
                         "multiple": False,
                         "presets": [],
                     },
@@ -215,10 +219,10 @@ DEFAULT_METADATA_SCHEMA: dict[str, Any] = {
                 "{{ character_thread(scene, input.character) }}\n"
             ),
         },
-        "revise": {
+        "prompt:revise": {
             "name": "Revise",
             "kind": "prompt",
-            "parent": "prompt",
+            "parent": "prompt:prompt",
             "fields": [],
             "has_body": True,
             "prompt": {
@@ -229,10 +233,10 @@ DEFAULT_METADATA_SCHEMA: dict[str, Any] = {
                 },
             },
         },
-        "general": {
+        "prompt:general": {
             "name": "General",
             "kind": "prompt",
-            "parent": "prompt",
+            "parent": "prompt:prompt",
             "fields": [],
             "has_body": True,
             "prompt": {
@@ -241,14 +245,14 @@ DEFAULT_METADATA_SCHEMA: dict[str, Any] = {
                 },
             },
         },
-        "snippet": {
+        "prompt:snippet": {
             "name": "Snippet",
             "kind": "prompt",
-            "parent": "prompt",
+            "parent": "prompt:prompt",
             "fields": [],
             "has_body": True,
         },
-        "assistant": {
+        "assistant:assistant": {
             "name": "Assistant",
             "kind": "assistant",
             "fields": [
@@ -259,13 +263,13 @@ DEFAULT_METADATA_SCHEMA: dict[str, Any] = {
                 "ai_max_tokens",
                 "ai_thinking",
                 "summary",
-                "is_default",
+                "tags",
                 "color",
             ],
             "has_body": False,
             "color": "graphite",
         },
-        "project": {
+        "project:project": {
             "name": "Project",
             "kind": "project",
             "fields": [
@@ -281,7 +285,7 @@ DEFAULT_METADATA_SCHEMA: dict[str, Any] = {
             "has_body": True,
             "color": "violet",
         },
-        "chat_session": {
+        "chat:chat_session": {
             # Chat-as-node base type (Phase 3 of the NodeEditor
             # modularization). Concrete (not abstract) because chats are
             # instantiated directly via the chats pane — Phase 3a only
@@ -299,6 +303,20 @@ DEFAULT_METADATA_SCHEMA: dict[str, Any] = {
             "has_body": False,
             "body_shape": "chat",
             "color": "graphite",
+        },
+        "view:view": {
+            # Saved view (0.5.0, #35/#78): a frontmatter-only node carrying a
+            # ViewSpec (kind + set-algebra expr + sort). Concrete so views are
+            # created directly; body-less (the spec lives in front matter, not a
+            # prose body). No schema fields in v1 — the view designer edits the
+            # spec, not metadata. See ADR-0021.
+            "name": "View",
+            "kind": "view",
+            "fields": [],
+            "has_body": False,
+            # Routes the NodeEditor to the Svelte Flow view designer body
+            # (0.5.0 step 3, #80) instead of the inert none-shape.
+            "body_shape": "view",
         },
     },
     "fields": {
@@ -351,27 +369,27 @@ DEFAULT_METADATA_SCHEMA: dict[str, Any] = {
         "characters": {
             "name": "Characters",
             "type": "entity_ref_list",
-            "picker_config": {"kinds": ["lore"], "entry_types": {"lore": ["character"]}},
+            "picker_config": {"sources": [{"kind": "lore", "expr": {"type": "lore:character"}}]},
         },
         "pov": {
             "name": "POV",
             "type": "entity_ref",
-            "picker_config": {"kinds": ["lore"], "entry_types": {"lore": ["character"]}},
+            "picker_config": {"sources": [{"kind": "lore", "expr": {"type": "lore:character"}}]},
         },
         "locations": {
             "name": "Locations",
             "type": "entity_ref_list",
-            "picker_config": {"kinds": ["lore"], "entry_types": {"lore": ["place"]}},
+            "picker_config": {"sources": [{"kind": "lore", "expr": {"type": "lore:place"}}]},
         },
         "home_place": {
             "name": "Home Place",
             "type": "entity_ref",
-            "picker_config": {"kinds": ["lore"], "entry_types": {"lore": ["place"]}},
+            "picker_config": {"sources": [{"kind": "lore", "expr": {"type": "lore:place"}}]},
         },
         "related_entries": {
             "name": "Related Entries",
             "type": "entity_ref_list",
-            "picker_config": {"kinds": ["lore"]},
+            "picker_config": {"sources": [{"kind": "lore"}]},
         },
         "word_count": {
             "name": "Word Count",
@@ -420,12 +438,16 @@ DEFAULT_METADATA_SCHEMA: dict[str, Any] = {
         "ai_temperature": {"name": "Temperature", "type": "number"},
         "ai_max_tokens": {"name": "Max output tokens", "type": "number"},
         "ai_thinking": {"name": "Show thinking", "type": "boolean"},
-        "is_default": {"name": "Default", "type": "boolean"},
         "preferred_assistant_id": {
             "name": "Preferred assistant",
             "type": "entity_ref",
-            "picker_config": {"kinds": ["assistant"]},
+            "picker_config": {"sources": [{"kind": "assistant"}]},
         },
+        # A prompt's soft assistant scope (ADR-0024): the picker surfaces
+        # assistants carrying any of these tags first, and the dynamic default
+        # is the topmost matching one. A degenerate `tagged:` source over
+        # kind:assistant, expressed with the existing tags widget/infra.
+        "assistant_tags": {"name": "Preferred assistant tags", "type": "tags"},
         "author": {"name": "Author", "type": "text"},
         "language": {"name": "Language", "type": "text"},
         "genre": {"name": "Genre", "type": "text"},

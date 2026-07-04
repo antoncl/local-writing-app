@@ -43,12 +43,12 @@ class GenerateEndpointTests(unittest.TestCase):
 
         # Minimal scene with a summary
         structure = global_service.create_structure_node(
-            CreateStructureNodeRequest(title="Act One", entry_type="act")
+            CreateStructureNodeRequest(title="Act One", entry_type="scene:act")
         )
-        act_node = next(c for c in structure.root.children if c.type == "act")
+        act_node = next(c for c in structure.root.children if c.type == "scene:act")
         s = global_service.create_structure_node(
             CreateStructureNodeRequest(
-                title="The Departure", entry_type="scene", parent_id=act_node.id
+                title="The Departure", entry_type="scene:scene", parent_id=act_node.id
             )
         )
         # Re-find the act with its children populated
@@ -63,7 +63,7 @@ class GenerateEndpointTests(unittest.TestCase):
                 body="Scene body.",
                 base_revision=scene.revision,
                 status="draft",
-                entry_type="scene",
+                entry_type="scene:scene",
                 metadata={"summary": "Honor takes the Salamander into battle."},
             ),
         )

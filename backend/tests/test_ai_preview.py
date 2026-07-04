@@ -31,7 +31,7 @@ class PreviewEndpointTests(unittest.TestCase):
 
         # Add one character + one scene with a summary that names them
         honor = self.service.create_lore_entry(
-            CreateLoreEntryRequest(title="Honor Harrington", entry_type="character")
+            CreateLoreEntryRequest(title="Honor Harrington", entry_type="lore:character")
         )
         existing = self.service.read_lore_entry(honor.id)
         self.service.save_lore_entry(
@@ -40,19 +40,19 @@ class PreviewEndpointTests(unittest.TestCase):
                 title=existing.title,
                 body="Captain of the Fearless.",
                 base_revision=existing.revision,
-                entry_type="character",
+                entry_type="lore:character",
                 metadata={"aliases": ["The Salamander"]},
             ),
         )
         self.honor_id = honor.id
 
         structure = self.service.create_structure_node(
-            CreateStructureNodeRequest(title="Act One", entry_type="act")
+            CreateStructureNodeRequest(title="Act One", entry_type="scene:act")
         )
-        act_node = next(c for c in structure.root.children if c.type == "act")
+        act_node = next(c for c in structure.root.children if c.type == "scene:act")
         s = self.service.create_structure_node(
             CreateStructureNodeRequest(
-                title="The Departure", entry_type="scene", parent_id=act_node.id
+                title="The Departure", entry_type="scene:scene", parent_id=act_node.id
             )
         )
         scene_node = next(c for c in s.root.children if c.id == act_node.id).children[-1]
@@ -66,7 +66,7 @@ class PreviewEndpointTests(unittest.TestCase):
                 body="Some scene prose.",
                 base_revision=scene.revision,
                 status="draft",
-                entry_type="scene",
+                entry_type="scene:scene",
                 metadata={
                     "summary": "Honor takes the Salamander into battle.",
                     "characters": [self.honor_id],
@@ -328,12 +328,12 @@ class PreviewEndpointTests(unittest.TestCase):
         # input wins over the caller's implicit target_scene_id. Templates
         # see the marked scene as `scene`.
         second_struct = self.service.create_structure_node(
-            CreateStructureNodeRequest(title="Aftermath", entry_type="scene"),
+            CreateStructureNodeRequest(title="Aftermath", entry_type="scene:scene"),
         )
         second_scene_id = next(
             n.scene_id
             for n in second_struct.root.children
-            if n.type == "scene" and n.title == "Aftermath"
+            if n.type == "scene:scene" and n.title == "Aftermath"
         )
         second_scene = self.service.read_scene(second_scene_id)
         self.service.save_scene(
@@ -343,7 +343,7 @@ class PreviewEndpointTests(unittest.TestCase):
                 body="",
                 base_revision=second_scene.revision,
                 status="draft",
-                entry_type="scene",
+                entry_type="scene:scene",
                 metadata={"summary": "Smoke clears over the bridge."},
             ),
         )
@@ -370,12 +370,12 @@ class PreviewEndpointTests(unittest.TestCase):
         # resolution_scene_id — sets the effective resolution scene, overriding
         # the caller's implicit target_scene_id. Templates see it as `scene`.
         second_struct = self.service.create_structure_node(
-            CreateStructureNodeRequest(title="Aftermath", entry_type="scene"),
+            CreateStructureNodeRequest(title="Aftermath", entry_type="scene:scene"),
         )
         second_scene_id = next(
             n.scene_id
             for n in second_struct.root.children
-            if n.type == "scene" and n.title == "Aftermath"
+            if n.type == "scene:scene" and n.title == "Aftermath"
         )
         response = self.client.post(
             "/api/ai/preview",
@@ -501,11 +501,10 @@ class PreviewCostEstimateTests(unittest.TestCase):
             "---\n"
             "id: sonnet\n"
             "title: Sonnet\n"
-            "entry_type: assistant\n"
+            "entry_type: assistant:assistant\n"
             "metadata:\n"
             "  ai_provider: anthropic\n"
             "  ai_model: claude-sonnet-4-6\n"
-            "  is_default: true\n"
             "---\n",
             encoding="utf-8",
         )
@@ -513,7 +512,7 @@ class PreviewCostEstimateTests(unittest.TestCase):
             "---\n"
             "id: phantom\n"
             "title: Phantom\n"
-            "entry_type: assistant\n"
+            "entry_type: assistant:assistant\n"
             "metadata:\n"
             "  ai_provider: anthropic\n"
             "  ai_model: not-a-real-model\n"

@@ -1,14 +1,14 @@
 <script context="module" lang="ts">
   import type { LoreEntrySummary, MetadataSchema } from "@/lib/types";
 
-  // A Lore-pane group: one bucket per entry_type, sorted by label. App owns the
-  // lore data and the editor-pane coupling (open an entry, move a note to
-  // Research, create a new entry — those all touch editor panes / confirmation
-  // modals). This component owns the search box, the per-type grouping, the
-  // collapse state, and the row rendering.
+  // A Lore-pane display group: one bucket to render under an optional header.
+  // `label: null` is the headerless flat list; otherwise it's a group header
+  // (entry_type buckets by default, or a view's label groups). `color` tints
+  // the header when a view's Group node carried one (ADR-0019).
   type LoreEntryGroup = {
     id: string;
-    label: string;
+    label: string | null;
+    color: string | null;
     entries: LoreEntrySummary[];
     depth: number;
   };
@@ -20,10 +20,19 @@
   import GroupCaret from "@/components/widgets/GroupCaret.svelte";
   import CountPill from "@/components/widgets/CountPill.svelte";
   import { getSwatch, resolveColorForType } from "@/lib/utils/colors";
+  import { evaluateView, type ViewGroup } from "@/lib/views/evaluateView";
+  import { paneViews } from "@/lib/stores/paneViews.svelte";
   import { metadataSchemaStore } from "@/lib/stores/schema";
   import { focusedDocumentStore, pinnedKeysStore } from "@/lib/stores/editorFocus";
+  import type { ViewPresentation, ViewSpec } from "@/lib/types";
 
   export let entries: LoreEntrySummary[];
+  // The view to render through + its presentation. App computes these from the
+  // pane's selected view (paneViews) and passes them in — the reactivity bridge
+  // for the legacy `$:` pane (feedback_svelte5_reactivity_traps). Defaults keep
+  // the standalone default: the whole `lore` universe, grouped by entry_type.
+  export let viewSpec: ViewSpec = { kind: "lore", expr: null, sort: { by: "manual" } };
+  export let presentation: ViewPresentation | null = null;
   // metadataSchema is global per-project — read from the store, not a prop (#14 Step 2).
   $: schema = $metadataSchemaStore;
   // Active-row highlight + pin-star read from the editor-focus store, not props (#14 Step 2).
@@ -39,13 +48,48 @@
   let searchQuery = "";
   let collapsedGroups: Record<string, boolean> = {};
 
-  $: filteredEntries = filterEntries(entries, searchQuery);
-  $: groupedEntries = groupByType(filteredEntries, schema);
+  // Every NodeList is backed by a view (ADR-0022). Evaluate the selected view,
+  // then apply the pane's own search + presentation on top: a view with label
+  // annotations carries its own hard groups (rank-ordered); otherwise Lore
+  // groups by entry_type (its intrinsic default), or renders flat when the
+  // view's presentation says so.
+  $: viewResult = evaluateView(viewSpec, entries, { schema, resolveView: paneViews.resolveView });
+  $: annotations = viewResult.annotations;
+  $: filteredEntries = filterEntries(viewResult.nodes, searchQuery);
+  $: displayGroups = buildDisplayGroups(viewResult.groups, filteredEntries, schema, presentation === "flat");
 
   function filterEntries(items: LoreEntrySummary[], query: string) {
     const normalizedQuery = query.trim().toLowerCase();
     if (!normalizedQuery) return items;
     return items.filter((entry) => entrySearchText(entry).includes(normalizedQuery));
+  }
+
+  function buildDisplayGroups(
+    labelGroups: ViewGroup<LoreEntrySummary>[] | null,
+    items: LoreEntrySummary[],
+    currentSchema: MetadataSchema | null,
+    flat: boolean,
+  ): LoreEntryGroup[] {
+    // A view with label annotations dictates the grouping — honor its rank order,
+    // filtering each bucket to the searched set (empty buckets drop out).
+    if (labelGroups) {
+      const inSet = new Set(items.map((e) => e.id));
+      return labelGroups
+        .map((g) => ({
+          id: g.key,
+          label: g.label ?? "Everything else",
+          color: g.color,
+          entries: g.nodes.filter((n) => inSet.has(n.id)),
+          depth: 0,
+        }))
+        .filter((g) => g.entries.length > 0);
+    }
+    // Flat presentation: one headerless list.
+    if (flat) {
+      return [{ id: "__flat__", label: null, color: null, entries: items, depth: 0 }];
+    }
+    // Default: group by entry_type.
+    return groupByType(items, currentSchema);
   }
 
   function groupByType(items: LoreEntrySummary[], currentSchema: MetadataSchema | null): LoreEntryGroup[] {
@@ -59,12 +103,13 @@
         groupsByType.set(groupId, {
           id: groupId,
           label: entryTypeName(entry, currentSchema),
+          color: null,
           entries: [entry],
           depth: 0,
         });
       }
     }
-    return Array.from(groupsByType.values()).sort((left, right) => left.label.localeCompare(right.label, undefined, { sensitivity: "base" }));
+    return Array.from(groupsByType.values()).sort((left, right) => (left.label ?? "").localeCompare(right.label ?? "", undefined, { sensitivity: "base" }));
   }
 
   function toggleGroup(groupId: string) {
@@ -109,6 +154,15 @@
     return [];
   }
 
+  // The row stripe color: a view's soft-color annotation wins over the instance
+  // color, which wins over the entry_type color (doc §1.3 precedence).
+  function stripeFor(entry: LoreEntrySummary): string | null {
+    const viewColor = annotations.get(entry.id)?.color ?? null;
+    const instanceColor = typeof entry.metadata?.color === "string" ? entry.metadata.color : null;
+    const swatch = getSwatch(viewColor) ?? getSwatch(instanceColor) ?? resolveColorForType(entry.entry_type, schema);
+    return swatch?.hex ?? null;
+  }
+
   function metadataSearchText(value: unknown): string {
     if (value === null || value === undefined) return "";
     if (Array.isArray(value)) return value.map(metadataSearchText).join(" ");
@@ -120,66 +174,69 @@
 <NodeList
   searchPlaceholder="Search entries, tags, aliases"
   bind:searchValue={searchQuery}
-  isEmpty={groupedEntries.length === 0}
+  isEmpty={displayGroups.length === 0}
 >
-  {#each groupedEntries as group}
-    <NodeRow
-      groupHeader
-      collapsed={!!collapsedGroups[group.id]}
-      title={group.label}
-      depth={group.depth}
-      onClick={() => toggleGroup(group.id)}
-      onmousedown={(event) => event.stopPropagation()}
-    >
-      {#snippet leading()}
-        <GroupCaret collapsed={collapsedGroups[group.id]} />
-      {/snippet}
-      {#snippet trailing()}
-        <CountPill count={group.entries.length} />
-      {/snippet}
-      {#snippet nested()}
-        {#if !collapsedGroups[group.id]}
-          {#each group.entries as entry}
-            {@const detailText = entryDetailText(entry)}
-            {@const entryTagList = entryTags(entry)}
-            {@const instanceColor = typeof entry.metadata?.color === "string" ? entry.metadata.color : null}
-            {@const entrySwatch = (() => {
-              const s = getSwatch(instanceColor);
-              if (s) return s;
-              return resolveColorForType(entry.entry_type, schema);
-            })()}
-            <NodeRow
-              title={entry.title}
-              detail={detailText}
-              tags={entryTagList}
-              depth={group.depth + 1}
-              active={focusedDocument?.type === "lore" && focusedDocument.id === entry.id}
-              pinned={pinnedKeys.has(`lore:${entry.id}`)}
-              stripeColor={entrySwatch?.hex ?? null}
-              onClick={() => onOpenEntry(entry.id)}
-              onmousedown={(event) => event.stopPropagation()}
-            >
-              {#snippet trailing()}
-                {#if entry.entry_type === "lore_note"}
-                  <button
-                    class="row-action-add"
-                    type="button"
-                    title="Move to Research"
-                    on:click|stopPropagation={() => onMoveNoteToResearch(entry)}
-                  >→R</button>
-                {/if}
-              {/snippet}
-            </NodeRow>
-          {/each}
-        {/if}
-      {/snippet}
-    </NodeRow>
+  {#each displayGroups as group (group.id)}
+    {#if group.label === null}
+      {#each group.entries as entry (entry.id)}
+        {@render entryRow(entry, 0)}
+      {/each}
+    {:else}
+      <NodeRow
+        groupHeader
+        collapsed={!!collapsedGroups[group.id]}
+        title={group.label}
+        depth={group.depth}
+        stripeColor={group.color ? getSwatch(group.color)?.hex ?? null : null}
+        onClick={() => toggleGroup(group.id)}
+        onmousedown={(event) => event.stopPropagation()}
+      >
+        {#snippet leading()}
+          <GroupCaret collapsed={collapsedGroups[group.id]} />
+        {/snippet}
+        {#snippet trailing()}
+          <CountPill count={group.entries.length} />
+        {/snippet}
+        {#snippet nested()}
+          {#if !collapsedGroups[group.id]}
+            {#each group.entries as entry (entry.id)}
+              {@render entryRow(entry, group.depth + 1)}
+            {/each}
+          {/if}
+        {/snippet}
+      </NodeRow>
+    {/if}
   {/each}
   {#snippet whenEmpty()}
     {#if entries.length === 0}
       <p class="muted">No entries yet.</p>
     {:else}
-      <p class="muted">No entries match this search.</p>
+      <p class="muted">No entries match this view.</p>
     {/if}
   {/snippet}
 </NodeList>
+
+{#snippet entryRow(entry: LoreEntrySummary, depth: number)}
+  <NodeRow
+    title={entry.title}
+    detail={entryDetailText(entry)}
+    tags={entryTags(entry)}
+    {depth}
+    active={focusedDocument?.type === "lore" && focusedDocument.id === entry.id}
+    pinned={pinnedKeys.has(`lore:${entry.id}`)}
+    stripeColor={stripeFor(entry)}
+    onClick={() => onOpenEntry(entry.id)}
+    onmousedown={(event) => event.stopPropagation()}
+  >
+    {#snippet trailing()}
+      {#if entry.entry_type === "lore:lore_note"}
+        <button
+          class="row-action-add"
+          type="button"
+          title="Move to Research"
+          on:click|stopPropagation={() => onMoveNoteToResearch(entry)}
+        >→R</button>
+      {/if}
+    {/snippet}
+  </NodeRow>
+{/snippet}

@@ -40,6 +40,14 @@
   } from "@/lib/types";
   import { metadataSchemaStore } from "@/lib/stores/schema";
   import { refreshChatSessions, refreshProjectCost } from "@/lib/stores/chats";
+  import {
+    assistantScopeTags,
+    assistantTitle,
+    partitionAssistants,
+    preferredAssistantForPrompt,
+    scopedDefaultAssistantId,
+    topmostMatchingAssistant,
+  } from "@/lib/chat/assistantScope";
 
   
   interface Props {
@@ -280,11 +288,6 @@
       .sort(sorter);
   }
 
-  function preferredAssistantForPrompt(entry: PromptEntrySummary): string {
-    const raw = (entry.metadata ?? {})["preferred_assistant_id"];
-    return typeof raw === "string" ? raw : "";
-  }
-
   async function toggleChatPromptPicker() {
     if (isLocked) return;
     promptPickerOpen = !promptPickerOpen;
@@ -305,8 +308,16 @@
     closeChatPromptPicker();
     if (isLocked) return;
     chatPromptEntryId = entry.id;
+    // Seed the assistant from the prompt: an explicit preferred pin wins;
+    // otherwise the dynamic default = topmost assistant matching the prompt's
+    // tag scope (ADR-0024). No scope + no pin → leave the current selection.
     const preferred = preferredAssistantForPrompt(entry);
-    if (preferred) chatAssistantId = preferred;
+    if (preferred) {
+      chatAssistantId = preferred;
+    } else {
+      const tags = assistantScopeTags(entry);
+      if (tags.length > 0) chatAssistantId = topmostMatchingAssistant(assistantEntries, tags)?.id ?? "";
+    }
     // chatSystemPrompt stays empty until first-send; renderAndLockPromptTemplate
     // fills it in from api.aiPreview right before the first user turn ships
     // (deferred render lets the user edit input drafts freely).
@@ -314,16 +325,6 @@
     chatInputDrafts = seedInputDraftsFromEntry(entry);
     chatInputsHidden = false;
     await persistActiveChat();
-  }
-
-  function filteredAssistantEntries(): AssistantEntrySummary[] {
-    const q = assistantPickerSearch.trim().toLowerCase();
-    const sorter = (a: AssistantEntrySummary, b: AssistantEntrySummary) =>
-      a.title.localeCompare(b.title, undefined, { sensitivity: "base" });
-    if (!q) return assistantEntries.slice().sort(sorter);
-    return assistantEntries
-      .filter((e) => e.title.toLowerCase().includes(q) || (e.entry_type || "").toLowerCase().includes(q))
-      .sort(sorter);
   }
 
   async function toggleAssistantPicker() {
@@ -371,16 +372,6 @@
       if (!insidePreview) chatPreviewPopoverOpen = false;
     }
   }
-
-  function assistantTitle(assistantId: string): string {
-    if (!assistantId) {
-      const def = assistantEntries.find((a) => a.id === defaultAssistantId);
-      return def ? `Default (${def.title})` : "Default";
-    }
-    return assistantEntries.find((a) => a.id === assistantId)?.title ?? "Unknown assistant";
-  }
-
-
 
   function defaultDraftFor(input: PromptInputDefinition): string {
     if (input.default !== undefined && input.default !== null) return String(input.default);
@@ -811,6 +802,11 @@
   let activePromptEntry = $derived(chatPromptEntryId
     ? promptEntries.find((p) => p.id === chatPromptEntryId) ?? null
     : null);
+  // The active prompt's assistant scope + the dynamic default it implies:
+  // topmost assistant matching the scope, else topmost overall (ADR-0024).
+  let assistantScope = $derived(assistantScopeTags(activePromptEntry));
+  let scopedDefaultId = $derived(scopedDefaultAssistantId(assistantEntries, assistantScope, defaultAssistantId));
+  let assistantParts = $derived(partitionAssistants(assistantEntries, assistantPickerSearch, assistantScope));
   let declaredInputs = $derived(activePromptEntry?.inputs ?? []);
   let missingRequiredInputs = $derived(declaredInputs.filter(
     (i) => i.required && isInputMissing(i, chatInputDrafts[i.name]),
@@ -895,7 +891,7 @@
           aria-label="Assistant"
         >
           <span class="cbv-chip-glyph" aria-hidden="true">🤖</span>
-          <strong>{assistantTitle(chatAssistantId)}</strong>
+          <strong>{assistantTitle(chatAssistantId, assistantEntries, scopedDefaultId)}</strong>
           {#if isLocked}
             <span class="cbv-chip-lock" aria-label="locked">🔒</span>
           {:else}
@@ -916,25 +912,39 @@
               onclick={() => void pickAssistantForChat("")}
             >
               <strong>Default</strong>
-              <small>{assistantTitle("").replace(/^Default \(|\)$/g, "") || "machine default"}</small>
+              <small>{assistantTitle("", assistantEntries, scopedDefaultId).replace(/^Default \(|\)$/g, "") || "machine default"}</small>
             </button>
-            {#each filteredAssistantEntries() as assistant (assistant.id)}
-              <button
-                type="button"
-                class:cbv-picker-active={assistant.id === chatAssistantId}
-                onclick={() => void pickAssistantForChat(assistant.id)}
-              >
-                <strong>{assistant.title}</strong>
-                <small>{assistant.entry_type}</small>
-              </button>
-            {:else}
+            {#if assistantParts.matching.length === 0 && assistantParts.rest.length === 0}
               <p class="cbv-picker-empty">
                 {assistantPickerSearch ? "No assistants match." : "No assistants configured."}
               </p>
-            {/each}
+            {:else}
+              {#if assistantParts.matching.length > 0}
+                <div class="cbv-picker-group-label">Suggested for this prompt</div>
+              {/if}
+              {#each assistantParts.matching as assistant (assistant.id)}
+                {@render assistantOption(assistant)}
+              {/each}
+              {#if assistantParts.matching.length > 0 && assistantParts.rest.length > 0}
+                <div class="cbv-picker-divider" role="separator"></div>
+              {/if}
+              {#each assistantParts.rest as assistant (assistant.id)}
+                {@render assistantOption(assistant)}
+              {/each}
+            {/if}
           </div>
         {/if}
       </div>
+      {#snippet assistantOption(assistant: AssistantEntrySummary)}
+        <button
+          type="button"
+          class:cbv-picker-active={assistant.id === chatAssistantId}
+          onclick={() => void pickAssistantForChat(assistant.id)}
+        >
+          <strong>{assistant.title}</strong>
+          <small>{assistant.entry_type}</small>
+        </button>
+      {/snippet}
       <div class="cbv-preview-anchor">
         <button
           type="button"
@@ -1243,6 +1253,23 @@
   .cbv-prompt-picker > button > strong { font-weight: 600; font-size: 13px; }
   .cbv-prompt-picker > button > small { font-size: 11px; color: var(--text-3); }
   .cbv-picker-empty { margin: 4px 6px; font-size: 12px; color: var(--text-3); }
+
+  /* Soft-partition affordances (ADR-0024): a label over the matching group and
+     a hairline before the rest of the roster. */
+  .cbv-picker-group-label {
+    padding: 4px 8px 2px;
+    font-size: 10px;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+    color: var(--text-3);
+  }
+
+  .cbv-picker-divider {
+    height: 1px;
+    margin: 5px 6px;
+    background: var(--border);
+  }
 
   /* Assistant chip = graphite variant of .cbv-chip. Trigger + popover
      mirror the prompt picker exactly so both reads at the same height

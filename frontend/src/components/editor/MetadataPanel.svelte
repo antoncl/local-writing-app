@@ -132,6 +132,7 @@
       field.type === "long_text" ||
       field.type === "entity_ref" ||
       field.type === "entity_ref_list" ||
+      field.type === "tags" ||
       (field.type === "multi_select" && field.options.length > 0)
     );
   }

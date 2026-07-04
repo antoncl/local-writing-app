@@ -57,7 +57,7 @@ class ProjectLifecycleMixin:
         # Project node singleton — book metadata, blurb, etc. live here.
         self._write_project_node_file(
             root / "project.md",
-            ProjectNode(id="project", title=title, body="", entry_type="project", metadata={}),
+            ProjectNode(id="project", title=title, body="", entry_type="project:project", metadata={}),
         )
         self._write_yaml(root / "metadata.schema.yaml", self._empty_metadata_schema())
         self._write_yaml(root / "tags.yaml", {"tags": []})
@@ -67,7 +67,7 @@ class ProjectLifecycleMixin:
             body="",
             revision="",
             status="draft",
-            entry_type="scene",
+            entry_type="scene:scene",
             metadata={},
         )
         self._write_scene_file(self._filepath_for_new_node(root / "scenes", initial_scene.title), initial_scene)
@@ -76,7 +76,7 @@ class ProjectLifecycleMixin:
         TreeStructureService(root, MANUSCRIPT_TREE_CONFIG).initialize(
             leaf_node={
                 "id": self._new_id("node"),
-                "type": "scene",
+                "type": "scene:scene",
                 "title": initial_scene.title,
                 "scene_id": initial_scene.id,
                 "children": [],
@@ -108,8 +108,8 @@ class ProjectLifecycleMixin:
             },
             "manuscript_structure": {
                 "container_types": [
-                    {"type": "act", "label": "Act"},
-                    {"type": "chapter", "label": "Chapter"},
+                    {"type": "scene:act", "label": "Act"},
+                    {"type": "scene:chapter", "label": "Chapter"},
                 ]
             },
         }
@@ -273,14 +273,14 @@ class ProjectLifecycleMixin:
             path = entry.path
             try:
                 front_matter, body = self._read_markdown_with_front_matter(path, strict=True)
-                entry_type = front_matter.get("entry_type", "scene")
+                entry_type = front_matter.get("entry_type", "scene:scene")
                 if entry_type is not None and not isinstance(entry_type, str):
                     errors.append(f"Scene {scene_id} has invalid entry_type; it must be text.")
-                    entry_type = "scene"
+                    entry_type = "scene:scene"
                 metadata = self._normalise_metadata(front_matter.get("metadata"), path)
                 status = str(front_matter.get("status") or "draft")
                 if metadata_schema:
-                    errors.extend(self._validate_scene_metadata(scene_id, str(entry_type or "scene"), status, metadata, metadata_schema, node_index))
+                    errors.extend(self._validate_scene_metadata(scene_id, str(entry_type or "scene:scene"), status, metadata, metadata_schema, node_index))
                     # Mutation-value issues are advisory (never block a save), so
                     # they surface as warnings, not errors.
                     warnings.extend(self._validate_scene_mutations(scene_id, body, metadata_schema, node_index))
@@ -292,13 +292,13 @@ class ProjectLifecycleMixin:
             path = entry.path
             try:
                 front_matter, _ = self._read_markdown_with_front_matter(path, strict=True)
-                entry_type = front_matter.get("entry_type", "lore_note")
+                entry_type = front_matter.get("entry_type", "lore:lore_note")
                 if entry_type is not None and not isinstance(entry_type, str):
                     errors.append(f"Lore Entry {entry_id} has invalid entry_type; it must be text.")
-                    entry_type = "lore_note"
+                    entry_type = "lore:lore_note"
                 metadata = self._normalise_metadata(front_matter.get("metadata"), path)
                 if metadata_schema:
-                    errors.extend(self._validate_lore_entry_metadata(entry_id, str(entry_type or "lore_note"), metadata, metadata_schema, node_index))
+                    errors.extend(self._validate_lore_entry_metadata(entry_id, str(entry_type or "lore:lore_note"), metadata, metadata_schema, node_index))
             except ProjectServiceError as exc:
                 errors.append(exc.message)
 

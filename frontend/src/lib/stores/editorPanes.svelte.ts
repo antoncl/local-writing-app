@@ -48,6 +48,7 @@ import { refreshPromptEntries, setPromptEntries } from "@/lib/stores/prompts";
 import { refreshAssistantEntries, setAssistantEntries } from "@/lib/stores/assistants";
 import { refreshKnownTags } from "@/lib/stores/tags";
 import { refreshTodos, refreshEmbeddedTodos } from "@/lib/stores/todos";
+import { paneViews } from "@/lib/stores/paneViews.svelte";
 import { chatSessionsStore, refreshChatSessions, setChatSessions } from "@/lib/stores/chats";
 import { bodyHasMutationMarkers, mutationsVersion } from "@/lib/stores/mutationsVersion.svelte";
 import type {
@@ -325,6 +326,10 @@ class EditorPanesController {
     // PUT /api/nodes/{id} path; the pane's draft-* fields aren't the
     // source of truth for chat state. Treat saveEditorPane as a no-op.
     if (documentKind === "chat") return;
+    // Views persist from within ViewBodyView via PUT /api/views/{id} (the
+    // designer owns the ViewSpec); the pane's draft-* fields aren't the source
+    // of truth for view state. Same no-op precedent as chats.
+    if (documentKind === "view") return;
     this.#autosave.cancel(id);
     this.setEditorPaneSaving(id, true);
     // Snapshot the pre-save baseline body for the mutations-version check below
@@ -451,7 +456,16 @@ class EditorPanesController {
     } catch (error) {
       console.warn("Failed to fetch backlinks", error);
     }
-    const fileLabel = documentKind === "scene" ? "scene" : documentKind === "lore" ? "entry" : documentKind === "research" ? "note" : "prompt";
+    const fileLabel =
+      documentKind === "scene"
+        ? "scene"
+        : documentKind === "lore"
+          ? "entry"
+          : documentKind === "research"
+            ? "note"
+            : documentKind === "view"
+              ? "view"
+              : "prompt";
     const titleLabel =
       documentKind === "scene"
         ? "Delete Scene"
@@ -459,7 +473,9 @@ class EditorPanesController {
           ? "Delete Entry"
           : documentKind === "research"
             ? "Delete Note"
-            : "Delete Prompt";
+            : documentKind === "view"
+              ? "Delete View"
+              : "Delete Prompt";
     const baseMessage = `Delete "${sceneTitle}"? This removes the ${fileLabel} file from the project.`;
     const message =
       backlinks.length > 0
@@ -498,6 +514,11 @@ class EditorPanesController {
     } else if (documentKind === "chat") {
       setChatSessions((await api.deleteChatSession(pane.scene.id)).sessions);
       if (this.activeChatId === pane.scene.id) this.activeChatId = null;
+    } else if (documentKind === "view") {
+      // A view is a frontmatter-only node with its own deleter; routing it
+      // through api.deleteScene 404s ("Scene <view-id> does not exist").
+      await api.deleteView(pane.scene.id);
+      await paneViews.reload();
     } else {
       setStructure(await api.deleteScene(pane.scene.id));
       await refreshTodos();
@@ -712,7 +733,7 @@ class EditorPanesController {
       body: "",
       revision: "",
       status: "",
-      entry_type: "chat_session",
+      entry_type: "chat:chat_session",
       metadata: {},
       computed_metadata: {},
     } as unknown as EditableDocument;
@@ -726,7 +747,7 @@ class EditorPanesController {
             draftTitle: sceneShaped.title,
             draftMarkdown: "",
             draftStatus: "",
-            draftEntryType: "chat_session",
+            draftEntryType: "chat:chat_session",
             draftMetadata: {},
             saving: false,
             recentlySaved: false,
@@ -798,6 +819,72 @@ class EditorPanesController {
     this.focusedEditorPaneId = targetPane.id;
     paneLayout.raise(targetPane.id);
     this.setStatus(`Loaded ${entry.title}`);
+  }
+
+  async openView(viewId: string): Promise<void> {
+    const existingPane = this.panes.find((pane) => pane.document?.type === "view" && pane.document.id === viewId);
+    if (existingPane) {
+      this.#focusExisting(existingPane, "open view");
+      return;
+    }
+    const targetPane = await this.#acquireTargetPane();
+    const node = await api.getView(viewId);
+    this.panes = this.panes.map((pane) =>
+      pane.id === targetPane.id
+        ? {
+            ...pane,
+            document: { type: "view", id: node.id },
+            scene: node,
+            dirty: false,
+            draftTitle: node.title,
+            // A view is frontmatter-only — no prose body, status, or fields.
+            // The ViewBodyView owns the spec and persists it directly, mirroring
+            // the chat precedent (saveEditorPane is a no-op for views).
+            draftMarkdown: "",
+            draftStatus: "",
+            draftEntryType: node.entry_type,
+            draftMetadata: {},
+            saving: false,
+            recentlySaved: false,
+          }
+        : pane,
+    );
+    this.focusedEditorPaneId = targetPane.id;
+    paneLayout.raise(targetPane.id);
+    this.setStatus(`Loaded ${node.title}`);
+  }
+
+  // Temporary entry point for step 3 (#80): mint a blank view and open the
+  // designer on it. The real "New view…" affordance arrives with the pane
+  // view-switchers in step 4 (#81, doc §5); this button will retire then.
+  async createAndOpenView(kind = "lore"): Promise<void> {
+    const node = await api.createView({
+      title: "New view",
+      spec: { kind, expr: null, sort: { by: "manual" } },
+      presentation: "flat",
+    });
+    await this.openView(node.id);
+  }
+
+  // Delete a saved view from a list affordance (e.g. the ViewSwitcher),
+  // confirming first. Works whether or not the view is currently open: it
+  // tears down any pane showing it and refreshes the view roster.
+  requestDeleteView(viewId: string, title: string): void {
+    confirmService.request({
+      title: "Delete View",
+      message: `Delete "${title}"? This removes the view file from the project.`,
+      confirmLabel: "Delete View",
+      destructive: true,
+      onConfirm: () => this.#deleteView(viewId),
+    });
+  }
+
+  async #deleteView(viewId: string): Promise<void> {
+    await api.deleteView(viewId);
+    const pane = this.panes.find((p) => p.document?.type === "view" && p.document.id === viewId);
+    if (pane) this.tearDown(pane.id);
+    await paneViews.reload();
+    this.setStatus("Deleted view");
   }
 
   async openLore(entryId: string): Promise<void> {

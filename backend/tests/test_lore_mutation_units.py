@@ -34,7 +34,7 @@ def _setup_honor() -> str:
             layer_id=layer_id,
             field_id="rank",
             field=MetadataFieldDefinition(name="Rank", type="text"),
-            entry_type="character",
+            entry_type="lore:character",
         )
     )
     svc.upsert_metadata_field(
@@ -42,11 +42,11 @@ def _setup_honor() -> str:
             layer_id=layer_id,
             field_id="titles",
             field=MetadataFieldDefinition(name="Titles", type="tags"),
-            entry_type="character",
+            entry_type="lore:character",
         )
     )
     return svc.create_lore_entry(
-        CreateLoreEntryRequest(title="Honor", entry_type="character")
+        CreateLoreEntryRequest(title="Honor", entry_type="lore:character")
     ).id
 
 

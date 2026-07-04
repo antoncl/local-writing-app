@@ -13,6 +13,19 @@
       "runtimeExecutable": "backend/.venv/Scripts/python.exe",
       "runtimeArgs": ["-m", "uvicorn", "app.main:app", "--app-dir", "backend", "--host", "127.0.0.1", "--port", "8787", "--reload", "--reload-dir", "backend"],
       "port": 8787
+    },
+    {
+      "name": "backend-claude",
+      "runtimeExecutable": "backend/.venv/Scripts/python.exe",
+      "runtimeArgs": ["-m", "uvicorn", "app.main:app", "--app-dir", "backend", "--host", "127.0.0.1", "--port", "8788", "--reload", "--reload-dir", "backend"],
+      "port": 8788
+    },
+    {
+      "name": "frontend-claude",
+      "runtimeExecutable": "npm",
+      "runtimeArgs": ["run", "dev", "--prefix", "frontend", "--", "--mode", "claude", "--port", "5174", "--strictPort"],
+      "port": 5174,
+      "autoPort": false
     }
   ]
 }

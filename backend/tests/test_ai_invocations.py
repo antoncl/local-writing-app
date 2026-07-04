@@ -38,7 +38,7 @@ class AIInvocationLogEndpointTests(unittest.TestCase):
             "/api/ai/invocations",
             json={
                 "prompt_entry_id": "prompt_1",
-                "prompt_entry_type": "continuation",
+                "prompt_entry_type": "prompt:continuation",
                 "scene_id": "scene_1",
                 "provider": "anthropic",
                 "model": "claude-opus-4-7",
@@ -214,7 +214,7 @@ class CrossKindCostDispatchTests(unittest.TestCase):
     def _new_character(self, title: str = "Honor") -> str:
         response = self.client.post(
             "/api/lore",
-            json={"title": title, "entry_type": "character"},
+            json={"title": title, "entry_type": "lore:character"},
         )
         self.assertEqual(response.status_code, 200, response.text)
         return response.json()["id"]

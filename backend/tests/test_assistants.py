@@ -38,10 +38,11 @@ class MigrateDefaultModelsTests(unittest.TestCase):
         folder = self.config_dir / "assistants"
         files = sorted(p.name for p in folder.glob("*.md"))
         self.assertEqual(len(files), 4)  # one per DEFAULT_MODELS entry
-        # The provider matching default_provider (ollama, by default) is
-        # flagged is_default.
-        ollama_file = next(p for p in folder.glob("*.md") if "ollama" in p.read_text(encoding="utf-8"))
-        self.assertIn("is_default: true", ollama_file.read_text(encoding="utf-8"))
+        # The ★ is_default flag is retired (ADR-0024) — no file carries it; the
+        # default_provider (ollama) assistant is instead seeded first so it is
+        # the topmost (dynamic default) row.
+        for p in folder.glob("*.md"):
+            self.assertNotIn("is_default", p.read_text(encoding="utf-8"))
 
     def test_subsequent_load_is_a_no_op(self) -> None:
         ms.load_settings()
@@ -62,8 +63,8 @@ class MigrateDefaultModelsTests(unittest.TestCase):
 
 class ProjectServiceResolveAssistantTests(unittest.TestCase):
     """ProjectService.resolve_assistant reads the file-backed index and
-    returns the AssistantEntry whose id matches (or whose metadata is
-    flagged is_default when no id is passed)."""
+    returns the AssistantEntry whose id matches (or the topmost in roster
+    order when no id is passed — the ★ is_default flag is retired, ADR-0024)."""
 
     def setUp(self) -> None:
         self.temp_dir = TemporaryDirectory()
@@ -86,7 +87,6 @@ class ProjectServiceResolveAssistantTests(unittest.TestCase):
             "  ai_model: claude-sonnet-4-6\n"
             "  ai_temperature: 0.9\n"
             "  ai_max_tokens: 4096\n"
-            "  is_default: true\n"
             "---\n",
             encoding="utf-8",
         )
@@ -114,10 +114,12 @@ class ProjectServiceResolveAssistantTests(unittest.TestCase):
         self.assertEqual(result.id, "cheap")
         self.assertEqual(result.metadata["ai_model"], "claude-haiku-4-5-20251001")
 
-    def test_resolve_falls_back_to_is_default(self) -> None:
+    def test_resolve_falls_back_to_topmost(self) -> None:
+        # No id → topmost in roster order. With no per-layer .order.yaml the
+        # roster sorts by title, so "Cheap" precedes "Creative".
         result = global_service.resolve_assistant(None)
         assert result is not None
-        self.assertEqual(result.id, "creative")
+        self.assertEqual(result.id, "cheap")
 
     def test_resolve_returns_none_for_unknown_id(self) -> None:
         result = global_service.resolve_assistant("ghost")
@@ -169,7 +171,6 @@ class ChatEndpointAssistantTests(unittest.TestCase):
             "  ai_model: claude-haiku-4-5-20251001\n"
             "  ai_temperature: 0.2\n"
             "  ai_max_tokens: 512\n"
-            "  is_default: true\n"
             "---\n",
             encoding="utf-8",
         )
@@ -209,7 +210,7 @@ class ChatEndpointAssistantTests(unittest.TestCase):
             )
         self.assertEqual(response.status_code, 200, response.text)
         kwargs = mock.call_args.kwargs
-        # The is_default=true file (cheap) is the fallback.
+        # No id → topmost by title ("Cheap summary" < "Creative drafting").
         self.assertEqual(kwargs["model"], "claude-haiku-4-5-20251001")
         self.assertEqual(kwargs["temperature"], 0.2)
 
@@ -322,7 +323,7 @@ class FileBackedAssistantsTests(unittest.TestCase):
     def test_create_assistant_endpoint_lands_in_machine_layer(self) -> None:
         create = self.client.post(
             "/api/assistants",
-            json={"title": "New one", "entry_type": "assistant"},
+            json={"title": "New one", "entry_type": "assistant:assistant"},
         )
         self.assertEqual(create.status_code, 200, create.text)
         entry = create.json()

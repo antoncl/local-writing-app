@@ -26,6 +26,9 @@
   export let onHealthCheck: () => void;
   export let onOpenPrompts: () => void;
   export let onOpenMutations: () => void;
+  // Temporary (0.5.0 step 3, #80): mints + opens a blank view in the designer.
+  // Retires when step 4 (#81) adds the real per-pane "New view…" switcher.
+  export let onNewView: () => void;
   export let onRepair: () => void;
 </script>
 
@@ -109,6 +112,7 @@
     <div class="button-row">
       <button type="button" on:click={onOpenPrompts}>Prompts…</button>
       <button type="button" on:click={onOpenMutations}>Mutations…</button>
+      <button type="button" on:click={onNewView}>New View…</button>
     </div>
     {#if aiHealthResult}
       <p class="ai-health-result" class:ok={aiHealthResult.ok} class:fail={!aiHealthResult.ok}>

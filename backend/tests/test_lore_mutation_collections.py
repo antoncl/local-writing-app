@@ -34,7 +34,7 @@ def _define_field(field_id: str, field_type: str, name: str) -> None:
             layer_id=layers.layers[-1].id,
             field_id=field_id,
             field=MetadataFieldDefinition(name=name, type=field_type),
-            entry_type="character",
+            entry_type="lore:character",
         )
     )
 
@@ -48,13 +48,13 @@ class CollectionMutationTests(unittest.TestCase):
         _define_field("clues", "tags", "Clues")
         _define_field("rank", "text", "Rank")
         self.honor = svc.create_lore_entry(
-            CreateLoreEntryRequest(title="Honor", entry_type="character")
+            CreateLoreEntryRequest(title="Honor", entry_type="lore:character")
         ).id
         # Base clues = ["footprint"] so add/remove interact with a real base set.
         svc.save_lore_entry(
             self.honor,
             SaveLoreEntryRequest(
-                title="Honor", body="", entry_type="character",
+                title="Honor", body="", entry_type="lore:character",
                 metadata={"clues": ["footprint"]},
             ),
         )

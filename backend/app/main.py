@@ -110,6 +110,12 @@ from app.models import (
     UpsertMetadataFieldRequest,
     UpsertMetadataGroupRequest,
 )
+from app.models_views import (
+    CreateViewRequest,
+    SaveViewRequest,
+    ViewNode,
+    ViewNodeList,
+)
 from app.services import machine_settings as machine_settings_service
 from app.services.ai import providers as ai_providers
 from app.services.ai import tokens as ai_tokens
@@ -118,10 +124,18 @@ from app.services.ai.profiles import CapabilityTier, ModelDescriptor
 from app.services.ai.profiles.registry import known_provider_names, profile_for
 from app.services.project_service import ProjectService, ProjectServiceError
 
-app = FastAPI(title="Local Writing Service", version="0.4.0")
+app = FastAPI(title="Local Writing Service", version="0.5.0")
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["http://127.0.0.1:5173", "http://localhost:5173"],
+    # 5173 = the default Vite dev server; 5174 = the isolated "claude" frontend
+    # (`--mode claude`, backend on :8788) so that parallel stack can actually
+    # reach its backend — see memory/feedback_isolated_claude_instance.md.
+    allow_origins=[
+        "http://127.0.0.1:5173",
+        "http://localhost:5173",
+        "http://127.0.0.1:5174",
+        "http://localhost:5174",
+    ],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -637,6 +651,37 @@ def delete_mutation_set_entry(entry_id: str) -> MutationSetEntryList:
         return service.delete_mutation_set_entry(entry_id)
 
 
+@app.get("/api/views", response_model=ViewNodeList)
+def list_views() -> ViewNodeList:
+    """Saved views (0.5.0, #35/#78) — frontmatter-only `view` nodes."""
+    with translate_errors():
+        return service.list_views()
+
+
+@app.post("/api/views", response_model=ViewNode)
+def create_view(request: CreateViewRequest) -> ViewNode:
+    with translate_errors():
+        return service.create_view(request)
+
+
+@app.get("/api/views/{view_id}", response_model=ViewNode)
+def get_view(view_id: str) -> ViewNode:
+    with translate_errors():
+        return service.read_view(view_id)
+
+
+@app.put("/api/views/{view_id}", response_model=ViewNode)
+def save_view(view_id: str, request: SaveViewRequest) -> ViewNode:
+    with translate_errors():
+        return service.save_view(view_id, request)
+
+
+@app.delete("/api/views/{view_id}", response_model=ViewNodeList)
+def delete_view(view_id: str) -> ViewNodeList:
+    with translate_errors():
+        return service.delete_view(view_id)
+
+
 @app.get("/api/assistants", response_model=AssistantEntryList)
 def list_assistant_entries() -> AssistantEntryList:
     with translate_errors():
@@ -867,8 +912,8 @@ def _resolve_call_params(
 
     Priority for each field, highest first:
       1. Explicit override on the request (provider, model, max_tokens).
-      2. The assistant indicated by assistant_id, or the entry flagged
-         is_default in the file-backed roster.
+      2. The assistant indicated by assistant_id, or the topmost assistant
+         in the file-backed roster when none is given (ADR-0024).
       3. The legacy default_provider / default_models matrix on settings.
 
     Temperature has no fallback: when the assistant doesn't set it (or

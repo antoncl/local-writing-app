@@ -23,7 +23,7 @@ from app.models import (
 )
 
 
-def _define_field(field_id: str, field_type: str, entry_type: str = "character") -> None:
+def _define_field(field_id: str, field_type: str, entry_type: str = "lore:character") -> None:
     layers = svc.read_metadata_schema_layers()
     svc.upsert_metadata_field(
         UpsertMetadataFieldRequest(
@@ -43,7 +43,7 @@ class MutationAdvisoryValidationTests(unittest.TestCase):
         svc.create_project(self.root, "Mutation Validation Tests")
         _define_field("rank", "number")
         self.char = svc.create_lore_entry(
-            CreateLoreEntryRequest(title="Rey", entry_type="character")
+            CreateLoreEntryRequest(title="Rey", entry_type="lore:character")
         ).id
         self.client = TestClient(app)
         self.scene_id = self.client.post("/api/scenes", json={"title": "Chapter One"}).json()["id"]

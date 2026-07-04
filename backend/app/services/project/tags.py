@@ -65,7 +65,9 @@ class TagsMixin:
         return KnownTags(tags=tags)
 
     def _tag_scope_for_node(self, kind: str, entry_type: str) -> NodePickerConfig:
-        return NodePickerConfig(
+        # A tag scope stays a degenerate type-leaf ViewSpec (ADR-0023): the
+        # `.kinds` / `.entry_types` accessors read it back for auto-broadening.
+        return NodePickerConfig.from_membership(
             kinds=[kind] if kind else [],
             entry_types={kind: [entry_type]} if (kind and entry_type) else {},
         )
@@ -79,7 +81,7 @@ class TagsMixin:
                 for sub in subs:
                     if sub not in bucket:
                         bucket.append(sub)
-        return NodePickerConfig(kinds=kinds, entry_types=entry_types)
+        return NodePickerConfig.from_membership(kinds=kinds, entry_types=entry_types)
 
     def _write_scoped_tags(self, tags: list[ScopedTag]) -> None:
         root = self._require_project()

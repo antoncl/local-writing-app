@@ -82,7 +82,7 @@ class SearchMixin:
                     scene_id = self._node_id_for_path(path, front_matter)
                     title = str(front_matter.get("title") or scene_id)
                     status = str(front_matter.get("status") or "draft")
-                    entry_type = str(front_matter.get("entry_type") or "scene")
+                    entry_type = str(front_matter.get("entry_type") or "scene:scene")
                     metadata = self._resolve_reference_titles(
                         self._normalise_metadata(front_matter.get("metadata"), path),
                         entry_type,
@@ -122,7 +122,7 @@ class SearchMixin:
                     front_matter, body = self._read_markdown_with_front_matter(path, strict=True)
                     entry_id = self._node_id_for_path(path, front_matter)
                     title = str(front_matter.get("title") or entry_id)
-                    entry_type = str(front_matter.get("entry_type") or "lore_note")
+                    entry_type = str(front_matter.get("entry_type") or "lore:lore_note")
                     metadata = self._resolve_reference_titles(
                         self._normalise_metadata(front_matter.get("metadata"), path),
                         entry_type,

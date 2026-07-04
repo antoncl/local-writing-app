@@ -26,9 +26,18 @@
   // so leaf checkboxes update but parent indeterminate state goes
   // stale. Flat rendering sidesteps that entirely.
 
-  import { untrack } from "svelte";
-  import type { NodePickerConfig, MetadataSchema, PromptInputType } from "@/lib/types";
+  import { onMount, untrack } from "svelte";
+  import type { NodePickerConfig, PromptInputType, ViewNodeSummary } from "@/lib/types";
   import { metadataSchemaStore } from "@/lib/stores/schema";
+  import { api } from "@/lib/api";
+  import { isViewRef, membershipToSources, pickerMembership } from "@/lib/utils/pickerSources";
+  import {
+    buildTree,
+    concreteLeaves,
+    nodeState,
+    flattenForRender,
+    type SchemaNode,
+  } from "./pickerTree";
 
   interface Props {
     config: NodePickerConfig;
@@ -75,6 +84,46 @@
 
   // metadataSchema is global per-project — read from the store, not a prop (#14 Step 2).
   const metadataSchema = $derived($metadataSchemaStore);
+  // The editor authors the degenerate type-leaf subset (ADR-0023). It thinks in
+  // legacy {kinds, entryTypes}, bridging to the stored `sources` shape here:
+  // reads reduce via `pickerMembership`, `writeSelection` re-encodes via
+  // `membershipToSources`. The full Venn graph ships later, for the designer.
+  const membership = $derived(pickerMembership(config));
+
+  // --- Saved views (ADR-0023 "…or use a saved view") -----------------
+  // Besides the degenerate checkbox tree, a picker source can be a saved
+  // view referenced by id ({ view: <id> }). We list the project's views,
+  // keep only those anchored to a kind this editor offers (scene / lore),
+  // and let the author add/remove them as chips. The tree's writeSelection
+  // preserves these refs (they can't be expressed as checkboxes).
+  let availableViews = $state<ViewNodeSummary[]>([]);
+  onMount(async () => {
+    try {
+      const res = await api.listViews();
+      const kindIds = new Set(KINDS.map((k) => k.id as string));
+      availableViews = res.entries.filter((v) => kindIds.has(v.view_kind));
+    } catch {
+      availableViews = [];
+    }
+  });
+
+  // The view-ref sources currently on the config, in stored order.
+  const viewRefs = $derived((config.sources ?? []).filter(isViewRef));
+  const viewRefIds = $derived(new Set(viewRefs.map((r) => r.view)));
+  function viewTitle(id: string): string {
+    return availableViews.find((v) => v.id === id)?.title ?? id;
+  }
+  // Views not yet added — offered in the "add a saved view" dropdown.
+  const addableViews = $derived(availableViews.filter((v) => !viewRefIds.has(v.id)));
+
+  function addViewRef(viewId: string) {
+    if (!viewId || viewRefIds.has(viewId)) return;
+    emit({ sources: [...(config.sources ?? []), { view: viewId }] });
+  }
+  function removeViewRef(viewId: string) {
+    const next = (config.sources ?? []).filter((s) => !(isViewRef(s) && s.view === viewId));
+    emit({ sources: next });
+  }
 
   // Widget-level collapse state. Local to the component instance — resets
   // when the prompt entry (and therefore this widget) re-mounts. Default
@@ -123,28 +172,9 @@
     },
   ];
 
-  type SchemaNode = {
-    id: string;
-    name: string;
-    abstract: boolean;
-    children: SchemaNode[];
-  };
-
-  type RenderedNode = {
-    id: string;
-    name: string;
-    abstract: boolean;
-    depth: number;
-    state: "checked" | "indeterminate" | "unchecked";
-    hasLeaves: boolean;
-    hasChildren: boolean;
-    collapsed: boolean;
-    pickedCount: number;
-    totalLeaves: number;
-  };
-
   type Chip =
     | { kind: "entry"; key: string; entryKind: Kind; entryTypeId: string; label: string }
+    | { kind: "viewref"; key: string; viewId: string; label: string }
     | { kind: "preset"; key: string; presetId: "full_outline" | "full_text"; label: string }
     | { kind: "marker"; key: string; label: string };
 
@@ -161,101 +191,15 @@
     collapsedIds = next;
   }
 
-  // Build the per-kind tree from the project schema. Roots are
-  // entry types whose `parent` is null; descendants attach via the
-  // parent chain. Abstract types act as containers — they're rendered
-  // as checkboxes too, but checking them toggles their concrete
-  // descendants (abstracts have no instances so they're not stored).
-  function buildTree(schema: MetadataSchema | null, kind: Kind): SchemaNode[] {
-    if (!schema) return [];
-    type Raw = { id: string; name: string; abstract: boolean; parent: string | null };
-    const raw: Raw[] = Object.entries(schema.entry_types ?? {})
-      .filter(([, def]) => def.kind === kind)
-      .map(([id, def]) => ({
-        id,
-        name: def.name || id,
-        abstract: !!def.abstract,
-        parent: def.parent || null,
-      }));
-    const nodeById = new Map<string, SchemaNode>(
-      raw.map((r) => [r.id, { id: r.id, name: r.name, abstract: r.abstract, children: [] }]),
-    );
-    const roots: SchemaNode[] = [];
-    for (const r of raw) {
-      const node = nodeById.get(r.id)!;
-      if (r.parent && nodeById.has(r.parent)) {
-        nodeById.get(r.parent)!.children.push(node);
-      } else {
-        roots.push(node);
-      }
-    }
-    const sort = (nodes: SchemaNode[]) => {
-      nodes.sort((a, b) => {
-        if (a.abstract !== b.abstract) return a.abstract ? -1 : 1;
-        return a.name.localeCompare(b.name);
-      });
-      for (const n of nodes) sort(n.children);
-    };
-    sort(roots);
-    return roots;
-  }
-
-  function concreteLeaves(node: SchemaNode): string[] {
-    if (node.children.length === 0) return node.abstract ? [] : [node.id];
-    const out: string[] = [];
-    for (const child of node.children) out.push(...concreteLeaves(child));
-    return out;
-  }
-
-  function nodeState(node: SchemaNode, selection: Set<string>): "checked" | "indeterminate" | "unchecked" {
-    const leaves = concreteLeaves(node);
-    if (leaves.length === 0) return "unchecked";
-    const inSet = leaves.filter((id) => selection.has(id)).length;
-    if (inSet === leaves.length) return "checked";
-    if (inSet === 0) return "unchecked";
-    return "indeterminate";
-  }
-
-  function flattenForRender(
-    roots: SchemaNode[],
-    selection: Set<string>,
-    collapsed: Set<string>,
-  ): RenderedNode[] {
-    const out: RenderedNode[] = [];
-    function walk(node: SchemaNode, depth: number) {
-      const leaves = concreteLeaves(node);
-      const picked = leaves.filter((id) => selection.has(id)).length;
-      const hasChildren = node.children.length > 0;
-      const isCollapsed = hasChildren && collapsed.has(node.id);
-      out.push({
-        id: node.id,
-        name: node.name,
-        abstract: node.abstract,
-        depth,
-        state: nodeState(node, selection),
-        hasLeaves: leaves.length > 0,
-        hasChildren,
-        collapsed: isCollapsed,
-        pickedCount: picked,
-        totalLeaves: leaves.length,
-      });
-      if (!isCollapsed) {
-        for (const child of node.children) walk(child, depth + 1);
-      }
-    }
-    for (const root of roots) walk(root, 0);
-    return out;
-  }
-
   function selectionFor(kind: Kind): Set<string> {
-    const explicit = config.entry_types?.[kind];
+    const explicit = membership.entryTypes[kind];
     if (explicit && explicit.length > 0) return new Set(explicit);
-    // Legacy fallback: a config with `kinds` set but no `entry_types[kind]`
+    // Legacy fallback: a source with `kind` set but no entry_type leaf
     // historically meant "all sub-types of that kind allowed" at runtime.
     // Reflect that as "all concrete leaves checked" in the editor so the
     // displayed selection matches the runtime behaviour. The first toggle
     // promotes the config to explicit positive selection.
-    if (config.kinds?.includes(kind)) {
+    if (membership.kinds.includes(kind)) {
       return new Set(trees[kind].flatMap((root) => concreteLeaves(root)));
     }
     return new Set();
@@ -294,8 +238,8 @@
   }
 
   function writeSelection(kind: Kind, next: Set<string>) {
-    const nextEntryTypes: Record<string, string[]> = { ...(config.entry_types ?? {}) };
-    const nextKinds = new Set(config.kinds ?? []);
+    const nextEntryTypes: Record<string, string[]> = { ...membership.entryTypes };
+    const nextKinds = new Set(membership.kinds);
     if (next.size === 0) {
       delete nextEntryTypes[kind];
       nextKinds.delete(kind);
@@ -303,7 +247,10 @@
       nextEntryTypes[kind] = Array.from(next).sort();
       nextKinds.add(kind);
     }
-    emit({ entry_types: nextEntryTypes, kinds: Array.from(nextKinds) });
+    // Re-encode the degenerate membership as `sources` (the stored shape, #78).
+    // Pass the current sources so saved-view refs survive the wholesale
+    // re-encode instead of being dropped on every checkbox toggle (#82).
+    emit({ sources: membershipToSources(Array.from(nextKinds), nextEntryTypes, config.sources) });
   }
 
   function togglePreset(id: "full_outline" | "full_text", checked: boolean) {
@@ -371,7 +318,7 @@
   const chips = $derived.by(() => {
     const out: Chip[] = [];
     for (const { id: kind } of KINDS) {
-      const ids = config.entry_types?.[kind] ?? [];
+      const ids = membership.entryTypes[kind] ?? [];
       for (const id of ids) {
         const node = nodeById(kind, id);
         if (!node) continue;
@@ -383,6 +330,14 @@
           label: node.name,
         });
       }
+    }
+    for (const ref of viewRefs) {
+      out.push({
+        kind: "viewref",
+        key: `view:${ref.view}`,
+        viewId: ref.view,
+        label: viewTitle(ref.view),
+      });
     }
     for (const preset of PRESETS) {
       if ((config.presets ?? []).includes(preset.id)) {
@@ -403,6 +358,7 @@
   const hasAnySource = $derived(
     renderedByKind.scene.some((n) => n.state !== "unchecked") ||
       renderedByKind.lore.some((n) => n.state !== "unchecked") ||
+      viewRefs.length > 0 ||
       (config.presets ?? []).length > 0,
   );
 
@@ -422,6 +378,9 @@
     for (const { id: k, label: kLabel } of KINDS) {
       const n = pickedCountByKind[k];
       if (n > 0) out.push({ key: `count:${k}`, kind: "count", label: `${kLabel} · ${n}` });
+    }
+    for (const ref of viewRefs) {
+      out.push({ key: `view:${ref.view}`, kind: "count", label: viewTitle(ref.view) });
     }
     for (const preset of PRESETS) {
       if ((config.presets ?? []).includes(preset.id)) {
@@ -555,6 +514,17 @@
                 onclick={() => removeEntryChip(chip.entryKind, chip.entryTypeId)}
               >✕</button>
             </span>
+          {:else if chip.kind === "viewref"}
+            <span class="ctx-chip ctx-chip-view">
+              <span class="ctx-chip-view-glyph" aria-hidden="true">◉</span>
+              <span class="ctx-chip-label">{chip.label}</span>
+              <button
+                type="button"
+                class="ctx-chip-remove"
+                aria-label={`Remove saved view ${chip.label}`}
+                onclick={() => removeViewRef(chip.viewId)}
+              >✕</button>
+            </span>
           {:else if chip.kind === "preset"}
             <span class="ctx-chip ctx-chip-preset">
               <span class="ctx-chip-label">{chip.label}</span>
@@ -629,6 +599,49 @@
         {/if}
       {/each}
     </div>
+  </section>
+
+  <section class="ctx-section">
+    <header class="ctx-section-label">…or use a saved view</header>
+    {#if viewRefs.length > 0}
+      <div class="ctx-chips">
+        {#each viewRefs as ref (ref.view)}
+          <span class="ctx-chip ctx-chip-view">
+            <span class="ctx-chip-view-glyph" aria-hidden="true">◉</span>
+            <span class="ctx-chip-label">{viewTitle(ref.view)}</span>
+            {#if !readonly}
+              <button
+                type="button"
+                class="ctx-chip-remove"
+                aria-label={`Remove saved view ${viewTitle(ref.view)}`}
+                onclick={() => removeViewRef(ref.view)}
+              >✕</button>
+            {/if}
+          </span>
+        {/each}
+      </div>
+    {/if}
+    {#if !readonly}
+      {#if addableViews.length > 0}
+        <select
+          class="ctx-view-select"
+          aria-label="Add a saved view"
+          value=""
+          onchange={(e) => {
+            const el = e.currentTarget as HTMLSelectElement;
+            addViewRef(el.value);
+            el.value = "";
+          }}
+        >
+          <option value="" disabled>Add a saved view…</option>
+          {#each addableViews as view (view.id)}
+            <option value={view.id}>{view.title} · {view.view_kind}</option>
+          {/each}
+        </select>
+      {:else if availableViews.length === 0}
+        <p class="ctx-muted">No saved views for scenes or lore yet.</p>
+      {/if}
+    {/if}
   </section>
 
   {#if mode === "prompt"}
@@ -1138,6 +1151,45 @@
 
   .ctx-chip-preset .ctx-chip-remove:hover {
     background: rgba(53, 107, 89, 0.12);
+  }
+
+  .ctx-chip-view {
+    background: var(--ctx-panel);
+    border-color: var(--ctx-border-strong);
+  }
+
+  .ctx-chip-view-glyph {
+    color: var(--ctx-accent);
+    font-size: 11px;
+    line-height: 1;
+  }
+
+  .ctx-view-select {
+    appearance: none;
+    -webkit-appearance: none;
+    align-self: flex-start;
+    max-width: 260px;
+    border: 1px solid var(--ctx-border);
+    background: var(--ctx-surface);
+    color: var(--ctx-text);
+    font-size: 12px;
+    font-family: inherit;
+    padding: 5px 26px 5px 10px;
+    border-radius: 7px;
+    cursor: pointer;
+    background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 10 6'><path d='M1 1 L5 5 L9 1' fill='none' stroke='%233f7d68' stroke-width='1.5' stroke-linecap='round' stroke-linejoin='round'/></svg>");
+    background-repeat: no-repeat;
+    background-position: right 9px center;
+    background-size: 8px 5px;
+  }
+
+  .ctx-view-select:hover {
+    border-color: var(--ctx-border-strong);
+  }
+
+  .ctx-view-select:focus-visible {
+    outline: 2px solid var(--ctx-accent);
+    outline-offset: 1px;
   }
 
   /* --- Tree frame -------------------------------------------------- */

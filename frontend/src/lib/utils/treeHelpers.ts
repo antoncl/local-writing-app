@@ -16,7 +16,7 @@ export function nodeChildren(node: StructureNode): StructureNode[] {
 // are not reorderable, so this manuscript-flavoured check is only ever reached
 // for the scene tree.)
 export function isLeafNode(node: StructureNode): boolean {
-  return node.type === "scene";
+  return node.type === "scene:scene";
 }
 
 // Depth-first lookup of a node by id, starting from any subtree root.

@@ -27,7 +27,7 @@
   let collapsedGroups: Record<string, boolean> = {};
 
   $: concreteSubtypes = Object.entries(schema?.entry_types ?? {})
-    .filter(([id, definition]) => definition.kind === "prompt" && !definition.abstract && id !== "prompt")
+    .filter(([id, definition]) => definition.kind === "prompt" && !definition.abstract && id !== "prompt:prompt")
     .map(([id, definition]) => ({ id, label: definition.name || id, parent: definition.parent ?? null }));
 
   // Tree of concrete prompt subtypes — Roleplay nests under Continuation, etc.

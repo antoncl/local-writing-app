@@ -5,6 +5,7 @@
   import ConfirmModal from "@/components/dialogs/ConfirmModal.svelte";
   import type { ConfirmationState } from "@/components/dialogs/ConfirmModal.svelte";
   import type { NodePickerConfig, TagUsage } from "@/lib/types";
+  import { pickerMembership } from "@/lib/utils/pickerSources";
 
   // Callback props (#14: App is runes — no on:event on components).
   export let onChanged: (() => void) | undefined = undefined;
@@ -20,7 +21,7 @@
   let mergeTarget = "";
   // Scope editor: the tag whose scope is being edited + a working copy.
   let scopeEditing: string | null = null;
-  let scopeDraft: NodePickerConfig = { kinds: [], entry_types: {} };
+  let scopeDraft: NodePickerConfig = { sources: [] };
 
   $: filtered = filter.trim()
     ? tags.filter((tag) => tag.name.toLowerCase().includes(filter.trim().toLowerCase()))
@@ -48,8 +49,7 @@
   }
 
   function scopeChips(scope: NodePickerConfig): string[] {
-    const kinds = scope.kinds ?? [];
-    const entryTypes = scope.entry_types ?? {};
+    const { kinds, entryTypes } = pickerMembership(scope);
     if (kinds.length === 0 && Object.keys(entryTypes).length === 0) return ["everywhere"];
     const chips: string[] = [];
     for (const kind of kinds) {
@@ -62,10 +62,7 @@
 
   function openScope(tag: TagUsage) {
     scopeEditing = tag.name;
-    scopeDraft = {
-      kinds: [...(tag.scope.kinds ?? [])],
-      entry_types: { ...(tag.scope.entry_types ?? {}) },
-    };
+    scopeDraft = { sources: [...(tag.scope.sources ?? [])] };
   }
 
   async function saveScope(name: string) {

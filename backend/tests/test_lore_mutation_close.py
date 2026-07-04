@@ -24,7 +24,7 @@ class IntervalCloseTests(unittest.TestCase):
         svc.__init__()
         svc.create_project(self.root, "Interval Close Tests")
         self.remus = svc.create_lore_entry(
-            CreateLoreEntryRequest(title="Remus", entry_type="character")
+            CreateLoreEntryRequest(title="Remus", entry_type="lore:character")
         ).id
         self.client = TestClient(app)
 

@@ -4,6 +4,12 @@ from typing import Any, Literal
 
 from pydantic import BaseModel, Field, field_validator
 
+# View / picker models live in models_views.py (this file is at the size cap).
+# NodePickerConfig is imported here because the metadata-field + tag-scope models
+# below annotate against it; the ViewSpec grammar and `view` node models are
+# imported from app.models_views directly by their few users.
+from app.models_views import NodePickerConfig
+
 
 class SelectOption(BaseModel):
     """One choice in a select / multi_select field, or a select prompt input.
@@ -109,33 +115,6 @@ class StructureDocument(BaseModel):
 
 
 MetadataValue = str | int | float | bool | None | list[Any] | dict[str, Any]
-
-
-class NodePickerConfig(BaseModel):
-    """Per-field constraint for which nodes the picker offers, replacing
-    the legacy flat `target: {kind, entry_type}` shape. Matches the
-    runtime NodePicker (formerly ContextPicker) config used for
-    context_pick prompt inputs, so entity_ref metadata fields and
-    prompt-side picks now share one vocabulary.
-
-    Wire format mirrors the frontend's NodePickerConfig type and the
-    PromptInputDefinition.target shape used by context_pick inputs."""
-
-    # Allowed kinds. Empty = no kind constraint (anything pickable).
-    kinds: list[str] = Field(default_factory=list)
-    # Optional per-kind whitelist of entry_type ids. Missing key for a
-    # kind means "any entry_type of that kind is allowed."
-    entry_types: dict[str, list[str]] = Field(default_factory=dict)
-    # Presets a context-pick UI may surface (full_outline, full_text…).
-    # Unused for entity_ref metadata fields but kept on the shared
-    # model so the same shape serializes both surfaces.
-    presets: list[str] = Field(default_factory=list)
-    # Multi-pick. None defers to the field type (entity_ref → false,
-    # entity_ref_list → true).
-    multiple: bool | None = None
-    # Author opt-in for context-pick target-marking. Unused for
-    # entity_ref metadata fields.
-    allow_target_marking: bool | None = None
 
 
 class MetadataFieldDefinition(BaseModel):
@@ -317,8 +296,9 @@ class EntryTypeDefinition(BaseModel):
     # fall back to (none if !has_body, code if body_editor=="code",
     # else prose). Explicit values let new shapes (chat) declare
     # themselves without retrofitting has_body/body_editor semantics.
+    # "view" routes to the Svelte Flow view designer (0.5.0 step 3, #80).
     # See decisions-node-editor-modularization + decisions-node-editor-body-spec.
-    body_shape: Literal["prose", "code", "chat", "none"] | None = None
+    body_shape: Literal["prose", "code", "chat", "none", "view"] | None = None
     # Starter content for new entries of this type. Used by
     # create_prompt_entry as the initial body so authoring a
     # `roleplay` (or any future type with conventions worth showing off)
@@ -392,7 +372,7 @@ class UpsertMetadataFieldRequest(BaseModel):
     layer_id: str = Field(min_length=1)
     field_id: str = Field(min_length=1)
     field: MetadataFieldDefinition
-    entry_type: str = "scene"
+    entry_type: str = "scene:scene"
     allow_existing: bool = True
     # Explicit old-value → new-value rename map for select/multi_select
     # options, computed client-side keyed by each option's original value.
@@ -415,18 +395,18 @@ class DeleteMetadataEntryTypeRequest(BaseModel):
 class MoveMetadataFieldRequest(BaseModel):
     field_id: str = Field(min_length=1)
     target_layer_id: str = Field(min_length=1)
-    entry_type: str = "scene"
+    entry_type: str = "scene:scene"
 
 
 class RenameMetadataFieldRequest(BaseModel):
     old_field_id: str = Field(min_length=1)
     new_field_id: str = Field(min_length=1)
-    entry_type: str = "scene"
+    entry_type: str = "scene:scene"
 
 
 class DeleteMetadataFieldRequest(BaseModel):
     field_id: str = Field(min_length=1)
-    entry_type: str = "scene"
+    entry_type: str = "scene:scene"
 
 
 class UpsertMetadataGroupRequest(BaseModel):
@@ -460,7 +440,7 @@ class Scene(BaseModel):
     body: str
     revision: str
     status: str = "draft"
-    entry_type: str = "scene"
+    entry_type: str = "scene:scene"
     metadata: dict[str, MetadataValue] = Field(default_factory=dict)
     computed_metadata: dict[str, MetadataValue] = Field(default_factory=dict)
     source_layer_id: str = ""
@@ -501,7 +481,7 @@ class ResearchNote(BaseModel):
     title: str
     body: str = ""
     revision: str = ""
-    entry_type: str = "note"
+    entry_type: str = "research:note"
     metadata: dict[str, MetadataValue] = Field(default_factory=dict)
 
 
@@ -509,7 +489,7 @@ class SaveResearchNoteRequest(BaseModel):
     title: str = Field(min_length=1)
     body: str = ""
     base_revision: str | None = None
-    entry_type: str = "note"
+    entry_type: str = "research:note"
     metadata: dict[str, MetadataValue] = Field(default_factory=dict)
 
 
@@ -533,7 +513,7 @@ class SaveSceneRequest(BaseModel):
     body: str
     base_revision: str | None = None
     status: str = "draft"
-    entry_type: str = "scene"
+    entry_type: str = "scene:scene"
     metadata: dict[str, MetadataValue] = Field(default_factory=dict)
 
 
@@ -550,7 +530,7 @@ class ProjectNode(BaseModel):
     title: str
     body: str = ""
     revision: str = ""
-    entry_type: str = "project"
+    entry_type: str = "project:project"
     metadata: dict[str, MetadataValue] = Field(default_factory=dict)
     computed_metadata: dict[str, MetadataValue] = Field(default_factory=dict)
 
@@ -559,7 +539,7 @@ class SaveProjectNodeRequest(BaseModel):
     title: str = Field(min_length=1)
     body: str = ""
     base_revision: str | None = None
-    entry_type: str = "project"
+    entry_type: str = "project:project"
     metadata: dict[str, MetadataValue] = Field(default_factory=dict)
 
 
@@ -567,7 +547,7 @@ class LoreEntrySummary(BaseModel):
     id: str
     title: str
     body: str = ""
-    entry_type: str = "lore_note"
+    entry_type: str = "lore:lore_note"
     metadata: dict[str, MetadataValue] = Field(default_factory=dict)
     source_layer_id: str = ""
     source_layer_label: str = ""
@@ -578,7 +558,7 @@ class LoreEntry(BaseModel):
     title: str
     body: str
     revision: str
-    entry_type: str = "lore_note"
+    entry_type: str = "lore:lore_note"
     metadata: dict[str, MetadataValue] = Field(default_factory=dict)
     computed_metadata: dict[str, MetadataValue] = Field(default_factory=dict)
     source_layer_id: str = ""
@@ -638,14 +618,14 @@ class MergeTagsRequest(BaseModel):
 
 class CreateLoreEntryRequest(BaseModel):
     title: str = Field(min_length=1)
-    entry_type: str = "lore_note"
+    entry_type: str = "lore:lore_note"
 
 
 class SaveLoreEntryRequest(BaseModel):
     title: str = Field(min_length=1)
     body: str
     base_revision: str | None = None
-    entry_type: str = "lore_note"
+    entry_type: str = "lore:lore_note"
     metadata: dict[str, MetadataValue] = Field(default_factory=dict)
 
 
@@ -653,7 +633,7 @@ class PromptEntrySummary(BaseModel):
     id: str
     title: str
     body: str = ""
-    entry_type: str = "prompt"
+    entry_type: str = "prompt:prompt"
     metadata: dict[str, MetadataValue] = Field(default_factory=dict)
     # Per-entry input declarations. Each prompt declares the parameters its
     # template body references via `{{ input.<name> }}`. Used to be on the
@@ -670,7 +650,7 @@ class PromptEntry(BaseModel):
     title: str
     body: str
     revision: str
-    entry_type: str = "prompt"
+    entry_type: str = "prompt:prompt"
     metadata: dict[str, MetadataValue] = Field(default_factory=dict)
     inputs: list[PromptInputDefinition] = Field(default_factory=list)
     computed_metadata: dict[str, MetadataValue] = Field(default_factory=dict)
@@ -684,14 +664,14 @@ class PromptEntryList(BaseModel):
 
 class CreatePromptEntryRequest(BaseModel):
     title: str = Field(min_length=1)
-    entry_type: str = "prompt"
+    entry_type: str = "prompt:prompt"
 
 
 class SavePromptEntryRequest(BaseModel):
     title: str = Field(min_length=1)
     body: str
     base_revision: str | None = None
-    entry_type: str = "prompt"
+    entry_type: str = "prompt:prompt"
     metadata: dict[str, MetadataValue] = Field(default_factory=dict)
     inputs: list[PromptInputDefinition] = Field(default_factory=list)
 
@@ -710,7 +690,7 @@ class MutationSetRow(BaseModel):
 class MutationSetEntrySummary(BaseModel):
     id: str
     title: str
-    entry_type: str = "mutation_set"
+    entry_type: str = "mutation_set:mutation_set"
     # The lore entry-type the rows target (e.g. "character"); scopes the apply
     # picker so only matching sets are offered for a given entity (#62).
     target_entry_type: str = ""
@@ -723,7 +703,7 @@ class MutationSetEntry(BaseModel):
     id: str
     title: str
     revision: str
-    entry_type: str = "mutation_set"
+    entry_type: str = "mutation_set:mutation_set"
     target_entry_type: str = ""
     rows: list[MutationSetRow] = Field(default_factory=list)
     source_layer_id: str = ""
@@ -736,7 +716,7 @@ class MutationSetEntryList(BaseModel):
 
 class CreateMutationSetEntryRequest(BaseModel):
     title: str = Field(min_length=1)
-    entry_type: str = "mutation_set"
+    entry_type: str = "mutation_set:mutation_set"
     target_entry_type: str = ""
     rows: list[MutationSetRow] = Field(default_factory=list)
 
@@ -744,7 +724,7 @@ class CreateMutationSetEntryRequest(BaseModel):
 class SaveMutationSetEntryRequest(BaseModel):
     title: str = Field(min_length=1)
     base_revision: str | None = None
-    entry_type: str = "mutation_set"
+    entry_type: str = "mutation_set:mutation_set"
     target_entry_type: str = ""
     rows: list[MutationSetRow] = Field(default_factory=list)
 
@@ -752,7 +732,7 @@ class SaveMutationSetEntryRequest(BaseModel):
 class AssistantEntrySummary(BaseModel):
     id: str
     title: str
-    entry_type: str = "assistant"
+    entry_type: str = "assistant:assistant"
     metadata: dict[str, MetadataValue] = Field(default_factory=dict)
     source_layer_id: str = ""
     source_layer_label: str = ""
@@ -762,7 +742,7 @@ class AssistantEntry(BaseModel):
     id: str
     title: str
     revision: str
-    entry_type: str = "assistant"
+    entry_type: str = "assistant:assistant"
     metadata: dict[str, MetadataValue] = Field(default_factory=dict)
     source_layer_id: str = ""
     source_layer_label: str = ""
@@ -774,7 +754,7 @@ class AssistantEntryList(BaseModel):
 
 class CreateAssistantEntryRequest(BaseModel):
     title: str = Field(min_length=1)
-    entry_type: str = "assistant"
+    entry_type: str = "assistant:assistant"
     # "" → machine layer (the default). Otherwise the layer-id (project root
     # hash) where the file should land.
     layer_id: str = ""
@@ -783,7 +763,7 @@ class CreateAssistantEntryRequest(BaseModel):
 class SaveAssistantEntryRequest(BaseModel):
     title: str = Field(min_length=1)
     base_revision: str | None = None
-    entry_type: str = "assistant"
+    entry_type: str = "assistant:assistant"
     metadata: dict[str, MetadataValue] = Field(default_factory=dict)
 
 

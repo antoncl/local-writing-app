@@ -46,7 +46,7 @@ class ReadNodeDispatchTests(unittest.TestCase):
 
     def test_dispatches_to_lore_reader(self) -> None:
         created = global_service.create_lore_entry(
-            from_request_or_kwargs(title="Test Character", entry_type="lore_note")
+            from_request_or_kwargs(title="Test Character", entry_type="lore:lore_note")
         )
         result = global_service.read_node(created.id)
         self.assertIsInstance(result, LoreEntry)
@@ -54,7 +54,7 @@ class ReadNodeDispatchTests(unittest.TestCase):
 
     def test_dispatches_to_prompt_reader(self) -> None:
         created = global_service.create_prompt_entry(
-            from_request_or_kwargs(title="Test Prompt", entry_type="general")
+            from_request_or_kwargs(title="Test Prompt", entry_type="prompt:general")
         )
         result = global_service.read_node(created.id)
         self.assertIsInstance(result, PromptEntry)
@@ -117,7 +117,7 @@ class SaveNodeDispatchTests(unittest.TestCase):
         )
         bogus = SaveLoreEntryRequest(
             title="Lore-shape on a chat",
-            entry_type="lore_note",
+            entry_type="lore:lore_note",
             metadata={},
             body="",
             base_revision="",
@@ -129,7 +129,7 @@ class SaveNodeDispatchTests(unittest.TestCase):
     def test_unknown_node_id_is_404(self) -> None:
         request = SavePromptEntryRequest(
             title="Whatever",
-            entry_type="general",
+            entry_type="prompt:general",
             body="",
             metadata={},
             inputs=[],
@@ -162,7 +162,7 @@ class DeleteNodeDispatchTests(unittest.TestCase):
 
     def test_dispatches_to_lore_deleter(self) -> None:
         created = global_service.create_lore_entry(
-            from_request_or_kwargs(title="Doomed", entry_type="lore_note")
+            from_request_or_kwargs(title="Doomed", entry_type="lore:lore_note")
         )
         before = {e.id for e in global_service.list_lore_entries().entries}
         self.assertIn(created.id, before)
@@ -187,7 +187,7 @@ def from_request_or_kwargs(**kwargs):
     # Lore + prompt requests have very similar shapes; pick by caller-
     # supplied entry_type hint.
     et = kwargs.get("entry_type", "")
-    if et in {"lore_note", "character", "place", "item", "lore_entry"}:
+    if et in {"lore:lore_note", "lore:character", "lore:place", "lore:item", "lore:lore_entry"}:
         return CreateLoreEntryRequest(**kwargs)
     return CreatePromptEntryRequest(**kwargs)
 

@@ -1,6 +1,7 @@
 <script lang="ts">
   import { createEventDispatcher } from "svelte";
   import type { ScopedTag } from "@/lib/types";
+  import { pickerMembership } from "@/lib/utils/pickerSources";
 
   export let value: string = "";
   export let knownTags: ScopedTag[] = [];
@@ -14,11 +15,11 @@
   const dispatch = createEventDispatcher<{ change: { value: string } }>();
 
   function inScope(tag: ScopedTag): boolean {
-    const scope = tag.scope ?? { kinds: [], entry_types: {} };
-    const kinds = scope.kinds ?? [];
-    const entryTypes = scope.entry_types ?? {};
+    // Tag scopes stay the degenerate type-leaf subset (ADR-0023) — read the
+    // legacy {kinds, entryTypes} view of the scope's `sources`.
+    const { kinds, entryTypes } = pickerMembership(tag.scope);
     if (kinds.length === 0 && Object.keys(entryTypes).length === 0) return true;
-    if (kinds.length && !kinds.includes(scopeKind as never)) return false;
+    if (kinds.length && !kinds.includes(scopeKind)) return false;
     const subs = entryTypes[scopeKind];
     if (subs && subs.length && !subs.includes(scopeEntryType)) return false;
     return true;

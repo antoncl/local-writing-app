@@ -65,6 +65,10 @@
     projectSchemaLayerId,
   } from "@/lib/stores/schema";
   import { implicitContextMatcherStore } from "@/lib/stores/derived";
+  import { paneViews } from "@/lib/stores/paneViews.svelte";
+  import { evaluateView } from "@/lib/views/evaluateView";
+  import { structureToEvalNodes } from "@/lib/views/structureNodes";
+  import ViewSwitcher from "@/components/widgets/ViewSwitcher.svelte";
   import { focusedDocumentStore, pinnedKeysStore } from "@/lib/stores/editorFocus";
   import { paneLayout, isEditorPaneId } from "@/lib/stores/paneLayout.svelte";
   import {
@@ -242,6 +246,7 @@
     void chatSessions.hydrateForProject();
     void refreshProjectCost();
     void aiSettings.refreshProjectColor();
+    void paneViews.loadForProject(projectPath);
   }
 
   async function refreshProjectCost(): Promise<void> {
@@ -250,6 +255,7 @@
 
   function resetEditorWorkspace() {
     editorPanes.reset();
+    paneViews.reset();
     setKnownTags([]);
     setChatSessions([]);
     // Preserve all pane configs. An earlier version stripped chat/preview/
@@ -265,6 +271,18 @@
   // the controller. raise() also runs onRaise (wired in onMount) to track focus.
   const focusPane = (id: PaneId) => paneLayout.raise(id);
   const paneStyle = (id: PaneId) => paneLayout.styleFor(id);
+
+  // Noun for the pane's delete button, keyed by document kind (was a
+  // scene/lore-only ternary that mislabelled view/prompt/chat panes).
+  const PANE_DELETE_NOUN: Record<string, string> = {
+    lore: "entry",
+    research: "note",
+    prompt: "prompt",
+    assistant: "assistant",
+    chat: "chat",
+    view: "view",
+  };
+  const paneDeleteNoun = (type: string | undefined) => (type && PANE_DELETE_NOUN[type]) || "scene";
 
   // The shared chrome controller handed to every <Pane>; each pane calls these
   // with its own id. Stable object — the handlers don't change.
@@ -460,6 +478,25 @@
   let metadataSchema = $derived($metadataSchemaStore);
   let promptEntries = $derived($promptEntriesStore);
   let assistantEntries = $derived($assistantEntriesStore);
+  // Selected-view specs/presentations per switchable pane (0.5.0 step 4, #81,
+  // doc §5). These runes-side reads of paneViews bridge to the legacy `$:` panes
+  // by flowing in as props (feedback_svelte5_reactivity_traps).
+  let loreViewSpec = $derived(paneViews.specFor("lore"));
+  let loreViewPresentation = $derived(paneViews.presentationFor("lore"));
+  let assistantViewSpec = $derived(paneViews.specFor("assistant"));
+  let assistantViewPresentation = $derived(paneViews.presentationFor("assistant"));
+  // Draft: color annotations only — the tree keeps its structural shape
+  // (ADR-0022). Evaluate the selected scene view over the flattened structure
+  // and hand the per-node colors to the Tree; membership/ordering are ignored.
+  let draftColorAnnotations = $derived.by(() => {
+    const result = evaluateView(paneViews.specFor("scene"), structureToEvalNodes(structure), {
+      schema: metadataSchema,
+      resolveView: paneViews.resolveView,
+    });
+    const map = new Map<string, string | null>();
+    for (const [id, ann] of result.annotations) map.set(id, ann.color);
+    return map;
+  });
   $effect.pre(() => {
     draftTitleByScene = computeDraftTitleOverrides(editorPanes.panes);
   });
@@ -555,16 +592,21 @@
         onHealthCheck={() => aiSettings.runHealthCheck()}
         onOpenPrompts={openPromptsPane}
         onOpenMutations={openMutationsPane}
+        onNewView={() => void editorPanes.createAndOpenView()}
         onRepair={repairProject}
       />
     </div>
   </Pane>
 
   <Pane id="outline" title="Draft" paneClass="outline-pane" hidden={!isPaneVisible("outline")} style={paneStyle("outline")} chrome={paneChrome}>
+    {#snippet actions()}
+      <ViewSwitcher kind="scene" />
+    {/snippet}
     <div class="pane-content">
       <Tree
         config={treeActions.manuscriptTree}
         {structure}
+        colorAnnotations={draftColorAnnotations}
         collapsed={treeActions.collapsedStructureNodes}        draftTitles={draftTitleByScene}
         sectionLabel="Scenes"
         emptyLabel="No scenes yet."
@@ -580,11 +622,15 @@
 
   <Pane id="lore" title="Lore" paneClass="lore-pane" hidden={!isPaneVisible("lore")} style={paneStyle("lore")} chrome={paneChrome}>
     {#snippet actions()}
+      <ViewSwitcher kind="lore" />
       <button class="pin-button" type="button" title="Add entry" onmousedown={(event) => event.stopPropagation()} onclick={() => treeActions.newLoreEntry()}>+ Entry</button>
     {/snippet}
     <div class="pane-content">
       <Lore
-        entries={loreEntries}        onOpenEntry={(id) => editorPanes.openLore(id)}
+        entries={loreEntries}
+        viewSpec={loreViewSpec}
+        presentation={loreViewPresentation}
+        onOpenEntry={(id) => editorPanes.openLore(id)}
         onMoveNoteToResearch={(entry) => treeActions.requestMoveLoreNoteToResearch(entry)}
       />
     </div>
@@ -649,12 +695,16 @@
 
   <Pane id="assistants" title="Assistants" paneClass="assistants-pane" hidden={!assistantsPaneOpen} style={paneStyle("assistants")} chrome={paneChrome}>
     {#snippet actions()}
+      <ViewSwitcher kind="assistant" />
       <button class="pin-button" type="button" title="Add assistant" onmousedown={(event) => event.stopPropagation()} onclick={() => treeActions.newAssistantEntry()}>+ Assistant</button>
       <button class="pin-button" type="button" onmousedown={(event) => event.stopPropagation()} onclick={() => closeListPane("assistants")}>Close</button>
     {/snippet}
     <div class="pane-content schema-list">
       <Assistants
-        entries={assistantEntries}        defaultAssistantId={defaultAssistantId}
+        entries={assistantEntries}
+        viewSpec={assistantViewSpec}
+        presentation={assistantViewPresentation}
+        defaultAssistantId={defaultAssistantId}
         onOpenEntry={(id) => editorPanes.openAssistant(id)}
         onReorder={reorderAssistantsInLayer}
       />
@@ -710,7 +760,7 @@
             class="pin-button danger"
             type="button"
             disabled={!editorPane.scene}
-            title={editorPane.document?.type === "lore" ? "Delete this entry" : "Delete this scene"}
+            title={`Delete this ${paneDeleteNoun(editorPane.document?.type)}`}
             onmousedown={(event) => event.stopPropagation()}
             onclick={() => editorPanes.requestDeleteScene(editorPane.id)}
           >
@@ -729,7 +779,7 @@
           <button
             class="pin-button"
             type="button"
-            title="Close this editor pane"
+            title="Save and close this pane (unsaved changes are flushed first)"
             onmousedown={(event) => event.stopPropagation()}
             onclick={() => editorPanes.close(editorPane.id)}
           >

@@ -16,6 +16,7 @@
   import { createEventDispatcher, tick } from "svelte";
   import { metadataSchemaStore } from "@/lib/stores/schema";
   import type {
+    AssistantEntrySummary,
     NodePickerConfig,
     NodePickerRef,
     LoreEntrySummary,
@@ -25,6 +26,7 @@
     StructureNode,
   } from "@/lib/types";
   import { resolveColor } from "@/lib/utils/colors";
+  import { pickerMembership } from "@/lib/utils/pickerSources";
 
   // Resolve a ref's color via the full chain: instance (not carried on
   // NodePickerRef today — that's a Phase 4 surface) → entry-type → parent
@@ -46,6 +48,9 @@
   export let researchStructure: StructureDocument | null = null;
   export let loreEntries: LoreEntrySummary[] = [];
   export let promptEntries: PromptEntrySummary[] = [];
+  // Assistants are machine-global nodes; enumerated here so views/pickers can
+  // hand-pick them (the view designer's hand_picked leaf over kind=assistant).
+  export let assistantEntries: AssistantEntrySummary[] = [];
   // metadataSchema is global per-project — read from the store, not a prop (#14 Step 2).
   $: metadataSchema = $metadataSchemaStore;
   // Compact mode trims chrome so the picker fits inside the Inputs
@@ -75,10 +80,13 @@
   const COLLAPSE_THRESHOLD_DEFAULT = 20;
   const COLLAPSE_THRESHOLD_COMPACT = 5;
 
+  // Membership (kinds + per-kind entry_type whitelist) reduced from the
+  // config's `sources` — the pre-evaluator degenerate subset (#78).
+  $: membership = pickerMembership(config);
   // Allowed presets per the author config — empty means no presets shown.
   $: allowedPresets = config.presets ?? [];
   // Allowed kinds per the author config — empty means no browse section.
-  $: allowedKinds = (config.kinds ?? []) as Category[];
+  $: allowedKinds = membership.kinds as Category[];
   $: allowMultiple = config.multiple !== false;
 
   const PRESET_META: Record<string, { title: string; tooltip: string }> = {
@@ -177,13 +185,26 @@
     search = "";
   }
 
+  // Portal the menu to <body> so its `position: fixed` resolves against the
+  // viewport rather than a transformed ancestor. Inside the view designer the
+  // picker lives in a Svelte Flow node whose pane carries a CSS transform, which
+  // makes it the containing block for fixed descendants — trapping the menu in
+  // canvas-space (offset, and it pans with the canvas). Portaling escapes that;
+  // positionMenu() already computes viewport coordinates.
+  function portalToBody(node: HTMLElement) {
+    document.body.appendChild(node);
+    return { destroy: () => node.remove() };
+  }
+
   function handleViewportShift() {
     if (open) positionMenu();
   }
 
   function handleDocumentClick(event: MouseEvent) {
     const target = event.target as HTMLElement | null;
-    if (open && !target?.closest(".ctx-picker-anchor")) close();
+    // The menu is portaled to <body> (outside .ctx-picker-anchor), so a click
+    // inside it must not count as "outside" and close the picker.
+    if (open && !target?.closest(".ctx-picker-anchor") && !target?.closest(".ctx-menu")) close();
   }
 
   function handleKeydown(event: KeyboardEvent) {
@@ -198,16 +219,16 @@
   // editor's checkbox actually does something (was a silent no-op).
   function flattenScenes(node: StructureNode | undefined): Array<{ id: string; title: string; entry_type: string }> {
     if (!node) return [];
-    const allowed = new Set(config.entry_types?.scene ?? []);
+    const allowed = new Set(membership.entryTypes.scene ?? []);
     const out: Array<{ id: string; title: string; entry_type: string }> = [];
     const walk = (n: StructureNode) => {
-      // StructureNode uses `type` ("scene" / "act" / "chapter" / "root").
-      // An earlier read used `n.kind`, which is always undefined — so
-      // the scene list was silently empty. scene_id is the canonical id
-      // for the scene itself (the structure node has its own id for the
-      // outline position).
-      if (n.type === "scene" && n.scene_id) {
-        const sceneType = (n as unknown as { entry_type?: string }).entry_type ?? "scene";
+      // StructureNode uses `type` — the FQN entry_type ("scene:scene" /
+      // "scene:act" / "scene:chapter") or the "root" sentinel. An earlier read
+      // used `n.kind`, which is always undefined — so the scene list was
+      // silently empty. scene_id is the canonical id for the scene itself (the
+      // structure node has its own id for the outline position).
+      if (n.type === "scene:scene" && n.scene_id) {
+        const sceneType = (n as unknown as { entry_type?: string }).entry_type ?? "scene:scene";
         if (allowed.size === 0 || allowed.has(sceneType)) {
           out.push({ id: n.scene_id, title: n.title, entry_type: sceneType });
         }
@@ -228,10 +249,10 @@
   // research tree uses `note_id` — see TreeStructureService).
   function flattenResearchNotes(node: StructureNode | undefined): Array<{ id: string; title: string; entry_type: string }> {
     if (!node) return [];
-    const allowed = new Set(config.entry_types?.research ?? []);
+    const allowed = new Set(membership.entryTypes.research ?? []);
     const out: Array<{ id: string; title: string; entry_type: string }> = [];
     const walk = (n: StructureNode) => {
-      if (n.type === "note" && n.scene_id) {
+      if (n.type === "research:note" && n.scene_id) {
         if (allowed.size === 0 || allowed.has(n.type)) {
           out.push({ id: n.scene_id, title: n.title, entry_type: n.type });
         }
@@ -254,7 +275,7 @@
   // Lore grouped by sub-type, respecting `config.entry_types.lore` filter
   // when set. Empty filter = all sub-types allowed.
   $: loreGroups = (() => {
-    const allowed = new Set(config.entry_types?.lore ?? []);
+    const allowed = new Set(membership.entryTypes.lore ?? []);
     const visible = loreEntries.filter((entry) => {
       // context_policy = "never" hides the entry from every explicit
       // picker. The entry still exists (browsable in the Lore pane);
@@ -280,8 +301,17 @@
   // entries that match the search.
   $: snippetEntries = filterByTitle(
     promptEntries.filter((p) => {
-      const allowed = new Set(config.entry_types?.snippet ?? []);
+      const allowed = new Set(membership.entryTypes.snippet ?? []);
       return allowed.size === 0 || allowed.has(p.entry_type);
+    }),
+    search,
+  );
+
+  // Assistants matching the config's per-kind entry_type whitelist + search.
+  $: assistantCandidates = filterByTitle(
+    assistantEntries.filter((a) => {
+      const allowed = new Set(membership.entryTypes.assistant ?? []);
+      return allowed.size === 0 || allowed.has(a.entry_type);
     }),
     search,
   );
@@ -410,6 +440,17 @@
       if (items.length > 0) groups.push({ id: "research", label: "Research", items });
     }
 
+    if (allowedKinds.includes("assistant")) {
+      const items = dropExcluded(
+        assistantCandidates.map((a) => ({
+          ref: { id: a.id, kind: "assistant" as const, title: a.title, entry_type: a.entry_type },
+          tag: itemTag("assistant", a.entry_type),
+          monogram: itemMonogram("assistant", a.entry_type),
+        })),
+      );
+      if (items.length > 0) groups.push({ id: "assistants", label: "Assistants", items });
+    }
+
     return groups;
   })();
 
@@ -513,7 +554,7 @@
       </button>
 
     {#if open}
-      <div class="ctx-menu" role="menu" style={menuStyle}>
+      <div class="ctx-menu" class:compact role="menu" style={menuStyle} use:portalToBody>
         <label class="ctx-search-wrap" class:has-query={search.length > 0}>
           <svg class="ctx-search-icon" width="14" height="14" viewBox="0 0 14 14" fill="none" aria-hidden="true">
             <circle cx="6" cy="6" r="4.2" stroke="currentColor" stroke-width="1.6" />
@@ -604,7 +645,12 @@
 </div>
 
 <style>
-  .ctx-picker {
+  /* The menu portals to <body> (to escape a transformed Svelte Flow ancestor
+     that would trap its `position: fixed`), so it lands OUTSIDE .ctx-picker and
+     must carry its own --ctx-* tokens — otherwise every var() falls back to
+     nothing (transparent surface, no borders, unstyled text). */
+  .ctx-picker,
+  .ctx-menu {
     /* Light theme tokens — mirrored to the config editor's set so the
        two surfaces share vocabulary. Adds a kind-color quartet for chip
        and monogram coloring. Dark set lives under [data-theme=dark]. */
@@ -635,7 +681,8 @@
     color: var(--ctx-text);
   }
 
-  :global([data-theme="dark"]) .ctx-picker {
+  :global([data-theme="dark"]) .ctx-picker,
+  :global([data-theme="dark"]) .ctx-menu {
     --ctx-surface: #18211d;
     --ctx-panel: #141c18;
     --ctx-panel-2: #1e2823;
@@ -861,7 +908,9 @@
     gap: 7px;
   }
 
-  .compact .ctx-menu {
+  /* `compact` is set on the menu itself (not just the picker root) so it still
+     applies once the menu portals to <body>. */
+  .ctx-menu.compact {
     width: 280px;
     padding: 8px;
     gap: 6px;
@@ -1056,7 +1105,7 @@
     line-height: 1;
   }
 
-  .compact .ctx-item-mono {
+  .ctx-menu.compact .ctx-item-mono {
     width: 19px;
     height: 19px;
     font-size: 10.5px;

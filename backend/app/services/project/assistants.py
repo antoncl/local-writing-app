@@ -50,8 +50,8 @@ class AssistantEntriesMixin:
                 front_matter, _body = self._read_markdown_with_front_matter(entry.path, strict=True)
             except ProjectServiceError:
                 continue
-            raw_entry_type = front_matter.get("entry_type") or "assistant"
-            entry_type = raw_entry_type if isinstance(raw_entry_type, str) else "assistant"
+            raw_entry_type = front_matter.get("entry_type") or "assistant:assistant"
+            entry_type = raw_entry_type if isinstance(raw_entry_type, str) else "assistant:assistant"
             entries.append(
                 AssistantEntrySummary(
                     id=entry.id,
@@ -138,7 +138,7 @@ class AssistantEntriesMixin:
         path = index_entry.path
         front_matter, _body = self._read_markdown_with_front_matter(path, strict=True)
         node_id = self._node_id_for_path(path, front_matter)
-        raw_entry_type = front_matter.get("entry_type") or "assistant"
+        raw_entry_type = front_matter.get("entry_type") or "assistant:assistant"
         if not isinstance(raw_entry_type, str):
             raise ProjectServiceError(f"Assistant {node_id} has invalid entry_type; it must be text.", 422)
         return AssistantEntry(
@@ -221,28 +221,29 @@ class AssistantEntriesMixin:
         return index
 
     def resolve_assistant(self, assistant_id: str | None) -> AssistantEntry | None:
-        """Look up an assistant by id; falls back to the entry flagged
-        is_default. Returns None when nothing matches — callers fall back to
-        the legacy default_provider / default_models path."""
+        """Look up an assistant by id; with no id, falls back to the **topmost**
+        assistant in roster (manual) order. Returns None when nothing matches —
+        callers fall back to the legacy default_provider / default_models path.
+
+        The old ``is_default`` flag is retired (ADR-0024): manual order already
+        expresses global preference, so "topmost" is the dynamic default, and it
+        degrades to exactly the old behaviour when no scope is declared. Any
+        prompt-scoped default (topmost *matching* a tag) is resolved on the
+        frontend, which then supplies a concrete id here."""
         index = self._build_assistant_index()
         if assistant_id:
             entry = index.by_id.get(assistant_id)
             if entry is None or entry.kind != "assistant":
                 return None
             return self._read_assistant_from_index_entry(entry)
-        # No id supplied: find the entry flagged is_default in the highest-
-        # priority (descendant) layer present. The index is already iterated
-        # outermost → innermost with descendant-wins, so the value in by_id
-        # is the right one. Search by metadata.is_default.
-        for entry in index.by_id.values():
-            if entry.kind != "assistant":
-                continue
-            data = self._read_assistant_from_index_entry(entry)
-            if data is None:
-                continue
-            if bool(data.metadata.get("is_default")):
-                return data
-        return None
+        # No id supplied: the topmost assistant in the **sorted roster** — the
+        # same order the UI shows (per-layer .order.yaml, then title), so the
+        # backend's fallback default and the frontend's dynamic default agree.
+        roster = self.list_assistant_entries().entries
+        if not roster:
+            return None
+        entry = index.by_id.get(roster[0].id)
+        return self._read_assistant_from_index_entry(entry) if entry else None
 
     def _read_assistant_from_index_entry(
         self, entry: NodeIndexEntry
@@ -251,12 +252,12 @@ class AssistantEntriesMixin:
             front_matter, _body = self._read_markdown_with_front_matter(entry.path, strict=True)
         except ProjectServiceError:
             return None
-        raw_entry_type = front_matter.get("entry_type") or "assistant"
+        raw_entry_type = front_matter.get("entry_type") or "assistant:assistant"
         return AssistantEntry(
             id=entry.id,
             title=str(front_matter.get("title") or entry.id),
             revision=self._revision(entry.path),
-            entry_type=raw_entry_type if isinstance(raw_entry_type, str) else "assistant",
+            entry_type=raw_entry_type if isinstance(raw_entry_type, str) else "assistant:assistant",
             metadata=self._normalise_metadata(front_matter.get("metadata"), entry.path),
             source_layer_id=entry.source_layer_id,
             source_layer_label=entry.source_layer_label,

@@ -467,21 +467,22 @@
     lastKind = k;
   });
 
-  // v1 preview universes are the summary-backed kinds the pane already holds.
-  // Scene/research previews arrive with the pane switchers (step 4).
-  const KIND_CHOICES = ["lore", "assistant", "prompt"];
 </script>
 
 <section class="view-designer" onfocusin={() => onFocus?.()}>
   <div class="designer-toolbar">
-    <label class="kind-pick">
+    <!--
+      The anchor kind is fixed by the pane the view was opened from (Lore / Draft
+      / Assistants): every entry point into the designer is a pane ViewSwitcher,
+      and re-anchoring an existing graph is destructive (types/fields don't carry
+      across kinds). So it reads out static rather than as a footgun <select>
+      (#92). A future context-free views surface (#90) can reintroduce a picker
+      for the "new blank view, choose its kind" case.
+    -->
+    <span class="kind-pick" title={`This view is anchored to “${kind}” by the pane it was opened from`}>
       <span>Views over</span>
-      <select bind:value={kind}>
-        {#each KIND_CHOICES as k (k)}
-          <option value={k}>{k}</option>
-        {/each}
-      </select>
-    </label>
+      <strong class="kind-fixed">{kind}</strong>
+    </span>
     <div class="palette">
       <span class="pal-group">
         {#each INJECTORS as p (p.kind)}
@@ -591,11 +592,11 @@
     font-size: 12px;
     color: var(--text-3, #6b7280);
   }
-  .kind-pick select {
+  .kind-fixed {
     padding: 3px 6px;
-    border: 1px solid var(--border, #e2e5ea);
-    border-radius: 6px;
     font-size: 12px;
+    font-weight: 600;
+    color: var(--text-1, #111827);
   }
   .palette {
     display: flex;

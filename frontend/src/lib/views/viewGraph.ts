@@ -369,10 +369,12 @@ function highlightBuilt(input: Built, node: ViewGraphNode): Built {
   return built({ annotate: { color }, of: input.expr });
 }
 
-// A Filter's predicate → a leaf ViewExpr (or null when unconfigured).
-function predicateExpr(node: ViewGraphNode): ViewExpr | null {
-  const d = node.data;
-  switch (d.filter_kind ?? "type") {
+// The leaf slots a Filter predicate and a leaf/injector node share: type,
+// descendants_of, tagged, field. Keyed by slot name (a Filter's `filter_kind` or
+// a leaf node's `kind`). Returns null for any other key or an unconfigured slot,
+// so a blank leaf doesn't silently mean "whole universe".
+function commonLeafExpr(slot: string, d: ViewGraphNode["data"]): ViewExpr | null {
+  switch (slot) {
     case "type":
       return d.type ? { type: d.type } : null;
     case "descendants_of":
@@ -386,25 +388,22 @@ function predicateExpr(node: ViewGraphNode): ViewExpr | null {
   }
 }
 
-// A leaf/injector node → its ViewExpr leaf slot. Returns null when unconfigured
-// so a blank leaf doesn't silently mean "whole universe".
+// A Filter's predicate → a leaf ViewExpr (or null when unconfigured).
+function predicateExpr(node: ViewGraphNode): ViewExpr | null {
+  return commonLeafExpr(node.data.filter_kind ?? "type", node.data);
+}
+
+// A leaf/injector node → its ViewExpr leaf slot. hand_picked/view_ref are
+// leaf-only; the rest reuse the shared slot builder.
 function leafExpr(node: ViewGraphNode): ViewExpr | null {
   const d = node.data;
   switch (node.kind) {
-    case "type":
-      return d.type ? { type: d.type } : null;
-    case "descendants_of":
-      return d.descendants_of ? { descendants_of: d.descendants_of } : null;
-    case "tagged":
-      return d.tagged ? { tagged: d.tagged } : null;
-    case "field":
-      return d.field?.key ? { field: d.field } : null;
     case "hand_picked":
       return d.hand_picked && d.hand_picked.length > 0 ? { hand_picked: d.hand_picked } : null;
     case "view_ref":
       return d.view_ref ? { view_ref: d.view_ref } : null;
     default:
-      return null;
+      return commonLeafExpr(node.kind, d);
   }
 }
 
@@ -419,11 +418,21 @@ type Segment = { handle: ViewHandle; built: Built; sort: ViewSort | null };
 
 // Lower one View handle: union everything wired to it, and capture a Sorter
 // feeding the handle as that segment's sort (a sorter is a membership
-// pass-through — doc §12: sorting sits in a branch before a handle).
-function lowerSegment(graph: ViewGraph, byId: Map<string, ViewGraphNode>, handle: ViewHandle): Segment {
-  const edges = orderedUpstream(graph, byId, OUTPUT_NODE_ID).filter(
-    (e) => (e.targetHandle ?? DEFAULT_HANDLE_ID) === handle.id,
-  );
+// pass-through — doc §12: sorting sits in a branch before a handle). An edge
+// whose targetHandle names no real handle (null, or a stale id left after the
+// output was regrouped) is adopted by the first handle rather than silently
+// dropped along with its whole subgraph (#93).
+function lowerSegment(
+  graph: ViewGraph,
+  byId: Map<string, ViewGraphNode>,
+  handle: ViewHandle,
+  handleIds: string[],
+): Segment {
+  const valid = new Set(handleIds);
+  const edges = orderedUpstream(graph, byId, OUTPUT_NODE_ID).filter((e) => {
+    const raw = e.targetHandle ?? DEFAULT_HANDLE_ID;
+    return (valid.has(raw) ? raw : handleIds[0]) === handle.id;
+  });
   let sort: ViewSort | null = null;
   const parts: Built[] = [];
   for (const e of edges) {
@@ -431,7 +440,11 @@ function lowerSegment(graph: ViewGraph, byId: Map<string, ViewGraphNode>, handle
     if (src?.kind === "sorter" && src.data.sort) sort = src.data.sort;
     parts.push(buildNode(graph, byId, e.source, new Set()));
   }
-  return { handle, built: unionBuilt(parts), sort };
+  // A Sorter wired to a handle with no upstream membership sorts the whole
+  // universe — promote the otherwise-empty segment to universe so graphToSpec
+  // keeps the group (and its sort) instead of dropping it as "empty" (#93).
+  const built = unionBuilt(parts);
+  return { handle, built: built.tag === "empty" && sort ? UNIVERSE : built, sort };
 }
 
 // Serialize the graph reachable from the View node into a ViewSpec. 0–1
@@ -439,7 +452,8 @@ function lowerSegment(graph: ViewGraph, byId: Map<string, ViewGraphNode>, handle
 export function graphToSpec(graph: ViewGraph, base: { kind: string; sort?: ViewSort | null }): ViewSpec {
   const byId = new Map(graph.nodes.map((n) => [n.id, n]));
   const handles = outputHandles(byId.get(OUTPUT_NODE_ID));
-  const segments = handles.map((h) => lowerSegment(graph, byId, h));
+  const handleIds = handles.map((h) => h.id);
+  const segments = handles.map((h) => lowerSegment(graph, byId, h, handleIds));
   const populated = segments.filter((s) => s.built.tag !== "empty");
 
   if (handles.length <= 1 || populated.length <= 1) {

@@ -79,6 +79,18 @@ describe("pickerSources", () => {
       expect(next).toEqual([{ kind: "scene" }]);
     });
 
+    it("preserves a non-degenerate inline expr source the tree can't represent (#94)", () => {
+      // A hand-authored `descendants_of` source is not a view-ref and not a
+      // degenerate type-leaf, so the checkbox re-encode used to drop it silently.
+      const existing: ViewSource[] = [
+        { kind: "lore", expr: { type: "lore:character" } },
+        { kind: "lore", expr: { descendants_of: "lore:deity" } },
+      ];
+      const next = membershipToSources(["lore"], { lore: ["lore:character"] }, existing);
+      expect(next).toContainEqual({ kind: "lore", expr: { descendants_of: "lore:deity" } });
+      expect(next).toContainEqual({ kind: "lore", expr: { type: "lore:character" } });
+    });
+
     it("preserves multiple view-refs in order", () => {
       const existing: ViewSource[] = [
         { kind: "scene" },

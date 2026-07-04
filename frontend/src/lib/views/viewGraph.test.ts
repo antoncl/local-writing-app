@@ -271,6 +271,42 @@ describe("sorter (per-segment sort)", () => {
   });
 });
 
+describe("graphToSpec — orphaned & sorted-empty handles (#93)", () => {
+  it("an edge whose targetHandle names no real handle is adopted by the first handle", () => {
+    const output = out({ handles: [{ id: "h0", name: "Cast" }, { id: "h1", name: "Gods" }] });
+    const cast = node("type", { type: "lore:character" }, 0);
+    const gods = node("descendants_of", { descendants_of: "lore:deity" }, 100);
+    const graph: ViewGraph = {
+      nodes: [output, cast, gods],
+      // `cast` wired with the default "in" handle — not h0/h1. Pre-fix its whole
+      // subgraph vanished; now it is adopted by the first handle (h0).
+      edges: [edge(cast.id, OUTPUT_NODE_ID), edge(gods.id, OUTPUT_NODE_ID, "h1")],
+    };
+    const spec = graphToSpec(graph, { kind: "lore" });
+    expect(spec.groups).toEqual([
+      { name: "Cast", expr: { type: "lore:character" } },
+      { name: "Gods", expr: { descendants_of: "lore:deity" } },
+    ]);
+  });
+
+  it("a Sorter feeding a handle with no upstream membership → sorted whole-universe group", () => {
+    const output = out({ handles: [{ id: "h0", name: "All sorted" }, { id: "h1", name: "Gods" }] });
+    const s = node("sorter", { sort: { by: "title", dir: "asc" } }, 0);
+    const gods = node("descendants_of", { descendants_of: "lore:deity" }, 100);
+    const graph: ViewGraph = {
+      nodes: [output, s, gods],
+      // The sorter has NO upstream membership; pre-fix the group and its sort were
+      // dropped as "empty". Now it persists as a sorted whole-universe group.
+      edges: [edge(s.id, OUTPUT_NODE_ID, "h0"), edge(gods.id, OUTPUT_NODE_ID, "h1")],
+    };
+    const spec = graphToSpec(graph, { kind: "lore" });
+    expect(spec.groups).toEqual([
+      { name: "All sorted", expr: null, sort: { by: "title", dir: "asc" } },
+      { name: "Gods", expr: { descendants_of: "lore:deity" } },
+    ]);
+  });
+});
+
 describe("nest lowering + self-loop recursion (ADR-0028)", () => {
   const match = { field: "parent", direction: "child_to_parent" as const, by: "ref" as const };
 

@@ -22,8 +22,9 @@
   import { api } from "@/lib/api";
   import { resolutionSceneIdFromInputs } from "@/lib/editor-core/promptResolution";
   import PlainTextEditor from "@/components/widgets/PlainTextEditor.svelte";
-  import PromptInputField from "@/components/widgets/PromptInputField.svelte";
-  import { renderChatContent } from "@/lib/utils/chatMessageRender";
+  import ChatTranscript from "@/components/editor/body/chat/ChatTranscript.svelte";
+  import ChatInputsStrip from "@/components/editor/body/chat/ChatInputsStrip.svelte";
+  import ChatJournalScope from "@/components/editor/body/chat/ChatJournalScope.svelte";
   import { formatCostEur, formatTokens } from "@/lib/utils/money";
   import type {
     AssistantEntrySummary,
@@ -34,7 +35,6 @@
     EditableDocument,
     LoreEntrySummary,
     PromptEntrySummary,
-    PromptInputDefinition,
     SaveChatSessionRequest,
     StructureDocument,
   } from "@/lib/types";
@@ -48,6 +48,12 @@
     scopedDefaultAssistantId,
     topmostMatchingAssistant,
   } from "@/lib/chat/assistantScope";
+  import {
+    coerceChatInputValue,
+    isInputMissing,
+    seedInputDraftsFromEntry,
+    ttlChipsFor,
+  } from "@/components/editor/body/chat/chatInputs";
 
   
   interface Props {
@@ -146,12 +152,7 @@
   let chatInputsHidden = $state(false);
 
   // ---- cost-estimate + TTL strip state ----
-  // Per-slot TTL in seconds; mirrors App.svelte's SLOT_TTL_SECONDS.
-  // Drives the TTL countdown chips. Slots not in this table get 5 min.
-  const SLOT_TTL_SECONDS: Record<string, number> = {
-    system: 3600,
-    lore: 300,
-  };
+  // SLOT_TTL_SECONDS + ttlChipsFor moved to chat/chatInputs.ts (#99).
   // Tick counter — bumped every second by an onMount interval — so the
   // TTL chips' "remaining" recompute live. Anything else that wants a
   // 1Hz refresh can read this too.
@@ -373,48 +374,8 @@
     }
   }
 
-  function defaultDraftFor(input: PromptInputDefinition): string {
-    if (input.default !== undefined && input.default !== null) return String(input.default);
-    return input.type === "boolean" ? "false" : "";
-  }
-
-  function seedInputDraftsFromEntry(entry: PromptEntrySummary): Record<string, string> {
-    const drafts: Record<string, string> = {};
-    for (const input of entry.inputs ?? []) drafts[input.name] = defaultDraftFor(input);
-    return drafts;
-  }
-
-  function isInputMissing(input: PromptInputDefinition, raw: string | undefined): boolean {
-    if (input.type === "entity_ref_list" || input.type === "context_pick") {
-      try {
-        const parsed = JSON.parse(raw || "[]");
-        return !Array.isArray(parsed) || parsed.length === 0;
-      } catch {
-        return true;
-      }
-    }
-    return !raw?.trim();
-  }
-
-  function coerceChatInputValue(raw: string, type: PromptInputDefinition["type"]): unknown {
-    const trimmed = raw.trim();
-    if (type === "number") {
-      if (trimmed === "") return null;
-      const parsed = Number(trimmed);
-      return Number.isFinite(parsed) ? parsed : trimmed;
-    }
-    if (type === "boolean") return trimmed.toLowerCase() === "true";
-    if (type === "entity_ref_list" || type === "context_pick") {
-      if (!trimmed) return type === "context_pick" ? [] : null;
-      try {
-        const parsed = JSON.parse(trimmed);
-        return Array.isArray(parsed) ? parsed : (type === "context_pick" ? [] : null);
-      } catch {
-        return type === "context_pick" ? [] : null;
-      }
-    }
-    return trimmed;
-  }
+  // defaultDraftFor / seedInputDraftsFromEntry / isInputMissing /
+  // coerceChatInputValue moved to chat/chatInputs.ts (#99).
 
   async function updateChatInputDraft(name: string, value: string): Promise<void> {
     chatInputDrafts = { ...chatInputDrafts, [name]: value };
@@ -757,27 +718,9 @@
     }
   }
 
-  // Per-slot TTL chips. Reads ttlTick so chips recompute live, reads
-  // activeChatCacheWriteTimes so they refresh when a new turn stamps a
-  // slot.
-  function ttlChipsFor(times: Record<string, string>, _tick: number) {
-    if (!times || Object.keys(times).length === 0) return [];
-    const now = Date.now();
-    return Object.entries(times).map(([slot, iso]) => {
-      const writtenAt = Date.parse(iso);
-      const ttl = (SLOT_TTL_SECONDS[slot] ?? 300) * 1000;
-      const remainingMs = writtenAt + ttl - now;
-      const remainingSec = Math.max(0, Math.round(remainingMs / 1000));
-      const label = slot.charAt(0).toUpperCase() + slot.slice(1);
-      const ttlLabel = ttl >= 3600_000 ? "1h" : "5m";
-      let formatted: string;
-      if (remainingSec <= 0) formatted = "expired";
-      else if (remainingSec >= 60) formatted = `${Math.floor(remainingSec / 60)}m`;
-      else formatted = `${remainingSec}s`;
-      return { slot, label, ttlLabel, formatted, expired: remainingSec <= 0 };
-    });
-  }
-
+  // ttlChipsFor (per-slot TTL chips) moved to chat/chatInputs.ts (#99).
+  // It reads ttlTick so chips recompute live, and activeChatCacheWriteTimes
+  // so they refresh when a new turn stamps a slot.
 
   // ---------- Public methods (called via bind:this from parent) ----------
   export function getBody(): string {
@@ -989,112 +932,25 @@
       </div>
     </div>
 
-    <div class="cbv-messages" bind:this={chatScrollEl} aria-label="Chat history">
-      {#if chatHistory.length === 0}
-        <p class="cbv-empty">No messages yet. Ctrl/⌘+Enter to send.</p>
-      {/if}
-      {#each chatHistory as message, i (i)}
-        <div class="cbv-message cbv-message-{message.role}">
-          <header class="cbv-message-role">
-            {#if message.role === "assistant"}Claude<span class="cbv-role-dot" aria-hidden="true"></span>{:else}You{/if}
-          </header>
-          {#if message.thinking}
-            <details class="cbv-thinking" open={chatRunning && i === chatHistory.length - 1 && !message.content}>
-              <summary>Thinking</summary>
-              <div class="cbv-message-rendered">{@html renderChatContent(message.thinking)}</div>
-            </details>
-          {/if}
-          {#if chatRunning && i === chatHistory.length - 1 && message.role === "assistant" && !message.content && !message.thinking}
-            <div class="cbv-message-content cbv-typing">…thinking</div>
-          {:else if message.content}
-            {#if message.role === "assistant"}
-              <div class="cbv-message-content cbv-message-rendered">{@html renderChatContent(message.content)}</div>
-            {:else}
-              <div class="cbv-message-content">{message.content}</div>
-            {/if}
-          {/if}
-          {#if message.truncated}
-            <div class="cbv-truncated">Response cut off — hit max tokens.</div>
-          {/if}
-          {#if message.journal_added && message.journal_added.length > 0}
-            <div class="cbv-journal-added" title="Lore auto-detected from this turn.">
-              <span class="cbv-journal-label">Auto-added context:</span>
-              {#each message.journal_added as entry (entry.entry_id)}
-                <span class="cbv-journal-chip">{entry.title || entry.entry_id}</span>
-              {/each}
-            </div>
-          {/if}
-          {#if message.role === "assistant" && message.usage}
-            {@const totalIn = message.usage.input_tokens + message.usage.cached_input_tokens + message.usage.cache_write_tokens}
-            {@const cachePct = totalIn > 0 ? Math.round((message.usage.cached_input_tokens / totalIn) * 100) : 0}
-            <div class="cbv-turn-meta">
-              {totalIn} → {message.usage.output_tokens} tok
-              {#if cachePct > 0}<span> · {cachePct}% cached</span>{/if}
-              {#if message.cost_usd != null}<span> · {formatCostEur(message.cost_usd)}</span>{/if}
-            </div>
-          {/if}
-        </div>
-      {/each}
-    </div>
+    <ChatTranscript {chatHistory} {chatRunning} bind:scrollEl={chatScrollEl} />
 
     {#if declaredInputs.length > 0}
-      <div class="cbv-inputs-strip" class:cbv-inputs-locked={isLocked}>
-        {#if isLocked}
-          <button
-            type="button"
-            class="cbv-inputs-toggle"
-            aria-expanded={!chatInputsHidden}
-            onclick={() => (chatInputsHidden = !chatInputsHidden)}
-          >{chatInputsHidden ? "▸ Show inputs" : "▾ Hide inputs"}</button>
-        {/if}
-        {#if !isLocked || !chatInputsHidden}
-          <div class="cbv-inputs-fields">
-            {#each declaredInputs as input (input.name)}
-              {@const missing = input.required && isInputMissing(input, chatInputDrafts[input.name])}
-              <label class="cbv-input-field" class:cbv-input-missing={missing} class:cbv-input-disabled={isLocked}>
-                <span class="cbv-input-label">
-                  {input.label || input.name}{#if input.required}<span class="cbv-required-marker" title="Required"> *</span>{/if}
-                </span>
-                <PromptInputField
-                  input={input}
-                  value={chatInputDrafts[input.name] ?? ""}
-                  excludeId={null}
-                  ariaLabel={input.label || input.name}
-                  structure={structure}
-                  researchStructure={researchStructure}
-                  loreEntries={loreEntries}
-                  promptEntries={promptEntries}
-                  implicitContextMatcher={implicitContextMatcher}
-                  on:change={(event) => !isLocked && void updateChatInputDraft(input.name, event.detail.value)}
-                />
-              </label>
-            {/each}
-          </div>
-        {/if}
-      </div>
+      <ChatInputsStrip
+        {declaredInputs}
+        {isLocked}
+        bind:hidden={chatInputsHidden}
+        {chatInputDrafts}
+        {structure}
+        {researchStructure}
+        {loreEntries}
+        {promptEntries}
+        {implicitContextMatcher}
+        onDraftChange={(name, value) => void updateChatInputDraft(name, value)}
+      />
     {/if}
 
     {#if activeChatJournal.length > 0}
-      <div class="cbv-journal-scope" aria-label="Lore entries currently in this chat's implicit-context cache">
-        <span class="cbv-journal-scope-label">In context:</span>
-        {#each activeChatJournal as entry (entry.entry_id)}
-          <span
-            class="cbv-journal-scope-chip"
-            class:cbv-journal-scope-chip-fresh={activeChatJournalFreshIds.has(entry.entry_id)}
-            class:cbv-journal-scope-chip-depth1={entry.source === "depth1_expansion"}
-            title={entry.source === "depth1_expansion"
-              ? `${entry.title} — pulled in because another entity's body mentions it`
-              : `${entry.title} — detected in a user message`}
-          >
-            {entry.title || entry.entry_id}
-            {#if activeChatJournalFreshIds.has(entry.entry_id)}
-              <span class="cbv-journal-scope-pip cbv-journal-scope-pip-fresh">FRESH</span>
-            {:else if entry.source === "depth1_expansion"}
-              <span class="cbv-journal-scope-pip cbv-journal-scope-pip-depth1">↳ depth 1</span>
-            {/if}
-          </span>
-        {/each}
-      </div>
+      <ChatJournalScope journal={activeChatJournal} freshIds={activeChatJournalFreshIds} />
     {/if}
 
     {#if chatEstimate}
@@ -1316,139 +1172,21 @@
   .cbv-preview-hint { font-style: italic; }
 
   /* ---- 4 · messages ---- */
-  .cbv-messages {
-    flex: 1 1 0; min-height: 96px; overflow-y: auto;
-    display: flex; flex-direction: column; gap: 16px; padding: 16px 14px;
-  }
-  /* The composer + strips + input + action row keep their natural height;
-     only the messages region flexes (and scrolls). Prevents the message
-     input collapsing when the conversation is tall. */
+  /* The transcript (.cbv-messages) + its message atoms moved to
+     chat/ChatTranscript.svelte (#99). The flex-child rule below keeps the
+     composer + strips + input + action row at their natural height so only
+     the transcript flexes; ChatTranscript's own .cbv-messages carries the
+     flex: 1 1 0 that makes it scroll. */
+  /* The inputs strip + journal scope carry their own flex: 0 0 auto now that
+     they live in chat/ChatInputsStrip.svelte + chat/ChatJournalScope.svelte
+     (#99). */
   .cbv-composer-strip,
-  .cbv-inputs-strip,
-  .cbv-journal-scope,
   .cbv-estimate-strip,
   .cbv-ttl-strip,
   .cbv-action-row,
   .cbv-foot,
   :global(.chat-body-view > .cbv-input) {
     flex: 0 0 auto;
-  }
-  .cbv-message { display: flex; flex-direction: column; gap: 6px; max-width: 100%; }
-  .cbv-message-user { align-items: flex-end; }
-  .cbv-message-assistant { align-items: flex-start; }
-  .cbv-message-role {
-    display: flex; align-items: center; gap: 6px; font-size: 10px; font-weight: 800;
-    letter-spacing: 0.08em; text-transform: uppercase; color: var(--text-3); padding: 0 2px;
-  }
-  .cbv-role-dot { width: 6px; height: 6px; border-radius: 50%; background: var(--k-graphite); }
-  .cbv-message-content {
-    font-size: 13.5px; line-height: 1.6; white-space: pre-wrap; padding: 10px 13px;
-  }
-  .cbv-message-user .cbv-message-content {
-    max-width: 78%; border-radius: 13px 13px 4px 13px;
-    background: var(--accent-soft); border: 1px solid var(--accent-soft2); color: var(--text);
-  }
-  .cbv-message-assistant .cbv-message-content {
-    max-width: 82%; border-radius: 13px 13px 13px 4px; white-space: normal;
-    background: var(--surface); border: 1px solid var(--border); box-shadow: 0 1px 3px var(--shadow); color: var(--text);
-    padding: 11px 14px;
-  }
-  .cbv-typing { font-style: italic; color: var(--text-3); }
-  :global(.cbv-message-rendered) { font-size: 13.5px; line-height: 1.6; }
-  :global(.cbv-message-rendered p) { margin: 0 0 0.6em; }
-  :global(.cbv-message-rendered p:last-child) { margin-bottom: 0; }
-  :global(.cbv-message-rendered pre) {
-    margin: 0.4em 0; padding: 8px 10px; background: var(--inset); border-radius: 8px; overflow-x: auto;
-  }
-  :global(.cbv-message-rendered code) { font-family: ui-monospace, "JetBrains Mono", monospace; font-size: 12.5px; }
-
-  /* 4a · thinking accordion. */
-  .cbv-thinking {
-    max-width: 82%; font-size: 11.5px; color: var(--text-3);
-    border: 1px solid var(--divider); border-radius: 9px; background: var(--inset); padding: 5px 11px;
-  }
-  .cbv-thinking summary { cursor: pointer; list-style: none; }
-  .cbv-thinking summary::-webkit-details-marker { display: none; }
-  .cbv-thinking summary::before { content: "▸  "; color: var(--text-3); }
-  .cbv-thinking[open] summary::before { content: "▾  "; }
-
-  /* 4d · truncation banner. */
-  .cbv-truncated {
-    display: inline-flex; align-items: center; gap: 7px; padding: 7px 12px;
-    border: 1px solid var(--star-border); border-radius: 9px; background: var(--star-soft);
-    font-size: 11.5px; color: var(--star);
-  }
-  .cbv-truncated::before { content: "⚠"; }
-
-  /* 4b · journal-added chip. */
-  .cbv-journal-added {
-    display: inline-flex; flex-wrap: wrap; gap: 5px 6px; align-items: center; font-size: 11px;
-  }
-  .cbv-journal-label {
-    font-size: 9.5px; font-weight: 800; letter-spacing: 0.06em; text-transform: uppercase; color: var(--text-3);
-  }
-  .cbv-journal-chip {
-    display: inline-flex; align-items: center; gap: 5px; padding: 3px 10px; border-radius: 999px;
-    background: var(--accent-soft); border: 1px solid var(--accent-soft2);
-    color: var(--accent-strong); font-weight: 600;
-  }
-  .cbv-journal-chip::before { content: "✚"; font-size: 9px; }
-
-  /* 4c · per-turn usage meta. */
-  .cbv-turn-meta {
-    display: flex; align-items: center; gap: 12px; padding: 0 2px;
-    font-family: ui-monospace, "JetBrains Mono", monospace; font-size: 10.5px; color: var(--text-3);
-  }
-
-  /* ---- 5 · inputs strip (inset) ---- */
-  .cbv-inputs-strip {
-    display: flex; flex-direction: column; gap: 8px; padding: 11px 14px;
-    border-radius: 10px; border: 1px solid var(--divider); background: var(--inset);
-  }
-  .cbv-inputs-toggle {
-    align-self: flex-start; padding: 2px 6px; font-size: 11px; font-weight: 600;
-    background: transparent; border: none; cursor: pointer; color: var(--text-3);
-  }
-  .cbv-inputs-fields { display: flex; flex-direction: column; gap: 8px; }
-  .cbv-input-field { display: flex; flex-direction: column; gap: 3px; font-size: 12px; }
-  .cbv-input-label {
-    font-size: 10px; font-weight: 800; letter-spacing: 0.07em; text-transform: uppercase; color: var(--text-3);
-  }
-  .cbv-required-marker { color: var(--danger); }
-  .cbv-input-field.cbv-input-missing > .cbv-input-label { color: var(--danger); }
-  .cbv-input-field.cbv-input-disabled { opacity: 0.7; }
-
-  /* ---- 6 · journal scope (inset) ---- */
-  .cbv-journal-scope {
-    display: flex; flex-wrap: wrap; gap: 6px 7px; align-items: center;
-    padding: 11px 14px; border-radius: 10px; border: 1px solid var(--divider);
-    background: var(--inset); font-size: 11px;
-  }
-  .cbv-journal-scope-label {
-    font-size: 10px; font-weight: 800; letter-spacing: 0.07em; text-transform: uppercase; color: var(--text-3);
-  }
-  .cbv-journal-scope-chip {
-    display: inline-flex; align-items: center; gap: 6px; padding: 2px 9px; border-radius: 999px;
-    background: var(--k-lore-soft); border: 1px solid var(--k-lore-border);
-    color: var(--k-lore-text); font-weight: 600;
-    transition: background 250ms ease-out, border-color 250ms ease-out;
-  }
-  .cbv-journal-scope-chip::before {
-    content: ""; width: 7px; height: 7px; border-radius: 50%; background: var(--k-lore);
-  }
-  .cbv-journal-scope-chip-depth1 { background: var(--surface); border-style: dashed; }
-  .cbv-journal-scope-chip-depth1::before { background: #9a9cca; }
-  .cbv-journal-scope-chip-fresh { border-color: var(--accent-soft2); }
-  .cbv-journal-scope-chip-fresh::before { background: var(--accent); }
-  .cbv-journal-scope-pip {
-    font-size: 9px; font-weight: 700; border-radius: 4px;
-    padding: 1px 4px; margin-left: 1px; line-height: 1.3;
-  }
-  .cbv-journal-scope-pip-fresh {
-    color: var(--accent-strong); background: var(--accent-soft2);
-  }
-  .cbv-journal-scope-pip-depth1 {
-    color: #6c6e9e; background: var(--k-lore-soft);
   }
 
   /* ---- 7 · cost estimate + 8 · TTL (inset) ---- */

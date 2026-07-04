@@ -6,6 +6,7 @@
 import { getContext, setContext } from "svelte";
 import type { ViewNodeData } from "@/lib/views/viewGraph";
 import type {
+  AssistantEntrySummary,
   LoreEntrySummary,
   MetadataFieldDefinition,
   PromptEntrySummary,
@@ -30,6 +31,7 @@ export type DesignerContext = {
   // data sources for the hand_picked NodePicker + FieldValueEditor pickers
   loreEntries: LoreEntrySummary[];
   promptEntries: PromptEntrySummary[];
+  assistantEntries: AssistantEntrySummary[];
   structure: StructureDocument | null;
   researchStructure: StructureDocument | null;
 };

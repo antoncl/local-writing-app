@@ -127,7 +127,15 @@ from app.services.project_service import ProjectService, ProjectServiceError
 app = FastAPI(title="Local Writing Service", version="0.4.0")
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["http://127.0.0.1:5173", "http://localhost:5173"],
+    # 5173 = the default Vite dev server; 5174 = the isolated "claude" frontend
+    # (`--mode claude`, backend on :8788) so that parallel stack can actually
+    # reach its backend — see memory/feedback_isolated_claude_instance.md.
+    allow_origins=[
+        "http://127.0.0.1:5173",
+        "http://localhost:5173",
+        "http://127.0.0.1:5174",
+        "http://localhost:5174",
+    ],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],

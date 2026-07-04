@@ -267,6 +267,7 @@
       savedViews,
       loreEntries,
       promptEntries,
+      assistantEntries,
       structure,
       researchStructure,
     }),

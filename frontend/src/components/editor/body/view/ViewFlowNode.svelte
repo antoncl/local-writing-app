@@ -114,14 +114,36 @@
   }
 
   // --- hand_picked helpers: ids <-> light refs for NodePicker ---
+  // Resolve a picked id's title across the rosters the anchor kind can draw from
+  // (lore / assistant / prompt), so an assistant hand-pick shows its title, not
+  // its raw id.
+  function refTitle(pid: string): string {
+    return (
+      ctx.loreEntries.find((e) => e.id === pid)?.title ??
+      ctx.assistantEntries.find((e) => e.id === pid)?.title ??
+      ctx.promptEntries.find((e) => e.id === pid)?.title ??
+      pid
+    );
+  }
   let pickerRefs = $derived<NodePickerRef[]>(
-    (cfg.hand_picked ?? []).map((pid) => {
-      const lore = ctx.loreEntries.find((e) => e.id === pid);
-      return { id: pid, kind: (ctx.kind as NodePickerRef["kind"]) ?? "lore", title: lore?.title ?? pid };
-    }),
+    (cfg.hand_picked ?? []).map((pid) => ({
+      id: pid,
+      kind: (ctx.kind as NodePickerRef["kind"]) ?? "lore",
+      title: refTitle(pid),
+    })),
   );
   function onPickerChange(refs: NodePickerRef[]) {
     patch({ hand_picked: refs.map((r) => r.id) });
+  }
+
+  // Stop pointerdown *natively* (not via Svelte's delegated onpointerdown, which
+  // fires at the root — too late to beat Svelte Flow's native node-select
+  // listener on an ancestor). Keeps interacting with the picker from selecting /
+  // dragging the flow node.
+  function stopPointerdown(node: HTMLElement) {
+    const stop = (e: Event) => e.stopPropagation();
+    node.addEventListener("pointerdown", stop);
+    return { destroy: () => node.removeEventListener("pointerdown", stop) };
   }
 
   // --- View (output) named handles = groups ---
@@ -299,7 +321,10 @@
       </div>
     {/if}
   {:else if kind === "hand_picked"}
-    <div class="vfield-value">
+    <!-- nodrag + native stop-pointerdown so interacting with the picker doesn't
+         drag or select the flow node (Svelte Flow selects on pointerdown; the
+         picker menu itself is portaled to <body>). -->
+    <div class="vfield-value nodrag" role="presentation" use:stopPointerdown>
       <NodePicker
         config={{ sources: [{ kind: ctx.kind }] }}
         value={pickerRefs}
@@ -307,6 +332,7 @@
         compact
         loreEntries={ctx.loreEntries}
         promptEntries={ctx.promptEntries}
+        assistantEntries={ctx.assistantEntries}
         structure={ctx.structure}
         researchStructure={ctx.researchStructure}
         on:change={(e) => onPickerChange(e.detail.value)}

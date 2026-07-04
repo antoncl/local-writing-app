@@ -16,6 +16,7 @@
   import { createEventDispatcher, tick } from "svelte";
   import { metadataSchemaStore } from "@/lib/stores/schema";
   import type {
+    AssistantEntrySummary,
     NodePickerConfig,
     NodePickerRef,
     LoreEntrySummary,
@@ -47,6 +48,9 @@
   export let researchStructure: StructureDocument | null = null;
   export let loreEntries: LoreEntrySummary[] = [];
   export let promptEntries: PromptEntrySummary[] = [];
+  // Assistants are machine-global nodes; enumerated here so views/pickers can
+  // hand-pick them (the view designer's hand_picked leaf over kind=assistant).
+  export let assistantEntries: AssistantEntrySummary[] = [];
   // metadataSchema is global per-project — read from the store, not a prop (#14 Step 2).
   $: metadataSchema = $metadataSchemaStore;
   // Compact mode trims chrome so the picker fits inside the Inputs
@@ -181,13 +185,26 @@
     search = "";
   }
 
+  // Portal the menu to <body> so its `position: fixed` resolves against the
+  // viewport rather than a transformed ancestor. Inside the view designer the
+  // picker lives in a Svelte Flow node whose pane carries a CSS transform, which
+  // makes it the containing block for fixed descendants — trapping the menu in
+  // canvas-space (offset, and it pans with the canvas). Portaling escapes that;
+  // positionMenu() already computes viewport coordinates.
+  function portalToBody(node: HTMLElement) {
+    document.body.appendChild(node);
+    return { destroy: () => node.remove() };
+  }
+
   function handleViewportShift() {
     if (open) positionMenu();
   }
 
   function handleDocumentClick(event: MouseEvent) {
     const target = event.target as HTMLElement | null;
-    if (open && !target?.closest(".ctx-picker-anchor")) close();
+    // The menu is portaled to <body> (outside .ctx-picker-anchor), so a click
+    // inside it must not count as "outside" and close the picker.
+    if (open && !target?.closest(".ctx-picker-anchor") && !target?.closest(".ctx-menu")) close();
   }
 
   function handleKeydown(event: KeyboardEvent) {
@@ -286,6 +303,15 @@
     promptEntries.filter((p) => {
       const allowed = new Set(membership.entryTypes.snippet ?? []);
       return allowed.size === 0 || allowed.has(p.entry_type);
+    }),
+    search,
+  );
+
+  // Assistants matching the config's per-kind entry_type whitelist + search.
+  $: assistantCandidates = filterByTitle(
+    assistantEntries.filter((a) => {
+      const allowed = new Set(membership.entryTypes.assistant ?? []);
+      return allowed.size === 0 || allowed.has(a.entry_type);
     }),
     search,
   );
@@ -414,6 +440,17 @@
       if (items.length > 0) groups.push({ id: "research", label: "Research", items });
     }
 
+    if (allowedKinds.includes("assistant")) {
+      const items = dropExcluded(
+        assistantCandidates.map((a) => ({
+          ref: { id: a.id, kind: "assistant" as const, title: a.title, entry_type: a.entry_type },
+          tag: itemTag("assistant", a.entry_type),
+          monogram: itemMonogram("assistant", a.entry_type),
+        })),
+      );
+      if (items.length > 0) groups.push({ id: "assistants", label: "Assistants", items });
+    }
+
     return groups;
   })();
 
@@ -517,7 +554,7 @@
       </button>
 
     {#if open}
-      <div class="ctx-menu" role="menu" style={menuStyle}>
+      <div class="ctx-menu" role="menu" style={menuStyle} use:portalToBody>
         <label class="ctx-search-wrap" class:has-query={search.length > 0}>
           <svg class="ctx-search-icon" width="14" height="14" viewBox="0 0 14 14" fill="none" aria-hidden="true">
             <circle cx="6" cy="6" r="4.2" stroke="currentColor" stroke-width="1.6" />

@@ -1,10 +1,11 @@
 <!--
-  One custom Svelte Flow node for the view designer (0.5.0 step 3, #80). A
-  single component renders every kind — leaf, combinator, annotate, output —
-  switching on `data.kind`, so the flow registers one node type. Combinators
-  wear a Venn glyph (ViewGlyph); difference exposes explicit keep/remove target
-  ports (the confusable op, doc §1.2). Leaf/annotate config is edited inline and
-  written back through the designer context.
+  One custom Svelte Flow node for the view designer (0.5.0 step 3, #80;
+  approachable roles for #91). A single component renders every kind — injector
+  (leaves + All), filter, operation (Venn combinators), sorter, highlight, and
+  the View (output) node with its named handles — switching on `data.kind`, so
+  the flow registers one node type. Difference exposes explicit keep/remove
+  ports (the confusable op, doc §1.2). Config is edited inline and written back
+  through the designer context.
 -->
 <script lang="ts">
   import { Handle, Position } from "@xyflow/svelte";
@@ -12,9 +13,9 @@
   import FieldValueEditor from "@/components/widgets/FieldValueEditor.svelte";
   import NodePicker from "@/components/widgets/NodePicker.svelte";
   import SwatchPicker from "@/components/widgets/SwatchPicker.svelte";
-  import { inputArity, type GraphNodeKind, type ViewNodeData } from "@/lib/views/viewGraph";
+  import { inputArity, type GraphNodeKind, type PredicateKind, type ViewHandle, type ViewNodeData } from "@/lib/views/viewGraph";
   import { useDesignerContext } from "./designerContext";
-  import type { NodePickerRef } from "@/lib/types";
+  import type { MetadataFieldType, NodePickerRef, ViewSort } from "@/lib/types";
 
   // Svelte Flow passes the node's id/data/selection state as props.
   let { id, data, selected = false }: { id: string; data: { kind: GraphNodeKind; cfg: ViewNodeData }; selected?: boolean } =
@@ -25,14 +26,19 @@
   let kind = $derived(data.kind);
   let cfg = $derived(data.cfg ?? {});
   let arity = $derived(inputArity(kind));
+  // A kind with a single entry_type (e.g. assistant) makes Type/Type+subtypes
+  // predicates noise — offer them only when there's a real choice (#91).
+  let hasTypeChoice = $derived((ctx.entryTypes?.length ?? 0) > 1);
 
   const LABELS: Record<GraphNodeKind, string> = {
     output: "View result",
+    all: "All",
+    filter: "Filter",
+    sorter: "Sort",
     union: "Union",
     intersect: "Intersect",
     difference: "Difference",
     complement: "Complement",
-    group: "Group",
     highlight: "Highlight",
     type: "Type is",
     descendants_of: "Type & subtypes",
@@ -42,27 +48,69 @@
     view_ref: "Saved view",
   };
 
-  const FIELD_OPS: { value: NonNullable<ViewNodeData["field"]>["op"]; label: string }[] = [
-    { value: "eq", label: "=" },
-    { value: "neq", label: "≠" },
-    { value: "includes", label: "includes" },
-    { value: "not_includes", label: "excludes" },
-    { value: "set", label: "is set" },
-    { value: "unset", label: "is empty" },
-  ];
-
   function patch(next: Partial<ViewNodeData>) {
     ctx.updateNodeData(id, next);
   }
 
-  // --- field predicate helpers ---
+  // --- predicate-kind options for a Filter (drop Type when there's one type) ---
+  let predicateKinds = $derived<{ value: PredicateKind; label: string }[]>(
+    [
+      ...(hasTypeChoice
+        ? ([
+            { value: "type", label: "Type is" },
+            { value: "descendants_of", label: "Type & subtypes" },
+          ] as { value: PredicateKind; label: string }[])
+        : []),
+      { value: "tagged", label: "Tagged" },
+      { value: "field", label: "Field" },
+    ],
+  );
+  let filterKind = $derived<PredicateKind>(cfg.filter_kind ?? (hasTypeChoice ? "type" : "tagged"));
+  let filterMode = $derived<"keep" | "drop">(cfg.filter_mode ?? "keep");
+
+  // --- field predicate helpers (comparator adapts to the field's datatype) ---
   let fieldKey = $derived(cfg.field?.key ?? "");
   let fieldOp = $derived(cfg.field?.op ?? "eq");
   let fieldDef = $derived(fieldKey ? ctx.fieldByKey(fieldKey) : null);
+  let fieldOps = $derived(opsForType(fieldDef?.type));
   let opNeedsValue = $derived(fieldOp !== "set" && fieldOp !== "unset");
   function setField(next: Partial<NonNullable<ViewNodeData["field"]>>) {
     const merged = { key: fieldKey, op: fieldOp, value: cfg.field?.value, ...next };
+    // If the new field's datatype no longer supports the current op, reset it.
+    if (next.key !== undefined) {
+      const ops = opsForType(ctx.fieldByKey(next.key)?.type);
+      if (!ops.some((o) => o.value === merged.op)) merged.op = ops[0]?.value ?? "eq";
+    }
     patch({ field: merged });
+  }
+
+  type FieldOp = NonNullable<ViewNodeData["field"]>["op"];
+  const OP_LABEL: Record<FieldOp, string> = {
+    eq: "=",
+    neq: "≠",
+    includes: "includes",
+    not_includes: "excludes",
+    set: "is set",
+    unset: "is empty",
+  };
+  function opsForType(type: MetadataFieldType | undefined): { value: FieldOp; label: string }[] {
+    // Collection fields compare by membership; scalars by equality. set/unset
+    // (presence) apply to every type. Unknown type → offer the full menu.
+    const collection = type === "multi_select" || type === "entity_ref_list" || type === "tags";
+    const scalar = type === undefined ? (["eq", "neq"] as FieldOp[]) : collection ? [] : (["eq", "neq"] as FieldOp[]);
+    const member: FieldOp[] = type === undefined || collection ? ["includes", "not_includes"] : [];
+    const ops: FieldOp[] = [...scalar, ...member, "set", "unset"];
+    return ops.map((value) => ({ value, label: OP_LABEL[value] }));
+  }
+
+  // --- sorter helpers ---
+  let sortBy = $derived<ViewSort["by"]>(cfg.sort?.by ?? "manual");
+  let sortDir = $derived<NonNullable<ViewSort["dir"]>>(cfg.sort?.dir ?? "asc");
+  let sortFieldKey = $derived(cfg.sort?.field_key ?? "");
+  function setSort(next: Partial<ViewSort>) {
+    const merged: ViewSort = { by: sortBy, dir: sortDir, field_key: sortFieldKey || undefined, ...next };
+    if (merged.by !== "field") merged.field_key = undefined;
+    patch({ sort: merged });
   }
 
   // --- hand_picked helpers: ids <-> light refs for NodePicker ---
@@ -75,11 +123,113 @@
   function onPickerChange(refs: NodePickerRef[]) {
     patch({ hand_picked: refs.map((r) => r.id) });
   }
+
+  // --- View (output) named handles = groups ---
+  let handles = $derived<ViewHandle[]>(cfg.handles && cfg.handles.length > 0 ? cfg.handles : [{ id: "in", name: "" }]);
+  function commitHandles(next: ViewHandle[]) {
+    patch({ handles: next });
+  }
+  function nextHandleId(list: ViewHandle[]): string {
+    let max = 0;
+    for (const h of list) {
+      const m = /^h(\d+)$/.exec(h.id);
+      if (m) max = Math.max(max, Number(m[1]));
+    }
+    return `h${max + 1}`;
+  }
+  function addHandle() {
+    const list = [...handles];
+    commitHandles([...list, { id: nextHandleId(list), name: "" }]);
+  }
+  function renameHandle(hid: string, name: string) {
+    commitHandles(handles.map((h) => (h.id === hid ? { ...h, name } : h)));
+  }
+  function setHandleColor(hid: string, color: string | null) {
+    commitHandles(handles.map((h) => (h.id === hid ? { ...h, color: color ?? null } : h)));
+  }
+  function removeHandle(hid: string) {
+    if (handles.length <= 1) return; // keep at least one group
+    commitHandles(handles.filter((h) => h.id !== hid));
+  }
+  function moveHandle(hid: string, delta: -1 | 1) {
+    const i = handles.findIndex((h) => h.id === hid);
+    const j = i + delta;
+    if (i < 0 || j < 0 || j >= handles.length) return;
+    const next = [...handles];
+    [next[i], next[j]] = [next[j], next[i]];
+    commitHandles(next);
+  }
+  // Even vertical spread for the target ports down the node's left edge.
+  function handleTop(i: number): string {
+    return `${((i + 1) / (handles.length + 1)) * 100}%`;
+  }
 </script>
 
-<div class="vnode" class:selected class:output={kind === "output"} class:combinator={arity === "many" || arity === "keep_remove" || kind === "complement"}>
+{#snippet typeSelect(useDescendants: boolean)}
+  <select
+    class="vfield"
+    value={useDescendants ? (cfg.descendants_of ?? "") : (cfg.type ?? "")}
+    onchange={(e) => patch(useDescendants ? { descendants_of: e.currentTarget.value } : { type: e.currentTarget.value })}
+  >
+    <option value="">— pick type —</option>
+    {#each ctx.entryTypes as et (et.fqn)}
+      <option value={et.fqn}>{et.name}</option>
+    {/each}
+  </select>
+{/snippet}
+
+{#snippet tagSelect()}
+  <select class="vfield" value={cfg.tagged ?? ""} onchange={(e) => patch({ tagged: e.currentTarget.value })}>
+    <option value="">— pick tag —</option>
+    {#each ctx.tags as tag (tag)}
+      <option value={tag}>{tag}</option>
+    {/each}
+  </select>
+{/snippet}
+
+{#snippet fieldEditor()}
+  <div class="vfield-row">
+    <select class="vfield" value={fieldKey} onchange={(e) => setField({ key: e.currentTarget.value })}>
+      <option value="">— field —</option>
+      {#each ctx.fields as f (f.key)}
+        <option value={f.key}>{f.name}</option>
+      {/each}
+    </select>
+    <select class="vfield op" value={fieldOp} onchange={(e) => setField({ op: e.currentTarget.value as FieldOp })}>
+      {#each fieldOps as op (op.value)}
+        <option value={op.value}>{op.label}</option>
+      {/each}
+    </select>
+  </div>
+  {#if opNeedsValue && fieldDef}
+    <div class="vfield-value">
+      <FieldValueEditor
+        field={fieldDef}
+        value={(cfg.field?.value ?? null) as import("@/lib/types").MetadataValue}
+        onChange={(v) => setField({ value: v })}
+        loreEntries={ctx.loreEntries}
+        promptEntries={ctx.promptEntries}
+        structure={ctx.structure}
+        researchStructure={ctx.researchStructure}
+        ariaLabel="Field value"
+      />
+    </div>
+  {/if}
+{/snippet}
+
+<div
+  class="vnode"
+  class:selected
+  class:output={kind === "output"}
+  class:combinator={arity === "many" || arity === "keep_remove" || kind === "complement"}
+  class:injector={kind === "all"}
+>
   <!-- target ports (left) -->
-  {#if kind === "difference"}
+  {#if kind === "output"}
+    {#each handles as h, i (h.id)}
+      <Handle type="target" position={Position.Left} id={h.id} class="port port-h" style={`top:${handleTop(i)}`} />
+    {/each}
+  {:else if kind === "difference"}
     <Handle type="target" position={Position.Left} id="keep" class="port keep" style="top: 34%" />
     <Handle type="target" position={Position.Left} id="remove" class="port remove" style="top: 66%" />
   {:else if arity !== "none"}
@@ -98,51 +248,54 @@
     <div class="port-legend"><span class="dot keep"></span>keep · <span class="dot remove"></span>remove</div>
   {/if}
 
-  <!-- leaf / annotate config -->
+  <!-- config by kind -->
   {#if kind === "type" || kind === "descendants_of"}
+    {@render typeSelect(kind === "descendants_of")}
+  {:else if kind === "tagged"}
+    {@render tagSelect()}
+  {:else if kind === "field"}
+    {@render fieldEditor()}
+  {:else if kind === "filter"}
+    <div class="vseg" role="group" aria-label="Filter mode">
+      <button type="button" class:on={filterMode === "keep"} onclick={() => patch({ filter_mode: "keep" })}>Keep</button>
+      <button type="button" class:on={filterMode === "drop"} onclick={() => patch({ filter_mode: "drop" })}>Drop</button>
+    </div>
     <select
       class="vfield"
-      value={kind === "type" ? (cfg.type ?? "") : (cfg.descendants_of ?? "")}
-      onchange={(e) => patch(kind === "type" ? { type: e.currentTarget.value } : { descendants_of: e.currentTarget.value })}
+      value={filterKind}
+      onchange={(e) => patch({ filter_kind: e.currentTarget.value as PredicateKind })}
     >
-      <option value="">— pick type —</option>
-      {#each ctx.entryTypes as et (et.fqn)}
-        <option value={et.fqn}>{et.name}</option>
+      {#each predicateKinds as pk (pk.value)}
+        <option value={pk.value}>{pk.label}</option>
       {/each}
     </select>
-  {:else if kind === "tagged"}
-    <select class="vfield" value={cfg.tagged ?? ""} onchange={(e) => patch({ tagged: e.currentTarget.value })}>
-      <option value="">— pick tag —</option>
-      {#each ctx.tags as tag (tag)}
-        <option value={tag}>{tag}</option>
-      {/each}
+    {#if filterKind === "type"}
+      {@render typeSelect(false)}
+    {:else if filterKind === "descendants_of"}
+      {@render typeSelect(true)}
+    {:else if filterKind === "tagged"}
+      {@render tagSelect()}
+    {:else if filterKind === "field"}
+      {@render fieldEditor()}
+    {/if}
+  {:else if kind === "sorter"}
+    <select class="vfield" value={sortBy} onchange={(e) => setSort({ by: e.currentTarget.value as ViewSort["by"] })}>
+      <option value="manual">Manual (stored order)</option>
+      <option value="title">Title</option>
+      <option value="field">Field…</option>
     </select>
-  {:else if kind === "field"}
-    <div class="vfield-row">
-      <select class="vfield" value={fieldKey} onchange={(e) => setField({ key: e.currentTarget.value })}>
+    {#if sortBy === "field"}
+      <select class="vfield" value={sortFieldKey} onchange={(e) => setSort({ field_key: e.currentTarget.value })}>
         <option value="">— field —</option>
         {#each ctx.fields as f (f.key)}
           <option value={f.key}>{f.name}</option>
         {/each}
       </select>
-      <select class="vfield op" value={fieldOp} onchange={(e) => setField({ op: e.currentTarget.value as NonNullable<ViewNodeData["field"]>["op"] })}>
-        {#each FIELD_OPS as op (op.value)}
-          <option value={op.value}>{op.label}</option>
-        {/each}
-      </select>
-    </div>
-    {#if opNeedsValue && fieldDef}
-      <div class="vfield-value">
-        <FieldValueEditor
-          field={fieldDef}
-          value={(cfg.field?.value ?? null) as import("@/lib/types").MetadataValue}
-          onChange={(v) => setField({ value: v })}
-          loreEntries={ctx.loreEntries}
-          promptEntries={ctx.promptEntries}
-          structure={ctx.structure}
-          researchStructure={ctx.researchStructure}
-          ariaLabel="Field value"
-        />
+    {/if}
+    {#if sortBy !== "manual"}
+      <div class="vseg" role="group" aria-label="Sort direction">
+        <button type="button" class:on={sortDir === "asc"} onclick={() => setSort({ dir: "asc" })}>Asc</button>
+        <button type="button" class:on={sortDir === "desc"} onclick={() => setSort({ dir: "desc" })}>Desc</button>
       </div>
     {/if}
   {:else if kind === "hand_picked"}
@@ -166,32 +319,30 @@
         <option value={v.id}>{v.title}</option>
       {/each}
     </select>
-  {:else if kind === "group"}
-    <input
-      class="vfield"
-      type="text"
-      placeholder="Group name"
-      value={cfg.label ?? ""}
-      oninput={(e) => patch({ label: e.currentTarget.value })}
-    />
-    <div class="vfield-row">
-      <input
-        class="vfield rank"
-        type="number"
-        title="Group order — sort position of this named group in the output"
-        value={cfg.rank ?? 0}
-        onchange={(e) => patch({ rank: Number(e.currentTarget.value) || 0 })}
-      />
-      <span class="vswatch" title="Group tint (optional)">
-        <span class="vswatch-label">Tint</span>
-        <SwatchPicker value={cfg.color ?? null} onChange={(id) => patch({ color: id ?? "" })} />
-      </span>
-    </div>
   {:else if kind === "highlight"}
     <span class="vswatch" title="Highlight colour">
       <span class="vswatch-label">Colour</span>
       <SwatchPicker value={cfg.color ?? null} onChange={(id) => patch({ color: id ?? "" })} />
     </span>
+  {:else if kind === "output"}
+    <div class="handles">
+      {#each handles as h, i (h.id)}
+        <div class="handle-row">
+          <input
+            class="vfield hname"
+            type="text"
+            placeholder={handles.length > 1 ? `Group ${i + 1}` : "All results"}
+            value={h.name}
+            oninput={(e) => renameHandle(h.id, e.currentTarget.value)}
+          />
+          <SwatchPicker value={h.color ?? null} onChange={(c) => setHandleColor(h.id, c)} />
+          <button class="hbtn" title="Move up" aria-label="Move group up" disabled={i === 0} onclick={() => moveHandle(h.id, -1)}>↑</button>
+          <button class="hbtn" title="Move down" aria-label="Move group down" disabled={i === handles.length - 1} onclick={() => moveHandle(h.id, 1)}>↓</button>
+          <button class="hbtn del" title="Remove group" aria-label="Remove group" disabled={handles.length <= 1} onclick={() => removeHandle(h.id)}>×</button>
+        </div>
+      {/each}
+      <button class="add-handle" type="button" onclick={addHandle}>+ Group</button>
+    </div>
   {/if}
 
   <!-- source port (right) -->
@@ -216,6 +367,9 @@
     box-shadow: 0 0 0 2px var(--accent-soft, #d9e2ff);
   }
   .vnode.combinator {
+    background: var(--inset, #f7f8fa);
+  }
+  .vnode.injector {
     background: var(--inset, #f7f8fa);
   }
   .vnode.output {
@@ -290,26 +444,92 @@
     width: 100%;
   }
   .vfield.op {
-    max-width: 84px;
+    max-width: 96px;
   }
-  .vfield.rank {
-    max-width: 62px;
+  /* keep/drop + asc/desc segmented toggle */
+  .vseg {
+    display: flex;
+    gap: 0;
+    margin: 0 8px 8px;
   }
-  /* swatch-picker row: a small labelled trigger sitting inline with the
-     rank input (group) or on its own (highlight). */
+  .vseg button {
+    flex: 1;
+    padding: 3px 6px;
+    border: 1px solid var(--border-strong, #cbd0d8);
+    background: var(--panel, #fff);
+    font-size: 11.5px;
+    cursor: pointer;
+  }
+  .vseg button:first-child {
+    border-radius: 5px 0 0 5px;
+  }
+  .vseg button:last-child {
+    border-radius: 0 5px 5px 0;
+    border-left: none;
+  }
+  .vseg button.on {
+    background: var(--accent, #4361ee);
+    border-color: var(--accent, #4361ee);
+    color: #fff;
+  }
+  /* swatch trigger sitting on its own (highlight). */
   .vswatch {
     display: inline-flex;
     align-items: center;
     gap: 6px;
     margin: 0 8px 8px;
   }
-  .vfield-row .vswatch {
-    margin: 0;
-    flex: 1;
-  }
   .vswatch-label {
     font-size: 11px;
     color: var(--text-3, #6b7280);
+  }
+  /* named-handle (group) editor on the View node */
+  .handles {
+    padding: 0 8px 8px;
+    display: flex;
+    flex-direction: column;
+    gap: 5px;
+  }
+  .handle-row {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+  }
+  .handle-row .hname {
+    margin: 0;
+    flex: 1;
+    width: auto;
+    min-width: 0;
+  }
+  .hbtn {
+    border: 1px solid var(--border, #e2e5ea);
+    background: var(--panel, #fff);
+    border-radius: 4px;
+    font-size: 11px;
+    line-height: 1;
+    padding: 2px 4px;
+    cursor: pointer;
+    color: var(--text-3, #6b7280);
+  }
+  .hbtn:disabled {
+    opacity: 0.35;
+    cursor: default;
+  }
+  .hbtn.del:hover:not(:disabled) {
+    color: var(--danger, #d64545);
+  }
+  .add-handle {
+    align-self: flex-start;
+    border: 1px dashed var(--border-strong, #cbd0d8);
+    background: transparent;
+    border-radius: 5px;
+    font-size: 11.5px;
+    padding: 2px 8px;
+    cursor: pointer;
+    color: var(--text-2, #4b5563);
+  }
+  .add-handle:hover {
+    background: var(--panel, #fff);
   }
   /* keep the flow-node ports visually distinct + above node content so the
      whole handle (not just the half sticking out) is grabbable/hoverable. */

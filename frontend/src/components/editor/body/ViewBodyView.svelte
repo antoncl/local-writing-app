@@ -17,14 +17,15 @@
   import { themePreference } from "@/lib/utils/theme";
   import ViewFlowNode from "./view/ViewFlowNode.svelte";
   import FitView from "./view/FitView.svelte";
+  import GroupCaret from "@/components/widgets/GroupCaret.svelte";
   import { setDesignerContext, type DesignerContext } from "./view/designerContext";
   import { api } from "@/lib/api";
   import { metadataSchemaStore } from "@/lib/stores/schema";
   import { evaluateView, type EvalNode } from "@/lib/views/evaluateView";
   import { structureToEvalNodes } from "@/lib/views/structureNodes";
   import {
-    exprToGraph,
-    graphToExpr,
+    specToGraph,
+    graphToSpec,
     inputArity,
     wouldCycle,
     OUTPUT_NODE_ID,
@@ -143,7 +144,7 @@
         })),
       };
     }
-    const g = exprToGraph(node.spec?.expr);
+    const g = specToGraph(node.spec);
     return {
       nodes: g.nodes.map((n) => toFlowNode(n.id, n.kind, n.data, n.position)),
       edges: g.edges.map((e) => ({
@@ -200,7 +201,7 @@
       edges: flowEdges.map((e) => ({ id: e.id, source: e.source, target: e.target, targetHandle: e.targetHandle ?? null })),
     };
   }
-  let spec = $derived<ViewSpec>({ kind, expr: graphToExpr(toGraph()), sort });
+  let spec = $derived<ViewSpec>(graphToSpec(toGraph(), { kind, sort }));
 
   // ---- preview universe for the anchor kind ----
   let universe = $derived<EvalNode[]>(universeFor(kind));
@@ -280,31 +281,47 @@
     flowEdges = flowEdges.filter((e) => e.source !== id && e.target !== id);
   }
 
-  // ---- palette ----
-  const LEAVES: { kind: GraphNodeKind; label: string }[] = [
-    { kind: "type", label: "Type" },
-    { kind: "descendants_of", label: "Type + subtypes" },
+  // ---- palette (roles — ADR-0027 / doc §12) ----
+  // Injectors are sources: a universal `All` plus the leaves. Type-based
+  // injectors are hidden for single-type kinds (they'd be noise, #91).
+  let hasTypeChoice = $derived(entryTypeOptions.length > 1);
+  let INJECTORS = $derived<{ kind: GraphNodeKind; label: string }[]>([
+    { kind: "all", label: "All" },
+    ...(hasTypeChoice
+      ? ([
+          { kind: "type", label: "Type" },
+          { kind: "descendants_of", label: "Type + subtypes" },
+        ] as { kind: GraphNodeKind; label: string }[])
+      : []),
     { kind: "tagged", label: "Tag" },
     { kind: "field", label: "Field" },
     { kind: "hand_picked", label: "Hand-picked" },
     { kind: "view_ref", label: "Saved view" },
-  ];
-  const COMBINATORS: { kind: GraphNodeKind; label: string }[] = [
+  ]);
+  // Filter is the everyday transform; series = AND, parallel = OR by topology.
+  const FILTERS: { kind: GraphNodeKind; label: string }[] = [{ kind: "filter", label: "Filter" }];
+  // Operations — the explicit set combinators, the power tier.
+  const OPERATIONS: { kind: GraphNodeKind; label: string }[] = [
     { kind: "union", label: "Union" },
     { kind: "intersect", label: "Intersect" },
     { kind: "difference", label: "Difference" },
     { kind: "complement", label: "Complement" },
   ];
-  const ANNOTATES: { kind: GraphNodeKind; label: string }[] = [
-    { kind: "group", label: "Group" },
+  // Arrange — per-segment Sort + the color Highlight overlay.
+  const ARRANGE: { kind: GraphNodeKind; label: string }[] = [
+    { kind: "sorter", label: "Sort" },
     { kind: "highlight", label: "Highlight" },
   ];
 
+  function defaultCfg(k: GraphNodeKind): ViewNodeData {
+    if (k === "filter") return { filter_mode: "keep", filter_kind: hasTypeChoice ? "type" : "tagged" };
+    if (k === "sorter") return { sort: { by: "title", dir: "asc" } };
+    return {};
+  }
   function addNode(k: GraphNodeKind): void {
     const id = `a${addCounter++}`;
-    const cfg: ViewNodeData = k === "group" ? { rank: 0 } : {};
     const position = { x: 60, y: 60 + (flowNodes.length % 8) * 46 };
-    flowNodes = [...flowNodes, toFlowNode(id, k, cfg, position)];
+    flowNodes = [...flowNodes, toFlowNode(id, k, defaultCfg(k), position)];
   }
 
   // ---- connection wiring ----
@@ -323,7 +340,10 @@
     for (let i = flowEdges.length - 1; i >= 0; i--) {
       const e = flowEdges[i];
       const target = flowNodes.find((n) => n.id === e.target);
-      const many = target?.data.kind === "union" || target?.data.kind === "intersect";
+      // union/intersect and the View (its handles each union) accept many wires;
+      // everything else keeps only its newest edge per target handle.
+      const many =
+        target?.data.kind === "union" || target?.data.kind === "intersect" || target?.data.kind === "output";
       const key = `${e.target}::${e.targetHandle ?? "in"}`;
       if (!many) {
         if (seen.has(key)) continue;
@@ -381,6 +401,13 @@
     return preview.annotations.get(id)?.color ?? null;
   }
 
+  // Preview group collapse (per group key) — reuse the GroupCaret affordance the
+  // panes use so the designer preview matches (#84 rollup).
+  let collapsedPreview = $state<Record<string, boolean>>({});
+  function togglePreviewGroup(key: string): void {
+    collapsedPreview = { ...collapsedPreview, [key]: !collapsedPreview[key] };
+  }
+
   // When the anchor kind changes, stale type/field leaves no longer apply — reset
   // to a blank graph (keep only the output). Skipped during hydration.
   let lastKind = $state("");
@@ -415,19 +442,25 @@
     </label>
     <div class="palette">
       <span class="pal-group">
-        {#each LEAVES as p (p.kind)}
-          <button type="button" onclick={() => addNode(p.kind)}>{p.label}</button>
+        {#each INJECTORS as p (p.kind)}
+          <button type="button" class="inj" onclick={() => addNode(p.kind)}>{p.label}</button>
         {/each}
       </span>
       <span class="pal-sep"></span>
       <span class="pal-group">
-        {#each COMBINATORS as p (p.kind)}
+        {#each FILTERS as p (p.kind)}
+          <button type="button" class="filter" onclick={() => addNode(p.kind)}>{p.label}</button>
+        {/each}
+      </span>
+      <span class="pal-sep"></span>
+      <span class="pal-group">
+        {#each OPERATIONS as p (p.kind)}
           <button type="button" class="op" onclick={() => addNode(p.kind)}>{p.label}</button>
         {/each}
       </span>
       <span class="pal-sep"></span>
       <span class="pal-group">
-        {#each ANNOTATES as p (p.kind)}
+        {#each ARRANGE as p (p.kind)}
           <button type="button" class="ann" onclick={() => addNode(p.kind)}>{p.label}</button>
         {/each}
       </span>
@@ -443,6 +476,7 @@
         {colorMode}
         {isValidConnection}
         onconnect={normalizeEdges}
+        deleteKey={["Backspace", "Delete"]}
         fitView
         minZoom={0.3}
       >
@@ -453,7 +487,7 @@
       {#if flowNodes.length <= 1}
         <!-- Overlay, NOT a Svelte Flow <Panel>: a Panel captures pointer events
              over the canvas and blocks the handles (no crosshair / no connect). -->
-        <div class="empty-hint">Add a leaf from the palette, then wire it into <strong>View result</strong>.</div>
+        <div class="empty-hint">Drop an <strong>All</strong>, chain a <strong>Filter</strong> or two, then wire into <strong>View result</strong>.</div>
       {/if}
     </div>
 
@@ -468,12 +502,22 @@
         {:else if preview.groups}
           {#each preview.groups as group (group.key)}
             <div class="pgroup">
-              <div class="pgroup-head" style={group.color ? `--tint:${group.color}` : ""}>
-                {group.label ?? "Everything else"} <span class="count">{group.nodes.length}</span>
-              </div>
-              {#each group.nodes as n (n.id)}
-                <div class="prow" style={annColor(n.id) ? `--tint:${annColor(n.id)}` : ""}>{n.title}</div>
-              {/each}
+              <button
+                type="button"
+                class="pgroup-head"
+                style={group.color ? `--tint:${group.color}` : ""}
+                aria-expanded={!collapsedPreview[group.key]}
+                onclick={() => togglePreviewGroup(group.key)}
+              >
+                <GroupCaret collapsed={collapsedPreview[group.key]} />
+                <span class="pgroup-label">{group.label ?? "Everything else"}</span>
+                <span class="count">{group.nodes.length}</span>
+              </button>
+              {#if !collapsedPreview[group.key]}
+                {#each group.nodes as n (n.id)}
+                  <div class="prow" style={annColor(n.id) ? `--tint:${annColor(n.id)}` : ""}>{n.title}</div>
+                {/each}
+              {/if}
             </div>
           {/each}
         {:else}
@@ -544,6 +588,12 @@
   }
   .palette button:hover {
     background: var(--inset, #f2f4f7);
+  }
+  .palette button.filter {
+    border-color: var(--accent, #4361ee);
+    background: var(--accent, #4361ee);
+    color: #fff;
+    font-weight: 600;
   }
   .palette button.op {
     border-color: var(--accent, #4361ee);
@@ -623,14 +673,28 @@
   }
   .pgroup-head {
     display: flex;
-    justify-content: space-between;
+    align-items: center;
+    gap: 4px;
+    width: 100%;
     padding: 3px 8px;
     font-size: 11px;
     font-weight: 600;
+    text-align: left;
     color: var(--text, #1f2430);
+    border: none;
     border-left: 3px solid var(--tint, var(--border-strong, #cbd0d8));
     background: var(--panel, #fff);
     border-radius: 4px;
+    cursor: pointer;
+  }
+  .pgroup-label {
+    flex: 1;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+  .pgroup-head:hover {
+    background: var(--inset, #f2f4f7);
   }
   .prow {
     padding: 4px 8px 4px 11px;

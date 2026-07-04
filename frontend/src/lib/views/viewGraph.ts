@@ -1,40 +1,77 @@
-// The view designer's graph model + its (de)serialization to a `ViewExpr`
-// tree (0.5.0 step 3, #80). The designer canvas (ViewBodyView) is a Svelte
-// Flow DAG; this pure module is the bridge between that node/edge graph and
-// the portable `ViewSpec.expr` the evaluator (evaluateView.ts) consumes.
+// The view designer's graph model + its lowering to a `ViewSpec` (0.5.0 step 3,
+// #80; approachable roles for #91). The designer canvas (ViewBodyView) is a
+// Svelte Flow DAG; this pure module is the bridge between that node/edge graph
+// and the portable `ViewSpec` the evaluator (evaluateView.ts) consumes.
 //
-// Kept pure and framework-free so the round-trip (graph → expr → graph) is
+// Kept pure and framework-free so the round-trip (graph → spec → graph) is
 // unit-testable, mirroring evaluateView. Auto-layout is deterministic (no
 // Date/random) so a reloaded saved view lays out stably.
 //
-// Set-algebra grammar (ADR-0018/0021): every node has exactly one primary
-// slot. Combinators wire children through edges; the `output` node's single
-// upstream is the root expr. Difference is non-commutative — its two inputs
-// carry explicit `keep` / `remove` handle roles (doc §1.2, the confusable op).
+// Palette ROLES (ADR-0027, doc §12) — the approachable surface over the shipped
+// set algebra:
+//  - Injector — a source: the leaves (type/descendants_of/tagged/field/
+//    hand_picked/view_ref) PLUS a universal `All` (the whole kind universe).
+//  - Filter — a transform (set in → narrowed out) on a type/tag/field predicate.
+//    Pure sugar that lowers here: `keep p` → `intersect(input, p)`, `drop p` →
+//    `difference(input, p)`; off `All` those collapse to `p` / `complement(p)`.
+//  - Operation — the set combinators (∪ ∩ ∖ ¬), the power tier.
+//  - Sorter — sorts one branch/segment; captured as the group/spec `sort`.
+//  - View (output) — N named input handles = grouping. Same handle → union +
+//    dedupe; across handles → ordered groups (handle order = group order).
+//    Highlight (color) survives as a pass-through annotate; the Group node and
+//    annotate label+rank grouping are retired.
+//
+// The lowering runs over a small three-valued algebra (`Built`): a concrete
+// `expr`, the whole `universe` (an `All` injector or a bare handle), or `empty`
+// (nothing wired). The sentinels let filters-off-`All` and set ops fold to the
+// minimal shipped `expr` without a universe leaf in the grammar.
 
-import type { ViewExpr, ViewFieldPredicate } from "@/lib/types";
+import type { ViewExpr, ViewFieldPredicate, ViewGroupSpec, ViewSort, ViewSpec } from "@/lib/types";
 
 export type LeafKind = "type" | "descendants_of" | "tagged" | "field" | "hand_picked" | "view_ref";
 export type CombinatorKind = "union" | "intersect" | "difference" | "complement";
-export type AnnotateKind = "group" | "highlight";
-// "output" is the single sink; its upstream node is the view's root expr.
-export type GraphNodeKind = "output" | CombinatorKind | AnnotateKind | LeafKind;
+// The predicate a Filter narrows on — a subset of the leaves (the set-drawing
+// ones; hand_picked / view_ref stay injector-only).
+export type PredicateKind = "type" | "descendants_of" | "tagged" | "field";
+// "output" is the single sink (the View); its named handles are the groups.
+export type GraphNodeKind =
+  | "output"
+  | "all"
+  | "filter"
+  | "sorter"
+  | "highlight"
+  | CombinatorKind
+  | LeafKind;
 
-// Per-node config. A superset of the slots ViewExpr carries — only the fields
-// relevant to a node's `kind` are read. Mirrors ViewExpr field names so
-// serialization is a direct lift.
+// A named input handle on the View (output) node = one group. `name` is the
+// group label; handle order (the array order) = group order. `color` tints the
+// group. A view with 0–1 populated handles renders flat (ADR-0027 §D).
+export type ViewHandle = { id: string; name: string; color?: string | null };
+export const DEFAULT_HANDLE_ID = "in";
+
+// Per-node config. A superset of the slots ViewExpr carries plus the designer
+// roles' own config (filter mode/predicate, sorter sort, output handles). Only
+// the fields relevant to a node's `kind` are read.
 export type ViewNodeData = {
-  // leaf configs
+  // leaf / filter predicate configs
   type?: string;
   descendants_of?: string;
   tagged?: string;
   field?: ViewFieldPredicate;
   hand_picked?: string[];
   view_ref?: string;
-  // annotate configs (group = label[+color], highlight = color)
+  // filter
+  filter_kind?: PredicateKind; // which predicate the filter narrows on
+  filter_mode?: "keep" | "drop";
+  // sorter
+  sort?: ViewSort;
+  // highlight (color-only annotate)
+  color?: string;
+  // output (View) — the named handles / groups
+  handles?: ViewHandle[];
+  // legacy annotate group slots (kept so pre-#91 layouts don't crash on load)
   label?: string;
   rank?: number;
-  color?: string;
 };
 
 export type ViewGraphNode = {
@@ -45,8 +82,9 @@ export type ViewGraphNode = {
 };
 
 // A directed edge source→target. Handles carry explicit ids so Svelte Flow can
-// render the edge: `sourceHandle` is always the leaf/op output ("out"),
-// `targetHandle` is the input port ("in", or "keep"/"remove" on a difference).
+// render the edge: `sourceHandle` is always the node output ("out"),
+// `targetHandle` is the input port ("in"/a difference "keep"/"remove"/an output
+// handle id).
 export type ViewGraphEdge = {
   id: string;
   source: string;
@@ -64,22 +102,28 @@ export function isLeafKind(kind: GraphNodeKind): kind is LeafKind {
   return (LEAF_KINDS as string[]).includes(kind);
 }
 
-// How many upstream inputs a node kind accepts. Combinators + annotate consume
-// edges; leaves are sources with none.
+// Injectors = sources (no input): the leaves + the universal `All`.
+export function isInjectorKind(kind: GraphNodeKind): boolean {
+  return kind === "all" || isLeafKind(kind);
+}
+
+// How many upstream inputs a node kind accepts. Injectors are sources (none);
+// the View (output) is n-ary across its handles.
 export function inputArity(kind: GraphNodeKind): "none" | "one" | "many" | "keep_remove" {
   switch (kind) {
     case "union":
     case "intersect":
+    case "output":
       return "many";
     case "difference":
       return "keep_remove";
     case "complement":
-    case "group":
+    case "filter":
+    case "sorter":
     case "highlight":
-    case "output":
       return "one";
     default:
-      return "none"; // leaves
+      return "none"; // injectors (leaves + all)
   }
 }
 
@@ -102,103 +146,166 @@ export function wouldCycle(edges: ViewGraphEdge[], source: string, target: strin
   return false;
 }
 
-// --- graph → expr --------------------------------------------------------
+// --- the three-valued lowering algebra -----------------------------------
 
-// Serialize the graph reachable from the output node into a ViewExpr tree.
-// Returns null for an empty/unwired graph (→ whole-universe view). Incomplete
-// wiring degrades gracefully: a combinator with no valid children collapses to
-// null (dropped) rather than throwing, so the live preview stays responsive
-// while the user is mid-compose.
-export function graphToExpr(graph: ViewGraph): ViewExpr | null {
-  const byId = new Map(graph.nodes.map((n) => [n.id, n]));
-  const root = upstreamOf(graph, OUTPUT_NODE_ID)[0];
-  if (!root) return null;
-  return buildExpr(graph, byId, root.source, new Set());
+// A lowered branch: a concrete membership `expr`, the whole `universe` (an
+// `All` injector or a bare handle), or `empty` (nothing / unconfigured).
+type Built = { tag: "expr"; expr: ViewExpr } | { tag: "universe" } | { tag: "empty" };
+const UNIVERSE: Built = { tag: "universe" };
+const EMPTY: Built = { tag: "empty" };
+const built = (expr: ViewExpr): Built => ({ tag: "expr", expr });
+
+// universe/empty → null (whole universe of the kind, or nothing wired → also the
+// whole universe, matching the empty-graph default). A concrete expr → itself.
+function materialize(b: Built): ViewExpr | null {
+  return b.tag === "expr" ? b.expr : null;
 }
+
+function unionBuilt(parts: Built[]): Built {
+  const exprs: ViewExpr[] = [];
+  for (const p of parts) {
+    if (p.tag === "universe") return UNIVERSE; // universe absorbs a union
+    if (p.tag === "empty") continue;
+    exprs.push(p.expr);
+  }
+  if (exprs.length === 0) return EMPTY;
+  if (exprs.length === 1) return built(exprs[0]);
+  return built({ union: exprs });
+}
+
+function intersectBuilt(parts: Built[]): Built {
+  const exprs: ViewExpr[] = [];
+  for (const p of parts) {
+    if (p.tag === "empty") return EMPTY; // empty absorbs an intersect
+    if (p.tag === "universe") continue; // universe is the identity
+    exprs.push(p.expr);
+  }
+  if (exprs.length === 0) return UNIVERSE; // every operand was universe
+  if (exprs.length === 1) return built(exprs[0]);
+  return built({ intersect: exprs });
+}
+
+function complementBuilt(inner: Built): Built {
+  if (inner.tag === "universe") return EMPTY;
+  if (inner.tag === "empty") return UNIVERSE;
+  return built({ complement: inner.expr });
+}
+
+function differenceBuilt(keep: Built, remove: Built): Built {
+  if (keep.tag === "empty") return EMPTY;
+  if (remove.tag === "empty") return keep; // nothing removed
+  if (remove.tag === "universe") return EMPTY; // removes everything
+  // remove is a concrete expr
+  if (keep.tag === "universe") return built({ complement: remove.expr });
+  return built({ difference: { keep: keep.expr, remove: remove.expr } });
+}
+
+// --- graph → spec / expr -------------------------------------------------
 
 function upstreamOf(graph: ViewGraph, nodeId: string): ViewGraphEdge[] {
   return graph.edges.filter((e) => e.target === nodeId);
 }
 
-function buildExpr(
+// Upstream edges of a node in a stable order (source node position: top-to-
+// bottom, then left-to-right) — the order n-ary children serialize in.
+function orderedUpstream(graph: ViewGraph, byId: Map<string, ViewGraphNode>, nodeId: string): ViewGraphEdge[] {
+  return [...upstreamOf(graph, nodeId)].sort((a, b) => {
+    const na = byId.get(a.source);
+    const nb = byId.get(b.source);
+    return (na?.position.y ?? 0) - (nb?.position.y ?? 0) || (na?.position.x ?? 0) - (nb?.position.x ?? 0);
+  });
+}
+
+// Lower the subgraph rooted at `nodeId` into a Built. Incomplete wiring degrades
+// gracefully (a combinator with no valid children → EMPTY) so the live preview
+// stays responsive mid-compose.
+function buildNode(
   graph: ViewGraph,
   byId: Map<string, ViewGraphNode>,
   nodeId: string,
   seen: Set<string>,
-): ViewExpr | null {
-  if (seen.has(nodeId)) return null; // defensive: designer cycle
+): Built {
+  if (seen.has(nodeId)) return EMPTY; // defensive: designer cycle
   const node = byId.get(nodeId);
-  if (!node) return null;
+  if (!node) return EMPTY;
   seen.add(nodeId);
   try {
     switch (node.kind) {
+      case "all":
+        return UNIVERSE;
       case "union":
-      case "intersect": {
-        const children = orderedChildren(graph, byId, nodeId, seen);
-        if (children.length === 0) return null;
-        return node.kind === "union" ? { union: children } : { intersect: children };
-      }
+        return unionBuilt(childBuilts(graph, byId, nodeId, seen));
+      case "intersect":
+        return intersectBuilt(childBuilts(graph, byId, nodeId, seen));
       case "difference": {
         const keepEdge = upstreamOf(graph, nodeId).find((e) => e.targetHandle === "keep");
         const removeEdge = upstreamOf(graph, nodeId).find((e) => e.targetHandle === "remove");
-        const keep = keepEdge ? buildExpr(graph, byId, keepEdge.source, seen) : null;
-        if (!keep) return null; // nothing to keep → nothing to show
-        const remove = removeEdge ? buildExpr(graph, byId, removeEdge.source, seen) : null;
-        // No remove wired yet → the difference is a pass-through of `keep`.
-        return remove ? { difference: { keep, remove } } : keep;
+        const keep = keepEdge ? buildNode(graph, byId, keepEdge.source, seen) : EMPTY;
+        const remove = removeEdge ? buildNode(graph, byId, removeEdge.source, seen) : EMPTY;
+        return differenceBuilt(keep, remove);
       }
-      case "complement": {
-        const inner = orderedChildren(graph, byId, nodeId, seen)[0];
-        return inner ? { complement: inner } : null;
+      case "complement":
+        return complementBuilt(soleChild(graph, byId, nodeId, seen));
+      case "filter":
+        return filterBuilt(soleChild(graph, byId, nodeId, seen), node);
+      case "sorter":
+        // Membership pass-through; the sort itself is captured at the handle.
+        return soleChild(graph, byId, nodeId, seen);
+      case "highlight":
+        return highlightBuilt(soleChild(graph, byId, nodeId, seen), node);
+      default: {
+        const e = leafExpr(node);
+        return e ? built(e) : EMPTY;
       }
-      case "group":
-      case "highlight": {
-        const inner = orderedChildren(graph, byId, nodeId, seen)[0];
-        if (!inner) return null;
-        return { annotate: annotatePayload(node), of: inner };
-      }
-      default:
-        return leafExpr(node);
     }
   } finally {
     seen.delete(nodeId);
   }
 }
 
-// Children of a node in a stable order (upstream node position: top-to-bottom,
-// then left-to-right), skipping unwired/incomplete branches.
-function orderedChildren(
-  graph: ViewGraph,
-  byId: Map<string, ViewGraphNode>,
-  nodeId: string,
-  seen: Set<string>,
-): ViewExpr[] {
-  const edges = [...upstreamOf(graph, nodeId)].sort((a, b) => {
-    const na = byId.get(a.source);
-    const nb = byId.get(b.source);
-    return (na?.position.y ?? 0) - (nb?.position.y ?? 0) || (na?.position.x ?? 0) - (nb?.position.x ?? 0);
-  });
-  const out: ViewExpr[] = [];
-  for (const e of edges) {
-    const child = buildExpr(graph, byId, e.source, seen);
-    if (child) out.push(child);
-  }
-  return out;
+function childBuilts(graph: ViewGraph, byId: Map<string, ViewGraphNode>, nodeId: string, seen: Set<string>): Built[] {
+  return orderedUpstream(graph, byId, nodeId).map((e) => buildNode(graph, byId, e.source, seen));
 }
 
-function annotatePayload(node: ViewGraphNode): ViewExpr["annotate"] {
-  if (node.kind === "highlight") {
-    return { color: node.data.color ?? "" };
-  }
-  // group: label (+ optional rank/color)
-  const payload: NonNullable<ViewExpr["annotate"]> = { label: node.data.label ?? "" };
-  if (node.data.rank !== undefined) payload.rank = node.data.rank;
-  if (node.data.color) payload.color = node.data.color;
-  return payload;
+function soleChild(graph: ViewGraph, byId: Map<string, ViewGraphNode>, nodeId: string, seen: Set<string>): Built {
+  const first = orderedUpstream(graph, byId, nodeId)[0];
+  return first ? buildNode(graph, byId, first.source, seen) : EMPTY;
 }
 
-// A leaf node → its ViewExpr leaf slot. Returns null when unconfigured so a
-// blank leaf doesn't silently mean "whole universe".
+function filterBuilt(input: Built, node: ViewGraphNode): Built {
+  const p = predicateExpr(node);
+  if (!p) return input; // unconfigured filter = pass-through
+  const mode = node.data.filter_mode ?? "keep";
+  return mode === "drop" ? differenceBuilt(input, built(p)) : intersectBuilt([input, built(p)]);
+}
+
+function highlightBuilt(input: Built, node: ViewGraphNode): Built {
+  const color = node.data.color;
+  // A color annotate must wrap a concrete expr; on universe/empty there is no
+  // `of`, so the color is dropped (a bare `All` has no rows to tint yet).
+  if (!color || input.tag !== "expr") return input;
+  return built({ annotate: { color }, of: input.expr });
+}
+
+// A Filter's predicate → a leaf ViewExpr (or null when unconfigured).
+function predicateExpr(node: ViewGraphNode): ViewExpr | null {
+  const d = node.data;
+  switch (d.filter_kind ?? "type") {
+    case "type":
+      return d.type ? { type: d.type } : null;
+    case "descendants_of":
+      return d.descendants_of ? { descendants_of: d.descendants_of } : null;
+    case "tagged":
+      return d.tagged ? { tagged: d.tagged } : null;
+    case "field":
+      return d.field?.key ? { field: d.field } : null;
+    default:
+      return null;
+  }
+}
+
+// A leaf/injector node → its ViewExpr leaf slot. Returns null when unconfigured
+// so a blank leaf doesn't silently mean "whole universe".
 function leafExpr(node: ViewGraphNode): ViewExpr | null {
   const d = node.data;
   switch (node.kind) {
@@ -219,52 +326,113 @@ function leafExpr(node: ViewGraphNode): ViewExpr | null {
   }
 }
 
-// --- expr → graph --------------------------------------------------------
+// The View (output) node's named handles, defaulting to a single unnamed handle.
+export function outputHandles(node: ViewGraphNode | undefined): ViewHandle[] {
+  const handles = node?.data.handles;
+  if (handles && handles.length > 0) return handles;
+  return [{ id: DEFAULT_HANDLE_ID, name: "" }];
+}
+
+type Segment = { handle: ViewHandle; built: Built; sort: ViewSort | null };
+
+// Lower one View handle: union everything wired to it, and capture a Sorter
+// feeding the handle as that segment's sort (a sorter is a membership
+// pass-through — doc §12: sorting sits in a branch before a handle).
+function lowerSegment(graph: ViewGraph, byId: Map<string, ViewGraphNode>, handle: ViewHandle): Segment {
+  const edges = orderedUpstream(graph, byId, OUTPUT_NODE_ID).filter(
+    (e) => (e.targetHandle ?? DEFAULT_HANDLE_ID) === handle.id,
+  );
+  let sort: ViewSort | null = null;
+  const parts: Built[] = [];
+  for (const e of edges) {
+    const src = byId.get(e.source);
+    if (src?.kind === "sorter" && src.data.sort) sort = src.data.sort;
+    parts.push(buildNode(graph, byId, e.source, new Set()));
+  }
+  return { handle, built: unionBuilt(parts), sort };
+}
+
+// Serialize the graph reachable from the View node into a ViewSpec. 0–1
+// populated handles → a flat `expr`; 2+ → an ordered `groups` list (ADR-0027).
+export function graphToSpec(graph: ViewGraph, base: { kind: string; sort?: ViewSort | null }): ViewSpec {
+  const byId = new Map(graph.nodes.map((n) => [n.id, n]));
+  const handles = outputHandles(byId.get(OUTPUT_NODE_ID));
+  const segments = handles.map((h) => lowerSegment(graph, byId, h));
+  const populated = segments.filter((s) => s.built.tag !== "empty");
+
+  if (handles.length <= 1 || populated.length <= 1) {
+    const seg = populated[0];
+    return { kind: base.kind, expr: seg ? materialize(seg.built) : null, sort: seg?.sort ?? base.sort ?? null };
+  }
+
+  const groups: ViewGroupSpec[] = populated.map((s, i) => {
+    const g: ViewGroupSpec = { name: s.handle.name?.trim() || `Group ${i + 1}`, expr: materialize(s.built) };
+    if (s.sort) g.sort = s.sort;
+    if (s.handle.color) g.color = s.handle.color;
+    return g;
+  });
+  return { kind: base.kind, groups, sort: base.sort ?? null };
+}
+
+// Flat single-segment lowering — the root `expr` of a designer graph, ignoring
+// handles/grouping. Used for previews of the default handle and by round-trip
+// tests. Returns null for an empty/unwired graph (→ whole universe).
+export function graphToExpr(graph: ViewGraph): ViewExpr | null {
+  const byId = new Map(graph.nodes.map((n) => [n.id, n]));
+  const parts = orderedUpstream(graph, byId, OUTPUT_NODE_ID).map((e) => buildNode(graph, byId, e.source, new Set()));
+  return materialize(unionBuilt(parts));
+}
+
+// --- spec → graph (reopen fallback) --------------------------------------
 
 const COL_WIDTH = 260;
 const ROW_HEIGHT = 120;
 
-// Rebuild a designer graph from a stored expr, with deterministic layered
-// auto-layout: depth 0 (root) sits nearest the output at the right; leaves fan
-// out to the left. Rows are assigned by a running counter so siblings stack.
-export function exprToGraph(expr: ViewExpr | null | undefined): ViewGraph {
+// Rebuild a designer graph from a stored ViewSpec, with deterministic layered
+// auto-layout. The primary reopen path is the persisted `layout`; this is the
+// fallback for designer-less / backend-authored views. A grouped spec fans each
+// group into its own named handle (+ a Sorter node when the group sorts).
+export function specToGraph(spec: ViewSpec | null | undefined): ViewGraph {
   const nodes: ViewGraphNode[] = [];
   const edges: ViewGraphEdge[] = [];
   const rowCursor = { value: 0 };
   let counter = 0;
   const nextId = () => `n${counter++}`;
 
-  // Output node anchors the right column; its depth is -1 so the root lands at 0.
-  const outputNode: ViewGraphNode = {
-    id: OUTPUT_NODE_ID,
-    kind: "output",
-    position: { x: 0, y: 0 },
-    data: {},
-  };
+  const outputNode: ViewGraphNode = { id: OUTPUT_NODE_ID, kind: "output", position: { x: 0, y: 0 }, data: {} };
   nodes.push(outputNode);
 
-  if (expr) {
-    const rootId = walk(expr, 0);
-    if (rootId) link(rootId, OUTPUT_NODE_ID);
+  const groups = spec?.groups ?? null;
+  if (groups && groups.length > 0) {
+    const handles: ViewHandle[] = groups.map((g, i) => ({
+      id: `h${i}`,
+      name: g.name,
+      ...(g.color ? { color: g.color } : {}),
+    }));
+    outputNode.data = { handles };
+    groups.forEach((g, i) => attachSegment(g.expr ?? null, handles[i].id, g.sort ?? null));
+  } else {
+    attachSegment(spec?.expr ?? null, DEFAULT_HANDLE_ID, null);
   }
 
-  // Depth → x column (root at high x near output, leaves at low x). Find max
-  // depth to invert so leaves sit left. Output pinned rightmost.
-  const maxDepth = nodes.reduce((m, n) => Math.max(m, (n.data as { _depth?: number })._depth ?? 0), 0);
-  for (const n of nodes) {
-    if (n.id === OUTPUT_NODE_ID) {
-      n.position.x = (maxDepth + 1) * COL_WIDTH;
-    } else {
-      const depth = (n.data as { _depth?: number })._depth ?? 0;
-      n.position.x = (maxDepth - depth) * COL_WIDTH;
-    }
-    delete (n.data as { _depth?: number })._depth;
-  }
-  // Center the output vertically against the spread of rows (never negative —
-  // fitView reframes anyway, but keep coordinates in a sane positive range).
-  outputNode.position.y = Math.max(0, ((rowCursor.value - 1) * ROW_HEIGHT) / 2);
-
+  layoutColumns(nodes, outputNode, rowCursor);
   return { nodes, edges };
+
+  // Walk one segment's expr, wiring its root (optionally through a Sorter) into
+  // the given output handle.
+  function attachSegment(expr: ViewExpr | null, handleId: string, sort: ViewSort | null): void {
+    const rootId = expr ? walk(expr, sort ? 1 : 0) : null;
+    let feed = rootId;
+    if (sort) {
+      const sorterId = addNode("sorter", 0, { sort });
+      if (rootId) link(rootId, sorterId);
+      feed = sorterId;
+    } else if (!rootId && (groups?.length ?? 0) > 0) {
+      // A whole-universe group (null expr) still needs a visible source: an `All`.
+      feed = addNode("all", 0, {});
+    }
+    if (feed) link(feed, OUTPUT_NODE_ID, handleId);
+  }
 
   // Returns the created node's id (or null for an unrepresentable expr).
   function walk(e: ViewExpr, depth: number): string | null {
@@ -292,23 +460,18 @@ export function exprToGraph(expr: ViewExpr | null | undefined): ViewGraph {
       return id;
     }
     if (e.annotate && e.of) {
-      // A color-only Highlight carries label null; a Group carries a (possibly
-      // empty) label string. `!= null` matches the evaluator's discrimination
-      // and survives the backend's dense-null serialization (label: null).
-      const isGroup = e.annotate.label != null;
-      const id = addNode(isGroup ? "group" : "highlight", depth, {
-        label: e.annotate.label,
-        rank: e.annotate.rank,
-        color: e.annotate.color,
-      });
-      const innerId = walk(e.of, depth + 1);
-      if (innerId) link(innerId, id);
-      return id;
+      // Only a color annotate (Highlight) survives #91; a label-only annotate is
+      // an inert pass-through, so skip it and lay out its input directly.
+      if (e.annotate.color != null) {
+        const id = addNode("highlight", depth, { color: e.annotate.color });
+        const innerId = walk(e.of, depth + 1);
+        if (innerId) link(innerId, id);
+        return id;
+      }
+      return walk(e.of, depth);
     }
-    // Leaves. Use `!= null` (not `!== undefined`): the backend serializes
-    // ViewExpr densely, so every unused slot arrives as `null`, not absent —
-    // `!== undefined` would match the first check (type) for every leaf and
-    // turn tags/fields/etc. into "type" nodes.
+    // Leaves. `!= null` (not `!== undefined`): the backend serializes ViewExpr
+    // densely, so every unused slot arrives as `null`, not absent.
     if (e.type != null) return addNode("type", depth, { type: e.type });
     if (e.descendants_of != null) return addNode("descendants_of", depth, { descendants_of: e.descendants_of });
     if (e.tagged != null) return addNode("tagged", depth, { tagged: e.tagged });
@@ -318,8 +481,7 @@ export function exprToGraph(expr: ViewExpr | null | undefined): ViewGraph {
     return null;
   }
 
-  // Emit an edge with explicit handle ids so Svelte Flow renders it on load.
-  function link(source: string, target: string, targetHandle = "in"): void {
+  function link(source: string, target: string, targetHandle = DEFAULT_HANDLE_ID): void {
     edges.push({ id: nextId(), source, sourceHandle: "out", target, targetHandle });
   }
 
@@ -330,4 +492,26 @@ export function exprToGraph(expr: ViewExpr | null | undefined): ViewGraph {
     nodes.push({ id, kind, position: { x: 0, y }, data: { ...data, _depth: depth } as ViewNodeData });
     return id;
   }
+}
+
+// Deterministic layered layout: depth → x column (root near the output at the
+// right, leaves fanning left); output pinned rightmost; rows stacked by cursor.
+function layoutColumns(nodes: ViewGraphNode[], outputNode: ViewGraphNode, rowCursor: { value: number }): void {
+  const maxDepth = nodes.reduce((m, n) => Math.max(m, (n.data as { _depth?: number })._depth ?? 0), 0);
+  for (const n of nodes) {
+    if (n.id === OUTPUT_NODE_ID) {
+      n.position.x = (maxDepth + 1) * COL_WIDTH;
+    } else {
+      const depth = (n.data as { _depth?: number })._depth ?? 0;
+      n.position.x = (maxDepth - depth) * COL_WIDTH;
+    }
+    delete (n.data as { _depth?: number })._depth;
+  }
+  outputNode.position.y = Math.max(0, ((rowCursor.value - 1) * ROW_HEIGHT) / 2);
+}
+
+// Back-compat alias: the flat single-expr layout (used where a bare expr, not a
+// full spec, is on hand).
+export function exprToGraph(expr: ViewExpr | null | undefined): ViewGraph {
+  return specToGraph(expr == null ? null : { kind: "", expr });
 }

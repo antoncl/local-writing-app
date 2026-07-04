@@ -59,8 +59,8 @@
 {:else}
   <span class="glyph sym" style={`font-size:${size * 0.62}px`} aria-hidden="true">
     {#if kind === "type"}◆{:else if kind === "descendants_of"}⋔{:else if kind === "tagged"}#{:else if kind === "field"}=
-    {:else if kind === "hand_picked"}✋{:else if kind === "view_ref"}⧉{:else if kind === "group"}▤{:else if kind === "highlight"}●
-    {:else if kind === "output"}▶{:else}•{/if}
+    {:else if kind === "hand_picked"}✋{:else if kind === "view_ref"}⧉{:else if kind === "all"}◯{:else if kind === "filter"}▽
+    {:else if kind === "sorter"}⇅{:else if kind === "highlight"}●{:else if kind === "output"}▶{:else}•{/if}
   </span>
 {/if}
 

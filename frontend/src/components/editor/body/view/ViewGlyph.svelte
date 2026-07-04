@@ -56,6 +56,15 @@
       <circle cx={11} cy={CY} r={R} class="stroke" />
     {/if}
   </svg>
+{:else if kind === "nest"}
+  <!-- a parent node branching down to two children: the denormalized tree. -->
+  <svg class="glyph tree" width={size} height={size} viewBox="0 0 22 22" aria-hidden="true">
+    <line x1="11" y1="5.5" x2="6" y2="15.5" class="tstroke" />
+    <line x1="11" y1="5.5" x2="16" y2="15.5" class="tstroke" />
+    <circle cx="11" cy="5" r="2.4" class="tfill" />
+    <circle cx="6" cy="16" r="2.4" class="tfill" />
+    <circle cx="16" cy="16" r="2.4" class="tfill" />
+  </svg>
 {:else}
   <span class="glyph sym" style={`font-size:${size * 0.62}px`} aria-hidden="true">
     {#if kind === "type"}◆{:else if kind === "descendants_of"}⋔{:else if kind === "tagged"}#{:else if kind === "field"}=
@@ -81,6 +90,14 @@
   }
   .venn .stroke {
     fill: none;
+    stroke: var(--accent, #4361ee);
+    stroke-width: 1.1;
+  }
+  .tree .tfill {
+    fill: var(--accent, #4361ee);
+    fill-opacity: 0.85;
+  }
+  .tree .tstroke {
     stroke: var(--accent, #4361ee);
     stroke-width: 1.1;
   }

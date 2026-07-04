@@ -31,6 +31,7 @@ import type {
   ViewExpr,
   ViewFieldPredicate,
   ViewGroupSpec,
+  ViewNestOp,
   ViewSort,
   ViewSpec,
 } from "@/lib/types";
@@ -79,6 +80,43 @@ export type ViewGroup<T extends EvalNode = EvalNode> = {
   children: ViewGroup<T>[];
 };
 
+// Counts a `nest` accumulates while denormalizing (ADR-0028 §D). Surfaced so the
+// UI (stage 5 / #110) can warn instead of silently returning a wrong tree.
+// `cyclicLinksSkipped`: parent/child edges dropped because the child already sat
+// among its own ancestors (the mandatory data-cycle guard — also what guarantees
+// termination). `orphansDropped`: candidate children that matched no parent.
+// `fanoutTruncated`: the `K·N` row ceiling tripped (a too-permissive match or the
+// universe wired into both handles) and the result was hard-stopped + truncated.
+export type ViewDiagnostics = {
+  cyclicLinksSkipped: number;
+  orphansDropped: number;
+  fanoutTruncated: boolean;
+};
+
+// Human-readable warnings from a nest's diagnostics (ADR-0028 §D, #110), most
+// severe first: a truncated result (with the likely cause) before merely dropped
+// links/orphans. Empty when nothing went wrong (or no nest ran). Pure, so the
+// designer and any pane surface the same copy and it is unit-testable.
+export function nestWarnings(diagnostics: ViewDiagnostics | undefined): string[] {
+  if (!diagnostics) return [];
+  const warnings: string[] = [];
+  if (diagnostics.fanoutTruncated) {
+    warnings.push(
+      "Runaway fan-out — the tree was truncated. The match rule is likely too permissive, " +
+        "or the whole universe is wired into both handles. Seed Parents with roots.",
+    );
+  }
+  const cyclic = diagnostics.cyclicLinksSkipped;
+  if (cyclic > 0) {
+    warnings.push(`${cyclic} cyclic link${cyclic === 1 ? "" : "s"} skipped (a card is its own ancestor).`);
+  }
+  const orphans = diagnostics.orphansDropped;
+  if (orphans > 0) {
+    warnings.push(`${orphans} unmatched ${orphans === 1 ? "child" : "children"} dropped (matched no parent).`);
+  }
+  return warnings;
+}
+
 export type ViewResult<T extends EvalNode = EvalNode> = {
   // Flat membership across every group, deduped by id, in row (handle) order.
   // Preserves input order for `manual` sort within a segment.
@@ -88,6 +126,8 @@ export type ViewResult<T extends EvalNode = EvalNode> = {
   // Handle-derived groups (handle order), or null when the view has 0–1 groups
   // — the flat/pipeline case (1-handle View renders flat, ADR-0027 §D).
   groups: ViewGroup<T>[] | null;
+  // Set only when the view ran a `nest`; carries its cycle/orphan/fan-out counts.
+  diagnostics?: ViewDiagnostics;
 };
 
 export type EvalContext = {
@@ -142,11 +182,14 @@ export function filterGroups<T extends EvalNode>(groups: ViewGroup<T>[], keep: S
 type RunState<T extends EvalNode> = {
   universe: T[];
   order: Map<string, number>; // id → universe index, for stable set→list
+  nodeById: Map<string, T>; // id → node, for `nest` edge resolution
   annotations: Map<string, ViewAnnotation>;
   descendantsCache: Map<string, Set<string>>;
   schema?: MetadataSchema | null;
   resolveView?: (viewId: string) => ViewSpec | null;
   viewStack: string[]; // view_ref cycle guard
+  diag: ViewDiagnostics; // nest accumulator (cycle/orphan/fan-out counts)
+  nestRan: boolean; // whether any `nest` evaluated (gates `diagnostics` on result)
 };
 
 export function evaluateView<T extends EvalNode>(
@@ -155,15 +198,22 @@ export function evaluateView<T extends EvalNode>(
   ctx: EvalContext = {},
 ): ViewResult<T> {
   const order = new Map<string, number>();
-  nodes.forEach((n, i) => order.set(n.id, i));
+  const nodeById = new Map<string, T>();
+  nodes.forEach((n, i) => {
+    order.set(n.id, i);
+    nodeById.set(n.id, n);
+  });
   const state: RunState<T> = {
     universe: nodes,
     order,
+    nodeById,
     annotations: new Map(),
     descendantsCache: new Map(),
     schema: ctx.schema,
     resolveView: ctx.resolveView,
     viewStack: [],
+    diag: { cyclicLinksSkipped: 0, orphansDropped: 0, fanoutTruncated: false },
+    nestRan: false,
   };
 
   // Tree presentation (#101): members nest by their structural `ancestry`, not
@@ -171,11 +221,11 @@ export function evaluateView<T extends EvalNode>(
   // filtered tree keeps a match's ancestors and prunes empty branches for free.
   if (spec.presentation === "tree") {
     const members = evalSegment(state, spec.expr ?? null, spec.sort);
-    return {
+    return withDiag(state, {
       nodes: members,
       annotations: state.annotations,
       groups: buildStructureTree(members),
-    };
+    });
   }
 
   const groups = spec.groups && spec.groups.length > 0 ? spec.groups : null;
@@ -189,6 +239,12 @@ export function evaluateView<T extends EvalNode>(
     : evalSource(state, spec.expr ?? null, spec.sort);
 
   return normalize(state, rows);
+}
+
+// Attach nest diagnostics to a result — only when a `nest` actually ran, so
+// non-relational views keep the exact `{nodes, annotations, groups}` shape.
+function withDiag<T extends EvalNode>(state: RunState<T>, result: ViewResult<T>): ViewResult<T> {
+  return state.nestRan ? { ...result, diagnostics: state.diag } : result;
 }
 
 // Evaluate one membership segment: a `null` expr is the whole universe. Returns
@@ -240,6 +296,11 @@ function evalSource<T extends EvalNode>(
       }
       return rows;
     }
+    if (expr.nest) {
+      // Nest is the other row-producing primary (ADR-0028): it denormalizes a
+      // relational join into `(node, path)` rows with real-node parent segments.
+      return sortNestRows(evalNest(state, expr.nest).rows, sort);
+    }
     if (isBareViewRef(expr)) {
       const nested = evalViewRefRows(state, expr.view_ref as string, sort);
       if (nested) return nested; // grouped/tree ref → nested rows; null → flat
@@ -287,15 +348,27 @@ function normalize<T extends EvalNode>(
 ): ViewResult<T> {
   const seenId = new Set<string>();
   const nodes: T[] = [];
+  const pushNode = (n: T): void => {
+    if (seenId.has(n.id)) return;
+    seenId.add(n.id);
+    nodes.push(n);
+  };
   for (const r of rows) {
-    if (seenId.has(r.node.id)) continue;
-    seenId.add(r.node.id);
-    nodes.push(r.node);
+    // Real-node path segments (a `nest`'s parent headers) are members too — pull
+    // them into the flat list, ancestors before the leaf. Synthetic handle
+    // segments (`nodeId: null`) are skipped, so handle-grouped views are
+    // unchanged (their flat membership stays the row nodes in row order).
+    for (const seg of r.path) {
+      if (!seg.nodeId) continue;
+      const n = state.nodeById.get(seg.nodeId);
+      if (n) pushNode(n);
+    }
+    pushNode(r.node);
   }
 
   // No row carries a path → nothing to nest (default/flat view).
   if (!rows.some((r) => r.path.length > 0)) {
-    return { nodes, annotations: state.annotations, groups: null };
+    return withDiag(state, { nodes, annotations: state.annotations, groups: null });
   }
 
   const built = buildLevel(rows);
@@ -314,10 +387,16 @@ function normalize<T extends EvalNode>(
   }
   // A lone leaf group (one handle, no nesting) renders as a flat list — its name
   // is the list title, not a group header. Ungrouped direct members keep groups.
-  if (built.nodes.length === 0 && groups.length <= 1 && groups.every((g) => g.children.length === 0)) {
-    return { nodes, annotations: state.annotations, groups: null };
+  // Only synthetic handle groups (`nodeId: null`) collapse this way: a lone
+  // real-node group is a genuine tree parent (a `nest` header) and must stay.
+  if (
+    built.nodes.length === 0 &&
+    groups.length <= 1 &&
+    groups.every((g) => g.children.length === 0 && g.nodeId === null)
+  ) {
+    return withDiag(state, { nodes, annotations: state.annotations, groups: null });
   }
-  return { nodes, annotations: state.annotations, groups };
+  return withDiag(state, { nodes, annotations: state.annotations, groups });
 }
 
 // Recursively bucket rows by their leading path segment. Rows with an empty
@@ -413,6 +492,9 @@ function evalExpr<T extends EvalNode>(state: RunState<T>, expr: ViewExpr): Set<s
     stampAnnotation(state, members, expr.annotate);
     return members;
   }
+  // Nest buried in the set algebra contributes its flat membership: every node
+  // that landed in the denormalized tree (parents kept + children attached).
+  if (expr.nest) return evalNest(state, expr.nest).placed;
   return evalLeaf(state, expr);
 }
 
@@ -511,6 +593,181 @@ function evalViewRefRows<T extends EvalNode>(
   }
 }
 
+// --- nest (relational denormalization, ADR-0028) -------------------------
+
+// The runaway fan-out ceiling: cap materialized placements at K · N (N = live
+// universe size). A strict tree emits exactly N; legitimate multi-membership a
+// small multiple; a dense/factorial match blows past K·N within a pass or two.
+const NEST_FANOUT_K = 8;
+
+// Denormalize a `nest` into `(node, path)` rows (ADR-0028). Frontier BFS from the
+// parent seeds; each pass attaches the frontier's matching children one level
+// deeper (a real-node parent segment). A placement emits a ROW only when it is a
+// leaf (no child placed under it) — interior parents render purely as `nodeId`
+// path segments (collapsible NodeRow headers via `buildLevel`). Many-to-many
+// falls out of per-(node, path) dedupe. Three bounds: `recursive` gates the loop
+// (else a single pass); the ancestor-path guard drops data cycles (and bounds
+// path length ≤ |nodes|, guaranteeing a NOP); the K·N ceiling caps fan-out.
+// Returns rows plus `placed` (every node that landed in the tree — the flat-set
+// contribution when a nest is buried in the set algebra).
+function evalNest<T extends EvalNode>(
+  state: RunState<T>,
+  op: ViewNestOp,
+): { rows: ViewRow<T>[]; placed: Set<string> } {
+  state.nestRan = true;
+  const wholeUniverse = (): Set<string> => new Set(state.order.keys());
+  const parentSeedIds = op.parents ? evalExpr(state, op.parents) : wholeUniverse();
+  const childIds = op.children ? evalExpr(state, op.children) : wholeUniverse();
+  const adj = buildNestAdjacency(state, op.match, childIds);
+
+  const ceiling = NEST_FANOUT_K * Math.max(state.universe.length, 1);
+  const maxDepth = op.recursive ? Number.POSITIVE_INFINITY : 1;
+
+  type Placement = { node: T; path: PathSegment[]; ancestors: Set<string>; hasChild: boolean };
+  const placements: Placement[] = [];
+  const seen = new Set<string>(); // dedupe key: ancestor id chain + node id
+  const placed = new Set<string>();
+  const placementKey = (id: string, path: PathSegment[]): string =>
+    path.map((s) => s.nodeId ?? s.key).join(">") + "|" + id;
+
+  // Seed the frontier from the parent set, in universe order (stable `manual`).
+  let frontier: Placement[] = [];
+  for (const n of state.universe) {
+    if (!parentSeedIds.has(n.id)) continue;
+    const pl: Placement = { node: n, path: [], ancestors: new Set(), hasChild: false };
+    placements.push(pl);
+    placed.add(n.id);
+    seen.add(placementKey(n.id, []));
+    frontier.push(pl);
+  }
+
+  let depth = 0;
+  let truncated = false;
+  while (frontier.length > 0 && depth < maxDepth && !truncated) {
+    const next: Placement[] = [];
+    for (const pl of frontier) {
+      const kids = adj.get(pl.node.id);
+      if (!kids || kids.length === 0) continue;
+      const parentSeg: PathSegment = { key: pl.node.id, label: pl.node.title, nodeId: pl.node.id };
+      const childPath = [...pl.path, parentSeg];
+      const childAncestors = new Set(pl.ancestors).add(pl.node.id);
+      for (const cid of kids) {
+        // Guard 2 — ancestor-path data cycle: a child already among its own
+        // ancestors on this path is dropped and counted (also guarantees
+        // termination: no path repeats a node, so length ≤ |nodes|).
+        if (childAncestors.has(cid)) {
+          state.diag.cyclicLinksSkipped++;
+          continue;
+        }
+        const childNode = state.nodeById.get(cid);
+        if (!childNode) continue;
+        const key = placementKey(cid, childPath);
+        if (seen.has(key)) continue; // dedupe identical (node, path)
+        // Guard 3 — runaway fan-out: hard-stop + truncate at the K·N ceiling.
+        if (placements.length >= ceiling) {
+          truncated = true;
+          break;
+        }
+        seen.add(key);
+        const childPl: Placement = { node: childNode, path: childPath, ancestors: childAncestors, hasChild: false };
+        placements.push(childPl);
+        placed.add(cid);
+        next.push(childPl);
+        pl.hasChild = true;
+      }
+      if (truncated) break;
+    }
+    frontier = next;
+    depth++;
+  }
+  if (truncated) state.diag.fanoutTruncated = true;
+
+  // Orphans: candidate children that matched no parent (never placed). Counted
+  // so the UI can surface the drop (ADR-0028 §A).
+  for (const cid of childIds) if (!placed.has(cid)) state.diag.orphansDropped++;
+
+  const rows = placements.filter((pl) => !pl.hasChild).map((pl) => ({ node: pl.node, path: pl.path }));
+  return { rows, placed };
+}
+
+// Build the parent→children adjacency the match rule implies, child side
+// restricted to `childIds`. `direction` picks which card holds the link value;
+// `by` picks whether that value identifies the other card by id (`ref`) or by
+// title (`title`, matched case-insensitively). Potential parents are the whole
+// universe (recursion promotes attached children to parents); the parent *seed*
+// set only decides where the BFS starts.
+function buildNestAdjacency<T extends EvalNode>(
+  state: RunState<T>,
+  match: ViewNestOp["match"],
+  childIds: Set<string>,
+): Map<string, string[]> {
+  const adj = new Map<string, string[]>();
+  const link = (parentId: string, childId: string): void => {
+    if (parentId === childId) return; // a self-link is never a tree edge
+    const list = adj.get(parentId);
+    if (list) list.push(childId);
+    else adj.set(parentId, [childId]);
+  };
+
+  const byTitle = match.by === "title";
+  let titleIndex: Map<string, string[]> | null = null;
+  const idsForTitle = (title: string): string[] => {
+    if (!titleIndex) {
+      titleIndex = new Map();
+      for (const n of state.universe) {
+        const k = n.title.trim().toLowerCase();
+        const list = titleIndex.get(k);
+        if (list) list.push(n.id);
+        else titleIndex.set(k, [n.id]);
+      }
+    }
+    return titleIndex.get(title.trim().toLowerCase()) ?? [];
+  };
+  // Resolve a stored field value to the node id(s) it identifies.
+  const resolve = (value: string): string[] => (byTitle ? idsForTitle(value) : [value]);
+
+  if (match.direction === "child_to_parent") {
+    // The child card holds the link to its parent(s).
+    for (const child of state.universe) {
+      if (!childIds.has(child.id)) continue;
+      for (const value of fieldValueList(child, match.field)) {
+        for (const parentId of resolve(value)) link(parentId, child.id);
+      }
+    }
+  } else {
+    // parent_to_children: the (potential) parent card holds links to its children.
+    for (const parent of state.universe) {
+      for (const value of fieldValueList(parent, match.field)) {
+        for (const childId of resolve(value)) {
+          if (childIds.has(childId)) link(parent.id, childId);
+        }
+      }
+    }
+  }
+  return adj;
+}
+
+// A node's link-field values as a list of trimmed strings — entity_ref (a bare
+// id string), entity_ref_list (a list of ids), a CSV string, or a tag list. The
+// stored shape is always plain strings/lists of strings (no ref wrappers).
+function fieldValueList(node: EvalNode, field: string): string[] {
+  return asArray(node.metadata?.[field]).map((v) => String(v).trim()).filter(Boolean);
+}
+
+// Order a nest's leaf rows by the segment sort (title/field). `manual`/none keeps
+// the natural universe/BFS order. Ranks nodes by the shared node comparator, then
+// stable-sorts rows by their node's rank — so within each parent the leaves come
+// out sorted while sibling parents keep their first-seen order.
+function sortNestRows<T extends EvalNode>(rows: ViewRow<T>[], sort: ViewSort | null | undefined): ViewRow<T>[] {
+  if (!sort || sort.by === "manual") return rows;
+  const ranked = sortNodes(rows.map((r) => r.node), sort);
+  const rank = new Map<string, number>();
+  ranked.forEach((n, i) => {
+    if (!rank.has(n.id)) rank.set(n.id, i);
+  });
+  return [...rows].sort((a, b) => (rank.get(a.node.id) ?? 0) - (rank.get(b.node.id) ?? 0));
+}
+
 // --- annotate (color only) -----------------------------------------------
 
 function stampAnnotation<T extends EvalNode>(
@@ -570,8 +827,15 @@ function nodeTags(node: EvalNode): string[] {
   return [];
 }
 
+// A node's value for a predicate/sort key. `title` is a top-level node property
+// (not metadata), so read it specially — otherwise a title filter or field-sort
+// would read the absent `metadata.title` and match / order nothing.
+function fieldValue(node: EvalNode, key: string): unknown {
+  return key === "title" ? node.title : node.metadata?.[key];
+}
+
 function matchesField(node: EvalNode, pred: ViewFieldPredicate): boolean {
-  const raw = node.metadata?.[pred.key];
+  const raw = fieldValue(node, pred.key);
   switch (pred.op) {
     case "set":
       return !isEmpty(raw);
@@ -645,8 +909,8 @@ function sortNodes<T extends EvalNode>(nodes: T[], sort: ViewSort | null | undef
   if (sort.by === "field" && sort.field_key) {
     const key = sort.field_key;
     return [...nodes].sort((a, b) => {
-      const av = a.metadata?.[key];
-      const bv = b.metadata?.[key];
+      const av = fieldValue(a, key);
+      const bv = fieldValue(b, key);
       const ae = isEmpty(av);
       const be = isEmpty(bv);
       // Empty/unset values always sort last, regardless of direction; `dir` only

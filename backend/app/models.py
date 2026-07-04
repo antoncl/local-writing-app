@@ -602,6 +602,25 @@ class TagUsage(BaseModel):
     count: int = 0
 
 
+class AssistantTag(BaseModel):
+    """One entry in the machine-global assistant-tag vocabulary (#88). Assistants
+    live machine-globally, so their tag vocabulary can't live in a project's
+    per-project tags.yaml — it has its own store. `color` is a swatch id from the
+    machine palette (reused by SwatchPicker/getSwatch), or None when unassigned."""
+
+    name: str
+    color: str | None = None
+
+
+class AssistantTagList(BaseModel):
+    tags: list[AssistantTag] = Field(default_factory=list)
+
+
+class SetAssistantTagColorRequest(BaseModel):
+    # A palette swatch id, or null to clear the color.
+    color: str | None = None
+
+
 class TagsOverview(BaseModel):
     tags: list[TagUsage] = Field(default_factory=list)
 

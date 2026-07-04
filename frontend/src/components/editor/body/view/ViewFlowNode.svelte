@@ -39,6 +39,7 @@
     intersect: "Intersect",
     difference: "Difference",
     complement: "Complement",
+    nest: "Nest",
     highlight: "Highlight",
     type: "Type is",
     descendants_of: "Type & subtypes",
@@ -111,6 +112,32 @@
     const merged: ViewSort = { by: sortBy, dir: sortDir, field_key: sortFieldKey || undefined, ...next };
     if (merged.by !== "field") merged.field_key = undefined;
     patch({ sort: merged });
+  }
+
+  // --- nest (relational op) match-rule helpers ---
+  let matchField = $derived(cfg.match?.field ?? "");
+  let matchDir = $derived<NonNullable<ViewNodeData["match"]>["direction"]>(cfg.match?.direction ?? "child_to_parent");
+  let matchBy = $derived<NonNullable<ViewNodeData["match"]>["by"]>(cfg.match?.by ?? "ref");
+  // Joinable field types (ADR-0028 §B): refs (by id) or text/tags (by title). A
+  // number/boolean/date/computed/color field is never a tree edge, so keep the
+  // picker to the types that can actually carry a parent↔child link. (context_pick
+  // is a prompt-runtime input, not a metadata field type, so it can't appear here.)
+  const NEST_JOINABLE_TYPES: MetadataFieldType[] = [
+    "entity_ref",
+    "entity_ref_list",
+    "tags",
+    "select",
+    "multi_select",
+    "text",
+    "long_text",
+  ];
+  // `title` is a synthetic field (a top-level node property, not stored in
+  // metadata), so it can't carry a parent↔child link — drop it from the picker.
+  let joinableFields = $derived(
+    ctx.fields.filter((f) => f.key !== "title" && NEST_JOINABLE_TYPES.includes(f.def.type)),
+  );
+  function setMatch(next: Partial<NonNullable<ViewNodeData["match"]>>) {
+    patch({ match: { field: matchField, direction: matchDir, by: matchBy, ...next } });
   }
 
   // --- hand_picked helpers: ids <-> light refs for NodePicker ---
@@ -249,7 +276,7 @@
   class="vnode"
   class:selected
   class:output={kind === "output"}
-  class:combinator={arity === "many" || arity === "keep_remove" || kind === "complement"}
+  class:combinator={arity === "many" || arity === "keep_remove" || arity === "parents_children" || kind === "complement"}
   class:injector={kind === "all"}
 >
   <!-- target ports (left) -->
@@ -260,6 +287,9 @@
   {:else if kind === "difference"}
     <Handle type="target" position={Position.Left} id="keep" class="port keep" style="top: 34%" />
     <Handle type="target" position={Position.Left} id="remove" class="port remove" style="top: 66%" />
+  {:else if kind === "nest"}
+    <Handle type="target" position={Position.Left} id="parents" class="port parents" style="top: 34%" />
+    <Handle type="target" position={Position.Left} id="children" class="port children" style="top: 66%" />
   {:else if arity !== "none"}
     <Handle type="target" position={Position.Left} id="in" class="port" />
   {/if}
@@ -274,6 +304,8 @@
 
   {#if kind === "difference"}
     <div class="port-legend"><span class="dot keep"></span>keep · <span class="dot remove"></span>remove</div>
+  {:else if kind === "nest"}
+    <div class="port-legend"><span class="dot parents"></span>parents · <span class="dot children"></span>children</div>
   {/if}
 
   <!-- config by kind -->
@@ -351,6 +383,28 @@
         <option value={v.id}>{v.title}</option>
       {/each}
     </select>
+  {:else if kind === "nest"}
+    <!-- The join rule: which field links parent↔child, which way it points, and
+         whether it matches by reference (id) or by title/tag (ADR-0028 §B). -->
+    <select class="vfield" value={matchField} onchange={(e) => setMatch({ field: e.currentTarget.value })}>
+      <option value="">— link field —</option>
+      {#each joinableFields as f (f.key)}
+        <option value={f.key}>{f.name}</option>
+      {/each}
+    </select>
+    <select
+      class="vfield"
+      value={matchDir}
+      onchange={(e) => setMatch({ direction: e.currentTarget.value as NonNullable<ViewNodeData["match"]>["direction"] })}
+    >
+      <option value="child_to_parent">Child → parent (child holds link)</option>
+      <option value="parent_to_children">Parent → children (parent holds links)</option>
+    </select>
+    <div class="vseg" role="group" aria-label="Match by">
+      <button type="button" class:on={matchBy === "ref"} onclick={() => setMatch({ by: "ref" })}>By reference</button>
+      <button type="button" class:on={matchBy === "title"} onclick={() => setMatch({ by: "title" })}>By title</button>
+    </div>
+    <p class="vhint">Wire roots into <b>parents</b>, candidates into <b>children</b>. Loop the output back to <b>parents</b> to recurse.</p>
   {:else if kind === "highlight"}
     <span class="vswatch" title="Highlight colour">
       <span class="vswatch-label">Colour</span>
@@ -446,11 +500,26 @@
     margin: 0 2px 0 4px;
     vertical-align: middle;
   }
-  .dot.keep {
+  .dot.keep,
+  .dot.parents {
     background: var(--accent, #4361ee);
   }
   .dot.remove {
     background: var(--danger, #d64545);
+  }
+  .dot.children {
+    background: var(--ok, #2a9d8f);
+  }
+  /* nest match-rule hint under the config selects */
+  .vhint {
+    margin: 0 8px 8px;
+    font-size: 10.5px;
+    line-height: 1.35;
+    color: var(--text-3, #6b7280);
+  }
+  .vhint b {
+    font-weight: 600;
+    color: var(--text-2, #4b5563);
   }
   .vfield,
   .vfield-value,
@@ -574,5 +643,8 @@
   }
   .vnode :global(.port.remove) {
     background: var(--danger, #d64545);
+  }
+  .vnode :global(.port.children) {
+    background: var(--ok, #2a9d8f);
   }
 </style>

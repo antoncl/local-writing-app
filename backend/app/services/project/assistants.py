@@ -181,6 +181,11 @@ class AssistantEntriesMixin:
         metadata = self._normalise_metadata(request.metadata, path)
         self._write_node_entry_file(path, node_id, request.title, request.entry_type, metadata, "")
         self._maybe_rename_node_file(path, request.title)
+        # Register the assistant's tags in the machine-global vocabulary so the
+        # `[+]` picker + tag manager surface them (#88).
+        from app.services import machine_settings as ms_service
+
+        ms_service.register_assistant_tags(ms_service.tag_names_from_field(metadata.get("tags")))
         return self.read_assistant_entry(node_id)
 
     def delete_assistant_entry(self, entry_id: str) -> AssistantEntryList:

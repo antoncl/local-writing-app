@@ -17,6 +17,7 @@ import type {
   CreateAIInvocationRequest,
   ChatSessionJournalEntry,
   ChatUsage,
+  AssistantTagList,
   BacklinksResponse,
   ProjectCostResponse,
   ChatSession,
@@ -413,6 +414,15 @@ export const api = {
   getKnownTags() {
     return request<KnownTags>("/tags");
   },
+  getAssistantTags() {
+    return request<AssistantTagList>("/assistant-tags");
+  },
+  setAssistantTagColor(name: string, color: string | null) {
+    return request<AssistantTagList>(`/assistant-tags/${encodeURIComponent(name)}`, {
+      method: "PUT",
+      body: JSON.stringify({ color }),
+    });
+  },
   getTagsOverview() {
     return request<TagsOverview>("/tags/overview");
   },
@@ -532,7 +542,7 @@ export const api = {
   listLoreEntries() {
     return request<LoreEntryList>("/lore");
   },
-  createLoreEntry(title: string, entryType = "lore:lore_note") {
+  createLoreEntry(title: string, entryType: string) {
     return request<LoreEntry>("/lore", {
       method: "POST",
       body: JSON.stringify({ title, entry_type: entryType }),

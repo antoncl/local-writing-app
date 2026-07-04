@@ -392,26 +392,34 @@ class MetadataSchemaMixin:
             raise ProjectServiceError("Unknown metadata schema layer.", 404)
         entry_type_id = request.entry_type_id.strip()
         schema = self.read_metadata_schema()
-        if entry_type_id not in schema.entry_types:
+        definition = schema.entry_types.get(entry_type_id)
+        if definition is None:
             raise ProjectServiceError(f"Unknown node type {entry_type_id}.", 404)
         overview = self.read_metadata_schema_overview()
         source = overview.entry_type_sources.get(entry_type_id)
         if source and source.built_in:
             raise ProjectServiceError("System node types cannot be edited.", 422)
+        # Display order references the type's resolved membership (own +
+        # inherited + generated). It may be a subset — listed fields lead in this
+        # sequence, the rest trail in resolved order (#89) — but every id must be
+        # a real member and there are no duplicates.
+        members = set(definition.fields)
+        if len(set(request.field_order)) != len(request.field_order) or any(
+            fid not in members for fid in request.field_order
+        ):
+            raise ProjectServiceError("Field order must reference the type's fields without duplicates.", 422)
         layer_data = self._read_yaml(layer_path) if layer_path.exists() else self._empty_metadata_schema()
         entry_types = layer_data.get("entry_types")
-        if not isinstance(entry_types, dict) or not isinstance(entry_types.get(entry_type_id), dict):
-            raise ProjectServiceError("This node type has no own fields to reorder at this layer.", 422)
-        entry_type_data = entry_types[entry_type_id]
-        current = entry_type_data.get("fields")
-        if not isinstance(current, list):
-            current = []
-        # The requested order must be a permutation of the fields defined on
-        # the type at this layer (own fields). Inherited/generated fields are
-        # not reorderable here.
-        if sorted(request.field_order) != sorted(current):
-            raise ProjectServiceError("Field order must be a permutation of the type's own fields.", 422)
-        entry_type_data["fields"] = list(request.field_order)
+        if not isinstance(entry_types, dict):
+            entry_types = {}
+        entry_type_data = entry_types.get(entry_type_id)
+        if not isinstance(entry_type_data, dict):
+            # A type whose fields are all inherited has no own definition at this
+            # layer; still allow storing a local display-order override.
+            entry_type_data = {}
+        # Membership is untouched (parent ∪ own_fields); this is a pure ordering
+        # overlay, so inherited fields become locally reorderable (#89).
+        entry_type_data["display_order"] = list(request.field_order)
         entry_types[entry_type_id] = entry_type_data
         layer_data["entry_types"] = entry_types
         self._validate_candidate_schema(root, layer_path, layer_data)
@@ -970,6 +978,14 @@ class MetadataSchemaMixin:
             # L2: append generated fields from this type's group applications
             # (after own/inherited so they trail the hand-authored fields).
             expand_group_applications(raw_entry_type, next_entry_type["fields"])
+            # Display order (#89): membership is inheritance-resolved above; a
+            # per-type `display_order` then reorders the whole resolved list
+            # (inherited fields included) without touching membership. Additive
+            # and stable — unknown ids are ignored, members absent from the order
+            # trail in their resolved position.
+            next_entry_type["fields"] = self._apply_display_order(
+                next_entry_type["fields"], raw_entry_type.get("display_order")
+            )
             if isinstance(parent_id, str) and parent_id in entry_types:
                 parent_definition = resolved.get(parent_id)
                 if isinstance(parent_definition, dict):
@@ -1031,6 +1047,28 @@ class MetadataSchemaMixin:
                 if field_id not in fields:
                     fields.append(deepcopy(field_id))
         return fields
+
+    @staticmethod
+    def _apply_display_order(fields: list[str], order: Any) -> list[str]:
+        """Reorder a resolved membership list by a per-type `display_order` (#89):
+        ids named in `order` (that are actually members) lead, in that sequence;
+        the rest trail in their resolved order. Stable and robust to drift — a
+        stale id in `order` is skipped; a new member absent from `order` keeps its
+        place after the ordered ones."""
+        if not isinstance(order, list):
+            return fields
+        members = set(fields)
+        seen: set[str] = set()
+        ordered: list[str] = []
+        for field_id in order:
+            if isinstance(field_id, str) and field_id in members and field_id not in seen:
+                ordered.append(field_id)
+                seen.add(field_id)
+        for field_id in fields:
+            if field_id not in seen:
+                ordered.append(field_id)
+                seen.add(field_id)
+        return ordered
 
     def _merge_metadata_schema_section(self, base: Any, layer: Any) -> Any:
         if not isinstance(base, dict):

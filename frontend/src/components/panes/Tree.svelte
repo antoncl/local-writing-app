@@ -605,32 +605,6 @@
     gap: 4px;
   }
 
-  .tree-menu-anchor {
-    position: relative;
-  }
-
-  /* Add-child popover — opens from a row's +> affordance (or the pane's
-     section-title +> button). Editorial Card surface; positioned `fixed` so an
-     ancestor `overflow: hidden` can't clip it (top/right set inline at click
-     time). Hosts a NodeList of NodeRows so creation uses the same widget. */
-  .row-add-popover {
-    position: fixed;
-    z-index: 1000;
-    min-width: 200px;
-    padding: 8px;
-    border: 1px solid var(--border);
-    border-radius: 11px;
-    background: var(--surface);
-    box-shadow: 0 6px 18px var(--shadow2);
-  }
-
-  .row-add-popover-heading {
-    display: block;
-    padding: 2px 8px 6px;
-    font-size: 11px;
-    font-weight: 700;
-    letter-spacing: 0.07em;
-    text-transform: uppercase;
-    color: var(--text-3);
-  }
+  /* .tree-menu-anchor / .row-add-popover / .row-add-popover-heading are now
+     global in styles.css — shared with the Lore "+ Entry" type-picker (#67). */
 </style>

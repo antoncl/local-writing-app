@@ -1,25 +1,17 @@
 <script context="module" lang="ts">
   import type { LoreEntrySummary, MetadataSchema } from "@/lib/types";
+  import type { DisplayGroup } from "@/components/widgets/ViewGroupedList.svelte";
 
-  // A Lore-pane display group: one bucket to render under an optional header.
-  // `label: null` is the headerless flat list; otherwise it's a group header
-  // (entry_type buckets by default, or a view's label groups). `color` tints
-  // the header when a view's Group node carried one (ADR-0019).
-  type LoreEntryGroup = {
-    id: string;
-    label: string | null;
-    color: string | null;
-    entries: LoreEntrySummary[];
-    depth: number;
-  };
+  // A Lore-pane display bucket: the shared DisplayGroup shape (#97). `label: null`
+  // is the headerless flat list; otherwise a group header (entry_type buckets by
+  // default, or a view's label groups). `color` tints the header (ADR-0019).
+  type LoreEntryGroup = DisplayGroup<LoreEntrySummary>;
 </script>
 
 <script lang="ts">
   import NodeRow from "@/components/widgets/NodeRow.svelte";
   import NodeList from "@/components/widgets/NodeList.svelte";
-  import GroupCaret from "@/components/widgets/GroupCaret.svelte";
-  import CountPill from "@/components/widgets/CountPill.svelte";
-  import GroupTree from "@/components/widgets/GroupTree.svelte";
+  import ViewGroupedList from "@/components/widgets/ViewGroupedList.svelte";
   import { getSwatch, resolveColorForType } from "@/lib/utils/colors";
   import { evaluateView, filterGroups, type ViewGroup } from "@/lib/views/evaluateView";
   import { paneViews } from "@/lib/stores/paneViews.svelte";
@@ -171,41 +163,13 @@
   bind:searchValue={searchQuery}
   {isEmpty}
 >
-  {#if viewGroups}
-    <GroupTree groups={viewGroups} collapsed={collapsedGroups} onToggle={toggleGroup} leaf={entryRow} />
-  {:else}
-    {#each displayGroups as group (group.id)}
-      {#if group.label === null}
-        {#each group.entries as entry (entry.id)}
-          {@render entryRow(entry, 0)}
-        {/each}
-      {:else}
-        <NodeRow
-          groupHeader
-          collapsed={!!collapsedGroups[group.id]}
-          title={group.label}
-          depth={group.depth}
-          stripeColor={group.color ? getSwatch(group.color)?.hex ?? null : null}
-          onClick={() => toggleGroup(group.id)}
-          onmousedown={(event) => event.stopPropagation()}
-        >
-          {#snippet leading()}
-            <GroupCaret collapsed={collapsedGroups[group.id]} />
-          {/snippet}
-          {#snippet trailing()}
-            <CountPill count={group.entries.length} />
-          {/snippet}
-          {#snippet nested()}
-            {#if !collapsedGroups[group.id]}
-              {#each group.entries as entry (entry.id)}
-                {@render entryRow(entry, group.depth + 1)}
-              {/each}
-            {/if}
-          {/snippet}
-        </NodeRow>
-      {/if}
-    {/each}
-  {/if}
+  <ViewGroupedList
+    {viewGroups}
+    {displayGroups}
+    collapsed={collapsedGroups}
+    onToggle={toggleGroup}
+    row={entryRow}
+  />
   {#snippet whenEmpty()}
     {#if entries.length === 0}
       <p class="muted">No entries yet.</p>

@@ -61,6 +61,10 @@
     // do NOT pass aliases here (aliases live in the editor pane, not
     // the row). Visible cap: TAG_VISIBLE_MAX; overflow becomes a +N chip.
     tags?: readonly string[];
+    // Optional per-tag hue: given a tag, return a hex (or null for the neutral
+    // chip). Colors the tag as a Chip (a distinct color system from the kind
+    // Stripe — widget taxonomy). Used by the assistant-tag vocabulary (#88).
+    tagColor?: ((tag: string) => string | null) | null;
     // Group-header treatment: serif title + a hairline rule under the
     // row. Pair with variant="tree", a caret in leading, and a count
     // pill in trailing. The "chapter divider" look from the Editorial
@@ -131,6 +135,7 @@
     variant = undefined,
     role = null,
     tags = [],
+    tagColor = null,
     groupHeader = false,
     collapsed = false,
     draggable = false,
@@ -159,6 +164,13 @@
   const effectiveMode = $derived(groupHeader ? "tree" : (variant ?? nodeListMode?.current ?? "card"));
   const visibleTags = $derived(tags.slice(0, TAG_VISIBLE_MAX));
   const hiddenTagCount = $derived(Math.max(0, tags.length - TAG_VISIBLE_MAX));
+  // Colored-chip CSS vars for one tag (empty when the tag has no hue). The tint
+  // reads on both themes; the hue itself carries the border + text.
+  function tagStyle(tag: string): string {
+    const hex = tagColor?.(tag);
+    if (!hex) return "";
+    return `--tag-bg: color-mix(in srgb, ${hex} 16%, transparent); --tag-border: color-mix(in srgb, ${hex} 45%, var(--divider)); --tag-text: ${hex}`;
+  }
 </script>
 
 <!-- svelte-ignore a11y_no_static_element_interactions -->
@@ -187,7 +199,7 @@
   {ondragover}
   {ondragleave}
   {ondrop}
->{#if leading}{@render leading()}{/if}{#if titleSlot}{@render titleSlot()}{:else if clickable}<button type="button" class="node-row-click" onclick={onClick} ondblclick={onDblClick}><span class="node-row-text"><strong>{title}</strong>{#if detailSlot}{@render detailSlot()}{:else if detail}<small>{detail}</small>{/if}{#if visibleTags.length > 0}<span class="node-row-tags">{#each visibleTags as tag}<span class="node-row-tag">{tag}</span>{/each}{#if hiddenTagCount > 0}<span class="node-row-tag node-row-tag-overflow">+{hiddenTagCount}</span>{/if}</span>{/if}</span></button>{:else}<span class="node-row-text"><strong>{title}</strong>{#if detailSlot}{@render detailSlot()}{:else if detail}<small>{detail}</small>{/if}{#if visibleTags.length > 0}<span class="node-row-tags">{#each visibleTags as tag}<span class="node-row-tag">{tag}</span>{/each}{#if hiddenTagCount > 0}<span class="node-row-tag node-row-tag-overflow">+{hiddenTagCount}</span>{/if}</span>{/if}</span>{/if}{#if pinned}<span class="node-row-pin-indicator" title="Open in a pinned editor" aria-label="Pinned in editor">★</span>{/if}{#if trailing}<span class="node-row-trailing">{@render trailing()}</span>{/if}</div>
+>{#if leading}{@render leading()}{/if}{#if titleSlot}{@render titleSlot()}{:else if clickable}<button type="button" class="node-row-click" onclick={onClick} ondblclick={onDblClick}><span class="node-row-text"><strong>{title}</strong>{#if detailSlot}{@render detailSlot()}{:else if detail}<small>{detail}</small>{/if}{#if visibleTags.length > 0}<span class="node-row-tags">{#each visibleTags as tag}<span class="node-row-tag" style={tagStyle(tag)}>{tag}</span>{/each}{#if hiddenTagCount > 0}<span class="node-row-tag node-row-tag-overflow">+{hiddenTagCount}</span>{/if}</span>{/if}</span></button>{:else}<span class="node-row-text"><strong>{title}</strong>{#if detailSlot}{@render detailSlot()}{:else if detail}<small>{detail}</small>{/if}{#if visibleTags.length > 0}<span class="node-row-tags">{#each visibleTags as tag}<span class="node-row-tag" style={tagStyle(tag)}>{tag}</span>{/each}{#if hiddenTagCount > 0}<span class="node-row-tag node-row-tag-overflow">+{hiddenTagCount}</span>{/if}</span>{/if}</span>{/if}{#if pinned}<span class="node-row-pin-indicator" title="Open in a pinned editor" aria-label="Pinned in editor">★</span>{/if}{#if trailing}<span class="node-row-trailing">{@render trailing()}</span>{/if}</div>
 
 {#if nested && !collapsed}
   <div class="node-row-group-children">{@render nested()}</div>
@@ -342,10 +354,10 @@
     display: inline-flex;
     align-items: center;
     padding: 1px 7px;
-    border: 1px solid var(--divider);
+    border: 1px solid var(--tag-border, var(--divider));
     border-radius: 999px;
-    background: var(--inset);
-    color: var(--text-2);
+    background: var(--tag-bg, var(--inset));
+    color: var(--tag-text, var(--text-2));
     font-size: 10.5px;
     font-weight: 600;
     line-height: 1.45;

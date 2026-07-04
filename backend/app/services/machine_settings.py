@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import os
 import sys
+from collections.abc import Iterable
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
@@ -9,10 +10,11 @@ from typing import Any
 import yaml
 from pydantic import BaseModel, Field
 
-from app.models import RecentProject, Swatch
+from app.models import AssistantTag, RecentProject, Swatch
 
 APP_NAME = "local-writing-app"
 CONFIG_FILENAME = "config.yaml"
+ASSISTANT_TAGS_FILENAME = "assistant-tags.yaml"
 MASK = "********"
 RECENT_PROJECTS_MAX = 10
 
@@ -132,6 +134,81 @@ def assistants_dir() -> Path:
     """Folder holding assistant entry files. Derived from `config_path()` so
     test fixtures that patch the config path automatically isolate this too."""
     return config_path().parent / "assistants"
+
+
+def assistant_tags_path() -> Path:
+    """The machine-global assistant-tag vocabulary file (#88). Derived from
+    config_path() so test fixtures patching the config path isolate it too."""
+    return config_path().parent / ASSISTANT_TAGS_FILENAME
+
+
+def load_assistant_tags() -> list[AssistantTag]:
+    """Read the assistant-tag vocabulary; a missing/malformed file → empty."""
+    path = assistant_tags_path()
+    if not path.exists():
+        return []
+    try:
+        data = yaml.safe_load(path.read_text(encoding="utf-8")) or {}
+    except yaml.YAMLError:
+        return []
+    raw = data.get("tags") if isinstance(data, dict) else None
+    if not isinstance(raw, list):
+        return []
+    tags: list[AssistantTag] = []
+    for entry in raw:
+        if isinstance(entry, dict) and isinstance(entry.get("name"), str) and entry["name"].strip():
+            color = entry.get("color")
+            tags.append(AssistantTag(name=entry["name"].strip(), color=color if isinstance(color, str) else None))
+    return tags
+
+
+def save_assistant_tags(tags: list[AssistantTag]) -> None:
+    path = assistant_tags_path()
+    path.parent.mkdir(parents=True, exist_ok=True)
+    payload = {"tags": [t.model_dump(mode="json") for t in tags]}
+    path.write_text(yaml.safe_dump(payload, sort_keys=False, allow_unicode=True), encoding="utf-8")
+
+
+def tag_names_from_field(raw: Any) -> list[str]:
+    """A metadata tags field (a list, or a comma-separated string) → clean names.
+    Mirrors the frontend readTags in assistantScope.ts."""
+    if isinstance(raw, list):
+        return [str(item).strip() for item in raw if str(item).strip()]
+    if isinstance(raw, str):
+        return [part.strip() for part in raw.split(",") if part.strip()]
+    return []
+
+
+def register_assistant_tags(names: Iterable[str]) -> list[AssistantTag]:
+    """Add any not-yet-known tag names with color=None; never clobber an existing
+    color. Returns the full updated vocabulary. This is what un-breaks the empty
+    `[+]` picker — every tag a writer types on an assistant/prompt lands here."""
+    tags = load_assistant_tags()
+    existing = {t.name for t in tags}
+    added = False
+    for name in names:
+        clean = name.strip()
+        if clean and clean not in existing:
+            tags.append(AssistantTag(name=clean, color=None))
+            existing.add(clean)
+            added = True
+    if added:
+        save_assistant_tags(tags)
+    return tags
+
+
+def set_assistant_tag_color(name: str, color: str | None) -> list[AssistantTag]:
+    """Set (or clear) a tag's color, registering the tag if it's new."""
+    clean = name.strip()
+    tags = load_assistant_tags()
+    for tag in tags:
+        if tag.name == clean:
+            tag.color = color
+            break
+    else:
+        tags.append(AssistantTag(name=clean, color=color))
+    save_assistant_tags(tags)
+    return tags
 
 
 def load_settings() -> MachineSettings:

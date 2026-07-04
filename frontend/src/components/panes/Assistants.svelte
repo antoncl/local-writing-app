@@ -1,24 +1,19 @@
 <script context="module" lang="ts">
   import type { AssistantEntrySummary } from "@/lib/types";
+  import type { DisplayGroup } from "@/components/widgets/ViewGroupedList.svelte";
 
-  // A unified render bucket. `label: null` is the headerless flat list; a
-  // `layerId` marks a drag-reorderable layer group (default view only).
-  type AssistantDisplayGroup = {
-    id: string;
-    label: string | null;
-    color: string | null;
-    layerId: string | null;
-    entries: AssistantEntrySummary[];
-  };
+  // The shared render bucket (#97). `label: null` is the headerless flat list; a
+  // non-null `reorderKey` marks a drag-reorderable layer group (default view only).
+  type AssistantDisplayGroup = DisplayGroup<AssistantEntrySummary>;
 </script>
 
 <script lang="ts">
   import NodeRow from "@/components/widgets/NodeRow.svelte";
   import NodeList from "@/components/widgets/NodeList.svelte";
-  import GroupCaret from "@/components/widgets/GroupCaret.svelte";
-  import CountPill from "@/components/widgets/CountPill.svelte";
-  import GroupTree from "@/components/widgets/GroupTree.svelte";
+  import ViewGroupedList from "@/components/widgets/ViewGroupedList.svelte";
   import { getSwatch } from "@/lib/utils/colors";
+  import { assistantTagsStore, assistantTagColorHexes } from "@/lib/stores/assistantTags";
+  import { assistantTagsOf } from "@/lib/chat/assistantScope";
   import { evaluateView } from "@/lib/views/evaluateView";
   import { paneViews } from "@/lib/stores/paneViews.svelte";
   import { metadataSchemaStore } from "@/lib/stores/schema";
@@ -49,6 +44,13 @@
   // Per-group collapse — pane-local, not persisted (same as the Lore pane).
   let collapsedGroups: Record<string, boolean> = {};
 
+  // Colored tag chips: name → hex from the machine-global assistant-tag
+  // vocabulary (#88). Uncolored tags fall back to the neutral chip.
+  $: assistantTagColors = assistantTagColorHexes($assistantTagsStore);
+  // Reactive (not const) so the function reference changes when colors update,
+  // re-rendering the rows' chips.
+  $: tagHexFor = (tag: string): string | null => assistantTagColors.get(tag) ?? null;
+
   // Every NodeList is backed by a view (ADR-0022). Evaluate the selected view,
   // then present: a view with label annotations carries its own hard groups; a
   // flat view is one headerless list; otherwise the intrinsic per-layer grouping
@@ -76,7 +78,7 @@
     layerGrouped: boolean,
   ): AssistantDisplayGroup[] {
     if (flat) {
-      return [{ id: "__flat__", label: null, color: null, layerId: null, entries: items }];
+      return [{ id: "__flat__", label: null, color: null, reorderKey: null, entries: items }];
     }
     return groupByLayer(items, layerGrouped);
   }
@@ -129,7 +131,7 @@
       endDrag();
       return;
     }
-    const group = displayGroups.find((g) => g.layerId === layerId);
+    const group = displayGroups.find((g) => g.id === layerId);
     if (!group) {
       endDrag();
       return;
@@ -161,7 +163,7 @@
       if (existing) {
         existing.entries.push(entry);
       } else {
-        groups.set(key, { id: key, label, color: null, layerId: layerGrouped ? key : null, entries: [entry] });
+        groups.set(key, { id: key, label, color: null, reorderKey: layerGrouped ? key : null, entries: [entry] });
       }
     }
     // Machine layer first; then alphabetical by label.
@@ -189,54 +191,27 @@
 </script>
 
 <NodeList isEmpty={entries.length === 0}>
-  {#if viewGroups}
-    <GroupTree groups={viewGroups} collapsed={collapsedGroups} onToggle={toggleGroup} leaf={assistantLeaf} />
-  {:else}
-    {#each displayGroups as group (group.id)}
-      {#if group.label === null}
-        {#each group.entries as entry (entry.id)}
-          {@render assistantRow(entry, group.layerId, 0)}
-        {/each}
-      {:else}
-        {@const userCollapsed = !!collapsedGroups[group.id]}
-        {@const isEmpty = group.entries.length === 0}
-        <NodeRow
-          groupHeader
-          collapsed={userCollapsed || isEmpty}
-          title={group.label}
-          stripeColor={group.color ? getSwatch(group.color)?.hex ?? null : null}
-          onClick={() => toggleGroup(group.id)}
-        >
-          {#snippet leading()}
-            <GroupCaret collapsed={userCollapsed || isEmpty} />
-          {/snippet}
-          {#snippet trailing()}
-            <CountPill count={group.entries.length} />
-          {/snippet}
-          {#snippet nested()}
-            {#each group.entries as entry (entry.id)}
-              {@render assistantRow(entry, group.layerId, 0)}
-            {/each}
-          {/snippet}
-        </NodeRow>
-      {/if}
-    {/each}
-  {/if}
+  <ViewGroupedList
+    {viewGroups}
+    {displayGroups}
+    collapsed={collapsedGroups}
+    onToggle={toggleGroup}
+    row={assistantRow}
+  />
   {#snippet whenEmpty()}
     <p class="muted">No assistants defined yet. Click + Assistant to create one in the machine layer.</p>
   {/snippet}
 </NodeList>
 
-<!-- GroupTree leaf: a view's grouped rows are read-only (layer drag is only for
-     the intrinsic default view), so this passes layerId null. -->
-{#snippet assistantLeaf(entry: AssistantEntrySummary, depth: number)}
-  {@render assistantRow(entry, null, depth)}
-{/snippet}
-
-{#snippet assistantRow(entry: AssistantEntrySummary, layerId: string | null, depth: number)}
+<!-- A view's grouped rows are read-only (layer drag applies only to the intrinsic
+     default view), so `group` is null there → `reorderable` false. -->
+{#snippet assistantRow(entry: AssistantEntrySummary, depth: number, group: AssistantDisplayGroup | null)}
+  {@const layerId = group?.reorderKey ?? null}
   <NodeRow
     title={entry.title}
     {depth}
+    tags={assistantTagsOf(entry)}
+    tagColor={tagHexFor}
     active={focusedDocument?.type === "assistant" && focusedDocument.id === entry.id}
     pinned={pinnedKeys.has(`assistant:${entry.id}`)}
     stripeColor={stripeFor(entry)}

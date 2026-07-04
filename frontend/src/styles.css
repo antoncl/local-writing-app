@@ -137,6 +137,38 @@ body {
   background-size: 28px 28px;
 }
 
+/* Themed scrollbars. `color-scheme` (set per theme on :root) is supposed to
+   give native dark scrollbars for free, but Windows Chromium ignores it for
+   the classic overlay scrollbar — so paint them from tokens explicitly.
+   Firefox honors `scrollbar-color`; WebKit/Blink use the ::-webkit-scrollbar
+   pseudo-elements. Both derive from theme tokens, so they follow dark mode.
+   Components that hide their own scrollbar (`scrollbar-width: none`) still win. */
+* {
+  scrollbar-color: var(--tier3) transparent;
+}
+::-webkit-scrollbar {
+  width: 12px;
+  height: 12px;
+}
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+::-webkit-scrollbar-thumb {
+  background: var(--tier3);
+  /* Transparent border + padding-box clip insets the thumb so it reads as a
+     rounded pill floating in the track rather than a full-width slab. */
+  border: 3px solid transparent;
+  background-clip: padding-box;
+  border-radius: 8px;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: var(--border-strong);
+  background-clip: padding-box;
+}
+::-webkit-scrollbar-corner {
+  background: transparent;
+}
+
 button,
 input,
 select,
@@ -446,9 +478,35 @@ h3 {
   cursor: grabbing;
 }
 
-/* .tree-menu-anchor / .row-add-popover co-located into Tree.svelte (#14).
-   (App.svelte only `closest()`-queries these by class name for outside-click
-   detection — scoping adds a hash but keeps the class, so the query still works.) */
+/* Add-menu popover chrome. Global because two panes now host it: the
+   manuscript/research Tree add-child menus and the Lore pane's "+ Entry"
+   type-picker (#67). Anchor is `position: relative`; the popover is `fixed`
+   with top/right set inline at click time so an ancestor `overflow: hidden`
+   can't clip it. Hosts a NodeList of NodeRows so creation reuses the widget. */
+.tree-menu-anchor {
+  position: relative;
+}
+
+.row-add-popover {
+  position: fixed;
+  z-index: 1000;
+  min-width: 200px;
+  padding: 8px;
+  border: 1px solid var(--border);
+  border-radius: 11px;
+  background: var(--surface);
+  box-shadow: 0 6px 18px var(--shadow2);
+}
+
+.row-add-popover-heading {
+  display: block;
+  padding: 2px 8px 6px;
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.07em;
+  text-transform: uppercase;
+  color: var(--text-3);
+}
 
 /* `.row-action-add` button styling for callers outside a NodeRow
    trailing slot (e.g. pane section-title). NodeRow's own trailing
@@ -477,8 +535,6 @@ button.row-action-add.active {
   color: var(--accent);
   border-color: var(--accent);
 }
-
-/* .row-add-popover-heading co-located into Tree.svelte (#14). */
 
 .editor-pane {
   min-width: 440px;

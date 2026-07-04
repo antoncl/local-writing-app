@@ -1163,9 +1163,13 @@ class MetadataValidationTests(unittest.TestCase):
         schema = self.service.set_entry_type_field_order(
             SetFieldOrderRequest(layer_id=project_layer.id, entry_type_id="lore:faction", field_order=["gamma", "alpha", "beta"])
         )
-        self.assertEqual(schema.entry_types["lore:faction"].own_fields, ["gamma", "alpha", "beta"])
+        # Membership (own_fields) is untouched — a display-order overlay drives
+        # the render order (#89), so the reordered ids lead the resolved list.
+        self.assertEqual(schema.entry_types["lore:faction"].own_fields, ["alpha", "beta", "gamma"])
+        self.assertEqual(schema.entry_types["lore:faction"].fields[:3], ["gamma", "alpha", "beta"])
         on_disk = self.service._read_yaml(self.root / "metadata.schema.yaml")
-        self.assertEqual(on_disk["entry_types"]["lore:faction"]["fields"], ["gamma", "alpha", "beta"])
+        self.assertEqual(on_disk["entry_types"]["lore:faction"]["display_order"], ["gamma", "alpha", "beta"])
+        self.assertEqual(on_disk["entry_types"]["lore:faction"]["fields"], ["alpha", "beta", "gamma"])
 
     def test_set_entry_type_field_order_rejects_non_permutation(self) -> None:
         project_layer = next(
@@ -1205,6 +1209,56 @@ class MetadataValidationTests(unittest.TestCase):
                 SetFieldOrderRequest(layer_id=project_layer.id, entry_type_id="scene:scene", field_order=[])
             )
         self.assertEqual(raised.exception.status_code, 422)
+
+    def test_display_order_can_lift_own_field_above_inherited(self) -> None:
+        # The #89 capability the old single-`fields` list couldn't express:
+        # place an own field ahead of an inherited one.
+        project_layer = next(
+            layer
+            for layer in self.service.read_metadata_schema_layers().layers
+            if layer.folder_path == str(self.root)
+        )
+        self.service.upsert_metadata_entry_type(
+            UpsertMetadataEntryTypeRequest(
+                layer_id=project_layer.id,
+                entry_type_id="realm",
+                entry_type=EntryTypeDefinition(name="Realm", kind="lore", parent="lore:lore_entry", fields=[]),
+            )
+        )
+        self.service.upsert_metadata_field(
+            UpsertMetadataFieldRequest(
+                layer_id=project_layer.id,
+                field_id="p1",
+                field=MetadataFieldDefinition(name="P1", type="text"),
+                entry_type="lore:realm",
+            )
+        )
+        self.service.upsert_metadata_entry_type(
+            UpsertMetadataEntryTypeRequest(
+                layer_id=project_layer.id,
+                entry_type_id="kingdom",
+                entry_type=EntryTypeDefinition(name="Kingdom", kind="lore", parent="lore:realm", fields=[]),
+            )
+        )
+        self.service.upsert_metadata_field(
+            UpsertMetadataFieldRequest(
+                layer_id=project_layer.id,
+                field_id="c1",
+                field=MetadataFieldDefinition(name="C1", type="text"),
+                entry_type="lore:kingdom",
+            )
+        )
+        default_fields = self.service.read_metadata_schema().entry_types["lore:kingdom"].fields
+        self.assertLess(default_fields.index("p1"), default_fields.index("c1"))  # inherited leads by default
+
+        self.service.set_entry_type_field_order(
+            SetFieldOrderRequest(layer_id=project_layer.id, entry_type_id="lore:kingdom", field_order=["c1", "p1"])
+        )
+        reordered = self.service.read_metadata_schema().entry_types["lore:kingdom"].fields
+        self.assertEqual(reordered.index("c1"), 0)
+        self.assertEqual(reordered.index("p1"), 1)
+        # Membership is unchanged — c1 stays kingdom's only own field.
+        self.assertEqual(self.service.read_metadata_schema().entry_types["lore:kingdom"].own_fields, ["c1"])
 
     def test_move_metadata_field_removes_original_layer_definition(self) -> None:
         layers = self.service.read_metadata_schema_layers().layers

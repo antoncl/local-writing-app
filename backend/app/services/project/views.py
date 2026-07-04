@@ -13,6 +13,7 @@ no evaluator yet — nothing consumes a stored spec's membership at runtime.
 
 from __future__ import annotations
 
+from collections.abc import Iterator
 from typing import Any
 
 from app.models_views import (
@@ -30,17 +31,23 @@ from app.services.project.errors import ProjectServiceError
 
 
 class ViewsMixin:
-    def list_views(self) -> ViewNodeList:
-        index = self._build_node_index()
-        entries: list[ViewNodeSummary] = []
-        for entry in index.by_id.values():
+    def _iter_view_entries(self) -> Iterator[tuple[Any, dict[str, Any], ViewSpec | None]]:
+        """One node-index pass over stored views, yielding (index entry, front
+        matter, parsed spec). list_views and the ref-cycle check share it so a
+        view's file is read + parsed once per call by a single loop instead of
+        two divergent ones (#95). Unreadable views are skipped."""
+        for entry in self._build_node_index().by_id.values():
             if entry.kind != "view":
                 continue
             try:
                 front_matter, _ = self._read_markdown_with_front_matter(entry.path, strict=True)
             except ProjectServiceError:
                 continue
-            spec = self._parse_view_spec(front_matter.get("spec"))
+            yield entry, front_matter, self._parse_view_spec(front_matter.get("spec"))
+
+    def list_views(self) -> ViewNodeList:
+        entries: list[ViewNodeSummary] = []
+        for entry, front_matter, spec in self._iter_view_entries():
             entries.append(
                 ViewNodeSummary(
                     id=entry.id,
@@ -48,6 +55,7 @@ class ViewsMixin:
                     entry_type=self._view_entry_type(front_matter),
                     view_kind=spec.kind if spec else "",
                     presentation=self._view_presentation(front_matter),
+                    spec=spec,
                     source_layer_id=entry.source_layer_id,
                     source_layer_label=entry.source_layer_label,
                 )
@@ -206,6 +214,9 @@ class ViewsMixin:
             if node.difference is not None:
                 walk(node.difference.keep)
                 walk(node.difference.remove)
+            if node.nest is not None:
+                walk(node.nest.parents)
+                walk(node.nest.children)
             walk(node.complement)
             if node.annotate is not None:
                 walk(node.of)
@@ -231,14 +242,7 @@ class ViewsMixin:
         from the view being written. Views are nodes, so ref cycles are real and
         would non-terminate any future evaluator (ADR-0021)."""
         graph: dict[str, set[str]] = {}
-        for entry in self._build_node_index().by_id.values():
-            if entry.kind != "view":
-                continue
-            try:
-                front_matter, _ = self._read_markdown_with_front_matter(entry.path, strict=True)
-            except ProjectServiceError:
-                continue
-            existing = self._parse_view_spec(front_matter.get("spec"))
+        for entry, _front_matter, existing in self._iter_view_entries():
             graph[entry.id] = self._spec_view_refs(existing)
 
         # A new view has no id yet — a placeholder node nothing else references.

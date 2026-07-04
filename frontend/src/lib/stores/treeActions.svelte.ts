@@ -71,9 +71,9 @@ class TreeActions {
   #pendingCollapseTimeoutId: ReturnType<typeof setTimeout> | null = null;
 
   // ---- Node creation ----
-  async newLoreEntry(): Promise<void> {
+  async newLoreEntry(entryType: string): Promise<void> {
     await this.run(async () => {
-      const entry = await api.createLoreEntry("New Entry", "lore:lore_note");
+      const entry = await api.createLoreEntry("New Entry", entryType);
       await refreshLoreEntries();
       await editorPanes.openLore(entry.id);
     });

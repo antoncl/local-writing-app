@@ -179,6 +179,18 @@ export type KnownTags = {
   tags: ScopedTag[];
 };
 
+// The machine-global assistant-tag vocabulary (#88). Assistants live
+// machine-globally, so this is separate from a project's scoped KnownTags.
+// `color` is a palette swatch id (or null when unassigned).
+export type AssistantTag = {
+  name: string;
+  color: string | null;
+};
+
+export type AssistantTagList = {
+  tags: AssistantTag[];
+};
+
 export type TagUsage = {
   name: string;
   scope: NodePickerConfig;
@@ -267,13 +279,37 @@ export type ViewFieldPredicate = {
 
 export type ViewAnnotatePayload = { label?: string; color?: string; rank?: number };
 
+// The parameterized link rule a `nest` denormalizes (ADR-0028 §B). `direction`
+// says which card holds the link value; `by` says whether it identifies the
+// other card by `ref` (an entity_ref/id field) or `title` (a tag == title).
+// `field` names the metadata field carrying the link. `context_pick` fields are
+// not offered (per-prompt runtime, not authored structure).
+export type ViewNestMatch = {
+  field: string;
+  direction: "child_to_parent" | "parent_to_children";
+  by: "ref" | "title";
+};
+
+// The `nest` relational operator (ADR-0028): denormalize a user-authored tree
+// from lore links. `parents`/`children` are the two input sets (absent = the
+// whole universe); `match` is the join rule; `recursive` marks the canvas
+// self-loop (frontier BFS over an unknown-depth homogeneous hierarchy).
+export type ViewNestOp = {
+  parents?: ViewExpr | null;
+  children?: ViewExpr | null;
+  match: ViewNestMatch;
+  recursive?: boolean;
+};
+
 // One node in a view's set-algebra tree: exactly one primary slot is set
-// (a combinator, an annotate pass-through paired with `of`, or a leaf).
+// (a combinator, the `nest` relational op, an annotate pass-through paired with
+// `of`, or a leaf).
 export type ViewExpr = {
   union?: ViewExpr[];
   intersect?: ViewExpr[];
   difference?: { keep: ViewExpr; remove: ViewExpr };
   complement?: ViewExpr;
+  nest?: ViewNestOp;
   annotate?: ViewAnnotatePayload;
   of?: ViewExpr;
   type?: string; // exact entry_type FQN
@@ -369,6 +405,9 @@ export type ViewNodeSummary = {
   entry_type: string;
   view_kind: string;
   presentation: ViewPresentation;
+  // The full spec ships with the list summary (#95) so evaluating a listed view
+  // — including resolving its view_ref leaves — needs no second per-view fetch.
+  spec?: ViewSpec | null;
   source_layer_id?: string;
   source_layer_label?: string;
 };
@@ -461,6 +500,9 @@ export type EntryTypeDefinition = {
   kind: string;
   parent?: string | null;
   abstract?: boolean;
+  // Superseded types kept readable for legacy projects but no longer offered
+  // for new-entry creation (e.g. `lore:lore_note` → Research kind, #67).
+  deprecated?: boolean;
   fields: string[];
   own_fields?: string[];
   display_template?: string;

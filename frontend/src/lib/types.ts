@@ -290,9 +290,29 @@ export type ViewSort = {
   dir?: "asc" | "desc";
 };
 
-// The portable view core: an anchor `kind` + membership expr + ordering.
-// `expr` absent/null = the whole universe of `kind`.
-export type ViewSpec = { kind: string; expr?: ViewExpr | null; sort?: ViewSort | null };
+// One named group = one named input handle on the View node (ADR-0027 §D/§E,
+// #91). `name` is the group label and the row `path` segment; `expr` is the
+// group's membership (absent/null = the whole universe); `sort` sorts this
+// segment; `color` is an optional group tint. Group order = handle order = this
+// list's order. Same-name groups union + dedupe.
+export type ViewGroupSpec = {
+  name: string;
+  expr?: ViewExpr | null;
+  sort?: ViewSort | null;
+  color?: string | null;
+};
+
+// The portable view core: an anchor `kind` + membership + ordering. Membership
+// is EITHER a single `expr` (flat view) OR an ordered `groups` list (named
+// handles; 2+ populated handles render as groups — ADR-0027). `expr`/`groups`
+// both absent/null = the whole universe of `kind`. `sort` is the fallback when a
+// group carries no per-segment sort.
+export type ViewSpec = {
+  kind: string;
+  expr?: ViewExpr | null;
+  groups?: ViewGroupSpec[] | null;
+  sort?: ViewSort | null;
+};
 
 // How a view's result list is laid out (doc §3.1). Orthogonal to membership.
 export type ViewPresentation = "tree" | "grouped" | "flat";

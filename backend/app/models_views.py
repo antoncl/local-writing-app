@@ -140,15 +140,40 @@ class ViewSort(BaseModel):
         return self
 
 
+class ViewGroupSpec(BaseModel):
+    """One named group = one named input handle on the View node (ADR-0027
+    §D/§E, #91). `name` is the group label and the row `path` segment; `expr` is
+    the group's membership (None = the whole universe); `sort` sorts this
+    segment; `color` is an optional group tint. Group order = handle order = the
+    `groups` list order; same-name handles union + dedupe in the evaluator."""
+
+    name: str = Field(min_length=1)
+    expr: ViewExpr | None = None
+    sort: ViewSort | None = None
+    color: str | None = None
+
+
 class ViewSpec(BaseModel):
     """A kind-anchored membership expression + ordering — the portable core of a
-    view. `expr` None = the whole universe of `kind` (the degenerate "all nodes
-    of this kind" spec a kind-only picker source uses). Entry_type refs inside
-    `expr` are FQN (#77)."""
+    view. Membership is EITHER a single `expr` (flat view) OR an ordered
+    `groups` list (named handles → 2+ populated handles render as groups,
+    ADR-0027). `expr`/`groups` both None = the whole universe of `kind` (the
+    degenerate "all nodes of this kind" spec a kind-only picker source uses).
+    Entry_type refs inside `expr` are FQN (#77). `sort` is the fallback when a
+    group carries no per-segment sort."""
 
     kind: str = Field(min_length=1)
     expr: ViewExpr | None = None
+    groups: list[ViewGroupSpec] | None = None
     sort: ViewSort | None = None
+
+    @model_validator(mode="after")
+    def _expr_xor_groups(self) -> ViewSpec:
+        if self.expr is not None and self.groups is not None:
+            raise ValueError(
+                "a ViewSpec sets either `expr` (flat) or `groups` (named handles), not both"
+            )
+        return self
 
 
 class ViewRef(BaseModel):

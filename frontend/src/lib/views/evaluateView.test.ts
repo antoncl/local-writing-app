@@ -97,7 +97,6 @@ describe("backend-dense exprs (explicit null slots)", () => {
     const result = evaluateView(spec, NODES, { schema: SCHEMA });
     expect(result.groups).toBeNull();
     expect(result.annotations.get("b")?.color).toBe("red");
-    expect(result.annotations.get("b")?.labels).toEqual([]);
   });
 });
 
@@ -153,31 +152,97 @@ describe("combinators", () => {
   });
 });
 
-describe("annotate", () => {
+describe("named-handle groups (#91)", () => {
   const grouped: ViewSpec = {
     kind: "lore",
-    expr: {
-      union: [
-        { annotate: { label: "Deities", rank: 2 }, of: { descendants_of: "lore:deity" } },
-        { annotate: { label: "Cast", rank: 1 }, of: { type: "lore:character" } },
-        // An unlabeled leaf: the location `d` is a member but carries no label,
-        // so it must land in the trailing "everything else" bucket.
-        { type: "lore:location" },
-      ],
-    },
+    groups: [
+      { name: "Cast", expr: { type: "lore:character" } },
+      { name: "Deities", expr: { descendants_of: "lore:deity" } },
+    ],
   };
 
-  it("labels build rank-ordered groups with an 'everything else' bucket", () => {
+  it("2+ handles render as groups, in handle order", () => {
     const res = evaluateView(grouped, NODES, { schema: SCHEMA });
-    // rank 1 before rank 2; unlabeled (location d) falls into the trailing bucket.
     expect(res.groups?.map((g) => [g.label, g.nodes.map((n) => n.id)])).toEqual([
       ["Cast", ["a", "b"]],
       ["Deities", ["c", "e"]],
-      [null, ["d"]],
     ]);
   });
 
-  it("color annotate stamps annotations without creating a group", () => {
+  it("flat membership (nodes) unions the handles, deduped, in handle order", () => {
+    const res = evaluateView(grouped, NODES, { schema: SCHEMA });
+    expect(res.nodes.map((n) => n.id)).toEqual(["a", "b", "c", "e"]);
+  });
+
+  it("a node in two handles appears under both groups but once in nodes", () => {
+    const overlap: ViewSpec = {
+      kind: "lore",
+      groups: [
+        { name: "Gotham", expr: { tagged: "gotham" } }, // b, c
+        { name: "Deities", expr: { descendants_of: "lore:deity" } }, // c, e
+      ],
+    };
+    const res = evaluateView(overlap, NODES, { schema: SCHEMA });
+    expect(res.groups?.map((g) => [g.label, g.nodes.map((n) => n.id)])).toEqual([
+      ["Gotham", ["b", "c"]],
+      ["Deities", ["c", "e"]],
+    ]);
+    expect(res.nodes.map((n) => n.id)).toEqual(["b", "c", "e"]);
+  });
+
+  it("a single populated handle renders flat (groups null)", () => {
+    const one: ViewSpec = { kind: "lore", groups: [{ name: "Cast", expr: { type: "lore:character" } }] };
+    const res = evaluateView(one, NODES, { schema: SCHEMA });
+    expect(res.groups).toBeNull();
+    expect(res.nodes.map((n) => n.id)).toEqual(["a", "b"]);
+  });
+
+  it("empty handles drop out; if only one is populated it collapses to flat", () => {
+    const withEmpty: ViewSpec = {
+      kind: "lore",
+      groups: [
+        { name: "Cast", expr: { type: "lore:character" } },
+        { name: "Robots", expr: { type: "lore:robot" } }, // no members
+      ],
+    };
+    const res = evaluateView(withEmpty, NODES, { schema: SCHEMA });
+    expect(res.groups).toBeNull();
+    expect(res.nodes.map((n) => n.id)).toEqual(["a", "b"]);
+  });
+
+  it("a group with null expr is the whole universe", () => {
+    const spec: ViewSpec = {
+      kind: "lore",
+      groups: [
+        { name: "Everything", expr: null },
+        { name: "Deities", expr: { descendants_of: "lore:deity" } },
+      ],
+    };
+    const res = evaluateView(spec, NODES, { schema: SCHEMA });
+    expect(res.groups?.map((g) => [g.label, g.nodes.map((n) => n.id)])).toEqual([
+      ["Everything", ["a", "b", "c", "d", "e"]],
+      ["Deities", ["c", "e"]],
+    ]);
+  });
+
+  it("per-segment sort overrides the fallback sort", () => {
+    const spec: ViewSpec = {
+      kind: "lore",
+      sort: { by: "manual" },
+      groups: [
+        { name: "Cast", expr: { type: "lore:character" }, sort: { by: "title", dir: "asc" } },
+        { name: "Deities", expr: { descendants_of: "lore:deity" } },
+      ],
+    };
+    const res = evaluateView(spec, NODES, { schema: SCHEMA });
+    // Cast sorted by title (Alice before Zed → b, a); Deities keeps manual order.
+    expect(res.groups?.map((g) => [g.label, g.nodes.map((n) => n.id)])).toEqual([
+      ["Cast", ["b", "a"]],
+      ["Deities", ["c", "e"]],
+    ]);
+  });
+
+  it("color annotate (Highlight) stamps annotations without creating a group", () => {
     const res = evaluateView(
       { kind: "lore", expr: { annotate: { color: "amber" }, of: { tagged: "gotham" } } },
       NODES,
@@ -187,10 +252,6 @@ describe("annotate", () => {
     expect(res.annotations.get("b")?.color).toBe("amber");
     expect(res.annotations.get("c")?.color).toBe("amber");
     expect(res.annotations.has("a")).toBe(false);
-  });
-
-  it("annotate is a pass-through: membership equals its input set", () => {
-    expect(ids(grouped)).toEqual(["a", "b", "c", "d", "e"]);
   });
 });
 

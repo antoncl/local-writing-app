@@ -133,7 +133,9 @@ class ViewCrudTests(unittest.TestCase):
             json={"title": "V2", "base_revision": got["revision"], "spec": {"kind": "scene"}},
         )
         self.assertEqual(ok.status_code, 200, ok.text)
-        self.assertEqual(ok.json()["spec"], {"kind": "scene", "expr": None, "sort": None})
+        self.assertEqual(
+            ok.json()["spec"], {"kind": "scene", "expr": None, "groups": None, "sort": None}
+        )
 
     def test_delete_removes_view(self) -> None:
         created = self._create("Gone", {"kind": "lore"})
@@ -190,6 +192,30 @@ class ViewSpecModelTests(unittest.TestCase):
     def test_sort_field_requires_key(self) -> None:
         with self.assertRaises(ValueError):
             ViewSpec(kind="lore", sort={"by": "field"})
+
+    def test_named_groups_roundtrip(self) -> None:
+        spec = ViewSpec(
+            kind="lore",
+            groups=[
+                {"name": "Cast", "expr": {"type": "lore:character"}},
+                {"name": "Deities", "expr": {"descendants_of": "lore:deity"}, "color": "amber"},
+            ],
+        )
+        self.assertIsNone(spec.expr)
+        self.assertEqual([g.name for g in spec.groups], ["Cast", "Deities"])
+        self.assertEqual(spec.groups[1].color, "amber")
+
+    def test_group_requires_name(self) -> None:
+        with self.assertRaises(ValueError):
+            ViewSpec(kind="lore", groups=[{"name": "", "expr": {"type": "lore:character"}}])
+
+    def test_expr_and_groups_are_mutually_exclusive(self) -> None:
+        with self.assertRaises(ValueError):
+            ViewSpec(
+                kind="lore",
+                expr={"type": "lore:character"},
+                groups=[{"name": "Cast", "expr": {"type": "lore:character"}}],
+            )
 
 
 class NodePickerConfigSourcesTests(unittest.TestCase):

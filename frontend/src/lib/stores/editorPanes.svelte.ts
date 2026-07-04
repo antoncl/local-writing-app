@@ -48,6 +48,7 @@ import { refreshPromptEntries, setPromptEntries } from "@/lib/stores/prompts";
 import { refreshAssistantEntries, setAssistantEntries } from "@/lib/stores/assistants";
 import { refreshKnownTags } from "@/lib/stores/tags";
 import { refreshTodos, refreshEmbeddedTodos } from "@/lib/stores/todos";
+import { paneViews } from "@/lib/stores/paneViews.svelte";
 import { chatSessionsStore, refreshChatSessions, setChatSessions } from "@/lib/stores/chats";
 import { bodyHasMutationMarkers, mutationsVersion } from "@/lib/stores/mutationsVersion.svelte";
 import type {
@@ -455,7 +456,16 @@ class EditorPanesController {
     } catch (error) {
       console.warn("Failed to fetch backlinks", error);
     }
-    const fileLabel = documentKind === "scene" ? "scene" : documentKind === "lore" ? "entry" : documentKind === "research" ? "note" : "prompt";
+    const fileLabel =
+      documentKind === "scene"
+        ? "scene"
+        : documentKind === "lore"
+          ? "entry"
+          : documentKind === "research"
+            ? "note"
+            : documentKind === "view"
+              ? "view"
+              : "prompt";
     const titleLabel =
       documentKind === "scene"
         ? "Delete Scene"
@@ -463,7 +473,9 @@ class EditorPanesController {
           ? "Delete Entry"
           : documentKind === "research"
             ? "Delete Note"
-            : "Delete Prompt";
+            : documentKind === "view"
+              ? "Delete View"
+              : "Delete Prompt";
     const baseMessage = `Delete "${sceneTitle}"? This removes the ${fileLabel} file from the project.`;
     const message =
       backlinks.length > 0
@@ -502,6 +514,11 @@ class EditorPanesController {
     } else if (documentKind === "chat") {
       setChatSessions((await api.deleteChatSession(pane.scene.id)).sessions);
       if (this.activeChatId === pane.scene.id) this.activeChatId = null;
+    } else if (documentKind === "view") {
+      // A view is a frontmatter-only node with its own deleter; routing it
+      // through api.deleteScene 404s ("Scene <view-id> does not exist").
+      await api.deleteView(pane.scene.id);
+      await paneViews.reload();
     } else {
       setStructure(await api.deleteScene(pane.scene.id));
       await refreshTodos();

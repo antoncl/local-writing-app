@@ -11,6 +11,7 @@
   import ViewGlyph from "./ViewGlyph.svelte";
   import FieldValueEditor from "@/components/widgets/FieldValueEditor.svelte";
   import NodePicker from "@/components/widgets/NodePicker.svelte";
+  import SwatchPicker from "@/components/widgets/SwatchPicker.svelte";
   import { inputArity, type GraphNodeKind, type ViewNodeData } from "@/lib/views/viewGraph";
   import { useDesignerContext } from "./designerContext";
   import type { NodePickerRef } from "@/lib/types";
@@ -177,26 +178,20 @@
       <input
         class="vfield rank"
         type="number"
-        title="Group order"
+        title="Group order — sort position of this named group in the output"
         value={cfg.rank ?? 0}
-        oninput={(e) => patch({ rank: Number(e.currentTarget.value) })}
+        onchange={(e) => patch({ rank: Number(e.currentTarget.value) || 0 })}
       />
-      <input
-        class="vfield color"
-        type="text"
-        placeholder="tint (opt)"
-        value={cfg.color ?? ""}
-        oninput={(e) => patch({ color: e.currentTarget.value })}
-      />
+      <span class="vswatch" title="Group tint (optional)">
+        <span class="vswatch-label">Tint</span>
+        <SwatchPicker value={cfg.color ?? null} onChange={(id) => patch({ color: id ?? "" })} />
+      </span>
     </div>
   {:else if kind === "highlight"}
-    <input
-      class="vfield"
-      type="text"
-      placeholder="Colour / swatch"
-      value={cfg.color ?? ""}
-      oninput={(e) => patch({ color: e.currentTarget.value })}
-    />
+    <span class="vswatch" title="Highlight colour">
+      <span class="vswatch-label">Colour</span>
+      <SwatchPicker value={cfg.color ?? null} onChange={(id) => patch({ color: id ?? "" })} />
+    </span>
   {/if}
 
   <!-- source port (right) -->
@@ -299,6 +294,22 @@
   }
   .vfield.rank {
     max-width: 62px;
+  }
+  /* swatch-picker row: a small labelled trigger sitting inline with the
+     rank input (group) or on its own (highlight). */
+  .vswatch {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    margin: 0 8px 8px;
+  }
+  .vfield-row .vswatch {
+    margin: 0;
+    flex: 1;
+  }
+  .vswatch-label {
+    font-size: 11px;
+    color: var(--text-3, #6b7280);
   }
   /* keep the flow-node ports visually distinct + above node content so the
      whole handle (not just the half sticking out) is grabbable/hoverable. */

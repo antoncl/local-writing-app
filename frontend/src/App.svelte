@@ -272,6 +272,18 @@
   const focusPane = (id: PaneId) => paneLayout.raise(id);
   const paneStyle = (id: PaneId) => paneLayout.styleFor(id);
 
+  // Noun for the pane's delete button, keyed by document kind (was a
+  // scene/lore-only ternary that mislabelled view/prompt/chat panes).
+  const PANE_DELETE_NOUN: Record<string, string> = {
+    lore: "entry",
+    research: "note",
+    prompt: "prompt",
+    assistant: "assistant",
+    chat: "chat",
+    view: "view",
+  };
+  const paneDeleteNoun = (type: string | undefined) => (type && PANE_DELETE_NOUN[type]) || "scene";
+
   // The shared chrome controller handed to every <Pane>; each pane calls these
   // with its own id. Stable object — the handlers don't change.
   const paneChrome: PaneChrome = {
@@ -748,7 +760,7 @@
             class="pin-button danger"
             type="button"
             disabled={!editorPane.scene}
-            title={editorPane.document?.type === "lore" ? "Delete this entry" : "Delete this scene"}
+            title={`Delete this ${paneDeleteNoun(editorPane.document?.type)}`}
             onmousedown={(event) => event.stopPropagation()}
             onclick={() => editorPanes.requestDeleteScene(editorPane.id)}
           >
@@ -767,7 +779,7 @@
           <button
             class="pin-button"
             type="button"
-            title="Close this editor pane"
+            title="Save and close this pane (unsaved changes are flushed first)"
             onmousedown={(event) => event.stopPropagation()}
             onclick={() => editorPanes.close(editorPane.id)}
           >

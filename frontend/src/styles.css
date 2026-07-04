@@ -7,6 +7,10 @@
    Kept in styles.css :root so Svelte-scoped component CSS and plain
    CSS rules both reach them via var(). */
 :root {
+  /* Let native controls (number spinners, scrollbars, date pickers) follow
+     the active theme — the dark override flips this to `dark`. Without it the
+     spin buttons render on a bright default background in dark mode. */
+  color-scheme: light;
   --surface: #ffffff;
   --board: #f4f6f5;
   --panel: #edf3f1;
@@ -75,6 +79,7 @@
    to read on dark, hand-tune the kind softs (a pure invert turns them
    muddy). Shadows shift to alpha-on-black for depth on dark. */
 :root[data-theme="dark"] {
+  color-scheme: dark;
   --surface: #1f2522;
   --board: #181c1a;
   --panel: #20272a;

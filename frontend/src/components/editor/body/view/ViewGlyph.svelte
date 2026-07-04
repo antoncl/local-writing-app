@@ -72,7 +72,12 @@
     line-height: 1;
   }
   .venn .fill {
-    fill: var(--accent-soft, #d9e2ff);
+    /* Tint the *result region* with the accent at partial opacity rather than
+       --accent-soft, which sits almost on top of the node background in both
+       themes — making union (both lobes) and intersect (lens only) look
+       identical because the distinguishing fill was invisible. */
+    fill: var(--accent, #4361ee);
+    fill-opacity: 0.3;
   }
   .venn .stroke {
     fill: none;

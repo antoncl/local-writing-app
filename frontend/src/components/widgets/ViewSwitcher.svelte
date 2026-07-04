@@ -38,6 +38,16 @@
     void editorPanes.createAndOpenView(kind);
   }
 
+  function editView(id: string): void {
+    open = false;
+    void editorPanes.openView(id);
+  }
+
+  function deleteView(id: string, title: string): void {
+    open = false;
+    editorPanes.requestDeleteView(id, title);
+  }
+
   function onWindowClick(event: MouseEvent): void {
     if (!(event.target as HTMLElement)?.closest?.(".view-switcher")) open = false;
   }
@@ -73,17 +83,22 @@
         <span class="view-switcher-item-label">Default view</span>
       </button>
       {#each saved as view (view.id)}
-        <button
-          class="view-switcher-item"
-          class:selected={selectedId === view.id}
-          type="button"
-          role="option"
-          aria-selected={selectedId === view.id}
-          onclick={() => pick(view.id)}
-        >
-          <span class="view-switcher-check">{selectedId === view.id ? "✓" : ""}</span>
-          <span class="view-switcher-item-label">{view.title}</span>
-        </button>
+        <div class="view-switcher-item" class:selected={selectedId === view.id}>
+          <button
+            class="view-switcher-pick"
+            type="button"
+            role="option"
+            aria-selected={selectedId === view.id}
+            onclick={() => pick(view.id)}
+          >
+            <span class="view-switcher-check">{selectedId === view.id ? "✓" : ""}</span>
+            <span class="view-switcher-item-label">{view.title}</span>
+          </button>
+          <span class="view-switcher-actions">
+            <button class="vsa" type="button" title="Edit view" aria-label={`Edit ${view.title}`} onclick={() => editView(view.id)}>✎</button>
+            <button class="vsa vsa-del" type="button" title="Delete view" aria-label={`Delete ${view.title}`} onclick={() => deleteView(view.id, view.title)}>×</button>
+          </span>
+        </div>
       {/each}
       <div class="view-switcher-divider"></div>
       <button class="view-switcher-item view-switcher-new" type="button" onclick={newView}>
@@ -153,6 +168,57 @@
 
   .view-switcher-item.selected {
     color: var(--accent-strong);
+  }
+
+  /* Saved-view rows wrap a pick button + hover-revealed edit/delete
+     affordances (right-aligned, per the widget taxonomy). The container
+     keeps the row padding; the pick button is unpadded and fills the row. */
+  .view-switcher-pick {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    flex: 1;
+    min-width: 0;
+    padding: 0;
+    border: none;
+    background: transparent;
+    color: inherit;
+    font: inherit;
+    text-align: left;
+    cursor: pointer;
+  }
+
+  .view-switcher-actions {
+    display: inline-flex;
+    gap: 2px;
+    flex: 0 0 auto;
+    opacity: 0;
+    transition: opacity 80ms linear;
+  }
+
+  .view-switcher-item:hover .view-switcher-actions,
+  .view-switcher-item:focus-within .view-switcher-actions {
+    opacity: 1;
+  }
+
+  .vsa {
+    border: none;
+    background: transparent;
+    color: var(--text-3);
+    font-size: 13px;
+    line-height: 1;
+    padding: 2px 4px;
+    border-radius: 4px;
+    cursor: pointer;
+  }
+
+  .vsa:hover {
+    background: var(--surface);
+    color: var(--text);
+  }
+
+  .vsa-del:hover {
+    color: var(--danger, #d64545);
   }
 
   .view-switcher-check {

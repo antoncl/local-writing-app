@@ -866,6 +866,27 @@ class EditorPanesController {
     await this.openView(node.id);
   }
 
+  // Delete a saved view from a list affordance (e.g. the ViewSwitcher),
+  // confirming first. Works whether or not the view is currently open: it
+  // tears down any pane showing it and refreshes the view roster.
+  requestDeleteView(viewId: string, title: string): void {
+    confirmService.request({
+      title: "Delete View",
+      message: `Delete "${title}"? This removes the view file from the project.`,
+      confirmLabel: "Delete View",
+      destructive: true,
+      onConfirm: () => this.#deleteView(viewId),
+    });
+  }
+
+  async #deleteView(viewId: string): Promise<void> {
+    await api.deleteView(viewId);
+    const pane = this.panes.find((p) => p.document?.type === "view" && p.document.id === viewId);
+    if (pane) this.tearDown(pane.id);
+    await paneViews.reload();
+    this.setStatus("Deleted view");
+  }
+
   async openLore(entryId: string): Promise<void> {
     const existingPane = this.panes.find((pane) => pane.document?.type === "lore" && pane.document.id === entryId);
     if (existingPane) {

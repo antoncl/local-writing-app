@@ -21,6 +21,34 @@ import type {
 // of which have their own schema-type tree.
 export type SchemaKind = "scene" | "lore" | "research" | "prompt" | "assistant" | "project";
 
+// A field's effective display label for a given entry type (#116). A per-type
+// `field_overrides[key].label` wins; otherwise the shared field def's `name`;
+// otherwise the raw key. Pass the resolved schema — overrides are already
+// merged down the parent chain by the backend.
+export function effectiveFieldLabel(
+  schema: MetadataSchema | null,
+  entryTypeId: string | null | undefined,
+  fieldKey: string,
+): string {
+  const override = entryTypeId ? schema?.entry_types?.[entryTypeId]?.field_overrides?.[fieldKey] : undefined;
+  const label = override?.label;
+  if (typeof label === "string" && label.trim()) return label;
+  return schema?.fields?.[fieldKey]?.name ?? fieldKey;
+}
+
+// Whether a field is hidden for a given entry type (#116). A per-type
+// `field_overrides[key].hidden` (true OR false) wins over the field def's
+// `hidden` default — so a type can un-hide a def-hidden field (e.g. `id`).
+export function effectiveFieldHidden(
+  schema: MetadataSchema | null,
+  entryTypeId: string | null | undefined,
+  fieldKey: string,
+): boolean {
+  const override = entryTypeId ? schema?.entry_types?.[entryTypeId]?.field_overrides?.[fieldKey] : undefined;
+  if (override && typeof override.hidden === "boolean") return override.hidden;
+  return Boolean(schema?.fields?.[fieldKey]?.hidden);
+}
+
 // Slugify a free-text label into a stable field/type id.
 export function slugifyFieldId(value: string): string {
   return value

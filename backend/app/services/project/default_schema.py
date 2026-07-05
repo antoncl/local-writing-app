@@ -15,6 +15,14 @@ from __future__ import annotations
 
 from typing import Any
 
+# Intrinsic fields (#116): the identity triple stored in every node's
+# top-level front matter (not in `metadata`). The schema resolver injects
+# these keys into every entry_type's resolved `fields` list, in this order
+# (title leads; id trails since it's hidden by default). Value is read from
+# the node property of the same name. Kept here so the resolver and any
+# consumer share one source of truth.
+INTRINSIC_FIELD_KEYS: tuple[str, ...] = ("title", "entry_type", "id")
+
 DEFAULT_METADATA_SCHEMA: dict[str, Any] = {
     "version": 1,
     "entry_types": {
@@ -57,6 +65,11 @@ DEFAULT_METADATA_SCHEMA: dict[str, Any] = {
             "abstract": True,
             "fields": ["aliases", "tags", "related_entries", "color", "context_policy"],
             "color": "slate-blue",
+            # Lore entries call their title a "Name" (#116). Expressed as a
+            # per-type label override on the intrinsic `title` field rather
+            # than a hardcoded per-kind label in the editor — inherited by
+            # every lore kind, and users can further relabel per type.
+            "field_overrides": {"title": {"label": "Name"}},
         },
         "lore:character": {
             "name": "Character",
@@ -320,6 +333,19 @@ DEFAULT_METADATA_SCHEMA: dict[str, Any] = {
         },
     },
     "fields": {
+        # Intrinsic identity triple (#116). Every node carries `id`, `title`,
+        # and `entry_type` in top-level front matter — not in `metadata`.
+        # Declaring them as fields (marked `intrinsic`) surfaces them in the
+        # field-inheritance hierarchy so Views can filter/sort by title/type
+        # and the schema editor can rename/hide them per layer. Value is read
+        # from the node property keyed by the field id, never from metadata.
+        # The resolver injects these into every entry_type's field list, so
+        # they need no membership entry on individual types.
+        "title": {"name": "Title", "type": "text", "intrinsic": True},
+        "entry_type": {"name": "Type", "type": "text", "intrinsic": True},
+        # `id` is machine identity — hidden by default so it doesn't clutter
+        # the rail / picker; unhide per type in the schema editor to filter by it.
+        "id": {"name": "ID", "type": "text", "intrinsic": True, "hidden": True},
         "status": {
             "name": "Status",
             "type": "select",

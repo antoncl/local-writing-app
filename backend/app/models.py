@@ -157,6 +157,18 @@ class MetadataFieldDefinition(BaseModel):
     # id (or list of ids for entity_ref_list). Computed fields never carry
     # a default — they're derived at read time.
     default: MetadataValue | None = None
+    # Intrinsic (#116): the field's value lives on the node's TOP-LEVEL
+    # front matter (`id` / `title` / `entry_type`), not in the `metadata`
+    # dict. These are the identity triple every node carries; declaring them
+    # as fields makes them visible to the field-inheritance hierarchy and
+    # filterable/sortable in Views, without moving storage into metadata.
+    # Consumers read the value from the node property keyed by the field id.
+    intrinsic: bool = False
+    # Display default: hide this field from the per-node rail and the Views
+    # field picker unless a per-type override shows it. Used to keep `id`
+    # out of sight by default (#116). Display-only — never affects storage
+    # or filtering membership.
+    hidden: bool = False
 
     @field_validator("options", mode="before")
     @classmethod
@@ -281,6 +293,19 @@ class GroupApplication(BaseModel):
     key_prefix: str = ""
 
 
+class FieldOverride(BaseModel):
+    """Per-entry_type overlay on a field's presentation (#116). Lets a type
+    relabel or hide a field it carries — own or inherited — without touching
+    the shared field definition. `label` renames (e.g. `title` → "Name" on
+    lore, "Title" on scene); `hidden` toggles the field out of the per-node
+    rail and the Views picker. Both optional: an absent aspect falls back to
+    the field def. Stored per layer on the type; merged down the parent chain
+    (child wins) by the schema resolver, same as `display_order`."""
+
+    label: str | None = None
+    hidden: bool | None = None
+
+
 class EntryTypeDefinition(BaseModel):
     name: str
     kind: str
@@ -331,6 +356,12 @@ class EntryTypeDefinition(BaseModel):
     # Reusable group applications (L2). Each expands into generated prefixed
     # fields in the effective schema. Authored on the type; persisted as-is.
     group_applications: list[GroupApplication] = Field(default_factory=list)
+    # Per-field presentation overrides (#116), keyed by field id. Relabel /
+    # hide a field for this type without editing the shared field def. The
+    # resolver merges parent overrides then this type's, so children inherit
+    # and can refine. Consumers resolve a field's effective label / hidden
+    # via this map (falling back to the field def).
+    field_overrides: dict[str, FieldOverride] = Field(default_factory=dict)
 
 
 class MetadataSchema(BaseModel):
@@ -432,6 +463,19 @@ class SetFieldOrderRequest(BaseModel):
     # Desired order of the type's own field ids (must be a permutation of the
     # fields currently defined on the type at this layer).
     field_order: list[str] = Field(default_factory=list)
+
+
+class SetFieldOverrideRequest(BaseModel):
+    """Set / clear a per-type field presentation override (#116). `field_key`
+    must be a member of the type's resolved fields. `label` / `hidden` are
+    each tri-state: a value sets it, `null` clears that aspect. When both
+    resolve to empty the override entry is dropped from the layer."""
+
+    layer_id: str = Field(min_length=1)
+    entry_type_id: str = Field(min_length=1)
+    field_key: str = Field(min_length=1)
+    label: str | None = None
+    hidden: bool | None = None
 
 
 class Scene(BaseModel):

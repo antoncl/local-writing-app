@@ -69,6 +69,16 @@ describe("leaves", () => {
     ).nodes.map((n) => n.title);
     expect(sorted).toEqual(["Alice", "Cass", "Kitchen", "Mara", "Zed"]);
   });
+
+  // The intrinsic resolver generalizes beyond title: `entry_type` is also a
+  // top-level node property (#116), so a field predicate on it reads
+  // node.entry_type, not the absent metadata.entry_type.
+  it("field predicate on `entry_type` reads the node entry_type", () => {
+    expect(ids({ kind: "lore", expr: { field: { key: "entry_type", op: "eq", value: "lore:character" } } })).toEqual([
+      "a",
+      "b",
+    ]);
+  });
 });
 
 // The backend (Pydantic) serializes a ViewExpr with *every* slot present —

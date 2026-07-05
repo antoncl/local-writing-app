@@ -498,6 +498,26 @@ export const api = {
       body: JSON.stringify({ layer_id: layerId, entry_type_id: entryTypeId, field_order: fieldOrder }),
     });
   },
+  // Per-type field presentation override (#116): relabel / hide a field for
+  // one entry type. `label`/`hidden` are the complete desired overlay — pass
+  // null to clear an aspect; both empty drops the override.
+  setEntryTypeFieldOverride(
+    layerId: string,
+    entryTypeId: string,
+    fieldKey: string,
+    override: { label?: string | null; hidden?: boolean | null },
+  ) {
+    return request<MetadataSchema>("/metadata/schema/entry-types/field-override", {
+      method: "PUT",
+      body: JSON.stringify({
+        layer_id: layerId,
+        entry_type_id: entryTypeId,
+        field_key: fieldKey,
+        label: override.label ?? null,
+        hidden: override.hidden ?? null,
+      }),
+    });
+  },
   listDirectories(path?: string) {
     const query = path ? `?path=${encodeURIComponent(path)}` : "";
     return request<DirectoryListing>(`/directories${query}`);

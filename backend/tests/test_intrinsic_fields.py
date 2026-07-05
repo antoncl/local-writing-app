@@ -1,0 +1,203 @@
+"""Intrinsic identity fields (#116).
+
+`id`, `title`, and `entry_type` live in a node's top-level front matter, not in
+`metadata`. The schema resolver injects them into every entry_type's resolved
+`fields` list so they are visible to the field-inheritance hierarchy and
+filterable/sortable in Views — without moving storage into `metadata`.
+"""
+
+from __future__ import annotations
+
+import unittest
+from pathlib import Path
+from tempfile import TemporaryDirectory
+
+from app.models import SaveSceneRequest, SetFieldOverrideRequest
+from app.services.project.default_schema import INTRINSIC_FIELD_KEYS
+from app.services.project_service import ProjectService, ProjectServiceError
+
+
+class IntrinsicFieldTests(unittest.TestCase):
+    def setUp(self) -> None:
+        self.temp_dir = TemporaryDirectory()
+        self.root = Path(self.temp_dir.name) / "project"
+        self.service = ProjectService()
+        self.service.create_project(self.root, "Test Project")
+        self.scene_id = self.service._read_front_matter_only(
+            next((self.root / "scenes").glob("*.md")), strict=True
+        )["id"]
+
+    def tearDown(self) -> None:
+        self.temp_dir.cleanup()
+
+    def test_every_entry_type_carries_the_intrinsic_triple(self) -> None:
+        schema = self.service.read_metadata_schema()
+        for entry_type_id, definition in schema.entry_types.items():
+            for key in INTRINSIC_FIELD_KEYS:
+                self.assertIn(
+                    key,
+                    definition.fields,
+                    f"{entry_type_id} is missing intrinsic field {key}",
+                )
+
+    def test_intrinsic_fields_lead_and_are_not_owned(self) -> None:
+        # Injected leading (title first), and NOT counted as own_fields so the
+        # editor renders them as built-in rather than type-owned.
+        scene = self.service.read_metadata_schema().entry_types["scene:scene"]
+        self.assertEqual(scene.fields[:3], ["title", "entry_type", "id"])
+        for key in INTRINSIC_FIELD_KEYS:
+            self.assertNotIn(key, scene.own_fields)
+
+    def test_intrinsic_field_defs_are_marked(self) -> None:
+        fields = self.service.read_metadata_schema().fields
+        self.assertTrue(fields["title"].intrinsic)
+        self.assertTrue(fields["entry_type"].intrinsic)
+        self.assertTrue(fields["id"].intrinsic)
+        # `id` is hidden by default; title/entry_type are shown.
+        self.assertTrue(fields["id"].hidden)
+        self.assertFalse(fields["title"].hidden)
+
+    def test_intrinsic_injection_does_not_duplicate(self) -> None:
+        # A type that already lists an intrinsic key must not get a duplicate.
+        self.service._write_yaml(
+            self.root / "metadata.schema.yaml",
+            {
+                "version": 1,
+                "entry_types": {
+                    "scene:scene": {
+                        "name": "Scene",
+                        "kind": "scene",
+                        "fields": ["title", "status"],
+                    }
+                },
+            },
+        )
+        fields = self.service.read_metadata_schema().entry_types["scene:scene"].fields
+        self.assertEqual(fields.count("title"), 1)
+
+    def test_title_is_not_stored_in_metadata_after_save(self) -> None:
+        # Declaring title/id/entry_type as fields must not cause them to be
+        # persisted into the metadata dict — storage stays in front matter.
+        scene = self.service.read_scene(self.scene_id)
+        self.service.save_scene(
+            self.scene_id,
+            SaveSceneRequest(
+                title="A New Title",
+                body=scene.body,
+                base_revision=scene.revision,
+                status="draft",
+                entry_type="scene:scene",
+                metadata=dict(scene.metadata),
+            ),
+        )
+        reloaded = self.service.read_scene(self.scene_id)
+        self.assertEqual(reloaded.title, "A New Title")
+        self.assertNotIn("title", reloaded.metadata)
+        self.assertNotIn("id", reloaded.metadata)
+        self.assertNotIn("entry_type", reloaded.metadata)
+
+
+class FieldOverrideTests(unittest.TestCase):
+    """Per-type field presentation overrides (#116): relabel / hide."""
+
+    def setUp(self) -> None:
+        self.temp_dir = TemporaryDirectory()
+        self.root = Path(self.temp_dir.name) / "project"
+        self.service = ProjectService()
+        self.service.create_project(self.root, "Test Project")
+
+    def tearDown(self) -> None:
+        self.temp_dir.cleanup()
+
+    def _project_layer_id(self) -> str:
+        return self.service.read_metadata_schema_layers().layers[-1].id
+
+    def test_overrides_merge_down_the_parent_chain(self) -> None:
+        # Parent relabels `tags`; child relabels `title` — the child sees both.
+        self.service._write_yaml(
+            self.root / "metadata.schema.yaml",
+            {
+                "version": 1,
+                "entry_types": {
+                    "lore:lore_entry": {"field_overrides": {"tags": {"label": "Labels"}}},
+                    "lore:character": {"field_overrides": {"title": {"label": "Name"}}},
+                },
+            },
+        )
+        character = self.service.read_metadata_schema().entry_types["lore:character"]
+        self.assertEqual(character.field_overrides["tags"].label, "Labels")
+        self.assertEqual(character.field_overrides["title"].label, "Name")
+
+    def test_lore_relabels_title_to_name_by_default(self) -> None:
+        # The built-in schema ships a per-type override so lore entries call
+        # their title a "Name" (replaces the old hardcoded editor ternary).
+        character = self.service.read_metadata_schema().entry_types["lore:character"]
+        self.assertEqual(character.field_overrides["title"].label, "Name")
+        # Scenes keep the plain "Title" — no override.
+        scene = self.service.read_metadata_schema().entry_types["scene:scene"]
+        self.assertNotIn("title", scene.field_overrides)
+
+    def test_hidden_false_override_can_unhide_a_def_hidden_field(self) -> None:
+        # `id` is hidden at the def level; a per-type hidden:false overrides it.
+        self.service._write_yaml(
+            self.root / "metadata.schema.yaml",
+            {
+                "version": 1,
+                "entry_types": {"lore:character": {"field_overrides": {"id": {"hidden": False}}}},
+            },
+        )
+        character = self.service.read_metadata_schema().entry_types["lore:character"]
+        self.assertIs(character.field_overrides["id"].hidden, False)
+
+    def test_set_override_round_trips_via_the_endpoint(self) -> None:
+        # `aliases` is inherited with no built-in override, so a clear drops it
+        # cleanly (unlike `title`, which lore relabels to "Name" by default).
+        layer = self._project_layer_id()
+        self.service.set_metadata_field_override(
+            SetFieldOverrideRequest(
+                layer_id=layer, entry_type_id="lore:character", field_key="aliases", label="Also known as"
+            )
+        )
+        character = self.service.read_metadata_schema().entry_types["lore:character"]
+        self.assertEqual(character.field_overrides["aliases"].label, "Also known as")
+        # Clearing (empty overlay) drops the entry again.
+        self.service.set_metadata_field_override(
+            SetFieldOverrideRequest(
+                layer_id=layer, entry_type_id="lore:character", field_key="aliases", label=None
+            )
+        )
+        character = self.service.read_metadata_schema().entry_types["lore:character"]
+        self.assertNotIn("aliases", character.field_overrides)
+
+    def test_clearing_last_override_leaves_no_empty_stub(self) -> None:
+        # Set then clear the only override on a built-in type: the type must not
+        # be left as an empty `{}` entry in the layer (which would flip its
+        # source from built-in to this layer).
+        layer = self._project_layer_id()
+        before = self.service.read_metadata_schema_overview().entry_type_sources["lore:character"]
+        self.assertTrue(before.built_in)
+        for label in ("Also known as", None):
+            self.service.set_metadata_field_override(
+                SetFieldOverrideRequest(
+                    layer_id=layer, entry_type_id="lore:character", field_key="aliases", label=label
+                )
+            )
+        layer_yaml = self.service._read_yaml(self.root / "metadata.schema.yaml")
+        self.assertNotIn("lore:character", layer_yaml.get("entry_types", {}))
+        after = self.service.read_metadata_schema_overview().entry_type_sources["lore:character"]
+        self.assertTrue(after.built_in)
+
+    def test_override_rejects_a_non_member_field(self) -> None:
+        with self.assertRaises(ProjectServiceError):
+            self.service.set_metadata_field_override(
+                SetFieldOverrideRequest(
+                    layer_id=self._project_layer_id(),
+                    entry_type_id="lore:character",
+                    field_key="not_a_field",
+                    label="X",
+                )
+            )
+
+
+if __name__ == "__main__":
+    unittest.main()

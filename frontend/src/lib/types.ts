@@ -253,6 +253,12 @@ export type MetadataFieldDefinition = {
   // carries this field (#38). Type-matched per `type`; computed fields
   // never carry a default.
   default?: MetadataValue | null;
+  // Intrinsic (#116): value lives on the node's top-level front matter
+  // (`id` / `title` / `entry_type`), not in `metadata`. Consumers read it
+  // from the node property keyed by the field id (see INTRINSIC_FIELD_KEYS).
+  intrinsic?: boolean;
+  // Hidden by default from the per-node rail and Views field picker.
+  hidden?: boolean;
 };
 
 export type PromptInputType =
@@ -524,6 +530,20 @@ export type EntryTypeDefinition = {
   // Reusable group applications (L2). Each expands into generated prefixed
   // fields in the effective schema.
   group_applications?: GroupApplication[];
+  // Per-field presentation overrides (#116), keyed by field id. Relabel / hide
+  // a field for this type without touching the shared field def. Resolved down
+  // the parent chain by the backend. Read effective label/hidden via the
+  // schemaFields helpers, never off the map directly.
+  field_overrides?: Record<string, FieldOverride>;
+};
+
+// Per-type presentation overlay on a field (#116). `label` renames it for the
+// type; `hidden` toggles it out of the rail / picker. Absent aspect → fall
+// back to the field def. `hidden: false` is meaningful — it un-hides a field
+// the def hides by default (e.g. `id`).
+export type FieldOverride = {
+  label?: string | null;
+  hidden?: boolean | null;
 };
 
 // One member of a reusable group definition (L2 groups). `key` is the

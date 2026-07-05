@@ -309,7 +309,7 @@
   .multi-select-chip.active {
     background: var(--accent-soft, #edf6f2);
     border-color: var(--accent, #2f6f5e);
-    color: var(--accent-strong, #234e43);
+    color: var(--accent-emphasis, #234e43);
   }
   .multi-select-chip.static {
     cursor: default;

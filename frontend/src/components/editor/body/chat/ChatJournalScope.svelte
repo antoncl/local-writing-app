@@ -67,7 +67,7 @@
     padding: 1px 4px; margin-left: 1px; line-height: 1.3;
   }
   .cbv-journal-scope-pip-fresh {
-    color: var(--accent-strong); background: var(--accent-soft2);
+    color: var(--accent-emphasis); background: var(--accent-soft2);
   }
   .cbv-journal-scope-pip-depth1 {
     color: #6c6e9e; background: var(--k-lore-soft);

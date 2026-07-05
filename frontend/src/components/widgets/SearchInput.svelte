@@ -190,7 +190,7 @@
 
   .search-input-clear:hover {
     background: var(--accent-soft);
-    color: var(--accent-strong);
+    color: var(--accent-emphasis);
   }
 
   /* Keycap badge. Dim "available" state shows a raised key (1px bottom

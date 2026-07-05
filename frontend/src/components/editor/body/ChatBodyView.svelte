@@ -1166,7 +1166,7 @@
   }
   .cbv-preview-popover-body { padding: 12px 14px; overflow-y: auto; flex: 1; }
   .cbv-preview-content {
-    margin: 0 0 8px; font-family: ui-monospace, "JetBrains Mono", monospace;
+    margin: 0 0 8px; font-family: var(--mono);
     font-size: var(--fs-sm); line-height: 1.5; white-space: pre-wrap; word-wrap: break-word; color: var(--text);
   }
   .cbv-preview-hint { font-style: italic; }
@@ -1210,7 +1210,7 @@
     background: var(--surface); border: 1px solid var(--divider); font-size: var(--fs-xs);
   }
   .cbv-estimate-tokens,
-  .cbv-estimate-cost { font-family: ui-monospace, "JetBrains Mono", monospace; }
+  .cbv-estimate-cost { font-family: var(--mono); }
   .cbv-estimate-chip { background: var(--accent-soft); border-color: var(--accent-soft2); color: var(--accent-emphasis); font-weight: 600; }
   .cbv-estimate-sep { display: none; }
   .cbv-ttl-chip.cbv-ttl-expired { background: var(--danger-soft); border-color: var(--danger-border); color: var(--danger); font-weight: 600; }

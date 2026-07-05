@@ -438,7 +438,7 @@
     display: inline-flex;
     align-items: center;
     gap: 5px;
-    font-family: ui-monospace, monospace;
+    font-family: var(--mono);
     font-size: var(--fs-sm);
     color: var(--text-3);
   }

@@ -117,7 +117,7 @@
   }
 
   .slash-filter-indicator code {
-    font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+    font-family: var(--mono);
     font-size: var(--fs-sm);
     color: var(--accent-deep);
     background: transparent;
@@ -132,7 +132,7 @@
   }
 
   .slash-empty code {
-    font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+    font-family: var(--mono);
     font-style: normal;
     color: var(--text-2);
   }

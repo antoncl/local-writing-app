@@ -219,7 +219,7 @@
     border: 1px solid var(--border, var(--border));
     border-radius: 8px;
     background: var(--surface);
-    font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+    font-family: var(--mono);
     font-size: var(--fs-sm);
   }
   .sfi-option-label {

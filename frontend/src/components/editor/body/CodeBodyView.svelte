@@ -374,7 +374,7 @@
     border: 1px solid var(--border);
     border-radius: 3px;
     padding: 0 4px;
-    font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+    font-family: var(--mono);
   }
   .prompt-help-popover-close {
     width: 22px;
@@ -419,7 +419,7 @@
     border: 1px solid var(--border);
     border-radius: 3px;
     padding: 0 4px;
-    font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+    font-family: var(--mono);
     font-size: var(--fs-sm);
     color: var(--accent-deep);
   }
@@ -434,7 +434,7 @@
     border: 1px solid var(--border);
     border-radius: 3px;
     padding: 0 3px;
-    font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+    font-family: var(--mono);
     font-size: var(--fs-xs);
     color: var(--accent-deep);
   }

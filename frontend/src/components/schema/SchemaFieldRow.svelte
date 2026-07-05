@@ -176,7 +176,7 @@
     border: 1px solid var(--k-snippet);
     background: var(--k-snippet-soft);
     color: var(--k-snippet-text);
-    font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+    font-family: var(--mono);
     font-size: var(--fs-xs);
     font-weight: 600;
   }

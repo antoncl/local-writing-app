@@ -110,7 +110,7 @@
     outline-offset: -1px;
   }
   .code-editor :global(.cm-scroller) {
-    font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+    font-family: var(--mono);
     font-size: var(--fs-md);
     line-height: 1.5;
   }

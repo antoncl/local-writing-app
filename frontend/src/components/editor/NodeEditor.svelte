@@ -1384,9 +1384,7 @@
     border: 0;
     border-bottom: 1px solid var(--divider);
     border-radius: 0;
-    font-family:
-      Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI",
-      sans-serif;
+    font-family: var(--serif);
     font-size: var(--fs-2xl);
     font-weight: 700;
     padding-left: 0;

@@ -158,6 +158,14 @@
   --toolbar-danger-text: #ffd4cc;
   --toolbar-loading: rgba(34, 60, 50, 0.96);
   --toolbar-error: rgba(80, 30, 25, 0.97);
+  /* Muted label text on the dark glass (e.g. the selection word-count) — a
+     fixed mid-grey; --divider/--text-* would flip to near-black in dark and
+     vanish on the always-dark surface. */
+  --toolbar-text-muted: #a8b2ad;
+  /* The glass surface's own drop shadow — tinted and offset enough to lift a
+     dark toolbar off the prose. The neutral --elev-* tokens are calibrated
+     for panes on the app surface and read as "no shadow" under dark glass. */
+  --toolbar-elev: 0 14px 28px rgba(25, 40, 35, 0.22);
 }
 
 /* Dark mode token overrides. The FOUC guard in index.html stamps

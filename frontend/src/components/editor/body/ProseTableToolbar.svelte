@@ -52,7 +52,7 @@
     border: 1px solid var(--toolbar-border);
     border-radius: 7px;
     background: var(--toolbar-surface);
-    box-shadow: var(--elev-2);
+    box-shadow: var(--toolbar-elev);
     white-space: nowrap;
   }
 

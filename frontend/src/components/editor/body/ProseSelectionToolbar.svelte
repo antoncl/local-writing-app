@@ -74,7 +74,7 @@
     border: 1px solid var(--toolbar-border);
     border-radius: 7px;
     background: var(--toolbar-surface);
-    box-shadow: var(--elev-2);
+    box-shadow: var(--toolbar-elev);
     transform: translate(-50%, calc(-100% - 8px));
   }
 
@@ -112,7 +112,7 @@
     display: inline-flex;
     align-items: center;
     padding: 0 12px;
-    color: var(--divider);
+    color: var(--toolbar-text-muted);
   }
 
   .toolbar-menu {
@@ -135,7 +135,7 @@
     border: 1px solid var(--toolbar-border);
     border-radius: 7px;
     background: var(--toolbar-surface);
-    box-shadow: var(--elev-2);
+    box-shadow: var(--toolbar-elev);
   }
 
   .toolbar-menu-popover.below {

@@ -1014,7 +1014,7 @@
   /* Inline editor-pane save-status indicator (App renders editor panes inline). */
   .pane-status {
     color: var(--text-3);
-    font-size: 12px;
+    font-size: var(--fs-sm);
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
@@ -1039,7 +1039,7 @@
     border-radius: 10px;
     background: var(--star);
     color: var(--surface);
-    font-size: 11px;
+    font-size: var(--fs-xs);
     font-weight: 500;
     vertical-align: middle;
   }
@@ -1058,7 +1058,7 @@
     border-radius: 8px;
     color: var(--danger);
     background: var(--danger-soft);
-    box-shadow: 0 14px 30px rgba(36, 36, 36, 0.16);
+    box-shadow: var(--elev-3);
   }
 
   .error-toast-body {
@@ -1081,13 +1081,13 @@
     border-radius: 6px;
     background: transparent;
     color: var(--danger);
-    font-size: 18px;
+    font-size: var(--fs-xl);
     line-height: 1;
     cursor: pointer;
   }
 
   .error-toast-close:hover {
-    background: rgba(180, 59, 53, 0.12);
+    background: color-mix(in srgb, var(--danger) 12%, transparent);
   }
 </style>
 

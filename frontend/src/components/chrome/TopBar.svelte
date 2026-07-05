@@ -28,6 +28,66 @@
   export let themePref: ThemePreference = "system";
   export let onCycleTheme: () => void = () => {};
 
+  // Layout presets (#155). The built-in preset the current arrangement matches
+  // (or null for a custom layout), the user's saved preset names, and the
+  // callbacks that apply / save / delete / reset. Layout is a project-scoped
+  // concern, so the button is disabled with no project open.
+  export let activePreset: string | null = null;
+  export let userPresets: string[] = [];
+  export let onApplyPreset: (name: string) => void = () => {};
+  export let onApplyUserPreset: (name: string) => void = () => {};
+  export let onSavePreset: (name: string) => void = () => {};
+  export let onDeleteUserPreset: (name: string) => void = () => {};
+  export let onResetLayout: () => void = () => {};
+
+  const BUILT_IN_PRESETS: { key: string; label: string }[] = [
+    { key: "writing", label: "Writing" },
+    { key: "schema", label: "Schema & types" },
+    { key: "research", label: "Research" },
+  ];
+
+  let layoutOpen = false;
+  let layoutButton: HTMLButtonElement | null = null;
+  let showSaveField = false;
+  let saveName = "";
+
+  function resetSaveField() {
+    showSaveField = false;
+    saveName = "";
+  }
+
+  function toggleLayout() {
+    layoutOpen = !layoutOpen;
+    if (!layoutOpen) resetSaveField();
+  }
+
+  function closeLayout() {
+    layoutOpen = false;
+    resetSaveField();
+  }
+
+  function applyBuiltIn(key: string) {
+    closeLayout();
+    onApplyPreset(key);
+  }
+
+  function applyUser(name: string) {
+    closeLayout();
+    onApplyUserPreset(name);
+  }
+
+  function resetLayout() {
+    closeLayout();
+    onResetLayout();
+  }
+
+  function commitSave() {
+    const name = saveName.trim();
+    if (!name) return;
+    onSavePreset(name);
+    closeLayout();
+  }
+
   const THEME_GLYPH: Record<ThemePreference, string> = {
     system: "◐",
     light: "☀",
@@ -68,9 +128,14 @@
   }
 
   function handleKeydown(event: KeyboardEvent) {
-    if (event.key === "Escape" && switcherOpen) {
+    if (event.key !== "Escape") return;
+    if (switcherOpen) {
       switcherOpen = false;
       switcherButton?.focus();
+    }
+    if (layoutOpen) {
+      closeLayout();
+      layoutButton?.focus();
     }
   }
 
@@ -164,6 +229,85 @@
     <button type="button" class="action-button" disabled={!projectOpen} on:click={onOpenProjectNode}>Project</button>
     <button type="button" class="action-button" disabled={!projectOpen} on:click={onOpenDetailTypes}>Detail Types</button>
     <button type="button" class="action-button" disabled={!projectOpen} on:click={onOpenAssistants}>Assistants</button>
+
+    <div class="layout-wrap">
+      <button
+        bind:this={layoutButton}
+        type="button"
+        class="action-button"
+        class:active={layoutOpen}
+        disabled={!projectOpen}
+        aria-haspopup="menu"
+        aria-expanded={layoutOpen}
+        on:click={toggleLayout}
+      >Layout <span class="chevron" aria-hidden="true">▾</span></button>
+
+      {#if layoutOpen}
+        <!-- click-outside dismiss -->
+        <div class="switcher-overlay" role="presentation" on:click={closeLayout}></div>
+
+        <div class="layout-menu" role="menu" aria-label="Layout presets">
+          <div class="switcher-section-label">Presets</div>
+          {#each BUILT_IN_PRESETS as preset (preset.key)}
+            <button
+              type="button"
+              class="switcher-item preset-item"
+              role="menuitemradio"
+              aria-checked={activePreset === preset.key}
+              on:click={() => applyBuiltIn(preset.key)}
+            >
+              <span class="preset-check" aria-hidden="true">{activePreset === preset.key ? "✓" : ""}</span>
+              {preset.label}
+            </button>
+          {/each}
+
+          {#if userPresets.length > 0}
+            <div class="switcher-divider" role="separator"></div>
+            <div class="switcher-section-label">Saved</div>
+            {#each userPresets as name (name)}
+              <div class="preset-user-row">
+                <button type="button" class="switcher-item preset-item preset-user" role="menuitem" on:click={() => applyUser(name)}>
+                  <span class="preset-check" aria-hidden="true"></span>
+                  <span class="preset-user-name">{name}</span>
+                </button>
+                <button
+                  type="button"
+                  class="preset-delete"
+                  title="Delete {name}"
+                  aria-label="Delete preset {name}"
+                  on:click={() => onDeleteUserPreset(name)}
+                >×</button>
+              </div>
+            {/each}
+          {/if}
+
+          <div class="switcher-divider" role="separator"></div>
+          {#if showSaveField}
+            <form class="preset-save" on:submit|preventDefault={commitSave}>
+              <!-- svelte-ignore a11y_autofocus -->
+              <input
+                type="text"
+                bind:value={saveName}
+                placeholder="Preset name"
+                aria-label="New preset name"
+                autofocus
+              />
+              <button type="submit" disabled={!saveName.trim()}>Save</button>
+            </form>
+          {:else}
+            <button type="button" class="switcher-item" role="menuitem" on:click={() => (showSaveField = true)}>
+              <span class="switcher-icon" aria-hidden="true">＋</span>
+              Save current as…
+            </button>
+          {/if}
+          <button type="button" class="switcher-item" role="menuitem" on:click={resetLayout}>
+            <span class="switcher-icon" aria-hidden="true">↺</span>
+            Reset to default
+          </button>
+        </div>
+      {/if}
+    </div>
+
     <button
       type="button"
       class="action-button icon-button"
@@ -374,5 +518,113 @@
     padding: 4px 8px;
     font-size: var(--fs-xl);
     line-height: 1;
+  }
+
+  .top-bar .layout-wrap {
+    position: relative;
+  }
+
+  .top-bar .action-button.active {
+    background: var(--panel);
+    border-color: var(--border);
+  }
+
+  .top-bar .action-button .chevron {
+    font-size: var(--fs-xs);
+    color: var(--text-3);
+  }
+
+  .top-bar .layout-menu {
+    position: absolute;
+    top: calc(100% + 4px);
+    right: 0;
+    z-index: 101;
+    min-width: 220px;
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    box-shadow: var(--elev-2);
+    padding: 6px;
+    display: grid;
+    gap: 1px;
+  }
+
+  .top-bar .preset-item {
+    gap: 6px;
+  }
+
+  .top-bar .preset-check {
+    width: 14px;
+    flex: none;
+    text-align: center;
+    color: var(--accent-emphasis);
+    font-size: var(--fs-sm);
+  }
+
+  .top-bar .preset-user-row {
+    display: flex;
+    align-items: center;
+  }
+
+  .top-bar .preset-user {
+    flex: 1;
+    min-width: 0;
+  }
+
+  .top-bar .preset-user-name {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .top-bar .preset-delete {
+    flex: none;
+    width: 24px;
+    height: 24px;
+    border: 1px solid transparent;
+    border-radius: 4px;
+    background: transparent;
+    color: var(--text-3);
+    font-size: var(--fs-md);
+    line-height: 1;
+    cursor: pointer;
+  }
+
+  .top-bar .preset-delete:hover {
+    background: var(--danger-soft);
+    color: var(--danger);
+  }
+
+  .top-bar .preset-save {
+    display: flex;
+    gap: 6px;
+    padding: 4px;
+  }
+
+  .top-bar .preset-save input {
+    flex: 1;
+    min-width: 0;
+    padding: 4px 8px;
+    border: 1px solid var(--divider);
+    border-radius: 4px;
+    background: var(--inset);
+    color: var(--text);
+    font-size: var(--fs-md);
+  }
+
+  .top-bar .preset-save button {
+    flex: none;
+    padding: 4px 10px;
+    border: 1px solid var(--divider);
+    border-radius: 4px;
+    background: var(--surface);
+    color: var(--text);
+    font-size: var(--fs-md);
+    cursor: pointer;
+  }
+
+  .top-bar .preset-save button:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
   }
 </style>

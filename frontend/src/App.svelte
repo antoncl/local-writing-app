@@ -75,6 +75,8 @@
   import { focusedDocumentStore } from "@/lib/stores/editorFocus";
   import { paneLayout } from "@/lib/stores/paneLayout.svelte";
   import { workspaceLayout, isEditorPanelId } from "@/lib/stores/workspaceLayout.svelte";
+  import { type PresetName } from "@/lib/stores/workspaceLayout.serialize";
+  import { layoutPresets } from "@/lib/stores/layoutPresets.svelte";
   import RegionRegistrar from "@/components/workspace/RegionRegistrar.svelte";
   import {
     type EditorPaneState,
@@ -254,6 +256,8 @@
     resetEditorWorkspace();
     projectPath = nextProject.root_path;
     treeActions.loadCollapseForProject(projectPath);
+    workspaceLayout.loadForProject(projectPath);
+    layoutPresets.load();
     projectTitle = nextProject.title;
     aiSettings.seedFromProject(nextProject);
     setProjectCost(null, []);
@@ -272,6 +276,9 @@
 
   function resetEditorWorkspace() {
     editorPanes.reset();
+    // Flush the current project's layout and detach before the next project's
+    // loadForProject re-seeds it (openProjectWorkspace calls this first).
+    workspaceLayout.closeForProject();
     paneViews.reset();
     setKnownTags([]);
     setChatSessions([]);
@@ -331,6 +338,40 @@
   // On-demand regions drop out of the layout when closed and reopen via
   // ensureVisible; the closer is handed to the registrar in markup below.
   const closeRegion = (id: string) => () => workspaceLayout.removePanel(id);
+
+  // Move real keyboard focus onto a region group after a layout focus change so
+  // the region is keyboard-reachable (design-language §4). rAF lets the DOM
+  // settle (e.g. a collapsed split re-tiling) before we query for the element.
+  function focusGroupDom(groupId: string | null) {
+    if (!groupId) return;
+    requestAnimationFrame(() => {
+      // A group that lives inside a collapsed split has no element of its own
+      // (the split renders as one strip); fall back to whichever group is now
+      // showing the focused panel (`.ws-group.focused`).
+      const el =
+        document.querySelector<HTMLElement>(`[data-group-id="${groupId}"]`)
+        ?? document.querySelector<HTMLElement>(".ws-group.focused");
+      el?.focus();
+    });
+  }
+
+  // Region keyboard nav (#155): Ctrl/Cmd+1…9 jump to the Nth region, F6 /
+  // Shift+F6 cycle focus. These are modifier chords, so they're safe to handle
+  // even while typing in the editor. (Ctrl+digit is reserved by browsers for
+  // tab switching; add Alt — Ctrl+Alt+digit — in the browser, or use the
+  // packaged app where the plain chord is free.)
+  function handleWorkspaceKeydown(event: KeyboardEvent) {
+    if (!isProjectOpen) return;
+    if (event.key === "F6") {
+      event.preventDefault();
+      focusGroupDom(workspaceLayout.cycleFocus(event.shiftKey ? -1 : 1));
+      return;
+    }
+    if ((event.ctrlKey || event.metaKey) && event.key >= "1" && event.key <= "9") {
+      event.preventDefault();
+      focusGroupDom(workspaceLayout.focusGroupByIndex(Number(event.key) - 1));
+    }
+  }
 
   // Tab-bar accessors for open editor documents (the one dynamic surface class).
   const editorTitle = (id: string) => editorPaneById(id)?.scene?.title ?? "Editor";
@@ -561,6 +602,8 @@
   let defaultAssistantId = $derived($defaultAssistantIdStore);
 </script>
 
+<svelte:window on:keydown={handleWorkspaceKeydown} />
+
 <TopBar
   currentTitle={isProjectOpen ? projectTitle : null}
   currentProjectColor={aiSettings.projectColor}
@@ -575,6 +618,13 @@
   onOpenSettings={() => void projectSession.openMachineSettings()}
   onOpenDetailTypes={() => schemaPanes?.openDetailTypes()}
   onOpenProjectNode={() => void editorPanes.openProjectNode()}
+  activePreset={workspaceLayout.activePreset}
+  userPresets={layoutPresets.presets.map((preset) => preset.name)}
+  onApplyPreset={(name) => workspaceLayout.applyPreset(name as PresetName)}
+  onApplyUserPreset={(name) => layoutPresets.apply(name)}
+  onSavePreset={(name) => layoutPresets.save(name)}
+  onDeleteUserPreset={(name) => layoutPresets.remove(name)}
+  onResetLayout={() => workspaceLayout.reset()}
 />
 
 <main class="app-main">

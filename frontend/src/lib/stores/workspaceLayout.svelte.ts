@@ -11,60 +11,33 @@
 // The tree is a $state root; operations mutate it in place (Svelte 5 deep
 // proxies make nested mutation reactive) and reassign scalars where needed. All
 // nodes carry a stable id so the renderer can address them for splitter drag.
+//
+// Phase 2 (#155) adds per-project persistence, named presets, and keyboard
+// focus. The pure tree/preset/serialization logic lives in
+// workspaceLayout.serialize.ts; this file owns the reactive state + side effects.
 
 import type { LayoutNode, PanelId, Split, SplitDir, TabGroup } from "@/lib/types";
+import {
+  G_EDITOR,
+  G_SIDE,
+  HOMES,
+  PRESETS,
+  defaultLayout,
+  deserialize,
+  group,
+  isEditorPanelId,
+  normalize,
+  serialize,
+  split,
+  type LayoutSnapshot,
+  type PresetName,
+} from "./workspaceLayout.serialize";
 
-// Stable ids for the default groups so `HOMES` can target them and a persisted
-// layout can be reconciled against them later (#155). User-created groups get
-// generated ids.
-const G_PROJECT = "g-project";
-const G_DRAFT = "g-draft";
-const G_EDITOR = "g-editor";
-const G_SIDE = "g-side";
-const G_TOOLS = "g-tools";
+// Re-exported so consumers keep importing it from the controller module.
+export { isEditorPanelId };
 
-// Editor documents carry dynamic `editor_*` ids; everything else is a fixed
-// region panel. Pure predicate — lives outside the instance.
-export function isEditorPanelId(id: string): boolean {
-  return id.startsWith("editor_");
-}
-
-// Where a region lands when opened and not already placed. Editor docs are not
-// listed — they always home to the editor group (see homeGroupFor).
-const HOMES: Record<string, string> = {
-  project: G_PROJECT,
-  outline: G_DRAFT,
-  lore: G_SIDE,
-  research: G_SIDE,
-  schema: G_SIDE,
-  schema_type: G_SIDE,
-  prompts: G_SIDE,
-  mutations: G_SIDE,
-  assistants: G_SIDE,
-  chats: G_SIDE,
-  todo: G_TOOLS,
-  search: G_TOOLS,
-};
-
-function group(id: string, tabs: PanelId[]): TabGroup {
-  return { kind: "group", id, tabs: [...tabs], active: tabs[0] ?? null };
-}
-
-function split(id: string, dir: SplitDir, children: LayoutNode[], sizes: number[]): Split {
-  return { kind: "split", id, dir, children, sizes };
-}
-
-// The starting arrangement — a "writing" layout: Project + Draft stacked on the
-// left, the editor in the centre, Lore/Research over TODO/Search on the right.
-// On-demand regions (prompts, mutations, assistants, chats, schema) are absent
-// until opened, when they join their home group.
-function defaultLayout(): Split {
-  return split("root", "row", [
-    split("s-left", "col", [group(G_PROJECT, ["project"]), group(G_DRAFT, ["outline"])], [0.4, 0.6]),
-    group(G_EDITOR, []),
-    split("s-right", "col", [group(G_SIDE, ["lore", "research"]), group(G_TOOLS, ["todo", "search"])], [0.62, 0.38]),
-  ], [0.24, 0.54, 0.22]);
-}
+const STORAGE_PREFIX = "workspaceLayout:"; // + project path
+const PERSIST_DEBOUNCE_MS = 400;
 
 class WorkspaceLayout {
   root = $state<Split>(defaultLayout());
@@ -74,11 +47,19 @@ class WorkspaceLayout {
   activeEditorGroupId = $state<string>(G_EDITOR);
   focusedPanel = $state<PanelId | null>(null);
 
+  // The built-in preset the current arrangement matches, or null once the user
+  // has rearranged into a custom layout (drives the Layout menu's check mark).
+  activePreset = $state<PresetName | null>("writing");
+
   // Live tab drag-and-drop (rearrange). `dragging` is the panel under the
   // cursor; `dropZone` is the group + region the drop would land in, so the
   // renderer can paint the target overlay.
   dragging = $state<PanelId | null>(null);
   dropZone = $state<{ groupId: string; zone: "center" | "left" | "right" | "top" | "bottom" } | null>(null);
+
+  // localStorage key for the open project's layout, or null with none open.
+  #storageKey: string | null = null;
+  #persistTimer: ReturnType<typeof setTimeout> | null = null;
 
   beginDrag(panelId: PanelId): void {
     this.dragging = panelId;
@@ -154,7 +135,22 @@ class WorkspaceLayout {
       return this.groupById(this.activeEditorGroupId) ?? this.groupById(G_EDITOR) ?? this.allGroups()[0];
     }
     const homeId = HOMES[panelId] ?? G_SIDE;
-    return this.groupById(homeId) ?? this.groupById(G_SIDE) ?? this.allGroups()[0];
+    const existing = this.groupById(homeId);
+    if (existing) return existing;
+    // The region's home column was pruned away (e.g. both permanent regions
+    // dragged out of it). Recreate a dedicated group for it on the right edge
+    // rather than dumping the region into an unrelated group's tabs (#155).
+    const fresh = group(homeId, []);
+    this.#appendColumn(fresh);
+    return fresh;
+  }
+
+  // Add a fresh group as a new column at the end of the root row split.
+  #appendColumn(g: TabGroup): void {
+    const share = this.root.children.length > 0 ? 1 / (this.root.children.length + 1) : 1;
+    this.root.children.push(g);
+    this.root.sizes.push(share);
+    this.root.sizes = normalize([...this.root.sizes]);
   }
 
   // --- Placement ----------------------------------------------------------
@@ -166,9 +162,12 @@ class WorkspaceLayout {
     if (!g) {
       g = this.#homeGroupFor(panelId);
       g.tabs.push(panelId);
+      // Placing a region (not just opening a document) is a layout change.
+      if (!isEditorPanelId(panelId)) this.#markCustom();
     }
     g.active = panelId;
     this.focus(panelId);
+    this.#schedulePersist();
   }
 
   activate(panelId: PanelId): void {
@@ -176,6 +175,9 @@ class WorkspaceLayout {
     if (!g) return;
     g.active = panelId;
     this.focus(panelId);
+    // The active tab is part of the persisted layout (region tab selection, e.g.
+    // Lore vs Research). Editor-tab churn is stripped on serialize + debounced.
+    this.#schedulePersist();
   }
 
   focus(panelId: PanelId): void {
@@ -197,6 +199,8 @@ class WorkspaceLayout {
     }
     this.#maybePrune(g.id);
     if (this.focusedPanel === panelId) this.focusedPanel = null;
+    if (!isEditorPanelId(panelId)) this.#markCustom();
+    this.#schedulePersist();
   }
 
   // Prune an emptied group unless it is the perennial editor group — the editor
@@ -231,18 +235,27 @@ class WorkspaceLayout {
     const next = removeFrom(this.root);
     // Root always stays a split so the shell has a stable container; if it
     // collapsed to a single group, wrap it back into a 1-child row split.
-    if (!next) this.root = defaultLayout();
-    else if (next.kind === "group") this.root = split("root", "row", [next], [1]);
-    else this.root = next;
+    if (!next) {
+      // The tree emptied out — rebuilding the default is the writing preset.
+      this.root = defaultLayout();
+      this.activeEditorGroupId = G_EDITOR;
+      this.activePreset = "writing";
+    } else if (next.kind === "group") {
+      this.root = split("root", "row", [next], [1]);
+    } else {
+      this.root = next;
+    }
   }
 
   // --- Interactions -------------------------------------------------------
 
   // Commit new fractional sizes for a split after a splitter drag. The live
-  // drag writes flex-grow to the DOM directly (Workspace); this persists it.
+  // drag writes flex-grow to the DOM directly (Workspace); this persists it. A
+  // resize keeps the active-preset identity (only rearranging clears it).
   commitSizes(splitId: string, sizes: number[]): void {
     const target = this.#findSplit(this.root, splitId);
     if (target) target.sizes = normalize(sizes);
+    this.#schedulePersist();
   }
 
   #findSplit(node: LayoutNode, id: string): Split | null {
@@ -262,12 +275,14 @@ class WorkspaceLayout {
     if (!target) return;
     const src = this.groupOf(panelId);
     if (!src) return;
+    this.#markCustom();
     if (src.id === target.id) {
       const from = src.tabs.indexOf(panelId);
       src.tabs.splice(from, 1);
       const to = beforeIndex === undefined ? src.tabs.length : clampInsert(beforeIndex, from, src.tabs.length);
       src.tabs.splice(to, 0, panelId);
       src.active = panelId;
+      this.#schedulePersist();
       return;
     }
     src.tabs.splice(src.tabs.indexOf(panelId), 1);
@@ -276,6 +291,7 @@ class WorkspaceLayout {
     target.active = panelId;
     this.#maybePrune(src.id);
     this.focus(panelId);
+    this.#schedulePersist();
   }
 
   // Drop a tab onto an edge of a target group → create a new group holding the
@@ -289,6 +305,7 @@ class WorkspaceLayout {
     // No-op: dropping the only tab of a group back onto itself.
     if (src.id === target.id && src.tabs.length === 1) return;
 
+    this.#markCustom();
     src.tabs.splice(src.tabs.indexOf(panelId), 1);
     if (src.active === panelId) src.active = src.tabs[src.tabs.length - 1] ?? null;
 
@@ -299,6 +316,7 @@ class WorkspaceLayout {
 
     if (src.id !== target.id) this.#maybePrune(src.id);
     this.focus(panelId);
+    this.#schedulePersist();
   }
 
   // Place `fresh` next to the group `neighbourId` along `dir`. If the group's
@@ -341,19 +359,131 @@ class WorkspaceLayout {
     return null;
   }
 
-  // Restore the default arrangement (used by "reset layout" and on the first
-  // project open before saved layouts land in #155).
+  // --- Keyboard focus -----------------------------------------------------
+
+  // Focus the Nth tab-group in document order (Ctrl/Cmd+1…9). Returns the
+  // group's id so the caller can move DOM focus onto it, or null if out of range.
+  focusGroupByIndex(index: number): string | null {
+    const groups = this.allGroups();
+    const g = groups[index];
+    if (!g) return null;
+    const tab = g.active ?? g.tabs[0] ?? null;
+    if (tab) this.focus(tab);
+    else this.focusedPanel = null;
+    return g.id;
+  }
+
+  // Cycle focus to the next/previous tab-group (F6 / Shift+F6). Returns the
+  // newly focused group's id, or null when there are no groups.
+  cycleFocus(direction: 1 | -1): string | null {
+    const groups = this.allGroups();
+    if (groups.length === 0) return null;
+    const current = this.focusedPanel ? this.groupOf(this.focusedPanel) : null;
+    const at = current ? groups.findIndex((g) => g.id === current.id) : -1;
+    const next = (at + direction + groups.length) % groups.length;
+    return this.focusGroupByIndex(next);
+  }
+
+  // --- Presets + persistence ----------------------------------------------
+
+  // Replace the whole arrangement with a built-in preset. Open editor documents
+  // re-home into the new editor group via App's reconcile effect.
+  applyPreset(name: PresetName): void {
+    const factory = PRESETS[name];
+    if (!factory) return;
+    this.root = factory();
+    this.activeEditorGroupId = G_EDITOR;
+    this.activePreset = name;
+    this.focusedPanel = null;
+    this.#schedulePersist();
+  }
+
+  // Apply a saved snapshot (a user preset). Round-trips through serialize() to
+  // clone + normalize, so applying the same stored snapshot twice never aliases
+  // its nodes into reactive state. A user preset is a custom layout (no built-in
+  // check mark), so activePreset clears.
+  applySnapshot(snap: LayoutSnapshot): void {
+    const fresh = serialize(snap.root, snap.activeEditorGroupId, null);
+    this.root = fresh.root;
+    this.activeEditorGroupId = fresh.activeEditorGroupId;
+    this.activePreset = null;
+    this.focusedPanel = null;
+    this.#schedulePersist();
+  }
+
+  // Capture the current arrangement for saving as a named user preset.
+  snapshot(): LayoutSnapshot {
+    return serialize(this.root, this.activeEditorGroupId, this.activePreset);
+  }
+
+  // Restore the open project's saved layout (or the writing preset on a miss).
+  loadForProject(path: string): void {
+    this.#flushPersist();
+    this.#storageKey = path ? STORAGE_PREFIX + path : null;
+    let snap: LayoutSnapshot | null = null;
+    try {
+      snap = this.#storageKey ? deserialize(localStorage.getItem(this.#storageKey)) : null;
+    } catch {
+      snap = null;
+    }
+    if (snap) {
+      this.root = snap.root;
+      this.activeEditorGroupId = snap.activeEditorGroupId;
+      // Restore the preset identity so an untouched preset keeps its check mark.
+      this.activePreset = snap.activePreset;
+      this.focusedPanel = null;
+    } else {
+      // No saved layout yet — start from the writing preset (and persist it).
+      this.applyPreset("writing");
+    }
+  }
+
+  // Flush any pending write and detach from the project's storage key. Leaves
+  // the tree on the default so the no-project state is clean.
+  closeForProject(): void {
+    this.#flushPersist();
+    this.#storageKey = null;
+    this.reset();
+  }
+
+  #markCustom(): void {
+    this.activePreset = null;
+  }
+
+  #schedulePersist(): void {
+    if (!this.#storageKey) return;
+    if (this.#persistTimer !== null) clearTimeout(this.#persistTimer);
+    this.#persistTimer = setTimeout(() => {
+      this.#persistTimer = null;
+      this.#persistNow();
+    }, PERSIST_DEBOUNCE_MS);
+  }
+
+  #flushPersist(): void {
+    if (this.#persistTimer !== null) {
+      clearTimeout(this.#persistTimer);
+      this.#persistTimer = null;
+      this.#persistNow();
+    }
+  }
+
+  #persistNow(): void {
+    if (!this.#storageKey) return;
+    try {
+      localStorage.setItem(this.#storageKey, JSON.stringify(serialize(this.root, this.activeEditorGroupId, this.activePreset)));
+    } catch {
+      // Storage disabled / quota — layout persistence is best-effort.
+    }
+  }
+
+  // Restore the default arrangement ("Reset layout" + the no-project state).
   reset(): void {
     this.root = defaultLayout();
     this.activeEditorGroupId = G_EDITOR;
+    this.activePreset = "writing";
     this.focusedPanel = null;
+    this.#schedulePersist();
   }
-}
-
-function normalize(sizes: number[]): number[] {
-  const total = sizes.reduce((a, b) => a + b, 0);
-  if (total <= 0) return sizes.map(() => 1 / sizes.length);
-  return sizes.map((s) => s / total);
 }
 
 // Adjust an insertion index for a same-group move once the source item has been

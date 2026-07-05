@@ -167,16 +167,16 @@
   .swatch-trigger {
     appearance: none;
     background: transparent;
-    border: 1px solid var(--ctx-border, #cdd8d3);
+    border: 1px solid var(--border);
     border-radius: 6px;
     padding: 3px;
     cursor: pointer;
     line-height: 0;
     transition: border-color 80ms linear;
   }
-  .swatch-trigger:hover { border-color: var(--ctx-accent, #3f7d68); }
+  .swatch-trigger:hover { border-color: var(--accent); }
   .swatch-trigger.read-only { cursor: default; }
-  .swatch-trigger.read-only:hover { border-color: var(--ctx-border, #cdd8d3); }
+  .swatch-trigger.read-only:hover { border-color: var(--border); }
   .swatch-trigger.empty .swatch-dot { background: transparent; }
 
   .swatch-dot {
@@ -196,15 +196,16 @@
 
   .swatch-picker-popover {
     /* Anchored at viewport coords by the component — `position: fixed`
-       so pane overflow can never clip the popover. z-index is high
-       enough to sit above any pane and most modals. */
+       so pane overflow can never clip the popover. Stays a DOM child of
+       its invoker, so inside a dialog it stacks within the dialog's own
+       stacking context. */
     position: fixed;
-    z-index: 2500;
-    background: var(--ctx-surface, #fff);
-    border: 1px solid var(--ctx-border, #cdd8d3);
+    z-index: var(--z-dropdown);
+    background: var(--surface);
+    border: 1px solid var(--border);
     border-radius: 8px;
     padding: 8px;
-    box-shadow: 0 6px 16px rgba(40, 60, 52, 0.18);
+    box-shadow: var(--elev-2);
     min-width: 180px;
   }
 
@@ -225,7 +226,7 @@
     transition: border-color 80ms linear;
   }
   .swatch-cell:hover { border-color: rgba(0, 0, 0, 0.35); }
-  .swatch-cell.selected { border-color: var(--ctx-accent, #3f7d68); }
+  .swatch-cell.selected { border-color: var(--accent); }
 
   .swatch-clear {
     appearance: none;
@@ -240,17 +241,17 @@
     border-radius: 5px;
     font: inherit;
     font-size: 12px;
-    color: var(--ctx-text-3, #6c7872);
+    color: var(--text-3);
     cursor: pointer;
     text-align: left;
   }
   .swatch-clear:hover {
-    background: var(--ctx-panel-2, #eef3f0);
-    color: var(--ctx-text, #28332f);
+    background: var(--panel);
+    color: var(--text);
   }
   .swatch-clear.selected {
-    border-color: var(--ctx-accent, #3f7d68);
-    color: var(--ctx-accent-strong, #356b59);
+    border-color: var(--accent);
+    color: var(--accent-strong);
   }
   .swatch-clear .swatch-dot-empty {
     border-style: dashed;
@@ -262,7 +263,7 @@
   .swatch-current-label {
     margin-top: 8px;
     font-size: 11px;
-    color: var(--ctx-text-3, #6c7872);
+    color: var(--text-3);
     text-align: center;
   }
 </style>

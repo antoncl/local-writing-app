@@ -220,11 +220,11 @@
   .gm-backdrop {
     position: fixed;
     inset: 0;
-    z-index: 200;
+    z-index: var(--z-modal);
     display: flex;
     align-items: center;
     justify-content: center;
-    background: rgba(20, 30, 27, 0.32);
+    background: var(--scrim);
   }
   .gm-dialog {
     width: 560px;
@@ -233,54 +233,54 @@
     display: flex;
     flex-direction: column;
     overflow: hidden;
-    border: 1px solid var(--border-strong, #b4c2bc);
+    border: 1px solid var(--border-strong);
     border-radius: 14px;
-    background: var(--surface, #fff);
-    box-shadow: 0 20px 60px rgba(20, 40, 35, 0.28);
+    background: var(--surface);
+    box-shadow: var(--elev-3);
   }
   .gm-head {
     display: flex;
     align-items: center;
     gap: 9px;
     padding: 12px 16px;
-    border-bottom: 1px solid var(--divider, #e2e8e5);
-    background: var(--panel, #edf3f1);
+    border-bottom: 1px solid var(--divider);
+    background: var(--panel);
   }
   .gm-head h2 {
     margin: 0;
-    font-family: Newsreader, Georgia, serif;
+    font-family: var(--serif);
     font-size: 18px;
     font-weight: 600;
   }
   .tm-count {
     padding: 1px 9px;
     border-radius: 999px;
-    border: 1px solid var(--border, #cbd6d2);
-    background: var(--surface, #fff);
+    border: 1px solid var(--border);
+    background: var(--surface);
     font-size: 12px;
-    color: var(--text-2, #4d5753);
+    color: var(--text-2);
   }
   .tm-filter {
     margin-left: auto;
     width: 150px;
     padding: 5px 9px;
-    border: 1px solid var(--border, #cbd6d2);
+    border: 1px solid var(--border);
     border-radius: 8px;
     font-size: 13px;
   }
   .gm-close {
     padding: 5px 11px;
-    border: 1px solid var(--border, #cbd6d2);
+    border: 1px solid var(--border);
     border-radius: 8px;
-    background: var(--surface, #fff);
+    background: var(--surface);
     font-size: 12.5px;
     cursor: pointer;
   }
   .gm-error {
     margin: 0;
     padding: 9px 16px;
-    background: #fdeceb;
-    color: #b4453a;
+    background: var(--danger-soft);
+    color: var(--danger);
     font-size: 12.5px;
   }
   .tm-merge-bar {
@@ -288,9 +288,9 @@
     align-items: center;
     gap: 10px;
     padding: 9px 16px;
-    background: var(--accent-soft, #edf6f2);
-    border-bottom: 1px solid var(--accent-soft2, #dff0ea);
-    color: var(--accent-strong, #234e43);
+    background: var(--accent-soft);
+    border-bottom: 1px solid var(--accent-soft2);
+    color: var(--accent-strong);
   }
   .tm-merge-label {
     font-size: 12.5px;
@@ -299,13 +299,13 @@
   .tm-merge-target {
     width: 160px;
     padding: 5px 9px;
-    border: 1px solid var(--border, #cbd6d2);
+    border: 1px solid var(--border);
     border-radius: 8px;
     font-size: 13px;
   }
   .tm-merge-note {
     font-size: 11px;
-    color: var(--text-2, #4d5753);
+    color: var(--text-2);
   }
   .gm-body {
     overflow: auto;
@@ -315,10 +315,10 @@
     align-items: center;
     gap: 11px;
     padding: 9px 16px;
-    border-bottom: 1px solid var(--divider, #e2e8e5);
+    border-bottom: 1px solid var(--divider);
   }
   .tm-row.sel {
-    background: var(--accent-soft, #edf6f2);
+    background: var(--accent-soft);
   }
   .tm-check {
     flex: none;
@@ -327,25 +327,25 @@
     display: flex;
     align-items: center;
     justify-content: center;
-    border: 1px solid var(--border-strong, #b4c2bc);
+    border: 1px solid var(--border-strong);
     border-radius: 5px;
-    background: var(--surface, #fff);
+    background: var(--surface);
     color: #fff;
     font-size: 12px;
     cursor: pointer;
   }
   .tm-check.on {
-    background: var(--accent, #2f6f5e);
-    border-color: var(--accent, #2f6f5e);
+    background: var(--accent);
+    border-color: var(--accent);
   }
   .tm-name {
     font-size: 13px;
     font-weight: 600;
-    color: var(--text, #242424);
+    color: var(--text);
   }
   .tm-uses {
     font-size: 11.5px;
-    color: var(--text-3, #74817b);
+    color: var(--text-3);
   }
   .tm-scopes {
     margin-left: auto;
@@ -357,37 +357,37 @@
   .tm-scope-chip {
     padding: 1px 8px;
     border-radius: 999px;
-    border: 1px solid var(--divider, #e2e8e5);
-    background: var(--inset, #f1f5f3);
+    border: 1px solid var(--divider);
+    background: var(--inset);
     font-size: 11px;
-    color: var(--text-2, #4d5753);
+    color: var(--text-2);
   }
   .tm-cog {
     flex: none;
     border: 0;
     background: transparent;
-    color: var(--text-3, #74817b);
+    color: var(--text-3);
     font-size: 15px;
     cursor: pointer;
   }
   .tm-cog:hover {
-    color: var(--accent, #2f6f5e);
+    color: var(--accent);
   }
   .tm-scope-editor {
     display: flex;
     flex-direction: column;
     gap: 9px;
     padding: 12px 16px 14px 41px;
-    background: var(--inset, #f1f5f3);
-    border-bottom: 1px solid var(--divider, #e2e8e5);
-    box-shadow: inset 3px 0 0 0 var(--accent, #2f6f5e);
+    background: var(--inset);
+    border-bottom: 1px solid var(--divider);
+    box-shadow: inset 3px 0 0 0 var(--accent);
   }
   .lbl {
     font-size: 10px;
     font-weight: 800;
     letter-spacing: 0.09em;
     text-transform: uppercase;
-    color: var(--text-3, #74817b);
+    color: var(--text-3);
   }
   .sfi-footer {
     display: flex;
@@ -399,17 +399,17 @@
   }
   .sfi-cancel {
     padding: 6px 12px;
-    border: 1px solid var(--border, #cbd6d2);
+    border: 1px solid var(--border);
     border-radius: 8px;
-    background: var(--surface, #fff);
+    background: var(--surface);
     font-size: 12.5px;
     cursor: pointer;
   }
   .sfi-done {
     padding: 6px 14px;
-    border: 1px solid var(--accent, #2f6f5e);
+    border: 1px solid var(--accent);
     border-radius: 8px;
-    background: var(--accent, #2f6f5e);
+    background: var(--accent);
     color: #fff;
     font-size: 12.5px;
     font-weight: 600;
@@ -422,6 +422,6 @@
   .muted {
     padding: 16px;
     font-size: 13px;
-    color: var(--text-3, #74817b);
+    color: var(--text-3);
   }
 </style>

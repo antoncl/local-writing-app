@@ -645,60 +645,21 @@
 </div>
 
 <style>
-  /* The menu portals to <body> (to escape a transformed Svelte Flow ancestor
-     that would trap its `position: fixed`), so it lands OUTSIDE .ctx-picker and
-     must carry its own --ctx-* tokens — otherwise every var() falls back to
-     nothing (transparent surface, no borders, unstyled text). */
+  /* The picker consumes the global role tokens directly (the local
+     --ctx-* parallel palette folded into them, #125 phase 1 / ADR-0030).
+     The menu portals to <body> (to escape a transformed Svelte Flow
+     ancestor that would trap its `position: fixed`) — safe, because the
+     role tokens live on :root and reach it anywhere in the tree. */
   .ctx-picker,
   .ctx-menu {
-    /* Light theme tokens — mirrored to the config editor's set so the
-       two surfaces share vocabulary. Adds a kind-color quartet for chip
-       and monogram coloring. Dark set lives under [data-theme=dark]. */
-    --ctx-surface: #ffffff;
-    --ctx-panel: #f7faf8;
-    --ctx-panel-2: #eef3f0;
-    --ctx-inset: #f3f6f4;
-    --ctx-border: #cdd8d3;
-    --ctx-border-strong: #b4c2bc;
-    --ctx-text: #28332f;
-    --ctx-text-2: #4d5753;
-    --ctx-text-3: #6c7872;
-    --ctx-accent: #3f7d68;
-    --ctx-accent-strong: #356b59;
-    --ctx-accent-soft: #e2efe9;
-    --ctx-star: #b07d1e;
-    --ctx-star-soft: #f7eed7;
-    --ctx-shadow: rgba(40, 60, 52, 0.08);
-    --ctx-shadow-pop: rgba(40, 60, 52, 0.18);
     /* Per-chip colors come from inline `--chip-base` set by the markup
        via resolveColorForKind() — see colors.ts. The soft tint is
        derived in CSS via color-mix so we don't have to ship two values
        per swatch. */
-
     display: flex;
     flex-direction: column;
     min-width: 0;
-    color: var(--ctx-text);
-  }
-
-  :global([data-theme="dark"]) .ctx-picker,
-  :global([data-theme="dark"]) .ctx-menu {
-    --ctx-surface: #18211d;
-    --ctx-panel: #141c18;
-    --ctx-panel-2: #1e2823;
-    --ctx-inset: #1b2521;
-    --ctx-border: #324039;
-    --ctx-border-strong: #41534a;
-    --ctx-text: #e3e9e5;
-    --ctx-text-2: #b4c0ba;
-    --ctx-text-3: #869189;
-    --ctx-accent: #5ea585;
-    --ctx-accent-strong: #7cc0a1;
-    --ctx-accent-soft: #22332c;
-    --ctx-star: #d6a946;
-    --ctx-star-soft: #3a2f17;
-    --ctx-shadow: rgba(0, 0, 0, 0.45);
-    --ctx-shadow-pop: rgba(0, 0, 0, 0.55);
+    color: var(--text);
   }
 
   /* --- Context bar (PR 2: chips + trigger in one bordered well) ---- */
@@ -709,9 +670,9 @@
     align-items: center;
     gap: 6px;
     padding: 6px;
-    border: 1px solid var(--ctx-border);
+    border: 1px solid var(--border);
     border-radius: 10px;
-    background: var(--ctx-surface);
+    background: var(--surface);
     min-width: 0;
   }
 
@@ -728,18 +689,18 @@
     align-items: center;
     gap: 6px;
     padding: 4px 8px;
-    background: var(--ctx-surface);
-    border: 1px solid var(--ctx-border);
+    background: var(--surface);
+    border: 1px solid var(--border);
     border-radius: 8px;
     font-size: 12.5px;
     line-height: 1.2;
-    color: var(--ctx-text);
+    color: var(--text);
     /* --chip-base is set inline per chip by colorStyleForRef() — see the
        script. The tag-pill color uses the base directly; the tag-pill
        background is a soft tint derived via color-mix. When unset, the
        chip falls back to a neutral border-only treatment. */
-    --chip-tag-color: var(--chip-base, var(--ctx-text-3));
-    --chip-tag-bg: var(--ctx-inset);
+    --chip-tag-color: var(--chip-base, var(--text-3));
+    --chip-tag-bg: var(--inset);
   }
 
   .ctx-chip[style*="--chip-base"] {
@@ -754,22 +715,22 @@
   /* Preset chips reverse the polarity — pale base-tint background so the
      whole-document inclusion reads visually distinct from item chips. */
   .ctx-chip-preset {
-    background: color-mix(in srgb, var(--chip-base, var(--ctx-text-3)) 12%, white 88%);
-    --chip-tag-color: var(--chip-base, var(--ctx-text-3));
-    --chip-tag-bg: var(--ctx-surface);
+    background: color-mix(in srgb, var(--chip-base, var(--text-3)) 12%, white 88%);
+    --chip-tag-color: var(--chip-base, var(--text-3));
+    --chip-tag-bg: var(--surface);
   }
 
   :global([data-theme="dark"]) .ctx-chip-preset {
-    background: color-mix(in srgb, var(--chip-base, var(--ctx-text-3)) 18%, black 82%);
+    background: color-mix(in srgb, var(--chip-base, var(--text-3)) 18%, black 82%);
   }
 
   /* ★-bound scene gets a full gold-tint chip — loudest treatment in the
      strip, because this scene fills the template's `scene` variable. */
   .ctx-chip-target {
-    background: var(--ctx-star-soft);
-    border-color: var(--ctx-star);
-    --chip-tag-color: var(--ctx-star);
-    --chip-tag-bg: var(--ctx-surface);
+    background: var(--star-soft);
+    border-color: var(--star);
+    --chip-tag-color: var(--star);
+    --chip-tag-bg: var(--surface);
   }
 
   .ctx-chip-tag {
@@ -793,7 +754,7 @@
   }
 
   .ctx-chip-target .ctx-chip-dot {
-    background: var(--ctx-star);
+    background: var(--star);
   }
 
   .ctx-chip-title {
@@ -807,24 +768,24 @@
     cursor: pointer;
     padding: 0;
     font-size: 13px;
-    color: var(--ctx-text-3);
+    color: var(--text-3);
     line-height: 1;
     opacity: 0.55;
     transition: color 80ms linear, opacity 80ms linear;
   }
 
   .ctx-chip-star:hover {
-    color: var(--ctx-star);
+    color: var(--star);
     opacity: 1;
   }
 
   .ctx-chip-star[aria-pressed="true"] {
-    color: var(--ctx-star);
+    color: var(--star);
     opacity: 1;
   }
 
   .ctx-chip-target .ctx-chip-star {
-    color: var(--ctx-star);
+    color: var(--star);
     opacity: 1;
   }
 
@@ -832,7 +793,7 @@
     appearance: none;
     border: none;
     background: transparent;
-    color: var(--ctx-text-3);
+    color: var(--text-3);
     font-size: 14px;
     line-height: 1;
     padding: 0 2px;
@@ -841,8 +802,8 @@
   }
 
   .ctx-chip-remove:hover {
-    background: var(--ctx-inset);
-    color: var(--ctx-text);
+    background: var(--inset);
+    color: var(--text);
   }
 
   /* --- Trigger ----------------------------------------------------- */
@@ -858,9 +819,9 @@
     align-items: center;
     gap: 5px;
     padding: 4px 11px;
-    border: 1px dashed var(--ctx-accent);
-    background: var(--ctx-accent-soft);
-    color: var(--ctx-accent-strong);
+    border: 1px dashed var(--accent);
+    background: var(--accent-soft);
+    color: var(--accent-emphasis);
     border-radius: 8px;
     font-size: 12.5px;
     font-weight: 600;
@@ -871,7 +832,7 @@
   }
 
   .ctx-add:hover {
-    background: var(--ctx-surface);
+    background: var(--surface);
   }
 
   .ctx-add-plus {
@@ -897,10 +858,10 @@
     max-width: calc(100vw - 16px);
     max-height: 420px;
     overflow-y: auto;
-    background: var(--ctx-surface);
-    border: 1px solid var(--ctx-border);
+    background: var(--surface);
+    border: 1px solid var(--border);
     border-radius: 11px;
-    box-shadow: 0 8px 28px var(--ctx-shadow-pop);
+    box-shadow: var(--elev-2);
     padding: 10px;
     z-index: 100;
     display: flex;
@@ -922,25 +883,25 @@
     align-items: center;
     gap: 8px;
     padding: 8px 11px;
-    border: 1px solid var(--ctx-border-strong);
+    border: 1px solid var(--border-strong);
     border-radius: 9px;
-    background: var(--ctx-surface);
+    background: var(--surface);
     transition: border-color 80ms linear, border-width 0s;
   }
 
   .ctx-search-wrap:focus-within,
   .ctx-search-wrap.has-query {
-    border-color: var(--ctx-accent);
+    border-color: var(--accent);
   }
 
   .ctx-search-icon {
-    color: var(--ctx-text-3);
+    color: var(--text-3);
     flex: none;
   }
 
   .ctx-search-wrap:focus-within .ctx-search-icon,
   .ctx-search-wrap.has-query .ctx-search-icon {
-    color: var(--ctx-accent);
+    color: var(--accent);
   }
 
   .ctx-search {
@@ -949,7 +910,7 @@
     appearance: none;
     border: none;
     background: transparent;
-    color: var(--ctx-text);
+    color: var(--text);
     font-size: 13px;
     padding: 0;
     font-family: inherit;
@@ -960,21 +921,21 @@
   }
 
   .ctx-search::placeholder {
-    color: var(--ctx-text-3);
+    color: var(--text-3);
   }
 
   .ctx-search-count {
     flex: none;
     font-size: 11px;
     font-weight: 600;
-    color: var(--ctx-text-3);
+    color: var(--text-3);
   }
 
   .ctx-search-clear {
     appearance: none;
     border: none;
     background: transparent;
-    color: var(--ctx-text-3);
+    color: var(--text-3);
     font-size: 14px;
     line-height: 1;
     cursor: pointer;
@@ -984,8 +945,8 @@
   }
 
   .ctx-search-clear:hover {
-    background: var(--ctx-inset);
-    color: var(--ctx-text);
+    background: var(--inset);
+    color: var(--text);
   }
 
   /* --- Groups ------------------------------------------------------ */
@@ -1001,7 +962,7 @@
     align-items: center;
     gap: 8px;
     padding: 6px 9px;
-    background: var(--ctx-panel-2);
+    background: var(--panel);
     border-radius: 7px;
     cursor: pointer;
     list-style: none;
@@ -1013,7 +974,7 @@
   }
 
   .ctx-group-chevron {
-    color: var(--ctx-text-3);
+    color: var(--text-3);
     font-size: 10px;
     width: 10px;
     display: inline-block;
@@ -1029,16 +990,16 @@
     font-weight: 700;
     text-transform: uppercase;
     letter-spacing: 0.07em;
-    color: var(--ctx-text-2);
+    color: var(--text-2);
   }
 
   .ctx-group-count {
     margin-left: auto;
     font-size: 10.5px;
     font-weight: 600;
-    color: var(--ctx-text-3);
-    background: var(--ctx-surface);
-    border: 1px solid var(--ctx-border);
+    color: var(--text-3);
+    background: var(--surface);
+    border: 1px solid var(--border);
     border-radius: 999px;
     padding: 1px 8px;
     line-height: 1.3;
@@ -1064,12 +1025,12 @@
     cursor: pointer;
     text-align: left;
     font-family: inherit;
-    color: var(--ctx-text);
+    color: var(--text);
     /* --chip-base is set inline by colorStyleForRef() on the item
        button; monogram color/background derive from it. Falls back to
        neutral inset when unset. */
-    --mono-color: var(--chip-base, var(--ctx-text-3));
-    --mono-bg: var(--ctx-inset);
+    --mono-color: var(--chip-base, var(--text-3));
+    --mono-bg: var(--inset);
   }
 
   .ctx-item[style*="--chip-base"] {
@@ -1082,7 +1043,7 @@
   }
 
   .ctx-item:hover:not(:disabled) {
-    background: var(--ctx-panel-2);
+    background: var(--panel);
   }
 
   .ctx-item:disabled {
@@ -1121,8 +1082,8 @@
   }
 
   .ctx-item-title mark {
-    background: var(--ctx-accent-soft);
-    color: var(--ctx-accent-strong);
+    background: var(--accent-soft);
+    color: var(--accent-emphasis);
     border-radius: 2px;
     padding: 0 1px;
     font-weight: 600;
@@ -1132,8 +1093,8 @@
     flex: none;
     font-size: 10.5px;
     font-weight: 600;
-    color: var(--ctx-accent-strong);
-    background: var(--ctx-accent-soft);
+    color: var(--accent-emphasis);
+    background: var(--accent-soft);
     border-radius: 999px;
     padding: 1px 8px;
     line-height: 1.3;
@@ -1154,34 +1115,34 @@
     width: 38px;
     height: 38px;
     border-radius: 10px;
-    background: var(--ctx-inset);
-    border: 1px solid var(--ctx-border);
+    background: var(--inset);
+    border: 1px solid var(--border);
     display: flex;
     align-items: center;
     justify-content: center;
-    color: var(--ctx-text-3);
+    color: var(--text-3);
     font-size: 18px;
     line-height: 1;
   }
 
   .ctx-empty-icon-svg {
-    color: var(--ctx-text-3);
+    color: var(--text-3);
     opacity: 0.6;
   }
 
   .ctx-empty-title {
     font-size: 13px;
-    color: var(--ctx-text-2);
+    color: var(--text-2);
   }
 
   .ctx-empty-title strong {
-    color: var(--ctx-text);
+    color: var(--text);
     font-weight: 600;
   }
 
   .ctx-empty-hint {
     font-size: 12px;
-    color: var(--ctx-text-3);
+    color: var(--text-3);
     line-height: 1.45;
   }
 </style>

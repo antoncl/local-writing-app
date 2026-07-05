@@ -718,9 +718,9 @@
     gap: 4px;
     font-size: 11px;
     line-height: 1.35;
-    color: var(--warn-text, #92400e);
-    background: var(--warn-soft, #fef3c7);
-    border-bottom: 1px solid var(--border, #e2e5ea);
+    color: var(--warn);
+    background: var(--warn-soft);
+    border-bottom: 1px solid var(--border);
   }
   .preview-list {
     flex: 1;

@@ -290,11 +290,11 @@
   .gm-backdrop {
     position: fixed;
     inset: 0;
-    z-index: 200;
+    z-index: var(--z-modal);
     display: flex;
     align-items: center;
     justify-content: center;
-    background: rgba(20, 30, 27, 0.32);
+    background: var(--scrim);
   }
   .gm-dialog {
     width: 540px;
@@ -303,31 +303,31 @@
     display: flex;
     flex-direction: column;
     overflow: hidden;
-    border: 1px solid var(--border-strong, #b4c2bc);
+    border: 1px solid var(--border-strong);
     border-radius: 14px;
-    background: var(--surface, #fff);
-    box-shadow: 0 20px 60px rgba(20, 40, 35, 0.28);
+    background: var(--surface);
+    box-shadow: var(--elev-3);
   }
   .gm-head {
     display: flex;
     align-items: center;
     gap: 9px;
     padding: 13px 16px;
-    border-bottom: 1px solid var(--divider, #e2e8e5);
-    background: var(--panel, #edf3f1);
+    border-bottom: 1px solid var(--divider);
+    background: var(--panel);
   }
   .gm-head h2 {
     flex: 1;
     margin: 0;
-    font-family: Newsreader, Georgia, serif;
+    font-family: var(--serif);
     font-size: 18px;
     font-weight: 600;
   }
   .gm-close {
     padding: 5px 11px;
-    border: 1px solid var(--border, #cbd6d2);
+    border: 1px solid var(--border);
     border-radius: 8px;
-    background: var(--surface, #fff);
+    background: var(--surface);
     font-size: 12.5px;
     cursor: pointer;
   }
@@ -351,15 +351,15 @@
     gap: 11px;
     width: 100%;
     padding: 9px 10px;
-    border: 1px solid var(--divider, #e2e8e5);
+    border: 1px solid var(--divider);
     border-radius: 9px;
-    background: var(--surface, #fff);
+    background: var(--surface);
     text-align: left;
     cursor: pointer;
   }
   .gm-row:hover {
-    border-color: var(--border-strong, #b4c2bc);
-    background: var(--inset, #f1f5f3);
+    border-color: var(--border-strong);
+    background: var(--inset);
   }
   .gm-row-name {
     font-size: 14px;
@@ -368,7 +368,7 @@
   .gm-row-members {
     flex: 1;
     font-size: 12px;
-    color: var(--text-3, #74817b);
+    color: var(--text-3);
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
@@ -376,7 +376,7 @@
   .gm-row-id {
     font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
     font-size: 11px;
-    color: var(--text-3, #74817b);
+    color: var(--text-3);
   }
   .gm-foot,
   .gm-editor-foot {
@@ -398,20 +398,20 @@
     flex-direction: column;
     gap: 4px;
     font-size: 12px;
-    color: var(--text-2, #4d5753);
+    color: var(--text-2);
   }
   .sfi-field input,
   .gm-member-name,
   .gm-member-type {
     padding: 6px 9px;
-    border: 1px solid var(--border, #cbd6d2);
+    border: 1px solid var(--border);
     border-radius: 8px;
-    background: var(--surface, #fff);
+    background: var(--surface);
     font-size: 13px;
   }
   .gm-id-static {
     font-size: 11px;
-    color: var(--text-3, #74817b);
+    color: var(--text-3);
     padding-bottom: 7px;
   }
   .lbl {
@@ -419,7 +419,7 @@
     font-weight: 800;
     letter-spacing: 0.09em;
     text-transform: uppercase;
-    color: var(--text-3, #74817b);
+    color: var(--text-3);
   }
   .gm-members {
     display: flex;
@@ -438,7 +438,7 @@
   .gm-member-grip {
     flex: none;
     display: inline-flex;
-    color: var(--border-strong, #b4c2bc);
+    color: var(--border-strong);
     font-size: 15px;
     cursor: grab;
   }
@@ -451,8 +451,8 @@
     cursor: pointer;
   }
   .gm-icon-btn:hover {
-    border-color: var(--accent, #2f6f5e);
-    color: var(--accent-strong, #234e43);
+    border-color: var(--accent);
+    color: var(--accent-strong);
   }
   .gm-icon-pop {
     position: absolute;
@@ -467,7 +467,7 @@
     left: 0;
     right: 0;
     height: 2px;
-    background: var(--accent, #2f6f5e);
+    background: var(--accent);
     pointer-events: none;
     z-index: 2;
   }
@@ -498,16 +498,16 @@
     white-space: nowrap;
     font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
     font-size: 11px;
-    color: var(--text-3, #74817b);
+    color: var(--text-3);
   }
   .gm-add-member {
     align-self: flex-start;
     padding: 5px 10px;
-    border: 1px dashed var(--border-strong, #b4c2bc);
+    border: 1px dashed var(--border-strong);
     border-radius: 8px;
     background: transparent;
     font-size: 12.5px;
-    color: var(--accent, #2f6f5e);
+    color: var(--accent);
     cursor: pointer;
   }
   .sfr-tile {
@@ -518,9 +518,9 @@
     align-items: center;
     justify-content: center;
     border-radius: 7px;
-    background: var(--inset, #f1f5f3);
-    border: 1px solid var(--divider, #e2e8e5);
-    color: var(--text-2, #4d5753);
+    background: var(--inset);
+    border: 1px solid var(--divider);
+    color: var(--text-2);
     font-size: 15px;
   }
   .sfi-spacer {
@@ -528,17 +528,17 @@
   }
   .sfi-cancel {
     padding: 6px 12px;
-    border: 1px solid var(--border, #cbd6d2);
+    border: 1px solid var(--border);
     border-radius: 8px;
-    background: var(--surface, #fff);
+    background: var(--surface);
     font-size: 12.5px;
     cursor: pointer;
   }
   .sfi-done {
     padding: 6px 14px;
-    border: 1px solid var(--accent, #2f6f5e);
+    border: 1px solid var(--accent);
     border-radius: 8px;
-    background: var(--accent, #2f6f5e);
+    background: var(--accent);
     color: #fff;
     font-size: 12.5px;
     font-weight: 600;
@@ -560,6 +560,6 @@
   }
   .muted {
     font-size: 13px;
-    color: var(--text-3, #74817b);
+    color: var(--text-3);
   }
 </style>

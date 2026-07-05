@@ -96,7 +96,7 @@ tunable in review; *structure* is the contract):
 **Color roles are already tokenized and stay** — `--app-bg / --board / --panel /
 --surface / --inset`, `--text`/`--text-2`/`--text-3`, `--border`/`--divider`,
 the `--accent` family, `--danger`, `--star` (gold), the `--k-*` kind colors,
-and the `--tier1..3` recess ladder. Two corrections:
+and the `--tier1..3` recess ladder. Two corrections and one addition:
 
 - **The `--ctx-*` parallel palette (17 tokens) folds into the global roles.**
   The context picker is not a separate visual universe; a popover is `--panel`
@@ -104,6 +104,16 @@ and the `--tier1..3` recess ladder. Two corrections:
 - **Gold keeps exactly one meaning: the pin** (plus the sanctioned prose-TODO
   anchor, per the NodeEditor body spec). This rule has held since the taxonomy
   memo; the token layer makes it checkable.
+- **`--accent-emphasis` joins the accent family** (#125 phase 1). It is the
+  accent for legible emphasis text/glyphs sitting *on* `--accent-soft`. It is
+  the one accent shade tuned per-theme in *opposite* directions: darker than
+  `--accent` in light, **brighter** in dark — because a small emphasis label
+  must stay above AA contrast on the soft tint in both themes. This is
+  distinct from `--accent-strong`/`--accent-deep`, which deepen in both themes
+  for solid fills and borders. Reach for `--accent-emphasis` for accent-colored
+  text on a soft-accent chip/pill; reach for `--accent-strong` for a fill or
+  border. (The fold of the context-picker palette exposed that `--accent-strong`
+  had been carrying both jobs, and lost dark-mode contrast doing the first.)
 
 ## 3. Composition law
 

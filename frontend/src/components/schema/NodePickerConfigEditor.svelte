@@ -705,35 +705,16 @@
 
 <style>
   .ctx-config {
-    /* Light theme tokens. Dark set lives in the [data-theme=dark]
-       override below so a future toggle in a parent only has to flip
-       the attribute — no code changes here. */
-    --ctx-board: #e7eae7;
-    --ctx-surface: #ffffff;
-    --ctx-panel: #f7faf8;
-    --ctx-panel-2: #eef3f0;
-    --ctx-inset: #f3f6f4;
-    --ctx-border: #cdd8d3;
-    --ctx-border-strong: #b4c2bc;
-    --ctx-text: #28332f;
-    --ctx-text-2: #4d5753;
-    --ctx-text-3: #6c7872;
-    --ctx-accent: #3f7d68;
-    --ctx-accent-strong: #356b59;
-    --ctx-accent-soft: #e2efe9;
-    --ctx-warn-bg: #fff4e6;
-    --ctx-warn-border: #f0d29a;
-    --ctx-warn-text: #8a520d;
-    --ctx-star: #b07d1e;
-    --ctx-shadow: rgba(40, 60, 52, 0.08);
-
+    /* Consumes the global role tokens directly (the local --ctx-*
+       parallel palette folded into them, #125 phase 1 / ADR-0030);
+       both themes arrive via :root / [data-theme=dark] for free. */
     display: flex;
     flex-direction: column;
-    border: 1px solid var(--ctx-border);
+    border: 1px solid var(--border);
     border-radius: 9px;
-    background: var(--ctx-surface);
-    box-shadow: 0 1px 3px var(--ctx-shadow);
-    color: var(--ctx-text);
+    background: var(--surface);
+    box-shadow: var(--elev-1);
+    color: var(--text);
     font-size: 12px;
     overflow: hidden;
   }
@@ -745,27 +726,6 @@
     padding: 14px 14px 16px;
   }
 
-  :global([data-theme="dark"]) .ctx-config {
-    --ctx-board: #0e1613;
-    --ctx-surface: #18211d;
-    --ctx-panel: #141c18;
-    --ctx-panel-2: #1e2823;
-    --ctx-inset: #1b2521;
-    --ctx-border: #324039;
-    --ctx-border-strong: #41534a;
-    --ctx-text: #e3e9e5;
-    --ctx-text-2: #b4c0ba;
-    --ctx-text-3: #869189;
-    --ctx-accent: #5ea585;
-    --ctx-accent-strong: #7cc0a1;
-    --ctx-accent-soft: #22332c;
-    --ctx-warn-bg: #2c2414;
-    --ctx-warn-border: #5a4a24;
-    --ctx-warn-text: #e6c084;
-    --ctx-star: #d6a946;
-    --ctx-shadow: rgba(0, 0, 0, 0.45);
-  }
-
   /* --- Row header (owns the full input row, PR 2) ----------------- */
 
   .ctx-row-header {
@@ -773,8 +733,8 @@
     align-items: center;
     gap: 10px;
     padding: 10px 12px;
-    background: var(--ctx-panel-2);
-    border-bottom: 1px solid var(--ctx-border);
+    background: var(--panel);
+    border-bottom: 1px solid var(--border);
     flex-wrap: wrap;
   }
 
@@ -789,7 +749,7 @@
     padding: 0;
     border: none;
     background: transparent;
-    color: var(--ctx-accent);
+    color: var(--accent);
     font-size: 11px;
     line-height: 1;
     cursor: pointer;
@@ -801,7 +761,7 @@
   }
 
   .ctx-row-chevron:hover {
-    background: var(--ctx-inset);
+    background: var(--inset);
   }
 
   .ctx-row-id-stack {
@@ -820,7 +780,7 @@
     margin: -2px -6px;
     font-size: 13.5px;
     font-weight: 600;
-    color: var(--ctx-text);
+    color: var(--text);
     font-family: inherit;
     border-radius: 4px;
     min-width: 0;
@@ -828,19 +788,19 @@
   }
 
   .ctx-row-label-input::placeholder {
-    color: var(--ctx-text-3);
+    color: var(--text-3);
     font-weight: 500;
   }
 
   .ctx-row-label-input:hover {
-    background: var(--ctx-surface);
-    border-color: var(--ctx-border);
+    background: var(--surface);
+    border-color: var(--border);
   }
 
   .ctx-row-label-input:focus {
     outline: none;
-    background: var(--ctx-surface);
-    border-color: var(--ctx-accent);
+    background: var(--surface);
+    border-color: var(--accent);
   }
 
   .ctx-row-accessor-row {
@@ -857,7 +817,7 @@
     padding: 1px 5px;
     margin: -1px -5px;
     font-size: 11px;
-    color: var(--ctx-text-3);
+    color: var(--text-3);
     font-family: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
     border-radius: 4px;
     min-width: 0;
@@ -865,25 +825,25 @@
   }
 
   .ctx-row-name-input::placeholder {
-    color: var(--ctx-text-3);
+    color: var(--text-3);
     opacity: 0.6;
   }
 
   .ctx-row-name-input:hover {
-    background: var(--ctx-surface);
-    border-color: var(--ctx-border);
+    background: var(--surface);
+    border-color: var(--border);
   }
 
   .ctx-row-name-input:focus {
     outline: none;
-    background: var(--ctx-surface);
-    border-color: var(--ctx-accent);
-    color: var(--ctx-text-2);
+    background: var(--surface);
+    border-color: var(--accent);
+    color: var(--text-2);
   }
 
   .ctx-row-accessor {
     font-size: 11px;
-    color: var(--ctx-text-3);
+    color: var(--text-3);
     font-family: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
     background: transparent;
     padding: 0;
@@ -901,9 +861,9 @@
   .ctx-row-type-select {
     appearance: none;
     -webkit-appearance: none;
-    border: 1px solid var(--ctx-accent);
-    background: var(--ctx-accent-soft);
-    color: var(--ctx-accent-strong);
+    border: 1px solid var(--accent);
+    background: var(--accent-soft);
+    color: var(--accent-emphasis);
     font-size: 10.5px;
     font-weight: 600;
     text-transform: none;
@@ -920,7 +880,7 @@
   }
 
   .ctx-row-type-select:focus-visible {
-    outline: 2px solid var(--ctx-accent);
+    outline: 2px solid var(--accent);
     outline-offset: 1px;
   }
 
@@ -938,7 +898,7 @@
     gap: 6px;
     cursor: pointer;
     font-size: 11.5px;
-    color: var(--ctx-text-2);
+    color: var(--text-2);
     line-height: 1;
   }
 
@@ -946,7 +906,7 @@
     appearance: none;
     background: transparent;
     border: none;
-    color: var(--ctx-text-3);
+    color: var(--text-3);
     font-size: 18px;
     line-height: 1;
     padding: 0 4px;
@@ -955,8 +915,8 @@
   }
 
   .ctx-row-remove:hover {
-    background: var(--ctx-inset);
-    color: var(--ctx-text);
+    background: var(--inset);
+    color: var(--text);
   }
 
   /* --- Collapsed strip --------------------------------------------- */
@@ -975,9 +935,9 @@
     gap: 6px;
     padding: 3px 10px;
     border-radius: 999px;
-    background: var(--ctx-warn-bg);
-    border: 1px solid var(--ctx-warn-border);
-    color: var(--ctx-warn-text);
+    background: var(--warn-soft);
+    border: 1px solid var(--warn-border);
+    color: var(--warn);
     font-size: 11.5px;
     line-height: 1.2;
   }
@@ -988,10 +948,10 @@
     gap: 6px;
     padding: 3px 9px;
     border-radius: 999px;
-    background: var(--ctx-inset);
-    border: 1px solid var(--ctx-border);
+    background: var(--inset);
+    border: 1px solid var(--border);
     font-size: 11.5px;
-    color: var(--ctx-text-2);
+    color: var(--text-2);
     line-height: 1.2;
   }
 
@@ -999,12 +959,12 @@
     width: 6px;
     height: 6px;
     border-radius: 50%;
-    background: var(--ctx-accent);
+    background: var(--accent);
     flex: none;
   }
 
   .ctx-collapsed-star {
-    color: var(--ctx-star);
+    color: var(--star);
     font-size: 11px;
     line-height: 1;
   }
@@ -1020,7 +980,7 @@
     font-weight: 700;
     text-transform: uppercase;
     letter-spacing: 0.08em;
-    color: var(--ctx-text-3);
+    color: var(--text-3);
   }
 
   /* --- Custom checkbox (used in tree + scene-binding) -------------- */
@@ -1032,9 +992,9 @@
     width: 16px;
     height: 16px;
     flex: none;
-    border: 1.5px solid var(--ctx-border-strong);
+    border: 1.5px solid var(--border-strong);
     border-radius: 5px;
-    background: var(--ctx-surface);
+    background: var(--surface);
     cursor: pointer;
     display: inline-block;
     position: relative;
@@ -1042,12 +1002,12 @@
   }
 
   .ctx-check:hover:not(:disabled) {
-    border-color: var(--ctx-accent);
+    border-color: var(--accent);
   }
 
   .ctx-check:checked {
-    background-color: var(--ctx-accent);
-    border-color: var(--ctx-accent);
+    background-color: var(--accent);
+    border-color: var(--accent);
   }
 
   .ctx-check:checked::after {
@@ -1061,8 +1021,8 @@
   }
 
   .ctx-check:indeterminate {
-    background-color: var(--ctx-accent-soft);
-    border-color: var(--ctx-accent);
+    background-color: var(--accent-soft);
+    border-color: var(--accent);
   }
 
   .ctx-check:indeterminate::after {
@@ -1073,7 +1033,7 @@
     top: 50%;
     height: 2px;
     margin-top: -1px;
-    background: var(--ctx-accent);
+    background: var(--accent);
     border-radius: 1px;
   }
 
@@ -1096,10 +1056,10 @@
     gap: 6px;
     padding: 4px 4px 4px 10px;
     border-radius: 999px;
-    background: var(--ctx-surface);
-    border: 1px solid var(--ctx-border);
+    background: var(--surface);
+    border: 1px solid var(--border);
     font-size: 12px;
-    color: var(--ctx-text);
+    color: var(--text);
     line-height: 1;
   }
 
@@ -1107,12 +1067,12 @@
     width: 6px;
     height: 6px;
     border-radius: 50%;
-    background: var(--ctx-accent);
+    background: var(--accent);
     flex: none;
   }
 
   .ctx-chip-star {
-    color: var(--ctx-star);
+    color: var(--star);
     font-size: 12px;
     line-height: 1;
   }
@@ -1125,7 +1085,7 @@
     appearance: none;
     background: transparent;
     border: none;
-    color: var(--ctx-text-3);
+    color: var(--text-3);
     font-size: 11px;
     cursor: pointer;
     padding: 2px 5px;
@@ -1134,32 +1094,32 @@
   }
 
   .ctx-chip-remove:hover {
-    background: var(--ctx-panel-2);
-    color: var(--ctx-text);
+    background: var(--panel);
+    color: var(--text);
   }
 
   .ctx-chip-preset {
-    background: var(--ctx-accent-soft);
-    border-color: var(--ctx-accent);
-    color: var(--ctx-accent-strong);
+    background: var(--accent-soft);
+    border-color: var(--accent);
+    color: var(--accent-emphasis);
     font-weight: 500;
   }
 
   .ctx-chip-preset .ctx-chip-remove {
-    color: var(--ctx-accent-strong);
+    color: var(--accent-emphasis);
   }
 
   .ctx-chip-preset .ctx-chip-remove:hover {
-    background: rgba(53, 107, 89, 0.12);
+    background: color-mix(in srgb, var(--accent) 12%, transparent);
   }
 
   .ctx-chip-view {
-    background: var(--ctx-panel);
-    border-color: var(--ctx-border-strong);
+    background: var(--board);
+    border-color: var(--border-strong);
   }
 
   .ctx-chip-view-glyph {
-    color: var(--ctx-accent);
+    color: var(--accent);
     font-size: 11px;
     line-height: 1;
   }
@@ -1169,9 +1129,9 @@
     -webkit-appearance: none;
     align-self: flex-start;
     max-width: 260px;
-    border: 1px solid var(--ctx-border);
-    background: var(--ctx-surface);
-    color: var(--ctx-text);
+    border: 1px solid var(--border);
+    background: var(--surface);
+    color: var(--text);
     font-size: 12px;
     font-family: inherit;
     padding: 5px 26px 5px 10px;
@@ -1184,21 +1144,21 @@
   }
 
   .ctx-view-select:hover {
-    border-color: var(--ctx-border-strong);
+    border-color: var(--border-strong);
   }
 
   .ctx-view-select:focus-visible {
-    outline: 2px solid var(--ctx-accent);
+    outline: 2px solid var(--accent);
     outline-offset: 1px;
   }
 
   /* --- Tree frame -------------------------------------------------- */
 
   .ctx-tree-frame {
-    border: 1px solid var(--ctx-border);
+    border: 1px solid var(--border);
     border-radius: 9px;
     overflow: hidden;
-    background: var(--ctx-surface);
+    background: var(--surface);
   }
 
   .ctx-tree-kind-bar {
@@ -1206,9 +1166,9 @@
     align-items: center;
     justify-content: space-between;
     padding: 7px 12px;
-    background: var(--ctx-panel-2);
-    border-top: 1px solid var(--ctx-border);
-    border-bottom: 1px solid var(--ctx-border);
+    background: var(--panel);
+    border-top: 1px solid var(--border);
+    border-bottom: 1px solid var(--border);
   }
 
   .ctx-tree-kind-bar.first {
@@ -1220,12 +1180,12 @@
     font-weight: 700;
     text-transform: uppercase;
     letter-spacing: 0.07em;
-    color: var(--ctx-text-2);
+    color: var(--text-2);
   }
 
   .ctx-tree-kind-count {
     font-size: 10.5px;
-    color: var(--ctx-text-3);
+    color: var(--text-3);
   }
 
   .ctx-tree-rows {
@@ -1246,7 +1206,7 @@
   }
 
   .ctx-tree-row:hover {
-    background: var(--ctx-panel-2);
+    background: var(--panel);
   }
 
   .ctx-tree-chevron {
@@ -1255,7 +1215,7 @@
     padding: 0;
     border: none;
     background: transparent;
-    color: var(--ctx-text-3);
+    color: var(--text-3);
     font-size: 10px;
     line-height: 1;
     cursor: pointer;
@@ -1267,7 +1227,7 @@
   }
 
   .ctx-tree-chevron:hover {
-    background: var(--ctx-inset);
+    background: var(--inset);
   }
 
   .ctx-tree-chevron-leaf {
@@ -1294,7 +1254,7 @@
 
   .ctx-tree-name {
     font-size: 12.5px;
-    color: var(--ctx-text);
+    color: var(--text);
   }
 
   .ctx-tree-name.root {
@@ -1303,7 +1263,7 @@
 
   .ctx-tree-partial-count {
     font-size: 10.5px;
-    color: var(--ctx-text-3);
+    color: var(--text-3);
     flex: none;
   }
 
@@ -1321,23 +1281,23 @@
     gap: 8px;
     padding: 7px 13px;
     border-radius: 999px;
-    border: 1.5px solid var(--ctx-border);
-    background: var(--ctx-surface);
+    border: 1.5px solid var(--border);
+    background: var(--surface);
     font-size: 12.5px;
-    color: var(--ctx-text-2);
+    color: var(--text-2);
     cursor: pointer;
     line-height: 1;
     transition: border-color 80ms linear, background-color 80ms linear, color 80ms linear;
   }
 
   .ctx-preset-pill:hover {
-    border-color: var(--ctx-border-strong);
+    border-color: var(--border-strong);
   }
 
   .ctx-preset-pill.active {
-    border-color: var(--ctx-accent);
-    background: var(--ctx-accent-soft);
-    color: var(--ctx-text);
+    border-color: var(--accent);
+    background: var(--accent-soft);
+    color: var(--text);
   }
 
   .ctx-preset-pill-input {
@@ -1357,15 +1317,15 @@
     width: 15px;
     height: 15px;
     border-radius: 4px;
-    border: 1.5px solid var(--ctx-border-strong);
-    background: var(--ctx-surface);
+    border: 1.5px solid var(--border-strong);
+    background: var(--surface);
     flex: none;
     position: relative;
   }
 
   .ctx-preset-pill.active .ctx-preset-pill-check {
-    background: var(--ctx-accent);
-    border-color: var(--ctx-accent);
+    background: var(--accent);
+    border-color: var(--accent);
   }
 
   .ctx-preset-pill.active .ctx-preset-pill-check::after {
@@ -1379,7 +1339,7 @@
   }
 
   .ctx-preset-pill-input:focus-visible + .ctx-preset-pill-check {
-    box-shadow: 0 0 0 2px var(--ctx-accent-soft);
+    box-shadow: 0 0 0 2px var(--accent-soft);
   }
 
   .ctx-preset-pill-label {
@@ -1389,9 +1349,9 @@
   /* --- Scene binding block ----------------------------------------- */
 
   .ctx-scene-binding {
-    border: 1px solid var(--ctx-accent);
+    border: 1px solid var(--accent);
     border-radius: 10px;
-    background: var(--ctx-accent-soft);
+    background: var(--accent-soft);
     padding: 13px;
     display: flex;
     align-items: flex-start;
@@ -1403,8 +1363,8 @@
     height: 26px;
     flex: none;
     border-radius: 7px;
-    background: var(--ctx-surface);
-    color: var(--ctx-star);
+    background: var(--surface);
+    color: var(--star);
     display: flex;
     align-items: center;
     justify-content: center;
@@ -1429,19 +1389,19 @@
   .ctx-scene-binding-title {
     font-size: 13px;
     font-weight: 600;
-    color: var(--ctx-text);
+    color: var(--text);
   }
 
   .ctx-scene-binding-help {
     margin: 0;
     font-size: 12px;
-    color: var(--ctx-text-2);
+    color: var(--text-2);
     line-height: 1.45;
   }
 
   .ctx-scene-binding-help code {
     font-size: 11px;
-    background: var(--ctx-surface);
+    background: var(--surface);
     padding: 1px 4px;
     border-radius: 4px;
   }
@@ -1455,9 +1415,9 @@
     margin: 0;
     padding: 11px 13px;
     border-radius: 9px;
-    background: var(--ctx-warn-bg);
-    border: 1px solid var(--ctx-warn-border);
-    color: var(--ctx-warn-text);
+    background: var(--warn-soft);
+    border: 1px solid var(--warn-border);
+    color: var(--warn);
     font-size: 12.5px;
     line-height: 1.45;
   }
@@ -1470,7 +1430,7 @@
 
   .ctx-muted {
     margin: 4px 8px 6px;
-    color: var(--ctx-text-3);
+    color: var(--text-3);
     font-size: 11px;
     font-style: italic;
   }

@@ -290,7 +290,7 @@
     padding: 9px 16px;
     background: var(--accent-soft);
     border-bottom: 1px solid var(--accent-soft2);
-    color: var(--accent-strong);
+    color: var(--accent-emphasis);
   }
   .tm-merge-label {
     font-size: 12.5px;

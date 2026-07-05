@@ -372,7 +372,7 @@
     padding: 1px 6px;
     border-radius: 999px;
     background: var(--accent-soft, color-mix(in srgb, var(--accent) 14%, var(--surface)));
-    color: var(--accent-strong, var(--accent));
+    color: var(--accent-emphasis, var(--accent));
   }
 
   /* --- Entry-inputs editor, co-located from styles.css (#14). Child-DOM

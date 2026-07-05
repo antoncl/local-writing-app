@@ -182,7 +182,7 @@
   .ip-cell.on {
     background: var(--accent-soft, #edf6f2);
     border-color: var(--accent, #2f6f5e);
-    color: var(--accent-strong, #234e43);
+    color: var(--accent-emphasis, #234e43);
   }
   .ip-empty {
     margin: 4px 0;

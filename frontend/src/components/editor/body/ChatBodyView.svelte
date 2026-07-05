@@ -1211,7 +1211,7 @@
   }
   .cbv-estimate-tokens,
   .cbv-estimate-cost { font-family: ui-monospace, "JetBrains Mono", monospace; }
-  .cbv-estimate-chip { background: var(--accent-soft); border-color: var(--accent-soft2); color: var(--accent-strong); font-weight: 600; }
+  .cbv-estimate-chip { background: var(--accent-soft); border-color: var(--accent-soft2); color: var(--accent-emphasis); font-weight: 600; }
   .cbv-estimate-sep { display: none; }
   .cbv-ttl-chip.cbv-ttl-expired { background: var(--danger-soft); border-color: var(--danger-border); color: var(--danger); font-weight: 600; }
 

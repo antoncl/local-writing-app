@@ -135,7 +135,7 @@
   .cbv-journal-chip {
     display: inline-flex; align-items: center; gap: 5px; padding: 3px 10px; border-radius: 999px;
     background: var(--accent-soft); border: 1px solid var(--accent-soft2);
-    color: var(--accent-strong); font-weight: 600;
+    color: var(--accent-emphasis); font-weight: 600;
   }
   .cbv-journal-chip::before { content: "✚"; font-size: 9px; }
 

@@ -430,7 +430,7 @@ h3 {
 .pin-button.active-pin {
   border-color: var(--accent);
   background: var(--accent-soft2);
-  color: var(--accent-strong);
+  color: var(--accent-emphasis);
 }
 
 .pin-button.danger {

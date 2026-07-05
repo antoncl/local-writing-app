@@ -177,6 +177,42 @@ in it; no per-pane move buttons, no corner resize grips (splitters between
 regions instead). Empty space belongs *inside* regions (breathing room around
 content), never *between* them (dead board).
 
+**Surface taxonomy — where a thing lives.** Five surface classes exist, and
+every feature gets exactly one. Like the glyph lexicon, the class list grows
+only by amending this document:
+
+| class | nature | examples |
+|---|---|---|
+| **region** | long-lived tile in the workspace; participates in layouts, splitters, tabbing | Draft, Lore, Research, the editor |
+| **editor tab** | a document open inside the editor region | scene, lore entry, view, chat |
+| **rail** | fixed-side companion *inside* a region, scoped to its content | metadata rail in the editor |
+| **popover** | transient, anchored to its invoker, dismissed on blur | pickers, dropdowns, swatch grid |
+| **dialog** | modal, workspace-centered, for flows that must complete | settings, confirm, tag/group managers |
+
+A new feature classifies itself by walking these in order:
+
+1. **Is it a node the user opens?** → editor tab. Documents never spawn
+   regions, panes, or windows of their own — opening a second document is a
+   second tab (or a split of the editor region), not a new surface.
+2. **Is it a persistent browse/list surface over nodes?** → region. It must
+   also survive being *tabbed with* another region — a region that only works
+   at full size is a design error.
+3. **Is it context for what's currently open?** → rail, inside that region.
+   Never a sibling region that must be manually kept in sync.
+4. **Is it a quick choice anchored to a control?** → popover.
+5. **Does it demand completion or confirm destruction?** → dialog. Everything
+   else is one of the four above — modality is a last resort, not a layout
+   tool.
+
+**Extension guarantees** the shell owes every current and future surface:
+every region is keyboard-reachable (focus cycling per #32); a saved layout
+that predates a new region still loads — unknown regions join a default
+position instead of invalidating the layout; regions declare a minimum useful
+width and the shell may collapse them to tabs below it, so adding a region
+never breaks an existing arrangement. Mechanism (tab model, splitter
+implementation, layout persistence format) is #32's decision — this taxonomy
+is the contract it implements.
+
 ## 5. Adding UI — the checklist
 
 Before a PR with visual changes is done:

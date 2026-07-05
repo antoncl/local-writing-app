@@ -59,8 +59,13 @@ A live survey of the app (testbench drive, both themes) plus a full audit of
 4. **The shell contract for #32 is spatial, not implementation**: a tiled
    workspace — regions fill it, nothing floats/overlaps/cascades, the editor is
    the primary region, splitters replace per-pane move buttons and corner
-   grips. #32 chooses the mechanism; this ADR fixes the gestalt it must land
-   on.
+   grips. On top of the gestalt, a **surface taxonomy** (region / editor tab /
+   rail / popover / dialog, with an ordered classification walk) answers
+   "where does a new feature live?" the way the widget taxonomy answers "how
+   does a thing render?" — documents never spawn surfaces of their own, and
+   the shell owes extension guarantees (keyboard reachability, saved layouts
+   tolerate unknown regions, regions collapse to tabs below a minimum width).
+   #32 chooses the mechanism; this ADR fixes the contract it must implement.
 
 5. **Enforcement follows the house pattern** (machine-enforced, not prose):
    after #125 phase 1, the PostToolUse hook + pre-commit gain a style lint —

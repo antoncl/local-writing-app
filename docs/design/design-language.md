@@ -239,10 +239,12 @@ Before a PR with visual changes is done:
 6. Both themes eyeballed (`data-theme="dark"` + light), and `npm run check`
    clean.
 
-Enforcement note: once #125 phase 1 lands, the file-edit hook gains a style
-lint (hex/rgb literals + non-token `font-size` in `.svelte` style blocks fail,
-with a grandfather list that shrinks to zero) — same machine-enforced pattern
-as the file-size guard.
+Enforcement note: step 2 is machine-enforced (#129) —
+`scripts/check_style_tokens.py` runs from the file-edit hook and pre-commit.
+Hex/rgb literals and non-token `font-size` in `.svelte` style blocks (and
+`styles.css` outside the `:root` token blocks) fail, with a grandfather list
+that shrinks to zero — same pattern as the file-size guard. Sanctioned
+exceptions live in that script's docstring.
 
 ## Appendix — survey findings (2026-07-05, testbench live-drive)
 

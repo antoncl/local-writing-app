@@ -58,10 +58,12 @@ weakest → strongest:
 
 1. **In-session** — a Claude Code `PostToolUse` hook
    (`.claude/hooks/check_edited_file.py`, wired in `.claude/settings.json`) runs
-   the file-size guard + `ruff` on **every file you edit** and feeds any
-   violation straight back into context. Fix it before declaring the task done.
+   the file-size guard + the style-token guard + `ruff` on **every file you
+   edit** and feeds any violation straight back into context. Fix it before
+   declaring the task done.
 2. **Git hooks** (`.pre-commit-config.yaml`) — *commit* runs `ruff` + the
-   file-size guard on staged files; *push* runs `svelte-check` + `pytest`.
+   file-size and style-token guards on staged files; *push* runs
+   `svelte-check` + `pytest`.
    One-time setup per clone:
    `backend/.venv/Scripts/python.exe -m pip install -e "backend[dev]"`, then
    `backend/.venv/Scripts/pre-commit install` and `… install -t pre-push`.
@@ -70,7 +72,12 @@ The **file-size guard** (`scripts/check_file_size.py`) is the enforced half of
 "no monolithic files": warns ≥1200, **fails ≥1500** lines on `.py/.svelte/.ts`.
 Files knowingly over the cap are listed in that script's `GRANDFATHERED` set
 (currently `main.py`, `test_metadata_validation.py`) — split them when you next
-work there, then delete the entry. The manual gates still apply when iterating
+work there, then delete the entry. The **style-token guard**
+(`scripts/check_style_tokens.py`) is the enforced half of the design language
+(`docs/design/design-language.md` §5): hex/rgb color literals and non-token
+`font-size` in frontend style code fail, with its own shrink-to-zero
+`GRANDFATHERED` set (#129) — sanctioned exceptions are in the script's
+docstring. The manual gates still apply when iterating
 (`ruff check backend` + `pytest backend/tests`; `npm run check`).
 
 **Where do I stop splitting? Match the target shapes, don't guess:**

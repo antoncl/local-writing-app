@@ -10,6 +10,7 @@ has already happened, so exit 0 + stdout is the right channel here.)
 
 Checks:
   * file-size guard  — every source file (scripts/check_file_size.py)
+  * style-token guard — frontend style code (scripts/check_style_tokens.py)
   * ruff             — Python files only, via the backend venv where it lives
 
 Always exits 0; a broken hook must never wedge the session.
@@ -24,6 +25,7 @@ from pathlib import Path
 
 REPO = Path(__file__).resolve().parents[2]
 SIZE_GUARD = REPO / "scripts" / "check_file_size.py"
+STYLE_GUARD = REPO / "scripts" / "check_style_tokens.py"
 # Advisory complexity rules — flagged, never blocking, while the existing count
 # is burned down (see backend/pyproject.toml for thresholds).
 COMPLEXITY_RULES = "PLR0912,PLR0913,PLR0915,C901"
@@ -61,6 +63,11 @@ def main() -> int:
 
     if SIZE_GUARD.is_file():
         _, out = run([sys.executable, str(SIZE_GUARD), str(path)])
+        if out:
+            messages.append(out)
+
+    if path.suffix in {".svelte", ".css"} and STYLE_GUARD.is_file():
+        _, out = run([sys.executable, str(STYLE_GUARD), str(path)])
         if out:
             messages.append(out)
 

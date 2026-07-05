@@ -78,10 +78,9 @@ DEFAULT_METADATA_SCHEMA: dict[str, Any] = {
             "fields": ["character_cost"],
         },
         "lore:location": {
-            # Display label is "Location" (matches the `locations` field on
-            # scene and the user's mental model); the entry-type local key
-            # stays "place" so existing project YAML and metadata refs keep
-            # resolving — the key is a backend identifier, display is UX.
+            # Local key aligned to its "Location" display (#85); the old key
+            # was `place`, a documented key/display mismatch scar removed in
+            # the pre-1.0 FQN cleanup. Matches the `locations` field on scene.
             "name": "Location",
             "kind": "lore",
             "parent": "lore:base",

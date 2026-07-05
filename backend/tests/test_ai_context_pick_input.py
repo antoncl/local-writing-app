@@ -22,7 +22,7 @@ def test_context_pick_input_validates_with_kinds_and_presets():
             "required": False,
             "target": {
                 "kinds": ["scene", "lore"],
-                "entry_types": {"lore": ["lore:character", "lore:place"]},
+                "entry_types": {"lore": ["lore:character", "lore:location"]},
                 "presets": ["full_outline"],
                 "multiple": True,
             },
@@ -32,7 +32,7 @@ def test_context_pick_input_validates_with_kinds_and_presets():
     assert spec.target is not None
     assert spec.target["kinds"] == ["scene", "lore"]
     assert spec.target["presets"] == ["full_outline"]
-    assert spec.target["entry_types"]["lore"] == ["lore:character", "lore:place"]
+    assert spec.target["entry_types"]["lore"] == ["lore:character", "lore:location"]
 
 
 def test_context_pick_input_allows_empty_target():

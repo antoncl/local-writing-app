@@ -119,7 +119,7 @@ class FieldOverrideTests(unittest.TestCase):
             {
                 "version": 1,
                 "entry_types": {
-                    "lore:lore_entry": {"field_overrides": {"tags": {"label": "Labels"}}},
+                    "lore:base": {"field_overrides": {"tags": {"label": "Labels"}}},
                     "lore:character": {"field_overrides": {"title": {"label": "Name"}}},
                 },
             },

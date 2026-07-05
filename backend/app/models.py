@@ -696,7 +696,7 @@ class PromptEntrySummary(BaseModel):
     id: str
     title: str
     body: str = ""
-    entry_type: str = "prompt:prompt"
+    entry_type: str = "prompt:base"
     metadata: dict[str, MetadataValue] = Field(default_factory=dict)
     # Per-entry input declarations. Each prompt declares the parameters its
     # template body references via `{{ input.<name> }}`. Used to be on the
@@ -713,7 +713,7 @@ class PromptEntry(BaseModel):
     title: str
     body: str
     revision: str
-    entry_type: str = "prompt:prompt"
+    entry_type: str = "prompt:base"
     metadata: dict[str, MetadataValue] = Field(default_factory=dict)
     inputs: list[PromptInputDefinition] = Field(default_factory=list)
     computed_metadata: dict[str, MetadataValue] = Field(default_factory=dict)
@@ -727,14 +727,14 @@ class PromptEntryList(BaseModel):
 
 class CreatePromptEntryRequest(BaseModel):
     title: str = Field(min_length=1)
-    entry_type: str = "prompt:prompt"
+    entry_type: str = "prompt:base"
 
 
 class SavePromptEntryRequest(BaseModel):
     title: str = Field(min_length=1)
     body: str
     base_revision: str | None = None
-    entry_type: str = "prompt:prompt"
+    entry_type: str = "prompt:base"
     metadata: dict[str, MetadataValue] = Field(default_factory=dict)
     inputs: list[PromptInputDefinition] = Field(default_factory=list)
 

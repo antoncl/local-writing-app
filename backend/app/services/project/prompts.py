@@ -43,8 +43,8 @@ class PromptEntriesMixin:
                 front_matter, body = self._read_markdown_with_front_matter(entry.path, strict=True)
             except ProjectServiceError:
                 continue
-            raw_entry_type = front_matter.get("entry_type") or "prompt:prompt"
-            entry_type = raw_entry_type if isinstance(raw_entry_type, str) else "prompt:prompt"
+            raw_entry_type = front_matter.get("entry_type") or "prompt:base"
+            entry_type = raw_entry_type if isinstance(raw_entry_type, str) else "prompt:base"
             entries.append(
                 PromptEntrySummary(
                     id=entry.id,
@@ -106,7 +106,7 @@ class PromptEntriesMixin:
             path = self._path_for_node_id(entry_id, "prompt")
         front_matter, body = self._read_markdown_with_front_matter(path, strict=True)
         node_id = self._node_id_for_path(path, front_matter)
-        raw_entry_type = front_matter.get("entry_type") or "prompt:prompt"
+        raw_entry_type = front_matter.get("entry_type") or "prompt:base"
         if not isinstance(raw_entry_type, str):
             raise ProjectServiceError(f"Prompt {node_id} has invalid entry_type; it must be text.", 422)
         return PromptEntry(

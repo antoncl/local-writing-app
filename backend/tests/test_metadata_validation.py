@@ -61,7 +61,7 @@ class MetadataValidationTests(unittest.TestCase):
         data.setdefault("fields", {})["home_place"] = {
             "name": "Home Place",
             "type": "entity_ref",
-            "target": {"entry_type": "lore:place"},
+            "target": {"entry_type": "lore:location"},
         }
         character = data["entry_types"].get("lore:character") or {}
         fields = list(character.get("fields") or [])
@@ -82,13 +82,13 @@ class MetadataValidationTests(unittest.TestCase):
 
     def test_manuscript_structure_is_shared_abstract_parent(self) -> None:
         schema = self.service.read_metadata_schema()
-        parent = schema.entry_types.get("scene:manuscript_structure")
+        parent = schema.entry_types.get("scene:base")
         self.assertIsNotNone(parent)
         assert parent is not None
         self.assertTrue(parent.abstract)
         self.assertEqual(parent.kind, "scene")
         for type_id in ["scene:act", "scene:chapter", "scene:scene"]:
-            self.assertEqual(schema.entry_types[type_id].parent, "scene:manuscript_structure")
+            self.assertEqual(schema.entry_types[type_id].parent, "scene:base")
             self.assertIn("summary", schema.entry_types[type_id].fields)
 
     def test_same_local_key_under_two_kinds_coexists(self) -> None:
@@ -98,7 +98,7 @@ class MetadataValidationTests(unittest.TestCase):
         schema_path = self.root / "metadata.schema.yaml"
         data = self.service._read_yaml(schema_path)
         entry_types = data.setdefault("entry_types", {})
-        entry_types["lore:widget"] = {"name": "Widget", "kind": "lore", "parent": "lore:lore_entry", "fields": []}
+        entry_types["lore:widget"] = {"name": "Widget", "kind": "lore", "parent": "lore:base", "fields": []}
         entry_types["mutation_set:widget"] = {"name": "Widget Set", "kind": "mutation_set", "fields": []}
         self.service._write_yaml(schema_path, data)
         schema = self.service.read_metadata_schema()
@@ -113,7 +113,7 @@ class MetadataValidationTests(unittest.TestCase):
             UpsertMetadataEntryTypeRequest(
                 layer_id=layer_id,
                 entry_type_id="faction",
-                entry_type=EntryTypeDefinition(name="Faction", kind="lore", parent="lore:lore_entry"),
+                entry_type=EntryTypeDefinition(name="Faction", kind="lore", parent="lore:base"),
                 allow_existing=False,
             )
         )
@@ -130,7 +130,7 @@ class MetadataValidationTests(unittest.TestCase):
                 UpsertMetadataEntryTypeRequest(
                     layer_id=layer_id,
                     entry_type_id="scene:faction",
-                    entry_type=EntryTypeDefinition(name="Faction", kind="lore", parent="lore:lore_entry"),
+                    entry_type=EntryTypeDefinition(name="Faction", kind="lore", parent="lore:base"),
                     allow_existing=False,
                 )
             )
@@ -170,7 +170,7 @@ class MetadataValidationTests(unittest.TestCase):
 
     def test_prompt_subtypes_inherit_code_and_jinja2(self) -> None:
         schema = self.service.read_metadata_schema()
-        for type_id in ("prompt:prompt", "prompt:continuation", "prompt:revise", "prompt:general", "prompt:snippet"):
+        for type_id in ("prompt:base", "prompt:continuation", "prompt:revise", "prompt:general", "prompt:snippet"):
             definition = schema.entry_types[type_id]
             self.assertEqual(definition.body_editor, "code", msg=type_id)
             self.assertEqual(definition.body_language, "jinja2", msg=type_id)
@@ -185,7 +185,7 @@ class MetadataValidationTests(unittest.TestCase):
                     "lore:research_note": {
                         "name": "Research Note",
                         "kind": "lore",
-                        "parent": "lore:lore_entry",
+                        "parent": "lore:base",
                         "fields": [],
                         "body_editor": "code",
                         "body_language": "plain",
@@ -264,7 +264,7 @@ class MetadataValidationTests(unittest.TestCase):
 
     def test_has_body_inherits_false_for_containers_true_for_scene(self) -> None:
         schema = self.service.read_metadata_schema()
-        self.assertFalse(schema.entry_types["scene:manuscript_structure"].has_body)
+        self.assertFalse(schema.entry_types["scene:base"].has_body)
         self.assertFalse(schema.entry_types["scene:act"].has_body)
         self.assertFalse(schema.entry_types["scene:chapter"].has_body)
         self.assertTrue(schema.entry_types["scene:scene"].has_body)
@@ -303,12 +303,12 @@ class MetadataValidationTests(unittest.TestCase):
         schema = self.service.read_metadata_schema()
         # Direct seeds.
         self.assertEqual(schema.entry_types["scene:scene"].color, "forest")
-        self.assertEqual(schema.entry_types["lore:lore_entry"].color, "slate-blue")
-        self.assertEqual(schema.entry_types["prompt:prompt"].color, "warm-brown")
+        self.assertEqual(schema.entry_types["lore:base"].color, "slate-blue")
+        self.assertEqual(schema.entry_types["prompt:base"].color, "warm-brown")
         self.assertEqual(schema.entry_types["assistant:assistant"].color, "graphite")
         # Inherited through one parent link.
         self.assertEqual(schema.entry_types["lore:character"].color, "slate-blue")
-        self.assertEqual(schema.entry_types["lore:place"].color, "slate-blue")
+        self.assertEqual(schema.entry_types["lore:location"].color, "slate-blue")
         self.assertEqual(schema.entry_types["lore:item"].color, "slate-blue")
         self.assertEqual(schema.entry_types["prompt:continuation"].color, "warm-brown")
         self.assertEqual(schema.entry_types["prompt:general"].color, "warm-brown")
@@ -420,7 +420,7 @@ class MetadataValidationTests(unittest.TestCase):
 
         with self.assertRaises(ProjectServiceError) as ctx:
             self.service.create_structure_node(
-                CreateStructureNodeRequest(title="Bad", entry_type="scene:manuscript_structure")
+                CreateStructureNodeRequest(title="Bad", entry_type="scene:base")
             )
         self.assertIn("abstract", ctx.exception.message)
 
@@ -1018,7 +1018,7 @@ class MetadataValidationTests(unittest.TestCase):
                 entry_type=EntryTypeDefinition.model_validate({
                     "name": "Brainstorm",
                     "kind": "prompt",
-                    "parent": "prompt:prompt",
+                    "parent": "prompt:base",
                     "abstract": False,
                     "fields": [],
                 }),
@@ -1147,7 +1147,7 @@ class MetadataValidationTests(unittest.TestCase):
             UpsertMetadataEntryTypeRequest(
                 layer_id=project_layer.id,
                 entry_type_id="faction",
-                entry_type=EntryTypeDefinition(name="Faction", kind="lore", parent="lore:lore_entry", fields=[]),
+                entry_type=EntryTypeDefinition(name="Faction", kind="lore", parent="lore:base", fields=[]),
             )
         )
         for fid in ("alpha", "beta", "gamma"):
@@ -1182,7 +1182,7 @@ class MetadataValidationTests(unittest.TestCase):
             UpsertMetadataEntryTypeRequest(
                 layer_id=project_layer.id,
                 entry_type_id="faction",
-                entry_type=EntryTypeDefinition(name="Faction", kind="lore", parent="lore:lore_entry", fields=[]),
+                entry_type=EntryTypeDefinition(name="Faction", kind="lore", parent="lore:base", fields=[]),
             )
         )
         self.service.upsert_metadata_field(
@@ -1223,7 +1223,7 @@ class MetadataValidationTests(unittest.TestCase):
             UpsertMetadataEntryTypeRequest(
                 layer_id=project_layer.id,
                 entry_type_id="realm",
-                entry_type=EntryTypeDefinition(name="Realm", kind="lore", parent="lore:lore_entry", fields=[]),
+                entry_type=EntryTypeDefinition(name="Realm", kind="lore", parent="lore:base", fields=[]),
             )
         )
         self.service.upsert_metadata_field(
@@ -1518,16 +1518,16 @@ class MetadataValidationTests(unittest.TestCase):
         schema = self.service.read_metadata_schema()
 
         self.assertEqual(schema.entry_types["lore:character"].kind, "lore")
-        self.assertEqual(schema.entry_types["lore:place"].kind, "lore")
-        self.assertTrue(schema.entry_types["lore:lore_entry"].abstract)
-        self.assertEqual(schema.entry_types["lore:character"].parent, "lore:lore_entry")
-        self.assertEqual(schema.entry_types["lore:lore_note"].parent, "lore:lore_entry")
+        self.assertEqual(schema.entry_types["lore:location"].kind, "lore")
+        self.assertTrue(schema.entry_types["lore:base"].abstract)
+        self.assertEqual(schema.entry_types["lore:character"].parent, "lore:base")
+        self.assertEqual(schema.entry_types["lore:lore_note"].parent, "lore:base")
         self.assertNotIn("summary", schema.entry_types["lore:character"].fields)
         self.assertNotIn("summary", schema.entry_types["lore:lore_note"].fields)
         self.assertNotIn("appears_in_scenes", schema.entry_types["lore:lore_note"].fields)
         self.assertIn("aliases", schema.entry_types["lore:lore_note"].fields)
         self.assertIn("tags", schema.entry_types["lore:lore_note"].fields)
-        self.assertEqual(schema.entry_types["lore:lore_entry"].own_fields, ["aliases", "tags", "related_entries", "color", "context_policy"])
+        self.assertEqual(schema.entry_types["lore:base"].own_fields, ["aliases", "tags", "related_entries", "color", "context_policy"])
         # Test fixture adds home_place to character (see _add_home_place_to_character_schema).
         # The seed ships character with `character_cost` (Phase C2 cross-kind
         # cost dispatch); the fixture layer adds home_place on top.
@@ -1547,15 +1547,15 @@ class MetadataValidationTests(unittest.TestCase):
 
         # Research is the abstract parent for the research-kind tree —
         # like manuscript_structure for the manuscript tree.
-        self.assertTrue(schema.entry_types["research:research"].abstract)
-        self.assertEqual(schema.entry_types["research:research"].kind, "research")
+        self.assertTrue(schema.entry_types["research:base"].abstract)
+        self.assertEqual(schema.entry_types["research:base"].kind, "research")
 
         self.assertEqual(schema.entry_types["research:topic"].kind, "research")
-        self.assertEqual(schema.entry_types["research:topic"].parent, "research:research")
+        self.assertEqual(schema.entry_types["research:topic"].parent, "research:base")
         self.assertFalse(schema.entry_types["research:topic"].has_body)
 
         self.assertEqual(schema.entry_types["research:note"].kind, "research")
-        self.assertEqual(schema.entry_types["research:note"].parent, "research:research")
+        self.assertEqual(schema.entry_types["research:note"].parent, "research:base")
         self.assertTrue(schema.entry_types["research:note"].has_body)
         # v1 ships notes with just tags (per decisions-research-strategy).
         # Aliases / related_entries / context_policy intentionally omitted.
@@ -1599,7 +1599,7 @@ class MetadataValidationTests(unittest.TestCase):
                 layer_id=project_layer.id,
                 field_id="importance",
                 field=MetadataFieldDefinition(name="Importance", type="select", options=["Low", "High"]),
-                entry_type="lore:lore_entry",
+                entry_type="lore:base",
             )
         )
         self.assertIn("importance", schema.entry_types["lore:character"].fields)
@@ -1632,7 +1632,7 @@ class MetadataValidationTests(unittest.TestCase):
                 entry_type=EntryTypeDefinition(
                     name="Faction",
                     kind="lore",
-                    parent="lore:lore_entry",
+                    parent="lore:base",
                     fields=[],
                 ),
             )
@@ -1661,8 +1661,8 @@ class MetadataValidationTests(unittest.TestCase):
         self.assertEqual(saved.metadata["tags"], ["Politics"])
 
     def test_abstract_entry_type_cannot_be_used_by_documents(self) -> None:
-        with self.assertRaisesRegex(ProjectServiceError, "abstract entry_type lore:lore_entry"):
-            self.service.create_lore_entry(CreateLoreEntryRequest(title="Abstract", entry_type="lore:lore_entry"))
+        with self.assertRaisesRegex(ProjectServiceError, "abstract entry_type lore:base"):
+            self.service.create_lore_entry(CreateLoreEntryRequest(title="Abstract", entry_type="lore:base"))
 
     def test_used_custom_entry_type_cannot_be_deleted(self) -> None:
         project_layer = next(
@@ -1674,7 +1674,7 @@ class MetadataValidationTests(unittest.TestCase):
             UpsertMetadataEntryTypeRequest(
                 layer_id=project_layer.id,
                 entry_type_id="faction",
-                entry_type=EntryTypeDefinition(name="Faction", kind="lore", parent="lore:lore_entry", fields=[]),
+                entry_type=EntryTypeDefinition(name="Faction", kind="lore", parent="lore:base", fields=[]),
             )
         )
         self.service.create_lore_entry(CreateLoreEntryRequest(title="The Pact", entry_type="lore:faction"))
@@ -1684,7 +1684,7 @@ class MetadataValidationTests(unittest.TestCase):
 
     def test_lore_entry_round_trips_metadata(self) -> None:
         entry = self.service.create_lore_entry(CreateLoreEntryRequest(title="Seren", entry_type="lore:character"))
-        place = self.service.create_lore_entry(CreateLoreEntryRequest(title="Taverna", entry_type="lore:place"))
+        place = self.service.create_lore_entry(CreateLoreEntryRequest(title="Taverna", entry_type="lore:location"))
 
         saved = self.service.save_lore_entry(
             entry.id,
@@ -1774,7 +1774,7 @@ class MetadataValidationTests(unittest.TestCase):
                 ),
             )
 
-        with self.assertRaisesRegex(ProjectServiceError, "expected entry_type in \\['lore:place'\\]"):
+        with self.assertRaisesRegex(ProjectServiceError, "expected entry_type in \\['lore:location'\\]"):
             self.service.save_lore_entry(
                 character.id,
                 SaveLoreEntryRequest(
@@ -1910,7 +1910,7 @@ class MetadataValidationTests(unittest.TestCase):
                 entry_type=EntryTypeDefinition(
                     name="Continue Scene",
                     kind="prompt",
-                    parent="prompt:prompt",
+                    parent="prompt:base",
                     prompt=extras,
                 ),
             )
@@ -2018,7 +2018,7 @@ class MetadataValidationTests(unittest.TestCase):
         for type_id in ("prompt:continuation", "prompt:revise", "prompt:general", "prompt:snippet"):
             self.assertIn(type_id, schema.entry_types)
             self.assertEqual(schema.entry_types[type_id].kind, "prompt")
-            self.assertEqual(schema.entry_types[type_id].parent, "prompt:prompt")
+            self.assertEqual(schema.entry_types[type_id].parent, "prompt:base")
             self.assertFalse(schema.entry_types[type_id].abstract, msg=type_id)
 
         continuation_prompt = schema.entry_types["prompt:continuation"].prompt
@@ -2078,7 +2078,7 @@ class MetadataValidationTests(unittest.TestCase):
         self.assertEqual(schema.entry_types["prompt:house_voice"].kind, "prompt")
         self.assertEqual(schema.entry_types["prompt:house_voice"].parent, "prompt:snippet")
         self.assertEqual(schema.entry_types["prompt:snippet"].kind, "prompt")
-        self.assertEqual(schema.entry_types["prompt:snippet"].parent, "prompt:prompt")
+        self.assertEqual(schema.entry_types["prompt:snippet"].parent, "prompt:base")
 
     def test_unknown_kind_is_rejected(self) -> None:
         layer_id = self._project_layer_id()
@@ -2101,7 +2101,7 @@ class MetadataValidationTests(unittest.TestCase):
                     entry_type=EntryTypeDefinition(
                         name="Faction",
                         kind="lore",
-                        parent="lore:lore_entry",
+                        parent="lore:base",
                         prompt=PromptEntryTypeExtras(system_prompt="Nope"),
                     ),
                 )
@@ -2117,7 +2117,7 @@ class MetadataValidationTests(unittest.TestCase):
                     entry_type=EntryTypeDefinition(
                         name="Bad Prompt",
                         kind="prompt",
-                        parent="prompt:prompt",
+                        parent="prompt:base",
                         prompt=PromptEntryTypeExtras(
                             inputs=[PromptInputDefinition(name="tone", type="select", options=[])],
                         ),
@@ -2135,7 +2135,7 @@ class MetadataValidationTests(unittest.TestCase):
                     entry_type=EntryTypeDefinition(
                         name="Dup Prompt",
                         kind="prompt",
-                        parent="prompt:prompt",
+                        parent="prompt:base",
                         prompt=PromptEntryTypeExtras(
                             inputs=[
                                 PromptInputDefinition(name="x"),
@@ -2155,7 +2155,7 @@ class MetadataValidationTests(unittest.TestCase):
                 entry_type=EntryTypeDefinition(
                     name="House Prompt",
                     kind="prompt",
-                    parent="prompt:prompt",
+                    parent="prompt:base",
                     abstract=True,
                     prompt=PromptEntryTypeExtras(
                         system_prompt="House style: terse, no purple prose.",
@@ -2194,7 +2194,7 @@ class MetadataValidationTests(unittest.TestCase):
                 entry_type=EntryTypeDefinition(
                     name="My Prompt",
                     kind="prompt",
-                    parent="prompt:prompt",
+                    parent="prompt:base",
                     prompt=PromptEntryTypeExtras(
                         system_prompt="Keep it short.",
                         inputs=[PromptInputDefinition(name="topic")],
@@ -2209,7 +2209,7 @@ class MetadataValidationTests(unittest.TestCase):
                 entry_type=EntryTypeDefinition(
                     name="Renamed Prompt",
                     kind="prompt",
-                    parent="prompt:prompt",
+                    parent="prompt:base",
                 ),
             )
         )
@@ -2424,7 +2424,7 @@ class ReferenceResolutionTests(unittest.TestCase):
         data.setdefault("fields", {})["home_place"] = {
             "name": "Home Place",
             "type": "entity_ref",
-            "target": {"entry_type": "lore:place"},
+            "target": {"entry_type": "lore:location"},
         }
         character = data["entry_types"].get("lore:character") or {}
         fields = list(character.get("fields") or [])
@@ -2456,7 +2456,7 @@ class ReferenceResolutionTests(unittest.TestCase):
 
     def test_resolve_returns_titles_for_known_ids(self) -> None:
         seren = self.service.create_lore_entry(CreateLoreEntryRequest(title="Seren", entry_type="lore:character"))
-        taverna = self.service.create_lore_entry(CreateLoreEntryRequest(title="Taverna", entry_type="lore:place"))
+        taverna = self.service.create_lore_entry(CreateLoreEntryRequest(title="Taverna", entry_type="lore:location"))
 
         response = self.service.resolve_references([seren.id, taverna.id])
 
@@ -2495,13 +2495,13 @@ class ReferenceResolutionTests(unittest.TestCase):
 
     def test_candidates_filter_by_entry_type_with_inheritance(self) -> None:
         self.service.create_lore_entry(CreateLoreEntryRequest(title="Seren", entry_type="lore:character"))
-        self.service.create_lore_entry(CreateLoreEntryRequest(title="Taverna", entry_type="lore:place"))
+        self.service.create_lore_entry(CreateLoreEntryRequest(title="Taverna", entry_type="lore:location"))
 
         characters_only = self.service.list_reference_candidates(entry_type="lore:character")
         titles = {candidate.title for candidate in characters_only.candidates}
         self.assertEqual(titles, {"Seren"})
 
-        all_lore = self.service.list_reference_candidates(entry_type="lore:lore_entry")
+        all_lore = self.service.list_reference_candidates(entry_type="lore:base")
         titles = {candidate.title for candidate in all_lore.candidates}
         self.assertEqual(titles, {"Seren", "Taverna"})
 
@@ -2517,7 +2517,7 @@ class ReferenceResolutionTests(unittest.TestCase):
 
     def test_backlinks_finds_references(self) -> None:
         seren = self.service.create_lore_entry(CreateLoreEntryRequest(title="Seren", entry_type="lore:character"))
-        taverna = self.service.create_lore_entry(CreateLoreEntryRequest(title="Taverna", entry_type="lore:place"))
+        taverna = self.service.create_lore_entry(CreateLoreEntryRequest(title="Taverna", entry_type="lore:location"))
         self.service.save_lore_entry(
             seren.id,
             SaveLoreEntryRequest(

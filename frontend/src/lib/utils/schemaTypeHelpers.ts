@@ -71,8 +71,8 @@ export function nodeTypeDisplayName(
   definition: EntryTypeDefinition | undefined,
 ): string {
   if (typeId === "scene:scene") return "Scenes";
-  if (typeId === "lore:lore_entry") return "Lore Entries";
-  if (typeId === "prompt:prompt") return "Prompts";
+  if (typeId === "lore:base") return "Lore Entries";
+  if (typeId === "prompt:base") return "Prompts";
   return definition?.name ?? typeId;
 }
 
@@ -201,12 +201,12 @@ export function buildNodeTypeTree(
     children.sort(compareByName);
   }
   const rootIds =
-    kind === "lore" && entryTypes["lore:lore_entry"]
-      ? ["lore:lore_entry"]
-      : kind === "prompt" && entryTypes["prompt:prompt"]
-        ? ["prompt:prompt"]
-        : kind === "research" && entryTypes["research:research"]
-          ? ["research:research"]
+    kind === "lore" && entryTypes["lore:base"]
+      ? ["lore:base"]
+      : kind === "prompt" && entryTypes["prompt:base"]
+        ? ["prompt:base"]
+        : kind === "research" && entryTypes["research:base"]
+          ? ["research:base"]
           : roots.sort(compareByName);
   const fieldsRegistry = schema?.fields ?? {};
   const buildNode = (typeId: string, depth: number): NodeTypeTreeNode | null => {

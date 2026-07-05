@@ -821,7 +821,7 @@
     padding: 4px 11px;
     border: 1px dashed var(--accent);
     background: var(--accent-soft);
-    color: var(--accent-strong);
+    color: var(--accent-emphasis);
     border-radius: 8px;
     font-size: 12.5px;
     font-weight: 600;
@@ -1083,7 +1083,7 @@
 
   .ctx-item-title mark {
     background: var(--accent-soft);
-    color: var(--accent-strong);
+    color: var(--accent-emphasis);
     border-radius: 2px;
     padding: 0 1px;
     font-weight: 600;
@@ -1093,7 +1093,7 @@
     flex: none;
     font-size: 10.5px;
     font-weight: 600;
-    color: var(--accent-strong);
+    color: var(--accent-emphasis);
     background: var(--accent-soft);
     border-radius: 999px;
     padding: 1px 8px;

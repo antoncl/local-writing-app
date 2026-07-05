@@ -88,6 +88,13 @@
   --accent: #2f6f5e;
   --accent-strong: #234e43;
   --accent-deep: #1c3f36;
+  /* Accent tuned for legible emphasis text/glyphs sitting ON --accent-soft.
+     Unlike --accent-strong (which DEEPENS in both themes — for solid fills
+     and borders), this goes darker than --accent in light but BRIGHTER in
+     dark, so small emphasis text keeps AA contrast on the soft tint in each
+     theme. (#125 phase 1: the fold of the context-picker palette surfaced
+     that --accent-strong was overloaded for these two opposite needs.) */
+  --accent-emphasis: #234e43;
   --accent-soft: #edf6f2;
   --accent-soft2: #dff0ea;
   --accent-drop: #d9ecdf;
@@ -162,6 +169,7 @@
   --accent: #6cc4a6;
   --accent-strong: #4ea88c;
   --accent-deep: #2f7a64;
+  --accent-emphasis: #7cc0a1; /* brighter than --accent in dark — see light block */
   --accent-soft: #1f3a32;
   --accent-soft2: #2a4a3f;
   --accent-drop: #1d3026;

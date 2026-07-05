@@ -863,7 +863,7 @@
     -webkit-appearance: none;
     border: 1px solid var(--accent);
     background: var(--accent-soft);
-    color: var(--accent-strong);
+    color: var(--accent-emphasis);
     font-size: 10.5px;
     font-weight: 600;
     text-transform: none;
@@ -1101,12 +1101,12 @@
   .ctx-chip-preset {
     background: var(--accent-soft);
     border-color: var(--accent);
-    color: var(--accent-strong);
+    color: var(--accent-emphasis);
     font-weight: 500;
   }
 
   .ctx-chip-preset .ctx-chip-remove {
-    color: var(--accent-strong);
+    color: var(--accent-emphasis);
   }
 
   .ctx-chip-preset .ctx-chip-remove:hover {

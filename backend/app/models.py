@@ -210,7 +210,7 @@ class PromptInputDefinition(BaseModel):
     # three types share one picker-constraint vocabulary:
     #   {
     #     "kinds": ["scene", "lore", "snippet", "assistant"],
-    #     "entry_types": {"lore": ["character", "place"]},  # optional, per kind
+    #     "entry_types": {"lore": ["character", "location"]},  # optional, per kind
     #     "presets": ["full_outline", "full_text"],         # context_pick only
     #     "multiple": true,                                  # context_pick only
     #     "allow_target_marking": true,                      # context_pick only

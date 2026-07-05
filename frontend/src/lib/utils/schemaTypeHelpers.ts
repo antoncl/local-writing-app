@@ -176,8 +176,8 @@ export type NodeTypeTreeNode = NodeTypeOption & {
 
 // Build the per-kind entry-type tree the Detail Types pane renders.
 // Roots come first in a kind-specific order (the kind's canonical root —
-// lore_entry / prompt / research — or name-sorted for scene/assistant/
-// project); children sort by display name. Each node bakes in its own
+// lore:base / prompt:base / research:base — or name-sorted for scene/
+// assistant/project); children sort by display name. Each node bakes in its own
 // field entries (see NodeTypeTreeNode).
 export function buildNodeTypeTree(
   schema: MetadataSchema | null,

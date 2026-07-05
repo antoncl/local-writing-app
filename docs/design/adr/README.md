@@ -46,3 +46,7 @@ Design doc: [`../views-and-filters.md`](../views-and-filters.md) · Prerequisite
 - [0025](0025-views-evaluate-frontend-side.md) — Views evaluate frontend-side; SQLite index rejected (measured)
 - [0026](0026-type-aware-jinja-helpers.md) — Type-aware Jinja helpers (`is_a`) on a shared entry_type-ancestry primitive
 - [0027](0027-approachable-flow-injectors-filters-named-handles.md) — The approachable flow: injector/filter roles + named-handle grouping + denormalized `(node, path)` output (#91; amends 0018/0019/0021/0025)
+- [0028](0028-nest-relational-trees-from-lore-links.md) — Nest: relational trees denormalized from lore links (#35/#101/#105; amends 0018/0025/0027)
+
+## 0.5.5 — Field model
+- [0029](0029-the-field-model-categories-operations-surfaces.md) — The field model: a permissive convenience, categorized by authorship (stored/intrinsic/computed); layering extends & overlays built-in types, presentation ops are category-independent (#118; follows #116)

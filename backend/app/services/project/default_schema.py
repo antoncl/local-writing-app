@@ -26,7 +26,7 @@ INTRINSIC_FIELD_KEYS: tuple[str, ...] = ("title", "entry_type", "id")
 DEFAULT_METADATA_SCHEMA: dict[str, Any] = {
     "version": 1,
     "entry_types": {
-        "scene:manuscript_structure": {
+        "scene:base": {
             "name": "Manuscript",
             "kind": "scene",
             "abstract": True,
@@ -37,24 +37,24 @@ DEFAULT_METADATA_SCHEMA: dict[str, Any] = {
         "scene:act": {
             "name": "Act",
             "kind": "scene",
-            "parent": "scene:manuscript_structure",
+            "parent": "scene:base",
             "fields": [],
         },
         "scene:chapter": {
             "name": "Chapter",
             "kind": "scene",
-            "parent": "scene:manuscript_structure",
+            "parent": "scene:base",
             "fields": [],
         },
         "scene:scene": {
             "name": "Scene",
             "kind": "scene",
-            "parent": "scene:manuscript_structure",
+            "parent": "scene:base",
             "fields": ["status", "pov", "characters", "locations", "dynamics", "word_count", "cost"],
             "has_body": True,
             "color": "forest",
         },
-        "lore:lore_entry": {
+        "lore:base": {
             # Abstract base for every lore kind — carries the fields every
             # entry shares (aliases for matching, tags for filtering,
             # related_entries for cross-links, color for per-entry tint,
@@ -74,36 +74,35 @@ DEFAULT_METADATA_SCHEMA: dict[str, Any] = {
         "lore:character": {
             "name": "Character",
             "kind": "lore",
-            "parent": "lore:lore_entry",
+            "parent": "lore:base",
             "fields": ["character_cost"],
         },
-        "lore:place": {
-            # Display label is "Location" (matches the `locations` field on
-            # scene and the user's mental model); the entry-type local key
-            # stays "place" so existing project YAML and metadata refs keep
-            # resolving — the key is a backend identifier, display is UX.
+        "lore:location": {
+            # Local key aligned to its "Location" display (#85); the old key
+            # was `place`, a documented key/display mismatch scar removed in
+            # the pre-1.0 FQN cleanup. Matches the `locations` field on scene.
             "name": "Location",
             "kind": "lore",
-            "parent": "lore:lore_entry",
+            "parent": "lore:base",
             "fields": [],
         },
         "lore:item": {
             "name": "Item",
             "kind": "lore",
-            "parent": "lore:lore_entry",
+            "parent": "lore:base",
             "fields": [],
         },
         "lore:lore_note": {
             "name": "Note",
             "kind": "lore",
-            "parent": "lore:lore_entry",
+            "parent": "lore:base",
             "fields": [],
             # Deprecated by the research kind (docs/research-strategy.md
             # slice 5). Kept readable for legacy projects; UI filters this
             # flag so new entries can't be created as `lore:lore_note`.
             "deprecated": True,
         },
-        "research:research": {
+        "research:base": {
             # Abstract parent for the research-kind tree. Mirrors
             # `manuscript_structure` for the manuscript tree: not
             # instantiated directly, used as the shared parent so the
@@ -118,7 +117,7 @@ DEFAULT_METADATA_SCHEMA: dict[str, Any] = {
         "research:topic": {
             "name": "Topic",
             "kind": "research",
-            "parent": "research:research",
+            "parent": "research:base",
             "fields": [],
             "has_body": False,
         },
@@ -129,7 +128,7 @@ DEFAULT_METADATA_SCHEMA: dict[str, Any] = {
             # context via the explicit picker for now.
             "name": "Note",
             "kind": "research",
-            "parent": "research:research",
+            "parent": "research:base",
             "fields": ["tags"],
             "has_body": True,
         },
@@ -143,7 +142,7 @@ DEFAULT_METADATA_SCHEMA: dict[str, Any] = {
             "fields": [],
             "has_body": False,
         },
-        "prompt:prompt": {
+        "prompt:base": {
             "name": "Prompt",
             "kind": "prompt",
             "abstract": True,
@@ -156,7 +155,7 @@ DEFAULT_METADATA_SCHEMA: dict[str, Any] = {
         "prompt:continuation": {
             "name": "Continuation",
             "kind": "prompt",
-            "parent": "prompt:prompt",
+            "parent": "prompt:base",
             "fields": [],
             "has_body": True,
             "prompt": {
@@ -235,7 +234,7 @@ DEFAULT_METADATA_SCHEMA: dict[str, Any] = {
         "prompt:revise": {
             "name": "Revise",
             "kind": "prompt",
-            "parent": "prompt:prompt",
+            "parent": "prompt:base",
             "fields": [],
             "has_body": True,
             "prompt": {
@@ -249,7 +248,7 @@ DEFAULT_METADATA_SCHEMA: dict[str, Any] = {
         "prompt:general": {
             "name": "General",
             "kind": "prompt",
-            "parent": "prompt:prompt",
+            "parent": "prompt:base",
             "fields": [],
             "has_body": True,
             "prompt": {
@@ -261,7 +260,7 @@ DEFAULT_METADATA_SCHEMA: dict[str, Any] = {
         "prompt:snippet": {
             "name": "Snippet",
             "kind": "prompt",
-            "parent": "prompt:prompt",
+            "parent": "prompt:base",
             "fields": [],
             "has_body": True,
         },
@@ -405,12 +404,12 @@ DEFAULT_METADATA_SCHEMA: dict[str, Any] = {
         "locations": {
             "name": "Locations",
             "type": "entity_ref_list",
-            "picker_config": {"sources": [{"kind": "lore", "expr": {"type": "lore:place"}}]},
+            "picker_config": {"sources": [{"kind": "lore", "expr": {"type": "lore:location"}}]},
         },
         "home_place": {
             "name": "Home Place",
             "type": "entity_ref",
-            "picker_config": {"sources": [{"kind": "lore", "expr": {"type": "lore:place"}}]},
+            "picker_config": {"sources": [{"kind": "lore", "expr": {"type": "lore:location"}}]},
         },
         "related_entries": {
             "name": "Related Entries",

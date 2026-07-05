@@ -337,9 +337,9 @@
   }
 
   function defaultSchemaParentType(kind: SchemaKind) {
-    if (kind === "lore" && metadataSchema?.entry_types["lore:lore_entry"]) return "lore:lore_entry";
-    if (kind === "prompt" && metadataSchema?.entry_types["prompt:prompt"]) return "prompt:prompt";
-    if (kind === "research" && metadataSchema?.entry_types["research:research"]) return "research:research";
+    if (kind === "lore" && metadataSchema?.entry_types["lore:base"]) return "lore:base";
+    if (kind === "prompt" && metadataSchema?.entry_types["prompt:base"]) return "prompt:base";
+    if (kind === "research" && metadataSchema?.entry_types["research:base"]) return "research:base";
     return "";
   }
 
@@ -382,7 +382,7 @@
   }
 
   function defaultSchemaEntryType(kind: SchemaKind) {
-    const fallback = kind === "lore" ? "lore:lore_note" : kind === "research" ? "research:note" : kind === "prompt" ? "prompt:prompt" : kind === "assistant" ? "assistant:assistant" : kind === "project" ? "project:project" : "scene:scene";
+    const fallback = kind === "lore" ? "lore:lore_note" : kind === "research" ? "research:note" : kind === "prompt" ? "prompt:base" : kind === "assistant" ? "assistant:assistant" : kind === "project" ? "project:project" : "scene:scene";
     return Object.entries(metadataSchema?.entry_types ?? {}).find(([, definition]) => definition.kind === kind)?.[0] ?? fallback;
   }
 

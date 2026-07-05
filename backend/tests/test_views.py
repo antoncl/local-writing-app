@@ -43,7 +43,7 @@ class ViewCrudTests(unittest.TestCase):
             "expr": {
                 "difference": {
                     "keep": {"descendants_of": "lore:character"},
-                    "remove": {"descendants_of": "lore:place"},
+                    "remove": {"descendants_of": "lore:location"},
                 }
             },
             "sort": {"by": "title", "dir": "asc"},
@@ -359,10 +359,10 @@ class NodePickerConfigSourcesTests(unittest.TestCase):
     def test_membership_roundtrip(self) -> None:
         cfg = NodePickerConfig.from_membership(
             kinds=["lore", "scene"],
-            entry_types={"lore": ["lore:character", "lore:place"]},
+            entry_types={"lore": ["lore:character", "lore:location"]},
         )
         self.assertEqual(cfg.kinds, ["lore", "scene"])
-        self.assertEqual(cfg.entry_types, {"lore": ["lore:character", "lore:place"]})
+        self.assertEqual(cfg.entry_types, {"lore": ["lore:character", "lore:location"]})
         # Only `sources` (+ mechanics) serialize — the dead shape is gone.
         dumped = cfg.model_dump()
         self.assertIn("sources", dumped)

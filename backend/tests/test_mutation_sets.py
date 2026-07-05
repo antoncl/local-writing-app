@@ -65,12 +65,12 @@ class MutationSetCrudTests(unittest.TestCase):
 
     def test_list_reports_row_count_and_target(self) -> None:
         self._create("Full Moon", "lore:character", [{"field": "title", "value": "The Wolf"}])
-        self._create("Relocate", "lore:place", [{"field": "title", "value": "Ruins"}, {"field": "status", "value": "razed"}])
+        self._create("Relocate", "lore:location", [{"field": "title", "value": "Ruins"}, {"field": "status", "value": "razed"}])
         listing = self.client.get("/api/mutation-sets").json()["entries"]
         by_title = {e["title"]: e for e in listing}
         self.assertEqual(by_title["Full Moon"]["row_count"], 1)
         self.assertEqual(by_title["Relocate"]["row_count"], 2)
-        self.assertEqual(by_title["Relocate"]["target_entry_type"], "lore:place")
+        self.assertEqual(by_title["Relocate"]["target_entry_type"], "lore:location")
 
     def test_save_updates_rows(self) -> None:
         created = self._create("Full Moon", "lore:character", [{"field": "title", "value": "The Wolf"}])

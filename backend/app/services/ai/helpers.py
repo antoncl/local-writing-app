@@ -944,7 +944,7 @@ def _format_lore_block(
                 overrides = project.effective_state(entry_id, scene_id, position, index)
             except Exception:
                 overrides = {}
-        entry_type = _attr_or_item(entry, "entry_type") or "lore:lore_entry"
+        entry_type = _attr_or_item(entry, "entry_type") or "lore:base"
         # Tag from the bare local key, not the kind-qualified FQN — a
         # `<character>` tag reads cleaner to the model than `<lore_character>`,
         # and the `:` isn't XML-tag-legal (mirrors context_presets.py).

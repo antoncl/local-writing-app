@@ -66,7 +66,7 @@ class _HelperFixtureBase(unittest.TestCase):
         )
         self.manticore = self._make_lore(
             title="Manticore",
-            entry_type="lore:place",
+            entry_type="lore:location",
             metadata={"aliases": ["Star Kingdom"]},
             body="A binary star system; the capital world of the Star Kingdom.",
         )
@@ -145,7 +145,7 @@ class _HelperFixtureBase(unittest.TestCase):
         data.setdefault("fields", {})["home_place"] = {
             "name": "Home Place",
             "type": "entity_ref",
-            "target": {"entry_type": "lore:place"},
+            "target": {"entry_type": "lore:location"},
         }
         character = data["entry_types"].get("lore:character") or {}
         fields = list(character.get("fields") or [])
@@ -231,13 +231,13 @@ class EntryTypeAncestryTests(_HelperFixtureBase):
         # Full chain incl. the built-in base type character inherits from.
         self.assertEqual(
             self.service.entry_type_ancestry("lore:deity"),
-            ["lore:deity", "lore:character", "lore:lore_entry"],
+            ["lore:deity", "lore:character", "lore:base"],
         )
 
     def test_ancestry_of_seeded_type_reaches_base(self) -> None:
         self.assertEqual(
             self.service.entry_type_ancestry("lore:character"),
-            ["lore:character", "lore:lore_entry"],
+            ["lore:character", "lore:base"],
         )
 
     def test_ancestry_of_unknown_type_is_itself(self) -> None:
@@ -493,7 +493,7 @@ class RelevantLoreHelperTests(_HelperFixtureBase):
             ChatSessionJournalEntry(
                 entry_id=self.manticore["id"],
                 title="Manticore",
-                entry_type="lore:place",
+                entry_type="lore:location",
                 added_at_turn=2,
                 source="user_message",
             )

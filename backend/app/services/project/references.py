@@ -55,7 +55,7 @@ class ReferencesMixin:
                 # or series-level research notes are a natural use case.
                 ("research", "research/notes", "research:note"),
                 ("lore", "lore", "lore:lore_note"),
-                ("prompt", "prompts", "prompt:prompt"),
+                ("prompt", "prompts", "prompt:base"),
                 ("assistant", "assistants", "assistant:assistant"),
                 # Reusable mutation sets (#62): body-less Node files under
                 # `mutation-sets/`. Layered like lore/prompts (a werewolf

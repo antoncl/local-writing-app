@@ -187,7 +187,7 @@ def from_request_or_kwargs(**kwargs):
     # Lore + prompt requests have very similar shapes; pick by caller-
     # supplied entry_type hint.
     et = kwargs.get("entry_type", "")
-    if et in {"lore:lore_note", "lore:character", "lore:place", "lore:item", "lore:lore_entry"}:
+    if et in {"lore:lore_note", "lore:character", "lore:location", "lore:item", "lore:base"}:
         return CreateLoreEntryRequest(**kwargs)
     return CreatePromptEntryRequest(**kwargs)
 

@@ -250,11 +250,13 @@ Before a PR with visual changes is done:
 6. Both themes eyeballed (`data-theme="dark"` + light), and `npm run check`
    clean.
 
-Enforcement note: step 2 is machine-enforced (#129) —
+Enforcement note: step 2 is machine-enforced (#129, extended #144) —
 `scripts/check_style_tokens.py` runs from the file-edit hook and pre-commit.
-Hex/rgb literals and non-token `font-size` in `.svelte` style blocks (and
-`styles.css` outside the `:root` token blocks) fail, with a grandfather list
-that shrinks to zero — same pattern as the file-size guard. Sanctioned
+Hex/rgb literals, non-token `font-size`, and non-token `font-family` (anything
+but `var(--sans|--serif|--mono)`) in `.svelte` style blocks (and `styles.css`
+outside the `:root` token blocks) fail, with grandfather lists that shrink to
+zero — same pattern as the file-size guard. Colors/sizes and font-family carry
+separate grandfather sets so the two axes shrink independently. Sanctioned
 exceptions live in that script's docstring.
 
 ## Appendix — survey findings (2026-07-05, testbench live-drive)

@@ -6,12 +6,18 @@
   Splitter drag follows the house pattern (AGENTS.md): document-level
   mousemove/mouseup writing flex-grow to the two adjacent slots directly for
   smoothness, committing the fractions to the layout store on mouseup.
+
+  Responsive collapse (#155): a split whose measured main-axis size can't fit its
+  children at their declared minimum widths renders its whole subtree as a single
+  tab strip instead of tiling — a view-time transform that never mutates the
+  layout tree, so it re-tiles exactly when the space returns.
 -->
 <script lang="ts">
   import type { LayoutNode, PanelId } from "@/lib/types";
-  import { getContext } from "svelte";
+  import { getContext, untrack } from "svelte";
   import WorkspaceNode from "./WorkspaceNode.svelte";
   import { workspaceLayout, isEditorPanelId } from "@/lib/stores/workspaceLayout.svelte";
+  import { flattenPanels, subtreeMinMain } from "@/lib/stores/workspaceLayout.serialize";
   import { panelRegistry } from "@/lib/stores/panelRegistry.svelte";
   import { WORKSPACE_KEY, type WorkspaceEditor } from "./workspaceContext";
 
@@ -34,7 +40,12 @@
     else panelRegistry.get(id)?.onClose?.();
   }
 
+  // `containerEl` is the `.ws-split` (queried for slots during splitter drag).
+  // `measureEl` is a wrapper present in BOTH the tiled and collapsed states, so
+  // we can keep measuring to un-collapse after the split has been replaced by a
+  // tab strip.
   let containerEl: HTMLElement | undefined = $state();
+  let measureEl: HTMLElement | undefined = $state();
 
   const MIN_FRACTION = 0.08;
   const EDGE_BAND = 0.25;
@@ -42,6 +53,52 @@
   const activeTab = $derived(
     node.kind === "group" ? (node.active ?? node.tabs[0] ?? null) : null,
   );
+
+  // --- Responsive collapse -------------------------------------------------
+
+  // Measured pixel size of a split container. Kept current by three triggers so
+  // it's robust: an initial measure when the element mounts, a window-resize
+  // handler (the app's only outer resize), and a ResizeObserver that also
+  // catches ancestor-splitter-driven width changes in a real browser.
+  let measured = $state({ w: 0, h: 0 });
+
+  function measure() {
+    const el = measureEl;
+    if (!el) return;
+    const rect = el.getBoundingClientRect();
+    // Only react to real changes so `collapsed` doesn't churn on sub-pixel jitter.
+    if (Math.abs(rect.width - measured.w) > 0.5 || Math.abs(rect.height - measured.h) > 0.5) {
+      measured = { w: rect.width, h: rect.height };
+    }
+  }
+
+  $effect(() => {
+    const el = measureEl;
+    if (!el || node.kind !== "split") return;
+    // untrack the initial read: measure() reads `measured` for its change-guard,
+    // and we must NOT make this effect depend on `measured` (it also writes it),
+    // or every size change would tear down and rebuild the observer.
+    untrack(measure);
+    const observer = new ResizeObserver(() => measure());
+    observer.observe(el);
+    return () => observer.disconnect();
+  });
+
+  // Collapse when the split can't fit its children along its own axis at their
+  // declared minimums. Guard on a positive measurement so we don't collapse
+  // before the first layout pass.
+  const collapsed = $derived.by(() => {
+    if (node.kind !== "split") return false;
+    const main = node.dir === "row" ? measured.w : measured.h;
+    if (main <= 0) return false;
+    return main < subtreeMinMain(node, node.dir);
+  });
+
+  const flat = $derived(node.kind === "split" ? flattenPanels(node) : []);
+  const collapsedActive = $derived.by(() => {
+    const focused = workspaceLayout.focusedPanel;
+    return focused && flat.includes(focused) ? focused : flat[0] ?? null;
+  });
 
   function startSplitDrag(event: MouseEvent, index: number) {
     if (node.kind !== "split" || event.button !== 0) return;
@@ -114,12 +171,12 @@
     return "center";
   }
 
-  function onBodyDragOver(event: DragEvent) {
-    if (!workspaceLayout.dragging || node.kind !== "group") return;
+  function onBodyDragOver(event: DragEvent, groupId: string) {
+    if (!workspaceLayout.dragging) return;
     event.preventDefault();
     if (event.dataTransfer) event.dataTransfer.dropEffect = "move";
     const el = event.currentTarget as HTMLElement;
-    workspaceLayout.setDropZone(node.id, zoneFor(event, el));
+    workspaceLayout.setDropZone(groupId, zoneFor(event, el));
   }
 
   function onBodyDrop(event: DragEvent) {
@@ -128,41 +185,33 @@
     workspaceLayout.drop();
   }
 
-  const dropHere = $derived(
-    node.kind === "group" && workspaceLayout.dropZone?.groupId === node.id
-      ? workspaceLayout.dropZone.zone
-      : null,
-  );
+  function dropZoneFor(groupId: string): "center" | "left" | "right" | "top" | "bottom" | null {
+    return workspaceLayout.dropZone?.groupId === groupId ? workspaceLayout.dropZone.zone : null;
+  }
 </script>
 
-{#if node.kind === "split"}
-  <div class="ws-split {node.dir}" bind:this={containerEl}>
-    {#each node.children as child, i (child.id)}
-      {#if i > 0}
-        <!-- svelte-ignore a11y_no_noninteractive_element_interactions -->
-        <div
-          class="ws-splitter {node.dir}"
-          role="separator"
-          aria-orientation={node.dir === "row" ? "vertical" : "horizontal"}
-          onmousedown={(event) => startSplitDrag(event, i - 1)}
-        ></div>
-      {/if}
-      <div class="ws-slot" style="flex-grow: {node.sizes[i]}">
-        <WorkspaceNode node={child} />
-      </div>
-    {/each}
-  </div>
-{:else}
-  <section class="ws-group" data-group-id={node.id} class:focused={activeTab !== null && activeTab === workspaceLayout.focusedPanel}>
+<svelte:window onresize={measure} />
+
+<!-- Tab-group chrome, shared by real groups and collapsed splits. `droppable`
+     is false for a collapsed split (a synthetic group with no tree node to
+     receive a drop) — its tabs stay draggable OUT, but nothing drops onto it. -->
+{#snippet tabGroup(groupId: string, tabs: PanelId[], active: PanelId | null, droppable: boolean)}
+  <section
+    class="ws-group"
+    data-group-id={groupId}
+    tabindex="-1"
+    class:focused={active !== null && active === workspaceLayout.focusedPanel}
+  >
     <div class="ws-tabbar" role="tablist">
       <div class="ws-tabs">
-        {#each node.tabs as tab (tab)}
+        {#each tabs as tab (tab)}
+          {@const b = badgeOf(tab)}
           <div
             class="ws-tab"
-            class:active={tab === activeTab}
+            class:active={tab === active}
             role="tab"
             tabindex="0"
-            aria-selected={tab === activeTab}
+            aria-selected={tab === active}
             draggable="true"
             onclick={() => workspaceLayout.activate(tab)}
             onkeydown={(event) => {
@@ -175,9 +224,8 @@
             ondragend={() => workspaceLayout.endDrag()}
           >
             <span class="ws-tab-label">{titleOf(tab)}</span>
-            {#if badgeOf(tab)}
-              {@const b = badgeOf(tab)}
-              <span class="ws-tab-badge" class:saved={b?.saved}>{b?.text}</span>
+            {#if b}
+              <span class="ws-tab-badge" class:saved={b.saved}>{b.text}</span>
             {/if}
             {#if closableOf(tab)}
               <button
@@ -195,24 +243,28 @@
           </div>
         {/each}
       </div>
-      {#if activeTab}
+      {#if active}
         <div class="ws-tab-actions">
-          {#if isEditorPanelId(activeTab)}
-            {@render editor.actions(activeTab)}
-          {:else if panelRegistry.get(activeTab)?.actions}
-            {@render panelRegistry.get(activeTab)!.actions!()}
+          {#if isEditorPanelId(active)}
+            {@render editor.actions(active)}
+          {:else if panelRegistry.get(active)?.actions}
+            {@render panelRegistry.get(active)!.actions!()}
           {/if}
         </div>
       {/if}
     </div>
 
     <!-- svelte-ignore a11y_no_static_element_interactions -->
-    <div class="ws-body" ondragover={onBodyDragOver} ondrop={onBodyDrop}>
-      <!-- Every tab in the group stays mounted; only the active one is shown.
-           Preserves the old always-mounted semantics so live editors (TipTap),
-           search state, etc. survive a tab switch without a remount. -->
-      {#each node.tabs as tab (tab)}
-        <div class="ws-doc" class:hidden-doc={tab !== activeTab}>
+    <div
+      class="ws-body"
+      ondragover={droppable ? (event) => onBodyDragOver(event, groupId) : undefined}
+      ondrop={droppable ? onBodyDrop : undefined}
+    >
+      <!-- Every tab stays mounted; only the active one is shown. Preserves the
+           old always-mounted semantics so live editors (TipTap), search state,
+           etc. survive a tab switch (or a collapse) without a remount. -->
+      {#each tabs as tab (tab)}
+        <div class="ws-doc" class:hidden-doc={tab !== active}>
           {#if isEditorPanelId(tab)}
             {@render editor.body(tab)}
           {:else if panelRegistry.get(tab)}
@@ -220,17 +272,65 @@
           {/if}
         </div>
       {/each}
-      {#if !activeTab}
+      {#if !active}
         <p class="ws-empty">No document open.</p>
       {/if}
-      {#if dropHere}
-        <div class="ws-drop-indicator {dropHere}"></div>
+      {#if droppable}
+        {@const zone = dropZoneFor(groupId)}
+        {#if zone}
+          <div class="ws-drop-indicator {zone}"></div>
+        {/if}
       {/if}
     </div>
   </section>
+{/snippet}
+
+{#if node.kind === "split"}
+  <!-- Always-present wrapper so we can keep measuring (and un-collapse) after
+       the tiled `.ws-split` has been swapped for a collapsed tab strip. -->
+  <div class="ws-node-fill" bind:this={measureEl}>
+    {#if collapsed}
+      <!-- Over-subscribed split → one tab strip over its whole subtree. The tree
+           is untouched, so it re-tiles exactly when there's room again. -->
+      {@render tabGroup(node.id, flat, collapsedActive, false)}
+    {:else}
+      <div class="ws-split {node.dir}" bind:this={containerEl}>
+        {#each node.children as child, i (child.id)}
+          {#if i > 0}
+            <!-- svelte-ignore a11y_no_noninteractive_element_interactions -->
+            <div
+              class="ws-splitter {node.dir}"
+              role="separator"
+              aria-orientation={node.dir === "row" ? "vertical" : "horizontal"}
+              onmousedown={(event) => startSplitDrag(event, i - 1)}
+            ></div>
+          {/if}
+          <div class="ws-slot" style="flex-grow: {node.sizes[i]}">
+            <WorkspaceNode node={child} />
+          </div>
+        {/each}
+      </div>
+    {/if}
+  </div>
+{:else}
+  {@render tabGroup(node.id, node.tabs, activeTab, true)}
 {/if}
 
 <style>
+  /* Fills its slot and passes the fill to whichever child is showing (the tiled
+     split or the collapsed tab strip), so both measure the same box. */
+  .ws-node-fill {
+    display: flex;
+    width: 100%;
+    height: 100%;
+    min-width: 0;
+    min-height: 0;
+  }
+  .ws-node-fill > :global(*) {
+    flex: 1 1 auto;
+    min-width: 0;
+    min-height: 0;
+  }
   .ws-split {
     display: flex;
     width: 100%;
@@ -292,6 +392,9 @@
     border: 1px solid var(--border);
     border-radius: var(--r-md);
     overflow: hidden;
+  }
+  .ws-group:focus {
+    outline: none;
   }
   .ws-group.focused {
     border-color: var(--accent);

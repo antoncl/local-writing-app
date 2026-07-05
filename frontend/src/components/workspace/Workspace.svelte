@@ -44,7 +44,7 @@
     background: var(--app-bg);
     overflow: hidden;
   }
-  .workspace > :global(.ws-split) {
+  .workspace > :global(.ws-node-fill) {
     flex: 1 1 auto;
   }
 </style>

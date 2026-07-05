@@ -14,7 +14,7 @@
   import Project from "@/components/panes/Project.svelte";
   import Search from "@/components/panes/Search.svelte";
   import Todo from "@/components/panes/Todo.svelte";
-  import Pane, { type PaneChrome } from "@/components/panes/Pane.svelte";
+  import Workspace from "@/components/workspace/Workspace.svelte";
   import { isLeafNode, entryTypeChoicesByKind } from "@/lib/utils/treeHelpers";
   import NewProjectModal from "@/components/dialogs/NewProjectModal.svelte";
   import MachineSettingsDialog from "@/components/dialogs/MachineSettingsDialog.svelte";
@@ -73,7 +73,9 @@
   import NodeList from "@/components/widgets/NodeList.svelte";
   import NodeRow from "@/components/widgets/NodeRow.svelte";
   import { focusedDocumentStore, pinnedKeysStore } from "@/lib/stores/editorFocus";
-  import { paneLayout, isEditorPaneId } from "@/lib/stores/paneLayout.svelte";
+  import { paneLayout } from "@/lib/stores/paneLayout.svelte";
+  import { workspaceLayout, isEditorPanelId } from "@/lib/stores/workspaceLayout.svelte";
+  import RegionRegistrar from "@/components/workspace/RegionRegistrar.svelte";
   import {
     type EditorPaneState,
     computeDraftTitleOverrides,
@@ -143,10 +145,6 @@
   let schemaPanes: SchemaPanes | undefined = $state();
   // Instance ref so the pane handle bar's "+ New set" can open the editor.
   let mutationsPane: Mutations | undefined = $state();
-  let promptsPaneOpen = $state(false);
-  let mutationsPaneOpen = $state(false);
-  let assistantsPaneOpen = $state(false);
-  let chatsPaneOpen = $state(false);
   let error = $state("");
   let status = "No project open";
   // The editor-pane MDI surface (open panes, drafts, autosave lifecycle, the
@@ -156,11 +154,18 @@
   let cleanupThemeWiring: (() => void) | null = null;
 
   onMount(() => {
-    paneLayout.fitToViewport();
     // Raising the focused editor pane must also update focusedEditorPaneId; the
     // pane-layout controller stays ignorant of editor state and calls back here.
+    // (editorPanes still drives focus through paneLayout.raise; the tiled shell
+    // mirrors focusedEditorPaneId into the active tab via an effect below.)
     paneLayout.onRaise = (id) => {
-      if (isEditorPaneId(id) && editorPanes.panes.some((pane) => pane.id === id)) {
+      if (isEditorPanelId(id) && editorPanes.panes.some((pane) => pane.id === id)) {
+        editorPanes.focusedEditorPaneId = id;
+      }
+    };
+    // Clicking a tab in the tiled shell focuses that document too.
+    workspaceLayout.onFocusPanel = (id) => {
+      if (isEditorPanelId(id) && editorPanes.panes.some((pane) => pane.id === id)) {
         editorPanes.focusedEditorPaneId = id;
       }
     };
@@ -255,8 +260,7 @@
     setProjectCost(null, []);
     projectCostExpanded = false;
     appState = { name: "projectOpen", project: nextProject };
-    paneLayout.fitToViewport();
-    focusPane("outline");
+    workspaceLayout.activate("outline");
     void chatSessions.hydrateForProject();
     void refreshProjectCost();
     void aiSettings.refreshProjectColor();
@@ -280,11 +284,29 @@
     // pure UI state; nothing project-specific lives here.
   }
 
-  // Thin adapters onto the pane-layout window manager (lib/stores/paneLayout):
-  // App keeps its local vocabulary while the geometry/drag/resize logic lives in
-  // the controller. raise() also runs onRaise (wired in onMount) to track focus.
-  const focusPane = (id: PaneId) => paneLayout.raise(id);
-  const paneStyle = (id: PaneId) => paneLayout.styleFor(id);
+  // Look up an open editor document by its panel id (editor tabs render by id).
+  const editorPaneById = (id: string) => editorPanes.panes.find((pane) => pane.id === id);
+
+  // Mirror open editor documents into the tiled layout: newly opened docs join
+  // the editor group as tabs; closed docs drop out. The layout store owns
+  // placement, editorPanes owns the document lifecycle — this reconciles them.
+  $effect(() => {
+    const openIds = new Set(editorPanes.panes.map((pane) => pane.id));
+    for (const g of workspaceLayout.allGroups()) {
+      for (const tab of [...g.tabs]) {
+        if (isEditorPanelId(tab) && !openIds.has(tab)) workspaceLayout.removePanel(tab);
+      }
+    }
+    for (const pane of editorPanes.panes) {
+      if (!workspaceLayout.isPlaced(pane.id)) workspaceLayout.ensureVisible(pane.id);
+    }
+  });
+
+  // Reflect the focused editor document as its group's active tab.
+  $effect(() => {
+    const focusedId = editorPanes.focusedEditorPaneId;
+    if (focusedId && workspaceLayout.isPlaced(focusedId)) workspaceLayout.activate(focusedId);
+  });
 
   // Noun for the pane's delete button, keyed by document kind (was a
   // scene/lore-only ternary that mislabelled view/prompt/chat panes).
@@ -298,15 +320,20 @@
   };
   const paneDeleteNoun = (type: string | undefined) => (type && PANE_DELETE_NOUN[type]) || "scene";
 
-  // The shared chrome controller handed to every <Pane>; each pane calls these
-  // with its own id. Stable object — the handlers don't change.
-  const paneChrome: PaneChrome = {
-    focus: focusPane,
-    headerKeydown: (event, id) => paneLayout.headerKeydown(event, id),
-    headerDrag: (event, id) => paneLayout.startDrag(event, id),
-    resizeKeydown: (event, id) => paneLayout.resizeKeydown(event, id),
-    resizeDrag: (event, id) => paneLayout.startResize(event, id),
-  };
+  // On-demand regions drop out of the layout when closed and reopen via
+  // ensureVisible; the closer is handed to the registrar in markup below.
+  const closeRegion = (id: string) => () => workspaceLayout.removePanel(id);
+
+  // Tab-bar accessors for open editor documents (the one dynamic surface class).
+  const editorTitle = (id: string) => editorPaneById(id)?.scene?.title ?? "Editor";
+  function editorBadge(id: string): { text: string; saved: boolean } | null {
+    const pane = editorPaneById(id);
+    if (!pane) return null;
+    if (pane.saving) return { text: "Saving…", saved: false };
+    if (pane.dirty) return { text: "Unsaved", saved: false };
+    if (pane.recentlySaved) return { text: "Saved", saved: true };
+    return null;
+  }
 
   async function run(action: () => Promise<void>): Promise<boolean> {
     error = "";
@@ -381,32 +408,22 @@
     return layerId !== projectLayer;
   }
 
-  function closeListPane(id: "prompts" | "assistants" | "chats") {
-    if (id === "prompts") promptsPaneOpen = false;
-    else if (id === "assistants") assistantsPaneOpen = false;
-    else if (id === "chats") chatsPaneOpen = false;
-  }
-
   function openPromptsPane() {
-    promptsPaneOpen = true;
-    focusPane("prompts");
+    workspaceLayout.ensureVisible("prompts");
   }
 
   function openMutationsPane() {
-    mutationsPaneOpen = true;
-    focusPane("mutations");
+    workspaceLayout.ensureVisible("mutations");
   }
 
   function openAssistantsPane() {
-    assistantsPaneOpen = true;
     void refreshAssistantEntries();
-    focusPane("assistants");
+    workspaceLayout.ensureVisible("assistants");
   }
 
   function openChatsPane() {
-    chatsPaneOpen = true;
     void chatSessions.refresh();
-    focusPane("chats");
+    workspaceLayout.ensureVisible("chats");
   }
 
   function sceneEntryHasBody(scene: Scene): boolean {
@@ -530,38 +547,6 @@
   $effect.pre(() => {
     draftTitleByScene = computeDraftTitleOverrides(editorPanes.panes);
   });
-  // Reactive function: rebound whenever any visibility-deciding state changes.
-  // Templates that call `isPaneVisible(id)` track the function's identity — so
-  // when this `$:` recomputes, every callsite re-runs and the pane shows.
-  //
-  // Why this is necessary: function calls are opaque to Svelte's template
-  // dependency analyzer. A plain `function isPaneVisible(id)` that reads
-  // `chatsPaneOpen` inside doesn't tell the compiler that flipping
-  // `chatsPaneOpen` should re-evaluate `class:hidden-pane={!isPaneVisible("chats")}`.
-  // The `$:` rebinding gives the template a tracked dependency.
-  // (The schema / schema_type panes own their own visibility inside
-  // SchemaPanes.svelte and are not routed through here — #14 P0.)
-  let isPaneVisible = $derived(((
-    _isProjectOpen,
-    _assistantsPaneOpen,
-    _promptsPaneOpen,
-    _chatsPaneOpen,
-    _editorPanes,
-  ) => (id: PaneId): boolean => {
-    if (id === "project") return true;
-    if (id === "assistants") return _assistantsPaneOpen;
-    if (!_isProjectOpen) return false;
-    if (id === "research") return true;
-    if (id === "prompts") return _promptsPaneOpen;
-    if (id === "chats") return _chatsPaneOpen;
-    return !isEditorPaneId(id) || _editorPanes.some((pane) => pane.id === id);
-  })(
-    isProjectOpen,
-    assistantsPaneOpen,
-    promptsPaneOpen,
-    chatsPaneOpen,
-    editorPanes.panes,
-  ));
   // Derived in the assistants store (not a function): consumers pass it as a
   // prop, and a bare call in a prop expression wouldn't track its inner roster
   // dependency. See feedback_svelte5_reactivity_traps.
@@ -600,8 +585,49 @@
   onOpenProjectNode={() => void editorPanes.openProjectNode()}
 />
 
-<main class="workspace">
-  <Pane id="project" title="Project" paneClass="project-pane" hidden={!isPaneVisible("project")} style={paneStyle("project")} chrome={paneChrome}>
+<main class="app-main">
+  {#if isProjectOpen}
+    <Workspace
+      title={editorTitle}
+      badge={editorBadge}
+      onClose={(id) => void editorPanes.close(id)}
+      body={editorDocBody}
+      actions={editorDocActions}
+    />
+  {:else}
+    <div class="welcome">
+      {@render projectBody()}
+    </div>
+  {/if}
+
+  <!-- SchemaPanes stays mounted for its schema-authoring state; it now registers
+       its Detail Types / Detail Type regions into the tiled shell rather than
+       rendering its own floating panes. -->
+  <SchemaPanes
+    bind:this={schemaPanes}
+    {isProjectOpen}
+    {run}
+    setStatus={(message) => (status = message)}
+    refreshOpenEditorPaneBaselines={(transform) => editorPanes.refreshOpenEditorPaneBaselines(transform)}
+    onOpenTagsManager={() => (tagsManagerOpen = true)}
+  />
+
+  <RegionRegistrar
+    regions={{
+      project: { title: "Project", body: projectBody },
+      outline: { title: "Draft", body: outlineBody, actions: outlineActions },
+      lore: { title: "Lore", body: loreBody, actions: loreActions },
+      research: { title: "Research", body: researchBody },
+      prompts: { title: "Prompts", body: promptsBody, closable: true, onClose: closeRegion("prompts") },
+      mutations: { title: "Reusable mutations", body: mutationsBody, actions: mutationsActions, closable: true, onClose: closeRegion("mutations") },
+      assistants: { title: "Assistants", body: assistantsBody, actions: assistantsActions, closable: true, onClose: closeRegion("assistants") },
+      chats: { title: "Chats", body: chatsBody, actions: chatsActions, closable: true, onClose: closeRegion("chats") },
+      todo: { title: "TODO", body: todoBody, actions: todoBarActions },
+      search: { title: "Search", body: searchBody },
+    }}
+  />
+
+  {#snippet projectBody()}
     <div class="pane-content project-panel">
       <Project
         {isProjectOpen}
@@ -625,12 +651,12 @@
         onRepair={repairProject}
       />
     </div>
-  </Pane>
+  {/snippet}
 
-  <Pane id="outline" title="Draft" paneClass="outline-pane" hidden={!isPaneVisible("outline")} style={paneStyle("outline")} chrome={paneChrome}>
-    {#snippet actions()}
-      <ViewSwitcher kind="scene" />
-    {/snippet}
+  {#snippet outlineActions()}
+    <ViewSwitcher kind="scene" />
+  {/snippet}
+  {#snippet outlineBody()}
     <div class="pane-content">
       <Tree
         config={treeActions.manuscriptTree}
@@ -648,10 +674,9 @@
         onCloseAddMenu={() => treeActions.closeAddMenu()}
       />
     </div>
-  </Pane>
+  {/snippet}
 
-  <Pane id="lore" title="Lore" paneClass="lore-pane" hidden={!isPaneVisible("lore")} style={paneStyle("lore")} chrome={paneChrome}>
-    {#snippet actions()}
+  {#snippet loreActions()}
       <ViewSwitcher kind="lore" />
       <div class="tree-menu-anchor">
         <button
@@ -681,7 +706,8 @@
           </div>
         {/if}
       </div>
-    {/snippet}
+  {/snippet}
+  {#snippet loreBody()}
     <div class="pane-content">
       <Lore
         entries={loreEntries}
@@ -691,9 +717,9 @@
         onMoveNoteToResearch={(entry) => treeActions.requestMoveLoreNoteToResearch(entry)}
       />
     </div>
-  </Pane>
+  {/snippet}
 
-  <Pane id="research" title="Research" paneClass="research-pane" hidden={!isPaneVisible("research")} style={paneStyle("research")} chrome={paneChrome}>
+  {#snippet researchBody()}
     <div class="pane-content">
       <Tree
         config={treeActions.researchTree}
@@ -709,35 +735,21 @@
         onCloseAddMenu={() => treeActions.closeAddMenu()}
       />
     </div>
-  </Pane>
+  {/snippet}
 
-  <SchemaPanes
-    bind:this={schemaPanes}
-    {isProjectOpen}
-    {paneChrome}
-    {run}
-    setStatus={(message) => (status = message)}
-    refreshOpenEditorPaneBaselines={(transform) => editorPanes.refreshOpenEditorPaneBaselines(transform)}
-    onOpenTagsManager={() => (tagsManagerOpen = true)}
-  />
-
-  <Pane id="prompts" title="Prompts" paneClass="prompts-pane" hidden={!isProjectOpen || !promptsPaneOpen} style={paneStyle("prompts")} chrome={paneChrome}>
-    {#snippet actions()}
-      <button class="pin-button" type="button" onmousedown={(event) => event.stopPropagation()} onclick={() => closeListPane("prompts")}>Close</button>
-    {/snippet}
+  {#snippet promptsBody()}
     <div class="pane-content schema-list">
       <Prompts
         entries={promptEntries}        onOpenEntry={(id) => editorPanes.openPrompt(id)}
         onNewEntry={(entryType) => treeActions.newPromptEntry(entryType)}
       />
     </div>
-  </Pane>
+  {/snippet}
 
-  <Pane id="mutations" title="Reusable mutations" paneClass="prompts-pane" hidden={!isProjectOpen || !mutationsPaneOpen} style={paneStyle("mutations")} chrome={paneChrome}>
-    {#snippet actions()}
-      <button class="pin-button" type="button" title="New mutation set" onmousedown={(event) => event.stopPropagation()} onclick={() => mutationsPane?.openNew()}>+ New set</button>
-      <button class="pin-button" type="button" onmousedown={(event) => event.stopPropagation()} onclick={() => (mutationsPaneOpen = false)}>Close</button>
-    {/snippet}
+  {#snippet mutationsActions()}
+    <button class="pin-button" type="button" title="New mutation set" onmousedown={(event) => event.stopPropagation()} onclick={() => mutationsPane?.openNew()}>+ New set</button>
+  {/snippet}
+  {#snippet mutationsBody()}
     <div class="pane-content schema-list">
       <Mutations
         bind:this={mutationsPane}
@@ -748,15 +760,14 @@
         knownTags={knownTags}
       />
     </div>
-  </Pane>
+  {/snippet}
 
-  <Pane id="assistants" title="Assistants" paneClass="assistants-pane" hidden={!assistantsPaneOpen} style={paneStyle("assistants")} chrome={paneChrome}>
-    {#snippet actions()}
+  {#snippet assistantsActions()}
       <ViewSwitcher kind="assistant" />
       <button class="pin-button" type="button" title="Add assistant" onmousedown={(event) => event.stopPropagation()} onclick={() => treeActions.newAssistantEntry()}>+ Assistant</button>
       <button class="pin-button" type="button" title="Assistant tag colors" onmousedown={(event) => event.stopPropagation()} onclick={() => (assistantTagManagerOpen = true)}>Tags…</button>
-      <button class="pin-button" type="button" onmousedown={(event) => event.stopPropagation()} onclick={() => closeListPane("assistants")}>Close</button>
-    {/snippet}
+  {/snippet}
+  {#snippet assistantsBody()}
     <div class="pane-content schema-list">
       <Assistants
         entries={assistantEntries}
@@ -767,13 +778,12 @@
         onReorder={reorderAssistantsInLayer}
       />
     </div>
-  </Pane>
+  {/snippet}
 
-  <Pane id="chats" title="Chats" paneClass="chats-pane" hidden={!isPaneVisible("chats")} style={paneStyle("chats")} chrome={paneChrome}>
-    {#snippet actions()}
-      <button class="pin-button" type="button" title="Start a new chat" onmousedown={(event) => event.stopPropagation()} onclick={() => chatSessions.createNewChatSession()}>+ New Chat</button>
-      <button class="pin-button" type="button" onmousedown={(event) => event.stopPropagation()} onclick={() => closeListPane("chats")}>Close</button>
-    {/snippet}
+  {#snippet chatsActions()}
+    <button class="pin-button" type="button" title="Start a new chat" onmousedown={(event) => event.stopPropagation()} onclick={() => chatSessions.createNewChatSession()}>+ New Chat</button>
+  {/snippet}
+  {#snippet chatsBody()}
     <div class="pane-content schema-list">
       <Chats
         sessions={chatSessionList}
@@ -784,67 +794,41 @@
         onDeleteChat={(id) => chatSessions.deleteChatSessionFromPane(id)}
       />
     </div>
-  </Pane>
+  {/snippet}
 
-  {#each editorPanes.panes as editorPane (editorPane.id)}
-    <!-- svelte-ignore a11y_no_noninteractive_element_interactions -->
-    <section
-      class:hidden-pane={!isPaneVisible(editorPane.id)}
-      class:from-ancestor={paneEntryFromAncestor(editorPane)}
-      class="pane editor-pane"
-      data-pane-id={editorPane.id}
-      style={paneStyle(editorPane.id)}
-      aria-label="Editor pane"
-      onmousedown={() => focusPane(editorPane.id)}
-    >
-      <header class="pane-header" role="button" tabindex="0" aria-label="Move Editor pane" onkeydown={(event) => paneLayout.headerKeydown(event, editorPane.id)} onmousedown={(event) => paneLayout.startDrag(event, editorPane.id)}>
-        <h2>
-          {editorPane.scene?.title ?? "Editor"}
-          {#if paneEntryFromAncestor(editorPane)}
-            <span class="ancestor-badge" title="This entry lives in an ancestor project. Edits write back to the original file.">
-              from {editorPane.scene?.source_layer_label ?? "ancestor"}
-            </span>
-          {/if}
-        </h2>
-        <div class="pane-header-actions">
-          {#if editorPane.saving}
-            <span class="pane-status">Saving…</span>
-          {:else if editorPane.dirty}
-            <span class="pane-status">Unsaved</span>
-          {:else if editorPane.recentlySaved}
-            <span class="pane-status pane-status-saved">Saved</span>
-          {/if}
-          <button
-            class="pin-button danger"
-            type="button"
-            disabled={!editorPane.scene}
-            title={`Delete this ${paneDeleteNoun(editorPane.document?.type)}`}
-            onmousedown={(event) => event.stopPropagation()}
-            onclick={() => editorPanes.requestDeleteScene(editorPane.id)}
-          >
-            Delete
-          </button>
-          <button
-            class:active-pin={editorPane.pinned}
-            class="pin-button"
-            type="button"
-            title={editorPane.pinned ? "Unpin this pane" : "Pin this pane"}
-            onmousedown={(event) => event.stopPropagation()}
-            onclick={() => editorPanes.togglePinned(editorPane.id)}
-          >
-            {editorPane.pinned ? "Pinned" : "Pin"}
-          </button>
-          <button
-            class="pin-button"
-            type="button"
-            title="Save and close this pane (unsaved changes are flushed first)"
-            onmousedown={(event) => event.stopPropagation()}
-            onclick={() => editorPanes.close(editorPane.id)}
-          >
-            Close
-          </button>
+  {#snippet editorDocActions(id: string)}
+    {@const editorPane = editorPaneById(id)}
+    {#if editorPane}
+      <button
+        class="pin-button danger"
+        type="button"
+        disabled={!editorPane.scene}
+        title={`Delete this ${paneDeleteNoun(editorPane.document?.type)}`}
+        onmousedown={(event) => event.stopPropagation()}
+        onclick={() => editorPanes.requestDeleteScene(editorPane.id)}
+      >
+        Delete
+      </button>
+      <button
+        class:active-pin={editorPane.pinned}
+        class="pin-button"
+        type="button"
+        title={editorPane.pinned ? "Unpin this document" : "Pin this document"}
+        onmousedown={(event) => event.stopPropagation()}
+        onclick={() => editorPanes.togglePinned(editorPane.id)}
+      >
+        {editorPane.pinned ? "Pinned" : "Pin"}
+      </button>
+    {/if}
+  {/snippet}
+  {#snippet editorDocBody(id: string)}
+    {@const editorPane = editorPaneById(id)}
+    {#if editorPane}
+      {#if paneEntryFromAncestor(editorPane)}
+        <div class="ancestor-banner" title="This entry lives in an ancestor project. Edits write back to the original file.">
+          from {editorPane.scene?.source_layer_label ?? "ancestor"}
         </div>
-      </header>
+      {/if}
       <NodeEditor
         bind:this={editorPanes.editorPaneComponents[editorPane.id]}
         scene={editorPane.scene}
@@ -864,7 +848,7 @@
         titleReload={editorPanes.titleReloadsByPane[editorPane.id] ?? null}
         dirty={editorPane.dirty}
         todoStatusHint={editorPane.document?.type === "scene" && editorPane.scene && sceneEntryHasBody(editorPane.scene as Scene) ? embeddedHintForScene(editorPane.scene.id) : ""}
-        onFocus={() => focusPane(editorPane.id)}
+        onFocus={() => workspaceLayout.focus(editorPane.id)}
         onChange={(detail) =>
           editorPanes.updateEditorPaneDraft(
             editorPane.id,
@@ -879,23 +863,22 @@
         onNavigate={(detail) => navigateToBacklink(detail.id, detail.kind)}
         onOpenChat={(detail) => chatSessions.openChatFromPromptEntry(detail.entry, detail.inputs, detail.sceneId, detail.assistantId)}
       />
-      <button class="pane-resize" type="button" aria-label="Resize Editor pane" onkeydown={(event) => paneLayout.resizeKeydown(event, editorPane.id)} onmousedown={(event) => paneLayout.startResize(event, editorPane.id)}></button>
-    </section>
-  {/each}
+    {/if}
+  {/snippet}
 
-  <Pane id="todo" title="TODO" paneClass="todo-pane" hidden={!isPaneVisible("todo")} style={paneStyle("todo")} chrome={paneChrome}>
-    {#snippet actions()}
-      <button
-        class="pin-button danger"
-        type="button"
-        disabled={!todos.some((item) => item.status === "done") && !embeddedTodos.some((item) => item.status === "done")}
-        title="Delete all completed TODOs"
-        onmousedown={(event) => event.stopPropagation()}
-        onclick={() => todoActions.deleteCompletedTodos()}
-      >
-        Delete Done
-      </button>
-    {/snippet}
+  {#snippet todoBarActions()}
+    <button
+      class="pin-button danger"
+      type="button"
+      disabled={!todos.some((item) => item.status === "done") && !embeddedTodos.some((item) => item.status === "done")}
+      title="Delete all completed TODOs"
+      onmousedown={(event) => event.stopPropagation()}
+      onclick={() => todoActions.deleteCompletedTodos()}
+    >
+      Delete Done
+    </button>
+  {/snippet}
+  {#snippet todoBody()}
     <div class="pane-content">
       <Todo
         {todos}
@@ -913,13 +896,13 @@
         onDeleteEmbeddedTodo={(item) => todoActions.deleteEmbeddedTodo(item)}
       />
     </div>
-  </Pane>
+  {/snippet}
 
-  <Pane id="search" title="Search" paneClass="search-pane" hidden={!isPaneVisible("search")} style={paneStyle("search")} chrome={paneChrome}>
+  {#snippet searchBody()}
     <div class="pane-content">
       <Search {run} onOpenHit={(hit) => todoActions.openSearchHit(hit)} />
     </div>
-  </Pane>
+  {/snippet}
 
   <DirectoryPickerModal
     open={projectChooser.pickerOpen}
@@ -985,63 +968,47 @@
 </main>
 
 <style>
-  .workspace {
-    position: relative;
+  /* Main area below the top bar. The tiled Workspace fills it; before a project
+     opens, the Project region shows centred as a welcome surface. */
+  .app-main {
+    display: flex;
+    flex-direction: column;
     width: 100vw;
     height: calc(100vh - 40px);
     margin-top: 40px;
     overflow: hidden;
   }
 
-  @media (max-width: 640px) {
-    .workspace {
-      display: grid;
-      height: auto;
-      min-height: 100vh;
-      gap: 12px;
-      padding: 12px;
-      overflow: auto;
-    }
+  .welcome {
+    flex: 1 1 auto;
+    min-height: 0;
+    display: flex;
+    justify-content: center;
+    align-items: flex-start;
+    padding: var(--sp-5);
+    overflow: auto;
+  }
+  .welcome > :global(.project-panel) {
+    width: min(560px, 100%);
   }
 
-  /* Project pane content wrapper — slotted into <Pane>, so it's App's own DOM. */
+  /* Project region content wrapper (rendered as a snippet into the shell). */
   .project-panel {
     display: grid;
     align-content: start;
-    gap: 10px;
+    gap: var(--sp-2);
+    padding: var(--sp-3);
   }
 
-  /* Inline editor-pane save-status indicator (App renders editor panes inline). */
-  .pane-status {
-    color: var(--text-3);
-    font-size: var(--fs-sm);
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
-  }
-
-  .pane-status-saved {
-    color: var(--accent);
-  }
-
-  /* Ancestor-entry editor panes: tint the (shared) pane header + show a badge.
-     `.from-ancestor` is App-only, so scoping this here matches only App's inline
-     editor panes — other components' `.pane-header` is untouched. */
-  .editor-pane.from-ancestor .pane-header {
+  /* Ancestor-entry documents: a slim banner above the editor (edits still write
+     back to the ancestor file). Replaces the old header tint + badge. */
+  .ancestor-banner {
+    flex: 0 0 auto;
+    padding: var(--sp-1) var(--sp-3);
     background: var(--star-soft);
-    border-bottom-color: var(--star-border);
-  }
-
-  .ancestor-badge {
-    display: inline-block;
-    margin-left: 8px;
-    padding: 1px 7px;
-    border-radius: 10px;
-    background: var(--star);
-    color: var(--surface);
+    border-bottom: 1px solid var(--star-border);
+    color: var(--text-2);
     font-size: var(--fs-xs);
-    font-weight: 500;
-    vertical-align: middle;
   }
 
   .error-toast {

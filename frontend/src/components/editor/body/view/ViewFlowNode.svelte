@@ -443,26 +443,26 @@
   .vnode {
     min-width: 150px;
     max-width: 230px;
-    background: var(--panel, #fff);
-    border: 1px solid var(--border-strong, #cbd0d8);
+    background: var(--panel);
+    border: 1px solid var(--border-strong);
     border-radius: 9px;
-    box-shadow: 0 1px 3px rgba(0, 0, 0, 0.08);
+    box-shadow: var(--elev-1);
     font-size: 12px;
-    color: var(--text, #1f2430);
+    color: var(--text);
   }
   .vnode.selected {
-    border-color: var(--accent, #4361ee);
-    box-shadow: 0 0 0 2px var(--accent-soft, #d9e2ff);
+    border-color: var(--accent);
+    box-shadow: 0 0 0 2px var(--accent-soft);
   }
   .vnode.combinator {
-    background: var(--inset, #f7f8fa);
+    background: var(--inset);
   }
   .vnode.injector {
-    background: var(--inset, #f7f8fa);
+    background: var(--inset);
   }
   .vnode.output {
-    border-color: var(--accent, #4361ee);
-    background: var(--accent-soft, #eef2ff);
+    border-color: var(--accent);
+    background: var(--accent-soft);
   }
   .vnode-head {
     display: flex;
@@ -480,19 +480,19 @@
   .vnode-del {
     border: none;
     background: transparent;
-    color: var(--text-3, #6b7280);
+    color: var(--text-3);
     font-size: 15px;
     line-height: 1;
     cursor: pointer;
     padding: 0 2px;
   }
   .vnode-del:hover {
-    color: var(--danger, #d64545);
+    color: var(--danger);
   }
   .port-legend {
     padding: 0 8px 4px;
     font-size: 10px;
-    color: var(--text-3, #6b7280);
+    color: var(--text-3);
   }
   .port-legend .dot {
     display: inline-block;
@@ -504,24 +504,24 @@
   }
   .dot.keep,
   .dot.parents {
-    background: var(--accent, #4361ee);
+    background: var(--accent);
   }
   .dot.remove {
-    background: var(--danger, #d64545);
+    background: var(--danger);
   }
   .dot.children {
-    background: var(--ok, #2a9d8f);
+    background: var(--k-lore);
   }
   /* nest match-rule hint under the config selects */
   .vhint {
     margin: 0 8px 8px;
     font-size: 10.5px;
     line-height: 1.35;
-    color: var(--text-3, #6b7280);
+    color: var(--text-3);
   }
   .vhint b {
     font-weight: 600;
-    color: var(--text-2, #4b5563);
+    color: var(--text-2);
   }
   .vfield,
   .vfield-value,
@@ -533,10 +533,10 @@
     width: calc(100% - 16px);
     box-sizing: border-box;
     padding: 3px 5px;
-    border: 1px solid var(--border, #e2e5ea);
+    border: 1px solid var(--border);
     border-radius: 5px;
     font-size: 12px;
-    background: var(--panel, #fff);
+    background: var(--panel);
   }
   .vfield-row {
     display: flex;
@@ -558,8 +558,8 @@
   .vseg button {
     flex: 1;
     padding: 3px 6px;
-    border: 1px solid var(--border-strong, #cbd0d8);
-    background: var(--panel, #fff);
+    border: 1px solid var(--border-strong);
+    background: var(--panel);
     font-size: 11.5px;
     cursor: pointer;
   }
@@ -571,8 +571,8 @@
     border-left: none;
   }
   .vseg button.on {
-    background: var(--accent, #4361ee);
-    border-color: var(--accent, #4361ee);
+    background: var(--accent);
+    border-color: var(--accent);
     color: #fff;
   }
   /* swatch trigger sitting on its own (highlight). */
@@ -584,7 +584,7 @@
   }
   .vswatch-label {
     font-size: 11px;
-    color: var(--text-3, #6b7280);
+    color: var(--text-3);
   }
   /* named-handle (group) editor on the View node */
   .handles {
@@ -605,34 +605,34 @@
     min-width: 0;
   }
   .hbtn {
-    border: 1px solid var(--border, #e2e5ea);
-    background: var(--panel, #fff);
+    border: 1px solid var(--border);
+    background: var(--panel);
     border-radius: 4px;
     font-size: 11px;
     line-height: 1;
     padding: 2px 4px;
     cursor: pointer;
-    color: var(--text-3, #6b7280);
+    color: var(--text-3);
   }
   .hbtn:disabled {
     opacity: 0.35;
     cursor: default;
   }
   .hbtn.del:hover:not(:disabled) {
-    color: var(--danger, #d64545);
+    color: var(--danger);
   }
   .add-handle {
     align-self: flex-start;
-    border: 1px dashed var(--border-strong, #cbd0d8);
+    border: 1px dashed var(--border-strong);
     background: transparent;
     border-radius: 5px;
     font-size: 11.5px;
     padding: 2px 8px;
     cursor: pointer;
-    color: var(--text-2, #4b5563);
+    color: var(--text-2);
   }
   .add-handle:hover {
-    background: var(--panel, #fff);
+    background: var(--panel);
   }
   /* keep the flow-node ports visually distinct + above node content so the
      whole handle (not just the half sticking out) is grabbable/hoverable. */
@@ -640,13 +640,13 @@
     width: 10px;
     height: 10px;
     z-index: 5;
-    background: var(--accent, #4361ee);
-    border: 1px solid var(--panel, #fff);
+    background: var(--accent);
+    border: 1px solid var(--panel);
   }
   .vnode :global(.port.remove) {
-    background: var(--danger, #d64545);
+    background: var(--danger);
   }
   .vnode :global(.port.children) {
-    background: var(--ok, #2a9d8f);
+    background: var(--k-lore);
   }
 </style>

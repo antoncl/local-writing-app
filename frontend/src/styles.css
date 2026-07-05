@@ -2,11 +2,72 @@
   box-sizing: border-box;
 }
 
-/* Design tokens — Editorial Card direction (Node widget design pass,
-   2026-06-22). Shared across NodeRow, NodeList, SearchInput, modals.
-   Kept in styles.css :root so Svelte-scoped component CSS and plain
-   CSS rules both reach them via var(). */
+/* Design tokens — the single source of visual truth (ADR-0030,
+   docs/design/design-language.md §2, normative from 0.6.0). Every
+   component style consults tokens; raw literals in component styles
+   are defects. Kept in styles.css :root so Svelte-scoped component
+   CSS and plain CSS rules both reach them via var(). */
 :root {
+  /* — type scale — seven sizes, nothing else. Authored values are
+     integer px; --ui-scale is the future user master-scaler (#127 — a
+     settings write, no code change) — computed fractions are fine,
+     authored fractional px are not. — */
+  --ui-scale: 1;
+  --fs-xs: calc(11px * var(--ui-scale)); /* caps-labels, keycaps, fine meta */
+  --fs-sm: calc(12px * var(--ui-scale)); /* secondary UI: detail lines, chips, hints */
+  --fs-md: calc(13px * var(--ui-scale)); /* DEFAULT UI: buttons, rows, inputs, menus */
+  --fs-lg: calc(15px * var(--ui-scale)); /* emphasized UI: pane titles, dialog headings */
+  --fs-xl: calc(16px * var(--ui-scale)); /* serif display: group headers, rail sections */
+  --fs-2xl: calc(20px * var(--ui-scale)); /* serif display: document title in the editor */
+  --fs-prose: calc(16px * var(--ui-scale)); /* the reading/writing surface (prose bodies) */
+  /* The document title stands out through VOICE (serif), weight, and
+     isolation (whitespace + caps-label) — never through sheer size. */
+
+  /* — families & weights — 800 is retired; display serif carries 700 max. */
+  --sans: "Inter", ui-sans-serif, system-ui, sans-serif;
+  --serif: "Newsreader", "Iowan Old Style", Georgia, serif;
+  --mono: "JetBrains Mono", "SFMono-Regular", Consolas, monospace;
+  --w-regular: 400;
+  --w-medium: 500;
+  --w-semibold: 600;
+  --w-bold: 700;
+
+  /* — spacing — the only seven gaps/pads/margins that exist — */
+  --sp-0: 2px;
+  --sp-1: 4px;
+  --sp-2: 8px;
+  --sp-3: 12px;
+  --sp-4: 16px;
+  --sp-5: 24px;
+  --sp-6: 32px;
+
+  /* — radius — */
+  --r-sm: 4px; /* inputs, chips, keycaps, small buttons */
+  --r-md: 6px; /* buttons, rows, cards */
+  --r-lg: 10px; /* panes, dialogs, popovers */
+  --r-pill: 999px;
+
+  /* — elevation — full box-shadow recipes so background + border +
+     shadow travel together; level 0 is flat (border only, no shadow).
+     Raw rgba() shadows are defects. — */
+  --elev-1: 0 2px 8px var(--shadow); /* raised: hover states, dropdowns */
+  --elev-2: 0 6px 18px var(--shadow2); /* floating: popovers, pinned panes */
+  --elev-3: 0 16px 36px var(--shadow-pane); /* modal: dialogs, command surfaces */
+
+  /* — z-layers — six layers, nothing between them — */
+  --z-base: 0;
+  --z-sticky: 10;
+  --z-dropdown: 100;
+  --z-overlay: 200;
+  --z-modal: 300;
+  --z-toast: 400;
+
+  /* — motion — two durations, one easing, one exception (the AI
+     spinner keeps its own animation); prefers-reduced-motion disables
+     --t-base transitions, keeps --t-fast feedback. — */
+  --t-fast: 80ms linear; /* color/opacity feedback (hover, focus) */
+  --t-base: 160ms ease-out; /* reveal, expand, slide */
+
   /* Let native controls (number spinners, scrollbars, date pickers) follow
      the active theme — the dark override flips this to `dark`. Without it the
      spin buttons render on a bright default background in dark mode. */
@@ -53,13 +114,19 @@
   --danger: #a64a4a;
   --danger-soft: #fbeeee;
   --danger-border: #e2c4c2;
+  /* Warning role (promoted from the context-picker's local --ctx-warn-*
+     palette when it folded into the global roles, #125 phase 1). */
+  --warn: #8a520d;
+  --warn-soft: #fff4e6;
+  --warn-border: #f0d29a;
   --shadow: rgba(36, 36, 36, 0.06);
   --shadow2: rgba(36, 36, 36, 0.10);
   --shadow-pane: rgba(36, 36, 36, 0.13);
-  /* App canvas (the area outside panes). Derived to keep all
-     background-painting going through tokens — dark mode flips both. */
+  /* Modal backdrop wash behind dialogs. */
+  --scrim: rgba(25, 40, 35, 0.28);
+  /* App canvas (the area outside panes) — a flat surface; the
+     graph-paper grid died in 0.6.0 (design language §1). */
   --app-bg: #f5f7f6;
-  --app-grid: rgba(47, 111, 94, 0.05);
   /* Floating editor toolbars (text-selection / table / slash menus) are a
      deliberate dark "glass" surface over light content — and stay dark in
      dark mode too, so these are NOT overridden below. Tokenised only to
@@ -69,7 +136,6 @@
   --toolbar-divider: #414b47;
   --toolbar-hover: #3c4642;
   --toolbar-text: #f5f7f6;
-  --serif: Newsreader, Georgia, "Times New Roman", serif;
 }
 
 /* Dark mode token overrides. The FOUC guard in index.html stamps
@@ -117,24 +183,29 @@
   --danger: #d97070;
   --danger-soft: #3a2424;
   --danger-border: #5a3838;
+  --warn: #e6c084;
+  --warn-soft: #2c2414;
+  --warn-border: #5a4a24;
   --shadow: rgba(0, 0, 0, 0.40);
   --shadow2: rgba(0, 0, 0, 0.50);
   --shadow-pane: rgba(0, 0, 0, 0.55);
+  --scrim: rgba(0, 0, 0, 0.50);
   --app-bg: #14181a;
-  --app-grid: rgba(108, 196, 166, 0.07);
+}
+
+/* Reduced motion, honored at the token level: reveals/expands snap
+   (--t-base → 0) while color/opacity feedback (--t-fast) stays. */
+@media (prefers-reduced-motion: reduce) {
+  :root {
+    --t-base: 0ms linear;
+  }
 }
 
 body {
   margin: 0;
-  font-family:
-    Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI",
-    sans-serif;
+  font-family: var(--sans);
   color: var(--text);
-  background:
-    linear-gradient(var(--app-grid) 1px, transparent 1px),
-    linear-gradient(90deg, var(--app-grid) 1px, transparent 1px),
-    var(--app-bg);
-  background-size: 28px 28px;
+  background: var(--app-bg);
 }
 
 /* Themed scrollbars. `color-scheme` (set per theme on :root) is supposed to

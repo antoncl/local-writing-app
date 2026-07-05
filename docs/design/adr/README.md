@@ -50,3 +50,6 @@ Design doc: [`../views-and-filters.md`](../views-and-filters.md) · Prerequisite
 
 ## 0.5.5 — Field model
 - [0029](0029-the-field-model-categories-operations-surfaces.md) — The field model: a permissive convenience, categorized by authorship (stored/intrinsic/computed); layering extends & overlays built-in types, presentation ops are category-independent (#118; follows #116)
+
+## 0.6.0 — UI overhaul
+- [0030](0030-design-language-quiet-writing-desk.md) — The design language: a quiet writing desk; full token layer as visual contract, interaction law promoted into the repo, tiled-shell gestalt for #32 (#124; steers #32/#125)

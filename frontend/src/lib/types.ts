@@ -39,9 +39,6 @@ export type Split = {
 
 export type LayoutNode = Split | TabGroup;
 
-// Where a panel lands when it becomes visible and isn't already placed.
-export type PanelHome = { groupId: string };
-
 export type StructureNode = {
   id: string;
   type: string;

@@ -94,7 +94,6 @@
     AssistantEntrySummary,
     Scene,
     NodePickerConfig,
-    PaneId,
     ProjectInfo,
     ProjectValidation,
     SearchHit,
@@ -287,18 +286,27 @@
   // Look up an open editor document by its panel id (editor tabs render by id).
   const editorPaneById = (id: string) => editorPanes.panes.find((pane) => pane.id === id);
 
-  // Mirror open editor documents into the tiled layout: newly opened docs join
-  // the editor group as tabs; closed docs drop out. The layout store owns
-  // placement, editorPanes owns the document lifecycle — this reconciles them.
+  // Stable key of the open editor documents (panes with loaded content), so the
+  // reconcile effect below re-runs when a document opens/closes — not on every
+  // keystroke (draft edits continuously reassign editorPanes.panes, but this
+  // string is unchanged while the set of open ids is). Panel ids never contain "|".
+  let openEditorDocKey = $derived(
+    editorPanes.panes.filter((pane) => pane.document && pane.scene).map((pane) => pane.id).join("|"),
+  );
+
+  // Mirror open editor documents into the tiled layout: a document becomes a tab
+  // once its content has loaded (a still-loading or failed-to-load pane never
+  // flashes a blank "Editor" tab), and drops out when closed. The layout store
+  // owns placement, editorPanes owns the document lifecycle — this reconciles them.
   $effect(() => {
-    const openIds = new Set(editorPanes.panes.map((pane) => pane.id));
-    for (const g of workspaceLayout.allGroups()) {
-      for (const tab of [...g.tabs]) {
+    const openIds = new Set(openEditorDocKey ? openEditorDocKey.split("|") : []);
+    for (const group of workspaceLayout.allGroups()) {
+      for (const tab of [...group.tabs]) {
         if (isEditorPanelId(tab) && !openIds.has(tab)) workspaceLayout.removePanel(tab);
       }
     }
-    for (const pane of editorPanes.panes) {
-      if (!workspaceLayout.isPlaced(pane.id)) workspaceLayout.ensureVisible(pane.id);
+    for (const id of openIds) {
+      if (!workspaceLayout.isPlaced(id)) workspaceLayout.ensureVisible(id);
     }
   });
 

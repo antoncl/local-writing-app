@@ -67,16 +67,16 @@
     const move = (e: MouseEvent) => {
       const pos = horizontal ? e.clientX : e.clientY;
       const delta = (pos - startPos) / total;
+      // Clamp so neither slot drops below MIN_FRACTION. When the pair is already
+      // smaller than two minimums (reachable after repeated splits), enforce only
+      // the pair sum so the user can still rebalance, rather than the two
+      // sequential clamps leaving one slot below the minimum as an ungrabbable
+      // sliver.
+      const lo = MIN_FRACTION;
+      const hi = pairSum - MIN_FRACTION;
       let na = startA + delta;
-      let nb = startB - delta;
-      if (na < MIN_FRACTION) {
-        na = MIN_FRACTION;
-        nb = pairSum - MIN_FRACTION;
-      }
-      if (nb < MIN_FRACTION) {
-        nb = MIN_FRACTION;
-        na = pairSum - MIN_FRACTION;
-      }
+      na = hi >= lo ? Math.min(Math.max(na, lo), hi) : Math.min(Math.max(na, 0), pairSum);
+      const nb = pairSum - na;
       pendingA = na;
       pendingB = nb;
       if (slots[a]) slots[a].style.flexGrow = String(na);
@@ -153,7 +153,7 @@
     {/each}
   </div>
 {:else}
-  <section class="ws-group" data-group-id={node.id} class:focused={activeTab === workspaceLayout.focusedPanel}>
+  <section class="ws-group" data-group-id={node.id} class:focused={activeTab !== null && activeTab === workspaceLayout.focusedPanel}>
     <div class="ws-tabbar" role="tablist">
       <div class="ws-tabs">
         {#each node.tabs as tab (tab)}

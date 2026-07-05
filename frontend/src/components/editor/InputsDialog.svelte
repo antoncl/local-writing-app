@@ -135,7 +135,7 @@
   .inputs-dialog-backdrop {
     position: fixed;
     inset: 0;
-    background: rgba(15, 23, 32, 0.45);
+    background: var(--scrim);
     display: flex;
     align-items: center;
     justify-content: center;
@@ -145,7 +145,7 @@
   .inputs-dialog {
     background: var(--surface);
     border-radius: 8px;
-    box-shadow: 0 12px 36px rgba(15, 23, 32, 0.25);
+    box-shadow: var(--elev-3);
     padding: 16px 20px;
     min-width: 360px;
     max-width: 520px;
@@ -159,7 +159,7 @@
     color: var(--danger);
     padding: 6px 10px;
     border-radius: 4px;
-    font-size: 12px;
+    font-size: var(--fs-sm);
   }
 
   .inputs-dialog header {
@@ -168,7 +168,7 @@
   }
 
   .inputs-dialog header strong {
-    font-size: 15px;
+    font-size: var(--fs-lg);
   }
 
   .inputs-dialog header small {
@@ -183,7 +183,7 @@
   .inputs-dialog-fields label {
     display: grid;
     gap: 4px;
-    font-size: 13px;
+    font-size: var(--fs-md);
   }
 
   .inputs-dialog-fields .required-marker {
@@ -225,7 +225,7 @@
 
   .inputs-dialog-hint {
     color: var(--text-3);
-    font-size: 11px;
+    font-size: var(--fs-xs);
     text-align: right;
   }
 
@@ -237,8 +237,8 @@
     align-items: center;
     gap: 6px;
     padding: 4px 8px 2px;
-    font-size: 0.78em;
-    color: var(--color-muted, #888);
+    font-size: var(--fs-xs);
+    color: var(--text-3);
     cursor: default;
   }
 
@@ -248,7 +248,7 @@
   }
 
   .chat-estimate-cost {
-    color: var(--color-text, #ccc);
+    color: var(--text-2);
   }
 
   .chat-estimate-sep {

@@ -268,7 +268,7 @@
     border-radius: 6px;
     background: var(--inset);
     color: var(--text);
-    font-size: 14px;
+    font-size: var(--fs-md);
   }
 
   .ptp-row {
@@ -284,7 +284,7 @@
   }
 
   .ptp-status {
-    font-size: 12px;
+    font-size: var(--fs-sm);
     color: var(--text-3);
   }
 
@@ -318,7 +318,7 @@
     background: transparent;
     color: var(--text-2);
     border-radius: 4px;
-    font-size: 12px;
+    font-size: var(--fs-sm);
     cursor: pointer;
   }
 
@@ -327,7 +327,7 @@
   }
 
   .ptp-model-detail {
-    font-size: 12px;
+    font-size: var(--fs-sm);
     color: var(--text-3);
   }
 </style>

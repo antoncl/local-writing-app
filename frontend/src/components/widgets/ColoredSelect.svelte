@@ -167,7 +167,7 @@
     gap: 6px;
     padding: 4px 8px;
     font: inherit;
-    font-size: 13px;
+    font-size: var(--fs-md);
     line-height: 1.2;
     background: var(--surface);
     border: 1px solid var(--border);
@@ -224,7 +224,7 @@
 
   .colored-select-caret {
     margin-left: auto;
-    font-size: 10px;
+    font-size: var(--fs-xs);
     color: var(--text-3);
     line-height: 1;
   }
@@ -254,7 +254,7 @@
     border-radius: 5px;
     cursor: pointer;
     font: inherit;
-    font-size: 13px;
+    font-size: var(--fs-md);
     color: var(--text);
     text-align: left;
   }

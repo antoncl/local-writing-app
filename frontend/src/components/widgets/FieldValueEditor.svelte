@@ -250,12 +250,12 @@
   /* Self-contained control styles so the editor looks right anywhere (the
      metadata rail also layers its own row-scoped :global input rules). */
   input {
-    font-size: 13px;
+    font-size: var(--fs-md);
     padding: 5px 8px;
-    border: 1px solid var(--border, #cbd6d2);
+    border: 1px solid var(--border);
     border-radius: 8px;
-    background: var(--surface, #fff);
-    color: var(--text, #242424);
+    background: var(--surface);
+    color: var(--text);
   }
 
   .fr-toggle {
@@ -264,8 +264,8 @@
     height: 20px;
     padding: 0;
     border-radius: 999px;
-    border: 1px solid var(--border, #cbd6d2);
-    background: var(--inset, #f1f5f3);
+    border: 1px solid var(--border);
+    background: var(--inset);
     cursor: pointer;
     position: relative;
     transition: background-color 120ms ease, border-color 120ms ease;
@@ -277,13 +277,13 @@
     width: 16px;
     height: 16px;
     border-radius: 50%;
-    background: #fff;
-    box-shadow: 0 1px 2px rgba(20, 40, 33, 0.28);
+    background: var(--surface);
+    box-shadow: 0 1px 2px var(--shadow-pane);
     transition: transform 120ms ease;
   }
   .fr-toggle.on {
-    background: var(--accent, #2f6f5e);
-    border-color: var(--accent, #2f6f5e);
+    background: var(--accent);
+    border-color: var(--accent);
   }
   .fr-toggle.on .fr-toggle-knob {
     transform: translateX(14px);
@@ -296,20 +296,20 @@
   }
   .multi-select-chip {
     padding: 2px 9px;
-    border: 1px solid var(--border, #cbd6d2);
+    border: 1px solid var(--border);
     border-radius: 999px;
-    background: var(--surface, #fff);
-    font-size: 12px;
-    color: var(--text-2, #4d5753);
+    background: var(--surface);
+    font-size: var(--fs-sm);
+    color: var(--text-2);
     cursor: pointer;
   }
   .multi-select-chip:hover {
-    background: var(--inset, #eef3f1);
+    background: var(--inset);
   }
   .multi-select-chip.active {
-    background: var(--accent-soft, #edf6f2);
-    border-color: var(--accent, #2f6f5e);
-    color: var(--accent-emphasis, #234e43);
+    background: var(--accent-soft);
+    border-color: var(--accent);
+    color: var(--accent-emphasis);
   }
   .multi-select-chip.static {
     cursor: default;
@@ -317,9 +317,9 @@
 
   /* Read-only static values (#64). Sized to sit where the input would. */
   .fv-static {
-    font-size: 13px;
+    font-size: var(--fs-md);
     padding: 5px 2px;
-    color: var(--text, #242424);
+    color: var(--text);
     min-width: 0;
     overflow-wrap: anywhere;
   }
@@ -328,6 +328,6 @@
     line-height: 1.5;
   }
   .fv-empty {
-    color: var(--text-3, #6c7872);
+    color: var(--text-3);
   }
 </style>

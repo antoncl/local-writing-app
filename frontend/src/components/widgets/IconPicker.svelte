@@ -98,37 +98,37 @@
     display: flex;
     flex-direction: column;
     overflow: hidden;
-    border: 1px solid var(--border-strong, #b4c2bc);
+    border: 1px solid var(--border-strong);
     border-radius: 12px;
-    background: var(--surface, #fff);
-    box-shadow: 0 10px 30px rgba(20, 40, 35, 0.18);
+    background: var(--surface);
+    box-shadow: var(--elev-2);
   }
   .ip-head {
     display: flex;
     align-items: center;
     gap: 8px;
     padding: 9px 12px;
-    border-bottom: 1px solid var(--divider, #e2e8e5);
-    background: var(--panel, #edf3f1);
+    border-bottom: 1px solid var(--divider);
+    background: var(--panel);
   }
   .ip-title {
-    font-size: 12px;
+    font-size: var(--fs-sm);
     font-weight: 600;
-    color: var(--text-2, #4d5753);
+    color: var(--text-2);
   }
   .ip-field {
-    color: var(--k-snippet-text, #7a5230);
+    color: var(--k-snippet-text);
   }
   .ip-reset {
     margin-left: auto;
     border: 0;
     background: transparent;
-    font-size: 11px;
-    color: var(--text-3, #74817b);
+    font-size: var(--fs-xs);
+    color: var(--text-3);
     cursor: pointer;
   }
   .ip-reset:hover {
-    color: var(--accent, #2f6f5e);
+    color: var(--accent);
     text-decoration: underline;
   }
   .ip-body {
@@ -141,10 +141,10 @@
   .ip-search {
     width: 100%;
     padding: 6px 9px;
-    border: 1px solid var(--border, #cbd6d2);
+    border: 1px solid var(--border);
     border-radius: 8px;
-    background: var(--surface, #fff);
-    font-size: 13px;
+    background: var(--surface);
+    font-size: var(--fs-md);
   }
   .ip-cat {
     display: flex;
@@ -152,11 +152,11 @@
     gap: 6px;
   }
   .ip-cat-label {
-    font-size: 10px;
+    font-size: var(--fs-xs);
     font-weight: 800;
     letter-spacing: 0.08em;
     text-transform: uppercase;
-    color: var(--text-3, #74817b);
+    color: var(--text-3);
   }
   .ip-grid {
     display: grid;
@@ -168,50 +168,50 @@
     display: flex;
     align-items: center;
     justify-content: center;
-    border: 1px solid var(--divider, #e2e8e5);
+    border: 1px solid var(--divider);
     border-radius: 8px;
-    background: var(--surface, #fff);
-    color: var(--text-2, #4d5753);
-    font-size: 16px;
+    background: var(--surface);
+    color: var(--text-2);
+    font-size: var(--fs-xl);
     cursor: pointer;
   }
   .ip-cell:hover {
-    border-color: var(--border-strong, #b4c2bc);
-    background: var(--inset, #f1f5f3);
+    border-color: var(--border-strong);
+    background: var(--inset);
   }
   .ip-cell.on {
-    background: var(--accent-soft, #edf6f2);
-    border-color: var(--accent, #2f6f5e);
-    color: var(--accent-emphasis, #234e43);
+    background: var(--accent-soft);
+    border-color: var(--accent);
+    color: var(--accent-emphasis);
   }
   .ip-empty {
     margin: 4px 0;
-    font-size: 12px;
-    color: var(--text-3, #74817b);
+    font-size: var(--fs-sm);
+    color: var(--text-3);
   }
   .ip-foot {
     display: flex;
     align-items: center;
     gap: 8px;
     padding-top: 4px;
-    border-top: 1px solid var(--divider, #e2e8e5);
+    border-top: 1px solid var(--divider);
     margin-top: 2px;
   }
   .ip-default {
     display: inline-flex;
     align-items: center;
     gap: 5px;
-    font-size: 11px;
-    color: var(--text-3, #74817b);
+    font-size: var(--fs-xs);
+    color: var(--text-3);
   }
   .ip-done {
     margin-left: auto;
     padding: 4px 12px;
-    border: 1px solid var(--accent, #2f6f5e);
+    border: 1px solid var(--accent);
     border-radius: 8px;
-    background: var(--accent, #2f6f5e);
+    background: var(--accent);
     color: #fff;
-    font-size: 12px;
+    font-size: var(--fs-sm);
     font-weight: 600;
     cursor: pointer;
   }

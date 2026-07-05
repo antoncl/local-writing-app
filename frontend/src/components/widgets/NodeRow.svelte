@@ -326,7 +326,7 @@
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
-    font-size: 14.5px;
+    font-size: var(--fs-lg);
     font-weight: 600;
     color: var(--text);
   }
@@ -336,7 +336,7 @@
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
-    font-size: 12.5px;
+    font-size: var(--fs-sm);
     color: var(--text-3);
   }
 
@@ -358,7 +358,7 @@
     border-radius: 999px;
     background: var(--tag-bg, var(--inset));
     color: var(--tag-text, var(--text-2));
-    font-size: 10.5px;
+    font-size: var(--fs-xs);
     font-weight: 600;
     line-height: 1.45;
   }
@@ -390,7 +390,7 @@
     background: var(--star-soft);
     border: 1px solid var(--star-border);
     border-radius: 999px;
-    font-size: 13px;
+    font-size: var(--fs-md);
     line-height: 1;
     user-select: none;
   }
@@ -411,7 +411,7 @@
     border-radius: 7px;
     background: transparent;
     color: var(--text-2);
-    font-size: 15px;
+    font-size: var(--fs-lg);
     line-height: 1;
     cursor: pointer;
     transition: background 120ms ease, color 120ms ease, border-color 120ms ease;
@@ -467,7 +467,7 @@
   .node-row.variant-tree .node-row-trailing :global(button) {
     min-width: 22px;
     height: 22px;
-    font-size: 13px;
+    font-size: var(--fs-md);
   }
 
   /* Group-header treatment: serif title + a hairline rule below. The
@@ -476,7 +476,7 @@
   .node-row.group-header > .node-row-click .node-row-text :global(strong),
   .node-row.group-header > .node-row-text :global(strong) {
     font-family: var(--serif);
-    font-size: 13.5px;
+    font-size: var(--fs-md);
     font-weight: 700;
     color: var(--text);
   }

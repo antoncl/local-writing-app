@@ -111,7 +111,7 @@
   }
   .code-editor :global(.cm-scroller) {
     font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
-    font-size: 14px;
+    font-size: var(--fs-md);
     line-height: 1.5;
   }
   .code-editor :global(.cm-content) {

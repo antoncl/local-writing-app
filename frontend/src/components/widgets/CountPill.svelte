@@ -19,7 +19,7 @@
     border-radius: 999px;
     background: var(--inset);
     color: var(--text-3);
-    font-size: 11px;
+    font-size: var(--fs-xs);
     font-weight: 700;
   }
 </style>

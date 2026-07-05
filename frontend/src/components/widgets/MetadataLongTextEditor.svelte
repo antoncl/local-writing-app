@@ -134,7 +134,7 @@
 
   .metadata-long-text-toolbar button {
     padding: 3px 6px;
-    font-size: 12px;
+    font-size: var(--fs-sm);
   }
 
   :global(.metadata-long-text-body) {
@@ -143,7 +143,7 @@
     padding: 8px 10px;
     overflow: auto;
     outline: none;
-    font-size: 13px;
+    font-size: var(--fs-md);
     font-weight: 400;
     line-height: 1.45;
   }

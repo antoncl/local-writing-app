@@ -193,7 +193,7 @@
     left: 10px;
     color: var(--text-3);
     pointer-events: none;
-    font-size: 15px;
+    font-size: var(--fs-lg);
     line-height: 1.5;
   }
 
@@ -204,7 +204,7 @@
     overflow: auto;
     outline: none;
     font-family: inherit;
-    font-size: 15px;
+    font-size: var(--fs-lg);
     font-weight: 400;
     line-height: 1.5;
     white-space: pre-wrap;

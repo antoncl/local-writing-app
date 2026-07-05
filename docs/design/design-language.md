@@ -15,11 +15,21 @@ those memos never defined.
 *the work* (manuscript, lore, notes — the things the writer made) or *the tool*
 (chrome that hosts the work). The design has two voices for the two:
 
-- **The work speaks serif.** `--serif` (Newsreader) marks *editorial* moments:
+- **The work speaks serif.** `--serif` (Georgia) marks *editorial* moments:
   document titles, group/section headers, the reading surface. Serif = "this is
   yours."
-- **The tool speaks sans.** `--sans` (Inter) for every control, label, input,
+- **The tool speaks sans.** `--sans` (Segoe UI) for every control, label, input,
   and affordance. The tool's job is to recede: small, quiet, consistent.
+
+**Type is system fonts, by design (#143).** The three faces are resident
+platform fonts — Segoe UI / Georgia / Consolas on Windows, native equivalents
+elsewhere — never bundled webfonts. This is deliberate, not a shortcut: the app
+is local-first and holds the whole project graph in memory (that is how Views
+operate, and the resident load grows at 0.7.0), so the type layer must not spend
+that budget on webfont glyph atlases. Serif is **Georgia, not Newsreader** —
+Georgia reads better on screen. The role split (serif = the work, sans = the
+tool) is the identity; the specific faces are the safe, zero-cost bets that
+carry it.
 
 Three consequences that decide most day-to-day questions:
 
@@ -58,10 +68,11 @@ tunable in review; *structure* is the contract):
      isolation (whitespace + caps-label) — never through sheer size.
      Display sizes are deliberately modest; this is a density-first app. */
 
-  /* — families & weights — */
-  --sans:  'Inter', ui-sans-serif, system-ui, sans-serif;
-  --serif: 'Newsreader', 'Iowan Old Style', Georgia, serif;
-  --mono:  'JetBrains Mono', 'SFMono-Regular', Consolas, monospace;
+  /* — families & weights — system-font strategy (#143): resident faces only,
+     no bundled webfonts (local-first + in-memory project graph; see §1). */
+  --sans:  "Segoe UI", system-ui, sans-serif;
+  --serif: Georgia, "Times New Roman", serif;
+  --mono:  Consolas, ui-monospace, monospace;
   --w-regular: 400; --w-medium: 500; --w-semibold: 600; --w-bold: 700;
   /* 800 is retired. Display serif carries 700 max. */
 

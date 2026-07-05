@@ -14,8 +14,11 @@ worktree's venv (found via `git --git-common-dir`). One venv, all worktrees.
 
 from __future__ import annotations
 
-import subprocess
+import sys
 from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+from worktree import main_worktree_root  # noqa: E402
 
 
 def _candidates(root: Path):
@@ -25,26 +28,6 @@ def _candidates(root: Path):
     yield base / "bin" / "python"
 
 
-def _main_worktree_root(repo_root: Path) -> Path | None:
-    """The primary worktree's root, or None if not a linked worktree / no git."""
-    try:
-        out = subprocess.run(
-            ["git", "-C", str(repo_root), "rev-parse", "--git-common-dir"],
-            capture_output=True,
-            text=True,
-            timeout=10,
-        )
-    except Exception:
-        return None
-    if out.returncode != 0 or not out.stdout.strip():
-        return None
-    common = Path(out.stdout.strip())
-    if not common.is_absolute():
-        common = (repo_root / common).resolve()
-    # <main>/.git → parent is the main worktree root; other git-dir shapes: skip.
-    return common.parent if common.name == ".git" else None
-
-
 def find_venv_python(repo_root: Path) -> Path | None:
     """Return the backend venv interpreter, or None if it can't be found.
 
@@ -52,8 +35,8 @@ def find_venv_python(repo_root: Path) -> Path | None:
     falls back to the primary worktree's venv.
     """
     roots = [repo_root]
-    main = _main_worktree_root(repo_root)
-    if main and main != repo_root:
+    main = main_worktree_root(repo_root)
+    if main:
         roots.append(main)
     for root in roots:
         for cand in _candidates(root):

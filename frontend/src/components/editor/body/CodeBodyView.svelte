@@ -299,12 +299,12 @@
     border: 1px solid var(--border);
     background: var(--surface);
     color: var(--text-2);
-    font-size: 12px;
+    font-size: var(--fs-sm);
     font-weight: 600;
     cursor: pointer;
     padding: 0;
     line-height: 1;
-    box-shadow: 0 1px 3px rgba(0, 0, 0, 0.06);
+    box-shadow: var(--elev-1);
   }
   .prompt-help-button:hover,
   .prompt-help-button.active {
@@ -322,11 +322,11 @@
     border: 1px solid var(--border);
     background: var(--surface);
     color: var(--text-2);
-    font-size: 11px;
+    font-size: var(--fs-xs);
     font-weight: 500;
     cursor: pointer;
     line-height: 1;
-    box-shadow: 0 1px 3px rgba(0, 0, 0, 0.06);
+    box-shadow: var(--elev-1);
   }
   .prompt-restore-default-button:hover,
   .prompt-wrap-button:hover {
@@ -350,7 +350,7 @@
     box-shadow: 0 8px 24px rgba(0, 0, 0, 0.18);
     padding: 12px 16px;
     z-index: 100;
-    font-size: 13px;
+    font-size: var(--fs-md);
   }
   .prompt-help-popover-header {
     display: flex;
@@ -362,11 +362,11 @@
   }
   .prompt-help-popover-header > strong {
     color: var(--text);
-    font-size: 13px;
+    font-size: var(--fs-md);
   }
   .prompt-help-popover-header > small {
     color: var(--text-3);
-    font-size: 11px;
+    font-size: var(--fs-xs);
     flex: 1;
   }
   .prompt-help-popover-header > small > code {
@@ -383,7 +383,7 @@
     border: none;
     background: transparent;
     cursor: pointer;
-    font-size: 16px;
+    font-size: var(--fs-xl);
     color: var(--text-3);
     padding: 0;
     line-height: 1;
@@ -400,7 +400,7 @@
   }
   .prompt-cheatsheet-body h4 {
     margin: 0 0 6px;
-    font-size: 12px;
+    font-size: var(--fs-sm);
     font-weight: 600;
     text-transform: uppercase;
     letter-spacing: 0.06em;
@@ -420,13 +420,13 @@
     border-radius: 3px;
     padding: 0 4px;
     font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
-    font-size: 12px;
+    font-size: var(--fs-sm);
     color: var(--accent-deep);
   }
   .prompt-cheatsheet-body dd {
     margin: 0 0 6px;
     color: var(--text-2);
-    font-size: 12px;
+    font-size: var(--fs-sm);
     line-height: 1.45;
   }
   .prompt-cheatsheet-body dd > code {
@@ -435,7 +435,7 @@
     border-radius: 3px;
     padding: 0 3px;
     font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
-    font-size: 11px;
+    font-size: var(--fs-xs);
     color: var(--accent-deep);
   }
   @media (max-width: 720px) {

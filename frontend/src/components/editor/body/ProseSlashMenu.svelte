@@ -91,7 +91,7 @@
     border: 1px solid var(--border);
     border-radius: 8px;
     background: var(--surface);
-    box-shadow: 0 18px 42px rgba(25, 40, 35, 0.22);
+    box-shadow: var(--elev-2);
   }
 
   .slash-menu.table-mode {
@@ -102,7 +102,7 @@
   .slash-group {
     padding: 8px 6px 5px;
     color: var(--text-3);
-    font-size: 12px;
+    font-size: var(--fs-sm);
     font-weight: 700;
     text-transform: uppercase;
     letter-spacing: 0.04em;
@@ -112,13 +112,13 @@
     padding: 6px 10px;
     background: var(--inset);
     border-bottom: 1px solid var(--border);
-    font-size: 12px;
+    font-size: var(--fs-sm);
     color: var(--text-2);
   }
 
   .slash-filter-indicator code {
     font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
-    font-size: 12px;
+    font-size: var(--fs-sm);
     color: var(--accent-deep);
     background: transparent;
   }
@@ -126,7 +126,7 @@
   .slash-empty {
     padding: 14px 12px;
     color: var(--text-3);
-    font-size: 13px;
+    font-size: var(--fs-md);
     font-style: italic;
     text-align: center;
   }
@@ -155,12 +155,12 @@
 
   .slash-menu button strong {
     color: var(--text);
-    font-size: 13px;
+    font-size: var(--fs-md);
   }
 
   .slash-menu button span {
     color: var(--text-3);
-    font-size: 12px;
+    font-size: var(--fs-sm);
     line-height: 1.35;
   }
 
@@ -210,7 +210,7 @@
   .slash-menu .table-grid-label {
     padding: 4px 12px 10px;
     color: var(--text-2);
-    font-size: 12px;
+    font-size: var(--fs-sm);
     text-align: center;
   }
 </style>

@@ -354,7 +354,7 @@
   /* Compact accessor pill rendered in the collapsed row's meta strip. */
   .prompt-input-accessor-mini {
     font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
-    font-size: 10.5px;
+    font-size: var(--fs-xs);
     color: var(--text-3);
     background: var(--inset);
     border: 1px solid var(--divider);
@@ -365,7 +365,7 @@
   /* "req" badge surfaced in the collapsed row so the author can tell at a
      glance which inputs are required without expanding them. */
   .prompt-input-required-badge {
-    font-size: 9.5px;
+    font-size: var(--fs-xs);
     font-weight: 700;
     text-transform: uppercase;
     letter-spacing: 0.05em;
@@ -382,7 +382,7 @@
     padding: 6px 12px;
     background: var(--inset);
     border-top: 1px solid var(--border);
-    font-size: 13px;
+    font-size: var(--fs-md);
   }
   .entry-inputs-editor[open] {
     max-height: 50vh;
@@ -403,7 +403,7 @@
   }
   .entry-inputs-hint {
     margin-left: auto;
-    font-size: 11px;
+    font-size: var(--fs-xs);
   }
   .entry-inputs-hint > code {
     background: var(--surface);
@@ -414,7 +414,7 @@
   }
   .entry-inputs-empty {
     margin: 6px 0;
-    font-size: 12px;
+    font-size: var(--fs-sm);
   }
   .entry-inputs-add {
     margin-top: 6px;
@@ -432,7 +432,7 @@
     top: 50%;
     left: 4px;
     transform: translateY(-50%);
-    font-size: 14px;
+    font-size: var(--fs-md);
   }
   .entry-inputs-editor .prompt-input-row.dragging {
     opacity: 0.45;
@@ -475,7 +475,7 @@
   .entry-inputs-editor .prompt-input-grid > label {
     display: grid;
     gap: 2px;
-    font-size: 10px;
+    font-size: var(--fs-xs);
     font-weight: 600;
     text-transform: uppercase;
     letter-spacing: 0.04em;
@@ -486,7 +486,7 @@
     padding: 3px 6px;
     border: 1px solid var(--border);
     border-radius: 4px;
-    font-size: 12px;
+    font-size: var(--fs-sm);
     background: var(--surface);
   }
   .entry-inputs-editor .prompt-input-required {
@@ -503,7 +503,7 @@
     background: transparent;
     color: var(--text-3);
     cursor: pointer;
-    font-size: 16px;
+    font-size: var(--fs-xl);
     line-height: 1;
     padding: 0 8px;
     border-radius: 4px;

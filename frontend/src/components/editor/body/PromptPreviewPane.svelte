@@ -440,7 +440,7 @@
     grid-template-rows: auto auto 1fr;
     min-height: 120px;
     background: var(--inset);
-    font-size: 13px;
+    font-size: var(--fs-md);
     border-top: 1px solid var(--border);
     overflow: hidden;
   }
@@ -464,14 +464,14 @@
     color: var(--accent-deep);
   }
   .prompt-preview-toggle > strong {
-    font-size: 13px;
+    font-size: var(--fs-md);
     color: inherit;
   }
   .prompt-preview-caret {
     display: inline-block;
     width: 12px;
     text-align: center;
-    font-size: 10px;
+    font-size: var(--fs-xs);
     color: var(--text-3);
   }
   .prompt-preview-pane-header {
@@ -489,7 +489,7 @@
     gap: 8px;
   }
   .prompt-preview-status {
-    font-size: 11px;
+    font-size: var(--fs-xs);
     color: var(--text-3);
   }
   .prompt-preview-pane-controls {
@@ -503,14 +503,14 @@
   .prompt-preview-field {
     display: grid;
     gap: 2px;
-    font-size: 11px;
+    font-size: var(--fs-xs);
     color: var(--text-2);
   }
   .prompt-preview-field > span {
     font-weight: 600;
     text-transform: uppercase;
     letter-spacing: 0.04em;
-    font-size: 10px;
+    font-size: var(--fs-xs);
     color: var(--text-3);
   }
   .prompt-preview-field > :global(input),
@@ -519,7 +519,7 @@
     padding: 3px 6px;
     border: 1px solid var(--border);
     border-radius: 4px;
-    font-size: 12px;
+    font-size: var(--fs-sm);
     background: var(--surface);
   }
   .prompt-preview-field > :global(textarea) {
@@ -541,7 +541,7 @@
     display: flex;
     align-items: baseline;
     gap: 6px;
-    font-size: 10px;
+    font-size: var(--fs-xs);
     font-weight: 600;
     text-transform: uppercase;
     letter-spacing: 0.04em;
@@ -555,7 +555,7 @@
     margin-left: auto;
     text-transform: none;
     letter-spacing: 0;
-    font-size: 11px;
+    font-size: var(--fs-xs);
     color: var(--text-3);
   }
   .prompt-preview-inputs-hint > code {
@@ -570,7 +570,7 @@
     align-items: baseline;
     gap: 6px;
     font-weight: 600;
-    font-size: 10px;
+    font-size: var(--fs-xs);
     text-transform: uppercase;
     letter-spacing: 0.04em;
     color: var(--text-3);
@@ -586,7 +586,7 @@
     cursor: pointer;
     padding: 0;
     font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
-    font-size: 11px;
+    font-size: var(--fs-xs);
     font-weight: 400;
     text-transform: none;
     letter-spacing: 0;
@@ -618,7 +618,7 @@
     border: 1px solid var(--star-border);
     border-radius: 4px;
     color: var(--star);
-    font-size: 12px;
+    font-size: var(--fs-sm);
     line-height: 1.45;
   }
   .prompt-preview-pane-body {
@@ -631,7 +631,7 @@
   }
   .prompt-preview-empty {
     margin: 0;
-    font-size: 12px;
+    font-size: var(--fs-sm);
   }
   .prompt-preview-error {
     margin: 8px 0 0;
@@ -640,7 +640,7 @@
     border: 1px solid var(--danger-border);
     border-radius: 4px;
     color: var(--danger);
-    font-size: 12px;
+    font-size: var(--fs-sm);
     line-height: 1.45;
   }
   .prompt-preview-warnings {
@@ -649,7 +649,7 @@
     border: 1px solid var(--star-border);
     border-radius: 4px;
     color: var(--star);
-    font-size: 12px;
+    font-size: var(--fs-sm);
   }
   .prompt-preview-warnings > p {
     margin: 4px 0 0;
@@ -663,7 +663,7 @@
     border-radius: 4px;
   }
   .prompt-preview-message-role {
-    font-size: 10px;
+    font-size: var(--fs-xs);
     font-weight: 600;
     text-transform: uppercase;
     letter-spacing: 0.05em;
@@ -686,7 +686,7 @@
     white-space: pre-wrap;
     overflow-wrap: anywhere;
     font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
-    font-size: 12px;
+    font-size: var(--fs-sm);
     line-height: 1.45;
     color: var(--text);
   }
@@ -697,7 +697,7 @@
     border: 1px dashed var(--star-border);
     border-radius: 4px;
     color: var(--star);
-    font-size: 10px;
+    font-size: var(--fs-xs);
     font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
   }
   .prompt-preview-cache-strip {
@@ -706,7 +706,7 @@
     align-items: center;
     gap: 4px 6px;
     padding: 2px 8px 6px;
-    font-size: 0.78em;
+    font-size: var(--fs-sm);
     color: var(--text-3);
   }
   .prompt-preview-cache-chip {

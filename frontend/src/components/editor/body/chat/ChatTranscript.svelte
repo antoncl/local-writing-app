@@ -69,7 +69,7 @@
 <style>
   .cbv-empty {
     margin: 0;
-    font-size: 13px;
+    font-size: var(--fs-md);
     color: var(--text-3);
   }
 
@@ -82,12 +82,12 @@
   .cbv-message-user { align-items: flex-end; }
   .cbv-message-assistant { align-items: flex-start; }
   .cbv-message-role {
-    display: flex; align-items: center; gap: 6px; font-size: 10px; font-weight: 800;
+    display: flex; align-items: center; gap: 6px; font-size: var(--fs-xs); font-weight: 800;
     letter-spacing: 0.08em; text-transform: uppercase; color: var(--text-3); padding: 0 2px;
   }
   .cbv-role-dot { width: 6px; height: 6px; border-radius: 50%; background: var(--k-graphite); }
   .cbv-message-content {
-    font-size: 13.5px; line-height: 1.6; white-space: pre-wrap; padding: 10px 13px;
+    font-size: var(--fs-md); line-height: 1.6; white-space: pre-wrap; padding: 10px 13px;
   }
   .cbv-message-user .cbv-message-content {
     max-width: 78%; border-radius: 13px 13px 4px 13px;
@@ -99,17 +99,17 @@
     padding: 11px 14px;
   }
   .cbv-typing { font-style: italic; color: var(--text-3); }
-  :global(.cbv-message-rendered) { font-size: 13.5px; line-height: 1.6; }
+  :global(.cbv-message-rendered) { font-size: var(--fs-md); line-height: 1.6; }
   :global(.cbv-message-rendered p) { margin: 0 0 0.6em; }
   :global(.cbv-message-rendered p:last-child) { margin-bottom: 0; }
   :global(.cbv-message-rendered pre) {
     margin: 0.4em 0; padding: 8px 10px; background: var(--inset); border-radius: 8px; overflow-x: auto;
   }
-  :global(.cbv-message-rendered code) { font-family: ui-monospace, "JetBrains Mono", monospace; font-size: 12.5px; }
+  :global(.cbv-message-rendered code) { font-family: ui-monospace, "JetBrains Mono", monospace; font-size: var(--fs-sm); }
 
   /* 4a · thinking accordion. */
   .cbv-thinking {
-    max-width: 82%; font-size: 11.5px; color: var(--text-3);
+    max-width: 82%; font-size: var(--fs-sm); color: var(--text-3);
     border: 1px solid var(--divider); border-radius: 9px; background: var(--inset); padding: 5px 11px;
   }
   .cbv-thinking summary { cursor: pointer; list-style: none; }
@@ -121,27 +121,27 @@
   .cbv-truncated {
     display: inline-flex; align-items: center; gap: 7px; padding: 7px 12px;
     border: 1px solid var(--star-border); border-radius: 9px; background: var(--star-soft);
-    font-size: 11.5px; color: var(--star);
+    font-size: var(--fs-sm); color: var(--star);
   }
   .cbv-truncated::before { content: "⚠"; }
 
   /* 4b · journal-added chip. */
   .cbv-journal-added {
-    display: inline-flex; flex-wrap: wrap; gap: 5px 6px; align-items: center; font-size: 11px;
+    display: inline-flex; flex-wrap: wrap; gap: 5px 6px; align-items: center; font-size: var(--fs-xs);
   }
   .cbv-journal-label {
-    font-size: 9.5px; font-weight: 800; letter-spacing: 0.06em; text-transform: uppercase; color: var(--text-3);
+    font-size: var(--fs-xs); font-weight: 800; letter-spacing: 0.06em; text-transform: uppercase; color: var(--text-3);
   }
   .cbv-journal-chip {
     display: inline-flex; align-items: center; gap: 5px; padding: 3px 10px; border-radius: 999px;
     background: var(--accent-soft); border: 1px solid var(--accent-soft2);
     color: var(--accent-emphasis); font-weight: 600;
   }
-  .cbv-journal-chip::before { content: "✚"; font-size: 9px; }
+  .cbv-journal-chip::before { content: "✚"; font-size: var(--fs-xs); }
 
   /* 4c · per-turn usage meta. */
   .cbv-turn-meta {
     display: flex; align-items: center; gap: 12px; padding: 0 2px;
-    font-family: ui-monospace, "JetBrains Mono", monospace; font-size: 10.5px; color: var(--text-3);
+    font-family: ui-monospace, "JetBrains Mono", monospace; font-size: var(--fs-xs); color: var(--text-3);
   }
 </style>

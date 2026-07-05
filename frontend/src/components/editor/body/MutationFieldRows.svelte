@@ -289,7 +289,7 @@
     gap: 6px;
   }
   .mrow-label {
-    font-size: 0.78rem;
+    font-size: var(--fs-sm);
     font-weight: 600;
     color: var(--text-2);
   }
@@ -301,11 +301,11 @@
     background: var(--surface);
     color: var(--text);
     font: inherit;
-    font-size: 0.82rem;
+    font-size: var(--fs-md);
   }
   .mrow-op {
     color: var(--text-2);
-    font-size: 0.78rem;
+    font-size: var(--fs-sm);
   }
   .mrow-spacer {
     flex: 1 1 auto;
@@ -337,11 +337,11 @@
     gap: 4px;
   }
   .mrow-chip {
-    font-size: 0.74rem;
+    font-size: var(--fs-sm);
     padding: 1px 7px;
     border-radius: 999px;
-    border: 1px solid color-mix(in oklab, var(--mutation-color, #7c5cbf) 45%, transparent);
-    background: color-mix(in oklab, var(--mutation-color, #7c5cbf) 12%, transparent);
+    border: 1px solid color-mix(in oklab, var(--mutation-color) 45%, transparent);
+    background: color-mix(in oklab, var(--mutation-color) 12%, transparent);
     color: var(--text-2);
     white-space: nowrap;
   }
@@ -352,12 +352,12 @@
   }
   .mrow-chips-empty {
     margin: 0;
-    font-size: 0.74rem;
+    font-size: var(--fs-sm);
     color: var(--text-3);
   }
   .mrow-note {
     margin: 0;
-    font-size: 0.74rem;
+    font-size: var(--fs-sm);
     line-height: 1.35;
     color: var(--text-3);
   }

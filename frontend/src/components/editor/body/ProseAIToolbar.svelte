@@ -80,11 +80,11 @@
     align-items: center;
     gap: 2px;
     padding: 4px 6px;
-    background: rgba(34, 44, 40, 0.96);
+    background: var(--toolbar-surface);
     border-radius: 6px;
-    font-size: 12px;
+    font-size: var(--fs-sm);
     color: var(--toolbar-text);
-    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.22);
+    box-shadow: var(--elev-2);
     z-index: 30;
     white-space: nowrap;
     user-select: none;
@@ -96,7 +96,7 @@
     border: none;
     color: inherit;
     padding: 4px 9px;
-    font-size: 12px;
+    font-size: var(--fs-sm);
     font-weight: 500;
     cursor: pointer;
     border-radius: 4px;
@@ -107,7 +107,7 @@
   }
 
   .ai-toolbar-btn:hover {
-    background: rgba(255, 255, 255, 0.13);
+    background: var(--toolbar-hover);
   }
 
   .ai-toolbar-btn:disabled {
@@ -117,8 +117,8 @@
 
   .ai-toolbar-accept {
     /* Light mint on the dark ai inline toolbar — correct in both themes
-       (the toolbar surface never flips), so no palette token applies. */
-    color: #9adfba;
+       (the toolbar surface never flips); part of the --toolbar-* glass family. */
+    color: var(--toolbar-accent);
   }
 
   .ai-toolbar-discard {
@@ -129,7 +129,7 @@
     padding: 0 8px 0 6px;
     color: var(--border);
     font-style: italic;
-    border-left: 1px solid rgba(255, 255, 255, 0.15);
+    border-left: 1px solid var(--toolbar-divider);
     margin-left: 2px;
   }
 
@@ -143,7 +143,7 @@
     padding-left: 6px;
     animation: ai-spin 1.1s linear infinite;
     transform-origin: center;
-    font-size: 14px;
+    font-size: var(--fs-md);
     line-height: 1;
   }
 
@@ -152,16 +152,17 @@
   }
 
   .ai-inline-toolbar-loading {
-    background: rgba(34, 60, 50, 0.96);
+    background: var(--toolbar-loading);
   }
 
   .ai-inline-toolbar-error {
-    background: rgba(80, 30, 25, 0.97);
+    background: var(--toolbar-error);
   }
 
   .ai-inline-toolbar-error .ai-toolbar-status {
-    /* Light pink on the dark error toolbar — intentional in both themes. */
-    color: #ffd4cc;
+    /* Light pink on the dark error toolbar — intentional in both themes;
+       part of the --toolbar-* glass family. */
+    color: var(--toolbar-danger-text);
     font-style: normal;
   }
 </style>

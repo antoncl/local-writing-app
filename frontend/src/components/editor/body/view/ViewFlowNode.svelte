@@ -447,7 +447,7 @@
     border: 1px solid var(--border-strong);
     border-radius: 9px;
     box-shadow: var(--elev-1);
-    font-size: 12px;
+    font-size: var(--fs-sm);
     color: var(--text);
   }
   .vnode.selected {
@@ -481,7 +481,7 @@
     border: none;
     background: transparent;
     color: var(--text-3);
-    font-size: 15px;
+    font-size: var(--fs-lg);
     line-height: 1;
     cursor: pointer;
     padding: 0 2px;
@@ -491,7 +491,7 @@
   }
   .port-legend {
     padding: 0 8px 4px;
-    font-size: 10px;
+    font-size: var(--fs-xs);
     color: var(--text-3);
   }
   .port-legend .dot {
@@ -515,7 +515,7 @@
   /* nest match-rule hint under the config selects */
   .vhint {
     margin: 0 8px 8px;
-    font-size: 10.5px;
+    font-size: var(--fs-xs);
     line-height: 1.35;
     color: var(--text-3);
   }
@@ -535,7 +535,7 @@
     padding: 3px 5px;
     border: 1px solid var(--border);
     border-radius: 5px;
-    font-size: 12px;
+    font-size: var(--fs-sm);
     background: var(--panel);
   }
   .vfield-row {
@@ -560,7 +560,7 @@
     padding: 3px 6px;
     border: 1px solid var(--border-strong);
     background: var(--panel);
-    font-size: 11.5px;
+    font-size: var(--fs-sm);
     cursor: pointer;
   }
   .vseg button:first-child {
@@ -583,7 +583,7 @@
     margin: 0 8px 8px;
   }
   .vswatch-label {
-    font-size: 11px;
+    font-size: var(--fs-xs);
     color: var(--text-3);
   }
   /* named-handle (group) editor on the View node */
@@ -608,7 +608,7 @@
     border: 1px solid var(--border);
     background: var(--panel);
     border-radius: 4px;
-    font-size: 11px;
+    font-size: var(--fs-xs);
     line-height: 1;
     padding: 2px 4px;
     cursor: pointer;
@@ -626,7 +626,7 @@
     border: 1px dashed var(--border-strong);
     background: transparent;
     border-radius: 5px;
-    font-size: 11.5px;
+    font-size: var(--fs-sm);
     padding: 2px 8px;
     cursor: pointer;
     color: var(--text-2);

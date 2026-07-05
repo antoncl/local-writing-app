@@ -462,20 +462,20 @@
     margin-bottom: 12px;
   }
   .mutation-label {
-    font-size: 0.78rem;
+    font-size: var(--fs-sm);
     font-weight: 600;
     color: var(--text-2);
   }
   .mutation-loading {
     margin: 0 0 12px;
-    font-size: 0.82rem;
+    font-size: var(--fs-md);
     color: var(--text-3);
   }
   .mutation-check {
     display: flex;
     align-items: center;
     gap: 6px;
-    font-size: 0.9rem;
+    font-size: var(--fs-lg);
     color: var(--text);
     cursor: pointer;
   }
@@ -487,7 +487,7 @@
   .mutation-mode button {
     flex: 1 1 0;
     padding: 6px 10px;
-    font-size: 0.82rem;
+    font-size: var(--fs-md);
     background: transparent;
     color: var(--text-2);
     border: 1px solid var(--border);
@@ -525,10 +525,10 @@
     cursor: pointer;
   }
   .set-row:hover {
-    background: var(--surface-2, rgba(0, 0, 0, 0.04));
+    background: var(--inset);
   }
   .set-count {
-    font-size: 0.76rem;
+    font-size: var(--fs-sm);
     color: var(--text-3);
     flex: 0 0 auto;
   }
@@ -547,6 +547,6 @@
     background: var(--surface);
     color: var(--text);
     font: inherit;
-    font-size: 0.85rem;
+    font-size: var(--fs-md);
   }
 </style>

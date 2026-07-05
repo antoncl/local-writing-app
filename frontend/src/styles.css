@@ -118,6 +118,12 @@
      apart; lifted in dark mode to stay visible on dark message blocks. */
   --k-system: #6b6750; /* olive */
   --k-assistant: #5b6478; /* slate */
+  /* Mid-scene lore-mutation marker (#33) — a distinct violet, deliberately
+     unlike the teal accent and amber TODO anchors. Used by the inline
+     .mutation-pill plus the mutation dialogs/scrubber/field rows; promoted
+     from a component-local into a shared role (#125). No dark override — the
+     violet already shipped identically in both themes. */
+  --mutation-color: #7c5cbf;
   --danger: #a64a4a;
   --danger-soft: #fbeeee;
   --danger-border: #e2c4c2;
@@ -143,6 +149,15 @@
   --toolbar-divider: #414b47;
   --toolbar-hover: #3c4642;
   --toolbar-text: #f5f7f6;
+  /* AI inline-toolbar state variants — light accent/error text and the
+     loading/error glass tints. Like the surface above, these never flip:
+     the toolbar is dark in both themes, so the mint/pink read on it either
+     way. Kept in the --toolbar-* family so the guard treats them as the
+     sanctioned glass recipe, not literals. */
+  --toolbar-accent: #9adfba;
+  --toolbar-danger-text: #ffd4cc;
+  --toolbar-loading: rgba(34, 60, 50, 0.96);
+  --toolbar-error: rgba(80, 30, 25, 0.97);
 }
 
 /* Dark mode token overrides. The FOUC guard in index.html stamps
@@ -1010,7 +1025,6 @@ button.row-action-add.active {
    inline text is compact ("⤳ Captain"); the full "Entity · field → value"
    sits in the native title tooltip (a richer detail box is layered on later). */
 .editor-body .mutation-pill {
-  --mutation-color: #7c5cbf;
   display: inline-flex;
   align-items: center;
   font-size: 0.82em;

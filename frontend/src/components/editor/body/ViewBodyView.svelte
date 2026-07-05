@@ -590,28 +590,28 @@
     flex-direction: column;
     height: 100%;
     min-height: 0;
-    background: var(--panel, #fff);
+    background: var(--panel);
   }
   .designer-toolbar {
     display: flex;
     align-items: center;
     gap: 12px;
     padding: 8px 12px;
-    border-bottom: 1px solid var(--border, #e2e5ea);
+    border-bottom: 1px solid var(--border);
     flex-wrap: wrap;
   }
   .kind-pick {
     display: inline-flex;
     align-items: center;
     gap: 6px;
-    font-size: 12px;
-    color: var(--text-3, #6b7280);
+    font-size: var(--fs-sm);
+    color: var(--text-3);
   }
   .kind-fixed {
     padding: 3px 6px;
-    font-size: 12px;
+    font-size: var(--fs-sm);
     font-weight: 600;
-    color: var(--text-1, #111827);
+    color: var(--text);
   }
   .palette {
     display: flex;
@@ -627,28 +627,28 @@
   .pal-sep {
     width: 1px;
     height: 18px;
-    background: var(--border, #e2e5ea);
+    background: var(--border);
   }
   .palette button {
     padding: 3px 8px;
-    border: 1px solid var(--border-strong, #cbd0d8);
+    border: 1px solid var(--border-strong);
     border-radius: 6px;
-    background: var(--panel, #fff);
-    font-size: 11.5px;
+    background: var(--panel);
+    font-size: var(--fs-sm);
     cursor: pointer;
   }
   .palette button:hover {
-    background: var(--inset, #f2f4f7);
+    background: var(--inset);
   }
   .palette button.filter {
-    border-color: var(--accent, #4361ee);
-    background: var(--accent, #4361ee);
+    border-color: var(--accent);
+    background: var(--accent);
     color: #fff;
     font-weight: 600;
   }
   .palette button.op {
-    border-color: var(--accent, #4361ee);
-    color: var(--accent, #4361ee);
+    border-color: var(--accent);
+    color: var(--accent);
   }
   .palette button.ann {
     border-style: dashed;
@@ -678,36 +678,36 @@
     z-index: 4;
     /* Must not intercept pointer events — the handles live under it. */
     pointer-events: none;
-    background: var(--inset, #f2f4f7);
-    border: 1px dashed var(--border-strong, #cbd0d8);
+    background: var(--inset);
+    border: 1px dashed var(--border-strong);
     border-radius: 8px;
     padding: 6px 12px;
-    font-size: 12px;
-    color: var(--text-3, #6b7280);
+    font-size: var(--fs-sm);
+    color: var(--text-3);
   }
   .preview {
     width: 260px;
     flex-shrink: 0;
-    border-left: 1px solid var(--border, #e2e5ea);
+    border-left: 1px solid var(--border);
     display: flex;
     flex-direction: column;
     min-height: 0;
-    background: var(--inset, #fafbfc);
+    background: var(--inset);
   }
   .preview-head {
     display: flex;
     justify-content: space-between;
     align-items: baseline;
     padding: 8px 12px;
-    font-size: 11px;
+    font-size: var(--fs-xs);
     text-transform: uppercase;
     letter-spacing: 0.04em;
-    color: var(--text-3, #6b7280);
-    border-bottom: 1px solid var(--border, #e2e5ea);
+    color: var(--text-3);
+    border-bottom: 1px solid var(--border);
   }
   .count {
     font-variant-numeric: tabular-nums;
-    color: var(--text-3, #6b7280);
+    color: var(--text-3);
   }
   .preview-warnings {
     margin: 0;
@@ -716,7 +716,7 @@
     display: flex;
     flex-direction: column;
     gap: 4px;
-    font-size: 11px;
+    font-size: var(--fs-xs);
     line-height: 1.35;
     color: var(--warn);
     background: var(--warn-soft);
@@ -729,16 +729,16 @@
   }
   .preview-empty {
     padding: 12px;
-    font-size: 12px;
-    color: var(--text-3, #6b7280);
+    font-size: var(--fs-sm);
+    color: var(--text-3);
   }
   .prow {
     padding: 4px 8px 4px 11px;
-    font-size: 12.5px;
+    font-size: var(--fs-sm);
     border-left: 3px solid var(--tint, transparent);
     border-radius: 3px;
   }
   .prow:hover {
-    background: var(--panel, #fff);
+    background: var(--panel);
   }
 </style>

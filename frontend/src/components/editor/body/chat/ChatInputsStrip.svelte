@@ -87,13 +87,13 @@
     border-radius: 10px; border: 1px solid var(--divider); background: var(--inset);
   }
   .cbv-inputs-toggle {
-    align-self: flex-start; padding: 2px 6px; font-size: 11px; font-weight: 600;
+    align-self: flex-start; padding: 2px 6px; font-size: var(--fs-xs); font-weight: 600;
     background: transparent; border: none; cursor: pointer; color: var(--text-3);
   }
   .cbv-inputs-fields { display: flex; flex-direction: column; gap: 8px; }
-  .cbv-input-field { display: flex; flex-direction: column; gap: 3px; font-size: 12px; }
+  .cbv-input-field { display: flex; flex-direction: column; gap: 3px; font-size: var(--fs-sm); }
   .cbv-input-label {
-    font-size: 10px; font-weight: 800; letter-spacing: 0.07em; text-transform: uppercase; color: var(--text-3);
+    font-size: var(--fs-xs); font-weight: 800; letter-spacing: 0.07em; text-transform: uppercase; color: var(--text-3);
   }
   .cbv-required-marker { color: var(--danger); }
   .cbv-input-field.cbv-input-missing > .cbv-input-label { color: var(--danger); }

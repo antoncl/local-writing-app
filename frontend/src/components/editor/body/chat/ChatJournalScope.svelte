@@ -44,10 +44,10 @@
     flex: 0 0 auto;
     display: flex; flex-wrap: wrap; gap: 6px 7px; align-items: center;
     padding: 11px 14px; border-radius: 10px; border: 1px solid var(--divider);
-    background: var(--inset); font-size: 11px;
+    background: var(--inset); font-size: var(--fs-xs);
   }
   .cbv-journal-scope-label {
-    font-size: 10px; font-weight: 800; letter-spacing: 0.07em; text-transform: uppercase; color: var(--text-3);
+    font-size: var(--fs-xs); font-weight: 800; letter-spacing: 0.07em; text-transform: uppercase; color: var(--text-3);
   }
   .cbv-journal-scope-chip {
     display: inline-flex; align-items: center; gap: 6px; padding: 2px 9px; border-radius: 999px;
@@ -59,17 +59,17 @@
     content: ""; width: 7px; height: 7px; border-radius: 50%; background: var(--k-lore);
   }
   .cbv-journal-scope-chip-depth1 { background: var(--surface); border-style: dashed; }
-  .cbv-journal-scope-chip-depth1::before { background: #9a9cca; }
+  .cbv-journal-scope-chip-depth1::before { background: var(--k-lore); }
   .cbv-journal-scope-chip-fresh { border-color: var(--accent-soft2); }
   .cbv-journal-scope-chip-fresh::before { background: var(--accent); }
   .cbv-journal-scope-pip {
-    font-size: 9px; font-weight: 700; border-radius: 4px;
+    font-size: var(--fs-xs); font-weight: 700; border-radius: 4px;
     padding: 1px 4px; margin-left: 1px; line-height: 1.3;
   }
   .cbv-journal-scope-pip-fresh {
     color: var(--accent-emphasis); background: var(--accent-soft2);
   }
   .cbv-journal-scope-pip-depth1 {
-    color: #6c6e9e; background: var(--k-lore-soft);
+    color: var(--k-lore-text); background: var(--k-lore-soft);
   }
 </style>

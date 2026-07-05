@@ -85,24 +85,24 @@
        --accent-soft, which sits almost on top of the node background in both
        themes — making union (both lobes) and intersect (lens only) look
        identical because the distinguishing fill was invisible. */
-    fill: var(--accent, #4361ee);
+    fill: var(--accent);
     fill-opacity: 0.3;
   }
   .venn .stroke {
     fill: none;
-    stroke: var(--accent, #4361ee);
+    stroke: var(--accent);
     stroke-width: 1.1;
   }
   .tree .tfill {
-    fill: var(--accent, #4361ee);
+    fill: var(--accent);
     fill-opacity: 0.85;
   }
   .tree .tstroke {
-    stroke: var(--accent, #4361ee);
+    stroke: var(--accent);
     stroke-width: 1.1;
   }
   .sym {
-    color: var(--text-3, #6b7280);
+    color: var(--text-3);
     font-weight: 600;
   }
 </style>

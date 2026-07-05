@@ -1043,11 +1043,11 @@
   .cbv-error,
   .cbv-meta {
     margin: 0;
-    font-size: 13px;
+    font-size: var(--fs-md);
     color: var(--text-3);
   }
   .cbv-error { color: var(--danger); }
-  .cbv-meta { font-size: 11.5px; }
+  .cbv-meta { font-size: var(--fs-sm); }
 
   /* ---- 1 · composer strip ---- */
   .cbv-composer-strip {
@@ -1066,7 +1066,7 @@
     border-radius: 999px;
     background: var(--surface);
     border: 1px solid var(--border);
-    font-size: 12px;
+    font-size: var(--fs-sm);
     font-weight: 600;
     color: var(--text-2);
   }
@@ -1077,9 +1077,9 @@
     color: var(--k-snippet-text);
   }
   .cbv-chip strong { font-weight: 600; }
-  .cbv-chip-glyph { font-size: 13px; }
-  .cbv-chip-lock { font-size: 11px; opacity: 0.65; }
-  .cbv-chip-caret { font-size: 11px; opacity: 0.7; }
+  .cbv-chip-glyph { font-size: var(--fs-md); }
+  .cbv-chip-lock { font-size: var(--fs-xs); opacity: 0.65; }
+  .cbv-chip-caret { font-size: var(--fs-xs); opacity: 0.7; }
   .cbv-chip-locked { opacity: 0.8; }
   .cbv-chip-button { cursor: pointer; font: inherit; }
   .cbv-chip-button[disabled] { cursor: default; }
@@ -1095,7 +1095,7 @@
   }
   .cbv-picker-search {
     width: 100%; box-sizing: border-box; padding: 6px 8px; border-radius: 7px;
-    border: 1px solid var(--border); font-size: 13px; margin-bottom: 4px;
+    border: 1px solid var(--border); font-size: var(--fs-md); margin-bottom: 4px;
   }
   .cbv-prompt-picker > button {
     text-align: left; padding: 7px 9px; border-radius: 8px;
@@ -1106,15 +1106,15 @@
   .cbv-prompt-picker > button.cbv-picker-active {
     background: var(--accent-soft); border-color: var(--accent-soft2);
   }
-  .cbv-prompt-picker > button > strong { font-weight: 600; font-size: 13px; }
-  .cbv-prompt-picker > button > small { font-size: 11px; color: var(--text-3); }
-  .cbv-picker-empty { margin: 4px 6px; font-size: 12px; color: var(--text-3); }
+  .cbv-prompt-picker > button > strong { font-weight: 600; font-size: var(--fs-md); }
+  .cbv-prompt-picker > button > small { font-size: var(--fs-xs); color: var(--text-3); }
+  .cbv-picker-empty { margin: 4px 6px; font-size: var(--fs-sm); color: var(--text-3); }
 
   /* Soft-partition affordances (ADR-0024): a label over the matching group and
      a hairline before the rest of the roster. */
   .cbv-picker-group-label {
     padding: 4px 8px 2px;
-    font-size: 10px;
+    font-size: var(--fs-xs);
     font-weight: 700;
     text-transform: uppercase;
     letter-spacing: 0.06em;
@@ -1142,7 +1142,7 @@
   .cbv-preview-icon {
     width: 30px; height: 30px; border-radius: 8px;
     border: 1px solid var(--border); background: var(--surface);
-    cursor: pointer; font-size: 15px; line-height: 1; padding: 0; color: var(--text-2);
+    cursor: pointer; font-size: var(--fs-lg); line-height: 1; padding: 0; color: var(--text-2);
   }
   .cbv-preview-icon:hover { background: var(--inset); }
   .cbv-preview-icon-active { background: var(--accent-soft); border-color: var(--accent-soft2); }
@@ -1156,18 +1156,18 @@
   }
   .cbv-preview-popover-header {
     display: flex; align-items: baseline; gap: 8px; padding: 9px 13px;
-    border-bottom: 1px solid var(--divider); background: var(--panel); font-size: 12px;
+    border-bottom: 1px solid var(--divider); background: var(--panel); font-size: var(--fs-sm);
   }
-  .cbv-preview-popover-header strong { font-size: 12px; font-weight: 600; color: var(--text); }
-  .cbv-preview-popover-header small { color: var(--text-3); flex: 1; font-size: 10.5px; }
+  .cbv-preview-popover-header strong { font-size: var(--fs-sm); font-weight: 600; color: var(--text); }
+  .cbv-preview-popover-header small { color: var(--text-3); flex: 1; font-size: var(--fs-xs); }
   .cbv-preview-popover-close {
-    background: transparent; border: none; cursor: pointer; font-size: 15px;
+    background: transparent; border: none; cursor: pointer; font-size: var(--fs-lg);
     line-height: 1; padding: 0 2px; color: var(--text-3);
   }
   .cbv-preview-popover-body { padding: 12px 14px; overflow-y: auto; flex: 1; }
   .cbv-preview-content {
     margin: 0 0 8px; font-family: ui-monospace, "JetBrains Mono", monospace;
-    font-size: 12px; line-height: 1.5; white-space: pre-wrap; word-wrap: break-word; color: var(--text);
+    font-size: var(--fs-sm); line-height: 1.5; white-space: pre-wrap; word-wrap: break-word; color: var(--text);
   }
   .cbv-preview-hint { font-style: italic; }
 
@@ -1194,20 +1194,20 @@
   .cbv-ttl-strip {
     display: flex; flex-wrap: wrap; align-items: center; gap: 7px;
     padding: 11px 14px; border-radius: 10px; border: 1px solid var(--divider);
-    background: var(--inset); font-size: 11px; color: var(--text-2);
+    background: var(--inset); font-size: var(--fs-xs); color: var(--text-2);
   }
   .cbv-estimate-strip::before { content: "NEXT TURN EST."; }
   .cbv-ttl-strip::before { content: "CACHE TTL"; }
   .cbv-estimate-strip::before,
   .cbv-ttl-strip::before {
-    font-size: 10px; font-weight: 800; letter-spacing: 0.07em; color: var(--text-3);
+    font-size: var(--fs-xs); font-weight: 800; letter-spacing: 0.07em; color: var(--text-3);
   }
   .cbv-estimate-tokens,
   .cbv-estimate-cost,
   .cbv-estimate-chip,
   .cbv-ttl-chip {
     display: inline-flex; align-items: center; gap: 5px; padding: 2px 9px; border-radius: 999px;
-    background: var(--surface); border: 1px solid var(--divider); font-size: 11px;
+    background: var(--surface); border: 1px solid var(--divider); font-size: var(--fs-xs);
   }
   .cbv-estimate-tokens,
   .cbv-estimate-cost { font-family: ui-monospace, "JetBrains Mono", monospace; }
@@ -1218,7 +1218,7 @@
   /* ---- 10 · action row ---- */
   .cbv-action-row { display: flex; align-items: center; gap: 10px; justify-content: flex-end; }
   .cbv-action-row button {
-    padding: 8px 14px; font-size: 12.5px; font-weight: 600; border-radius: 9px;
+    padding: 8px 14px; font-size: var(--fs-sm); font-weight: 600; border-radius: 9px;
     border: 1px solid var(--border); background: var(--surface); color: var(--text-2); cursor: pointer;
   }
   .cbv-action-row button:hover { background: var(--inset); }
@@ -1230,7 +1230,7 @@
   .cbv-action-row button.primary:hover { background: var(--accent-strong); }
 
   .cbv-foot {
-    margin: 0; font-size: 11.5px; color: var(--text-3);
+    margin: 0; font-size: var(--fs-sm); color: var(--text-3);
     border-top: 1px solid var(--divider); padding-top: 8px;
   }
 </style>

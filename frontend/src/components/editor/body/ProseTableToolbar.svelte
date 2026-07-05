@@ -52,7 +52,7 @@
     border: 1px solid var(--toolbar-border);
     border-radius: 7px;
     background: var(--toolbar-surface);
-    box-shadow: 0 14px 28px rgba(25, 40, 35, 0.22);
+    box-shadow: var(--elev-2);
     white-space: nowrap;
   }
 
@@ -65,7 +65,7 @@
     border-radius: 0;
     background: transparent;
     color: var(--toolbar-text);
-    font-size: 13px;
+    font-size: var(--fs-md);
     font-weight: 700;
     cursor: pointer;
   }

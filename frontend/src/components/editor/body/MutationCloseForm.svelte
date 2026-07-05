@@ -186,7 +186,7 @@
     display: flex;
     align-items: center;
     justify-content: center;
-    background: rgba(0, 0, 0, 0.28);
+    background: var(--scrim);
   }
   .mutation-card {
     width: min(460px, 92vw);
@@ -195,17 +195,17 @@
     background: var(--surface);
     border: 1px solid var(--border);
     border-radius: 10px;
-    box-shadow: 0 12px 40px rgba(0, 0, 0, 0.24);
+    box-shadow: var(--elev-3);
     padding: 18px;
   }
   .mutation-head h3 {
     margin: 0 0 2px;
-    font-size: 1.05rem;
+    font-size: var(--fs-xl);
     color: var(--text);
   }
   .mutation-head p {
     margin: 0 0 14px;
-    font-size: 0.82rem;
+    font-size: var(--fs-md);
     color: var(--text-3);
   }
   .mutation-row {
@@ -215,7 +215,7 @@
     margin-bottom: 12px;
   }
   .mutation-label {
-    font-size: 0.78rem;
+    font-size: var(--fs-sm);
     font-weight: 600;
     color: var(--text-2);
   }
@@ -245,10 +245,10 @@
     color: var(--text);
   }
   .close-row:hover {
-    background: var(--surface-2, rgba(0, 0, 0, 0.04));
+    background: var(--inset);
   }
   .close-scene {
-    font-size: 0.76rem;
+    font-size: var(--fs-sm);
     color: var(--text-3);
     flex: 0 0 auto;
   }
@@ -262,8 +262,8 @@
   }
   .close-count {
     margin-left: 8px;
-    font-size: 0.72rem;
-    color: var(--mutation-color, #7c5cbf);
+    font-size: var(--fs-sm);
+    color: var(--mutation-color);
   }
   .close-expand {
     flex: none;
@@ -284,11 +284,11 @@
   }
   .close-row-sub {
     padding: 5px 9px;
-    font-size: 0.85rem;
+    font-size: var(--fs-md);
   }
   .muted {
     color: var(--text-3);
-    font-size: 0.85rem;
+    font-size: var(--fs-md);
     list-style: none;
   }
   .mutation-foot {

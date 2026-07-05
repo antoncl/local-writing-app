@@ -106,7 +106,7 @@
     display: flex;
     align-items: center;
     justify-content: center;
-    background: rgba(0, 0, 0, 0.28);
+    background: var(--scrim);
   }
   .mdlg-card {
     position: relative;
@@ -116,7 +116,7 @@
     background: var(--surface);
     border: 1px solid var(--border);
     border-radius: 10px;
-    box-shadow: 0 12px 40px rgba(0, 0, 0, 0.24);
+    box-shadow: var(--elev-3);
     padding: 18px;
   }
   .mdlg-head {
@@ -124,12 +124,12 @@
   }
   .mdlg-head h3 {
     margin: 0 0 2px;
-    font-size: 1.05rem;
+    font-size: var(--fs-xl);
     color: var(--text);
   }
   .mdlg-head p {
     margin: 0 0 14px;
-    font-size: 0.82rem;
+    font-size: var(--fs-md);
     color: var(--text-3);
   }
   .mdlg-body {
@@ -173,8 +173,8 @@
   }
   .mdlg-foot :global(button.danger) {
     background: transparent;
-    color: #b4442f;
-    border-color: color-mix(in oklab, #b4442f 40%, transparent);
+    color: var(--danger);
+    border-color: color-mix(in oklab, var(--danger) 40%, transparent);
   }
   .mdlg-foot :global(button.primary) {
     background: var(--accent);

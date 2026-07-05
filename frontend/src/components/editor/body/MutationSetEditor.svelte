@@ -153,7 +153,7 @@
     margin-bottom: 12px;
   }
   .tset-field > span {
-    font-size: 0.78rem;
+    font-size: var(--fs-sm);
     font-weight: 600;
     color: var(--text-2);
   }
@@ -165,6 +165,6 @@
     background: var(--surface);
     color: var(--text);
     font: inherit;
-    font-size: 0.85rem;
+    font-size: var(--fs-md);
   }
 </style>

@@ -18,6 +18,8 @@ dependencies = [
 dev = [
   "ruff>=0.15",
   "pre-commit>=4.0",
+  "pytest>=9",
+  "httpx>=0.28",  # FastAPI TestClient dependency
 ]
 
 [tool.setuptools.packages.find]

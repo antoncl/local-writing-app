@@ -116,7 +116,7 @@
   .todo-section-label {
     margin: 14px 0 6px;
     color: var(--text-3);
-    font-size: 12px;
+    font-size: var(--fs-sm);
     font-weight: 700;
     text-transform: uppercase;
   }
@@ -146,12 +146,12 @@
 
   .todo-link strong {
     color: var(--text);
-    font-size: 12px;
+    font-size: var(--fs-sm);
   }
 
   .todo-link span {
     color: var(--text-2);
-    font-size: 12px;
+    font-size: var(--fs-sm);
     line-height: 1.35;
     overflow: hidden;
     text-overflow: ellipsis;
@@ -164,7 +164,7 @@
 
   .todo-item small {
     color: var(--star);
-    font-size: 11px;
+    font-size: var(--fs-xs);
     font-weight: 700;
     text-transform: uppercase;
   }
@@ -173,6 +173,6 @@
     padding: 3px 7px;
     border-color: var(--danger-border);
     color: var(--danger);
-    font-size: 12px;
+    font-size: var(--fs-sm);
   }
 </style>

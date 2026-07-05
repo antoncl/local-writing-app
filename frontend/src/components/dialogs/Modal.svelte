@@ -64,7 +64,7 @@
     border: 1px solid var(--border);
     border-radius: 8px;
     background: var(--surface);
-    box-shadow: 0 24px 60px rgba(25, 40, 35, 0.28);
+    box-shadow: var(--elev-3);
   }
 
   .confirm-modal-header {
@@ -80,7 +80,7 @@
   .confirm-modal :global(p) {
     margin: 0;
     color: var(--text-2);
-    font-size: 14px;
+    font-size: var(--fs-md);
     line-height: 1.45;
     white-space: pre-line;
   }

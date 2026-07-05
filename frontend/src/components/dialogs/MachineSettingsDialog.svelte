@@ -182,13 +182,13 @@
 
   .palette-editor h3 {
     margin: 0;
-    font-size: 14px;
+    font-size: var(--fs-md);
     font-weight: 600;
   }
 
   .palette-editor p.muted {
     margin: 0 0 8px;
-    font-size: 12px;
+    font-size: var(--fs-sm);
   }
 
   .palette-row {
@@ -196,11 +196,11 @@
     grid-template-columns: 22px 1fr 1.5fr 44px auto;
     gap: 8px;
     align-items: center;
-    font-size: 12px;
+    font-size: var(--fs-sm);
   }
 
   .palette-row.palette-header {
-    font-size: 11px;
+    font-size: var(--fs-xs);
     color: var(--text-3);
     text-transform: uppercase;
     letter-spacing: 0.04em;
@@ -219,7 +219,7 @@
 
   .palette-id-input,
   .palette-label-input {
-    font-size: 12px;
+    font-size: var(--fs-sm);
     padding: 3px 6px;
     border: 1px solid var(--border);
     border-radius: 4px;
@@ -227,7 +227,7 @@
   }
 
   .palette-id-input {
-    font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+    font-family: var(--mono);
   }
 
   .palette-color-input {
@@ -251,7 +251,7 @@
     border: 1px solid transparent;
     border-radius: 4px;
     padding: 2px 6px;
-    font-size: 11px;
+    font-size: var(--fs-xs);
     color: var(--text-2);
     cursor: pointer;
     line-height: 1;
@@ -278,7 +278,7 @@
   }
 
   .palette-add-row button {
-    font-size: 12px;
+    font-size: var(--fs-sm);
     padding: 4px 10px;
     border: 1px dashed var(--border-strong);
     border-radius: 4px;
@@ -297,8 +297,8 @@
      this dialog's slotted content and stay scoped. Sizing is handled by the
      --modal-* custom props set via frameStyle, so there's no bare frame rule. */
   :global(.machine-settings-modal) code {
-    font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
-    font-size: 12px;
+    font-family: var(--mono);
+    font-size: var(--fs-sm);
     background: var(--inset);
     padding: 1px 5px;
     border-radius: 3px;
@@ -307,11 +307,11 @@
   :global(.machine-settings-modal) label {
     display: grid;
     gap: 4px;
-    font-size: 13px;
+    font-size: var(--fs-md);
   }
 
   :global(.machine-settings-modal) input {
-    font-size: 13px;
+    font-size: var(--fs-md);
     padding: 6px 8px;
     border: 1px solid var(--border);
     border-radius: 4px;

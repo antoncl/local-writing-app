@@ -80,7 +80,7 @@
     margin: 0;
     padding-left: 20px;
     color: var(--text-2);
-    font-size: 13px;
+    font-size: var(--fs-md);
     line-height: 1.5;
     max-height: 200px;
     overflow: auto;
@@ -91,17 +91,17 @@
     align-items: center;
     gap: 6px;
     margin: 0 !important;
-    font-size: 12.5px;
+    font-size: var(--fs-sm);
     font-weight: 600;
-    color: var(--danger, #9d2f2a);
+    color: var(--danger);
   }
 
   .confirm-modal-dsa {
     display: flex;
     align-items: center;
     gap: 7px;
-    font-size: 12.5px;
-    color: var(--text-2, var(--text-2));
+    font-size: var(--fs-sm);
+    color: var(--text-2);
     cursor: pointer;
   }
 

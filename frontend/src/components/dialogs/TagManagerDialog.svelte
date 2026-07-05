@@ -249,7 +249,7 @@
   .gm-head h2 {
     margin: 0;
     font-family: var(--serif);
-    font-size: 18px;
+    font-size: var(--fs-xl);
     font-weight: 600;
   }
   .tm-count {
@@ -257,7 +257,7 @@
     border-radius: 999px;
     border: 1px solid var(--border);
     background: var(--surface);
-    font-size: 12px;
+    font-size: var(--fs-sm);
     color: var(--text-2);
   }
   .tm-filter {
@@ -266,14 +266,14 @@
     padding: 5px 9px;
     border: 1px solid var(--border);
     border-radius: 8px;
-    font-size: 13px;
+    font-size: var(--fs-md);
   }
   .gm-close {
     padding: 5px 11px;
     border: 1px solid var(--border);
     border-radius: 8px;
     background: var(--surface);
-    font-size: 12.5px;
+    font-size: var(--fs-sm);
     cursor: pointer;
   }
   .gm-error {
@@ -281,7 +281,7 @@
     padding: 9px 16px;
     background: var(--danger-soft);
     color: var(--danger);
-    font-size: 12.5px;
+    font-size: var(--fs-sm);
   }
   .tm-merge-bar {
     display: flex;
@@ -293,7 +293,7 @@
     color: var(--accent-emphasis);
   }
   .tm-merge-label {
-    font-size: 12.5px;
+    font-size: var(--fs-sm);
     font-weight: 600;
   }
   .tm-merge-target {
@@ -301,10 +301,10 @@
     padding: 5px 9px;
     border: 1px solid var(--border);
     border-radius: 8px;
-    font-size: 13px;
+    font-size: var(--fs-md);
   }
   .tm-merge-note {
-    font-size: 11px;
+    font-size: var(--fs-xs);
     color: var(--text-2);
   }
   .gm-body {
@@ -331,7 +331,7 @@
     border-radius: 5px;
     background: var(--surface);
     color: #fff;
-    font-size: 12px;
+    font-size: var(--fs-sm);
     cursor: pointer;
   }
   .tm-check.on {
@@ -339,12 +339,12 @@
     border-color: var(--accent);
   }
   .tm-name {
-    font-size: 13px;
+    font-size: var(--fs-md);
     font-weight: 600;
     color: var(--text);
   }
   .tm-uses {
-    font-size: 11.5px;
+    font-size: var(--fs-sm);
     color: var(--text-3);
   }
   .tm-scopes {
@@ -359,7 +359,7 @@
     border-radius: 999px;
     border: 1px solid var(--divider);
     background: var(--inset);
-    font-size: 11px;
+    font-size: var(--fs-xs);
     color: var(--text-2);
   }
   .tm-cog {
@@ -367,7 +367,7 @@
     border: 0;
     background: transparent;
     color: var(--text-3);
-    font-size: 15px;
+    font-size: var(--fs-lg);
     cursor: pointer;
   }
   .tm-cog:hover {
@@ -383,7 +383,7 @@
     box-shadow: inset 3px 0 0 0 var(--accent);
   }
   .lbl {
-    font-size: 10px;
+    font-size: var(--fs-xs);
     font-weight: 800;
     letter-spacing: 0.09em;
     text-transform: uppercase;
@@ -402,7 +402,7 @@
     border: 1px solid var(--border);
     border-radius: 8px;
     background: var(--surface);
-    font-size: 12.5px;
+    font-size: var(--fs-sm);
     cursor: pointer;
   }
   .sfi-done {
@@ -411,7 +411,7 @@
     border-radius: 8px;
     background: var(--accent);
     color: #fff;
-    font-size: 12.5px;
+    font-size: var(--fs-sm);
     font-weight: 600;
     cursor: pointer;
   }
@@ -421,7 +421,7 @@
   }
   .muted {
     padding: 16px;
-    font-size: 13px;
+    font-size: var(--fs-md);
     color: var(--text-3);
   }
 </style>

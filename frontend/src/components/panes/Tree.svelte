@@ -593,7 +593,7 @@
     flex: 1;
     min-width: 0;
     padding: 2px 6px;
-    font-size: 14px;
+    font-size: var(--fs-md);
     border: 1px solid var(--accent);
     border-radius: 4px;
     background: var(--surface);

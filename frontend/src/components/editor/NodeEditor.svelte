@@ -1177,8 +1177,8 @@
     position: relative;
     width: 280px;
     min-height: 0;
-    background: var(--inset, #f1f5f3);
-    border-left: 1px solid var(--divider, var(--divider));
+    background: var(--inset);
+    border-left: 1px solid var(--divider);
   }
 
   /* Left-edge drag handle to widen/narrow the rail. */
@@ -1201,7 +1201,7 @@
     background: linear-gradient(
       to right,
       transparent 0 2px,
-      var(--accent, #2f6f5e) 2px 4px,
+      var(--accent) 2px 4px,
       transparent 4px
     );
   }
@@ -1214,7 +1214,7 @@
     background: linear-gradient(
       to right,
       transparent 0 2px,
-      var(--accent, #2f6f5e) 2px 4px,
+      var(--accent) 2px 4px,
       transparent 4px
     );
   }
@@ -1230,7 +1230,7 @@
 
   .rail-head-label {
     flex: 1;
-    font-size: 11px;
+    font-size: var(--fs-xs);
     font-weight: 800;
     letter-spacing: 0.09em;
     text-transform: uppercase;
@@ -1248,15 +1248,15 @@
     border: 1px solid transparent;
     border-radius: 6px;
     background: transparent;
-    color: var(--text-3, var(--text-3));
-    font-size: 16px;
+    color: var(--text-3);
+    font-size: var(--fs-xl);
     cursor: pointer;
   }
 
   .rail-collapse:hover {
-    background: var(--surface, #fff);
-    border-color: var(--divider, var(--divider));
-    color: var(--text-2, var(--text-2));
+    background: var(--surface);
+    border-color: var(--divider);
+    color: var(--text-2);
   }
 
   .rail-scroll {
@@ -1275,21 +1275,21 @@
     width: 34px;
     padding: 12px 0;
     border: 0;
-    border-left: 1px solid var(--divider, var(--divider));
-    background: var(--inset, #f1f5f3);
-    color: var(--text-3, var(--text-3));
-    font-size: 15px;
+    border-left: 1px solid var(--divider);
+    background: var(--inset);
+    color: var(--text-3);
+    font-size: var(--fs-lg);
     cursor: pointer;
   }
 
   .rail-tab:hover {
-    color: var(--text, #242424);
-    background: var(--panel, var(--panel));
+    color: var(--text);
+    background: var(--panel);
   }
 
   .rail-tab-label {
     writing-mode: vertical-rl;
-    font-size: 11px;
+    font-size: var(--fs-xs);
     font-weight: 700;
     letter-spacing: 0.09em;
     text-transform: uppercase;
@@ -1331,15 +1331,15 @@
 
   .title-mutated-marker {
     margin-left: 4px;
-    color: var(--mutation-color, #7c5cbf);
+    color: var(--mutation-color);
     font-weight: 700;
   }
   .title-input[readonly] {
-    background: var(--inset, #f1f5f3);
+    background: var(--inset);
     cursor: default;
   }
   .title-input.mutated {
-    color: var(--mutation-color, #7c5cbf);
+    color: var(--mutation-color);
     font-weight: 600;
   }
 
@@ -1354,18 +1354,18 @@
     align-items: center;
     gap: 6px;
     padding: 4px 24px;
-    font-size: 11.5px;
+    font-size: var(--fs-sm);
     font-weight: 600;
-    color: var(--mutation-color, #7c5cbf);
-    background: color-mix(in srgb, var(--mutation-color, #7c5cbf) 10%, transparent);
-    border-bottom: 1px solid color-mix(in srgb, var(--mutation-color, #7c5cbf) 30%, transparent);
+    color: var(--mutation-color);
+    background: color-mix(in srgb, var(--mutation-color) 10%, transparent);
+    border-bottom: 1px solid color-mix(in srgb, var(--mutation-color) 30%, transparent);
   }
   .effective-body-content {
     padding: 12px 24px 24px;
     max-width: 72ch;
-    font-size: 15px;
+    font-size: var(--fs-lg);
     line-height: 1.65;
-    color: var(--text, #242424);
+    color: var(--text);
   }
   .effective-body-content :global(p) {
     margin: 0 0 0.9em;
@@ -1375,7 +1375,7 @@
     display: grid;
     gap: 3px;
     color: var(--text-3);
-    font-size: 11px;
+    font-size: var(--fs-xs);
     font-weight: 700;
     text-transform: uppercase;
   }
@@ -1387,7 +1387,7 @@
     font-family:
       Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI",
       sans-serif;
-    font-size: 26px;
+    font-size: var(--fs-2xl);
     font-weight: 700;
     padding-left: 0;
   }
@@ -1408,8 +1408,8 @@
      as the session/last-call view, and `character-cost-chip` carries the
      per-character all-time totals from the log. */
   .continuation-cost-chip {
-    color: var(--color-muted, #888);
-    font-size: 11px;
+    color: var(--text-3);
+    font-size: var(--fs-xs);
     white-space: nowrap;
     cursor: default;
     flex: 0 0 auto;
@@ -1419,8 +1419,8 @@
      character entries and the project node respectively). Same muted
      tone as the scene cost chips so the editor hint row stays calm. */
   .node-rollup-cost-chip {
-    color: var(--color-muted, #888);
-    font-size: 11px;
+    color: var(--text-3);
+    font-size: var(--fs-xs);
     white-space: nowrap;
     cursor: default;
     flex: 0 0 auto;
@@ -1446,8 +1446,8 @@
     display: inline-flex;
     align-items: center;
     gap: 4px;
-    font-size: 11px;
-    color: var(--color-muted, #888);
+    font-size: var(--fs-xs);
+    color: var(--text-3);
     white-space: nowrap;
     cursor: default;
   }
@@ -1456,12 +1456,12 @@
     width: 7px;
     height: 7px;
     border-radius: 50%;
-    background: var(--character-color, #888);
+    background: var(--character-color, var(--text-3));
     flex: 0 0 auto;
   }
 
   .character-cost-name {
-    color: var(--color-text, #1a1a1a);
+    color: var(--text);
   }
 
   .character-cost-amount {

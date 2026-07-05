@@ -98,7 +98,7 @@
     border-radius: 999px;
     background: var(--inset);
     color: var(--text-2);
-    font-size: 10.5px;
+    font-size: var(--fs-xs);
     font-weight: 600;
     line-height: 1.5;
     white-space: nowrap;

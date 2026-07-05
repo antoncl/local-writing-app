@@ -91,8 +91,8 @@
     align-items: center;
     gap: 10px;
     padding: 6px 14px;
-    border-top: 1px solid var(--divider, #e2e8e5);
-    background: var(--inset, #f7faf8);
+    border-top: 1px solid var(--divider);
+    background: var(--inset);
     min-width: 0;
   }
 
@@ -102,20 +102,20 @@
     height: 14px;
     padding: 0;
     border-radius: 50%;
-    border: 2px solid color-mix(in srgb, var(--mutation-color, #7c5cbf) 42%, transparent);
-    background: var(--surface, #fff);
+    border: 2px solid color-mix(in srgb, var(--mutation-color) 42%, transparent);
+    background: var(--surface);
     cursor: pointer;
     transition: border-color 80ms linear, background-color 80ms linear;
   }
   .scrub-stop:hover {
-    border-color: var(--mutation-color, #7c5cbf);
+    border-color: var(--mutation-color);
   }
   .scrub-stop.passed {
-    background: color-mix(in srgb, var(--mutation-color, #7c5cbf) 30%, var(--surface, #fff));
+    background: color-mix(in srgb, var(--mutation-color) 30%, var(--surface));
   }
   .scrub-stop.current {
-    background: var(--mutation-color, #7c5cbf);
-    border-color: var(--mutation-color, #7c5cbf);
+    background: var(--mutation-color);
+    border-color: var(--mutation-color);
   }
 
   /* Stop 0 — home/base. A touch larger, carries the edit affordance. */
@@ -126,8 +126,8 @@
     align-items: center;
     justify-content: center;
     border-radius: 6px;
-    font-size: 12px;
-    color: var(--text-2, #4d5753);
+    font-size: var(--fs-sm);
+    color: var(--text-2);
   }
   .scrub-base.current {
     color: #fff;
@@ -150,7 +150,7 @@
     right: 0;
     top: 50%;
     height: 2px;
-    background: color-mix(in srgb, var(--mutation-color, #7c5cbf) 24%, transparent);
+    background: color-mix(in srgb, var(--mutation-color) 24%, transparent);
   }
   .scrub-track .scrub-stop {
     position: relative;
@@ -159,12 +159,12 @@
   .scrub-asof {
     margin-left: auto;
     flex: none;
-    font-size: 11px;
-    color: var(--text-3, #74817b);
+    font-size: var(--fs-xs);
+    color: var(--text-3);
     white-space: nowrap;
   }
   .scrub-asof.scrubbed {
-    color: var(--mutation-color, #7c5cbf);
+    color: var(--mutation-color);
     font-weight: 600;
   }
 </style>

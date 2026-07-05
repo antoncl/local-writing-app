@@ -283,14 +283,14 @@
      targets are :global; the .scene-metadata ancestor keeps this scope. */
   .scene-metadata :global(label) {
     color: var(--text-2);
-    font-size: 12px;
+    font-size: var(--fs-sm);
     font-weight: 700;
   }
   .scene-metadata :global(input),
   .scene-metadata :global(select),
   .scene-metadata :global(textarea) {
     margin-top: 4px;
-    font-size: 13px;
+    font-size: var(--fs-md);
     font-weight: 400;
   }
   .scene-metadata :global(input[readonly]) {
@@ -307,7 +307,7 @@
     align-items: flex-end;
     gap: 8px;
     padding: 8px 12px 10px;
-    border-bottom: 1px solid var(--divider, #e2e8e5);
+    border-bottom: 1px solid var(--divider);
   }
   .rail-type-select {
     display: flex;
@@ -317,39 +317,39 @@
     min-width: 0;
   }
   .rail-type-label {
-    font-size: 10px;
+    font-size: var(--fs-xs);
     font-weight: 800;
     letter-spacing: 0.08em;
     text-transform: uppercase;
-    color: var(--text-3, #74817b);
+    color: var(--text-3);
   }
   .rail-type-select select {
     width: 100%;
     padding: 5px 8px;
-    border: 1px solid var(--border, #cbd6d2);
+    border: 1px solid var(--border);
     border-radius: 8px;
-    background: var(--surface, #fff);
-    font-size: 13px;
-    color: var(--text, #242424);
+    background: var(--surface);
+    font-size: var(--fs-md);
+    color: var(--text);
   }
   .rail-edit-type {
     flex: 0 0 auto;
     padding: 5px 9px;
-    border: 1px solid var(--border, #cbd6d2);
+    border: 1px solid var(--border);
     border-radius: 8px;
-    background: var(--surface, #fff);
-    font-size: 11.5px;
-    color: var(--text-2, #4d5753);
+    background: var(--surface);
+    font-size: var(--fs-sm);
+    color: var(--text-2);
     cursor: pointer;
   }
   .rail-edit-type:hover {
-    border-color: var(--accent, #2f6f5e);
-    color: var(--accent-strong, #234e43);
+    border-color: var(--accent);
+    color: var(--accent-strong);
   }
 
   .rail-assistant {
     padding: 10px 12px;
-    border-bottom: 1px solid var(--divider, #e2e8e5);
+    border-bottom: 1px solid var(--divider);
   }
 
   /* L1 section headers live in styles.css (shared with the Detail Type
@@ -373,15 +373,15 @@
     align-items: center;
     justify-content: center;
     border-radius: 7px;
-    background: var(--inset, #f1f5f3);
-    border: 1px solid var(--divider, #e2e8e5);
-    color: var(--text-2, #4d5753);
-    font-size: 14px;
+    background: var(--inset);
+    border: 1px solid var(--divider);
+    color: var(--text-2);
+    font-size: var(--fs-md);
   }
   .fr-name {
     flex: 0 1 auto;
-    font-size: 13px;
-    color: var(--text, #242424);
+    font-size: var(--fs-md);
+    color: var(--text);
     min-width: 78px;
   }
   .fr-val {
@@ -412,27 +412,26 @@
 
   /* Mutated-by-here rows (#64): the in-prose mutation pill's vocabulary —
      violet + a miniaturized ⤳ beside the name, like a required-field
-     asterisk. Unchanged rows render plain read-only. --mutation-color is
-     scoped to .mutation-pill in styles.css, so fall back to the literal. */
+     asterisk. Unchanged rows render plain read-only. */
   .fr-mutated-marker {
     margin-left: 4px;
-    color: var(--mutation-color, #7c5cbf);
+    color: var(--mutation-color);
     font-weight: 700;
-    font-size: 12px;
+    font-size: var(--fs-sm);
   }
   .field-row.mutated .fr-name {
-    color: var(--mutation-color, #7c5cbf);
+    color: var(--mutation-color);
     font-weight: 600;
   }
   .field-row.mutated .fr-val :global(.fv-static),
   .field-row.mutated .fr-val :global(.fv-static-longtext) {
-    color: var(--mutation-color, #7c5cbf);
+    color: var(--mutation-color);
   }
   /* Chips in a mutated row pick up the pill's tint recipe (14% bg / 42% border). */
   .field-row.mutated .fr-val :global(.multi-select-chip.static) {
-    background: color-mix(in srgb, var(--mutation-color, #7c5cbf) 14%, transparent);
-    border-color: color-mix(in srgb, var(--mutation-color, #7c5cbf) 42%, transparent);
-    color: var(--mutation-color, #7c5cbf);
+    background: color-mix(in srgb, var(--mutation-color) 14%, transparent);
+    border-color: color-mix(in srgb, var(--mutation-color) 42%, transparent);
+    color: var(--mutation-color);
   }
 
   .fr-computed {
@@ -440,27 +439,27 @@
     align-items: center;
     gap: 5px;
     font-family: ui-monospace, monospace;
-    font-size: 12px;
-    color: var(--text-3, #74817b);
+    font-size: var(--fs-sm);
+    color: var(--text-3);
   }
 
   .color-row .fr-val {
     gap: 8px;
   }
   .color-row .muted {
-    font-size: 10.5px;
-    color: var(--text-3, #74817b);
+    font-size: var(--fs-xs);
+    color: var(--text-3);
   }
 
   /* Controls inside a row — keep them compact and on-palette. */
   .fr-val :global(input),
   .fr-val :global(select) {
-    font-size: 13px;
+    font-size: var(--fs-md);
     padding: 5px 8px;
-    border: 1px solid var(--border, #cbd6d2);
+    border: 1px solid var(--border);
     border-radius: 8px;
-    background: var(--surface, #fff);
-    color: var(--text, #242424);
+    background: var(--surface);
+    color: var(--text);
   }
   .field-row:not(.wide) .fr-val :global(input[type="text"]),
   .field-row:not(.wide) .fr-val :global(input[type="number"]),

@@ -350,15 +350,15 @@ button.add-affordance {
   padding: 6px 11px;
   border: 1px dashed var(--border-strong, var(--border-strong));
   border-radius: 8px;
-  background: var(--inset, #f1f5f3);
+  background: var(--inset);
   color: var(--text-2, var(--text-2));
-  font-size: 12px;
+  font-size: var(--fs-sm);
   font-weight: 500;
 }
 button.add-affordance:hover {
-  border-color: var(--accent, #2f6f5e);
-  color: var(--accent-strong, #234e43);
-  background: var(--surface, #fff);
+  border-color: var(--accent);
+  color: var(--accent-strong);
+  background: var(--surface);
 }
 
 input,
@@ -383,7 +383,7 @@ textarea {
 label {
   display: grid;
   gap: 5px;
-  font-size: 13px;
+  font-size: var(--fs-md);
 }
 
 h1,
@@ -393,15 +393,15 @@ h3 {
 }
 
 h1 {
-  font-size: 20px;
+  font-size: var(--fs-2xl);
 }
 
 h2 {
-  font-size: 14px;
+  font-size: var(--fs-md);
 }
 
 h3 {
-  font-size: 15px;
+  font-size: var(--fs-lg);
 }
 
 /* .workspace (+ its @media) co-located into App.svelte (#14). */
@@ -415,7 +415,7 @@ h3 {
   border: 1px solid var(--border);
   border-radius: 8px;
   background: var(--surface);
-  box-shadow: 0 16px 36px rgba(36, 36, 36, 0.12);
+  box-shadow: var(--elev-3);
   overflow: hidden;
 }
 
@@ -454,7 +454,7 @@ h3 {
 
 .pin-button {
   padding: 3px 7px;
-  font-size: 12px;
+  font-size: var(--fs-sm);
 }
 
 .pin-button.active-pin {
@@ -558,7 +558,7 @@ h3 {
 .muted,
 .status {
   color: var(--text-3);
-  font-size: 13px;
+  font-size: var(--fs-md);
 }
 
 /* The `.tree-row*` rules were REMOVED (#14). NodeRow fully styles its own
@@ -577,7 +577,7 @@ h3 {
   color: var(--text-3);
   cursor: grab;
   user-select: none;
-  font-size: 14.5px;
+  font-size: var(--fs-lg);
   font-weight: 700;
   line-height: 1;
   letter-spacing: -2px;
@@ -610,7 +610,7 @@ h3 {
 .row-add-popover-heading {
   display: block;
   padding: 2px 8px 6px;
-  font-size: 11px;
+  font-size: var(--fs-xs);
   font-weight: 700;
   letter-spacing: 0.07em;
   text-transform: uppercase;
@@ -632,7 +632,7 @@ button.row-action-add {
   border-radius: 7px;
   background: transparent;
   color: var(--accent);
-  font-size: 14px;
+  font-size: var(--fs-md);
   line-height: 1;
   cursor: pointer;
   transition: background 120ms ease, color 120ms ease, border-color 120ms ease;
@@ -667,7 +667,7 @@ button.row-action-add.active {
 
 .editor-hint {
   color: var(--text-3);
-  font-size: 12px;
+  font-size: var(--fs-sm);
   display: flex;
   align-items: baseline;
   justify-content: space-between;
@@ -698,7 +698,7 @@ button.row-action-add.active {
   display: grid;
   gap: 5px;
   color: var(--text-2);
-  font-size: 12px;
+  font-size: var(--fs-sm);
   font-weight: 700;
 }
 
@@ -857,7 +857,7 @@ button.row-action-add.active {
   padding: 12px 12px 4px;
 }
 .rail-group-label {
-  font-size: 10px;
+  font-size: var(--fs-xs);
   font-weight: 800;
   letter-spacing: 0.09em;
   text-transform: uppercase;
@@ -886,14 +886,14 @@ button.row-action-add.active {
   align-items: center;
   justify-content: center;
   border-radius: 7px;
-  background: var(--inset, #f1f5f3);
+  background: var(--inset);
   border: 1px solid var(--divider, var(--divider));
   color: var(--text-2, var(--text-2));
-  font-size: 14px;
+  font-size: var(--fs-md);
 }
 .sfr-cog {
   color: var(--text-3, var(--text-3));
-  font-size: 14px;
+  font-size: var(--fs-md);
 }
 
 /* Expand-in-place field editor (metadata revision, mockup C). One row's
@@ -906,8 +906,8 @@ button.row-action-add.active {
   padding: 12px;
   border: 1px solid var(--divider, var(--divider));
   border-radius: 8px;
-  background: var(--inset, #f1f5f3);
-  box-shadow: inset 3px 0 0 0 var(--accent, #2f6f5e);
+  background: var(--inset);
+  box-shadow: inset 3px 0 0 0 var(--accent);
 }
 /* Inline field-editor chrome (.sfi-head/-icon-*/-name/-type-*/-computed/
    -controls/-id/-key-*) co-located into SchemaFieldInlineEditor.svelte (#14).
@@ -918,22 +918,22 @@ button.row-action-add.active {
   padding: 5px 8px;
   border: 1px solid var(--border, var(--border));
   border-radius: 8px;
-  background: var(--surface, #fff);
-  font-size: 13px;
+  background: var(--surface);
+  font-size: var(--fs-md);
 }
 .sfi-field {
   display: flex;
   align-items: center;
   gap: 7px;
-  font-size: 12px;
+  font-size: var(--fs-sm);
   color: var(--text-2, var(--text-2));
 }
 .sfi-field input {
   padding: 5px 8px;
   border: 1px solid var(--border, var(--border));
   border-radius: 8px;
-  background: var(--surface, #fff);
-  font-size: 13px;
+  background: var(--surface);
+  font-size: var(--fs-md);
   font-weight: 400;
 }
 .sfi-footer {
@@ -950,11 +950,11 @@ button.row-action-add.active {
   align-items: center;
   gap: 5px;
   margin: 2px 0 0;
-  font-size: 11px;
+  font-size: var(--fs-xs);
   color: var(--text-3, var(--text-3));
 }
 .sfi-options-hint strong {
-  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-family: var(--mono);
   font-weight: 600;
   color: var(--text-2, var(--text-2));
 }
@@ -965,18 +965,18 @@ button.row-action-add.active {
   padding: 5px 11px;
   border: 1px solid var(--border, var(--border));
   border-radius: 8px;
-  background: var(--surface, #fff);
-  font-size: 12.5px;
+  background: var(--surface);
+  font-size: var(--fs-sm);
   color: var(--text-2, var(--text-2));
   cursor: pointer;
 }
 .sfi-done {
   padding: 5px 14px;
-  border: 1px solid var(--accent, #2f6f5e);
+  border: 1px solid var(--accent);
   border-radius: 8px;
-  background: var(--accent, #2f6f5e);
+  background: var(--accent);
   color: #fff;
-  font-size: 12.5px;
+  font-size: var(--fs-sm);
   font-weight: 600;
   cursor: pointer;
 }
@@ -988,7 +988,7 @@ button.row-action-add.active {
   padding: 5px 4px;
   border: 0;
   background: transparent;
-  font-size: 12px;
+  font-size: var(--fs-sm);
   color: var(--danger);
   cursor: pointer;
 }
@@ -1010,7 +1010,7 @@ button.row-action-add.active {
   color: var(--danger);
   border: 1px solid var(--danger-border);
   border-radius: 4px;
-  font-size: 14px;
+  font-size: var(--fs-md);
 }
 
 .ai-suggestion {
@@ -1096,8 +1096,8 @@ button.row-action-add.active {
   background: var(--surface);
   border: 1px solid var(--border);
   border-radius: 6px;
-  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.12);
-  font-size: 13px;
+  box-shadow: var(--elev-2);
+  font-size: var(--fs-md);
   line-height: 1.4;
   color: var(--text);
   pointer-events: none;
@@ -1114,7 +1114,7 @@ button.row-action-add.active {
   padding: 1px 6px;
   background: var(--accent-soft);
   border-radius: 8px;
-  font-size: 11px;
+  font-size: var(--fs-xs);
   color: var(--text-2);
   text-transform: uppercase;
   letter-spacing: 0.04em;

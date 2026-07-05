@@ -191,12 +191,12 @@
     padding: 0 16px;
     background: var(--surface);
     border-bottom: 1px solid var(--border);
-    box-shadow: 0 1px 2px rgba(36, 36, 36, 0.04);
+    box-shadow: var(--elev-1);
   }
 
   .top-bar .wordmark {
     font-weight: 600;
-    font-size: 14px;
+    font-size: var(--fs-md);
     color: var(--text);
     letter-spacing: 0.02em;
     user-select: none;
@@ -214,7 +214,7 @@
     border: 1px solid var(--divider);
     background: var(--inset);
     color: var(--text);
-    font-size: 13px;
+    font-size: var(--fs-md);
     border-radius: 6px;
     cursor: pointer;
     min-width: 200px;
@@ -228,7 +228,7 @@
   }
 
   .top-bar .switcher-button .chevron {
-    font-size: 10px;
+    font-size: var(--fs-xs);
     color: var(--text-3);
   }
 
@@ -271,14 +271,14 @@
     background: var(--surface);
     border: 1px solid var(--border);
     border-radius: 8px;
-    box-shadow: 0 12px 28px rgba(36, 36, 36, 0.16);
+    box-shadow: var(--elev-2);
     padding: 6px;
     display: grid;
     gap: 1px;
   }
 
   .top-bar .switcher-section-label {
-    font-size: 11px;
+    font-size: var(--fs-xs);
     text-transform: uppercase;
     letter-spacing: 0.06em;
     color: var(--text-3);
@@ -295,7 +295,7 @@
     border: 1px solid transparent;
     border-radius: 4px;
     color: var(--text);
-    font-size: 13px;
+    font-size: var(--fs-md);
     text-align: left;
     cursor: pointer;
     width: 100%;
@@ -319,7 +319,7 @@
   .top-bar .recent-meta {
     display: flex;
     gap: 8px;
-    font-size: 11px;
+    font-size: var(--fs-xs);
     color: var(--text-3);
     justify-content: space-between;
   }
@@ -328,7 +328,7 @@
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
-    font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+    font-family: var(--mono);
   }
 
   .top-bar .switcher-divider {
@@ -351,7 +351,7 @@
 
   .top-bar .action-button {
     padding: 4px 10px;
-    font-size: 13px;
+    font-size: var(--fs-md);
     border: 1px solid var(--divider);
     background: var(--surface);
     border-radius: 6px;
@@ -370,7 +370,7 @@
 
   .top-bar .icon-button {
     padding: 4px 8px;
-    font-size: 16px;
+    font-size: var(--fs-xl);
     line-height: 1;
   }
 </style>

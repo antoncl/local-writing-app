@@ -26,6 +26,12 @@ repos:
         language: system
         files: \.(py|svelte|ts|tsx)$
 
+      - id: style-token-guard
+        name: style-token guard (colors/type from tokens, design-language.md)
+        entry: python scripts/check_style_tokens.py
+        language: system
+        files: ^frontend/src/.*\.svelte$|^frontend/src/styles\.css$
+
       - id: ruff-complexity
         name: ruff complexity (advisory, non-blocking)
         # --exit-zero: never fails the commit; verbose: always print the hints

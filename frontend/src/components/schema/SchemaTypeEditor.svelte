@@ -37,6 +37,8 @@
   import { fieldIconClass, fieldTypeLabel } from "@/lib/utils/fieldIcons";
   import { metadataSchemaStore } from "@/lib/stores/schema";
   import {
+    effectiveFieldHidden,
+    effectiveFieldLabel,
     groupOriginLabel,
     inheritedFromLabel,
     nodeTypeDisplayName,
@@ -105,6 +107,10 @@
     onFieldDragOver?: (event: DragEvent, fieldId: string) => void;
     onFieldDrop?: (targetFieldId: string) => void;
     onClearFieldDrag?: () => void;
+    // Per-type field presentation override (#116): relabel / hide a field for
+    // this type. `label`/`hidden` are the complete desired overlay (null clears
+    // an aspect). Parent persists + refreshes.
+    onSetFieldOverride?: (fieldId: string, override: { label: string | null; hidden: boolean | null }) => void;
   }
 
   let {
@@ -145,6 +151,7 @@
     onFieldDragOver = () => {},
     onFieldDrop = () => {},
     onClearFieldDrag = () => {},
+    onSetFieldOverride = () => {},
   }: Props = $props();
 
   // metadataSchema is global per-project — read from the store, not a prop (#14 Step 2).
@@ -307,6 +314,45 @@
     // — e.g. a blocked rename — returns false and keeps the changes flagged).
     if (saved !== false) baseline = snapshotDraft();
   }
+
+  // --- Per-type field overrides (#116): relabel / hide an inherited field for
+  // this type. State scoped here; the parent persists + refreshes. Overrides
+  // are read off the resolved schema (`field_overrides`, already merged down
+  // the parent chain), so each aspect is preserved when the other is edited. ---
+  let overrideRenamingId = $state<string | null>(null);
+  let overrideRenameValue = $state("");
+
+  function currentOverride(fieldId: string): { label?: string | null; hidden?: boolean | null } | undefined {
+    return selectedSchemaTypeId
+      ? metadataSchema?.entry_types[selectedSchemaTypeId]?.field_overrides?.[fieldId]
+      : undefined;
+  }
+  function startRename(fieldId: string) {
+    overrideRenamingId = fieldId;
+    overrideRenameValue = effectiveFieldLabel(metadataSchema, selectedSchemaTypeId, fieldId);
+  }
+  function cancelRename() {
+    overrideRenamingId = null;
+    overrideRenameValue = "";
+  }
+  function submitRename(fieldId: string) {
+    const trimmed = overrideRenameValue.trim();
+    // Clearing back to the field def's own name drops the label override.
+    const defName = metadataSchema?.fields?.[fieldId]?.name ?? fieldId;
+    const label = trimmed && trimmed !== defName ? trimmed : null;
+    onSetFieldOverride(fieldId, { label, hidden: currentOverride(fieldId)?.hidden ?? null });
+    cancelRename();
+  }
+  function toggleHide(fieldId: string) {
+    const next = !effectiveFieldHidden(metadataSchema, selectedSchemaTypeId, fieldId);
+    // Store `hidden` only when it diverges from the field def's default, so a
+    // toggle back to default clears the aspect rather than persisting a no-op.
+    const defHidden = Boolean(metadataSchema?.fields?.[fieldId]?.hidden);
+    onSetFieldOverride(fieldId, {
+      label: currentOverride(fieldId)?.label ?? null,
+      hidden: next === defHidden ? null : next,
+    });
+  }
 </script>
 
 <div class="pane-content schema-editor">
@@ -384,7 +430,7 @@
             {@const isExpanded = expandedSchemaFieldId === fieldId}
             <SchemaFieldRow
               iconClass={fieldIconClass(field)}
-              name={field.name}
+              name={effectiveFieldLabel(metadataSchema, selectedSchemaTypeId, fieldId)}
               typeLabel={fieldTypeLabel(field.type)}
               expanded={isExpanded}
               draggable={fieldEntries.length > 1 && !schemaTypeReadonly}
@@ -415,23 +461,53 @@
             </div>
           {/if}
           {#each section.entries as [fieldId, field]}
+            {@const label = effectiveFieldLabel(metadataSchema, selectedSchemaTypeId, fieldId)}
+            {@const hidden = effectiveFieldHidden(metadataSchema, selectedSchemaTypeId, fieldId)}
             <SchemaFieldRow
               interactive={false}
               inherited
               iconClass={fieldIconClass(field)}
-              name={field.name}
+              name={label}
               typeLabel={fieldTypeLabel(field.type)}
-              ariaLabel={`${field.name} (inherited)`}
+              ariaLabel={`${label} (inherited)`}
             >
               {#snippet meta()}
                 {#if field.group_origin}
                   <span class="sfr-group-origin"><i class="ti ti-stack-2" aria-hidden="true"></i> {groupOriginLabel(field, metadataSchema)}</span>
+                {:else if field.intrinsic}
+                  <span class="sfr-inherited-label">built-in</span>
                 {:else}
                   <span class="sfr-inherited-label">inherited from {inheritedFromLabel(selectedSchemaTypeId!, fieldId, metadataSchema)}</span>
-                  <i class="ti ti-arrow-up-right sfr-cog" aria-hidden="true"></i>
+                {/if}
+                <!-- Overrides show even on a readonly (System) type: a per-type
+                     relabel / hide is a layer overlay the backend allows on
+                     built-in types (it never edits the built-in def), and it's
+                     the primary #116 case (rename `title` → "Name" on
+                     lore:character). Only group-generated fields are exempt. -->
+                {#if !field.group_origin}
+                  <button class="sfr-ovr" type="button" title={`Rename “${field.name}” for this type`} aria-label={`Rename ${field.name} for this type`} onclick={() => startRename(fieldId)}>
+                    <i class="ti ti-pencil" aria-hidden="true"></i>
+                  </button>
+                  <button class="sfr-ovr" class:active={hidden} type="button" title={hidden ? "Show in the rail" : "Hide from the rail"} aria-label={hidden ? `Show ${label}` : `Hide ${label}`} onclick={() => toggleHide(fieldId)}>
+                    <i class={hidden ? "ti ti-eye-off" : "ti ti-eye"} aria-hidden="true"></i>
+                  </button>
                 {/if}
               {/snippet}
             </SchemaFieldRow>
+            {#if overrideRenamingId === fieldId}
+              <div class="sfr-rename">
+                <input
+                  class="sfr-rename-input"
+                  aria-label={`New label for ${field.name}`}
+                  value={overrideRenameValue}
+                  placeholder={field.name}
+                  oninput={(event) => (overrideRenameValue = event.currentTarget.value)}
+                  onkeydown={(event) => { if (event.key === "Enter") submitRename(fieldId); if (event.key === "Escape") cancelRename(); }}
+                />
+                <button class="sfi-done" type="button" onclick={() => submitRename(fieldId)}>Save</button>
+                <button class="sfi-cancel" type="button" onclick={cancelRename}>Cancel</button>
+              </div>
+            {/if}
           {/each}
         {/each}
         {#if expandedSchemaFieldId === NEW_FIELD_SENTINEL}
@@ -553,6 +629,46 @@
     font-size: 11px;
     font-style: italic;
     color: var(--text-3, var(--text-3));
+  }
+  /* Per-type override affordances (#116): rename pencil + hide-eye toggle in an
+     inherited field row's meta cluster (the row is a <div>, so these buttons
+     nest legally). */
+  .sfr-ovr {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 22px;
+    height: 22px;
+    padding: 0;
+    border: 1px solid transparent;
+    border-radius: 6px;
+    background: transparent;
+    color: var(--text-3);
+    cursor: pointer;
+  }
+  .sfr-ovr:hover {
+    border-color: var(--divider);
+    background: var(--surface, #fff);
+    color: var(--text, #242424);
+  }
+  .sfr-ovr.active {
+    color: var(--accent, #2f6f5e);
+  }
+  /* Inline rename input, rendered beneath the row (mirrors the field inline
+     editor's placement). */
+  .sfr-rename {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 6px 12px 8px 34px;
+  }
+  .sfr-rename-input {
+    flex: 1 1 auto;
+    padding: 5px 8px;
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    background: var(--surface, #fff);
+    font-size: 13px;
   }
   /* L2 reusable groups in the type editor. */
   .sfr-group-origin {

@@ -39,12 +39,16 @@ from app.models import (
     MoveMetadataFieldRequest,
     RenameMetadataFieldRequest,
     SetFieldOrderRequest,
+    SetFieldOverrideRequest,
     SetGroupApplicationsRequest,
     UpsertMetadataEntryTypeRequest,
     UpsertMetadataFieldRequest,
     UpsertMetadataGroupRequest,
 )
-from app.services.project.default_schema import DEFAULT_METADATA_SCHEMA
+from app.services.project.default_schema import (
+    DEFAULT_METADATA_SCHEMA,
+    INTRINSIC_FIELD_KEYS,
+)
 from app.services.project.errors import ProjectServiceError
 
 
@@ -421,6 +425,70 @@ class MetadataSchemaMixin:
         # overlay, so inherited fields become locally reorderable (#89).
         entry_type_data["display_order"] = list(request.field_order)
         entry_types[entry_type_id] = entry_type_data
+        layer_data["entry_types"] = entry_types
+        self._validate_candidate_schema(root, layer_path, layer_data)
+        self._write_yaml(layer_path, layer_data)
+        return self.read_metadata_schema()
+
+    def set_metadata_field_override(self, request: SetFieldOverrideRequest) -> MetadataSchema:
+        """Set / clear a per-type field presentation override (#116): relabel or
+        hide a field this type carries (own or inherited) without touching the
+        shared field def. Pure-presentation overlay on the layer, parallel to
+        `display_order`; the request is the field's COMPLETE desired overlay at
+        this layer (empty aspects clear, an empty overlay drops the entry).
+        `hidden: false` is meaningful — it un-hides a field the def hides by
+        default (e.g. `id`)."""
+        root = self._require_project()
+        layer_path = self._metadata_schema_layer_path_for_id(root, request.layer_id)
+        if layer_path is None:
+            raise ProjectServiceError("Unknown metadata schema layer.", 404)
+        entry_type_id = request.entry_type_id.strip()
+        schema = self.read_metadata_schema()
+        definition = schema.entry_types.get(entry_type_id)
+        if definition is None:
+            raise ProjectServiceError(f"Unknown node type {entry_type_id}.", 404)
+        # No built-in guard here (unlike type-definition CRUD): a field override
+        # is a pure presentation overlay written to the user's layer and never
+        # mutates the built-in type. Relabelling / hiding a field on a built-in
+        # type (e.g. `title` → "Name" on lore:character) is the core use case.
+        field_key = request.field_key.strip()
+        if field_key not in set(definition.fields):
+            raise ProjectServiceError(
+                f"Field {field_key} is not defined for entry_type {entry_type_id}.", 422
+            )
+        label = request.label.strip() if isinstance(request.label, str) else None
+        overlay: dict[str, Any] = {}
+        if label:
+            overlay["label"] = label
+        if request.hidden is not None:
+            overlay["hidden"] = bool(request.hidden)
+
+        layer_data = self._read_yaml(layer_path) if layer_path.exists() else self._empty_metadata_schema()
+        entry_types = layer_data.get("entry_types")
+        if not isinstance(entry_types, dict):
+            entry_types = {}
+        entry_type_data = entry_types.get(entry_type_id)
+        if not isinstance(entry_type_data, dict):
+            entry_type_data = {}
+        overrides = entry_type_data.get("field_overrides")
+        if not isinstance(overrides, dict):
+            overrides = {}
+        if overlay:
+            overrides[field_key] = overlay
+        else:
+            overrides.pop(field_key, None)
+        if overrides:
+            entry_type_data["field_overrides"] = overrides
+        else:
+            entry_type_data.pop("field_overrides", None)
+        # Don't leave an orphaned empty stub: clearing the last override on a
+        # type that has no other local definition would otherwise write
+        # `<type>: {}` to the layer — cruft that also flips a built-in type's
+        # source to this layer (making it look user-defined). Drop the entry.
+        if entry_type_data:
+            entry_types[entry_type_id] = entry_type_data
+        else:
+            entry_types.pop(entry_type_id, None)
         layer_data["entry_types"] = entry_types
         self._validate_candidate_schema(root, layer_path, layer_data)
         self._write_yaml(layer_path, layer_data)
@@ -978,6 +1046,17 @@ class MetadataSchemaMixin:
             # L2: append generated fields from this type's group applications
             # (after own/inherited so they trail the hand-authored fields).
             expand_group_applications(raw_entry_type, next_entry_type["fields"])
+            # Intrinsic identity fields (#116): every node carries id/title/
+            # entry_type in top-level front matter, so inject them into every
+            # type's membership (leading, before display_order can reorder).
+            # Unconditional + deduped: intrinsic fields can never be dropped by
+            # a type omitting them, and inheriting a parent that already has
+            # them doesn't double-count. Injected here (not via each type's
+            # `fields`) keeps them out of `own_fields`, so the editor renders
+            # them as built-in rather than type-owned.
+            existing_fields = next_entry_type["fields"]
+            intrinsic_to_add = [k for k in INTRINSIC_FIELD_KEYS if k not in existing_fields]
+            next_entry_type["fields"] = intrinsic_to_add + existing_fields
             # Display order (#89): membership is inheritance-resolved above; a
             # per-type `display_order` then reorders the whole resolved list
             # (inherited fields included) without touching membership. Additive
@@ -997,6 +1076,30 @@ class MetadataSchemaMixin:
                         child_prompt = next_entry_type.get("prompt") if isinstance(next_entry_type.get("prompt"), dict) else {}
                         merged_prompt = {**deepcopy(parent_prompt), **deepcopy(child_prompt)}
                         next_entry_type["prompt"] = merged_prompt
+            # Field presentation overrides (#116): inherit the parent's, then
+            # layer this type's on top per aspect (child wins). Parallel to
+            # display_order — pure presentation, membership untouched. A child
+            # that only sets `hidden` keeps the parent's `label`, and vice versa.
+            parent_overrides: dict[str, Any] = {}
+            if isinstance(parent_id, str) and parent_id in entry_types:
+                parent_definition = resolved.get(parent_id)
+                if isinstance(parent_definition, dict) and isinstance(parent_definition.get("field_overrides"), dict):
+                    parent_overrides = parent_definition["field_overrides"]
+            own_overrides = next_entry_type.get("field_overrides")
+            if not isinstance(own_overrides, dict):
+                own_overrides = {}
+            merged_overrides: dict[str, dict[str, Any]] = {
+                key: dict(value) for key, value in parent_overrides.items() if isinstance(value, dict)
+            }
+            for key, value in own_overrides.items():
+                if not isinstance(value, dict):
+                    continue
+                combined = dict(merged_overrides.get(key, {}))
+                for aspect in ("label", "hidden"):
+                    if value.get(aspect) is not None:
+                        combined[aspect] = value[aspect]
+                merged_overrides[key] = combined
+            next_entry_type["field_overrides"] = merged_overrides
             resolving.remove(entry_type_id)
             resolved[entry_type_id] = next_entry_type
             return next_entry_type

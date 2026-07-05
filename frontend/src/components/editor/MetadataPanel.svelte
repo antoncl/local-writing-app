@@ -4,6 +4,7 @@
   import SwatchPicker from "@/components/widgets/SwatchPicker.svelte";
   import ColoredSelect from "@/components/widgets/ColoredSelect.svelte";
   import { fieldIconClass } from "@/lib/utils/fieldIcons";
+  import { effectiveFieldLabel, effectiveFieldHidden } from "@/lib/utils/schemaTypeHelpers";
   import type {
     DocumentKind,
     EntryMetadata,
@@ -219,18 +220,23 @@
       </div>
     {/if}
     {#each section.ids as fieldId}
-      {#if metadataSchema.fields[fieldId]}
+      <!-- Intrinsic identity fields (id/title/entry_type, #116) are surfaced
+           via dedicated rail controls (the type select above, the shell title
+           header) and stored off `metadata`, so skip them in the generic
+           value-editor loop — otherwise they'd render as empty rows. -->
+      {#if metadataSchema.fields[fieldId] && !metadataSchema.fields[fieldId].intrinsic && !effectiveFieldHidden(metadataSchema, entryType, fieldId)}
         {@const field = metadataSchema.fields[fieldId]}
+        {@const fieldLabel = effectiveFieldLabel(metadataSchema, entryType, fieldId)}
         <div class="field-row" class:wide={isWide(field)} class:inherited={isInherited(fieldId)} class:mutated={isMutated(fieldId)}>
           <span class="fr-icon"><i class={fieldIconClass(field)} aria-hidden="true"></i></span>
-          <span class="fr-name">{field.name}{#if isMutated(fieldId)}<span class="fr-mutated-marker" title="Changed by here">⤳</span>{/if}</span>
+          <span class="fr-name">{fieldLabel}{#if isMutated(fieldId)}<span class="fr-mutated-marker" title="Changed by here">⤳</span>{/if}</span>
           <div class="fr-val">
             {#if fieldId === "status"}
               <!-- status is stored off `metadata` and edited via onStatusChange. -->
               <ColoredSelect
                 value={isMutated("status") ? metadataValueString(effectiveOverrides?.["status"]) : status}
                 options={field.options}
-                ariaLabel={field.name}
+                ariaLabel={fieldLabel}
                 placeholder="(no status)"
                 {readOnly}
                 onChange={(value) => onStatusChange?.(value)}
@@ -242,7 +248,7 @@
                 {field}
                 {readOnly}
                 value={displayValue(fieldId)}
-                ariaLabel={field.name}
+                ariaLabel={fieldLabel}
                 loreEntries={loreEntries}
                 promptEntries={promptEntries}
                 structure={structure}

@@ -21,7 +21,7 @@
   import { setDesignerContext, type DesignerContext } from "./view/designerContext";
   import { api } from "@/lib/api";
   import { metadataSchemaStore } from "@/lib/stores/schema";
-  import { evaluateView, nestWarnings, type EvalNode } from "@/lib/views/evaluateView";
+  import { evaluateView, nestWarnings, INTRINSIC_FIELD_KEYS, type EvalNode } from "@/lib/views/evaluateView";
   import { structureToEvalNodes } from "@/lib/views/structureNodes";
   import {
     specToGraph,
@@ -246,15 +246,11 @@
       .filter(([, def]) => def.kind === kind && !def.abstract)
       .map(([fqn, def]) => ({ fqn, name: def.name })),
   );
-  // Every node carries a top-level `title` (not a schema metadata field), so the
-  // schema-driven field list never lists it — yet filtering / sorting by title
-  // is a common need. Surface it as a synthetic, always-available field pinned
-  // first; the evaluator reads `node.title` for the `title` key (see fieldValue).
-  const TITLE_FIELD: { key: string; name: string; def: MetadataFieldDefinition } = {
-    key: "title",
-    name: "Title",
-    def: { name: "Title", type: "text", options: [] },
-  };
+  // The intrinsic identity fields (id/title/entry_type, #116) are now regular
+  // schema fields injected into every entry_type, so title/entry_type surface
+  // here naturally — pinned first (intrinsic before metadata). `hidden` fields
+  // (id by default) are skipped; the evaluator reads intrinsic keys off the
+  // node property (see fieldValue).
   let fieldOptions = $derived(buildFieldOptions());
   function buildFieldOptions(): { key: string; name: string; def: MetadataFieldDefinition }[] {
     const keys = new Set<string>();
@@ -265,10 +261,16 @@
     const out: { key: string; name: string; def: MetadataFieldDefinition }[] = [];
     for (const k of keys) {
       const def = schema?.fields?.[k];
-      if (def) out.push({ key: k, name: def.name ?? k, def });
+      if (!def || def.hidden) continue;
+      out.push({ key: k, name: def.name ?? k, def });
     }
-    out.sort((a, b) => a.name.localeCompare(b.name));
-    return [TITLE_FIELD, ...out];
+    out.sort((a, b) => {
+      const ai = INTRINSIC_FIELD_KEYS.has(a.key);
+      const bi = INTRINSIC_FIELD_KEYS.has(b.key);
+      if (ai !== bi) return ai ? -1 : 1;
+      return a.name.localeCompare(b.name);
+    });
+    return out;
   }
   // Tags present in this kind's universe (contextual — avoids a separate store).
   let tagOptions = $derived(collectTags(universe));
@@ -293,7 +295,7 @@
       kind,
       entryTypes: entryTypeOptions,
       fields: fieldOptions,
-      fieldByKey: (key: string) => (key === TITLE_FIELD.key ? TITLE_FIELD.def : schema?.fields?.[key] ?? null),
+      fieldByKey: (key: string) => schema?.fields?.[key] ?? null,
       tags: tagOptions,
       savedViews,
       loreEntries,

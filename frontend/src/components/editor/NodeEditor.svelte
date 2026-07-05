@@ -19,6 +19,7 @@
   import { resolveColor } from "@/lib/utils/colors";
   import type { AssistantEntrySummary, Backlink, BodyShape, DocumentKind, EditableDocument, EntryBodyLanguage, EntryMetadata, EntryTypeDefinition, MetadataFieldDefinition, MetadataSchema, PromptEntrySummary, PromptInputDefinition } from "@/lib/types";
   import { metadataSchemaStore } from "@/lib/stores/schema";
+  import { effectiveFieldLabel } from "@/lib/utils/schemaTypeHelpers";
   import { mutationsVersion } from "@/lib/stores/mutationsVersion.svelte";
 
   // Effective body shape for an entry type. Falls back through the
@@ -781,7 +782,13 @@
     maybeReseedInputs(scene, documentKind);
   });
   let documentLabel = $derived(documentKind === "lore" ? "Entry" : documentKind === "structure_node" ? "Node" : documentKind === "chat" ? "Chat" : "Scene");
-  let documentNameLabel = $derived(documentKind === "lore" ? "Name" : documentKind === "chat" ? "Title" : "Title");
+  // The title header's label is the intrinsic `title` field's effective label
+  // for this entry type (#116) — schema-driven, so lore reads "Name" (a
+  // built-in per-type override) and users can relabel per type. Falls back to
+  // "Title" before the schema/entryType resolve.
+  let documentNameLabel = $derived(
+    metadataSchema && entryType ? effectiveFieldLabel(metadataSchema, entryType, "title") : "Title",
+  );
   // structure_node has no schema kind of its own — Acts/Chapters share
   // kind="scene" in the metadata schema. Reuse the scene entry types so
   // the type selector still lists Act/Chapter/Scene/etc.

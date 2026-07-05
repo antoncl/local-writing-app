@@ -98,6 +98,7 @@ from app.models import (
     SearchResponse,
     SetAssistantTagColorRequest,
     SetFieldOrderRequest,
+    SetFieldOverrideRequest,
     SetGroupApplicationsRequest,
     StructureDocument,
     StructureNodeDeletePreview,
@@ -444,6 +445,12 @@ def set_entry_type_group_applications(request: SetGroupApplicationsRequest) -> M
 def set_entry_type_field_order(request: SetFieldOrderRequest) -> MetadataSchema:
     with translate_errors():
         return service.set_entry_type_field_order(request)
+
+
+@app.put("/api/metadata/schema/entry-types/field-override", response_model=MetadataSchema)
+def set_metadata_field_override(request: SetFieldOverrideRequest) -> MetadataSchema:
+    with translate_errors():
+        return service.set_metadata_field_override(request)
 
 
 @app.post("/api/scenes", response_model=Scene)

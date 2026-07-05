@@ -51,6 +51,13 @@ export type EvalNode = {
   ancestry?: PathSegment[] | null;
 };
 
+// Intrinsic identity fields (#116): stored on the node top-level, not in
+// `metadata`. Mirrors the backend `default_schema.INTRINSIC_FIELD_KEYS`. The
+// keys match EvalNode's top-level string properties, so `fieldValue` can read
+// them off the node directly. Kept here as the frontend source of truth for
+// which field keys route to the node property instead of the metadata dict.
+export const INTRINSIC_FIELD_KEYS: ReadonlySet<string> = new Set(["id", "title", "entry_type"]);
+
 // Per-node stamp from a color `annotate` (Highlight) node. Drives the NodeRow
 // color part (doc §1.3). Grouping no longer stamps here — it lives in handles.
 export type ViewAnnotation = { color: string | null };
@@ -827,11 +834,13 @@ function nodeTags(node: EvalNode): string[] {
   return [];
 }
 
-// A node's value for a predicate/sort key. `title` is a top-level node property
-// (not metadata), so read it specially — otherwise a title filter or field-sort
-// would read the absent `metadata.title` and match / order nothing.
+// A node's value for a predicate/sort key. The intrinsic identity fields
+// (id/title/entry_type, #116) live on the node top-level, not in metadata, so
+// read them from the node property; everything else reads from metadata.
 function fieldValue(node: EvalNode, key: string): unknown {
-  return key === "title" ? node.title : node.metadata?.[key];
+  return INTRINSIC_FIELD_KEYS.has(key)
+    ? (node as unknown as Record<string, unknown>)[key]
+    : node.metadata?.[key];
 }
 
 function matchesField(node: EvalNode, pred: ViewFieldPredicate): boolean {

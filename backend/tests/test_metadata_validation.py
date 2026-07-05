@@ -842,9 +842,10 @@ class MetadataValidationTests(unittest.TestCase):
         self.assertEqual(schema.entry_types["scene:scene"].name, "World Scene")
         self.assertIn("mood", schema.fields)
         self.assertIn("tension", schema.fields)
+        # Intrinsic identity fields (#116) lead every type's resolved list.
         self.assertEqual(
             schema.entry_types["scene:scene"].fields,
-            ["number", "summary", "color", "status", "pov", "characters", "locations", "dynamics", "word_count", "cost", "mood", "tension"],
+            ["title", "entry_type", "id", "number", "summary", "color", "status", "pov", "characters", "locations", "dynamics", "word_count", "cost", "mood", "tension"],
         )
 
         scene = self.service.read_scene(self.scene_id)

@@ -10,14 +10,13 @@
   import GroupCaret from "@/components/widgets/GroupCaret.svelte";
   import CountPill from "@/components/widgets/CountPill.svelte";
   import { metadataSchemaStore } from "@/lib/stores/schema";
-  import { focusedDocumentStore, pinnedKeysStore } from "@/lib/stores/editorFocus";
+  import { focusedDocumentStore } from "@/lib/stores/editorFocus";
 
   // metadataSchema is global per-project — read from the store, not a prop (#14 Step 2).
   $: schema = $metadataSchemaStore;
   export let entries: PromptEntrySummary[];
   // Active-row highlight + pin-star read from the editor-focus store, not props (#14 Step 2).
   $: focusedDocument = $focusedDocumentStore;
-  $: pinnedKeys = $pinnedKeysStore;
   // Open a prompt entry in an editor pane (App owns the pane set).
   export let onOpenEntry: (entryId: string) => void;
   // Create a new prompt entry of the given concrete sub-type.
@@ -96,7 +95,6 @@
         <NodeRow
           title={entry.title}
           active={focusedDocument?.type === "prompt" && focusedDocument.id === entry.id}
-          pinned={pinnedKeys.has(`prompt:${entry.id}`)}
           onClick={() => onOpenEntry(entry.id)}
         />
       {/each}

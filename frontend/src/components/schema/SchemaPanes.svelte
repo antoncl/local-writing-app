@@ -10,7 +10,6 @@
   // re-sync authoring selection after a project loads) via `bind:this`.
   import { get } from "svelte/store";
   import { api } from "@/lib/api";
-  import Pane, { type PaneChrome } from "@/components/panes/Pane.svelte";
   import SchemaTreePane from "@/components/schema/SchemaTreePane.svelte";
   import SchemaTypeEditor, { type TypeDraftPayload } from "@/components/schema/SchemaTypeEditor.svelte";
   import type { FieldDraftPayload } from "@/components/schema/SchemaFieldInlineEditor.svelte";
@@ -31,7 +30,8 @@
     projectSchemaLayerId,
   } from "@/lib/stores/schema";
   import { setValidation } from "@/lib/stores/validation";
-  import { paneLayout } from "@/lib/stores/paneLayout.svelte";
+  import { workspaceLayout } from "@/lib/stores/workspaceLayout.svelte";
+  import RegionRegistrar from "@/components/workspace/RegionRegistrar.svelte";
   import { confirmService } from "@/lib/stores/confirmService.svelte";
   import type {
     DocumentKind,
@@ -40,15 +40,12 @@
     MetadataFieldDefinition,
     MetadataFieldType,
     MetadataValue,
-    PaneId,
     PromptEntryTypeExtras,
     SelectOption,
   } from "@/lib/types";
 
   interface Props {
     isProjectOpen: boolean;
-    // The shared MDI chrome handed to every <Pane> (focus/drag/resize handlers).
-    paneChrome: PaneChrome;
     // App's error-wrapping runner — sets App's `error` on throw, returns success.
     run: (action: () => Promise<void>) => Promise<boolean>;
     // App's status-line sink.
@@ -63,15 +60,11 @@
 
   let {
     isProjectOpen,
-    paneChrome,
     run,
     setStatus,
     refreshOpenEditorPaneBaselines,
     onOpenTagsManager,
   }: Props = $props();
-
-  const focusPane = (id: PaneId) => paneChrome.focus(id);
-  const paneStyle = (id: PaneId) => paneLayout.styleFor(id);
 
   // --- Schema store (read live for reactivity inside the cluster) -------------
   const metadataSchema = $derived($metadataSchemaStore);
@@ -96,8 +89,6 @@
   // field. null = all rows collapsed.
   const NEW_FIELD_SENTINEL = "__new__";
   let expandedSchemaFieldId: string | null = $state(null);
-  let schemaPaneOpen = $state(false);
-  let schemaTypePaneOpen = $state(false);
   // Bound from SchemaTypeEditor: true while the type draft has unsaved edits,
   // so closing the pane warns first (#68).
   let schemaTypeDirty = $state(false);
@@ -304,8 +295,7 @@
     schemaTypeInitColor = null;
     schemaTypeInitPrompt = null;
     schemaTypeDraftToken += 1;
-    schemaTypePaneOpen = true;
-    focusPane("schema_type");
+    workspaceLayout.ensureVisible("schema_type");
   }
 
   function openSchemaTypeDetail(typeId: string) {
@@ -332,8 +322,7 @@
     schemaTypeInitColor = entryType.own_color ?? null;
     schemaTypeInitPrompt = entryType.prompt ?? null;
     schemaTypeDraftToken += 1;
-    schemaTypePaneOpen = true;
-    focusPane("schema_type");
+    workspaceLayout.ensureVisible("schema_type");
   }
 
   function defaultSchemaParentType(kind: SchemaKind) {
@@ -359,8 +348,7 @@
     } else {
       // No matching type — fall back to opening the tree so the user can pick or
       // create one. Rare edge case for new projects.
-      schemaPaneOpen = true;
-      focusPane("schema");
+      workspaceLayout.ensureVisible("schema");
     }
   }
 
@@ -369,8 +357,7 @@
   // openSchemaTypeDetail instead — see Phase B's split.
   function openDetailTypesPane() {
     if (!isProjectOpen) return;
-    schemaPaneOpen = true;
-    focusPane("schema");
+    workspaceLayout.ensureVisible("schema");
   }
 
   // Switches the tree's scope. schemaFieldKind is derived from
@@ -394,7 +381,7 @@
 
   function closeSchemaPane(id: "schema" | "schema_type") {
     if (id === "schema") {
-      schemaPaneOpen = false;
+      workspaceLayout.removePanel("schema");
       return;
     }
     // Warn before discarding unsaved detail-type edits (#68). Cancel/backdrop
@@ -406,12 +393,12 @@
         confirmLabel: "Discard changes",
         destructive: true,
         onConfirm: async () => {
-          schemaTypePaneOpen = false;
+          workspaceLayout.removePanel("schema_type");
         },
       });
       return;
     }
-    schemaTypePaneOpen = false;
+    workspaceLayout.removePanel("schema_type");
   }
 
   function startSchemaTypeDrag(typeId: string) {
@@ -663,7 +650,7 @@
     await refreshMetadataSchema();
     setValidation(await api.validateProject());
     selectedSchemaTypeId = null;
-    schemaTypePaneOpen = false;
+    workspaceLayout.removePanel("schema_type");
     if (schemaFieldEntryType === typeId || !metadataSchema?.entry_types[schemaFieldEntryType]) {
       schemaFieldEntryType = defaultSchemaEntryType(deletedKind);
     }
@@ -785,13 +772,12 @@
   }
 </script>
 
-<Pane id="schema" title="Detail Types" paneClass="schema-pane" hidden={!isProjectOpen || !schemaPaneOpen} style={paneStyle("schema")} chrome={paneChrome}>
-  {#snippet actions()}
+{#snippet schemaActions()}
     <button class="pin-button" type="button" onmousedown={(event) => event.stopPropagation()} onclick={() => createSchemaTypeDraft()}>+ Type</button>
     <button class="pin-button" type="button" onmousedown={(event) => event.stopPropagation()} onclick={() => (groupsManagerOpen = true)}>Groups…</button>
     <button class="pin-button" type="button" onmousedown={(event) => event.stopPropagation()} onclick={() => onOpenTagsManager()}>Tags…</button>
-    <button class="pin-button" type="button" onmousedown={(event) => event.stopPropagation()} onclick={() => closeSchemaPane("schema")}>Close</button>
-  {/snippet}
+{/snippet}
+{#snippet schemaBody()}
   <SchemaTreePane
     bind:draggedSchemaTypeId
     schemaFieldKind={schemaFieldKind}
@@ -810,12 +796,9 @@
     onDeleteType={requestDeleteSchemaType}
     onOpenField={openSchemaFieldDetail}
   />
-</Pane>
+{/snippet}
 
-<Pane id="schema_type" title="Detail Type" paneClass="schema-type-pane" hidden={!isProjectOpen || !schemaTypePaneOpen} style={paneStyle("schema_type")} chrome={paneChrome}>
-  {#snippet actions()}
-    <button class="pin-button" type="button" onmousedown={(event) => event.stopPropagation()} onclick={() => closeSchemaPane("schema_type")}>Close</button>
-  {/snippet}
+{#snippet schemaTypeBody()}
   {#key schemaTypeDraftToken}
   <SchemaTypeEditor
     initialName={schemaTypeInitName}
@@ -858,7 +841,14 @@
     onSetFieldOverride={setFieldOverride}
   />
   {/key}
-</Pane>
+{/snippet}
+
+<RegionRegistrar
+  regions={{
+    schema: { title: "Detail Types", body: schemaBody, actions: schemaActions, closable: true, onClose: () => closeSchemaPane("schema") },
+    schema_type: { title: "Detail Type", body: schemaTypeBody, closable: true, onClose: () => closeSchemaPane("schema_type") },
+  }}
+/>
 
 {#if groupsManagerOpen && metadataSchema}
   <GroupsManagerDialog

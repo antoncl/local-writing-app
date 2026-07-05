@@ -16,7 +16,7 @@
   import { evaluateView, filterGroups, type ViewGroup } from "@/lib/views/evaluateView";
   import { paneViews } from "@/lib/stores/paneViews.svelte";
   import { metadataSchemaStore } from "@/lib/stores/schema";
-  import { focusedDocumentStore, pinnedKeysStore } from "@/lib/stores/editorFocus";
+  import { focusedDocumentStore } from "@/lib/stores/editorFocus";
   import type { ViewPresentation, ViewSpec } from "@/lib/types";
 
   export let entries: LoreEntrySummary[];
@@ -30,7 +30,6 @@
   $: schema = $metadataSchemaStore;
   // Active-row highlight + pin-star read from the editor-focus store, not props (#14 Step 2).
   $: focusedDocument = $focusedDocumentStore;
-  $: pinnedKeys = $pinnedKeysStore;
   // Open an entry in an editor pane (App owns the pane set).
   export let onOpenEntry: (entryId: string) => void;
   // Migrate a lore note into the Research tree (App owns the confirm flow).
@@ -186,7 +185,6 @@
     tags={entryTags(entry)}
     {depth}
     active={focusedDocument?.type === "lore" && focusedDocument.id === entry.id}
-    pinned={pinnedKeys.has(`lore:${entry.id}`)}
     stripeColor={stripeFor(entry)}
     onClick={() => onOpenEntry(entry.id)}
     onmousedown={(event) => event.stopPropagation()}

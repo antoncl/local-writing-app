@@ -12,6 +12,33 @@ export type PaneState = {
   z: number;
 };
 
+// --- Tiled workspace shell (#32) ------------------------------------------
+// The MDI floating panes above are being replaced by a tiled split-tree. A
+// PanelId names a piece of content shown as a tab — a fixed region ("lore") or
+// an editor document ("editor_1"). The layout is a tree: Split nodes tile their
+// children with splitters; TabGroup leaves stack panels as tabs.
+export type PanelId = string;
+
+export type TabGroup = {
+  kind: "group";
+  id: string;
+  tabs: PanelId[];
+  active: PanelId | null;
+};
+
+export type SplitDir = "row" | "col";
+
+export type Split = {
+  kind: "split";
+  id: string;
+  dir: SplitDir;
+  children: LayoutNode[];
+  // Flex fractions parallel to `children` (sum ≈ 1).
+  sizes: number[];
+};
+
+export type LayoutNode = Split | TabGroup;
+
 export type StructureNode = {
   id: string;
   type: string;

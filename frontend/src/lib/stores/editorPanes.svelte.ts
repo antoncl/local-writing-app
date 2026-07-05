@@ -244,9 +244,6 @@ class EditorPanesController {
     this.metadataReloadsByPane = { ...this.metadataReloadsByPane, ...nextReloads };
   }
 
-  togglePinned(id: string): void {
-    this.panes = this.panes.map((pane) => (pane.id === id ? { ...pane, pinned: !pane.pinned } : pane));
-  }
 
   async close(id: string): Promise<void> {
     const pane = this.panes.find((candidate) => candidate.id === id);
@@ -569,17 +566,20 @@ class EditorPanesController {
     this.titleReloadsByPane = nextReloads;
   }
 
-  // Resolve a target pane for an open: reuse the first non-pinned pane (saving it
-  // first if dirty) or allocate a fresh one.
-  async #acquireTargetPane(): Promise<EditorPaneState> {
-    let targetPane = this.panes.find((pane) => !pane.pinned);
-    if (!targetPane) {
-      targetPane = this.addEditorPane();
-    }
-    if (targetPane.dirty) {
-      await this.saveEditorPane(targetPane.id);
-    }
-    return targetPane;
+  // Resolve a target pane for an open and CLAIM it for `claim` synchronously.
+  // Every opened document gets its own tab (one-tab-per-doc); callers already
+  // focus an existing pane before reaching here. Reuse an empty, clean pane if
+  // one exists, else mint fresh — then stamp `document` immediately, before the
+  // caller's async fetch. Without the synchronous stamp two rapid opens (same
+  // OR different node) both see `document === null` and grab the same empty
+  // pane; one open is then lost (or, minting fresh, duplicates the tab). The
+  // pane isn't shown until its content loads (the shell places panes with a
+  // scene), so the claim is invisible.
+  async #acquireTargetPane(claim: DocumentRef): Promise<EditorPaneState> {
+    const empty = this.panes.find((pane) => pane.document === null && !pane.dirty);
+    const target = empty ?? this.addEditorPane();
+    this.panes = this.panes.map((pane) => (pane.id === target.id ? { ...pane, document: claim } : pane));
+    return this.panes.find((pane) => pane.id === target.id) ?? target;
   }
 
   // Focus an already-open pane (if the document is showing) and report it.
@@ -591,7 +591,7 @@ class EditorPanesController {
 
   async openProjectNode(): Promise<void> {
     // Singleton — focus the existing pane if it's already showing the
-    // project node, otherwise reuse a non-pinned pane (or open one).
+    // project node, otherwise open it in a fresh tab.
     const existingPane = this.panes.find((pane) => pane.document?.type === "project");
     if (existingPane) {
       this.#focusExisting(existingPane, "project");
@@ -599,7 +599,7 @@ class EditorPanesController {
     }
 
     await this.run(async () => {
-      const targetPane = await this.#acquireTargetPane();
+      const targetPane = await this.#acquireTargetPane({ type: "project", id: "" });
       const node = await api.getProjectNode();
       // The editor pane uses Scene-compatible shape; project nodes have no
       // `status` so default to "" and let the documentKind branch hide it.
@@ -639,7 +639,7 @@ class EditorPanesController {
       return;
     }
 
-    const targetPane = await this.#acquireTargetPane();
+    const targetPane = await this.#acquireTargetPane({ type: "scene", id: sceneId });
     const scene = await api.getScene(sceneId);
     this.panes = this.panes.map((pane) =>
       pane.id === targetPane.id
@@ -690,7 +690,7 @@ class EditorPanesController {
       this.setError(`Node ${node.title} has no underlying scene to edit.`);
       return;
     }
-    const targetPane = await this.#acquireTargetPane();
+    const targetPane = await this.#acquireTargetPane({ type: "structure_node", id: node.id });
     const scene = await api.getScene(node.scene_id);
     this.panes = this.panes.map((pane) =>
       pane.id === targetPane.id
@@ -730,7 +730,7 @@ class EditorPanesController {
       return;
     }
     const summary = get(chatSessionsStore).find((s) => s.id === chatId);
-    const targetPane = await this.#acquireTargetPane();
+    const targetPane = await this.#acquireTargetPane({ type: "chat", id: chatId });
     const sceneShaped = {
       id: chatId,
       title: summary?.title || "Untitled chat",
@@ -770,7 +770,7 @@ class EditorPanesController {
       this.#focusExisting(existingPane, "open prompt");
       return;
     }
-    const targetPane = await this.#acquireTargetPane();
+    const targetPane = await this.#acquireTargetPane({ type: "prompt", id: entryId });
     const entry = await api.getPromptEntry(entryId);
     this.panes = this.panes.map((pane) =>
       pane.id === targetPane.id
@@ -801,7 +801,7 @@ class EditorPanesController {
       this.#focusExisting(existingPane, "open assistant");
       return;
     }
-    const targetPane = await this.#acquireTargetPane();
+    const targetPane = await this.#acquireTargetPane({ type: "assistant", id: entryId });
     const entry = await api.getAssistantEntry(entryId);
     this.panes = this.panes.map((pane) =>
       pane.id === targetPane.id
@@ -831,7 +831,7 @@ class EditorPanesController {
       this.#focusExisting(existingPane, "open view");
       return;
     }
-    const targetPane = await this.#acquireTargetPane();
+    const targetPane = await this.#acquireTargetPane({ type: "view", id: viewId });
     const node = await api.getView(viewId);
     this.panes = this.panes.map((pane) =>
       pane.id === targetPane.id
@@ -899,7 +899,7 @@ class EditorPanesController {
       return;
     }
 
-    const targetPane = await this.#acquireTargetPane();
+    const targetPane = await this.#acquireTargetPane({ type: "lore", id: entryId });
     const entry = await api.getLoreEntry(entryId);
     this.panes = this.panes.map((pane) =>
       pane.id === targetPane.id
@@ -930,7 +930,7 @@ class EditorPanesController {
       return;
     }
 
-    const targetPane = await this.#acquireTargetPane();
+    const targetPane = await this.#acquireTargetPane({ type: "research", id: noteId });
     const note = await api.getResearchNote(noteId);
     this.panes = this.panes.map((pane) =>
       pane.id === targetPane.id

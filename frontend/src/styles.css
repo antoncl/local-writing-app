@@ -404,52 +404,15 @@ h3 {
   font-size: var(--fs-lg);
 }
 
-/* .workspace (+ its @media) co-located into App.svelte (#14). */
+/* The floating-MDI pane chrome (.pane / .pane-header / .pane-resize /
+   .hidden-pane) is gone with the tiled workspace shell (#32); region tiles are
+   styled by the workspace components. .pane-content (region body padding +
+   scroll) and .pin-button (tab-bar affordances) survive as shared utilities. */
 
-.pane {
-  position: absolute;
-  display: grid;
-  grid-template-rows: auto 1fr;
-  min-width: 240px;
-  min-height: 170px;
-  border: 1px solid var(--border);
-  border-radius: 8px;
-  background: var(--surface);
-  box-shadow: var(--elev-3);
-  overflow: hidden;
-}
-
-.hidden-pane {
-  display: none;
-}
-
-.pane-header {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 10px;
-  min-height: 34px;
-  padding: 7px 10px;
-  border-bottom: 1px solid var(--divider);
-  background: var(--panel);
-  cursor: move;
-  touch-action: none;
-  user-select: none;
-}
-
-.pane-header h2 {
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-/* .pane-status / .pane-status-saved co-located into App.svelte (#14). */
-
-.pane-header-actions {
-  display: flex;
-  flex-shrink: 0;
-  align-items: center;
-  gap: 8px;
+.pane-content {
+  min-height: 0;
+  padding: 14px;
+  overflow: auto;
 }
 
 .pin-button {
@@ -466,37 +429,6 @@ h3 {
 .pin-button.danger {
   border-color: var(--danger-border);
   color: var(--danger);
-}
-
-.pane-content {
-  min-height: 0;
-  padding: 14px;
-  overflow: auto;
-}
-
-.pane-resize {
-  position: absolute;
-  right: 0;
-  bottom: 0;
-  width: 16px;
-  height: 16px;
-  padding: 0;
-  border: 0;
-  border-radius: 0;
-  background: transparent;
-  cursor: nwse-resize;
-  touch-action: none;
-}
-
-.pane-resize::after {
-  position: absolute;
-  right: 4px;
-  bottom: 4px;
-  width: 7px;
-  height: 7px;
-  border-right: 2px solid var(--border-strong);
-  border-bottom: 2px solid var(--border-strong);
-  content: "";
 }
 
 /* .project-panel co-located into App.svelte (#14). */
@@ -808,27 +740,6 @@ button.row-action-add.active {
 /* .search-hit* co-located into Search.svelte (#14). */
 
 /* .error-toast* co-located into App.svelte (#14). */
-
-@media (max-width: 640px) {
-  .pane {
-    position: static;
-    width: auto !important;
-    height: auto !important;
-    min-height: 220px;
-  }
-
-  .pane-resize {
-    display: none;
-  }
-
-  .editor-pane {
-    min-height: 520px;
-  }
-
-  .pane-header {
-    cursor: default;
-  }
-}
 
 /* .ai-settings / .ai-policy / .ai-health-result co-located into Project.svelte (#14). */
 

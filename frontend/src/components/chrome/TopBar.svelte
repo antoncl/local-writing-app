@@ -14,6 +14,8 @@
   export let onSelectRecent: (path: string) => void = () => {};
   export let onOpenFolder: () => void = () => {};
   export let onNewProject: () => void = () => {};
+  // Assistants (like Detail Types / Project) is project-scoped — its editor
+  // lives in the workspace shell, so the button is disabled with no project open.
   export let onOpenAssistants: () => void = () => {};
   export let onOpenSettings: () => void = () => {};
   // Detail Types is project-scoped — disabled when no project is open.
@@ -161,7 +163,7 @@
   <div class="actions">
     <button type="button" class="action-button" disabled={!projectOpen} on:click={onOpenProjectNode}>Project</button>
     <button type="button" class="action-button" disabled={!projectOpen} on:click={onOpenDetailTypes}>Detail Types</button>
-    <button type="button" class="action-button" on:click={onOpenAssistants}>Assistants</button>
+    <button type="button" class="action-button" disabled={!projectOpen} on:click={onOpenAssistants}>Assistants</button>
     <button
       type="button"
       class="action-button icon-button"

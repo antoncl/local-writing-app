@@ -42,14 +42,21 @@ tunable in review; *structure* is the contract):
 
 ```css
 :root {
-  /* — type scale — seven sizes, no fractional px, nothing else — */
-  --fs-xs:  11px;   /* caps-labels, keycaps, fine meta */
-  --fs-sm:  12px;   /* secondary UI: detail lines, chips, hints */
-  --fs-md:  13px;   /* DEFAULT UI: buttons, rows, inputs, menus */
-  --fs-lg:  15px;   /* emphasized UI: pane titles, dialog headings */
-  --fs-xl:  18px;   /* serif display: group headers, rail sections */
-  --fs-2xl: 24px;   /* serif display: document title in the editor */
-  --fs-prose: 16px; /* the reading/writing surface (prose bodies) */
+  /* — type scale — seven sizes, nothing else. Authored values are
+     integer px; --ui-scale is the future user master-scaler (a
+     settings write, no code change) — computed fractions are fine,
+     authored fractional px are not. — */
+  --ui-scale: 1;
+  --fs-xs:  calc(11px * var(--ui-scale));  /* caps-labels, keycaps, fine meta */
+  --fs-sm:  calc(12px * var(--ui-scale));  /* secondary UI: detail lines, chips, hints */
+  --fs-md:  calc(13px * var(--ui-scale));  /* DEFAULT UI: buttons, rows, inputs, menus */
+  --fs-lg:  calc(15px * var(--ui-scale));  /* emphasized UI: pane titles, dialog headings */
+  --fs-xl:  calc(16px * var(--ui-scale));  /* serif display: group headers, rail sections */
+  --fs-2xl: calc(20px * var(--ui-scale));  /* serif display: document title in the editor */
+  --fs-prose: calc(16px * var(--ui-scale)); /* the reading/writing surface (prose bodies) */
+  /* The document title stands out through VOICE (serif), weight, and
+     isolation (whitespace + caps-label) — never through sheer size.
+     Display sizes are deliberately modest; this is a density-first app. */
 
   /* — families & weights — */
   --sans:  'Inter', ui-sans-serif, system-ui, sans-serif;
@@ -129,10 +136,27 @@ toolbars), `outline` (border, transparent — default standalone action),
 modifier on any variant, never a fourth style. The current mix of 12/13/16px
 buttons for identical jobs converges here.
 
-**Icon-only controls carry meaning, not puzzles.** Every icon-only button has
-an `aria-label` and tooltip. Cryptic ASCII compounds (`+>`) are retired —
-an affordance is either a recognizable single glyph (`+`, `×`, `⋯`, `⋮⋮`) or
-it gets a word.
+**Glyph-first affordances, from a closed lexicon.** The house style is glyphs
+over words (density-first; the tool recedes) — but a glyph earns that only by
+meaning the same thing everywhere. Affordances draw from this lexicon, and the
+lexicon grows by PR, never ad hoc:
+
+| glyph | meaning — everywhere |
+|---|---|
+| `+` | add / create (context supplies *what*) |
+| `×` | remove / close |
+| `⋯` | more actions (menu) |
+| `⋮⋮` | drag handle |
+| `✎` | rename / edit in place |
+| `★` | pin (gold when active — the one gold) |
+| `▸ / ▾` | collapse / expand |
+| `⌕` | search |
+
+Every glyph control carries an `aria-label` and a tooltip — the tooltip is the
+word. Compounds (`+>`) stay banned: if no single lexicon glyph is self-evident
+for an action, it takes a word until one is agreed and added here. Words remain
+the default for primary/destructive dialog actions (`Save`, `Delete`) where a
+misread is expensive.
 
 **Caps-labels** (rail sections, `TITLE`, fine print): one recipe —
 `--fs-xs`, `--w-semibold`, `letter-spacing: 0.07em`, `text-transform:
@@ -162,7 +186,8 @@ Before a PR with visual changes is done:
    color? `grep` your diff for `px`, `#`, `rgba(` in style blocks: hits must
    be token definitions or documented exceptions.
 3. Is color scoped to its largest unit, and is nothing gold but the pin? (§3.2)
-4. Are icon-only buttons labeled, affordances right-aligned/hover-revealed? (§4)
+4. Are glyph affordances from the lexicon (tooltip + aria-label), affordances
+   right-aligned/hover-revealed? (§4)
 5. Single-line first — did anything gain a second line that isn't unbounded
    content? (§1.2)
 6. Both themes eyeballed (`data-theme="dark"` + light), and `npm run check`

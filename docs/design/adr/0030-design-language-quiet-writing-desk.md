@@ -37,18 +37,24 @@ A live survey of the app (testbench drive, both themes) plus a full audit of
    thing on screen; chrome may never be heavier than the content it hosts;
    decoration that encodes nothing is removed. The graph-paper board dies.
 
-2. **A full token layer becomes the visual contract**: 7 type sizes (no
-   fractional px), 7 spacing steps, 4 radii, 3 elevation levels, 6 z-layers,
-   2 motion durations, 3 font stacks, 4 weights (800 retired). Raw literals in
-   component styles are defects. Color roles keep the existing (good)
-   architecture; `--ctx-*` folds into the global roles; gold keeps exactly one
-   meaning (pin, plus the sanctioned prose-TODO anchor).
+2. **A full token layer becomes the visual contract**: 7 type sizes (integer
+   px, deliberately modest display sizes — the document title stands out
+   through serif voice, weight, and isolation, not size), 7 spacing steps, 4
+   radii, 3 elevation levels, 6 z-layers, 2 motion durations, 3 font stacks, 4
+   weights (800 retired). Type tokens compose a `--ui-scale` factor, so a
+   future user-facing type-size setting (master scaler, per-role overrides) is
+   a settings write, not a rework. Raw literals in component styles are
+   defects. Color roles keep the existing (good) architecture; `--ctx-*` folds
+   into the global roles; gold keeps exactly one meaning (pin, plus the
+   sanctioned prose-TODO anchor).
 
 3. **Interaction law is promoted from memory memos into the repo** (composition
    rules §3 of the language doc) and extended with component rules: two button
-   sizes / three variants, labeled icon-buttons (cryptic `+>` compounds
-   retired), one caps-label recipe, one field-row atom (the rail's ref-field
-   double-render collapses), popovers on shared panel/elevation tokens.
+   sizes / three variants, glyph-first affordances drawn from a closed lexicon
+   (tooltip + aria-label mandatory; cryptic `+>` compounds retired; words
+   reserved for primary/destructive actions), one caps-label recipe, one
+   field-row atom (the rail's ref-field double-render collapses), popovers on
+   shared panel/elevation tokens.
 
 4. **The shell contract for #32 is spatial, not implementation**: a tiled
    workspace — regions fill it, nothing floats/overlaps/cascades, the editor is

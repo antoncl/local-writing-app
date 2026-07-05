@@ -26,7 +26,6 @@ export type EditorPaneState = {
   // The server baseline the drafts are diffed against (immutable until a save
   // or an explicit baseline refresh replaces it).
   scene: EditableDocument | null;
-  pinned: boolean;
   dirty: boolean;
   draftTitle: string;
   draftMarkdown: string;
@@ -48,7 +47,6 @@ export function createEmptyEditorPane(id: string): EditorPaneState {
     id,
     document: null,
     scene: null,
-    pinned: false,
     dirty: false,
     draftTitle: "",
     draftMarkdown: "",

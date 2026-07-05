@@ -65,7 +65,7 @@
     updateNodeTitleInTree,
   } from "@/lib/utils/treeHelpers";
   import { metadataSchemaStore } from "@/lib/stores/schema";
-  import { focusedDocumentStore, pinnedKeysStore } from "@/lib/stores/editorFocus";
+  import { focusedDocumentStore } from "@/lib/stores/editorFocus";
 
   export let config: TreeConfig;
   // Reactive tree data — drives the render. Handlers read config.getStructure()
@@ -75,9 +75,8 @@
   // metadataSchema is global per-project — read it from the store instead of
   // drilling it as a prop (#14 Step 2).
   $: schema = $metadataSchemaStore;
-  // Active-row highlight + pin-star read from the editor-focus store, not props (#14 Step 2).
+  // Active-row highlight read from the editor-focus store, not props (#14 Step 2).
   $: focusedDocument = $focusedDocumentStore;
-  $: pinnedKeys = $pinnedKeysStore;
   export let draftTitles: Map<string, string>;
   export let sectionLabel: string;
   export let emptyLabel: string;
@@ -437,10 +436,6 @@
     (!!node.scene_id && focusedDocument?.type === config.kind && focusedDocument.id === node.scene_id)
     || (config.containerHasEditor && focusedDocument?.type === "structure_node" && focusedDocument.id === node.id)
   )}
-  {@const isPinned = (
-    (!!node.scene_id && pinnedKeys.has(`${config.kind}:${node.scene_id}`))
-    || (config.containerHasEditor && pinnedKeys.has(`structure_node:${node.id}`))
-  )}
   {#if leaf && !editing}
     <!-- Simplest-form leaf NodeRow — same widget as a lore character.
          No status stripe (called out as visual noise on scenes); drag
@@ -450,7 +445,6 @@
       ariaLabel={node.title}
       title={renderNodeTitle(node)}
       active={isActive}
-      pinned={isPinned}
       stripeColor={viewStripeHex}
       dragging={config.supportsDrag && draggedNodeId === node.id}
       dropPosition={config.supportsDrag && dragOverNodeId === node.id ? dragOverPosition : null}
@@ -520,7 +514,6 @@
       ariaLabel={node.title}
       title={renderNodeTitle(node)}
       active={isActive}
-      pinned={isPinned}
       stripeColor={viewStripeHex ?? stripeHex}
       dragging={config.supportsDrag && draggedNodeId === node.id}
       dropPosition={config.supportsDrag && dragOverNodeId === node.id ? dragOverPosition : null}

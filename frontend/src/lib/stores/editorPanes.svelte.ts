@@ -244,9 +244,6 @@ class EditorPanesController {
     this.metadataReloadsByPane = { ...this.metadataReloadsByPane, ...nextReloads };
   }
 
-  togglePinned(id: string): void {
-    this.panes = this.panes.map((pane) => (pane.id === id ? { ...pane, pinned: !pane.pinned } : pane));
-  }
 
   async close(id: string): Promise<void> {
     const pane = this.panes.find((candidate) => candidate.id === id);
@@ -569,17 +566,15 @@ class EditorPanesController {
     this.titleReloadsByPane = nextReloads;
   }
 
-  // Resolve a target pane for an open: reuse the first non-pinned pane (saving it
-  // first if dirty) or allocate a fresh one.
+  // Resolve a target pane for an open. Every opened document gets its own tab
+  // (one-tab-per-doc); callers already focus an existing pane before reaching
+  // here. Reuse an empty, clean pane if one exists — this both avoids stray
+  // blank tabs and closes a race: the open methods set `document` only after an
+  // async fetch, so a rapid second open of the same node would miss the
+  // already-open check and, minting fresh unconditionally, duplicate the tab.
   async #acquireTargetPane(): Promise<EditorPaneState> {
-    let targetPane = this.panes.find((pane) => !pane.pinned);
-    if (!targetPane) {
-      targetPane = this.addEditorPane();
-    }
-    if (targetPane.dirty) {
-      await this.saveEditorPane(targetPane.id);
-    }
-    return targetPane;
+    const empty = this.panes.find((pane) => pane.document === null && !pane.dirty);
+    return empty ?? this.addEditorPane();
   }
 
   // Focus an already-open pane (if the document is showing) and report it.

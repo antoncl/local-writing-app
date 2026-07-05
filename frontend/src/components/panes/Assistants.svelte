@@ -17,7 +17,7 @@
   import { evaluateView } from "@/lib/views/evaluateView";
   import { paneViews } from "@/lib/stores/paneViews.svelte";
   import { metadataSchemaStore } from "@/lib/stores/schema";
-  import { focusedDocumentStore, pinnedKeysStore } from "@/lib/stores/editorFocus";
+  import { focusedDocumentStore } from "@/lib/stores/editorFocus";
   import type { ViewPresentation, ViewSpec } from "@/lib/types";
 
   export let entries: AssistantEntrySummary[];
@@ -30,7 +30,6 @@
   $: schema = $metadataSchemaStore;
   // Active-row highlight + pin-star read from the editor-focus store, not props (#14 Step 2).
   $: focusedDocument = $focusedDocumentStore;
-  $: pinnedKeys = $pinnedKeysStore;
   // App resolves the default-assistant id (it's also read by the chat pane), so
   // it's passed in rather than recomputed here.
   export let defaultAssistantId: string;
@@ -213,7 +212,6 @@
     tags={assistantTagsOf(entry)}
     tagColor={tagHexFor}
     active={focusedDocument?.type === "assistant" && focusedDocument.id === entry.id}
-    pinned={pinnedKeys.has(`assistant:${entry.id}`)}
     stripeColor={stripeFor(entry)}
     dragging={dragId === entry.id}
     dropPosition={dropTarget?.id === entry.id ? (dropTarget?.position ?? null) : null}

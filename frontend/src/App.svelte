@@ -72,7 +72,7 @@
   import ViewSwitcher from "@/components/widgets/ViewSwitcher.svelte";
   import NodeList from "@/components/widgets/NodeList.svelte";
   import NodeRow from "@/components/widgets/NodeRow.svelte";
-  import { focusedDocumentStore, pinnedKeysStore } from "@/lib/stores/editorFocus";
+  import { focusedDocumentStore } from "@/lib/stores/editorFocus";
   import { paneLayout } from "@/lib/stores/paneLayout.svelte";
   import { workspaceLayout, isEditorPanelId } from "@/lib/stores/workspaceLayout.svelte";
   import RegionRegistrar from "@/components/workspace/RegionRegistrar.svelte";
@@ -551,22 +551,6 @@
   // prop, and a bare call in a prop expression wouldn't track its inner roster
   // dependency. See feedback_svelte5_reactivity_traps.
   let defaultAssistantId = $derived($defaultAssistantIdStore);
-  // Set of "<docType>:<id>" keys for every node currently open in a
-  // pinned editor pane. Derived reactively so the template can ask
-  // `pinnedEditorPaneKeys.has(\`lore:${entry.id}\`)` and have Svelte
-  // re-evaluate the binding when any pane's .pinned flips. (A plain
-  // `function editorPanePinnedFor(...)` doesn't track editorPanes
-  // when called inside a template prop binding — Svelte 5 legacy
-  // reactivity only tracks deps read directly in the expression.)
-  let pinnedEditorPaneKeys = $derived(new Set<string>(
-    editorPanes.panes
-      .filter((pane) => pane.pinned && pane.document)
-      .map((pane) => `${pane.document!.type}:${pane.document!.id}`),
-  ));
-  // Write-through to the editor-focus store (read by the list panes' pin-star).
-  $effect.pre(() => {
-    pinnedKeysStore.set(pinnedEditorPaneKeys);
-  });
 </script>
 
 <TopBar
@@ -808,16 +792,6 @@
         onclick={() => editorPanes.requestDeleteScene(editorPane.id)}
       >
         Delete
-      </button>
-      <button
-        class:active-pin={editorPane.pinned}
-        class="pin-button"
-        type="button"
-        title={editorPane.pinned ? "Unpin this document" : "Pin this document"}
-        onmousedown={(event) => event.stopPropagation()}
-        onclick={() => editorPanes.togglePinned(editorPane.id)}
-      >
-        {editorPane.pinned ? "Pinned" : "Pin"}
       </button>
     {/if}
   {/snippet}

@@ -297,8 +297,12 @@
     border-color: var(--accent);
   }
 
+  /* The bar wraps: when a region is too narrow to fit tabs + actions on one
+     row, the actions drop to a second row instead of crowding out / sliding
+     over the tabs. Wide regions stay a single row. */
   .ws-tabbar {
     display: flex;
+    flex-wrap: wrap;
     align-items: stretch;
     gap: var(--sp-2);
     min-height: var(--sp-5);
@@ -306,7 +310,10 @@
     border-bottom: 1px solid var(--divider);
     background: var(--panel);
   }
+  /* Tabs take the first row and scroll within it when there are many; the
+     actions keep their natural width, pinned right (or wrapped to row two). */
   .ws-tabs {
+    flex: 1 1 auto;
     display: flex;
     align-items: stretch;
     min-width: 0;
@@ -366,6 +373,7 @@
     color: var(--danger);
   }
   .ws-tab-actions {
+    flex: 0 0 auto;
     display: flex;
     align-items: center;
     gap: var(--sp-1);

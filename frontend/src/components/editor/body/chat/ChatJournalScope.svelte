@@ -59,7 +59,8 @@
     content: ""; width: 7px; height: 7px; border-radius: 50%; background: var(--k-lore);
   }
   .cbv-journal-scope-chip-depth1 { background: var(--surface); border-style: dashed; }
-  .cbv-journal-scope-chip-depth1::before { background: var(--k-lore); }
+  /* Dimmer dot than the base chip: depth1 (ancestor) reads fainter than fresh. */
+  .cbv-journal-scope-chip-depth1::before { background: var(--k-lore-border); }
   .cbv-journal-scope-chip-fresh { border-color: var(--accent-soft2); }
   .cbv-journal-scope-chip-fresh::before { background: var(--accent); }
   .cbv-journal-scope-pip {

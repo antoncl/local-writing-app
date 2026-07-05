@@ -84,7 +84,7 @@
     border-radius: 6px;
     font-size: var(--fs-sm);
     color: var(--toolbar-text);
-    box-shadow: var(--elev-1);
+    box-shadow: var(--elev-2);
     z-index: 30;
     white-space: nowrap;
     user-select: none;

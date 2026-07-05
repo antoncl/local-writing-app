@@ -47,11 +47,10 @@ from pathlib import Path
 # restyled under #125. They still warn. Remove an entry once its file is
 # clean — this list only shrinks. Stored repo-relative with forward slashes;
 # matched against the path tail.
-GRANDFATHERED = {
-    # styles.css residual = the reserved .editor-body prose surface (face
-    # typography + in-prose mention/annotation marks) — its own #125 slice.
-    "frontend/src/styles.css",
-}
+# Empty: every frontend file's color/type literals now come from the token
+# layer. Add an entry only to temporarily exempt a NEW pre-token file while it
+# is being restyled — this set should stay empty in steady state.
+GRANDFATHERED: set[str] = set()
 
 # Files with raw `font-family` stacks bypassing the --sans/--serif/--mono
 # tokens (#144). Separate from GRANDFATHERED above (colors/sizes) so the axes
@@ -73,7 +72,6 @@ GRANDFATHERED_FONT_FAMILY = {
     "frontend/src/components/schema/SchemaTypeEditor.svelte",
     "frontend/src/components/schema/SelectOptionsEditor.svelte",
     "frontend/src/components/widgets/CodeEditor.svelte",
-    "frontend/src/styles.css",
 }
 
 HEX_RE = re.compile(r"#[0-9a-fA-F]{3,8}\b")

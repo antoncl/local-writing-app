@@ -29,9 +29,18 @@ STYLE_GUARD = REPO / "scripts" / "check_style_tokens.py"
 # Advisory complexity rules — flagged, never blocking, while the existing count
 # is burned down (see backend/pyproject.toml for thresholds).
 COMPLEXITY_RULES = "PLR0912,PLR0913,PLR0915,C901"
-# Windows venv layout (matches .claude/launch.json + CLAUDE.md). On a POSIX
-# checkout this would be backend/.venv/bin/python.
-VENV_PYTHON = REPO / "backend" / ".venv" / "Scripts" / "python.exe"
+
+# Resolve the backend venv via the shared helper so a git worktree (which has
+# no local .venv) falls back to the primary worktree's — otherwise the ruff
+# gate would silently skip here (issue #135). Import defensively: a broken hook
+# must never wedge the session.
+try:
+    sys.path.insert(0, str(REPO / "scripts"))
+    from venv_python import find_venv_python
+
+    VENV_PYTHON = find_venv_python(REPO)
+except Exception:
+    VENV_PYTHON = None
 
 
 def edited_path() -> Path | None:
@@ -71,7 +80,7 @@ def main() -> int:
         if out:
             messages.append(out)
 
-    if path.suffix == ".py" and VENV_PYTHON.is_file():
+    if path.suffix == ".py" and VENV_PYTHON is not None:
         code, out = run([str(VENV_PYTHON), "-m", "ruff", "check", str(path)])
         if code != 0 and out:
             messages.append("ruff:\n" + out)

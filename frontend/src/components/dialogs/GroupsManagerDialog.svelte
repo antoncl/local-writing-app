@@ -320,7 +320,7 @@
     flex: 1;
     margin: 0;
     font-family: var(--serif);
-    font-size: 18px;
+    font-size: var(--fs-xl);
     font-weight: 600;
   }
   .gm-close {
@@ -328,7 +328,7 @@
     border: 1px solid var(--border);
     border-radius: 8px;
     background: var(--surface);
-    font-size: 12.5px;
+    font-size: var(--fs-sm);
     cursor: pointer;
   }
   .gm-error {
@@ -336,7 +336,7 @@
     padding: 9px 16px;
     background: var(--danger-soft);
     color: var(--danger);
-    font-size: 12.5px;
+    font-size: var(--fs-sm);
   }
   .gm-body {
     display: flex;
@@ -362,20 +362,20 @@
     background: var(--inset);
   }
   .gm-row-name {
-    font-size: 14px;
+    font-size: var(--fs-md);
     font-weight: 600;
   }
   .gm-row-members {
     flex: 1;
-    font-size: 12px;
+    font-size: var(--fs-sm);
     color: var(--text-3);
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
   }
   .gm-row-id {
-    font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
-    font-size: 11px;
+    font-family: var(--mono);
+    font-size: var(--fs-xs);
     color: var(--text-3);
   }
   .gm-foot,
@@ -397,7 +397,7 @@
     display: flex;
     flex-direction: column;
     gap: 4px;
-    font-size: 12px;
+    font-size: var(--fs-sm);
     color: var(--text-2);
   }
   .sfi-field input,
@@ -407,15 +407,15 @@
     border: 1px solid var(--border);
     border-radius: 8px;
     background: var(--surface);
-    font-size: 13px;
+    font-size: var(--fs-md);
   }
   .gm-id-static {
-    font-size: 11px;
+    font-size: var(--fs-xs);
     color: var(--text-3);
     padding-bottom: 7px;
   }
   .lbl {
-    font-size: 10px;
+    font-size: var(--fs-xs);
     font-weight: 800;
     letter-spacing: 0.09em;
     text-transform: uppercase;
@@ -439,7 +439,7 @@
     flex: none;
     display: inline-flex;
     color: var(--border-strong);
-    font-size: 15px;
+    font-size: var(--fs-lg);
     cursor: grab;
   }
   .gm-member-icon-anchor {
@@ -496,8 +496,8 @@
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
-    font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
-    font-size: 11px;
+    font-family: var(--mono);
+    font-size: var(--fs-xs);
     color: var(--text-3);
   }
   .gm-add-member {
@@ -506,7 +506,7 @@
     border: 1px dashed var(--border-strong);
     border-radius: 8px;
     background: transparent;
-    font-size: 12.5px;
+    font-size: var(--fs-sm);
     color: var(--accent);
     cursor: pointer;
   }
@@ -521,7 +521,7 @@
     background: var(--inset);
     border: 1px solid var(--divider);
     color: var(--text-2);
-    font-size: 15px;
+    font-size: var(--fs-lg);
   }
   .sfi-spacer {
     flex: 1;
@@ -531,7 +531,7 @@
     border: 1px solid var(--border);
     border-radius: 8px;
     background: var(--surface);
-    font-size: 12.5px;
+    font-size: var(--fs-sm);
     cursor: pointer;
   }
   .sfi-done {
@@ -540,7 +540,7 @@
     border-radius: 8px;
     background: var(--accent);
     color: #fff;
-    font-size: 12.5px;
+    font-size: var(--fs-sm);
     font-weight: 600;
     cursor: pointer;
   }
@@ -551,7 +551,7 @@
   .link-danger {
     border: 0;
     background: transparent;
-    font-size: 12px;
+    font-size: var(--fs-sm);
     color: var(--danger);
     cursor: pointer;
   }
@@ -559,7 +559,7 @@
     text-decoration: underline;
   }
   .muted {
-    font-size: 13px;
+    font-size: var(--fs-md);
     color: var(--text-3);
   }
 </style>

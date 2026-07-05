@@ -75,7 +75,7 @@
     display: grid;
     place-items: center;
     padding: 24px;
-    background: rgba(25, 40, 35, 0.28);
+    background: var(--scrim);
   }
 
   .directory-modal {
@@ -88,7 +88,7 @@
     border: 1px solid var(--border);
     border-radius: 8px;
     background: var(--surface);
-    box-shadow: 0 24px 60px rgba(25, 40, 35, 0.28);
+    box-shadow: var(--elev-3);
   }
 
   .directory-modal-header {
@@ -102,7 +102,7 @@
     margin: 4px 0 0;
     overflow: hidden;
     color: var(--text-2);
-    font-size: 13px;
+    font-size: var(--fs-md);
     text-overflow: ellipsis;
     white-space: nowrap;
   }

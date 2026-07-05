@@ -276,7 +276,7 @@
     border-radius: 999px;
     background: var(--accent-soft);
     color: var(--accent-emphasis);
-    font-size: 11px;
+    font-size: var(--fs-xs);
     font-weight: 700;
     white-space: nowrap;
   }

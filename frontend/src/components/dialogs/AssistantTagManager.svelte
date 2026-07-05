@@ -48,7 +48,7 @@
   .atm-backdrop {
     position: fixed;
     inset: 0;
-    background: rgba(0, 0, 0, 0.28);
+    background: var(--scrim);
     z-index: 60;
   }
   .atm-panel {
@@ -63,7 +63,7 @@
     background: var(--surface);
     border: 1px solid var(--border);
     border-radius: 10px;
-    box-shadow: 0 12px 40px rgba(0, 0, 0, 0.28);
+    box-shadow: var(--elev-3);
     padding: 14px 16px;
   }
   .atm-head {
@@ -74,20 +74,20 @@
   }
   .atm-head h2 {
     margin: 0;
-    font-size: 14px;
+    font-size: var(--fs-md);
     font-weight: 700;
   }
   .atm-close {
     border: none;
     background: none;
-    font-size: 20px;
+    font-size: var(--fs-2xl);
     line-height: 1;
     cursor: pointer;
     color: var(--text-3);
   }
   .atm-empty {
     color: var(--text-3);
-    font-size: 12.5px;
+    font-size: var(--fs-sm);
     margin: 6px 2px;
   }
   .atm-list {
@@ -110,9 +110,9 @@
     background: var(--inset);
   }
   .atm-name {
-    font-size: 12.5px;
+    font-size: var(--fs-sm);
     font-weight: 600;
-    color: var(--text-1);
+    color: var(--text);
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;

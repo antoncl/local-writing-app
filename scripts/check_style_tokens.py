@@ -49,19 +49,6 @@ from pathlib import Path
 # matched against the path tail.
 GRANDFATHERED = {
     "frontend/src/components/chrome/TopBar.svelte",
-    "frontend/src/components/dialogs/AssistantTagManager.svelte",
-    "frontend/src/components/dialogs/ConfirmModal.svelte",
-    "frontend/src/components/dialogs/DirectoryPickerModal.svelte",
-    "frontend/src/components/dialogs/GroupsManagerDialog.svelte",
-    "frontend/src/components/dialogs/MachineSettingsDialog.svelte",
-    "frontend/src/components/dialogs/Modal.svelte",
-    "frontend/src/components/dialogs/TagManagerDialog.svelte",
-    "frontend/src/components/panes/Assistants.svelte",
-    "frontend/src/components/panes/Chats.svelte",
-    "frontend/src/components/panes/Mutations.svelte",
-    "frontend/src/components/panes/Project.svelte",
-    "frontend/src/components/panes/Todo.svelte",
-    "frontend/src/components/panes/Tree.svelte",
     "frontend/src/styles.css",
 }
 
@@ -71,8 +58,6 @@ GRANDFATHERED = {
 # var(--sans) — as part of the #125 restyle slices — then delete its entry.
 GRANDFATHERED_FONT_FAMILY = {
     "frontend/src/components/chrome/TopBar.svelte",
-    "frontend/src/components/dialogs/GroupsManagerDialog.svelte",
-    "frontend/src/components/dialogs/MachineSettingsDialog.svelte",
     "frontend/src/components/editor/MetadataPanel.svelte",
     "frontend/src/components/editor/NodeEditor.svelte",
     "frontend/src/components/editor/body/ChatBodyView.svelte",
@@ -81,7 +66,6 @@ GRANDFATHERED_FONT_FAMILY = {
     "frontend/src/components/editor/body/PromptPreviewPane.svelte",
     "frontend/src/components/editor/body/ProseSlashMenu.svelte",
     "frontend/src/components/editor/body/chat/ChatTranscript.svelte",
-    "frontend/src/components/panes/Project.svelte",
     "frontend/src/components/schema/NodePickerConfigEditor.svelte",
     "frontend/src/components/schema/SchemaFieldInlineEditor.svelte",
     "frontend/src/components/schema/SchemaFieldRow.svelte",

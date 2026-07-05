@@ -69,16 +69,16 @@
      scope hash — the old `.chats-pane` ancestor anchor (App's pane wrapper)
      is no longer needed; scoping limits them to this component. */
   .chat-prompt-glyph {
-    font-size: 14px;
+    font-size: var(--fs-md);
   }
 
   .chat-session-preset {
     color: var(--accent);
-    font-size: 11px;
+    font-size: var(--fs-xs);
   }
 
   .chat-session-cost {
-    color: var(--text-2, var(--text-2));
+    color: var(--text-2);
     font-variant-numeric: tabular-nums;
   }
 </style>

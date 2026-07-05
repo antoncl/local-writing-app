@@ -122,12 +122,12 @@
 <style>
   .muted {
     color: var(--text-3);
-    font-size: 0.85rem;
+    font-size: var(--fs-md);
     padding: 8px;
   }
   .pane-error {
-    color: var(--danger, #b4442f);
-    font-size: 0.85rem;
+    color: var(--danger);
+    font-size: var(--fs-md);
     padding: 0 8px 4px;
     margin: 0;
   }
@@ -136,11 +136,11 @@
     background: transparent;
     color: var(--text-3);
     cursor: pointer;
-    font-size: 15px;
+    font-size: var(--fs-lg);
     line-height: 1;
     padding: 0 4px;
   }
   .row-action-delete:hover {
-    color: var(--danger, #b4442f);
+    color: var(--danger);
   }
 </style>

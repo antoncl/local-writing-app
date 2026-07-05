@@ -48,7 +48,8 @@ from pathlib import Path
 # clean — this list only shrinks. Stored repo-relative with forward slashes;
 # matched against the path tail.
 GRANDFATHERED = {
-    "frontend/src/components/chrome/TopBar.svelte",
+    # styles.css residual = the reserved .editor-body prose surface (face
+    # typography + in-prose mention/annotation marks) — its own #125 slice.
     "frontend/src/styles.css",
 }
 
@@ -57,7 +58,6 @@ GRANDFATHERED = {
 # shrink independently. Migrate a file's stacks onto var(--mono)/var(--serif)/
 # var(--sans) — as part of the #125 restyle slices — then delete its entry.
 GRANDFATHERED_FONT_FAMILY = {
-    "frontend/src/components/chrome/TopBar.svelte",
     "frontend/src/components/editor/MetadataPanel.svelte",
     "frontend/src/components/editor/NodeEditor.svelte",
     "frontend/src/components/editor/body/ChatBodyView.svelte",

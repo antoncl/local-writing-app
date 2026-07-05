@@ -78,13 +78,6 @@ GRANDFATHERED = {
     "frontend/src/components/panes/Project.svelte",
     "frontend/src/components/panes/Todo.svelte",
     "frontend/src/components/panes/Tree.svelte",
-    "frontend/src/components/schema/DefaultValueEditor.svelte",
-    "frontend/src/components/schema/NodePickerConfigEditor.svelte",
-    "frontend/src/components/schema/SchemaFieldInlineEditor.svelte",
-    "frontend/src/components/schema/SchemaFieldRow.svelte",
-    "frontend/src/components/schema/SchemaTreePane.svelte",
-    "frontend/src/components/schema/SchemaTypeEditor.svelte",
-    "frontend/src/components/schema/SelectOptionsEditor.svelte",
     "frontend/src/styles.css",
 }
 

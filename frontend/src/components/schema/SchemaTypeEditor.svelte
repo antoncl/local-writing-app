@@ -621,12 +621,12 @@
     border-radius: 999px;
     color: var(--accent-deep);
     background: hsl(calc(145 + var(--source-index, 0) * 44), 48%, 88%);
-    font-size: 10px;
+    font-size: var(--fs-xs);
     font-weight: 800;
     white-space: nowrap;
   }
   .sfr-inherited-label {
-    font-size: 11px;
+    font-size: var(--fs-xs);
     font-style: italic;
     color: var(--text-3, var(--text-3));
   }
@@ -648,11 +648,11 @@
   }
   .sfr-ovr:hover {
     border-color: var(--divider);
-    background: var(--surface, #fff);
-    color: var(--text, #242424);
+    background: var(--surface);
+    color: var(--text);
   }
   .sfr-ovr.active {
-    color: var(--accent, #2f6f5e);
+    color: var(--accent);
   }
   /* Inline rename input, rendered beneath the row (mirrors the field inline
      editor's placement). */
@@ -667,17 +667,17 @@
     padding: 5px 8px;
     border: 1px solid var(--border);
     border-radius: 8px;
-    background: var(--surface, #fff);
-    font-size: 13px;
+    background: var(--surface);
+    font-size: var(--fs-md);
   }
   /* L2 reusable groups in the type editor. */
   .sfr-group-origin {
     display: inline-flex;
     align-items: center;
     gap: 4px;
-    font-size: 11px;
+    font-size: var(--fs-xs);
     font-style: italic;
-    color: var(--k-lore-text, #43448a);
+    color: var(--k-lore-text);
   }
 
   /* Type-editor layout chrome co-located from styles.css (#14). The shared
@@ -698,7 +698,7 @@
     border-radius: 6px;
     color: var(--text-2);
     background: var(--surface);
-    font-size: 12px;
+    font-size: var(--fs-sm);
   }
 
   /* Identity line: kind pill + "extends <parent>". */
@@ -715,8 +715,8 @@
     padding: 1px 9px;
     border-radius: 999px;
     border: 1px solid var(--border);
-    background: var(--surface, #fff);
-    font-size: 11px;
+    background: var(--surface);
+    font-size: var(--fs-xs);
     font-weight: 600;
     color: var(--text-2);
     text-transform: capitalize;
@@ -725,7 +725,7 @@
     display: inline-flex;
     align-items: center;
     gap: 3px;
-    font-size: 11px;
+    font-size: var(--fs-xs);
     color: var(--text-3);
   }
   .extends-pill {
@@ -734,8 +734,8 @@
     padding: 1px 9px;
     border-radius: 999px;
     border: 1px solid var(--border);
-    background: var(--surface, #fff);
-    font-size: 11px;
+    background: var(--surface);
+    font-size: var(--fs-xs);
     font-weight: 600;
     color: var(--text-2);
   }
@@ -745,7 +745,7 @@
     display: flex;
     align-items: center;
     gap: 10px;
-    font-size: 13px;
+    font-size: var(--fs-md);
   }
   .schema-type-color-row > span:first-child {
     min-width: 80px;
@@ -753,7 +753,7 @@
   }
   .schema-type-color-row small {
     color: var(--text-3);
-    font-size: 11px;
+    font-size: var(--fs-xs);
   }
 
   /* Fields / reusable-groups sections. */
@@ -770,7 +770,7 @@
     display: flex;
     align-items: baseline;
     gap: 6px;
-    font-size: 13px;
+    font-size: var(--fs-md);
   }
   .schema-type-fields-header small {
     color: var(--text-3);
@@ -794,17 +794,17 @@
     padding: 5px 4px;
   }
   .ag-name {
-    font-size: 13px;
+    font-size: var(--fs-md);
     font-weight: 600;
-    color: var(--text, #242424);
+    color: var(--text);
   }
   .ag-as {
-    font-size: 12px;
+    font-size: var(--fs-sm);
     color: var(--text-3);
   }
   .ag-prefix {
     font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
-    font-size: 11px;
+    font-size: var(--fs-xs);
     color: var(--text-3);
   }
   .ag-remove {
@@ -818,8 +818,8 @@
     padding: 10px;
     border: 1px solid var(--divider);
     border-radius: 8px;
-    background: var(--inset, #f1f5f3);
-    box-shadow: inset 3px 0 0 0 var(--accent, #2f6f5e);
+    background: var(--inset);
+    box-shadow: inset 3px 0 0 0 var(--accent);
   }
   .group-apply-form .sfi-field {
     flex-direction: column;
@@ -831,8 +831,8 @@
     padding: 5px 8px;
     border: 1px solid var(--border);
     border-radius: 8px;
-    background: var(--surface, #fff);
-    font-size: 13px;
+    background: var(--surface);
+    font-size: var(--fs-md);
   }
   .group-apply-form .sfi-footer {
     flex-basis: 100%;

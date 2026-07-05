@@ -122,7 +122,7 @@
     position: relative;
   }
   button.schema-field-row:hover {
-    background: var(--surface, #fff);
+    background: var(--surface);
     border-color: var(--divider, var(--divider));
   }
   .schema-field-row.inherited {
@@ -130,7 +130,7 @@
     cursor: default;
   }
   .schema-field-row.expanded {
-    background: var(--surface, #fff);
+    background: var(--surface);
     border-color: var(--divider, var(--divider));
   }
   /* Unified drag-fade (was .entry-inputs-editor .prompt-input-row-collapsed.dragging);
@@ -147,7 +147,7 @@
     left: 0;
     right: 0;
     height: 2px;
-    background: var(--accent, #2f6f5e);
+    background: var(--accent);
     pointer-events: none;
     z-index: 2;
   }
@@ -161,23 +161,23 @@
     flex: none;
     display: inline-flex;
     color: var(--border-strong, var(--border-strong));
-    font-size: 15px;
+    font-size: var(--fs-lg);
     cursor: grab;
   }
   .sfr-name {
     flex: 0 1 auto;
-    font-size: 13px;
-    color: var(--text, #242424);
+    font-size: var(--fs-md);
+    color: var(--text);
   }
   .sfr-typechip {
     flex: none;
     padding: 1px 8px;
     border-radius: 6px;
-    border: 1px solid var(--k-snippet, #7a5230);
-    background: var(--k-snippet-soft, #f3e6d6);
-    color: var(--k-snippet-text, #7a5230);
+    border: 1px solid var(--k-snippet);
+    background: var(--k-snippet-soft);
+    color: var(--k-snippet-text);
     font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
-    font-size: 11px;
+    font-size: var(--fs-xs);
     font-weight: 600;
   }
   .sfr-meta {

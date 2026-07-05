@@ -349,8 +349,8 @@
     cursor: pointer;
   }
   .sfi-icon-btn:hover {
-    border-color: var(--accent, #2f6f5e);
-    color: var(--accent-strong, #234e43);
+    border-color: var(--accent);
+    color: var(--accent-strong);
   }
   .sfi-icon-pop {
     position: absolute;
@@ -364,8 +364,8 @@
     padding: 6px 9px;
     border: 1px solid var(--border, var(--border));
     border-radius: 8px;
-    background: var(--surface, #fff);
-    font-size: 13px;
+    background: var(--surface);
+    font-size: var(--fs-md);
   }
   /* Type chip + grid popover (the 11-type field-type picker). */
   .sfi-type-anchor {
@@ -379,21 +379,21 @@
     padding: 6px 9px;
     border: 1px solid var(--border, var(--border));
     border-radius: 8px;
-    background: var(--surface, #fff);
-    font-size: 12px;
+    background: var(--surface);
+    font-size: var(--fs-sm);
     color: var(--text-2, var(--text-2));
     cursor: pointer;
   }
   .sfi-type-chip:hover,
   .sfi-type-chip.open {
-    border-color: var(--accent, #2f6f5e);
-    color: var(--accent-strong, #234e43);
+    border-color: var(--accent);
+    color: var(--accent-strong);
   }
   .sfi-type-chip-label {
     font-weight: 500;
   }
   .sfi-type-chip-caret {
-    font-size: 13px;
+    font-size: var(--fs-md);
     opacity: 0.6;
   }
   .sfi-type-grid {
@@ -407,8 +407,8 @@
     padding: 6px;
     border: 1px solid var(--border, var(--border));
     border-radius: 10px;
-    background: var(--surface, #fff);
-    box-shadow: 0 8px 24px rgba(20, 40, 33, 0.16);
+    background: var(--surface);
+    box-shadow: var(--elev-2);
   }
   .sfi-type-cell {
     display: flex;
@@ -418,26 +418,26 @@
     border: 1px solid transparent;
     border-radius: 8px;
     background: transparent;
-    font-size: 12px;
+    font-size: var(--fs-sm);
     color: var(--text-2, var(--text-2));
     text-align: left;
     cursor: pointer;
   }
   .sfi-type-cell i {
-    font-size: 15px;
+    font-size: var(--fs-lg);
     color: var(--text-3, var(--text-3));
   }
   .sfi-type-cell:hover {
-    background: var(--inset, #f1f5f3);
+    background: var(--inset);
   }
   .sfi-type-cell.selected {
-    border-color: var(--accent, #2f6f5e);
-    background: var(--inset, #f1f5f3);
-    color: var(--accent-strong, #234e43);
+    border-color: var(--accent);
+    background: var(--inset);
+    color: var(--accent-strong);
     font-weight: 500;
   }
   .sfi-type-cell.selected i {
-    color: var(--accent, #2f6f5e);
+    color: var(--accent);
   }
   .sfi-computed {
     display: flex;
@@ -451,11 +451,11 @@
     flex-wrap: wrap;
   }
   .sfi-id {
-    font-size: 11px;
+    font-size: var(--fs-xs);
     color: var(--text-3, var(--text-3));
   }
   .sfi-id code {
-    font-size: 11px;
+    font-size: var(--fs-xs);
     font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
     color: var(--text-2, var(--text-2));
   }
@@ -470,28 +470,28 @@
     border: 0;
     background: transparent;
     padding: 0;
-    font-size: 11px;
-    color: var(--accent, #2f6f5e);
+    font-size: var(--fs-xs);
+    color: var(--accent);
     cursor: pointer;
   }
   .sfi-key-rename:hover {
     text-decoration: underline;
   }
   .sfi-key-tag {
-    font-size: 11px;
+    font-size: var(--fs-xs);
     color: var(--text-3, var(--text-3));
   }
   .sfi-key-input {
     width: 160px;
     padding: 5px 8px;
-    border: 1px solid var(--accent, #2f6f5e);
+    border: 1px solid var(--accent);
     border-radius: 8px;
-    background: var(--surface, #fff);
+    background: var(--surface);
     font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
-    font-size: 12px;
+    font-size: var(--fs-sm);
   }
   .sfi-key-hint {
-    font-size: 11px;
+    font-size: var(--fs-xs);
     color: var(--text-3, var(--text-3));
   }
 </style>

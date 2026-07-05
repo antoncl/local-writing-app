@@ -715,7 +715,7 @@
     background: var(--surface);
     box-shadow: var(--elev-1);
     color: var(--text);
-    font-size: 12px;
+    font-size: var(--fs-sm);
     overflow: hidden;
   }
 
@@ -750,7 +750,7 @@
     border: none;
     background: transparent;
     color: var(--accent);
-    font-size: 11px;
+    font-size: var(--fs-xs);
     line-height: 1;
     cursor: pointer;
     border-radius: 4px;
@@ -778,7 +778,7 @@
     background: transparent;
     padding: 2px 6px;
     margin: -2px -6px;
-    font-size: 13.5px;
+    font-size: var(--fs-md);
     font-weight: 600;
     color: var(--text);
     font-family: inherit;
@@ -816,7 +816,7 @@
     background: transparent;
     padding: 1px 5px;
     margin: -1px -5px;
-    font-size: 11px;
+    font-size: var(--fs-xs);
     color: var(--text-3);
     font-family: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
     border-radius: 4px;
@@ -842,7 +842,7 @@
   }
 
   .ctx-row-accessor {
-    font-size: 11px;
+    font-size: var(--fs-xs);
     color: var(--text-3);
     font-family: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
     background: transparent;
@@ -864,7 +864,7 @@
     border: 1px solid var(--accent);
     background: var(--accent-soft);
     color: var(--accent-emphasis);
-    font-size: 10.5px;
+    font-size: var(--fs-xs);
     font-weight: 600;
     text-transform: none;
     letter-spacing: 0;
@@ -897,7 +897,7 @@
     align-items: center;
     gap: 6px;
     cursor: pointer;
-    font-size: 11.5px;
+    font-size: var(--fs-sm);
     color: var(--text-2);
     line-height: 1;
   }
@@ -907,7 +907,7 @@
     background: transparent;
     border: none;
     color: var(--text-3);
-    font-size: 18px;
+    font-size: var(--fs-xl);
     line-height: 1;
     padding: 0 4px;
     cursor: pointer;
@@ -938,7 +938,7 @@
     background: var(--warn-soft);
     border: 1px solid var(--warn-border);
     color: var(--warn);
-    font-size: 11.5px;
+    font-size: var(--fs-sm);
     line-height: 1.2;
   }
 
@@ -950,7 +950,7 @@
     border-radius: 999px;
     background: var(--inset);
     border: 1px solid var(--border);
-    font-size: 11.5px;
+    font-size: var(--fs-sm);
     color: var(--text-2);
     line-height: 1.2;
   }
@@ -965,7 +965,7 @@
 
   .ctx-collapsed-star {
     color: var(--star);
-    font-size: 11px;
+    font-size: var(--fs-xs);
     line-height: 1;
   }
 
@@ -976,7 +976,7 @@
   }
 
   .ctx-section-label {
-    font-size: 10.5px;
+    font-size: var(--fs-xs);
     font-weight: 700;
     text-transform: uppercase;
     letter-spacing: 0.08em;
@@ -1058,7 +1058,7 @@
     border-radius: 999px;
     background: var(--surface);
     border: 1px solid var(--border);
-    font-size: 12px;
+    font-size: var(--fs-sm);
     color: var(--text);
     line-height: 1;
   }
@@ -1073,7 +1073,7 @@
 
   .ctx-chip-star {
     color: var(--star);
-    font-size: 12px;
+    font-size: var(--fs-sm);
     line-height: 1;
   }
 
@@ -1086,7 +1086,7 @@
     background: transparent;
     border: none;
     color: var(--text-3);
-    font-size: 11px;
+    font-size: var(--fs-xs);
     cursor: pointer;
     padding: 2px 5px;
     border-radius: 999px;
@@ -1120,7 +1120,7 @@
 
   .ctx-chip-view-glyph {
     color: var(--accent);
-    font-size: 11px;
+    font-size: var(--fs-xs);
     line-height: 1;
   }
 
@@ -1132,7 +1132,7 @@
     border: 1px solid var(--border);
     background: var(--surface);
     color: var(--text);
-    font-size: 12px;
+    font-size: var(--fs-sm);
     font-family: inherit;
     padding: 5px 26px 5px 10px;
     border-radius: 7px;
@@ -1176,7 +1176,7 @@
   }
 
   .ctx-tree-kind-label {
-    font-size: 10.5px;
+    font-size: var(--fs-xs);
     font-weight: 700;
     text-transform: uppercase;
     letter-spacing: 0.07em;
@@ -1184,7 +1184,7 @@
   }
 
   .ctx-tree-kind-count {
-    font-size: 10.5px;
+    font-size: var(--fs-xs);
     color: var(--text-3);
   }
 
@@ -1216,7 +1216,7 @@
     border: none;
     background: transparent;
     color: var(--text-3);
-    font-size: 10px;
+    font-size: var(--fs-xs);
     line-height: 1;
     cursor: pointer;
     border-radius: 3px;
@@ -1253,7 +1253,7 @@
   }
 
   .ctx-tree-name {
-    font-size: 12.5px;
+    font-size: var(--fs-sm);
     color: var(--text);
   }
 
@@ -1262,7 +1262,7 @@
   }
 
   .ctx-tree-partial-count {
-    font-size: 10.5px;
+    font-size: var(--fs-xs);
     color: var(--text-3);
     flex: none;
   }
@@ -1283,7 +1283,7 @@
     border-radius: 999px;
     border: 1.5px solid var(--border);
     background: var(--surface);
-    font-size: 12.5px;
+    font-size: var(--fs-sm);
     color: var(--text-2);
     cursor: pointer;
     line-height: 1;
@@ -1368,7 +1368,7 @@
     display: flex;
     align-items: center;
     justify-content: center;
-    font-size: 15px;
+    font-size: var(--fs-lg);
     line-height: 1;
   }
 
@@ -1387,20 +1387,20 @@
   }
 
   .ctx-scene-binding-title {
-    font-size: 13px;
+    font-size: var(--fs-md);
     font-weight: 600;
     color: var(--text);
   }
 
   .ctx-scene-binding-help {
     margin: 0;
-    font-size: 12px;
+    font-size: var(--fs-sm);
     color: var(--text-2);
     line-height: 1.45;
   }
 
   .ctx-scene-binding-help code {
-    font-size: 11px;
+    font-size: var(--fs-xs);
     background: var(--surface);
     padding: 1px 4px;
     border-radius: 4px;
@@ -1418,12 +1418,12 @@
     background: var(--warn-soft);
     border: 1px solid var(--warn-border);
     color: var(--warn);
-    font-size: 12.5px;
+    font-size: var(--fs-sm);
     line-height: 1.45;
   }
 
   .ctx-warn-icon {
-    font-size: 15px;
+    font-size: var(--fs-lg);
     line-height: 1.2;
     flex: none;
   }
@@ -1431,7 +1431,7 @@
   .ctx-muted {
     margin: 4px 8px 6px;
     color: var(--text-3);
-    font-size: 11px;
+    font-size: var(--fs-xs);
     font-style: italic;
   }
 </style>

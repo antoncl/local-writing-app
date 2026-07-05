@@ -46,7 +46,8 @@ repos:
       # --- push stage (slow, whole project) ---
       - id: svelte-check
         name: svelte-check (frontend types/templates)
-        entry: npm run check --prefix frontend
+        # via npm_run.py so a git worktree links the primary install (#137)
+        entry: python scripts/npm_run.py run check
         language: system
         pass_filenames: false
         always_run: true
@@ -54,7 +55,7 @@ repos:
 
       - id: vitest
         name: vitest (frontend unit tests)
-        entry: npm test --prefix frontend
+        entry: python scripts/npm_run.py test
         language: system
         pass_filenames: false
         always_run: true

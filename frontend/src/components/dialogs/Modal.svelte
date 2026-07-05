@@ -50,7 +50,7 @@
     display: grid;
     place-items: center;
     padding: 24px;
-    background: rgba(25, 40, 35, 0.28);
+    background: var(--scrim);
   }
 
   .confirm-modal {

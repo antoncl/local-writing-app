@@ -169,31 +169,31 @@
     font: inherit;
     font-size: 13px;
     line-height: 1.2;
-    background: var(--ctx-surface, var(--surface));
-    border: 1px solid var(--ctx-border, var(--border));
+    background: var(--surface);
+    border: 1px solid var(--border);
     border-radius: 6px;
-    color: var(--ctx-text, var(--text));
+    color: var(--text);
     cursor: pointer;
     transition: border-color 80ms linear, background-color 80ms linear;
     min-width: 96px;
   }
   .colored-select-trigger:hover {
-    border-color: var(--ctx-accent, var(--accent));
+    border-color: var(--accent);
   }
   .colored-select-trigger.read-only {
     cursor: default;
   }
   .colored-select-trigger.read-only:hover {
-    border-color: var(--ctx-border, var(--border));
+    border-color: var(--border);
   }
   .colored-select-trigger.read-only.has-color:hover {
-    border-color: color-mix(in srgb, var(--chip-base) 40%, var(--ctx-border, var(--border)) 60%);
+    border-color: color-mix(in srgb, var(--chip-base) 40%, var(--border) 60%);
   }
   /* When the selected option has a color, render the whole trigger as a
      soft-tinted pill so the status is loud at a glance. */
   .colored-select-trigger.has-color {
     background: color-mix(in srgb, var(--chip-base) 12%, white 88%);
-    border-color: color-mix(in srgb, var(--chip-base) 40%, var(--ctx-border, var(--border)) 60%);
+    border-color: color-mix(in srgb, var(--chip-base) 40%, var(--border) 60%);
   }
   :global([data-theme="dark"]) .colored-select-trigger.has-color {
     background: color-mix(in srgb, var(--chip-base) 22%, black 78%);
@@ -219,24 +219,24 @@
     line-height: 1.2;
   }
   .colored-select-placeholder {
-    color: var(--ctx-text-3, #6c7872);
+    color: var(--text-3);
   }
 
   .colored-select-caret {
     margin-left: auto;
     font-size: 10px;
-    color: var(--ctx-text-3, #6c7872);
+    color: var(--text-3);
     line-height: 1;
   }
 
   .colored-select-popover {
     position: fixed;
-    z-index: 10000;
-    background: var(--ctx-surface, #fff);
-    border: 1px solid var(--ctx-border, #cdd8d3);
+    z-index: var(--z-dropdown);
+    background: var(--surface);
+    border: 1px solid var(--border);
     border-radius: 8px;
     padding: 4px;
-    box-shadow: 0 6px 16px rgba(40, 60, 52, 0.18);
+    box-shadow: var(--elev-2);
     min-width: 140px;
     display: flex;
     flex-direction: column;
@@ -255,17 +255,17 @@
     cursor: pointer;
     font: inherit;
     font-size: 13px;
-    color: var(--ctx-text, #28332f);
+    color: var(--text);
     text-align: left;
   }
   .colored-select-row:hover {
-    background: var(--ctx-panel-2, #eef3f0);
+    background: var(--panel);
   }
   .colored-select-row.selected {
-    background: var(--ctx-accent-soft, #e2efe9);
+    background: var(--accent-soft);
   }
   .colored-select-row-label.muted {
-    color: var(--ctx-text-3, #6c7872);
+    color: var(--text-3);
     font-style: italic;
   }
 </style>

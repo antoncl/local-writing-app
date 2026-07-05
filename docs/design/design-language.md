@@ -227,6 +227,9 @@ Card editor, NodeRows, stripes, serif group headers) already carries the
 intended identity — the dated feel is the shell plus unsystematic values, which
 is exactly what #32 (shell) and #125 (values) replace.
 
-Open question, non-blocking: computed borders read 0.909091px (= 1px ÷ 1.1)
-in the live app; no global zoom/scale found in the stylesheets. Locate during
-#125 (suspect: browser zoom state or an inherited transform on the pane tree).
+Resolved non-issue: computed borders read 0.909091px (= 1px ÷ 1.1) in the live
+app. Diagnosed live: `devicePixelRatio` is 1.1 (Windows display scaling 110%)
+and no zoom/transform exists anywhere in the CSS chain — Chromium snaps 1px
+borders to whole device pixels, and one device pixel at dpr 1.1 is 0.909 CSS
+px. The stylesheet is correct; every web app on a fractionally-scaled display
+reports this. Authored values stay integer px; ignore the computed fraction.

@@ -23,10 +23,17 @@
   /* The document title stands out through VOICE (serif), weight, and
      isolation (whitespace + caps-label) — never through sheer size. */
 
-  /* — families & weights — 800 is retired; display serif carries 700 max. */
-  --sans: "Inter", ui-sans-serif, system-ui, sans-serif;
-  --serif: "Newsreader", "Iowan Old Style", Georgia, serif;
-  --mono: "JetBrains Mono", "SFMono-Regular", Consolas, monospace;
+  /* — families & weights — 800 is retired; display serif carries 700 max.
+     System-font strategy (#143): three faces, but ONLY fonts already resident
+     on the platform — no bundled webfonts. This is a local-first app that keeps
+     the whole project graph in memory (Views; heavier still at 0.7.0), so the
+     type layer must not spend that budget on glyph atlases. Windows-first
+     "safe bets" (Segoe UI / Georgia / Consolas ship with the OS and are already
+     loaded), with generics so it degrades to the native face on macOS/Linux.
+     Serif is Georgia, NOT Newsreader — it reads better on screen. */
+  --sans: "Segoe UI", system-ui, sans-serif;
+  --serif: Georgia, "Times New Roman", serif;
+  --mono: Consolas, ui-monospace, monospace;
   --w-regular: 400;
   --w-medium: 500;
   --w-semibold: 600;

@@ -205,7 +205,7 @@
     border-radius: 5px;
     background: var(--inset);
     color: var(--text-3);
-    font-family: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+    font-family: var(--mono);
     font-size: var(--fs-xs);
     font-weight: 600;
     white-space: nowrap;

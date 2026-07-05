@@ -54,25 +54,10 @@ GRANDFATHERED: set[str] = set()
 
 # Files with raw `font-family` stacks bypassing the --sans/--serif/--mono
 # tokens (#144). Separate from GRANDFATHERED above (colors/sizes) so the axes
-# shrink independently. Migrate a file's stacks onto var(--mono)/var(--serif)/
-# var(--sans) — as part of the #125 restyle slices — then delete its entry.
-GRANDFATHERED_FONT_FAMILY = {
-    "frontend/src/components/editor/MetadataPanel.svelte",
-    "frontend/src/components/editor/NodeEditor.svelte",
-    "frontend/src/components/editor/body/ChatBodyView.svelte",
-    "frontend/src/components/editor/body/CodeBodyView.svelte",
-    "frontend/src/components/editor/body/EntryInputsEditor.svelte",
-    "frontend/src/components/editor/body/PromptPreviewPane.svelte",
-    "frontend/src/components/editor/body/ProseSlashMenu.svelte",
-    "frontend/src/components/editor/body/chat/ChatTranscript.svelte",
-    "frontend/src/components/schema/NodePickerConfigEditor.svelte",
-    "frontend/src/components/schema/SchemaFieldInlineEditor.svelte",
-    "frontend/src/components/schema/SchemaFieldRow.svelte",
-    "frontend/src/components/schema/SchemaTreePane.svelte",
-    "frontend/src/components/schema/SchemaTypeEditor.svelte",
-    "frontend/src/components/schema/SelectOptionsEditor.svelte",
-    "frontend/src/components/widgets/CodeEditor.svelte",
-}
+# shrink independently. Empty: every font-family now resolves through a token
+# (var(--sans|--serif|--mono)) or `inherit`. Add an entry only to temporarily
+# exempt a NEW pre-token file while it is being restyled.
+GRANDFATHERED_FONT_FAMILY: set[str] = set()
 
 HEX_RE = re.compile(r"#[0-9a-fA-F]{3,8}\b")
 RGB_RE = re.compile(r"\brgba?\([^)]*\)")

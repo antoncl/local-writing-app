@@ -803,7 +803,7 @@
     color: var(--text-3);
   }
   .ag-prefix {
-    font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+    font-family: var(--mono);
     font-size: var(--fs-xs);
     color: var(--text-3);
   }

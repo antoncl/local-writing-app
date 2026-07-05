@@ -105,7 +105,7 @@
   :global(.cbv-message-rendered pre) {
     margin: 0.4em 0; padding: 8px 10px; background: var(--inset); border-radius: 8px; overflow-x: auto;
   }
-  :global(.cbv-message-rendered code) { font-family: ui-monospace, "JetBrains Mono", monospace; font-size: var(--fs-sm); }
+  :global(.cbv-message-rendered code) { font-family: var(--mono); font-size: var(--fs-sm); }
 
   /* 4a · thinking accordion. */
   .cbv-thinking {
@@ -142,6 +142,6 @@
   /* 4c · per-turn usage meta. */
   .cbv-turn-meta {
     display: flex; align-items: center; gap: 12px; padding: 0 2px;
-    font-family: ui-monospace, "JetBrains Mono", monospace; font-size: var(--fs-xs); color: var(--text-3);
+    font-family: var(--mono); font-size: var(--fs-xs); color: var(--text-3);
   }
 </style>

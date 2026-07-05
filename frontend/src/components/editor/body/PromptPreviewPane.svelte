@@ -523,7 +523,7 @@
     background: var(--surface);
   }
   .prompt-preview-field > :global(textarea) {
-    font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+    font-family: var(--mono);
     resize: vertical;
   }
   .prompt-preview-inputs {
@@ -559,7 +559,7 @@
     color: var(--text-3);
   }
   .prompt-preview-inputs-hint > code {
-    font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+    font-family: var(--mono);
     background: var(--surface);
     border: 1px solid var(--border);
     border-radius: 3px;
@@ -585,7 +585,7 @@
     color: var(--text-2);
     cursor: pointer;
     padding: 0;
-    font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+    font-family: var(--mono);
     font-size: var(--fs-xs);
     font-weight: 400;
     text-transform: none;
@@ -685,7 +685,7 @@
     padding: 0;
     white-space: pre-wrap;
     overflow-wrap: anywhere;
-    font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+    font-family: var(--mono);
     font-size: var(--fs-sm);
     line-height: 1.45;
     color: var(--text);
@@ -698,7 +698,7 @@
     border-radius: 4px;
     color: var(--star);
     font-size: var(--fs-xs);
-    font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+    font-family: var(--mono);
   }
   .prompt-preview-cache-strip {
     display: flex;

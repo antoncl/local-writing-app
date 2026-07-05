@@ -456,7 +456,7 @@
   }
   .sfi-id code {
     font-size: var(--fs-xs);
-    font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+    font-family: var(--mono);
     color: var(--text-2, var(--text-2));
   }
   /* Stable-key row (decision #10): key shown as quiet mono + rename affordance. */
@@ -487,7 +487,7 @@
     border: 1px solid var(--accent);
     border-radius: 8px;
     background: var(--surface);
-    font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+    font-family: var(--mono);
     font-size: var(--fs-sm);
   }
   .sfi-key-hint {

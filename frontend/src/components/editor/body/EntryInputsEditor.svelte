@@ -353,7 +353,7 @@
 
   /* Compact accessor pill rendered in the collapsed row's meta strip. */
   .prompt-input-accessor-mini {
-    font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+    font-family: var(--mono);
     font-size: var(--fs-xs);
     color: var(--text-3);
     background: var(--inset);
@@ -410,7 +410,7 @@
     border: 1px solid var(--border);
     border-radius: 3px;
     padding: 0 4px;
-    font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+    font-family: var(--mono);
   }
   .entry-inputs-empty {
     margin: 6px 0;

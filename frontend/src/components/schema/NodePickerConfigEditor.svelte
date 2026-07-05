@@ -818,7 +818,7 @@
     margin: -1px -5px;
     font-size: var(--fs-xs);
     color: var(--text-3);
-    font-family: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+    font-family: var(--mono);
     border-radius: 4px;
     min-width: 0;
     flex: 0 1 140px;
@@ -844,7 +844,7 @@
   .ctx-row-accessor {
     font-size: var(--fs-xs);
     color: var(--text-3);
-    font-family: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+    font-family: var(--mono);
     background: transparent;
     padding: 0;
     white-space: nowrap;

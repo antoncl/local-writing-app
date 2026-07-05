@@ -16,7 +16,7 @@
     display: inline-block;
     width: 14px;
     color: var(--text-3);
-    font-size: 11px;
+    font-size: var(--fs-xs);
     text-align: center;
     transition: transform 120ms ease;
   }

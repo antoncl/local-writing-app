@@ -182,7 +182,7 @@
     border-radius: 999px;
     background: var(--inset);
     color: var(--text-2);
-    font-size: 14px;
+    font-size: var(--fs-md);
     line-height: 1;
     cursor: pointer;
     transition: background 120ms ease, color 120ms ease;
@@ -205,7 +205,7 @@
     border-radius: 5px;
     background: var(--surface);
     color: var(--text-3);
-    font-size: 10.5px;
+    font-size: var(--fs-xs);
     font-weight: 700;
     letter-spacing: 0.35px;
     line-height: 1;
@@ -217,7 +217,7 @@
 
   .search-input-shortcut.active {
     background: var(--accent);
-    color: #ffffff;
+    color: #fff;
     border-color: var(--accent-deep);
     border-bottom-width: 1px;
     box-shadow: inset 0 1px 2px rgba(0, 0, 0, 0.18);

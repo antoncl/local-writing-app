@@ -127,16 +127,16 @@
     padding-right: 0;
     border: 1px dashed var(--border-strong, var(--border-strong));
     border-radius: 8px;
-    background: var(--inset, #f1f5f3);
+    background: var(--inset);
     color: var(--text-2, var(--text-2));
-    font-size: 15px;
+    font-size: var(--fs-lg);
     line-height: 1;
   }
 
   .tag-picker-toggle:hover {
-    border-color: var(--accent, #2f6f5e);
-    color: var(--accent-strong, #234e43);
-    background: var(--surface, #fff);
+    border-color: var(--accent);
+    color: var(--accent-strong);
+    background: var(--surface);
   }
 
   .tag-picker {
@@ -152,13 +152,13 @@
     border: 1px solid var(--divider);
     border-radius: 6px;
     background: var(--surface);
-    box-shadow: 0 10px 24px rgba(36, 48, 43, 0.18);
+    box-shadow: var(--elev-2);
   }
 
   .tag-picker button {
     padding: 4px 7px;
     border-radius: 999px;
-    font-size: 12px;
+    font-size: var(--fs-sm);
   }
 
   .tag-picker button.active {
@@ -169,6 +169,6 @@
 
   .tag-picker span {
     color: var(--text-3);
-    font-size: 12px;
+    font-size: var(--fs-sm);
   }
 </style>

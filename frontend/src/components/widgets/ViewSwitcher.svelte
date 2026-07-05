@@ -129,7 +129,7 @@
   }
 
   .view-switcher-caret {
-    font-size: 9px;
+    font-size: var(--fs-xs);
     opacity: 0.7;
   }
 
@@ -205,7 +205,7 @@
     border: none;
     background: transparent;
     color: var(--text-3);
-    font-size: 13px;
+    font-size: var(--fs-md);
     line-height: 1;
     padding: 2px 4px;
     border-radius: 4px;
@@ -218,14 +218,14 @@
   }
 
   .vsa-del:hover {
-    color: var(--danger, #d64545);
+    color: var(--danger);
   }
 
   .view-switcher-check {
     flex: 0 0 auto;
     width: 12px;
     color: var(--accent-strong);
-    font-size: 11px;
+    font-size: var(--fs-xs);
   }
 
   .view-switcher-item-label {

@@ -692,7 +692,7 @@
     background: var(--surface);
     border: 1px solid var(--border);
     border-radius: 8px;
-    font-size: 12.5px;
+    font-size: var(--fs-sm);
     line-height: 1.2;
     color: var(--text);
     /* --chip-base is set inline per chip by colorStyleForRef() — see the
@@ -734,7 +734,7 @@
   }
 
   .ctx-chip-tag {
-    font-size: 9.5px;
+    font-size: var(--fs-xs);
     font-weight: 700;
     text-transform: uppercase;
     letter-spacing: 0.04em;
@@ -767,7 +767,7 @@
     background: transparent;
     cursor: pointer;
     padding: 0;
-    font-size: 13px;
+    font-size: var(--fs-md);
     color: var(--text-3);
     line-height: 1;
     opacity: 0.55;
@@ -794,7 +794,7 @@
     border: none;
     background: transparent;
     color: var(--text-3);
-    font-size: 14px;
+    font-size: var(--fs-md);
     line-height: 1;
     padding: 0 2px;
     cursor: pointer;
@@ -823,7 +823,7 @@
     background: var(--accent-soft);
     color: var(--accent-emphasis);
     border-radius: 8px;
-    font-size: 12.5px;
+    font-size: var(--fs-sm);
     font-weight: 600;
     cursor: pointer;
     font-family: inherit;
@@ -836,12 +836,12 @@
   }
 
   .ctx-add-plus {
-    font-size: 14px;
+    font-size: var(--fs-md);
     line-height: 1;
   }
 
   .compact .ctx-add {
-    font-size: 12px;
+    font-size: var(--fs-sm);
     padding: 3px 9px;
   }
 
@@ -911,7 +911,7 @@
     border: none;
     background: transparent;
     color: var(--text);
-    font-size: 13px;
+    font-size: var(--fs-md);
     padding: 0;
     font-family: inherit;
   }
@@ -926,7 +926,7 @@
 
   .ctx-search-count {
     flex: none;
-    font-size: 11px;
+    font-size: var(--fs-xs);
     font-weight: 600;
     color: var(--text-3);
   }
@@ -936,7 +936,7 @@
     border: none;
     background: transparent;
     color: var(--text-3);
-    font-size: 14px;
+    font-size: var(--fs-md);
     line-height: 1;
     cursor: pointer;
     padding: 0 2px;
@@ -975,7 +975,7 @@
 
   .ctx-group-chevron {
     color: var(--text-3);
-    font-size: 10px;
+    font-size: var(--fs-xs);
     width: 10px;
     display: inline-block;
     transition: transform 0.1s;
@@ -986,7 +986,7 @@
   }
 
   .ctx-group-label {
-    font-size: 10.5px;
+    font-size: var(--fs-xs);
     font-weight: 700;
     text-transform: uppercase;
     letter-spacing: 0.07em;
@@ -995,7 +995,7 @@
 
   .ctx-group-count {
     margin-left: auto;
-    font-size: 10.5px;
+    font-size: var(--fs-xs);
     font-weight: 600;
     color: var(--text-3);
     background: var(--surface);
@@ -1058,7 +1058,7 @@
     border-radius: 6px;
     background: var(--mono-bg);
     color: var(--mono-color);
-    font-size: 11px;
+    font-size: var(--fs-xs);
     font-weight: 700;
     display: flex;
     align-items: center;
@@ -1069,12 +1069,12 @@
   .ctx-menu.compact .ctx-item-mono {
     width: 19px;
     height: 19px;
-    font-size: 10.5px;
+    font-size: var(--fs-xs);
   }
 
   .ctx-item-title {
     flex: 1;
-    font-size: 13px;
+    font-size: var(--fs-md);
     min-width: 0;
     overflow: hidden;
     text-overflow: ellipsis;
@@ -1091,7 +1091,7 @@
 
   .ctx-item-added {
     flex: none;
-    font-size: 10.5px;
+    font-size: var(--fs-xs);
     font-weight: 600;
     color: var(--accent-emphasis);
     background: var(--accent-soft);
@@ -1121,7 +1121,7 @@
     align-items: center;
     justify-content: center;
     color: var(--text-3);
-    font-size: 18px;
+    font-size: var(--fs-xl);
     line-height: 1;
   }
 
@@ -1131,7 +1131,7 @@
   }
 
   .ctx-empty-title {
-    font-size: 13px;
+    font-size: var(--fs-md);
     color: var(--text-2);
   }
 
@@ -1141,7 +1141,7 @@
   }
 
   .ctx-empty-hint {
-    font-size: 12px;
+    font-size: var(--fs-sm);
     color: var(--text-3);
     line-height: 1.45;
   }

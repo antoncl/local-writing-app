@@ -240,7 +240,7 @@
     border: 1px solid transparent;
     border-radius: 5px;
     font: inherit;
-    font-size: 12px;
+    font-size: var(--fs-sm);
     color: var(--text-3);
     cursor: pointer;
     text-align: left;
@@ -262,7 +262,7 @@
 
   .swatch-current-label {
     margin-top: 8px;
-    font-size: 11px;
+    font-size: var(--fs-xs);
     color: var(--text-3);
     text-align: center;
   }

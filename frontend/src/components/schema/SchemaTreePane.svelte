@@ -180,7 +180,7 @@
 
   .schema-context-heading small {
     color: var(--text-3);
-    font-size: 11px;
+    font-size: var(--fs-xs);
   }
 
   /* Outer container around the Detail Types NodeList. The NodeList itself
@@ -206,7 +206,7 @@
     background: var(--inset);
     color: var(--text-3);
     font-family: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
-    font-size: 10.5px;
+    font-size: var(--fs-xs);
     font-weight: 600;
     white-space: nowrap;
   }
@@ -228,7 +228,7 @@
     border: 1px solid transparent;
     border-bottom: 2px solid transparent;
     border-radius: 4px 4px 0 0;
-    font-size: 12px;
+    font-size: var(--fs-sm);
     color: var(--text-3);
     cursor: pointer;
   }

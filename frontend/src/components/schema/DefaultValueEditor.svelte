@@ -121,7 +121,7 @@
     border: 1px solid var(--border);
     background: var(--surface);
     color: var(--text-3);
-    font-size: 14px;
+    font-size: var(--fs-md);
     line-height: 1;
     padding: 0 7px;
     border-radius: 4px;

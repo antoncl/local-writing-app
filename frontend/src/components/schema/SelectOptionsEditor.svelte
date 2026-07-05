@@ -195,7 +195,7 @@
     left: 0;
     right: 0;
     height: 2px;
-    background: var(--accent, #2f6f5e);
+    background: var(--accent);
     pointer-events: none;
     z-index: 2;
   }
@@ -209,7 +209,7 @@
     flex: none;
     display: inline-flex;
     color: var(--border-strong, var(--border-strong));
-    font-size: 15px;
+    font-size: var(--fs-lg);
     cursor: grab;
   }
   .sfi-option-value-input {
@@ -218,9 +218,9 @@
     padding: 5px 8px;
     border: 1px solid var(--border, var(--border));
     border-radius: 8px;
-    background: var(--surface, #fff);
+    background: var(--surface);
     font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
-    font-size: 12px;
+    font-size: var(--fs-sm);
   }
   .sfi-option-label {
     flex: 1;
@@ -228,8 +228,8 @@
     padding: 5px 8px;
     border: 1px solid var(--border, var(--border));
     border-radius: 8px;
-    background: var(--surface, #fff);
-    font-size: 13px;
+    background: var(--surface);
+    font-size: var(--fs-md);
   }
   .sfi-option-remove {
     flex: none;
@@ -246,9 +246,9 @@
     cursor: pointer;
   }
   .sfi-option-remove:hover {
-    border-color: var(--danger-border, #e2c4c2);
-    color: var(--danger, #7c1f18);
-    background: var(--danger-soft, #fff3f2);
+    border-color: var(--danger-border);
+    color: var(--danger);
+    background: var(--danger-soft);
   }
   .sfi-add-option {
     align-self: flex-start;

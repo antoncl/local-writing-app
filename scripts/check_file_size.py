@@ -30,9 +30,6 @@ EXTENSIONS = {".py", ".svelte", ".ts", ".tsx"}
 GRANDFATHERED = {
     "backend/app/main.py",
     "backend/tests/test_metadata_validation.py",
-    # Already at the cap before #116 tipped it over; the metadata models are
-    # entangled with shared base types, so the split is tracked separately (#117).
-    "backend/app/models.py",
 }
 
 

@@ -350,7 +350,16 @@ class ProjectService(
         return self._unique_filepath(folder, self._sanitize_filename(title))
 
     def _maybe_rename_node_file(self, path: Path, new_title: str) -> Path:
-        target = self._unique_filepath(path.parent, self._sanitize_filename(new_title), current_path=path)
+        sanitized = self._sanitize_filename(new_title)
+        # The file already owns a valid name for this title when its stem is the
+        # sanitized title or that title with a collision suffix ("Name" /
+        # "Name (2)"). Renaming purely to drop a freed-up suffix churns a
+        # perfectly good filename on every save (and risks the transient-lock
+        # failure below) — so rename only when the title genuinely changed away
+        # from the current name, not to re-canonicalize an owned one.
+        if self._filename_represents_title(path.stem, sanitized):
+            return path
+        target = self._unique_filepath(path.parent, sanitized, current_path=path)
         if target == path:
             return path
         try:
@@ -365,6 +374,13 @@ class ProjectService(
             logger.warning("kept filename %s; rename to %s failed", path.name, target.name)
             return path
         return target
+
+    @staticmethod
+    def _filename_represents_title(stem: str, sanitized_title: str) -> bool:
+        # True when `stem` is the sanitized title, or that title with a numeric
+        # collision suffix ("Name" or "Name (2)") — i.e. the file already owns a
+        # valid name for this title and needs no rename.
+        return re.fullmatch(rf"{re.escape(sanitized_title)}(?: \(\d+\))?", stem) is not None
 
     @staticmethod
     def _rename_with_retry(path: Path, target: Path, *, attempts: int = 5, delay: float = 0.05) -> None:

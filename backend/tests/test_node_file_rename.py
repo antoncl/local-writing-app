@@ -60,6 +60,29 @@ def test_rename_with_retry_reraises_when_lock_never_clears(service, monkeypatch,
         service._rename_with_retry(src, tmp_path / "dst.md")
 
 
+def test_no_rename_when_filename_already_represents_title(service, tmp_path):
+    # "New Entry (2).md" is a name the file legitimately owns for title
+    # "New Entry"; even though "New Entry.md" is free, a save must not churn it.
+    src = tmp_path / "New Entry (2).md"
+    src.write_text("x", encoding="utf-8")
+
+    result = service._maybe_rename_node_file(src, "New Entry")
+
+    assert result == src
+    assert src.exists()
+    assert not (tmp_path / "New Entry.md").exists()
+
+
+def test_rename_on_real_title_change(service, tmp_path):
+    src = tmp_path / "Old Name.md"
+    src.write_text("x", encoding="utf-8")
+
+    result = service._maybe_rename_node_file(src, "Brand New")
+
+    assert result == tmp_path / "Brand New.md"
+    assert result.exists() and not src.exists()
+
+
 def test_maybe_rename_is_non_fatal_when_lock_persists(service, monkeypatch, tmp_path):
     def always_locked(self: Path, target):
         raise PermissionError(32, "locked by another process")

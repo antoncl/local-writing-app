@@ -21,7 +21,8 @@
   import { setDesignerContext, type DesignerContext } from "./view/designerContext";
   import { api } from "@/lib/api";
   import { metadataSchemaStore } from "@/lib/stores/schema";
-  import { evaluateView, nestWarnings, INTRINSIC_FIELD_KEYS, type EvalNode } from "@/lib/views/evaluateView";
+  import { evaluateView, nestWarnings, type EvalNode } from "@/lib/views/evaluateView";
+  import { effectiveFieldLabel, effectiveFieldHidden, kindRootEntryTypeId } from "@/lib/utils/schemaTypeHelpers";
   import { structureToEvalNodes } from "@/lib/views/structureNodes";
   import {
     specToGraph,
@@ -258,15 +259,21 @@
       if (def.kind !== kind) continue;
       for (const fk of def.fields ?? []) keys.add(fk);
     }
+    // The picker is kind-anchored (ADR-0020), so per-type overrides resolve
+    // against the kind ROOT (ADR-0029 §F): the built-in lore `title → "Name"`
+    // relabel sits on `lore:base` and so reaches the picker; a leaf-only
+    // override deliberately does not.
+    const anchor = kindRootEntryTypeId(schema, kind);
     const out: { key: string; name: string; def: MetadataFieldDefinition }[] = [];
     for (const k of keys) {
       const def = schema?.fields?.[k];
-      if (!def || def.hidden) continue;
-      out.push({ key: k, name: def.name ?? k, def });
+      if (!def || effectiveFieldHidden(schema, anchor, k)) continue;
+      out.push({ key: k, name: effectiveFieldLabel(schema, anchor, k), def });
     }
     out.sort((a, b) => {
-      const ai = INTRINSIC_FIELD_KEYS.has(a.key);
-      const bi = INTRINSIC_FIELD_KEYS.has(b.key);
+      // Intrinsics lead — the resolver-stamped category is the signal.
+      const ai = a.def.category === "intrinsic";
+      const bi = b.def.category === "intrinsic";
       if (ai !== bi) return ai ? -1 : 1;
       return a.name.localeCompare(b.name);
     });

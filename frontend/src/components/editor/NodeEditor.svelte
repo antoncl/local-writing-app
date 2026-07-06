@@ -808,11 +808,10 @@
   // entry-type the component first mounted with. The single derivation
   // tracks both deps explicitly.
   //
-  // `color` is filtered out because the dedicated SwatchPicker in the
-  // metadata-color-row above already edits metadata.color — letting the
-  // generic field switch render it too would produce a duplicate
-  // (untyped text input) row.
-  let metadataFieldIds = $derived(((metadataSchema?.entry_types[entryType] ?? metadataSchema?.entry_types[defaultEntryType()])?.fields ?? []).filter((fieldId) => fieldId !== "color"));
+  // `color` is no longer filtered (ADR-0029 §G): the color-row hoist is gone,
+  // so color flows through the generic rail loop like any field and renders at
+  // its display_order slot via MetadataPanel's `type === "color"` branch.
+  let metadataFieldIds = $derived((metadataSchema?.entry_types[entryType] ?? metadataSchema?.entry_types[defaultEntryType()])?.fields ?? []);
   let hasBody = $derived(bodyShape !== "none");
   $effect.pre(() => {
     if (titleReload && titleReload.token !== lastTitleReloadToken) {

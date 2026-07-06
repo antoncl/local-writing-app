@@ -54,7 +54,7 @@ chapter, scene, plus anything you subclass from it later):
 ```yaml
 version: 1
 entry_types:
-  manuscript_structure:
+  scene:base:
     display_template: "{number}. {title}"   # default English
   act:
     display_template: "Akt {number}: {title}"
@@ -81,7 +81,7 @@ stored in the file or in search results.
 
 The schema editor lets you subclass via the "+ type" affordance, but you
 can also do it by hand. A custom container type just needs `kind: scene`
-and `parent: manuscript_structure` (or any other type you want to
+and `parent: scene:base` (or any other type you want to
 inherit from). Inheritance brings the `number`, `summary`, and
 `display_template` along automatically.
 
@@ -95,7 +95,7 @@ entry_types:
   part:
     name: "Part"
     kind: scene
-    parent: manuscript_structure
+    parent: scene:base
     display_template: "Part {number}: {title}"
 ```
 

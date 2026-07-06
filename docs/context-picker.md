@@ -109,7 +109,7 @@ The wire shape of a `context_pick` input as stored in the prompt's YAML:
   target:
     kinds: ["scene"]                  # at least one required
     entry_types:                      # optional, per kind
-      lore: ["character", "place"]
+      lore: ["character", "location"]
     presets: ["full_outline"]         # optional
     multiple: true                    # default true
     allow_target_marking: true        # default false; only when scenes pickable

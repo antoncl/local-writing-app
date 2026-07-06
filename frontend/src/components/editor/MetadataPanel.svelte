@@ -153,10 +153,6 @@
     return isMutated(fieldId) ? (effectiveOverrides?.[fieldId] ?? "") : metadata[fieldId];
   }
 
-  function updateColor(value: string) {
-    onMetadataChange?.({ ...metadata, color: value });
-  }
-
   function updateAssistantProvider(provider: string, tier: string, model: string) {
     onMetadataChange?.({ ...metadata, ai_provider: provider, ai_capability_tier: tier, ai_model: model });
   }
@@ -185,22 +181,6 @@
     </button>
   </div>
 
-  <div class="field-row color-row" class:mutated={isMutated("color")}>
-    <span class="fr-icon"><i class="ti ti-palette" aria-hidden="true"></i></span>
-    <span class="fr-name">Colour{#if isMutated("color")}<span class="fr-mutated-marker" title="Changed by here">⤳</span>{/if}</span>
-    <span class="fr-val">
-      <SwatchPicker
-        value={metadataValueString(displayValue("color")) || null}
-        {readOnly}
-        onChange={(id) => updateColor(id ?? "")}
-      />
-      {#if !metadataValueString(displayValue("color"))}
-        {@const inherited = metadataSchema.entry_types[entryType]?.color}
-        <small class="muted">{inherited ? `inherits ${inherited}` : "type / kind default"}</small>
-      {/if}
-    </span>
-  </div>
-
   {#if documentKind === "assistant"}
     <div class="rail-assistant">
       <ProviderTierPicker
@@ -227,7 +207,7 @@
       {#if metadataSchema.fields[fieldId] && !metadataSchema.fields[fieldId].intrinsic && !effectiveFieldHidden(metadataSchema, entryType, fieldId)}
         {@const field = metadataSchema.fields[fieldId]}
         {@const fieldLabel = effectiveFieldLabel(metadataSchema, entryType, fieldId)}
-        <div class="field-row" class:wide={isWide(field)} class:inherited={isInherited(fieldId)} class:mutated={isMutated(fieldId)}>
+        <div class="field-row" class:color-row={field.type === "color"} class:wide={isWide(field)} class:inherited={isInherited(fieldId)} class:mutated={isMutated(fieldId)}>
           <span class="fr-icon"><i class={fieldIconClass(field)} aria-hidden="true"></i></span>
           <span class="fr-name">{fieldLabel}{#if isMutated(fieldId)}<span class="fr-mutated-marker" title="Changed by here">⤳</span>{/if}</span>
           <div class="fr-val">
@@ -243,6 +223,19 @@
               />
             {:else if field.type === "computed"}
               <span class="fr-computed">{computedFieldString(fieldId)}<i class="ti ti-lock" aria-hidden="true"></i></span>
+            {:else if field.type === "color"}
+              <!-- Color renders at its display_order slot like any field
+                   (ADR-0029 §G) — the hoist is gone. The swatch + the
+                   inherited-default hint (type/kind fallback) live inline. -->
+              <SwatchPicker
+                value={metadataValueString(displayValue(fieldId)) || null}
+                {readOnly}
+                onChange={(id) => onMetadataChange?.({ ...metadata, [fieldId]: id ?? "" })}
+              />
+              {#if !metadataValueString(displayValue(fieldId))}
+                {@const inherited = metadataSchema.entry_types[entryType]?.color}
+                <small class="muted">{inherited ? `inherits ${inherited}` : "type / kind default"}</small>
+              {/if}
             {:else}
               <FieldValueEditor
                 {field}

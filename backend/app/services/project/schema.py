@@ -202,8 +202,13 @@ class MetadataSchemaMixin:
 
         overview = self.read_metadata_schema_overview()
         source = overview.entry_type_sources.get(entry_type_id)
-        if source and source.built_in:
-            raise ProjectServiceError("System node types cannot be edited.", 422)
+        # ADR-0029 §A: a layer may EXTEND/OVERLAY a built-in type — the guard is
+        # narrowed from a blanket wall to blocking only DECLARATION rewrites.
+        # A built-in write persists overlay-safe data (fields it extends, color,
+        # body/display settings, group applications, field overrides); the
+        # shipped `name`/`kind`/`parent`/`abstract` declaration is stripped
+        # before write (below), so the built-in can never be forked.
+        entry_type_built_in = bool(source and source.built_in)
 
         layer_data = self._read_yaml(layer_path) if layer_path.exists() else self._empty_metadata_schema()
         entry_types = layer_data.get("entry_types")
@@ -238,7 +243,28 @@ class MetadataSchemaMixin:
             existing_prompt = existing_entry_type.get("prompt")
             if isinstance(existing_prompt, dict):
                 entry_type_data["prompt"] = deepcopy(existing_prompt)
-        entry_types[entry_type_id] = entry_type_data
+        if entry_type_built_in:
+            # Overlay-only for a built-in (ADR-0029 §A): never persist the
+            # shipped declaration — `name`/`kind`/`parent`/`abstract` stay
+            # inherited from the built-in. Membership keeps only the fields
+            # that EXTEND the built-in, so inherited/intrinsic keys aren't
+            # pinned literally into the layer (the resolver re-injects them).
+            for declaration_key in ("name", "kind", "parent", "abstract"):
+                entry_type_data.pop(declaration_key, None)
+            builtin_members = set(schema.entry_types[entry_type_id].fields)
+            entry_type_data["fields"] = [
+                field for field in entry_type_data.get("fields", []) if field not in builtin_members
+            ]
+        # Don't leave a source-flipping stub for a built-in: if the overlay
+        # carries nothing but an empty membership, drop the entry rather than
+        # writing `<type>: {}` (which would report the built-in as
+        # layer-sourced) — same reasoning as `set_metadata_field_override`.
+        if entry_type_built_in and not entry_type_data.get("fields") and not (
+            set(entry_type_data) - {"fields"}
+        ):
+            entry_types.pop(entry_type_id, None)
+        else:
+            entry_types[entry_type_id] = entry_type_data
         layer_data["entry_types"] = entry_types
 
         candidate = deepcopy(DEFAULT_METADATA_SCHEMA)
@@ -369,10 +395,9 @@ class MetadataSchemaMixin:
         schema = self.read_metadata_schema()
         if entry_type_id not in schema.entry_types:
             raise ProjectServiceError(f"Unknown node type {entry_type_id}.", 404)
-        overview = self.read_metadata_schema_overview()
-        source = overview.entry_type_sources.get(entry_type_id)
-        if source and source.built_in:
-            raise ProjectServiceError("System node types cannot be edited.", 422)
+        # No built-in guard (ADR-0029 §A): group applications are a pure
+        # per-layer overlay that never rewrites the built-in declaration —
+        # same reasoning as `set_metadata_field_override`.
         layer_data = self._read_yaml(layer_path) if layer_path.exists() else self._empty_metadata_schema()
         entry_types = layer_data.get("entry_types")
         if not isinstance(entry_types, dict):
@@ -399,10 +424,9 @@ class MetadataSchemaMixin:
         definition = schema.entry_types.get(entry_type_id)
         if definition is None:
             raise ProjectServiceError(f"Unknown node type {entry_type_id}.", 404)
-        overview = self.read_metadata_schema_overview()
-        source = overview.entry_type_sources.get(entry_type_id)
-        if source and source.built_in:
-            raise ProjectServiceError("System node types cannot be edited.", 422)
+        # No built-in guard (ADR-0029 §A): display order is a pure per-layer
+        # overlay that never rewrites the built-in declaration — same reasoning
+        # as `set_metadata_field_override`.
         # Display order references the type's resolved membership (own +
         # inherited + generated). It may be a subset — listed fields lead in this
         # sequence, the rest trail in resolved order (#89) — but every id must be
@@ -1088,6 +1112,11 @@ class MetadataSchemaMixin:
             own_overrides = next_entry_type.get("field_overrides")
             if not isinstance(own_overrides, dict):
                 own_overrides = {}
+            # Own (pre-merge) overrides, mirroring `own_fields`/`own_color`
+            # (ADR-0029 §I). The override editor reads/writes this so editing
+            # one aspect doesn't freeze the inherited other aspect into the
+            # child layer.
+            next_entry_type["own_field_overrides"] = deepcopy(own_overrides)
             merged_overrides: dict[str, dict[str, Any]] = {
                 key: dict(value) for key, value in parent_overrides.items() if isinstance(value, dict)
             }
@@ -1117,6 +1146,23 @@ class MetadataSchemaMixin:
             for generated_key, generated_def in generated_fields.items():
                 schema_fields.setdefault(generated_key, generated_def)
             resolved_data["fields"] = schema_fields
+
+        # Authorship category (ADR-0029 §D): stamp `category` on every resolved
+        # field def as the single source of truth so no surface re-derives it
+        # from scattered booleans. Derived, never stored — `intrinsic` iff the
+        # key is in the canonical set, `computed` iff `type == "computed"`,
+        # else `stored`. INTRINSIC_FIELD_KEYS stays canonical here.
+        schema_fields = resolved_data.get("fields")
+        if isinstance(schema_fields, dict):
+            for field_key, field_def in schema_fields.items():
+                if not isinstance(field_def, dict):
+                    continue
+                if field_key in INTRINSIC_FIELD_KEYS:
+                    field_def["category"] = "intrinsic"
+                elif field_def.get("type") == "computed":
+                    field_def["category"] = "computed"
+                else:
+                    field_def["category"] = "stored"
         return resolved_data
 
     def _merge_metadata_entry_types(self, base: Any, layer: Any) -> Any:

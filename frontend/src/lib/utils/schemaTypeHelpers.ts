@@ -21,10 +21,13 @@ import type {
 // of which have their own schema-type tree.
 export type SchemaKind = "scene" | "lore" | "research" | "prompt" | "assistant" | "project";
 
-// A field's effective display label for a given entry type (#116). A per-type
-// `field_overrides[key].label` wins; otherwise the shared field def's `name`;
-// otherwise the raw key. Pass the resolved schema — overrides are already
-// merged down the parent chain by the backend.
+// A field's effective display label, resolved against an ANCHOR entry type
+// (#116, ADR-0029 §F). A per-type `field_overrides[key].label` on the anchor
+// wins; otherwise the shared field def's `name`; otherwise the raw key. The
+// anchor is the caller's choice: the rail / schema editor / NodeEditor pass the
+// node's own `entry_type`; the kind-anchored Views picker passes the kind root
+// (`kindRootEntryTypeId`), where cross-type conventions live. Overrides are
+// already merged down the parent chain by the backend.
 export function effectiveFieldLabel(
   schema: MetadataSchema | null,
   entryTypeId: string | null | undefined,
@@ -36,9 +39,10 @@ export function effectiveFieldLabel(
   return schema?.fields?.[fieldKey]?.name ?? fieldKey;
 }
 
-// Whether a field is hidden for a given entry type (#116). A per-type
-// `field_overrides[key].hidden` (true OR false) wins over the field def's
-// `hidden` default — so a type can un-hide a def-hidden field (e.g. `id`).
+// Whether a field is hidden, resolved against an ANCHOR entry type (#116,
+// ADR-0029 §F — see `effectiveFieldLabel` for the anchor convention). A
+// per-type `field_overrides[key].hidden` (true OR false) wins over the field
+// def's `hidden` default — so a type can un-hide a def-hidden field (e.g. `id`).
 export function effectiveFieldHidden(
   schema: MetadataSchema | null,
   entryTypeId: string | null | undefined,
@@ -47,6 +51,26 @@ export function effectiveFieldHidden(
   const override = entryTypeId ? schema?.entry_types?.[entryTypeId]?.field_overrides?.[fieldKey] : undefined;
   if (override && typeof override.hidden === "boolean") return override.hidden;
   return Boolean(schema?.fields?.[fieldKey]?.hidden);
+}
+
+// The kind's root entry type — the anchor a kind-scoped surface (the Views
+// picker) resolves per-type overrides against (ADR-0029 §F). Prefers the
+// canonical `<kind>:base` abstract root (where built-in cross-type conventions
+// like lore's `title → "Name"` sit); falls back to any type of the kind with no
+// same-kind parent. Returns null if the kind has no types.
+export function kindRootEntryTypeId(
+  schema: MetadataSchema | null,
+  kind: string,
+): string | null {
+  const entryTypes = schema?.entry_types ?? {};
+  const canonical = `${kind}:base`;
+  if (entryTypes[canonical]) return canonical;
+  for (const [typeId, definition] of Object.entries(entryTypes)) {
+    if (definition.kind !== kind) continue;
+    const parent = definition.parent;
+    if (!parent || entryTypes[parent]?.kind !== kind) return typeId;
+  }
+  return null;
 }
 
 // Slugify a free-text label into a stable field/type id.

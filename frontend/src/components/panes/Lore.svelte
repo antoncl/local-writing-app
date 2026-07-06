@@ -32,8 +32,6 @@
   $: focusedDocument = $focusedDocumentStore;
   // Open an entry in an editor pane (App owns the pane set).
   export let onOpenEntry: (entryId: string) => void;
-  // Migrate a lore note into the Research tree (App owns the confirm flow).
-  export let onMoveNoteToResearch: (entry: LoreEntrySummary) => void;
 
   // Pane-local UI state — search + per-group collapse. Never escapes the
   // component (collapse here, unlike the manuscript tree, isn't persisted).
@@ -188,16 +186,5 @@
     stripeColor={stripeFor(entry)}
     onClick={() => onOpenEntry(entry.id)}
     onmousedown={(event) => event.stopPropagation()}
-  >
-    {#snippet trailing()}
-      {#if entry.entry_type === "lore:lore_note"}
-        <button
-          class="row-action-add"
-          type="button"
-          title="Move to Research"
-          on:click|stopPropagation={() => onMoveNoteToResearch(entry)}
-        >→R</button>
-      {/if}
-    {/snippet}
-  </NodeRow>
+  />
 {/snippet}

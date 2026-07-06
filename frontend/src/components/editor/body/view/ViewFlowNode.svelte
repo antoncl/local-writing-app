@@ -429,7 +429,7 @@
           <button class="hbtn del" title="Remove group" aria-label="Remove group" disabled={handles.length <= 1} onclick={() => removeHandle(h.id)}>×</button>
         </div>
       {/each}
-      <button class="add-handle" type="button" onclick={addHandle}>+ Group</button>
+      <button class="add-handle" type="button" title="Add handle group" aria-label="Add handle group" onclick={addHandle}>+</button>
     </div>
   {/if}
 

@@ -107,6 +107,7 @@
       type="button"
       class="search-input-clear"
       title="Clear search (Esc)"
+      aria-label="Clear search"
       tabindex="-1"
       on:click={clearValue}
     >×</button>

@@ -164,20 +164,44 @@ lexicon grows by PR, never ad hoc:
 
 | glyph | meaning — everywhere |
 |---|---|
-| `+` | add / create (context supplies *what*) |
+| `+` | add / create (context supplies *what* — see the anchor rule) |
 | `×` | remove / close |
 | `⋯` | more actions (menu) |
 | `⋮⋮` | drag handle |
 | `✎` | rename / edit in place |
-| `★` | pin (gold when active — the one gold) |
+| `★` | designated / bound — the marked one of a set (gold when active — the one gold) |
 | `▸ / ▾` | collapse / expand |
 | `⌕` | search |
+| `⚙` | settings |
+| `◐ / ☀ / ☾` | theme cycle (system / light / dark — stateful) |
+| `▤` | view — a rendered arrangement of the node set (Views switcher) |
 
 Every glyph control carries an `aria-label` and a tooltip — the tooltip is the
 word. Compounds (`+>`) stay banned: if no single lexicon glyph is self-evident
 for an action, it takes a word until one is agreed and added here. Words remain
 the default for primary/destructive dialog actions (`Save`, `Delete`) where a
 misread is expensive.
+
+**The `+` anchor rule.** `+` is glyph-only when it sits in a **labeled container
+that names the thing** — a rail, list, or section header supplies the *what*.
+It keeps its **word** when it is a **menu item** (`New view…`, `Open folder…` —
+a dropdown is a list of worded actions) or a **floating/anchorless** button.
+Where two `+` actions would compete on one surface (e.g. *add sub-type* and
+*add field* on the same row), that is the smell to **split into their own
+labeled contexts**, not to disambiguate with words — each `+` then anchors under
+a header that names it. (The schema tree does this: the type tree's row `+` adds
+a sub-type; field creation lives under the type editor's *Fields* header.)
+
+**Adaptive stateful selectors.** A control that displays *which state is active*
+shows a **quiet glyph when idle/default** and the **state's name when a
+meaningful state is active** — never glyph-only-with-tooltip, which hides live
+state behind a hover. The Views switcher is canonical: `▤` alone on *Default
+view*, the view's name (+ an active tint) once a real view is applied.
+
+**Domain toolbars are a sanctioned exception.** Where an action carries
+information no lexicon glyph can (table cell alignment `⟵ ↔ ⟶`, directional
+row/column inserts), a self-contained domain toolbar keeps its own marks rather
+than forcing them into the global lexicon.
 
 **Caps-labels** (rail sections, `TITLE`, fine print): one recipe —
 `--fs-xs`, `--w-semibold`, `letter-spacing: 0.07em`, `text-transform:

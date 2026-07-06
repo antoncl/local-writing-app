@@ -59,14 +59,20 @@
   <button
     class="pin-button view-switcher-trigger"
     class:active={open}
+    class:has-view={!!selectedId}
     type="button"
     title="Switch view"
+    aria-label={selectedId ? `Current view: ${currentLabel}` : "Switch view"}
     aria-haspopup="listbox"
     aria-expanded={open}
     onmousedown={(event) => event.stopPropagation()}
     onclick={toggle}
   >
-    <span class="view-switcher-label">{currentLabel}</span>
+    {#if selectedId}
+      <span class="view-switcher-label">{currentLabel}</span>
+    {:else}
+      <span class="view-switcher-glyph" aria-hidden="true">▤</span>
+    {/if}
     <span class="view-switcher-caret" aria-hidden="true">▾</span>
   </button>
   {#if open}
@@ -102,7 +108,7 @@
       {/each}
       <div class="view-switcher-divider"></div>
       <button class="view-switcher-item view-switcher-new" type="button" onclick={newView}>
-        <span class="view-switcher-check">＋</span>
+        <span class="view-switcher-check">+</span>
         <span class="view-switcher-item-label">New view…</span>
       </button>
     </div>
@@ -126,6 +132,18 @@
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
+  }
+
+  .view-switcher-glyph {
+    font-size: var(--fs-md);
+    opacity: 0.75;
+    line-height: 1;
+  }
+
+  /* A real (non-default) view is active — tint the name so the switcher
+     announces state; the idle default shows only the quiet ▤ glyph. */
+  .view-switcher-trigger.has-view .view-switcher-label {
+    color: var(--accent-strong);
   }
 
   .view-switcher-caret {

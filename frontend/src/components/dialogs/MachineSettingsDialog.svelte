@@ -151,13 +151,14 @@
                 type="button"
                 class="palette-row-btn palette-row-delete"
                 title="Delete swatch"
+                aria-label="Delete swatch"
                 on:click={() => paletteRemoveSwatch(i)}
               >×</button>
             </span>
           </div>
         {/each}
         <div class="palette-add-row">
-          <button type="button" on:click={paletteAddSwatch}>+ Add color</button>
+          <button type="button" title="Add color" aria-label="Add color" on:click={paletteAddSwatch}>+</button>
         </div>
       </section>
 

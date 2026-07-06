@@ -41,17 +41,17 @@
     {:else if error && !suggestionId}
       <span class="ai-toolbar-status">⚠ {error}</span>
       <button type="button" class="ai-toolbar-btn" onmousedown={(e) => { e.preventDefault(); onDismissError(); }} title="Dismiss">
-        <span aria-hidden="true">✕</span> Dismiss
+        Dismiss
       </button>
     {:else if suggestionId}
       <button type="button" class="ai-toolbar-btn ai-toolbar-accept" onmousedown={(e) => { e.preventDefault(); onAccept(); }} title="Accept (keep the text)">
-        <span aria-hidden="true">✓</span> Accept
+        Accept
       </button>
       <button type="button" class="ai-toolbar-btn" onmousedown={(e) => { e.preventDefault(); onRetry(); }} title="Retry (regenerate)" disabled={generating}>
-        <span aria-hidden="true">↻</span> Retry
+        Retry
       </button>
       <button type="button" class="ai-toolbar-btn ai-toolbar-discard" onmousedown={(e) => { e.preventDefault(); onDiscard(); }} title="Discard (delete the text)">
-        <span aria-hidden="true">✕</span> Discard
+        Discard
       </button>
       {#if meta}
         <span class="ai-toolbar-meta">

@@ -60,7 +60,7 @@
     </NodeRow>
   {/each}
   {#snippet whenEmpty()}
-    <p class="muted">No chats yet. Click + New Chat to start one.</p>
+    <p class="muted">No chats yet. Click + to start one.</p>
   {/snippet}
 </NodeList>
 

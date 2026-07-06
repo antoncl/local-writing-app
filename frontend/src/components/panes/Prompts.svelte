@@ -88,7 +88,7 @@
     {/snippet}
     {#snippet trailing()}
       <CountPill count={subtypeEntries.length} />
-      <button class="pin-button" type="button" on:click|stopPropagation={() => onNewEntry(node.id)}>+ Entry</button>
+      <button class="pin-button" type="button" title="Add prompt" aria-label="Add prompt" on:click|stopPropagation={() => onNewEntry(node.id)}>+</button>
     {/snippet}
     {#snippet nested()}
       {#each subtypeEntries as entry (entry.id)}

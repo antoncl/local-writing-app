@@ -725,9 +725,10 @@
           class="pin-button"
           type="button"
           title="Add entry"
+          aria-label="Add entry"
           onmousedown={(event) => event.stopPropagation()}
           onclick={(event) => treeActions.toggleAddMenu(LORE_ADD_MENU_KEY, event)}
-        >+ Entry</button>
+        >+</button>
         {#if treeActions.addMenuOpenFor === LORE_ADD_MENU_KEY}
           <div
             class="row-add-popover"
@@ -756,7 +757,6 @@
         viewSpec={loreViewSpec}
         presentation={loreViewPresentation}
         onOpenEntry={(id) => editorPanes.openLore(id)}
-        onMoveNoteToResearch={(entry) => treeActions.requestMoveLoreNoteToResearch(entry)}
       />
     </div>
   {/snippet}
@@ -789,7 +789,7 @@
   {/snippet}
 
   {#snippet mutationsActions()}
-    <button class="pin-button" type="button" title="New mutation set" onmousedown={(event) => event.stopPropagation()} onclick={() => mutationsPane?.openNew()}>+ New set</button>
+    <button class="pin-button" type="button" title="New mutation set" aria-label="New mutation set" onmousedown={(event) => event.stopPropagation()} onclick={() => mutationsPane?.openNew()}>+</button>
   {/snippet}
   {#snippet mutationsBody()}
     <div class="pane-content schema-list">
@@ -806,7 +806,7 @@
 
   {#snippet assistantsActions()}
       <ViewSwitcher kind="assistant" />
-      <button class="pin-button" type="button" title="Add assistant" onmousedown={(event) => event.stopPropagation()} onclick={() => treeActions.newAssistantEntry()}>+ Assistant</button>
+      <button class="pin-button" type="button" title="Add assistant" aria-label="Add assistant" onmousedown={(event) => event.stopPropagation()} onclick={() => treeActions.newAssistantEntry()}>+</button>
       <button class="pin-button" type="button" title="Assistant tag colors" onmousedown={(event) => event.stopPropagation()} onclick={() => (assistantTagManagerOpen = true)}>Tags…</button>
   {/snippet}
   {#snippet assistantsBody()}
@@ -815,7 +815,6 @@
         entries={assistantEntries}
         viewSpec={assistantViewSpec}
         presentation={assistantViewPresentation}
-        defaultAssistantId={defaultAssistantId}
         onOpenEntry={(id) => editorPanes.openAssistant(id)}
         onReorder={reorderAssistantsInLayer}
       />
@@ -823,7 +822,7 @@
   {/snippet}
 
   {#snippet chatsActions()}
-    <button class="pin-button" type="button" title="Start a new chat" onmousedown={(event) => event.stopPropagation()} onclick={() => chatSessions.createNewChatSession()}>+ New Chat</button>
+    <button class="pin-button" type="button" title="Start a new chat" aria-label="Start a new chat" onmousedown={(event) => event.stopPropagation()} onclick={() => chatSessions.createNewChatSession()}>+</button>
   {/snippet}
   {#snippet chatsBody()}
     <div class="pane-content schema-list">

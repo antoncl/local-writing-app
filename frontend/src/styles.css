@@ -1041,8 +1041,6 @@ button.row-action-add.active {
 /* .assistant-drag-handle* co-located into Assistants.svelte (#14);
    dead .assistant-row-wrap* rules dropped (wrapper replaced by NodeRow drag props). */
 
-/* .row-default-marker co-located into Assistants.svelte (#14). */
-
 /* .chat-session-preset / .chat-session-cost co-located into Chats.svelte (#14). */
 
 .editor-pane .hidden {

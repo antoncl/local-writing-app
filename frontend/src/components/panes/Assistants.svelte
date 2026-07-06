@@ -30,9 +30,6 @@
   $: schema = $metadataSchemaStore;
   // Active-row highlight + pin-star read from the editor-focus store, not props (#14 Step 2).
   $: focusedDocument = $focusedDocumentStore;
-  // App resolves the default-assistant id (it's also read by the chat pane), so
-  // it's passed in rather than recomputed here.
-  export let defaultAssistantId: string;
   // Open an assistant in an editor pane (App owns the pane set).
   export let onOpenEntry: (entryId: string) => void;
   // Persist a within-layer reorder. App owns assistantEntries (shared with the
@@ -198,7 +195,7 @@
     row={assistantRow}
   />
   {#snippet whenEmpty()}
-    <p class="muted">No assistants defined yet. Click + Assistant to create one in the machine layer.</p>
+    <p class="muted">No assistants defined yet. Click + to create one in the machine layer.</p>
   {/snippet}
 </NodeList>
 
@@ -236,11 +233,6 @@
     {#snippet detailSlot()}
       <small>{assistantSubtitle(entry)}</small>
     {/snippet}
-    {#snippet trailing()}
-      {#if entry.id === defaultAssistantId}
-        <span class="row-default-marker" aria-label="Default assistant" title="Default assistant">★ default</span>
-      {/if}
-    {/snippet}
   </NodeRow>
 {/snippet}
 
@@ -263,19 +255,4 @@
     cursor: grabbing;
   }
 
-  /* Trailing-slot marker that names the row as the resolved default
-     (e.g. the assistant returned by defaultAssistantEntryId()). One
-     per list at most — driven by the *resolved* default, not the
-     per-entry is_default field, so it can't disagree with itself. */
-  .row-default-marker {
-    display: inline-flex;
-    align-items: center;
-    padding: 2px 9px;
-    border-radius: 999px;
-    background: var(--accent-soft);
-    color: var(--accent-emphasis);
-    font-size: var(--fs-xs);
-    font-weight: 700;
-    white-space: nowrap;
-  }
 </style>

@@ -386,7 +386,7 @@
   <h3>{sectionLabel}</h3>
   <div class="tree-add-controls">
     <div class="tree-menu-anchor">
-      <button class="row-action-add section-add-button" class:active={addMenuOpenFor === config.rootAddMenuKey} title="Add at root" on:click={(event) => onToggleAddMenu(config.rootAddMenuKey, event)}>+&gt;</button>
+      <button class="row-action-add section-add-button" class:active={addMenuOpenFor === config.rootAddMenuKey} title="Add at root" aria-label="Add at root" on:click={(event) => onToggleAddMenu(config.rootAddMenuKey, event)}>+</button>
       {#if addMenuOpenFor === config.rootAddMenuKey}
         <div class="row-add-popover" style={addMenuPosition ? `top: ${addMenuPosition.top}px; right: ${addMenuPosition.right}px` : ""}>
           <span class="row-add-popover-heading">Add at root</span>
@@ -543,7 +543,7 @@
       {#snippet trailing()}
         <CountPill count={childNodes.length} />
         <div class="tree-menu-anchor">
-          <button class="row-action-add" class:active={addMenuOpenFor === node.id} title="Add child" on:click|stopPropagation={(event) => onToggleAddMenu(node.id, event)}>+&gt;</button>
+          <button class="row-action-add" class:active={addMenuOpenFor === node.id} title="Add child" aria-label="Add child" on:click|stopPropagation={(event) => onToggleAddMenu(node.id, event)}>+</button>
           {#if addMenuOpenFor === node.id}
             <div class="row-add-popover" style={addMenuPosition ? `top: ${addMenuPosition.top}px; right: ${addMenuPosition.right}px` : ""}>
               <span class="row-add-popover-heading">Add child</span>

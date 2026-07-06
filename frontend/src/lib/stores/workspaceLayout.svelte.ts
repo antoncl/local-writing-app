@@ -1,7 +1,7 @@
 // Tiled workspace shell (#32) — owns the split-tree that tiles every region and
-// editor document edge to edge. Replaces the floating-MDI geometry that used to
-// live in paneLayout.svelte.ts (absolute x/y/width/height/z + document-level
-// drag/resize of free-floating boxes). Here nothing floats, overlaps, or
+// editor document edge to edge. Replaces the old floating-MDI geometry (absolute
+// x/y/width/height/z + document-level drag/resize of free-floating boxes; the
+// paneLayout shim that held it is gone, #157). Here nothing floats, overlaps, or
 // cascades: the tree fills the workspace, splitters resize siblings, and panels
 // stack as tabs (design-language §4, surface taxonomy).
 //

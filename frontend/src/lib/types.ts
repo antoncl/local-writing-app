@@ -1,22 +1,9 @@
-// Floating-pane window-manager types, owned by lib/stores/paneLayout. PaneId is
-// the open-set of pane keys (the fixed singletons plus dynamic `editor_*` ids);
-// PaneState is one pane's position/size/z-order.
-export type PaneId = "project" | "outline" | "lore" | "todo" | "search" | string;
-
-export type PaneState = {
-  title: string;
-  x: number;
-  y: number;
-  width: number;
-  height: number;
-  z: number;
-};
-
 // --- Tiled workspace shell (#32) ------------------------------------------
-// The MDI floating panes above are being replaced by a tiled split-tree. A
-// PanelId names a piece of content shown as a tab — a fixed region ("lore") or
-// an editor document ("editor_1"). The layout is a tree: Split nodes tile their
-// children with splitters; TabGroup leaves stack panels as tabs.
+// A PanelId names a piece of content shown as a tab — a fixed region ("lore")
+// or an editor document ("editor_1"). The layout is a tree: Split nodes tile
+// their children with splitters; TabGroup leaves stack panels as tabs.
+// (The former floating-MDI PaneId/PaneState geometry types are gone with the
+// paneLayout shim — #157.)
 export type PanelId = string;
 
 export type TabGroup = {

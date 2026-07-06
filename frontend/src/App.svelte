@@ -73,7 +73,6 @@
   import NodeList from "@/components/widgets/NodeList.svelte";
   import NodeRow from "@/components/widgets/NodeRow.svelte";
   import { focusedDocumentStore } from "@/lib/stores/editorFocus";
-  import { paneLayout } from "@/lib/stores/paneLayout.svelte";
   import { workspaceLayout, isEditorPanelId } from "@/lib/stores/workspaceLayout.svelte";
   import { type PresetName } from "@/lib/stores/workspaceLayout.serialize";
   import { layoutPresets } from "@/lib/stores/layoutPresets.svelte";
@@ -155,16 +154,9 @@
   let cleanupThemeWiring: (() => void) | null = null;
 
   onMount(() => {
-    // Raising the focused editor pane must also update focusedEditorPaneId; the
-    // pane-layout controller stays ignorant of editor state and calls back here.
-    // (editorPanes still drives focus through paneLayout.raise; the tiled shell
-    // mirrors focusedEditorPaneId into the active tab via an effect below.)
-    paneLayout.onRaise = (id) => {
-      if (isEditorPanelId(id) && editorPanes.panes.some((pane) => pane.id === id)) {
-        editorPanes.focusedEditorPaneId = id;
-      }
-    };
-    // Clicking a tab in the tiled shell focuses that document too.
+    // Clicking a tab in the tiled shell focuses that document; editorPanes sets
+    // focusedEditorPaneId directly when it opens/raises a pane, and the effect
+    // below mirrors that into the active tab.
     workspaceLayout.onFocusPanel = (id) => {
       if (isEditorPanelId(id) && editorPanes.panes.some((pane) => pane.id === id)) {
         editorPanes.focusedEditorPaneId = id;
@@ -233,7 +225,6 @@
     // so colored chips + suggestions are ready before a project opens (#88).
     void refreshAssistantTags();
     return () => {
-      paneLayout.dispose();
       editorPanes.dispose();
       document.removeEventListener("mousedown", handleDocumentMousedown);
       cleanupThemeWiring?.();

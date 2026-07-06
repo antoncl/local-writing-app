@@ -20,7 +20,6 @@
 // rune fields is correct and idiomatic (mirrors the other rune controllers). Not a writable
 // store — a controller with traceable methods (see docs/frontend-architecture.md).
 
-import { tick } from "svelte";
 import { get } from "svelte/store";
 import { api } from "@/lib/api";
 import { refreshAssistantTags } from "@/lib/stores/assistantTags";

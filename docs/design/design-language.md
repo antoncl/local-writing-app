@@ -165,6 +165,7 @@ lexicon grows by PR, never ad hoc:
 | glyph | meaning — everywhere |
 |---|---|
 | `+` | add / create (context supplies *what* — see the anchor rule) |
+| `⇄` | replace / swap a single bound value (a labelled single-value reference field — append is `+`, this is *rebind*) |
 | `×` | remove / close |
 | `⋯` | more actions (menu) |
 | `⋮⋮` | drag handle |

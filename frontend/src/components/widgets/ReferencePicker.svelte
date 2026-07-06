@@ -185,7 +185,8 @@
             config={pickerConfig}
             value={selectedRefs.filter((r) => !r.missing)}
             excludeIds={pickerExcludeIds}
-            label={multi || selectedRefs.length === 0 ? "Add" : "Change"}
+            affordance={multi || selectedRefs.length === 0 ? "add" : "change"}
+            label={ariaLabel}
             structure={structure}
             researchStructure={researchStructure}
             loreEntries={loreEntries}

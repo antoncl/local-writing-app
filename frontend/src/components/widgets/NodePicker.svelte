@@ -41,6 +41,17 @@
   export let config: NodePickerConfig = {};
   export let value: NodePickerRef[] = [];
   export let label: string = "Context";
+  // Glyph-first trigger (opt-in, #163). When set, the add button renders a
+  // bare lexicon glyph instead of a `+ word` compound — anchored by a labelled
+  // host (the metadata rail's field row supplies the *what*). `"add"` → `+`
+  // (append), `"change"` → `⇄` (replace a single bound value; the swap glyph
+  // added to the lexicon in design-language.md §4). `null` keeps the legacy
+  // `+ label` word form used by the context-picker, whose host is less clearly
+  // labelled. `label` is reused as the aria/tooltip subject in glyph mode.
+  export let affordance: "add" | "change" | null = null;
+  $: affordanceVerb = affordance === "change" ? "Change" : "Add";
+  $: affordanceGlyph = affordance === "change" ? "⇄" : "+";
+  $: affordanceAria = label && label !== "Context" ? `${affordanceVerb} ${label}` : affordanceVerb;
   export let structure: StructureDocument | null = null;
   // Research tree, sibling to `structure`. Same shape — used to enumerate
   // research notes (leaves only; topics are organizational containers
@@ -545,12 +556,19 @@
         bind:this={triggerEl}
         type="button"
         class="ctx-add"
+        class:ctx-add-glyph={affordance}
         aria-haspopup="menu"
         aria-expanded={open}
+        aria-label={affordance ? affordanceAria : undefined}
+        title={affordance ? affordanceAria : undefined}
         on:click={toggle}
       >
-        <span class="ctx-add-plus" aria-hidden="true">+</span>
-        <span class="ctx-add-label">{value.length > 0 ? "Add" : label}</span>
+        {#if affordance}
+          <span class="ctx-add-plus" aria-hidden="true">{affordanceGlyph}</span>
+        {:else}
+          <span class="ctx-add-plus" aria-hidden="true">+</span>
+          <span class="ctx-add-label">{value.length > 0 ? "Add" : label}</span>
+        {/if}
       </button>
 
     {#if open}
@@ -838,6 +856,13 @@
   .ctx-add-plus {
     font-size: var(--fs-md);
     line-height: 1;
+  }
+
+  /* Glyph-only trigger (#163): a lone lexicon glyph, tightened to a
+     square-ish tap target since there's no trailing word to balance it. */
+  .ctx-add-glyph {
+    gap: 0;
+    padding: 4px 8px;
   }
 
   .compact .ctx-add {

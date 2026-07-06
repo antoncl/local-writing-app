@@ -3,7 +3,7 @@
 // list, the last-opened-project persistence, and the open/create/rehydrate flow.
 // Extracted from App.svelte (#14 P0).
 //
-// Singleton rune controller (mirrors paneLayout / confirmService / projectChooser):
+// Singleton rune controller (mirrors confirmService / projectChooser):
 // one app shell, one of each, so a module-level instance with rune fields is the
 // idiomatic shape. Not a writable store — traceable methods.
 //

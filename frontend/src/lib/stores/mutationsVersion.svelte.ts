@@ -6,7 +6,7 @@
 // after the edit); readers key their fetch effects on `mutationsVersion.value`
 // so authoring in one pane refreshes an open lore card in another.
 //
-// Rune singleton (mirrors paneLayout/confirmService) rather than a writable so
+// Rune singleton (mirrors confirmService) rather than a writable so
 // .svelte.ts rune modules can read it reactively inside $effect.
 
 class MutationsVersionSignal {

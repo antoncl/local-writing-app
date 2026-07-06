@@ -2,9 +2,10 @@
 // per-pane draft/autosave lifecycle, opening documents into panes, the embedded-
 // TODO bridge, and tearing panes down. Extracted from App.svelte (#14 P0), the
 // last and largest of the god-shell slices. The pure draft *semantics* live in
-// lib/editor-core/editorPaneModel; the *timing* in lib/editor-core/autosave; the
-// pane *geometry* in lib/stores/paneLayout. This controller is the stateful glue
-// that ties those to the api + domain stores.
+// lib/editor-core/editorPaneModel; the *timing* in lib/editor-core/autosave;
+// placement is the tiled workspace's concern (App reconciles panes↔layout into
+// workspaceLayout). This controller is the stateful glue tying those to the api
+// + domain stores.
 //
 // THIS IS THE DATA-LOSS SURFACE. The five autosave invariants must hold:
 //   1. `dirty` is the single source of truth for autosave; `pane.scene` is the
@@ -16,14 +17,13 @@
 //   5. Pin/unpin must not drop drafts or cancel timers incorrectly.
 //
 // Singleton: the app mounts one shell, so a single module-level instance with
-// rune fields is correct and idiomatic (mirrors paneLayout). Not a writable
+// rune fields is correct and idiomatic (mirrors the other rune controllers). Not a writable
 // store — a controller with traceable methods (see docs/frontend-architecture.md).
 
 import { tick } from "svelte";
 import { get } from "svelte/store";
 import { api } from "@/lib/api";
 import { refreshAssistantTags } from "@/lib/stores/assistantTags";
-import { paneLayout } from "@/lib/stores/paneLayout.svelte";
 import { AutosaveScheduler } from "@/lib/editor-core/autosave";
 import {
   type DocumentRef,
@@ -100,6 +100,9 @@ class EditorPanesController {
   // Monotonic token source for metadata-reload signals (plain — not reactive).
   nextMetadataReloadToken = 1;
 
+  // Monotonic id source for editor panes (editor_N ids); reset on project switch.
+  #nextEditorPaneIndex = 1;
+
   // Injected by App (set in onMount): the app-level error/status sinks and the
   // run() wrapper that funnels errors into App's `error`. These keep the
   // controller ignorant of App's UI chrome.
@@ -132,9 +135,9 @@ class EditorPanesController {
     },
   });
 
-  // Reset the editor surface on project switch. Mirrors the original
-  // resetEditorWorkspace exactly: pane geometry is pure UI state (preserved by
-  // paneLayout), only the editor-id counter + per-pane editor state reset.
+  // Reset the editor surface on project switch: clear panes + focus and restart
+  // the editor-pane id counter + per-pane editor state (placement is the tiled
+  // layout's concern, reset separately via workspaceLayout).
   reset(): void {
     this.panes = [];
     this.focusedEditorPaneId = null;
@@ -142,7 +145,7 @@ class EditorPanesController {
     this.metadataReloadsByPane = {};
     this.titleReloadsByPane = {};
     this.activeChatId = null;
-    paneLayout.resetEditorIndex();
+    this.#nextEditorPaneIndex = 1;
   }
 
   // Remove any lingering autosave timers (App unmount / shutdown).
@@ -150,15 +153,8 @@ class EditorPanesController {
     this.#autosave.dispose();
   }
 
-  // Whether a scene's entry type renders a body (some entry types are
-  // title-only). Used to decide auto-fit + the embedded-TODO hint.
-  #sceneEntryHasBody(scene: EditableDocument): boolean {
-    const entryDefinition = get(metadataSchemaStore)?.entry_types[scene.entry_type];
-    return entryDefinition?.has_body ?? true;
-  }
-
   addEditorPane(): EditorPaneState {
-    const id = paneLayout.allocateEditorPane(this.panes.length);
+    const id = `editor_${this.#nextEditorPaneIndex++}`;
     const pane = createEmptyEditorPane(id);
     this.panes = [...this.panes, pane];
     return pane;
@@ -310,7 +306,6 @@ class EditorPanesController {
     this.metadataReloadsByPane = remainingReloads;
     const { [id]: _closedTitleReload, ...remainingTitleReloads } = this.titleReloadsByPane;
     this.titleReloadsByPane = remainingTitleReloads;
-    paneLayout.removePane(id);
     if (this.focusedEditorPaneId === id) {
       this.focusedEditorPaneId = remainingEditorPanes[0]?.id ?? null;
     }
@@ -585,7 +580,6 @@ class EditorPanesController {
   // Focus an already-open pane (if the document is showing) and report it.
   #focusExisting(pane: EditorPaneState, label: string): void {
     this.focusedEditorPaneId = pane.id;
-    paneLayout.raise(pane.id);
     this.setStatus(`Focused ${pane.scene?.title ?? label}`);
   }
 
@@ -627,7 +621,6 @@ class EditorPanesController {
           : pane,
       );
       this.focusedEditorPaneId = targetPane.id;
-      paneLayout.raise(targetPane.id);
       this.setStatus(`Loaded ${node.title}`);
     });
   }
@@ -659,12 +652,7 @@ class EditorPanesController {
         : pane,
     );
     this.focusedEditorPaneId = targetPane.id;
-    paneLayout.raise(targetPane.id);
     this.setStatus(`Loaded ${scene.title}`);
-    if (!this.#sceneEntryHasBody(scene)) {
-      await tick();
-      paneLayout.fitEditorPaneToContent(targetPane.id);
-    }
   }
 
   // Opens a manuscript-tree structure node (Act, Chapter, leaf-Scene-as-
@@ -710,7 +698,6 @@ class EditorPanesController {
         : pane,
     );
     this.focusedEditorPaneId = targetPane.id;
-    paneLayout.raise(targetPane.id);
     this.setStatus(`Loaded ${scene.title}`);
   }
 
@@ -759,7 +746,6 @@ class EditorPanesController {
         : pane,
     );
     this.focusedEditorPaneId = targetPane.id;
-    paneLayout.raise(targetPane.id);
     this.setStatus(`Loaded ${sceneShaped.title}`);
     this.activeChatId = chatId;
   }
@@ -791,7 +777,6 @@ class EditorPanesController {
         : pane,
     );
     this.focusedEditorPaneId = targetPane.id;
-    paneLayout.raise(targetPane.id);
     this.setStatus(`Loaded ${entry.title}`);
   }
 
@@ -821,7 +806,6 @@ class EditorPanesController {
         : pane,
     );
     this.focusedEditorPaneId = targetPane.id;
-    paneLayout.raise(targetPane.id);
     this.setStatus(`Loaded ${entry.title}`);
   }
 
@@ -854,7 +838,6 @@ class EditorPanesController {
         : pane,
     );
     this.focusedEditorPaneId = targetPane.id;
-    paneLayout.raise(targetPane.id);
     this.setStatus(`Loaded ${node.title}`);
   }
 
@@ -919,7 +902,6 @@ class EditorPanesController {
         : pane,
     );
     this.focusedEditorPaneId = targetPane.id;
-    paneLayout.raise(targetPane.id);
     this.setStatus(`Loaded ${entry.title}`);
   }
 
@@ -950,7 +932,6 @@ class EditorPanesController {
         : pane,
     );
     this.focusedEditorPaneId = targetPane.id;
-    paneLayout.raise(targetPane.id);
     this.setStatus(`Loaded ${note.title}`);
   }
 

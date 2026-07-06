@@ -2,7 +2,7 @@
 // the "new project" modal: their UI state, the folder-listing fetch, and the
 // path-derivation logic. Extracted from App.svelte (#14 P0).
 //
-// Singleton rune controller (mirrors paneLayout / confirmService): one app shell
+// Singleton rune controller (mirrors confirmService): one app shell
 // mounts one of each modal, so a module-level instance with rune fields is
 // correct and idiomatic. Not a writable store — traceable methods.
 //

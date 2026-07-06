@@ -2,7 +2,7 @@
 // provider health-check, and the top-bar project-color dot that App used to
 // carry directly. Extracted from App.svelte (#14 P0).
 //
-// Singleton rune controller (mirrors paneLayout / confirmService /
+// Singleton rune controller (mirrors confirmService /
 // projectChooser / projectSession): one app shell, one of each, so a
 // module-level instance with rune fields is the idiomatic shape.
 //

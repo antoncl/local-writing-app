@@ -158,7 +158,7 @@
     </div>
   {/each}
   {#if !readonly}
-    <button class="add-affordance sfi-add-option" type="button" onclick={addOption}>+ Add option</button>
+    <button class="add-affordance sfi-add-option" type="button" title="Add option" aria-label="Add option" onclick={addOption}>+</button>
   {/if}
   {#if showMigrationHint && options.length > 0}
     <p class="sfi-options-hint">

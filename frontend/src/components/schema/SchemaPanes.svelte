@@ -773,7 +773,7 @@
 </script>
 
 {#snippet schemaActions()}
-    <button class="pin-button" type="button" onmousedown={(event) => event.stopPropagation()} onclick={() => createSchemaTypeDraft()}>+ Type</button>
+    <button class="pin-button" type="button" title="Add detail type" aria-label="Add detail type" onmousedown={(event) => event.stopPropagation()} onclick={() => createSchemaTypeDraft()}>+</button>
     <button class="pin-button" type="button" onmousedown={(event) => event.stopPropagation()} onclick={() => (groupsManagerOpen = true)}>Groups…</button>
     <button class="pin-button" type="button" onmousedown={(event) => event.stopPropagation()} onclick={() => onOpenTagsManager()}>Tags…</button>
 {/snippet}
@@ -792,7 +792,6 @@
     onOpenType={openSchemaTypeDetail}
     onStartTypeDrag={startSchemaTypeDrag}
     onDropTypeOnParent={dropSchemaTypeOnParent}
-    onCreateField={createSchemaFieldDraft}
     onDeleteType={requestDeleteSchemaType}
     onOpenField={openSchemaFieldDetail}
   />

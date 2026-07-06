@@ -197,7 +197,7 @@
           </button>
         {/each}
         <div class="gm-foot">
-          <button class="sfi-done" type="button" on:click={openNew}>+ New group</button>
+          <button class="sfi-done" type="button" title="New group" aria-label="New group" on:click={openNew}>+</button>
         </div>
       </div>
     {:else}
@@ -270,7 +270,7 @@
               <button class="link-danger" type="button" on:click={() => removeMember(index)} aria-label="Remove member">✕</button>
             </div>
           {/each}
-          <button class="gm-add-member" type="button" on:click={addMember}>+ Add member</button>
+          <button class="gm-add-member" type="button" title="Add member" aria-label="Add member" on:click={addMember}>+</button>
         </div>
 
         <div class="gm-editor-foot">

@@ -296,12 +296,11 @@
             </form>
           {:else}
             <button type="button" class="switcher-item" role="menuitem" on:click={() => (showSaveField = true)}>
-              <span class="switcher-icon" aria-hidden="true">＋</span>
+              <span class="switcher-icon" aria-hidden="true">+</span>
               Save current as…
             </button>
           {/if}
           <button type="button" class="switcher-item" role="menuitem" on:click={resetLayout}>
-            <span class="switcher-icon" aria-hidden="true">↺</span>
             Reset to default
           </button>
         </div>

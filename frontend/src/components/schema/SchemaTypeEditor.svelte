@@ -519,7 +519,7 @@
       </div>
       {#if !schemaTypeReadonly && expandedSchemaFieldId !== NEW_FIELD_SENTINEL}
         <div class="button-row">
-          <button class="add-affordance" type="button" onclick={() => onCreateFieldDraft(schemaTypeLayerId || projectSchemaLayerId(), selectedSchemaTypeId ?? undefined)}>+ Add field</button>
+          <button class="add-affordance" type="button" title="Add field" aria-label="Add field" onclick={() => onCreateFieldDraft(schemaTypeLayerId || projectSchemaLayerId(), selectedSchemaTypeId ?? undefined)}>+</button>
         </div>
       {/if}
     </section>
@@ -577,7 +577,7 @@
           </div>
         {:else}
           <div class="button-row">
-            <button class="add-affordance" type="button" onclick={() => { groupApplyOpen = true; applyGroupId = availableGroupEntries[0]?.[0] ?? ""; }}>+ Apply group</button>
+            <button class="add-affordance" type="button" title="Apply group" aria-label="Apply group" onclick={() => { groupApplyOpen = true; applyGroupId = availableGroupEntries[0]?.[0] ?? ""; }}>+</button>
           </div>
         {/if}
       </section>

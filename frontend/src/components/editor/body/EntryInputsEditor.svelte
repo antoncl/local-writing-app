@@ -198,7 +198,7 @@
     <small class="entry-inputs-hint">declared on this prompt · use as <code>&lbrace;&lbrace; input.&lt;id&gt; &rbrace;&rbrace;</code></small>
   </summary>
   {#if entryInputDrafts.length === 0}
-    <p class="muted entry-inputs-empty">No inputs yet. Click + Input to declare one.</p>
+    <p class="muted entry-inputs-empty">No inputs yet. Click + to declare one.</p>
   {/if}
   {#each entryInputDrafts as draft, index (draft.clientId)}
     {#if draft.type === "context_pick"}
@@ -341,7 +341,7 @@
     {/if}
   {/each}
   <div class="entry-inputs-add">
-    <button type="button" onclick={addEntryInput}>+ Input</button>
+    <button type="button" title="Add input" aria-label="Add input" onclick={addEntryInput}>+</button>
   </div>
 </details>
 

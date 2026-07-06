@@ -259,7 +259,7 @@
     </div>
   {/each}
   {#if showAdd && onRowAdd}
-    <button type="button" class="mrow-add" onclick={onRowAdd}>+ Add field change</button>
+    <button type="button" class="mrow-add" title="Add field change" aria-label="Add field change" onclick={onRowAdd}>+</button>
   {/if}
 </div>
 

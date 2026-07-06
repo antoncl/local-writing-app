@@ -40,7 +40,6 @@
     onOpenType?: (typeId: string) => void;
     onStartTypeDrag?: (typeId: string) => void;
     onDropTypeOnParent?: (parentTypeId: string) => void;
-    onCreateField?: (layerId: string, entryTypeId: string) => void;
     onDeleteType?: (typeId: string) => void;
     onOpenField?: (fieldId: string, entryTypeId: string) => void;
   }
@@ -59,7 +58,6 @@
     onOpenType = () => {},
     onStartTypeDrag = () => {},
     onDropTypeOnParent = () => {},
-    onCreateField = () => {},
     onDeleteType = () => {},
     onOpenField = () => {},
   }: Props = $props();
@@ -140,8 +138,7 @@
   >
     {#snippet trailing()}
       <CountPill count={childCount} title={`${fieldEntries.length} field${fieldEntries.length === 1 ? "" : "s"}, ${node.children.length} sub-type${node.children.length === 1 ? "" : "s"}`} />
-      <button class="row-action-add" type="button" title={`Add sub-type to ${node.label}`} aria-label={`Add sub-type to ${node.label}`} onclick={() => onCreateType(schemaTypeLayerId || projectSchemaLayerId(), node.id)}>+ Type</button>
-      <button class="row-action-add" type="button" title={`Add field to ${node.label}`} aria-label={`Add field to ${node.label}`} onclick={() => { onOpenType(node.id); onCreateField(schemaTypeLayerId || projectSchemaLayerId(), node.id); }}>+ Field</button>
+      <button class="row-action-add" type="button" title={`Add sub-type to ${node.label}`} aria-label={`Add sub-type to ${node.label}`} onclick={() => onCreateType(schemaTypeLayerId || projectSchemaLayerId(), node.id)}>+</button>
       {#if !typeSource?.built_in}
         <button class="row-action-delete" type="button" title={`Delete ${node.label}`} aria-label={`Delete ${node.label}`} onclick={() => onDeleteType(node.id)}>×</button>
       {/if}

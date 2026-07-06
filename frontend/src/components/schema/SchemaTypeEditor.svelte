@@ -416,18 +416,24 @@
         onRemove={onRemoveField}
       />
     {/snippet}
-    <!-- Per-type override affordances (relabel / hide), shared by own AND
-         inherited rows (ADR-0029 §H): presentation is per-type regardless of
-         where the def is owned. Overrides are a layer overlay the backend
-         allows on built-in types too, so they show even on a readonly type. -->
-    {#snippet fieldOverrideButtons(fieldId: string, field: MetadataFieldDefinition)}
+    <!-- Per-type override affordances, shared by own AND inherited rows
+         (ADR-0029 §H): presentation is per-type regardless of where the def is
+         owned. Overrides are a layer overlay the backend allows on built-in
+         types too, so they show even on a readonly type. `allowHide` is false
+         for intrinsics (title/entry_type/id): their display is routed to the
+         header / type selector, never a rail row, so only RENAME is meaningful
+         — hide has no rail target and reorder no rail position (ADR-0029 §J,
+         corrected). -->
+    {#snippet fieldOverrideButtons(fieldId: string, field: MetadataFieldDefinition, allowHide: boolean)}
       {@const hidden = effectiveFieldHidden(metadataSchema, selectedSchemaTypeId, fieldId)}
       <button class="sfr-ovr" type="button" title={`Rename “${field.name}” for this type`} aria-label={`Rename ${field.name} for this type`} onclick={() => startRename(fieldId)}>
         <i class="ti ti-pencil" aria-hidden="true"></i>
       </button>
-      <button class="sfr-ovr" class:active={hidden} type="button" title={hidden ? "Show in the rail" : "Hide from the rail"} aria-label={hidden ? `Show ${field.name}` : `Hide ${field.name}`} onclick={() => toggleHide(fieldId)}>
-        <i class={hidden ? "ti ti-eye-off" : "ti ti-eye"} aria-hidden="true"></i>
-      </button>
+      {#if allowHide}
+        <button class="sfr-ovr" class:active={hidden} type="button" title={hidden ? "Show in the rail" : "Hide from the rail"} aria-label={hidden ? `Show ${field.name}` : `Hide ${field.name}`} onclick={() => toggleHide(fieldId)}>
+          <i class={hidden ? "ti ti-eye-off" : "ti ti-eye"} aria-hidden="true"></i>
+        </button>
+      {/if}
     {/snippet}
     {#snippet fieldRenameBox(fieldId: string, field: MetadataFieldDefinition)}
       {#if overrideRenamingId === fieldId}
@@ -465,9 +471,12 @@
           {#each section.entries as [fieldId, field]}
             {@const isOwn = ownFieldIds.has(fieldId)}
             {@const isIntrinsic = field.category === "intrinsic" || field.intrinsic}
-            <!-- Group-generated fields move with their group, so they're not
-                 individually draggable / overridable. -->
-            {@const canDrag = fieldsDraggable && !field.group_origin}
+            <!-- Group-generated fields move with their group; intrinsics
+                 (title/entry_type/id) have no rail row, so reorder has no
+                 position to change (ADR-0029 §J, corrected). Neither is
+                 draggable — nor a drop target, so nothing slots above the
+                 pinned intrinsics. -->
+            {@const canDrag = fieldsDraggable && !field.group_origin && !isIntrinsic}
             {@const dropBefore = fieldDropTarget?.id === fieldId && fieldDropTarget?.position === "before"}
             {@const dropAfter = fieldDropTarget?.id === fieldId && fieldDropTarget?.position === "after"}
             {#if isOwn}
@@ -498,7 +507,7 @@
                    buttons render as a sibling bar beneath it (nesting buttons is
                    illegal) rather than in the row's meta cluster. -->
               {#if !field.group_origin}
-                <div class="sfr-own-ovr">{@render fieldOverrideButtons(fieldId, field)}</div>
+                <div class="sfr-own-ovr">{@render fieldOverrideButtons(fieldId, field, true)}</div>
                 {@render fieldRenameBox(fieldId, field)}
               {/if}
               {#if isExpanded}
@@ -516,11 +525,11 @@
                 draggable={canDrag}
                 {dropBefore}
                 {dropAfter}
-                onDragStart={() => onFieldDragStart(fieldId)}
-                onDragOver={(event) => onFieldDragOver(event, fieldId)}
-                onDragLeave={() => { if (fieldDropTarget?.id === fieldId) fieldDropTarget = null; }}
-                onDrop={() => onFieldDrop(fieldId)}
-                onDragEnd={onClearFieldDrag}
+                onDragStart={canDrag ? (() => onFieldDragStart(fieldId)) : undefined}
+                onDragOver={canDrag ? ((event) => onFieldDragOver(event, fieldId)) : undefined}
+                onDragLeave={canDrag ? (() => { if (fieldDropTarget?.id === fieldId) fieldDropTarget = null; }) : undefined}
+                onDrop={canDrag ? (() => onFieldDrop(fieldId)) : undefined}
+                onDragEnd={canDrag ? onClearFieldDrag : undefined}
               >
                 {#snippet meta()}
                   {#if field.group_origin}
@@ -531,10 +540,11 @@
                     <span class="sfr-inherited-label">inherited from {inheritedFromLabel(selectedSchemaTypeId!, fieldId, metadataSchema)}</span>
                   {/if}
                   <!-- Inherited rows are a plain <div>, so the override buttons sit
-                       inline in the meta cluster. Only group-generated fields are
-                       exempt (their def is synthesized, not overridable). -->
+                       inline in the meta cluster. Group-generated fields are exempt
+                       (synthesized def); intrinsics get rename only (no hide — no
+                       rail row to hide), via allowHide=false. -->
                   {#if !field.group_origin}
-                    {@render fieldOverrideButtons(fieldId, field)}
+                    {@render fieldOverrideButtons(fieldId, field, !isIntrinsic)}
                   {/if}
                 {/snippet}
               </SchemaFieldRow>

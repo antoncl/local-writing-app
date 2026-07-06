@@ -1,6 +1,7 @@
 # ADR-0029: The field model — a permissive convenience, categorized by authorship
 
 - Status: Proposed — 0.5.5, 2026-07-05
+- Amendments: **2026-07-06 (#113)** — §C matrix + §J corrected: intrinsics support **relabel only**; `hide`/`reorder` are N/A (their display is a routed identity control, not a rail row).
 - Feature: #118 (unify the field model, then conform) · follows #116 (intrinsic fields + per-type overrides, merged PR #119)
 - Governed by: `memory/decisions_intrinsic_fields_and_overrides.md`,
   `docs/metadata-strategy.md`, `memory/decisions_metadata_revision.md`,
@@ -97,16 +98,24 @@ The operations a field can be subject to, and which categories permit each:
 | **read** (display the value) | ✓ | ✓ | ✓ |
 | **edit value** (author the instance value) | ✓ widget | ✓ identity control | — app-produced |
 | **relabel** (per-type label) | ✓ | ✓ | ✓ |
-| **hide** (per-type visibility) | ✓ | ✓ | ✓ |
-| **reorder** (via `display_order`) | ✓ | ✓ | ✓ |
+| **hide** (per-type visibility) | ✓ | —¹ | ✓ |
+| **reorder** (via `display_order`) | ✓ | —¹ | ✓ |
 | **add / remove on a type** (any type, per §A) | ✓ | — always present | ✓ from catalog |
 | **author the field's definition** | ✓ user-defined defs | — built-in identity | — app owns derivations |
 
-The middle three rows are identical across categories — **relabel, hide, and reorder apply
-to every field the same way.** Only *value editing* and *definition authoring* vary by
-category. Membership (add/remove on a type) is permissive for all three per §A: it is never
-blocked by a type being built-in. This matrix *is* the ADR — each surface consults
-`category` → the row → renders accordingly, instead of re-deriving from scattered booleans.
+¹ **Amendment (2026-07-06, #113):** intrinsics are the exception to the otherwise-uniform
+matrix. Their value is **never rendered as a metadata-rail row** — display is routed to a
+fixed identity control (header / type selector; `id` shows nowhere), so `hide` has no rail
+target and `reorder` no rail position. Only **relabel** is meaningful for an intrinsic (it
+retargets the identity-control label and the Views-picker entry). `id` stays out of the Views
+picker via its def-level `hidden` default, not a per-type toggle. See the amended §J.
+
+For **stored** and **computed** fields the middle three rows are identical — **relabel, hide,
+and reorder apply the same way.** **Intrinsics are the exception** (¹, §J): only relabel
+applies. Otherwise only *value editing* and *definition authoring* vary by category.
+Membership (add/remove on a type) is permissive for all three per §A: it is never blocked by a
+type being built-in. This matrix *is* the ADR — each surface consults `category` → the row →
+renders accordingly, instead of re-deriving from scattered booleans.
 
 ### D. One resolved descriptor; `category` is the single source of truth
 
@@ -191,22 +200,30 @@ child overlay, so it keeps inheriting. The endpoint contract (a complete desired
 `null` clears an aspect; empty overlay drops the entry — #116) is unchanged; only the value
 the UI feeds it changes.
 
-### J. Intrinsic fields: identity presentation vs field presentation
+### J. Intrinsic fields: identity presentation, not a rail row (amended 2026-07-06, #113)
 
-An intrinsic field has two presentations, and `hide` governs only the second:
+> **Amendment.** The original §J posited that an intrinsic has *two* presentations — an
+> identity control **and** a "field presentation (a row in the rail) governed by `hidden`."
+> Verifying #113 showed the second half is fiction: the metadata rail (`MetadataPanel`)
+> unconditionally skips intrinsics, so there is no rail row to hide or reorder. Build `hide`
+> and `reorder` on a row that doesn't exist and they have no target. The corrected model:
 
-- **Identity presentation** — structural, always present because the node's nature requires
-  it: `title` → the editor header (the doc's name); `entry_type` → the type selector; `id` →
-  an opaque key with no identity control of its own.
-- **Field presentation** — a row in the rail, a chip, a picker entry — governed by `hidden`
-  like any field.
+An intrinsic field's value is **never rendered as a metadata-rail row** — its display is routed
+to a fixed identity control:
 
-So **relabel** drives the label *wherever the field appears* — header *and* rows *and* picker
-(`title → "Name"` renames the lore header and the picker entry together). **hide** removes the
-*field presentation* only; it never removes the identity control (you cannot "hide" a
-document's name — the header stays). Defaults: `title`/`entry_type` field presentation
-visible, `id` hidden (un-hideable per type to surface a read-only key row). Gives hide-title
-and Type/ID relabel a defined, narrow meaning; resolves #118 point 1.
+- `title` → the editor header (the doc's name)
+- `entry_type` → the type selector
+- `id` → an opaque key with no control of its own (shown nowhere)
+
+Because there is no rail row, **`hide` has no target and `reorder` has no position** — both are
+meaningless for intrinsics (§C¹). Only **relabel** is meaningful: it retargets the
+identity-control label *wherever the field surfaces* — the header / type selector **and** the
+Views-picker entry (`title → "Name"` renames the lore header and the picker entry together).
+The Views picker keeps `id` out of its filter/sort list via `id`'s def-level `hidden` default
+(not a per-type toggle). The type editor therefore shows intrinsic rows as **rename-only** and
+**pinned** (non-draggable, and not a drop target, so nothing slots above them). You still
+cannot "hide" a document's name — but that's now because `hide` doesn't apply to intrinsics at
+all, not because a hide-of-a-rail-row is intercepted. Resolves #118 point 1.
 
 ## Why / rejected alternatives
 

@@ -73,6 +73,7 @@
     class="schema-field-row {rowClass}"
     class:expanded
     class:inherited
+    class:draggable-row={draggable}
     class:dragging
     class:drop-before={dropBefore}
     class:drop-after={dropAfter}
@@ -94,7 +95,27 @@
     <span class="sfr-meta">{@render meta?.()}</span>
   </button>
 {:else}
-  <div class="schema-field-row {rowClass}" class:inherited aria-label={ariaLabel || undefined}>
+  <!-- Display-only row (inherited / intrinsic): not click-to-expand, but it MAY
+       still be draggable to reorder the type's display_order (#113). A plain
+       <div> carries the native drag handlers without the button semantics.
+       Drag-reorder is a pointer affordance (the interactive variant is a real
+       <button>); matches the NodeRow tree-drag row. -->
+  <!-- svelte-ignore a11y_no_static_element_interactions -->
+  <div
+    class="schema-field-row {rowClass}"
+    class:inherited
+    class:draggable-row={draggable}
+    class:dragging
+    class:drop-before={dropBefore}
+    class:drop-after={dropAfter}
+    {draggable}
+    aria-label={ariaLabel || undefined}
+    ondragstart={onDragStart}
+    ondragover={onDragOver}
+    ondragleave={onDragLeave}
+    ondrop={(event) => { event.preventDefault(); onDrop(event); }}
+    ondragend={onDragEnd}
+  >
     <span class="sfr-grip" aria-hidden="true"><i class="ti ti-grip-vertical"></i></span>
     <span class="sfr-tile"><i class={iconClass} aria-hidden="true"></i></span>
     <span class="sfr-name">{name}</span>
@@ -129,6 +150,10 @@
     opacity: 0.62;
     cursor: default;
   }
+  /* A draggable inherited row still invites the drag (#113). */
+  .schema-field-row.draggable-row {
+    cursor: grab;
+  }
   .schema-field-row.expanded {
     background: var(--surface);
     border-color: var(--divider, var(--divider));
@@ -162,6 +187,11 @@
     display: inline-flex;
     color: var(--border-strong, var(--border-strong));
     font-size: var(--fs-lg);
+    /* Grip only invites a drag on rows that actually drag (#113) — otherwise
+       it read as draggable when it wasn't (the group / non-reorderable rows). */
+    cursor: default;
+  }
+  .draggable-row .sfr-grip {
     cursor: grab;
   }
   .sfr-name {

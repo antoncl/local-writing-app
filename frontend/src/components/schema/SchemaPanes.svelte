@@ -142,12 +142,18 @@
   // recompute when the schema is refreshed after a save — fieldEntriesFor…
   // reads it *inside* the function, which the template wouldn't track on its
   // own (see feedback-svelte5-reactivity-traps).
+  //
+  // ONE display-ordered list over the full resolved membership (#113): the
+  // editor renders own + inherited + intrinsic in a single sequence so a
+  // display_order overlay can interleave an own field between inherited ones
+  // (#89's core UX) — a split own-then-inherited render can't express that.
+  // `typeOwnFieldEntries` still identifies which rows this type owns (for the
+  // count, per-row treatment, and the reorder fallback below).
   let typeOwnFieldEntries =
     $derived(metadataSchema && selectedSchemaTypeId ? fieldEntriesForEntryType(selectedSchemaTypeId) : []);
-  let typeInheritedFieldEntries =
-    $derived(metadataSchema && selectedSchemaTypeId ? inheritedFieldEntriesForEntryType(selectedSchemaTypeId) : []);
-  let typeOwnFieldSections = $derived(buildSchemaFieldSections(typeOwnFieldEntries));
-  let typeInheritedFieldSections = $derived(buildSchemaFieldSections(typeInheritedFieldEntries));
+  let typeFieldEntries =
+    $derived(metadataSchema && selectedSchemaTypeId ? membershipFieldEntriesForEntryType(selectedSchemaTypeId) : []);
+  let typeFieldSections = $derived(buildSchemaFieldSections(typeFieldEntries));
   // L2 reusable groups: the applications on the selected type + the groups
   // available to apply. Reference metadataSchema explicitly so these recompute
   // after a save (see feedback-svelte5-reactivity-traps).
@@ -219,15 +225,14 @@
     return Boolean(metadataSchema?.entry_types[entryTypeId]?.fields.includes(fieldId));
   }
 
-  // Fields this type inherits from its parent/kind — present in `fields` but not
-  // in `own_fields`. Rendered dimmed (read-only) in the type editor with a
-  // jump-to-parent affordance (metadata revision, mockup B).
-  function inheritedFieldEntriesForEntryType(entryTypeId: string) {
+  // The type's FULL resolved membership in display order (#113) — own +
+  // inherited + intrinsic, already sorted by the backend's display_order
+  // overlay. The editor renders one list and styles each row by whether it's
+  // owned here (interactive) vs inherited/intrinsic (dimmed), so ordering can
+  // interleave the two.
+  function membershipFieldEntriesForEntryType(entryTypeId: string) {
     const entryType = metadataSchema?.entry_types[entryTypeId];
-    if (!entryType || !Array.isArray(entryType.own_fields)) return [];
-    const own = new Set(entryType.own_fields);
-    return (entryType.fields ?? [])
-      .filter((fieldId) => !own.has(fieldId))
+    return (entryType?.fields ?? [])
       .map((fieldId) => {
         const field = metadataSchema?.fields[fieldId];
         return field ? ([fieldId, field] as [string, MetadataFieldDefinition]) : null;
@@ -748,11 +753,13 @@
     if (order.join(" ") === current.join(" ")) return;
     const layerId = schemaTypeLayerId || projectSchemaLayerId();
     await run(async () => {
-      // Reorder is layer-invariant: the backend guard requires an existing
-      // override at this layer, so it can't change the overview's
-      // field_sources / entry_type_sources / layers. Write through the new
-      // effective schema and re-validate the authoring selection locally — no
-      // overview refetch needed (the only schema site where that holds).
+      // Reorder writes only a display_order overlay — never a field def or the
+      // type's declaration — so it can't change the overview's field_sources /
+      // entry_type_sources / layers. A built-in stays built-in-sourced even when
+      // this is its first layer entry (#123 narrowed the guard; source is
+      // derived from the shipped declaration, not layer presence). So we write
+      // through the new effective schema and re-validate the authoring selection
+      // locally — no overview refetch needed (the only schema site where that holds).
       setMetadataSchema(await api.setEntryTypeFieldOrder(layerId, selectedSchemaTypeId!, order));
       syncSchemaAuthoringSelection();
       setStatus("Reordered fields");
@@ -818,9 +825,7 @@
     metadataSchemaOverview={metadataSchemaOverview}
     metadataSchemaLayers={metadataSchemaLayers}
     typeOwnFieldEntries={typeOwnFieldEntries}
-    typeInheritedFieldEntries={typeInheritedFieldEntries}
-    typeOwnFieldSections={typeOwnFieldSections}
-    typeInheritedFieldSections={typeInheritedFieldSections}
+    typeFieldSections={typeFieldSections}
     typeGroupApplications={typeGroupApplications}
     availableGroupEntries={availableGroupEntries}
     NEW_FIELD_SENTINEL={NEW_FIELD_SENTINEL}

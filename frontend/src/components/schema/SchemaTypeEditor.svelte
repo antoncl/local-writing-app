@@ -88,9 +88,9 @@
     metadataSchemaOverview?: MetadataSchemaOverview | null;
     metadataSchemaLayers?: MetadataSchemaLayer[];
     typeOwnFieldEntries?: [string, MetadataFieldDefinition][];
-    typeInheritedFieldEntries?: [string, MetadataFieldDefinition][];
-    typeOwnFieldSections?: SchemaFieldSection[];
-    typeInheritedFieldSections?: SchemaFieldSection[];
+    // One display-ordered list over the full membership (#113) — own +
+    // inherited + intrinsic; each row is classified against typeOwnFieldEntries.
+    typeFieldSections?: SchemaFieldSection[];
     typeGroupApplications?: Array<{ group_id: string; label: string; key_prefix: string }>;
     availableGroupEntries?: [string, { name: string; icon?: string | null }][];
     projectSchemaLayerId?: () => string;
@@ -133,9 +133,7 @@
     metadataSchemaOverview = null,
     metadataSchemaLayers = [],
     typeOwnFieldEntries = [],
-    typeInheritedFieldEntries = [],
-    typeOwnFieldSections = [],
-    typeInheritedFieldSections = [],
+    typeFieldSections = [],
     typeGroupApplications = [],
     availableGroupEntries = [],
     projectSchemaLayerId = () => "",
@@ -400,8 +398,13 @@
     {/if}
   </div>
   {#if selectedSchemaTypeId}
-    {@const fieldEntries = typeOwnFieldEntries}
-    {@const inheritedEntries = typeInheritedFieldEntries}
+    {@const ownFieldIds = new Set(typeOwnFieldEntries.map(([id]) => id))}
+    {@const totalFieldCount = typeFieldSections.reduce((n, s) => n + s.entries.length, 0)}
+    {@const ownFieldCount = typeOwnFieldEntries.length}
+    {@const inheritedFieldCount = totalFieldCount - ownFieldCount}
+    <!-- A field is draggable when there's more than one to order (#113); the
+         whole membership reorders through one display_order overlay. -->
+    {@const fieldsDraggable = totalFieldCount > 1}
     {#snippet fieldInlineEditor(field: MetadataFieldDefinition | null)}
       <SchemaFieldInlineEditor
         field={field}
@@ -445,10 +448,14 @@
     <section class="schema-type-fields" aria-label="Fields on this type">
       <header class="schema-type-fields-header">
         <strong>Fields</strong>
-        <small>{fieldEntries.length}{inheritedEntries.length ? ` · ${inheritedEntries.length} inherited` : ""}</small>
+        <small>{totalFieldCount}{inheritedFieldCount ? ` · ${inheritedFieldCount} inherited` : ""}</small>
       </header>
+      <!-- ONE display-ordered list (#113): own + inherited + intrinsic render in
+           a single sequence so a drag can interleave them; each row is styled by
+           whether this type owns it. Reorder flows through the shared
+           onFieldDrop, which persists the full display_order. -->
       <div class="schema-field-rows">
-        {#each typeOwnFieldSections as section}
+        {#each typeFieldSections as section}
           {#if section.group}
             <div class="rail-group-head">
               <span class="rail-group-label">{section.group}</span>
@@ -456,81 +463,89 @@
             </div>
           {/if}
           {#each section.entries as [fieldId, field]}
-            {@const fieldSource = metadataSchemaOverview?.field_sources[fieldId]}
-            {@const isExpanded = expandedSchemaFieldId === fieldId}
-            <SchemaFieldRow
-              iconClass={fieldIconClass(field)}
-              name={effectiveFieldLabel(metadataSchema, selectedSchemaTypeId, fieldId)}
-              typeLabel={fieldTypeLabel(field.type)}
-              expanded={isExpanded}
-              draggable={fieldEntries.length > 1}
-              dropBefore={fieldDropTarget?.id === fieldId && fieldDropTarget?.position === "before"}
-              dropAfter={fieldDropTarget?.id === fieldId && fieldDropTarget?.position === "after"}
-              onToggle={() => onToggleFieldInline(fieldId, selectedSchemaTypeId!)}
-              onDragStart={() => onFieldDragStart(fieldId)}
-              onDragOver={(event) => onFieldDragOver(event, fieldId)}
-              onDragLeave={() => { if (fieldDropTarget?.id === fieldId) fieldDropTarget = null; }}
-              onDrop={() => onFieldDrop(fieldId)}
-              onDragEnd={onClearFieldDrag}
-            >
-              {#snippet meta()}
-                <span class="schema-source-badge" style={`--source-index: ${sourceLayerIndex(fieldSource, metadataSchemaLayers)}`}>{sourceBadgeLabel(fieldSource)}</span>
-                <i class={`ti sfr-cog ${isExpanded ? "ti-chevron-up" : "ti-settings"}`} aria-hidden="true"></i>
-              {/snippet}
-            </SchemaFieldRow>
-            <!-- Own rows expose the per-type override controls too (ADR-0029
-                 §H). SchemaFieldRow is an interactive <button>, so the override
-                 buttons render as a sibling bar beneath it (nesting buttons is
-                 illegal) rather than in the row's meta cluster. -->
-            {#if !field.group_origin}
-              <div class="sfr-own-ovr">{@render fieldOverrideButtons(fieldId, field)}</div>
+            {@const isOwn = ownFieldIds.has(fieldId)}
+            {@const isIntrinsic = field.category === "intrinsic" || field.intrinsic}
+            <!-- Group-generated fields move with their group, so they're not
+                 individually draggable / overridable. -->
+            {@const canDrag = fieldsDraggable && !field.group_origin}
+            {@const dropBefore = fieldDropTarget?.id === fieldId && fieldDropTarget?.position === "before"}
+            {@const dropAfter = fieldDropTarget?.id === fieldId && fieldDropTarget?.position === "after"}
+            {#if isOwn}
+              {@const fieldSource = metadataSchemaOverview?.field_sources[fieldId]}
+              {@const isExpanded = expandedSchemaFieldId === fieldId}
+              <SchemaFieldRow
+                iconClass={fieldIconClass(field)}
+                name={effectiveFieldLabel(metadataSchema, selectedSchemaTypeId, fieldId)}
+                typeLabel={fieldTypeLabel(field.type)}
+                expanded={isExpanded}
+                draggable={canDrag}
+                {dropBefore}
+                {dropAfter}
+                onToggle={() => onToggleFieldInline(fieldId, selectedSchemaTypeId!)}
+                onDragStart={() => onFieldDragStart(fieldId)}
+                onDragOver={(event) => onFieldDragOver(event, fieldId)}
+                onDragLeave={() => { if (fieldDropTarget?.id === fieldId) fieldDropTarget = null; }}
+                onDrop={() => onFieldDrop(fieldId)}
+                onDragEnd={onClearFieldDrag}
+              >
+                {#snippet meta()}
+                  <span class="schema-source-badge" style={`--source-index: ${sourceLayerIndex(fieldSource, metadataSchemaLayers)}`}>{sourceBadgeLabel(fieldSource)}</span>
+                  <i class={`ti sfr-cog ${isExpanded ? "ti-chevron-up" : "ti-settings"}`} aria-hidden="true"></i>
+                {/snippet}
+              </SchemaFieldRow>
+              <!-- Own rows expose the per-type override controls too (ADR-0029
+                   §H). SchemaFieldRow is an interactive <button>, so the override
+                   buttons render as a sibling bar beneath it (nesting buttons is
+                   illegal) rather than in the row's meta cluster. -->
+              {#if !field.group_origin}
+                <div class="sfr-own-ovr">{@render fieldOverrideButtons(fieldId, field)}</div>
+                {@render fieldRenameBox(fieldId, field)}
+              {/if}
+              {#if isExpanded}
+                {@render fieldInlineEditor(field)}
+              {/if}
+            {:else}
+              {@const label = effectiveFieldLabel(metadataSchema, selectedSchemaTypeId, fieldId)}
+              <SchemaFieldRow
+                interactive={false}
+                inherited
+                iconClass={fieldIconClass(field)}
+                name={label}
+                typeLabel={fieldTypeLabel(field.type)}
+                ariaLabel={canDrag ? `${label} (inherited, draggable)` : `${label} (inherited)`}
+                draggable={canDrag}
+                {dropBefore}
+                {dropAfter}
+                onDragStart={() => onFieldDragStart(fieldId)}
+                onDragOver={(event) => onFieldDragOver(event, fieldId)}
+                onDragLeave={() => { if (fieldDropTarget?.id === fieldId) fieldDropTarget = null; }}
+                onDrop={() => onFieldDrop(fieldId)}
+                onDragEnd={onClearFieldDrag}
+              >
+                {#snippet meta()}
+                  {#if field.group_origin}
+                    <span class="sfr-group-origin"><i class="ti ti-stack-2" aria-hidden="true"></i> {groupOriginLabel(field, metadataSchema)}</span>
+                  {:else if isIntrinsic}
+                    <span class="sfr-inherited-label">built-in</span>
+                  {:else}
+                    <span class="sfr-inherited-label">inherited from {inheritedFromLabel(selectedSchemaTypeId!, fieldId, metadataSchema)}</span>
+                  {/if}
+                  <!-- Inherited rows are a plain <div>, so the override buttons sit
+                       inline in the meta cluster. Only group-generated fields are
+                       exempt (their def is synthesized, not overridable). -->
+                  {#if !field.group_origin}
+                    {@render fieldOverrideButtons(fieldId, field)}
+                  {/if}
+                {/snippet}
+              </SchemaFieldRow>
               {@render fieldRenameBox(fieldId, field)}
             {/if}
-            {#if isExpanded}
-              {@render fieldInlineEditor(field)}
-            {/if}
-          {/each}
-        {/each}
-        {#each typeInheritedFieldSections as section}
-          {#if section.group}
-            <div class="rail-group-head">
-              <span class="rail-group-label">{section.group}</span>
-              <span class="rail-group-rule"></span>
-            </div>
-          {/if}
-          {#each section.entries as [fieldId, field]}
-            {@const label = effectiveFieldLabel(metadataSchema, selectedSchemaTypeId, fieldId)}
-            <SchemaFieldRow
-              interactive={false}
-              inherited
-              iconClass={fieldIconClass(field)}
-              name={label}
-              typeLabel={fieldTypeLabel(field.type)}
-              ariaLabel={`${label} (inherited)`}
-            >
-              {#snippet meta()}
-                {#if field.group_origin}
-                  <span class="sfr-group-origin"><i class="ti ti-stack-2" aria-hidden="true"></i> {groupOriginLabel(field, metadataSchema)}</span>
-                {:else if field.intrinsic}
-                  <span class="sfr-inherited-label">built-in</span>
-                {:else}
-                  <span class="sfr-inherited-label">inherited from {inheritedFromLabel(selectedSchemaTypeId!, fieldId, metadataSchema)}</span>
-                {/if}
-                <!-- Inherited rows are a plain <div>, so the override buttons sit
-                     inline in the meta cluster. Only group-generated fields are
-                     exempt (their def is synthesized, not overridable). -->
-                {#if !field.group_origin}
-                  {@render fieldOverrideButtons(fieldId, field)}
-                {/if}
-              {/snippet}
-            </SchemaFieldRow>
-            {@render fieldRenameBox(fieldId, field)}
           {/each}
         {/each}
         {#if expandedSchemaFieldId === NEW_FIELD_SENTINEL}
           {@render fieldInlineEditor(null)}
         {/if}
-        {#if fieldEntries.length === 0 && inheritedEntries.length === 0 && expandedSchemaFieldId !== NEW_FIELD_SENTINEL}
+        {#if totalFieldCount === 0 && expandedSchemaFieldId !== NEW_FIELD_SENTINEL}
           <p class="muted">No fields defined on this type.</p>
         {/if}
       </div>

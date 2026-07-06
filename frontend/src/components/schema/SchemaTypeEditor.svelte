@@ -426,14 +426,17 @@
          corrected). -->
     {#snippet fieldOverrideButtons(fieldId: string, field: MetadataFieldDefinition, allowHide: boolean)}
       {@const hidden = effectiveFieldHidden(metadataSchema, selectedSchemaTypeId, fieldId)}
-      <button class="sfr-ovr" type="button" title={`Rename “${field.name}” for this type`} aria-label={`Rename ${field.name} for this type`} onclick={() => startRename(fieldId)}>
-        <i class="ti ti-pencil" aria-hidden="true"></i>
-      </button>
+      <!-- Hide (👁) leads, rename (✏️) trails: rename is the universal op (every
+           overridable row has it) while the eye is absent on intrinsics — so
+           putting the pencil last keeps it in one aligned rightmost column. -->
       {#if allowHide}
         <button class="sfr-ovr" class:active={hidden} type="button" title={hidden ? "Show in the rail" : "Hide from the rail"} aria-label={hidden ? `Show ${field.name}` : `Hide ${field.name}`} onclick={() => toggleHide(fieldId)}>
           <i class={hidden ? "ti ti-eye-off" : "ti ti-eye"} aria-hidden="true"></i>
         </button>
       {/if}
+      <button class="sfr-ovr" type="button" title={`Rename “${field.name}” for this type`} aria-label={`Rename ${field.name} for this type`} onclick={() => startRename(fieldId)}>
+        <i class="ti ti-pencil" aria-hidden="true"></i>
+      </button>
     {/snippet}
     {#snippet fieldRenameBox(fieldId: string, field: MetadataFieldDefinition)}
       {#if overrideRenamingId === fieldId}

@@ -169,6 +169,13 @@ class MetadataFieldDefinition(BaseModel):
     # out of sight by default (#116). Display-only — never affects storage
     # or filtering membership.
     hidden: bool = False
+    # Authorship category (ADR-0029): who produces the value —
+    # `intrinsic` (identity triple, lives on `node.<key>`),
+    # `computed` (app-derived, read-only), else `stored` (`metadata.<key>`).
+    # DERIVED, not authored: stamped by the schema resolver on read (None on
+    # authored input); every surface consults it instead of re-deriving from
+    # `intrinsic` / `type == "computed"` / key membership.
+    category: Literal["stored", "intrinsic", "computed"] | None = None
 
     @field_validator("options", mode="before")
     @classmethod
@@ -362,6 +369,13 @@ class EntryTypeDefinition(BaseModel):
     # and can refine. Consumers resolve a field's effective label / hidden
     # via this map (falling back to the field def).
     field_overrides: dict[str, FieldOverride] = Field(default_factory=dict)
+    # The pre-merge overrides authored ON THIS TYPE (mirrors `own_fields` /
+    # `own_color`). `field_overrides` above is the parent-merged result; this
+    # is only what this layer set. ADR-0029 §I: the override editor reads /
+    # writes THIS so editing one aspect (label) doesn't freeze the inherited
+    # other aspect (hidden) into the child layer. Computed by the resolver;
+    # not authored directly.
+    own_field_overrides: dict[str, FieldOverride] = Field(default_factory=dict)
 
 
 class MetadataSchema(BaseModel):

@@ -24,7 +24,7 @@ definitions are moving toward node types and subtypes:
 - `id`: stable identity.
 - `kind`: broad system category. Today: `scene`, `lore`, or `prompt`.
 - `entry_type`: schema-defined subtype with optional `parent` for single-inheritance
-  (e.g. `character` → `lore_entry`; `continuation` → `prompt`; `bob` → `general` →
+  (e.g. `character` → `lore:base`; `continuation` → `prompt`; `bob` → `general` →
   `prompt`).
 - `title`: display title.
 - `metadata`: schema-defined values.
@@ -205,7 +205,7 @@ entry_types:
       - turning_point
       - word_count
 
-  lore_entry:
+  lore:base:
     name: Entry
     kind: lore
     abstract: true
@@ -217,16 +217,16 @@ entry_types:
   character:
     name: Character
     kind: lore
-    parent: lore_entry
+    parent: lore:base
     fields:
       - gender
       - pronouns
       - story_role
 
-  place:
+  location:
     name: Location
     kind: lore
-    parent: lore_entry
+    parent: lore:base
     fields:
       - parent_location
       - theme
@@ -248,13 +248,13 @@ fields:
     name: Characters
     type: entity_ref_list
     target:
-      entry_type: lore_character
+      entry_type: lore:character
 
   location:
     name: Location
     type: entity_ref
     target:
-      entry_type: lore_location
+      entry_type: lore:location
 
   word_count:
     name: Word Count

@@ -75,6 +75,18 @@ class IntrinsicFieldTests(unittest.TestCase):
         fields = self.service.read_metadata_schema().entry_types["scene:scene"].fields
         self.assertEqual(fields.count("title"), 1)
 
+    def test_resolver_stamps_authorship_category(self) -> None:
+        # ADR-0029 §D: every resolved field carries a `category` derived by the
+        # resolver — intrinsic (identity triple), computed (app-produced), else
+        # stored. This is the single source of truth the surfaces consult.
+        fields = self.service.read_metadata_schema().fields
+        self.assertEqual(fields["title"].category, "intrinsic")
+        self.assertEqual(fields["entry_type"].category, "intrinsic")
+        self.assertEqual(fields["id"].category, "intrinsic")
+        self.assertEqual(fields["word_count"].category, "computed")
+        self.assertEqual(fields["status"].category, "stored")
+        self.assertEqual(fields["color"].category, "stored")
+
     def test_title_is_not_stored_in_metadata_after_save(self) -> None:
         # Declaring title/id/entry_type as fields must not cause them to be
         # persisted into the metadata dict — storage stays in front matter.
@@ -186,6 +198,30 @@ class FieldOverrideTests(unittest.TestCase):
         self.assertNotIn("lore:character", layer_yaml.get("entry_types", {}))
         after = self.service.read_metadata_schema_overview().entry_type_sources["lore:character"]
         self.assertTrue(after.built_in)
+
+    def test_own_field_overrides_are_pre_merge(self) -> None:
+        # ADR-0029 §I: the resolver ships each type's OWN (pre-merge) overrides
+        # in parallel to the merged `field_overrides`. The parent hides `tags`
+        # and the child relabels it — the child's MERGED view carries both, but
+        # its OWN overlay carries only the aspect it authored (label), so
+        # editing one aspect never freezes the inherited other into the child.
+        self.service._write_yaml(
+            self.root / "metadata.schema.yaml",
+            {
+                "version": 1,
+                "entry_types": {
+                    "lore:base": {"field_overrides": {"tags": {"hidden": True}}},
+                    "lore:character": {"field_overrides": {"tags": {"label": "Labels"}}},
+                },
+            },
+        )
+        character = self.service.read_metadata_schema().entry_types["lore:character"]
+        # Merged view: both aspects present.
+        self.assertEqual(character.field_overrides["tags"].label, "Labels")
+        self.assertIs(character.field_overrides["tags"].hidden, True)
+        # Own overlay: only the authored aspect (label); hidden stays inherited.
+        self.assertEqual(character.own_field_overrides["tags"].label, "Labels")
+        self.assertIsNone(character.own_field_overrides["tags"].hidden)
 
     def test_override_rejects_a_non_member_field(self) -> None:
         with self.assertRaises(ProjectServiceError):

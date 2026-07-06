@@ -315,16 +315,17 @@
     if (saved !== false) baseline = snapshotDraft();
   }
 
-  // --- Per-type field overrides (#116): relabel / hide an inherited field for
-  // this type. State scoped here; the parent persists + refreshes. Overrides
-  // are read off the resolved schema (`field_overrides`, already merged down
-  // the parent chain), so each aspect is preserved when the other is edited. ---
+  // --- Per-type field overrides (#116): relabel / hide a field (own OR
+  // inherited) for this type. State scoped here; the parent persists + refreshes.
+  // The submit reads the type's OWN (pre-merge) overlay, not the resolved
+  // `field_overrides` (ADR-0029 §I): feeding the parent-merged value back would
+  // freeze an inherited aspect into this layer when only the other is edited. ---
   let overrideRenamingId = $state<string | null>(null);
   let overrideRenameValue = $state("");
 
   function currentOverride(fieldId: string): { label?: string | null; hidden?: boolean | null } | undefined {
     return selectedSchemaTypeId
-      ? metadataSchema?.entry_types[selectedSchemaTypeId]?.field_overrides?.[fieldId]
+      ? metadataSchema?.entry_types[selectedSchemaTypeId]?.own_field_overrides?.[fieldId]
       : undefined;
   }
   function startRename(fieldId: string) {
@@ -412,6 +413,35 @@
         onRemove={onRemoveField}
       />
     {/snippet}
+    <!-- Per-type override affordances (relabel / hide), shared by own AND
+         inherited rows (ADR-0029 §H): presentation is per-type regardless of
+         where the def is owned. Overrides are a layer overlay the backend
+         allows on built-in types too, so they show even on a readonly type. -->
+    {#snippet fieldOverrideButtons(fieldId: string, field: MetadataFieldDefinition)}
+      {@const hidden = effectiveFieldHidden(metadataSchema, selectedSchemaTypeId, fieldId)}
+      <button class="sfr-ovr" type="button" title={`Rename “${field.name}” for this type`} aria-label={`Rename ${field.name} for this type`} onclick={() => startRename(fieldId)}>
+        <i class="ti ti-pencil" aria-hidden="true"></i>
+      </button>
+      <button class="sfr-ovr" class:active={hidden} type="button" title={hidden ? "Show in the rail" : "Hide from the rail"} aria-label={hidden ? `Show ${field.name}` : `Hide ${field.name}`} onclick={() => toggleHide(fieldId)}>
+        <i class={hidden ? "ti ti-eye-off" : "ti ti-eye"} aria-hidden="true"></i>
+      </button>
+    {/snippet}
+    {#snippet fieldRenameBox(fieldId: string, field: MetadataFieldDefinition)}
+      {#if overrideRenamingId === fieldId}
+        <div class="sfr-rename">
+          <input
+            class="sfr-rename-input"
+            aria-label={`New label for ${field.name}`}
+            value={overrideRenameValue}
+            placeholder={field.name}
+            oninput={(event) => (overrideRenameValue = event.currentTarget.value)}
+            onkeydown={(event) => { if (event.key === "Enter") submitRename(fieldId); if (event.key === "Escape") cancelRename(); }}
+          />
+          <button class="sfi-done" type="button" onclick={() => submitRename(fieldId)}>Save</button>
+          <button class="sfi-cancel" type="button" onclick={cancelRename}>Cancel</button>
+        </div>
+      {/if}
+    {/snippet}
     <section class="schema-type-fields" aria-label="Fields on this type">
       <header class="schema-type-fields-header">
         <strong>Fields</strong>
@@ -433,7 +463,7 @@
               name={effectiveFieldLabel(metadataSchema, selectedSchemaTypeId, fieldId)}
               typeLabel={fieldTypeLabel(field.type)}
               expanded={isExpanded}
-              draggable={fieldEntries.length > 1 && !schemaTypeReadonly}
+              draggable={fieldEntries.length > 1}
               dropBefore={fieldDropTarget?.id === fieldId && fieldDropTarget?.position === "before"}
               dropAfter={fieldDropTarget?.id === fieldId && fieldDropTarget?.position === "after"}
               onToggle={() => onToggleFieldInline(fieldId, selectedSchemaTypeId!)}
@@ -448,6 +478,14 @@
                 <i class={`ti sfr-cog ${isExpanded ? "ti-chevron-up" : "ti-settings"}`} aria-hidden="true"></i>
               {/snippet}
             </SchemaFieldRow>
+            <!-- Own rows expose the per-type override controls too (ADR-0029
+                 §H). SchemaFieldRow is an interactive <button>, so the override
+                 buttons render as a sibling bar beneath it (nesting buttons is
+                 illegal) rather than in the row's meta cluster. -->
+            {#if !field.group_origin}
+              <div class="sfr-own-ovr">{@render fieldOverrideButtons(fieldId, field)}</div>
+              {@render fieldRenameBox(fieldId, field)}
+            {/if}
             {#if isExpanded}
               {@render fieldInlineEditor(field)}
             {/if}
@@ -462,7 +500,6 @@
           {/if}
           {#each section.entries as [fieldId, field]}
             {@const label = effectiveFieldLabel(metadataSchema, selectedSchemaTypeId, fieldId)}
-            {@const hidden = effectiveFieldHidden(metadataSchema, selectedSchemaTypeId, fieldId)}
             <SchemaFieldRow
               interactive={false}
               inherited
@@ -479,35 +516,15 @@
                 {:else}
                   <span class="sfr-inherited-label">inherited from {inheritedFromLabel(selectedSchemaTypeId!, fieldId, metadataSchema)}</span>
                 {/if}
-                <!-- Overrides show even on a readonly (System) type: a per-type
-                     relabel / hide is a layer overlay the backend allows on
-                     built-in types (it never edits the built-in def), and it's
-                     the primary #116 case (rename `title` → "Name" on
-                     lore:character). Only group-generated fields are exempt. -->
+                <!-- Inherited rows are a plain <div>, so the override buttons sit
+                     inline in the meta cluster. Only group-generated fields are
+                     exempt (their def is synthesized, not overridable). -->
                 {#if !field.group_origin}
-                  <button class="sfr-ovr" type="button" title={`Rename “${field.name}” for this type`} aria-label={`Rename ${field.name} for this type`} onclick={() => startRename(fieldId)}>
-                    <i class="ti ti-pencil" aria-hidden="true"></i>
-                  </button>
-                  <button class="sfr-ovr" class:active={hidden} type="button" title={hidden ? "Show in the rail" : "Hide from the rail"} aria-label={hidden ? `Show ${label}` : `Hide ${label}`} onclick={() => toggleHide(fieldId)}>
-                    <i class={hidden ? "ti ti-eye-off" : "ti ti-eye"} aria-hidden="true"></i>
-                  </button>
+                  {@render fieldOverrideButtons(fieldId, field)}
                 {/if}
               {/snippet}
             </SchemaFieldRow>
-            {#if overrideRenamingId === fieldId}
-              <div class="sfr-rename">
-                <input
-                  class="sfr-rename-input"
-                  aria-label={`New label for ${field.name}`}
-                  value={overrideRenameValue}
-                  placeholder={field.name}
-                  oninput={(event) => (overrideRenameValue = event.currentTarget.value)}
-                  onkeydown={(event) => { if (event.key === "Enter") submitRename(fieldId); if (event.key === "Escape") cancelRename(); }}
-                />
-                <button class="sfi-done" type="button" onclick={() => submitRename(fieldId)}>Save</button>
-                <button class="sfi-cancel" type="button" onclick={cancelRename}>Cancel</button>
-              </div>
-            {/if}
+            {@render fieldRenameBox(fieldId, field)}
           {/each}
         {/each}
         {#if expandedSchemaFieldId === NEW_FIELD_SENTINEL}
@@ -517,7 +534,10 @@
           <p class="muted">No fields defined on this type.</p>
         {/if}
       </div>
-      {#if !schemaTypeReadonly && expandedSchemaFieldId !== NEW_FIELD_SENTINEL}
+      <!-- Add a field even on a built-in type (ADR-0029 §A/§H): membership is a
+           layer overlay the backend accepts on built-ins, so no forced subtype.
+           The draft targets the project layer when none is explicitly chosen. -->
+      {#if expandedSchemaFieldId !== NEW_FIELD_SENTINEL}
         <div class="button-row">
           <button class="add-affordance" type="button" title="Add field" aria-label="Add field" onclick={() => onCreateFieldDraft(schemaTypeLayerId || projectSchemaLayerId(), selectedSchemaTypeId ?? undefined)}>+</button>
         </div>
@@ -653,6 +673,14 @@
   }
   .sfr-ovr.active {
     color: var(--accent);
+  }
+  /* Per-type override bar under an OWN field row (ADR-0029 §H). Own rows are
+     interactive <button>s, so their relabel / hide controls can't nest inside;
+     they sit in a compact sibling bar aligned under the row's name column. */
+  .sfr-own-ovr {
+    display: flex;
+    gap: 4px;
+    padding: 0 12px 4px 34px;
   }
   /* Inline rename input, rendered beneath the row (mirrors the field inline
      editor's placement). */

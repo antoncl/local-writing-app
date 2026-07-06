@@ -92,7 +92,7 @@ scannable TOC view of the research corpus.
 
 ### B. Fold research into the manuscript tree
 
-Add `topic` / `note` entry_types under `manuscript_structure`, so the
+Add `topic` / `note` entry_types under `scene:base`, so the
 research notes live alongside acts and scenes in one tree. Reuses
 existing machinery with zero new infrastructure.
 

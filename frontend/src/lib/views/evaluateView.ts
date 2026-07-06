@@ -51,12 +51,14 @@ export type EvalNode = {
   ancestry?: PathSegment[] | null;
 };
 
-// Intrinsic identity fields (#116): stored on the node top-level, not in
-// `metadata`. Mirrors the backend `default_schema.INTRINSIC_FIELD_KEYS`. The
-// keys match EvalNode's top-level string properties, so `fieldValue` can read
-// them off the node directly. Kept here as the frontend source of truth for
-// which field keys route to the node property instead of the metadata dict.
-export const INTRINSIC_FIELD_KEYS: ReadonlySet<string> = new Set(["id", "title", "entry_type"]);
+// A field routes to the node top-level property (id/title/entry_type) instead
+// of the `metadata` dict iff the resolver stamped it `intrinsic` (ADR-0029 §D).
+// Read that off the resolved schema payload — the backend
+// `default_schema.INTRINSIC_FIELD_KEYS` is the single source of truth; the
+// frontend no longer mirrors the key set. Unknown keys fall back to metadata.
+export function isIntrinsicField(schema: MetadataSchema | null | undefined, key: string): boolean {
+  return schema?.fields?.[key]?.category === "intrinsic";
+}
 
 // Per-node stamp from a color `annotate` (Highlight) node. Drives the NodeRow
 // color part (doc §1.3). Grouping no longer stamps here — it lives in handles.
@@ -263,7 +265,7 @@ function evalSegment<T extends EvalNode>(
 ): T[] {
   const memberIds = expr ? evalExpr(state, expr) : new Set(state.order.keys());
   const members = state.universe.filter((n) => memberIds.has(n.id));
-  return sortNodes(members, sort);
+  return sortNodes(members, sort, state.schema);
 }
 
 // A stable dedupe key for a `(node, path)` row — the node id plus the ordered
@@ -306,7 +308,7 @@ function evalSource<T extends EvalNode>(
     if (expr.nest) {
       // Nest is the other row-producing primary (ADR-0028): it denormalizes a
       // relational join into `(node, path)` rows with real-node parent segments.
-      return sortNestRows(evalNest(state, expr.nest).rows, sort);
+      return sortNestRows(evalNest(state, expr.nest).rows, sort, state.schema);
     }
     if (isBareViewRef(expr)) {
       const nested = evalViewRefRows(state, expr.view_ref as string, sort);
@@ -523,7 +525,7 @@ function evalLeaf<T extends EvalNode>(state: RunState<T>, expr: ViewExpr): Set<s
   }
   if (expr.field != null) {
     const pred = expr.field;
-    return idsWhere(state, (n) => matchesField(n, pred));
+    return idsWhere(state, (n) => matchesField(n, pred, state.schema));
   }
   if (expr.hand_picked != null) {
     const picked = new Set(expr.hand_picked);
@@ -765,9 +767,13 @@ function fieldValueList(node: EvalNode, field: string): string[] {
 // the natural universe/BFS order. Ranks nodes by the shared node comparator, then
 // stable-sorts rows by their node's rank — so within each parent the leaves come
 // out sorted while sibling parents keep their first-seen order.
-function sortNestRows<T extends EvalNode>(rows: ViewRow<T>[], sort: ViewSort | null | undefined): ViewRow<T>[] {
+function sortNestRows<T extends EvalNode>(
+  rows: ViewRow<T>[],
+  sort: ViewSort | null | undefined,
+  schema: MetadataSchema | null | undefined,
+): ViewRow<T>[] {
   if (!sort || sort.by === "manual") return rows;
-  const ranked = sortNodes(rows.map((r) => r.node), sort);
+  const ranked = sortNodes(rows.map((r) => r.node), sort, schema);
   const rank = new Map<string, number>();
   ranked.forEach((n, i) => {
     if (!rank.has(n.id)) rank.set(n.id, i);
@@ -834,17 +840,18 @@ function nodeTags(node: EvalNode): string[] {
   return [];
 }
 
-// A node's value for a predicate/sort key. The intrinsic identity fields
-// (id/title/entry_type, #116) live on the node top-level, not in metadata, so
-// read them from the node property; everything else reads from metadata.
-function fieldValue(node: EvalNode, key: string): unknown {
-  return INTRINSIC_FIELD_KEYS.has(key)
+// A node's value for a predicate/sort key. Intrinsic fields (id/title/
+// entry_type) live on the node top-level, not in metadata, so read them from
+// the node property; everything else reads from metadata. Which is which comes
+// from the resolver-stamped `category` (ADR-0029 §D), never a mirrored set.
+function fieldValue(node: EvalNode, key: string, schema: MetadataSchema | null | undefined): unknown {
+  return isIntrinsicField(schema, key)
     ? (node as unknown as Record<string, unknown>)[key]
     : node.metadata?.[key];
 }
 
-function matchesField(node: EvalNode, pred: ViewFieldPredicate): boolean {
-  const raw = fieldValue(node, pred.key);
+function matchesField(node: EvalNode, pred: ViewFieldPredicate, schema: MetadataSchema | null | undefined): boolean {
+  const raw = fieldValue(node, pred.key, schema);
   switch (pred.op) {
     case "set":
       return !isEmpty(raw);
@@ -909,7 +916,11 @@ function intersectAll(sets: Set<string>[]): Set<string> {
   return new Set(acc);
 }
 
-function sortNodes<T extends EvalNode>(nodes: T[], sort: ViewSort | null | undefined): T[] {
+function sortNodes<T extends EvalNode>(
+  nodes: T[],
+  sort: ViewSort | null | undefined,
+  schema: MetadataSchema | null | undefined,
+): T[] {
   if (!sort || sort.by === "manual") return nodes; // input (universe/manual) order
   const dir = sort.dir === "desc" ? -1 : 1;
   if (sort.by === "title") {
@@ -918,8 +929,8 @@ function sortNodes<T extends EvalNode>(nodes: T[], sort: ViewSort | null | undef
   if (sort.by === "field" && sort.field_key) {
     const key = sort.field_key;
     return [...nodes].sort((a, b) => {
-      const av = fieldValue(a, key);
-      const bv = fieldValue(b, key);
+      const av = fieldValue(a, key, schema);
+      const bv = fieldValue(b, key, schema);
       const ae = isEmpty(av);
       const be = isEmpty(bv);
       // Empty/unset values always sort last, regardless of direction; `dir` only

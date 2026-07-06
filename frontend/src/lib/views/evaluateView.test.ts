@@ -21,7 +21,13 @@ const SCHEMA = {
     "lore:demigod": { name: "Demigod", kind: "lore", parent: "lore:deity", fields: [] },
     "lore:location": { name: "Location", kind: "lore", fields: [] },
   },
-  fields: {},
+  // Intrinsic fields carry the resolver-stamped `category` so `fieldValue`
+  // routes them to the node top-level property, not `metadata` (ADR-0029 §D).
+  fields: {
+    title: { name: "Title", type: "text", category: "intrinsic" },
+    entry_type: { name: "Type", type: "text", category: "intrinsic" },
+    id: { name: "ID", type: "text", category: "intrinsic" },
+  },
 } as unknown as MetadataSchema;
 
 const ids = (spec: ViewSpec, nodes = NODES, ctx = { schema: SCHEMA }) =>

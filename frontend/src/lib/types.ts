@@ -269,10 +269,17 @@ export type MetadataFieldDefinition = {
   default?: MetadataValue | null;
   // Intrinsic (#116): value lives on the node's top-level front matter
   // (`id` / `title` / `entry_type`), not in `metadata`. Consumers read it
-  // from the node property keyed by the field id (see INTRINSIC_FIELD_KEYS).
+  // from the node property keyed by the field id — but prefer `category`
+  // (below), the resolver-stamped single source of truth.
   intrinsic?: boolean;
   // Hidden by default from the per-node rail and Views field picker.
   hidden?: boolean;
+  // Authorship category (ADR-0029 §D), stamped by the backend resolver on
+  // every resolved field: `intrinsic` (identity triple, on `node.<key>`),
+  // `computed` (app-produced, read-only), else `stored` (`metadata.<key>`).
+  // The single signal every surface consults — never re-derive it from
+  // `intrinsic` / `type === "computed"` / key membership on the frontend.
+  category?: "stored" | "intrinsic" | "computed";
 };
 
 export type PromptInputType =
@@ -549,6 +556,12 @@ export type EntryTypeDefinition = {
   // the parent chain by the backend. Read effective label/hidden via the
   // schemaFields helpers, never off the map directly.
   field_overrides?: Record<string, FieldOverride>;
+  // The type's OWN (pre-merge) overrides — mirrors `own_fields` / `own_color`
+  // (ADR-0029 §I). `field_overrides` above is parent-merged; this is only what
+  // this type authored. The override editor reads/writes THIS so editing one
+  // aspect (label) doesn't freeze the inherited other aspect (hidden) into the
+  // layer. Read-back only; writes still go through the field-override endpoint.
+  own_field_overrides?: Record<string, FieldOverride>;
 };
 
 // Per-type presentation overlay on a field (#116). `label` renames it for the

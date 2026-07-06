@@ -21,6 +21,7 @@ from app.models import (
     SearchRequest,
     SelectOption,
     SetFieldOrderRequest,
+    SetGroupApplicationsRequest,
     UpdateProjectSettingsRequest,
     UpsertMetadataEntryTypeRequest,
     UpsertMetadataFieldRequest,
@@ -1199,17 +1200,67 @@ class MetadataValidationTests(unittest.TestCase):
             )
         self.assertEqual(raised.exception.status_code, 422)
 
-    def test_set_entry_type_field_order_rejects_system_type(self) -> None:
+    def test_set_entry_type_field_order_allows_system_type_as_overlay(self) -> None:
+        # ADR-0029 §A: display order is a pure per-layer overlay, so it now
+        # applies to a built-in type — the narrowed guard no longer walls it
+        # off — and the built-in stays built-in-sourced.
         project_layer = next(
             layer
             for layer in self.service.read_metadata_schema_layers().layers
             if layer.folder_path == str(self.root)
         )
-        with self.assertRaises(ProjectServiceError) as raised:
-            self.service.set_entry_type_field_order(
-                SetFieldOrderRequest(layer_id=project_layer.id, entry_type_id="scene:scene", field_order=[])
+        self.service.set_entry_type_field_order(
+            SetFieldOrderRequest(
+                layer_id=project_layer.id, entry_type_id="scene:scene", field_order=["summary", "number"]
             )
-        self.assertEqual(raised.exception.status_code, 422)
+        )
+        fields = self.service.read_metadata_schema().entry_types["scene:scene"].fields
+        self.assertLess(fields.index("summary"), fields.index("number"))
+        overview = self.service.read_metadata_schema_overview()
+        self.assertTrue(overview.entry_type_sources["scene:scene"].built_in)
+
+    def test_set_entry_type_group_applications_allows_system_type_as_overlay(self) -> None:
+        # ADR-0029 §A: group applications are a per-layer overlay too, so the
+        # narrowed guard no longer rejects a built-in target (a plain no-op
+        # overlay is enough to prove the wall is gone), and it stays sourced
+        # as built-in.
+        project_layer = next(
+            layer
+            for layer in self.service.read_metadata_schema_layers().layers
+            if layer.folder_path == str(self.root)
+        )
+        self.service.set_entry_type_group_applications(
+            SetGroupApplicationsRequest(
+                layer_id=project_layer.id, entry_type_id="scene:scene", applications=[]
+            )
+        )
+        overview = self.service.read_metadata_schema_overview()
+        self.assertTrue(overview.entry_type_sources["scene:scene"].built_in)
+
+    def test_upsert_entry_type_overlays_builtin_without_forking_declaration(self) -> None:
+        # ADR-0029 §A: "Save Type" on a built-in persists overlay data (here a
+        # color) but never forks the shipped name/kind/parent declaration, and
+        # the type stays built-in-sourced.
+        project_layer = next(
+            layer
+            for layer in self.service.read_metadata_schema_layers().layers
+            if layer.folder_path == str(self.root)
+        )
+        self.service.upsert_metadata_entry_type(
+            UpsertMetadataEntryTypeRequest(
+                layer_id=project_layer.id,
+                entry_type_id="lore:character",
+                entry_type=EntryTypeDefinition(name="Character", kind="lore", parent="lore:base", color="rose"),
+                allow_existing=True,
+            )
+        )
+        schema = self.service.read_metadata_schema()
+        character = schema.entry_types["lore:character"]
+        self.assertEqual(character.color, "rose")
+        self.assertEqual(character.name, "Character")
+        self.assertEqual(character.parent, "lore:base")
+        overview = self.service.read_metadata_schema_overview()
+        self.assertTrue(overview.entry_type_sources["lore:character"].built_in)
 
     def test_display_order_can_lift_own_field_above_inherited(self) -> None:
         # The #89 capability the old single-`fields` list couldn't express:

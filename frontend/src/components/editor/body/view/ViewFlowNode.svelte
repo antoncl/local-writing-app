@@ -14,7 +14,6 @@
   import NodePicker from "@/components/widgets/NodePicker.svelte";
   import SwatchPicker from "@/components/widgets/SwatchPicker.svelte";
   import { inputArity, type GraphNodeKind, type PredicateKind, type ViewHandle, type ViewNodeData } from "@/lib/views/viewGraph";
-  import { INTRINSIC_FIELD_KEYS } from "@/lib/views/evaluateView";
   import { useDesignerContext } from "./designerContext";
   import type { MetadataFieldType, NodePickerRef, ViewSort } from "@/lib/types";
 
@@ -132,11 +131,12 @@
     "text",
     "long_text",
   ];
-  // Intrinsic identity fields (id/title/entry_type, #116) are top-level node
+  // Intrinsic identity fields (id/title/entry_type) are top-level node
   // properties, not metadata refs, so they can't carry a parent↔child link —
-  // drop them from the join picker.
+  // drop them from the join picker. Category is the resolver-stamped signal
+  // (ADR-0029 §D).
   let joinableFields = $derived(
-    ctx.fields.filter((f) => !INTRINSIC_FIELD_KEYS.has(f.key) && NEST_JOINABLE_TYPES.includes(f.def.type)),
+    ctx.fields.filter((f) => f.def.category !== "intrinsic" && NEST_JOINABLE_TYPES.includes(f.def.type)),
   );
   function setMatch(next: Partial<NonNullable<ViewNodeData["match"]>>) {
     patch({ match: { field: matchField, direction: matchDir, by: matchBy, ...next } });

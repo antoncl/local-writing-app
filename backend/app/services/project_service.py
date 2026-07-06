@@ -1,7 +1,9 @@
 from __future__ import annotations
 
 import hashlib
+import logging
 import re
+import time
 import uuid
 from copy import deepcopy
 from datetime import UTC, datetime
@@ -44,6 +46,8 @@ from app.services.project.search import SearchMixin
 from app.services.project.tags import TagsMixin
 from app.services.project.todos import TodosMixin
 from app.services.project.views import ViewsMixin
+
+logger = logging.getLogger(__name__)
 
 
 class ProjectService(
@@ -346,11 +350,52 @@ class ProjectService(
         return self._unique_filepath(folder, self._sanitize_filename(title))
 
     def _maybe_rename_node_file(self, path: Path, new_title: str) -> Path:
-        target = self._unique_filepath(path.parent, self._sanitize_filename(new_title), current_path=path)
+        sanitized = self._sanitize_filename(new_title)
+        # The file already owns a valid name for this title when its stem is the
+        # sanitized title or that title with a collision suffix ("Name" /
+        # "Name (2)"). Renaming purely to drop a freed-up suffix churns a
+        # perfectly good filename on every save (and risks the transient-lock
+        # failure below) — so rename only when the title genuinely changed away
+        # from the current name, not to re-canonicalize an owned one.
+        if self._filename_represents_title(path.stem, sanitized):
+            return path
+        target = self._unique_filepath(path.parent, sanitized, current_path=path)
         if target == path:
             return path
-        path.rename(target)
+        try:
+            self._rename_with_retry(path, target)
+        except OSError:
+            # The on-disk filename is cosmetic — the front-matter `id` is the
+            # canonical identity (filenames are not), and reads resolve by id.
+            # The content is already saved by this point, so a rename failure
+            # (a transient Windows lock that outlasts the retries, or any other
+            # OS error) must not fail the save. Keep the current filename; a
+            # later save re-attempts the rename.
+            logger.warning("kept filename %s; rename to %s failed", path.name, target.name)
+            return path
         return target
+
+    @staticmethod
+    def _filename_represents_title(stem: str, sanitized_title: str) -> bool:
+        # True when `stem` is the sanitized title, or that title with a numeric
+        # collision suffix ("Name" or "Name (2)") — i.e. the file already owns a
+        # valid name for this title and needs no rename.
+        return re.fullmatch(rf"{re.escape(sanitized_title)}(?: \(\d+\))?", stem) is not None
+
+    @staticmethod
+    def _rename_with_retry(path: Path, target: Path, *, attempts: int = 5, delay: float = 0.05) -> None:
+        # Windows briefly locks a just-written file (Defender / the search
+        # indexer scans it) — the rename right after an atomic write then hits
+        # PermissionError (WinError 32). The lock clears in milliseconds, so
+        # back off and retry before giving up.
+        for attempt in range(attempts):
+            try:
+                path.rename(target)
+                return
+            except PermissionError:
+                if attempt == attempts - 1:
+                    raise
+                time.sleep(delay)
 
     def _write_scene_file(self, path: Path, scene: Scene) -> None:
         front_matter = yaml.safe_dump(

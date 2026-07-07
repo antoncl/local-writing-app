@@ -15,7 +15,7 @@ from tempfile import TemporaryDirectory
 from fastapi.testclient import TestClient
 
 from app.main import app
-from app.main import service as global_service
+from app.runtime import service as global_service
 
 MARKER = (
     "<!-- embedded-todo:id=t1;status=open;note=buy -->Buy milk<!-- /embedded-todo -->"

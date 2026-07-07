@@ -28,7 +28,6 @@ EXTENSIONS = {".py", ".svelte", ".ts", ".tsx"}
 # split. They still warn. Remove an entry once it is back under HARD_FAIL.
 # Stored repo-relative with forward slashes; matched against the path tail.
 GRANDFATHERED = {
-    "backend/app/main.py",
     "backend/tests/test_metadata_validation.py",
 }
 

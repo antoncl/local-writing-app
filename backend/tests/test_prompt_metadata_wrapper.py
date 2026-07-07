@@ -11,8 +11,8 @@ import unittest
 from pathlib import Path
 from tempfile import TemporaryDirectory
 
-from app.main import service as global_service
 from app.models import SavePromptEntryRequest
+from app.runtime import service as global_service
 
 
 class PromptMetadataWrapperTests(unittest.TestCase):

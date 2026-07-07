@@ -14,7 +14,7 @@ from pathlib import Path
 
 import pytest
 
-from app.main import service as svc
+from app.runtime import service as svc
 
 
 @pytest.fixture

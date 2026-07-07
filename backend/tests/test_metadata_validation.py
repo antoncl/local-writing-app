@@ -2631,13 +2631,19 @@ class ReferenceResolutionTests(unittest.TestCase):
     def test_http_reference_routes(self) -> None:
         from fastapi.testclient import TestClient
 
-        import app.main as app_main
+        from app.main import app
+        from app.runtime import service
 
-        original_service = app_main.service
-        app_main.service = self.service
+        # The routers operate on the shared runtime singleton (app/runtime.py),
+        # so drive the HTTP routes by opening THIS test's project on it. Restore
+        # the singleton's prior identity afterwards so the test leaves shared
+        # state as it found it (open_project sets exactly root_path + title).
+        prev_root = getattr(service, "root_path", None)
+        prev_title = getattr(service, "title", None)
+        service.open_project(self.root)
         try:
-            client = TestClient(app_main.app)
-            seren = self.service.create_lore_entry(CreateLoreEntryRequest(title="Seren", entry_type="lore:character"))
+            client = TestClient(app)
+            seren = service.create_lore_entry(CreateLoreEntryRequest(title="Seren", entry_type="lore:character"))
 
             resolve_response = client.post("/api/references/resolve", json={"ids": [seren.id, "missing"]})
             self.assertEqual(resolve_response.status_code, 200)
@@ -2651,7 +2657,8 @@ class ReferenceResolutionTests(unittest.TestCase):
             titles = {candidate["title"] for candidate in candidates_response.json()["candidates"]}
             self.assertIn("Seren", titles)
         finally:
-            app_main.service = original_service
+            service.root_path = prev_root
+            service.title = prev_title
 
 
 class LayeredEntryIndexTests(unittest.TestCase):

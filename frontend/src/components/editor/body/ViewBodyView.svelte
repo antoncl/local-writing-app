@@ -16,11 +16,13 @@
   import { untrack } from "svelte";
   import { themePreference } from "@/lib/utils/theme";
   import ViewFlowNode from "./view/ViewFlowNode.svelte";
+  import SelfLoopEdge from "./view/SelfLoopEdge.svelte";
   import FitView from "./view/FitView.svelte";
   import GroupTree from "@/components/widgets/GroupTree.svelte";
   import { setDesignerContext, type DesignerContext } from "./view/designerContext";
   import { api } from "@/lib/api";
   import { metadataSchemaStore } from "@/lib/stores/schema";
+  import { paneViews } from "@/lib/stores/paneViews.svelte";
   import { evaluateView, nestWarnings, type EvalNode } from "@/lib/views/evaluateView";
   import { effectiveFieldLabel, effectiveFieldHidden, kindRootEntryTypeId } from "@/lib/utils/schemaTypeHelpers";
   import { structureToEvalNodes } from "@/lib/views/structureNodes";
@@ -90,6 +92,7 @@
   let flowNodes = $state<Node<FlowData>[]>([]);
   let flowEdges = $state<Edge[]>([]);
   const nodeTypes = { viewNode: ViewFlowNode };
+  const edgeTypes = { selfloop: SelfLoopEdge };
 
   let addCounter = 0;
   let hydrating = false;
@@ -147,6 +150,7 @@
           target: e.target,
           sourceHandle: e.source_handle ?? undefined,
           targetHandle: e.target_handle ?? undefined,
+          type: e.source === e.target ? "selfloop" : undefined,
         })),
       };
     }
@@ -159,6 +163,7 @@
         target: e.target,
         sourceHandle: e.sourceHandle ?? undefined,
         targetHandle: e.targetHandle ?? undefined,
+        type: e.source === e.target ? "selfloop" : undefined,
       })),
     };
   }
@@ -395,6 +400,7 @@
   function normalizeEdges(): void {
     const kept: Edge[] = [];
     const seen = new Set<string>();
+    let changed = false;
     for (let i = flowEdges.length - 1; i >= 0; i--) {
       const e = flowEdges[i];
       const target = flowNodes.find((n) => n.id === e.target);
@@ -409,13 +415,23 @@
         target?.data.kind === "nest";
       const key = `${e.target}::${e.targetHandle ?? "in"}`;
       if (!many) {
-        if (seen.has(key)) continue;
+        if (seen.has(key)) {
+          changed = true;
+          continue;
+        }
         seen.add(key);
       }
-      kept.push(e);
+      // A recursion self-loop renders with the custom edge that routes around
+      // the node instead of cutting back behind it.
+      if (e.source === e.target && e.type !== "selfloop") {
+        kept.push({ ...e, type: "selfloop" });
+        changed = true;
+      } else {
+        kept.push(e);
+      }
     }
     kept.reverse();
-    if (kept.length !== flowEdges.length) flowEdges = kept;
+    if (changed || kept.length !== flowEdges.length) flowEdges = kept;
   }
 
   // ---- persistence (debounced) ----
@@ -449,6 +465,12 @@
       revision = saved.revision;
       lastSaved = snapshot;
       onBodyChange?.();
+      // Refresh the shared saved-view roster so panes consuming this view (or
+      // referencing it via `view_ref`) re-evaluate. Without this, `paneViews.specs`
+      // holds the pre-edit spec and consumers stay stale until something else
+      // reloads (e.g. opening the ViewSwitcher). Autosave fires before close, so
+      // this also covers the "window updates when the editor closes" case.
+      void paneViews.reload();
     } catch (e) {
       // Surface via console for step-3 dev; a toast lands with the pane switcher.
       console.error("Failed to save view", e);
@@ -538,6 +560,7 @@
         bind:nodes={flowNodes}
         bind:edges={flowEdges}
         {nodeTypes}
+        {edgeTypes}
         {colorMode}
         {isValidConnection}
         onconnect={normalizeEdges}
@@ -676,6 +699,12 @@
   /* Svelte Flow needs an explicitly sized parent. */
   .canvas :global(.svelte-flow) {
     height: 100%;
+  }
+  /* Edges a touch heavier than the 1px default so wiring reads clearly, incl.
+     the in-progress connection line and the custom self-loop (BaseEdge). */
+  .canvas :global(.svelte-flow__edge-path),
+  .canvas :global(.svelte-flow__connection-path) {
+    stroke-width: 2;
   }
   .empty-hint {
     position: absolute;

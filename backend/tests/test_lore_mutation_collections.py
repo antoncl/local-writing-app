@@ -17,7 +17,6 @@ from tempfile import TemporaryDirectory
 from fastapi.testclient import TestClient
 
 from app.main import app
-from app.main import service as svc
 from app.models import (
     CreateLoreEntryRequest,
     MetadataFieldDefinition,
@@ -25,6 +24,7 @@ from app.models import (
     UpdateMutationRequest,
     UpsertMetadataFieldRequest,
 )
+from app.runtime import service as svc
 
 
 def _define_field(field_id: str, field_type: str, name: str) -> None:

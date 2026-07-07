@@ -16,7 +16,7 @@ import yaml
 from fastapi.testclient import TestClient
 
 from app.main import app
-from app.main import service as global_service
+from app.runtime import service as global_service
 
 
 class ResearchHttpEndpointTests(unittest.TestCase):

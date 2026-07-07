@@ -2631,27 +2631,27 @@ class ReferenceResolutionTests(unittest.TestCase):
     def test_http_reference_routes(self) -> None:
         from fastapi.testclient import TestClient
 
-        import app.main as app_main
+        from app.main import app
+        from app.runtime import service
 
-        original_service = app_main.service
-        app_main.service = self.service
-        try:
-            client = TestClient(app_main.app)
-            seren = self.service.create_lore_entry(CreateLoreEntryRequest(title="Seren", entry_type="lore:character"))
+        # The routers operate on the shared runtime singleton (app/runtime.py),
+        # so drive the HTTP routes by opening THIS test's project on it — the
+        # same mutate-the-singleton pattern the other HTTP tests use.
+        service.open_project(self.root)
+        client = TestClient(app)
+        seren = service.create_lore_entry(CreateLoreEntryRequest(title="Seren", entry_type="lore:character"))
 
-            resolve_response = client.post("/api/references/resolve", json={"ids": [seren.id, "missing"]})
-            self.assertEqual(resolve_response.status_code, 200)
-            payload = resolve_response.json()
-            ids_by = {candidate["id"]: candidate for candidate in payload["candidates"]}
-            self.assertEqual(ids_by[seren.id]["title"], "Seren")
-            self.assertFalse(ids_by["missing"]["found"])
+        resolve_response = client.post("/api/references/resolve", json={"ids": [seren.id, "missing"]})
+        self.assertEqual(resolve_response.status_code, 200)
+        payload = resolve_response.json()
+        ids_by = {candidate["id"]: candidate for candidate in payload["candidates"]}
+        self.assertEqual(ids_by[seren.id]["title"], "Seren")
+        self.assertFalse(ids_by["missing"]["found"])
 
-            candidates_response = client.get("/api/references/candidates", params={"entry_type": "lore:character"})
-            self.assertEqual(candidates_response.status_code, 200)
-            titles = {candidate["title"] for candidate in candidates_response.json()["candidates"]}
-            self.assertIn("Seren", titles)
-        finally:
-            app_main.service = original_service
+        candidates_response = client.get("/api/references/candidates", params={"entry_type": "lore:character"})
+        self.assertEqual(candidates_response.status_code, 200)
+        titles = {candidate["title"] for candidate in candidates_response.json()["candidates"]}
+        self.assertIn("Seren", titles)
 
 
 class LayeredEntryIndexTests(unittest.TestCase):

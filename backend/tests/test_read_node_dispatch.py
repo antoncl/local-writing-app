@@ -10,7 +10,6 @@ import unittest
 from pathlib import Path
 from tempfile import TemporaryDirectory
 
-from app.main import service as global_service
 from app.models import (
     AssistantEntry,
     ChatSession,
@@ -22,6 +21,7 @@ from app.models import (
     SavePromptEntryRequest,
     Scene,
 )
+from app.runtime import service as global_service
 from app.services.project_service import ProjectServiceError
 
 

@@ -13,8 +13,8 @@ from tempfile import TemporaryDirectory
 from fastapi.testclient import TestClient
 
 from app.main import app
-from app.main import service as svc
 from app.models import CreateLoreEntryRequest, SaveLoreEntryRequest
+from app.runtime import service as svc
 from app.services.ai.helpers import _alias_match
 
 

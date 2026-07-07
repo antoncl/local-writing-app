@@ -197,7 +197,7 @@ describe("named-handle groups (#91)", () => {
 
   it("2+ handles render as groups, in handle order", () => {
     const res = evaluateView(grouped, NODES, { schema: SCHEMA });
-    expect(res.groups?.map((g) => [g.label, g.nodes.map((n) => n.id)])).toEqual([
+    expect(res.groups?.map((g) => [g.label, g.children.map((c) => c.nodeId)])).toEqual([
       ["Cast", ["a", "b"]],
       ["Deities", ["c", "e"]],
     ]);
@@ -217,7 +217,7 @@ describe("named-handle groups (#91)", () => {
       ],
     };
     const res = evaluateView(overlap, NODES, { schema: SCHEMA });
-    expect(res.groups?.map((g) => [g.label, g.nodes.map((n) => n.id)])).toEqual([
+    expect(res.groups?.map((g) => [g.label, g.children.map((c) => c.nodeId)])).toEqual([
       ["Gotham", ["b", "c"]],
       ["Deities", ["c", "e"]],
     ]);
@@ -253,7 +253,7 @@ describe("named-handle groups (#91)", () => {
       ],
     };
     const res = evaluateView(spec, NODES, { schema: SCHEMA });
-    expect(res.groups?.map((g) => [g.label, g.nodes.map((n) => n.id)])).toEqual([
+    expect(res.groups?.map((g) => [g.label, g.children.map((c) => c.nodeId)])).toEqual([
       ["Everything", ["a", "b", "c", "d", "e"]],
       ["Deities", ["c", "e"]],
     ]);
@@ -270,7 +270,7 @@ describe("named-handle groups (#91)", () => {
     };
     const res = evaluateView(spec, NODES, { schema: SCHEMA });
     // Cast sorted by title (Alice before Zed → b, a); Deities keeps manual order.
-    expect(res.groups?.map((g) => [g.label, g.nodes.map((n) => n.id)])).toEqual([
+    expect(res.groups?.map((g) => [g.label, g.children.map((c) => c.nodeId)])).toEqual([
       ["Cast", ["b", "a"]],
       ["Deities", ["c", "e"]],
     ]);
@@ -379,8 +379,10 @@ describe("sub-flow nesting (#101)", () => {
   };
   const ctx = { schema: SCHEMA, resolveView: (id: string) => saved[id] ?? null };
   // Compact a group tree to [label, [child ids]] rows for readable assertions.
+  // Tree-uniform (#181): a leaf is a childless group → its bare nodeId; a
+  // container → [label, its children compacted].
   const rows = (groups: ViewGroup[] | null): unknown =>
-    groups?.map((g) => (g.children.length ? [g.label, rows(g.children)] : [g.label, g.nodes.map((n) => n.id)]));
+    groups?.map((g) => (g.children.length ? [g.label, rows(g.children)] : g.nodeId));
 
   it("a top-level bare grouped view_ref inherits the sub-view's groups (no wrapper)", () => {
     const res = evaluateView({ kind: "lore", expr: { view_ref: "cast-and-gods" } }, NODES, ctx);
@@ -555,6 +557,55 @@ describe("tree presentation (#101)", () => {
     expect(tree({ tagged: "honor" }).nodes.map((n) => n.id)).toEqual(["s1", "s3"]);
   });
 
+  it("composes handle grouping with structural nesting (#181): a chapter tree within each bucket", () => {
+    // The old fork returned before reading `groups`, so group-by + nest-by-chapter
+    // were mutually exclusive. Now handles are the outer path, ancestry the inner.
+    const res = evaluateView(
+      {
+        kind: "manuscript",
+        presentation: "tree",
+        groups: [
+          { name: "Honored", expr: { tagged: "honor" } }, // s1, s3
+          { name: "Scenes", expr: { type: "manuscript:scene" } }, // s1, s2, s3
+        ],
+      },
+      structureToEvalNodes(MANUSCRIPT),
+    );
+    expect(shape(res.groups!)).toEqual([
+      ["Honored", [
+        ["Act 1", [["Ch 1", ["Scene 1"]]]],
+        ["Act 2", [["Ch 3", ["Scene 3"]]]],
+      ]],
+      ["Scenes", [
+        ["Act 1", [["Ch 1", ["Scene 1", "Scene 2"]]]],
+        ["Act 2", [["Ch 3", ["Scene 3"]]]],
+      ]],
+    ]);
+    // Ancestors stay structural context — flat membership is the matched scenes only.
+    expect(res.nodes.map((n) => n.id)).toEqual(["s1", "s3", "s2"]);
+  });
+
+  it("a tree matching only top-level nodes stays a tree (does not collapse to groups:null)", () => {
+    // Regression (#181): a filtered tree whose matches are all top-level (empty
+    // ancestry) has all-empty row paths. Collapsing that to `groups:null` (the
+    // handle/flat rule) blanks `treeNodeIds` → the Draft tree hides real matches.
+    // A set of top-level scenes is still a (single-level) tree of leaf nodes.
+    const FLAT: StructureDocument = {
+      root: sn("root", "manuscript:base", "Book", [
+        sn("s1", "manuscript:scene", "Scene 1", [], ["pick"]),
+        sn("s2", "manuscript:scene", "Scene 2", []),
+        sn("s3", "manuscript:scene", "Scene 3", [], ["pick"]),
+      ]),
+    };
+    const res = evaluateView(
+      { kind: "manuscript", presentation: "tree", expr: { tagged: "pick" } },
+      structureToEvalNodes(FLAT),
+    );
+    expect(res.groups).not.toBeNull();
+    expect(shape(res.groups!)).toEqual(["Scene 1", "Scene 3"]);
+    expect(treeNodeIds(res.groups)).toEqual(new Set(["s1", "s3"]));
+  });
+
   it("treeNodeIds collects matches + kept ancestors, dropping pruned branches", () => {
     // Filtered tree keeps s1/s3 and their ancestors; s2 and ch2 are gone.
     expect(treeNodeIds(tree({ tagged: "honor" }).groups)).toEqual(
@@ -569,10 +620,10 @@ describe("tree presentation (#101)", () => {
 
 // --- nest: relational denormalization from lore links (ADR-0028, #107) -----
 
-// Compact a group tree the same way the sub-flow suite does: a container is
-// `[label, children]`, a leaf level is `[label, [memberIds]]`.
+// Compact a group tree the same way the sub-flow suite does (#181 tree-uniform):
+// a container is `[label, children]`; a leaf is a childless group → its nodeId.
 const nrows = (groups: ViewGroup[] | null): unknown =>
-  groups?.map((g) => (g.children.length ? [g.label, nrows(g.children)] : [g.label, g.nodes.map((n) => n.id)]));
+  groups?.map((g) => (g.children.length ? [g.label, nrows(g.children)] : g.nodeId));
 
 // Nested locations via a `parent` entity_ref (child → parent). Aeria is a root
 // (no parent); nowhere points at a ghost id → orphan.

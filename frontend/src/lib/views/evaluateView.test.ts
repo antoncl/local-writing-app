@@ -585,6 +585,27 @@ describe("tree presentation (#101)", () => {
     expect(res.nodes.map((n) => n.id)).toEqual(["s1", "s3", "s2"]);
   });
 
+  it("a tree matching only top-level nodes stays a tree (does not collapse to groups:null)", () => {
+    // Regression (#181): a filtered tree whose matches are all top-level (empty
+    // ancestry) has all-empty row paths. Collapsing that to `groups:null` (the
+    // handle/flat rule) blanks `treeNodeIds` → the Draft tree hides real matches.
+    // A set of top-level scenes is still a (single-level) tree of leaf nodes.
+    const FLAT: StructureDocument = {
+      root: sn("root", "manuscript:base", "Book", [
+        sn("s1", "manuscript:scene", "Scene 1", [], ["pick"]),
+        sn("s2", "manuscript:scene", "Scene 2", []),
+        sn("s3", "manuscript:scene", "Scene 3", [], ["pick"]),
+      ]),
+    };
+    const res = evaluateView(
+      { kind: "manuscript", presentation: "tree", expr: { tagged: "pick" } },
+      structureToEvalNodes(FLAT),
+    );
+    expect(res.groups).not.toBeNull();
+    expect(shape(res.groups!)).toEqual(["Scene 1", "Scene 3"]);
+    expect(treeNodeIds(res.groups)).toEqual(new Set(["s1", "s3"]));
+  });
+
   it("treeNodeIds collects matches + kept ancestors, dropping pruned branches", () => {
     // Filtered tree keeps s1/s3 and their ancestors; s2 and ch2 are gone.
     expect(treeNodeIds(tree({ tagged: "honor" }).groups)).toEqual(

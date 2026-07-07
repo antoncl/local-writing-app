@@ -15,8 +15,9 @@
 //    groups union + dedupe. Evaluation emits rows `(node, path)`; the normalize
 //    pass rebuilds nesting from the paths — arbitrary depth, with the depth-1
 //    handle case falling out as the shallow one (ADR-0027 §E). A
-//    `presentation: "tree"` view (#101) instead nests members by their
-//    structural `ancestry`, rebuilt by `buildStructureTree`.
+//    `presentation: "tree"` view (#101) appends each node's structural
+//    `ancestry` to its row path (#181), so structural nesting flows through the
+//    same normalize pass and composes with handle grouping.
 //  - Membership is a `Set<id>` per segment; the segment list is the universe
 //    filtered to that set, preserving **input order** — exactly the `manual`
 //    sort the Assistants drag order relies on (ADR-0022, doc §1.5).
@@ -251,16 +252,18 @@ export function evaluateView<T extends EvalNode>(
   // with handle grouping (group by status → a chapter tree within each bucket).
   // Ancestor containers materialize from the segments (kept even when not
   // members), so a filtered tree keeps a match's ancestors and self-prunes empty
-  // branches. Ancestors are structural context, not matches, so segments are
-  // excluded from flat membership (`includeSegmentsInFlat: false`); a nest's
-  // real-node parent segments, by contrast, ARE members (`true`), while synthetic
-  // handle segments are skipped in flat membership either way.
+  // branches. The `treePresentation` flag makes normalize (a) exclude ancestor
+  // segments from flat membership (they are context, not matches — unlike a
+  // nest's real-node parents, which ARE members) and (b) always build node
+  // groups, even when every match is top-level (empty ancestry): a flat set of
+  // scenes is still a tree of leaf nodes, and collapsing it to `groups: null`
+  // would blank `treeNodeIds` and hide the Draft tree.
   if (spec.presentation === "tree") {
     const nested = rows.map((r) => ({ node: r.node, path: [...r.path, ...(r.node.ancestry ?? [])] }));
-    return normalize(state, nested, false);
+    return normalize(state, nested, true);
   }
 
-  return normalize(state, rows, true);
+  return normalize(state, rows, false);
 }
 
 // Attach nest diagnostics to a result — only when a `nest` actually ran, so
@@ -363,14 +366,16 @@ function evalGroups<T extends EvalNode>(
 // nesting parent; a row with an empty remaining path is the node itself as a
 // member at that level. Every real node — container or leaf — becomes a `nodeId`
 // group, merged by id (no double appearance for a member that is also an
-// ancestor). Whether to group is read from the rows: with no paths it is the
-// flat/pipeline case (`groups: null`). `includeSegmentsInFlat` decides whether
-// real-node path segments count as flat members (nest parents: yes; structural-
-// tree ancestors: no — they are context, not matches).
+// ancestor). `treePresentation` distinguishes structural-tree views from
+// handle/nest ones on two axes: (a) flat membership — a nest's real-node parent
+// segments ARE members (included), while a tree's ancestor segments are context
+// (excluded); (b) collapse — a handle/nest view with no paths is a flat list
+// (`groups: null`), but a tree always builds node groups so that a set of
+// top-level nodes stays a (single-level) tree rather than blanking out.
 function normalize<T extends EvalNode>(
   state: RunState<T>,
   rows: ViewRow<T>[],
-  includeSegmentsInFlat: boolean,
+  treePresentation: boolean,
 ): ViewResult<T> {
   const seenId = new Set<string>();
   const nodes: T[] = [];
@@ -384,7 +389,7 @@ function normalize<T extends EvalNode>(
     // them into the flat list, ancestors before the leaf — unless they are pure
     // structural context (a tree view's ancestors). Synthetic handle segments
     // (`nodeId: null`) are always skipped.
-    if (includeSegmentsInFlat) {
+    if (!treePresentation) {
       for (const seg of r.path) {
         if (!seg.nodeId) continue;
         const n = state.nodeById.get(seg.nodeId);
@@ -394,8 +399,10 @@ function normalize<T extends EvalNode>(
     pushNode(r.node);
   }
 
-  // No row carries a path → nothing to nest (default/flat view).
-  if (!rows.some((r) => r.path.length > 0)) {
+  // A handle/nest view with no paths is a flat list (`groups: null`). A tree
+  // view skips this: even an all-top-level match set stays a tree of leaf node
+  // groups, so `treeNodeIds`/pruning still see every member.
+  if (!treePresentation && !rows.some((r) => r.path.length > 0)) {
     return withDiag(state, { nodes, annotations: state.annotations, groups: null });
   }
 

@@ -53,3 +53,7 @@ Design doc: [`../views-and-filters.md`](../views-and-filters.md) · Prerequisite
 
 ## 0.6.0 — UI overhaul
 - [0030](0030-design-language-quiet-writing-desk.md) — The design language: a quiet writing desk; full token layer as visual contract, interaction law promoted into the repo, tiled-shell gestalt for #32 (#124; steers #32/#125)
+
+## 0.7.0 — Render pipeline
+- [0031](0031-parameterized-views-free-variables-and-field-extraction.md) — Parameterized views: free variables + a bindings environment, a variable-supplied predicate RHS (parameter handle), and the field-extraction node (node-set → `(name, valueSet)`); cardinality-driven overlap semantics (single-select ∈ set) collapses the `op` enum 6→4 (`overlap`/`disjoint`/`set`/`unset`), two wire types, `long_text` excluded, `$self` reserved (#184; amends 0018/0025/0027, builds on 0023)
+- [0032](0032-parameter-declaration-and-binding-provenance.md) — Parameter declaration + binding provenance: author declares a Parameter node typed by reference (entity → view, value → field domain), entity types subtype-polymorphic (`is_a`, ADR-0026); binding ladder (surface `$self` / author default / runtime control / context-wire); runtime picks ephemeral (view = template, pane state not spec); the #182 wrapper owns the parameter strip (#184 configurator slice; follows 0031, builds on 0023/0022/0026)

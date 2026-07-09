@@ -1,6 +1,9 @@
 # ADR-0032: Parameter declaration and binding provenance
 
-- Status: Proposed — 0.7.0, 2026-07-08 (design agreed; implementation pending)
+- Status: Proposed — 0.7.0, **revised 2026-07-09** (design agreed; implementation pending). The
+  revision makes each parameter family's **output wire pipe** explicit and points reference
+  traversal at the new **Match** node (ADR-0033). See
+  `memory/decisions_184_entity_vs_value_parameters.md`.
 - Feature: #184 Parameterized views — the **configurator slice** ADR-0031 deferred · Doc:
   `views-and-filters.md` (parameterization)
 - Follows: **ADR-0031** (free variables + a bindings environment; this ADR specifies *how a
@@ -30,13 +33,20 @@ In the designer the author drops a **Parameter** node (the same family as `$self
 than inventing a widget-config surface:
 - **Entity parameter** (`$character`) — ranges over **nodes**, so its type **is a view** (the
   universe of `lore:character`). The runtime control is the picker that view drives (ADR-0023
-  `sources`).
+  `sources`). **Its output rides the node-set pipe (green)** — an entity parameter is a *node-set
+  source*, feeding a Filter set-input, a `field_of` source, or a **Match**/**Nest** Parents/Children
+  handle (ADR-0031 §C). It is never a value.
 - **Value parameter** (`$status`) — ranges over a **field's value domain**, so the author points
   at a **field** (`status`); the parameter inherits that field's options in **key-space**
-  (ADR-0031 §F). The runtime control is a select of those options.
+  (ADR-0031 §F). The runtime control is a select of those options. **Its output is a coupled
+  `{field, value}` on the `{field,value}` pipe (orange)**, feeding a **Filter RHS** (ADR-0031 §C).
 
-These two families are the same split as ADR-0031 §E/§F (entity refs vs select values) surfacing
-in the authoring layer — a sign the model is coherent, not accreting. The control is **derived
+These two families are the same split as ADR-0031 §C–§F (entity node-sets vs `{field,value}`)
+surfacing in the authoring layer — a sign the model is coherent, not accreting. The output-pipe
+distinction *is* the wire-type discipline of ADR-0031 §C: entities ride the node-set pipe,
+values ride the `{field,value}` pipe, and they cannot cross-connect. **Reference traversal
+("scenes where `$character` is POV", referenced-by) is the Match node (ADR-0033), fed by the entity
+parameter's green output — not a field predicate.** The control is **derived
 from the type, never hand-built** — exactly as an `entity_ref` field's picker is derived from its
 config today. The declaration (name + type-reference) is stored in the view spec's **parameter
 list**.

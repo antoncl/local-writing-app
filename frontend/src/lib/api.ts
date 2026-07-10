@@ -18,7 +18,6 @@ import type {
   ChatSessionJournalEntry,
   ChatUsage,
   AssistantTagList,
-  BacklinksResponse,
   ProjectCostResponse,
   ChatSession,
   ChatSessionList,
@@ -856,9 +855,6 @@ export const api = {
     if (filters.exclude_id) params.set("exclude_id", filters.exclude_id);
     const query = params.toString();
     return request<ReferenceCandidatesResponse>(`/references/candidates${query ? `?${query}` : ""}`);
-  },
-  listBacklinks(id: string) {
-    return request<BacklinksResponse>(`/references/backlinks?id=${encodeURIComponent(id)}`);
   },
   referenceGraph() {
     return request<ReferenceGraphResponse>("/references/graph");

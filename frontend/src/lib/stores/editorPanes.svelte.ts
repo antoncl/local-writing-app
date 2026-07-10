@@ -47,7 +47,8 @@ import { refreshLoreEntries, setLoreEntries } from "@/lib/stores/lore";
 import { refreshPromptEntries, setPromptEntries } from "@/lib/stores/prompts";
 import { refreshAssistantEntries, setAssistantEntries } from "@/lib/stores/assistants";
 import { refreshKnownTags } from "@/lib/stores/tags";
-import { refreshReferenceIndex } from "@/lib/stores/references";
+import { referenceIndexStore, refreshReferenceIndex } from "@/lib/stores/references";
+import { backlinksFor } from "@/lib/views/backlinks";
 import { refreshTodos, refreshEmbeddedTodos } from "@/lib/stores/todos";
 import { paneViews } from "@/lib/stores/paneViews.svelte";
 import { chatSessionsStore, refreshChatSessions, setChatSessions } from "@/lib/stores/chats";
@@ -452,7 +453,9 @@ class EditorPanesController {
     const sceneId = pane.scene.id;
     let backlinks: Backlink[] = [];
     try {
-      backlinks = (await api.listBacklinks(sceneId)).backlinks;
+      // Referrers via the same `field_of($self, references)` model the panel uses
+      // (#194): membership from the in-memory reverse index, rows resolved on demand.
+      backlinks = await backlinksFor(sceneId, get(referenceIndexStore));
     } catch (error) {
       console.warn("Failed to fetch backlinks", error);
     }

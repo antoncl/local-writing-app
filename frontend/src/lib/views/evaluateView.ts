@@ -36,6 +36,7 @@ import type {
   ViewSort,
   ViewSpec,
 } from "@/lib/types";
+import { projectReferences } from "@/lib/views/referenceIndex";
 
 // The minimal node shape the evaluator reads. Every `*EntrySummary` satisfies
 // it structurally; the Draft tree adapts its `StructureNode`s (type→entry_type,
@@ -548,15 +549,12 @@ function evalFieldOf<T extends EvalNode>(state: RunState<T>, op: { of: ViewExpr;
 }
 
 function projectField<T extends EvalNode>(state: RunState<T>, ofIds: Set<string>, field: string): Set<string> {
-  const out = new Set<string>();
-  // `references` is not a stored field — it reads the reverse index (§14.4).
+  // `references` is not a stored field — it reads the reverse index (§14.4);
+  // the same projection backs the backlinks panel (Phase 2c).
   if (field === REFERENCES_FIELD) {
-    for (const id of ofIds) {
-      const referrers = state.referenceIndex?.get(id);
-      if (referrers) for (const r of referrers) out.add(r);
-    }
-    return out;
+    return projectReferences(ofIds, state.referenceIndex);
   }
+  const out = new Set<string>();
   for (const id of ofIds) {
     const n = state.nodeById.get(id);
     if (!n) continue;

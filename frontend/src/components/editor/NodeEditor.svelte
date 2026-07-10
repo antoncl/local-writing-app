@@ -19,6 +19,8 @@
   import { resolveColor } from "@/lib/utils/colors";
   import type { AssistantEntrySummary, Backlink, BodyShape, DocumentKind, EditableDocument, EntryBodyLanguage, EntryMetadata, EntryTypeDefinition, MetadataFieldDefinition, MetadataSchema, PromptEntrySummary, PromptInputDefinition } from "@/lib/types";
   import { metadataSchemaStore } from "@/lib/stores/schema";
+  import { referenceIndexStore } from "@/lib/stores/references";
+  import { backlinksFor } from "@/lib/views/backlinks";
   import { effectiveFieldLabel } from "@/lib/utils/schemaTypeHelpers";
   import { mutationsVersion } from "@/lib/stores/mutationsVersion.svelte";
 
@@ -405,15 +407,22 @@
 
 
 
-  async function refreshBacklinks(sceneId: string) {
-    lastBacklinksSceneId = sceneId;
+  let backlinksReq = 0;
+  // Backlinks = the open node's referrers via the view model `field_of($self,
+  // references)` (#194): membership from the in-memory reverse index, rows from
+  // `resolve_references`. A request token drops out-of-order resolves when the
+  // anchor or the index changes mid-flight.
+  async function refreshBacklinks(
+    anchorId: string,
+    referenceIndex: ReadonlyMap<string, ReadonlySet<string>>,
+  ) {
+    lastBacklinksSceneId = anchorId;
+    const req = ++backlinksReq;
     try {
-      const response = await api.listBacklinks(sceneId);
-      if (lastBacklinksSceneId === sceneId) {
-        backlinks = response.backlinks;
-      }
-    } catch (error) {
-      if (lastBacklinksSceneId === sceneId) backlinks = [];
+      const next = await backlinksFor(anchorId, referenceIndex);
+      if (req === backlinksReq) backlinks = next;
+    } catch {
+      if (req === backlinksReq) backlinks = [];
     }
   }
 
@@ -819,10 +828,15 @@
       title = titleReload.title;
     }
   });
+  // Re-source backlinks when the open node changes or the reverse index rebuilds
+  // (a referrer was saved/deleted) — reading the index also closes the open-during
+  // -initial-load race the old one-shot fetch had.
   $effect.pre(() => {
-    if (scene && scene.id !== lastBacklinksSceneId) {
-      void refreshBacklinks(scene.id);
-    } else if (!scene && lastBacklinksSceneId !== null) {
+    const anchorId = scene?.id ?? null;
+    const referenceIndex = $referenceIndexStore;
+    if (anchorId) {
+      void refreshBacklinks(anchorId, referenceIndex);
+    } else if (lastBacklinksSceneId !== null) {
       lastBacklinksSceneId = null;
       backlinks = [];
     }

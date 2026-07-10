@@ -189,10 +189,13 @@
   // wired, the operand comes from the edge — the inline literal / promote control
   // is hidden (the three fill modes are mutually exclusive, ADR-0031 §E).
   let isValueWired = $derived(ctx.valueWired?.(id) ?? false);
-  // A field/Filter predicate that takes a value operand exposes a value input
-  // handle (a wireable socket). Only field predicates with a value-taking op.
+  // The value socket is a Filter (transform) affordance: a Filter with a
+  // value-taking field predicate exposes it, so you can wire a projection in. A
+  // bare "Field" *injector* is a self-contained source — it shows the socket
+  // ONLY to display an already-wired value (e.g. a reopened wired Filter lowers
+  // to a field leaf), never as an empty dangling input (#196).
   let hasValueSlot = $derived(
-    (kind === "field" || (kind === "filter" && filterKind === "field")) && !!fieldDef && opNeedsValue,
+    kind === "filter" ? filterKind === "field" && !!fieldDef && opNeedsValue : kind === "field" && isValueWired,
   );
 
   // --- hand_picked helpers: ids <-> light refs for NodePicker ---

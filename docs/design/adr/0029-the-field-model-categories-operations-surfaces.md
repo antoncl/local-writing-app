@@ -137,7 +137,8 @@ Being app-produced governs authoring, not presentation:
   in the picker** (filter/sort by `word_count > 1200`) and in ordering. They relabel / hide /
   reorder like any field.
 - **Added to a type from a fixed catalog** of app-provided derivations
-  (`word_count`, `number`/counter, `cost` and its scoped variants; backlinks when surfaced).
+  (`word_count`, `number`/counter, `cost` and its scoped variants; backlinks when surfaced —
+  **surfaced by #184 as the node-set-valued `references` field; see `views-and-filters.md` §14.4**).
   Adding one is a membership operation (§A) — pick from the catalog — never authoring a new
   derivation. The schema field-type dropdown does **not** offer `computed` as a
   user-creatable type: a user cannot supply a derivation function, so a "computed" option is

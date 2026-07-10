@@ -1,0 +1,115 @@
+# ADR-0032: Parameter declaration and binding provenance
+
+- Status: Accepted — 0.7.0, **amended 2026-07-09 (forward model)**; accepted 2026-07-10. Declaration is now **promote-in-
+  place**: a runtime formal is a *promoted Filter value slot*, its type **derived from the field**;
+  the declared *Parameter-node-typed-by-reference* is **deferred** to node-set-source params (no
+  current use case). `$self` is a **reserved wired source node**, not a formal. Reference traversal
+  is forward `Filter`/`field_of` (ADR-0031) — Match (ADR-0033) is withdrawn. See
+  `memory/decisions_184_entity_vs_value_parameters.md`.
+- Feature: #184 Parameterized views — the **configurator slice** ADR-0031 deferred · Doc:
+  `views-and-filters.md` (parameterization)
+- Follows: **ADR-0031** (free variables + bindings env; forward `field_of`/`Filter`). This ADR
+  specifies *how a formal is authored* and *how its actual reaches the evaluator at runtime*.
+- Builds on: ADR-0023 (a param's control reuses picker mechanics), ADR-0022 (every NodeList is a
+  view), the #182 render-wrapper contract, ADR-0026 (`is_a` for type intersection)
+- Governed by: `memory/decisions_author_vs_runtime_authority.md`,
+  `memory/decisions_view_render_pipeline_ownership.md`
+
+## Context
+ADR-0031 gives the evaluator **free variables** and a **bindings environment**, but stops at the
+evaluator boundary: it consumes bindings and says nothing about where they come from. `$self` is
+ambient — the pane supplies it. But the moment a view **takes an input the surface doesn't already
+know** — "…a `POV`", "…a `status`" — that value must be **collected**. This ADR specifies
+**(a)** how the author declares a formal, **(b)** how a runtime user supplies its actual, and who
+owns the collecting UI.
+
+The authoring convention is load-bearing because **it fixes where a formal's *type* comes from**,
+which fixes its runtime control.
+
+## Decision
+
+**A. Declaration = promote-in-place; the type is derived from the field.**
+A runtime formal is created by **promoting a Filter's value slot** (the "promoted port" convention:
+Houdini *promote parameter*, Blender *group inputs*, Unreal *promoted variables*). The inline value
+editor **collapses into a socket** wired to the parameter strip. Consequences:
+- The formal's **type is derived from the promoted field** — an `entity_ref` slot yields an entity
+  formal whose picker is the field's `ReferencePicker`; a `select` slot yields a value formal over
+  the field's key-space. **No separate type declaration, and it cannot mismatch the slot** — it came
+  from it.
+- Promoting binds the slot to a **named formal** stored in the view spec's **parameter list**
+  (`name`, `label`). Multiple slots may promote to the **same name** (fan-out — filter *and* colour
+  by one `$POV`); a shared formal's **type is the intersection of its slots' fields** (ADR-0031 §F).
+  Sharing a name across an empty intersection is a validation **warning**.
+
+**`$self` is a reserved *wired source node*, not a promoted formal.** It has no slot to promote —
+ADR-0031's canonical use is `field_of($self, 'References')`, where `$self` is the **input** to
+`field_of`. So `$self` is a node on the canvas (sibling to `All`) emitting the anchored node as a
+singleton set, **wired** wherever a node-set is wanted (a `field_of` input; a Filter's entity
+operand for "scenes where **this** character is POV"). Its type is the **pane's anchor kind**
+(ambient); in a **roster pane** with no anchor it emits empty, so a `$self` view only functions where
+there is an anchor.
+
+**The declared Parameter-node-typed-by-reference is deferred.** A formal declared *independently* of
+any slot — a user-typed **entity seed set** fed into `field_of`/set-algebra — is the only case
+promote-in-place cannot express (no slot to derive a type from). It has **no current use case**, so
+it is documented but **not built for 0.7.0**. When it arrives it is the non-reserved sibling of the
+`$self` source node, typed by reference (a kind/view; entity types subtype-polymorphic via ADR-0026,
+picker offers the whole `is_a` family) and runtime-bound.
+
+**B. Binding provenance — the authored value is an overridable default.**
+Promoting a value slot does **not** discard its authored constant — it **converts the constant into
+a default**, shown pre-filled in the strip and **overridable** at runtime. So a promoted formal is
+always a strip control *seeded by its default*; there is no separate "author-default closes the
+formal" tier. The ladder, per formal:
+1. **Surface / reserved** — `$self` (wired source node), and anything the pane binds. No user action,
+   **no strip control**; reserved names only.
+2. **Un-promoted literal** — a **fixed constant** internal to the Filter, **not exposed** in the
+   strip and not overridable. The author's choice to hardcode a value.
+3. **Promoted formal** — the real runtime path (`$POV`/`$status`). A strip control **seeded by the
+   authored default** (which may be empty); the user may **override** it → the binding updates → the
+   view re-evaluates. A formal with **no default** starts unbound → its predicate is inactive until
+   picked (ADR-0031 §B). A search box's relationship to a filtered list, generalized.
+4. *(later)* **Wired from enclosing context** — bound to a sibling pane's selection. Real, but v2.
+
+**C. Defaults persist; overrides are ephemeral.**
+An authored **default** (§B tier 3) persists in the spec — it is part of the template. A runtime
+**override** of that default is **pane/session state, not baked into the shared view node**;
+persisting it would collapse the template into one concrete view. So the saved view carries its
+defaults ("a function with default arguments"); the current pane carries the overrides. Un-promoted
+literals (§B tier 2) persist as ordinary fixed constants.
+
+**D. Ownership — the #182 render wrapper.**
+The evaluator only **consumes** `bindings`. **Populating** them is the wrapper's job: its contract
+`(viewSpec, bindings)` extends to *"for each formal the incoming bindings don't cover, render its
+control (derived from its type), collect the value, feed it back, re-evaluate."* So the parameter
+strip lives **with the wrapper** — centralized, reused wherever a parameterized list appears — and
+its controls are the same `FieldValueEditor` widgets promoted from the fields.
+
+## Why / rejected alternatives
+- **A declared Parameter node as the *primary* declaration — rejected/deferred.** Promote-in-place
+  derives the type from the field (no independent declaration, no mismatch) and gives fan-out via
+  shared names, matching the "the inline picker becomes a socket" model. A declared node earns its
+  keep only for **node-set-source** params, which have no current use case — so it is deferred, not
+  built.
+- **Baking runtime picks into the saved spec — rejected (§C).** Closes the parameter; "the same view
+  for a different character" would need a new saved view per value.
+- **Per-pane bespoke parameter UI — rejected (§D).** That is the derived-list escape hatch one layer
+  up. Centralize in the wrapper.
+- **Hand-configured parameter widgets — rejected (§A).** The control derives from the field
+  (promote-in-place) or, for the deferred declared param, from a type-reference (ADR-0023) — never a
+  bespoke widget surface.
+
+## Consequences
+- **The view spec grows a parameter list** (`name`, `label`, **default**; type **derived** from the
+  promoted slot's field, intersected across shared slots). This is the **first thing the backend
+  persists** for a **saved** parameterized view (`models_views.py`). Authored **defaults persist**;
+  runtime **overrides** do not (§C).
+- **The #182 wrapper gains a parameter strip** — reads the formals, resolves each down the ladder,
+  renders a `FieldValueEditor`-derived control for the unbound ones, holds bindings as pane state,
+  re-evaluates on change.
+- **`$self` ships as a reserved wired source node** (ambient, no control, type = anchor kind, empty
+  in roster panes). The **declared source node is deferred**.
+- **Reserved names never render a control**; promoted formals render one unless the surface binds
+  them.
+- **Out of scope**: context-wiring (§B tier 4); the declared source Parameter node; named/shared/
+  persisted binding sets.

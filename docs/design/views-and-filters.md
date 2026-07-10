@@ -26,7 +26,12 @@ in Lore, tagged-assistant picker scoping) plus a fourth that fell out during des
 
 ### 1.1 Universe
 
-A view is **anchored to one kind**. Its universe — what complement is relative to — is
+> **Amended by ADR-0031 §I / ADR-0034 / §14 (0.7.0).** The universe is the view's **roster** (the
+> `EvalNode[]` the pane supplies), and **complement is kind-relative**:
+> `complement(S) = { n ∈ roster : kind(n) ∈ kinds(S) } − S`. The single-kind description below is the
+> v1 (0.5.0) baseline and the *common* case (roster = one kind) — it no longer bounds the model.
+
+A view is **anchored to one kind** (v1). Its universe — what complement is relative to — is
 *all nodes of that kind in the project*: all lore entries, all scenes, all assistants.
 This keeps complement well-defined, matches how the panes are already kind-scoped, and
 keeps cross-kind "smart folders" out of scope (per #35).
@@ -119,7 +124,9 @@ Notes:
   (`FieldValueEditor` already renders per-type) — a select field offers its options, an
   entity_ref field offers the picker. Operators per type: equals / not-equals for
   scalars, includes / not-includes for collections, plus set/unset. No free-text
-  comparison DSL.
+  comparison DSL. **(Amended by §14 / ADR-0031 §E, 0.7.0: these collapse to
+  `overlap`/`disjoint` (+`set`/`unset`) under set-coerced overlap — a single-valued field tests
+  against a multi-pick set. The 6-op vocabulary here is the v1 baseline.)**
 - **Hand-picked is the one static leaf** — a snapshot enumeration ("my problem scenes"),
   not a query. The designer shows the live/static distinction; mixing them in one view
   is fine and useful.
@@ -239,7 +246,10 @@ to grouped/flat. The Draft tree keeps its structural shape — v1 gives it **col
 annotations** ("tint Honor's scenes" over the hierarchy), which delivers use case 1
 visually *without* solving filtered-tree ancestor visibility (a matching scene needs its
 non-matching chapter/act ancestors kept visible). Membership-filtering the tree is
-deferred to a later slice, deliberately.
+deferred to a later slice, deliberately. **(Amended by ADR-0034 / §14, 0.7.0: Draft
+membership-filtering — scene POV/status — now ships, over the enriched structure roster
+(ADR-0034 path (a)); a matching scene keeps its non-matching chapter/act ancestors via the
+`presentation: "tree"` ancestry path.)**
 
 ## 4. Authoring UI — the view designer
 
@@ -362,7 +372,8 @@ primitive. See ADR-0026.
   dissolves.
 - Server-side evaluation / query indexes.
 - Cross-pane narrowing (§7).
-- Membership-filtering the Draft tree (§3.1 — color annotations only).
+- ~~Membership-filtering the Draft tree (§3.1 — color annotations only).~~ **Now IN scope for 0.7.0**
+  — ships via ADR-0034 (a) enrich (§3.1 amended).
 - Search/Todo adoption of NodeList+views.
 - Per-user (vs project) views.
 
@@ -390,7 +401,8 @@ Each step lands green (ruff + pytest + svelte-check + browser-verify) before the
 - Set algebra over boolean predicates; Venn-glyph graph authoring (§0–1).
 - Annotate op: grouping/coloring dissolve into the expression graph; user-facing
   Group/Highlight; tinting for depth (§1.3).
-- Views are kind-anchored; universe = all nodes of the kind (§1.1).
+- Views are kind-anchored; universe = all nodes of the kind (§1.1). **(Superseded for 0.7.0 by
+  ADR-0031 §I / ADR-0034: universe = the view's roster; complement is kind-relative.)**
 - Saved views are frontmatter-only nodes; ViewSpec is the portable core (§2).
 - Every NodeList is backed by a view; presentation ∈ {tree, grouped, flat} (§3).
 - NodePickerConfig = sources (ViewSpecs/refs) + mechanics (§6.1).
@@ -502,3 +514,148 @@ body = the node alone) is *supported*; a multi-node loop (`nest → Filter → n
 the frontier between passes) is warned and deferred to a later increment. Child-eligibility
 filtering meanwhile goes on the **children** input, outside the loop. See ADR-0028 for the
 grammar construct, evaluation, and consequences.
+
+## 14. Parameterized views (0.7.0, #184 — ADR-0031 / 0032 / 0034)
+
+The *why* (forward model, `$self`, kind-relative complement, why Match is unnecessary) lives in
+ADR-0031/0032/0033(withdrawn)/0034. This section pins the **representable shapes** a builder needs,
+so nothing here has to be inferred from intent.
+
+Parameterization touches **both** representations: the portable `ViewSpec = (kind, expr, sort)` and
+the designer `ViewGraph` it lowers from (`graphToSpec`).
+
+### 14.1 ViewSpec additions (the portable, stored, evaluated core)
+
+**Parameter list — `ViewSpec.params`:**
+```yaml
+params:
+  - { name: "POV",    label: "Point of view", default: null }
+  - { name: "status", label: "Status",        default: ["draft", "revised"] }
+```
+- `name` — stable key, referenced by operands (below). `label` — parameter-strip UI. `default` —
+  the authored **overridable** default (ADR-0032); `null`/absent ⇒ unbound ⇒ its predicate is
+  **inactive** until the user picks (ADR-0031 §B).
+- **No `type` field is stored.** A param's type is **recomputed at load** from the field(s) whose
+  slot references it (the intersection rule, ADR-0031 §F) — single source of truth, no drift.
+- `$self` is **reserved** and never appears in `params` (surface-supplied via bindings).
+
+**Variable / projection operand.** A `field` predicate's `value` is **either** a literal (as today)
+**or** exactly one tagged operand — mutually exclusive by shape, so there is no precedence to
+resolve (a slot holds one value):
+```yaml
+field: { key: "status",  op: "overlap", value: ["draft"] }                        # literal (unchanged)
+field: { key: "pov_ref", op: "overlap", value: { var: "POV" } }                   # promoted formal
+field: { key: "pov_ref", op: "overlap", value: { var: "$self" } }                 # reserved anchor
+field: { key: "tags",    op: "overlap", value: { field_of: { of: <ViewExpr>, field: "tags" } } }  # projection
+```
+The designer's three fill-modes (inline literal / promoted formal / wired source) lower to exactly
+these two ViewSpec shapes — a **bare literal** or a **tagged operand** (`{var}` or `{field_of}`).
+That is the whole operand discriminator.
+
+**`field_of` — a new `ViewExpr` that produces a set:**
+```yaml
+field_of: { of: <ViewExpr>, field: "pov" }
+```
+- `of` = the input set (any `ViewExpr`: a leaf, `$self`, set algebra). `field` = the projected key.
+- **Output payload is inferred, never stored** (ADR-0031 §D): `field` a **reference** field →
+  a **node-set**; a **scalar** field → a **value-set**. Evaluator does `flatMap` + dedup.
+- Appears standalone (feeds set algebra / the render wrapper) or inline in a predicate `value`
+  (same-field / same-value / same-tag matching).
+
+**`$self`** — the reserved operand/leaf `{ var: "$self" }`; in an `of`/leaf position it is a
+**singleton node-set** (the anchored node). Bound by the surface via `EvalContext.bindings`;
+unresolved (a pane with no anchor) ⇒ the **empty set**.
+
+**`references`** (label "References") — no special shape. It is the ADR-0029 catalog **computed**
+field (node-set-valued; §G of ADR-0031, spec'd in §14.4), so it is just a `field` key:
+`field_of: { of: { var: "$self" }, field: "references" }` → the referrers.
+
+**`op` enum, 6→4** — `ViewFieldPredicate.op ∈ { overlap, disjoint, set, unset }` (was
+`eq`/`neq`/`includes`/`not_includes`/`set`/`unset`). `overlap` = set-coerce both sides, test
+non-empty intersection; `disjoint` = its negation. `entity_ref` compared by **id**, scalar by
+value (ADR-0031 §E). No migration of stored old-op values — test projects recreated (pre-1.0).
+
+**Entity-typed operands, literals, and bindings.** An `entity_ref` operand — a literal, a `default`,
+or a resolved binding — is a **list of ids** (the field's stored representation), e.g.
+`value: ["char-bob", "char-alice"]` or `default: ["char-bob"]`; comparison is **id-overlap**. So
+`ctx.bindings[name]` for an entity formal is an **id-set**; for a value formal, a **value-set**. The
+`{ var: name }` shape is **position-dispatched**: in an `of`/leaf position it must resolve to a
+**node-set** (in the 0.7.0 cut only `$self` is legal there — a declared entity source is deferred,
+ADR-0032/§14.5); as a predicate operand it may be a
+node-set or a value-set, and the evaluator dispatches on the bound value's shape.
+
+### 14.2 Evaluation
+
+`evaluateView(spec, nodes, ctx)` — `ctx.bindings: Record<string, IdSet | ValueSet>` (name → actual),
+injected exactly as `resolveView`/`schema` are (ADR-0025). `ctx` also threads the **reference index +
+id→summary map** (§14.4), the same way. Resolution: `$self` and each promoted
+formal read from `bindings`; an **unbound formal with no default** ⇒ its predicate is inactive
+(input passes through); an **unresolved `$self`** ⇒ empty set. The runtime stays field-structural
+(no per-node type inference at eval time — §14.3 is authoring-time only).
+
+### 14.3 Designer graph (`ViewGraph`) additions
+
+- New `GraphNodeKind`s: **`field_of`** (one `of` input handle, a field selector, one output) and
+  **`self`** (reserved source, no input, one output). *(No `param` node — parameters are
+  promote-in-place, §14.4; the deferred declared source node is ADR-0032, out of this cut.)*
+- **Handle payload type.** Each handle carries an inferred payload type — **node-set** or
+  **value-set** (ADR-0031 §D/§F). The connection validator rejects value-set → node-set-input and
+  vice-versa: this is the two-payload accept-matrix (ADR-0031 §E table), enforced at authoring.
+- **Field selectors** offer the **intersection of fields over the input set** (ADR-0031 §F),
+  inferred statically (leaf kind → `Filter` preserves it → `field_of` remaps to the field's target).
+  For `entity_ref` fields the offered picker domain is the **intersection of the slots' target
+  kinds** (empty → the shared-formal warning, ADR-0032 §A).
+- **Promote-in-place.** A Filter value slot's "promote" affordance binds the slot to a **named
+  formal** (creates/reuses a `params` entry), **converts the current literal into that formal's
+  `default`**, and renders the slot as a socket (ADR-0032). Un-promote restores an inline literal.
+
+### 14.4 The `references` computed field + reverse index
+
+**Field registration (ADR-0029).** Backlinks is surfaced as a built-in **catalog computed field** —
+this is the *"backlinks when surfaced"* entry ADR-0029 already anticipated. Stable key **`references`**,
+display label **"References"** (stable-key-vs-label, ADR-0029), category **computed**, value type
+**node-set** (ADR-0029's first node-set-valued computed field — the one aspect it left implicit,
+ADR-0031 §G). Like any catalog computed field it is **added/removed per type** (membership),
+**reorderable and hideable/relabelable via `field_overrides` / `display_order`** (the "designable
+move/hide in the field-types window" requirement, #118 pt 3), and its **definition is built-in / not
+user-editable**. It reads read-only from the reverse index below. For designer handle-typing (§14.3)
+a computed field **declares its value-type** (`references` → node-set) — a third payload-inference
+source alongside ADR-0031 §D's *reference → node-set* / *scalar → value-set*.
+
+**Reverse index (frontend, rebuildable).** A frontend structure `Map<targetId, Set<referrerId>>`,
+built at load by **inverting the forward `entity_ref`/`entity_ref_list` adjacency over the full
+roster** — the same in-memory inversion Nest performs (ADR-0028), promoted to a shared index. Its input is a
+**shared cross-kind reference index** — for every node, only its forward `entity_ref`/`entity_ref_list`
+**target ids** (spanning all kinds: a lore entry's referrers include scenes via `pov_ref`). This is
+**distinct from the per-pane filtering rosters** (ADR-0034): those carry *full metadata for one kind*
+(membership predicates); the reference index carries *per-node **display-summaries** + forward
+ref-target-ids across all kinds* — **not** full metadata. The frontend loads it once from a **backend
+load-time reference-graph payload** (per node: a display-summary — **id, title, entry_type, kind** —
+plus its forward ref-target-ids) and inverts the adjacency. The same payload's **id→summary map
+resolves referrer ids to renderable rows**, so the index is **self-contained** (no separate global
+summary store needed). Build
+cost O(nodes × ref-fields-per-node); it is **derived and rebuildable** (`.cache` class), rebuilt on
+load and on any reference-mutating save (its caching policy is exactly "rebuild, never persist").
+`references` is **any-field by construction** (it flattens all incoming reference fields); a
+**field-specific** referenced-by ("scenes where Bob is POV") stays a forward `Filter(scenes, pov ∈
+{Bob})` (ADR-0031 §G), so the index needs no per-field keying for this cut.
+
+**Evaluation.** `field_of(of, references)` → for each node `n ∈ of`, `reverseIndex.get(n.id) ?? ∅`,
+resolve ids → nodes, `flatMap` + dedup → a node-set. `field_of({ var: "$self" }, references)` is the
+`$self`-backlinks case (UC1 / `BacklinksPanel`), now a synthetic view.
+
+**Backend.** The forward-ref adjacency reaches the frontend as the **load-time reference-graph
+payload** above (per node: a display-summary — id, title, entry_type, kind — plus forward
+ref-target-ids) — computed once from the node index. The on-demand `/references/backlinks` scan (`references.py::list_backlinks`) is **not** on the
+eval path (evaluation is frontend-side, ADR-0025); it is superseded for view evaluation and may remain
+for non-view callers.
+
+### 14.5 Not specified here (deferred — do not infer)
+
+- Multi-hop `field_of → field_of` per-node inference — **single-hop cut** (ADR-0031): a `field_of`
+  output feeds a terminal / set algebra / a Filter operand, not another type-aware node's input. The
+  connection validator **rejects** a `field_of` whose `of` resolves (through the graph) from another
+  `field_of`, enforcing the cut.
+- The declared source Parameter node (ADR-0032, deferred — no use case yet).
+- The concrete wire shape of the Draft-roster (a) enrichment (ADR-0034 — path decided; shape is an
+  implementation detail).

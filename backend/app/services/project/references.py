@@ -366,44 +366,52 @@ class ReferencesMixin:
         backlinks.sort(key=lambda link: (link.kind, link.title.lower(), link.field_id))
         return BacklinksResponse(target_id=target_id, backlinks=backlinks)
 
+    def _forward_refs_for_entry(self, entry: NodeIndexEntry, schema: MetadataSchema) -> list[str]:
+        """The ids one node references through its entity_ref* fields, deduped in
+        field-declaration order. Empty when the node has no schema type, is
+        unreadable, or references nothing."""
+        entry_definition = schema.entry_types.get(entry.entry_type)
+        if entry_definition is None:
+            return []
+        try:
+            front_matter = self._read_front_matter_only(entry.path, strict=True)
+        except ProjectServiceError:
+            return []
+        metadata = self._normalise_metadata(front_matter.get("metadata"), entry.path)
+        targets: list[str] = []
+        seen: set[str] = set()
+
+        def add(candidate: object) -> None:
+            if isinstance(candidate, str) and candidate and candidate not in seen:
+                seen.add(candidate)
+                targets.append(candidate)
+
+        for field_id in entry_definition.fields:
+            field = schema.fields.get(field_id)
+            if field is None:
+                continue
+            value = metadata.get(field_id)
+            if field.type == "entity_ref":
+                add(value)
+            elif field.type == "entity_ref_list" and isinstance(value, list):
+                for item in value:
+                    add(item)
+        return targets
+
     def reference_graph(self) -> ReferenceGraphResponse:
         """Forward reference adjacency for the whole project (#184 Phase 2).
 
-        For every indexed node with a schema-defined type, collect the ids it
-        references through any `entity_ref` / `entity_ref_list` field. Same
-        front-matter walk as `list_backlinks`, but forward + bulk + one pass, so
-        the frontend can invert it into a reverse index the view evaluator's
-        `references` computed field projects over. Only nodes that reference
-        something appear as keys; per-node target order is field-declaration
-        order, deduped."""
+        For every indexed node, collect the ids it references through any
+        `entity_ref` / `entity_ref_list` field. Same front-matter walk as
+        `list_backlinks`, but forward + bulk + one pass, so the frontend can
+        invert it into a reverse index the view evaluator's `references` computed
+        field projects over. Only nodes that reference something appear as
+        keys."""
         node_index = self._build_node_index()
         schema = self.read_metadata_schema()
         refs: dict[str, list[str]] = {}
         for entry in node_index.by_id.values():
-            entry_definition = schema.entry_types.get(entry.entry_type)
-            if entry_definition is None:
-                continue
-            try:
-                front_matter = self._read_front_matter_only(entry.path, strict=True)
-            except ProjectServiceError:
-                continue
-            metadata = self._normalise_metadata(front_matter.get("metadata"), entry.path)
-            targets: list[str] = []
-            seen: set[str] = set()
-            for field_id in entry_definition.fields:
-                field = schema.fields.get(field_id)
-                if field is None:
-                    continue
-                value = metadata.get(field_id)
-                if field.type == "entity_ref":
-                    if isinstance(value, str) and value and value not in seen:
-                        seen.add(value)
-                        targets.append(value)
-                elif field.type == "entity_ref_list" and isinstance(value, list):
-                    for item in value:
-                        if isinstance(item, str) and item and item not in seen:
-                            seen.add(item)
-                            targets.append(item)
+            targets = self._forward_refs_for_entry(entry, schema)
             if targets:
                 refs[entry.id] = targets
         return ReferenceGraphResponse(refs=refs)

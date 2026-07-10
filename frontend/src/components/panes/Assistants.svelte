@@ -17,6 +17,7 @@
   import { evaluateView } from "@/lib/views/evaluateView";
   import { paneViews } from "@/lib/stores/paneViews.svelte";
   import { metadataSchemaStore } from "@/lib/stores/schema";
+  import { referenceIndexStore } from "@/lib/stores/references";
   import { focusedDocumentStore } from "@/lib/stores/editorFocus";
   import type { ViewPresentation, ViewSpec } from "@/lib/types";
 
@@ -51,7 +52,11 @@
   // then present: a view with label annotations carries its own hard groups; a
   // flat view is one headerless list; otherwise the intrinsic per-layer grouping
   // (the only mode where drag-reorder — the manual sort — applies, §6.3).
-  $: viewResult = evaluateView(viewSpec, entries, { schema, resolveView: paneViews.resolveView });
+  $: viewResult = evaluateView(viewSpec, entries, {
+    schema,
+    resolveView: paneViews.resolveView,
+    referenceIndex: $referenceIndexStore,
+  });
   $: annotations = viewResult.annotations;
   // Drag-reorder is manual order, meaningful only on the implicit default view.
   $: canReorder = presentation === null && viewResult.groups === null;

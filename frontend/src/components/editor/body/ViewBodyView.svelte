@@ -22,6 +22,7 @@
   import { setDesignerContext, type DesignerContext } from "./view/designerContext";
   import { api } from "@/lib/api";
   import { metadataSchemaStore } from "@/lib/stores/schema";
+  import { referenceIndexStore } from "@/lib/stores/references";
   import { paneViews } from "@/lib/stores/paneViews.svelte";
   import { evaluateView, nestWarnings, type EvalNode } from "@/lib/views/evaluateView";
   import { effectiveFieldLabel, effectiveFieldHidden, kindRootEntryTypeId } from "@/lib/utils/schemaTypeHelpers";
@@ -73,6 +74,9 @@
   }: Props = $props();
 
   let schema = $derived($metadataSchemaStore);
+  // Reverse reference index backing the `references` computed field so the
+  // designer preview resolves backlink projections (#184 Phase 2).
+  let referenceIndex = $derived($referenceIndexStore);
   // Svelte Flow ships light-only chrome; drive its theme from the app's. The
   // preference values ("system"/"light"/"dark") map straight to ColorMode.
   let colorMode = $derived($themePreference as ColorMode);
@@ -240,6 +244,7 @@
     evaluateView(spec, universe, {
       schema,
       resolveView: (viewId: string) => viewSpecs.get(viewId) ?? null,
+      referenceIndex,
     }),
   );
   // Nest diagnostics surfaced as warnings so a truncated/lossy tree is never

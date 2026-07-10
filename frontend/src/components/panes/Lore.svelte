@@ -18,6 +18,7 @@
   import { buildBindings, effectiveParamValue, resolveParamControls } from "@/lib/views/viewParams";
   import { paneViews } from "@/lib/stores/paneViews.svelte";
   import { metadataSchemaStore } from "@/lib/stores/schema";
+  import { referenceIndexStore } from "@/lib/stores/references";
   import { focusedDocumentStore } from "@/lib/stores/editorFocus";
   import type { ViewPresentation, ViewSpec } from "@/lib/types";
 
@@ -54,7 +55,16 @@
   // referencing Filter slot) + a bindings environment folded into evaluation.
   $: paramControls = resolveParamControls(viewSpec, schema);
   $: bindings = buildBindings(viewSpec.params, paramOverrides);
-  $: viewResult = evaluateView(viewSpec, entries, { schema, resolveView: paneViews.resolveView, bindings });
+  // The reverse reference index backs the `references` computed field so a view
+  // can project backlinks (`field_of(set, references)`) and compose them with
+  // set algebra (#184 Phase 2).
+  $: referenceIndex = $referenceIndexStore;
+  $: viewResult = evaluateView(viewSpec, entries, {
+    schema,
+    resolveView: paneViews.resolveView,
+    bindings,
+    referenceIndex,
+  });
 
   // The value a strip control shows: the ephemeral override, else the authored
   // default (both in the field's stored shape). Single-ref fields want a scalar,

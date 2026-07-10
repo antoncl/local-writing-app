@@ -1231,6 +1231,14 @@ export type BacklinksResponse = {
   backlinks: Backlink[];
 };
 
+// Forward reference adjacency for the whole project (#184 Phase 2): each node id
+// → the ids it references through any entity_ref / entity_ref_list field. The
+// frontend inverts this into a reverse index the view evaluator's `references`
+// computed field projects over. Only referencing nodes appear as keys.
+export type ReferenceGraphResponse = {
+  refs: Record<string, string[]>;
+};
+
 export type StructureNodeDeletePreview = {
   target_id: string;
   target_title: string;

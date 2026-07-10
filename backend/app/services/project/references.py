@@ -29,6 +29,7 @@ from app.models import (
     MetadataSchema,
     ReferenceCandidate,
     ReferenceCandidatesResponse,
+    ReferenceGraphResponse,
     ReferenceResolveResponse,
 )
 from app.services.project.errors import ProjectServiceError
@@ -364,6 +365,48 @@ class ReferencesMixin:
                     )
         backlinks.sort(key=lambda link: (link.kind, link.title.lower(), link.field_id))
         return BacklinksResponse(target_id=target_id, backlinks=backlinks)
+
+    def reference_graph(self) -> ReferenceGraphResponse:
+        """Forward reference adjacency for the whole project (#184 Phase 2).
+
+        For every indexed node with a schema-defined type, collect the ids it
+        references through any `entity_ref` / `entity_ref_list` field. Same
+        front-matter walk as `list_backlinks`, but forward + bulk + one pass, so
+        the frontend can invert it into a reverse index the view evaluator's
+        `references` computed field projects over. Only nodes that reference
+        something appear as keys; per-node target order is field-declaration
+        order, deduped."""
+        node_index = self._build_node_index()
+        schema = self.read_metadata_schema()
+        refs: dict[str, list[str]] = {}
+        for entry in node_index.by_id.values():
+            entry_definition = schema.entry_types.get(entry.entry_type)
+            if entry_definition is None:
+                continue
+            try:
+                front_matter = self._read_front_matter_only(entry.path, strict=True)
+            except ProjectServiceError:
+                continue
+            metadata = self._normalise_metadata(front_matter.get("metadata"), entry.path)
+            targets: list[str] = []
+            seen: set[str] = set()
+            for field_id in entry_definition.fields:
+                field = schema.fields.get(field_id)
+                if field is None:
+                    continue
+                value = metadata.get(field_id)
+                if field.type == "entity_ref":
+                    if isinstance(value, str) and value and value not in seen:
+                        seen.add(value)
+                        targets.append(value)
+                elif field.type == "entity_ref_list" and isinstance(value, list):
+                    for item in value:
+                        if isinstance(item, str) and item and item not in seen:
+                            seen.add(item)
+                            targets.append(item)
+            if targets:
+                refs[entry.id] = targets
+        return ReferenceGraphResponse(refs=refs)
 
     def list_reference_candidates(
         self,

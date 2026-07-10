@@ -47,6 +47,7 @@ import { refreshLoreEntries, setLoreEntries } from "@/lib/stores/lore";
 import { refreshPromptEntries, setPromptEntries } from "@/lib/stores/prompts";
 import { refreshAssistantEntries, setAssistantEntries } from "@/lib/stores/assistants";
 import { refreshKnownTags } from "@/lib/stores/tags";
+import { refreshReferenceIndex } from "@/lib/stores/references";
 import { refreshTodos, refreshEmbeddedTodos } from "@/lib/stores/todos";
 import { paneViews } from "@/lib/stores/paneViews.svelte";
 import { chatSessionsStore, refreshChatSessions, setChatSessions } from "@/lib/stores/chats";
@@ -396,6 +397,10 @@ class EditorPanesController {
       });
       if (paneStillDirty) this.#autosave.schedule(id);
       else this.#autosave.flashSaved(id);
+      // A save can have changed this node's entity_ref fields (#184 Phase 2),
+      // so the reverse reference index the `references` view field projects over
+      // may be stale — rebuild it in the background (cheap: one bulk endpoint).
+      void refreshReferenceIndex();
       if (documentKind === "lore") {
         await refreshLoreEntries();
         await refreshKnownTags();
@@ -518,6 +523,9 @@ class EditorPanesController {
       setStructure(await api.deleteScene(pane.scene.id));
       await refreshTodos();
     }
+    // A delete drops the node's outgoing refs and dangles any backlinks to it,
+    // so rebuild the reverse reference index (#184 Phase 2) in the background.
+    void refreshReferenceIndex();
     this.tearDown(id);
     this.setStatus(`Deleted ${sceneTitle}`);
   }

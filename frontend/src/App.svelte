@@ -65,6 +65,7 @@
     metadataSchemaStore,
     projectSchemaLayerId,
   } from "@/lib/stores/schema";
+  import { referenceIndexStore } from "@/lib/stores/references";
   import { implicitContextMatcherStore } from "@/lib/stores/derived";
   import { paneViews } from "@/lib/stores/paneViews.svelte";
   import { evaluateView, treeNodeIds } from "@/lib/views/evaluateView";
@@ -550,6 +551,7 @@
   }
   let validation = $derived($validationStore);
   let metadataSchema = $derived($metadataSchemaStore);
+  let referenceIndex = $derived($referenceIndexStore);
   let promptEntries = $derived($promptEntriesStore);
   let assistantEntries = $derived($assistantEntriesStore);
   // Selected-view specs/presentations per switchable pane (0.5.0 step 4, #81,
@@ -566,6 +568,7 @@
     const result = evaluateView(paneViews.specFor("scene"), structureToEvalNodes(structure), {
       schema: metadataSchema,
       resolveView: paneViews.resolveView,
+      referenceIndex,
     });
     const map = new Map<string, string | null>();
     for (const [id, ann] of result.annotations) map.set(id, ann.color);
@@ -581,6 +584,7 @@
     const result = evaluateView({ ...spec, presentation: "tree" }, structureToEvalNodes(structure), {
       schema: metadataSchema,
       resolveView: paneViews.resolveView,
+      referenceIndex,
     });
     return treeNodeIds(result.groups);
   });

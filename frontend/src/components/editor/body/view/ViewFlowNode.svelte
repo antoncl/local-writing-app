@@ -174,12 +174,26 @@
   function buildProjectFields(): { key: string; name: string }[] {
     const out: { key: string; name: string }[] = [];
     for (const f of ctx.fields) {
-      if (f.def.type === "entity_ref" || f.def.type === "entity_ref_list") out.push({ key: f.key, name: f.name });
+      // Every field projects — a reference field to a node-set, a scalar field
+      // to a value-set (#196, ADR-0031 §D) — except `long_text`: freeform prose
+      // has no stable identity, so it's presence-only (§H).
+      if (f.def.type === "long_text") continue;
+      out.push({ key: f.key, name: f.name });
     }
     const refDef = ctx.fieldByKey("references");
     if (refDef && !out.some((o) => o.key === "references")) out.push({ key: "references", name: refDef.name });
     return out;
   }
+
+  // Whether this node's value slot is fed by a wired source edge (#196). When
+  // wired, the operand comes from the edge — the inline literal / promote control
+  // is hidden (the three fill modes are mutually exclusive, ADR-0031 §E).
+  let isValueWired = $derived(ctx.valueWired?.(id) ?? false);
+  // A field/Filter predicate that takes a value operand exposes a value input
+  // handle (a wireable socket). Only field predicates with a value-taking op.
+  let hasValueSlot = $derived(
+    (kind === "field" || (kind === "filter" && filterKind === "field")) && !!fieldDef && opNeedsValue,
+  );
 
   // --- hand_picked helpers: ids <-> light refs for NodePicker ---
   // Resolve a picked id's title across the rosters the anchor kind can draw from
@@ -298,7 +312,11 @@
     </select>
   </div>
   {#if opNeedsValue && fieldDef}
-    {#if isPromoted}
+    {#if isValueWired}
+      <!-- Wired: a source edge fills the value slot (#196). The operand comes
+           from the wire; the literal / promote controls are hidden. -->
+      <div class="vwired" role="note">↳ value from a wired source</div>
+    {:else if isPromoted}
       <!-- Promoted: the slot is a runtime formal. Edit its strip label + the
            overridable default; Unlink demotes back to a fixed value. -->
       <div class="vparam" role="group" aria-label="Runtime parameter">
@@ -366,7 +384,19 @@
     <Handle type="target" position={Position.Left} id="parents" class="port parents" style="top: 34%" />
     <Handle type="target" position={Position.Left} id="children" class="port children" style="top: 66%" />
   {:else if arity !== "none"}
-    <Handle type="target" position={Position.Left} id="in" class="port" />
+    <Handle type="target" position={Position.Left} id="in" class="port" style={hasValueSlot ? "top: 34%" : ""} />
+  {/if}
+  <!-- value operand socket (#196): a wired source fills the field's value slot.
+       For a Filter it sits below the set `in` port; a bare `field` leaf has only
+       this one input. -->
+  {#if hasValueSlot}
+    <Handle
+      type="target"
+      position={Position.Left}
+      id="value"
+      class="port value"
+      style={arity !== "none" ? "top: 66%" : "top: 50%"}
+    />
   {/if}
 
   <header class="vnode-head">
@@ -381,6 +411,10 @@
     <div class="port-legend"><span class="dot keep"></span>keep · <span class="dot remove"></span>remove</div>
   {:else if kind === "nest"}
     <div class="port-legend"><span class="dot parents"></span>parents · <span class="dot children"></span>children</div>
+  {:else if hasValueSlot}
+    <div class="port-legend">
+      {#if arity !== "none"}set · {/if}<span class="dot value"></span>value
+    </div>
   {/if}
 
   <!-- config by kind -->
@@ -597,6 +631,19 @@
   }
   .dot.children {
     background: var(--k-lore);
+  }
+  .dot.value,
+  :global(.svelte-flow__handle.port.value) {
+    background: var(--k-assistant);
+  }
+  /* the value slot is filled by a wired source, not an inline literal (#196) */
+  .vwired {
+    margin: 0 8px 8px;
+    padding: 2px 6px;
+    border: 1px dashed var(--border-strong);
+    border-radius: 5px;
+    font-size: var(--fs-xs);
+    color: var(--text-3);
   }
   /* nest match-rule hint under the config selects */
   .vhint {

@@ -26,8 +26,8 @@
 // (nothing wired). The sentinels let filters-off-`All` and set ops fold to the
 // minimal shipped `expr` without a universe leaf in the grammar.
 
-import type { ViewExpr, ViewFieldPredicate, ViewGroupSpec, ViewNestMatch, ViewNestOp, ViewParam, ViewSort, ViewSpec } from "@/lib/types";
-import { SELF_VAR } from "@/lib/views/evaluateView";
+import type { ViewExpr, ViewFieldOf, ViewFieldPredicate, ViewGroupSpec, ViewNestMatch, ViewNestOp, ViewOperand, ViewParam, ViewSort, ViewSpec } from "@/lib/types";
+import { REFERENCES_FIELD, SELF_VAR } from "@/lib/views/evaluateView";
 
 export type LeafKind = "type" | "descendants_of" | "tagged" | "field" | "hand_picked" | "view_ref";
 export type CombinatorKind = "union" | "intersect" | "difference" | "complement";
@@ -63,6 +63,63 @@ export const NEST_CHILDREN_HANDLE = "children";
 export type ViewHandle = { id: string; name: string; color?: string | null };
 export const DEFAULT_HANDLE_ID = "in";
 
+// The Filter/field predicate's value-operand input handle (#196, ADR-0031 §E).
+// Distinct from `in` (the set input): a wired source here fills the value slot
+// (mutually exclusive with an inline literal / promoted formal). The evaluator +
+// grammar already accept a `{field_of}` / `{var}` operand; this is the authoring
+// edge that produces one.
+export const FILTER_VALUE_HANDLE = "value";
+
+// A designer edge carries one of two payloads (ADR-0031 §D): a **node-set** or a
+// **value-set**. Only a `field_of` projecting a SCALAR field emits a value-set;
+// every other source — incl. `field_of` on a reference field or the computed
+// `references` — emits a node-set. `fieldType(key)` reads the schema field type.
+export type EdgePayload = "node-set" | "value-set";
+
+function isNodeSetField(key: string, fieldType: (key: string) => string | null): boolean {
+  if (key === REFERENCES_FIELD) return true; // the built-in computed node-set field
+  const t = fieldType(key);
+  return t === "entity_ref" || t === "entity_ref_list";
+}
+
+export function outputPayload(
+  node: ViewGraphNode | undefined,
+  fieldType: (key: string) => string | null,
+): EdgePayload {
+  if (node?.kind === "field_of") {
+    const f = node.data.project_field;
+    if (f && !isNodeSetField(f, fieldType)) return "value-set";
+  }
+  return "node-set";
+}
+
+// What a Filter/field value slot authored on `fieldKey` accepts as a wired source
+// (ADR-0031 §E): an entity_ref field's slot takes a **node-set** (id overlap), a
+// scalar field's slot takes a **value-set** (value overlap). `null` when the key
+// carries no value operand (unset / unknown) — the slot can't be wired.
+export function valueSlotPayload(
+  fieldKey: string | undefined,
+  fieldType: (key: string) => string | null,
+): EdgePayload | null {
+  if (!fieldKey) return null;
+  return isNodeSetField(fieldKey, fieldType) ? "node-set" : "value-set";
+}
+
+// Whether a wired `source` may feed a Filter/field value slot authored on
+// `field` (#196, ADR-0031 §E). The source must be an operand-representable wired
+// source — a `field_of` (the node-set/value-set producer) or a bare `$self` — AND
+// its output payload must match what the field's slot accepts. Set-algebra / leaf
+// sources have no operand form → rejected (a future increment).
+export function valueSlotAccepts(
+  source: ViewGraphNode | undefined,
+  field: ViewFieldPredicate | undefined,
+  fieldType: (key: string) => string | null,
+): boolean {
+  if (!source || (source.kind !== "field_of" && source.kind !== "self")) return false;
+  const want = valueSlotPayload(field?.key, fieldType);
+  return want != null && outputPayload(source, fieldType) === want;
+}
+
 // Per-node config. A superset of the slots ViewExpr carries plus the designer
 // roles' own config (filter mode/predicate, sorter sort, output handles). Only
 // the fields relevant to a node's `kind` are read.
@@ -91,9 +148,10 @@ export type ViewNodeData = {
   // `{var}` in the predicate lowers verbatim). Absent = a plain literal value.
   field_param?: { name: string; label?: string; default?: unknown };
   // field_of (#184, ADR-0031 §D): the metadata key this node projects its `of`
-  // input through. Reference/node-set fields (incl. the built-in `references`)
-  // project to a node-set; the 0.7.0 cut offers only those (scalar projection =
-  // a value-set, deferred with its Filter value-slot consumer, §14.5).
+  // input through. Reference fields (incl. the built-in `references`) project to
+  // a node-set that joins the general flow; a SCALAR field projects to a
+  // value-set that feeds only a Filter value slot authored on a scalar field
+  // (#196 — the two-payload pipe, `outputPayload`/`valueSlotAccepts`).
   project_field?: string;
   // output (View) — the named handles / groups
   handles?: ViewHandle[];
@@ -373,8 +431,11 @@ function buildNode(
         return built({ var: SELF_VAR });
       case "field_of":
         return fieldOfBuilt(soleChild(graph, byId, nodeId, seen), node);
+      case "field":
+        // A leaf field predicate whose value slot may be a wired source (#196).
+        return fieldLeafBuilt(graph, byId, node, seen);
       case "filter":
-        return filterBuilt(soleChild(graph, byId, nodeId, seen), node);
+        return filterBuilt(graph, byId, node, seen);
       case "sorter":
         // Membership pass-through; the sort itself is captured at the handle.
         return soleChild(graph, byId, nodeId, seen);
@@ -399,11 +460,49 @@ function soleChild(graph: ViewGraph, byId: Map<string, ViewGraphNode>, nodeId: s
   return first ? buildNode(graph, byId, first.source, seen) : EMPTY;
 }
 
-function filterBuilt(input: Built, node: ViewGraphNode): Built {
-  const p = predicateExpr(node);
+function filterBuilt(graph: ViewGraph, byId: Map<string, ViewGraphNode>, node: ViewGraphNode, seen: Set<string>): Built {
+  // The set input is the `in` handle specifically — a Filter now has a second
+  // (`value`) input handle, so `soleChild` (any-handle first) would be wrong.
+  const inEdge = upstreamOf(graph, node.id).find((e) => (e.targetHandle ?? DEFAULT_HANDLE_ID) === DEFAULT_HANDLE_ID);
+  const input = inEdge ? buildNode(graph, byId, inEdge.source, seen) : EMPTY;
+  const p = predicateExpr(node, wiredValueOperand(graph, byId, node, seen));
   if (!p) return input; // unconfigured filter = pass-through
   const mode = node.data.filter_mode ?? "keep";
   return mode === "drop" ? differenceBuilt(input, built(p)) : intersectBuilt([input, built(p)]);
+}
+
+// A leaf `field` node → its predicate expr, honoring a wired value source (#196).
+function fieldLeafBuilt(graph: ViewGraph, byId: Map<string, ViewGraphNode>, node: ViewGraphNode, seen: Set<string>): Built {
+  const key = node.data.field?.key;
+  if (!key) return EMPTY; // a blank leaf isn't "whole universe"
+  return built({ field: withWiredValue(node.data.field!, wiredValueOperand(graph, byId, node, seen)) });
+}
+
+// Resolve a wired value operand on `node`'s `value` handle (#196, ADR-0031 §E):
+// a `field_of` source → a `{field_of}` operand; a bare `$self` → `{var: $self}`.
+// Set-algebra / leaf sources have no operand form → ignored (validation blocks
+// wiring them). Returns undefined when the value slot is unwired.
+function wiredValueOperand(
+  graph: ViewGraph,
+  byId: Map<string, ViewGraphNode>,
+  node: ViewGraphNode,
+  seen: Set<string>,
+): ViewOperand | undefined {
+  const edge = upstreamOf(graph, node.id).find((e) => e.targetHandle === FILTER_VALUE_HANDLE);
+  if (!edge) return undefined;
+  const src = byId.get(edge.source);
+  if (src?.kind === "self") return { var: SELF_VAR };
+  if (src?.kind === "field_of") {
+    const b = buildNode(graph, byId, edge.source, seen);
+    if (b.tag === "expr" && b.expr.field_of) return { field_of: b.expr.field_of };
+  }
+  return undefined;
+}
+
+// Override a field predicate's value with a wired operand when present; otherwise
+// keep the authored literal / promoted `{var}`.
+function withWiredValue(field: ViewFieldPredicate, wired: ViewOperand | undefined): ViewFieldPredicate {
+  return wired === undefined ? field : { ...field, value: wired };
 }
 
 // Lower a `field_of` node (#184, ADR-0031 §D): project its single `of` input
@@ -430,7 +529,7 @@ function highlightBuilt(input: Built, node: ViewGraphNode): Built {
 // descendants_of, tagged, field. Keyed by slot name (a Filter's `filter_kind` or
 // a leaf node's `kind`). Returns null for any other key or an unconfigured slot,
 // so a blank leaf doesn't silently mean "whole universe".
-function commonLeafExpr(slot: string, d: ViewGraphNode["data"]): ViewExpr | null {
+function commonLeafExpr(slot: string, d: ViewGraphNode["data"], wiredValue?: ViewOperand): ViewExpr | null {
   switch (slot) {
     case "type":
       return d.type ? { type: d.type } : null;
@@ -439,15 +538,17 @@ function commonLeafExpr(slot: string, d: ViewGraphNode["data"]): ViewExpr | null
     case "tagged":
       return d.tagged ? { tagged: d.tagged } : null;
     case "field":
-      return d.field?.key ? { field: d.field } : null;
+      return d.field?.key ? { field: withWiredValue(d.field, wiredValue) } : null;
     default:
       return null;
   }
 }
 
-// A Filter's predicate → a leaf ViewExpr (or null when unconfigured).
-function predicateExpr(node: ViewGraphNode): ViewExpr | null {
-  return commonLeafExpr(node.data.filter_kind ?? "type", node.data);
+// A Filter's predicate → a leaf ViewExpr (or null when unconfigured). A wired
+// value source on the Filter's `value` handle (#196) overrides the field's
+// authored literal / promoted formal.
+function predicateExpr(node: ViewGraphNode, wiredValue?: ViewOperand): ViewExpr | null {
+  return commonLeafExpr(node.data.filter_kind ?? "type", node.data, wiredValue);
 }
 
 // A leaf/injector node → its ViewExpr leaf slot. hand_picked/view_ref are
@@ -509,6 +610,10 @@ function isVarOperand(v: unknown): v is { var: string } {
   return typeof v === "object" && v !== null && typeof (v as { var?: unknown }).var === "string";
 }
 
+function isFieldOfOperand(v: unknown): v is { field_of: ViewFieldOf } {
+  return typeof v === "object" && v !== null && (v as { field_of?: unknown }).field_of != null;
+}
+
 // The node ids reachable upstream from the View (output) node — the subgraph
 // that actually lowers into the spec. A promoted formal sitting on a node NOT
 // wired to the output must not leak a phantom parameter into the strip.
@@ -537,7 +642,10 @@ function collectParams(graph: ViewGraph): ViewParam[] {
     if (!reachable.has(n.id)) continue;
     const fp = n.data.field_param;
     const v = n.data.field?.value;
-    if (!fp || !isVarOperand(v) || v.var !== fp.name || seen.has(fp.name)) continue;
+    // A value-wired slot (#196) takes its operand from the edge, not a formal —
+    // the wire wins at lowering, so a stale `field_param` must not leak a param.
+    const valueWired = graph.edges.some((e) => e.target === n.id && e.targetHandle === FILTER_VALUE_HANDLE);
+    if (valueWired || !fp || !isVarOperand(v) || v.var !== fp.name || seen.has(fp.name)) continue;
     seen.add(fp.name);
     const param: ViewParam = { name: fp.name };
     if (fp.label != null) param.label = fp.label;
@@ -704,8 +812,22 @@ export function specToGraph(spec: ViewSpec | null | undefined): ViewGraph {
     if (e.descendants_of != null) return addNode("descendants_of", depth, { descendants_of: e.descendants_of });
     if (e.tagged != null) return addNode("tagged", depth, { tagged: e.tagged });
     if (e.field != null) {
-      const data: ViewNodeData = { field: e.field };
       const v = e.field.value;
+      // A wired value source (#196) reopens as a source node + an edge into the
+      // field's `value` handle; the field node itself drops its inline value
+      // (the wire re-supplies it on lowering).
+      if (isFieldOfOperand(v)) {
+        const fieldId = addNode("field", depth, { field: { ...e.field, value: null } });
+        const foId = walk({ field_of: v.field_of } as ViewExpr, depth + 1);
+        if (foId) link(foId, fieldId, FILTER_VALUE_HANDLE);
+        return fieldId;
+      }
+      if (isVarOperand(v) && v.var === SELF_VAR) {
+        const fieldId = addNode("field", depth, { field: { ...e.field, value: null } });
+        link(addNode("self", depth + 1, {}), fieldId, FILTER_VALUE_HANDLE);
+        return fieldId;
+      }
+      const data: ViewNodeData = { field: e.field };
       if (isVarOperand(v)) {
         const p = paramByName.get(v.var);
         data.field_param = { name: v.var, label: p?.label, default: p?.default };

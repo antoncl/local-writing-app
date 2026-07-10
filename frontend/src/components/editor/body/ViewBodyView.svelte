@@ -34,6 +34,9 @@
     classifyConnection,
     connectionAllowed,
     reachesFieldOf,
+    outputPayload,
+    valueSlotAccepts,
+    FILTER_VALUE_HANDLE,
     OUTPUT_NODE_ID,
     type GraphNodeKind,
     type ViewGraph,
@@ -314,6 +317,8 @@
       entryTypes: entryTypeOptions,
       fields: fieldOptions,
       fieldByKey: (key: string) => schema?.fields?.[key] ?? null,
+      valueWired: (nodeId: string) =>
+        flowEdges.some((e) => e.target === nodeId && e.targetHandle === FILTER_VALUE_HANDLE),
       tags: tagOptions,
       savedViews,
       loreEntries,
@@ -396,7 +401,7 @@
   }): boolean {
     if (!conn.source || !conn.target) return false;
     const target = flowNodes.find((n) => n.id === conn.target);
-    if (!target || inputArity(target.data.kind) === "none") return false;
+    if (!target) return false;
     const byId = new Map<string, ViewGraphNode>(
       flowNodes.map((n) => [n.id, { id: n.id, kind: n.data.kind, position: n.position, data: n.data.cfg ?? {} }]),
     );
@@ -406,6 +411,22 @@
       target: e.target,
       targetHandle: e.targetHandle ?? null,
     }));
+    const fieldType = (key: string) => schema?.fields?.[key]?.type ?? null;
+    const srcNode = byId.get(conn.source);
+    const tgtNode = byId.get(conn.target);
+    // The value slot (#196, ADR-0031 §E): a wired operand into a field/Filter's
+    // `value` handle. Allowed only when the authored field's payload matches the
+    // source's (node-set for entity_ref, value-set for scalar). Bypasses the
+    // arity check — a `field` leaf has no set input but does have a value slot.
+    if (conn.targetHandle === FILTER_VALUE_HANDLE) {
+      if (tgtNode?.kind !== "field" && tgtNode?.kind !== "filter") return false;
+      if (!valueSlotAccepts(srcNode, tgtNode.data.field, fieldType)) return false;
+      return connectionAllowed(classifyConnection(byId, edges, conn.source, conn.target, conn.targetHandle ?? null));
+    }
+    if (inputArity(target.data.kind) === "none") return false;
+    // A value-set source (a scalar `field_of`) may feed ONLY a value slot, never
+    // a node-set input — the two-payload accept-matrix (ADR-0031 §E).
+    if (outputPayload(srcNode, fieldType) === "value-set") return false;
     // Single-hop cut (#184, §14.5): a field_of's `of` must not resolve from
     // another field_of (multi-hop per-node type inference is deferred).
     if (target.data.kind === "field_of" && reachesFieldOf(byId, edges, conn.source)) return false;

@@ -6,8 +6,11 @@ import {
   exprToGraph,
   graphToExpr,
   graphToSpec,
+  outputPayload,
   reachesFieldOf,
   specToGraph,
+  valueSlotAccepts,
+  FILTER_VALUE_HANDLE,
   OUTPUT_NODE_ID,
   type ConnectionVerdict,
   type ViewGraph,
@@ -391,6 +394,81 @@ describe("#184 field_of / self lowering + round-trip (ADR-0031 §D)", () => {
     expect(reachesFieldOf(byId, [edge(src.id, fo.id)], fo.id)).toBe(true);
     // A plain source does not.
     expect(reachesFieldOf(byId, [edge(src.id, fo.id)], src.id)).toBe(false);
+  });
+});
+
+describe("#196 value-set pipe (scalar field_of → Filter value slot, ADR-0031 §E)", () => {
+  const fieldType = (k: string): string | null =>
+    ({ pov: "entity_ref", characters: "entity_ref_list", status: "select" })[k] ?? null;
+
+  it("outputPayload: scalar field_of → value-set; ref/references/other → node-set", () => {
+    expect(outputPayload(node("field_of", { project_field: "status" }), fieldType)).toBe("value-set");
+    expect(outputPayload(node("field_of", { project_field: "pov" }), fieldType)).toBe("node-set");
+    expect(outputPayload(node("field_of", { project_field: "references" }), fieldType)).toBe("node-set");
+    expect(outputPayload(node("self", {}), fieldType)).toBe("node-set");
+    expect(outputPayload(node("type", { type: "x" }), fieldType)).toBe("node-set");
+  });
+
+  it("valueSlotAccepts enforces the two-payload matrix", () => {
+    const scalarFO = node("field_of", { project_field: "status" });
+    const refFO = node("field_of", { project_field: "pov" });
+    const self = node("self", {});
+    const typeSrc = node("type", { type: "scene:scene" });
+    // scalar field slot ← value-set only
+    expect(valueSlotAccepts(scalarFO, { key: "status", op: "overlap" }, fieldType)).toBe(true);
+    expect(valueSlotAccepts(refFO, { key: "status", op: "overlap" }, fieldType)).toBe(false);
+    // entity_ref field slot ← node-set only (a ref projection or a bare $self)
+    expect(valueSlotAccepts(refFO, { key: "pov", op: "overlap" }, fieldType)).toBe(true);
+    expect(valueSlotAccepts(self, { key: "pov", op: "overlap" }, fieldType)).toBe(true);
+    expect(valueSlotAccepts(scalarFO, { key: "pov", op: "overlap" }, fieldType)).toBe(false);
+    // only field_of / self are operand-representable wired sources
+    expect(valueSlotAccepts(typeSrc, { key: "pov", op: "overlap" }, fieldType)).toBe(false);
+    // no field key → nothing to accept
+    expect(valueSlotAccepts(scalarFO, undefined, fieldType)).toBe(false);
+  });
+
+  it("lowers a field leaf with a wired scalar field_of into a {field_of} value operand", () => {
+    const scenes = node("type", { type: "scene:scene" }, 0);
+    const fo = node("field_of", { project_field: "status" }, 100);
+    const field = node("field", { field: { key: "status", op: "overlap" } }, 200);
+    const graph: ViewGraph = {
+      nodes: [out(), scenes, fo, field],
+      edges: [
+        edge(scenes.id, fo.id),
+        edge(fo.id, field.id, FILTER_VALUE_HANDLE),
+        edge(field.id, OUTPUT_NODE_ID),
+      ],
+    };
+    expect(graphToExpr(graph)).toEqual({
+      field: { key: "status", op: "overlap", value: { field_of: { of: { type: "scene:scene" }, field: "status" } } },
+    });
+  });
+
+  it("round-trips a Filter value wired from a field_of", () => {
+    const expr: ViewExpr = {
+      field: { key: "status", op: "overlap", value: { field_of: { of: { type: "scene:scene" }, field: "status" } } },
+    };
+    expect(roundTrip(expr)).toEqual(expr);
+  });
+
+  it("round-trips a Filter value wired from $self", () => {
+    const expr: ViewExpr = { field: { key: "pov", op: "overlap", value: { var: "$self" } } };
+    expect(roundTrip(expr)).toEqual(expr);
+  });
+
+  it("specToGraph rebuilds the value wire (field_of node + edge into the field's value handle)", () => {
+    const graph = specToGraph({
+      kind: "scene",
+      expr: { field: { key: "status", op: "overlap", value: { field_of: { of: { type: "scene:scene" }, field: "status" } } } },
+    });
+    const field = graph.nodes.find((n) => n.kind === "field")!;
+    const fo = graph.nodes.find((n) => n.kind === "field_of")!;
+    expect(fo.data.project_field).toBe("status");
+    expect(
+      graph.edges.some((e) => e.source === fo.id && e.target === field.id && e.targetHandle === FILTER_VALUE_HANDLE),
+    ).toBe(true);
+    // the field node's inline value is cleared — the wire re-supplies it on lowering.
+    expect(field.data.field?.value ?? null).toBeNull();
   });
 });
 

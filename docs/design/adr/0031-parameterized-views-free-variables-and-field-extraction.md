@@ -1,220 +1,246 @@
-# ADR-0031: Parameterized views — free variables, a bindings environment, and the field-extraction node
+# ADR-0031: Parameterized views — free variables, forward projection/predication, and field-set-typed selectors
 
-- Status: Proposed — 0.7.0, **revised 2026-07-09** (design agreed; implementation pending). The
-  2026-07-09 revision corrects a flattening in the original §C/§D: parameters are **two families on
-  two wire pipes** (entity → node-set; value → `{field,value}`), and **referenced-by is not a field
-  predicate** — it is the **Match** node (ADR-0033). See
-  `memory/decisions_184_entity_vs_value_parameters.md`.
+- Status: Accepted — 0.7.0, **rewritten 2026-07-09 (forward model)**; accepted 2026-07-10 (5 context-blind gates). This supersedes the
+  two-pipe/Match revision made earlier the same day. What died is the **symmetric two-parameter-
+  family** framing and **id-in-`field_of` matching** — *not* the existence of two edge payloads:
+  edges still carry **node-sets** (the general flow) and **value-sets** (from scalar `field_of`),
+  because a field's value is a node or a scalar. `field_of` is a **forward projection** whose output
+  follows the field (reference → nodes, scalar → values); reference matching is ordinary **forward
+  `Filter` predication** or **`field_of` projection**; and **Match (ADR-0033) is withdrawn** as
+  unnecessary. See `memory/decisions_184_entity_vs_value_parameters.md`.
 - Feature: #184 Parameterized views · Doc: `views-and-filters.md` (parameterization)
 - Part of the render-pipeline trio: ADR-0027/#181 (producer — canonical `ViewResult`) ·
   **this / #184** (membership-side — parameterization) · #182 (consumer — canonical render wrapper)
-- Amends: ADR-0025 (the frontend evaluator gains a **bindings environment** injected at eval
-  time, alongside `schema`/`resolveView`), ADR-0018/0027 (the grammar gains a **variable operand
-  form** in the predicate value slot and a **field-extraction operator**), builds on ADR-0023
-  (typed param declarations feed the picker)
+- Amends: ADR-0025 (the evaluator gains a **bindings environment** injected at eval time),
+  ADR-0018/0027 (the grammar gains a **variable operand** in a Filter's value slot and a
+  **`field_of` projection** operator), **ADR-0020** (kind-anchoring generalized: a node's field
+  selector derives from **its input set**, not one view-level anchor), builds on ADR-0023
+- Depends on: **ADR-0034** (full-field roster) — the forward model presupposes every node's complete
+  field set is present in the evaluated roster
+- Withdraws: **ADR-0033** (Match) — see §C and "Why"
 - Governed by: `memory/decisions_author_vs_runtime_authority.md`,
-  `memory/decisions_view_render_pipeline_ownership.md`,
-  `memory/decisions_metadata_revision.md` (stable-key-vs-display-name)
+  `memory/decisions_view_render_pipeline_ownership.md`, `memory/decisions_metadata_revision.md`
 
 ## Context
-Every ViewExpr leaf/predicate today takes **literal** operands baked into the stored spec — a
-field predicate's right-hand side is a value the designer picks from a dropdown (ADR-0018 §1.4).
-So a view like *"scenes where character X is the POV"* or *"nodes that reference **this** node"*
-**cannot be a static saved spec**: the identity (`X`, `this node`) lives in the **environment
-around the list**, not the stored view. The evaluator has no channel to inject that identity, so
-these lists are hand-rolled *outside* the view system today — `BacklinksPanel`,
-`MutationTimeline`, ad-hoc POV filters. That is the reason **"derived lists"** exist as an escape
-hatch.
+Every ViewExpr predicate today takes a **literal** operand baked into the stored spec
+(`views-and-filters.md` §1.4). So *"scenes where character X is the POV"* or *"nodes that reference **this** node"* cannot
+be a static saved view — the identity (`X`, `this node`) lives in the **environment around the
+list**, not the spec. Lacking a channel to inject that identity, these lists are hand-rolled
+*outside* the view system (`BacklinksPanel`, `MutationTimeline`, ad-hoc POV filters). That is the
+reason **"derived lists"** exist as an escape hatch.
 
-Parameterized views are what make **"every list is governed by a view"** — the premise of #182 —
-true instead of a slogan: `BacklinksPanel = references(target=$self)`,
-`MutationTimeline = mutations(target=$self)`, POV `= pov == $povCharacter`. The evaluator already
-injects runtime capabilities through `EvalContext` (`schema` for `descendants_of`, `resolveView`
-for `view_ref` — ADR-0025); a **bindings environment** is the same seam, one member further.
+Parameterized views make **"every list is governed by a view"** (the #182 premise) true. The
+evaluator already injects runtime capability through `EvalContext` (`schema`, `resolveView` —
+ADR-0025); a **bindings environment** is the same seam, one member further.
+
+An earlier revision routed this through a *symmetric two-parameter-family* scheme (an entity-param
+pipe and a value-param pipe, plus id-in-`field_of`) and a dedicated reverse-join node (Match,
+ADR-0033). That *symmetric* machinery dissolves once one observation is taken seriously: **you always
+operate from the side of a relationship that carries the linking field.** Everything below follows
+from that. (Two edge *payloads* — node-sets and value-sets — do remain, because a field's value is a
+node or a scalar; that is not the rejected symmetry. See §D.)
 
 ## Decision
 
 **A. Authoring vs runtime — the field is authored, only the value is free.**
-*Which* field or tag a view filters on, and the `nest`/`match` rule, are **authoring** decisions
-frozen into the spec. A free variable **never selects the field or match rule** — it only supplies
-a **value** (a value parameter → the `{field,value}` slot, §C) or a **node** (an entity parameter →
-a node-set input, §C). Choosing to filter on `pov` rather than `status`, or which reference field
-Match traverses, is the author building that predicate; nothing at runtime re-decides it. `$self` (the node the
-pane/editor is anchored to) is a **reserved implicit parameter** the surface supplies; other
-parameters are **user-declared** with a type. This is [[decisions-author-vs-runtime-authority]]:
-capability on the author, per-use value on the runtime user.
+*Which* field a view filters or projects on, and the `nest` rule, are **authoring** decisions frozen
+into the spec. A free variable **never selects the field** — it supplies only a **value** (or a
+**node**, via a wired source). `$self` (the node a pane is anchored to) is a **reserved** parameter
+the surface supplies; other parameters are user-declared. This is
+[[decisions-author-vs-runtime-authority]].
 
 **B. Free variables + a bindings environment.**
-A `ViewSpec` may carry **parameter declarations** `{ name, type, label }`, where `type` is an
-`entity_ref` constraint so a configurator/picker can offer the right values (ADR-0023).
-Evaluation takes a **bindings environment** (`EvalContext.bindings`: param name → value),
-injected at eval time exactly as `resolveView` is. A saved view with **no** free variables is the
-**degenerate closed case** (empty bindings) — nothing changes for existing views. An
-**unresolved** variable degrades gracefully (its predicate contributes no match), mirroring an
-unresolved `view_ref` contributing the empty set.
+A `ViewSpec` may carry **parameter declarations** and evaluation takes a **bindings environment**
+(`EvalContext.bindings`: name → value), injected exactly as `resolveView` is. A view with **no**
+free variables is the **degenerate closed case** (empty bindings) — existing views are unchanged.
+An **unbound** variable degrades gracefully **by role**: an unbound **filter operand** makes its
+predicate **inactive** (no constraint — the input set passes through), while an **unresolved source**
+(`$self` in a pane with no anchor) contributes the **empty set**. A promoted formal is normally
+**seeded by its authored default** (ADR-0032), so "unbound" arises only when no default is set.
 
-**C. Two parameter families, two pipes — the entity/value split is the spine.**
-*(Revised 2026-07-09. The original §C flattened both families into "a variable in the predicate
-value slot"; that lost the node-set nature of entities and mis-modelled referenced-by. Corrected
-below.)* A parameter is one of two families (the same split ADR-0032 §A declares), and each rides
-its own wire type:
+**C. The forward model — predicate or project, always from the field-carrying side.**
+Given a field `F` linking node-sets X and Y, you start from the side that **carries `F`** and do one
+of two things:
+- **Predicate it — `Filter`** — keep the subset of that same side whose `F` matches an operand.
+  The subject never leaves. (`Filter(scenes, pov ∈ {Alice, Bob})` → scenes.)
+- **Project it — `field_of`** — cross to the other side / to the values.
+  (`field_of(scenes, pov)` → the POV characters.)
 
-- An **entity parameter** — `$self` (reserved, surface-supplied) or `$character` (author-declared)
-  — ranges over **nodes**, so it is a **node-set source** on the **node-set pipe** (the existing
-  set-algebra flow). It feeds any node-set input: a Filter's set-input, a `field_of` source, a
-  **Match**/**Nest** Parents or Children handle. It is **not** a value operand.
-- A **value parameter** — `$status` → e.g. `status: draft` — is a coupled **`{field, value}`** (the
-  field it ranges over plus a chosen value). It rides a **second wire type**, the **`{field,value}`
-  pipe**, into a **Filter's RHS**, supplying both the predicate's field and its value.
+This is the whole reference-query surface. The apparent need for a reverse **join** (Match) came
+from *projecting first* (`field_of(scenes, pov)` → characters) and then trying to recover the
+scenes — which forces a join. **Predication never projects, so it never needs to recover the
+subject.** A genuinely reverse query ("which characters are the POV of some draft scene") is *still
+forward* — you start from the scenes (which carry `pov`) and **project** to characters. You are
+forced to a reverse join only when you hold one entity and cannot enumerate the candidate side; with
+a full-field roster (ADR-0034) you always can, so **Match is unnecessary** (see §G for the one
+residual, any-field referenced-by).
 
-So the field-predicate `value` slot is fed only by the **`{field,value}` pipe** — a value parameter,
-or a `field_of` extraction (§D) — **never by an entity**. The two pipes carry different payloads and
-**cannot cross-connect**: a `{field,value}` can't feed `union`/`intersect`/a Match input; a node-set
-can't land on a Filter's RHS. **The type is the connection rule, made visible** — value/binding
-handles sit at the **top** of a node (visually distinct), node-set handles on the sides.
+**D. `field_of` — forward projection; output kind follows the projected field.**
+`field_of(nodeSet, F)` = `flatMap(nodeSet, n → valuesOf(n, F))`, **deduplicated**. Its **output type
+is statically known** from `F`:
+- `F` a **reference** field → the **referenced nodes** (a node-set). `field_of(scenes, pov)` →
+  characters. This output feeds set algebra, the render wrapper, or a Filter operand.
+- `F` a **value** field → the **values** (e.g. the set of statuses in use). This feeds a Filter
+  operand for a same-field comparison ("scenes with the same status as this one").
 
-**referenced-by is not a field predicate** (the original §C's `field(<ref>, includes, $self)` was
-the flatten). "Nodes that reference `$self`" is a **relational match**, expressed with the **Match**
-node (ADR-0033): `$self` (an entity, node-set pipe) into Match's Parents, the universe into
-Children, matched on the reference field; Match returns the referrers, flat. Only genuine **value**
-comparisons — "scenes whose `status` is `draft`", "scenes sharing `$self`'s scalar `pov`" — live on
-the `{field,value}` pipe into a Filter (the **POV/Status** shape).
+`field_of($self, pov)` is the N=1 case; `field_of(All, pov)` yields `pov`'s distinct **projections**
+across the roster — for a reference field the distinct referenced **nodes**, for a scalar field the
+distinct **values** — deduped, so the output is bounded by the field's distinct projections, not
+roster size (no fan-out to guard).
 
-**D. The field-extraction node (`field_of`) — same-field matching, always on the `{field,value}`
-pipe.** Given a **node-set** source and a chosen field `F`, `field_of` emits a coupled
-**`{field: F, value}`** on the `{field,value}` pipe: `flatMap(inputSet, n → valuesOf(n, F))`,
-**deduplicated**. `field_of($self, "pov")` is the N=1 case (`$self` a singleton); a multi-node
-input (e.g. `All`, §E) yields `F`'s distinct values across the set. Wired into a Filter it
-**overrides both** the field (via `F`) and the value — which is exactly a **same-field match**
-("scenes sharing `$self`'s `pov`"): the extracted field and the filtered field are the *same* field,
-so coupling them is correct.
+The **two outputs are two edge payloads**, but they never contend for one port (§E): a Filter's
+single value slot accepts *whichever payload its authored field's type calls for*. A reference
+projection is a **node-set** and joins the general flow — set algebra, the value slot of a Filter
+**authored on an `entity_ref` field**, or (in a later increment) another `field_of` (**multi-hop** —
+the 0.7.0 cut is **single-hop**; see Consequences). A scalar projection is a **value-set**
+and joins **only** the value slot of a Filter **authored on a scalar field**, for same-field /
+same-value comparison. This is what expresses *"nodes sharing `$self`'s tags"* and *"a reference
+tree built by shared tag"* (the value-matching Nest already ships as `by: title`, generalized). Two
+payloads are inherent to the field-value duality — not the rejected symmetric ceremony.
 
-**`field_of` always emits `{field,value}` — never a node-set — including for reference fields.**
-*(Revised 2026-07-09; the original §D wrongly gave it a value-only mode and implied entities could
-be values.)* Same-field matching compares the **stored representation**, and a reference's stored
-representation is its **id**, so "sharing `$self`'s `pov_ref`" is `candidate.pov_ref == <$self's
-stored pov_ref>` — id equality on the `{field,value}` pipe, no entity reified. *Cross-field /
-identity traversal* — a candidate's reference field pointing at a **different** entity — is **not**
-`field_of`; it is **Match** (ADR-0033). `field_of` never produces the node-set an entity target
-would need, which is precisely why coupling `{field,value}` is always the right rule for it (and why
-the original "value-only wire, dropdown names a different LHS" escape hatch — the LHS-override
-problem — is unnecessary: that case is Match).
+**E. `Filter` — forward predication; ONE value slot, typed by the authored field.**
+A Filter has **exactly one value slot** — never an entity slot *and* a value slot. Which payload that
+slot accepts is **fixed by the authored field's type** (monomorphic per field), and the slot renders
+the field's own editor (this ships today — `FieldValueEditor`: `ReferencePicker` for `entity_ref`, an
+option list for `select`, …):
 
-The **field dropdown** selects `F`, listing the source entity's fields **including intrinsics**
-(`id`/`title`/`entry_type` — the honest choice, matching the field-definition window). Because
-entity types are **subtype-polymorphic** (ADR-0032 §A), the dropdown offers the **declared (base)
-type's** fields — every specialization carries at least those. `long_text` stays excluded (§F);
-enum/select project the stored **key** (§F).
+| Authored field type | The one value slot accepts | Compared by |
+|---|---|---|
+| `entity_ref` / `entity_ref_list` | a **node-set** | id overlap |
+| scalar (`select` / `text` / `number` / `tags` / …) | a **value-set** | value overlap |
 
-**E. Cardinality — both sides are sets; predicate semantics is overlap.**
-Because every edge carries a node-set, and extraction (§D) emits a value-*set*, the predicate RHS
-is **generally a set**, and the honest semantics is **coerce both sides to sets and test overlap**:
+So a Filter authored on `pov_ref` exposes a node-set slot; one authored on `status` exposes a
+value-set slot; the slot is never *both*, and its payload type is known statically at authoring time.
+An `entity_ref` field is thus compared by its **stored id** against the operand's id(s) — forward and
+correct: the field is on the candidate, node identity *is* id equality, and no id is extracted or
+reified (the subject stays a scene).
+
+That one slot may be filled three **mutually-exclusive** ways (ADR-0032): an **inline literal**, a
+**promoted formal** (a runtime strip control), or a **wired source** (`$self`, a `field_of` output,
+set-algebra). A wired source occupies the slot as a graph edge into the port; a literal or a formal
+is an in-slot **tagged operand**; the three cannot co-occupy one slot. The serialized operand tag +
+new-node grammar live in the parameterization spec (`views-and-filters.md`).
+
+**Cardinality — both sides are sets; the predicate is overlap.** Because edges carry sets and
+projection emits value-*sets*, the honest semantics is **coerce both sides to sets and test
+overlap**:
 
 | LHS \ RHS | scalar | set |
 |---|---|---|
-| **single** (e.g. `status`) | `==` | **`∈`** — `status ∈ {draft, todo}` |
-| **list** (e.g. `tags`) | `includes` | **intersection ≠ ∅** — "tagged like `$self`" |
+| **single** (e.g. `status`, `pov`) | `==` | **`∈`** — `status ∈ {draft, revised}`, `pov ∈ {Alice, Bob}` |
+| **list** (e.g. `tags`) | `includes` | **intersection ≠ ∅** |
 
-This is one rule, not four. It has two immediate payoffs:
-- **A single-select filters against a *set* of allowed values** — "status is draft **or** todo" is a
-  multi-pick on the value dropdown yielding `{draft, todo}`, tested by `∈`. No union-of-`eq`
-  boilerplate, and **no storage change** — a scene still holds one `status`; only the set of
-  *acceptable* values grows.
-- **Extraction of a multi-valued field just flows in as a set** — no special-casing. `matchesField`
-  already `asArray`s the LHS; the change is to `asArray` the RHS too and test intersection.
-- **Connecting `All` to extraction is safe and well-defined** — `flatMap` + dedup means the output
-  is bounded by the field's *distinct values* (e.g. the set of statuses in use), not by universe
-  size, so there is no Nest-style fan-out to guard.
+One rule, not four. A **single-valued field filters against a *set* of allowed values** with **no
+storage change** (a scene still holds one `status`; only the set of *acceptable* values grows) — this
+is what expresses "Bob **or** Alice" and "draft **or** revised". Consequently the `op` enum
+**collapses 6→4**: `eq`+`includes` → **`overlap`**, `neq`+`not_includes` → **`disjoint`**,
+`set`/`unset` kept. This edits the `op` enum in `models_views.py` and the frontend
+`ViewFieldPredicate.op` type. Per the project **no-pre-1.0-migrations** rule, stored views carrying
+old `eq`/`neq`/`includes`/`not_includes` values are **not migrated** — test projects are recreated
+([[feedback-no-pre-1-0-migrations]]).
 
-Since cardinality now drives the match, the op vocabulary **collapses** (decided 2026-07-08):
-`eq`+`includes` become one positive **overlap** op, `neq`+`not_includes` its negation **disjoint**,
-`set`/`unset` kept — the six-value `op` enum ([`types.ts`] `ViewFieldPredicate.op`) shrinks to four.
-The scalar-vs-list distinction those pairs encoded is now handled by set-coercion, not op choice, so
-keeping them apart is a distinction without a difference. (Op *names* `overlap`/`disjoint` are a
-trivial follow-up; the decision is the merge.)
+**F. Field selectors = the intersection of fields over the input set.**
+A node's field dropdown (on `Filter` and `field_of`) offers **the fields present on every member of
+its actual input set** — not a single view-level anchor kind (generalizing ADR-0020). The common
+cases:
+- a **subtype family** (`character` + `protagonist`, ADR-0026 `is_a`) → the base type's fields (every
+  specialization carries at least those) — the specialization of the intersection rule;
+- **shared field-groups across unrelated kinds** → whatever fields they genuinely share (sharing is
+  not only vertical);
+- a **cross-kind** set with nothing in common → down to intrinsics (`id`/`title`/`entry_type`), with
+  an authoring **warning** when the offered set is thin.
 
-**F. Field-type applicability — not every type is joinable.**
-- **text · number · single-ref · single-select** — scalar, extractable, `∈`/`==`. The easy case,
-  covers most `$self`-style derived lists on day one.
-- **tags · multi-ref · multi-select** — multi-valued → value-sets, intersection semantics (§E).
-- **select / enum (key/label duality).** A select **stores a key** but **shows a label**. Extraction
-  must project the **stored key** — projecting the display string would compare a label against
-  another node's key and never match. The extraction node is **schema-aware for enum fields**
-  (yields the key); the override handle is already key-based, so it round-trips. This is
-  [[decisions-metadata-revision]]'s stable-key-vs-display-name rule resurfacing.
-- **`long_text` — excluded, presence-only.** Freeform prose with no stable identity; equality/
-  membership on a paragraph is meaningless and extraction yields an uncomparable blob. Only
-  `set`/`unset` applies — the same exclusion `context_pick` got from Nest (ADR-0028: per-prompt
-  runtime, not authored structure), which stays excluded here too.
-- **computed numerics** (`word_count`, `cost` — ADR-0029) are comparable *in principle* but want
-  **ordering ops** (`>`/`<`) the grammar lacks; a **noted gap**, not part of this cut.
+The input set's type is derivable statically (leaf kind → `Filter` preserves it → `field_of` remaps
+to `F`'s target). The **runtime evaluator is unchanged** — it still reads fields structurally; this
+is authoring-time type inference for populating dropdowns and validating.
+
+**G. Referenced-by = the `references` computed field (ADR-0029), not an operator.**
+"Nodes referencing `$self` via *any* field" is a disjunction over an unknown set of reference fields
+— awkward to author as one Filter. It is served by the **backlinks computed field ADR-0029 already
+catalogs** — *"backlinks **when surfaced**"* ([[decisions-intrinsic-fields-and-overrides]], ADR-0029)
+— which **#184 is what surfaces** (stable key `references`, label "References"; spec'd in
+`views-and-filters.md` §14.4). As a catalog computed field it is added/removed per type,
+**reorderable and hideable via `field_overrides` like any field** (this realizes #118 pt 3 "References
+editable-or-removable in the schema editor"; the broader bidirectional-display design is GH #15), its
+definition built-in. The one aspect ADR-0029 left implicit — its **value is a node-set**, not a
+scalar like `word_count`/`cost` — is made explicit here: `field_of($self, references)` → the
+referrers (a node-set). Materialized by inverting the forward reference adjacency the **backend
+supplies at load** (`views-and-filters.md` §14.4; the same in-memory inversion Nest does) — a
+**data-model convenience backed by a reverse index, not a graph operator.** Field-*specific* referenced-by ("scenes where Bob is POV") is just
+forward `Filter(scenes, pov ∈ {Bob})`.
+
+**H. Field-type applicability.**
+- **text · number · single-ref · single-select** — scalar, projectable, `∈`/`==`.
+- **tags · multi-ref · multi-select** — multi-valued → value-sets, intersection semantics.
+- **select / enum** — projects the **stored key**, never the label (else a label compares against
+  another node's key and never matches) — [[decisions-metadata-revision]] stable-key rule.
+- **`long_text`** — excluded, presence-only (`set`/`unset`): freeform prose has no stable identity.
+- **computed numerics** (`word_count`, `cost`) want ordering ops (`>`/`<`) the grammar lacks — a
+  **noted gap**.
+
+**I. Universe & complement — kind-relative, against the roster.**
+`All` is the **view's roster** (the `EvalNode[]` the pane supplies, ADR-0034) — *not* "all nodes of
+one kind." **Complement** (the only universe-dependent op) is **kind-relative**:
+`complement(S) = { n ∈ All : kind(n) ∈ kinds(S) } − S`. ADR-0020's "all nodes of that kind" is this in
+the single-kind special case. It is well-defined only when `S` is **kind-homogeneous** — e.g.
+*"characters who are the POV of no scene"* = `All(characters) − field_of(scenes, pov)` (both sides
+characters). **Complementing a heterogeneous (cross-kind) set has no coherent universe → out of scope
+for 0.7.0** (a validation error), on the same typed-pipe frontier as multi-hop. This makes the
+**roster-completeness** requirement load-bearing: the roster must be **complete within every kind the
+view references** (ADR-0034) — otherwise a kind-relative complement silently under-counts.
 
 ## Why / rejected alternatives
-- **Sigil string `"$self"` as the operand form — rejected.** Stringly-typed and collides with any
-  literal value that legitimately begins with `$`. The grammar discriminates by **tagged slots**
-  everywhere else (`ViewExpr`, `ViewSource = ViewSpec | ViewRef`); a tagged variable operand is
-  the house style.
-- **Keeping derived lists backend-computed (the current `/references/backlinks` endpoint) as
-  their permanent home — rejected.** It leaves "derived lists" a hand-rolled escape hatch and
-  contradicts ADR-0025 (eval is frontend-side). The synthetic parameterized views are
-  **frontend-constructed and never persisted**, so **no backend round-trip is needed** until a
-  user *saves* a parameterized view — which is the configurator slice (out of scope here).
-- **Splitting `name` and `value` into independent wires — rejected (§D).** The motivating case for
-  a split (a value for a *different* LHS field than the one it came from) is **referenced-by**, and
-  that is now **Match** (ADR-0033), not a field predicate — so `field_of` stays cleanly coupled and
-  never needs a value-only mode. A field *is* a `(name, value)` unit; coupling matches the writer's
-  mental model.
-- **Overloading the field predicate for reference traversal — rejected (2026-07-09).** A
-  *polymorphic Filter RHS* (accept a green entity, identity-match when the LHS is a reference field)
-  was considered; it mixes value comparison and identity traversal in one node and reintroduces the
-  **LHS-override problem** (an extracted `(name,value)` hijacks the filter's field). Likewise a
-  *mode flag on Nest* (flat-vs-nested output) is the mode-parameter smell. Reference traversal gets
-  its **own node, Match** (ADR-0033) — flat semi-join, green in/out — so Filter stays value-only and
-  Nest stays tree-only.
-- **A dedicated reverse-link / "backlinks" operator — RESOLVED as Match (ADR-0033), not deferred.**
-  Referenced-by, "which nodes reference `$self`", is the Match node (`$self` → Parents, universe →
-  Children, match on the reference field, flat output). `MutationTimeline`'s non-roster data source
-  is still separate work layered on top.
-- **Keeping `eq`/`includes` (and `neq`/`not_includes`) as distinct ops — rejected (§E, decided).**
-  Under set-coerced overlap they are the same test at different cardinalities; the difference was
-  only scalar-vs-list-field, now handled by coercion. They **merge** into `overlap`/`disjoint`
-  (+ `set`/`unset`). This is a backend `models_views.py` op-set change touching stored views' `op`
-  values — **cheap pre-1.0** (test projects recreated, `feedback_no_pre_1_0_migrations`).
+- **Match / a dedicated reverse-join operator (ADR-0033) — withdrawn.** It was introduced to give
+  reference traversal a *flat* output. Forward **predication** keeps the subject (no join to recover
+  it) and forward **projection** (`field_of`) yields the other side directly; the only residual —
+  any-field referenced-by — is the `'References'` computed field (§G). Match adds no expressive
+  power. Keeping it would re-introduce a near-clone of Nest and re-litigate flat-vs-tree, which
+  ADR-0027/#181 already made a **presentation** concern (`treePresentation`), not a grammar one.
+- **The symmetric two-parameter-family framing (entity-param pipe vs value-param pipe, both feeding
+  filters) — rejected.** The Filter's value operand is **one** slot, field-typed (`ReferencePicker`
+  for `entity_ref`, select for `select`), fed by a literal, a promoted formal, or a wired payload of
+  the matching type. There is no "entity pipe vs value pipe" to reconcile *at the Filter*; the
+  "polymorphic RHS" objection dissolves because the slot's type is fixed by the **authored** field
+  (monomorphic per field), not chosen at runtime. (This is distinct from the two *edge payloads*,
+  §D — those are real and inherent; what is rejected is the symmetric *parameter-family* ceremony.)
+- **`field_of` always emits `{field,value}`, and id-in-`field_of` matching — rejected.** That
+  demoted a reference to its id and forced hand-rolled identity matching. `field_of` **projects**;
+  on a reference field it yields **nodes**. Forward predication never extracts an id to match.
+- **A `direction` parameter on `field_of` — rejected.** Forward-only over a full-field roster
+  (ADR-0034) removes the need to traverse a forward field in reverse; reverse membership is either a
+  forward `Filter` on the candidate side or the `'References'` field.
+- **Sigil string `"$self"` as the operand — rejected.** Stringly-typed; the grammar discriminates by
+  tagged slots everywhere else. A tagged variable operand is the house style.
+- **Backend-computed derived lists as their permanent home — rejected.** Contradicts ADR-0025
+  (frontend eval). Synthetic parameterized views are frontend-constructed and never persisted until
+  a user *saves* one (the configurator slice, ADR-0032).
 
 ## Consequences
-- **The grammar grows two things**: a **variable-operand form** in the field-predicate `value`
-  slot, and a **field-extraction operator** (`field_of` — a node-set → coupled `(name, valueSet)`
-  via `flatMap` + dedup). The evaluator gains a **bindings environment** in `EvalContext`/`RunState`
-  (amends ADR-0025, mirroring `resolveView`) and **set-coerced overlap** in `matchesField` (both
-  sides → sets; §E). `$self` is reserved.
-- **Predicate semantics becomes cardinality-driven** (§E): the `op` enum shrinks 6→4 — one
-  `overlap` test + its `disjoint` negation replace `eq`/`neq`/`includes`/`not_includes` (**decided**
-  op collapse), `set`/`unset` retained. A single-select filters against a multi-pick value **set**
-  (`status ∈ {draft, todo}`) with no storage change.
-- **The graph gains a second wire type** (§C): node-set edges (set-algebra flow) vs
-  **`{field,value}`** edges (value parameter / `field_of` → a Filter RHS), visually distinct and
-  non-cross-connectable. Value/binding handles sit at the **top** of a node; node-set handles on the
-  sides. The type is the connection rule.
-- **The designer grows** (§C/§D): an **entity Parameter** node (node-set source: `$self` reserved,
-  `$character` declared) and a **value Parameter** node (`{field,value}` source); the
-  **field-extraction** node `field_of` (node-set → `{field,value}`); and the **Match** node
-  (ADR-0033) for reference traversal. A `{field,value}` wire into a Filter **overrides its field/op/
-  value editors and locks them** until disconnected (it is the single source); a wired field the
-  target kind lacks is a **validation warning**.
-- **Referenced-by / reference traversal is Match, not a predicate** (§C, ADR-0033): the Filter RHS
-  stays **`{field,value}`-only**; Nest stays tree-only; Match owns the flat semi-join. Entity
-  parameters (node-set pipe) feed Filter set-inputs, `field_of` sources, and Match/Nest handles.
-- **Field-type applicability is bounded** (§F): `long_text` and `context_pick` excluded (presence-
-  only); enum extraction is key-space; computed-numeric ordering ops are a noted gap.
-- **Existing closed views are byte-identical** (empty bindings, no variables) — the closed case is
-  the degenerate case.
-- **The backend (`models_views.py`) is untouched** in this cut: synthetic parameterized views live
-  and die in the frontend. Backend persistence of **typed param declarations** arrives only with
-  the **configurator/picker** for user-authored parameterized views (a later slice, likely with
-  #182's derived-list phase).
-- **Derived lists fold into the view system.** `BacklinksPanel`, `MutationTimeline`, and POV
-  become **synthetic parameterized views bound with `$self`** (#182's derived-list slice),
-  collapsing the escape hatch into the core and making "every list is governed by a view" true.
-- **Out of scope**: the configurator/picker for user-declared params and its backend persistence;
-  a dedicated reverse-link operator; `MutationTimeline`'s non-roster data source; splitting
-  `name`/`value`.
+- **The grammar grows two things**: a **variable operand** in a Filter's value slot, and the
+  **`field_of` projection** operator (node-set → nodes or values, `flatMap` + dedup). The evaluator
+  gains a **bindings environment** (amends ADR-0025) and **set-coerced overlap** in `matchesField`;
+  the `op` enum shrinks **6→4**. Runtime remains field-structural.
+- **Field selectors become input-set-derived** (§F, generalizing ADR-0020): authoring-time type
+  inference offers the **intersection of fields over the input set**; cross-kind degrades gracefully
+  with a warning.
+- **Requires a full-field roster (ADR-0034).** The forward model can only predicate/project on
+  fields present in the evaluated roster; the thin manuscript-structure projection is insufficient.
+- **`'References'` is a computed node-set field** (§G) backed by a frontend reverse index — not an
+  operator.
+- **Match, the *symmetric two-parameter-family* ceremony, `field_of` direction, and id-matching are
+  removed.** Edges still carry **two honest payloads** — node-sets (general flow) and value-sets
+  (scalar `field_of` → a Filter's value operand) — an inherent consequence of the field-value
+  duality, not the rejected ceremony.
+- **Derived lists fold in**: `BacklinksPanel` = `field_of($self, 'References')`; POV/status = forward
+  Filters bound via the parameter strip — synthetic views, collapsing the escape hatch.
+- **Multi-hop** (`field_of → field_of`, e.g. House→characters→scenes) works under §F applied to
+  `field_of`'s **inferred** output, via per-node type inference. **0.7.0 cut = single-hop**
+  (`field_of` output → a terminal / set algebra / a Filter operand — not into another type-aware
+  node's primary input); multi-hop (per-node inference) is the first forward-compatible increment;
+  **heterogeneous self-render / flow composition = Views 2.0**
+  ([[decisions-views-2-0-flow-model]]).
+- **Existing closed views are byte-identical** (empty bindings). **`models_views.py`** gains no
+  *parameter-list* fields for *synthetic* (frontend-only) views; the `op`-enum edit above is the one
+  separate backend change. A **saved** parameterized view persists its parameter list (ADR-0032).
+- **Out of scope**: the configurator/persistence (ADR-0032); multi-hop inference; `MutationTimeline`'s
+  non-roster source.

@@ -145,6 +145,21 @@ export type ViewResult<T extends EvalNode = EvalNode> = {
   diagnostics?: ViewDiagnostics;
 };
 
+// A bound actual for a free variable (#184): an id-set (entity_ref formal /
+// `$self`) or a value-set (scalar formal) — both plain string sets. Accepted as
+// a Set or a bare array; normalized to a Set at resolution.
+export type BindingValue = ReadonlySet<string> | readonly string[];
+export type EvalBindings = Record<string, BindingValue | null | undefined>;
+
+// The reserved variable name for the pane's anchor node (#184, ADR-0032). Its
+// canonical use is `field_of({var: "$self"}, "references")`.
+export const SELF_VAR = "$self";
+
+// The stable key of the built-in `references` computed node-set field (ADR-0029,
+// #184 §14.4): any-field backlinks, read from the reverse index (below) rather
+// than a node's metadata. `field_of(of, "references")` projects to the referrers.
+export const REFERENCES_FIELD = "references";
+
 export type EvalContext = {
   // Needed only by the `descendants_of` leaf: resolves an entry_type FQN to
   // itself + every type inheriting from it via `parent:` chains.
@@ -152,6 +167,15 @@ export type EvalContext = {
   // Needed only by the `view_ref` leaf: resolves a saved-view node id to its
   // stored ViewSpec. Referenced views are kind-anchored to the same kind.
   resolveView?: (viewId: string) => ViewSpec | null;
+  // #184: the bindings environment (name → id-set | value-set), injected exactly
+  // as `schema`/`resolveView` are. `$self` and each promoted formal read from
+  // here. An unbound formal ⇒ its predicate is inactive (input passes through);
+  // an unresolved `$self` ⇒ the empty set (ADR-0031 §B).
+  bindings?: EvalBindings;
+  // #184 §14.4 (Phase 2): the reverse reference index (targetId → referrer ids)
+  // backing the `references` field, threaded like `schema`. Absent ⇒ `field_of`
+  // on `references` yields the empty set.
+  referenceIndex?: ReadonlyMap<string, ReadonlySet<string>>;
 };
 
 // Build an implicit default view for a pane: the whole universe of `kind`,
@@ -208,6 +232,8 @@ type RunState<T extends EvalNode> = {
   descendantsCache: Map<string, Set<string>>;
   schema?: MetadataSchema | null;
   resolveView?: (viewId: string) => ViewSpec | null;
+  bindings?: EvalBindings; // #184: name → id-set|value-set (free variables + $self)
+  referenceIndex?: ReadonlyMap<string, ReadonlySet<string>>; // #184: targetId → referrers
   viewStack: string[]; // view_ref cycle guard
   diag: ViewDiagnostics; // nest accumulator (cycle/orphan/fan-out counts)
   nestRan: boolean; // whether any `nest` evaluated (gates `diagnostics` on result)
@@ -232,6 +258,8 @@ export function evaluateView<T extends EvalNode>(
     descendantsCache: new Map(),
     schema: ctx.schema,
     resolveView: ctx.resolveView,
+    bindings: ctx.bindings,
+    referenceIndex: ctx.referenceIndex,
     viewStack: [],
     diag: { cyclicLinksSkipped: 0, orphansDropped: 0, fanoutTruncated: false },
     nestRan: false,
@@ -501,7 +529,49 @@ function evalExpr<T extends EvalNode>(state: RunState<T>, expr: ViewExpr): Set<s
   // Nest buried in the set algebra contributes its flat membership: every node
   // that landed in the denormalized tree (parents kept + children attached).
   if (expr.nest) return evalNest(state, expr.nest).placed;
+  // Field projection (#184, ADR-0031 §D): project the input set through a field.
+  // In membership position the result is treated as a node-set (reference
+  // projection); a scalar projection's values are only meaningful as a Filter
+  // operand and fall out of the universe filter here.
+  if (expr.field_of) return evalFieldOf(state, expr.field_of);
+  // A free variable / `$self` leaf (#184): resolves to a node-set from bindings.
+  if (expr.var != null) return evalVar(state, expr.var);
   return evalLeaf(state, expr);
+}
+
+// Forward projection: evaluate `of` to a node-set, then flatMap each node's
+// `field` values and dedupe (ADR-0031 §D). Returns a set of strings — target
+// ids for a reference field (a node-set), the stored values for a scalar field
+// (a value-set); the position determines interpretation.
+function evalFieldOf<T extends EvalNode>(state: RunState<T>, op: { of: ViewExpr; field: string }): Set<string> {
+  return projectField(state, evalExpr(state, op.of), op.field);
+}
+
+function projectField<T extends EvalNode>(state: RunState<T>, ofIds: Set<string>, field: string): Set<string> {
+  const out = new Set<string>();
+  // `references` is not a stored field — it reads the reverse index (§14.4).
+  if (field === REFERENCES_FIELD) {
+    for (const id of ofIds) {
+      const referrers = state.referenceIndex?.get(id);
+      if (referrers) for (const r of referrers) out.add(r);
+    }
+    return out;
+  }
+  for (const id of ofIds) {
+    const n = state.nodeById.get(id);
+    if (!n) continue;
+    for (const v of asArray(fieldValue(n, field, state.schema))) {
+      const s = String(v).trim();
+      if (s) out.add(s);
+    }
+  }
+  return out;
+}
+
+// A var/`$self` in membership/`of`/leaf position → a node-set from bindings
+// ($self = the anchored node as a singleton). Unresolved ⇒ empty (ADR-0031 §B).
+function evalVar<T extends EvalNode>(state: RunState<T>, name: string): Set<string> {
+  return bindingSet(state.bindings?.[name]);
 }
 
 function evalLeaf<T extends EvalNode>(state: RunState<T>, expr: ViewExpr): Set<string> {
@@ -522,7 +592,7 @@ function evalLeaf<T extends EvalNode>(state: RunState<T>, expr: ViewExpr): Set<s
   }
   if (expr.field != null) {
     const pred = expr.field;
-    return idsWhere(state, (n) => matchesField(n, pred, state.schema));
+    return idsWhere(state, (n) => matchesField(state, n, pred));
   }
   if (expr.hand_picked != null) {
     const picked = new Set(expr.hand_picked);
@@ -573,7 +643,9 @@ function isBareViewRef(expr: ViewExpr): boolean {
     expr.descendants_of == null &&
     expr.tagged == null &&
     expr.field == null &&
-    expr.hand_picked == null
+    expr.hand_picked == null &&
+    expr.field_of == null &&
+    expr.var == null
   );
 }
 
@@ -847,24 +919,72 @@ function fieldValue(node: EvalNode, key: string, schema: MetadataSchema | null |
     : node.metadata?.[key];
 }
 
-function matchesField(node: EvalNode, pred: ViewFieldPredicate, schema: MetadataSchema | null | undefined): boolean {
-  const raw = fieldValue(node, pred.key, schema);
-  switch (pred.op) {
-    case "set":
-      return !isEmpty(raw);
-    case "unset":
-      return isEmpty(raw);
-    case "eq":
-      return scalarEq(raw, pred.value);
-    case "neq":
-      return !scalarEq(raw, pred.value);
-    case "includes":
-      return asArray(raw).some((v) => scalarEq(v, pred.value));
-    case "not_includes":
-      return !asArray(raw).some((v) => scalarEq(v, pred.value));
-    default:
-      return false;
+// An unbound promoted formal — the predicate is inactive and passes the input
+// through (ADR-0031 §B), distinct from an operand that resolves to the empty set.
+const OPERAND_INACTIVE = Symbol("operand-inactive");
+
+// Overlap/disjoint semantics (ADR-0031 §E, #184): set-coerce both sides and test
+// (non-)intersection. `set`/`unset` are presence tests (operand ignored). The one
+// value slot may be a bare literal, a tagged `{var}` (a promoted formal / `$self`),
+// or a tagged `{field_of}` projection — resolved to a set of strings by
+// `resolveOperand`. An entity_ref field's stored value is an id (or id list), so
+// overlap on it is id-overlap; a scalar field's is value-overlap — automatically,
+// because both sides coerce to string sets.
+function matchesField<T extends EvalNode>(state: RunState<T>, node: T, pred: ViewFieldPredicate): boolean {
+  const raw = fieldValue(node, pred.key, state.schema);
+  if (pred.op === "set") return !isEmpty(raw);
+  if (pred.op === "unset") return isEmpty(raw);
+  const operand = resolveOperand(state, pred.value);
+  if (operand === OPERAND_INACTIVE) return true; // unbound formal → no constraint
+  const overlaps = intersects(toStringSet(raw), operand);
+  return pred.op === "overlap" ? overlaps : !overlaps; // "disjoint"
+}
+
+// Resolve a predicate operand to a string set (or INACTIVE). A `{var}` reads the
+// bindings: an unresolved `$self` is the empty set (a source with no anchor);
+// an unbound formal is INACTIVE (its predicate drops out). A `{field_of}` is a
+// projection; anything else is a bare literal, set-coerced.
+function resolveOperand<T extends EvalNode>(
+  state: RunState<T>,
+  value: unknown,
+): Set<string> | typeof OPERAND_INACTIVE {
+  if (isVarOperand(value)) {
+    const bound = state.bindings?.[value.var];
+    if (bound == null) return value.var === SELF_VAR ? new Set<string>() : OPERAND_INACTIVE;
+    return bindingSet(bound);
   }
+  if (isFieldOfOperand(value)) return evalFieldOf(state, value.field_of);
+  return toStringSet(value);
+}
+
+function isVarOperand(v: unknown): v is { var: string } {
+  return typeof v === "object" && v !== null && typeof (v as { var?: unknown }).var === "string";
+}
+
+function isFieldOfOperand(v: unknown): v is { field_of: { of: ViewExpr; field: string } } {
+  return typeof v === "object" && v !== null && (v as { field_of?: unknown }).field_of != null;
+}
+
+// Normalize a binding actual (Set or array) to a Set; nullish ⇒ empty.
+function bindingSet(v: BindingValue | null | undefined): Set<string> {
+  return v == null ? new Set<string>() : new Set(v);
+}
+
+// Coerce a raw metadata value to a set of trimmed strings — an entity_ref id, an
+// id/tag/value list, or a CSV string (shared `asArray` splitting), for overlap.
+function toStringSet(v: unknown): Set<string> {
+  const out = new Set<string>();
+  for (const item of asArray(v)) {
+    const s = String(item).trim();
+    if (s) out.add(s);
+  }
+  return out;
+}
+
+function intersects(a: Set<string>, b: Set<string>): boolean {
+  const [small, large] = a.size <= b.size ? [a, b] : [b, a];
+  for (const x of small) if (large.has(x)) return true;
+  return false;
 }
 
 function isEmpty(v: unknown): boolean {
@@ -876,23 +996,6 @@ function asArray(v: unknown): unknown[] {
   if (v === null || v === undefined) return [];
   if (typeof v === "string") return v.split(",").map((s) => s.trim()).filter(Boolean);
   return [v];
-}
-
-function scalarEq(a: unknown, b: unknown): boolean {
-  if (a === null || a === undefined || b === null || b === undefined) return a === b;
-  if (typeof a === "number" || typeof b === "number") {
-    const na = Number(a);
-    const nb = Number(b);
-    if (!Number.isNaN(na) && !Number.isNaN(nb)) return na === nb;
-  }
-  if (typeof a === "boolean" || typeof b === "boolean") return toBool(a) === toBool(b);
-  return String(a) === String(b);
-}
-
-function toBool(v: unknown): boolean {
-  if (typeof v === "boolean") return v;
-  if (typeof v === "string") return v === "true" || v === "1";
-  return !!v;
 }
 
 // --- set + sort helpers --------------------------------------------------

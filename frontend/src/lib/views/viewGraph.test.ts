@@ -53,7 +53,7 @@ describe("viewGraph serialization (round-trip)", () => {
       { type: "lore:character" },
       { descendants_of: "lore:character" },
       { tagged: "gotham" },
-      { field: { key: "pov", op: "eq", value: "honor" } },
+      { field: { key: "pov", op: "overlap", value: "honor" } },
       { hand_picked: ["a", "b"] },
       { view_ref: "view-123" },
     ];

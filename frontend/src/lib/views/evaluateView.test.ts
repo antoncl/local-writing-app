@@ -63,7 +63,7 @@ describe("leaves", () => {
   // must read node.title, not the absent metadata.title (regression for the
   // missing-Title field the picker now surfaces).
   it("field predicate on `title` reads the node title", () => {
-    expect(ids({ kind: "lore", expr: { field: { key: "title", op: "eq", value: "Alice" } } })).toEqual(["b"]);
+    expect(ids({ kind: "lore", expr: { field: { key: "title", op: "overlap", value: "Alice" } } })).toEqual(["b"]);
     expect(ids({ kind: "lore", expr: { field: { key: "title", op: "set" } } })).toEqual(["a", "b", "c", "d", "e"]);
   });
 
@@ -80,7 +80,7 @@ describe("leaves", () => {
   // top-level node property (#116), so a field predicate on it reads
   // node.entry_type, not the absent metadata.entry_type.
   it("field predicate on `entry_type` reads the node entry_type", () => {
-    expect(ids({ kind: "lore", expr: { field: { key: "entry_type", op: "eq", value: "lore:character" } } })).toEqual([
+    expect(ids({ kind: "lore", expr: { field: { key: "entry_type", op: "overlap", value: "lore:character" } } })).toEqual([
       "a",
       "b",
     ]);
@@ -100,12 +100,14 @@ describe("backend-dense exprs (explicit null slots)", () => {
     complement: null,
     annotate: null,
     of: null,
+    field_of: null,
     type: null,
     descendants_of: null,
     tagged: null,
     field: null,
     hand_picked: null,
     view_ref: null,
+    var: null,
   } as const;
   // Cast through `unknown`: the ViewExpr/ViewSort types model unset slots as
   // `undefined`, but the backend serializes them as explicit `null`. This test
@@ -124,7 +126,7 @@ describe("backend-dense exprs (explicit null slots)", () => {
     expect(ids(dense({ tagged: "gotham" }))).toEqual(["b", "c"]);
   });
   it("field survives sibling nulls", () => {
-    expect(ids(dense({ field: { key: "pov", op: "eq", value: "honor" } }))).toEqual(["a"]);
+    expect(ids(dense({ field: { key: "pov", op: "overlap", value: "honor" } }))).toEqual(["a"]);
   });
   it("color-only annotate (label null) makes no group", () => {
     const spec = dense({ annotate: { label: null, color: "red", rank: null }, of: { ...NULLS, tagged: "gotham" } });
@@ -134,31 +136,102 @@ describe("backend-dense exprs (explicit null slots)", () => {
   });
 });
 
-describe("field predicates", () => {
-  it("eq", () => {
-    expect(ids({ kind: "lore", expr: { field: { key: "pov", op: "eq", value: "honor" } } })).toEqual(["a"]);
+describe("field predicates (op enum 6→4: overlap/disjoint/set/unset)", () => {
+  it("overlap: single value (== case)", () => {
+    expect(ids({ kind: "lore", expr: { field: { key: "pov", op: "overlap", value: "honor" } } })).toEqual(["a"]);
   });
-  it("neq excludes the match (and keeps unset rows)", () => {
-    expect(ids({ kind: "lore", expr: { field: { key: "pov", op: "neq", value: "honor" } } })).toEqual([
+  it("disjoint excludes the match (and keeps unset rows)", () => {
+    expect(ids({ kind: "lore", expr: { field: { key: "pov", op: "disjoint", value: "honor" } } })).toEqual([
       "b", "c", "d", "e",
     ]);
   });
-  it("eq coerces numbers", () => {
-    expect(ids({ kind: "lore", expr: { field: { key: "power", op: "eq", value: "9" } } })).toEqual(["c"]);
+  it("overlap coerces numbers to strings", () => {
+    expect(ids({ kind: "lore", expr: { field: { key: "power", op: "overlap", value: "9" } } })).toEqual(["c"]);
   });
-  it("includes: membership in a collection field", () => {
-    expect(ids({ kind: "lore", expr: { field: { key: "locations", op: "includes", value: "kitchen" } } })).toEqual([
+  it("overlap: single-valued field against a SET of allowed values (∈, no storage change)", () => {
+    // The 6→4 win: `status ∈ {draft, revised}` / `pov ∈ {honor, gotham}` — a
+    // single-valued field filters against a multi-pick operand set (ADR-0031 §E).
+    expect(ids({ kind: "lore", expr: { field: { key: "pov", op: "overlap", value: ["honor", "none"] } } })).toEqual([
+      "a",
+    ]);
+  });
+  it("overlap: membership in a collection field (former `includes`)", () => {
+    expect(ids({ kind: "lore", expr: { field: { key: "locations", op: "overlap", value: "kitchen" } } })).toEqual([
       "d",
     ]);
   });
-  it("not_includes", () => {
-    expect(ids({ kind: "lore", expr: { field: { key: "locations", op: "not_includes", value: "kitchen" } } })).toEqual([
+  it("disjoint: former `not_includes`", () => {
+    expect(ids({ kind: "lore", expr: { field: { key: "locations", op: "disjoint", value: "kitchen" } } })).toEqual([
       "a", "b", "c", "e",
     ]);
   });
-  it("set / unset", () => {
+  it("set / unset (presence, operand ignored)", () => {
     expect(ids({ kind: "lore", expr: { field: { key: "power", op: "set" } } })).toEqual(["c", "e"]);
     expect(ids({ kind: "lore", expr: { field: { key: "power", op: "unset" } } })).toEqual(["a", "b", "d"]);
+  });
+});
+
+// #184 forward model: free variables (`{var}` / `$self`), a bindings environment,
+// and `field_of` forward projection. A small ref-carrying roster: scenes point at
+// characters via `pov`; a couple of tag-carrying nodes for value projection.
+describe("parameterized views (#184: bindings, $self, field_of)", () => {
+  const REFS: EvalNode[] = [
+    { id: "s1", entry_type: "scene:scene", title: "Scene 1", metadata: { pov: "bob", status: "draft" } },
+    { id: "s2", entry_type: "scene:scene", title: "Scene 2", metadata: { pov: "alice", status: "revised" } },
+    { id: "s3", entry_type: "scene:scene", title: "Scene 3", metadata: { pov: "bob", status: "draft" } },
+    { id: "bob", entry_type: "lore:character", title: "Bob", metadata: { tags: ["hero"] } },
+    { id: "alice", entry_type: "lore:character", title: "Alice", metadata: { tags: ["hero", "villain"] } },
+  ];
+  const evalIds = (spec: ViewSpec, ctx: Parameters<typeof evaluateView>[2]) =>
+    evaluateView(spec, REFS, ctx).nodes.map((n) => n.id);
+
+  it("bound promoted formal: scenes whose pov ∈ {bob}", () => {
+    const spec: ViewSpec = { kind: "scene", expr: { field: { key: "pov", op: "overlap", value: { var: "POV" } } } };
+    expect(evalIds(spec, { bindings: { POV: new Set(["bob"]) } })).toEqual(["s1", "s3"]);
+  });
+  it("bound formal accepts a multi-pick set (pov ∈ {bob, alice})", () => {
+    const spec: ViewSpec = { kind: "scene", expr: { field: { key: "pov", op: "overlap", value: { var: "POV" } } } };
+    expect(evalIds(spec, { bindings: { POV: ["bob", "alice"] } })).toEqual(["s1", "s2", "s3"]);
+  });
+  it("UNBOUND formal ⇒ predicate inactive (whole input passes through)", () => {
+    const spec: ViewSpec = { kind: "scene", expr: { field: { key: "pov", op: "overlap", value: { var: "POV" } } } };
+    expect(evalIds(spec, {})).toEqual(["s1", "s2", "s3", "bob", "alice"]);
+  });
+  it("$self as a predicate operand: scenes where THIS character is pov", () => {
+    const spec: ViewSpec = { kind: "scene", expr: { field: { key: "pov", op: "overlap", value: { var: "$self" } } } };
+    expect(evalIds(spec, { bindings: { $self: ["bob"] } })).toEqual(["s1", "s3"]);
+  });
+  it("unresolved $self ⇒ empty set ⇒ no matches (not inactive)", () => {
+    const spec: ViewSpec = { kind: "scene", expr: { field: { key: "pov", op: "overlap", value: { var: "$self" } } } };
+    expect(evalIds(spec, {})).toEqual([]);
+  });
+  it("field_of on a reference field projects to a node-set (scenes → their povs)", () => {
+    // field_of(scenes, pov) → the pov characters, deduped. Used standalone as
+    // membership: the projected ids that exist in the roster (bob, alice).
+    const spec: ViewSpec = { kind: "scene", expr: { field_of: { of: { type: "scene:scene" }, field: "pov" } } };
+    expect(evalIds(spec, {}).sort()).toEqual(["alice", "bob"]);
+  });
+  it("field_of($self, pov) — the N=1 projection", () => {
+    const spec: ViewSpec = { kind: "scene", expr: { field_of: { of: { var: "$self" }, field: "pov" } } };
+    expect(evalIds(spec, { bindings: { $self: ["s2"] } })).toEqual(["alice"]);
+  });
+  it("field_of feeding a Filter operand: same-tag matching (value-set projection)", () => {
+    // field_of(Alice, tags) → {hero, villain}; scenes… no, characters sharing a
+    // tag with Alice. Project alice's tags, then keep characters overlapping them.
+    const spec: ViewSpec = {
+      kind: "lore",
+      expr: {
+        field: { key: "tags", op: "overlap", value: { field_of: { of: { hand_picked: ["alice"] }, field: "tags" } } },
+      },
+    };
+    expect(evalIds(spec, {}).sort()).toEqual(["alice", "bob"]); // both carry "hero"
+  });
+  it("field_of on `references` uses the reverse index (Phase-2 wiring hook)", () => {
+    // field_of($self, references) → the referrers of the anchored node, resolved
+    // through ctx.referenceIndex. Here bob is referenced by s1 and s3.
+    const spec: ViewSpec = { kind: "scene", expr: { field_of: { of: { var: "$self" }, field: "references" } } };
+    const referenceIndex = new Map([["bob", new Set(["s1", "s3"])]]);
+    expect(evalIds(spec, { bindings: { $self: ["bob"] }, referenceIndex }).sort()).toEqual(["s1", "s3"]);
   });
 });
 

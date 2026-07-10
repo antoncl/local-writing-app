@@ -71,38 +71,24 @@
 
   // --- field predicate helpers (comparator adapts to the field's datatype) ---
   let fieldKey = $derived(cfg.field?.key ?? "");
-  let fieldOp = $derived(cfg.field?.op ?? "eq");
+  let fieldOp = $derived<FieldOp>(cfg.field?.op ?? "overlap");
   let fieldDef = $derived(fieldKey ? ctx.fieldByKey(fieldKey) : null);
-  let fieldOps = $derived(opsForType(fieldDef?.type));
   let opNeedsValue = $derived(fieldOp !== "set" && fieldOp !== "unset");
   function setField(next: Partial<NonNullable<ViewNodeData["field"]>>) {
     const merged = { key: fieldKey, op: fieldOp, value: cfg.field?.value, ...next };
-    // If the new field's datatype no longer supports the current op, reset it.
-    if (next.key !== undefined) {
-      const ops = opsForType(ctx.fieldByKey(next.key)?.type);
-      if (!ops.some((o) => o.value === merged.op)) merged.op = ops[0]?.value ?? "eq";
-    }
     patch({ field: merged });
   }
 
   type FieldOp = NonNullable<ViewNodeData["field"]>["op"];
-  const OP_LABEL: Record<FieldOp, string> = {
-    eq: "=",
-    neq: "≠",
-    includes: "includes",
-    not_includes: "excludes",
-    set: "is set",
-    unset: "is empty",
-  };
-  function opsForType(type: MetadataFieldType | undefined): { value: FieldOp; label: string }[] {
-    // Collection fields compare by membership; scalars by equality. set/unset
-    // (presence) apply to every type. Unknown type → offer the full menu.
-    const collection = type === "multi_select" || type === "entity_ref_list" || type === "tags";
-    const scalar = type === undefined ? (["eq", "neq"] as FieldOp[]) : collection ? [] : (["eq", "neq"] as FieldOp[]);
-    const member: FieldOp[] = type === undefined || collection ? ["includes", "not_includes"] : [];
-    const ops: FieldOp[] = [...scalar, ...member, "set", "unset"];
-    return ops.map((value) => ({ value, label: OP_LABEL[value] }));
-  }
+  // Op enum collapsed 6→4 (ADR-0031 §E, #184): overlap/disjoint set-coerce both
+  // sides and work for scalar and collection fields alike, so one menu serves
+  // every type (the old per-type eq/neq vs includes/not_includes split is gone).
+  const FIELD_OPS: { value: FieldOp; label: string }[] = [
+    { value: "overlap", label: "any of" },
+    { value: "disjoint", label: "none of" },
+    { value: "set", label: "is set" },
+    { value: "unset", label: "is empty" },
+  ];
 
   // --- sorter helpers ---
   let sortBy = $derived<ViewSort["by"]>(cfg.sort?.by ?? "manual");
@@ -253,7 +239,7 @@
       {/each}
     </select>
     <select class="vfield op" value={fieldOp} onchange={(e) => setField({ op: e.currentTarget.value as FieldOp })}>
-      {#each fieldOps as op (op.value)}
+      {#each FIELD_OPS as op (op.value)}
         <option value={op.value}>{op.label}</option>
       {/each}
     </select>

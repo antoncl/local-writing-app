@@ -27,21 +27,40 @@ from typing import Any, Literal
 
 from pydantic import BaseModel, Field, model_validator
 
-FieldPredicateOp = Literal["eq", "neq", "includes", "not_includes", "set", "unset"]
+# The op enum collapsed 6→4 for the forward model (ADR-0031 §E, #184): `eq`+
+# `includes` → `overlap` (set-coerce both sides, test non-empty intersection),
+# `neq`+`not_includes` → `disjoint` (its negation), `set`/`unset` kept. An
+# `entity_ref` field compares by id, a scalar by value. No migration of stored
+# old-op values — test projects are recreated (pre-1.0).
+FieldPredicateOp = Literal["overlap", "disjoint", "set", "unset"]
 
 
 class FieldPredicate(BaseModel):
-    """A `field` leaf: test a metadata field against a value. `op` set/unset test
-    presence and ignore `value`; eq/neq compare scalars; includes/not_includes
-    test collection membership. Authored via the field's own widget — no
-    free-text DSL (doc §1.4)."""
+    """A `field` leaf: test a metadata field against an operand. `op` set/unset
+    test presence and ignore `value`; overlap/disjoint set-coerce both sides and
+    test (non-)intersection (ADR-0031 §E). Authored via the field's own widget —
+    no free-text DSL (doc §1.4)."""
 
     key: str = Field(min_length=1)
     op: FieldPredicateOp
-    # A metadata value (str/int/float/bool/list/dict); kept loose to avoid a
-    # models.py <-> models_views.py import cycle. Only structurally validated in
-    # step 1 — there is no evaluator comparing it yet.
+    # The operand: EITHER a bare metadata literal (str/int/float/bool/list) OR a
+    # tagged operand — `{"var": name}` (a promoted formal or the reserved
+    # `$self`) or `{"field_of": {...}}` (a forward projection, #184 §14.1). Kept
+    # loose (`Any`) — the two shapes are mutually exclusive and the frontend
+    # evaluator dispatches on shape (no evaluator here; backend is structural).
     value: Any = None
+
+
+class FieldOfOp(BaseModel):
+    """`field_of` — forward projection (ADR-0031 §D, #184): `flatMap(of, n →
+    valuesOf(n, field))`, deduped. `of` is the input set (any ViewExpr — a leaf,
+    a `$self` var, set algebra); `field` is the projected key. The output payload
+    is INFERRED, never stored: a reference field yields a node-set, a scalar field
+    a value-set. Appears as a standalone ViewExpr (feeds set algebra / the render
+    wrapper) or inline in a predicate `value` (same-field/same-value matching)."""
+
+    of: ViewExpr
+    field: str = Field(min_length=1)
 
 
 class AnnotatePayload(BaseModel):
@@ -120,12 +139,14 @@ _VIEW_EXPR_PRIMARY_SLOTS: tuple[str, ...] = (
     "complement",
     "nest",
     "annotate",
+    "field_of",
     "type",
     "descendants_of",
     "tagged",
     "field",
     "hand_picked",
     "view_ref",
+    "var",
 )
 
 
@@ -148,6 +169,9 @@ class ViewExpr(BaseModel):
     # Annotate pass-through: the payload plus the input set it forwards unchanged.
     annotate: AnnotatePayload | None = None
     of: ViewExpr | None = None
+    # Field projection (#184, ADR-0031 §D): project the input set through a field.
+    # A set-producing operator, like the combinators — not paired via `of`.
+    field_of: FieldOfOp | None = None
     # Leaves
     type: str | None = None  # exact entry_type FQN, e.g. "lore:character"
     descendants_of: str | None = None  # an entry_type FQN + every type inheriting it
@@ -155,6 +179,11 @@ class ViewExpr(BaseModel):
     field: FieldPredicate | None = None
     hand_picked: list[str] | None = None  # explicit node ids — the one static leaf
     view_ref: str | None = None  # a saved view node id (cycle-checked at save)
+    # A free variable / reserved source leaf (#184, ADR-0032): `{"var": "$self"}`
+    # is the anchored node (surface-supplied via bindings); a user-declared name
+    # is a promoted formal. Resolves from `EvalContext.bindings` at eval time; in
+    # an `of`/leaf position it is a singleton node-set (empty when unresolved).
+    var: str | None = None
 
     @model_validator(mode="after")
     def _exactly_one_primary(self) -> ViewExpr:
@@ -207,6 +236,23 @@ class ViewGroupSpec(BaseModel):
     color: str | None = None
 
 
+class ViewParam(BaseModel):
+    """A declared runtime formal (#184, ADR-0032): a promoted Filter value slot.
+    `name` is the stable key `{"var": name}` operands reference; `label` is the
+    parameter-strip UI; `default` is the authored OVERRIDABLE default (null/absent
+    ⇒ unbound ⇒ its predicate is inactive until the user picks). **No `type` is
+    stored** — a param's type is recomputed at load from the field(s) whose slot
+    references it (the intersection rule, ADR-0031 §F), single source of truth.
+    `$self` is reserved (surface-supplied) and never appears in a params list."""
+
+    name: str = Field(min_length=1)
+    label: str = ""
+    # The overridable default operand — a literal in the field's stored shape
+    # (e.g. a list of ids for entity_ref). Loose for the same reason as
+    # `FieldPredicate.value`.
+    default: Any = None
+
+
 class ViewSpec(BaseModel):
     """A kind-anchored membership expression + ordering — the portable core of a
     view. Membership is EITHER a single `expr` (flat view) OR an ordered
@@ -214,12 +260,14 @@ class ViewSpec(BaseModel):
     ADR-0027). `expr`/`groups` both None = the whole universe of `kind` (the
     degenerate "all nodes of this kind" spec a kind-only picker source uses).
     Entry_type refs inside `expr` are FQN (#77). `sort` is the fallback when a
-    group carries no per-segment sort."""
+    group carries no per-segment sort. `params` declares runtime formals (#184);
+    a view with none is the degenerate closed case (existing views are unchanged)."""
 
     kind: str = Field(min_length=1)
     expr: ViewExpr | None = None
     groups: list[ViewGroupSpec] | None = None
     sort: ViewSort | None = None
+    params: list[ViewParam] | None = None
 
     @model_validator(mode="after")
     def _expr_xor_groups(self) -> ViewSpec:
@@ -237,9 +285,11 @@ class ViewRef(BaseModel):
     view: str = Field(min_length=1)
 
 
-# Resolve the mutually-recursive forward refs (ViewExpr ↔ DifferenceOp/NestOp, self).
+# Resolve the mutually-recursive forward refs (ViewExpr ↔ DifferenceOp/NestOp/
+# FieldOfOp, self).
 DifferenceOp.model_rebuild()
 NestOp.model_rebuild()
+FieldOfOp.model_rebuild()
 ViewExpr.model_rebuild()
 
 

@@ -27,6 +27,7 @@
 // minimal shipped `expr` without a universe leaf in the grammar.
 
 import type { ViewExpr, ViewFieldPredicate, ViewGroupSpec, ViewNestMatch, ViewNestOp, ViewParam, ViewSort, ViewSpec } from "@/lib/types";
+import { SELF_VAR } from "@/lib/views/evaluateView";
 
 export type LeafKind = "type" | "descendants_of" | "tagged" | "field" | "hand_picked" | "view_ref";
 export type CombinatorKind = "union" | "intersect" | "difference" | "complement";
@@ -36,6 +37,9 @@ export type PredicateKind = "type" | "descendants_of" | "tagged" | "field";
 // "output" is the single sink (the View); its named handles are the groups.
 // "nest" is the relational operator (ADR-0028): two input handles
 // (parents/children), one output; a self-loop into `parents` = recursion.
+// "field_of" is forward projection (#184, ADR-0031 §D): one `of` input, a field
+// selector, one output (a node-set). "self" is the reserved wired source
+// (`{var: "$self"}`, the pane's anchor node): no input, one output.
 export type GraphNodeKind =
   | "output"
   | "all"
@@ -43,6 +47,8 @@ export type GraphNodeKind =
   | "sorter"
   | "highlight"
   | "nest"
+  | "field_of"
+  | "self"
   | CombinatorKind
   | LeafKind;
 
@@ -84,6 +90,11 @@ export type ViewNodeData = {
   // promotion survives the graph⇄spec round-trip (the spec keeps `params`;
   // `{var}` in the predicate lowers verbatim). Absent = a plain literal value.
   field_param?: { name: string; label?: string; default?: unknown };
+  // field_of (#184, ADR-0031 §D): the metadata key this node projects its `of`
+  // input through. Reference/node-set fields (incl. the built-in `references`)
+  // project to a node-set; the 0.7.0 cut offers only those (scalar projection =
+  // a value-set, deferred with its Filter value-slot consumer, §14.5).
+  project_field?: string;
   // output (View) — the named handles / groups
   handles?: ViewHandle[];
   // legacy annotate group slots (kept so pre-#91 layouts don't crash on load)
@@ -140,9 +151,10 @@ export function inputArity(kind: GraphNodeKind): "none" | "one" | "many" | "keep
     case "filter":
     case "sorter":
     case "highlight":
+    case "field_of":
       return "one";
     default:
-      return "none"; // injectors (leaves + all)
+      return "none"; // injectors (leaves + all + self)
   }
 }
 
@@ -200,6 +212,28 @@ export function classifyConnection(
 // verdict as a warning (stage 5 / #110).
 export function connectionAllowed(verdict: ConnectionVerdict): boolean {
   return verdict === "ok" || verdict === "nest-recursion";
+}
+
+// The single-hop cut (#184, ADR-0031 / §14.5): a `field_of`'s `of` must not
+// resolve — through the graph — from another `field_of`. Multi-hop projection
+// would need per-node type inference the 0.7.0 authoring layer doesn't do, so a
+// would-be edge into a `field_of` input is rejected when the source node IS or
+// reaches (upstream) any `field_of`. Pure graph walk (source + its ancestors).
+export function reachesFieldOf(
+  byId: Map<string, ViewGraphNode>,
+  edges: ViewGraphEdge[],
+  sourceId: string,
+): boolean {
+  const stack = [sourceId];
+  const seen = new Set<string>();
+  while (stack.length) {
+    const cur = stack.pop()!;
+    if (seen.has(cur)) continue;
+    seen.add(cur);
+    if (byId.get(cur)?.kind === "field_of") return true;
+    for (const e of edges) if (e.target === cur) stack.push(e.source);
+  }
+  return false;
 }
 
 // --- the three-valued lowering algebra -----------------------------------
@@ -334,6 +368,11 @@ function buildNode(
         return complementBuilt(soleChild(graph, byId, nodeId, seen));
       case "nest":
         return nestBuilt(graph, byId, node, seen);
+      case "self":
+        // The reserved anchor source — `{var: "$self"}` (no input).
+        return built({ var: SELF_VAR });
+      case "field_of":
+        return fieldOfBuilt(soleChild(graph, byId, nodeId, seen), node);
       case "filter":
         return filterBuilt(soleChild(graph, byId, nodeId, seen), node);
       case "sorter":
@@ -365,6 +404,18 @@ function filterBuilt(input: Built, node: ViewGraphNode): Built {
   if (!p) return input; // unconfigured filter = pass-through
   const mode = node.data.filter_mode ?? "keep";
   return mode === "drop" ? differenceBuilt(input, built(p)) : intersectBuilt([input, built(p)]);
+}
+
+// Lower a `field_of` node (#184, ADR-0031 §D): project its single `of` input
+// through the selected field. `field_of`'s `of` is a REQUIRED ViewExpr and the
+// grammar has no universal-set leaf, so an unwired/`All` input (which
+// materializes to null = universe) can't be expressed → EMPTY, degrading like
+// any unconfigured node. An unset field selector is likewise EMPTY.
+function fieldOfBuilt(input: Built, node: ViewGraphNode): Built {
+  const field = node.data.project_field;
+  const of = materialize(input);
+  if (!field || !of) return EMPTY;
+  return built({ field_of: { of, field } });
 }
 
 function highlightBuilt(input: Built, node: ViewGraphNode): Built {
@@ -632,6 +683,20 @@ export function specToGraph(spec: ViewSpec | null | undefined): ViewGraph {
         return id;
       }
       return walk(e.of, depth);
+    }
+    if (e.field_of != null) {
+      // Forward projection (#184): a field_of node fed by its `of` subgraph.
+      const id = addNode("field_of", depth, { project_field: e.field_of.field });
+      const ofId = walk(e.field_of.of, depth + 1);
+      if (ofId) link(ofId, id);
+      return id;
+    }
+    if (e.var != null) {
+      // Only the reserved `$self` renders as a designer source in the 0.7.0 cut
+      // (a declared source Parameter node is deferred, ADR-0032). A promoted
+      // formal never appears as a standalone leaf — it lives in a Filter value
+      // slot — so any other `var` has no designer node and is skipped.
+      return e.var === SELF_VAR ? addNode("self", depth, {}) : null;
     }
     // Leaves. `!= null` (not `!== undefined`): the backend serializes ViewExpr
     // densely, so every unused slot arrives as `null`, not absent.

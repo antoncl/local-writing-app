@@ -449,6 +449,26 @@ DEFAULT_METADATA_SCHEMA: dict[str, Any] = {
             "type": "computed",
             "computed": {"function": "cost", "scope": "project"},
         },
+        "references": {
+            # Any-field backlinks — the built-in node-set computed field
+            # (#184, ADR-0029 §G / ADR-0031 §G). Unlike word_count/cost it has
+            # NO stored/materialized value: it is resolved at VIEW-EVAL time on
+            # the frontend by inverting the forward reference adjacency into a
+            # reverse index (views-and-filters.md §14.4), so there is no
+            # `computed_metadata` branch for it — the loose function dispatch in
+            # computed_metadata.py simply skips the unknown `references` function.
+            # `computed.value_type` DECLARES the output payload (node-set) so the
+            # view designer can type its `field_of` handles (ADR-0031 §D/§G; the
+            # one aspect ADR-0029 left implicit). A catalog field like any other:
+            # added/removed per type, reorderable, hideable/relabelable via
+            # field_overrides — but NOT seeded into any default type membership
+            # (surfacing it as a rail backlinks widget is #15 / Phase 2c), and
+            # its definition is built-in (not user-editable, like the other
+            # computed fields). `field_of($self, references)` → the referrers.
+            "name": "References",
+            "type": "computed",
+            "computed": {"function": "references", "value_type": "node_set"},
+        },
         "ai_provider": {
             "name": "Subscription",
             "type": "select",

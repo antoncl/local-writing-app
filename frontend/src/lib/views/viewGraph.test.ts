@@ -6,6 +6,7 @@ import {
   exprToGraph,
   graphToExpr,
   graphToSpec,
+  reachesFieldOf,
   specToGraph,
   OUTPUT_NODE_ID,
   type ConnectionVerdict,
@@ -338,6 +339,58 @@ describe("nest lowering + self-loop recursion (ADR-0028)", () => {
     const nst = node("nest", { match: { field: "p", direction: "child_to_parent" } as never }, 0);
     const graph: ViewGraph = { nodes: [out(), nst], edges: [edge(nst.id, OUTPUT_NODE_ID)] };
     expect(graphToExpr(graph)).toEqual({ nest: { match: { field: "p", direction: "child_to_parent", by: "ref" } } });
+  });
+});
+
+describe("#184 field_of / self lowering + round-trip (ADR-0031 §D)", () => {
+  it("round-trips field_of over a leaf `of`", () => {
+    const expr: ViewExpr = { field_of: { of: { type: "scene:scene" }, field: "pov" } };
+    expect(roundTrip(expr)).toEqual(expr);
+  });
+
+  it("round-trips the $self-backlinks shape field_of($self, references)", () => {
+    const expr: ViewExpr = { field_of: { of: { var: "$self" }, field: "references" } };
+    expect(roundTrip(expr)).toEqual(expr);
+  });
+
+  it("a standalone $self source lowers to {var: $self}", () => {
+    const self = node("self", {}, 0);
+    const graph: ViewGraph = { nodes: [out(), self], edges: [edge(self.id, OUTPUT_NODE_ID)] };
+    expect(graphToExpr(graph)).toEqual({ var: "$self" });
+  });
+
+  it("field_of with no projected field lowers to nothing", () => {
+    const src = node("type", { type: "scene:scene" }, 0);
+    const fo = node("field_of", {}, 100);
+    const graph: ViewGraph = {
+      nodes: [out(), src, fo],
+      edges: [edge(src.id, fo.id), edge(fo.id, OUTPUT_NODE_ID)],
+    };
+    expect(graphToExpr(graph)).toBeNull();
+  });
+
+  it("field_of with no wired `of` lowers to nothing (grammar has no universal-set leaf)", () => {
+    const fo = node("field_of", { project_field: "references" }, 0);
+    const graph: ViewGraph = { nodes: [out(), fo], edges: [edge(fo.id, OUTPUT_NODE_ID)] };
+    expect(graphToExpr(graph)).toBeNull();
+  });
+
+  it("specToGraph rebuilds a field_of node wired from its `of` subgraph", () => {
+    const graph = specToGraph({ kind: "lore", expr: { field_of: { of: { var: "$self" }, field: "references" } } });
+    const fo = graph.nodes.find((n) => n.kind === "field_of")!;
+    const self = graph.nodes.find((n) => n.kind === "self")!;
+    expect(fo.data.project_field).toBe("references");
+    expect(graph.edges.some((e) => e.source === self.id && e.target === fo.id)).toBe(true);
+  });
+
+  it("reachesFieldOf enforces the single-hop cut", () => {
+    const src = node("type", { type: "scene:scene" }, 0);
+    const fo = node("field_of", { project_field: "pov" }, 100);
+    const byId = new Map([[src.id, src], [fo.id, fo]]);
+    // A field_of output (or anything downstream of it) reaches a field_of.
+    expect(reachesFieldOf(byId, [edge(src.id, fo.id)], fo.id)).toBe(true);
+    // A plain source does not.
+    expect(reachesFieldOf(byId, [edge(src.id, fo.id)], src.id)).toBe(false);
   });
 });
 

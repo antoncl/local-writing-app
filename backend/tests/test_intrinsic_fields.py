@@ -87,6 +87,27 @@ class IntrinsicFieldTests(unittest.TestCase):
         self.assertEqual(fields["status"].category, "stored")
         self.assertEqual(fields["color"].category, "stored")
 
+    def test_references_is_a_builtin_node_set_computed_field(self) -> None:
+        # #184 Phase 2b (ADR-0031 §G): `references` (any-field backlinks) is a
+        # built-in catalog computed field. It carries no stored value (resolved
+        # at view-eval time from the reverse index) but DECLARES its node-set
+        # output payload via `computed.value_type` so the view designer can type
+        # its `field_of` handles. It is NOT seeded into any type's membership.
+        schema = self.service.read_metadata_schema()
+        references = schema.fields.get("references")
+        self.assertIsNotNone(references, "references catalog field is missing")
+        assert references is not None  # narrow for the type checker
+        self.assertEqual(references.category, "computed")
+        self.assertEqual(references.type, "computed")
+        self.assertEqual(references.name, "References")
+        self.assertEqual((references.computed or {}).get("value_type"), "node_set")
+        for entry_type_id, definition in schema.entry_types.items():
+            self.assertNotIn(
+                "references",
+                definition.fields,
+                f"references should not be seeded into {entry_type_id} membership",
+            )
+
     def test_title_is_not_stored_in_metadata_after_save(self) -> None:
         # Declaring title/id/entry_type as fields must not cause them to be
         # persisted into the metadata dict — storage stays in front matter.

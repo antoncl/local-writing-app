@@ -33,6 +33,7 @@
     inputArity,
     classifyConnection,
     connectionAllowed,
+    reachesFieldOf,
     OUTPUT_NODE_ID,
     type GraphNodeKind,
     type ViewGraph,
@@ -351,6 +352,13 @@
   ]);
   // Filter is the everyday transform; series = AND, parallel = OR by topology.
   const FILTERS: { kind: GraphNodeKind; label: string }[] = [{ kind: "filter", label: "Filter" }];
+  // Projection (#184): follow a reference field to the nodes it points at
+  // (`Field of`), seeded by the pane's anchor entry (`This entry`). Together they
+  // author backlinks — `field_of(This entry, References)`.
+  const PROJECT: { kind: GraphNodeKind; label: string }[] = [
+    { kind: "field_of", label: "Field of" },
+    { kind: "self", label: "This entry" },
+  ];
   // Operations — the explicit set combinators, the power tier.
   const OPERATIONS: { kind: GraphNodeKind; label: string }[] = [
     { kind: "union", label: "Union" },
@@ -398,6 +406,9 @@
       target: e.target,
       targetHandle: e.targetHandle ?? null,
     }));
+    // Single-hop cut (#184, §14.5): a field_of's `of` must not resolve from
+    // another field_of (multi-hop per-node type inference is deferred).
+    if (target.data.kind === "field_of" && reachesFieldOf(byId, edges, conn.source)) return false;
     return connectionAllowed(classifyConnection(byId, edges, conn.source, conn.target, conn.targetHandle ?? null));
   }
   // After a connection auto-adds, trim single-input handles to their newest edge
@@ -546,6 +557,12 @@
       </span>
       <span class="pal-sep"></span>
       <span class="pal-group">
+        {#each PROJECT as p (p.kind)}
+          <button type="button" class="proj" onclick={() => addNode(p.kind)}>{p.label}</button>
+        {/each}
+      </span>
+      <span class="pal-sep"></span>
+      <span class="pal-group">
         {#each OPERATIONS as p (p.kind)}
           <button type="button" class="op" onclick={() => addNode(p.kind)}>{p.label}</button>
         {/each}
@@ -682,6 +699,10 @@
     font-weight: 600;
   }
   .palette button.op {
+    border-color: var(--accent);
+    color: var(--accent);
+  }
+  .palette button.proj {
     border-color: var(--accent);
     color: var(--accent);
   }

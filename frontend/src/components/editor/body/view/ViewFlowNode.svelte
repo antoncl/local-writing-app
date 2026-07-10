@@ -40,6 +40,8 @@
     difference: "Difference",
     complement: "Complement",
     nest: "Nest",
+    field_of: "Field of",
+    self: "This entry",
     highlight: "Highlight",
     type: "Type is",
     descendants_of: "Type & subtypes",
@@ -157,6 +159,26 @@
   );
   function setMatch(next: Partial<NonNullable<ViewNodeData["match"]>>) {
     patch({ match: { field: matchField, direction: matchDir, by: matchBy, ...next } });
+  }
+
+  // --- field_of (forward projection, #184 ADR-0031 §D) ---
+  // The 0.7.0 cut projects to a NODE-SET only: the input kind's reference fields
+  // (entity_ref / entity_ref_list) plus the built-in `references` (any-field
+  // backlinks — a universal projection offered on every field_of, even though it
+  // isn't a member of the anchor kind's types). Scalar projection (a value-set)
+  // and its Filter value-slot consumer are deferred (§14.5). Fields are the
+  // anchor kind's (single-hop from anchor sources); precise cross-kind
+  // intersection is deferred with multi-hop.
+  let projectField = $derived(cfg.project_field ?? "");
+  let projectFields = $derived(buildProjectFields());
+  function buildProjectFields(): { key: string; name: string }[] {
+    const out: { key: string; name: string }[] = [];
+    for (const f of ctx.fields) {
+      if (f.def.type === "entity_ref" || f.def.type === "entity_ref_list") out.push({ key: f.key, name: f.name });
+    }
+    const refDef = ctx.fieldByKey("references");
+    if (refDef && !out.some((o) => o.key === "references")) out.push({ key: "references", name: refDef.name });
+    return out;
   }
 
   // --- hand_picked helpers: ids <-> light refs for NodePicker ---
@@ -458,6 +480,19 @@
       <button type="button" class:on={matchBy === "title"} onclick={() => setMatch({ by: "title" })}>By title</button>
     </div>
     <p class="vhint">Wire roots into <b>parents</b>, candidates into <b>children</b>. Loop the output back to <b>parents</b> to recurse.</p>
+  {:else if kind === "field_of"}
+    <!-- Forward projection (#184): follow a reference field from the wired input
+         set to the nodes it points at. `References` projects the other way — the
+         nodes that reference the input (any-field backlinks). -->
+    <select class="vfield" value={projectField} onchange={(e) => patch({ project_field: e.currentTarget.value })}>
+      <option value="">— follow field —</option>
+      {#each projectFields as f (f.key)}
+        <option value={f.key}>{f.name}</option>
+      {/each}
+    </select>
+    <p class="vhint">Wire a set into the input; projects to a set of <b>nodes</b>.</p>
+  {:else if kind === "self"}
+    <p class="vhint">The entry this pane is anchored to. Feed it into <b>Field of</b> — e.g. <b>References</b> for its backlinks.</p>
   {:else if kind === "highlight"}
     <span class="vswatch" title="Highlight colour">
       <span class="vswatch-label">Colour</span>

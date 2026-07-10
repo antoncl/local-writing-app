@@ -26,7 +26,7 @@
 // (nothing wired). The sentinels let filters-off-`All` and set ops fold to the
 // minimal shipped `expr` without a universe leaf in the grammar.
 
-import type { ViewExpr, ViewFieldPredicate, ViewGroupSpec, ViewNestMatch, ViewNestOp, ViewSort, ViewSpec } from "@/lib/types";
+import type { ViewExpr, ViewFieldPredicate, ViewGroupSpec, ViewNestMatch, ViewNestOp, ViewParam, ViewSort, ViewSpec } from "@/lib/types";
 
 export type LeafKind = "type" | "descendants_of" | "tagged" | "field" | "hand_picked" | "view_ref";
 export type CombinatorKind = "union" | "intersect" | "difference" | "complement";
@@ -78,6 +78,12 @@ export type ViewNodeData = {
   match?: ViewNestMatch;
   // highlight (color-only annotate)
   color?: string;
+  // promote-in-place (#184 Phase 1b, ADR-0032): when a field predicate's value
+  // slot is promoted to a runtime formal, the value carries `{var: name}` and
+  // this holds the formal's authored label + overridable `default`, so the
+  // promotion survives the graph⇄spec round-trip (the spec keeps `params`;
+  // `{var}` in the predicate lowers verbatim). Absent = a plain literal value.
+  field_param?: { name: string; label?: string; default?: unknown };
   // output (View) — the named handles / groups
   handles?: ViewHandle[];
   // legacy annotate group slots (kept so pre-#91 layouts don't crash on load)
@@ -447,8 +453,52 @@ function lowerSegment(
   return { handle, built: built.tag === "empty" && sort ? UNIVERSE : built, sort };
 }
 
+// Is a predicate value slot a promoted-formal reference (`{var: name}`)?
+function isVarOperand(v: unknown): v is { var: string } {
+  return typeof v === "object" && v !== null && typeof (v as { var?: unknown }).var === "string";
+}
+
+// The node ids reachable upstream from the View (output) node — the subgraph
+// that actually lowers into the spec. A promoted formal sitting on a node NOT
+// wired to the output must not leak a phantom parameter into the strip.
+function reachableFromOutput(graph: ViewGraph): Set<string> {
+  const seen = new Set<string>();
+  const stack = [OUTPUT_NODE_ID];
+  while (stack.length) {
+    const cur = stack.pop()!;
+    if (seen.has(cur)) continue;
+    seen.add(cur);
+    for (const e of graph.edges) if (e.target === cur) stack.push(e.source);
+  }
+  return seen;
+}
+
+// Collect the promoted runtime formals (#184 Phase 1b, ADR-0032) declared on
+// reachable field nodes, in stable node order. A formal counts only when its
+// node both carries a `field_param` AND actually references it via
+// `field.value = {var: name}`, so a demoted (or key-changed) node never emits a
+// stale param. Deduped by name (the stable key `{var}` operands reference).
+function collectParams(graph: ViewGraph): ViewParam[] {
+  const reachable = reachableFromOutput(graph);
+  const seen = new Set<string>();
+  const out: ViewParam[] = [];
+  for (const n of graph.nodes) {
+    if (!reachable.has(n.id)) continue;
+    const fp = n.data.field_param;
+    const v = n.data.field?.value;
+    if (!fp || !isVarOperand(v) || v.var !== fp.name || seen.has(fp.name)) continue;
+    seen.add(fp.name);
+    const param: ViewParam = { name: fp.name };
+    if (fp.label != null) param.label = fp.label;
+    if (fp.default !== undefined) param.default = fp.default;
+    out.push(param);
+  }
+  return out;
+}
+
 // Serialize the graph reachable from the View node into a ViewSpec. 0–1
 // populated handles → a flat `expr`; 2+ → an ordered `groups` list (ADR-0027).
+// Promoted formals reachable from the output become `params` (#184 Phase 1b).
 export function graphToSpec(graph: ViewGraph, base: { kind: string; sort?: ViewSort | null }): ViewSpec {
   const byId = new Map(graph.nodes.map((n) => [n.id, n]));
   const handles = outputHandles(byId.get(OUTPUT_NODE_ID));
@@ -456,9 +506,12 @@ export function graphToSpec(graph: ViewGraph, base: { kind: string; sort?: ViewS
   const segments = handles.map((h) => lowerSegment(graph, byId, h, handleIds));
   const populated = segments.filter((s) => s.built.tag !== "empty");
 
+  const params = collectParams(graph);
+  const withParams = (s: ViewSpec): ViewSpec => (params.length > 0 ? { ...s, params } : s);
+
   if (handles.length <= 1 || populated.length <= 1) {
     const seg = populated[0];
-    return { kind: base.kind, expr: seg ? materialize(seg.built) : null, sort: seg?.sort ?? base.sort ?? null };
+    return withParams({ kind: base.kind, expr: seg ? materialize(seg.built) : null, sort: seg?.sort ?? base.sort ?? null });
   }
 
   const groups: ViewGroupSpec[] = populated.map((s, i) => {
@@ -467,7 +520,7 @@ export function graphToSpec(graph: ViewGraph, base: { kind: string; sort?: ViewS
     if (s.handle.color) g.color = s.handle.color;
     return g;
   });
-  return { kind: base.kind, groups, sort: base.sort ?? null };
+  return withParams({ kind: base.kind, groups, sort: base.sort ?? null });
 }
 
 // Flat single-segment lowering — the root `expr` of a designer graph, ignoring
@@ -497,6 +550,10 @@ export function specToGraph(spec: ViewSpec | null | undefined): ViewGraph {
 
   const outputNode: ViewGraphNode = { id: OUTPUT_NODE_ID, kind: "output", position: { x: 0, y: 0 }, data: {} };
   nodes.push(outputNode);
+
+  // Promoted formals (#184 Phase 1b): a field value of `{var: name}` reopens as
+  // a promoted node whose label/default come from the matching spec `param`.
+  const paramByName = new Map((spec?.params ?? []).map((p) => [p.name, p]));
 
   const groups = spec?.groups ?? null;
   if (groups && groups.length > 0) {
@@ -581,7 +638,15 @@ export function specToGraph(spec: ViewSpec | null | undefined): ViewGraph {
     if (e.type != null) return addNode("type", depth, { type: e.type });
     if (e.descendants_of != null) return addNode("descendants_of", depth, { descendants_of: e.descendants_of });
     if (e.tagged != null) return addNode("tagged", depth, { tagged: e.tagged });
-    if (e.field != null) return addNode("field", depth, { field: e.field });
+    if (e.field != null) {
+      const data: ViewNodeData = { field: e.field };
+      const v = e.field.value;
+      if (isVarOperand(v)) {
+        const p = paramByName.get(v.var);
+        data.field_param = { name: v.var, label: p?.label, default: p?.default };
+      }
+      return addNode("field", depth, data);
+    }
     if (e.hand_picked != null) return addNode("hand_picked", depth, { hand_picked: e.hand_picked });
     if (e.view_ref != null) return addNode("view_ref", depth, { view_ref: e.view_ref });
     return null;

@@ -79,6 +79,37 @@
     patch({ field: merged });
   }
 
+  // --- promote-in-place (#184 Phase 1b, ADR-0032): a field value slot ⇄ a named
+  // runtime formal. Promoting freezes the field/op (authoring) and turns the
+  // authored literal into an overridable default (runtime); the predicate value
+  // becomes `{var: name}`. `name` keys on the node id so a view can carry two
+  // formals over the same field. Lowering collects these into ViewSpec.params.
+  let fieldParam = $derived(cfg.field_param ?? null);
+  let isPromoted = $derived(fieldParam != null);
+  function promoteField() {
+    const name = fieldKey ? `${fieldKey}_${id}` : `param_${id}`;
+    const label = fieldDef?.name || fieldKey || "Parameter";
+    patch({ field: { key: fieldKey, op: fieldOp, value: { var: name } }, field_param: { name, label, default: cfg.field?.value ?? null } });
+  }
+  function demoteField() {
+    patch({ field: { key: fieldKey, op: fieldOp, value: cfg.field_param?.default ?? null }, field_param: undefined });
+  }
+  function setParamLabel(label: string) {
+    if (cfg.field_param) patch({ field_param: { ...cfg.field_param, label } });
+  }
+  function setParamDefault(v: unknown) {
+    if (cfg.field_param) patch({ field_param: { ...cfg.field_param, default: v } });
+  }
+  // A valueless op (is set / is empty) has no slot to promote — demote when
+  // switching into one so a stale formal can't leak into the parameter strip.
+  function changeOp(op: FieldOp) {
+    if ((op === "set" || op === "unset") && isPromoted) {
+      patch({ field: { key: fieldKey, op, value: undefined }, field_param: undefined });
+    } else {
+      setField({ op });
+    }
+  }
+
   type FieldOp = NonNullable<ViewNodeData["field"]>["op"];
   // Op enum collapsed 6→4 (ADR-0031 §E, #184): overlap/disjoint set-coerce both
   // sides and work for scalar and collection fields alike, so one menu serves
@@ -238,25 +269,59 @@
         <option value={f.key}>{f.name}</option>
       {/each}
     </select>
-    <select class="vfield op" value={fieldOp} onchange={(e) => setField({ op: e.currentTarget.value as FieldOp })}>
+    <select class="vfield op" value={fieldOp} onchange={(e) => changeOp(e.currentTarget.value as FieldOp)}>
       {#each FIELD_OPS as op (op.value)}
         <option value={op.value}>{op.label}</option>
       {/each}
     </select>
   </div>
   {#if opNeedsValue && fieldDef}
-    <div class="vfield-value">
-      <FieldValueEditor
-        field={fieldDef}
-        value={(cfg.field?.value ?? null) as import("@/lib/types").MetadataValue}
-        onChange={(v) => setField({ value: v })}
-        loreEntries={ctx.loreEntries}
-        promptEntries={ctx.promptEntries}
-        structure={ctx.structure}
-        researchStructure={ctx.researchStructure}
-        ariaLabel="Field value"
-      />
-    </div>
+    {#if isPromoted}
+      <!-- Promoted: the slot is a runtime formal. Edit its strip label + the
+           overridable default; Unlink demotes back to a fixed value. -->
+      <div class="vparam" role="group" aria-label="Runtime parameter">
+        <div class="vparam-head">
+          <span class="vparam-tag">Parameter</span>
+          <button type="button" class="vparam-unlink" title="Back to a fixed value" onclick={demoteField}>Unlink</button>
+        </div>
+        <input
+          class="vfield"
+          type="text"
+          placeholder="Parameter label"
+          aria-label="Parameter label"
+          value={cfg.field_param?.label ?? ""}
+          oninput={(e) => setParamLabel(e.currentTarget.value)}
+        />
+        <div class="vfield-value">
+          <FieldValueEditor
+            field={fieldDef}
+            value={(cfg.field_param?.default ?? null) as import("@/lib/types").MetadataValue}
+            onChange={(v) => setParamDefault(v)}
+            loreEntries={ctx.loreEntries}
+            promptEntries={ctx.promptEntries}
+            structure={ctx.structure}
+            researchStructure={ctx.researchStructure}
+            ariaLabel="Default value"
+          />
+        </div>
+      </div>
+    {:else}
+      <div class="vfield-value">
+        <FieldValueEditor
+          field={fieldDef}
+          value={(cfg.field?.value ?? null) as import("@/lib/types").MetadataValue}
+          onChange={(v) => setField({ value: v })}
+          loreEntries={ctx.loreEntries}
+          promptEntries={ctx.promptEntries}
+          structure={ctx.structure}
+          researchStructure={ctx.researchStructure}
+          ariaLabel="Field value"
+        />
+      </div>
+      <button type="button" class="vpromote" title="Expose this value as a runtime parameter" onclick={promoteField}>
+        Promote to parameter
+      </button>
+    {/if}
   {/if}
 {/snippet}
 
@@ -534,6 +599,57 @@
   }
   .vfield.op {
     max-width: 96px;
+  }
+  /* promote-in-place: the "make this a parameter" affordance + the promoted card */
+  .vpromote {
+    display: block;
+    margin: 0 8px 8px;
+    padding: 2px 6px;
+    border: 1px dashed var(--border-strong);
+    background: transparent;
+    border-radius: 5px;
+    font-size: var(--fs-xs);
+    color: var(--text-2);
+    cursor: pointer;
+  }
+  .vpromote:hover {
+    background: var(--panel);
+  }
+  .vparam {
+    margin: 0 8px 8px;
+    padding: 6px;
+    border: 1px solid var(--accent);
+    border-radius: 6px;
+    background: var(--accent-soft);
+  }
+  .vparam-head {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    margin-bottom: 5px;
+  }
+  .vparam-tag {
+    font-size: var(--fs-xs);
+    font-weight: 600;
+    color: var(--accent);
+  }
+  .vparam-unlink {
+    border: none;
+    background: transparent;
+    color: var(--text-3);
+    font-size: var(--fs-xs);
+    cursor: pointer;
+    padding: 0 2px;
+  }
+  .vparam-unlink:hover {
+    color: var(--danger);
+  }
+  .vparam .vfield {
+    width: 100%;
+    margin: 0 0 5px;
+  }
+  .vparam .vfield-value {
+    margin: 0;
   }
   /* keep/drop + asc/desc segmented toggle */
   .vseg {

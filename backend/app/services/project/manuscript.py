@@ -44,10 +44,12 @@ class ManuscriptMixin:
         document = self._manuscript_tree().read()
         schema = self.read_metadata_schema()
         # One-shot scene front-matter scan: avoids per-leaf read_scene
-        # (which does full body parsing). Builds {id → (status, color)}
-        # so each tree node gets O(1) lookup during the recursive walk.
+        # (which does full body parsing). Builds {id → (status, metadata)} so
+        # each tree node gets O(1) lookup during the recursive walk. The full
+        # metadata dict rides along (color is derived from it) so the roster can
+        # be filtered by any scene field (#184 Phase 3).
         index = self._build_node_index(root)
-        scene_front: dict[str, tuple[str | None, str | None]] = {}
+        scene_front: dict[str, tuple[str | None, dict[str, Any]]] = {}
         for scene_id, entry in index.by_id.items():
             if entry.kind != "scene":
                 continue
@@ -58,12 +60,8 @@ class ManuscriptMixin:
             status_raw = fm.get("status")
             status = status_raw if isinstance(status_raw, str) and status_raw else None
             meta = fm.get("metadata")
-            color = None
-            if isinstance(meta, dict):
-                cand = meta.get("color")
-                if isinstance(cand, str) and cand:
-                    color = cand
-            scene_front[scene_id] = (status, color)
+            metadata = meta if isinstance(meta, dict) else {}
+            scene_front[scene_id] = (status, metadata)
         self._inject_structure_computed_metadata(document.root, document.root, schema, scene_front)
         return document
 
@@ -72,7 +70,7 @@ class ManuscriptMixin:
         node: StructureNode,
         root: StructureNode,
         schema: MetadataSchema,
-        scene_front: dict[str, tuple[str | None, str | None]] | None = None,
+        scene_front: dict[str, tuple[str | None, dict[str, Any]]] | None = None,
     ) -> None:
         entry_definition = schema.entry_types.get(node.type)
         if entry_definition is not None and node.scene_id:
@@ -88,13 +86,18 @@ class ManuscriptMixin:
                     if value is not None:
                         computed[field_id] = value
             node.computed_metadata = computed
-            # Surface scene.status + scene.metadata.color via the pre-built
-            # front-matter index so the manuscript tree can render colored
-            # stripes without per-row file reads.
+            # Surface scene.status + the full scene.metadata (color derived from
+            # it) via the pre-built front-matter index so the manuscript tree can
+            # render colored stripes AND the view evaluator can filter the roster
+            # by scene fields — both without per-row file reads (#184 Phase 3).
             if scene_front is not None:
                 pair = scene_front.get(node.scene_id)
                 if pair:
-                    node.status, node.color = pair
+                    status, metadata = pair
+                    node.status = status
+                    node.metadata = metadata or None
+                    color = metadata.get("color")
+                    node.color = color if isinstance(color, str) and color else None
         for child in node.children:
             self._inject_structure_computed_metadata(child, root, schema, scene_front)
 

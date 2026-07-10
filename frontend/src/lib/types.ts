@@ -37,6 +37,10 @@ export type StructureNode = {
   status?: string | null;
   // Scene's instance-level color override (palette swatch id).
   color?: string | null;
+  // Full scene front-matter metadata (pov, characters, locations, …) surfaced
+  // so the view evaluator can filter the Draft roster by scene fields in one
+  // pass (#184 Phase 3). Null for non-scene nodes.
+  metadata?: Record<string, MetadataValue> | null;
   computed_metadata?: Record<string, MetadataValue>;
   children: StructureNode[];
 };

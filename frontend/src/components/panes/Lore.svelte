@@ -12,8 +12,10 @@
   import NodeRow from "@/components/widgets/NodeRow.svelte";
   import NodeList from "@/components/widgets/NodeList.svelte";
   import ViewGroupedList from "@/components/widgets/ViewGroupedList.svelte";
+  import FieldValueEditor from "@/components/widgets/FieldValueEditor.svelte";
   import { getSwatch, resolveColorForType } from "@/lib/utils/colors";
   import { evaluateView, filterGroups, type ViewGroup } from "@/lib/views/evaluateView";
+  import { buildBindings, effectiveParamValue, resolveParamControls } from "@/lib/views/viewParams";
   import { paneViews } from "@/lib/stores/paneViews.svelte";
   import { metadataSchemaStore } from "@/lib/stores/schema";
   import { focusedDocumentStore } from "@/lib/stores/editorFocus";
@@ -37,13 +39,45 @@
   // component (collapse here, unlike the manuscript tree, isn't persisted).
   let searchQuery = "";
   let collapsedGroups: Record<string, boolean> = {};
+  // Ephemeral runtime overrides for the view's declared parameters (#184,
+  // ADR-0032 §C): pane/session state, seeded by each formal's authored default,
+  // never baked into the shared view. Keyed by formal name; stale keys (from a
+  // previously-selected view) are ignored by `buildBindings`.
+  let paramOverrides: Record<string, unknown> = {};
 
   // Every NodeList is backed by a view (ADR-0022). Evaluate the selected view,
   // then apply the pane's own search + presentation on top: a view with label
   // annotations carries its own hard groups (rank-ordered); otherwise Lore
   // groups by entry_type (its intrinsic default), or renders flat when the
   // view's presentation says so.
-  $: viewResult = evaluateView(viewSpec, entries, { schema, resolveView: paneViews.resolveView });
+  // The view's declared parameters → strip controls (type derived from the
+  // referencing Filter slot) + a bindings environment folded into evaluation.
+  $: paramControls = resolveParamControls(viewSpec, schema);
+  $: bindings = buildBindings(viewSpec.params, paramOverrides);
+  $: viewResult = evaluateView(viewSpec, entries, { schema, resolveView: paneViews.resolveView, bindings });
+
+  // The value a strip control shows: the ephemeral override, else the authored
+  // default (both in the field's stored shape). Single-ref fields want a scalar,
+  // list/tags fields a list — FieldValueEditor coerces either way.
+  function paramDisplayValue(name: string): import("@/lib/types").MetadataValue {
+    if (name in paramOverrides) return paramOverrides[name] as import("@/lib/types").MetadataValue;
+    const declared = viewSpec.params?.find((p) => p.name === name)?.default;
+    return (declared ?? null) as import("@/lib/types").MetadataValue;
+  }
+  function setParam(name: string, value: import("@/lib/types").MetadataValue) {
+    paramOverrides = { ...paramOverrides, [name]: value };
+  }
+  function clearParam(name: string) {
+    // Reset to the authored default (drop the override entirely).
+    const { [name]: _dropped, ...rest } = paramOverrides;
+    paramOverrides = rest;
+  }
+  // Whether a formal currently constrains the result (has a non-empty effective
+  // value) — drives the "active" affordance + the clear button.
+  function paramActive(name: string): boolean {
+    const p = viewSpec.params?.find((param) => param.name === name);
+    return p ? effectiveParamValue(p, paramOverrides).length > 0 : false;
+  }
   $: annotations = viewResult.annotations;
   $: filteredEntries = filterEntries(viewResult.nodes, searchQuery);
   // A view with named-handle / structural groups renders through the recursive
@@ -155,6 +189,31 @@
   }
 </script>
 
+{#if paramControls.length > 0}
+  <!-- The parameter strip (#184, ADR-0032 §D): one control per declared formal,
+       seeded by its default and overridable at runtime. Filtering the list from
+       the environment around it — a saved view's search box, generalized. -->
+  <div class="param-strip" role="group" aria-label="View parameters">
+    {#each paramControls as control (control.name)}
+      <div class="param" class:active={paramActive(control.name)}>
+        <span class="param-label">{control.label}</span>
+        <div class="param-control">
+          <FieldValueEditor
+            field={control.field}
+            value={paramDisplayValue(control.name)}
+            onChange={(v) => setParam(control.name, v)}
+            loreEntries={entries}
+            ariaLabel={control.label}
+          />
+        </div>
+        {#if control.name in paramOverrides}
+          <button class="param-clear" title="Reset to default" aria-label={`Reset ${control.label} to default`} onclick={() => clearParam(control.name)}>×</button>
+        {/if}
+      </div>
+    {/each}
+  </div>
+{/if}
+
 <NodeList
   searchPlaceholder="Search entries, tags, aliases"
   bind:searchValue={searchQuery}
@@ -188,3 +247,45 @@
     onmousedown={(event) => event.stopPropagation()}
   />
 {/snippet}
+
+<style>
+  .param-strip {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 10px;
+    padding: 8px 10px;
+    border-bottom: 1px solid var(--border);
+    background: var(--inset);
+  }
+  .param {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    min-width: 0;
+  }
+  .param-label {
+    font-size: var(--fs-xs);
+    color: var(--text-3);
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+    white-space: nowrap;
+  }
+  .param.active .param-label {
+    color: var(--accent-emphasis);
+  }
+  .param-control {
+    min-width: 140px;
+  }
+  .param-clear {
+    border: none;
+    background: transparent;
+    color: var(--text-3);
+    font-size: var(--fs-lg);
+    line-height: 1;
+    padding: 0 2px;
+    cursor: pointer;
+  }
+  .param-clear:hover {
+    color: var(--danger);
+  }
+</style>

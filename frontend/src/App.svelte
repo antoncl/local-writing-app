@@ -130,12 +130,9 @@
   let appState = $state<AppState>({ name: "needsProject" });
   let tagsManagerOpen = $state(false);
   let assistantTagManagerOpen = $state(false);
-  // Sentinel key for the Lore "+ Entry" type-picker, reusing the tree add-menu
-  // machinery (treeActions.toggleAddMenu / addMenuPosition / closeAddMenu). Lore
-  // groups dynamically so it has no per-type "+ Entry" like Prompts — the
-  // pane-header button offers the choice instead. Deprecated types (Note) are
-  // filtered out by entryTypeChoicesByKind, so notes can't be created (#67).
-  const LORE_ADD_MENU_KEY = "lore:new";
+  // The Lore pane owns its own add-menu (a ViewNodeList feature, #112 4c-iv); this
+  // ref lets the pane-header "+ Entry" button drive it.
+  let loreRef = $state<{ toggleAddMenu: (event?: MouseEvent) => void; isAddMenuOpen: () => boolean }>();
   let activeParentId: string | undefined = undefined;
   let draftTitleByScene = $state(new Map<string, string>());
   // The schema-authoring surface (state, the entry-type→kind→tree cascade, and
@@ -214,7 +211,6 @@
     projectSession.onOpenWorkspace = openProjectWorkspace;
     projectSession.onProjectDataLoaded = () => schemaPanes?.syncSelection();
     cleanupThemeWiring = installThemeWiring();
-    document.addEventListener("mousedown", handleDocumentMousedown);
     // Eagerly fetch machine settings (so the chat panel + inputs dialog can show
     // the assistant roster without a round-trip) and auto-rehydrate the
     // last-opened project so an HMR reload / plain F5 doesn't drop the user back
@@ -225,18 +221,9 @@
     void refreshAssistantTags();
     return () => {
       editorPanes.dispose();
-      document.removeEventListener("mousedown", handleDocumentMousedown);
       cleanupThemeWiring?.();
     };
   });
-
-  function handleDocumentMousedown(event: MouseEvent) {
-    const target = event.target as HTMLElement | null;
-    const inAnchorOrPopover = target?.closest(".tree-menu-anchor, .row-add-popover");
-    if (treeActions.addMenuOpenFor !== null && !inAnchorOrPopover) {
-      treeActions.closeAddMenu();
-    }
-  }
 
   // The cross-subsystem workspace wiring, injected into projectSession as
   // onOpenWorkspace and run before loadProjectData. projectSession owns the
@@ -682,39 +669,24 @@
 
   {#snippet loreActions()}
       <ViewSwitcher kind="lore" />
+      <!-- The add-menu popover is owned by Lore's ViewNodeList (mode-agnostic,
+           #112 4c-iv); this header button just drives its imperative handles. -->
       <div class="tree-menu-anchor">
         <button
           class="pin-button"
           type="button"
           title="Add entry"
           aria-label="Add entry"
+          class:active={loreRef?.isAddMenuOpen() ?? false}
           onmousedown={(event) => event.stopPropagation()}
-          onclick={(event) => treeActions.toggleAddMenu(LORE_ADD_MENU_KEY, event)}
+          onclick={(event) => loreRef?.toggleAddMenu(event)}
         >+</button>
-        {#if treeActions.addMenuOpenFor === LORE_ADD_MENU_KEY}
-          <div
-            class="row-add-popover"
-            style={treeActions.addMenuPosition ? `top: ${treeActions.addMenuPosition.top}px; right: ${treeActions.addMenuPosition.right}px` : ""}
-          >
-            <span class="row-add-popover-heading">New entry</span>
-            <NodeList isEmpty={entryTypeChoicesByKind(metadataSchema, "lore").length === 0}>
-              {#each entryTypeChoicesByKind(metadataSchema, "lore") as choice (choice.id)}
-                <NodeRow
-                  title={choice.name}
-                  onClick={() => { treeActions.newLoreEntry(choice.id); treeActions.closeAddMenu(); }}
-                />
-              {/each}
-              {#snippet whenEmpty()}
-                <p class="muted">No entry types defined.</p>
-              {/snippet}
-            </NodeList>
-          </div>
-        {/if}
       </div>
   {/snippet}
   {#snippet loreBody()}
     <div class="pane-content">
       <Lore
+        bind:this={loreRef}
         entries={loreEntries}
         viewSpec={loreViewSpec}
         presentation={loreViewPresentation}

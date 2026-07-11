@@ -4,10 +4,13 @@
 
 <script lang="ts">
   import NodeRow from "@/components/widgets/NodeRow.svelte";
+  import NodeList from "@/components/widgets/NodeList.svelte";
   import ViewNodeList, { type RowCtx } from "@/components/widgets/ViewNodeList.svelte";
   import RowCaret from "@/components/widgets/RowCaret.svelte";
   import CountPill from "@/components/widgets/CountPill.svelte";
   import FieldValueEditor from "@/components/widgets/FieldValueEditor.svelte";
+  import { entryTypeChoicesByKind } from "@/lib/utils/treeHelpers";
+  import { treeActions } from "@/lib/stores/treeActions.svelte";
   import { getSwatch, resolveColorForType } from "@/lib/utils/colors";
   import { evaluateView, type ViewGroup, type ViewResult } from "@/lib/views/evaluateView";
   import { leafGroup } from "@/lib/views/viewResult";
@@ -31,6 +34,24 @@
   $: focusedDocument = $focusedDocumentStore;
   // Open an entry in an editor pane (App owns the pane set).
   export let onOpenEntry: (entryId: string) => void;
+
+  // Add-child menu is a ViewNodeList feature (mode-agnostic; #112 4c-iv). The
+  // "+" button lives in the pane header (App's loreActions), so we bind the list
+  // instance and re-expose its imperative add-menu handles for that button. The
+  // popover itself renders inside this ViewNodeList via the `addMenu` snippet.
+  const ADD_MENU_KEY = "lore:new";
+  let list:
+    | {
+        toggleAddMenu: (parentId: string | null, key: string, event?: MouseEvent) => void;
+        isAddMenuOpen: (key: string) => boolean;
+      }
+    | undefined;
+  export function toggleAddMenu(event?: MouseEvent) {
+    list?.toggleAddMenu(null, ADD_MENU_KEY, event);
+  }
+  export function isAddMenuOpen(): boolean {
+    return list?.isAddMenuOpen(ADD_MENU_KEY) ?? false;
+  }
 
   // Pane-local search text — bound to ViewNodeList's search box. Per-group
   // collapse is ephemeral and owned by ViewNodeList (phase 1; not persisted).
@@ -207,6 +228,7 @@
 {/if}
 
 <ViewNodeList
+  bind:this={list}
   result={displayResult}
   searchPlaceholder="Search entries, tags, aliases"
   bind:searchValue={searchQuery}
@@ -214,6 +236,7 @@
   active={(entry) => focusedDocument?.type === "lore" && focusedDocument.id === entry.id}
   onClick={(entry) => onOpenEntry(entry.id)}
   row={entryRow}
+  {addMenu}
 >
   {#snippet whenEmpty()}
     {#if entries.length === 0}
@@ -223,6 +246,18 @@
     {/if}
   {/snippet}
 </ViewNodeList>
+
+{#snippet addMenu({ close }: { parentId: string | null; close: () => void })}
+  <span class="row-add-popover-heading">New entry</span>
+  <NodeList isEmpty={entryTypeChoicesByKind($metadataSchemaStore, "lore").length === 0}>
+    {#each entryTypeChoicesByKind($metadataSchemaStore, "lore") as choice (choice.id)}
+      <NodeRow title={choice.name} onClick={() => { treeActions.newLoreEntry(choice.id); close(); }} />
+    {/each}
+    {#snippet whenEmpty()}
+      <p class="muted">No entry types defined.</p>
+    {/snippet}
+  </NodeList>
+{/snippet}
 
 {#snippet entryRow(entry: LoreEntrySummary, ctx: RowCtx<LoreEntrySummary>)}
   <NodeRow

@@ -43,12 +43,6 @@ import type {
 } from "@/lib/types";
 
 class TreeActions {
-  // Floating add-menu popover, shared across both trees. `position: fixed`
-  // coordinates are captured at click time so the menu sidesteps any ancestor
-  // `overflow: hidden`. App's document-level mousedown handler closes it.
-  addMenuOpenFor = $state<string | null>(null);
-  addMenuPosition = $state<{ top: number; right: number } | null>(null);
-
   // ---- Injected host hooks (set in App.onMount) ----
   run: (action: () => Promise<void>) => Promise<boolean> = async (action) => {
     await action();
@@ -199,36 +193,6 @@ class TreeActions {
       await config.afterDelete();
     }
     this.setStatus("Deleted");
-  }
-
-  // ---- Add menu ----
-  toggleAddMenu(nodeId: string, event?: MouseEvent): void {
-    if (this.addMenuOpenFor === nodeId) {
-      this.addMenuOpenFor = null;
-      this.addMenuPosition = null;
-      return;
-    }
-    this.addMenuOpenFor = nodeId;
-    const anchor = event?.currentTarget;
-    if (anchor instanceof HTMLElement) {
-      const rect = anchor.getBoundingClientRect();
-      // The popover anchors to the button's right edge and drops below.
-      // If there isn't room below (less than 200px before the viewport
-      // bottom), flip above the button instead.
-      const popoverHeight = 180;
-      const fitsBelow = window.innerHeight - rect.bottom > popoverHeight;
-      this.addMenuPosition = {
-        top: fitsBelow ? rect.bottom + 4 : rect.top - popoverHeight - 4,
-        right: window.innerWidth - rect.right,
-      };
-    } else {
-      this.addMenuPosition = null;
-    }
-  }
-
-  closeAddMenu(): void {
-    this.addMenuOpenFor = null;
-    this.addMenuPosition = null;
   }
 
   // ---- Tree configs (the per-kind contract consumed by StructureTree.svelte) ----

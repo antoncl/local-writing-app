@@ -155,13 +155,10 @@
     if (config.persistCollapse) void collapse.flush();
   });
 
-  // Tree-local UI state — inline rename + drag + the collapse defer-guard.
-  // Never escapes the component.
+  // Tree-local UI state — inline rename + the collapse defer-guard. Drag state
+  // now lives in the wrapper (ViewNodeList owns the gesture; 4c-i). Never escapes.
   let editingNodeId = $state<string | null>(null);
   let editingTitle = $state("");
-  let draggedNodeId = $state<string | null>(null);
-  let dragOverNodeId = $state<string | null>(null);
-  let dragOverPosition = $state<"before" | "after" | "into" | null>(null);
   let pendingCollapseTimeout: ReturnType<typeof setTimeout> | null = null;
 
   function isActiveNode(node: EvalNode): boolean {
@@ -422,71 +419,39 @@
     await refocusTreeNode(nodeId);
   }
 
-  function handleTreeDragStart(event: DragEvent, nodeId: string) {
-    draggedNodeId = nodeId;
-    if (event.dataTransfer) {
-      event.dataTransfer.effectAllowed = "move";
-      event.dataTransfer.setData("text/plain", nodeId);
-    }
-  }
-
-  function handleTreeDragEnd() {
-    draggedNodeId = null;
-    dragOverNodeId = null;
-    dragOverPosition = null;
-  }
-
-  function handleTreeDragOver(event: DragEvent, node: EvalNode) {
-    if (!draggedNodeId || draggedNodeId === node.id) return;
-    event.preventDefault();
-    if (event.dataTransfer) event.dataTransfer.dropEffect = "move";
-    const target = event.currentTarget;
-    if (!(target instanceof HTMLElement)) return;
-    const rect = target.getBoundingClientRect();
-    const ratio = (event.clientY - rect.top) / rect.height;
-    let position: "before" | "after" | "into";
-    const isContainer = node.entry_type !== config.leafType;
-    if (isContainer && ratio > 0.2 && ratio < 0.8) {
-      position = "into";
-    } else if (ratio < 0.5) {
-      position = "before";
-    } else {
-      position = "after";
-    }
-    if (dragOverNodeId !== node.id || dragOverPosition !== position) {
-      dragOverNodeId = node.id;
-      dragOverPosition = position;
-    }
-  }
-
-  async function handleTreeDrop(event: DragEvent, node: EvalNode) {
-    event.preventDefault();
-    const sourceId = draggedNodeId;
-    const position = dragOverPosition;
-    handleTreeDragEnd();
+  // The domain half of drag-reorder: ViewNodeList owns the gesture and hands us
+  // the settled (moved, target, position) intent; we translate it to a
+  // parent/index and call the move API. `into` drops append under the target;
+  // before/after resolve against the target's parent, with the usual same-parent
+  // index adjustment when the source sat before the drop slot.
+  async function handleReorder(
+    moved: EvalNode,
+    target: EvalNode,
+    position: "before" | "after" | "into",
+  ) {
     const tree = config.getStructure();
-    if (!sourceId || !position || !tree || !config.api.move || sourceId === node.id) return;
+    if (!tree || !config.api.move || moved.id === target.id) return;
 
     let targetParentId: string;
     let targetIndex: number;
     if (position === "into") {
-      targetParentId = node.id;
-      const target = findStructureNodeById(tree.root, node.id);
-      targetIndex = target?.children?.length ?? 0;
+      targetParentId = target.id;
+      const container = findStructureNodeById(tree.root, target.id);
+      targetIndex = container?.children?.length ?? 0;
     } else {
-      const found = findParentAndIndex(tree.root, node.id);
+      const found = findParentAndIndex(tree.root, target.id);
       if (!found) return;
       targetParentId = found.parent.id;
       targetIndex = found.index + (position === "after" ? 1 : 0);
     }
 
-    const sourceFound = findParentAndIndex(tree.root, sourceId);
+    const sourceFound = findParentAndIndex(tree.root, moved.id);
     if (sourceFound && sourceFound.parent.id === targetParentId && sourceFound.index < targetIndex) {
       targetIndex -= 1;
     }
 
     await run(async () => {
-      config.applyStructure(await config.api.move!(sourceId, targetParentId, targetIndex));
+      config.applyStructure(await config.api.move!(moved.id, targetParentId, targetIndex));
     });
   }
 </script>
@@ -517,7 +482,15 @@
 </div>
 
 <div class="tree-keys" use:treeKeyboard>
-  <ViewNodeList {result} mode="tree" active={isActiveNode} collapsed={collapse.collapsed} {row}>
+  <ViewNodeList
+    {result}
+    mode="tree"
+    active={isActiveNode}
+    collapsed={collapse.collapsed}
+    onReorder={config.supportsDrag ? handleReorder : undefined}
+    isContainer={(node) => node.entry_type !== config.leafType}
+    {row}
+  >
     {#snippet whenEmpty()}
       {#if !structure}
         <p class="muted">Open or create a project to begin.</p>
@@ -531,8 +504,8 @@
 {#snippet row(node: EvalNode, ctx: RowCtx<EvalNode>)}
   {@const leaf = node.entry_type === config.leafType}
   {@const editing = editingNodeId === node.id}
-  {@const dragging = config.supportsDrag && draggedNodeId === node.id}
-  {@const dropPosition = config.supportsDrag && dragOverNodeId === node.id ? dragOverPosition : null}
+  {@const dragging = ctx.dragging}
+  {@const dropPosition = ctx.dropPosition}
   {@const stripe = leaf ? ctx.stripeColor : ctx.stripeColor ?? statusHex(node)}
   {#if editing}
     <!-- Rename-in-progress: titleSlot hosts the input. groupHeader stays true
@@ -550,8 +523,8 @@
       clickable={false}
       dataNodeId={node.id}
       onmousedown={(event) => event.stopPropagation()}
-      ondragover={(event) => { if (config.supportsDrag) handleTreeDragOver(event, node); }}
-      ondrop={(event) => { if (config.supportsDrag) handleTreeDrop(event, node); }}
+      ondragover={ctx.reorder?.onDragOver}
+      ondrop={ctx.reorder?.onDrop}
     >
       {#snippet titleSlot()}
         <input
@@ -577,19 +550,19 @@
       {dropPosition}
       onClick={() => node.ref_id && run(() => config.openLeaf(node.ref_id!))}
       onmousedown={(event) => event.stopPropagation()}
-      ondragover={(event) => { if (config.supportsDrag) handleTreeDragOver(event, node); }}
-      ondrop={(event) => { if (config.supportsDrag) handleTreeDrop(event, node); }}
+      ondragover={ctx.reorder?.onDragOver}
+      ondrop={ctx.reorder?.onDrop}
     >
       {#snippet leading()}
-        {#if config.supportsDrag}
+        {#if ctx.reorder}
           <span
             class="tree-handle"
             draggable="true"
             role="button"
             tabindex="-1"
             aria-label="Drag to reorder"
-            ondragstart={(event) => handleTreeDragStart(event, node.id)}
-            ondragend={handleTreeDragEnd}
+            ondragstart={ctx.reorder.onDragStart}
+            ondragend={ctx.reorder.onDragEnd}
           >⋮⋮</span>
         {/if}
       {/snippet}
@@ -613,19 +586,19 @@
       onClick={() => deferCollapse(ctx.toggle)}
       onDblClick={() => handleGroupDblClick(node)}
       onmousedown={(event) => event.stopPropagation()}
-      ondragover={(event) => { if (config.supportsDrag) handleTreeDragOver(event, node); }}
-      ondrop={(event) => { if (config.supportsDrag) handleTreeDrop(event, node); }}
+      ondragover={ctx.reorder?.onDragOver}
+      ondrop={ctx.reorder?.onDrop}
     >
       {#snippet leading()}
-        {#if config.supportsDrag}
+        {#if ctx.reorder}
           <span
             class="tree-handle"
             draggable="true"
             role="button"
             tabindex="-1"
             aria-label="Drag to reorder"
-            ondragstart={(event) => handleTreeDragStart(event, node.id)}
-            ondragend={handleTreeDragEnd}
+            ondragstart={ctx.reorder.onDragStart}
+            ondragend={ctx.reorder.onDragEnd}
           >⋮⋮</span>
         {/if}
         {#if ctx.collapsible}

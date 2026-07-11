@@ -29,6 +29,19 @@
     onDblClick: () => void;
     onRename?: (nextTitle: string) => void;
     onReorder?: (target: T, position: "before" | "after" | "into") => void;
+    // Drag-reorder, present only when the list is reorderable (an `onReorder`
+    // prop is wired). The wrapper owns the gesture; the snippet reflects
+    // `dragging`/`dropPosition` on its NodeRow and spreads `reorder`'s handlers —
+    // `onDragStart`/`onDragEnd` onto the drag handle, `onDragOver`/`onDrop` onto
+    // the row. The before/after/into zones + settled intent are the wrapper's.
+    dragging: boolean;
+    dropPosition: "before" | "after" | "into" | null;
+    reorder?: {
+      onDragStart: (event: DragEvent) => void;
+      onDragEnd: (event: DragEvent) => void;
+      onDragOver: (event: DragEvent) => void;
+      onDrop: (event: DragEvent) => void;
+    };
   };
 
   // The context handed to a `groupHeader` override snippet for one SYNTHETIC
@@ -60,6 +73,7 @@
   import { SvelteSet } from "svelte/reactivity";
   import NodeList from "@/components/widgets/NodeList.svelte";
   import ViewNodeTree from "@/components/widgets/ViewNodeTree.svelte";
+  import { TreeDrag } from "@/components/widgets/treeDrag.svelte";
   import { filterGroups, type ViewGroup, type ViewResult } from "@/lib/views/evaluateView";
   import { leafGroup } from "@/lib/views/viewResult";
 
@@ -77,6 +91,7 @@
     onDblClick,
     onRename,
     onReorder,
+    isContainer,
     collapsed = $bindable(new SvelteSet<string>()),
     defaultCollapsed,
     whenEmpty,
@@ -104,6 +119,11 @@
     onDblClick?: (node: T) => void;
     onRename?: (node: T, nextTitle: string) => void;
     onReorder?: (moved: T, target: T, position: "before" | "after" | "into") => void;
+    // Domain classification for drag: does this node accept an "into" drop (i.e.
+    // it's a container, even an empty one)? The wrapper owns the drop-zone
+    // mechanics; the consumer names what can contain. Absent ⇒ falls back to
+    // "has children", so an empty container won't accept drops without this.
+    isContainer?: (node: T) => boolean;
     // Per-group collapse keyed by stable `ViewGroup.key`. $bindable so #112 can
     // back it with persisted state; unbound ⇒ ephemeral internal set (phase 1).
     collapsed?: SvelteSet<string>;
@@ -143,6 +163,10 @@
   const effectiveGroups = $derived<ViewGroup<T>[]>(displayedGroups ?? displayedNodes.map((n) => leafGroup(n)));
 
   const isEmpty = $derived(effectiveGroups.length === 0);
+
+  // One drag-gesture holder for the whole tree, threaded through the recursion
+  // (inert unless `onReorder` is wired). See treeDrag.svelte.ts.
+  const drag = new TreeDrag<T>();
 </script>
 
 <NodeList {mode} {searchPlaceholder} bind:searchValue {searchDebounceMs} {isEmpty} {whenEmpty}>
@@ -156,6 +180,8 @@
     {onDblClick}
     {onRename}
     {onReorder}
+    {isContainer}
+    {drag}
     {row}
     {groupHeader}
   />

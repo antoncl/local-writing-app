@@ -100,10 +100,11 @@ class TreeStructureService:
         """Persist the tree, stripping transient computed fields first."""
         raw = document.model_dump()
         self._strip_key_recursively(raw, "computed_metadata")
-        # `status` and `color` are projections of leaf front-matter; do not
-        # echo them into the tree YAML — they would drift out of sync.
+        # `status`, `color`, and `metadata` are projections of leaf front-matter;
+        # do not echo them into the tree YAML — they would drift out of sync.
         self._strip_key_recursively(raw, "status")
         self._strip_key_recursively(raw, "color")
+        self._strip_key_recursively(raw, "metadata")
         raw = self._rename_leaf_ref_in(raw, "scene_id", self.config.leaf_ref_field)
         text = yaml.safe_dump(raw, sort_keys=False, allow_unicode=True)
         self._atomic_write(self.yaml_path, text)

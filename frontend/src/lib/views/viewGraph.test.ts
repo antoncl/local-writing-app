@@ -6,7 +6,11 @@ import {
   exprToGraph,
   graphToExpr,
   graphToSpec,
+  outputPayload,
+  reachesFieldOf,
   specToGraph,
+  valueSlotAccepts,
+  FILTER_VALUE_HANDLE,
   OUTPUT_NODE_ID,
   type ConnectionVerdict,
   type ViewGraph,
@@ -53,7 +57,7 @@ describe("viewGraph serialization (round-trip)", () => {
       { type: "lore:character" },
       { descendants_of: "lore:character" },
       { tagged: "gotham" },
-      { field: { key: "pov", op: "eq", value: "honor" } },
+      { field: { key: "pov", op: "overlap", value: "honor" } },
       { hand_picked: ["a", "b"] },
       { view_ref: "view-123" },
     ];
@@ -341,6 +345,146 @@ describe("nest lowering + self-loop recursion (ADR-0028)", () => {
   });
 });
 
+describe("#184 field_of / self lowering + round-trip (ADR-0031 §D)", () => {
+  it("round-trips field_of over a leaf `of`", () => {
+    const expr: ViewExpr = { field_of: { of: { type: "scene:scene" }, field: "pov" } };
+    expect(roundTrip(expr)).toEqual(expr);
+  });
+
+  it("round-trips the $self-backlinks shape field_of($self, references)", () => {
+    const expr: ViewExpr = { field_of: { of: { var: "$self" }, field: "references" } };
+    expect(roundTrip(expr)).toEqual(expr);
+  });
+
+  it("a standalone $self source lowers to {var: $self}", () => {
+    const self = node("self", {}, 0);
+    const graph: ViewGraph = { nodes: [out(), self], edges: [edge(self.id, OUTPUT_NODE_ID)] };
+    expect(graphToExpr(graph)).toEqual({ var: "$self" });
+  });
+
+  it("field_of with no projected field lowers to nothing", () => {
+    const src = node("type", { type: "scene:scene" }, 0);
+    const fo = node("field_of", {}, 100);
+    const graph: ViewGraph = {
+      nodes: [out(), src, fo],
+      edges: [edge(src.id, fo.id), edge(fo.id, OUTPUT_NODE_ID)],
+    };
+    expect(graphToExpr(graph)).toBeNull();
+  });
+
+  it("field_of with no wired `of` lowers to nothing (grammar has no universal-set leaf)", () => {
+    const fo = node("field_of", { project_field: "references" }, 0);
+    const graph: ViewGraph = { nodes: [out(), fo], edges: [edge(fo.id, OUTPUT_NODE_ID)] };
+    expect(graphToExpr(graph)).toBeNull();
+  });
+
+  it("field_of wired from an `All` injector lowers to nothing — the silent-empty the UI blocks (#203)", () => {
+    // `All` materializes to the universe (null), which fieldOfBuilt can't express
+    // as a concrete `of` → EMPTY. isValidConnection blocks the wire so the author
+    // never reaches this state; this asserts the lowering stays safe if they do.
+    const all = node("all", {}, 0);
+    const fo = node("field_of", { project_field: "pov" }, 100);
+    const graph: ViewGraph = {
+      nodes: [out(), all, fo],
+      edges: [edge(all.id, fo.id), edge(fo.id, OUTPUT_NODE_ID)],
+    };
+    expect(graphToExpr(graph)).toBeNull();
+  });
+
+  it("specToGraph rebuilds a field_of node wired from its `of` subgraph", () => {
+    const graph = specToGraph({ kind: "lore", expr: { field_of: { of: { var: "$self" }, field: "references" } } });
+    const fo = graph.nodes.find((n) => n.kind === "field_of")!;
+    const self = graph.nodes.find((n) => n.kind === "self")!;
+    expect(fo.data.project_field).toBe("references");
+    expect(graph.edges.some((e) => e.source === self.id && e.target === fo.id)).toBe(true);
+  });
+
+  it("reachesFieldOf enforces the single-hop cut", () => {
+    const src = node("type", { type: "scene:scene" }, 0);
+    const fo = node("field_of", { project_field: "pov" }, 100);
+    const byId = new Map([[src.id, src], [fo.id, fo]]);
+    // A field_of output (or anything downstream of it) reaches a field_of.
+    expect(reachesFieldOf(byId, [edge(src.id, fo.id)], fo.id)).toBe(true);
+    // A plain source does not.
+    expect(reachesFieldOf(byId, [edge(src.id, fo.id)], src.id)).toBe(false);
+  });
+});
+
+describe("#196 value-set pipe (scalar field_of → Filter value slot, ADR-0031 §E)", () => {
+  const fieldType = (k: string): string | null =>
+    ({ pov: "entity_ref", characters: "entity_ref_list", status: "select" })[k] ?? null;
+
+  it("outputPayload: scalar field_of → value-set; ref/references/other → node-set", () => {
+    expect(outputPayload(node("field_of", { project_field: "status" }), fieldType)).toBe("value-set");
+    expect(outputPayload(node("field_of", { project_field: "pov" }), fieldType)).toBe("node-set");
+    expect(outputPayload(node("field_of", { project_field: "references" }), fieldType)).toBe("node-set");
+    expect(outputPayload(node("self", {}), fieldType)).toBe("node-set");
+    expect(outputPayload(node("type", { type: "x" }), fieldType)).toBe("node-set");
+  });
+
+  it("valueSlotAccepts enforces the two-payload matrix", () => {
+    const scalarFO = node("field_of", { project_field: "status" });
+    const refFO = node("field_of", { project_field: "pov" });
+    const self = node("self", {});
+    const typeSrc = node("type", { type: "scene:scene" });
+    // scalar field slot ← value-set only
+    expect(valueSlotAccepts(scalarFO, { key: "status", op: "overlap" }, fieldType)).toBe(true);
+    expect(valueSlotAccepts(refFO, { key: "status", op: "overlap" }, fieldType)).toBe(false);
+    // entity_ref field slot ← node-set only (a ref projection or a bare $self)
+    expect(valueSlotAccepts(refFO, { key: "pov", op: "overlap" }, fieldType)).toBe(true);
+    expect(valueSlotAccepts(self, { key: "pov", op: "overlap" }, fieldType)).toBe(true);
+    expect(valueSlotAccepts(scalarFO, { key: "pov", op: "overlap" }, fieldType)).toBe(false);
+    // only field_of / self are operand-representable wired sources
+    expect(valueSlotAccepts(typeSrc, { key: "pov", op: "overlap" }, fieldType)).toBe(false);
+    // no field key → nothing to accept
+    expect(valueSlotAccepts(scalarFO, undefined, fieldType)).toBe(false);
+  });
+
+  it("lowers a field leaf with a wired scalar field_of into a {field_of} value operand", () => {
+    const scenes = node("type", { type: "scene:scene" }, 0);
+    const fo = node("field_of", { project_field: "status" }, 100);
+    const field = node("field", { field: { key: "status", op: "overlap" } }, 200);
+    const graph: ViewGraph = {
+      nodes: [out(), scenes, fo, field],
+      edges: [
+        edge(scenes.id, fo.id),
+        edge(fo.id, field.id, FILTER_VALUE_HANDLE),
+        edge(field.id, OUTPUT_NODE_ID),
+      ],
+    };
+    expect(graphToExpr(graph)).toEqual({
+      field: { key: "status", op: "overlap", value: { field_of: { of: { type: "scene:scene" }, field: "status" } } },
+    });
+  });
+
+  it("round-trips a Filter value wired from a field_of", () => {
+    const expr: ViewExpr = {
+      field: { key: "status", op: "overlap", value: { field_of: { of: { type: "scene:scene" }, field: "status" } } },
+    };
+    expect(roundTrip(expr)).toEqual(expr);
+  });
+
+  it("round-trips a Filter value wired from $self", () => {
+    const expr: ViewExpr = { field: { key: "pov", op: "overlap", value: { var: "$self" } } };
+    expect(roundTrip(expr)).toEqual(expr);
+  });
+
+  it("specToGraph rebuilds the value wire (field_of node + edge into the field's value handle)", () => {
+    const graph = specToGraph({
+      kind: "scene",
+      expr: { field: { key: "status", op: "overlap", value: { field_of: { of: { type: "scene:scene" }, field: "status" } } } },
+    });
+    const field = graph.nodes.find((n) => n.kind === "field")!;
+    const fo = graph.nodes.find((n) => n.kind === "field_of")!;
+    expect(fo.data.project_field).toBe("status");
+    expect(
+      graph.edges.some((e) => e.source === fo.id && e.target === field.id && e.targetHandle === FILTER_VALUE_HANDLE),
+    ).toBe(true);
+    // the field node's inline value is cleared — the wire re-supplies it on lowering.
+    expect(field.data.field?.value ?? null).toBeNull();
+  });
+});
+
 describe("cycle classifier — recursion vs meaningless (ADR-0028 §D)", () => {
   const match = { field: "parent", direction: "child_to_parent" as const, by: "ref" as const };
 
@@ -407,5 +551,72 @@ describe("specToGraph (reopen fallback)", () => {
       { name: "Cast", expr: { type: "lore:character" } },
       { name: "Gods", expr: { descendants_of: "lore:deity" }, sort: { by: "title" } },
     ]);
+  });
+});
+
+// Promote-in-place (#184 Phase 1b, ADR-0032): a Filter/field value slot ⇄ a
+// named ViewSpec.params formal. graphToSpec collects reachable promoted formals;
+// specToGraph restores field_param from the params list on `{var}` values.
+describe("promote-in-place params (#184)", () => {
+  it("collects a promoted field's formal into spec.params (value → {var})", () => {
+    const f = node("field", {
+      field: { key: "tags", op: "overlap", value: { var: "P_TAG" } },
+      field_param: { name: "P_TAG", label: "Tag", default: ["hero"] },
+    });
+    const graph: ViewGraph = { nodes: [out(), f], edges: [edge(f.id, OUTPUT_NODE_ID)] };
+    const spec = graphToSpec(graph, { kind: "lore" });
+    expect(spec.params).toEqual([{ name: "P_TAG", label: "Tag", default: ["hero"] }]);
+    expect(spec.expr).toEqual({ field: { key: "tags", op: "overlap", value: { var: "P_TAG" } } });
+  });
+
+  it("omits an unbound formal's default but keeps the param", () => {
+    const f = node("field", {
+      field: { key: "tags", op: "overlap", value: { var: "P" } },
+      field_param: { name: "P", label: "Tag" },
+    });
+    const graph: ViewGraph = { nodes: [out(), f], edges: [edge(f.id, OUTPUT_NODE_ID)] };
+    expect(graphToSpec(graph, { kind: "lore" }).params).toEqual([{ name: "P", label: "Tag" }]);
+  });
+
+  it("skips a promoted formal on a node not wired to the output (no phantom param)", () => {
+    const wired = node("type", { type: "lore:character" });
+    const orphan = node("field", {
+      field: { key: "tags", op: "overlap", value: { var: "GHOST" } },
+      field_param: { name: "GHOST", default: ["x"] },
+    });
+    const graph: ViewGraph = { nodes: [out(), wired, orphan], edges: [edge(wired.id, OUTPUT_NODE_ID)] };
+    expect(graphToSpec(graph, { kind: "lore" }).params).toBeUndefined();
+  });
+
+  it("skips a stale field_param whose value is no longer its {var}", () => {
+    const f = node("field", {
+      field: { key: "tags", op: "overlap", value: "literal" },
+      field_param: { name: "P", default: [] },
+    });
+    const graph: ViewGraph = { nodes: [out(), f], edges: [edge(f.id, OUTPUT_NODE_ID)] };
+    expect(graphToSpec(graph, { kind: "lore" }).params).toBeUndefined();
+  });
+
+  it("specToGraph restores field_param from a {var} value + matching param", () => {
+    const spec = {
+      kind: "lore",
+      expr: { field: { key: "tags", op: "overlap" as const, value: { var: "P" } } },
+      params: [{ name: "P", label: "Tag", default: ["hero"] }],
+    };
+    const field = specToGraph(spec).nodes.find((n) => n.kind === "field");
+    expect(field?.data.field_param).toEqual({ name: "P", label: "Tag", default: ["hero"] });
+    expect(field?.data.field?.value).toEqual({ var: "P" });
+  });
+
+  it("round-trips a promoted formal graph → spec → graph → spec", () => {
+    const f = node("field", {
+      field: { key: "pov", op: "overlap", value: { var: "POV" } },
+      field_param: { name: "POV", label: "Point of view", default: ["alice"] },
+    });
+    const graph: ViewGraph = { nodes: [out(), f], edges: [edge(f.id, OUTPUT_NODE_ID)] };
+    const spec1 = graphToSpec(graph, { kind: "lore" });
+    const spec2 = graphToSpec(specToGraph(spec1), { kind: "lore" });
+    expect(spec2.params).toEqual(spec1.params);
+    expect(spec2.expr).toEqual(spec1.expr);
   });
 });

@@ -18,7 +18,6 @@ import type {
   ChatSessionJournalEntry,
   ChatUsage,
   AssistantTagList,
-  BacklinksResponse,
   ProjectCostResponse,
   ChatSession,
   ChatSessionList,
@@ -52,6 +51,7 @@ import type {
   MutationSetEntryList,
   MutationSetRow,
   ReferenceCandidatesResponse,
+  ReferenceGraphResponse,
   ReferenceResolveResponse,
   ResearchNote,
   Scene,
@@ -856,7 +856,7 @@ export const api = {
     const query = params.toString();
     return request<ReferenceCandidatesResponse>(`/references/candidates${query ? `?${query}` : ""}`);
   },
-  listBacklinks(id: string) {
-    return request<BacklinksResponse>(`/references/backlinks?id=${encodeURIComponent(id)}`);
+  referenceGraph() {
+    return request<ReferenceGraphResponse>("/references/graph");
   },
 };

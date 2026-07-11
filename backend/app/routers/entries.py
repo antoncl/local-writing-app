@@ -14,6 +14,7 @@ from app.models import (
     CreateTodoRequest,
     EmbeddedTodoList,
     ReferenceCandidatesResponse,
+    ReferenceGraphResponse,
     ReferenceResolveRequest,
     ReferenceResolveResponse,
     ReorderAssistantsRequest,
@@ -264,6 +265,12 @@ def list_reference_candidates(
 def list_backlinks(id: str = Query()) -> BacklinksResponse:
     with translate_errors():
         return service.list_backlinks(id)
+
+
+@router.get("/api/references/graph", response_model=ReferenceGraphResponse)
+def reference_graph() -> ReferenceGraphResponse:
+    with translate_errors():
+        return service.reference_graph()
 
 
 @router.post("/api/search", response_model=SearchResponse)

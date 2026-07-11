@@ -37,6 +37,10 @@ export type StructureNode = {
   status?: string | null;
   // Scene's instance-level color override (palette swatch id).
   color?: string | null;
+  // Full scene front-matter metadata (pov, characters, locations, …) surfaced
+  // so the view evaluator can filter the Draft roster by scene fields in one
+  // pass (#184 Phase 3). Null for non-scene nodes.
+  metadata?: Record<string, MetadataValue> | null;
   computed_metadata?: Record<string, MetadataValue>;
   children: StructureNode[];
 };
@@ -298,11 +302,25 @@ export type PromptInputType =
 // Mirrors the backend Pydantic models; entry_type references are FQN
 // ("lore:character", per #77). See docs/design/views-and-filters.md §1–2. There
 // is no frontend evaluator in step 1 — these types describe the stored shape.
+// The op enum collapsed 6→4 for the forward model (ADR-0031 §E, #184): `overlap`
+// = set-coerce both sides and test non-empty intersection (entity_ref by id,
+// scalar by value); `disjoint` = its negation; `set`/`unset` = presence. `value`
+// is EITHER a bare literal OR exactly one tagged operand (`{var}` / `{field_of}`)
+// — mutually exclusive by shape.
 export type ViewFieldPredicate = {
   key: string;
-  op: "eq" | "neq" | "includes" | "not_includes" | "set" | "unset";
-  value?: unknown;
+  op: "overlap" | "disjoint" | "set" | "unset";
+  value?: ViewOperand;
 };
+
+// A forward projection (ADR-0031 §D, #184): `flatMap(of, n → valuesOf(n, field))`,
+// deduped. Output payload is inferred (reference field → node-set, scalar → value-
+// set), never stored. Standalone (a ViewExpr) or inline in a predicate `value`.
+export type ViewFieldOf = { of: ViewExpr; field: string };
+
+// A predicate value slot: a bare literal, or one tagged operand. `{var}` names a
+// promoted formal or the reserved `$self`; `{field_of}` is a projection.
+export type ViewOperand = unknown | { var: string } | { field_of: ViewFieldOf };
 
 export type ViewAnnotatePayload = { label?: string; color?: string; rank?: number };
 
@@ -339,12 +357,14 @@ export type ViewExpr = {
   nest?: ViewNestOp;
   annotate?: ViewAnnotatePayload;
   of?: ViewExpr;
+  field_of?: ViewFieldOf; // forward projection (#184): input set → nodes or values
   type?: string; // exact entry_type FQN
   descendants_of?: string; // entry_type FQN + every inheriting type
   tagged?: string;
   field?: ViewFieldPredicate;
   hand_picked?: string[];
   view_ref?: string; // a saved view node id
+  var?: string; // a free variable / reserved `$self` leaf (#184), resolved from bindings
 };
 
 export type ViewSort = {
@@ -370,11 +390,23 @@ export type ViewGroupSpec = {
 // handles; 2+ populated handles render as groups — ADR-0027). `expr`/`groups`
 // both absent/null = the whole universe of `kind`. `sort` is the fallback when a
 // group carries no per-segment sort.
+// A declared runtime formal (#184, ADR-0032): a promoted Filter value slot.
+// `name` is the stable key `{var: name}` operands reference; `label` is the
+// parameter-strip UI; `default` is the authored overridable default (null/absent
+// ⇒ unbound ⇒ its predicate is inactive until picked). No `type` is stored — it
+// is recomputed at load from the field(s) whose slot references the param.
+export type ViewParam = {
+  name: string;
+  label?: string;
+  default?: unknown;
+};
+
 export type ViewSpec = {
   kind: string;
   expr?: ViewExpr | null;
   groups?: ViewGroupSpec[] | null;
   sort?: ViewSort | null;
+  params?: ViewParam[] | null;
   // Layout of the result list (doc §3.1). `"tree"` nests members by structural
   // ancestry (the evaluator reads each node's `ancestry`, #101); absent/other
   // values keep the flat-or-handle-grouped behavior. Orthogonal to membership.
@@ -1201,6 +1233,14 @@ export type Backlink = {
 export type BacklinksResponse = {
   target_id: string;
   backlinks: Backlink[];
+};
+
+// Forward reference adjacency for the whole project (#184 Phase 2): each node id
+// → the ids it references through any entity_ref / entity_ref_list field. The
+// frontend inverts this into a reverse index the view evaluator's `references`
+// computed field projects over. Only referencing nodes appear as keys.
+export type ReferenceGraphResponse = {
+  refs: Record<string, string[]>;
 };
 
 export type StructureNodeDeletePreview = {

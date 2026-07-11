@@ -23,6 +23,12 @@ class StructureNode(BaseModel):
     # Scene's instance-level color override (metadata.color, a palette
     # swatch id) — lets the tree row reflect per-scene color tweaks.
     color: str | None = None
+    # Full scene front-matter `metadata` dict (pov, characters, locations,
+    # color, …) surfaced onto the roster so the view evaluator can filter the
+    # Draft pane by scene fields (status/pov/…) in one pass, no per-scene fetch
+    # (#184 Phase 3). A projection of leaf front-matter like status/color —
+    # None for non-scene nodes; stripped on write so it never drifts on disk.
+    metadata: dict[str, Any] | None = None
     computed_metadata: dict[str, Any] = Field(default_factory=dict)
     children: list[StructureNode] = Field(default_factory=list)
 

@@ -26,7 +26,8 @@
 // (nothing wired). The sentinels let filters-off-`All` and set ops fold to the
 // minimal shipped `expr` without a universe leaf in the grammar.
 
-import type { ViewExpr, ViewFieldPredicate, ViewGroupSpec, ViewNestMatch, ViewNestOp, ViewSort, ViewSpec } from "@/lib/types";
+import type { ViewExpr, ViewFieldOf, ViewFieldPredicate, ViewGroupSpec, ViewNestMatch, ViewNestOp, ViewOperand, ViewParam, ViewSort, ViewSpec } from "@/lib/types";
+import { REFERENCES_FIELD, SELF_VAR } from "@/lib/views/evaluateView";
 
 export type LeafKind = "type" | "descendants_of" | "tagged" | "field" | "hand_picked" | "view_ref";
 export type CombinatorKind = "union" | "intersect" | "difference" | "complement";
@@ -36,6 +37,9 @@ export type PredicateKind = "type" | "descendants_of" | "tagged" | "field";
 // "output" is the single sink (the View); its named handles are the groups.
 // "nest" is the relational operator (ADR-0028): two input handles
 // (parents/children), one output; a self-loop into `parents` = recursion.
+// "field_of" is forward projection (#184, ADR-0031 §D): one `of` input, a field
+// selector, one output (a node-set). "self" is the reserved wired source
+// (`{var: "$self"}`, the pane's anchor node): no input, one output.
 export type GraphNodeKind =
   | "output"
   | "all"
@@ -43,6 +47,8 @@ export type GraphNodeKind =
   | "sorter"
   | "highlight"
   | "nest"
+  | "field_of"
+  | "self"
   | CombinatorKind
   | LeafKind;
 
@@ -56,6 +62,63 @@ export const NEST_CHILDREN_HANDLE = "children";
 // group. A view with 0–1 populated handles renders flat (ADR-0027 §D).
 export type ViewHandle = { id: string; name: string; color?: string | null };
 export const DEFAULT_HANDLE_ID = "in";
+
+// The Filter/field predicate's value-operand input handle (#196, ADR-0031 §E).
+// Distinct from `in` (the set input): a wired source here fills the value slot
+// (mutually exclusive with an inline literal / promoted formal). The evaluator +
+// grammar already accept a `{field_of}` / `{var}` operand; this is the authoring
+// edge that produces one.
+export const FILTER_VALUE_HANDLE = "value";
+
+// A designer edge carries one of two payloads (ADR-0031 §D): a **node-set** or a
+// **value-set**. Only a `field_of` projecting a SCALAR field emits a value-set;
+// every other source — incl. `field_of` on a reference field or the computed
+// `references` — emits a node-set. `fieldType(key)` reads the schema field type.
+export type EdgePayload = "node-set" | "value-set";
+
+function isNodeSetField(key: string, fieldType: (key: string) => string | null): boolean {
+  if (key === REFERENCES_FIELD) return true; // the built-in computed node-set field
+  const t = fieldType(key);
+  return t === "entity_ref" || t === "entity_ref_list";
+}
+
+export function outputPayload(
+  node: ViewGraphNode | undefined,
+  fieldType: (key: string) => string | null,
+): EdgePayload {
+  if (node?.kind === "field_of") {
+    const f = node.data.project_field;
+    if (f && !isNodeSetField(f, fieldType)) return "value-set";
+  }
+  return "node-set";
+}
+
+// What a Filter/field value slot authored on `fieldKey` accepts as a wired source
+// (ADR-0031 §E): an entity_ref field's slot takes a **node-set** (id overlap), a
+// scalar field's slot takes a **value-set** (value overlap). `null` when the key
+// carries no value operand (unset / unknown) — the slot can't be wired.
+export function valueSlotPayload(
+  fieldKey: string | undefined,
+  fieldType: (key: string) => string | null,
+): EdgePayload | null {
+  if (!fieldKey) return null;
+  return isNodeSetField(fieldKey, fieldType) ? "node-set" : "value-set";
+}
+
+// Whether a wired `source` may feed a Filter/field value slot authored on
+// `field` (#196, ADR-0031 §E). The source must be an operand-representable wired
+// source — a `field_of` (the node-set/value-set producer) or a bare `$self` — AND
+// its output payload must match what the field's slot accepts. Set-algebra / leaf
+// sources have no operand form → rejected (a future increment).
+export function valueSlotAccepts(
+  source: ViewGraphNode | undefined,
+  field: ViewFieldPredicate | undefined,
+  fieldType: (key: string) => string | null,
+): boolean {
+  if (!source || (source.kind !== "field_of" && source.kind !== "self")) return false;
+  const want = valueSlotPayload(field?.key, fieldType);
+  return want != null && outputPayload(source, fieldType) === want;
+}
 
 // Per-node config. A superset of the slots ViewExpr carries plus the designer
 // roles' own config (filter mode/predicate, sorter sort, output handles). Only
@@ -78,6 +141,18 @@ export type ViewNodeData = {
   match?: ViewNestMatch;
   // highlight (color-only annotate)
   color?: string;
+  // promote-in-place (#184 Phase 1b, ADR-0032): when a field predicate's value
+  // slot is promoted to a runtime formal, the value carries `{var: name}` and
+  // this holds the formal's authored label + overridable `default`, so the
+  // promotion survives the graph⇄spec round-trip (the spec keeps `params`;
+  // `{var}` in the predicate lowers verbatim). Absent = a plain literal value.
+  field_param?: { name: string; label?: string; default?: unknown };
+  // field_of (#184, ADR-0031 §D): the metadata key this node projects its `of`
+  // input through. Reference fields (incl. the built-in `references`) project to
+  // a node-set that joins the general flow; a SCALAR field projects to a
+  // value-set that feeds only a Filter value slot authored on a scalar field
+  // (#196 — the two-payload pipe, `outputPayload`/`valueSlotAccepts`).
+  project_field?: string;
   // output (View) — the named handles / groups
   handles?: ViewHandle[];
   // legacy annotate group slots (kept so pre-#91 layouts don't crash on load)
@@ -134,9 +209,10 @@ export function inputArity(kind: GraphNodeKind): "none" | "one" | "many" | "keep
     case "filter":
     case "sorter":
     case "highlight":
+    case "field_of":
       return "one";
     default:
-      return "none"; // injectors (leaves + all)
+      return "none"; // injectors (leaves + all + self)
   }
 }
 
@@ -194,6 +270,28 @@ export function classifyConnection(
 // verdict as a warning (stage 5 / #110).
 export function connectionAllowed(verdict: ConnectionVerdict): boolean {
   return verdict === "ok" || verdict === "nest-recursion";
+}
+
+// The single-hop cut (#184, ADR-0031 / §14.5): a `field_of`'s `of` must not
+// resolve — through the graph — from another `field_of`. Multi-hop projection
+// would need per-node type inference the 0.7.0 authoring layer doesn't do, so a
+// would-be edge into a `field_of` input is rejected when the source node IS or
+// reaches (upstream) any `field_of`. Pure graph walk (source + its ancestors).
+export function reachesFieldOf(
+  byId: Map<string, ViewGraphNode>,
+  edges: ViewGraphEdge[],
+  sourceId: string,
+): boolean {
+  const stack = [sourceId];
+  const seen = new Set<string>();
+  while (stack.length) {
+    const cur = stack.pop()!;
+    if (seen.has(cur)) continue;
+    seen.add(cur);
+    if (byId.get(cur)?.kind === "field_of") return true;
+    for (const e of edges) if (e.target === cur) stack.push(e.source);
+  }
+  return false;
 }
 
 // --- the three-valued lowering algebra -----------------------------------
@@ -328,8 +426,16 @@ function buildNode(
         return complementBuilt(soleChild(graph, byId, nodeId, seen));
       case "nest":
         return nestBuilt(graph, byId, node, seen);
+      case "self":
+        // The reserved anchor source — `{var: "$self"}` (no input).
+        return built({ var: SELF_VAR });
+      case "field_of":
+        return fieldOfBuilt(soleChild(graph, byId, nodeId, seen), node);
+      case "field":
+        // A leaf field predicate whose value slot may be a wired source (#196).
+        return fieldLeafBuilt(graph, byId, node, seen);
       case "filter":
-        return filterBuilt(soleChild(graph, byId, nodeId, seen), node);
+        return filterBuilt(graph, byId, node, seen);
       case "sorter":
         // Membership pass-through; the sort itself is captured at the handle.
         return soleChild(graph, byId, nodeId, seen);
@@ -354,11 +460,61 @@ function soleChild(graph: ViewGraph, byId: Map<string, ViewGraphNode>, nodeId: s
   return first ? buildNode(graph, byId, first.source, seen) : EMPTY;
 }
 
-function filterBuilt(input: Built, node: ViewGraphNode): Built {
-  const p = predicateExpr(node);
+function filterBuilt(graph: ViewGraph, byId: Map<string, ViewGraphNode>, node: ViewGraphNode, seen: Set<string>): Built {
+  // The set input is the `in` handle specifically — a Filter now has a second
+  // (`value`) input handle, so `soleChild` (any-handle first) would be wrong.
+  const inEdge = upstreamOf(graph, node.id).find((e) => (e.targetHandle ?? DEFAULT_HANDLE_ID) === DEFAULT_HANDLE_ID);
+  const input = inEdge ? buildNode(graph, byId, inEdge.source, seen) : EMPTY;
+  const p = predicateExpr(node, wiredValueOperand(graph, byId, node, seen));
   if (!p) return input; // unconfigured filter = pass-through
   const mode = node.data.filter_mode ?? "keep";
   return mode === "drop" ? differenceBuilt(input, built(p)) : intersectBuilt([input, built(p)]);
+}
+
+// A leaf `field` node → its predicate expr, honoring a wired value source (#196).
+function fieldLeafBuilt(graph: ViewGraph, byId: Map<string, ViewGraphNode>, node: ViewGraphNode, seen: Set<string>): Built {
+  const key = node.data.field?.key;
+  if (!key) return EMPTY; // a blank leaf isn't "whole universe"
+  return built({ field: withWiredValue(node.data.field!, wiredValueOperand(graph, byId, node, seen)) });
+}
+
+// Resolve a wired value operand on `node`'s `value` handle (#196, ADR-0031 §E):
+// a `field_of` source → a `{field_of}` operand; a bare `$self` → `{var: $self}`.
+// Set-algebra / leaf sources have no operand form → ignored (validation blocks
+// wiring them). Returns undefined when the value slot is unwired.
+function wiredValueOperand(
+  graph: ViewGraph,
+  byId: Map<string, ViewGraphNode>,
+  node: ViewGraphNode,
+  seen: Set<string>,
+): ViewOperand | undefined {
+  const edge = upstreamOf(graph, node.id).find((e) => e.targetHandle === FILTER_VALUE_HANDLE);
+  if (!edge) return undefined;
+  const src = byId.get(edge.source);
+  if (src?.kind === "self") return { var: SELF_VAR };
+  if (src?.kind === "field_of") {
+    const b = buildNode(graph, byId, edge.source, seen);
+    if (b.tag === "expr" && b.expr.field_of) return { field_of: b.expr.field_of };
+  }
+  return undefined;
+}
+
+// Override a field predicate's value with a wired operand when present; otherwise
+// keep the authored literal / promoted `{var}`.
+function withWiredValue(field: ViewFieldPredicate, wired: ViewOperand | undefined): ViewFieldPredicate {
+  return wired === undefined ? field : { ...field, value: wired };
+}
+
+// Lower a `field_of` node (#184, ADR-0031 §D): project its single `of` input
+// through the selected field. `field_of`'s `of` is a REQUIRED ViewExpr and the
+// grammar has no universal-set leaf, so an unwired/`All` input (which
+// materializes to null = universe) can't be expressed → EMPTY, degrading like
+// any unconfigured node. An unset field selector is likewise EMPTY.
+function fieldOfBuilt(input: Built, node: ViewGraphNode): Built {
+  const field = node.data.project_field;
+  const of = materialize(input);
+  if (!field || !of) return EMPTY;
+  return built({ field_of: { of, field } });
 }
 
 function highlightBuilt(input: Built, node: ViewGraphNode): Built {
@@ -373,7 +529,7 @@ function highlightBuilt(input: Built, node: ViewGraphNode): Built {
 // descendants_of, tagged, field. Keyed by slot name (a Filter's `filter_kind` or
 // a leaf node's `kind`). Returns null for any other key or an unconfigured slot,
 // so a blank leaf doesn't silently mean "whole universe".
-function commonLeafExpr(slot: string, d: ViewGraphNode["data"]): ViewExpr | null {
+function commonLeafExpr(slot: string, d: ViewGraphNode["data"], wiredValue?: ViewOperand): ViewExpr | null {
   switch (slot) {
     case "type":
       return d.type ? { type: d.type } : null;
@@ -382,15 +538,17 @@ function commonLeafExpr(slot: string, d: ViewGraphNode["data"]): ViewExpr | null
     case "tagged":
       return d.tagged ? { tagged: d.tagged } : null;
     case "field":
-      return d.field?.key ? { field: d.field } : null;
+      return d.field?.key ? { field: withWiredValue(d.field, wiredValue) } : null;
     default:
       return null;
   }
 }
 
-// A Filter's predicate → a leaf ViewExpr (or null when unconfigured).
-function predicateExpr(node: ViewGraphNode): ViewExpr | null {
-  return commonLeafExpr(node.data.filter_kind ?? "type", node.data);
+// A Filter's predicate → a leaf ViewExpr (or null when unconfigured). A wired
+// value source on the Filter's `value` handle (#196) overrides the field's
+// authored literal / promoted formal.
+function predicateExpr(node: ViewGraphNode, wiredValue?: ViewOperand): ViewExpr | null {
+  return commonLeafExpr(node.data.filter_kind ?? "type", node.data, wiredValue);
 }
 
 // A leaf/injector node → its ViewExpr leaf slot. hand_picked/view_ref are
@@ -447,8 +605,59 @@ function lowerSegment(
   return { handle, built: built.tag === "empty" && sort ? UNIVERSE : built, sort };
 }
 
+// Is a predicate value slot a promoted-formal reference (`{var: name}`)?
+function isVarOperand(v: unknown): v is { var: string } {
+  return typeof v === "object" && v !== null && typeof (v as { var?: unknown }).var === "string";
+}
+
+function isFieldOfOperand(v: unknown): v is { field_of: ViewFieldOf } {
+  return typeof v === "object" && v !== null && (v as { field_of?: unknown }).field_of != null;
+}
+
+// The node ids reachable upstream from the View (output) node — the subgraph
+// that actually lowers into the spec. A promoted formal sitting on a node NOT
+// wired to the output must not leak a phantom parameter into the strip.
+function reachableFromOutput(graph: ViewGraph): Set<string> {
+  const seen = new Set<string>();
+  const stack = [OUTPUT_NODE_ID];
+  while (stack.length) {
+    const cur = stack.pop()!;
+    if (seen.has(cur)) continue;
+    seen.add(cur);
+    for (const e of graph.edges) if (e.target === cur) stack.push(e.source);
+  }
+  return seen;
+}
+
+// Collect the promoted runtime formals (#184 Phase 1b, ADR-0032) declared on
+// reachable field nodes, in stable node order. A formal counts only when its
+// node both carries a `field_param` AND actually references it via
+// `field.value = {var: name}`, so a demoted (or key-changed) node never emits a
+// stale param. Deduped by name (the stable key `{var}` operands reference).
+function collectParams(graph: ViewGraph): ViewParam[] {
+  const reachable = reachableFromOutput(graph);
+  const seen = new Set<string>();
+  const out: ViewParam[] = [];
+  for (const n of graph.nodes) {
+    if (!reachable.has(n.id)) continue;
+    const fp = n.data.field_param;
+    const v = n.data.field?.value;
+    // A value-wired slot (#196) takes its operand from the edge, not a formal —
+    // the wire wins at lowering, so a stale `field_param` must not leak a param.
+    const valueWired = graph.edges.some((e) => e.target === n.id && e.targetHandle === FILTER_VALUE_HANDLE);
+    if (valueWired || !fp || !isVarOperand(v) || v.var !== fp.name || seen.has(fp.name)) continue;
+    seen.add(fp.name);
+    const param: ViewParam = { name: fp.name };
+    if (fp.label != null) param.label = fp.label;
+    if (fp.default !== undefined) param.default = fp.default;
+    out.push(param);
+  }
+  return out;
+}
+
 // Serialize the graph reachable from the View node into a ViewSpec. 0–1
 // populated handles → a flat `expr`; 2+ → an ordered `groups` list (ADR-0027).
+// Promoted formals reachable from the output become `params` (#184 Phase 1b).
 export function graphToSpec(graph: ViewGraph, base: { kind: string; sort?: ViewSort | null }): ViewSpec {
   const byId = new Map(graph.nodes.map((n) => [n.id, n]));
   const handles = outputHandles(byId.get(OUTPUT_NODE_ID));
@@ -456,9 +665,12 @@ export function graphToSpec(graph: ViewGraph, base: { kind: string; sort?: ViewS
   const segments = handles.map((h) => lowerSegment(graph, byId, h, handleIds));
   const populated = segments.filter((s) => s.built.tag !== "empty");
 
+  const params = collectParams(graph);
+  const withParams = (s: ViewSpec): ViewSpec => (params.length > 0 ? { ...s, params } : s);
+
   if (handles.length <= 1 || populated.length <= 1) {
     const seg = populated[0];
-    return { kind: base.kind, expr: seg ? materialize(seg.built) : null, sort: seg?.sort ?? base.sort ?? null };
+    return withParams({ kind: base.kind, expr: seg ? materialize(seg.built) : null, sort: seg?.sort ?? base.sort ?? null });
   }
 
   const groups: ViewGroupSpec[] = populated.map((s, i) => {
@@ -467,7 +679,7 @@ export function graphToSpec(graph: ViewGraph, base: { kind: string; sort?: ViewS
     if (s.handle.color) g.color = s.handle.color;
     return g;
   });
-  return { kind: base.kind, groups, sort: base.sort ?? null };
+  return withParams({ kind: base.kind, groups, sort: base.sort ?? null });
 }
 
 // Flat single-segment lowering — the root `expr` of a designer graph, ignoring
@@ -497,6 +709,10 @@ export function specToGraph(spec: ViewSpec | null | undefined): ViewGraph {
 
   const outputNode: ViewGraphNode = { id: OUTPUT_NODE_ID, kind: "output", position: { x: 0, y: 0 }, data: {} };
   nodes.push(outputNode);
+
+  // Promoted formals (#184 Phase 1b): a field value of `{var: name}` reopens as
+  // a promoted node whose label/default come from the matching spec `param`.
+  const paramByName = new Map((spec?.params ?? []).map((p) => [p.name, p]));
 
   const groups = spec?.groups ?? null;
   if (groups && groups.length > 0) {
@@ -576,12 +792,48 @@ export function specToGraph(spec: ViewSpec | null | undefined): ViewGraph {
       }
       return walk(e.of, depth);
     }
+    if (e.field_of != null) {
+      // Forward projection (#184): a field_of node fed by its `of` subgraph.
+      const id = addNode("field_of", depth, { project_field: e.field_of.field });
+      const ofId = walk(e.field_of.of, depth + 1);
+      if (ofId) link(ofId, id);
+      return id;
+    }
+    if (e.var != null) {
+      // Only the reserved `$self` renders as a designer source in the 0.7.0 cut
+      // (a declared source Parameter node is deferred, ADR-0032). A promoted
+      // formal never appears as a standalone leaf — it lives in a Filter value
+      // slot — so any other `var` has no designer node and is skipped.
+      return e.var === SELF_VAR ? addNode("self", depth, {}) : null;
+    }
     // Leaves. `!= null` (not `!== undefined`): the backend serializes ViewExpr
     // densely, so every unused slot arrives as `null`, not absent.
     if (e.type != null) return addNode("type", depth, { type: e.type });
     if (e.descendants_of != null) return addNode("descendants_of", depth, { descendants_of: e.descendants_of });
     if (e.tagged != null) return addNode("tagged", depth, { tagged: e.tagged });
-    if (e.field != null) return addNode("field", depth, { field: e.field });
+    if (e.field != null) {
+      const v = e.field.value;
+      // A wired value source (#196) reopens as a source node + an edge into the
+      // field's `value` handle; the field node itself drops its inline value
+      // (the wire re-supplies it on lowering).
+      if (isFieldOfOperand(v)) {
+        const fieldId = addNode("field", depth, { field: { ...e.field, value: null } });
+        const foId = walk({ field_of: v.field_of } as ViewExpr, depth + 1);
+        if (foId) link(foId, fieldId, FILTER_VALUE_HANDLE);
+        return fieldId;
+      }
+      if (isVarOperand(v) && v.var === SELF_VAR) {
+        const fieldId = addNode("field", depth, { field: { ...e.field, value: null } });
+        link(addNode("self", depth + 1, {}), fieldId, FILTER_VALUE_HANDLE);
+        return fieldId;
+      }
+      const data: ViewNodeData = { field: e.field };
+      if (isVarOperand(v)) {
+        const p = paramByName.get(v.var);
+        data.field_param = { name: v.var, label: p?.label, default: p?.default };
+      }
+      return addNode("field", depth, data);
+    }
     if (e.hand_picked != null) return addNode("hand_picked", depth, { hand_picked: e.hand_picked });
     if (e.view_ref != null) return addNode("view_ref", depth, { view_ref: e.view_ref });
     return null;

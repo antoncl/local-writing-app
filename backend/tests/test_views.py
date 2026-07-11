@@ -138,7 +138,7 @@ class ViewCrudTests(unittest.TestCase):
         )
         self.assertEqual(ok.status_code, 200, ok.text)
         self.assertEqual(
-            ok.json()["spec"], {"kind": "scene", "expr": None, "groups": None, "sort": None}
+            ok.json()["spec"], {"kind": "scene", "expr": None, "groups": None, "sort": None, "params": None}
         )
 
     def test_delete_removes_view(self) -> None:
@@ -241,6 +241,63 @@ class ViewSpecModelTests(unittest.TestCase):
                 expr={"type": "lore:character"},
                 groups=[{"name": "Cast", "expr": {"type": "lore:character"}}],
             )
+
+
+class ParameterizedViewGrammarTests(unittest.TestCase):
+    """#184 forward model grammar (ADR-0031/0032, views-and-filters.md §14): the
+    `field_of` projection + `var`/`$self` leaves, the 6→4 op enum, and the
+    `params` formal list on a ViewSpec."""
+
+    def test_op_enum_is_4_valued(self) -> None:
+        for op in ("overlap", "disjoint", "set", "unset"):
+            self.assertEqual(ViewExpr(field={"key": "pov", "op": op}).field.op, op)
+        # The retired 6-op values no longer validate.
+        for old in ("eq", "neq", "includes", "not_includes"):
+            with self.assertRaises(ValueError):
+                ViewExpr(field={"key": "pov", "op": old})
+
+    def test_field_of_is_a_primary_slot(self) -> None:
+        expr = ViewExpr(field_of={"of": {"type": "scene:scene"}, "field": "pov"})
+        self.assertEqual(expr.field_of.field, "pov")
+        self.assertEqual(expr.field_of.of.type, "scene:scene")
+        # Exclusive with other primaries.
+        with self.assertRaises(ValueError):
+            ViewExpr(field_of={"of": {"type": "scene:scene"}, "field": "pov"}, type="lore:character")
+
+    def test_field_of_requires_field(self) -> None:
+        with self.assertRaises(ValueError):
+            ViewExpr(field_of={"of": {"type": "scene:scene"}, "field": ""})
+
+    def test_var_leaf(self) -> None:
+        self.assertEqual(ViewExpr(var="$self").var, "$self")
+        self.assertEqual(ViewExpr(var="POV").var, "POV")
+        with self.assertRaises(ValueError):
+            ViewExpr(var="$self", type="lore:character")
+
+    def test_tagged_operand_in_predicate_value_roundtrips(self) -> None:
+        # A predicate value may carry a tagged operand (loose `Any`, structural).
+        expr = ViewExpr(field={"key": "pov", "op": "overlap", "value": {"var": "POV"}})
+        self.assertEqual(expr.field.value, {"var": "POV"})
+        proj = ViewExpr(
+            field={"key": "tags", "op": "overlap", "value": {"field_of": {"of": {"var": "$self"}, "field": "tags"}}}
+        )
+        self.assertEqual(proj.field.value["field_of"]["field"], "tags")
+
+    def test_params_list_roundtrips_and_stores_no_type(self) -> None:
+        spec = ViewSpec(
+            kind="scene",
+            expr={"field": {"key": "pov", "op": "overlap", "value": {"var": "POV"}}},
+            params=[{"name": "POV", "label": "Point of view", "default": None},
+                    {"name": "status", "label": "Status", "default": ["draft", "revised"]}],
+        )
+        self.assertEqual([p.name for p in spec.params], ["POV", "status"])
+        self.assertEqual(spec.params[1].default, ["draft", "revised"])
+        # No `type` field is stored on a param (recomputed at load, §14.1).
+        self.assertNotIn("type", spec.params[0].model_dump())
+
+    def test_params_absent_is_degenerate_closed_case(self) -> None:
+        spec = ViewSpec(kind="lore", expr={"type": "lore:character"})
+        self.assertIsNone(spec.params)
 
 
 class NestGrammarTests(unittest.TestCase):

@@ -228,6 +228,17 @@ class BacklinksResponse(BaseModel):
     backlinks: list[Backlink] = Field(default_factory=list)
 
 
+class ReferenceGraphResponse(BaseModel):
+    """Forward reference adjacency for the whole project (#184 Phase 2): each
+    node id → the ids it references through any entity_ref / entity_ref_list
+    field. The frontend inverts this into a reverse index the view evaluator's
+    computed `references` field projects over (`field_of(set, "references")`),
+    so backlinks compose with set algebra instead of a bespoke per-node call.
+    Only nodes that reference something appear as keys."""
+
+    refs: dict[str, list[str]] = Field(default_factory=dict)
+
+
 class StructureNodeDeletePreview(BaseModel):
     target_id: str
     target_title: str

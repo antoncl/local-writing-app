@@ -36,6 +36,7 @@ import type {
   ViewSort,
   ViewSpec,
 } from "@/lib/types";
+import { projectReferences } from "@/lib/views/referenceIndex";
 
 // The minimal node shape the evaluator reads. Every `*EntrySummary` satisfies
 // it structurally; the Draft tree adapts its `StructureNode`s (type→entry_type,
@@ -50,6 +51,14 @@ export type EvalNode = {
   // (`structureToEvalNodes`); other callers omit it and non-tree presentations
   // ignore it. Members nest under their ancestry; empty branches self-prune.
   ancestry?: PathSegment[] | null;
+  // #201: a node's CANONICAL identity for reference purposes, when it differs
+  // from `id`. A manuscript scene's roster `id` is its structure `node.id`
+  // (`node_…`), but the reverse reference index keys scenes by their canonical
+  // `scene_id` (`scene_…`) — the front-matter identity the backend walk records.
+  // The structure adapter sets `ref_id = scene_id` so `field_of(…, references)`
+  // can bridge the two id spaces. Omitted ⇒ `id` already IS the canonical id
+  // (lore/assistant/prompt rosters, where the two coincide).
+  ref_id?: string | null;
 };
 
 // A field routes to the node top-level property (id/title/entry_type) instead
@@ -145,6 +154,21 @@ export type ViewResult<T extends EvalNode = EvalNode> = {
   diagnostics?: ViewDiagnostics;
 };
 
+// A bound actual for a free variable (#184): an id-set (entity_ref formal /
+// `$self`) or a value-set (scalar formal) — both plain string sets. Accepted as
+// a Set or a bare array; normalized to a Set at resolution.
+export type BindingValue = ReadonlySet<string> | readonly string[];
+export type EvalBindings = Record<string, BindingValue | null | undefined>;
+
+// The reserved variable name for the pane's anchor node (#184, ADR-0032). Its
+// canonical use is `field_of({var: "$self"}, "references")`.
+export const SELF_VAR = "$self";
+
+// The stable key of the built-in `references` computed node-set field (ADR-0029,
+// #184 §14.4): any-field backlinks, read from the reverse index (below) rather
+// than a node's metadata. `field_of(of, "references")` projects to the referrers.
+export const REFERENCES_FIELD = "references";
+
 export type EvalContext = {
   // Needed only by the `descendants_of` leaf: resolves an entry_type FQN to
   // itself + every type inheriting from it via `parent:` chains.
@@ -152,6 +176,15 @@ export type EvalContext = {
   // Needed only by the `view_ref` leaf: resolves a saved-view node id to its
   // stored ViewSpec. Referenced views are kind-anchored to the same kind.
   resolveView?: (viewId: string) => ViewSpec | null;
+  // #184: the bindings environment (name → id-set | value-set), injected exactly
+  // as `schema`/`resolveView` are. `$self` and each promoted formal read from
+  // here. An unbound formal ⇒ its predicate is inactive (input passes through);
+  // an unresolved `$self` ⇒ the empty set (ADR-0031 §B).
+  bindings?: EvalBindings;
+  // #184 §14.4 (Phase 2): the reverse reference index (targetId → referrer ids)
+  // backing the `references` field, threaded like `schema`. Absent ⇒ `field_of`
+  // on `references` yields the empty set.
+  referenceIndex?: ReadonlyMap<string, ReadonlySet<string>>;
 };
 
 // Build an implicit default view for a pane: the whole universe of `kind`,
@@ -204,10 +237,16 @@ type RunState<T extends EvalNode> = {
   universe: T[];
   order: Map<string, number>; // id → universe index, for stable set→list
   nodeById: Map<string, T>; // id → node, for `nest` edge resolution
+  // #201: canonical (reference) id → roster id, ONLY for nodes whose `ref_id`
+  // differs from `id` (scenes). Empty for rosters where the two coincide, so the
+  // `references` projection is a no-op translation there.
+  idByCanonical: Map<string, string>;
   annotations: Map<string, ViewAnnotation>;
   descendantsCache: Map<string, Set<string>>;
   schema?: MetadataSchema | null;
   resolveView?: (viewId: string) => ViewSpec | null;
+  bindings?: EvalBindings; // #184: name → id-set|value-set (free variables + $self)
+  referenceIndex?: ReadonlyMap<string, ReadonlySet<string>>; // #184: targetId → referrers
   viewStack: string[]; // view_ref cycle guard
   diag: ViewDiagnostics; // nest accumulator (cycle/orphan/fan-out counts)
   nestRan: boolean; // whether any `nest` evaluated (gates `diagnostics` on result)
@@ -220,18 +259,25 @@ export function evaluateView<T extends EvalNode>(
 ): ViewResult<T> {
   const order = new Map<string, number>();
   const nodeById = new Map<string, T>();
+  const idByCanonical = new Map<string, string>();
   nodes.forEach((n, i) => {
     order.set(n.id, i);
     nodeById.set(n.id, n);
+    // Only scenes carry a distinct canonical id; skip the identity case so a
+    // referrer whose canonical id already equals its roster id needs no lookup.
+    if (n.ref_id && n.ref_id !== n.id) idByCanonical.set(n.ref_id, n.id);
   });
   const state: RunState<T> = {
     universe: nodes,
     order,
     nodeById,
+    idByCanonical,
     annotations: new Map(),
     descendantsCache: new Map(),
     schema: ctx.schema,
     resolveView: ctx.resolveView,
+    bindings: ctx.bindings,
+    referenceIndex: ctx.referenceIndex,
     viewStack: [],
     diag: { cyclicLinksSkipped: 0, orphansDropped: 0, fanoutTruncated: false },
     nestRan: false,
@@ -278,8 +324,9 @@ function evalSegment<T extends EvalNode>(
   state: RunState<T>,
   expr: ViewExpr | null | undefined,
   sort: ViewSort | null | undefined,
+  neutralUniverse = true,
 ): T[] {
-  const memberIds = expr ? evalExpr(state, expr) : new Set(state.order.keys());
+  const memberIds = expr ? evalExpr(state, expr, neutralUniverse) : new Set(state.order.keys());
   const members = state.universe.filter((n) => memberIds.has(n.id));
   return sortNodes(members, sort, state.schema);
 }
@@ -302,17 +349,24 @@ function rowKey<T extends EvalNode>(node: T, path: PathSegment[]): string {
 //    the set algebra (intersect/difference/…) has no grouping to preserve and
 //    flattens through `evalExpr` as before.
 //  - everything else resolves to flat rows (empty path) via `evalSegment`.
+//
+// `neutralUniverse` (#198) is threaded to the terminal `evalSegment` so an
+// inactive predicate drops out here too, and RESET to `false` for a top-level
+// `union`'s operands (∪ identity is ∅) — otherwise an unbound filter in a union
+// branch resolves to the universe and the union absorbs to everything. (Buried
+// unions inside the set algebra are handled the same way by `evalExpr`.)
 function evalSource<T extends EvalNode>(
   state: RunState<T>,
   expr: ViewExpr | null | undefined,
   sort: ViewSort | null | undefined,
+  neutralUniverse = true,
 ): ViewRow<T>[] {
   if (expr) {
     if (expr.union) {
       const rows: ViewRow<T>[] = [];
       const seen = new Set<string>();
       for (const sub of expr.union) {
-        for (const r of evalSource(state, sub, sort)) {
+        for (const r of evalSource(state, sub, sort, false)) {
           const key = rowKey(r.node, r.path);
           if (seen.has(key)) continue; // dedupe identical (node, path)
           seen.add(key);
@@ -331,7 +385,7 @@ function evalSource<T extends EvalNode>(
       if (nested) return nested; // grouped/tree ref → nested rows; null → flat
     }
   }
-  return evalSegment(state, expr, sort).map((node) => ({ node, path: [] as PathSegment[] }));
+  return evalSegment(state, expr, sort, neutralUniverse).map((node) => ({ node, path: [] as PathSegment[] }));
 }
 
 // Evaluate each named handle in order into rows. Each handle prepends its own
@@ -479,32 +533,111 @@ function buildLevel<T extends EvalNode>(state: RunState<T>, rows: ViewRow<T>[]):
   });
 }
 
-function evalExpr<T extends EvalNode>(state: RunState<T>, expr: ViewExpr): Set<string> {
+// `neutralUniverse` is the value an *inactive* field predicate (an unbound
+// promoted formal) takes in THIS position (#198): the whole universe (`true`) or
+// the empty set (`false`). Under (a) "unset = show everything", an inactive
+// predicate must be the IDENTITY ELEMENT of its immediately enclosing combinator,
+// so it drops out cleanly. Each combinator therefore RESETS this for its children
+// to its own identity — it is not a sign propagated from the root:
+//   intersect → universe (`A ∩ 1 = A`)      union → ∅ (`A ∪ ∅ = A`)
+//   difference.keep → universe               difference.remove → ∅ (`A − ∅ = A`)
+//   complement → ∅ (`U − ∅ = U`)             annotate/view_ref → inherit
+// A global keep/subtract sign (an earlier attempt) got the direct drop/complement
+// case right but mis-handled an inactive predicate nested inside a combinator that
+// itself sits in a subtractive position — e.g. `A − (X ∩ inactive)` collapsed to
+// `A` instead of `A − X`, and `X ∪ inactive` blew up to the universe. Resetting
+// per-combinator is the correct model. The default is `true`: a bare filter at the
+// membership root shows everything when unset.
+function evalExpr<T extends EvalNode>(state: RunState<T>, expr: ViewExpr, neutralUniverse = true): Set<string> {
   // Combinators first, then annotate pass-through, then leaves. Exactly one
   // primary slot is populated per node (validated backend-side, #78).
-  if (expr.union) return unionAll(expr.union.map((e) => evalExpr(state, e)));
-  if (expr.intersect) return intersectAll(expr.intersect.map((e) => evalExpr(state, e)));
+  if (expr.union) return unionAll(expr.union.map((e) => evalExpr(state, e, false)));
+  if (expr.intersect) return intersectAll(expr.intersect.map((e) => evalExpr(state, e, true)));
   if (expr.difference) {
-    const keep = evalExpr(state, expr.difference.keep);
-    const remove = evalExpr(state, expr.difference.remove);
+    const keep = evalExpr(state, expr.difference.keep, true);
+    const remove = evalExpr(state, expr.difference.remove, false);
     return new Set([...keep].filter((id) => !remove.has(id)));
   }
   if (expr.complement) {
-    const inner = evalExpr(state, expr.complement);
+    const inner = evalExpr(state, expr.complement, false);
     return new Set([...state.order.keys()].filter((id) => !inner.has(id)));
   }
   if (expr.annotate && expr.of) {
-    const members = evalExpr(state, expr.of);
+    const members = evalExpr(state, expr.of, neutralUniverse);
     stampAnnotation(state, members, expr.annotate);
     return members;
   }
   // Nest buried in the set algebra contributes its flat membership: every node
   // that landed in the denormalized tree (parents kept + children attached).
   if (expr.nest) return evalNest(state, expr.nest).placed;
-  return evalLeaf(state, expr);
+  // Field projection (#184, ADR-0031 §D): project the input set through a field.
+  // In membership position the result is treated as a node-set (reference
+  // projection); a scalar projection's values are only meaningful as a Filter
+  // operand and fall out of the universe filter here.
+  if (expr.field_of) return evalFieldOf(state, expr.field_of);
+  // A free variable / `$self` leaf (#184): resolves to a node-set from bindings.
+  if (expr.var != null) return evalVar(state, expr.var);
+  return evalLeaf(state, expr, neutralUniverse);
 }
 
-function evalLeaf<T extends EvalNode>(state: RunState<T>, expr: ViewExpr): Set<string> {
+// Forward projection: evaluate `of` to a node-set, then flatMap each node's
+// `field` values and dedupe (ADR-0031 §D). Returns a set of strings — target
+// ids for a reference field (a node-set), the stored values for a scalar field
+// (a value-set); the position determines interpretation.
+//
+// #203: guard a malformed op (a hand-edited/corrupt `{field_of:{field}}` with no
+// `of`). The designer never emits it, but without the guard `evalExpr(undefined)`
+// throws and aborts the whole pane. A missing `of` (or field) ⇒ the empty set —
+// a benign no-match, applied to BOTH the operand and membership call sites.
+function evalFieldOf<T extends EvalNode>(state: RunState<T>, op: { of?: ViewExpr | null; field?: string }): Set<string> {
+  if (op == null || op.of == null || !op.field) return new Set<string>();
+  return projectField(state, evalExpr(state, op.of), op.field);
+}
+
+function projectField<T extends EvalNode>(state: RunState<T>, ofIds: Set<string>, field: string): Set<string> {
+  // `references` is not a stored field — it reads the reverse index (§14.4);
+  // the same projection backs the backlinks panel (Phase 2c). The index is
+  // canonical-id space, so bridge #201: translate the input roster ids →
+  // canonical for the lookup, then the referrer canonical ids → roster ids so
+  // the caller's universe filter matches. Both translations are identity on a
+  // roster where `id === canonical` (lore/assistant), and `projectReferences`
+  // itself stays pure canonical (the backlinks panel keeps reading it directly).
+  if (field === REFERENCES_FIELD) {
+    const canonicalOf = new Set<string>();
+    // `|| id` (not `??`): a blank ref_id ("") is not a canonical id — fall back to
+    // the roster id so the lookup can't query the empty string.
+    for (const id of ofIds) canonicalOf.add(state.nodeById.get(id)?.ref_id || id);
+    const out = new Set<string>();
+    for (const referrer of projectReferences(canonicalOf, state.referenceIndex)) {
+      out.add(state.idByCanonical.get(referrer) ?? referrer);
+    }
+    return out;
+  }
+  // A scalar field projects its WHOLE value; only a collection field (or an array
+  // value) tokenizes (#202) — the same rule `evalField` applies on the node side,
+  // so a value-set projection of e.g. a comma-bearing title stays one token.
+  const collection = isCollectionField(state.schema, field);
+  const out = new Set<string>();
+  for (const id of ofIds) {
+    const n = state.nodeById.get(id);
+    if (!n) continue;
+    const raw = fieldValue(n, field, state.schema);
+    const tokens = collection || Array.isArray(raw) ? asArray(raw) : isEmpty(raw) ? [] : [raw];
+    for (const v of tokens) {
+      const s = String(v).trim();
+      if (s) out.add(s);
+    }
+  }
+  return out;
+}
+
+// A var/`$self` in membership/`of`/leaf position → a node-set from bindings
+// ($self = the anchored node as a singleton). Unresolved ⇒ empty (ADR-0031 §B).
+function evalVar<T extends EvalNode>(state: RunState<T>, name: string): Set<string> {
+  return bindingSet(state.bindings?.[name]);
+}
+
+function evalLeaf<T extends EvalNode>(state: RunState<T>, expr: ViewExpr, neutralUniverse = true): Set<string> {
   // Match against `!= null`, not `!== undefined`: the backend serializes a
   // ViewExpr with *every* slot present (unset ones as explicit `null`, Pydantic
   // default dump), so an omitted-vs-null asymmetry would misfire on the first
@@ -521,37 +654,39 @@ function evalLeaf<T extends EvalNode>(state: RunState<T>, expr: ViewExpr): Set<s
     return idsWhere(state, (n) => nodeTags(n).includes(tag));
   }
   if (expr.field != null) {
-    const pred = expr.field;
-    return idsWhere(state, (n) => matchesField(n, pred, state.schema));
+    return evalField(state, expr.field, neutralUniverse);
   }
   if (expr.hand_picked != null) {
     const picked = new Set(expr.hand_picked);
     return idsWhere(state, (n) => picked.has(n.id));
   }
   if (expr.view_ref != null) {
-    return evalViewRef(state, expr.view_ref);
+    return evalViewRef(state, expr.view_ref, neutralUniverse);
   }
   // Empty expr node: no constraint → whole universe (defensive; the grammar
   // requires a primary slot, but treat a stray {} as pass-through).
   return new Set(state.order.keys());
 }
 
-function evalViewRef<T extends EvalNode>(state: RunState<T>, viewId: string): Set<string> {
+function evalViewRef<T extends EvalNode>(state: RunState<T>, viewId: string, neutralUniverse = true): Set<string> {
   if (state.viewStack.includes(viewId)) return new Set(); // cycle: contribute nothing
   const ref = state.resolveView?.(viewId);
   if (!ref) return new Set(); // unresolved ref contributes nothing
   state.viewStack.push(viewId);
   try {
-    // A referenced view contributes its flat membership. A grouped view (named
-    // handles, `groups` set / `expr` null) carries no top-level `expr`, so union
-    // every handle's expr (v1 depth <= 1); a stray group without an expr is a
-    // whole-universe pass-through, mirroring evalSegment.
+    // A referenced view contributes its flat membership. The ref inherits the
+    // enclosing position's `neutralUniverse` (#198) so an unbound filter behind a
+    // `view_ref` still drops out cleanly in a subtractive position instead of
+    // re-emptying it. A grouped view (named handles, `groups` set / `expr` null)
+    // carries no top-level `expr`, so union every handle's expr (v1 depth <= 1); a
+    // stray group without an expr is a whole-universe pass-through, mirroring
+    // evalSegment.
     if (ref.groups && ref.groups.length > 0) {
       return unionAll(
-        ref.groups.map((g) => (g.expr ? evalExpr(state, g.expr) : new Set(state.order.keys()))),
+        ref.groups.map((g) => (g.expr ? evalExpr(state, g.expr, neutralUniverse) : new Set(state.order.keys()))),
       );
     }
-    if (ref.expr) return evalExpr(state, ref.expr);
+    if (ref.expr) return evalExpr(state, ref.expr, neutralUniverse);
     return new Set(state.order.keys()); // no primary slot -> pass-through
   } finally {
     state.viewStack.pop();
@@ -573,7 +708,9 @@ function isBareViewRef(expr: ViewExpr): boolean {
     expr.descendants_of == null &&
     expr.tagged == null &&
     expr.field == null &&
-    expr.hand_picked == null
+    expr.hand_picked == null &&
+    expr.field_of == null &&
+    expr.var == null
   );
 }
 
@@ -847,24 +984,146 @@ function fieldValue(node: EvalNode, key: string, schema: MetadataSchema | null |
     : node.metadata?.[key];
 }
 
-function matchesField(node: EvalNode, pred: ViewFieldPredicate, schema: MetadataSchema | null | undefined): boolean {
-  const raw = fieldValue(node, pred.key, schema);
-  switch (pred.op) {
-    case "set":
-      return !isEmpty(raw);
-    case "unset":
-      return isEmpty(raw);
-    case "eq":
-      return scalarEq(raw, pred.value);
-    case "neq":
-      return !scalarEq(raw, pred.value);
-    case "includes":
-      return asArray(raw).some((v) => scalarEq(v, pred.value));
-    case "not_includes":
-      return !asArray(raw).some((v) => scalarEq(v, pred.value));
-    default:
-      return false;
+// An unbound promoted formal — the predicate is inactive and passes the input
+// through (ADR-0031 §B), distinct from an operand that resolves to the empty set.
+const OPERAND_INACTIVE = Symbol("operand-inactive");
+
+// Collection field types (ADR-0031 §E): a value that is inherently a SET of
+// tokens. Only these tokenize a comma-bearing string; every other type is scalar
+// and compares whole (#202). An array value is always treated as a collection
+// regardless of the declared type, since it is already multi-valued.
+const COLLECTION_FIELD_TYPES = new Set<string>(["multi_select", "entity_ref_list", "tags"]);
+function isCollectionField(schema: MetadataSchema | null | undefined, key: string): boolean {
+  const t = schema?.fields?.[key]?.type;
+  return t != null && COLLECTION_FIELD_TYPES.has(t);
+}
+
+// Evaluate a `field` predicate to its member id-set (ADR-0031 §E, #184).
+// Overlap/disjoint compare the node's value against the operand; `set`/`unset`
+// are presence tests (operand ignored). The one value slot may be a bare literal,
+// a tagged `{var}` (a promoted formal / `$self`), or a tagged `{field_of}`
+// projection — resolved ONCE by `resolveOperand` (node-independent, so lifting it
+// out of the per-node loop also saves the repeat resolve, cf. #200).
+//
+// COLLECTION vs SCALAR (#202): a collection field (multi_select / entity_ref_list
+// / tags, or any array value) tokenizes and tests set-overlap; a SCALAR field
+// (text/select/entity_ref/…) compares its WHOLE value — never CSV-split, so a
+// title like "Alice, Queen of Hearts" is one token. Numeric equivalence (`9`
+// matches `"9.0"`, restoring the `scalarEq` the 6→4 collapse dropped) is applied
+// ONLY to a declared `number` field — a text/select code like "007" must NOT
+// match "7". The operand is coerced the same way, so a scalar literal containing a
+// comma stays one token while a multi-pick list stays multi.
+//
+// An INACTIVE operand (an unbound promoted formal) means "no constraint". Under
+// (a) "unset = show everything" (#198) that is the identity element of the
+// predicate's enclosing combinator — `neutralUniverse` carries which: the whole
+// universe when the position wants ∩-identity (so an intersect passes the input
+// through), the empty set when it wants ∪/−-identity (so a union/drop/complement
+// leaves the input untouched). See `evalExpr` for how each combinator sets it.
+function evalField<T extends EvalNode>(
+  state: RunState<T>,
+  pred: ViewFieldPredicate,
+  neutralUniverse: boolean,
+): Set<string> {
+  if (pred.op === "set") return idsWhere(state, (n) => !isEmpty(fieldValue(n, pred.key, state.schema)));
+  if (pred.op === "unset") return idsWhere(state, (n) => isEmpty(fieldValue(n, pred.key, state.schema)));
+  const collection = isCollectionField(state.schema, pred.key);
+  const operand = resolveOperand(state, pred.value, collection);
+  if (operand === OPERAND_INACTIVE) {
+    return neutralUniverse ? new Set(state.order.keys()) : new Set<string>();
   }
+  const numeric = state.schema?.fields?.[pred.key]?.type === "number";
+  const want = pred.op === "overlap"; // else "disjoint"
+  return idsWhere(state, (n) => {
+    const raw = fieldValue(n, pred.key, state.schema);
+    const overlaps =
+      collection || Array.isArray(raw)
+        ? intersects(toStringSet(raw), operand) // tokenized set-overlap (string equality)
+        : scalarOverlap(raw, operand, numeric); // whole value, numeric only for number fields
+    return overlaps === want;
+  });
+}
+
+// Whole-value scalar match (#202): does the node's single value equal ANY operand
+// candidate? Trimmed-string equality always; numeric equivalence (`9` vs `"9.0"`)
+// only when `numeric` (a declared `number` field) — otherwise "007" would wrongly
+// match "7". An empty value overlaps nothing (an empty set is disjoint from all).
+function scalarOverlap(raw: unknown, operand: Set<string>, numeric: boolean): boolean {
+  if (isEmpty(raw)) return false;
+  const s = String(raw).trim();
+  const n = Number(s);
+  const rawNumeric = numeric && s !== "" && !Number.isNaN(n);
+  for (const cand of operand) {
+    if (cand === s) return true;
+    if (rawNumeric) {
+      const cn = Number(cand);
+      if (cand.trim() !== "" && !Number.isNaN(cn) && cn === n) return true;
+    }
+  }
+  return false;
+}
+
+// Resolve a predicate operand to a string set (or INACTIVE). A `{var}` reads the
+// bindings: an unresolved `$self` is the empty set (a source with no anchor);
+// an unbound formal is INACTIVE (its predicate drops out). A `{field_of}` is a
+// projection; anything else is a bare literal, coerced to a set. `collection`
+// governs literal coercion (#202): a scalar field's string literal stays ONE
+// token (no comma-split), while a collection field's splits — matching how the
+// node side is tokenized. Arrays (a multi-pick) always keep their items whole.
+function resolveOperand<T extends EvalNode>(
+  state: RunState<T>,
+  value: unknown,
+  collection: boolean,
+): Set<string> | typeof OPERAND_INACTIVE {
+  if (isVarOperand(value)) {
+    const bound = state.bindings?.[value.var];
+    if (bound == null) return value.var === SELF_VAR ? new Set<string>() : OPERAND_INACTIVE;
+    return bindingSet(bound);
+  }
+  if (isFieldOfOperand(value)) {
+    const fo = value.field_of;
+    // A malformed field_of operand (no `of`/`field`) can't project. Treat it as
+    // INACTIVE — no constraint — NOT the empty set (#203): an empty operand would
+    // make a `disjoint` predicate match the WHOLE universe (`disjoint ∅` is true
+    // for every node), the inverse of "benign no-match".
+    if (fo == null || fo.of == null || !fo.field) return OPERAND_INACTIVE;
+    return evalFieldOf(state, fo);
+  }
+  if (!collection && typeof value === "string") {
+    const s = value.trim();
+    return s ? new Set([s]) : new Set<string>();
+  }
+  return toStringSet(value);
+}
+
+function isVarOperand(v: unknown): v is { var: string } {
+  return typeof v === "object" && v !== null && typeof (v as { var?: unknown }).var === "string";
+}
+
+function isFieldOfOperand(v: unknown): v is { field_of: { of: ViewExpr; field: string } } {
+  return typeof v === "object" && v !== null && (v as { field_of?: unknown }).field_of != null;
+}
+
+// Normalize a binding actual (Set or array) to a Set; nullish ⇒ empty.
+function bindingSet(v: BindingValue | null | undefined): Set<string> {
+  return v == null ? new Set<string>() : new Set(v);
+}
+
+// Coerce a raw metadata value to a set of trimmed strings — an entity_ref id, an
+// id/tag/value list, or a CSV string (shared `asArray` splitting), for overlap.
+function toStringSet(v: unknown): Set<string> {
+  const out = new Set<string>();
+  for (const item of asArray(v)) {
+    const s = String(item).trim();
+    if (s) out.add(s);
+  }
+  return out;
+}
+
+function intersects(a: Set<string>, b: Set<string>): boolean {
+  const [small, large] = a.size <= b.size ? [a, b] : [b, a];
+  for (const x of small) if (large.has(x)) return true;
+  return false;
 }
 
 function isEmpty(v: unknown): boolean {
@@ -876,23 +1135,6 @@ function asArray(v: unknown): unknown[] {
   if (v === null || v === undefined) return [];
   if (typeof v === "string") return v.split(",").map((s) => s.trim()).filter(Boolean);
   return [v];
-}
-
-function scalarEq(a: unknown, b: unknown): boolean {
-  if (a === null || a === undefined || b === null || b === undefined) return a === b;
-  if (typeof a === "number" || typeof b === "number") {
-    const na = Number(a);
-    const nb = Number(b);
-    if (!Number.isNaN(na) && !Number.isNaN(nb)) return na === nb;
-  }
-  if (typeof a === "boolean" || typeof b === "boolean") return toBool(a) === toBool(b);
-  return String(a) === String(b);
-}
-
-function toBool(v: unknown): boolean {
-  if (typeof v === "boolean") return v;
-  if (typeof v === "string") return v === "true" || v === "1";
-  return !!v;
 }
 
 // --- set + sort helpers --------------------------------------------------

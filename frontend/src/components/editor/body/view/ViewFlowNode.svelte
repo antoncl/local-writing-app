@@ -40,6 +40,8 @@
     difference: "Difference",
     complement: "Complement",
     nest: "Nest",
+    field_of: "Field of",
+    self: "This entry",
     highlight: "Highlight",
     type: "Type is",
     descendants_of: "Type & subtypes",
@@ -71,38 +73,65 @@
 
   // --- field predicate helpers (comparator adapts to the field's datatype) ---
   let fieldKey = $derived(cfg.field?.key ?? "");
-  let fieldOp = $derived(cfg.field?.op ?? "eq");
+  let fieldOp = $derived<FieldOp>(cfg.field?.op ?? "overlap");
   let fieldDef = $derived(fieldKey ? ctx.fieldByKey(fieldKey) : null);
-  let fieldOps = $derived(opsForType(fieldDef?.type));
   let opNeedsValue = $derived(fieldOp !== "set" && fieldOp !== "unset");
   function setField(next: Partial<NonNullable<ViewNodeData["field"]>>) {
     const merged = { key: fieldKey, op: fieldOp, value: cfg.field?.value, ...next };
-    // If the new field's datatype no longer supports the current op, reset it.
-    if (next.key !== undefined) {
-      const ops = opsForType(ctx.fieldByKey(next.key)?.type);
-      if (!ops.some((o) => o.value === merged.op)) merged.op = ops[0]?.value ?? "eq";
-    }
     patch({ field: merged });
   }
 
-  type FieldOp = NonNullable<ViewNodeData["field"]>["op"];
-  const OP_LABEL: Record<FieldOp, string> = {
-    eq: "=",
-    neq: "≠",
-    includes: "includes",
-    not_includes: "excludes",
-    set: "is set",
-    unset: "is empty",
-  };
-  function opsForType(type: MetadataFieldType | undefined): { value: FieldOp; label: string }[] {
-    // Collection fields compare by membership; scalars by equality. set/unset
-    // (presence) apply to every type. Unknown type → offer the full menu.
-    const collection = type === "multi_select" || type === "entity_ref_list" || type === "tags";
-    const scalar = type === undefined ? (["eq", "neq"] as FieldOp[]) : collection ? [] : (["eq", "neq"] as FieldOp[]);
-    const member: FieldOp[] = type === undefined || collection ? ["includes", "not_includes"] : [];
-    const ops: FieldOp[] = [...scalar, ...member, "set", "unset"];
-    return ops.map((value) => ({ value, label: OP_LABEL[value] }));
+  // --- promote-in-place (#184 Phase 1b, ADR-0032): a field value slot ⇄ a named
+  // runtime formal. Promoting freezes the field/op (authoring) and turns the
+  // authored literal into an overridable default (runtime); the predicate value
+  // becomes `{var: name}`. `name` keys on the node id so a view can carry two
+  // formals over the same field. Lowering collects these into ViewSpec.params.
+  let fieldParam = $derived(cfg.field_param ?? null);
+  let isPromoted = $derived(fieldParam != null);
+  // #198: a promoted formal with no default is UNBOUND — by default its predicate
+  // is inactive (under (a) "unset = show everything" it imposes no constraint:
+  // pass-through in a keep, removes nothing in a drop/complement). Surface that
+  // no-op state in the designer so a power user can see the node is currently
+  // inert rather than silently filtering. `set`/`unset` carry no operand, so they
+  // are never inactive; an unpromoted node's fixed literal is always bound.
+  let isInactiveParam = $derived(isPromoted && opNeedsValue && isEmptyValue(fieldParam?.default));
+  function isEmptyValue(v: unknown): boolean {
+    return v == null || v === "" || (Array.isArray(v) && v.length === 0);
   }
+  function promoteField() {
+    const name = fieldKey ? `${fieldKey}_${id}` : `param_${id}`;
+    const label = fieldDef?.name || fieldKey || "Parameter";
+    patch({ field: { key: fieldKey, op: fieldOp, value: { var: name } }, field_param: { name, label, default: cfg.field?.value ?? null } });
+  }
+  function demoteField() {
+    patch({ field: { key: fieldKey, op: fieldOp, value: cfg.field_param?.default ?? null }, field_param: undefined });
+  }
+  function setParamLabel(label: string) {
+    if (cfg.field_param) patch({ field_param: { ...cfg.field_param, label } });
+  }
+  function setParamDefault(v: unknown) {
+    if (cfg.field_param) patch({ field_param: { ...cfg.field_param, default: v } });
+  }
+  // A valueless op (is set / is empty) has no slot to promote — demote when
+  // switching into one so a stale formal can't leak into the parameter strip.
+  function changeOp(op: FieldOp) {
+    if ((op === "set" || op === "unset") && isPromoted) {
+      patch({ field: { key: fieldKey, op, value: undefined }, field_param: undefined });
+    } else {
+      setField({ op });
+    }
+  }
+
+  type FieldOp = NonNullable<ViewNodeData["field"]>["op"];
+  // Op enum collapsed 6→4 (ADR-0031 §E, #184): overlap/disjoint set-coerce both
+  // sides and work for scalar and collection fields alike, so one menu serves
+  // every type (the old per-type eq/neq vs includes/not_includes split is gone).
+  const FIELD_OPS: { value: FieldOp; label: string }[] = [
+    { value: "overlap", label: "any of" },
+    { value: "disjoint", label: "none of" },
+    { value: "set", label: "is set" },
+    { value: "unset", label: "is empty" },
+  ];
 
   // --- sorter helpers ---
   let sortBy = $derived<ViewSort["by"]>(cfg.sort?.by ?? "manual");
@@ -141,6 +170,43 @@
   function setMatch(next: Partial<NonNullable<ViewNodeData["match"]>>) {
     patch({ match: { field: matchField, direction: matchDir, by: matchBy, ...next } });
   }
+
+  // --- field_of (forward projection, #184 ADR-0031 §D) ---
+  // The 0.7.0 cut projects to a NODE-SET only: the input kind's reference fields
+  // (entity_ref / entity_ref_list) plus the built-in `references` (any-field
+  // backlinks — a universal projection offered on every field_of, even though it
+  // isn't a member of the anchor kind's types). Scalar projection (a value-set)
+  // and its Filter value-slot consumer are deferred (§14.5). Fields are the
+  // anchor kind's (single-hop from anchor sources); precise cross-kind
+  // intersection is deferred with multi-hop.
+  let projectField = $derived(cfg.project_field ?? "");
+  let projectFields = $derived(buildProjectFields());
+  function buildProjectFields(): { key: string; name: string }[] {
+    const out: { key: string; name: string }[] = [];
+    for (const f of ctx.fields) {
+      // Every field projects — a reference field to a node-set, a scalar field
+      // to a value-set (#196, ADR-0031 §D) — except `long_text`: freeform prose
+      // has no stable identity, so it's presence-only (§H).
+      if (f.def.type === "long_text") continue;
+      out.push({ key: f.key, name: f.name });
+    }
+    const refDef = ctx.fieldByKey("references");
+    if (refDef && !out.some((o) => o.key === "references")) out.push({ key: "references", name: refDef.name });
+    return out;
+  }
+
+  // Whether this node's value slot is fed by a wired source edge (#196). When
+  // wired, the operand comes from the edge — the inline literal / promote control
+  // is hidden (the three fill modes are mutually exclusive, ADR-0031 §E).
+  let isValueWired = $derived(ctx.valueWired?.(id) ?? false);
+  // The value socket is a Filter (transform) affordance: a Filter with a
+  // value-taking field predicate exposes it, so you can wire a projection in. A
+  // bare "Field" *injector* is a self-contained source — it shows the socket
+  // ONLY to display an already-wired value (e.g. a reopened wired Filter lowers
+  // to a field leaf), never as an empty dangling input (#196).
+  let hasValueSlot = $derived(
+    kind === "filter" ? filterKind === "field" && !!fieldDef && opNeedsValue : kind === "field" && isValueWired,
+  );
 
   // --- hand_picked helpers: ids <-> light refs for NodePicker ---
   // Resolve a picked id's title across the rosters the anchor kind can draw from
@@ -252,25 +318,64 @@
         <option value={f.key}>{f.name}</option>
       {/each}
     </select>
-    <select class="vfield op" value={fieldOp} onchange={(e) => setField({ op: e.currentTarget.value as FieldOp })}>
-      {#each fieldOps as op (op.value)}
+    <select class="vfield op" value={fieldOp} onchange={(e) => changeOp(e.currentTarget.value as FieldOp)}>
+      {#each FIELD_OPS as op (op.value)}
         <option value={op.value}>{op.label}</option>
       {/each}
     </select>
   </div>
   {#if opNeedsValue && fieldDef}
-    <div class="vfield-value">
-      <FieldValueEditor
-        field={fieldDef}
-        value={(cfg.field?.value ?? null) as import("@/lib/types").MetadataValue}
-        onChange={(v) => setField({ value: v })}
-        loreEntries={ctx.loreEntries}
-        promptEntries={ctx.promptEntries}
-        structure={ctx.structure}
-        researchStructure={ctx.researchStructure}
-        ariaLabel="Field value"
-      />
-    </div>
+    {#if isValueWired}
+      <!-- Wired: a source edge fills the value slot (#196). The operand comes
+           from the wire; the literal / promote controls are hidden. -->
+      <div class="vwired" role="note">↳ value from a wired source</div>
+    {:else if isPromoted}
+      <!-- Promoted: the slot is a runtime formal. Edit its strip label + the
+           overridable default; Unlink demotes back to a fixed value. -->
+      <div class="vparam" role="group" aria-label="Runtime parameter">
+        <div class="vparam-head">
+          <span class="vparam-tag">Parameter</span>
+          {#if isInactiveParam}<span class="vparam-inert" role="note">inactive</span>{/if}
+          <button type="button" class="vparam-unlink" title="Back to a fixed value" onclick={demoteField}>Unlink</button>
+        </div>
+        <input
+          class="vfield"
+          type="text"
+          placeholder="Parameter label"
+          aria-label="Parameter label"
+          value={cfg.field_param?.label ?? ""}
+          oninput={(e) => setParamLabel(e.currentTarget.value)}
+        />
+        <div class="vfield-value">
+          <FieldValueEditor
+            field={fieldDef}
+            value={(cfg.field_param?.default ?? null) as import("@/lib/types").MetadataValue}
+            onChange={(v) => setParamDefault(v)}
+            loreEntries={ctx.loreEntries}
+            promptEntries={ctx.promptEntries}
+            structure={ctx.structure}
+            researchStructure={ctx.researchStructure}
+            ariaLabel="Default value"
+          />
+        </div>
+      </div>
+    {:else}
+      <div class="vfield-value">
+        <FieldValueEditor
+          field={fieldDef}
+          value={(cfg.field?.value ?? null) as import("@/lib/types").MetadataValue}
+          onChange={(v) => setField({ value: v })}
+          loreEntries={ctx.loreEntries}
+          promptEntries={ctx.promptEntries}
+          structure={ctx.structure}
+          researchStructure={ctx.researchStructure}
+          ariaLabel="Field value"
+        />
+      </div>
+      <button type="button" class="vpromote" title="Expose this value as a runtime parameter" onclick={promoteField}>
+        Promote to parameter
+      </button>
+    {/if}
   {/if}
 {/snippet}
 
@@ -280,6 +385,8 @@
   class:output={kind === "output"}
   class:combinator={arity === "many" || arity === "keep_remove" || arity === "parents_children" || kind === "complement"}
   class:injector={kind === "all"}
+  class:inactive={isInactiveParam}
+  title={isInactiveParam ? "Unbound parameter — inactive until a value is picked (shows everything by default)" : undefined}
 >
   <!-- target ports (left) -->
   {#if kind === "output"}
@@ -293,7 +400,19 @@
     <Handle type="target" position={Position.Left} id="parents" class="port parents" style="top: 34%" />
     <Handle type="target" position={Position.Left} id="children" class="port children" style="top: 66%" />
   {:else if arity !== "none"}
-    <Handle type="target" position={Position.Left} id="in" class="port" />
+    <Handle type="target" position={Position.Left} id="in" class="port" style={hasValueSlot ? "top: 34%" : ""} />
+  {/if}
+  <!-- value operand socket (#196): a wired source fills the field's value slot.
+       For a Filter it sits below the set `in` port; a bare `field` leaf has only
+       this one input. -->
+  {#if hasValueSlot}
+    <Handle
+      type="target"
+      position={Position.Left}
+      id="value"
+      class="port value"
+      style={arity !== "none" ? "top: 66%" : "top: 50%"}
+    />
   {/if}
 
   <header class="vnode-head">
@@ -308,6 +427,10 @@
     <div class="port-legend"><span class="dot keep"></span>keep · <span class="dot remove"></span>remove</div>
   {:else if kind === "nest"}
     <div class="port-legend"><span class="dot parents"></span>parents · <span class="dot children"></span>children</div>
+  {:else if hasValueSlot}
+    <div class="port-legend">
+      {#if arity !== "none"}set · {/if}<span class="dot value"></span>value
+    </div>
   {/if}
 
   <!-- config by kind -->
@@ -407,6 +530,19 @@
       <button type="button" class:on={matchBy === "title"} onclick={() => setMatch({ by: "title" })}>By title</button>
     </div>
     <p class="vhint">Wire roots into <b>parents</b>, candidates into <b>children</b>. Loop the output back to <b>parents</b> to recurse.</p>
+  {:else if kind === "field_of"}
+    <!-- Forward projection (#184): follow a reference field from the wired input
+         set to the nodes it points at. `References` projects the other way — the
+         nodes that reference the input (any-field backlinks). -->
+    <select class="vfield" value={projectField} onchange={(e) => patch({ project_field: e.currentTarget.value })}>
+      <option value="">— follow field —</option>
+      {#each projectFields as f (f.key)}
+        <option value={f.key}>{f.name}</option>
+      {/each}
+    </select>
+    <p class="vhint">Wire a set into the input; projects to a set of <b>nodes</b>.</p>
+  {:else if kind === "self"}
+    <p class="vhint">The entry this pane is anchored to. Feed it into <b>Field of</b> — e.g. <b>References</b> for its backlinks.</p>
   {:else if kind === "highlight"}
     <span class="vswatch" title="Highlight colour">
       <span class="vswatch-label">Colour</span>
@@ -464,6 +600,18 @@
     border-color: var(--accent);
     background: var(--accent-soft);
   }
+  /* #198: an unbound parameter is inert by default — a recessed, dashed-border
+     tint marks the no-op so the author sees it isn't currently constraining.
+     Selection still reads clearly on top of it. */
+  .vnode.inactive {
+    background: var(--inset);
+    border-style: dashed;
+    border-color: var(--border-strong);
+  }
+  .vnode.inactive.selected {
+    border-style: solid;
+    border-color: var(--accent);
+  }
   .vnode-head {
     display: flex;
     align-items: center;
@@ -512,6 +660,19 @@
   .dot.children {
     background: var(--k-lore);
   }
+  .dot.value,
+  :global(.svelte-flow__handle.port.value) {
+    background: var(--k-assistant);
+  }
+  /* the value slot is filled by a wired source, not an inline literal (#196) */
+  .vwired {
+    margin: 0 8px 8px;
+    padding: 2px 6px;
+    border: 1px dashed var(--border-strong);
+    border-radius: 5px;
+    font-size: var(--fs-xs);
+    color: var(--text-3);
+  }
   /* nest match-rule hint under the config selects */
   .vhint {
     margin: 0 8px 8px;
@@ -548,6 +709,65 @@
   }
   .vfield.op {
     max-width: 96px;
+  }
+  /* promote-in-place: the "make this a parameter" affordance + the promoted card */
+  .vpromote {
+    display: block;
+    margin: 0 8px 8px;
+    padding: 2px 6px;
+    border: 1px dashed var(--border-strong);
+    background: transparent;
+    border-radius: 5px;
+    font-size: var(--fs-xs);
+    color: var(--text-2);
+    cursor: pointer;
+  }
+  .vpromote:hover {
+    background: var(--panel);
+  }
+  .vparam {
+    margin: 0 8px 8px;
+    padding: 6px;
+    border: 1px solid var(--accent);
+    border-radius: 6px;
+    background: var(--accent-soft);
+  }
+  .vparam-head {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    margin-bottom: 5px;
+  }
+  .vparam-tag {
+    font-size: var(--fs-xs);
+    font-weight: 600;
+    color: var(--accent);
+  }
+  /* #198: the "unbound → inert by default" chip inside the parameter card */
+  .vparam-inert {
+    font-size: var(--fs-xs);
+    font-weight: 600;
+    color: var(--text-3);
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+  }
+  .vparam-unlink {
+    border: none;
+    background: transparent;
+    color: var(--text-3);
+    font-size: var(--fs-xs);
+    cursor: pointer;
+    padding: 0 2px;
+  }
+  .vparam-unlink:hover {
+    color: var(--danger);
+  }
+  .vparam .vfield {
+    width: 100%;
+    margin: 0 0 5px;
+  }
+  .vparam .vfield-value {
+    margin: 0;
   }
   /* keep/drop + asc/desc segmented toggle */
   .vseg {

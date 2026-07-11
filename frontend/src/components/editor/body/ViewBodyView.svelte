@@ -22,6 +22,7 @@
   import { setDesignerContext, type DesignerContext } from "./view/designerContext";
   import { api } from "@/lib/api";
   import { metadataSchemaStore } from "@/lib/stores/schema";
+  import { referenceIndexStore } from "@/lib/stores/references";
   import { paneViews } from "@/lib/stores/paneViews.svelte";
   import { evaluateView, nestWarnings, type EvalNode } from "@/lib/views/evaluateView";
   import { effectiveFieldLabel, effectiveFieldHidden, kindRootEntryTypeId } from "@/lib/utils/schemaTypeHelpers";
@@ -32,6 +33,10 @@
     inputArity,
     classifyConnection,
     connectionAllowed,
+    reachesFieldOf,
+    outputPayload,
+    valueSlotAccepts,
+    FILTER_VALUE_HANDLE,
     OUTPUT_NODE_ID,
     type GraphNodeKind,
     type ViewGraph,
@@ -73,6 +78,9 @@
   }: Props = $props();
 
   let schema = $derived($metadataSchemaStore);
+  // Reverse reference index backing the `references` computed field so the
+  // designer preview resolves backlink projections (#184 Phase 2).
+  let referenceIndex = $derived($referenceIndexStore);
   // Svelte Flow ships light-only chrome; drive its theme from the app's. The
   // preference values ("system"/"light"/"dark") map straight to ColorMode.
   let colorMode = $derived($themePreference as ColorMode);
@@ -240,6 +248,7 @@
     evaluateView(spec, universe, {
       schema,
       resolveView: (viewId: string) => viewSpecs.get(viewId) ?? null,
+      referenceIndex,
     }),
   );
   // Nest diagnostics surfaced as warnings so a truncated/lossy tree is never
@@ -308,6 +317,8 @@
       entryTypes: entryTypeOptions,
       fields: fieldOptions,
       fieldByKey: (key: string) => schema?.fields?.[key] ?? null,
+      valueWired: (nodeId: string) =>
+        flowEdges.some((e) => e.target === nodeId && e.targetHandle === FILTER_VALUE_HANDLE),
       tags: tagOptions,
       savedViews,
       loreEntries,
@@ -346,6 +357,13 @@
   ]);
   // Filter is the everyday transform; series = AND, parallel = OR by topology.
   const FILTERS: { kind: GraphNodeKind; label: string }[] = [{ kind: "filter", label: "Filter" }];
+  // Projection (#184): follow a reference field to the nodes it points at
+  // (`Field of`), seeded by the pane's anchor entry (`This entry`). Together they
+  // author backlinks — `field_of(This entry, References)`.
+  const PROJECT: { kind: GraphNodeKind; label: string }[] = [
+    { kind: "field_of", label: "Field of" },
+    { kind: "self", label: "This entry" },
+  ];
   // Operations — the explicit set combinators, the power tier.
   const OPERATIONS: { kind: GraphNodeKind; label: string }[] = [
     { kind: "union", label: "Union" },
@@ -383,7 +401,7 @@
   }): boolean {
     if (!conn.source || !conn.target) return false;
     const target = flowNodes.find((n) => n.id === conn.target);
-    if (!target || inputArity(target.data.kind) === "none") return false;
+    if (!target) return false;
     const byId = new Map<string, ViewGraphNode>(
       flowNodes.map((n) => [n.id, { id: n.id, kind: n.data.kind, position: n.position, data: n.data.cfg ?? {} }]),
     );
@@ -393,6 +411,30 @@
       target: e.target,
       targetHandle: e.targetHandle ?? null,
     }));
+    const fieldType = (key: string) => schema?.fields?.[key]?.type ?? null;
+    const srcNode = byId.get(conn.source);
+    const tgtNode = byId.get(conn.target);
+    // The value slot (#196, ADR-0031 §E): a wired operand into a field/Filter's
+    // `value` handle. Allowed only when the authored field's payload matches the
+    // source's (node-set for entity_ref, value-set for scalar). Bypasses the
+    // arity check — a `field` leaf has no set input but does have a value slot.
+    if (conn.targetHandle === FILTER_VALUE_HANDLE) {
+      if (tgtNode?.kind !== "field" && tgtNode?.kind !== "filter") return false;
+      if (!valueSlotAccepts(srcNode, tgtNode.data.field, fieldType)) return false;
+      return connectionAllowed(classifyConnection(byId, edges, conn.source, conn.target, conn.targetHandle ?? null));
+    }
+    if (inputArity(target.data.kind) === "none") return false;
+    // A value-set source (a scalar `field_of`) may feed ONLY a value slot, never
+    // a node-set input — the two-payload accept-matrix (ADR-0031 §E).
+    if (outputPayload(srcNode, fieldType) === "value-set") return false;
+    // Single-hop cut (#184, §14.5): a field_of's `of` must not resolve from
+    // another field_of (multi-hop per-node type inference is deferred).
+    if (target.data.kind === "field_of" && reachesFieldOf(byId, edges, conn.source)) return false;
+    // #203: a field_of's `of` must be a CONCRETE set. The grammar has no
+    // universal-set leaf, so an `All` injector lowers to EMPTY (`fieldOfBuilt`) —
+    // a legal-looking "project the pov of everything" that silently yields
+    // nothing. Block the wire instead of shipping a blank result with no warning.
+    if (target.data.kind === "field_of" && srcNode?.kind === "all") return false;
     return connectionAllowed(classifyConnection(byId, edges, conn.source, conn.target, conn.targetHandle ?? null));
   }
   // After a connection auto-adds, trim single-input handles to their newest edge
@@ -541,6 +583,12 @@
       </span>
       <span class="pal-sep"></span>
       <span class="pal-group">
+        {#each PROJECT as p (p.kind)}
+          <button type="button" class="proj" onclick={() => addNode(p.kind)}>{p.label}</button>
+        {/each}
+      </span>
+      <span class="pal-sep"></span>
+      <span class="pal-group">
         {#each OPERATIONS as p (p.kind)}
           <button type="button" class="op" onclick={() => addNode(p.kind)}>{p.label}</button>
         {/each}
@@ -677,6 +725,10 @@
     font-weight: 600;
   }
   .palette button.op {
+    border-color: var(--accent);
+    color: var(--accent);
+  }
+  .palette button.proj {
     border-color: var(--accent);
     color: var(--accent);
   }

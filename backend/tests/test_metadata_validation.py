@@ -257,6 +257,63 @@ class MetadataValidationTests(unittest.TestCase):
 
         self.assertFalse(has_computed(raw["root"]))
 
+    def test_structure_surfaces_scene_metadata_for_filtering(self) -> None:
+        """#184 Phase 3: the Draft roster carries each scene's status + full
+        front-matter metadata so a view can filter it by scene field
+        (status/pov/…) in one pass, without a per-scene fetch."""
+        from app.models import CreateLoreEntryRequest, SaveSceneRequest
+
+        hero = self.service.create_lore_entry(
+            CreateLoreEntryRequest(title="Seren", entry_type="lore:character")
+        )
+        scene = self.service.read_scene(self.scene_id)
+        self.service.save_scene(
+            self.scene_id,
+            SaveSceneRequest(
+                title=scene.title,
+                body=scene.body,
+                base_revision=scene.revision,
+                status="revised",
+                entry_type="scene:scene",
+                metadata={"pov": hero.id},
+            ),
+        )
+
+        structure = self.service.read_structure()
+        node = next(child for child in structure.root.children if child.scene_id == self.scene_id)
+        self.assertEqual(node.status, "revised")
+        self.assertIsNotNone(node.metadata)
+        self.assertEqual(node.metadata["pov"], hero.id)
+
+    def test_structure_yaml_does_not_persist_scene_metadata(self) -> None:
+        """The surfaced `metadata` projection must never echo into the tree
+        YAML — it would drift from the leaf front-matter (same invariant as
+        status/color/computed_metadata)."""
+        from app.models import CreateStructureNodeRequest, SaveSceneRequest
+
+        scene = self.service.read_scene(self.scene_id)
+        self.service.save_scene(
+            self.scene_id,
+            SaveSceneRequest(
+                title=scene.title,
+                body=scene.body,
+                base_revision=scene.revision,
+                status="revised",
+                entry_type="scene:scene",
+                metadata={"summary": "Opening beat"},
+            ),
+        )
+        # A structure mutation triggers the write path that must strip it.
+        self.service.create_structure_node(CreateStructureNodeRequest(title="Act 1", entry_type="scene:act"))
+        raw = self.service._read_yaml(self.root / "manuscript.structure.yaml")
+
+        def has_metadata(node: dict) -> bool:
+            if "metadata" in node:
+                return True
+            return any(has_metadata(child) for child in node.get("children", []))
+
+        self.assertFalse(has_metadata(raw["root"]))
+
     def test_display_template_inherits_from_manuscript_structure(self) -> None:
         schema = self.service.read_metadata_schema()
         for type_id in ("scene:act", "scene:chapter", "scene:scene"):

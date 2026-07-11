@@ -26,6 +26,7 @@
   import type { DropPosition, TreeDrag } from "@/components/widgets/treeDrag.svelte";
   import type { TreeRename } from "@/components/widgets/treeRename.svelte";
   import type { TreeAddMenu } from "@/components/widgets/treeAddMenu.svelte";
+  import type { CollapseGuard } from "@/components/widgets/treeCollapseGuard";
 
   let {
     groups,
@@ -41,6 +42,7 @@
     drag,
     rename,
     add,
+    collapseGuard,
     row,
     groupHeader,
   }: {
@@ -57,6 +59,7 @@
     drag: TreeDrag<T>;
     rename: TreeRename<T>;
     add: TreeAddMenu;
+    collapseGuard: CollapseGuard;
     row: Snippet<[T, RowCtx<T>]>;
     groupHeader?: Snippet<[GroupCtx]>;
   } = $props();
@@ -80,8 +83,12 @@
       collapsed: collapsed.has(key),
       childCount: subtreeCount(group),
       toggle: () => toggle(key),
+      toggleCollapse: () => collapseGuard.defer(() => toggle(key)),
       onClick: () => onClick?.(node),
-      onDblClick: () => onDblClick?.(node),
+      onDblClick: () => {
+        collapseGuard.cancel();
+        onDblClick?.(node);
+      },
       onRename: onRename ? (nextTitle: string) => onRename(node, nextTitle) : undefined,
       onReorder: onReorder ? (target: T, position: DropPosition) => onReorder(node, target, position) : undefined,
       dragging: drag.dragged?.id === node.id,
@@ -178,6 +185,7 @@
         {drag}
         {rename}
         {add}
+        {collapseGuard}
         {row}
         {groupHeader}
       />
@@ -207,6 +215,7 @@
         {drag}
         {rename}
         {add}
+        {collapseGuard}
         {row}
         {groupHeader}
       />
@@ -244,6 +253,7 @@
             {drag}
             {rename}
             {add}
+            {collapseGuard}
             {row}
             {groupHeader}
           />

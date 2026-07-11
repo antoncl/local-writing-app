@@ -79,11 +79,6 @@
   import { focusedDocumentStore } from "@/lib/stores/editorFocus";
   import { referenceIndexStore } from "@/lib/stores/references";
 
-  // Single-click on a container defers collapse past the double-click window so
-  // a fast second click can cancel it and open the editor instead (without the
-  // defer the row visibly toggles for ~100ms before the editor opens on top).
-  const DBLCLICK_GUARD_MS = 200;
-
   let {
     config,
     structure,
@@ -155,7 +150,6 @@
     toggleAddMenu: (parentId: string | null, key: string, event?: MouseEvent) => void;
     isAddMenuOpen: (key: string) => boolean;
   }>();
-  let pendingCollapseTimeout: ReturnType<typeof setTimeout> | null = null;
 
   function isActiveNode(node: EvalNode): boolean {
     return (
@@ -243,23 +237,12 @@
     });
   }
 
-  // Container click defers collapse (see DBLCLICK_GUARD_MS); the toggle itself
-  // is ViewNodeList's, handed in via RowCtx.
-  function deferCollapse(toggle: () => void) {
-    if (pendingCollapseTimeout !== null) clearTimeout(pendingCollapseTimeout);
-    pendingCollapseTimeout = setTimeout(() => {
-      pendingCollapseTimeout = null;
-      toggle();
-    }, DBLCLICK_GUARD_MS);
-  }
-
-  function handleGroupDblClick(node: EvalNode, beginRename: () => void) {
-    if (pendingCollapseTimeout !== null) {
-      clearTimeout(pendingCollapseTimeout);
-      pendingCollapseTimeout = null;
-    }
+  // Container double-click: manuscript opens the structure-node editor, research
+  // renames inline (via the wrapper's imperative beginRename). The wrapper cancels
+  // the pending collapse (defer-guard) before invoking this.
+  function handleGroupDblClick(node: EvalNode) {
     if (config.groupDblClickRenames) {
-      beginRename();
+      list?.beginRename(node.id, node.title);
     } else {
       config.onGroupDblClick?.(node.id);
     }
@@ -333,6 +316,7 @@
   onReorder={config.supportsDrag ? handleReorder : undefined}
   isContainer={(node) => node.entry_type !== config.leafType}
   onRename={domainRename}
+  onDblClick={handleGroupDblClick}
   {row}
   {addMenu}
 >
@@ -437,8 +421,8 @@
       dataNodeId={node.id}
       {dragging}
       {dropPosition}
-      onClick={() => deferCollapse(ctx.toggle)}
-      onDblClick={() => handleGroupDblClick(node, ctx.beginRename)}
+      onClick={ctx.toggleCollapse}
+      onDblClick={ctx.onDblClick}
       onmousedown={(event) => event.stopPropagation()}
       ondragover={ctx.reorder?.onDragOver}
       ondrop={ctx.reorder?.onDrop}

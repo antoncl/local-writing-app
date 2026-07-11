@@ -52,6 +52,10 @@
     beginRename: () => void;
     commitRename: () => void;
     cancelRename: () => void;
+    // Deferred collapse toggle (4c-iv-c): schedules `toggle` past the dblclick
+    // window so a following double-click (→ onDblClick) can cancel it. Use this
+    // for a container's single-click; `onDblClick` cancels any pending toggle.
+    toggleCollapse: () => void;
     // Per-container add-child "+" (4c-iv). The snippet renders a `.tree-menu-anchor`
     // button reflecting `addMenuOpen` and calling `toggleAddMenu(event)`; the popover
     // itself is the wrapper's (fed by the `addMenu` snippet, keyed to this node).
@@ -92,6 +96,7 @@
   import { TreeDrag } from "@/components/widgets/treeDrag.svelte";
   import { TreeRename } from "@/components/widgets/treeRename.svelte";
   import { TreeAddMenu } from "@/components/widgets/treeAddMenu.svelte";
+  import { CollapseGuard } from "@/components/widgets/treeCollapseGuard";
   import { filterGroups, type ViewGroup, type ViewResult } from "@/lib/views/evaluateView";
   import { leafGroup } from "@/lib/views/viewResult";
 
@@ -197,6 +202,10 @@
   // One drag-gesture holder for the whole tree, threaded through the recursion
   // (inert unless `onReorder` is wired). See treeDrag.svelte.ts.
   const drag = new TreeDrag<T>();
+
+  // One collapse defer-guard for the tree (single-click vs dblclick). See
+  // treeCollapseGuard.ts.
+  const collapseGuard = new CollapseGuard();
 
   // Inline-rename controller (4c-iii). Owns edit state; persists via `onRename`.
   // Threaded down like `drag`; also driven imperatively by the consumer (F2 is
@@ -354,6 +363,7 @@
       {drag}
       {rename}
       {add}
+      {collapseGuard}
       {row}
       {groupHeader}
     />

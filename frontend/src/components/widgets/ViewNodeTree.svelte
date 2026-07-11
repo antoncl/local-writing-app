@@ -24,6 +24,7 @@
   import type { EvalNode, ViewAnnotation, ViewGroup } from "@/lib/views/evaluateView";
   import type { GroupCtx, RowCtx } from "@/components/widgets/ViewNodeList.svelte";
   import type { DropPosition, TreeDrag } from "@/components/widgets/treeDrag.svelte";
+  import type { TreeRename } from "@/components/widgets/treeRename.svelte";
 
   let {
     groups,
@@ -37,6 +38,7 @@
     onReorder,
     isContainer,
     drag,
+    rename,
     row,
     groupHeader,
   }: {
@@ -51,6 +53,7 @@
     onReorder?: (moved: T, target: T, position: "before" | "after" | "into") => void;
     isContainer?: (node: T) => boolean;
     drag: TreeDrag<T>;
+    rename: TreeRename<T>;
     row: Snippet<[T, RowCtx<T>]>;
     groupHeader?: Snippet<[GroupCtx]>;
   } = $props();
@@ -81,6 +84,12 @@
       dragging: drag.dragged?.id === node.id,
       dropPosition: drag.overId === node.id ? drag.position : null,
       reorder: onReorder ? reorderHandlers(group, node) : undefined,
+      editing: rename.editingId === node.id,
+      editValue: rename.editValue,
+      onEditInput: (value: string) => rename.onInput(value),
+      beginRename: () => rename.begin(node.id, node.title),
+      commitRename: () => rename.commit(),
+      cancelRename: () => rename.cancel(),
     };
   }
 
@@ -162,6 +171,7 @@
         {onReorder}
         {isContainer}
         {drag}
+        {rename}
         {row}
         {groupHeader}
       />
@@ -189,6 +199,7 @@
         {onReorder}
         {isContainer}
         {drag}
+        {rename}
         {row}
         {groupHeader}
       />
@@ -224,6 +235,7 @@
             {onReorder}
             {isContainer}
             {drag}
+            {rename}
             {row}
             {groupHeader}
           />

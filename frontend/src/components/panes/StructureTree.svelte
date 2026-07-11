@@ -155,10 +155,11 @@
     if (config.persistCollapse) void collapse.flush();
   });
 
-  // Tree-local UI state — inline rename + the collapse defer-guard. Drag state
-  // now lives in the wrapper (ViewNodeList owns the gesture; 4c-i). Never escapes.
-  let editingNodeId = $state<string | null>(null);
-  let editingTitle = $state("");
+  // Drag + inline-rename state now live in the wrapper (ViewNodeList owns the
+  // gesture + edit state; 4c-i/iii). We keep a handle to it for the two rename
+  // triggers that originate OUTSIDE a row render — create-then-rename and
+  // cancel-on-delete — plus the local collapse defer-guard.
+  let list = $state<{ beginRename: (id: string, title: string) => void; cancelRename: (id: string) => void }>();
   let pendingCollapseTimeout: ReturnType<typeof setTimeout> | null = null;
 
   function isActiveNode(node: EvalNode): boolean {
@@ -227,46 +228,25 @@
         }
       }
       if (createdNodeId && (!isLeaf || config.inlineRenameOnLeafCreate)) {
-        startRename(createdNodeId, title);
+        list?.beginRename(createdNodeId, title);
       }
     });
   }
 
-  function startRename(nodeId: string, currentTitle: string) {
-    editingNodeId = nodeId;
-    editingTitle = currentTitle;
-    setTimeout(() => {
-      const input = document.querySelector<HTMLInputElement>(`[data-node-edit-id="${nodeId}"]`);
-      if (input) {
-        input.focus();
-        input.select();
-      }
-    }, 0);
-  }
-
-  async function commitRename(nodeId: string) {
-    if (editingNodeId !== nodeId) return;
-    const trimmed = editingTitle.trim();
+  // Persist a committed inline rename. ViewNodeList owns the edit state + guards
+  // and only calls this for a real change; we do the optimistic update + API write.
+  async function domainRename(node: EvalNode, nextTitle: string) {
     const tree = config.getStructure();
-    const node = tree ? findStructureNodeById(tree.root, nodeId) : null;
-    editingNodeId = null;
-    if (!trimmed || !node || node.title === trimmed) {
-      return;
-    }
-    if (tree) {
-      config.applyStructure({ root: updateNodeTitleInTree(tree.root, nodeId, trimmed) });
-    }
+    const sn = tree ? findStructureNodeById(tree.root, node.id) : null;
+    if (!tree || !sn || sn.title === nextTitle) return;
+    config.applyStructure({ root: updateNodeTitleInTree(tree.root, node.id, nextTitle) });
     await run(async () => {
-      const next = await config.api.rename(nodeId, trimmed);
+      const next = await config.api.rename(node.id, nextTitle);
       config.applyStructure(next);
       if (config.afterRename) {
-        await config.afterRename(nodeId, trimmed);
+        await config.afterRename(node.id, nextTitle);
       }
     });
-  }
-
-  function cancelRename() {
-    editingNodeId = null;
   }
 
   // Container click defers collapse (see DBLCLICK_GUARD_MS); the toggle itself
@@ -279,20 +259,20 @@
     }, DBLCLICK_GUARD_MS);
   }
 
-  function handleGroupDblClick(node: EvalNode) {
+  function handleGroupDblClick(node: EvalNode, beginRename: () => void) {
     if (pendingCollapseTimeout !== null) {
       clearTimeout(pendingCollapseTimeout);
       pendingCollapseTimeout = null;
     }
     if (config.groupDblClickRenames) {
-      startRename(node.id, node.title);
+      beginRename();
     } else {
       config.onGroupDblClick?.(node.id);
     }
   }
 
   function requestDelete(node: EvalNode) {
-    if (editingNodeId === node.id) editingNodeId = null;
+    list?.cancelRename(node.id);
     const root = config.getStructure()?.root;
     const sn = root ? findStructureNodeById(root, node.id) : null;
     if (sn) onRequestDelete(sn);
@@ -361,15 +341,14 @@
 </div>
 
 <ViewNodeList
+  bind:this={list}
   {result}
   mode="tree"
   active={isActiveNode}
   collapsed={collapse.collapsed}
   onReorder={config.supportsDrag ? handleReorder : undefined}
   isContainer={(node) => node.entry_type !== config.leafType}
-  onRenameStart={config.supportsDrag ? (node) => startRename(node.id, node.title) : undefined}
-  onRenameCommit={(node) => commitRename(node.id)}
-  onRenameCancel={() => cancelRename()}
+  onRename={domainRename}
   {row}
 >
   {#snippet whenEmpty()}
@@ -383,7 +362,7 @@
 
 {#snippet row(node: EvalNode, ctx: RowCtx<EvalNode>)}
   {@const leaf = node.entry_type === config.leafType}
-  {@const editing = editingNodeId === node.id}
+  {@const editing = ctx.editing}
   {@const dragging = ctx.dragging}
   {@const dropPosition = ctx.dropPosition}
   {@const stripe = leaf ? ctx.stripeColor : ctx.stripeColor ?? statusHex(node)}
@@ -410,8 +389,9 @@
         <input
           class="tree-title tree-rename-input"
           data-node-edit-id={node.id}
-          bind:value={editingTitle}
-          onblur={() => commitRename(node.id)}
+          value={ctx.editValue}
+          oninput={(event) => ctx.onEditInput(event.currentTarget.value)}
+          onblur={ctx.commitRename}
         />
       {/snippet}
     </NodeRow>
@@ -464,7 +444,7 @@
       {dragging}
       {dropPosition}
       onClick={() => deferCollapse(ctx.toggle)}
-      onDblClick={() => handleGroupDblClick(node)}
+      onDblClick={() => handleGroupDblClick(node, ctx.beginRename)}
       onmousedown={(event) => event.stopPropagation()}
       ondragover={ctx.reorder?.onDragOver}
       ondrop={ctx.reorder?.onDrop}

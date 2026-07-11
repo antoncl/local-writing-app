@@ -42,6 +42,16 @@
       onDragOver: (event: DragEvent) => void;
       onDrop: (event: DragEvent) => void;
     };
+    // Inline rename (4c-iii). The wrapper owns the edit state; the snippet renders
+    // the styled `<input>` when `editing`, feeding `editValue`/`onEditInput` and
+    // calling `commitRename` (blur) / `cancelRename`. `beginRename` starts an edit
+    // (e.g. a container's rename-on-dblclick).
+    editing: boolean;
+    editValue: string;
+    onEditInput: (value: string) => void;
+    beginRename: () => void;
+    commitRename: () => void;
+    cancelRename: () => void;
   };
 
   // The context handed to a `groupHeader` override snippet for one SYNTHETIC
@@ -75,6 +85,7 @@
   import NodeList from "@/components/widgets/NodeList.svelte";
   import ViewNodeTree from "@/components/widgets/ViewNodeTree.svelte";
   import { TreeDrag } from "@/components/widgets/treeDrag.svelte";
+  import { TreeRename } from "@/components/widgets/treeRename.svelte";
   import { filterGroups, type ViewGroup, type ViewResult } from "@/lib/views/evaluateView";
   import { leafGroup } from "@/lib/views/viewResult";
 
@@ -92,9 +103,6 @@
     onDblClick,
     onRename,
     onReorder,
-    onRenameStart,
-    onRenameCommit,
-    onRenameCancel,
     isContainer,
     collapsed = $bindable(new SvelteSet<string>()),
     defaultCollapsed,
@@ -121,17 +129,13 @@
     // Intent surface. Escape hatches (present phase 1, exercised by #112 Draft).
     onClick?: (node: T) => void;
     onDblClick?: (node: T) => void;
+    // Persist a committed inline rename (4c-iii). The wrapper owns the edit state
+    // + guards and calls this only for a real, non-empty change; the consumer
+    // does the domain write (optimistic update + rename API).
     onRename?: (node: T, nextTitle: string) => void;
     // Reorder intent (drag OR keyboard). May return a Promise; the keyboard path
     // awaits it before restoring focus to the moved row's new position.
     onReorder?: (moved: T, target: T, position: "before" | "after" | "into") => void | Promise<void>;
-    // Keyboard rename routing. The wrapper owns the tree keydown listener; these
-    // relay F2 (start), Enter (commit), Escape (cancel) from the focused row /
-    // rename input. The edit STATE + styled input stay consumer-side (#112 4c-iii
-    // absorbs those). Present ⇒ the wrapper handles those keys for this list.
-    onRenameStart?: (node: T) => void;
-    onRenameCommit?: (node: T) => void;
-    onRenameCancel?: (node: T) => void;
     // Domain classification for drag: does this node accept an "into" drop (i.e.
     // it's a container, even an empty one)? The wrapper owns the drop-zone
     // mechanics; the consumer names what can contain. Absent ⇒ falls back to
@@ -180,6 +184,24 @@
   // One drag-gesture holder for the whole tree, threaded through the recursion
   // (inert unless `onReorder` is wired). See treeDrag.svelte.ts.
   const drag = new TreeDrag<T>();
+
+  // Inline-rename controller (4c-iii). Owns edit state; persists via `onRename`.
+  // Threaded down like `drag`; also driven imperatively by the consumer (F2 is
+  // wrapper-side, but create-then-rename comes from outside a row render).
+  const rename = new TreeRename<T>({
+    persist: (node, nextTitle) => onRename?.(node, nextTitle),
+    resolve: (id) => locate(id)?.node ?? null,
+  });
+
+  // Imperative rename entry points for the consumer (see the block comment): begin
+  // an inline rename on a just-created node, or cancel one whose row is being
+  // deleted. F2 / dblclick renames are driven wrapper-side (keyboard) or via RowCtx.
+  export function beginRename(id: string, title: string): void {
+    rename.begin(id, title);
+  }
+  export function cancelRename(id: string): void {
+    rename.cancel(id);
+  }
 
   // ── Tree keyboard (4c-ii) ────────────────────────────────────────────────
   // The wrapper owns tree keyboard so every tree consumer inherits it. Ctrl+arrows
@@ -248,27 +270,27 @@
       const target = event.target;
       if (!(target instanceof HTMLElement)) return;
       if (target.closest(".row-add-popover")) return;
-      const input = target.closest<HTMLElement>("[data-node-edit-id]");
-      if (input) {
-        const node = locate(input.getAttribute("data-node-edit-id") ?? "")?.node;
-        if (!node) return;
+      // Enter/Escape inside the rename input commit/cancel the wrapper-owned edit.
+      if (target.closest("[data-node-edit-id]")) {
         if (event.key === "Enter") {
           event.preventDefault();
-          onRenameCommit?.(node);
+          rename.commit();
         } else if (event.key === "Escape") {
           event.preventDefault();
-          onRenameCancel?.(node);
+          rename.cancel();
         }
         return;
       }
       const row = target.closest<HTMLElement>("[data-node-id]");
       const id = row?.getAttribute("data-node-id");
       if (!id) return;
+      // F2 rename rides with the reorderable-tree keyboard bundle (preserving the
+      // pre-4c parity where the non-reorderable Research tree had no F2).
       if (event.key === "F2") {
-        if (!onRenameStart) return;
+        if (!onReorder) return;
         event.preventDefault();
         const node = locate(id)?.node;
-        if (node) onRenameStart(node);
+        if (node) rename.begin(node.id, node.title);
         return;
       }
       if (event.ctrlKey || event.metaKey) handleReorderKey(event, id);
@@ -292,6 +314,7 @@
       {onReorder}
       {isContainer}
       {drag}
+      {rename}
       {row}
       {groupHeader}
     />

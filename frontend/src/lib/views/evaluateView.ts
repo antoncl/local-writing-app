@@ -51,6 +51,14 @@ export type EvalNode = {
   // (`structureToEvalNodes`); other callers omit it and non-tree presentations
   // ignore it. Members nest under their ancestry; empty branches self-prune.
   ancestry?: PathSegment[] | null;
+  // #201: a node's CANONICAL identity for reference purposes, when it differs
+  // from `id`. A manuscript scene's roster `id` is its structure `node.id`
+  // (`node_…`), but the reverse reference index keys scenes by their canonical
+  // `scene_id` (`scene_…`) — the front-matter identity the backend walk records.
+  // The structure adapter sets `ref_id = scene_id` so `field_of(…, references)`
+  // can bridge the two id spaces. Omitted ⇒ `id` already IS the canonical id
+  // (lore/assistant/prompt rosters, where the two coincide).
+  ref_id?: string | null;
 };
 
 // A field routes to the node top-level property (id/title/entry_type) instead
@@ -229,6 +237,10 @@ type RunState<T extends EvalNode> = {
   universe: T[];
   order: Map<string, number>; // id → universe index, for stable set→list
   nodeById: Map<string, T>; // id → node, for `nest` edge resolution
+  // #201: canonical (reference) id → roster id, ONLY for nodes whose `ref_id`
+  // differs from `id` (scenes). Empty for rosters where the two coincide, so the
+  // `references` projection is a no-op translation there.
+  idByCanonical: Map<string, string>;
   annotations: Map<string, ViewAnnotation>;
   descendantsCache: Map<string, Set<string>>;
   schema?: MetadataSchema | null;
@@ -247,14 +259,19 @@ export function evaluateView<T extends EvalNode>(
 ): ViewResult<T> {
   const order = new Map<string, number>();
   const nodeById = new Map<string, T>();
+  const idByCanonical = new Map<string, string>();
   nodes.forEach((n, i) => {
     order.set(n.id, i);
     nodeById.set(n.id, n);
+    // Only scenes carry a distinct canonical id; skip the identity case so a
+    // referrer whose canonical id already equals its roster id needs no lookup.
+    if (n.ref_id && n.ref_id !== n.id) idByCanonical.set(n.ref_id, n.id);
   });
   const state: RunState<T> = {
     universe: nodes,
     order,
     nodeById,
+    idByCanonical,
     annotations: new Map(),
     descendantsCache: new Map(),
     schema: ctx.schema,
@@ -561,9 +578,20 @@ function evalFieldOf<T extends EvalNode>(state: RunState<T>, op: { of: ViewExpr;
 
 function projectField<T extends EvalNode>(state: RunState<T>, ofIds: Set<string>, field: string): Set<string> {
   // `references` is not a stored field — it reads the reverse index (§14.4);
-  // the same projection backs the backlinks panel (Phase 2c).
+  // the same projection backs the backlinks panel (Phase 2c). The index is
+  // canonical-id space, so bridge #201: translate the input roster ids →
+  // canonical for the lookup, then the referrer canonical ids → roster ids so
+  // the caller's universe filter matches. Both translations are identity on a
+  // roster where `id === canonical` (lore/assistant), and `projectReferences`
+  // itself stays pure canonical (the backlinks panel keeps reading it directly).
   if (field === REFERENCES_FIELD) {
-    return projectReferences(ofIds, state.referenceIndex);
+    const canonicalOf = new Set<string>();
+    for (const id of ofIds) canonicalOf.add(state.nodeById.get(id)?.ref_id ?? id);
+    const out = new Set<string>();
+    for (const referrer of projectReferences(canonicalOf, state.referenceIndex)) {
+      out.add(state.idByCanonical.get(referrer) ?? referrer);
+    }
+    return out;
   }
   const out = new Set<string>();
   for (const id of ofIds) {

@@ -557,15 +557,15 @@
   // Selected-view specs/presentations per switchable pane (0.5.0 step 4, #81,
   // doc §5). These runes-side reads of paneViews bridge to the legacy `$:` panes
   // by flowing in as props (feedback_svelte5_reactivity_traps).
-  let loreViewSpec = $derived(paneViews.specFor("lore"));
+  let loreViewSpec = $derived(paneViews.specFor("lore", metadataSchema));
   let loreViewPresentation = $derived(paneViews.presentationFor("lore"));
-  let assistantViewSpec = $derived(paneViews.specFor("assistant"));
+  let assistantViewSpec = $derived(paneViews.specFor("assistant", metadataSchema));
   let assistantViewPresentation = $derived(paneViews.presentationFor("assistant"));
   // Draft: color annotations only — the tree keeps its structural shape
   // (ADR-0022). Evaluate the selected scene view over the flattened structure
   // and hand the per-node colors to the Tree; membership/ordering are ignored.
   let draftColorAnnotations = $derived.by(() => {
-    const result = evaluateView(paneViews.specFor("scene"), structureToEvalNodes(structure), {
+    const result = evaluateView(paneViews.specFor("scene", metadataSchema), structureToEvalNodes(structure), {
       schema: metadataSchema,
       resolveView: paneViews.resolveView,
       referenceIndex,
@@ -579,7 +579,7 @@
   // `tree` and collect the surviving node ids). `null` = the whole-universe
   // default → no pruning, full structural tree.
   let draftVisibleIds = $derived.by(() => {
-    const spec = paneViews.specFor("scene");
+    const spec = paneViews.specFor("scene", metadataSchema);
     if (!spec.expr && !(spec.groups && spec.groups.length)) return null;
     const result = evaluateView({ ...spec, presentation: "tree" }, structureToEvalNodes(structure), {
       schema: metadataSchema,

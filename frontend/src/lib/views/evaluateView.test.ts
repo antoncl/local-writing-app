@@ -12,14 +12,18 @@ const NODES: EvalNode[] = [
   { id: "e", entry_type: "lore:demigod", title: "Cass", metadata: { power: 3 } },
 ];
 
-// Schema with a `parent:` chain: demigod → deity → (root). character is separate.
+// Schema with a `parent:` chain rooted at the abstract `lore:base` (mirrors the
+// real default schema): character / deity / location hang off the base; demigod
+// → deity. So `descendants_of: "lore:base"` selects the whole roster — the
+// explicit "everything" the default view lowers to post-ADR-0036.
 const SCHEMA = {
   version: 1,
   entry_types: {
-    "lore:character": { name: "Character", kind: "lore", fields: [] },
-    "lore:deity": { name: "Deity", kind: "lore", fields: [] },
+    "lore:base": { name: "Lore", kind: "lore", abstract: true, fields: [] },
+    "lore:character": { name: "Character", kind: "lore", parent: "lore:base", fields: [] },
+    "lore:deity": { name: "Deity", kind: "lore", parent: "lore:base", fields: [] },
     "lore:demigod": { name: "Demigod", kind: "lore", parent: "lore:deity", fields: [] },
-    "lore:location": { name: "Location", kind: "lore", fields: [] },
+    "lore:location": { name: "Location", kind: "lore", parent: "lore:base", fields: [] },
   },
   // Intrinsic fields carry the resolver-stamped `category` so `fieldValue`
   // routes them to the node top-level property, not `metadata` (ADR-0029 §D).
@@ -33,12 +37,21 @@ const SCHEMA = {
 const ids = (spec: ViewSpec, nodes = NODES, ctx = { schema: SCHEMA }) =>
   evaluateView(spec, nodes, ctx).nodes.map((n) => n.id);
 
+// The explicit "whole roster" expr — what the default view lowers to (ADR-0036).
+const ALL: ViewSpec["expr"] = { descendants_of: "lore:base" };
+
 describe("default view", () => {
-  it("returns the whole universe in input order", () => {
-    expect(ids(defaultView("lore"))).toEqual(["a", "b", "c", "d", "e"]);
+  it("is the explicit whole-kind roster (descendants_of the kind root), in input order", () => {
+    expect(defaultView("lore", SCHEMA)).toEqual({
+      kind: "lore",
+      expr: { descendants_of: "lore:base" },
+      sort: { by: "manual" },
+    });
+    expect(ids(defaultView("lore", SCHEMA))).toEqual(["a", "b", "c", "d", "e"]);
   });
-  it("null expr == whole universe", () => {
-    expect(ids({ kind: "lore" })).toEqual(["a", "b", "c", "d", "e"]);
+  it("an absent/null expr evaluates to the empty set — not the universe (ADR-0036)", () => {
+    expect(ids({ kind: "lore" })).toEqual([]);
+    expect(ids({ kind: "lore", expr: null })).toEqual([]);
   });
 });
 
@@ -69,7 +82,7 @@ describe("leaves", () => {
 
   it("field sort on `title` orders by the node title", () => {
     const sorted = evaluateView(
-      { kind: "lore", sort: { by: "field", field_key: "title", dir: "asc" } },
+      { kind: "lore", expr: ALL, sort: { by: "field", field_key: "title", dir: "asc" } },
       NODES,
       { schema: SCHEMA },
     ).nodes.map((n) => n.title);
@@ -471,15 +484,17 @@ describe("named-handle groups (#91)", () => {
     expect(res.nodes.map((n) => n.id)).toEqual(["a", "b"]);
   });
 
-  it("a group with null expr is the whole universe", () => {
+  it("a group with no expr is empty — not the universe (ADR-0036)", () => {
     const spec: ViewSpec = {
       kind: "lore",
       groups: [
-        { name: "Everything", expr: null },
+        { name: "Everything", expr: ALL },
+        { name: "Unspecified", expr: null }, // no members → pruned from the output
         { name: "Deities", expr: { descendants_of: "lore:deity" } },
       ],
     };
     const res = evaluateView(spec, NODES, { schema: SCHEMA });
+    // The null-expr group contributes nothing and (being empty) drops out.
     expect(res.groups?.map((g) => [g.label, g.children.map((c) => c.nodeId)])).toEqual([
       ["Everything", ["a", "b", "c", "d", "e"]],
       ["Deities", ["c", "e"]],
@@ -518,11 +533,11 @@ describe("named-handle groups (#91)", () => {
 
 describe("sort", () => {
   it("manual preserves input order", () => {
-    expect(ids({ kind: "lore", expr: null, sort: { by: "manual" } })).toEqual(["a", "b", "c", "d", "e"]);
+    expect(ids({ kind: "lore", expr: ALL, sort: { by: "manual" } })).toEqual(["a", "b", "c", "d", "e"]);
   });
   it("by title asc/desc", () => {
-    expect(ids({ kind: "lore", sort: { by: "title", dir: "asc" } })).toEqual(["b", "e", "d", "c", "a"]);
-    expect(ids({ kind: "lore", sort: { by: "title", dir: "desc" } })).toEqual(["a", "c", "d", "e", "b"]);
+    expect(ids({ kind: "lore", expr: ALL, sort: { by: "title", dir: "asc" } })).toEqual(["b", "e", "d", "c", "a"]);
+    expect(ids({ kind: "lore", expr: ALL, sort: { by: "title", dir: "desc" } })).toEqual(["a", "c", "d", "e", "b"]);
   });
   it("by field, numeric", () => {
     expect(ids({ kind: "lore", expr: { field: { key: "power", op: "set" } }, sort: { by: "field", field_key: "power" } })).toEqual([
@@ -533,7 +548,7 @@ describe("sort", () => {
     // power: c=9, e=3; a/b/d unset. desc orders the populated rows, empties stay
     // last in input order — regression for the `dir * compareScalar` flip that
     // sent blanks to the top of a descending sort.
-    expect(ids({ kind: "lore", sort: { by: "field", field_key: "power", dir: "desc" } })).toEqual([
+    expect(ids({ kind: "lore", expr: ALL, sort: { by: "field", field_key: "power", dir: "desc" } })).toEqual([
       "c", "e", "a", "b", "d",
     ]);
   });
@@ -721,9 +736,21 @@ const MANUSCRIPT: StructureDocument = {
 const shape = (groups: ViewGroup[]): unknown =>
   groups.map((g) => (g.children.length ? [g.label, shape(g.children)] : g.label));
 
-const tree = (expr: ViewSpec["expr"] = null) => {
+// The manuscript type tree, so an unfiltered `tree()` can select the whole
+// structure via the explicit roster expr (ADR-0036 — an absent expr is empty).
+const MANUSCRIPT_SCHEMA = {
+  version: 1,
+  entry_types: {
+    "manuscript:base": { name: "Manuscript", kind: "manuscript", abstract: true },
+    "manuscript:act": { name: "Act", kind: "manuscript", parent: "manuscript:base" },
+    "manuscript:chapter": { name: "Chapter", kind: "manuscript", parent: "manuscript:base" },
+    "manuscript:scene": { name: "Scene", kind: "manuscript", parent: "manuscript:base" },
+  },
+} as unknown as MetadataSchema;
+
+const tree = (expr: ViewSpec["expr"] = { descendants_of: "manuscript:base" }) => {
   const nodes = structureToEvalNodes(MANUSCRIPT);
-  return evaluateView({ kind: "manuscript", presentation: "tree", expr }, nodes);
+  return evaluateView({ kind: "manuscript", presentation: "tree", expr }, nodes, { schema: MANUSCRIPT_SCHEMA });
 };
 
 describe("tree presentation (#101)", () => {

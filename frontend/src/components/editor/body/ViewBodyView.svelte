@@ -229,7 +229,7 @@
   // frame (#96). The autosave effect still tracks positions via toLayout().
   let specMemo: { key: string; spec: ViewSpec } | null = null;
   let spec = $derived.by<ViewSpec>(() => {
-    const next = graphToSpec(toGraph(), { kind, sort });
+    const next = graphToSpec(toGraph(), { kind, sort, schema });
     const key = JSON.stringify(next);
     if (specMemo && specMemo.key === key) return specMemo.spec;
     specMemo = { key, spec: next };

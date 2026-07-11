@@ -14,7 +14,7 @@
 
 import { api } from "@/lib/api";
 import { defaultView } from "@/lib/views/evaluateView";
-import type { ViewNodeSummary, ViewPresentation, ViewSpec } from "@/lib/types";
+import type { MetadataSchema, ViewNodeSummary, ViewPresentation, ViewSpec } from "@/lib/types";
 
 const STORAGE_PREFIX = "paneView.selected."; // + kind
 
@@ -110,14 +110,17 @@ class PaneViewsController {
   }
 
   // The ViewSpec a pane should render through: the selected view's spec, or the
-  // implicit default (whole universe, manual order) when none is selected.
-  specFor(kind: string): ViewSpec {
+  // default (the whole roster, manual order) when none is selected. The default
+  // is now an explicit `descendants_of:<kind-root>` spec (ADR-0036), so `schema`
+  // is threaded through to resolve the kind's root type; without it the resolver
+  // falls back to `<kind>:base`.
+  specFor(kind: string, schema?: MetadataSchema | null): ViewSpec {
     const id = this.selected[kind];
     if (id) {
       const spec = this.specs.get(id);
       if (spec) return spec;
     }
-    return defaultView(kind);
+    return defaultView(kind, schema);
   }
 
   // The selected view's presentation, or null for the pane's intrinsic default

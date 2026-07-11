@@ -88,6 +88,16 @@
   // formals over the same field. Lowering collects these into ViewSpec.params.
   let fieldParam = $derived(cfg.field_param ?? null);
   let isPromoted = $derived(fieldParam != null);
+  // #198: a promoted formal with no default is UNBOUND — by default its predicate
+  // is inactive (under (a) "unset = show everything" it imposes no constraint:
+  // pass-through in a keep, removes nothing in a drop/complement). Surface that
+  // no-op state in the designer so a power user can see the node is currently
+  // inert rather than silently filtering. `set`/`unset` carry no operand, so they
+  // are never inactive; an unpromoted node's fixed literal is always bound.
+  let isInactiveParam = $derived(isPromoted && opNeedsValue && isEmptyValue(fieldParam?.default));
+  function isEmptyValue(v: unknown): boolean {
+    return v == null || v === "" || (Array.isArray(v) && v.length === 0);
+  }
   function promoteField() {
     const name = fieldKey ? `${fieldKey}_${id}` : `param_${id}`;
     const label = fieldDef?.name || fieldKey || "Parameter";
@@ -325,6 +335,7 @@
       <div class="vparam" role="group" aria-label="Runtime parameter">
         <div class="vparam-head">
           <span class="vparam-tag">Parameter</span>
+          {#if isInactiveParam}<span class="vparam-inert" role="note">inactive</span>{/if}
           <button type="button" class="vparam-unlink" title="Back to a fixed value" onclick={demoteField}>Unlink</button>
         </div>
         <input
@@ -374,6 +385,8 @@
   class:output={kind === "output"}
   class:combinator={arity === "many" || arity === "keep_remove" || arity === "parents_children" || kind === "complement"}
   class:injector={kind === "all"}
+  class:inactive={isInactiveParam}
+  title={isInactiveParam ? "Unbound parameter — inactive until a value is picked (shows everything by default)" : undefined}
 >
   <!-- target ports (left) -->
   {#if kind === "output"}
@@ -587,6 +600,18 @@
     border-color: var(--accent);
     background: var(--accent-soft);
   }
+  /* #198: an unbound parameter is inert by default — a recessed, dashed-border
+     tint marks the no-op so the author sees it isn't currently constraining.
+     Selection still reads clearly on top of it. */
+  .vnode.inactive {
+    background: var(--inset);
+    border-style: dashed;
+    border-color: var(--border-strong);
+  }
+  .vnode.inactive.selected {
+    border-style: solid;
+    border-color: var(--accent);
+  }
   .vnode-head {
     display: flex;
     align-items: center;
@@ -717,6 +742,14 @@
     font-size: var(--fs-xs);
     font-weight: 600;
     color: var(--accent);
+  }
+  /* #198: the "unbound → inert by default" chip inside the parameter card */
+  .vparam-inert {
+    font-size: var(--fs-xs);
+    font-weight: 600;
+    color: var(--text-3);
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
   }
   .vparam-unlink {
     border: none;

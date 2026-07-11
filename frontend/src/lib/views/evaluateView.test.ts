@@ -197,6 +197,35 @@ describe("parameterized views (#184: bindings, $self, field_of)", () => {
     const spec: ViewSpec = { kind: "scene", expr: { field: { key: "pov", op: "overlap", value: { var: "POV" } } } };
     expect(evalIds(spec, {})).toEqual(["s1", "s2", "s3", "bob", "alice"]);
   });
+  // #198: an unbound formal is "no constraint" and must show EVERYTHING in a drop
+  // or complement too — not empty the list. Before the polarity fix the inactive
+  // operand resolved to universe in every position, so `input − universe = ∅`.
+  it("UNBOUND formal in a DROP (difference.remove) ⇒ removes nothing (#198)", () => {
+    // "exclude scenes whose pov ∈ {param}", param unset → drop nothing → all scenes.
+    const spec: ViewSpec = {
+      kind: "scene",
+      expr: { difference: { keep: { type: "scene:scene" }, remove: { field: { key: "pov", op: "overlap", value: { var: "POV" } } } } },
+    };
+    expect(evalIds(spec, {})).toEqual(["s1", "s2", "s3"]);
+  });
+  it("BOUND formal in a DROP still subtracts (drop is live once picked)", () => {
+    const spec: ViewSpec = {
+      kind: "scene",
+      expr: { difference: { keep: { type: "scene:scene" }, remove: { field: { key: "pov", op: "overlap", value: { var: "POV" } } } } },
+    };
+    expect(evalIds(spec, { bindings: { POV: ["bob"] } })).toEqual(["s2"]);
+  });
+  it("UNBOUND formal in a COMPLEMENT ⇒ whole universe (#198)", () => {
+    // Drop off `All` lowers to complement(p) (viewGraph differenceBuilt); unset
+    // param → complement of ∅ → everything, not universe − universe = ∅.
+    const spec: ViewSpec = { kind: "scene", expr: { complement: { field: { key: "pov", op: "overlap", value: { var: "POV" } } } } };
+    expect(evalIds(spec, {})).toEqual(["s1", "s2", "s3", "bob", "alice"]);
+  });
+  it("BOUND formal in a COMPLEMENT excludes the matches", () => {
+    const spec: ViewSpec = { kind: "scene", expr: { complement: { field: { key: "pov", op: "overlap", value: { var: "POV" } } } } };
+    // pov ∈ {bob} matches s1,s3 → complement is everything else.
+    expect(evalIds(spec, { bindings: { POV: ["bob"] } })).toEqual(["s2", "bob", "alice"]);
+  });
   it("$self as a predicate operand: scenes where THIS character is pov", () => {
     const spec: ViewSpec = { kind: "scene", expr: { field: { key: "pov", op: "overlap", value: { var: "$self" } } } };
     expect(evalIds(spec, { bindings: { $self: ["bob"] } })).toEqual(["s1", "s3"]);

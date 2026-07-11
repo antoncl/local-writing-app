@@ -508,22 +508,33 @@ function buildLevel<T extends EvalNode>(state: RunState<T>, rows: ViewRow<T>[]):
   });
 }
 
-function evalExpr<T extends EvalNode>(state: RunState<T>, expr: ViewExpr): Set<string> {
+// `polarity` tracks whether the expression sits in a KEEP (`+1`) or a SUBTRACTIVE
+// (`-1`) position — flipped by `difference.remove` and by `complement` (#198).
+// It only matters for an *inactive* field predicate (an unbound promoted formal):
+// under (a) "unset = show everything", such a predicate must be the identity for
+// its enclosing position — the whole universe when keeping (so `A ∩ inactive = A`)
+// but the empty set when subtracting (so `A − inactive = A`, `universe − inactive
+// = universe`). A single per-node `true` (the old `OPERAND_INACTIVE` handling) is
+// universe-valued everywhere, which passes keep but *empties* drop/complement —
+// the bug. Threading polarity makes "unset = show everything" hold in all three.
+type Polarity = 1 | -1;
+
+function evalExpr<T extends EvalNode>(state: RunState<T>, expr: ViewExpr, polarity: Polarity = 1): Set<string> {
   // Combinators first, then annotate pass-through, then leaves. Exactly one
   // primary slot is populated per node (validated backend-side, #78).
-  if (expr.union) return unionAll(expr.union.map((e) => evalExpr(state, e)));
-  if (expr.intersect) return intersectAll(expr.intersect.map((e) => evalExpr(state, e)));
+  if (expr.union) return unionAll(expr.union.map((e) => evalExpr(state, e, polarity)));
+  if (expr.intersect) return intersectAll(expr.intersect.map((e) => evalExpr(state, e, polarity)));
   if (expr.difference) {
-    const keep = evalExpr(state, expr.difference.keep);
-    const remove = evalExpr(state, expr.difference.remove);
+    const keep = evalExpr(state, expr.difference.keep, polarity);
+    const remove = evalExpr(state, expr.difference.remove, (-polarity) as Polarity);
     return new Set([...keep].filter((id) => !remove.has(id)));
   }
   if (expr.complement) {
-    const inner = evalExpr(state, expr.complement);
+    const inner = evalExpr(state, expr.complement, (-polarity) as Polarity);
     return new Set([...state.order.keys()].filter((id) => !inner.has(id)));
   }
   if (expr.annotate && expr.of) {
-    const members = evalExpr(state, expr.of);
+    const members = evalExpr(state, expr.of, polarity);
     stampAnnotation(state, members, expr.annotate);
     return members;
   }
@@ -537,7 +548,7 @@ function evalExpr<T extends EvalNode>(state: RunState<T>, expr: ViewExpr): Set<s
   if (expr.field_of) return evalFieldOf(state, expr.field_of);
   // A free variable / `$self` leaf (#184): resolves to a node-set from bindings.
   if (expr.var != null) return evalVar(state, expr.var);
-  return evalLeaf(state, expr);
+  return evalLeaf(state, expr, polarity);
 }
 
 // Forward projection: evaluate `of` to a node-set, then flatMap each node's
@@ -572,7 +583,7 @@ function evalVar<T extends EvalNode>(state: RunState<T>, name: string): Set<stri
   return bindingSet(state.bindings?.[name]);
 }
 
-function evalLeaf<T extends EvalNode>(state: RunState<T>, expr: ViewExpr): Set<string> {
+function evalLeaf<T extends EvalNode>(state: RunState<T>, expr: ViewExpr, polarity: Polarity = 1): Set<string> {
   // Match against `!= null`, not `!== undefined`: the backend serializes a
   // ViewExpr with *every* slot present (unset ones as explicit `null`, Pydantic
   // default dump), so an omitted-vs-null asymmetry would misfire on the first
@@ -589,8 +600,7 @@ function evalLeaf<T extends EvalNode>(state: RunState<T>, expr: ViewExpr): Set<s
     return idsWhere(state, (n) => nodeTags(n).includes(tag));
   }
   if (expr.field != null) {
-    const pred = expr.field;
-    return idsWhere(state, (n) => matchesField(state, n, pred));
+    return evalField(state, expr.field, polarity);
   }
   if (expr.hand_picked != null) {
     const picked = new Set(expr.hand_picked);
@@ -921,21 +931,38 @@ function fieldValue(node: EvalNode, key: string, schema: MetadataSchema | null |
 // through (ADR-0031 §B), distinct from an operand that resolves to the empty set.
 const OPERAND_INACTIVE = Symbol("operand-inactive");
 
-// Overlap/disjoint semantics (ADR-0031 §E, #184): set-coerce both sides and test
-// (non-)intersection. `set`/`unset` are presence tests (operand ignored). The one
-// value slot may be a bare literal, a tagged `{var}` (a promoted formal / `$self`),
-// or a tagged `{field_of}` projection — resolved to a set of strings by
-// `resolveOperand`. An entity_ref field's stored value is an id (or id list), so
-// overlap on it is id-overlap; a scalar field's is value-overlap — automatically,
-// because both sides coerce to string sets.
-function matchesField<T extends EvalNode>(state: RunState<T>, node: T, pred: ViewFieldPredicate): boolean {
-  const raw = fieldValue(node, pred.key, state.schema);
-  if (pred.op === "set") return !isEmpty(raw);
-  if (pred.op === "unset") return isEmpty(raw);
+// Evaluate a `field` predicate to its member id-set (ADR-0031 §E, #184).
+// Overlap/disjoint set-coerce both sides and test (non-)intersection; `set`/
+// `unset` are presence tests (operand ignored). The one value slot may be a bare
+// literal, a tagged `{var}` (a promoted formal / `$self`), or a tagged
+// `{field_of}` projection — resolved ONCE by `resolveOperand` (it is
+// node-independent, so lifting it out of the per-node loop also saves the repeat
+// resolve, cf. #200). An entity_ref field's stored value is an id (or id list),
+// so overlap on it is id-overlap; a scalar field's is value-overlap —
+// automatically, because both sides coerce to string sets.
+//
+// An INACTIVE operand (an unbound promoted formal) means "no constraint". Under
+// (a) "unset = show everything" (#198) that is the identity for the predicate's
+// enclosing position: the whole universe when keeping (`polarity +1` — so an
+// intersect passes the input through) but the empty set when subtracting
+// (`polarity -1` — so a drop/complement removes nothing). Returning universe in
+// both positions is what emptied Drop filters before this fix.
+function evalField<T extends EvalNode>(
+  state: RunState<T>,
+  pred: ViewFieldPredicate,
+  polarity: Polarity,
+): Set<string> {
+  if (pred.op === "set") return idsWhere(state, (n) => !isEmpty(fieldValue(n, pred.key, state.schema)));
+  if (pred.op === "unset") return idsWhere(state, (n) => isEmpty(fieldValue(n, pred.key, state.schema)));
   const operand = resolveOperand(state, pred.value);
-  if (operand === OPERAND_INACTIVE) return true; // unbound formal → no constraint
-  const overlaps = intersects(toStringSet(raw), operand);
-  return pred.op === "overlap" ? overlaps : !overlaps; // "disjoint"
+  if (operand === OPERAND_INACTIVE) {
+    return polarity < 0 ? new Set<string>() : new Set(state.order.keys());
+  }
+  const want = pred.op === "overlap"; // else "disjoint"
+  return idsWhere(state, (n) => {
+    const overlaps = intersects(toStringSet(fieldValue(n, pred.key, state.schema)), operand);
+    return overlaps === want;
+  });
 }
 
 // Resolve a predicate operand to a string set (or INACTIVE). A `{var}` reads the

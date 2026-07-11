@@ -27,6 +27,7 @@
   import { paneViews } from "@/lib/stores/paneViews.svelte";
   import { evaluateView, nestWarnings, type EvalNode } from "@/lib/views/evaluateView";
   import { effectiveFieldLabel, effectiveFieldHidden, kindRootEntryTypeId } from "@/lib/utils/schemaTypeHelpers";
+  import { pickerMembership } from "@/lib/utils/pickerSources";
   import { structureToEvalNodes } from "@/lib/views/structureNodes";
   import {
     specToGraph,
@@ -37,6 +38,7 @@
     reachesFieldOf,
     outputPayload,
     valueSlotAccepts,
+    inferInputKind,
     FILTER_VALUE_HANDLE,
     OUTPUT_NODE_ID,
     type GraphNodeKind,
@@ -134,6 +136,11 @@
     const graph = hydrateGraph(node);
     flowNodes = graph.nodes;
     flowEdges = graph.edges;
+    // Seed the add-node counter past any `a<N>` id already in the loaded graph.
+    // Persisted layouts store the exact ids addNode minted in a prior session, so
+    // a fresh `addCounter = 0` would re-emit `a0` and collide — Svelte Flow keys
+    // by id, so the "new" node lands on an existing one instead of appending.
+    seedAddCounter(graph.nodes);
     void loadSavedViews(kind, id);
     // Let the derived spec settle before re-enabling persistence.
     queueMicrotask(() => (hydrating = false));
@@ -143,16 +150,34 @@
     return { id, type: "viewNode", position, data: { kind: k, cfg }, deletable: k !== "output" };
   }
 
+  // The two wire types (ADR-0031 §D): a node-set pipe (solid, the default) vs a
+  // value-set pipe (a scalar `field_of` — dashed, tinted the value colour). The
+  // class is derived from the source's `outputPayload`, so it survives a layout
+  // round-trip (never persisted) — recomputed on hydrate, connect, and whenever a
+  // field_of's projected field changes its payload.
+  function edgeClass(sourceId: string, nodes: Node<FlowData>[]): string | undefined {
+    const s = nodes.find((n) => n.id === sourceId);
+    if (!s) return undefined;
+    const gn: ViewGraphNode = { id: s.id, kind: s.data.kind, position: s.position, data: s.data.cfg ?? {} };
+    const fieldType = (key: string) => schema?.fields?.[key]?.type ?? null;
+    return outputPayload(gn, fieldType) === "value-set" ? "value-wire" : undefined;
+  }
+  function tagEdge(e: Edge, nodes: Node<FlowData>[]): Edge {
+    const cls = edgeClass(e.source, nodes);
+    return (e.class ?? undefined) === cls ? e : { ...e, class: cls };
+  }
+
   // Build the canvas graph for a view: from its persisted designer `layout`
   // (author's exact positions + wiring) when present, else auto-laid-out from
   // the semantic `expr` (designer-less / legacy / backend-authored views).
   function hydrateGraph(node: ViewNode): { nodes: Node<FlowData>[]; edges: Edge[] } {
     const layout = node.layout;
     if (layout && layout.nodes.length > 0) {
+      const nodes = layout.nodes.map((n) =>
+        toFlowNode(n.id, n.kind as GraphNodeKind, (n.cfg ?? {}) as ViewNodeData, n.position),
+      );
       return {
-        nodes: layout.nodes.map((n) =>
-          toFlowNode(n.id, n.kind as GraphNodeKind, (n.cfg ?? {}) as ViewNodeData, n.position),
-        ),
+        nodes,
         edges: layout.edges.map((e) => ({
           id: e.id,
           source: e.source,
@@ -160,12 +185,14 @@
           sourceHandle: e.source_handle ?? undefined,
           targetHandle: e.target_handle ?? undefined,
           type: e.source === e.target ? "selfloop" : undefined,
+          class: edgeClass(e.source, nodes),
         })),
       };
     }
     const g = specToGraph(node.spec, schema);
+    const nodes = g.nodes.map((n) => toFlowNode(n.id, n.kind, n.data, n.position));
     return {
-      nodes: g.nodes.map((n) => toFlowNode(n.id, n.kind, n.data, n.position)),
+      nodes,
       edges: g.edges.map((e) => ({
         id: e.id,
         source: e.source,
@@ -173,6 +200,7 @@
         sourceHandle: e.sourceHandle ?? undefined,
         targetHandle: e.targetHandle ?? undefined,
         type: e.source === e.target ? "selfloop" : undefined,
+        class: edgeClass(e.source, nodes),
       })),
     };
   }
@@ -267,18 +295,29 @@
   // here naturally — pinned first (intrinsic before metadata). `hidden` fields
   // (id by default) are skipped; the evaluator reads intrinsic keys off the
   // node property (see fieldValue).
-  let fieldOptions = $derived(buildFieldOptions());
-  function buildFieldOptions(): { key: string; name: string; def: MetadataFieldDefinition }[] {
+  // Field rosters keyed by kind. A node's picker is anchored to the kind of its
+  // INPUT set (ADR-0031 §F, kind-level increment), not the single view kind — so
+  // downstream of a `field_of` that projects to another kind, the pickers offer
+  // THAT kind's fields. `fieldsFor(nodeId)` (below) resolves the per-node kind and
+  // reads from this map; `fieldOptions` stays the anchor-kind list for fallbacks.
+  let fieldOptionsByKind = $derived.by(() => {
+    const map = new Map<string, { key: string; name: string; def: MetadataFieldDefinition }[]>();
+    for (const def of Object.values(schema?.entry_types ?? {})) {
+      if (!map.has(def.kind)) map.set(def.kind, buildFieldOptions(def.kind));
+    }
+    return map;
+  });
+  let fieldOptions = $derived(fieldOptionsByKind.get(kind) ?? buildFieldOptions(kind));
+  function buildFieldOptions(forKind: string): { key: string; name: string; def: MetadataFieldDefinition }[] {
     const keys = new Set<string>();
     for (const [, def] of Object.entries(schema?.entry_types ?? {})) {
-      if (def.kind !== kind) continue;
+      if (def.kind !== forKind) continue;
       for (const fk of def.fields ?? []) keys.add(fk);
     }
-    // The picker is kind-anchored (ADR-0020), so per-type overrides resolve
-    // against the kind ROOT (ADR-0029 §F): the built-in lore `title → "Name"`
-    // relabel sits on `lore:base` and so reaches the picker; a leaf-only
-    // override deliberately does not.
-    const anchor = kindRootEntryTypeId(schema, kind);
+    // Per-type overrides resolve against the kind ROOT (ADR-0029 §F): the built-in
+    // lore `title → "Name"` relabel sits on `lore:base` and so reaches the picker;
+    // a leaf-only override deliberately does not.
+    const anchor = kindRootEntryTypeId(schema, forKind);
     const out: { key: string; name: string; def: MetadataFieldDefinition }[] = [];
     for (const k of keys) {
       const def = schema?.fields?.[k];
@@ -293,6 +332,28 @@
       return a.name.localeCompare(b.name);
     });
     return out;
+  }
+  // Authoring-time kind inference (ADR-0031 §F): the kind of a node's INPUT set,
+  // driving which field roster its picker offers. `refTargetKind` resolves a
+  // reference field's single target kind from its picker config (multi-kind →
+  // null → anchor fallback).
+  const fieldType = (key: string) => schema?.fields?.[key]?.type ?? null;
+  function refTargetKind(fieldKey: string): string | null {
+    const def = schema?.fields?.[fieldKey];
+    if (!def) return null;
+    const kinds = pickerMembership(def.picker_config).kinds;
+    return kinds.length === 1 ? kinds[0] : null;
+  }
+  function inputKindForNode(nodeId: string): string | null {
+    const byId = new Map<string, ViewGraphNode>(
+      flowNodes.map((n) => [n.id, { id: n.id, kind: n.data.kind, position: n.position, data: n.data.cfg ?? {} }]),
+    );
+    const edges = flowEdges.map((e) => ({ id: e.id, source: e.source, target: e.target, targetHandle: e.targetHandle ?? null }));
+    return inferInputKind(byId, edges, nodeId, kind, refTargetKind, fieldType);
+  }
+  function fieldsForNode(nodeId: string): { key: string; name: string; def: MetadataFieldDefinition }[] {
+    const k = inputKindForNode(nodeId);
+    return (k ? fieldOptionsByKind.get(k) : null) ?? fieldOptionsByKind.get(kind) ?? fieldOptions;
   }
   // Tags present in this kind's universe (contextual — avoids a separate store).
   let tagOptions = $derived(collectTags(universe));
@@ -317,6 +378,7 @@
       kind,
       entryTypes: entryTypeOptions,
       fields: fieldOptions,
+      fieldsFor: fieldsForNode,
       fieldByKey: (key: string) => schema?.fields?.[key] ?? null,
       valueWired: (nodeId: string) =>
         flowEdges.some((e) => e.target === nodeId && e.targetHandle === FILTER_VALUE_HANDLE),
@@ -332,6 +394,29 @@
 
   function updateNodeData(id: string, patch: Partial<ViewNodeData>): void {
     flowNodes = flowNodes.map((n) => (n.id === id ? { ...n, data: { ...n.data, cfg: { ...n.data.cfg, ...patch } } } : n));
+    // A config edit can invalidate the edges this node touches, in both
+    // directions: a payload FLIP (node-set ⇄ value-set — a field_of switched
+    // between a scalar and a reference field) breaks its OUTGOING edges, and a
+    // value-slot field-key change (scalar ⇄ reference) breaks an INCOMING
+    // value-operand edge. Re-run the exact gate used on connect over every
+    // incident edge and drop those that no longer pass, so the graph never holds
+    // a wire the author couldn't have drawn (which would otherwise lower to a
+    // silently type-mismatched spec).
+    const stale = new Set(
+      flowEdges
+        .filter(
+          (e) =>
+            (e.source === id || e.target === id) &&
+            !isValidConnection({ source: e.source, target: e.target, targetHandle: e.targetHandle ?? null }),
+        )
+        .map((e) => e.id),
+    );
+    if (stale.size) flowEdges = flowEdges.filter((e) => !stale.has(e.id));
+    // Re-tag the remaining edges: a field_of payload change recolours its wire.
+    // Only reassigns when a class actually changed (no churn on edits that don't
+    // affect payload, e.g. typing a filter value).
+    const retagged = flowEdges.map((e) => tagEdge(e, flowNodes));
+    if (retagged.some((e, i) => e !== flowEdges[i])) flowEdges = retagged;
   }
   function removeNode(id: string): void {
     if (id === OUTPUT_NODE_ID) return;
@@ -390,6 +475,16 @@
     const position = { x: 60, y: 60 + (flowNodes.length % 8) * 46 };
     flowNodes = [...flowNodes, toFlowNode(id, k, defaultCfg(k), position)];
   }
+  // Advance addCounter past the highest `a<N>` id present in `nodes`, so a
+  // reopened graph never re-mints an id that's already on the canvas.
+  function seedAddCounter(nodes: Node<FlowData>[]): void {
+    let max = -1;
+    for (const n of nodes) {
+      const m = /^a(\d+)$/.exec(n.id);
+      if (m) max = Math.max(max, Number(m[1]));
+    }
+    addCounter = max + 1;
+  }
 
   // ---- connection wiring ----
   // Cycles are no longer a blanket block (ADR-0028 §D): a self-loop into a
@@ -431,11 +526,10 @@
     // Single-hop cut (#184, §14.5): a field_of's `of` must not resolve from
     // another field_of (multi-hop per-node type inference is deferred).
     if (target.data.kind === "field_of" && reachesFieldOf(byId, edges, conn.source)) return false;
-    // #203: a field_of's `of` must be a CONCRETE set. The grammar has no
-    // universal-set leaf, so an `All` injector lowers to EMPTY (`fieldOfBuilt`) —
-    // a legal-looking "project the pov of everything" that silently yields
-    // nothing. Block the wire instead of shipping a blank result with no warning.
-    if (target.data.kind === "field_of" && srcNode?.kind === "all") return false;
+    // NB: `All → field_of` is now permitted (was blocked by #203). Post ADR-0036
+    // the whole-kind roster has an explicit expr, so `field_of(All, Type)` lowers
+    // to a concrete projection (every entry_type in use) rather than a silent
+    // EMPTY — see `fieldOfBuilt`.
     return connectionAllowed(classifyConnection(byId, edges, conn.source, conn.target, conn.targetHandle ?? null));
   }
   // After a connection auto-adds, trim single-input handles to their newest edge
@@ -465,12 +559,15 @@
         seen.add(key);
       }
       // A recursion self-loop renders with the custom edge that routes around
-      // the node instead of cutting back behind it.
+      // the node instead of cutting back behind it. Tag every kept edge with its
+      // wire-type class (node-set vs value-set) so a freshly-wired pipe paints.
       if (e.source === e.target && e.type !== "selfloop") {
-        kept.push({ ...e, type: "selfloop" });
+        kept.push(tagEdge({ ...e, type: "selfloop" }, flowNodes));
         changed = true;
       } else {
-        kept.push(e);
+        const tagged = tagEdge(e, flowNodes);
+        if (tagged !== e) changed = true;
+        kept.push(tagged);
       }
     }
     kept.reverse();
@@ -758,6 +855,14 @@
   .canvas :global(.svelte-flow__edge-path),
   .canvas :global(.svelte-flow__connection-path) {
     stroke-width: 2;
+  }
+  /* The value-set wire (ADR-0031 §D): a scalar `field_of` projection. Dashed +
+     tinted `--k-snippet` (matching the value handles) so it reads as a visibly
+     different pipe from the solid, neutral node-set wires — and distinct from the
+     `--k-lore` Nest children port it used to clash with. */
+  .canvas :global(.svelte-flow__edge.value-wire .svelte-flow__edge-path) {
+    stroke: var(--k-snippet);
+    stroke-dasharray: 5 3;
   }
   .empty-hint {
     position: absolute;

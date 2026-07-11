@@ -24,7 +24,12 @@ export type DesignerContext = {
   // schema-derived leaf-config options for the view's anchor kind
   kind: string;
   entryTypes: EntryTypeOption[];
+  // `fields` = the anchor-kind roster (fallback / non-node-specific reads).
+  // `fieldsFor(nodeId)` = the roster for that node's INPUT-set kind (ADR-0031 §F,
+  // kind-level) — the pickers use it so a node downstream of a cross-kind
+  // `field_of` offers the projected kind's fields, not the view anchor's.
   fields: FieldOption[];
+  fieldsFor: (nodeId: string) => FieldOption[];
   fieldByKey: (key: string) => MetadataFieldDefinition | null;
   // Whether a node's value slot (#196) is fed by a wired source edge — the node
   // renders the wired state instead of an inline literal / promote control.

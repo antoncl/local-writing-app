@@ -13,7 +13,7 @@
   import FieldValueEditor from "@/components/widgets/FieldValueEditor.svelte";
   import NodePicker from "@/components/widgets/NodePicker.svelte";
   import SwatchPicker from "@/components/widgets/SwatchPicker.svelte";
-  import { inputArity, type GraphNodeKind, type PredicateKind, type ViewHandle, type ViewNodeData } from "@/lib/views/viewGraph";
+  import { inputArity, outputPayload, type GraphNodeKind, type PredicateKind, type ViewGraphNode, type ViewHandle, type ViewNodeData } from "@/lib/views/viewGraph";
   import { useDesignerContext } from "./designerContext";
   import type { MetadataFieldType, NodePickerRef, ViewSort } from "@/lib/types";
 
@@ -29,6 +29,18 @@
   // A kind with a single entry_type (e.g. assistant) makes Type/Type+subtypes
   // predicates noise — offer them only when there's a real choice (#91).
   let hasTypeChoice = $derived((ctx.entryTypes?.length ?? 0) > 1);
+  // The wire this node's `out` handle emits: a scalar `field_of` yields a
+  // value-set, everything else a node-set (ADR-0031 §D). The source handle is
+  // tinted to match so handle + pipe read as one wire — and a `field_of` shows
+  // whether it's projecting nodes or values before you even wire it up.
+  let emitsValueSet = $derived(
+    outputPayload({ id, kind, position: { x: 0, y: 0 }, data: cfg } as ViewGraphNode, (key: string) => ctx.fieldByKey(key)?.type ?? null) ===
+      "value-set",
+  );
+  // Field roster for THIS node's pickers — anchored to the kind of its input set
+  // (ADR-0031 §F), so downstream of a cross-kind `field_of` the dropdowns offer
+  // the projected kind's fields instead of the view anchor's.
+  let nodeFields = $derived(ctx.fieldsFor?.(id) ?? ctx.fields);
 
   const LABELS: Record<GraphNodeKind, string> = {
     output: "View result",
@@ -165,7 +177,7 @@
   // drop them from the join picker. Category is the resolver-stamped signal
   // (ADR-0029 §D).
   let joinableFields = $derived(
-    ctx.fields.filter((f) => f.def.category !== "intrinsic" && NEST_JOINABLE_TYPES.includes(f.def.type)),
+    nodeFields.filter((f) => f.def.category !== "intrinsic" && NEST_JOINABLE_TYPES.includes(f.def.type)),
   );
   function setMatch(next: Partial<NonNullable<ViewNodeData["match"]>>) {
     patch({ match: { field: matchField, direction: matchDir, by: matchBy, ...next } });
@@ -183,7 +195,7 @@
   let projectFields = $derived(buildProjectFields());
   function buildProjectFields(): { key: string; name: string }[] {
     const out: { key: string; name: string }[] = [];
-    for (const f of ctx.fields) {
+    for (const f of nodeFields) {
       // Every field projects — a reference field to a node-set, a scalar field
       // to a value-set (#196, ADR-0031 §D) — except `long_text`: freeform prose
       // has no stable identity, so it's presence-only (§H).
@@ -314,7 +326,7 @@
   <div class="vfield-row">
     <select class="vfield" value={fieldKey} onchange={(e) => setField({ key: e.currentTarget.value })}>
       <option value="">— field —</option>
-      {#each ctx.fields as f (f.key)}
+      {#each nodeFields as f (f.key)}
         <option value={f.key}>{f.name}</option>
       {/each}
     </select>
@@ -472,7 +484,7 @@
     {#if sortBy === "field"}
       <select class="vfield" value={sortFieldKey} onchange={(e) => setSort({ field_key: e.currentTarget.value })}>
         <option value="">— field —</option>
-        {#each ctx.fields as f (f.key)}
+        {#each nodeFields as f (f.key)}
           <option value={f.key}>{f.name}</option>
         {/each}
       </select>
@@ -569,9 +581,9 @@
     </div>
   {/if}
 
-  <!-- source port (right) -->
+  <!-- source port (right) — tinted `value` when this node emits a value-set. -->
   {#if kind !== "output"}
-    <Handle type="source" position={Position.Right} id="out" class="port out" />
+    <Handle type="source" position={Position.Right} id="out" class={emitsValueSet ? "port out value" : "port out"} />
   {/if}
 </div>
 
@@ -660,9 +672,8 @@
   .dot.children {
     background: var(--k-lore);
   }
-  .dot.value,
-  :global(.svelte-flow__handle.port.value) {
-    background: var(--k-assistant);
+  .dot.value {
+    background: var(--k-snippet);
   }
   /* the value slot is filled by a wired source, not an inline literal (#196) */
   .vwired {
@@ -868,5 +879,13 @@
   }
   .vnode :global(.port.children) {
     background: var(--k-lore);
+  }
+  /* The value-pipe handles (#196) — the value-operand target socket AND a
+     value-emitting source `out` (a scalar field_of). Tinted `--k-snippet` (tan),
+     deliberately distinct from Nest's `--k-lore` children port (both were blue and
+     clashed). Must sit AFTER the generic `.vnode :global(.port)` rule above: equal
+     specificity, so source order decides — placed earlier it lost to `--accent`. */
+  .vnode :global(.port.value) {
+    background: var(--k-snippet);
   }
 </style>

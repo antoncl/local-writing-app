@@ -93,6 +93,103 @@ export function outputPayload(
   return "node-set";
 }
 
+// --- authoring-time kind inference for the field pickers (ADR-0031 §F) --------
+
+// Static, single-hop output-KIND inference (the kind-level increment of §F; the
+// full per-member entry_type intersection is deferred). Returns the kind of the
+// node-set a node emits, or null when that set is indeterminate — a value-set
+// (scalar `field_of`), an any-kind `references` projection, or a mixed-kind
+// set-op — so callers fall back to the view's anchor-kind roster. `field_of` is
+// the only remap: its `of` is never another `field_of` (the connection validator
+// blocks that), so one hop resolves it. A nest self-loop is guarded by `seen`.
+function inferOutputKind(
+  byId: Map<string, ViewGraphNode>,
+  edges: ViewGraphEdge[],
+  nodeId: string,
+  anchorKind: string,
+  refTargetKind: (fieldKey: string) => string | null,
+  fieldType: (key: string) => string | null,
+  seen: Set<string>,
+): string | null {
+  if (seen.has(nodeId)) return null;
+  const node = byId.get(nodeId);
+  if (!node) return null;
+  seen.add(nodeId);
+  // The upstream feeding a named input handle → its output kind (anchor when
+  // unwired). Self-loop edges (nest recursion) are skipped. Each branch recurses
+  // with an INDEPENDENT copy of `seen`: the set only guards a single path against
+  // cycles, so sharing it across sibling branches would falsely null out a diamond
+  // (a shared ancestor visited by the first branch, rejected by the second).
+  const sourceFor = (handle: string): string | null => {
+    const e = edges.find(
+      (e) => e.target === nodeId && e.source !== nodeId && (e.targetHandle ?? DEFAULT_HANDLE_ID) === handle,
+    );
+    return e ? inferOutputKind(byId, edges, e.source, anchorKind, refTargetKind, fieldType, new Set(seen)) : anchorKind;
+  };
+  switch (node.kind) {
+    case "field_of": {
+      const f = node.data.project_field;
+      if (!f) return anchorKind; // unconfigured → treat as passthrough
+      if (f === REFERENCES_FIELD) return null; // any-kind backlinks
+      if (isNodeSetField(f, fieldType)) return refTargetKind(f); // ref → target kind
+      return null; // scalar → value-set (no node kind)
+    }
+    case "filter":
+    case "sorter":
+    case "highlight":
+    case "complement":
+      return sourceFor(DEFAULT_HANDLE_ID);
+    case "difference":
+      return sourceFor("keep");
+    case "nest":
+      return sourceFor(NEST_CHILDREN_HANDLE) ?? sourceFor(NEST_PARENTS_HANDLE);
+    case "union":
+    case "intersect": {
+      const kinds = new Set(
+        edges
+          .filter((e) => e.target === nodeId && e.source !== nodeId)
+          .map((e) => inferOutputKind(byId, edges, e.source, anchorKind, refTargetKind, fieldType, new Set(seen))),
+      );
+      return kinds.size === 1 ? [...kinds][0] : null; // mixed / empty → indeterminate
+    }
+    default:
+      // sources: all / type / descendants_of / tagged / hand_picked / view_ref /
+      // self all draw from the anchor-kind roster.
+      return anchorKind;
+  }
+}
+
+// The kind whose field roster a node's picker should offer: the kind of the
+// node's INPUT set (what it filters / sorts / projects from / joins on). Null
+// when indeterminate → the caller falls back to the anchor kind. Closes ADR-0031
+// §F's "field selectors derive from the input set, not the view anchor" gap at
+// kind granularity; the full entry_type intersection is deferred.
+export function inferInputKind(
+  byId: Map<string, ViewGraphNode>,
+  edges: ViewGraphEdge[],
+  nodeId: string,
+  anchorKind: string,
+  refTargetKind: (fieldKey: string) => string | null,
+  fieldType: (key: string) => string | null,
+): string | null {
+  const node = byId.get(nodeId);
+  if (!node) return anchorKind;
+  // For a Nest the join field lives on whichever side HOLDS the link: the child
+  // for `child_to_parent`, the parent for `parent_to_children`.
+  const inHandle =
+    node.kind === "nest"
+      ? node.data.match?.direction === "parent_to_children"
+        ? NEST_PARENTS_HANDLE
+        : NEST_CHILDREN_HANDLE
+      : node.kind === "difference"
+        ? "keep"
+        : DEFAULT_HANDLE_ID;
+  const e = edges.find(
+    (e) => e.target === nodeId && e.source !== nodeId && (e.targetHandle ?? DEFAULT_HANDLE_ID) === inHandle,
+  );
+  return e ? inferOutputKind(byId, edges, e.source, anchorKind, refTargetKind, fieldType, new Set()) : anchorKind;
+}
+
 // What a Filter/field value slot authored on `fieldKey` accepts as a wired source
 // (ADR-0031 §E): an entity_ref field's slot takes a **node-set** (id overlap), a
 // scalar field's slot takes a **value-set** (value overlap). `null` when the key
@@ -370,7 +467,7 @@ function differenceBuilt(keep: Built, remove: Built): Built {
 // not recurse forever. An unwired handle materializes to null = the whole
 // universe (the evaluator's convention; an unseeded `parents` yields a thicket).
 // A Nest with no match rule can't join → EMPTY (nothing to show mid-compose).
-function nestBuilt(graph: ViewGraph, byId: Map<string, ViewGraphNode>, node: ViewGraphNode, seen: Set<string>): Built {
+function nestBuilt(graph: ViewGraph, byId: Map<string, ViewGraphNode>, node: ViewGraphNode, seen: Set<string>, uni: ViewExpr | null): Built {
   const match = node.data.match;
   if (!match?.field || !match.direction) return EMPTY;
 
@@ -380,7 +477,7 @@ function nestBuilt(graph: ViewGraph, byId: Map<string, ViewGraphNode>, node: Vie
   const recursive = parentEdges.some((e) => e.source === node.id); // self-loop
 
   const lowerEdges = (edges: ViewGraphEdge[]): Built =>
-    unionBuilt(edges.filter((e) => e.source !== node.id).map((e) => buildNode(graph, byId, e.source, seen)));
+    unionBuilt(edges.filter((e) => e.source !== node.id).map((e) => buildNode(graph, byId, e.source, seen, uni)));
   const parents = lowerEdges(parentEdges);
   const children = lowerEdges(childEdges);
 
@@ -417,6 +514,7 @@ function buildNode(
   byId: Map<string, ViewGraphNode>,
   nodeId: string,
   seen: Set<string>,
+  uni: ViewExpr | null,
 ): Built {
   if (seen.has(nodeId)) return EMPTY; // defensive: designer cycle
   const node = byId.get(nodeId);
@@ -427,35 +525,35 @@ function buildNode(
       case "all":
         return UNIVERSE;
       case "union":
-        return unionBuilt(childBuilts(graph, byId, nodeId, seen));
+        return unionBuilt(childBuilts(graph, byId, nodeId, seen, uni));
       case "intersect":
-        return intersectBuilt(childBuilts(graph, byId, nodeId, seen));
+        return intersectBuilt(childBuilts(graph, byId, nodeId, seen, uni));
       case "difference": {
         const keepEdge = upstreamOf(graph, nodeId).find((e) => e.targetHandle === "keep");
         const removeEdge = upstreamOf(graph, nodeId).find((e) => e.targetHandle === "remove");
-        const keep = keepEdge ? buildNode(graph, byId, keepEdge.source, seen) : EMPTY;
-        const remove = removeEdge ? buildNode(graph, byId, removeEdge.source, seen) : EMPTY;
+        const keep = keepEdge ? buildNode(graph, byId, keepEdge.source, seen, uni) : EMPTY;
+        const remove = removeEdge ? buildNode(graph, byId, removeEdge.source, seen, uni) : EMPTY;
         return differenceBuilt(keep, remove);
       }
       case "complement":
-        return complementBuilt(soleChild(graph, byId, nodeId, seen));
+        return complementBuilt(soleChild(graph, byId, nodeId, seen, uni));
       case "nest":
-        return nestBuilt(graph, byId, node, seen);
+        return nestBuilt(graph, byId, node, seen, uni);
       case "self":
         // The reserved anchor source — `{var: "$self"}` (no input).
         return built({ var: SELF_VAR });
       case "field_of":
-        return fieldOfBuilt(soleChild(graph, byId, nodeId, seen), node);
+        return fieldOfBuilt(soleChild(graph, byId, nodeId, seen, uni), node, uni);
       case "field":
         // A leaf field predicate whose value slot may be a wired source (#196).
-        return fieldLeafBuilt(graph, byId, node, seen);
+        return fieldLeafBuilt(graph, byId, node, seen, uni);
       case "filter":
-        return filterBuilt(graph, byId, node, seen);
+        return filterBuilt(graph, byId, node, seen, uni);
       case "sorter":
         // Membership pass-through; the sort itself is captured at the handle.
-        return soleChild(graph, byId, nodeId, seen);
+        return soleChild(graph, byId, nodeId, seen, uni);
       case "highlight":
-        return highlightBuilt(soleChild(graph, byId, nodeId, seen), node);
+        return highlightBuilt(soleChild(graph, byId, nodeId, seen, uni), node);
       default: {
         const e = leafExpr(node);
         return e ? built(e) : EMPTY;
@@ -466,31 +564,31 @@ function buildNode(
   }
 }
 
-function childBuilts(graph: ViewGraph, byId: Map<string, ViewGraphNode>, nodeId: string, seen: Set<string>): Built[] {
-  return orderedUpstream(graph, byId, nodeId).map((e) => buildNode(graph, byId, e.source, seen));
+function childBuilts(graph: ViewGraph, byId: Map<string, ViewGraphNode>, nodeId: string, seen: Set<string>, uni: ViewExpr | null): Built[] {
+  return orderedUpstream(graph, byId, nodeId).map((e) => buildNode(graph, byId, e.source, seen, uni));
 }
 
-function soleChild(graph: ViewGraph, byId: Map<string, ViewGraphNode>, nodeId: string, seen: Set<string>): Built {
+function soleChild(graph: ViewGraph, byId: Map<string, ViewGraphNode>, nodeId: string, seen: Set<string>, uni: ViewExpr | null): Built {
   const first = orderedUpstream(graph, byId, nodeId)[0];
-  return first ? buildNode(graph, byId, first.source, seen) : EMPTY;
+  return first ? buildNode(graph, byId, first.source, seen, uni) : EMPTY;
 }
 
-function filterBuilt(graph: ViewGraph, byId: Map<string, ViewGraphNode>, node: ViewGraphNode, seen: Set<string>): Built {
+function filterBuilt(graph: ViewGraph, byId: Map<string, ViewGraphNode>, node: ViewGraphNode, seen: Set<string>, uni: ViewExpr | null): Built {
   // The set input is the `in` handle specifically — a Filter now has a second
   // (`value`) input handle, so `soleChild` (any-handle first) would be wrong.
   const inEdge = upstreamOf(graph, node.id).find((e) => (e.targetHandle ?? DEFAULT_HANDLE_ID) === DEFAULT_HANDLE_ID);
-  const input = inEdge ? buildNode(graph, byId, inEdge.source, seen) : EMPTY;
-  const p = predicateExpr(node, wiredValueOperand(graph, byId, node, seen));
+  const input = inEdge ? buildNode(graph, byId, inEdge.source, seen, uni) : EMPTY;
+  const p = predicateExpr(node, wiredValueOperand(graph, byId, node, seen, uni));
   if (!p) return input; // unconfigured filter = pass-through
   const mode = node.data.filter_mode ?? "keep";
   return mode === "drop" ? differenceBuilt(input, built(p)) : intersectBuilt([input, built(p)]);
 }
 
 // A leaf `field` node → its predicate expr, honoring a wired value source (#196).
-function fieldLeafBuilt(graph: ViewGraph, byId: Map<string, ViewGraphNode>, node: ViewGraphNode, seen: Set<string>): Built {
+function fieldLeafBuilt(graph: ViewGraph, byId: Map<string, ViewGraphNode>, node: ViewGraphNode, seen: Set<string>, uni: ViewExpr | null): Built {
   const key = node.data.field?.key;
   if (!key) return EMPTY; // a blank leaf isn't "whole universe"
-  return built({ field: withWiredValue(node.data.field!, wiredValueOperand(graph, byId, node, seen)) });
+  return built({ field: withWiredValue(node.data.field!, wiredValueOperand(graph, byId, node, seen, uni)) });
 }
 
 // Resolve a wired value operand on `node`'s `value` handle (#196, ADR-0031 §E):
@@ -502,13 +600,14 @@ function wiredValueOperand(
   byId: Map<string, ViewGraphNode>,
   node: ViewGraphNode,
   seen: Set<string>,
+  uni: ViewExpr | null,
 ): ViewOperand | undefined {
   const edge = upstreamOf(graph, node.id).find((e) => e.targetHandle === FILTER_VALUE_HANDLE);
   if (!edge) return undefined;
   const src = byId.get(edge.source);
   if (src?.kind === "self") return { var: SELF_VAR };
   if (src?.kind === "field_of") {
-    const b = buildNode(graph, byId, edge.source, seen);
+    const b = buildNode(graph, byId, edge.source, seen, uni);
     if (b.tag === "expr" && b.expr.field_of) return { field_of: b.expr.field_of };
   }
   return undefined;
@@ -521,13 +620,15 @@ function withWiredValue(field: ViewFieldPredicate, wired: ViewOperand | undefine
 }
 
 // Lower a `field_of` node (#184, ADR-0031 §D): project its single `of` input
-// through the selected field. `field_of`'s `of` is a REQUIRED ViewExpr and the
-// grammar has no universal-set leaf, so an unwired/`All` input (which
-// materializes to null = universe) can't be expressed → EMPTY, degrading like
-// any unconfigured node. An unset field selector is likewise EMPTY.
-function fieldOfBuilt(input: Built, node: ViewGraphNode): Built {
+// through the selected field. `field_of`'s `of` is a REQUIRED ViewExpr. Post
+// ADR-0036 the whole-kind roster has an explicit expr (`kindUniverseExpr`), so an
+// `All`/universe input lowers to it — `field_of(All, Type)` becomes the concrete
+// "project the field of every node" (e.g. every entry_type in use), no longer a
+// silent EMPTY. Uses the OUTER materialize with the resolved universe expr; only
+// an unwired input (materializes to null) or an unset field selector → EMPTY.
+function fieldOfBuilt(input: Built, node: ViewGraphNode, uni: ViewExpr | null): Built {
   const field = node.data.project_field;
-  const of = materialize(input);
+  const of = materializeOuter(input, uni);
   if (!field || !of) return EMPTY;
   return built({ field_of: { of, field } });
 }
@@ -600,6 +701,7 @@ function lowerSegment(
   byId: Map<string, ViewGraphNode>,
   handle: ViewHandle,
   handleIds: string[],
+  uni: ViewExpr | null,
 ): Segment {
   const valid = new Set(handleIds);
   const edges = orderedUpstream(graph, byId, OUTPUT_NODE_ID).filter((e) => {
@@ -611,7 +713,7 @@ function lowerSegment(
   for (const e of edges) {
     const src = byId.get(e.source);
     if (src?.kind === "sorter" && src.data.sort) sort = src.data.sort;
-    parts.push(buildNode(graph, byId, e.source, new Set()));
+    parts.push(buildNode(graph, byId, e.source, new Set(), uni));
   }
   // A Sorter wired to a handle with no upstream membership sorts the whole
   // universe — promote the otherwise-empty segment to universe so graphToSpec
@@ -680,11 +782,14 @@ export function graphToSpec(
   const byId = new Map(graph.nodes.map((n) => [n.id, n]));
   const handles = outputHandles(byId.get(OUTPUT_NODE_ID));
   const handleIds = handles.map((h) => h.id);
-  const segments = handles.map((h) => lowerSegment(graph, byId, h, handleIds));
-  const populated = segments.filter((s) => s.built.tag !== "empty");
 
   // The explicit "everything" expr an `All`/universe segment lowers to (ADR-0036).
+  // Resolved before lowering so a `field_of(All, …)` inside a segment can project
+  // over the whole roster instead of collapsing to EMPTY (#184 §D).
   const universeExpr = kindUniverseExpr(base.kind, base.schema ?? null);
+
+  const segments = handles.map((h) => lowerSegment(graph, byId, h, handleIds, universeExpr));
+  const populated = segments.filter((s) => s.built.tag !== "empty");
 
   const params = collectParams(graph);
   const withParams = (s: ViewSpec): ViewSpec => (params.length > 0 ? { ...s, params } : s);
@@ -710,8 +815,9 @@ export function graphToSpec(
 // (the pure round-trip helper) a universe stays null.
 export function graphToExpr(graph: ViewGraph, kind?: string): ViewExpr | null {
   const byId = new Map(graph.nodes.map((n) => [n.id, n]));
-  const parts = orderedUpstream(graph, byId, OUTPUT_NODE_ID).map((e) => buildNode(graph, byId, e.source, new Set()));
-  return materializeOuter(unionBuilt(parts), kind ? kindUniverseExpr(kind, null) : null);
+  const uni = kind ? kindUniverseExpr(kind, null) : null;
+  const parts = orderedUpstream(graph, byId, OUTPUT_NODE_ID).map((e) => buildNode(graph, byId, e.source, new Set(), uni));
+  return materializeOuter(unionBuilt(parts), uni);
 }
 
 // --- spec → graph (reopen fallback) --------------------------------------

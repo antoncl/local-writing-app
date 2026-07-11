@@ -6,6 +6,7 @@ import {
   exprToGraph,
   graphToExpr,
   graphToSpec,
+  inferInputKind,
   outputPayload,
   reachesFieldOf,
   specToGraph,
@@ -413,16 +414,19 @@ describe("#184 field_of / self lowering + round-trip (ADR-0031 §D)", () => {
     expect(graphToExpr(graph)).toBeNull();
   });
 
-  it("field_of wired from an `All` injector lowers to nothing — the silent-empty the UI blocks (#203)", () => {
-    // `All` materializes to the universe (null), which fieldOfBuilt can't express
-    // as a concrete `of` → EMPTY. isValidConnection blocks the wire so the author
-    // never reaches this state; this asserts the lowering stays safe if they do.
+  it("field_of wired from an `All` injector projects over the whole-kind roster (was #203's blocked silent-empty)", () => {
+    // Post ADR-0036 `All` lowers to the explicit whole-kind expr, so `field_of(All,
+    // pov)` is a concrete projection over every node — e.g. `field_of(All, entry_type)`
+    // enumerates the types in use. The #203 wire block is retired accordingly.
     const all = node("all", {}, 0);
     const fo = node("field_of", { project_field: "pov" }, 100);
     const graph: ViewGraph = {
       nodes: [out(), all, fo],
       edges: [edge(all.id, fo.id), edge(fo.id, OUTPUT_NODE_ID)],
     };
+    expect(graphToExpr(graph, "lore")).toEqual({ field_of: { of: { descendants_of: "lore:base" }, field: "pov" } });
+    // Without a kind (the pure round-trip helper) there's no universe expr to
+    // resolve, so a universe `of` still degrades to null.
     expect(graphToExpr(graph)).toBeNull();
   });
 
@@ -653,5 +657,97 @@ describe("promote-in-place params (#184)", () => {
     const spec2 = graphToSpec(specToGraph(spec1), { kind: "lore" });
     expect(spec2.params).toEqual(spec1.params);
     expect(spec2.expr).toEqual(spec1.expr);
+  });
+});
+
+describe("field-picker kind inference (ADR-0031 §F, kind-level)", () => {
+  // pov = entity_ref → lore; characters = entity_ref_list → lore; status = scalar.
+  const fieldType = (k: string): string | null =>
+    ({ pov: "entity_ref", characters: "entity_ref_list", status: "select" })[k] ?? null;
+  const refTargetKind = (k: string): string | null => (k === "pov" || k === "characters" ? "lore" : null);
+  const byIdOf = (nodes: ViewGraphNode[]) => new Map(nodes.map((n) => [n.id, n]));
+
+  it("a node over a plain leaf infers the anchor kind", () => {
+    const src = node("type", { type: "scene:scene" }, 0);
+    const filter = node("filter", { filter_kind: "field" }, 100);
+    const nodes = [out(), src, filter];
+    const edges = [edge(src.id, filter.id), edge(filter.id, OUTPUT_NODE_ID)];
+    expect(inferInputKind(byIdOf(nodes), edges, filter.id, "scene", refTargetKind, fieldType)).toBe("scene");
+  });
+
+  it("a node downstream of a ref `field_of` infers the ref field's target kind (the §F remap)", () => {
+    // scene → field_of(pov: entity_ref → lore) → filter: the filter's fields come
+    // from `lore`, not the `scene` anchor.
+    const src = node("type", { type: "scene:scene" }, 0);
+    const fo = node("field_of", { project_field: "pov" }, 100);
+    const filter = node("filter", { filter_kind: "field" }, 200);
+    const nodes = [out(), src, fo, filter];
+    const edges = [edge(src.id, fo.id), edge(fo.id, filter.id), edge(filter.id, OUTPUT_NODE_ID)];
+    expect(inferInputKind(byIdOf(nodes), edges, filter.id, "scene", refTargetKind, fieldType)).toBe("lore");
+  });
+
+  it("a `field_of`'s own project-field picker sees its INPUT kind, not its output", () => {
+    const src = node("type", { type: "scene:scene" }, 0);
+    const fo = node("field_of", { project_field: "pov" }, 100);
+    const nodes = [out(), src, fo];
+    const edges = [edge(src.id, fo.id), edge(fo.id, OUTPUT_NODE_ID)];
+    expect(inferInputKind(byIdOf(nodes), edges, fo.id, "scene", refTargetKind, fieldType)).toBe("scene");
+  });
+
+  it("downstream of a SCALAR `field_of` (value-set) → indeterminate (null → anchor fallback)", () => {
+    const src = node("type", { type: "scene:scene" }, 0);
+    const fo = node("field_of", { project_field: "status" }, 100);
+    const filter = node("filter", { filter_kind: "field" }, 200);
+    const nodes = [out(), src, fo, filter];
+    const edges = [edge(src.id, fo.id), edge(fo.id, filter.id), edge(filter.id, OUTPUT_NODE_ID)];
+    expect(inferInputKind(byIdOf(nodes), edges, filter.id, "scene", refTargetKind, fieldType)).toBeNull();
+  });
+
+  it("downstream of a `references` (any-kind) `field_of` → indeterminate", () => {
+    const src = node("type", { type: "scene:scene" }, 0);
+    const fo = node("field_of", { project_field: "references" }, 100);
+    const filter = node("filter", { filter_kind: "field" }, 200);
+    const nodes = [out(), src, fo, filter];
+    const edges = [edge(src.id, fo.id), edge(fo.id, filter.id), edge(filter.id, OUTPUT_NODE_ID)];
+    expect(inferInputKind(byIdOf(nodes), edges, filter.id, "scene", refTargetKind, fieldType)).toBeNull();
+  });
+
+  it("a Filter preserves its input kind through the remap (filter over ref field_of over lore)", () => {
+    // A Filter is a passthrough, so a second node past it still sees `lore`.
+    const src = node("type", { type: "scene:scene" }, 0);
+    const fo = node("field_of", { project_field: "characters" }, 100);
+    const f1 = node("filter", { filter_kind: "tagged" }, 200);
+    const f2 = node("sorter", { sort: { by: "field" } }, 300);
+    const nodes = [out(), src, fo, f1, f2];
+    const edges = [edge(src.id, fo.id), edge(fo.id, f1.id), edge(f1.id, f2.id), edge(f2.id, OUTPUT_NODE_ID)];
+    expect(inferInputKind(byIdOf(nodes), edges, f2.id, "scene", refTargetKind, fieldType)).toBe("lore");
+  });
+
+  it("an unwired node falls back to the anchor kind", () => {
+    const filter = node("filter", { filter_kind: "field" }, 0);
+    expect(inferInputKind(byIdOf([out(), filter]), [], filter.id, "scene", refTargetKind, fieldType)).toBe("scene");
+  });
+
+  it("a diamond over a ref `field_of` still remaps (independent `seen` per branch)", () => {
+    // scene → field_of(pov→lore) fans into filterA + filterB → union → sink.
+    // The shared field_of ancestor must be resolved on BOTH branches; a shared
+    // `seen` set would null the second one → `{lore, null}` → wrong anchor fallback.
+    const src = node("type", { type: "scene:scene" }, 0);
+    const fo = node("field_of", { project_field: "pov" }, 100);
+    const fa = node("filter", { filter_kind: "tagged" }, 200);
+    const fb = node("filter", { filter_kind: "tagged" }, 300);
+    const u = node("union", {}, 400);
+    const sink = node("filter", { filter_kind: "field" }, 500);
+    const nodes = [out(), src, fo, fa, fb, u, sink];
+    const edges = [
+      edge(src.id, fo.id),
+      edge(fo.id, fa.id),
+      edge(fo.id, fb.id),
+      edge(fa.id, u.id),
+      edge(fb.id, u.id),
+      edge(u.id, sink.id),
+      edge(sink.id, OUTPUT_NODE_ID),
+    ];
+    expect(inferInputKind(byIdOf(nodes), edges, sink.id, "scene", refTargetKind, fieldType)).toBe("lore");
   });
 });

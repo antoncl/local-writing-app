@@ -5,7 +5,7 @@
   import NodeEditor from "@/components/editor/NodeEditor.svelte";
   import DirectoryPickerModal from "@/components/dialogs/DirectoryPickerModal.svelte";
   import SchemaPanes from "@/components/schema/SchemaPanes.svelte";
-  import Tree from "@/components/panes/Tree.svelte";
+  import StructureTree from "@/components/panes/StructureTree.svelte";
   import Lore from "@/components/panes/Lore.svelte";
   import Assistants from "@/components/panes/Assistants.svelte";
   import Prompts from "@/components/panes/Prompts.svelte";
@@ -65,11 +65,8 @@
     metadataSchemaStore,
     projectSchemaLayerId,
   } from "@/lib/stores/schema";
-  import { referenceIndexStore } from "@/lib/stores/references";
   import { implicitContextMatcherStore } from "@/lib/stores/derived";
   import { paneViews } from "@/lib/stores/paneViews.svelte";
-  import { evaluateView, treeNodeIds } from "@/lib/views/evaluateView";
-  import { structureToEvalNodes } from "@/lib/views/structureNodes";
   import ViewSwitcher from "@/components/widgets/ViewSwitcher.svelte";
   import NodeList from "@/components/widgets/NodeList.svelte";
   import NodeRow from "@/components/widgets/NodeRow.svelte";
@@ -107,10 +104,11 @@
   type AppState =
     | { name: "needsProject" }
     | { name: "projectOpen"; project: ProjectInfo };
-  // The tree rendering + inline CRUD live in Tree.svelte; the per-kind
-  // TreeConfig contracts, node create/cascade-delete/collapse/add-menu actions,
-  // and the lore→research migration live in the treeActions controller
-  // (lib/stores/treeActions). App owns only the structure data it passes down.
+  // The tree rendering + inline CRUD live in StructureTree.svelte (via
+  // ViewNodeList); the per-kind TreeConfig contracts, node
+  // create/cascade-delete/add-menu actions, and the lore→research migration
+  // live in the treeActions controller (lib/stores/treeActions). App owns only
+  // the structure data + view spec it passes down.
 
   let projectPath = $state("");
   let projectTitle = $state("Untitled Project");
@@ -247,7 +245,6 @@
   function openProjectWorkspace(nextProject: ProjectInfo) {
     resetEditorWorkspace();
     projectPath = nextProject.root_path;
-    treeActions.loadCollapseForProject(projectPath);
     workspaceLayout.loadForProject(projectPath);
     layoutPresets.load();
     projectTitle = nextProject.title;
@@ -551,7 +548,6 @@
   }
   let validation = $derived($validationStore);
   let metadataSchema = $derived($metadataSchemaStore);
-  let referenceIndex = $derived($referenceIndexStore);
   let promptEntries = $derived($promptEntriesStore);
   let assistantEntries = $derived($assistantEntriesStore);
   // Selected-view specs/presentations per switchable pane (0.5.0 step 4, #81,
@@ -561,33 +557,9 @@
   let loreViewPresentation = $derived(paneViews.presentationFor("lore"));
   let assistantViewSpec = $derived(paneViews.specFor("assistant", metadataSchema));
   let assistantViewPresentation = $derived(paneViews.presentationFor("assistant"));
-  // Draft: color annotations only — the tree keeps its structural shape
-  // (ADR-0022). Evaluate the selected scene view over the flattened structure
-  // and hand the per-node colors to the Tree; membership/ordering are ignored.
-  let draftColorAnnotations = $derived.by(() => {
-    const result = evaluateView(paneViews.specFor("scene", metadataSchema), structureToEvalNodes(structure), {
-      schema: metadataSchema,
-      resolveView: paneViews.resolveView,
-      referenceIndex,
-    });
-    const map = new Map<string, string | null>();
-    for (const [id, ann] of result.annotations) map.set(id, ann.color);
-    return map;
-  });
-  // Draft membership pruning (#101): when the selected view carries a filter,
-  // narrow the tree to matching scenes + their kept ancestors (evaluate as a
-  // `tree` and collect the surviving node ids). `null` = the whole-universe
-  // default → no pruning, full structural tree.
-  let draftVisibleIds = $derived.by(() => {
-    const spec = paneViews.specFor("scene", metadataSchema);
-    if (!spec.expr && !(spec.groups && spec.groups.length)) return null;
-    const result = evaluateView({ ...spec, presentation: "tree" }, structureToEvalNodes(structure), {
-      schema: metadataSchema,
-      resolveView: paneViews.resolveView,
-      referenceIndex,
-    });
-    return treeNodeIds(result.groups);
-  });
+  // Draft/Research tree evaluation now lives inside StructureTree (#112): it
+  // derives one ViewResult from `structure` + the pane's viewSpec, replacing the
+  // App-side double-eval (color annotations + membership pruning) that stood here.
   $effect.pre(() => {
     draftTitleByScene = computeDraftTitleOverrides(editorPanes.panes);
   });
@@ -695,12 +667,11 @@
   {/snippet}
   {#snippet outlineBody()}
     <div class="pane-content">
-      <Tree
+      <StructureTree
         config={treeActions.manuscriptTree}
         {structure}
-        colorAnnotations={draftColorAnnotations}
-        visibleIds={draftVisibleIds}
-        collapsed={treeActions.collapsedStructureNodes}        draftTitles={draftTitleByScene}
+        viewSpec={paneViews.specFor("scene", metadataSchema)}
+        draftTitles={draftTitleByScene}
         sectionLabel="Scenes"
         emptyLabel="No scenes yet."
         {run}
@@ -758,10 +729,11 @@
 
   {#snippet researchBody()}
     <div class="pane-content">
-      <Tree
+      <StructureTree
         config={treeActions.researchTree}
         structure={researchStructure}
-        collapsed={treeActions.collapsedResearchNodes}        draftTitles={draftTitleByScene}
+        viewSpec={paneViews.specFor("research", metadataSchema)}
+        draftTitles={draftTitleByScene}
         sectionLabel="Notes"
         emptyLabel="No topics or notes yet."
         {run}

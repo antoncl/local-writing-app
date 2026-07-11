@@ -1,10 +1,12 @@
 // Tree/node CRUD glue — the manuscript + research tree contracts plus the
-// node-creation / cascade-delete / collapse / add-menu actions lifted out of
+// node-creation / cascade-delete / add-menu actions lifted out of
 // App.svelte (#14 P0). A singleton rune controller (mirrors editorPanes /
 // projectSession / aiSettings / todoActions): it owns the two TreeConfig
-// objects consumed by Tree.svelte, the floating add-menu popover state, the
-// per-project group-collapse state (persisted to localStorage), and the
-// create / delete / lore→research-migrate actions.
+// objects consumed by StructureTree.svelte, the floating add-menu popover
+// state, and the create / delete / lore→research-migrate actions.
+//
+// Group collapse is no longer here — it moved onto ViewNodeList's own per-group
+// set (#112 / #182 substrate), per-view rather than per-project-localStorage.
 //
 // Editor-pane coupling (close panes pointing at a doomed subtree, open the
 // created or migrated node) goes through the editorPanes controller as a plain
@@ -33,17 +35,12 @@ import {
   collectSceneIdSet,
   entryTypeName,
 } from "@/lib/utils/treeHelpers";
-import type { TreeConfig } from "@/components/panes/Tree.svelte";
+import type { TreeConfig } from "@/components/panes/StructureTree.svelte";
 import type {
   LoreEntrySummary,
   StructureNode,
   StructureNodeDeletePreview,
 } from "@/lib/types";
-
-const TREE_COLLAPSE_LS_PREFIX = "treeCollapse:";
-// Defer a group's collapse-toggle past the browser's dblclick recognition
-// window so a fast second click can cancel it and open the editor instead.
-const DBLCLICK_GUARD_MS = 300;
 
 class TreeActions {
   // Floating add-menu popover, shared across both trees. `position: fixed`
@@ -52,23 +49,12 @@ class TreeActions {
   addMenuOpenFor = $state<string | null>(null);
   addMenuPosition = $state<{ top: number; right: number } | null>(null);
 
-  // Outline / research group-header collapse, keyed by StructureNode.id.
-  // Structure collapse is persisted per-project to localStorage; research
-  // collapse is in-memory only (matches the pre-extraction behaviour).
-  collapsedStructureNodes = $state<Record<string, boolean>>({});
-  collapsedResearchNodes = $state<Record<string, boolean>>({});
-
   // ---- Injected host hooks (set in App.onMount) ----
   run: (action: () => Promise<void>) => Promise<boolean> = async (action) => {
     await action();
     return true;
   };
   setStatus: (message: string) => void = () => {};
-
-  // The project whose collapse state is currently loaded, so toggles persist
-  // back to the right localStorage key.
-  #projectPath = "";
-  #pendingCollapseTimeoutId: ReturnType<typeof setTimeout> | null = null;
 
   // ---- Node creation ----
   async newLoreEntry(entryType: string): Promise<void> {
@@ -245,64 +231,7 @@ class TreeActions {
     this.addMenuPosition = null;
   }
 
-  // ---- Group collapse (persisted per-project) ----
-  loadCollapseForProject(path: string): void {
-    this.#projectPath = path;
-    this.collapsedStructureNodes = this.#loadCollapsed(path);
-  }
-
-  toggleStructureNodeCollapse(nodeId: string): void {
-    this.collapsedStructureNodes = {
-      ...this.collapsedStructureNodes,
-      [nodeId]: !this.collapsedStructureNodes[nodeId],
-    };
-    this.#saveCollapsed();
-  }
-
-  // Tree-row click → defer the collapse toggle past the dblclick window so a
-  // fast second click can cancel it and open the editor instead. Without the
-  // defer the row visibly toggles collapsed-state for ~100ms before the editor
-  // opens on top.
-  deferStructureNodeCollapse(nodeId: string): void {
-    if (this.#pendingCollapseTimeoutId !== null) {
-      clearTimeout(this.#pendingCollapseTimeoutId);
-    }
-    this.#pendingCollapseTimeoutId = setTimeout(() => {
-      this.#pendingCollapseTimeoutId = null;
-      this.toggleStructureNodeCollapse(nodeId);
-    }, DBLCLICK_GUARD_MS);
-  }
-
-  handleStructureNodeDblClick(nodeId: string): void {
-    if (this.#pendingCollapseTimeoutId !== null) {
-      clearTimeout(this.#pendingCollapseTimeoutId);
-      this.#pendingCollapseTimeoutId = null;
-    }
-    void this.run(() => editorPanes.openStructureNode(nodeId));
-  }
-
-  #loadCollapsed(path: string): Record<string, boolean> {
-    if (!path) return {};
-    try {
-      const raw = localStorage.getItem(TREE_COLLAPSE_LS_PREFIX + path);
-      if (!raw) return {};
-      const parsed = JSON.parse(raw);
-      return parsed && typeof parsed === "object" ? parsed : {};
-    } catch {
-      return {};
-    }
-  }
-
-  #saveCollapsed(): void {
-    if (!this.#projectPath) return;
-    try {
-      localStorage.setItem(TREE_COLLAPSE_LS_PREFIX + this.#projectPath, JSON.stringify(this.collapsedStructureNodes));
-    } catch {
-      // Quota / private-browsing — silently degrade to in-memory only.
-    }
-  }
-
-  // ---- Tree configs (the per-kind contract consumed by Tree.svelte) ----
+  // ---- Tree configs (the per-kind contract consumed by StructureTree.svelte) ----
   // App owns the structure data (passed to Tree separately); these wire the
   // kind-specific api + the editor-pane / collapse callbacks that live here.
   manuscriptTree: TreeConfig = {
@@ -319,8 +248,7 @@ class TreeActions {
       delete: api.deleteStructureNode.bind(api),
     },
     openLeaf: (sceneId) => editorPanes.openScene(sceneId),
-    onGroupClick: (nodeId) => this.deferStructureNodeCollapse(nodeId),
-    onGroupDblClick: (nodeId) => this.handleStructureNodeDblClick(nodeId),
+    onGroupDblClick: (nodeId) => void this.run(() => editorPanes.openStructureNode(nodeId)),
     cascadeLabels: {
       leaf: { singular: "scene", plural: "scenes" },
       container: { singular: "sub-container", plural: "sub-containers" },
@@ -347,12 +275,6 @@ class TreeActions {
       delete: api.deleteResearchNode.bind(api),
     },
     openLeaf: (sceneId) => editorPanes.openResearchNote(sceneId),
-    onGroupClick: (nodeId) => {
-      this.collapsedResearchNodes = {
-        ...this.collapsedResearchNodes,
-        [nodeId]: !this.collapsedResearchNodes[nodeId],
-      };
-    },
     // Research has no container editor to open, so a group double-click renames.
     groupDblClickRenames: true,
     cascadeLabels: {

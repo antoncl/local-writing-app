@@ -457,6 +457,19 @@ class ViewLayout(BaseModel):
     edges: list[ViewLayoutEdge] = Field(default_factory=list)
 
 
+class ViewUiState(BaseModel):
+    """Non-semantic per-view UI state — a presentation sibling of `spec`, like
+    `layout` (ADR-0036). Today just the collapsed group set for a ViewNodeList;
+    the extension point for future per-view UI (scroll, density). The backend
+    stores `collapsed` VERBATIM — it never parses a key, never evaluates, never
+    prunes (ADR-0025: views evaluate frontend-side); the frontend owns pruning
+    inert keys. Written/read on the lock-free `/ui` endpoint, independent of the
+    spec revision-lock so a fold toggle never contends with a designer save."""
+
+    # Collapsed ViewGroup.key set (`node:<id>` / `group:<seg>`); absent ⇒ expanded.
+    collapsed: list[str] = Field(default_factory=list)
+
+
 class ViewNodeSummary(BaseModel):
     id: str
     title: str
@@ -469,6 +482,12 @@ class ViewNodeSummary(BaseModel):
     # needs to evaluate them (incl. resolving view_ref leaves) without a second
     # per-view fetch — list_views already parses it (#95). None if malformed.
     spec: ViewSpec | None = None
+    # ADR-0036: fold/ui state ships with the list so a pane seeds collapse without
+    # a per-view fetch (None ⇒ no persisted state yet).
+    ui: ViewUiState | None = None
+    # ADR-0036: a system-provided default view — read-only (copyable, not
+    # editable); the pane's implicit "Default" entry, always listed.
+    system: bool = False
     source_layer_id: str = ""
     source_layer_label: str = ""
 
@@ -483,6 +502,10 @@ class ViewNode(BaseModel):
     # Designer canvas layout (positions + wiring). None for views never opened
     # in / saved from the designer — the frontend auto-lays-out the expr then.
     layout: ViewLayout | None = None
+    # ADR-0036: fold/ui state (collapsed groups). None until first `/ui` write.
+    ui: ViewUiState | None = None
+    # ADR-0036: system-provided read-only default view (Duplicate-not-Edit).
+    system: bool = False
     source_layer_id: str = ""
     source_layer_label: str = ""
 
@@ -506,3 +529,12 @@ class SaveViewRequest(BaseModel):
     spec: ViewSpec
     presentation: ViewPresentation = "flat"
     layout: ViewLayout | None = None
+
+
+class UpdateViewUiRequest(BaseModel):
+    """Body for the lock-free `PUT /api/views/{id}/ui` (ADR-0036). Carries ONLY
+    the fold/ui state — never `spec`/`revision`, so a fold toggle can't 409
+    against a concurrent designer save. For a `view_default_<kind>` id the node
+    is materialized on first write."""
+
+    ui: ViewUiState = Field(default_factory=ViewUiState)

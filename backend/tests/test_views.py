@@ -434,5 +434,109 @@ class NodePickerConfigSourcesTests(unittest.TestCase):
         self.assertEqual(cfg.entry_types, {"lore": ["lore:character"]})
 
 
+class ViewUiStateTests(unittest.TestCase):
+    """Fold/ui state on the view node (ADR-0036): the lock-free /ui endpoint,
+    round-trip, independence from the spec revision-lock, and the system-view
+    read-only guard."""
+
+    def setUp(self) -> None:
+        self.temp_dir = TemporaryDirectory()
+        self.root = Path(self.temp_dir.name) / "project"
+        svc.__init__()
+        svc.create_project(self.root, "View UI Tests")
+        self.client = TestClient(app)
+
+    def tearDown(self) -> None:
+        self.temp_dir.cleanup()
+
+    def _create(self, title: str, spec: dict) -> dict:
+        res = self.client.post("/api/views", json={"title": title, "spec": spec})
+        self.assertEqual(res.status_code, 200, res.text)
+        return res.json()
+
+    def test_ui_absent_by_default(self) -> None:
+        created = self._create("Plain", {"kind": "lore", "expr": {"tagged": "x"}})
+        self.assertIsNone(created.get("ui"))
+        self.assertFalse(created.get("system"))
+
+    def test_put_ui_roundtrips_collapsed_and_ships_on_list(self) -> None:
+        created = self._create("Folded", {"kind": "lore", "expr": {"tagged": "x"}})
+        keys = ["node:a1", "group:type:lore:character"]
+        res = self.client.put(f"/api/views/{created['id']}/ui", json={"ui": {"collapsed": keys}})
+        self.assertEqual(res.status_code, 200, res.text)
+        self.assertEqual(res.json()["ui"]["collapsed"], keys)
+
+        got = self.client.get(f"/api/views/{created['id']}")
+        self.assertEqual(got.json()["ui"]["collapsed"], keys)
+        # Summary ships the ui so a pane seeds collapse without a per-view fetch.
+        listed = self.client.get("/api/views").json()["entries"]
+        self.assertEqual(next(v for v in listed if v["id"] == created["id"])["ui"]["collapsed"], keys)
+
+    def test_put_ui_is_lock_free_and_preserves_spec(self) -> None:
+        spec = {"kind": "lore", "expr": {"tagged": "x"}}
+        created = self._create("Keep spec", spec)
+        rev_before = self.client.get(f"/api/views/{created['id']}").json()["revision"]
+
+        self.client.put(f"/api/views/{created['id']}/ui", json={"ui": {"collapsed": ["node:z"]}})
+        after = self.client.get(f"/api/views/{created['id']}").json()
+        # Spec + presentation untouched by a fold write.
+        self.assertEqual(after["spec"], created["spec"])
+        self.assertEqual(after["presentation"], created["presentation"])
+        # A fold write is content-addressed too, but it takes NO base_revision —
+        # it never 409s. Prove it accepts a write with no revision guard.
+        self.assertNotEqual(after["revision"], rev_before)  # ui blob changed the file
+
+    def test_save_view_preserves_existing_ui(self) -> None:
+        created = self._create("Edit me", {"kind": "lore", "expr": {"tagged": "x"}})
+        self.client.put(f"/api/views/{created['id']}/ui", json={"ui": {"collapsed": ["node:keep"]}})
+        # A spec save (Edit) must not wipe fold state (independent lifecycle).
+        res = self.client.put(
+            f"/api/views/{created['id']}",
+            json={"title": "Edit me", "spec": {"kind": "lore", "expr": {"tagged": "y"}}, "presentation": "flat"},
+        )
+        self.assertEqual(res.status_code, 200, res.text)
+        self.assertEqual(res.json()["spec"]["expr"]["tagged"], "y")
+        self.assertEqual(res.json()["ui"]["collapsed"], ["node:keep"])
+
+    def test_empty_collapsed_drops_the_ui_blob(self) -> None:
+        created = self._create("Emptyable", {"kind": "lore", "expr": {"tagged": "x"}})
+        self.client.put(f"/api/views/{created['id']}/ui", json={"ui": {"collapsed": ["node:a"]}})
+        self.client.put(f"/api/views/{created['id']}/ui", json={"ui": {"collapsed": []}})
+        self.assertIsNone(self.client.get(f"/api/views/{created['id']}").json().get("ui"))
+
+    def test_system_view_rejects_spec_edit_but_allows_ui(self) -> None:
+        # Hand-write a system view file (materialization is a later slice; the
+        # read-only guard must already hold so a system default can't be edited).
+        views_dir = self.root / "views"
+        views_dir.mkdir(parents=True, exist_ok=True)
+        (views_dir / "view_default_lore.md").write_text(
+            "---\n"
+            "id: view_default_lore\n"
+            "title: Default\n"
+            "entry_type: view:view\n"
+            "system: true\n"
+            "spec:\n  kind: lore\n  expr:\n    descendants_of: lore:base\n"
+            "presentation: grouped\n"
+            "---\n\n",
+            encoding="utf-8",
+        )
+        got = self.client.get("/api/views/view_default_lore")
+        self.assertEqual(got.status_code, 200, got.text)
+        self.assertTrue(got.json()["system"])
+
+        # Edit (spec save) is refused.
+        edit = self.client.put(
+            "/api/views/view_default_lore",
+            json={"title": "Default", "spec": {"kind": "lore", "expr": {"tagged": "x"}}, "presentation": "flat"},
+        )
+        self.assertEqual(edit.status_code, 403, edit.text)
+
+        # Fold state still updates, and preserves the system flag.
+        ui = self.client.put("/api/views/view_default_lore/ui", json={"ui": {"collapsed": ["node:q"]}})
+        self.assertEqual(ui.status_code, 200, ui.text)
+        self.assertTrue(ui.json()["system"])
+        self.assertEqual(ui.json()["ui"]["collapsed"], ["node:q"])
+
+
 if __name__ == "__main__":
     unittest.main()

@@ -19,6 +19,7 @@ from typing import Any
 from app.models_views import (
     CreateViewRequest,
     SaveViewRequest,
+    UpdateViewUiRequest,
     ViewExpr,
     ViewLayout,
     ViewNode,
@@ -26,6 +27,7 @@ from app.models_views import (
     ViewNodeSummary,
     ViewPresentation,
     ViewSpec,
+    ViewUiState,
 )
 from app.services.project.errors import ProjectServiceError
 
@@ -56,6 +58,8 @@ class ViewsMixin:
                     view_kind=spec.kind if spec else "",
                     presentation=self._view_presentation(front_matter),
                     spec=spec,
+                    ui=self._parse_view_ui(front_matter.get("ui")),
+                    system=self._view_system(front_matter),
                     source_layer_id=entry.source_layer_id,
                     source_layer_label=entry.source_layer_label,
                 )
@@ -99,6 +103,8 @@ class ViewsMixin:
             spec=spec,
             presentation=self._view_presentation(front_matter),
             layout=self._parse_view_layout(front_matter.get("layout")),
+            ui=self._parse_view_ui(front_matter.get("ui")),
+            system=self._view_system(front_matter),
             source_layer_id=index_entry.source_layer_id if index_entry else "",
             source_layer_label=index_entry.source_layer_label if index_entry else "",
         )
@@ -107,11 +113,17 @@ class ViewsMixin:
         path = self._path_for_node_id(view_id, "view")
         front_matter = self._read_front_matter_only(path, strict=True)
         node_id = self._node_id_for_path(path, front_matter)
+        # ADR-0036: a system-provided default view is read-only — spec edits go
+        # through Duplicate, not Edit. Fold state still updates via update_view_ui.
+        if self._view_system(front_matter):
+            raise ProjectServiceError("A system default view cannot be edited; duplicate it first.", 403)
         current_revision = self._revision(path)
         if request.base_revision and request.base_revision != current_revision:
             raise ProjectServiceError("View changed on disk after it was opened.", 409)
         self._check_entry_type_kind(request.entry_type, "view")
         self._check_view_ref_cycles(node_id, request.spec)
+        # Preserve fold/ui state — it lives on an independent lifecycle (the
+        # lock-free /ui endpoint), so a spec save must not wipe it (ADR-0036).
         self._write_view_file(
             path,
             node_id,
@@ -120,8 +132,36 @@ class ViewsMixin:
             request.spec,
             request.presentation,
             request.layout,
+            ui=self._parse_view_ui(front_matter.get("ui")),
         )
         self._maybe_rename_node_file(path, request.title)
+        return self.read_view(node_id)
+
+    def update_view_ui(self, view_id: str, request: UpdateViewUiRequest) -> ViewNode:
+        """Lock-free fold/ui write (ADR-0036): rewrites ONLY the `ui` blob,
+        preserving spec/presentation/layout/title/system. It takes no
+        base_revision and does not consult the spec revision, so a fold toggle
+        never 409s against a concurrent designer save — the two lifecycles are
+        independent. (Default-view materialization for a `view_default_<kind>`
+        id is deferred to the frontend null-cut slice, where `defaultView`/the
+        kind-root spec lives; today this 404s on an absent view.)"""
+        path = self._path_for_node_id(view_id, "view")
+        front_matter = self._read_front_matter_only(path, strict=True)
+        node_id = self._node_id_for_path(path, front_matter)
+        spec = self._parse_view_spec(front_matter.get("spec"))
+        if spec is None:
+            raise ProjectServiceError(f"View {node_id} has no valid spec.", 422)
+        self._write_view_file(
+            path,
+            node_id,
+            str(front_matter.get("title") or node_id),
+            self._view_entry_type(front_matter),
+            spec,
+            self._view_presentation(front_matter),
+            self._parse_view_layout(front_matter.get("layout")),
+            ui=request.ui,
+            system=self._view_system(front_matter),
+        )
         return self.read_view(node_id)
 
     def delete_view(self, view_id: str) -> ViewNodeList:
@@ -141,6 +181,8 @@ class ViewsMixin:
         spec: ViewSpec,
         presentation: ViewPresentation,
         layout: ViewLayout | None = None,
+        ui: ViewUiState | None = None,
+        system: bool = False,
     ) -> None:
         # exclude_none keeps the on-disk spec compact — a leaf serializes as
         # `{type: lore:character}`, not every unset ViewExpr slot.
@@ -152,6 +194,14 @@ class ViewsMixin:
         # / programmatic views clean (they fall back to auto-layout on open).
         if layout is not None:
             extra["layout"] = layout.model_dump(exclude_none=True)
+        # Fold/ui state (ADR-0036) — only when non-empty; `_write_node_entry_file`
+        # skips falsy extra values, so an empty collapsed list drops cleanly.
+        if ui is not None and ui.collapsed:
+            extra["ui"] = ui.model_dump(exclude_none=True)
+        # `system` marks the read-only default view; only write it when true
+        # (default False needs no on-disk footprint).
+        if system:
+            extra["system"] = True
         self._write_node_entry_file(
             path,
             node_id,
@@ -181,6 +231,24 @@ class ViewsMixin:
             return None
         try:
             return ViewSpec.model_validate(raw)
+        except ValidationError:
+            return None
+
+    @staticmethod
+    def _view_system(front_matter: dict[str, Any]) -> bool:
+        return front_matter.get("system") is True
+
+    @staticmethod
+    def _parse_view_ui(raw: Any) -> ViewUiState | None:
+        """Parse the optional fold/ui blob (ADR-0036). Stored verbatim; a
+        malformed one is dropped (fold state is disposable) rather than failing
+        the read. None ⇒ no persisted fold state (all groups expanded)."""
+        from pydantic import ValidationError
+
+        if not isinstance(raw, dict):
+            return None
+        try:
+            return ViewUiState.model_validate(raw)
         except ValidationError:
             return None
 

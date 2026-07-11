@@ -15,7 +15,7 @@
   import Search from "@/components/panes/Search.svelte";
   import Todo from "@/components/panes/Todo.svelte";
   import Workspace from "@/components/workspace/Workspace.svelte";
-  import { isLeafNode, entryTypeChoicesByKind } from "@/lib/utils/treeHelpers";
+  import { isLeafNode } from "@/lib/utils/treeHelpers";
   import NewProjectModal from "@/components/dialogs/NewProjectModal.svelte";
   import MachineSettingsDialog from "@/components/dialogs/MachineSettingsDialog.svelte";
   import ConfirmModal from "@/components/dialogs/ConfirmModal.svelte";
@@ -68,8 +68,6 @@
   import { implicitContextMatcherStore } from "@/lib/stores/derived";
   import { paneViews } from "@/lib/stores/paneViews.svelte";
   import ViewSwitcher from "@/components/widgets/ViewSwitcher.svelte";
-  import NodeList from "@/components/widgets/NodeList.svelte";
-  import NodeRow from "@/components/widgets/NodeRow.svelte";
   import { focusedDocumentStore } from "@/lib/stores/editorFocus";
   import { workspaceLayout, isEditorPanelId } from "@/lib/stores/workspaceLayout.svelte";
   import { type PresetName } from "@/lib/stores/workspaceLayout.serialize";

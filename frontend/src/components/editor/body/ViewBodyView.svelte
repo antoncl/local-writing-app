@@ -18,7 +18,8 @@
   import ViewFlowNode from "./view/ViewFlowNode.svelte";
   import SelfLoopEdge from "./view/SelfLoopEdge.svelte";
   import FitView from "./view/FitView.svelte";
-  import GroupTree from "@/components/widgets/GroupTree.svelte";
+  import ViewNodeList, { type RowCtx } from "@/components/widgets/ViewNodeList.svelte";
+  import RowCaret from "@/components/widgets/RowCaret.svelte";
   import { setDesignerContext, type DesignerContext } from "./view/designerContext";
   import { api } from "@/lib/api";
   import { metadataSchemaStore } from "@/lib/stores/schema";
@@ -528,13 +529,9 @@
     return preview.annotations.get(id)?.color ?? null;
   }
 
-  // Preview group collapse (per group key). The preview renders through the same
-  // GroupTree the panes use, so nested `nest` trees (depth > 1) show correctly
-  // and the preview is WYSIWYG (#84 rollup; ADR-0028).
-  let collapsedPreview = $state<Record<string, boolean>>({});
-  function togglePreviewGroup(key: string): void {
-    collapsedPreview = { ...collapsedPreview, [key]: !collapsedPreview[key] };
-  }
+  // The preview renders through ViewNodeList (the same wrapper the panes use), so
+  // nested `nest` trees (depth > 1) show correctly and the preview is WYSIWYG
+  // (#84 rollup; ADR-0028). Collapse is ephemeral, owned by ViewNodeList.
 
   // When the anchor kind changes, stale type/field leaves no longer apply — reset
   // to a blank graph (keep only the output). Skipped during hydration.
@@ -639,23 +636,27 @@
           {/each}
         </ul>
       {/if}
-      {#snippet previewLeaf(node: EvalNode, depth: number)}
-        <div class="prow" style={`padding-left:${11 + depth * 12}px;${annColor(node.id) ? `--tint:${annColor(node.id)}` : ""}`}>
+      {#snippet previewRow(node: EvalNode, ctx: RowCtx<EvalNode>)}
+        <!-- A real-node parent (a Nest header that IS a node) stays a real row,
+             collapsible via its own caret — tree-uniformity. `annColor` keeps the
+             raw swatch token for `--tint`, matching the pane stripe treatment. -->
+        <div class="prow" style={`padding-left:${11 + ctx.depth * 12}px;${annColor(node.id) ? `--tint:${annColor(node.id)}` : ""}`}>
+          {#if ctx.collapsible}
+            <RowCaret collapsed={ctx.collapsed} toggle={ctx.toggle} />
+          {/if}
           {node.title}
+          {#if ctx.collapsible}<span class="prow-count">{ctx.childCount}</span>{/if}
         </div>
       {/snippet}
       <div class="preview-list">
         {#if universe.length === 0}
           <p class="preview-empty">No <code>{kind}</code> nodes in this project to preview.</p>
-        {:else if preview.groups}
-          <GroupTree groups={preview.groups} collapsed={collapsedPreview} onToggle={togglePreviewGroup} leaf={previewLeaf} />
         {:else}
-          {#each preview.nodes as n (n.id)}
-            <div class="prow" style={annColor(n.id) ? `--tint:${annColor(n.id)}` : ""}>{n.title}</div>
-          {/each}
-          {#if preview.nodes.length === 0}
-            <p class="preview-empty">No matches — the current expression selects nothing.</p>
-          {/if}
+          <ViewNodeList result={preview} mode="tree" row={previewRow}>
+            {#snippet whenEmpty()}
+              <p class="preview-empty">No matches — the current expression selects nothing.</p>
+            {/snippet}
+          </ViewNodeList>
         {/if}
       </div>
     </aside>
@@ -828,5 +829,11 @@
   }
   .prow:hover {
     background: var(--panel);
+  }
+  .prow-count {
+    margin-left: 6px;
+    color: var(--text-3);
+    font-size: var(--fs-xs);
+    font-weight: 700;
   }
 </style>

@@ -430,6 +430,11 @@
     // Single-hop cut (#184, §14.5): a field_of's `of` must not resolve from
     // another field_of (multi-hop per-node type inference is deferred).
     if (target.data.kind === "field_of" && reachesFieldOf(byId, edges, conn.source)) return false;
+    // #203: a field_of's `of` must be a CONCRETE set. The grammar has no
+    // universal-set leaf, so an `All` injector lowers to EMPTY (`fieldOfBuilt`) —
+    // a legal-looking "project the pov of everything" that silently yields
+    // nothing. Block the wire instead of shipping a blank result with no warning.
+    if (target.data.kind === "field_of" && srcNode?.kind === "all") return false;
     return connectionAllowed(classifyConnection(byId, edges, conn.source, conn.target, conn.targetHandle ?? null));
   }
   // After a connection auto-adds, trim single-input handles to their newest edge

@@ -20,8 +20,18 @@ import { projectReferences } from "@/lib/views/referenceIndex";
 // are empty — membership is any-field, so there is no single field to attribute;
 // the panel keys rows on `id:field_id`, which stays unique because referrer ids
 // are already deduped. Pure, so the mapping/sort is unit-testable off the wire.
-export function candidatesToBacklinks(candidates: readonly ReferenceCandidate[]): Backlink[] {
+//
+// Two exclusions match the retired `list_backlinks` (#203): the anchor node's own
+// id (a node referencing itself is not its own backlink — `if entry.id ==
+// target_id: continue`), and `found: false` candidates (a referrer deleted during
+// the stale-index window, which the endpoint never emitted a row for — it would
+// render as a broken empty-kind row).
+export function candidatesToBacklinks(
+  candidates: readonly ReferenceCandidate[],
+  anchorId?: string,
+): Backlink[] {
   return candidates
+    .filter((c) => c.found && c.id !== anchorId)
     .map((c) => ({ id: c.id, title: c.title, kind: c.kind, entry_type: c.entry_type, field_id: "", field_name: "" }))
     .sort((a, b) => a.kind.localeCompare(b.kind) || a.title.localeCompare(b.title, undefined, { sensitivity: "base" }));
 }
@@ -35,5 +45,5 @@ export async function backlinksFor(
   const referrerIds = [...projectReferences([anchorId], referenceIndex)];
   if (referrerIds.length === 0) return [];
   const { candidates } = await api.resolveReferences(referrerIds);
-  return candidatesToBacklinks(candidates);
+  return candidatesToBacklinks(candidates, anchorId);
 }

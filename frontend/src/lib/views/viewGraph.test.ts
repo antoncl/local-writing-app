@@ -378,6 +378,19 @@ describe("#184 field_of / self lowering + round-trip (ADR-0031 §D)", () => {
     expect(graphToExpr(graph)).toBeNull();
   });
 
+  it("field_of wired from an `All` injector lowers to nothing — the silent-empty the UI blocks (#203)", () => {
+    // `All` materializes to the universe (null), which fieldOfBuilt can't express
+    // as a concrete `of` → EMPTY. isValidConnection blocks the wire so the author
+    // never reaches this state; this asserts the lowering stays safe if they do.
+    const all = node("all", {}, 0);
+    const fo = node("field_of", { project_field: "pov" }, 100);
+    const graph: ViewGraph = {
+      nodes: [out(), all, fo],
+      edges: [edge(all.id, fo.id), edge(fo.id, OUTPUT_NODE_ID)],
+    };
+    expect(graphToExpr(graph)).toBeNull();
+  });
+
   it("specToGraph rebuilds a field_of node wired from its `of` subgraph", () => {
     const graph = specToGraph({ kind: "lore", expr: { field_of: { of: { var: "$self" }, field: "references" } } });
     const fo = graph.nodes.find((n) => n.kind === "field_of")!;

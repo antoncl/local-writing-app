@@ -299,6 +299,18 @@ describe("parameterized views (#184: bindings, $self, field_of)", () => {
     };
     expect(evalIds(spec, {}).sort()).toEqual(["alice", "bob"]); // both carry "hero"
   });
+  it("malformed {field_of} operand (no `of`) degrades to no-match, not a crash (#203)", () => {
+    // A corrupt/hand-edited operand with no `of`. The designer never emits this,
+    // but the evaluator must not throw and abort the whole pane.
+    const spec = { kind: "scene", expr: { field: { key: "pov", op: "overlap" as const, value: { field_of: { field: "pov" } } } } } as unknown as ViewSpec;
+    expect(() => evalIds(spec, {})).not.toThrow();
+    expect(evalIds(spec, {})).toEqual([]);
+  });
+  it("malformed field_of in membership position (no `of`) is the empty set, not a crash (#203)", () => {
+    const spec = { kind: "scene", expr: { field_of: { field: "pov" } } } as unknown as ViewSpec;
+    expect(() => evalIds(spec, {})).not.toThrow();
+    expect(evalIds(spec, {})).toEqual([]);
+  });
   it("field_of on `references` uses the reverse index (Phase-2 wiring hook)", () => {
     // field_of($self, references) → the referrers of the anchored node, resolved
     // through ctx.referenceIndex. Here bob is referenced by s1 and s3.

@@ -572,7 +572,13 @@ function evalExpr<T extends EvalNode>(state: RunState<T>, expr: ViewExpr, polari
 // `field` values and dedupe (ADR-0031 §D). Returns a set of strings — target
 // ids for a reference field (a node-set), the stored values for a scalar field
 // (a value-set); the position determines interpretation.
-function evalFieldOf<T extends EvalNode>(state: RunState<T>, op: { of: ViewExpr; field: string }): Set<string> {
+//
+// #203: guard a malformed op (a hand-edited/corrupt `{field_of:{field}}` with no
+// `of`). The designer never emits it, but without the guard `evalExpr(undefined)`
+// throws and aborts the whole pane. A missing `of` (or field) ⇒ the empty set —
+// a benign no-match, applied to BOTH the operand and membership call sites.
+function evalFieldOf<T extends EvalNode>(state: RunState<T>, op: { of?: ViewExpr | null; field?: string }): Set<string> {
+  if (op == null || op.of == null || !op.field) return new Set<string>();
   return projectField(state, evalExpr(state, op.of), op.field);
 }
 

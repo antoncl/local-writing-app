@@ -31,4 +31,26 @@ describe("candidatesToBacklinks (#194 Phase 2c)", () => {
   it("returns an empty list for no candidates", () => {
     expect(candidatesToBacklinks([])).toEqual([]);
   });
+
+  // #203: match the retired list_backlinks exclusions.
+  it("drops the anchor's self-reference (a node is not its own backlink)", () => {
+    const rows = candidatesToBacklinks(
+      [candidate({ id: "self", title: "Me" }), candidate({ id: "bob", title: "Bob" })],
+      "self",
+    );
+    expect(rows.map((r) => r.id)).toEqual(["bob"]);
+  });
+
+  it("drops found:false referrers (deleted during the stale-index window)", () => {
+    const rows = candidatesToBacklinks([
+      candidate({ id: "gone", title: "Ghost", found: false }),
+      candidate({ id: "bob", title: "Bob" }),
+    ]);
+    expect(rows.map((r) => r.id)).toEqual(["bob"]);
+  });
+
+  it("still includes the anchor's referrers when no anchorId is passed", () => {
+    const rows = candidatesToBacklinks([candidate({ id: "bob", title: "Bob" })]);
+    expect(rows.map((r) => r.id)).toEqual(["bob"]);
+  });
 });

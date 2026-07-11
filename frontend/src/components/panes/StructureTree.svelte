@@ -93,10 +93,6 @@
     draftTitles,
     run,
     onRequestDelete,
-    addMenuOpenFor,
-    addMenuPosition,
-    onToggleAddMenu,
-    onCloseAddMenu,
   }: {
     config: TreeConfig;
     // Reactive tree data — feeds the view evaluation. Handlers read
@@ -114,12 +110,6 @@
     // Delete stays in App (it tears down editor panes pointing at the doomed
     // subtree first); this component just looks the node up and requests it.
     onRequestDelete: (node: StructureNode) => void;
-    // Add-menu state lives in App so a single menu is shared across both trees
-    // and App's document-level click-outside handler can close it.
-    addMenuOpenFor: string | null;
-    addMenuPosition: { top: number; right: number } | null;
-    onToggleAddMenu: (nodeId: string, event?: MouseEvent) => void;
-    onCloseAddMenu: () => void;
   } = $props();
 
   // Globals read from stores rather than drilled as props (#14 Step 2).
@@ -159,7 +149,12 @@
   // gesture + edit state; 4c-i/iii). We keep a handle to it for the two rename
   // triggers that originate OUTSIDE a row render — create-then-rename and
   // cancel-on-delete — plus the local collapse defer-guard.
-  let list = $state<{ beginRename: (id: string, title: string) => void; cancelRename: (id: string) => void }>();
+  let list = $state<{
+    beginRename: (id: string, title: string) => void;
+    cancelRename: (id: string) => void;
+    toggleAddMenu: (parentId: string | null, key: string, event?: MouseEvent) => void;
+    isAddMenuOpen: (key: string) => boolean;
+  }>();
   let pendingCollapseTimeout: ReturnType<typeof setTimeout> | null = null;
 
   function isActiveNode(node: EvalNode): boolean {
@@ -205,7 +200,6 @@
   // legacy path through api.createScene that refreshes via the leaf API.
   async function addTreeChild(parentId: string | null, entryType: string) {
     const title = nextAutoName(parentId, entryType);
-    onCloseAddMenu();
     await run(async () => {
       const before = config.getStructure();
       let createdNodeId: string | null = null;
@@ -321,21 +315,11 @@
     <div class="tree-menu-anchor">
       <button
         class="row-action-add section-add-button"
-        class:active={addMenuOpenFor === config.rootAddMenuKey}
+        class:active={list?.isAddMenuOpen(config.rootAddMenuKey) ?? false}
         title="Add at root"
         aria-label="Add at root"
-        onclick={(event) => onToggleAddMenu(config.rootAddMenuKey, event)}
+        onclick={(event) => list?.toggleAddMenu(null, config.rootAddMenuKey, event)}
       >+</button>
-      {#if addMenuOpenFor === config.rootAddMenuKey}
-        <div class="row-add-popover" style={addMenuPosition ? `top: ${addMenuPosition.top}px; right: ${addMenuPosition.right}px` : ""}>
-          <span class="row-add-popover-heading">Add at root</span>
-          <NodeList isEmpty={false}>
-            {#each entryTypeChoicesByKind(schema, config.kind) as choice (choice.id)}
-              <NodeRow title={choice.name} onClick={() => { addTreeChild(null, choice.id); onCloseAddMenu(); }} />
-            {/each}
-          </NodeList>
-        </div>
-      {/if}
     </div>
   </div>
 </div>
@@ -350,6 +334,7 @@
   isContainer={(node) => node.entry_type !== config.leafType}
   onRename={domainRename}
   {row}
+  {addMenu}
 >
   {#snippet whenEmpty()}
     {#if !structure}
@@ -359,6 +344,15 @@
     {/if}
   {/snippet}
 </ViewNodeList>
+
+{#snippet addMenu({ parentId, close }: { parentId: string | null; close: () => void })}
+  <span class="row-add-popover-heading">{parentId === null ? "Add at root" : "Add child"}</span>
+  <NodeList isEmpty={false}>
+    {#each entryTypeChoicesByKind(schema, config.kind) as choice (choice.id)}
+      <NodeRow title={choice.name} onClick={() => { addTreeChild(parentId, choice.id); close(); }} />
+    {/each}
+  </NodeList>
+{/snippet}
 
 {#snippet row(node: EvalNode, ctx: RowCtx<EvalNode>)}
   {@const leaf = node.entry_type === config.leafType}
@@ -472,21 +466,11 @@
         <div class="tree-menu-anchor">
           <button
             class="row-action-add"
-            class:active={addMenuOpenFor === node.id}
+            class:active={ctx.addMenuOpen}
             title="Add child"
             aria-label="Add child"
-            onclick={(event) => { event.stopPropagation(); onToggleAddMenu(node.id, event); }}
+            onclick={(event) => { event.stopPropagation(); ctx.toggleAddMenu(event); }}
           >+</button>
-          {#if addMenuOpenFor === node.id}
-            <div class="row-add-popover" style={addMenuPosition ? `top: ${addMenuPosition.top}px; right: ${addMenuPosition.right}px` : ""}>
-              <span class="row-add-popover-heading">Add child</span>
-              <NodeList isEmpty={false}>
-                {#each entryTypeChoicesByKind(schema, config.kind) as choice (choice.id)}
-                  <NodeRow title={choice.name} onClick={() => { addTreeChild(node.id, choice.id); onCloseAddMenu(); }} />
-                {/each}
-              </NodeList>
-            </div>
-          {/if}
         </div>
         <button
           class="row-action-delete"

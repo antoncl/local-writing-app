@@ -676,10 +676,6 @@
         emptyLabel="No scenes yet."
         {run}
         onRequestDelete={(node) => treeActions.requestDeleteTreeNode(treeActions.manuscriptTree, node)}
-        addMenuOpenFor={treeActions.addMenuOpenFor}
-        addMenuPosition={treeActions.addMenuPosition}
-        onToggleAddMenu={(nodeId, event) => treeActions.toggleAddMenu(nodeId, event)}
-        onCloseAddMenu={() => treeActions.closeAddMenu()}
       />
     </div>
   {/snippet}
@@ -738,10 +734,6 @@
         emptyLabel="No topics or notes yet."
         {run}
         onRequestDelete={(node) => treeActions.requestDeleteTreeNode(treeActions.researchTree, node)}
-        addMenuOpenFor={treeActions.addMenuOpenFor}
-        addMenuPosition={treeActions.addMenuPosition}
-        onToggleAddMenu={(nodeId, event) => treeActions.toggleAddMenu(nodeId, event)}
-        onCloseAddMenu={() => treeActions.closeAddMenu()}
       />
     </div>
   {/snippet}

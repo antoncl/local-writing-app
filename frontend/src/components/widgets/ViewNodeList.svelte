@@ -52,6 +52,11 @@
     beginRename: () => void;
     commitRename: () => void;
     cancelRename: () => void;
+    // Per-container add-child "+" (4c-iv). The snippet renders a `.tree-menu-anchor`
+    // button reflecting `addMenuOpen` and calling `toggleAddMenu(event)`; the popover
+    // itself is the wrapper's (fed by the `addMenu` snippet, keyed to this node).
+    addMenuOpen: boolean;
+    toggleAddMenu: (event: MouseEvent) => void;
   };
 
   // The context handed to a `groupHeader` override snippet for one SYNTHETIC
@@ -86,6 +91,7 @@
   import ViewNodeTree from "@/components/widgets/ViewNodeTree.svelte";
   import { TreeDrag } from "@/components/widgets/treeDrag.svelte";
   import { TreeRename } from "@/components/widgets/treeRename.svelte";
+  import { TreeAddMenu } from "@/components/widgets/treeAddMenu.svelte";
   import { filterGroups, type ViewGroup, type ViewResult } from "@/lib/views/evaluateView";
   import { leafGroup } from "@/lib/views/viewResult";
 
@@ -104,6 +110,7 @@
     onRename,
     onReorder,
     isContainer,
+    addMenu,
     collapsed = $bindable(new SvelteSet<string>()),
     defaultCollapsed,
     whenEmpty,
@@ -141,6 +148,12 @@
     // mechanics; the consumer names what can contain. Absent ⇒ falls back to
     // "has children", so an empty container won't accept drops without this.
     isContainer?: (node: T) => boolean;
+    // Add-child popover CONTENT (4c-iv). The wrapper owns the open-state, position,
+    // dismissal, and the `.row-add-popover` shell; this snippet fills it with the
+    // consumer's heading + type choices for the given `parentId` (null = root),
+    // calling `close` after a create. Present ⇒ the wrapper renders the popover
+    // when a "+" (RowCtx.toggleAddMenu, or the imperative toggleAddMenu) opens it.
+    addMenu?: Snippet<[{ parentId: string | null; close: () => void }]>;
     // Per-group collapse keyed by stable `ViewGroup.key`. $bindable so #112 can
     // back it with persisted state; unbound ⇒ ephemeral internal set (phase 1).
     collapsed?: SvelteSet<string>;
@@ -202,6 +215,31 @@
   export function cancelRename(id: string): void {
     rename.cancel(id);
   }
+
+  // Per-instance add-child menu (4c-iv). The holder threads down for per-container
+  // "+" buttons; these exports drive it from a consumer's header/pane button. A
+  // document mousedown outside the anchor/popover closes it (per instance — no
+  // shared App-level handler). See treeAddMenu.svelte.ts.
+  const add = new TreeAddMenu();
+  export function toggleAddMenu(parentId: string | null, key: string, event?: MouseEvent): void {
+    add.toggle(parentId, key, event);
+  }
+  export function closeAddMenu(): void {
+    add.close();
+  }
+  export function isAddMenuOpen(key: string): boolean {
+    return add.isOpen(key);
+  }
+  $effect(() => {
+    const onDown = (event: MouseEvent) => {
+      if (add.key === null) return;
+      const target = event.target;
+      if (target instanceof Element && target.closest(".tree-menu-anchor, .row-add-popover")) return;
+      add.close();
+    };
+    document.addEventListener("mousedown", onDown);
+    return () => document.removeEventListener("mousedown", onDown);
+  });
 
   // ── Tree keyboard (4c-ii) ────────────────────────────────────────────────
   // The wrapper owns tree keyboard so every tree consumer inherits it. Ctrl+arrows
@@ -315,11 +353,23 @@
       {isContainer}
       {drag}
       {rename}
+      {add}
       {row}
       {groupHeader}
     />
   </NodeList>
 </div>
+
+{#if add.key !== null && addMenu}
+  <!-- Add-child popover shell: wrapper-owned open-state/position/dismissal; the
+       consumer's `addMenu` snippet supplies the heading + type choices. -->
+  <div
+    class="row-add-popover"
+    style={add.pos ? `top: ${add.pos.top}px; right: ${add.pos.right}px` : ""}
+  >
+    {@render addMenu({ parentId: add.parentId, close: () => add.close() })}
+  </div>
+{/if}
 
 <style>
   /* Transparent to layout — hosts the direct keydown listener (treeKeyboard)

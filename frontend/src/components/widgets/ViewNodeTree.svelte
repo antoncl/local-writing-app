@@ -25,6 +25,7 @@
   import type { GroupCtx, RowCtx } from "@/components/widgets/ViewNodeList.svelte";
   import type { DropPosition, TreeDrag } from "@/components/widgets/treeDrag.svelte";
   import type { TreeRename } from "@/components/widgets/treeRename.svelte";
+  import type { TreeAddMenu } from "@/components/widgets/treeAddMenu.svelte";
 
   let {
     groups,
@@ -39,6 +40,7 @@
     isContainer,
     drag,
     rename,
+    add,
     row,
     groupHeader,
   }: {
@@ -54,6 +56,7 @@
     isContainer?: (node: T) => boolean;
     drag: TreeDrag<T>;
     rename: TreeRename<T>;
+    add: TreeAddMenu;
     row: Snippet<[T, RowCtx<T>]>;
     groupHeader?: Snippet<[GroupCtx]>;
   } = $props();
@@ -90,6 +93,8 @@
       beginRename: () => rename.begin(node.id, node.title),
       commitRename: () => rename.commit(),
       cancelRename: () => rename.cancel(),
+      addMenuOpen: add.key === node.id,
+      toggleAddMenu: (event: MouseEvent) => add.toggle(node.id, node.id, event),
     };
   }
 
@@ -172,6 +177,7 @@
         {isContainer}
         {drag}
         {rename}
+        {add}
         {row}
         {groupHeader}
       />
@@ -200,6 +206,7 @@
         {isContainer}
         {drag}
         {rename}
+        {add}
         {row}
         {groupHeader}
       />
@@ -236,6 +243,7 @@
             {isContainer}
             {drag}
             {rename}
+            {add}
             {row}
             {groupHeader}
           />

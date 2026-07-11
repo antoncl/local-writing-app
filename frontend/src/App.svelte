@@ -650,7 +650,7 @@
   {/snippet}
 
   {#snippet outlineActions()}
-    <ViewSwitcher kind="scene" />
+    <ViewSwitcher kind="scene" schema={metadataSchema} />
   {/snippet}
   {#snippet outlineBody()}
     <div class="pane-content">
@@ -668,7 +668,7 @@
   {/snippet}
 
   {#snippet loreActions()}
-      <ViewSwitcher kind="lore" />
+      <ViewSwitcher kind="lore" schema={metadataSchema} />
       <!-- The add-menu popover is owned by Lore's ViewNodeList (mode-agnostic,
            #112 4c-iv); this header button just drives its imperative handles. -->
       <div class="tree-menu-anchor">
@@ -736,7 +736,7 @@
   {/snippet}
 
   {#snippet assistantsActions()}
-      <ViewSwitcher kind="assistant" />
+      <ViewSwitcher kind="assistant" schema={metadataSchema} />
       <button class="pin-button" type="button" title="Add assistant" aria-label="Add assistant" onmousedown={(event) => event.stopPropagation()} onclick={() => treeActions.newAssistantEntry()}>+</button>
       <button class="pin-button" type="button" title="Assistant tag colors" onmousedown={(event) => event.stopPropagation()} onclick={() => (assistantTagManagerOpen = true)}>Tags…</button>
   {/snippet}

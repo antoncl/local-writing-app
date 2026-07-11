@@ -209,9 +209,32 @@ describe("scalar fields compare whole, collections tokenize (#202)", () => {
   it("number field keeps numeric equivalence (9 matches '9.0')", () => {
     expect(run({ kind: "lore", expr: { field: { key: "power", op: "overlap", value: "9.0" } } })).toEqual(["q"]);
   });
+  it("numeric equivalence is gated to `number` fields — a text/select code '007' does NOT match '7'", () => {
+    // faction is `text`; the numeric arm must not fire, or zero-padded/decimal
+    // codes would conflate. (power, a `number`, still coerces above.)
+    const ROWS2: EvalNode[] = [
+      { id: "z", entry_type: "lore:character", title: "Z", metadata: { faction: "007" } },
+    ];
+    const r = evaluateView({ kind: "lore", expr: { field: { key: "faction", op: "overlap", value: "7" } } }, ROWS2, { schema: SC });
+    expect(r.nodes.map((n) => n.id)).toEqual([]);
+  });
   it("a declared collection field (tags) still tokenizes a CSV string", () => {
     expect(run({ kind: "lore", expr: { field: { key: "roles", op: "overlap", value: "red" } } })).toEqual(["q"]);
     expect(run({ kind: "lore", expr: { field: { key: "roles", op: "disjoint", value: "red" } } })).toEqual(["p"]);
+  });
+  it("a scalar field_of projection stays whole when fed as an operand (#202 projection-side gap)", () => {
+    const rows: EvalNode[] = [
+      { id: "q", entry_type: "lore:character", title: "Q", metadata: { faction: "Red, White" } },
+      { id: "r", entry_type: "lore:character", title: "R", metadata: { faction: "Red" } },
+    ];
+    // Project q's scalar faction → {"Red, White"} (NOT {"Red","White"}), then keep
+    // characters whose faction overlaps it. Only q matches; a comma-split
+    // projection (the pre-fix projectField) would also drag in r ("Red").
+    const spec: ViewSpec = {
+      kind: "lore",
+      expr: { field: { key: "faction", op: "overlap", value: { field_of: { of: { hand_picked: ["q"] }, field: "faction" } } } },
+    };
+    expect(evaluateView(spec, rows, { schema: SC }).nodes.map((n) => n.id)).toEqual(["q"]);
   });
 });
 
@@ -270,6 +293,42 @@ describe("parameterized views (#184: bindings, $self, field_of)", () => {
     // pov ∈ {bob} matches s1,s3 → complement is everything else.
     expect(evalIds(spec, { bindings: { POV: ["bob"] } })).toEqual(["s2", "bob", "alice"]);
   });
+  // #198 (review follow-up): an inactive predicate is the IDENTITY of its
+  // IMMEDIATE combinator, not a sign propagated from the root. A global keep/drop
+  // sign mishandled these nested cases.
+  it("UNBOUND formal INSIDE an intersect that sits in a DROP ⇒ removes the intersect's OTHER constraint", () => {
+    // "all scenes EXCEPT (draft AND pov∈{param})", param unset. The inactive pov
+    // is the intersect's identity (universe), so remove = draft-scenes and the
+    // result is all-scenes − draft-scenes. (A global sign gave ∅ → kept everything.)
+    const spec: ViewSpec = {
+      kind: "scene",
+      expr: {
+        difference: {
+          keep: { type: "scene:scene" },
+          remove: { intersect: [{ field: { key: "status", op: "overlap", value: "draft" } }, { field: { key: "pov", op: "overlap", value: { var: "POV" } } }] },
+        },
+      },
+    };
+    expect(evalIds(spec, {})).toEqual(["s2"]); // s1,s3 are draft → removed; s2 (revised) stays
+  });
+  it("UNBOUND formal in a UNION ⇒ drops out (∪ identity ∅), not blows up to the universe", () => {
+    // "scenes that are revised OR pov∈{param}", param unset → just the revised set,
+    // NOT every scene. (A global keep sign gave universe → union absorbed to all.)
+    const spec: ViewSpec = {
+      kind: "scene",
+      expr: { union: [{ field: { key: "status", op: "overlap", value: "revised" } }, { field: { key: "pov", op: "overlap", value: { var: "POV" } } }] },
+    };
+    expect(evalIds(spec, {})).toEqual(["s2"]);
+  });
+  it("BOUND formal in that union still contributes its matches", () => {
+    const spec: ViewSpec = {
+      kind: "scene",
+      expr: { union: [{ field: { key: "status", op: "overlap", value: "revised" } }, { field: { key: "pov", op: "overlap", value: { var: "POV" } } }] },
+    };
+    // Top-level union preserves OPERAND order (not roster order): revised {s2}
+    // rows first, then pov∈{bob} {s1,s3}.
+    expect(evalIds(spec, { bindings: { POV: ["bob"] } })).toEqual(["s2", "s1", "s3"]);
+  });
   it("$self as a predicate operand: scenes where THIS character is pov", () => {
     const spec: ViewSpec = { kind: "scene", expr: { field: { key: "pov", op: "overlap", value: { var: "$self" } } } };
     expect(evalIds(spec, { bindings: { $self: ["bob"] } })).toEqual(["s1", "s3"]);
@@ -299,12 +358,22 @@ describe("parameterized views (#184: bindings, $self, field_of)", () => {
     };
     expect(evalIds(spec, {}).sort()).toEqual(["alice", "bob"]); // both carry "hero"
   });
-  it("malformed {field_of} operand (no `of`) degrades to no-match, not a crash (#203)", () => {
+  it("malformed {field_of} operand (no `of`) degrades to INACTIVE (no constraint), not a crash (#203)", () => {
     // A corrupt/hand-edited operand with no `of`. The designer never emits this,
-    // but the evaluator must not throw and abort the whole pane.
+    // but the evaluator must not throw. It resolves to INACTIVE (no constraint),
+    // NOT the empty set — so at the membership root an overlap shows everything.
     const spec = { kind: "scene", expr: { field: { key: "pov", op: "overlap" as const, value: { field_of: { field: "pov" } } } } } as unknown as ViewSpec;
     expect(() => evalIds(spec, {})).not.toThrow();
-    expect(evalIds(spec, {})).toEqual([]);
+    expect(evalIds(spec, {})).toEqual(["s1", "s2", "s3", "bob", "alice"]);
+  });
+  it("malformed {field_of} operand under DISJOINT does NOT match everything (#203 — the empty-set inversion trap)", () => {
+    // The bug the empty-set degradation would cause: `disjoint ∅` is true for every
+    // node. As INACTIVE it's no-constraint instead → in a drop it removes nothing.
+    const spec = {
+      kind: "scene",
+      expr: { difference: { keep: { type: "scene:scene" }, remove: { field: { key: "pov", op: "disjoint", value: { field_of: { field: "pov" } } } } } },
+    } as unknown as ViewSpec;
+    expect(evalIds(spec, {})).toEqual(["s1", "s2", "s3"]); // remove is inert → all scenes kept
   });
   it("malformed field_of in membership position (no `of`) is the empty set, not a crash (#203)", () => {
     const spec = { kind: "scene", expr: { field_of: { field: "pov" } } } as unknown as ViewSpec;

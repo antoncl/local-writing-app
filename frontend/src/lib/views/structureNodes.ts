@@ -37,8 +37,9 @@ export function structureToEvalNodes(structure: StructureDocument | null): EvalN
       // #201: a scene's canonical identity is its front-matter `scene_id`, which
       // is what the reverse reference index keys on — while its roster `id` is
       // the structure `node.id`. Carry it so `field_of(…, references)` bridges
-      // the two id spaces. Containers have no `scene_id` ⇒ omitted (id is canonical).
-      ref_id: node.scene_id ?? undefined,
+      // the two id spaces. `||`: a container (no scene_id) or a blank id ⇒ omitted
+      // so `id` is treated as canonical, never a lookup on the empty string.
+      ref_id: node.scene_id || undefined,
     });
     const childAncestry = [...ancestry, { key: node.id, label: node.title, nodeId: node.id }];
     for (const child of node.children ?? []) walk(child, childAncestry);

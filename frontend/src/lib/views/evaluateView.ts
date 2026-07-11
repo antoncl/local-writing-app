@@ -324,8 +324,9 @@ function evalSegment<T extends EvalNode>(
   state: RunState<T>,
   expr: ViewExpr | null | undefined,
   sort: ViewSort | null | undefined,
+  neutralUniverse = true,
 ): T[] {
-  const memberIds = expr ? evalExpr(state, expr) : new Set(state.order.keys());
+  const memberIds = expr ? evalExpr(state, expr, neutralUniverse) : new Set(state.order.keys());
   const members = state.universe.filter((n) => memberIds.has(n.id));
   return sortNodes(members, sort, state.schema);
 }
@@ -348,17 +349,24 @@ function rowKey<T extends EvalNode>(node: T, path: PathSegment[]): string {
 //    the set algebra (intersect/difference/…) has no grouping to preserve and
 //    flattens through `evalExpr` as before.
 //  - everything else resolves to flat rows (empty path) via `evalSegment`.
+//
+// `neutralUniverse` (#198) is threaded to the terminal `evalSegment` so an
+// inactive predicate drops out here too, and RESET to `false` for a top-level
+// `union`'s operands (∪ identity is ∅) — otherwise an unbound filter in a union
+// branch resolves to the universe and the union absorbs to everything. (Buried
+// unions inside the set algebra are handled the same way by `evalExpr`.)
 function evalSource<T extends EvalNode>(
   state: RunState<T>,
   expr: ViewExpr | null | undefined,
   sort: ViewSort | null | undefined,
+  neutralUniverse = true,
 ): ViewRow<T>[] {
   if (expr) {
     if (expr.union) {
       const rows: ViewRow<T>[] = [];
       const seen = new Set<string>();
       for (const sub of expr.union) {
-        for (const r of evalSource(state, sub, sort)) {
+        for (const r of evalSource(state, sub, sort, false)) {
           const key = rowKey(r.node, r.path);
           if (seen.has(key)) continue; // dedupe identical (node, path)
           seen.add(key);
@@ -377,7 +385,7 @@ function evalSource<T extends EvalNode>(
       if (nested) return nested; // grouped/tree ref → nested rows; null → flat
     }
   }
-  return evalSegment(state, expr, sort).map((node) => ({ node, path: [] as PathSegment[] }));
+  return evalSegment(state, expr, sort, neutralUniverse).map((node) => ({ node, path: [] as PathSegment[] }));
 }
 
 // Evaluate each named handle in order into rows. Each handle prepends its own
@@ -525,33 +533,37 @@ function buildLevel<T extends EvalNode>(state: RunState<T>, rows: ViewRow<T>[]):
   });
 }
 
-// `polarity` tracks whether the expression sits in a KEEP (`+1`) or a SUBTRACTIVE
-// (`-1`) position — flipped by `difference.remove` and by `complement` (#198).
-// It only matters for an *inactive* field predicate (an unbound promoted formal):
-// under (a) "unset = show everything", such a predicate must be the identity for
-// its enclosing position — the whole universe when keeping (so `A ∩ inactive = A`)
-// but the empty set when subtracting (so `A − inactive = A`, `universe − inactive
-// = universe`). A single per-node `true` (the old `OPERAND_INACTIVE` handling) is
-// universe-valued everywhere, which passes keep but *empties* drop/complement —
-// the bug. Threading polarity makes "unset = show everything" hold in all three.
-type Polarity = 1 | -1;
-
-function evalExpr<T extends EvalNode>(state: RunState<T>, expr: ViewExpr, polarity: Polarity = 1): Set<string> {
+// `neutralUniverse` is the value an *inactive* field predicate (an unbound
+// promoted formal) takes in THIS position (#198): the whole universe (`true`) or
+// the empty set (`false`). Under (a) "unset = show everything", an inactive
+// predicate must be the IDENTITY ELEMENT of its immediately enclosing combinator,
+// so it drops out cleanly. Each combinator therefore RESETS this for its children
+// to its own identity — it is not a sign propagated from the root:
+//   intersect → universe (`A ∩ 1 = A`)      union → ∅ (`A ∪ ∅ = A`)
+//   difference.keep → universe               difference.remove → ∅ (`A − ∅ = A`)
+//   complement → ∅ (`U − ∅ = U`)             annotate/view_ref → inherit
+// A global keep/subtract sign (an earlier attempt) got the direct drop/complement
+// case right but mis-handled an inactive predicate nested inside a combinator that
+// itself sits in a subtractive position — e.g. `A − (X ∩ inactive)` collapsed to
+// `A` instead of `A − X`, and `X ∪ inactive` blew up to the universe. Resetting
+// per-combinator is the correct model. The default is `true`: a bare filter at the
+// membership root shows everything when unset.
+function evalExpr<T extends EvalNode>(state: RunState<T>, expr: ViewExpr, neutralUniverse = true): Set<string> {
   // Combinators first, then annotate pass-through, then leaves. Exactly one
   // primary slot is populated per node (validated backend-side, #78).
-  if (expr.union) return unionAll(expr.union.map((e) => evalExpr(state, e, polarity)));
-  if (expr.intersect) return intersectAll(expr.intersect.map((e) => evalExpr(state, e, polarity)));
+  if (expr.union) return unionAll(expr.union.map((e) => evalExpr(state, e, false)));
+  if (expr.intersect) return intersectAll(expr.intersect.map((e) => evalExpr(state, e, true)));
   if (expr.difference) {
-    const keep = evalExpr(state, expr.difference.keep, polarity);
-    const remove = evalExpr(state, expr.difference.remove, (-polarity) as Polarity);
+    const keep = evalExpr(state, expr.difference.keep, true);
+    const remove = evalExpr(state, expr.difference.remove, false);
     return new Set([...keep].filter((id) => !remove.has(id)));
   }
   if (expr.complement) {
-    const inner = evalExpr(state, expr.complement, (-polarity) as Polarity);
+    const inner = evalExpr(state, expr.complement, false);
     return new Set([...state.order.keys()].filter((id) => !inner.has(id)));
   }
   if (expr.annotate && expr.of) {
-    const members = evalExpr(state, expr.of, polarity);
+    const members = evalExpr(state, expr.of, neutralUniverse);
     stampAnnotation(state, members, expr.annotate);
     return members;
   }
@@ -565,7 +577,7 @@ function evalExpr<T extends EvalNode>(state: RunState<T>, expr: ViewExpr, polari
   if (expr.field_of) return evalFieldOf(state, expr.field_of);
   // A free variable / `$self` leaf (#184): resolves to a node-set from bindings.
   if (expr.var != null) return evalVar(state, expr.var);
-  return evalLeaf(state, expr, polarity);
+  return evalLeaf(state, expr, neutralUniverse);
 }
 
 // Forward projection: evaluate `of` to a node-set, then flatMap each node's
@@ -592,18 +604,26 @@ function projectField<T extends EvalNode>(state: RunState<T>, ofIds: Set<string>
   // itself stays pure canonical (the backlinks panel keeps reading it directly).
   if (field === REFERENCES_FIELD) {
     const canonicalOf = new Set<string>();
-    for (const id of ofIds) canonicalOf.add(state.nodeById.get(id)?.ref_id ?? id);
+    // `|| id` (not `??`): a blank ref_id ("") is not a canonical id — fall back to
+    // the roster id so the lookup can't query the empty string.
+    for (const id of ofIds) canonicalOf.add(state.nodeById.get(id)?.ref_id || id);
     const out = new Set<string>();
     for (const referrer of projectReferences(canonicalOf, state.referenceIndex)) {
       out.add(state.idByCanonical.get(referrer) ?? referrer);
     }
     return out;
   }
+  // A scalar field projects its WHOLE value; only a collection field (or an array
+  // value) tokenizes (#202) — the same rule `evalField` applies on the node side,
+  // so a value-set projection of e.g. a comma-bearing title stays one token.
+  const collection = isCollectionField(state.schema, field);
   const out = new Set<string>();
   for (const id of ofIds) {
     const n = state.nodeById.get(id);
     if (!n) continue;
-    for (const v of asArray(fieldValue(n, field, state.schema))) {
+    const raw = fieldValue(n, field, state.schema);
+    const tokens = collection || Array.isArray(raw) ? asArray(raw) : isEmpty(raw) ? [] : [raw];
+    for (const v of tokens) {
       const s = String(v).trim();
       if (s) out.add(s);
     }
@@ -617,7 +637,7 @@ function evalVar<T extends EvalNode>(state: RunState<T>, name: string): Set<stri
   return bindingSet(state.bindings?.[name]);
 }
 
-function evalLeaf<T extends EvalNode>(state: RunState<T>, expr: ViewExpr, polarity: Polarity = 1): Set<string> {
+function evalLeaf<T extends EvalNode>(state: RunState<T>, expr: ViewExpr, neutralUniverse = true): Set<string> {
   // Match against `!= null`, not `!== undefined`: the backend serializes a
   // ViewExpr with *every* slot present (unset ones as explicit `null`, Pydantic
   // default dump), so an omitted-vs-null asymmetry would misfire on the first
@@ -634,36 +654,39 @@ function evalLeaf<T extends EvalNode>(state: RunState<T>, expr: ViewExpr, polari
     return idsWhere(state, (n) => nodeTags(n).includes(tag));
   }
   if (expr.field != null) {
-    return evalField(state, expr.field, polarity);
+    return evalField(state, expr.field, neutralUniverse);
   }
   if (expr.hand_picked != null) {
     const picked = new Set(expr.hand_picked);
     return idsWhere(state, (n) => picked.has(n.id));
   }
   if (expr.view_ref != null) {
-    return evalViewRef(state, expr.view_ref);
+    return evalViewRef(state, expr.view_ref, neutralUniverse);
   }
   // Empty expr node: no constraint → whole universe (defensive; the grammar
   // requires a primary slot, but treat a stray {} as pass-through).
   return new Set(state.order.keys());
 }
 
-function evalViewRef<T extends EvalNode>(state: RunState<T>, viewId: string): Set<string> {
+function evalViewRef<T extends EvalNode>(state: RunState<T>, viewId: string, neutralUniverse = true): Set<string> {
   if (state.viewStack.includes(viewId)) return new Set(); // cycle: contribute nothing
   const ref = state.resolveView?.(viewId);
   if (!ref) return new Set(); // unresolved ref contributes nothing
   state.viewStack.push(viewId);
   try {
-    // A referenced view contributes its flat membership. A grouped view (named
-    // handles, `groups` set / `expr` null) carries no top-level `expr`, so union
-    // every handle's expr (v1 depth <= 1); a stray group without an expr is a
-    // whole-universe pass-through, mirroring evalSegment.
+    // A referenced view contributes its flat membership. The ref inherits the
+    // enclosing position's `neutralUniverse` (#198) so an unbound filter behind a
+    // `view_ref` still drops out cleanly in a subtractive position instead of
+    // re-emptying it. A grouped view (named handles, `groups` set / `expr` null)
+    // carries no top-level `expr`, so union every handle's expr (v1 depth <= 1); a
+    // stray group without an expr is a whole-universe pass-through, mirroring
+    // evalSegment.
     if (ref.groups && ref.groups.length > 0) {
       return unionAll(
-        ref.groups.map((g) => (g.expr ? evalExpr(state, g.expr) : new Set(state.order.keys()))),
+        ref.groups.map((g) => (g.expr ? evalExpr(state, g.expr, neutralUniverse) : new Set(state.order.keys()))),
       );
     }
-    if (ref.expr) return evalExpr(state, ref.expr);
+    if (ref.expr) return evalExpr(state, ref.expr, neutralUniverse);
     return new Set(state.order.keys()); // no primary slot -> pass-through
   } finally {
     state.viewStack.pop();
@@ -984,53 +1007,55 @@ function isCollectionField(schema: MetadataSchema | null | undefined, key: strin
 //
 // COLLECTION vs SCALAR (#202): a collection field (multi_select / entity_ref_list
 // / tags, or any array value) tokenizes and tests set-overlap; a SCALAR field
-// (text/select/number/entity_ref/…) compares its WHOLE value — never CSV-split,
-// so a title like "Alice, Queen of Hearts" is one token — and matches numerically
-// too (`power=9` overlaps operand `"9.0"`), restoring the `scalarEq` the 6→4 op
-// collapse dropped. The operand is coerced the same way, so a scalar literal
-// containing a comma stays one token while a multi-pick list stays multi.
+// (text/select/entity_ref/…) compares its WHOLE value — never CSV-split, so a
+// title like "Alice, Queen of Hearts" is one token. Numeric equivalence (`9`
+// matches `"9.0"`, restoring the `scalarEq` the 6→4 collapse dropped) is applied
+// ONLY to a declared `number` field — a text/select code like "007" must NOT
+// match "7". The operand is coerced the same way, so a scalar literal containing a
+// comma stays one token while a multi-pick list stays multi.
 //
 // An INACTIVE operand (an unbound promoted formal) means "no constraint". Under
-// (a) "unset = show everything" (#198) that is the identity for the predicate's
-// enclosing position: the whole universe when keeping (`polarity +1` — so an
-// intersect passes the input through) but the empty set when subtracting
-// (`polarity -1` — so a drop/complement removes nothing). Returning universe in
-// both positions is what emptied Drop filters before this fix.
+// (a) "unset = show everything" (#198) that is the identity element of the
+// predicate's enclosing combinator — `neutralUniverse` carries which: the whole
+// universe when the position wants ∩-identity (so an intersect passes the input
+// through), the empty set when it wants ∪/−-identity (so a union/drop/complement
+// leaves the input untouched). See `evalExpr` for how each combinator sets it.
 function evalField<T extends EvalNode>(
   state: RunState<T>,
   pred: ViewFieldPredicate,
-  polarity: Polarity,
+  neutralUniverse: boolean,
 ): Set<string> {
   if (pred.op === "set") return idsWhere(state, (n) => !isEmpty(fieldValue(n, pred.key, state.schema)));
   if (pred.op === "unset") return idsWhere(state, (n) => isEmpty(fieldValue(n, pred.key, state.schema)));
   const collection = isCollectionField(state.schema, pred.key);
   const operand = resolveOperand(state, pred.value, collection);
   if (operand === OPERAND_INACTIVE) {
-    return polarity < 0 ? new Set<string>() : new Set(state.order.keys());
+    return neutralUniverse ? new Set(state.order.keys()) : new Set<string>();
   }
+  const numeric = state.schema?.fields?.[pred.key]?.type === "number";
   const want = pred.op === "overlap"; // else "disjoint"
   return idsWhere(state, (n) => {
     const raw = fieldValue(n, pred.key, state.schema);
     const overlaps =
       collection || Array.isArray(raw)
         ? intersects(toStringSet(raw), operand) // tokenized set-overlap (string equality)
-        : scalarOverlap(raw, operand); // whole value, numeric-aware
+        : scalarOverlap(raw, operand, numeric); // whole value, numeric only for number fields
     return overlaps === want;
   });
 }
 
 // Whole-value scalar match (#202): does the node's single value equal ANY operand
-// candidate, by trimmed-string equality OR numeric equivalence? The numeric arm
-// restores the old `scalarEq` (so `9` matches `"9.0"`); an empty value overlaps
-// nothing (an empty set is disjoint from everything).
-function scalarOverlap(raw: unknown, operand: Set<string>): boolean {
+// candidate? Trimmed-string equality always; numeric equivalence (`9` vs `"9.0"`)
+// only when `numeric` (a declared `number` field) — otherwise "007" would wrongly
+// match "7". An empty value overlaps nothing (an empty set is disjoint from all).
+function scalarOverlap(raw: unknown, operand: Set<string>, numeric: boolean): boolean {
   if (isEmpty(raw)) return false;
   const s = String(raw).trim();
   const n = Number(s);
-  const numeric = s !== "" && !Number.isNaN(n);
+  const rawNumeric = numeric && s !== "" && !Number.isNaN(n);
   for (const cand of operand) {
     if (cand === s) return true;
-    if (numeric) {
+    if (rawNumeric) {
       const cn = Number(cand);
       if (cand.trim() !== "" && !Number.isNaN(cn) && cn === n) return true;
     }
@@ -1055,7 +1080,15 @@ function resolveOperand<T extends EvalNode>(
     if (bound == null) return value.var === SELF_VAR ? new Set<string>() : OPERAND_INACTIVE;
     return bindingSet(bound);
   }
-  if (isFieldOfOperand(value)) return evalFieldOf(state, value.field_of);
+  if (isFieldOfOperand(value)) {
+    const fo = value.field_of;
+    // A malformed field_of operand (no `of`/`field`) can't project. Treat it as
+    // INACTIVE — no constraint — NOT the empty set (#203): an empty operand would
+    // make a `disjoint` predicate match the WHOLE universe (`disjoint ∅` is true
+    // for every node), the inverse of "benign no-match".
+    if (fo == null || fo.of == null || !fo.field) return OPERAND_INACTIVE;
+    return evalFieldOf(state, fo);
+  }
   if (!collection && typeof value === "string") {
     const s = value.trim();
     return s ? new Set([s]) : new Set<string>();

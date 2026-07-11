@@ -571,9 +571,21 @@ field (node-set-valued; §G of ADR-0031, spec'd in §14.4), so it is just a `fie
 `field_of: { of: { var: "$self" }, field: "references" }` → the referrers.
 
 **`op` enum, 6→4** — `ViewFieldPredicate.op ∈ { overlap, disjoint, set, unset }` (was
-`eq`/`neq`/`includes`/`not_includes`/`set`/`unset`). `overlap` = set-coerce both sides, test
-non-empty intersection; `disjoint` = its negation. `entity_ref` compared by **id**, scalar by
+`eq`/`neq`/`includes`/`not_includes`/`set`/`unset`). `overlap` = test non-empty intersection between
+the node's value and the operand; `disjoint` = its negation. `entity_ref` compared by **id**, scalar by
 value (ADR-0031 §E). No migration of stored old-op values — test projects recreated (pre-1.0).
+
+**Collection vs scalar coercion (#202).** How a side is turned into a set depends on the field's type,
+applied identically to the node value and to a bare-literal operand:
+- **Collection** field (`multi_select` / `entity_ref_list` / `tags`), or **any array** value →
+  **tokenized** (a comma-bearing string splits into members).
+- **Scalar** field (`text` / `select` / `entity_ref` / `number` / …) → compared as **one whole value**;
+  a comma is data, not a separator (a title `"Alice, Queen of Hearts"` is a single token).
+- **Numeric equivalence** (`9` matches `"9.0"`) applies **only** to a declared `number` field; a
+  text/select code like `"007"` must **not** match `"7"`. String equality is unconditional.
+
+The same rule governs a value-set **projection** (`field_of` on a scalar field yields whole values, not
+comma-split tokens), so both sides of an overlap normalize consistently.
 
 **Entity-typed operands, literals, and bindings.** An `entity_ref` operand — a literal, a `default`,
 or a resolved binding — is a **list of ids** (the field's stored representation), e.g.
@@ -590,8 +602,20 @@ node-set or a value-set, and the evaluator dispatches on the bound value's shape
 injected exactly as `resolveView`/`schema` are (ADR-0025). `ctx` also threads the **reference index +
 id→summary map** (§14.4), the same way. Resolution: `$self` and each promoted
 formal read from `bindings`; an **unbound formal with no default** ⇒ its predicate is inactive
-(input passes through); an **unresolved `$self`** ⇒ empty set. The runtime stays field-structural
+(no constraint); an **unresolved `$self`** ⇒ empty set. The runtime stays field-structural
 (no per-node type inference at eval time — §14.3 is authoring-time only).
+
+**Inactive predicates and "unset = show everything" (#198).** An inactive predicate (an unbound
+formal) is not a fixed value — it is the **identity element of its immediately enclosing combinator**,
+so it drops out cleanly wherever it sits. Concretely the evaluator resets a per-position flag for each
+combinator to *its own* identity: `∩` → the **universe** (`A ∩ inactive = A`), `∪` → the **empty set**
+(`A ∪ inactive = A`), `difference.keep` → universe / `difference.remove` → ∅ (`A − inactive = A`),
+`complement` → ∅ (`U − inactive = U`); `annotate`/`view_ref` inherit the enclosing position. A bare
+filter at the membership root defaults to the universe (unset ⇒ show all). This makes
+"unset = show everything" hold uniformly across **keep, drop, complement, and union** — it is a
+**structural** decision (identity of the immediate combinator), **not** a per-node boolean and **not**
+a keep/subtract sign propagated from the root (a global sign mishandles an inactive predicate nested
+inside a combinator that itself sits in a subtractive position, e.g. `A − (X ∩ inactive)`).
 
 ### 14.3 Designer graph (`ViewGraph`) additions
 
@@ -608,6 +632,11 @@ formal read from `bindings`; an **unbound formal with no default** ⇒ its predi
 - **Promote-in-place.** A Filter value slot's "promote" affordance binds the slot to a **named
   formal** (creates/reuses a `params` entry), **converts the current literal into that formal's
   `default`**, and renders the slot as a socket (ADR-0032). Un-promote restores an inline literal.
+- **Inactive-node affordance (#198).** A promoted formal with **no default** is unbound → its predicate
+  is inactive (a no-op by default, §14.2). The designer marks such a node as inactive — a recessed
+  dashed-border tint, an "inactive" chip in its parameter card, and a hover title — so a power user can
+  *see* that the node imposes no constraint rather than silently filtering. Giving the formal a default
+  (or the runtime user picking a value) clears the marking.
 
 ### 14.4 The `references` computed field + reverse index
 
@@ -643,6 +672,14 @@ load and on any reference-mutating save (its caching policy is exactly "rebuild,
 **Evaluation.** `field_of(of, references)` → for each node `n ∈ of`, `reverseIndex.get(n.id) ?? ∅`,
 resolve ids → nodes, `flatMap` + dedup → a node-set. `field_of({ var: "$self" }, references)` is the
 `$self`-backlinks case (UC1 / `BacklinksPanel`), now a synthetic view.
+
+**Scene id-space bridge (#201).** The reverse index is keyed in **canonical** id space (a node's
+front-matter `id`), but the manuscript Draft roster keys its `EvalNode`s by the structure **`node.id`**
+— which for a scene differs from its canonical `scene_id`. So the `references` projection translates the
+input roster ids → canonical for the lookup and the referrer canonical ids → roster ids for the caller's
+universe filter (each `EvalNode` carries a `ref_id` = its canonical id; the translation is identity where
+`id === canonical`, i.e. lore/assistant). Without the bridge, references over the Draft roster silently
+miss every scene. `projectReferences` itself stays pure-canonical (the backlinks panel reads it directly).
 
 **Backend.** The forward-ref adjacency reaches the frontend as the **load-time reference-graph
 payload** above (per node: a display-summary — id, title, entry_type, kind — plus forward

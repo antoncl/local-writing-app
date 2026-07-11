@@ -171,6 +171,50 @@ describe("field predicates (op enum 6→4: overlap/disjoint/set/unset)", () => {
   });
 });
 
+// #202: the 6→4 op collapse routed EVERY comparison through comma-splitting,
+// tokenizing scalar values (a title, a select) and dropping the numeric
+// equivalence the old `scalarEq` had. A genuinely scalar field must compare its
+// WHOLE value; only collection fields (multi_select / entity_ref_list / tags, or
+// an array value) tokenize.
+describe("scalar fields compare whole, collections tokenize (#202)", () => {
+  const ROWS: EvalNode[] = [
+    { id: "q", entry_type: "lore:character", title: "Alice, Queen of Hearts", metadata: { power: 9, faction: "Red, White", roles: "red, white" } },
+    { id: "p", entry_type: "lore:character", title: "Bob", metadata: { power: 3, faction: "Blue", roles: "blue" } },
+  ];
+  const SC = {
+    version: 1,
+    entry_types: {},
+    fields: {
+      title: { name: "Title", type: "text", category: "intrinsic" },
+      power: { name: "Power", type: "number", category: "stored" },
+      faction: { name: "Faction", type: "text", category: "stored" },
+      roles: { name: "Roles", type: "tags", category: "stored" },
+    },
+  } as unknown as MetadataSchema;
+  const run = (spec: ViewSpec) => evaluateView(spec, ROWS, { schema: SC }).nodes.map((n) => n.id);
+
+  it("intrinsic title with a comma is ONE token — a fragment does not match", () => {
+    expect(run({ kind: "lore", expr: { field: { key: "title", op: "overlap", value: "Alice" } } })).toEqual([]);
+  });
+  it("intrinsic title matches its whole comma-bearing value", () => {
+    expect(run({ kind: "lore", expr: { field: { key: "title", op: "overlap", value: "Alice, Queen of Hearts" } } })).toEqual(["q"]);
+  });
+  it("disjoint on a title fragment keeps the comma-bearing row (was wrongly dropped)", () => {
+    expect(run({ kind: "lore", expr: { field: { key: "title", op: "disjoint", value: "Alice" } } })).toEqual(["q", "p"]);
+  });
+  it("scalar text field with a comma compares whole, not split", () => {
+    expect(run({ kind: "lore", expr: { field: { key: "faction", op: "overlap", value: "Red" } } })).toEqual([]);
+    expect(run({ kind: "lore", expr: { field: { key: "faction", op: "overlap", value: "Red, White" } } })).toEqual(["q"]);
+  });
+  it("number field keeps numeric equivalence (9 matches '9.0')", () => {
+    expect(run({ kind: "lore", expr: { field: { key: "power", op: "overlap", value: "9.0" } } })).toEqual(["q"]);
+  });
+  it("a declared collection field (tags) still tokenizes a CSV string", () => {
+    expect(run({ kind: "lore", expr: { field: { key: "roles", op: "overlap", value: "red" } } })).toEqual(["q"]);
+    expect(run({ kind: "lore", expr: { field: { key: "roles", op: "disjoint", value: "red" } } })).toEqual(["p"]);
+  });
+});
+
 // #184 forward model: free variables (`{var}` / `$self`), a bindings environment,
 // and `field_of` forward projection. A small ref-carrying roster: scenes point at
 // characters via `pov`; a couple of tag-carrying nodes for value projection.

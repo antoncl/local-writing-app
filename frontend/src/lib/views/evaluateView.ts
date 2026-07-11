@@ -959,15 +959,30 @@ function fieldValue(node: EvalNode, key: string, schema: MetadataSchema | null |
 // through (ADR-0031 §B), distinct from an operand that resolves to the empty set.
 const OPERAND_INACTIVE = Symbol("operand-inactive");
 
+// Collection field types (ADR-0031 §E): a value that is inherently a SET of
+// tokens. Only these tokenize a comma-bearing string; every other type is scalar
+// and compares whole (#202). An array value is always treated as a collection
+// regardless of the declared type, since it is already multi-valued.
+const COLLECTION_FIELD_TYPES = new Set<string>(["multi_select", "entity_ref_list", "tags"]);
+function isCollectionField(schema: MetadataSchema | null | undefined, key: string): boolean {
+  const t = schema?.fields?.[key]?.type;
+  return t != null && COLLECTION_FIELD_TYPES.has(t);
+}
+
 // Evaluate a `field` predicate to its member id-set (ADR-0031 §E, #184).
-// Overlap/disjoint set-coerce both sides and test (non-)intersection; `set`/
-// `unset` are presence tests (operand ignored). The one value slot may be a bare
-// literal, a tagged `{var}` (a promoted formal / `$self`), or a tagged
-// `{field_of}` projection — resolved ONCE by `resolveOperand` (it is
-// node-independent, so lifting it out of the per-node loop also saves the repeat
-// resolve, cf. #200). An entity_ref field's stored value is an id (or id list),
-// so overlap on it is id-overlap; a scalar field's is value-overlap —
-// automatically, because both sides coerce to string sets.
+// Overlap/disjoint compare the node's value against the operand; `set`/`unset`
+// are presence tests (operand ignored). The one value slot may be a bare literal,
+// a tagged `{var}` (a promoted formal / `$self`), or a tagged `{field_of}`
+// projection — resolved ONCE by `resolveOperand` (node-independent, so lifting it
+// out of the per-node loop also saves the repeat resolve, cf. #200).
+//
+// COLLECTION vs SCALAR (#202): a collection field (multi_select / entity_ref_list
+// / tags, or any array value) tokenizes and tests set-overlap; a SCALAR field
+// (text/select/number/entity_ref/…) compares its WHOLE value — never CSV-split,
+// so a title like "Alice, Queen of Hearts" is one token — and matches numerically
+// too (`power=9` overlaps operand `"9.0"`), restoring the `scalarEq` the 6→4 op
+// collapse dropped. The operand is coerced the same way, so a scalar literal
+// containing a comma stays one token while a multi-pick list stays multi.
 //
 // An INACTIVE operand (an unbound promoted formal) means "no constraint". Under
 // (a) "unset = show everything" (#198) that is the identity for the predicate's
@@ -982,24 +997,52 @@ function evalField<T extends EvalNode>(
 ): Set<string> {
   if (pred.op === "set") return idsWhere(state, (n) => !isEmpty(fieldValue(n, pred.key, state.schema)));
   if (pred.op === "unset") return idsWhere(state, (n) => isEmpty(fieldValue(n, pred.key, state.schema)));
-  const operand = resolveOperand(state, pred.value);
+  const collection = isCollectionField(state.schema, pred.key);
+  const operand = resolveOperand(state, pred.value, collection);
   if (operand === OPERAND_INACTIVE) {
     return polarity < 0 ? new Set<string>() : new Set(state.order.keys());
   }
   const want = pred.op === "overlap"; // else "disjoint"
   return idsWhere(state, (n) => {
-    const overlaps = intersects(toStringSet(fieldValue(n, pred.key, state.schema)), operand);
+    const raw = fieldValue(n, pred.key, state.schema);
+    const overlaps =
+      collection || Array.isArray(raw)
+        ? intersects(toStringSet(raw), operand) // tokenized set-overlap (string equality)
+        : scalarOverlap(raw, operand); // whole value, numeric-aware
     return overlaps === want;
   });
+}
+
+// Whole-value scalar match (#202): does the node's single value equal ANY operand
+// candidate, by trimmed-string equality OR numeric equivalence? The numeric arm
+// restores the old `scalarEq` (so `9` matches `"9.0"`); an empty value overlaps
+// nothing (an empty set is disjoint from everything).
+function scalarOverlap(raw: unknown, operand: Set<string>): boolean {
+  if (isEmpty(raw)) return false;
+  const s = String(raw).trim();
+  const n = Number(s);
+  const numeric = s !== "" && !Number.isNaN(n);
+  for (const cand of operand) {
+    if (cand === s) return true;
+    if (numeric) {
+      const cn = Number(cand);
+      if (cand.trim() !== "" && !Number.isNaN(cn) && cn === n) return true;
+    }
+  }
+  return false;
 }
 
 // Resolve a predicate operand to a string set (or INACTIVE). A `{var}` reads the
 // bindings: an unresolved `$self` is the empty set (a source with no anchor);
 // an unbound formal is INACTIVE (its predicate drops out). A `{field_of}` is a
-// projection; anything else is a bare literal, set-coerced.
+// projection; anything else is a bare literal, coerced to a set. `collection`
+// governs literal coercion (#202): a scalar field's string literal stays ONE
+// token (no comma-split), while a collection field's splits — matching how the
+// node side is tokenized. Arrays (a multi-pick) always keep their items whole.
 function resolveOperand<T extends EvalNode>(
   state: RunState<T>,
   value: unknown,
+  collection: boolean,
 ): Set<string> | typeof OPERAND_INACTIVE {
   if (isVarOperand(value)) {
     const bound = state.bindings?.[value.var];
@@ -1007,6 +1050,10 @@ function resolveOperand<T extends EvalNode>(
     return bindingSet(bound);
   }
   if (isFieldOfOperand(value)) return evalFieldOf(state, value.field_of);
+  if (!collection && typeof value === "string") {
+    const s = value.trim();
+    return s ? new Set([s]) : new Set<string>();
+  }
   return toStringSet(value);
 }
 

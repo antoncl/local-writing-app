@@ -723,12 +723,23 @@ const ROW_HEIGHT = 120;
 // auto-layout. The primary reopen path is the persisted `layout`; this is the
 // fallback for designer-less / backend-authored views. A grouped spec fans each
 // group into its own named handle (+ a Sorter node when the group sorts).
-export function specToGraph(spec: ViewSpec | null | undefined): ViewGraph {
+//
+// `schema` closes the lower/lift asymmetry (#211): the designer's `All` injector
+// lowers to `descendants_of:<kind-root>` (`kindUniverseExpr`), so on reopen a
+// `descendants_of` that EQUALS the kind's universe root must lift back to an `all`
+// node — not a "Type & subtypes" node whose abstract root (`scene:base`/`lore:base`)
+// the type picker filters out, leaving a blank unresettable dropdown. Resolving the
+// root needs the schema (`${kind}:base` alone misses concrete-root kinds like
+// assistant); absent it we skip the collapse and lift verbatim (round-trip helpers).
+export function specToGraph(spec: ViewSpec | null | undefined, schema?: MetadataSchema | null): ViewGraph {
   const nodes: ViewGraphNode[] = [];
   const edges: ViewGraphEdge[] = [];
   const rowCursor = { value: 0 };
   let counter = 0;
   const nextId = () => `n${counter++}`;
+  // The `descendants_of` value an `All`/universe node lowers to for this kind — the
+  // sentinel that lifts back to `all`. Null when kind is unknown (bare-expr helper).
+  const universeRoot = spec?.kind ? kindUniverseExpr(spec.kind, schema).descendants_of ?? null : null;
 
   const outputNode: ViewGraphNode = { id: OUTPUT_NODE_ID, kind: "output", position: { x: 0, y: 0 }, data: {} };
   nodes.push(outputNode);
@@ -832,7 +843,11 @@ export function specToGraph(spec: ViewSpec | null | undefined): ViewGraph {
     // Leaves. `!= null` (not `!== undefined`): the backend serializes ViewExpr
     // densely, so every unused slot arrives as `null`, not absent.
     if (e.type != null) return addNode("type", depth, { type: e.type });
-    if (e.descendants_of != null) return addNode("descendants_of", depth, { descendants_of: e.descendants_of });
+    if (e.descendants_of != null) {
+      // A kind-root `descendants_of` is the universe → the `All` injector (#211).
+      if (universeRoot != null && e.descendants_of === universeRoot) return addNode("all", depth, {});
+      return addNode("descendants_of", depth, { descendants_of: e.descendants_of });
+    }
     if (e.tagged != null) return addNode("tagged", depth, { tagged: e.tagged });
     if (e.field != null) {
       const v = e.field.value;

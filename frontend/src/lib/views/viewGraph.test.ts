@@ -114,6 +114,37 @@ describe("injector: All (universal)", () => {
     // Kind-less (the pure round-trip helper) leaves a bare universe as null.
     expect(graphToExpr(graph)).toBeNull();
   });
+
+  // #211: the kind-root `descendants_of` a duplicated default view carries must
+  // LIFT back to an `all` node (not a "Type & subtypes" node whose abstract root
+  // the picker filters out). Closes the lower/lift asymmetry.
+  it("specToGraph lifts a kind-root descendants_of back to an All node", () => {
+    // Abstract-rooted kind: `${kind}:base` fallback (no schema needed).
+    const g = specToGraph({ kind: "lore", expr: { descendants_of: "lore:base" } });
+    expect(g.nodes.filter((n) => n.kind !== "output").map((n) => n.kind)).toEqual(["all"]);
+    // Round-trips: All → descendants_of:lore:base → All again.
+    expect(graphToSpec(g, { kind: "lore" }).expr).toEqual({ descendants_of: "lore:base" });
+  });
+
+  it("specToGraph keeps a NON-root descendants_of as a Type & subtypes node", () => {
+    const g = specToGraph({ kind: "lore", expr: { descendants_of: "lore:deity" } });
+    const injectors = g.nodes.filter((n) => n.kind !== "output");
+    expect(injectors.map((n) => n.kind)).toEqual(["descendants_of"]);
+    expect(injectors[0].data).toMatchObject({ descendants_of: "lore:deity" });
+  });
+
+  it("specToGraph lifts a concrete-root kind's universe to All when the schema resolves it", () => {
+    // Assistant's root is the concrete `assistant:assistant` (no abstract base) —
+    // only the threaded schema, not the `${kind}:base` fallback, resolves it.
+    const schema = {
+      entry_types: { "assistant:assistant": { kind: "assistant", name: "Assistant" } },
+    } as unknown as Parameters<typeof specToGraph>[1];
+    const g = specToGraph({ kind: "assistant", expr: { descendants_of: "assistant:assistant" } }, schema);
+    expect(g.nodes.filter((n) => n.kind !== "output").map((n) => n.kind)).toEqual(["all"]);
+    // Without the schema, the concrete root has no match → stays a type node.
+    const gNoSchema = specToGraph({ kind: "assistant", expr: { descendants_of: "assistant:assistant" } });
+    expect(gNoSchema.nodes.filter((n) => n.kind !== "output").map((n) => n.kind)).toEqual(["descendants_of"]);
+  });
 });
 
 describe("filter lowering (sugar → set ops)", () => {

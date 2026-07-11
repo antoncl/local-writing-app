@@ -163,7 +163,7 @@
         })),
       };
     }
-    const g = specToGraph(node.spec);
+    const g = specToGraph(node.spec, schema);
     return {
       nodes: g.nodes.map((n) => toFlowNode(n.id, n.kind, n.data, n.position)),
       edges: g.edges.map((e) => ({

@@ -1,20 +1,17 @@
 <script context="module" lang="ts">
   import type { AssistantEntrySummary } from "@/lib/types";
-  import type { DisplayGroup } from "@/components/widgets/ViewGroupedList.svelte";
-
-  // The shared render bucket (#97). `label: null` is the headerless flat list; a
-  // non-null `reorderKey` marks a drag-reorderable layer group (default view only).
-  type AssistantDisplayGroup = DisplayGroup<AssistantEntrySummary>;
 </script>
 
 <script lang="ts">
   import NodeRow from "@/components/widgets/NodeRow.svelte";
-  import NodeList from "@/components/widgets/NodeList.svelte";
-  import ViewGroupedList from "@/components/widgets/ViewGroupedList.svelte";
+  import ViewNodeList, { type RowCtx } from "@/components/widgets/ViewNodeList.svelte";
+  import RowCaret from "@/components/widgets/RowCaret.svelte";
+  import CountPill from "@/components/widgets/CountPill.svelte";
   import { getSwatch } from "@/lib/utils/colors";
   import { assistantTagsStore, assistantTagColorHexes } from "@/lib/stores/assistantTags";
   import { assistantTagsOf } from "@/lib/chat/assistantScope";
-  import { evaluateView } from "@/lib/views/evaluateView";
+  import { evaluateView, type ViewGroup, type ViewResult } from "@/lib/views/evaluateView";
+  import { leafGroup } from "@/lib/views/viewResult";
   import { paneViews } from "@/lib/stores/paneViews.svelte";
   import { metadataSchemaStore } from "@/lib/stores/schema";
   import { referenceIndexStore } from "@/lib/stores/references";
@@ -38,8 +35,8 @@
   // computes the new order from the drag.
   export let onReorder: (layerId: string, orderedIds: string[]) => Promise<void>;
 
-  // Per-group collapse — pane-local, not persisted (same as the Lore pane).
-  let collapsedGroups: Record<string, boolean> = {};
+  // Per-group collapse is ephemeral and owned by ViewNodeList (phase 1; not
+  // persisted, same as the Lore pane).
 
   // Colored tag chips: name → hex from the machine-global assistant-tag
   // vocabulary (#88). Uncolored tags fall back to the neutral chip.
@@ -58,37 +55,33 @@
     referenceIndex: $referenceIndexStore,
   });
   $: annotations = viewResult.annotations;
-  // Drag-reorder is manual order, meaningful only on the implicit default view.
+  // Drag-reorder is manual order, meaningful only on the implicit default view
+  // (its per-layer buckets). A view with named-handle / structural groups, or a
+  // flat presentation, is read-only.
   $: canReorder = presentation === null && viewResult.groups === null;
-  // A view with named-handle / structural groups renders through the recursive
-  // GroupTree (read-only — no layer drag). Otherwise the intrinsic flat / layer
-  // buckets apply (the only mode where drag-reorder is meaningful).
-  $: viewGroups = viewResult.groups;
-  $: displayGroups = viewGroups ? [] : buildDisplayGroups(viewResult.nodes, presentation === "flat", canReorder);
+  // ViewNodeList's sole input is one ViewResult (ADR-0035). A view with its own
+  // groups renders those; otherwise the intrinsic presentation — a flat list, or
+  // the per-layer buckets (the only mode where drag-reorder applies) — is
+  // synthesized as the result's `groups`.
+  $: displayResult = intrinsicDisplayResult(viewResult, presentation === "flat");
 
   // Drag-drop state for reordering assistants within a layer. Never escapes.
   let dragId: string | null = null;
   let dragLayerId: string | null = null;
   let dropTarget: { id: string; position: "before" | "after" } | null = null;
 
-  // The non-view grouping: the intrinsic flat / per-layer buckets. A view that
-  // carries its own groups bypasses this and renders through GroupTree.
-  function buildDisplayGroups(
-    items: AssistantEntrySummary[],
+  function intrinsicDisplayResult(
+    result: ViewResult<AssistantEntrySummary>,
     flat: boolean,
-    layerGrouped: boolean,
-  ): AssistantDisplayGroup[] {
-    if (flat) {
-      return [{ id: "__flat__", label: null, color: null, reorderKey: null, entries: items }];
-    }
-    return groupByLayer(items, layerGrouped);
+  ): ViewResult<AssistantEntrySummary> {
+    if (result.groups || flat) return result;
+    return { ...result, groups: groupByLayer(result.nodes) };
   }
 
-  function toggleGroup(groupId: string) {
-    collapsedGroups = {
-      ...collapsedGroups,
-      [groupId]: !collapsedGroups[groupId],
-    };
+  // All members of a layer, in the roster's manual order — the reorder onDrop
+  // recomputes the new order from this (viewResult.nodes carries manual order).
+  function layerEntries(layerId: string): AssistantEntrySummary[] {
+    return viewResult.nodes.filter((entry) => (entry.source_layer_id ?? "") === layerId);
   }
 
   function startDrag(event: DragEvent, entry: AssistantEntrySummary) {
@@ -132,14 +125,14 @@
       endDrag();
       return;
     }
-    const group = displayGroups.find((g) => g.id === layerId);
-    if (!group) {
+    const entries = layerEntries(layerId);
+    if (entries.length === 0) {
       endDrag();
       return;
     }
     const draggedId = dragId;
     const dropPosition = dropTarget?.position ?? "after";
-    const withoutDragged = group.entries.filter((e) => e.id !== draggedId);
+    const withoutDragged = entries.filter((e) => e.id !== draggedId);
     const targetIndex = withoutDragged.findIndex((e) => e.id === entry.id);
     if (targetIndex === -1) {
       endDrag();
@@ -155,16 +148,20 @@
     await onReorder(layerId, orderedIds);
   }
 
-  function groupByLayer(items: AssistantEntrySummary[], layerGrouped: boolean): AssistantDisplayGroup[] {
-    const groups = new Map<string, AssistantDisplayGroup>();
+  // Intrinsic per-layer grouping: one synthetic bucket per source layer, each
+  // holding its assistants as childless leaf groups (the tree-uniform form
+  // ViewNodeList renders). Machine layer first, then alphabetical.
+  function groupByLayer(items: AssistantEntrySummary[]): ViewGroup<AssistantEntrySummary>[] {
+    const groups = new Map<string, ViewGroup<AssistantEntrySummary>>();
     for (const entry of items) {
       const key = entry.source_layer_id || "";
       const label = entry.source_layer_label || "Unknown";
+      const leaf = leafGroup(entry);
       const existing = groups.get(key);
       if (existing) {
-        existing.entries.push(entry);
+        existing.children.push(leaf);
       } else {
-        groups.set(key, { id: key, label, color: null, reorderKey: layerGrouped ? key : null, entries: [entry] });
+        groups.set(key, { key: `group:layer:${key}`, label, color: null, nodeId: null, node: null, children: [leaf] });
       }
     }
     // Machine layer first; then alphabetical by label.
@@ -191,52 +188,62 @@
   }
 </script>
 
-<NodeList isEmpty={entries.length === 0}>
-  <ViewGroupedList
-    {viewGroups}
-    {displayGroups}
-    collapsed={collapsedGroups}
-    onToggle={toggleGroup}
-    row={assistantRow}
-  />
+<ViewNodeList
+  result={displayResult}
+  active={(entry) => focusedDocument?.type === "assistant" && focusedDocument.id === entry.id}
+  onClick={(entry) => onOpenEntry(entry.id)}
+  row={assistantRow}
+>
   {#snippet whenEmpty()}
-    <p class="muted">No assistants defined yet. Click + to create one in the machine layer.</p>
+    {#if entries.length === 0}
+      <p class="muted">No assistants defined yet. Click + to create one in the machine layer.</p>
+    {:else}
+      <p class="muted">No assistants match this view.</p>
+    {/if}
   {/snippet}
-</NodeList>
+</ViewNodeList>
 
-<!-- A view's grouped rows are read-only (layer drag applies only to the intrinsic
-     default view), so `group` is null there → `reorderable` false. -->
-{#snippet assistantRow(entry: AssistantEntrySummary, depth: number, group: AssistantDisplayGroup | null)}
-  {@const layerId = group?.reorderKey ?? null}
+<!-- Layer drag applies only to the intrinsic default view (canReorder); a view's
+     grouped rows are read-only. Drag is wired in-snippet on the NodeRow — it does
+     not route through ViewNodeList's onReorder escape hatch (that's for #112). -->
+{#snippet assistantRow(entry: AssistantEntrySummary, ctx: RowCtx<AssistantEntrySummary>)}
+  {@const layerId = canReorder ? (entry.source_layer_id ?? "") : null}
   <NodeRow
     title={entry.title}
-    {depth}
+    depth={ctx.depth}
     tags={assistantTagsOf(entry)}
     tagColor={tagHexFor}
-    active={focusedDocument?.type === "assistant" && focusedDocument.id === entry.id}
+    active={ctx.active}
     stripeColor={stripeFor(entry)}
     dragging={dragId === entry.id}
     dropPosition={dropTarget?.id === entry.id ? (dropTarget?.position ?? null) : null}
-    onClick={() => onOpenEntry(entry.id)}
+    onClick={ctx.onClick}
     ondragover={layerId !== null ? (event) => onDragOver(event, entry) : undefined}
     ondragleave={layerId !== null ? onDragLeave : undefined}
     ondrop={layerId !== null ? (event) => onDrop(event, entry) : undefined}
   >
     {#snippet leading()}
-      {#if layerId !== null}
+      {#if ctx.collapsible}
+        <RowCaret collapsed={ctx.collapsed} toggle={ctx.toggle} />
+      {:else if layerId !== null}
         <span
           class="assistant-drag-handle"
           draggable="true"
           role="button"
           tabindex="-1"
           aria-label="Drag to reorder"
-          on:dragstart={(event) => startDrag(event, entry)}
-          on:dragend={endDrag}
+          ondragstart={(event) => startDrag(event, entry)}
+          ondragend={endDrag}
         >⋮⋮</span>
       {/if}
     {/snippet}
     {#snippet detailSlot()}
       <small>{assistantSubtitle(entry)}</small>
+    {/snippet}
+    {#snippet trailing()}
+      {#if ctx.collapsible}
+        <CountPill count={ctx.childCount} />
+      {/if}
     {/snippet}
   </NodeRow>
 {/snippet}
@@ -259,5 +266,4 @@
   .assistant-drag-handle:active {
     cursor: grabbing;
   }
-
 </style>

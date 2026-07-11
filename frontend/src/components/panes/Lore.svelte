@@ -1,20 +1,16 @@
 <script context="module" lang="ts">
   import type { LoreEntrySummary, MetadataSchema } from "@/lib/types";
-  import type { DisplayGroup } from "@/components/widgets/ViewGroupedList.svelte";
-
-  // A Lore-pane display bucket: the shared DisplayGroup shape (#97). `label: null`
-  // is the headerless flat list; otherwise a group header (entry_type buckets by
-  // default, or a view's label groups). `color` tints the header (ADR-0019).
-  type LoreEntryGroup = DisplayGroup<LoreEntrySummary>;
 </script>
 
 <script lang="ts">
   import NodeRow from "@/components/widgets/NodeRow.svelte";
-  import NodeList from "@/components/widgets/NodeList.svelte";
-  import ViewGroupedList from "@/components/widgets/ViewGroupedList.svelte";
+  import ViewNodeList, { type RowCtx } from "@/components/widgets/ViewNodeList.svelte";
+  import RowCaret from "@/components/widgets/RowCaret.svelte";
+  import CountPill from "@/components/widgets/CountPill.svelte";
   import FieldValueEditor from "@/components/widgets/FieldValueEditor.svelte";
   import { getSwatch, resolveColorForType } from "@/lib/utils/colors";
-  import { evaluateView, filterGroups, type ViewGroup } from "@/lib/views/evaluateView";
+  import { evaluateView, type ViewGroup, type ViewResult } from "@/lib/views/evaluateView";
+  import { leafGroup } from "@/lib/views/viewResult";
   import { buildBindings, effectiveParamValue, resolveParamControls } from "@/lib/views/viewParams";
   import { paneViews } from "@/lib/stores/paneViews.svelte";
   import { metadataSchemaStore } from "@/lib/stores/schema";
@@ -36,10 +32,9 @@
   // Open an entry in an editor pane (App owns the pane set).
   export let onOpenEntry: (entryId: string) => void;
 
-  // Pane-local UI state — search + per-group collapse. Never escapes the
-  // component (collapse here, unlike the manuscript tree, isn't persisted).
+  // Pane-local search text — bound to ViewNodeList's search box. Per-group
+  // collapse is ephemeral and owned by ViewNodeList (phase 1; not persisted).
   let searchQuery = "";
-  let collapsedGroups: Record<string, boolean> = {};
   // Ephemeral runtime overrides for the view's declared parameters (#184,
   // ADR-0032 §C): pane/session state, seeded by each formal's authored default,
   // never baked into the shared view. Keyed by formal name; stale keys (from a
@@ -89,62 +84,49 @@
     return p ? effectiveParamValue(p, paramOverrides).length > 0 : false;
   }
   $: annotations = viewResult.annotations;
-  $: filteredEntries = filterEntries(viewResult.nodes, searchQuery);
-  // A view with named-handle / structural groups renders through the recursive
-  // GroupTree; search prunes the tree to the matching set. Otherwise Lore falls
-  // back to its own flat / by-entry_type buckets (depth-1, no nesting).
-  $: viewGroups = viewResult.groups
-    ? filterGroups(viewResult.groups, new Set(filteredEntries.map((e) => e.id)))
-    : null;
-  $: displayGroups = viewGroups ? [] : buildDisplayGroups(filteredEntries, schema, presentation === "flat");
-  $: isEmpty = viewGroups ? viewGroups.length === 0 : displayGroups.length === 0;
+  // ViewNodeList's sole input is one ViewResult (ADR-0035). A view that carries
+  // its own named-handle / structural groups renders those; otherwise Lore
+  // synthesizes its intrinsic presentation — a flat list (presentation "flat") or
+  // its by-entry_type buckets — as the result's `groups`. Search pruning + per-
+  // group collapse then live in ViewNodeList, not here.
+  $: displayResult = intrinsicDisplayResult(viewResult, schema, presentation === "flat");
 
-  function filterEntries(items: LoreEntrySummary[], query: string) {
-    const normalizedQuery = query.trim().toLowerCase();
-    if (!normalizedQuery) return items;
-    return items.filter((entry) => entrySearchText(entry).includes(normalizedQuery));
-  }
-
-  // The non-view grouping: Lore's intrinsic flat / by-entry_type buckets. A view
-  // that carries its own groups bypasses this and renders through GroupTree.
-  function buildDisplayGroups(
-    items: LoreEntrySummary[],
+  function intrinsicDisplayResult(
+    result: ViewResult<LoreEntrySummary>,
     currentSchema: MetadataSchema | null,
     flat: boolean,
-  ): LoreEntryGroup[] {
-    // Flat presentation: one headerless list.
-    if (flat) {
-      return [{ id: "__flat__", label: null, color: null, entries: items, depth: 0 }];
-    }
-    // Default: group by entry_type.
-    return groupByType(items, currentSchema);
+  ): ViewResult<LoreEntrySummary> {
+    // A view with its own groups, or a flat presentation, renders as-is.
+    if (result.groups || flat) return result;
+    // Default: group by entry_type — synthetic buckets over the members.
+    return { ...result, groups: groupByType(result.nodes, currentSchema) };
   }
 
-  function groupByType(items: LoreEntrySummary[], currentSchema: MetadataSchema | null): LoreEntryGroup[] {
-    const groupsByType = new Map<string, LoreEntryGroup>();
+  // Lore's intrinsic grouping: one synthetic bucket per entry_type, each holding
+  // its members as childless leaf groups (the tree-uniform form ViewNodeList
+  // renders). Sorted by type label.
+  function groupByType(items: LoreEntrySummary[], currentSchema: MetadataSchema | null): ViewGroup<LoreEntrySummary>[] {
+    const groupsByType = new Map<string, ViewGroup<LoreEntrySummary>>();
     for (const entry of items) {
-      const groupId = `type:${entry.entry_type || "unknown"}`;
+      const groupId = `group:type:${entry.entry_type || "unknown"}`;
+      const leaf = leafGroup(entry);
       const existingGroup = groupsByType.get(groupId);
       if (existingGroup) {
-        existingGroup.entries.push(entry);
+        existingGroup.children.push(leaf);
       } else {
         groupsByType.set(groupId, {
-          id: groupId,
+          key: groupId,
           label: entryTypeName(entry, currentSchema),
           color: null,
-          entries: [entry],
-          depth: 0,
+          nodeId: null,
+          node: null,
+          children: [leaf],
         });
       }
     }
-    return Array.from(groupsByType.values()).sort((left, right) => (left.label ?? "").localeCompare(right.label ?? "", undefined, { sensitivity: "base" }));
-  }
-
-  function toggleGroup(groupId: string) {
-    collapsedGroups = {
-      ...collapsedGroups,
-      [groupId]: !collapsedGroups[groupId],
-    };
+    return Array.from(groupsByType.values()).sort((left, right) =>
+      (left.label ?? "").localeCompare(right.label ?? "", undefined, { sensitivity: "base" }),
+    );
   }
 
   function entrySearchText(entry: LoreEntrySummary) {
@@ -224,18 +206,15 @@
   </div>
 {/if}
 
-<NodeList
+<ViewNodeList
+  result={displayResult}
   searchPlaceholder="Search entries, tags, aliases"
   bind:searchValue={searchQuery}
-  {isEmpty}
+  filter={(entry, query) => entrySearchText(entry).includes(query)}
+  active={(entry) => focusedDocument?.type === "lore" && focusedDocument.id === entry.id}
+  onClick={(entry) => onOpenEntry(entry.id)}
+  row={entryRow}
 >
-  <ViewGroupedList
-    {viewGroups}
-    {displayGroups}
-    collapsed={collapsedGroups}
-    onToggle={toggleGroup}
-    row={entryRow}
-  />
   {#snippet whenEmpty()}
     {#if entries.length === 0}
       <p class="muted">No entries yet.</p>
@@ -243,19 +222,32 @@
       <p class="muted">No entries match this view.</p>
     {/if}
   {/snippet}
-</NodeList>
+</ViewNodeList>
 
-{#snippet entryRow(entry: LoreEntrySummary, depth: number)}
+{#snippet entryRow(entry: LoreEntrySummary, ctx: RowCtx<LoreEntrySummary>)}
   <NodeRow
     title={entry.title}
     detail={entryDetailText(entry)}
     tags={entryTags(entry)}
-    {depth}
-    active={focusedDocument?.type === "lore" && focusedDocument.id === entry.id}
+    depth={ctx.depth}
+    active={ctx.active}
     stripeColor={stripeFor(entry)}
-    onClick={() => onOpenEntry(entry.id)}
+    onClick={ctx.onClick}
     onmousedown={(event) => event.stopPropagation()}
-  />
+  >
+    {#snippet leading()}
+      <!-- A real-node parent (a Nest tree header that IS a lore entry) stays a
+           real NodeRow — collapsible via its own caret, still openable. -->
+      {#if ctx.collapsible}
+        <RowCaret collapsed={ctx.collapsed} toggle={ctx.toggle} />
+      {/if}
+    {/snippet}
+    {#snippet trailing()}
+      {#if ctx.collapsible}
+        <CountPill count={ctx.childCount} />
+      {/if}
+    {/snippet}
+  </NodeRow>
 {/snippet}
 
 <style>

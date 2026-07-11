@@ -53,7 +53,7 @@
 </script>
 
 <script lang="ts">
-  import { tick, onDestroy } from "svelte";
+  import { onDestroy } from "svelte";
   import { api } from "@/lib/api";
   import NodeRow from "@/components/widgets/NodeRow.svelte";
   import NodeList from "@/components/widgets/NodeList.svelte";
@@ -269,70 +269,6 @@
     editingNodeId = null;
   }
 
-  function handleRenameKeydown(event: KeyboardEvent, nodeId: string) {
-    if (event.key === "Enter") {
-      event.preventDefault();
-      void commitRename(nodeId);
-    } else if (event.key === "Escape") {
-      event.preventDefault();
-      cancelRename();
-    }
-  }
-
-  // Keyboard reorder + F2 rename — only on reorderable trees (manuscript).
-  function handleRowKeydown(event: KeyboardEvent, nodeId: string) {
-    if (!config.supportsDrag) return;
-    if (event.key === "F2") {
-      event.preventDefault();
-      const root = config.getStructure()?.root;
-      const sn = root ? findStructureNodeById(root, nodeId) : null;
-      startRename(nodeId, sn?.title ?? "");
-      return;
-    }
-    if (!(event.ctrlKey || event.metaKey)) return;
-    if (event.key === "ArrowUp") {
-      event.preventDefault();
-      void moveNodeUp(nodeId);
-    } else if (event.key === "ArrowDown") {
-      event.preventDefault();
-      void moveNodeDown(nodeId);
-    } else if (event.key === "ArrowRight") {
-      event.preventDefault();
-      void indentNode(nodeId);
-    } else if (event.key === "ArrowLeft") {
-      event.preventDefault();
-      void outdentNode(nodeId);
-    }
-  }
-
-  // All tree keyboard handling rides on ONE direct listener on the list
-  // wrapper, dispatched by the event target's data-node markers. Svelte 5
-  // DELEGATES keydown at a per-component boundary, and the `row` snippet's DOM
-  // (owned here, mounted inside ViewNodeTree) falls outside StructureTree's
-  // delegation root — so per-element `onkeydown` props silently never fire
-  // (click/blur, which are non-delegated here, still work). A direct
-  // addEventListener sidesteps delegation entirely. (#112 — the #182 substrate's
-  // first keydown consumer; the wrapper-owned version lands in phase 1b.)
-  function treeKeyboard(container: HTMLElement) {
-    const onKey = (event: KeyboardEvent) => {
-      const target = event.target;
-      if (!(target instanceof HTMLElement)) return;
-      // Keys typed inside an add-child popover are the popover's own (its
-      // buttons); don't let Ctrl+arrows there reorder the hosting container.
-      if (target.closest(".row-add-popover")) return;
-      const input = target.closest<HTMLElement>("[data-node-edit-id]");
-      if (input) {
-        handleRenameKeydown(event, input.getAttribute("data-node-edit-id") ?? "");
-        return;
-      }
-      const row = target.closest<HTMLElement>("[data-node-id]");
-      const id = row?.getAttribute("data-node-id");
-      if (id) handleRowKeydown(event, id);
-    };
-    container.addEventListener("keydown", onKey);
-    return { destroy: () => container.removeEventListener("keydown", onKey) };
-  }
-
   // Container click defers collapse (see DBLCLICK_GUARD_MS); the toggle itself
   // is ViewNodeList's, handed in via RowCtx.
   function deferCollapse(toggle: () => void) {
@@ -362,64 +298,7 @@
     if (sn) onRequestDelete(sn);
   }
 
-  async function refocusTreeNode(nodeId: string) {
-    await tick();
-    const row = document.querySelector<HTMLElement>(`[data-node-id="${nodeId}"]`);
-    const target = row?.querySelector<HTMLElement>("button.node-row-click") ?? row;
-    target?.focus();
-  }
-
-  async function moveNodeUp(nodeId: string) {
-    const tree = config.getStructure();
-    if (!tree || !config.api.move) return;
-    const found = findParentAndIndex(tree.root, nodeId);
-    if (!found || found.index === 0) return;
-    await run(async () => {
-      config.applyStructure(await config.api.move!(nodeId, found.parent.id, found.index - 1));
-    });
-    await refocusTreeNode(nodeId);
-  }
-
-  async function moveNodeDown(nodeId: string) {
-    const tree = config.getStructure();
-    if (!tree || !config.api.move) return;
-    const found = findParentAndIndex(tree.root, nodeId);
-    if (!found || found.index >= (found.parent.children?.length ?? 0) - 1) return;
-    await run(async () => {
-      config.applyStructure(await config.api.move!(nodeId, found.parent.id, found.index + 1));
-    });
-    await refocusTreeNode(nodeId);
-  }
-
-  async function indentNode(nodeId: string) {
-    const tree = config.getStructure();
-    if (!tree || !config.api.move) return;
-    const found = findParentAndIndex(tree.root, nodeId);
-    if (!found || found.index === 0) return;
-    const previousSibling = found.parent.children[found.index - 1];
-    if (previousSibling.scene_id) return;
-    const newPosition = previousSibling.children?.length ?? 0;
-    await run(async () => {
-      config.applyStructure(await config.api.move!(nodeId, previousSibling.id, newPosition));
-    });
-    await refocusTreeNode(nodeId);
-  }
-
-  async function outdentNode(nodeId: string) {
-    const tree = config.getStructure();
-    if (!tree || !config.api.move) return;
-    const parentFound = findParentAndIndex(tree.root, nodeId);
-    if (!parentFound) return;
-    if (parentFound.parent.id === tree.root.id) return;
-    const grandparentFound = findParentAndIndex(tree.root, parentFound.parent.id);
-    if (!grandparentFound) return;
-    await run(async () => {
-      config.applyStructure(await config.api.move!(nodeId, grandparentFound.parent.id, grandparentFound.index + 1));
-    });
-    await refocusTreeNode(nodeId);
-  }
-
-  // The domain half of drag-reorder: ViewNodeList owns the gesture and hands us
+  // The domain half of reorder: ViewNodeList owns the gesture + keyboard and hands us
   // the settled (moved, target, position) intent; we translate it to a
   // parent/index and call the move API. `into` drops append under the target;
   // before/after resolve against the target's parent, with the usual same-parent
@@ -481,25 +360,26 @@
   </div>
 </div>
 
-<div class="tree-keys" use:treeKeyboard>
-  <ViewNodeList
-    {result}
-    mode="tree"
-    active={isActiveNode}
-    collapsed={collapse.collapsed}
-    onReorder={config.supportsDrag ? handleReorder : undefined}
-    isContainer={(node) => node.entry_type !== config.leafType}
-    {row}
-  >
-    {#snippet whenEmpty()}
-      {#if !structure}
-        <p class="muted">Open or create a project to begin.</p>
-      {:else}
-        <p class="muted">{emptyLabel}</p>
-      {/if}
-    {/snippet}
-  </ViewNodeList>
-</div>
+<ViewNodeList
+  {result}
+  mode="tree"
+  active={isActiveNode}
+  collapsed={collapse.collapsed}
+  onReorder={config.supportsDrag ? handleReorder : undefined}
+  isContainer={(node) => node.entry_type !== config.leafType}
+  onRenameStart={config.supportsDrag ? (node) => startRename(node.id, node.title) : undefined}
+  onRenameCommit={(node) => commitRename(node.id)}
+  onRenameCancel={() => cancelRename()}
+  {row}
+>
+  {#snippet whenEmpty()}
+    {#if !structure}
+      <p class="muted">Open or create a project to begin.</p>
+    {:else}
+      <p class="muted">{emptyLabel}</p>
+    {/if}
+  {/snippet}
+</ViewNodeList>
 
 {#snippet row(node: EvalNode, ctx: RowCtx<EvalNode>)}
   {@const leaf = node.entry_type === config.leafType}
@@ -665,11 +545,5 @@
     display: flex;
     align-items: center;
     gap: 4px;
-  }
-
-  /* Transparent to layout — exists only to host the direct keydown listener
-     (see treeKeyboard) around the list. */
-  .tree-keys {
-    display: contents;
   }
 </style>

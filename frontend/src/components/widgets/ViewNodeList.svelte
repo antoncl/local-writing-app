@@ -70,6 +70,7 @@
   // sites lift their arrays via `nodeSet()` (lib/views/viewResult). There is no
   // `ViewResult | T[]` union and no `Array.isArray` branch here.
   import type { Snippet } from "svelte";
+  import { tick } from "svelte";
   import { SvelteSet } from "svelte/reactivity";
   import NodeList from "@/components/widgets/NodeList.svelte";
   import ViewNodeTree from "@/components/widgets/ViewNodeTree.svelte";
@@ -91,6 +92,9 @@
     onDblClick,
     onRename,
     onReorder,
+    onRenameStart,
+    onRenameCommit,
+    onRenameCancel,
     isContainer,
     collapsed = $bindable(new SvelteSet<string>()),
     defaultCollapsed,
@@ -118,7 +122,16 @@
     onClick?: (node: T) => void;
     onDblClick?: (node: T) => void;
     onRename?: (node: T, nextTitle: string) => void;
-    onReorder?: (moved: T, target: T, position: "before" | "after" | "into") => void;
+    // Reorder intent (drag OR keyboard). May return a Promise; the keyboard path
+    // awaits it before restoring focus to the moved row's new position.
+    onReorder?: (moved: T, target: T, position: "before" | "after" | "into") => void | Promise<void>;
+    // Keyboard rename routing. The wrapper owns the tree keydown listener; these
+    // relay F2 (start), Enter (commit), Escape (cancel) from the focused row /
+    // rename input. The edit STATE + styled input stay consumer-side (#112 4c-iii
+    // absorbs those). Present ⇒ the wrapper handles those keys for this list.
+    onRenameStart?: (node: T) => void;
+    onRenameCommit?: (node: T) => void;
+    onRenameCancel?: (node: T) => void;
     // Domain classification for drag: does this node accept an "into" drop (i.e.
     // it's a container, even an empty one)? The wrapper owns the drop-zone
     // mechanics; the consumer names what can contain. Absent ⇒ falls back to
@@ -167,22 +180,128 @@
   // One drag-gesture holder for the whole tree, threaded through the recursion
   // (inert unless `onReorder` is wired). See treeDrag.svelte.ts.
   const drag = new TreeDrag<T>();
+
+  // ── Tree keyboard (4c-ii) ────────────────────────────────────────────────
+  // The wrapper owns tree keyboard so every tree consumer inherits it. Ctrl+arrows
+  // reorder by translating to the SAME `onReorder(moved, target, position)` intent
+  // as drag (targets computed from the group tree — the wrapper knows siblings);
+  // F2/Enter/Escape relay to the rename hooks. Rides a DIRECT listener (see the
+  // `treeKeyboard` action) because Svelte-5 delegated `onkeydown` doesn't reach the
+  // consumer's `row` snippet DOM, which is mounted under a foreign delegation root.
+
+  // Locate a real node within the group tree: its sibling list + index + nearest
+  // real-node ancestor (the outdent target). Synthetic buckets are transparent —
+  // their `node` is null, so `parentNode` skips past them to the enclosing node.
+  type Located = { node: T; siblings: ViewGroup<T>[]; index: number; parentNode: T | null };
+  function locate(
+    id: string,
+    groups: ViewGroup<T>[] = effectiveGroups,
+    parentNode: T | null = null,
+  ): Located | null {
+    for (let i = 0; i < groups.length; i++) {
+      const g = groups[i];
+      if (g.nodeId === id && g.node) return { node: g.node, siblings: groups, index: i, parentNode };
+      if (g.children.length) {
+        const found = locate(id, g.children, g.node ?? parentNode);
+        if (found) return found;
+      }
+    }
+    return null;
+  }
+
+  async function reorderTo(moved: T, target: T, position: "before" | "after" | "into"): Promise<void> {
+    await onReorder?.(moved, target, position);
+    // The moved row is a fresh DOM element after the structure re-renders; keep
+    // focus on it so repeated Ctrl+arrows chain without a re-grab.
+    await tick();
+    const row = document.querySelector<HTMLElement>(`[data-node-id="${moved.id}"]`);
+    (row?.querySelector<HTMLElement>("button.node-row-click") ?? row)?.focus();
+  }
+
+  function handleReorderKey(event: KeyboardEvent, nodeId: string): void {
+    if (!onReorder) return;
+    const loc = locate(nodeId);
+    if (!loc) return;
+    const prev = loc.index > 0 ? loc.siblings[loc.index - 1] : null;
+    const next = loc.index < loc.siblings.length - 1 ? loc.siblings[loc.index + 1] : null;
+    if (event.key === "ArrowUp" && prev?.node) {
+      event.preventDefault();
+      void reorderTo(loc.node, prev.node, "before");
+    } else if (event.key === "ArrowDown" && next?.node) {
+      event.preventDefault();
+      void reorderTo(loc.node, next.node, "after");
+    } else if (event.key === "ArrowRight" && prev?.node && (isContainer ? isContainer(prev.node) : prev.children.length > 0)) {
+      event.preventDefault();
+      void reorderTo(loc.node, prev.node, "into");
+    } else if (event.key === "ArrowLeft" && loc.parentNode) {
+      event.preventDefault();
+      void reorderTo(loc.node, loc.parentNode, "after");
+    }
+  }
+
+  // Direct keydown listener for the whole tree (see the block comment above).
+  // Routes by the event target's data markers: rename input → commit/cancel;
+  // a focused row → F2 rename-start or Ctrl+arrow reorder. Add-popover keys are
+  // the popover's own.
+  function treeKeyboard(container: HTMLElement) {
+    const onKey = (event: KeyboardEvent) => {
+      const target = event.target;
+      if (!(target instanceof HTMLElement)) return;
+      if (target.closest(".row-add-popover")) return;
+      const input = target.closest<HTMLElement>("[data-node-edit-id]");
+      if (input) {
+        const node = locate(input.getAttribute("data-node-edit-id") ?? "")?.node;
+        if (!node) return;
+        if (event.key === "Enter") {
+          event.preventDefault();
+          onRenameCommit?.(node);
+        } else if (event.key === "Escape") {
+          event.preventDefault();
+          onRenameCancel?.(node);
+        }
+        return;
+      }
+      const row = target.closest<HTMLElement>("[data-node-id]");
+      const id = row?.getAttribute("data-node-id");
+      if (!id) return;
+      if (event.key === "F2") {
+        if (!onRenameStart) return;
+        event.preventDefault();
+        const node = locate(id)?.node;
+        if (node) onRenameStart(node);
+        return;
+      }
+      if (event.ctrlKey || event.metaKey) handleReorderKey(event, id);
+    };
+    container.addEventListener("keydown", onKey);
+    return { destroy: () => container.removeEventListener("keydown", onKey) };
+  }
 </script>
 
-<NodeList {mode} {searchPlaceholder} bind:searchValue {searchDebounceMs} {isEmpty} {whenEmpty}>
-  <ViewNodeTree
-    groups={effectiveGroups}
-    depth={0}
-    {collapsed}
-    annotations={result.annotations}
-    {active}
-    {onClick}
-    {onDblClick}
-    {onRename}
-    {onReorder}
-    {isContainer}
-    {drag}
-    {row}
-    {groupHeader}
-  />
-</NodeList>
+<div class="tree-keys" use:treeKeyboard>
+  <NodeList {mode} {searchPlaceholder} bind:searchValue {searchDebounceMs} {isEmpty} {whenEmpty}>
+    <ViewNodeTree
+      groups={effectiveGroups}
+      depth={0}
+      {collapsed}
+      annotations={result.annotations}
+      {active}
+      {onClick}
+      {onDblClick}
+      {onRename}
+      {onReorder}
+      {isContainer}
+      {drag}
+      {row}
+      {groupHeader}
+    />
+  </NodeList>
+</div>
+
+<style>
+  /* Transparent to layout — hosts the direct keydown listener (treeKeyboard)
+     around the list without introducing a box. */
+  .tree-keys {
+    display: contents;
+  }
+</style>

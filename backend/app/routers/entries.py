@@ -31,6 +31,7 @@ from app.models import (
 from app.models_views import (
     CreateViewRequest,
     SaveViewRequest,
+    UpdateViewUiRequest,
     ViewNode,
     ViewNodeList,
 )
@@ -63,6 +64,15 @@ def get_view(view_id: str) -> ViewNode:
 def save_view(view_id: str, request: SaveViewRequest) -> ViewNode:
     with translate_errors():
         return service.save_view(view_id, request)
+
+
+@router.put("/api/views/{view_id}/ui", response_model=ViewNode)
+def update_view_ui(view_id: str, request: UpdateViewUiRequest) -> ViewNode:
+    """Lock-free fold/ui write (ADR-0036) — updates ONLY the collapsed-group
+    state, outside the spec revision-lock, so it can't 409 against a designer
+    save."""
+    with translate_errors():
+        return service.update_view_ui(view_id, request)
 
 
 @router.delete("/api/views/{view_id}", response_model=ViewNodeList)

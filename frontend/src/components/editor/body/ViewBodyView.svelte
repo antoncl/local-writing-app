@@ -163,7 +163,7 @@
         })),
       };
     }
-    const g = specToGraph(node.spec);
+    const g = specToGraph(node.spec, schema);
     return {
       nodes: g.nodes.map((n) => toFlowNode(n.id, n.kind, n.data, n.position)),
       edges: g.edges.map((e) => ({
@@ -229,7 +229,7 @@
   // frame (#96). The autosave effect still tracks positions via toLayout().
   let specMemo: { key: string; spec: ViewSpec } | null = null;
   let spec = $derived.by<ViewSpec>(() => {
-    const next = graphToSpec(toGraph(), { kind, sort });
+    const next = graphToSpec(toGraph(), { kind, sort, schema });
     const key = JSON.stringify(next);
     if (specMemo && specMemo.key === key) return specMemo.spec;
     specMemo = { key, spec: next };

@@ -47,7 +47,7 @@ const edge = (source: string, target: string, targetHandle = "in"): ViewGraph["e
 });
 
 describe("viewGraph serialization (round-trip)", () => {
-  it("empty graph → null expr (whole universe)", () => {
+  it("empty graph → null expr (the empty set, ADR-0036)", () => {
     const graph: ViewGraph = { nodes: [out()], edges: [] };
     expect(graphToExpr(graph)).toBeNull();
   });
@@ -107,10 +107,43 @@ describe("viewGraph serialization (round-trip)", () => {
 });
 
 describe("injector: All (universal)", () => {
-  it("a bare All → whole universe (null expr)", () => {
+  it("a bare All → the explicit whole-kind roster (descendants_of the kind root, ADR-0036)", () => {
     const all = node("all", {}, 0);
     const graph: ViewGraph = { nodes: [out(), all], edges: [edge(all.id, OUTPUT_NODE_ID)] };
+    expect(graphToExpr(graph, "lore")).toEqual({ descendants_of: "lore:base" });
+    // Kind-less (the pure round-trip helper) leaves a bare universe as null.
     expect(graphToExpr(graph)).toBeNull();
+  });
+
+  // #211: the kind-root `descendants_of` a duplicated default view carries must
+  // LIFT back to an `all` node (not a "Type & subtypes" node whose abstract root
+  // the picker filters out). Closes the lower/lift asymmetry.
+  it("specToGraph lifts a kind-root descendants_of back to an All node", () => {
+    // Abstract-rooted kind: `${kind}:base` fallback (no schema needed).
+    const g = specToGraph({ kind: "lore", expr: { descendants_of: "lore:base" } });
+    expect(g.nodes.filter((n) => n.kind !== "output").map((n) => n.kind)).toEqual(["all"]);
+    // Round-trips: All → descendants_of:lore:base → All again.
+    expect(graphToSpec(g, { kind: "lore" }).expr).toEqual({ descendants_of: "lore:base" });
+  });
+
+  it("specToGraph keeps a NON-root descendants_of as a Type & subtypes node", () => {
+    const g = specToGraph({ kind: "lore", expr: { descendants_of: "lore:deity" } });
+    const injectors = g.nodes.filter((n) => n.kind !== "output");
+    expect(injectors.map((n) => n.kind)).toEqual(["descendants_of"]);
+    expect(injectors[0].data).toMatchObject({ descendants_of: "lore:deity" });
+  });
+
+  it("specToGraph lifts a concrete-root kind's universe to All when the schema resolves it", () => {
+    // Assistant's root is the concrete `assistant:assistant` (no abstract base) —
+    // only the threaded schema, not the `${kind}:base` fallback, resolves it.
+    const schema = {
+      entry_types: { "assistant:assistant": { kind: "assistant", name: "Assistant" } },
+    } as unknown as Parameters<typeof specToGraph>[1];
+    const g = specToGraph({ kind: "assistant", expr: { descendants_of: "assistant:assistant" } }, schema);
+    expect(g.nodes.filter((n) => n.kind !== "output").map((n) => n.kind)).toEqual(["all"]);
+    // Without the schema, the concrete root has no match → stays a type node.
+    const gNoSchema = specToGraph({ kind: "assistant", expr: { descendants_of: "assistant:assistant" } });
+    expect(gNoSchema.nodes.filter((n) => n.kind !== "output").map((n) => n.kind)).toEqual(["descendants_of"]);
   });
 });
 
@@ -216,7 +249,7 @@ describe("named handles → grouped spec", () => {
     ]);
   });
 
-  it("a whole-universe handle (bare All) → group with null expr", () => {
+  it("a whole-universe handle (bare All) → group with the explicit roster expr (ADR-0036)", () => {
     const output = out({ handles: [{ id: "h0", name: "Everything" }, { id: "h1", name: "Gods" }] });
     const all = node("all", {}, 0);
     const gods = node("descendants_of", { descendants_of: "lore:deity" }, 100);
@@ -226,7 +259,7 @@ describe("named handles → grouped spec", () => {
     };
     const spec = graphToSpec(graph, { kind: "lore" });
     expect(spec.groups).toEqual([
-      { name: "Everything", expr: null },
+      { name: "Everything", expr: { descendants_of: "lore:base" } },
       { name: "Gods", expr: { descendants_of: "lore:deity" } },
     ]);
   });
@@ -300,12 +333,14 @@ describe("graphToSpec — orphaned & sorted-empty handles (#93)", () => {
     const graph: ViewGraph = {
       nodes: [output, s, gods],
       // The sorter has NO upstream membership; pre-fix the group and its sort were
-      // dropped as "empty". Now it persists as a sorted whole-universe group.
+      // dropped as "empty". Now it persists as a sorted whole-roster group — the
+      // universe coercion (empty+sort → UNIVERSE) lowers to the explicit roster
+      // expr, not null (ADR-0036).
       edges: [edge(s.id, OUTPUT_NODE_ID, "h0"), edge(gods.id, OUTPUT_NODE_ID, "h1")],
     };
     const spec = graphToSpec(graph, { kind: "lore" });
     expect(spec.groups).toEqual([
-      { name: "All sorted", expr: null, sort: { by: "title", dir: "asc" } },
+      { name: "All sorted", expr: { descendants_of: "lore:base" }, sort: { by: "title", dir: "asc" } },
       { name: "Gods", expr: { descendants_of: "lore:deity" } },
     ]);
   });

@@ -26,8 +26,8 @@
 // (nothing wired). The sentinels let filters-off-`All` and set ops fold to the
 // minimal shipped `expr` without a universe leaf in the grammar.
 
-import type { ViewExpr, ViewFieldOf, ViewFieldPredicate, ViewGroupSpec, ViewNestMatch, ViewNestOp, ViewOperand, ViewParam, ViewSort, ViewSpec } from "@/lib/types";
-import { REFERENCES_FIELD, SELF_VAR } from "@/lib/views/evaluateView";
+import type { MetadataSchema, ViewExpr, ViewFieldOf, ViewFieldPredicate, ViewGroupSpec, ViewNestMatch, ViewNestOp, ViewOperand, ViewParam, ViewSort, ViewSpec } from "@/lib/types";
+import { kindUniverseExpr, REFERENCES_FIELD, SELF_VAR } from "@/lib/views/evaluateView";
 
 export type LeafKind = "type" | "descendants_of" | "tagged" | "field" | "hand_picked" | "view_ref";
 export type CombinatorKind = "union" | "intersect" | "difference" | "complement";
@@ -303,10 +303,25 @@ const UNIVERSE: Built = { tag: "universe" };
 const EMPTY: Built = { tag: "empty" };
 const built = (expr: ViewExpr): Built => ({ tag: "expr", expr });
 
-// universe/empty → null (whole universe of the kind, or nothing wired → also the
-// whole universe, matching the empty-graph default). A concrete expr → itself.
+// Inner lowering: a concrete expr → itself; universe/empty → null. Used for
+// positions the grammar can't hand a universal-set operand (a `nest` seed, a
+// `field_of` input) — there an unwired/`All` branch still degrades to null (→
+// dropped/empty), exactly as before ADR-0036. The OUTER serialization points
+// (`materializeOuter`, called from graphToSpec/graphToExpr) instead render a
+// top-level/group `universe` as the explicit `descendants_of:<kind-root>` — post
+// ADR-0036 null means the empty set, so "everything" can no longer ride on null.
 function materialize(b: Built): ViewExpr | null {
   return b.tag === "expr" ? b.expr : null;
+}
+
+// Outer lowering (ADR-0036 §3): a top-level or group `universe` becomes the
+// explicit whole-roster expr for the anchor kind; `empty` → null (= empty set);
+// a concrete expr → itself. `universeExpr` is resolved once per lowering from the
+// graph's kind + schema (null in the kind-less `graphToExpr` test helper, where a
+// bare universe stays null).
+function materializeOuter(b: Built, universeExpr: ViewExpr | null): ViewExpr | null {
+  if (b.tag === "universe") return universeExpr;
+  return materialize(b);
 }
 
 function unionBuilt(parts: Built[]): Built {
@@ -658,23 +673,29 @@ function collectParams(graph: ViewGraph): ViewParam[] {
 // Serialize the graph reachable from the View node into a ViewSpec. 0–1
 // populated handles → a flat `expr`; 2+ → an ordered `groups` list (ADR-0027).
 // Promoted formals reachable from the output become `params` (#184 Phase 1b).
-export function graphToSpec(graph: ViewGraph, base: { kind: string; sort?: ViewSort | null }): ViewSpec {
+export function graphToSpec(
+  graph: ViewGraph,
+  base: { kind: string; sort?: ViewSort | null; schema?: MetadataSchema | null },
+): ViewSpec {
   const byId = new Map(graph.nodes.map((n) => [n.id, n]));
   const handles = outputHandles(byId.get(OUTPUT_NODE_ID));
   const handleIds = handles.map((h) => h.id);
   const segments = handles.map((h) => lowerSegment(graph, byId, h, handleIds));
   const populated = segments.filter((s) => s.built.tag !== "empty");
 
+  // The explicit "everything" expr an `All`/universe segment lowers to (ADR-0036).
+  const universeExpr = kindUniverseExpr(base.kind, base.schema ?? null);
+
   const params = collectParams(graph);
   const withParams = (s: ViewSpec): ViewSpec => (params.length > 0 ? { ...s, params } : s);
 
   if (handles.length <= 1 || populated.length <= 1) {
     const seg = populated[0];
-    return withParams({ kind: base.kind, expr: seg ? materialize(seg.built) : null, sort: seg?.sort ?? base.sort ?? null });
+    return withParams({ kind: base.kind, expr: seg ? materializeOuter(seg.built, universeExpr) : null, sort: seg?.sort ?? base.sort ?? null });
   }
 
   const groups: ViewGroupSpec[] = populated.map((s, i) => {
-    const g: ViewGroupSpec = { name: s.handle.name?.trim() || `Group ${i + 1}`, expr: materialize(s.built) };
+    const g: ViewGroupSpec = { name: s.handle.name?.trim() || `Group ${i + 1}`, expr: materializeOuter(s.built, universeExpr) };
     if (s.sort) g.sort = s.sort;
     if (s.handle.color) g.color = s.handle.color;
     return g;
@@ -683,12 +704,14 @@ export function graphToSpec(graph: ViewGraph, base: { kind: string; sort?: ViewS
 }
 
 // Flat single-segment lowering — the root `expr` of a designer graph, ignoring
-// handles/grouping. Used for previews of the default handle and by round-trip
-// tests. Returns null for an empty/unwired graph (→ whole universe).
-export function graphToExpr(graph: ViewGraph): ViewExpr | null {
+// handles/grouping. Used by round-trip tests. Returns null for an empty/unwired
+// graph (→ the empty set, ADR-0036). A bare `All`/universe graph lowers to the
+// explicit `descendants_of:<kind-root>` when `kind` is supplied; without a kind
+// (the pure round-trip helper) a universe stays null.
+export function graphToExpr(graph: ViewGraph, kind?: string): ViewExpr | null {
   const byId = new Map(graph.nodes.map((n) => [n.id, n]));
   const parts = orderedUpstream(graph, byId, OUTPUT_NODE_ID).map((e) => buildNode(graph, byId, e.source, new Set()));
-  return materialize(unionBuilt(parts));
+  return materializeOuter(unionBuilt(parts), kind ? kindUniverseExpr(kind, null) : null);
 }
 
 // --- spec → graph (reopen fallback) --------------------------------------
@@ -700,12 +723,23 @@ const ROW_HEIGHT = 120;
 // auto-layout. The primary reopen path is the persisted `layout`; this is the
 // fallback for designer-less / backend-authored views. A grouped spec fans each
 // group into its own named handle (+ a Sorter node when the group sorts).
-export function specToGraph(spec: ViewSpec | null | undefined): ViewGraph {
+//
+// `schema` closes the lower/lift asymmetry (#211): the designer's `All` injector
+// lowers to `descendants_of:<kind-root>` (`kindUniverseExpr`), so on reopen a
+// `descendants_of` that EQUALS the kind's universe root must lift back to an `all`
+// node — not a "Type & subtypes" node whose abstract root (`scene:base`/`lore:base`)
+// the type picker filters out, leaving a blank unresettable dropdown. Resolving the
+// root needs the schema (`${kind}:base` alone misses concrete-root kinds like
+// assistant); absent it we skip the collapse and lift verbatim (round-trip helpers).
+export function specToGraph(spec: ViewSpec | null | undefined, schema?: MetadataSchema | null): ViewGraph {
   const nodes: ViewGraphNode[] = [];
   const edges: ViewGraphEdge[] = [];
   const rowCursor = { value: 0 };
   let counter = 0;
   const nextId = () => `n${counter++}`;
+  // The `descendants_of` value an `All`/universe node lowers to for this kind — the
+  // sentinel that lifts back to `all`. Null when kind is unknown (bare-expr helper).
+  const universeRoot = spec?.kind ? kindUniverseExpr(spec.kind, schema).descendants_of ?? null : null;
 
   const outputNode: ViewGraphNode = { id: OUTPUT_NODE_ID, kind: "output", position: { x: 0, y: 0 }, data: {} };
   nodes.push(outputNode);
@@ -809,7 +843,11 @@ export function specToGraph(spec: ViewSpec | null | undefined): ViewGraph {
     // Leaves. `!= null` (not `!== undefined`): the backend serializes ViewExpr
     // densely, so every unused slot arrives as `null`, not absent.
     if (e.type != null) return addNode("type", depth, { type: e.type });
-    if (e.descendants_of != null) return addNode("descendants_of", depth, { descendants_of: e.descendants_of });
+    if (e.descendants_of != null) {
+      // A kind-root `descendants_of` is the universe → the `All` injector (#211).
+      if (universeRoot != null && e.descendants_of === universeRoot) return addNode("all", depth, {});
+      return addNode("descendants_of", depth, { descendants_of: e.descendants_of });
+    }
     if (e.tagged != null) return addNode("tagged", depth, { tagged: e.tagged });
     if (e.field != null) {
       const v = e.field.value;

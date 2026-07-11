@@ -36,6 +36,7 @@ import type {
   ViewSort,
   ViewSpec,
 } from "@/lib/types";
+import { kindRootEntryTypeId } from "@/lib/utils/schemaTypeHelpers";
 import { projectReferences } from "@/lib/views/referenceIndex";
 
 // The minimal node shape the evaluator reads. Every `*EntrySummary` satisfies
@@ -187,10 +188,24 @@ export type EvalContext = {
   referenceIndex?: ReadonlyMap<string, ReadonlySet<string>>;
 };
 
-// Build an implicit default view for a pane: the whole universe of `kind`,
-// in stored/manual order. The seam every NodeList routes through (ADR-0022).
-export function defaultView(kind: string): ViewSpec {
-  return { kind, expr: null, sort: { by: "manual" } };
+// The explicit "whole roster of `kind`" membership expr (ADR-0036 §3). Replaces
+// the retired null-means-everything default: `descendants_of:<kind-root>`, which
+// is seed-inclusive (`descendantFqns` seeds the family with the root FQN itself),
+// so it selects the root type *and* every descendant = the entire kind. The
+// kind's parentless root comes from the schema (`kindRootEntryTypeId`): the
+// canonical `<kind>:base` where one exists, else the single concrete root
+// (`assistant:assistant`, `chat:chat_session`, …). With no schema we fall back to
+// `<kind>:base` — the convention for kinds that carry an abstract base.
+export function kindUniverseExpr(kind: string, schema?: MetadataSchema | null): ViewExpr {
+  return { descendants_of: kindRootEntryTypeId(schema ?? null, kind) ?? `${kind}:base` };
+}
+
+// Build the default view for a pane: the whole roster of `kind`, in stored/manual
+// order. Now an EXPLICIT spec (`descendants_of:<kind-root>`), not `expr: null` —
+// post-ADR-0036 an unspecified view is empty, so "everything" must be stated.
+// The seam every NodeList routes through (ADR-0022).
+export function defaultView(kind: string, schema?: MetadataSchema | null): ViewSpec {
+  return { kind, expr: kindUniverseExpr(kind, schema), sort: { by: "manual" } };
 }
 
 // Every node id present in a tree result's group hierarchy — the surviving
@@ -318,7 +333,9 @@ function withDiag<T extends EvalNode>(state: RunState<T>, result: ViewResult<T>)
   return state.nestRan ? { ...result, diagnostics: state.diag } : result;
 }
 
-// Evaluate one membership segment: a `null` expr is the whole universe. Returns
+// Evaluate one membership segment: an absent (`null`) expr is the EMPTY set —
+// an unspecified view/handle shows nothing (ADR-0036 §1); "everything" must be
+// stated explicitly (`descendants_of:<kind-root>`, see `defaultView`). Returns
 // the members as a list in universe order, then applies the segment's sort.
 function evalSegment<T extends EvalNode>(
   state: RunState<T>,
@@ -326,7 +343,7 @@ function evalSegment<T extends EvalNode>(
   sort: ViewSort | null | undefined,
   neutralUniverse = true,
 ): T[] {
-  const memberIds = expr ? evalExpr(state, expr, neutralUniverse) : new Set(state.order.keys());
+  const memberIds = expr ? evalExpr(state, expr, neutralUniverse) : new Set<string>();
   const members = state.universe.filter((n) => memberIds.has(n.id));
   return sortNodes(members, sort, state.schema);
 }
@@ -663,9 +680,10 @@ function evalLeaf<T extends EvalNode>(state: RunState<T>, expr: ViewExpr, neutra
   if (expr.view_ref != null) {
     return evalViewRef(state, expr.view_ref, neutralUniverse);
   }
-  // Empty expr node: no constraint → whole universe (defensive; the grammar
-  // requires a primary slot, but treat a stray {} as pass-through).
-  return new Set(state.order.keys());
+  // Empty expr node: no primary slot set → the EMPTY set (ADR-0036 §1; the
+  // grammar requires a primary slot, and an unspecified leaf now selects
+  // nothing — an absent specification never smuggles in the maximal one).
+  return new Set<string>();
 }
 
 function evalViewRef<T extends EvalNode>(state: RunState<T>, viewId: string, neutralUniverse = true): Set<string> {
@@ -679,15 +697,15 @@ function evalViewRef<T extends EvalNode>(state: RunState<T>, viewId: string, neu
     // `view_ref` still drops out cleanly in a subtractive position instead of
     // re-emptying it. A grouped view (named handles, `groups` set / `expr` null)
     // carries no top-level `expr`, so union every handle's expr (v1 depth <= 1); a
-    // stray group without an expr is a whole-universe pass-through, mirroring
-    // evalSegment.
+    // handle with no expr contributes nothing — an unspecified segment is empty
+    // (ADR-0036 §1), mirroring evalSegment.
     if (ref.groups && ref.groups.length > 0) {
       return unionAll(
-        ref.groups.map((g) => (g.expr ? evalExpr(state, g.expr, neutralUniverse) : new Set(state.order.keys()))),
+        ref.groups.map((g) => (g.expr ? evalExpr(state, g.expr, neutralUniverse) : new Set<string>())),
       );
     }
     if (ref.expr) return evalExpr(state, ref.expr, neutralUniverse);
-    return new Set(state.order.keys()); // no primary slot -> pass-through
+    return new Set<string>(); // no primary slot -> empty (ADR-0036 §1)
   } finally {
     state.viewStack.pop();
   }

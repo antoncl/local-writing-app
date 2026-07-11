@@ -170,6 +170,7 @@ lexicon grows by PR, never ad hoc:
 | `⋯` | more actions (menu) |
 | `⋮⋮` | drag handle |
 | `✎` | rename / edit in place |
+| `⧉` | duplicate — fork the item into a new editable copy (distinct from `+` create-blank) |
 | `★` | designated / bound — the marked one of a set (gold when active — the one gold) |
 | `▸ / ▾` | collapse / expand |
 | `⌕` | search |

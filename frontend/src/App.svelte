@@ -5,7 +5,7 @@
   import NodeEditor from "@/components/editor/NodeEditor.svelte";
   import DirectoryPickerModal from "@/components/dialogs/DirectoryPickerModal.svelte";
   import SchemaPanes from "@/components/schema/SchemaPanes.svelte";
-  import Tree from "@/components/panes/Tree.svelte";
+  import StructureTree from "@/components/panes/StructureTree.svelte";
   import Lore from "@/components/panes/Lore.svelte";
   import Assistants from "@/components/panes/Assistants.svelte";
   import Prompts from "@/components/panes/Prompts.svelte";
@@ -15,7 +15,7 @@
   import Search from "@/components/panes/Search.svelte";
   import Todo from "@/components/panes/Todo.svelte";
   import Workspace from "@/components/workspace/Workspace.svelte";
-  import { isLeafNode, entryTypeChoicesByKind } from "@/lib/utils/treeHelpers";
+  import { isLeafNode } from "@/lib/utils/treeHelpers";
   import NewProjectModal from "@/components/dialogs/NewProjectModal.svelte";
   import MachineSettingsDialog from "@/components/dialogs/MachineSettingsDialog.svelte";
   import ConfirmModal from "@/components/dialogs/ConfirmModal.svelte";
@@ -65,14 +65,9 @@
     metadataSchemaStore,
     projectSchemaLayerId,
   } from "@/lib/stores/schema";
-  import { referenceIndexStore } from "@/lib/stores/references";
   import { implicitContextMatcherStore } from "@/lib/stores/derived";
   import { paneViews } from "@/lib/stores/paneViews.svelte";
-  import { evaluateView, treeNodeIds } from "@/lib/views/evaluateView";
-  import { structureToEvalNodes } from "@/lib/views/structureNodes";
   import ViewSwitcher from "@/components/widgets/ViewSwitcher.svelte";
-  import NodeList from "@/components/widgets/NodeList.svelte";
-  import NodeRow from "@/components/widgets/NodeRow.svelte";
   import { focusedDocumentStore } from "@/lib/stores/editorFocus";
   import { workspaceLayout, isEditorPanelId } from "@/lib/stores/workspaceLayout.svelte";
   import { type PresetName } from "@/lib/stores/workspaceLayout.serialize";
@@ -107,10 +102,11 @@
   type AppState =
     | { name: "needsProject" }
     | { name: "projectOpen"; project: ProjectInfo };
-  // The tree rendering + inline CRUD live in Tree.svelte; the per-kind
-  // TreeConfig contracts, node create/cascade-delete/collapse/add-menu actions,
-  // and the lore→research migration live in the treeActions controller
-  // (lib/stores/treeActions). App owns only the structure data it passes down.
+  // The tree rendering + inline CRUD live in StructureTree.svelte (via
+  // ViewNodeList); the per-kind TreeConfig contracts, node
+  // create/cascade-delete/add-menu actions, and the lore→research migration
+  // live in the treeActions controller (lib/stores/treeActions). App owns only
+  // the structure data + view spec it passes down.
 
   let projectPath = $state("");
   let projectTitle = $state("Untitled Project");
@@ -132,12 +128,9 @@
   let appState = $state<AppState>({ name: "needsProject" });
   let tagsManagerOpen = $state(false);
   let assistantTagManagerOpen = $state(false);
-  // Sentinel key for the Lore "+ Entry" type-picker, reusing the tree add-menu
-  // machinery (treeActions.toggleAddMenu / addMenuPosition / closeAddMenu). Lore
-  // groups dynamically so it has no per-type "+ Entry" like Prompts — the
-  // pane-header button offers the choice instead. Deprecated types (Note) are
-  // filtered out by entryTypeChoicesByKind, so notes can't be created (#67).
-  const LORE_ADD_MENU_KEY = "lore:new";
+  // The Lore pane owns its own add-menu (a ViewNodeList feature, #112 4c-iv); this
+  // ref lets the pane-header "+ Entry" button drive it.
+  let loreRef = $state<{ toggleAddMenu: (event?: MouseEvent) => void; isAddMenuOpen: () => boolean }>();
   let activeParentId: string | undefined = undefined;
   let draftTitleByScene = $state(new Map<string, string>());
   // The schema-authoring surface (state, the entry-type→kind→tree cascade, and
@@ -216,7 +209,6 @@
     projectSession.onOpenWorkspace = openProjectWorkspace;
     projectSession.onProjectDataLoaded = () => schemaPanes?.syncSelection();
     cleanupThemeWiring = installThemeWiring();
-    document.addEventListener("mousedown", handleDocumentMousedown);
     // Eagerly fetch machine settings (so the chat panel + inputs dialog can show
     // the assistant roster without a round-trip) and auto-rehydrate the
     // last-opened project so an HMR reload / plain F5 doesn't drop the user back
@@ -227,18 +219,9 @@
     void refreshAssistantTags();
     return () => {
       editorPanes.dispose();
-      document.removeEventListener("mousedown", handleDocumentMousedown);
       cleanupThemeWiring?.();
     };
   });
-
-  function handleDocumentMousedown(event: MouseEvent) {
-    const target = event.target as HTMLElement | null;
-    const inAnchorOrPopover = target?.closest(".tree-menu-anchor, .row-add-popover");
-    if (treeActions.addMenuOpenFor !== null && !inAnchorOrPopover) {
-      treeActions.closeAddMenu();
-    }
-  }
 
   // The cross-subsystem workspace wiring, injected into projectSession as
   // onOpenWorkspace and run before loadProjectData. projectSession owns the
@@ -247,7 +230,6 @@
   function openProjectWorkspace(nextProject: ProjectInfo) {
     resetEditorWorkspace();
     projectPath = nextProject.root_path;
-    treeActions.loadCollapseForProject(projectPath);
     workspaceLayout.loadForProject(projectPath);
     layoutPresets.load();
     projectTitle = nextProject.title;
@@ -551,43 +533,18 @@
   }
   let validation = $derived($validationStore);
   let metadataSchema = $derived($metadataSchemaStore);
-  let referenceIndex = $derived($referenceIndexStore);
   let promptEntries = $derived($promptEntriesStore);
   let assistantEntries = $derived($assistantEntriesStore);
   // Selected-view specs/presentations per switchable pane (0.5.0 step 4, #81,
   // doc §5). These runes-side reads of paneViews bridge to the legacy `$:` panes
   // by flowing in as props (feedback_svelte5_reactivity_traps).
-  let loreViewSpec = $derived(paneViews.specFor("lore"));
+  let loreViewSpec = $derived(paneViews.specFor("lore", metadataSchema));
   let loreViewPresentation = $derived(paneViews.presentationFor("lore"));
-  let assistantViewSpec = $derived(paneViews.specFor("assistant"));
+  let assistantViewSpec = $derived(paneViews.specFor("assistant", metadataSchema));
   let assistantViewPresentation = $derived(paneViews.presentationFor("assistant"));
-  // Draft: color annotations only — the tree keeps its structural shape
-  // (ADR-0022). Evaluate the selected scene view over the flattened structure
-  // and hand the per-node colors to the Tree; membership/ordering are ignored.
-  let draftColorAnnotations = $derived.by(() => {
-    const result = evaluateView(paneViews.specFor("scene"), structureToEvalNodes(structure), {
-      schema: metadataSchema,
-      resolveView: paneViews.resolveView,
-      referenceIndex,
-    });
-    const map = new Map<string, string | null>();
-    for (const [id, ann] of result.annotations) map.set(id, ann.color);
-    return map;
-  });
-  // Draft membership pruning (#101): when the selected view carries a filter,
-  // narrow the tree to matching scenes + their kept ancestors (evaluate as a
-  // `tree` and collect the surviving node ids). `null` = the whole-universe
-  // default → no pruning, full structural tree.
-  let draftVisibleIds = $derived.by(() => {
-    const spec = paneViews.specFor("scene");
-    if (!spec.expr && !(spec.groups && spec.groups.length)) return null;
-    const result = evaluateView({ ...spec, presentation: "tree" }, structureToEvalNodes(structure), {
-      schema: metadataSchema,
-      resolveView: paneViews.resolveView,
-      referenceIndex,
-    });
-    return treeNodeIds(result.groups);
-  });
+  // Draft/Research tree evaluation now lives inside StructureTree (#112): it
+  // derives one ViewResult from `structure` + the pane's viewSpec, replacing the
+  // App-side double-eval (color annotations + membership pruning) that stood here.
   $effect.pre(() => {
     draftTitleByScene = computeDraftTitleOverrides(editorPanes.panes);
   });
@@ -691,63 +648,43 @@
   {/snippet}
 
   {#snippet outlineActions()}
-    <ViewSwitcher kind="scene" />
+    <ViewSwitcher kind="scene" schema={metadataSchema} />
   {/snippet}
   {#snippet outlineBody()}
     <div class="pane-content">
-      <Tree
+      <StructureTree
         config={treeActions.manuscriptTree}
         {structure}
-        colorAnnotations={draftColorAnnotations}
-        visibleIds={draftVisibleIds}
-        collapsed={treeActions.collapsedStructureNodes}        draftTitles={draftTitleByScene}
+        viewSpec={paneViews.specFor("scene", metadataSchema)}
+        draftTitles={draftTitleByScene}
         sectionLabel="Scenes"
         emptyLabel="No scenes yet."
         {run}
         onRequestDelete={(node) => treeActions.requestDeleteTreeNode(treeActions.manuscriptTree, node)}
-        addMenuOpenFor={treeActions.addMenuOpenFor}
-        addMenuPosition={treeActions.addMenuPosition}
-        onToggleAddMenu={(nodeId, event) => treeActions.toggleAddMenu(nodeId, event)}
-        onCloseAddMenu={() => treeActions.closeAddMenu()}
       />
     </div>
   {/snippet}
 
   {#snippet loreActions()}
-      <ViewSwitcher kind="lore" />
+      <ViewSwitcher kind="lore" schema={metadataSchema} />
+      <!-- The add-menu popover is owned by Lore's ViewNodeList (mode-agnostic,
+           #112 4c-iv); this header button just drives its imperative handles. -->
       <div class="tree-menu-anchor">
         <button
           class="pin-button"
           type="button"
           title="Add entry"
           aria-label="Add entry"
+          class:active={loreRef?.isAddMenuOpen() ?? false}
           onmousedown={(event) => event.stopPropagation()}
-          onclick={(event) => treeActions.toggleAddMenu(LORE_ADD_MENU_KEY, event)}
+          onclick={(event) => loreRef?.toggleAddMenu(event)}
         >+</button>
-        {#if treeActions.addMenuOpenFor === LORE_ADD_MENU_KEY}
-          <div
-            class="row-add-popover"
-            style={treeActions.addMenuPosition ? `top: ${treeActions.addMenuPosition.top}px; right: ${treeActions.addMenuPosition.right}px` : ""}
-          >
-            <span class="row-add-popover-heading">New entry</span>
-            <NodeList isEmpty={entryTypeChoicesByKind(metadataSchema, "lore").length === 0}>
-              {#each entryTypeChoicesByKind(metadataSchema, "lore") as choice (choice.id)}
-                <NodeRow
-                  title={choice.name}
-                  onClick={() => { treeActions.newLoreEntry(choice.id); treeActions.closeAddMenu(); }}
-                />
-              {/each}
-              {#snippet whenEmpty()}
-                <p class="muted">No entry types defined.</p>
-              {/snippet}
-            </NodeList>
-          </div>
-        {/if}
       </div>
   {/snippet}
   {#snippet loreBody()}
     <div class="pane-content">
       <Lore
+        bind:this={loreRef}
         entries={loreEntries}
         viewSpec={loreViewSpec}
         presentation={loreViewPresentation}
@@ -758,18 +695,15 @@
 
   {#snippet researchBody()}
     <div class="pane-content">
-      <Tree
+      <StructureTree
         config={treeActions.researchTree}
         structure={researchStructure}
-        collapsed={treeActions.collapsedResearchNodes}        draftTitles={draftTitleByScene}
+        viewSpec={paneViews.specFor("research", metadataSchema)}
+        draftTitles={draftTitleByScene}
         sectionLabel="Notes"
         emptyLabel="No topics or notes yet."
         {run}
         onRequestDelete={(node) => treeActions.requestDeleteTreeNode(treeActions.researchTree, node)}
-        addMenuOpenFor={treeActions.addMenuOpenFor}
-        addMenuPosition={treeActions.addMenuPosition}
-        onToggleAddMenu={(nodeId, event) => treeActions.toggleAddMenu(nodeId, event)}
-        onCloseAddMenu={() => treeActions.closeAddMenu()}
       />
     </div>
   {/snippet}
@@ -800,7 +734,7 @@
   {/snippet}
 
   {#snippet assistantsActions()}
-      <ViewSwitcher kind="assistant" />
+      <ViewSwitcher kind="assistant" schema={metadataSchema} />
       <button class="pin-button" type="button" title="Add assistant" aria-label="Add assistant" onmousedown={(event) => event.stopPropagation()} onclick={() => treeActions.newAssistantEntry()}>+</button>
       <button class="pin-button" type="button" title="Assistant tag colors" onmousedown={(event) => event.stopPropagation()} onclick={() => (assistantTagManagerOpen = true)}>Tags…</button>
   {/snippet}

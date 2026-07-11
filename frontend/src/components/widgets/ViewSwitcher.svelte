@@ -8,16 +8,25 @@
 <script lang="ts">
   import { paneViews } from "@/lib/stores/paneViews.svelte";
   import { editorPanes } from "@/lib/stores/editorPanes.svelte";
+  import type { MetadataSchema } from "@/lib/types";
 
   interface Props {
     // The pane's anchor kind ("lore" / "scene" / "assistant").
     kind: string;
+    // Resolves the kind's root type when duplicating an un-materialized default.
+    schema?: MetadataSchema | null;
   }
-  let { kind }: Props = $props();
+  let { kind, schema }: Props = $props();
 
   let open = $state(false);
 
   let saved = $derived(paneViews.viewsFor(kind));
+  // The pane's system default (ADR-0036 §5) is presented AS the default entry
+  // (read-only, Duplicate-not-Edit) rather than a pickable saved view — selecting
+  // it via id would break the pane's intrinsic default presentation (Lore/
+  // Assistants group vs. the default view's flat spec). Only user views are
+  // pickable rows below.
+  let userViews = $derived(saved.filter((v) => !v.system));
   let selectedId = $derived(paneViews.selectedId(kind));
   let currentLabel = $derived(
     selectedId ? (saved.find((v) => v.id === selectedId)?.title ?? "View") : "Default view",
@@ -41,6 +50,11 @@
   function editView(id: string): void {
     open = false;
     void editorPanes.openView(id);
+  }
+
+  function duplicateDefault(): void {
+    open = false;
+    void editorPanes.duplicateDefaultView(kind, schema);
   }
 
   function deleteView(id: string, title: string): void {
@@ -77,18 +91,31 @@
   </button>
   {#if open}
     <div class="view-switcher-popover" role="listbox">
-      <button
-        class="view-switcher-item"
-        class:selected={!selectedId}
-        type="button"
-        role="option"
-        aria-selected={!selectedId}
-        onclick={() => pick(null)}
-      >
-        <span class="view-switcher-check">{!selectedId ? "✓" : ""}</span>
-        <span class="view-switcher-item-label">Default view</span>
-      </button>
-      {#each saved as view (view.id)}
+      <!-- The default entry is read-only (ADR-0036 §5): no Edit/Delete, only
+           Duplicate (⧉ — fork into an editable copy, design-language §glyphs).
+           Picking it selects the pane's default. -->
+      <div class="view-switcher-item" class:selected={!selectedId}>
+        <button
+          class="view-switcher-pick"
+          type="button"
+          role="option"
+          aria-selected={!selectedId}
+          onclick={() => pick(null)}
+        >
+          <span class="view-switcher-check">{!selectedId ? "✓" : ""}</span>
+          <span class="view-switcher-item-label">Default view</span>
+        </button>
+        <span class="view-switcher-actions">
+          <button
+            class="vsa"
+            type="button"
+            title="Duplicate view"
+            aria-label="Duplicate default view"
+            onclick={duplicateDefault}>⧉</button
+          >
+        </span>
+      </div>
+      {#each userViews as view (view.id)}
         <div class="view-switcher-item" class:selected={selectedId === view.id}>
           <button
             class="view-switcher-pick"

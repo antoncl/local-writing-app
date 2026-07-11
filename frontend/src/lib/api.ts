@@ -63,6 +63,7 @@ import type {
   SaveViewRequest,
   ViewNode,
   ViewNodeList,
+  ViewUiState,
 } from "@/lib/types";
 
 // Backend base URL. Defaults to the shared dev backend on :8787; an isolated
@@ -719,6 +720,14 @@ export const api = {
   deleteView(viewId: string) {
     return request<ViewNodeList>(`/views/${encodeURIComponent(viewId)}`, {
       method: "DELETE",
+    });
+  },
+  // Lock-free fold/ui write (ADR-0036). Rewrites ONLY the view's `ui` blob; a
+  // `view_default_<kind>` id with no file yet materializes the system default.
+  updateViewUi(viewId: string, ui: ViewUiState) {
+    return request<ViewNode>(`/views/${encodeURIComponent(viewId)}/ui`, {
+      method: "PUT",
+      body: JSON.stringify({ ui }),
     });
   },
   // Unified node-CRUD shim (Phase 3c). Returns the kind-specific

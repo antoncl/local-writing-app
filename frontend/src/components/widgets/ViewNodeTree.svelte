@@ -23,6 +23,10 @@
   import { getSwatch } from "@/lib/utils/colors";
   import type { EvalNode, ViewAnnotation, ViewGroup } from "@/lib/views/evaluateView";
   import type { GroupCtx, RowCtx } from "@/components/widgets/ViewNodeList.svelte";
+  import type { DropPosition, TreeDrag } from "@/components/widgets/treeDrag.svelte";
+  import type { TreeRename } from "@/components/widgets/treeRename.svelte";
+  import type { TreeAddMenu } from "@/components/widgets/treeAddMenu.svelte";
+  import type { CollapseGuard } from "@/components/widgets/treeCollapseGuard";
 
   let {
     groups,
@@ -34,6 +38,11 @@
     onDblClick,
     onRename,
     onReorder,
+    isContainer,
+    drag,
+    rename,
+    add,
+    collapseGuard,
     row,
     groupHeader,
   }: {
@@ -46,6 +55,11 @@
     onDblClick?: (node: T) => void;
     onRename?: (node: T, nextTitle: string) => void;
     onReorder?: (moved: T, target: T, position: "before" | "after" | "into") => void;
+    isContainer?: (node: T) => boolean;
+    drag: TreeDrag<T>;
+    rename: TreeRename<T>;
+    add: TreeAddMenu;
+    collapseGuard: CollapseGuard;
     row: Snippet<[T, RowCtx<T>]>;
     groupHeader?: Snippet<[GroupCtx]>;
   } = $props();
@@ -69,10 +83,68 @@
       collapsed: collapsed.has(key),
       childCount: subtreeCount(group),
       toggle: () => toggle(key),
+      toggleCollapse: () => collapseGuard.defer(() => toggle(key)),
       onClick: () => onClick?.(node),
-      onDblClick: () => onDblClick?.(node),
+      onDblClick: () => {
+        collapseGuard.cancel();
+        onDblClick?.(node);
+      },
       onRename: onRename ? (nextTitle: string) => onRename(node, nextTitle) : undefined,
-      onReorder: onReorder ? (target: T, position: "before" | "after" | "into") => onReorder(node, target, position) : undefined,
+      onReorder: onReorder ? (target: T, position: DropPosition) => onReorder(node, target, position) : undefined,
+      dragging: drag.dragged?.id === node.id,
+      dropPosition: drag.overId === node.id ? drag.position : null,
+      reorder: onReorder ? reorderHandlers(group, node) : undefined,
+      editing: rename.editingId === node.id,
+      editValue: rename.editValue,
+      onEditInput: (value: string) => rename.onInput(value),
+      beginRename: () => rename.begin(node.id, node.title),
+      commitRename: () => rename.commit(),
+      cancelRename: () => rename.cancel(),
+      addMenuOpen: add.key === node.id,
+      toggleAddMenu: (event: MouseEvent) => add.toggle(node.id, node.id, event),
+    };
+  }
+
+  // Drag-gesture handlers for one row (wrapper-owned; see treeDrag.svelte.ts).
+  // dragstart/end mark the dragged node; dragover computes the before/after/into
+  // zone by cursor ratio (into only over a container); drop settles the intent
+  // and fires `onReorder(moved, target, position)`.
+  function reorderHandlers(group: ViewGroup<T>, node: T) {
+    const container = isContainer ? isContainer(node) : group.children.length > 0;
+    return {
+      onDragStart: (event: DragEvent) => {
+        drag.dragged = node;
+        if (event.dataTransfer) {
+          event.dataTransfer.effectAllowed = "move";
+          event.dataTransfer.setData("text/plain", node.id);
+        }
+      },
+      onDragEnd: () => drag.reset(),
+      onDragOver: (event: DragEvent) => {
+        const moved = drag.dragged;
+        if (!moved || moved.id === node.id) return;
+        event.preventDefault();
+        if (event.dataTransfer) event.dataTransfer.dropEffect = "move";
+        const el = event.currentTarget;
+        if (!(el instanceof HTMLElement)) return;
+        const rect = el.getBoundingClientRect();
+        const ratio = (event.clientY - rect.top) / rect.height;
+        let position: DropPosition;
+        if (container && ratio > 0.2 && ratio < 0.8) position = "into";
+        else if (ratio < 0.5) position = "before";
+        else position = "after";
+        if (drag.overId !== node.id || drag.position !== position) {
+          drag.overId = node.id;
+          drag.position = position;
+        }
+      },
+      onDrop: (event: DragEvent) => {
+        event.preventDefault();
+        const moved = drag.dragged;
+        const position = drag.position;
+        drag.reset();
+        if (moved && position && moved.id !== node.id) onReorder?.(moved, node, position);
+      },
     };
   }
 
@@ -109,6 +181,11 @@
         {onDblClick}
         {onRename}
         {onReorder}
+        {isContainer}
+        {drag}
+        {rename}
+        {add}
+        {collapseGuard}
         {row}
         {groupHeader}
       />
@@ -134,6 +211,11 @@
         {onDblClick}
         {onRename}
         {onReorder}
+        {isContainer}
+        {drag}
+        {rename}
+        {add}
+        {collapseGuard}
         {row}
         {groupHeader}
       />
@@ -167,6 +249,11 @@
             {onDblClick}
             {onRename}
             {onReorder}
+            {isContainer}
+            {drag}
+            {rename}
+            {add}
+            {collapseGuard}
             {row}
             {groupHeader}
           />

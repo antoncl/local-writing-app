@@ -29,6 +29,38 @@
     onDblClick: () => void;
     onRename?: (nextTitle: string) => void;
     onReorder?: (target: T, position: "before" | "after" | "into") => void;
+    // Drag-reorder, present only when the list is reorderable (an `onReorder`
+    // prop is wired). The wrapper owns the gesture; the snippet reflects
+    // `dragging`/`dropPosition` on its NodeRow and spreads `reorder`'s handlers —
+    // `onDragStart`/`onDragEnd` onto the drag handle, `onDragOver`/`onDrop` onto
+    // the row. The before/after/into zones + settled intent are the wrapper's.
+    dragging: boolean;
+    dropPosition: "before" | "after" | "into" | null;
+    reorder?: {
+      onDragStart: (event: DragEvent) => void;
+      onDragEnd: (event: DragEvent) => void;
+      onDragOver: (event: DragEvent) => void;
+      onDrop: (event: DragEvent) => void;
+    };
+    // Inline rename (4c-iii). The wrapper owns the edit state; the snippet renders
+    // the styled `<input>` when `editing`, feeding `editValue`/`onEditInput` and
+    // calling `commitRename` (blur) / `cancelRename`. `beginRename` starts an edit
+    // (e.g. a container's rename-on-dblclick).
+    editing: boolean;
+    editValue: string;
+    onEditInput: (value: string) => void;
+    beginRename: () => void;
+    commitRename: () => void;
+    cancelRename: () => void;
+    // Deferred collapse toggle (4c-iv-c): schedules `toggle` past the dblclick
+    // window so a following double-click (→ onDblClick) can cancel it. Use this
+    // for a container's single-click; `onDblClick` cancels any pending toggle.
+    toggleCollapse: () => void;
+    // Per-container add-child "+" (4c-iv). The snippet renders a `.tree-menu-anchor`
+    // button reflecting `addMenuOpen` and calling `toggleAddMenu(event)`; the popover
+    // itself is the wrapper's (fed by the `addMenu` snippet, keyed to this node).
+    addMenuOpen: boolean;
+    toggleAddMenu: (event: MouseEvent) => void;
   };
 
   // The context handed to a `groupHeader` override snippet for one SYNTHETIC
@@ -57,9 +89,14 @@
   // sites lift their arrays via `nodeSet()` (lib/views/viewResult). There is no
   // `ViewResult | T[]` union and no `Array.isArray` branch here.
   import type { Snippet } from "svelte";
+  import { tick } from "svelte";
   import { SvelteSet } from "svelte/reactivity";
   import NodeList from "@/components/widgets/NodeList.svelte";
   import ViewNodeTree from "@/components/widgets/ViewNodeTree.svelte";
+  import { TreeDrag } from "@/components/widgets/treeDrag.svelte";
+  import { TreeRename } from "@/components/widgets/treeRename.svelte";
+  import { TreeAddMenu } from "@/components/widgets/treeAddMenu.svelte";
+  import { CollapseGuard } from "@/components/widgets/treeCollapseGuard";
   import { filterGroups, type ViewGroup, type ViewResult } from "@/lib/views/evaluateView";
   import { leafGroup } from "@/lib/views/viewResult";
 
@@ -77,6 +114,8 @@
     onDblClick,
     onRename,
     onReorder,
+    isContainer,
+    addMenu,
     collapsed = $bindable(new SvelteSet<string>()),
     defaultCollapsed,
     whenEmpty,
@@ -102,8 +141,24 @@
     // Intent surface. Escape hatches (present phase 1, exercised by #112 Draft).
     onClick?: (node: T) => void;
     onDblClick?: (node: T) => void;
+    // Persist a committed inline rename (4c-iii). The wrapper owns the edit state
+    // + guards and calls this only for a real, non-empty change; the consumer
+    // does the domain write (optimistic update + rename API).
     onRename?: (node: T, nextTitle: string) => void;
-    onReorder?: (moved: T, target: T, position: "before" | "after" | "into") => void;
+    // Reorder intent (drag OR keyboard). May return a Promise; the keyboard path
+    // awaits it before restoring focus to the moved row's new position.
+    onReorder?: (moved: T, target: T, position: "before" | "after" | "into") => void | Promise<void>;
+    // Domain classification for drag: does this node accept an "into" drop (i.e.
+    // it's a container, even an empty one)? The wrapper owns the drop-zone
+    // mechanics; the consumer names what can contain. Absent ⇒ falls back to
+    // "has children", so an empty container won't accept drops without this.
+    isContainer?: (node: T) => boolean;
+    // Add-child popover CONTENT (4c-iv). The wrapper owns the open-state, position,
+    // dismissal, and the `.row-add-popover` shell; this snippet fills it with the
+    // consumer's heading + type choices for the given `parentId` (null = root),
+    // calling `close` after a create. Present ⇒ the wrapper renders the popover
+    // when a "+" (RowCtx.toggleAddMenu, or the imperative toggleAddMenu) opens it.
+    addMenu?: Snippet<[{ parentId: string | null; close: () => void }]>;
     // Per-group collapse keyed by stable `ViewGroup.key`. $bindable so #112 can
     // back it with persisted state; unbound ⇒ ephemeral internal set (phase 1).
     collapsed?: SvelteSet<string>;
@@ -143,20 +198,193 @@
   const effectiveGroups = $derived<ViewGroup<T>[]>(displayedGroups ?? displayedNodes.map((n) => leafGroup(n)));
 
   const isEmpty = $derived(effectiveGroups.length === 0);
+
+  // One drag-gesture holder for the whole tree, threaded through the recursion
+  // (inert unless `onReorder` is wired). See treeDrag.svelte.ts.
+  const drag = new TreeDrag<T>();
+
+  // One collapse defer-guard for the tree (single-click vs dblclick). See
+  // treeCollapseGuard.ts.
+  const collapseGuard = new CollapseGuard();
+
+  // Inline-rename controller (4c-iii). Owns edit state; persists via `onRename`.
+  // Threaded down like `drag`; also driven imperatively by the consumer (F2 is
+  // wrapper-side, but create-then-rename comes from outside a row render).
+  const rename = new TreeRename<T>({
+    persist: (node, nextTitle) => onRename?.(node, nextTitle),
+    resolve: (id) => locate(id)?.node ?? null,
+  });
+
+  // Imperative rename entry points for the consumer (see the block comment): begin
+  // an inline rename on a just-created node, or cancel one whose row is being
+  // deleted. F2 / dblclick renames are driven wrapper-side (keyboard) or via RowCtx.
+  export function beginRename(id: string, title: string): void {
+    rename.begin(id, title);
+  }
+  export function cancelRename(id: string): void {
+    rename.cancel(id);
+  }
+
+  // Per-instance add-child menu (4c-iv). The holder threads down for per-container
+  // "+" buttons; these exports drive it from a consumer's header/pane button. A
+  // document mousedown outside the anchor/popover closes it (per instance — no
+  // shared App-level handler). See treeAddMenu.svelte.ts.
+  const add = new TreeAddMenu();
+  export function toggleAddMenu(parentId: string | null, key: string, event?: MouseEvent): void {
+    add.toggle(parentId, key, event);
+  }
+  export function closeAddMenu(): void {
+    add.close();
+  }
+  export function isAddMenuOpen(key: string): boolean {
+    return add.isOpen(key);
+  }
+  $effect(() => {
+    const onDown = (event: MouseEvent) => {
+      if (add.key === null) return;
+      const target = event.target;
+      if (target instanceof Element && target.closest(".tree-menu-anchor, .row-add-popover")) return;
+      add.close();
+    };
+    document.addEventListener("mousedown", onDown);
+    return () => document.removeEventListener("mousedown", onDown);
+  });
+
+  // ── Tree keyboard (4c-ii) ────────────────────────────────────────────────
+  // The wrapper owns tree keyboard so every tree consumer inherits it. Ctrl+arrows
+  // reorder by translating to the SAME `onReorder(moved, target, position)` intent
+  // as drag (targets computed from the group tree — the wrapper knows siblings);
+  // F2/Enter/Escape relay to the rename hooks. Rides a DIRECT listener (see the
+  // `treeKeyboard` action) because Svelte-5 delegated `onkeydown` doesn't reach the
+  // consumer's `row` snippet DOM, which is mounted under a foreign delegation root.
+
+  // Locate a real node within the group tree: its sibling list + index + nearest
+  // real-node ancestor (the outdent target). Synthetic buckets are transparent —
+  // their `node` is null, so `parentNode` skips past them to the enclosing node.
+  type Located = { node: T; siblings: ViewGroup<T>[]; index: number; parentNode: T | null };
+  function locate(
+    id: string,
+    groups: ViewGroup<T>[] = effectiveGroups,
+    parentNode: T | null = null,
+  ): Located | null {
+    for (let i = 0; i < groups.length; i++) {
+      const g = groups[i];
+      if (g.nodeId === id && g.node) return { node: g.node, siblings: groups, index: i, parentNode };
+      if (g.children.length) {
+        const found = locate(id, g.children, g.node ?? parentNode);
+        if (found) return found;
+      }
+    }
+    return null;
+  }
+
+  async function reorderTo(moved: T, target: T, position: "before" | "after" | "into"): Promise<void> {
+    await onReorder?.(moved, target, position);
+    // The moved row is a fresh DOM element after the structure re-renders; keep
+    // focus on it so repeated Ctrl+arrows chain without a re-grab.
+    await tick();
+    const row = document.querySelector<HTMLElement>(`[data-node-id="${moved.id}"]`);
+    (row?.querySelector<HTMLElement>("button.node-row-click") ?? row)?.focus();
+  }
+
+  function handleReorderKey(event: KeyboardEvent, nodeId: string): void {
+    if (!onReorder) return;
+    const loc = locate(nodeId);
+    if (!loc) return;
+    const prev = loc.index > 0 ? loc.siblings[loc.index - 1] : null;
+    const next = loc.index < loc.siblings.length - 1 ? loc.siblings[loc.index + 1] : null;
+    if (event.key === "ArrowUp" && prev?.node) {
+      event.preventDefault();
+      void reorderTo(loc.node, prev.node, "before");
+    } else if (event.key === "ArrowDown" && next?.node) {
+      event.preventDefault();
+      void reorderTo(loc.node, next.node, "after");
+    } else if (event.key === "ArrowRight" && prev?.node && (isContainer ? isContainer(prev.node) : prev.children.length > 0)) {
+      event.preventDefault();
+      void reorderTo(loc.node, prev.node, "into");
+    } else if (event.key === "ArrowLeft" && loc.parentNode) {
+      event.preventDefault();
+      void reorderTo(loc.node, loc.parentNode, "after");
+    }
+  }
+
+  // Direct keydown listener for the whole tree (see the block comment above).
+  // Routes by the event target's data markers: rename input → commit/cancel;
+  // a focused row → F2 rename-start or Ctrl+arrow reorder. Add-popover keys are
+  // the popover's own.
+  function treeKeyboard(container: HTMLElement) {
+    const onKey = (event: KeyboardEvent) => {
+      const target = event.target;
+      if (!(target instanceof HTMLElement)) return;
+      if (target.closest(".row-add-popover")) return;
+      // Enter/Escape inside the rename input commit/cancel the wrapper-owned edit.
+      if (target.closest("[data-node-edit-id]")) {
+        if (event.key === "Enter") {
+          event.preventDefault();
+          rename.commit();
+        } else if (event.key === "Escape") {
+          event.preventDefault();
+          rename.cancel();
+        }
+        return;
+      }
+      const row = target.closest<HTMLElement>("[data-node-id]");
+      const id = row?.getAttribute("data-node-id");
+      if (!id) return;
+      // F2 rename rides with the reorderable-tree keyboard bundle (preserving the
+      // pre-4c parity where the non-reorderable Research tree had no F2).
+      if (event.key === "F2") {
+        if (!onReorder) return;
+        event.preventDefault();
+        const node = locate(id)?.node;
+        if (node) rename.begin(node.id, node.title);
+        return;
+      }
+      if (event.ctrlKey || event.metaKey) handleReorderKey(event, id);
+    };
+    container.addEventListener("keydown", onKey);
+    return { destroy: () => container.removeEventListener("keydown", onKey) };
+  }
 </script>
 
-<NodeList {mode} {searchPlaceholder} bind:searchValue {searchDebounceMs} {isEmpty} {whenEmpty}>
-  <ViewNodeTree
-    groups={effectiveGroups}
-    depth={0}
-    {collapsed}
-    annotations={result.annotations}
-    {active}
-    {onClick}
-    {onDblClick}
-    {onRename}
-    {onReorder}
-    {row}
-    {groupHeader}
-  />
-</NodeList>
+<div class="tree-keys" use:treeKeyboard>
+  <NodeList {mode} {searchPlaceholder} bind:searchValue {searchDebounceMs} {isEmpty} {whenEmpty}>
+    <ViewNodeTree
+      groups={effectiveGroups}
+      depth={0}
+      {collapsed}
+      annotations={result.annotations}
+      {active}
+      {onClick}
+      {onDblClick}
+      {onRename}
+      {onReorder}
+      {isContainer}
+      {drag}
+      {rename}
+      {add}
+      {collapseGuard}
+      {row}
+      {groupHeader}
+    />
+  </NodeList>
+</div>
+
+{#if add.key !== null && addMenu}
+  <!-- Add-child popover shell: wrapper-owned open-state/position/dismissal; the
+       consumer's `addMenu` snippet supplies the heading + type choices. -->
+  <div
+    class="row-add-popover"
+    style={add.pos ? `top: ${add.pos.top}px; right: ${add.pos.right}px` : ""}
+  >
+    {@render addMenu({ parentId: add.parentId, close: () => add.close() })}
+  </div>
+{/if}
+
+<style>
+  /* Transparent to layout — hosts the direct keydown listener (treeKeyboard)
+     around the list without introducing a box. */
+  .tree-keys {
+    display: contents;
+  }
+</style>

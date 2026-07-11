@@ -14,7 +14,7 @@
 
 import { api } from "@/lib/api";
 import { defaultView } from "@/lib/views/evaluateView";
-import type { ViewNodeSummary, ViewPresentation, ViewSpec } from "@/lib/types";
+import type { MetadataSchema, ViewNodeSummary, ViewPresentation, ViewSpec } from "@/lib/types";
 
 const STORAGE_PREFIX = "paneView.selected."; // + kind
 
@@ -70,6 +70,10 @@ class PaneViewsController {
     } catch {
       return; // Leave the current roster in place on a transient failure.
     }
+    // System default views (ADR-0036 §5) are first-class roster members: the
+    // switcher renders them read-only (Duplicate, not Edit) and their spec must
+    // resolve for `view_ref` leaves, so they stay in both the roster and the
+    // spec map. `selected===null` still means the pane's default.
     const byKind: Record<string, ViewNodeSummary[]> = {};
     for (const v of entries) (byKind[v.view_kind] ??= []).push(v);
     for (const list of Object.values(byKind)) {
@@ -104,20 +108,30 @@ class PaneViewsController {
     return this.selected[kind] ?? null;
   }
 
+  // The concrete view-node id whose fold state a pane persists to (ADR-0036):
+  // the selected saved view, or the pane's `view_default_<kind>` system default
+  // when none is selected (materialized on first fold write).
+  resolvedViewId(kind: string): string {
+    return this.selected[kind] ?? `view_default_${kind}`;
+  }
+
   select(kind: string, id: string | null): void {
     this.selected = { ...this.selected, [kind]: id };
     saveSelection(kind, id);
   }
 
   // The ViewSpec a pane should render through: the selected view's spec, or the
-  // implicit default (whole universe, manual order) when none is selected.
-  specFor(kind: string): ViewSpec {
+  // default (the whole roster, manual order) when none is selected. The default
+  // is now an explicit `descendants_of:<kind-root>` spec (ADR-0036), so `schema`
+  // is threaded through to resolve the kind's root type; without it the resolver
+  // falls back to `<kind>:base`.
+  specFor(kind: string, schema?: MetadataSchema | null): ViewSpec {
     const id = this.selected[kind];
     if (id) {
       const spec = this.specs.get(id);
       if (spec) return spec;
     }
-    return defaultView(kind);
+    return defaultView(kind, schema);
   }
 
   // The selected view's presentation, or null for the pane's intrinsic default

@@ -49,6 +49,7 @@ import { refreshAssistantEntries, setAssistantEntries } from "@/lib/stores/assis
 import { refreshKnownTags } from "@/lib/stores/tags";
 import { referenceIndexStore, refreshReferenceIndex } from "@/lib/stores/references";
 import { backlinksFor } from "@/lib/views/backlinks";
+import { defaultView } from "@/lib/views/evaluateView";
 import { refreshTodos, refreshEmbeddedTodos } from "@/lib/stores/todos";
 import { paneViews } from "@/lib/stores/paneViews.svelte";
 import { chatSessionsStore, refreshChatSessions, setChatSessions } from "@/lib/stores/chats";
@@ -59,11 +60,13 @@ import type {
   EditableDocument,
   EntryMetadata,
   LoreEntry,
+  MetadataSchema,
   PromptEntry,
   PromptInputDefinition,
   ProjectNode,
   ResearchNote,
   Scene,
+  ViewPresentation,
 } from "@/lib/types";
 
 // Signal that tells a pane's MetadataPanel/title to re-seed from a refreshed
@@ -861,6 +864,23 @@ class EditorPanesController {
       spec: { kind, expr: null, sort: { by: "manual" } },
       presentation: "flat",
     });
+    await this.openView(node.id);
+  }
+
+  // Fork a pane's read-only system default view into a new editable view and
+  // open the designer on it (ADR-0036 §5: the default is copyable, not editable
+  // — the switcher offers "Duplicate" where a user view offers Edit). Sources
+  // the spec/presentation from the materialized system default when it exists,
+  // else the frontend's canonical `defaultView(kind)` — so the copy starts from
+  // the real default whether or not the pane's default has been folded
+  // (materialized on disk) yet. `schema` resolves the kind's root type for the
+  // fallback (without it `assistant` has no `:base` to descend from).
+  async duplicateDefaultView(kind: string, schema?: MetadataSchema | null): Promise<void> {
+    const system = paneViews.viewsFor(kind).find((v) => v.system);
+    const spec = system?.spec ?? defaultView(kind, schema);
+    const presentation: ViewPresentation = system?.presentation ?? (kind === "scene" ? "tree" : "flat");
+    const node = await api.createView({ title: "Default (copy)", spec, presentation });
+    await paneViews.reload();
     await this.openView(node.id);
   }
 

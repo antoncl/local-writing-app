@@ -7,11 +7,10 @@
   import ViewNodeList, { type RowCtx } from "@/components/widgets/ViewNodeList.svelte";
   import RowCaret from "@/components/widgets/RowCaret.svelte";
   import CountPill from "@/components/widgets/CountPill.svelte";
-  import { getSwatch } from "@/lib/utils/colors";
   import { assistantTagsStore, assistantTagColorHexes } from "@/lib/stores/assistantTags";
   import { assistantTagsOf } from "@/lib/chat/assistantScope";
   import { evaluateView, type ViewGroup, type ViewResult } from "@/lib/views/evaluateView";
-  import { leafGroup } from "@/lib/views/viewResult";
+  import { groupBy } from "@/lib/views/viewResult";
   import { paneViews } from "@/lib/stores/paneViews.svelte";
   import { metadataSchemaStore } from "@/lib/stores/schema";
   import { referenceIndexStore } from "@/lib/stores/references";
@@ -54,7 +53,6 @@
     resolveView: paneViews.resolveView,
     referenceIndex: $referenceIndexStore,
   });
-  $: annotations = viewResult.annotations;
   // Drag-reorder is manual order, meaningful only on the implicit default view
   // (its per-layer buckets). A view with named-handle / structural groups, or a
   // flat presentation, is read-only.
@@ -152,30 +150,20 @@
   // holding its assistants as childless leaf groups (the tree-uniform form
   // ViewNodeList renders). Machine layer first, then alphabetical.
   function groupByLayer(items: AssistantEntrySummary[]): ViewGroup<AssistantEntrySummary>[] {
-    const groups = new Map<string, ViewGroup<AssistantEntrySummary>>();
-    for (const entry of items) {
-      const key = entry.source_layer_id || "";
-      const label = entry.source_layer_label || "Unknown";
-      const leaf = leafGroup(entry);
-      const existing = groups.get(key);
-      if (existing) {
-        existing.children.push(leaf);
-      } else {
-        groups.set(key, { key: `group:layer:${key}`, label, color: null, nodeId: null, node: null, children: [leaf] });
-      }
-    }
-    // Machine layer first; then alphabetical by label.
-    return Array.from(groups.values()).sort((a, b) => {
-      if (a.label === "Machine") return -1;
-      if (b.label === "Machine") return 1;
-      return (a.label ?? "").localeCompare(b.label ?? "");
-    });
-  }
-
-  // View soft-color annotation → row stripe (assistants carry no type color).
-  function stripeFor(entry: AssistantEntrySummary): string | null {
-    const viewColor = annotations.get(entry.id)?.color ?? null;
-    return viewColor ? getSwatch(viewColor)?.hex ?? null : null;
+    return groupBy(
+      items,
+      (entry) => entry.source_layer_id || "",
+      (entry) => entry.source_layer_label || "Unknown",
+      {
+        groupKey: (key) => `group:layer:${key}`,
+        // Machine layer first; then alphabetical by label.
+        sort: (a, b) => {
+          if (a.label === "Machine") return -1;
+          if (b.label === "Machine") return 1;
+          return (a.label ?? "").localeCompare(b.label ?? "");
+        },
+      },
+    );
   }
 
   function assistantSubtitle(entry: AssistantEntrySummary): string {
@@ -214,7 +202,7 @@
     tags={assistantTagsOf(entry)}
     tagColor={tagHexFor}
     active={ctx.active}
-    stripeColor={stripeFor(entry)}
+    stripeColor={ctx.stripeColor}
     dragging={dragId === entry.id}
     dropPosition={dropTarget?.id === entry.id ? (dropTarget?.position ?? null) : null}
     onClick={ctx.onClick}

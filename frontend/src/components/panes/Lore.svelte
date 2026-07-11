@@ -13,7 +13,7 @@
   import { treeActions } from "@/lib/stores/treeActions.svelte";
   import { getSwatch, resolveColorForType } from "@/lib/utils/colors";
   import { evaluateView, type ViewGroup, type ViewResult } from "@/lib/views/evaluateView";
-  import { leafGroup } from "@/lib/views/viewResult";
+  import { groupBy } from "@/lib/views/viewResult";
   import { buildBindings, effectiveParamValue, resolveParamControls } from "@/lib/views/viewParams";
   import { paneViews } from "@/lib/stores/paneViews.svelte";
   import { metadataSchemaStore } from "@/lib/stores/schema";
@@ -127,26 +127,15 @@
   // its members as childless leaf groups (the tree-uniform form ViewNodeList
   // renders). Sorted by type label.
   function groupByType(items: LoreEntrySummary[], currentSchema: MetadataSchema | null): ViewGroup<LoreEntrySummary>[] {
-    const groupsByType = new Map<string, ViewGroup<LoreEntrySummary>>();
-    for (const entry of items) {
-      const groupId = `group:type:${entry.entry_type || "unknown"}`;
-      const leaf = leafGroup(entry);
-      const existingGroup = groupsByType.get(groupId);
-      if (existingGroup) {
-        existingGroup.children.push(leaf);
-      } else {
-        groupsByType.set(groupId, {
-          key: groupId,
-          label: entryTypeName(entry, currentSchema),
-          color: null,
-          nodeId: null,
-          node: null,
-          children: [leaf],
-        });
-      }
-    }
-    return Array.from(groupsByType.values()).sort((left, right) =>
-      (left.label ?? "").localeCompare(right.label ?? "", undefined, { sensitivity: "base" }),
+    return groupBy(
+      items,
+      (entry) => entry.entry_type || "unknown",
+      (entry) => entryTypeName(entry, currentSchema),
+      {
+        groupKey: (key) => `group:type:${key}`,
+        sort: (left, right) =>
+          (left.label ?? "").localeCompare(right.label ?? "", undefined, { sensitivity: "base" }),
+      },
     );
   }
 

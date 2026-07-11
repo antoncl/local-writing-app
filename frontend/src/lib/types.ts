@@ -441,6 +441,11 @@ export type ViewLayout = { nodes: ViewLayoutNode[]; edges: ViewLayoutEdge[] };
 // a prose/code body. Mirrors backend ViewNode (models_views.py). Carries the
 // metadata/computed_metadata slots so it satisfies EditableDocument
 // structurally; both are empty in v1 (the view has no schema fields).
+// Non-semantic per-view UI state (ADR-0036) — today just the collapsed
+// ViewGroup.key set (`node:<id>` / `group:<seg>`). Persisted on the lock-free
+// /ui endpoint, independent of the spec revision-lock.
+export type ViewUiState = { collapsed: string[] };
+
 export type ViewNode = {
   id: string;
   title: string;
@@ -450,6 +455,10 @@ export type ViewNode = {
   presentation: ViewPresentation;
   // Designer canvas layout (positions + wiring); absent for designer-less views.
   layout?: ViewLayout | null;
+  // Persisted fold state (ADR-0036); absent ⇒ all groups expanded.
+  ui?: ViewUiState | null;
+  // A read-only system-provided default view (copyable, not editable).
+  system?: boolean;
   // EditableDocument compatibility — a view carries no prose body or fields.
   body?: string;
   metadata?: EntryMetadata;
@@ -467,6 +476,10 @@ export type ViewNodeSummary = {
   // The full spec ships with the list summary (#95) so evaluating a listed view
   // — including resolving its view_ref leaves — needs no second per-view fetch.
   spec?: ViewSpec | null;
+  // Fold state ships with the list (ADR-0036) so a pane seeds collapse without a
+  // per-view fetch; `system` marks the read-only default view.
+  ui?: ViewUiState | null;
+  system?: boolean;
   source_layer_id?: string;
   source_layer_label?: string;
 };

@@ -45,11 +45,15 @@
     containerHasEditor: boolean;
     inlineRenameOnLeafCreate: boolean;
     rootAddMenuKey: string;
+    // Persist per-view collapse to the backend `/ui` endpoint (ADR-0036). True
+    // for the explicit Draft pane; false for Research (its collapse is ephemeral
+    // until implicit host-node fold state lands, memo §2).
+    persistCollapse: boolean;
   };
 </script>
 
 <script lang="ts">
-  import { tick } from "svelte";
+  import { tick, onDestroy } from "svelte";
   import { api } from "@/lib/api";
   import NodeRow from "@/components/widgets/NodeRow.svelte";
   import NodeList from "@/components/widgets/NodeList.svelte";
@@ -70,6 +74,7 @@
   import { evaluateView, type EvalNode } from "@/lib/views/evaluateView";
   import type { ViewSpec } from "@/lib/types";
   import { paneViews } from "@/lib/stores/paneViews.svelte";
+  import { CollapseState } from "@/lib/stores/collapseState.svelte";
   import { metadataSchemaStore } from "@/lib/stores/schema";
   import { focusedDocumentStore } from "@/lib/stores/editorFocus";
   import { referenceIndexStore } from "@/lib/stores/references";
@@ -133,6 +138,22 @@
       referenceIndex,
     }),
   );
+
+  // Per-view collapse persistence (ADR-0036). The controller's set is bound into
+  // ViewNodeList; for the explicit Draft pane we seed/persist it against the
+  // pane's resolved view id (selected saved view, or `view_default_<kind>`).
+  // Research (persistCollapse=false) never binds → the same set stays ephemeral.
+  const collapse = new CollapseState();
+  const resolvedViewId = $derived(paneViews.resolvedViewId(config.kind));
+  $effect(() => {
+    if (config.persistCollapse) void collapse.bind(resolvedViewId);
+  });
+  $effect(() => {
+    if (config.persistCollapse) collapse.observe();
+  });
+  onDestroy(() => {
+    if (config.persistCollapse) void collapse.flush();
+  });
 
   // Tree-local UI state — inline rename + drag + the collapse defer-guard.
   // Never escapes the component.
@@ -496,7 +517,7 @@
 </div>
 
 <div class="tree-keys" use:treeKeyboard>
-  <ViewNodeList {result} mode="tree" active={isActiveNode} {row}>
+  <ViewNodeList {result} mode="tree" active={isActiveNode} collapsed={collapse.collapsed} {row}>
     {#snippet whenEmpty()}
       {#if !structure}
         <p class="muted">Open or create a project to begin.</p>

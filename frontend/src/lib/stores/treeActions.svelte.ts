@@ -260,6 +260,7 @@ class TreeActions {
     containerHasEditor: true,
     inlineRenameOnLeafCreate: true,
     rootAddMenuKey: "__root__",
+    persistCollapse: true,
   };
 
   researchTree: TreeConfig = {
@@ -286,6 +287,7 @@ class TreeActions {
     containerHasEditor: false,
     inlineRenameOnLeafCreate: false,
     rootAddMenuKey: "__research_root__",
+    persistCollapse: false,
   };
 }
 

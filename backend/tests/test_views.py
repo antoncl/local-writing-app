@@ -537,6 +537,42 @@ class ViewUiStateTests(unittest.TestCase):
         self.assertTrue(ui.json()["system"])
         self.assertEqual(ui.json()["ui"]["collapsed"], ["node:q"])
 
+    def test_first_ui_write_materializes_system_default_view(self) -> None:
+        # No file for view_default_scene yet; a fold write materializes it (§5).
+        self.assertEqual(self.client.get("/api/views/view_default_scene").status_code, 404)
+        res = self.client.put(
+            "/api/views/view_default_scene/ui", json={"ui": {"collapsed": ["node:act1"]}}
+        )
+        self.assertEqual(res.status_code, 200, res.text)
+        body = res.json()
+        # Materialized as the read-only whole-kind roster: descendants_of the
+        # scene kind's parentless root (scene:base), with the fold state applied.
+        self.assertTrue(body["system"])
+        self.assertEqual(body["spec"]["kind"], "scene")
+        self.assertEqual(body["spec"]["expr"]["descendants_of"], "scene:base")
+        self.assertEqual(body["presentation"], "tree")
+        self.assertEqual(body["ui"]["collapsed"], ["node:act1"])
+
+    def test_materialized_default_is_listed_and_reused_on_next_write(self) -> None:
+        self.client.put("/api/views/view_default_scene/ui", json={"ui": {"collapsed": ["node:a"]}})
+        listed = self.client.get("/api/views").json()["entries"]
+        defaults = [v for v in listed if v["id"] == "view_default_scene"]
+        self.assertEqual(len(defaults), 1)
+        self.assertTrue(defaults[0]["system"])
+        # A second fold write reuses the existing node (no duplicate file).
+        self.client.put("/api/views/view_default_scene/ui", json={"ui": {"collapsed": ["node:b"]}})
+        listed2 = self.client.get("/api/views").json()["entries"]
+        self.assertEqual(len([v for v in listed2 if v["id"] == "view_default_scene"]), 1)
+        self.assertEqual(
+            self.client.get("/api/views/view_default_scene").json()["ui"]["collapsed"], ["node:b"]
+        )
+
+    def test_default_view_for_unknown_kind_is_422(self) -> None:
+        res = self.client.put(
+            "/api/views/view_default_nonsense/ui", json={"ui": {"collapsed": ["x"]}}
+        )
+        self.assertEqual(res.status_code, 422, res.text)
+
 
 if __name__ == "__main__":
     unittest.main()

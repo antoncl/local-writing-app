@@ -31,6 +31,12 @@ from app.models_views import (
 )
 from app.services.project.errors import ProjectServiceError
 
+# Well-known id prefix for the per-kind system default view (ADR-0036 §5). The
+# frontend addresses `view_default_<kind>` when persisting fold state for a
+# pane's default (unselected) view; the node is materialized lazily here on the
+# first fold write.
+DEFAULT_VIEW_ID_PREFIX = "view_default_"
+
 
 class ViewsMixin:
     def _iter_view_entries(self) -> Iterator[tuple[Any, dict[str, Any], ViewSpec | None]]:
@@ -142,9 +148,11 @@ class ViewsMixin:
         preserving spec/presentation/layout/title/system. It takes no
         base_revision and does not consult the spec revision, so a fold toggle
         never 409s against a concurrent designer save — the two lifecycles are
-        independent. (Default-view materialization for a `view_default_<kind>`
-        id is deferred to the frontend null-cut slice, where `defaultView`/the
-        kind-root spec lives; today this 404s on an absent view.)"""
+        independent. A `view_default_<kind>` id with no file yet MATERIALIZES the
+        read-only system default view (§5): the pane's default (unselected) view
+        is real-on-disk the moment the user first folds it."""
+        if view_id.startswith(DEFAULT_VIEW_ID_PREFIX) and self._build_node_index().by_id.get(view_id) is None:
+            return self._materialize_default_view(view_id, request.ui)
         path = self._path_for_node_id(view_id, "view")
         front_matter = self._read_front_matter_only(path, strict=True)
         node_id = self._node_id_for_path(path, front_matter)
@@ -169,6 +177,47 @@ class ViewsMixin:
         if path.exists():
             path.unlink()
         return self.list_views()
+
+    def _materialize_default_view(self, view_id: str, ui: ViewUiState) -> ViewNode:
+        """Write the read-only system default view node for a `view_default_<kind>`
+        id (ADR-0036 §5). Its spec is the whole-kind roster — `descendants_of` the
+        kind's parentless root type — which is exactly what the frontend's
+        `defaultView(kind)` lowers to, so a later Duplicate starts from the real
+        default. Marked `system: true` (Duplicate-not-Edit; save_view rejects it)."""
+        root = self._require_project()
+        kind = view_id[len(DEFAULT_VIEW_ID_PREFIX):]
+        root_type = self._kind_root_entry_type(kind)
+        if not root_type:
+            raise ProjectServiceError(f"No default view is defined for kind '{kind}'.", 422)
+        spec = ViewSpec(kind=kind, expr=ViewExpr(descendants_of=root_type))
+        # Draft renders a structural tree; the other explicit panes render flat/
+        # grouped rosters. Stored for the Duplicate path; the pane's own default
+        # render ignores it (selection stays null → frontend `defaultView`).
+        presentation: ViewPresentation = "tree" if kind == "scene" else "flat"
+        (root / "views").mkdir(parents=True, exist_ok=True)
+        self._write_view_file(
+            self._filepath_for_new_node(root / "views", view_id),
+            view_id,
+            "Default",
+            "view:view",
+            spec,
+            presentation,
+            ui=ui,
+            system=True,
+        )
+        return self.read_view(view_id)
+
+    def _kind_root_entry_type(self, kind: str) -> str | None:
+        """The kind's parentless root entry_type FQN — `<kind>:base` for the
+        abstract-rooted kinds (lore/scene/research), or the single concrete type
+        for the rest (assistant:assistant, chat:chat_session, …). Mirrors the
+        frontend `kindRootEntryTypeId`; `descendants_of` this seeds the whole
+        roster for the kind."""
+        schema = self.read_metadata_schema()
+        for fqn, definition in schema.entry_types.items():
+            if definition.kind == kind and not definition.parent:
+                return fqn
+        return None
 
     # ----- helpers --------------------------------------------------------
 

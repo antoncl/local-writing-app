@@ -70,8 +70,13 @@ class PaneViewsController {
     } catch {
       return; // Leave the current roster in place on a transient failure.
     }
+    // System default views (ADR-0036) are the collapse-persistence backing for a
+    // pane's *unselected* default; they are NOT user-selectable switcher entries
+    // yet (the Duplicate-not-Edit switcher treatment is a later slice), so keep
+    // them out of the roster + spec map. `selected===null` still means default.
+    const switcherEntries = entries.filter((v) => !v.system);
     const byKind: Record<string, ViewNodeSummary[]> = {};
-    for (const v of entries) (byKind[v.view_kind] ??= []).push(v);
+    for (const v of switcherEntries) (byKind[v.view_kind] ??= []).push(v);
     for (const list of Object.values(byKind)) {
       list.sort((a, b) => a.title.localeCompare(b.title, undefined, { sensitivity: "base" }));
     }
@@ -80,7 +85,7 @@ class PaneViewsController {
     // The list summary already carries each view's spec (#95), so evaluation
     // (incl. resolving view_ref leaves) is synchronous with no per-view fetch.
     const map = new Map<string, ViewSpec>();
-    for (const v of entries) if (v.spec) map.set(v.id, v.spec);
+    for (const v of switcherEntries) if (v.spec) map.set(v.id, v.spec);
     this.specs = map;
 
     // Drop any selection that no longer resolves.
@@ -102,6 +107,13 @@ class PaneViewsController {
 
   selectedId(kind: string): string | null {
     return this.selected[kind] ?? null;
+  }
+
+  // The concrete view-node id whose fold state a pane persists to (ADR-0036):
+  // the selected saved view, or the pane's `view_default_<kind>` system default
+  // when none is selected (materialized on first fold write).
+  resolvedViewId(kind: string): string {
+    return this.selected[kind] ?? `view_default_${kind}`;
   }
 
   select(kind: string, id: string | null): void {

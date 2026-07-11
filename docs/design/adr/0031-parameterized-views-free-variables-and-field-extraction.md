@@ -54,9 +54,18 @@ A `ViewSpec` may carry **parameter declarations** and evaluation takes a **bindi
 (`EvalContext.bindings`: name → value), injected exactly as `resolveView` is. A view with **no**
 free variables is the **degenerate closed case** (empty bindings) — existing views are unchanged.
 An **unbound** variable degrades gracefully **by role**: an unbound **filter operand** makes its
-predicate **inactive** (no constraint — the input set passes through), while an **unresolved source**
-(`$self` in a pane with no anchor) contributes the **empty set**. A promoted formal is normally
-**seeded by its authored default** (ADR-0032), so "unbound" arises only when no default is set.
+predicate **inactive** (no constraint), while an **unresolved source** (`$self` in a pane with no
+anchor) contributes the **empty set**. A promoted formal is normally **seeded by its authored default**
+(ADR-0032), so "unbound" arises only when no default is set.
+
+An inactive predicate is the **identity element of its immediately enclosing combinator**, not a fixed
+value — so "no constraint" means *show everything* in every position, uniformly across keep, drop,
+complement, and union. The evaluator resets a per-position flag for each combinator to its own identity
+(`∩` → universe, `∪` → ∅, `difference.keep` → universe / `remove` → ∅, `complement` → ∅), rather than
+propagating a keep/subtract sign from the root — a global sign is wrong for an inactive predicate nested
+inside a combinator that itself sits in a subtractive position (`A − (X ∩ inactive)` must give `A − X`,
+not `A`). This is the structural realization of "unset = show everything." (See `views-and-filters.md`
+§14.2.)
 
 **C. The forward model — predicate or project, always from the field-carrying side.**
 Given a field `F` linking node-sets X and Y, you start from the side that **carries `F`** and do one

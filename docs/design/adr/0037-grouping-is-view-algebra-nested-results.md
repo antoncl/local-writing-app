@@ -51,6 +51,10 @@ and the discipline of keeping σ inside the algebra instead of leaking shape dec
 when not. **No renderer or pane ever synthesizes grouping.** `intrinsicDisplayResult` (both panes)
 and the #208 `groupBy` helper (`lib/views/viewResult.ts`) are deleted.
 
+> **Amended by [Amendment 1](#amendment-1--organize-is-per-group-2026-07-12): Organize is per-group,
+> not result-level.** §2 below describes the single/unnamed-group case, which is unchanged; per-group
+> Organize is additive. Read the amendment first.
+
 ### 2. `ViewSpec.group_by` — ordered organize levels
 ```ts
 group_by?: Array<{ field: string; order?: "label" }>;
@@ -154,6 +158,9 @@ Assistants' in-snippet drag re-keys from `presentation === null` to *manual sort
 grouping + no handles* (one careful implementation beat, flagged).
 
 ### 8. Author surface
+> **Amended by [Amendment 1](#amendment-1--organize-is-per-group-2026-07-12):** the Organize controls
+> live **inside each group**, not as one section beside the handles.
+
 The designer's **result node** gains an "Organize" section: an ordered list of group-by dropdowns
 (add / remove / reorder), offering the kind's groupable fields — populated through the same
 input-kind machinery the pickers already use (`inferInputKind`, ADR-0031 §F). It is node *config*,
@@ -161,6 +168,50 @@ not graph shape: `group_by` lifts/lowers with the spec, adds no designer node, a
 compete with Nest on the canvas. Handles are unchanged (wired named sections). Nest's match options
 gain "contained in." The mental model is one sentence: **"Nest builds hierarchies from
 relationships — including 'contained in'; group-by organizes by a field."**
+
+## Amendment 1 — Organize is per-group (2026-07-12)
+
+**Status: approved & implemented (2026-07-12).** Raised by Anton after dogfooding the shipped
+designer; approved with no red-pen. Landed on branch `feat/0.7.0-213-grouping-view-algebra`.
+
+### The problem
+A view with named groups (handles A, B) showed a **single** Organize section *beside* the groups.
+That imposed one grouping on every group and read as if the Organize levels somehow paired with the
+groups. Two limits, one confusing surface:
+1. **You cannot organize groups differently.** Group A's rows and Group B's rows are forced through
+   the same Organize. There is no way to say "A grouped by Type, B grouped by Status."
+2. **The relationship is unreadable** — Organize floats at the result, not attached to anything.
+
+### The decision
+**Organize is owned by a group, not by the result.** Every group carries its *own*, independent
+ordered Organize levels.
+
+- **Single / unnamed group** (a view with an `expr`, no named handles): keeps `ViewSpec.group_by`
+  exactly as §2 describes — **behavior unchanged.** This is the "one implicit group" and all shipped
+  defaults (Lore, Assistants, Draft) are this case, so nothing shipped changes.
+- **Named groups** (`ViewSpec.groups` / designer handles): **each group gains its own `group_by`**
+  (`ViewGroup.group_by?: ViewGroupByLevel[]`). Group A can organize by Type→Aliases while Group B
+  organizes by Status — fully independent.
+- **Evaluation:** the level application of §2 runs **per group, with that group's levels**, appended
+  innermost within that group's rows. A group with no levels stays flat. (Today's single application
+  over the merged result becomes the unnamed-group special case of the same rule.)
+- **Designer:** the Organize controls move **inside each group**, shown under that group's handle
+  row. The standalone result-level Organize section beside the handles is **removed**. For the
+  single-unnamed-group view, Organize appears once, under that group.
+
+### Conformance (amends the normative suite)
+Add anchors: (a) two named groups with **different** `group_by` produce independently-organized
+subtrees; (b) a group with no levels renders flat beside a sibling group that has them; (c) the
+single-unnamed-group view is byte-identical to today (`ViewSpec.group_by` regression-locked). The
+existing §2 anchors stay green (they are the unnamed-group case).
+
+### Not in scope / unaffected
+- The two ν operators (§1), the row-preserving pipeline (§5), provenance/membership (§6), containment
+  Nest (§4), and `ViewPresentation`'s eradication (§3) are all untouched.
+- `ViewSpec.group_by` **survives** as the unnamed-group slot, so what shipped in #229 is a
+  forward-compatible subset — no stored-format break for the single-group defaults.
+- This is a grouping-semantics change and lives **entirely in ADR-0037.** It is *not* related to the
+  view-designer-UX pass (ADR-0038).
 
 ## Conformance
 

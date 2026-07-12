@@ -1,6 +1,13 @@
 import { describe, expect, it } from "vitest";
-import type { MetadataSchema, ViewSpec } from "@/lib/types";
-import { defaultView, evaluateView, nestWarnings, type EvalNode, type ViewGroup } from "@/lib/views/evaluateView";
+import type { MetadataSchema, ViewExpr, ViewSpec } from "@/lib/types";
+import {
+  defaultView,
+  evaluateView,
+  isBareDescendantsOf,
+  nestWarnings,
+  type EvalNode,
+  type ViewGroup,
+} from "@/lib/views/evaluateView";
 
 // A tiny lore-like roster. Order is load-bearing (manual sort == input order).
 const NODES: EvalNode[] = [
@@ -38,6 +45,43 @@ const ids = (spec: ViewSpec, nodes = NODES, ctx = { schema: SCHEMA }) =>
 
 // The explicit "whole roster" expr — what the default view lowers to (ADR-0036).
 const ALL: ViewSpec["expr"] = { descendants_of: "lore:base" };
+
+describe("isBareDescendantsOf (dense-null tolerant whole-roster detection)", () => {
+  it("accepts a sparse whole-roster expr", () => {
+    expect(isBareDescendantsOf({ descendants_of: "lore:base" })).toBe(true);
+  });
+  it("accepts the backend's dense-null dump (every other slot present as null)", () => {
+    // Regression: a round-tripped spec has ~15 keys, all null but descendants_of.
+    // A key-count check (`Object.keys(...).length === 1`) misfired here, silently
+    // disabling drag-reorder on saved/duplicated whole-roster views.
+    // Slots typed `ViewExpr[] | undefined` arrive as `null` at runtime, so the
+    // literal is cast through `unknown` — that asymmetry is exactly what the
+    // `== null` checks (not key counting) exist to absorb.
+    expect(
+      isBareDescendantsOf({
+        descendants_of: "lore:base",
+        view_ref: null,
+        union: null,
+        intersect: null,
+        difference: null,
+        complement: null,
+        annotate: null,
+        type: null,
+        tagged: null,
+        field: null,
+        hand_picked: null,
+        field_of: null,
+        var: null,
+      } as unknown as ViewExpr),
+    ).toBe(true);
+  });
+  it("rejects an expr with another primary slot set (a filtered roster)", () => {
+    expect(isBareDescendantsOf({ descendants_of: "lore:base", tagged: "hero" })).toBe(false);
+  });
+  it("rejects an expr with no descendants_of", () => {
+    expect(isBareDescendantsOf({ tagged: "hero" })).toBe(false);
+  });
+});
 
 describe("default view", () => {
   it("is the explicit whole-kind roster (descendants_of the kind root) plus the kind's honest shape (ADR-0037 §7)", () => {

@@ -9,7 +9,12 @@
   import CountPill from "@/components/widgets/CountPill.svelte";
   import { assistantTagsStore, assistantTagColorHexes } from "@/lib/stores/assistantTags";
   import { assistantTagsOf } from "@/lib/chat/assistantScope";
-  import { defaultView, evaluateView, kindUniverseExpr } from "@/lib/views/evaluateView";
+  import {
+    defaultView,
+    evaluateView,
+    isBareDescendantsOf,
+    kindUniverseExpr,
+  } from "@/lib/views/evaluateView";
   import { paneViews } from "@/lib/stores/paneViews.svelte";
   import { metadataSchemaStore } from "@/lib/stores/schema";
   import { referenceIndexStore } from "@/lib/stores/references";
@@ -70,10 +75,14 @@
       (e) => (e as { descendants_of?: string }).descendants_of,
     ),
   );
+  // Dense-null tolerant (NOT a key count): the backend dumps every unset slot as
+  // explicit null, so a round-tripped whole-roster spec has ~15 keys — a key-count
+  // check would misfire on any saved/duplicated default view and silently disable
+  // drag. `isBareDescendantsOf` tests slot values, matching `kindUniverseExpr`.
   $: isWholeRoster =
     !!viewSpec.expr &&
     typeof viewSpec.expr === "object" &&
-    Object.keys(viewSpec.expr).length === 1 &&
+    isBareDescendantsOf(viewSpec.expr) &&
     rosterRoots.has((viewSpec.expr as { descendants_of?: string }).descendants_of);
   $: canReorder =
     isWholeRoster &&

@@ -833,6 +833,29 @@ function isBareViewRef(expr: ViewExpr): boolean {
   );
 }
 
+// A `descendants_of` leaf with no other primary slot set — the whole-kind roster
+// expr (`kindUniverseExpr`), unfiltered. Like `isBareViewRef`, this must tolerate
+// the backend's dense-null dump (every unset slot present as explicit `null`), so
+// it tests slot *values* with `== null` rather than counting keys — a round-tripped
+// spec has ~15 keys, all null but `descendants_of`.
+export function isBareDescendantsOf(expr: ViewExpr): boolean {
+  return (
+    expr.descendants_of != null &&
+    expr.view_ref == null &&
+    expr.union == null &&
+    expr.intersect == null &&
+    expr.difference == null &&
+    expr.complement == null &&
+    expr.annotate == null &&
+    expr.type == null &&
+    expr.tagged == null &&
+    expr.field == null &&
+    expr.hand_picked == null &&
+    expr.field_of == null &&
+    expr.var == null
+  );
+}
+
 // Nest a grouped/handle sub-flow: evaluate the referenced view's handles into
 // rows *with their paths* so the caller can splice them under its own segment
 // (sub-flow → handle, #101). Returns null when the ref has no group structure to

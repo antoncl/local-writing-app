@@ -19,10 +19,10 @@
 import type { EvalNode, ViewGroup, ViewResult } from "@/lib/views/evaluateView";
 
 // A member node as a childless real-node (leaf) group — the tree-uniform form
-// every real node takes (ADR-0035 §4). The single source for this shape: the flat
-// lift in `ViewNodeList` and the panes' intrinsic bucketing all build leaves
-// through it, so the render contract lives in one place. `color` carries the
-// node's annotation token when a caller has one (default none).
+// every real node takes (ADR-0035 §4). The single source for this shape: the
+// flat lift in `ViewNodeList` builds its leaves through it, so the render
+// contract lives in one place. `color` carries the node's annotation token when
+// a caller has one (default none).
 export function leafGroup<T extends EvalNode>(node: T, color: string | null = null): ViewGroup<T> {
   return { key: `node:${node.id}`, label: node.title, color, nodeId: node.id, node, children: [] };
 }
@@ -32,36 +32,4 @@ export function leafGroup<T extends EvalNode>(node: T, color: string | null = nu
 // every non-view site lifts through. `<ViewNodeList result={nodeSet(chats)} />`.
 export function nodeSet<T extends EvalNode>(nodes: T[]): ViewResult<T> {
   return { nodes, annotations: new Map(), groups: null };
-}
-
-// A pane's intrinsic bucketing (Lore by entry_type, Assistants by layer): partition
-// `items` into one synthetic `ViewGroup` per `keyOf` value, each holding its members
-// as `leafGroup`s (the tree-uniform form ViewNodeList renders). `labelOf` names a
-// bucket from the first item that opens it; `groupKey` namespaces the raw key into
-// the stable `ViewGroup.key` (e.g. `group:type:…`) — identity, so collapse survives;
-// `sort` orders the buckets (insertion order if omitted). The single source for this
-// scaffolding (was duplicated as Lore.groupByType / Assistants.groupByLayer, #208).
-export function groupBy<T extends EvalNode>(
-  items: T[],
-  keyOf: (item: T) => string,
-  labelOf: (item: T) => string,
-  opts: {
-    groupKey?: (key: string) => string;
-    sort?: (a: ViewGroup<T>, b: ViewGroup<T>) => number;
-  } = {},
-): ViewGroup<T>[] {
-  const namespace = opts.groupKey ?? ((key) => key);
-  const buckets = new Map<string, ViewGroup<T>>();
-  for (const item of items) {
-    const key = namespace(keyOf(item));
-    const leaf = leafGroup(item);
-    const existing = buckets.get(key);
-    if (existing) {
-      existing.children.push(leaf);
-    } else {
-      buckets.set(key, { key, label: labelOf(item), color: null, nodeId: null, node: null, children: [leaf] });
-    }
-  }
-  const groups = Array.from(buckets.values());
-  return opts.sort ? groups.sort(opts.sort) : groups;
 }

@@ -535,13 +535,12 @@
   let metadataSchema = $derived($metadataSchemaStore);
   let promptEntries = $derived($promptEntriesStore);
   let assistantEntries = $derived($assistantEntriesStore);
-  // Selected-view specs/presentations per switchable pane (0.5.0 step 4, #81,
-  // doc §5). These runes-side reads of paneViews bridge to the legacy `$:` panes
-  // by flowing in as props (feedback_svelte5_reactivity_traps).
+  // Selected-view specs per switchable pane (0.5.0 step 4, #81, doc §5). These
+  // runes-side reads of paneViews bridge to the legacy `$:` panes by flowing in
+  // as props (feedback_svelte5_reactivity_traps). The view is authoritative for
+  // its own shape (ADR-0037 §3), so no presentation flows alongside the spec.
   let loreViewSpec = $derived(paneViews.specFor("lore", metadataSchema));
-  let loreViewPresentation = $derived(paneViews.presentationFor("lore"));
   let assistantViewSpec = $derived(paneViews.specFor("assistant", metadataSchema));
-  let assistantViewPresentation = $derived(paneViews.presentationFor("assistant"));
   // Draft/Research tree evaluation now lives inside StructureTree (#112): it
   // derives one ViewResult from `structure` + the pane's viewSpec, replacing the
   // App-side double-eval (color annotations + membership pruning) that stood here.
@@ -687,7 +686,6 @@
         bind:this={loreRef}
         entries={loreEntries}
         viewSpec={loreViewSpec}
-        presentation={loreViewPresentation}
         onOpenEntry={(id) => editorPanes.openLore(id)}
       />
     </div>
@@ -743,7 +741,6 @@
       <Assistants
         entries={assistantEntries}
         viewSpec={assistantViewSpec}
-        presentation={assistantViewPresentation}
         onOpenEntry={(id) => editorPanes.openAssistant(id)}
         onReorder={reorderAssistantsInLayer}
       />

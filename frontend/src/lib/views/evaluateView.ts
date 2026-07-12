@@ -60,6 +60,12 @@ export type EvalNode = {
   // can bridge the two id spaces. Omitted ⇒ `id` already IS the canonical id
   // (lore/assistant/prompt rosters, where the two coincide).
   ref_id?: string | null;
+  // ADR-0037 §7 (the Assistants default): a roster node's source layer, as the
+  // summary-level projection the backend stamps — not a schema/metadata field.
+  // Only the assistant roster sets these; the `source_layer` group_by level in
+  // `segmentForField` reads them. Other rosters omit them (rows stay bare).
+  source_layer_id?: string | null;
+  source_layer_label?: string | null;
 };
 
 // A field routes to the node top-level property (id/title/entry_type) instead
@@ -228,12 +234,39 @@ export function kindUniverseExpr(kind: string, schema?: MetadataSchema | null): 
   return { descendants_of: kindRootEntryTypeId(schema ?? null, kind) ?? `${kind}:base` };
 }
 
-// Build the default view for a pane: the whole roster of `kind`, in stored/manual
-// order. Now an EXPLICIT spec (`descendants_of:<kind-root>`), not `expr: null` —
-// post-ADR-0036 an unspecified view is empty, so "everything" must be stated.
-// The seam every NodeList routes through (ADR-0022).
+// Build the default view for a pane — an HONEST spec (ADR-0037 §7, mirroring
+// the backend `_default_view_spec`): the whole roster of `kind` in stored/
+// manual order, carrying the shape the panes used to synthesize in
+// presentation code. Lore groups by entry_type (alphabetical labels);
+// Assistants by source layer (first-seen keeps the machine layer first); the
+// structural kinds (scene/research) are a recursive containment Nest over the
+// `parent` relation (roots = parentless, ADR-0037 §4). Post-ADR-0036 an
+// unspecified view is empty, so "everything" must be stated. The seam every
+// NodeList routes through (ADR-0022).
 export function defaultView(kind: string, schema?: MetadataSchema | null): ViewSpec {
-  return { kind, expr: kindUniverseExpr(kind, schema), sort: { by: "manual" } };
+  const roster = kindUniverseExpr(kind, schema);
+  const sort: ViewSort = { by: "manual" };
+  if (kind === "scene" || kind === "research") {
+    return {
+      kind,
+      expr: {
+        nest: {
+          parents: { field: { key: "parent", op: "unset" } },
+          children: roster,
+          match: { field: "parent", direction: "child_to_parent", by: "ref" },
+          recursive: true,
+        },
+      },
+      sort,
+    };
+  }
+  if (kind === "lore") {
+    return { kind, expr: roster, sort, group_by: [{ field: "entry_type", order: "label" }] };
+  }
+  if (kind === "assistant") {
+    return { kind, expr: roster, sort, group_by: [{ field: "source_layer" }] };
+  }
+  return { kind, expr: roster, sort };
 }
 
 // Every node id present in a tree result's group hierarchy — the surviving
@@ -577,6 +610,25 @@ function segmentForField<T extends EvalNode>(
   level: NonNullable<ViewSpec["group_by"]>[number],
 ): PathSegment[] {
   const { field, order } = level;
+
+  // `source_layer` (ADR-0037 §7 — the Assistants default): resolved off the
+  // node's summary-level projection (`source_layer_id`/`source_layer_label`),
+  // like `entry_type` routes to a top-level property — there is no schema field
+  // to consult. One synthetic bucket per layer, keyed by id, labelled by label.
+  if (field === "source_layer") {
+    const layerId = (node.source_layer_id ?? "").trim();
+    if (!layerId) return []; // missing → bare at this level
+    return [
+      {
+        key: layerId,
+        label: node.source_layer_label || layerId,
+        nodeId: null,
+        origin: "field",
+        ...(order ? { order } : {}),
+      },
+    ];
+  }
+
   const raw = fieldValue(node, field, state.schema);
   if (isEmpty(raw)) return [];
 

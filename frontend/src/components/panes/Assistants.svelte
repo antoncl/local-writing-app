@@ -9,21 +9,19 @@
   import CountPill from "@/components/widgets/CountPill.svelte";
   import { assistantTagsStore, assistantTagColorHexes } from "@/lib/stores/assistantTags";
   import { assistantTagsOf } from "@/lib/chat/assistantScope";
-  import { evaluateView, type ViewGroup, type ViewResult } from "@/lib/views/evaluateView";
-  import { groupBy } from "@/lib/views/viewResult";
+  import { defaultView, evaluateView } from "@/lib/views/evaluateView";
   import { paneViews } from "@/lib/stores/paneViews.svelte";
   import { metadataSchemaStore } from "@/lib/stores/schema";
   import { referenceIndexStore } from "@/lib/stores/references";
   import { focusedDocumentStore } from "@/lib/stores/editorFocus";
-  import type { ViewPresentation, ViewSpec } from "@/lib/types";
+  import type { ViewSpec } from "@/lib/types";
 
   export let entries: AssistantEntrySummary[];
-  // The view to render through + its presentation, computed by App from the
-  // pane's selected view (paneViews) — the reactivity bridge for this legacy
-  // `$:` pane. Defaults keep the standalone default: whole `assistant` universe
-  // in stored (manual drag) order, grouped by layer.
-  export let viewSpec: ViewSpec = { kind: "assistant", expr: null, sort: { by: "manual" } };
-  export let presentation: ViewPresentation | null = null;
+  // The view to render through, computed by App from the pane's selected view
+  // (paneViews) — the reactivity bridge for this legacy `$:` pane. The
+  // standalone default is the kind's honest default view (ADR-0037 §7: whole
+  // `assistant` universe in stored/manual order, grouped by source layer).
+  export let viewSpec: ViewSpec = defaultView("assistant");
   $: schema = $metadataSchemaStore;
   // Active-row highlight + pin-star read from the editor-focus store, not props (#14 Step 2).
   $: focusedDocument = $focusedDocumentStore;
@@ -44,37 +42,31 @@
   // re-rendering the rows' chips.
   $: tagHexFor = (tag: string): string | null => assistantTagColors.get(tag) ?? null;
 
-  // Every NodeList is backed by a view (ADR-0022). Evaluate the selected view,
-  // then present: a view with label annotations carries its own hard groups; a
-  // flat view is one headerless list; otherwise the intrinsic per-layer grouping
-  // (the only mode where drag-reorder — the manual sort — applies, §6.3).
+  // Every NodeList is backed by a view (ADR-0022), and the view is authoritative
+  // for its own shape (ADR-0037 §3): the per-layer buckets come from the spec's
+  // `group_by: source_layer` level, never synthesized here.
   $: viewResult = evaluateView(viewSpec, entries, {
     schema,
     resolveView: paneViews.resolveView,
     referenceIndex: $referenceIndexStore,
   });
-  // Drag-reorder is manual order, meaningful only on the implicit default view
-  // (its per-layer buckets). A view with named-handle / structural groups, or a
-  // flat presentation, is read-only.
-  $: canReorder = presentation === null && viewResult.groups === null;
-  // ViewNodeList's sole input is one ViewResult (ADR-0035). A view with its own
-  // groups renders those; otherwise the intrinsic presentation — a flat list, or
-  // the per-layer buckets (the only mode where drag-reorder applies) — is
-  // synthesized as the result's `groups`.
-  $: displayResult = intrinsicDisplayResult(viewResult, presentation === "flat");
+  // Drag-reorder is manual order, meaningful only on the default SHAPE (ADR-0037
+  // §7 — re-keyed off the retired `presentation === null`): manual sort, the
+  // single per-layer group_by level, no named handles. Anything else (a sorted
+  // view, a handle-grouped view, a deeper organize) is read-only. NOTE for the
+  // stage-5 designer (which makes group_by authorable): a FILTERING expr that
+  // passes this key would let a drag persist a partial layer order (the backend
+  // reorder demotes unlisted ids) — tighten to whole-roster exprs then.
+  $: canReorder =
+    (viewSpec.sort?.by ?? "manual") === "manual" &&
+    !viewSpec.groups?.length &&
+    viewSpec.group_by?.length === 1 &&
+    viewSpec.group_by?.[0]?.field === "source_layer";
 
   // Drag-drop state for reordering assistants within a layer. Never escapes.
   let dragId: string | null = null;
   let dragLayerId: string | null = null;
   let dropTarget: { id: string; position: "before" | "after" } | null = null;
-
-  function intrinsicDisplayResult(
-    result: ViewResult<AssistantEntrySummary>,
-    flat: boolean,
-  ): ViewResult<AssistantEntrySummary> {
-    if (result.groups || flat) return result;
-    return { ...result, groups: groupByLayer(result.nodes) };
-  }
 
   // All members of a layer, in the roster's manual order — the reorder onDrop
   // recomputes the new order from this (viewResult.nodes carries manual order).
@@ -146,26 +138,6 @@
     await onReorder(layerId, orderedIds);
   }
 
-  // Intrinsic per-layer grouping: one synthetic bucket per source layer, each
-  // holding its assistants as childless leaf groups (the tree-uniform form
-  // ViewNodeList renders). Machine layer first, then alphabetical.
-  function groupByLayer(items: AssistantEntrySummary[]): ViewGroup<AssistantEntrySummary>[] {
-    return groupBy(
-      items,
-      (entry) => entry.source_layer_id || "",
-      (entry) => entry.source_layer_label || "Unknown",
-      {
-        groupKey: (key) => `group:layer:${key}`,
-        // Machine layer first; then alphabetical by label.
-        sort: (a, b) => {
-          if (a.label === "Machine") return -1;
-          if (b.label === "Machine") return 1;
-          return (a.label ?? "").localeCompare(b.label ?? "");
-        },
-      },
-    );
-  }
-
   function assistantSubtitle(entry: AssistantEntrySummary): string {
     const provider = entry.metadata?.ai_provider;
     const model = entry.metadata?.ai_model;
@@ -177,7 +149,7 @@
 </script>
 
 <ViewNodeList
-  result={displayResult}
+  result={viewResult}
   active={(entry) => focusedDocument?.type === "assistant" && focusedDocument.id === entry.id}
   onClick={(entry) => onOpenEntry(entry.id)}
   row={assistantRow}
@@ -191,9 +163,10 @@
   {/snippet}
 </ViewNodeList>
 
-<!-- Layer drag applies only to the intrinsic default view (canReorder); a view's
-     grouped rows are read-only. Drag is wired in-snippet on the NodeRow — it does
-     not route through ViewNodeList's onReorder escape hatch (that's for #112). -->
+<!-- Layer drag applies only to the default shape (canReorder: manual sort +
+     per-layer group_by + no handles); anything else is read-only. Drag is wired
+     in-snippet on the NodeRow — it does not route through ViewNodeList's
+     onReorder escape hatch (that's for #112). -->
 {#snippet assistantRow(entry: AssistantEntrySummary, ctx: RowCtx<AssistantEntrySummary>)}
   {@const layerId = canReorder ? (entry.source_layer_id ?? "") : null}
   <NodeRow

@@ -370,17 +370,17 @@ describe("ADR-0037: the Paris view (nest + orphans keep + group_by)", () => {
 // §7 — the defaults are honest views
 // ---------------------------------------------------------------------------
 describe("ADR-0037 §7: defaults", () => {
-  it.fails("the Lore default groups by entry_type (alphabetical labels)", () => {
+  it("the Lore default groups by entry_type (alphabetical labels)", () => {
     const spec = defaultView("lore", LORE_SCHEMA);
     expect(spec.group_by).toEqual([{ field: "entry_type", order: "label" }]);
   });
 
-  it.fails("the Assistants default groups by source layer", () => {
+  it("the Assistants default groups by source layer", () => {
     const spec = defaultView("assistant", null);
     expect(spec.group_by?.[0]?.field).toBe("source_layer");
   });
 
-  it.fails("the Draft default is a recursive containment Nest — not a presentation flag", () => {
+  it("the Draft default is a recursive containment Nest — not a presentation flag", () => {
     const spec = defaultView("scene", MS_SCHEMA);
     expect(spec.expr?.nest?.recursive).toBe(true);
     expect((spec as { presentation?: unknown }).presentation).toBeUndefined();

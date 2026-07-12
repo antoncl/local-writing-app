@@ -7,14 +7,14 @@
 //   - the *selected* view per kind, persisted in UI state (localStorage) — the
 //     views are project data, the selection is not (ADR-0022).
 //
-// Reactivity bridge: this is rune `$state`. App.svelte (runes) reads `specFor`/
-// `presentationFor` inside `$derived` and passes the results as props to the
-// (legacy `$:`) pane components, which react to prop changes — sidestepping the
-// cross-module rune-tracking trap (feedback_svelte5_reactivity_traps).
+// Reactivity bridge: this is rune `$state`. App.svelte (runes) reads `specFor`
+// inside `$derived` and passes the result as a prop to the (legacy `$:`) pane
+// components, which react to prop changes — sidestepping the cross-module
+// rune-tracking trap (feedback_svelte5_reactivity_traps).
 
 import { api } from "@/lib/api";
 import { defaultView } from "@/lib/views/evaluateView";
-import type { MetadataSchema, ViewNodeSummary, ViewPresentation, ViewSpec } from "@/lib/types";
+import type { MetadataSchema, ViewNodeSummary, ViewSpec } from "@/lib/types";
 
 const STORAGE_PREFIX = "paneView.selected."; // + kind
 
@@ -132,14 +132,6 @@ class PaneViewsController {
       if (spec) return spec;
     }
     return defaultView(kind, schema);
-  }
-
-  // The selected view's presentation, or null for the pane's intrinsic default
-  // (Lore group-by-type, Assistants group-by-layer, Draft tree).
-  presentationFor(kind: string): ViewPresentation | null {
-    const id = this.selected[kind];
-    if (!id) return null;
-    return this.viewsFor(kind).find((v) => v.id === id)?.presentation ?? null;
   }
 }
 

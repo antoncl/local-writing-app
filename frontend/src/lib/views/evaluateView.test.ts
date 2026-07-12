@@ -41,11 +41,12 @@ const ids = (spec: ViewSpec, nodes = NODES, ctx = { schema: SCHEMA }) =>
 const ALL: ViewSpec["expr"] = { descendants_of: "lore:base" };
 
 describe("default view", () => {
-  it("is the explicit whole-kind roster (descendants_of the kind root), in input order", () => {
+  it("is the explicit whole-kind roster (descendants_of the kind root) plus the kind's honest shape (ADR-0037 §7)", () => {
     expect(defaultView("lore", SCHEMA)).toEqual({
       kind: "lore",
       expr: { descendants_of: "lore:base" },
       sort: { by: "manual" },
+      group_by: [{ field: "entry_type", order: "label" }],
     });
     expect(ids(defaultView("lore", SCHEMA))).toEqual(["a", "b", "c", "d", "e"]);
   });

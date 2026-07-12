@@ -12,22 +12,20 @@
   import { entryTypeChoicesByKind } from "@/lib/utils/treeHelpers";
   import { treeActions } from "@/lib/stores/treeActions.svelte";
   import { getSwatch, resolveColorForType } from "@/lib/utils/colors";
-  import { evaluateView, type ViewGroup, type ViewResult } from "@/lib/views/evaluateView";
-  import { groupBy } from "@/lib/views/viewResult";
+  import { defaultView, evaluateView } from "@/lib/views/evaluateView";
   import { buildBindings, effectiveParamValue, resolveParamControls } from "@/lib/views/viewParams";
   import { paneViews } from "@/lib/stores/paneViews.svelte";
   import { metadataSchemaStore } from "@/lib/stores/schema";
   import { referenceIndexStore } from "@/lib/stores/references";
   import { focusedDocumentStore } from "@/lib/stores/editorFocus";
-  import type { ViewPresentation, ViewSpec } from "@/lib/types";
+  import type { ViewSpec } from "@/lib/types";
 
   export let entries: LoreEntrySummary[];
-  // The view to render through + its presentation. App computes these from the
-  // pane's selected view (paneViews) and passes them in — the reactivity bridge
-  // for the legacy `$:` pane (feedback_svelte5_reactivity_traps). Defaults keep
-  // the standalone default: the whole `lore` universe, grouped by entry_type.
-  export let viewSpec: ViewSpec = { kind: "lore", expr: null, sort: { by: "manual" } };
-  export let presentation: ViewPresentation | null = null;
+  // The view to render through. App computes it from the pane's selected view
+  // (paneViews) and passes it in — the reactivity bridge for the legacy `$:`
+  // pane (feedback_svelte5_reactivity_traps). The standalone default is the
+  // kind's honest default view (ADR-0037 §7: roster grouped by entry_type).
+  export let viewSpec: ViewSpec = defaultView("lore");
   // metadataSchema is global per-project — read from the store, not a prop (#14 Step 2).
   $: schema = $metadataSchemaStore;
   // Active-row highlight + pin-star read from the editor-focus store, not props (#14 Step 2).
@@ -62,11 +60,9 @@
   // previously-selected view) are ignored by `buildBindings`.
   let paramOverrides: Record<string, unknown> = {};
 
-  // Every NodeList is backed by a view (ADR-0022). Evaluate the selected view,
-  // then apply the pane's own search + presentation on top: a view with label
-  // annotations carries its own hard groups (rank-ordered); otherwise Lore
-  // groups by entry_type (its intrinsic default), or renders flat when the
-  // view's presentation says so.
+  // Every NodeList is backed by a view (ADR-0022), and the view is authoritative
+  // for its own shape (ADR-0037 §3): grouping comes from the spec (`group_by` /
+  // handles / nest), never synthesized here. The pane only layers search on top.
   // The view's declared parameters → strip controls (type derived from the
   // referencing Filter slot) + a bindings environment folded into evaluation.
   $: paramControls = resolveParamControls(viewSpec, schema);
@@ -105,39 +101,6 @@
     return p ? effectiveParamValue(p, paramOverrides).length > 0 : false;
   }
   $: annotations = viewResult.annotations;
-  // ViewNodeList's sole input is one ViewResult (ADR-0035). A view that carries
-  // its own named-handle / structural groups renders those; otherwise Lore
-  // synthesizes its intrinsic presentation — a flat list (presentation "flat") or
-  // its by-entry_type buckets — as the result's `groups`. Search pruning + per-
-  // group collapse then live in ViewNodeList, not here.
-  $: displayResult = intrinsicDisplayResult(viewResult, schema, presentation === "flat");
-
-  function intrinsicDisplayResult(
-    result: ViewResult<LoreEntrySummary>,
-    currentSchema: MetadataSchema | null,
-    flat: boolean,
-  ): ViewResult<LoreEntrySummary> {
-    // A view with its own groups, or a flat presentation, renders as-is.
-    if (result.groups || flat) return result;
-    // Default: group by entry_type — synthetic buckets over the members.
-    return { ...result, groups: groupByType(result.nodes, currentSchema) };
-  }
-
-  // Lore's intrinsic grouping: one synthetic bucket per entry_type, each holding
-  // its members as childless leaf groups (the tree-uniform form ViewNodeList
-  // renders). Sorted by type label.
-  function groupByType(items: LoreEntrySummary[], currentSchema: MetadataSchema | null): ViewGroup<LoreEntrySummary>[] {
-    return groupBy(
-      items,
-      (entry) => entry.entry_type || "unknown",
-      (entry) => entryTypeName(entry, currentSchema),
-      {
-        groupKey: (key) => `group:type:${key}`,
-        sort: (left, right) =>
-          (left.label ?? "").localeCompare(right.label ?? "", undefined, { sensitivity: "base" }),
-      },
-    );
-  }
 
   function entrySearchText(entry: LoreEntrySummary) {
     return [
@@ -218,7 +181,7 @@
 
 <ViewNodeList
   bind:this={list}
-  result={displayResult}
+  result={viewResult}
   searchPlaceholder="Search entries, tags, aliases"
   bind:searchValue={searchQuery}
   filter={(entry, query) => entrySearchText(entry).includes(query)}

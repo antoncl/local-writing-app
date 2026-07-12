@@ -29,10 +29,19 @@
     },
     onClose: (id) => props.onClose(id),
   });
+
+  // Tile zoom (#219): a maximized tile renders full-bleed — we hand the renderer
+  // just that group instead of the split tree. The tree stays untouched, so
+  // restoring re-tiles exactly. A stale target (its group was pruned mid-zoom)
+  // falls back to the whole tree rather than a blank shell.
+  const displayNode = $derived.by(() => {
+    const id = workspaceLayout.zoomedGroupId;
+    return (id ? workspaceLayout.groupById(id) : null) ?? workspaceLayout.root;
+  });
 </script>
 
 <div class="workspace">
-  <WorkspaceNode node={workspaceLayout.root} />
+  <WorkspaceNode node={displayNode} />
 </div>
 
 <style>
@@ -45,6 +54,11 @@
     overflow: hidden;
   }
   .workspace > :global(.ws-node-fill) {
+    flex: 1 1 auto;
+  }
+  /* A zoomed tile hands the renderer a bare group (no split wrapper); give it
+     the same fill so the maximized pane spans the whole board. */
+  .workspace > :global(.ws-group) {
     flex: 1 1 auto;
   }
 </style>

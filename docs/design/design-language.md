@@ -177,6 +177,7 @@ lexicon grows by PR, never ad hoc:
 | `⚙` | settings |
 | `◐ / ☀ / ☾` | theme cycle (system / light / dark — stateful) |
 | `▤` | view — a rendered arrangement of the node set (Views switcher) |
+| `⤢` | zoom — maximize a workspace tile to fill the shell / restore it (toggle; accent-tinted while active — a shell affordance, see below) |
 
 Every glyph control carries an `aria-label` and a tooltip — the tooltip is the
 word. Compounds (`+>`) stay banned: if no single lexicon glyph is self-evident
@@ -223,6 +224,16 @@ chrome budget: one `--fs-lg` title row per region, affordances right-aligned
 in it; no per-pane move buttons, no corner resize grips (splitters between
 regions instead). Empty space belongs *inside* regions (breathing room around
 content), never *between* them (dead board).
+
+**Tile zoom is a sanctioned shell affordance** (#219, ADR-0038 §F). A tile may
+be *maximized* to fill the whole workspace and *restored* to its place — a
+tmux-style toggle driven from one `⤢` glyph in the pane title row (and
+Ctrl/Cmd+M for the focused tile). This does not breach the tiled law: a zoomed
+tile still fills the board edge to edge — nothing floats, overlaps, or cascades
+— and the split tree is retained untouched, so restoring re-tiles exactly. Zoom
+is ephemeral view state, never part of a saved layout. Because it lives in the
+shell, every region and editor inherits it for free; no editor gets its own
+private fullscreen mode.
 
 **Surface taxonomy — where a thing lives.** Five surface classes exist, and
 every feature gets exactly one. Like the glyph lexicon, the class list grows

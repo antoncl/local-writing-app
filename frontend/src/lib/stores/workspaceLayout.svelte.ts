@@ -57,6 +57,12 @@ class WorkspaceLayout {
   dragging = $state<PanelId | null>(null);
   dropZone = $state<{ groupId: string; zone: "center" | "left" | "right" | "top" | "bottom" } | null>(null);
 
+  // Tile zoom (#219, ADR-0038 §F): the group maximized to fill the whole shell,
+  // or null at rest. tmux-zoom semantics — the split tree is retained untouched;
+  // the renderer just paints this one group full-bleed and re-tiles when it
+  // clears. Ephemeral: never serialized, so a saved layout re-opens un-zoomed.
+  zoomedGroupId = $state<string | null>(null);
+
   // localStorage key for the open project's layout, or null with none open.
   #storageKey: string | null = null;
   #persistTimer: ReturnType<typeof setTimeout> | null = null;
@@ -84,6 +90,34 @@ class WorkspaceLayout {
   endDrag(): void {
     this.dragging = null;
     this.dropZone = null;
+  }
+
+  // --- Tile zoom ----------------------------------------------------------
+
+  // Toggle maximize for a specific tile (the pane-title glyph).
+  toggleZoom(groupId: string): void {
+    this.zoomedGroupId = this.zoomedGroupId === groupId ? null : groupId;
+  }
+
+  // Toggle maximize for the tile holding the focused panel (keyboard). Falls
+  // back to the active editor group when nothing is focused yet.
+  toggleZoomFocused(): void {
+    if (this.zoomedGroupId) {
+      this.zoomedGroupId = null;
+      return;
+    }
+    const g =
+      (this.focusedPanel ? this.groupOf(this.focusedPanel) : null) ??
+      this.groupById(this.activeEditorGroupId);
+    if (g) this.zoomedGroupId = g.id;
+  }
+
+  // Drop a stale zoom target after a structural change removed its group, so a
+  // pruned tile can't leave the shell stuck on a group that no longer exists.
+  #clearZoomIfMissing(): void {
+    if (this.zoomedGroupId && !this.groupById(this.zoomedGroupId)) {
+      this.zoomedGroupId = null;
+    }
   }
 
   #idSeq = 1;
@@ -245,6 +279,7 @@ class WorkspaceLayout {
     } else {
       this.root = next;
     }
+    this.#clearZoomIfMissing();
   }
 
   // --- Interactions -------------------------------------------------------
@@ -395,6 +430,7 @@ class WorkspaceLayout {
     this.activeEditorGroupId = G_EDITOR;
     this.activePreset = name;
     this.focusedPanel = null;
+    this.zoomedGroupId = null;
     this.#schedulePersist();
   }
 
@@ -408,6 +444,7 @@ class WorkspaceLayout {
     this.activeEditorGroupId = fresh.activeEditorGroupId;
     this.activePreset = null;
     this.focusedPanel = null;
+    this.zoomedGroupId = null;
     this.#schedulePersist();
   }
 
@@ -419,6 +456,7 @@ class WorkspaceLayout {
   // Restore the open project's saved layout (or the writing preset on a miss).
   loadForProject(path: string): void {
     this.#flushPersist();
+    this.zoomedGroupId = null;
     this.#storageKey = path ? STORAGE_PREFIX + path : null;
     let snap: LayoutSnapshot | null = null;
     try {
@@ -482,6 +520,7 @@ class WorkspaceLayout {
     this.activeEditorGroupId = G_EDITOR;
     this.activePreset = "writing";
     this.focusedPanel = null;
+    this.zoomedGroupId = null;
     this.#schedulePersist();
   }
 }

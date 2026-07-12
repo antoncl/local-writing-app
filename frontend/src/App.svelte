@@ -341,6 +341,12 @@
       focusGroupDom(workspaceLayout.cycleFocus(event.shiftKey ? -1 : 1));
       return;
     }
+    // Ctrl/Cmd+M: maximize (zoom) the focused tile / restore it (#219, §F).
+    if ((event.ctrlKey || event.metaKey) && !event.shiftKey && !event.altKey && event.key.toLowerCase() === "m") {
+      event.preventDefault();
+      workspaceLayout.toggleZoomFocused();
+      return;
+    }
     if ((event.ctrlKey || event.metaKey) && event.key >= "1" && event.key <= "9") {
       event.preventDefault();
       focusGroupDom(workspaceLayout.focusGroupByIndex(Number(event.key) - 1));

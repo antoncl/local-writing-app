@@ -275,6 +275,65 @@ describe("named handles → grouped spec", () => {
   });
 });
 
+// ADR-0037 §2/§8: organize levels are result-node config that rides on the spec
+// beside the handle-derived expr/groups — orthogonal to the expr-XOR-groups rule.
+describe("group_by (organize levels, ADR-0037 §2/§8)", () => {
+  it("no organize levels → spec carries no group_by key", () => {
+    const leaf = node("type", { type: "lore:character" }, 0);
+    const graph: ViewGraph = { nodes: [out(), leaf], edges: [edge(leaf.id, OUTPUT_NODE_ID)] };
+    expect(graphToSpec(graph, { kind: "lore" })).not.toHaveProperty("group_by");
+  });
+
+  it("output-node levels lower onto a flat expr spec", () => {
+    const output = out({ group_by: [{ field: "entry_type", order: "label" }, { field: "rank" }] });
+    const leaf = node("descendants_of", { descendants_of: "lore:base" }, 0);
+    const graph: ViewGraph = { nodes: [output, leaf], edges: [edge(leaf.id, OUTPUT_NODE_ID)] };
+    const spec = graphToSpec(graph, { kind: "lore" });
+    expect(spec.expr).toEqual({ descendants_of: "lore:base" });
+    expect(spec.group_by).toEqual([{ field: "entry_type", order: "label" }, { field: "rank" }]);
+  });
+
+  it("levels compose with grouped handles (orthogonal to expr-XOR-groups)", () => {
+    const output = out({
+      handles: [{ id: "h0", name: "Cast" }, { id: "h1", name: "Gods" }],
+      group_by: [{ field: "rank" }],
+    });
+    const cast = node("type", { type: "lore:character" }, 0);
+    const gods = node("descendants_of", { descendants_of: "lore:deity" }, 100);
+    const graph: ViewGraph = {
+      nodes: [output, cast, gods],
+      edges: [edge(cast.id, OUTPUT_NODE_ID, "h0"), edge(gods.id, OUTPUT_NODE_ID, "h1")],
+    };
+    const spec = graphToSpec(graph, { kind: "lore" });
+    expect(spec.groups).toHaveLength(2);
+    expect(spec.group_by).toEqual([{ field: "rank" }]);
+  });
+
+  it("drops blank-field levels (a half-authored dropdown never persists)", () => {
+    const output = out({ group_by: [{ field: "" }, { field: "rank" }] });
+    const leaf = node("type", { type: "lore:character" }, 0);
+    const graph: ViewGraph = { nodes: [output, leaf], edges: [edge(leaf.id, OUTPUT_NODE_ID)] };
+    expect(graphToSpec(graph, { kind: "lore" }).group_by).toEqual([{ field: "rank" }]);
+  });
+
+  it("specToGraph lifts group_by back onto the output node (flat + grouped)", () => {
+    const flat = specToGraph({ kind: "lore", expr: { descendants_of: "lore:base" }, group_by: [{ field: "entry_type" }] });
+    expect(flat.nodes.find((n) => n.id === OUTPUT_NODE_ID)?.data.group_by).toEqual([{ field: "entry_type" }]);
+    const grouped = specToGraph({
+      kind: "lore",
+      groups: [{ name: "Cast", expr: { type: "lore:character" } }],
+      group_by: [{ field: "rank" }],
+    });
+    expect(grouped.nodes.find((n) => n.id === OUTPUT_NODE_ID)?.data.group_by).toEqual([{ field: "rank" }]);
+  });
+
+  it("round-trips group_by through specToGraph → graphToSpec", () => {
+    const spec = { kind: "lore", expr: { descendants_of: "lore:base" }, group_by: [{ field: "entry_type", order: "label" as const }, { field: "rank" }] };
+    const back = graphToSpec(specToGraph(spec), { kind: "lore" });
+    expect(back.group_by).toEqual(spec.group_by);
+  });
+});
+
 describe("sorter (per-segment sort)", () => {
   it("a Sorter feeding the View sets the flat sort", () => {
     const src = node("type", { type: "lore:character" }, 0);

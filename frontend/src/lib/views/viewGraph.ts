@@ -26,7 +26,7 @@
 // (nothing wired). The sentinels let filters-off-`All` and set ops fold to the
 // minimal shipped `expr` without a universe leaf in the grammar.
 
-import type { MetadataSchema, ViewExpr, ViewFieldOf, ViewFieldPredicate, ViewGroupSpec, ViewNestMatch, ViewNestOp, ViewOperand, ViewParam, ViewSort, ViewSpec } from "@/lib/types";
+import type { MetadataSchema, ViewExpr, ViewFieldOf, ViewFieldPredicate, ViewGroupByLevel, ViewGroupSpec, ViewNestMatch, ViewNestOp, ViewOperand, ViewParam, ViewSort, ViewSpec } from "@/lib/types";
 import { kindUniverseExpr, REFERENCES_FIELD, SELF_VAR } from "@/lib/views/evaluateView";
 
 export type LeafKind = "type" | "descendants_of" | "tagged" | "field" | "hand_picked" | "view_ref";
@@ -252,6 +252,11 @@ export type ViewNodeData = {
   project_field?: string;
   // output (View) — the named handles / groups
   handles?: ViewHandle[];
+  // output (View) — ADR-0037 §2/§8 ordered organize levels (ν by attribute).
+  // Result-node CONFIG, not graph shape: lifts/lowers with the spec (see
+  // graphToSpec/specToGraph) and adds no canvas node, so it can never compete
+  // with Nest as a hierarchy-maker.
+  group_by?: ViewGroupByLevel[];
   // legacy annotate group slots (kept so pre-#91 layouts don't crash on load)
   label?: string;
   rank?: number;
@@ -792,7 +797,14 @@ export function graphToSpec(
   const populated = segments.filter((s) => s.built.tag !== "empty");
 
   const params = collectParams(graph);
-  const withParams = (s: ViewSpec): ViewSpec => (params.length > 0 ? { ...s, params } : s);
+  // ADR-0037 §2/§8: the result node's organize levels ride on the spec, beside
+  // the handle-derived expr/groups (orthogonal to the expr-XOR-groups rule).
+  const groupBy = byId.get(OUTPUT_NODE_ID)?.data.group_by?.filter((l) => l.field) ?? [];
+  const withParams = (s: ViewSpec): ViewSpec => ({
+    ...s,
+    ...(params.length > 0 ? { params } : {}),
+    ...(groupBy.length > 0 ? { group_by: groupBy } : {}),
+  });
 
   if (handles.length <= 1 || populated.length <= 1) {
     const seg = populated[0];
@@ -866,6 +878,10 @@ export function specToGraph(spec: ViewSpec | null | undefined, schema?: Metadata
   } else {
     attachSegment(spec?.expr ?? null, DEFAULT_HANDLE_ID, null);
   }
+  // ADR-0037 §2/§8: organize levels are output-node config, restored regardless
+  // of the expr/groups shape (the primary reopen path restores them for free via
+  // the persisted layout cfg; this covers the spec-only fallback reopen).
+  if (spec?.group_by && spec.group_by.length > 0) outputNode.data.group_by = spec.group_by;
 
   layoutColumns(nodes, outputNode, rowCursor);
   return { nodes, edges };

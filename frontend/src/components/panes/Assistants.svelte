@@ -9,7 +9,7 @@
   import CountPill from "@/components/widgets/CountPill.svelte";
   import { assistantTagsStore, assistantTagColorHexes } from "@/lib/stores/assistantTags";
   import { assistantTagsOf } from "@/lib/chat/assistantScope";
-  import { defaultView, evaluateView } from "@/lib/views/evaluateView";
+  import { defaultView, evaluateView, kindUniverseExpr } from "@/lib/views/evaluateView";
   import { paneViews } from "@/lib/stores/paneViews.svelte";
   import { metadataSchemaStore } from "@/lib/stores/schema";
   import { referenceIndexStore } from "@/lib/stores/references";
@@ -51,13 +51,32 @@
     referenceIndex: $referenceIndexStore,
   });
   // Drag-reorder is manual order, meaningful only on the default SHAPE (ADR-0037
-  // §7 — re-keyed off the retired `presentation === null`): manual sort, the
-  // single per-layer group_by level, no named handles. Anything else (a sorted
-  // view, a handle-grouped view, a deeper organize) is read-only. NOTE for the
-  // stage-5 designer (which makes group_by authorable): a FILTERING expr that
-  // passes this key would let a drag persist a partial layer order (the backend
-  // reorder demotes unlisted ids) — tighten to whole-roster exprs then.
+  // §7 — re-keyed off the retired `presentation === null`): the WHOLE roster,
+  // manual sort, the single per-layer group_by level, no named handles. Anything
+  // else (a sorted view, a handle-grouped view, a deeper organize) is read-only.
+  // The whole-roster guard is load-bearing now that stage 5 makes group_by
+  // authorable: a FILTERING expr still carrying the source_layer level would let
+  // a drag persist a PARTIAL layer order — the backend reorder demotes ids
+  // absent from the list — silently reshuffling the hidden assistants.
+  // Accept BOTH the schema-resolved roster root and the schema-less `:base`
+  // fallback: `assistant` is a concrete-root kind (root ≠ `assistant:base`), so
+  // a spec authored/defaulted without schema (e.g. the prop default `defaultView
+  // ("assistant")`) carries `assistant:base` while the loaded schema resolves the
+  // concrete root — a raw single-value compare would wrongly hide drag on the
+  // genuine default roster. Same lift/lower asymmetry that gave specToGraph a
+  // schema arg (#211). Failure is safe (read-only), but harden it anyway.
+  $: rosterRoots = new Set(
+    [kindUniverseExpr("assistant", schema), kindUniverseExpr("assistant", null)].map(
+      (e) => (e as { descendants_of?: string }).descendants_of,
+    ),
+  );
+  $: isWholeRoster =
+    !!viewSpec.expr &&
+    typeof viewSpec.expr === "object" &&
+    Object.keys(viewSpec.expr).length === 1 &&
+    rosterRoots.has((viewSpec.expr as { descendants_of?: string }).descendants_of);
   $: canReorder =
+    isWholeRoster &&
     (viewSpec.sort?.by ?? "manual") === "manual" &&
     !viewSpec.groups?.length &&
     viewSpec.group_by?.length === 1 &&

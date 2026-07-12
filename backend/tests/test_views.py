@@ -29,15 +29,15 @@ class ViewCrudTests(unittest.TestCase):
     def tearDown(self) -> None:
         self.temp_dir.cleanup()
 
-    def _create(self, title: str, spec: dict, presentation: str = "flat") -> dict:
+    def _create(self, title: str, spec: dict) -> dict:
         res = self.client.post(
             "/api/views",
-            json={"title": title, "spec": spec, "presentation": presentation},
+            json={"title": title, "spec": spec},
         )
         self.assertEqual(res.status_code, 200, res.text)
         return res.json()
 
-    def test_create_read_roundtrips_spec_and_presentation(self) -> None:
+    def test_create_read_roundtrips_spec(self) -> None:
         spec = {
             "kind": "lore",
             "expr": {
@@ -48,10 +48,10 @@ class ViewCrudTests(unittest.TestCase):
             },
             "sort": {"by": "title", "dir": "asc"},
         }
-        created = self._create("Non-place characters", spec, presentation="grouped")
+        created = self._create("Non-place characters", spec)
         self.assertTrue(created["id"].startswith("view"))
         self.assertEqual(created["entry_type"], "view:view")
-        self.assertEqual(created["presentation"], "grouped")
+        self.assertNotIn("presentation", created)
         self.assertEqual(created["spec"]["kind"], "lore")
         self.assertEqual(
             created["spec"]["expr"]["difference"]["keep"]["descendants_of"],
@@ -82,7 +82,6 @@ class ViewCrudTests(unittest.TestCase):
                 "title": "Tagged",
                 "base_revision": created["revision"],
                 "spec": {"kind": "lore", "expr": {"tagged": "gotham"}},
-                "presentation": "flat",
                 "layout": layout,
             },
         )
@@ -138,7 +137,8 @@ class ViewCrudTests(unittest.TestCase):
         )
         self.assertEqual(ok.status_code, 200, ok.text)
         self.assertEqual(
-            ok.json()["spec"], {"kind": "scene", "expr": None, "groups": None, "sort": None, "params": None}
+            ok.json()["spec"],
+            {"kind": "scene", "expr": None, "groups": None, "sort": None, "params": None, "group_by": None},
         )
 
     def test_delete_removes_view(self) -> None:
@@ -229,6 +229,37 @@ class ViewSpecModelTests(unittest.TestCase):
         self.assertIsNone(spec.expr)
         self.assertEqual([g.name for g in spec.groups], ["Cast", "Deities"])
         self.assertEqual(spec.groups[1].color, "amber")
+
+    def test_multi_level_sort_chain_roundtrip(self) -> None:
+        # #230: `then` chains a tiebreaker; stored verbatim, round-trips.
+        spec = ViewSpec(
+            kind="lore",
+            expr={"descendants_of": "lore:base"},
+            sort={"by": "field", "field_key": "team", "dir": "asc", "then": {"by": "title", "dir": "desc"}},
+        )
+        self.assertEqual(spec.sort.by, "field")
+        self.assertEqual(spec.sort.then.by, "title")
+        self.assertEqual(spec.sort.then.dir, "desc")
+        self.assertIsNone(spec.sort.then.then)
+        back = ViewSpec.model_validate(spec.model_dump(exclude_none=True))
+        self.assertEqual(back.sort.then.by, "title")
+        self.assertEqual(back.sort.then.dir, "desc")
+
+    def test_per_group_group_by_roundtrip(self) -> None:
+        # ADR-0037 Amendment 1: each named group carries its OWN organize levels.
+        spec = ViewSpec(
+            kind="lore",
+            groups=[
+                {"name": "Cast", "expr": {"type": "lore:character"}, "group_by": [{"field": "rank"}]},
+                {"name": "Places", "expr": {"type": "lore:location"}},
+            ],
+        )
+        self.assertEqual([lvl.field for lvl in spec.groups[0].group_by], ["rank"])
+        self.assertIsNone(spec.groups[1].group_by)
+        # Survives the storage round-trip (model_dump exclude_none → model_validate).
+        back = ViewSpec.model_validate(spec.model_dump(exclude_none=True))
+        self.assertEqual(back.groups[0].group_by[0].field, "rank")
+        self.assertIsNone(back.groups[1].group_by)
 
     def test_group_requires_name(self) -> None:
         with self.assertRaises(ValueError):
@@ -479,9 +510,8 @@ class ViewUiStateTests(unittest.TestCase):
 
         self.client.put(f"/api/views/{created['id']}/ui", json={"ui": {"collapsed": ["node:z"]}})
         after = self.client.get(f"/api/views/{created['id']}").json()
-        # Spec + presentation untouched by a fold write.
+        # Spec untouched by a fold write.
         self.assertEqual(after["spec"], created["spec"])
-        self.assertEqual(after["presentation"], created["presentation"])
         # A fold write is content-addressed too, but it takes NO base_revision —
         # it never 409s. Prove it accepts a write with no revision guard.
         self.assertNotEqual(after["revision"], rev_before)  # ui blob changed the file
@@ -492,7 +522,7 @@ class ViewUiStateTests(unittest.TestCase):
         # A spec save (Edit) must not wipe fold state (independent lifecycle).
         res = self.client.put(
             f"/api/views/{created['id']}",
-            json={"title": "Edit me", "spec": {"kind": "lore", "expr": {"tagged": "y"}}, "presentation": "flat"},
+            json={"title": "Edit me", "spec": {"kind": "lore", "expr": {"tagged": "y"}}},
         )
         self.assertEqual(res.status_code, 200, res.text)
         self.assertEqual(res.json()["spec"]["expr"]["tagged"], "y")
@@ -516,7 +546,6 @@ class ViewUiStateTests(unittest.TestCase):
             "entry_type: view:view\n"
             "system: true\n"
             "spec:\n  kind: lore\n  expr:\n    descendants_of: lore:base\n"
-            "presentation: grouped\n"
             "---\n\n",
             encoding="utf-8",
         )
@@ -527,7 +556,7 @@ class ViewUiStateTests(unittest.TestCase):
         # Edit (spec save) is refused.
         edit = self.client.put(
             "/api/views/view_default_lore",
-            json={"title": "Default", "spec": {"kind": "lore", "expr": {"tagged": "x"}}, "presentation": "flat"},
+            json={"title": "Default", "spec": {"kind": "lore", "expr": {"tagged": "x"}}},
         )
         self.assertEqual(edit.status_code, 403, edit.text)
 
@@ -545,13 +574,51 @@ class ViewUiStateTests(unittest.TestCase):
         )
         self.assertEqual(res.status_code, 200, res.text)
         body = res.json()
-        # Materialized as the read-only whole-kind roster: descendants_of the
-        # scene kind's parentless root (scene:base), with the fold state applied.
+        # Materialized as the read-only structural default (ADR-0037 §7): a
+        # recursive containment Nest over the `parent` relation, roots =
+        # parentless, children = the whole scene roster.
         self.assertTrue(body["system"])
         self.assertEqual(body["spec"]["kind"], "scene")
-        self.assertEqual(body["spec"]["expr"]["descendants_of"], "scene:base")
-        self.assertEqual(body["presentation"], "tree")
+        nest = body["spec"]["expr"]["nest"]
+        self.assertTrue(nest["recursive"])
+        self.assertEqual(nest["match"], {"field": "parent", "direction": "child_to_parent", "by": "ref"})
+        self.assertEqual(nest["parents"]["field"]["key"], "parent")
+        self.assertEqual(nest["parents"]["field"]["op"], "unset")
+        self.assertEqual(nest["children"]["descendants_of"], "scene:base")
+        self.assertNotIn("presentation", body)
         self.assertEqual(body["ui"]["collapsed"], ["node:act1"])
+
+    def test_materialized_lore_default_groups_by_entry_type(self) -> None:
+        # ADR-0037 §7: the Lore default is a real grouped view — the whole-kind
+        # roster with a group_by entry_type level (alphabetical labels) — not a
+        # flat spec the pane re-shapes.
+        res = self.client.put(
+            "/api/views/view_default_lore/ui", json={"ui": {"collapsed": ["group:x"]}}
+        )
+        self.assertEqual(res.status_code, 200, res.text)
+        body = res.json()
+        self.assertEqual(body["spec"]["expr"]["descendants_of"], "lore:base")
+        self.assertEqual(body["spec"]["group_by"], [{"field": "entry_type", "order": "label"}])
+
+    def test_group_by_and_orphans_round_trip_through_create_and_read(self) -> None:
+        # ADR-0037: group_by levels and the nest orphans policy are stored
+        # verbatim and survive create → read (the backend never evaluates them).
+        spec = {
+            "kind": "lore",
+            "expr": {
+                "nest": {
+                    "parents": {"type": "lore:location"},
+                    "children": {"descendants_of": "lore:base"},
+                    "match": {"field": "located_in", "direction": "child_to_parent", "by": "ref"},
+                    "orphans": "keep",
+                }
+            },
+            "group_by": [{"field": "entry_type"}],
+        }
+        created = self._create("Paris view", spec)
+        got = self.client.get(f"/api/views/{created['id']}").json()
+        self.assertEqual(got["spec"]["group_by"], [{"field": "entry_type", "order": None}])
+        self.assertEqual(got["spec"]["expr"]["nest"]["orphans"], "keep")
 
     def test_materialized_default_is_listed_and_reused_on_next_write(self) -> None:
         self.client.put("/api/views/view_default_scene/ui", json={"ui": {"collapsed": ["node:a"]}})

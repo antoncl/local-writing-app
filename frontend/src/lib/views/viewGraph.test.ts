@@ -275,6 +275,89 @@ describe("named handles → grouped spec", () => {
   });
 });
 
+// ADR-0037 §2/§8: organize levels are result-node config that rides on the spec
+// beside the handle-derived expr/groups — orthogonal to the expr-XOR-groups rule.
+describe("group_by (organize levels, ADR-0037 §2/§8)", () => {
+  it("no organize levels → spec carries no group_by key", () => {
+    const leaf = node("type", { type: "lore:character" }, 0);
+    const graph: ViewGraph = { nodes: [out(), leaf], edges: [edge(leaf.id, OUTPUT_NODE_ID)] };
+    expect(graphToSpec(graph, { kind: "lore" })).not.toHaveProperty("group_by");
+  });
+
+  it("the single/unnamed group's levels (on its `in` handle) lower onto a flat expr spec", () => {
+    const output = out({ handles: [{ id: "in", name: "", group_by: [{ field: "entry_type", order: "label" }, { field: "rank" }] }] });
+    const leaf = node("descendants_of", { descendants_of: "lore:base" }, 0);
+    const graph: ViewGraph = { nodes: [output, leaf], edges: [edge(leaf.id, OUTPUT_NODE_ID)] };
+    const spec = graphToSpec(graph, { kind: "lore" });
+    expect(spec.expr).toEqual({ descendants_of: "lore:base" });
+    expect(spec.group_by).toEqual([{ field: "entry_type", order: "label" }, { field: "rank" }]);
+  });
+
+  it("Amendment 1: each handle's group_by lowers onto its OWN group; no top-level group_by", () => {
+    const output = out({
+      handles: [
+        { id: "h0", name: "Cast", group_by: [{ field: "rank" }] },
+        { id: "h1", name: "Gods", group_by: [{ field: "entry_type" }] },
+      ],
+    });
+    const cast = node("type", { type: "lore:character" }, 0);
+    const gods = node("descendants_of", { descendants_of: "lore:deity" }, 100);
+    const graph: ViewGraph = {
+      nodes: [output, cast, gods],
+      edges: [edge(cast.id, OUTPUT_NODE_ID, "h0"), edge(gods.id, OUTPUT_NODE_ID, "h1")],
+    };
+    const spec = graphToSpec(graph, { kind: "lore" });
+    expect(spec.groups).toHaveLength(2);
+    expect(spec.groups?.[0].group_by).toEqual([{ field: "rank" }]);
+    expect(spec.groups?.[1].group_by).toEqual([{ field: "entry_type" }]);
+    expect(spec).not.toHaveProperty("group_by"); // Organize is per-group, not result-level
+  });
+
+  it("drops blank-field levels (a half-authored dropdown never persists)", () => {
+    const output = out({ handles: [{ id: "in", name: "", group_by: [{ field: "" }, { field: "rank" }] }] });
+    const leaf = node("type", { type: "lore:character" }, 0);
+    const graph: ViewGraph = { nodes: [output, leaf], edges: [edge(leaf.id, OUTPUT_NODE_ID)] };
+    expect(graphToSpec(graph, { kind: "lore" }).group_by).toEqual([{ field: "rank" }]);
+  });
+
+  it("specToGraph seeds the `in` handle (flat) and each handle (grouped) with its group_by (Amendment 1)", () => {
+    const flat = specToGraph({ kind: "lore", expr: { descendants_of: "lore:base" }, group_by: [{ field: "entry_type" }] });
+    const flatHandles = flat.nodes.find((n) => n.id === OUTPUT_NODE_ID)?.data.handles;
+    expect(flatHandles?.[0].id).toBe("in");
+    expect(flatHandles?.[0].group_by).toEqual([{ field: "entry_type" }]);
+    const grouped = specToGraph({
+      kind: "lore",
+      groups: [
+        { name: "Cast", expr: { type: "lore:character" }, group_by: [{ field: "rank" }] },
+        { name: "Gods", expr: { type: "lore:deity" } },
+      ],
+    });
+    const handles = grouped.nodes.find((n) => n.id === OUTPUT_NODE_ID)?.data.handles;
+    expect(handles?.[0].group_by).toEqual([{ field: "rank" }]);
+    expect(handles?.[1].group_by).toBeUndefined();
+  });
+
+  it("round-trips the unnamed group's group_by through specToGraph → graphToSpec", () => {
+    const spec = { kind: "lore", expr: { descendants_of: "lore:base" }, group_by: [{ field: "entry_type", order: "label" as const }, { field: "rank" }] };
+    const back = graphToSpec(specToGraph(spec), { kind: "lore" });
+    expect(back.group_by).toEqual(spec.group_by);
+  });
+
+  it("round-trips per-group group_by (Amendment 1) through specToGraph → graphToSpec", () => {
+    const spec = {
+      kind: "lore",
+      groups: [
+        { name: "Cast", expr: { type: "lore:character" }, group_by: [{ field: "rank" }] },
+        { name: "Gods", expr: { type: "lore:deity" } },
+      ],
+    };
+    const back = graphToSpec(specToGraph(spec), { kind: "lore" });
+    expect(back.groups).toHaveLength(2);
+    expect(back.groups?.[0].group_by).toEqual([{ field: "rank" }]);
+    expect(back.groups?.[1].group_by).toBeUndefined();
+  });
+});
+
 describe("sorter (per-segment sort)", () => {
   it("a Sorter feeding the View sets the flat sort", () => {
     const src = node("type", { type: "lore:character" }, 0);
@@ -286,6 +369,29 @@ describe("sorter (per-segment sort)", () => {
     const spec = graphToSpec(graph, { kind: "lore", sort: { by: "manual" } });
     expect(spec.expr).toEqual({ type: "lore:character" });
     expect(spec.sort).toEqual({ by: "title", dir: "asc" });
+  });
+
+  it("does NOT promote a null-expr view to the universe when it carries a sort (#B1)", () => {
+    // A saved empty-but-ordered view (expr null + non-manual sort). Reopening must
+    // not wire an input-less Sorter that the #93 empty+sort rule promotes to the
+    // whole roster — that would silently flip membership ∅ → everything.
+    const back = graphToSpec(specToGraph({ kind: "lore", expr: null, sort: { by: "title", dir: "asc" } }), { kind: "lore" });
+    expect(back.expr ?? null).toBeNull(); // still the empty set, not descendants_of
+  });
+
+  it("carries a multi-level sort chain (#230) through the Sorter node verbatim", () => {
+    const chain = { by: "field" as const, field_key: "rank", dir: "desc" as const, then: { by: "title" as const, dir: "asc" as const } };
+    const src = node("type", { type: "lore:character" }, 0);
+    const s = node("sorter", { sort: chain }, 100);
+    const graph: ViewGraph = {
+      nodes: [out(), src, s],
+      edges: [edge(src.id, s.id), edge(s.id, OUTPUT_NODE_ID)],
+    };
+    const spec = graphToSpec(graph, { kind: "lore" });
+    expect(spec.sort).toEqual(chain);
+    // and specToGraph rebuilds the Sorter with the chain intact.
+    const back = graphToSpec(specToGraph(spec), { kind: "lore" });
+    expect(back.sort).toEqual(chain);
   });
 
   it("a Sorter before a handle sets that group's sort", () => {

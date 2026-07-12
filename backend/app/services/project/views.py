@@ -1,10 +1,10 @@
 """Saved-view slice of ProjectService (0.5.0, epic #35 / #78).
 
 A saved view is a frontmatter-only Node kind (`view`): a ViewSpec (anchor
-`kind` + a set-algebra `expr` + `sort`) plus a `presentation` hint. Storage
-mirrors mutation sets — layered Node markdown files under `<project>/views/`
-with **no prose body**: the spec + presentation live in front matter (via
-`_write_node_entry_file`'s `extra=`). `ProjectService` composes this mixin;
+`kind` + a set-algebra `expr` + `sort` + `group_by`). Storage mirrors mutation
+sets — layered Node markdown files under `<project>/views/` with **no prose
+body**: the spec lives in front matter (via `_write_node_entry_file`'s
+`extra=`). `ProjectService` composes this mixin;
 shared IO/index helpers resolve through the MRO (see `mutation_sets.py`).
 
 0.5.0 step 1 lands storage + CRUD + a `view_ref` cycle check at save. There is
@@ -18,14 +18,17 @@ from typing import Any
 
 from app.models_views import (
     CreateViewRequest,
+    FieldPredicate,
+    NestMatch,
+    NestOp,
     SaveViewRequest,
     UpdateViewUiRequest,
     ViewExpr,
+    ViewGroupByLevel,
     ViewLayout,
     ViewNode,
     ViewNodeList,
     ViewNodeSummary,
-    ViewPresentation,
     ViewSpec,
     ViewUiState,
 )
@@ -62,7 +65,6 @@ class ViewsMixin:
                     title=str(front_matter.get("title") or entry.id),
                     entry_type=self._view_entry_type(front_matter),
                     view_kind=spec.kind if spec else "",
-                    presentation=self._view_presentation(front_matter),
                     spec=spec,
                     ui=self._parse_view_ui(front_matter.get("ui")),
                     system=self._view_system(front_matter),
@@ -85,7 +87,6 @@ class ViewsMixin:
             request.title,
             request.entry_type,
             request.spec,
-            request.presentation,
             request.layout,
         )
         return self.read_view(view_id)
@@ -107,7 +108,6 @@ class ViewsMixin:
             revision=self._revision(path),
             entry_type=self._view_entry_type(front_matter),
             spec=spec,
-            presentation=self._view_presentation(front_matter),
             layout=self._parse_view_layout(front_matter.get("layout")),
             ui=self._parse_view_ui(front_matter.get("ui")),
             system=self._view_system(front_matter),
@@ -136,7 +136,6 @@ class ViewsMixin:
             request.title,
             request.entry_type,
             request.spec,
-            request.presentation,
             request.layout,
             ui=self._parse_view_ui(front_matter.get("ui")),
         )
@@ -145,7 +144,7 @@ class ViewsMixin:
 
     def update_view_ui(self, view_id: str, request: UpdateViewUiRequest) -> ViewNode:
         """Lock-free fold/ui write (ADR-0036): rewrites ONLY the `ui` blob,
-        preserving spec/presentation/layout/title/system. It takes no
+        preserving spec/layout/title/system. It takes no
         base_revision and does not consult the spec revision, so a fold toggle
         never 409s against a concurrent designer save — the two lifecycles are
         independent. A `view_default_<kind>` id with no file yet MATERIALIZES the
@@ -165,7 +164,6 @@ class ViewsMixin:
             str(front_matter.get("title") or node_id),
             self._view_entry_type(front_matter),
             spec,
-            self._view_presentation(front_matter),
             self._parse_view_layout(front_matter.get("layout")),
             ui=request.ui,
             system=self._view_system(front_matter),
@@ -180,20 +178,16 @@ class ViewsMixin:
 
     def _materialize_default_view(self, view_id: str, ui: ViewUiState) -> ViewNode:
         """Write the read-only system default view node for a `view_default_<kind>`
-        id (ADR-0036 §5). Its spec is the whole-kind roster — `descendants_of` the
-        kind's parentless root type — which is exactly what the frontend's
-        `defaultView(kind)` lowers to, so a later Duplicate starts from the real
-        default. Marked `system: true` (Duplicate-not-Edit; save_view rejects it)."""
+        id (ADR-0036 §5). Its spec is the kind's honest default (ADR-0037 §7) —
+        matching what the frontend's `defaultView(kind)` produces, so a later
+        Duplicate starts from the real default. Marked `system: true`
+        (Duplicate-not-Edit; save_view rejects it)."""
         root = self._require_project()
         kind = view_id[len(DEFAULT_VIEW_ID_PREFIX):]
         root_type = self._kind_root_entry_type(kind)
         if not root_type:
             raise ProjectServiceError(f"No default view is defined for kind '{kind}'.", 422)
-        spec = ViewSpec(kind=kind, expr=ViewExpr(descendants_of=root_type))
-        # Draft renders a structural tree; the other explicit panes render flat/
-        # grouped rosters. Stored for the Duplicate path; the pane's own default
-        # render ignores it (selection stays null → frontend `defaultView`).
-        presentation: ViewPresentation = "tree" if kind == "scene" else "flat"
+        spec = self._default_view_spec(kind, root_type)
         (root / "views").mkdir(parents=True, exist_ok=True)
         self._write_view_file(
             self._filepath_for_new_node(root / "views", view_id),
@@ -201,7 +195,6 @@ class ViewsMixin:
             "Default",
             "view:view",
             spec,
-            presentation,
             ui=ui,
             system=True,
         )
@@ -219,6 +212,32 @@ class ViewsMixin:
                 return fqn
         return None
 
+    @staticmethod
+    def _default_view_spec(kind: str, root_type: str) -> ViewSpec:
+        """The per-kind system default spec (ADR-0037 §7). Lore groups by
+        entry_type (alphabetical labels); Assistants by source layer (first-seen
+        keeps the machine layer first); the structural kinds (scene/research)
+        are a recursive containment Nest over the `parent` relation (roots =
+        parentless); every other kind stays the plain whole-kind roster."""
+        roster = ViewExpr(descendants_of=root_type)
+        if kind in ("scene", "research"):
+            return ViewSpec(
+                kind=kind,
+                expr=ViewExpr(
+                    nest=NestOp(
+                        parents=ViewExpr(field=FieldPredicate(key="parent", op="unset")),
+                        children=roster,
+                        match=NestMatch(field="parent", direction="child_to_parent", by="ref"),
+                        recursive=True,
+                    )
+                ),
+            )
+        if kind == "lore":
+            return ViewSpec(kind=kind, expr=roster, group_by=[ViewGroupByLevel(field="entry_type", order="label")])
+        if kind == "assistant":
+            return ViewSpec(kind=kind, expr=roster, group_by=[ViewGroupByLevel(field="source_layer")])
+        return ViewSpec(kind=kind, expr=roster)
+
     # ----- helpers --------------------------------------------------------
 
     def _write_view_file(
@@ -228,17 +247,13 @@ class ViewsMixin:
         title: str,
         entry_type: str,
         spec: ViewSpec,
-        presentation: ViewPresentation,
         layout: ViewLayout | None = None,
         ui: ViewUiState | None = None,
         system: bool = False,
     ) -> None:
         # exclude_none keeps the on-disk spec compact — a leaf serializes as
         # `{type: lore:character}`, not every unset ViewExpr slot.
-        extra: dict[str, Any] = {
-            "spec": spec.model_dump(exclude_none=True),
-            "presentation": presentation,
-        }
+        extra: dict[str, Any] = {"spec": spec.model_dump(exclude_none=True)}
         # Only write layout when the designer supplied one — keeps designer-less
         # / programmatic views clean (they fall back to auto-layout on open).
         if layout is not None:
@@ -266,11 +281,6 @@ class ViewsMixin:
     def _view_entry_type(front_matter: dict[str, Any]) -> str:
         raw = front_matter.get("entry_type") or "view:view"
         return raw if isinstance(raw, str) else "view:view"
-
-    @staticmethod
-    def _view_presentation(front_matter: dict[str, Any]) -> ViewPresentation:
-        raw = front_matter.get("presentation")
-        return raw if raw in ("tree", "grouped", "flat") else "flat"
 
     @staticmethod
     def _parse_view_spec(raw: Any) -> ViewSpec | None:

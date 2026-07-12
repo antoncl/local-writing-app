@@ -7,18 +7,21 @@
 // (the Draft pane only tints, never re-shapes — ADR-0022 — so including
 // containers costs nothing).
 //
-// Each node also carries its `ancestry` — the chain of container nodes above it,
-// outer→inner — so a `presentation: "tree"` view (#101) can rebuild the nesting
-// from the flat roster. `nodeId` on each segment marks it as a real node, so the
-// renderer draws an ancestor as a collapsible NodeRow, not a synthetic header.
+// Each node carries a `parent` metadata ref = its immediate container's node id
+// (unset for roots). This is the materialized backing of the containment
+// relation (ADR-0037 §4): the Draft/Research default view is a recursive Nest on
+// `parent` (`defaultView("scene")`), so the tree is rebuilt by the ordinary Nest
+// evaluator — not a `presentation: "tree"` special case (eradicated by §3). When
+// containment later moves to real stored references (#217), only this backing
+// swaps; the view spec is unchanged.
 
-import type { EvalNode, PathSegment } from "@/lib/views/evaluateView";
+import type { EvalNode } from "@/lib/views/evaluateView";
 import type { MetadataValue, StructureDocument, StructureNode } from "@/lib/types";
 
 export function structureToEvalNodes(structure: StructureDocument | null): EvalNode[] {
   if (!structure) return [];
   const out: EvalNode[] = [];
-  const walk = (node: StructureNode, ancestry: PathSegment[]): void => {
+  const walk = (node: StructureNode, parentId: string | null): void => {
     // The evaluator reads a scene field via `metadata[key]` (status/pov/… are
     // not intrinsic), so flatten the full scene metadata + computed counters +
     // the top-level `status` projection into one dict — this is what makes the
@@ -28,12 +31,14 @@ export function structureToEvalNodes(structure: StructureDocument | null): EvalN
       ...(node.computed_metadata ?? {}),
     };
     if (node.status) metadata.status = node.status;
+    // The containment ref the Draft/Research Nest joins on (ADR-0037 §4). Roots
+    // leave it unset ⇒ `field: parent unset` seeds them as nest roots.
+    if (parentId) metadata.parent = parentId;
     out.push({
       id: node.id,
       entry_type: node.type,
       title: node.title,
       metadata,
-      ancestry,
       // #201: a scene's canonical identity is its front-matter `scene_id`, which
       // is what the reverse reference index keys on — while its roster `id` is
       // the structure `node.id`. Carry it so `field_of(…, references)` bridges
@@ -41,9 +46,8 @@ export function structureToEvalNodes(structure: StructureDocument | null): EvalN
       // so `id` is treated as canonical, never a lookup on the empty string.
       ref_id: node.scene_id || undefined,
     });
-    const childAncestry = [...ancestry, { key: node.id, label: node.title, nodeId: node.id }];
-    for (const child of node.children ?? []) walk(child, childAncestry);
+    for (const child of node.children ?? []) walk(child, node.id);
   };
-  for (const child of structure.root.children ?? []) walk(child, []);
+  for (const child of structure.root.children ?? []) walk(child, null);
   return out;
 }

@@ -26,7 +26,7 @@
 // (nothing wired). The sentinels let filters-off-`All` and set ops fold to the
 // minimal shipped `expr` without a universe leaf in the grammar.
 
-import type { MetadataSchema, ViewExpr, ViewFieldOf, ViewFieldPredicate, ViewGroupSpec, ViewNestMatch, ViewNestOp, ViewOperand, ViewParam, ViewSort, ViewSpec } from "@/lib/types";
+import type { MetadataSchema, ViewExpr, ViewFieldOf, ViewFieldPredicate, ViewGroupByLevel, ViewGroupSpec, ViewNestMatch, ViewNestOp, ViewOperand, ViewParam, ViewSort, ViewSpec } from "@/lib/types";
 import { kindUniverseExpr, REFERENCES_FIELD, SELF_VAR } from "@/lib/views/evaluateView";
 
 export type LeafKind = "type" | "descendants_of" | "tagged" | "field" | "hand_picked" | "view_ref";
@@ -60,7 +60,10 @@ export const NEST_CHILDREN_HANDLE = "children";
 // A named input handle on the View (output) node = one group. `name` is the
 // group label; handle order (the array order) = group order. `color` tints the
 // group. A view with 0–1 populated handles renders flat (ADR-0027 §D).
-export type ViewHandle = { id: string; name: string; color?: string | null };
+// ADR-0037 Amendment 1: a handle (= a named group) owns its Organize levels.
+// graphToSpec lowers `group_by` onto that handle's `ViewGroupSpec`; the single/
+// unnamed group keeps the output-node-level `group_by` below.
+export type ViewHandle = { id: string; name: string; color?: string | null; group_by?: ViewGroupByLevel[] };
 export const DEFAULT_HANDLE_ID = "in";
 
 // The Filter/field predicate's value-operand input handle (#196, ADR-0031 §E).
@@ -250,7 +253,11 @@ export type ViewNodeData = {
   // value-set that feeds only a Filter value slot authored on a scalar field
   // (#196 — the two-payload pipe, `outputPayload`/`valueSlotAccepts`).
   project_field?: string;
-  // output (View) — the named handles / groups
+  // output (View) — the named handles / groups. ADR-0037 §2/§8 + Amendment 1:
+  // each handle carries its own ordered organize levels (`ViewHandle.group_by`,
+  // ν by attribute) — result-node CONFIG, not graph shape (lifts/lowers with the
+  // spec, adds no canvas node, never competes with Nest). The single/unnamed
+  // group's levels live on the synthetic `in` handle.
   handles?: ViewHandle[];
   // legacy annotate group slots (kept so pre-#91 layouts don't crash on load)
   label?: string;
@@ -792,17 +799,30 @@ export function graphToSpec(
   const populated = segments.filter((s) => s.built.tag !== "empty");
 
   const params = collectParams(graph);
-  const withParams = (s: ViewSpec): ViewSpec => (params.length > 0 ? { ...s, params } : s);
+  const withParams = (s: ViewSpec): ViewSpec => ({ ...s, ...(params.length > 0 ? { params } : {}) });
 
   if (handles.length <= 1 || populated.length <= 1) {
+    // Single/unnamed group: its Organize rides on the spec as `group_by`
+    // (ADR-0037 §2). Amendment 1 — the levels live on the lone handle (uniform
+    // with named groups), so lower them from there, not the output-node config.
     const seg = populated[0];
-    return withParams({ kind: base.kind, expr: seg ? materializeOuter(seg.built, universeExpr) : null, sort: seg?.sort ?? base.sort ?? null });
+    const groupBy = seg?.handle.group_by?.filter((l) => l.field) ?? [];
+    return withParams({
+      kind: base.kind,
+      expr: seg ? materializeOuter(seg.built, universeExpr) : null,
+      sort: seg?.sort ?? base.sort ?? null,
+      ...(groupBy.length > 0 ? { group_by: groupBy } : {}),
+    });
   }
 
+  // Named groups: Amendment 1 — each group owns its Organize, lowered onto its
+  // `ViewGroupSpec.group_by`. A top-level (output-node) group_by does not apply.
   const groups: ViewGroupSpec[] = populated.map((s, i) => {
     const g: ViewGroupSpec = { name: s.handle.name?.trim() || `Group ${i + 1}`, expr: materializeOuter(s.built, universeExpr) };
     if (s.sort) g.sort = s.sort;
     if (s.handle.color) g.color = s.handle.color;
+    const gb = s.handle.group_by?.filter((l) => l.field) ?? [];
+    if (gb.length > 0) g.group_by = gb;
     return g;
   });
   return withParams({ kind: base.kind, groups, sort: base.sort ?? null });
@@ -856,15 +876,30 @@ export function specToGraph(spec: ViewSpec | null | undefined, schema?: Metadata
 
   const groups = spec?.groups ?? null;
   if (groups && groups.length > 0) {
+    // Amendment 1: each group's Organize (`group_by`) lifts back onto its handle.
     const handles: ViewHandle[] = groups.map((g, i) => ({
       id: `h${i}`,
       name: g.name,
       ...(g.color ? { color: g.color } : {}),
+      ...(g.group_by && g.group_by.length > 0 ? { group_by: g.group_by } : {}),
     }));
     outputNode.data = { handles };
     groups.forEach((g, i) => attachSegment(g.expr ?? null, handles[i].id, g.sort ?? null));
   } else {
-    attachSegment(spec?.expr ?? null, DEFAULT_HANDLE_ID, null);
+    // A non-manual flat sort reopens as a Sorter node feeding the handle (mirrors
+    // the grouped branch's `g.sort`), so the designer shows it — and a #230 sort
+    // chain round-trips. ONLY when there is real membership (`expr != null`): a
+    // Sorter with no upstream input lowers to EMPTY+sort, which the #93 rule
+    // promotes to UNIVERSE — flipping a null-expr (empty) view to the whole roster
+    // on reopen. Manual/absent also stays null (no Sorter node for defaults).
+    const flatSort = spec?.expr != null && spec?.sort && spec.sort.by !== "manual" ? spec.sort : null;
+    attachSegment(spec?.expr ?? null, DEFAULT_HANDLE_ID, flatSort);
+    // Amendment 1: the single/unnamed group's Organize lives on its lone handle
+    // (uniform with named groups), so seed the synthetic `in` handle with the
+    // spec's levels. The primary reopen path restores this via the layout cfg.
+    if (spec?.group_by && spec.group_by.length > 0) {
+      outputNode.data.handles = [{ id: DEFAULT_HANDLE_ID, name: "", group_by: spec.group_by }];
+    }
   }
 
   layoutColumns(nodes, outputNode, rowCursor);

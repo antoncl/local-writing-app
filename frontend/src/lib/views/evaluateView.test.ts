@@ -1,7 +1,13 @@
 import { describe, expect, it } from "vitest";
-import type { MetadataSchema, StructureDocument, StructureNode, ViewSpec } from "@/lib/types";
-import { defaultView, evaluateView, nestWarnings, treeNodeIds, type EvalNode, type ViewGroup } from "@/lib/views/evaluateView";
-import { structureToEvalNodes } from "@/lib/views/structureNodes";
+import type { MetadataSchema, ViewExpr, ViewSort, ViewSpec } from "@/lib/types";
+import {
+  defaultView,
+  evaluateView,
+  isBareDescendantsOf,
+  nestWarnings,
+  type EvalNode,
+  type ViewGroup,
+} from "@/lib/views/evaluateView";
 
 // A tiny lore-like roster. Order is load-bearing (manual sort == input order).
 const NODES: EvalNode[] = [
@@ -40,12 +46,127 @@ const ids = (spec: ViewSpec, nodes = NODES, ctx = { schema: SCHEMA }) =>
 // The explicit "whole roster" expr — what the default view lowers to (ADR-0036).
 const ALL: ViewSpec["expr"] = { descendants_of: "lore:base" };
 
+describe("group_by A–Z: reference bucket colliding with a bare member (#A2)", () => {
+  const refSchema = {
+    version: 1,
+    entry_types: {
+      "lore:base": { name: "Lore", kind: "lore", abstract: true, fields: [] },
+      "lore:character": { name: "Character", kind: "lore", parent: "lore:base", fields: [] },
+      "lore:location": { name: "Location", kind: "lore", parent: "lore:base", fields: [] },
+    },
+    fields: {
+      title: { name: "Title", type: "text", category: "intrinsic" },
+      entry_type: { name: "Type", type: "text", category: "intrinsic" },
+      located_in: { name: "Located in", type: "entity_ref" },
+    },
+  } as unknown as MetadataSchema;
+  // Referencing nodes come BEFORE their targets, so node:paris / node:marseille
+  // are stored as label buckets; paris/marseille (no located_in) then collide as
+  // bare members on the same `node:<id>` key.
+  const nodes: EvalNode[] = [
+    { id: "amelie", entry_type: "lore:character", title: "Amelie", metadata: { located_in: "paris" } },
+    { id: "zed", entry_type: "lore:character", title: "Zed", metadata: { located_in: "marseille" } },
+    { id: "cass", entry_type: "lore:character", title: "Cass", metadata: {} }, // pure bare member
+    { id: "paris", entry_type: "lore:location", title: "Paris", metadata: {} },
+    { id: "marseille", entry_type: "lore:location", title: "Marseille", metadata: {} },
+  ];
+  it("colliding reference buckets ALPHABETIZE; only pure bare members sink", () => {
+    const r = evaluateView(
+      { kind: "lore", expr: ALL, group_by: [{ field: "located_in", order: "label" }] } as ViewSpec,
+      nodes,
+      { schema: refSchema },
+    );
+    // Marseille, Paris (real-node buckets sorted A–Z) — NOT sunk because they
+    // collide with a bare member — then Cass (a genuine bare member) last.
+    expect((r.groups ?? []).map((g) => g.label)).toEqual(["Marseille", "Paris", "Cass"]);
+  });
+});
+
+describe("multi-level sort (#230)", () => {
+  const roster: EvalNode[] = [
+    { id: "1", entry_type: "lore:character", title: "Bob", metadata: { team: "red" } },
+    { id: "2", entry_type: "lore:character", title: "Alice", metadata: { team: "red" } },
+    { id: "3", entry_type: "lore:character", title: "Dave", metadata: { team: "blue" } },
+    { id: "4", entry_type: "lore:character", title: "Carol", metadata: {} }, // no team → last
+  ];
+  const run = (sort: ViewSort): string[] =>
+    evaluateView({ kind: "lore", expr: ALL, sort } as ViewSpec, roster, { schema: SCHEMA }).nodes.map((n) => n.id);
+
+  it("sorts by A, then breaks ties by B", () => {
+    // team asc (blue<red), tie → title asc; empty team sorts last regardless.
+    const order = run({ by: "field", field_key: "team", dir: "asc", then: { by: "title", dir: "asc" } });
+    expect(order).toEqual(["3", "2", "1", "4"]); // Dave(blue), Alice/Bob(red asc), Carol(empty)
+  });
+  it("the single-key form is unchanged (no `then`)", () => {
+    expect(run({ by: "title", dir: "asc" })).toEqual(["2", "1", "4", "3"]); // Alice, Bob, Carol, Dave
+  });
+  it("a `manual` key TERMINATES the chain — later keys don't re-sort", () => {
+    // {by:manual, then:title} must keep INPUT order, not title-sort (else a pane
+    // offering manual drag would actually render title-ordered — a broken drag).
+    expect(run({ by: "manual", then: { by: "title", dir: "asc" } })).toEqual(["1", "2", "3", "4"]);
+  });
+  it("a cyclic `then` chain does not hang (cycle guard)", () => {
+    const cyclic: ViewSort = { by: "title", dir: "asc" };
+    (cyclic as { then?: ViewSort }).then = cyclic; // self-reference (malformed spec)
+    expect(run(cyclic)).toEqual(["2", "1", "4", "3"]); // terminates, sorts by title once
+  });
+  it("a full tie across all keys keeps input order (stable)", () => {
+    // Everyone ties on team=... no: give a constant key, tiebreak absent → input order.
+    const tie = [
+      { id: "x", entry_type: "lore:character", title: "Z", metadata: { team: "red" } },
+      { id: "y", entry_type: "lore:character", title: "Z", metadata: { team: "red" } },
+    ];
+    const order = evaluateView({ kind: "lore", expr: ALL, sort: { by: "field", field_key: "team" } } as ViewSpec, tie, {
+      schema: SCHEMA,
+    }).nodes.map((n) => n.id);
+    expect(order).toEqual(["x", "y"]);
+  });
+});
+
+describe("isBareDescendantsOf (dense-null tolerant whole-roster detection)", () => {
+  it("accepts a sparse whole-roster expr", () => {
+    expect(isBareDescendantsOf({ descendants_of: "lore:base" })).toBe(true);
+  });
+  it("accepts the backend's dense-null dump (every other slot present as null)", () => {
+    // Regression: a round-tripped spec has ~15 keys, all null but descendants_of.
+    // A key-count check (`Object.keys(...).length === 1`) misfired here, silently
+    // disabling drag-reorder on saved/duplicated whole-roster views.
+    // Slots typed `ViewExpr[] | undefined` arrive as `null` at runtime, so the
+    // literal is cast through `unknown` — that asymmetry is exactly what the
+    // `== null` checks (not key counting) exist to absorb.
+    expect(
+      isBareDescendantsOf({
+        descendants_of: "lore:base",
+        view_ref: null,
+        union: null,
+        intersect: null,
+        difference: null,
+        complement: null,
+        annotate: null,
+        type: null,
+        tagged: null,
+        field: null,
+        hand_picked: null,
+        field_of: null,
+        var: null,
+      } as unknown as ViewExpr),
+    ).toBe(true);
+  });
+  it("rejects an expr with another primary slot set (a filtered roster)", () => {
+    expect(isBareDescendantsOf({ descendants_of: "lore:base", tagged: "hero" })).toBe(false);
+  });
+  it("rejects an expr with no descendants_of", () => {
+    expect(isBareDescendantsOf({ tagged: "hero" })).toBe(false);
+  });
+});
+
 describe("default view", () => {
-  it("is the explicit whole-kind roster (descendants_of the kind root), in input order", () => {
+  it("is the explicit whole-kind roster (descendants_of the kind root) plus the kind's honest shape (ADR-0037 §7)", () => {
     expect(defaultView("lore", SCHEMA)).toEqual({
       kind: "lore",
       expr: { descendants_of: "lore:base" },
       sort: { by: "manual" },
+      group_by: [{ field: "entry_type", order: "label" }],
     });
     expect(ids(defaultView("lore", SCHEMA))).toEqual(["a", "b", "c", "d", "e"]);
   });
@@ -700,175 +821,6 @@ describe("sub-flow nesting (#101)", () => {
     const res = evaluateView({ kind: "lore", expr: { view_ref: "flat" } }, NODES, ctx);
     expect(res.groups).toBeNull();
     expect(res.nodes.map((n) => n.id)).toEqual(["a", "b"]);
-  });
-});
-
-// --- tree presentation (#101) ----------------------------------------------
-
-// A small manuscript: two acts, chapters, scenes, plus one empty chapter. Tags
-// live in computed_metadata so `tagged` leaves apply (structureToEvalNodes maps
-// computed_metadata → EvalNode.metadata).
-const sn = (
-  id: string,
-  type: string,
-  title: string,
-  children: StructureNode[] = [],
-  tags: string[] = [],
-): StructureNode => ({ id, type, title, children, computed_metadata: { tags } });
-
-const MANUSCRIPT: StructureDocument = {
-  root: sn("root", "manuscript:base", "Book", [
-    sn("act1", "manuscript:act", "Act 1", [
-      sn("ch1", "manuscript:chapter", "Ch 1", [
-        sn("s1", "manuscript:scene", "Scene 1", [], ["honor"]),
-        sn("s2", "manuscript:scene", "Scene 2", []),
-      ]),
-      sn("ch2", "manuscript:chapter", "Ch 2 (empty)", []),
-    ]),
-    sn("act2", "manuscript:act", "Act 2", [
-      sn("ch3", "manuscript:chapter", "Ch 3", [sn("s3", "manuscript:scene", "Scene 3", [], ["honor"])]),
-    ]),
-  ]),
-};
-
-// Compact a group tree for readable assertions: a leaf is its bare label; a
-// container is `[label, [children...]]`.
-const shape = (groups: ViewGroup[]): unknown =>
-  groups.map((g) => (g.children.length ? [g.label, shape(g.children)] : g.label));
-
-// The manuscript type tree, so an unfiltered `tree()` can select the whole
-// structure via the explicit roster expr (ADR-0036 — an absent expr is empty).
-const MANUSCRIPT_SCHEMA = {
-  version: 1,
-  entry_types: {
-    "manuscript:base": { name: "Manuscript", kind: "manuscript", abstract: true },
-    "manuscript:act": { name: "Act", kind: "manuscript", parent: "manuscript:base" },
-    "manuscript:chapter": { name: "Chapter", kind: "manuscript", parent: "manuscript:base" },
-    "manuscript:scene": { name: "Scene", kind: "manuscript", parent: "manuscript:base" },
-  },
-} as unknown as MetadataSchema;
-
-const tree = (expr: ViewSpec["expr"] = { descendants_of: "manuscript:base" }) => {
-  const nodes = structureToEvalNodes(MANUSCRIPT);
-  return evaluateView({ kind: "manuscript", presentation: "tree", expr }, nodes, { schema: MANUSCRIPT_SCHEMA });
-};
-
-describe("tree presentation (#101)", () => {
-  it("structureToEvalNodes carries each node's ancestry outer→inner", () => {
-    const nodes = structureToEvalNodes(MANUSCRIPT);
-    const byId = Object.fromEntries(nodes.map((n) => [n.id, n.ancestry?.map((s) => s.key)]));
-    expect(byId.act1).toEqual([]);
-    expect(byId.ch1).toEqual(["act1"]);
-    expect(byId.s1).toEqual(["act1", "ch1"]);
-    expect(byId.s3).toEqual(["act2", "ch3"]);
-  });
-
-  it("an unfiltered view nests the whole structure, keeping empty containers", () => {
-    expect(shape(tree().groups!)).toEqual([
-      ["Act 1", [
-        ["Ch 1", ["Scene 1", "Scene 2"]],
-        "Ch 2 (empty)", // empty container (a member) still appears, childless
-      ]],
-      ["Act 2", [["Ch 3", ["Scene 3"]]]],
-    ]);
-  });
-
-  it("ancestor segments are real nodes (nodeId set) → render as NodeRows", () => {
-    const act1 = tree().groups![0];
-    expect(act1.nodeId).toBe("act1");
-    expect(act1.children[0].nodeId).toBe("ch1");
-    expect(act1.children[0].children[0].nodeId).toBe("s1");
-  });
-
-  it("a filtered view keeps a match's ancestors and prunes empty branches", () => {
-    // Only the honor-tagged scenes survive; ch2 (no match) and its siblings drop.
-    expect(shape(tree({ tagged: "honor" }).groups!)).toEqual([
-      ["Act 1", [["Ch 1", ["Scene 1"]]]], // s2 gone, ch2 gone
-      ["Act 2", [["Ch 3", ["Scene 3"]]]],
-    ]);
-  });
-
-  it("a matched container and its matched scene merge into one branch (no double appearance)", () => {
-    // ch1 itself is tagged AND its scene s1 is tagged: ch1 appears once, with s1 nested.
-    const withTag: StructureDocument = {
-      root: sn("root", "manuscript:base", "Book", [
-        sn("act1", "manuscript:act", "Act 1", [
-          sn("ch1", "manuscript:chapter", "Ch 1", [sn("s1", "manuscript:scene", "Scene 1", [], ["x"])], ["x"]),
-        ]),
-      ]),
-    };
-    const res = evaluateView(
-      { kind: "manuscript", presentation: "tree", expr: { tagged: "x" } },
-      structureToEvalNodes(withTag),
-    );
-    expect(shape(res.groups!)).toEqual([["Act 1", [["Ch 1", ["Scene 1"]]]]]);
-    // ch1 occurs exactly once across the tree.
-    const act1 = res.groups![0];
-    expect(act1.children.filter((g) => g.nodeId === "ch1")).toHaveLength(1);
-  });
-
-  it("flat membership still lists every matching node (containers + leaves)", () => {
-    expect(tree({ tagged: "honor" }).nodes.map((n) => n.id)).toEqual(["s1", "s3"]);
-  });
-
-  it("composes handle grouping with structural nesting (#181): a chapter tree within each bucket", () => {
-    // The old fork returned before reading `groups`, so group-by + nest-by-chapter
-    // were mutually exclusive. Now handles are the outer path, ancestry the inner.
-    const res = evaluateView(
-      {
-        kind: "manuscript",
-        presentation: "tree",
-        groups: [
-          { name: "Honored", expr: { tagged: "honor" } }, // s1, s3
-          { name: "Scenes", expr: { type: "manuscript:scene" } }, // s1, s2, s3
-        ],
-      },
-      structureToEvalNodes(MANUSCRIPT),
-    );
-    expect(shape(res.groups!)).toEqual([
-      ["Honored", [
-        ["Act 1", [["Ch 1", ["Scene 1"]]]],
-        ["Act 2", [["Ch 3", ["Scene 3"]]]],
-      ]],
-      ["Scenes", [
-        ["Act 1", [["Ch 1", ["Scene 1", "Scene 2"]]]],
-        ["Act 2", [["Ch 3", ["Scene 3"]]]],
-      ]],
-    ]);
-    // Ancestors stay structural context — flat membership is the matched scenes only.
-    expect(res.nodes.map((n) => n.id)).toEqual(["s1", "s3", "s2"]);
-  });
-
-  it("a tree matching only top-level nodes stays a tree (does not collapse to groups:null)", () => {
-    // Regression (#181): a filtered tree whose matches are all top-level (empty
-    // ancestry) has all-empty row paths. Collapsing that to `groups:null` (the
-    // handle/flat rule) blanks `treeNodeIds` → the Draft tree hides real matches.
-    // A set of top-level scenes is still a (single-level) tree of leaf nodes.
-    const FLAT: StructureDocument = {
-      root: sn("root", "manuscript:base", "Book", [
-        sn("s1", "manuscript:scene", "Scene 1", [], ["pick"]),
-        sn("s2", "manuscript:scene", "Scene 2", []),
-        sn("s3", "manuscript:scene", "Scene 3", [], ["pick"]),
-      ]),
-    };
-    const res = evaluateView(
-      { kind: "manuscript", presentation: "tree", expr: { tagged: "pick" } },
-      structureToEvalNodes(FLAT),
-    );
-    expect(res.groups).not.toBeNull();
-    expect(shape(res.groups!)).toEqual(["Scene 1", "Scene 3"]);
-    expect(treeNodeIds(res.groups)).toEqual(new Set(["s1", "s3"]));
-  });
-
-  it("treeNodeIds collects matches + kept ancestors, dropping pruned branches", () => {
-    // Filtered tree keeps s1/s3 and their ancestors; s2 and ch2 are gone.
-    expect(treeNodeIds(tree({ tagged: "honor" }).groups)).toEqual(
-      new Set(["act1", "ch1", "s1", "act2", "ch3", "s3"]),
-    );
-    // Unfiltered → every structure node is visible.
-    expect(treeNodeIds(tree().groups)).toEqual(
-      new Set(["act1", "ch1", "s1", "s2", "ch2", "act2", "ch3", "s3"]),
-    );
   });
 });
 

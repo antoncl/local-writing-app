@@ -123,12 +123,17 @@ class NestOp(BaseModel):
     universe (the evaluator's `null expr = universe` convention). Seed `parents`
     with the roots (a `field: {op: unset}` leaf) for a clean tree; leaving it the
     universe yields a *thicket* (a subtree rooted at every node, ADR-0028 §C).
-    `match` is required — without a rule there is no join."""
+    `match` is required — without a rule there is no join.
+
+    `orphans` (ADR-0037, #216): what happens to a candidate child that matched
+    no parent — "drop" (the default; counted in diagnostics) or "keep" (the
+    orphan stays at the root as a bare row — the who-lives-where pattern)."""
 
     parents: ViewExpr | None = None
     children: ViewExpr | None = None
     match: NestMatch
     recursive: bool = False
+    orphans: Literal["keep", "drop"] | None = None
 
 
 # The mutually-exclusive "primary" slots on a ViewExpr node: exactly one is set.
@@ -209,12 +214,15 @@ class ViewExpr(BaseModel):
 class ViewSort(BaseModel):
     """View ordering, orthogonal to membership (doc §1.5). `by`: "manual" =
     stored/drag order (load-bearing for Assistants), "title" = by node title,
-    "field" = by `field_key`. `dir` applies to title/field. Sort applies within
-    each annotate group."""
+    "field" = by `field_key`. `dir` applies to title/field. `then` is the #230
+    multi-level tiebreaker chain (sort by A, then B, …) — the single-key form
+    (no `then`) is unchanged. The backend stores the chain verbatim and never
+    evaluates it. Sort applies within each annotate group."""
 
     by: Literal["manual", "title", "field"] = "manual"
     field_key: str | None = None
     dir: Literal["asc", "desc"] = "asc"
+    then: ViewSort | None = None
 
     @model_validator(mode="after")
     def _field_key_present(self) -> ViewSort:
@@ -223,17 +231,33 @@ class ViewSort(BaseModel):
         return self
 
 
+class ViewGroupByLevel(BaseModel):
+    """One ADR-0037 §2 organize level — ν by attribute, on the result. `field`
+    is any groupable field of the input set's kind (enum/select, the intrinsic
+    entry_type, a reference field → real-node buckets; a multi-valued field
+    fans a row out under each value; a missing value leaves the row bare at the
+    level). Bucket order is first-seen in row order unless `order: "label"`
+    opts into alphabetical-by-label. The backend stores levels verbatim and
+    never evaluates them (ADR-0025)."""
+
+    field: str = Field(min_length=1)
+    order: Literal["label"] | None = None
+
+
 class ViewGroupSpec(BaseModel):
     """One named group = one named input handle on the View node (ADR-0027
     §D/§E, #91). `name` is the group label and the row `path` segment; `expr` is
     the group's membership (None = the whole universe); `sort` sorts this
-    segment; `color` is an optional group tint. Group order = handle order = the
-    `groups` list order; same-name handles union + dedupe in the evaluator."""
+    segment; `color` is an optional group tint. `group_by` is this group's own
+    organize levels (ADR-0037 Amendment 1 — each group organizes independently).
+    Group order = handle order = the `groups` list order; same-name handles
+    union + dedupe in the evaluator."""
 
     name: str = Field(min_length=1)
     expr: ViewExpr | None = None
     sort: ViewSort | None = None
     color: str | None = None
+    group_by: list[ViewGroupByLevel] | None = None
 
 
 class ViewParam(BaseModel):
@@ -261,13 +285,17 @@ class ViewSpec(BaseModel):
     degenerate "all nodes of this kind" spec a kind-only picker source uses).
     Entry_type refs inside `expr` are FQN (#77). `sort` is the fallback when a
     group carries no per-segment sort. `params` declares runtime formals (#184);
-    a view with none is the degenerate closed case (existing views are unchanged)."""
+    a view with none is the degenerate closed case (existing views are unchanged).
+    `group_by` (ADR-0037 §2) is the ordered organize-level list — orthogonal to
+    the expr-XOR-groups rule (handles compose: handles outermost, levels
+    innermost)."""
 
     kind: str = Field(min_length=1)
     expr: ViewExpr | None = None
     groups: list[ViewGroupSpec] | None = None
     sort: ViewSort | None = None
     params: list[ViewParam] | None = None
+    group_by: list[ViewGroupByLevel] | None = None
 
     @model_validator(mode="after")
     def _expr_xor_groups(self) -> ViewSpec:
@@ -418,12 +446,13 @@ class NodePickerConfig(BaseModel):
 
 # --- Saved views: the frontmatter-only `view` node -----------------------
 #
-# A saved view is a frontmatter-only Node of kind `view` (folder `views/`,
-# no prose body), carrying a ViewSpec + a presentation hint. Storage mirrors
-# mutation sets — the spec lives in front matter via `_write_node_entry_file`'s
-# `extra=`. `spec.kind` is the ViewSpec's *anchor* kind (which kind of nodes the
-# view selects), distinct from the node's own `view` kind. ADR-0021, doc §2/§3.
-ViewPresentation = Literal["tree", "grouped", "flat"]
+# A saved view is a frontmatter-only Node of kind `view` (folder `views/`, no
+# prose body), carrying a ViewSpec. Storage mirrors mutation sets — the spec
+# lives in front matter via `_write_node_entry_file`'s `extra=`. `spec.kind` is
+# the ViewSpec's *anchor* kind (which kind of nodes the view selects), distinct
+# from the node's own `view` kind. ADR-0021, doc §2/§3. (Grouping/tree layout is
+# the view's own shape — `group_by` + Nest — never a presentation hint: ADR-0037
+# §3 eradicated `ViewPresentation`.)
 
 
 class ViewLayoutNode(BaseModel):
@@ -447,11 +476,10 @@ class ViewLayoutEdge(BaseModel):
 
 
 class ViewLayout(BaseModel):
-    """The view designer's visual graph (nodes + edges). Non-semantic
-    presentation state parallel to `presentation`; the evaluator ignores it and
-    it lives off `ViewSpec` (the portable semantic core) on purpose. Absent for
-    views authored without the designer — the frontend falls back to laying the
-    `expr` out automatically."""
+    """The view designer's visual graph (nodes + edges). Non-semantic designer
+    state; the evaluator ignores it and it lives off `ViewSpec` (the portable
+    semantic core) on purpose. Absent for views authored without the designer —
+    the frontend falls back to laying the `expr` out automatically."""
 
     nodes: list[ViewLayoutNode] = Field(default_factory=list)
     edges: list[ViewLayoutEdge] = Field(default_factory=list)
@@ -477,7 +505,6 @@ class ViewNodeSummary(BaseModel):
     # The ViewSpec's anchor kind (the kind of nodes this view selects), surfaced
     # on the summary so a pane can group/offer views by the kind they target.
     view_kind: str = ""
-    presentation: ViewPresentation = "flat"
     # The full spec, so a client that lists views already holds everything it
     # needs to evaluate them (incl. resolving view_ref leaves) without a second
     # per-view fetch — list_views already parses it (#95). None if malformed.
@@ -498,7 +525,6 @@ class ViewNode(BaseModel):
     revision: str
     entry_type: str = "view:view"
     spec: ViewSpec
-    presentation: ViewPresentation = "flat"
     # Designer canvas layout (positions + wiring). None for views never opened
     # in / saved from the designer — the frontend auto-lays-out the expr then.
     layout: ViewLayout | None = None
@@ -518,7 +544,6 @@ class CreateViewRequest(BaseModel):
     title: str = Field(min_length=1)
     entry_type: str = "view:view"
     spec: ViewSpec
-    presentation: ViewPresentation = "flat"
     layout: ViewLayout | None = None
 
 
@@ -527,7 +552,6 @@ class SaveViewRequest(BaseModel):
     base_revision: str | None = None
     entry_type: str = "view:view"
     spec: ViewSpec
-    presentation: ViewPresentation = "flat"
     layout: ViewLayout | None = None
 
 

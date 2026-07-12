@@ -15,7 +15,7 @@
   import SwatchPicker from "@/components/widgets/SwatchPicker.svelte";
   import { inputArity, outputPayload, type GraphNodeKind, type PredicateKind, type ViewGraphNode, type ViewHandle, type ViewNodeData } from "@/lib/views/viewGraph";
   import { useDesignerContext } from "./designerContext";
-  import type { MetadataFieldType, NodePickerRef, ViewSort } from "@/lib/types";
+  import type { MetadataFieldType, NodePickerRef, ViewGroupByLevel, ViewSort } from "@/lib/types";
 
   // Svelte Flow passes the node's id/data/selection state as props.
   let { id, data, selected = false }: { id: string; data: { kind: GraphNodeKind; cfg: ViewNodeData }; selected?: boolean } =
@@ -145,14 +145,61 @@
     { value: "unset", label: "is empty" },
   ];
 
-  // --- sorter helpers ---
-  let sortBy = $derived<ViewSort["by"]>(cfg.sort?.by ?? "manual");
-  let sortDir = $derived<NonNullable<ViewSort["dir"]>>(cfg.sort?.dir ?? "asc");
-  let sortFieldKey = $derived(cfg.sort?.field_key ?? "");
-  function setSort(next: Partial<ViewSort>) {
-    const merged: ViewSort = { by: sortBy, dir: sortDir, field_key: sortFieldKey || undefined, ...next };
-    if (merged.by !== "field") merged.field_key = undefined;
-    patch({ sort: merged });
+  // --- sorter helpers (#230 multi-level: an ordered list of keys ⇄ the `then`
+  // chain). A key is title|field + dir; "manual" = the EMPTY list (input order). ---
+  type SortKey = { by: "title" | "field"; field_key?: string; dir: "asc" | "desc" };
+  function sortToList(sort: ViewSort | null | undefined): SortKey[] {
+    const list: SortKey[] = [];
+    for (let s: ViewSort | null | undefined = sort; s; s = s.then) {
+      if (s.by === "title") list.push({ by: "title", dir: s.dir ?? "asc" });
+      else if (s.by === "field") list.push({ by: "field", field_key: s.field_key, dir: s.dir ?? "asc" });
+      // "manual" carries no ordering key
+    }
+    return list;
+  }
+  function listToSort(list: SortKey[]): ViewSort {
+    // Fold the list into a right-nested `then` chain; empty ⇒ manual order. A
+    // half-authored "Field…" key (no field yet) is kept so the row doesn't vanish
+    // mid-edit; it is an inert no-op in the evaluator (compareByKey returns 0 with
+    // no field_key), so it never affects ordering.
+    let chain: ViewSort | null = null;
+    for (let i = list.length - 1; i >= 0; i--) {
+      const k = list[i];
+      chain = {
+        by: k.by,
+        dir: k.dir,
+        ...(k.by === "field" ? { field_key: k.field_key || undefined } : {}),
+        ...(chain ? { then: chain } : {}),
+      };
+    }
+    return chain ?? { by: "manual" };
+  }
+  let sortKeys = $derived<SortKey[]>(sortToList(cfg.sort));
+  function commitSortKeys(list: SortKey[]) {
+    patch({ sort: listToSort(list) });
+  }
+  function addSortKey() {
+    commitSortKeys([...sortKeys, { by: "title", dir: "asc" }]);
+  }
+  function setSortKey(i: number, next: Partial<SortKey>) {
+    commitSortKeys(
+      sortKeys.map((k, j) => {
+        if (j !== i) return k;
+        const merged = { ...k, ...next };
+        if (merged.by !== "field") merged.field_key = undefined;
+        return merged;
+      }),
+    );
+  }
+  function removeSortKey(i: number) {
+    commitSortKeys(sortKeys.filter((_, j) => j !== i));
+  }
+  function moveSortKey(i: number, delta: -1 | 1) {
+    const j = i + delta;
+    if (j < 0 || j >= sortKeys.length) return;
+    const next = [...sortKeys];
+    [next[i], next[j]] = [next[j], next[i]];
+    commitSortKeys(next);
   }
 
   // --- nest (relational op) match-rule helpers ---
@@ -298,6 +345,81 @@
   function handleTop(i: number): string {
     return `${((i + 1) / (handles.length + 1)) * 100}%`;
   }
+
+  // --- organize levels (ADR-0037 §2/§8 + Amendment 1: ν by attribute, owned per
+  // GROUP). Each named group carries its own levels (`ViewHandle.group_by`); the
+  // single/unnamed group keeps the output-node `group_by`. The `organizeSection`
+  // snippet renders the controls for either owner — the handlers below are pure
+  // over a (levels, onCommit) pair so both bindings reuse them.
+  //
+  // Offer only fields the ADR-0037 §2 table sanctions as organize levels:
+  // enum/select, multi-valued (tags / multi-ref), reference fields (real-node
+  // buckets), and the intrinsic `entry_type`. Continuous/identity/freeform
+  // fields (number, computed, color, long_text, title/id) would make one bucket
+  // per value, so they are dropped — mirroring `joinableFields`/`projectFields`.
+  // `boolean` is deliberately excluded: it is not in the §2 table and
+  // `segmentForField` has no label case for it (would render raw true/false).
+  const GROUPABLE_TYPES: MetadataFieldType[] = ["select", "multi_select", "tags", "entity_ref", "entity_ref_list"];
+  let groupableFields = $derived(
+    nodeFields.filter(
+      (f) => f.key === "entry_type" || (f.def.category !== "intrinsic" && GROUPABLE_TYPES.includes(f.def.type)),
+    ),
+  );
+  // A stored level may name a field the roster can't offer — the Assistants
+  // default's synthetic `source_layer` projection (groupBy.ts), or a field
+  // hidden since authoring. Show a readable label, never a blank <select>; the
+  // level is preserved exactly as stored (display-only fallback).
+  const SYNTHETIC_LEVEL_LABELS: Record<string, string> = { source_layer: "Source layer" };
+  function levelLabel(field: string): string {
+    return groupableFields.find((f) => f.key === field)?.name ?? SYNTHETIC_LEVEL_LABELS[field] ?? field;
+  }
+  // Per-list helpers (each group organizes independently, so used-field sets and
+  // add-availability are computed against *that* group's levels).
+  function usedFields(levels: ViewGroupByLevel[]): Set<string> {
+    return new Set(levels.map((l) => l.field));
+  }
+  function canAddLevel(levels: ViewGroupByLevel[]): boolean {
+    const used = usedFields(levels);
+    return groupableFields.some((f) => !used.has(f.key));
+  }
+  // A level's own <select> offers the unused groupable fields plus its own
+  // current field — so the no-duplicate-levels contract can't be bypassed by
+  // re-pointing a row at an already-used field.
+  function levelOptions(levels: ViewGroupByLevel[], current: string): typeof groupableFields {
+    const used = usedFields(levels);
+    return groupableFields.filter((f) => f.key === current || !used.has(f.key));
+  }
+  // Pure mutators over one owner's levels list; each calls that owner's commit.
+  type LevelCommit = (next: ViewGroupByLevel[]) => void;
+  function addLevelTo(levels: ViewGroupByLevel[], commit: LevelCommit) {
+    const pick = groupableFields.find((f) => !usedFields(levels).has(f.key));
+    if (pick) commit([...levels, { field: pick.key }]);
+  }
+  function setLevelFieldAt(levels: ViewGroupByLevel[], commit: LevelCommit, i: number, field: string) {
+    commit(levels.map((l, j) => (j === i ? { ...l, field } : l)));
+  }
+  // first-seen (undefined) ⇄ alphabetical-by-label ("label").
+  function toggleLevelOrderAt(levels: ViewGroupByLevel[], commit: LevelCommit, i: number) {
+    commit(levels.map((l, j) => (j === i ? { field: l.field, ...(l.order === "label" ? {} : { order: "label" }) } : l)));
+  }
+  function removeLevelAt(levels: ViewGroupByLevel[], commit: LevelCommit, i: number) {
+    commit(levels.filter((_, j) => j !== i));
+  }
+  function moveLevelAt(levels: ViewGroupByLevel[], commit: LevelCommit, i: number, delta: -1 | 1) {
+    const j = i + delta;
+    if (j < 0 || j >= levels.length) return;
+    const next = [...levels];
+    [next[i], next[j]] = [next[j], next[i]];
+    commit(next);
+  }
+  // Organize is ALWAYS owned by a handle (ADR-0037 Amendment 1), including the
+  // single/unnamed group (the synthetic `in` handle). One uniform binding — no
+  // single-vs-grouped switch — so a group + its Organize move, add, and delete as
+  // one unit (graphToSpec lowers a lone handle's `group_by` to `ViewSpec.group_by`).
+  function commitHandleLevels(hid: string): LevelCommit {
+    return (next) =>
+      commitHandles(handles.map((h) => (h.id === hid ? { ...h, group_by: next.length > 0 ? next : undefined } : h)));
+  }
 </script>
 
 {#snippet typeSelect(useDescendants: boolean)}
@@ -311,6 +433,51 @@
       <option value={et.fqn}>{et.name}</option>
     {/each}
   </select>
+{/snippet}
+
+{#snippet organizeSection(levels: ViewGroupByLevel[], commit: LevelCommit)}
+  <!-- Organize levels (ADR-0037 §8 + Amendment 1): ordered group-by dropdowns
+       for ONE group (a named handle, or the single/unnamed group). Node config,
+       not graph shape — so no canvas node competes with Nest. -->
+  <div class="organize">
+    <div class="org-head">Organize</div>
+    {#each levels as level, i (i)}
+      <div class="handle-row">
+        <select
+          class="vfield lname"
+          value={level.field}
+          onchange={(e) => setLevelFieldAt(levels, commit, i, e.currentTarget.value)}
+          aria-label={`Organize level ${i + 1} field`}
+        >
+          {#if !groupableFields.some((f) => f.key === level.field)}
+            <option value={level.field}>{levelLabel(level.field)}</option>
+          {/if}
+          {#each levelOptions(levels, level.field) as f (f.key)}
+            <option value={f.key}>{f.name}</option>
+          {/each}
+        </select>
+        <button
+          type="button"
+          class="hbtn"
+          class:on={level.order === "label"}
+          title="Sort buckets A–Z (otherwise by first appearance)"
+          aria-label="Toggle alphabetical bucket order"
+          aria-pressed={level.order === "label"}
+          onclick={() => toggleLevelOrderAt(levels, commit, i)}>A–Z</button
+        >
+        <button class="hbtn" type="button" title="Move level up" aria-label="Move level up" disabled={i === 0} onclick={() => moveLevelAt(levels, commit, i, -1)}>↑</button>
+        <button class="hbtn" type="button" title="Move level down" aria-label="Move level down" disabled={i === levels.length - 1} onclick={() => moveLevelAt(levels, commit, i, 1)}>↓</button>
+        <button class="hbtn del" type="button" title="Remove level" aria-label="Remove level" onclick={() => removeLevelAt(levels, commit, i)}>×</button>
+      </div>
+    {/each}
+    {#if groupableFields.length > 0}
+      <button class="add-handle" type="button" title="Add organize level" aria-label="Add organize level" disabled={!canAddLevel(levels)} onclick={() => addLevelTo(levels, commit)}>
+        + Organize by…
+      </button>
+    {:else if levels.length === 0}
+      <p class="vhint org-empty">No groupable fields on this kind.</p>
+    {/if}
+  </div>
 {/snippet}
 
 {#snippet tagSelect()}
@@ -476,25 +643,50 @@
       {@render fieldEditor()}
     {/if}
   {:else if kind === "sorter"}
-    <select class="vfield" value={sortBy} onchange={(e) => setSort({ by: e.currentTarget.value as ViewSort["by"] })}>
-      <option value="manual">Manual (stored order)</option>
-      <option value="title">Title</option>
-      <option value="field">Field…</option>
-    </select>
-    {#if sortBy === "field"}
-      <select class="vfield" value={sortFieldKey} onchange={(e) => setSort({ field_key: e.currentTarget.value })}>
-        <option value="">— field —</option>
-        {#each nodeFields as f (f.key)}
-          <option value={f.key}>{f.name}</option>
-        {/each}
-      </select>
-    {/if}
-    {#if sortBy !== "manual"}
-      <div class="vseg" role="group" aria-label="Sort direction">
-        <button type="button" class:on={sortDir === "asc"} onclick={() => setSort({ dir: "asc" })}>Asc</button>
-        <button type="button" class:on={sortDir === "desc"} onclick={() => setSort({ dir: "desc" })}>Desc</button>
-      </div>
-    {/if}
+    <!-- #230 multi-level sort: an ordered list of keys (sort by A, then B, …). -->
+    <div class="organize">
+      <div class="org-head">Sort by</div>
+      {#each sortKeys as key, i (i)}
+        <div class="handle-row">
+          <select
+            class="vfield lname"
+            value={key.by}
+            onchange={(e) => setSortKey(i, { by: e.currentTarget.value as SortKey["by"] })}
+            aria-label={`Sort key ${i + 1} type`}
+          >
+            <option value="title">Title</option>
+            <option value="field">Field…</option>
+          </select>
+          {#if key.by === "field"}
+            <select
+              class="vfield lname"
+              value={key.field_key ?? ""}
+              onchange={(e) => setSortKey(i, { field_key: e.currentTarget.value })}
+              aria-label={`Sort key ${i + 1} field`}
+            >
+              <option value="">— field —</option>
+              {#each nodeFields as f (f.key)}
+                <option value={f.key}>{f.name}</option>
+              {/each}
+            </select>
+          {/if}
+          <button
+            type="button"
+            class="hbtn"
+            title={key.dir === "desc" ? "Descending (click for ascending)" : "Ascending (click for descending)"}
+            aria-label="Toggle sort direction"
+            onclick={() => setSortKey(i, { dir: key.dir === "desc" ? "asc" : "desc" })}>{key.dir === "desc" ? "Desc" : "Asc"}</button
+          >
+          <button class="hbtn" type="button" title="Move up" aria-label="Move sort key up" disabled={i === 0} onclick={() => moveSortKey(i, -1)}>↑</button>
+          <button class="hbtn" type="button" title="Move down" aria-label="Move sort key down" disabled={i === sortKeys.length - 1} onclick={() => moveSortKey(i, 1)}>↓</button>
+          <button class="hbtn del" type="button" title="Remove sort key" aria-label="Remove sort key" onclick={() => removeSortKey(i)}>×</button>
+        </div>
+      {/each}
+      <button class="add-handle" type="button" title="Add sort key" aria-label="Add sort key" onclick={addSortKey}>+ Add sort key</button>
+      {#if sortKeys.length === 0}
+        <p class="vhint org-empty">No keys → stored/manual order.</p>
+      {/if}
+    </div>
   {:else if kind === "hand_picked"}
     <!-- nodrag + native stop-pointerdown so interacting with the picker doesn't
          drag or select the flow node (Svelte Flow selects on pointerdown; the
@@ -563,21 +755,29 @@
   {:else if kind === "output"}
     <div class="handles">
       {#each handles as h, i (h.id)}
-        <div class="handle-row">
-          <input
-            class="vfield hname"
-            type="text"
-            placeholder={handles.length > 1 ? `Group ${i + 1}` : "All results"}
-            value={h.name}
-            oninput={(e) => renameHandle(h.id, e.currentTarget.value)}
-          />
-          <SwatchPicker value={h.color ?? null} onChange={(c) => setHandleColor(h.id, c)} />
-          <button class="hbtn" title="Move up" aria-label="Move group up" disabled={i === 0} onclick={() => moveHandle(h.id, -1)}>↑</button>
-          <button class="hbtn" title="Move down" aria-label="Move group down" disabled={i === handles.length - 1} onclick={() => moveHandle(h.id, 1)}>↓</button>
-          <button class="hbtn del" title="Remove group" aria-label="Remove group" disabled={handles.length <= 1} onclick={() => removeHandle(h.id)}>×</button>
+        <div class="group-block">
+          <div class="handle-row">
+            <input
+              class="vfield hname"
+              type="text"
+              placeholder={handles.length > 1 ? `Group ${i + 1}` : "All results"}
+              value={h.name}
+              oninput={(e) => renameHandle(h.id, e.currentTarget.value)}
+            />
+            <SwatchPicker value={h.color ?? null} onChange={(c) => setHandleColor(h.id, c)} />
+            <button class="hbtn" title="Move up" aria-label="Move group up" disabled={i === 0} onclick={() => moveHandle(h.id, -1)}>↑</button>
+            <button class="hbtn" title="Move down" aria-label="Move group down" disabled={i === handles.length - 1} onclick={() => moveHandle(h.id, 1)}>↓</button>
+            <button class="hbtn del" title="Remove group" aria-label="Remove group" disabled={handles.length <= 1} onclick={() => removeHandle(h.id)}>×</button>
+          </div>
+          <!-- Amendment 1: each group owns its Organize (the single/unnamed group
+               too — its lone handle carries the levels). Group + Organize = one
+               unit; the "+ add group" below adds another. -->
+          <div class="group-organize">
+            {@render organizeSection(h.group_by ?? [], commitHandleLevels(h.id))}
+          </div>
         </div>
       {/each}
-      <button class="add-handle" type="button" title="Add handle group" aria-label="Add handle group" onclick={addHandle}>+</button>
+      <button class="add-handle" type="button" title="Add handle group" aria-label="Add handle group" onclick={addHandle}>+ Add group</button>
     </div>
   {/if}
 
@@ -864,6 +1064,57 @@
   }
   .add-handle:hover {
     background: var(--panel);
+  }
+  .add-handle:disabled {
+    opacity: 0.4;
+    cursor: default;
+  }
+  /* A group = its handle row + (when there are 2+ groups) its own Organize
+     (ADR-0037 Amendment 1). The Organize is indented under the row with a left
+     rule so it reads as belonging to that group, not to the result. */
+  .group-block {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+  }
+  .group-organize {
+    margin-left: 14px;
+    border-left: 2px solid var(--border);
+    padding-left: 6px;
+  }
+  .group-organize .organize {
+    border-top: none;
+    margin-top: 0;
+    padding: 2px 0 4px;
+  }
+  /* Organize levels (ADR-0037 §8) — for the single/unnamed group, sits below the
+     lone handle, separated by a hairline so "which group" reads distinctly from
+     "how to organize within it". */
+  .organize {
+    padding: 8px 8px 8px;
+    margin-top: 2px;
+    border-top: 1px solid var(--border);
+    display: flex;
+    flex-direction: column;
+    gap: 5px;
+  }
+  .org-head {
+    font-size: var(--fs-xs);
+    font-weight: 600;
+    color: var(--text-3);
+  }
+  .handle-row .lname {
+    margin: 0;
+    flex: 1;
+    width: auto;
+    min-width: 0;
+  }
+  .hbtn.on {
+    color: var(--accent);
+    border-color: var(--accent);
+  }
+  .org-empty {
+    margin: 0;
   }
   /* keep the flow-node ports visually distinct + above node content so the
      whole handle (not just the half sticking out) is grabbable/hoverable. */

@@ -37,6 +37,8 @@ import type {
   ViewSpec,
 } from "@/lib/types";
 import { kindRootEntryTypeId } from "@/lib/utils/schemaTypeHelpers";
+import { asArray, fieldValue, fieldValueList, isCollectionField, isEmpty } from "@/lib/views/fieldAccess";
+import { applyGroupBy } from "@/lib/views/groupBy";
 import { projectReferences } from "@/lib/views/referenceIndex";
 
 // The minimal node shape the evaluator reads. Every `*EntrySummary` satisfies
@@ -67,15 +69,6 @@ export type EvalNode = {
   source_layer_id?: string | null;
   source_layer_label?: string | null;
 };
-
-// A field routes to the node top-level property (id/title/entry_type) instead
-// of the `metadata` dict iff the resolver stamped it `intrinsic` (ADR-0029 §D).
-// Read that off the resolved schema payload — the backend
-// `default_schema.INTRINSIC_FIELD_KEYS` is the single source of truth; the
-// frontend no longer mirrors the key set. Unknown keys fall back to metadata.
-export function isIntrinsicField(schema: MetadataSchema | null | undefined, key: string): boolean {
-  return schema?.fields?.[key]?.category === "intrinsic";
-}
 
 // Per-node stamp from a color `annotate` (Highlight) node. Drives the NodeRow
 // color part (doc §1.3). Grouping no longer stamps here — it lives in handles.
@@ -562,104 +555,8 @@ function evalGroups<T extends EvalNode>(
   return rows;
 }
 
-// --- group_by (ν by attribute, ADR-0037 §2) ------------------------------
-
-// Apply the ordered `group_by` levels to already-denormalized rows. Each level
-// appends ONE path segment above the leaf (innermost), beneath every pipeline-
-// produced segment, in declared order (outer → inner). A multi-valued field fans
-// the row out under EACH value (groups repeat, `normalize` dedupes membership);
-// a missing/unset value leaves the row BARE at that level (no segment, no
-// "Ungrouped" bucket). Pure fold over the rows, level by level.
-function applyGroupBy<T extends EvalNode>(
-  state: RunState<T>,
-  rows: ViewRow<T>[],
-  levels: NonNullable<ViewSpec["group_by"]>,
-): ViewRow<T>[] {
-  let out = rows;
-  for (const level of levels) {
-    const next: ViewRow<T>[] = [];
-    for (const r of out) {
-      const segs = segmentForField(state, r.node, level);
-      if (segs.length === 0) {
-        next.push(r); // missing value → bare at this level
-        continue;
-      }
-      for (const seg of segs) next.push({ node: r.node, path: [...r.path, seg] });
-    }
-    out = next;
-  }
-  return out;
-}
-
-// The buckets a node falls into for one `group_by` level (ADR-0037 §2 — the only
-// genuinely new evaluator logic). Returns 0 segments (missing → bare), 1 (single
-// value), or many (a multi-valued field fans out):
-//  - `entry_type` (intrinsic) → one synthetic bucket, labelled by type display
-//    name, keyed by the FQN.
-//  - a reference field (entity_ref / entity_ref_list) → REAL-NODE buckets: the
-//    target's title as label, its id as `nodeId` — an openable header (§6: a
-//    value, never a member).
-//  - enum / select (and multi_select) → synthetic buckets labelled by the OPTION
-//    LABEL, keyed by the value.
-//  - anything else (tags, text, …) → synthetic buckets labelled by the value.
-// `order: "label"` is carried onto the segment so `buildLevel` can sort this
-// level's sibling buckets alphabetically instead of first-seen.
-function segmentForField<T extends EvalNode>(
-  state: RunState<T>,
-  node: T,
-  level: NonNullable<ViewSpec["group_by"]>[number],
-): PathSegment[] {
-  const { field, order } = level;
-
-  // `source_layer` (ADR-0037 §7 — the Assistants default): resolved off the
-  // node's summary-level projection (`source_layer_id`/`source_layer_label`),
-  // like `entry_type` routes to a top-level property — there is no schema field
-  // to consult. One synthetic bucket per layer, keyed by id, labelled by label.
-  if (field === "source_layer") {
-    const layerId = (node.source_layer_id ?? "").trim();
-    if (!layerId) return []; // missing → bare at this level
-    return [
-      {
-        key: layerId,
-        label: node.source_layer_label || layerId,
-        nodeId: null,
-        origin: "field",
-        ...(order ? { order } : {}),
-      },
-    ];
-  }
-
-  const raw = fieldValue(node, field, state.schema);
-  if (isEmpty(raw)) return [];
-
-  const fieldDef = state.schema?.fields?.[field];
-  const type = fieldDef?.type;
-  const isRef = type === "entity_ref" || type === "entity_ref_list";
-  const values = isCollectionField(state.schema, field) || Array.isArray(raw) ? asArray(raw) : [raw];
-
-  const seg = (key: string, label: string, nodeId: string | null): PathSegment => ({
-    key,
-    label,
-    nodeId,
-    origin: "field",
-    ...(order ? { order } : {}),
-  });
-
-  const out: PathSegment[] = [];
-  for (const v of values) {
-    const value = String(v).trim();
-    if (!value) continue;
-    if (field === "entry_type") {
-      out.push(seg(value, state.schema?.entry_types?.[value]?.name ?? value, null));
-    } else if (isRef) {
-      out.push(seg(value, state.nodeById.get(value)?.title ?? value, value));
-    } else {
-      const option = fieldDef?.options?.find((o) => o.value === value);
-      out.push(seg(value, option?.label ?? value, null));
-    }
-  }
-  return out;
-}
+// (`applyGroupBy` — ν by attribute, ADR-0037 §2 — lives in `groupBy.ts`;
+// `RunState` satisfies its `GroupByContext` slice structurally.)
 
 // Normalize rows → a render-ready result. Flat membership (dedupe by id, row
 // order) is always exposed as `nodes`. Grouping reconstructs a tree-uniform
@@ -1174,13 +1071,6 @@ function buildNestAdjacency<T extends EvalNode>(
   return adj;
 }
 
-// A node's link-field values as a list of trimmed strings — entity_ref (a bare
-// id string), entity_ref_list (a list of ids), a CSV string, or a tag list. The
-// stored shape is always plain strings/lists of strings (no ref wrappers).
-function fieldValueList(node: EvalNode, field: string): string[] {
-  return asArray(node.metadata?.[field]).map((v) => String(v).trim()).filter(Boolean);
-}
-
 // Order a nest's leaf rows by the segment sort (title/field). `manual`/none keeps
 // the natural universe/BFS order. Ranks nodes by the shared node comparator, then
 // stable-sorts rows by their node's rank — so within each parent the leaves come
@@ -1258,29 +1148,9 @@ function nodeTags(node: EvalNode): string[] {
   return [];
 }
 
-// A node's value for a predicate/sort key. Intrinsic fields (id/title/
-// entry_type) live on the node top-level, not in metadata, so read them from
-// the node property; everything else reads from metadata. Which is which comes
-// from the resolver-stamped `category` (ADR-0029 §D), never a mirrored set.
-function fieldValue(node: EvalNode, key: string, schema: MetadataSchema | null | undefined): unknown {
-  return isIntrinsicField(schema, key)
-    ? (node as unknown as Record<string, unknown>)[key]
-    : node.metadata?.[key];
-}
-
 // An unbound promoted formal — the predicate is inactive and passes the input
 // through (ADR-0031 §B), distinct from an operand that resolves to the empty set.
 const OPERAND_INACTIVE = Symbol("operand-inactive");
-
-// Collection field types (ADR-0031 §E): a value that is inherently a SET of
-// tokens. Only these tokenize a comma-bearing string; every other type is scalar
-// and compares whole (#202). An array value is always treated as a collection
-// regardless of the declared type, since it is already multi-valued.
-const COLLECTION_FIELD_TYPES = new Set<string>(["multi_select", "entity_ref_list", "tags"]);
-function isCollectionField(schema: MetadataSchema | null | undefined, key: string): boolean {
-  const t = schema?.fields?.[key]?.type;
-  return t != null && COLLECTION_FIELD_TYPES.has(t);
-}
 
 // Evaluate a `field` predicate to its member id-set (ADR-0031 §E, #184).
 // Overlap/disjoint compare the node's value against the operand; `set`/`unset`
@@ -1408,17 +1278,6 @@ function intersects(a: Set<string>, b: Set<string>): boolean {
   const [small, large] = a.size <= b.size ? [a, b] : [b, a];
   for (const x of small) if (large.has(x)) return true;
   return false;
-}
-
-function isEmpty(v: unknown): boolean {
-  return v === null || v === undefined || v === "" || (Array.isArray(v) && v.length === 0);
-}
-
-function asArray(v: unknown): unknown[] {
-  if (Array.isArray(v)) return v;
-  if (v === null || v === undefined) return [];
-  if (typeof v === "string") return v.split(",").map((s) => s.trim()).filter(Boolean);
-  return [v];
 }
 
 // --- set + sort helpers --------------------------------------------------

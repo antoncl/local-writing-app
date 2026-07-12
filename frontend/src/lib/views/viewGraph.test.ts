@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { ViewExpr } from "@/lib/types";
+import { defaultView } from "./evaluateView";
 import {
   classifyConnection,
   connectionAllowed,
@@ -89,7 +90,9 @@ describe("viewGraph serialization (round-trip)", () => {
       }) as unknown as ViewExpr;
     const expr = dense({ union: [dense({ type: "assistant:assistant" }), dense({ tagged: "OpenAI" })] });
     const kinds = exprToGraph(expr).nodes.map((n) => n.kind).sort();
-    expect(kinds).toEqual(["output", "tagged", "type", "union"]);
+    // The `type`/`tagged` predicate leaves canonicalize to `All → Filter` on open
+    // (ADR-0038 §B), so each contributes an `all` + a `filter` node.
+    expect(kinds).toEqual(["all", "all", "filter", "filter", "output", "union"]);
   });
 
   it("a label-only annotate is an inert pass-through (grouping is retired)", () => {
@@ -97,7 +100,8 @@ describe("viewGraph serialization (round-trip)", () => {
     // its input (no group), and specToGraph skips the annotate on reopen.
     const expr = { annotate: { label: "Cast" }, of: { type: "lore:character" } } as unknown as ViewExpr;
     const kinds = exprToGraph(expr).nodes.map((n) => n.kind).sort();
-    expect(kinds).toEqual(["output", "type"]);
+    // The `type` leaf canonicalizes to `All → Filter` on open (ADR-0038 §B).
+    expect(kinds).toEqual(["all", "filter", "output"]);
   });
 
   it("drops an unconfigured leaf (blank type ≠ whole universe)", () => {
@@ -127,11 +131,14 @@ describe("injector: All (universal)", () => {
     expect(graphToSpec(g, { kind: "lore" }).expr).toEqual({ descendants_of: "lore:base" });
   });
 
-  it("specToGraph keeps a NON-root descendants_of as a Type & subtypes node", () => {
+  it("specToGraph canonicalizes a NON-root descendants_of to All → Filter (ADR-0038 §B)", () => {
     const g = specToGraph({ kind: "lore", expr: { descendants_of: "lore:deity" } });
-    const injectors = g.nodes.filter((n) => n.kind !== "output");
-    expect(injectors.map((n) => n.kind)).toEqual(["descendants_of"]);
-    expect(injectors[0].data).toMatchObject({ descendants_of: "lore:deity" });
+    const kinds = g.nodes.filter((n) => n.kind !== "output").map((n) => n.kind).sort();
+    expect(kinds).toEqual(["all", "filter"]);
+    const filter = g.nodes.find((n) => n.kind === "filter")!;
+    expect(filter.data).toMatchObject({ filter_kind: "descendants_of", descendants_of: "lore:deity", filter_mode: "keep" });
+    // Lossless: the graph re-serializes to the same bare descendants_of.
+    expect(graphToSpec(g, { kind: "lore" }).expr).toEqual({ descendants_of: "lore:deity" });
   });
 
   it("specToGraph lifts a concrete-root kind's universe to All when the schema resolves it", () => {
@@ -142,10 +149,93 @@ describe("injector: All (universal)", () => {
     } as unknown as Parameters<typeof specToGraph>[1];
     const g = specToGraph({ kind: "assistant", expr: { descendants_of: "assistant:assistant" } }, schema);
     expect(g.nodes.filter((n) => n.kind !== "output").map((n) => n.kind)).toEqual(["all"]);
-    // Without the schema, the concrete root has no match → stays a type node.
+    // Without the schema the concrete root doesn't resolve to the universe, so it
+    // canonicalizes to All → Filter rather than lifting to a bare All (§B).
     const gNoSchema = specToGraph({ kind: "assistant", expr: { descendants_of: "assistant:assistant" } });
-    expect(gNoSchema.nodes.filter((n) => n.kind !== "output").map((n) => n.kind)).toEqual(["descendants_of"]);
+    expect(gNoSchema.nodes.filter((n) => n.kind !== "output").map((n) => n.kind).sort()).toEqual(["all", "filter"]);
   });
+});
+
+// ADR-0038 §B: the palette retired the standalone `type / descendants_of /
+// tagged / field` predicate leaves. `specToGraph` canonicalizes any surviving
+// bare leaf (in a saved or duplicated view) into `All → Filter` on open, so the
+// designer never presents vocabulary the palette can't rebuild. The rewrite is
+// lossless — `intersect(universe, p) === p` — so graphToSpec re-serializes the
+// exact same bytes. `hand_picked` / `view_ref` are sources, not predicates, and
+// stay as themselves.
+describe("canonicalize bare predicate leaves → All → Filter (ADR-0038 §B)", () => {
+  const isFilterOverAll = (g: ViewGraph, pred: Partial<ViewGraphNode["data"]>) => {
+    const nonOutput = g.nodes.filter((n) => n.kind !== "output");
+    expect(nonOutput.map((n) => n.kind).sort()).toEqual(["all", "filter"]);
+    const filter = g.nodes.find((n) => n.kind === "filter")!;
+    const all = g.nodes.find((n) => n.kind === "all")!;
+    expect(filter.data).toMatchObject({ filter_mode: "keep", ...pred });
+    // All feeds the Filter's set input (default handle).
+    expect(g.edges.some((e) => e.source === all.id && e.target === filter.id)).toBe(true);
+  };
+
+  it("type → All → Filter(type), lossless round-trip", () => {
+    const g = specToGraph({ kind: "lore", expr: { type: "lore:character" } });
+    isFilterOverAll(g, { filter_kind: "type", type: "lore:character" });
+    expect(graphToSpec(g, { kind: "lore" }).expr).toEqual({ type: "lore:character" });
+  });
+
+  it("tagged → All → Filter(tagged), lossless round-trip", () => {
+    const g = specToGraph({ kind: "lore", expr: { tagged: "gotham" } });
+    isFilterOverAll(g, { filter_kind: "tagged", tagged: "gotham" });
+    expect(graphToSpec(g, { kind: "lore" }).expr).toEqual({ tagged: "gotham" });
+  });
+
+  it("field → All → Filter(field), lossless round-trip", () => {
+    const expr: ViewExpr = { field: { key: "pov", op: "overlap", value: "honor" } };
+    const g = specToGraph({ kind: "lore", expr });
+    isFilterOverAll(g, { filter_kind: "field" });
+    expect(graphToSpec(g, { kind: "lore" }).expr).toEqual(expr);
+  });
+
+  it("hand_picked / view_ref stay sources (not canonicalized)", () => {
+    expect(
+      specToGraph({ kind: "lore", expr: { hand_picked: ["a", "b"] } })
+        .nodes.filter((n) => n.kind !== "output").map((n) => n.kind),
+    ).toEqual(["hand_picked"]);
+    expect(
+      specToGraph({ kind: "lore", expr: { view_ref: "view-123" } })
+        .nodes.filter((n) => n.kind !== "output").map((n) => n.kind),
+    ).toEqual(["view_ref"]);
+  });
+
+  it("a bare-leaf predicate nested in a combinator canonicalizes in place", () => {
+    // union[type, tagged] → union[All→Filter, All→Filter], still round-trips.
+    const expr: ViewExpr = { union: [{ type: "lore:character" }, { tagged: "villain" }] };
+    const g = specToGraph({ kind: "lore", expr });
+    const kinds = g.nodes.filter((n) => n.kind !== "output").map((n) => n.kind).sort();
+    expect(kinds).toEqual(["all", "all", "filter", "filter", "union"]);
+    expect(graphToSpec(g, { kind: "lore" }).expr).toEqual(expr);
+  });
+
+  // The paired ADR requirement — "shipped defaults authored in the All → Filter
+  // idiom" — is satisfied for free: All → Filter serializes byte-identically to
+  // a bare leaf, so there is no distinct idiom to author at the spec level. The
+  // canonicalizer alone guarantees a duplicated default opens palette-buildable:
+  // no retired predicate-leaf kind ever appears in a reopened default's graph.
+  const RETIRED = new Set(["type", "descendants_of", "tagged", "field"]);
+  for (const kind of ["scene", "research", "lore", "assistant", "prompt"]) {
+    it(`the ${kind} default view opens with no palette-unbuildable node kinds`, () => {
+      const g = specToGraph(defaultView(kind));
+      expect(g.nodes.filter((n) => RETIRED.has(n.kind)).map((n) => n.kind)).toEqual([]);
+    });
+  }
+
+  // The flat defaults also re-serialize byte-identically (the canonicalization is
+  // lossless). The scene/research defaults nest the whole-kind roster as `children`,
+  // which lifts to `All` and drops on `materialize` — a pre-existing nest/All-child
+  // serialization quirk (materialize vs materializeOuter), unrelated to §B.
+  for (const kind of ["lore", "assistant", "prompt"]) {
+    it(`the ${kind} default view re-serializes to the same expr (lossless)`, () => {
+      const spec = defaultView(kind);
+      expect(graphToSpec(specToGraph(spec), { kind, sort: spec.sort }).expr).toEqual(spec.expr);
+    });
+  }
 });
 
 describe("filter lowering (sugar → set ops)", () => {
@@ -614,19 +704,22 @@ describe("#196 value-set pipe (scalar field_of → Filter value slot, ADR-0031 �
     expect(roundTrip(expr)).toEqual(expr);
   });
 
-  it("specToGraph rebuilds the value wire (field_of node + edge into the field's value handle)", () => {
+  it("specToGraph rebuilds the value wire (field_of node + edge into the Filter's value handle)", () => {
     const graph = specToGraph({
       kind: "scene",
       expr: { field: { key: "status", op: "overlap", value: { field_of: { of: { type: "scene:scene" }, field: "status" } } } },
     });
-    const field = graph.nodes.find((n) => n.kind === "field")!;
+    // The field predicate canonicalizes to a Filter (filter_kind: field) fed by All
+    // (§B). The `of`'s `type` predicate ALSO canonicalizes, so pick by filter_kind.
+    const filter = graph.nodes.find((n) => n.kind === "filter" && n.data.filter_kind === "field")!;
     const fo = graph.nodes.find((n) => n.kind === "field_of")!;
+    expect(filter.data.filter_kind).toBe("field");
     expect(fo.data.project_field).toBe("status");
     expect(
-      graph.edges.some((e) => e.source === fo.id && e.target === field.id && e.targetHandle === FILTER_VALUE_HANDLE),
+      graph.edges.some((e) => e.source === fo.id && e.target === filter.id && e.targetHandle === FILTER_VALUE_HANDLE),
     ).toBe(true);
-    // the field node's inline value is cleared — the wire re-supplies it on lowering.
-    expect(field.data.field?.value ?? null).toBeNull();
+    // the Filter's inline value is cleared — the wire re-supplies it on lowering.
+    expect(filter.data.field?.value ?? null).toBeNull();
   });
 });
 
@@ -748,9 +841,10 @@ describe("promote-in-place params (#184)", () => {
       expr: { field: { key: "tags", op: "overlap" as const, value: { var: "P" } } },
       params: [{ name: "P", label: "Tag", default: ["hero"] }],
     };
-    const field = specToGraph(spec).nodes.find((n) => n.kind === "field");
-    expect(field?.data.field_param).toEqual({ name: "P", label: "Tag", default: ["hero"] });
-    expect(field?.data.field?.value).toEqual({ var: "P" });
+    // The field predicate canonicalizes to a Filter; the promoted formal rides on it (§B).
+    const filter = specToGraph(spec).nodes.find((n) => n.kind === "filter");
+    expect(filter?.data.field_param).toEqual({ name: "P", label: "Tag", default: ["hero"] });
+    expect(filter?.data.field?.value).toEqual({ var: "P" });
   });
 
   it("round-trips a promoted formal graph → spec → graph → spec", () => {

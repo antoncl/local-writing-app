@@ -114,6 +114,10 @@
   type FlowData = { kind: GraphNodeKind; cfg: ViewNodeData };
   let flowNodes = $state<Node<FlowData>[]>([]);
   let flowEdges = $state<Edge[]>([]);
+  // The canvas element, so insertion can invert screen→flow coords by reading the
+  // live viewport transform straight off the DOM (§E) — `bind:viewport` only
+  // emits on a viewport CHANGE, so it stays undefined until the first pan/zoom.
+  let canvasEl = $state<HTMLDivElement | undefined>(undefined);
   const nodeTypes = { viewNode: ViewFlowNode };
   const edgeTypes = { selfloop: SelfLoopEdge };
 
@@ -185,21 +189,23 @@
   function hydrateGraph(node: ViewNode): { nodes: Node<FlowData>[]; edges: Edge[] } {
     const layout = node.layout;
     if (layout && layout.nodes.length > 0) {
-      const nodes = layout.nodes.map((n) =>
+      const rawNodes = layout.nodes.map((n) =>
         toFlowNode(n.id, n.kind as GraphNodeKind, (n.cfg ?? {}) as ViewNodeData, n.position),
       );
-      return {
-        nodes,
-        edges: layout.edges.map((e) => ({
-          id: e.id,
-          source: e.source,
-          target: e.target,
-          sourceHandle: e.source_handle ?? undefined,
-          targetHandle: e.target_handle ?? undefined,
-          type: e.source === e.target ? "selfloop" : undefined,
-          class: edgeClass(e.source, nodes),
-        })),
-      };
+      const rawEdges = layout.edges.map((e) => ({
+        id: e.id,
+        source: e.source,
+        target: e.target,
+        sourceHandle: e.source_handle ?? undefined,
+        targetHandle: e.target_handle ?? undefined,
+        type: e.source === e.target ? "selfloop" : undefined,
+      }));
+      // A persisted layout bypasses specToGraph, so its bare predicate leaves must
+      // be canonicalized here too (ADR-0038 §B) — otherwise a designer-authored
+      // view reopens showing `type`/`tagged`/`field` nodes the palette can't
+      // rebuild. Done in place so the author's positions + wiring survive.
+      const { nodes, edges } = canonicalizeLeafNodes(rawNodes, rawEdges, node.spec?.kind ?? kind);
+      return { nodes, edges: edges.map((e) => ({ ...e, class: edgeClass(e.source, nodes) })) };
     }
     const g = specToGraph(node.spec, schema);
     const nodes = g.nodes.map((n) => toFlowNode(n.id, n.kind, n.data, n.position));
@@ -215,6 +221,47 @@
         class: edgeClass(e.source, nodes),
       })),
     };
+  }
+
+  // Canonicalize bare predicate-leaf nodes (`type / descendants_of / tagged /
+  // field`) in a persisted layout into the `All → Filter` idiom on open (ADR-0038
+  // §B) — the same repair specToGraph does for the fallback path, applied in place
+  // so authored positions and wiring survive. Each leaf's id is reused for the
+  // Filter (all its edges stay valid, incl. a `field` value wire on the same
+  // handle); a fresh `All` source is added to its left. A kind-root
+  // `descendants_of` collapses to a bare `All` (it IS the universe, no predicate).
+  // Sources (hand_picked / view_ref / self) and already-canonical graphs are
+  // untouched; the repair persists on the next debounced save.
+  const PREDICATE_LEAF_KINDS = new Set<GraphNodeKind>(["type", "descendants_of", "tagged", "field"]);
+  function canonicalizeLeafNodes(
+    nodes: Node<FlowData>[],
+    edges: Edge[],
+    viewKind: string,
+  ): { nodes: Node<FlowData>[]; edges: Edge[] } {
+    const universeRoot = kindRootEntryTypeId(schema, viewKind) ?? `${viewKind}:base`;
+    const outNodes: Node<FlowData>[] = [];
+    const outEdges = [...edges];
+    let seq = 0;
+    for (const n of nodes) {
+      const k = n.data.kind;
+      if (!PREDICATE_LEAF_KINDS.has(k)) {
+        outNodes.push(n);
+        continue;
+      }
+      // A kind-root descendants_of is the whole universe → a bare All.
+      if (k === "descendants_of" && n.data.cfg?.descendants_of === universeRoot) {
+        outNodes.push({ ...n, data: { kind: "all", cfg: {} } });
+        continue;
+      }
+      // Reuse the leaf's id + position as the Filter; its edges stay valid.
+      const filterCfg: ViewNodeData = { ...n.data.cfg, filter_kind: k as ViewNodeData["filter_kind"], filter_mode: "keep" };
+      outNodes.push({ ...n, data: { kind: "filter", cfg: filterCfg } });
+      // A fresh All to the leaf's left, wired into the Filter's set input.
+      const allId = `${n.id}__all${seq++}`;
+      outNodes.push(toFlowNode(allId, "all", {}, { x: n.position.x - 180, y: n.position.y }));
+      outEdges.push({ id: `${n.id}__e${seq++}`, source: allId, sourceHandle: "out", target: n.id, targetHandle: "in" });
+    }
+    return { nodes: outNodes, edges: outEdges };
   }
 
   // Serialize the live canvas (positions + wiring) for persistence. Parallel to
@@ -439,44 +486,43 @@
     flowEdges = flowEdges.filter((e) => e.source !== id && e.target !== id);
   }
 
-  // ---- palette (roles — ADR-0027 / doc §12) ----
-  // Injectors are sources: a universal `All` plus the leaves. Type-based
-  // injectors are hidden for single-type kinds (they'd be noise, #91).
+  // ---- palette (sources vs operations — ADR-0038 §B) ----
+  // The algebra has two roles: a SOURCE injects a node set, an OPERATION
+  // transforms one. The bare predicate leaves (`type / descendants_of / tagged /
+  // field`) are retired from the palette — `All → Filter` composes the identical
+  // lowering (`commonLeafExpr`) through one UI path, and post-ADR-0036 `All` is a
+  // real kind universe, so nothing is lost. `specToGraph` canonicalizes any
+  // surviving bare leaf on open, so a reopened or duplicated view never presents
+  // vocabulary the palette can't rebuild. Per-item `cls` keeps the colour cue
+  // (retokenised in §G / #223); per-kind glyphs are the §G lexicon batch, not
+  // this slice.
   let hasTypeChoice = $derived(entryTypeOptions.length > 1);
-  let INJECTORS = $derived<{ kind: GraphNodeKind; label: string }[]>([
-    { kind: "all", label: "All" },
-    ...(hasTypeChoice
-      ? ([
-          { kind: "type", label: "Type" },
-          { kind: "descendants_of", label: "Type + subtypes" },
-        ] as { kind: GraphNodeKind; label: string }[])
-      : []),
-    { kind: "tagged", label: "Tag" },
-    { kind: "field", label: "Field" },
-    { kind: "hand_picked", label: "Hand-picked" },
-    { kind: "view_ref", label: "Saved view" },
-  ]);
-  // Filter is the everyday transform; series = AND, parallel = OR by topology.
-  const FILTERS: { kind: GraphNodeKind; label: string }[] = [{ kind: "filter", label: "Filter" }];
-  // Projection (#184): follow a reference field to the nodes it points at
-  // (`Field of`), seeded by the pane's anchor entry (`This entry`). Together they
-  // author backlinks — `field_of(This entry, References)`.
-  const PROJECT: { kind: GraphNodeKind; label: string }[] = [
-    { kind: "field_of", label: "Field of" },
-    { kind: "self", label: "This entry" },
-  ];
-  // Operations — the explicit set combinators, the power tier.
-  const OPERATIONS: { kind: GraphNodeKind; label: string }[] = [
-    { kind: "union", label: "Union" },
-    { kind: "intersect", label: "Intersect" },
-    { kind: "difference", label: "Difference" },
-    { kind: "complement", label: "Complement" },
-    { kind: "nest", label: "Nest" },
-  ];
-  // Arrange — per-segment Sort + the color Highlight overlay.
-  const ARRANGE: { kind: GraphNodeKind; label: string }[] = [
-    { kind: "sorter", label: "Sort" },
-    { kind: "highlight", label: "Highlight" },
+  type PalItem = { kind: GraphNodeKind; label: string; cls: string };
+  const PALETTE: { label: string; items: PalItem[] }[] = [
+    {
+      label: "Sources",
+      items: [
+        { kind: "all", label: "All", cls: "inj" },
+        { kind: "hand_picked", label: "Hand-picked", cls: "inj" },
+        { kind: "view_ref", label: "Saved view", cls: "inj" },
+        // `This entry` ($self) seeds a projection from the pane's anchor.
+        { kind: "self", label: "This entry", cls: "proj" },
+      ],
+    },
+    {
+      label: "Operations",
+      items: [
+        { kind: "filter", label: "Filter", cls: "filter" },
+        { kind: "field_of", label: "Field of", cls: "proj" },
+        { kind: "union", label: "Union", cls: "op" },
+        { kind: "intersect", label: "Intersect", cls: "op" },
+        { kind: "difference", label: "Difference", cls: "op" },
+        { kind: "complement", label: "Complement", cls: "op" },
+        { kind: "nest", label: "Nest", cls: "op" },
+        { kind: "sorter", label: "Sort", cls: "ann" },
+        { kind: "highlight", label: "Highlight", cls: "ann" },
+      ],
+    },
   ];
 
   function defaultCfg(k: GraphNodeKind): ViewNodeData {
@@ -485,10 +531,53 @@
     if (k === "nest") return { match: { field: "", direction: "child_to_parent", by: "ref" } };
     return {};
   }
-  function addNode(k: GraphNodeKind): void {
+  function addNode(k: GraphNodeKind, position?: { x: number; y: number }): void {
     const id = `a${addCounter++}`;
-    const position = { x: 60, y: 60 + (flowNodes.length % 8) * 46 };
-    flowNodes = [...flowNodes, toFlowNode(id, k, defaultCfg(k), position)];
+    flowNodes = [...flowNodes, toFlowNode(id, k, defaultCfg(k), position ?? centrePos())];
+  }
+  // ---- insertion placement (ADR-0038 §E) ----
+  // `screenToFlowPosition` without the provider hook: invert the live viewport
+  // transform (read off the DOM) against the canvas rect. Drop lands under the
+  // pointer; click lands at the viewport centre (killing the old top-left staircase).
+  const DND_MIME = "application/x-view-node-kind";
+  function readViewport(): { x: number; y: number; zoom: number } | null {
+    const t = canvasEl?.querySelector<HTMLElement>(".svelte-flow__viewport")?.style.transform;
+    const m = t ? /translate\(\s*(-?[\d.]+)px,\s*(-?[\d.]+)px\)\s*scale\(\s*([\d.]+)\s*\)/.exec(t) : null;
+    return m ? { x: parseFloat(m[1]), y: parseFloat(m[2]), zoom: parseFloat(m[3]) } : null;
+  }
+  function staircaseFallback(): { x: number; y: number } {
+    return { x: 60, y: 60 + (flowNodes.length % 8) * 46 };
+  }
+  function toFlowPos(clientX: number, clientY: number): { x: number; y: number } {
+    const rect = canvasEl?.getBoundingClientRect();
+    const vp = readViewport();
+    if (!rect || !vp) return staircaseFallback();
+    return { x: (clientX - rect.left - vp.x) / vp.zoom, y: (clientY - rect.top - vp.y) / vp.zoom };
+  }
+  function centrePos(): { x: number; y: number } {
+    const rect = canvasEl?.getBoundingClientRect();
+    const vp = readViewport();
+    if (!rect || !vp) return staircaseFallback();
+    // Nudge by roughly half a compact node so it reads as centred, not corner-hung.
+    return { x: (rect.width / 2 - vp.x) / vp.zoom - 55, y: (rect.height / 2 - vp.y) / vp.zoom - 20 };
+  }
+  function onPaletteDragStart(e: DragEvent, kind: GraphNodeKind): void {
+    if (!e.dataTransfer) return;
+    e.dataTransfer.setData(DND_MIME, kind);
+    e.dataTransfer.effectAllowed = "copy";
+  }
+  function onCanvasDragOver(e: DragEvent): void {
+    // getData is unreadable during dragover, but the MIME type is visible — gate
+    // on it so unrelated drags don't paint a drop cursor over the canvas.
+    if (!e.dataTransfer?.types.includes(DND_MIME)) return;
+    e.preventDefault();
+    e.dataTransfer.dropEffect = "copy";
+  }
+  function onCanvasDrop(e: DragEvent): void {
+    const kind = e.dataTransfer?.getData(DND_MIME);
+    if (!kind) return;
+    e.preventDefault();
+    addNode(kind as GraphNodeKind, toFlowPos(e.clientX, e.clientY));
   }
   // Advance addCounter past the highest `a<N>` id present in `nodes`, so a
   // reopened graph never re-mints an id that's already on the canvas.
@@ -677,41 +766,42 @@
       <span>Views over</span>
       <strong class="kind-fixed">{kind}</strong>
     </span>
+    <!--
+      Sources vs operations (ADR-0038 §B). Each item both clicks-to-insert (lands
+      at the viewport centre) and drags-to-place (`screenToFlowPosition` at the
+      drop point, §E). Caps-label groups; per-kind glyphs are the §G lexicon pass.
+    -->
     <div class="palette">
-      <span class="pal-group">
-        {#each INJECTORS as p (p.kind)}
-          <button type="button" class="inj" onclick={() => addNode(p.kind)}>{p.label}</button>
-        {/each}
-      </span>
-      <span class="pal-sep"></span>
-      <span class="pal-group">
-        {#each FILTERS as p (p.kind)}
-          <button type="button" class="filter" onclick={() => addNode(p.kind)}>{p.label}</button>
-        {/each}
-      </span>
-      <span class="pal-sep"></span>
-      <span class="pal-group">
-        {#each PROJECT as p (p.kind)}
-          <button type="button" class="proj" onclick={() => addNode(p.kind)}>{p.label}</button>
-        {/each}
-      </span>
-      <span class="pal-sep"></span>
-      <span class="pal-group">
-        {#each OPERATIONS as p (p.kind)}
-          <button type="button" class="op" onclick={() => addNode(p.kind)}>{p.label}</button>
-        {/each}
-      </span>
-      <span class="pal-sep"></span>
-      <span class="pal-group">
-        {#each ARRANGE as p (p.kind)}
-          <button type="button" class="ann" onclick={() => addNode(p.kind)}>{p.label}</button>
-        {/each}
-      </span>
+      {#each PALETTE as g, gi (g.label)}
+        {#if gi > 0}<span class="pal-sep"></span>{/if}
+        <span class="pal-group">
+          <span class="pal-label">{g.label}</span>
+          {#each g.items as p (p.kind)}
+            <button
+              type="button"
+              class={p.cls}
+              draggable="true"
+              ondragstart={(e) => onPaletteDragStart(e, p.kind)}
+              onclick={() => addNode(p.kind)}
+              title={`Click to add, or drag onto the canvas — ${p.label}`}
+            >{p.label}</button>
+          {/each}
+        </span>
+      {/each}
     </div>
   </div>
 
   <div class="designer-body">
-    <div class="canvas">
+    <!-- Drop target for palette drags (§E). The wrapper (not <SvelteFlow>, which
+         doesn't type DOM drag props) carries the handlers; role=application so the
+         static-element-interaction a11y rule is satisfied for a canvas surface. -->
+    <div
+      class="canvas"
+      bind:this={canvasEl}
+      role="application"
+      ondragover={onCanvasDragOver}
+      ondrop={onCanvasDrop}
+    >
       <SvelteFlow
         bind:nodes={flowNodes}
         bind:edges={flowEdges}
@@ -824,8 +914,16 @@
   }
   .pal-group {
     display: inline-flex;
+    align-items: center;
     gap: 4px;
     flex-wrap: wrap;
+  }
+  .pal-label {
+    font-size: var(--fs-xs);
+    letter-spacing: 0.04em;
+    text-transform: uppercase;
+    color: var(--text-3);
+    margin-right: 2px;
   }
   .pal-sep {
     width: 1px;
@@ -838,7 +936,10 @@
     border-radius: 6px;
     background: var(--panel);
     font-size: var(--fs-sm);
-    cursor: pointer;
+    cursor: grab;
+  }
+  .palette button:active {
+    cursor: grabbing;
   }
   .palette button:hover {
     background: var(--inset);

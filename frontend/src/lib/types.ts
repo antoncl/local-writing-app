@@ -387,6 +387,10 @@ export type ViewGroupSpec = {
   expr?: ViewExpr | null;
   sort?: ViewSort | null;
   color?: string | null;
+  // ADR-0037 Amendment 1: each named group owns its Organize levels (ν by
+  // attribute), applied innermost within this group's rows — independent of every
+  // other group. The unnamed/single-group case keeps `ViewSpec.group_by`.
+  group_by?: ViewGroupByLevel[] | null;
 };
 
 // The portable view core: an anchor `kind` + membership + ordering. Membership

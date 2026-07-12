@@ -230,6 +230,22 @@ class ViewSpecModelTests(unittest.TestCase):
         self.assertEqual([g.name for g in spec.groups], ["Cast", "Deities"])
         self.assertEqual(spec.groups[1].color, "amber")
 
+    def test_per_group_group_by_roundtrip(self) -> None:
+        # ADR-0037 Amendment 1: each named group carries its OWN organize levels.
+        spec = ViewSpec(
+            kind="lore",
+            groups=[
+                {"name": "Cast", "expr": {"type": "lore:character"}, "group_by": [{"field": "rank"}]},
+                {"name": "Places", "expr": {"type": "lore:location"}},
+            ],
+        )
+        self.assertEqual([lvl.field for lvl in spec.groups[0].group_by], ["rank"])
+        self.assertIsNone(spec.groups[1].group_by)
+        # Survives the storage round-trip (model_dump exclude_none → model_validate).
+        back = ViewSpec.model_validate(spec.model_dump(exclude_none=True))
+        self.assertEqual(back.groups[0].group_by[0].field, "rank")
+        self.assertIsNone(back.groups[1].group_by)
+
     def test_group_requires_name(self) -> None:
         with self.assertRaises(ValueError):
             ViewSpec(kind="lore", groups=[{"name": "", "expr": {"type": "lore:character"}}])

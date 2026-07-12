@@ -60,7 +60,10 @@ export const NEST_CHILDREN_HANDLE = "children";
 // A named input handle on the View (output) node = one group. `name` is the
 // group label; handle order (the array order) = group order. `color` tints the
 // group. A view with 0–1 populated handles renders flat (ADR-0027 §D).
-export type ViewHandle = { id: string; name: string; color?: string | null };
+// ADR-0037 Amendment 1: a handle (= a named group) owns its Organize levels.
+// graphToSpec lowers `group_by` onto that handle's `ViewGroupSpec`; the single/
+// unnamed group keeps the output-node-level `group_by` below.
+export type ViewHandle = { id: string; name: string; color?: string | null; group_by?: ViewGroupByLevel[] };
 export const DEFAULT_HANDLE_ID = "in";
 
 // The Filter/field predicate's value-operand input handle (#196, ADR-0031 §E).
@@ -797,24 +800,29 @@ export function graphToSpec(
   const populated = segments.filter((s) => s.built.tag !== "empty");
 
   const params = collectParams(graph);
-  // ADR-0037 §2/§8: the result node's organize levels ride on the spec, beside
-  // the handle-derived expr/groups (orthogonal to the expr-XOR-groups rule).
-  const groupBy = byId.get(OUTPUT_NODE_ID)?.data.group_by?.filter((l) => l.field) ?? [];
-  const withParams = (s: ViewSpec): ViewSpec => ({
-    ...s,
-    ...(params.length > 0 ? { params } : {}),
-    ...(groupBy.length > 0 ? { group_by: groupBy } : {}),
-  });
+  const withParams = (s: ViewSpec): ViewSpec => ({ ...s, ...(params.length > 0 ? { params } : {}) });
 
   if (handles.length <= 1 || populated.length <= 1) {
+    // Single/unnamed group: its Organize rides on the spec as `group_by`
+    // (ADR-0037 §2, unchanged by Amendment 1 — this is the "one implicit group").
     const seg = populated[0];
-    return withParams({ kind: base.kind, expr: seg ? materializeOuter(seg.built, universeExpr) : null, sort: seg?.sort ?? base.sort ?? null });
+    const groupBy = byId.get(OUTPUT_NODE_ID)?.data.group_by?.filter((l) => l.field) ?? [];
+    return withParams({
+      kind: base.kind,
+      expr: seg ? materializeOuter(seg.built, universeExpr) : null,
+      sort: seg?.sort ?? base.sort ?? null,
+      ...(groupBy.length > 0 ? { group_by: groupBy } : {}),
+    });
   }
 
+  // Named groups: Amendment 1 — each group owns its Organize, lowered onto its
+  // `ViewGroupSpec.group_by`. A top-level (output-node) group_by does not apply.
   const groups: ViewGroupSpec[] = populated.map((s, i) => {
     const g: ViewGroupSpec = { name: s.handle.name?.trim() || `Group ${i + 1}`, expr: materializeOuter(s.built, universeExpr) };
     if (s.sort) g.sort = s.sort;
     if (s.handle.color) g.color = s.handle.color;
+    const gb = s.handle.group_by?.filter((l) => l.field) ?? [];
+    if (gb.length > 0) g.group_by = gb;
     return g;
   });
   return withParams({ kind: base.kind, groups, sort: base.sort ?? null });
@@ -868,20 +876,22 @@ export function specToGraph(spec: ViewSpec | null | undefined, schema?: Metadata
 
   const groups = spec?.groups ?? null;
   if (groups && groups.length > 0) {
+    // Amendment 1: each group's Organize (`group_by`) lifts back onto its handle.
     const handles: ViewHandle[] = groups.map((g, i) => ({
       id: `h${i}`,
       name: g.name,
       ...(g.color ? { color: g.color } : {}),
+      ...(g.group_by && g.group_by.length > 0 ? { group_by: g.group_by } : {}),
     }));
     outputNode.data = { handles };
     groups.forEach((g, i) => attachSegment(g.expr ?? null, handles[i].id, g.sort ?? null));
   } else {
     attachSegment(spec?.expr ?? null, DEFAULT_HANDLE_ID, null);
+    // The single/unnamed group's Organize is output-node config (ADR-0037 §2).
+    // The primary reopen path restores it via the persisted layout cfg; this
+    // covers the spec-only fallback reopen.
+    if (spec?.group_by && spec.group_by.length > 0) outputNode.data.group_by = spec.group_by;
   }
-  // ADR-0037 §2/§8: organize levels are output-node config, restored regardless
-  // of the expr/groups shape (the primary reopen path restores them for free via
-  // the persisted layout cfg; this covers the spec-only fallback reopen).
-  if (spec?.group_by && spec.group_by.length > 0) outputNode.data.group_by = spec.group_by;
 
   layoutColumns(nodes, outputNode, rowCursor);
   return { nodes, edges };

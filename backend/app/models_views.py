@@ -228,17 +228,33 @@ class ViewSort(BaseModel):
         return self
 
 
+class ViewGroupByLevel(BaseModel):
+    """One ADR-0037 §2 organize level — ν by attribute, on the result. `field`
+    is any groupable field of the input set's kind (enum/select, the intrinsic
+    entry_type, a reference field → real-node buckets; a multi-valued field
+    fans a row out under each value; a missing value leaves the row bare at the
+    level). Bucket order is first-seen in row order unless `order: "label"`
+    opts into alphabetical-by-label. The backend stores levels verbatim and
+    never evaluates them (ADR-0025)."""
+
+    field: str = Field(min_length=1)
+    order: Literal["label"] | None = None
+
+
 class ViewGroupSpec(BaseModel):
     """One named group = one named input handle on the View node (ADR-0027
     §D/§E, #91). `name` is the group label and the row `path` segment; `expr` is
     the group's membership (None = the whole universe); `sort` sorts this
-    segment; `color` is an optional group tint. Group order = handle order = the
-    `groups` list order; same-name handles union + dedupe in the evaluator."""
+    segment; `color` is an optional group tint. `group_by` is this group's own
+    organize levels (ADR-0037 Amendment 1 — each group organizes independently).
+    Group order = handle order = the `groups` list order; same-name handles
+    union + dedupe in the evaluator."""
 
     name: str = Field(min_length=1)
     expr: ViewExpr | None = None
     sort: ViewSort | None = None
     color: str | None = None
+    group_by: list[ViewGroupByLevel] | None = None
 
 
 class ViewParam(BaseModel):
@@ -256,19 +272,6 @@ class ViewParam(BaseModel):
     # (e.g. a list of ids for entity_ref). Loose for the same reason as
     # `FieldPredicate.value`.
     default: Any = None
-
-
-class ViewGroupByLevel(BaseModel):
-    """One ADR-0037 §2 organize level — ν by attribute, on the result. `field`
-    is any groupable field of the input set's kind (enum/select, the intrinsic
-    entry_type, a reference field → real-node buckets; a multi-valued field
-    fans a row out under each value; a missing value leaves the row bare at the
-    level). Bucket order is first-seen in row order unless `order: "label"`
-    opts into alphabetical-by-label. The backend stores levels verbatim and
-    never evaluates them (ADR-0025)."""
-
-    field: str = Field(min_length=1)
-    order: Literal["label"] | None = None
 
 
 class ViewSpec(BaseModel):

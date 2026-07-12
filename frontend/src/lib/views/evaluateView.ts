@@ -336,16 +336,21 @@ export function evaluateView<T extends EvalNode>(
   // an intersect/difference whose structure-carrying operand is a row-producer
   // filters those rows leaf-wise while carrying paths (ADR-0037 §5). A top-level
   // bare grouped view_ref (no handles) inherits the referenced view's groups.
-  const pipelineRows = groups
-    ? evalGroups(state, groups, spec.sort)
-    : evalSource(state, spec.expr ?? null, spec.sort);
-
-  // ADR-0037 §2: `group_by` levels append one path segment above the leaf,
-  // beneath every pipeline-produced segment, in declared order — ν by attribute
-  // on the already-denormalized rows. Then the existing `normalize` runs
-  // unchanged (handles outermost, pipeline/nest segments, then levels innermost).
-  const rows =
-    spec.group_by && spec.group_by.length > 0 ? applyGroupBy(state, pipelineRows, spec.group_by) : pipelineRows;
+  //
+  // ADR-0037 §2 + Amendment 1: `group_by` levels append one path segment above
+  // the leaf, beneath every pipeline-produced segment, in declared order — ν by
+  // attribute on the denormalized rows. Organize is owned by a GROUP: with named
+  // handles, each group applies its OWN levels inside its rows (`evalGroups`);
+  // without, the single/unnamed group applies `spec.group_by`. Then `normalize`
+  // runs unchanged (handles outermost, pipeline/nest segments, then levels
+  // innermost).
+  let rows: ViewRow<T>[];
+  if (groups) {
+    rows = evalGroups(state, groups, spec.sort);
+  } else {
+    const src = evalSource(state, spec.expr ?? null, spec.sort);
+    rows = spec.group_by && spec.group_by.length > 0 ? applyGroupBy(state, src, spec.group_by) : src;
+  }
 
   return normalize(state, rows);
 }
@@ -501,7 +506,12 @@ function evalGroups<T extends EvalNode>(
   const seen = new Set<string>();
   for (const g of groups) {
     const seg: PathSegment = { key: g.name, label: g.name, nodeId: null, color: g.color ?? null, origin: "handle" };
-    for (const r of evalSource(state, g.expr ?? null, g.sort ?? fallbackSort)) {
+    // ADR-0037 Amendment 1: each group organizes independently — apply THIS
+    // group's own levels to its source rows (innermost) before the handle segment
+    // is prepended (outermost). A group with no levels stays flat.
+    const src = evalSource(state, g.expr ?? null, g.sort ?? fallbackSort);
+    const groupRows = g.group_by && g.group_by.length > 0 ? applyGroupBy(state, src, g.group_by) : src;
+    for (const r of groupRows) {
       const path = [seg, ...r.path];
       const key = rowKey(r.node, path);
       if (seen.has(key)) continue; // dedupe identical (node, path)

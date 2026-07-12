@@ -188,7 +188,10 @@ describe("ADR-0037 §2: group_by levels", () => {
     ]);
   });
 
-  it("handles compose with levels: handles outermost, levels innermost", () => {
+  it("ANCHOR (Amd 1): with named groups, a top-level group_by is IGNORED — Organize is owned per-group", () => {
+    // Pre-Amendment-1 this applied `rank` to BOTH handles. Amendment 1 makes
+    // Organize a property of each group; a result-level group_by beside named
+    // groups no longer exists (the designer emits it per-group), so it is ignored.
     const r = lore({
       groups: [
         { name: "Cast", expr: { type: "lore:character" } },
@@ -197,12 +200,62 @@ describe("ADR-0037 §2: group_by levels", () => {
       group_by: [{ field: "rank" }],
     });
     expect(shape(r.groups)).toEqual([
+      ["Cast", ["Amelie", "Bruno", "Celine"]], // flat — top-level rank ignored
+      ["Places", ["Paris", "Marseille"]],
+    ]);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Amendment 1 — Organize is owned per-group
+// ---------------------------------------------------------------------------
+describe("ADR-0037 Amendment 1: per-group Organize", () => {
+  it("ANCHOR: two groups organize INDEPENDENTLY — A by rank, B by location, same nodes", () => {
+    const r = lore({
+      groups: [
+        { name: "By rank", expr: { type: "lore:character" }, group_by: [{ field: "rank" }] },
+        { name: "By place", expr: { type: "lore:character" }, group_by: [{ field: "located_in" }] },
+      ],
+    });
+    expect(shape(r.groups)).toEqual([
+      ["By rank", [
+        ["Knight", ["Amelie", "Celine"]],
+        ["Soldier", ["Bruno"]],
+      ]],
+      ["By place", [
+        ["Paris", ["Amelie"]],
+        ["Marseille", ["Bruno"]],
+        "Celine", // no located_in → bare within its group, §2 unchanged
+      ]],
+    ]);
+    // Membership stays deduped across groups (ADR-0027 §E): each character once.
+    expect(nodeIds(r)).toEqual(["amelie", "bruno", "celine"]);
+  });
+
+  it("ANCHOR: a group with its own levels nests; a sibling with none stays flat — handles outermost, per-group levels innermost", () => {
+    const r = lore({
+      groups: [
+        { name: "Cast", expr: { type: "lore:character" }, group_by: [{ field: "rank" }] },
+        { name: "Places", expr: { type: "lore:location" } }, // no levels → flat
+      ],
+    });
+    expect(shape(r.groups)).toEqual([
       ["Cast", [
         ["Knight", ["Amelie", "Celine"]],
         ["Soldier", ["Bruno"]],
       ]],
-      // Locations carry no rank → bare at the level, inside their handle.
       ["Places", ["Paris", "Marseille"]],
+    ]);
+  });
+
+  it("ANCHOR: the single/unnamed group (expr + spec.group_by) is unchanged — Amendment 1 is additive", () => {
+    // Byte-identical to the §2 entry_type anchor: the unnamed group keeps
+    // `ViewSpec.group_by`; only named groups gained their own.
+    const r = lore({ expr: ALL, group_by: [{ field: "entry_type" }] });
+    expect(shape(r.groups)).toEqual([
+      ["Location", ["Paris", "Marseille"]],
+      ["Character", ["Amelie", "Bruno", "Celine"]],
+      ["Item", ["Dagger", "Elixir"]],
     ]);
   });
 });

@@ -299,6 +299,20 @@ describe("ADR-0037 §5: row-preserving σ/∩/−", () => {
     expect(nodeIds(r)).toEqual(["ch2", "s1"]);
   });
 
+  it("ANCHOR: a container that is both a σ-passing member AND the parent of a surviving child appears exactly once (#101 merge-dedup)", () => {
+    // ch1 is hand-picked (a member) AND parents the hand-picked s1. It must render
+    // once — as the parent header carrying s1 — never twice (a leaf member row PLUS
+    // a header). Migrated from the eradicated presentation:"tree" suite (#101);
+    // §4/§5 otherwise only cover childless-container members and revived ancestors.
+    const r = ms({ expr: { intersect: [CONTAINMENT, { hand_picked: ["ch1", "s1"] }] } });
+    expect(shape(r.groups)).toEqual([["Act 1", [["Ch 1", ["Scene 1"]]]]]);
+    // Act 1 is revived context (not picked); ch1 + s1 are the σ-passing members.
+    expect(nodeIds(r)).toEqual(["ch1", "s1"]);
+    // ch1 occurs exactly once across the tree — no double appearance.
+    const act1 = r.groups![0];
+    expect(act1.children.filter((g) => g.nodeId === "ch1")).toHaveLength(1);
+  });
+
   it("ANCHOR: filter wired INTO nest's children participates in the join — chain-sensitive by design", () => {
     // Children restricted to scenes only: chapters are not in the children set,
     // so scenes cannot attach through them — they become orphans and (default

@@ -78,7 +78,10 @@ Per-field segment semantics (`segmentForField`, the only genuinely new evaluator
 
 A reference-field level is single-level relational grouping *via dropdown* — Nest is only ever
 needed for recursion. Bucket **order** = first-seen in row order (the `buildLevel` rule, `:509`), so
-the view's sort also orders buckets; `order: "label"` opts into alphabetical. Membership invariant
+the view's sort also orders buckets; `order: "label"` opts into alphabetical. **Under `order: "label"`
+a bare (missing-value) row SINKS below the sorted buckets** — an out-of-sequence bare row amid
+alphabetized buckets reads as broken sorting (2026-07-12, Anton). In first-seen mode bare rows stay
+interleaved by row order (as the table row above notes), which is expected there. Membership invariant
 unchanged (ADR-0027 §E): `groups` may repeat a node, `nodes` dedupes.
 
 ### 3. `ViewPresentation` is eradicated

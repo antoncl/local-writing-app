@@ -606,6 +606,11 @@ function buildLevel<T extends EvalNode>(state: RunState<T>, rows: ViewRow<T>[]):
   const order: string[] = [];
   type Bucket = { seg: PathSegment; node: T | null; rows: ViewRow<T>[] };
   const buckets = new Map<string, Bucket>();
+  // Keys of bare LEAF members at this level (a node with no value for a group_by
+  // level → no segment, so it lands here as itself). Tracked so `order: "label"`
+  // can sink them below the sorted buckets (ADR-0037 §2 — an out-of-sequence bare
+  // row amid alphabetized buckets reads as broken sorting).
+  const memberKeys = new Set<string>();
   const ensure = (key: string, seg: PathSegment): Bucket => {
     let b = buckets.get(key);
     if (!b) {
@@ -620,7 +625,9 @@ function buildLevel<T extends EvalNode>(state: RunState<T>, rows: ViewRow<T>[]):
     if (r.path.length === 0) {
       // The node itself is a member at this level → its own group. Carry the
       // concrete node (a bare ancestor segment may have resolved a null node).
-      ensure(`node:${r.node.id}`, { key: r.node.id, label: r.node.title, nodeId: r.node.id }).node = r.node;
+      const mkey = `node:${r.node.id}`;
+      ensure(mkey, { key: r.node.id, label: r.node.title, nodeId: r.node.id }).node = r.node;
+      memberKeys.add(mkey);
       continue;
     }
     const seg = r.path[0];
@@ -643,19 +650,28 @@ function buildLevel<T extends EvalNode>(state: RunState<T>, rows: ViewRow<T>[]):
 
   // ADR-0037 §2 `order: "label"`: a §2 field level opts ITS buckets into
   // alphabetical-by-label ordering instead of the default first-seen (row order).
-  // Reorder ONLY the label-ordered field buckets, among the slots they occupy —
-  // pipeline (handle/nest `placed`) and bare siblings that happen to share this
-  // depth (e.g. a `group_by` beside orphan-kept nest headers) keep their
-  // first-seen positions. No label-ordered bucket ⇒ the array is untouched.
-  const labelSlots: number[] = [];
-  order.forEach((key, i) => {
-    if (buckets.get(key)!.seg.order === "label") labelSlots.push(i);
+  // Reorder the slots occupied by label-ordered field buckets AND bare leaf
+  // members (empty-value rows): buckets sort A–Z, then bare members SINK below
+  // them (an out-of-sequence bare row amid alphabetized buckets reads as broken
+  // sorting). Structural siblings — pipeline (handle/nest `placed`) and any
+  // member that is itself a parent — keep their first-seen slots. No label-ordered
+  // bucket ⇒ the array is untouched (first-seen mode intersperses by design).
+  const hasLabelOrder = order.some((key) => buckets.get(key)!.seg.order === "label");
+  if (!hasLabelOrder) return built;
+  const movable: number[] = [];
+  built.forEach((g, i) => {
+    if (buckets.get(g.key)!.seg.order === "label" || (memberKeys.has(g.key) && g.children.length === 0)) movable.push(i);
   });
-  if (labelSlots.length === 0) return built;
-  const sorted = labelSlots
+  const sorted = movable
     .map((i) => built[i])
-    .sort((a, b) => (a.label ?? "").localeCompare(b.label ?? "", undefined, { sensitivity: "base" }));
-  labelSlots.forEach((slot, k) => {
+    .sort((a, b) => {
+      const am = memberKeys.has(a.key);
+      const bm = memberKeys.has(b.key);
+      if (am !== bm) return am ? 1 : -1; // bare members sink below label buckets
+      if (am) return 0; // stable sort keeps bare members in first-seen order
+      return (a.label ?? "").localeCompare(b.label ?? "", undefined, { sensitivity: "base" });
+    });
+  movable.forEach((slot, k) => {
     built[slot] = sorted[k];
   });
   return built;

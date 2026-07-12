@@ -140,6 +140,18 @@ describe("ADR-0037 §2: group_by levels", () => {
     expect((r.groups ?? []).map((g) => g.label)).toEqual(["Character", "Item", "Location"]);
   });
 
+  it('order: "label" sinks a bare (empty-value) row BELOW the sorted buckets (not interspersed)', () => {
+    // amelie→Paris, bruno→Marseille, celine has no located_in. Under A–Z the
+    // buckets sort (Marseille, Paris) and the bare row sinks to the bottom — an
+    // out-of-sequence bare row amid alphabetized buckets reads as broken sorting.
+    const r = lore({ expr: { type: "lore:character" }, group_by: [{ field: "located_in", order: "label" }] });
+    expect(shape(r.groups)).toEqual([
+      ["Marseille", ["Bruno"]],
+      ["Paris", ["Amelie"]],
+      "Celine",
+    ]);
+  });
+
   it("first-seen bucket order follows the view's sort (sort reorders rows → reorders buckets)", () => {
     const r = lore({ expr: ALL, sort: { by: "title", dir: "asc" }, group_by: [{ field: "entry_type" }] });
     // Titles asc: Amelie (Character) first, Dagger (Item) before Marseille (Location).

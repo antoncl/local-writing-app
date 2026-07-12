@@ -339,11 +339,15 @@ export type ViewNestMatch = {
 // from lore links. `parents`/`children` are the two input sets (absent = the
 // whole universe); `match` is the join rule; `recursive` marks the canvas
 // self-loop (frontier BFS over an unknown-depth homogeneous hierarchy).
+// `orphans` (ADR-0037 sub-issue): what happens to a candidate child that
+// matched no parent — `"drop"` (today's behavior, the default) or `"keep"`
+// (stays at the root as a bare row — the who-lives-where pattern).
 export type ViewNestOp = {
   parents?: ViewExpr | null;
   children?: ViewExpr | null;
   match: ViewNestMatch;
   recursive?: boolean;
+  orphans?: "keep" | "drop";
 };
 
 // One node in a view's set-algebra tree: exactly one primary slot is set
@@ -410,7 +414,25 @@ export type ViewSpec = {
   // Layout of the result list (doc §3.1). `"tree"` nests members by structural
   // ancestry (the evaluator reads each node's `ancestry`, #101); absent/other
   // values keep the flat-or-handle-grouped behavior. Orthogonal to membership.
+  // DEPRECATED by ADR-0037 (#213) — grouping belongs to the view (`group_by`);
+  // deleted in the ADR-0037 §3 sweep.
   presentation?: ViewPresentation | null;
+  // ADR-0037 §2: ordered result-level organize levels — ν by attribute. Each
+  // level appends one path segment above the leaf, beneath every pipeline-
+  // produced segment, in declared order. Orthogonal to the `expr` XOR `groups`
+  // rule (handles compose: handles outermost, levels innermost).
+  group_by?: ViewGroupByLevel[] | null;
+};
+
+// One ADR-0037 §2 organize level. `field` is any groupable field of the input
+// set's kind: enum/select and intrinsic `entry_type` yield synthetic buckets;
+// a reference field yields real-node (openable) buckets; a multi-valued field
+// fans a row out under each value; a missing value leaves the row bare at that
+// level. Bucket order = first-seen in row order; `order: "label"` opts into
+// alphabetical-by-label.
+export type ViewGroupByLevel = {
+  field: string;
+  order?: "label";
 };
 
 // How a view's result list is laid out (doc §3.1). Orthogonal to membership.

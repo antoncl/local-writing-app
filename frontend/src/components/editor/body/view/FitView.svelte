@@ -12,8 +12,9 @@
 <script lang="ts">
   import { useSvelteFlow } from "@xyflow/svelte";
 
-  // `trigger` is a value the parent changes (opened view id + node count) to
-  // request a reframe.
+  // `trigger` is a value the parent changes (the opened view id) to request a
+  // reframe — on view LOAD only, not on every graph edit (that shifted the origin
+  // under the author on each drop/delete).
   let { trigger }: { trigger: unknown } = $props();
   const { fitView } = useSvelteFlow();
 

@@ -292,6 +292,21 @@ export function isLeafKind(kind: GraphNodeKind): kind is LeafKind {
   return (LEAF_KINDS as string[]).includes(kind);
 }
 
+// The predicate leaves that canonicalize to `All → Filter` on open (ADR-0038 §B):
+// a Filter narrows on exactly these. Exported as the single source of truth so the
+// spec-walk canonicalizer (`specToGraph`) and the persisted-layout canonicalizer
+// (`canonicalizeLeafNodes` in ViewBodyView) can't drift on which kinds retire.
+// `hand_picked`/`view_ref` are sources, not predicates, so they stay off this list.
+export const PREDICATE_LEAF_KINDS: ReadonlySet<GraphNodeKind> = new Set<GraphNodeKind>([
+  "type",
+  "descendants_of",
+  "tagged",
+  "field",
+]);
+export function isPredicateLeafKind(kind: GraphNodeKind): kind is PredicateKind {
+  return PREDICATE_LEAF_KINDS.has(kind);
+}
+
 // Injectors = sources (no input): the leaves + the universal `All`.
 export function isInjectorKind(kind: GraphNodeKind): boolean {
   return kind === "all" || isLeafKind(kind);
@@ -981,41 +996,54 @@ export function specToGraph(spec: ViewSpec | null | undefined, schema?: Metadata
       // slot — so any other `var` has no designer node and is skipped.
       return e.var === SELF_VAR ? addNode("self", depth, {}) : null;
     }
-    // Leaves. `!= null` (not `!== undefined`): the backend serializes ViewExpr
-    // densely, so every unused slot arrives as `null`, not absent.
-    if (e.type != null) return addNode("type", depth, { type: e.type });
+    // Predicate leaves canonicalize to `All → Filter` on open (ADR-0038 §B). The
+    // palette retired the standalone `type / descendants_of / tagged / field`
+    // leaves, so a saved or duplicated view authored with one must reopen as the
+    // composable idiom the palette can rebuild. Lossless: an `All` input is the
+    // Built `UNIVERSE` and `intersect(universe, p) === p`, so graphToSpec
+    // re-serializes byte-identically. `!= null` (not `!== undefined`): the backend
+    // serializes ViewExpr densely, so every unused slot arrives as `null`.
+    if (e.type != null) return predicateLeaf(depth, { filter_kind: "type", type: e.type });
     if (e.descendants_of != null) {
-      // A kind-root `descendants_of` is the universe → the `All` injector (#211).
+      // A kind-root `descendants_of` is the universe → the `All` source itself (#211).
       if (universeRoot != null && e.descendants_of === universeRoot) return addNode("all", depth, {});
-      return addNode("descendants_of", depth, { descendants_of: e.descendants_of });
+      return predicateLeaf(depth, { filter_kind: "descendants_of", descendants_of: e.descendants_of });
     }
-    if (e.tagged != null) return addNode("tagged", depth, { tagged: e.tagged });
+    if (e.tagged != null) return predicateLeaf(depth, { filter_kind: "tagged", tagged: e.tagged });
     if (e.field != null) {
       const v = e.field.value;
       // A wired value source (#196) reopens as a source node + an edge into the
-      // field's `value` handle; the field node itself drops its inline value
-      // (the wire re-supplies it on lowering).
+      // Filter's `value` handle; the Filter drops its inline value (the wire
+      // re-supplies it on lowering).
       if (isFieldOfOperand(v)) {
-        const fieldId = addNode("field", depth, { field: { ...e.field, value: null } });
         const foId = walk({ field_of: v.field_of } as ViewExpr, depth + 1);
-        if (foId) link(foId, fieldId, FILTER_VALUE_HANDLE);
-        return fieldId;
+        return predicateLeaf(depth, { filter_kind: "field", field: { ...e.field, value: null } }, foId);
       }
       if (isVarOperand(v) && v.var === SELF_VAR) {
-        const fieldId = addNode("field", depth, { field: { ...e.field, value: null } });
-        link(addNode("self", depth + 1, {}), fieldId, FILTER_VALUE_HANDLE);
-        return fieldId;
+        return predicateLeaf(depth, { filter_kind: "field", field: { ...e.field, value: null } }, addNode("self", depth + 1, {}));
       }
-      const data: ViewNodeData = { field: e.field };
+      const data: ViewNodeData = { filter_kind: "field", field: e.field };
       if (isVarOperand(v)) {
         const p = paramByName.get(v.var);
         data.field_param = { name: v.var, label: p?.label, default: p?.default };
       }
-      return addNode("field", depth, data);
+      return predicateLeaf(depth, data);
     }
+    // Sources (not predicates) stay as themselves — the palette still offers them.
     if (e.hand_picked != null) return addNode("hand_picked", depth, { hand_picked: e.hand_picked });
     if (e.view_ref != null) return addNode("view_ref", depth, { view_ref: e.view_ref });
     return null;
+  }
+
+  // Emit the canonical `All → Filter` pair for a bare predicate leaf (ADR-0038
+  // §B): a Filter carrying the predicate `data` (filter_kind + value slot,
+  // keep mode) fed by an `All` source. An optional wired value source links into
+  // the Filter's `value` handle. Returns the Filter id (the segment root).
+  function predicateLeaf(depth: number, data: ViewNodeData, valueSource?: string | null): string {
+    const filterId = addNode("filter", depth, { ...data, filter_mode: "keep" });
+    link(addNode("all", depth + 1, {}), filterId);
+    if (valueSource) link(valueSource, filterId, FILTER_VALUE_HANDLE);
+    return filterId;
   }
 
   function link(source: string, target: string, targetHandle = DEFAULT_HANDLE_ID): void {

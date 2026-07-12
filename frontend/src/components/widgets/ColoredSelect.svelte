@@ -72,6 +72,16 @@
     close();
   }
 
+  // Portal the popover to <body> so its `position: fixed` resolves against the
+  // viewport, not a transformed ancestor (the view designer's Svelte Flow pane
+  // carries a CSS transform that would otherwise trap it — #225). Mirrors
+  // NodePicker; the anchor rect already gives viewport coords, and onDocClick
+  // already queries the portaled node.
+  function portalToBody(node: HTMLElement) {
+    document.body.appendChild(node);
+    return { destroy: () => node.remove() };
+  }
+
   function dotStyle(opt: SelectOption): string {
     const s = opt.color ? getSwatch(opt.color) : null;
     return s ? `background: ${s.hex};` : "";
@@ -117,6 +127,7 @@
       class="colored-select-popover"
       role="listbox"
       style={`left: ${menuPos.x}px; top: ${menuPos.y}px; min-width: ${menuPos.width}px;`}
+      use:portalToBody
     >
       {#if allowBlank}
         <button

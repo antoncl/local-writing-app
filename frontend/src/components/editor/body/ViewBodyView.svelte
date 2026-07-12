@@ -88,6 +88,12 @@
   // preference values ("system"/"light"/"dark") map straight to ColorMode.
   let colorMode = $derived($themePreference as ColorMode);
 
+  // Preview aside fold (#220, ADR-0038 §A): default open; collapses to a thin
+  // strip to hand the canvas the full width. Ephemeral this pass — persisting it
+  // on the view node's `/ui` (ADR-0036) is a small follow-up (the designer has
+  // no `/ui` write path today; that's the view panes' CollapseState).
+  let previewCollapsed = $state(false);
+
   // The view node's editable state. `title` is fed from the pane header.
   let loadedViewId = $state<string | null>(null);
   let revision = $state("");
@@ -718,11 +724,22 @@
       {/if}
     </div>
 
-    <aside class="preview">
+    <aside class="preview" class:collapsed={previewCollapsed}>
       <header class="preview-head">
-        <span>Preview</span>
-        <span class="count">{preview.nodes.length} / {universe.length}</span>
+        <button
+          type="button"
+          class="preview-toggle"
+          title={previewCollapsed ? "Expand preview" : "Collapse preview"}
+          aria-label={previewCollapsed ? "Expand preview" : "Collapse preview"}
+          aria-expanded={!previewCollapsed}
+          onclick={() => (previewCollapsed = !previewCollapsed)}
+        >{previewCollapsed ? "▸" : "▾"}</button>
+        {#if !previewCollapsed}
+          <span class="preview-title">Preview</span>
+          <span class="count">{preview.nodes.length} / {universe.length}</span>
+        {/if}
       </header>
+      {#if !previewCollapsed}
       {#if warnings.length > 0}
         <ul class="preview-warnings" role="alert">
           {#each warnings as w (w)}
@@ -753,6 +770,7 @@
           </ViewNodeList>
         {/if}
       </div>
+      {/if}
     </aside>
   </div>
 </section>
@@ -885,16 +903,40 @@
     min-height: 0;
     background: var(--inset);
   }
+  /* Collapsed: the aside folds to a thin strip holding only the toggle, giving
+     the canvas the full width (#220). */
+  .preview.collapsed {
+    width: auto;
+  }
+  .preview.collapsed .preview-head {
+    border-bottom: none;
+  }
   .preview-head {
     display: flex;
     justify-content: space-between;
-    align-items: baseline;
+    align-items: center;
+    gap: 6px;
     padding: 8px 12px;
     font-size: var(--fs-xs);
     text-transform: uppercase;
     letter-spacing: 0.04em;
     color: var(--text-3);
     border-bottom: 1px solid var(--border);
+  }
+  .preview-title {
+    flex: 1;
+  }
+  .preview-toggle {
+    border: none;
+    background: transparent;
+    color: var(--text-3);
+    font-size: var(--fs-sm);
+    line-height: 1;
+    cursor: pointer;
+    padding: 0 2px;
+  }
+  .preview-toggle:hover {
+    color: var(--text);
   }
   .count {
     font-variant-numeric: tabular-nums;

@@ -90,6 +90,17 @@
     if (pop && target && pop.contains(target)) return;
     close();
   }
+
+  // Portal the popover to <body> so its `position: fixed` resolves against the
+  // viewport, not a transformed ancestor. Inside the view designer the picker
+  // lives in a Svelte Flow node whose pane carries a CSS transform, which makes
+  // it the containing block for fixed descendants — trapping the popover in
+  // canvas-space (#225). Mirrors NodePicker; positionPopover() already computes
+  // viewport coordinates, and onDocClick already queries the portaled node.
+  function portalToBody(node: HTMLElement) {
+    document.body.appendChild(node);
+    return { destroy: () => node.remove() };
+  }
 </script>
 
 <svelte:window
@@ -124,6 +135,7 @@
       role="dialog"
       aria-label="Choose a color"
       style={`left: ${popoverLeft}px; top: ${popoverTop}px;`}
+      use:portalToBody
     >
       {#if allowNone}
         <button

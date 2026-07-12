@@ -7,13 +7,21 @@
 import type { EvalNode } from "@/lib/views/evaluateView";
 import type { MetadataSchema } from "@/lib/types";
 
+// The three canonical intrinsic keys — top-level properties on EVERY node/
+// summary, forced intrinsic by the backend (`default_schema.INTRINSIC_FIELD_KEYS`)
+// in every resolved schema, and NOT user-extensible. Encoding this invariant
+// (not the mutable set) lets id/title/entry_type resolve correctly even before
+// the schema store loads — #227: a group_by/sort on entry_type no longer reads
+// undefined `metadata.entry_type` during the first-render race (schema and
+// entries load in parallel), which flashed the Lore pane flat then regrouped.
+const CANONICAL_INTRINSIC = new Set(["id", "title", "entry_type"]);
+
 // A field routes to the node top-level property (id/title/entry_type) instead
-// of the `metadata` dict iff the resolver stamped it `intrinsic` (ADR-0029 §D).
-// Read that off the resolved schema payload — the backend
-// `default_schema.INTRINSIC_FIELD_KEYS` is the single source of truth; the
-// frontend no longer mirrors the key set. Unknown keys fall back to metadata.
+// of the `metadata` dict iff it is a canonical intrinsic OR the resolver stamped
+// it `intrinsic` (ADR-0029 §D). The EXTENSIBLE set still comes only from the
+// resolved schema — the frontend does not mirror it. Unknown keys → metadata.
 export function isIntrinsicField(schema: MetadataSchema | null | undefined, key: string): boolean {
-  return schema?.fields?.[key]?.category === "intrinsic";
+  return CANONICAL_INTRINSIC.has(key) || schema?.fields?.[key]?.category === "intrinsic";
 }
 
 // A node's value for a predicate/sort key. Intrinsic fields (id/title/

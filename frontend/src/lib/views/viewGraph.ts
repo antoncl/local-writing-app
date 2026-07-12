@@ -292,6 +292,21 @@ export function isLeafKind(kind: GraphNodeKind): kind is LeafKind {
   return (LEAF_KINDS as string[]).includes(kind);
 }
 
+// The predicate leaves that canonicalize to `All → Filter` on open (ADR-0038 §B):
+// a Filter narrows on exactly these. Exported as the single source of truth so the
+// spec-walk canonicalizer (`specToGraph`) and the persisted-layout canonicalizer
+// (`canonicalizeLeafNodes` in ViewBodyView) can't drift on which kinds retire.
+// `hand_picked`/`view_ref` are sources, not predicates, so they stay off this list.
+export const PREDICATE_LEAF_KINDS: ReadonlySet<GraphNodeKind> = new Set<GraphNodeKind>([
+  "type",
+  "descendants_of",
+  "tagged",
+  "field",
+]);
+export function isPredicateLeafKind(kind: GraphNodeKind): kind is PredicateKind {
+  return PREDICATE_LEAF_KINDS.has(kind);
+}
+
 // Injectors = sources (no input): the leaves + the universal `All`.
 export function isInjectorKind(kind: GraphNodeKind): boolean {
   return kind === "all" || isLeafKind(kind);

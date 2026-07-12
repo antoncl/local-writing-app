@@ -39,6 +39,7 @@
     outputPayload,
     valueSlotAccepts,
     inferInputKind,
+    PREDICATE_LEAF_KINDS,
     FILTER_VALUE_HANDLE,
     OUTPUT_NODE_ID,
     type GraphNodeKind,
@@ -231,8 +232,8 @@
   // handle); a fresh `All` source is added to its left. A kind-root
   // `descendants_of` collapses to a bare `All` (it IS the universe, no predicate).
   // Sources (hand_picked / view_ref / self) and already-canonical graphs are
-  // untouched; the repair persists on the next debounced save.
-  const PREDICATE_LEAF_KINDS = new Set<GraphNodeKind>(["type", "descendants_of", "tagged", "field"]);
+  // untouched; the repair persists on the next debounced save. The predicate-leaf
+  // kind list is shared with specToGraph via PREDICATE_LEAF_KINDS (single source).
   function canonicalizeLeafNodes(
     nodes: Node<FlowData>[],
     edges: Edge[],
@@ -536,9 +537,11 @@
     flowNodes = [...flowNodes, toFlowNode(id, k, defaultCfg(k), position ?? centrePos())];
   }
   // ---- insertion placement (ADR-0038 §E) ----
-  // `screenToFlowPosition` without the provider hook: invert the live viewport
-  // transform (read off the DOM) against the canvas rect. Drop lands under the
-  // pointer; click lands at the viewport centre (killing the old top-left staircase).
+  // The equivalent of SvelteFlow's `screenToFlowPosition`, hand-rolled (not the
+  // real call — the drop target is the wrapper div, outside the flow provider
+  // context `useSvelteFlow()` needs): invert the live viewport transform (read off
+  // the DOM) against the canvas rect. Drop lands under the pointer; click lands at
+  // the viewport centre (killing the old top-left staircase).
   const DND_MIME = "application/x-view-node-kind";
   function readViewport(): { x: number; y: number; zoom: number } | null {
     const t = canvasEl?.querySelector<HTMLElement>(".svelte-flow__viewport")?.style.transform;
@@ -768,8 +771,8 @@
     </span>
     <!--
       Sources vs operations (ADR-0038 §B). Each item both clicks-to-insert (lands
-      at the viewport centre) and drags-to-place (`screenToFlowPosition` at the
-      drop point, §E). Caps-label groups; per-kind glyphs are the §G lexicon pass.
+      at the viewport centre) and drags-to-place (at the drop point, §E). Caps-label
+      groups; per-kind glyphs are the §G lexicon pass.
     -->
     <div class="palette">
       {#each PALETTE as g, gi (g.label)}

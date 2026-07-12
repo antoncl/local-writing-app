@@ -226,12 +226,22 @@ describe("canonicalize bare predicate leaves → All → Filter (ADR-0038 §B)",
     });
   }
 
-  // The flat defaults also re-serialize byte-identically (the canonicalization is
-  // lossless). The scene/research defaults nest the whole-kind roster as `children`,
-  // which lifts to `All` and drops on `materialize` — a pre-existing nest/All-child
-  // serialization quirk (materialize vs materializeOuter), unrelated to §B.
+  // The flat defaults re-serialize byte-identically (the canonicalization is lossless).
   for (const kind of ["lore", "assistant", "prompt"]) {
     it(`the ${kind} default view re-serializes to the same expr (lossless)`, () => {
+      const spec = defaultView(kind);
+      expect(graphToSpec(specToGraph(spec), { kind, sort: spec.sort }).expr).toEqual(spec.expr);
+    });
+  }
+
+  // The scene/research defaults nest the whole-kind roster as `children`, which
+  // lifts to `All` and drops on `materialize` (nestBuilt uses `materialize`, not
+  // `materializeOuter`) — a pre-existing nest/All-child serialization quirk,
+  // unrelated to §B (filed as a follow-up). A tracked xfail rather than a silent
+  // omission: when the quirk is fixed these round-trips become lossless and
+  // `it.fails` flips red, prompting their promotion to the loop above.
+  for (const kind of ["scene", "research"]) {
+    it.fails(`the ${kind} default view does NOT yet round-trip losslessly (nest All-child quirk)`, () => {
       const spec = defaultView(kind);
       expect(graphToSpec(specToGraph(spec), { kind, sort: spec.sort }).expr).toEqual(spec.expr);
     });

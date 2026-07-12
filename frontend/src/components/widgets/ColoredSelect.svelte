@@ -8,6 +8,7 @@
   // widget is safe to use even when only SOME options are colored.
 
   import { getSwatch } from "@/lib/utils/colors";
+  import { portalToBody } from "@/lib/actions/portal";
   import type { SelectOption } from "@/lib/types";
 
   export let value: string = "";
@@ -117,6 +118,7 @@
       class="colored-select-popover"
       role="listbox"
       style={`left: ${menuPos.x}px; top: ${menuPos.y}px; min-width: ${menuPos.width}px;`}
+      use:portalToBody
     >
       {#if allowBlank}
         <button

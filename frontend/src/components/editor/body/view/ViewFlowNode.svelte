@@ -14,6 +14,7 @@
   import NodePicker from "@/components/widgets/NodePicker.svelte";
   import SwatchPicker from "@/components/widgets/SwatchPicker.svelte";
   import { inputArity, outputPayload, type GraphNodeKind, type PredicateKind, type ViewGraphNode, type ViewHandle, type ViewNodeData } from "@/lib/views/viewGraph";
+  import { nodeSummary } from "@/lib/views/nodeSummary";
   import { useDesignerContext } from "./designerContext";
   import type { MetadataFieldType, NodePickerRef, ViewGroupByLevel, ViewSort } from "@/lib/types";
 
@@ -25,6 +26,10 @@
   let ctx = $derived(getCtx());
   let kind = $derived(data.kind);
   let cfg = $derived(data.cfg ?? {});
+  // Expanded = editing in place (§A). Toggled by the header, cleared by a
+  // canvas-background click — NOT Svelte Flow selection, so a second header
+  // click collapses (#220 dogfood). `selected` still drives the highlight border.
+  let isExpanded = $derived(ctx.expandedId === id);
   let arity = $derived(inputArity(kind));
   // A kind with a single entry_type (e.g. assistant) makes Type/Type+subtypes
   // predicates noise — offer them only when there's a real choice (#91).
@@ -67,6 +72,17 @@
     ctx.updateNodeData(id, next);
   }
 
+  // One-line config summary shown on the COMPACT (unselected) node body (§A):
+  // the resting canvas stays small; selecting a node expands it to the editor
+  // below. Structural nodes (set ops / output / self / highlight) return "".
+  let summaryText = $derived(
+    nodeSummary(kind, cfg, {
+      fieldName: (key) => ctx.fieldByKey(key)?.name ?? key,
+      entryTypeName: (fqn) => ctx.entryTypes.find((t) => t.fqn === fqn)?.name ?? fqn,
+      savedViewTitle: (vid) => ctx.savedViews.find((v) => v.id === vid)?.title ?? vid,
+    }),
+  );
+
   // --- predicate-kind options for a Filter (drop Type when there's one type) ---
   let predicateKinds = $derived<{ value: PredicateKind; label: string }[]>(
     [
@@ -89,8 +105,14 @@
   let fieldDef = $derived(fieldKey ? ctx.fieldByKey(fieldKey) : null);
   let opNeedsValue = $derived(fieldOp !== "set" && fieldOp !== "unset");
   function setField(next: Partial<NonNullable<ViewNodeData["field"]>>) {
-    const merged = { key: fieldKey, op: fieldOp, value: cfg.field?.value, ...next };
-    patch({ field: merged });
+    // A value belongs to a specific field. When the field KEY changes, start the
+    // value slot fresh (and drop any promotion of it) — otherwise a color-field
+    // swatch id bleeds into, e.g., a tags field's input as raw text (dogfood bug).
+    if (next.key !== undefined && next.key !== fieldKey) {
+      patch({ field: { key: next.key, op: fieldOp, value: undefined }, field_param: undefined });
+      return;
+    }
+    patch({ field: { key: fieldKey, op: fieldOp, value: cfg.field?.value, ...next } });
   }
 
   // --- promote-in-place (#184 Phase 1b, ADR-0032): a field value slot ⇄ a named
@@ -511,12 +533,17 @@
     {:else if isPromoted}
       <!-- Promoted: the slot is a runtime formal. Edit its strip label + the
            overridable default; Unlink demotes back to a fixed value. -->
-      <div class="vparam" role="group" aria-label="Runtime parameter">
+      <div class="vparam nodrag" role="group" aria-label="Runtime parameter" use:stopPointerdown>
         <div class="vparam-head">
           <span class="vparam-tag">Parameter</span>
           {#if isInactiveParam}<span class="vparam-inert" role="note">inactive</span>{/if}
           <button type="button" class="vparam-unlink" title="Back to a fixed value" onclick={demoteField}>Unlink</button>
         </div>
+        {#if isInactiveParam}
+          <!-- #206: the quiet dashed tint marks the no-op at rest; here in the
+               expanded body it gets the plain-words reason. -->
+          <p class="vparam-note" role="note">Unbound — imposes no constraint (shows everything) until a default or picked value fills it.</p>
+        {/if}
         <input
           class="vfield"
           type="text"
@@ -539,7 +566,7 @@
         </div>
       </div>
     {:else}
-      <div class="vfield-value">
+      <div class="vfield-value nodrag" role="presentation" use:stopPointerdown>
         <FieldValueEditor
           field={fieldDef}
           value={(cfg.field?.value ?? null) as import("@/lib/types").MetadataValue}
@@ -595,8 +622,19 @@
   {/if}
 
   <header class="vnode-head">
-    <ViewGlyph {kind} uid={id} />
-    <span class="vnode-title">{LABELS[kind]}</span>
+    <!-- The header is the expand/collapse toggle (#220): glyph + title in one
+         button. Delete stays a sibling button (no nested interactives). -->
+    <button
+      class="vnode-toggle"
+      type="button"
+      aria-expanded={isExpanded}
+      title={isExpanded ? "Collapse" : "Expand"}
+      aria-label={`${isExpanded ? "Collapse" : "Expand"} ${LABELS[kind]}`}
+      onclick={() => ctx.toggleExpanded(id)}
+    >
+      <ViewGlyph {kind} uid={id} />
+      <span class="vnode-title">{LABELS[kind]}</span>
+    </button>
     {#if kind !== "output"}
       <button class="vnode-del" title="Delete node" aria-label="Delete node" onclick={() => ctx.removeNode(id)}>×</button>
     {/if}
@@ -612,7 +650,12 @@
     </div>
   {/if}
 
-  <!-- config by kind -->
+  <!-- config by kind — only the SELECTED node expands to its editor (§A); the
+       resting node shows a one-line summary. `nodrag` + native stop-pointerdown
+       keep interacting with any config control from dragging/selecting the node
+       (Svelte Flow acts on pointerdown; picker menus portal to <body>). -->
+  {#if isExpanded}
+  <div class="vconfig nodrag" role="presentation" use:stopPointerdown>
   {#if kind === "type" || kind === "descendants_of"}
     {@render typeSelect(kind === "descendants_of")}
   {:else if kind === "tagged"}
@@ -780,6 +823,10 @@
       <button class="add-handle" type="button" title="Add handle group" aria-label="Add handle group" onclick={addHandle}>+ Add group</button>
     </div>
   {/if}
+  </div>
+  {:else if summaryText}
+    <div class="vnode-summary" title={summaryText}>{summaryText}</div>
+  {/if}
 
   <!-- source port (right) — tinted `value` when this node emits a value-set. -->
   {#if kind !== "output"}
@@ -830,6 +877,21 @@
     gap: 6px;
     padding: 6px 8px;
   }
+  /* The glyph+title expand toggle — reads as the header, not a button. */
+  .vnode-toggle {
+    flex: 1;
+    min-width: 0;
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    padding: 0;
+    border: none;
+    background: transparent;
+    color: inherit;
+    font: inherit;
+    text-align: left;
+    cursor: pointer;
+  }
   .vnode-title {
     flex: 1;
     font-weight: 600;
@@ -848,6 +910,16 @@
   }
   .vnode-del:hover {
     color: var(--danger);
+  }
+  /* Compact one-line config summary on the resting (unselected) node — the
+     glance state; selecting the node swaps it for the full editor (§A). */
+  .vnode-summary {
+    padding: 0 8px 8px;
+    font-size: var(--fs-sm);
+    color: var(--text-2);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
   }
   .port-legend {
     padding: 0 8px 4px;
@@ -969,6 +1041,13 @@
     font-size: var(--fs-xs);
     cursor: pointer;
     padding: 0 2px;
+  }
+  /* #206: plain-words reason for the inactive tint, in the expanded card */
+  .vparam-note {
+    margin: 4px 0 0;
+    font-size: var(--fs-xs);
+    line-height: 1.35;
+    color: var(--text-3);
   }
   .vparam-unlink:hover {
     color: var(--danger);

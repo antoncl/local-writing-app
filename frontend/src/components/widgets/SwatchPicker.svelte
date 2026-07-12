@@ -8,6 +8,7 @@
   // `paletteStore` that App.svelte fills on settings load.
 
   import { paletteStore, getSwatch } from "@/lib/utils/colors";
+  import { portalToBody } from "@/lib/actions/portal";
 
   interface Props {
     value?: string | null;
@@ -124,6 +125,7 @@
       role="dialog"
       aria-label="Choose a color"
       style={`left: ${popoverLeft}px; top: ${popoverTop}px;`}
+      use:portalToBody
     >
       {#if allowNone}
         <button

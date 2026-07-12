@@ -2,6 +2,7 @@
   import { createEventDispatcher } from "svelte";
   import type { ScopedTag } from "@/lib/types";
   import { pickerMembership } from "@/lib/utils/pickerSources";
+  import { portalToBody } from "@/lib/actions/portal";
 
   export let value: string = "";
   export let knownTags: ScopedTag[] = [];
@@ -58,6 +59,11 @@
     if (!open || !anchorEl) return;
     const target = event.target;
     if (target instanceof Node && anchorEl.contains(target)) return;
+    // The menu portals to <body> (outside anchorEl), so a pointerdown inside it
+    // must not count as "outside" — otherwise it closes before the suggestion's
+    // click lands. Query the portaled node the same way its sibling pickers do.
+    const menu = document.querySelector(".tag-picker");
+    if (menu && target instanceof Node && menu.contains(target)) return;
     open = false;
     position = null;
   }
@@ -92,6 +98,7 @@
       class="tag-picker"
       style={`left: ${position.x}px; top: ${position.y}px; width: ${position.width}px;`}
       aria-label={`${ariaLabel} known tags`}
+      use:portalToBody
     >
       {#if suggestions.length > 0}
         {#each suggestions as tag}

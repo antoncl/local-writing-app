@@ -27,6 +27,7 @@
   } from "@/lib/types";
   import { resolveColor } from "@/lib/utils/colors";
   import { pickerMembership } from "@/lib/utils/pickerSources";
+  import { portalToBody } from "@/lib/actions/portal";
 
   // Resolve a ref's color via the full chain: instance (not carried on
   // NodePickerRef today — that's a Phase 4 surface) → entry-type → parent
@@ -194,17 +195,6 @@
   function close() {
     open = false;
     search = "";
-  }
-
-  // Portal the menu to <body> so its `position: fixed` resolves against the
-  // viewport rather than a transformed ancestor. Inside the view designer the
-  // picker lives in a Svelte Flow node whose pane carries a CSS transform, which
-  // makes it the containing block for fixed descendants — trapping the menu in
-  // canvas-space (offset, and it pans with the canvas). Portaling escapes that;
-  // positionMenu() already computes viewport coordinates.
-  function portalToBody(node: HTMLElement) {
-    document.body.appendChild(node);
-    return { destroy: () => node.remove() };
   }
 
   function handleViewportShift() {

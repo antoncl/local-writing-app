@@ -146,10 +146,16 @@ applies within each group; group order comes from handle order (§12, ADR-0027).
 > **Amended by §12 / ADR-0027 (#91).** Sort is **per-segment**: a **Sorter node** in a branch
 > sorts that segment before it reaches its handle. This ViewSpec-level `sort` remains the
 > fallback when no per-branch Sorter is present.
+>
+> **Amended by #230 (0.7.0): `sort` is multi-level.** `ViewSort` gains an optional `then`
+> tiebreaker chain (sort by A, then B, …); the single-key form (no `then`) is unchanged. The
+> Sorter node is an ordered list of keys. Empty/unset values sort last per key; a full tie keeps
+> input order (stable).
 
 ## 2. ViewSpec — one membership language, two carriers
 
-**ViewSpec** = `(kind, expr, sort)` — the portable core. Two carriers:
+**ViewSpec** = `(kind, expr, sort)` — the portable core (also carries `groups`, per-group
+`group_by`, and `params`; ADR-0037 / ADR-0032). Two carriers:
 
 1. **A saved view** = a **frontmatter-only node** of new kind `view` (folder `views/`,
    no body): name + ViewSpec + presentation hints (§3). Node storage gives CRUD,
@@ -239,6 +245,15 @@ user-switchable. The 2026-07-02 inventory (12 NodeList sites + 3 hand-rolled lis
 | Search / Todo / cost breakdown (hand-rolled) | — | no; Search is the natural later adoption (a search = an ad-hoc view), Todo is an index over markers (`decisions_todo_as_node_index`), cost breakdown isn't a node list |
 
 ### 3.1 Presentation: tree is a shape, not a grouping
+
+> **SUPERSEDED by ADR-0037 (0.7.0): `ViewPresentation` is eradicated.** Grouping belongs to the
+> VIEW, not a presentation flag. Two ν operators only — **Nest** (ν by join; the sole
+> hierarchy-maker, incl. containment as a `parent` relation) and **`group_by`** (ν by attribute,
+> ordered result-level levels, owned **per group** — ADR-0037 Amendment 1). A `ViewNodeList`
+> conforms to the data's shape; `"tree"` survives only as NodeList `mode="card"|"tree"` row
+> styling. The `presentation: "tree"` ancestry path below is gone (containment is now a Nest over
+> `parent`). The paragraphs in this section describe the retired model — read ADR-0037 for the
+> current one. Multi-level *nested* grouping (once "deferred" here) ships: stack `group_by` levels.
 
 A view's presentation is one of **tree-from-structure / grouped / flat**. The set
 machinery handles *membership and annotation* in all three; label-grouping applies only

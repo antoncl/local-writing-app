@@ -70,6 +70,27 @@ describe("nodeSummary — compact node one-liners (#220)", () => {
     expect(summary("field_of", { project_field: "references" })).toBe("→ References");
   });
 
+  it("formats boolean and projection operands", () => {
+    expect(summary("field", { field: { key: "rank", op: "overlap", value: true } })).toBe("Rank any of yes");
+    expect(summary("field", { field: { key: "rank", op: "overlap", value: false } })).toBe("Rank any of no");
+    expect(
+      summary("field", { field: { key: "ref", op: "overlap", value: { field_of: { of: {}, field: "x" } } } }),
+    ).toBe("Ref any of ⟨projection⟩");
+  });
+
+  it("handles a descendants_of inner filter", () => {
+    expect(summary("filter", { filter_mode: "keep", filter_kind: "descendants_of", descendants_of: "lore:character" })).toBe(
+      "keep · Character +sub",
+    );
+  });
+
+  it("caps a cyclic sort chain instead of hanging", () => {
+    const cyclic: import("./viewGraph").ViewNodeData["sort"] = { by: "title", dir: "asc" };
+    (cyclic as { then?: unknown }).then = cyclic; // self-referential `then`
+    // Must return within the 16-key cap rather than loop forever.
+    expect(summary("sorter", { sort: cyclic }).startsWith("title ↑")).toBe(true);
+  });
+
   it("returns no one-liner for structural nodes", () => {
     expect(summary("union", {})).toBe("");
     expect(summary("intersect", {})).toBe("");

@@ -2,6 +2,7 @@
   import { createEventDispatcher } from "svelte";
   import type { ScopedTag } from "@/lib/types";
   import { pickerMembership } from "@/lib/utils/pickerSources";
+  import { portalToBody } from "@/lib/actions/portal";
 
   export let value: string = "";
   export let knownTags: ScopedTag[] = [];
@@ -65,15 +66,6 @@
     if (menu && target instanceof Node && menu.contains(target)) return;
     open = false;
     position = null;
-  }
-
-  // Portal the menu to <body> so its `position: fixed` resolves against the
-  // viewport, not a transformed ancestor (the view designer's Svelte Flow pane
-  // carries a CSS transform that would otherwise trap it — #225). Mirrors
-  // NodePicker; toggle() already captures viewport coords from the anchor rect.
-  function portalToBody(node: HTMLElement) {
-    document.body.appendChild(node);
-    return { destroy: () => node.remove() };
   }
 
   function applyTag(tag: string) {

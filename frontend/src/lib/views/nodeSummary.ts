@@ -77,7 +77,10 @@ function filterInner(cfg: ViewNodeData, r: SummaryResolvers): string {
 
 function sortSummary(sort: ViewSort | null | undefined, r: SummaryResolvers): string {
   const parts: string[] = [];
-  for (let s: ViewSort | null | undefined = sort; s; s = s.then) {
+  // Depth-cap the `then` walk (matches the evaluator's sortKeyChain guard) so a
+  // malformed cyclic chain can't hang the render.
+  let s: ViewSort | null | undefined = sort;
+  for (let i = 0; s && i < 16; s = s.then, i++) {
     if (s.by === "title") parts.push(`title ${s.dir === "desc" ? "↓" : "↑"}`);
     else if (s.by === "field") parts.push(`${r.fieldName(s.field_key ?? "")} ${s.dir === "desc" ? "↓" : "↑"}`);
     // by:"manual" contributes no key

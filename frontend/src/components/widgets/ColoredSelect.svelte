@@ -8,6 +8,7 @@
   // widget is safe to use even when only SOME options are colored.
 
   import { getSwatch } from "@/lib/utils/colors";
+  import { portalToBody } from "@/lib/actions/portal";
   import type { SelectOption } from "@/lib/types";
 
   export let value: string = "";
@@ -70,16 +71,6 @@
     const pop = document.querySelector(".colored-select-popover");
     if (pop && target && pop.contains(target)) return;
     close();
-  }
-
-  // Portal the popover to <body> so its `position: fixed` resolves against the
-  // viewport, not a transformed ancestor (the view designer's Svelte Flow pane
-  // carries a CSS transform that would otherwise trap it — #225). Mirrors
-  // NodePicker; the anchor rect already gives viewport coords, and onDocClick
-  // already queries the portaled node.
-  function portalToBody(node: HTMLElement) {
-    document.body.appendChild(node);
-    return { destroy: () => node.remove() };
   }
 
   function dotStyle(opt: SelectOption): string {

@@ -93,9 +93,10 @@
     // Reactive tree data — feeds the view evaluation. Handlers read
     // config.getStructure() instead so post-mutation reads aren't stale.
     structure: StructureDocument | null;
-    // The pane's selected view spec. Draft only ever renders a tree + tints
-    // (ADR-0022), so we force `presentation: "tree"`; the spec's expr/handles
-    // still drive membership pruning + color annotations.
+    // The pane's selected view spec. The Draft/Research default is a recursive
+    // containment Nest on `parent` (`defaultView("scene")`, ADR-0037 §4), so the
+    // tree is the view's own shape — no presentation override; the spec's
+    // expr/handles/group_by drive membership pruning + color annotations.
     viewSpec: ViewSpec;
     draftTitles: Map<string, string>;
     sectionLabel: string;
@@ -112,12 +113,13 @@
   const focusedDocument = $derived($focusedDocumentStore);
   const referenceIndex = $derived($referenceIndexStore);
 
-  // One evaluation feeds the whole render: tree shape (via the `ancestry`
-  // side-channel), membership pruning, and color annotations — replacing the
-  // App-side double-eval this migration deleted (#112). Forced to a tree because
-  // the Draft/Research panes only ever tint, never re-shape (ADR-0022).
+  // One evaluation feeds the whole render: tree shape (the containment Nest over
+  // each node's `parent` ref, ADR-0037 §4), membership pruning, and color
+  // annotations — replacing the App-side double-eval this migration deleted
+  // (#112). The tree is the view's own shape; the Draft/Research panes only ever
+  // tint, never re-shape (ADR-0022).
   const result = $derived(
-    evaluateView({ ...viewSpec, presentation: "tree" }, structureToEvalNodes(structure), {
+    evaluateView(viewSpec, structureToEvalNodes(structure), {
       schema,
       resolveView: paneViews.resolveView,
       referenceIndex,

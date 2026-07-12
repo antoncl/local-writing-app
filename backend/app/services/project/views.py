@@ -1,10 +1,10 @@
 """Saved-view slice of ProjectService (0.5.0, epic #35 / #78).
 
 A saved view is a frontmatter-only Node kind (`view`): a ViewSpec (anchor
-`kind` + a set-algebra `expr` + `sort`) plus a `presentation` hint. Storage
-mirrors mutation sets — layered Node markdown files under `<project>/views/`
-with **no prose body**: the spec + presentation live in front matter (via
-`_write_node_entry_file`'s `extra=`). `ProjectService` composes this mixin;
+`kind` + a set-algebra `expr` + `sort` + `group_by`). Storage mirrors mutation
+sets — layered Node markdown files under `<project>/views/` with **no prose
+body**: the spec lives in front matter (via `_write_node_entry_file`'s
+`extra=`). `ProjectService` composes this mixin;
 shared IO/index helpers resolve through the MRO (see `mutation_sets.py`).
 
 0.5.0 step 1 lands storage + CRUD + a `view_ref` cycle check at save. There is
@@ -29,7 +29,6 @@ from app.models_views import (
     ViewNode,
     ViewNodeList,
     ViewNodeSummary,
-    ViewPresentation,
     ViewSpec,
     ViewUiState,
 )
@@ -66,7 +65,6 @@ class ViewsMixin:
                     title=str(front_matter.get("title") or entry.id),
                     entry_type=self._view_entry_type(front_matter),
                     view_kind=spec.kind if spec else "",
-                    presentation=self._view_presentation(front_matter),
                     spec=spec,
                     ui=self._parse_view_ui(front_matter.get("ui")),
                     system=self._view_system(front_matter),
@@ -89,7 +87,6 @@ class ViewsMixin:
             request.title,
             request.entry_type,
             request.spec,
-            request.presentation,
             request.layout,
         )
         return self.read_view(view_id)
@@ -111,7 +108,6 @@ class ViewsMixin:
             revision=self._revision(path),
             entry_type=self._view_entry_type(front_matter),
             spec=spec,
-            presentation=self._view_presentation(front_matter),
             layout=self._parse_view_layout(front_matter.get("layout")),
             ui=self._parse_view_ui(front_matter.get("ui")),
             system=self._view_system(front_matter),
@@ -140,7 +136,6 @@ class ViewsMixin:
             request.title,
             request.entry_type,
             request.spec,
-            request.presentation,
             request.layout,
             ui=self._parse_view_ui(front_matter.get("ui")),
         )
@@ -149,7 +144,7 @@ class ViewsMixin:
 
     def update_view_ui(self, view_id: str, request: UpdateViewUiRequest) -> ViewNode:
         """Lock-free fold/ui write (ADR-0036): rewrites ONLY the `ui` blob,
-        preserving spec/presentation/layout/title/system. It takes no
+        preserving spec/layout/title/system. It takes no
         base_revision and does not consult the spec revision, so a fold toggle
         never 409s against a concurrent designer save — the two lifecycles are
         independent. A `view_default_<kind>` id with no file yet MATERIALIZES the
@@ -169,7 +164,6 @@ class ViewsMixin:
             str(front_matter.get("title") or node_id),
             self._view_entry_type(front_matter),
             spec,
-            self._view_presentation(front_matter),
             self._parse_view_layout(front_matter.get("layout")),
             ui=request.ui,
             system=self._view_system(front_matter),
@@ -194,10 +188,6 @@ class ViewsMixin:
         if not root_type:
             raise ProjectServiceError(f"No default view is defined for kind '{kind}'.", 422)
         spec = self._default_view_spec(kind, root_type)
-        # Interim presentation hint (deleted by the ADR-0037 §3 sweep): Draft
-        # still renders a structural tree off it until the frontend consumes the
-        # containment-nest spec directly.
-        presentation: ViewPresentation = "tree" if kind == "scene" else "flat"
         (root / "views").mkdir(parents=True, exist_ok=True)
         self._write_view_file(
             self._filepath_for_new_node(root / "views", view_id),
@@ -205,7 +195,6 @@ class ViewsMixin:
             "Default",
             "view:view",
             spec,
-            presentation,
             ui=ui,
             system=True,
         )
@@ -258,17 +247,13 @@ class ViewsMixin:
         title: str,
         entry_type: str,
         spec: ViewSpec,
-        presentation: ViewPresentation,
         layout: ViewLayout | None = None,
         ui: ViewUiState | None = None,
         system: bool = False,
     ) -> None:
         # exclude_none keeps the on-disk spec compact — a leaf serializes as
         # `{type: lore:character}`, not every unset ViewExpr slot.
-        extra: dict[str, Any] = {
-            "spec": spec.model_dump(exclude_none=True),
-            "presentation": presentation,
-        }
+        extra: dict[str, Any] = {"spec": spec.model_dump(exclude_none=True)}
         # Only write layout when the designer supplied one — keeps designer-less
         # / programmatic views clean (they fall back to auto-layout on open).
         if layout is not None:
@@ -296,11 +281,6 @@ class ViewsMixin:
     def _view_entry_type(front_matter: dict[str, Any]) -> str:
         raw = front_matter.get("entry_type") or "view:view"
         return raw if isinstance(raw, str) else "view:view"
-
-    @staticmethod
-    def _view_presentation(front_matter: dict[str, Any]) -> ViewPresentation:
-        raw = front_matter.get("presentation")
-        return raw if raw in ("tree", "grouped", "flat") else "flat"
 
     @staticmethod
     def _parse_view_spec(raw: Any) -> ViewSpec | None:

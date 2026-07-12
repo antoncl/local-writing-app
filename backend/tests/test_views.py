@@ -29,15 +29,15 @@ class ViewCrudTests(unittest.TestCase):
     def tearDown(self) -> None:
         self.temp_dir.cleanup()
 
-    def _create(self, title: str, spec: dict, presentation: str = "flat") -> dict:
+    def _create(self, title: str, spec: dict) -> dict:
         res = self.client.post(
             "/api/views",
-            json={"title": title, "spec": spec, "presentation": presentation},
+            json={"title": title, "spec": spec},
         )
         self.assertEqual(res.status_code, 200, res.text)
         return res.json()
 
-    def test_create_read_roundtrips_spec_and_presentation(self) -> None:
+    def test_create_read_roundtrips_spec(self) -> None:
         spec = {
             "kind": "lore",
             "expr": {
@@ -48,10 +48,10 @@ class ViewCrudTests(unittest.TestCase):
             },
             "sort": {"by": "title", "dir": "asc"},
         }
-        created = self._create("Non-place characters", spec, presentation="grouped")
+        created = self._create("Non-place characters", spec)
         self.assertTrue(created["id"].startswith("view"))
         self.assertEqual(created["entry_type"], "view:view")
-        self.assertEqual(created["presentation"], "grouped")
+        self.assertNotIn("presentation", created)
         self.assertEqual(created["spec"]["kind"], "lore")
         self.assertEqual(
             created["spec"]["expr"]["difference"]["keep"]["descendants_of"],
@@ -82,7 +82,6 @@ class ViewCrudTests(unittest.TestCase):
                 "title": "Tagged",
                 "base_revision": created["revision"],
                 "spec": {"kind": "lore", "expr": {"tagged": "gotham"}},
-                "presentation": "flat",
                 "layout": layout,
             },
         )
@@ -480,9 +479,8 @@ class ViewUiStateTests(unittest.TestCase):
 
         self.client.put(f"/api/views/{created['id']}/ui", json={"ui": {"collapsed": ["node:z"]}})
         after = self.client.get(f"/api/views/{created['id']}").json()
-        # Spec + presentation untouched by a fold write.
+        # Spec untouched by a fold write.
         self.assertEqual(after["spec"], created["spec"])
-        self.assertEqual(after["presentation"], created["presentation"])
         # A fold write is content-addressed too, but it takes NO base_revision —
         # it never 409s. Prove it accepts a write with no revision guard.
         self.assertNotEqual(after["revision"], rev_before)  # ui blob changed the file
@@ -493,7 +491,7 @@ class ViewUiStateTests(unittest.TestCase):
         # A spec save (Edit) must not wipe fold state (independent lifecycle).
         res = self.client.put(
             f"/api/views/{created['id']}",
-            json={"title": "Edit me", "spec": {"kind": "lore", "expr": {"tagged": "y"}}, "presentation": "flat"},
+            json={"title": "Edit me", "spec": {"kind": "lore", "expr": {"tagged": "y"}}},
         )
         self.assertEqual(res.status_code, 200, res.text)
         self.assertEqual(res.json()["spec"]["expr"]["tagged"], "y")
@@ -517,7 +515,6 @@ class ViewUiStateTests(unittest.TestCase):
             "entry_type: view:view\n"
             "system: true\n"
             "spec:\n  kind: lore\n  expr:\n    descendants_of: lore:base\n"
-            "presentation: grouped\n"
             "---\n\n",
             encoding="utf-8",
         )
@@ -528,7 +525,7 @@ class ViewUiStateTests(unittest.TestCase):
         # Edit (spec save) is refused.
         edit = self.client.put(
             "/api/views/view_default_lore",
-            json={"title": "Default", "spec": {"kind": "lore", "expr": {"tagged": "x"}}, "presentation": "flat"},
+            json={"title": "Default", "spec": {"kind": "lore", "expr": {"tagged": "x"}}},
         )
         self.assertEqual(edit.status_code, 403, edit.text)
 
@@ -557,7 +554,7 @@ class ViewUiStateTests(unittest.TestCase):
         self.assertEqual(nest["parents"]["field"]["key"], "parent")
         self.assertEqual(nest["parents"]["field"]["op"], "unset")
         self.assertEqual(nest["children"]["descendants_of"], "scene:base")
-        self.assertEqual(body["presentation"], "tree")
+        self.assertNotIn("presentation", body)
         self.assertEqual(body["ui"]["collapsed"], ["node:act1"])
 
     def test_materialized_lore_default_groups_by_entry_type(self) -> None:

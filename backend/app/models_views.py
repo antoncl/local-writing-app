@@ -440,12 +440,13 @@ class NodePickerConfig(BaseModel):
 
 # --- Saved views: the frontmatter-only `view` node -----------------------
 #
-# A saved view is a frontmatter-only Node of kind `view` (folder `views/`,
-# no prose body), carrying a ViewSpec + a presentation hint. Storage mirrors
-# mutation sets — the spec lives in front matter via `_write_node_entry_file`'s
-# `extra=`. `spec.kind` is the ViewSpec's *anchor* kind (which kind of nodes the
-# view selects), distinct from the node's own `view` kind. ADR-0021, doc §2/§3.
-ViewPresentation = Literal["tree", "grouped", "flat"]
+# A saved view is a frontmatter-only Node of kind `view` (folder `views/`, no
+# prose body), carrying a ViewSpec. Storage mirrors mutation sets — the spec
+# lives in front matter via `_write_node_entry_file`'s `extra=`. `spec.kind` is
+# the ViewSpec's *anchor* kind (which kind of nodes the view selects), distinct
+# from the node's own `view` kind. ADR-0021, doc §2/§3. (Grouping/tree layout is
+# the view's own shape — `group_by` + Nest — never a presentation hint: ADR-0037
+# §3 eradicated `ViewPresentation`.)
 
 
 class ViewLayoutNode(BaseModel):
@@ -469,11 +470,10 @@ class ViewLayoutEdge(BaseModel):
 
 
 class ViewLayout(BaseModel):
-    """The view designer's visual graph (nodes + edges). Non-semantic
-    presentation state parallel to `presentation`; the evaluator ignores it and
-    it lives off `ViewSpec` (the portable semantic core) on purpose. Absent for
-    views authored without the designer — the frontend falls back to laying the
-    `expr` out automatically."""
+    """The view designer's visual graph (nodes + edges). Non-semantic designer
+    state; the evaluator ignores it and it lives off `ViewSpec` (the portable
+    semantic core) on purpose. Absent for views authored without the designer —
+    the frontend falls back to laying the `expr` out automatically."""
 
     nodes: list[ViewLayoutNode] = Field(default_factory=list)
     edges: list[ViewLayoutEdge] = Field(default_factory=list)
@@ -499,7 +499,6 @@ class ViewNodeSummary(BaseModel):
     # The ViewSpec's anchor kind (the kind of nodes this view selects), surfaced
     # on the summary so a pane can group/offer views by the kind they target.
     view_kind: str = ""
-    presentation: ViewPresentation = "flat"
     # The full spec, so a client that lists views already holds everything it
     # needs to evaluate them (incl. resolving view_ref leaves) without a second
     # per-view fetch — list_views already parses it (#95). None if malformed.
@@ -520,7 +519,6 @@ class ViewNode(BaseModel):
     revision: str
     entry_type: str = "view:view"
     spec: ViewSpec
-    presentation: ViewPresentation = "flat"
     # Designer canvas layout (positions + wiring). None for views never opened
     # in / saved from the designer — the frontend auto-lays-out the expr then.
     layout: ViewLayout | None = None
@@ -540,7 +538,6 @@ class CreateViewRequest(BaseModel):
     title: str = Field(min_length=1)
     entry_type: str = "view:view"
     spec: ViewSpec
-    presentation: ViewPresentation = "flat"
     layout: ViewLayout | None = None
 
 
@@ -549,7 +546,6 @@ class SaveViewRequest(BaseModel):
     base_revision: str | None = None
     entry_type: str = "view:view"
     spec: ViewSpec
-    presentation: ViewPresentation = "flat"
     layout: ViewLayout | None = None
 
 

@@ -94,7 +94,6 @@
   let title = $state("");
   let kind = $state("lore");
   let sort = $state<ViewSort>({ by: "manual" });
-  let presentation = $state<ViewNode["presentation"]>("flat");
 
   // Svelte Flow graph — the source of truth for the expression, bound to the
   // canvas. Custom nodes all use the single "viewNode" type; data carries the
@@ -127,7 +126,6 @@
     title = node.title ?? "";
     kind = node.spec?.kind ?? "lore";
     sort = node.spec?.sort ?? { by: "manual" };
-    presentation = node.presentation ?? "flat";
     // Prefer the persisted designer layout (exact positions the author left);
     // fall back to laying out the semantic expr for designer-less / legacy views.
     // Handle ids are explicit so Svelte Flow renders these edges once the new
@@ -580,7 +578,7 @@
   $effect(() => {
     // Layout is in the snapshot so a position-only drag (which leaves `spec`
     // unchanged) still triggers a persist.
-    const snapshot = JSON.stringify({ title, spec, presentation, layout: toLayout() });
+    const snapshot = JSON.stringify({ title, spec, layout: toLayout() });
     if (hydrating || !loadedViewId) {
       lastSaved = snapshot;
       return;
@@ -599,7 +597,6 @@
         title: title || "Untitled view",
         base_revision: revision,
         spec,
-        presentation,
         layout: toLayout(),
       });
       revision = saved.revision;

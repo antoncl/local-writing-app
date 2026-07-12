@@ -14,10 +14,10 @@
 //    handle: its `name` is the group label and a row `path` segment; same-name
 //    groups union + dedupe. Evaluation emits rows `(node, path)`; the normalize
 //    pass rebuilds nesting from the paths — arbitrary depth, with the depth-1
-//    handle case falling out as the shallow one (ADR-0027 §E). A
-//    `presentation: "tree"` view (#101) appends each node's structural
-//    `ancestry` to its row path (#181), so structural nesting flows through the
-//    same normalize pass and composes with handle grouping.
+//    handle case falling out as the shallow one (ADR-0027 §E). Structural
+//    nesting (the manuscript/research tree) is not special: it is a recursive
+//    containment Nest on the `parent` ref (ADR-0037 §4), whose placed segments
+//    flow through the same normalize pass and compose with handle grouping.
 //  - Membership is a `Set<id>` per segment; the segment list is the universe
 //    filtered to that set, preserving **input order** — exactly the `manual`
 //    sort the Assistants drag order relies on (ADR-0022, doc §1.5).
@@ -49,11 +49,6 @@ export type EvalNode = {
   entry_type: string;
   title: string;
   metadata?: Record<string, unknown> | null;
-  // Tree presentation only (#101): the node's structural ancestry, outer→inner
-  // (the container nodes above it). Set by the structure adapter
-  // (`structureToEvalNodes`); other callers omit it and non-tree presentations
-  // ignore it. Members nest under their ancestry; empty branches self-prune.
-  ancestry?: PathSegment[] | null;
   // #201: a node's CANONICAL identity for reference purposes, when it differs
   // from `id`. A manuscript scene's roster `id` is its structure `node.id`
   // (`node_…`), but the reverse reference index keys scenes by their canonical
@@ -84,8 +79,8 @@ export type ViewAnnotation = { color: string | null };
 //  - `placed`  — a Nest-placed real node (ADR-0028) that passed selection → a
 //                member (an interior parent header that is also in `nodes`).
 //  - `revived` — an ancestor materialized from a surviving row's path that did
-//                NOT itself pass selection (a σ-filtered tree's acts/chapters, a
-//                structural ancestry segment): context/scaffolding, not a member.
+//                NOT itself pass selection (a σ-filtered containment Nest's
+//                acts/chapters): context/scaffolding, not a member.
 export type SegmentOrigin = "handle" | "field" | "placed" | "revived";
 
 // One nesting level in a row's `path` (ADR-0027 §E, #101). `nodeId` set => the
@@ -262,25 +257,6 @@ export function defaultView(kind: string, schema?: MetadataSchema | null): ViewS
   return { kind, expr: roster, sort };
 }
 
-// Every node id present in a tree result's group hierarchy — the surviving
-// members plus the ancestors kept to reach them (#101). Drives the Draft tree's
-// membership pruning: a structure node absent from this set is hidden, so a
-// filter narrows the tree to matches and their ancestors and drops empty
-// branches. (`nodes` is scanned too so it also works on handle-grouped results.)
-export function treeNodeIds<T extends EvalNode>(groups: ViewGroup<T>[] | null): Set<string> {
-  const ids = new Set<string>();
-  const walk = (gs: ViewGroup<T>[]): void => {
-    for (const g of gs) {
-      // Every real node (leaf or container) is a `nodeId` group post-#181, so
-      // one nodeId add per group covers members and kept ancestors alike.
-      if (g.nodeId) ids.add(g.nodeId);
-      walk(g.children);
-    }
-  };
-  if (groups) walk(groups);
-  return ids;
-}
-
 // Filter a group tree to members whose id is in `keep`, pruning any branch with
 // no survivors (a group stays if it keeps a direct node OR a surviving child).
 // Pure; panes use it to apply a text search over an already-computed group tree
@@ -364,33 +340,14 @@ export function evaluateView<T extends EvalNode>(
     ? evalGroups(state, groups, spec.sort)
     : evalSource(state, spec.expr ?? null, spec.sort);
 
-  // Tree presentation (#101, #181): each row's node nests under its structural
-  // `ancestry` — appended so ancestry is *just another path source* and composes
-  // with handle grouping. Ancestor segments are stamped `revived` (ADR-0037 §6):
-  // pure structural context, excluded from flat membership, so a filtered tree
-  // keeps a match's ancestors and self-prunes empty branches while listing only
-  // the matched leaves. DEPRECATED by ADR-0037 §3 (grouping belongs to the view
-  // via `group_by`/`nest`); kept until the §3 sweep so StructureTree still works.
-  const treePresentation = spec.presentation === "tree";
-  const structuredRows = treePresentation
-    ? pipelineRows.map((r) => ({ node: r.node, path: [...r.path, ...revivedAncestry(r.node)] }))
-    : pipelineRows;
-
   // ADR-0037 §2: `group_by` levels append one path segment above the leaf,
   // beneath every pipeline-produced segment, in declared order — ν by attribute
   // on the already-denormalized rows. Then the existing `normalize` runs
   // unchanged (handles outermost, pipeline/nest segments, then levels innermost).
   const rows =
-    spec.group_by && spec.group_by.length > 0 ? applyGroupBy(state, structuredRows, spec.group_by) : structuredRows;
+    spec.group_by && spec.group_by.length > 0 ? applyGroupBy(state, pipelineRows, spec.group_by) : pipelineRows;
 
-  return normalize(state, rows, treePresentation);
-}
-
-// A node's structural ancestry (#101) stamped `revived` (ADR-0037 §6): the
-// container segments above it are context, not members. Empty for non-tree
-// callers (they omit `ancestry`).
-function revivedAncestry(node: EvalNode): PathSegment[] {
-  return (node.ancestry ?? []).map((seg) => ({ ...seg, origin: "revived" as const }));
+  return normalize(state, rows);
 }
 
 // Attach nest diagnostics to a result — only when a `nest` actually ran, so
@@ -564,17 +521,11 @@ function evalGroups<T extends EvalNode>(
 // nesting parent; a row with an empty remaining path is the node itself as a
 // member at that level. Every real node — container or leaf — becomes a `nodeId`
 // group, merged by id (no double appearance for a member that is also an
-// ancestor). `treePresentation` distinguishes structural-tree views from
-// handle/nest ones on two axes: (a) flat membership — a nest's real-node parent
-// segments ARE members (included), while a tree's ancestor segments are context
-// (excluded); (b) collapse — a handle/nest view with no paths is a flat list
-// (`groups: null`), but a tree always builds node groups so that a set of
-// top-level nodes stays a (single-level) tree rather than blanking out.
-function normalize<T extends EvalNode>(
-  state: RunState<T>,
-  rows: ViewRow<T>[],
-  treePresentation: boolean,
-): ViewResult<T> {
+// ancestor). Flat membership is σ-passage (ADR-0037 §6): a Nest's real-node
+// parent segments that pass selection ARE members; `revived` ancestors of a
+// σ-filtered nest are context (excluded). A view whose rows carry no paths is a
+// flat list (`groups: null`).
+function normalize<T extends EvalNode>(state: RunState<T>, rows: ViewRow<T>[]): ViewResult<T> {
   const seenId = new Set<string>();
   const nodes: T[] = [];
   const pushNode = (n: T): void => {
@@ -597,10 +548,10 @@ function normalize<T extends EvalNode>(
     pushNode(r.node);
   }
 
-  // A handle/nest view with no paths is a flat list (`groups: null`). A tree
-  // view skips this: even an all-top-level match set stays a tree of leaf node
-  // groups, so `treeNodeIds`/pruning still see every member.
-  if (!treePresentation && !rows.some((r) => r.path.length > 0)) {
+  // A view whose rows carry no paths is a flat list (`groups: null`) — a
+  // degenerate Nest (all roots, no placements) collapses here, as does any
+  // ungrouped selection.
+  if (!rows.some((r) => r.path.length > 0)) {
     return withDiag(state, { nodes, annotations: state.annotations, groups: null });
   }
 

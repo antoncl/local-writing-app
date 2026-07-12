@@ -1,7 +1,27 @@
 import { describe, expect, it } from "vitest";
-import type { StructureDocument } from "@/lib/types";
+import type { MetadataSchema, StructureDocument } from "@/lib/types";
 import { structureToEvalNodes } from "./structureNodes";
 import { evaluateView } from "./evaluateView";
+
+// The containment relation as a recursive Nest on `parent` (ADR-0037 §4): the
+// Draft/Research default. Roots = parentless; children = the whole scene roster.
+const CONTAINMENT = {
+  nest: {
+    parents: { field: { key: "parent", op: "unset" as const } },
+    children: { descendants_of: "scene:base" },
+    match: { field: "parent", direction: "child_to_parent" as const, by: "ref" as const },
+    recursive: true,
+  },
+};
+const SCENE_SCHEMA = {
+  version: 1,
+  fields: { parent: { name: "Parent", type: "entity_ref", category: "stored" } },
+  entry_types: {
+    "scene:base": { name: "Scene root", kind: "scene", abstract: true },
+    "scene:act": { name: "Act", kind: "scene", parent: "scene:base" },
+    "scene:scene": { name: "Scene", kind: "scene", parent: "scene:base" },
+  },
+} as unknown as MetadataSchema;
 
 function doc(): StructureDocument {
   return {
@@ -45,19 +65,72 @@ function doc(): StructureDocument {
 }
 
 describe("structureToEvalNodes (#184 Phase 3 roster enrichment)", () => {
-  it("merges full scene metadata + computed counters + status into one filterable dict", () => {
+  it("merges full scene metadata + computed counters + status + parent ref into one filterable dict", () => {
     const nodes = structureToEvalNodes(doc());
     const s1 = nodes.find((n) => n.id === "s1")!;
-    expect(s1.metadata).toEqual({ pov: "char_alice", color: "moss", number: 1, word_count: 42, status: "complete" });
-    // ancestry still carries the container chain for tree presentation.
-    expect(s1.ancestry).toEqual([{ key: "act1", label: "Act One", nodeId: "act1" }]);
+    // `parent` = the immediate container's node id — the ref the containment
+    // Nest joins on (ADR-0037 §4).
+    expect(s1.metadata).toEqual({ pov: "char_alice", color: "moss", number: 1, word_count: 42, status: "complete", parent: "act1" });
   });
 
-  it("omits status when the node has none (containers)", () => {
+  it("omits status AND parent for a root container (roots seed the Nest via `parent unset`)", () => {
     const nodes = structureToEvalNodes(doc());
     const act = nodes.find((n) => n.id === "act1")!;
     expect(act.metadata).toEqual({ number: 1 });
-    expect("status" in (act.metadata ?? {})).toBe(false);
+    expect("parent" in (act.metadata ?? {})).toBe(false);
+  });
+
+  it("the containment Nest over the stamped roster reproduces the manuscript tree (ADR-0037 §4)", () => {
+    const nodes = structureToEvalNodes(doc());
+    const result = evaluateView({ kind: "scene", expr: CONTAINMENT, sort: { by: "manual" } }, nodes, { schema: SCENE_SCHEMA });
+    // Act One (a root) nests its two scenes; no `presentation: "tree"` involved.
+    expect(result.groups?.map((g) => g.label)).toEqual(["Act One"]);
+    expect(result.groups![0].children.map((c) => c.label)).toEqual(["Arrival", "Departure"]);
+  });
+
+  it("a container-less roster (all scenes at root) collapses to a flat list, not a tree", () => {
+    // ADR-0037 §3 behavior shift: with `presentation:"tree"` gone, an all-root
+    // manuscript has only empty-path rows ⇒ `normalize` returns groups:null and
+    // the pane renders a flat list. (The old forced tree kept it a single-level
+    // tree of leaves — visually identical once ViewNodeList maps nodes→leaves.)
+    const flat: StructureDocument = {
+      root: {
+        id: "root",
+        type: "root",
+        title: "Manuscript",
+        children: [
+          { id: "s1", type: "scene:scene", title: "One", children: [] },
+          { id: "s2", type: "scene:scene", title: "Two", children: [] },
+        ],
+      },
+    };
+    const nodes = structureToEvalNodes(flat);
+    const result = evaluateView({ kind: "scene", expr: CONTAINMENT, sort: { by: "manual" } }, nodes, { schema: SCENE_SCHEMA });
+    expect(result.groups).toBeNull();
+    expect(result.nodes.map((n) => n.id)).toEqual(["s1", "s2"]);
+  });
+
+  it("a named handle wrapping the containment Nest keeps the sub-tree inside its bucket (#181 composition)", () => {
+    // Regression guard for handle-grouping composed with structural nesting (the
+    // case the deleted presentation:"tree" suite covered): a handle prepends its
+    // segment outside the nest's placed rows, so bucket 1 stays a full sub-tree.
+    const nodes = structureToEvalNodes(doc());
+    const result = evaluateView(
+      {
+        kind: "scene",
+        groups: [
+          { name: "Tree", expr: CONTAINMENT },
+          { name: "Everything", expr: { descendants_of: "scene:base" } }, // 2nd handle so neither collapses
+        ],
+        sort: { by: "manual" },
+      },
+      nodes,
+      { schema: SCENE_SCHEMA },
+    );
+    expect(result.groups?.map((g) => g.label)).toEqual(["Tree", "Everything"]);
+    const treeBucket = result.groups![0];
+    expect(treeBucket.children.map((c) => c.label)).toEqual(["Act One"]);
+    expect(treeBucket.children[0].children.map((c) => c.label)).toEqual(["Arrival", "Departure"]);
   });
 
   it("lets a scene view filter the roster by status (the Draft filter this enables)", () => {

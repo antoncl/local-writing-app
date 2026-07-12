@@ -411,12 +411,6 @@ export type ViewSpec = {
   groups?: ViewGroupSpec[] | null;
   sort?: ViewSort | null;
   params?: ViewParam[] | null;
-  // Layout of the result list (doc §3.1). `"tree"` nests members by structural
-  // ancestry (the evaluator reads each node's `ancestry`, #101); absent/other
-  // values keep the flat-or-handle-grouped behavior. Orthogonal to membership.
-  // DEPRECATED by ADR-0037 (#213) — grouping belongs to the view (`group_by`);
-  // deleted in the ADR-0037 §3 sweep.
-  presentation?: ViewPresentation | null;
   // ADR-0037 §2: ordered result-level organize levels — ν by attribute. Each
   // level appends one path segment above the leaf, beneath every pipeline-
   // produced segment, in declared order. Orthogonal to the `expr` XOR `groups`
@@ -434,9 +428,6 @@ export type ViewGroupByLevel = {
   field: string;
   order?: "label";
 };
-
-// How a view's result list is laid out (doc §3.1). Orthogonal to membership.
-export type ViewPresentation = "tree" | "grouped" | "flat";
 
 // The view designer's persisted canvas graph (nodes + wiring). Non-semantic
 // presentation state — the evaluator ignores it; it exists so reopening a view
@@ -474,7 +465,6 @@ export type ViewNode = {
   revision: string;
   entry_type: string; // "view:view"
   spec: ViewSpec;
-  presentation: ViewPresentation;
   // Designer canvas layout (positions + wiring); absent for designer-less views.
   layout?: ViewLayout | null;
   // Persisted fold state (ADR-0036); absent ⇒ all groups expanded.
@@ -494,7 +484,6 @@ export type ViewNodeSummary = {
   title: string;
   entry_type: string;
   view_kind: string;
-  presentation: ViewPresentation;
   // The full spec ships with the list summary (#95) so evaluating a listed view
   // — including resolving its view_ref leaves — needs no second per-view fetch.
   spec?: ViewSpec | null;
@@ -512,7 +501,6 @@ export type CreateViewRequest = {
   title: string;
   entry_type?: string;
   spec: ViewSpec;
-  presentation?: ViewPresentation;
   layout?: ViewLayout | null;
 };
 
@@ -521,7 +509,6 @@ export type SaveViewRequest = {
   base_revision?: string | null;
   entry_type?: string;
   spec: ViewSpec;
-  presentation?: ViewPresentation;
   layout?: ViewLayout | null;
 };
 

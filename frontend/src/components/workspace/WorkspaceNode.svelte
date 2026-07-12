@@ -201,6 +201,7 @@
     data-group-id={groupId}
     tabindex="-1"
     class:focused={active !== null && active === workspaceLayout.focusedPanel}
+    class:zoomed={droppable && workspaceLayout.zoomedGroupId === groupId}
   >
     <div class="ws-tabbar" role="tablist">
       <div class="ws-tabs">
@@ -243,13 +244,28 @@
           </div>
         {/each}
       </div>
-      {#if active}
+      <!-- Actions rail: per-region/editor actions plus the shell-level zoom
+           toggle (#219, ADR-0038 §F). Real groups only — a collapsed split's
+           synthetic id has no group to maximize. -->
+      {#if droppable}
         <div class="ws-tab-actions">
-          {#if isEditorPanelId(active)}
-            {@render editor.actions(active)}
-          {:else if panelRegistry.get(active)?.actions}
-            {@render panelRegistry.get(active)!.actions!()}
+          {#if active}
+            {#if isEditorPanelId(active)}
+              {@render editor.actions(active)}
+            {:else if panelRegistry.get(active)?.actions}
+              {@render panelRegistry.get(active)!.actions!()}
+            {/if}
           {/if}
+          <button
+            class="ws-zoom"
+            class:active={workspaceLayout.zoomedGroupId === groupId}
+            type="button"
+            title={workspaceLayout.zoomedGroupId === groupId ? "Restore pane" : "Maximize pane"}
+            aria-label={workspaceLayout.zoomedGroupId === groupId ? "Restore pane" : "Maximize pane"}
+            aria-pressed={workspaceLayout.zoomedGroupId === groupId}
+            onmousedown={(event) => event.stopPropagation()}
+            onclick={() => workspaceLayout.toggleZoom(groupId)}
+          >⤢</button>
         </div>
       {/if}
     </div>
@@ -399,6 +415,15 @@
   .ws-group.focused {
     border-color: var(--accent);
   }
+  /* Zoom (#219): CSS-promote this tile to fill the positioned .workspace,
+     painting over the tiled tree beneath — which stays mounted, so no editor
+     remounts on maximize/restore. Sits above the splitters (--z-sticky);
+     popovers/dialogs still layer above it. */
+  .ws-group.zoomed {
+    position: absolute;
+    inset: 0;
+    z-index: var(--z-dropdown);
+  }
 
   /* The bar wraps: when a region is too narrow to fit tabs + actions on one
      row, the actions drop to a second row instead of crowding out / sliding
@@ -482,6 +507,34 @@
     gap: var(--sp-1);
     margin-left: auto;
     padding-left: var(--sp-2);
+  }
+
+  /* Shell zoom toggle — a quiet ghost glyph at rest; accent-tinted while this
+     tile is maximized so the live state reads without a hover (§4 stateful
+     selector). */
+  .ws-zoom {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: var(--sp-5);
+    height: var(--sp-5);
+    padding: 0;
+    border: none;
+    border-radius: var(--r-sm);
+    background: transparent;
+    color: var(--text-3);
+    font-size: var(--fs-md);
+    line-height: 1;
+    cursor: pointer;
+    transition: color var(--t-fast), background var(--t-fast);
+  }
+  .ws-zoom:hover {
+    background: var(--inset);
+    color: var(--text-2);
+  }
+  .ws-zoom.active {
+    background: var(--accent-soft);
+    color: var(--accent-emphasis);
   }
 
   .ws-body {

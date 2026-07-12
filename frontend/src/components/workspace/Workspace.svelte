@@ -31,6 +31,11 @@
   });
 </script>
 
+<!-- Tile zoom (#219) is presentation-only: the full split tree always renders,
+     so no editor (TipTap et al.) ever remounts on maximize/restore. A zoomed
+     group is CSS-promoted (WorkspaceNode: `.ws-group.zoomed`) to fill this
+     positioned container, painting over the tiles beneath — which stay mounted,
+     so restoring re-tiles exactly. -->
 <div class="workspace">
   <WorkspaceNode node={workspaceLayout.root} />
 </div>
@@ -43,6 +48,8 @@
     padding: var(--sp-2);
     background: var(--app-bg);
     overflow: hidden;
+    /* Containing block for a CSS-promoted (zoomed) tile. */
+    position: relative;
   }
   .workspace > :global(.ws-node-fill) {
     flex: 1 1 auto;

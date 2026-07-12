@@ -341,6 +341,14 @@
       focusGroupDom(workspaceLayout.cycleFocus(event.shiftKey ? -1 : 1));
       return;
     }
+    // Ctrl+M: maximize (zoom) the focused tile / restore it (#219, §F). Ctrl
+    // only, NOT Cmd — Cmd+M is the macOS/Electron "minimize window" shortcut
+    // (and preventDefault can't reliably suppress that OS-level chord).
+    if (event.ctrlKey && !event.metaKey && !event.shiftKey && !event.altKey && event.key.toLowerCase() === "m") {
+      event.preventDefault();
+      workspaceLayout.toggleZoomFocused();
+      return;
+    }
     if ((event.ctrlKey || event.metaKey) && event.key >= "1" && event.key <= "9") {
       event.preventDefault();
       focusGroupDom(workspaceLayout.focusGroupByIndex(Number(event.key) - 1));

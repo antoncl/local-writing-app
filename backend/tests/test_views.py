@@ -230,6 +230,21 @@ class ViewSpecModelTests(unittest.TestCase):
         self.assertEqual([g.name for g in spec.groups], ["Cast", "Deities"])
         self.assertEqual(spec.groups[1].color, "amber")
 
+    def test_multi_level_sort_chain_roundtrip(self) -> None:
+        # #230: `then` chains a tiebreaker; stored verbatim, round-trips.
+        spec = ViewSpec(
+            kind="lore",
+            expr={"descendants_of": "lore:base"},
+            sort={"by": "field", "field_key": "team", "dir": "asc", "then": {"by": "title", "dir": "desc"}},
+        )
+        self.assertEqual(spec.sort.by, "field")
+        self.assertEqual(spec.sort.then.by, "title")
+        self.assertEqual(spec.sort.then.dir, "desc")
+        self.assertIsNone(spec.sort.then.then)
+        back = ViewSpec.model_validate(spec.model_dump(exclude_none=True))
+        self.assertEqual(back.sort.then.by, "title")
+        self.assertEqual(back.sort.then.dir, "desc")
+
     def test_per_group_group_by_roundtrip(self) -> None:
         # ADR-0037 Amendment 1: each named group carries its OWN organize levels.
         spec = ViewSpec(

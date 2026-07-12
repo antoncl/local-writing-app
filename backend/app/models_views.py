@@ -214,12 +214,15 @@ class ViewExpr(BaseModel):
 class ViewSort(BaseModel):
     """View ordering, orthogonal to membership (doc §1.5). `by`: "manual" =
     stored/drag order (load-bearing for Assistants), "title" = by node title,
-    "field" = by `field_key`. `dir` applies to title/field. Sort applies within
-    each annotate group."""
+    "field" = by `field_key`. `dir` applies to title/field. `then` is the #230
+    multi-level tiebreaker chain (sort by A, then B, …) — the single-key form
+    (no `then`) is unchanged. The backend stores the chain verbatim and never
+    evaluates it. Sort applies within each annotate group."""
 
     by: Literal["manual", "title", "field"] = "manual"
     field_key: str | None = None
     dir: Literal["asc", "desc"] = "asc"
+    then: ViewSort | None = None
 
     @model_validator(mode="after")
     def _field_key_present(self) -> ViewSort:

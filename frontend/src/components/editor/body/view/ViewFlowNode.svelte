@@ -145,14 +145,58 @@
     { value: "unset", label: "is empty" },
   ];
 
-  // --- sorter helpers ---
-  let sortBy = $derived<ViewSort["by"]>(cfg.sort?.by ?? "manual");
-  let sortDir = $derived<NonNullable<ViewSort["dir"]>>(cfg.sort?.dir ?? "asc");
-  let sortFieldKey = $derived(cfg.sort?.field_key ?? "");
-  function setSort(next: Partial<ViewSort>) {
-    const merged: ViewSort = { by: sortBy, dir: sortDir, field_key: sortFieldKey || undefined, ...next };
-    if (merged.by !== "field") merged.field_key = undefined;
-    patch({ sort: merged });
+  // --- sorter helpers (#230 multi-level: an ordered list of keys ⇄ the `then`
+  // chain). A key is title|field + dir; "manual" = the EMPTY list (input order). ---
+  type SortKey = { by: "title" | "field"; field_key?: string; dir: "asc" | "desc" };
+  function sortToList(sort: ViewSort | null | undefined): SortKey[] {
+    const list: SortKey[] = [];
+    for (let s: ViewSort | null | undefined = sort; s; s = s.then) {
+      if (s.by === "title") list.push({ by: "title", dir: s.dir ?? "asc" });
+      else if (s.by === "field") list.push({ by: "field", field_key: s.field_key, dir: s.dir ?? "asc" });
+      // "manual" carries no ordering key
+    }
+    return list;
+  }
+  function listToSort(list: SortKey[]): ViewSort {
+    // Fold the list into a right-nested `then` chain; empty ⇒ manual order.
+    let chain: ViewSort | null = null;
+    for (let i = list.length - 1; i >= 0; i--) {
+      const k = list[i];
+      chain = {
+        by: k.by,
+        dir: k.dir,
+        ...(k.by === "field" ? { field_key: k.field_key || undefined } : {}),
+        ...(chain ? { then: chain } : {}),
+      };
+    }
+    return chain ?? { by: "manual" };
+  }
+  let sortKeys = $derived<SortKey[]>(sortToList(cfg.sort));
+  function commitSortKeys(list: SortKey[]) {
+    patch({ sort: listToSort(list) });
+  }
+  function addSortKey() {
+    commitSortKeys([...sortKeys, { by: "title", dir: "asc" }]);
+  }
+  function setSortKey(i: number, next: Partial<SortKey>) {
+    commitSortKeys(
+      sortKeys.map((k, j) => {
+        if (j !== i) return k;
+        const merged = { ...k, ...next };
+        if (merged.by !== "field") merged.field_key = undefined;
+        return merged;
+      }),
+    );
+  }
+  function removeSortKey(i: number) {
+    commitSortKeys(sortKeys.filter((_, j) => j !== i));
+  }
+  function moveSortKey(i: number, delta: -1 | 1) {
+    const j = i + delta;
+    if (j < 0 || j >= sortKeys.length) return;
+    const next = [...sortKeys];
+    [next[i], next[j]] = [next[j], next[i]];
+    commitSortKeys(next);
   }
 
   // --- nest (relational op) match-rule helpers ---
@@ -596,25 +640,50 @@
       {@render fieldEditor()}
     {/if}
   {:else if kind === "sorter"}
-    <select class="vfield" value={sortBy} onchange={(e) => setSort({ by: e.currentTarget.value as ViewSort["by"] })}>
-      <option value="manual">Manual (stored order)</option>
-      <option value="title">Title</option>
-      <option value="field">Field…</option>
-    </select>
-    {#if sortBy === "field"}
-      <select class="vfield" value={sortFieldKey} onchange={(e) => setSort({ field_key: e.currentTarget.value })}>
-        <option value="">— field —</option>
-        {#each nodeFields as f (f.key)}
-          <option value={f.key}>{f.name}</option>
-        {/each}
-      </select>
-    {/if}
-    {#if sortBy !== "manual"}
-      <div class="vseg" role="group" aria-label="Sort direction">
-        <button type="button" class:on={sortDir === "asc"} onclick={() => setSort({ dir: "asc" })}>Asc</button>
-        <button type="button" class:on={sortDir === "desc"} onclick={() => setSort({ dir: "desc" })}>Desc</button>
-      </div>
-    {/if}
+    <!-- #230 multi-level sort: an ordered list of keys (sort by A, then B, …). -->
+    <div class="organize">
+      <div class="org-head">Sort by</div>
+      {#each sortKeys as key, i (i)}
+        <div class="handle-row">
+          <select
+            class="vfield lname"
+            value={key.by}
+            onchange={(e) => setSortKey(i, { by: e.currentTarget.value as SortKey["by"] })}
+            aria-label={`Sort key ${i + 1} type`}
+          >
+            <option value="title">Title</option>
+            <option value="field">Field…</option>
+          </select>
+          {#if key.by === "field"}
+            <select
+              class="vfield lname"
+              value={key.field_key ?? ""}
+              onchange={(e) => setSortKey(i, { field_key: e.currentTarget.value })}
+              aria-label={`Sort key ${i + 1} field`}
+            >
+              <option value="">— field —</option>
+              {#each nodeFields as f (f.key)}
+                <option value={f.key}>{f.name}</option>
+              {/each}
+            </select>
+          {/if}
+          <button
+            type="button"
+            class="hbtn"
+            title={key.dir === "desc" ? "Descending (click for ascending)" : "Ascending (click for descending)"}
+            aria-label="Toggle sort direction"
+            onclick={() => setSortKey(i, { dir: key.dir === "desc" ? "asc" : "desc" })}>{key.dir === "desc" ? "Desc" : "Asc"}</button
+          >
+          <button class="hbtn" type="button" title="Move up" aria-label="Move sort key up" disabled={i === 0} onclick={() => moveSortKey(i, -1)}>↑</button>
+          <button class="hbtn" type="button" title="Move down" aria-label="Move sort key down" disabled={i === sortKeys.length - 1} onclick={() => moveSortKey(i, 1)}>↓</button>
+          <button class="hbtn del" type="button" title="Remove sort key" aria-label="Remove sort key" onclick={() => removeSortKey(i)}>×</button>
+        </div>
+      {/each}
+      <button class="add-handle" type="button" title="Add sort key" aria-label="Add sort key" onclick={addSortKey}>+ Add sort key</button>
+      {#if sortKeys.length === 0}
+        <p class="vhint org-empty">No keys → stored/manual order.</p>
+      {/if}
+    </div>
   {:else if kind === "hand_picked"}
     <!-- nodrag + native stop-pointerdown so interacting with the picker doesn't
          drag or select the flow node (Svelte Flow selects on pointerdown; the

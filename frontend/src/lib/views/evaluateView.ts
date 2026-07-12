@@ -1298,30 +1298,54 @@ function intersectAll(sets: Set<string>[]): Set<string> {
   return new Set(acc);
 }
 
+// Flatten a sort `then`-chain into an ordered list of active keys (#230).
+// `by:"manual"` terminates/skips — it carries no ordering (input order).
+function sortKeyChain(sort: ViewSort | null | undefined): ViewSort[] {
+  const chain: ViewSort[] = [];
+  for (let s: ViewSort | null | undefined = sort; s; s = s.then) {
+    if (s.by !== "manual") chain.push(s);
+  }
+  return chain;
+}
+
+// Compare two nodes by ONE sort key. 0 = tie (defer to the next key). Empty/unset
+// values always sort last regardless of direction (a desc sort must not float
+// blanks to the top); `dir` only orders the populated rows.
+function compareByKey<T extends EvalNode>(
+  a: T,
+  b: T,
+  key: ViewSort,
+  schema: MetadataSchema | null | undefined,
+): number {
+  const dir = key.dir === "desc" ? -1 : 1;
+  if (key.by === "title") return dir * a.title.localeCompare(b.title, undefined, { sensitivity: "base" });
+  if (key.by === "field" && key.field_key) {
+    const av = fieldValue(a, key.field_key, schema);
+    const bv = fieldValue(b, key.field_key, schema);
+    const ae = isEmpty(av);
+    const be = isEmpty(bv);
+    if (ae || be) return ae === be ? 0 : ae ? 1 : -1;
+    return dir * compareScalar(av, bv);
+  }
+  return 0;
+}
+
 function sortNodes<T extends EvalNode>(
   nodes: T[],
   sort: ViewSort | null | undefined,
   schema: MetadataSchema | null | undefined,
 ): T[] {
-  if (!sort || sort.by === "manual") return nodes; // input (universe/manual) order
-  const dir = sort.dir === "desc" ? -1 : 1;
-  if (sort.by === "title") {
-    return [...nodes].sort((a, b) => dir * a.title.localeCompare(b.title, undefined, { sensitivity: "base" }));
-  }
-  if (sort.by === "field" && sort.field_key) {
-    const key = sort.field_key;
-    return [...nodes].sort((a, b) => {
-      const av = fieldValue(a, key, schema);
-      const bv = fieldValue(b, key, schema);
-      const ae = isEmpty(av);
-      const be = isEmpty(bv);
-      // Empty/unset values always sort last, regardless of direction; `dir` only
-      // orders the populated rows (a desc sort must not float blanks to the top).
-      if (ae || be) return ae === be ? 0 : ae ? 1 : -1;
-      return dir * compareScalar(av, bv);
-    });
-  }
-  return nodes;
+  const chain = sortKeyChain(sort);
+  if (chain.length === 0) return nodes; // manual/absent → input (universe) order
+  // Multi-key (#230): the first key that breaks the tie wins; a full tie keeps
+  // input order (stable sort). Single-key is the length-1 case, unchanged.
+  return [...nodes].sort((a, b) => {
+    for (const key of chain) {
+      const c = compareByKey(a, b, key, schema);
+      if (c !== 0) return c;
+    }
+    return 0;
+  });
 }
 
 function compareScalar(a: unknown, b: unknown): number {

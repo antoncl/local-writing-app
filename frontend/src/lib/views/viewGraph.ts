@@ -886,7 +886,11 @@ export function specToGraph(spec: ViewSpec | null | undefined, schema?: Metadata
     outputNode.data = { handles };
     groups.forEach((g, i) => attachSegment(g.expr ?? null, handles[i].id, g.sort ?? null));
   } else {
-    attachSegment(spec?.expr ?? null, DEFAULT_HANDLE_ID, null);
+    // A non-manual flat sort reopens as a Sorter node feeding the handle (mirrors
+    // the grouped branch's `g.sort`), so the designer shows it — and a #230 sort
+    // chain round-trips. Manual/absent stays null (no Sorter node for defaults).
+    const flatSort = spec?.sort && spec.sort.by !== "manual" ? spec.sort : null;
+    attachSegment(spec?.expr ?? null, DEFAULT_HANDLE_ID, flatSort);
     // Amendment 1: the single/unnamed group's Organize lives on its lone handle
     // (uniform with named groups), so seed the synthetic `in` handle with the
     // spec's levels. The primary reopen path restores this via the layout cfg.

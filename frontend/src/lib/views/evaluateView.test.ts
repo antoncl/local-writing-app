@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import type { MetadataSchema, ViewExpr, ViewSpec } from "@/lib/types";
+import type { MetadataSchema, ViewExpr, ViewSort, ViewSpec } from "@/lib/types";
 import {
   defaultView,
   evaluateView,
@@ -45,6 +45,37 @@ const ids = (spec: ViewSpec, nodes = NODES, ctx = { schema: SCHEMA }) =>
 
 // The explicit "whole roster" expr — what the default view lowers to (ADR-0036).
 const ALL: ViewSpec["expr"] = { descendants_of: "lore:base" };
+
+describe("multi-level sort (#230)", () => {
+  const roster: EvalNode[] = [
+    { id: "1", entry_type: "lore:character", title: "Bob", metadata: { team: "red" } },
+    { id: "2", entry_type: "lore:character", title: "Alice", metadata: { team: "red" } },
+    { id: "3", entry_type: "lore:character", title: "Dave", metadata: { team: "blue" } },
+    { id: "4", entry_type: "lore:character", title: "Carol", metadata: {} }, // no team → last
+  ];
+  const run = (sort: ViewSort): string[] =>
+    evaluateView({ kind: "lore", expr: ALL, sort } as ViewSpec, roster, { schema: SCHEMA }).nodes.map((n) => n.id);
+
+  it("sorts by A, then breaks ties by B", () => {
+    // team asc (blue<red), tie → title asc; empty team sorts last regardless.
+    const order = run({ by: "field", field_key: "team", dir: "asc", then: { by: "title", dir: "asc" } });
+    expect(order).toEqual(["3", "2", "1", "4"]); // Dave(blue), Alice/Bob(red asc), Carol(empty)
+  });
+  it("the single-key form is unchanged (no `then`)", () => {
+    expect(run({ by: "title", dir: "asc" })).toEqual(["2", "1", "4", "3"]); // Alice, Bob, Carol, Dave
+  });
+  it("a full tie across all keys keeps input order (stable)", () => {
+    // Everyone ties on team=... no: give a constant key, tiebreak absent → input order.
+    const tie = [
+      { id: "x", entry_type: "lore:character", title: "Z", metadata: { team: "red" } },
+      { id: "y", entry_type: "lore:character", title: "Z", metadata: { team: "red" } },
+    ];
+    const order = evaluateView({ kind: "lore", expr: ALL, sort: { by: "field", field_key: "team" } } as ViewSpec, tie, {
+      schema: SCHEMA,
+    }).nodes.map((n) => n.id);
+    expect(order).toEqual(["x", "y"]);
+  });
+});
 
 describe("isBareDescendantsOf (dense-null tolerant whole-roster detection)", () => {
   it("accepts a sparse whole-roster expr", () => {

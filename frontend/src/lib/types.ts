@@ -375,6 +375,10 @@ export type ViewSort = {
   by: "manual" | "title" | "field";
   field_key?: string;
   dir?: "asc" | "desc";
+  // #230 multi-level sort: a tiebreaker applied when this key compares equal
+  // (sort by A, then B, …). A chain of `{by,dir,field_key}` keys; the single-key
+  // form (no `then`) is unchanged. `by:"manual"` in a chain is a no-op key.
+  then?: ViewSort | null;
 };
 
 // One named group = one named input handle on the View node (ADR-0027 §D/§E,

@@ -371,6 +371,21 @@ describe("sorter (per-segment sort)", () => {
     expect(spec.sort).toEqual({ by: "title", dir: "asc" });
   });
 
+  it("carries a multi-level sort chain (#230) through the Sorter node verbatim", () => {
+    const chain = { by: "field" as const, field_key: "rank", dir: "desc" as const, then: { by: "title" as const, dir: "asc" as const } };
+    const src = node("type", { type: "lore:character" }, 0);
+    const s = node("sorter", { sort: chain }, 100);
+    const graph: ViewGraph = {
+      nodes: [out(), src, s],
+      edges: [edge(src.id, s.id), edge(s.id, OUTPUT_NODE_ID)],
+    };
+    const spec = graphToSpec(graph, { kind: "lore" });
+    expect(spec.sort).toEqual(chain);
+    // and specToGraph rebuilds the Sorter with the chain intact.
+    const back = graphToSpec(specToGraph(spec), { kind: "lore" });
+    expect(back.sort).toEqual(chain);
+  });
+
   it("a Sorter before a handle sets that group's sort", () => {
     const output = out({ handles: [{ id: "h0", name: "Cast" }, { id: "h1", name: "Gods" }] });
     const cast = node("type", { type: "lore:character" }, 0);

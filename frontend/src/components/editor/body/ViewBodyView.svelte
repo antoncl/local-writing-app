@@ -817,7 +817,11 @@
       >
         <Background />
         <Controls />
-        <FitView trigger={`${loadedViewId}:${flowNodes.length}`} />
+        <!-- Reframe on view LOAD only (the opened id), NOT on node count: keying
+             on flowNodes.length re-fit the viewport on every drop/delete, shifting
+             the origin under the author (§E insertion already places nodes in
+             view — pointer for drop, viewport centre for click). -->
+        <FitView trigger={loadedViewId} />
       </SvelteFlow>
       {#if flowNodes.length <= 1}
         <!-- Overlay, NOT a Svelte Flow <Panel>: a Panel captures pointer events

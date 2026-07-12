@@ -138,7 +138,8 @@ class ViewCrudTests(unittest.TestCase):
         )
         self.assertEqual(ok.status_code, 200, ok.text)
         self.assertEqual(
-            ok.json()["spec"], {"kind": "scene", "expr": None, "groups": None, "sort": None, "params": None}
+            ok.json()["spec"],
+            {"kind": "scene", "expr": None, "groups": None, "sort": None, "params": None, "group_by": None},
         )
 
     def test_delete_removes_view(self) -> None:
@@ -545,13 +546,51 @@ class ViewUiStateTests(unittest.TestCase):
         )
         self.assertEqual(res.status_code, 200, res.text)
         body = res.json()
-        # Materialized as the read-only whole-kind roster: descendants_of the
-        # scene kind's parentless root (scene:base), with the fold state applied.
+        # Materialized as the read-only structural default (ADR-0037 §7): a
+        # recursive containment Nest over the `parent` relation, roots =
+        # parentless, children = the whole scene roster.
         self.assertTrue(body["system"])
         self.assertEqual(body["spec"]["kind"], "scene")
-        self.assertEqual(body["spec"]["expr"]["descendants_of"], "scene:base")
+        nest = body["spec"]["expr"]["nest"]
+        self.assertTrue(nest["recursive"])
+        self.assertEqual(nest["match"], {"field": "parent", "direction": "child_to_parent", "by": "ref"})
+        self.assertEqual(nest["parents"]["field"]["key"], "parent")
+        self.assertEqual(nest["parents"]["field"]["op"], "unset")
+        self.assertEqual(nest["children"]["descendants_of"], "scene:base")
         self.assertEqual(body["presentation"], "tree")
         self.assertEqual(body["ui"]["collapsed"], ["node:act1"])
+
+    def test_materialized_lore_default_groups_by_entry_type(self) -> None:
+        # ADR-0037 §7: the Lore default is a real grouped view — the whole-kind
+        # roster with a group_by entry_type level (alphabetical labels) — not a
+        # flat spec the pane re-shapes.
+        res = self.client.put(
+            "/api/views/view_default_lore/ui", json={"ui": {"collapsed": ["group:x"]}}
+        )
+        self.assertEqual(res.status_code, 200, res.text)
+        body = res.json()
+        self.assertEqual(body["spec"]["expr"]["descendants_of"], "lore:base")
+        self.assertEqual(body["spec"]["group_by"], [{"field": "entry_type", "order": "label"}])
+
+    def test_group_by_and_orphans_round_trip_through_create_and_read(self) -> None:
+        # ADR-0037: group_by levels and the nest orphans policy are stored
+        # verbatim and survive create → read (the backend never evaluates them).
+        spec = {
+            "kind": "lore",
+            "expr": {
+                "nest": {
+                    "parents": {"type": "lore:location"},
+                    "children": {"descendants_of": "lore:base"},
+                    "match": {"field": "located_in", "direction": "child_to_parent", "by": "ref"},
+                    "orphans": "keep",
+                }
+            },
+            "group_by": [{"field": "entry_type"}],
+        }
+        created = self._create("Paris view", spec)
+        got = self.client.get(f"/api/views/{created['id']}").json()
+        self.assertEqual(got["spec"]["group_by"], [{"field": "entry_type", "order": None}])
+        self.assertEqual(got["spec"]["expr"]["nest"]["orphans"], "keep")
 
     def test_materialized_default_is_listed_and_reused_on_next_write(self) -> None:
         self.client.put("/api/views/view_default_scene/ui", json={"ui": {"collapsed": ["node:a"]}})

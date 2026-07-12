@@ -123,12 +123,17 @@ class NestOp(BaseModel):
     universe (the evaluator's `null expr = universe` convention). Seed `parents`
     with the roots (a `field: {op: unset}` leaf) for a clean tree; leaving it the
     universe yields a *thicket* (a subtree rooted at every node, ADR-0028 §C).
-    `match` is required — without a rule there is no join."""
+    `match` is required — without a rule there is no join.
+
+    `orphans` (ADR-0037, #216): what happens to a candidate child that matched
+    no parent — "drop" (the default; counted in diagnostics) or "keep" (the
+    orphan stays at the root as a bare row — the who-lives-where pattern)."""
 
     parents: ViewExpr | None = None
     children: ViewExpr | None = None
     match: NestMatch
     recursive: bool = False
+    orphans: Literal["keep", "drop"] | None = None
 
 
 # The mutually-exclusive "primary" slots on a ViewExpr node: exactly one is set.
@@ -253,6 +258,19 @@ class ViewParam(BaseModel):
     default: Any = None
 
 
+class ViewGroupByLevel(BaseModel):
+    """One ADR-0037 §2 organize level — ν by attribute, on the result. `field`
+    is any groupable field of the input set's kind (enum/select, the intrinsic
+    entry_type, a reference field → real-node buckets; a multi-valued field
+    fans a row out under each value; a missing value leaves the row bare at the
+    level). Bucket order is first-seen in row order unless `order: "label"`
+    opts into alphabetical-by-label. The backend stores levels verbatim and
+    never evaluates them (ADR-0025)."""
+
+    field: str = Field(min_length=1)
+    order: Literal["label"] | None = None
+
+
 class ViewSpec(BaseModel):
     """A kind-anchored membership expression + ordering — the portable core of a
     view. Membership is EITHER a single `expr` (flat view) OR an ordered
@@ -261,13 +279,17 @@ class ViewSpec(BaseModel):
     degenerate "all nodes of this kind" spec a kind-only picker source uses).
     Entry_type refs inside `expr` are FQN (#77). `sort` is the fallback when a
     group carries no per-segment sort. `params` declares runtime formals (#184);
-    a view with none is the degenerate closed case (existing views are unchanged)."""
+    a view with none is the degenerate closed case (existing views are unchanged).
+    `group_by` (ADR-0037 §2) is the ordered organize-level list — orthogonal to
+    the expr-XOR-groups rule (handles compose: handles outermost, levels
+    innermost)."""
 
     kind: str = Field(min_length=1)
     expr: ViewExpr | None = None
     groups: list[ViewGroupSpec] | None = None
     sort: ViewSort | None = None
     params: list[ViewParam] | None = None
+    group_by: list[ViewGroupByLevel] | None = None
 
     @model_validator(mode="after")
     def _expr_xor_groups(self) -> ViewSpec:

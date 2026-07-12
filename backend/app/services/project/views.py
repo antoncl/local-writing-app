@@ -18,9 +18,13 @@ from typing import Any
 
 from app.models_views import (
     CreateViewRequest,
+    FieldPredicate,
+    NestMatch,
+    NestOp,
     SaveViewRequest,
     UpdateViewUiRequest,
     ViewExpr,
+    ViewGroupByLevel,
     ViewLayout,
     ViewNode,
     ViewNodeList,
@@ -180,19 +184,19 @@ class ViewsMixin:
 
     def _materialize_default_view(self, view_id: str, ui: ViewUiState) -> ViewNode:
         """Write the read-only system default view node for a `view_default_<kind>`
-        id (ADR-0036 §5). Its spec is the whole-kind roster — `descendants_of` the
-        kind's parentless root type — which is exactly what the frontend's
-        `defaultView(kind)` lowers to, so a later Duplicate starts from the real
-        default. Marked `system: true` (Duplicate-not-Edit; save_view rejects it)."""
+        id (ADR-0036 §5). Its spec is the kind's honest default (ADR-0037 §7) —
+        matching what the frontend's `defaultView(kind)` produces, so a later
+        Duplicate starts from the real default. Marked `system: true`
+        (Duplicate-not-Edit; save_view rejects it)."""
         root = self._require_project()
         kind = view_id[len(DEFAULT_VIEW_ID_PREFIX):]
         root_type = self._kind_root_entry_type(kind)
         if not root_type:
             raise ProjectServiceError(f"No default view is defined for kind '{kind}'.", 422)
-        spec = ViewSpec(kind=kind, expr=ViewExpr(descendants_of=root_type))
-        # Draft renders a structural tree; the other explicit panes render flat/
-        # grouped rosters. Stored for the Duplicate path; the pane's own default
-        # render ignores it (selection stays null → frontend `defaultView`).
+        spec = self._default_view_spec(kind, root_type)
+        # Interim presentation hint (deleted by the ADR-0037 §3 sweep): Draft
+        # still renders a structural tree off it until the frontend consumes the
+        # containment-nest spec directly.
         presentation: ViewPresentation = "tree" if kind == "scene" else "flat"
         (root / "views").mkdir(parents=True, exist_ok=True)
         self._write_view_file(
@@ -218,6 +222,32 @@ class ViewsMixin:
             if definition.kind == kind and not definition.parent:
                 return fqn
         return None
+
+    @staticmethod
+    def _default_view_spec(kind: str, root_type: str) -> ViewSpec:
+        """The per-kind system default spec (ADR-0037 §7). Lore groups by
+        entry_type (alphabetical labels); Assistants by source layer (first-seen
+        keeps the machine layer first); the structural kinds (scene/research)
+        are a recursive containment Nest over the `parent` relation (roots =
+        parentless); every other kind stays the plain whole-kind roster."""
+        roster = ViewExpr(descendants_of=root_type)
+        if kind in ("scene", "research"):
+            return ViewSpec(
+                kind=kind,
+                expr=ViewExpr(
+                    nest=NestOp(
+                        parents=ViewExpr(field=FieldPredicate(key="parent", op="unset")),
+                        children=roster,
+                        match=NestMatch(field="parent", direction="child_to_parent", by="ref"),
+                        recursive=True,
+                    )
+                ),
+            )
+        if kind == "lore":
+            return ViewSpec(kind=kind, expr=roster, group_by=[ViewGroupByLevel(field="entry_type", order="label")])
+        if kind == "assistant":
+            return ViewSpec(kind=kind, expr=roster, group_by=[ViewGroupByLevel(field="source_layer")])
+        return ViewSpec(kind=kind, expr=roster)
 
     # ----- helpers --------------------------------------------------------
 

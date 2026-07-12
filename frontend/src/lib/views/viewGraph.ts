@@ -253,13 +253,12 @@ export type ViewNodeData = {
   // value-set that feeds only a Filter value slot authored on a scalar field
   // (#196 — the two-payload pipe, `outputPayload`/`valueSlotAccepts`).
   project_field?: string;
-  // output (View) — the named handles / groups
+  // output (View) — the named handles / groups. ADR-0037 §2/§8 + Amendment 1:
+  // each handle carries its own ordered organize levels (`ViewHandle.group_by`,
+  // ν by attribute) — result-node CONFIG, not graph shape (lifts/lowers with the
+  // spec, adds no canvas node, never competes with Nest). The single/unnamed
+  // group's levels live on the synthetic `in` handle.
   handles?: ViewHandle[];
-  // output (View) — ADR-0037 §2/§8 ordered organize levels (ν by attribute).
-  // Result-node CONFIG, not graph shape: lifts/lowers with the spec (see
-  // graphToSpec/specToGraph) and adds no canvas node, so it can never compete
-  // with Nest as a hierarchy-maker.
-  group_by?: ViewGroupByLevel[];
   // legacy annotate group slots (kept so pre-#91 layouts don't crash on load)
   label?: string;
   rank?: number;
@@ -804,9 +803,10 @@ export function graphToSpec(
 
   if (handles.length <= 1 || populated.length <= 1) {
     // Single/unnamed group: its Organize rides on the spec as `group_by`
-    // (ADR-0037 §2, unchanged by Amendment 1 — this is the "one implicit group").
+    // (ADR-0037 §2). Amendment 1 — the levels live on the lone handle (uniform
+    // with named groups), so lower them from there, not the output-node config.
     const seg = populated[0];
-    const groupBy = byId.get(OUTPUT_NODE_ID)?.data.group_by?.filter((l) => l.field) ?? [];
+    const groupBy = seg?.handle.group_by?.filter((l) => l.field) ?? [];
     return withParams({
       kind: base.kind,
       expr: seg ? materializeOuter(seg.built, universeExpr) : null,
@@ -887,10 +887,12 @@ export function specToGraph(spec: ViewSpec | null | undefined, schema?: Metadata
     groups.forEach((g, i) => attachSegment(g.expr ?? null, handles[i].id, g.sort ?? null));
   } else {
     attachSegment(spec?.expr ?? null, DEFAULT_HANDLE_ID, null);
-    // The single/unnamed group's Organize is output-node config (ADR-0037 §2).
-    // The primary reopen path restores it via the persisted layout cfg; this
-    // covers the spec-only fallback reopen.
-    if (spec?.group_by && spec.group_by.length > 0) outputNode.data.group_by = spec.group_by;
+    // Amendment 1: the single/unnamed group's Organize lives on its lone handle
+    // (uniform with named groups), so seed the synthetic `in` handle with the
+    // spec's levels. The primary reopen path restores this via the layout cfg.
+    if (spec?.group_by && spec.group_by.length > 0) {
+      outputNode.data.handles = [{ id: DEFAULT_HANDLE_ID, name: "", group_by: spec.group_by }];
+    }
   }
 
   layoutColumns(nodes, outputNode, rowCursor);

@@ -365,16 +365,14 @@
     [next[i], next[j]] = [next[j], next[i]];
     commit(next);
   }
-  // The two owner bindings: the single/unnamed group (output-node `group_by`,
-  // unchanged from #229) and a named handle (its own `group_by`).
-  const commitSingleLevels: LevelCommit = (next) => patch({ group_by: next });
+  // Organize is ALWAYS owned by a handle (ADR-0037 Amendment 1), including the
+  // single/unnamed group (the synthetic `in` handle). One uniform binding — no
+  // single-vs-grouped switch — so a group + its Organize move, add, and delete as
+  // one unit (graphToSpec lowers a lone handle's `group_by` to `ViewSpec.group_by`).
   function commitHandleLevels(hid: string): LevelCommit {
     return (next) =>
       commitHandles(handles.map((h) => (h.id === hid ? { ...h, group_by: next.length > 0 ? next : undefined } : h)));
   }
-  // Multiple named groups → Organize lives under each group; a single/unnamed
-  // group keeps one standalone Organize section (ADR-0037 Amendment 1).
-  let grouped = $derived(handles.length > 1);
 </script>
 
 {#snippet typeSelect(useDescendants: boolean)}
@@ -699,20 +697,16 @@
             <button class="hbtn" title="Move down" aria-label="Move group down" disabled={i === handles.length - 1} onclick={() => moveHandle(h.id, 1)}>↓</button>
             <button class="hbtn del" title="Remove group" aria-label="Remove group" disabled={handles.length <= 1} onclick={() => removeHandle(h.id)}>×</button>
           </div>
-          <!-- Amendment 1: with named groups, each group owns its Organize. -->
-          {#if grouped}
-            <div class="group-organize">
-              {@render organizeSection(h.group_by ?? [], commitHandleLevels(h.id))}
-            </div>
-          {/if}
+          <!-- Amendment 1: each group owns its Organize (the single/unnamed group
+               too — its lone handle carries the levels). Group + Organize = one
+               unit; the "+ add group" below adds another. -->
+          <div class="group-organize">
+            {@render organizeSection(h.group_by ?? [], commitHandleLevels(h.id))}
+          </div>
         </div>
       {/each}
-      <button class="add-handle" type="button" title="Add handle group" aria-label="Add handle group" onclick={addHandle}>+</button>
+      <button class="add-handle" type="button" title="Add handle group" aria-label="Add handle group" onclick={addHandle}>+ Add group</button>
     </div>
-    <!-- Single/unnamed group: one standalone Organize (ADR-0037 §2, unchanged). -->
-    {#if !grouped}
-      {@render organizeSection(cfg.group_by ?? [], commitSingleLevels)}
-    {/if}
   {/if}
 
   <!-- source port (right) — tinted `value` when this node emits a value-set. -->

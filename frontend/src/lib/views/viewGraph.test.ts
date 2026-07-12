@@ -284,8 +284,8 @@ describe("group_by (organize levels, ADR-0037 §2/§8)", () => {
     expect(graphToSpec(graph, { kind: "lore" })).not.toHaveProperty("group_by");
   });
 
-  it("output-node levels lower onto a flat expr spec", () => {
-    const output = out({ group_by: [{ field: "entry_type", order: "label" }, { field: "rank" }] });
+  it("the single/unnamed group's levels (on its `in` handle) lower onto a flat expr spec", () => {
+    const output = out({ handles: [{ id: "in", name: "", group_by: [{ field: "entry_type", order: "label" }, { field: "rank" }] }] });
     const leaf = node("descendants_of", { descendants_of: "lore:base" }, 0);
     const graph: ViewGraph = { nodes: [output, leaf], edges: [edge(leaf.id, OUTPUT_NODE_ID)] };
     const spec = graphToSpec(graph, { kind: "lore" });
@@ -314,15 +314,17 @@ describe("group_by (organize levels, ADR-0037 §2/§8)", () => {
   });
 
   it("drops blank-field levels (a half-authored dropdown never persists)", () => {
-    const output = out({ group_by: [{ field: "" }, { field: "rank" }] });
+    const output = out({ handles: [{ id: "in", name: "", group_by: [{ field: "" }, { field: "rank" }] }] });
     const leaf = node("type", { type: "lore:character" }, 0);
     const graph: ViewGraph = { nodes: [output, leaf], edges: [edge(leaf.id, OUTPUT_NODE_ID)] };
     expect(graphToSpec(graph, { kind: "lore" }).group_by).toEqual([{ field: "rank" }]);
   });
 
-  it("specToGraph lifts group_by onto the output node (flat) and onto each handle (grouped, Amendment 1)", () => {
+  it("specToGraph seeds the `in` handle (flat) and each handle (grouped) with its group_by (Amendment 1)", () => {
     const flat = specToGraph({ kind: "lore", expr: { descendants_of: "lore:base" }, group_by: [{ field: "entry_type" }] });
-    expect(flat.nodes.find((n) => n.id === OUTPUT_NODE_ID)?.data.group_by).toEqual([{ field: "entry_type" }]);
+    const flatHandles = flat.nodes.find((n) => n.id === OUTPUT_NODE_ID)?.data.handles;
+    expect(flatHandles?.[0].id).toBe("in");
+    expect(flatHandles?.[0].group_by).toEqual([{ field: "entry_type" }]);
     const grouped = specToGraph({
       kind: "lore",
       groups: [
@@ -333,8 +335,6 @@ describe("group_by (organize levels, ADR-0037 §2/§8)", () => {
     const handles = grouped.nodes.find((n) => n.id === OUTPUT_NODE_ID)?.data.handles;
     expect(handles?.[0].group_by).toEqual([{ field: "rank" }]);
     expect(handles?.[1].group_by).toBeUndefined();
-    // A grouped spec puts no group_by on the output node itself.
-    expect(grouped.nodes.find((n) => n.id === OUTPUT_NODE_ID)?.data.group_by).toBeUndefined();
   });
 
   it("round-trips the unnamed group's group_by through specToGraph → graphToSpec", () => {

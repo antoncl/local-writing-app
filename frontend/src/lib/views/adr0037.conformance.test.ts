@@ -121,7 +121,7 @@ describe("ADR-0037 §2: group_by levels", () => {
     expect(lore({ expr: ALL }).groups).toBeNull();
   });
 
-  it.fails("one entry_type level → synthetic buckets labelled by type display name, first-seen order", () => {
+  it("one entry_type level → synthetic buckets labelled by type display name, first-seen order", () => {
     const r = lore({ expr: ALL, group_by: [{ field: "entry_type" }] });
     // Roster order: paris (Location) first, then amelie (Character), then dagger (Item).
     expect(shape(r.groups)).toEqual([
@@ -135,18 +135,18 @@ describe("ADR-0037 §2: group_by levels", () => {
     expect(nodeIds(r)).toEqual(["paris", "marseille", "amelie", "bruno", "celine", "dagger", "elixir"]);
   });
 
-  it.fails('order: "label" → alphabetical by bucket label', () => {
+  it('order: "label" → alphabetical by bucket label', () => {
     const r = lore({ expr: ALL, group_by: [{ field: "entry_type", order: "label" }] });
     expect((r.groups ?? []).map((g) => g.label)).toEqual(["Character", "Item", "Location"]);
   });
 
-  it.fails("first-seen bucket order follows the view's sort (sort reorders rows → reorders buckets)", () => {
+  it("first-seen bucket order follows the view's sort (sort reorders rows → reorders buckets)", () => {
     const r = lore({ expr: ALL, sort: { by: "title", dir: "asc" }, group_by: [{ field: "entry_type" }] });
     // Titles asc: Amelie (Character) first, Dagger (Item) before Marseille (Location).
     expect((r.groups ?? []).map((g) => g.label)).toEqual(["Character", "Item", "Location"]);
   });
 
-  it.fails("a select level buckets by value, LABELLED by the option label", () => {
+  it("a select level buckets by value, LABELLED by the option label", () => {
     const r = lore({ expr: { type: "lore:character" }, group_by: [{ field: "rank" }] });
     expect(shape(r.groups)).toEqual([
       ["Knight", ["Amelie", "Celine"]],
@@ -154,7 +154,7 @@ describe("ADR-0037 §2: group_by levels", () => {
     ]);
   });
 
-  it.fails("a reference-field level → REAL-NODE buckets (openable headers); a missing value leaves the row bare at that level", () => {
+  it("a reference-field level → REAL-NODE buckets (openable headers); a missing value leaves the row bare at that level", () => {
     const r = lore({ expr: { type: "lore:character" }, group_by: [{ field: "located_in" }] });
     expect(shape(r.groups)).toEqual([
       ["Paris", ["Amelie"]],
@@ -169,7 +169,7 @@ describe("ADR-0037 §2: group_by levels", () => {
     expect(nodeIds(r)).toEqual(["amelie", "bruno", "celine"]);
   });
 
-  it.fails("a multi-valued level fans a row out under each value; membership stays deduped (ADR-0027 §E)", () => {
+  it("a multi-valued level fans a row out under each value; membership stays deduped (ADR-0027 §E)", () => {
     const r = lore({ expr: { hand_picked: ["celine"] }, group_by: [{ field: "tags" }] });
     expect(shape(r.groups)).toEqual([
       ["hero", ["Celine"]],
@@ -178,7 +178,7 @@ describe("ADR-0037 §2: group_by levels", () => {
     expect(nodeIds(r)).toEqual(["celine"]);
   });
 
-  it.fails("levels nest in declared order (outer first)", () => {
+  it("levels nest in declared order (outer first)", () => {
     const r = lore({ expr: { type: "lore:character" }, group_by: [{ field: "entry_type" }, { field: "rank" }] });
     expect(shape(r.groups)).toEqual([
       ["Character", [
@@ -188,7 +188,7 @@ describe("ADR-0037 §2: group_by levels", () => {
     ]);
   });
 
-  it.fails("handles compose with levels: handles outermost, levels innermost", () => {
+  it("handles compose with levels: handles outermost, levels innermost", () => {
     const r = lore({
       groups: [
         { name: "Cast", expr: { type: "lore:character" } },
@@ -211,7 +211,7 @@ describe("ADR-0037 §2: group_by levels", () => {
 // §6 — provenance: which buckets collapse, who is a member
 // ---------------------------------------------------------------------------
 describe("ADR-0037 §6: provenance rules", () => {
-  it.fails("a LONE group_by bucket keeps its header (declared grouping never collapses to flat)", () => {
+  it("a LONE group_by bucket keeps its header (declared grouping never collapses to flat)", () => {
     // A Lore project holding only characters must still show the "Character"
     // header — the day-one regression the ADR calls out.
     const r = lore({ expr: { type: "lore:character" }, group_by: [{ field: "entry_type" }] });
@@ -241,7 +241,7 @@ describe("ADR-0037 §4: containment Nest", () => {
     expect(new Set(nodeIds(r))).toEqual(new Set(["act1", "ch1", "ch2", "s1", "s2"]));
   });
 
-  it.fails('orphans: "keep" — unmatched children stay at the root as bare rows (the who-lives-where pattern)', () => {
+  it('orphans: "keep" — unmatched children stay at the root as bare rows (the who-lives-where pattern)', () => {
     const r = lore({
       expr: {
         nest: {
@@ -266,7 +266,7 @@ describe("ADR-0037 §4: containment Nest", () => {
 // §5 — the row-preserving pipeline: σ over (node, path) rows
 // ---------------------------------------------------------------------------
 describe("ADR-0037 §5: row-preserving σ/∩/−", () => {
-  it.fails("filter AFTER nest: leaf test with path carried — ancestors revive from paths, empty branches self-prune", () => {
+  it("filter AFTER nest: leaf test with path carried — ancestors revive from paths, empty branches self-prune", () => {
     const r = ms({ expr: { intersect: [CONTAINMENT, { field: { key: "status", op: "overlap", value: "draft" } }] } });
     // Ch 1 fails the filter itself but is revived by Scene 1's parent list;
     // Ch 2 and Scene 2 have no surviving row → gone.
@@ -276,7 +276,7 @@ describe("ADR-0037 §5: row-preserving σ/∩/−", () => {
     expect(nodeIds(r)).toEqual(["s1"]);
   });
 
-  it.fails("difference over rows removes σ-matching leaves, keeps the surviving structure", () => {
+  it("difference over rows removes σ-matching leaves, keeps the surviving structure", () => {
     const r = ms({ expr: { difference: { keep: CONTAINMENT, remove: { field: { key: "status", op: "overlap", value: "done" } } } } });
     expect(shape(r.groups)).toEqual([
       ["Act 1", [
@@ -288,7 +288,7 @@ describe("ADR-0037 §5: row-preserving σ/∩/−", () => {
     expect(new Set(nodeIds(r))).toEqual(new Set(["act1", "ch1", "ch2", "s1"]));
   });
 
-  it.fails("intersect with a hand-picked node-set = leaf-membership σ, structure preserved", () => {
+  it("intersect with a hand-picked node-set = leaf-membership σ, structure preserved", () => {
     const r = ms({ expr: { intersect: [CONTAINMENT, { hand_picked: ["s1", "ch2"] }] } });
     expect(shape(r.groups)).toEqual([
       ["Act 1", [
@@ -342,7 +342,7 @@ describe("ADR-0037 §5: row-preserving σ/∩/−", () => {
 // §2 + §4 + §5 — the flagship: the Paris view, end to end
 // ---------------------------------------------------------------------------
 describe("ADR-0037: the Paris view (nest + orphans keep + group_by)", () => {
-  it.fails("universal entities' type buckets sit beside city headers; each city re-groups by type", () => {
+  it("universal entities' type buckets sit beside city headers; each city re-groups by type", () => {
     const r = lore({
       expr: {
         nest: {

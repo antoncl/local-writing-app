@@ -75,11 +75,35 @@ export function isIntrinsicField(schema: MetadataSchema | null | undefined, key:
 // color part (doc §1.3). Grouping no longer stamps here — it lives in handles.
 export type ViewAnnotation = { color: string | null };
 
+// Where a path segment came from (ADR-0037 §6). Replaces the former global
+// `treePresentation` membership flag with a per-segment rule:
+//  - `handle`  — a named-handle group (ADR-0027 §D); synthetic, nodeId null.
+//  - `field`   — a `group_by` level (ADR-0037 §2). A reference-field level
+//                carries a real `nodeId` (an openable bucket header) but is
+//                NEVER a member: it is a VALUE the algebra surfaced (§6), not a
+//                node the view selected.
+//  - `placed`  — a Nest-placed real node (ADR-0028) that passed selection → a
+//                member (an interior parent header that is also in `nodes`).
+//  - `revived` — an ancestor materialized from a surviving row's path that did
+//                NOT itself pass selection (a σ-filtered tree's acts/chapters, a
+//                structural ancestry segment): context/scaffolding, not a member.
+export type SegmentOrigin = "handle" | "field" | "placed" | "revived";
+
 // One nesting level in a row's `path` (ADR-0027 §E, #101). `nodeId` set => the
 // segment IS a real node (a structure container) and renders as a collapsible
-// NodeRow; `null` => a synthetic group label (a named handle). `color` is an
-// optional group tint (handles carry one; structure segments don't).
-export type PathSegment = { key: string; label: string; nodeId: string | null; color?: string | null };
+// NodeRow; `null` => a synthetic group label (a named handle or a synthetic
+// `group_by` bucket). `color` is an optional group tint (handles carry one;
+// structure segments don't). `origin` (ADR-0037 §6) drives membership + the
+// collapse rules; `order: "label"` on a §2 field level opts its sibling buckets
+// into alphabetical-by-label ordering (default is first-seen in row order).
+export type PathSegment = {
+  key: string;
+  label: string;
+  nodeId: string | null;
+  color?: string | null;
+  origin?: SegmentOrigin;
+  order?: "label";
+};
 
 // A denormalized evaluator row: a member node tagged with its `path` — the
 // nesting segments outer→inner (handle names for grouped views, or structural
@@ -100,8 +124,12 @@ export type ViewGroup<T extends EvalNode = EvalNode> = {
   color: string | null;
   nodeId: string | null;
   // The concrete node for a real-node group (leaf or container); null for a
-  // synthetic handle bucket. Lets a renderer draw a leaf from its group alone.
+  // synthetic handle/field bucket. Lets a renderer draw a leaf from its group.
   node: T | null;
+  // ADR-0037 §6: the origin of the segment that produced this group. Drives the
+  // collapse rules (only `handle` buckets collapse to flat); absent on the leaf
+  // node's own group (a member row, not a produced segment).
+  origin?: SegmentOrigin;
   children: ViewGroup<T>[];
 };
 
@@ -301,30 +329,42 @@ export function evaluateView<T extends EvalNode>(
   const groups = spec.groups && spec.groups.length > 0 ? spec.groups : null;
   // Both paths yield denormalized `(node, path)` rows. `evalSource` carries
   // nesting: a handle whose source is a bare grouped `view_ref` contributes that
-  // view's group structure (multi-segment paths), and a `union` concatenates its
-  // operands' rows preserving each row's path. A top-level bare grouped view_ref
-  // (no handles) likewise inherits the referenced view's groups directly.
-  const rows = groups
+  // view's group structure (multi-segment paths), a `union` concatenates its
+  // operands' rows preserving each row's path, a `nest` denormalizes a join, and
+  // an intersect/difference whose structure-carrying operand is a row-producer
+  // filters those rows leaf-wise while carrying paths (ADR-0037 §5). A top-level
+  // bare grouped view_ref (no handles) inherits the referenced view's groups.
+  const pipelineRows = groups
     ? evalGroups(state, groups, spec.sort)
     : evalSource(state, spec.expr ?? null, spec.sort);
 
   // Tree presentation (#101, #181): each row's node nests under its structural
   // `ancestry` — appended so ancestry is *just another path source* and composes
-  // with handle grouping (group by status → a chapter tree within each bucket).
-  // Ancestor containers materialize from the segments (kept even when not
-  // members), so a filtered tree keeps a match's ancestors and self-prunes empty
-  // branches. The `treePresentation` flag makes normalize (a) exclude ancestor
-  // segments from flat membership (they are context, not matches — unlike a
-  // nest's real-node parents, which ARE members) and (b) always build node
-  // groups, even when every match is top-level (empty ancestry): a flat set of
-  // scenes is still a tree of leaf nodes, and collapsing it to `groups: null`
-  // would blank `treeNodeIds` and hide the Draft tree.
-  if (spec.presentation === "tree") {
-    const nested = rows.map((r) => ({ node: r.node, path: [...r.path, ...(r.node.ancestry ?? [])] }));
-    return normalize(state, nested, true);
-  }
+  // with handle grouping. Ancestor segments are stamped `revived` (ADR-0037 §6):
+  // pure structural context, excluded from flat membership, so a filtered tree
+  // keeps a match's ancestors and self-prunes empty branches while listing only
+  // the matched leaves. DEPRECATED by ADR-0037 §3 (grouping belongs to the view
+  // via `group_by`/`nest`); kept until the §3 sweep so StructureTree still works.
+  const treePresentation = spec.presentation === "tree";
+  const structuredRows = treePresentation
+    ? pipelineRows.map((r) => ({ node: r.node, path: [...r.path, ...revivedAncestry(r.node)] }))
+    : pipelineRows;
 
-  return normalize(state, rows, false);
+  // ADR-0037 §2: `group_by` levels append one path segment above the leaf,
+  // beneath every pipeline-produced segment, in declared order — ν by attribute
+  // on the already-denormalized rows. Then the existing `normalize` runs
+  // unchanged (handles outermost, pipeline/nest segments, then levels innermost).
+  const rows =
+    spec.group_by && spec.group_by.length > 0 ? applyGroupBy(state, structuredRows, spec.group_by) : structuredRows;
+
+  return normalize(state, rows, treePresentation);
+}
+
+// A node's structural ancestry (#101) stamped `revived` (ADR-0037 §6): the
+// container segments above it are context, not members. Empty for non-tree
+// callers (they omit `ancestry`).
+function revivedAncestry(node: EvalNode): PathSegment[] {
+  return (node.ancestry ?? []).map((seg) => ({ ...seg, origin: "revived" as const }));
 }
 
 // Attach nest diagnostics to a result — only when a `nest` actually ran, so
@@ -397,12 +437,70 @@ function evalSource<T extends EvalNode>(
       // relational join into `(node, path)` rows with real-node parent segments.
       return sortNestRows(evalNest(state, expr.nest).rows, sort, state.schema);
     }
+    // ADR-0037 §5: σ downstream of a row-producer is row-preserving. When the
+    // structure-carrying operand (intersect's first, difference's `keep`) is a
+    // row-producer, evaluate IT to rows and apply the other operand(s) as a
+    // LEAF-membership test (path carried) instead of flattening the whole expr
+    // through `evalExpr`. `normalize` then revives ancestors from surviving paths
+    // and self-prunes empty branches (the Draft `nest(contained_in) → filter`
+    // case). When the first operand is NOT a row-producer (a plain leaf, or a
+    // buried grouped `view_ref` with no structure to preserve), we fall through
+    // to the flat `evalSegment` path — behavior unchanged. A row-producer that is
+    // NOT first degrades to its membership (the intersect/difference set), the §5
+    // "first carries structure; others degrade to membership" rule.
+    if (expr.intersect && expr.intersect.length > 0 && isRowProducer(expr.intersect[0])) {
+      const [first, ...rest] = expr.intersect;
+      const baseRows = evalSource(state, first, sort);
+      if (rest.length === 0) return baseRows;
+      const keep = intersectAll(rest.map((e) => evalExpr(state, e, true)));
+      return sigmaRows(baseRows, keep, "keep");
+    }
+    if (expr.difference && isRowProducer(expr.difference.keep)) {
+      const baseRows = evalSource(state, expr.difference.keep, sort);
+      const remove = evalExpr(state, expr.difference.remove, false);
+      return sigmaRows(baseRows, remove, "remove");
+    }
     if (isBareViewRef(expr)) {
       const nested = evalViewRefRows(state, expr.view_ref as string, sort);
       if (nested) return nested; // grouped/tree ref → nested rows; null → flat
     }
   }
   return evalSegment(state, expr, sort, neutralUniverse).map((node) => ({ node, path: [] as PathSegment[] }));
+}
+
+// A row-producing expr (ADR-0037 §5): a `nest` (relational join) or a `union`
+// (path-preserving concat) carries `(node, path)` structure worth preserving
+// when it sits as the structure-carrying operand of an intersect/difference. A
+// buried grouped `view_ref` is deliberately excluded — it flattens to membership
+// as before (the denormalized structure of a *referenced* view is preserved only
+// when it is wired directly, not buried in the set algebra).
+function isRowProducer(expr: ViewExpr | null | undefined): boolean {
+  return !!(expr && (expr.nest || expr.union));
+}
+
+// Apply a leaf-membership σ over `(node, path)` rows (ADR-0037 §5/§6). A row
+// survives iff its LEAF node passes σ (`keep` → in the set; `remove` → not in
+// it). Surviving rows carry their paths, but a `placed` segment whose node fails
+// σ is demoted to `revived` — it was a member of the unfiltered nest, but the
+// filter makes it context: kept as scaffolding, dropped from flat membership.
+function sigmaRows<T extends EvalNode>(
+  rows: ViewRow<T>[],
+  sigma: Set<string>,
+  mode: "keep" | "remove",
+): ViewRow<T>[] {
+  const passes = (id: string): boolean => (mode === "keep" ? sigma.has(id) : !sigma.has(id));
+  const out: ViewRow<T>[] = [];
+  for (const r of rows) {
+    if (!passes(r.node.id)) continue;
+    const demote = r.path.some((s) => s.origin === "placed" && s.nodeId != null && !passes(s.nodeId));
+    const path = demote
+      ? r.path.map((s) =>
+          s.origin === "placed" && s.nodeId != null && !passes(s.nodeId) ? { ...s, origin: "revived" as const } : s,
+        )
+      : r.path;
+    out.push({ node: r.node, path });
+  }
+  return out;
 }
 
 // Evaluate each named handle in order into rows. Each handle prepends its own
@@ -419,7 +517,7 @@ function evalGroups<T extends EvalNode>(
   const rows: ViewRow<T>[] = [];
   const seen = new Set<string>();
   for (const g of groups) {
-    const seg: PathSegment = { key: g.name, label: g.name, nodeId: null, color: g.color ?? null };
+    const seg: PathSegment = { key: g.name, label: g.name, nodeId: null, color: g.color ?? null, origin: "handle" };
     for (const r of evalSource(state, g.expr ?? null, g.sort ?? fallbackSort)) {
       const path = [seg, ...r.path];
       const key = rowKey(r.node, path);
@@ -429,6 +527,86 @@ function evalGroups<T extends EvalNode>(
     }
   }
   return rows;
+}
+
+// --- group_by (ν by attribute, ADR-0037 §2) ------------------------------
+
+// Apply the ordered `group_by` levels to already-denormalized rows. Each level
+// appends ONE path segment above the leaf (innermost), beneath every pipeline-
+// produced segment, in declared order (outer → inner). A multi-valued field fans
+// the row out under EACH value (groups repeat, `normalize` dedupes membership);
+// a missing/unset value leaves the row BARE at that level (no segment, no
+// "Ungrouped" bucket). Pure fold over the rows, level by level.
+function applyGroupBy<T extends EvalNode>(
+  state: RunState<T>,
+  rows: ViewRow<T>[],
+  levels: NonNullable<ViewSpec["group_by"]>,
+): ViewRow<T>[] {
+  let out = rows;
+  for (const level of levels) {
+    const next: ViewRow<T>[] = [];
+    for (const r of out) {
+      const segs = segmentForField(state, r.node, level);
+      if (segs.length === 0) {
+        next.push(r); // missing value → bare at this level
+        continue;
+      }
+      for (const seg of segs) next.push({ node: r.node, path: [...r.path, seg] });
+    }
+    out = next;
+  }
+  return out;
+}
+
+// The buckets a node falls into for one `group_by` level (ADR-0037 §2 — the only
+// genuinely new evaluator logic). Returns 0 segments (missing → bare), 1 (single
+// value), or many (a multi-valued field fans out):
+//  - `entry_type` (intrinsic) → one synthetic bucket, labelled by type display
+//    name, keyed by the FQN.
+//  - a reference field (entity_ref / entity_ref_list) → REAL-NODE buckets: the
+//    target's title as label, its id as `nodeId` — an openable header (§6: a
+//    value, never a member).
+//  - enum / select (and multi_select) → synthetic buckets labelled by the OPTION
+//    LABEL, keyed by the value.
+//  - anything else (tags, text, …) → synthetic buckets labelled by the value.
+// `order: "label"` is carried onto the segment so `buildLevel` can sort this
+// level's sibling buckets alphabetically instead of first-seen.
+function segmentForField<T extends EvalNode>(
+  state: RunState<T>,
+  node: T,
+  level: NonNullable<ViewSpec["group_by"]>[number],
+): PathSegment[] {
+  const { field, order } = level;
+  const raw = fieldValue(node, field, state.schema);
+  if (isEmpty(raw)) return [];
+
+  const fieldDef = state.schema?.fields?.[field];
+  const type = fieldDef?.type;
+  const isRef = type === "entity_ref" || type === "entity_ref_list";
+  const values = isCollectionField(state.schema, field) || Array.isArray(raw) ? asArray(raw) : [raw];
+
+  const seg = (key: string, label: string, nodeId: string | null): PathSegment => ({
+    key,
+    label,
+    nodeId,
+    origin: "field",
+    ...(order ? { order } : {}),
+  });
+
+  const out: PathSegment[] = [];
+  for (const v of values) {
+    const value = String(v).trim();
+    if (!value) continue;
+    if (field === "entry_type") {
+      out.push(seg(value, state.schema?.entry_types?.[value]?.name ?? value, null));
+    } else if (isRef) {
+      out.push(seg(value, state.nodeById.get(value)?.title ?? value, value));
+    } else {
+      const option = fieldDef?.options?.find((o) => o.value === value);
+      out.push(seg(value, option?.label ?? value, null));
+    }
+  }
+  return out;
 }
 
 // Normalize rows → a render-ready result. Flat membership (dedupe by id, row
@@ -456,16 +634,16 @@ function normalize<T extends EvalNode>(
     nodes.push(n);
   };
   for (const r of rows) {
-    // Real-node path segments (a `nest`'s parent headers) are members too — pull
-    // them into the flat list, ancestors before the leaf — unless they are pure
-    // structural context (a tree view's ancestors). Synthetic handle segments
-    // (`nodeId: null`) are always skipped.
-    if (!treePresentation) {
-      for (const seg of r.path) {
-        if (!seg.nodeId) continue;
-        const n = state.nodeById.get(seg.nodeId);
-        if (n) pushNode(n);
-      }
+    // Membership is σ-passage (ADR-0037 §6): a path segment is a member iff it is
+    // a `placed` real node — a Nest-placed parent that itself passed selection,
+    // pulled into the flat list ancestors-before-leaf. `revived` ancestors (a
+    // σ-filtered tree/nest's context), `field` buckets (a value the algebra
+    // surfaced, never a member — even a real-node reference bucket), and synthetic
+    // `handle` segments are all skipped. The leaf `r.node` is always a member.
+    for (const seg of r.path) {
+      if (seg.origin !== "placed" || !seg.nodeId) continue;
+      const n = state.nodeById.get(seg.nodeId);
+      if (n) pushNode(n);
     }
     pushNode(r.node);
   }
@@ -478,24 +656,27 @@ function normalize<T extends EvalNode>(
   }
 
   let groups = buildLevel(state, rows);
-  // "Top level not considered": a lone synthetic wrapper whose children are all
+  // "Top level not considered": a lone HANDLE wrapper whose children are all
   // sub-containers is a passthrough strip (a handle over a grouped sub-flow) —
-  // drop it and surface the sub-flow's groups directly.
+  // drop it and surface the sub-flow's groups directly. Restricted to `handle`
+  // origin (ADR-0037 §6): a lone `group_by` level over a nested result keeps its
+  // header (a Lore-of-only-characters must still show "Character").
   if (
     groups.length === 1 &&
-    groups[0].nodeId === null &&
+    groups[0].origin === "handle" &&
     groups[0].children.length > 0 &&
     groups[0].children.every((c) => c.children.length > 0)
   ) {
     groups = groups[0].children;
   }
-  // A lone synthetic handle whose children are all leaves renders as a flat list
-  // — its name is the list title, not a group header. Only synthetic handle
-  // groups collapse this way: a lone real-node group is a genuine tree parent (a
-  // `nest`/tree header) and must stay.
+  // A lone HANDLE whose children are all leaves renders as a flat list — its name
+  // is the list title, not a group header. Collapse-to-flat applies to `handle`
+  // buckets ONLY (ADR-0037 §6): a lone real-node group is a genuine tree parent
+  // (a `nest`/tree header), and a lone declared `group_by` bucket always shows
+  // its header — else a project holding one type loses its header on day one.
   if (
     groups.length <= 1 &&
-    groups.every((g) => g.nodeId === null && g.children.every((c) => c.children.length === 0))
+    groups.every((g) => g.origin === "handle" && g.children.every((c) => c.children.length === 0))
   ) {
     return withDiag(state, { nodes, annotations: state.annotations, groups: null });
   }
@@ -537,7 +718,7 @@ function buildLevel<T extends EvalNode>(state: RunState<T>, rows: ViewRow<T>[]):
     ensure(key, seg).rows.push({ node: r.node, path: r.path.slice(1) });
   }
 
-  return order.map((key) => {
+  const built = order.map((key) => {
     const b = buckets.get(key)!;
     return {
       key,
@@ -545,9 +726,29 @@ function buildLevel<T extends EvalNode>(state: RunState<T>, rows: ViewRow<T>[]):
       color: b.seg.color ?? null,
       nodeId: b.seg.nodeId,
       node: b.node,
+      origin: b.seg.origin,
       children: buildLevel(state, b.rows),
     };
   });
+
+  // ADR-0037 §2 `order: "label"`: a §2 field level opts ITS buckets into
+  // alphabetical-by-label ordering instead of the default first-seen (row order).
+  // Reorder ONLY the label-ordered field buckets, among the slots they occupy —
+  // pipeline (handle/nest `placed`) and bare siblings that happen to share this
+  // depth (e.g. a `group_by` beside orphan-kept nest headers) keep their
+  // first-seen positions. No label-ordered bucket ⇒ the array is untouched.
+  const labelSlots: number[] = [];
+  order.forEach((key, i) => {
+    if (buckets.get(key)!.seg.order === "label") labelSlots.push(i);
+  });
+  if (labelSlots.length === 0) return built;
+  const sorted = labelSlots
+    .map((i) => built[i])
+    .sort((a, b) => (a.label ?? "").localeCompare(b.label ?? "", undefined, { sensitivity: "base" }));
+  labelSlots.forEach((slot, k) => {
+    built[slot] = sorted[k];
+  });
+  return built;
 }
 
 // `neutralUniverse` is the value an *inactive* field predicate (an unbound
@@ -809,7 +1010,9 @@ function evalNest<T extends EvalNode>(
     for (const pl of frontier) {
       const kids = adj.get(pl.node.id);
       if (!kids || kids.length === 0) continue;
-      const parentSeg: PathSegment = { key: pl.node.id, label: pl.node.title, nodeId: pl.node.id };
+      // A placed real-node parent header (ADR-0037 §6): a member unless a
+      // downstream σ later demotes it to `revived` (see `sigmaRows`).
+      const parentSeg: PathSegment = { key: pl.node.id, label: pl.node.title, nodeId: pl.node.id, origin: "placed" };
       const childPath = [...pl.path, parentSeg];
       const childAncestors = new Set(pl.ancestors).add(pl.node.id);
       for (const cid of kids) {
@@ -843,11 +1046,22 @@ function evalNest<T extends EvalNode>(
   }
   if (truncated) state.diag.fanoutTruncated = true;
 
-  // Orphans: candidate children that matched no parent (never placed). Counted
-  // so the UI can surface the drop (ADR-0028 §A).
-  for (const cid of childIds) if (!placed.has(cid)) state.diag.orphansDropped++;
-
+  // Orphans: candidate children that matched no parent (never placed). ADR-0037
+  // §Sub-issues / #216: `orphans: "keep"` seeds them at the root as bare rows
+  // (the who-lives-where pattern) — placed rows first (BFS/placement order),
+  // then orphans in roster order; kept orphans are NOT "dropped". The default
+  // (`"drop"`, or unset) counts them so the UI can surface the loss (ADR-0028 §A).
+  const keepOrphans = op.orphans === "keep";
   const rows = placements.filter((pl) => !pl.hasChild).map((pl) => ({ node: pl.node, path: pl.path }));
+  for (const n of state.universe) {
+    if (!childIds.has(n.id) || placed.has(n.id)) continue;
+    if (keepOrphans) {
+      rows.push({ node: n, path: [] });
+      placed.add(n.id);
+    } else {
+      state.diag.orphansDropped++;
+    }
+  }
   return { rows, placed };
 }
 

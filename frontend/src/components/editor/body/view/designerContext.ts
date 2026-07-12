@@ -21,6 +21,11 @@ export type DesignerContext = {
   // node mutation, wired back to the shell's bound Svelte Flow arrays
   updateNodeData: (id: string, patch: Partial<ViewNodeData>) => void;
   removeNode: (id: string) => void;
+  // Which node is expanded to its full editor (§A, #220). A node's header is a
+  // toggle (`toggleExpanded`); a canvas-background click clears it. Independent
+  // of Svelte Flow selection, so clicking a header a second time collapses.
+  expandedId: string | null;
+  toggleExpanded: (nodeId: string) => void;
   // schema-derived leaf-config options for the view's anchor kind
   kind: string;
   entryTypes: EntryTypeOption[];

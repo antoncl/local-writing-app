@@ -88,6 +88,13 @@
   // preference values ("system"/"light"/"dark") map straight to ColorMode.
   let colorMode = $derived($themePreference as ColorMode);
 
+  // Which designer node is expanded to its full editor (#220, §A). Header-click
+  // toggles it; a canvas-background click (onpaneclick) clears it. Ephemeral.
+  let expandedId = $state<string | null>(null);
+  function toggleExpanded(id: string): void {
+    expandedId = expandedId === id ? null : id;
+  }
+
   // Preview aside fold (#220, ADR-0038 §A): default open; collapses to a thin
   // strip to hand the canvas the full width. Ephemeral this pass — persisting it
   // on the view node's `/ui` (ADR-0036) is a small follow-up (the designer has
@@ -128,6 +135,7 @@
     if (id === untrack(() => loadedViewId)) return;
     hydrating = true;
     loadedViewId = id;
+    expandedId = null; // a freshly-opened view starts fully collapsed
     revision = node.revision ?? "";
     title = node.title ?? "";
     kind = node.spec?.kind ?? "lore";
@@ -379,6 +387,8 @@
     (): DesignerContext => ({
       updateNodeData,
       removeNode,
+      expandedId,
+      toggleExpanded,
       kind,
       entryTypes: entryTypeOptions,
       fields: fieldOptions,
@@ -424,6 +434,7 @@
   }
   function removeNode(id: string): void {
     if (id === OUTPUT_NODE_ID) return;
+    if (expandedId === id) expandedId = null;
     flowNodes = flowNodes.filter((n) => n.id !== id);
     flowEdges = flowEdges.filter((e) => e.source !== id && e.target !== id);
   }
@@ -709,6 +720,7 @@
         {colorMode}
         {isValidConnection}
         onconnect={normalizeEdges}
+        onpaneclick={() => (expandedId = null)}
         deleteKey={["Backspace", "Delete"]}
         fitView
         minZoom={0.3}

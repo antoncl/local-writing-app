@@ -26,6 +26,10 @@
   let ctx = $derived(getCtx());
   let kind = $derived(data.kind);
   let cfg = $derived(data.cfg ?? {});
+  // Expanded = editing in place (§A). Toggled by the header, cleared by a
+  // canvas-background click — NOT Svelte Flow selection, so a second header
+  // click collapses (#220 dogfood). `selected` still drives the highlight border.
+  let isExpanded = $derived(ctx.expandedId === id);
   let arity = $derived(inputArity(kind));
   // A kind with a single entry_type (e.g. assistant) makes Type/Type+subtypes
   // predicates noise — offer them only when there's a real choice (#91).
@@ -101,8 +105,14 @@
   let fieldDef = $derived(fieldKey ? ctx.fieldByKey(fieldKey) : null);
   let opNeedsValue = $derived(fieldOp !== "set" && fieldOp !== "unset");
   function setField(next: Partial<NonNullable<ViewNodeData["field"]>>) {
-    const merged = { key: fieldKey, op: fieldOp, value: cfg.field?.value, ...next };
-    patch({ field: merged });
+    // A value belongs to a specific field. When the field KEY changes, start the
+    // value slot fresh (and drop any promotion of it) — otherwise a color-field
+    // swatch id bleeds into, e.g., a tags field's input as raw text (dogfood bug).
+    if (next.key !== undefined && next.key !== fieldKey) {
+      patch({ field: { key: next.key, op: fieldOp, value: undefined }, field_param: undefined });
+      return;
+    }
+    patch({ field: { key: fieldKey, op: fieldOp, value: cfg.field?.value, ...next } });
   }
 
   // --- promote-in-place (#184 Phase 1b, ADR-0032): a field value slot ⇄ a named
@@ -612,8 +622,19 @@
   {/if}
 
   <header class="vnode-head">
-    <ViewGlyph {kind} uid={id} />
-    <span class="vnode-title">{LABELS[kind]}</span>
+    <!-- The header is the expand/collapse toggle (#220): glyph + title in one
+         button. Delete stays a sibling button (no nested interactives). -->
+    <button
+      class="vnode-toggle"
+      type="button"
+      aria-expanded={isExpanded}
+      title={isExpanded ? "Collapse" : "Expand"}
+      aria-label={`${isExpanded ? "Collapse" : "Expand"} ${LABELS[kind]}`}
+      onclick={() => ctx.toggleExpanded(id)}
+    >
+      <ViewGlyph {kind} uid={id} />
+      <span class="vnode-title">{LABELS[kind]}</span>
+    </button>
     {#if kind !== "output"}
       <button class="vnode-del" title="Delete node" aria-label="Delete node" onclick={() => ctx.removeNode(id)}>×</button>
     {/if}
@@ -633,7 +654,7 @@
        resting node shows a one-line summary. `nodrag` + native stop-pointerdown
        keep interacting with any config control from dragging/selecting the node
        (Svelte Flow acts on pointerdown; picker menus portal to <body>). -->
-  {#if selected}
+  {#if isExpanded}
   <div class="vconfig nodrag" role="presentation" use:stopPointerdown>
   {#if kind === "type" || kind === "descendants_of"}
     {@render typeSelect(kind === "descendants_of")}
@@ -855,6 +876,21 @@
     align-items: center;
     gap: 6px;
     padding: 6px 8px;
+  }
+  /* The glyph+title expand toggle — reads as the header, not a button. */
+  .vnode-toggle {
+    flex: 1;
+    min-width: 0;
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    padding: 0;
+    border: none;
+    background: transparent;
+    color: inherit;
+    font: inherit;
+    text-align: left;
+    cursor: pointer;
   }
   .vnode-title {
     flex: 1;

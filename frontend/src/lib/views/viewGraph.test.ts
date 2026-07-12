@@ -235,13 +235,13 @@ describe("canonicalize bare predicate leaves → All → Filter (ADR-0038 §B)",
   }
 
   // The scene/research defaults nest the whole-kind roster as `children`, which
-  // lifts to `All` and drops on `materialize` (nestBuilt uses `materialize`, not
-  // `materializeOuter`) — a pre-existing nest/All-child serialization quirk,
-  // unrelated to §B (filed as a follow-up). A tracked xfail rather than a silent
-  // omission: when the quirk is fixed these round-trips become lossless and
-  // `it.fails` flips red, prompting their promotion to the loop above.
+  // lifts to an `All` node on open. That now round-trips losslessly too: `nestBuilt`
+  // serializes `parents`/`children` via `materializeOuter`, so an All-roster child
+  // re-emits the explicit `{descendants_of:<kind-root>}` instead of dropping the key
+  // (which previously collapsed the recursive containment tree to the empty set).
+  // See the "nest lowering" block for the unit-level guards on that seam.
   for (const kind of ["scene", "research"]) {
-    it.fails(`the ${kind} default view does NOT yet round-trip losslessly (nest All-child quirk)`, () => {
+    it(`the ${kind} default view re-serializes to the same expr (lossless, nest All-child)`, () => {
       const spec = defaultView(kind);
       expect(graphToSpec(specToGraph(spec), { kind, sort: spec.sort }).expr).toEqual(spec.expr);
     });
@@ -584,6 +584,30 @@ describe("nest lowering + self-loop recursion (ADR-0028)", () => {
     const nst = node("nest", { match: { field: "p", direction: "child_to_parent" } as never }, 0);
     const graph: ViewGraph = { nodes: [out(), nst], edges: [edge(nst.id, OUTPUT_NODE_ID)] };
     expect(graphToExpr(graph)).toEqual({ nest: { match: { field: "p", direction: "child_to_parent", by: "ref" } } });
+  });
+
+  it("a nest whose `children` is fed by an `All` injector re-serializes the whole-kind roster (outer materialize)", () => {
+    // The all-roster children lowers through the OUTER materialize: `All` → the
+    // explicit `{descendants_of:<kind-root>}`, NOT a dropped key. Without a kind
+    // (the pure round-trip helper) there's no universe expr, so it degrades to a
+    // missing `children` — the evaluator's unseeded-feed convention. This is the
+    // seam that makes the scene/research default view round-trip (see the §B block).
+    const all = node("all", {}, 0);
+    const nst = node("nest", { match }, 100);
+    const graph: ViewGraph = {
+      nodes: [out(), all, nst],
+      edges: [edge(all.id, nst.id, "children"), edge(nst.id, OUTPUT_NODE_ID)],
+    };
+    expect(graphToExpr(graph, "scene")).toEqual({ nest: { children: { descendants_of: "scene:base" }, match } });
+    expect(graphToExpr(graph)).toEqual({ nest: { match } });
+  });
+
+  it("an unwired `children` handle omits the key (unconfigured feed stays a dropped key)", () => {
+    // EMPTY (unconfigured), unlike UNIVERSE (an All roster), must still omit the
+    // key so the evaluator applies its whole-universe-on-missing-seed convention.
+    const nst = node("nest", { match }, 0);
+    const graph: ViewGraph = { nodes: [out(), nst], edges: [edge(nst.id, OUTPUT_NODE_ID)] };
+    expect(graphToExpr(graph, "scene")).toEqual({ nest: { match } });
   });
 });
 

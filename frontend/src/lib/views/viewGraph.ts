@@ -486,8 +486,14 @@ function differenceBuilt(keep: Built, remove: Built): Built {
 // (upper) and `children` (lower) — and its match rule. Recursion is *topology*:
 // a self-loop edge (source === this node) into the `parents` handle lowers to
 // `recursive: true`; the self-edge is excluded from the parents input so it does
-// not recurse forever. An unwired handle materializes to null = the whole
-// universe (the evaluator's convention; an unseeded `parents` yields a thicket).
+// not recurse forever. `parents`/`children` are OUTER serialization points
+// (`materializeOuter`): an unwired handle → EMPTY → null → the key is omitted
+// (the evaluator's convention: a missing seed is the whole universe / a thicket),
+// but a handle fed the whole-kind roster (an `All` node → UNIVERSE) re-serializes
+// to the explicit `{descendants_of:<kind-root>}` instead of collapsing to a
+// dropped key. That distinction is what makes a duplicated scene/research default
+// view — whose `children` IS the kind root — round-trip instead of silently
+// emptying (the recursive containment tree needs a concrete children feed).
 // A Nest with no match rule can't join → EMPTY (nothing to show mid-compose).
 function nestBuilt(graph: ViewGraph, byId: Map<string, ViewGraphNode>, node: ViewGraphNode, seen: Set<string>, uni: ViewExpr | null): Built {
   const match = node.data.match;
@@ -504,9 +510,9 @@ function nestBuilt(graph: ViewGraph, byId: Map<string, ViewGraphNode>, node: Vie
   const children = lowerEdges(childEdges);
 
   const nest: ViewNestOp = { match: { field: match.field, direction: match.direction, by: match.by ?? "ref" } };
-  const p = materialize(parents);
+  const p = materializeOuter(parents, uni);
   if (p) nest.parents = p;
-  const c = materialize(children);
+  const c = materializeOuter(children, uni);
   if (c) nest.children = c;
   if (recursive) nest.recursive = true;
   return built({ nest });

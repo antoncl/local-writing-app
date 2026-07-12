@@ -371,6 +371,14 @@ describe("sorter (per-segment sort)", () => {
     expect(spec.sort).toEqual({ by: "title", dir: "asc" });
   });
 
+  it("does NOT promote a null-expr view to the universe when it carries a sort (#B1)", () => {
+    // A saved empty-but-ordered view (expr null + non-manual sort). Reopening must
+    // not wire an input-less Sorter that the #93 empty+sort rule promotes to the
+    // whole roster — that would silently flip membership ∅ → everything.
+    const back = graphToSpec(specToGraph({ kind: "lore", expr: null, sort: { by: "title", dir: "asc" } }), { kind: "lore" });
+    expect(back.expr ?? null).toBeNull(); // still the empty set, not descendants_of
+  });
+
   it("carries a multi-level sort chain (#230) through the Sorter node verbatim", () => {
     const chain = { by: "field" as const, field_key: "rank", dir: "desc" as const, then: { by: "title" as const, dir: "asc" as const } };
     const src = node("type", { type: "lore:character" }, 0);

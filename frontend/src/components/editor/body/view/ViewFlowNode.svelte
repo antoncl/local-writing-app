@@ -158,7 +158,10 @@
     return list;
   }
   function listToSort(list: SortKey[]): ViewSort {
-    // Fold the list into a right-nested `then` chain; empty ⇒ manual order.
+    // Fold the list into a right-nested `then` chain; empty ⇒ manual order. A
+    // half-authored "Field…" key (no field yet) is kept so the row doesn't vanish
+    // mid-edit; it is an inert no-op in the evaluator (compareByKey returns 0 with
+    // no field_key), so it never affects ordering.
     let chain: ViewSort | null = null;
     for (let i = list.length - 1; i >= 0; i--) {
       const k = list[i];

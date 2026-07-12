@@ -46,6 +46,42 @@ const ids = (spec: ViewSpec, nodes = NODES, ctx = { schema: SCHEMA }) =>
 // The explicit "whole roster" expr — what the default view lowers to (ADR-0036).
 const ALL: ViewSpec["expr"] = { descendants_of: "lore:base" };
 
+describe("group_by A–Z: reference bucket colliding with a bare member (#A2)", () => {
+  const refSchema = {
+    version: 1,
+    entry_types: {
+      "lore:base": { name: "Lore", kind: "lore", abstract: true, fields: [] },
+      "lore:character": { name: "Character", kind: "lore", parent: "lore:base", fields: [] },
+      "lore:location": { name: "Location", kind: "lore", parent: "lore:base", fields: [] },
+    },
+    fields: {
+      title: { name: "Title", type: "text", category: "intrinsic" },
+      entry_type: { name: "Type", type: "text", category: "intrinsic" },
+      located_in: { name: "Located in", type: "entity_ref" },
+    },
+  } as unknown as MetadataSchema;
+  // Referencing nodes come BEFORE their targets, so node:paris / node:marseille
+  // are stored as label buckets; paris/marseille (no located_in) then collide as
+  // bare members on the same `node:<id>` key.
+  const nodes: EvalNode[] = [
+    { id: "amelie", entry_type: "lore:character", title: "Amelie", metadata: { located_in: "paris" } },
+    { id: "zed", entry_type: "lore:character", title: "Zed", metadata: { located_in: "marseille" } },
+    { id: "cass", entry_type: "lore:character", title: "Cass", metadata: {} }, // pure bare member
+    { id: "paris", entry_type: "lore:location", title: "Paris", metadata: {} },
+    { id: "marseille", entry_type: "lore:location", title: "Marseille", metadata: {} },
+  ];
+  it("colliding reference buckets ALPHABETIZE; only pure bare members sink", () => {
+    const r = evaluateView(
+      { kind: "lore", expr: ALL, group_by: [{ field: "located_in", order: "label" }] } as ViewSpec,
+      nodes,
+      { schema: refSchema },
+    );
+    // Marseille, Paris (real-node buckets sorted A–Z) — NOT sunk because they
+    // collide with a bare member — then Cass (a genuine bare member) last.
+    expect((r.groups ?? []).map((g) => g.label)).toEqual(["Marseille", "Paris", "Cass"]);
+  });
+});
+
 describe("multi-level sort (#230)", () => {
   const roster: EvalNode[] = [
     { id: "1", entry_type: "lore:character", title: "Bob", metadata: { team: "red" } },
@@ -63,6 +99,16 @@ describe("multi-level sort (#230)", () => {
   });
   it("the single-key form is unchanged (no `then`)", () => {
     expect(run({ by: "title", dir: "asc" })).toEqual(["2", "1", "4", "3"]); // Alice, Bob, Carol, Dave
+  });
+  it("a `manual` key TERMINATES the chain — later keys don't re-sort", () => {
+    // {by:manual, then:title} must keep INPUT order, not title-sort (else a pane
+    // offering manual drag would actually render title-ordered — a broken drag).
+    expect(run({ by: "manual", then: { by: "title", dir: "asc" } })).toEqual(["1", "2", "3", "4"]);
+  });
+  it("a cyclic `then` chain does not hang (cycle guard)", () => {
+    const cyclic: ViewSort = { by: "title", dir: "asc" };
+    (cyclic as { then?: ViewSort }).then = cyclic; // self-reference (malformed spec)
+    expect(run(cyclic)).toEqual(["2", "1", "4", "3"]); // terminates, sorts by title once
   });
   it("a full tie across all keys keeps input order (stable)", () => {
     // Everyone ties on team=... no: give a constant key, tiebreak absent → input order.

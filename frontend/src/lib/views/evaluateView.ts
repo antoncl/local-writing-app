@@ -656,17 +656,24 @@ function buildLevel<T extends EvalNode>(state: RunState<T>, rows: ViewRow<T>[]):
   // sorting). Structural siblings — pipeline (handle/nest `placed`) and any
   // member that is itself a parent — keep their first-seen slots. No label-ordered
   // bucket ⇒ the array is untouched (first-seen mode intersperses by design).
-  const hasLabelOrder = order.some((key) => buckets.get(key)!.seg.order === "label");
+  const isLabelBucket = (key: string): boolean => buckets.get(key)!.seg.order === "label";
+  // A sinkable bare member is a childless member row that is NOT itself a label
+  // bucket. The guard against label buckets matters when a reference-field bucket
+  // and a bare member share a `node:<id>` key (the node is both a group_by target
+  // AND has no value of its own): that entry is a real populated bucket and must
+  // ALPHABETIZE, not sink to the bottom as if it were empty.
+  const isBareMember = (key: string): boolean => memberKeys.has(key) && !isLabelBucket(key);
+  const hasLabelOrder = order.some((key) => isLabelBucket(key));
   if (!hasLabelOrder) return built;
   const movable: number[] = [];
   built.forEach((g, i) => {
-    if (buckets.get(g.key)!.seg.order === "label" || (memberKeys.has(g.key) && g.children.length === 0)) movable.push(i);
+    if (isLabelBucket(g.key) || (isBareMember(g.key) && g.children.length === 0)) movable.push(i);
   });
   const sorted = movable
     .map((i) => built[i])
     .sort((a, b) => {
-      const am = memberKeys.has(a.key);
-      const bm = memberKeys.has(b.key);
+      const am = isBareMember(a.key);
+      const bm = isBareMember(b.key);
       if (am !== bm) return am ? 1 : -1; // bare members sink below label buckets
       if (am) return 0; // stable sort keeps bare members in first-seen order
       return (a.label ?? "").localeCompare(b.label ?? "", undefined, { sensitivity: "base" });
@@ -855,6 +862,7 @@ function isBareViewRef(expr: ViewExpr): boolean {
     expr.field == null &&
     expr.hand_picked == null &&
     expr.field_of == null &&
+    expr.nest == null &&
     expr.var == null
   );
 }
@@ -878,6 +886,7 @@ export function isBareDescendantsOf(expr: ViewExpr): boolean {
     expr.field == null &&
     expr.hand_picked == null &&
     expr.field_of == null &&
+    expr.nest == null &&
     expr.var == null
   );
 }
@@ -1299,11 +1308,16 @@ function intersectAll(sets: Set<string>[]): Set<string> {
 }
 
 // Flatten a sort `then`-chain into an ordered list of active keys (#230).
-// `by:"manual"` terminates/skips — it carries no ordering (input order).
+// `by:"manual"` TERMINATES the chain (keep input order from here on), so a manual
+// key never lets a later key secretly re-sort. A `seen` set guards a cyclic/self-
+// referential `then` (a malformed/hand-authored spec would otherwise hang).
 function sortKeyChain(sort: ViewSort | null | undefined): ViewSort[] {
   const chain: ViewSort[] = [];
-  for (let s: ViewSort | null | undefined = sort; s; s = s.then) {
-    if (s.by !== "manual") chain.push(s);
+  const seen = new Set<ViewSort>();
+  for (let s: ViewSort | null | undefined = sort; s && !seen.has(s); s = s.then) {
+    if (s.by === "manual") break;
+    seen.add(s);
+    chain.push(s);
   }
   return chain;
 }

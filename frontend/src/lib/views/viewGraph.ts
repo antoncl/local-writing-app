@@ -888,8 +888,11 @@ export function specToGraph(spec: ViewSpec | null | undefined, schema?: Metadata
   } else {
     // A non-manual flat sort reopens as a Sorter node feeding the handle (mirrors
     // the grouped branch's `g.sort`), so the designer shows it — and a #230 sort
-    // chain round-trips. Manual/absent stays null (no Sorter node for defaults).
-    const flatSort = spec?.sort && spec.sort.by !== "manual" ? spec.sort : null;
+    // chain round-trips. ONLY when there is real membership (`expr != null`): a
+    // Sorter with no upstream input lowers to EMPTY+sort, which the #93 rule
+    // promotes to UNIVERSE — flipping a null-expr (empty) view to the whole roster
+    // on reopen. Manual/absent also stays null (no Sorter node for defaults).
+    const flatSort = spec?.expr != null && spec?.sort && spec.sort.by !== "manual" ? spec.sort : null;
     attachSegment(spec?.expr ?? null, DEFAULT_HANDLE_ID, flatSort);
     // Amendment 1: the single/unnamed group's Organize lives on its lone handle
     // (uniform with named groups), so seed the synthetic `in` handle with the

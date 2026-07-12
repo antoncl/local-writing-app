@@ -201,6 +201,7 @@
     data-group-id={groupId}
     tabindex="-1"
     class:focused={active !== null && active === workspaceLayout.focusedPanel}
+    class:zoomed={droppable && workspaceLayout.zoomedGroupId === groupId}
   >
     <div class="ws-tabbar" role="tablist">
       <div class="ws-tabs">
@@ -413,6 +414,15 @@
   }
   .ws-group.focused {
     border-color: var(--accent);
+  }
+  /* Zoom (#219): CSS-promote this tile to fill the positioned .workspace,
+     painting over the tiled tree beneath — which stays mounted, so no editor
+     remounts on maximize/restore. Sits above the splitters (--z-sticky);
+     popovers/dialogs still layer above it. */
+  .ws-group.zoomed {
+    position: absolute;
+    inset: 0;
+    z-index: var(--z-dropdown);
   }
 
   /* The bar wraps: when a region is too narrow to fit tabs + actions on one

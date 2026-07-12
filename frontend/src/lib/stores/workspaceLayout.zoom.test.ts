@@ -38,6 +38,19 @@ describe("workspaceLayout tile zoom (#219)", () => {
     expect(workspaceLayout.zoomedGroupId).toBeNull();
   });
 
+  it("toggleZoomFocused falls back to the active editor group when nothing is focused", () => {
+    workspaceLayout.focusedPanel = null;
+    workspaceLayout.toggleZoomFocused();
+    expect(workspaceLayout.zoomedGroupId).toBe(workspaceLayout.activeEditorGroupId);
+  });
+
+  it("applySnapshot drops an active zoom", () => {
+    const g = workspaceLayout.allGroups()[0];
+    workspaceLayout.toggleZoom(g.id);
+    workspaceLayout.applySnapshot(workspaceLayout.snapshot());
+    expect(workspaceLayout.zoomedGroupId).toBeNull();
+  });
+
   it("pruning the zoomed tile clears the stale target", () => {
     const tools = workspaceLayout.groupOf("todo");
     expect(tools).not.toBeNull();

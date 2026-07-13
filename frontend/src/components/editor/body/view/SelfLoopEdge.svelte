@@ -76,4 +76,6 @@
   });
 </script>
 
-<BaseEdge {path} {markerEnd} {style} />
+<!-- The self-loop is always a Nest recursion (output → own `parents`), so it
+     carries the lore slate-blue of the children port it pairs with (§240). -->
+<BaseEdge {path} {markerEnd} style={`${style ?? ""}; stroke: var(--k-lore); stroke-opacity: 0.7;`} />

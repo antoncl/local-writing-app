@@ -1302,19 +1302,32 @@
   .org-empty {
     margin: 0;
   }
-  /* keep the flow-node ports visually distinct + above node content so the
-     whole handle (not just the half sticking out) is grabbable/hoverable. */
+  /* Ports = hollow rings (§240 Claude Design pass): a socket, not a bullet —
+     quiet at rest (surface fill + kind-colored border), filling with the kind
+     color on hover so it announces itself only when you're about to wire. Kept
+     above node content so the whole handle is grabbable. Semantic color moves
+     from fill → border so the hollow reads as a ring. */
   .vnode :global(.port) {
-    width: 10px;
-    height: 10px;
+    width: 11px;
+    height: 11px;
     z-index: 5;
+    box-sizing: border-box;
+    background: var(--surface);
+    border: 1.5px solid var(--accent);
+  }
+  .vnode :global(.port:hover) {
     background: var(--accent);
-    border: 1px solid var(--panel);
   }
   .vnode :global(.port.remove) {
+    border-color: var(--danger);
+  }
+  .vnode :global(.port.remove:hover) {
     background: var(--danger);
   }
   .vnode :global(.port.children) {
+    border-color: var(--k-lore);
+  }
+  .vnode :global(.port.children:hover) {
     background: var(--k-lore);
   }
   /* The value-pipe handles (#196) — the value-operand target socket AND a
@@ -1323,6 +1336,9 @@
      clashed). Must sit AFTER the generic `.vnode :global(.port)` rule above: equal
      specificity, so source order decides — placed earlier it lost to `--accent`. */
   .vnode :global(.port.value) {
+    border-color: var(--k-snippet);
+  }
+  .vnode :global(.port.value:hover) {
     background: var(--k-snippet);
   }
 </style>

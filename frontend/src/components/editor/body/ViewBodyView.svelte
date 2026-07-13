@@ -1085,11 +1085,13 @@
     --xy-node-boxshadow-hover: none;
     --xy-node-boxshadow-selected: none;
     /* wires */
-    --xy-edge-stroke: var(--border-strong);
+    /* node-set wires take the accent (kind-tinted, §240), softened via opacity
+       on the path below so they read as calm pipes, not hard rules */
+    --xy-edge-stroke: var(--accent);
     --xy-edge-stroke-selected: var(--accent);
-    /* ports (the generic `.port` rule tints per-kind on top of this) */
-    --xy-handle-background-color: var(--accent);
-    --xy-handle-border-color: var(--panel);
+    /* ports (the generic `.port` rule paints the hollow ring on top of this) */
+    --xy-handle-background-color: var(--surface);
+    --xy-handle-border-color: var(--accent);
     /* zoom/fit controls */
     --xy-controls-button-background-color: var(--panel);
     --xy-controls-button-background-color-hover: var(--inset);
@@ -1107,6 +1109,8 @@
   .canvas :global(.svelte-flow__edge-path),
   .canvas :global(.svelte-flow__connection-path) {
     stroke-width: 2;
+    /* softened accent so the node-set wire reads as a calm pipe (§240) */
+    stroke-opacity: 0.6;
   }
   /* The value-set wire (ADR-0031 §D): a scalar `field_of` projection. Dashed +
      tinted `--k-snippet` (matching the value handles) so it reads as a visibly
@@ -1114,7 +1118,8 @@
      `--k-lore` Nest children port it used to clash with. */
   .canvas :global(.svelte-flow__edge.value-wire .svelte-flow__edge-path) {
     stroke: var(--k-snippet);
-    stroke-dasharray: 5 3;
+    stroke-opacity: 0.85;
+    stroke-dasharray: 5 4;
   }
   .empty-hint {
     position: absolute;

@@ -12,7 +12,7 @@
 -->
 <script lang="ts">
   import "@xyflow/svelte/dist/style.css";
-  import { SvelteFlow, Background, Controls, type ColorMode, type Node, type Edge } from "@xyflow/svelte";
+  import { SvelteFlow, Controls, type ColorMode, type Node, type Edge } from "@xyflow/svelte";
   import { untrack } from "svelte";
   import { themePreference } from "@/lib/utils/theme";
   import ViewFlowNode from "./view/ViewFlowNode.svelte";
@@ -896,7 +896,8 @@
         fitView
         minZoom={0.3}
       >
-        <Background />
+        <!-- §G: no dotted <Background/> — the canvas is a flat --board surface
+             (§1.3: a writing desk, not a whiteboard / graph paper). -->
         <Controls />
         <!-- Reframe on view LOAD only (the opened id), NOT on node count: keying
              on flowNodes.length re-fit the viewport on every drop/delete, shifting
@@ -1023,7 +1024,7 @@
   .palette button {
     padding: 3px 8px;
     border: 1px solid var(--border-strong);
-    border-radius: 6px;
+    border-radius: var(--r-md);
     background: var(--panel);
     font-size: var(--fs-sm);
     cursor: grab;
@@ -1037,7 +1038,10 @@
   .palette button.filter {
     border-color: var(--accent);
     background: var(--accent);
-    color: #fff;
+    /* ink on accent-solid: --surface flips with theme (white on the light-mode
+       dark-green accent, near-black on the dark-mode mint accent) — kills the
+       raw #fff literal and its dark-mode low-contrast (§G). */
+    color: var(--surface);
     font-weight: 600;
   }
   .palette button.op {
@@ -1064,9 +1068,37 @@
     /* Clip the flow so a node can never paint over the toolbar/preview. */
     overflow: hidden;
   }
-  /* Svelte Flow needs an explicitly sized parent. */
+  /* Svelte Flow needs an explicitly sized parent. §G: the stock skin is retuned
+     onto the token layer through the library's own `--xy-*` custom-property seam
+     (cleaner than fighting :global specificity, and it themes both modes at once
+     since the tokens are already theme-aware). The stock stylesheet stays
+     imported for layout/behavior only. */
   .canvas :global(.svelte-flow) {
     height: 100%;
+    /* flat writing-desk board, no dot grid (§1.3) */
+    --xy-background-color: var(--board);
+    /* the node wrapper paints nothing — each .vnode owns its own surface */
+    --xy-node-background-color: transparent;
+    --xy-node-border: none;
+    --xy-node-boxshadow-hover: none;
+    --xy-node-boxshadow-selected: none;
+    /* wires */
+    --xy-edge-stroke: var(--border-strong);
+    --xy-edge-stroke-selected: var(--accent);
+    /* ports (the generic `.port` rule tints per-kind on top of this) */
+    --xy-handle-background-color: var(--accent);
+    --xy-handle-border-color: var(--panel);
+    /* zoom/fit controls */
+    --xy-controls-button-background-color: var(--panel);
+    --xy-controls-button-background-color-hover: var(--inset);
+    --xy-controls-button-border-color: var(--border);
+    --xy-controls-button-color: var(--text-2);
+    --xy-controls-button-color-hover: var(--text);
+    --xy-controls-box-shadow: var(--elev-1);
+    /* rubber-band selection box + the low-key attribution chip */
+    --xy-selection-background-color: var(--accent-soft);
+    --xy-selection-border: 1px dashed var(--accent);
+    --xy-attribution-background-color: transparent;
   }
   /* Edges a touch heavier than the 1px default so wiring reads clearly, incl.
      the in-progress connection line and the custom self-loop (BaseEdge). */
@@ -1167,7 +1199,7 @@
     width: 100%;
     text-align: left;
     border: 1px solid var(--border);
-    border-radius: 6px;
+    border-radius: var(--r-md);
     background: var(--panel);
     padding: 6px 8px;
     cursor: pointer;
@@ -1278,7 +1310,7 @@
     padding: 4px 8px 4px 11px;
     font-size: var(--fs-sm);
     border-left: 3px solid var(--tint, transparent);
-    border-radius: 3px;
+    border-radius: var(--r-sm);
   }
   .prow:hover {
     background: var(--panel);

@@ -19,6 +19,7 @@
   import SelfLoopEdge from "./view/SelfLoopEdge.svelte";
   import ViewportFit from "./view/ViewportFit.svelte";
   import ParamMark from "./view/ParamMark.svelte";
+  import ViewGlyph from "./view/ViewGlyph.svelte";
   import ViewNodeList, { type RowCtx } from "@/components/widgets/ViewNodeList.svelte";
   import RowCaret from "@/components/widgets/RowCaret.svelte";
   import { setDesignerContext, type DesignerContext } from "./view/designerContext";
@@ -811,26 +812,33 @@
       <strong class="kind-fixed">{kind}</strong>
     </span>
     <!--
-      Sources vs operations (ADR-0038 §B). Each item both clicks-to-insert (lands
-      at the viewport centre) and drags-to-place (at the drop point, §E). Caps-label
-      groups; per-kind glyphs are the §G lexicon pass.
+      Sources vs operations (ADR-0038 §B, §240 Editorial-Card pass). A tray you
+      pick from, not a toolbar: each item is a glyph-chip on a liftable surface —
+      the kind glyph (same mark as the node header, so palette ↔ canvas read as
+      one system) + label; hover lifts it and reveals the drag mark. Each chip
+      both clicks-to-insert (viewport centre) and drags-to-place (drop point, §E).
     -->
     <div class="palette">
-      {#each PALETTE as g, gi (g.label)}
-        {#if gi > 0}<span class="pal-sep"></span>{/if}
-        <span class="pal-group">
+      {#each PALETTE as g (g.label)}
+        <div class="pal-group">
           <span class="pal-label">{g.label}</span>
-          {#each g.items as p (p.kind)}
-            <button
-              type="button"
-              class={p.cls}
-              draggable="true"
-              ondragstart={(e) => onPaletteDragStart(e, p.kind)}
-              onclick={() => addNode(p.kind)}
-              title={`Click to add, or drag onto the canvas — ${p.label}`}
-            >{p.label}</button>
-          {/each}
-        </span>
+          <div class="pal-chips">
+            {#each g.items as p (p.kind)}
+              <button
+                type="button"
+                class="chip"
+                draggable="true"
+                ondragstart={(e) => onPaletteDragStart(e, p.kind)}
+                onclick={() => addNode(p.kind)}
+                title={`Click to add, or drag onto the canvas — ${p.label}`}
+              >
+                <span class="chip-g"><ViewGlyph kind={p.kind} uid={`pal-${p.kind}`} size={16} /></span>
+                <span class="chip-label">{p.label}</span>
+                <span class="chip-drag" aria-hidden="true">⋮⋮</span>
+              </button>
+            {/each}
+          </div>
+        </div>
       {/each}
     </div>
   </div>
@@ -915,7 +923,7 @@
       {#if flowNodes.length <= 1}
         <!-- Overlay, NOT a Svelte Flow <Panel>: a Panel captures pointer events
              over the canvas and blocks the handles (no crosshair / no connect). -->
-        <div class="empty-hint">Drop an <strong>All</strong>, chain a <strong>Filter</strong> or two, then wire into <strong>View result</strong>.</div>
+        <div class="empty-hint">Drag a <strong>Source</strong> from the tray to begin, then wire operations toward a <strong>View result</strong>.</div>
       {/if}
     </div>
 
@@ -999,63 +1007,69 @@
     font-weight: 600;
     color: var(--text);
   }
+  /* A tray you pick from (§240): serif group labels; glyph-chips on a liftable
+     surface. Footprint ≈ the old dense toolbar — the invitation comes from the
+     treatment, not extra size. No per-chip stripe: the glyph carries the kind. */
   .palette {
     display: flex;
-    align-items: center;
+    flex-direction: column;
     gap: 8px;
-    flex-wrap: wrap;
   }
   .pal-group {
-    display: inline-flex;
-    align-items: center;
-    gap: 4px;
+    display: flex;
+    align-items: baseline;
+    gap: 10px;
     flex-wrap: wrap;
   }
   .pal-label {
-    font-size: var(--fs-xs);
-    letter-spacing: 0.04em;
-    text-transform: uppercase;
-    color: var(--text-3);
-    margin-right: 2px;
+    font-family: var(--serif);
+    font-size: var(--fs-sm);
+    color: var(--text-2);
+    width: 74px;
+    flex-shrink: 0;
   }
-  .pal-sep {
-    width: 1px;
-    height: 18px;
-    background: var(--border);
+  .pal-chips {
+    display: flex;
+    gap: 7px;
+    flex-wrap: wrap;
   }
-  .palette button {
-    padding: 3px 8px;
+  .palette button.chip {
+    position: relative;
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    padding: 5px 10px;
     border: 1px solid var(--border-strong);
     border-radius: var(--r-md);
-    background: var(--panel);
+    background: var(--surface);
     font-size: var(--fs-sm);
+    color: var(--text);
     cursor: grab;
+    transition: transform var(--t-fast), box-shadow var(--t-fast), border-color var(--t-fast);
   }
-  .palette button:active {
+  .palette button.chip:hover {
+    transform: translateY(-1px);
+    box-shadow: var(--elev-1);
+    border-color: var(--accent);
+  }
+  .palette button.chip:active {
     cursor: grabbing;
+    transform: none;
+    box-shadow: none;
   }
-  .palette button:hover {
-    background: var(--inset);
+  .chip-g {
+    display: inline-flex;
+    align-items: center;
   }
-  .palette button.filter {
-    border-color: var(--accent);
-    background: var(--accent);
-    /* ink on accent-solid: --surface flips with theme (white on the light-mode
-       dark-green accent, near-black on the dark-mode mint accent) — kills the
-       raw #fff literal and its dark-mode low-contrast (§G). */
-    color: var(--surface);
-    font-weight: 600;
+  .chip-drag {
+    color: var(--text-3);
+    font-size: var(--fs-xs);
+    letter-spacing: -2px;
+    opacity: 0;
+    transition: opacity var(--t-fast);
   }
-  .palette button.op {
-    border-color: var(--accent);
-    color: var(--accent);
-  }
-  .palette button.proj {
-    border-color: var(--accent);
-    color: var(--accent);
-  }
-  .palette button.ann {
-    border-style: dashed;
+  .palette button.chip:hover .chip-drag {
+    opacity: 0.6;
   }
   .designer-body {
     display: flex;

@@ -144,20 +144,27 @@ predicate.
 **Amendment 1 (2026-07-13, #222 scoping).** "Every config slot" overreached. Promotion is a *runtime
 value* affordance — it makes sense only where the slot holds a **data value** the reader would
 plausibly rebind at render time. That is the set of **value-carrying leaf slots**: `field value`
-(already promotable), `type`, `descendants_of`, `tagged`, and the highlight `color` (promotes, never
-wires — a color is not a set). Promoting type/tag/descendants_of widens the spec grammar
+(already promotable), `type`, `descendants_of`, and `tagged`. Promoting these widens the spec grammar
 (`type`/`descendants_of`/`tagged` accept a `{var}` operand alongside the string literal) across the
 frontend types, the frontend evaluator's leaf resolution, and the backend structural model; the
 evaluator resolves the bound value(s) to a string-set and the literal case degenerates to a
 single-element set (behaviour-preserving).
 
-The **structural selectors are NOT promotable** — they select a field *key* or a view *identity*, not
-a data value, so "rebind which field the tree joins on / which view this references at render time" is
-incoherent as a runtime formal: **nest join-field**, **view-ref**, and **sort field** (the last left
-out for now — its promotion semantics are unclear and sorting is being revisited separately, #237).
-These slots still adopt the uniform slot-row *chrome* (typed widget, edit-in-place) for visual
-consistency, but show no promote affordance. Wiring is unchanged this pass (the field value slot only);
-the wire *indicator* is the uniform abstraction, not new wire handles on the leaf slots.
+The following slots take the uniform slot-row *chrome* (typed widget, edit-in-place) for visual
+consistency but are **NOT promotable**:
+
+- **Structural selectors** — **nest join-field**, **view-ref**, and **sort field**. They select a
+  field *key* or a view *identity*, not a data value, so "rebind which field the tree joins on / which
+  view this references at render time" is incoherent as a runtime formal. (Sort is also being revisited
+  separately, #237.)
+- **Highlight `color`** — deliberately left out (Anton, 2026-07-13). Highlight is intentionally
+  simplistic today (a single soft in-place tint via `annotate`), and it participates in *presentation*
+  at render, not in membership evaluation — so a runtime color formal would need render-surface binding
+  plumbing the leaf/field params don't. Not worth extending until the highlight feature itself grows.
+  Revisit then.
+
+Wiring is unchanged this pass (the field value slot only); the wire *indicator* is the uniform
+abstraction, not new wire handles on the leaf slots.
 
 ### D. Parameters at a glance: the rail's one job
 

@@ -207,6 +207,18 @@
       setField({ op });
     }
   }
+  // A Filter's `param` is keyed to whichever slot `filter_kind` currently selects.
+  // Switching kinds would strand it on the old slot — a ghost card the §D rail
+  // can't see (collectParamBindings reads the NEW slot's value) that silently
+  // drops on save. So demote first (restore the old slot's literal from the
+  // default, clear the formal), then switch — the same guard changeOp applies.
+  function changeFilterKind(next: PredicateKind) {
+    if (isPromoted && slotKind) {
+      patch({ ...slotValuePatch(cfg.param?.default ?? null), param: undefined, filter_kind: next });
+    } else {
+      patch({ filter_kind: next });
+    }
+  }
 
   type FieldOp = NonNullable<ViewNodeData["field"]>["op"];
   // Op enum collapsed 6→4 (ADR-0031 §E, #184): overlap/disjoint set-coerce both
@@ -520,7 +532,7 @@
      the closed entry-type set instead of raw text; every other field routes to
      FieldValueEditor by datatype. Parametrized by value + setter for reuse in the
      literal slot and the promoted default. -->
-{#snippet fieldValueWidget(value: unknown, onSet: (v: unknown) => void)}
+{#snippet fieldValueWidget(value: unknown, onSet: (v: unknown) => void, ariaLabel: string)}
   {#if fieldKey === "entry_type"}
     {@render entryTypeWidget(typeof value === "string" ? value : "", onSet)}
   {:else if fieldDef}
@@ -532,7 +544,7 @@
       promptEntries={ctx.promptEntries}
       structure={ctx.structure}
       researchStructure={ctx.researchStructure}
-      ariaLabel="Field value"
+      {ariaLabel}
     />
   {/if}
 {/snippet}
@@ -650,7 +662,7 @@
      as literal | promoted formal | wired source — the same three modes every
      value-carrying slot follows. -->
 {#snippet fieldDefault()}
-  {@render fieldValueWidget(cfg.param?.default, (v) => setParamDefault(v))}
+  {@render fieldValueWidget(cfg.param?.default, (v) => setParamDefault(v), "Default value")}
 {/snippet}
 {#snippet fieldEditor()}
   <div class="vfield-row">
@@ -675,7 +687,7 @@
       {@render promoteCard(fieldDefault)}
     {:else}
       <div class="vfield-value nodrag" role="presentation" use:stopPointerdown>
-        {@render fieldValueWidget(cfg.field?.value, (v) => setField({ value: v }))}
+        {@render fieldValueWidget(cfg.field?.value, (v) => setField({ value: v }), "Field value")}
       </div>
       {@render promoteButton()}
     {/if}
@@ -767,7 +779,7 @@
     <select
       class="vfield"
       value={filterKind}
-      onchange={(e) => patch({ filter_kind: e.currentTarget.value as PredicateKind })}
+      onchange={(e) => changeFilterKind(e.currentTarget.value as PredicateKind)}
     >
       {#each predicateKinds as pk (pk.value)}
         <option value={pk.value}>{pk.label}</option>

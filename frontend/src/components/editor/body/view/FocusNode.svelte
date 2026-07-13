@@ -22,7 +22,10 @@
     timer = setTimeout(() => {
       timer = null;
       void fitView({ nodes: [{ id }], maxZoom: 1.1, minZoom: 0.5, padding: 0.5, duration: 200 });
-    }, 20);
+      // 80ms (matching FitView): the rail EXPANDS the target node just before this
+      // fires, so we must let Svelte Flow re-measure the now-taller node — fitting
+      // sooner frames it against stale (compact) bounds and clips the expanded card.
+    }, 80);
     return () => {
       if (timer) clearTimeout(timer);
     };

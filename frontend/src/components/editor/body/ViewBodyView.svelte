@@ -157,6 +157,17 @@
   type FlowData = { kind: GraphNodeKind; cfg: ViewNodeData };
   let flowNodes = $state<Node<FlowData>[]>([]);
   let flowEdges = $state<Edge[]>([]);
+  // `${nodeId}:${handleId}` for every wired endpoint — built once per edge change
+  // so `handleConnected` / `valueWired` are O(1) lookups rather than a per-handle
+  // scan of every edge (§240). Reactive: re-derives when flowEdges changes.
+  let connectedHandleKeys = $derived.by(() => {
+    const keys = new Set<string>();
+    for (const e of flowEdges) {
+      if (e.sourceHandle) keys.add(`${e.source}:${e.sourceHandle}`);
+      if (e.targetHandle) keys.add(`${e.target}:${e.targetHandle}`);
+    }
+    return keys;
+  });
   // The canvas element, so insertion can invert screen→flow coords by reading the
   // live viewport transform straight off the DOM (§E) — `bind:viewport` only
   // emits on a viewport CHANGE, so it stays undefined until the first pan/zoom.
@@ -484,14 +495,8 @@
       fields: fieldOptions,
       fieldsFor: fieldsForNode,
       fieldByKey: (key: string) => schema?.fields?.[key] ?? null,
-      valueWired: (nodeId: string) =>
-        flowEdges.some((e) => e.target === nodeId && e.targetHandle === FILTER_VALUE_HANDLE),
-      handleConnected: (nodeId: string, handleId: string) =>
-        flowEdges.some(
-          (e) =>
-            (e.target === nodeId && e.targetHandle === handleId) ||
-            (e.source === nodeId && e.sourceHandle === handleId),
-        ),
+      valueWired: (nodeId: string) => connectedHandleKeys.has(`${nodeId}:${FILTER_VALUE_HANDLE}`),
+      handleConnected: (nodeId: string, handleId: string) => connectedHandleKeys.has(`${nodeId}:${handleId}`),
       tags: tagOptions,
       savedViews,
       loreEntries,
@@ -542,34 +547,33 @@
   // lowering (`commonLeafExpr`) through one UI path, and post-ADR-0036 `All` is a
   // real kind universe, so nothing is lost. `specToGraph` canonicalizes any
   // surviving bare leaf on open, so a reopened or duplicated view never presents
-  // vocabulary the palette can't rebuild. Per-item `cls` keeps the colour cue
-  // (retokenised in §G / #223); per-kind glyphs are the §G lexicon batch, not
-  // this slice.
+  // vocabulary the palette can't rebuild. Each chip carries the kind's ViewGlyph
+  // (the same mark as the node header, §240), so it needs no per-item colour cue.
   let hasTypeChoice = $derived(entryTypeOptions.length > 1);
-  type PalItem = { kind: GraphNodeKind; label: string; cls: string };
+  type PalItem = { kind: GraphNodeKind; label: string };
   const PALETTE: { label: string; items: PalItem[] }[] = [
     {
       label: "Sources",
       items: [
-        { kind: "all", label: "All", cls: "inj" },
-        { kind: "hand_picked", label: "Hand-picked", cls: "inj" },
-        { kind: "view_ref", label: "Saved view", cls: "inj" },
+        { kind: "all", label: "All" },
+        { kind: "hand_picked", label: "Hand-picked" },
+        { kind: "view_ref", label: "Saved view" },
         // `This entry` ($self) seeds a projection from the pane's anchor.
-        { kind: "self", label: "This entry", cls: "proj" },
+        { kind: "self", label: "This entry" },
       ],
     },
     {
       label: "Operations",
       items: [
-        { kind: "filter", label: "Filter", cls: "filter" },
-        { kind: "field_of", label: "Field of", cls: "proj" },
-        { kind: "union", label: "Union", cls: "op" },
-        { kind: "intersect", label: "Intersect", cls: "op" },
-        { kind: "difference", label: "Difference", cls: "op" },
-        { kind: "complement", label: "Complement", cls: "op" },
-        { kind: "nest", label: "Nest", cls: "op" },
-        { kind: "sorter", label: "Sort", cls: "ann" },
-        { kind: "highlight", label: "Highlight", cls: "ann" },
+        { kind: "filter", label: "Filter" },
+        { kind: "field_of", label: "Field of" },
+        { kind: "union", label: "Union" },
+        { kind: "intersect", label: "Intersect" },
+        { kind: "difference", label: "Difference" },
+        { kind: "complement", label: "Complement" },
+        { kind: "nest", label: "Nest" },
+        { kind: "sorter", label: "Sort" },
+        { kind: "highlight", label: "Highlight" },
       ],
     },
   ];
@@ -849,6 +853,20 @@
     </div>
   </div>
 
+  <!-- Shared collapse toggle for the rail-like panes (§240): the same Tabler
+       sidebar icon as the editor's details rail. `side` selects the left
+       (Parameters) or right (Preview) variant. -->
+  {#snippet railToggle(collapsed: boolean, side: "left" | "right", label: string, onToggle: () => void)}
+    <button
+      type="button"
+      class="rail-toggle"
+      title={collapsed ? `Expand ${label}` : `Collapse ${label}`}
+      aria-label={collapsed ? `Expand ${label}` : `Collapse ${label}`}
+      aria-expanded={!collapsed}
+      onclick={onToggle}
+    ><i class="ti ti-layout-sidebar-{side}-{collapsed ? 'expand' : 'collapse'}" aria-hidden="true"></i></button>
+  {/snippet}
+
   <div class="designer-body">
     <!-- Parameters rail (ADR-0038 §D): the view-level overview of every promoted
          formal. Per-node config edits IN PLACE (§A) — never here; the rail only
@@ -856,14 +874,7 @@
          view exposes none — never a config dumping ground. -->
     <aside class="params-rail" class:collapsed={paramsCollapsed}>
       <header class="params-head">
-        <button
-          type="button"
-          class="params-toggle"
-          title={paramsCollapsed ? "Expand parameters" : "Collapse parameters"}
-          aria-label={paramsCollapsed ? "Expand parameters" : "Collapse parameters"}
-          aria-expanded={!paramsCollapsed}
-          onclick={() => (paramsCollapsed = !paramsCollapsed)}
-        ><i class="ti {paramsCollapsed ? 'ti-layout-sidebar-left-expand' : 'ti-layout-sidebar-left-collapse'}" aria-hidden="true"></i></button>
+        {@render railToggle(paramsCollapsed, "left", "parameters", () => (paramsCollapsed = !paramsCollapsed))}
         {#if !paramsCollapsed}
           <span class="params-title">Parameters</span>
           {#if paramRows.length > 0}<span class="count">{paramRows.length}</span>{/if}
@@ -935,14 +946,7 @@
 
     <aside class="preview" class:collapsed={previewCollapsed}>
       <header class="preview-head">
-        <button
-          type="button"
-          class="preview-toggle"
-          title={previewCollapsed ? "Expand preview" : "Collapse preview"}
-          aria-label={previewCollapsed ? "Expand preview" : "Collapse preview"}
-          aria-expanded={!previewCollapsed}
-          onclick={() => (previewCollapsed = !previewCollapsed)}
-        ><i class="ti {previewCollapsed ? 'ti-layout-sidebar-right-expand' : 'ti-layout-sidebar-right-collapse'}" aria-hidden="true"></i></button>
+        {@render railToggle(previewCollapsed, "right", "preview", () => (previewCollapsed = !previewCollapsed))}
         {#if !previewCollapsed}
           <span class="preview-title">Preview</span>
           <span class="count">{preview.nodes.length} / {universe.length}</span>
@@ -1189,7 +1193,7 @@
   .params-title {
     flex: 1;
   }
-  .params-toggle {
+  .rail-toggle {
     border: none;
     background: transparent;
     color: var(--text-3);
@@ -1198,7 +1202,7 @@
     cursor: pointer;
     padding: 0 2px;
   }
-  .params-toggle:hover {
+  .rail-toggle:hover {
     color: var(--text);
   }
   .params-empty {
@@ -1298,18 +1302,6 @@
   }
   .preview-title {
     flex: 1;
-  }
-  .preview-toggle {
-    border: none;
-    background: transparent;
-    color: var(--text-3);
-    font-size: var(--fs-sm);
-    line-height: 1;
-    cursor: pointer;
-    padding: 0 2px;
-  }
-  .preview-toggle:hover {
-    color: var(--text);
   }
   .count {
     font-variant-numeric: tabular-nums;

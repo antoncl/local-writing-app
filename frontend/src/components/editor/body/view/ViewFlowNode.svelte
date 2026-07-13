@@ -432,10 +432,6 @@
     [next[i], next[j]] = [next[j], next[i]];
     commitHandles(next);
   }
-  // Even vertical spread for the target ports down the node's left edge.
-  function handleTop(i: number): string {
-    return `${((i + 1) / (handles.length + 1)) * 100}%`;
-  }
 
   // --- organize levels (ADR-0037 §2/§8 + Amendment 1: ν by attribute, owned per
   // GROUP). Each named group carries its own levels (`ViewHandle.group_by`); the

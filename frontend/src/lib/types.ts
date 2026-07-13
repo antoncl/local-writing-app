@@ -322,6 +322,14 @@ export type ViewFieldOf = { of: ViewExpr; field: string };
 // promoted formal or the reserved `$self`; `{field_of}` is a projection.
 export type ViewOperand = unknown | { var: string } | { field_of: ViewFieldOf };
 
+// A leaf slot value — the `type` / `descendants_of` / `tagged` slots (ADR-0038 §C
+// Amendment 1, #222). EITHER a bare string literal (an entry_type FQN or a tag) OR
+// a promoted formal `{var}`: the reader rebinds the value at render time. Unlike a
+// field predicate value a leaf never wires (`{field_of}` is not admitted) — it
+// carries a single value, not a set-source. The evaluator resolves `{var}` to a
+// string-set from bindings; the literal degenerates to a one-element set.
+export type ViewLeafValue = string | { var: string };
+
 export type ViewAnnotatePayload = { label?: string; color?: string; rank?: number };
 
 // The parameterized link rule a `nest` denormalizes (ADR-0028 §B). `direction`
@@ -362,9 +370,9 @@ export type ViewExpr = {
   annotate?: ViewAnnotatePayload;
   of?: ViewExpr;
   field_of?: ViewFieldOf; // forward projection (#184): input set → nodes or values
-  type?: string; // exact entry_type FQN
-  descendants_of?: string; // entry_type FQN + every inheriting type
-  tagged?: string;
+  type?: ViewLeafValue; // exact entry_type FQN, or a promoted `{var}` (#222)
+  descendants_of?: ViewLeafValue; // entry_type FQN + every inheriting type, or `{var}`
+  tagged?: ViewLeafValue; // a tag value, or a promoted `{var}`
   field?: ViewFieldPredicate;
   hand_picked?: string[];
   view_ref?: string; // a saved view node id

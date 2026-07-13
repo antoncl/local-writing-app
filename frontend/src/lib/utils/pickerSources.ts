@@ -16,8 +16,10 @@ export function isViewRef(source: ViewSource): source is ViewRef {
 
 function exprEntryTypeLeaves(expr: ViewExpr | null | undefined): string[] | null {
   if (!expr) return null;
-  if (expr.type) return [expr.type];
-  if (expr.union && expr.union.length > 0 && expr.union.every((child) => !!child.type)) {
+  // Only a STRING type leaf is a static entry_type whitelist; a promoted `{var}`
+  // type leaf (#222) is a parameterized source with no degenerate reduction.
+  if (typeof expr.type === "string") return [expr.type];
+  if (expr.union && expr.union.length > 0 && expr.union.every((child) => typeof child.type === "string")) {
     return expr.union.map((child) => child.type as string);
   }
   // Any richer expr can't be reduced to the degenerate subset without an

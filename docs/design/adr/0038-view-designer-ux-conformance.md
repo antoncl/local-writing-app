@@ -134,12 +134,37 @@ the safety net for pre-existing user views; the authored defaults are the primar
 ### C. Every config slot follows one model: literal | promoted formal | wired source
 
 The three fill modes the field value slot already has (ADR-0031/0032) become **the uniform slot
-model**. Every configurable slot — type, tag, field value, nest join-field, highlight color, sort
-field, view-ref — renders in the expanded node (§A) as the same slot row: its typed widget, plus a
-promote affordance (`field_param` generalizes to a per-slot `param`), plus a wire indicator where the
-slot's payload type admits wiring (value-set/node-set slots only; a color slot promotes but never
-wires). Promotion keeps ADR-0032 semantics exactly: authored literal becomes the overridable default;
-`collectParams` walks slots generically instead of special-casing the field predicate.
+model**. Every configurable slot renders in the expanded node (§A) as the same slot row: its typed
+widget, plus a promote affordance (`field_param` generalizes to a per-slot `param`), plus a wire
+indicator where the slot's payload type admits wiring (value-set/node-set slots only; a color slot
+promotes but never wires). Promotion keeps ADR-0032 semantics exactly: authored literal becomes the
+overridable default; `collectParams` walks slots generically instead of special-casing the field
+predicate.
+
+**Amendment 1 (2026-07-13, #222 scoping).** "Every config slot" overreached. Promotion is a *runtime
+value* affordance — it makes sense only where the slot holds a **data value** the reader would
+plausibly rebind at render time. That is the set of **value-carrying leaf slots**: `field value`
+(already promotable), `type`, `descendants_of`, and `tagged`. Promoting these widens the spec grammar
+(`type`/`descendants_of`/`tagged` accept a `{var}` operand alongside the string literal) across the
+frontend types, the frontend evaluator's leaf resolution, and the backend structural model; the
+evaluator resolves the bound value(s) to a string-set and the literal case degenerates to a
+single-element set (behaviour-preserving).
+
+The following slots take the uniform slot-row *chrome* (typed widget, edit-in-place) for visual
+consistency but are **NOT promotable**:
+
+- **Structural selectors** — **nest join-field**, **view-ref**, and **sort field**. They select a
+  field *key* or a view *identity*, not a data value, so "rebind which field the tree joins on / which
+  view this references at render time" is incoherent as a runtime formal. (Sort is also being revisited
+  separately, #237.)
+- **Highlight `color`** — deliberately left out (Anton, 2026-07-13). Highlight is intentionally
+  simplistic today (a single soft in-place tint via `annotate`), and it participates in *presentation*
+  at render, not in membership evaluation — so a runtime color formal would need render-surface binding
+  plumbing the leaf/field params don't. Not worth extending until the highlight feature itself grows.
+  Revisit then.
+
+Wiring is unchanged this pass (the field value slot only); the wire *indicator* is the uniform
+abstraction, not new wire handles on the leaf slots.
 
 ### D. Parameters at a glance: the rail's one job
 

@@ -523,6 +523,49 @@ describe("parameterized views (#184: bindings, $self, field_of)", () => {
   });
 });
 
+// ADR-0038 §C Amendment 1 (#222): the type / descendants_of / tagged leaves now
+// carry a promoted `{var}` alongside the string literal, resolving from bindings
+// exactly like a field predicate value. A literal degenerates to a one-element
+// set (behaviour-preserving); an unbound formal is inactive (no constraint).
+describe("promoted leaf slots resolve from bindings (ADR-0038 §C, #222)", () => {
+  const leafIds = (expr: ViewExpr, bindings?: Record<string, string[] | Set<string>>) =>
+    evaluateView({ kind: "lore", expr } as ViewSpec, NODES, { schema: SCHEMA, bindings }).nodes.map((n) => n.id);
+
+  it("a literal type leaf is unchanged (behaviour-preserving)", () => {
+    expect(leafIds({ type: "lore:character" })).toEqual(["a", "b"]);
+  });
+  it("a bound type leaf matches the bound entry_type", () => {
+    expect(leafIds({ type: { var: "T" } }, { T: ["lore:deity"] })).toEqual(["c"]);
+  });
+  it("a bound type leaf matches ANY of a multi-value binding", () => {
+    expect(leafIds({ type: { var: "T" } }, { T: ["lore:deity", "lore:location"] })).toEqual(["c", "d"]);
+  });
+  it("a bound descendants_of leaf includes the subtype family", () => {
+    // lore:deity + its lore:demigod descendant.
+    expect(leafIds({ descendants_of: { var: "T" } }, { T: ["lore:deity"] })).toEqual(["c", "e"]);
+  });
+  it("a bound tagged leaf matches nodes carrying the tag (array + CSV)", () => {
+    expect(leafIds({ tagged: { var: "TAG" } }, { TAG: ["gotham"] })).toEqual(["b", "c"]);
+  });
+  it("an UNBOUND type leaf is inactive — shows everything at top level (#198)", () => {
+    expect(leafIds({ type: { var: "T" } })).toEqual(["a", "b", "c", "d", "e"]);
+  });
+  it("an UNBOUND type leaf in a DROP removes nothing (#198 polarity)", () => {
+    expect(leafIds({ difference: { keep: { descendants_of: "lore:base" }, remove: { type: { var: "T" } } } })).toEqual([
+      "a",
+      "b",
+      "c",
+      "d",
+      "e",
+    ]);
+  });
+  it("a BOUND type leaf in a DROP subtracts its matches", () => {
+    expect(
+      leafIds({ difference: { keep: { descendants_of: "lore:base" }, remove: { type: { var: "T" } } } }, { T: ["lore:character"] }),
+    ).toEqual(["c", "d", "e"]);
+  });
+});
+
 describe("combinators", () => {
   it("union (n-ary)", () => {
     expect(ids({ kind: "lore", expr: { union: [{ type: "lore:character" }, { type: "lore:deity" }] } })).toEqual([

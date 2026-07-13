@@ -177,10 +177,16 @@ class ViewExpr(BaseModel):
     # Field projection (#184, ADR-0031 §D): project the input set through a field.
     # A set-producing operator, like the combinators — not paired via `of`.
     field_of: FieldOfOp | None = None
-    # Leaves
-    type: str | None = None  # exact entry_type FQN, e.g. "lore:character"
-    descendants_of: str | None = None  # an entry_type FQN + every type inheriting it
-    tagged: str | None = None  # a tag value
+    # Leaves. type/descendants_of/tagged are EITHER a bare string literal OR a
+    # tagged `{"var": name}` operand — a promoted formal (ADR-0038 §C Amendment 1,
+    # #222): the reader rebinds the entry_type/tag at render time. Kept loose
+    # (`str | dict`) for the same reason as `FieldPredicate.value` — the two shapes
+    # are mutually exclusive and the frontend evaluator dispatches on shape (no
+    # evaluator here; backend is structural). A leaf never carries `field_of` — it
+    # holds a single value, not a wired set.
+    type: str | dict[str, Any] | None = None  # exact entry_type FQN, or {"var": name}
+    descendants_of: str | dict[str, Any] | None = None  # FQN (+ inheriting types), or {"var": name}
+    tagged: str | dict[str, Any] | None = None  # a tag value, or {"var": name}
     field: FieldPredicate | None = None
     hand_picked: list[str] | None = None  # explicit node ids — the one static leaf
     view_ref: str | None = None  # a saved view node id (cycle-checked at save)
@@ -335,10 +341,13 @@ def _view_expr_entry_type_leaves(expr: ViewExpr | None) -> list[str] | None:
 
     if expr is None:
         return None
-    if expr.type is not None:
+    # Only a STRING type leaf is a static entry_type whitelist. A promoted
+    # `{"var": ...}` type leaf (ADR-0038 §C Amendment 1) is a parameterized source,
+    # not a fixed set — it has no degenerate (kinds, entry_types) reduction.
+    if isinstance(expr.type, str):
         return [expr.type]
-    if expr.union is not None and all(child.type is not None for child in expr.union):
-        return [child.type for child in expr.union if child.type is not None]
+    if expr.union is not None and all(isinstance(child.type, str) for child in expr.union):
+        return [child.type for child in expr.union if isinstance(child.type, str)]
     return None
 
 

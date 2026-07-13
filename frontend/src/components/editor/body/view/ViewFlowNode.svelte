@@ -723,7 +723,9 @@
   {:else if kind === "nest"}
     <Handle type="target" position={Position.Left} id="parents" class={portClass("port parents", "parents")} style="top: 34%" />
     <Handle type="target" position={Position.Left} id="children" class={portClass("port children", "children")} style="top: 66%" />
-  {:else if arity !== "none"}
+  {:else if kind !== "output" && arity !== "none"}
+    <!-- output is excluded: its group handles live in the group rows below, so it
+         must not also get a generic `in` port here (it's arity "many"). -->
     <Handle type="target" position={Position.Left} id="in" class={portClass("port", "in")} style={hasValueSlot ? "top: 34%" : ""} />
   {/if}
   <!-- value operand socket (#196): a wired source fills the field's value slot.

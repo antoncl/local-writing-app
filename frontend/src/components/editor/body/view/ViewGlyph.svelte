@@ -3,7 +3,12 @@
   two-circle icon with the *result region filled*, the Figma/Illustrator
   boolean-ops pattern. Difference fills only the left (keep) lobe so the
   surviving set is unmistakable — the confusable, non-commutative op (doc §1.2).
-  Leaf / annotate / output kinds get a simple mono symbol instead.
+  Leaf / annotate / output kinds get a simple mono symbol instead — a
+  self-contained designer domain toolbar (design-language §4 sanctioned
+  exception), so no color emoji and no clash with the global lexicon:
+  `view_ref` reuses the global `▤` (= view), never `⧉` (which the lexicon
+  reserves for *duplicate*); `hand_picked` is a mono `✓` (= selected), never
+  the `✋` color emoji.
 
   `uid` namespaces the clip/mask ids so multiple glyphs on one canvas don't
   collide.
@@ -68,7 +73,7 @@
 {:else}
   <span class="glyph sym" style={`font-size:${size * 0.62}px`} aria-hidden="true">
     {#if kind === "type"}◆{:else if kind === "descendants_of"}⋔{:else if kind === "tagged"}#{:else if kind === "field"}=
-    {:else if kind === "hand_picked"}✋{:else if kind === "view_ref"}⧉{:else if kind === "all"}◯{:else if kind === "filter"}▽
+    {:else if kind === "hand_picked"}✓{:else if kind === "view_ref"}▤{:else if kind === "all"}◯{:else if kind === "filter"}▽
     {:else if kind === "field_of"}⇒{:else if kind === "self"}◉
     {:else if kind === "sorter"}⇅{:else if kind === "highlight"}●{:else if kind === "output"}▶{:else}•{/if}
   </span>

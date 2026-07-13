@@ -49,6 +49,13 @@
   // the projected kind's fields instead of the view anchor's.
   let nodeFields = $derived(ctx.fieldsFor?.(id) ?? ctx.fields);
 
+  // A wired port stays filled at rest (§240), not only while hovered: append
+  // `connected` when this handle currently has an edge. Reads flowEdges through
+  // the context, so it re-evaluates when the wiring changes.
+  function portClass(base: string, handleId: string): string {
+    return ctx.handleConnected(id, handleId) ? `${base} connected` : base;
+  }
+
   const LABELS: Record<GraphNodeKind, string> = {
     output: "View result",
     all: "All",
@@ -706,19 +713,20 @@
   class:inactive={isInactiveParam}
   title={isInactiveParam ? "Unbound parameter — inactive until a value is picked (shows everything by default)" : undefined}
 >
+  <span class="vnode-stripe" aria-hidden="true"></span>
   <!-- target ports (left) -->
   {#if kind === "output"}
     {#each handles as h, i (h.id)}
-      <Handle type="target" position={Position.Left} id={h.id} class="port port-h" style={`top:${handleTop(i)}`} />
+      <Handle type="target" position={Position.Left} id={h.id} class={portClass("port port-h", h.id)} style={`top:${handleTop(i)}`} />
     {/each}
   {:else if kind === "difference"}
-    <Handle type="target" position={Position.Left} id="keep" class="port keep" style="top: 34%" />
-    <Handle type="target" position={Position.Left} id="remove" class="port remove" style="top: 66%" />
+    <Handle type="target" position={Position.Left} id="keep" class={portClass("port keep", "keep")} style="top: 34%" />
+    <Handle type="target" position={Position.Left} id="remove" class={portClass("port remove", "remove")} style="top: 66%" />
   {:else if kind === "nest"}
-    <Handle type="target" position={Position.Left} id="parents" class="port parents" style="top: 34%" />
-    <Handle type="target" position={Position.Left} id="children" class="port children" style="top: 66%" />
+    <Handle type="target" position={Position.Left} id="parents" class={portClass("port parents", "parents")} style="top: 34%" />
+    <Handle type="target" position={Position.Left} id="children" class={portClass("port children", "children")} style="top: 66%" />
   {:else if arity !== "none"}
-    <Handle type="target" position={Position.Left} id="in" class="port" style={hasValueSlot ? "top: 34%" : ""} />
+    <Handle type="target" position={Position.Left} id="in" class={portClass("port", "in")} style={hasValueSlot ? "top: 34%" : ""} />
   {/if}
   <!-- value operand socket (#196): a wired source fills the field's value slot.
        For a Filter it sits below the set `in` port; a bare `field` leaf has only
@@ -728,7 +736,7 @@
       type="target"
       position={Position.Left}
       id="value"
-      class="port value"
+      class={portClass("port value", "value")}
       style={arity !== "none" ? "top: 66%" : "top: 50%"}
     />
   {/if}
@@ -942,12 +950,13 @@
 
   <!-- source port (right) — tinted `value` when this node emits a value-set. -->
   {#if kind !== "output"}
-    <Handle type="source" position={Position.Right} id="out" class={emitsValueSet ? "port out value" : "port out"} />
+    <Handle type="source" position={Position.Right} id="out" class={portClass(emitsValueSet ? "port out value" : "port out", "out")} />
   {/if}
 </div>
 
 <style>
   .vnode {
+    position: relative;
     min-width: 150px;
     max-width: 230px;
     background: var(--panel);
@@ -956,6 +965,20 @@
     box-shadow: var(--elev-1);
     font-size: var(--fs-sm);
     color: var(--text);
+  }
+  /* The kind-stripe (§240): a soft accent band down the left edge — the same
+     idea that ties every NodeRow to its kind, now tying flow nodes to that
+     family too. Uniform on every node kind; rounded to follow the card's left
+     corners (the card has no overflow:hidden — the ports sit outside it). */
+  .vnode-stripe {
+    position: absolute;
+    left: 0;
+    top: 0;
+    bottom: 0;
+    width: 4px;
+    background: var(--accent);
+    border-radius: var(--r-lg) 0 0 var(--r-lg);
+    pointer-events: none;
   }
   .vnode.selected {
     border-color: var(--accent);
@@ -987,7 +1010,7 @@
     display: flex;
     align-items: center;
     gap: 6px;
-    padding: 6px 8px;
+    padding: 6px 8px 6px 11px;
   }
   /* The glyph+title expand toggle — reads as the header, not a button. */
   .vnode-toggle {
@@ -1026,7 +1049,7 @@
   /* Compact one-line config summary on the resting (unselected) node — the
      glance state; selecting the node swaps it for the full editor (§A). */
   .vnode-summary {
-    padding: 0 8px 8px;
+    padding: 0 8px 8px 11px;
     font-size: var(--fs-sm);
     color: var(--text-2);
     white-space: nowrap;
@@ -1034,7 +1057,7 @@
     text-overflow: ellipsis;
   }
   .port-legend {
-    padding: 0 8px 4px;
+    padding: 0 8px 4px 11px;
     font-size: var(--fs-xs);
     color: var(--text-3);
   }
@@ -1314,19 +1337,23 @@
     background: var(--surface);
     border: 1.5px solid var(--accent);
   }
-  .vnode :global(.port:hover) {
+  /* a port fills with its kind color both on hover AND while wired (§240) */
+  .vnode :global(.port:hover),
+  .vnode :global(.port.connected) {
     background: var(--accent);
   }
   .vnode :global(.port.remove) {
     border-color: var(--danger);
   }
-  .vnode :global(.port.remove:hover) {
+  .vnode :global(.port.remove:hover),
+  .vnode :global(.port.remove.connected) {
     background: var(--danger);
   }
   .vnode :global(.port.children) {
     border-color: var(--k-lore);
   }
-  .vnode :global(.port.children:hover) {
+  .vnode :global(.port.children:hover),
+  .vnode :global(.port.children.connected) {
     background: var(--k-lore);
   }
   /* The value-pipe handles (#196) — the value-operand target socket AND a
@@ -1337,7 +1364,8 @@
   .vnode :global(.port.value) {
     border-color: var(--k-snippet);
   }
-  .vnode :global(.port.value:hover) {
+  .vnode :global(.port.value:hover),
+  .vnode :global(.port.value.connected) {
     background: var(--k-snippet);
   }
 </style>

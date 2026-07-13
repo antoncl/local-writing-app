@@ -486,6 +486,12 @@
       fieldByKey: (key: string) => schema?.fields?.[key] ?? null,
       valueWired: (nodeId: string) =>
         flowEdges.some((e) => e.target === nodeId && e.targetHandle === FILTER_VALUE_HANDLE),
+      handleConnected: (nodeId: string, handleId: string) =>
+        flowEdges.some(
+          (e) =>
+            (e.target === nodeId && e.targetHandle === handleId) ||
+            (e.source === nodeId && e.sourceHandle === handleId),
+        ),
       tags: tagOptions,
       savedViews,
       loreEntries,

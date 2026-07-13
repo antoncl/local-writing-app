@@ -946,7 +946,7 @@
     max-width: 230px;
     background: var(--panel);
     border: 1px solid var(--border-strong);
-    border-radius: 9px;
+    border-radius: var(--r-lg);
     box-shadow: var(--elev-1);
     font-size: var(--fs-sm);
     color: var(--text);
@@ -1058,7 +1058,7 @@
     margin: 0 8px 8px;
     padding: 2px 6px;
     border: 1px dashed var(--border-strong);
-    border-radius: 5px;
+    border-radius: var(--r-sm);
     font-size: var(--fs-xs);
     color: var(--text-3);
   }
@@ -1084,7 +1084,7 @@
     box-sizing: border-box;
     padding: 3px 5px;
     border: 1px solid var(--border);
-    border-radius: 5px;
+    border-radius: var(--r-sm);
     font-size: var(--fs-sm);
     background: var(--panel);
   }
@@ -1106,7 +1106,7 @@
     padding: 2px 6px;
     border: 1px dashed var(--border-strong);
     background: transparent;
-    border-radius: 5px;
+    border-radius: var(--r-sm);
     font-size: var(--fs-xs);
     color: var(--text-2);
     cursor: pointer;
@@ -1118,7 +1118,7 @@
     margin: 0 8px 8px;
     padding: 6px;
     border: 1px solid var(--accent);
-    border-radius: 6px;
+    border-radius: var(--r-md);
     background: var(--accent-soft);
   }
   .vparam-head {
@@ -1180,16 +1180,17 @@
     cursor: pointer;
   }
   .vseg button:first-child {
-    border-radius: 5px 0 0 5px;
+    border-radius: var(--r-sm) 0 0 var(--r-sm);
   }
   .vseg button:last-child {
-    border-radius: 0 5px 5px 0;
+    border-radius: 0 var(--r-sm) var(--r-sm) 0;
     border-left: none;
   }
   .vseg button.on {
     background: var(--accent);
     border-color: var(--accent);
-    color: #fff;
+    /* ink on accent-solid — theme-flipping --surface, not a raw #fff (§G) */
+    color: var(--surface);
   }
   /* swatch trigger sitting on its own (highlight). */
   .vswatch {
@@ -1223,7 +1224,7 @@
   .hbtn {
     border: 1px solid var(--border);
     background: var(--panel);
-    border-radius: 4px;
+    border-radius: var(--r-sm);
     font-size: var(--fs-xs);
     line-height: 1;
     padding: 2px 4px;
@@ -1241,7 +1242,7 @@
     align-self: flex-start;
     border: 1px dashed var(--border-strong);
     background: transparent;
-    border-radius: 5px;
+    border-radius: var(--r-sm);
     font-size: var(--fs-sm);
     padding: 2px 8px;
     cursor: pointer;

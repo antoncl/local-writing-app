@@ -18,6 +18,7 @@
   import ViewFlowNode from "./view/ViewFlowNode.svelte";
   import SelfLoopEdge from "./view/SelfLoopEdge.svelte";
   import ViewportFit from "./view/ViewportFit.svelte";
+  import ParamMark from "./view/ParamMark.svelte";
   import ViewNodeList, { type RowCtx } from "@/components/widgets/ViewNodeList.svelte";
   import RowCaret from "@/components/widgets/RowCaret.svelte";
   import { setDesignerContext, type DesignerContext } from "./view/designerContext";
@@ -862,9 +863,10 @@
             {#each paramRows as p (p.name)}
               <li>
                 <button type="button" class="param-row" class:unbound={!p.bound} onclick={() => focusParamNode(p.nodeId)} title="Go to this parameter's node">
+                  <span class="param-mark"><ParamMark bound={p.bound} /></span>
                   <span class="param-label">{p.label}</span>
                   <span class="param-type">{p.typeLabel}</span>
-                  <span class="param-default">{p.bound ? p.defaultText : "unbound"}</span>
+                  <span class="param-default">{p.bound ? p.defaultText : "no default"}</span>
                 </button>
               </li>
             {/each}
@@ -1191,10 +1193,10 @@
   }
   .param-row {
     display: grid;
-    grid-template-columns: 1fr auto;
+    grid-template-columns: auto 1fr auto;
     grid-template-areas:
-      "label type"
-      "default default";
+      "mark label type"
+      "mark default default";
     gap: 2px 8px;
     width: 100%;
     text-align: left;
@@ -1209,6 +1211,11 @@
   .param-row:hover {
     border-color: var(--border-strong);
     background: var(--accent-soft);
+  }
+  .param-mark {
+    grid-area: mark;
+    align-self: center;
+    display: inline-flex;
   }
   .param-label {
     grid-area: label;

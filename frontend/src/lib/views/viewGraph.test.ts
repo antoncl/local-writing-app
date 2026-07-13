@@ -3,6 +3,7 @@ import type { ViewExpr } from "@/lib/types";
 import { defaultView } from "./evaluateView";
 import {
   classifyConnection,
+  collectParamBindings,
   connectionAllowed,
   exprToGraph,
   graphToExpr,
@@ -940,6 +941,25 @@ describe("promote-in-place params — leaf slots (ADR-0038 §C, #222)", () => {
     const spec2 = graphToSpec(specToGraph(spec1), { kind: "lore" });
     expect(spec2.params).toEqual(spec1.params);
     expect(spec2.expr).toEqual(spec1.expr);
+  });
+
+  // The §D Parameters rail lists these — each row needs the owning node id + slot
+  // to navigate to and expand it.
+  it("collectParamBindings pairs each formal with its owning node and slot", () => {
+    const t = node("type", { type: { var: "T" }, param: { name: "T", label: "Type" } });
+    const f = node("field", {
+      field: { key: "tags", op: "overlap", value: { var: "TAG" } },
+      param: { name: "TAG", label: "Tag", default: ["hero"] },
+    });
+    const graph: ViewGraph = {
+      nodes: [out(), t, f],
+      edges: [edge(t.id, OUTPUT_NODE_ID), edge(f.id, OUTPUT_NODE_ID)],
+    };
+    const bindings = collectParamBindings(graph);
+    expect(bindings.map((b) => [b.nodeId, b.slot, b.param.name])).toEqual([
+      [t.id, "type", "T"],
+      [f.id, "field", "TAG"],
+    ]);
   });
 });
 

@@ -806,31 +806,40 @@ function promotedSlotValue(node: ViewGraphNode): unknown {
   }
 }
 
+// A declared formal paired with the node (and slot) that owns it — the §D
+// Parameters rail lists these so each row can navigate to + expand its node.
+export type ParamBinding = { param: ViewParam; nodeId: string; slot: PromotableSlot };
+
 // Collect the promoted runtime formals (#184 Phase 1b, ADR-0032; per-slot for
-// ADR-0038 §C, #222) declared on reachable nodes, in stable node order. A formal
-// counts only when its node both carries a `param` AND actually references it via
-// its promotable slot value `= {var: name}`, so a demoted (or key-changed) node
-// never emits a stale param. Deduped by name (the stable key `{var}` operands
-// reference).
-function collectParams(graph: ViewGraph): ViewParam[] {
+// ADR-0038 §C, #222) declared on reachable nodes, in stable node order, paired
+// with their owning node. A formal counts only when its node both carries a
+// `param` AND actually references it via its promotable slot value `= {var: name}`,
+// so a demoted (or key-changed) node never emits a stale param. Deduped by name
+// (the stable key `{var}` operands reference).
+export function collectParamBindings(graph: ViewGraph): ParamBinding[] {
   const reachable = reachableFromOutput(graph);
   const seen = new Set<string>();
-  const out: ViewParam[] = [];
+  const out: ParamBinding[] = [];
   for (const n of graph.nodes) {
     if (!reachable.has(n.id)) continue;
     const fp = n.data.param;
+    const slot = promotableSlot(n);
     const v = promotedSlotValue(n);
     // A value-wired slot (#196) takes its operand from the edge, not a formal —
     // the wire wins at lowering, so a stale `param` must not leak a param.
     const valueWired = graph.edges.some((e) => e.target === n.id && e.targetHandle === FILTER_VALUE_HANDLE);
-    if (valueWired || !fp || !isVarOperand(v) || v.var !== fp.name || seen.has(fp.name)) continue;
+    if (valueWired || !fp || !slot || !isVarOperand(v) || v.var !== fp.name || seen.has(fp.name)) continue;
     seen.add(fp.name);
     const param: ViewParam = { name: fp.name };
     if (fp.label != null) param.label = fp.label;
     if (fp.default !== undefined) param.default = fp.default;
-    out.push(param);
+    out.push({ param, nodeId: n.id, slot });
   }
   return out;
+}
+
+function collectParams(graph: ViewGraph): ViewParam[] {
+  return collectParamBindings(graph).map((b) => b.param);
 }
 
 // Serialize the graph reachable from the View node into a ViewSpec. 0–1

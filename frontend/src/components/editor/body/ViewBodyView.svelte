@@ -18,6 +18,7 @@
   import ViewFlowNode from "./view/ViewFlowNode.svelte";
   import SelfLoopEdge from "./view/SelfLoopEdge.svelte";
   import FitView from "./view/FitView.svelte";
+  import FocusNode from "./view/FocusNode.svelte";
   import ViewNodeList, { type RowCtx } from "@/components/widgets/ViewNodeList.svelte";
   import RowCaret from "@/components/widgets/RowCaret.svelte";
   import { setDesignerContext, type DesignerContext } from "./view/designerContext";
@@ -32,6 +33,7 @@
   import {
     specToGraph,
     graphToSpec,
+    collectParamBindings,
     inputArity,
     classifyConnection,
     connectionAllowed,
@@ -101,6 +103,47 @@
   // on the view node's `/ui` (ADR-0036) is a small follow-up (the designer has
   // no `/ui` write path today; that's the view panes' CollapseState).
   let previewCollapsed = $state(false);
+
+  // Parameters rail (ADR-0038 §D, #222): the view-level overview of every promoted
+  // formal — the rail's ONE job (per-node config edits in place, not here). Each
+  // row navigates to + expands its owning node. Collapsible like the preview;
+  // ephemeral this pass. Runtime *binding* stays on the render surface (#182/#199).
+  let paramsCollapsed = $state(false);
+  // A fresh object per navigate request so re-clicking the same row re-centers.
+  let focusRequest = $state<{ id: string } | null>(null);
+  function focusParamNode(nodeId: string): void {
+    expandedId = nodeId;
+    flowNodes = flowNodes.map((n) => ({ ...n, selected: n.id === nodeId }));
+    focusRequest = { id: nodeId };
+  }
+  function isEmptyValue(v: unknown): boolean {
+    return v == null || v === "" || (Array.isArray(v) && v.length === 0);
+  }
+  // Display rows for the rail: label, inferred type, default text, bound state,
+  // owning node. Derived off the graph (recomputes on any edit — light: no eval).
+  type ParamRow = { nodeId: string; name: string; label: string; typeLabel: string; defaultText: string; bound: boolean };
+  let paramRows = $derived.by<ParamRow[]>(() =>
+    collectParamBindings(toGraph()).map((b) => {
+      const cfg = flowNodes.find((n) => n.id === b.nodeId)?.data.cfg ?? {};
+      const def = b.param.default;
+      const bound = !isEmptyValue(def);
+      let typeLabel: string;
+      let defaultText: string;
+      if (b.slot === "tagged") {
+        typeLabel = "tag";
+        defaultText = bound ? String(def) : "";
+      } else if (b.slot === "type" || b.slot === "descendants_of") {
+        typeLabel = "entry type";
+        defaultText = bound ? (entryTypeOptions.find((t) => t.fqn === def)?.name ?? String(def)) : "";
+      } else {
+        // field slot — the field's datatype, and the field name folds into the label.
+        const fdef = cfg.field?.key ? schema?.fields?.[cfg.field.key] : null;
+        typeLabel = fdef?.type ?? "value";
+        defaultText = bound ? (Array.isArray(def) ? def.join(", ") : String(def)) : "";
+      }
+      return { nodeId: b.nodeId, name: b.param.name, label: b.param.label || b.param.name, typeLabel, defaultText, bound };
+    }),
+  );
 
   // The view node's editable state. `title` is fed from the pane header.
   let loadedViewId = $state<string | null>(null);
@@ -795,6 +838,44 @@
   </div>
 
   <div class="designer-body">
+    <!-- Parameters rail (ADR-0038 §D): the view-level overview of every promoted
+         formal. Per-node config edits IN PLACE (§A) — never here; the rail only
+         lists declarations and navigates to their nodes. Empty/collapsed when the
+         view exposes none — never a config dumping ground. -->
+    <aside class="params-rail" class:collapsed={paramsCollapsed}>
+      <header class="params-head">
+        <button
+          type="button"
+          class="params-toggle"
+          title={paramsCollapsed ? "Expand parameters" : "Collapse parameters"}
+          aria-label={paramsCollapsed ? "Expand parameters" : "Collapse parameters"}
+          aria-expanded={!paramsCollapsed}
+          onclick={() => (paramsCollapsed = !paramsCollapsed)}
+        >{paramsCollapsed ? "▸" : "▾"}</button>
+        {#if !paramsCollapsed}
+          <span class="params-title">Parameters</span>
+          {#if paramRows.length > 0}<span class="count">{paramRows.length}</span>{/if}
+        {/if}
+      </header>
+      {#if !paramsCollapsed}
+        {#if paramRows.length === 0}
+          <p class="params-empty">No parameters. Promote a slot's value (Type, Tag, or a field) to expose one.</p>
+        {:else}
+          <ul class="params-list">
+            {#each paramRows as p (p.name)}
+              <li>
+                <button type="button" class="param-row" class:unbound={!p.bound} onclick={() => focusParamNode(p.nodeId)} title="Go to this parameter's node">
+                  <span class="param-label">{p.label}</span>
+                  <span class="param-type">{p.typeLabel}</span>
+                  <span class="param-default">{p.bound ? p.defaultText : "unbound"}</span>
+                </button>
+              </li>
+            {/each}
+          </ul>
+        {/if}
+      {/if}
+    </aside>
+
     <!-- Drop target for palette drags (§E). The wrapper (not <SvelteFlow>, which
          doesn't type DOM drag props) carries the handlers; role=application so the
          static-element-interaction a11y rule is satisfied for a canvas surface. -->
@@ -825,6 +906,8 @@
              the origin under the author (§E insertion already places nodes in
              view — pointer for drop, viewport centre for click). -->
         <FitView trigger={loadedViewId} />
+        <!-- §D: the Parameters rail centers the viewport on a formal's node. -->
+        <FocusNode request={focusRequest} />
       </SvelteFlow>
       {#if flowNodes.length <= 1}
         <!-- Overlay, NOT a Svelte Flow <Panel>: a Panel captures pointer events
@@ -1013,6 +1096,111 @@
     padding: 6px 12px;
     font-size: var(--fs-sm);
     color: var(--text-3);
+  }
+  /* Parameters rail (§D): a left aside mirroring the preview's chrome. Empty or
+     collapsed it costs the canvas almost no width. */
+  .params-rail {
+    width: 220px;
+    flex-shrink: 0;
+    border-right: 1px solid var(--border);
+    display: flex;
+    flex-direction: column;
+    min-height: 0;
+    background: var(--inset);
+    overflow-y: auto;
+  }
+  .params-rail.collapsed {
+    width: auto;
+  }
+  .params-rail.collapsed .params-head {
+    border-bottom: none;
+  }
+  .params-head {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    padding: 8px 12px;
+    font-size: var(--fs-xs);
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+    color: var(--text-3);
+    border-bottom: 1px solid var(--border);
+  }
+  .params-title {
+    flex: 1;
+  }
+  .params-toggle {
+    border: none;
+    background: transparent;
+    color: var(--text-3);
+    font-size: var(--fs-sm);
+    line-height: 1;
+    cursor: pointer;
+    padding: 0 2px;
+  }
+  .params-toggle:hover {
+    color: var(--text);
+  }
+  .params-empty {
+    margin: 0;
+    padding: 10px 12px;
+    font-size: var(--fs-xs);
+    line-height: 1.4;
+    color: var(--text-3);
+  }
+  .params-list {
+    margin: 0;
+    padding: 6px;
+    list-style: none;
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+  }
+  .param-row {
+    display: grid;
+    grid-template-columns: 1fr auto;
+    grid-template-areas:
+      "label type"
+      "default default";
+    gap: 2px 8px;
+    width: 100%;
+    text-align: left;
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    background: var(--panel);
+    padding: 6px 8px;
+    cursor: pointer;
+    font-size: var(--fs-sm);
+    color: var(--text);
+  }
+  .param-row:hover {
+    border-color: var(--border-strong);
+    background: var(--accent-soft);
+  }
+  .param-label {
+    grid-area: label;
+    font-weight: 500;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+  .param-type {
+    grid-area: type;
+    align-self: center;
+    font-size: var(--fs-xs);
+    color: var(--text-3);
+  }
+  .param-default {
+    grid-area: default;
+    overflow: hidden;
+    font-size: var(--fs-xs);
+    color: var(--text-2);
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+  .param-row.unbound .param-default {
+    color: var(--text-3);
+    font-style: italic;
   }
   .preview {
     width: 260px;

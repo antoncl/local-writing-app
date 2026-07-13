@@ -10,6 +10,7 @@
 <script lang="ts">
   import { Handle, Position } from "@xyflow/svelte";
   import ViewGlyph from "./ViewGlyph.svelte";
+  import ParamMark from "./ParamMark.svelte";
   import FieldValueEditor from "@/components/widgets/FieldValueEditor.svelte";
   import NodePicker from "@/components/widgets/NodePicker.svelte";
   import SwatchPicker from "@/components/widgets/SwatchPicker.svelte";
@@ -551,8 +552,10 @@
 {#snippet promoteCard(defaultWidget: Snippet)}
   <div class="vparam nodrag" role="group" aria-label="Runtime parameter" use:stopPointerdown>
     <div class="vparam-head">
+      <!-- The half→whole mark carries the bound state (§240): whole once a
+           default/value fills it, half while unbound (imposing no constraint). -->
+      <ParamMark bound={!isInactiveParam} size={13} />
       <span class="vparam-tag">Parameter</span>
-      {#if isInactiveParam}<span class="vparam-inert" role="note">inactive</span>{/if}
       <button type="button" class="vparam-unlink" title="Back to a fixed value" onclick={demoteSlot}>Unlink</button>
     </div>
     {#if isInactiveParam}
@@ -573,8 +576,11 @@
 {/snippet}
 
 {#snippet promoteButton()}
-  <button type="button" class="vpromote" title="Expose this value as a runtime parameter" onclick={promoteSlot}>
-    Promote to parameter
+  <!-- §240: the promote affordance is the half-mark itself (not a dashed button
+       that widens the card) — click it to promote the slot to a parameter; it
+       then completes to whole once a default/value binds it. -->
+  <button type="button" class="vpromote" title="Promote this value to a runtime parameter" aria-label="Promote to a runtime parameter" onclick={promoteSlot}>
+    <ParamMark size={13} />
   </button>
 {/snippet}
 
@@ -1099,16 +1105,16 @@
   .vfield.op {
     max-width: 96px;
   }
-  /* promote-in-place: the "make this a parameter" affordance + the promoted card */
+  /* promote-in-place (§240): the affordance is the half-mark glyph, right-aligned
+     under its slot — click to promote — not a dashed button that widens the card. */
   .vpromote {
     display: block;
-    margin: 0 8px 8px;
-    padding: 2px 6px;
-    border: 1px dashed var(--border-strong);
+    margin: 0 8px 6px auto;
+    padding: 2px;
+    border: none;
     background: transparent;
     border-radius: var(--r-sm);
-    font-size: var(--fs-xs);
-    color: var(--text-2);
+    line-height: 0;
     cursor: pointer;
   }
   .vpromote:hover {
@@ -1124,7 +1130,7 @@
   .vparam-head {
     display: flex;
     align-items: center;
-    justify-content: space-between;
+    gap: 5px;
     margin-bottom: 5px;
   }
   .vparam-tag {
@@ -1132,15 +1138,8 @@
     font-weight: 600;
     color: var(--accent);
   }
-  /* #198: the "unbound → inert by default" chip inside the parameter card */
-  .vparam-inert {
-    font-size: var(--fs-xs);
-    font-weight: 600;
-    color: var(--text-3);
-    text-transform: uppercase;
-    letter-spacing: 0.04em;
-  }
   .vparam-unlink {
+    margin-left: auto;
     border: none;
     background: transparent;
     color: var(--text-3);

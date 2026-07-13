@@ -863,7 +863,7 @@
           aria-label={paramsCollapsed ? "Expand parameters" : "Collapse parameters"}
           aria-expanded={!paramsCollapsed}
           onclick={() => (paramsCollapsed = !paramsCollapsed)}
-        >{paramsCollapsed ? "▸" : "▾"}</button>
+        ><i class="ti {paramsCollapsed ? 'ti-layout-sidebar-left-expand' : 'ti-layout-sidebar-left-collapse'}" aria-hidden="true"></i></button>
         {#if !paramsCollapsed}
           <span class="params-title">Parameters</span>
           {#if paramRows.length > 0}<span class="count">{paramRows.length}</span>{/if}
@@ -942,7 +942,7 @@
           aria-label={previewCollapsed ? "Expand preview" : "Collapse preview"}
           aria-expanded={!previewCollapsed}
           onclick={() => (previewCollapsed = !previewCollapsed)}
-        >{previewCollapsed ? "▸" : "▾"}</button>
+        ><i class="ti {previewCollapsed ? 'ti-layout-sidebar-right-expand' : 'ti-layout-sidebar-right-collapse'}" aria-hidden="true"></i></button>
         {#if !previewCollapsed}
           <span class="preview-title">Preview</span>
           <span class="count">{preview.nodes.length} / {universe.length}</span>

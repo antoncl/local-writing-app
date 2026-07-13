@@ -713,7 +713,6 @@
   class:inactive={isInactiveParam}
   title={isInactiveParam ? "Unbound parameter — inactive until a value is picked (shows everything by default)" : undefined}
 >
-  <span class="vnode-stripe" aria-hidden="true"></span>
   <!-- target ports (left) -->
   {#if kind === "output"}
     {#each handles as h, i (h.id)}
@@ -956,33 +955,22 @@
 
 <style>
   .vnode {
-    position: relative;
     min-width: 150px;
     max-width: 230px;
     background: var(--panel);
     border: 1px solid var(--border-strong);
     border-radius: var(--r-lg);
-    box-shadow: var(--elev-1);
+    /* The kind-stripe (§240): a 4px accent band down the left edge, drawn as an
+       INSET box-shadow exactly like NodeRow (variant-card) so it follows the
+       card's rounded corners — the same signature that ties every NodeRow to its
+       kind, now on the flow nodes. Uniform on every kind. */
+    box-shadow: inset 4px 0 0 0 var(--accent), var(--elev-1);
     font-size: var(--fs-sm);
     color: var(--text);
   }
-  /* The kind-stripe (§240): a soft accent band down the left edge — the same
-     idea that ties every NodeRow to its kind, now tying flow nodes to that
-     family too. Uniform on every node kind; rounded to follow the card's left
-     corners (the card has no overflow:hidden — the ports sit outside it). */
-  .vnode-stripe {
-    position: absolute;
-    left: 0;
-    top: 0;
-    bottom: 0;
-    width: 4px;
-    background: var(--accent);
-    border-radius: var(--r-lg) 0 0 var(--r-lg);
-    pointer-events: none;
-  }
   .vnode.selected {
     border-color: var(--accent);
-    box-shadow: 0 0 0 2px var(--accent-soft);
+    box-shadow: inset 4px 0 0 0 var(--accent), 0 0 0 2px var(--accent-soft);
   }
   .vnode.combinator {
     background: var(--inset);
@@ -1081,6 +1069,18 @@
   }
   .dot.value {
     background: var(--k-snippet);
+  }
+  /* §240: a hairline separates the header (the collapse/expand area) from the
+     expanded edit area, on EVERY node — the divider Sort already had via its
+     `.organize`. Suppressed on a leading `.organize` so the two don't double up. */
+  .vconfig {
+    border-top: 1px solid var(--divider);
+    padding-top: 6px;
+  }
+  .vconfig > .organize:first-child {
+    border-top: none;
+    margin-top: 0;
+    padding-top: 0;
   }
   /* the value slot is filled by a wired source, not an inline literal (#196) */
   .vwired {

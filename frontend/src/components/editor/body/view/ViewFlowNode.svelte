@@ -13,7 +13,7 @@
   import FieldValueEditor from "@/components/widgets/FieldValueEditor.svelte";
   import NodePicker from "@/components/widgets/NodePicker.svelte";
   import SwatchPicker from "@/components/widgets/SwatchPicker.svelte";
-  import { inputArity, outputPayload, promotableSlot, type GraphNodeKind, type PredicateKind, type ViewGraphNode, type ViewHandle, type ViewNodeData } from "@/lib/views/viewGraph";
+  import { inputArity, isEmptyValue, outputPayload, promotableSlot, type GraphNodeKind, type PredicateKind, type ViewGraphNode, type ViewHandle, type ViewNodeData } from "@/lib/views/viewGraph";
   import { nodeSummary } from "@/lib/views/nodeSummary";
   import { useDesignerContext } from "./designerContext";
   import type { MetadataFieldType, MetadataValue, NodePickerRef, ViewGroupByLevel, ViewLeafValue, ViewSort } from "@/lib/types";
@@ -135,9 +135,6 @@
   let isInactiveParam = $derived(
     isPromoted && isEmptyValue(param?.default) && (slotKind !== "field" || opNeedsValue),
   );
-  function isEmptyValue(v: unknown): boolean {
-    return v == null || v === "" || (Array.isArray(v) && v.length === 0);
-  }
   // The slot's current literal (seeds the default on promote).
   function slotLiteral(): unknown {
     switch (slotKind) {

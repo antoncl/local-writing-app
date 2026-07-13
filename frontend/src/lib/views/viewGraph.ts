@@ -311,6 +311,14 @@ export function isPredicateLeafKind(kind: GraphNodeKind): kind is PredicateKind 
   return PREDICATE_LEAF_KINDS.has(kind);
 }
 
+// True when a slot / param value counts as "empty" — null/undefined, a blank
+// string, or an empty array. The shared test behind a promoted formal's bound vs
+// UNBOUND (#198) state, read by the node config (ViewFlowNode's `isInactiveParam`)
+// and the §D Parameters rail (ViewBodyView's row `bound`).
+export function isEmptyValue(v: unknown): boolean {
+  return v == null || v === "" || (Array.isArray(v) && v.length === 0);
+}
+
 // Injectors = sources (no input): the leaves + the universal `All`.
 export function isInjectorKind(kind: GraphNodeKind): boolean {
   return kind === "all" || isLeafKind(kind);
@@ -695,8 +703,19 @@ function commonLeafExpr(slot: string, d: ViewGraphNode["data"], wiredValue?: Vie
 // A Filter's predicate → a leaf ViewExpr (or null when unconfigured). A wired
 // value source on the Filter's `value` handle (#196) overrides the field's
 // authored literal / promoted formal.
+// The predicate a Filter narrows on — its `filter_kind`, defaulting to `type` for
+// an unconfigured filter. Written ONCE so the promote target (`promotableSlot`)
+// and the lowering target (`predicateExpr`) can't drift apart. NB the editor UI
+// picks a schema-aware default (`tagged` when the anchor kind has no type choice,
+// ViewFlowNode `filterKind` + `defaultCfg`) — a concern this structural layer has
+// no schema access to; `defaultCfg` writes `filter_kind` eagerly on drop, so this
+// bare `type` fallback is only a net for a filter that never got one.
+function filterLeafKind(node: ViewGraphNode): PredicateKind {
+  return node.data.filter_kind ?? "type";
+}
+
 function predicateExpr(node: ViewGraphNode, wiredValue?: ViewOperand): ViewExpr | null {
-  return commonLeafExpr(node.data.filter_kind ?? "type", node.data, wiredValue);
+  return commonLeafExpr(filterLeafKind(node), node.data, wiredValue);
 }
 
 // A leaf/injector node → its ViewExpr leaf slot. hand_picked/view_ref are
@@ -785,7 +804,7 @@ function reachableFromOutput(graph: ViewGraph): Set<string> {
 // sort field) are excluded by design.
 export type PromotableSlot = "type" | "descendants_of" | "tagged" | "field";
 export function promotableSlot(node: ViewGraphNode): PromotableSlot | null {
-  const k = node.kind === "filter" ? (node.data.filter_kind ?? "type") : node.kind;
+  const k = node.kind === "filter" ? filterLeafKind(node) : node.kind;
   return isPredicateLeafKind(k as GraphNodeKind) ? (k as PromotableSlot) : null;
 }
 

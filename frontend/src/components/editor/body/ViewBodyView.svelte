@@ -17,8 +17,7 @@
   import { themePreference } from "@/lib/utils/theme";
   import ViewFlowNode from "./view/ViewFlowNode.svelte";
   import SelfLoopEdge from "./view/SelfLoopEdge.svelte";
-  import FitView from "./view/FitView.svelte";
-  import FocusNode from "./view/FocusNode.svelte";
+  import ViewportFit from "./view/ViewportFit.svelte";
   import ViewNodeList, { type RowCtx } from "@/components/widgets/ViewNodeList.svelte";
   import RowCaret from "@/components/widgets/RowCaret.svelte";
   import { setDesignerContext, type DesignerContext } from "./view/designerContext";
@@ -34,6 +33,7 @@
     specToGraph,
     graphToSpec,
     collectParamBindings,
+    isEmptyValue,
     inputArity,
     classifyConnection,
     connectionAllowed,
@@ -115,9 +115,6 @@
     expandedId = nodeId;
     flowNodes = flowNodes.map((n) => ({ ...n, selected: n.id === nodeId }));
     focusRequest = { id: nodeId };
-  }
-  function isEmptyValue(v: unknown): boolean {
-    return v == null || v === "" || (Array.isArray(v) && v.length === 0);
   }
   // Display rows for the rail: label, inferred type, default text, bound state,
   // owning node. Derived off the graph (recomputes on any edit — light: no eval).
@@ -905,9 +902,12 @@
              on flowNodes.length re-fit the viewport on every drop/delete, shifting
              the origin under the author (§E insertion already places nodes in
              view — pointer for drop, viewport centre for click). -->
-        <FitView trigger={loadedViewId} />
-        <!-- §D: the Parameters rail centers the viewport on a formal's node. -->
-        <FocusNode request={focusRequest} />
+        <ViewportFit trigger={loadedViewId} options={{ padding: 0.2, maxZoom: 1 }} />
+        <!-- §D: the Parameters rail centers the viewport on ONE formal's node. -->
+        <ViewportFit
+          trigger={focusRequest}
+          options={focusRequest ? { nodes: [{ id: focusRequest.id }], maxZoom: 1.1, minZoom: 0.5, padding: 0.5, duration: 200 } : {}}
+        />
       </SvelteFlow>
       {#if flowNodes.length <= 1}
         <!-- Overlay, NOT a Svelte Flow <Panel>: a Panel captures pointer events
@@ -1097,8 +1097,9 @@
     font-size: var(--fs-sm);
     color: var(--text-3);
   }
-  /* Parameters rail (§D): a left aside mirroring the preview's chrome. Empty or
-     collapsed it costs the canvas almost no width. */
+  /* Parameters rail (§D): a left aside mirroring the preview's chrome. A fixed
+     220px when open (even with no params — the empty state shows a one-line hint);
+     collapsed it shrinks to just the toggle, costing the canvas almost no width. */
   .params-rail {
     width: 220px;
     flex-shrink: 0;

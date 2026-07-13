@@ -713,12 +713,11 @@
   class:inactive={isInactiveParam}
   title={isInactiveParam ? "Unbound parameter — inactive until a value is picked (shows everything by default)" : undefined}
 >
-  <!-- target ports (left) -->
-  {#if kind === "output"}
-    {#each handles as h, i (h.id)}
-      <Handle type="target" position={Position.Left} id={h.id} class={portClass("port port-h", h.id)} style={`top:${handleTop(i)}`} />
-    {/each}
-  {:else if kind === "difference"}
+  <!-- target ports (left). The output node's group handles are NOT here — they
+       live inside each group row (below) so every handle sits ON its group's
+       name row (§240 / Wiring Desk), instead of an even spread that drifts out
+       of line with the groups. -->
+  {#if kind === "difference"}
     <Handle type="target" position={Position.Left} id="keep" class={portClass("port keep", "keep")} style="top: 34%" />
     <Handle type="target" position={Position.Left} id="remove" class={portClass("port remove", "remove")} style="top: 66%" />
   {:else if kind === "nest"}
@@ -773,7 +772,44 @@
        resting node shows a one-line summary. `nodrag` + native stop-pointerdown
        keep interacting with any config control from dragging/selecting the node
        (Svelte Flow acts on pointerdown; picker menus portal to <body>). -->
-  {#if isExpanded}
+  {#if kind === "output"}
+  <!-- Output groups render in BOTH states (§240 / Wiring Desk) so each handle
+       sits ON its group's name row: at rest a read-only name row, expanded the
+       full group editor. The handle lives inside the row, so Svelte Flow aligns
+       it (and its wire) to that row instead of an even spread down the node. -->
+  <div class="handles nodrag" role="presentation" use:stopPointerdown>
+    {#each handles as h, i (h.id)}
+      <div class="group-block">
+        <div class="handle-row group-row">
+          <Handle type="target" position={Position.Left} id={h.id} class={portClass("port port-h", h.id)} />
+          {#if isExpanded}
+            <input
+              class="vfield hname"
+              type="text"
+              placeholder={handles.length > 1 ? `Group ${i + 1}` : "All results"}
+              value={h.name}
+              oninput={(e) => renameHandle(h.id, e.currentTarget.value)}
+            />
+            <SwatchPicker value={h.color ?? null} onChange={(c) => setHandleColor(h.id, c)} />
+            <button class="hbtn" title="Move up" aria-label="Move group up" disabled={i === 0} onclick={() => moveHandle(h.id, -1)}>↑</button>
+            <button class="hbtn" title="Move down" aria-label="Move group down" disabled={i === handles.length - 1} onclick={() => moveHandle(h.id, 1)}>↓</button>
+            <button class="hbtn del" title="Remove group" aria-label="Remove group" disabled={handles.length <= 1} onclick={() => removeHandle(h.id)}>×</button>
+          {:else}
+            <span class="group-name">{h.name || (handles.length > 1 ? `Group ${i + 1}` : "All results")}</span>
+          {/if}
+        </div>
+        {#if isExpanded}
+          <div class="group-organize">
+            {@render organizeSection(h.group_by ?? [], commitHandleLevels(h.id))}
+          </div>
+        {/if}
+      </div>
+    {/each}
+    {#if isExpanded}
+      <button class="add-handle" type="button" title="Add handle group" aria-label="Add handle group" onclick={addHandle}>+ Add group</button>
+    {/if}
+  </div>
+  {:else if isExpanded}
   <div class="vconfig nodrag" role="presentation" use:stopPointerdown>
   {#if kind === "type" || kind === "descendants_of"}
     {@render typeSlot(kind === "descendants_of")}
@@ -914,33 +950,6 @@
       <span class="vswatch-label">Colour</span>
       <SwatchPicker value={cfg.color ?? null} onChange={(id) => patch({ color: id ?? "" })} />
     </span>
-  {:else if kind === "output"}
-    <div class="handles">
-      {#each handles as h, i (h.id)}
-        <div class="group-block">
-          <div class="handle-row">
-            <input
-              class="vfield hname"
-              type="text"
-              placeholder={handles.length > 1 ? `Group ${i + 1}` : "All results"}
-              value={h.name}
-              oninput={(e) => renameHandle(h.id, e.currentTarget.value)}
-            />
-            <SwatchPicker value={h.color ?? null} onChange={(c) => setHandleColor(h.id, c)} />
-            <button class="hbtn" title="Move up" aria-label="Move group up" disabled={i === 0} onclick={() => moveHandle(h.id, -1)}>↑</button>
-            <button class="hbtn" title="Move down" aria-label="Move group down" disabled={i === handles.length - 1} onclick={() => moveHandle(h.id, 1)}>↓</button>
-            <button class="hbtn del" title="Remove group" aria-label="Remove group" disabled={handles.length <= 1} onclick={() => removeHandle(h.id)}>×</button>
-          </div>
-          <!-- Amendment 1: each group owns its Organize (the single/unnamed group
-               too — its lone handle carries the levels). Group + Organize = one
-               unit; the "+ add group" below adds another. -->
-          <div class="group-organize">
-            {@render organizeSection(h.group_by ?? [], commitHandleLevels(h.id))}
-          </div>
-        </div>
-      {/each}
-      <button class="add-handle" type="button" title="Add handle group" aria-label="Add handle group" onclick={addHandle}>+ Add group</button>
-    </div>
   {/if}
   </div>
   {:else if summaryText}
@@ -1226,16 +1235,37 @@
     color: var(--text-3);
   }
   /* named-handle (group) editor on the View node */
+  /* The output node's group list (§240). No left padding so each group's handle
+     sits at the node's left edge; the row content is indented to clear it + the
+     stripe. A header divider matches the other nodes' expanded configs. */
   .handles {
-    padding: 0 8px 8px;
+    padding: 6px 8px 8px 0;
+    border-top: 1px solid var(--divider);
     display: flex;
     flex-direction: column;
     gap: 5px;
+  }
+  .handles > .add-handle {
+    margin-left: 15px;
   }
   .handle-row {
     display: flex;
     align-items: center;
     gap: 4px;
+  }
+  /* Each group row owns its handle (positioned at the node edge) so the port
+     lines up with the group name — at rest and expanded. */
+  .group-row {
+    position: relative;
+    padding-left: 15px;
+  }
+  .group-name {
+    flex: 1;
+    min-width: 0;
+    font-weight: 600;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
   }
   .handle-row .hname {
     margin: 0;

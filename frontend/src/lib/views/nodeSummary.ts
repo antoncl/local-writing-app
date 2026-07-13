@@ -5,7 +5,7 @@
 // canvas (which can't be driven in the headless preview — banked gotcha).
 
 import type { GraphNodeKind, ViewNodeData } from "./viewGraph";
-import type { ViewFieldPredicate, ViewSort } from "@/lib/types";
+import type { ViewFieldPredicate, ViewLeafValue, ViewSort } from "@/lib/types";
 
 export type SummaryResolvers = {
   // Display name for a metadata field key (falls back to the key).
@@ -56,19 +56,33 @@ function fieldSummary(cfg: ViewNodeData, r: SummaryResolvers): string {
   if (!pred?.key) return PLACEHOLDER.field!;
   const name = r.fieldName(pred.key);
   if (pred.op === "set" || pred.op === "unset") return `${name} ${OP_LABEL[pred.op]}`;
-  const val = valueText(pred.value, cfg.field_param?.label);
+  const val = valueText(pred.value, cfg.param?.label);
   return val ? `${name} ${OP_LABEL[pred.op]} ${val}` : `${name} ${OP_LABEL[pred.op]}`;
+}
+
+// A leaf slot value → glance text. A promoted `{var}` shows ⟨param label⟩ (via
+// valueText); a bare string resolves through the slot's formatter. Empty ⇒ the
+// slot's placeholder.
+function leafText(
+  value: ViewLeafValue | undefined,
+  paramLabel: string | undefined,
+  fmt: (s: string) => string,
+  placeholder: string,
+): string {
+  if (value == null || value === "") return placeholder;
+  if (typeof value === "object") return valueText(value, paramLabel);
+  return fmt(value);
 }
 
 // The predicate a Filter narrows on — reuses the leaf summaries by filter_kind.
 function filterInner(cfg: ViewNodeData, r: SummaryResolvers): string {
   switch (cfg.filter_kind) {
     case "type":
-      return cfg.type ? r.entryTypeName(cfg.type) : PLACEHOLDER.type!;
+      return leafText(cfg.type, cfg.param?.label, r.entryTypeName, PLACEHOLDER.type!);
     case "descendants_of":
-      return cfg.descendants_of ? `${r.entryTypeName(cfg.descendants_of)} +sub` : PLACEHOLDER.type!;
+      return leafText(cfg.descendants_of, cfg.param?.label, (s) => `${r.entryTypeName(s)} +sub`, PLACEHOLDER.type!);
     case "tagged":
-      return cfg.tagged ? `#${cfg.tagged}` : PLACEHOLDER.tagged!;
+      return leafText(cfg.tagged, cfg.param?.label, (s) => `#${s}`, PLACEHOLDER.tagged!);
     case "field":
     default:
       return fieldSummary(cfg, r);
@@ -91,11 +105,11 @@ function sortSummary(sort: ViewSort | null | undefined, r: SummaryResolvers): st
 export function nodeSummary(kind: GraphNodeKind, cfg: ViewNodeData, r: SummaryResolvers): string {
   switch (kind) {
     case "type":
-      return cfg.type ? r.entryTypeName(cfg.type) : PLACEHOLDER.type!;
+      return leafText(cfg.type, cfg.param?.label, r.entryTypeName, PLACEHOLDER.type!);
     case "descendants_of":
-      return cfg.descendants_of ? `${r.entryTypeName(cfg.descendants_of)} +sub` : PLACEHOLDER.descendants_of!;
+      return leafText(cfg.descendants_of, cfg.param?.label, (s) => `${r.entryTypeName(s)} +sub`, PLACEHOLDER.descendants_of!);
     case "tagged":
-      return cfg.tagged ? `#${cfg.tagged}` : PLACEHOLDER.tagged!;
+      return leafText(cfg.tagged, cfg.param?.label, (s) => `#${s}`, PLACEHOLDER.tagged!);
     case "field":
       return fieldSummary(cfg, r);
     case "filter": {

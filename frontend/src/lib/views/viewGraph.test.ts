@@ -828,12 +828,12 @@ describe("specToGraph (reopen fallback)", () => {
 
 // Promote-in-place (#184 Phase 1b, ADR-0032): a Filter/field value slot ⇄ a
 // named ViewSpec.params formal. graphToSpec collects reachable promoted formals;
-// specToGraph restores field_param from the params list on `{var}` values.
+// specToGraph restores param from the params list on `{var}` values.
 describe("promote-in-place params (#184)", () => {
   it("collects a promoted field's formal into spec.params (value → {var})", () => {
     const f = node("field", {
       field: { key: "tags", op: "overlap", value: { var: "P_TAG" } },
-      field_param: { name: "P_TAG", label: "Tag", default: ["hero"] },
+      param: { name: "P_TAG", label: "Tag", default: ["hero"] },
     });
     const graph: ViewGraph = { nodes: [out(), f], edges: [edge(f.id, OUTPUT_NODE_ID)] };
     const spec = graphToSpec(graph, { kind: "lore" });
@@ -844,7 +844,7 @@ describe("promote-in-place params (#184)", () => {
   it("omits an unbound formal's default but keeps the param", () => {
     const f = node("field", {
       field: { key: "tags", op: "overlap", value: { var: "P" } },
-      field_param: { name: "P", label: "Tag" },
+      param: { name: "P", label: "Tag" },
     });
     const graph: ViewGraph = { nodes: [out(), f], edges: [edge(f.id, OUTPUT_NODE_ID)] };
     expect(graphToSpec(graph, { kind: "lore" }).params).toEqual([{ name: "P", label: "Tag" }]);
@@ -854,22 +854,22 @@ describe("promote-in-place params (#184)", () => {
     const wired = node("type", { type: "lore:character" });
     const orphan = node("field", {
       field: { key: "tags", op: "overlap", value: { var: "GHOST" } },
-      field_param: { name: "GHOST", default: ["x"] },
+      param: { name: "GHOST", default: ["x"] },
     });
     const graph: ViewGraph = { nodes: [out(), wired, orphan], edges: [edge(wired.id, OUTPUT_NODE_ID)] };
     expect(graphToSpec(graph, { kind: "lore" }).params).toBeUndefined();
   });
 
-  it("skips a stale field_param whose value is no longer its {var}", () => {
+  it("skips a stale param whose value is no longer its {var}", () => {
     const f = node("field", {
       field: { key: "tags", op: "overlap", value: "literal" },
-      field_param: { name: "P", default: [] },
+      param: { name: "P", default: [] },
     });
     const graph: ViewGraph = { nodes: [out(), f], edges: [edge(f.id, OUTPUT_NODE_ID)] };
     expect(graphToSpec(graph, { kind: "lore" }).params).toBeUndefined();
   });
 
-  it("specToGraph restores field_param from a {var} value + matching param", () => {
+  it("specToGraph restores param from a {var} value + matching param", () => {
     const spec = {
       kind: "lore",
       expr: { field: { key: "tags", op: "overlap" as const, value: { var: "P" } } },
@@ -877,16 +877,65 @@ describe("promote-in-place params (#184)", () => {
     };
     // The field predicate canonicalizes to a Filter; the promoted formal rides on it (§B).
     const filter = specToGraph(spec).nodes.find((n) => n.kind === "filter");
-    expect(filter?.data.field_param).toEqual({ name: "P", label: "Tag", default: ["hero"] });
+    expect(filter?.data.param).toEqual({ name: "P", label: "Tag", default: ["hero"] });
     expect(filter?.data.field?.value).toEqual({ var: "P" });
   });
 
   it("round-trips a promoted formal graph → spec → graph → spec", () => {
     const f = node("field", {
       field: { key: "pov", op: "overlap", value: { var: "POV" } },
-      field_param: { name: "POV", label: "Point of view", default: ["alice"] },
+      param: { name: "POV", label: "Point of view", default: ["alice"] },
     });
     const graph: ViewGraph = { nodes: [out(), f], edges: [edge(f.id, OUTPUT_NODE_ID)] };
+    const spec1 = graphToSpec(graph, { kind: "lore" });
+    const spec2 = graphToSpec(specToGraph(spec1), { kind: "lore" });
+    expect(spec2.params).toEqual(spec1.params);
+    expect(spec2.expr).toEqual(spec1.expr);
+  });
+});
+
+// ADR-0038 §C Amendment 1 (#222): promotion generalizes from the field value slot
+// to the value-carrying LEAF slots — type / descendants_of / tagged. Their slot
+// value becomes `{var}`, `collectParams` picks them up generically, and the
+// canonicalize-on-open path (§B) reconstructs the param onto the Filter.
+describe("promote-in-place params — leaf slots (ADR-0038 §C, #222)", () => {
+  it("collects a promoted type leaf's formal (type → {var})", () => {
+    const t = node("type", { type: { var: "T" }, param: { name: "T", label: "Type", default: "lore:character" } });
+    const graph: ViewGraph = { nodes: [out(), t], edges: [edge(t.id, OUTPUT_NODE_ID)] };
+    const spec = graphToSpec(graph, { kind: "lore" });
+    expect(spec.params).toEqual([{ name: "T", label: "Type", default: "lore:character" }]);
+    expect(spec.expr).toEqual({ type: { var: "T" } });
+  });
+
+  it("collects a promoted tagged leaf's formal, omitting an absent default", () => {
+    const t = node("tagged", { tagged: { var: "TAG" }, param: { name: "TAG", label: "Tag" } });
+    const graph: ViewGraph = { nodes: [out(), t], edges: [edge(t.id, OUTPUT_NODE_ID)] };
+    const spec = graphToSpec(graph, { kind: "lore" });
+    expect(spec.params).toEqual([{ name: "TAG", label: "Tag" }]);
+    expect(spec.expr).toEqual({ tagged: { var: "TAG" } });
+  });
+
+  it("skips a stale leaf param whose slot value is no longer its {var}", () => {
+    const t = node("type", { type: "lore:character", param: { name: "T", default: "lore:deity" } });
+    const graph: ViewGraph = { nodes: [out(), t], edges: [edge(t.id, OUTPUT_NODE_ID)] };
+    expect(graphToSpec(graph, { kind: "lore" }).params).toBeUndefined();
+  });
+
+  it("specToGraph restores a promoted type leaf's param (canonicalized to a Filter, §B)", () => {
+    const spec = {
+      kind: "lore",
+      expr: { type: { var: "T" } },
+      params: [{ name: "T", label: "Type", default: "lore:character" }],
+    };
+    const filter = specToGraph(spec).nodes.find((n) => n.kind === "filter");
+    expect(filter?.data.filter_kind).toBe("type");
+    expect(filter?.data.type).toEqual({ var: "T" });
+    expect(filter?.data.param).toEqual({ name: "T", label: "Type", default: "lore:character" });
+  });
+
+  it("round-trips a promoted tagged leaf graph → spec → graph → spec", () => {
+    const t = node("tagged", { tagged: { var: "TAG" }, param: { name: "TAG", label: "Tag", default: "hero" } });
+    const graph: ViewGraph = { nodes: [out(), t], edges: [edge(t.id, OUTPUT_NODE_ID)] };
     const spec1 = graphToSpec(graph, { kind: "lore" });
     const spec2 = graphToSpec(specToGraph(spec1), { kind: "lore" });
     expect(spec2.params).toEqual(spec1.params);

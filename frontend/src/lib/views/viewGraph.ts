@@ -26,7 +26,7 @@
 // (nothing wired). The sentinels let filters-off-`All` and set ops fold to the
 // minimal shipped `expr` without a universe leaf in the grammar.
 
-import type { MetadataSchema, ViewExpr, ViewFieldOf, ViewFieldPredicate, ViewGroupByLevel, ViewGroupSpec, ViewNestMatch, ViewNestOp, ViewOperand, ViewParam, ViewSort, ViewSpec } from "@/lib/types";
+import type { MetadataSchema, ViewExpr, ViewFieldOf, ViewFieldPredicate, ViewGroupByLevel, ViewGroupSpec, ViewLeafValue, ViewNestMatch, ViewNestOp, ViewOperand, ViewParam, ViewSort, ViewSpec } from "@/lib/types";
 import { kindUniverseExpr, REFERENCES_FIELD, SELF_VAR } from "@/lib/views/evaluateView";
 
 export type LeafKind = "type" | "descendants_of" | "tagged" | "field" | "hand_picked" | "view_ref";
@@ -224,10 +224,12 @@ export function valueSlotAccepts(
 // roles' own config (filter mode/predicate, sorter sort, output handles). Only
 // the fields relevant to a node's `kind` are read.
 export type ViewNodeData = {
-  // leaf / filter predicate configs
-  type?: string;
-  descendants_of?: string;
-  tagged?: string;
+  // leaf / filter predicate configs. type/descendants_of/tagged accept a promoted
+  // `{var}` (ADR-0038 §C Amendment 1, #222) alongside the string literal, mirroring
+  // a field predicate's value slot.
+  type?: ViewLeafValue;
+  descendants_of?: ViewLeafValue;
+  tagged?: ViewLeafValue;
   field?: ViewFieldPredicate;
   hand_picked?: string[];
   view_ref?: string;
@@ -241,12 +243,14 @@ export type ViewNodeData = {
   match?: ViewNestMatch;
   // highlight (color-only annotate)
   color?: string;
-  // promote-in-place (#184 Phase 1b, ADR-0032): when a field predicate's value
-  // slot is promoted to a runtime formal, the value carries `{var: name}` and
-  // this holds the formal's authored label + overridable `default`, so the
-  // promotion survives the graph⇄spec round-trip (the spec keeps `params`;
-  // `{var}` in the predicate lowers verbatim). Absent = a plain literal value.
-  field_param?: { name: string; label?: string; default?: unknown };
+  // promote-in-place (#184 Phase 1b, ADR-0032; generalized per-slot for ADR-0038
+  // §C, #222): when a promotable slot — a field predicate value, or a
+  // type/descendants_of/tagged leaf — is promoted to a runtime formal, the slot
+  // value carries `{var: name}` and this holds the formal's authored label +
+  // overridable `default`, so the promotion survives the graph⇄spec round-trip
+  // (the spec keeps `params`; `{var}` in the slot lowers verbatim). At most one
+  // per node — each node has a single promotable slot. Absent = a plain literal.
+  param?: { name: string; label?: string; default?: unknown };
   // field_of (#184, ADR-0031 §D): the metadata key this node projects its `of`
   // input through. Reference fields (incl. the built-in `references`) project to
   // a node-set that joins the general flow; a SCALAR field projects to a
@@ -774,21 +778,50 @@ function reachableFromOutput(graph: ViewGraph): Set<string> {
   return seen;
 }
 
-// Collect the promoted runtime formals (#184 Phase 1b, ADR-0032) declared on
-// reachable field nodes, in stable node order. A formal counts only when its
-// node both carries a `field_param` AND actually references it via
-// `field.value = {var: name}`, so a demoted (or key-changed) node never emits a
-// stale param. Deduped by name (the stable key `{var}` operands reference).
+// The single promotable slot a node exposes (ADR-0038 §C Amendment 1, #222), or
+// null. A leaf/filter narrows on one predicate — `filter_kind` for a Filter, the
+// kind for a bare leaf — and only the value-carrying leaves promote (type,
+// descendants_of, tagged, field). Structural selectors (nest join-field, view_ref,
+// sort field) are excluded by design.
+export type PromotableSlot = "type" | "descendants_of" | "tagged" | "field";
+export function promotableSlot(node: ViewGraphNode): PromotableSlot | null {
+  const k = node.kind === "filter" ? (node.data.filter_kind ?? "type") : node.kind;
+  return isPredicateLeafKind(k as GraphNodeKind) ? (k as PromotableSlot) : null;
+}
+
+// The operand currently in a node's promotable slot (the leaf value or the field
+// predicate value), or undefined when the node has no promotable slot.
+function promotedSlotValue(node: ViewGraphNode): unknown {
+  switch (promotableSlot(node)) {
+    case "type":
+      return node.data.type;
+    case "descendants_of":
+      return node.data.descendants_of;
+    case "tagged":
+      return node.data.tagged;
+    case "field":
+      return node.data.field?.value;
+    default:
+      return undefined;
+  }
+}
+
+// Collect the promoted runtime formals (#184 Phase 1b, ADR-0032; per-slot for
+// ADR-0038 §C, #222) declared on reachable nodes, in stable node order. A formal
+// counts only when its node both carries a `param` AND actually references it via
+// its promotable slot value `= {var: name}`, so a demoted (or key-changed) node
+// never emits a stale param. Deduped by name (the stable key `{var}` operands
+// reference).
 function collectParams(graph: ViewGraph): ViewParam[] {
   const reachable = reachableFromOutput(graph);
   const seen = new Set<string>();
   const out: ViewParam[] = [];
   for (const n of graph.nodes) {
     if (!reachable.has(n.id)) continue;
-    const fp = n.data.field_param;
-    const v = n.data.field?.value;
+    const fp = n.data.param;
+    const v = promotedSlotValue(n);
     // A value-wired slot (#196) takes its operand from the edge, not a formal —
-    // the wire wins at lowering, so a stale `field_param` must not leak a param.
+    // the wire wins at lowering, so a stale `param` must not leak a param.
     const valueWired = graph.edges.some((e) => e.target === n.id && e.targetHandle === FILTER_VALUE_HANDLE);
     if (valueWired || !fp || !isVarOperand(v) || v.var !== fp.name || seen.has(fp.name)) continue;
     seen.add(fp.name);
@@ -1009,13 +1042,22 @@ export function specToGraph(spec: ViewSpec | null | undefined, schema?: Metadata
     // Built `UNIVERSE` and `intersect(universe, p) === p`, so graphToSpec
     // re-serializes byte-identically. `!= null` (not `!== undefined`): the backend
     // serializes ViewExpr densely, so every unused slot arrives as `null`.
-    if (e.type != null) return predicateLeaf(depth, { filter_kind: "type", type: e.type });
+    // Reconstruct the promoted-formal metadata (`param`) for a leaf/field slot
+    // whose value is a `{var}` — the mirror of `collectParams` on lowering. Reads
+    // the declared label/default off the spec's `params` (paramByName). A wired or
+    // literal value returns undefined (no promotion).
+    const leafParam = (v: ViewLeafValue | ViewOperand | undefined): ViewNodeData["param"] => {
+      if (!isVarOperand(v)) return undefined;
+      const p = paramByName.get(v.var);
+      return { name: v.var, label: p?.label, default: p?.default };
+    };
+    if (e.type != null) return predicateLeaf(depth, { filter_kind: "type", type: e.type, param: leafParam(e.type) });
     if (e.descendants_of != null) {
       // A kind-root `descendants_of` is the universe → the `All` source itself (#211).
       if (universeRoot != null && e.descendants_of === universeRoot) return addNode("all", depth, {});
-      return predicateLeaf(depth, { filter_kind: "descendants_of", descendants_of: e.descendants_of });
+      return predicateLeaf(depth, { filter_kind: "descendants_of", descendants_of: e.descendants_of, param: leafParam(e.descendants_of) });
     }
-    if (e.tagged != null) return predicateLeaf(depth, { filter_kind: "tagged", tagged: e.tagged });
+    if (e.tagged != null) return predicateLeaf(depth, { filter_kind: "tagged", tagged: e.tagged, param: leafParam(e.tagged) });
     if (e.field != null) {
       const v = e.field.value;
       // A wired value source (#196) reopens as a source node + an edge into the
@@ -1028,12 +1070,7 @@ export function specToGraph(spec: ViewSpec | null | undefined, schema?: Metadata
       if (isVarOperand(v) && v.var === SELF_VAR) {
         return predicateLeaf(depth, { filter_kind: "field", field: { ...e.field, value: null } }, addNode("self", depth + 1, {}));
       }
-      const data: ViewNodeData = { filter_kind: "field", field: e.field };
-      if (isVarOperand(v)) {
-        const p = paramByName.get(v.var);
-        data.field_param = { name: v.var, label: p?.label, default: p?.default };
-      }
-      return predicateLeaf(depth, data);
+      return predicateLeaf(depth, { filter_kind: "field", field: e.field, param: leafParam(v) });
     }
     // Sources (not predicates) stay as themselves — the palette still offers them.
     if (e.hand_picked != null) return addNode("hand_picked", depth, { hand_picked: e.hand_picked });

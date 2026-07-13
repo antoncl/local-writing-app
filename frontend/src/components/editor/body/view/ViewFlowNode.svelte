@@ -13,10 +13,11 @@
   import FieldValueEditor from "@/components/widgets/FieldValueEditor.svelte";
   import NodePicker from "@/components/widgets/NodePicker.svelte";
   import SwatchPicker from "@/components/widgets/SwatchPicker.svelte";
-  import { inputArity, outputPayload, type GraphNodeKind, type PredicateKind, type ViewGraphNode, type ViewHandle, type ViewNodeData } from "@/lib/views/viewGraph";
+  import { inputArity, outputPayload, promotableSlot, type GraphNodeKind, type PredicateKind, type ViewGraphNode, type ViewHandle, type ViewNodeData } from "@/lib/views/viewGraph";
   import { nodeSummary } from "@/lib/views/nodeSummary";
   import { useDesignerContext } from "./designerContext";
-  import type { MetadataFieldType, NodePickerRef, ViewGroupByLevel, ViewSort } from "@/lib/types";
+  import type { MetadataFieldType, MetadataValue, NodePickerRef, ViewGroupByLevel, ViewLeafValue, ViewSort } from "@/lib/types";
+  import type { Snippet } from "svelte";
 
   // Svelte Flow passes the node's id/data/selection state as props.
   let { id, data, selected = false }: { id: string; data: { kind: GraphNodeKind; cfg: ViewNodeData }; selected?: boolean } =
@@ -109,48 +110,99 @@
     // value slot fresh (and drop any promotion of it) — otherwise a color-field
     // swatch id bleeds into, e.g., a tags field's input as raw text (dogfood bug).
     if (next.key !== undefined && next.key !== fieldKey) {
-      patch({ field: { key: next.key, op: fieldOp, value: undefined }, field_param: undefined });
+      patch({ field: { key: next.key, op: fieldOp, value: undefined }, param: undefined });
       return;
     }
     patch({ field: { key: fieldKey, op: fieldOp, value: cfg.field?.value, ...next } });
   }
 
-  // --- promote-in-place (#184 Phase 1b, ADR-0032): a field value slot ⇄ a named
-  // runtime formal. Promoting freezes the field/op (authoring) and turns the
-  // authored literal into an overridable default (runtime); the predicate value
-  // becomes `{var: name}`. `name` keys on the node id so a view can carry two
-  // formals over the same field. Lowering collects these into ViewSpec.params.
-  let fieldParam = $derived(cfg.field_param ?? null);
-  let isPromoted = $derived(fieldParam != null);
+  // --- uniform promote-in-place (ADR-0032; per-slot for ADR-0038 §C, #222) ---
+  // Every value-carrying slot — a field value, or a type/descendants_of/tagged
+  // leaf — promotes to a named runtime formal: the authored literal becomes an
+  // overridable default and the slot value becomes `{var: name}`. `name` keys on
+  // the node id so a view can carry two formals over the same slot. `collectParams`
+  // lowers these into ViewSpec.params. Structural selectors (nest/sort/view_ref)
+  // carry no promotable slot (Amendment 1) so `slotKind` is null and no promote
+  // affordance shows.
+  let slotKind = $derived(promotableSlot({ id, kind, position: { x: 0, y: 0 }, data: cfg } as ViewGraphNode));
+  let param = $derived(cfg.param ?? null);
+  let isPromoted = $derived(param != null);
   // #198: a promoted formal with no default is UNBOUND — by default its predicate
   // is inactive (under (a) "unset = show everything" it imposes no constraint:
   // pass-through in a keep, removes nothing in a drop/complement). Surface that
-  // no-op state in the designer so a power user can see the node is currently
-  // inert rather than silently filtering. `set`/`unset` carry no operand, so they
-  // are never inactive; an unpromoted node's fixed literal is always bound.
-  let isInactiveParam = $derived(isPromoted && opNeedsValue && isEmptyValue(fieldParam?.default));
+  // no-op state so a power user sees the node is inert rather than silently
+  // filtering. A field `set`/`unset` op carries no operand → never inactive.
+  let isInactiveParam = $derived(
+    isPromoted && isEmptyValue(param?.default) && (slotKind !== "field" || opNeedsValue),
+  );
   function isEmptyValue(v: unknown): boolean {
     return v == null || v === "" || (Array.isArray(v) && v.length === 0);
   }
-  function promoteField() {
-    const name = fieldKey ? `${fieldKey}_${id}` : `param_${id}`;
-    const label = fieldDef?.name || fieldKey || "Parameter";
-    patch({ field: { key: fieldKey, op: fieldOp, value: { var: name } }, field_param: { name, label, default: cfg.field?.value ?? null } });
+  // The slot's current literal (seeds the default on promote).
+  function slotLiteral(): unknown {
+    switch (slotKind) {
+      case "field":
+        return cfg.field?.value ?? null;
+      case "type":
+        return typeof cfg.type === "string" ? cfg.type : "";
+      case "descendants_of":
+        return typeof cfg.descendants_of === "string" ? cfg.descendants_of : "";
+      case "tagged":
+        return typeof cfg.tagged === "string" ? cfg.tagged : "";
+      default:
+        return null;
+    }
   }
-  function demoteField() {
-    patch({ field: { key: fieldKey, op: fieldOp, value: cfg.field_param?.default ?? null }, field_param: undefined });
+  // Patch the slot's VALUE (a literal or a `{var}` operand); the field slot keeps
+  // its key/op. A leaf's empty default lowers to a blank leaf (null → "").
+  function slotValuePatch(value: unknown): Partial<ViewNodeData> {
+    switch (slotKind) {
+      case "field":
+        return { field: { key: fieldKey, op: fieldOp, value: value as NonNullable<ViewNodeData["field"]>["value"] } };
+      case "type":
+        return { type: (value ?? "") as ViewLeafValue };
+      case "descendants_of":
+        return { descendants_of: (value ?? "") as ViewLeafValue };
+      case "tagged":
+        return { tagged: (value ?? "") as ViewLeafValue };
+      default:
+        return {};
+    }
+  }
+  function slotParamLabel(): string {
+    switch (slotKind) {
+      case "field":
+        return fieldDef?.name || fieldKey || "Parameter";
+      case "type":
+      case "descendants_of":
+        return "Type";
+      case "tagged":
+        return "Tag";
+      default:
+        return "Parameter";
+    }
+  }
+  function promoteSlot() {
+    if (!slotKind) return;
+    const base = slotKind === "field" ? fieldKey || "param" : slotKind;
+    const name = `${base}_${id}`;
+    patch({ ...slotValuePatch({ var: name }), param: { name, label: slotParamLabel(), default: slotLiteral() } });
+  }
+  function demoteSlot() {
+    if (!slotKind) return;
+    patch({ ...slotValuePatch(cfg.param?.default ?? null), param: undefined });
   }
   function setParamLabel(label: string) {
-    if (cfg.field_param) patch({ field_param: { ...cfg.field_param, label } });
+    if (cfg.param) patch({ param: { ...cfg.param, label } });
   }
   function setParamDefault(v: unknown) {
-    if (cfg.field_param) patch({ field_param: { ...cfg.field_param, default: v } });
+    if (cfg.param) patch({ param: { ...cfg.param, default: v } });
   }
   // A valueless op (is set / is empty) has no slot to promote — demote when
   // switching into one so a stale formal can't leak into the parameter strip.
   function changeOp(op: FieldOp) {
     if ((op === "set" || op === "unset") && isPromoted) {
-      patch({ field: { key: fieldKey, op, value: undefined }, field_param: undefined });
+      patch({ field: { key: fieldKey, op, value: undefined }, param: undefined });
     } else {
       setField({ op });
     }
@@ -444,17 +496,109 @@
   }
 </script>
 
-{#snippet typeSelect(useDescendants: boolean)}
-  <select
-    class="vfield"
-    value={useDescendants ? (cfg.descendants_of ?? "") : (cfg.type ?? "")}
-    onchange={(e) => patch(useDescendants ? { descendants_of: e.currentTarget.value } : { type: e.currentTarget.value })}
-  >
+<!-- Base slot widgets (§C): a slot's typed picker, parametrized by value + setter
+     so the literal slot and the promoted default reuse ONE control. -->
+{#snippet entryTypeWidget(value: string, onSet: (v: string) => void)}
+  <select class="vfield" value={value} onchange={(e) => onSet(e.currentTarget.value)}>
     <option value="">— pick type —</option>
     {#each ctx.entryTypes as et (et.fqn)}
       <option value={et.fqn}>{et.name}</option>
     {/each}
   </select>
+{/snippet}
+
+{#snippet tagWidget(value: string, onSet: (v: string) => void)}
+  <select class="vfield" value={value} onchange={(e) => onSet(e.currentTarget.value)}>
+    <option value="">— pick tag —</option>
+    {#each ctx.tags as tag (tag)}
+      <option value={tag}>{tag}</option>
+    {/each}
+  </select>
+{/snippet}
+
+<!-- The field value widget (§C + #226): the intrinsic `entry_type` field offers
+     the closed entry-type set instead of raw text; every other field routes to
+     FieldValueEditor by datatype. Parametrized by value + setter for reuse in the
+     literal slot and the promoted default. -->
+{#snippet fieldValueWidget(value: unknown, onSet: (v: unknown) => void)}
+  {#if fieldKey === "entry_type"}
+    {@render entryTypeWidget(typeof value === "string" ? value : "", onSet)}
+  {:else if fieldDef}
+    <FieldValueEditor
+      field={fieldDef}
+      value={(value ?? null) as MetadataValue}
+      onChange={(v) => onSet(v)}
+      loreEntries={ctx.loreEntries}
+      promptEntries={ctx.promptEntries}
+      structure={ctx.structure}
+      researchStructure={ctx.researchStructure}
+      ariaLabel="Field value"
+    />
+  {/if}
+{/snippet}
+
+<!-- Shared promote card chrome (§C): label + overridable default + unlink. The
+     default's typed widget is passed per slot. -->
+{#snippet promoteCard(defaultWidget: Snippet)}
+  <div class="vparam nodrag" role="group" aria-label="Runtime parameter" use:stopPointerdown>
+    <div class="vparam-head">
+      <span class="vparam-tag">Parameter</span>
+      {#if isInactiveParam}<span class="vparam-inert" role="note">inactive</span>{/if}
+      <button type="button" class="vparam-unlink" title="Back to a fixed value" onclick={demoteSlot}>Unlink</button>
+    </div>
+    {#if isInactiveParam}
+      <!-- #206: the quiet dashed tint marks the no-op at rest; the expanded body
+           gets the plain-words reason. -->
+      <p class="vparam-note" role="note">Unbound — imposes no constraint (shows everything) until a default or picked value fills it.</p>
+    {/if}
+    <input
+      class="vfield"
+      type="text"
+      placeholder="Parameter label"
+      aria-label="Parameter label"
+      value={cfg.param?.label ?? ""}
+      oninput={(e) => setParamLabel(e.currentTarget.value)}
+    />
+    <div class="vfield-value">{@render defaultWidget()}</div>
+  </div>
+{/snippet}
+
+{#snippet promoteButton()}
+  <button type="button" class="vpromote" title="Expose this value as a runtime parameter" onclick={promoteSlot}>
+    Promote to parameter
+  </button>
+{/snippet}
+
+<!-- Type / Type+subtypes leaf slot (§C uniform): literal picker + promote, or the
+     promote card with an entry-type default. -->
+{#snippet typeDefault()}
+  {@render entryTypeWidget(typeof cfg.param?.default === "string" ? cfg.param.default : "", (v) => setParamDefault(v))}
+{/snippet}
+{#snippet typeSlot(useDescendants: boolean)}
+  {#if isPromoted}
+    {@render promoteCard(typeDefault)}
+  {:else}
+    {@const cur = useDescendants ? cfg.descendants_of : cfg.type}
+    <div class="vslot-lit nodrag" role="presentation" use:stopPointerdown>
+      {@render entryTypeWidget(typeof cur === "string" ? cur : "", (v) => patch(useDescendants ? { descendants_of: v } : { type: v }))}
+      {@render promoteButton()}
+    </div>
+  {/if}
+{/snippet}
+
+<!-- Tagged leaf slot (§C uniform). -->
+{#snippet tagDefault()}
+  {@render tagWidget(typeof cfg.param?.default === "string" ? cfg.param.default : "", (v) => setParamDefault(v))}
+{/snippet}
+{#snippet tagSlot()}
+  {#if isPromoted}
+    {@render promoteCard(tagDefault)}
+  {:else}
+    <div class="vslot-lit nodrag" role="presentation" use:stopPointerdown>
+      {@render tagWidget(typeof cfg.tagged === "string" ? cfg.tagged : "", (v) => patch({ tagged: v }))}
+      {@render promoteButton()}
+    </div>
+  {/if}
 {/snippet}
 
 {#snippet organizeSection(levels: ViewGroupByLevel[], commit: LevelCommit)}
@@ -502,15 +646,12 @@
   </div>
 {/snippet}
 
-{#snippet tagSelect()}
-  <select class="vfield" value={cfg.tagged ?? ""} onchange={(e) => patch({ tagged: e.currentTarget.value })}>
-    <option value="">— pick tag —</option>
-    {#each ctx.tags as tag (tag)}
-      <option value={tag}>{tag}</option>
-    {/each}
-  </select>
+<!-- Field predicate slot (§C uniform): field + op selects, then the value slot
+     as literal | promoted formal | wired source — the same three modes every
+     value-carrying slot follows. -->
+{#snippet fieldDefault()}
+  {@render fieldValueWidget(cfg.param?.default, (v) => setParamDefault(v))}
 {/snippet}
-
 {#snippet fieldEditor()}
   <div class="vfield-row">
     <select class="vfield" value={fieldKey} onchange={(e) => setField({ key: e.currentTarget.value })}>
@@ -531,56 +672,12 @@
            from the wire; the literal / promote controls are hidden. -->
       <div class="vwired" role="note">↳ value from a wired source</div>
     {:else if isPromoted}
-      <!-- Promoted: the slot is a runtime formal. Edit its strip label + the
-           overridable default; Unlink demotes back to a fixed value. -->
-      <div class="vparam nodrag" role="group" aria-label="Runtime parameter" use:stopPointerdown>
-        <div class="vparam-head">
-          <span class="vparam-tag">Parameter</span>
-          {#if isInactiveParam}<span class="vparam-inert" role="note">inactive</span>{/if}
-          <button type="button" class="vparam-unlink" title="Back to a fixed value" onclick={demoteField}>Unlink</button>
-        </div>
-        {#if isInactiveParam}
-          <!-- #206: the quiet dashed tint marks the no-op at rest; here in the
-               expanded body it gets the plain-words reason. -->
-          <p class="vparam-note" role="note">Unbound — imposes no constraint (shows everything) until a default or picked value fills it.</p>
-        {/if}
-        <input
-          class="vfield"
-          type="text"
-          placeholder="Parameter label"
-          aria-label="Parameter label"
-          value={cfg.field_param?.label ?? ""}
-          oninput={(e) => setParamLabel(e.currentTarget.value)}
-        />
-        <div class="vfield-value">
-          <FieldValueEditor
-            field={fieldDef}
-            value={(cfg.field_param?.default ?? null) as import("@/lib/types").MetadataValue}
-            onChange={(v) => setParamDefault(v)}
-            loreEntries={ctx.loreEntries}
-            promptEntries={ctx.promptEntries}
-            structure={ctx.structure}
-            researchStructure={ctx.researchStructure}
-            ariaLabel="Default value"
-          />
-        </div>
-      </div>
+      {@render promoteCard(fieldDefault)}
     {:else}
       <div class="vfield-value nodrag" role="presentation" use:stopPointerdown>
-        <FieldValueEditor
-          field={fieldDef}
-          value={(cfg.field?.value ?? null) as import("@/lib/types").MetadataValue}
-          onChange={(v) => setField({ value: v })}
-          loreEntries={ctx.loreEntries}
-          promptEntries={ctx.promptEntries}
-          structure={ctx.structure}
-          researchStructure={ctx.researchStructure}
-          ariaLabel="Field value"
-        />
+        {@render fieldValueWidget(cfg.field?.value, (v) => setField({ value: v }))}
       </div>
-      <button type="button" class="vpromote" title="Expose this value as a runtime parameter" onclick={promoteField}>
-        Promote to parameter
-      </button>
+      {@render promoteButton()}
     {/if}
   {/if}
 {/snippet}
@@ -657,9 +754,9 @@
   {#if isExpanded}
   <div class="vconfig nodrag" role="presentation" use:stopPointerdown>
   {#if kind === "type" || kind === "descendants_of"}
-    {@render typeSelect(kind === "descendants_of")}
+    {@render typeSlot(kind === "descendants_of")}
   {:else if kind === "tagged"}
-    {@render tagSelect()}
+    {@render tagSlot()}
   {:else if kind === "field"}
     {@render fieldEditor()}
   {:else if kind === "filter"}
@@ -677,11 +774,11 @@
       {/each}
     </select>
     {#if filterKind === "type"}
-      {@render typeSelect(false)}
+      {@render typeSlot(false)}
     {:else if filterKind === "descendants_of"}
-      {@render typeSelect(true)}
+      {@render typeSlot(true)}
     {:else if filterKind === "tagged"}
-      {@render tagSelect()}
+      {@render tagSlot()}
     {:else if filterKind === "field"}
       {@render fieldEditor()}
     {/if}

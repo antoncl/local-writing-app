@@ -32,6 +32,7 @@ import type {
   ViewExpr,
   ViewFieldPredicate,
   ViewGroupSpec,
+  ViewLeafValue,
   ViewNestOp,
   ViewSort,
   ViewSpec,
@@ -794,15 +795,21 @@ function evalLeaf<T extends EvalNode>(state: RunState<T>, expr: ViewExpr, neutra
   // default dump), so an omitted-vs-null asymmetry would misfire on the first
   // slot. `null` and `undefined` both mean "this leaf isn't set".
   if (expr.type != null) {
-    return idsWhere(state, (n) => n.entry_type === expr.type);
+    const set = resolveLeafOperand(state, expr.type);
+    if (set === OPERAND_INACTIVE) return neutralUniverse ? new Set(state.order.keys()) : new Set<string>();
+    return idsWhere(state, (n) => set.has(n.entry_type));
   }
   if (expr.descendants_of != null) {
-    const family = descendantFqns(state, expr.descendants_of);
+    const set = resolveLeafOperand(state, expr.descendants_of);
+    if (set === OPERAND_INACTIVE) return neutralUniverse ? new Set(state.order.keys()) : new Set<string>();
+    const family = new Set<string>();
+    for (const fqn of set) for (const d of descendantFqns(state, fqn)) family.add(d);
     return idsWhere(state, (n) => family.has(n.entry_type));
   }
   if (expr.tagged != null) {
-    const tag = expr.tagged;
-    return idsWhere(state, (n) => nodeTags(n).includes(tag));
+    const set = resolveLeafOperand(state, expr.tagged);
+    if (set === OPERAND_INACTIVE) return neutralUniverse ? new Set(state.order.keys()) : new Set<string>();
+    return idsWhere(state, (n) => nodeTags(n).some((t) => set.has(t)));
   }
   if (expr.field != null) {
     return evalField(state, expr.field, neutralUniverse);
@@ -874,7 +881,9 @@ function isBareViewRef(expr: ViewExpr): boolean {
 // spec has ~15 keys, all null but `descendants_of`.
 export function isBareDescendantsOf(expr: ViewExpr): boolean {
   return (
-    expr.descendants_of != null &&
+    // A STRING descendants_of only — a promoted `{var}` leaf (#222) is a
+    // parameterized source, never the plain kind-universe roster.
+    typeof expr.descendants_of === "string" &&
     expr.view_ref == null &&
     expr.union == null &&
     expr.intersect == null &&
@@ -1261,6 +1270,25 @@ function resolveOperand<T extends EvalNode>(
 
 function isVarOperand(v: unknown): v is { var: string } {
   return typeof v === "object" && v !== null && typeof (v as { var?: unknown }).var === "string";
+}
+
+// Resolve a leaf slot value (type/descendants_of/tagged, ADR-0038 §C Amendment 1,
+// #222) to a string-set, or INACTIVE. A bare string literal is a one-element set —
+// behaviour-preserving, the pre-#222 leaf. A `{var}` reads the bindings: an unbound
+// formal is INACTIVE (the leaf drops out, no constraint — like an unbound field
+// predicate), a bound one contributes its value-set (binding multiple FQNs/tags →
+// the leaf matches ANY). `$self` is never a leaf-slot operand (leaves hold values,
+// not a node anchor), so an unbound var is always INACTIVE here.
+function resolveLeafOperand<T extends EvalNode>(
+  state: RunState<T>,
+  value: ViewLeafValue,
+): Set<string> | typeof OPERAND_INACTIVE {
+  if (isVarOperand(value)) {
+    const bound = state.bindings?.[value.var];
+    return bound == null ? OPERAND_INACTIVE : bindingSet(bound);
+  }
+  const s = String(value).trim();
+  return s ? new Set([s]) : new Set<string>();
 }
 
 function isFieldOfOperand(v: unknown): v is { field_of: { of: ViewExpr; field: string } } {

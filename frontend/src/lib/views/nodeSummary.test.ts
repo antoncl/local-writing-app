@@ -39,7 +39,7 @@ describe("nodeSummary — compact node one-liners (#220)", () => {
   it("shows the parameter label for a promoted value slot", () => {
     const cfg: ViewNodeData = {
       field: { key: "rank", op: "overlap", value: { var: "rank_n1" } },
-      field_param: { name: "rank_n1", label: "Min rank", default: null },
+      param: { name: "rank_n1", label: "Min rank", default: null },
     };
     expect(summary("field", cfg)).toBe("Rank any of ⟨Min rank⟩");
   });

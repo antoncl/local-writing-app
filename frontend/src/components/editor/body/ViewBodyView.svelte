@@ -18,6 +18,8 @@
   import ViewFlowNode from "./view/ViewFlowNode.svelte";
   import SelfLoopEdge from "./view/SelfLoopEdge.svelte";
   import ViewportFit from "./view/ViewportFit.svelte";
+  import ParamMark from "./view/ParamMark.svelte";
+  import ViewGlyph from "./view/ViewGlyph.svelte";
   import ViewNodeList, { type RowCtx } from "@/components/widgets/ViewNodeList.svelte";
   import RowCaret from "@/components/widgets/RowCaret.svelte";
   import { setDesignerContext, type DesignerContext } from "./view/designerContext";
@@ -155,6 +157,17 @@
   type FlowData = { kind: GraphNodeKind; cfg: ViewNodeData };
   let flowNodes = $state<Node<FlowData>[]>([]);
   let flowEdges = $state<Edge[]>([]);
+  // `${nodeId}:${handleId}` for every wired endpoint — built once per edge change
+  // so `handleConnected` / `valueWired` are O(1) lookups rather than a per-handle
+  // scan of every edge (§240). Reactive: re-derives when flowEdges changes.
+  let connectedHandleKeys = $derived.by(() => {
+    const keys = new Set<string>();
+    for (const e of flowEdges) {
+      if (e.sourceHandle) keys.add(`${e.source}:${e.sourceHandle}`);
+      if (e.targetHandle) keys.add(`${e.target}:${e.targetHandle}`);
+    }
+    return keys;
+  });
   // The canvas element, so insertion can invert screen→flow coords by reading the
   // live viewport transform straight off the DOM (§E) — `bind:viewport` only
   // emits on a viewport CHANGE, so it stays undefined until the first pan/zoom.
@@ -482,8 +495,8 @@
       fields: fieldOptions,
       fieldsFor: fieldsForNode,
       fieldByKey: (key: string) => schema?.fields?.[key] ?? null,
-      valueWired: (nodeId: string) =>
-        flowEdges.some((e) => e.target === nodeId && e.targetHandle === FILTER_VALUE_HANDLE),
+      valueWired: (nodeId: string) => connectedHandleKeys.has(`${nodeId}:${FILTER_VALUE_HANDLE}`),
+      handleConnected: (nodeId: string, handleId: string) => connectedHandleKeys.has(`${nodeId}:${handleId}`),
       tags: tagOptions,
       savedViews,
       loreEntries,
@@ -534,34 +547,33 @@
   // lowering (`commonLeafExpr`) through one UI path, and post-ADR-0036 `All` is a
   // real kind universe, so nothing is lost. `specToGraph` canonicalizes any
   // surviving bare leaf on open, so a reopened or duplicated view never presents
-  // vocabulary the palette can't rebuild. Per-item `cls` keeps the colour cue
-  // (retokenised in §G / #223); per-kind glyphs are the §G lexicon batch, not
-  // this slice.
+  // vocabulary the palette can't rebuild. Each chip carries the kind's ViewGlyph
+  // (the same mark as the node header, §240), so it needs no per-item colour cue.
   let hasTypeChoice = $derived(entryTypeOptions.length > 1);
-  type PalItem = { kind: GraphNodeKind; label: string; cls: string };
+  type PalItem = { kind: GraphNodeKind; label: string };
   const PALETTE: { label: string; items: PalItem[] }[] = [
     {
       label: "Sources",
       items: [
-        { kind: "all", label: "All", cls: "inj" },
-        { kind: "hand_picked", label: "Hand-picked", cls: "inj" },
-        { kind: "view_ref", label: "Saved view", cls: "inj" },
+        { kind: "all", label: "All" },
+        { kind: "hand_picked", label: "Hand-picked" },
+        { kind: "view_ref", label: "Saved view" },
         // `This entry` ($self) seeds a projection from the pane's anchor.
-        { kind: "self", label: "This entry", cls: "proj" },
+        { kind: "self", label: "This entry" },
       ],
     },
     {
       label: "Operations",
       items: [
-        { kind: "filter", label: "Filter", cls: "filter" },
-        { kind: "field_of", label: "Field of", cls: "proj" },
-        { kind: "union", label: "Union", cls: "op" },
-        { kind: "intersect", label: "Intersect", cls: "op" },
-        { kind: "difference", label: "Difference", cls: "op" },
-        { kind: "complement", label: "Complement", cls: "op" },
-        { kind: "nest", label: "Nest", cls: "op" },
-        { kind: "sorter", label: "Sort", cls: "ann" },
-        { kind: "highlight", label: "Highlight", cls: "ann" },
+        { kind: "filter", label: "Filter" },
+        { kind: "field_of", label: "Field of" },
+        { kind: "union", label: "Union" },
+        { kind: "intersect", label: "Intersect" },
+        { kind: "difference", label: "Difference" },
+        { kind: "complement", label: "Complement" },
+        { kind: "nest", label: "Nest" },
+        { kind: "sorter", label: "Sort" },
+        { kind: "highlight", label: "Highlight" },
       ],
     },
   ];
@@ -810,29 +822,50 @@
       <strong class="kind-fixed">{kind}</strong>
     </span>
     <!--
-      Sources vs operations (ADR-0038 §B). Each item both clicks-to-insert (lands
-      at the viewport centre) and drags-to-place (at the drop point, §E). Caps-label
-      groups; per-kind glyphs are the §G lexicon pass.
+      Sources vs operations (ADR-0038 §B, §240 Editorial-Card pass). A tray you
+      pick from, not a toolbar: each item is a glyph-chip on a liftable surface —
+      the kind glyph (same mark as the node header, so palette ↔ canvas read as
+      one system) + label; hover lifts it and reveals the drag mark. Each chip
+      both clicks-to-insert (viewport centre) and drags-to-place (drop point, §E).
     -->
     <div class="palette">
-      {#each PALETTE as g, gi (g.label)}
-        {#if gi > 0}<span class="pal-sep"></span>{/if}
-        <span class="pal-group">
+      {#each PALETTE as g (g.label)}
+        <div class="pal-group">
           <span class="pal-label">{g.label}</span>
-          {#each g.items as p (p.kind)}
-            <button
-              type="button"
-              class={p.cls}
-              draggable="true"
-              ondragstart={(e) => onPaletteDragStart(e, p.kind)}
-              onclick={() => addNode(p.kind)}
-              title={`Click to add, or drag onto the canvas — ${p.label}`}
-            >{p.label}</button>
-          {/each}
-        </span>
+          <div class="pal-chips">
+            {#each g.items as p (p.kind)}
+              <button
+                type="button"
+                class="chip"
+                draggable="true"
+                ondragstart={(e) => onPaletteDragStart(e, p.kind)}
+                onclick={() => addNode(p.kind)}
+                title={`Click to add, or drag onto the canvas — ${p.label}`}
+              >
+                <span class="chip-g"><ViewGlyph kind={p.kind} uid={`pal-${p.kind}`} size={16} /></span>
+                <span class="chip-label">{p.label}</span>
+                <span class="chip-drag" aria-hidden="true">⋮⋮</span>
+              </button>
+            {/each}
+          </div>
+        </div>
       {/each}
     </div>
   </div>
+
+  <!-- Shared collapse toggle for the rail-like panes (§240): the same Tabler
+       sidebar icon as the editor's details rail. `side` selects the left
+       (Parameters) or right (Preview) variant. -->
+  {#snippet railToggle(collapsed: boolean, side: "left" | "right", label: string, onToggle: () => void)}
+    <button
+      type="button"
+      class="rail-toggle"
+      title={collapsed ? `Expand ${label}` : `Collapse ${label}`}
+      aria-label={collapsed ? `Expand ${label}` : `Collapse ${label}`}
+      aria-expanded={!collapsed}
+      onclick={onToggle}
+    ><i class="ti ti-layout-sidebar-{side}-{collapsed ? 'expand' : 'collapse'}" aria-hidden="true"></i></button>
+  {/snippet}
 
   <div class="designer-body">
     <!-- Parameters rail (ADR-0038 §D): the view-level overview of every promoted
@@ -841,14 +874,7 @@
          view exposes none — never a config dumping ground. -->
     <aside class="params-rail" class:collapsed={paramsCollapsed}>
       <header class="params-head">
-        <button
-          type="button"
-          class="params-toggle"
-          title={paramsCollapsed ? "Expand parameters" : "Collapse parameters"}
-          aria-label={paramsCollapsed ? "Expand parameters" : "Collapse parameters"}
-          aria-expanded={!paramsCollapsed}
-          onclick={() => (paramsCollapsed = !paramsCollapsed)}
-        >{paramsCollapsed ? "▸" : "▾"}</button>
+        {@render railToggle(paramsCollapsed, "left", "parameters", () => (paramsCollapsed = !paramsCollapsed))}
         {#if !paramsCollapsed}
           <span class="params-title">Parameters</span>
           {#if paramRows.length > 0}<span class="count">{paramRows.length}</span>{/if}
@@ -862,9 +888,10 @@
             {#each paramRows as p (p.name)}
               <li>
                 <button type="button" class="param-row" class:unbound={!p.bound} onclick={() => focusParamNode(p.nodeId)} title="Go to this parameter's node">
+                  <span class="param-mark"><ParamMark bound={p.bound} /></span>
                   <span class="param-label">{p.label}</span>
                   <span class="param-type">{p.typeLabel}</span>
-                  <span class="param-default">{p.bound ? p.defaultText : "unbound"}</span>
+                  <span class="param-default">{p.bound ? p.defaultText : "no default"}</span>
                 </button>
               </li>
             {/each}
@@ -913,20 +940,13 @@
       {#if flowNodes.length <= 1}
         <!-- Overlay, NOT a Svelte Flow <Panel>: a Panel captures pointer events
              over the canvas and blocks the handles (no crosshair / no connect). -->
-        <div class="empty-hint">Drop an <strong>All</strong>, chain a <strong>Filter</strong> or two, then wire into <strong>View result</strong>.</div>
+        <div class="empty-hint">Drag a <strong>Source</strong> from the tray to begin, then wire operations toward a <strong>View result</strong>.</div>
       {/if}
     </div>
 
     <aside class="preview" class:collapsed={previewCollapsed}>
       <header class="preview-head">
-        <button
-          type="button"
-          class="preview-toggle"
-          title={previewCollapsed ? "Expand preview" : "Collapse preview"}
-          aria-label={previewCollapsed ? "Expand preview" : "Collapse preview"}
-          aria-expanded={!previewCollapsed}
-          onclick={() => (previewCollapsed = !previewCollapsed)}
-        >{previewCollapsed ? "▸" : "▾"}</button>
+        {@render railToggle(previewCollapsed, "right", "preview", () => (previewCollapsed = !previewCollapsed))}
         {#if !previewCollapsed}
           <span class="preview-title">Preview</span>
           <span class="count">{preview.nodes.length} / {universe.length}</span>
@@ -997,63 +1017,69 @@
     font-weight: 600;
     color: var(--text);
   }
+  /* A tray you pick from (§240): serif group labels; glyph-chips on a liftable
+     surface. Footprint ≈ the old dense toolbar — the invitation comes from the
+     treatment, not extra size. No per-chip stripe: the glyph carries the kind. */
   .palette {
     display: flex;
-    align-items: center;
+    flex-direction: column;
     gap: 8px;
-    flex-wrap: wrap;
   }
   .pal-group {
-    display: inline-flex;
-    align-items: center;
-    gap: 4px;
+    display: flex;
+    align-items: baseline;
+    gap: 10px;
     flex-wrap: wrap;
   }
   .pal-label {
-    font-size: var(--fs-xs);
-    letter-spacing: 0.04em;
-    text-transform: uppercase;
-    color: var(--text-3);
-    margin-right: 2px;
+    font-family: var(--serif);
+    font-size: var(--fs-sm);
+    color: var(--text-2);
+    width: 74px;
+    flex-shrink: 0;
   }
-  .pal-sep {
-    width: 1px;
-    height: 18px;
-    background: var(--border);
+  .pal-chips {
+    display: flex;
+    gap: 7px;
+    flex-wrap: wrap;
   }
-  .palette button {
-    padding: 3px 8px;
+  .palette button.chip {
+    position: relative;
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    padding: 5px 10px;
     border: 1px solid var(--border-strong);
     border-radius: var(--r-md);
-    background: var(--panel);
+    background: var(--surface);
     font-size: var(--fs-sm);
+    color: var(--text);
     cursor: grab;
+    transition: transform var(--t-fast), box-shadow var(--t-fast), border-color var(--t-fast);
   }
-  .palette button:active {
+  .palette button.chip:hover {
+    transform: translateY(-1px);
+    box-shadow: var(--elev-1);
+    border-color: var(--accent);
+  }
+  .palette button.chip:active {
     cursor: grabbing;
+    transform: none;
+    box-shadow: none;
   }
-  .palette button:hover {
-    background: var(--inset);
+  .chip-g {
+    display: inline-flex;
+    align-items: center;
   }
-  .palette button.filter {
-    border-color: var(--accent);
-    background: var(--accent);
-    /* ink on accent-solid: --surface flips with theme (white on the light-mode
-       dark-green accent, near-black on the dark-mode mint accent) — kills the
-       raw #fff literal and its dark-mode low-contrast (§G). */
-    color: var(--surface);
-    font-weight: 600;
+  .chip-drag {
+    color: var(--text-3);
+    font-size: var(--fs-xs);
+    letter-spacing: -2px;
+    opacity: 0;
+    transition: opacity var(--t-fast);
   }
-  .palette button.op {
-    border-color: var(--accent);
-    color: var(--accent);
-  }
-  .palette button.proj {
-    border-color: var(--accent);
-    color: var(--accent);
-  }
-  .palette button.ann {
-    border-style: dashed;
+  .palette button.chip:hover .chip-drag {
+    opacity: 0.6;
   }
   .designer-body {
     display: flex;
@@ -1083,11 +1109,13 @@
     --xy-node-boxshadow-hover: none;
     --xy-node-boxshadow-selected: none;
     /* wires */
-    --xy-edge-stroke: var(--border-strong);
+    /* node-set wires take the accent (kind-tinted, §240), softened via opacity
+       on the path below so they read as calm pipes, not hard rules */
+    --xy-edge-stroke: var(--accent);
     --xy-edge-stroke-selected: var(--accent);
-    /* ports (the generic `.port` rule tints per-kind on top of this) */
-    --xy-handle-background-color: var(--accent);
-    --xy-handle-border-color: var(--panel);
+    /* ports (the generic `.port` rule paints the hollow ring on top of this) */
+    --xy-handle-background-color: var(--surface);
+    --xy-handle-border-color: var(--accent);
     /* zoom/fit controls */
     --xy-controls-button-background-color: var(--panel);
     --xy-controls-button-background-color-hover: var(--inset);
@@ -1105,6 +1133,8 @@
   .canvas :global(.svelte-flow__edge-path),
   .canvas :global(.svelte-flow__connection-path) {
     stroke-width: 2;
+    /* softened accent so the node-set wire reads as a calm pipe (§240) */
+    stroke-opacity: 0.6;
   }
   /* The value-set wire (ADR-0031 §D): a scalar `field_of` projection. Dashed +
      tinted `--k-snippet` (matching the value handles) so it reads as a visibly
@@ -1112,7 +1142,8 @@
      `--k-lore` Nest children port it used to clash with. */
   .canvas :global(.svelte-flow__edge.value-wire .svelte-flow__edge-path) {
     stroke: var(--k-snippet);
-    stroke-dasharray: 5 3;
+    stroke-opacity: 0.85;
+    stroke-dasharray: 5 4;
   }
   .empty-hint {
     position: absolute;
@@ -1162,7 +1193,7 @@
   .params-title {
     flex: 1;
   }
-  .params-toggle {
+  .rail-toggle {
     border: none;
     background: transparent;
     color: var(--text-3);
@@ -1171,7 +1202,7 @@
     cursor: pointer;
     padding: 0 2px;
   }
-  .params-toggle:hover {
+  .rail-toggle:hover {
     color: var(--text);
   }
   .params-empty {
@@ -1191,10 +1222,10 @@
   }
   .param-row {
     display: grid;
-    grid-template-columns: 1fr auto;
+    grid-template-columns: auto 1fr auto;
     grid-template-areas:
-      "label type"
-      "default default";
+      "mark label type"
+      "mark default default";
     gap: 2px 8px;
     width: 100%;
     text-align: left;
@@ -1209,6 +1240,11 @@
   .param-row:hover {
     border-color: var(--border-strong);
     background: var(--accent-soft);
+  }
+  .param-mark {
+    grid-area: mark;
+    align-self: center;
+    display: inline-flex;
   }
   .param-label {
     grid-area: label;
@@ -1266,18 +1302,6 @@
   }
   .preview-title {
     flex: 1;
-  }
-  .preview-toggle {
-    border: none;
-    background: transparent;
-    color: var(--text-3);
-    font-size: var(--fs-sm);
-    line-height: 1;
-    cursor: pointer;
-    padding: 0 2px;
-  }
-  .preview-toggle:hover {
-    color: var(--text);
   }
   .count {
     font-variant-numeric: tabular-nums;

@@ -10,6 +10,7 @@
 <script lang="ts">
   import { Handle, Position } from "@xyflow/svelte";
   import ViewGlyph from "./ViewGlyph.svelte";
+  import ParamMark from "./ParamMark.svelte";
   import FieldValueEditor from "@/components/widgets/FieldValueEditor.svelte";
   import NodePicker from "@/components/widgets/NodePicker.svelte";
   import SwatchPicker from "@/components/widgets/SwatchPicker.svelte";
@@ -47,6 +48,13 @@
   // (ADR-0031 §F), so downstream of a cross-kind `field_of` the dropdowns offer
   // the projected kind's fields instead of the view anchor's.
   let nodeFields = $derived(ctx.fieldsFor?.(id) ?? ctx.fields);
+
+  // A wired port stays filled at rest (§240), not only while hovered: append
+  // `connected` when this handle currently has an edge. Reads flowEdges through
+  // the context, so it re-evaluates when the wiring changes.
+  function portClass(base: string, handleId: string): string {
+    return ctx.handleConnected(id, handleId) ? `${base} connected` : base;
+  }
 
   const LABELS: Record<GraphNodeKind, string> = {
     output: "View result",
@@ -424,10 +432,6 @@
     [next[i], next[j]] = [next[j], next[i]];
     commitHandles(next);
   }
-  // Even vertical spread for the target ports down the node's left edge.
-  function handleTop(i: number): string {
-    return `${((i + 1) / (handles.length + 1)) * 100}%`;
-  }
 
   // --- organize levels (ADR-0037 §2/§8 + Amendment 1: ν by attribute, owned per
   // GROUP). Each named group carries its own levels (`ViewHandle.group_by`); the
@@ -551,8 +555,10 @@
 {#snippet promoteCard(defaultWidget: Snippet)}
   <div class="vparam nodrag" role="group" aria-label="Runtime parameter" use:stopPointerdown>
     <div class="vparam-head">
+      <!-- The half→whole mark carries the bound state (§240): whole once a
+           default/value fills it, half while unbound (imposing no constraint). -->
+      <ParamMark bound={!isInactiveParam} size={13} />
       <span class="vparam-tag">Parameter</span>
-      {#if isInactiveParam}<span class="vparam-inert" role="note">inactive</span>{/if}
       <button type="button" class="vparam-unlink" title="Back to a fixed value" onclick={demoteSlot}>Unlink</button>
     </div>
     {#if isInactiveParam}
@@ -573,8 +579,11 @@
 {/snippet}
 
 {#snippet promoteButton()}
-  <button type="button" class="vpromote" title="Expose this value as a runtime parameter" onclick={promoteSlot}>
-    Promote to parameter
+  <!-- §240: the promote affordance is the half-mark itself (not a dashed button
+       that widens the card) — click it to promote the slot to a parameter; it
+       then completes to whole once a default/value binds it. -->
+  <button type="button" class="vpromote" title="Promote this value to a runtime parameter" aria-label="Promote to a runtime parameter" onclick={promoteSlot}>
+    <ParamMark size={13} />
   </button>
 {/snippet}
 
@@ -700,19 +709,20 @@
   class:inactive={isInactiveParam}
   title={isInactiveParam ? "Unbound parameter — inactive until a value is picked (shows everything by default)" : undefined}
 >
-  <!-- target ports (left) -->
-  {#if kind === "output"}
-    {#each handles as h, i (h.id)}
-      <Handle type="target" position={Position.Left} id={h.id} class="port port-h" style={`top:${handleTop(i)}`} />
-    {/each}
-  {:else if kind === "difference"}
-    <Handle type="target" position={Position.Left} id="keep" class="port keep" style="top: 34%" />
-    <Handle type="target" position={Position.Left} id="remove" class="port remove" style="top: 66%" />
+  <!-- target ports (left). The output node's group handles are NOT here — they
+       live inside each group row (below) so every handle sits ON its group's
+       name row (§240 / Wiring Desk), instead of an even spread that drifts out
+       of line with the groups. -->
+  {#if kind === "difference"}
+    <Handle type="target" position={Position.Left} id="keep" class={portClass("port keep", "keep")} style="top: 34%" />
+    <Handle type="target" position={Position.Left} id="remove" class={portClass("port remove", "remove")} style="top: 66%" />
   {:else if kind === "nest"}
-    <Handle type="target" position={Position.Left} id="parents" class="port parents" style="top: 34%" />
-    <Handle type="target" position={Position.Left} id="children" class="port children" style="top: 66%" />
-  {:else if arity !== "none"}
-    <Handle type="target" position={Position.Left} id="in" class="port" style={hasValueSlot ? "top: 34%" : ""} />
+    <Handle type="target" position={Position.Left} id="parents" class={portClass("port parents", "parents")} style="top: 34%" />
+    <Handle type="target" position={Position.Left} id="children" class={portClass("port children", "children")} style="top: 66%" />
+  {:else if kind !== "output" && arity !== "none"}
+    <!-- output is excluded: its group handles live in the group rows below, so it
+         must not also get a generic `in` port here (it's arity "many"). -->
+    <Handle type="target" position={Position.Left} id="in" class={portClass("port", "in")} style={hasValueSlot ? "top: 34%" : ""} />
   {/if}
   <!-- value operand socket (#196): a wired source fills the field's value slot.
        For a Filter it sits below the set `in` port; a bare `field` leaf has only
@@ -722,7 +732,7 @@
       type="target"
       position={Position.Left}
       id="value"
-      class="port value"
+      class={portClass("port value", "value")}
       style={arity !== "none" ? "top: 66%" : "top: 50%"}
     />
   {/if}
@@ -760,7 +770,44 @@
        resting node shows a one-line summary. `nodrag` + native stop-pointerdown
        keep interacting with any config control from dragging/selecting the node
        (Svelte Flow acts on pointerdown; picker menus portal to <body>). -->
-  {#if isExpanded}
+  {#if kind === "output"}
+  <!-- Output groups render in BOTH states (§240 / Wiring Desk) so each handle
+       sits ON its group's name row: at rest a read-only name row, expanded the
+       full group editor. The handle lives inside the row, so Svelte Flow aligns
+       it (and its wire) to that row instead of an even spread down the node. -->
+  <div class="handles nodrag" role="presentation" use:stopPointerdown>
+    {#each handles as h, i (h.id)}
+      <div class="group-block">
+        <div class="handle-row group-row">
+          <Handle type="target" position={Position.Left} id={h.id} class={portClass("port port-h", h.id)} />
+          {#if isExpanded}
+            <input
+              class="vfield hname"
+              type="text"
+              placeholder={handles.length > 1 ? `Group ${i + 1}` : "All results"}
+              value={h.name}
+              oninput={(e) => renameHandle(h.id, e.currentTarget.value)}
+            />
+            <SwatchPicker value={h.color ?? null} onChange={(c) => setHandleColor(h.id, c)} />
+            <button class="hbtn" title="Move up" aria-label="Move group up" disabled={i === 0} onclick={() => moveHandle(h.id, -1)}>↑</button>
+            <button class="hbtn" title="Move down" aria-label="Move group down" disabled={i === handles.length - 1} onclick={() => moveHandle(h.id, 1)}>↓</button>
+            <button class="hbtn del" title="Remove group" aria-label="Remove group" disabled={handles.length <= 1} onclick={() => removeHandle(h.id)}>×</button>
+          {:else}
+            <span class="group-name">{h.name || (handles.length > 1 ? `Group ${i + 1}` : "All results")}</span>
+          {/if}
+        </div>
+        {#if isExpanded}
+          <div class="group-organize">
+            {@render organizeSection(h.group_by ?? [], commitHandleLevels(h.id))}
+          </div>
+        {/if}
+      </div>
+    {/each}
+    {#if isExpanded}
+      <button class="add-handle" type="button" title="Add handle group" aria-label="Add handle group" onclick={addHandle}>+ Add group</button>
+    {/if}
+  </div>
+  {:else if isExpanded}
   <div class="vconfig nodrag" role="presentation" use:stopPointerdown>
   {#if kind === "type" || kind === "descendants_of"}
     {@render typeSlot(kind === "descendants_of")}
@@ -901,33 +948,6 @@
       <span class="vswatch-label">Colour</span>
       <SwatchPicker value={cfg.color ?? null} onChange={(id) => patch({ color: id ?? "" })} />
     </span>
-  {:else if kind === "output"}
-    <div class="handles">
-      {#each handles as h, i (h.id)}
-        <div class="group-block">
-          <div class="handle-row">
-            <input
-              class="vfield hname"
-              type="text"
-              placeholder={handles.length > 1 ? `Group ${i + 1}` : "All results"}
-              value={h.name}
-              oninput={(e) => renameHandle(h.id, e.currentTarget.value)}
-            />
-            <SwatchPicker value={h.color ?? null} onChange={(c) => setHandleColor(h.id, c)} />
-            <button class="hbtn" title="Move up" aria-label="Move group up" disabled={i === 0} onclick={() => moveHandle(h.id, -1)}>↑</button>
-            <button class="hbtn" title="Move down" aria-label="Move group down" disabled={i === handles.length - 1} onclick={() => moveHandle(h.id, 1)}>↓</button>
-            <button class="hbtn del" title="Remove group" aria-label="Remove group" disabled={handles.length <= 1} onclick={() => removeHandle(h.id)}>×</button>
-          </div>
-          <!-- Amendment 1: each group owns its Organize (the single/unnamed group
-               too — its lone handle carries the levels). Group + Organize = one
-               unit; the "+ add group" below adds another. -->
-          <div class="group-organize">
-            {@render organizeSection(h.group_by ?? [], commitHandleLevels(h.id))}
-          </div>
-        </div>
-      {/each}
-      <button class="add-handle" type="button" title="Add handle group" aria-label="Add handle group" onclick={addHandle}>+ Add group</button>
-    </div>
   {/if}
   </div>
   {:else if summaryText}
@@ -936,7 +956,7 @@
 
   <!-- source port (right) — tinted `value` when this node emits a value-set. -->
   {#if kind !== "output"}
-    <Handle type="source" position={Position.Right} id="out" class={emitsValueSet ? "port out value" : "port out"} />
+    <Handle type="source" position={Position.Right} id="out" class={portClass(emitsValueSet ? "port out value" : "port out", "out")} />
   {/if}
 </div>
 
@@ -947,13 +967,17 @@
     background: var(--panel);
     border: 1px solid var(--border-strong);
     border-radius: var(--r-lg);
-    box-shadow: var(--elev-1);
+    /* The kind-stripe (§240): a 4px accent band down the left edge, drawn as an
+       INSET box-shadow exactly like NodeRow (variant-card) so it follows the
+       card's rounded corners — the same signature that ties every NodeRow to its
+       kind, now on the flow nodes. Uniform on every kind. */
+    box-shadow: inset 4px 0 0 0 var(--accent), var(--elev-1);
     font-size: var(--fs-sm);
     color: var(--text);
   }
   .vnode.selected {
     border-color: var(--accent);
-    box-shadow: 0 0 0 2px var(--accent-soft);
+    box-shadow: inset 4px 0 0 0 var(--accent), 0 0 0 2px var(--accent-soft);
   }
   .vnode.combinator {
     background: var(--inset);
@@ -981,7 +1005,7 @@
     display: flex;
     align-items: center;
     gap: 6px;
-    padding: 6px 8px;
+    padding: 6px 8px 6px 11px;
   }
   /* The glyph+title expand toggle — reads as the header, not a button. */
   .vnode-toggle {
@@ -1020,7 +1044,7 @@
   /* Compact one-line config summary on the resting (unselected) node — the
      glance state; selecting the node swaps it for the full editor (§A). */
   .vnode-summary {
-    padding: 0 8px 8px;
+    padding: 0 8px 8px 11px;
     font-size: var(--fs-sm);
     color: var(--text-2);
     white-space: nowrap;
@@ -1028,7 +1052,7 @@
     text-overflow: ellipsis;
   }
   .port-legend {
-    padding: 0 8px 4px;
+    padding: 0 8px 4px 11px;
     font-size: var(--fs-xs);
     color: var(--text-3);
   }
@@ -1052,6 +1076,18 @@
   }
   .dot.value {
     background: var(--k-snippet);
+  }
+  /* §240: a hairline separates the header (the collapse/expand area) from the
+     expanded edit area, on EVERY node — the divider Sort already had via its
+     `.organize`. Suppressed on a leading `.organize` so the two don't double up. */
+  .vconfig {
+    border-top: 1px solid var(--divider);
+    padding-top: 6px;
+  }
+  .vconfig > .organize:first-child {
+    border-top: none;
+    margin-top: 0;
+    padding-top: 0;
   }
   /* the value slot is filled by a wired source, not an inline literal (#196) */
   .vwired {
@@ -1099,16 +1135,16 @@
   .vfield.op {
     max-width: 96px;
   }
-  /* promote-in-place: the "make this a parameter" affordance + the promoted card */
+  /* promote-in-place (§240): the affordance is the half-mark glyph, right-aligned
+     under its slot — click to promote — not a dashed button that widens the card. */
   .vpromote {
     display: block;
-    margin: 0 8px 8px;
-    padding: 2px 6px;
-    border: 1px dashed var(--border-strong);
+    margin: 0 8px 6px auto;
+    padding: 2px;
+    border: none;
     background: transparent;
     border-radius: var(--r-sm);
-    font-size: var(--fs-xs);
-    color: var(--text-2);
+    line-height: 0;
     cursor: pointer;
   }
   .vpromote:hover {
@@ -1124,7 +1160,7 @@
   .vparam-head {
     display: flex;
     align-items: center;
-    justify-content: space-between;
+    gap: 5px;
     margin-bottom: 5px;
   }
   .vparam-tag {
@@ -1132,15 +1168,8 @@
     font-weight: 600;
     color: var(--accent);
   }
-  /* #198: the "unbound → inert by default" chip inside the parameter card */
-  .vparam-inert {
-    font-size: var(--fs-xs);
-    font-weight: 600;
-    color: var(--text-3);
-    text-transform: uppercase;
-    letter-spacing: 0.04em;
-  }
   .vparam-unlink {
+    margin-left: auto;
     border: none;
     background: transparent;
     color: var(--text-3);
@@ -1204,16 +1233,37 @@
     color: var(--text-3);
   }
   /* named-handle (group) editor on the View node */
+  /* The output node's group list (§240). No left padding so each group's handle
+     sits at the node's left edge; the row content is indented to clear it + the
+     stripe. A header divider matches the other nodes' expanded configs. */
   .handles {
-    padding: 0 8px 8px;
+    padding: 6px 8px 8px 0;
+    border-top: 1px solid var(--divider);
     display: flex;
     flex-direction: column;
     gap: 5px;
+  }
+  .handles > .add-handle {
+    margin-left: 15px;
   }
   .handle-row {
     display: flex;
     align-items: center;
     gap: 4px;
+  }
+  /* Each group row owns its handle (positioned at the node edge) so the port
+     lines up with the group name — at rest and expanded. */
+  .group-row {
+    position: relative;
+    padding-left: 15px;
+  }
+  .group-name {
+    flex: 1;
+    min-width: 0;
+    font-weight: 600;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
   }
   .handle-row .hname {
     margin: 0;
@@ -1302,19 +1352,36 @@
   .org-empty {
     margin: 0;
   }
-  /* keep the flow-node ports visually distinct + above node content so the
-     whole handle (not just the half sticking out) is grabbable/hoverable. */
+  /* Ports = hollow rings (§240 Claude Design pass): a socket, not a bullet —
+     quiet at rest (surface fill + kind-colored border), filling with the kind
+     color on hover so it announces itself only when you're about to wire. Kept
+     above node content so the whole handle is grabbable. Semantic color moves
+     from fill → border so the hollow reads as a ring. */
   .vnode :global(.port) {
-    width: 10px;
-    height: 10px;
+    width: 11px;
+    height: 11px;
     z-index: 5;
+    box-sizing: border-box;
+    background: var(--surface);
+    border: 1.5px solid var(--accent);
+  }
+  /* a port fills with its kind color both on hover AND while wired (§240) */
+  .vnode :global(.port:hover),
+  .vnode :global(.port.connected) {
     background: var(--accent);
-    border: 1px solid var(--panel);
   }
   .vnode :global(.port.remove) {
+    border-color: var(--danger);
+  }
+  .vnode :global(.port.remove:hover),
+  .vnode :global(.port.remove.connected) {
     background: var(--danger);
   }
   .vnode :global(.port.children) {
+    border-color: var(--k-lore);
+  }
+  .vnode :global(.port.children:hover),
+  .vnode :global(.port.children.connected) {
     background: var(--k-lore);
   }
   /* The value-pipe handles (#196) — the value-operand target socket AND a
@@ -1323,6 +1390,10 @@
      clashed). Must sit AFTER the generic `.vnode :global(.port)` rule above: equal
      specificity, so source order decides — placed earlier it lost to `--accent`. */
   .vnode :global(.port.value) {
+    border-color: var(--k-snippet);
+  }
+  .vnode :global(.port.value:hover),
+  .vnode :global(.port.value.connected) {
     background: var(--k-snippet);
   }
 </style>

@@ -39,6 +39,9 @@ export type DesignerContext = {
   // Whether a node's value slot (#196) is fed by a wired source edge — the node
   // renders the wired state instead of an inline literal / promote control.
   valueWired: (nodeId: string) => boolean;
+  // Whether a specific handle (by id) on a node currently has an edge, so a wired
+  // port stays filled at rest — not only while hovered (§240).
+  handleConnected: (nodeId: string, handleId: string) => boolean;
   tags: string[];
   savedViews: SavedViewOption[];
   // data sources for the hand_picked NodePicker + FieldValueEditor pickers

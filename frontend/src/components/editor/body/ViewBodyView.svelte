@@ -22,7 +22,7 @@
   import ViewGlyph from "./view/ViewGlyph.svelte";
   import ViewNodeList, { type RowCtx } from "@/components/widgets/ViewNodeList.svelte";
   import RowCaret from "@/components/widgets/RowCaret.svelte";
-  import { setDesignerContext, type DesignerContext, type FieldOption } from "./view/designerContext";
+  import { setDesignerContext, type DesignerContext, type FieldOption, type RosterWarning } from "./view/designerContext";
   import { api } from "@/lib/api";
   import { metadataSchemaStore } from "@/lib/stores/schema";
   import { knownTagsStore } from "@/lib/stores/tags";
@@ -51,6 +51,7 @@
     outputPayload,
     valueSlotAccepts,
     inferInputTypes,
+    inputKinds,
     tagAppliesToInput,
     anchorSet,
     PREDICATE_LEAF_KINDS,
@@ -505,6 +506,27 @@
     const anchor = ts.size === 1 ? kindRootEntryTypeId(schema, [...ts.keys()][0]) : null;
     return fieldOptionsFromKeys(intersectFieldKeysOverTypes(schema, fqns), anchor);
   }
+  // The authoring warning ADR-0031 §F asks for (Slice B, #215): when a picker
+  // node's inferred INPUT set is cross-kind, its roster is a degraded intersection,
+  // not the precise single-kind roster. Cross-kind ⇔ the type-set spans a number of
+  // kinds OTHER than exactly one:
+  //  - size > 1 — a genuine multi-kind set (union of kinds, cross-kind ref, Nest);
+  //  - size 0 (a determinate, NON-null empty Map) — a cross-kind INTERSECT that
+  //    collapsed to nothing (`combineTypeSets` drops every kind when the branches
+  //    share none, e.g. `scenes ∩ characters`), the thinnest roster of all and
+  //    exactly the "nothing in common → down to intrinsics" case §F names.
+  // Silent (null) otherwise: `ts === null` (indeterminate → anchor fallback), and
+  // size 1 — a single kind, INCLUDING a same-kind empty intersect (`{scene:∅}`),
+  // which is a distinct impossible-filter diagnostic out of §F's cross-kind scope.
+  // `thin` reuses `fieldsForNode` (the roster the picker actually shows), so for a
+  // cross-kind node the note always agrees with the dropdown.
+  function rosterWarningFor(nodeId: string): RosterWarning | null {
+    const ts = inputTypesForNode(nodeId);
+    if (ts === null || ts.size === 1) return null;
+    const kinds = inputKinds(ts).sort();
+    const thin = !fieldsForNode(nodeId).some((o) => o.def.category !== "intrinsic");
+    return { kinds, thin };
+  }
   // Tags present in this kind's universe (contextual — avoids a separate store).
   let tagOptions = $derived(collectTags(universe));
   // Per-node tag roster (#243 → #215): tags whose scope matches the node's inferred
@@ -541,6 +563,7 @@
       entryTypes: entryTypeOptions,
       fields: fieldOptions,
       fieldsFor: fieldsForNode,
+      rosterWarningFor,
       fieldByKey: (key: string) => schema?.fields?.[key] ?? null,
       valueWired: (nodeId: string) => connectedHandleKeys.has(`${nodeId}:${FILTER_VALUE_HANDLE}`),
       handleConnected: (nodeId: string, handleId: string) => connectedHandleKeys.has(`${nodeId}:${handleId}`),

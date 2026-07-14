@@ -310,6 +310,16 @@ export function inferInputTypes(
   );
 }
 
+// The distinct kinds a node's inferred INPUT type-set spans (ADR-0031 §F). One
+// kind → a precise single-kind roster; MORE than one → the field/tag roster is a
+// cross-kind intersection (a graceful degradation, ADR-0031 §F / Consequences), so
+// the caller can raise the authoring warning §F asks for. Empty when the set is
+// indeterminate (a `null` type-set → the anchor-kind fallback, NOT a cross-kind
+// case). Kept here beside the inference so "how many kinds" has one home.
+export function inputKinds(ts: InputTypeSet | null): string[] {
+  return ts ? [...ts.keys()] : [];
+}
+
 // Whether a scoped tag applies to a node's inferred input type-set (#215) — the
 // predicate behind the designer's per-node tag roster. Offered when the tag's
 // scope kind can appear in the input AND (if the tag narrows to entry_types) the

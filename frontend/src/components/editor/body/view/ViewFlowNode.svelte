@@ -108,6 +108,30 @@
   let filterKind = $derived<PredicateKind>(cfg.filter_kind ?? (hasTypeChoice ? "type" : "tagged"));
   let filterMode = $derived<"keep" | "drop">(cfg.filter_mode ?? "keep");
 
+  // Cross-kind authoring warning (ADR-0031 §F, Slice B / #215). §F is about FIELD
+  // selectors, so this surfaces on the nodes whose picker reads the per-node input
+  // roster (`fieldsFor`): `field_of`, a Filter narrowing on a field, and a Sorter's
+  // "Sort by field" selector. `type`/`descendants_of` read the anchor entryTypes,
+  // not the input roster; a `tagged` picker degrades the TAG roster, whose warning
+  // needs tag-worded copy (a follow-up); a bare `field` leaf has no set input so is
+  // never cross-kind. Reactive on `filterKind`, so it appears/clears as the author
+  // switches a Filter's predicate.
+  let usesInputRoster = $derived(
+    kind === "field_of" || kind === "sorter" || (kind === "filter" && filterKind === "field"),
+  );
+  let rosterWarning = $derived(usesInputRoster ? (ctx.rosterWarningFor?.(id) ?? null) : null);
+  let rosterWarnText = $derived.by(() => {
+    if (!rosterWarning) return "";
+    const { kinds, thin } = rosterWarning;
+    // No named kinds = a cross-kind INTERSECT that collapsed to the empty set (its
+    // branches share no kind) — the thinnest roster; name the phenomenon, not kinds.
+    if (kinds.length === 0) return "Cross-kind intersection with no common kind — only intrinsic fields (title, type) are offered.";
+    const names = kinds.map((k) => k.charAt(0).toUpperCase() + k.slice(1)).join(", ");
+    return thin
+      ? `Cross-kind input (${names}) — no fields shared across these kinds, so only intrinsic fields (title, type) are offered.`
+      : `Cross-kind input (${names}) — the picker offers only fields shared across these kinds.`;
+  });
+
   // --- field predicate helpers (comparator adapts to the field's datatype) ---
   let fieldKey = $derived(cfg.field?.key ?? "");
   let fieldOp = $derived<FieldOp>(cfg.field?.op ?? "overlap");
@@ -810,6 +834,14 @@
   </div>
   {:else if isExpanded}
   <div class="vconfig nodrag" role="presentation" use:stopPointerdown>
+  {#if rosterWarnText}
+    <!-- Cross-kind roster degradation (ADR-0031 §F, Slice B). A WORD, not a glyph:
+         the lexicon has no warning mark and the design language forbids
+         glyph-only-with-tooltip (state hidden behind a hover). `role="note"` (not
+         `alert`) — a persistent authoring advisory, so it must not re-interrupt the
+         screen reader each time the text recomputes on a rewire. -->
+    <p class="vwarn" role="note">{rosterWarnText}</p>
+  {/if}
   {#if kind === "type" || kind === "descendants_of"}
     {@render typeSlot(kind === "descendants_of")}
   {:else if kind === "tagged"}
@@ -1109,6 +1141,18 @@
   .vhint b {
     font-weight: 600;
     color: var(--text-2);
+  }
+  /* Cross-kind roster degradation note (ADR-0031 §F, Slice B). The shared warning
+     role (#125), matching the preview's `.preview-warnings` banner. */
+  .vwarn {
+    margin: 0 8px 8px;
+    padding: 4px 8px;
+    font-size: var(--fs-xs);
+    line-height: 1.35;
+    color: var(--warn);
+    background: var(--warn-soft);
+    border: 1px solid var(--warn-border);
+    border-radius: 4px;
   }
   .vfield,
   .vfield-value,

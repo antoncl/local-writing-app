@@ -9,6 +9,7 @@ import {
   graphToExpr,
   graphToSpec,
   inferInputTypes,
+  inputKinds,
   tagAppliesToInput,
   outputPayload,
   reachesFieldOf,
@@ -1194,5 +1195,65 @@ describe("field-picker type inference (ADR-0031 §F)", () => {
       edge(sink.id, OUTPUT_NODE_ID),
     ];
     expect(infer(nodes, edges, sink.id)).toEqual({ lore: null });
+  });
+
+  // Slice B (#215): `inputKinds` reduces an inferred type-set to the kinds it
+  // spans — the cross-kind (>1) authoring-warning signal (ADR-0031 §F / Consequences).
+  describe("inputKinds — cross-kind warning signal (Slice B)", () => {
+    const kindsOf = (nodes: ViewGraphNode[], edges: ReturnType<typeof edge>[], id: string, anchor = "scene") =>
+      inputKinds(inferInputTypes(byIdOf(nodes), edges, id, anchor, resolvers)).sort();
+
+    it("a single-kind input spans one kind (no warning)", () => {
+      const src = node("type", { type: "scene:scene" }, 0);
+      const sink = node("filter", { filter_kind: "field" }, 100);
+      const nodes = [out(), src, sink];
+      const edges = [edge(src.id, sink.id), edge(sink.id, OUTPUT_NODE_ID)];
+      expect(kindsOf(nodes, edges, sink.id)).toEqual(["scene"]);
+    });
+
+    it("a union of two kinds spans both (cross-kind → warn)", () => {
+      const a = node("type", { type: "scene:scene" }, 0);
+      const b = node("descendants_of", { descendants_of: "lore:character" }, 100);
+      const u = node("union", {}, 200);
+      const sink = node("filter", { filter_kind: "field" }, 300);
+      const nodes = [out(), a, b, u, sink];
+      const edges = [edge(a.id, u.id), edge(b.id, u.id), edge(u.id, sink.id), edge(sink.id, OUTPUT_NODE_ID)];
+      expect(kindsOf(nodes, edges, sink.id)).toEqual(["lore", "scene"]);
+    });
+
+    it("a multi-kind ref `field_of` spans its target kinds (cross-kind → warn)", () => {
+      const src = node("type", { type: "scene:scene" }, 0);
+      const fo = node("field_of", { project_field: "owner" }, 100);
+      const sink = node("filter", { filter_kind: "field" }, 200);
+      const nodes = [out(), src, fo, sink];
+      const edges = [edge(src.id, fo.id), edge(fo.id, sink.id), edge(sink.id, OUTPUT_NODE_ID)];
+      expect(kindsOf(nodes, edges, sink.id)).toEqual(["lore", "scene"]);
+    });
+
+    it("an indeterminate input (scalar field_of → null) spans no kinds (anchor fallback, not cross-kind)", () => {
+      const src = node("type", { type: "scene:scene" }, 0);
+      const fo = node("field_of", { project_field: "status" }, 100);
+      const sink = node("filter", { filter_kind: "field" }, 200);
+      const nodes = [out(), src, fo, sink];
+      const edges = [edge(src.id, fo.id), edge(fo.id, sink.id), edge(sink.id, OUTPUT_NODE_ID)];
+      expect(kindsOf(nodes, edges, sink.id)).toEqual([]);
+    });
+
+    it("an empty cross-kind INTERSECT is determinate (non-null) yet spans no kinds — the thinnest roster, still a cross-kind case", () => {
+      // scene ∩ character = ∅ across kinds → combineTypeSets(intersect) drops every
+      // kind → a size-0 (NON-null) Map. `rosterWarningFor` must treat this as
+      // cross-kind (ts !== null && size !== 1), NOT confuse it with the null
+      // (indeterminate) anchor-fallback case above.
+      const a = node("type", { type: "scene:scene" }, 0);
+      const b = node("descendants_of", { descendants_of: "lore:character" }, 100);
+      const x = node("intersect", {}, 200);
+      const sink = node("filter", { filter_kind: "field" }, 300);
+      const nodes = [out(), a, b, x, sink];
+      const edges = [edge(a.id, x.id), edge(b.id, x.id), edge(x.id, sink.id), edge(sink.id, OUTPUT_NODE_ID)];
+      // Determinate empty set: an empty object from `dump` (a real Map of size 0),
+      // distinct from `null`; `inputKinds` of it is [].
+      expect(infer(nodes, edges, sink.id)).toEqual({});
+      expect(kindsOf(nodes, edges, sink.id)).toEqual([]);
+    });
   });
 });

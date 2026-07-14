@@ -471,9 +471,11 @@
   }
   // Tags present in this kind's universe (contextual — avoids a separate store).
   let tagOptions = $derived(collectTags(universe));
-  // Tag roster for the designer's field-value pickers (#243). A designer Filter is
-  // KIND-level, so surface the anchor kind's tags but drop entry_type sub-scoping —
-  // a kind-level filter can't resolve one entry_type, and that precision is #215.
+  // Tag roster for the designer's field-value pickers (#243). Scoped to the view
+  // ANCHOR kind and unaware of entry_type — the minimal "don't show an empty
+  // picker" fix. The precise per-node roster (match the node's inferred INPUT kind
+  // — like `fieldsFor` — AND its entry_type, the "input pipe") is #215; until then
+  // a cross-kind `field_of` node sees the anchor's tags, not its input kind's.
   // Keep tags whose scope is unset or includes this kind; re-emit them unscoped so
   // the TagPicker (which re-applies scope) shows the whole kind-relevant set.
   let designerKnownTags = $derived(
@@ -482,7 +484,7 @@
         const { kinds } = pickerMembership(t.scope);
         return kinds.length === 0 || kinds.includes(kind);
       })
-      .map((t) => ({ ...t, scope: {} })),
+      .map((t) => ({ ...t, scope: { sources: [] } })),
   );
   function collectTags(nodes: EvalNode[]): string[] {
     const set = new Set<string>();

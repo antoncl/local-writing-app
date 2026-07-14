@@ -118,7 +118,25 @@ export type TypeResolvers = {
   kindOfType: (fqn: string) => string | null;
 };
 
-const anchorSet = (kind: string): InputTypeSet => new Map([[kind, null]]);
+// The whole anchor kind, no entry_type constraint — the fallback sentinel shared
+// by inference and its consumers (ViewBodyView), so the two never drift.
+export const anchorSet = (kind: string): InputTypeSet => new Map([[kind, null]]);
+
+// The type-set a concrete `type`/`descendants_of` slot denotes — the exact type,
+// or (expanded) its seed-inclusive descendant family. Null when the slot is empty
+// or a promoted `{var}` (not a concrete string) → no static type constraint. One
+// helper so a `type`/`descendants_of` LEAF and a keep-Filter on the same predicate
+// stay in lockstep.
+function typeLeafSet(
+  value: ViewLeafValue | undefined,
+  expand: boolean,
+  resolvers: TypeResolvers,
+  anchorKind: string,
+): InputTypeSet | null {
+  if (typeof value !== "string") return null;
+  const k = resolvers.kindOfType(value) ?? anchorKind;
+  return new Map([[k, new Set(expand ? resolvers.descendantsOf(value) : [value])]]);
+}
 
 // Merge input type-sets across branches. `union` keeps everything (union of
 // kinds; per-kind union of fqn sets, an unconstrained `null` dominating) — a null
@@ -188,10 +206,17 @@ function inferOutputTypes(
   // recurses with an INDEPENDENT copy of `seen`: the set guards a single path
   // against cycles, so sharing it across siblings would falsely null a diamond.
   const sourceFor = (handle: string): InputTypeSet | null => {
-    const e = edges.find(
+    // A handle can take MANY edges (nest parents/children union all sources on the
+    // handle when lowering) — union every source, not just the first, else the
+    // inferred set under-approximates and the roster over-offers.
+    const es = edges.filter(
       (e) => e.target === nodeId && e.source !== nodeId && (e.targetHandle ?? DEFAULT_HANDLE_ID) === handle,
     );
-    return e ? inferOutputTypes(byId, edges, e.source, anchorKind, resolvers, new Set(seen)) : anchorSet(anchorKind);
+    if (es.length === 0) return anchorSet(anchorKind);
+    return combineTypeSets(
+      es.map((e) => inferOutputTypes(byId, edges, e.source, anchorKind, resolvers, new Set(seen))),
+      "union",
+    );
   };
   switch (node.kind) {
     case "field_of": {
@@ -207,23 +232,24 @@ function inferOutputTypes(
       // predicates and promoted `{var}` types impose no static type constraint.
       const input = sourceFor(DEFAULT_HANDLE_ID);
       if (!input || (node.data.filter_mode ?? "keep") !== "keep") return input;
-      if (node.data.filter_kind === "type" && typeof node.data.type === "string") {
-        const t = node.data.type;
-        return combineTypeSets([input, new Map([[resolvers.kindOfType(t) ?? anchorKind, new Set([t])]])], "intersect");
-      }
-      if (node.data.filter_kind === "descendants_of" && typeof node.data.descendants_of === "string") {
-        const d = node.data.descendants_of;
-        return combineTypeSets(
-          [input, new Map([[resolvers.kindOfType(d) ?? anchorKind, new Set(resolvers.descendantsOf(d))]])],
-          "intersect",
-        );
-      }
-      return input;
+      const narrow =
+        node.data.filter_kind === "type"
+          ? typeLeafSet(node.data.type, false, resolvers, anchorKind)
+          : node.data.filter_kind === "descendants_of"
+            ? typeLeafSet(node.data.descendants_of, true, resolvers, anchorKind)
+            : null;
+      return narrow ? combineTypeSets([input, narrow], "intersect") : input;
     }
     case "sorter":
     case "highlight":
-    case "complement":
       return sourceFor(DEFAULT_HANDLE_ID);
+    case "complement": {
+      // complement = universe ∖ A (kind-relative): the output holds every OTHER
+      // type of A's kinds, so widen each kind to no entry_type constraint — the
+      // operand's exact types would be exactly wrong here.
+      const input = sourceFor(DEFAULT_HANDLE_ID);
+      return input ? new Map([...input.keys()].map((k) => [k, null])) : null;
+    }
     case "difference":
       return sourceFor("keep");
     case "nest":
@@ -236,16 +262,15 @@ function inferOutputTypes(
         .map((e) => inferOutputTypes(byId, edges, e.source, anchorKind, resolvers, new Set(seen)));
       return combineTypeSets(branches, node.kind === "union" ? "union" : "intersect");
     }
-    default: {
+    default:
       // Leaves. `type`/`descendants_of` carry a concrete entry_type constraint (a
-      // promoted `{var}` leaf is a string-less param → whole kind); all / tagged /
-      // hand_picked / view_ref / self draw from the whole anchor kind.
-      const t = typeof node.data.type === "string" ? node.data.type : null;
-      if (t) return new Map([[resolvers.kindOfType(t) ?? anchorKind, new Set([t])]]);
-      const d = typeof node.data.descendants_of === "string" ? node.data.descendants_of : null;
-      if (d) return new Map([[resolvers.kindOfType(d) ?? anchorKind, new Set(resolvers.descendantsOf(d))]]);
-      return anchorSet(anchorKind);
-    }
+      // promoted `{var}` leaf → whole kind); all / tagged / hand_picked / view_ref
+      // / self draw from the whole anchor kind.
+      return (
+        typeLeafSet(node.data.type, false, resolvers, anchorKind) ??
+        typeLeafSet(node.data.descendants_of, true, resolvers, anchorKind) ??
+        anchorSet(anchorKind)
+      );
   }
 }
 
@@ -273,10 +298,15 @@ export function inferInputTypes(
       : node.kind === "difference"
         ? "keep"
         : DEFAULT_HANDLE_ID;
-  const e = edges.find(
+  const es = edges.filter(
     (e) => e.target === nodeId && e.source !== nodeId && (e.targetHandle ?? DEFAULT_HANDLE_ID) === inHandle,
   );
-  return e ? inferOutputTypes(byId, edges, e.source, anchorKind, resolvers, new Set()) : anchorSet(anchorKind);
+  if (es.length === 0) return anchorSet(anchorKind);
+  // Union all sources on the handle (a nest parents/children handle takes many).
+  return combineTypeSets(
+    es.map((e) => inferOutputTypes(byId, edges, e.source, anchorKind, resolvers, new Set())),
+    "union",
+  );
 }
 
 // What a Filter/field value slot authored on `fieldKey` accepts as a wired source

@@ -14,6 +14,7 @@ import {
   specToGraph,
   valueSlotAccepts,
   FILTER_VALUE_HANDLE,
+  NEST_CHILDREN_HANDLE,
   OUTPUT_NODE_ID,
   type ConnectionVerdict,
   type InputTypeSet,
@@ -1078,6 +1079,57 @@ describe("field-picker type inference (ADR-0031 §F)", () => {
     const nodes = [out(), all, drop, sink];
     const edges = [edge(all.id, drop.id), edge(drop.id, sink.id), edge(sink.id, OUTPUT_NODE_ID)];
     expect(infer(nodes, edges, sink.id, "lore")).toEqual({ lore: null });
+  });
+
+  it("complement widens to the whole kind (universe ∖ A ≠ A's types)", () => {
+    // All(lore) → keep-Filter type=character → complement → sink. The complement
+    // holds all lore EXCEPT characters, so the sink must see the whole lore kind,
+    // not `{lore:character}`.
+    const all = node("all", {}, 0);
+    const tf = node("filter", { filter_kind: "type", filter_mode: "keep", type: "lore:character" }, 100);
+    const comp = node("complement", {}, 200);
+    const sink = node("filter", { filter_kind: "field" }, 300);
+    const nodes = [out(), all, tf, comp, sink];
+    const edges = [edge(all.id, tf.id), edge(tf.id, comp.id), edge(comp.id, sink.id), edge(sink.id, OUTPUT_NODE_ID)];
+    expect(infer(nodes, edges, sink.id, "lore")).toEqual({ lore: null });
+  });
+
+  it("a nest handle unions ALL its inbound sources, not just the first", () => {
+    // Two type leaves wired into a nest's children handle → the join-field picker
+    // must see BOTH types (lowering unions them), not only the first edge's type.
+    const l1 = node("type", { type: "scene:action" }, 0);
+    const l2 = node("type", { type: "scene:sequel" }, 100);
+    const nest = node("nest", { match: { field: "parent", direction: "child_to_parent", by: "ref" } }, 200);
+    const nodes = [out(), l1, l2, nest];
+    const edges = [
+      edge(l1.id, nest.id, NEST_CHILDREN_HANDLE),
+      edge(l2.id, nest.id, NEST_CHILDREN_HANDLE),
+      edge(nest.id, OUTPUT_NODE_ID),
+    ];
+    expect(infer(nodes, edges, nest.id)).toEqual({ scene: ["scene:action", "scene:sequel"] });
+  });
+
+  it("a provably-empty intersect (disjoint types) yields an empty type-set, not the anchor kind", () => {
+    // All(lore)→keep character  ∩  All(lore)→keep location  = ∅ (empty Map, NOT null).
+    const a = node("all", {}, 0);
+    const fa = node("filter", { filter_kind: "type", filter_mode: "keep", type: "lore:character" }, 100);
+    const b = node("all", {}, 200);
+    const fb = node("filter", { filter_kind: "type", filter_mode: "keep", type: "lore:location" }, 300);
+    const x = node("intersect", {}, 400);
+    const sink = node("filter", { filter_kind: "field" }, 500);
+    const nodes = [out(), a, fa, b, fb, x, sink];
+    const edges = [
+      edge(a.id, fa.id),
+      edge(fa.id, x.id),
+      edge(b.id, fb.id),
+      edge(fb.id, x.id),
+      edge(x.id, sink.id),
+      edge(sink.id, OUTPUT_NODE_ID),
+    ];
+    // The kind is kept but with an empty concrete-type set — `concreteTypesOf`
+    // then yields no fqns, so the roster becomes intrinsics-only (not the anchor
+    // union). Distinct from `null` (indeterminate → anchor fallback).
+    expect(infer(nodes, edges, sink.id, "lore")).toEqual({ lore: [] });
   });
 
   it("an unwired node falls back to the whole anchor kind", () => {

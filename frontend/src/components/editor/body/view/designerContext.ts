@@ -17,6 +17,12 @@ import type {
 export type EntryTypeOption = { fqn: string; name: string };
 export type FieldOption = { key: string; name: string; def: MetadataFieldDefinition };
 export type SavedViewOption = { id: string; title: string };
+// The authoring warning ADR-0031 §F asks for: a picker node whose inferred INPUT
+// set spans MORE than one kind offers a cross-kind field/tag roster (a degraded
+// intersection, not a precise single-kind roster). `kinds` = the spanned kinds;
+// `thin` = the intersection collapsed to intrinsics only (nothing shared). Null
+// from `rosterWarningFor` = single-kind or indeterminate → nothing to flag.
+export type RosterWarning = { kinds: string[]; thin: boolean };
 
 export type DesignerContext = {
   // node mutation, wired back to the shell's bound Svelte Flow arrays
@@ -36,6 +42,10 @@ export type DesignerContext = {
   // `field_of` offers the projected kind's fields, not the view anchor's.
   fields: FieldOption[];
   fieldsFor: (nodeId: string) => FieldOption[];
+  // The cross-kind authoring warning for a node's picker roster (ADR-0031 §F), or
+  // null when the input is single-kind / indeterminate. Read by picker nodes to
+  // surface a worded note so a degraded roster is never silent.
+  rosterWarningFor: (nodeId: string) => RosterWarning | null;
   fieldByKey: (key: string) => MetadataFieldDefinition | null;
   // Whether a node's value slot (#196) is fed by a wired source edge — the node
   // renders the wired state instead of an inline literal / promote control.

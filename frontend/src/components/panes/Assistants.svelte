@@ -11,7 +11,6 @@
   import { assistantTagsOf } from "@/lib/chat/assistantScope";
   import {
     defaultView,
-    evaluateView,
     isBareDescendantsOf,
     kindUniverseExpr,
   } from "@/lib/views/evaluateView";
@@ -49,12 +48,17 @@
 
   // Every NodeList is backed by a view (ADR-0022), and the view is authoritative
   // for its own shape (ADR-0037 §3): the per-layer buckets come from the spec's
-  // `group_by: source_layer` level, never synthesized here.
-  $: viewResult = evaluateView(viewSpec, entries, {
+  // `group_by: source_layer` level, never synthesized here. Hand the whole view to
+  // ViewNodeList, which owns evaluation + the parameter strip (ADR-0032 §D) — so a
+  // parameterized assistant view now gets its strip here too, not only in Lore. A
+  // roster pane with no anchor, so no `$self` is supplied.
+  $: view = {
+    spec: viewSpec,
+    universe: entries,
     schema,
     resolveView: paneViews.resolveView,
     referenceIndex: $referenceIndexStore,
-  });
+  };
   // Drag-reorder is manual order, meaningful only on the default SHAPE (ADR-0037
   // §7 — re-keyed off the retired `presentation === null`): the WHOLE roster,
   // manual sort, the single per-layer group_by level, no named handles. Anything
@@ -97,9 +101,11 @@
   let dropTarget: { id: string; position: "before" | "after" } | null = null;
 
   // All members of a layer, in the roster's manual order — the reorder onDrop
-  // recomputes the new order from this (viewResult.nodes carries manual order).
+  // recomputes the new order from this. Reads the raw `entries` (not the evaluated
+  // result, now owned by ViewNodeList): reorder is gated on `canReorder` =
+  // whole-roster, so the view's membership equals `entries` whenever this is used.
   function layerEntries(layerId: string): AssistantEntrySummary[] {
-    return viewResult.nodes.filter((entry) => (entry.source_layer_id ?? "") === layerId);
+    return entries.filter((entry) => (entry.source_layer_id ?? "") === layerId);
   }
 
   function startDrag(event: DragEvent, entry: AssistantEntrySummary) {
@@ -177,7 +183,7 @@
 </script>
 
 <ViewNodeList
-  result={viewResult}
+  {view}
   active={(entry) => focusedDocument?.type === "assistant" && focusedDocument.id === entry.id}
   onClick={(entry) => onOpenEntry(entry.id)}
   row={assistantRow}

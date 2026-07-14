@@ -73,6 +73,58 @@ export function kindRootEntryTypeId(
   return null;
 }
 
+// --- entry_type-set field intersection (ADR-0031 §F) --------------------------
+// The field roster a view node's picker offers is the fields present on EVERY
+// member of its input set — a set-intersection over the concrete entry_types the
+// input can contain (#215). This is group-aware by construction: each type's
+// `fields` is its full inherited + group-applied list, so intersecting them keeps
+// both vertically-inherited fields (a subtype family collapses to its base) AND
+// horizontally-shared field-groups (unrelated types that apply the same group),
+// while type-specific fields drop out. NOT a base-type/common-ancestor shortcut,
+// which would be vertical-only and silently lose shared groups.
+
+// All concrete (instantiable) entry_type FQNs of a kind — abstract types have no
+// members, so they never constrain the intersection.
+export function kindEntryTypeFqns(schema: MetadataSchema | null, kind: string): string[] {
+  return Object.entries(schema?.entry_types ?? {})
+    .filter(([, def]) => def.kind === kind && !def.abstract)
+    .map(([id]) => id);
+}
+
+// An entry_type FQN plus every concrete descendant (seed-inclusive), matching the
+// `descendants_of` leaf's family semantics. Walks the parent chain downward.
+export function descendantTypeFqns(schema: MetadataSchema | null, root: string): string[] {
+  const entryTypes = schema?.entry_types ?? {};
+  const out: string[] = [];
+  const seen = new Set<string>();
+  const walk = (fqn: string) => {
+    if (seen.has(fqn)) return;
+    seen.add(fqn);
+    const def = entryTypes[fqn];
+    if (def && !def.abstract) out.push(fqn);
+    for (const [id, d] of Object.entries(entryTypes)) if (d.parent === fqn) walk(id);
+  };
+  walk(root);
+  return out;
+}
+
+// The set-intersection of `fields` across a set of entry_type FQNs — the fields
+// on every member. Empty input (no types) → empty set (a caller signals "fall
+// back to the kind roster" separately). A single type → exactly its fields.
+export function intersectFieldKeysOverTypes(schema: MetadataSchema | null, fqns: string[]): Set<string> {
+  const entryTypes = schema?.entry_types ?? {};
+  let acc: Set<string> | null = null;
+  for (const fqn of fqns) {
+    const fields = new Set(entryTypes[fqn]?.fields ?? []);
+    if (acc === null) {
+      acc = fields;
+    } else {
+      for (const k of [...acc]) if (!fields.has(k)) acc.delete(k);
+    }
+  }
+  return acc ?? new Set<string>();
+}
+
 // Slugify a free-text label into a stable field/type id.
 export function slugifyFieldId(value: string): string {
   return value

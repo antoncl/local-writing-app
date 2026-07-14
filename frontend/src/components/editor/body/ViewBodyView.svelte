@@ -29,7 +29,14 @@
   import { referenceIndexStore } from "@/lib/stores/references";
   import { paneViews } from "@/lib/stores/paneViews.svelte";
   import { evaluateView, nestWarnings, type EvalNode } from "@/lib/views/evaluateView";
-  import { effectiveFieldLabel, effectiveFieldHidden, kindRootEntryTypeId } from "@/lib/utils/schemaTypeHelpers";
+  import {
+    effectiveFieldLabel,
+    effectiveFieldHidden,
+    kindRootEntryTypeId,
+    kindEntryTypeFqns,
+    descendantTypeFqns,
+    intersectFieldKeysOverTypes,
+  } from "@/lib/utils/schemaTypeHelpers";
   import { pickerMembership } from "@/lib/utils/pickerSources";
   import { structureToEvalNodes } from "@/lib/views/structureNodes";
   import {
@@ -43,14 +50,17 @@
     reachesFieldOf,
     outputPayload,
     valueSlotAccepts,
-    inferInputKind,
+    inferInputTypes,
     PREDICATE_LEAF_KINDS,
     FILTER_VALUE_HANDLE,
     OUTPUT_NODE_ID,
     type GraphNodeKind,
     type ViewGraph,
     type ViewGraphNode,
+    type ViewGraphEdge,
     type ViewNodeData,
+    type InputTypeSet,
+    type TypeResolvers,
   } from "@/lib/views/viewGraph";
   import type {
     AssistantEntrySummary,
@@ -58,6 +68,7 @@
     LoreEntrySummary,
     MetadataFieldDefinition,
     PromptEntrySummary,
+    ScopedTag,
     StructureDocument,
     ViewLayout,
     ViewNode,
@@ -447,45 +458,90 @@
     });
     return out;
   }
-  // Authoring-time kind inference (ADR-0031 §F): the kind of a node's INPUT set,
-  // driving which field roster its picker offers. `refTargetKind` resolves a
-  // reference field's single target kind from its picker config (multi-kind →
-  // null → anchor fallback).
+  // Authoring-time TYPE inference (ADR-0031 §F): the entry_type-set of a node's
+  // INPUT set, driving which field roster AND tag roster its picker offers.
   const fieldType = (key: string) => schema?.fields?.[key]?.type ?? null;
-  function refTargetKind(fieldKey: string): string | null {
-    const def = schema?.fields?.[fieldKey];
-    if (!def) return null;
-    const kinds = pickerMembership(def.picker_config).kinds;
-    return kinds.length === 1 ? kinds[0] : null;
-  }
-  function inputKindForNode(nodeId: string): string | null {
+  const typeResolvers: TypeResolvers = {
+    fieldType,
+    // A ref field's target as a type-set: kind → its entry_type FQNs (empty →
+    // whole kind, no entry_type constraint). Multi-kind refs are kept, not nulled
+    // — the roster intersects across them (§14.3).
+    refTargetTypes: (fieldKey) => {
+      const def = schema?.fields?.[fieldKey];
+      if (!def) return null;
+      const { kinds, entryTypes } = pickerMembership(def.picker_config);
+      if (kinds.length === 0) return null;
+      return new Map(kinds.map((k) => [k, entryTypes[k]?.length ? new Set(entryTypes[k]) : null]));
+    },
+    descendantsOf: (fqn) => descendantTypeFqns(schema, fqn),
+    kindOfType: (fqn) => schema?.entry_types?.[fqn]?.kind ?? fqn.split(":")[0] ?? null,
+  };
+  function graphForInference(): { byId: Map<string, ViewGraphNode>; edges: ViewGraphEdge[] } {
     const byId = new Map<string, ViewGraphNode>(
       flowNodes.map((n) => [n.id, { id: n.id, kind: n.data.kind, position: n.position, data: n.data.cfg ?? {} }]),
     );
     const edges = flowEdges.map((e) => ({ id: e.id, source: e.source, target: e.target, targetHandle: e.targetHandle ?? null }));
-    return inferInputKind(byId, edges, nodeId, kind, refTargetKind, fieldType);
+    return { byId, edges };
+  }
+  function inputTypesForNode(nodeId: string): InputTypeSet | null {
+    const { byId, edges } = graphForInference();
+    return inferInputTypes(byId, edges, nodeId, kind, typeResolvers);
+  }
+  // Expand an inferred input type-set to the concrete entry_type FQNs it can hold
+  // (a `null` per-kind constraint → every concrete type of that kind).
+  function concreteTypesOf(ts: InputTypeSet): string[] {
+    const out: string[] = [];
+    for (const [k, set] of ts) out.push(...(set ? [...set] : kindEntryTypeFqns(schema, k)));
+    return out;
   }
   function fieldsForNode(nodeId: string): { key: string; name: string; def: MetadataFieldDefinition }[] {
-    const k = inputKindForNode(nodeId);
-    return (k ? fieldOptionsByKind.get(k) : null) ?? fieldOptionsByKind.get(kind) ?? fieldOptions;
+    const ts = inputTypesForNode(nodeId);
+    if (!ts) return fieldOptions; // indeterminate → anchor roster
+    const fqns = concreteTypesOf(ts);
+    if (fqns.length === 0) return fieldOptions;
+    // §F: the fields present on EVERY member — a group-aware set-intersection over
+    // the input's concrete types (vertical inheritance AND shared field-groups).
+    const keys = intersectFieldKeysOverTypes(schema, fqns);
+    // Per-type label/hidden overrides resolve against the kind ROOT for a single-
+    // kind set; a cross-kind set has no single root → resolve against the bare def.
+    const anchor = ts.size === 1 ? kindRootEntryTypeId(schema, [...ts.keys()][0]) : null;
+    const out: { key: string; name: string; def: MetadataFieldDefinition }[] = [];
+    for (const k of keys) {
+      const def = schema?.fields?.[k];
+      if (!def || effectiveFieldHidden(schema, anchor, k)) continue;
+      out.push({ key: k, name: effectiveFieldLabel(schema, anchor, k), def });
+    }
+    out.sort((a, b) => {
+      const ai = a.def.category === "intrinsic";
+      const bi = b.def.category === "intrinsic";
+      if (ai !== bi) return ai ? -1 : 1;
+      return a.name.localeCompare(b.name);
+    });
+    return out;
   }
   // Tags present in this kind's universe (contextual — avoids a separate store).
   let tagOptions = $derived(collectTags(universe));
-  // Tag roster for the designer's field-value pickers (#243). Scoped to the view
-  // ANCHOR kind and unaware of entry_type — the minimal "don't show an empty
-  // picker" fix. The precise per-node roster (match the node's inferred INPUT kind
-  // — like `fieldsFor` — AND its entry_type, the "input pipe") is #215; until then
-  // a cross-kind `field_of` node sees the anchor's tags, not its input kind's.
-  // Keep tags whose scope is unset or includes this kind; re-emit them unscoped so
-  // the TagPicker (which re-applies scope) shows the whole kind-relevant set.
-  let designerKnownTags = $derived(
-    $knownTagsStore
+  // Per-node tag roster (#243 → #215): tags whose scope matches the node's inferred
+  // INPUT type-set — kind AND (when the tag narrows to entry_types) type, the
+  // "input pipe". Re-emitted unscoped so the TagPicker shows the whole matched set;
+  // an indeterminate input falls back to the anchor kind.
+  function knownTagsFor(nodeId: string): ScopedTag[] {
+    const ts: InputTypeSet = inputTypesForNode(nodeId) ?? new Map([[kind, null]]);
+    return $knownTagsStore
       .filter((t) => {
-        const { kinds } = pickerMembership(t.scope);
-        return kinds.length === 0 || kinds.includes(kind);
+        const { kinds, entryTypes } = pickerMembership(t.scope);
+        if (kinds.length === 0) return true; // unscoped tag → always offered
+        return kinds.some((k) => {
+          if (!ts.has(k)) return false;
+          const inputTypes = ts.get(k)!;
+          const tagTypes = entryTypes[k];
+          if (!tagTypes || tagTypes.length === 0) return true; // tag = whole kind
+          if (inputTypes == null) return true; // input = whole kind → overlaps
+          return tagTypes.some((et) => inputTypes.has(et));
+        });
       })
-      .map((t) => ({ ...t, scope: { sources: [] } })),
-  );
+      .map((t) => ({ ...t, scope: { sources: [] } }));
+  }
   function collectTags(nodes: EvalNode[]): string[] {
     const set = new Set<string>();
     for (const n of nodes) {
@@ -514,7 +570,7 @@
       valueWired: (nodeId: string) => connectedHandleKeys.has(`${nodeId}:${FILTER_VALUE_HANDLE}`),
       handleConnected: (nodeId: string, handleId: string) => connectedHandleKeys.has(`${nodeId}:${handleId}`),
       tags: tagOptions,
-      knownTags: designerKnownTags,
+      knownTagsFor,
       savedViews,
       loreEntries,
       promptEntries,

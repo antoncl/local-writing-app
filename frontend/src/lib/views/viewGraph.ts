@@ -96,48 +96,130 @@ export function outputPayload(
   return "node-set";
 }
 
-// --- authoring-time kind inference for the field pickers (ADR-0031 §F) --------
+// --- authoring-time TYPE inference for the field pickers (ADR-0031 §F) --------
 
-// Static, single-hop output-KIND inference (the kind-level increment of §F; the
-// full per-member entry_type intersection is deferred). Returns the kind of the
-// node-set a node emits, or null when that set is indeterminate — a value-set
-// (scalar `field_of`), an any-kind `references` projection, or a mixed-kind
-// set-op — so callers fall back to the view's anchor-kind roster. `field_of` is
-// the only remap: its `of` is never another `field_of` (the connection validator
-// blocks that), so one hop resolves it. A nest self-loop is guarded by `seen`.
-function inferOutputKind(
+// The static type of a node's input set: for each kind it can contain, the set
+// of concrete entry_type FQNs possible, or `null` = any type of that kind (no
+// entry_type constraint). Multi-kind maps arise from cross-kind refs, set-ops and
+// Nest (the parent/child tree is heterogeneous). A `null` RETURN (not a null
+// value) = indeterminate → the caller falls back to the anchor-kind roster.
+export type InputTypeSet = Map<string, Set<string> | null>;
+
+// Schema-derived resolvers the pure inference needs — bundled as one cohesive
+// oracle rather than a fistful of positional callbacks (a value object for a
+// cohesive concept, not parameter-stuffing).
+export type TypeResolvers = {
+  fieldType: (key: string) => string | null;
+  // A ref field's target as a type-set (multi-kind allowed); null if unknown.
+  refTargetTypes: (fieldKey: string) => InputTypeSet | null;
+  // A type FQN's concrete descendant family (seed-inclusive), for `descendants_of`.
+  descendantsOf: (fqn: string) => string[];
+  // The kind a type FQN belongs to.
+  kindOfType: (fqn: string) => string | null;
+};
+
+const anchorSet = (kind: string): InputTypeSet => new Map([[kind, null]]);
+
+// Merge input type-sets across branches. `union` keeps everything (union of
+// kinds; per-kind union of fqn sets, an unconstrained `null` dominating) — a null
+// BRANCH means an unknown kind, so the whole union is indeterminate. `intersect`
+// keeps only kinds present in every branch, intersecting their fqn sets (a `null`
+// side imposes no constraint, so it yields to the other); a null branch is
+// ignored (it bounds nothing), and all-null → indeterminate.
+function combineTypeSets(branches: (InputTypeSet | null)[], mode: "union" | "intersect"): InputTypeSet | null {
+  if (branches.length === 0) return null;
+  if (mode === "union") {
+    if (branches.some((b) => b == null)) return null;
+    const out: InputTypeSet = new Map();
+    for (const b of branches as InputTypeSet[]) {
+      for (const [k, set] of b) {
+        if (!out.has(k)) out.set(k, set == null ? null : new Set(set));
+        else {
+          const cur = out.get(k)!;
+          if (cur == null || set == null) out.set(k, null);
+          else for (const fqn of set) cur.add(fqn);
+        }
+      }
+    }
+    return out;
+  }
+  // intersect
+  const present = branches.filter((b): b is InputTypeSet => b != null);
+  if (present.length === 0) return null;
+  let acc: InputTypeSet | null = null;
+  for (const b of present) {
+    if (acc === null) {
+      acc = new Map([...b].map(([k, s]) => [k, s == null ? null : new Set(s)]));
+      continue;
+    }
+    const next: InputTypeSet = new Map();
+    for (const [k, accSet] of acc) {
+      if (!b.has(k)) continue; // kind not in every branch → drop
+      const bSet = b.get(k)!;
+      if (accSet == null) next.set(k, bSet == null ? null : new Set(bSet));
+      else if (bSet == null) next.set(k, new Set(accSet));
+      else next.set(k, new Set([...accSet].filter((fqn) => bSet.has(fqn))));
+    }
+    acc = next;
+  }
+  return acc;
+}
+
+// Static, single-hop output-TYPE inference (ADR-0031 §F): the entry_type-set of
+// the node-set a node emits, or null when indeterminate — a value-set (scalar
+// `field_of`), an any-kind `references` projection, or an unbounded branch — so
+// callers fall back to the anchor-kind roster. `field_of` remaps to its ref
+// target's types; leaves carry their own type constraint (`type`/`descendants_of`)
+// or the whole anchor kind. A nest self-loop is guarded by `seen`.
+function inferOutputTypes(
   byId: Map<string, ViewGraphNode>,
   edges: ViewGraphEdge[],
   nodeId: string,
   anchorKind: string,
-  refTargetKind: (fieldKey: string) => string | null,
-  fieldType: (key: string) => string | null,
+  resolvers: TypeResolvers,
   seen: Set<string>,
-): string | null {
+): InputTypeSet | null {
   if (seen.has(nodeId)) return null;
   const node = byId.get(nodeId);
   if (!node) return null;
   seen.add(nodeId);
-  // The upstream feeding a named input handle → its output kind (anchor when
-  // unwired). Self-loop edges (nest recursion) are skipped. Each branch recurses
-  // with an INDEPENDENT copy of `seen`: the set only guards a single path against
-  // cycles, so sharing it across sibling branches would falsely null out a diamond
-  // (a shared ancestor visited by the first branch, rejected by the second).
-  const sourceFor = (handle: string): string | null => {
+  // The upstream feeding a named input handle → its output type-set (whole anchor
+  // when unwired). Self-loop edges (nest recursion) are skipped. Each branch
+  // recurses with an INDEPENDENT copy of `seen`: the set guards a single path
+  // against cycles, so sharing it across siblings would falsely null a diamond.
+  const sourceFor = (handle: string): InputTypeSet | null => {
     const e = edges.find(
       (e) => e.target === nodeId && e.source !== nodeId && (e.targetHandle ?? DEFAULT_HANDLE_ID) === handle,
     );
-    return e ? inferOutputKind(byId, edges, e.source, anchorKind, refTargetKind, fieldType, new Set(seen)) : anchorKind;
+    return e ? inferOutputTypes(byId, edges, e.source, anchorKind, resolvers, new Set(seen)) : anchorSet(anchorKind);
   };
   switch (node.kind) {
     case "field_of": {
       const f = node.data.project_field;
-      if (!f) return anchorKind; // unconfigured → treat as passthrough
+      if (!f) return anchorSet(anchorKind); // unconfigured → treat as passthrough
       if (f === REFERENCES_FIELD) return null; // any-kind backlinks
-      if (isNodeSetField(f, fieldType)) return refTargetKind(f); // ref → target kind
+      if (isNodeSetField(f, resolvers.fieldType)) return resolvers.refTargetTypes(f); // ref → target types
       return null; // scalar → value-set (no node kind)
     }
-    case "filter":
+    case "filter": {
+      // A keep-Filter on a concrete `type`/`descendants_of` predicate NARROWS the
+      // downstream set to that type family (intersect); drop-mode, tag/field
+      // predicates and promoted `{var}` types impose no static type constraint.
+      const input = sourceFor(DEFAULT_HANDLE_ID);
+      if (!input || (node.data.filter_mode ?? "keep") !== "keep") return input;
+      if (node.data.filter_kind === "type" && typeof node.data.type === "string") {
+        const t = node.data.type;
+        return combineTypeSets([input, new Map([[resolvers.kindOfType(t) ?? anchorKind, new Set([t])]])], "intersect");
+      }
+      if (node.data.filter_kind === "descendants_of" && typeof node.data.descendants_of === "string") {
+        const d = node.data.descendants_of;
+        return combineTypeSets(
+          [input, new Map([[resolvers.kindOfType(d) ?? anchorKind, new Set(resolvers.descendantsOf(d))]])],
+          "intersect",
+        );
+      }
+      return input;
+    }
     case "sorter":
     case "highlight":
     case "complement":
@@ -145,38 +227,42 @@ function inferOutputKind(
     case "difference":
       return sourceFor("keep");
     case "nest":
-      return sourceFor(NEST_CHILDREN_HANDLE) ?? sourceFor(NEST_PARENTS_HANDLE);
+      // The denormalized tree holds BOTH sides → a heterogeneous (union) set.
+      return combineTypeSets([sourceFor(NEST_CHILDREN_HANDLE), sourceFor(NEST_PARENTS_HANDLE)], "union");
     case "union":
     case "intersect": {
-      const kinds = new Set(
-        edges
-          .filter((e) => e.target === nodeId && e.source !== nodeId)
-          .map((e) => inferOutputKind(byId, edges, e.source, anchorKind, refTargetKind, fieldType, new Set(seen))),
-      );
-      return kinds.size === 1 ? [...kinds][0] : null; // mixed / empty → indeterminate
+      const branches = edges
+        .filter((e) => e.target === nodeId && e.source !== nodeId)
+        .map((e) => inferOutputTypes(byId, edges, e.source, anchorKind, resolvers, new Set(seen)));
+      return combineTypeSets(branches, node.kind === "union" ? "union" : "intersect");
     }
-    default:
-      // sources: all / type / descendants_of / tagged / hand_picked / view_ref /
-      // self all draw from the anchor-kind roster.
-      return anchorKind;
+    default: {
+      // Leaves. `type`/`descendants_of` carry a concrete entry_type constraint (a
+      // promoted `{var}` leaf is a string-less param → whole kind); all / tagged /
+      // hand_picked / view_ref / self draw from the whole anchor kind.
+      const t = typeof node.data.type === "string" ? node.data.type : null;
+      if (t) return new Map([[resolvers.kindOfType(t) ?? anchorKind, new Set([t])]]);
+      const d = typeof node.data.descendants_of === "string" ? node.data.descendants_of : null;
+      if (d) return new Map([[resolvers.kindOfType(d) ?? anchorKind, new Set(resolvers.descendantsOf(d))]]);
+      return anchorSet(anchorKind);
+    }
   }
 }
 
-// The kind whose field roster a node's picker should offer: the kind of the
-// node's INPUT set (what it filters / sorts / projects from / joins on). Null
-// when indeterminate → the caller falls back to the anchor kind. Closes ADR-0031
-// §F's "field selectors derive from the input set, not the view anchor" gap at
-// kind granularity; the full entry_type intersection is deferred.
-export function inferInputKind(
+// The entry_type-set whose field roster a node's picker should offer: the type of
+// the node's INPUT set (what it filters / sorts / projects from / joins on). Null
+// → the caller falls back to the anchor kind. Realizes ADR-0031 §F ("field
+// selectors = the intersection of fields over the input set"): the roster builder
+// intersects `fields` over these concrete types.
+export function inferInputTypes(
   byId: Map<string, ViewGraphNode>,
   edges: ViewGraphEdge[],
   nodeId: string,
   anchorKind: string,
-  refTargetKind: (fieldKey: string) => string | null,
-  fieldType: (key: string) => string | null,
-): string | null {
+  resolvers: TypeResolvers,
+): InputTypeSet | null {
   const node = byId.get(nodeId);
-  if (!node) return anchorKind;
+  if (!node) return anchorSet(anchorKind);
   // For a Nest the join field lives on whichever side HOLDS the link: the child
   // for `child_to_parent`, the parent for `parent_to_children`.
   const inHandle =
@@ -190,7 +276,7 @@ export function inferInputKind(
   const e = edges.find(
     (e) => e.target === nodeId && e.source !== nodeId && (e.targetHandle ?? DEFAULT_HANDLE_ID) === inHandle,
   );
-  return e ? inferOutputKind(byId, edges, e.source, anchorKind, refTargetKind, fieldType, new Set()) : anchorKind;
+  return e ? inferOutputTypes(byId, edges, e.source, anchorKind, resolvers, new Set()) : anchorSet(anchorKind);
 }
 
 // What a Filter/field value slot authored on `fieldKey` accepts as a wired source

@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import type { ViewExpr } from "@/lib/types";
+import type { NodePickerConfig, ViewExpr } from "@/lib/types";
 import { defaultView } from "./evaluateView";
 import {
   classifyConnection,
@@ -8,14 +8,18 @@ import {
   exprToGraph,
   graphToExpr,
   graphToSpec,
-  inferInputKind,
+  inferInputTypes,
+  tagAppliesToInput,
   outputPayload,
   reachesFieldOf,
   specToGraph,
   valueSlotAccepts,
   FILTER_VALUE_HANDLE,
+  NEST_CHILDREN_HANDLE,
   OUTPUT_NODE_ID,
   type ConnectionVerdict,
+  type InputTypeSet,
+  type TypeResolvers,
   type ViewGraph,
   type ViewGraphNode,
 } from "./viewGraph";
@@ -963,38 +967,72 @@ describe("promote-in-place params — leaf slots (ADR-0038 §C, #222)", () => {
   });
 });
 
-describe("field-picker kind inference (ADR-0031 §F, kind-level)", () => {
-  // pov = entity_ref → lore; characters = entity_ref_list → lore; status = scalar.
+describe("field-picker type inference (ADR-0031 §F)", () => {
+  // pov = entity_ref → lore; characters = entity_ref_list → lore; owner = a
+  // multi-kind ref (lore + scene); status = scalar.
   const fieldType = (k: string): string | null =>
-    ({ pov: "entity_ref", characters: "entity_ref_list", status: "select" })[k] ?? null;
-  const refTargetKind = (k: string): string | null => (k === "pov" || k === "characters" ? "lore" : null);
+    ({ pov: "entity_ref", characters: "entity_ref_list", owner: "entity_ref", status: "select" })[k] ?? null;
+  const resolvers: TypeResolvers = {
+    fieldType,
+    refTargetTypes: (k) =>
+      k === "pov" || k === "characters"
+        ? new Map([["lore", null]])
+        : k === "owner"
+          ? new Map([
+              ["lore", null],
+              ["scene", null],
+            ])
+          : null,
+    descendantsOf: (fqn) => (fqn === "lore:character" ? ["lore:character", "lore:protagonist"] : [fqn]),
+    kindOfType: (fqn) => fqn.split(":")[0] ?? null,
+  };
   const byIdOf = (nodes: ViewGraphNode[]) => new Map(nodes.map((n) => [n.id, n]));
+  // Normalize a type-set to a comparable plain object (sorted fqns, or null).
+  const dump = (ts: InputTypeSet | null) =>
+    ts === null ? null : Object.fromEntries([...ts].map(([k, s]) => [k, s === null ? null : [...s].sort()]));
+  const infer = (nodes: ViewGraphNode[], edges: ReturnType<typeof edge>[], id: string, anchor = "scene") =>
+    dump(inferInputTypes(byIdOf(nodes), edges, id, anchor, resolvers));
 
-  it("a node over a plain leaf infers the anchor kind", () => {
+  it("a Filter over a `type` leaf infers that exact entry_type", () => {
     const src = node("type", { type: "scene:scene" }, 0);
     const filter = node("filter", { filter_kind: "field" }, 100);
     const nodes = [out(), src, filter];
     const edges = [edge(src.id, filter.id), edge(filter.id, OUTPUT_NODE_ID)];
-    expect(inferInputKind(byIdOf(nodes), edges, filter.id, "scene", refTargetKind, fieldType)).toBe("scene");
+    expect(infer(nodes, edges, filter.id)).toEqual({ scene: ["scene:scene"] });
+  });
+
+  it("a `descendants_of` leaf infers the whole subtype family (seed-inclusive)", () => {
+    const src = node("descendants_of", { descendants_of: "lore:character" }, 0);
+    const filter = node("filter", { filter_kind: "field" }, 100);
+    const nodes = [out(), src, filter];
+    const edges = [edge(src.id, filter.id), edge(filter.id, OUTPUT_NODE_ID)];
+    expect(infer(nodes, edges, filter.id, "lore")).toEqual({ lore: ["lore:character", "lore:protagonist"] });
   });
 
   it("a node downstream of a ref `field_of` infers the ref field's target kind (the §F remap)", () => {
-    // scene → field_of(pov: entity_ref → lore) → filter: the filter's fields come
-    // from `lore`, not the `scene` anchor.
     const src = node("type", { type: "scene:scene" }, 0);
     const fo = node("field_of", { project_field: "pov" }, 100);
     const filter = node("filter", { filter_kind: "field" }, 200);
     const nodes = [out(), src, fo, filter];
     const edges = [edge(src.id, fo.id), edge(fo.id, filter.id), edge(filter.id, OUTPUT_NODE_ID)];
-    expect(inferInputKind(byIdOf(nodes), edges, filter.id, "scene", refTargetKind, fieldType)).toBe("lore");
+    expect(infer(nodes, edges, filter.id)).toEqual({ lore: null });
   });
 
-  it("a `field_of`'s own project-field picker sees its INPUT kind, not its output", () => {
+  it("a multi-kind ref `field_of` yields a cross-kind set (§14.3), not a null fallback", () => {
+    const src = node("type", { type: "scene:scene" }, 0);
+    const fo = node("field_of", { project_field: "owner" }, 100);
+    const filter = node("filter", { filter_kind: "field" }, 200);
+    const nodes = [out(), src, fo, filter];
+    const edges = [edge(src.id, fo.id), edge(fo.id, filter.id), edge(filter.id, OUTPUT_NODE_ID)];
+    expect(infer(nodes, edges, filter.id)).toEqual({ lore: null, scene: null });
+  });
+
+  it("a `field_of`'s own project-field picker sees its INPUT type, not its output", () => {
     const src = node("type", { type: "scene:scene" }, 0);
     const fo = node("field_of", { project_field: "pov" }, 100);
     const nodes = [out(), src, fo];
     const edges = [edge(src.id, fo.id), edge(fo.id, OUTPUT_NODE_ID)];
-    expect(inferInputKind(byIdOf(nodes), edges, fo.id, "scene", refTargetKind, fieldType)).toBe("scene");
+    expect(infer(nodes, edges, fo.id)).toEqual({ scene: ["scene:scene"] });
   });
 
   it("downstream of a SCALAR `field_of` (value-set) → indeterminate (null → anchor fallback)", () => {
@@ -1003,7 +1041,7 @@ describe("field-picker kind inference (ADR-0031 §F, kind-level)", () => {
     const filter = node("filter", { filter_kind: "field" }, 200);
     const nodes = [out(), src, fo, filter];
     const edges = [edge(src.id, fo.id), edge(fo.id, filter.id), edge(filter.id, OUTPUT_NODE_ID)];
-    expect(inferInputKind(byIdOf(nodes), edges, filter.id, "scene", refTargetKind, fieldType)).toBeNull();
+    expect(infer(nodes, edges, filter.id)).toBeNull();
   });
 
   it("downstream of a `references` (any-kind) `field_of` → indeterminate", () => {
@@ -1012,29 +1050,133 @@ describe("field-picker kind inference (ADR-0031 §F, kind-level)", () => {
     const filter = node("filter", { filter_kind: "field" }, 200);
     const nodes = [out(), src, fo, filter];
     const edges = [edge(src.id, fo.id), edge(fo.id, filter.id), edge(filter.id, OUTPUT_NODE_ID)];
-    expect(inferInputKind(byIdOf(nodes), edges, filter.id, "scene", refTargetKind, fieldType)).toBeNull();
+    expect(infer(nodes, edges, filter.id)).toBeNull();
   });
 
-  it("a Filter preserves its input kind through the remap (filter over ref field_of over lore)", () => {
-    // A Filter is a passthrough, so a second node past it still sees `lore`.
+  it("a Filter/Sorter preserves its input type through the remap", () => {
     const src = node("type", { type: "scene:scene" }, 0);
     const fo = node("field_of", { project_field: "characters" }, 100);
     const f1 = node("filter", { filter_kind: "tagged" }, 200);
     const f2 = node("sorter", { sort: { by: "field" } }, 300);
     const nodes = [out(), src, fo, f1, f2];
     const edges = [edge(src.id, fo.id), edge(fo.id, f1.id), edge(f1.id, f2.id), edge(f2.id, OUTPUT_NODE_ID)];
-    expect(inferInputKind(byIdOf(nodes), edges, f2.id, "scene", refTargetKind, fieldType)).toBe("lore");
+    expect(infer(nodes, edges, f2.id)).toEqual({ lore: null });
   });
 
-  it("an unwired node falls back to the anchor kind", () => {
+  it("a keep-Filter on a `type` predicate narrows the downstream type-set", () => {
+    // All(lore) → Filter(keep type=character) → sink: the sink sees character only.
+    const all = node("all", {}, 0);
+    const tf = node("filter", { filter_kind: "type", filter_mode: "keep", type: "lore:character" }, 100);
+    const sink = node("filter", { filter_kind: "field" }, 200);
+    const nodes = [out(), all, tf, sink];
+    const edges = [edge(all.id, tf.id), edge(tf.id, sink.id), edge(sink.id, OUTPUT_NODE_ID)];
+    expect(infer(nodes, edges, sink.id, "lore")).toEqual({ lore: ["lore:character"] });
+  });
+
+  it("a drop-Filter and a promoted-`{var}` type Filter impose no type narrowing (passthrough)", () => {
+    const all = node("all", {}, 0);
+    const drop = node("filter", { filter_kind: "type", filter_mode: "drop", type: "lore:character" }, 100);
+    const sink = node("filter", { filter_kind: "field" }, 200);
+    const nodes = [out(), all, drop, sink];
+    const edges = [edge(all.id, drop.id), edge(drop.id, sink.id), edge(sink.id, OUTPUT_NODE_ID)];
+    expect(infer(nodes, edges, sink.id, "lore")).toEqual({ lore: null });
+  });
+
+  it("complement widens to the whole kind (universe ∖ A ≠ A's types)", () => {
+    // All(lore) → keep-Filter type=character → complement → sink. The complement
+    // holds all lore EXCEPT characters, so the sink must see the whole lore kind,
+    // not `{lore:character}`.
+    const all = node("all", {}, 0);
+    const tf = node("filter", { filter_kind: "type", filter_mode: "keep", type: "lore:character" }, 100);
+    const comp = node("complement", {}, 200);
+    const sink = node("filter", { filter_kind: "field" }, 300);
+    const nodes = [out(), all, tf, comp, sink];
+    const edges = [edge(all.id, tf.id), edge(tf.id, comp.id), edge(comp.id, sink.id), edge(sink.id, OUTPUT_NODE_ID)];
+    expect(infer(nodes, edges, sink.id, "lore")).toEqual({ lore: null });
+  });
+
+  it("a nest handle unions ALL its inbound sources, not just the first", () => {
+    // Two type leaves wired into a nest's children handle → the join-field picker
+    // must see BOTH types (lowering unions them), not only the first edge's type.
+    const l1 = node("type", { type: "scene:action" }, 0);
+    const l2 = node("type", { type: "scene:sequel" }, 100);
+    const nest = node("nest", { match: { field: "parent", direction: "child_to_parent", by: "ref" } }, 200);
+    const nodes = [out(), l1, l2, nest];
+    const edges = [
+      edge(l1.id, nest.id, NEST_CHILDREN_HANDLE),
+      edge(l2.id, nest.id, NEST_CHILDREN_HANDLE),
+      edge(nest.id, OUTPUT_NODE_ID),
+    ];
+    expect(infer(nodes, edges, nest.id)).toEqual({ scene: ["scene:action", "scene:sequel"] });
+  });
+
+  it("a provably-empty intersect (disjoint types) yields an empty type-set, not the anchor kind", () => {
+    // All(lore)→keep character  ∩  All(lore)→keep location  = ∅ (empty Map, NOT null).
+    const a = node("all", {}, 0);
+    const fa = node("filter", { filter_kind: "type", filter_mode: "keep", type: "lore:character" }, 100);
+    const b = node("all", {}, 200);
+    const fb = node("filter", { filter_kind: "type", filter_mode: "keep", type: "lore:location" }, 300);
+    const x = node("intersect", {}, 400);
+    const sink = node("filter", { filter_kind: "field" }, 500);
+    const nodes = [out(), a, fa, b, fb, x, sink];
+    const edges = [
+      edge(a.id, fa.id),
+      edge(fa.id, x.id),
+      edge(b.id, fb.id),
+      edge(fb.id, x.id),
+      edge(x.id, sink.id),
+      edge(sink.id, OUTPUT_NODE_ID),
+    ];
+    // The kind is kept but with an empty concrete-type set — `concreteTypesOf`
+    // then yields no fqns, so the roster becomes intrinsics-only (not the anchor
+    // union). Distinct from `null` (indeterminate → anchor fallback).
+    expect(infer(nodes, edges, sink.id, "lore")).toEqual({ lore: [] });
+  });
+
+  it("an unwired node falls back to the whole anchor kind", () => {
     const filter = node("filter", { filter_kind: "field" }, 0);
-    expect(inferInputKind(byIdOf([out(), filter]), [], filter.id, "scene", refTargetKind, fieldType)).toBe("scene");
+    expect(infer([out(), filter], [], filter.id)).toEqual({ scene: null });
+  });
+
+  it("a union of two kinds yields a cross-kind set", () => {
+    const a = node("type", { type: "scene:scene" }, 0);
+    const b = node("descendants_of", { descendants_of: "lore:character" }, 100);
+    const u = node("union", {}, 200);
+    const sink = node("filter", { filter_kind: "field" }, 300);
+    const nodes = [out(), a, b, u, sink];
+    const edges = [edge(a.id, u.id), edge(b.id, u.id), edge(u.id, sink.id), edge(sink.id, OUTPUT_NODE_ID)];
+    expect(infer(nodes, edges, sink.id)).toEqual({
+      scene: ["scene:scene"],
+      lore: ["lore:character", "lore:protagonist"],
+    });
+  });
+
+  it("a base-type-scoped tag reaches a concrete-subtype input; a leaf tag does not cross types", () => {
+    const descendantsOf = (fqn: string): string[] =>
+      fqn === "lore:base"
+        ? ["lore:base", "lore:character", "lore:location"]
+        : fqn === "lore:character"
+          ? ["lore:character", "lore:protagonist"]
+          : [fqn];
+    const scope = (sources: NodePickerConfig["sources"]): NodePickerConfig => ({ sources });
+    const typeScope = (k: string, fqn?: string): NodePickerConfig =>
+      scope([fqn ? { kind: k, expr: { type: fqn } } : { kind: k }]);
+    const applies = (sc: NodePickerConfig, ts: InputTypeSet) => tagAppliesToInput(sc, ts, descendantsOf);
+    const charInput: InputTypeSet = new Map([["lore", new Set(["lore:character"])]]);
+    const locInput: InputTypeSet = new Map([["lore", new Set(["lore:location"])]]);
+
+    expect(applies(scope([]), charInput)).toBe(true); // unscoped → anywhere
+    expect(applies(typeScope("lore", "lore:base"), charInput)).toBe(true); // base → subtype (the pattern)
+    expect(applies(typeScope("lore", "lore:character"), charInput)).toBe(true); // own type
+    expect(applies(typeScope("lore", "lore:character"), locInput)).toBe(false); // disjoint leaf types
+    expect(applies(typeScope("lore"), locInput)).toBe(true); // kind-scoped → any type
+    expect(applies(typeScope("lore", "lore:character"), new Map([["lore", null]]))).toBe(true); // whole-kind input
+    expect(applies(typeScope("scene", "scene:scene"), new Map([["lore", null]]))).toBe(false); // other kind
   });
 
   it("a diamond over a ref `field_of` still remaps (independent `seen` per branch)", () => {
     // scene → field_of(pov→lore) fans into filterA + filterB → union → sink.
-    // The shared field_of ancestor must be resolved on BOTH branches; a shared
-    // `seen` set would null the second one → `{lore, null}` → wrong anchor fallback.
+    // A shared `seen` set would null the second branch → wrong anchor fallback.
     const src = node("type", { type: "scene:scene" }, 0);
     const fo = node("field_of", { project_field: "pov" }, 100);
     const fa = node("filter", { filter_kind: "tagged" }, 200);
@@ -1051,6 +1193,6 @@ describe("field-picker kind inference (ADR-0031 §F, kind-level)", () => {
       edge(u.id, sink.id),
       edge(sink.id, OUTPUT_NODE_ID),
     ];
-    expect(inferInputKind(byIdOf(nodes), edges, sink.id, "scene", refTargetKind, fieldType)).toBe("lore");
+    expect(infer(nodes, edges, sink.id)).toEqual({ lore: null });
   });
 });

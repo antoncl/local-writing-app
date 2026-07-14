@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import type { ViewExpr } from "@/lib/types";
+import type { NodePickerConfig, ViewExpr } from "@/lib/types";
 import { defaultView } from "./evaluateView";
 import {
   classifyConnection,
@@ -9,6 +9,7 @@ import {
   graphToExpr,
   graphToSpec,
   inferInputTypes,
+  tagAppliesToInput,
   outputPayload,
   reachesFieldOf,
   specToGraph,
@@ -1148,6 +1149,29 @@ describe("field-picker type inference (ADR-0031 §F)", () => {
       scene: ["scene:scene"],
       lore: ["lore:character", "lore:protagonist"],
     });
+  });
+
+  it("a base-type-scoped tag reaches a concrete-subtype input; a leaf tag does not cross types", () => {
+    const descendantsOf = (fqn: string): string[] =>
+      fqn === "lore:base"
+        ? ["lore:base", "lore:character", "lore:location"]
+        : fqn === "lore:character"
+          ? ["lore:character", "lore:protagonist"]
+          : [fqn];
+    const scope = (sources: NodePickerConfig["sources"]): NodePickerConfig => ({ sources });
+    const typeScope = (k: string, fqn?: string): NodePickerConfig =>
+      scope([fqn ? { kind: k, expr: { type: fqn } } : { kind: k }]);
+    const applies = (sc: NodePickerConfig, ts: InputTypeSet) => tagAppliesToInput(sc, ts, descendantsOf);
+    const charInput: InputTypeSet = new Map([["lore", new Set(["lore:character"])]]);
+    const locInput: InputTypeSet = new Map([["lore", new Set(["lore:location"])]]);
+
+    expect(applies(scope([]), charInput)).toBe(true); // unscoped → anywhere
+    expect(applies(typeScope("lore", "lore:base"), charInput)).toBe(true); // base → subtype (the pattern)
+    expect(applies(typeScope("lore", "lore:character"), charInput)).toBe(true); // own type
+    expect(applies(typeScope("lore", "lore:character"), locInput)).toBe(false); // disjoint leaf types
+    expect(applies(typeScope("lore"), locInput)).toBe(true); // kind-scoped → any type
+    expect(applies(typeScope("lore", "lore:character"), new Map([["lore", null]]))).toBe(true); // whole-kind input
+    expect(applies(typeScope("scene", "scene:scene"), new Map([["lore", null]]))).toBe(false); // other kind
   });
 
   it("a diamond over a ref `field_of` still remaps (independent `seen` per branch)", () => {

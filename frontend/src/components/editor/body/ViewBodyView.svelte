@@ -51,6 +51,7 @@
     outputPayload,
     valueSlotAccepts,
     inferInputTypes,
+    tagAppliesToInput,
     anchorSet,
     PREDICATE_LEAF_KINDS,
     FILTER_VALUE_HANDLE,
@@ -513,18 +514,7 @@
   function knownTagsFor(nodeId: string): ScopedTag[] {
     const ts: InputTypeSet = inputTypesForNode(nodeId) ?? anchorSet(kind);
     return $knownTagsStore
-      .filter((t) => {
-        const { kinds, entryTypes } = pickerMembership(t.scope);
-        if (kinds.length === 0) return true; // unscoped tag → always offered
-        return kinds.some((k) => {
-          if (!ts.has(k)) return false;
-          const inputTypes = ts.get(k)!;
-          const tagTypes = entryTypes[k];
-          if (!tagTypes || tagTypes.length === 0) return true; // tag = whole kind
-          if (inputTypes == null) return true; // input = whole kind → overlaps
-          return tagTypes.some((et) => inputTypes.has(et));
-        });
-      })
+      .filter((t) => tagAppliesToInput(t.scope, ts, typeResolvers.descendantsOf))
       .map((t) => ({ ...t, scope: { sources: [] } }));
   }
   function collectTags(nodes: EvalNode[]): string[] {

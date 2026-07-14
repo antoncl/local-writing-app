@@ -26,8 +26,9 @@
 // (nothing wired). The sentinels let filters-off-`All` and set ops fold to the
 // minimal shipped `expr` without a universe leaf in the grammar.
 
-import type { MetadataSchema, ViewExpr, ViewFieldOf, ViewFieldPredicate, ViewGroupByLevel, ViewGroupSpec, ViewLeafValue, ViewNestMatch, ViewNestOp, ViewOperand, ViewParam, ViewSort, ViewSpec } from "@/lib/types";
+import type { MetadataSchema, NodePickerConfig, ViewExpr, ViewFieldOf, ViewFieldPredicate, ViewGroupByLevel, ViewGroupSpec, ViewLeafValue, ViewNestMatch, ViewNestOp, ViewOperand, ViewParam, ViewSort, ViewSpec } from "@/lib/types";
 import { kindUniverseExpr, REFERENCES_FIELD, SELF_VAR } from "@/lib/views/evaluateView";
+import { pickerMembership } from "@/lib/utils/pickerSources";
 
 export type LeafKind = "type" | "descendants_of" | "tagged" | "field" | "hand_picked" | "view_ref";
 export type CombinatorKind = "union" | "intersect" | "difference" | "complement";
@@ -307,6 +308,30 @@ export function inferInputTypes(
     es.map((e) => inferOutputTypes(byId, edges, e.source, anchorKind, resolvers, new Set())),
     "union",
   );
+}
+
+// Whether a scoped tag applies to a node's inferred input type-set (#215) — the
+// predicate behind the designer's per-node tag roster. Offered when the tag's
+// scope kind can appear in the input AND (if the tag narrows to entry_types) the
+// input can hold a type WITHIN that scope's descendant family. The descendant
+// closure is the load-bearing bit: a tag assigned to a BASE type (the intended
+// "applies to every subtype" pattern) reaches all its subtypes, mirroring how the
+// field roster expands a `descendants_of` family. Unscoped tag → offered anywhere.
+export function tagAppliesToInput(
+  scope: NodePickerConfig,
+  ts: InputTypeSet,
+  descendantsOf: (fqn: string) => string[],
+): boolean {
+  const { kinds, entryTypes } = pickerMembership(scope);
+  if (kinds.length === 0) return true;
+  return kinds.some((k) => {
+    if (!ts.has(k)) return false;
+    const inputTypes = ts.get(k)!;
+    const tagTypes = entryTypes[k];
+    if (!tagTypes || tagTypes.length === 0) return true; // tag = whole kind
+    if (inputTypes == null) return true; // input = whole kind → overlaps
+    return tagTypes.some((et) => descendantsOf(et).some((d) => inputTypes.has(d)));
+  });
 }
 
 // What a Filter/field value slot authored on `fieldKey` accepts as a wired source

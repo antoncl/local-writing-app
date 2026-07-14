@@ -545,6 +545,7 @@
       promptEntries={ctx.promptEntries}
       structure={ctx.structure}
       researchStructure={ctx.researchStructure}
+      knownTags={ctx.knownTags}
       {ariaLabel}
     />
   {/if}

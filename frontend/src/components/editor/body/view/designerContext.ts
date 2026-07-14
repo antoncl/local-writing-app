@@ -10,6 +10,7 @@ import type {
   LoreEntrySummary,
   MetadataFieldDefinition,
   PromptEntrySummary,
+  ScopedTag,
   StructureDocument,
 } from "@/lib/types";
 
@@ -42,7 +43,11 @@ export type DesignerContext = {
   // Whether a specific handle (by id) on a node currently has an edge, so a wired
   // port stays filled at rest — not only while hovered (§240).
   handleConnected: (nodeId: string, handleId: string) => boolean;
+  // `tags` = flat tag strings present in this kind's universe (feeds the `tagged`
+  // leaf `<select>`). `knownTags` = the project's scoped roster (feeds the
+  // FieldValueEditor → TagPicker "+" for `tags`-type field values, #243).
   tags: string[];
+  knownTags: ScopedTag[];
   savedViews: SavedViewOption[];
   // data sources for the hand_picked NodePicker + FieldValueEditor pickers
   loreEntries: LoreEntrySummary[];

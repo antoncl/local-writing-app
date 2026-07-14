@@ -25,6 +25,7 @@
   import { setDesignerContext, type DesignerContext } from "./view/designerContext";
   import { api } from "@/lib/api";
   import { metadataSchemaStore } from "@/lib/stores/schema";
+  import { knownTagsStore } from "@/lib/stores/tags";
   import { referenceIndexStore } from "@/lib/stores/references";
   import { paneViews } from "@/lib/stores/paneViews.svelte";
   import { evaluateView, nestWarnings, type EvalNode } from "@/lib/views/evaluateView";
@@ -470,6 +471,21 @@
   }
   // Tags present in this kind's universe (contextual — avoids a separate store).
   let tagOptions = $derived(collectTags(universe));
+  // Tag roster for the designer's field-value pickers (#243). Scoped to the view
+  // ANCHOR kind and unaware of entry_type — the minimal "don't show an empty
+  // picker" fix. The precise per-node roster (match the node's inferred INPUT kind
+  // — like `fieldsFor` — AND its entry_type, the "input pipe") is #215; until then
+  // a cross-kind `field_of` node sees the anchor's tags, not its input kind's.
+  // Keep tags whose scope is unset or includes this kind; re-emit them unscoped so
+  // the TagPicker (which re-applies scope) shows the whole kind-relevant set.
+  let designerKnownTags = $derived(
+    $knownTagsStore
+      .filter((t) => {
+        const { kinds } = pickerMembership(t.scope);
+        return kinds.length === 0 || kinds.includes(kind);
+      })
+      .map((t) => ({ ...t, scope: { sources: [] } })),
+  );
   function collectTags(nodes: EvalNode[]): string[] {
     const set = new Set<string>();
     for (const n of nodes) {
@@ -498,6 +514,7 @@
       valueWired: (nodeId: string) => connectedHandleKeys.has(`${nodeId}:${FILTER_VALUE_HANDLE}`),
       handleConnected: (nodeId: string, handleId: string) => connectedHandleKeys.has(`${nodeId}:${handleId}`),
       tags: tagOptions,
+      knownTags: designerKnownTags,
       savedViews,
       loreEntries,
       promptEntries,

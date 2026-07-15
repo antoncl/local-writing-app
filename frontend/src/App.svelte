@@ -131,6 +131,7 @@
   // The Lore pane owns its own add-menu (a ViewNodeList feature, #112 4c-iv); this
   // ref lets the pane-header "+ Entry" button drive it.
   let loreRef = $state<{ toggleAddMenu: (event?: MouseEvent) => void; isAddMenuOpen: () => boolean }>();
+  let promptsRef = $state<{ toggleAddMenu: (event?: MouseEvent) => void; isAddMenuOpen: () => boolean }>();
   let activeParentId: string | undefined = undefined;
   let draftTitleByScene = $state(new Map<string, string>());
   // The schema-authoring surface (state, the entry-type→kind→tree cascade, and
@@ -549,6 +550,7 @@
   // its own shape (ADR-0037 §3), so no presentation flows alongside the spec.
   let loreViewSpec = $derived(paneViews.specFor("lore", metadataSchema));
   let assistantViewSpec = $derived(paneViews.specFor("assistant", metadataSchema));
+  let promptViewSpec = $derived(paneViews.specFor("prompt", metadataSchema));
   // Draft/Research tree evaluation now lives inside StructureTree (#112): it
   // derives one ViewResult from `structure` + the pane's viewSpec, replacing the
   // App-side double-eval (color annotations + membership pruning) that stood here.
@@ -619,7 +621,7 @@
       outline: { title: "Draft", body: outlineBody, actions: outlineActions },
       lore: { title: "Lore", body: loreBody, actions: loreActions },
       research: { title: "Research", body: researchBody },
-      prompts: { title: "Prompts", body: promptsBody, closable: true, onClose: closeRegion("prompts") },
+      prompts: { title: "Prompts", body: promptsBody, actions: promptsActions, closable: true, onClose: closeRegion("prompts") },
       mutations: { title: "Reusable mutations", body: mutationsBody, actions: mutationsActions, closable: true, onClose: closeRegion("mutations") },
       assistants: { title: "Assistants", body: assistantsBody, actions: assistantsActions, closable: true, onClose: closeRegion("assistants") },
       chats: { title: "Chats", body: chatsBody, actions: chatsActions, closable: true, onClose: closeRegion("chats") },
@@ -714,10 +716,28 @@
     </div>
   {/snippet}
 
+  {#snippet promptsActions()}
+    <!-- The add-menu popover is owned by Prompts' ViewNodeList (mirrors Lore); this
+         header button just drives its imperative handles. -->
+    <div class="tree-menu-anchor">
+      <button
+        class="pin-button"
+        type="button"
+        title="Add prompt"
+        aria-label="Add prompt"
+        class:active={promptsRef?.isAddMenuOpen() ?? false}
+        onmousedown={(event) => event.stopPropagation()}
+        onclick={(event) => promptsRef?.toggleAddMenu(event)}
+      >+</button>
+    </div>
+  {/snippet}
   {#snippet promptsBody()}
     <div class="pane-content schema-list">
       <Prompts
-        entries={promptEntries}        onOpenEntry={(id) => editorPanes.openPrompt(id)}
+        bind:this={promptsRef}
+        entries={promptEntries}
+        viewSpec={promptViewSpec}
+        onOpenEntry={(id) => editorPanes.openPrompt(id)}
         onNewEntry={(entryType) => treeActions.newPromptEntry(entryType)}
       />
     </div>

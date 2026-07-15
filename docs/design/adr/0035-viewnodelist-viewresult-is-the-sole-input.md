@@ -13,6 +13,15 @@
   groups/paths), ADR-0031 §D (node-set vs value-set edge payloads — scoped in Decision below)
 - Governed by: `memory/decisions_view_render_pipeline_ownership.md`
 
+> **Terminology — "wrapper" = `ViewNodeList`.** Throughout this ADR (and its
+> siblings, ADR-0032 §D in particular) "the wrapper" / "the list-render wrapper"
+> denotes exactly **`ViewNodeList`** — the component named in the Feature line and
+> the subject of the Decision. There is no separate or additional wrapper layer:
+> the param strip, the bindings env (incl. `$self`), and re-evaluation all live
+> **inside `ViewNodeList`** (its `view` mode), not in a per-pane shim. When a
+> passage says "the pane hands the wrapper one `ViewResult`," read "the pane hands
+> `ViewNodeList` one `ViewResult`."
+
 ## Context
 #181 unified the evaluator's normalizers so `evaluateView` returns **one tree-uniform
 `ViewResult<T>`** (`nodes` membership · `annotations` per-node color · `groups` tree-or-`null` ·

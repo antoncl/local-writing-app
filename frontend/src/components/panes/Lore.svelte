@@ -58,16 +58,16 @@
   // synthesized here. The pane hands the whole view (spec + roster + data env) to
   // ViewNodeList, which owns evaluation, the parameter strip, and the bindings —
   // centralized (ADR-0032 §D), not per-pane. Lore is a roster pane with no anchor,
-  // so no `$self` is supplied. `paramData.loreEntries` feeds any reference/tag
-  // parameter control's picker; `referenceIndex` backs the `references` field so a
-  // view can project backlinks (`field_of(set, references)`) and compose them.
+  // so no `$self` is supplied. The param strip's pickers source their node universe
+  // from the stores inside ViewNodeList (#257), so the pane threads no roster data;
+  // `referenceIndex` backs the `references` field so a view can project backlinks
+  // (`field_of(set, references)`) and compose them.
   $: view = {
     spec: viewSpec,
     universe: entries,
     schema,
     resolveView: paneViews.resolveView,
     referenceIndex: $referenceIndexStore,
-    paramData: { loreEntries: entries },
   };
 
   function entrySearchText(entry: LoreEntrySummary) {

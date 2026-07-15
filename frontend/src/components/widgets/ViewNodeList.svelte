@@ -1,13 +1,6 @@
 <script module lang="ts">
   import type { EvalNode } from "@/lib/views/evaluateView";
-  import type {
-    LoreEntrySummary,
-    MetadataSchema,
-    PromptEntrySummary,
-    ScopedTag,
-    StructureDocument,
-    ViewSpec,
-  } from "@/lib/types";
+  import type { MetadataSchema, ViewSpec } from "@/lib/types";
 
   // The view-driven input (ADR-0032 §D / ADR-0035). Instead of a pre-resolved
   // `result`, a consumer hands ViewNodeList the view to evaluate + its data
@@ -25,15 +18,10 @@
     // null in a roster pane with no anchor: `$self` then resolves to the empty
     // set, so a `$self` view only functions where there is an anchor.
     anchorId?: string | null;
-    // Data sources for reference/tag parameter controls (FieldValueEditor). Pass
-    // what the pane has; scalar controls (text/select/number/boolean) need none.
-    paramData?: {
-      loreEntries?: LoreEntrySummary[];
-      promptEntries?: PromptEntrySummary[];
-      structure?: StructureDocument | null;
-      researchStructure?: StructureDocument | null;
-      knownTags?: ScopedTag[];
-    };
+    // (No roster data here.) The param strip's reference/tag pickers source the
+    // full node universe from the global stores directly (see the store imports
+    // above) — a pane doesn't thread it, because a param can reference ANY kind,
+    // not the pane's own (#257).
   };
 
   // The context handed to a consumer's `row` snippet for one REAL node (leaf OR
@@ -136,6 +124,17 @@
   import { evaluateView, filterGroups, SELF_VAR, type EvalBindings, type ViewGroup, type ViewResult } from "@/lib/views/evaluateView";
   import { leafGroup, nodeSet } from "@/lib/views/viewResult";
   import { buildBindings, effectiveParamValue, resolveParamControls } from "@/lib/views/viewParams";
+  // The param strip's reference/tag pickers draw the WHOLE node universe — any
+  // kind/type a `references` field can hold (Anton). That universe is the global
+  // per-project stores, read directly here (the #14-Step-2 pattern the schema /
+  // reference-index reads already use), NOT threaded per-pane — a pane can't know
+  // which kind a param references, and threading one roster (lore) starved the
+  // picker of every other kind (#257). NodePicker/ReferencePicker resolve assistants
+  // from their own store.
+  import { loreEntriesStore } from "@/lib/stores/lore";
+  import { promptEntriesStore } from "@/lib/stores/prompts";
+  import { structureStore, researchStructureStore } from "@/lib/stores/structure";
+  import { knownTagsStore } from "@/lib/stores/tags";
   import type { MetadataValue } from "@/lib/types";
 
   let {
@@ -463,11 +462,11 @@
             value={paramDisplayValue(control.name)}
             onChange={(v) => setParam(control.name, v)}
             ariaLabel={control.label}
-            loreEntries={view?.paramData?.loreEntries ?? []}
-            promptEntries={view?.paramData?.promptEntries ?? []}
-            structure={view?.paramData?.structure ?? null}
-            researchStructure={view?.paramData?.researchStructure ?? null}
-            knownTags={view?.paramData?.knownTags ?? []}
+            loreEntries={$loreEntriesStore}
+            promptEntries={$promptEntriesStore}
+            structure={$structureStore}
+            researchStructure={$researchStructureStore}
+            knownTags={$knownTagsStore}
           />
         </div>
         {#if control.name in paramOverrides}

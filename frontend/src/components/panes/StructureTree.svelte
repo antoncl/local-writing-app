@@ -59,7 +59,7 @@
   import NodeList from "@/components/widgets/NodeList.svelte";
   import GroupCaret from "@/components/widgets/GroupCaret.svelte";
   import CountPill from "@/components/widgets/CountPill.svelte";
-  import ViewNodeList, { type RowCtx } from "@/components/widgets/ViewNodeList.svelte";
+  import ViewNodeList, { type RowCtx, type ViewInput } from "@/components/widgets/ViewNodeList.svelte";
   import { getSwatch } from "@/lib/utils/colors";
   import {
     entryTypeChoicesByKind,
@@ -71,7 +71,7 @@
     updateNodeTitleInTree,
   } from "@/lib/utils/treeHelpers";
   import { structureToEvalNodes } from "@/lib/views/structureNodes";
-  import { evaluateView, type EvalNode } from "@/lib/views/evaluateView";
+  import type { EvalNode } from "@/lib/views/evaluateView";
   import type { ViewSpec } from "@/lib/types";
   import { paneViews } from "@/lib/stores/paneViews.svelte";
   import { CollapseState } from "@/lib/stores/collapseState.svelte";
@@ -113,18 +113,22 @@
   const focusedDocument = $derived($focusedDocumentStore);
   const referenceIndex = $derived($referenceIndexStore);
 
-  // One evaluation feeds the whole render: tree shape (the containment Nest over
-  // each node's `parent` ref, ADR-0037 §4), membership pruning, and color
-  // annotations — replacing the App-side double-eval this migration deleted
-  // (#112). The tree is the view's own shape; the Draft/Research panes only ever
-  // tint, never re-shape (ADR-0022).
-  const result = $derived(
-    evaluateView(viewSpec, structureToEvalNodes(structure), {
-      schema,
-      resolveView: paneViews.resolveView,
-      referenceIndex,
-    }),
-  );
+  // The whole render is driven by ONE view (ADR-0035): tree shape (the containment
+  // Nest over each node's `parent` ref, ADR-0037 §4), membership pruning, and color
+  // annotations. We hand ViewNodeList the spec + data environment (`view` mode,
+  // ADR-0032 §D) rather than a pre-evaluated `result`, so the wrapper owns
+  // evaluation, the parameter strip, and the bindings env — the same surface Lore
+  // and Assistants use (#199). The tree is the view's own shape; the Draft/Research
+  // panes only ever tint, never re-shape (ADR-0022). Anchor-less roster/tree panes,
+  // so no `$self`; the param strip's pickers source their node universe from stores
+  // inside ViewNodeList (#257), so no roster is threaded here.
+  const view = $derived<ViewInput<EvalNode>>({
+    spec: viewSpec,
+    universe: structureToEvalNodes(structure),
+    schema,
+    resolveView: paneViews.resolveView,
+    referenceIndex,
+  });
 
   // Per-view collapse persistence (ADR-0036). The controller's set is bound into
   // ViewNodeList; for the explicit Draft pane we seed/persist it against the
@@ -311,7 +315,7 @@
 
 <ViewNodeList
   bind:this={list}
-  {result}
+  {view}
   mode="tree"
   active={isActiveNode}
   collapsed={collapse.collapsed}

@@ -1,106 +1,99 @@
 <script context="module" lang="ts">
   import type { PromptEntrySummary } from "@/lib/types";
-
-  type PromptSubtypeNode = { id: string; label: string; children: PromptSubtypeNode[] };
 </script>
 
 <script lang="ts">
   import NodeRow from "@/components/widgets/NodeRow.svelte";
   import NodeList from "@/components/widgets/NodeList.svelte";
-  import GroupCaret from "@/components/widgets/GroupCaret.svelte";
-  import CountPill from "@/components/widgets/CountPill.svelte";
+  import ViewNodeList, { type RowCtx } from "@/components/widgets/ViewNodeList.svelte";
+  import { entryTypeChoicesByKind } from "@/lib/utils/treeHelpers";
+  import { defaultView } from "@/lib/views/evaluateView";
+  import { paneViews } from "@/lib/stores/paneViews.svelte";
   import { metadataSchemaStore } from "@/lib/stores/schema";
+  import { referenceIndexStore } from "@/lib/stores/references";
   import { focusedDocumentStore } from "@/lib/stores/editorFocus";
+  import type { ViewSpec } from "@/lib/types";
 
+  export let entries: PromptEntrySummary[];
+  // Prompts is a real view like Lore (ADR-0022/0036): the whole prompt roster
+  // grouped by entry_type, evaluated by evaluateView — the subtype buckets ARE the
+  // view's grouping (`group_by: entry_type`, defaultView("prompt")), not a hand-
+  // built schema tree. Membership is the whole roster, so an entry never "falls
+  // off" for having an unexpected type — it just lands in its own bucket.
+  export let viewSpec: ViewSpec = defaultView("prompt");
   // metadataSchema is global per-project — read from the store, not a prop (#14 Step 2).
   $: schema = $metadataSchemaStore;
-  export let entries: PromptEntrySummary[];
-  // Active-row highlight + pin-star read from the editor-focus store, not props (#14 Step 2).
+  // Active-row highlight reads from the editor-focus store, not props (#14 Step 2).
   $: focusedDocument = $focusedDocumentStore;
   // Open a prompt entry in an editor pane (App owns the pane set).
   export let onOpenEntry: (entryId: string) => void;
   // Create a new prompt entry of the given concrete sub-type.
   export let onNewEntry: (entryType: string) => void;
 
-  // Per-group collapse — pane-local, not persisted (same as Lore/Assistants).
-  let collapsedGroups: Record<string, boolean> = {};
-
-  $: concreteSubtypes = Object.entries(schema?.entry_types ?? {})
-    .filter(([id, definition]) => definition.kind === "prompt" && !definition.abstract && id !== "prompt:base")
-    .map(([id, definition]) => ({ id, label: definition.name || id, parent: definition.parent ?? null }));
-
-  // Tree of concrete prompt subtypes — Roleplay nests under Continuation, etc.
-  // The pane renders this recursively (each subtype is a group-header NodeRow
-  // whose nested slot holds its prompt entries AND its child subtype NodeRows),
-  // so the schema hierarchy reads via real nesting in NodeRow's tier panel
-  // rather than a depth-padding hack. Tier1/tier2/tier3 backgrounds in NodeRow's
-  // scoped CSS handle the visual stepping automatically.
-  $: subtypeTree = (() => {
-    const byId = new Map<string, PromptSubtypeNode>(
-      concreteSubtypes.map((s) => [s.id, { id: s.id, label: s.label, children: [] }]),
-    );
-    const roots: PromptSubtypeNode[] = [];
-    for (const s of concreteSubtypes) {
-      const node = byId.get(s.id);
-      if (!node) continue;
-      const parent = s.parent ? byId.get(s.parent) : undefined;
-      if (parent) parent.children.push(node);
-      else roots.push(node);
-    }
-    function sortRecursively(nodes: PromptSubtypeNode[]) {
-      nodes.sort((a, b) => a.label.localeCompare(b.label));
-      for (const n of nodes) sortRecursively(n.children);
-    }
-    sortRecursively(roots);
-    return roots;
-  })();
-
-  function toggleGroup(groupId: string) {
-    collapsedGroups = {
-      ...collapsedGroups,
-      [groupId]: !collapsedGroups[groupId],
-    };
+  // The add-menu popover lives inside this pane's ViewNodeList (mode-agnostic); the
+  // pane-header "+" button drives its imperative handles (mirrors Lore). One add
+  // button + a subtype menu, not a "+" per bucket.
+  const ADD_MENU_KEY = "prompt:new";
+  let list:
+    | {
+        toggleAddMenu: (parentId: string | null, key: string, event?: MouseEvent) => void;
+        isAddMenuOpen: (key: string) => boolean;
+      }
+    | undefined;
+  export function toggleAddMenu(event?: MouseEvent) {
+    list?.toggleAddMenu(null, ADD_MENU_KEY, event);
   }
+  export function isAddMenuOpen(): boolean {
+    return list?.isAddMenuOpen(ADD_MENU_KEY) ?? false;
+  }
+
+  // Every NodeList is backed by a view (ADR-0022): the pane hands the whole view
+  // (spec + roster + data env) to ViewNodeList, which owns evaluation + grouping.
+  // Grouping comes from the spec, never synthesized here.
+  $: view = {
+    spec: viewSpec,
+    universe: entries,
+    schema,
+    resolveView: paneViews.resolveView,
+    referenceIndex: $referenceIndexStore,
+  };
 </script>
 
-<NodeList isEmpty={subtypeTree.length === 0}>
-  {#each subtypeTree as root (root.id)}
-    {@render renderSubtype(root)}
-  {/each}
+<ViewNodeList
+  bind:this={list}
+  {view}
+  active={(entry) => focusedDocument?.type === "prompt" && focusedDocument.id === entry.id}
+  onClick={(entry) => onOpenEntry(entry.id)}
+  row={entryRow}
+  {addMenu}
+>
   {#snippet whenEmpty()}
-    <p class="muted">No prompt sub-types defined yet. Open a prompt entry's Detail Types to create one.</p>
+    {#if entries.length === 0}
+      <p class="muted">No prompts yet. Click + to create one.</p>
+    {:else}
+      <p class="muted">No prompts match this view.</p>
+    {/if}
   {/snippet}
-</NodeList>
+</ViewNodeList>
 
-{#snippet renderSubtype(node: PromptSubtypeNode)}
-  {@const subtypeEntries = entries.filter((e) => e.entry_type === node.id)}
-  {@const userCollapsed = !!collapsedGroups[node.id]}
-  {@const hasContent = subtypeEntries.length > 0 || node.children.length > 0}
-  {@const isCollapsed = userCollapsed || !hasContent}
+{#snippet addMenu({ close }: { parentId: string | null; close: () => void })}
+  <span class="row-add-popover-heading">New prompt</span>
+  <NodeList isEmpty={entryTypeChoicesByKind($metadataSchemaStore, "prompt").length === 0}>
+    {#each entryTypeChoicesByKind($metadataSchemaStore, "prompt") as choice (choice.id)}
+      <NodeRow title={choice.name} onClick={() => { onNewEntry(choice.id); close(); }} />
+    {/each}
+    {#snippet whenEmpty()}
+      <p class="muted">No prompt sub-types defined. Open a prompt entry's Detail Types to create one.</p>
+    {/snippet}
+  </NodeList>
+{/snippet}
+
+{#snippet entryRow(entry: PromptEntrySummary, ctx: RowCtx<PromptEntrySummary>)}
   <NodeRow
-    groupHeader
-    collapsed={isCollapsed}
-    title={node.label}
-    onClick={() => toggleGroup(node.id)}
-  >
-    {#snippet leading()}
-      <GroupCaret collapsed={isCollapsed} />
-    {/snippet}
-    {#snippet trailing()}
-      <CountPill count={subtypeEntries.length} />
-      <button class="pin-button" type="button" title="Add prompt" aria-label="Add prompt" on:click|stopPropagation={() => onNewEntry(node.id)}>+</button>
-    {/snippet}
-    {#snippet nested()}
-      {#each subtypeEntries as entry (entry.id)}
-        <NodeRow
-          title={entry.title}
-          active={focusedDocument?.type === "prompt" && focusedDocument.id === entry.id}
-          onClick={() => onOpenEntry(entry.id)}
-        />
-      {/each}
-      {#each node.children as child (child.id)}
-        {@render renderSubtype(child)}
-      {/each}
-    {/snippet}
-  </NodeRow>
+    title={entry.title}
+    depth={ctx.depth}
+    active={ctx.active}
+    onClick={ctx.onClick}
+    onmousedown={(event) => event.stopPropagation()}
+  />
 {/snippet}

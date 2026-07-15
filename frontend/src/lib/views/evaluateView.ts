@@ -226,7 +226,7 @@ export function kindUniverseExpr(kind: string, schema?: MetadataSchema | null): 
 // Build the default view for a pane — an HONEST spec (ADR-0037 §7, mirroring
 // the backend `_default_view_spec`): the whole roster of `kind` in stored/
 // manual order, carrying the shape the panes used to synthesize in
-// presentation code. Lore groups by entry_type (alphabetical labels);
+// presentation code. Lore and Prompts group by entry_type (alphabetical labels);
 // Assistants by source layer (first-seen keeps the machine layer first); the
 // structural kinds (scene/research) are a recursive containment Nest over the
 // `parent` relation (roots = parentless, ADR-0037 §4). Post-ADR-0036 an
@@ -249,7 +249,7 @@ export function defaultView(kind: string, schema?: MetadataSchema | null): ViewS
       sort,
     };
   }
-  if (kind === "lore") {
+  if (kind === "lore" || kind === "prompt") {
     return { kind, expr: roster, sort, group_by: [{ field: "entry_type", order: "label" }] };
   }
   if (kind === "assistant") {

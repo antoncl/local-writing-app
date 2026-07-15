@@ -29,6 +29,10 @@
     StructureNode,
   } from "@/lib/types";
   import { metadataSchemaStore } from "@/lib/stores/schema";
+  // Assistants are machine-global nodes; read from the store so any entity_ref /
+  // param picking kind=assistant can enumerate them everywhere, without every
+  // caller threading the roster (#257). The other rosters still arrive as props.
+  import { assistantEntriesStore } from "@/lib/stores/assistants";
 
   export let field: MetadataFieldDefinition;
   export let value: string | string[] | null | undefined;
@@ -83,6 +87,7 @@
   $: sceneIndex = structure ? flattenScenesAll(structure.root) : new Map<string, { id: string; title: string; entry_type: string }>();
   $: loreIndex = new Map(loreEntries.map((e) => [e.id, e] as const));
   $: promptIndex = new Map(promptEntries.map((e) => [e.id, e] as const));
+  $: assistantIndex = new Map($assistantEntriesStore.map((e) => [e.id, e] as const));
   $: selectedRefs = selectedIds.map((id) => resolveRefById(id));
 
   function toIdList(input: string | string[] | null | undefined): string[] {
@@ -112,6 +117,8 @@
     if (lore) return { id, kind: "lore", title: lore.title, entry_type: lore.entry_type };
     const snippet = promptIndex.get(id);
     if (snippet) return { id, kind: "snippet", title: snippet.title, entry_type: snippet.entry_type };
+    const assistant = assistantIndex.get(id);
+    if (assistant) return { id, kind: "assistant", title: assistant.title, entry_type: assistant.entry_type };
     // Fall back to the picker's configured kind so a freshly-saved ref whose
     // index hasn't refreshed yet still shows the right type-pill color.
     const fallbackKind = (targetKind || "lore") as NodePickerRef["kind"];
@@ -191,6 +198,7 @@
             researchStructure={researchStructure}
             loreEntries={loreEntries}
             promptEntries={promptEntries}
+            assistantEntries={$assistantEntriesStore}
             on:change={handlePickerChange}
           />
         </span>

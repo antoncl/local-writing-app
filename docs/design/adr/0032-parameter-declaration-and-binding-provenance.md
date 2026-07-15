@@ -4,8 +4,10 @@
   place**: a runtime formal is a *promoted Filter value slot*, its type **derived from the field**;
   the declared *Parameter-node-typed-by-reference* is **deferred** to node-set-source params (no
   current use case). `$self` is a **reserved wired source node**, not a formal. Reference traversal
-  is forward `Filter`/`field_of` (ADR-0031) — Match (ADR-0033) is withdrawn. See
-  `memory/decisions_184_entity_vs_value_parameters.md`.
+  is forward `Filter`/`field_of` (ADR-0031) — Match (ADR-0033) is withdrawn. **Amended 2026-07-15
+  (§D Amendment 1: ONE central reused component owns the whole runtime view surface — selection +
+  binding — because selection fixes which params instantiate).**
+  See `memory/decisions_184_entity_vs_value_parameters.md`.
 - Feature: #184 Parameterized views — the **configurator slice** ADR-0031 deferred · Doc:
   `views-and-filters.md` (parameterization)
 - Follows: **ADR-0031** (free variables + bindings env; forward `field_of`/`Filter`). This ADR
@@ -84,6 +86,30 @@ The evaluator only **consumes** `bindings`. **Populating** them is the wrapper's
 control (derived from its type), collect the value, feed it back, re-evaluate."* So the parameter
 strip lives **with the wrapper** — centralized, reused wherever a parameterized list appears — and
 its controls are the same `FieldValueEditor` widgets promoted from the fields.
+
+**Amendment 1 (2026-07-15) — one central reused component owns the whole runtime view surface.**
+§D generalizes: **runtime view-configuration is ONE central, reused component** — not a set of parts
+a caller (App/pane) wires together. This is the #182 / ADR-0022 principle (the failure mode being
+callers driving the naive `NodeList` / handle-bar differently, so surfaces drift). The two runtime
+concerns — **view selection** (which saved lens is active) and **actual→formal binding** (arguments
+to that lens's formals) — are **inseparable**, so they are **not** two independently-owned components:
+
+- **Selecting the lens *fixes the formals*, which fixes whether a parameter strip instantiates at all
+  and which controls it shows.** The selector is therefore intrinsically part of parameter
+  instantiation — the decision "show parameter controls? which?" is downstream of the selection and
+  cannot be owned by a different component than the selection itself.
+
+So one component owns the whole runtime surface: it renders the **view selector** (positioned as
+pane-handle-bar chrome — a coarse, persistent, tab-like choice), the **param strip** (fine-grained,
+ephemeral, §C), and the list. It is **dropped in once per pane**; the selector is **not** a separate
+widget a caller hand-places per pane. *Which* panes expose selection is a prop/config on the one
+component (ADR-0022 v1: Lore/Draft/Assistants), never a per-pane reimplementation.
+
+This **supersedes** any reading of §D as "selection is pane-owned, binding is wrapper-owned" (two
+owners): the single component owns both. Chosen (over a two-component split) for two reasons — it is
+the **stronger guard against per-caller divergence** (one component, no seams for functionality to
+fork across panes), and the two concerns are **not cleanly separable** (above). The rule holds until
+a pane needs something the one component cannot express (falsifiable, not proven).
 
 ## Why / rejected alternatives
 - **A declared Parameter node as the *primary* declaration — rejected/deferred.** Promote-in-place

@@ -142,3 +142,108 @@ from the mandatory lore guard.
 - **Out of scope for 0.5.4**: multi-node loop bodies / frontier transforms (§E); mutual
   recursion (a cycle through two Nests — warn); joining across kinds beyond the roster the
   anchor kind exposes.
+
+## Amendment 1 — Orphans are a structural output, not a scalar disposition (0.7.0)
+
+- Status: Accepted — 0.7.0, 2026-07-15
+- Amends: §A (unmatched children "dropped, with a surfaced count") and the later
+  `orphans: "keep"` disposition (added for #216 via ADR-0037 §Sub-issues).
+- Closes: #255 (the `orphans` scalar is lost on every designer round-trip); reframes #252
+  (a filtered `parents` seed does not subtract from membership — see §A below); supersedes #216.
+
+### Context
+Orphans are the child candidates a Nest never places — nodes in the `children` set whose match
+never attached them under a seeded parent. §A dropped them (with a count); #216 added a binary
+`orphans: "keep"` that re-adds each unplaced node **flat at the root**. Two problems surfaced:
+
+1. **`"keep"` shreds hierarchy.** The re-add pass emits each orphan independently with `path: []`.
+   With three acts *Aleph / Bet / Gimmel* and only **Bet** wired into `parents` (children = All),
+   everything under Aleph and Gimmel — the acts *and* their chapters *and* their scenes — is
+   unplaced, so `"keep"` dumps them all as flat sibling rows at the root, discarding their
+   containment. `"keep"` was written for **leaf** orphans (a character with no region); it has no
+   notion of an orphan that owns a subtree.
+2. **The scalar can't be authored.** It has no designer control and is discarded on the
+   graph→spec→graph round-trip (#255), so it silently reverts to `"drop"` on the first edit.
+
+The deeper truth §A obscured: **membership is the `children` operand; `parents` only chooses BFS
+seeds** (Amendment target — this is the #252 "filter is ignored" report). Filtering `parents` down
+to Bet cannot remove Aleph/Gimmel from the output — they are still in `children`, so they surface
+as orphans (or are dropped). The fix is not to make `parents` subtract; it is to make the orphan
+set a **first-class, routable output** so the author decides its fate in the graph.
+
+### Decision
+**A. The unplaced-child set becomes a second Nest output — an ordinary node-set handle.** A Nest
+exposes two outputs: its **results** (the denormalized tree, unchanged) and its **orphans** (the
+flat set of `children` it never placed). The orphan output is a **first-class source handle** — it
+carries the unplaced nodes as a plain node-set and may be wired into **any** downstream operator,
+exactly like any other output, or left unwired. It is **not** special-cased or restricted to a
+particular destination.
+
+**B. Unwired ⇒ drop (default preserved).** With nothing consuming the orphan output, orphans are
+dropped and counted exactly as §A of the base ADR specified — the out-of-the-box behavior does not
+change, and the `children`-defines-membership rule is now stated, not implicit.
+
+**C. Wired ⇒ the orphans flow, through whatever they are wired into, to the *same* `ViewResult`.**
+Every branch — the orphan output included — can only terminate in the one output sink
+(`OUTPUT_NODE_ID = "output"`, `viewGraph.ts`), so the whole view is always **one `ViewResult`**:
+intra-result composition (ADR-0035 §1), never inter-result / Views 2.0. Crucially this is
+**orthogonal to whether the backing spec is a tree or a DAG**: a two-output Nest consumed by two
+branches makes the lowered spec a **single-sink DAG** (the Nest computed once, referenced twice),
+and a single-sink DAG is *still exactly one result*. The Views-2.0 line is **multiple sinks**, not
+internal fan-out; inter-result composition unlocks only if the designer ever offers add/remove of
+the results widget — until then the topology forbids it for free.
+
+**D. The orphan output is routable; its serialization is an implementation detail; the
+`keep`/`drop` scalar is retired.** The author may feed orphans into **any** operator — a Filter, a
+Sort, a group on the sink, or a second Nest — and the design must **not** constrain that to protect
+a simple serialization. How `graphToSpec` lowers a Nest whose two outputs are consumed by different
+branches is an implementation concern that accommodates the graph, not a limit on it (Anton: "*it
+is immaterial how that is expressed in the backing query language*"). The natural tree-compatible
+encoding is an **inline orphan sub-expression** on the Nest — the wired downstream chain
+(filter/sort/second Nest) evaluated over the unplaced set and concatenated into the result — which
+covers every case *except* an orphan stream cross-merging with an *unrelated* branch mid-graph; that
+lone exotic case (and only it) would want named intermediate results / a single-sink DAG form, and
+is deferred. The portable spec grows whatever the wiring needs; the design does not pick for it. The
+binary `orphans: "keep"|"drop"` scalar is **retired** — its two values collapse to *unwired* = drop
+and *wired* = routed; pre-1.0 straight cut, no migration (`feedback_no_pre_1_0_migrations`).
+
+**E. Orphan reprocessing is available, not deferred.** Because the orphan output is an ordinary
+node-set output, feeding it into a Filter/Sort, or into a **second Nest seeded on the orphan roots**
+to rebuild Aleph's and Gimmel's subtrees intact, is just normal wiring — not a special case, and
+not a §E frontier transform (that is a transform *inside* the recursion loop; this is downstream of
+it). What may phase is only how much of the evaluator/lowering lands first — never whether the
+design permits routing.
+
+### Why / rejected alternatives
+- **Rejected: keep the binary `keep`/`drop` scalar.** It flattens hierarchical orphans (Context 1)
+  and can't be authored/persisted (Context 2). A routable output lets the graph, not a frozen enum,
+  decide — and subsumes both old values (`drop` = unwired, `keep` = wired to a flat group).
+- **Rejected: make `parents` subtract from membership.** That would redefine `children` as
+  "children reachable from a parent seed," coupling two operands the base ADR kept orthogonal, and
+  it still gives the author no way to *see* what fell out. Exposing orphans keeps `parents`
+  attachment-only and makes the residue inspectable.
+- **Rejected: restrict the orphan output (e.g. group-only) to keep the spec a tree.** This inverts
+  the priority — it lets the serialization format dictate the feature. A single-sink DAG in the
+  backing spec is embraced where the graph needs it (§C/§D); what we reject is **multiple result
+  sinks** (inter-result composition, Views 2.0 — `decisions_views_2_0_flow_model`), which a routable
+  orphan output does **not** require, because with one sink every branch still lands in one result.
+
+### Consequences
+- `evaluateView`'s `evalNest` exposes the unplaced-child set as a **consumable stream**: when an
+  `orphans` sub-expression is present it evaluates that over the unplaced set and concatenates the
+  result; on the unwired/drop path it counts them (`orphansDropped`) as today.
+- **Moderate, multi-surface — not a one-line bugfix, but not a whole-spec DAG rework.** The scope
+  is: `models_views.py`'s `nest` gains an optional `orphans` **sub-expression** field; `evalNest`
+  evaluates it; the designer's Nest node grows a second **source handle** ("Orphans", flat); and the
+  trickiest piece is the `graphToSpec`/`specToGraph` lowering rule that folds the wired orphan branch
+  into `nest.orphans` and rebuilds it (closing #255 — the disposition now round-trips). Named
+  intermediate results are **deferred** to the cross-merge case (§D), so this stays within the
+  existing tree-shaped spec.
+- No backend storage change on cards.
+
+### Resolved
+- **Default label/placement — moot** (Anton): there is no inherent label for the orphan output
+  unless it is wired straight to the results sink, and even then the designer can add or remove any
+  label node we provide. So the ADR prescribes none — a raw orphan→results branch is just the
+  unplaced nodes, and labelling is an ordinary designer affordance (a group/label the author
+  inserts), not a Nest-op default.

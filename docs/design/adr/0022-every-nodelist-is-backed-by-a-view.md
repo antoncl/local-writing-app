@@ -1,6 +1,6 @@
 # ADR-0022: Every NodeList is backed by a view; presentation ∈ {tree, grouped, flat}
 
-- Status: Accepted (v1) — 0.5.0, 2026-07-02
+- Status: Accepted (v1) — 0.5.0, 2026-07-02; **amended 2026-07-15 (runtime view surface = ONE central reused component owning selection + binding; ADR-0032 §D Amdt 1)**
 - Feature: #35 Views & Filters · Doc: `views-and-filters.md` §3, §5 · Issue: #35
 - Governed by: `memory/decisions_ui_widget_taxonomy.md`, `memory/decisions_todo_as_node_index.md`
 
@@ -39,3 +39,19 @@ stays out), the cost breakdown isn't a node list.
 - The pane persists its **last-selected view** in UI state, not in the project (the *views* are
   project data; the *selection* is not).
 - Prompts/Chats/Mutations get fixed views now, switchers later.
+
+## Amendment (2026-07-15) — the runtime view surface is ONE central reused component
+Superseding the v1 framing where App positions a standalone `<ViewSwitcher>` in each pane's handle
+bar: **view selection *and* actual→formal parameter binding are owned by one central, reused
+component** (the render surface — ADR-0032 §D Amendment 1), because they are **inseparable** — the
+selected lens fixes the formals, hence *whether and which* parameter controls instantiate, so the
+selector is part of parameter instantiation, not a component that can be owned apart from it. The
+selector is **positioned** as pane-handle-bar chrome but is **part of that one component**, not a
+per-pane widget a caller wires in. "v1 switcher on Lore/Draft/Assistants only" becomes a prop/config
+on the one component (an **exposure** decision), never a licence to fork or re-place it. Chosen for
+the stronger guard against per-caller divergence (one component, no seams for functionality to drift
+across panes) and because the two concerns don't cleanly separate.
+
+**Code follow-up (tracked, not yet done):** the current per-pane `<ViewSwitcher>` wiring in
+`App.svelte` (`loreActions` / `outlineActions` / `assistantsActions`) folds into the central
+component; App stops hand-placing the selector per pane.

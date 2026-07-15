@@ -1,5 +1,28 @@
 <script module lang="ts">
   import type { EvalNode } from "@/lib/views/evaluateView";
+  import type { MetadataSchema, ViewSpec } from "@/lib/types";
+
+  // The view-driven input (ADR-0032 §D / ADR-0035). Instead of a pre-resolved
+  // `result`, a consumer hands ViewNodeList the view to evaluate + its data
+  // environment; the wrapper then owns the parameter strip, the bindings env
+  // (incl. `$self` from `anchorId`), and re-evaluation on override change. Exactly
+  // one of `view` / `result` is supplied — `result` stays for non-view / already-
+  // resolved sites (they lift arrays via `nodeSet()`, ADR-0035).
+  export type ViewInput<T extends EvalNode> = {
+    spec: ViewSpec;
+    universe: readonly T[];
+    schema?: MetadataSchema | null;
+    resolveView?: (viewId: string) => ViewSpec | null;
+    referenceIndex?: ReadonlyMap<string, ReadonlySet<string>>;
+    // The anchored surface's node id → the `$self` binding (ADR-0032 §A). Omit /
+    // null in a roster pane with no anchor: `$self` then resolves to the empty
+    // set, so a `$self` view only functions where there is an anchor.
+    anchorId?: string | null;
+    // (No roster data here.) The param strip's reference/tag pickers source the
+    // full node universe from the global stores directly (see the store imports
+    // above) — a pane doesn't thread it, because a param can reference ANY kind,
+    // not the pane's own (#257).
+  };
 
   // The context handed to a consumer's `row` snippet for one REAL node (leaf OR
   // real-node parent — tree-uniformity, [[feedback-tree-uniformity-over-header-dichotomy]]).
@@ -97,11 +120,26 @@
   import { TreeRename } from "@/components/widgets/treeRename.svelte";
   import { TreeAddMenu } from "@/components/widgets/treeAddMenu.svelte";
   import { CollapseGuard } from "@/components/widgets/treeCollapseGuard";
-  import { filterGroups, type ViewGroup, type ViewResult } from "@/lib/views/evaluateView";
-  import { leafGroup } from "@/lib/views/viewResult";
+  import FieldValueEditor from "@/components/widgets/FieldValueEditor.svelte";
+  import { evaluateView, filterGroups, SELF_VAR, type EvalBindings, type ViewGroup, type ViewResult } from "@/lib/views/evaluateView";
+  import { leafGroup, nodeSet } from "@/lib/views/viewResult";
+  import { buildBindings, effectiveParamValue, resolveParamControls } from "@/lib/views/viewParams";
+  // The param strip's reference/tag pickers draw the WHOLE node universe — any
+  // kind/type a `references` field can hold (Anton). That universe is the global
+  // per-project stores, read directly here (the #14-Step-2 pattern the schema /
+  // reference-index reads already use), NOT threaded per-pane — a pane can't know
+  // which kind a param references, and threading one roster (lore) starved the
+  // picker of every other kind (#257). NodePicker/ReferencePicker resolve assistants
+  // from their own store.
+  import { loreEntriesStore } from "@/lib/stores/lore";
+  import { promptEntriesStore } from "@/lib/stores/prompts";
+  import { structureStore, researchStructureStore } from "@/lib/stores/structure";
+  import { knownTagsStore } from "@/lib/stores/tags";
+  import type { MetadataValue } from "@/lib/types";
 
   let {
     result,
+    view,
     row,
     groupHeader,
     mode = "card",
@@ -120,8 +158,14 @@
     defaultCollapsed,
     whenEmpty,
   }: {
-    // The one and only input — a view's output (ADR-0035).
-    result: ViewResult<T>;
+    // The rendered input — a view's output (ADR-0035). Supplied directly by non-
+    // view / already-resolved sites (which lift arrays via `nodeSet()`); for a
+    // view-driven pane, omit this and pass `view` instead — the wrapper evaluates.
+    result?: ViewResult<T>;
+    // The view-driven input (ADR-0032 §D): the spec + data environment to
+    // evaluate internally, so the wrapper owns the parameter strip + `$self`
+    // binding + re-evaluation. Exactly one of `view` / `result`.
+    view?: ViewInput<T>;
     // Renders one REAL node (leaf or real-node parent). The main extension point.
     row: Snippet<[T, RowCtx<T>]>;
     // Optional override for SYNTHETIC label buckets; default is groupHeader chrome
@@ -167,6 +211,61 @@
     whenEmpty?: Snippet;
   } = $props();
 
+  // ── View evaluation + parameter strip (ADR-0032 §D) ──────────────────────
+  // When `view` is supplied, the wrapper OWNS evaluation: it resolves the strip
+  // controls, holds the ephemeral overrides, folds them (+ `$self`) into a
+  // bindings env, and evaluates the spec against the roster. Centralized here so
+  // every parameterized list gets the strip + `$self` for free — not per pane
+  // (ADR-0032 §D rejects per-pane bespoke UI). `result`-driven sites skip all of
+  // this and render their pre-resolved result unchanged (ADR-0035).
+
+  // Ephemeral runtime overrides for the view's declared formals (ADR-0032 §C):
+  // pane/session state, seeded per-control by the authored default, never baked
+  // into the shared view. Stale keys (from a previously-selected view) are ignored
+  // by `buildBindings`.
+  let paramOverrides = $state<Record<string, unknown>>({});
+  const paramControls = $derived(view ? resolveParamControls(view.spec, view.schema) : []);
+  const bindings = $derived.by((): EvalBindings => {
+    if (!view) return {};
+    const b: EvalBindings = { ...buildBindings(view.spec.params, paramOverrides) };
+    // `$self` is surface-supplied (ADR-0032 §A): the anchored pane's node id, or
+    // absent in a roster pane (→ `$self` resolves to the empty set downstream).
+    if (view.anchorId) b[SELF_VAR] = [view.anchorId];
+    return b;
+  });
+  // The rendered result: evaluated from `view` (re-runs on override/spec change),
+  // or the pre-resolved `result`, or an empty set when neither is wired.
+  const computedResult = $derived.by((): ViewResult<T> =>
+    view
+      ? evaluateView(view.spec, view.universe as T[], {
+          schema: view.schema,
+          resolveView: view.resolveView,
+          bindings,
+          referenceIndex: view.referenceIndex,
+        })
+      : (result ?? nodeSet<T>([])),
+  );
+
+  // The value a strip control shows: the ephemeral override, else the authored
+  // default (both in the field's stored shape); FieldValueEditor coerces scalar
+  // vs list. `setParam`/`clearParam` write/reset the override; `paramActive` marks
+  // a formal that currently constrains the result (drives the affordance + clear).
+  function paramDisplayValue(name: string): MetadataValue {
+    if (name in paramOverrides) return paramOverrides[name] as MetadataValue;
+    return (view?.spec.params?.find((p) => p.name === name)?.default ?? null) as MetadataValue;
+  }
+  function setParam(name: string, value: MetadataValue): void {
+    paramOverrides = { ...paramOverrides, [name]: value };
+  }
+  function clearParam(name: string): void {
+    const { [name]: _dropped, ...rest } = paramOverrides;
+    paramOverrides = rest;
+  }
+  function paramActive(name: string): boolean {
+    const p = view?.spec.params?.find((param) => param.name === name);
+    return p ? effectiveParamValue(p, paramOverrides).length > 0 : false;
+  }
+
   // Seed the initial collapsed set once from `defaultCollapsed`. Guarded so the
   // effect never re-seeds (and it reads neither `collapsed` nor the seed after,
   // so mutating the set can't retrigger it).
@@ -183,13 +282,13 @@
   const keptIds = $derived.by(() => {
     if (!filter || !query) return null;
     const ids = new Set<string>();
-    for (const node of result.nodes) if (filter(node, query)) ids.add(node.id);
+    for (const node of computedResult.nodes) if (filter(node, query)) ids.add(node.id);
     return ids;
   });
 
-  const displayedNodes = $derived(keptIds ? result.nodes.filter((n) => keptIds.has(n.id)) : result.nodes);
+  const displayedNodes = $derived(keptIds ? computedResult.nodes.filter((n) => keptIds.has(n.id)) : computedResult.nodes);
   const displayedGroups = $derived(
-    result.groups ? (keptIds ? filterGroups(result.groups, keptIds) : result.groups) : null,
+    computedResult.groups ? (keptIds ? filterGroups(computedResult.groups, keptIds) : computedResult.groups) : null,
   );
 
   // One render path: flat membership lifts to childless leaf groups, so grouped
@@ -347,13 +446,44 @@
   }
 </script>
 
+{#if paramControls.length > 0}
+  <!-- The parameter strip (ADR-0032 §D): one control per declared formal, seeded
+       by its default and overridable at runtime — a saved view's search box,
+       generalized. Owned HERE so every parameterized list shares it (§D rejects
+       per-pane strips); the control is a FieldValueEditor derived from the formal's
+       field (its reference/tag data comes from `view.paramData`). -->
+  <div class="param-strip" role="group" aria-label="View parameters">
+    {#each paramControls as control (control.name)}
+      <div class="param" class:active={paramActive(control.name)}>
+        <span class="param-label">{control.label}</span>
+        <div class="param-control">
+          <FieldValueEditor
+            field={control.field}
+            value={paramDisplayValue(control.name)}
+            onChange={(v) => setParam(control.name, v)}
+            ariaLabel={control.label}
+            loreEntries={$loreEntriesStore}
+            promptEntries={$promptEntriesStore}
+            structure={$structureStore}
+            researchStructure={$researchStructureStore}
+            knownTags={$knownTagsStore}
+          />
+        </div>
+        {#if control.name in paramOverrides}
+          <button class="param-clear" title="Reset to default" aria-label={`Reset ${control.label} to default`} onclick={() => clearParam(control.name)}>×</button>
+        {/if}
+      </div>
+    {/each}
+  </div>
+{/if}
+
 <div class="tree-keys" use:treeKeyboard>
   <NodeList {mode} {searchPlaceholder} bind:searchValue {searchDebounceMs} {isEmpty} {whenEmpty}>
     <ViewNodeTree
       groups={effectiveGroups}
       depth={0}
       {collapsed}
-      annotations={result.annotations}
+      annotations={computedResult.annotations}
       {active}
       {onClick}
       {onDblClick}
@@ -386,5 +516,47 @@
      around the list without introducing a box. */
   .tree-keys {
     display: contents;
+  }
+
+  /* Parameter strip (ADR-0032 §D) — moved here from the per-pane Lore strip so it
+     is shared by every parameterized list. */
+  .param-strip {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 10px;
+    padding: 8px 10px;
+    border-bottom: 1px solid var(--border);
+    background: var(--inset);
+  }
+  .param {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    min-width: 0;
+  }
+  .param-label {
+    font-size: var(--fs-xs);
+    color: var(--text-3);
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+    white-space: nowrap;
+  }
+  .param.active .param-label {
+    color: var(--accent-emphasis);
+  }
+  .param-control {
+    min-width: 140px;
+  }
+  .param-clear {
+    border: none;
+    background: transparent;
+    color: var(--text-3);
+    font-size: var(--fs-lg);
+    line-height: 1;
+    padding: 0 2px;
+    cursor: pointer;
+  }
+  .param-clear:hover {
+    color: var(--danger);
   }
 </style>

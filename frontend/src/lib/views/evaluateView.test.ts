@@ -123,6 +123,105 @@ describe("multi-level sort (#230)", () => {
   });
 });
 
+describe("sort excludes unorderable fields (#237)", () => {
+  // A schema declaring a set-valued field: sorting on it has no natural order, so
+  // the comparator must NOT collapse the array to a stringly-coerced key.
+  const tagSchema = {
+    version: 1,
+    entry_types: { "lore:base": { name: "Lore", kind: "lore", abstract: true, fields: [] } },
+    fields: {
+      title: { name: "Title", type: "text", category: "intrinsic" },
+      factions: { name: "Factions", type: "tags", category: "stored" },
+      accent: { name: "Accent", type: "color", category: "stored" },
+      rank: { name: "Rank", type: "number", category: "stored" },
+    },
+  } as unknown as MetadataSchema;
+  // Authored (input) order is z, a, m; tag arrays are deliberately anti-sorted so
+  // any accidental first-token/joined-string order would visibly reorder them.
+  // `accent` is a SCALAR swatch string (not an array), so only the schema-type
+  // sub-guard — not the Array.isArray backstop — can no-op a sort on it.
+  const roster: EvalNode[] = [
+    { id: "z", entry_type: "lore:base", title: "Zed", metadata: { factions: ["beta", "alpha"], accent: "rust", rank: 3 } },
+    { id: "a", entry_type: "lore:base", title: "Ann", metadata: { factions: ["alpha"], accent: "azure", rank: 1 } },
+    { id: "m", entry_type: "lore:base", title: "Mia", metadata: { factions: ["gamma"], accent: "moss", rank: 2 } },
+  ];
+  const run = (sort: ViewSort, nodes = roster): string[] =>
+    evaluateView({ kind: "lore", expr: { descendants_of: "lore:base" }, sort } as ViewSpec, nodes, { schema: tagSchema }).nodes.map(
+      (n) => n.id,
+    );
+
+  it("sorting by a tags field is a no-op — input order is preserved, not array-coerced", () => {
+    expect(run({ by: "field", field_key: "factions", dir: "asc" })).toEqual(["z", "a", "m"]);
+  });
+  it("sorting by a scalar-but-orderless field (color) is a no-op via the schema-type guard", () => {
+    // accent is a plain string ("rust"/"azure"/"moss"), so the Array.isArray
+    // backstop never fires — only the schema-type sub-guard no-ops it. Without
+    // that sub-guard the swatches would localeCompare to azure<moss<rust = a,m,z.
+    expect(run({ by: "field", field_key: "accent", dir: "asc" })).toEqual(["z", "a", "m"]);
+  });
+  it("an unorderable key defers to the next key in a multi-level chain", () => {
+    // factions is inert → rank asc decides: a(1), m(2), z(3).
+    expect(run({ by: "field", field_key: "factions", dir: "asc", then: { by: "field", field_key: "rank", dir: "asc" } })).toEqual([
+      "a",
+      "m",
+      "z",
+    ]);
+  });
+  it("the array backstop no-ops even when the field's type is unknown", () => {
+    // `factions` carries no field def here (mirrors the schema-less first render,
+    // where the type isn't resolved yet) — a raw array value still must not be
+    // collapsed; the array-shape check backstops the missing type.
+    const noTypeSchema = {
+      version: 1,
+      entry_types: { "lore:base": { name: "Lore", kind: "lore", abstract: true, fields: [] } },
+      fields: { title: { name: "Title", type: "text", category: "intrinsic" } },
+    } as unknown as MetadataSchema;
+    const order = evaluateView(
+      { kind: "lore", expr: { descendants_of: "lore:base" }, sort: { by: "field", field_key: "factions" } } as ViewSpec,
+      roster,
+      { schema: noTypeSchema },
+    ).nodes.map((n) => n.id);
+    expect(order).toEqual(["z", "a", "m"]);
+  });
+  it("an orderable field is unaffected — the guard does not over-fire", () => {
+    expect(run({ by: "field", field_key: "rank", dir: "asc" })).toEqual(["a", "m", "z"]);
+  });
+});
+
+describe("scalar collation is type-driven (#237): text lexicographic, number numeric", () => {
+  const schema = {
+    version: 1,
+    entry_types: { "lore:base": { name: "Lore", kind: "lore", abstract: true, fields: [] } },
+    fields: {
+      title: { name: "Title", type: "text", category: "intrinsic" },
+      code: { name: "Code", type: "text", category: "stored" }, // numeric-LOOKING text
+      seq: { name: "Seq", type: "number", category: "stored" },
+    },
+  } as unknown as MetadataSchema;
+  // Titles + a text `code` field both hold values that look numeric; only the
+  // real number field `seq` should order numerically.
+  const roster: EvalNode[] = [
+    { id: "n2", entry_type: "lore:base", title: "2", metadata: { code: "2", seq: 2 } },
+    { id: "n10", entry_type: "lore:base", title: "10", metadata: { code: "10", seq: 10 } },
+    { id: "n1", entry_type: "lore:base", title: "1", metadata: { code: "1", seq: 1 } },
+  ];
+  const run = (sort: ViewSort): string[] =>
+    evaluateView({ kind: "lore", expr: { descendants_of: "lore:base" }, sort } as ViewSpec, roster, { schema }).nodes.map((n) => n.id);
+
+  it("a TEXT field sorts lexicographically even when the values look numeric (1, 10, 2)", () => {
+    expect(run({ by: "field", field_key: "code", dir: "asc" })).toEqual(["n1", "n10", "n2"]);
+  });
+  it("the intrinsic title (a text field) sorts lexicographically via the field path", () => {
+    expect(run({ by: "field", field_key: "title", dir: "asc" })).toEqual(["n1", "n10", "n2"]);
+  });
+  it("the legacy by:\"title\" fast-path agrees — also lexicographic", () => {
+    expect(run({ by: "title", dir: "asc" })).toEqual(["n1", "n10", "n2"]);
+  });
+  it("a real NUMBER field sorts numerically (1, 2, 10)", () => {
+    expect(run({ by: "field", field_key: "seq", dir: "asc" })).toEqual(["n1", "n2", "n10"]);
+  });
+});
+
 describe("isBareDescendantsOf (dense-null tolerant whole-roster detection)", () => {
   it("accepts a sparse whole-roster expr", () => {
     expect(isBareDescendantsOf({ descendants_of: "lore:base" })).toBe(true);

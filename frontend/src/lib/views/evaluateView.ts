@@ -38,7 +38,7 @@ import type {
   ViewSpec,
 } from "@/lib/types";
 import { kindRootEntryTypeId } from "@/lib/utils/schemaTypeHelpers";
-import { asArray, fieldValue, fieldValueList, isCollectionField, isEmpty } from "@/lib/views/fieldAccess";
+import { asArray, fieldValue, fieldValueList, isCollectionField, isEmpty, isSortableField } from "@/lib/views/fieldAccess";
 import { applyGroupBy } from "@/lib/views/groupBy";
 import { projectReferences } from "@/lib/views/referenceIndex";
 
@@ -1364,10 +1364,18 @@ function compareByKey<T extends EvalNode>(
   if (key.by === "field" && key.field_key) {
     const av = fieldValue(a, key.field_key, schema);
     const bv = fieldValue(b, key.field_key, schema);
+    // Collection/opaque fields (tags, multi_select, ref lists, single refs,
+    // color) have no natural order (#237). The picker no longer offers them, but
+    // a legacy/hand-authored spec might still name one — treat as a tie (defer to
+    // the next key / input order) rather than collapse a set to a stringly-
+    // coerced key. The array check backstops the schema-less first render, where
+    // the type is not yet known but a multi-valued field already reads as one.
+    const ftype = schema?.fields?.[key.field_key]?.type;
+    if ((ftype != null && !isSortableField(ftype)) || Array.isArray(av) || Array.isArray(bv)) return 0;
     const ae = isEmpty(av);
     const be = isEmpty(bv);
     if (ae || be) return ae === be ? 0 : ae ? 1 : -1;
-    return dir * compareScalar(av, bv);
+    return dir * compareScalar(av, bv, ftype);
   }
   return 0;
 }
@@ -1390,14 +1398,22 @@ function sortNodes<T extends EvalNode>(
   });
 }
 
-function compareScalar(a: unknown, b: unknown): number {
+// Compare two scalar field values. Numeric comparison applies ONLY to genuinely
+// numeric field types (`number`, and computed counters/cost); a text field —
+// including the intrinsic `title` — always sorts lexicographically, even when its
+// values look like numbers ("2" before "10" is wrong for a title). When the field
+// type is unknown (schema-less first render), infer from the values so a number
+// field doesn't flip to string order for a frame.
+function compareScalar(a: unknown, b: unknown, ftype: string | null | undefined): number {
   const ae = isEmpty(a);
   const be = isEmpty(b);
   if (ae && be) return 0;
   if (ae) return 1; // empties sort last regardless of direction? keep simple: after
   if (be) return -1;
-  const na = Number(a);
-  const nb = Number(b);
-  if (!Number.isNaN(na) && !Number.isNaN(nb)) return na - nb;
+  if (ftype === "number" || ftype === "computed" || ftype == null) {
+    const na = Number(a);
+    const nb = Number(b);
+    if (!Number.isNaN(na) && !Number.isNaN(nb)) return na - nb;
+  }
   return String(a).localeCompare(String(b), undefined, { sensitivity: "base" });
 }

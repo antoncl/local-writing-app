@@ -16,6 +16,7 @@
   import SwatchPicker from "@/components/widgets/SwatchPicker.svelte";
   import { defaultFilterKind, inputArity, isEmptyValue, outputPayload, promotableSlot, type GraphNodeKind, type PredicateKind, type ViewGraphNode, type ViewHandle, type ViewNodeData } from "@/lib/views/viewGraph";
   import { nodeSummary } from "@/lib/views/nodeSummary";
+  import { isSortableField } from "@/lib/views/fieldAccess";
   import { useDesignerContext } from "./designerContext";
   import type { MetadataFieldType, MetadataValue, NodePickerRef, ViewGroupByLevel, ViewLeafValue, ViewSort } from "@/lib/types";
   import type { Snippet } from "svelte";
@@ -264,32 +265,32 @@
     { value: "unset", label: "is empty" },
   ];
 
+  // Fields this sorter can order by: the node roster minus set-valued/opaque
+  // types, which have no natural order (#237). `title` is an intrinsic field and
+  // lives in this list, so the picker offers it inline — there is no separate
+  // "Title vs Field" dichotomy (it is a field, per ADR-0029's intrinsic model).
+  let sortableFields = $derived(nodeFields.filter((f) => isSortableField(f.def.type)));
+
   // --- sorter helpers (#230 multi-level: an ordered list of keys ⇄ the `then`
-  // chain). A key is title|field + dir; "manual" = the EMPTY list (input order). ---
-  type SortKey = { by: "title" | "field"; field_key?: string; dir: "asc" | "desc" };
+  // chain). A key is a field_key (title included) + dir; "manual" = the EMPTY
+  // list (input order). Every key is `by:"field"` on the wire; a legacy stored
+  // `by:"title"` is read as field/title and normalized on the next edit. ---
+  type SortKey = { field_key: string; dir: "asc" | "desc" };
   function sortToList(sort: ViewSort | null | undefined): SortKey[] {
     const list: SortKey[] = [];
     for (let s: ViewSort | null | undefined = sort; s; s = s.then) {
-      if (s.by === "title") list.push({ by: "title", dir: s.dir ?? "asc" });
-      else if (s.by === "field") list.push({ by: "field", field_key: s.field_key, dir: s.dir ?? "asc" });
+      if (s.by === "title") list.push({ field_key: "title", dir: s.dir ?? "asc" });
+      else if (s.by === "field") list.push({ field_key: s.field_key ?? "title", dir: s.dir ?? "asc" });
       // "manual" carries no ordering key
     }
     return list;
   }
   function listToSort(list: SortKey[]): ViewSort {
-    // Fold the list into a right-nested `then` chain; empty ⇒ manual order. A
-    // half-authored "Field…" key (no field yet) is kept so the row doesn't vanish
-    // mid-edit; it is an inert no-op in the evaluator (compareByKey returns 0 with
-    // no field_key), so it never affects ordering.
+    // Fold the list into a right-nested `then` chain; empty ⇒ manual order.
     let chain: ViewSort | null = null;
     for (let i = list.length - 1; i >= 0; i--) {
       const k = list[i];
-      chain = {
-        by: k.by,
-        dir: k.dir,
-        ...(k.by === "field" ? { field_key: k.field_key || undefined } : {}),
-        ...(chain ? { then: chain } : {}),
-      };
+      chain = { by: "field", field_key: k.field_key, dir: k.dir, ...(chain ? { then: chain } : {}) };
     }
     return chain ?? { by: "manual" };
   }
@@ -298,17 +299,12 @@
     patch({ sort: listToSort(list) });
   }
   function addSortKey() {
-    commitSortKeys([...sortKeys, { by: "title", dir: "asc" }]);
+    // Default to the first orderable field (title leads the roster); fall back to
+    // a bare "title" key if the roster hasn't resolved yet.
+    commitSortKeys([...sortKeys, { field_key: sortableFields[0]?.key ?? "title", dir: "asc" }]);
   }
   function setSortKey(i: number, next: Partial<SortKey>) {
-    commitSortKeys(
-      sortKeys.map((k, j) => {
-        if (j !== i) return k;
-        const merged = { ...k, ...next };
-        if (merged.by !== "field") merged.field_key = undefined;
-        return merged;
-      }),
-    );
+    commitSortKeys(sortKeys.map((k, j) => (j === i ? { ...k, ...next } : k)));
   }
   function removeSortKey(i: number) {
     commitSortKeys(sortKeys.filter((_, j) => j !== i));
@@ -862,26 +858,22 @@
         <div class="handle-row">
           <select
             class="vfield lname"
-            value={key.by}
-            onchange={(e) => setSortKey(i, { by: e.currentTarget.value as SortKey["by"] })}
-            aria-label={`Sort key ${i + 1} type`}
+            value={key.field_key}
+            onchange={(e) => setSortKey(i, { field_key: e.currentTarget.value })}
+            aria-label={`Sort key ${i + 1} field`}
           >
-            <option value="title">Title</option>
-            <option value="field">Field…</option>
+            {#if key.field_key && !sortableFields.some((f) => f.key === key.field_key)}
+              <!-- A legacy/cross-roster key on a now-unsortable or absent field: keep it
+                   visible + labelled (the evaluator no-ops it) so the row isn't a blank
+                   select the author can't read or fix. -->
+              <option value={key.field_key}>
+                {(nodeFields.find((f) => f.key === key.field_key)?.name ?? key.field_key) + " — not sortable"}
+              </option>
+            {/if}
+            {#each sortableFields as f (f.key)}
+              <option value={f.key}>{f.name}</option>
+            {/each}
           </select>
-          {#if key.by === "field"}
-            <select
-              class="vfield lname"
-              value={key.field_key ?? ""}
-              onchange={(e) => setSortKey(i, { field_key: e.currentTarget.value })}
-              aria-label={`Sort key ${i + 1} field`}
-            >
-              <option value="">— field —</option>
-              {#each nodeFields as f (f.key)}
-                <option value={f.key}>{f.name}</option>
-              {/each}
-            </select>
-          {/if}
           <button
             type="button"
             class="hbtn"

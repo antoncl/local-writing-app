@@ -13,10 +13,11 @@
 
   import { createEventDispatcher } from "svelte";
   import NodePicker from "@/components/widgets/NodePicker.svelte";
-  import NodeList from "@/components/widgets/NodeList.svelte";
   import NodeRow from "@/components/widgets/NodeRow.svelte";
   import GroupCaret from "@/components/widgets/GroupCaret.svelte";
   import CountPill from "@/components/widgets/CountPill.svelte";
+  import ViewNodeList, { type RowCtx } from "@/components/widgets/ViewNodeList.svelte";
+  import { nodeSet } from "@/lib/views/viewResult";
   import { resolveColor } from "@/lib/utils/colors";
   import { pickerMembership } from "@/lib/utils/pickerSources";
   import type {
@@ -82,6 +83,12 @@
   // two views agree on title/entry_type. Missing ids surface a "missing"
   // sentinel ref the card can render distinctly.
   type ResolvedRef = NodePickerRef & { missing?: boolean };
+  // The selected-refs display is a non-view surface (ADR-0035 §3, #256): it lifts
+  // to the degenerate ViewResult via nodeSet() and renders through ViewNodeList
+  // like every other node list. A ResolvedRef already ≈ EvalNode (id/kind/title);
+  // the ONE adapter step is coercing `entry_type` to a string (a missing sentinel
+  // leaves it undefined) so the node satisfies EvalNode.
+  type RefNode = ResolvedRef & { entry_type: string };
 
   $: selectedIds = toIdList(value);
   $: sceneIndex = structure ? flattenScenesAll(structure.root) : new Map<string, { id: string; title: string; entry_type: string }>();
@@ -89,6 +96,7 @@
   $: promptIndex = new Map(promptEntries.map((e) => [e.id, e] as const));
   $: assistantIndex = new Map($assistantEntriesStore.map((e) => [e.id, e] as const));
   $: selectedRefs = selectedIds.map((id) => resolveRefById(id));
+  $: refNodes = selectedRefs.map((ref): RefNode => ({ ...ref, entry_type: ref.entry_type ?? "" }));
 
   function toIdList(input: string | string[] | null | undefined): string[] {
     if (input === null || input === undefined) return [];
@@ -205,40 +213,42 @@
       {/if}
     {/snippet}
     {#snippet nested()}
-      <NodeList mode="tree" isEmpty={selectedRefs.length === 0}>
+      <ViewNodeList result={nodeSet(refNodes)} mode="tree" row={refRow}>
         {#snippet whenEmpty()}
           <p class="muted">No references.</p>
         {/snippet}
-        {#each selectedRefs as ref (ref.id)}
-          {@const hex = ref.missing ? null : pillHexFor(ref)}
-          <NodeRow
-            title={ref.title}
-            stripeColor={ref.missing ? "#c98a8a" : null}
-            onClick={ref.missing ? undefined : () => dispatch("navigate", { id: ref.id, kind: ref.kind })}
-          >
-            {#snippet trailing()}
-              <span
-                class="ref-type-pill"
-                class:has-color={!!hex}
-                class:missing={ref.missing}
-                style={hex ? `--chip-base: ${hex}` : ""}
-              >{ref.missing ? "Missing" : entryTypeName(ref.entry_type, ref.kind)}</span>
-              {#if !readOnly}
-                <button
-                  type="button"
-                  class="row-action-delete"
-                  aria-label="Remove {ref.title}"
-                  title="Remove"
-                  on:click={() => removeId(ref.id)}
-                >×</button>
-              {/if}
-            {/snippet}
-          </NodeRow>
-        {/each}
-      </NodeList>
+      </ViewNodeList>
     {/snippet}
   </NodeRow>
 </section>
+
+{#snippet refRow(ref: RefNode, ctx: RowCtx<RefNode>)}
+  {@const hex = ref.missing ? null : pillHexFor(ref)}
+  <NodeRow
+    title={ref.title}
+    depth={ctx.depth}
+    stripeColor={ref.missing ? "#c98a8a" : null}
+    onClick={ref.missing ? undefined : () => dispatch("navigate", { id: ref.id, kind: ref.kind })}
+  >
+    {#snippet trailing()}
+      <span
+        class="ref-type-pill"
+        class:has-color={!!hex}
+        class:missing={ref.missing}
+        style={hex ? `--chip-base: ${hex}` : ""}
+      >{ref.missing ? "Missing" : entryTypeName(ref.entry_type, ref.kind)}</span>
+      {#if !readOnly}
+        <button
+          type="button"
+          class="row-action-delete"
+          aria-label="Remove {ref.title}"
+          title="Remove"
+          on:click={() => removeId(ref.id)}
+        >×</button>
+      {/if}
+    {/snippet}
+  </NodeRow>
+{/snippet}
 
 <style>
   .reference-picker {

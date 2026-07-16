@@ -1,9 +1,10 @@
 <script lang="ts">
   import { createEventDispatcher } from "svelte";
-  import NodeList from "@/components/widgets/NodeList.svelte";
   import NodeRow from "@/components/widgets/NodeRow.svelte";
   import GroupCaret from "@/components/widgets/GroupCaret.svelte";
   import CountPill from "@/components/widgets/CountPill.svelte";
+  import ViewNodeList, { type RowCtx } from "@/components/widgets/ViewNodeList.svelte";
+  import { nodeSet } from "@/lib/views/viewResult";
   import { resolveColor } from "@/lib/utils/colors";
   import type {
     Backlink,
@@ -25,6 +26,20 @@
 
   let expanded = false;
 
+  // A non-view surface (ADR-0035 §3, #256): the backlink list lifts to the
+  // degenerate ViewResult via nodeSet() and renders through ViewNodeList like
+  // every other node list — no bespoke NodeList. A Backlink already ≈ EvalNode
+  // (id/title/entry_type); the ONE adapter step is a unique row id, because the
+  // same target node can back-link through several fields — the composite
+  // (id:field_id) keeps keyed rows distinct while `targetId` carries the real
+  // navigation target.
+  type BacklinkNode = Omit<Backlink, "id"> & { id: string; targetId: string };
+  $: backlinkNodes = backlinks.map((link): BacklinkNode => ({
+    ...link,
+    id: `${link.id}:${link.field_id}`,
+    targetId: link.id,
+  }));
+
   function findStructureNodeBySceneId(node: StructureNode | null | undefined, sceneId: string): StructureNode | null {
     if (!node) return null;
     if (node.scene_id === sceneId) return node;
@@ -35,13 +50,13 @@
     return null;
   }
 
-  function backlinkSwatchHex(link: Backlink): string | null {
+  function backlinkSwatchHex(link: BacklinkNode): string | null {
     let instanceColor: string | null | undefined = null;
     if (link.kind === "lore") {
-      const entry = loreEntries.find((e) => e.id === link.id);
+      const entry = loreEntries.find((e) => e.id === link.targetId);
       instanceColor = typeof entry?.metadata?.color === "string" ? entry.metadata.color : null;
     } else if (link.kind === "scene") {
-      instanceColor = findStructureNodeBySceneId(structure?.root, link.id)?.color ?? null;
+      instanceColor = findStructureNodeBySceneId(structure?.root, link.targetId)?.color ?? null;
     }
     return resolveColor(instanceColor, link.entry_type, link.kind, metadataSchema)?.hex ?? null;
   }
@@ -61,29 +76,32 @@
       <CountPill count={backlinks.length} />
     {/snippet}
     {#snippet nested()}
-      <NodeList mode="tree" isEmpty={backlinks.length === 0}>
+      <ViewNodeList
+        result={nodeSet(backlinkNodes)}
+        mode="tree"
+        onClick={(node) => dispatch("navigate", { id: node.targetId, kind: node.kind })}
+        row={backlinkRow}
+      >
         {#snippet whenEmpty()}
           <p class="muted">No incoming references.</p>
         {/snippet}
-        {#each backlinks as link (`${link.id}:${link.field_id}`)}
-          {@const pillHex = backlinkSwatchHex(link)}
-          <NodeRow
-            title={link.title}
-            onClick={() => dispatch("navigate", { id: link.id, kind: link.kind })}
-          >
-            {#snippet trailing()}
-              <span
-                class="backlink-type-pill"
-                class:has-color={!!pillHex}
-                style={pillHex ? `--chip-base: ${pillHex}` : ""}
-              >{metadataSchema?.entry_types[link.entry_type]?.name ?? link.entry_type ?? link.kind}</span>
-            {/snippet}
-          </NodeRow>
-        {/each}
-      </NodeList>
+      </ViewNodeList>
     {/snippet}
   </NodeRow>
 </section>
+
+{#snippet backlinkRow(link: BacklinkNode, ctx: RowCtx<BacklinkNode>)}
+  {@const pillHex = backlinkSwatchHex(link)}
+  <NodeRow title={link.title} depth={ctx.depth} onClick={ctx.onClick}>
+    {#snippet trailing()}
+      <span
+        class="backlink-type-pill"
+        class:has-color={!!pillHex}
+        style={pillHex ? `--chip-base: ${pillHex}` : ""}
+      >{metadataSchema?.entry_types[link.entry_type]?.name ?? link.entry_type ?? link.kind}</span>
+    {/snippet}
+  </NodeRow>
+{/snippet}
 
 <style>
   .scene-backlinks {

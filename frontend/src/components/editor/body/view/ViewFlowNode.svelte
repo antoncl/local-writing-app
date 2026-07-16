@@ -136,15 +136,6 @@
   let fieldKey = $derived(cfg.field?.key ?? "");
   let fieldOp = $derived<FieldOp>(cfg.field?.op ?? "overlap");
   let fieldDef = $derived(fieldKey ? ctx.fieldByKey(fieldKey) : null);
-  // A stored predicate may name a key the roster can't offer — a structural
-  // containment ref (`parent`, seeding a Nest's roots — see defaultView("scene"))
-  // or a field hidden since authoring. Mirror the Organize levels' fallback: show
-  // a readable label, never a blank <select>; the key is preserved exactly as
-  // stored (display-only, until the author re-points the picker).
-  const STRUCTURAL_FIELD_LABELS: Record<string, string> = { parent: "Parent" };
-  function fieldKeyLabel(key: string): string {
-    return ctx.fieldByKey(key)?.name ?? STRUCTURAL_FIELD_LABELS[key] ?? key;
-  }
   let opNeedsValue = $derived(fieldOp !== "set" && fieldOp !== "unset");
   function setField(next: Partial<NonNullable<ViewNodeData["field"]>>) {
     // A value belongs to a specific field. When the field KEY changes, start the
@@ -708,9 +699,6 @@
   <div class="vfield-row">
     <select class="vfield" value={fieldKey} onchange={(e) => setField({ key: e.currentTarget.value })}>
       <option value="">— field —</option>
-      {#if fieldKey && !nodeFields.some((f) => f.key === fieldKey)}
-        <option value={fieldKey}>{fieldKeyLabel(fieldKey)}</option>
-      {/if}
       {#each nodeFields as f (f.key)}
         <option value={f.key}>{f.name}</option>
       {/each}

@@ -53,12 +53,9 @@ export type DesignerContext = {
   // Whether a specific handle (by id) on a node currently has an edge, so a wired
   // port stays filled at rest — not only while hovered (§240).
   handleConnected: (nodeId: string, handleId: string) => boolean;
-  // `tags` = flat tag strings present in this kind's universe (feeds the `tagged`
-  // leaf `<select>`). `knownTagsFor(nodeId)` = the project's scoped roster narrowed
-  // to a node's inferred INPUT type-set (kind + entry_type, ADR-0031 §F), re-emitted
-  // unscoped — feeds the FieldValueEditor → TagPicker "+" for `tags` field values
-  // (#243/#215).
-  tags: string[];
+  // `knownTagsFor(nodeId)` = the project's scoped tag roster narrowed to a node's
+  // inferred INPUT type-set (kind + entry_type, ADR-0031 §F), re-emitted unscoped —
+  // feeds the FieldValueEditor → TagPicker "+" for `tags` field values (#243/#215).
   knownTagsFor: (nodeId: string) => ScopedTag[];
   savedViews: SavedViewOption[];
   // data sources for the hand_picked NodePicker + FieldValueEditor pickers

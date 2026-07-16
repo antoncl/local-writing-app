@@ -14,7 +14,7 @@
   import FieldValueEditor from "@/components/widgets/FieldValueEditor.svelte";
   import NodePicker from "@/components/widgets/NodePicker.svelte";
   import SwatchPicker from "@/components/widgets/SwatchPicker.svelte";
-  import { inputArity, isEmptyValue, outputPayload, promotableSlot, type GraphNodeKind, type PredicateKind, type ViewGraphNode, type ViewHandle, type ViewNodeData } from "@/lib/views/viewGraph";
+  import { defaultFilterKind, inputArity, isEmptyValue, outputPayload, promotableSlot, type GraphNodeKind, type PredicateKind, type ViewGraphNode, type ViewHandle, type ViewNodeData } from "@/lib/views/viewGraph";
   import { nodeSummary } from "@/lib/views/nodeSummary";
   import { useDesignerContext } from "./designerContext";
   import type { MetadataFieldType, MetadataValue, NodePickerRef, ViewGroupByLevel, ViewLeafValue, ViewSort } from "@/lib/types";
@@ -101,11 +101,15 @@
             { value: "descendants_of", label: "Type & subtypes" },
           ] as { value: PredicateKind; label: string }[])
         : []),
-      { value: "tagged", label: "Tagged" },
       { value: "field", label: "Field" },
     ],
   );
-  let filterKind = $derived<PredicateKind>(cfg.filter_kind ?? (hasTypeChoice ? "type" : "tagged"));
+  // Show the predicate <select> only when there's a real choice to make; with a
+  // single option (a single-type kind → just Field) render its editor directly.
+  let showPredicateSelect = $derived(predicateKinds.length > 1);
+  // `tagged` is retired as an authoring predicate — `Field → tags` covers it (and
+  // handles multi-tag correctly); shared with `defaultCfg` so the two can't drift.
+  let filterKind = $derived<PredicateKind>(cfg.filter_kind ?? defaultFilterKind(hasTypeChoice));
   let filterMode = $derived<"keep" | "drop">(cfg.filter_mode ?? "keep");
 
   // Cross-kind authoring warning (ADR-0031 §F, Slice B / #215). §F is about FIELD
@@ -544,15 +548,6 @@
   </select>
 {/snippet}
 
-{#snippet tagWidget(value: string, onSet: (v: string) => void)}
-  <select class="vfield" value={value} onchange={(e) => onSet(e.currentTarget.value)}>
-    <option value="">— pick tag —</option>
-    {#each ctx.tags as tag (tag)}
-      <option value={tag}>{tag}</option>
-    {/each}
-  </select>
-{/snippet}
-
 <!-- The field value widget (§C + #226): the intrinsic `entry_type` field offers
      the closed entry-type set instead of raw text; every other field routes to
      FieldValueEditor by datatype. Parametrized by value + setter for reuse in the
@@ -629,20 +624,6 @@
   {/if}
 {/snippet}
 
-<!-- Tagged leaf slot (§C uniform). -->
-{#snippet tagDefault()}
-  {@render tagWidget(typeof cfg.param?.default === "string" ? cfg.param.default : "", (v) => setParamDefault(v))}
-{/snippet}
-{#snippet tagSlot()}
-  {#if isPromoted}
-    {@render promoteCard(tagDefault)}
-  {:else}
-    <div class="vslot-lit nodrag" role="presentation" use:stopPointerdown>
-      {@render tagWidget(typeof cfg.tagged === "string" ? cfg.tagged : "", (v) => patch({ tagged: v }))}
-      {@render promoteButton()}
-    </div>
-  {/if}
-{/snippet}
 
 {#snippet organizeSection(levels: ViewGroupByLevel[], commit: LevelCommit)}
   <!-- Organize levels (ADR-0037 §8 + Amendment 1): ordered group-by dropdowns
@@ -844,8 +825,6 @@
   {/if}
   {#if kind === "type" || kind === "descendants_of"}
     {@render typeSlot(kind === "descendants_of")}
-  {:else if kind === "tagged"}
-    {@render tagSlot()}
   {:else if kind === "field"}
     {@render fieldEditor()}
   {:else if kind === "filter"}
@@ -853,21 +832,25 @@
       <button type="button" class:on={filterMode === "keep"} onclick={() => patch({ filter_mode: "keep" })}>Keep</button>
       <button type="button" class:on={filterMode === "drop"} onclick={() => patch({ filter_mode: "drop" })}>Drop</button>
     </div>
-    <select
-      class="vfield"
-      value={filterKind}
-      onchange={(e) => changeFilterKind(e.currentTarget.value as PredicateKind)}
-    >
-      {#each predicateKinds as pk (pk.value)}
-        <option value={pk.value}>{pk.label}</option>
-      {/each}
-    </select>
+    <!-- The predicate select is context-dependent: Type / Type & subtypes only
+         appear when the anchor kind has >1 entry_type. When that leaves a single
+         option (a single-type kind → just Field), hide the select and render the
+         editor directly — no zero-choice dropdown. -->
+    {#if showPredicateSelect}
+      <select
+        class="vfield"
+        value={filterKind}
+        onchange={(e) => changeFilterKind(e.currentTarget.value as PredicateKind)}
+      >
+        {#each predicateKinds as pk (pk.value)}
+          <option value={pk.value}>{pk.label}</option>
+        {/each}
+      </select>
+    {/if}
     {#if filterKind === "type"}
       {@render typeSlot(false)}
     {:else if filterKind === "descendants_of"}
       {@render typeSlot(true)}
-    {:else if filterKind === "tagged"}
-      {@render tagSlot()}
     {:else if filterKind === "field"}
       {@render fieldEditor()}
     {/if}

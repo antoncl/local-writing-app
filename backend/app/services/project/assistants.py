@@ -43,6 +43,16 @@ class AssistantEntriesMixin:
         index = self._build_assistant_index()
         entries: list[AssistantEntrySummary] = []
         layer_paths: dict[str, Path] = {}
+        # First-seen ordinal per layer. `index.by_id` is walked machine-layer-
+        # first, then base folder → … → open project (see `_build_node_index`:
+        # `_collect_machine_layer_assistants` runs before the project-layer loop),
+        # so this ordinal is a machine-first layer rank. Making it the LEADING
+        # sort term keeps the roster layer-grouped (Machine bucket first) — the
+        # ADR-0037 §7 assumption the Assistants default's `group_by: source_layer`
+        # relies on under the first-seen bucket rule. Without it the sort
+        # interleaves layers, so a fresh project-layer "Alpha" precedes a machine
+        # "Zed" the moment no `.order.yaml` exists yet (#224).
+        layer_rank: dict[str, int] = {}
         for entry in index.by_id.values():
             if entry.kind != "assistant":
                 continue
@@ -63,19 +73,21 @@ class AssistantEntriesMixin:
                 )
             )
             layer_paths.setdefault(entry.source_layer_id, entry.path.parent)
+            layer_rank.setdefault(entry.source_layer_id, len(layer_rank))
         # Per-layer ordering: read each layer's .order.yaml (if any) and use
-        # it as the primary sort key. Entries not listed in the order file
-        # sort alphabetically by title after the listed ones.
+        # it as the secondary sort key (within a layer). Entries not listed in
+        # the order file sort alphabetically by title after the listed ones.
         order_by_layer: dict[str, dict[str, int]] = {}
         for layer_id, folder in layer_paths.items():
             ordered = self._read_assistants_order(folder)
             order_by_layer[layer_id] = {entry_id: idx for idx, entry_id in enumerate(ordered)}
 
         def sort_key(entry: AssistantEntrySummary):
+            rank = layer_rank.get(entry.source_layer_id, len(layer_rank))
             positions = order_by_layer.get(entry.source_layer_id, {})
             if entry.id in positions:
-                return (0, positions[entry.id], "")
-            return (1, 0, entry.title.lower())
+                return (rank, 0, positions[entry.id], "")
+            return (rank, 1, 0, entry.title.lower())
 
         entries.sort(key=sort_key)
         return AssistantEntryList(entries=entries)

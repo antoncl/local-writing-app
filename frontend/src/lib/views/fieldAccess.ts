@@ -57,13 +57,10 @@ export function isCollectionField(schema: MetadataSchema | null | undefined, key
 // these at the picker is what stops the comparator from ever collapsing an array
 // to a stringly-coerced key. A field whose type is unknown (e.g. the synthetic
 // structural `parent` ref, absent from the schema) is treated as unsortable.
-const UNSORTABLE_FIELD_TYPES = new Set<string>([
-  "multi_select",
-  "tags",
-  "entity_ref",
-  "entity_ref_list",
-  "color",
-]);
+// Derived from COLLECTION_FIELD_TYPES (every set-of-tokens type is unsortable by
+// construction) plus the two scalar-but-orderless types, so a future collection
+// type is excluded automatically rather than drifting into the sort picker.
+const UNSORTABLE_FIELD_TYPES = new Set<string>([...COLLECTION_FIELD_TYPES, "entity_ref", "color"]);
 export function isSortableField(type: string | null | undefined): boolean {
   return type != null && !UNSORTABLE_FIELD_TYPES.has(type);
 }

@@ -862,6 +862,14 @@
             onchange={(e) => setSortKey(i, { field_key: e.currentTarget.value })}
             aria-label={`Sort key ${i + 1} field`}
           >
+            {#if key.field_key && !sortableFields.some((f) => f.key === key.field_key)}
+              <!-- A legacy/cross-roster key on a now-unsortable or absent field: keep it
+                   visible + labelled (the evaluator no-ops it) so the row isn't a blank
+                   select the author can't read or fix. -->
+              <option value={key.field_key}>
+                {(nodeFields.find((f) => f.key === key.field_key)?.name ?? key.field_key) + " — not sortable"}
+              </option>
+            {/if}
             {#each sortableFields as f (f.key)}
               <option value={f.key}>{f.name}</option>
             {/each}

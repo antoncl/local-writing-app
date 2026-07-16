@@ -670,7 +670,7 @@
 
   function defaultCfg(k: GraphNodeKind): ViewNodeData {
     if (k === "filter") return { filter_mode: "keep", filter_kind: defaultFilterKind(hasTypeChoice) };
-    if (k === "sorter") return { sort: { by: "title", dir: "asc" } };
+    if (k === "sorter") return { sort: { by: "field", field_key: "title", dir: "asc" } };
     if (k === "nest") return { match: { field: "", direction: "child_to_parent", by: "ref" } };
     return {};
   }

@@ -132,15 +132,18 @@ describe("sort excludes unorderable fields (#237)", () => {
     fields: {
       title: { name: "Title", type: "text", category: "intrinsic" },
       factions: { name: "Factions", type: "tags", category: "stored" },
+      accent: { name: "Accent", type: "color", category: "stored" },
       rank: { name: "Rank", type: "number", category: "stored" },
     },
   } as unknown as MetadataSchema;
   // Authored (input) order is z, a, m; tag arrays are deliberately anti-sorted so
   // any accidental first-token/joined-string order would visibly reorder them.
+  // `accent` is a SCALAR swatch string (not an array), so only the schema-type
+  // sub-guard — not the Array.isArray backstop — can no-op a sort on it.
   const roster: EvalNode[] = [
-    { id: "z", entry_type: "lore:base", title: "Zed", metadata: { factions: ["beta", "alpha"], rank: 3 } },
-    { id: "a", entry_type: "lore:base", title: "Ann", metadata: { factions: ["alpha"], rank: 1 } },
-    { id: "m", entry_type: "lore:base", title: "Mia", metadata: { factions: ["gamma"], rank: 2 } },
+    { id: "z", entry_type: "lore:base", title: "Zed", metadata: { factions: ["beta", "alpha"], accent: "rust", rank: 3 } },
+    { id: "a", entry_type: "lore:base", title: "Ann", metadata: { factions: ["alpha"], accent: "azure", rank: 1 } },
+    { id: "m", entry_type: "lore:base", title: "Mia", metadata: { factions: ["gamma"], accent: "moss", rank: 2 } },
   ];
   const run = (sort: ViewSort, nodes = roster): string[] =>
     evaluateView({ kind: "lore", expr: { descendants_of: "lore:base" }, sort } as ViewSpec, nodes, { schema: tagSchema }).nodes.map(
@@ -149,6 +152,12 @@ describe("sort excludes unorderable fields (#237)", () => {
 
   it("sorting by a tags field is a no-op — input order is preserved, not array-coerced", () => {
     expect(run({ by: "field", field_key: "factions", dir: "asc" })).toEqual(["z", "a", "m"]);
+  });
+  it("sorting by a scalar-but-orderless field (color) is a no-op via the schema-type guard", () => {
+    // accent is a plain string ("rust"/"azure"/"moss"), so the Array.isArray
+    // backstop never fires — only the schema-type sub-guard no-ops it. Without
+    // that sub-guard the swatches would localeCompare to azure<moss<rust = a,m,z.
+    expect(run({ by: "field", field_key: "accent", dir: "asc" })).toEqual(["z", "a", "m"]);
   });
   it("an unorderable key defers to the next key in a multi-level chain", () => {
     // factions is inert → rank asc decides: a(1), m(2), z(3).

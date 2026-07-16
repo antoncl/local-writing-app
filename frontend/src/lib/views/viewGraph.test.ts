@@ -565,6 +565,26 @@ describe("graphToSpec — half-authored 'field' sort keys are stripped from the 
     const spec = graphToSpec(graph, { kind: "lore" });
     expect(spec.sort).toBeNull();
   });
+
+  it("keeps #93 whole-universe membership but drops the inert sort for an input-less keyless-field Sorter", () => {
+    // #93 promotes an input-less Sorter's group to the whole roster using the RAW
+    // sort, while graphToSpec sanitizes the emitted sort. Pre-fix this pair (UNIVERSE
+    // membership + keyless field sort) 422'd and never saved; the group must now
+    // persist as a valid whole-roster group with no `sort`, matching what the
+    // preview already shows for a not-yet-configured sorter.
+    const output = out({ handles: [{ id: "h0", name: "All" }, { id: "h1", name: "Gods" }] });
+    const s = node("sorter", { sort: { by: "field", dir: "asc" } }, 0); // no field_key
+    const gods = node("descendants_of", { descendants_of: "lore:deity" }, 100);
+    const graph: ViewGraph = {
+      nodes: [output, s, gods],
+      edges: [edge(s.id, OUTPUT_NODE_ID, "h0"), edge(gods.id, OUTPUT_NODE_ID, "h1")],
+    };
+    const spec = graphToSpec(graph, { kind: "lore" });
+    expect(spec.groups).toEqual([
+      { name: "All", expr: { descendants_of: "lore:base" } },
+      { name: "Gods", expr: { descendants_of: "lore:deity" } },
+    ]);
+  });
 });
 
 describe("graphToSpec — orphaned & sorted-empty handles (#93)", () => {

@@ -1012,9 +1012,6 @@ function collectParams(graph: ViewGraph): ViewParam[] {
   return collectParamBindings(graph).map((b) => b.param);
 }
 
-// Serialize the graph reachable from the View node into a ViewSpec. 0–1
-// populated handles → a flat `expr`; 2+ → an ordered `groups` list (ADR-0027).
-// Promoted formals reachable from the output become `params` (#184 Phase 1b).
 // Strip half-authored "field" sort keys (`by:"field"` with no `field_key`) from a
 // then-chain as it enters the emitted spec. Such a key is inert in the evaluator
 // (compareByKey returns 0 with no field_key) but the backend `ViewSort` model
@@ -1034,6 +1031,9 @@ function sanitizeSort(sort: ViewSort | null | undefined): ViewSort | null {
   return kept[0];
 }
 
+// Serialize the graph reachable from the View node into a ViewSpec. 0–1
+// populated handles → a flat `expr`; 2+ → an ordered `groups` list (ADR-0027).
+// Promoted formals reachable from the output become `params` (#184 Phase 1b).
 export function graphToSpec(
   graph: ViewGraph,
   base: { kind: string; sort?: ViewSort | null; schema?: MetadataSchema | null },

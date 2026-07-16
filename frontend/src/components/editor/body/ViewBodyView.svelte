@@ -455,18 +455,22 @@
   // follows it (`match.field: parent`, by ref). `children` is deferred to #217: no
   // node stamps it, so the evaluator has no inverse index to resolve it yet.
   const STRUCTURAL_KINDS = new Set(["scene", "research"]);
-  const PARENT_FIELD_DEF: MetadataFieldDefinition = {
-    name: "Parent",
-    type: "entity_ref",
-    options: [],
-    category: "computed",
-  };
+  // The structural `parent` ref as a computed reference field, scoped to kind `k`
+  // so its value widget (op overlap/disjoint → ReferencePicker) offers that kind's
+  // nodes — without a `picker_config` the picker falls back to the `lore` roster.
+  function parentFieldDef(k: string): MetadataFieldDefinition {
+    return { name: "Parent", type: "entity_ref", options: [], category: "computed", picker_config: { sources: [{ kind: k }] } };
+  }
   // The structural field options for a set of kinds — `parent` when any is a
   // structural (tree) kind, else none. Prepended to a roster, not merged into the
-  // schema-key set, since it has no entry_type membership to intersect over.
+  // schema-key set, since it has no entry_type membership to intersect over. A
+  // user-declared metadata field literally keyed `parent` (rare) takes precedence:
+  // the real field is already in the roster, so skip the synthetic to avoid a
+  // duplicate option (`fieldByKey` likewise resolves the schema field first).
   function structuralFieldOptions(kinds: Iterable<string>): FieldOption[] {
+    if (schema?.fields?.parent) return [];
     for (const k of kinds) {
-      if (STRUCTURAL_KINDS.has(k)) return [{ key: "parent", name: PARENT_FIELD_DEF.name, def: PARENT_FIELD_DEF }];
+      if (STRUCTURAL_KINDS.has(k)) return [{ key: "parent", name: "Parent", def: parentFieldDef(k) }];
     }
     return [];
   }
@@ -594,7 +598,7 @@
       fieldsFor: fieldsForNode,
       rosterWarningFor,
       fieldByKey: (key: string) =>
-        schema?.fields?.[key] ?? (key === "parent" && STRUCTURAL_KINDS.has(kind) ? PARENT_FIELD_DEF : null),
+        schema?.fields?.[key] ?? (key === "parent" && STRUCTURAL_KINDS.has(kind) ? parentFieldDef(kind) : null),
       valueWired: (nodeId: string) => connectedHandleKeys.has(`${nodeId}:${FILTER_VALUE_HANDLE}`),
       handleConnected: (nodeId: string, handleId: string) => connectedHandleKeys.has(`${nodeId}:${handleId}`),
       tags: tagOptions,

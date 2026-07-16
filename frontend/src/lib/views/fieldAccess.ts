@@ -51,6 +51,23 @@ export function isCollectionField(schema: MetadataSchema | null | undefined, key
   return t != null && COLLECTION_FIELD_TYPES.has(t);
 }
 
+// Field types with NO natural total order — a set of tokens (tags/multi_select/
+// ref list), an opaque reference id, or a named color swatch has no defined
+// position to sort by (#237). Views sort offers only orderable fields; excluding
+// these at the picker is what stops the comparator from ever collapsing an array
+// to a stringly-coerced key. A field whose type is unknown (e.g. the synthetic
+// structural `parent` ref, absent from the schema) is treated as unsortable.
+const UNSORTABLE_FIELD_TYPES = new Set<string>([
+  "multi_select",
+  "tags",
+  "entity_ref",
+  "entity_ref_list",
+  "color",
+]);
+export function isSortableField(type: string | null | undefined): boolean {
+  return type != null && !UNSORTABLE_FIELD_TYPES.has(type);
+}
+
 export function isEmpty(v: unknown): boolean {
   return v === null || v === undefined || v === "" || (Array.isArray(v) && v.length === 0);
 }

@@ -38,7 +38,7 @@ import type {
   ViewSpec,
 } from "@/lib/types";
 import { kindRootEntryTypeId } from "@/lib/utils/schemaTypeHelpers";
-import { asArray, fieldValue, fieldValueList, isCollectionField, isEmpty } from "@/lib/views/fieldAccess";
+import { asArray, fieldValue, fieldValueList, isCollectionField, isEmpty, isSortableField } from "@/lib/views/fieldAccess";
 import { applyGroupBy } from "@/lib/views/groupBy";
 import { projectReferences } from "@/lib/views/referenceIndex";
 
@@ -1364,6 +1364,14 @@ function compareByKey<T extends EvalNode>(
   if (key.by === "field" && key.field_key) {
     const av = fieldValue(a, key.field_key, schema);
     const bv = fieldValue(b, key.field_key, schema);
+    // Collection/opaque fields (tags, multi_select, ref lists, single refs,
+    // color) have no natural order (#237). The picker no longer offers them, but
+    // a legacy/hand-authored spec might still name one — treat as a tie (defer to
+    // the next key / input order) rather than collapse a set to a stringly-
+    // coerced key. The array check backstops the schema-less first render, where
+    // the type is not yet known but a multi-valued field already reads as one.
+    const ftype = schema?.fields?.[key.field_key]?.type;
+    if ((ftype != null && !isSortableField(ftype)) || Array.isArray(av) || Array.isArray(bv)) return 0;
     const ae = isEmpty(av);
     const be = isEmpty(bv);
     if (ae || be) return ae === be ? 0 : ae ? 1 : -1;

@@ -19,6 +19,8 @@
   import { workspaceLayout, isEditorPanelId } from "@/lib/stores/workspaceLayout.svelte";
   import { flattenPanels, subtreeMinMain } from "@/lib/stores/workspaceLayout.serialize";
   import { panelRegistry } from "@/lib/stores/panelRegistry.svelte";
+  import RegionActions from "./RegionActions.svelte";
+  import RegionBody from "./RegionBody.svelte";
   import { WORKSPACE_KEY, type WorkspaceEditor } from "./workspaceContext";
 
   let { node }: { node: LayoutNode } = $props();
@@ -252,8 +254,8 @@
           {#if active}
             {#if isEditorPanelId(active)}
               {@render editor.actions(active)}
-            {:else if panelRegistry.get(active)?.actions}
-              {@render panelRegistry.get(active)!.actions!()}
+            {:else}
+              <RegionActions id={active} />
             {/if}
           {/if}
           <button
@@ -283,8 +285,8 @@
         <div class="ws-doc" class:hidden-doc={tab !== active}>
           {#if isEditorPanelId(tab)}
             {@render editor.body(tab)}
-          {:else if panelRegistry.get(tab)}
-            {@render panelRegistry.get(tab)!.body()}
+          {:else}
+            <RegionBody id={tab} />
           {/if}
         </div>
       {/each}

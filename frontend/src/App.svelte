@@ -67,7 +67,6 @@
   } from "@/lib/stores/schema";
   import { implicitContextMatcherStore } from "@/lib/stores/derived";
   import { paneViews } from "@/lib/stores/paneViews.svelte";
-  import ViewSwitcher from "@/components/widgets/ViewSwitcher.svelte";
   import { focusedDocumentStore } from "@/lib/stores/editorFocus";
   import { workspaceLayout, isEditorPanelId } from "@/lib/stores/workspaceLayout.svelte";
   import { type PresetName } from "@/lib/stores/workspaceLayout.serialize";
@@ -97,6 +96,7 @@
     StructureDocument,
     StructureNode,
     TodoItem,
+    ViewSpec,
   } from "@/lib/types";
 
   type AppState =
@@ -544,13 +544,11 @@
   let metadataSchema = $derived($metadataSchemaStore);
   let promptEntries = $derived($promptEntriesStore);
   let assistantEntries = $derived($assistantEntriesStore);
-  // Selected-view specs per switchable pane (0.5.0 step 4, #81, doc §5). These
-  // runes-side reads of paneViews bridge to the legacy `$:` panes by flowing in
-  // as props (feedback_svelte5_reactivity_traps). The view is authoritative for
-  // its own shape (ADR-0037 §3), so no presentation flows alongside the spec.
-  let loreViewSpec = $derived(paneViews.specFor("lore", metadataSchema));
-  let assistantViewSpec = $derived(paneViews.specFor("assistant", metadataSchema));
-  let promptViewSpec = $derived(paneViews.specFor("prompt", metadataSchema));
+  // The per-pane selected-view spec is no longer derived here: an explicit-view
+  // pane declares `view: { kind }` on its region entry, and the central RegionBody
+  // outlet resolves `paneViews.specFor(kind, schema)` and hands it to the body
+  // snippet (#258, ADR-0022 / ADR-0032 §D Amdt 1) — one source drives the selector
+  // and the list, so App no longer wires the switcher or the spec per pane.
   // Draft/Research tree evaluation now lives inside StructureTree (#112): it
   // derives one ViewResult from `structure` + the pane's viewSpec, replacing the
   // App-side double-eval (color annotations + membership pruning) that stood here.
@@ -618,12 +616,12 @@
   <RegionRegistrar
     regions={{
       project: { title: "Project", body: projectBody },
-      outline: { title: "Draft", body: outlineBody, actions: outlineActions },
-      lore: { title: "Lore", body: loreBody, actions: loreActions },
-      research: { title: "Research", body: researchBody },
-      prompts: { title: "Prompts", body: promptsBody, actions: promptsActions, closable: true, onClose: closeRegion("prompts") },
+      outline: { title: "Draft", body: outlineBody, view: { kind: "scene", switcher: true } },
+      lore: { title: "Lore", body: loreBody, actions: loreActions, view: { kind: "lore", switcher: true } },
+      research: { title: "Research", body: researchBody, view: { kind: "research" } },
+      prompts: { title: "Prompts", body: promptsBody, actions: promptsActions, view: { kind: "prompt" }, closable: true, onClose: closeRegion("prompts") },
       mutations: { title: "Reusable mutations", body: mutationsBody, actions: mutationsActions, closable: true, onClose: closeRegion("mutations") },
-      assistants: { title: "Assistants", body: assistantsBody, actions: assistantsActions, closable: true, onClose: closeRegion("assistants") },
+      assistants: { title: "Assistants", body: assistantsBody, actions: assistantsActions, view: { kind: "assistant", switcher: true }, closable: true, onClose: closeRegion("assistants") },
       chats: { title: "Chats", body: chatsBody, actions: chatsActions, closable: true, onClose: closeRegion("chats") },
       todo: { title: "TODO", body: todoBody, actions: todoBarActions },
       search: { title: "Search", body: searchBody },
@@ -656,26 +654,24 @@
     </div>
   {/snippet}
 
-  {#snippet outlineActions()}
-    <ViewSwitcher kind="scene" schema={metadataSchema} />
-  {/snippet}
-  {#snippet outlineBody()}
+  {#snippet outlineBody(viewSpec: ViewSpec | undefined)}
     <div class="pane-content">
+      {#if viewSpec}
       <StructureTree
         config={treeActions.manuscriptTree}
         {structure}
-        viewSpec={paneViews.specFor("scene", metadataSchema)}
+        {viewSpec}
         draftTitles={draftTitleByScene}
         sectionLabel="Scenes"
         emptyLabel="No scenes yet."
         {run}
         onRequestDelete={(node) => treeActions.requestDeleteTreeNode(treeActions.manuscriptTree, node)}
       />
+      {/if}
     </div>
   {/snippet}
 
   {#snippet loreActions()}
-      <ViewSwitcher kind="lore" schema={metadataSchema} />
       <!-- The add-menu popover is owned by Lore's ViewNodeList (mode-agnostic,
            #112 4c-iv); this header button just drives its imperative handles. -->
       <div class="tree-menu-anchor">
@@ -690,29 +686,31 @@
         >+</button>
       </div>
   {/snippet}
-  {#snippet loreBody()}
+  {#snippet loreBody(viewSpec: ViewSpec | undefined)}
     <div class="pane-content">
       <Lore
         bind:this={loreRef}
         entries={loreEntries}
-        viewSpec={loreViewSpec}
+        {viewSpec}
         onOpenEntry={(id) => editorPanes.openLore(id)}
       />
     </div>
   {/snippet}
 
-  {#snippet researchBody()}
+  {#snippet researchBody(viewSpec: ViewSpec | undefined)}
     <div class="pane-content">
+      {#if viewSpec}
       <StructureTree
         config={treeActions.researchTree}
         structure={researchStructure}
-        viewSpec={paneViews.specFor("research", metadataSchema)}
+        {viewSpec}
         draftTitles={draftTitleByScene}
         sectionLabel="Notes"
         emptyLabel="No topics or notes yet."
         {run}
         onRequestDelete={(node) => treeActions.requestDeleteTreeNode(treeActions.researchTree, node)}
       />
+      {/if}
     </div>
   {/snippet}
 
@@ -731,12 +729,12 @@
       >+</button>
     </div>
   {/snippet}
-  {#snippet promptsBody()}
+  {#snippet promptsBody(viewSpec: ViewSpec | undefined)}
     <div class="pane-content schema-list">
       <Prompts
         bind:this={promptsRef}
         entries={promptEntries}
-        viewSpec={promptViewSpec}
+        {viewSpec}
         onOpenEntry={(id) => editorPanes.openPrompt(id)}
         onNewEntry={(entryType) => treeActions.newPromptEntry(entryType)}
       />
@@ -760,15 +758,14 @@
   {/snippet}
 
   {#snippet assistantsActions()}
-      <ViewSwitcher kind="assistant" schema={metadataSchema} />
       <button class="pin-button" type="button" title="Add assistant" aria-label="Add assistant" onmousedown={(event) => event.stopPropagation()} onclick={() => treeActions.newAssistantEntry()}>+</button>
       <button class="pin-button" type="button" title="Assistant tag colors" onmousedown={(event) => event.stopPropagation()} onclick={() => (assistantTagManagerOpen = true)}>Tags…</button>
   {/snippet}
-  {#snippet assistantsBody()}
+  {#snippet assistantsBody(viewSpec: ViewSpec | undefined)}
     <div class="pane-content schema-list">
       <Assistants
         entries={assistantEntries}
-        viewSpec={assistantViewSpec}
+        {viewSpec}
         onOpenEntry={(id) => editorPanes.openAssistant(id)}
         onReorder={reorderAssistantsInLayer}
       />

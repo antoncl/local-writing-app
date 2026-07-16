@@ -13,13 +13,34 @@
 // (dynamic, always closable) handled by the editor hooks on <Workspace/>.
 
 import type { Snippet } from "svelte";
-import type { PanelId } from "@/lib/types";
+import type { PanelId, ViewSpec } from "@/lib/types";
+
+// An explicit-view pane declares itself here (ADR-0022 / ADR-0032 §D Amdt 1):
+// the pane's anchor `kind` drives BOTH the handle-bar view selector AND the spec
+// its body renders through, from ONE source — so the selector is no longer a
+// per-pane widget App hand-places (the drift seam #258 closes). The central
+// region outlets (RegionActions / RegionBody) render the switcher and resolve
+// `paneViews.specFor(kind, schema)` — reading the schema from `metadataSchemaStore`
+// so it stays live (the registry entry is captured once at mount, so a reactive
+// value baked in here would freeze). `switcher` gates *exposure* (ADR-0022 v1:
+// Draft/Lore/Assistants) — a config on the one mechanism, not a licence to
+// re-place it; a fixed-view pane (Research/Prompts) omits it and just receives
+// its resolved default spec.
+export type RegionView = {
+  kind: string;
+  switcher?: boolean;
+};
 
 export type RegionEntry = {
   title: string;
-  body: Snippet;
-  // Trailing tab-bar affordances (view switcher, add buttons, …).
+  // Receives the resolved ViewSpec when the entry declares `view`; a non-view
+  // pane ignores the argument.
+  body: Snippet<[ViewSpec | undefined]>;
+  // Trailing tab-bar affordances (add buttons, …). The view selector is NOT
+  // here anymore — it comes from `view.switcher`, rendered centrally.
   actions?: Snippet;
+  // Present ⇒ an explicit-view pane; the outlets render the selector + spec.
+  view?: RegionView;
   // Permanent regions (Draft, Lore) omit this; on-demand ones (Prompts, Chats)
   // set closable + an onClose that also resets their open-state flag.
   closable?: boolean;

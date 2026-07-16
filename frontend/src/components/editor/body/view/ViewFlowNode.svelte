@@ -14,7 +14,7 @@
   import FieldValueEditor from "@/components/widgets/FieldValueEditor.svelte";
   import NodePicker from "@/components/widgets/NodePicker.svelte";
   import SwatchPicker from "@/components/widgets/SwatchPicker.svelte";
-  import { inputArity, isEmptyValue, outputPayload, promotableSlot, type GraphNodeKind, type PredicateKind, type ViewGraphNode, type ViewHandle, type ViewNodeData } from "@/lib/views/viewGraph";
+  import { defaultFilterKind, inputArity, isEmptyValue, outputPayload, promotableSlot, type GraphNodeKind, type PredicateKind, type ViewGraphNode, type ViewHandle, type ViewNodeData } from "@/lib/views/viewGraph";
   import { nodeSummary } from "@/lib/views/nodeSummary";
   import { useDesignerContext } from "./designerContext";
   import type { MetadataFieldType, MetadataValue, NodePickerRef, ViewGroupByLevel, ViewLeafValue, ViewSort } from "@/lib/types";
@@ -104,9 +104,12 @@
       { value: "field", label: "Field" },
     ],
   );
+  // Show the predicate <select> only when there's a real choice to make; with a
+  // single option (a single-type kind → just Field) render its editor directly.
+  let showPredicateSelect = $derived(predicateKinds.length > 1);
   // `tagged` is retired as an authoring predicate — `Field → tags` covers it (and
-  // handles multi-tag correctly), so a single-type kind now defaults to `field`.
-  let filterKind = $derived<PredicateKind>(cfg.filter_kind ?? (hasTypeChoice ? "type" : "field"));
+  // handles multi-tag correctly); shared with `defaultCfg` so the two can't drift.
+  let filterKind = $derived<PredicateKind>(cfg.filter_kind ?? defaultFilterKind(hasTypeChoice));
   let filterMode = $derived<"keep" | "drop">(cfg.filter_mode ?? "keep");
 
   // Cross-kind authoring warning (ADR-0031 §F, Slice B / #215). §F is about FIELD
@@ -833,7 +836,7 @@
          appear when the anchor kind has >1 entry_type. When that leaves a single
          option (a single-type kind → just Field), hide the select and render the
          editor directly — no zero-choice dropdown. -->
-    {#if predicateKinds.length > 1}
+    {#if showPredicateSelect}
       <select
         class="vfield"
         value={filterKind}

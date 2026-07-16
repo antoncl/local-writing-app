@@ -854,13 +854,21 @@ function commonLeafExpr(slot: string, d: ViewGraphNode["data"], wiredValue?: Vie
 // A Filter's predicate → a leaf ViewExpr (or null when unconfigured). A wired
 // value source on the Filter's `value` handle (#196) overrides the field's
 // authored literal / promoted formal.
+// The schema-aware default predicate for a NEW Filter, shared by the two editor
+// sites that must agree: ViewFlowNode's `filterKind` read-fallback and
+// ViewBodyView's `defaultCfg` eager writer. `type` when the anchor kind has a
+// type choice, else `field` (`tagged` retired, #270). Single source so the two
+// can't drift (they had to be edited in lockstep before this existed).
+export function defaultFilterKind(hasTypeChoice: boolean): PredicateKind {
+  return hasTypeChoice ? "type" : "field";
+}
+
 // The predicate a Filter narrows on — its `filter_kind`, defaulting to `type` for
 // an unconfigured filter. Written ONCE so the promote target (`promotableSlot`)
 // and the lowering target (`predicateExpr`) can't drift apart. NB the editor UI
-// picks a schema-aware default (`field` when the anchor kind has no type choice,
-// ViewFlowNode `filterKind` + `defaultCfg`) — a concern this structural layer has
-// no schema access to; `defaultCfg` writes `filter_kind` eagerly on drop, so this
-// bare `type` fallback is only a net for a filter that never got one.
+// picks a schema-aware default (`defaultFilterKind`) — a concern this structural
+// layer has no schema access to; `defaultCfg` writes `filter_kind` eagerly on
+// drop, so this bare `type` fallback is only a net for a filter that never got one.
 function filterLeafKind(node: ViewGraphNode): PredicateKind {
   return node.data.filter_kind ?? "type";
 }

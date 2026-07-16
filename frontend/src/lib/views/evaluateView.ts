@@ -1375,7 +1375,7 @@ function compareByKey<T extends EvalNode>(
     const ae = isEmpty(av);
     const be = isEmpty(bv);
     if (ae || be) return ae === be ? 0 : ae ? 1 : -1;
-    return dir * compareScalar(av, bv);
+    return dir * compareScalar(av, bv, ftype);
   }
   return 0;
 }
@@ -1398,14 +1398,22 @@ function sortNodes<T extends EvalNode>(
   });
 }
 
-function compareScalar(a: unknown, b: unknown): number {
+// Compare two scalar field values. Numeric comparison applies ONLY to genuinely
+// numeric field types (`number`, and computed counters/cost); a text field —
+// including the intrinsic `title` — always sorts lexicographically, even when its
+// values look like numbers ("2" before "10" is wrong for a title). When the field
+// type is unknown (schema-less first render), infer from the values so a number
+// field doesn't flip to string order for a frame.
+function compareScalar(a: unknown, b: unknown, ftype: string | null | undefined): number {
   const ae = isEmpty(a);
   const be = isEmpty(b);
   if (ae && be) return 0;
   if (ae) return 1; // empties sort last regardless of direction? keep simple: after
   if (be) return -1;
-  const na = Number(a);
-  const nb = Number(b);
-  if (!Number.isNaN(na) && !Number.isNaN(nb)) return na - nb;
+  if (ftype === "number" || ftype === "computed" || ftype == null) {
+    const na = Number(a);
+    const nb = Number(b);
+    if (!Number.isNaN(na) && !Number.isNaN(nb)) return na - nb;
+  }
   return String(a).localeCompare(String(b), undefined, { sensitivity: "base" });
 }

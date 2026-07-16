@@ -188,6 +188,40 @@ describe("sort excludes unorderable fields (#237)", () => {
   });
 });
 
+describe("scalar collation is type-driven (#237): text lexicographic, number numeric", () => {
+  const schema = {
+    version: 1,
+    entry_types: { "lore:base": { name: "Lore", kind: "lore", abstract: true, fields: [] } },
+    fields: {
+      title: { name: "Title", type: "text", category: "intrinsic" },
+      code: { name: "Code", type: "text", category: "stored" }, // numeric-LOOKING text
+      seq: { name: "Seq", type: "number", category: "stored" },
+    },
+  } as unknown as MetadataSchema;
+  // Titles + a text `code` field both hold values that look numeric; only the
+  // real number field `seq` should order numerically.
+  const roster: EvalNode[] = [
+    { id: "n2", entry_type: "lore:base", title: "2", metadata: { code: "2", seq: 2 } },
+    { id: "n10", entry_type: "lore:base", title: "10", metadata: { code: "10", seq: 10 } },
+    { id: "n1", entry_type: "lore:base", title: "1", metadata: { code: "1", seq: 1 } },
+  ];
+  const run = (sort: ViewSort): string[] =>
+    evaluateView({ kind: "lore", expr: { descendants_of: "lore:base" }, sort } as ViewSpec, roster, { schema }).nodes.map((n) => n.id);
+
+  it("a TEXT field sorts lexicographically even when the values look numeric (1, 10, 2)", () => {
+    expect(run({ by: "field", field_key: "code", dir: "asc" })).toEqual(["n1", "n10", "n2"]);
+  });
+  it("the intrinsic title (a text field) sorts lexicographically via the field path", () => {
+    expect(run({ by: "field", field_key: "title", dir: "asc" })).toEqual(["n1", "n10", "n2"]);
+  });
+  it("the legacy by:\"title\" fast-path agrees — also lexicographic", () => {
+    expect(run({ by: "title", dir: "asc" })).toEqual(["n1", "n10", "n2"]);
+  });
+  it("a real NUMBER field sorts numerically (1, 2, 10)", () => {
+    expect(run({ by: "field", field_key: "seq", dir: "asc" })).toEqual(["n1", "n2", "n10"]);
+  });
+});
+
 describe("isBareDescendantsOf (dense-null tolerant whole-roster detection)", () => {
   it("accepts a sparse whole-roster expr", () => {
     expect(isBareDescendantsOf({ descendants_of: "lore:base" })).toBe(true);

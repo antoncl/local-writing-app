@@ -857,7 +857,7 @@ function commonLeafExpr(slot: string, d: ViewGraphNode["data"], wiredValue?: Vie
 // The predicate a Filter narrows on — its `filter_kind`, defaulting to `type` for
 // an unconfigured filter. Written ONCE so the promote target (`promotableSlot`)
 // and the lowering target (`predicateExpr`) can't drift apart. NB the editor UI
-// picks a schema-aware default (`tagged` when the anchor kind has no type choice,
+// picks a schema-aware default (`field` when the anchor kind has no type choice,
 // ViewFlowNode `filterKind` + `defaultCfg`) — a concern this structural layer has
 // no schema access to; `defaultCfg` writes `filter_kind` eagerly on drop, so this
 // bare `type` fallback is only a net for a filter that never got one.

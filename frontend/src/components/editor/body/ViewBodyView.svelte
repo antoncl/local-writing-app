@@ -560,8 +560,6 @@
     const thin = !fieldsForNode(nodeId).some((o) => o.def.category !== "intrinsic");
     return { kinds, thin };
   }
-  // Tags present in this kind's universe (contextual — avoids a separate store).
-  let tagOptions = $derived(collectTags(universe));
   // Per-node tag roster (#243 → #215): tags whose scope matches the node's inferred
   // INPUT type-set — kind AND (when the tag narrows to entry_types) type, the
   // "input pipe". Re-emitted unscoped so the TagPicker shows the whole matched set;
@@ -572,19 +570,6 @@
       .filter((t) => tagAppliesToInput(t.scope, ts, typeResolvers.descendantsOf))
       .map((t) => ({ ...t, scope: { sources: [] } }));
   }
-  function collectTags(nodes: EvalNode[]): string[] {
-    const set = new Set<string>();
-    for (const n of nodes) {
-      const raw = n.metadata?.tags;
-      const arr = Array.isArray(raw) ? raw : typeof raw === "string" ? raw.split(",") : [];
-      for (const t of arr) {
-        const v = String(t).trim();
-        if (v) set.add(v);
-      }
-    }
-    return [...set].sort();
-  }
-
   // ---- designer context for the custom nodes ----
   setDesignerContext(
     (): DesignerContext => ({
@@ -601,7 +586,6 @@
         schema?.fields?.[key] ?? (key === "parent" && STRUCTURAL_KINDS.has(kind) ? parentFieldDef(kind) : null),
       valueWired: (nodeId: string) => connectedHandleKeys.has(`${nodeId}:${FILTER_VALUE_HANDLE}`),
       handleConnected: (nodeId: string, handleId: string) => connectedHandleKeys.has(`${nodeId}:${handleId}`),
-      tags: tagOptions,
       knownTagsFor,
       savedViews,
       loreEntries,
@@ -684,7 +668,7 @@
   ];
 
   function defaultCfg(k: GraphNodeKind): ViewNodeData {
-    if (k === "filter") return { filter_mode: "keep", filter_kind: hasTypeChoice ? "type" : "tagged" };
+    if (k === "filter") return { filter_mode: "keep", filter_kind: hasTypeChoice ? "type" : "field" };
     if (k === "sorter") return { sort: { by: "title", dir: "asc" } };
     if (k === "nest") return { match: { field: "", direction: "child_to_parent", by: "ref" } };
     return {};

@@ -1015,6 +1015,25 @@ function collectParams(graph: ViewGraph): ViewParam[] {
 // Serialize the graph reachable from the View node into a ViewSpec. 0–1
 // populated handles → a flat `expr`; 2+ → an ordered `groups` list (ADR-0027).
 // Promoted formals reachable from the output become `params` (#184 Phase 1b).
+// Strip half-authored "field" sort keys (`by:"field"` with no `field_key`) from a
+// then-chain as it enters the emitted spec. Such a key is inert in the evaluator
+// (compareByKey returns 0 with no field_key) but the backend `ViewSort` model
+// rejects it, silently 422-ing every autosave until a field is picked (#254). The
+// designer keeps the key in the graph (`cfg.sort`) so the row stays visible and
+// the author can finish choosing a field — only the wire/persist spec is cleaned.
+function sanitizeSort(sort: ViewSort | null | undefined): ViewSort | null {
+  if (!sort) return null;
+  const kept: ViewSort[] = [];
+  for (let s: ViewSort | null | undefined = sort; s; s = s.then) {
+    if (s.by === "field" && !s.field_key) continue;
+    const { then: _then, ...rest } = s;
+    kept.push(rest as ViewSort);
+  }
+  if (kept.length === 0) return null;
+  for (let i = kept.length - 1; i > 0; i--) kept[i - 1].then = kept[i];
+  return kept[0];
+}
+
 export function graphToSpec(
   graph: ViewGraph,
   base: { kind: string; sort?: ViewSort | null; schema?: MetadataSchema | null },
@@ -1043,7 +1062,7 @@ export function graphToSpec(
     return withParams({
       kind: base.kind,
       expr: seg ? materializeOuter(seg.built, universeExpr) : null,
-      sort: seg?.sort ?? base.sort ?? null,
+      sort: sanitizeSort(seg?.sort ?? base.sort ?? null),
       ...(groupBy.length > 0 ? { group_by: groupBy } : {}),
     });
   }
@@ -1052,13 +1071,14 @@ export function graphToSpec(
   // `ViewGroupSpec.group_by`. A top-level (output-node) group_by does not apply.
   const groups: ViewGroupSpec[] = populated.map((s, i) => {
     const g: ViewGroupSpec = { name: s.handle.name?.trim() || `Group ${i + 1}`, expr: materializeOuter(s.built, universeExpr) };
-    if (s.sort) g.sort = s.sort;
+    const gs = sanitizeSort(s.sort);
+    if (gs) g.sort = gs;
     if (s.handle.color) g.color = s.handle.color;
     const gb = s.handle.group_by?.filter((l) => l.field) ?? [];
     if (gb.length > 0) g.group_by = gb;
     return g;
   });
-  return withParams({ kind: base.kind, groups, sort: base.sort ?? null });
+  return withParams({ kind: base.kind, groups, sort: sanitizeSort(base.sort ?? null) });
 }
 
 // Flat single-segment lowering — the root `expr` of a designer graph, ignoring

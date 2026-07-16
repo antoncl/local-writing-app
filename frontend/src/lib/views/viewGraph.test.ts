@@ -521,6 +521,52 @@ describe("sorter (per-segment sort)", () => {
   });
 });
 
+describe("graphToSpec — half-authored 'field' sort keys are stripped from the spec (#254)", () => {
+  // A Sorter with `by:"field"` and no field_key is a legitimate transient
+  // authoring state (row added, "Field…" chosen, field not yet picked). It is
+  // inert in the evaluator but the backend ViewSort model rejects it, silently
+  // 422-ing every autosave. graphToSpec must keep it out of the emitted spec.
+  it("drops a sole keyless field sort → flat sort is null (manual/stored order)", () => {
+    const src = node("type", { type: "lore:character" }, 0);
+    const s = node("sorter", { sort: { by: "field", dir: "asc" } }, 100);
+    const graph: ViewGraph = {
+      nodes: [out(), src, s],
+      edges: [edge(src.id, s.id), edge(s.id, OUTPUT_NODE_ID)],
+    };
+    const spec = graphToSpec(graph, { kind: "lore" });
+    expect(spec.sort).toBeNull();
+  });
+
+  it("splices a keyless field key out of the middle of a chain, keeping valid keys", () => {
+    const chain = {
+      by: "field" as const,
+      dir: "asc" as const, // no field_key → inert, must be dropped
+      then: { by: "title" as const, dir: "desc" as const },
+    };
+    const src = node("type", { type: "lore:character" }, 0);
+    const s = node("sorter", { sort: chain }, 100);
+    const graph: ViewGraph = {
+      nodes: [out(), src, s],
+      edges: [edge(src.id, s.id), edge(s.id, OUTPUT_NODE_ID)],
+    };
+    const spec = graphToSpec(graph, { kind: "lore" });
+    expect(spec.sort).toEqual({ by: "title", dir: "desc" });
+  });
+
+  it("omits a group's sort when it is only a keyless field key", () => {
+    const output = out({ handles: [{ id: "h0", name: "Cast" }] });
+    const cast = node("type", { type: "lore:character" }, 0);
+    const s = node("sorter", { sort: { by: "field", dir: "asc" } }, 50);
+    const graph: ViewGraph = {
+      nodes: [output, cast, s],
+      edges: [edge(cast.id, s.id), edge(s.id, OUTPUT_NODE_ID, "h0")],
+    };
+    // Single populated handle lowers to the flat form; the inert sort is stripped.
+    const spec = graphToSpec(graph, { kind: "lore" });
+    expect(spec.sort).toBeNull();
+  });
+});
+
 describe("graphToSpec — orphaned & sorted-empty handles (#93)", () => {
   it("an edge whose targetHandle names no real handle is adopted by the first handle", () => {
     const output = out({ handles: [{ id: "h0", name: "Cast" }, { id: "h1", name: "Gods" }] });

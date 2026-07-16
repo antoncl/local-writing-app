@@ -7,10 +7,11 @@
   // and navigates to the originating scene. v1.0's slider + raw effective-
   // values box are gone — the real card is the trust surface now (ADR-0013);
   // editing still lives in the prose (ADR-0006).
-  import NodeList from "@/components/widgets/NodeList.svelte";
   import NodeRow from "@/components/widgets/NodeRow.svelte";
   import GroupCaret from "@/components/widgets/GroupCaret.svelte";
   import CountPill from "@/components/widgets/CountPill.svelte";
+  import ViewNodeList, { type RowCtx } from "@/components/widgets/ViewNodeList.svelte";
+  import { nodeSet } from "@/lib/views/viewResult";
   import {
     mutationUnitGroupFields,
     mutationUnitGroupLabel,
@@ -32,6 +33,23 @@
 
   let expanded = $state(false);
 
+  // A non-view surface (ADR-0035 §3, #256): the unit list lifts to the degenerate
+  // ViewResult via nodeSet() and renders through ViewNodeList like every other
+  // node list. A MutationUnitGroup isn't a node, so a thin adapter stamps EvalNode
+  // identity (id/title/entry_type) and carries the source unit + its scrubber
+  // index — the list and the MutationScrubber strip are two views of ONE ordered
+  // dataset, so the row keeps its index to drive activeIndex/onSelect.
+  type MutationNode = { id: string; entry_type: string; title: string; unit: MutationUnitGroup; index: number };
+  let unitNodes = $derived(
+    units.map((unit, i): MutationNode => ({
+      id: unit.unitId,
+      entry_type: "mutation",
+      title: mutationUnitGroupLabel(unit),
+      unit,
+      index: i,
+    })),
+  );
+
   function detailFor(unit: MutationUnitGroup): string {
     const scene = unit.records[0]?.scene_path ?? "";
     // A one-row unit's label already names its field; multi-row rows list them.
@@ -51,24 +69,25 @@
         <CountPill count={units.length} />
       {/snippet}
       {#snippet nested()}
-        <NodeList mode="tree" isEmpty={false}>
-          {#each units as unit, i (unit.unitId)}
-            <NodeRow
-              title={mutationUnitGroupLabel(unit)}
-              detail={detailFor(unit)}
-              active={activeIndex === i + 1}
-              onClick={() => {
-                onSelect?.(i + 1);
-                const record = unit.records[0];
-                if (record) onNavigate?.({ id: record.scene_id, kind: "scene" });
-              }}
-            />
-          {/each}
-        </NodeList>
+        <ViewNodeList
+          result={nodeSet(unitNodes)}
+          mode="tree"
+          active={(node) => activeIndex === node.index + 1}
+          onClick={(node) => {
+            onSelect?.(node.index + 1);
+            const record = node.unit.records[0];
+            if (record) onNavigate?.({ id: record.scene_id, kind: "scene" });
+          }}
+          row={mutationRow}
+        />
       {/snippet}
     </NodeRow>
   </section>
 {/if}
+
+{#snippet mutationRow(node: MutationNode, ctx: RowCtx<MutationNode>)}
+  <NodeRow title={node.title} detail={detailFor(node.unit)} depth={ctx.depth} active={ctx.active} onClick={ctx.onClick} />
+{/snippet}
 
 <style>
   .mutation-timeline {

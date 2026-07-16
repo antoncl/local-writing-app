@@ -444,6 +444,32 @@
     });
     return out;
   }
+  // Structural containment ref (ADR-0029 §D `computed` category / #217): scenes
+  // and research notes carry a `parent` metadata ref stamped from the structure
+  // tree (`structureNodes.ts`), which drives `defaultView()`'s containment Nest.
+  // It's not a schema-declared field, so it's absent from the entry_type rosters
+  // — leaving every field picker (filter predicate, Nest link, field_of, group_by)
+  // unable to show, select, or RESTORE it (#251). Inject it as a first-class
+  // computed reference field so all those pickers offer it uniformly. `entity_ref`
+  // + non-intrinsic category = joinable AND groupable, matching how the evaluator
+  // follows it (`match.field: parent`, by ref). `children` is deferred to #217: no
+  // node stamps it, so the evaluator has no inverse index to resolve it yet.
+  const STRUCTURAL_KINDS = new Set(["scene", "research"]);
+  const PARENT_FIELD_DEF: MetadataFieldDefinition = {
+    name: "Parent",
+    type: "entity_ref",
+    options: [],
+    category: "computed",
+  };
+  // The structural field options for a set of kinds — `parent` when any is a
+  // structural (tree) kind, else none. Prepended to a roster, not merged into the
+  // schema-key set, since it has no entry_type membership to intersect over.
+  function structuralFieldOptions(kinds: Iterable<string>): FieldOption[] {
+    for (const k of kinds) {
+      if (STRUCTURAL_KINDS.has(k)) return [{ key: "parent", name: PARENT_FIELD_DEF.name, def: PARENT_FIELD_DEF }];
+    }
+    return [];
+  }
   // The anchor-kind roster (union of the kind's fields over its entry_types) — the
   // fallback when a node's input type is indeterminate. Per-node rosters come from
   // `fieldsForNode` via §F inference below.
@@ -453,7 +479,7 @@
       if (def.kind !== forKind) continue;
       for (const fk of def.fields ?? []) keys.add(fk);
     }
-    return fieldOptionsFromKeys(keys, kindRootEntryTypeId(schema, forKind));
+    return [...structuralFieldOptions([forKind]), ...fieldOptionsFromKeys(keys, kindRootEntryTypeId(schema, forKind))];
   }
   let fieldOptions = $derived(buildFieldOptions(kind));
   // Authoring-time TYPE inference (ADR-0031 §F): the entry_type-set of a node's
@@ -502,9 +528,12 @@
     if (fqns.length === 0) return fieldOptions.filter((o) => o.def.category === "intrinsic");
     // §F: the fields present on EVERY member — a group-aware set-intersection over
     // the input's concrete types (vertical inheritance AND shared field-groups). A
-    // cross-kind set has no single root → resolve labels against the bare def.
+    // cross-kind set has no single root → resolve labels against the bare def. The
+    // structural `parent` (prepended) isn't an entry_type member, so it survives
+    // the intersection only by being added here — offered whenever a structural
+    // kind is in play (the indeterminate branch above inherits it via `fieldOptions`).
     const anchor = ts.size === 1 ? kindRootEntryTypeId(schema, [...ts.keys()][0]) : null;
-    return fieldOptionsFromKeys(intersectFieldKeysOverTypes(schema, fqns), anchor);
+    return [...structuralFieldOptions(ts.keys()), ...fieldOptionsFromKeys(intersectFieldKeysOverTypes(schema, fqns), anchor)];
   }
   // The authoring warning ADR-0031 §F asks for (Slice B, #215): when a picker
   // node's inferred INPUT set is cross-kind, its roster is a degraded intersection,
@@ -564,7 +593,8 @@
       fields: fieldOptions,
       fieldsFor: fieldsForNode,
       rosterWarningFor,
-      fieldByKey: (key: string) => schema?.fields?.[key] ?? null,
+      fieldByKey: (key: string) =>
+        schema?.fields?.[key] ?? (key === "parent" && STRUCTURAL_KINDS.has(kind) ? PARENT_FIELD_DEF : null),
       valueWired: (nodeId: string) => connectedHandleKeys.has(`${nodeId}:${FILTER_VALUE_HANDLE}`),
       handleConnected: (nodeId: string, handleId: string) => connectedHandleKeys.has(`${nodeId}:${handleId}`),
       tags: tagOptions,

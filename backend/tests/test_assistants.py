@@ -397,5 +397,71 @@ class AssistantReorderTests(unittest.TestCase):
         self.assertEqual(ids, ["bravo", "charlie", "alpha"])
 
 
+class AssistantLayerOrderingTests(unittest.TestCase):
+    """#224 / ADR-0037 §7: the roster is layer-grouped, machine layer first,
+    so a fresh project-layer assistant never sorts above a machine one even
+    when its title would win alphabetically. This upholds the first-seen
+    bucket assumption the Assistants default's `group_by: source_layer` needs."""
+
+    def setUp(self) -> None:
+        self.temp_dir = TemporaryDirectory()
+        self.root = Path(self.temp_dir.name) / "project"
+        global_service.__init__()
+        global_service.create_project(self.root, "Layer Order Tests")
+        self.client = TestClient(app)
+        self.config_dir = Path(self.temp_dir.name) / "config"
+        self.config_dir.mkdir()
+        self._patcher = patch(
+            "app.services.machine_settings.config_path",
+            return_value=self.config_dir / "config.yaml",
+        )
+        self._patcher.start()
+        # A machine-layer assistant titled "Zed" — sorts LAST alphabetically,
+        # so any cross-layer interleaving would drop it below a project "Alpha".
+        machine_dir = self.config_dir / "assistants"
+        machine_dir.mkdir(parents=True)
+        (machine_dir / "zed.md").write_text(
+            "---\nid: zed\ntitle: Zed\nentry_type: assistant\nmetadata: { ai_provider: anthropic, ai_model: m }\n---\n",
+            encoding="utf-8",
+        )
+
+    def tearDown(self) -> None:
+        self._patcher.stop()
+        self.temp_dir.cleanup()
+
+    def test_machine_layer_sorts_before_project_layer(self) -> None:
+        # A project-layer assistant titled "Alpha" — sorts FIRST alphabetically.
+        project_layer_id = global_service._metadata_schema_layer_id(self.root)
+        create = self.client.post(
+            "/api/assistants",
+            json={
+                "title": "Alpha",
+                "entry_type": "assistant:assistant",
+                "layer_id": project_layer_id,
+            },
+        )
+        self.assertEqual(create.status_code, 200, create.text)
+        self.assertNotEqual(create.json()["source_layer_label"], "Machine")
+
+        entries = self.client.get("/api/assistants").json()["entries"]
+        titles = [e["title"] for e in entries]
+        labels = [e["source_layer_label"] for e in entries]
+        # Machine "Zed" precedes project "Alpha" despite "Alpha" < "Zed":
+        # pre-#224 the layer-blind sort put "Alpha" first.
+        self.assertEqual(titles, ["Zed", "Alpha"])
+        self.assertEqual(labels[0], "Machine")
+        self.assertNotEqual(labels[1], "Machine")
+
+    def test_within_machine_layer_still_alphabetical(self) -> None:
+        # Regression guard: the layer term must not disturb within-layer order.
+        # A second machine assistant "Ada" still sorts before "Zed" (same layer).
+        (self.config_dir / "assistants" / "ada.md").write_text(
+            "---\nid: ada\ntitle: Ada\nentry_type: assistant\nmetadata: { ai_provider: anthropic, ai_model: m }\n---\n",
+            encoding="utf-8",
+        )
+        titles = [e["title"] for e in self.client.get("/api/assistants").json()["entries"]]
+        self.assertEqual(titles, ["Ada", "Zed"])
+
+
 if __name__ == "__main__":
     unittest.main()

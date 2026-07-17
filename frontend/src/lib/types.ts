@@ -347,15 +347,18 @@ export type ViewNestMatch = {
 // from lore links. `parents`/`children` are the two input sets (absent = the
 // whole universe); `match` is the join rule; `recursive` marks the canvas
 // self-loop (frontier BFS over an unknown-depth homogeneous hierarchy).
-// `orphans` (ADR-0037 sub-issue): what happens to a candidate child that
-// matched no parent — `"drop"` (today's behavior, the default) or `"keep"`
-// (stays at the root as a bare row — the who-lives-where pattern).
+// `orphans` (ADR-0028 Amendment 1): the unplaced-child set is a routable SECOND
+// output. Absent = drop + count (the default). Present = a sub-expression
+// evaluated over the unplaced set and concatenated into the same result — the
+// wired downstream chain (Filter/Sort/a second Nest). Every leaf inside it
+// denotes the orphan set (the evaluator scopes the universe to it). The old
+// `"keep"|"drop"` scalar is retired (#260): unwired = drop, wired = routed.
 export type ViewNestOp = {
   parents?: ViewExpr | null;
   children?: ViewExpr | null;
   match: ViewNestMatch;
   recursive?: boolean;
-  orphans?: "keep" | "drop";
+  orphans?: ViewExpr | null;
 };
 
 // One node in a view's set-algebra tree: exactly one primary slot is set

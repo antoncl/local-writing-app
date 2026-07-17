@@ -296,6 +296,11 @@ type RunState<T extends EvalNode> = {
   viewStack: string[]; // view_ref cycle guard
   diag: ViewDiagnostics; // nest accumulator (cycle/orphan/fan-out counts)
   nestRan: boolean; // whether any `nest` evaluated (gates `diagnostics` on result)
+  // ADR-0028 Amendment 1: how deep the current eval sits inside routed-orphan
+  // sub-expressions (a `nest` whose `orphans` is itself a `nest`, …). Bounds a
+  // pathological self-similar chain whose scope never shrinks (defensive — the
+  // designer can't author one). 0/absent at the top level.
+  orphanDepth?: number;
 };
 
 export function evaluateView<T extends EvalNode>(
@@ -929,6 +934,14 @@ function evalViewRefRows<T extends EvalNode>(
 // small multiple; a dense/factorial match blows past K·N within a pass or two.
 const NEST_FANOUT_K = 8;
 
+// The routed-orphan nesting cap (ADR-0028 Amendment 1). A `nest.orphans` chain
+// may itself contain a `nest` (rebuild the orphan roots' subtrees); each scopes
+// to a strictly smaller candidate set, so real specs terminate in a level or
+// two. This is only a defensive backstop against a hand-authored self-similar
+// spec whose scope never shrinks — well past any real depth, it drops the
+// residue rather than hanging the browser. The designer cannot produce one.
+const NEST_ORPHAN_MAX_DEPTH = 32;
+
 // Denormalize a `nest` into `(node, path)` rows (ADR-0028). Frontier BFS from the
 // parent seeds; each pass attaches the frontier's matching children one level
 // deeper (a real-node parent segment). A placement emits a ROW only when it is a
@@ -1013,23 +1026,61 @@ function evalNest<T extends EvalNode>(
   }
   if (truncated) state.diag.fanoutTruncated = true;
 
-  // Orphans: candidate children that matched no parent (never placed). ADR-0037
-  // §Sub-issues / #216: `orphans: "keep"` seeds them at the root as bare rows
-  // (the who-lives-where pattern) — placed rows first (BFS/placement order),
-  // then orphans in roster order; kept orphans are NOT "dropped". The default
-  // (`"drop"`, or unset) counts them so the UI can surface the loss (ADR-0028 §A).
-  const keepOrphans = op.orphans === "keep";
   const rows = placements.filter((pl) => !pl.hasChild).map((pl) => ({ node: pl.node, path: pl.path }));
+
+  // Orphans (ADR-0028 Amendment 1): candidate children the join never placed —
+  // the unplaced set is a routable SECOND output, not a scalar disposition.
+  //  - `op.orphans` absent (nothing wired downstream) ⇒ drop + count, exactly as
+  //    base §A specified. The out-of-the-box behavior is unchanged.
+  //  - `op.orphans` present (a wired chain) ⇒ evaluate that sub-expression over
+  //    the unplaced set — a RunState SCOPED to those nodes, so every leaf/`All`
+  //    inside it denotes the orphan set — and concatenate its rows into the SAME
+  //    ViewResult (§C/§D: one sink, intra-result). A downstream Filter/Sort or a
+  //    second Nest seeded on the orphan roots rebuilds their subtrees intact (§E),
+  //    just normal wiring. The scoped eval shares `diag`/`annotations`, so a
+  //    nested nest's cyclic/fan-out counts and any Highlight accumulate onto the
+  //    one result; routed orphans are members (added to `placed`, so a nest
+  //    buried in the set algebra counts them in its flat membership too).
+  const orphanIds: string[] = [];
   for (const n of state.universe) {
-    if (!childIds.has(n.id) || placed.has(n.id)) continue;
-    if (keepOrphans) {
-      rows.push({ node: n, path: [] });
-      placed.add(n.id);
+    if (childIds.has(n.id) && !placed.has(n.id)) orphanIds.push(n.id);
+  }
+  if (orphanIds.length > 0) {
+    if (op.orphans && (state.orphanDepth ?? 0) < NEST_ORPHAN_MAX_DEPTH) {
+      const orphanState = scopeToOrphans(state, new Set(orphanIds));
+      for (const r of evalSource(orphanState, op.orphans, null)) {
+        rows.push(r);
+        placed.add(r.node.id);
+      }
     } else {
-      state.diag.orphansDropped++;
+      // Unwired ⇒ drop + count (§A). The depth cap also lands here: a pathological
+      // self-similar chain falls back to drop rather than hanging (unreachable
+      // from the designer).
+      state.diag.orphansDropped += orphanIds.length;
     }
   }
   return { rows, placed };
+}
+
+// Scope a RunState to a subset of its universe — the machinery behind a routed
+// orphan output (ADR-0028 Amendment 1). The `orphans` sub-expression evaluates
+// against ONLY the unplaced nodes, so an `All` / `descendants_of:<root>` leaf
+// inside it denotes the orphan set rather than the whole roster, and a bare
+// `field:{parent, unset}` seeds that scope's roots. Shares the live `diag`,
+// `annotations` and reference lookups by reference (nested diagnostics and
+// Highlights accumulate onto the one result); rebuilds only the universe-indexed
+// maps. `orphanDepth` increments so `evalNest` can bound self-similar nesting.
+function scopeToOrphans<T extends EvalNode>(state: RunState<T>, keep: Set<string>): RunState<T> {
+  const universe = state.universe.filter((n) => keep.has(n.id));
+  const order = new Map<string, number>();
+  const nodeById = new Map<string, T>();
+  const idByCanonical = new Map<string, string>();
+  universe.forEach((n, i) => {
+    order.set(n.id, i);
+    nodeById.set(n.id, n);
+    if (n.ref_id && n.ref_id !== n.id) idByCanonical.set(n.ref_id, n.id);
+  });
+  return { ...state, universe, order, nodeById, idByCanonical, orphanDepth: (state.orphanDepth ?? 0) + 1 };
 }
 
 // Build the parent→children adjacency the match rule implies, child side

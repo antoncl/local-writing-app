@@ -67,6 +67,7 @@
     difference: "Difference",
     complement: "Complement",
     nest: "Nest",
+    orphans_ref: "Orphans", // synthetic lowering scaffolding — never rendered as a canvas node
     field_of: "Field of",
     self: "This entry",
     highlight: "Highlight",

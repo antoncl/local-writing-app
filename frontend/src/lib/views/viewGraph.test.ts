@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import type { NodePickerConfig, ViewExpr } from "@/lib/types";
+import type { NodePickerConfig, ViewExpr, ViewSpec } from "@/lib/types";
 import { defaultView } from "./evaluateView";
 import {
   classifyConnection,
@@ -685,100 +685,80 @@ describe("nest lowering + self-loop recursion (ADR-0028)", () => {
   });
 });
 
-describe("nest orphans — routable second output (ADR-0028 Amendment 1, #260)", () => {
+describe("nest orphans — first-class node-set output (ADR-0028 Amendment 1, #260)", () => {
   const match = { field: "parent", direction: "child_to_parent" as const, by: "ref" as const };
-  const roots: ViewExpr = { field: { key: "parent", op: "unset" } };
-  // Round-trip through the KIND-aware path (unlike the bare `roundTrip` helper):
-  // specToGraph needs the kind to lift/lower the orphan-set `All` (§B seam).
-  const rt = (expr: ViewExpr, kind = "scene"): ViewExpr | null | undefined =>
-    graphToSpec(specToGraph({ kind, expr }), { kind }).expr;
 
-  it("round-trips a bare orphans→root wire as a flat orphan set (All-over-scope)", () => {
-    // The retired `keep`, now a wire: orphans routed straight to the sink = the
-    // flat unplaced set at the root. Encoded as an `All`-over-scope sub-expr.
-    const expr: ViewExpr = { nest: { parents: roots, match, recursive: true, orphans: { descendants_of: "scene:base" } } };
-    expect(rt(expr)).toEqual(expr);
-  });
-
-  it("round-trips orphans routed through a Filter", () => {
-    const expr: ViewExpr = { nest: { parents: roots, match, recursive: true, orphans: { type: "scene:scene" } } };
-    expect(rt(expr)).toEqual(expr);
-  });
-
-  it("round-trips orphans routed into a SECOND Nest that rebuilds their subtrees", () => {
-    // The headline case: the unplaced set (Aleph/Gimmel and their subtrees) is
-    // re-nested on ITS roots — the round-trip loss #255 closes.
-    const expr: ViewExpr = {
-      nest: {
-        parents: { hand_picked: ["bet"] },
-        match,
-        recursive: true,
-        orphans: { nest: { parents: roots, match, recursive: true } },
-      },
+  it("graphToSpec: results → group A, orphans → group B lowers to nest.id + orphans_of", () => {
+    // The Strip-acts shape: a two-output Nest into two named groups. The Nest gets
+    // an id; the orphans group references it as a plain node-set — no fold.
+    const roster = node("all", {}, -100);
+    const nst = node("nest", { match }, 0);
+    const graph: ViewGraph = {
+      nodes: [out({ handles: [{ id: "in", name: "Placed" }, { id: "h1", name: "Orphans" }] }), roster, nst],
+      edges: [
+        edge(roster.id, nst.id, NEST_CHILDREN_HANDLE),
+        edge(nst.id, OUTPUT_NODE_ID, "in"), // results → group A
+        { id: "eo", source: nst.id, sourceHandle: NEST_ORPHANS_HANDLE, target: OUTPUT_NODE_ID, targetHandle: "h1" }, // orphans → group B
+      ],
     };
-    expect(rt(expr)).toEqual(expr);
+    const spec = graphToSpec(graph, { kind: "scene" });
+    expect(spec.groups?.map((g) => g.name)).toEqual(["Placed", "Orphans"]);
+    const nestId = spec.groups![0].expr?.nest?.id;
+    expect(nestId).toBe(nst.id);
+    expect(spec.groups![0].expr?.nest).toMatchObject({ children: { descendants_of: "scene:base" }, match });
+    expect(spec.groups![1].expr).toEqual({ orphans_of: nestId });
   });
 
-  it("specToGraph wires the orphan sub-expression off the nest's orphans output handle", () => {
-    const expr: ViewExpr = { nest: { parents: roots, match, recursive: true, orphans: { type: "scene:scene" } } };
-    const g = specToGraph({ kind: "scene", expr });
-    // An edge leaves the nest's `orphans` source handle (the wire the UI draws),
-    // and the standalone `All` that fed the orphan filter was pruned in favor of it.
+  it("round-trips the two-group orphans view (nest.id ↔ orphans_of stays consistent)", () => {
+    const spec: ViewSpec = {
+      kind: "scene",
+      groups: [
+        { name: "Placed", expr: { nest: { id: "nA", parents: { field: { key: "parent", op: "unset" } }, children: { descendants_of: "scene:base" }, match, recursive: true } } },
+        { name: "Orphans", expr: { orphans_of: "nA" } },
+      ],
+    } as ViewSpec;
+    const out2 = graphToSpec(specToGraph(spec, undefined), { kind: "scene" });
+    expect(out2.groups?.map((g) => g.name)).toEqual(["Placed", "Orphans"]);
+    const nestId = out2.groups![0].expr?.nest?.id;
+    expect(nestId).toBeTruthy();
+    // The reference still names the same Nest (the id value may be regenerated).
+    expect(out2.groups![1].expr?.orphans_of).toBe(nestId);
+    expect(out2.groups![0].expr?.nest).toMatchObject({ children: { descendants_of: "scene:base" }, match, recursive: true });
+  });
+
+  it("specToGraph wires the orphans reference off the nest's orphans output handle", () => {
+    const spec: ViewSpec = {
+      kind: "scene",
+      groups: [
+        { name: "Placed", expr: { nest: { id: "nA", parents: { field: { key: "parent", op: "unset" } }, children: { descendants_of: "scene:base" }, match, recursive: true } } },
+        { name: "Orphans", expr: { orphans_of: "nA" } },
+      ],
+    } as ViewSpec;
+    const g = specToGraph(spec, undefined);
+    // The reconstructed canvas has no `orphans_ref` scaffolding, and an edge leaves
+    // the nest's `orphans` source handle (the wire the UI draws).
+    expect(g.nodes.some((n) => n.kind === "orphans_ref")).toBe(false);
     const nst = g.nodes.find((n) => n.kind === "nest")!;
     expect(g.edges.some((e) => e.source === nst.id && e.sourceHandle === NEST_ORPHANS_HANDLE)).toBe(true);
   });
 
-  it("graphToSpec folds a wired orphans output into nest.orphans, not a sink union", () => {
-    // Nest results → sink; Nest orphans → Filter → sink. The orphan branch folds
-    // into nest.orphans and its sink edge is dropped, so the sink is ONE nest.
+  it("a bare orphans output wired straight to a group lowers to {orphans_of}", () => {
     const nst = node("nest", { match }, 0);
-    const flt = node("filter", { filter_kind: "type", type: "scene:scene", filter_mode: "keep" }, 100);
     const graph: ViewGraph = {
-      nodes: [out(), nst, flt],
+      nodes: [out({ handles: [{ id: "in", name: "Tree" }, { id: "h1", name: "Loose" }] }), nst],
       edges: [
-        edge(nst.id, OUTPUT_NODE_ID), // results → sink
-        { id: "eo", source: nst.id, sourceHandle: NEST_ORPHANS_HANDLE, target: flt.id, targetHandle: "in" }, // orphans → filter
-        edge(flt.id, OUTPUT_NODE_ID), // filter → sink
+        edge(nst.id, OUTPUT_NODE_ID, "in"),
+        { id: "eo", source: nst.id, sourceHandle: NEST_ORPHANS_HANDLE, target: OUTPUT_NODE_ID, targetHandle: "h1" },
       ],
     };
-    expect(graphToSpec(graph, { kind: "scene" }).expr).toEqual({ nest: { match, orphans: { type: "scene:scene" } } });
+    const spec = graphToSpec(graph, { kind: "scene" });
+    expect(spec.groups![1].expr).toEqual({ orphans_of: nst.id });
   });
 
-  it("an unwired orphans output stays dropped (no orphans key — the default)", () => {
+  it("an unwired orphans output gives the Nest no id and drops its orphans (the default)", () => {
     const nst = node("nest", { match }, 0);
-    const graph: ViewGraph = {
-      nodes: [out(), nst],
-      edges: [edge(nst.id, OUTPUT_NODE_ID)],
-    };
+    const graph: ViewGraph = { nodes: [out(), nst], edges: [edge(nst.id, OUTPUT_NODE_ID)] };
     expect(graphToSpec(graph, { kind: "scene" }).expr).toEqual({ nest: { match } });
-  });
-
-  it("a second Nest fed by the orphans output seeds its parents from the orphan set", () => {
-    // The graph a user draws for the rebuild: orphans → Nest2.children AND
-    // orphans → Filter(roots) → Nest2.parents; Nest2 → sink. (Nest parents/children
-    // come from EDGES, not node data.)
-    const seed = node("hand_picked", { hand_picked: ["bet"] }, -100);
-    const nst = node("nest", { match }, 0);
-    const flt = node("filter", { filter_kind: "field", field: { key: "parent", op: "unset" }, filter_mode: "keep" }, 100);
-    const nst2 = node("nest", { match }, 200);
-    const graph: ViewGraph = {
-      nodes: [out(), seed, nst, flt, nst2],
-      edges: [
-        edge(seed.id, nst.id, NEST_PARENTS_HANDLE),
-        edge(nst.id, OUTPUT_NODE_ID), // results → sink
-        { id: "e1", source: nst.id, sourceHandle: NEST_ORPHANS_HANDLE, target: nst2.id, targetHandle: NEST_CHILDREN_HANDLE },
-        { id: "e2", source: nst.id, sourceHandle: NEST_ORPHANS_HANDLE, target: flt.id, targetHandle: "in" },
-        edge(flt.id, nst2.id, NEST_PARENTS_HANDLE),
-        edge(nst2.id, OUTPUT_NODE_ID), // rebuilt subtrees → sink
-      ],
-    };
-    expect(graphToSpec(graph, { kind: "scene" }).expr).toEqual({
-      nest: {
-        parents: { hand_picked: ["bet"] },
-        match,
-        orphans: { nest: { parents: { field: { key: "parent", op: "unset" } }, children: { descendants_of: "scene:base" }, match } },
-      },
-    });
   });
 });
 

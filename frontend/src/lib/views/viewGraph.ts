@@ -58,6 +58,14 @@ export type GraphNodeKind =
 export const NEST_PARENTS_HANDLE = "parents";
 export const NEST_CHILDREN_HANDLE = "children";
 
+// The Nest's SECOND source (output) handle (ADR-0028 Amendment 1, #260): the
+// unplaced-child set as a routable node-set. An edge leaving here (a downstream
+// Filter/Sort/second Nest, or the sink itself) folds into `nest.orphans`; the
+// default `out` output stays the denormalized results tree. Every `All`-over-
+// scope leaf in that folded chain denotes the orphan set (the evaluator scopes
+// the universe to it), so lowering treats an orphan-output edge as UNIVERSE.
+export const NEST_ORPHANS_HANDLE = "orphans";
+
 // A named input handle on the View (output) node = one group. `name` is the
 // group label; handle order (the array order) = group order. `color` tints the
 // group. A view with 0–1 populated handles renders flat (ADR-0027 §D).
@@ -678,7 +686,26 @@ function nestBuilt(graph: ViewGraph, byId: Map<string, ViewGraphNode>, node: Vie
   const c = materializeOuter(children, uni);
   if (c) nest.children = c;
   if (recursive) nest.recursive = true;
+  // Amendment 1 (#260): the routed orphan branch, pre-resolved by `foldOrphans`
+  // to the terminus node id(s) feeding the sink and stashed on this node. Lower
+  // each over the folded graph — their `All`-over-scope leaves already read from
+  // the synthetic orphan-set source — and union them into `nest.orphans`.
+  const orphans = lowerOrphans(graph, byId, node, uni);
+  if (orphans) nest.orphans = orphans;
   return built({ nest });
+}
+
+// Lower a Nest's folded orphan branch (ADR-0028 Amendment 1). `foldOrphans`
+// records the terminus node id(s) — the branch's sink-feeding head(s), or the
+// synthetic orphan-set `All` itself for a bare orphans→sink wire — on the nest
+// node's transient `_orphanTermini`. Building each yields the orphan sub-
+// expression (`All` leaves = the orphan set); union + materialize. Null when the
+// nest routes no orphans (unwired ⇒ drop, the default).
+function lowerOrphans(graph: ViewGraph, byId: Map<string, ViewGraphNode>, node: ViewGraphNode, uni: ViewExpr | null): ViewExpr | null {
+  const termini = (node.data as { _orphanTermini?: string[] })._orphanTermini;
+  if (!termini || termini.length === 0) return null;
+  const combined = unionBuilt(termini.map((t) => buildNode(graph, byId, t, new Set(), uni)));
+  return materializeOuter(combined, uni);
 }
 
 // --- graph → spec / expr -------------------------------------------------
@@ -1039,13 +1066,96 @@ function sanitizeSort(sort: ViewSort | null | undefined): ViewSort | null {
   return kept[0];
 }
 
+// ADR-0028 Amendment 1 (#260): fold each Nest's routed orphan branch so the
+// lowering treats it as an ordinary subgraph. A Nest's orphan OUTPUT (a source
+// edge with `sourceHandle === NEST_ORPHANS_HANDLE`) carries the unplaced set as a
+// restricted universe. This pre-pass:
+//   1. rewires every orphan-output edge to a synthetic `All` node (the orphan set
+//      = an All-over-scope leaf), so the downstream chain lowers with universe
+//      leaves that the evaluator scopes to the orphans;
+//   2. records the branch TERMINUS — the node(s) feeding the single sink (§C/§D),
+//      or the synthetic `All` itself for a bare orphans→sink wire — on the nest
+//      node's transient `_orphanTermini`, which `nestBuilt` folds into
+//      `nest.orphans`;
+//   3. drops those terminus→sink edges so the branch does NOT also union as a
+//      sibling at the sink (the single-sink fold — always one ViewResult).
+// A graph with no orphan-output edges is returned untouched (the fast path — no
+// behavior change for the overwhelmingly common non-orphan view).
+function foldOrphans(graph: ViewGraph): ViewGraph {
+  if (!graph.edges.some((e) => e.sourceHandle === NEST_ORPHANS_HANDLE)) return graph;
+
+  const nodes = graph.nodes.map((n) => ({ ...n, data: { ...n.data } }));
+  let edges = graph.edges.map((e) => ({ ...e }));
+  const byId = new Map(nodes.map((n) => [n.id, n]));
+
+  // One synthetic `All` (the orphan set) per orphan-emitting Nest.
+  const nestIds = [
+    ...new Set(edges.filter((e) => e.sourceHandle === NEST_ORPHANS_HANDLE).map((e) => e.source)),
+  ].filter((id) => byId.get(id)?.kind === "nest");
+  const allByNest = new Map<string, string>();
+  nestIds.forEach((nestId, i) => {
+    const allId = `__orphan_all_${i}`;
+    const node: ViewGraphNode = { id: allId, kind: "all", position: { ...byId.get(nestId)!.position }, data: {} };
+    nodes.push(node);
+    byId.set(allId, node);
+    allByNest.set(nestId, allId);
+  });
+  // Rewire each orphan-output edge to its Nest's synthetic All (an ordinary `out`
+  // source), so the branch downstream lowers with no special-casing.
+  edges = edges.map((e) =>
+    e.sourceHandle === NEST_ORPHANS_HANDLE && allByNest.has(e.source)
+      ? { ...e, source: allByNest.get(e.source)!, sourceHandle: "out" }
+      : e,
+  );
+  const g2: ViewGraph = { nodes, edges };
+
+  const droppedSinkEdges = new Set<string>();
+  for (const nestId of nestIds) {
+    const allId = allByNest.get(nestId)!;
+    const closure = downstreamClosure(g2, allId); // includes allId; never enters the sink
+    // The terminus: the closure node(s) feeding the sink (the canonical wiring —
+    // the routed orphans flow to the result), else the branch tips (a chain wired
+    // nowhere yet), else the synthetic All itself (a bare orphans→sink wire, or an
+    // output consumed by nothing) → UNIVERSE = the flat orphan set.
+    const sinkFeeders = g2.edges.filter((e) => e.target === OUTPUT_NODE_ID && closure.has(e.source));
+    let termini: string[];
+    if (sinkFeeders.length > 0) {
+      for (const e of sinkFeeders) droppedSinkEdges.add(e.id);
+      termini = [...new Set(sinkFeeders.map((e) => e.source))];
+    } else {
+      const tips = [...closure].filter((id) => !g2.edges.some((e) => e.source === id));
+      termini = tips.length > 0 ? tips : [allId];
+    }
+    (byId.get(nestId)!.data as { _orphanTermini?: string[] })._orphanTermini = termini;
+  }
+  return { nodes, edges: edges.filter((e) => !droppedSinkEdges.has(e.id)) };
+}
+
+// Every node reachable downstream from `startId` (following source→target),
+// stopping at the single sink (never traversing into it). Includes `startId`.
+function downstreamClosure(graph: ViewGraph, startId: string): Set<string> {
+  const seen = new Set<string>([startId]);
+  const stack = [startId];
+  while (stack.length > 0) {
+    const cur = stack.pop()!;
+    for (const e of graph.edges) {
+      if (e.source === cur && e.target !== OUTPUT_NODE_ID && !seen.has(e.target)) {
+        seen.add(e.target);
+        stack.push(e.target);
+      }
+    }
+  }
+  return seen;
+}
+
 // Serialize the graph reachable from the View node into a ViewSpec. 0–1
 // populated handles → a flat `expr`; 2+ → an ordered `groups` list (ADR-0027).
 // Promoted formals reachable from the output become `params` (#184 Phase 1b).
 export function graphToSpec(
-  graph: ViewGraph,
+  rawGraph: ViewGraph,
   base: { kind: string; sort?: ViewSort | null; schema?: MetadataSchema | null },
 ): ViewSpec {
+  const graph = foldOrphans(rawGraph);
   const byId = new Map(graph.nodes.map((n) => [n.id, n]));
   const handles = outputHandles(byId.get(OUTPUT_NODE_ID));
   const handleIds = handles.map((h) => h.id);
@@ -1094,7 +1204,8 @@ export function graphToSpec(
 // graph (→ the empty set, ADR-0036). A bare `All`/universe graph lowers to the
 // explicit `descendants_of:<kind-root>` when `kind` is supplied; without a kind
 // (the pure round-trip helper) a universe stays null.
-export function graphToExpr(graph: ViewGraph, kind?: string): ViewExpr | null {
+export function graphToExpr(rawGraph: ViewGraph, kind?: string): ViewExpr | null {
+  const graph = foldOrphans(rawGraph);
   const byId = new Map(graph.nodes.map((n) => [n.id, n]));
   const uni = kind ? kindUniverseExpr(kind, null) : null;
   const parts = orderedUpstream(graph, byId, OUTPUT_NODE_ID).map((e) => buildNode(graph, byId, e.source, new Set(), uni));
@@ -1124,6 +1235,9 @@ export function specToGraph(spec: ViewSpec | null | undefined, schema?: Metadata
   const rowCursor = { value: 0 };
   let counter = 0;
   const nextId = () => `n${counter++}`;
+  // `All` nodes replaced by a nest's orphans output (ADR-0028 Amdt 1) — pruned at
+  // the end so the canvas shows the wire, not a detached source.
+  const removed = new Set<string>();
   // The `descendants_of` value an `All`/universe node lowers to for this kind — the
   // sentinel that lifts back to `all`. Null when kind is unknown (bare-expr helper).
   const universeRoot = spec?.kind ? kindUniverseExpr(spec.kind, schema).descendants_of ?? null : null;
@@ -1163,8 +1277,40 @@ export function specToGraph(spec: ViewSpec | null | undefined, schema?: Metadata
     }
   }
 
-  layoutColumns(nodes, outputNode, rowCursor);
-  return { nodes, edges };
+  // Prune the `All` nodes that attachOrphans re-sourced to a nest's orphans
+  // output — the wire replaces the standalone source. Their outgoing edges were
+  // already redirected; drop any stray edge that still names one, defensively.
+  const keptNodes = removed.size > 0 ? nodes.filter((n) => !removed.has(n.id)) : nodes;
+  const keptEdges = removed.size > 0 ? edges.filter((e) => !removed.has(e.source) && !removed.has(e.target)) : edges;
+  layoutColumns(keptNodes, outputNode, rowCursor);
+  return { nodes: keptNodes, edges: keptEdges };
+
+  // Rebuild a routed orphan sub-expression (ADR-0028 Amendment 1) as a subgraph
+  // hanging off `nestId`'s orphans output. Every `All`-over-scope leaf the sub-
+  // expression walks to IS the orphan set, so re-source those edges from the nest's
+  // orphans handle (the inverse of foldOrphans' synthetic-All rewrite) and drop the
+  // standalone `All`s; the sub-expression's root then feeds the sink so the routed
+  // orphans render (graphToSpec folds that edge back into `nest.orphans`). Nodes an
+  // inner nest's own orphans already claimed (`removed`) are left to it.
+  function attachOrphans(nestId: string, orphans: ViewExpr, depth: number): void {
+    const before = nodes.length;
+    const rootId = walk(orphans, depth);
+    const allIds = new Set(nodes.slice(before).filter((n) => n.kind === "all" && !removed.has(n.id)).map((n) => n.id));
+    for (const edge of edges) {
+      if (allIds.has(edge.source)) {
+        edge.source = nestId;
+        edge.sourceHandle = NEST_ORPHANS_HANDLE;
+      }
+    }
+    for (const id of allIds) removed.add(id);
+    if (rootId && allIds.has(rootId)) {
+      // The sub-expression WAS a bare universe `All` (orphans wired straight to the
+      // sink): no operators to route through — wire the sink from orphans directly.
+      link(nestId, OUTPUT_NODE_ID, DEFAULT_HANDLE_ID, NEST_ORPHANS_HANDLE);
+    } else if (rootId) {
+      link(rootId, OUTPUT_NODE_ID, DEFAULT_HANDLE_ID);
+    }
+  }
 
   // Walk one segment's expr, wiring its root (optionally through a Sorter) into
   // the given output handle.
@@ -1215,6 +1361,8 @@ export function specToGraph(spec: ViewSpec | null | undefined, schema?: Metadata
       if (childrenId) link(childrenId, id, NEST_CHILDREN_HANDLE);
       // Recursion is the canvas self-loop: output → own `parents` handle.
       if (e.nest.recursive) link(id, id, NEST_PARENTS_HANDLE);
+      // Amendment 1 (#260): the routed orphan branch off the second output handle.
+      if (e.nest.orphans) attachOrphans(id, e.nest.orphans, depth + 1);
       return id;
     }
     if (e.annotate && e.of) {
@@ -1296,8 +1444,8 @@ export function specToGraph(spec: ViewSpec | null | undefined, schema?: Metadata
     return filterId;
   }
 
-  function link(source: string, target: string, targetHandle = DEFAULT_HANDLE_ID): void {
-    edges.push({ id: nextId(), source, sourceHandle: "out", target, targetHandle });
+  function link(source: string, target: string, targetHandle = DEFAULT_HANDLE_ID, sourceHandle = "out"): void {
+    edges.push({ id: nextId(), source, sourceHandle, target, targetHandle });
   }
 
   function addNode(kind: GraphNodeKind, depth: number, data: ViewNodeData): string {

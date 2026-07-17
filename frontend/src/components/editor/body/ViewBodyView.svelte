@@ -375,7 +375,16 @@
   function toGraph(): ViewGraph {
     return {
       nodes: flowNodes.map((n) => ({ id: n.id, kind: n.data.kind, position: n.position, data: n.data.cfg ?? {} })),
-      edges: flowEdges.map((e) => ({ id: e.id, source: e.source, target: e.target, targetHandle: e.targetHandle ?? null })),
+      // sourceHandle is load-bearing for the Nest orphans output (ADR-0028 Amdt 1,
+      // #260): graphToSpec folds an edge leaving the `orphans` handle into
+      // `nest.orphans`. It was dropped before that handle existed.
+      edges: flowEdges.map((e) => ({
+        id: e.id,
+        source: e.source,
+        target: e.target,
+        sourceHandle: e.sourceHandle ?? null,
+        targetHandle: e.targetHandle ?? null,
+      })),
     };
   }
   // Memoize the lowered spec by structural equality. Dragging a node mutates

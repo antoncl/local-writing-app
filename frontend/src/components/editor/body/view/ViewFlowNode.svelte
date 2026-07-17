@@ -937,7 +937,11 @@
       <button type="button" class:on={matchBy === "ref"} onclick={() => setMatch({ by: "ref" })}>By reference</button>
       <button type="button" class:on={matchBy === "title"} onclick={() => setMatch({ by: "title" })}>By title</button>
     </div>
-    <p class="vhint">Wire roots into <b>parents</b>, candidates into <b>children</b>. Loop the output back to <b>parents</b> to recurse.</p>
+    <p class="vhint">
+      Wire roots into <b>parents</b>, candidates into <b>children</b>. Loop the output back to <b>parents</b> to recurse.
+      The lower-right <b>orphans</b> output carries candidates that matched no parent — wire it on (a filter, a group, a
+      second Nest) to keep them, or leave it to drop them.
+    </p>
   {:else if kind === "field_of"}
     <!-- Forward projection (#184): follow a reference field from the wired input
          set to the nodes it points at. `References` projects the other way — the
@@ -962,8 +966,14 @@
     <div class="vnode-summary" title={summaryText}>{summaryText}</div>
   {/if}
 
-  <!-- source port (right) — tinted `value` when this node emits a value-set. -->
-  {#if kind !== "output"}
+  <!-- source port(s) (right). A Nest has a SECOND output — the routable orphans
+       set (ADR-0028 Amdt 1, #260) — stacked below its results output; wiring it
+       folds a downstream chain into `nest.orphans`. Other nodes emit one, tinted
+       `value` when it carries a value-set. -->
+  {#if kind === "nest"}
+    <Handle type="source" position={Position.Right} id="out" class={portClass("port out", "out")} style="top: 34%" />
+    <Handle type="source" position={Position.Right} id="orphans" class={portClass("port out orphans", "orphans")} style="top: 66%" />
+  {:else if kind !== "output"}
     <Handle type="source" position={Position.Right} id="out" class={portClass(emitsValueSet ? "port out value" : "port out", "out")} />
   {/if}
 </div>
@@ -1415,5 +1425,15 @@
   .vnode :global(.port.value:hover),
   .vnode :global(.port.value.connected) {
     background: var(--k-snippet);
+  }
+  /* The Nest's second output — the routable orphans set (ADR-0028 Amdt 1, #260).
+     Muted, since it carries the residue (the unplaced candidates), distinct from
+     the `--accent` results `out` port directly above it. */
+  .vnode :global(.port.orphans) {
+    border-color: var(--text-3);
+  }
+  .vnode :global(.port.orphans:hover),
+  .vnode :global(.port.orphans.connected) {
+    background: var(--text-3);
   }
 </style>

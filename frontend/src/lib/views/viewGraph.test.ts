@@ -18,7 +18,6 @@ import {
   FILTER_VALUE_HANDLE,
   NEST_CHILDREN_HANDLE,
   NEST_ORPHANS_HANDLE,
-  NEST_PARENTS_HANDLE,
   OUTPUT_NODE_ID,
   type ConnectionVerdict,
   type InputTypeSet,
@@ -921,6 +920,15 @@ describe("cycle classifier — recursion vs meaningless (ADR-0028 §D)", () => {
     const nst = node("nest", { match }, 0);
     const byId = new Map([[nst.id, nst]]);
     expect(classifyConnection(byId, [], nst.id, nst.id, "children")).toBe("meaningless-cycle");
+  });
+
+  it("the ORPHANS output looped into parents is NOT recursion — only the results output is (Amdt 1)", () => {
+    // Only `out → parents` is the supported recursion; `orphans → parents` is a
+    // Nest seeded by its own orphans (a circular reference), rejected.
+    const nst = node("nest", { match }, 0);
+    const byId = new Map([[nst.id, nst]]);
+    expect(classifyConnection(byId, [], nst.id, nst.id, "parents", "out")).toBe("nest-recursion");
+    expect(classifyConnection(byId, [], nst.id, nst.id, "parents", NEST_ORPHANS_HANDLE)).toBe("meaningless-cycle");
   });
 
   it("a cycle with no nest on it is meaningless", () => {

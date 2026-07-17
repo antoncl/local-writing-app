@@ -421,6 +421,10 @@ export type ViewNodeData = {
   // this synthetic source emits (`{orphans_of: id}`). Only on lowering/reopen
   // scaffolding nodes, never a user-placed canvas node.
   orphans_of?: string;
+  // Transient (ADR-0028 Amdt 1): the id `assignOrphanRefs` stamps on a Nest whose
+  // orphans output is wired, read back by `nestBuilt` → `nest.id`. Set only within
+  // one graphToSpec lowering, never persisted.
+  _orphanId?: string;
   // output (View) — the named handles / groups. ADR-0037 §2/§8 + Amendment 1:
   // each handle carries its own ordered organize levels (`ViewHandle.group_by`,
   // ν by attribute) — result-node CONFIG, not graph shape (lifts/lowers with the
@@ -440,9 +444,11 @@ export type ViewGraphNode = {
 };
 
 // A directed edge source→target. Handles carry explicit ids so Svelte Flow can
-// render the edge: `sourceHandle` is always the node output ("out"),
-// `targetHandle` is the input port ("in"/a difference "keep"/"remove"/an output
-// handle id).
+// render the edge: `sourceHandle` is the node output — usually "out", but a Nest
+// also emits "orphans" (ADR-0028 Amdt 1), and `assignOrphanRefs` keys entirely on
+// it, so it must be preserved through any edge mapping. `targetHandle` is the
+// input port ("in"/a difference "keep"/"remove"/a nest "parents"/"children"/an
+// output handle id).
 export type ViewGraphEdge = {
   id: string;
   source: string;
@@ -550,13 +556,18 @@ export function classifyConnection(
   source: string,
   target: string,
   targetHandle: string | null | undefined,
+  sourceHandle?: string | null,
 ): ConnectionVerdict {
   if (!wouldCycle(edges, source, target)) return "ok";
   // The distinguishing signal (ADR-0028 §D): does the back-edge feed a Nest's
   // `parents` handle? If so it is a recursion (self-loop = supported; longer =
   // v2). Otherwise the cycle is meaningless.
   const feedsNestParents = byId.get(target)?.kind === "nest" && targetHandle === NEST_PARENTS_HANDLE;
-  if (feedsNestParents) return source === target ? "nest-recursion" : "nest-recursion-unsupported";
+  // …BUT only the RESULTS output looped back is recursion (Amendment 1). The
+  // orphans output fed into parents is a circular reference — a Nest seeded by its
+  // own orphans, which evaluates to nothing — never recursion. Reject it.
+  const fromOrphans = sourceHandle === NEST_ORPHANS_HANDLE;
+  if (feedsNestParents && !fromOrphans) return source === target ? "nest-recursion" : "nest-recursion-unsupported";
   return "meaningless-cycle";
 }
 
@@ -695,8 +706,7 @@ function nestBuilt(graph: ViewGraph, byId: Map<string, ViewGraphNode>, node: Vie
   // stamped it with an `id` so a downstream `{orphans_of: id}` can reference its
   // orphan node-set. Carry the id; the orphan branch lowers as an ordinary
   // subgraph off that reference (no fold, no sink surgery).
-  const orphanId = (node.data as { _orphanId?: string })._orphanId;
-  if (orphanId != null) nest.id = orphanId;
+  if (node.data._orphanId != null) nest.id = node.data._orphanId;
   return built({ nest });
 }
 
@@ -752,7 +762,9 @@ function buildNode(
       case "orphans_ref":
         // A Nest's orphan output as a plain node-set (ADR-0028 Amdt 1): the
         // synthetic source `assignOrphanRefs` inserts for each orphan-output edge.
-        return node.data.orphans_of ? built({ orphans_of: node.data.orphans_of }) : EMPTY;
+        // `!= null` (not truthiness): an empty-string id is a valid ref, and the
+        // evaluator matches on `!= null` too — keep them in lockstep.
+        return node.data.orphans_of != null ? built({ orphans_of: node.data.orphans_of }) : EMPTY;
       case "self":
         // The reserved anchor source — `{var: "$self"}` (no input).
         return built({ var: SELF_VAR });
@@ -1085,7 +1097,7 @@ function assignOrphanRefs(graph: ViewGraph): ViewGraph {
   ].filter((id) => byId.get(id)?.kind === "nest");
   const refByNest = new Map<string, string>();
   for (const nestId of nestIds) {
-    (byId.get(nestId)!.data as { _orphanId?: string })._orphanId = nestId; // the Nest's stable id
+    byId.get(nestId)!.data._orphanId = nestId; // the Nest's stable id
     const refId = `__orphans_ref_${nestId}`;
     nodes.push({ id: refId, kind: "orphans_ref", position: { ...byId.get(nestId)!.position }, data: { orphans_of: nestId } });
     refByNest.set(nestId, refId);
@@ -1248,7 +1260,7 @@ export function specToGraph(spec: ViewSpec | null | undefined, schema?: Metadata
   function resolveOrphanRefs(): void {
     for (const node of nodes) {
       if (node.kind !== "orphans_ref") continue;
-      const nestNodeId = node.data.orphans_of ? nestNodeByOrphanId.get(node.data.orphans_of) : undefined;
+      const nestNodeId = node.data.orphans_of != null ? nestNodeByOrphanId.get(node.data.orphans_of) : undefined;
       if (nestNodeId) {
         for (const edge of edges) {
           if (edge.source === node.id) {

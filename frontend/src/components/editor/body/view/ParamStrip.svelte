@@ -1,8 +1,9 @@
 <script lang="ts">
   // The runtime parameter strip (ADR-0032 §D): one editable control per declared
-  // formal, seeded by its authored default and overridable. Extracted so the
-  // designer preview (ViewBodyView) and the panes (via ViewNodeList) share ONE
-  // control surface instead of hand-rolling it each — the wrapper owns the strip.
+  // formal, seeded by its authored default and overridable. Used by the designer
+  // preview (ViewBodyView). NOTE: the panes' `ViewNodeList` still hand-rolls an
+  // equivalent inline strip — a known duplication both should be reduced to this
+  // component (they have already drifted slightly in layout/tokens).
   import FieldValueEditor from "@/components/widgets/FieldValueEditor.svelte";
   import { effectiveParamValue, resolveParamControls } from "@/lib/views/viewParams";
   import { loreEntriesStore } from "@/lib/stores/lore";

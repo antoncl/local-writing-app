@@ -37,6 +37,7 @@ import type {
   ViewSort,
   ViewSpec,
 } from "@/lib/types";
+import { collectNests } from "@/lib/views/nestRegistry";
 import { kindRootEntryTypeId } from "@/lib/utils/schemaTypeHelpers";
 import { asArray, fieldValue, fieldValueList, isCollectionField, isEmpty, isSortableField } from "@/lib/views/fieldAccess";
 import { applyGroupBy } from "@/lib/views/groupBy";
@@ -305,6 +306,12 @@ type RunState<T extends EvalNode> = {
   nestsById: Map<string, ViewNestOp>;
   orphansReferenced: Set<string>;
   nestCache: Map<string, NestEval<T>>;
+  // Re-entrancy guard for `{orphans_of}` (the analogue of `viewStack` for
+  // `view_ref`): an id'd Nest currently mid-evaluation. A Nest that references its
+  // own orphans (or a mutual A↔B cycle) would otherwise recurse forever, since the
+  // memo is only written on exit. Re-entering an in-progress id breaks the cycle
+  // (empty) instead of overflowing the stack.
+  nestInProgress: Set<string>;
 };
 
 // A Nest's evaluated outputs (ADR-0028 Amendment 1). `rows` = the denormalized
@@ -313,29 +320,6 @@ type RunState<T extends EvalNode> = {
 // flat node-set of `children` it never placed — the second output that
 // `{orphans_of: id}` resolves to.
 type NestEval<T extends EvalNode> = { rows: ViewRow<T>[]; placed: Set<string>; orphanSet: Set<string> };
-
-// Register every id'd `nest` and every `{orphans_of}` reference reachable in an
-// expr tree (ADR-0028 Amendment 1) — a pre-walk so a reference can resolve to a
-// Nest defined in another group, whichever evaluates first. Recurses through
-// every ViewExpr slot that can hold a sub-expr.
-function collectNests(expr: ViewExpr | null | undefined, nests: Map<string, ViewNestOp>, refs: Set<string>): void {
-  if (!expr) return;
-  if (expr.orphans_of != null) refs.add(expr.orphans_of);
-  if (expr.nest) {
-    if (expr.nest.id != null) nests.set(expr.nest.id, expr.nest);
-    collectNests(expr.nest.parents, nests, refs);
-    collectNests(expr.nest.children, nests, refs);
-  }
-  for (const sub of expr.union ?? []) collectNests(sub, nests, refs);
-  for (const sub of expr.intersect ?? []) collectNests(sub, nests, refs);
-  if (expr.difference) {
-    collectNests(expr.difference.keep, nests, refs);
-    collectNests(expr.difference.remove, nests, refs);
-  }
-  collectNests(expr.complement, nests, refs);
-  collectNests(expr.of, nests, refs);
-  if (expr.field_of) collectNests(expr.field_of.of, nests, refs);
-}
 
 export function evaluateView<T extends EvalNode>(
   spec: ViewSpec,
@@ -369,6 +353,7 @@ export function evaluateView<T extends EvalNode>(
     nestsById: new Map(),
     orphansReferenced: new Set(),
     nestCache: new Map(),
+    nestInProgress: new Set(),
   };
 
   // ADR-0028 Amendment 1: register id'd Nests + orphan references across the whole
@@ -997,6 +982,15 @@ function evalNest<T extends EvalNode>(state: RunState<T>, op: ViewNestOp): NestE
   if (op.id != null) {
     const cached = state.nestCache.get(op.id);
     if (cached) return cached;
+    if (state.nestInProgress.has(op.id)) {
+      // Circular `{orphans_of}` (a nest referencing its own orphans, or a mutual
+      // A↔B cycle): break it rather than overflow the stack (the memo is only
+      // written on exit, so the re-entrant call would recurse forever). An empty
+      // result is the only sound value for a nest defined via its own orphans; the
+      // designer also blocks the orphans→own-parents wire (classifyConnection).
+      return { rows: [], placed: new Set(), orphanSet: new Set() };
+    }
+    state.nestInProgress.add(op.id);
   }
   state.nestRan = true;
   const wholeUniverse = (): Set<string> => new Set(state.order.keys());
@@ -1083,7 +1077,10 @@ function evalNest<T extends EvalNode>(state: RunState<T>, op: ViewNestOp): NestE
   if (!referenced) state.diag.orphansDropped += orphanSet.size;
 
   const result: NestEval<T> = { rows, placed, orphanSet };
-  if (op.id != null) state.nestCache.set(op.id, result);
+  if (op.id != null) {
+    state.nestCache.set(op.id, result);
+    state.nestInProgress.delete(op.id);
+  }
   return result;
 }
 

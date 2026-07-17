@@ -1244,6 +1244,26 @@ describe("nest — orphans as a routable node-set (ADR-0028 Amendment 1)", () =>
     const res = evaluateView({ kind: "lore", expr: { orphans_of: "missing" } }, ABG);
     expect(res.nodes).toEqual([]);
   });
+
+  it("a Nest that references its OWN orphans breaks the cycle instead of overflowing the stack", () => {
+    // Reachable by looping the orphans output back into the Nest's own parents.
+    const spec: ViewSpec = {
+      kind: "lore",
+      expr: { nest: { id: "n", children: { orphans_of: "n" }, match: ABG_MATCH, recursive: true } },
+    };
+    expect(() => evaluateView(spec, ABG)).not.toThrow();
+  });
+
+  it("a mutual orphans_of cycle (A references B's orphans, B references A's) terminates", () => {
+    const spec: ViewSpec = {
+      kind: "lore",
+      groups: [
+        { name: "A", expr: { nest: { id: "a", children: { orphans_of: "b" }, match: ABG_MATCH } } },
+        { name: "B", expr: { nest: { id: "b", children: { orphans_of: "a" }, match: ABG_MATCH } } },
+      ],
+    };
+    expect(() => evaluateView(spec, ABG)).not.toThrow();
+  });
 });
 
 describe("nestWarnings — surfacing diagnostics (#110)", () => {

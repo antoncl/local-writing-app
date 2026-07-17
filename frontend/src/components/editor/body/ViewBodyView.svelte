@@ -762,6 +762,7 @@
     source?: string | null;
     target?: string | null;
     targetHandle?: string | null;
+    sourceHandle?: string | null;
   }): boolean {
     if (!conn.source || !conn.target) return false;
     const target = flowNodes.find((n) => n.id === conn.target);
@@ -785,7 +786,7 @@
     if (conn.targetHandle === FILTER_VALUE_HANDLE) {
       if (tgtNode?.kind !== "field" && tgtNode?.kind !== "filter") return false;
       if (!valueSlotAccepts(srcNode, tgtNode.data.field, fieldType)) return false;
-      return connectionAllowed(classifyConnection(byId, edges, conn.source, conn.target, conn.targetHandle ?? null));
+      return connectionAllowed(classifyConnection(byId, edges, conn.source, conn.target, conn.targetHandle ?? null, conn.sourceHandle ?? null));
     }
     if (inputArity(target.data.kind) === "none") return false;
     // A value-set source (a scalar `field_of`) may feed ONLY a value slot, never
@@ -798,7 +799,7 @@
     // the whole-kind roster has an explicit expr, so `field_of(All, Type)` lowers
     // to a concrete projection (every entry_type in use) rather than a silent
     // EMPTY — see `fieldOfBuilt`.
-    return connectionAllowed(classifyConnection(byId, edges, conn.source, conn.target, conn.targetHandle ?? null));
+    return connectionAllowed(classifyConnection(byId, edges, conn.source, conn.target, conn.targetHandle ?? null, conn.sourceHandle ?? null));
   }
   // After a connection auto-adds, trim single-input handles to their newest edge
   // (union/intersect keep all). Newest wins so a re-wire replaces cleanly.
@@ -1007,7 +1008,8 @@
           </ul>
           <!-- Editable controls (ADR-0032 §D): vary a value and the preview
                re-evaluates live, so the designer verifies the logic exactly as the
-               pane will render it. Same strip the panes use (ViewNodeList). -->
+               pane will render it. (The pane's ViewNodeList renders equivalent
+               controls from its own inline copy — a duplication to unify.) -->
           <ParamStrip {spec} {schema} bind:overrides={paramOverrides} />
         {/if}
       {/if}

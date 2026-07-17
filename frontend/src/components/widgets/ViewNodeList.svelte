@@ -116,26 +116,15 @@
   import { SvelteSet } from "svelte/reactivity";
   import NodeList from "@/components/widgets/NodeList.svelte";
   import ViewNodeTree from "@/components/widgets/ViewNodeTree.svelte";
+  import ParamStrip from "@/components/editor/body/view/ParamStrip.svelte";
   import { TreeDrag } from "@/components/widgets/treeDrag.svelte";
   import { TreeRename } from "@/components/widgets/treeRename.svelte";
   import { TreeAddMenu } from "@/components/widgets/treeAddMenu.svelte";
   import { CollapseGuard } from "@/components/widgets/treeCollapseGuard";
-  import FieldValueEditor from "@/components/widgets/FieldValueEditor.svelte";
   import { evaluateView, filterGroups, SELF_VAR, type EvalBindings, type ViewGroup, type ViewResult } from "@/lib/views/evaluateView";
   import { leafGroup, nodeSet } from "@/lib/views/viewResult";
-  import { buildBindings, effectiveParamValue, resolveParamControls } from "@/lib/views/viewParams";
-  // The param strip's reference/tag pickers draw the WHOLE node universe — any
-  // kind/type a `references` field can hold (Anton). That universe is the global
-  // per-project stores, read directly here (the #14-Step-2 pattern the schema /
-  // reference-index reads already use), NOT threaded per-pane — a pane can't know
-  // which kind a param references, and threading one roster (lore) starved the
-  // picker of every other kind (#257). NodePicker/ReferencePicker resolve assistants
-  // from their own store.
-  import { loreEntriesStore } from "@/lib/stores/lore";
-  import { promptEntriesStore } from "@/lib/stores/prompts";
-  import { structureStore, researchStructureStore } from "@/lib/stores/structure";
-  import { knownTagsStore } from "@/lib/stores/tags";
-  import type { MetadataValue } from "@/lib/types";
+  import { buildBindings } from "@/lib/views/viewParams";
+  import { repairSpecCycles } from "@/lib/views/cycleCheck";
 
   let {
     result,
@@ -212,8 +201,8 @@
   } = $props();
 
   // ── View evaluation + parameter strip (ADR-0032 §D) ──────────────────────
-  // When `view` is supplied, the wrapper OWNS evaluation: it resolves the strip
-  // controls, holds the ephemeral overrides, folds them (+ `$self`) into a
+  // When `view` is supplied, the wrapper OWNS evaluation: it holds the ephemeral
+  // overrides (edited via the shared `ParamStrip`), folds them (+ `$self`) into a
   // bindings env, and evaluates the spec against the roster. Centralized here so
   // every parameterized list gets the strip + `$self` for free — not per pane
   // (ADR-0032 §D rejects per-pane bespoke UI). `result`-driven sites skip all of
@@ -221,10 +210,9 @@
 
   // Ephemeral runtime overrides for the view's declared formals (ADR-0032 §C):
   // pane/session state, seeded per-control by the authored default, never baked
-  // into the shared view. Stale keys (from a previously-selected view) are ignored
-  // by `buildBindings`.
+  // into the shared view. Bound into `ParamStrip` (the strip UI + its controls);
+  // stale keys (from a previously-selected view) are ignored by `buildBindings`.
   let paramOverrides = $state<Record<string, unknown>>({});
-  const paramControls = $derived(view ? resolveParamControls(view.spec, view.schema) : []);
   const bindings = $derived.by((): EvalBindings => {
     if (!view) return {};
     const b: EvalBindings = { ...buildBindings(view.spec.params, paramOverrides) };
@@ -233,11 +221,25 @@
     if (view.anchorId) b[SELF_VAR] = [view.anchorId];
     return b;
   });
+  // The pane's LOAD-time cycle repair (#275): a pane evaluates a STORED spec
+  // directly (no designer graph, so `repairGraphCycles` never runs on it). A cyclic
+  // `{orphans_of}` spec — only reachable via a hand-edited file / crafted POST,
+  // never the designer — would recurse forever in `evalNest`. Repair it here, once
+  // per spec (this derived tracks `view.spec`, not the per-keystroke overrides);
+  // the acyclic common case returns the same spec object untouched.
+  const safeSpec = $derived.by(() => {
+    if (!view) return null;
+    const { spec, repaired } = repairSpecCycles(view.spec);
+    if (repaired > 0 && import.meta.env.DEV) {
+      console.warn(`[views] pane load repair: neutralized ${repaired} cyclic orphans_of reference(s)`);
+    }
+    return spec;
+  });
   // The rendered result: evaluated from `view` (re-runs on override/spec change),
   // or the pre-resolved `result`, or an empty set when neither is wired.
   const computedResult = $derived.by((): ViewResult<T> =>
-    view
-      ? evaluateView(view.spec, view.universe as T[], {
+    view && safeSpec
+      ? evaluateView(safeSpec, view.universe as T[], {
           schema: view.schema,
           resolveView: view.resolveView,
           bindings,
@@ -245,26 +247,6 @@
         })
       : (result ?? nodeSet<T>([])),
   );
-
-  // The value a strip control shows: the ephemeral override, else the authored
-  // default (both in the field's stored shape); FieldValueEditor coerces scalar
-  // vs list. `setParam`/`clearParam` write/reset the override; `paramActive` marks
-  // a formal that currently constrains the result (drives the affordance + clear).
-  function paramDisplayValue(name: string): MetadataValue {
-    if (name in paramOverrides) return paramOverrides[name] as MetadataValue;
-    return (view?.spec.params?.find((p) => p.name === name)?.default ?? null) as MetadataValue;
-  }
-  function setParam(name: string, value: MetadataValue): void {
-    paramOverrides = { ...paramOverrides, [name]: value };
-  }
-  function clearParam(name: string): void {
-    const { [name]: _dropped, ...rest } = paramOverrides;
-    paramOverrides = rest;
-  }
-  function paramActive(name: string): boolean {
-    const p = view?.spec.params?.find((param) => param.name === name);
-    return p ? effectiveParamValue(p, paramOverrides).length > 0 : false;
-  }
 
   // Seed the initial collapsed set once from `defaultCollapsed`. Guarded so the
   // effect never re-seeds (and it reads neither `collapsed` nor the seed after,
@@ -446,35 +428,13 @@
   }
 </script>
 
-{#if paramControls.length > 0}
-  <!-- The parameter strip (ADR-0032 §D): one control per declared formal, seeded
-       by its default and overridable at runtime — a saved view's search box,
-       generalized. Owned HERE so every parameterized list shares it (§D rejects
-       per-pane strips); the control is a FieldValueEditor derived from the formal's
-       field (its reference/tag data comes from `view.paramData`). -->
-  <div class="param-strip" role="group" aria-label="View parameters">
-    {#each paramControls as control (control.name)}
-      <div class="param" class:active={paramActive(control.name)}>
-        <span class="param-label">{control.label}</span>
-        <div class="param-control">
-          <FieldValueEditor
-            field={control.field}
-            value={paramDisplayValue(control.name)}
-            onChange={(v) => setParam(control.name, v)}
-            ariaLabel={control.label}
-            loreEntries={$loreEntriesStore}
-            promptEntries={$promptEntriesStore}
-            structure={$structureStore}
-            researchStructure={$researchStructureStore}
-            knownTags={$knownTagsStore}
-          />
-        </div>
-        {#if control.name in paramOverrides}
-          <button class="param-clear" title="Reset to default" aria-label={`Reset ${control.label} to default`} onclick={() => clearParam(control.name)}>×</button>
-        {/if}
-      </div>
-    {/each}
-  </div>
+{#if view}
+  <!-- The runtime parameter strip (ADR-0032 §D): one control per declared formal,
+       seeded by its default and overridable at runtime — a saved view's search box,
+       generalized. The SAME `ParamStrip` the designer preview uses (#275) — every
+       parameterized surface shares one implementation (§D rejects per-pane strips).
+       It renders nothing when the view declares no parameters. -->
+  <ParamStrip spec={view.spec} schema={view.schema} bind:overrides={paramOverrides} />
 {/if}
 
 <div class="tree-keys" use:treeKeyboard>
@@ -516,47 +476,5 @@
      around the list without introducing a box. */
   .tree-keys {
     display: contents;
-  }
-
-  /* Parameter strip (ADR-0032 §D) — moved here from the per-pane Lore strip so it
-     is shared by every parameterized list. */
-  .param-strip {
-    display: flex;
-    flex-wrap: wrap;
-    gap: 10px;
-    padding: 8px 10px;
-    border-bottom: 1px solid var(--border);
-    background: var(--inset);
-  }
-  .param {
-    display: flex;
-    align-items: center;
-    gap: 6px;
-    min-width: 0;
-  }
-  .param-label {
-    font-size: var(--fs-xs);
-    color: var(--text-3);
-    text-transform: uppercase;
-    letter-spacing: 0.04em;
-    white-space: nowrap;
-  }
-  .param.active .param-label {
-    color: var(--accent-emphasis);
-  }
-  .param-control {
-    min-width: 140px;
-  }
-  .param-clear {
-    border: none;
-    background: transparent;
-    color: var(--text-3);
-    font-size: var(--fs-lg);
-    line-height: 1;
-    padding: 0 2px;
-    cursor: pointer;
-  }
-  .param-clear:hover {
-    color: var(--danger);
   }
 </style>

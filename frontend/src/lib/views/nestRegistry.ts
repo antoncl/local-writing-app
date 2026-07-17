@@ -5,36 +5,24 @@
 // from `evaluateView` so that (large) file stays under the size cap; pure and
 // framework-free.
 
-import type { ViewExpr, ViewFieldOf, ViewNestOp } from "@/lib/types";
+import type { ViewExpr, ViewNestOp } from "@/lib/types";
+import { walkViewExpr } from "@/lib/views/walkViewExpr";
 
-// Register every id'd `nest` (`nests`) and every `{orphans_of}` reference (`refs`)
-// reachable in an expr tree. Recurses through every ViewExpr slot that can hold a
-// sub-expr — including a Filter value operand's `{field_of}` projection, which the
-// evaluator (`resolveOperand`) also traverses, so a nest / reference buried there
-// must not drop out of the pre-walk.
+// Register every id'd Nest (`nests`) and every `{orphans_of}` reference (`refs`)
+// reachable in an expr tree. A Nest's `id` is registered from EITHER a `{nest}`
+// slot (its results branch) OR an `{orphans_of, orphans_nest}` reference carrying
+// the definition inline (the orphans-only case, #275) — both populate the same
+// registry so `{orphans_of: id}` resolves regardless of which output was wired.
+// Traversal (incl. the Filter value-operand's `{field_of}` projection) is the
+// shared `walkViewExpr` — this pass only collects.
 export function collectNests(
   expr: ViewExpr | null | undefined,
   nests: Map<string, ViewNestOp>,
   refs: Set<string>,
 ): void {
-  if (!expr) return;
-  if (expr.orphans_of != null) refs.add(expr.orphans_of);
-  if (expr.nest) {
-    if (expr.nest.id != null) nests.set(expr.nest.id, expr.nest);
-    collectNests(expr.nest.parents, nests, refs);
-    collectNests(expr.nest.children, nests, refs);
-  }
-  for (const sub of expr.union ?? []) collectNests(sub, nests, refs);
-  for (const sub of expr.intersect ?? []) collectNests(sub, nests, refs);
-  if (expr.difference) {
-    collectNests(expr.difference.keep, nests, refs);
-    collectNests(expr.difference.remove, nests, refs);
-  }
-  collectNests(expr.complement, nests, refs);
-  collectNests(expr.of, nests, refs);
-  if (expr.field_of) collectNests(expr.field_of.of, nests, refs);
-  const val = expr.field?.value;
-  if (val && typeof val === "object" && "field_of" in val) {
-    collectNests((val as { field_of: ViewFieldOf }).field_of.of, nests, refs);
-  }
+  walkViewExpr(expr, (e) => {
+    if (e.orphans_of != null) refs.add(e.orphans_of);
+    if (e.nest?.id != null) nests.set(e.nest.id, e.nest);
+    if (e.orphans_nest?.id != null) nests.set(e.orphans_nest.id, e.orphans_nest);
+  });
 }

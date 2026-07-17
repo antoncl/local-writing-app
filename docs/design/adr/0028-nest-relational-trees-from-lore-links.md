@@ -247,3 +247,40 @@ design permits routing.
   label node we provide. So the ADR prescribes none — a raw orphan→results branch is just the
   unplaced nodes, and labelling is an ordinary designer affordance (a group/label the author
   inserts), not a Nest-op default.
+
+### Follow-ups and governing invariants (#275)
+
+Two invariants govern the Nest/orphans machinery. They are upheld structurally, so
+the evaluator and the lowering carry **no runtime guards** for them — a permanent
+record, because both guards below were once added on a code review that did not
+know these invariants, and the implementing thread (#260) applied the review's
+suggestions without checking them against the code:
+
+- **Acyclicity of the view graph** is held by `isValidConnection` at authoring
+  (Svelte Flow's per-connect callback rejects every cycle except a Nest's legal
+  results→own-`parents` self-loop) **and** a load-time 3-colour-DFS repair
+  (`cycleCheck.ts`) at BOTH entry paths a cyclic view can take: the designer graph
+  (`repairGraphCycles` in `hydrateGraph`) and the pane's stored spec
+  (`repairSpecCycles` in `ViewNodeList` — panes evaluate a spec directly, never
+  building a graph). Authoring can't create a cycle and neither load path can admit
+  one, so `{orphans_of}` can never re-enter the evaluator. The `nestInProgress`
+  re-entrancy guard and the `buildNode.seen` lowering guard were therefore redundant
+  and are removed; a runtime guard would only trade a loud, catchable failure for a
+  silent-empty result that masks a real gate leak. **No save-time / backend DAG
+  check** — the frontend load boundary is the guarantor (load-valid + every-edit-
+  valid ⇒ every saved view is valid), and a "cycle detected" error is not actionable
+  by a non-technical author. (A max review caught that the first cut guarded only
+  the designer graph; the pane spec repair is the second surface it prompted.)
+- **Uniqueness of Nest ids** is held by Svelte Flow keying nodes by id (a duplicate
+  breaks the canvas) plus `addNode`/`seedAddCounter` minting fresh ids; `nest.id`
+  *is* the node id. So the `nestCache` memo keyed by id cannot alias two Nests, and
+  a WeakMap-on-op (a review suggestion) buys nothing — dropped.
+
+**Orphans-only wiring serializes the Nest inline.** A Nest evaluates the same
+regardless of which of its two outputs are wired — an unwired output is *discarded
+output*, not a semantic change. So when only the orphans output is wired (results
+unwired), the Nest is otherwise unreachable from the sink and no `{nest}` would
+serialize it: lowering carries its definition inline on the `{orphans_of}`
+reference (`orphans_nest`, a companion field) so the reference resolves and the
+node survives save→reload. A Nest whose results output is wired is defined by its
+`{nest}` and the reference stays a bare `{orphans_of: id}`.

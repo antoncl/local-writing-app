@@ -166,6 +166,7 @@ lexicon grows by PR, never ad hoc:
 |---|---|
 | `+` | add / create (context supplies *what* — see the anchor rule) |
 | `⇄` | replace / swap a single bound value (a labelled single-value reference field — append is `+`, this is *rebind*) |
+| `↺` | revert / reset to default — restore a value to its authored default (distinct from `×` remove: the value is not cleared, it returns to the default) |
 | `×` | remove / close |
 | `⋯` | more actions (menu) |
 | `⋮⋮` | drag handle |

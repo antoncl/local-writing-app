@@ -380,6 +380,12 @@ export type ViewExpr = {
   view_ref?: string; // a saved view node id
   var?: string; // a free variable / reserved `$self` leaf (#184), resolved from bindings
   orphans_of?: string; // the flat unplaced-child node-set of the Nest with this `id` (ADR-0028 Amdt 1)
+  // The Nest DEFINITION carried inline on an `orphans_of` reference (#275), set
+  // only when that Nest's results output is unwired (so no `{nest}` serializes it).
+  // A Nest evaluates the same regardless of which outputs are wired, so it must
+  // persist even when only orphans are used — else it dangles + the node is lost
+  // on reload. Companion to `orphans_of` (like `of` to `annotate`).
+  orphans_nest?: ViewNestOp;
 };
 
 export type ViewSort = {

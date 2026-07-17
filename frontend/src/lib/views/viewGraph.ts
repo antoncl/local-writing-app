@@ -28,6 +28,7 @@
 
 import type { MetadataSchema, NodePickerConfig, ViewExpr, ViewFieldOf, ViewFieldPredicate, ViewGroupByLevel, ViewGroupSpec, ViewLeafValue, ViewNestMatch, ViewNestOp, ViewOperand, ViewParam, ViewSort, ViewSpec } from "@/lib/types";
 import { kindUniverseExpr, REFERENCES_FIELD, SELF_VAR } from "@/lib/views/evaluateView";
+import { walkViewExpr } from "@/lib/views/walkViewExpr";
 import { pickerMembership } from "@/lib/utils/pickerSources";
 
 export type LeafKind = "type" | "descendants_of" | "tagged" | "field" | "hand_picked" | "view_ref";
@@ -546,8 +547,10 @@ export function wouldCycle(edges: ViewGraphEdge[], source: string, target: strin
 //  - "nest-recursion-unsupported" — a *multi-node* cycle feeding a Nest's
 //    `parents` (a frontier transform, ADR-0028 §E). Detected, deferred to v2 →
 //    warn, don't wire.
-//  - "meaningless-cycle" — a cycle with no Nest on it: the evaluator's `seen`
-//    guard would silently drop the back-edge → a wrong result. Warn, don't wire.
+//  - "meaningless-cycle" — a cycle with no Nest on it: it has no sound lowering
+//    (the back-edge would have to be dropped, giving a wrong result). Warn, don't
+//    wire. Together with the load-time repair (#275) this keeps the graph acyclic
+//    without a lowering-time cycle guard.
 export type ConnectionVerdict = "ok" | "nest-recursion" | "nest-recursion-unsupported" | "meaningless-cycle";
 
 export function classifyConnection(
@@ -682,7 +685,7 @@ function differenceBuilt(keep: Built, remove: Built): Built {
 // view — whose `children` IS the kind root — round-trip instead of silently
 // emptying (the recursive containment tree needs a concrete children feed).
 // A Nest with no match rule can't join → EMPTY (nothing to show mid-compose).
-function nestBuilt(graph: ViewGraph, byId: Map<string, ViewGraphNode>, node: ViewGraphNode, seen: Set<string>, uni: ViewExpr | null): Built {
+function nestBuilt(graph: ViewGraph, byId: Map<string, ViewGraphNode>, node: ViewGraphNode, uni: ViewExpr | null): Built {
   const match = node.data.match;
   if (!match?.field || !match.direction) return EMPTY;
 
@@ -692,7 +695,7 @@ function nestBuilt(graph: ViewGraph, byId: Map<string, ViewGraphNode>, node: Vie
   const recursive = parentEdges.some((e) => e.source === node.id); // self-loop
 
   const lowerEdges = (edges: ViewGraphEdge[]): Built =>
-    unionBuilt(edges.filter((e) => e.source !== node.id).map((e) => buildNode(graph, byId, e.source, seen, uni)));
+    unionBuilt(edges.filter((e) => e.source !== node.id).map((e) => buildNode(graph, byId, e.source, uni)));
   const parents = lowerEdges(parentEdges);
   const children = lowerEdges(childEdges);
 
@@ -733,88 +736,81 @@ function buildNode(
   graph: ViewGraph,
   byId: Map<string, ViewGraphNode>,
   nodeId: string,
-  seen: Set<string>,
   uni: ViewExpr | null,
 ): Built {
-  if (seen.has(nodeId)) return EMPTY; // defensive: designer cycle
   const node = byId.get(nodeId);
   if (!node) return EMPTY;
-  seen.add(nodeId);
-  try {
-    switch (node.kind) {
-      case "all":
-        return UNIVERSE;
-      case "union":
-        return unionBuilt(childBuilts(graph, byId, nodeId, seen, uni));
-      case "intersect":
-        return intersectBuilt(childBuilts(graph, byId, nodeId, seen, uni));
-      case "difference": {
-        const keepEdge = upstreamOf(graph, nodeId).find((e) => e.targetHandle === "keep");
-        const removeEdge = upstreamOf(graph, nodeId).find((e) => e.targetHandle === "remove");
-        const keep = keepEdge ? buildNode(graph, byId, keepEdge.source, seen, uni) : EMPTY;
-        const remove = removeEdge ? buildNode(graph, byId, removeEdge.source, seen, uni) : EMPTY;
-        return differenceBuilt(keep, remove);
-      }
-      case "complement":
-        return complementBuilt(soleChild(graph, byId, nodeId, seen, uni));
-      case "nest":
-        return nestBuilt(graph, byId, node, seen, uni);
-      case "orphans_ref":
-        // A Nest's orphan output as a plain node-set (ADR-0028 Amdt 1): the
-        // synthetic source `assignOrphanRefs` inserts for each orphan-output edge.
-        // `!= null` (not truthiness): an empty-string id is a valid ref, and the
-        // evaluator matches on `!= null` too — keep them in lockstep.
-        return node.data.orphans_of != null ? built({ orphans_of: node.data.orphans_of }) : EMPTY;
-      case "self":
-        // The reserved anchor source — `{var: "$self"}` (no input).
-        return built({ var: SELF_VAR });
-      case "field_of":
-        return fieldOfBuilt(soleChild(graph, byId, nodeId, seen, uni), node, uni);
-      case "field":
-        // A leaf field predicate whose value slot may be a wired source (#196).
-        return fieldLeafBuilt(graph, byId, node, seen, uni);
-      case "filter":
-        return filterBuilt(graph, byId, node, seen, uni);
-      case "sorter":
-        // Membership pass-through; the sort itself is captured at the handle.
-        return soleChild(graph, byId, nodeId, seen, uni);
-      case "highlight":
-        return highlightBuilt(soleChild(graph, byId, nodeId, seen, uni), node);
-      default: {
-        const e = leafExpr(node);
-        return e ? built(e) : EMPTY;
-      }
+  switch (node.kind) {
+    case "all":
+      return UNIVERSE;
+    case "union":
+      return unionBuilt(childBuilts(graph, byId, nodeId, uni));
+    case "intersect":
+      return intersectBuilt(childBuilts(graph, byId, nodeId, uni));
+    case "difference": {
+      const keepEdge = upstreamOf(graph, nodeId).find((e) => e.targetHandle === "keep");
+      const removeEdge = upstreamOf(graph, nodeId).find((e) => e.targetHandle === "remove");
+      const keep = keepEdge ? buildNode(graph, byId, keepEdge.source, uni) : EMPTY;
+      const remove = removeEdge ? buildNode(graph, byId, removeEdge.source, uni) : EMPTY;
+      return differenceBuilt(keep, remove);
     }
-  } finally {
-    seen.delete(nodeId);
+    case "complement":
+      return complementBuilt(soleChild(graph, byId, nodeId, uni));
+    case "nest":
+      return nestBuilt(graph, byId, node, uni);
+    case "orphans_ref":
+      // A Nest's orphan output as a plain node-set (ADR-0028 Amdt 1): the
+      // synthetic source `assignOrphanRefs` inserts for each orphan-output edge.
+      // `!= null` (not truthiness): an empty-string id is a valid ref, and the
+      // evaluator matches on `!= null` too — keep them in lockstep.
+      return node.data.orphans_of != null ? built({ orphans_of: node.data.orphans_of }) : EMPTY;
+    case "self":
+      // The reserved anchor source — `{var: "$self"}` (no input).
+      return built({ var: SELF_VAR });
+    case "field_of":
+      return fieldOfBuilt(soleChild(graph, byId, nodeId, uni), node, uni);
+    case "field":
+      // A leaf field predicate whose value slot may be a wired source (#196).
+      return fieldLeafBuilt(graph, byId, node, uni);
+    case "filter":
+      return filterBuilt(graph, byId, node, uni);
+    case "sorter":
+      // Membership pass-through; the sort itself is captured at the handle.
+      return soleChild(graph, byId, nodeId, uni);
+    case "highlight":
+      return highlightBuilt(soleChild(graph, byId, nodeId, uni), node);
+    default: {
+      const e = leafExpr(node);
+      return e ? built(e) : EMPTY;
+    }
   }
 }
 
-function childBuilts(graph: ViewGraph, byId: Map<string, ViewGraphNode>, nodeId: string, seen: Set<string>, uni: ViewExpr | null): Built[] {
-  return orderedUpstream(graph, byId, nodeId).map((e) => buildNode(graph, byId, e.source, seen, uni));
+function childBuilts(graph: ViewGraph, byId: Map<string, ViewGraphNode>, nodeId: string, uni: ViewExpr | null): Built[] {
+  return orderedUpstream(graph, byId, nodeId).map((e) => buildNode(graph, byId, e.source, uni));
 }
 
-function soleChild(graph: ViewGraph, byId: Map<string, ViewGraphNode>, nodeId: string, seen: Set<string>, uni: ViewExpr | null): Built {
+function soleChild(graph: ViewGraph, byId: Map<string, ViewGraphNode>, nodeId: string, uni: ViewExpr | null): Built {
   const first = orderedUpstream(graph, byId, nodeId)[0];
-  return first ? buildNode(graph, byId, first.source, seen, uni) : EMPTY;
+  return first ? buildNode(graph, byId, first.source, uni) : EMPTY;
 }
 
-function filterBuilt(graph: ViewGraph, byId: Map<string, ViewGraphNode>, node: ViewGraphNode, seen: Set<string>, uni: ViewExpr | null): Built {
+function filterBuilt(graph: ViewGraph, byId: Map<string, ViewGraphNode>, node: ViewGraphNode, uni: ViewExpr | null): Built {
   // The set input is the `in` handle specifically — a Filter now has a second
   // (`value`) input handle, so `soleChild` (any-handle first) would be wrong.
   const inEdge = upstreamOf(graph, node.id).find((e) => (e.targetHandle ?? DEFAULT_HANDLE_ID) === DEFAULT_HANDLE_ID);
-  const input = inEdge ? buildNode(graph, byId, inEdge.source, seen, uni) : EMPTY;
-  const p = predicateExpr(node, wiredValueOperand(graph, byId, node, seen, uni));
+  const input = inEdge ? buildNode(graph, byId, inEdge.source, uni) : EMPTY;
+  const p = predicateExpr(node, wiredValueOperand(graph, byId, node, uni));
   if (!p) return input; // unconfigured filter = pass-through
   const mode = node.data.filter_mode ?? "keep";
   return mode === "drop" ? differenceBuilt(input, built(p)) : intersectBuilt([input, built(p)]);
 }
 
 // A leaf `field` node → its predicate expr, honoring a wired value source (#196).
-function fieldLeafBuilt(graph: ViewGraph, byId: Map<string, ViewGraphNode>, node: ViewGraphNode, seen: Set<string>, uni: ViewExpr | null): Built {
+function fieldLeafBuilt(graph: ViewGraph, byId: Map<string, ViewGraphNode>, node: ViewGraphNode, uni: ViewExpr | null): Built {
   const key = node.data.field?.key;
   if (!key) return EMPTY; // a blank leaf isn't "whole universe"
-  return built({ field: withWiredValue(node.data.field!, wiredValueOperand(graph, byId, node, seen, uni)) });
+  return built({ field: withWiredValue(node.data.field!, wiredValueOperand(graph, byId, node, uni)) });
 }
 
 // Resolve a wired value operand on `node`'s `value` handle (#196, ADR-0031 §E):
@@ -825,7 +821,6 @@ function wiredValueOperand(
   graph: ViewGraph,
   byId: Map<string, ViewGraphNode>,
   node: ViewGraphNode,
-  seen: Set<string>,
   uni: ViewExpr | null,
 ): ViewOperand | undefined {
   const edge = upstreamOf(graph, node.id).find((e) => e.targetHandle === FILTER_VALUE_HANDLE);
@@ -833,7 +828,7 @@ function wiredValueOperand(
   const src = byId.get(edge.source);
   if (src?.kind === "self") return { var: SELF_VAR };
   if (src?.kind === "field_of") {
-    const b = buildNode(graph, byId, edge.source, seen, uni);
+    const b = buildNode(graph, byId, edge.source, uni);
     if (b.tag === "expr" && b.expr.field_of) return { field_of: b.expr.field_of };
   }
   return undefined;
@@ -958,7 +953,7 @@ function lowerSegment(
   for (const e of edges) {
     const src = byId.get(e.source);
     if (src?.kind === "sorter" && src.data.sort) sort = src.data.sort;
-    parts.push(buildNode(graph, byId, e.source, new Set(), uni));
+    parts.push(buildNode(graph, byId, e.source, uni));
   }
   // A Sorter wired to a handle with no upstream membership sorts the whole
   // universe — promote the otherwise-empty segment to universe so graphToSpec
@@ -1133,32 +1128,70 @@ export function graphToSpec(
   const params = collectParams(graph);
   const withParams = (s: ViewSpec): ViewSpec => ({ ...s, ...(params.length > 0 ? { params } : {}) });
 
+  let spec: ViewSpec;
   if (handles.length <= 1 || populated.length <= 1) {
     // Single/unnamed group: its Organize rides on the spec as `group_by`
     // (ADR-0037 §2). Amendment 1 — the levels live on the lone handle (uniform
     // with named groups), so lower them from there, not the output-node config.
     const seg = populated[0];
     const groupBy = seg?.handle.group_by?.filter((l) => l.field) ?? [];
-    return withParams({
+    spec = withParams({
       kind: base.kind,
       expr: seg ? materializeOuter(seg.built, universeExpr) : null,
       sort: sanitizeSort(seg?.sort ?? base.sort ?? null),
       ...(groupBy.length > 0 ? { group_by: groupBy } : {}),
     });
+  } else {
+    // Named groups: Amendment 1 — each group owns its Organize, lowered onto its
+    // `ViewGroupSpec.group_by`. A top-level (output-node) group_by does not apply.
+    const groups: ViewGroupSpec[] = populated.map((s, i) => {
+      const g: ViewGroupSpec = { name: s.handle.name?.trim() || `Group ${i + 1}`, expr: materializeOuter(s.built, universeExpr) };
+      const gs = sanitizeSort(s.sort);
+      if (gs) g.sort = gs;
+      if (s.handle.color) g.color = s.handle.color;
+      const gb = s.handle.group_by?.filter((l) => l.field) ?? [];
+      if (gb.length > 0) g.group_by = gb;
+      return g;
+    });
+    spec = withParams({ kind: base.kind, groups, sort: sanitizeSort(base.sort ?? null) });
   }
 
-  // Named groups: Amendment 1 — each group owns its Organize, lowered onto its
-  // `ViewGroupSpec.group_by`. A top-level (output-node) group_by does not apply.
-  const groups: ViewGroupSpec[] = populated.map((s, i) => {
-    const g: ViewGroupSpec = { name: s.handle.name?.trim() || `Group ${i + 1}`, expr: materializeOuter(s.built, universeExpr) };
-    const gs = sanitizeSort(s.sort);
-    if (gs) g.sort = gs;
-    if (s.handle.color) g.color = s.handle.color;
-    const gb = s.handle.group_by?.filter((l) => l.field) ?? [];
-    if (gb.length > 0) g.group_by = gb;
-    return g;
-  });
-  return withParams({ kind: base.kind, groups, sort: sanitizeSort(base.sort ?? null) });
+  attachOrphansNests([spec.expr, ...(spec.groups?.map((g) => g.expr) ?? [])], graph, byId, universeExpr);
+  return spec;
+}
+
+// Persist an orphans-only Nest's definition inline on its `{orphans_of}` references
+// (#275, ADR-0028 "governing invariants"): a Nest whose results output is unwired is
+// unreachable from the sink, so lowering emits no `{nest}` — without this its
+// orphans dangle (empty) and the node is lost on reload. Semantics are wiring-
+// independent; a results-wired Nest is defined by its `{nest}` and skipped here.
+function attachOrphansNests(
+  exprs: (ViewExpr | null | undefined)[],
+  graph: ViewGraph,
+  byId: Map<string, ViewGraphNode>,
+  universeExpr: ViewExpr | null,
+): void {
+  // Fast path: `_orphanId` is stamped only on Nests with an orphan-output edge, so a
+  // view with no orphan wiring (the vast majority) skips the walk + lowering.
+  if (!graph.nodes.some((n) => n.data._orphanId != null)) return;
+  const reachable = reachableFromOutput(graph);
+  const ops = new Map<string, ViewNestOp>();
+  for (const n of graph.nodes) {
+    if (n.kind !== "nest" || n.data._orphanId == null || reachable.has(n.id)) continue;
+    const b = buildNode(graph, byId, n.id, universeExpr);
+    if (b.tag === "expr" && b.expr.nest) ops.set(n.data._orphanId, b.expr.nest);
+  }
+  if (ops.size === 0) return;
+  // Attach to the FIRST reference per id only — specToGraph rebuilds the node from
+  // one copy (idempotent by id); all N would bloat the spec + alias one op object.
+  const attached = new Set<string>();
+  const attach = (e: ViewExpr): void => {
+    if (e.orphans_of != null && e.orphans_nest == null && !attached.has(e.orphans_of) && ops.has(e.orphans_of)) {
+      e.orphans_nest = ops.get(e.orphans_of);
+      attached.add(e.orphans_of);
+    }
+  };
+  for (const expr of exprs) walkViewExpr(expr, attach);
 }
 
 // Flat single-segment lowering — the root `expr` of a designer graph, ignoring
@@ -1170,8 +1203,10 @@ export function graphToExpr(rawGraph: ViewGraph, kind?: string): ViewExpr | null
   const graph = assignOrphanRefs(rawGraph);
   const byId = new Map(graph.nodes.map((n) => [n.id, n]));
   const uni = kind ? kindUniverseExpr(kind, null) : null;
-  const parts = orderedUpstream(graph, byId, OUTPUT_NODE_ID).map((e) => buildNode(graph, byId, e.source, new Set(), uni));
-  return materializeOuter(unionBuilt(parts), uni);
+  const parts = orderedUpstream(graph, byId, OUTPUT_NODE_ID).map((e) => buildNode(graph, byId, e.source, uni));
+  const expr = materializeOuter(unionBuilt(parts), uni);
+  attachOrphansNests([expr], graph, byId, uni);
+  return expr;
 }
 
 // --- spec → graph (reopen fallback) --------------------------------------
@@ -1273,6 +1308,28 @@ export function specToGraph(spec: ViewSpec | null | undefined, schema?: Metadata
     }
   }
 
+  // Materialize a Nest node + its parents/children subgraph, registering its `id`
+  // so `{orphans_of: id}` resolves to its orphans output. Idempotent by id (a Nest
+  // defined via `{nest}` OR an inline orphans-only `{orphans_of}` never doubles).
+  function buildNestNode(op: ViewNestOp, depth: number): string {
+    if (op.id != null) {
+      const existing = nestNodeByOrphanId.get(op.id);
+      if (existing) return existing;
+    }
+    const id = addNode("nest", depth, { match: op.match });
+    const parentsId = op.parents ? walk(op.parents, depth + 1) : null;
+    const childrenId = op.children ? walk(op.children, depth + 1) : null;
+    if (parentsId) link(parentsId, id, NEST_PARENTS_HANDLE);
+    if (childrenId) link(childrenId, id, NEST_CHILDREN_HANDLE);
+    // Recursion is the canvas self-loop: output → own `parents` handle.
+    if (op.recursive) link(id, id, NEST_PARENTS_HANDLE);
+    // Amendment 1 (#260): map this Nest's id → its graph node, so an
+    // `{orphans_of: id}` reference resolves to its orphans output handle after the
+    // whole spec is walked (resolveOrphanRefs).
+    if (op.id != null) nestNodeByOrphanId.set(op.id, id);
+    return id;
+  }
+
   // Walk one segment's expr, wiring its root (optionally through a Sorter) into
   // the given output handle.
   function attachSegment(expr: ViewExpr | null, handleId: string, sort: ViewSort | null): void {
@@ -1315,23 +1372,15 @@ export function specToGraph(spec: ViewSpec | null | undefined, schema?: Metadata
       return id;
     }
     if (e.nest) {
-      const id = addNode("nest", depth, { match: e.nest.match });
-      const parentsId = e.nest.parents ? walk(e.nest.parents, depth + 1) : null;
-      const childrenId = e.nest.children ? walk(e.nest.children, depth + 1) : null;
-      if (parentsId) link(parentsId, id, NEST_PARENTS_HANDLE);
-      if (childrenId) link(childrenId, id, NEST_CHILDREN_HANDLE);
-      // Recursion is the canvas self-loop: output → own `parents` handle.
-      if (e.nest.recursive) link(id, id, NEST_PARENTS_HANDLE);
-      // Amendment 1 (#260): map this Nest's id → its graph node, so an
-      // `{orphans_of: id}` reference resolves to its orphans output handle after
-      // the whole spec is walked (resolveOrphanRefs).
-      if (e.nest.id != null) nestNodeByOrphanId.set(e.nest.id, id);
-      return id;
+      return buildNestNode(e.nest, depth);
     }
     if (e.orphans_of != null) {
       // A reference to a Nest's orphan node-set (ADR-0028 Amdt 1). Reopens as a
       // synthetic `orphans_ref` source; resolveOrphanRefs then re-sources its
-      // outgoing edges from the referenced Nest's orphans output handle.
+      // outgoing edges from the referenced Nest's orphans output handle. When the
+      // Nest is defined INLINE here (orphans-only, #275 — no `{nest}` elsewhere),
+      // materialize its node first so that re-sourcing has a Nest to point at.
+      if (e.orphans_nest) buildNestNode(e.orphans_nest, depth);
       return addNode("orphans_ref", depth, { orphans_of: e.orphans_of });
     }
     if (e.annotate && e.of) {

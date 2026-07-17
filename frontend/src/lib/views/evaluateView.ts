@@ -306,12 +306,6 @@ type RunState<T extends EvalNode> = {
   nestsById: Map<string, ViewNestOp>;
   orphansReferenced: Set<string>;
   nestCache: Map<string, NestEval<T>>;
-  // Re-entrancy guard for `{orphans_of}` (the analogue of `viewStack` for
-  // `view_ref`): an id'd Nest currently mid-evaluation. A Nest that references its
-  // own orphans (or a mutual A↔B cycle) would otherwise recurse forever, since the
-  // memo is only written on exit. Re-entering an in-progress id breaks the cycle
-  // (empty) instead of overflowing the stack.
-  nestInProgress: Set<string>;
 };
 
 // A Nest's evaluated outputs (ADR-0028 Amendment 1). `rows` = the denormalized
@@ -353,7 +347,6 @@ export function evaluateView<T extends EvalNode>(
     nestsById: new Map(),
     orphansReferenced: new Set(),
     nestCache: new Map(),
-    nestInProgress: new Set(),
   };
 
   // ADR-0028 Amendment 1: register id'd Nests + orphan references across the whole
@@ -979,18 +972,25 @@ const NEST_FANOUT_K = 8;
 // `{orphans_of: id}`). An id'd Nest is memoized so it is computed ONCE and
 // referenced many (results + orphans = the single-sink DAG, §C).
 function evalNest<T extends EvalNode>(state: RunState<T>, op: ViewNestOp): NestEval<T> {
+  // GOVERNING INVARIANTS — do not re-add a re-entrancy guard or swap this memo to a
+  // WeakMap (#275). This memo is keyed by `op.id`, which is a designer NODE id:
+  //   1. Node ids are UNIQUE — Svelte Flow keys nodes by id (a duplicate breaks the
+  //      canvas outright) and `addNode`/`seedAddCounter` mint fresh ones. So two
+  //      distinct Nests never share an id; keying the memo by id cannot alias, and a
+  //      WeakMap-on-op buys nothing.
+  //   2. `{orphans_of}` references are ACYCLIC — `isValidConnection` rejects every
+  //      cyclic wiring at authoring time, and the load-time repair (cycleCheck.ts)
+  //      drops any back-edge on BOTH entry paths: the designer graph
+  //      (`repairGraphCycles` in hydrateGraph) and the pane's stored spec
+  //      (`repairSpecCycles` in ViewNodeList — panes never build a graph). So a
+  //      cyclic spec is repaired before evalNest sees it; no `nestInProgress` guard.
+  // Both a re-entrancy guard and a WeakMap were once added here on a code review's
+  // suggestion; the review didn't know these invariants and the change went in
+  // without checking them against the code. They were redundant and were removed —
+  // if a review flags this again, verify against the invariants above first.
   if (op.id != null) {
     const cached = state.nestCache.get(op.id);
     if (cached) return cached;
-    if (state.nestInProgress.has(op.id)) {
-      // Circular `{orphans_of}` (a nest referencing its own orphans, or a mutual
-      // A↔B cycle): break it rather than overflow the stack (the memo is only
-      // written on exit, so the re-entrant call would recurse forever). An empty
-      // result is the only sound value for a nest defined via its own orphans; the
-      // designer also blocks the orphans→own-parents wire (classifyConnection).
-      return { rows: [], placed: new Set(), orphanSet: new Set() };
-    }
-    state.nestInProgress.add(op.id);
   }
   state.nestRan = true;
   const wholeUniverse = (): Set<string> => new Set(state.order.keys());
@@ -1077,10 +1077,7 @@ function evalNest<T extends EvalNode>(state: RunState<T>, op: ViewNestOp): NestE
   if (!referenced) state.diag.orphansDropped += orphanSet.size;
 
   const result: NestEval<T> = { rows, placed, orphanSet };
-  if (op.id != null) {
-    state.nestCache.set(op.id, result);
-    state.nestInProgress.delete(op.id);
-  }
+  if (op.id != null) state.nestCache.set(op.id, result);
   return result;
 }
 

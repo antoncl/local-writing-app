@@ -41,6 +41,7 @@
   } from "@/lib/utils/schemaTypeHelpers";
   import { pickerMembership } from "@/lib/utils/pickerSources";
   import { structureToEvalNodes } from "@/lib/views/structureNodes";
+  import { repairGraphCycles as repairGraphCycles_ } from "@/lib/views/cycleCheck";
   import {
     specToGraph,
     graphToSpec,
@@ -221,7 +222,7 @@
     // Handle ids are explicit so Svelte Flow renders these edges once the new
     // nodes' handle bounds are measured (its layout pass is a derived that
     // recomputes after measurement — no manual defer needed).
-    const graph = hydrateGraph(node);
+    const graph = repairGraphCycles(hydrateGraph(node));
     flowNodes = graph.nodes;
     flowEdges = graph.edges;
     // Seed the add-node counter past any `a<N>` id already in the loaded graph.
@@ -293,6 +294,22 @@
         class: edgeClass(e.source, nodes),
       })),
     };
+  }
+
+  // Load-time DAG-invariant repair (#275, ADR-0028 §D): silently drop any illegal
+  // back-edge in the hydrated graph (a hand-edited file / a previously-buggy
+  // designer's output) so the view still opens; the repair persists on the next
+  // debounced save. The invariant + the one legal exception live in cycleCheck.
+  function repairGraphCycles(graph: { nodes: Node<FlowData>[]; edges: Edge[] }): {
+    nodes: Node<FlowData>[];
+    edges: Edge[];
+  } {
+    const kindById = new Map(graph.nodes.map((n) => [n.id, n.data.kind]));
+    const { edges, dropped } = repairGraphCycles_(kindById, graph.edges);
+    if (dropped.length > 0 && import.meta.env.DEV) {
+      console.warn(`[views] load-time repair: dropped ${dropped.length} cyclic edge(s)`, dropped);
+    }
+    return { nodes: graph.nodes, edges };
   }
 
   // Canonicalize bare predicate-leaf nodes (`type / descendants_of / tagged /
@@ -1008,8 +1025,8 @@
           </ul>
           <!-- Editable controls (ADR-0032 §D): vary a value and the preview
                re-evaluates live, so the designer verifies the logic exactly as the
-               pane will render it. (The pane's ViewNodeList renders equivalent
-               controls from its own inline copy — a duplication to unify.) -->
+               pane will render it — the SAME `ParamStrip` the pane's ViewNodeList
+               now renders (#275), so preview and pane share one implementation. -->
           <ParamStrip {spec} {schema} bind:overrides={paramOverrides} />
         {/if}
       {/if}

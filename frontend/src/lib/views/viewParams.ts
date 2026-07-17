@@ -13,6 +13,7 @@
 
 import type { MetadataFieldDefinition, MetadataSchema, ViewExpr, ViewParam, ViewSpec } from "@/lib/types";
 import { SELF_VAR, type EvalBindings } from "@/lib/views/evaluateView";
+import { walkViewExpr } from "@/lib/views/walkViewExpr";
 
 // A resolved strip control: the declared formal + the field its editor derives
 // from. `fieldKey` is "" when no referencing slot was found (→ a text fallback).
@@ -35,7 +36,9 @@ function isVarOperand(v: unknown): v is { var: string } {
 
 // Map each formal name → the field keys whose predicate operand is `{var: name}`.
 // Only predicate operands need a control: `$self` is surface-supplied and a
-// `field_of` `of`-var is a wired source, neither a user-facing formal.
+// `field_of` `of`-var is a wired source, neither a user-facing formal. Traversal
+// is the shared `walkViewExpr` (#275) — so a promoted formal buried anywhere,
+// including inside an orphans-only Nest, is found.
 function collectReferencingFieldKeys(spec: ViewSpec): Map<string, string[]> {
   const out = new Map<string, string[]>();
   const add = (name: string, key: string): void => {
@@ -46,28 +49,14 @@ function collectReferencingFieldKeys(spec: ViewSpec): Map<string, string[]> {
       out.set(name, [key]);
     }
   };
-  const walk = (e: ViewExpr | null | undefined): void => {
-    if (!e) return;
-    e.union?.forEach(walk);
-    e.intersect?.forEach(walk);
-    if (e.difference) {
-      walk(e.difference.keep);
-      walk(e.difference.remove);
-    }
-    if (e.complement) walk(e.complement);
-    if (e.nest) {
-      walk(e.nest.parents);
-      walk(e.nest.children);
-    }
-    if (e.annotate && e.of) walk(e.of);
-    if (e.field_of) walk(e.field_of.of);
+  const visit = (e: ViewExpr): void => {
     if (e.field) {
       const v = e.field.value;
       if (isVarOperand(v) && v.var !== SELF_VAR) add(v.var, e.field.key);
     }
   };
-  walk(spec.expr);
-  spec.groups?.forEach((g) => walk(g.expr));
+  walkViewExpr(spec.expr, visit);
+  spec.groups?.forEach((g) => walkViewExpr(g.expr, visit));
   return out;
 }
 

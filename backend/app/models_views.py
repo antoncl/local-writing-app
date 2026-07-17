@@ -205,6 +205,15 @@ class ViewExpr(BaseModel):
     # (ADR-0028 Amendment 1, #260): the flat set of `children` that nest never
     # placed, as a plain node-set — a first-class source, wireable anywhere.
     orphans_of: str | None = None
+    # The Nest DEFINITION carried inline on an `orphans_of` reference (#275): set
+    # only when that Nest's RESULTS output is unwired, so the Nest is otherwise
+    # unreachable from the sink and no `{nest}` serializes it. A Nest evaluates the
+    # same regardless of which of its two outputs are wired (an unwired output is
+    # discarded output, not a semantic change), so its definition must persist even
+    # when only orphans are used — else it dangles (empty group) and the node is
+    # lost on reload. Companion to `orphans_of` (like `of` to `annotate`); omitted
+    # in the common case where a `{nest}` in the results branch defines the id.
+    orphans_nest: NestOp | None = None
 
     @model_validator(mode="after")
     def _exactly_one_primary(self) -> ViewExpr:
@@ -222,6 +231,8 @@ class ViewExpr(BaseModel):
                 raise ValueError("an `annotate` payload must set at least one of label/color")
         elif self.of is not None:
             raise ValueError("`of` is only valid paired with `annotate`")
+        if self.orphans_nest is not None and slot != "orphans_of":
+            raise ValueError("`orphans_nest` is only valid paired with `orphans_of`")
         if slot in ("union", "intersect") and not getattr(self, slot):
             raise ValueError(f"`{slot}` requires at least one operand")
         return self

@@ -601,8 +601,11 @@ class ViewUiStateTests(unittest.TestCase):
         self.assertEqual(body["spec"]["group_by"], [{"field": "entry_type", "order": "label"}])
 
     def test_group_by_and_orphans_round_trip_through_create_and_read(self) -> None:
-        # ADR-0037: group_by levels and the nest orphans policy are stored
-        # verbatim and survive create → read (the backend never evaluates them).
+        # ADR-0037 group_by + ADR-0028 Amendment 1 (#260): the nest `orphans`
+        # output is now a routable SUB-EXPRESSION (not the retired keep/drop
+        # scalar). It is stored verbatim and survives create → read — a second
+        # Nest here, proving a nested structure round-trips (the backend never
+        # evaluates it).
         spec = {
             "kind": "lore",
             "expr": {
@@ -610,7 +613,13 @@ class ViewUiStateTests(unittest.TestCase):
                     "parents": {"type": "lore:location"},
                     "children": {"descendants_of": "lore:base"},
                     "match": {"field": "located_in", "direction": "child_to_parent", "by": "ref"},
-                    "orphans": "keep",
+                    "orphans": {
+                        "nest": {
+                            "parents": {"field": {"key": "located_in", "op": "unset"}},
+                            "match": {"field": "located_in", "direction": "child_to_parent", "by": "ref"},
+                            "recursive": True,
+                        }
+                    },
                 }
             },
             "group_by": [{"field": "entry_type"}],
@@ -618,7 +627,11 @@ class ViewUiStateTests(unittest.TestCase):
         created = self._create("Paris view", spec)
         got = self.client.get(f"/api/views/{created['id']}").json()
         self.assertEqual(got["spec"]["group_by"], [{"field": "entry_type", "order": None}])
-        self.assertEqual(got["spec"]["expr"]["nest"]["orphans"], "keep")
+        # The routed orphan chain survives as a real sub-expression (dense-null
+        # serialized), so assert the load-bearing fields rather than exact equality.
+        orphans = got["spec"]["expr"]["nest"]["orphans"]
+        self.assertEqual(orphans["nest"]["match"]["field"], "located_in")
+        self.assertTrue(orphans["nest"]["recursive"])
 
     def test_materialized_default_is_listed_and_reused_on_next_write(self) -> None:
         self.client.put("/api/views/view_default_scene/ui", json={"ui": {"collapsed": ["node:a"]}})

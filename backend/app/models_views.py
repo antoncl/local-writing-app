@@ -125,15 +125,21 @@ class NestOp(BaseModel):
     universe yields a *thicket* (a subtree rooted at every node, ADR-0028 §C).
     `match` is required — without a rule there is no join.
 
-    `orphans` (ADR-0037, #216): what happens to a candidate child that matched
-    no parent — "drop" (the default; counted in diagnostics) or "keep" (the
-    orphan stays at the root as a bare row — the who-lives-where pattern)."""
+    `orphans` (ADR-0028 Amendment 1, #260): the unplaced-child set is a routable
+    SECOND output, not a scalar disposition. `None` (nothing wired downstream) =
+    drop + count, the default. A sub-expression = the wired downstream chain
+    (Filter/Sort/a second Nest) evaluated by the frontend over the unplaced set
+    and concatenated into the SAME result — every leaf inside it denotes the
+    orphan set (the evaluator scopes the universe to it). The old `"keep"/"drop"`
+    scalar is RETIRED (unwired = drop, wired = routed); pre-1.0 straight cut, no
+    migration. The backend stays structural — it validates the sub-expr as an
+    ordinary ViewExpr and never evaluates it."""
 
     parents: ViewExpr | None = None
     children: ViewExpr | None = None
     match: NestMatch
     recursive: bool = False
-    orphans: Literal["keep", "drop"] | None = None
+    orphans: ViewExpr | None = None
 
 
 # The mutually-exclusive "primary" slots on a ViewExpr node: exactly one is set.

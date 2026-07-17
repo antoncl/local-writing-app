@@ -759,6 +759,43 @@ describe("nest orphans — first-class node-set output (ADR-0028 Amendment 1, #2
     const graph: ViewGraph = { nodes: [out(), nst], edges: [edge(nst.id, OUTPUT_NODE_ID)] };
     expect(graphToSpec(graph, { kind: "scene" }).expr).toEqual({ nest: { match } });
   });
+
+  it("orphans-only (results output unwired): the Nest definition is carried inline (#275)", () => {
+    // Only the orphans output is wired; the results output goes nowhere. The Nest
+    // is unreachable from the sink, so lowering would drop it — instead it rides
+    // inline on the `{orphans_of}` reference so it survives + resolves.
+    const roster = node("all", {}, -100);
+    const nst = node("nest", { match }, 0);
+    const graph: ViewGraph = {
+      nodes: [out({ handles: [{ id: "in", name: "Tree" }, { id: "h1", name: "Loose" }] }), roster, nst],
+      edges: [
+        edge(roster.id, nst.id, NEST_CHILDREN_HANDLE),
+        { id: "eo", source: nst.id, sourceHandle: NEST_ORPHANS_HANDLE, target: OUTPUT_NODE_ID, targetHandle: "h1" },
+      ],
+    };
+    // Only the orphans handle is populated → a flat expr.
+    const spec = graphToSpec(graph, { kind: "scene" });
+    expect(spec.expr?.orphans_of).toBe(nst.id);
+    expect(spec.expr?.orphans_nest).toMatchObject({ children: { descendants_of: "scene:base" }, match, id: nst.id });
+  });
+
+  it("round-trips an orphans-only view — the Nest node survives reload (#275)", () => {
+    const spec: ViewSpec = {
+      kind: "scene",
+      expr: { orphans_of: "nA", orphans_nest: { id: "nA", children: { descendants_of: "scene:base" }, match } },
+    } as ViewSpec;
+    const g = specToGraph(spec, undefined);
+    // The Nest node is reconstructed from the inline def (not lost), its orphans
+    // output wired to the sink, and no `orphans_ref` scaffolding remains.
+    const nst = g.nodes.find((n) => n.kind === "nest");
+    expect(nst).toBeTruthy();
+    expect(g.nodes.some((n) => n.kind === "orphans_ref")).toBe(false);
+    expect(g.edges.some((e) => e.source === nst!.id && e.sourceHandle === NEST_ORPHANS_HANDLE)).toBe(true);
+    // Re-lowering carries the def again (still orphans-only).
+    const out2 = graphToSpec(g, { kind: "scene" });
+    expect(out2.expr?.orphans_of).toBeTruthy();
+    expect(out2.expr?.orphans_nest).toMatchObject({ children: { descendants_of: "scene:base" }, match });
+  });
 });
 
 describe("#184 field_of / self lowering + round-trip (ADR-0031 §D)", () => {

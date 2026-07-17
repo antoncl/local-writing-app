@@ -1,9 +1,9 @@
 <script lang="ts">
   // The runtime parameter strip (ADR-0032 §D): one editable control per declared
-  // formal, seeded by its authored default and overridable. Used by the designer
-  // preview (ViewBodyView). NOTE: the panes' `ViewNodeList` still hand-rolls an
-  // equivalent inline strip — a known duplication both should be reduced to this
-  // component (they have already drifted slightly in layout/tokens).
+  // formal, seeded by its authored default and overridable. The SINGLE strip
+  // implementation (#275): both the designer preview (ViewBodyView) and the panes
+  // (via ViewNodeList) render this component, so the control logic lives once.
+  // Renders nothing when the spec declares no parameters.
   import FieldValueEditor from "@/components/widgets/FieldValueEditor.svelte";
   import { effectiveParamValue, resolveParamControls } from "@/lib/views/viewParams";
   import { loreEntriesStore } from "@/lib/stores/lore";
@@ -54,10 +54,10 @@
             researchStructure={$researchStructureStore}
             knownTags={$knownTagsStore}
           />
+          {#if control.name in overrides}
+            <button class="param-clear" title="Reset to default" aria-label={`Reset ${control.label} to default`} onclick={() => clearParam(control.name)}>↺</button>
+          {/if}
         </div>
-        {#if control.name in overrides}
-          <button class="param-clear" title="Reset to default" aria-label={`Reset ${control.label} to default`} onclick={() => clearParam(control.name)}>×</button>
-        {/if}
       </div>
     {/each}
   </div>

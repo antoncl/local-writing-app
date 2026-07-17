@@ -1245,25 +1245,24 @@ describe("nest — orphans as a routable node-set (ADR-0028 Amendment 1)", () =>
     expect(res.nodes).toEqual([]);
   });
 
-  it("a Nest that references its OWN orphans breaks the cycle instead of overflowing the stack", () => {
-    // Reachable by looping the orphans output back into the Nest's own parents.
-    const spec: ViewSpec = {
-      kind: "lore",
-      expr: { nest: { id: "n", children: { orphans_of: "n" }, match: ABG_MATCH, recursive: true } },
-    };
-    expect(() => evaluateView(spec, ABG)).not.toThrow();
+  it("(#275) an orphans-only reference carries the Nest inline and resolves to the orphan set", () => {
+    // No `{nest}` anywhere — the definition rides on the reference (`orphans_nest`),
+    // so `collectNests` registers it and `{orphans_of}` resolves to the real set
+    // instead of dangling to empty (the save→reload-with-results-unwired case).
+    const op = abgNest("n").nest!;
+    const res = evaluateView({ kind: "lore", expr: { orphans_of: "n", orphans_nest: op } }, ABG);
+    expect(new Set(res.nodes.map((n) => n.id))).toEqual(
+      new Set(["aleph", "aleph-ch", "aleph-s", "gimmel", "gimmel-ch", "gimmel-s"]),
+    );
+    expect(res.diagnostics?.orphansDropped).toBe(0);
   });
 
-  it("a mutual orphans_of cycle (A references B's orphans, B references A's) terminates", () => {
-    const spec: ViewSpec = {
-      kind: "lore",
-      groups: [
-        { name: "A", expr: { nest: { id: "a", children: { orphans_of: "b" }, match: ABG_MATCH } } },
-        { name: "B", expr: { nest: { id: "b", children: { orphans_of: "a" }, match: ABG_MATCH } } },
-      ],
-    };
-    expect(() => evaluateView(spec, ABG)).not.toThrow();
-  });
+  // NOTE (#275): a cyclic `{orphans_of}` spec (a Nest referencing its own orphans,
+  // or a mutual A↔B cycle) is no longer defended against in the evaluator. It
+  // cannot reach here: the designer's `isValidConnection` rejects every such wiring
+  // as a `meaningless-cycle` (see viewGraph.test.ts) and the load-time repair drops
+  // any back-edge in a hand-edited/legacy graph before it lowers. The former
+  // re-entrancy guard (`nestInProgress`) was redundant and has been removed.
 });
 
 describe("nestWarnings — surfacing diagnostics (#110)", () => {

@@ -28,7 +28,9 @@
   import { knownTagsStore } from "@/lib/stores/tags";
   import { referenceIndexStore } from "@/lib/stores/references";
   import { paneViews } from "@/lib/stores/paneViews.svelte";
-  import { evaluateView, nestWarnings, type EvalNode } from "@/lib/views/evaluateView";
+  import { evaluateView, nestWarnings, type EvalNode, type EvalBindings } from "@/lib/views/evaluateView";
+  import { buildBindings } from "@/lib/views/viewParams";
+  import ParamStrip from "./view/ParamStrip.svelte";
   import {
     effectiveFieldLabel,
     effectiveFieldHidden,
@@ -411,11 +413,19 @@
     if (k === "scene") return structureToEvalNodes(structure);
     return [];
   }
+  // The preview MUST evaluate what the pane will, or the designer can't verify the
+  // view's logic (Anton). So it binds the view's parameters exactly as the pane's
+  // ViewNodeList does — `buildBindings` seeds each formal from its authored default
+  // and applies the designer's own overrides (the editable ParamStrip in the rail).
+  // Without this the preview ran every parameter UNBOUND, diverging from the pane.
+  let paramOverrides = $state<Record<string, unknown>>({});
+  const previewBindings = $derived.by((): EvalBindings => buildBindings(spec.params, paramOverrides));
   let preview = $derived(
     evaluateView(spec, universe, {
       schema,
       resolveView: (viewId: string) => viewSpecs.get(viewId) ?? null,
       referenceIndex,
+      bindings: previewBindings,
     }),
   );
   // Nest diagnostics surfaced as warnings so a truncated/lossy tree is never
@@ -995,6 +1005,10 @@
               </li>
             {/each}
           </ul>
+          <!-- Editable controls (ADR-0032 §D): vary a value and the preview
+               re-evaluates live, so the designer verifies the logic exactly as the
+               pane will render it. Same strip the panes use (ViewNodeList). -->
+          <ParamStrip {spec} {schema} bind:overrides={paramOverrides} />
         {/if}
       {/if}
     </aside>

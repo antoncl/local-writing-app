@@ -307,18 +307,22 @@ describe("ADR-0037 §4: containment Nest", () => {
   });
 
   it("orphans wired flat to the root — the routed equivalent of the retired keep (ADR-0028 Amdt 1)", () => {
-    // The orphan output routed to an `All`-over-scope leaf: the unplaced children
-    // rejoin the result as bare rows at the root. `ALL` inside `orphans` denotes
-    // the orphan SET (the evaluator scopes the universe to it), so this reproduces
-    // exactly what the retired `orphans: "keep"` scalar produced — now authorable.
+    // The orphan output is a plain node-set: union the Nest's tree with its
+    // `{orphans_of}` reference and the unplaced children rejoin the result as bare
+    // rows at the root — exactly what the retired `orphans: "keep"` scalar produced.
     const r = lore({
       expr: {
-        nest: {
-          parents: { type: "lore:location" },
-          children: ALL,
-          match: { field: "located_in", direction: "child_to_parent", by: "ref" },
-          orphans: ALL,
-        },
+        union: [
+          {
+            nest: {
+              id: "cities",
+              parents: { type: "lore:location" },
+              children: ALL,
+              match: { field: "located_in", direction: "child_to_parent", by: "ref" },
+            },
+          },
+          { orphans_of: "cities" },
+        ],
       },
     });
     // Placed rows first (placement order), then orphans in roster order.
@@ -428,12 +432,19 @@ describe("ADR-0037: the Paris view (nest + routed orphans + group_by)", () => {
   it("universal entities' type buckets sit beside city headers; each city re-groups by type", () => {
     const r = lore({
       expr: {
-        nest: {
-          parents: { type: "lore:location" },
-          children: ALL,
-          match: { field: "located_in", direction: "child_to_parent", by: "ref" },
-          orphans: ALL, // routed flat (the retired keep); the outer group_by then buckets them by type
-        },
+        // The Nest tree unioned with its orphan node-set (routed flat); the outer
+        // group_by then buckets both placed and orphaned rows by entry_type.
+        union: [
+          {
+            nest: {
+              id: "cities",
+              parents: { type: "lore:location" },
+              children: ALL,
+              match: { field: "located_in", direction: "child_to_parent", by: "ref" },
+            },
+          },
+          { orphans_of: "cities" },
+        ],
       },
       group_by: [{ field: "entry_type" }],
     });

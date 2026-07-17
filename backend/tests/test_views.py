@@ -601,37 +601,34 @@ class ViewUiStateTests(unittest.TestCase):
         self.assertEqual(body["spec"]["group_by"], [{"field": "entry_type", "order": "label"}])
 
     def test_group_by_and_orphans_round_trip_through_create_and_read(self) -> None:
-        # ADR-0037 group_by + ADR-0028 Amendment 1 (#260): the nest `orphans`
-        # output is now a routable SUB-EXPRESSION (not the retired keep/drop
-        # scalar). It is stored verbatim and survives create → read — a second
-        # Nest here, proving a nested structure round-trips (the backend never
-        # evaluates it).
+        # ADR-0037 group_by + ADR-0028 Amendment 1 (#260): the nest's orphan output
+        # is a first-class node-set — the Nest carries an `id` and a second group
+        # references it via `{"orphans_of": id}`. Both survive create → read (the
+        # backend never evaluates them; the scalar keep/drop is retired).
         spec = {
             "kind": "lore",
-            "expr": {
-                "nest": {
-                    "parents": {"type": "lore:location"},
-                    "children": {"descendants_of": "lore:base"},
-                    "match": {"field": "located_in", "direction": "child_to_parent", "by": "ref"},
-                    "orphans": {
+            "groups": [
+                {
+                    "name": "Placed",
+                    "expr": {
                         "nest": {
-                            "parents": {"field": {"key": "located_in", "op": "unset"}},
+                            "id": "cities",
+                            "parents": {"type": "lore:location"},
+                            "children": {"descendants_of": "lore:base"},
                             "match": {"field": "located_in", "direction": "child_to_parent", "by": "ref"},
-                            "recursive": True,
                         }
                     },
-                }
-            },
+                },
+                {"name": "Orphans", "expr": {"orphans_of": "cities"}},
+            ],
             "group_by": [{"field": "entry_type"}],
         }
         created = self._create("Paris view", spec)
         got = self.client.get(f"/api/views/{created['id']}").json()
         self.assertEqual(got["spec"]["group_by"], [{"field": "entry_type", "order": None}])
-        # The routed orphan chain survives as a real sub-expression (dense-null
-        # serialized), so assert the load-bearing fields rather than exact equality.
-        orphans = got["spec"]["expr"]["nest"]["orphans"]
-        self.assertEqual(orphans["nest"]["match"]["field"], "located_in")
-        self.assertTrue(orphans["nest"]["recursive"])
+        # The Nest id and the orphans reference survive, still consistent.
+        self.assertEqual(got["spec"]["groups"][0]["expr"]["nest"]["id"], "cities")
+        self.assertEqual(got["spec"]["groups"][1]["expr"]["orphans_of"], "cities")
 
     def test_materialized_default_is_listed_and_reused_on_next_write(self) -> None:
         self.client.put("/api/views/view_default_scene/ui", json={"ui": {"collapsed": ["node:a"]}})

@@ -347,18 +347,17 @@ export type ViewNestMatch = {
 // from lore links. `parents`/`children` are the two input sets (absent = the
 // whole universe); `match` is the join rule; `recursive` marks the canvas
 // self-loop (frontier BFS over an unknown-depth homogeneous hierarchy).
-// `orphans` (ADR-0028 Amendment 1): the unplaced-child set is a routable SECOND
-// output. Absent = drop + count (the default). Present = a sub-expression
-// evaluated over the unplaced set and concatenated into the same result — the
-// wired downstream chain (Filter/Sort/a second Nest). Every leaf inside it
-// denotes the orphan set (the evaluator scopes the universe to it). The old
-// `"keep"|"drop"` scalar is retired (#260): unwired = drop, wired = routed.
+// `id` (ADR-0028 Amendment 1, #260): a stable name so the Nest's SECOND output
+// — its **orphans** (the plain node-set of `children` it never placed) — can be
+// referenced elsewhere in the spec as `{orphans_of: id}`. Set only when the
+// orphan output is wired; the Nest is then evaluated once and referenced (the
+// single-sink DAG, §C). Unreferenced orphans are dropped + counted (the default).
 export type ViewNestOp = {
   parents?: ViewExpr | null;
   children?: ViewExpr | null;
   match: ViewNestMatch;
   recursive?: boolean;
-  orphans?: ViewExpr | null;
+  id?: string;
 };
 
 // One node in a view's set-algebra tree: exactly one primary slot is set
@@ -380,6 +379,7 @@ export type ViewExpr = {
   hand_picked?: string[];
   view_ref?: string; // a saved view node id
   var?: string; // a free variable / reserved `$self` leaf (#184), resolved from bindings
+  orphans_of?: string; // the flat unplaced-child node-set of the Nest with this `id` (ADR-0028 Amdt 1)
 };
 
 export type ViewSort = {

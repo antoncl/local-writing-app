@@ -125,21 +125,20 @@ class NestOp(BaseModel):
     universe yields a *thicket* (a subtree rooted at every node, ADR-0028 §C).
     `match` is required — without a rule there is no join.
 
-    `orphans` (ADR-0028 Amendment 1, #260): the unplaced-child set is a routable
-    SECOND output, not a scalar disposition. `None` (nothing wired downstream) =
-    drop + count, the default. A sub-expression = the wired downstream chain
-    (Filter/Sort/a second Nest) evaluated by the frontend over the unplaced set
-    and concatenated into the SAME result — every leaf inside it denotes the
-    orphan set (the evaluator scopes the universe to it). The old `"keep"/"drop"`
-    scalar is RETIRED (unwired = drop, wired = routed); pre-1.0 straight cut, no
-    migration. The backend stays structural — it validates the sub-expr as an
-    ordinary ViewExpr and never evaluates it."""
+    `id` (ADR-0028 Amendment 1, #260): a stable name so the Nest's SECOND output
+    — its **orphans** (the plain node-set of `children` it never placed) — can be
+    referenced elsewhere in the spec as an `{"orphans_of": id}` leaf. The orphan
+    output is a first-class node-set: wire it into any operator or group, exactly
+    like any other output. Set only when the orphan output is wired; the Nest is
+    then evaluated once and referenced (the single-sink DAG, §C). Unreferenced
+    orphans are dropped + counted (the default). The old `"keep"/"drop"` scalar is
+    RETIRED; pre-1.0 straight cut, no migration. The backend stays structural."""
 
     parents: ViewExpr | None = None
     children: ViewExpr | None = None
     match: NestMatch
     recursive: bool = False
-    orphans: ViewExpr | None = None
+    id: str | None = None
 
 
 # The mutually-exclusive "primary" slots on a ViewExpr node: exactly one is set.
@@ -158,6 +157,7 @@ _VIEW_EXPR_PRIMARY_SLOTS: tuple[str, ...] = (
     "hand_picked",
     "view_ref",
     "var",
+    "orphans_of",
 )
 
 
@@ -201,6 +201,10 @@ class ViewExpr(BaseModel):
     # is a promoted formal. Resolves from `EvalContext.bindings` at eval time; in
     # an `of`/leaf position it is a singleton node-set (empty when unresolved).
     var: str | None = None
+    # A reference to the orphan node-set of the `nest` carrying this `id`
+    # (ADR-0028 Amendment 1, #260): the flat set of `children` that nest never
+    # placed, as a plain node-set — a first-class source, wireable anywhere.
+    orphans_of: str | None = None
 
     @model_validator(mode="after")
     def _exactly_one_primary(self) -> ViewExpr:

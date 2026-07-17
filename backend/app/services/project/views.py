@@ -344,7 +344,6 @@ class ViewsMixin:
             if node.nest is not None:
                 walk(node.nest.parents)
                 walk(node.nest.children)
-                walk(node.nest.orphans)  # ADR-0028 Amdt 1: a view_ref can hide in the routed orphan chain
             walk(node.complement)
             if node.annotate is not None:
                 walk(node.of)

@@ -1050,7 +1050,12 @@ function evalNest<T extends EvalNode>(
       const orphanState = scopeToOrphans(state, new Set(orphanIds));
       for (const r of evalSource(orphanState, op.orphans, null)) {
         rows.push(r);
+        // Members = the leaf AND any real-node parent segments a nested orphan
+        // Nest produced (interior parents are members, mirroring the main BFS and
+        // `normalize`), so a nest buried in the set algebra — which reads only
+        // `placed` — counts the whole rebuilt orphan subtree, not just its leaves.
         placed.add(r.node.id);
+        for (const seg of r.path) if (seg.nodeId) placed.add(seg.nodeId);
       }
     } else {
       // Unwired ⇒ drop + count (§A). The depth cap also lands here: a pathological

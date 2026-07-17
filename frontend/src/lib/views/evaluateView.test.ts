@@ -1217,6 +1217,29 @@ describe("nest — routable orphans (ADR-0028 Amendment 1)", () => {
     );
     expect(new Set(res.nodes.map((n) => n.id)).size).toBe(9);
   });
+
+  it("a nested-nest orphan chain contributes its interior parents to flat membership (placed path)", () => {
+    // The nest is NOT the first operand, so it degrades to its flat `placed` set
+    // (ADR-0037 §5) — the code path that reads `placed`, not the (node, path) rows.
+    // That set must include the rebuilt orphan subtree's INTERIOR parents (Aleph,
+    // Aleph Ch), not just the leaf scenes, or a buried nest under-counts membership.
+    const rebuild: ViewExpr = { nest: { parents: { field: { key: "parent", op: "unset" } }, match: ABG_MATCH, recursive: true } };
+    const res = evaluateView(
+      {
+        kind: "lore",
+        expr: {
+          intersect: [
+            { type: "lore:note" },
+            { nest: { parents: { hand_picked: ["bet"] }, match: ABG_MATCH, recursive: true, orphans: rebuild } },
+          ],
+        },
+      },
+      ABG,
+    );
+    expect(new Set(res.nodes.map((n) => n.id)).size).toBe(9);
+    expect(res.nodes.some((n) => n.id === "aleph")).toBe(true); // interior act, member via a path segment
+    expect(res.nodes.some((n) => n.id === "aleph-ch")).toBe(true); // interior chapter
+  });
 });
 
 describe("nestWarnings — surfacing diagnostics (#110)", () => {

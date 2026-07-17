@@ -1125,6 +1125,147 @@ describe("nest — other match modes", () => {
   });
 });
 
+// --- nest: orphans as a routable second output (ADR-0028 Amendment 1, #260) ---
+
+// The Aleph/Bet/Gimmel case from the ADR. Three acts, each with a chapter and a
+// scene down a `parent` entity_ref chain. Only Bet is seeded into `parents`, so
+// Bet's subtree is placed and EVERYTHING under Aleph and Gimmel — the acts, their
+// chapters AND their scenes (6 nodes) — is unplaced: an orphan that OWNS a
+// subtree, the case the retired `"keep"` scalar shredded into flat siblings.
+const ABG: EvalNode[] = [
+  { id: "aleph", entry_type: "lore:note", title: "Aleph", metadata: {} },
+  { id: "aleph-ch", entry_type: "lore:note", title: "Aleph Ch", metadata: { parent: "aleph" } },
+  { id: "aleph-s", entry_type: "lore:note", title: "Aleph S", metadata: { parent: "aleph-ch" } },
+  { id: "bet", entry_type: "lore:note", title: "Bet", metadata: {} },
+  { id: "bet-ch", entry_type: "lore:note", title: "Bet Ch", metadata: { parent: "bet" } },
+  { id: "bet-s", entry_type: "lore:note", title: "Bet S", metadata: { parent: "bet-ch" } },
+  { id: "gimmel", entry_type: "lore:note", title: "Gimmel", metadata: {} },
+  { id: "gimmel-ch", entry_type: "lore:note", title: "Gimmel Ch", metadata: { parent: "gimmel" } },
+  { id: "gimmel-s", entry_type: "lore:note", title: "Gimmel S", metadata: { parent: "gimmel-ch" } },
+];
+const ABG_MATCH = { field: "parent", direction: "child_to_parent" as const, by: "ref" as const };
+// Seed ONLY Bet into parents; children = the whole universe (handle omitted). An
+// `id` lets the Nest's orphan node-set be referenced by `{orphans_of: id}`.
+const abgNest = (id?: string): ViewExpr => ({
+  nest: { ...(id ? { id } : {}), parents: { hand_picked: ["bet"] }, match: ABG_MATCH, recursive: true },
+});
+
+describe("nest — orphans as a routable node-set (ADR-0028 Amendment 1)", () => {
+  it("(a) unwired ⇒ drops the unplaced set and counts it (default preserved)", () => {
+    const res = evaluateView({ kind: "lore", expr: abgNest() }, ABG);
+    // Only Bet's subtree renders; Aleph and Gimmel (+ their subtrees) are gone.
+    expect(nrows(res.groups)).toEqual([["Bet", [["Bet Ch", ["bet-s"]]]]]);
+    expect(res.nodes.map((n) => n.id)).toEqual(["bet", "bet-ch", "bet-s"]);
+    // 6 unplaced children: the two acts, their chapters, their scenes.
+    expect(res.diagnostics?.orphansDropped).toBe(6);
+  });
+
+  it("(b) `orphans_of` unioned with the tree ⇒ orphans rejoin the root, not dropped", () => {
+    // The orphan output is a plain node-set: union the Nest's tree with its
+    // `{orphans_of}` and the 6 unplaced nodes sit beside it — the routed
+    // equivalent of the retired keep, and NOT counted dropped.
+    const res = evaluateView({ kind: "lore", expr: { union: [abgNest("n"), { orphans_of: "n" }] } }, ABG);
+    expect(res.diagnostics?.orphansDropped).toBe(0);
+    expect(nrows(res.groups)).toEqual([
+      ["Bet", [["Bet Ch", ["bet-s"]]]],
+      "aleph",
+      "aleph-ch",
+      "aleph-s",
+      "gimmel",
+      "gimmel-ch",
+      "gimmel-s",
+    ]);
+    expect(new Set(res.nodes.map((n) => n.id)).size).toBe(9);
+  });
+
+  it("(c) `orphans_of` into a second Nest ⇒ the two acts' subtrees are rebuilt intact", () => {
+    // The orphan node-set seeds a second Nest: parents = orphan roots (orphans ∩
+    // parent-unset = Aleph, Gimmel — Bet is placed, so excluded), children = the
+    // orphan set. Rebuilds both subtrees — the hierarchy the flat keep shredded.
+    const rebuild: ViewExpr = {
+      nest: {
+        parents: { intersect: [{ orphans_of: "n" }, { field: { key: "parent", op: "unset" } }] },
+        children: { orphans_of: "n" },
+        match: ABG_MATCH,
+        recursive: true,
+      },
+    };
+    const res = evaluateView({ kind: "lore", expr: { union: [abgNest("n"), rebuild] } }, ABG);
+    expect(res.diagnostics?.orphansDropped).toBe(0);
+    expect(nrows(res.groups)).toEqual([
+      ["Bet", [["Bet Ch", ["bet-s"]]]],
+      ["Aleph", [["Aleph Ch", ["aleph-s"]]]],
+      ["Gimmel", [["Gimmel Ch", ["gimmel-s"]]]],
+    ]);
+    expect(res.groups![1].nodeId).toBe("aleph"); // real-node header, not a synthetic bucket
+    expect(res.groups![2].nodeId).toBe("gimmel");
+  });
+
+  it("two named groups: the tree in one, its orphan node-set in another (the Strip-acts shape)", () => {
+    // The case that was broken: a two-output Nest → two groups. Both names appear;
+    // the Nest is evaluated once (single-sink DAG) and referenced by both.
+    const res = evaluateView(
+      {
+        kind: "lore",
+        groups: [
+          { name: "Placed", expr: abgNest("n") },
+          { name: "Orphans", expr: { orphans_of: "n" } },
+        ],
+      },
+      ABG,
+    );
+    expect(res.groups!.map((g) => g.label)).toEqual(["Placed", "Orphans"]);
+    expect(nrows(res.groups)).toEqual([
+      ["Placed", [["Bet", [["Bet Ch", ["bet-s"]]]]]],
+      ["Orphans", ["aleph", "aleph-ch", "aleph-s", "gimmel", "gimmel-ch", "gimmel-s"]],
+    ]);
+    expect(res.diagnostics?.orphansDropped).toBe(0);
+  });
+
+  it("`orphans_of` participates in set algebra as a plain node-set", () => {
+    // Intersect the orphan set with the roster → exactly the 6 unplaced nodes.
+    const res = evaluateView(
+      {
+        kind: "lore",
+        groups: [
+          { name: "Tree", expr: abgNest("n") },
+          { name: "Loose", expr: { intersect: [{ orphans_of: "n" }, { type: "lore:note" }] } },
+        ],
+      },
+      ABG,
+    );
+    const loose = res.groups!.find((g) => g.label === "Loose")!;
+    expect(new Set(loose.children.map((c) => c.nodeId))).toEqual(
+      new Set(["aleph", "aleph-ch", "aleph-s", "gimmel", "gimmel-ch", "gimmel-s"]),
+    );
+  });
+
+  it("an `orphans_of` naming no Nest resolves to the empty set (not a crash)", () => {
+    const res = evaluateView({ kind: "lore", expr: { orphans_of: "missing" } }, ABG);
+    expect(res.nodes).toEqual([]);
+  });
+
+  it("a Nest that references its OWN orphans breaks the cycle instead of overflowing the stack", () => {
+    // Reachable by looping the orphans output back into the Nest's own parents.
+    const spec: ViewSpec = {
+      kind: "lore",
+      expr: { nest: { id: "n", children: { orphans_of: "n" }, match: ABG_MATCH, recursive: true } },
+    };
+    expect(() => evaluateView(spec, ABG)).not.toThrow();
+  });
+
+  it("a mutual orphans_of cycle (A references B's orphans, B references A's) terminates", () => {
+    const spec: ViewSpec = {
+      kind: "lore",
+      groups: [
+        { name: "A", expr: { nest: { id: "a", children: { orphans_of: "b" }, match: ABG_MATCH } } },
+        { name: "B", expr: { nest: { id: "b", children: { orphans_of: "a" }, match: ABG_MATCH } } },
+      ],
+    };
+    expect(() => evaluateView(spec, ABG)).not.toThrow();
+  });
+});
+
 describe("nestWarnings — surfacing diagnostics (#110)", () => {
   it("no diagnostics → no warnings", () => {
     expect(nestWarnings(undefined)).toEqual([]);

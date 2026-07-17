@@ -28,7 +28,9 @@
   import { knownTagsStore } from "@/lib/stores/tags";
   import { referenceIndexStore } from "@/lib/stores/references";
   import { paneViews } from "@/lib/stores/paneViews.svelte";
-  import { evaluateView, nestWarnings, type EvalNode } from "@/lib/views/evaluateView";
+  import { evaluateView, nestWarnings, type EvalNode, type EvalBindings } from "@/lib/views/evaluateView";
+  import { buildBindings } from "@/lib/views/viewParams";
+  import ParamStrip from "./view/ParamStrip.svelte";
   import {
     effectiveFieldLabel,
     effectiveFieldHidden,
@@ -375,7 +377,16 @@
   function toGraph(): ViewGraph {
     return {
       nodes: flowNodes.map((n) => ({ id: n.id, kind: n.data.kind, position: n.position, data: n.data.cfg ?? {} })),
-      edges: flowEdges.map((e) => ({ id: e.id, source: e.source, target: e.target, targetHandle: e.targetHandle ?? null })),
+      // sourceHandle is load-bearing for the Nest orphans output (ADR-0028 Amdt 1,
+      // #260): graphToSpec folds an edge leaving the `orphans` handle into
+      // `nest.orphans`. It was dropped before that handle existed.
+      edges: flowEdges.map((e) => ({
+        id: e.id,
+        source: e.source,
+        target: e.target,
+        sourceHandle: e.sourceHandle ?? null,
+        targetHandle: e.targetHandle ?? null,
+      })),
     };
   }
   // Memoize the lowered spec by structural equality. Dragging a node mutates
@@ -402,11 +413,19 @@
     if (k === "scene") return structureToEvalNodes(structure);
     return [];
   }
+  // The preview MUST evaluate what the pane will, or the designer can't verify the
+  // view's logic (Anton). So it binds the view's parameters exactly as the pane's
+  // ViewNodeList does — `buildBindings` seeds each formal from its authored default
+  // and applies the designer's own overrides (the editable ParamStrip in the rail).
+  // Without this the preview ran every parameter UNBOUND, diverging from the pane.
+  let paramOverrides = $state<Record<string, unknown>>({});
+  const previewBindings = $derived.by((): EvalBindings => buildBindings(spec.params, paramOverrides));
   let preview = $derived(
     evaluateView(spec, universe, {
       schema,
       resolveView: (viewId: string) => viewSpecs.get(viewId) ?? null,
       referenceIndex,
+      bindings: previewBindings,
     }),
   );
   // Nest diagnostics surfaced as warnings so a truncated/lossy tree is never
@@ -743,6 +762,7 @@
     source?: string | null;
     target?: string | null;
     targetHandle?: string | null;
+    sourceHandle?: string | null;
   }): boolean {
     if (!conn.source || !conn.target) return false;
     const target = flowNodes.find((n) => n.id === conn.target);
@@ -766,7 +786,7 @@
     if (conn.targetHandle === FILTER_VALUE_HANDLE) {
       if (tgtNode?.kind !== "field" && tgtNode?.kind !== "filter") return false;
       if (!valueSlotAccepts(srcNode, tgtNode.data.field, fieldType)) return false;
-      return connectionAllowed(classifyConnection(byId, edges, conn.source, conn.target, conn.targetHandle ?? null));
+      return connectionAllowed(classifyConnection(byId, edges, conn.source, conn.target, conn.targetHandle ?? null, conn.sourceHandle ?? null));
     }
     if (inputArity(target.data.kind) === "none") return false;
     // A value-set source (a scalar `field_of`) may feed ONLY a value slot, never
@@ -779,7 +799,7 @@
     // the whole-kind roster has an explicit expr, so `field_of(All, Type)` lowers
     // to a concrete projection (every entry_type in use) rather than a silent
     // EMPTY — see `fieldOfBuilt`.
-    return connectionAllowed(classifyConnection(byId, edges, conn.source, conn.target, conn.targetHandle ?? null));
+    return connectionAllowed(classifyConnection(byId, edges, conn.source, conn.target, conn.targetHandle ?? null, conn.sourceHandle ?? null));
   }
   // After a connection auto-adds, trim single-input handles to their newest edge
   // (union/intersect keep all). Newest wins so a re-wire replaces cleanly.
@@ -986,6 +1006,11 @@
               </li>
             {/each}
           </ul>
+          <!-- Editable controls (ADR-0032 §D): vary a value and the preview
+               re-evaluates live, so the designer verifies the logic exactly as the
+               pane will render it. (The pane's ViewNodeList renders equivalent
+               controls from its own inline copy — a duplication to unify.) -->
+          <ParamStrip {spec} {schema} bind:overrides={paramOverrides} />
         {/if}
       {/if}
     </aside>

@@ -601,24 +601,34 @@ class ViewUiStateTests(unittest.TestCase):
         self.assertEqual(body["spec"]["group_by"], [{"field": "entry_type", "order": "label"}])
 
     def test_group_by_and_orphans_round_trip_through_create_and_read(self) -> None:
-        # ADR-0037: group_by levels and the nest orphans policy are stored
-        # verbatim and survive create → read (the backend never evaluates them).
+        # ADR-0037 group_by + ADR-0028 Amendment 1 (#260): the nest's orphan output
+        # is a first-class node-set — the Nest carries an `id` and a second group
+        # references it via `{"orphans_of": id}`. Both survive create → read (the
+        # backend never evaluates them; the scalar keep/drop is retired).
         spec = {
             "kind": "lore",
-            "expr": {
-                "nest": {
-                    "parents": {"type": "lore:location"},
-                    "children": {"descendants_of": "lore:base"},
-                    "match": {"field": "located_in", "direction": "child_to_parent", "by": "ref"},
-                    "orphans": "keep",
-                }
-            },
+            "groups": [
+                {
+                    "name": "Placed",
+                    "expr": {
+                        "nest": {
+                            "id": "cities",
+                            "parents": {"type": "lore:location"},
+                            "children": {"descendants_of": "lore:base"},
+                            "match": {"field": "located_in", "direction": "child_to_parent", "by": "ref"},
+                        }
+                    },
+                },
+                {"name": "Orphans", "expr": {"orphans_of": "cities"}},
+            ],
             "group_by": [{"field": "entry_type"}],
         }
         created = self._create("Paris view", spec)
         got = self.client.get(f"/api/views/{created['id']}").json()
         self.assertEqual(got["spec"]["group_by"], [{"field": "entry_type", "order": None}])
-        self.assertEqual(got["spec"]["expr"]["nest"]["orphans"], "keep")
+        # The Nest id and the orphans reference survive, still consistent.
+        self.assertEqual(got["spec"]["groups"][0]["expr"]["nest"]["id"], "cities")
+        self.assertEqual(got["spec"]["groups"][1]["expr"]["orphans_of"], "cities")
 
     def test_materialized_default_is_listed_and_reused_on_next_write(self) -> None:
         self.client.put("/api/views/view_default_scene/ui", json={"ui": {"collapsed": ["node:a"]}})

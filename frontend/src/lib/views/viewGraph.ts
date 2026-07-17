@@ -50,6 +50,7 @@ export type GraphNodeKind =
   | "nest"
   | "field_of"
   | "self"
+  | "orphans_ref"
   | CombinatorKind
   | LeafKind;
 
@@ -57,6 +58,14 @@ export type GraphNodeKind =
 // Difference node's keep/remove roles.
 export const NEST_PARENTS_HANDLE = "parents";
 export const NEST_CHILDREN_HANDLE = "children";
+
+// The Nest's SECOND source (output) handle (ADR-0028 Amendment 1, #260): the
+// unplaced-child set as a routable node-set. An edge leaving here (a downstream
+// Filter/Sort/second Nest, or the sink itself) folds into `nest.orphans`; the
+// default `out` output stays the denormalized results tree. Every `All`-over-
+// scope leaf in that folded chain denotes the orphan set (the evaluator scopes
+// the universe to it), so lowering treats an orphan-output edge as UNIVERSE.
+export const NEST_ORPHANS_HANDLE = "orphans";
 
 // A named input handle on the View (output) node = one group. `name` is the
 // group label; handle order (the array order) = group order. `color` tints the
@@ -408,6 +417,14 @@ export type ViewNodeData = {
   // value-set that feeds only a Filter value slot authored on a scalar field
   // (#196 — the two-payload pipe, `outputPayload`/`valueSlotAccepts`).
   project_field?: string;
+  // orphans_ref (ADR-0028 Amdt 1, #260): the id of the Nest whose orphan node-set
+  // this synthetic source emits (`{orphans_of: id}`). Only on lowering/reopen
+  // scaffolding nodes, never a user-placed canvas node.
+  orphans_of?: string;
+  // Transient (ADR-0028 Amdt 1): the id `assignOrphanRefs` stamps on a Nest whose
+  // orphans output is wired, read back by `nestBuilt` → `nest.id`. Set only within
+  // one graphToSpec lowering, never persisted.
+  _orphanId?: string;
   // output (View) — the named handles / groups. ADR-0037 §2/§8 + Amendment 1:
   // each handle carries its own ordered organize levels (`ViewHandle.group_by`,
   // ν by attribute) — result-node CONFIG, not graph shape (lifts/lowers with the
@@ -427,9 +444,11 @@ export type ViewGraphNode = {
 };
 
 // A directed edge source→target. Handles carry explicit ids so Svelte Flow can
-// render the edge: `sourceHandle` is always the node output ("out"),
-// `targetHandle` is the input port ("in"/a difference "keep"/"remove"/an output
-// handle id).
+// render the edge: `sourceHandle` is the node output — usually "out", but a Nest
+// also emits "orphans" (ADR-0028 Amdt 1), and `assignOrphanRefs` keys entirely on
+// it, so it must be preserved through any edge mapping. `targetHandle` is the
+// input port ("in"/a difference "keep"/"remove"/a nest "parents"/"children"/an
+// output handle id).
 export type ViewGraphEdge = {
   id: string;
   source: string;
@@ -537,13 +556,18 @@ export function classifyConnection(
   source: string,
   target: string,
   targetHandle: string | null | undefined,
+  sourceHandle?: string | null,
 ): ConnectionVerdict {
   if (!wouldCycle(edges, source, target)) return "ok";
   // The distinguishing signal (ADR-0028 §D): does the back-edge feed a Nest's
   // `parents` handle? If so it is a recursion (self-loop = supported; longer =
   // v2). Otherwise the cycle is meaningless.
   const feedsNestParents = byId.get(target)?.kind === "nest" && targetHandle === NEST_PARENTS_HANDLE;
-  if (feedsNestParents) return source === target ? "nest-recursion" : "nest-recursion-unsupported";
+  // …BUT only the RESULTS output looped back is recursion (Amendment 1). The
+  // orphans output fed into parents is a circular reference — a Nest seeded by its
+  // own orphans, which evaluates to nothing — never recursion. Reject it.
+  const fromOrphans = sourceHandle === NEST_ORPHANS_HANDLE;
+  if (feedsNestParents && !fromOrphans) return source === target ? "nest-recursion" : "nest-recursion-unsupported";
   return "meaningless-cycle";
 }
 
@@ -678,6 +702,11 @@ function nestBuilt(graph: ViewGraph, byId: Map<string, ViewGraphNode>, node: Vie
   const c = materializeOuter(children, uni);
   if (c) nest.children = c;
   if (recursive) nest.recursive = true;
+  // Amendment 1 (#260): when this Nest's orphan output is wired, `assignOrphanRefs`
+  // stamped it with an `id` so a downstream `{orphans_of: id}` can reference its
+  // orphan node-set. Carry the id; the orphan branch lowers as an ordinary
+  // subgraph off that reference (no fold, no sink surgery).
+  if (node.data._orphanId != null) nest.id = node.data._orphanId;
   return built({ nest });
 }
 
@@ -730,6 +759,12 @@ function buildNode(
         return complementBuilt(soleChild(graph, byId, nodeId, seen, uni));
       case "nest":
         return nestBuilt(graph, byId, node, seen, uni);
+      case "orphans_ref":
+        // A Nest's orphan output as a plain node-set (ADR-0028 Amdt 1): the
+        // synthetic source `assignOrphanRefs` inserts for each orphan-output edge.
+        // `!= null` (not truthiness): an empty-string id is a valid ref, and the
+        // evaluator matches on `!= null` too — keep them in lockstep.
+        return node.data.orphans_of != null ? built({ orphans_of: node.data.orphans_of }) : EMPTY;
       case "self":
         // The reserved anchor source — `{var: "$self"}` (no input).
         return built({ var: SELF_VAR });
@@ -1039,13 +1074,50 @@ function sanitizeSort(sort: ViewSort | null | undefined): ViewSort | null {
   return kept[0];
 }
 
+// ADR-0028 Amendment 1 (#260): make a Nest's orphan output a first-class node-set
+// source. A Nest's orphan OUTPUT is a source edge with `sourceHandle ===
+// NEST_ORPHANS_HANDLE`. This pre-pass, for each orphan-emitting Nest N:
+//   1. stamps N with an `id` (`_orphanId`), so a reference can name its orphans;
+//   2. inserts a synthetic `orphans_ref` source node emitting `{orphans_of: N.id}`
+//      and rewires N's orphan-output edges to come from it.
+// The orphan branch then lowers as an ordinary subgraph off that plain node-set —
+// into any group / Filter / second Nest / the result — with NO fold and NO sink
+// surgery; the Nest is defined once (its results) and referenced (its orphans) =
+// the single-sink DAG (§C). A graph with no orphan-output edges is returned
+// untouched (the fast path — no change for the common non-orphan view).
+function assignOrphanRefs(graph: ViewGraph): ViewGraph {
+  if (!graph.edges.some((e) => e.sourceHandle === NEST_ORPHANS_HANDLE)) return graph;
+
+  const nodes = graph.nodes.map((n) => ({ ...n, data: { ...n.data } }));
+  let edges = graph.edges.map((e) => ({ ...e }));
+  const byId = new Map(nodes.map((n) => [n.id, n]));
+
+  const nestIds = [
+    ...new Set(edges.filter((e) => e.sourceHandle === NEST_ORPHANS_HANDLE).map((e) => e.source)),
+  ].filter((id) => byId.get(id)?.kind === "nest");
+  const refByNest = new Map<string, string>();
+  for (const nestId of nestIds) {
+    byId.get(nestId)!.data._orphanId = nestId; // the Nest's stable id
+    const refId = `__orphans_ref_${nestId}`;
+    nodes.push({ id: refId, kind: "orphans_ref", position: { ...byId.get(nestId)!.position }, data: { orphans_of: nestId } });
+    refByNest.set(nestId, refId);
+  }
+  edges = edges.map((e) =>
+    e.sourceHandle === NEST_ORPHANS_HANDLE && refByNest.has(e.source)
+      ? { ...e, source: refByNest.get(e.source)!, sourceHandle: "out" }
+      : e,
+  );
+  return { nodes, edges };
+}
+
 // Serialize the graph reachable from the View node into a ViewSpec. 0–1
 // populated handles → a flat `expr`; 2+ → an ordered `groups` list (ADR-0027).
 // Promoted formals reachable from the output become `params` (#184 Phase 1b).
 export function graphToSpec(
-  graph: ViewGraph,
+  rawGraph: ViewGraph,
   base: { kind: string; sort?: ViewSort | null; schema?: MetadataSchema | null },
 ): ViewSpec {
+  const graph = assignOrphanRefs(rawGraph);
   const byId = new Map(graph.nodes.map((n) => [n.id, n]));
   const handles = outputHandles(byId.get(OUTPUT_NODE_ID));
   const handleIds = handles.map((h) => h.id);
@@ -1094,7 +1166,8 @@ export function graphToSpec(
 // graph (→ the empty set, ADR-0036). A bare `All`/universe graph lowers to the
 // explicit `descendants_of:<kind-root>` when `kind` is supplied; without a kind
 // (the pure round-trip helper) a universe stays null.
-export function graphToExpr(graph: ViewGraph, kind?: string): ViewExpr | null {
+export function graphToExpr(rawGraph: ViewGraph, kind?: string): ViewExpr | null {
+  const graph = assignOrphanRefs(rawGraph);
   const byId = new Map(graph.nodes.map((n) => [n.id, n]));
   const uni = kind ? kindUniverseExpr(kind, null) : null;
   const parts = orderedUpstream(graph, byId, OUTPUT_NODE_ID).map((e) => buildNode(graph, byId, e.source, new Set(), uni));
@@ -1124,6 +1197,11 @@ export function specToGraph(spec: ViewSpec | null | undefined, schema?: Metadata
   const rowCursor = { value: 0 };
   let counter = 0;
   const nextId = () => `n${counter++}`;
+  // `orphans_ref` scaffolding nodes (ADR-0028 Amdt 1), pruned once re-sourced from
+  // their Nest's orphans output; `nestNodeByOrphanId` maps a spec Nest `id` to its
+  // graph node so an `{orphans_of: id}` reference in any group can find it.
+  const removed = new Set<string>();
+  const nestNodeByOrphanId = new Map<string, string>();
   // The `descendants_of` value an `All`/universe node lowers to for this kind — the
   // sentinel that lifts back to `all`. Null when kind is unknown (bare-expr helper).
   const universeRoot = spec?.kind ? kindUniverseExpr(spec.kind, schema).descendants_of ?? null : null;
@@ -1163,8 +1241,37 @@ export function specToGraph(spec: ViewSpec | null | undefined, schema?: Metadata
     }
   }
 
-  layoutColumns(nodes, outputNode, rowCursor);
-  return { nodes, edges };
+  // Amendment 1 (#260): re-source each `orphans_ref` scaffolding node's outgoing
+  // edges from the referenced Nest's orphans output handle, then drop the
+  // scaffolding — so the orphan node-set flows from the Nest just as it was wired.
+  resolveOrphanRefs();
+
+  // Prune the resolved `orphans_ref` scaffolding nodes; their outgoing edges now
+  // originate at the Nest, and a dangling ref (unknown id) drops with its edges.
+  const keptNodes = removed.size > 0 ? nodes.filter((n) => !removed.has(n.id)) : nodes;
+  const keptEdges = removed.size > 0 ? edges.filter((e) => !removed.has(e.source) && !removed.has(e.target)) : edges;
+  layoutColumns(keptNodes, outputNode, rowCursor);
+  return { nodes: keptNodes, edges: keptEdges };
+
+  // Rewire every `{orphans_of: id}` reference (a synthetic `orphans_ref` node) to
+  // the orphans output of the Nest carrying that id. Runs after the whole spec is
+  // walked, so a reference resolves to a Nest defined in any group. A ref whose id
+  // names no Nest is dropped (its edges fall out via the kept-edge filter).
+  function resolveOrphanRefs(): void {
+    for (const node of nodes) {
+      if (node.kind !== "orphans_ref") continue;
+      const nestNodeId = node.data.orphans_of != null ? nestNodeByOrphanId.get(node.data.orphans_of) : undefined;
+      if (nestNodeId) {
+        for (const edge of edges) {
+          if (edge.source === node.id) {
+            edge.source = nestNodeId;
+            edge.sourceHandle = NEST_ORPHANS_HANDLE;
+          }
+        }
+      }
+      removed.add(node.id); // the ref itself is scaffolding, never a canvas node
+    }
+  }
 
   // Walk one segment's expr, wiring its root (optionally through a Sorter) into
   // the given output handle.
@@ -1215,7 +1322,17 @@ export function specToGraph(spec: ViewSpec | null | undefined, schema?: Metadata
       if (childrenId) link(childrenId, id, NEST_CHILDREN_HANDLE);
       // Recursion is the canvas self-loop: output → own `parents` handle.
       if (e.nest.recursive) link(id, id, NEST_PARENTS_HANDLE);
+      // Amendment 1 (#260): map this Nest's id → its graph node, so an
+      // `{orphans_of: id}` reference resolves to its orphans output handle after
+      // the whole spec is walked (resolveOrphanRefs).
+      if (e.nest.id != null) nestNodeByOrphanId.set(e.nest.id, id);
       return id;
+    }
+    if (e.orphans_of != null) {
+      // A reference to a Nest's orphan node-set (ADR-0028 Amdt 1). Reopens as a
+      // synthetic `orphans_ref` source; resolveOrphanRefs then re-sources its
+      // outgoing edges from the referenced Nest's orphans output handle.
+      return addNode("orphans_ref", depth, { orphans_of: e.orphans_of });
     }
     if (e.annotate && e.of) {
       // Only a color annotate (Highlight) survives #91; a label-only annotate is
@@ -1296,8 +1413,8 @@ export function specToGraph(spec: ViewSpec | null | undefined, schema?: Metadata
     return filterId;
   }
 
-  function link(source: string, target: string, targetHandle = DEFAULT_HANDLE_ID): void {
-    edges.push({ id: nextId(), source, sourceHandle: "out", target, targetHandle });
+  function link(source: string, target: string, targetHandle = DEFAULT_HANDLE_ID, sourceHandle = "out"): void {
+    edges.push({ id: nextId(), source, sourceHandle, target, targetHandle });
   }
 
   function addNode(kind: GraphNodeKind, depth: number, data: ViewNodeData): string {

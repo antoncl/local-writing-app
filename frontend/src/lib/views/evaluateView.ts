@@ -37,6 +37,7 @@ import type {
   ViewSort,
   ViewSpec,
 } from "@/lib/types";
+import { collectNests } from "@/lib/views/nestRegistry";
 import { kindRootEntryTypeId } from "@/lib/utils/schemaTypeHelpers";
 import { asArray, fieldValue, fieldValueList, isCollectionField, isEmpty, isSortableField } from "@/lib/views/fieldAccess";
 import { applyGroupBy } from "@/lib/views/groupBy";
@@ -296,7 +297,29 @@ type RunState<T extends EvalNode> = {
   viewStack: string[]; // view_ref cycle guard
   diag: ViewDiagnostics; // nest accumulator (cycle/orphan/fan-out counts)
   nestRan: boolean; // whether any `nest` evaluated (gates `diagnostics` on result)
+  // ADR-0028 Amendment 1 (#260): the single-sink-DAG support for a routed orphan
+  // output. `nestsById` registers every `nest` carrying an `id` (pre-walked, so an
+  // `{orphans_of: id}` reference can find + evaluate its Nest on demand);
+  // `orphansReferenced` is the set of ids some `{orphans_of}` consumes (an
+  // unreferenced Nest drops + counts its orphans); `nestCache` memoizes each
+  // id'd Nest so it is computed ONCE and referenced (results AND orphans) many.
+  nestsById: Map<string, ViewNestOp>;
+  orphansReferenced: Set<string>;
+  nestCache: Map<string, NestEval<T>>;
+  // Re-entrancy guard for `{orphans_of}` (the analogue of `viewStack` for
+  // `view_ref`): an id'd Nest currently mid-evaluation. A Nest that references its
+  // own orphans (or a mutual A↔B cycle) would otherwise recurse forever, since the
+  // memo is only written on exit. Re-entering an in-progress id breaks the cycle
+  // (empty) instead of overflowing the stack.
+  nestInProgress: Set<string>;
 };
+
+// A Nest's evaluated outputs (ADR-0028 Amendment 1). `rows` = the denormalized
+// tree (leaf `(node, path)` rows); `placed` = every node that landed in the tree
+// (flat membership when the Nest is buried in set algebra); `orphanSet` = the
+// flat node-set of `children` it never placed — the second output that
+// `{orphans_of: id}` resolves to.
+type NestEval<T extends EvalNode> = { rows: ViewRow<T>[]; placed: Set<string>; orphanSet: Set<string> };
 
 export function evaluateView<T extends EvalNode>(
   spec: ViewSpec,
@@ -327,9 +350,19 @@ export function evaluateView<T extends EvalNode>(
     viewStack: [],
     diag: { cyclicLinksSkipped: 0, orphansDropped: 0, fanoutTruncated: false },
     nestRan: false,
+    nestsById: new Map(),
+    orphansReferenced: new Set(),
+    nestCache: new Map(),
+    nestInProgress: new Set(),
   };
 
+  // ADR-0028 Amendment 1: register id'd Nests + orphan references across the whole
+  // spec (top-level expr AND every group's expr) before evaluating, so an
+  // `{orphans_of: id}` in one group resolves to a Nest defined in another.
   const groups = spec.groups && spec.groups.length > 0 ? spec.groups : null;
+  collectNests(spec.expr, state.nestsById, state.orphansReferenced);
+  for (const g of groups ?? []) collectNests(g.expr, state.nestsById, state.orphansReferenced);
+
   // Both paths yield denormalized `(node, path)` rows. `evalSource` carries
   // nesting: a handle whose source is a bare grouped `view_ref` contributes that
   // view's group structure (multi-segment paths), a `union` concatenates its
@@ -722,6 +755,9 @@ function evalExpr<T extends EvalNode>(state: RunState<T>, expr: ViewExpr, neutra
   // Nest buried in the set algebra contributes its flat membership: every node
   // that landed in the denormalized tree (parents kept + children attached).
   if (expr.nest) return evalNest(state, expr.nest).placed;
+  // A Nest's orphan output as a plain node-set (ADR-0028 Amdt 1): the flat set of
+  // `children` the referenced Nest never placed — a first-class source leaf.
+  if (expr.orphans_of != null) return evalOrphansOf(state, expr.orphans_of);
   // Field projection (#184, ADR-0031 §D): project the input set through a field.
   // In membership position the result is treated as a node-set (reference
   // projection); a scalar projection's values are only meaningful as a Filter
@@ -937,12 +973,25 @@ const NEST_FANOUT_K = 8;
 // falls out of per-(node, path) dedupe. Three bounds: `recursive` gates the loop
 // (else a single pass); the ancestor-path guard drops data cycles (and bounds
 // path length ≤ |nodes|, guaranteeing a NOP); the K·N ceiling caps fan-out.
-// Returns rows plus `placed` (every node that landed in the tree — the flat-set
-// contribution when a nest is buried in the set algebra).
-function evalNest<T extends EvalNode>(
-  state: RunState<T>,
-  op: ViewNestOp,
-): { rows: ViewRow<T>[]; placed: Set<string> } {
+// Returns `rows`, `placed` (every node that landed in the tree — the flat-set
+// contribution when a nest is buried in the set algebra), and `orphanSet` (the
+// flat node-set of `children` it never placed — the second output resolved by
+// `{orphans_of: id}`). An id'd Nest is memoized so it is computed ONCE and
+// referenced many (results + orphans = the single-sink DAG, §C).
+function evalNest<T extends EvalNode>(state: RunState<T>, op: ViewNestOp): NestEval<T> {
+  if (op.id != null) {
+    const cached = state.nestCache.get(op.id);
+    if (cached) return cached;
+    if (state.nestInProgress.has(op.id)) {
+      // Circular `{orphans_of}` (a nest referencing its own orphans, or a mutual
+      // A↔B cycle): break it rather than overflow the stack (the memo is only
+      // written on exit, so the re-entrant call would recurse forever). An empty
+      // result is the only sound value for a nest defined via its own orphans; the
+      // designer also blocks the orphans→own-parents wire (classifyConnection).
+      return { rows: [], placed: new Set(), orphanSet: new Set() };
+    }
+    state.nestInProgress.add(op.id);
+  }
   state.nestRan = true;
   const wholeUniverse = (): Set<string> => new Set(state.order.keys());
   const parentSeedIds = op.parents ? evalExpr(state, op.parents) : wholeUniverse();
@@ -1013,23 +1062,35 @@ function evalNest<T extends EvalNode>(
   }
   if (truncated) state.diag.fanoutTruncated = true;
 
-  // Orphans: candidate children that matched no parent (never placed). ADR-0037
-  // §Sub-issues / #216: `orphans: "keep"` seeds them at the root as bare rows
-  // (the who-lives-where pattern) — placed rows first (BFS/placement order),
-  // then orphans in roster order; kept orphans are NOT "dropped". The default
-  // (`"drop"`, or unset) counts them so the UI can surface the loss (ADR-0028 §A).
-  const keepOrphans = op.orphans === "keep";
   const rows = placements.filter((pl) => !pl.hasChild).map((pl) => ({ node: pl.node, path: pl.path }));
+
+  // Orphans (ADR-0028 Amendment 1): the candidate children the join never placed,
+  // as a flat node-set — the Nest's SECOND output. When some `{orphans_of: id}`
+  // references this Nest they flow there (a first-class node-set: into a group, a
+  // Filter, a second Nest — whatever the graph wired); otherwise they are dropped
+  // and counted, exactly as base §A specified (the unchanged default).
+  const orphanSet = new Set<string>();
   for (const n of state.universe) {
-    if (!childIds.has(n.id) || placed.has(n.id)) continue;
-    if (keepOrphans) {
-      rows.push({ node: n, path: [] });
-      placed.add(n.id);
-    } else {
-      state.diag.orphansDropped++;
-    }
+    if (childIds.has(n.id) && !placed.has(n.id)) orphanSet.add(n.id);
   }
-  return { rows, placed };
+  const referenced = op.id != null && state.orphansReferenced.has(op.id);
+  if (!referenced) state.diag.orphansDropped += orphanSet.size;
+
+  const result: NestEval<T> = { rows, placed, orphanSet };
+  if (op.id != null) {
+    state.nestCache.set(op.id, result);
+    state.nestInProgress.delete(op.id);
+  }
+  return result;
+}
+
+// Resolve `{orphans_of: id}` to the flat orphan node-set of the Nest carrying
+// that `id` (ADR-0028 Amendment 1). Looks the Nest up in the pre-walked registry
+// and evaluates it (memoized — computed once, shared with its own results
+// branch); an unknown id yields the empty set.
+function evalOrphansOf<T extends EvalNode>(state: RunState<T>, id: string): Set<string> {
+  const op = state.nestsById.get(id);
+  return op ? new Set(evalNest(state, op).orphanSet) : new Set<string>();
 }
 
 // Build the parent→children adjacency the match rule implies, child side

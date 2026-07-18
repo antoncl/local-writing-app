@@ -72,11 +72,16 @@ Filter identity surviving a round-trip *only* through the *non-semantic* persist
 therefore **loses that identity entirely**, reopening as a bare combinator — a standing surface↔core
 drift source. (Note precisely: `specToGraph` has **no** `intersect(S, leaf)`→`Filter(S)`
 reconstruction to lean on; the only load-time canonicalization is the *leaf-level* bare-predicate →
-`All → Filter` rewrite of ADR-0038 §B, a separate, deterministic, lossless mechanism that is
-**retained** — the predicate leaves stay the §D injectors Filter's `pred` points at.) Serializing
-the `filter` node moves that identity **into the grammar**, so a layout-less view reopens with its
-Filter transforms intact — a maintainability win *for the grammar*, so the economy criterion likely
-favours the stored-node form. The implementation makes the final serialization call on that basis;
+`All → Filter` rewrite of ADR-0038 §B, which is **retained** — the predicate leaves stay the §D
+injectors Filter's `pred` points at. Its round-trip is lossless only as a *matched pair*: §B opens a
+bare leaf into `All → Filter`, and the producer's **universe-fold** (`filterBuilt`) closes it back —
+a Filter over the whole roster serializes to the bare predicate (keep) or its complement (drop),
+**not** to `{filter}`. #271 converges that pair onto `{filter}` and retires both together.)
+Serializing the `filter` node therefore moves the identity **into the grammar for the
+Filter-over-a-real-set case specifically** — a layout-less view of a Filter over a concrete set
+reopens with its transforms intact (a Filter over the roster stays a bare leaf, sharing §B's
+round-trip with the still-bare-leaf backend defaults) — a maintainability win *for the grammar*, so
+the economy criterion likely favours the stored-node form. The implementation makes the final serialization call on that basis;
 the ADR fixes the **invariant** (user-facing first-classness) and the **mechanism** (derived
 operator + declared lowering), not the byte layout.
 
@@ -174,12 +179,14 @@ equivalence**: a Filter evaluated via its declared rewrite yields the same set a
   lowerings, the surface→core lowering becomes "expand derived → primitive," *generated* from those
   lowerings rather than hand-written — one grammar with a primitive/derived distinction, not two
   grammars plus a desugaring relation. And **if** Filter is serialized first-class (C's
-  economy-favoured form), a Filter-over-a-real-set's identity lives in the grammar rather than the
+  economy-favoured form), a Filter-**over-a-real-set**'s identity lives in the grammar rather than the
   non-semantic `layout`, so a layout-less / backend-authored view reopens with its Filter transforms
   intact instead of as a bare combinator — the maintainability payoff that drives that serialization
   choice. This retires **no** `specToGraph` intersect→Filter reconstruction (there is none); the
-  leaf-level bare-predicate → `All → Filter` canonicalization (ADR-0038 §B) is a distinct mechanism
-  and is retained.
+  leaf-level bare-predicate → `All → Filter` canonicalization (ADR-0038 §B) is a distinct, retained
+  mechanism whose lossless round-trip is closed by the producer's universe-fold (a Filter over the
+  roster stays a bare leaf, not `{filter}`) — §B and that fold being the matched pair #271 retires
+  together.
 - **The #275 `orphans_of`/`orphans_nest` companion wart is re-examined** under the injector-role
   framing (orphans as a source may not need the inline-`orphans_nest` companion) — flagged for the
   modelling pass, not committed here.

@@ -14,7 +14,7 @@
   import FieldValueEditor from "@/components/widgets/FieldValueEditor.svelte";
   import NodePicker from "@/components/widgets/NodePicker.svelte";
   import SwatchPicker from "@/components/widgets/SwatchPicker.svelte";
-  import { defaultFilterKind, inputArity, isEmptyValue, outputPayload, promotableSlot, type GraphNodeKind, type PredicateKind, type ViewGraphNode, type ViewHandle, type ViewNodeData } from "@/lib/views/viewGraph";
+  import { defaultFilterKind, inputArity, isEmptyValue, outputPayload, promotableSlot, valueSlotPayload, type GraphNodeKind, type PredicateKind, type ViewGraphNode, type ViewHandle, type ViewNodeData } from "@/lib/views/viewGraph";
   import { nodeSummary } from "@/lib/views/nodeSummary";
   import { isSortableField } from "@/lib/views/fieldAccess";
   import { useDesignerContext } from "./designerContext";
@@ -137,6 +137,11 @@
   let fieldOp = $derived<FieldOp>(cfg.field?.op ?? "overlap");
   let fieldDef = $derived(fieldKey ? ctx.fieldByKey(fieldKey) : null);
   let opNeedsValue = $derived(fieldOp !== "set" && fieldOp !== "unset");
+  // What the value-operand slot ACCEPTS (ADR-0031 §E): an entity_ref field's slot
+  // takes a node-set, a scalar field's a value-set. Tints the value target handle
+  // to match — green (node) vs snippet (value) — so it reads the same as the
+  // source handle that feeds it (which already tints via `emitsValueSet`).
+  let valueAcceptsNodeSet = $derived(valueSlotPayload(fieldKey, (key: string) => ctx.fieldByKey(key)?.type ?? null) === "node-set");
   function setField(next: Partial<NonNullable<ViewNodeData["field"]>>) {
     // A value belongs to a specific field. When the field KEY changes, start the
     // value slot fresh (and drop any promotion of it) — otherwise a color-field
@@ -726,7 +731,7 @@
       type="target"
       position={Position.Left}
       id="value"
-      class={portClass("port value", "value")}
+      class={portClass(valueAcceptsNodeSet ? "port value valnode" : "port value", "value")}
       style={arity !== "none" ? "top: 66%" : "top: 50%"}
     />
   {/if}
@@ -756,7 +761,7 @@
     <div class="port-legend"><span class="dot parents"></span>parents · <span class="dot children"></span>children</div>
   {:else if hasValueSlot}
     <div class="port-legend">
-      {#if arity !== "none"}set · {/if}<span class="dot value"></span>value
+      {#if arity !== "none"}set · {/if}<span class="dot value" class:valnode={valueAcceptsNodeSet}></span>value
     </div>
   {/if}
 
@@ -1075,6 +1080,9 @@
   }
   .dot.value {
     background: var(--k-snippet);
+  }
+  .dot.value.valnode {
+    background: var(--k-lore);
   }
   /* §240: a hairline separates the header (the collapse/expand area) from the
      expanded edit area, on EVERY node — the divider Sort already had via its
@@ -1406,6 +1414,17 @@
   .vnode :global(.port.value:hover),
   .vnode :global(.port.value.connected) {
     background: var(--k-snippet);
+  }
+  /* When the field is an entity_ref, the value slot accepts a NODE-set, so the
+     handle reads green (like the `children` node-set handle) rather than the
+     snippet value-set tint. Three classes → outranks `.port.value` regardless of
+     source order. */
+  .vnode :global(.port.value.valnode) {
+    border-color: var(--k-lore);
+  }
+  .vnode :global(.port.value.valnode:hover),
+  .vnode :global(.port.value.valnode.connected) {
+    background: var(--k-lore);
   }
   /* The Nest's second output — the routable orphans set (ADR-0028 Amdt 1, #260).
      Muted, since it carries the residue (the unplaced candidates), distinct from

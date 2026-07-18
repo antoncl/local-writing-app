@@ -24,15 +24,14 @@ from app.routers import (
 app = FastAPI(title="Local Writing Service", version="0.5.4")
 app.add_middleware(
     CORSMiddleware,
-    # 5173 = the default Vite dev server; 5174 = the isolated "claude" frontend
-    # (`--mode claude`, backend on :8788) so that parallel stack can actually
-    # reach its backend — see memory/feedback_isolated_claude_instance.md.
-    allow_origins=[
-        "http://127.0.0.1:5173",
-        "http://localhost:5173",
-        "http://127.0.0.1:5174",
-        "http://localhost:5174",
-    ],
+    # Local-first: the backend only ever binds 127.0.0.1 (never network-exposed),
+    # and any number of parallel dev stacks must reach it — Anton's :5173, the
+    # isolated "claude" frontend on :5174, plus a worktree thread on any other
+    # port. Pinning specific frontend ports (was 5173/5174 only) CORS-rejected
+    # every stack outside that pair — a hardcode that blocked parallel work. Match
+    # any loopback origin by regex instead; Starlette echoes the matched origin
+    # (not `*`), so this stays compatible with allow_credentials.
+    allow_origin_regex=r"https?://(127\.0\.0\.1|localhost)(:\d+)?",
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],

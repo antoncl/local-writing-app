@@ -65,14 +65,20 @@ erase it from the user's model; and the equivalence being declared, a fold/expan
 derivable either direction, never hand-rolled.
 
 The economy axis has a thumb on the scale worth recording, but the ADR does not pre-empt the call:
-0027 §B's lower-on-save path stores only the expanded core, so a Filter's identity survives solely
-in the *non-semantic* `layout` and must be **heuristically reconstructed** by `specToGraph` on load
-— a standing surface↔core drift source that inverts semantics and presentation. Serializing the
-`filter` node keeps its identity in the grammar and retires that heuristic, which is a
-maintainability win *for the grammar* — so the economy criterion likely favours the stored-node
-form. The implementation makes the final serialization call on that basis; the ADR fixes the
-**invariant** (user-facing first-classness) and the **mechanism** (derived operator + declared
-lowering), not the byte layout.
+0027 §B's lower-on-save path stores only the expanded core, so a Filter-over-a-real-set serializes
+as a plain `intersect`/`difference` — **indistinguishable from a user's explicit intersect**, its
+Filter identity surviving a round-trip *only* through the *non-semantic* persisted `layout` (which
+`hydrateGraph` reopens directly, bypassing `specToGraph`). A layout-less or backend-authored view
+therefore **loses that identity entirely**, reopening as a bare combinator — a standing surface↔core
+drift source. (Note precisely: `specToGraph` has **no** `intersect(S, leaf)`→`Filter(S)`
+reconstruction to lean on; the only load-time canonicalization is the *leaf-level* bare-predicate →
+`All → Filter` rewrite of ADR-0038 §B, a separate, deterministic, lossless mechanism that is
+**retained** — the predicate leaves stay the §D injectors Filter's `pred` points at.) Serializing
+the `filter` node moves that identity **into the grammar**, so a layout-less view reopens with its
+Filter transforms intact — a maintainability win *for the grammar*, so the economy criterion likely
+favours the stored-node form. The implementation makes the final serialization call on that basis;
+the ADR fixes the **invariant** (user-facing first-classness) and the **mechanism** (derived
+operator + declared lowering), not the byte layout.
 
 **D. Injector is a *derived* role (set-arity 0), not a node type — pin this precisely, because it
 is exactly the kind of context-dependent call an implementing thread can get wrong.** An operator's
@@ -168,8 +174,12 @@ equivalence**: a Filter evaluated via its declared rewrite yields the same set a
   lowerings, the surface→core lowering becomes "expand derived → primitive," *generated* from those
   lowerings rather than hand-written — one grammar with a primitive/derived distinction, not two
   grammars plus a desugaring relation. And **if** Filter is serialized first-class (C's
-  economy-favoured form), its identity lives in the grammar and `specToGraph`'s reconstruction
-  heuristic retires — the maintainability payoff that drives that serialization choice.
+  economy-favoured form), a Filter-over-a-real-set's identity lives in the grammar rather than the
+  non-semantic `layout`, so a layout-less / backend-authored view reopens with its Filter transforms
+  intact instead of as a bare combinator — the maintainability payoff that drives that serialization
+  choice. This retires **no** `specToGraph` intersect→Filter reconstruction (there is none); the
+  leaf-level bare-predicate → `All → Filter` canonicalization (ADR-0038 §B) is a distinct mechanism
+  and is retained.
 - **The #275 `orphans_of`/`orphans_nest` companion wart is re-examined** under the injector-role
   framing (orphans as a source may not need the inline-`orphans_nest` companion) — flagged for the
   modelling pass, not committed here.

@@ -39,7 +39,7 @@ Design doc: [`../views-and-filters.md`](../views-and-filters.md) · Prerequisite
 - [0018](0018-set-algebra-with-venn-glyph-authoring.md) — Views are set algebra, authored as a Venn-glyph composition graph (no boolean operators, no text DSL)
 - [0019](0019-annotate-op-dissolves-grouping.md) — The annotate op: grouping (label) and coloring dissolve into the expression graph
 - [0020](0020-views-are-kind-anchored.md) — Views are kind-anchored; universe = all nodes of that kind (needs #77 FQN)
-- [0021](0021-saved-views-are-nodes-viewspec-is-the-core.md) — Saved views are frontmatter-only nodes; ViewSpec `(kind, expr, sort)` is the portable core. **Amended 2026-07-18 (Amendment 1):** the `view-ref` leaf (embed one saved view inside another view's `expr`) is **removed** — stored-view *inclusion* is cut, with its `resolveView`/`viewStack`/save-time cycle-check machinery. Saved views **as nodes** and the NodePicker `{view}` source (0023) are unaffected. (#276)
+- [0021](0021-saved-views-are-nodes-viewspec-is-the-core.md) — Saved views are frontmatter-only nodes; ViewSpec `(kind, expr, sort)` is the portable core
 - [0022](0022-every-nodelist-is-backed-by-a-view.md) — Every NodeList is backed by a view; presentation ∈ {tree, grouped, flat}
 - [0023](0023-nodepickerconfig-is-sources-plus-mechanics.md) — NodePickerConfig = `sources` (ViewSpecs/refs) + mechanics
 - [0024](0024-assistant-dynamic-default-topmost-matching.md) — Assistant dynamic default = topmost matching; ★ default flag retired (#35 Q6)

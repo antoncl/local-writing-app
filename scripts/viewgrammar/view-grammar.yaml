@@ -40,12 +40,15 @@ records:
     fields:
       field:     { type: str, min_len: 1 }
       direction: { type: enum, values: [child_to_parent, parent_to_children] }
-      by:        { type: enum, values: [ref, title], default: ref }
+      # ts_required reproduces today's hand-written `by: "ref"|"title"` (left required
+      # despite the default) — an incidental quirk; a Phase-3 normalization candidate.
+      by:        { type: enum, values: [ref, title], default: ref, ts_required: true }
 
   NestOp:
     fields:
-      parents:   { type: ViewExpr, optional: true, child: true }
-      children:  { type: ViewExpr, optional: true, child: true }
+      # ts_null reproduces today's hand-written `ViewExpr | null` on these two ports.
+      parents:   { type: ViewExpr, optional: true, child: true, ts_null: true }
+      children:  { type: ViewExpr, optional: true, child: true, ts_null: true }
       match:     { type: NestMatch }
       recursive: { type: bool, default: false }
       id:        { type: str, optional: true }

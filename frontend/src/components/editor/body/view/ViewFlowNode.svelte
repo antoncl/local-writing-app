@@ -71,10 +71,6 @@
     field_of: "Field of",
     self: "This entry",
     highlight: "Highlight",
-    type: "Type is",
-    descendants_of: "Type & subtypes",
-    tagged: "Tagged",
-    field: "Field",
     hand_picked: "Hand-picked",
   };
 
@@ -373,13 +369,10 @@
   // is hidden (the three fill modes are mutually exclusive, ADR-0031 §E).
   let isValueWired = $derived(ctx.valueWired?.(id) ?? false);
   // The value socket is a Filter (transform) affordance: a Filter with a
-  // value-taking field predicate exposes it, so you can wire a projection in. A
-  // bare "Field" *injector* is a self-contained source — it shows the socket
-  // ONLY to display an already-wired value (e.g. a reopened wired Filter lowers
-  // to a field leaf), never as an empty dangling input (#196).
-  let hasValueSlot = $derived(
-    kind === "filter" ? filterKind === "field" && !!fieldDef && opNeedsValue : kind === "field" && isValueWired,
-  );
+  // value-taking field predicate exposes it, so you can wire a projection in
+  // (#196). Only a Filter carries it now — the standalone `field` leaf that once
+  // also showed it is retired (#271/#284).
+  let hasValueSlot = $derived(kind === "filter" && filterKind === "field" && !!fieldDef && opNeedsValue);
 
   // --- hand_picked helpers: ids <-> light refs for NodePicker ---
   // Resolve a picked id's title across the rosters the anchor kind can draw from
@@ -818,11 +811,7 @@
          screen reader each time the text recomputes on a rewire. -->
     <p class="vwarn" role="note">{rosterWarnText}</p>
   {/if}
-  {#if kind === "type" || kind === "descendants_of"}
-    {@render typeSlot(kind === "descendants_of")}
-  {:else if kind === "field"}
-    {@render fieldEditor()}
-  {:else if kind === "filter"}
+  {#if kind === "filter"}
     <div class="vseg" role="group" aria-label="Filter mode">
       <button type="button" class:on={filterMode === "keep"} onclick={() => patch({ filter_mode: "keep" })}>Keep</button>
       <button type="button" class:on={filterMode === "drop"} onclick={() => patch({ filter_mode: "drop" })}>Drop</button>

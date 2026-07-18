@@ -127,8 +127,8 @@ describe("viewGraph serialization (round-trip)", () => {
     expect(kinds).toEqual(["hand_picked", "output"]);
   });
 
-  it("drops an unconfigured leaf (blank type ≠ whole universe)", () => {
-    const leaf = node("type", {}, 0);
+  it("drops an unconfigured hand_picked leaf (empty pick ≠ whole universe)", () => {
+    const leaf = node("hand_picked", {}, 0);
     const graph: ViewGraph = { nodes: [out(), leaf], edges: [edge(leaf.id, OUTPUT_NODE_ID)] };
     expect(graphToExpr(graph)).toBeNull();
   });
@@ -185,25 +185,30 @@ describe("system default views round-trip (first-class, #271)", () => {
   }
 });
 
-describe("filter serialization (first-class node + set-identity folds, ADR-0041 §C)", () => {
-  it("keep off All collapses to the bare predicate", () => {
+describe("filter serialization (first-class node, ADR-0041 §C)", () => {
+  it("keep off All → a first-class filter over the roster (no bare-predicate fold, #271/#284)", () => {
     const all = node("all", {}, 0);
     const f = node("filter", { filter_kind: "type", filter_mode: "keep", type: "lore:character" }, 100);
     const graph: ViewGraph = {
       nodes: [out(), all, f],
       edges: [edge(all.id, f.id), edge(f.id, OUTPUT_NODE_ID)],
     };
-    expect(graphToExpr(graph)).toEqual({ type: "lore:character" });
+    // The roster resolves with a kind; the Filter is always first-class over it.
+    expect(graphToExpr(graph, "lore")).toEqual({ filter: { of: { descendants_of: "lore:base" }, pred: { type: "lore:character" } } });
+    // Kind-less the roster can't resolve → no first-class form → EMPTY (the pre-#271
+    // bare-predicate escape hatch is retired, finding-3).
+    expect(graphToExpr(graph)).toBeNull();
   });
 
-  it("drop off All → complement of the predicate", () => {
+  it("drop off All → a first-class filter{mode: drop} over the roster (was a complement)", () => {
     const all = node("all", {}, 0);
     const f = node("filter", { filter_kind: "tagged", filter_mode: "drop", tagged: "archived" }, 100);
     const graph: ViewGraph = {
       nodes: [out(), all, f],
       edges: [edge(all.id, f.id), edge(f.id, OUTPUT_NODE_ID)],
     };
-    expect(graphToExpr(graph)).toEqual({ complement: { tagged: "archived" } });
+    expect(graphToExpr(graph, "lore")).toEqual({ filter: { of: { descendants_of: "lore:base" }, pred: { tagged: "archived" }, mode: "drop" } });
+    expect(graphToExpr(graph)).toBeNull();
   });
 
   it("keep on a concrete input → first-class filter{of, pred} (identity kept in the spec)", () => {
@@ -234,13 +239,13 @@ describe("filter serialization (first-class node + set-identity folds, ADR-0041 
   });
 
   it("an unconfigured filter is a pass-through", () => {
-    const src = node("type", { type: "lore:character" }, 0);
+    const src = node("hand_picked", { hand_picked: ["c1"] }, 0);
     const f = node("filter", { filter_kind: "field", filter_mode: "keep" }, 100);
     const graph: ViewGraph = {
       nodes: [out(), src, f],
       edges: [edge(src.id, f.id), edge(f.id, OUTPUT_NODE_ID)],
     };
-    expect(graphToExpr(graph)).toEqual({ type: "lore:character" });
+    expect(graphToExpr(graph)).toEqual({ hand_picked: ["c1"] });
   });
 
   it("chained filters narrow successively (series = AND)", () => {
@@ -251,17 +256,20 @@ describe("filter serialization (first-class node + set-identity folds, ADR-0041 
       nodes: [out(), all, f1, f2],
       edges: [edge(all.id, f1.id), edge(f1.id, f2.id), edge(f2.id, OUTPUT_NODE_ID)],
     };
-    // f1 sits over the universe → folds to the bare `{type}` predicate, which is
-    // then f2's concrete `of`; f2 stores first-class over it.
-    expect(graphToExpr(graph)).toEqual({ filter: { of: { type: "lore:character" }, pred: { tagged: "hero" } } });
+    // f1 is a first-class filter over the resolved roster; f2 stores first-class
+    // over f1's `{filter}` — a nested filter chain, no bare-predicate fold (#271/#284).
+    expect(graphToExpr(graph, "lore")).toEqual({
+      filter: { of: { filter: { of: { descendants_of: "lore:base" }, pred: { type: "lore:character" } } }, pred: { tagged: "hero" } },
+    });
   });
 });
 
 describe("injector = set-arity 0 (ADR-0041 §D)", () => {
   it("classifies exactly the arity-0 sources as injectors — orphans + $self included", () => {
-    // The §D arity-0 set: predicate leaves + all + $self + an orphans ref (its id is
-    // a reference, not a wired port). Derived from inputArity, so this pins the table.
-    const injectors: GraphNodeKind[] = ["all", "type", "descendants_of", "tagged", "field", "hand_picked", "self", "orphans_ref"];
+    // The §D arity-0 set: the source leaves (`all`, `hand_picked`, `$self`) + an
+    // orphans ref (its id is a reference, not a wired port). Derived from inputArity,
+    // so this pins the table. (The bare predicate leaves are retired, #271/#284.)
+    const injectors: GraphNodeKind[] = ["all", "hand_picked", "self", "orphans_ref"];
     // Everything with a set-valued input port is NOT an injector — including an
     // unwired combinator (it keeps its arity) and the pass-throughs.
     const nonInjectors: GraphNodeKind[] = ["union", "intersect", "difference", "complement", "nest", "field_of", "filter", "sorter", "highlight", "output"];
@@ -273,25 +281,25 @@ describe("injector = set-arity 0 (ADR-0041 §D)", () => {
 describe("named handles → grouped spec", () => {
   it("2 handles → an ordered groups list (handle order = group order)", () => {
     const output = out({ handles: [{ id: "h0", name: "Cast" }, { id: "h1", name: "Gods" }] });
-    const cast = node("type", { type: "lore:character" }, 0);
-    const gods = node("descendants_of", { descendants_of: "lore:deity" }, 100);
+    const cast = node("hand_picked", { hand_picked: ["c1", "c2"] }, 0);
+    const gods = node("hand_picked", { hand_picked: ["g1"] }, 100);
     const graph: ViewGraph = {
       nodes: [output, cast, gods],
       edges: [edge(cast.id, OUTPUT_NODE_ID, "h0"), edge(gods.id, OUTPUT_NODE_ID, "h1")],
     };
     const spec = graphToSpec(graph, { kind: "lore" });
     expect(spec.groups).toEqual([
-      { name: "Cast", expr: { type: "lore:character" } },
-      { name: "Gods", expr: { descendants_of: "lore:deity" } },
+      { name: "Cast", expr: { hand_picked: ["c1", "c2"] } },
+      { name: "Gods", expr: { hand_picked: ["g1"] } },
     ]);
     expect(spec.expr).toBeUndefined();
   });
 
   it("multiple wires into one handle → union + dedupe (same-handle)", () => {
     const output = out({ handles: [{ id: "h0", name: "Folk" }, { id: "h1", name: "Places" }] });
-    const a = node("type", { type: "lore:character" }, 0);
-    const b = node("type", { type: "lore:deity" }, 100);
-    const c = node("type", { type: "lore:location" }, 200);
+    const a = node("hand_picked", { hand_picked: ["c1"] }, 0);
+    const b = node("hand_picked", { hand_picked: ["d1"] }, 100);
+    const c = node("hand_picked", { hand_picked: ["l1"] }, 200);
     const graph: ViewGraph = {
       nodes: [output, a, b, c],
       edges: [
@@ -302,15 +310,15 @@ describe("named handles → grouped spec", () => {
     };
     const spec = graphToSpec(graph, { kind: "lore" });
     expect(spec.groups).toEqual([
-      { name: "Folk", expr: { union: [{ type: "lore:character" }, { type: "lore:deity" }] } },
-      { name: "Places", expr: { type: "lore:location" } },
+      { name: "Folk", expr: { union: [{ hand_picked: ["c1"] }, { hand_picked: ["d1"] }] } },
+      { name: "Places", expr: { hand_picked: ["l1"] } },
     ]);
   });
 
   it("a whole-universe handle (bare All) → group with the explicit roster expr (ADR-0036)", () => {
     const output = out({ handles: [{ id: "h0", name: "Everything" }, { id: "h1", name: "Gods" }] });
     const all = node("all", {}, 0);
-    const gods = node("descendants_of", { descendants_of: "lore:deity" }, 100);
+    const gods = node("hand_picked", { hand_picked: ["g1"] }, 100);
     const graph: ViewGraph = {
       nodes: [output, all, gods],
       edges: [edge(all.id, OUTPUT_NODE_ID, "h0"), edge(gods.id, OUTPUT_NODE_ID, "h1")],
@@ -318,17 +326,17 @@ describe("named handles → grouped spec", () => {
     const spec = graphToSpec(graph, { kind: "lore" });
     expect(spec.groups).toEqual([
       { name: "Everything", expr: { descendants_of: "lore:base" } },
-      { name: "Gods", expr: { descendants_of: "lore:deity" } },
+      { name: "Gods", expr: { hand_picked: ["g1"] } },
     ]);
   });
 
   it("only one populated handle collapses to a flat expr", () => {
     const output = out({ handles: [{ id: "h0", name: "Cast" }, { id: "h1", name: "Empty" }] });
-    const cast = node("type", { type: "lore:character" }, 0);
+    const cast = node("hand_picked", { hand_picked: ["c1"] }, 0);
     const graph: ViewGraph = { nodes: [output, cast], edges: [edge(cast.id, OUTPUT_NODE_ID, "h0")] };
     const spec = graphToSpec(graph, { kind: "lore" });
     expect(spec.groups).toBeUndefined();
-    expect(spec.expr).toEqual({ type: "lore:character" });
+    expect(spec.expr).toEqual({ hand_picked: ["c1"] });
   });
 });
 
@@ -336,14 +344,14 @@ describe("named handles → grouped spec", () => {
 // beside the handle-derived expr/groups — orthogonal to the expr-XOR-groups rule.
 describe("group_by (organize levels, ADR-0037 §2/§8)", () => {
   it("no organize levels → spec carries no group_by key", () => {
-    const leaf = node("type", { type: "lore:character" }, 0);
+    const leaf = node("hand_picked", { hand_picked: ["c1"] }, 0);
     const graph: ViewGraph = { nodes: [out(), leaf], edges: [edge(leaf.id, OUTPUT_NODE_ID)] };
     expect(graphToSpec(graph, { kind: "lore" })).not.toHaveProperty("group_by");
   });
 
   it("the single/unnamed group's levels (on its `in` handle) lower onto a flat expr spec", () => {
     const output = out({ handles: [{ id: "in", name: "", group_by: [{ field: "entry_type", order: "label" }, { field: "rank" }] }] });
-    const leaf = node("descendants_of", { descendants_of: "lore:base" }, 0);
+    const leaf = node("all", {}, 0);
     const graph: ViewGraph = { nodes: [output, leaf], edges: [edge(leaf.id, OUTPUT_NODE_ID)] };
     const spec = graphToSpec(graph, { kind: "lore" });
     expect(spec.expr).toEqual({ descendants_of: "lore:base" });
@@ -357,8 +365,8 @@ describe("group_by (organize levels, ADR-0037 §2/§8)", () => {
         { id: "h1", name: "Gods", group_by: [{ field: "entry_type" }] },
       ],
     });
-    const cast = node("type", { type: "lore:character" }, 0);
-    const gods = node("descendants_of", { descendants_of: "lore:deity" }, 100);
+    const cast = node("hand_picked", { hand_picked: ["c1"] }, 0);
+    const gods = node("hand_picked", { hand_picked: ["g1"] }, 100);
     const graph: ViewGraph = {
       nodes: [output, cast, gods],
       edges: [edge(cast.id, OUTPUT_NODE_ID, "h0"), edge(gods.id, OUTPUT_NODE_ID, "h1")],
@@ -372,7 +380,7 @@ describe("group_by (organize levels, ADR-0037 §2/§8)", () => {
 
   it("drops blank-field levels (a half-authored dropdown never persists)", () => {
     const output = out({ handles: [{ id: "in", name: "", group_by: [{ field: "" }, { field: "rank" }] }] });
-    const leaf = node("type", { type: "lore:character" }, 0);
+    const leaf = node("hand_picked", { hand_picked: ["c1"] }, 0);
     const graph: ViewGraph = { nodes: [output, leaf], edges: [edge(leaf.id, OUTPUT_NODE_ID)] };
     expect(graphToSpec(graph, { kind: "lore" }).group_by).toEqual([{ field: "rank" }]);
   });
@@ -385,8 +393,8 @@ describe("group_by (organize levels, ADR-0037 §2/§8)", () => {
     const grouped = specToGraph({
       kind: "lore",
       groups: [
-        { name: "Cast", expr: { type: "lore:character" }, group_by: [{ field: "rank" }] },
-        { name: "Gods", expr: { type: "lore:deity" } },
+        { name: "Cast", expr: { hand_picked: ["c1"] }, group_by: [{ field: "rank" }] },
+        { name: "Gods", expr: { hand_picked: ["g1"] } },
       ],
     });
     const handles = grouped.nodes.find((n) => n.id === OUTPUT_NODE_ID)?.data.handles;
@@ -404,8 +412,8 @@ describe("group_by (organize levels, ADR-0037 §2/§8)", () => {
     const spec = {
       kind: "lore",
       groups: [
-        { name: "Cast", expr: { type: "lore:character" }, group_by: [{ field: "rank" }] },
-        { name: "Gods", expr: { type: "lore:deity" } },
+        { name: "Cast", expr: { hand_picked: ["c1"] }, group_by: [{ field: "rank" }] },
+        { name: "Gods", expr: { hand_picked: ["g1"] } },
       ],
     };
     const back = graphToSpec(specToGraph(spec), { kind: "lore" });
@@ -417,14 +425,14 @@ describe("group_by (organize levels, ADR-0037 §2/§8)", () => {
 
 describe("sorter (per-segment sort)", () => {
   it("a Sorter feeding the View sets the flat sort", () => {
-    const src = node("type", { type: "lore:character" }, 0);
+    const src = node("hand_picked", { hand_picked: ["c1"] }, 0);
     const s = node("sorter", { sort: { by: "title", dir: "asc" } }, 100);
     const graph: ViewGraph = {
       nodes: [out(), src, s],
       edges: [edge(src.id, s.id), edge(s.id, OUTPUT_NODE_ID)],
     };
     const spec = graphToSpec(graph, { kind: "lore", sort: { by: "manual" } });
-    expect(spec.expr).toEqual({ type: "lore:character" });
+    expect(spec.expr).toEqual({ hand_picked: ["c1"] });
     expect(spec.sort).toEqual({ by: "title", dir: "asc" });
   });
 
@@ -438,7 +446,7 @@ describe("sorter (per-segment sort)", () => {
 
   it("carries a multi-level sort chain (#230) through the Sorter node verbatim", () => {
     const chain = { by: "field" as const, field_key: "rank", dir: "desc" as const, then: { by: "title" as const, dir: "asc" as const } };
-    const src = node("type", { type: "lore:character" }, 0);
+    const src = node("hand_picked", { hand_picked: ["c1"] }, 0);
     const s = node("sorter", { sort: chain }, 100);
     const graph: ViewGraph = {
       nodes: [out(), src, s],
@@ -453,9 +461,9 @@ describe("sorter (per-segment sort)", () => {
 
   it("a Sorter before a handle sets that group's sort", () => {
     const output = out({ handles: [{ id: "h0", name: "Cast" }, { id: "h1", name: "Gods" }] });
-    const cast = node("type", { type: "lore:character" }, 0);
+    const cast = node("hand_picked", { hand_picked: ["c1"] }, 0);
     const s = node("sorter", { sort: { by: "title", dir: "asc" } }, 50);
-    const gods = node("descendants_of", { descendants_of: "lore:deity" }, 100);
+    const gods = node("hand_picked", { hand_picked: ["g1"] }, 100);
     const graph: ViewGraph = {
       nodes: [output, cast, s, gods],
       edges: [
@@ -466,8 +474,8 @@ describe("sorter (per-segment sort)", () => {
     };
     const spec = graphToSpec(graph, { kind: "lore" });
     expect(spec.groups).toEqual([
-      { name: "Cast", expr: { type: "lore:character" }, sort: { by: "title", dir: "asc" } },
-      { name: "Gods", expr: { descendants_of: "lore:deity" } },
+      { name: "Cast", expr: { hand_picked: ["c1"] }, sort: { by: "title", dir: "asc" } },
+      { name: "Gods", expr: { hand_picked: ["g1"] } },
     ]);
   });
 });
@@ -478,7 +486,7 @@ describe("graphToSpec — half-authored 'field' sort keys are stripped from the 
   // inert in the evaluator but the backend ViewSort model rejects it, silently
   // 422-ing every autosave. graphToSpec must keep it out of the emitted spec.
   it("drops a sole keyless field sort → flat sort is null (manual/stored order)", () => {
-    const src = node("type", { type: "lore:character" }, 0);
+    const src = node("hand_picked", { hand_picked: ["c1"] }, 0);
     const s = node("sorter", { sort: { by: "field", dir: "asc" } }, 100);
     const graph: ViewGraph = {
       nodes: [out(), src, s],
@@ -494,7 +502,7 @@ describe("graphToSpec — half-authored 'field' sort keys are stripped from the 
       dir: "asc" as const, // no field_key → inert, must be dropped
       then: { by: "title" as const, dir: "desc" as const },
     };
-    const src = node("type", { type: "lore:character" }, 0);
+    const src = node("hand_picked", { hand_picked: ["c1"] }, 0);
     const s = node("sorter", { sort: chain }, 100);
     const graph: ViewGraph = {
       nodes: [out(), src, s],
@@ -506,7 +514,7 @@ describe("graphToSpec — half-authored 'field' sort keys are stripped from the 
 
   it("omits a group's sort when it is only a keyless field key", () => {
     const output = out({ handles: [{ id: "h0", name: "Cast" }] });
-    const cast = node("type", { type: "lore:character" }, 0);
+    const cast = node("hand_picked", { hand_picked: ["c1"] }, 0);
     const s = node("sorter", { sort: { by: "field", dir: "asc" } }, 50);
     const graph: ViewGraph = {
       nodes: [output, cast, s],
@@ -525,7 +533,7 @@ describe("graphToSpec — half-authored 'field' sort keys are stripped from the 
     // preview already shows for a not-yet-configured sorter.
     const output = out({ handles: [{ id: "h0", name: "All" }, { id: "h1", name: "Gods" }] });
     const s = node("sorter", { sort: { by: "field", dir: "asc" } }, 0); // no field_key
-    const gods = node("descendants_of", { descendants_of: "lore:deity" }, 100);
+    const gods = node("hand_picked", { hand_picked: ["g1"] }, 100);
     const graph: ViewGraph = {
       nodes: [output, s, gods],
       edges: [edge(s.id, OUTPUT_NODE_ID, "h0"), edge(gods.id, OUTPUT_NODE_ID, "h1")],
@@ -533,7 +541,7 @@ describe("graphToSpec — half-authored 'field' sort keys are stripped from the 
     const spec = graphToSpec(graph, { kind: "lore" });
     expect(spec.groups).toEqual([
       { name: "All", expr: { descendants_of: "lore:base" } },
-      { name: "Gods", expr: { descendants_of: "lore:deity" } },
+      { name: "Gods", expr: { hand_picked: ["g1"] } },
     ]);
   });
 });
@@ -541,8 +549,8 @@ describe("graphToSpec — half-authored 'field' sort keys are stripped from the 
 describe("graphToSpec — orphaned & sorted-empty handles (#93)", () => {
   it("an edge whose targetHandle names no real handle is adopted by the first handle", () => {
     const output = out({ handles: [{ id: "h0", name: "Cast" }, { id: "h1", name: "Gods" }] });
-    const cast = node("type", { type: "lore:character" }, 0);
-    const gods = node("descendants_of", { descendants_of: "lore:deity" }, 100);
+    const cast = node("hand_picked", { hand_picked: ["c1"] }, 0);
+    const gods = node("hand_picked", { hand_picked: ["g1"] }, 100);
     const graph: ViewGraph = {
       nodes: [output, cast, gods],
       // `cast` wired with the default "in" handle — not h0/h1. Pre-fix its whole
@@ -551,15 +559,15 @@ describe("graphToSpec — orphaned & sorted-empty handles (#93)", () => {
     };
     const spec = graphToSpec(graph, { kind: "lore" });
     expect(spec.groups).toEqual([
-      { name: "Cast", expr: { type: "lore:character" } },
-      { name: "Gods", expr: { descendants_of: "lore:deity" } },
+      { name: "Cast", expr: { hand_picked: ["c1"] } },
+      { name: "Gods", expr: { hand_picked: ["g1"] } },
     ]);
   });
 
   it("a Sorter feeding a handle with no upstream membership → sorted whole-universe group", () => {
     const output = out({ handles: [{ id: "h0", name: "All sorted" }, { id: "h1", name: "Gods" }] });
     const s = node("sorter", { sort: { by: "title", dir: "asc" } }, 0);
-    const gods = node("descendants_of", { descendants_of: "lore:deity" }, 100);
+    const gods = node("hand_picked", { hand_picked: ["g1"] }, 100);
     const graph: ViewGraph = {
       nodes: [output, s, gods],
       // The sorter has NO upstream membership; pre-fix the group and its sort were
@@ -571,7 +579,7 @@ describe("graphToSpec — orphaned & sorted-empty handles (#93)", () => {
     const spec = graphToSpec(graph, { kind: "lore" });
     expect(spec.groups).toEqual([
       { name: "All sorted", expr: { descendants_of: "lore:base" }, sort: { by: "title", dir: "asc" } },
-      { name: "Gods", expr: { descendants_of: "lore:deity" } },
+      { name: "Gods", expr: { hand_picked: ["g1"] } },
     ]);
   });
 });
@@ -768,7 +776,7 @@ describe("#184 field_of / self lowering + round-trip (ADR-0031 §D)", () => {
   });
 
   it("field_of with no projected field lowers to nothing", () => {
-    const src = node("type", { type: "scene:scene" }, 0);
+    const src = node("hand_picked", { hand_picked: ["s1"] }, 0);
     const fo = node("field_of", {}, 100);
     const graph: ViewGraph = {
       nodes: [out(), src, fo],
@@ -808,7 +816,7 @@ describe("#184 field_of / self lowering + round-trip (ADR-0031 §D)", () => {
   });
 
   it("reachesFieldOf enforces the single-hop cut", () => {
-    const src = node("type", { type: "scene:scene" }, 0);
+    const src = node("hand_picked", { hand_picked: ["s1"] }, 0);
     const fo = node("field_of", { project_field: "pov" }, 100);
     const byId = new Map([[src.id, src], [fo.id, fo]]);
     // A field_of output (or anything downstream of it) reaches a field_of.
@@ -827,14 +835,14 @@ describe("#196 value-set pipe (scalar field_of → Filter value slot, ADR-0031 �
     expect(outputPayload(node("field_of", { project_field: "pov" }), fieldType)).toBe("node-set");
     expect(outputPayload(node("field_of", { project_field: "references" }), fieldType)).toBe("node-set");
     expect(outputPayload(node("self", {}), fieldType)).toBe("node-set");
-    expect(outputPayload(node("type", { type: "x" }), fieldType)).toBe("node-set");
+    expect(outputPayload(node("hand_picked", { hand_picked: ["x"] }), fieldType)).toBe("node-set");
   });
 
   it("valueSlotAccepts enforces the two-payload matrix", () => {
     const scalarFO = node("field_of", { project_field: "status" });
     const refFO = node("field_of", { project_field: "pov" });
     const self = node("self", {});
-    const typeSrc = node("type", { type: "scene:scene" });
+    const pickedSrc = node("hand_picked", { hand_picked: ["s1"] });
     // scalar field slot ← value-set only
     expect(valueSlotAccepts(scalarFO, { key: "status", op: "overlap" }, fieldType)).toBe(true);
     expect(valueSlotAccepts(refFO, { key: "status", op: "overlap" }, fieldType)).toBe(false);
@@ -843,25 +851,32 @@ describe("#196 value-set pipe (scalar field_of → Filter value slot, ADR-0031 �
     expect(valueSlotAccepts(self, { key: "pov", op: "overlap" }, fieldType)).toBe(true);
     expect(valueSlotAccepts(scalarFO, { key: "pov", op: "overlap" }, fieldType)).toBe(false);
     // only field_of / self are operand-representable wired sources
-    expect(valueSlotAccepts(typeSrc, { key: "pov", op: "overlap" }, fieldType)).toBe(false);
+    expect(valueSlotAccepts(pickedSrc, { key: "pov", op: "overlap" }, fieldType)).toBe(false);
     // no field key → nothing to accept
     expect(valueSlotAccepts(scalarFO, undefined, fieldType)).toBe(false);
   });
 
-  it("lowers a field leaf with a wired scalar field_of into a {field_of} value operand", () => {
-    const scenes = node("type", { type: "scene:scene" }, 0);
-    const fo = node("field_of", { project_field: "status" }, 100);
-    const field = node("field", { field: { key: "status", op: "overlap" } }, 200);
+  it("lowers a Filter's field predicate with a wired scalar field_of into a {field_of} value operand", () => {
+    // Post-#271 a field predicate lives inside a Filter (the standalone `field` leaf
+    // is retired); the #196 value wire feeds the Filter's `value` handle.
+    const setSrc = node("hand_picked", { hand_picked: ["a", "b"] }, 0);
+    const picked = node("hand_picked", { hand_picked: ["s1"] }, 100);
+    const fo = node("field_of", { project_field: "status" }, 200);
+    const filter = node("filter", { filter_kind: "field", field: { key: "status", op: "overlap" } }, 300);
     const graph: ViewGraph = {
-      nodes: [out(), scenes, fo, field],
+      nodes: [out(), setSrc, picked, fo, filter],
       edges: [
-        edge(scenes.id, fo.id),
-        edge(fo.id, field.id, FILTER_VALUE_HANDLE),
-        edge(field.id, OUTPUT_NODE_ID),
+        edge(setSrc.id, filter.id),
+        edge(picked.id, fo.id),
+        edge(fo.id, filter.id, FILTER_VALUE_HANDLE),
+        edge(filter.id, OUTPUT_NODE_ID),
       ],
     };
     expect(graphToExpr(graph)).toEqual({
-      field: { key: "status", op: "overlap", value: { field_of: { of: { type: "scene:scene" }, field: "status" } } },
+      filter: {
+        of: { hand_picked: ["a", "b"] },
+        pred: { field: { key: "status", op: "overlap", value: { field_of: { of: { hand_picked: ["s1"] }, field: "status" } } } },
+      },
     });
   });
 
@@ -949,7 +964,7 @@ describe("cycle classifier — recursion vs meaningless (ADR-0028 §D)", () => {
   });
 
   it("a plain acyclic edge is ok", () => {
-    const src = node("type", { type: "lore:character" }, 0);
+    const src = node("hand_picked", { hand_picked: ["c1"] }, 0);
     const nst = node("nest", { match }, 100);
     const byId = new Map([[src.id, src], [nst.id, nst]]);
     expect(classifyConnection(byId, [], src.id, nst.id, "children")).toBe("ok");
@@ -991,28 +1006,35 @@ describe("specToGraph (reopen fallback)", () => {
 // specToGraph restores param from the params list on `{var}` values.
 describe("promote-in-place params (#184)", () => {
   it("collects a promoted field's formal into spec.params (value → {var})", () => {
-    const f = node("field", {
+    // A promoted field predicate lives on a Filter (the standalone field leaf is
+    // retired, #271/#284); the Filter narrows a source set.
+    const src = node("hand_picked", { hand_picked: ["a"] }, 0);
+    const f = node("filter", {
+      filter_kind: "field",
       field: { key: "tags", op: "overlap", value: { var: "P_TAG" } },
       param: { name: "P_TAG", label: "Tag", default: ["hero"] },
-    });
-    const graph: ViewGraph = { nodes: [out(), f], edges: [edge(f.id, OUTPUT_NODE_ID)] };
+    }, 100);
+    const graph: ViewGraph = { nodes: [out(), src, f], edges: [edge(src.id, f.id), edge(f.id, OUTPUT_NODE_ID)] };
     const spec = graphToSpec(graph, { kind: "lore" });
     expect(spec.params).toEqual([{ name: "P_TAG", label: "Tag", default: ["hero"] }]);
-    expect(spec.expr).toEqual({ field: { key: "tags", op: "overlap", value: { var: "P_TAG" } } });
+    expect(spec.expr).toEqual({ filter: { of: { hand_picked: ["a"] }, pred: { field: { key: "tags", op: "overlap", value: { var: "P_TAG" } } } } });
   });
 
   it("omits an unbound formal's default but keeps the param", () => {
-    const f = node("field", {
+    const src = node("hand_picked", { hand_picked: ["a"] }, 0);
+    const f = node("filter", {
+      filter_kind: "field",
       field: { key: "tags", op: "overlap", value: { var: "P" } },
       param: { name: "P", label: "Tag" },
-    });
-    const graph: ViewGraph = { nodes: [out(), f], edges: [edge(f.id, OUTPUT_NODE_ID)] };
+    }, 100);
+    const graph: ViewGraph = { nodes: [out(), src, f], edges: [edge(src.id, f.id), edge(f.id, OUTPUT_NODE_ID)] };
     expect(graphToSpec(graph, { kind: "lore" }).params).toEqual([{ name: "P", label: "Tag" }]);
   });
 
   it("skips a promoted formal on a node not wired to the output (no phantom param)", () => {
-    const wired = node("type", { type: "lore:character" });
-    const orphan = node("field", {
+    const wired = node("hand_picked", { hand_picked: ["c1"] });
+    const orphan = node("filter", {
+      filter_kind: "field",
       field: { key: "tags", op: "overlap", value: { var: "GHOST" } },
       param: { name: "GHOST", default: ["x"] },
     });
@@ -1021,11 +1043,13 @@ describe("promote-in-place params (#184)", () => {
   });
 
   it("skips a stale param whose value is no longer its {var}", () => {
-    const f = node("field", {
+    const src = node("hand_picked", { hand_picked: ["a"] }, 0);
+    const f = node("filter", {
+      filter_kind: "field",
       field: { key: "tags", op: "overlap", value: "literal" },
       param: { name: "P", default: [] },
-    });
-    const graph: ViewGraph = { nodes: [out(), f], edges: [edge(f.id, OUTPUT_NODE_ID)] };
+    }, 100);
+    const graph: ViewGraph = { nodes: [out(), src, f], edges: [edge(src.id, f.id), edge(f.id, OUTPUT_NODE_ID)] };
     expect(graphToSpec(graph, { kind: "lore" }).params).toBeUndefined();
   });
 
@@ -1061,30 +1085,34 @@ describe("promote-in-place params (#184)", () => {
   });
 });
 
-// ADR-0038 §C Amendment 1 (#222): promotion generalizes from the field value slot
-// to the value-carrying LEAF slots — type / descendants_of / tagged. Their slot
-// value becomes `{var}`, `collectParams` picks them up generically, and the
-// canonicalize-on-open path (§B) reconstructs the param onto the Filter.
-describe("promote-in-place params — leaf slots (ADR-0038 §C, #222)", () => {
-  it("collects a promoted type leaf's formal (type → {var})", () => {
-    const t = node("type", { type: { var: "T" }, param: { name: "T", label: "Type", default: "lore:character" } });
-    const graph: ViewGraph = { nodes: [out(), t], edges: [edge(t.id, OUTPUT_NODE_ID)] };
+// ADR-0038 §C Amendment 1 (#222): promotion generalizes across the value-carrying
+// predicate slots a Filter narrows on — type / descendants_of / tagged (+ field).
+// The slot value becomes `{var}`, `collectParams` picks them up generically. Post
+// #271/#284 the predicate lives on a Filter (the standalone leaf is retired), so
+// these are Filter nodes over a source set.
+describe("promote-in-place params — predicate slots (ADR-0038 §C, #222)", () => {
+  it("collects a promoted type predicate's formal (type → {var})", () => {
+    const src = node("hand_picked", { hand_picked: ["a"] }, 0);
+    const t = node("filter", { filter_kind: "type", type: { var: "T" }, param: { name: "T", label: "Type", default: "lore:character" } }, 100);
+    const graph: ViewGraph = { nodes: [out(), src, t], edges: [edge(src.id, t.id), edge(t.id, OUTPUT_NODE_ID)] };
     const spec = graphToSpec(graph, { kind: "lore" });
     expect(spec.params).toEqual([{ name: "T", label: "Type", default: "lore:character" }]);
-    expect(spec.expr).toEqual({ type: { var: "T" } });
+    expect(spec.expr).toEqual({ filter: { of: { hand_picked: ["a"] }, pred: { type: { var: "T" } } } });
   });
 
-  it("collects a promoted tagged leaf's formal, omitting an absent default", () => {
-    const t = node("tagged", { tagged: { var: "TAG" }, param: { name: "TAG", label: "Tag" } });
-    const graph: ViewGraph = { nodes: [out(), t], edges: [edge(t.id, OUTPUT_NODE_ID)] };
+  it("collects a promoted tagged predicate's formal, omitting an absent default", () => {
+    const src = node("hand_picked", { hand_picked: ["a"] }, 0);
+    const t = node("filter", { filter_kind: "tagged", tagged: { var: "TAG" }, param: { name: "TAG", label: "Tag" } }, 100);
+    const graph: ViewGraph = { nodes: [out(), src, t], edges: [edge(src.id, t.id), edge(t.id, OUTPUT_NODE_ID)] };
     const spec = graphToSpec(graph, { kind: "lore" });
     expect(spec.params).toEqual([{ name: "TAG", label: "Tag" }]);
-    expect(spec.expr).toEqual({ tagged: { var: "TAG" } });
+    expect(spec.expr).toEqual({ filter: { of: { hand_picked: ["a"] }, pred: { tagged: { var: "TAG" } } } });
   });
 
-  it("skips a stale leaf param whose slot value is no longer its {var}", () => {
-    const t = node("type", { type: "lore:character", param: { name: "T", default: "lore:deity" } });
-    const graph: ViewGraph = { nodes: [out(), t], edges: [edge(t.id, OUTPUT_NODE_ID)] };
+  it("skips a stale predicate param whose slot value is no longer its {var}", () => {
+    const src = node("hand_picked", { hand_picked: ["a"] }, 0);
+    const t = node("filter", { filter_kind: "type", type: "lore:character", param: { name: "T", default: "lore:deity" } }, 100);
+    const graph: ViewGraph = { nodes: [out(), src, t], edges: [edge(src.id, t.id), edge(t.id, OUTPUT_NODE_ID)] };
     expect(graphToSpec(graph, { kind: "lore" }).params).toBeUndefined();
   });
 
@@ -1120,8 +1148,9 @@ describe("promote-in-place params — leaf slots (ADR-0038 §C, #222)", () => {
   // The §D Parameters rail lists these — each row needs the owning node id + slot
   // to navigate to and expand it.
   it("collectParamBindings pairs each formal with its owning node and slot", () => {
-    const t = node("type", { type: { var: "T" }, param: { name: "T", label: "Type" } });
-    const f = node("field", {
+    const t = node("filter", { filter_kind: "type", type: { var: "T" }, param: { name: "T", label: "Type" } });
+    const f = node("filter", {
+      filter_kind: "field",
       field: { key: "tags", op: "overlap", value: { var: "TAG" } },
       param: { name: "TAG", label: "Tag", default: ["hero"] },
     });
@@ -1163,24 +1192,43 @@ describe("field-picker type inference (ADR-0031 §F)", () => {
   const infer = (nodes: ViewGraphNode[], edges: ReturnType<typeof edge>[], id: string, anchor = "scene") =>
     dump(inferInputTypes(byIdOf(nodes), edges, id, anchor, resolvers));
 
-  it("a Filter over a `type` leaf infers that exact entry_type", () => {
-    const src = node("type", { type: "scene:scene" }, 0);
+  // Post-#271/#284 there is no bare type/descendants_of leaf, so a concretely-typed
+  // source is `All` narrowed by a keep-Filter on that predicate (anchor-kind only —
+  // the Filter intersects the roster). A FOREIGN kind is reachable only through a
+  // ref `field_of` (the §F remap), which `refSrc` builds. Each returns its nodes +
+  // internal edges and the id of its output node.
+  const typedSrc = (pred: "type" | "descendants_of", fqn: string) => {
+    const all = node("all", {});
+    const f =
+      pred === "type"
+        ? node("filter", { filter_kind: "type", filter_mode: "keep", type: fqn }, 0)
+        : node("filter", { filter_kind: "descendants_of", filter_mode: "keep", descendants_of: fqn }, 0);
+    return { nodes: [all, f], edges: [edge(all.id, f.id)], id: f.id };
+  };
+  const refSrc = (field: string) => {
+    const pick = node("hand_picked", { hand_picked: ["x"] });
+    const fo = node("field_of", { project_field: field });
+    return { nodes: [pick, fo], edges: [edge(pick.id, fo.id)], id: fo.id };
+  };
+
+  it("a keep-Filter on a `type` predicate infers that exact entry_type", () => {
+    const src = typedSrc("type", "scene:scene");
     const filter = node("filter", { filter_kind: "field" }, 100);
-    const nodes = [out(), src, filter];
-    const edges = [edge(src.id, filter.id), edge(filter.id, OUTPUT_NODE_ID)];
+    const nodes = [out(), ...src.nodes, filter];
+    const edges = [...src.edges, edge(src.id, filter.id), edge(filter.id, OUTPUT_NODE_ID)];
     expect(infer(nodes, edges, filter.id)).toEqual({ scene: ["scene:scene"] });
   });
 
-  it("a `descendants_of` leaf infers the whole subtype family (seed-inclusive)", () => {
-    const src = node("descendants_of", { descendants_of: "lore:character" }, 0);
+  it("a keep-Filter on a `descendants_of` predicate infers the whole subtype family (seed-inclusive)", () => {
+    const src = typedSrc("descendants_of", "lore:character");
     const filter = node("filter", { filter_kind: "field" }, 100);
-    const nodes = [out(), src, filter];
-    const edges = [edge(src.id, filter.id), edge(filter.id, OUTPUT_NODE_ID)];
+    const nodes = [out(), ...src.nodes, filter];
+    const edges = [...src.edges, edge(src.id, filter.id), edge(filter.id, OUTPUT_NODE_ID)];
     expect(infer(nodes, edges, filter.id, "lore")).toEqual({ lore: ["lore:character", "lore:protagonist"] });
   });
 
   it("a node downstream of a ref `field_of` infers the ref field's target kind (the §F remap)", () => {
-    const src = node("type", { type: "scene:scene" }, 0);
+    const src = node("hand_picked", { hand_picked: ["s1"] }, 0);
     const fo = node("field_of", { project_field: "pov" }, 100);
     const filter = node("filter", { filter_kind: "field" }, 200);
     const nodes = [out(), src, fo, filter];
@@ -1189,7 +1237,7 @@ describe("field-picker type inference (ADR-0031 §F)", () => {
   });
 
   it("a multi-kind ref `field_of` yields a cross-kind set (§14.3), not a null fallback", () => {
-    const src = node("type", { type: "scene:scene" }, 0);
+    const src = node("hand_picked", { hand_picked: ["s1"] }, 0);
     const fo = node("field_of", { project_field: "owner" }, 100);
     const filter = node("filter", { filter_kind: "field" }, 200);
     const nodes = [out(), src, fo, filter];
@@ -1198,15 +1246,15 @@ describe("field-picker type inference (ADR-0031 §F)", () => {
   });
 
   it("a `field_of`'s own project-field picker sees its INPUT type, not its output", () => {
-    const src = node("type", { type: "scene:scene" }, 0);
+    const src = typedSrc("type", "scene:scene");
     const fo = node("field_of", { project_field: "pov" }, 100);
-    const nodes = [out(), src, fo];
-    const edges = [edge(src.id, fo.id), edge(fo.id, OUTPUT_NODE_ID)];
+    const nodes = [out(), ...src.nodes, fo];
+    const edges = [...src.edges, edge(src.id, fo.id), edge(fo.id, OUTPUT_NODE_ID)];
     expect(infer(nodes, edges, fo.id)).toEqual({ scene: ["scene:scene"] });
   });
 
   it("downstream of a SCALAR `field_of` (value-set) → indeterminate (null → anchor fallback)", () => {
-    const src = node("type", { type: "scene:scene" }, 0);
+    const src = node("hand_picked", { hand_picked: ["s1"] }, 0);
     const fo = node("field_of", { project_field: "status" }, 100);
     const filter = node("filter", { filter_kind: "field" }, 200);
     const nodes = [out(), src, fo, filter];
@@ -1215,7 +1263,7 @@ describe("field-picker type inference (ADR-0031 §F)", () => {
   });
 
   it("downstream of a `references` (any-kind) `field_of` → indeterminate", () => {
-    const src = node("type", { type: "scene:scene" }, 0);
+    const src = node("hand_picked", { hand_picked: ["s1"] }, 0);
     const fo = node("field_of", { project_field: "references" }, 100);
     const filter = node("filter", { filter_kind: "field" }, 200);
     const nodes = [out(), src, fo, filter];
@@ -1224,7 +1272,7 @@ describe("field-picker type inference (ADR-0031 §F)", () => {
   });
 
   it("a Filter/Sorter preserves its input type through the remap", () => {
-    const src = node("type", { type: "scene:scene" }, 0);
+    const src = node("hand_picked", { hand_picked: ["s1"] }, 0);
     const fo = node("field_of", { project_field: "characters" }, 100);
     const f1 = node("filter", { filter_kind: "tagged" }, 200);
     const f2 = node("sorter", { sort: { by: "field" } }, 300);
@@ -1266,13 +1314,15 @@ describe("field-picker type inference (ADR-0031 §F)", () => {
   });
 
   it("a nest handle unions ALL its inbound sources, not just the first", () => {
-    // Two type leaves wired into a nest's children handle → the join-field picker
+    // Two typed sources wired into a nest's children handle → the join-field picker
     // must see BOTH types (lowering unions them), not only the first edge's type.
-    const l1 = node("type", { type: "scene:action" }, 0);
-    const l2 = node("type", { type: "scene:sequel" }, 100);
+    const l1 = typedSrc("type", "scene:action");
+    const l2 = typedSrc("type", "scene:sequel");
     const nest = node("nest", { match: { field: "parent", direction: "child_to_parent", by: "ref" } }, 200);
-    const nodes = [out(), l1, l2, nest];
+    const nodes = [out(), ...l1.nodes, ...l2.nodes, nest];
     const edges = [
+      ...l1.edges,
+      ...l2.edges,
       edge(l1.id, nest.id, NEST_CHILDREN_HANDLE),
       edge(l2.id, nest.id, NEST_CHILDREN_HANDLE),
       edge(nest.id, OUTPUT_NODE_ID),
@@ -1309,12 +1359,25 @@ describe("field-picker type inference (ADR-0031 §F)", () => {
   });
 
   it("a union of two kinds yields a cross-kind set", () => {
-    const a = node("type", { type: "scene:scene" }, 0);
-    const b = node("descendants_of", { descendants_of: "lore:character" }, 100);
+    // A foreign kind is reachable only through a ref field_of (§F remap); narrow it
+    // back to a concrete family with a keep-Filter so the union merges two concrete
+    // per-kind fqn sets (not just concrete ∪ any-kind).
+    const a = typedSrc("type", "scene:scene");
+    const pick = node("hand_picked", { hand_picked: ["x"] });
+    const fo = node("field_of", { project_field: "pov" }, 100);
+    const loreFilter = node("filter", { filter_kind: "descendants_of", filter_mode: "keep", descendants_of: "lore:character" }, 150);
     const u = node("union", {}, 200);
     const sink = node("filter", { filter_kind: "field" }, 300);
-    const nodes = [out(), a, b, u, sink];
-    const edges = [edge(a.id, u.id), edge(b.id, u.id), edge(u.id, sink.id), edge(sink.id, OUTPUT_NODE_ID)];
+    const nodes = [out(), ...a.nodes, pick, fo, loreFilter, u, sink];
+    const edges = [
+      ...a.edges,
+      edge(pick.id, fo.id),
+      edge(fo.id, loreFilter.id),
+      edge(loreFilter.id, u.id),
+      edge(a.id, u.id),
+      edge(u.id, sink.id),
+      edge(sink.id, OUTPUT_NODE_ID),
+    ];
     expect(infer(nodes, edges, sink.id)).toEqual({
       scene: ["scene:scene"],
       lore: ["lore:character", "lore:protagonist"],
@@ -1347,7 +1410,7 @@ describe("field-picker type inference (ADR-0031 §F)", () => {
   it("a diamond over a ref `field_of` still remaps (independent `seen` per branch)", () => {
     // scene → field_of(pov→lore) fans into filterA + filterB → union → sink.
     // A shared `seen` set would null the second branch → wrong anchor fallback.
-    const src = node("type", { type: "scene:scene" }, 0);
+    const src = node("hand_picked", { hand_picked: ["s1"] }, 0);
     const fo = node("field_of", { project_field: "pov" }, 100);
     const fa = node("filter", { filter_kind: "tagged" }, 200);
     const fb = node("filter", { filter_kind: "tagged" }, 300);
@@ -1373,7 +1436,7 @@ describe("field-picker type inference (ADR-0031 §F)", () => {
       inputKinds(inferInputTypes(byIdOf(nodes), edges, id, anchor, resolvers)).sort();
 
     it("a single-kind input spans one kind (no warning)", () => {
-      const src = node("type", { type: "scene:scene" }, 0);
+      const src = node("hand_picked", { hand_picked: ["s1"] }, 0);
       const sink = node("filter", { filter_kind: "field" }, 100);
       const nodes = [out(), src, sink];
       const edges = [edge(src.id, sink.id), edge(sink.id, OUTPUT_NODE_ID)];
@@ -1381,17 +1444,17 @@ describe("field-picker type inference (ADR-0031 §F)", () => {
     });
 
     it("a union of two kinds spans both (cross-kind → warn)", () => {
-      const a = node("type", { type: "scene:scene" }, 0);
-      const b = node("descendants_of", { descendants_of: "lore:character" }, 100);
+      const a = node("hand_picked", { hand_picked: ["s1"] }, 0);
+      const b = refSrc("pov"); // a ref field_of reaches the foreign kind (lore)
       const u = node("union", {}, 200);
       const sink = node("filter", { filter_kind: "field" }, 300);
-      const nodes = [out(), a, b, u, sink];
-      const edges = [edge(a.id, u.id), edge(b.id, u.id), edge(u.id, sink.id), edge(sink.id, OUTPUT_NODE_ID)];
+      const nodes = [out(), a, ...b.nodes, u, sink];
+      const edges = [...b.edges, edge(a.id, u.id), edge(b.id, u.id), edge(u.id, sink.id), edge(sink.id, OUTPUT_NODE_ID)];
       expect(kindsOf(nodes, edges, sink.id)).toEqual(["lore", "scene"]);
     });
 
     it("a multi-kind ref `field_of` spans its target kinds (cross-kind → warn)", () => {
-      const src = node("type", { type: "scene:scene" }, 0);
+      const src = node("hand_picked", { hand_picked: ["s1"] }, 0);
       const fo = node("field_of", { project_field: "owner" }, 100);
       const sink = node("filter", { filter_kind: "field" }, 200);
       const nodes = [out(), src, fo, sink];
@@ -1400,7 +1463,7 @@ describe("field-picker type inference (ADR-0031 §F)", () => {
     });
 
     it("an indeterminate input (scalar field_of → null) spans no kinds (anchor fallback, not cross-kind)", () => {
-      const src = node("type", { type: "scene:scene" }, 0);
+      const src = node("hand_picked", { hand_picked: ["s1"] }, 0);
       const fo = node("field_of", { project_field: "status" }, 100);
       const sink = node("filter", { filter_kind: "field" }, 200);
       const nodes = [out(), src, fo, sink];
@@ -1413,12 +1476,12 @@ describe("field-picker type inference (ADR-0031 §F)", () => {
       // kind → a size-0 (NON-null) Map. `rosterWarningFor` must treat this as
       // cross-kind (ts !== null && size !== 1), NOT confuse it with the null
       // (indeterminate) anchor-fallback case above.
-      const a = node("type", { type: "scene:scene" }, 0);
-      const b = node("descendants_of", { descendants_of: "lore:character" }, 100);
+      const a = typedSrc("type", "scene:scene");
+      const b = refSrc("pov"); // scene ∩ lore = ∅ across kinds
       const x = node("intersect", {}, 200);
       const sink = node("filter", { filter_kind: "field" }, 300);
-      const nodes = [out(), a, b, x, sink];
-      const edges = [edge(a.id, x.id), edge(b.id, x.id), edge(x.id, sink.id), edge(sink.id, OUTPUT_NODE_ID)];
+      const nodes = [out(), ...a.nodes, ...b.nodes, x, sink];
+      const edges = [...a.edges, ...b.edges, edge(a.id, x.id), edge(b.id, x.id), edge(x.id, sink.id), edge(sink.id, OUTPUT_NODE_ID)];
       // Determinate empty set: an empty object from `dump` (a real Map of size 0),
       // distinct from `null`; `inputKinds` of it is [].
       expect(infer(nodes, edges, sink.id)).toEqual({});

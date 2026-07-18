@@ -11,35 +11,38 @@ const R: SummaryResolvers = {
 const summary = (kind: Parameters<typeof nodeSummary>[0], cfg: ViewNodeData) => nodeSummary(kind, cfg, R);
 
 describe("nodeSummary — compact node one-liners (#220)", () => {
-  it("shows placeholders for unconfigured leaves", () => {
-    expect(summary("type", {})).toBe("— any type —");
-    expect(summary("tagged", {})).toBe("— tag —");
-    expect(summary("field", {})).toBe("— field —");
+  it("shows placeholders for unconfigured predicates + structural slots", () => {
+    // The predicate placeholders (type/tagged/field) surface through a Filter now —
+    // the standalone predicate leaves are retired (#271/#284).
+    expect(summary("filter", { filter_kind: "type" })).toBe("keep · — any type —");
+    expect(summary("filter", { filter_kind: "tagged" })).toBe("keep · — tag —");
+    expect(summary("filter", { filter_kind: "field" })).toBe("keep · — field —");
     expect(summary("nest", {})).toBe("— link field —");
     expect(summary("field_of", {})).toBe("— follow field —");
   });
 
-  it("resolves type / descendants_of / tagged", () => {
-    expect(summary("type", { type: "lore:character" })).toBe("Character");
-    expect(summary("descendants_of", { descendants_of: "lore:character" })).toBe("Character +sub");
-    expect(summary("tagged", { tagged: "hero" })).toBe("#hero");
+  it("resolves a Filter's type / descendants_of / tagged predicate", () => {
+    expect(summary("filter", { filter_kind: "type", type: "lore:character" })).toBe("keep · Character");
+    expect(summary("filter", { filter_kind: "descendants_of", descendants_of: "lore:character" })).toBe("keep · Character +sub");
+    expect(summary("filter", { filter_kind: "tagged", tagged: "hero" })).toBe("keep · #hero");
   });
 
-  it("renders field predicates with op + value", () => {
-    expect(summary("field", { field: { key: "rank", op: "overlap", value: 3 } })).toBe("Rank any of 3");
-    expect(summary("field", { field: { key: "status", op: "disjoint", value: ["done", "wip"] } })).toBe(
-      "Status none of done, wip",
+  it("renders a Filter's field predicate with op + value", () => {
+    expect(summary("filter", { filter_kind: "field", field: { key: "rank", op: "overlap", value: 3 } })).toBe("keep · Rank any of 3");
+    expect(summary("filter", { filter_kind: "field", field: { key: "status", op: "disjoint", value: ["done", "wip"] } })).toBe(
+      "keep · Status none of done, wip",
     );
-    expect(summary("field", { field: { key: "rank", op: "set" } })).toBe("Rank is set");
-    expect(summary("field", { field: { key: "rank", op: "unset" } })).toBe("Rank is empty");
+    expect(summary("filter", { filter_kind: "field", field: { key: "rank", op: "set" } })).toBe("keep · Rank is set");
+    expect(summary("filter", { filter_kind: "field", field: { key: "rank", op: "unset" } })).toBe("keep · Rank is empty");
   });
 
   it("shows the parameter label for a promoted value slot", () => {
     const cfg: ViewNodeData = {
+      filter_kind: "field",
       field: { key: "rank", op: "overlap", value: { var: "rank_n1" } },
       param: { name: "rank_n1", label: "Min rank", default: null },
     };
-    expect(summary("field", cfg)).toBe("Rank any of ⟨Min rank⟩");
+    expect(summary("filter", cfg)).toBe("keep · Rank any of ⟨Min rank⟩");
   });
 
   it("summarizes filter mode + inner predicate", () => {
@@ -68,11 +71,11 @@ describe("nodeSummary — compact node one-liners (#220)", () => {
   });
 
   it("formats boolean and projection operands", () => {
-    expect(summary("field", { field: { key: "rank", op: "overlap", value: true } })).toBe("Rank any of yes");
-    expect(summary("field", { field: { key: "rank", op: "overlap", value: false } })).toBe("Rank any of no");
+    expect(summary("filter", { filter_kind: "field", field: { key: "rank", op: "overlap", value: true } })).toBe("keep · Rank any of yes");
+    expect(summary("filter", { filter_kind: "field", field: { key: "rank", op: "overlap", value: false } })).toBe("keep · Rank any of no");
     expect(
-      summary("field", { field: { key: "ref", op: "overlap", value: { field_of: { of: {}, field: "x" } } } }),
-    ).toBe("Ref any of ⟨projection⟩");
+      summary("filter", { filter_kind: "field", field: { key: "ref", op: "overlap", value: { field_of: { of: {}, field: "x" } } } }),
+    ).toBe("keep · Ref any of ⟨projection⟩");
   });
 
   it("handles a descendants_of inner filter", () => {

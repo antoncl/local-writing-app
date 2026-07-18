@@ -4,7 +4,7 @@
 // (kind, cfg) + a few schema resolvers, so it unit-tests without the SvelteFlow
 // canvas (which can't be driven in the headless preview — banked gotcha).
 
-import type { GraphNodeKind, ViewNodeData } from "./viewGraph";
+import type { GraphNodeKind, PredicateKind, ViewNodeData } from "./viewGraph";
 import type { ViewFieldPredicate, ViewLeafValue, ViewSort } from "@/lib/types";
 
 export type SummaryResolvers = {
@@ -15,8 +15,10 @@ export type SummaryResolvers = {
 };
 
 // Empty-slot placeholders — a compact node shows what it still needs, never a
-// blank line, mirroring the expanded editor's "— pick … —" options.
-const PLACEHOLDER: Partial<Record<GraphNodeKind, string>> = {
+// blank line, mirroring the expanded editor's "— pick … —" options. Keyed by node
+// kind (nest/field_of) OR a Filter predicate slot (type/descendants_of/tagged/
+// field — `PredicateKind`, no longer standalone node kinds; #271/#284).
+const PLACEHOLDER: Partial<Record<GraphNodeKind | PredicateKind, string>> = {
   type: "— any type —",
   descendants_of: "— any type —",
   tagged: "— tag —",
@@ -101,14 +103,6 @@ function sortSummary(sort: ViewSort | null | undefined, r: SummaryResolvers): st
 
 export function nodeSummary(kind: GraphNodeKind, cfg: ViewNodeData, r: SummaryResolvers): string {
   switch (kind) {
-    case "type":
-      return leafText(cfg.type, cfg.param?.label, r.entryTypeName, PLACEHOLDER.type!);
-    case "descendants_of":
-      return leafText(cfg.descendants_of, cfg.param?.label, (s) => `${r.entryTypeName(s)} +sub`, PLACEHOLDER.descendants_of!);
-    case "tagged":
-      return leafText(cfg.tagged, cfg.param?.label, (s) => `#${s}`, PLACEHOLDER.tagged!);
-    case "field":
-      return fieldSummary(cfg, r);
     case "filter": {
       const mode = cfg.filter_mode === "drop" ? "drop" : "keep";
       return `${mode} · ${filterInner(cfg, r)}`;

@@ -70,8 +70,7 @@
   </svg>
 {:else}
   <span class="glyph sym" style={`font-size:${size * 0.62}px`} aria-hidden="true">
-    {#if kind === "type"}◆{:else if kind === "descendants_of"}⋔{:else if kind === "field"}=
-    {:else if kind === "hand_picked"}✓{:else if kind === "all"}◯{:else if kind === "filter"}▽
+    {#if kind === "hand_picked"}✓{:else if kind === "all"}◯{:else if kind === "filter"}▽
     {:else if kind === "field_of"}⇒{:else if kind === "self"}◉
     {:else if kind === "sorter"}⇅{:else if kind === "highlight"}●{:else if kind === "output"}▶{:else}•{/if}
   </span>

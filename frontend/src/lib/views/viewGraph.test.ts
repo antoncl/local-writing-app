@@ -10,11 +10,13 @@ import {
   graphToSpec,
   inferInputTypes,
   inputKinds,
+  isInjectorKind,
   tagAppliesToInput,
   outputPayload,
   reachesFieldOf,
   specToGraph,
   valueSlotAccepts,
+  type GraphNodeKind,
   FILTER_VALUE_HANDLE,
   NEST_CHILDREN_HANDLE,
   NEST_ORPHANS_HANDLE,
@@ -319,6 +321,19 @@ describe("filter serialization (first-class node + set-identity folds, ADR-0041 
     // f1 sits over the universe → folds to the bare `{type}` predicate, which is
     // then f2's concrete `of`; f2 stores first-class over it.
     expect(graphToExpr(graph)).toEqual({ filter: { of: { type: "lore:character" }, pred: { tagged: "hero" } } });
+  });
+});
+
+describe("injector = set-arity 0 (ADR-0041 §D)", () => {
+  it("classifies exactly the arity-0 sources as injectors — orphans + $self included", () => {
+    // The §D arity-0 set: predicate leaves + all + $self + an orphans ref (its id is
+    // a reference, not a wired port). Derived from inputArity, so this pins the table.
+    const injectors: GraphNodeKind[] = ["all", "type", "descendants_of", "tagged", "field", "hand_picked", "self", "orphans_ref"];
+    // Everything with a set-valued input port is NOT an injector — including an
+    // unwired combinator (it keeps its arity) and the pass-throughs.
+    const nonInjectors: GraphNodeKind[] = ["union", "intersect", "difference", "complement", "nest", "field_of", "filter", "sorter", "highlight", "output"];
+    expect(injectors.filter(isInjectorKind)).toEqual(injectors);
+    expect(nonInjectors.filter(isInjectorKind)).toEqual([]);
   });
 });
 

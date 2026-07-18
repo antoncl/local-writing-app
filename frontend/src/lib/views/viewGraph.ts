@@ -491,13 +491,21 @@ export function isEmptyValue(v: unknown): boolean {
   return v == null || v === "" || (Array.isArray(v) && v.length === 0);
 }
 
-// Injectors = sources (no input): the leaves + the universal `All`.
+// Injector ≡ a set-arity-0 operator (ADR-0041 §D): a source with no set-valued
+// input port — the predicate leaves + `all` + `$self` + an orphans ref (`orphans_of`
+// names its Nest by id, not a wired port). DERIVED from `inputArity` (the §D arity
+// table is the single source) so the two can't drift: "injector" is exactly
+// `inputArity(kind) === "none"`. This is the §D-precise membership — orphans
+// included, and an UNWIRED combinator excluded (it keeps its arity, it is not an
+// injector). Any code needing "the injectors" computes this, never a hand-list.
 export function isInjectorKind(kind: GraphNodeKind): boolean {
-  return kind === "all" || isLeafKind(kind);
+  return inputArity(kind) === "none";
 }
 
-// How many upstream inputs a node kind accepts. Injectors are sources (none);
-// the View (output) is n-ary across its handles.
+// The set-arity of a node kind (ADR-0041 §D) as the designer's edge model: how many
+// set-valued upstream input ports it accepts. `none` = an injector (arity 0); `one`
+// = complement/field_of/Filter/pass-throughs; the multi-port combinators name their
+// ports. The View (output) is n-ary across its handles. This is the §D arity table.
 export function inputArity(kind: GraphNodeKind): "none" | "one" | "many" | "keep_remove" | "parents_children" {
   switch (kind) {
     case "union":

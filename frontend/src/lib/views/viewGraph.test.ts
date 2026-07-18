@@ -68,7 +68,6 @@ describe("viewGraph serialization (round-trip)", () => {
       { tagged: "gotham" },
       { field: { key: "pov", op: "overlap", value: "honor" } },
       { hand_picked: ["a", "b"] },
-      { view_ref: "view-123" },
     ];
     for (const leaf of leaves) expect(roundTrip(leaf)).toEqual(leaf);
   });
@@ -93,7 +92,7 @@ describe("viewGraph serialization (round-trip)", () => {
       ({
         union: null, intersect: null, difference: null, complement: null,
         annotate: null, of: null, type: null, descendants_of: null,
-        tagged: null, field: null, hand_picked: null, view_ref: null, ...o,
+        tagged: null, field: null, hand_picked: null, ...o,
       }) as unknown as ViewExpr;
     const expr = dense({ union: [dense({ type: "assistant:assistant" }), dense({ tagged: "OpenAI" })] });
     const kinds = exprToGraph(expr).nodes.map((n) => n.kind).sort();
@@ -168,8 +167,8 @@ describe("injector: All (universal)", () => {
 // bare leaf (in a saved or duplicated view) into `All → Filter` on open, so the
 // designer never presents vocabulary the palette can't rebuild. The rewrite is
 // lossless — `intersect(universe, p) === p` — so graphToSpec re-serializes the
-// exact same bytes. `hand_picked` / `view_ref` are sources, not predicates, and
-// stay as themselves.
+// exact same bytes. `hand_picked` is a source, not a predicate, and stays as
+// itself.
 describe("canonicalize bare predicate leaves → All → Filter (ADR-0038 §B)", () => {
   const isFilterOverAll = (g: ViewGraph, pred: Partial<ViewGraphNode["data"]>) => {
     const nonOutput = g.nodes.filter((n) => n.kind !== "output");
@@ -200,15 +199,11 @@ describe("canonicalize bare predicate leaves → All → Filter (ADR-0038 §B)",
     expect(graphToSpec(g, { kind: "lore" }).expr).toEqual(expr);
   });
 
-  it("hand_picked / view_ref stay sources (not canonicalized)", () => {
+  it("hand_picked stays a source (not canonicalized)", () => {
     expect(
       specToGraph({ kind: "lore", expr: { hand_picked: ["a", "b"] } })
         .nodes.filter((n) => n.kind !== "output").map((n) => n.kind),
     ).toEqual(["hand_picked"]);
-    expect(
-      specToGraph({ kind: "lore", expr: { view_ref: "view-123" } })
-        .nodes.filter((n) => n.kind !== "output").map((n) => n.kind),
-    ).toEqual(["view_ref"]);
   });
 
   it("a bare-leaf predicate nested in a combinator canonicalizes in place", () => {

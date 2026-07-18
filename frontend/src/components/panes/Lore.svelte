@@ -66,7 +66,6 @@
     spec: viewSpec,
     universe: entries,
     schema,
-    resolveView: paneViews.resolveView,
     referenceIndex: $referenceIndexStore,
   };
 

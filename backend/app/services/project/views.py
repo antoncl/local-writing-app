@@ -7,8 +7,8 @@ body**: the spec lives in front matter (via `_write_node_entry_file`'s
 `extra=`). `ProjectService` composes this mixin;
 shared IO/index helpers resolve through the MRO (see `mutation_sets.py`).
 
-0.5.0 step 1 lands storage + CRUD + a `view_ref` cycle check at save. There is
-no evaluator yet — nothing consumes a stored spec's membership at runtime.
+0.5.0 step 1 lands storage + CRUD. There is no evaluator here — the frontend
+consumes a stored spec's membership at runtime.
 """
 
 from __future__ import annotations
@@ -78,7 +78,6 @@ class ViewsMixin:
     def create_view(self, request: CreateViewRequest) -> ViewNode:
         root = self._require_project()
         self._check_entry_type_kind(request.entry_type, "view")
-        self._check_view_ref_cycles(None, request.spec)
         view_id = self._new_id("view")
         (root / "views").mkdir(parents=True, exist_ok=True)
         self._write_view_file(
@@ -127,7 +126,6 @@ class ViewsMixin:
         if request.base_revision and request.base_revision != current_revision:
             raise ProjectServiceError("View changed on disk after it was opened.", 409)
         self._check_entry_type_kind(request.entry_type, "view")
-        self._check_view_ref_cycles(node_id, request.spec)
         # Preserve fold/ui state — it lives on an independent lifecycle (the
         # lock-free /ui endpoint), so a spec save must not wipe it (ADR-0036).
         self._write_view_file(
@@ -324,77 +322,3 @@ class ViewsMixin:
         except ValidationError:
             return None
 
-    @staticmethod
-    def _collect_view_refs(expr: ViewExpr | None) -> set[str]:
-        """Every `view_ref` id anywhere in an expr tree (recursively)."""
-        refs: set[str] = set()
-
-        def walk(node: ViewExpr | None) -> None:
-            if node is None:
-                return
-            if node.view_ref:
-                refs.add(node.view_ref)
-            for child in node.union or ():
-                walk(child)
-            for child in node.intersect or ():
-                walk(child)
-            if node.difference is not None:
-                walk(node.difference.keep)
-                walk(node.difference.remove)
-            if node.nest is not None:
-                walk(node.nest.parents)
-                walk(node.nest.children)
-            walk(node.complement)
-            if node.annotate is not None:
-                walk(node.of)
-
-        walk(expr)
-        return refs
-
-    @classmethod
-    def _spec_view_refs(cls, spec: ViewSpec | None) -> set[str]:
-        """Every view_ref reachable from a ViewSpec — the top-level `expr` AND
-        every named-handle group's `expr`. A ViewSpec is expr-XOR-groups, so a
-        grouped view (named handles) carries its refs only under `groups`;
-        walking `expr` alone would let a grouped view's ref cycles slip through."""
-        if spec is None:
-            return set()
-        refs = cls._collect_view_refs(spec.expr)
-        for group in spec.groups or ():
-            refs |= cls._collect_view_refs(group.expr)
-        return refs
-
-    def _check_view_ref_cycles(self, view_id: str | None, spec: ViewSpec) -> None:
-        """Reject a save whose view_ref graph would contain a cycle reachable
-        from the view being written. Views are nodes, so ref cycles are real and
-        would non-terminate any future evaluator (ADR-0021)."""
-        graph: dict[str, set[str]] = {}
-        for entry, _front_matter, existing in self._iter_view_entries():
-            graph[entry.id] = self._spec_view_refs(existing)
-
-        # A new view has no id yet — a placeholder node nothing else references.
-        start = view_id or "__new__"
-        graph[start] = self._spec_view_refs(spec)
-
-        on_path: list[str] = []
-        on_path_set: set[str] = set()
-        settled: set[str] = set()
-
-        def dfs(node: str) -> None:
-            if node in on_path_set:
-                cycle = [*on_path[on_path.index(node):], node]
-                raise ProjectServiceError(
-                    "View reference cycle detected: " + " → ".join(cycle) + ".",
-                    422,
-                )
-            if node in settled:
-                return
-            on_path.append(node)
-            on_path_set.add(node)
-            for nxt in graph.get(node, set()):
-                dfs(nxt)
-            on_path.pop()
-            on_path_set.discard(node)
-            settled.add(node)
-
-        dfs(start)

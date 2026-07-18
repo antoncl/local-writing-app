@@ -6,7 +6,6 @@ import type { ViewNodeData } from "./viewGraph";
 const R: SummaryResolvers = {
   fieldName: (key) => ({ rank: "Rank", status: "Status", ref: "Ref", references: "References" })[key] ?? key,
   entryTypeName: (fqn) => ({ "lore:character": "Character", "lore:place": "Place" })[fqn] ?? fqn,
-  savedViewTitle: (id) => ({ v1: "Heroes" })[id] ?? id,
 };
 
 const summary = (kind: Parameters<typeof nodeSummary>[0], cfg: ViewNodeData) => nodeSummary(kind, cfg, R);
@@ -16,7 +15,6 @@ describe("nodeSummary — compact node one-liners (#220)", () => {
     expect(summary("type", {})).toBe("— any type —");
     expect(summary("tagged", {})).toBe("— tag —");
     expect(summary("field", {})).toBe("— field —");
-    expect(summary("view_ref", {})).toBe("— saved view —");
     expect(summary("nest", {})).toBe("— link field —");
     expect(summary("field_of", {})).toBe("— follow field —");
   });
@@ -64,8 +62,7 @@ describe("nodeSummary — compact node one-liners (#220)", () => {
     expect(summary("hand_picked", { hand_picked: ["a", "b", "c"] })).toBe("3 nodes");
   });
 
-  it("resolves view_ref, nest link, and field_of projection", () => {
-    expect(summary("view_ref", { view_ref: "v1" })).toBe("Heroes");
+  it("resolves nest link and field_of projection", () => {
     expect(summary("nest", { match: { field: "ref", direction: "child_to_parent", by: "ref" } })).toBe("Ref");
     expect(summary("field_of", { project_field: "references" })).toBe("→ References");
   });

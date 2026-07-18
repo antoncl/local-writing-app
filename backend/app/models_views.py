@@ -155,7 +155,6 @@ _VIEW_EXPR_PRIMARY_SLOTS: tuple[str, ...] = (
     "tagged",
     "field",
     "hand_picked",
-    "view_ref",
     "var",
     "orphans_of",
 )
@@ -166,7 +165,7 @@ class ViewExpr(BaseModel):
     combinator (union / intersect / difference / complement), the `nest`
     relational operator (ADR-0028; produces denormalized parent/child rows, not
     just a set), an `annotate` pass-through (paired with `of`), or a leaf (type /
-    descendants_of / tagged / field / hand_picked / view_ref). Validated
+    descendants_of / tagged / field / hand_picked). Validated
     structurally — the backend has no evaluator (eval is frontend-side)."""
 
     # Combinators
@@ -195,7 +194,6 @@ class ViewExpr(BaseModel):
     tagged: str | dict[str, Any] | None = None  # a tag value, or {"var": name}
     field: FieldPredicate | None = None
     hand_picked: list[str] | None = None  # explicit node ids — the one static leaf
-    view_ref: str | None = None  # a saved view node id (cycle-checked at save)
     # A free variable / reserved source leaf (#184, ADR-0032): `{"var": "$self"}`
     # is the anchored node (surface-supplied via bindings); a user-declared name
     # is a promoted formal. Resolves from `EvalContext.bindings` at eval time; in
@@ -536,8 +534,8 @@ class ViewNodeSummary(BaseModel):
     # on the summary so a pane can group/offer views by the kind they target.
     view_kind: str = ""
     # The full spec, so a client that lists views already holds everything it
-    # needs to evaluate them (incl. resolving view_ref leaves) without a second
-    # per-view fetch — list_views already parses it (#95). None if malformed.
+    # needs to evaluate them without a second per-view fetch — list_views already
+    # parses it (#95). None if malformed.
     spec: ViewSpec | None = None
     # ADR-0036: fold/ui state ships with the list so a pane seeds collapse without
     # a per-view fetch (None ⇒ no persisted state yet).

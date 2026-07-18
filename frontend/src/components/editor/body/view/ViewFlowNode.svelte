@@ -76,7 +76,6 @@
     tagged: "Tagged",
     field: "Field",
     hand_picked: "Hand-picked",
-    view_ref: "Saved view",
   };
 
   function patch(next: Partial<ViewNodeData>) {
@@ -90,7 +89,6 @@
     nodeSummary(kind, cfg, {
       fieldName: (key) => ctx.fieldByKey(key)?.name ?? key,
       entryTypeName: (fqn) => ctx.entryTypes.find((t) => t.fqn === fqn)?.name ?? fqn,
-      savedViewTitle: (vid) => ctx.savedViews.find((v) => v.id === vid)?.title ?? vid,
     }),
   );
 
@@ -159,7 +157,7 @@
   // leaf — promotes to a named runtime formal: the authored literal becomes an
   // overridable default and the slot value becomes `{var: name}`. `name` keys on
   // the node id so a view can carry two formals over the same slot. `collectParams`
-  // lowers these into ViewSpec.params. Structural selectors (nest/sort/view_ref)
+  // lowers these into ViewSpec.params. Structural selectors (nest/sort)
   // carry no promotable slot (Amendment 1) so `slotKind` is null and no promote
   // affordance shows.
   let slotKind = $derived(promotableSlot({ id, kind, position: { x: 0, y: 0 }, data: cfg } as ViewGraphNode));
@@ -910,13 +908,6 @@
         on:change={(e) => onPickerChange(e.detail.value)}
       />
     </div>
-  {:else if kind === "view_ref"}
-    <select class="vfield" value={cfg.view_ref ?? ""} onchange={(e) => patch({ view_ref: e.currentTarget.value })}>
-      <option value="">— saved view —</option>
-      {#each ctx.savedViews as v (v.id)}
-        <option value={v.id}>{v.title}</option>
-      {/each}
-    </select>
   {:else if kind === "nest"}
     <!-- The join rule: which field links parent↔child, which way it points, and
          whether it matches by reference (id) or by title/tag (ADR-0028 §B). -->

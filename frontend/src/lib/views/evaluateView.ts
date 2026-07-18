@@ -198,11 +198,8 @@ export type EvalContext = {
   // Needed only by the `descendants_of` leaf: resolves an entry_type FQN to
   // itself + every type inheriting from it via `parent:` chains.
   schema?: MetadataSchema | null;
-  // Needed only by the `view_ref` leaf: resolves a saved-view node id to its
-  // stored ViewSpec. Referenced views are kind-anchored to the same kind.
-  resolveView?: (viewId: string) => ViewSpec | null;
   // #184: the bindings environment (name → id-set | value-set), injected exactly
-  // as `schema`/`resolveView` are. `$self` and each promoted formal read from
+  // as `schema` is. `$self` and each promoted formal read from
   // here. An unbound formal ⇒ its predicate is inactive (input passes through);
   // an unresolved `$self` ⇒ the empty set (ADR-0031 §B).
   bindings?: EvalBindings;
@@ -291,10 +288,8 @@ type RunState<T extends EvalNode> = {
   annotations: Map<string, ViewAnnotation>;
   descendantsCache: Map<string, Set<string>>;
   schema?: MetadataSchema | null;
-  resolveView?: (viewId: string) => ViewSpec | null;
   bindings?: EvalBindings; // #184: name → id-set|value-set (free variables + $self)
   referenceIndex?: ReadonlyMap<string, ReadonlySet<string>>; // #184: targetId → referrers
-  viewStack: string[]; // view_ref cycle guard
   diag: ViewDiagnostics; // nest accumulator (cycle/orphan/fan-out counts)
   nestRan: boolean; // whether any `nest` evaluated (gates `diagnostics` on result)
   // ADR-0028 Amendment 1 (#260): the single-sink-DAG support for a routed orphan
@@ -338,10 +333,8 @@ export function evaluateView<T extends EvalNode>(
     annotations: new Map(),
     descendantsCache: new Map(),
     schema: ctx.schema,
-    resolveView: ctx.resolveView,
     bindings: ctx.bindings,
     referenceIndex: ctx.referenceIndex,
-    viewStack: [],
     diag: { cyclicLinksSkipped: 0, orphansDropped: 0, fanoutTruncated: false },
     nestRan: false,
     nestsById: new Map(),
@@ -357,12 +350,10 @@ export function evaluateView<T extends EvalNode>(
   for (const g of groups ?? []) collectNests(g.expr, state.nestsById, state.orphansReferenced);
 
   // Both paths yield denormalized `(node, path)` rows. `evalSource` carries
-  // nesting: a handle whose source is a bare grouped `view_ref` contributes that
-  // view's group structure (multi-segment paths), a `union` concatenates its
-  // operands' rows preserving each row's path, a `nest` denormalizes a join, and
-  // an intersect/difference whose structure-carrying operand is a row-producer
-  // filters those rows leaf-wise while carrying paths (ADR-0037 §5). A top-level
-  // bare grouped view_ref (no handles) inherits the referenced view's groups.
+  // nesting: a `union` concatenates its operands' rows preserving each row's
+  // path, a `nest` denormalizes a join, and an intersect/difference whose
+  // structure-carrying operand is a row-producer filters those rows leaf-wise
+  // while carrying paths (ADR-0037 §5).
   //
   // ADR-0037 §2 + Amendment 1: `group_by` levels append one path segment above
   // the leaf, beneath every pipeline-produced segment, in declared order — ν by
@@ -416,10 +407,6 @@ function rowKey<T extends EvalNode>(node: T, path: PathSegment[]): string {
 //  - `union` concatenates its operands' rows, preserving each row's path and
 //    deduping per `(node, path)` — so combining two grouped sub-flows yields
 //    their rows back-to-back (ADR-0027 §E; matches the denormalized set model).
-//  - a *bare* `view_ref` to a grouped view contributes that view's group
-//    structure as nested path segments (sub-flow → handle). A ref buried inside
-//    the set algebra (intersect/difference/…) has no grouping to preserve and
-//    flattens through `evalExpr` as before.
 //  - everything else resolves to flat rows (empty path) via `evalSegment`.
 //
 // `neutralUniverse` (#198) is threaded to the terminal `evalSegment` so an
@@ -458,8 +445,8 @@ function evalSource<T extends EvalNode>(
     // LEAF-membership test (path carried) instead of flattening the whole expr
     // through `evalExpr`. `normalize` then revives ancestors from surviving paths
     // and self-prunes empty branches (the Draft `nest(contained_in) → filter`
-    // case). When the first operand is NOT a row-producer (a plain leaf, or a
-    // buried grouped `view_ref` with no structure to preserve), we fall through
+    // case). When the first operand is NOT a row-producer (a plain leaf with no
+    // structure to preserve), we fall through
     // to the flat `evalSegment` path — behavior unchanged. A row-producer that is
     // NOT first degrades to its membership (the intersect/difference set), the §5
     // "first carries structure; others degrade to membership" rule.
@@ -475,20 +462,14 @@ function evalSource<T extends EvalNode>(
       const remove = evalExpr(state, expr.difference.remove, false);
       return sigmaRows(baseRows, remove, "remove");
     }
-    if (isBareViewRef(expr)) {
-      const nested = evalViewRefRows(state, expr.view_ref as string, sort);
-      if (nested) return nested; // grouped/tree ref → nested rows; null → flat
-    }
   }
   return evalSegment(state, expr, sort, neutralUniverse).map((node) => ({ node, path: [] as PathSegment[] }));
 }
 
 // A row-producing expr (ADR-0037 §5): a `nest` (relational join) or a `union`
 // (path-preserving concat) carries `(node, path)` structure worth preserving
-// when it sits as the structure-carrying operand of an intersect/difference. A
-// buried grouped `view_ref` is deliberately excluded — it flattens to membership
-// as before (the denormalized structure of a *referenced* view is preserved only
-// when it is wired directly, not buried in the set algebra).
+// when it sits as the structure-carrying operand of an intersect/difference.
+// Everything else flattens to membership.
 function isRowProducer(expr: ViewExpr | null | undefined): boolean {
   return !!(expr && (expr.nest || expr.union));
 }
@@ -719,7 +700,7 @@ function buildLevel<T extends EvalNode>(state: RunState<T>, rows: ViewRow<T>[]):
 // to its own identity — it is not a sign propagated from the root:
 //   intersect → universe (`A ∩ 1 = A`)      union → ∅ (`A ∪ ∅ = A`)
 //   difference.keep → universe               difference.remove → ∅ (`A − ∅ = A`)
-//   complement → ∅ (`U − ∅ = U`)             annotate/view_ref → inherit
+//   complement → ∅ (`U − ∅ = U`)             annotate → inherit
 // A global keep/subtract sign (an earlier attempt) got the direct drop/complement
 // case right but mis-handled an inactive predicate nested inside a combinator that
 // itself sits in a subtractive position — e.g. `A − (X ∩ inactive)` collapsed to
@@ -847,73 +828,22 @@ function evalLeaf<T extends EvalNode>(state: RunState<T>, expr: ViewExpr, neutra
     const picked = new Set(expr.hand_picked);
     return idsWhere(state, (n) => picked.has(n.id));
   }
-  if (expr.view_ref != null) {
-    return evalViewRef(state, expr.view_ref, neutralUniverse);
-  }
   // Empty expr node: no primary slot set → the EMPTY set (ADR-0036 §1; the
   // grammar requires a primary slot, and an unspecified leaf now selects
   // nothing — an absent specification never smuggles in the maximal one).
   return new Set<string>();
 }
 
-function evalViewRef<T extends EvalNode>(state: RunState<T>, viewId: string, neutralUniverse = true): Set<string> {
-  if (state.viewStack.includes(viewId)) return new Set(); // cycle: contribute nothing
-  const ref = state.resolveView?.(viewId);
-  if (!ref) return new Set(); // unresolved ref contributes nothing
-  state.viewStack.push(viewId);
-  try {
-    // A referenced view contributes its flat membership. The ref inherits the
-    // enclosing position's `neutralUniverse` (#198) so an unbound filter behind a
-    // `view_ref` still drops out cleanly in a subtractive position instead of
-    // re-emptying it. A grouped view (named handles, `groups` set / `expr` null)
-    // carries no top-level `expr`, so union every handle's expr (v1 depth <= 1); a
-    // handle with no expr contributes nothing — an unspecified segment is empty
-    // (ADR-0036 §1), mirroring evalSegment.
-    if (ref.groups && ref.groups.length > 0) {
-      return unionAll(
-        ref.groups.map((g) => (g.expr ? evalExpr(state, g.expr, neutralUniverse) : new Set<string>())),
-      );
-    }
-    if (ref.expr) return evalExpr(state, ref.expr, neutralUniverse);
-    return new Set<string>(); // no primary slot -> empty (ADR-0036 §1)
-  } finally {
-    state.viewStack.pop();
-  }
-}
-
-// A `view_ref` with no other primary slot set — a sub-flow wired *directly* to a
-// source (its group structure can be preserved). A ref buried in the set algebra
-// fails this and flattens through `evalExpr` (`!= null`: dense-null dumps).
-function isBareViewRef(expr: ViewExpr): boolean {
-  return (
-    expr.view_ref != null &&
-    expr.union == null &&
-    expr.intersect == null &&
-    expr.difference == null &&
-    expr.complement == null &&
-    expr.annotate == null &&
-    expr.type == null &&
-    expr.descendants_of == null &&
-    expr.tagged == null &&
-    expr.field == null &&
-    expr.hand_picked == null &&
-    expr.field_of == null &&
-    expr.nest == null &&
-    expr.var == null
-  );
-}
-
 // A `descendants_of` leaf with no other primary slot set — the whole-kind roster
-// expr (`kindUniverseExpr`), unfiltered. Like `isBareViewRef`, this must tolerate
-// the backend's dense-null dump (every unset slot present as explicit `null`), so
-// it tests slot *values* with `== null` rather than counting keys — a round-tripped
-// spec has ~15 keys, all null but `descendants_of`.
+// expr (`kindUniverseExpr`), unfiltered. This must tolerate the backend's
+// dense-null dump (every unset slot present as explicit `null`), so it tests slot
+// *values* with `== null` rather than counting keys — a round-tripped spec has
+// ~14 keys, all null but `descendants_of`.
 export function isBareDescendantsOf(expr: ViewExpr): boolean {
   return (
     // A STRING descendants_of only — a promoted `{var}` leaf (#222) is a
     // parameterized source, never the plain kind-universe roster.
     typeof expr.descendants_of === "string" &&
-    expr.view_ref == null &&
     expr.union == null &&
     expr.intersect == null &&
     expr.difference == null &&
@@ -927,28 +857,6 @@ export function isBareDescendantsOf(expr: ViewExpr): boolean {
     expr.nest == null &&
     expr.var == null
   );
-}
-
-// Nest a grouped/handle sub-flow: evaluate the referenced view's handles into
-// rows *with their paths* so the caller can splice them under its own segment
-// (sub-flow → handle, #101). Returns null when the ref has no group structure to
-// preserve (flat, tree, or unresolved) — the caller then flattens to membership.
-// An empty array (cycle, or a grouped ref with no members) short-circuits to "no
-// rows", contributing nothing.
-function evalViewRefRows<T extends EvalNode>(
-  state: RunState<T>,
-  viewId: string,
-  sort: ViewSort | null | undefined,
-): ViewRow<T>[] | null {
-  if (state.viewStack.includes(viewId)) return []; // cycle: contribute nothing
-  const ref = state.resolveView?.(viewId);
-  if (!ref || !ref.groups || ref.groups.length === 0) return null; // flat/unresolved → flatten
-  state.viewStack.push(viewId);
-  try {
-    return evalGroups(state, ref.groups, ref.sort ?? sort);
-  } finally {
-    state.viewStack.pop();
-  }
 }
 
 // --- nest (relational denormalization, ADR-0028) -------------------------

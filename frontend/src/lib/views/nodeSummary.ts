@@ -12,8 +12,6 @@ export type SummaryResolvers = {
   fieldName: (key: string) => string;
   // Display name for an entry_type FQN (falls back to the FQN).
   entryTypeName: (fqn: string) => string;
-  // Title for a saved-view node id (falls back to the id).
-  savedViewTitle: (id: string) => string;
 };
 
 // Empty-slot placeholders — a compact node shows what it still needs, never a
@@ -23,7 +21,6 @@ const PLACEHOLDER: Partial<Record<GraphNodeKind, string>> = {
   descendants_of: "— any type —",
   tagged: "— tag —",
   field: "— field —",
-  view_ref: "— saved view —",
   nest: "— link field —",
   field_of: "— follow field —",
 };
@@ -122,8 +119,6 @@ export function nodeSummary(kind: GraphNodeKind, cfg: ViewNodeData, r: SummaryRe
       const n = cfg.hand_picked?.length ?? 0;
       return n === 0 ? "none picked" : `${n} node${n === 1 ? "" : "s"}`;
     }
-    case "view_ref":
-      return cfg.view_ref ? r.savedViewTitle(cfg.view_ref) : PLACEHOLDER.view_ref!;
     case "nest":
       return cfg.match?.field ? r.fieldName(cfg.match.field) : PLACEHOLDER.nest!;
     case "field_of":

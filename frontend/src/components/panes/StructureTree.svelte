@@ -126,7 +126,6 @@
     spec: viewSpec,
     universe: structureToEvalNodes(structure),
     schema,
-    resolveView: paneViews.resolveView,
     referenceIndex,
   });
 

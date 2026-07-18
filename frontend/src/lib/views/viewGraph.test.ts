@@ -1359,15 +1359,29 @@ describe("field-picker type inference (ADR-0031 §F)", () => {
   });
 
   it("a union of two kinds yields a cross-kind set", () => {
-    // A foreign kind is reachable only through a ref field_of (§F remap); the union
-    // merges the scene source with the field_of's lore projection.
+    // A foreign kind is reachable only through a ref field_of (§F remap); narrow it
+    // back to a concrete family with a keep-Filter so the union merges two concrete
+    // per-kind fqn sets (not just concrete ∪ any-kind).
     const a = typedSrc("type", "scene:scene");
-    const b = refSrc("pov");
+    const pick = node("hand_picked", { hand_picked: ["x"] });
+    const fo = node("field_of", { project_field: "pov" }, 100);
+    const loreFilter = node("filter", { filter_kind: "descendants_of", filter_mode: "keep", descendants_of: "lore:character" }, 150);
     const u = node("union", {}, 200);
     const sink = node("filter", { filter_kind: "field" }, 300);
-    const nodes = [out(), ...a.nodes, ...b.nodes, u, sink];
-    const edges = [...a.edges, ...b.edges, edge(a.id, u.id), edge(b.id, u.id), edge(u.id, sink.id), edge(sink.id, OUTPUT_NODE_ID)];
-    expect(infer(nodes, edges, sink.id)).toEqual({ scene: ["scene:scene"], lore: null });
+    const nodes = [out(), ...a.nodes, pick, fo, loreFilter, u, sink];
+    const edges = [
+      ...a.edges,
+      edge(pick.id, fo.id),
+      edge(fo.id, loreFilter.id),
+      edge(loreFilter.id, u.id),
+      edge(a.id, u.id),
+      edge(u.id, sink.id),
+      edge(sink.id, OUTPUT_NODE_ID),
+    ];
+    expect(infer(nodes, edges, sink.id)).toEqual({
+      scene: ["scene:scene"],
+      lore: ["lore:character", "lore:protagonist"],
+    });
   });
 
   it("a base-type-scoped tag reaches a concrete-subtype input; a leaf tag does not cross types", () => {

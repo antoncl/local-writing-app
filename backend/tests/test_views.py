@@ -1,7 +1,7 @@
 """Saved-view Node kind (0.5.0, #35/#78). A frontmatter-only kind carrying a
 ViewSpec (anchor kind + set-algebra expr + sort) under `views/`. Covers CRUD,
-body-less storage, the view_ref cycle check, ViewSpec grammar validation, and
-the NodePickerConfig sources <-> legacy-membership reducer.
+body-less storage, ViewSpec grammar validation, and the NodePickerConfig
+sources <-> legacy-membership reducer.
 """
 
 from __future__ import annotations
@@ -147,43 +147,6 @@ class ViewCrudTests(unittest.TestCase):
         self.assertEqual(res.status_code, 200, res.text)
         self.assertEqual(res.json()["entries"], [])
         self.assertEqual(self.client.get(f"/api/views/{created['id']}").status_code, 404)
-
-    def test_view_ref_cycle_rejected_at_save(self) -> None:
-        b = self._create("B", {"kind": "lore", "expr": {"type": "lore:character"}})
-        a = self._create("A", {"kind": "lore", "expr": {"view_ref": b["id"]}})
-        got_b = self.client.get(f"/api/views/{b['id']}").json()
-        # Edit B to reference A → A -> B -> A is a cycle.
-        res = self.client.put(
-            f"/api/views/{b['id']}",
-            json={
-                "title": "B",
-                "base_revision": got_b["revision"],
-                "spec": {"kind": "lore", "expr": {"view_ref": a["id"]}},
-            },
-        )
-        self.assertEqual(res.status_code, 422, res.text)
-        self.assertIn("cycle", res.text.lower())
-
-    def test_view_ref_cycle_via_groups_rejected_at_save(self) -> None:
-        # A named-handle view carries its refs under `groups`, not `expr`. The
-        # cycle guard must walk groups too, else A -> B -> A slips through when
-        # the ref lives inside a group handle.
-        b = self._create("B", {"kind": "lore", "expr": {"type": "lore:character"}})
-        a = self._create(
-            "A", {"kind": "lore", "groups": [{"name": "g", "expr": {"view_ref": b["id"]}}]}
-        )
-        got_b = self.client.get(f"/api/views/{b['id']}").json()
-        # Edit B to reference A via a group → A -> B -> A is a cycle.
-        res = self.client.put(
-            f"/api/views/{b['id']}",
-            json={
-                "title": "B",
-                "base_revision": got_b["revision"],
-                "spec": {"kind": "lore", "groups": [{"name": "g", "expr": {"view_ref": a["id"]}}]},
-            },
-        )
-        self.assertEqual(res.status_code, 422, res.text)
-        self.assertIn("cycle", res.text.lower())
 
     def test_invalid_expr_rejected(self) -> None:
         # Two primary slots set → structural validation rejects it.
@@ -412,35 +375,6 @@ class NestApiTests(ViewCrudTests):
             got["spec"]["expr"]["nest"]["match"]["direction"], "child_to_parent"
         )
         self.assertEqual(got["spec"], created["spec"])
-
-    def test_view_ref_inside_nest_is_cycle_checked(self) -> None:
-        # A view_ref buried in a nest input must be walked by the cycle guard,
-        # else A -> B -> A slips through when the ref lives inside nest.children.
-        b = self._create("B", {"kind": "lore", "expr": {"type": "lore:location"}})
-        a = self._create(
-            "A",
-            {
-                "kind": "lore",
-                "expr": {
-                    "nest": {
-                        "parents": {"field": {"key": "parent", "op": "unset"}},
-                        "children": {"view_ref": b["id"]},
-                        "match": {"field": "parent", "direction": "child_to_parent"},
-                    }
-                },
-            },
-        )
-        got_b = self.client.get(f"/api/views/{b['id']}").json()
-        res = self.client.put(
-            f"/api/views/{b['id']}",
-            json={
-                "title": "B",
-                "base_revision": got_b["revision"],
-                "spec": {"kind": "lore", "expr": {"view_ref": a["id"]}},
-            },
-        )
-        self.assertEqual(res.status_code, 422, res.text)
-        self.assertIn("cycle", res.text.lower())
 
 
 class NodePickerConfigSourcesTests(unittest.TestCase):

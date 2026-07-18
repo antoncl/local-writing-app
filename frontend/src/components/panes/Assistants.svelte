@@ -56,7 +56,6 @@
     spec: viewSpec,
     universe: entries,
     schema,
-    resolveView: paneViews.resolveView,
     referenceIndex: $referenceIndexStore,
   };
   // Drag-reorder is manual order, meaningful only on the default SHAPE (ADR-0037

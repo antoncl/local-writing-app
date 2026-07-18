@@ -227,7 +227,7 @@ describe("isBareDescendantsOf (dense-null tolerant whole-roster detection)", () 
     expect(isBareDescendantsOf({ descendants_of: "lore:base" })).toBe(true);
   });
   it("accepts the backend's dense-null dump (every other slot present as null)", () => {
-    // Regression: a round-tripped spec has ~15 keys, all null but descendants_of.
+    // Regression: a round-tripped spec has ~14 keys, all null but descendants_of.
     // A key-count check (`Object.keys(...).length === 1`) misfired here, silently
     // disabling drag-reorder on saved/duplicated whole-roster views.
     // Slots typed `ViewExpr[] | undefined` arrive as `null` at runtime, so the
@@ -236,7 +236,6 @@ describe("isBareDescendantsOf (dense-null tolerant whole-roster detection)", () 
     expect(
       isBareDescendantsOf({
         descendants_of: "lore:base",
-        view_ref: null,
         union: null,
         intersect: null,
         difference: null,
@@ -339,7 +338,6 @@ describe("backend-dense exprs (explicit null slots)", () => {
     tagged: null,
     field: null,
     hand_picked: null,
-    view_ref: null,
     var: null,
   } as const;
   // Cast through `unknown`: the ViewExpr/ViewSort types model unset slots as
@@ -817,159 +815,10 @@ describe("sort", () => {
   });
 });
 
-describe("view_ref", () => {
-  const saved: Record<string, ViewSpec> = {
-    "cast-view": { kind: "lore", expr: { type: "lore:character" } },
-  };
-  const ctx = { schema: SCHEMA, resolveView: (id: string) => saved[id] ?? null };
-
-  it("embeds a saved view's membership", () => {
-    expect(evaluateView({ kind: "lore", expr: { view_ref: "cast-view" } }, NODES, ctx).nodes.map((n) => n.id)).toEqual([
-      "a", "b",
-    ]);
-  });
-
-  it("embeds a GROUPED saved view's flat membership (union of handles, not the universe)", () => {
-    // Regression: a view_ref to a grouped view (expr null, groups set — the shape
-    // graphToSpec emits for any 2+ handle view) used to fall through to the whole
-    // kind roster because evalViewRef read only ref.expr.
-    const withGroups: Record<string, ViewSpec> = {
-      "cast-and-gods": {
-        kind: "lore",
-        groups: [
-          { name: "Cast", expr: { type: "lore:character" } }, // a, b
-          { name: "Gods", expr: { descendants_of: "lore:deity" } }, // c, e
-        ],
-      },
-    };
-    const res = evaluateView({ kind: "lore", expr: { view_ref: "cast-and-gods" } }, NODES, {
-      schema: SCHEMA,
-      resolveView: (id) => withGroups[id] ?? null,
-    });
-    expect(res.nodes.map((n) => n.id)).toEqual(["a", "b", "c", "e"]); // NOT d (location)
-  });
-
-  it("a cycle contributes nothing rather than looping", () => {
-    const cyclic: Record<string, ViewSpec> = { self: { kind: "lore", expr: { view_ref: "self" } } };
-    const res = evaluateView({ kind: "lore", expr: { view_ref: "self" } }, NODES, {
-      schema: SCHEMA,
-      resolveView: (id) => cyclic[id] ?? null,
-    });
-    expect(res.nodes).toEqual([]);
-  });
-});
-
-// --- sub-flow nesting: a bare view_ref to a GROUPED view contributes its group
-// structure instead of flattening (#101). This is the "sub-flow → handle" path.
-describe("sub-flow nesting (#101)", () => {
-  // castAndGods: two handles; heroes/gods: one handle each (still grouped specs).
-  const saved: Record<string, ViewSpec> = {
-    "cast-and-gods": {
-      kind: "lore",
-      groups: [
-        { name: "Cast", expr: { type: "lore:character" } }, // a, b
-        { name: "Gods", expr: { descendants_of: "lore:deity" } }, // c, e
-      ],
-    },
-    heroes: { kind: "lore", groups: [{ name: "Heroes", expr: { type: "lore:character" } }] }, // a, b
-    gods: { kind: "lore", groups: [{ name: "Gods", expr: { descendants_of: "lore:deity" } }] }, // c, e
-    overlap: {
-      kind: "lore",
-      groups: [
-        { name: "Gotham", expr: { tagged: "gotham" } }, // b, c
-        { name: "Gods", expr: { descendants_of: "lore:deity" } }, // c, e
-      ],
-    },
-    flat: { kind: "lore", expr: { type: "lore:character" } }, // no group structure
-  };
-  const ctx = { schema: SCHEMA, resolveView: (id: string) => saved[id] ?? null };
-  // Compact a group tree to [label, [child ids]] rows for readable assertions.
-  // Tree-uniform (#181): a leaf is a childless group → its bare nodeId; a
-  // container → [label, its children compacted].
-  const rows = (groups: ViewGroup[] | null): unknown =>
-    groups?.map((g) => (g.children.length ? [g.label, rows(g.children)] : g.nodeId));
-
-  it("a top-level bare grouped view_ref inherits the sub-view's groups (no wrapper)", () => {
-    const res = evaluateView({ kind: "lore", expr: { view_ref: "cast-and-gods" } }, NODES, ctx);
-    expect(rows(res.groups)).toEqual([
-      ["Cast", ["a", "b"]],
-      ["Gods", ["c", "e"]],
-    ]);
-    expect(res.nodes.map((n) => n.id)).toEqual(["a", "b", "c", "e"]); // flat membership preserved
-  });
-
-  it("a handle fed by a grouped view_ref nests it under the handle name", () => {
-    const spec: ViewSpec = {
-      kind: "lore",
-      groups: [
-        { name: "By type", expr: { view_ref: "cast-and-gods" } },
-        { name: "Places", expr: { type: "lore:location" } }, // d
-      ],
-    };
-    const res = evaluateView(spec, NODES, ctx);
-    expect(rows(res.groups)).toEqual([
-      ["By type", [
-        ["Cast", ["a", "b"]],
-        ["Gods", ["c", "e"]],
-      ]],
-      ["Places", ["d"]],
-    ]);
-  });
-
-  it("a lone handle over a grouped sub-flow drops the wrapper (top level not considered)", () => {
-    const spec: ViewSpec = { kind: "lore", groups: [{ name: "By type", expr: { view_ref: "cast-and-gods" } }] };
-    const res = evaluateView(spec, NODES, ctx);
-    expect(rows(res.groups)).toEqual([
-      ["Cast", ["a", "b"]],
-      ["Gods", ["c", "e"]],
-    ]);
-  });
-
-  it("union of two grouped view_refs concatenates their rows, preserving paths", () => {
-    // Anton's semantic: in the denormalized model a union is a concatenation of
-    // (node, path) rows — each operand keeps its own group structure.
-    const res = evaluateView(
-      { kind: "lore", expr: { union: [{ view_ref: "heroes" }, { view_ref: "gods" }] } },
-      NODES,
-      ctx,
-    );
-    expect(rows(res.groups)).toEqual([
-      ["Heroes", ["a", "b"]],
-      ["Gods", ["c", "e"]],
-    ]);
-  });
-
-  it("a node in two sub-groups appears under both (dedupe is per (node, path))", () => {
-    const res = evaluateView({ kind: "lore", expr: { view_ref: "overlap" } }, NODES, ctx);
-    expect(rows(res.groups)).toEqual([
-      ["Gotham", ["b", "c"]],
-      ["Gods", ["c", "e"]], // c appears under both branches
-    ]);
-    expect(res.nodes.map((n) => n.id)).toEqual(["b", "c", "e"]); // once in flat membership
-  });
-
-  it("a view_ref buried in the set algebra flattens (no group structure to preserve)", () => {
-    const res = evaluateView(
-      { kind: "lore", expr: { intersect: [{ view_ref: "cast-and-gods" }, { tagged: "gotham" }] } },
-      NODES,
-      ctx,
-    );
-    expect(res.groups).toBeNull();
-    // cast-and-gods flattens to {a,b,c,e}; ∩ gotham {b,c} → b, c (c is a deity).
-    expect(res.nodes.map((n) => n.id)).toEqual(["b", "c"]);
-  });
-
-  it("a bare view_ref to a FLAT view stays flat", () => {
-    const res = evaluateView({ kind: "lore", expr: { view_ref: "flat" } }, NODES, ctx);
-    expect(res.groups).toBeNull();
-    expect(res.nodes.map((n) => n.id)).toEqual(["a", "b"]);
-  });
-});
-
 // --- nest: relational denormalization from lore links (ADR-0028, #107) -----
 
-// Compact a group tree the same way the sub-flow suite does (#181 tree-uniform):
-// a container is `[label, children]`; a leaf is a childless group → its nodeId.
+// Compact a group tree (#181 tree-uniform): a container is `[label, children]`;
+// a leaf is a childless group → its nodeId.
 const nrows = (groups: ViewGroup[] | null): unknown =>
   groups?.map((g) => (g.children.length ? [g.label, nrows(g.children)] : g.nodeId));
 

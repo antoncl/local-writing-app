@@ -197,13 +197,6 @@
   let addCounter = 0;
   let hydrating = false;
 
-  // Saved views of the same kind (for the view_ref leaf + preview resolution).
-  let savedViews = $state<{ id: string; title: string }[]>([]);
-  // $state so the `preview` derived re-resolves view_ref leaves once the specs
-  // finish loading async (mirrors paneViews.svelte.ts); a plain `let` leaves the
-  // reassignment untracked and the preview shows referenced views as empty.
-  let viewSpecs = $state(new Map<string, ViewSpec>());
-
   // ---- hydrate from the opened view node ----
   $effect(() => {
     const node = scene as ViewNode | null;
@@ -230,7 +223,6 @@
     // a fresh `addCounter = 0` would re-emit `a0` and collide — Svelte Flow keys
     // by id, so the "new" node lands on an existing one instead of appending.
     seedAddCounter(graph.nodes);
-    void loadSavedViews(kind, id);
     // Let the derived spec settle before re-enabling persistence.
     queueMicrotask(() => (hydrating = false));
   });
@@ -319,7 +311,7 @@
   // Filter (all its edges stay valid, incl. a `field` value wire on the same
   // handle); a fresh `All` source is added to its left. A kind-root
   // `descendants_of` collapses to a bare `All` (it IS the universe, no predicate).
-  // Sources (hand_picked / view_ref / self) and already-canonical graphs are
+  // Sources (hand_picked / self) and already-canonical graphs are
   // untouched; the repair persists on the next debounced save. The predicate-leaf
   // kind list is shared with specToGraph via PREDICATE_LEAF_KINDS (single source).
   function canonicalizeLeafNodes(
@@ -375,21 +367,6 @@
     };
   }
 
-  async function loadSavedViews(forKind: string, selfId: string | null): Promise<void> {
-    try {
-      const list = await api.listViews();
-      const same = list.entries.filter((v) => v.view_kind === forKind && v.id !== selfId);
-      savedViews = same.map((v) => ({ id: v.id, title: v.title }));
-      // The list summary carries each view's spec (#95), so the preview resolves
-      // view_ref leaves synchronously — no per-view fetch.
-      const map = new Map<string, ViewSpec>();
-      for (const v of same) if (v.spec) map.set(v.id, v.spec);
-      viewSpecs = map;
-    } catch {
-      savedViews = [];
-    }
-  }
-
   // ---- graph → spec ----
   function toGraph(): ViewGraph {
     return {
@@ -440,7 +417,6 @@
   let preview = $derived(
     evaluateView(spec, universe, {
       schema,
-      resolveView: (viewId: string) => viewSpecs.get(viewId) ?? null,
       referenceIndex,
       bindings: previewBindings,
     }),
@@ -624,7 +600,6 @@
       valueWired: (nodeId: string) => connectedHandleKeys.has(`${nodeId}:${FILTER_VALUE_HANDLE}`),
       handleConnected: (nodeId: string, handleId: string) => connectedHandleKeys.has(`${nodeId}:${handleId}`),
       knownTagsFor,
-      savedViews,
       loreEntries,
       promptEntries,
       assistantEntries,
@@ -683,7 +658,6 @@
       items: [
         { kind: "all", label: "All" },
         { kind: "hand_picked", label: "Hand-picked" },
-        { kind: "view_ref", label: "Saved view" },
         // `This entry` ($self) seeds a projection from the pane's anchor.
         { kind: "self", label: "This entry" },
       ],
@@ -890,11 +864,11 @@
       revision = saved.revision;
       lastSaved = snapshot;
       onBodyChange?.();
-      // Refresh the shared saved-view roster so panes consuming this view (or
-      // referencing it via `view_ref`) re-evaluate. Without this, `paneViews.specs`
-      // holds the pre-edit spec and consumers stay stale until something else
-      // reloads (e.g. opening the ViewSwitcher). Autosave fires before close, so
-      // this also covers the "window updates when the editor closes" case.
+      // Refresh the shared saved-view roster so panes consuming this view
+      // re-evaluate. Without this, `paneViews.specs` holds the pre-edit spec and
+      // consumers stay stale until something else reloads (e.g. opening the
+      // ViewSwitcher). Autosave fires before close, so this also covers the
+      // "window updates when the editor closes" case.
       void paneViews.reload();
     } catch (e) {
       // Surface via console for step-3 dev; a toast lands with the pane switcher.
@@ -927,7 +901,6 @@
     if (lastKind && lastKind !== k) {
       flowNodes = flowNodes.filter((n) => n.data.kind === "output");
       flowEdges = [];
-      void loadSavedViews(k, loadedViewId);
     }
     lastKind = k;
   });

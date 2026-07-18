@@ -8,7 +8,6 @@
   import ViewNodeList, { type RowCtx } from "@/components/widgets/ViewNodeList.svelte";
   import { entryTypeChoicesByKind } from "@/lib/utils/treeHelpers";
   import { defaultView } from "@/lib/views/evaluateView";
-  import { paneViews } from "@/lib/stores/paneViews.svelte";
   import { metadataSchemaStore } from "@/lib/stores/schema";
   import { referenceIndexStore } from "@/lib/stores/references";
   import { focusedDocumentStore } from "@/lib/stores/editorFocus";
@@ -54,7 +53,6 @@
     spec: viewSpec,
     universe: entries,
     schema,
-    resolveView: paneViews.resolveView,
     referenceIndex: $referenceIndexStore,
   };
 </script>

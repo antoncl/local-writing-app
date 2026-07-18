@@ -12,7 +12,6 @@
     spec: ViewSpec;
     universe: readonly T[];
     schema?: MetadataSchema | null;
-    resolveView?: (viewId: string) => ViewSpec | null;
     referenceIndex?: ReadonlyMap<string, ReadonlySet<string>>;
     // The anchored surface's node id → the `$self` binding (ADR-0032 §A). Omit /
     // null in a roster pane with no anchor: `$self` then resolves to the empty
@@ -241,7 +240,6 @@
     view && safeSpec
       ? evaluateView(safeSpec, view.universe as T[], {
           schema: view.schema,
-          resolveView: view.resolveView,
           bindings,
           referenceIndex: view.referenceIndex,
         })

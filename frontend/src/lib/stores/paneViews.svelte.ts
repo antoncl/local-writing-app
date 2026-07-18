@@ -2,8 +2,8 @@
 // Assistants each expose a switcher over the implicit default view + the saved
 // `view` nodes anchored to that pane's kind. This controller owns:
 //   - the saved-view roster per kind (summaries), loaded from the backend;
-//   - the full ViewSpec per view id, prefetched so `view_ref` leaves resolve
-//     synchronously during evaluation;
+//   - the full ViewSpec per view id, prefetched so the selected view evaluates
+//     synchronously with no per-view fetch;
 //   - the *selected* view per kind, persisted in UI state (localStorage) — the
 //     views are project data, the selection is not (ADR-0022).
 //
@@ -46,9 +46,6 @@ class PaneViewsController {
 
   #loadedPath: string | null = null;
 
-  // Resolver for `view_ref` leaves. Stable identity; reads the reactive map.
-  resolveView = (viewId: string): ViewSpec | null => this.specs.get(viewId) ?? null;
-
   // Load (or switch to) a project's saved views + restore its persisted
   // selection. Idempotent per path; call again to force a refresh.
   async loadForProject(path: string): Promise<void> {
@@ -71,9 +68,8 @@ class PaneViewsController {
       return; // Leave the current roster in place on a transient failure.
     }
     // System default views (ADR-0036 §5) are first-class roster members: the
-    // switcher renders them read-only (Duplicate, not Edit) and their spec must
-    // resolve for `view_ref` leaves, so they stay in both the roster and the
-    // spec map. `selected===null` still means the pane's default.
+    // switcher renders them read-only (Duplicate, not Edit), so they stay in both
+    // the roster and the spec map. `selected===null` still means the pane's default.
     const byKind: Record<string, ViewNodeSummary[]> = {};
     for (const v of entries) (byKind[v.view_kind] ??= []).push(v);
     for (const list of Object.values(byKind)) {
@@ -82,7 +78,7 @@ class PaneViewsController {
     this.views = byKind;
 
     // The list summary already carries each view's spec (#95), so evaluation
-    // (incl. resolving view_ref leaves) is synchronous with no per-view fetch.
+    // is synchronous with no per-view fetch.
     const map = new Map<string, ViewSpec>();
     for (const v of entries) if (v.spec) map.set(v.id, v.spec);
     this.specs = map;

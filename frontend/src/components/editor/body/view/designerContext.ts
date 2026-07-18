@@ -16,7 +16,6 @@ import type {
 
 export type EntryTypeOption = { fqn: string; name: string };
 export type FieldOption = { key: string; name: string; def: MetadataFieldDefinition };
-export type SavedViewOption = { id: string; title: string };
 // The authoring warning ADR-0031 §F asks for: a picker node whose inferred INPUT
 // set spans MORE than one kind offers a cross-kind field/tag roster (a degraded
 // intersection, not a precise single-kind roster). `kinds` = the spanned kinds;
@@ -57,7 +56,6 @@ export type DesignerContext = {
   // inferred INPUT type-set (kind + entry_type, ADR-0031 §F), re-emitted unscoped —
   // feeds the FieldValueEditor → TagPicker "+" for `tags` field values (#243/#215).
   knownTagsFor: (nodeId: string) => ScopedTag[];
-  savedViews: SavedViewOption[];
   // data sources for the hand_picked NodePicker + FieldValueEditor pickers
   loreEntries: LoreEntrySummary[];
   promptEntries: PromptEntrySummary[];

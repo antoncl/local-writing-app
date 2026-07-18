@@ -116,7 +116,6 @@ express**. v1 leaves:
 | **tag** | tagged `gotham` | live |
 | **field predicate** | `pov = honor`, `status ≠ draft`, `locations includes kitchen` | live |
 | **hand-picked** | an explicit node list, chosen via NodePicker | **static** |
-| **view-ref** | embed a saved view as a sub-expression | as referenced |
 
 Notes:
 
@@ -130,9 +129,6 @@ Notes:
 - **Hand-picked is the one static leaf** — a snapshot enumeration ("my problem scenes"),
   not a query. The designer shows the live/static distinction; mixing them in one view
   is fine and useful.
-- **view-ref** is where views-as-nodes pays off: "Gotham cast" defined once, reused in
-  the Lore pane, in an entity_ref field's picker constraint, and as a prompt's
-  context_pick source. Cycle detection at save time (reject, name the cycle).
 - Entry_type references serialize the **FQN** form — which is why **#77 must land
   first** (§8).
 
@@ -614,7 +610,7 @@ node-set or a value-set, and the evaluator dispatches on the bound value's shape
 ### 14.2 Evaluation
 
 `evaluateView(spec, nodes, ctx)` — `ctx.bindings: Record<string, IdSet | ValueSet>` (name → actual),
-injected exactly as `resolveView`/`schema` are (ADR-0025). `ctx` also threads the **reference index +
+injected exactly as `schema` is (ADR-0025). `ctx` also threads the **reference index +
 id→summary map** (§14.4), the same way. Resolution: `$self` and each promoted
 formal read from `bindings`; an **unbound formal with no default** ⇒ its predicate is inactive
 (no constraint); an **unresolved `$self`** ⇒ empty set. The runtime stays field-structural
@@ -625,7 +621,7 @@ formal) is not a fixed value — it is the **identity element of its immediately
 so it drops out cleanly wherever it sits. Concretely the evaluator resets a per-position flag for each
 combinator to *its own* identity: `∩` → the **universe** (`A ∩ inactive = A`), `∪` → the **empty set**
 (`A ∪ inactive = A`), `difference.keep` → universe / `difference.remove` → ∅ (`A − inactive = A`),
-`complement` → ∅ (`U − inactive = U`); `annotate`/`view_ref` inherit the enclosing position. A bare
+`complement` → ∅ (`U − inactive = U`); `annotate` inherits the enclosing position. A bare
 filter at the membership root defaults to the universe (unset ⇒ show all). This makes
 "unset = show everything" hold uniformly across **keep, drop, complement, and union** — it is a
 **structural** decision (identity of the immediate combinator), **not** a per-node boolean and **not**

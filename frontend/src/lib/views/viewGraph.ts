@@ -10,7 +10,7 @@
 // Palette ROLES (ADR-0027, doc §12) — the approachable surface over the shipped
 // set algebra:
 //  - Injector — a source: the leaves (type/descendants_of/tagged/field/
-//    hand_picked/view_ref) PLUS a universal `All` (the whole kind universe).
+//    hand_picked) PLUS a universal `All` (the whole kind universe).
 //  - Filter — a transform (set in → narrowed out) on a type/tag/field predicate.
 //    Pure sugar that lowers here: `keep p` → `intersect(input, p)`, `drop p` →
 //    `difference(input, p)`; off `All` those collapse to `p` / `complement(p)`.
@@ -31,10 +31,10 @@ import { kindUniverseExpr, REFERENCES_FIELD, SELF_VAR } from "@/lib/views/evalua
 import { walkViewExpr } from "@/lib/views/walkViewExpr";
 import { pickerMembership } from "@/lib/utils/pickerSources";
 
-export type LeafKind = "type" | "descendants_of" | "tagged" | "field" | "hand_picked" | "view_ref";
+export type LeafKind = "type" | "descendants_of" | "tagged" | "field" | "hand_picked";
 export type CombinatorKind = "union" | "intersect" | "difference" | "complement";
 // The predicate a Filter narrows on — a subset of the leaves (the set-drawing
-// ones; hand_picked / view_ref stay injector-only).
+// ones; hand_picked stays injector-only).
 export type PredicateKind = "type" | "descendants_of" | "tagged" | "field";
 // "output" is the single sink (the View); its named handles are the groups.
 // "nest" is the relational operator (ADR-0028): two input handles
@@ -275,7 +275,7 @@ function inferOutputTypes(
     }
     default:
       // Leaves. `type`/`descendants_of` carry a concrete entry_type constraint (a
-      // promoted `{var}` leaf → whole kind); all / tagged / hand_picked / view_ref
+      // promoted `{var}` leaf → whole kind); all / tagged / hand_picked
       // / self draw from the whole anchor kind.
       return (
         typeLeafSet(node.data.type, false, resolvers, anchorKind) ??
@@ -393,7 +393,6 @@ export type ViewNodeData = {
   tagged?: ViewLeafValue;
   field?: ViewFieldPredicate;
   hand_picked?: string[];
-  view_ref?: string;
   // filter
   filter_kind?: PredicateKind; // which predicate the filter narrows on
   filter_mode?: "keep" | "drop";
@@ -462,7 +461,7 @@ export type ViewGraph = { nodes: ViewGraphNode[]; edges: ViewGraphEdge[] };
 
 export const OUTPUT_NODE_ID = "output";
 
-const LEAF_KINDS: LeafKind[] = ["type", "descendants_of", "tagged", "field", "hand_picked", "view_ref"];
+const LEAF_KINDS: LeafKind[] = ["type", "descendants_of", "tagged", "field", "hand_picked"];
 export function isLeafKind(kind: GraphNodeKind): kind is LeafKind {
   return (LEAF_KINDS as string[]).includes(kind);
 }
@@ -471,7 +470,7 @@ export function isLeafKind(kind: GraphNodeKind): kind is LeafKind {
 // a Filter narrows on exactly these. Exported as the single source of truth so the
 // spec-walk canonicalizer (`specToGraph`) and the persisted-layout canonicalizer
 // (`canonicalizeLeafNodes` in ViewBodyView) can't drift on which kinds retire.
-// `hand_picked`/`view_ref` are sources, not predicates, so they stay off this list.
+// `hand_picked` is a source, not a predicate, so it stays off this list.
 export const PREDICATE_LEAF_KINDS: ReadonlySet<GraphNodeKind> = new Set<GraphNodeKind>([
   "type",
   "descendants_of",
@@ -907,15 +906,13 @@ function predicateExpr(node: ViewGraphNode, wiredValue?: ViewOperand): ViewExpr 
   return commonLeafExpr(filterLeafKind(node), node.data, wiredValue);
 }
 
-// A leaf/injector node → its ViewExpr leaf slot. hand_picked/view_ref are
-// leaf-only; the rest reuse the shared slot builder.
+// A leaf/injector node → its ViewExpr leaf slot. hand_picked is leaf-only; the
+// rest reuse the shared slot builder.
 function leafExpr(node: ViewGraphNode): ViewExpr | null {
   const d = node.data;
   switch (node.kind) {
     case "hand_picked":
       return d.hand_picked && d.hand_picked.length > 0 ? { hand_picked: d.hand_picked } : null;
-    case "view_ref":
-      return d.view_ref ? { view_ref: d.view_ref } : null;
     default:
       return commonLeafExpr(node.kind, d);
   }
@@ -989,7 +986,7 @@ function reachableFromOutput(graph: ViewGraph): Set<string> {
 // The single promotable slot a node exposes (ADR-0038 §C Amendment 1, #222), or
 // null. A leaf/filter narrows on one predicate — `filter_kind` for a Filter, the
 // kind for a bare leaf — and only the value-carrying leaves promote (type,
-// descendants_of, tagged, field). Structural selectors (nest join-field, view_ref,
+// descendants_of, tagged, field). Structural selectors (nest join-field,
 // sort field) are excluded by design.
 export type PromotableSlot = "type" | "descendants_of" | "tagged" | "field";
 export function promotableSlot(node: ViewGraphNode): PromotableSlot | null {
@@ -1447,7 +1444,6 @@ export function specToGraph(spec: ViewSpec | null | undefined, schema?: Metadata
     }
     // Sources (not predicates) stay as themselves — the palette still offers them.
     if (e.hand_picked != null) return addNode("hand_picked", depth, { hand_picked: e.hand_picked });
-    if (e.view_ref != null) return addNode("view_ref", depth, { view_ref: e.view_ref });
     return null;
   }
 

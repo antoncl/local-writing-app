@@ -377,7 +377,6 @@ export type ViewExpr = {
   tagged?: ViewLeafValue; // a tag value, or a promoted `{var}`
   field?: ViewFieldPredicate;
   hand_picked?: string[];
-  view_ref?: string; // a saved view node id
   var?: string; // a free variable / reserved `$self` leaf (#184), resolved from bindings
   orphans_of?: string; // the flat unplaced-child node-set of the Nest with this `id` (ADR-0028 Amdt 1)
   // The Nest DEFINITION carried inline on an `orphans_of` reference (#275), set
@@ -510,7 +509,7 @@ export type ViewNodeSummary = {
   entry_type: string;
   view_kind: string;
   // The full spec ships with the list summary (#95) so evaluating a listed view
-  // — including resolving its view_ref leaves — needs no second per-view fetch.
+  // needs no second per-view fetch.
   spec?: ViewSpec | null;
   // Fold state ships with the list (ADR-0036) so a pane seeds collapse without a
   // per-view fetch; `system` marks the read-only default view.

@@ -10,11 +10,12 @@ designer, and validators live in the app and consume it.
 | File | Role |
 |---|---|
 | `view-grammar.yaml` | **The IDL — edit this.** The single source of truth for the grammar. |
-| `emit_python.py` | Emitter → the Pydantic `ViewExpr` family + `children()`. |
-| `emit_ts.py` | Emitter → the TS `ViewExpr` types + `children()`. |
-| `generated_grammar.py` / `.ts` | **Machine-generated — do not edit.** Committed for inspection + the tsc proof. |
+| `emit_python.py` | Emitter → `../../backend/app/view_grammar_generated.py` (the Pydantic `ViewExpr` family + `children()`). |
+| `emit_ts.py` | Emitter → `generated_grammar.ts` (TS `ViewExpr` types + `children()`). Frontend not cut over yet. |
+| `../../backend/app/view_grammar_generated.py` | **Machine-generated — do not edit.** Imported by `models_views.py`; the backend's live grammar. |
+| `generated_grammar.ts` | **Machine-generated — do not edit.** Frontend spike output (in scripts pending the frontend cutover). |
 | `equiv.ts` + `tsconfig.check.json` | TS reproduce-today proof (structural type-equality vs `types.ts`). |
-| `../../backend/tests/test_grammar_spike.py` | Python reproduce-today proof + a freshness guard. |
+| `../../backend/tests/test_view_grammar.py` | Backend grammar guards: freshness + `children()`. |
 
 ## Regenerate
 
@@ -25,14 +26,14 @@ backend/.venv/Scripts/python.exe scripts/viewgrammar/emit_ts.py
 
 Regeneration is **not** wired into the build (generators complicate builds). The generated files
 are committed artifacts; a freshness guard in the Python test fails if the committed
-`generated_grammar.py` diverges from a fresh emit — so "edit the IDL, forget to regenerate" is
+`view_grammar_generated.py` diverges from a fresh emit — so "edit the IDL, forget to regenerate" is
 caught, without a build-time codegen step.
 
-## Verify (the reproduce-today guards)
+## Verify (the guards)
 
 ```
-backend/.venv/Scripts/python.exe -m pytest backend/tests/test_grammar_spike.py -q      # Python: parity + freshness
-node frontend/node_modules/typescript/bin/tsc -p scripts/viewgrammar/tsconfig.check.json  # TS: type-equality
+backend/.venv/Scripts/python.exe -m pytest backend/tests/test_view_grammar.py -q        # backend: freshness + children
+node frontend/node_modules/typescript/bin/tsc -p scripts/viewgrammar/tsconfig.check.json  # TS: type-equality vs types.ts
 ```
 
 The Python guard runs on `git push` via the existing pre-push `pytest`. The `tsc` guard is a manual
@@ -59,13 +60,18 @@ Don't subclass, extend, or hand-edit the generated modules. Change the grammar b
 
 ## Status (Phase 2, ADR-0041)
 
-The IDL currently models the grammar **descriptively** — it reproduces today's hand-written
-`app.models_views` (behaviourally) and `frontend/src/lib/types.ts` (by strict `tsc` structural
-equality), warts included (two incidental TS quirks are reproduced via `ts_*` hints and flagged
-inline as Phase-3 normalization candidates). The app still consumes the hand-written definitions.
+The IDL models the grammar **descriptively** (today's shape, warts included — two incidental TS
+quirks are reproduced via `ts_*` hints, flagged inline as normalization candidates).
 
-**Cutover** — the app importing the generated grammar and deleting the hand-written copies — lands
-with **Phase 3** (the prescriptive changes: Filter first-class, injector-role, kind-typed payloads),
-when the single source first pays off. Cutting over while the outputs are identical is risk without
-reward, and the generated-output **location** for app consumption (keeping imports clean without
-complicating the build) is a decision best made at that point, not now.
+**Backend cutover: done.** `models_views.py` deleted its hand-written grammar classes and imports
+them from `app.view_grammar_generated`; `services/project/views.py` and the tests import grammar
+from the same module. The reproduce-vs-hand-written proof retired (nothing left to compare); the
+freshness guard + `test_views.py` behaviour tests carry on. Full backend suite green.
+
+**Frontend cutover: pending.** `types.ts` still hand-writes the `ViewExpr` family; `equiv.ts`
+guards it against the generated TS by strict `tsc` equality. Cutover = emit into `frontend/src`,
+re-export from `types.ts`, route `walkViewExpr` through the generated `children()`.
+
+The **prescriptive** grammar changes (Filter first-class, injector-role, kind-typed payloads) ride
+on top of the single source once both runtimes are cut over — that is where `specToGraph` /
+`viewGraph.ts` reshape (informing #278).

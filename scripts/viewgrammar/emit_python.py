@@ -125,7 +125,13 @@ def _emit_children(records: dict[str, Any], node: dict[str, Any]) -> list[str]:
             rec = records[base]
             child_fields = [f for f, fs in rec["fields"].items() if fs.get("child")]
             operand_fields = [f for f, fs in rec["fields"].items() if fs.get("operand")]
-            if child_fields or operand_fields:
+            if len(child_fields) == 1 and not operand_fields:
+                cf = child_fields[0]
+                out += [
+                    f"    if e.{slot} is not None and e.{slot}.{cf} is not None:",
+                    f"        out.append(e.{slot}.{cf})",
+                ]
+            elif child_fields or operand_fields:
                 out.append(f"    if e.{slot} is not None:")
                 for cf in child_fields:
                     out += [
@@ -159,6 +165,7 @@ def main(out: Path | None = None) -> None:
         "",
         "from pydantic import BaseModel, Field, model_validator",
         "",
+        "",
     ]
     for name, rec in records.items():
         parts += [_emit_record(name, rec), "", ""]
@@ -182,7 +189,7 @@ def main(out: Path | None = None) -> None:
     parts.append("\n".join(_emit_children(records, node)))
     parts.append("")
 
-    dest = out or (HERE / "generated_grammar.py")
+    dest = out or (HERE.parents[1] / "backend" / "app" / "view_grammar_generated.py")
     dest.write_text("\n".join(parts), encoding="utf-8")
     print(f"wrote {dest} ({len(primaries)} primary slots)")
 

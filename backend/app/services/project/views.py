@@ -18,12 +18,8 @@ from typing import Any
 
 from app.models_views import (
     CreateViewRequest,
-    FieldPredicate,
-    NestMatch,
-    NestOp,
     SaveViewRequest,
     UpdateViewUiRequest,
-    ViewExpr,
     ViewGroupByLevel,
     ViewLayout,
     ViewNode,
@@ -33,6 +29,7 @@ from app.models_views import (
     ViewUiState,
 )
 from app.services.project.errors import ProjectServiceError
+from app.view_grammar_generated import FieldPredicate, NestMatch, NestOp, ViewExpr
 
 # Well-known id prefix for the per-kind system default view (ADR-0036 §5). The
 # frontend addresses `view_default_<kind>` when persisting fold state for a

@@ -8,6 +8,7 @@ from typing import Any, Literal
 
 from pydantic import BaseModel, Field, model_validator
 
+
 class FieldPredicate(BaseModel):
     key: str = Field(min_length=1)
     op: Literal["overlap", "disjoint", "set", "unset"]
@@ -127,9 +128,8 @@ def children(e: ViewExpr) -> list[Any]:
             out.append(e.nest.parents)
         if e.nest.children is not None:
             out.append(e.nest.children)
-    if e.field_of is not None:
-        if e.field_of.of is not None:
-            out.append(e.field_of.of)
+    if e.field_of is not None and e.field_of.of is not None:
+        out.append(e.field_of.of)
     if e.field is not None:
         _v = e.field.value
         if isinstance(_v, dict) and 'field_of' in _v:

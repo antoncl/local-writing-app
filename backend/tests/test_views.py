@@ -14,8 +14,9 @@ from fastapi.testclient import TestClient
 
 from app.main import app
 from app.models import NodePickerConfig
-from app.models_views import NestMatch, NestOp, ViewExpr, ViewSpec
+from app.models_views import ViewSpec
 from app.runtime import service as svc
+from app.view_grammar_generated import NestMatch, NestOp, ViewExpr
 
 
 class ViewCrudTests(unittest.TestCase):

@@ -1,4 +1,6 @@
-// GENERATED from view-grammar.yaml by emit_ts.py — do not edit.
+// MACHINE-GENERATED from view-grammar.yaml by emit_ts.py — DO NOT EDIT.
+// Edit the IDL and regenerate. See scripts/viewgrammar/README.md for the
+// stable surface vs. what churns on a grammar change.
 
 export type ViewLeafValue = string | { var: string };
 export type ViewOperand = unknown | { var: string } | { field_of: ViewFieldOf };

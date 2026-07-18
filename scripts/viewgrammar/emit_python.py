@@ -142,14 +142,17 @@ def _emit_children(records: dict[str, Any], node: dict[str, Any]) -> list[str]:
     return out
 
 
-def main() -> None:
+def main(out: Path | None = None) -> None:
     g = yaml.safe_load((HERE / "view-grammar.yaml").read_text(encoding="utf-8"))
     records: dict[str, Any] = g["records"]
     node = g["node"]
     primaries = [s for s, spec in node["slots"].items() if spec.get("primary")]
 
     parts = [
-        '"""GENERATED from view-grammar.yaml by emit_python.py — do not edit."""',
+        '"""MACHINE-GENERATED from view-grammar.yaml by emit_python.py — DO NOT EDIT.',
+        "",
+        "Edit the IDL and regenerate. See scripts/viewgrammar/README.md for the stable",
+        'surface (what you may depend on) vs. what churns on a grammar change."""',
         "from __future__ import annotations",
         "",
         "from typing import Any, Literal",
@@ -179,9 +182,12 @@ def main() -> None:
     parts.append("\n".join(_emit_children(records, node)))
     parts.append("")
 
-    (HERE / "generated_grammar.py").write_text("\n".join(parts), encoding="utf-8")
-    print(f"wrote {HERE / 'generated_grammar.py'} ({len(primaries)} primary slots)")
+    dest = out or (HERE / "generated_grammar.py")
+    dest.write_text("\n".join(parts), encoding="utf-8")
+    print(f"wrote {dest} ({len(primaries)} primary slots)")
 
 
 if __name__ == "__main__":
-    main()
+    import sys
+
+    main(Path(sys.argv[1]) if len(sys.argv) > 1 else None)

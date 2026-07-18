@@ -1,4 +1,7 @@
-"""GENERATED from view-grammar.yaml by emit_python.py — do not edit."""
+"""MACHINE-GENERATED from view-grammar.yaml by emit_python.py — DO NOT EDIT.
+
+Edit the IDL and regenerate. See scripts/viewgrammar/README.md for the stable
+surface (what you may depend on) vs. what churns on a grammar change."""
 from __future__ import annotations
 
 from typing import Any, Literal

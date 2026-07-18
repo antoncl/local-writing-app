@@ -18,6 +18,7 @@ from __future__ import annotations
 import importlib.util
 import subprocess
 import sys
+import tempfile
 from pathlib import Path
 
 import pytest
@@ -26,16 +27,17 @@ from pydantic import ValidationError
 from app import models_views as real
 
 _SPIKE = Path(__file__).resolve().parents[2] / "scripts" / "viewgrammar"
+_TMP_PY = Path(tempfile.mkdtemp()) / "generated_grammar.py"
 
 
 def _load_generated():
-    """Regenerate from the IDL, then import the emitted module fresh."""
+    """Regenerate to a temp path (never the committed file), then import it fresh."""
     subprocess.run(
-        [sys.executable, str(_SPIKE / "emit_python.py")], check=True, capture_output=True
+        [sys.executable, str(_SPIKE / "emit_python.py"), str(_TMP_PY)],
+        check=True,
+        capture_output=True,
     )
-    spec = importlib.util.spec_from_file_location(
-        "generated_grammar", _SPIKE / "generated_grammar.py"
-    )
+    spec = importlib.util.spec_from_file_location("generated_grammar", _TMP_PY)
     assert spec and spec.loader
     mod = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(mod)
@@ -43,6 +45,14 @@ def _load_generated():
 
 
 gen = _load_generated()
+
+
+def test_committed_generated_is_fresh() -> None:
+    """The committed generated_grammar.py must equal a fresh emit (regen + commit on IDL change)."""
+    committed = (_SPIKE / "generated_grammar.py").read_text(encoding="utf-8")
+    fresh = _TMP_PY.read_text(encoding="utf-8")
+    norm = lambda s: s.replace("\r\n", "\n")  # noqa: E731 — CRLF-agnostic compare
+    assert norm(committed) == norm(fresh), "generated_grammar.py is stale — run emit_python.py"
 
 _CLASSES = ["FieldPredicate", "FieldOfOp", "AnnotatePayload", "DifferenceOp", "NestMatch", "NestOp", "ViewExpr"]
 

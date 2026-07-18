@@ -103,13 +103,15 @@ def _emit_children(records: dict[str, Any], node: dict[str, Any]) -> str:
     return "\n".join(out)
 
 
-def main() -> None:
+def main(out: Path | None = None) -> None:
     g = yaml.safe_load((HERE / "view-grammar.yaml").read_text(encoding="utf-8"))
     records: dict[str, Any] = g["records"]
     node = g["node"]
 
     parts = [
-        "// GENERATED from view-grammar.yaml by emit_ts.py — do not edit.",
+        "// MACHINE-GENERATED from view-grammar.yaml by emit_ts.py — DO NOT EDIT.",
+        "// Edit the IDL and regenerate. See scripts/viewgrammar/README.md for the",
+        "// stable surface vs. what churns on a grammar change.",
         "",
         "export type ViewLeafValue = string | { var: string };",
         "export type ViewOperand = unknown | { var: string } | { field_of: ViewFieldOf };",
@@ -122,9 +124,12 @@ def main() -> None:
     parts += [_emit_type("ViewExpr", slot_fields, records), ""]
     parts += [_emit_children(records, node), ""]
 
-    (HERE / "generated_grammar.ts").write_text("\n".join(parts), encoding="utf-8")
-    print(f"wrote {HERE / 'generated_grammar.ts'}")
+    dest = out or (HERE / "generated_grammar.ts")
+    dest.write_text("\n".join(parts), encoding="utf-8")
+    print(f"wrote {dest}")
 
 
 if __name__ == "__main__":
-    main()
+    import sys
+
+    main(Path(sys.argv[1]) if len(sys.argv) > 1 else None)

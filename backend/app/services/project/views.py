@@ -18,12 +18,8 @@ from typing import Any
 
 from app.models_views import (
     CreateViewRequest,
-    FieldPredicate,
-    NestMatch,
-    NestOp,
     SaveViewRequest,
     UpdateViewUiRequest,
-    ViewExpr,
     ViewGroupByLevel,
     ViewLayout,
     ViewNode,
@@ -33,6 +29,13 @@ from app.models_views import (
     ViewUiState,
 )
 from app.services.project.errors import ProjectServiceError
+from app.view_grammar_generated import (
+    FieldPredicate,
+    FilterOp,
+    NestMatch,
+    NestOp,
+    ViewExpr,
+)
 
 # Well-known id prefix for the per-kind system default view (ADR-0036 §5). The
 # frontend addresses `view_default_<kind>` when persisting fold state for a
@@ -212,25 +215,33 @@ class ViewsMixin:
 
     @staticmethod
     def _default_view_spec(kind: str, root_type: str) -> ViewSpec:
-        """The per-kind system default spec (ADR-0037 §7). Lore groups by
+        """The per-kind system default spec (ADR-0037 §7). Lore + Prompts group by
         entry_type (alphabetical labels); Assistants by source layer (first-seen
         keeps the machine layer first); the structural kinds (scene/research)
         are a recursive containment Nest over the `parent` relation (roots =
-        parentless); every other kind stays the plain whole-kind roster."""
+        parentless); every other kind stays the plain whole-kind roster.
+
+        MUST stay in lockstep with the frontend `defaultView` (evaluateView.ts) — the
+        materialized default and the pane-synthesized one have to match. The golden
+        test in test_views.py::test_default_view_specs_match_frontend guards the drift."""
         roster = ViewExpr(descendants_of=root_type)
         if kind in ("scene", "research"):
             return ViewSpec(
                 kind=kind,
                 expr=ViewExpr(
                     nest=NestOp(
-                        parents=ViewExpr(field=FieldPredicate(key="parent", op="unset")),
+                        # Roots = the roster narrowed to parent-unset, as a first-class
+                        # Filter (ADR-0041 §C; #271 retired the bare-predicate-leaf form).
+                        parents=ViewExpr(
+                            filter=FilterOp(of=roster, pred=ViewExpr(field=FieldPredicate(key="parent", op="unset")))
+                        ),
                         children=roster,
                         match=NestMatch(field="parent", direction="child_to_parent", by="ref"),
                         recursive=True,
                     )
                 ),
             )
-        if kind == "lore":
+        if kind in ("lore", "prompt"):
             return ViewSpec(kind=kind, expr=roster, group_by=[ViewGroupByLevel(field="entry_type", order="label")])
         if kind == "assistant":
             return ViewSpec(kind=kind, expr=roster, group_by=[ViewGroupByLevel(field="source_layer")])

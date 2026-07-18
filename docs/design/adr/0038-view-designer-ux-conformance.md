@@ -131,6 +131,12 @@ requirement: the **shipped default-view specs are authored in the `All → Filte
 start, so a fresh duplicate matches the palette without leaning on the normalizer. (The normalizer is
 the safety net for pre-existing user views; the authored defaults are the primary fix.)
 
+> **Retired by #271 / ADR-0041 §C (2026-07).** This §B canonicalization is gone. Filter is now stored
+> genuinely first-class (`{filter}` always), so a predicate lives only inside a `{filter}.pred`, never
+> as a standalone bare leaf. `specToGraph` no longer normalizes bare leaves (and `canonicalizeLeafNodes`
+> is removed); the default views are authored directly in the `{filter}` idiom. The palette decision
+> above (leaf nodes not offered) stands — only the load-time normalization retired.
+
 ### C. Every config slot follows one model: literal | promoted formal | wired source
 
 The three fill modes the field value slot already has (ADR-0031/0032) become **the uniform slot

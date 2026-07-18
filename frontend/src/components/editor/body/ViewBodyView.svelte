@@ -58,7 +58,6 @@
     tagAppliesToInput,
     anchorSet,
     defaultFilterKind,
-    PREDICATE_LEAF_KINDS,
     FILTER_VALUE_HANDLE,
     OUTPUT_NODE_ID,
     type GraphNodeKind,
@@ -202,6 +201,12 @@
     const node = scene as ViewNode | null;
     const id = node?.id ?? null;
     if (!node || !("spec" in node)) return;
+    // Wait for the metadata schema before hydrating: `hydrateGraph`→`specToGraph`
+    // resolves the roster / kind root against it, so a null schema hydrates a
+    // roster-based view to an empty graph that WON'T re-hydrate (this effect is
+    // id-guarded below). Reading `schema` (a `$derived` of the store) re-runs this
+    // effect when it loads; the id-guard then still fires once per opened view.
+    if (schema == null) return;
     if (id === untrack(() => loadedViewId)) return;
     hydrating = true;
     loadedViewId = id;
@@ -265,12 +270,9 @@
         targetHandle: e.target_handle ?? undefined,
         type: e.source === e.target ? "selfloop" : undefined,
       }));
-      // A persisted layout bypasses specToGraph, so its bare predicate leaves must
-      // be canonicalized here too (ADR-0038 §B) — otherwise a designer-authored
-      // view reopens showing `type`/`tagged`/`field` nodes the palette can't
-      // rebuild. Done in place so the author's positions + wiring survive.
-      const { nodes, edges } = canonicalizeLeafNodes(rawNodes, rawEdges, node.spec?.kind ?? kind);
-      return { nodes, edges: edges.map((e) => ({ ...e, class: edgeClass(e.source, nodes) })) };
+      // A persisted layout is authored in the first-class idiom (#271 retired the
+      // bare-predicate-leaf → `All → Filter` canonicalization), so it hydrates as-is.
+      return { nodes: rawNodes, edges: rawEdges.map((e) => ({ ...e, class: edgeClass(e.source, rawNodes) })) };
     }
     const g = specToGraph(node.spec, schema);
     const nodes = g.nodes.map((n) => toFlowNode(n.id, n.kind, n.data, n.position));
@@ -304,46 +306,6 @@
     return { nodes: graph.nodes, edges };
   }
 
-  // Canonicalize bare predicate-leaf nodes (`type / descendants_of / tagged /
-  // field`) in a persisted layout into the `All → Filter` idiom on open (ADR-0038
-  // §B) — the same repair specToGraph does for the fallback path, applied in place
-  // so authored positions and wiring survive. Each leaf's id is reused for the
-  // Filter (all its edges stay valid, incl. a `field` value wire on the same
-  // handle); a fresh `All` source is added to its left. A kind-root
-  // `descendants_of` collapses to a bare `All` (it IS the universe, no predicate).
-  // Sources (hand_picked / self) and already-canonical graphs are
-  // untouched; the repair persists on the next debounced save. The predicate-leaf
-  // kind list is shared with specToGraph via PREDICATE_LEAF_KINDS (single source).
-  function canonicalizeLeafNodes(
-    nodes: Node<FlowData>[],
-    edges: Edge[],
-    viewKind: string,
-  ): { nodes: Node<FlowData>[]; edges: Edge[] } {
-    const universeRoot = kindRootEntryTypeId(schema, viewKind) ?? `${viewKind}:base`;
-    const outNodes: Node<FlowData>[] = [];
-    const outEdges = [...edges];
-    let seq = 0;
-    for (const n of nodes) {
-      const k = n.data.kind;
-      if (!PREDICATE_LEAF_KINDS.has(k)) {
-        outNodes.push(n);
-        continue;
-      }
-      // A kind-root descendants_of is the whole universe → a bare All.
-      if (k === "descendants_of" && n.data.cfg?.descendants_of === universeRoot) {
-        outNodes.push({ ...n, data: { kind: "all", cfg: {} } });
-        continue;
-      }
-      // Reuse the leaf's id + position as the Filter; its edges stay valid.
-      const filterCfg: ViewNodeData = { ...n.data.cfg, filter_kind: k as ViewNodeData["filter_kind"], filter_mode: "keep" };
-      outNodes.push({ ...n, data: { kind: "filter", cfg: filterCfg } });
-      // A fresh All to the leaf's left, wired into the Filter's set input.
-      const allId = `${n.id}__all${seq++}`;
-      outNodes.push(toFlowNode(allId, "all", {}, { x: n.position.x - 180, y: n.position.y }));
-      outEdges.push({ id: `${n.id}__e${seq++}`, source: allId, sourceHandle: "out", target: n.id, targetHandle: "in" });
-    }
-    return { nodes: outNodes, edges: outEdges };
-  }
 
   // Serialize the live canvas (positions + wiring) for persistence. Parallel to
   // toGraph()/graphToExpr, but lossless — keeps every node incl. unwired ones,

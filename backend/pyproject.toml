@@ -49,3 +49,9 @@ max-args = 8
 [tool.ruff.lint.mccabe]
 max-complexity = 10
 
+[tool.ruff.lint.per-file-ignores]
+# Machine-generated grammar (scripts/viewgrammar, #277/ADR-0041) is exempt from
+# the complexity limits: it is not hand-maintained and its branch count grows
+# with the grammar (each slot adds a children() branch). Edit the IDL, not this.
+"**/view_grammar_generated.py" = ["C901", "PLR0912", "PLR0915"]
+

@@ -1,0 +1,108 @@
+# view-grammar.yaml — the single source of truth for the ViewExpr language (#277, ADR-0041).
+#
+# Phase 3 (prescriptive taxonomy): `filter` is now a FIRST-CLASS derived operator (ADR-0041 §B/C).
+# Its meaning is the declared lowering `filter{of,pred,keep} ≝ intersect(of, pred)` /
+# `filter{of,pred,drop} ≝ difference(keep: of, remove: pred)`; the evaluator lowers on that rewrite
+# rather than carrying bespoke Filter code, and the serialized `filter` node keeps a Filter's
+# identity in the grammar (retiring the layout-only reconstruction of Filter-over-a-real-set).
+# The predicate leaves (type/descendants_of/tagged/field) are retained as the arity-0 injectors
+# that `pred` points at (§D). The primitive core still regenerates byte-identical to the
+# hand-written model; only the first-class `filter` slot changes the stored shape (pre-1.0, no
+# migration — validated by semantic equivalence, ADR-0041 §G).
+#
+# `child: true`  = this field carries a sub-ViewExpr the generated `children()` traversal must
+#                  reach. Cross-checked against the type graph by the emitter.
+# `operand: true`= an `Any` slot that may EMBED a `{field_of: {of: ViewExpr}}` (the buried edge
+#                  walkViewExpr special-cases); type stays `Any`, but children() reaches it.
+
+grammar: view-expr
+
+# Reusable sub-records referenced by ViewExpr slots.
+records:
+  FieldPredicate:
+    fields:
+      key:   { type: str, min_len: 1 }
+      op:    { type: enum, values: [overlap, disjoint, set, unset] }
+      value: { type: any, default: "null", operand: true }
+
+  FieldOfOp:
+    fields:
+      of:    { type: ViewExpr, child: true }
+      field: { type: str, min_len: 1 }
+
+  AnnotatePayload:
+    fields:
+      label: { type: str, optional: true }
+      color: { type: str, optional: true }
+      rank:  { type: int, optional: true }
+
+  DifferenceOp:
+    fields:
+      keep:   { type: ViewExpr, child: true }
+      remove: { type: ViewExpr, child: true }
+
+  # Filter is a first-class derived operator (ADR-0041 §C): a set-arity-1 narrowing.
+  # `of` is the set it narrows (its one set-input port); `pred` is the injected
+  # predicate (a predicate-leaf sub-expr = `inject(P)`, NOT a set-input port — §D);
+  # `mode` picks keep (`∩`) or drop (`∖`). Meaning = the declared lowering above.
+  FilterOp:
+    fields:
+      of:   { type: ViewExpr, child: true }
+      pred: { type: ViewExpr, child: true }
+      mode: { type: enum, values: [keep, drop], default: keep }
+
+  NestMatch:
+    fields:
+      field:     { type: str, min_len: 1 }
+      direction: { type: enum, values: [child_to_parent, parent_to_children] }
+      # ts_required reproduces today's hand-written `by: "ref"|"title"` (left required
+      # despite the default) — an incidental quirk; a Phase-3 normalization candidate.
+      by:        { type: enum, values: [ref, title], default: ref, ts_required: true }
+
+  NestOp:
+    fields:
+      # ts_null reproduces today's hand-written `ViewExpr | null` on these two ports.
+      parents:   { type: ViewExpr, optional: true, child: true, ts_null: true }
+      children:  { type: ViewExpr, optional: true, child: true, ts_null: true }
+      match:     { type: NestMatch }
+      recursive: { type: bool, default: false }
+      id:        { type: str, optional: true }
+
+# The node: one primary slot is set, plus the two paired companions (of, orphans_nest).
+node:
+  name: ViewExpr
+  slots:
+    union:          { type: "list[ViewExpr]", primary: true, child: true, min_items: 1 }
+    intersect:      { type: "list[ViewExpr]", primary: true, child: true, min_items: 1 }
+    difference:     { type: DifferenceOp, primary: true }
+    complement:     { type: ViewExpr, primary: true, child: true }
+    nest:           { type: NestOp, primary: true }
+    annotate:       { type: AnnotatePayload, primary: true }
+    field_of:       { type: FieldOfOp, primary: true }
+    filter:         { type: FilterOp, primary: true }   # derived: of ∩/∖ inject(pred)
+    type:           { type: leaf_value, primary: true }   # str | {"var": name}
+    descendants_of: { type: leaf_value, primary: true }
+    tagged:         { type: leaf_value, primary: true }
+    field:          { type: FieldPredicate, primary: true }
+    hand_picked:    { type: "list[str]", primary: true }
+    var:            { type: str, primary: true }
+    orphans_of:     { type: str, primary: true }
+    # Paired companions (non-primary):
+    of:             { type: ViewExpr, optional: true, child: true }
+    orphans_nest:   { type: NestOp, optional: true }
+
+  constraints:
+    exactly_one_primary: true
+    pairing:            # companion -> its primary slot; required = companion is mandatory there
+      of:           { primary: annotate,   required: true }
+      orphans_nest: { primary: orphans_of, required: false }
+    payload_nonempty:   # slot -> at least one of these fields must be set
+      annotate: [label, color]
+    min_items: [union, intersect]
+    # #275 / ADR-0041 §F: when the inline companion Nest is present alongside its
+    # by-id reference, the Nest's `id` must equal the reference — else the inline
+    # definition and the `{orphans_of}` pointer name different Nests and the orphan
+    # node-set can't resolve. companion -> { id_field, ref }. Now one DECLARED rule
+    # rather than a fifth hand-rolled validator (retires the parked #275 check).
+    companion_id_match:
+      orphans_nest: { id_field: id, ref: orphans_of }

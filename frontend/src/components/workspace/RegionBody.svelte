@@ -20,5 +20,21 @@
 </script>
 
 {#if entry}
-  {@render entry.body(spec)}
+  {#if entry.view && $metadataSchemaStore == null}
+    <!-- A view pane resolves its roster (`descendants_of:<root>`) against the
+         metadata schema; until that store loads, the roster under-resolves and a
+         default's roots collapse to empty (the schema is always present once
+         loaded, so `null` means "not loaded yet"). Show a loading state; the
+         `$derived`/store reactivity swaps in the real view the moment it arrives. -->
+    <div class="pane-loading">Loading…</div>
+  {:else}
+    {@render entry.body(spec)}
+  {/if}
 {/if}
+
+<style>
+  .pane-loading {
+    padding: 1rem;
+    color: var(--text-3);
+  }
+</style>

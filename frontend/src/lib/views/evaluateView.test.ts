@@ -319,6 +319,35 @@ describe("leaves", () => {
   });
 });
 
+// Filter is a first-class derived operator (ADR-0041 §C): the evaluator carries
+// no bespoke Filter branch — it desugars to the declared lowering
+// (keep ≝ intersect(of, pred), drop ≝ difference(of, pred)) at entry. These lock
+// the semantic equivalence ADR-0041 §G requires: a stored `{filter}` yields the
+// same set as the hand-written intersect/difference it replaces — at the source
+// position (evalSource), buried in the set algebra (evalExpr), and over a
+// row-producer (the row-preserving σ branch of evalSource, ADR-0037 §5).
+describe("filter (first-class derived operator, ADR-0041 §C)", () => {
+  const OF: ViewExpr = { type: "lore:character" }; // a, b
+  const PRED: ViewExpr = { tagged: "gotham" }; // b, c
+  it("keep ≡ intersect(of, pred), at the source position", () => {
+    expect(ids({ kind: "lore", expr: { filter: { of: OF, pred: PRED } } })).toEqual(["b"]);
+    expect(ids({ kind: "lore", expr: { intersect: [OF, PRED] } })).toEqual(["b"]);
+  });
+  it("drop ≡ difference(keep: of, remove: pred)", () => {
+    expect(ids({ kind: "lore", expr: { filter: { of: OF, pred: PRED, mode: "drop" } } })).toEqual(["a"]);
+    expect(ids({ kind: "lore", expr: { difference: { keep: OF, remove: PRED } } })).toEqual(["a"]);
+  });
+  it("lowers when buried inside the set algebra (evalExpr path)", () => {
+    const buried: ViewExpr = { intersect: [{ descendants_of: "lore:base" }, { filter: { of: OF, pred: PRED } }] };
+    expect(ids({ kind: "lore", expr: buried })).toEqual(["b"]);
+  });
+  it("over a row-producer, rows survive the σ (evalSource row-preserving path)", () => {
+    // `of` is a union (a row-producer): the lowered intersect goes through the
+    // row-preserving branch, narrowing rows by the predicate rather than flattening.
+    expect(ids({ kind: "lore", expr: { filter: { of: { union: [OF] }, pred: PRED } } })).toEqual(["b"]);
+  });
+});
+
 // The backend (Pydantic) serializes a ViewExpr with *every* slot present —
 // unset ones as explicit `null`, not omitted. The evaluator must treat those
 // nulls as "unset" and not misfire on the first slot it checks. Regression for

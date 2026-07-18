@@ -44,6 +44,9 @@ describe("resolveParamControls (type derived from the referencing Filter slot)",
       fields: {
         allies: { name: "Allies", type: "entity_ref_list", options: [] },
         note: { name: "Note", type: "text", options: [] },
+        // a select with NO options: must stay `select`, not widen to multi_select
+        // (which FieldValueEditor can't render → falls through to a text box).
+        bare: { name: "Bare", type: "select", options: [] },
       },
     } as unknown as MetadataSchema;
     const spec: ViewSpec = {
@@ -52,14 +55,16 @@ describe("resolveParamControls (type derived from the referencing Filter slot)",
         intersect: [
           { field: { key: "allies", op: "overlap", value: { var: "Allies" } } },
           { field: { key: "note", op: "overlap", value: { var: "Note" } } },
+          { field: { key: "bare", op: "overlap", value: { var: "Bare" } } },
         ],
       },
       params: [
         { name: "Allies", label: "Allies", default: null },
         { name: "Note", label: "Note", default: null },
+        { name: "Bare", label: "Bare", default: null },
       ],
     };
-    expect(resolveParamControls(spec, schema).map((c) => c.field.type)).toEqual(["entity_ref_list", "text"]);
+    expect(resolveParamControls(spec, schema).map((c) => c.field.type)).toEqual(["entity_ref_list", "text", "select"]);
   });
 
   it("finds operands nested in groups + set algebra", () => {

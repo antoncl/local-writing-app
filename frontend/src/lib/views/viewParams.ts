@@ -42,7 +42,10 @@ function textFallback(name: string): MetadataFieldDefinition {
 // — one place for the "overlap operand is a set" rule.
 export function toMultiValued(field: MetadataFieldDefinition): MetadataFieldDefinition {
   if (field.type === "entity_ref") return { ...field, type: "entity_ref_list" };
-  if (field.type === "select") return { ...field, type: "multi_select" };
+  // `multi_select` needs options to render (FieldValueEditor gates its chips on
+  // `options.length > 0`); an options-less select would fall through to the raw
+  // text input, so leave it a single `select`.
+  if (field.type === "select" && field.options.length > 0) return { ...field, type: "multi_select" };
   return field;
 }
 

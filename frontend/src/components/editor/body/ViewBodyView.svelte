@@ -29,7 +29,7 @@
   import { referenceIndexStore } from "@/lib/stores/references";
   import { paneViews } from "@/lib/stores/paneViews.svelte";
   import { evaluateView, nestWarnings, type EvalNode, type EvalBindings } from "@/lib/views/evaluateView";
-  import { buildBindings } from "@/lib/views/viewParams";
+  import { buildBindings, resolveParamControls } from "@/lib/views/viewParams";
   import ParamStrip from "./view/ParamStrip.svelte";
   import {
     effectiveFieldLabel,
@@ -375,6 +375,12 @@
   // and applies the designer's own overrides (the editable ParamStrip in the rail).
   // Without this the preview ran every parameter UNBOUND, diverging from the pane.
   let paramOverrides = $state<Record<string, unknown>>({});
+  // Whether the editable preview strip will actually render a control. The rail's
+  // §D param LIST is graph-derived (`paramRows`); the strip is spec-derived
+  // (`resolveParamControls`). They usually match, but a legacy/mid-edit spec can
+  // carry a formal the strip can't resolve — so gate the list↔strip separator on
+  // the strip having content, else the hairline dangles with nothing beneath it.
+  const paramStripControls = $derived(resolveParamControls(spec, schema));
   const previewBindings = $derived.by((): EvalBindings => buildBindings(spec.params, paramOverrides));
   let preview = $derived(
     evaluateView(spec, universe, {
@@ -960,8 +966,11 @@
             {/each}
           </ul>
           <!-- Separate the defined-parameter list (authoring) from the editable
-               preview strip below it, so the two don't read as one run of rows. -->
-          <hr class="params-sep" />
+               preview strip below it, so the two don't read as one run of rows.
+               Only when the strip has a control to show (else it would dangle). -->
+          {#if paramStripControls.length > 0}
+            <hr class="params-sep" />
+          {/if}
           <!-- Editable controls (ADR-0032 §D): vary a value and the preview
                re-evaluates live, so the designer verifies the logic exactly as the
                pane will render it — the SAME `ParamStrip` the pane's ViewNodeList

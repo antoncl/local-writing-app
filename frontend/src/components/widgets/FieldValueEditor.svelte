@@ -12,7 +12,6 @@
   import TagPicker from "@/components/widgets/TagPicker.svelte";
   import SwatchPicker from "@/components/widgets/SwatchPicker.svelte";
   import type {
-    DocumentKind,
     LoreEntrySummary,
     MetadataFieldDefinition,
     MetadataValue,
@@ -38,7 +37,10 @@
     implicitContextMatcher?: import("@/lib/editor-core/implicitContextMatcher").CompiledMatcher | null;
     excludeId?: string | null;
     knownTags?: ScopedTag[];
-    documentKind?: DocumentKind;
+    // A kind string used only as the TagPicker's scope (which takes a plain
+    // `string` and tolerates unknown kinds); not narrowed to DocumentKind so
+    // callers can pass a ViewSpec.kind without an unchecked cast.
+    documentKind?: string;
     entryType?: string;
     onNavigate?: (payload: { id: string; kind: string }) => void;
   }

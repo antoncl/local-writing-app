@@ -10,7 +10,7 @@
   import { promptEntriesStore } from "@/lib/stores/prompts";
   import { structureStore, researchStructureStore } from "@/lib/stores/structure";
   import { knownTagsStore } from "@/lib/stores/tags";
-  import type { DocumentKind, MetadataSchema, MetadataValue, ViewSpec } from "@/lib/types";
+  import type { MetadataSchema, MetadataValue, ViewSpec } from "@/lib/types";
 
   let {
     spec,
@@ -53,7 +53,7 @@
             structure={$structureStore}
             researchStructure={$researchStructureStore}
             knownTags={$knownTagsStore}
-            documentKind={spec.kind as DocumentKind}
+            documentKind={spec.kind}
           />
           {#if control.name in overrides}
             <button class="param-clear" title="Reset to default" aria-label={`Reset ${control.label} to default`} onclick={() => clearParam(control.name)}>↺</button>

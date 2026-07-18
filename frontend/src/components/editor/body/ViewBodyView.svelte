@@ -201,6 +201,12 @@
     const node = scene as ViewNode | null;
     const id = node?.id ?? null;
     if (!node || !("spec" in node)) return;
+    // Wait for the metadata schema before hydrating: `hydrateGraph`→`specToGraph`
+    // resolves the roster / kind root against it, so a null schema hydrates a
+    // roster-based view to an empty graph that WON'T re-hydrate (this effect is
+    // id-guarded below). Reading `schema` (a `$derived` of the store) re-runs this
+    // effect when it loads; the id-guard then still fires once per opened view.
+    if (schema == null) return;
     if (id === untrack(() => loadedViewId)) return;
     hydrating = true;
     loadedViewId = id;

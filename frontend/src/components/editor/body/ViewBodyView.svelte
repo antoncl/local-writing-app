@@ -959,6 +959,9 @@
               </li>
             {/each}
           </ul>
+          <!-- Separate the defined-parameter list (authoring) from the editable
+               preview strip below it, so the two don't read as one run of rows. -->
+          <hr class="params-sep" />
           <!-- Editable controls (ADR-0032 §D): vary a value and the preview
                re-evaluates live, so the designer verifies the logic exactly as the
                pane will render it — the SAME `ParamStrip` the pane's ViewNodeList
@@ -1287,6 +1290,13 @@
     display: flex;
     flex-direction: column;
     gap: 4px;
+  }
+  /* Hairline between the defined-parameter list and the editable preview strip. */
+  .params-sep {
+    height: 1px;
+    border: none;
+    margin: 8px 6px 4px;
+    background: var(--divider);
   }
   .param-row {
     display: grid;

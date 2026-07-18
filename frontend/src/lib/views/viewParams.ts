@@ -30,6 +30,22 @@ function textFallback(name: string): MetadataFieldDefinition {
   return { name, type: "text", options: [] };
 }
 
+// A promoted param always fills an overlap/disjoint predicate's `value` operand
+// (the only value-bearing ops — `set`/`unset` carry none), which is compared as a
+// SET. So the strip control must be MULTI-valued regardless of the field's own
+// cardinality: a single `pov` (entity_ref) filters `pov ∈ {picked}`, a single
+// `status` (select) filters `status ∈ {picked}` (the "this OR that" query). The
+// binding is already a `string[]` and the evaluator set-coerces (viewParams
+// `buildBindings`); this only widens the editor. Field types that are already
+// multi (entity_ref_list / multi_select / tags) or have no set widget pass through.
+// Exported so the designer's inline value editor (ViewFlowNode) widens the same way
+// — one place for the "overlap operand is a set" rule.
+export function toMultiValued(field: MetadataFieldDefinition): MetadataFieldDefinition {
+  if (field.type === "entity_ref") return { ...field, type: "entity_ref_list" };
+  if (field.type === "select") return { ...field, type: "multi_select" };
+  return field;
+}
+
 function isVarOperand(v: unknown): v is { var: string } {
   return typeof v === "object" && v !== null && typeof (v as { var?: unknown }).var === "string";
 }
@@ -70,8 +86,8 @@ export function resolveParamControls(
   const keysByName = collectReferencingFieldKeys(spec);
   return params.map((p) => {
     const fieldKey = keysByName.get(p.name)?.[0] ?? "";
-    const field = (fieldKey ? schema?.fields?.[fieldKey] : null) ?? textFallback(p.label || p.name);
-    return { name: p.name, label: p.label || p.name, field, fieldKey };
+    const resolved = (fieldKey ? schema?.fields?.[fieldKey] : null) ?? textFallback(p.label || p.name);
+    return { name: p.name, label: p.label || p.name, field: toMultiValued(resolved), fieldKey };
   });
 }
 

@@ -27,10 +27,39 @@ describe("resolveParamControls (type derived from the referencing Filter slot)",
       ],
     };
     const controls = resolveParamControls(spec, SCHEMA);
+    // A promoted param fills an overlap/disjoint operand — a SET — so the control
+    // WIDENS to the field's multi variant (entity_ref→entity_ref_list,
+    // select→multi_select) so you can seed `pov ∈ {A,B}` / `status ∈ {draft,revised}`.
+    // The fieldKey stays the original key.
     expect(controls.map((c) => [c.name, c.field.type, c.fieldKey])).toEqual([
-      ["POV", "entity_ref", "pov_ref"],
-      ["Status", "select", "status"],
+      ["POV", "entity_ref_list", "pov_ref"],
+      ["Status", "multi_select", "status"],
     ]);
+  });
+
+  it("already-multi and non-set fields pass through un-widened", () => {
+    const schema = {
+      version: 1,
+      entry_types: {},
+      fields: {
+        allies: { name: "Allies", type: "entity_ref_list", options: [] },
+        note: { name: "Note", type: "text", options: [] },
+      },
+    } as unknown as MetadataSchema;
+    const spec: ViewSpec = {
+      kind: "lore",
+      expr: {
+        intersect: [
+          { field: { key: "allies", op: "overlap", value: { var: "Allies" } } },
+          { field: { key: "note", op: "overlap", value: { var: "Note" } } },
+        ],
+      },
+      params: [
+        { name: "Allies", label: "Allies", default: null },
+        { name: "Note", label: "Note", default: null },
+      ],
+    };
+    expect(resolveParamControls(spec, schema).map((c) => c.field.type)).toEqual(["entity_ref_list", "text"]);
   });
 
   it("finds operands nested in groups + set algebra", () => {

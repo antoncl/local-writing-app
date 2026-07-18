@@ -215,11 +215,15 @@ class ViewsMixin:
 
     @staticmethod
     def _default_view_spec(kind: str, root_type: str) -> ViewSpec:
-        """The per-kind system default spec (ADR-0037 §7). Lore groups by
+        """The per-kind system default spec (ADR-0037 §7). Lore + Prompts group by
         entry_type (alphabetical labels); Assistants by source layer (first-seen
         keeps the machine layer first); the structural kinds (scene/research)
         are a recursive containment Nest over the `parent` relation (roots =
-        parentless); every other kind stays the plain whole-kind roster."""
+        parentless); every other kind stays the plain whole-kind roster.
+
+        MUST stay in lockstep with the frontend `defaultView` (evaluateView.ts) — the
+        materialized default and the pane-synthesized one have to match. The golden
+        test in test_views.py::test_default_view_specs_match_frontend guards the drift."""
         roster = ViewExpr(descendants_of=root_type)
         if kind in ("scene", "research"):
             return ViewSpec(
@@ -237,7 +241,7 @@ class ViewsMixin:
                     )
                 ),
             )
-        if kind == "lore":
+        if kind in ("lore", "prompt"):
             return ViewSpec(kind=kind, expr=roster, group_by=[ViewGroupByLevel(field="entry_type", order="label")])
         if kind == "assistant":
             return ViewSpec(kind=kind, expr=roster, group_by=[ViewGroupByLevel(field="source_layer")])

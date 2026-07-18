@@ -6,6 +6,7 @@ sources <-> legacy-membership reducer.
 
 from __future__ import annotations
 
+import json
 import unittest
 from pathlib import Path
 from tempfile import TemporaryDirectory
@@ -16,7 +17,40 @@ from app.main import app
 from app.models import NodePickerConfig
 from app.models_views import ViewSpec
 from app.runtime import service as svc
+from app.services.project.views import ViewsMixin
 from app.view_grammar_generated import NestMatch, NestOp, ViewExpr
+
+
+def test_default_view_specs_match_frontend() -> None:
+    """#271 / review finding-2: the backend `_default_view_spec` and the frontend
+    `defaultView` are two hand-written builders that MUST agree (the backend
+    materializes the default on disk; the frontend synthesizes it for the pane).
+    Both assert the SAME canonical fixture (owned by the frontend), so a change to
+    one without the other fails CI instead of shipping a before-fold/after-fold
+    mismatch. Compares expr + group_by with roots fixed at `<kind>:base`."""
+    fixture_path = (
+        Path(__file__).resolve().parents[2]
+        / "frontend" / "src" / "lib" / "views" / "__fixtures__" / "default-view-specs.json"
+    )
+    fixture = json.loads(fixture_path.read_text(encoding="utf-8"))
+
+    def _strip_keep(obj: object) -> object:
+        # A filter `mode: "keep"` is the default the frontend leaves implicit
+        # (filterBuilt only serializes `mode` for drop); the backend's Pydantic
+        # dump makes it explicit. Normalize it away so the golden tracks real
+        # shape drift, not this cosmetic serialization difference.
+        if isinstance(obj, dict):
+            return {k: _strip_keep(v) for k, v in obj.items() if not (k == "mode" and v == "keep")}
+        if isinstance(obj, list):
+            return [_strip_keep(x) for x in obj]
+        return obj
+
+    for kind, expected in fixture.items():
+        if kind == "_comment":
+            continue
+        dumped = ViewsMixin._default_view_spec(kind, f"{kind}:base").model_dump(exclude_none=True)
+        got = {"expr": _strip_keep(dumped["expr"]), "group_by": dumped.get("group_by")}
+        assert got == expected, f"backend default for {kind!r} drifted from the frontend canonical: {got} != {expected}"
 
 
 class ViewCrudTests(unittest.TestCase):

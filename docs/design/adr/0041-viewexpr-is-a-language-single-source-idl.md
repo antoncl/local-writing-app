@@ -1,6 +1,6 @@
 # ADR-0041: `ViewExpr` is a language — one IDL grammar generates both runtimes; Filter becomes first-class
 
-- Status: **Proposed** — 0.7.0, 2026-07-18 (under review, not accepted)
+- Status: **Accepted** — 0.7.0, 2026-07-18
 - Feature: #277 · Retires the hand-rolled walkers named there
 - Amends: **ADR-0027 §B** (Filter promoted from layout-only sugar to a first-class stored
   operator), ADR-0018/0021 (the grammar is now defined once, not twice by hand), ADR-0025

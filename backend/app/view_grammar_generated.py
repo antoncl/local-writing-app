@@ -31,6 +31,12 @@ class DifferenceOp(BaseModel):
     remove: ViewExpr
 
 
+class FilterOp(BaseModel):
+    of: ViewExpr
+    pred: ViewExpr
+    mode: Literal["keep", "drop"] = "keep"
+
+
 class NestMatch(BaseModel):
     field: str = Field(min_length=1)
     direction: Literal["child_to_parent", "parent_to_children"]
@@ -53,6 +59,7 @@ _VIEW_EXPR_PRIMARY_SLOTS: tuple[str, ...] = (
     "nest",
     "annotate",
     "field_of",
+    "filter",
     "type",
     "descendants_of",
     "tagged",
@@ -70,6 +77,7 @@ class ViewExpr(BaseModel):
     nest: NestOp | None = None
     annotate: AnnotatePayload | None = None
     field_of: FieldOfOp | None = None
+    filter: FilterOp | None = None
     type: str | dict[str, Any] | None = None
     descendants_of: str | dict[str, Any] | None = None
     tagged: str | dict[str, Any] | None = None
@@ -106,6 +114,7 @@ FieldPredicate.model_rebuild()
 FieldOfOp.model_rebuild()
 AnnotatePayload.model_rebuild()
 DifferenceOp.model_rebuild()
+FilterOp.model_rebuild()
 NestMatch.model_rebuild()
 NestOp.model_rebuild()
 ViewExpr.model_rebuild()
@@ -130,6 +139,11 @@ def children(e: ViewExpr) -> list[Any]:
             out.append(e.nest.children)
     if e.field_of is not None and e.field_of.of is not None:
         out.append(e.field_of.of)
+    if e.filter is not None:
+        if e.filter.of is not None:
+            out.append(e.filter.of)
+        if e.filter.pred is not None:
+            out.append(e.filter.pred)
     if e.field is not None:
         _v = e.field.value
         if isinstance(_v, dict) and 'field_of' in _v:

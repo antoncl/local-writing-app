@@ -24,6 +24,7 @@ TS_NAME = {
     "FieldOfOp": "ViewFieldOf",
     "AnnotatePayload": "ViewAnnotatePayload",
     "DifferenceOp": "ViewDifferenceOp",
+    "FilterOp": "ViewFilterOp",
     "NestMatch": "ViewNestMatch",
     "NestOp": "ViewNestOp",
 }

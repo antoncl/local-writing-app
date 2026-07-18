@@ -27,6 +27,12 @@ export type ViewDifferenceOp = {
   remove: ViewExpr;
 };
 
+export type ViewFilterOp = {
+  of: ViewExpr;
+  pred: ViewExpr;
+  mode?: "keep" | "drop";
+};
+
 export type ViewNestMatch = {
   field: string;
   direction: "child_to_parent" | "parent_to_children";
@@ -49,6 +55,7 @@ export type ViewExpr = {
   nest?: ViewNestOp;
   annotate?: ViewAnnotatePayload;
   field_of?: ViewFieldOf;
+  filter?: ViewFilterOp;
   type?: ViewLeafValue;
   descendants_of?: ViewLeafValue;
   tagged?: ViewLeafValue;
@@ -71,6 +78,8 @@ export function children(e: ViewExpr): ViewExpr[] {
   if (e.nest?.parents) out.push(e.nest.parents);
   if (e.nest?.children) out.push(e.nest.children);
   if (e.field_of?.of) out.push(e.field_of.of);
+  if (e.filter?.of) out.push(e.filter.of);
+  if (e.filter?.pred) out.push(e.filter.pred);
   const _v_field = e.field?.value;
   if (_v_field && typeof _v_field === "object" && "field_of" in _v_field)
     out.push((_v_field as { field_of: ViewFieldOf }).field_of.of);

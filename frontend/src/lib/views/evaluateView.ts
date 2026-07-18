@@ -31,6 +31,7 @@ import type {
   MetadataSchema,
   ViewExpr,
   ViewFieldPredicate,
+  ViewFilterOp,
   ViewGroupSpec,
   ViewLeafValue,
   ViewNestOp,
@@ -421,6 +422,10 @@ function evalSource<T extends EvalNode>(
   neutralUniverse = true,
 ): ViewRow<T>[] {
   if (expr) {
+    // A source-position Filter lowers first (ADR-0041 §C), so its `of` — if a
+    // row-producer — flows through the row-preserving σ branches below (ADR-0037 §5)
+    // exactly as a hand-written intersect/difference would.
+    if (expr.filter) return evalSource(state, lowerFilter(expr.filter), sort, neutralUniverse);
     if (expr.union) {
       const rows: ViewRow<T>[] = [];
       const seen = new Set<string>();
@@ -692,6 +697,15 @@ function buildLevel<T extends EvalNode>(state: RunState<T>, rows: ViewRow<T>[]):
   return built;
 }
 
+// Filter's declared lowering (ADR-0041 §C): `keep ≝ intersect(of, pred)`,
+// `drop ≝ difference(keep: of, remove: pred)`. Desugared at eval entry so the
+// existing intersect/difference branches — including the row-preserving σ in
+// `evalSource` (ADR-0037 §5) — evaluate a Filter with no per-operator code, and a
+// Filter's first-class stored form costs nothing at evaluation.
+function lowerFilter(f: ViewFilterOp): ViewExpr {
+  return f.mode === "drop" ? { difference: { keep: f.of, remove: f.pred } } : { intersect: [f.of, f.pred] };
+}
+
 // `neutralUniverse` is the value an *inactive* field predicate (an unbound
 // promoted formal) takes in THIS position (#198): the whole universe (`true`) or
 // the empty set (`false`). Under (a) "unset = show everything", an inactive
@@ -708,6 +722,9 @@ function buildLevel<T extends EvalNode>(state: RunState<T>, rows: ViewRow<T>[]):
 // per-combinator is the correct model. The default is `true`: a bare filter at the
 // membership root shows everything when unset.
 function evalExpr<T extends EvalNode>(state: RunState<T>, expr: ViewExpr, neutralUniverse = true): Set<string> {
+  // Filter is a derived operator: desugar to its declared lowering and evaluate
+  // that (ADR-0041 §C) — no bespoke Filter branch here or in evalSource.
+  if (expr.filter) return evalExpr(state, lowerFilter(expr.filter), neutralUniverse);
   // Combinators first, then annotate pass-through, then leaves. Exactly one
   // primary slot is populated per node (validated backend-side, #78).
   if (expr.union) return unionAll(expr.union.map((e) => evalExpr(state, e, false)));

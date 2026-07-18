@@ -1,9 +1,14 @@
 # view-grammar.yaml — the single source of truth for the ViewExpr language (#277, ADR-0041).
 #
-# SPIKE / Decision G: this models TODAY's grammar *descriptively* (no `filter` slot, current
-# leaves, current validators) so we can prove the emitter regenerates the hand-written
-# `ViewExpr` family in `models_views.py` before we evolve anything (the prescriptive taxonomy —
-# Filter first-class, injector-role, kind-typed payloads — lands only once reproduction holds).
+# Phase 3 (prescriptive taxonomy): `filter` is now a FIRST-CLASS derived operator (ADR-0041 §B/C).
+# Its meaning is the declared lowering `filter{of,pred,keep} ≝ intersect(of, pred)` /
+# `filter{of,pred,drop} ≝ difference(keep: of, remove: pred)`; the evaluator lowers on that rewrite
+# rather than carrying bespoke Filter code, and the serialized `filter` node keeps a Filter's
+# identity in the grammar (retiring the layout-only reconstruction of Filter-over-a-real-set).
+# The predicate leaves (type/descendants_of/tagged/field) are retained as the arity-0 injectors
+# that `pred` points at (§D). The primitive core still regenerates byte-identical to the
+# hand-written model; only the first-class `filter` slot changes the stored shape (pre-1.0, no
+# migration — validated by semantic equivalence, ADR-0041 §G).
 #
 # `child: true`  = this field carries a sub-ViewExpr the generated `children()` traversal must
 #                  reach. Cross-checked against the type graph by the emitter.
@@ -36,6 +41,16 @@ records:
       keep:   { type: ViewExpr, child: true }
       remove: { type: ViewExpr, child: true }
 
+  # Filter is a first-class derived operator (ADR-0041 §C): a set-arity-1 narrowing.
+  # `of` is the set it narrows (its one set-input port); `pred` is the injected
+  # predicate (a predicate-leaf sub-expr = `inject(P)`, NOT a set-input port — §D);
+  # `mode` picks keep (`∩`) or drop (`∖`). Meaning = the declared lowering above.
+  FilterOp:
+    fields:
+      of:   { type: ViewExpr, child: true }
+      pred: { type: ViewExpr, child: true }
+      mode: { type: enum, values: [keep, drop], default: keep }
+
   NestMatch:
     fields:
       field:     { type: str, min_len: 1 }
@@ -64,6 +79,7 @@ node:
     nest:           { type: NestOp, primary: true }
     annotate:       { type: AnnotatePayload, primary: true }
     field_of:       { type: FieldOfOp, primary: true }
+    filter:         { type: FilterOp, primary: true }   # derived: of ∩/∖ inject(pred)
     type:           { type: leaf_value, primary: true }   # str | {"var": name}
     descendants_of: { type: leaf_value, primary: true }
     tagged:         { type: leaf_value, primary: true }

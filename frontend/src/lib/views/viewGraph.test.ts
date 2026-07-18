@@ -250,7 +250,7 @@ describe("canonicalize bare predicate leaves → All → Filter (ADR-0038 §B)",
   }
 });
 
-describe("filter lowering (sugar → set ops)", () => {
+describe("filter serialization (first-class node + set-identity folds, ADR-0041 §C)", () => {
   it("keep off All collapses to the bare predicate", () => {
     const all = node("all", {}, 0);
     const f = node("filter", { filter_kind: "type", filter_mode: "keep", type: "lore:character" }, 100);
@@ -271,26 +271,31 @@ describe("filter lowering (sugar → set ops)", () => {
     expect(graphToExpr(graph)).toEqual({ complement: { tagged: "archived" } });
   });
 
-  it("keep on a concrete input → intersect(input, predicate)", () => {
+  it("keep on a concrete input → first-class filter{of, pred} (identity kept in the spec)", () => {
     const src = node("type", { type: "lore:character" }, 0);
     const f = node("filter", { filter_kind: "tagged", filter_mode: "keep", tagged: "hero" }, 100);
     const graph: ViewGraph = {
       nodes: [out(), src, f],
       edges: [edge(src.id, f.id), edge(f.id, OUTPUT_NODE_ID)],
     };
-    expect(graphToExpr(graph)).toEqual({ intersect: [{ type: "lore:character" }, { tagged: "hero" }] });
+    // A Filter over a REAL set no longer dissolves into an intersect (which was
+    // indistinguishable from a user's explicit intersect); it stores first-class,
+    // so specToGraph reopens it as a Filter with no layout to lean on.
+    const expr = { filter: { of: { type: "lore:character" }, pred: { tagged: "hero" } } };
+    expect(graphToExpr(graph)).toEqual(expr);
+    expect(graphToExpr(specToGraph({ kind: "lore", expr } as ViewSpec))).toEqual(expr);
   });
 
-  it("drop on a concrete input → difference(input, predicate)", () => {
+  it("drop on a concrete input → first-class filter{mode: drop} (was difference)", () => {
     const src = node("descendants_of", { descendants_of: "lore:deity" }, 0);
     const f = node("filter", { filter_kind: "type", filter_mode: "drop", type: "lore:demigod" }, 100);
     const graph: ViewGraph = {
       nodes: [out(), src, f],
       edges: [edge(src.id, f.id), edge(f.id, OUTPUT_NODE_ID)],
     };
-    expect(graphToExpr(graph)).toEqual({
-      difference: { keep: { descendants_of: "lore:deity" }, remove: { type: "lore:demigod" } },
-    });
+    const expr = { filter: { of: { descendants_of: "lore:deity" }, pred: { type: "lore:demigod" }, mode: "drop" } };
+    expect(graphToExpr(graph)).toEqual(expr);
+    expect(graphToExpr(specToGraph({ kind: "lore", expr } as ViewSpec))).toEqual(expr);
   });
 
   it("an unconfigured filter is a pass-through", () => {
@@ -311,7 +316,9 @@ describe("filter lowering (sugar → set ops)", () => {
       nodes: [out(), all, f1, f2],
       edges: [edge(all.id, f1.id), edge(f1.id, f2.id), edge(f2.id, OUTPUT_NODE_ID)],
     };
-    expect(graphToExpr(graph)).toEqual({ intersect: [{ type: "lore:character" }, { tagged: "hero" }] });
+    // f1 sits over the universe → folds to the bare `{type}` predicate, which is
+    // then f2's concrete `of`; f2 stores first-class over it.
+    expect(graphToExpr(graph)).toEqual({ filter: { of: { type: "lore:character" }, pred: { tagged: "hero" } } });
   });
 });
 

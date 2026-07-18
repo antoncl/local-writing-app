@@ -26,7 +26,9 @@
 // (nothing wired). The sentinels let filters-off-`All` and set ops fold to the
 // minimal shipped `expr` without a universe leaf in the grammar.
 
-import type { MetadataSchema, NodePickerConfig, ViewExpr, ViewFieldOf, ViewFieldPredicate, ViewGroupByLevel, ViewGroupSpec, ViewLeafValue, ViewNestMatch, ViewNestOp, ViewOperand, ViewParam, ViewSort, ViewSpec } from "@/lib/types";
+import type { MetadataSchema, NodePickerConfig, ViewExpr, ViewFieldOf, ViewFieldPredicate, ViewFilterOp, ViewGroupByLevel, ViewGroupSpec, ViewLeafValue, ViewNestMatch, ViewNestOp, ViewOperand, ViewParam, ViewSort, ViewSpec } from "@/lib/types";
+import type { Built } from "@/lib/views/builtAlgebra";
+import { built, complementBuilt, differenceBuilt, EMPTY, intersectBuilt, materialize, materializeOuter, unionBuilt, UNIVERSE } from "@/lib/views/builtAlgebra";
 import { kindUniverseExpr, REFERENCES_FIELD, SELF_VAR } from "@/lib/views/evaluateView";
 import { walkViewExpr } from "@/lib/views/walkViewExpr";
 import { pickerMembership } from "@/lib/utils/pickerSources";
@@ -602,74 +604,8 @@ export function reachesFieldOf(
   return false;
 }
 
-// --- the three-valued lowering algebra -----------------------------------
-
-// A lowered branch: a concrete membership `expr`, the whole `universe` (an
-// `All` injector or a bare handle), or `empty` (nothing / unconfigured).
-type Built = { tag: "expr"; expr: ViewExpr } | { tag: "universe" } | { tag: "empty" };
-const UNIVERSE: Built = { tag: "universe" };
-const EMPTY: Built = { tag: "empty" };
-const built = (expr: ViewExpr): Built => ({ tag: "expr", expr });
-
-// Inner lowering: a concrete expr → itself; universe/empty → null. Used for
-// positions the grammar can't hand a universal-set operand (a `nest` seed, a
-// `field_of` input) — there an unwired/`All` branch still degrades to null (→
-// dropped/empty), exactly as before ADR-0036. The OUTER serialization points
-// (`materializeOuter`, called from graphToSpec/graphToExpr) instead render a
-// top-level/group `universe` as the explicit `descendants_of:<kind-root>` — post
-// ADR-0036 null means the empty set, so "everything" can no longer ride on null.
-function materialize(b: Built): ViewExpr | null {
-  return b.tag === "expr" ? b.expr : null;
-}
-
-// Outer lowering (ADR-0036 §3): a top-level or group `universe` becomes the
-// explicit whole-roster expr for the anchor kind; `empty` → null (= empty set);
-// a concrete expr → itself. `universeExpr` is resolved once per lowering from the
-// graph's kind + schema (null in the kind-less `graphToExpr` test helper, where a
-// bare universe stays null).
-function materializeOuter(b: Built, universeExpr: ViewExpr | null): ViewExpr | null {
-  if (b.tag === "universe") return universeExpr;
-  return materialize(b);
-}
-
-function unionBuilt(parts: Built[]): Built {
-  const exprs: ViewExpr[] = [];
-  for (const p of parts) {
-    if (p.tag === "universe") return UNIVERSE; // universe absorbs a union
-    if (p.tag === "empty") continue;
-    exprs.push(p.expr);
-  }
-  if (exprs.length === 0) return EMPTY;
-  if (exprs.length === 1) return built(exprs[0]);
-  return built({ union: exprs });
-}
-
-function intersectBuilt(parts: Built[]): Built {
-  const exprs: ViewExpr[] = [];
-  for (const p of parts) {
-    if (p.tag === "empty") return EMPTY; // empty absorbs an intersect
-    if (p.tag === "universe") continue; // universe is the identity
-    exprs.push(p.expr);
-  }
-  if (exprs.length === 0) return UNIVERSE; // every operand was universe
-  if (exprs.length === 1) return built(exprs[0]);
-  return built({ intersect: exprs });
-}
-
-function complementBuilt(inner: Built): Built {
-  if (inner.tag === "universe") return EMPTY;
-  if (inner.tag === "empty") return UNIVERSE;
-  return built({ complement: inner.expr });
-}
-
-function differenceBuilt(keep: Built, remove: Built): Built {
-  if (keep.tag === "empty") return EMPTY;
-  if (remove.tag === "empty") return keep; // nothing removed
-  if (remove.tag === "universe") return EMPTY; // removes everything
-  // remove is a concrete expr
-  if (keep.tag === "universe") return built({ complement: remove.expr });
-  return built({ difference: { keep: keep.expr, remove: remove.expr } });
-}
+// The three-valued lowering algebra (`Built` + the identity-folding combinators)
+// lives in ./builtAlgebra — pure, and a down-payment on the #278 viewGraph split.
 
 // Lower a Nest node (ADR-0028). Reads its two named input handles — `parents`
 // (upper) and `children` (lower) — and its match rule. Recursion is *topology*:
@@ -802,7 +738,14 @@ function filterBuilt(graph: ViewGraph, byId: Map<string, ViewGraphNode>, node: V
   const p = predicateExpr(node, wiredValueOperand(graph, byId, node, uni));
   if (!p) return input; // unconfigured filter = pass-through
   const mode = node.data.filter_mode ?? "keep";
-  return mode === "drop" ? differenceBuilt(input, built(p)) : intersectBuilt([input, built(p)]);
+  // Filter is first-class now (ADR-0041 §C): over a CONCRETE set it serializes as a
+  // `{filter}` node, keeping its identity in the spec (no layout needed to reopen).
+  // Set-identity folds via the declared lowering — over the UNIVERSE to the bare
+  // predicate (keep) / complement (drop), over EMPTY to empty.
+  if (input.tag === "universe") return mode === "drop" ? complementBuilt(built(p)) : built(p);
+  if (input.tag === "empty") return EMPTY;
+  const filter: ViewFilterOp = mode === "drop" ? { of: input.expr, pred: p, mode } : { of: input.expr, pred: p };
+  return built({ filter });
 }
 
 // A leaf `field` node → its predicate expr, honoring a wired value source (#196).
@@ -1398,6 +1341,11 @@ export function specToGraph(spec: ViewSpec | null | undefined, schema?: Metadata
       if (ofId) link(ofId, id);
       return id;
     }
+    if (e.filter) {
+      // First-class Filter (ADR-0041 §C): a `filter` node over its `of` set, narrowed by `pred`.
+      const ofId = e.filter.of ? walk(e.filter.of, depth + 1) : null;
+      return filterFromPred(e.filter.pred, depth, e.filter.mode === "drop" ? "drop" : "keep", ofId);
+    }
     if (e.var != null) {
       // Only the reserved `$self` renders as a designer source in the 0.7.0 cut
       // (a declared source Parameter node is deferred, ADR-0032). A promoted
@@ -1405,55 +1353,50 @@ export function specToGraph(spec: ViewSpec | null | undefined, schema?: Metadata
       // slot — so any other `var` has no designer node and is skipped.
       return e.var === SELF_VAR ? addNode("self", depth, {}) : null;
     }
-    // Predicate leaves canonicalize to `All → Filter` on open (ADR-0038 §B). The
-    // palette retired the standalone `type / descendants_of / tagged / field`
-    // leaves, so a saved or duplicated view authored with one must reopen as the
-    // composable idiom the palette can rebuild. Lossless: an `All` input is the
-    // Built `UNIVERSE` and `intersect(universe, p) === p`, so graphToSpec
-    // re-serializes byte-identically. `!= null` (not `!== undefined`): the backend
-    // serializes ViewExpr densely, so every unused slot arrives as `null`.
-    // Reconstruct the promoted-formal metadata (`param`) for a leaf/field slot
-    // whose value is a `{var}` — the mirror of `collectParams` on lowering. Reads
-    // the declared label/default off the spec's `params` (paramByName). A wired or
-    // literal value returns undefined (no promotion).
-    const leafParam = (v: ViewLeafValue | ViewOperand | undefined): ViewNodeData["param"] => {
-      if (!isVarOperand(v)) return undefined;
-      const p = paramByName.get(v.var);
-      return { name: v.var, label: p?.label, default: p?.default };
-    };
-    if (e.type != null) return predicateLeaf(depth, { filter_kind: "type", type: e.type, param: leafParam(e.type) });
+    // Bare predicate leaves canonicalize to `All → Filter` on open (ADR-0038 §B):
+    // `filterFromPred(e, …, null)` adds the fresh `All` and the producer's universe
+    // fold re-collapses it, so it round-trips. `!= null` (not `!== undefined`): the
+    // backend serializes ViewExpr densely, unused slots arrive as `null`.
+    if (e.type != null) return filterFromPred(e, depth, "keep", null);
     if (e.descendants_of != null) {
       // A kind-root `descendants_of` is the universe → the `All` source itself (#211).
       if (universeRoot != null && e.descendants_of === universeRoot) return addNode("all", depth, {});
-      return predicateLeaf(depth, { filter_kind: "descendants_of", descendants_of: e.descendants_of, param: leafParam(e.descendants_of) });
+      return filterFromPred(e, depth, "keep", null);
     }
-    if (e.tagged != null) return predicateLeaf(depth, { filter_kind: "tagged", tagged: e.tagged, param: leafParam(e.tagged) });
-    if (e.field != null) {
-      const v = e.field.value;
-      // A wired value source (#196) reopens as a source node + an edge into the
-      // Filter's `value` handle; the Filter drops its inline value (the wire
-      // re-supplies it on lowering).
-      if (isFieldOfOperand(v)) {
-        const foId = walk({ field_of: v.field_of } as ViewExpr, depth + 1);
-        return predicateLeaf(depth, { filter_kind: "field", field: { ...e.field, value: null } }, foId);
-      }
-      if (isVarOperand(v) && v.var === SELF_VAR) {
-        return predicateLeaf(depth, { filter_kind: "field", field: { ...e.field, value: null } }, addNode("self", depth + 1, {}));
-      }
-      return predicateLeaf(depth, { filter_kind: "field", field: e.field, param: leafParam(v) });
-    }
+    if (e.tagged != null) return filterFromPred(e, depth, "keep", null);
+    if (e.field != null) return filterFromPred(e, depth, "keep", null);
     // Sources (not predicates) stay as themselves — the palette still offers them.
     if (e.hand_picked != null) return addNode("hand_picked", depth, { hand_picked: e.hand_picked });
     return null;
   }
 
-  // Emit the canonical `All → Filter` pair for a bare predicate leaf (ADR-0038
-  // §B): a Filter carrying the predicate `data` (filter_kind + value slot,
-  // keep mode) fed by an `All` source. An optional wired value source links into
-  // the Filter's `value` handle. Returns the Filter id (the segment root).
-  function predicateLeaf(depth: number, data: ViewNodeData, valueSource?: string | null): string {
-    const filterId = addNode("filter", depth, { ...data, filter_mode: "keep" });
-    link(addNode("all", depth + 1, {}), filterId);
+  // Reconstruct the promoted-formal `param` for a leaf/field value that is a `{var}`
+  // — the mirror of `collectParams`, reading label/default off `paramByName`.
+  function leafParam(v: ViewLeafValue | ViewOperand | undefined): ViewNodeData["param"] {
+    if (!isVarOperand(v)) return undefined;
+    const p = paramByName.get(v.var);
+    return { name: v.var, label: p?.label, default: p?.default };
+  }
+
+  // Reconstruct a `filter` graph node from a predicate-leaf expr — the single
+  // spec→graph Filter path (ADR-0041 §C), shared by the first-class `{filter}` and
+  // the bare-leaf canonicalization. `setInput` feeds the set input: an upstream node
+  // id (a `{filter}`'s `of`), or null for a bare leaf → a fresh `All`. A wired
+  // `field` value (field_of / $self, #196) reopens into the `value` handle.
+  function filterFromPred(pred: ViewExpr, depth: number, mode: "keep" | "drop", setInput: string | null): string | null {
+    let data: ViewNodeData | null = null;
+    let valueSource: string | null = null;
+    if (pred.type != null) data = { filter_kind: "type", type: pred.type, param: leafParam(pred.type) };
+    else if (pred.descendants_of != null) data = { filter_kind: "descendants_of", descendants_of: pred.descendants_of, param: leafParam(pred.descendants_of) };
+    else if (pred.tagged != null) data = { filter_kind: "tagged", tagged: pred.tagged, param: leafParam(pred.tagged) };
+    else if (pred.field != null) {
+      const v = pred.field.value;
+      valueSource = isFieldOfOperand(v) ? walk({ field_of: v.field_of } as ViewExpr, depth + 1) : isVarOperand(v) && v.var === SELF_VAR ? addNode("self", depth + 1, {}) : null;
+      data = valueSource ? { filter_kind: "field", field: { ...pred.field, value: null } } : { filter_kind: "field", field: pred.field, param: leafParam(v) };
+    }
+    if (!data) return null;
+    const filterId = addNode("filter", depth, { ...data, filter_mode: mode });
+    link(setInput ?? addNode("all", depth + 1, {}), filterId);
     if (valueSource) link(valueSource, filterId, FILTER_VALUE_HANDLE);
     return filterId;
   }

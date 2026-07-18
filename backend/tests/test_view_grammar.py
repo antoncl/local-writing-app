@@ -24,19 +24,30 @@ from app import view_grammar_generated as g
 _ROOT = Path(__file__).resolve().parents[2]
 _EMIT = _ROOT / "scripts" / "viewgrammar" / "emit_python.py"
 _COMMITTED = _ROOT / "backend" / "app" / "view_grammar_generated.py"
+_EMIT_TS = _ROOT / "scripts" / "viewgrammar" / "emit_ts.py"
+_COMMITTED_TS = _ROOT / "frontend" / "src" / "lib" / "viewGrammar.generated.ts"
+
+
+def _norm(s: str) -> str:
+    return s.replace("\r\n", "\n")
+
+
+def _fresh_matches(emitter: Path, committed: Path, suffix: str) -> tuple[str, str]:
+    tmp = Path(tempfile.mkdtemp()) / f"gen{suffix}"
+    subprocess.run([sys.executable, str(emitter), str(tmp)], check=True, capture_output=True)
+    return _norm(committed.read_text(encoding="utf-8")), _norm(tmp.read_text(encoding="utf-8"))
 
 
 def test_committed_generated_is_fresh() -> None:
-    """The committed module must equal a fresh emit — catches a forgotten regenerate."""
-    tmp = Path(tempfile.mkdtemp()) / "gen.py"
-    subprocess.run([sys.executable, str(_EMIT), str(tmp)], check=True, capture_output=True)
+    """The committed Pydantic module must equal a fresh emit (regen on IDL change)."""
+    committed, fresh = _fresh_matches(_EMIT, _COMMITTED, ".py")
+    assert committed == fresh, "view_grammar_generated.py is stale — run emit_python.py"
 
-    def norm(s: str) -> str:
-        return s.replace("\r\n", "\n")
 
-    assert norm(_COMMITTED.read_text(encoding="utf-8")) == norm(tmp.read_text(encoding="utf-8")), (
-        "view_grammar_generated.py is stale — run scripts/viewgrammar/emit_python.py"
-    )
+def test_committed_ts_generated_is_fresh() -> None:
+    """The committed TS module must equal a fresh emit (both runtimes share one IDL)."""
+    committed, fresh = _fresh_matches(_EMIT_TS, _COMMITTED_TS, ".ts")
+    assert committed == fresh, "viewGrammar.generated.ts is stale — run emit_ts.py"
 
 
 def _dump(x):

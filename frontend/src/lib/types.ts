@@ -298,93 +298,29 @@ export type PromptInputType =
   | "scene_ref"
   | "color";
 
-// ViewSpec — the kind-anchored set-algebra membership language (0.5.0, #35/#78).
-// Mirrors the backend Pydantic models; entry_type references are FQN
-// ("lore:character", per #77). See docs/design/views-and-filters.md §1–2. There
-// is no frontend evaluator in step 1 — these types describe the stored shape.
-// The op enum collapsed 6→4 for the forward model (ADR-0031 §E, #184): `overlap`
-// = set-coerce both sides and test non-empty intersection (entity_ref by id,
-// scalar by value); `disjoint` = its negation; `set`/`unset` = presence. `value`
-// is EITHER a bare literal OR exactly one tagged operand (`{var}` / `{field_of}`)
-// — mutually exclusive by shape.
-export type ViewFieldPredicate = {
-  key: string;
-  op: "overlap" | "disjoint" | "set" | "unset";
-  value?: ViewOperand;
-};
-
-// A forward projection (ADR-0031 §D, #184): `flatMap(of, n → valuesOf(n, field))`,
-// deduped. Output payload is inferred (reference field → node-set, scalar → value-
-// set), never stored. Standalone (a ViewExpr) or inline in a predicate `value`.
-export type ViewFieldOf = { of: ViewExpr; field: string };
-
-// A predicate value slot: a bare literal, or one tagged operand. `{var}` names a
-// promoted formal or the reserved `$self`; `{field_of}` is a projection.
-export type ViewOperand = unknown | { var: string } | { field_of: ViewFieldOf };
-
-// A leaf slot value — the `type` / `descendants_of` / `tagged` slots (ADR-0038 §C
-// Amendment 1, #222). EITHER a bare string literal (an entry_type FQN or a tag) OR
-// a promoted formal `{var}`: the reader rebinds the value at render time. Unlike a
-// field predicate value a leaf never wires (`{field_of}` is not admitted) — it
-// carries a single value, not a set-source. The evaluator resolves `{var}` to a
-// string-set from bindings; the literal degenerates to a one-element set.
-export type ViewLeafValue = string | { var: string };
-
-export type ViewAnnotatePayload = { label?: string; color?: string; rank?: number };
-
-// The parameterized link rule a `nest` denormalizes (ADR-0028 §B). `direction`
-// says which card holds the link value; `by` says whether it identifies the
-// other card by `ref` (an entity_ref/id field) or `title` (a tag == title).
-// `field` names the metadata field carrying the link. `context_pick` fields are
-// not offered (per-prompt runtime, not authored structure).
-export type ViewNestMatch = {
-  field: string;
-  direction: "child_to_parent" | "parent_to_children";
-  by: "ref" | "title";
-};
-
-// The `nest` relational operator (ADR-0028): denormalize a user-authored tree
-// from lore links. `parents`/`children` are the two input sets (absent = the
-// whole universe); `match` is the join rule; `recursive` marks the canvas
-// self-loop (frontier BFS over an unknown-depth homogeneous hierarchy).
-// `id` (ADR-0028 Amendment 1, #260): a stable name so the Nest's SECOND output
-// — its **orphans** (the plain node-set of `children` it never placed) — can be
-// referenced elsewhere in the spec as `{orphans_of: id}`. Set only when the
-// orphan output is wired; the Nest is then evaluated once and referenced (the
-// single-sink DAG, §C). Unreferenced orphans are dropped + counted (the default).
-export type ViewNestOp = {
-  parents?: ViewExpr | null;
-  children?: ViewExpr | null;
-  match: ViewNestMatch;
-  recursive?: boolean;
-  id?: string;
-};
-
-// One node in a view's set-algebra tree: exactly one primary slot is set
-// (a combinator, the `nest` relational op, an annotate pass-through paired with
-// `of`, or a leaf).
-export type ViewExpr = {
-  union?: ViewExpr[];
-  intersect?: ViewExpr[];
-  difference?: { keep: ViewExpr; remove: ViewExpr };
-  complement?: ViewExpr;
-  nest?: ViewNestOp;
-  annotate?: ViewAnnotatePayload;
-  of?: ViewExpr;
-  field_of?: ViewFieldOf; // forward projection (#184): input set → nodes or values
-  type?: ViewLeafValue; // exact entry_type FQN, or a promoted `{var}` (#222)
-  descendants_of?: ViewLeafValue; // entry_type FQN + every inheriting type, or `{var}`
-  tagged?: ViewLeafValue; // a tag value, or a promoted `{var}`
-  field?: ViewFieldPredicate;
-  hand_picked?: string[];
-  var?: string; // a free variable / reserved `$self` leaf (#184), resolved from bindings
-  orphans_of?: string; // the flat unplaced-child node-set of the Nest with this `id` (ADR-0028 Amdt 1)
-  // The Nest DEFINITION carried inline on an `orphans_of` reference (#275), set
-  // only when that Nest's results output is unwired (so no `{nest}` serializes it).
-  // A Nest evaluates the same regardless of which outputs are wired, so it must
-  // persist even when only orphans are used — else it dangles + the node is lost
-  // on reload. Companion to `orphans_of` (like `of` to `annotate`).
-  orphans_nest?: ViewNestOp;
+// The ViewExpr grammar family is machine-generated from the view-grammar IDL
+// (#277, ADR-0041). Imported for local use (ViewSpec/ViewGroupSpec reference
+// ViewExpr) and re-exported so `@/lib/types` stays the import site. Edit
+// scripts/viewgrammar/view-grammar.yaml and regenerate; see the README.
+import type {
+  ViewAnnotatePayload,
+  ViewExpr,
+  ViewFieldOf,
+  ViewFieldPredicate,
+  ViewLeafValue,
+  ViewNestMatch,
+  ViewNestOp,
+  ViewOperand,
+} from "./viewGrammar.generated";
+export type {
+  ViewAnnotatePayload,
+  ViewExpr,
+  ViewFieldOf,
+  ViewFieldPredicate,
+  ViewLeafValue,
+  ViewNestMatch,
+  ViewNestOp,
+  ViewOperand,
 };
 
 export type ViewSort = {

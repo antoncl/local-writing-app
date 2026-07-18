@@ -124,7 +124,7 @@ def main(out: Path | None = None) -> None:
     parts += [_emit_type("ViewExpr", slot_fields, records), ""]
     parts += [_emit_children(records, node), ""]
 
-    dest = out or (HERE / "generated_grammar.ts")
+    dest = out or (HERE.parents[1] / "frontend" / "src" / "lib" / "viewGrammar.generated.ts")
     dest.write_text("\n".join(parts), encoding="utf-8")
     print(f"wrote {dest}")
 

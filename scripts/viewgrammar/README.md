@@ -10,12 +10,11 @@ designer, and validators live in the app and consume it.
 | File | Role |
 |---|---|
 | `view-grammar.yaml` | **The IDL — edit this.** The single source of truth for the grammar. |
-| `emit_python.py` | Emitter → `../../backend/app/view_grammar_generated.py` (the Pydantic `ViewExpr` family + `children()`). |
-| `emit_ts.py` | Emitter → `generated_grammar.ts` (TS `ViewExpr` types + `children()`). Frontend not cut over yet. |
-| `../../backend/app/view_grammar_generated.py` | **Machine-generated — do not edit.** Imported by `models_views.py`; the backend's live grammar. |
-| `generated_grammar.ts` | **Machine-generated — do not edit.** Frontend spike output (in scripts pending the frontend cutover). |
-| `equiv.ts` + `tsconfig.check.json` | TS reproduce-today proof (structural type-equality vs `types.ts`). |
-| `../../backend/tests/test_view_grammar.py` | Backend grammar guards: freshness + `children()`. |
+| `emit_python.py` | Emitter → `../../backend/app/view_grammar_generated.py` (Pydantic `ViewExpr` family + `children()`). |
+| `emit_ts.py` | Emitter → `../../frontend/src/lib/viewGrammar.generated.ts` (TS `ViewExpr` types + `children()`). |
+| `../../backend/app/view_grammar_generated.py` | **Machine-generated — do not edit.** The backend's live grammar (imported by `models_views.py`). |
+| `../../frontend/src/lib/viewGrammar.generated.ts` | **Machine-generated — do not edit.** The frontend's live grammar (re-exported by `types.ts`; `walkViewExpr` uses its `children()`). |
+| `../../backend/tests/test_view_grammar.py` | Grammar guards: freshness (both runtimes) + `children()`. |
 
 ## Regenerate
 
@@ -32,8 +31,8 @@ caught, without a build-time codegen step.
 ## Verify (the guards)
 
 ```
-backend/.venv/Scripts/python.exe -m pytest backend/tests/test_view_grammar.py -q        # backend: freshness + children
-node frontend/node_modules/typescript/bin/tsc -p scripts/viewgrammar/tsconfig.check.json  # TS: type-equality vs types.ts
+backend/.venv/Scripts/python.exe -m pytest backend/tests/test_view_grammar.py -q   # freshness (both runtimes) + children
+npm run check --prefix frontend                                                    # the whole app type-checks on the generated types
 ```
 
 The Python guard runs on `git push` via the existing pre-push `pytest`. The `tsc` guard is a manual
@@ -63,15 +62,12 @@ Don't subclass, extend, or hand-edit the generated modules. Change the grammar b
 The IDL models the grammar **descriptively** (today's shape, warts included — two incidental TS
 quirks are reproduced via `ts_*` hints, flagged inline as normalization candidates).
 
-**Backend cutover: done.** `models_views.py` deleted its hand-written grammar classes and imports
-them from `app.view_grammar_generated`; `services/project/views.py` and the tests import grammar
-from the same module. The reproduce-vs-hand-written proof retired (nothing left to compare); the
-freshness guard + `test_views.py` behaviour tests carry on. Full backend suite green.
+**Backend + frontend cutover: done.** Both runtimes consume the generated grammar:
+`models_views.py` imports it from `app/view_grammar_generated.py`; `types.ts` re-exports the TS
+family from `viewGrammar.generated.ts` and `walkViewExpr` delegates to its `children()`. The
+reproduce-vs-hand-written proofs retired (nothing left to compare); the freshness guards +
+behaviour tests (`test_views.py`, the view unit tests) carry on. Full backend suite + svelte-check
++ the view unit tests green.
 
-**Frontend cutover: pending.** `types.ts` still hand-writes the `ViewExpr` family; `equiv.ts`
-guards it against the generated TS by strict `tsc` equality. Cutover = emit into `frontend/src`,
-re-export from `types.ts`, route `walkViewExpr` through the generated `children()`.
-
-The **prescriptive** grammar changes (Filter first-class, injector-role, kind-typed payloads) ride
-on top of the single source once both runtimes are cut over — that is where `specToGraph` /
-`viewGraph.ts` reshape (informing #278).
+The **prescriptive** grammar changes (Filter first-class, injector-role, kind-typed payloads) now
+ride on the single source. That is where `specToGraph` / `viewGraph.ts` reshape (informing #278).

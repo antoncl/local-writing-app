@@ -65,7 +65,7 @@ def _emit_record(name: str, rec: dict[str, Any]) -> str:
     return "\n".join(lines)
 
 
-def _emit_validator(node: dict[str, Any], primaries: list[str]) -> list[str]:
+def _emit_validator(node: dict[str, Any]) -> list[str]:
     c = node["constraints"]
     out = [
         "    @model_validator(mode='after')",
@@ -147,10 +147,14 @@ def _emit_children(records: dict[str, Any], node: dict[str, Any]) -> list[str]:
                         f"            out.append(e.{slot}.{cf})",
                     ]
                 for of in operand_fields:
+                    # The operand rides an `Any` slot, so the buried sub-expr arrives
+                    # as a raw dict — re-validate it into a ViewExpr so children()
+                    # yields models UNIFORMLY (a recursive walk mustn't hit a bare
+                    # dict), matching the TS twin which returns objects throughout.
                     out += [
                         f"        _v = e.{slot}.{of}",
                         "        if isinstance(_v, dict) and 'field_of' in _v:",
-                        "            out.append(_v['field_of']['of'])",
+                        "            out.append(ViewExpr.model_validate(_v['field_of']['of']))",
                     ]
     out.append("    return out")
     return out
@@ -187,7 +191,7 @@ def main(out: Path | None = None) -> None:
     for slot, spec in node["slots"].items():
         node_lines.append(_field_line(slot, spec, primary=spec.get("primary", False)))
     node_lines.append("")
-    node_lines += _emit_validator(node, primaries)
+    node_lines += _emit_validator(node)
     parts += ["\n".join(node_lines), "", ""]
 
     # Resolve forward refs (every record referencing ViewExpr, plus ViewExpr).

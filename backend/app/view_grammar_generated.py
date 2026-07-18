@@ -149,7 +149,7 @@ def children(e: ViewExpr) -> list[Any]:
     if e.field is not None:
         _v = e.field.value
         if isinstance(_v, dict) and 'field_of' in _v:
-            out.append(_v['field_of']['of'])
+            out.append(ViewExpr.model_validate(_v['field_of']['of']))
     if e.of is not None:
         out.append(e.of)
     if e.orphans_nest is not None:

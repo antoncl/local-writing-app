@@ -463,11 +463,6 @@ export type ViewGraph = { nodes: ViewGraphNode[]; edges: ViewGraphEdge[] };
 
 export const OUTPUT_NODE_ID = "output";
 
-const LEAF_KINDS: LeafKind[] = ["type", "descendants_of", "tagged", "field", "hand_picked"];
-export function isLeafKind(kind: GraphNodeKind): kind is LeafKind {
-  return (LEAF_KINDS as string[]).includes(kind);
-}
-
 // The predicate leaves that canonicalize to `All → Filter` on open (ADR-0038 §B):
 // a Filter narrows on exactly these. Exported as the single source of truth so the
 // spec-walk canonicalizer (`specToGraph`) and the persisted-layout canonicalizer
@@ -748,10 +743,12 @@ function filterBuilt(graph: ViewGraph, byId: Map<string, ViewGraphNode>, node: V
   const mode = node.data.filter_mode ?? "keep";
   // Filter is first-class now (ADR-0041 §C): over a CONCRETE set it serializes as a
   // `{filter}` node, keeping its identity in the spec (no layout needed to reopen).
-  // Set-identity folds via the declared lowering — over the UNIVERSE to the bare
-  // predicate (keep) / complement (drop), over EMPTY to empty.
-  if (input.tag === "universe") return mode === "drop" ? complementBuilt(built(p)) : built(p);
-  if (input.tag === "empty") return EMPTY;
+  // Over the UNIVERSE/EMPTY there is no set identity to preserve, so defer to the
+  // Built combinators — they OWN the identity folds (universe∩p=p, universe∖p=¬p,
+  // ∅-absorption); don't re-derive them here (that is exactly the declared lowering).
+  if (input.tag !== "expr") {
+    return mode === "drop" ? differenceBuilt(input, built(p)) : intersectBuilt([input, built(p)]);
+  }
   const filter: ViewFilterOp = mode === "drop" ? { of: input.expr, pred: p, mode } : { of: input.expr, pred: p };
   return built({ filter });
 }
@@ -1361,18 +1358,17 @@ export function specToGraph(spec: ViewSpec | null | undefined, schema?: Metadata
       // slot — so any other `var` has no designer node and is skipped.
       return e.var === SELF_VAR ? addNode("self", depth, {}) : null;
     }
-    // Bare predicate leaves canonicalize to `All → Filter` on open (ADR-0038 §B):
-    // `filterFromPred(e, …, null)` adds the fresh `All` and the producer's universe
-    // fold re-collapses it, so it round-trips. `!= null` (not `!== undefined`): the
-    // backend serializes ViewExpr densely, unused slots arrive as `null`.
-    if (e.type != null) return filterFromPred(e, depth, "keep", null);
-    if (e.descendants_of != null) {
-      // A kind-root `descendants_of` is the universe → the `All` source itself (#211).
-      if (universeRoot != null && e.descendants_of === universeRoot) return addNode("all", depth, {});
-      return filterFromPred(e, depth, "keep", null);
-    }
-    if (e.tagged != null) return filterFromPred(e, depth, "keep", null);
-    if (e.field != null) return filterFromPred(e, depth, "keep", null);
+    // A kind-root `descendants_of` is the universe → the `All` source itself (#211),
+    // claimed before predicate-leaf reconstruction. (`!= null` not `!== undefined`:
+    // the backend serializes ViewExpr densely, unused slots arrive as `null`.)
+    if (e.descendants_of != null && e.descendants_of === universeRoot) return addNode("all", depth, {});
+    // Any bare predicate leaf (type/descendants_of/tagged/field) canonicalizes to
+    // `All → Filter` on open (ADR-0038 §B): `filterFromPred` adds the fresh `All` and
+    // the producer's universe fold re-collapses it, so it round-trips. It dispatches
+    // on the four leaf slots and returns null for anything else (a source/combinator),
+    // so one call replaces the per-slot enumeration.
+    const leaf = filterFromPred(e, depth, "keep", null);
+    if (leaf) return leaf;
     // Sources (not predicates) stay as themselves — the palette still offers them.
     if (e.hand_picked != null) return addNode("hand_picked", depth, { hand_picked: e.hand_picked });
     return null;

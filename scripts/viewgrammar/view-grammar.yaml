@@ -1,0 +1,82 @@
+# view-grammar.yaml — the single source of truth for the ViewExpr language (#277, ADR-0041).
+#
+# SPIKE / Decision G: this models TODAY's grammar *descriptively* (no `filter` slot, current
+# leaves, current validators) so we can prove the emitter regenerates the hand-written
+# `ViewExpr` family in `models_views.py` before we evolve anything (the prescriptive taxonomy —
+# Filter first-class, injector-role, kind-typed payloads — lands only once reproduction holds).
+#
+# `child: true`  = this field carries a sub-ViewExpr the generated `children()` traversal must
+#                  reach. Cross-checked against the type graph by the emitter.
+# `operand: true`= an `Any` slot that may EMBED a `{field_of: {of: ViewExpr}}` (the buried edge
+#                  walkViewExpr special-cases); type stays `Any`, but children() reaches it.
+
+grammar: view-expr
+
+# Reusable sub-records referenced by ViewExpr slots.
+records:
+  FieldPredicate:
+    fields:
+      key:   { type: str, min_len: 1 }
+      op:    { type: enum, values: [overlap, disjoint, set, unset] }
+      value: { type: any, default: "null", operand: true }
+
+  FieldOfOp:
+    fields:
+      of:    { type: ViewExpr, child: true }
+      field: { type: str, min_len: 1 }
+
+  AnnotatePayload:
+    fields:
+      label: { type: str, optional: true }
+      color: { type: str, optional: true }
+      rank:  { type: int, optional: true }
+
+  DifferenceOp:
+    fields:
+      keep:   { type: ViewExpr, child: true }
+      remove: { type: ViewExpr, child: true }
+
+  NestMatch:
+    fields:
+      field:     { type: str, min_len: 1 }
+      direction: { type: enum, values: [child_to_parent, parent_to_children] }
+      by:        { type: enum, values: [ref, title], default: ref }
+
+  NestOp:
+    fields:
+      parents:   { type: ViewExpr, optional: true, child: true }
+      children:  { type: ViewExpr, optional: true, child: true }
+      match:     { type: NestMatch }
+      recursive: { type: bool, default: false }
+      id:        { type: str, optional: true }
+
+# The node: one primary slot is set, plus the two paired companions (of, orphans_nest).
+node:
+  name: ViewExpr
+  slots:
+    union:          { type: "list[ViewExpr]", primary: true, child: true, min_items: 1 }
+    intersect:      { type: "list[ViewExpr]", primary: true, child: true, min_items: 1 }
+    difference:     { type: DifferenceOp, primary: true }
+    complement:     { type: ViewExpr, primary: true, child: true }
+    nest:           { type: NestOp, primary: true }
+    annotate:       { type: AnnotatePayload, primary: true }
+    field_of:       { type: FieldOfOp, primary: true }
+    type:           { type: leaf_value, primary: true }   # str | {"var": name}
+    descendants_of: { type: leaf_value, primary: true }
+    tagged:         { type: leaf_value, primary: true }
+    field:          { type: FieldPredicate, primary: true }
+    hand_picked:    { type: "list[str]", primary: true }
+    var:            { type: str, primary: true }
+    orphans_of:     { type: str, primary: true }
+    # Paired companions (non-primary):
+    of:             { type: ViewExpr, optional: true, child: true }
+    orphans_nest:   { type: NestOp, optional: true }
+
+  constraints:
+    exactly_one_primary: true
+    pairing:            # companion -> its primary slot; required = companion is mandatory there
+      of:           { primary: annotate,   required: true }
+      orphans_nest: { primary: orphans_of, required: false }
+    payload_nonempty:   # slot -> at least one of these fields must be set
+      annotate: [label, color]
+    min_items: [union, intersect]

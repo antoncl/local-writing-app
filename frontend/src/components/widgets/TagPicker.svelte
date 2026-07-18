@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { createEventDispatcher } from "svelte";
+  import { createEventDispatcher, onDestroy } from "svelte";
   import type { ScopedTag } from "@/lib/types";
   import { pickerMembership } from "@/lib/utils/pickerSources";
   import { portalToBody } from "@/lib/actions/portal";
@@ -30,6 +30,7 @@
   let open = false;
   let position: { x: number; y: number; width: number } | null = null;
   let anchorEl: HTMLDivElement | null = null;
+  let rafId = 0;
 
   function parseTags(raw: string): string[] {
     return raw
@@ -40,20 +41,47 @@
 
   $: selectedKeys = new Set(parseTags(value).map((t) => t.toLowerCase()));
 
+  // Position the (body-portaled) popover from the anchor's viewport rect. Only
+  // reassign when the on-screen anchor actually moved, so the per-frame tracking
+  // loop doesn't churn reactivity while the canvas sits idle.
+  function measure(el: HTMLElement) {
+    const b = el.getBoundingClientRect();
+    const next = { x: b.left, y: b.bottom + 4, width: Math.min(320, Math.max(220, b.width)) };
+    if (!position || position.x !== next.x || position.y !== next.y || position.width !== next.width) {
+      position = next;
+    }
+  }
+
+  // #245: the popover portals to <body> and positions off the anchor's viewport
+  // rect. Inside a zoomed/panned SvelteFlow canvas the anchor moves on screen
+  // WITHOUT firing scroll/resize, so re-measure every frame while open — the menu
+  // stays glued to the node at native (1×) size (anchor-track, not scale-with-zoom).
+  function track() {
+    if (!open || !anchorEl) return;
+    measure(anchorEl);
+    rafId = requestAnimationFrame(track);
+  }
+
+  function close() {
+    open = false;
+    position = null;
+    if (rafId) {
+      cancelAnimationFrame(rafId);
+      rafId = 0;
+    }
+  }
+
   function toggle(event: MouseEvent) {
     if (open) {
-      open = false;
-      position = null;
+      close();
       return;
     }
-    const bounds = (anchorEl ?? (event.currentTarget as HTMLElement)).getBoundingClientRect();
-    position = {
-      x: bounds.left,
-      y: bounds.bottom + 4,
-      width: Math.min(320, Math.max(220, bounds.width)),
-    };
+    measure(anchorEl ?? (event.currentTarget as HTMLElement));
     open = true;
+    rafId = requestAnimationFrame(track);
   }
+
+  onDestroy(close);
 
   function handleOutsidePointerdown(event: PointerEvent) {
     if (!open || !anchorEl) return;
@@ -64,8 +92,7 @@
     // click lands. Query the portaled node the same way its sibling pickers do.
     const menu = document.querySelector(".tag-picker");
     if (menu && target instanceof Node && menu.contains(target)) return;
-    open = false;
-    position = null;
+    close();
   }
 
   function applyTag(tag: string) {

@@ -64,26 +64,26 @@ serialized form. Reducibility is thus preserved as the operator's *definition*, 
 erase it from the user's model; and the equivalence being declared, a fold/expand normalizer is
 derivable either direction, never hand-rolled.
 
-The economy axis has a thumb on the scale worth recording, but the ADR does not pre-empt the call:
-0027 §B's lower-on-save path stores only the expanded core, so a Filter-over-a-real-set serializes
-as a plain `intersect`/`difference` — **indistinguishable from a user's explicit intersect**, its
-Filter identity surviving a round-trip *only* through the *non-semantic* persisted `layout` (which
-`hydrateGraph` reopens directly, bypassing `specToGraph`). A layout-less or backend-authored view
-therefore **loses that identity entirely**, reopening as a bare combinator — a standing surface↔core
-drift source. (Note precisely: `specToGraph` has **no** `intersect(S, leaf)`→`Filter(S)`
-reconstruction to lean on; the only load-time canonicalization is the *leaf-level* bare-predicate →
-`All → Filter` rewrite of ADR-0038 §B, which is **retained** — the predicate leaves stay the §D
-injectors Filter's `pred` points at. Its round-trip is lossless only as a *matched pair*: §B opens a
-bare leaf into `All → Filter`, and the producer's **universe-fold** (`filterBuilt`) closes it back —
-a Filter over the whole roster serializes to the bare predicate (keep) or its complement (drop),
-**not** to `{filter}`. #271 converges that pair onto `{filter}` and retires both together.)
-Serializing the `filter` node therefore moves the identity **into the grammar for the
-Filter-over-a-real-set case specifically** — a layout-less view of a Filter over a concrete set
-reopens with its transforms intact (a Filter over the roster stays a bare leaf, sharing §B's
-round-trip with the still-bare-leaf backend defaults) — a maintainability win *for the grammar*, so
-the economy criterion likely favours the stored-node form. The implementation makes the final serialization call on that basis;
-the ADR fixes the **invariant** (user-facing first-classness) and the **mechanism** (derived
-operator + declared lowering), not the byte layout.
+The economy axis is now **resolved in favour of storing `{filter}` always**: a Filter serializes as
+its own node over *any* operand — a concrete set, a union, the orphans, a `field_of` node-set, or the
+whole roster — **never** folded to a bare predicate leaf or a plain `intersect`/`difference`. Its
+identity thus lives wholly in the grammar, killing the 0027 §B surface↔core drift (where the
+lower-on-save path stored only the expanded core, so a Filter's identity survived a round-trip only
+in the *non-semantic* `layout` and a layout-less / backend-authored view lost it entirely, reopening
+as a bare combinator indistinguishable from a user's explicit intersect).
+
+Because nothing then stores a bare predicate leaf, this **closes #271**: the ADR-0038 §B load-time
+canonicalization (bare predicate leaf → `All → Filter`) is **retired** — `specToGraph` no longer
+reconstructs a bare leaf, `canonicalizeLeafNodes` is gone, and the system default views are reworked
+to the `{filter}` idiom (pre-1.0, no migration — test projects recreated). A predicate leaf survives
+only as a Filter's `pred` (the §D injector it points at), never as a standalone stored form.
+
+Evaluation is a **separate axis**: the evaluator stays free to lower a `{filter}` to its declared
+rewrite (`intersect`/`difference`, `lowerFilter`) as an implementation optimization — a compiler
+choice, valid as long as results are correct, to be revisited on performance data. Storage
+first-classness is the fixed contract; the evaluation strategy is not. So the ADR fixes the
+**invariant** (user-facing first-classness), the **mechanism** (derived operator + declared
+lowering), and now the **serialized form** (always `{filter}`).
 
 **D. Injector is a *derived* role (set-arity 0), not a node type — pin this precisely, because it
 is exactly the kind of context-dependent call an implementing thread can get wrong.** An operator's
@@ -178,15 +178,15 @@ equivalence**: a Filter evaluated via its declared rewrite yields the same set a
 - **The surface/core split collapses to one grammar.** With derived operators carrying declared
   lowerings, the surface→core lowering becomes "expand derived → primitive," *generated* from those
   lowerings rather than hand-written — one grammar with a primitive/derived distinction, not two
-  grammars plus a desugaring relation. And **if** Filter is serialized first-class (C's
-  economy-favoured form), a Filter-**over-a-real-set**'s identity lives in the grammar rather than the
-  non-semantic `layout`, so a layout-less / backend-authored view reopens with its Filter transforms
-  intact instead of as a bare combinator — the maintainability payoff that drives that serialization
-  choice. This retires **no** `specToGraph` intersect→Filter reconstruction (there is none); the
-  leaf-level bare-predicate → `All → Filter` canonicalization (ADR-0038 §B) is a distinct, retained
-  mechanism whose lossless round-trip is closed by the producer's universe-fold (a Filter over the
-  roster stays a bare leaf, not `{filter}`) — §B and that fold being the matched pair #271 retires
-  together.
+  grammars plus a desugaring relation. Filter is serialized first-class **always** (C): a Filter's
+  identity lives in the grammar over any operand — including the whole roster — so a layout-less /
+  backend-authored view reopens with its transforms intact instead of as a bare combinator, and there
+  is no fold to a bare predicate leaf.
+- **#271 is closed.** Because no stored spec carries a bare predicate leaf, the ADR-0038 §B load-time
+  canonicalization (bare predicate leaf → `All → Filter`) is **retired** — `specToGraph`'s bare-leaf
+  branch and `canonicalizeLeafNodes` are removed, and the system default views are reworked to the
+  `{filter}` idiom. (There was never any `specToGraph` intersect→Filter reconstruction — the only
+  §B mechanism was the leaf-level rewrite, now gone.)
 - **The #275 `orphans_of`/`orphans_nest` companion wart is re-examined** under the injector-role
   framing (orphans as a source may not need the inline-`orphans_nest` companion) — flagged for the
   modelling pass, not committed here.

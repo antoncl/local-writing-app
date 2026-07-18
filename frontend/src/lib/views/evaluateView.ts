@@ -239,7 +239,9 @@ export function defaultView(kind: string, schema?: MetadataSchema | null): ViewS
       kind,
       expr: {
         nest: {
-          parents: { field: { key: "parent", op: "unset" } },
+          // Roots = the roster narrowed to parent-unset, as a first-class Filter
+          // (ADR-0041 §C — no bare predicate leaf; #271 retired the sugar form).
+          parents: { filter: { of: roster, pred: { field: { key: "parent", op: "unset" } } } },
           children: roster,
           match: { field: "parent", direction: "child_to_parent", by: "ref" },
           recursive: true,

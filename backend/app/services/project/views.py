@@ -29,7 +29,13 @@ from app.models_views import (
     ViewUiState,
 )
 from app.services.project.errors import ProjectServiceError
-from app.view_grammar_generated import FieldPredicate, NestMatch, NestOp, ViewExpr
+from app.view_grammar_generated import (
+    FieldPredicate,
+    FilterOp,
+    NestMatch,
+    NestOp,
+    ViewExpr,
+)
 
 # Well-known id prefix for the per-kind system default view (ADR-0036 §5). The
 # frontend addresses `view_default_<kind>` when persisting fold state for a
@@ -220,7 +226,11 @@ class ViewsMixin:
                 kind=kind,
                 expr=ViewExpr(
                     nest=NestOp(
-                        parents=ViewExpr(field=FieldPredicate(key="parent", op="unset")),
+                        # Roots = the roster narrowed to parent-unset, as a first-class
+                        # Filter (ADR-0041 §C; #271 retired the bare-predicate-leaf form).
+                        parents=ViewExpr(
+                            filter=FilterOp(of=roster, pred=ViewExpr(field=FieldPredicate(key="parent", op="unset")))
+                        ),
                         children=roster,
                         match=NestMatch(field="parent", direction="child_to_parent", by="ref"),
                         recursive=True,

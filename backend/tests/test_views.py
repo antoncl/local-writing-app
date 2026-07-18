@@ -517,8 +517,12 @@ class ViewUiStateTests(unittest.TestCase):
         nest = body["spec"]["expr"]["nest"]
         self.assertTrue(nest["recursive"])
         self.assertEqual(nest["match"], {"field": "parent", "direction": "child_to_parent", "by": "ref"})
-        self.assertEqual(nest["parents"]["field"]["key"], "parent")
-        self.assertEqual(nest["parents"]["field"]["op"], "unset")
+        # Roots = the roster narrowed to parent-unset, a first-class Filter (ADR-0041
+        # §C; #271 retired the bare-predicate-leaf form).
+        parents_filter = nest["parents"]["filter"]
+        self.assertEqual(parents_filter["of"]["descendants_of"], "scene:base")
+        self.assertEqual(parents_filter["pred"]["field"]["key"], "parent")
+        self.assertEqual(parents_filter["pred"]["field"]["op"], "unset")
         self.assertEqual(nest["children"]["descendants_of"], "scene:base")
         self.assertNotIn("presentation", body)
         self.assertEqual(body["ui"]["collapsed"], ["node:act1"])

@@ -463,11 +463,9 @@ export type ViewGraph = { nodes: ViewGraphNode[]; edges: ViewGraphEdge[] };
 
 export const OUTPUT_NODE_ID = "output";
 
-// The predicate leaves that canonicalize to `All → Filter` on open (ADR-0038 §B):
-// a Filter narrows on exactly these. Exported as the single source of truth so the
-// spec-walk canonicalizer (`specToGraph`) and the persisted-layout canonicalizer
-// (`canonicalizeLeafNodes` in ViewBodyView) can't drift on which kinds retire.
-// `hand_picked` is a source, not a predicate, so it stays off this list.
+// The predicate kinds a Filter narrows on — its `filter_kind` vocabulary. Read by
+// `promotableSlot` to decide whether a node's predicate slot can carry a promoted
+// formal. `hand_picked` is a source, not a predicate, so it stays off this list.
 export const PREDICATE_LEAF_KINDS: ReadonlySet<GraphNodeKind> = new Set<GraphNodeKind>([
   "type",
   "descendants_of",
@@ -741,15 +739,17 @@ function filterBuilt(graph: ViewGraph, byId: Map<string, ViewGraphNode>, node: V
   const p = predicateExpr(node, wiredValueOperand(graph, byId, node, uni));
   if (!p) return input; // unconfigured filter = pass-through
   const mode = node.data.filter_mode ?? "keep";
-  // Filter is first-class now (ADR-0041 §C): over a CONCRETE set it serializes as a
-  // `{filter}` node, keeping its identity in the spec (no layout needed to reopen).
-  // Over the UNIVERSE/EMPTY there is no set identity to preserve, so defer to the
-  // Built combinators — they OWN the identity folds (universe∩p=p, universe∖p=¬p,
-  // ∅-absorption); don't re-derive them here (that is exactly the declared lowering).
-  if (input.tag !== "expr") {
-    return mode === "drop" ? differenceBuilt(input, built(p)) : intersectBuilt([input, built(p)]);
-  }
-  const filter: ViewFilterOp = mode === "drop" ? { of: input.expr, pred: p, mode } : { of: input.expr, pred: p };
+  // Filter is GENUINELY first-class (ADR-0041 §C, #271): it ALWAYS serializes as a
+  // `{filter}` node — including over the whole roster — so its identity lives wholly
+  // in the grammar, never folded to a bare predicate leaf. `of` is the concrete
+  // upstream expr, or — over the universe — the resolved roster (`materializeOuter`).
+  if (input.tag === "empty") return EMPTY; // nothing to filter
+  const of = materializeOuter(input, uni);
+  // `of === null` only in the kind-less `graphToExpr` helper (no roster to name): the
+  // identity `universe ∩ p = p` / `universe ∖ p = ¬p`. `graphToSpec` always resolves
+  // the roster, so a persisted Filter is always first-class.
+  if (of === null) return mode === "drop" ? complementBuilt(built(p)) : built(p);
+  const filter: ViewFilterOp = mode === "drop" ? { of, pred: p, mode } : { of, pred: p };
   return built({ filter });
 }
 
@@ -1358,19 +1358,15 @@ export function specToGraph(spec: ViewSpec | null | undefined, schema?: Metadata
       // slot — so any other `var` has no designer node and is skipped.
       return e.var === SELF_VAR ? addNode("self", depth, {}) : null;
     }
-    // A kind-root `descendants_of` is the universe → the `All` source itself (#211),
-    // claimed before predicate-leaf reconstruction. (`!= null` not `!== undefined`:
-    // the backend serializes ViewExpr densely, unused slots arrive as `null`.)
+    // A kind-root `descendants_of` is the roster → the `All` source itself (#211).
+    // (`!= null` not `!== undefined`: the backend serializes ViewExpr densely.)
     if (e.descendants_of != null && e.descendants_of === universeRoot) return addNode("all", depth, {});
-    // Any bare predicate leaf (type/descendants_of/tagged/field) canonicalizes to
-    // `All → Filter` on open (ADR-0038 §B): `filterFromPred` adds the fresh `All` and
-    // the producer's universe fold re-collapses it, so it round-trips. It dispatches
-    // on the four leaf slots and returns null for anything else (a source/combinator),
-    // so one call replaces the per-slot enumeration.
-    const leaf = filterFromPred(e, depth, "keep", null);
-    if (leaf) return leaf;
-    // Sources (not predicates) stay as themselves — the palette still offers them.
+    // Sources (not predicates) stay as themselves — the palette offers them.
     if (e.hand_picked != null) return addNode("hand_picked", depth, { hand_picked: e.hand_picked });
+    // A bare predicate leaf (type / tagged / field / non-root descendants_of) is no
+    // longer a valid stored form: #271 retired the `All → Filter` canonicalization, so
+    // a predicate lives ONLY inside a first-class `{filter}` (handled above). Anything
+    // unrecognized here has no designer node and is dropped.
     return null;
   }
 
@@ -1382,11 +1378,10 @@ export function specToGraph(spec: ViewSpec | null | undefined, schema?: Metadata
     return { name: v.var, label: p?.label, default: p?.default };
   }
 
-  // Reconstruct a `filter` graph node from a predicate-leaf expr — the single
-  // spec→graph Filter path (ADR-0041 §C), shared by the first-class `{filter}` and
-  // the bare-leaf canonicalization. `setInput` feeds the set input: an upstream node
-  // id (a `{filter}`'s `of`), or null for a bare leaf → a fresh `All`. A wired
-  // `field` value (field_of / $self, #196) reopens into the `value` handle.
+  // Reconstruct a `filter` graph node from a first-class `{filter}`'s pred + of
+  // (ADR-0041 §C). `setInput` is the `of` node id; it falls back to a fresh `All`
+  // only for a degenerate `of` that walked to nothing. A wired `field` value
+  // (field_of / $self, #196) reopens into the `value` handle.
   function filterFromPred(pred: ViewExpr, depth: number, mode: "keep" | "drop", setInput: string | null): string | null {
     let data: ViewNodeData | null = null;
     let valueSource: string | null = null;

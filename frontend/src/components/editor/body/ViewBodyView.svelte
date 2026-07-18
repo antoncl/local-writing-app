@@ -606,11 +606,11 @@
   // ---- palette (sources vs operations — ADR-0038 §B) ----
   // The algebra has two roles: a SOURCE injects a node set, an OPERATION
   // transforms one. The bare predicate leaves (`type / descendants_of / tagged /
-  // field`) are retired from the palette — `All → Filter` composes the identical
-  // lowering (`commonLeafExpr`) through one UI path, and post-ADR-0036 `All` is a
-  // real kind universe, so nothing is lost. `specToGraph` canonicalizes any
-  // surviving bare leaf on open, so a reopened or duplicated view never presents
-  // vocabulary the palette can't rebuild. Each chip carries the kind's ViewGlyph
+  // field`) are fully retired (#271/#284) — `All → Filter` composes the identical
+  // lowering through one UI path, and post-ADR-0036 `All` is a real kind universe,
+  // so nothing is lost. A predicate now lives ONLY inside a first-class `{filter}`;
+  // `specToGraph` drops any bare predicate leaf on open (there is no node for it),
+  // and no default or user view carries one. Each chip carries the kind's ViewGlyph
   // (the same mark as the node header, §240), so it needs no per-item colour cue.
   let hasTypeChoice = $derived(entryTypeOptions.length > 1);
   type PalItem = { kind: GraphNodeKind; label: string };
@@ -732,12 +732,13 @@
     const fieldType = (key: string) => schema?.fields?.[key]?.type ?? null;
     const srcNode = byId.get(conn.source);
     const tgtNode = byId.get(conn.target);
-    // The value slot (#196, ADR-0031 §E): a wired operand into a field/Filter's
-    // `value` handle. Allowed only when the authored field's payload matches the
-    // source's (node-set for entity_ref, value-set for scalar). Bypasses the
-    // arity check — a `field` leaf has no set input but does have a value slot.
+    // The value slot (#196, ADR-0031 §E): a wired operand into a Filter's `value`
+    // handle. Allowed only when the authored field's payload matches the source's
+    // (node-set for entity_ref, value-set for scalar). Bypasses the arity check —
+    // the value slot is orthogonal to the set input. (The standalone `field` leaf
+    // that also carried a value slot is retired, #271/#284.)
     if (conn.targetHandle === FILTER_VALUE_HANDLE) {
-      if (tgtNode?.kind !== "field" && tgtNode?.kind !== "filter") return false;
+      if (tgtNode?.kind !== "filter") return false;
       if (!valueSlotAccepts(srcNode, tgtNode.data.field, fieldType)) return false;
       return connectionAllowed(classifyConnection(byId, edges, conn.source, conn.target, conn.targetHandle ?? null, conn.sourceHandle ?? null));
     }

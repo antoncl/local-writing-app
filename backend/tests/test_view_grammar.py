@@ -7,9 +7,11 @@ ongoing guards:
 
 - **freshness** — the committed generated module equals a fresh emit (edit the IDL → regenerate);
 - **children()** — the generated traversal reaches every child edge, incl. the operand-buried
-  `field.value.field_of.of` that walkViewExpr special-cases.
+  `field.value.field_of.of` that walkViewExpr special-cases;
+- **generated validators** — declared IDL constraints emit working checks (here the #275 / §F
+  `companion_id_match`: an inline `orphans_nest` must carry the id its `orphans_of` names).
 
-Behavioural validation of `ViewExpr` (exactly-one, pairing, op enum, …) lives in test_views.py.
+Broader behavioural validation of `ViewExpr` (exactly-one, pairing, op enum, …) lives in test_views.py.
 """
 
 from __future__ import annotations
@@ -19,7 +21,12 @@ import sys
 import tempfile
 from pathlib import Path
 
+import pytest
+from pydantic import ValidationError
+
 from app import view_grammar_generated as g
+
+_MATCH = {"field": "parent", "direction": "child_to_parent"}
 
 _ROOT = Path(__file__).resolve().parents[2]
 _EMIT = _ROOT / "scripts" / "viewgrammar" / "emit_python.py"
@@ -72,3 +79,20 @@ def test_children_reaches_every_edge() -> None:
     assert len(top) == 2
     assert [_dump(c) for c in g.children(top[0])] == [fo_child]
     assert [_dump(c) for c in g.children(top[1])] == [buried]
+
+
+def test_orphans_companion_id_must_match_reference() -> None:
+    """#275 / ADR-0041 §F: the generated `companion_id_match` rule rejects an inline
+    `orphans_nest` whose id disagrees with the `orphans_of` reference (they'd name
+    different Nests and the orphan node-set couldn't resolve)."""
+    # Inline Nest referenced by the SAME id → valid.
+    g.ViewExpr(orphans_of="cities", orphans_nest={"match": _MATCH, "id": "cities"})
+    # A plain by-id reference (no inline Nest) → valid: it resolves to a Nest elsewhere.
+    g.ViewExpr(orphans_of="cities")
+
+    # Mismatched id → rejected.
+    with pytest.raises(ValidationError, match="must equal"):
+        g.ViewExpr(orphans_of="cities", orphans_nest={"match": _MATCH, "id": "other"})
+    # A missing id on the inline Nest is also a mismatch (None != the reference).
+    with pytest.raises(ValidationError, match="must equal"):
+        g.ViewExpr(orphans_of="cities", orphans_nest={"match": _MATCH})

@@ -99,3 +99,10 @@ node:
     payload_nonempty:   # slot -> at least one of these fields must be set
       annotate: [label, color]
     min_items: [union, intersect]
+    # #275 / ADR-0041 §F: when the inline companion Nest is present alongside its
+    # by-id reference, the Nest's `id` must equal the reference — else the inline
+    # definition and the `{orphans_of}` pointer name different Nests and the orphan
+    # node-set can't resolve. companion -> { id_field, ref }. Now one DECLARED rule
+    # rather than a fifth hand-rolled validator (retires the parked #275 check).
+    companion_id_match:
+      orphans_nest: { id_field: id, ref: orphans_of }

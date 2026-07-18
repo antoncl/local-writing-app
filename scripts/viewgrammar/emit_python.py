@@ -96,6 +96,14 @@ def _emit_validator(node: dict[str, Any], primaries: list[str]) -> list[str]:
             f"        if slot == '{slot}' and {cond}:",
             f"            raise ValueError('a `{slot}` payload must set at least one of {names}')",
         ]
+    for comp, rule in c.get("companion_id_match", {}).items():
+        idf, ref = rule["id_field"], rule["ref"]
+        # Runs after `pairing` (which already forces `slot == ref` when the companion
+        # is present), so `self.{ref}` is set here — the check is purely id vs ref.
+        out += [
+            f"        if self.{comp} is not None and self.{comp}.{idf} != self.{ref}:",
+            f"            raise ValueError('`{comp}.{idf}` must equal `{ref}` (they name the same Nest)')",
+        ]
     mi = c.get("min_items", [])
     if mi:
         tup = ", ".join(f"'{s}'" for s in mi)

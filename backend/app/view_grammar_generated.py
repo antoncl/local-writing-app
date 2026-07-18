@@ -105,6 +105,8 @@ class ViewExpr(BaseModel):
             raise ValueError('`orphans_nest` is only valid paired with `orphans_of`')
         if slot == 'annotate' and self.annotate.label is None and self.annotate.color is None:
             raise ValueError('a `annotate` payload must set at least one of label/color')
+        if self.orphans_nest is not None and self.orphans_nest.id != self.orphans_of:
+            raise ValueError('`orphans_nest.id` must equal `orphans_of` (they name the same Nest)')
         if slot in ('union', 'intersect') and not getattr(self, slot):
             raise ValueError(f'`{slot}` requires at least one operand')
         return self

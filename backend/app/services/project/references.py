@@ -2,7 +2,10 @@
 
 `_build_node_index` walks every node markdown file (scenes, lore, prompts,
 research, chats, plus the machine assistants layer) into an in-memory
-`NodeIndex` keyed by id; the reference API (`resolve_references`,
+`NodeIndex` keyed by id — and, in that same front-matter pass, extracts the
+field-qualified reference edges plus their reverse adjacency map (#305, so
+answering a reference-graph request no longer parses the chain three times);
+the reference API (`resolve_references`,
 `list_backlinks`, `list_reference_candidates`) and the node-identity helpers
 (`_node_id_for_path`, `_path_for_node_id`, `_safe_relative`,
 `_read_body_summary`) build on it. This mixin owns that subsystem; almost
@@ -33,52 +36,85 @@ from app.models import (
     ReferenceResolveResponse,
 )
 from app.services.project.errors import ProjectServiceError
-from app.services.project.node_index import NodeIndex, NodeIndexEntry
+from app.services.project.node_index import (
+    IndexLayer,
+    NodeFamily,
+    NodeIndex,
+    NodeIndexEntry,
+    ReferenceEdge,
+)
+
+# The Node-shaped kinds the index walks, once per layer of the chain.
+NODE_FAMILIES = [
+    NodeFamily("scene", "scenes", "scene:scene"),
+    # Research notes walk `research/notes/`. Treated like lore (cross-layer)
+    # rather than scenes (book-scoped) — universe- or series-level research
+    # notes are a natural use case.
+    NodeFamily("research", "research/notes", "research:note"),
+    NodeFamily("lore", "lore", "lore:lore_note"),
+    NodeFamily("prompt", "prompts", "prompt:base"),
+    NodeFamily("assistant", "assistants", "assistant:assistant"),
+    # Reusable mutation sets (#62): body-less Node files under `mutation-sets/`.
+    # Layered like lore/prompts (a werewolf transform can live at any project
+    # level).
+    NodeFamily("mutation_set", "mutation-sets", "mutation_set:mutation_set"),
+    # Saved views (0.5.0, #35/#78): body-less Node files under `views/`, each
+    # carrying a ViewSpec in front matter. Layered like mutation sets — a view
+    # can live at any project level.
+    NodeFamily("view", "views", "view:view"),
+]
 
 
 class ReferencesMixin:
     def _build_node_index(self, root: Path | None = None) -> NodeIndex:
+        """Walk the layer chain once, producing both the id→entry map and the
+        reference edges (#305).
+
+        Edge extraction is schema-driven, so the merged schema is read up front
+        and threaded into the collectors — the front matter each file yields is
+        parsed exactly once, for both purposes.
+
+        **A schema that will not load must not make the index unbuildable.**
+        Reading the schema is new work on this path: before #305 the index never
+        touched it, so a typo in any layer's `metadata.schema.yaml` — including
+        an *ancestor's*, which no one editing this book would think to look at —
+        would otherwise take down every index consumer, from `list_lore_entries`
+        to `_path_for_node_id` on each save. The failure degrades to "no edges"
+        plus an `index.errors` row. Callers that want the schema still fail
+        loudly on their own read; this one does not fail on their behalf.
+        """
         root = root or self._require_project()
         index = NodeIndex()
+        try:
+            schema: MetadataSchema | None = self.read_metadata_schema()
+        # Malformed YAML arrives as ProjectServiceError (`_read_yaml` wraps it),
+        # a bad shape as pydantic ValidationError (a ValueError), and a locked
+        # or unreadable file as OSError.
+        except (ProjectServiceError, ValueError, OSError) as exc:
+            schema = None
+            index.errors.append(f"Invalid metadata schema; no reference edges were indexed: {exc}")
         # Machine config dir is a base layer for assistants only — it lives
         # outside the project tree and carries the user's roster.
-        self._collect_machine_layer_assistants(index, duplicate_relative_to=root)
+        self._collect_machine_layer_assistants(index, duplicate_relative_to=root, schema=schema)
         layer_folders = self._project_layer_folders(root)
         # Outermost ancestor first so descendant entries overwrite on collision.
         for layer_index, folder in enumerate(layer_folders):
-            layer_id = self._metadata_schema_layer_id(folder)
-            layer_label = self._layer_label_for_folder(root, folder, layer_index)
+            layer = IndexLayer(
+                folder=folder,
+                id=self._metadata_schema_layer_id(folder),
+                label=self._layer_label_for_folder(root, folder, layer_index),
+            )
             is_current_project = folder == root
-            for kind, folder_name, default_entry_type in [
-                ("scene", "scenes", "scene:scene"),
-                # Research notes walk `research/notes/`. Treated like lore
-                # (cross-layer) rather than scenes (book-scoped) — universe-
-                # or series-level research notes are a natural use case.
-                ("research", "research/notes", "research:note"),
-                ("lore", "lore", "lore:lore_note"),
-                ("prompt", "prompts", "prompt:base"),
-                ("assistant", "assistants", "assistant:assistant"),
-                # Reusable mutation sets (#62): body-less Node files under
-                # `mutation-sets/`. Layered like lore/prompts (a werewolf
-                # transform can live at any project level).
-                ("mutation_set", "mutation-sets", "mutation_set:mutation_set"),
-                # Saved views (0.5.0, #35/#78): body-less Node files under
-                # `views/`, each carrying a ViewSpec in front matter. Layered
-                # like mutation sets — a view can live at any project level.
-                ("view", "views", "view:view"),
-            ]:
+            for family in NODE_FAMILIES:
                 # Scenes stay book-scoped — only walk the current project's scenes folder.
-                if kind == "scene" and not is_current_project:
+                if family.kind == "scene" and not is_current_project:
                     continue
                 self._collect_layer_entries(
-                    folder=folder,
-                    folder_name=folder_name,
-                    kind=kind,
-                    default_entry_type=default_entry_type,
-                    layer_id=layer_id,
-                    layer_label=layer_label,
+                    layer=layer,
+                    family=family,
                     index=index,
                     duplicate_relative_to=root,
+                    schema=schema,
                 )
             # Chat sessions live as YAML files (not Node-shaped .md), so they
             # need their own collector. Read-only for now: this makes them
@@ -87,28 +123,17 @@ class ReferencesMixin:
             # remains the source of truth (Phase 3b-i / decisions-node-
             # editor-modularization).
             if is_current_project:
-                self._collect_chat_entries(
-                    folder=folder,
-                    layer_id=layer_id,
-                    layer_label=layer_label,
-                    index=index,
-                )
+                self._collect_chat_entries(layer=layer, index=index)
+        index.rebuild_reverse_edges()
         return index
 
-    def _collect_chat_entries(
-        self,
-        *,
-        folder: Path,
-        layer_id: str,
-        layer_label: str,
-        index: NodeIndex,
-    ) -> None:
+    def _collect_chat_entries(self, *, layer: IndexLayer, index: NodeIndex) -> None:
         """Walk <project>/chats/*.yaml and add an index entry per session.
 
         Storage stays YAML — this is just a discovery layer so chats are
         addressable from the unified node index alongside other kinds.
         """
-        chats_dir = folder / "chats"
+        chats_dir = layer.folder / "chats"
         if not chats_dir.exists():
             return
         for path in sorted(chats_dir.glob("*.yaml")):
@@ -131,8 +156,8 @@ class ReferencesMixin:
                 entry_type="chat:chat_session",
                 path=path,
                 title=title,
-                source_layer_id=layer_id,
-                source_layer_label=layer_label,
+                source_layer_id=layer.id,
+                source_layer_label=layer.label,
             )
             index.id_by_path[path.resolve()] = chat_id
             existing = index.by_id.get(chat_id)
@@ -147,7 +172,11 @@ class ReferencesMixin:
             index.by_id[chat_id] = entry
 
     def _collect_machine_layer_assistants(
-        self, index: NodeIndex, *, duplicate_relative_to: Path
+        self,
+        index: NodeIndex,
+        *,
+        duplicate_relative_to: Path,
+        schema: MetadataSchema | None = None,
     ) -> None:
         from app.services import machine_settings as ms_service
 
@@ -155,29 +184,28 @@ class ReferencesMixin:
         if not (machine_dir / "assistants").exists():
             return
         self._collect_layer_entries(
-            folder=machine_dir,
-            folder_name="assistants",
-            kind="assistant",
-            default_entry_type="assistant:assistant",
-            layer_id=self._metadata_schema_layer_id(machine_dir),
-            layer_label="Machine",
+            layer=IndexLayer(
+                folder=machine_dir,
+                id=self._metadata_schema_layer_id(machine_dir),
+                label="Machine",
+            ),
+            family=NodeFamily("assistant", "assistants", "assistant:assistant"),
             index=index,
             duplicate_relative_to=duplicate_relative_to,
+            schema=schema,
         )
 
     def _collect_layer_entries(
         self,
         *,
-        folder: Path,
-        folder_name: str,
-        kind: str,
-        default_entry_type: str,
-        layer_id: str,
-        layer_label: str,
+        layer: IndexLayer,
+        family: NodeFamily,
         index: NodeIndex,
         duplicate_relative_to: Path,
+        schema: MetadataSchema | None = None,
     ) -> None:
-        for path in sorted((folder / folder_name).glob("*.md")):
+        folder = layer.folder
+        for path in sorted((folder / family.folder_name).glob("*.md")):
             try:
                 front_matter = self._read_front_matter_only(path, strict=True)
             except ProjectServiceError as exc:
@@ -188,33 +216,33 @@ class ReferencesMixin:
             if raw_node_id is None:
                 node_id = path.stem
                 index.warnings.append(
-                    f"{kind.title()} file {self._safe_relative(path, folder)} is missing front matter id; using filename stem as legacy id."
+                    f"{family.kind.title()} file {self._safe_relative(path, folder)} is missing front matter id; using filename stem as legacy id."
                 )
             elif isinstance(raw_node_id, str) and raw_node_id.strip():
                 node_id = raw_node_id.strip()
             else:
                 node_id = path.stem
                 index.errors.append(
-                    f"{kind.title()} file {self._safe_relative(path, folder)} has invalid front matter id; it must be text."
+                    f"{family.kind.title()} file {self._safe_relative(path, folder)} has invalid front matter id; it must be text."
                 )
 
-            raw_entry_type = front_matter.get("entry_type") or default_entry_type
-            entry_type = raw_entry_type if isinstance(raw_entry_type, str) else default_entry_type
+            raw_entry_type = front_matter.get("entry_type") or family.default_entry_type
+            entry_type = raw_entry_type if isinstance(raw_entry_type, str) else family.default_entry_type
             raw_title = front_matter.get("title")
             title = raw_title.strip() if isinstance(raw_title, str) and raw_title.strip() else node_id
             entry = NodeIndexEntry(
                 id=node_id,
-                kind=kind,
+                kind=family.kind,
                 entry_type=entry_type,
                 path=path,
                 title=title,
-                source_layer_id=layer_id,
-                source_layer_label=layer_label,
+                source_layer_id=layer.id,
+                source_layer_label=layer.label,
             )
             index.id_by_path[path.resolve()] = node_id
             existing = index.by_id.get(node_id)
             if existing is not None:
-                if existing.source_layer_id == layer_id:
+                if existing.source_layer_id == layer.id:
                     # Duplicate within the same layer — stays an error.
                     index.errors.append(
                         f"Duplicate front matter id {node_id} in "
@@ -224,10 +252,30 @@ class ReferencesMixin:
                     continue
                 # Cross-layer collision: descendant wins, but flag it for visibility.
                 index.warnings.append(
-                    f"Entry id {node_id} in {layer_label} shadows the entry from "
+                    f"Entry id {node_id} in {layer.label} shadows the entry from "
                     f"{existing.source_layer_label}."
                 )
             index.by_id[node_id] = entry
+            # Same front matter, no second read: the edges this node declares
+            # are extracted here rather than in a later per-entry pass (#305).
+            # Assigning (not appending) keeps edges in step with `by_id` when a
+            # descendant layer shadows an ancestor's entry.
+            try:
+                edges = self._reference_edges_for_entry(entry, schema, front_matter=front_matter)
+            except ProjectServiceError as exc:
+                # `metadata:` that isn't a mapping. The node still indexes — it
+                # just contributes no edges — but that has to be *said*, or its
+                # references vanish from the graph and the backlinks panel with
+                # no signal anywhere.
+                index.errors.append(
+                    f"{self._safe_relative(path, duplicate_relative_to)}: {exc.message} "
+                    f"Its references were not indexed."
+                )
+                edges = []
+            if edges:
+                index.edges_by_src[node_id] = edges
+            else:
+                index.edges_by_src.pop(node_id, None)
 
     def _safe_relative(self, path: Path, anchor: Path) -> Path | str:
         try:
@@ -328,92 +376,110 @@ class ReferencesMixin:
         return ReferenceResolveResponse(candidates=candidates)
 
     def list_backlinks(self, target_id: str) -> BacklinksResponse:
+        """What points at `target_id`, read straight off the reverse adjacency
+        map the index build produced — no second walk over every node's front
+        matter (#305)."""
         node_index = self._build_node_index()
         if target_id not in node_index.by_id:
             return BacklinksResponse(target_id=target_id, backlinks=[])
         schema = self.read_metadata_schema()
         backlinks: list[Backlink] = []
-        for entry in node_index.by_id.values():
-            if entry.id == target_id:
+        for edge in node_index.edges_by_dst.get(target_id, []):
+            # A node's reference to itself is not a backlink.
+            if edge.src == target_id:
                 continue
-            entry_definition = schema.entry_types.get(entry.entry_type)
-            if entry_definition is None:
+            entry = node_index.by_id.get(edge.src)
+            field = schema.fields.get(edge.field_id)
+            if entry is None or field is None:
                 continue
-            try:
-                front_matter = self._read_front_matter_only(entry.path, strict=True)
-            except ProjectServiceError:
-                continue
-            metadata = self._normalise_metadata(front_matter.get("metadata"), entry.path)
-            for field_id in entry_definition.fields:
-                field = schema.fields.get(field_id)
-                if field is None:
-                    continue
-                value = metadata.get(field_id)
-                matched = False
-                if field.type == "entity_ref" and isinstance(value, str) and value == target_id or field.type == "entity_ref_list" and isinstance(value, list) and target_id in value:
-                    matched = True
-                if matched:
-                    backlinks.append(
-                        Backlink(
-                            id=entry.id,
-                            title=entry.title or entry.id,
-                            kind=entry.kind,
-                            entry_type=entry.entry_type,
-                            field_id=field_id,
-                            field_name=field.name,
-                        )
-                    )
+            backlinks.append(
+                Backlink(
+                    id=entry.id,
+                    title=entry.title or entry.id,
+                    kind=entry.kind,
+                    entry_type=entry.entry_type,
+                    field_id=edge.field_id,
+                    field_name=field.name,
+                )
+            )
         backlinks.sort(key=lambda link: (link.kind, link.title.lower(), link.field_id))
         return BacklinksResponse(target_id=target_id, backlinks=backlinks)
 
-    def _forward_refs_for_entry(self, entry: NodeIndexEntry, schema: MetadataSchema) -> list[str]:
-        """The ids one node references through its entity_ref* fields, deduped in
-        field-declaration order. Empty when the node has no schema type, is
-        unreadable, or references nothing."""
+    def _reference_edges_for_entry(
+        self,
+        entry: NodeIndexEntry,
+        schema: MetadataSchema | None,
+        *,
+        front_matter: dict[str, Any] | None = None,
+    ) -> list[ReferenceEdge]:
+        """The field-qualified edges one node declares through its entity_ref*
+        fields, in field-declaration order.
+
+        The single point where an edge is derived from a node — the index walk
+        passes the front matter it already parsed; re-extraction for a single
+        changed file re-reads it. Empty when the node has no schema type, is
+        unreadable, or references nothing.
+
+        Raises `ProjectServiceError` when the node's `metadata:` is not a
+        mapping. That is deliberately *not* swallowed here: the index walk
+        records it against the file, and a caller re-extracting one node wants
+        the error rather than a silently empty result.
+        """
+        if schema is None:
+            return []
         entry_definition = schema.entry_types.get(entry.entry_type)
         if entry_definition is None:
             return []
-        try:
-            front_matter = self._read_front_matter_only(entry.path, strict=True)
-        except ProjectServiceError:
-            return []
+        if front_matter is None:
+            try:
+                front_matter = self._read_front_matter_only(entry.path, strict=True)
+            except ProjectServiceError:
+                return []
         metadata = self._normalise_metadata(front_matter.get("metadata"), entry.path)
-        targets: list[str] = []
-        seen: set[str] = set()
-
-        def add(candidate: object) -> None:
-            if isinstance(candidate, str) and candidate and candidate not in seen:
-                seen.add(candidate)
-                targets.append(candidate)
-
+        edges: list[ReferenceEdge] = []
         for field_id in entry_definition.fields:
             field = schema.fields.get(field_id)
             if field is None:
                 continue
-            value = metadata.get(field_id)
-            if field.type == "entity_ref":
-                add(value)
-            elif field.type == "entity_ref_list" and isinstance(value, list):
-                for item in value:
-                    add(item)
-        return targets
+            edges.extend(self._edges_from_field(entry.id, field_id, field.type, metadata.get(field_id)))
+        return edges
+
+    def _edges_from_field(
+        self, src: str, field_id: str, field_type: str, value: object
+    ) -> list[ReferenceEdge]:
+        """The edges one `entity_ref` / `entity_ref_list` value contributes.
+
+        Deduped within the field — a target listed twice is one edge — but not
+        across fields, since the field is part of the edge's identity.
+        """
+        if field_type == "entity_ref":
+            candidates: list[object] = [value]
+        elif field_type == "entity_ref_list" and isinstance(value, list):
+            candidates = list(value)
+        else:
+            return []
+        targets = [item for item in candidates if isinstance(item, str) and item]
+        return [
+            ReferenceEdge(src=src, dst=target, field_id=field_id)
+            for target in dict.fromkeys(targets)
+        ]
 
     def reference_graph(self) -> ReferenceGraphResponse:
         """Forward reference adjacency for the whole project (#184 Phase 2).
 
-        For every indexed node, collect the ids it references through any
-        `entity_ref` / `entity_ref_list` field. Same front-matter walk as
-        `list_backlinks`, but forward + bulk + one pass, so the frontend can
-        invert it into a reverse index the view evaluator's `references` computed
-        field projects over. Only nodes that reference something appear as
-        keys."""
+        A projection of the edges the index already carries — the ids each node
+        references through any `entity_ref` / `entity_ref_list` field, flattened
+        across fields and deduped in field-declaration order. The frontend
+        inverts this into a reverse index the view evaluator's `references`
+        computed field projects over. Only nodes that reference something appear
+        as keys."""
         node_index = self._build_node_index()
-        schema = self.read_metadata_schema()
-        refs: dict[str, list[str]] = {}
-        for entry in node_index.by_id.values():
-            targets = self._forward_refs_for_entry(entry, schema)
-            if targets:
-                refs[entry.id] = targets
+        # `edges_by_src` never holds an empty list, so every key is a node that
+        # references something — no filtering needed here.
+        refs = {
+            src: list(dict.fromkeys(edge.dst for edge in edges))
+            for src, edges in node_index.edges_by_src.items()
+        }
         return ReferenceGraphResponse(refs=refs)
 
     def list_reference_candidates(

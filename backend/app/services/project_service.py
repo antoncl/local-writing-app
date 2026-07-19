@@ -115,48 +115,46 @@ class ProjectService(
         return out
 
     def _backlinks_to_targets(self, target_ids: set[str], *, exclude_source_ids: set[str] | None = None) -> list[Backlink]:
+        """What references any of `target_ids` — the delete guards' question.
+
+        Reads the index's reverse adjacency map (#305), same as `list_backlinks`.
+        Until #305 this was a second, independent copy of that walk, and the two
+        drifted the moment either changed: one would report a node as
+        unreferenced while the other refused the delete over the same node.
+        One source of edges, one answer.
+
+        Note the de-dup: a source that reaches the target set through two fields
+        is two edges, and both are legitimate rows (they name different fields),
+        but a source reaching *several* targets through the *same* field must
+        still be one row — the caller asks "what points into this set", not
+        "how many ways".
+        """
         if not target_ids:
             return []
         excluded = exclude_source_ids or set()
         node_index = self._build_node_index()
         schema = self.read_metadata_schema()
         backlinks: list[Backlink] = []
-        for entry in node_index.by_id.values():
-            if entry.id in excluded:
-                continue
-            entry_definition = schema.entry_types.get(entry.entry_type)
-            if entry_definition is None:
-                continue
-            try:
-                front_matter = self._read_front_matter_only(entry.path, strict=True)
-            except ProjectServiceError:
-                continue
-            metadata = self._normalise_metadata(front_matter.get("metadata"), entry.path)
-            for field_id in entry_definition.fields:
-                field = schema.fields.get(field_id)
-                if field is None:
+        seen: set[tuple[str, str]] = set()
+        for target_id in target_ids:
+            for edge in node_index.edges_by_dst.get(target_id, []):
+                if edge.src in excluded or (edge.src, edge.field_id) in seen:
                     continue
-                value = metadata.get(field_id)
-                hits_target = (
-                    field.type == "entity_ref"
-                    and isinstance(value, str)
-                    and value in target_ids
-                ) or (
-                    field.type == "entity_ref_list"
-                    and isinstance(value, list)
-                    and any(isinstance(item, str) and item in target_ids for item in value)
-                )
-                if hits_target:
-                    backlinks.append(
-                        Backlink(
-                            id=entry.id,
-                            title=entry.title or entry.id,
-                            kind=entry.kind,
-                            entry_type=entry.entry_type,
-                            field_id=field_id,
-                            field_name=field.name,
-                        )
+                entry = node_index.by_id.get(edge.src)
+                field = schema.fields.get(edge.field_id)
+                if entry is None or field is None:
+                    continue
+                seen.add((edge.src, edge.field_id))
+                backlinks.append(
+                    Backlink(
+                        id=entry.id,
+                        title=entry.title or entry.id,
+                        kind=entry.kind,
+                        entry_type=entry.entry_type,
+                        field_id=edge.field_id,
+                        field_name=field.name,
                     )
+                )
         backlinks.sort(key=lambda link: (link.kind, link.title.lower(), link.field_id))
         return backlinks
 
@@ -238,7 +236,13 @@ class ProjectService(
         if not path.exists():
             return {}
         with path.open("r", encoding="utf-8") as handle:
-            data = yaml.safe_load(handle) or {}
+            try:
+                data = yaml.safe_load(handle) or {}
+            except yaml.YAMLError as exc:
+                # Same contract as the front-matter readers below: a syntax
+                # error in a hand-edited file is a 422 with the parser's
+                # message, not a raw YAMLError escaping to a 500.
+                raise ProjectServiceError(f"Malformed YAML in {path.name}: {exc}", 422) from exc
         if not isinstance(data, dict):
             raise ProjectServiceError(f"{path.name} must contain a YAML object.")
         return data

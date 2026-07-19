@@ -10,8 +10,10 @@
 import type { MetadataSchema } from "@/lib/types";
 
 // The ids one node references through its `entity_ref` / `entity_ref_list`
-// fields — the frontend mirror of the backend `_forward_refs_for_entry`
-// (references.py). Walks the node's entry_type field list, collecting the scalar
+// fields — the frontend mirror of the backend `_reference_edges_for_entry`
+// (references.py), minus the field qualifier: the backend keeps edges
+// field-qualified (#305), this only needs the target set (see below).
+// Walks the node's entry_type field list, collecting the scalar
 // ref and each list ref, deduped into a SET: only the ref *set* determines the
 // reverse index, so reordering a list, editing a non-ref field, or a prose-only
 // save all leave it identical. Used to change-gate the reverse-index refresh

@@ -70,7 +70,6 @@
     nest: "Nest",
     orphans_ref: "Orphans", // synthetic lowering scaffolding — never rendered as a canvas node
     field_of: "Field of",
-    self: "This entry",
     highlight: "Highlight",
     hand_picked: "Hand-picked",
   };
@@ -81,7 +80,7 @@
 
   // One-line config summary shown on the COMPACT (unselected) node body (§A):
   // the resting canvas stays small; selecting a node expands it to the editor
-  // below. Structural nodes (set ops / output / self / highlight) return "".
+  // below. Structural nodes (set ops / output / highlight) return "".
   let summaryText = $derived(
     nodeSummary(kind, cfg, {
       fieldName: (key) => ctx.fieldByKey(key)?.name ?? key,
@@ -948,8 +947,6 @@
       {/each}
     </select>
     <p class="vhint">Wire a set into the input; projects to a set of <b>nodes</b>.</p>
-  {:else if kind === "self"}
-    <p class="vhint">The entry this pane is anchored to. Feed it into <b>Field of</b> — e.g. <b>References</b> for its backlinks.</p>
   {:else if kind === "highlight"}
     <span class="vswatch" title="Highlight colour">
       <span class="vswatch-label">Colour</span>

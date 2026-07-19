@@ -50,8 +50,7 @@
   // for its own shape (ADR-0037 §3): the per-layer buckets come from the spec's
   // `group_by: source_layer` level, never synthesized here. Hand the whole view to
   // ViewNodeList, which owns evaluation + the parameter strip (ADR-0032 §D) — so a
-  // parameterized assistant view now gets its strip here too, not only in Lore. A
-  // roster pane with no anchor, so no `$self` is supplied.
+  // parameterized assistant view now gets its strip here too, not only in Lore.
   $: view = {
     spec: viewSpec,
     universe: entries,

@@ -5,7 +5,7 @@
 // layout, no Date/random) so the graph ⇄ spec round-trip is unit-testable.
 
 import type { MetadataSchema, ViewExpr, ViewLeafValue, ViewNestOp, ViewOperand, ViewSort, ViewSpec } from "@/lib/types";
-import { kindUniverseExpr, SELF_VAR } from "@/lib/views/evaluateView";
+import { kindUniverseExpr } from "@/lib/views/evaluateView";
 import {
   DEFAULT_HANDLE_ID,
   FILTER_VALUE_HANDLE,
@@ -219,11 +219,10 @@ export function specToGraph(spec: ViewSpec | null | undefined, schema?: Metadata
       return filterFromPred(e.filter.pred, depth, e.filter.mode === "drop" ? "drop" : "keep", ofId);
     }
     if (e.var != null) {
-      // Only the reserved `$self` renders as a designer source in the 0.7.0 cut
-      // (a declared source Parameter node is deferred, ADR-0032). A promoted
-      // formal never appears as a standalone leaf — it lives in a Filter value
-      // slot — so any other `var` has no designer node and is skipped.
-      return e.var === SELF_VAR ? addNode("self", depth, {}) : null;
+      // A standalone `{var}` leaf has no designer node: a promoted formal lives in a
+      // Filter value slot, never as a bare source. (`$self` was the only source that
+      // rendered here; removed in #199 — reintroduce with the anchored surface.)
+      return null;
     }
     // A kind-root `descendants_of` is the roster → the `All` source itself (#211).
     // (`!= null` not `!== undefined`: the backend serializes ViewExpr densely.)
@@ -248,7 +247,7 @@ export function specToGraph(spec: ViewSpec | null | undefined, schema?: Metadata
   // Reconstruct a `filter` graph node from a first-class `{filter}`'s pred + of
   // (ADR-0041 §C). `setInput` is the `of` node id; it falls back to a fresh `All`
   // only for a degenerate `of` that walked to nothing. A wired `field` value
-  // (field_of / $self, #196) reopens into the `value` handle.
+  // (field_of, #196) reopens into the `value` handle.
   function filterFromPred(pred: ViewExpr, depth: number, mode: "keep" | "drop", setInput: string | null): string | null {
     let data: ViewNodeData | null = null;
     let valueSource: string | null = null;
@@ -257,7 +256,7 @@ export function specToGraph(spec: ViewSpec | null | undefined, schema?: Metadata
     else if (pred.tagged != null) data = { filter_kind: "tagged", tagged: pred.tagged, param: leafParam(pred.tagged) };
     else if (pred.field != null) {
       const v = pred.field.value;
-      valueSource = isFieldOfOperand(v) ? walk({ field_of: v.field_of } as ViewExpr, depth + 1) : isVarOperand(v) && v.var === SELF_VAR ? addNode("self", depth + 1, {}) : null;
+      valueSource = isFieldOfOperand(v) ? walk({ field_of: v.field_of } as ViewExpr, depth + 1) : null;
       data = valueSource ? { filter_kind: "field", field: { ...pred.field, value: null } } : { filter_kind: "field", field: pred.field, param: leafParam(v) };
     }
     if (!data) return null;

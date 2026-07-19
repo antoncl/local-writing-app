@@ -9,8 +9,8 @@
 //
 // Palette ROLES (ADR-0027, doc §12) — the approachable surface over the shipped
 // set algebra:
-//  - Injector — a source: `hand_picked`, `$self`, PLUS a universal `All` (the
-//    whole kind universe). (The bare predicate leaves — type/descendants_of/
+//  - Injector — a source: `hand_picked`, PLUS a universal `All` (the whole kind
+//    universe). (The bare predicate leaves — type/descendants_of/
 //    tagged/field — were retired with #271/#284; a predicate now lives only
 //    inside a first-class Filter's `pred`.)
 //  - Filter — a transform (set in → narrowed out) on a type/tag/field predicate.
@@ -33,7 +33,7 @@
 import type { MetadataSchema, NodePickerConfig, ViewExpr, ViewFieldOf, ViewFieldPredicate, ViewFilterOp, ViewGroupByLevel, ViewGroupSpec, ViewLeafValue, ViewNestMatch, ViewNestOp, ViewOperand, ViewParam, ViewSort, ViewSpec } from "@/lib/types";
 import type { Built } from "@/lib/views/builtAlgebra";
 import { built, complementBuilt, differenceBuilt, EMPTY, intersectBuilt, materialize, materializeOuter, unionBuilt, UNIVERSE } from "@/lib/views/builtAlgebra";
-import { kindUniverseExpr, REFERENCES_FIELD, SELF_VAR } from "@/lib/views/evaluateView";
+import { kindUniverseExpr, REFERENCES_FIELD } from "@/lib/views/evaluateView";
 import { walkViewExpr } from "@/lib/views/walkViewExpr";
 import { pickerMembership } from "@/lib/utils/pickerSources";
 
@@ -46,8 +46,7 @@ export type PredicateKind = "type" | "descendants_of" | "tagged" | "field";
 // "nest" is the relational operator (ADR-0028): two input handles
 // (parents/children), one output; a self-loop into `parents` = recursion.
 // "field_of" is forward projection (#184, ADR-0031 §D): one `of` input, a field
-// selector, one output (a node-set). "self" is the reserved wired source
-// (`{var: "$self"}`, the pane's anchor node): no input, one output.
+// selector, one output (a node-set).
 export type GraphNodeKind =
   | "output"
   | "all"
@@ -56,7 +55,6 @@ export type GraphNodeKind =
   | "highlight"
   | "nest"
   | "field_of"
-  | "self"
   | "orphans_ref"
   | CombinatorKind
   // The only source LEAF left after #271/#284 — an explicit id set. The bare
@@ -373,15 +371,15 @@ export function valueSlotPayload(
 
 // Whether a wired `source` may feed a Filter/field value slot authored on
 // `field` (#196, ADR-0031 §E). The source must be an operand-representable wired
-// source — a `field_of` (the node-set/value-set producer) or a bare `$self` — AND
-// its output payload must match what the field's slot accepts. Set-algebra / leaf
-// sources have no operand form → rejected (a future increment).
+// source — a `field_of` (the node-set/value-set producer) — AND its output payload
+// must match what the field's slot accepts. Set-algebra / leaf sources have no
+// operand form → rejected (a future increment).
 export function valueSlotAccepts(
   source: ViewGraphNode | undefined,
   field: ViewFieldPredicate | undefined,
   fieldType: (key: string) => string | null,
 ): boolean {
-  if (!source || (source.kind !== "field_of" && source.kind !== "self")) return false;
+  if (!source || source.kind !== "field_of") return false;
   const want = valueSlotPayload(field?.key, fieldType);
   return want != null && outputPayload(source, fieldType) === want;
 }
@@ -490,7 +488,7 @@ export function isEmptyValue(v: unknown): boolean {
 }
 
 // Injector ≡ a set-arity-0 operator (ADR-0041 §D): a source with no set-valued
-// input port — the predicate leaves + `all` + `$self` + an orphans ref (`orphans_of`
+// input port — the predicate leaves + `all` + an orphans ref (`orphans_of`
 // names its Nest by id, not a wired port). DERIVED from `inputArity` (the §D arity
 // table is the single source) so the two can't drift: "injector" is exactly
 // `inputArity(kind) === "none"`. This is the §D-precise membership — orphans
@@ -705,9 +703,6 @@ function buildNode(
       // `!= null` (not truthiness): an empty-string id is a valid ref, and the
       // evaluator matches on `!= null` too — keep them in lockstep.
       return node.data.orphans_of != null ? built({ orphans_of: node.data.orphans_of }) : EMPTY;
-    case "self":
-      // The reserved anchor source — `{var: "$self"}` (no input).
-      return built({ var: SELF_VAR });
     case "field_of":
       return fieldOfBuilt(soleChild(graph, byId, nodeId, uni), node, uni);
     case "filter":
@@ -762,9 +757,9 @@ function filterBuilt(graph: ViewGraph, byId: Map<string, ViewGraphNode>, node: V
 }
 
 // Resolve a wired value operand on `node`'s `value` handle (#196, ADR-0031 §E):
-// a `field_of` source → a `{field_of}` operand; a bare `$self` → `{var: $self}`.
-// Set-algebra / leaf sources have no operand form → ignored (validation blocks
-// wiring them). Returns undefined when the value slot is unwired.
+// a `field_of` source → a `{field_of}` operand. Set-algebra / leaf sources have no
+// operand form → ignored (validation blocks wiring them). Returns undefined when
+// the value slot is unwired.
 function wiredValueOperand(
   graph: ViewGraph,
   byId: Map<string, ViewGraphNode>,
@@ -774,7 +769,6 @@ function wiredValueOperand(
   const edge = upstreamOf(graph, node.id).find((e) => e.targetHandle === FILTER_VALUE_HANDLE);
   if (!edge) return undefined;
   const src = byId.get(edge.source);
-  if (src?.kind === "self") return { var: SELF_VAR };
   if (src?.kind === "field_of") {
     const b = buildNode(graph, byId, edge.source, uni);
     if (b.tag === "expr" && b.expr.field_of) return { field_of: b.expr.field_of };

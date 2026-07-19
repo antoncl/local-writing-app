@@ -464,7 +464,7 @@ DEFAULT_METADATA_SCHEMA: dict[str, Any] = {
             # field_overrides — but NOT seeded into any default type membership
             # (surfacing it as a rail backlinks widget is #15 / Phase 2c), and
             # its definition is built-in (not user-editable, like the other
-            # computed fields). `field_of($self, references)` → the referrers.
+            # computed fields). `field_of(set, references)` → the referrers.
             "name": "References",
             "type": "computed",
             "computed": {"function": "references", "value_type": "node_set"},

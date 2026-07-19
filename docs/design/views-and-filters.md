@@ -548,7 +548,12 @@ params:
   **inactive** until the user picks (ADR-0031 §B).
 - **No `type` field is stored.** A param's type is **recomputed at load** from the field(s) whose
   slot references it (the intersection rule, ADR-0031 §F) — single source of truth, no drift.
-- `$self` is **reserved** and never appears in `params` (surface-supplied via bindings).
+
+> **`$self` removed (#199, ADR-0032 Amendment 2).** The reserved anchor operand described below was
+> deleted — no render surface bound it (every view pane is a roster/tree pane with no anchor), so it
+> was inert everywhere and offered as a designer footgun. The `{var}` operand mechanism (promoted
+> formals) is unchanged. Reintroduce a `$self`-equivalent with the anchored render surface when it
+> ships. Remaining `$self` references below are **historical**, marked in place.
 
 **Variable / projection operand.** A `field` predicate's `value` is **either** a literal (as today)
 **or** exactly one tagged operand — mutually exclusive by shape, so there is no precedence to
@@ -556,7 +561,6 @@ resolve (a slot holds one value):
 ```yaml
 field: { key: "status",  op: "overlap", value: ["draft"] }                        # literal (unchanged)
 field: { key: "pov_ref", op: "overlap", value: { var: "POV" } }                   # promoted formal
-field: { key: "pov_ref", op: "overlap", value: { var: "$self" } }                 # reserved anchor
 field: { key: "tags",    op: "overlap", value: { field_of: { of: <ViewExpr>, field: "tags" } } }  # projection
 ```
 The designer's three fill-modes (inline literal / promoted formal / wired source) lower to exactly
@@ -567,19 +571,19 @@ That is the whole operand discriminator.
 ```yaml
 field_of: { of: <ViewExpr>, field: "pov" }
 ```
-- `of` = the input set (any `ViewExpr`: a leaf, `$self`, set algebra). `field` = the projected key.
+- `of` = the input set (any `ViewExpr`: a leaf, set algebra). `field` = the projected key.
 - **Output payload is inferred, never stored** (ADR-0031 §D): `field` a **reference** field →
   a **node-set**; a **scalar** field → a **value-set**. Evaluator does `flatMap` + dedup.
 - Appears standalone (feeds set algebra / the render wrapper) or inline in a predicate `value`
   (same-field / same-value / same-tag matching).
 
-**`$self`** — the reserved operand/leaf `{ var: "$self" }`; in an `of`/leaf position it is a
-**singleton node-set** (the anchored node). Bound by the surface via `EvalContext.bindings`;
-unresolved (a pane with no anchor) ⇒ the **empty set**.
+**`$self`** — *removed (#199, ADR-0032 Amendment 2).* Formerly the reserved operand/leaf
+`{ var: "$self" }` = a singleton node-set (the anchored node). No render surface bound it, so it was
+inert everywhere and is deleted; reintroduce with the anchored render surface.
 
 **`references`** (label "References") — no special shape. It is the ADR-0029 catalog **computed**
 field (node-set-valued; §G of ADR-0031, spec'd in §14.4), so it is just a `field` key:
-`field_of: { of: { var: "$self" }, field: "references" }` → the referrers.
+`field_of: { of: <ViewExpr>, field: "references" }` → the referrers.
 
 **`op` enum, 6→4** — `ViewFieldPredicate.op ∈ { overlap, disjoint, set, unset }` (was
 `eq`/`neq`/`includes`/`not_includes`/`set`/`unset`). `overlap` = test non-empty intersection between
@@ -603,18 +607,19 @@ or a resolved binding — is a **list of ids** (the field's stored representatio
 `value: ["char-bob", "char-alice"]` or `default: ["char-bob"]`; comparison is **id-overlap**. So
 `ctx.bindings[name]` for an entity formal is an **id-set**; for a value formal, a **value-set**. The
 `{ var: name }` shape is **position-dispatched**: in an `of`/leaf position it must resolve to a
-**node-set** (in the 0.7.0 cut only `$self` is legal there — a declared entity source is deferred,
-ADR-0032/§14.5); as a predicate operand it may be a
-node-set or a value-set, and the evaluator dispatches on the bound value's shape.
+**node-set** (with `$self` removed (#199) and the declared entity source deferred (ADR-0032/§14.5),
+**no `{var}` binds in an `of`/leaf position in the current cut** — promoted formals appear only as
+predicate operands); as a predicate operand it may be a node-set or a value-set, and the evaluator
+dispatches on the bound value's shape.
 
 ### 14.2 Evaluation
 
 `evaluateView(spec, nodes, ctx)` — `ctx.bindings: Record<string, IdSet | ValueSet>` (name → actual),
 injected exactly as `schema` is (ADR-0025). `ctx` also threads the **reference index +
-id→summary map** (§14.4), the same way. Resolution: `$self` and each promoted
-formal read from `bindings`; an **unbound formal with no default** ⇒ its predicate is inactive
-(no constraint); an **unresolved `$self`** ⇒ empty set. The runtime stays field-structural
-(no per-node type inference at eval time — §14.3 is authoring-time only).
+id→summary map** (§14.4), the same way. Resolution: each promoted formal reads from `bindings`; an
+**unbound formal with no default** ⇒ its predicate is inactive (no constraint, ADR-0031 §B). The
+runtime stays field-structural (no per-node type inference at eval time — §14.3 is authoring-time
+only).
 
 **Inactive predicates and "unset = show everything" (#198).** An inactive predicate (an unbound
 formal) is not a fixed value — it is the **identity element of its immediately enclosing combinator**,
@@ -681,8 +686,10 @@ load and on any reference-mutating save (its caching policy is exactly "rebuild,
 {Bob})` (ADR-0031 §G), so the index needs no per-field keying for this cut.
 
 **Evaluation.** `field_of(of, references)` → for each node `n ∈ of`, `reverseIndex.get(n.id) ?? ∅`,
-resolve ids → nodes, `flatMap` + dedup → a node-set. `field_of({ var: "$self" }, references)` is the
-`$self`-backlinks case (UC1 / `BacklinksPanel`), now a synthetic view.
+resolve ids → nodes, `flatMap` + dedup → a node-set. The `BacklinksPanel` (UC1) projects the open
+node's referrers through the **same** `projectReferences` helper, but hand-passes the anchor id
+straight to it — it does not route through the evaluator (there is no anchored render surface to bind
+one; `$self` was removed, #199 / ADR-0032 Amendment 2).
 
 **Scene id-space bridge (#201).** The reverse index is keyed in **canonical** id space (a node's
 front-matter `id`), but the manuscript Draft roster keys its `EvalNode`s by the structure **`node.id`**

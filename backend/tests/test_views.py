@@ -274,8 +274,8 @@ class ViewSpecModelTests(unittest.TestCase):
 
 class ParameterizedViewGrammarTests(unittest.TestCase):
     """#184 forward model grammar (ADR-0031/0032, views-and-filters.md §14): the
-    `field_of` projection + `var`/`$self` leaves, the 6→4 op enum, and the
-    `params` formal list on a ViewSpec."""
+    `field_of` projection + `var` leaves, the 6→4 op enum, and the `params` formal
+    list on a ViewSpec."""
 
     def test_op_enum_is_4_valued(self) -> None:
         for op in ("overlap", "disjoint", "set", "unset"):
@@ -298,17 +298,17 @@ class ParameterizedViewGrammarTests(unittest.TestCase):
             ViewExpr(field_of={"of": {"type": "scene:scene"}, "field": ""})
 
     def test_var_leaf(self) -> None:
-        self.assertEqual(ViewExpr(var="$self").var, "$self")
         self.assertEqual(ViewExpr(var="POV").var, "POV")
+        # Exclusive with other primaries.
         with self.assertRaises(ValueError):
-            ViewExpr(var="$self", type="lore:character")
+            ViewExpr(var="POV", type="lore:character")
 
     def test_tagged_operand_in_predicate_value_roundtrips(self) -> None:
         # A predicate value may carry a tagged operand (loose `Any`, structural).
         expr = ViewExpr(field={"key": "pov", "op": "overlap", "value": {"var": "POV"}})
         self.assertEqual(expr.field.value, {"var": "POV"})
         proj = ViewExpr(
-            field={"key": "tags", "op": "overlap", "value": {"field_of": {"of": {"var": "$self"}, "field": "tags"}}}
+            field={"key": "tags", "op": "overlap", "value": {"field_of": {"of": {"var": "POV"}, "field": "tags"}}}
         )
         self.assertEqual(proj.field.value["field_of"]["field"], "tags")
 

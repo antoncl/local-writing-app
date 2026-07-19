@@ -33,9 +33,9 @@ export function buildReferenceIndex(
 // Project the `references` computed field (ADR-0031 §14.4): the union of every
 // node that references any id in `of`. This is the single implementation behind
 // both `field_of(set, "references")` in the view evaluator and the backlinks
-// panel (Phase 2c) — the panel is `field_of($self, references)` with `$self` the
-// open node. Reads the reverse index only (never mutates); an unloaded/missing
-// index yields an empty set.
+// panel (Phase 2c) — the panel projects the open node's referrers through this same
+// helper. Reads the reverse index only (never mutates); an unloaded/missing index
+// yields an empty set.
 export function projectReferences(
   of: Iterable<string>,
   reverse: ReadonlyMap<string, ReadonlySet<string>> | null | undefined,

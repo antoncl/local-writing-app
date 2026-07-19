@@ -85,7 +85,7 @@
   let summaryText = $derived(
     nodeSummary(kind, cfg, {
       fieldName: (key) => ctx.fieldByKey(key)?.name ?? key,
-      entryTypeName: (fqn) => ctx.entryTypes.find((t) => t.fqn === fqn)?.name ?? fqn,
+      entryTypeName: (fqn) => ctx.entryTypesWithAbstract.find((t) => t.fqn === fqn)?.name ?? fqn,
     }),
   );
 
@@ -537,11 +537,13 @@
 </script>
 
 <!-- Base slot widgets (§C): a slot's typed picker, parametrized by value + setter
-     so the literal slot and the promoted default reuse ONE control. -->
-{#snippet entryTypeWidget(value: string, onSet: (v: string) => void)}
+     so the literal slot and the promoted default reuse ONE control. `includeAbstract`
+     is set for a `descendants_of` root (which expands a family, so an abstract head
+     is valid, #295); an exact `type` / `field → entry_type` keeps concrete-only. -->
+{#snippet entryTypeWidget(value: string, onSet: (v: string) => void, includeAbstract: boolean = false)}
   <select class="vfield" value={value} onchange={(e) => onSet(e.currentTarget.value)}>
     <option value="">— pick type —</option>
-    {#each ctx.entryTypes as et (et.fqn)}
+    {#each includeAbstract ? ctx.entryTypesWithAbstract : ctx.entryTypes as et (et.fqn)}
       <option value={et.fqn}>{et.name}</option>
     {/each}
   </select>
@@ -607,17 +609,18 @@
 {/snippet}
 
 <!-- Type / Type+subtypes leaf slot (§C uniform): literal picker + promote, or the
-     promote card with an entry-type default. -->
-{#snippet typeDefault()}
-  {@render entryTypeWidget(typeof cfg.param?.default === "string" ? cfg.param.default : "", (v) => setParamDefault(v))}
-{/snippet}
+     promote card with an entry-type default. `useDescendants` threads into the
+     picker's roster so a `descendants_of` slot offers abstract family roots (#295). -->
 {#snippet typeSlot(useDescendants: boolean)}
   {#if isPromoted}
+    {#snippet typeDefault()}
+      {@render entryTypeWidget(typeof cfg.param?.default === "string" ? cfg.param.default : "", (v) => setParamDefault(v), useDescendants)}
+    {/snippet}
     {@render promoteCard(typeDefault)}
   {:else}
     {@const cur = useDescendants ? cfg.descendants_of : cfg.type}
     <div class="vslot-lit nodrag" role="presentation" use:stopPointerdown>
-      {@render entryTypeWidget(typeof cur === "string" ? cur : "", (v) => patch(useDescendants ? { descendants_of: v } : { type: v }))}
+      {@render entryTypeWidget(typeof cur === "string" ? cur : "", (v) => patch(useDescendants ? { descendants_of: v } : { type: v }), useDescendants)}
       {@render promoteButton()}
     </div>
   {/if}

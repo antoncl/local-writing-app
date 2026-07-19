@@ -810,9 +810,28 @@
   // ---- persistence (debounced) ----
   let saveTimer: ReturnType<typeof setTimeout> | null = null;
   let lastSaved = "";
+  // True only while a node drag is in progress (Svelte Flow drag start→stop).
+  // A drag mutates node positions every animation frame, but the gesture is not a
+  // committed change until release — so the persist effect skips while it is set,
+  // and a single persist fires on drag end (#186).
+  let dragging = $state(false);
   $effect(() => {
+    // Read `dragging` FIRST and unconditionally, so drag-END always re-runs this
+    // effect. A Svelte 5 dep must be read on every pass, never behind an earlier
+    // return (see feedback_svelte5_reactivity_traps).
+    const isDragging = dragging;
+    if (isDragging) {
+      // Mid-drag: don't mark dirty or persist. Cancel any timer a pre-drag edit
+      // queued so nothing writes while the pointer is down; `onnodedragstop`
+      // clears `dragging`, re-running this effect with the settled position.
+      if (saveTimer) {
+        clearTimeout(saveTimer);
+        saveTimer = null;
+      }
+      return;
+    }
     // Layout is in the snapshot so a position-only drag (which leaves `spec`
-    // unchanged) still triggers a persist.
+    // unchanged) still persists — now once, on release rather than per frame.
     const snapshot = JSON.stringify({ title, spec, layout: toLayout() });
     if (hydrating || !loadedViewId) {
       lastSaved = snapshot;
@@ -1018,6 +1037,8 @@
         {colorMode}
         {isValidConnection}
         onconnect={normalizeEdges}
+        onnodedragstart={() => (dragging = true)}
+        onnodedragstop={() => (dragging = false)}
         onpaneclick={() => (expandedId = null)}
         deleteKey={["Backspace", "Delete"]}
         fitView

@@ -845,7 +845,12 @@
       });
       revision = saved.revision;
       lastSaved = snapshot;
-      onSaveState?.("saved");
+      // If the author kept editing while this save was in flight, the live snapshot
+      // no longer matches what we just persisted — stay "dirty" (a reschedule is
+      // already queued) rather than flash a premature "Saved" (#263 review). Mirrors
+      // saveEditorPane's `paneStillDirty` recompute for prose panes.
+      const caughtUp = JSON.stringify({ title, spec, layout: toLayout() }) === lastSaved;
+      onSaveState?.(caughtUp ? "saved" : "dirty");
       onBodyChange?.();
       // Refresh the shared saved-view roster so panes consuming this view
       // re-evaluate. Without this, `paneViews.specs` holds the pre-edit spec and

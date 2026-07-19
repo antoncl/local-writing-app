@@ -635,6 +635,17 @@ describe("parameterized views (#184: bindings, field_of)", () => {
     const referenceIndex = new Map([["bob", new Set(["s1", "s3"])]]);
     expect(evalIds(spec, { referenceIndex }).sort()).toEqual(["s1", "s3"]);
   });
+  it("a node-set computed field dispatches by `computed.function`, not a hardcoded key (#204)", () => {
+    // A second node-set computed field, keyed `linked_from` but backed by the
+    // `references` resolver: the evaluator must dispatch on the schema's declared
+    // `computed.function`, so a non-`references` key still projects the referrers.
+    const schema = {
+      fields: { linked_from: { name: "Linked from", type: "computed", options: [], computed: { function: "references", value_type: "node_set" } } },
+    } as unknown as MetadataSchema;
+    const spec: ViewSpec = { kind: "scene", expr: { field_of: { of: { hand_picked: ["bob"] }, field: "linked_from" } } };
+    const referenceIndex = new Map([["bob", new Set(["s1", "s3"])]]);
+    expect(evalIds(spec, { schema, referenceIndex }).sort()).toEqual(["s1", "s3"]);
+  });
 });
 
 // ADR-0038 §C Amendment 1 (#222): the type / descendants_of / tagged leaves now

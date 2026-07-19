@@ -6,11 +6,10 @@
 
 import type { MetadataSchema, ViewExpr, ViewLeafValue, ViewNestOp, ViewOperand, ViewSort, ViewSpec } from "@/lib/types";
 import { kindUniverseExpr } from "@/lib/views/evaluateView";
+import { isFieldOfOperand, isVarOperand } from "@/lib/views/fieldAccess";
 import {
   DEFAULT_HANDLE_ID,
   FILTER_VALUE_HANDLE,
-  isFieldOfOperand,
-  isVarOperand,
   NEST_CHILDREN_HANDLE,
   NEST_ORPHANS_HANDLE,
   NEST_PARENTS_HANDLE,

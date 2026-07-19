@@ -18,6 +18,7 @@
 import type { MetadataFieldDefinition, MetadataSchema, SelectOption, ViewExpr, ViewLeafValue, ViewParam, ViewSpec } from "@/lib/types";
 import { kindEntryTypeOptions } from "@/lib/utils/schemaTypeHelpers";
 import { type EvalBindings } from "@/lib/views/evaluateView";
+import { coerceStringList, isVarOperand } from "@/lib/views/fieldAccess";
 import { walkViewExpr } from "@/lib/views/walkViewExpr";
 
 // A resolved strip control: the declared formal + the field its editor derives
@@ -72,10 +73,6 @@ export function toMultiValued(field: MetadataFieldDefinition): MetadataFieldDefi
   // text input, so leave it a single `select`.
   if (field.type === "select" && field.options.length > 0) return { ...field, type: "multi_select" };
   return field;
-}
-
-function isVarOperand(v: unknown): v is { var: string } {
-  return typeof v === "object" && v !== null && typeof (v as { var?: unknown }).var === "string";
 }
 
 // A var reference discovered in the spec. A `field`-predicate operand derives its
@@ -174,7 +171,7 @@ export function effectiveParamValue(
   overrides: Record<string, unknown>,
 ): string[] {
   const raw = param.name in overrides ? overrides[param.name] : param.default;
-  return toStringList(raw);
+  return coerceStringList(raw);
 }
 
 // Fold declared formals + overrides into an `EvalBindings`. A formal whose
@@ -190,11 +187,4 @@ export function buildBindings(
     if (value.length > 0) bindings[p.name] = value;
   }
   return bindings;
-}
-
-function toStringList(v: unknown): string[] {
-  if (v == null) return [];
-  if (Array.isArray(v)) return v.map((x) => String(x).trim()).filter(Boolean);
-  if (typeof v === "string") return v.split(",").map((s) => s.trim()).filter(Boolean);
-  return [String(v).trim()].filter(Boolean);
 }

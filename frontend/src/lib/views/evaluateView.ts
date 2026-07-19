@@ -40,7 +40,7 @@ import type {
 } from "@/lib/types";
 import { collectNests } from "@/lib/views/nestRegistry";
 import { kindRootEntryTypeId } from "@/lib/utils/schemaTypeHelpers";
-import { asArray, fieldValue, fieldValueList, isCollectionField, isEmpty, isSortableField } from "@/lib/views/fieldAccess";
+import { asArray, coerceStringList, fieldValue, fieldValueList, isCollectionField, isEmpty, isFieldOfOperand, isSortableField, isVarOperand } from "@/lib/views/fieldAccess";
 import { applyGroupBy } from "@/lib/views/groupBy";
 import { projectReferences } from "@/lib/views/referenceIndex";
 
@@ -770,25 +770,56 @@ function evalFieldOf<T extends EvalNode>(state: RunState<T>, op: { of?: ViewExpr
   return projectField(state, evalExpr(state, op.of), op.field);
 }
 
-function projectField<T extends EvalNode>(state: RunState<T>, ofIds: Set<string>, field: string): Set<string> {
-  // `references` is not a stored field — it reads the reverse index (§14.4);
-  // the same projection backs the backlinks panel (Phase 2c). The index is
-  // canonical-id space, so bridge #201: translate the input roster ids →
-  // canonical for the lookup, then the referrer canonical ids → roster ids so
-  // the caller's universe filter matches. Both translations are identity on a
-  // roster where `id === canonical` (lore/assistant), and `projectReferences`
-  // itself stays pure canonical (the backlinks panel keeps reading it directly).
-  if (field === REFERENCES_FIELD) {
-    const canonicalOf = new Set<string>();
-    // `|| id` (not `??`): a blank ref_id ("") is not a canonical id — fall back to
-    // the roster id so the lookup can't query the empty string.
-    for (const id of ofIds) canonicalOf.add(state.nodeById.get(id)?.ref_id || id);
-    const out = new Set<string>();
-    for (const referrer of projectReferences(canonicalOf, state.referenceIndex)) {
-      out.add(state.idByCanonical.get(referrer) ?? referrer);
-    }
-    return out;
+// A node-set computed field projects through a resolver (not a stored value).
+// `references` reads the reverse index (§14.4) — the projection backing the
+// backlinks panel (Phase 2c). The index is canonical-id space, so bridge #201:
+// translate input roster ids → canonical for the lookup, then referrer canonical
+// ids → roster ids so the caller's universe filter matches. Both translations are
+// identity on a roster where `id === canonical` (lore/assistant), and
+// `projectReferences` stays pure canonical (the backlinks panel reads it directly).
+type NodeSetResolver = <T extends EvalNode>(state: RunState<T>, ofIds: Set<string>) => Set<string>;
+
+const projectReferencesField: NodeSetResolver = (state, ofIds) => {
+  const canonicalOf = new Set<string>();
+  // `|| id` (not `??`): a blank ref_id ("") is not a canonical id — fall back to
+  // the roster id so the lookup can't query the empty string.
+  for (const id of ofIds) canonicalOf.add(state.nodeById.get(id)?.ref_id || id);
+  const out = new Set<string>();
+  for (const referrer of projectReferences(canonicalOf, state.referenceIndex)) {
+    out.add(state.idByCanonical.get(referrer) ?? referrer);
   }
+  return out;
+};
+
+// Node-set computed resolvers keyed by the schema `computed.function` (#204):
+// `field_of` on a node-set-valued computed field dispatches here generically —
+// declare `computed: {function, value_type: "node_set"}` in the schema and
+// register the resolver, no hardcoded field key. The built-in `references` field's
+// key doubles as its function name, so schema-less evaluation resolves it too.
+const NODE_SET_RESOLVERS: Record<string, NodeSetResolver> = {
+  references: projectReferencesField,
+};
+
+// The resolver for a node-set computed `field`, or null (a stored/scalar/value-set
+// field, projected the ordinary way). Dispatches on the schema's declared
+// `computed.value_type`; falls back to the field key when the schema is absent
+// (tests / first-render) so the built-in `references` still projects. NOTE: only
+// COMPUTED node-set fields route here — a stored `entity_ref(_list)` holds its ids
+// as a value and projects through the ordinary path below.
+function nodeSetResolver(schema: MetadataSchema | null | undefined, field: string): NodeSetResolver | null {
+  const def = schema?.fields?.[field];
+  if (def) {
+    if (def.type === "computed" && def.computed?.value_type === "node_set") {
+      return NODE_SET_RESOLVERS[def.computed.function ?? ""] ?? null;
+    }
+    return null;
+  }
+  return NODE_SET_RESOLVERS[field] ?? null;
+}
+
+function projectField<T extends EvalNode>(state: RunState<T>, ofIds: Set<string>, field: string): Set<string> {
+  const resolver = nodeSetResolver(state.schema, field);
+  if (resolver) return resolver(state, ofIds);
   // A scalar field projects its WHOLE value; only a collection field (or an array
   // value) tokenizes (#202) — the same rule `evalField` applies on the node side,
   // so a value-set projection of e.g. a comma-bearing title stays one token.
@@ -1247,10 +1278,6 @@ function resolveOperand<T extends EvalNode>(
   return toStringSet(value);
 }
 
-function isVarOperand(v: unknown): v is { var: string } {
-  return typeof v === "object" && v !== null && typeof (v as { var?: unknown }).var === "string";
-}
-
 // Resolve a leaf slot value (type/descendants_of/tagged, ADR-0038 §C Amendment 1,
 // #222) to a string-set, or INACTIVE. A bare string literal is a one-element set —
 // behaviour-preserving, the pre-#222 leaf. A `{var}` reads the bindings: an unbound
@@ -1269,24 +1296,15 @@ function resolveLeafOperand<T extends EvalNode>(
   return s ? new Set([s]) : new Set<string>();
 }
 
-function isFieldOfOperand(v: unknown): v is { field_of: { of: ViewExpr; field: string } } {
-  return typeof v === "object" && v !== null && (v as { field_of?: unknown }).field_of != null;
-}
-
 // Normalize a binding actual (Set or array) to a Set; nullish ⇒ empty.
 function bindingSet(v: BindingValue | null | undefined): Set<string> {
   return v == null ? new Set<string>() : new Set(v);
 }
 
 // Coerce a raw metadata value to a set of trimmed strings — an entity_ref id, an
-// id/tag/value list, or a CSV string (shared `asArray` splitting), for overlap.
+// id/tag/value list, or a CSV string (shared `coerceStringList` splitting), for overlap.
 function toStringSet(v: unknown): Set<string> {
-  const out = new Set<string>();
-  for (const item of asArray(v)) {
-    const s = String(item).trim();
-    if (s) out.add(s);
-  }
-  return out;
+  return new Set(coerceStringList(v));
 }
 
 function intersects(a: Set<string>, b: Set<string>): boolean {

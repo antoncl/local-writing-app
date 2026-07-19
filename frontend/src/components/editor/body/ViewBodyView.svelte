@@ -82,6 +82,7 @@
     ViewSort,
     ViewSpec,
   } from "@/lib/types";
+  import type { ViewSaveState } from "@/lib/editor-core/editorPaneModel";
 
   interface Props {
     scene?: EditableDocument | null;
@@ -92,6 +93,9 @@
     researchStructure?: StructureDocument | null;
     onBodyChange?: () => void;
     onFocus?: () => void;
+    // Report the designer's own debounced save lifecycle up to the pane so the tab
+    // badge reflects it (#263) — views persist outside the generic autosave.
+    onSaveState?: (state: ViewSaveState) => void;
   }
   let {
     scene = null,
@@ -102,6 +106,7 @@
     researchStructure = null,
     onBodyChange,
     onFocus,
+    onSaveState,
   }: Props = $props();
 
   let schema = $derived($metadataSchemaStore);
@@ -816,6 +821,9 @@
       return;
     }
     if (snapshot === untrack(() => lastSaved)) return;
+    // An edit landed and a save is scheduled: mark the pane unsaved right away so
+    // the tab badge reflects it during the debounce window (#263).
+    onSaveState?.("dirty");
     if (saveTimer) clearTimeout(saveTimer);
     saveTimer = setTimeout(() => {
       saveTimer = null;
@@ -824,6 +832,7 @@
   });
   async function persist(snapshot: string): Promise<void> {
     if (!loadedViewId) return;
+    onSaveState?.("saving");
     try {
       const saved = await api.saveView(loadedViewId, {
         title: title || "Untitled view",
@@ -833,6 +842,7 @@
       });
       revision = saved.revision;
       lastSaved = snapshot;
+      onSaveState?.("saved");
       onBodyChange?.();
       // Refresh the shared saved-view roster so panes consuming this view
       // re-evaluate. Without this, `paneViews.specs` holds the pre-edit spec and
@@ -841,7 +851,10 @@
       // "window updates when the editor closes" case.
       void paneViews.reload();
     } catch (e) {
-      // Surface via console for step-3 dev; a toast lands with the pane switcher.
+      // A failed autosave must not be silent: mark the pane as failed so the tab
+      // badge shows a non-transient "Save failed" until a later save succeeds
+      // (#263). `lastSaved` stays unchanged, so the next edit re-attempts.
+      onSaveState?.("error");
       console.error("Failed to save view", e);
     }
   }

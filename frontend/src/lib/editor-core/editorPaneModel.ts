@@ -39,7 +39,18 @@ export type EditorPaneState = {
   // True for ~2s after a successful save so the pane chip can briefly show
   // "Saved". Reset whenever the pane becomes dirty again.
   recentlySaved: boolean;
+  // True while the pane's most recent save attempt FAILED and has not yet been
+  // superseded by a success (#263). Non-transient by design: it persists across
+  // edits/retries so the author never sees a failed view look "saved", and clears
+  // only on the next successful save. Today only view panes set it (they run their
+  // own persist loop, bypassing the generic autosave), but the field is generic.
+  saveError: boolean;
 };
+
+// The save-lifecycle transitions a self-persisting body (the view designer, #263)
+// reports up to its pane so the shared tab badge reflects its state — views run
+// their own debounced save outside `saveEditorPane`, so they push these instead.
+export type ViewSaveState = "dirty" | "saving" | "saved" | "error";
 
 // A fresh, document-less pane (drafts default to a scene-shaped blank).
 export function createEmptyEditorPane(id: string): EditorPaneState {
@@ -56,6 +67,7 @@ export function createEmptyEditorPane(id: string): EditorPaneState {
     draftInputs: [],
     saving: false,
     recentlySaved: false,
+    saveError: false,
   };
 }
 

@@ -18,6 +18,7 @@
   import { sceneMarkdownToHtml } from "@/lib/utils/markdown";
   import { resolveColor } from "@/lib/utils/colors";
   import type { AssistantEntrySummary, Backlink, BodyShape, DocumentKind, EditableDocument, EntryBodyLanguage, EntryMetadata, EntryTypeDefinition, MetadataFieldDefinition, MetadataSchema, PromptEntrySummary, PromptInputDefinition } from "@/lib/types";
+  import type { ViewSaveState } from "@/lib/editor-core/editorPaneModel";
   import { metadataSchemaStore } from "@/lib/stores/schema";
   import { referenceIndexStore } from "@/lib/stores/references";
   import { backlinksFor } from "@/lib/views/backlinks";
@@ -74,6 +75,9 @@
     onCustomData?: ((payload: { entryType: string; kind: DocumentKind }) => void) | undefined;
     onNavigate?: ((payload: { id: string; kind: string }) => void) | undefined;
     onOpenChat?: ((payload: { entry: PromptEntrySummary; inputs: Record<string, unknown>; sceneId: string | null; assistantId: string }) => void) | undefined;
+    // The view designer self-persists; it reports its save lifecycle up so the
+    // pane's tab badge can reflect it (#263).
+    onViewSaveState?: ((state: ViewSaveState) => void) | undefined;
   }
 
   let {
@@ -96,7 +100,8 @@
     onFocus = undefined,
     onCustomData = undefined,
     onNavigate = undefined,
-    onOpenChat = undefined
+    onOpenChat = undefined,
+    onViewSaveState = undefined
   }: Props = $props();
 
 
@@ -1062,6 +1067,7 @@
       {researchStructure}
       onBodyChange={emitChange}
       onFocus={() => onFocus?.()}
+      onSaveState={(state) => onViewSaveState?.(state)}
     />
   {/if}
 

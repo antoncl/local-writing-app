@@ -27,6 +27,7 @@ import { AutosaveScheduler } from "@/lib/editor-core/autosave";
 import {
   type DocumentRef,
   type EditorPaneState,
+  type ViewSaveState,
   cloneMetadata,
   createEmptyEditorPane,
   documentStatus,
@@ -445,6 +446,30 @@ class EditorPanesController {
 
   setEditorPaneSaving(id: string, saving: boolean): void {
     this.panes = this.panes.map((pane) => (pane.id === id ? { ...pane, saving } : pane));
+  }
+
+  // Bridge a self-persisting body's save lifecycle onto the shared pane flags so
+  // the tab badge reflects it (#263). View panes bypass `saveEditorPane` (the
+  // designer owns its own debounced PUT /api/views/{id}), so they push these
+  // transitions instead. `saveError` is deliberately sticky: an edit or a retry
+  // does NOT clear it — only a `saved` does — so a failed view never reads "saved".
+  setViewSaveState(id: string, state: ViewSaveState): void {
+    this.panes = this.panes.map((pane) => {
+      if (pane.id !== id) return pane;
+      switch (state) {
+        case "dirty":
+          return { ...pane, dirty: true, recentlySaved: false };
+        case "saving":
+          return { ...pane, saving: true };
+        case "saved":
+          return { ...pane, saving: false, dirty: false, recentlySaved: true, saveError: false };
+        case "error":
+          return { ...pane, saving: false, recentlySaved: false, saveError: true };
+      }
+    });
+    // Reuse the shared "Saved" indicator window so the flash auto-clears exactly as
+    // it does for prose panes (clearIndicator drops recentlySaved after indicatorMs).
+    if (state === "saved") this.#autosave.flashSaved(id);
   }
 
   async requestDeleteScene(id: string): Promise<void> {

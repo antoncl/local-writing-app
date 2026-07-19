@@ -11,8 +11,9 @@ export const WORKSPACE_KEY = Symbol("workspace-editor");
 export type WorkspaceEditor = {
   // Tab label for an open document (its title).
   title: (id: PanelId) => string;
-  // Save-state badge ("Saving…" / "Unsaved" / "Saved"), or null when clean.
-  badge: (id: PanelId) => { text: string; saved: boolean } | null;
+  // Save-state badge ("Save failed" / "Saving…" / "Unsaved" / "Saved"), or null
+  // when clean. `error` marks the failed-save state for danger styling (#263).
+  badge: (id: PanelId) => { text: string; saved: boolean; error?: boolean } | null;
   // Close (save-and-close) a document tab.
   onClose: (id: PanelId) => void;
   // The document editor, keyed by panel id (branches in App scope so the

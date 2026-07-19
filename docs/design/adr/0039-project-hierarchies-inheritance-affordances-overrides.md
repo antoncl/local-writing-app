@@ -1,7 +1,7 @@
 # ADR-0039: Project hierarchies — inheritance is virtual membership; three edit affordances; per-field layer overrides
 
 - Status: **Proposed** — 0.7.0 planning, 2026-07-16 · **rewritten 2026-07-19** after adversarial
-  review (awaiting approval)
+  review · **Amendment 1 (2026-07-19): inheritance is declared, not inferred** (awaiting approval)
 - Feature: #7 (epic) full project hierarchies
 - Companion: ADR-0040 (the index — which *materializes* the chain, not merely caches it)
 - Amends: ADR-0013 (see its Amendment 1) · Gesture UX: **ADR-0042** (co-designed with mutation
@@ -23,20 +23,19 @@ That framing was wrong in a way worth recording, because it drove several downst
 
 ## Decision
 
-**A project is any folder containing `project.yaml`** (the manifest). Nesting is implicit by
-filesystem — no `children/` wrapper. `project.md` is a *separate* thing: the singleton **project
+**A project is any folder containing `project.yaml`** (the manifest). Projects nest by filesystem
+placement — no `children/` wrapper — though *which* ancestors a project inherits from is **declared**,
+not inferred from that placement (Amendment 1). `project.md` is a *separate* thing: the singleton **project
 node** (kind `project`, the level's own metadata + blurb). A flat project is a chain of length one.
 *(This corrects the pre-1.0 design memo, which conflated the two as `project.md`.)*
 
-> **This is a behaviour change, not existing machinery.** `_project_layer_folders` today walks *every*
-> ancestor folder up to `projects_base_folder` with no marker check, so a purely organizational folder
-> (`Shelf/Weber/`) is already an inheritance layer. Under this ADR it is not. Making a folder a layer
-> becomes deliberate — you add a `project.yaml` — instead of incidental. Slice **A** owns the change;
-> a stray `lore/` in a non-project folder becomes invisible, which pre-1.0 is acceptable and arguably
-> correct.
+> **⚠ Superseded by Amendment 1 below.** This ADR originally made `project.yaml` the *layering*
+> marker, inferring the chain from folder placement. Amendment 1 replaces that with an explicit
+> declaration. `project.yaml` still marks an **openable project**; it no longer decides what is
+> inherited.
 
-**Inheritance is by folder depth, N levels, with no hardcoded tier names.** "Universe / series /
-book" are *conventions the user expresses by nesting depth*, never types the app knows. Lore, prompts,
+**Inheritance runs up the declared ancestry, N levels, with no hardcoded tier names.** "Universe /
+series / book" are *conventions the user expresses by nesting depth*, never types the app knows. Lore, prompts,
 assistants, mutation sets, views and research notes are collected across every ancestor layer,
 descendant overriding ancestor on id collision. Scenes stay **book-scoped** (see below).
 
@@ -178,6 +177,44 @@ colour, a different glyph, or a non-glyph treatment — is deliberately not sett
 mutation marker `⤳` is itself outside the closed glyph lexicon, so both marks enter it together under
 **#304**. This ADR requires only that the tell exist and be distinct.
 
+## Amendment 1 — inheritance is *declared*, over a filesystem-enumerated candidate list (2026-07-19)
+
+The original decision inferred the chain from folder placement: walk to the base folder, and (per the
+now-superseded blockquote above) treat every ancestor carrying a `project.yaml` as a layer. Review of
+slice **A** showed that inference cannot answer two questions without guessing at author intent —
+whether the marker also gates the *metadata-schema* walk, and whether a non-project ancestor
+**breaks** the chain or is **skipped**. Both have defensible answers and opposite failure modes; under
+"break", inserting an organizational folder mid-shelf silently removes a user's universe canon.
+
+**The user declares it instead.** Two steps, in this order, and the order is the whole point:
+
+1. **Enumerate candidates by walking the filesystem to the base folder.** Unchanged from today, and
+   **finite by construction** — directory traversal terminates, so the candidate list is complete and
+   cycle-free before anyone declares anything.
+2. **The project records which of those enumerated ancestors it inherits from.** A declaration naming
+   anything outside the enumeration is ignored with a warning; it cannot extend the walk.
+
+Gaps are now legitimate rather than ambiguous — skipping `Shelf/Weber/` is a recorded choice, not an
+inference the app has to make. This is the same principle the ADR already applies to node edits:
+divergence must be explicit. Inferring an inheritance structure from where a folder happens to sit is
+exactly the implicit magic that auto-shadow-on-edit is rejected for.
+
+**Rejected: a `parent:` link resolved transitively.** Superficially cleaner — one field, chain by
+transitivity, gaps free. But a link is *data in a user-editable file*, so `A → B → C → A` is reachable
+by hand-editing `project.yaml`, and the app would need cycle detection on every chain resolution to
+defend against a problem it introduced. Enumerate-then-declare cannot cycle, because the enumeration
+is a directory walk. **Do not reintroduce transitive links to "simplify" the declaration** — the
+finiteness is the feature.
+
+**The change is contained.** `_project_layer_folders` still returns an ordered `list[Path]`; only its
+body changes, from "every ancestor" to "the declared subset of every ancestor". Both consumers —
+`_metadata_schema_layer_paths` and `_build_node_index` — enumerate that list and are untouched, as are
+layer rank, candidate lists, and the ADR-0040 manifest. It also resolves the schema-walk question by
+construction: one declared chain serves node inheritance *and* schema layering, so they cannot diverge.
+
+**Where the declaration is made:** the create-project wizard, which presents the enumerated ancestors
+and lets the author tick the ones to inherit from. Editable afterwards in project settings.
+
 ## Why / rejected alternatives
 
 - **Overrides as a tier inside `effective_state`** (the earlier draft's central claim: an added layer
@@ -250,7 +287,7 @@ mutation marker `⤳` is itself outside the closed glyph lexicon, so both marks 
 
   | | slice | issue | status |
   |---|---|---|---|
-  | **A** | `project.yaml` marker change + discover ancestor chain and children on `ProjectInfo` | #309 | after #306 |
+  | **A** | declared inheritance (Amendment 1) + discover ancestor chain and children on `ProjectInfo` | #309 | after #306 |
   | **B** | open a non-leaf level (canon + child roster, no manuscript) | #310 | after A |
   | **C** | frontend breadcrumb / level switcher | #311 | after B |
   | **F** | settings / AI-policy chain resolution | #312 | ready, independent |

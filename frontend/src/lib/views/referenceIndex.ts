@@ -7,6 +7,48 @@
 // it (the references store today). The evaluator only reads the map — it never
 // mutates it — so the returned map's sets are the canonical membership.
 
+import type { MetadataSchema } from "@/lib/types";
+
+// The ids one node references through its `entity_ref` / `entity_ref_list`
+// fields — the frontend mirror of the backend `_forward_refs_for_entry`
+// (references.py). Walks the node's entry_type field list, collecting the scalar
+// ref and each list ref, deduped into a SET: only the ref *set* determines the
+// reverse index, so reordering a list, editing a non-ref field, or a prose-only
+// save all leave it identical. Used to change-gate the reverse-index refresh
+// (#200) — a save whose forward-ref set is unchanged cannot move the reverse
+// index, so the refetch (and the reactive storm a fresh Map identity triggers)
+// is skipped. Empty when the node has no schema type, no schema, or no metadata.
+export function forwardRefsOf(
+  metadata: Record<string, unknown> | null | undefined,
+  entryType: string | null | undefined,
+  schema: MetadataSchema | null | undefined,
+): Set<string> {
+  const refs = new Set<string>();
+  if (!metadata || !entryType || !schema) return refs;
+  const definition = schema.entry_types[entryType];
+  if (!definition) return refs;
+  for (const fieldId of definition.fields) {
+    const field = schema.fields[fieldId];
+    if (!field) continue;
+    const value = metadata[fieldId];
+    if (field.type === "entity_ref") {
+      if (typeof value === "string" && value) refs.add(value);
+    } else if (field.type === "entity_ref_list" && Array.isArray(value)) {
+      for (const item of value) if (typeof item === "string" && item) refs.add(item);
+    }
+  }
+  return refs;
+}
+
+// Two forward-ref sets are equivalent when they hold the same ids (order- and
+// duplicate-insensitive, since both are Sets). The change-gate skips the refresh
+// exactly when this holds across a save's before/after.
+export function sameRefSet(a: ReadonlySet<string>, b: ReadonlySet<string>): boolean {
+  if (a.size !== b.size) return false;
+  for (const id of a) if (!b.has(id)) return false;
+  return true;
+}
+
 // Build the reverse index from forward adjacency. `forward[id]` lists the ids
 // node `id` references; the result maps each referenced id → the set of nodes
 // that reference it. Self-references are kept (a node can reference itself); an

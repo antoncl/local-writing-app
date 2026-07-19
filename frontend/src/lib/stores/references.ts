@@ -24,15 +24,21 @@ let generation = 0;
 
 export async function refreshReferenceIndex(): Promise<void> {
   const token = ++generation;
-  try {
-    const { refs } = await api.referenceGraph();
-    if (token !== generation) return; // superseded by a newer refresh or a clear
-    referenceIndexStore.set(buildReferenceIndex(refs));
-  } catch (error) {
-    // Background refresh: swallow so it never surfaces as an unhandled rejection
-    // (callers `void` it). A stale index self-heals on the next save/delete.
+  const { refs } = await api.referenceGraph();
+  if (token !== generation) return; // superseded by a newer refresh or a clear
+  referenceIndexStore.set(buildReferenceIndex(refs));
+}
+
+// Fire-and-forget variant for the save/delete callers that trigger a refresh in
+// the background: a failed background refresh must never surface as an unhandled
+// rejection, and a stale index self-heals on the next save/delete. The awaited
+// project-open path (loadProjectData) calls the throwing `refreshReferenceIndex`
+// directly on purpose, so a reference-graph failure there still fails the open
+// rather than silently opening with an empty index.
+export function refreshReferenceIndexInBackground(): void {
+  void refreshReferenceIndex().catch((error) => {
     console.warn("Failed to refresh reference index", error);
-  }
+  });
 }
 
 export function clearReferenceIndex(): void {

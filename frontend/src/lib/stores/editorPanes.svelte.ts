@@ -48,7 +48,7 @@ import { refreshLoreEntries, setLoreEntries } from "@/lib/stores/lore";
 import { refreshPromptEntries, setPromptEntries } from "@/lib/stores/prompts";
 import { refreshAssistantEntries, setAssistantEntries } from "@/lib/stores/assistants";
 import { refreshKnownTags } from "@/lib/stores/tags";
-import { referenceIndexStore, refreshReferenceIndex } from "@/lib/stores/references";
+import { referenceIndexStore, refreshReferenceIndexInBackground } from "@/lib/stores/references";
 import { forwardRefsOf, sameRefSet } from "@/lib/views/referenceIndex";
 import { backlinksFor } from "@/lib/views/backlinks";
 import { defaultView } from "@/lib/views/evaluateView";
@@ -428,7 +428,7 @@ class EditorPanesController {
           forwardRefsOf(pane.scene.metadata, pane.scene.entry_type, schema),
           forwardRefsOf(draftDocument.metadata, draftDocument.entry_type, schema),
         );
-      if (!refsUnchanged) void refreshReferenceIndex();
+      if (!refsUnchanged) refreshReferenceIndexInBackground();
       if (documentKind === "lore") {
         await refreshLoreEntries();
         await refreshKnownTags();
@@ -582,7 +582,7 @@ class EditorPanesController {
     }
     // A delete drops the node's outgoing refs and dangles any backlinks to it,
     // so rebuild the reverse reference index (#184 Phase 2) in the background.
-    void refreshReferenceIndex();
+    refreshReferenceIndexInBackground();
     this.tearDown(id);
     this.setStatus(`Deleted ${sceneTitle}`);
   }

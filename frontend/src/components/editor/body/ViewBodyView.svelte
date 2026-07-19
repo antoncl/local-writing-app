@@ -82,6 +82,7 @@
     ViewSort,
     ViewSpec,
   } from "@/lib/types";
+  import type { ViewSaveState } from "@/lib/editor-core/editorPaneModel";
 
   interface Props {
     scene?: EditableDocument | null;
@@ -92,6 +93,9 @@
     researchStructure?: StructureDocument | null;
     onBodyChange?: () => void;
     onFocus?: () => void;
+    // Report the designer's own debounced save lifecycle up to the pane so the tab
+    // badge reflects it (#263) — views persist outside the generic autosave.
+    onSaveState?: (state: ViewSaveState) => void;
   }
   let {
     scene = null,
@@ -102,6 +106,7 @@
     researchStructure = null,
     onBodyChange,
     onFocus,
+    onSaveState,
   }: Props = $props();
 
   let schema = $derived($metadataSchemaStore);
@@ -817,6 +822,12 @@
     }
     if (snapshot === untrack(() => lastSaved)) return;
     if (saveTimer) clearTimeout(saveTimer);
+    // Both `onSaveState` calls mutate cross-component ($state) pane flags, which
+    // Svelte 5 forbids during an effect's synchronous run (state_unsafe_mutation),
+    // so both run from timer callbacks (macrotasks), never in the effect body. The
+    // 0ms timer marks "Unsaved" right after this flush (visible through the debounce
+    // window); the 600ms timer then persists.
+    setTimeout(() => onSaveState?.("dirty"), 0);
     saveTimer = setTimeout(() => {
       saveTimer = null;
       void persist(snapshot);
@@ -824,6 +835,7 @@
   });
   async function persist(snapshot: string): Promise<void> {
     if (!loadedViewId) return;
+    onSaveState?.("saving");
     try {
       const saved = await api.saveView(loadedViewId, {
         title: title || "Untitled view",
@@ -833,6 +845,7 @@
       });
       revision = saved.revision;
       lastSaved = snapshot;
+      onSaveState?.("saved");
       onBodyChange?.();
       // Refresh the shared saved-view roster so panes consuming this view
       // re-evaluate. Without this, `paneViews.specs` holds the pre-edit spec and
@@ -841,7 +854,10 @@
       // "window updates when the editor closes" case.
       void paneViews.reload();
     } catch (e) {
-      // Surface via console for step-3 dev; a toast lands with the pane switcher.
+      // A failed autosave must not be silent: mark the pane as failed so the tab
+      // badge shows a non-transient "Save failed" until a later save succeeds
+      // (#263). `lastSaved` stays unchanged, so the next edit re-attempts.
+      onSaveState?.("error");
       console.error("Failed to save view", e);
     }
   }

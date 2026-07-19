@@ -27,6 +27,7 @@ import { AutosaveScheduler } from "@/lib/editor-core/autosave";
 import {
   type DocumentRef,
   type EditorPaneState,
+  type ViewSaveState,
   cloneMetadata,
   createEmptyEditorPane,
   documentStatus,
@@ -175,12 +176,19 @@ class EditorPanesController {
     this.panes = this.panes.map((pane) => {
       if (pane.id !== id) return pane;
       const nextInputs = inputs ?? pane.draftInputs;
-      const nextDirty = isEditorPaneDirty(pane.scene, title, body, status, entryType, metadata, nextInputs);
+      // View panes self-persist (ViewBodyView owns a debounced PUT /api/views/{id})
+      // and drive their save-state flags via `setViewSaveState`. Their draft-* fields
+      // are NOT their source of truth, so the generic dirty diff would mark them
+      // PERMANENTLY unsaved (draft never equals the view `scene` baseline) — and,
+      // fired from the post-save `onBodyChange`, would instantly clobber the "Saved"
+      // flag (#263). Mirror the draft fields but leave the save flags to the view.
+      const isView = pane.document?.type === "view";
+      const nextDirty = isView ? pane.dirty : isEditorPaneDirty(pane.scene, title, body, status, entryType, metadata, nextInputs);
       return {
         ...pane,
         dirty: nextDirty,
-        // New edits invalidate any "Saved" feedback still on screen.
-        recentlySaved: nextDirty ? false : pane.recentlySaved,
+        // New edits invalidate any "Saved" feedback still on screen (non-view panes).
+        recentlySaved: isView ? pane.recentlySaved : nextDirty ? false : pane.recentlySaved,
         draftTitle: title,
         draftMarkdown: body,
         draftStatus: status,
@@ -189,7 +197,9 @@ class EditorPanesController {
         draftInputs: JSON.parse(JSON.stringify(nextInputs ?? [])),
       };
     });
-    this.#autosave.schedule(id);
+    // The generic autosave is a no-op for views (saveEditorPane returns early), so
+    // don't arm it for them — their own debounce handles persistence.
+    if (this.panes.find((pane) => pane.id === id)?.document?.type !== "view") this.#autosave.schedule(id);
   }
 
   async refreshOpenEditorPaneBaselines(transformDraftMetadata?: (metadata: EntryMetadata) => EntryMetadata): Promise<void> {
@@ -445,6 +455,30 @@ class EditorPanesController {
 
   setEditorPaneSaving(id: string, saving: boolean): void {
     this.panes = this.panes.map((pane) => (pane.id === id ? { ...pane, saving } : pane));
+  }
+
+  // Bridge a self-persisting body's save lifecycle onto the shared pane flags so
+  // the tab badge reflects it (#263). View panes bypass `saveEditorPane` (the
+  // designer owns its own debounced PUT /api/views/{id}), so they push these
+  // transitions instead. `saveError` is deliberately sticky: an edit or a retry
+  // does NOT clear it — only a `saved` does — so a failed view never reads "saved".
+  setViewSaveState(id: string, state: ViewSaveState): void {
+    this.panes = this.panes.map((pane) => {
+      if (pane.id !== id) return pane;
+      switch (state) {
+        case "dirty":
+          return { ...pane, dirty: true, recentlySaved: false };
+        case "saving":
+          return { ...pane, saving: true };
+        case "saved":
+          return { ...pane, saving: false, dirty: false, recentlySaved: true, saveError: false };
+        case "error":
+          return { ...pane, saving: false, recentlySaved: false, saveError: true };
+      }
+    });
+    // Reuse the shared "Saved" indicator window so the flash auto-clears exactly as
+    // it does for prose panes (clearIndicator drops recentlySaved after indicatorMs).
+    if (state === "saved") this.#autosave.flashSaved(id);
   }
 
   async requestDeleteScene(id: string): Promise<void> {

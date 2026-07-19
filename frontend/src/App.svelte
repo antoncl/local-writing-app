@@ -358,9 +358,12 @@
 
   // Tab-bar accessors for open editor documents (the one dynamic surface class).
   const editorTitle = (id: string) => editorPaneById(id)?.scene?.title ?? "Editor";
-  function editorBadge(id: string): { text: string; saved: boolean } | null {
+  function editorBadge(id: string): { text: string; saved: boolean; error?: boolean } | null {
     const pane = editorPaneById(id);
     if (!pane) return null;
+    // A failed save outranks every other state: it must stay visible on the tab
+    // even after the author moves on, and never look "saved" (#263).
+    if (pane.saveError) return { text: "Save failed", saved: false, error: true };
     if (pane.saving) return { text: "Saving…", saved: false };
     if (pane.dirty) return { text: "Unsaved", saved: false };
     if (pane.recentlySaved) return { text: "Saved", saved: true };
@@ -844,6 +847,7 @@
         onCustomData={(detail) => schemaPanes?.openForCustomData(detail.entryType, detail.kind)}
         onNavigate={(detail) => navigateToBacklink(detail.id, detail.kind)}
         onOpenChat={(detail) => chatSessions.openChatFromPromptEntry(detail.entry, detail.inputs, detail.sceneId, detail.assistantId)}
+        onViewSaveState={(state) => editorPanes.setViewSaveState(editorPane.id, state)}
       />
     {/if}
   {/snippet}

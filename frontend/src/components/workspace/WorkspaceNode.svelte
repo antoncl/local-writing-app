@@ -31,7 +31,7 @@
   function titleOf(id: PanelId): string {
     return isEditorPanelId(id) ? editor.title(id) : panelRegistry.get(id)?.title ?? id;
   }
-  function badgeOf(id: PanelId): { text: string; saved: boolean } | null {
+  function badgeOf(id: PanelId): { text: string; saved: boolean; error?: boolean } | null {
     return isEditorPanelId(id) ? editor.badge(id) : null;
   }
   function closableOf(id: PanelId): boolean {
@@ -228,7 +228,7 @@
           >
             <span class="ws-tab-label">{titleOf(tab)}</span>
             {#if b}
-              <span class="ws-tab-badge" class:saved={b.saved}>{b.text}</span>
+              <span class="ws-tab-badge" class:saved={b.saved} class:error={b.error}>{b.text}</span>
             {/if}
             {#if closableOf(tab)}
               <button
@@ -482,6 +482,10 @@
   }
   .ws-tab-badge.saved {
     color: var(--accent-emphasis);
+  }
+  .ws-tab-badge.error {
+    color: var(--danger);
+    font-weight: 600;
   }
   .ws-tab-close {
     display: inline-flex;

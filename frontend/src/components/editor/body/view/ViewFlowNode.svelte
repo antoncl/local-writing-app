@@ -14,7 +14,7 @@
   import FieldValueEditor from "@/components/widgets/FieldValueEditor.svelte";
   import NodePicker from "@/components/widgets/NodePicker.svelte";
   import SwatchPicker from "@/components/widgets/SwatchPicker.svelte";
-  import { defaultFilterKind, inputArity, isEmptyValue, outputPayload, promotableSlot, valueSlotPayload, type GraphNodeKind, type PredicateKind, type ViewGraphNode, type ViewHandle, type ViewNodeData } from "@/lib/views/viewGraph";
+  import { defaultFilterKind, inputArity, isInactiveParamNode, outputPayload, promotableSlot, valueSlotPayload, type GraphNodeKind, type PredicateKind, type ViewGraphNode, type ViewHandle, type ViewNodeData } from "@/lib/views/viewGraph";
   import { nodeSummary } from "@/lib/views/nodeSummary";
   import { toMultiValued } from "@/lib/views/viewParams";
   import { isSortableField } from "@/lib/views/fieldAccess";
@@ -174,9 +174,7 @@
   // pass-through in a keep, removes nothing in a drop/complement). Surface that
   // no-op state so a power user sees the node is inert rather than silently
   // filtering. A field `set`/`unset` op carries no operand → never inactive.
-  let isInactiveParam = $derived(
-    isPromoted && isEmptyValue(param?.default) && (slotKind !== "field" || opNeedsValue),
-  );
+  let isInactiveParam = $derived(isInactiveParamNode(param, slotKind, opNeedsValue));
   // The slot's current literal (seeds the default on promote).
   function slotLiteral(): unknown {
     switch (slotKind) {

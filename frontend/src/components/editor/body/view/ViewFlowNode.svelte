@@ -16,6 +16,7 @@
   import SwatchPicker from "@/components/widgets/SwatchPicker.svelte";
   import { defaultFilterKind, inputArity, isEmptyValue, outputPayload, promotableSlot, valueSlotPayload, type GraphNodeKind, type PredicateKind, type ViewGraphNode, type ViewHandle, type ViewNodeData } from "@/lib/views/viewGraph";
   import { nodeSummary } from "@/lib/views/nodeSummary";
+  import { toMultiValued } from "@/lib/views/viewParams";
   import { isSortableField } from "@/lib/views/fieldAccess";
   import { useDesignerContext } from "./designerContext";
   import type { MetadataFieldType, MetadataValue, NodePickerRef, ViewGroupByLevel, ViewLeafValue, ViewSort } from "@/lib/types";
@@ -142,6 +143,11 @@
   // to match — green (node) vs snippet (value) — so it reads the same as the
   // source handle that feeds it (which already tints via `emitsValueSet`).
   let valueAcceptsNodeSet = $derived(valueSlotPayload(fieldKey, (key: string) => ctx.fieldByKey(key)?.type ?? null) === "node-set");
+  // The value operand of an overlap/disjoint predicate is a SET, so its editor —
+  // the inline literal here and the promoted default — is the MULTI variant of the
+  // field (the same rule the runtime strip uses, `viewParams.toMultiValued`): pick
+  // several POVs / statuses. The stored value becomes an array; overlap set-coerces.
+  let valueFieldDef = $derived(fieldDef ? toMultiValued(fieldDef) : null);
   function setField(next: Partial<NonNullable<ViewNodeData["field"]>>) {
     // A value belongs to a specific field. When the field KEY changes, start the
     // value slot fresh (and drop any promotion of it) — otherwise a color-field
@@ -548,9 +554,9 @@
 {#snippet fieldValueWidget(value: unknown, onSet: (v: unknown) => void, ariaLabel: string)}
   {#if fieldKey === "entry_type"}
     {@render entryTypeWidget(typeof value === "string" ? value : "", onSet)}
-  {:else if fieldDef}
+  {:else if valueFieldDef}
     <FieldValueEditor
-      field={fieldDef}
+      field={valueFieldDef}
       value={(value ?? null) as MetadataValue}
       onChange={(v) => onSet(v)}
       loreEntries={ctx.loreEntries}

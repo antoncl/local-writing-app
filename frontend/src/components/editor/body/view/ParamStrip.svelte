@@ -53,6 +53,7 @@
             structure={$structureStore}
             researchStructure={$researchStructureStore}
             knownTags={$knownTagsStore}
+            documentKind={spec.kind}
           />
           {#if control.name in overrides}
             <button class="param-clear" title="Reset to default" aria-label={`Reset ${control.label} to default`} onclick={() => clearParam(control.name)}>↺</button>

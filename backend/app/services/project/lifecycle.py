@@ -161,6 +161,15 @@ class ProjectLifecycleMixin:
                 raise ProjectServiceError("Projects base folder is required.", 400)
             base_folder = self._validate_projects_base_folder(Path(request.projects_base_folder), root)
             settings["projects_base_folder"] = str(base_folder)
+        self._apply_ai_settings_update(root, settings, request)
+        manifest["settings"] = settings
+        self._write_yaml(root / "project.yaml", manifest)
+        return self.current_project()
+
+    def _apply_ai_settings_update(
+        self, root: Path, settings: dict[str, Any], request: UpdateProjectSettingsRequest
+    ) -> None:
+        """Fold the request's AI fields into `settings["ai"]` in place."""
         ai_settings = settings.get("ai")
         if not isinstance(ai_settings, dict):
             ai_settings = {}
@@ -200,9 +209,6 @@ class ProjectLifecycleMixin:
             settings["ai"] = ai_settings
         else:
             settings.pop("ai", None)
-        manifest["settings"] = settings
-        self._write_yaml(root / "project.yaml", manifest)
-        return self.current_project()
 
     def _read_ai_settings(self, root: Path) -> dict[str, Any]:
         """AI settings resolved over the hierarchy chain (#312, ADR-0039).

@@ -1,7 +1,7 @@
 # ADR-0040: The node index is a persisted, incrementally-maintained id-map; bodies are lazy; no SQLite
 
-- Status: **Proposed** — 0.7.0 planning, 2026-07-16 · **red-penned and re-measured 2026-07-19**
-  after adversarial review (awaiting approval)
+- Status: **Accepted** — 0.7.0, 2026-07-19 (PR #319) · red-penned and re-measured 2026-07-19 after
+  two rounds of adversarial review
 - Feature: #7 (prerequisite) · Companion: ADR-0039 · Follows: ADR-0025
 - Implemented by: #305 (single-pass) → #306 (snapshot + staleness manifest) → #307 (incremental patch
   + change-gate). #307 is the **backend** half of the reference-index work that #200 never landed —

@@ -1,6 +1,6 @@
 # ADR-0030: The design language — a quiet writing desk, tokens as contract
 
-- Status: Proposed — 0.6.0, 2026-07-05
+- Status: Accepted — 0.6.0, 2026-07-05 · shipped (#124)
 - Feature: #124 (design language) · steers #32 (layout shell) and #125 (restyle pass)
 - Normative document: `docs/design/design-language.md`
 - Consolidates: widget-taxonomy, NodeEditor-body-spec, and metadata-revision

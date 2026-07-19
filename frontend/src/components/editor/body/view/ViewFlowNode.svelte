@@ -43,7 +43,7 @@
   // tinted to match so handle + pipe read as one wire — and a `field_of` shows
   // whether it's projecting nodes or values before you even wire it up.
   let emitsValueSet = $derived(
-    outputPayload({ id, kind, position: { x: 0, y: 0 }, data: cfg } as ViewGraphNode, (key: string) => ctx.fieldByKey(key)?.type ?? null) ===
+    outputPayload({ id, kind, position: { x: 0, y: 0 }, data: cfg } as ViewGraphNode, (key: string) => ctx.fieldByKey(key)) ===
       "value-set",
   );
   // Field roster for THIS node's pickers — anchored to the kind of its input set
@@ -141,7 +141,7 @@
   // takes a node-set, a scalar field's a value-set. Tints the value target handle
   // to match — green (node) vs snippet (value) — so it reads the same as the
   // source handle that feeds it (which already tints via `emitsValueSet`).
-  let valueAcceptsNodeSet = $derived(valueSlotPayload(fieldKey, (key: string) => ctx.fieldByKey(key)?.type ?? null) === "node-set");
+  let valueAcceptsNodeSet = $derived(valueSlotPayload(fieldKey, (key: string) => ctx.fieldByKey(key)) === "node-set");
   // The value operand of an overlap/disjoint predicate is a SET, so its editor —
   // the inline literal here and the promoted default — is the MULTI variant of the
   // field (the same rule the runtime strip uses, `viewParams.toMultiValued`): pick
@@ -351,13 +351,12 @@
   }
 
   // --- field_of (forward projection, #184 ADR-0031 §D) ---
-  // The 0.7.0 cut projects to a NODE-SET only: the input kind's reference fields
-  // (entity_ref / entity_ref_list) plus the built-in `references` (any-field
-  // backlinks — a universal projection offered on every field_of, even though it
-  // isn't a member of the anchor kind's types). Scalar projection (a value-set)
-  // and its Filter value-slot consumer are deferred (§14.5). Fields are the
-  // anchor kind's (single-hop from anchor sources); precise cross-kind
-  // intersection is deferred with multi-hop.
+  // Projects the input set through a field: a reference field (entity_ref /
+  // entity_ref_list) → a NODE-SET, a scalar field → a VALUE-SET (#196 shipped
+  // both, the value-set feeding a Filter's value slot). The built-in `references`
+  // (any-field backlinks) is offered universally even though it isn't a member of
+  // the anchor kind's types. Fields are the anchor kind's (single-hop from anchor
+  // sources); precise cross-kind intersection is deferred with multi-hop.
   let projectField = $derived(cfg.project_field ?? "");
   let projectFields = $derived(buildProjectFields());
   function buildProjectFields(): { key: string; name: string }[] {

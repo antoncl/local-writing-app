@@ -30,10 +30,11 @@
 // (nothing wired). The sentinels let set ops fold to the minimal shipped `expr`
 // without a universe leaf in the grammar.
 
-import type { MetadataSchema, NodePickerConfig, ViewExpr, ViewFieldOf, ViewFieldPredicate, ViewFilterOp, ViewGroupByLevel, ViewGroupSpec, ViewLeafValue, ViewNestMatch, ViewNestOp, ViewOperand, ViewParam, ViewSort, ViewSpec } from "@/lib/types";
+import type { MetadataFieldDefinition, MetadataSchema, NodePickerConfig, ViewExpr, ViewFieldPredicate, ViewFilterOp, ViewGroupByLevel, ViewGroupSpec, ViewLeafValue, ViewNestMatch, ViewNestOp, ViewOperand, ViewParam, ViewSort, ViewSpec } from "@/lib/types";
 import type { Built } from "@/lib/views/builtAlgebra";
 import { built, complementBuilt, differenceBuilt, EMPTY, intersectBuilt, materialize, materializeOuter, unionBuilt, UNIVERSE } from "@/lib/views/builtAlgebra";
 import { kindUniverseExpr, REFERENCES_FIELD } from "@/lib/views/evaluateView";
+import { isFieldOfOperand, isNodeSetField, isVarOperand } from "@/lib/views/fieldAccess";
 import { walkViewExpr } from "@/lib/views/walkViewExpr";
 import { pickerMembership } from "@/lib/utils/pickerSources";
 
@@ -92,23 +93,17 @@ export const FILTER_VALUE_HANDLE = "value";
 
 // A designer edge carries one of two payloads (ADR-0031 §D): a **node-set** or a
 // **value-set**. Only a `field_of` projecting a SCALAR field emits a value-set;
-// every other source — incl. `field_of` on a reference field or the computed
-// `references` — emits a node-set. `fieldType(key)` reads the schema field type.
+// every other source — incl. `field_of` on a reference field or a node-set-valued
+// computed field like `references` — emits a node-set. `fieldDef(key)` reads the
+// schema field definition (node-set-ness is generic on it, #204).
 export type EdgePayload = "node-set" | "value-set";
 
-function isNodeSetField(key: string, fieldType: (key: string) => string | null): boolean {
-  if (key === REFERENCES_FIELD) return true; // the built-in computed node-set field
-  const t = fieldType(key);
-  return t === "entity_ref" || t === "entity_ref_list";
-}
+type FieldDefLookup = (key: string) => MetadataFieldDefinition | null;
 
-export function outputPayload(
-  node: ViewGraphNode | undefined,
-  fieldType: (key: string) => string | null,
-): EdgePayload {
+export function outputPayload(node: ViewGraphNode | undefined, fieldDef: FieldDefLookup): EdgePayload {
   if (node?.kind === "field_of") {
     const f = node.data.project_field;
-    if (f && !isNodeSetField(f, fieldType)) return "value-set";
+    if (f && !isNodeSetField(fieldDef(f))) return "value-set";
   }
   return "node-set";
 }
@@ -126,7 +121,7 @@ export type InputTypeSet = Map<string, Set<string> | null>;
 // oracle rather than a fistful of positional callbacks (a value object for a
 // cohesive concept, not parameter-stuffing).
 export type TypeResolvers = {
-  fieldType: (key: string) => string | null;
+  fieldDef: FieldDefLookup;
   // A ref field's target as a type-set (multi-kind allowed); null if unknown.
   refTargetTypes: (fieldKey: string) => InputTypeSet | null;
   // A type FQN's concrete descendant family (seed-inclusive), for `descendants_of`.
@@ -240,7 +235,7 @@ function inferOutputTypes(
       const f = node.data.project_field;
       if (!f) return anchorSet(anchorKind); // unconfigured → treat as passthrough
       if (f === REFERENCES_FIELD) return null; // any-kind backlinks
-      if (isNodeSetField(f, resolvers.fieldType)) return resolvers.refTargetTypes(f); // ref → target types
+      if (isNodeSetField(resolvers.fieldDef(f))) return resolvers.refTargetTypes(f); // ref → target types
       return null; // scalar → value-set (no node kind)
     }
     case "filter": {
@@ -363,10 +358,10 @@ export function tagAppliesToInput(
 // carries no value operand (unset / unknown) — the slot can't be wired.
 export function valueSlotPayload(
   fieldKey: string | undefined,
-  fieldType: (key: string) => string | null,
+  fieldDef: FieldDefLookup,
 ): EdgePayload | null {
   if (!fieldKey) return null;
-  return isNodeSetField(fieldKey, fieldType) ? "node-set" : "value-set";
+  return isNodeSetField(fieldDef(fieldKey)) ? "node-set" : "value-set";
 }
 
 // Whether a wired `source` may feed a Filter/field value slot authored on
@@ -377,11 +372,11 @@ export function valueSlotPayload(
 export function valueSlotAccepts(
   source: ViewGraphNode | undefined,
   field: ViewFieldPredicate | undefined,
-  fieldType: (key: string) => string | null,
+  fieldDef: FieldDefLookup,
 ): boolean {
   if (!source || source.kind !== "field_of") return false;
-  const want = valueSlotPayload(field?.key, fieldType);
-  return want != null && outputPayload(source, fieldType) === want;
+  const want = valueSlotPayload(field?.key, fieldDef);
+  return want != null && outputPayload(source, fieldDef) === want;
 }
 
 // Per-node config. A superset of the slots ViewExpr carries plus the designer
@@ -887,17 +882,6 @@ function lowerSegment(
   // keeps the group (and its sort) instead of dropping it as "empty" (#93).
   const built = unionBuilt(parts);
   return { handle, built: built.tag === "empty" && sort ? UNIVERSE : built, sort };
-}
-
-// Is a predicate value slot a promoted-formal reference (`{var: name}`)?
-// Exported (with `isFieldOfOperand`) as the shared operand guards the spec → graph
-// reopen path (./specToGraph, #278 split) reuses.
-export function isVarOperand(v: unknown): v is { var: string } {
-  return typeof v === "object" && v !== null && typeof (v as { var?: unknown }).var === "string";
-}
-
-export function isFieldOfOperand(v: unknown): v is { field_of: ViewFieldOf } {
-  return typeof v === "object" && v !== null && (v as { field_of?: unknown }).field_of != null;
 }
 
 // The node ids reachable upstream from the View (output) node — the subgraph

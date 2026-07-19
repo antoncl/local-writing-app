@@ -251,8 +251,8 @@
     const s = nodes.find((n) => n.id === sourceId);
     if (!s) return undefined;
     const gn: ViewGraphNode = { id: s.id, kind: s.data.kind, position: s.position, data: s.data.cfg ?? {} };
-    const fieldType = (key: string) => schema?.fields?.[key]?.type ?? null;
-    return outputPayload(gn, fieldType) === "value-set" ? "value-wire" : undefined;
+    const fieldDef = (key: string) => schema?.fields?.[key] ?? null;
+    return outputPayload(gn, fieldDef) === "value-set" ? "value-wire" : undefined;
   }
   function tagEdge(e: Edge, nodes: Node<FlowData>[]): Edge {
     const cls = edgeClass(e.source, nodes);
@@ -474,9 +474,9 @@
   let fieldOptions = $derived(buildFieldOptions(kind));
   // Authoring-time TYPE inference (ADR-0031 §F): the entry_type-set of a node's
   // INPUT set, driving which field roster AND tag roster its picker offers.
-  const fieldType = (key: string) => schema?.fields?.[key]?.type ?? null;
+  const fieldDef = (key: string) => schema?.fields?.[key] ?? null;
   const typeResolvers: TypeResolvers = {
-    fieldType,
+    fieldDef,
     // A ref field's target as a type-set: kind → its entry_type FQNs (empty →
     // whole kind, no entry_type constraint). Multi-kind refs are kept, not nulled
     // — the roster intersects across them (§14.3).
@@ -739,7 +739,7 @@
       target: e.target,
       targetHandle: e.targetHandle ?? null,
     }));
-    const fieldType = (key: string) => schema?.fields?.[key]?.type ?? null;
+    const fieldDef = (key: string) => schema?.fields?.[key] ?? null;
     const srcNode = byId.get(conn.source);
     const tgtNode = byId.get(conn.target);
     // The value slot (#196, ADR-0031 §E): a wired operand into a Filter's `value`
@@ -749,13 +749,13 @@
     // that also carried a value slot is retired, #271/#284.)
     if (conn.targetHandle === FILTER_VALUE_HANDLE) {
       if (tgtNode?.kind !== "filter") return false;
-      if (!valueSlotAccepts(srcNode, tgtNode.data.field, fieldType)) return false;
+      if (!valueSlotAccepts(srcNode, tgtNode.data.field, fieldDef)) return false;
       return connectionAllowed(classifyConnection(byId, edges, conn.source, conn.target, conn.targetHandle ?? null, conn.sourceHandle ?? null));
     }
     if (inputArity(target.data.kind) === "none") return false;
     // A value-set source (a scalar `field_of`) may feed ONLY a value slot, never
     // a node-set input — the two-payload accept-matrix (ADR-0031 §E).
-    if (outputPayload(srcNode, fieldType) === "value-set") return false;
+    if (outputPayload(srcNode, fieldDef) === "value-set") return false;
     // Single-hop cut (#184, §14.5): a field_of's `of` must not resolve from
     // another field_of (multi-hop per-node type inference is deferred).
     if (target.data.kind === "field_of" && reachesFieldOf(byId, edges, conn.source)) return false;

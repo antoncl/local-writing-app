@@ -26,13 +26,26 @@ export function structureToEvalNodes(structure: StructureDocument | null): EvalN
     // not intrinsic), so flatten the full scene metadata + computed counters +
     // the top-level `status` projection into one dict — this is what makes the
     // Draft roster filterable by scene field in one pass (#184 Phase 3).
+    //
+    // Spread precedence is SAFE, not a shadowing hazard (#204 verified): a schema
+    // key is stored XOR computed (the backend rejects a stored value on a computed
+    // field and a `computed` block on a non-computed one), so `node.metadata`
+    // (stored front-matter) and `node.computed_metadata` carry DISJOINT keys — the
+    // second spread can never clobber a real stored value.
     const metadata: Record<string, MetadataValue> = {
       ...(node.metadata ?? {}),
       ...(node.computed_metadata ?? {}),
     };
+    // `status` is a built-in stored field whose runtime home is the top-level scene
+    // property, not the metadata dict — so this projects it in (same value, no
+    // divergent stored `metadata.status` to overwrite).
     if (node.status) metadata.status = node.status;
     // The containment ref the Draft/Research Nest joins on (ADR-0037 §4). Roots
-    // leave it unset ⇒ `field: parent unset` seeds them as nest roots.
+    // leave it unset ⇒ `field: parent unset` seeds them as nest roots. `parent` is
+    // a SYNTHETIC structural key and intentionally wins here; it is not (yet) a
+    // reserved schema key, so a user metadata field literally named `parent` would
+    // be shadowed — a known narrow limitation that dissolves when containment
+    // becomes a real stored reference (#217), when this backing simply swaps.
     if (parentId) metadata.parent = parentId;
     out.push({
       id: node.id,

@@ -5,7 +5,7 @@
 // routing (ADR-0029 §D) and collection-vs-scalar shaping (ADR-0031 §E, #202).
 
 import type { EvalNode } from "@/lib/views/evaluateView";
-import type { MetadataSchema } from "@/lib/types";
+import type { MetadataFieldDefinition, MetadataSchema, ViewFieldOf } from "@/lib/types";
 
 // The three canonical intrinsic keys — top-level properties on EVERY node/
 // summary, forced intrinsic by the backend (`default_schema.INTRINSIC_FIELD_KEYS`)
@@ -74,4 +74,38 @@ export function asArray(v: unknown): unknown[] {
   if (v === null || v === undefined) return [];
   if (typeof v === "string") return v.split(",").map((s) => s.trim()).filter(Boolean);
   return [v];
+}
+
+// Coerce a raw value (array / CSV string / scalar) to a list of trimmed, non-empty
+// strings — the single shared coercion behind the evaluator's `toStringSet` and the
+// param strip's binding fold (#204: `viewParams.toStringList` re-implemented this).
+export function coerceStringList(v: unknown): string[] {
+  const out: string[] = [];
+  for (const item of asArray(v)) {
+    const s = String(item).trim();
+    if (s) out.push(s);
+  }
+  return out;
+}
+
+// The shared operand-shape guards (ADR-0031 §E). A predicate value slot holds a
+// bare literal, a promoted formal `{var: name}`, or a `{field_of}` projection —
+// exported ONCE here (was hand-rolled and drifting in evaluateView / viewGraph /
+// viewParams, #204) so membership-vs-binding semantics can't diverge by file.
+export function isVarOperand(v: unknown): v is { var: string } {
+  return typeof v === "object" && v !== null && typeof (v as { var?: unknown }).var === "string";
+}
+
+export function isFieldOfOperand(v: unknown): v is { field_of: ViewFieldOf } {
+  return typeof v === "object" && v !== null && (v as { field_of?: unknown }).field_of != null;
+}
+
+// Does a field yield a NODE-SET (ids) rather than a value-set when projected /
+// overlapped? An entity_ref(_list) field, or a computed field the schema declares
+// node-set-valued (#204: generic on `computed.value_type`, so a second node-set
+// computed field works without a hardcoded key like `references`).
+export function isNodeSetField(def: MetadataFieldDefinition | null | undefined): boolean {
+  if (!def) return false;
+  if (def.type === "entity_ref" || def.type === "entity_ref_list") return true;
+  return def.type === "computed" && def.computed?.value_type === "node_set";
 }

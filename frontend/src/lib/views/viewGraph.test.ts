@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import type { NodePickerConfig, ViewExpr, ViewSpec } from "@/lib/types";
+import type { MetadataFieldDefinition, NodePickerConfig, ViewExpr, ViewSpec } from "@/lib/types";
 import { defaultView } from "./evaluateView";
 import {
   classifyConnection,
@@ -48,6 +48,14 @@ const out = (data: ViewGraphNode["data"] = {}): ViewGraphNode => ({
   kind: "output",
   position: { x: 1000, y: 0 },
   data,
+});
+// Minimal schema field def for the payload/type-inference helpers (#204: node-set-ness
+// is generic on the def's `type` / `computed.value_type`).
+const mkDef = (type: MetadataFieldDefinition["type"], extra: Partial<MetadataFieldDefinition> = {}): MetadataFieldDefinition => ({
+  name: "",
+  type,
+  options: [],
+  ...extra,
 });
 let seq = 0;
 const node = (kind: ViewGraphNode["kind"], data: ViewGraphNode["data"], y = seq++ * 100): ViewGraphNode => ({
@@ -815,14 +823,20 @@ describe("#184 field_of / self lowering + round-trip (ADR-0031 §D)", () => {
 });
 
 describe("#196 value-set pipe (scalar field_of → Filter value slot, ADR-0031 §E)", () => {
-  const fieldType = (k: string): string | null =>
-    ({ pov: "entity_ref", characters: "entity_ref_list", status: "select" })[k] ?? null;
+  const fieldDef = (k: string): MetadataFieldDefinition | null =>
+    (({
+      pov: mkDef("entity_ref"),
+      characters: mkDef("entity_ref_list"),
+      status: mkDef("select"),
+      // `references` is a node-set-valued COMPUTED field (not a hardcoded key, #204).
+      references: mkDef("computed", { computed: { function: "references", value_type: "node_set" } }),
+    }) as Record<string, MetadataFieldDefinition>)[k] ?? null;
 
   it("outputPayload: scalar field_of → value-set; ref/references/other → node-set", () => {
-    expect(outputPayload(node("field_of", { project_field: "status" }), fieldType)).toBe("value-set");
-    expect(outputPayload(node("field_of", { project_field: "pov" }), fieldType)).toBe("node-set");
-    expect(outputPayload(node("field_of", { project_field: "references" }), fieldType)).toBe("node-set");
-    expect(outputPayload(node("hand_picked", { hand_picked: ["x"] }), fieldType)).toBe("node-set");
+    expect(outputPayload(node("field_of", { project_field: "status" }), fieldDef)).toBe("value-set");
+    expect(outputPayload(node("field_of", { project_field: "pov" }), fieldDef)).toBe("node-set");
+    expect(outputPayload(node("field_of", { project_field: "references" }), fieldDef)).toBe("node-set");
+    expect(outputPayload(node("hand_picked", { hand_picked: ["x"] }), fieldDef)).toBe("node-set");
   });
 
   it("valueSlotAccepts enforces the two-payload matrix", () => {
@@ -830,15 +844,15 @@ describe("#196 value-set pipe (scalar field_of → Filter value slot, ADR-0031 �
     const refFO = node("field_of", { project_field: "pov" });
     const pickedSrc = node("hand_picked", { hand_picked: ["s1"] });
     // scalar field slot ← value-set only
-    expect(valueSlotAccepts(scalarFO, { key: "status", op: "overlap" }, fieldType)).toBe(true);
-    expect(valueSlotAccepts(refFO, { key: "status", op: "overlap" }, fieldType)).toBe(false);
+    expect(valueSlotAccepts(scalarFO, { key: "status", op: "overlap" }, fieldDef)).toBe(true);
+    expect(valueSlotAccepts(refFO, { key: "status", op: "overlap" }, fieldDef)).toBe(false);
     // entity_ref field slot ← node-set only (a ref projection)
-    expect(valueSlotAccepts(refFO, { key: "pov", op: "overlap" }, fieldType)).toBe(true);
-    expect(valueSlotAccepts(scalarFO, { key: "pov", op: "overlap" }, fieldType)).toBe(false);
+    expect(valueSlotAccepts(refFO, { key: "pov", op: "overlap" }, fieldDef)).toBe(true);
+    expect(valueSlotAccepts(scalarFO, { key: "pov", op: "overlap" }, fieldDef)).toBe(false);
     // only field_of is an operand-representable wired source
-    expect(valueSlotAccepts(pickedSrc, { key: "pov", op: "overlap" }, fieldType)).toBe(false);
+    expect(valueSlotAccepts(pickedSrc, { key: "pov", op: "overlap" }, fieldDef)).toBe(false);
     // no field key → nothing to accept
-    expect(valueSlotAccepts(scalarFO, undefined, fieldType)).toBe(false);
+    expect(valueSlotAccepts(scalarFO, undefined, fieldDef)).toBe(false);
   });
 
   it("lowers a Filter's field predicate with a wired scalar field_of into a {field_of} value operand", () => {
@@ -1147,10 +1161,15 @@ describe("promote-in-place params — predicate slots (ADR-0038 §C, #222)", () 
 describe("field-picker type inference (ADR-0031 §F)", () => {
   // pov = entity_ref → lore; characters = entity_ref_list → lore; owner = a
   // multi-kind ref (lore + scene); status = scalar.
-  const fieldType = (k: string): string | null =>
-    ({ pov: "entity_ref", characters: "entity_ref_list", owner: "entity_ref", status: "select" })[k] ?? null;
+  const fieldDef = (k: string): MetadataFieldDefinition | null =>
+    (({
+      pov: mkDef("entity_ref"),
+      characters: mkDef("entity_ref_list"),
+      owner: mkDef("entity_ref"),
+      status: mkDef("select"),
+    }) as Record<string, MetadataFieldDefinition>)[k] ?? null;
   const resolvers: TypeResolvers = {
-    fieldType,
+    fieldDef,
     refTargetTypes: (k) =>
       k === "pov" || k === "characters"
         ? new Map([["lore", null]])

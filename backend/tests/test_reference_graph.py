@@ -24,6 +24,7 @@ from app.models import (
     CreateLoreEntryRequest,
     MetadataFieldDefinition,
     SaveLoreEntryRequest,
+    SaveSceneRequest,
     UpsertMetadataFieldRequest,
 )
 from app.runtime import service as svc
@@ -190,6 +191,145 @@ class ShadowedEdgeTests(unittest.TestCase):
         self.assertNotIn("shared", index.edges_by_src)
         self.assertEqual(index.edges_by_dst, {})
         self.assertEqual(self.service.reference_graph().refs, {})
+
+
+class DegradedInputTests(unittest.TestCase):
+    """Reading the schema during the index build (#305) is new work on a path
+    almost everything depends on, so its failure modes must degrade to "no
+    edges, and say so" — never to an unbuildable index."""
+
+    def setUp(self) -> None:
+        self.temp_dir = TemporaryDirectory()
+        self.base = Path(self.temp_dir.name) / "writing"
+        self.root = self.base / "universe" / "book"
+        self.service = ProjectService()
+        self.service.create_project(self.root, "Degraded Input Tests")
+        manifest = self.service._read_yaml(self.root / "project.yaml")
+        manifest.setdefault("settings", {})["projects_base_folder"] = str(self.base)
+        self.service._write_yaml(self.root / "project.yaml", manifest)
+
+    def tearDown(self) -> None:
+        self.temp_dir.cleanup()
+
+    def _write_lore_raw(self, node_id: str, metadata_block: str) -> None:
+        lore_dir = self.root / "lore"
+        lore_dir.mkdir(parents=True, exist_ok=True)
+        (lore_dir / f"{node_id}.md").write_text(
+            f"---\nid: {node_id}\ntitle: {node_id}\nentry_type: lore:character\n"
+            f"{metadata_block}---\n",
+            encoding="utf-8",
+        )
+
+    def test_unparseable_ancestor_schema_does_not_break_the_index(self) -> None:
+        # A typo in a *universe-level* schema — the layer nobody editing this
+        # book would think to look at. Before the guard was widened this raised
+        # yaml.ParserError straight out of every index consumer.
+        (self.base / "universe" / "metadata.schema.yaml").write_text(
+            "fields: [ this is: not valid yaml\n", encoding="utf-8"
+        )
+        self._write_lore_raw("alice", "metadata:\n  related_entries:\n    - bob\n")
+
+        index = self.service._build_node_index()
+
+        self.assertIn("alice", index.by_id)
+        self.assertEqual(index.edges_by_src, {})
+        self.assertTrue(any("Invalid metadata schema" in error for error in index.errors))
+        # The index-only consumers keep working — that is the whole point.
+        self.assertEqual(self.service.reference_graph().refs, {})
+        self.assertTrue(any(e.id == "alice" for e in self.service.list_lore_entries().entries))
+
+    def test_malformed_metadata_drops_edges_but_is_reported(self) -> None:
+        self._write_lore_raw("broken", "metadata: nope\n")
+        self._write_lore_raw("alice", "metadata:\n  related_entries:\n    - broken\n")
+
+        index = self.service._build_node_index()
+
+        # The node still indexes; only its outbound edges are lost...
+        self.assertIn("broken", index.by_id)
+        self.assertNotIn("broken", index.edges_by_src)
+        # ...and that is stated against the file, not swallowed.
+        self.assertTrue(any("broken.md" in error for error in index.errors))
+        # Everyone else's edges survive the one bad file.
+        self.assertEqual(self.service.reference_graph().refs, {"alice": ["broken"]})
+
+
+class SceneEdgeTests(unittest.TestCase):
+    """Edges are extracted for every Node family, not just lore — scenes carry
+    both an `entity_ref` (pov) and an `entity_ref_list` (characters)."""
+
+    def setUp(self) -> None:
+        self.temp_dir = TemporaryDirectory()
+        self.root = Path(self.temp_dir.name) / "project"
+        self.service = ProjectService()
+        self.service.create_project(self.root, "Scene Edge Tests")
+
+    def tearDown(self) -> None:
+        self.temp_dir.cleanup()
+
+    def test_scene_pov_and_characters_become_edges(self) -> None:
+        scene_path = next((self.root / "scenes").glob("*.md"))
+        scene_id = self.service._read_front_matter_only(scene_path, strict=True)["id"]
+        hero = self.service.create_lore_entry(
+            CreateLoreEntryRequest(title="Hero", entry_type="lore:character")
+        ).id
+        foil = self.service.create_lore_entry(
+            CreateLoreEntryRequest(title="Foil", entry_type="lore:character")
+        ).id
+        scene = self.service.read_scene(scene_id)
+        self.service.save_scene(
+            scene_id,
+            SaveSceneRequest(
+                title=scene.title,
+                body=scene.body,
+                base_revision=scene.revision,
+                status="draft",
+                entry_type="scene:scene",
+                metadata={"pov": hero, "characters": [hero, foil]},
+            ),
+        )
+
+        index = self.service._build_node_index()
+
+        self.assertEqual(
+            sorted((e.dst, e.field_id) for e in index.edges_by_src[scene_id]),
+            sorted([(hero, "pov"), (hero, "characters"), (foil, "characters")]),
+        )
+        # The scene reaches `hero` through two fields → two backlink rows.
+        self.assertEqual(
+            [link.field_id for link in self.service.list_backlinks(hero).backlinks],
+            ["characters", "pov"],
+        )
+
+    def test_delete_guard_and_backlinks_panel_agree(self) -> None:
+        """`_backlinks_to_targets` (the delete guards) and `list_backlinks` (the
+        panel) used to be independent walks. They now read the same edges, so
+        they cannot disagree about whether a node is referenced."""
+        scene_path = next((self.root / "scenes").glob("*.md"))
+        scene_id = self.service._read_front_matter_only(scene_path, strict=True)["id"]
+        hero = self.service.create_lore_entry(
+            CreateLoreEntryRequest(title="Hero", entry_type="lore:character")
+        ).id
+        scene = self.service.read_scene(scene_id)
+        self.service.save_scene(
+            scene_id,
+            SaveSceneRequest(
+                title=scene.title,
+                body=scene.body,
+                base_revision=scene.revision,
+                status="draft",
+                entry_type="scene:scene",
+                metadata={"pov": hero, "characters": [hero]},
+            ),
+        )
+
+        panel = self.service.list_backlinks(hero).backlinks
+        guard = self.service._backlinks_to_targets({hero})
+
+        self.assertEqual(
+            [(link.id, link.field_id) for link in panel],
+            [(link.id, link.field_id) for link in guard],
+        )
+        self.assertTrue(panel)
 
 
 if __name__ == "__main__":

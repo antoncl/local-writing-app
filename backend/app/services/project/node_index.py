@@ -46,7 +46,7 @@ class NodeFamily:
     default_entry_type: str
 
 
-@dataclass(frozen=True)
+@dataclass(frozen=True, slots=True)
 class ReferenceEdge:
     """One `entity_ref` / `entity_ref_list` link, qualified by the field it came
     from.
@@ -54,6 +54,11 @@ class ReferenceEdge:
     The field is part of the edge identity, not decoration: ADR-0039's
     reference-typed overrides must know *which* field an override re-points, and
     two fields on the same node may legitimately point at the same target.
+
+    `slots=True` because these are the most numerous objects the index holds —
+    8880 at Weber scale, 20230 at huge — and a per-instance `__dict__` is ~88 B
+    of pure overhead on a 3-string record. Measured over the whole edge
+    structure (forward + reverse) at Weber scale: **3.9 MB → 2.4 MB**.
     """
 
     src: str

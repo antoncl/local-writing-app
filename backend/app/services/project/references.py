@@ -72,16 +72,25 @@ class ReferencesMixin:
 
         Edge extraction is schema-driven, so the merged schema is read up front
         and threaded into the collectors — the front matter each file yields is
-        parsed exactly once, for both purposes. A schema that will not load is
-        recorded on `index.errors` (that is how `validate_project` surfaces it)
-        and simply yields no edges, rather than making the index itself
-        unbuildable.
+        parsed exactly once, for both purposes.
+
+        **A schema that will not load must not make the index unbuildable.**
+        Reading the schema is new work on this path: before #305 the index never
+        touched it, so a typo in any layer's `metadata.schema.yaml` — including
+        an *ancestor's*, which no one editing this book would think to look at —
+        would otherwise take down every index consumer, from `list_lore_entries`
+        to `_path_for_node_id` on each save. The failure degrades to "no edges"
+        plus an `index.errors` row. Callers that want the schema still fail
+        loudly on their own read; this one does not fail on their behalf.
         """
         root = root or self._require_project()
         index = NodeIndex()
         try:
             schema: MetadataSchema | None = self.read_metadata_schema()
-        except (ProjectServiceError, ValueError) as exc:
+        # Malformed YAML arrives as ProjectServiceError (`_read_yaml` wraps it),
+        # a bad shape as pydantic ValidationError (a ValueError), and a locked
+        # or unreadable file as OSError.
+        except (ProjectServiceError, ValueError, OSError) as exc:
             schema = None
             index.errors.append(f"Invalid metadata schema; no reference edges were indexed: {exc}")
         # Machine config dir is a base layer for assistants only — it lives
@@ -251,7 +260,18 @@ class ReferencesMixin:
             # are extracted here rather than in a later per-entry pass (#305).
             # Assigning (not appending) keeps edges in step with `by_id` when a
             # descendant layer shadows an ancestor's entry.
-            edges = self._reference_edges_for_entry(entry, schema, front_matter=front_matter)
+            try:
+                edges = self._reference_edges_for_entry(entry, schema, front_matter=front_matter)
+            except ProjectServiceError as exc:
+                # `metadata:` that isn't a mapping. The node still indexes — it
+                # just contributes no edges — but that has to be *said*, or its
+                # references vanish from the graph and the backlinks panel with
+                # no signal anywhere.
+                index.errors.append(
+                    f"{self._safe_relative(path, duplicate_relative_to)}: {exc.message} "
+                    f"Its references were not indexed."
+                )
+                edges = []
             if edges:
                 index.edges_by_src[node_id] = edges
             else:
@@ -399,6 +419,11 @@ class ReferencesMixin:
         passes the front matter it already parsed; re-extraction for a single
         changed file re-reads it. Empty when the node has no schema type, is
         unreadable, or references nothing.
+
+        Raises `ProjectServiceError` when the node's `metadata:` is not a
+        mapping. That is deliberately *not* swallowed here: the index walk
+        records it against the file, and a caller re-extracting one node wants
+        the error rather than a silently empty result.
         """
         if schema is None:
             return []
@@ -410,10 +435,7 @@ class ReferencesMixin:
                 front_matter = self._read_front_matter_only(entry.path, strict=True)
             except ProjectServiceError:
                 return []
-        try:
-            metadata = self._normalise_metadata(front_matter.get("metadata"), entry.path)
-        except ProjectServiceError:
-            return []
+        metadata = self._normalise_metadata(front_matter.get("metadata"), entry.path)
         edges: list[ReferenceEdge] = []
         for field_id in entry_definition.fields:
             field = schema.fields.get(field_id)

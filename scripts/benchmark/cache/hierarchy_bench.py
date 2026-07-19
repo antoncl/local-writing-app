@@ -38,7 +38,7 @@ import shutil
 import sqlite3
 import sys
 import time
-from dataclasses import dataclass, is_dataclass
+from dataclasses import dataclass, fields as dataclass_fields, is_dataclass
 from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
@@ -101,8 +101,15 @@ def deep_size(obj, _seen: set[int] | None = None) -> int:
         for item in obj:
             size += deep_size(item, _seen)
     elif is_dataclass(obj) and not isinstance(obj, type):
-        for value in vars(obj).values():
-            size += deep_size(value, _seen)
+        # `fields()`, not `vars()` — a slots dataclass (ReferenceEdge) has no
+        # __dict__ and vars() raises on it. Count the instance __dict__ where
+        # there is one: it is ~88 B of pure per-object overhead, and leaving it
+        # out made `slots=True` look free of charge in both directions.
+        instance_dict = getattr(obj, "__dict__", None)
+        if instance_dict is not None:
+            size += sys.getsizeof(instance_dict)
+        for f in dataclass_fields(obj):
+            size += deep_size(getattr(obj, f.name), _seen)
     elif isinstance(obj, Path):
         size += deep_size(str(obj), _seen)
     return size
@@ -410,12 +417,24 @@ def _measure_build(svc: ProjectService) -> tuple[float, object, float, float, di
 
 
 def _report_footprint(index, edges: dict) -> None:
+    """Size what the index actually holds.
+
+    Earlier revisions sized `graph.refs` — the flattened `{src: [dst]}` dict —
+    but since #305 that is a throwaway projection. The index holds
+    `ReferenceEdge` objects in a forward map *and* a reverse one, ~3x the flat
+    dict, and #306 sizes its snapshot off this number.
+    """
     size_index = deep_size(index.by_id) + deep_size(index.id_by_path)
-    size_edges = deep_size(edges)
+    size_forward = deep_size(index.edges_by_src)
+    size_reverse = deep_size(index.edges_by_dst)
+    size_flat = deep_size(edges)
     bodies = {nid: entry.path.read_text(encoding="utf-8") for nid, entry in index.by_id.items()}
+    edge_count = sum(len(e) for e in index.edges_by_src.values())
     print(f"  [Q1] index (by_id + id_by_path) : {mb(size_index)}   ({len(index.by_id)} nodes)")
-    print(f"       edges                       : {mb(size_edges)}   ({sum(len(v) for v in edges.values())} edges)")
-    print(f"       + every body in memory      : {mb(size_index + size_edges + deep_size(bodies))}")
+    print(f"       edges_by_src                : {mb(size_forward)}   ({edge_count} edges)")
+    print(f"       + edges_by_dst (reverse)    : {mb(size_forward + size_reverse)}   <- what the index holds")
+    print(f"       (flat {{src: [dst]}} for ref) : {mb(size_flat)}")
+    print(f"       + every body in memory      : {mb(size_index + size_forward + size_reverse + deep_size(bodies))}")
 
 
 def _report_snapshot(payload: dict, snap: Path) -> None:

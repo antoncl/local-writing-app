@@ -4,19 +4,15 @@
 
   // The view-driven input (ADR-0032 §D / ADR-0035). Instead of a pre-resolved
   // `result`, a consumer hands ViewNodeList the view to evaluate + its data
-  // environment; the wrapper then owns the parameter strip, the bindings env
-  // (incl. `$self` from `anchorId`), and re-evaluation on override change. Exactly
-  // one of `view` / `result` is supplied — `result` stays for non-view / already-
-  // resolved sites (they lift arrays via `nodeSet()`, ADR-0035).
+  // environment; the wrapper then owns the parameter strip, the bindings env, and
+  // re-evaluation on override change. Exactly one of `view` / `result` is supplied
+  // — `result` stays for non-view / already-resolved sites (they lift arrays via
+  // `nodeSet()`, ADR-0035).
   export type ViewInput<T extends EvalNode> = {
     spec: ViewSpec;
     universe: readonly T[];
     schema?: MetadataSchema | null;
     referenceIndex?: ReadonlyMap<string, ReadonlySet<string>>;
-    // The anchored surface's node id → the `$self` binding (ADR-0032 §A). Omit /
-    // null in a roster pane with no anchor: `$self` then resolves to the empty
-    // set, so a `$self` view only functions where there is an anchor.
-    anchorId?: string | null;
     // (No roster data here.) The param strip's reference/tag pickers source the
     // full node universe from the global stores directly (see the store imports
     // above) — a pane doesn't thread it, because a param can reference ANY kind,
@@ -120,7 +116,7 @@
   import { TreeRename } from "@/components/widgets/treeRename.svelte";
   import { TreeAddMenu } from "@/components/widgets/treeAddMenu.svelte";
   import { CollapseGuard } from "@/components/widgets/treeCollapseGuard";
-  import { evaluateView, filterGroups, SELF_VAR, type EvalBindings, type ViewGroup, type ViewResult } from "@/lib/views/evaluateView";
+  import { evaluateView, filterGroups, type EvalBindings, type ViewGroup, type ViewResult } from "@/lib/views/evaluateView";
   import { leafGroup, nodeSet } from "@/lib/views/viewResult";
   import { buildBindings } from "@/lib/views/viewParams";
   import { repairSpecCycles } from "@/lib/views/cycleCheck";
@@ -151,8 +147,8 @@
     // view-driven pane, omit this and pass `view` instead — the wrapper evaluates.
     result?: ViewResult<T>;
     // The view-driven input (ADR-0032 §D): the spec + data environment to
-    // evaluate internally, so the wrapper owns the parameter strip + `$self`
-    // binding + re-evaluation. Exactly one of `view` / `result`.
+    // evaluate internally, so the wrapper owns the parameter strip + re-evaluation.
+    // Exactly one of `view` / `result`.
     view?: ViewInput<T>;
     // Renders one REAL node (leaf or real-node parent). The main extension point.
     row: Snippet<[T, RowCtx<T>]>;
@@ -201,11 +197,11 @@
 
   // ── View evaluation + parameter strip (ADR-0032 §D) ──────────────────────
   // When `view` is supplied, the wrapper OWNS evaluation: it holds the ephemeral
-  // overrides (edited via the shared `ParamStrip`), folds them (+ `$self`) into a
-  // bindings env, and evaluates the spec against the roster. Centralized here so
-  // every parameterized list gets the strip + `$self` for free — not per pane
-  // (ADR-0032 §D rejects per-pane bespoke UI). `result`-driven sites skip all of
-  // this and render their pre-resolved result unchanged (ADR-0035).
+  // overrides (edited via the shared `ParamStrip`), folds them into a bindings env,
+  // and evaluates the spec against the roster. Centralized here so every
+  // parameterized list gets the strip for free — not per pane (ADR-0032 §D rejects
+  // per-pane bespoke UI). `result`-driven sites skip all of this and render their
+  // pre-resolved result unchanged (ADR-0035).
 
   // Ephemeral runtime overrides for the view's declared formals (ADR-0032 §C):
   // pane/session state, seeded per-control by the authored default, never baked
@@ -214,11 +210,7 @@
   let paramOverrides = $state<Record<string, unknown>>({});
   const bindings = $derived.by((): EvalBindings => {
     if (!view) return {};
-    const b: EvalBindings = { ...buildBindings(view.spec.params, paramOverrides) };
-    // `$self` is surface-supplied (ADR-0032 §A): the anchored pane's node id, or
-    // absent in a roster pane (→ `$self` resolves to the empty set downstream).
-    if (view.anchorId) b[SELF_VAR] = [view.anchorId];
-    return b;
+    return buildBindings(view.spec.params, paramOverrides);
   });
   // The pane's LOAD-time cycle repair (#275): a pane evaluates a STORED spec
   // directly (no designer graph, so `repairGraphCycles` never runs on it). A cyclic

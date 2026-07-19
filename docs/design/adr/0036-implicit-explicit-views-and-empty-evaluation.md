@@ -1,5 +1,7 @@
 # ADR-0036: Views are explicit or implicit; the empty view evaluates to the empty set
 
+> **⚠ Amended 2026-07-19 (#199): `$self` was removed entirely** — the `$self` mention below (the anchored entity a backlinks list is relative to) is **superseded**; the backlinks panel never routed through `$self`/the evaluator (it's a reverse-index bypass) and is unaffected. See [ADR-0032](0032-parameter-declaration-and-binding-provenance.md) Amendment 2.
+
 - Status: Proposed — 0.7.0, 2026-07-11
 - Feature: #112 Draft migration (phase 2 of #182) is the vehicle. Removes the null-view-evaluation
   hack, introduces the explicit/implicit split, and settles where `ViewNodeList` fold state persists.

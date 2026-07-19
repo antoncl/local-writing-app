@@ -97,7 +97,6 @@ describe("nodeSummary — compact node one-liners (#220)", () => {
     expect(summary("difference", {})).toBe("");
     expect(summary("complement", {})).toBe("");
     expect(summary("all", {})).toBe("");
-    expect(summary("self", {})).toBe("");
     expect(summary("highlight", { color: "red" })).toBe("");
     expect(summary("output", {})).toBe("");
   });

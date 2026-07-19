@@ -180,15 +180,11 @@ export type ViewResult<T extends EvalNode = EvalNode> = {
   diagnostics?: ViewDiagnostics;
 };
 
-// A bound actual for a free variable (#184): an id-set (entity_ref formal /
-// `$self`) or a value-set (scalar formal) — both plain string sets. Accepted as
-// a Set or a bare array; normalized to a Set at resolution.
+// A bound actual for a free variable (#184): an id-set (entity_ref formal) or a
+// value-set (scalar formal) — both plain string sets. Accepted as a Set or a bare
+// array; normalized to a Set at resolution.
 export type BindingValue = ReadonlySet<string> | readonly string[];
 export type EvalBindings = Record<string, BindingValue | null | undefined>;
-
-// The reserved variable name for the pane's anchor node (#184, ADR-0032). Its
-// canonical use is `field_of({var: "$self"}, "references")`.
-export const SELF_VAR = "$self";
 
 // The stable key of the built-in `references` computed node-set field (ADR-0029,
 // #184 §14.4): any-field backlinks, read from the reverse index (below) rather
@@ -200,9 +196,8 @@ export type EvalContext = {
   // itself + every type inheriting from it via `parent:` chains.
   schema?: MetadataSchema | null;
   // #184: the bindings environment (name → id-set | value-set), injected exactly
-  // as `schema` is. `$self` and each promoted formal read from
-  // here. An unbound formal ⇒ its predicate is inactive (input passes through);
-  // an unresolved `$self` ⇒ the empty set (ADR-0031 §B).
+  // as `schema` is. Each promoted formal reads from here. An unbound formal ⇒ its
+  // predicate is inactive (input passes through) (ADR-0031 §B).
   bindings?: EvalBindings;
   // #184 §14.4 (Phase 2): the reverse reference index (targetId → referrer ids)
   // backing the `references` field, threaded like `schema`. Absent ⇒ `field_of`
@@ -291,7 +286,7 @@ type RunState<T extends EvalNode> = {
   annotations: Map<string, ViewAnnotation>;
   descendantsCache: Map<string, Set<string>>;
   schema?: MetadataSchema | null;
-  bindings?: EvalBindings; // #184: name → id-set|value-set (free variables + $self)
+  bindings?: EvalBindings; // #184: name → id-set|value-set (free variables)
   referenceIndex?: ReadonlyMap<string, ReadonlySet<string>>; // #184: targetId → referrers
   diag: ViewDiagnostics; // nest accumulator (cycle/orphan/fan-out counts)
   nestRan: boolean; // whether any `nest` evaluated (gates `diagnostics` on result)
@@ -756,7 +751,7 @@ function evalExpr<T extends EvalNode>(state: RunState<T>, expr: ViewExpr, neutra
   // projection); a scalar projection's values are only meaningful as a Filter
   // operand and fall out of the universe filter here.
   if (expr.field_of) return evalFieldOf(state, expr.field_of);
-  // A free variable / `$self` leaf (#184): resolves to a node-set from bindings.
+  // A free variable leaf (#184): resolves to a node-set from bindings.
   if (expr.var != null) return evalVar(state, expr.var);
   return evalLeaf(state, expr, neutralUniverse);
 }
@@ -812,8 +807,8 @@ function projectField<T extends EvalNode>(state: RunState<T>, ofIds: Set<string>
   return out;
 }
 
-// A var/`$self` in membership/`of`/leaf position → a node-set from bindings
-// ($self = the anchored node as a singleton). Unresolved ⇒ empty (ADR-0031 §B).
+// A var in membership/`of`/leaf position → a node-set from bindings. Unresolved ⇒
+// empty (ADR-0031 §B).
 function evalVar<T extends EvalNode>(state: RunState<T>, name: string): Set<string> {
   return bindingSet(state.bindings?.[name]);
 }
@@ -1158,7 +1153,7 @@ const OPERAND_INACTIVE = Symbol("operand-inactive");
 // Evaluate a `field` predicate to its member id-set (ADR-0031 §E, #184).
 // Overlap/disjoint compare the node's value against the operand; `set`/`unset`
 // are presence tests (operand ignored). The one value slot may be a bare literal,
-// a tagged `{var}` (a promoted formal / `$self`), or a tagged `{field_of}`
+// a tagged `{var}` (a promoted formal), or a tagged `{field_of}`
 // projection — resolved ONCE by `resolveOperand` (node-independent, so lifting it
 // out of the per-node loop also saves the repeat resolve, cf. #200).
 //
@@ -1221,9 +1216,8 @@ function scalarOverlap(raw: unknown, operand: Set<string>, numeric: boolean): bo
 }
 
 // Resolve a predicate operand to a string set (or INACTIVE). A `{var}` reads the
-// bindings: an unresolved `$self` is the empty set (a source with no anchor);
-// an unbound formal is INACTIVE (its predicate drops out). A `{field_of}` is a
-// projection; anything else is a bare literal, coerced to a set. `collection`
+// bindings: an unbound formal is INACTIVE (its predicate drops out). A `{field_of}`
+// is a projection; anything else is a bare literal, coerced to a set. `collection`
 // governs literal coercion (#202): a scalar field's string literal stays ONE
 // token (no comma-split), while a collection field's splits — matching how the
 // node side is tokenized. Arrays (a multi-pick) always keep their items whole.
@@ -1234,7 +1228,7 @@ function resolveOperand<T extends EvalNode>(
 ): Set<string> | typeof OPERAND_INACTIVE {
   if (isVarOperand(value)) {
     const bound = state.bindings?.[value.var];
-    if (bound == null) return value.var === SELF_VAR ? new Set<string>() : OPERAND_INACTIVE;
+    if (bound == null) return OPERAND_INACTIVE;
     return bindingSet(bound);
   }
   if (isFieldOfOperand(value)) {
@@ -1262,8 +1256,7 @@ function isVarOperand(v: unknown): v is { var: string } {
 // behaviour-preserving, the pre-#222 leaf. A `{var}` reads the bindings: an unbound
 // formal is INACTIVE (the leaf drops out, no constraint — like an unbound field
 // predicate), a bound one contributes its value-set (binding multiple FQNs/tags →
-// the leaf matches ANY). `$self` is never a leaf-slot operand (leaves hold values,
-// not a node anchor), so an unbound var is always INACTIVE here.
+// the leaf matches ANY). An unbound var is always INACTIVE here.
 function resolveLeafOperand<T extends EvalNode>(
   state: RunState<T>,
   value: ViewLeafValue,

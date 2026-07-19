@@ -17,7 +17,7 @@
 
 import type { MetadataFieldDefinition, MetadataSchema, SelectOption, ViewExpr, ViewLeafValue, ViewParam, ViewSpec } from "@/lib/types";
 import { kindEntryTypeOptions } from "@/lib/utils/schemaTypeHelpers";
-import { SELF_VAR, type EvalBindings } from "@/lib/views/evaluateView";
+import { type EvalBindings } from "@/lib/views/evaluateView";
 import { walkViewExpr } from "@/lib/views/walkViewExpr";
 
 // A resolved strip control: the declared formal + the field its editor derives
@@ -92,9 +92,9 @@ function refKey(ref: ParamRef): string {
 }
 
 // Map each formal name → the (de-duplicated) slot references whose operand is
-// `{var: name}`. Only predicate operands need a control: `$self` is surface-
-// supplied and a `field_of` `of`-var is a wired source, neither a user-facing
-// formal. Traversal is the shared `walkViewExpr` (#275) — so a promoted formal
+// `{var: name}`. Only predicate operands need a control; a `field_of` `of`-var is
+// a wired source, not a user-facing formal. Traversal is the shared `walkViewExpr`
+// (#275) — so a promoted formal
 // buried anywhere, including inside an orphans-only Nest, is found. The leaf slots
 // (`type` / `descendants_of` / `tagged`) carry a `{var}` just like a field value
 // does (#222), so all four are inspected — walking only `field.value` was the #293
@@ -110,9 +110,9 @@ function collectParamRefs(spec: ViewSpec): Map<string, ParamRef[]> {
     }
   };
   const leafVar = (v: ViewLeafValue | undefined): string | null =>
-    isVarOperand(v) && v.var !== SELF_VAR ? v.var : null;
+    isVarOperand(v) ? v.var : null;
   const visit = (e: ViewExpr): void => {
-    if (e.field && isVarOperand(e.field.value) && e.field.value.var !== SELF_VAR) add(e.field.value.var, { kind: "field", key: e.field.key });
+    if (e.field && isVarOperand(e.field.value)) add(e.field.value.var, { kind: "field", key: e.field.key });
     // Precedence mirrors `evalLeaf`: `type` wins when both slots are set on one
     // (malformed, dense-serialized) node; a well-formed leaf sets only one.
     const t = leafVar(e.type);
@@ -179,8 +179,7 @@ export function effectiveParamValue(
 
 // Fold declared formals + overrides into an `EvalBindings`. A formal whose
 // effective value is empty is OMITTED — so its predicate stays inactive (the
-// input passes through), a search-box's empty state (ADR-0031 §B). `$self` is
-// never here (surface-supplied).
+// input passes through), a search-box's empty state (ADR-0031 §B).
 export function buildBindings(
   params: ViewParam[] | null | undefined,
   overrides: Record<string, unknown>,

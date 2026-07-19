@@ -6,7 +6,9 @@
   current use case). `$self` is a **reserved wired source node**, not a formal. Reference traversal
   is forward `Filter`/`field_of` (ADR-0031) — Match (ADR-0033) is withdrawn. **Amended 2026-07-15
   (§D Amendment 1: ONE central reused component owns the whole runtime view surface — selection +
-  binding — because selection fixes which params instantiate).**
+  binding — because selection fixes which params instantiate).** **Amended 2026-07-19
+  (Amendment 2, #199: `$self` is REMOVED — no surface binds it; reintroduce with the anchored render
+  surface. Every §A/§B/§D reference to `$self` below is superseded by Amendment 2).**
   See `memory/decisions_184_entity_vs_value_parameters.md`.
 - Feature: #184 Parameterized views — the **configurator slice** ADR-0031 deferred · Doc:
   `views-and-filters.md` (parameterization)
@@ -110,6 +112,34 @@ owners): the single component owns both. Chosen (over a two-component split) for
 the **stronger guard against per-caller divergence** (one component, no seams for functionality to
 fork across panes), and the two concerns are **not cleanly separable** (above). The rule holds until
 a pane needs something the one component cannot express (falsifiable, not proven).
+
+**Amendment 2 (2026-07-19) — `$self` is removed (#199).**
+The reserved `$self` source described in §A (and referenced in §B tier 1, §D consequences) is
+**deleted from the codebase**, not merely dormant. Rationale:
+
+- **Nothing binds it.** §A ties `$self`'s value to "the pane's anchor kind", but **every view-list /
+  tree pane is a roster pane with no anchor** (Lore, Draft, Research, Assistants). No surface ever
+  supplied an `anchorId`, so a `$self` view resolved to the empty set *everywhere*, including the pane
+  the reader might assume it worked in. The mechanism was fully inert.
+- **It was an over-exposed footgun.** The designer palette offered "This entry" (`$self`) as a source
+  in *every* view, on *every* pane — so a user could author a view that could never produce a row,
+  with no signal. Offering a source that can't bind is worse than not offering it.
+- **Its one real consumer never used it.** The backlinks panel — the only entry-relative feature that
+  actually works — is a reverse-index bypass (`backlinksFor(anchorId)`), never routed through the
+  evaluator or `$self`. It is unaffected.
+
+**What was removed:** the `SELF_VAR` constant + its evaluator branches (an unbound var is now uniformly
+`OPERAND_INACTIVE`, ADR-0031 §B — there is no `$self`-empty-set case); the `self` designer graph-node
+kind, its palette chip, lowering, glyph and render; and the `anchorId → $self` binding on the
+`ViewNodeList` `view` input. The `{var}` operand mechanism (promoted formals / params) is **untouched**.
+The view-grammar IDL (#277/ADR-0041) never reserved `$self` — `var` is an ordinary string field — so
+no grammar change was needed.
+
+**Reintroduction path.** `$self` was invented for the surface §A anticipated but that was never built:
+a **reference / entity_ref field rendered as a view on a node's editor rail**, which legitimately needs
+"filter relative to *this* node." When that anchored render surface ships (Views 2.0 flow model), a
+`$self`-equivalent anchor binding comes back **with it**, defined against a surface that actually binds —
+not as free-floating forward-compat ABI. Until then, `$self` does not exist.
 
 ## Why / rejected alternatives
 - **A declared Parameter node as the *primary* declaration — rejected/deferred.** Promote-in-place

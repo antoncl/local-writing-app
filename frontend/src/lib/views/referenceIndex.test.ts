@@ -31,7 +31,7 @@ describe("buildReferenceIndex (#184 Phase 2)", () => {
 describe("projectReferences (#194 Phase 2c)", () => {
   const reverse = buildReferenceIndex({ alice: ["bob", "mara"], eve: ["bob"] });
 
-  it("unions the referrers of every id in the input set (field_of($self, references))", () => {
+  it("unions the referrers of every id in the input set (field_of(set, references))", () => {
     expect(projectReferences(["bob"], reverse)).toEqual(new Set(["alice", "eve"]));
     expect(projectReferences(["mara"], reverse)).toEqual(new Set(["alice"]));
     // multi-anchor projection dedupes across inputs

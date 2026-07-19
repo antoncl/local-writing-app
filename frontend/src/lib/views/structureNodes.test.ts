@@ -200,15 +200,4 @@ describe("structureToEvalNodes — references over the Draft roster (#201 id-spa
     expect(result.nodes.map((n) => n.id)).toEqual(["node_s2"]);
   });
 
-  it("field_of($self, references) bridges regardless of which id space $self is bound in", () => {
-    const nodes = structureToEvalNodes(draftDoc());
-    const referenceIndex = new Map([["scene_s1", new Set(["scene_s2"])]]);
-    const spec = { kind: "scene", expr: { field_of: { of: { var: "$self" }, field: "references" } }, sort: { by: "manual" as const } };
-    // Bound to the roster id (node_…) → translated via ref_id; bound to the
-    // canonical id (scene_…) → looked up directly. Both must resolve the referrer.
-    const byRosterId = evaluateView(spec, nodes, { referenceIndex, bindings: { $self: ["node_s1"] } });
-    const byCanonical = evaluateView(spec, nodes, { referenceIndex, bindings: { $self: ["scene_s1"] } });
-    expect(byRosterId.nodes.map((n) => n.id)).toEqual(["node_s2"]);
-    expect(byCanonical.nodes.map((n) => n.id)).toEqual(["node_s2"]);
-  });
 });

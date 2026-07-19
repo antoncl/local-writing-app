@@ -492,8 +492,8 @@ class EditorPanesController {
     const sceneId = pane.scene.id;
     let backlinks: Backlink[] = [];
     try {
-      // Referrers via the same `field_of($self, references)` model the panel uses
-      // (#194): membership from the in-memory reverse index, rows resolved on demand.
+      // The open node's referrers (#194): membership from the in-memory reverse
+      // index, rows resolved on demand — same helper the backlinks panel uses.
       backlinks = await backlinksFor(sceneId, get(referenceIndexStore));
     } catch (error) {
       console.warn("Failed to fetch backlinks", error);

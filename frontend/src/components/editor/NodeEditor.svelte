@@ -413,10 +413,9 @@
 
 
   let backlinksReq = 0;
-  // Backlinks = the open node's referrers via the view model `field_of($self,
-  // references)` (#194): membership from the in-memory reverse index, rows from
-  // `resolve_references`. A request token drops out-of-order resolves when the
-  // anchor or the index changes mid-flight.
+  // Backlinks = the open node's referrers (#194): membership from the in-memory
+  // reverse index, rows from `resolve_references`. A request token drops out-of-
+  // order resolves when the anchor or the index changes mid-flight.
   async function refreshBacklinks(
     anchorId: string,
     referenceIndex: ReadonlyMap<string, ReadonlySet<string>>,

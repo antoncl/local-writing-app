@@ -498,10 +498,10 @@ describe("scalar fields compare whole, collections tokenize (#202)", () => {
   });
 });
 
-// #184 forward model: free variables (`{var}` / `$self`), a bindings environment,
-// and `field_of` forward projection. A small ref-carrying roster: scenes point at
+// #184 forward model: free variables (`{var}`), a bindings environment, and
+// `field_of` forward projection. A small ref-carrying roster: scenes point at
 // characters via `pov`; a couple of tag-carrying nodes for value projection.
-describe("parameterized views (#184: bindings, $self, field_of)", () => {
+describe("parameterized views (#184: bindings, field_of)", () => {
   const REFS: EvalNode[] = [
     { id: "s1", entry_type: "scene:scene", title: "Scene 1", metadata: { pov: "bob", status: "draft" } },
     { id: "s2", entry_type: "scene:scene", title: "Scene 2", metadata: { pov: "alice", status: "revised" } },
@@ -589,23 +589,11 @@ describe("parameterized views (#184: bindings, $self, field_of)", () => {
     // rows first, then pov∈{bob} {s1,s3}.
     expect(evalIds(spec, { bindings: { POV: ["bob"] } })).toEqual(["s2", "s1", "s3"]);
   });
-  it("$self as a predicate operand: scenes where THIS character is pov", () => {
-    const spec: ViewSpec = { kind: "scene", expr: { field: { key: "pov", op: "overlap", value: { var: "$self" } } } };
-    expect(evalIds(spec, { bindings: { $self: ["bob"] } })).toEqual(["s1", "s3"]);
-  });
-  it("unresolved $self ⇒ empty set ⇒ no matches (not inactive)", () => {
-    const spec: ViewSpec = { kind: "scene", expr: { field: { key: "pov", op: "overlap", value: { var: "$self" } } } };
-    expect(evalIds(spec, {})).toEqual([]);
-  });
   it("field_of on a reference field projects to a node-set (scenes → their povs)", () => {
     // field_of(scenes, pov) → the pov characters, deduped. Used standalone as
     // membership: the projected ids that exist in the roster (bob, alice).
     const spec: ViewSpec = { kind: "scene", expr: { field_of: { of: { type: "scene:scene" }, field: "pov" } } };
     expect(evalIds(spec, {}).sort()).toEqual(["alice", "bob"]);
-  });
-  it("field_of($self, pov) — the N=1 projection", () => {
-    const spec: ViewSpec = { kind: "scene", expr: { field_of: { of: { var: "$self" }, field: "pov" } } };
-    expect(evalIds(spec, { bindings: { $self: ["s2"] } })).toEqual(["alice"]);
   });
   it("field_of feeding a Filter operand: same-tag matching (value-set projection)", () => {
     // field_of(Alice, tags) → {hero, villain}; scenes… no, characters sharing a
@@ -641,11 +629,11 @@ describe("parameterized views (#184: bindings, $self, field_of)", () => {
     expect(evalIds(spec, {})).toEqual([]);
   });
   it("field_of on `references` uses the reverse index (Phase-2 wiring hook)", () => {
-    // field_of($self, references) → the referrers of the anchored node, resolved
+    // field_of(set, references) → the referrers of the input node-set, resolved
     // through ctx.referenceIndex. Here bob is referenced by s1 and s3.
-    const spec: ViewSpec = { kind: "scene", expr: { field_of: { of: { var: "$self" }, field: "references" } } };
+    const spec: ViewSpec = { kind: "scene", expr: { field_of: { of: { hand_picked: ["bob"] }, field: "references" } } };
     const referenceIndex = new Map([["bob", new Set(["s1", "s3"])]]);
-    expect(evalIds(spec, { bindings: { $self: ["bob"] }, referenceIndex }).sort()).toEqual(["s1", "s3"]);
+    expect(evalIds(spec, { referenceIndex }).sort()).toEqual(["s1", "s3"]);
   });
 });
 

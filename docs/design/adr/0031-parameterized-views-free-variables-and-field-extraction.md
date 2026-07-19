@@ -1,5 +1,7 @@
 # ADR-0031: Parameterized views — free variables, forward projection/predication, and field-set-typed selectors
 
+> **⚠ Amended 2026-07-19 (#199): `$self` was removed entirely** — no render surface ever bound it (every view pane is a roster/tree pane with no anchor), so it was inert everywhere and an inert designer footgun. Every `$self` reference below is **superseded**; the `{var}` free-variable / promoted-formal mechanism is unaffected. See [ADR-0032](0032-parameter-declaration-and-binding-provenance.md) Amendment 2. Reintroduce with the anchored render surface if/when built.
+
 - Status: Accepted — 0.7.0, **rewritten 2026-07-09 (forward model)**; accepted 2026-07-10 (5 context-blind gates). This supersedes the
   two-pipe/Match revision made earlier the same day. What died is the **symmetric two-parameter-
   family** framing and **id-in-`field_of` matching** — *not* the existence of two edge payloads:

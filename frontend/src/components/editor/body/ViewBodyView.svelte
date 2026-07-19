@@ -632,8 +632,6 @@
       items: [
         { kind: "all", label: "All" },
         { kind: "hand_picked", label: "Hand-picked" },
-        // `This entry` ($self) seeds a projection from the pane's anchor.
-        { kind: "self", label: "This entry" },
       ],
     },
     {

@@ -156,15 +156,6 @@ describe("resolveParamControls (type derived from the referencing Filter slot)",
     expect([c.field.type, c.fieldKey]).toEqual(["tags", "tags"]);
   });
 
-  it("$self operands are NOT formals (surface-supplied, no control)", () => {
-    const spec: ViewSpec = {
-      kind: "scene",
-      expr: { field: { key: "pov_ref", op: "overlap", value: { var: "$self" } } },
-      params: [],
-    };
-    expect(resolveParamControls(spec, SCHEMA)).toEqual([]);
-  });
-
   it("no params ⇒ no controls (degenerate closed view)", () => {
     expect(resolveParamControls({ kind: "lore", expr: null }, SCHEMA)).toEqual([]);
   });

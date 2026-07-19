@@ -57,9 +57,9 @@
   // for its own shape (ADR-0037 §3): grouping comes from the spec, never
   // synthesized here. The pane hands the whole view (spec + roster + data env) to
   // ViewNodeList, which owns evaluation, the parameter strip, and the bindings —
-  // centralized (ADR-0032 §D), not per-pane. Lore is a roster pane with no anchor,
-  // so no `$self` is supplied. The param strip's pickers source their node universe
-  // from the stores inside ViewNodeList (#257), so the pane threads no roster data;
+  // centralized (ADR-0032 §D), not per-pane. The param strip's pickers source their
+  // node universe from the stores inside ViewNodeList (#257), so the pane threads no
+  // roster data;
   // `referenceIndex` backs the `references` field so a view can project backlinks
   // (`field_of(set, references)`) and compose them.
   $: view = {

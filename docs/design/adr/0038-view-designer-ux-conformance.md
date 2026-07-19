@@ -1,5 +1,7 @@
 # ADR-0038: View designer UX — inspector rail, uniform slots, shell zoom
 
+> **⚠ Amended 2026-07-19 (#199): `$self` was removed entirely** — the palette no longer offers **"This entry" (`$self`)** as a source and the `◉` glyph is gone; every `$self` reference below is **superseded**. See [ADR-0032](0032-parameter-declaration-and-binding-provenance.md) Amendment 2. The source returns to the palette with the anchored render surface if/when built.
+
 - Status: Accepted — 2026-07-12 (Anton approved iteration 2: expand-in-place, params-only rail,
   leaf canonicalization, glyph-flood-as-one-pass)
 - Feature: epic #218 "view designer UX conformance" (sub-issues #219-#223, mapped in §Rollout).

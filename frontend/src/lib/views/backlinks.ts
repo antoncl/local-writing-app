@@ -1,10 +1,11 @@
-// Backlinks-panel-as-a-view (#194, Phase 2c of #184). The panel is the view
-// `field_of($self, references)` with `$self` = the open node: its members are
-// that node's referrers, read straight from the in-memory reverse index (the
-// same `projectReferences` the evaluator runs for the `references` computed
-// field). Presentation reuses `resolve_references` to turn referrer ids into
-// display rows — cross-kind and authoritative, like the retired per-node
-// `list_backlinks` node-index walk.
+// Backlinks panel (#194, Phase 2c of #184). Its members are the open node's
+// referrers, read straight from the in-memory reverse index — the same
+// `projectReferences` the evaluator runs for the `references` computed field, so
+// the panel and a view's `references` projection agree. It does NOT route through
+// the view evaluator: the anchor id is hand-passed here (the panel predates any
+// anchored render surface). Presentation reuses `resolve_references` to turn
+// referrer ids into display rows — cross-kind and authoritative, like the retired
+// per-node `list_backlinks` node-index walk.
 //
 // Any-field by construction: the reverse index carries no per-field split, so a
 // node referencing the anchor through two fields collapses to one row (the old
@@ -36,8 +37,9 @@ export function candidatesToBacklinks(
     .sort((a, b) => a.kind.localeCompare(b.kind) || a.title.localeCompare(b.title, undefined, { sensitivity: "base" }));
 }
 
-// Resolve the open node's backlinks. `anchorId` binds `$self`; `referenceIndex`
-// is the project-wide reverse index (see `stores/references`).
+// Resolve the open node's backlinks. `anchorId` is the open node's id (its
+// referrers are the panel); `referenceIndex` is the project-wide reverse index
+// (see `stores/references`).
 export async function backlinksFor(
   anchorId: string,
   referenceIndex: ReadonlyMap<string, ReadonlySet<string>> | null | undefined,

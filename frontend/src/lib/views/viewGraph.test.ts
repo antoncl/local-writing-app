@@ -73,10 +73,9 @@ describe("viewGraph serialization (round-trip)", () => {
   it("round-trips each round-trippable source", () => {
     // A bare predicate leaf (`{type}` / `{tagged}` / `{field}`) is no longer a
     // reconstructable stored form (#271 retired §B). The round-trippable SOURCES are
-    // `hand_picked`, `$self`, and — inside a `{filter}` — a predicate over a real set.
+    // `hand_picked` and — inside a `{filter}` — a predicate over a real set.
     const sources: ViewExpr[] = [
       { hand_picked: ["a", "b"] },
-      { var: "$self" },
       { filter: { of: { hand_picked: ["a", "b"] }, pred: { type: "lore:character" } } },
     ];
     for (const s of sources) expect(roundTrip(s)).toEqual(s);
@@ -265,11 +264,11 @@ describe("filter serialization (first-class node, ADR-0041 §C)", () => {
 });
 
 describe("injector = set-arity 0 (ADR-0041 §D)", () => {
-  it("classifies exactly the arity-0 sources as injectors — orphans + $self included", () => {
-    // The §D arity-0 set: the source leaves (`all`, `hand_picked`, `$self`) + an
-    // orphans ref (its id is a reference, not a wired port). Derived from inputArity,
-    // so this pins the table. (The bare predicate leaves are retired, #271/#284.)
-    const injectors: GraphNodeKind[] = ["all", "hand_picked", "self", "orphans_ref"];
+  it("classifies exactly the arity-0 sources as injectors — orphans included", () => {
+    // The §D arity-0 set: the source leaves (`all`, `hand_picked`) + an orphans ref
+    // (its id is a reference, not a wired port). Derived from inputArity, so this
+    // pins the table. (The bare predicate leaves are retired, #271/#284.)
+    const injectors: GraphNodeKind[] = ["all", "hand_picked", "orphans_ref"];
     // Everything with a set-valued input port is NOT an injector — including an
     // unwired combinator (it keeps its arity) and the pass-throughs.
     const nonInjectors: GraphNodeKind[] = ["union", "intersect", "difference", "complement", "nest", "field_of", "filter", "sorter", "highlight", "output"];
@@ -764,17 +763,6 @@ describe("#184 field_of / self lowering + round-trip (ADR-0031 §D)", () => {
     expect(roundTrip(expr)).toEqual(expr);
   });
 
-  it("round-trips the $self-backlinks shape field_of($self, references)", () => {
-    const expr: ViewExpr = { field_of: { of: { var: "$self" }, field: "references" } };
-    expect(roundTrip(expr)).toEqual(expr);
-  });
-
-  it("a standalone $self source lowers to {var: $self}", () => {
-    const self = node("self", {}, 0);
-    const graph: ViewGraph = { nodes: [out(), self], edges: [edge(self.id, OUTPUT_NODE_ID)] };
-    expect(graphToExpr(graph)).toEqual({ var: "$self" });
-  });
-
   it("field_of with no projected field lowers to nothing", () => {
     const src = node("hand_picked", { hand_picked: ["s1"] }, 0);
     const fo = node("field_of", {}, 100);
@@ -808,11 +796,11 @@ describe("#184 field_of / self lowering + round-trip (ADR-0031 §D)", () => {
   });
 
   it("specToGraph rebuilds a field_of node wired from its `of` subgraph", () => {
-    const graph = specToGraph({ kind: "lore", expr: { field_of: { of: { var: "$self" }, field: "references" } } });
+    const graph = specToGraph({ kind: "lore", expr: { field_of: { of: { hand_picked: ["x"] }, field: "references" } } });
     const fo = graph.nodes.find((n) => n.kind === "field_of")!;
-    const self = graph.nodes.find((n) => n.kind === "self")!;
+    const src = graph.nodes.find((n) => n.kind === "hand_picked")!;
     expect(fo.data.project_field).toBe("references");
-    expect(graph.edges.some((e) => e.source === self.id && e.target === fo.id)).toBe(true);
+    expect(graph.edges.some((e) => e.source === src.id && e.target === fo.id)).toBe(true);
   });
 
   it("reachesFieldOf enforces the single-hop cut", () => {
@@ -834,23 +822,20 @@ describe("#196 value-set pipe (scalar field_of → Filter value slot, ADR-0031 �
     expect(outputPayload(node("field_of", { project_field: "status" }), fieldType)).toBe("value-set");
     expect(outputPayload(node("field_of", { project_field: "pov" }), fieldType)).toBe("node-set");
     expect(outputPayload(node("field_of", { project_field: "references" }), fieldType)).toBe("node-set");
-    expect(outputPayload(node("self", {}), fieldType)).toBe("node-set");
     expect(outputPayload(node("hand_picked", { hand_picked: ["x"] }), fieldType)).toBe("node-set");
   });
 
   it("valueSlotAccepts enforces the two-payload matrix", () => {
     const scalarFO = node("field_of", { project_field: "status" });
     const refFO = node("field_of", { project_field: "pov" });
-    const self = node("self", {});
     const pickedSrc = node("hand_picked", { hand_picked: ["s1"] });
     // scalar field slot ← value-set only
     expect(valueSlotAccepts(scalarFO, { key: "status", op: "overlap" }, fieldType)).toBe(true);
     expect(valueSlotAccepts(refFO, { key: "status", op: "overlap" }, fieldType)).toBe(false);
-    // entity_ref field slot ← node-set only (a ref projection or a bare $self)
+    // entity_ref field slot ← node-set only (a ref projection)
     expect(valueSlotAccepts(refFO, { key: "pov", op: "overlap" }, fieldType)).toBe(true);
-    expect(valueSlotAccepts(self, { key: "pov", op: "overlap" }, fieldType)).toBe(true);
     expect(valueSlotAccepts(scalarFO, { key: "pov", op: "overlap" }, fieldType)).toBe(false);
-    // only field_of / self are operand-representable wired sources
+    // only field_of is an operand-representable wired source
     expect(valueSlotAccepts(pickedSrc, { key: "pov", op: "overlap" }, fieldType)).toBe(false);
     // no field key → nothing to accept
     expect(valueSlotAccepts(scalarFO, undefined, fieldType)).toBe(false);
@@ -888,13 +873,6 @@ describe("#196 value-set pipe (scalar field_of → Filter value slot, ADR-0031 �
         of: { hand_picked: ["a", "b"] },
         pred: { field: { key: "status", op: "overlap", value: { field_of: { of: { hand_picked: ["x"] }, field: "status" } } } },
       },
-    };
-    expect(roundTrip(expr)).toEqual(expr);
-  });
-
-  it("round-trips a Filter value wired from $self", () => {
-    const expr: ViewExpr = {
-      filter: { of: { hand_picked: ["a", "b"] }, pred: { field: { key: "pov", op: "overlap", value: { var: "$self" } } } },
     };
     expect(roundTrip(expr)).toEqual(expr);
   });

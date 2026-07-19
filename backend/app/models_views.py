@@ -88,8 +88,7 @@ class ViewParam(BaseModel):
     parameter-strip UI; `default` is the authored OVERRIDABLE default (null/absent
     ⇒ unbound ⇒ its predicate is inactive until the user picks). **No `type` is
     stored** — a param's type is recomputed at load from the field(s) whose slot
-    references it (the intersection rule, ADR-0031 §F), single source of truth.
-    `$self` is reserved (surface-supplied) and never appears in a params list."""
+    references it (the intersection rule, ADR-0031 §F), single source of truth."""
 
     name: str = Field(min_length=1)
     label: str = ""

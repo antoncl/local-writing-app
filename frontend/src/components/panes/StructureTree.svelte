@@ -119,9 +119,9 @@
   // ADR-0032 §D) rather than a pre-evaluated `result`, so the wrapper owns
   // evaluation, the parameter strip, and the bindings env — the same surface Lore
   // and Assistants use (#199). The tree is the view's own shape; the Draft/Research
-  // panes only ever tint, never re-shape (ADR-0022). Anchor-less roster/tree panes,
-  // so no `$self`; the param strip's pickers source their node universe from stores
-  // inside ViewNodeList (#257), so no roster is threaded here.
+  // panes only ever tint, never re-shape (ADR-0022). The param strip's pickers
+  // source their node universe from stores inside ViewNodeList (#257), so no roster
+  // is threaded here.
   const view = $derived<ViewInput<EvalNode>>({
     spec: viewSpec,
     universe: structureToEvalNodes(structure),

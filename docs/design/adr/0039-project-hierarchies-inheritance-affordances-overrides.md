@@ -261,8 +261,16 @@ and lets the author tick the ones to inherit from. Editable afterwards in projec
   query-time delta for backlinks / `References` / Nest to apply. The split is clean: **layer overrides
   are position-independent and can be materialized; scene mutations are position-dependent and cannot**
   (they stay resolved at query time, as today).
-- **Settings / AI-policy resolution must extend to the chain.** Today AI settings read only the open
-  project's own `project.yaml`; they must resolve `system → …chain… → prompt` over the same layer walk.
+- **Settings / AI-policy resolution extends to the chain** (slice **F**, #312, shipped). `settings.ai`
+  in `project.yaml` now resolves over the same `_project_layer_folders` walk as the metadata schema
+  and the node index. Two things fell out of it that are part of the decision, not incidental:
+  a new project no longer seeds an `ai` block (a stored value *shadows* the chain, so a seeded
+  `policy: "off"` would put inheritance permanently out of reach), and writes are **sparse** — a
+  value matching the inherited resolution is stored as nothing, because the settings pane
+  round-trips resolved values and would otherwise freeze them locally on first save, severing
+  inheritance exactly as auto-shadow-on-edit does for nodes. The one field this matters for is
+  `policy`; `ai.default_provider` / `default_model_class` have no consumer and are retired under
+  **#322**, superseded by assistant roster order (ADR-0024) and assistant tags (#88).
 - **`revision` must span the fold.** `read_lore_entry` returns `revision=self._revision(path)` — a hash
   of *one* file (`lore.py:116`). Once an entry is folded, editing an override leaves the ancestor's
   hash unchanged, so optimistic concurrency (`lore.py:129`) accepts a stale buffer **and** the AI
@@ -290,7 +298,7 @@ and lets the author tick the ones to inherit from. Editable afterwards in projec
   | **A** | declared inheritance (Amendment 1) + discover ancestor chain and children on `ProjectInfo` | #309 | after #306 |
   | **B** | open a non-leaf level (canon + child roster, no manuscript) | #310 | after A |
   | **C** | frontend breadcrumb / level switcher | #311 | after B |
-  | **F** | settings / AI-policy chain resolution | #312 | ready, independent |
+  | **F** | settings / AI-policy chain resolution | #312 | shipped |
   | **D** | provenance surfacing (level pill + rail treatment) + fork-to-here | #313 | blocked |
   | **E** | layer overrides (`overrides/` deltas on the mutation structure) | #314 | blocked |
 

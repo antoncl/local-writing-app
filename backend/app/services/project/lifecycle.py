@@ -97,14 +97,14 @@ class ProjectLifecycleMixin:
             "title": title,
             "version": 1,
             "schema_version": PROJECT_SCHEMA_VERSION,
+            # No seeded `ai` block: under hierarchy layering (#312) a stored
+            # value *shadows* the ancestor chain, so seeding `policy: "off"`
+            # would mean a book created under an AI-enabled universe could
+            # never inherit from it. Absent = not set here; "off" is the
+            # resolved fallback when nothing in the chain sets it.
             "settings": {
                 "projects_base_folder": str(base_folder),
                 "theme": "system",
-                "ai": {
-                    "policy": "off",
-                    "default_provider": None,
-                    "default_model_class": None,
-                },
             },
             "manuscript_structure": {
                 "container_types": [
@@ -165,27 +165,76 @@ class ProjectLifecycleMixin:
         if not isinstance(ai_settings, dict):
             ai_settings = {}
         # Partial update: only touch a field the caller explicitly sent. An
-        # explicit null (or empty string) clears the value back to the machine
-        # default; a field left unset is left unchanged. `model_fields_set`
-        # distinguishes "absent" from "present and null" — the frontend always
-        # sends all three AI fields, so selecting "(machine default)" reaches
-        # here as an explicit null and clears, instead of being a silent no-op.
+        # explicit null (or empty string) clears the value; a field left unset
+        # is left unchanged. `model_fields_set` distinguishes "absent" from
+        # "present and null" — the frontend always sends all three AI fields,
+        # so selecting the fall-through option reaches here as an explicit null
+        # and clears, instead of being a silent no-op.
+        #
+        # Writes are *sparse* (#312): a value that matches what the ancestor
+        # chain already resolves to is stored as nothing at all. The frontend
+        # round-trips the resolved values on every save, so persisting them
+        # verbatim would freeze the inherited settings into this project's own
+        # manifest and silently sever inheritance on the first visit to the
+        # settings pane. Same principle as ADR-0039's per-field node overrides:
+        # only genuine divergence is recorded.
+        inherited = self._read_inherited_ai_settings(root)
+
+        def store(key: str, value: Any, fallback: Any) -> None:
+            # `None` is already "not set here" to the resolver, so an explicit
+            # clear drops the key rather than persisting a null that reads the
+            # same but hides the divergence question behind junk in the file.
+            if value is None or value == inherited.get(key, fallback):
+                ai_settings.pop(key, None)
+            else:
+                ai_settings[key] = value
+
         fields_set = request.model_fields_set
         if request.ai_policy is not None:
-            ai_settings["policy"] = request.ai_policy
+            store("policy", request.ai_policy, "off")
         if "ai_default_provider" in fields_set:
-            ai_settings["default_provider"] = request.ai_default_provider or None
+            store("default_provider", request.ai_default_provider or None, None)
         if "ai_default_model_class" in fields_set:
-            ai_settings["default_model_class"] = request.ai_default_model_class or None
+            store("default_model_class", request.ai_default_model_class or None, None)
         if ai_settings:
             settings["ai"] = ai_settings
+        else:
+            settings.pop("ai", None)
         manifest["settings"] = settings
         self._write_yaml(root / "project.yaml", manifest)
         return self.current_project()
 
     def _read_ai_settings(self, root: Path) -> dict[str, Any]:
+        """AI settings resolved over the hierarchy chain (#312, ADR-0039).
+
+        Same ancestor walk as the metadata schema and the node index, and the
+        same rule: outermost ancestor first, nearer layers override farther
+        ones. A key that is absent *or explicitly null* at a layer is "not set
+        here" and falls through — which is what makes `update_project_settings`
+        able to keep local overrides sparse.
+        """
+        return self._merge_ai_settings_layers(self._project_layer_folders(root))
+
+    def _read_inherited_ai_settings(self, root: Path) -> dict[str, Any]:
+        """The same resolution with the open project's own layer excluded —
+        i.e. what this project would resolve to if it declared nothing."""
+        return self._merge_ai_settings_layers(self._project_layer_folders(root)[:-1])
+
+    def _merge_ai_settings_layers(self, folders: list[Path]) -> dict[str, Any]:
+        resolved: dict[str, Any] = {}
+        for folder in folders:
+            for key, value in self._read_ai_settings_layer(folder).items():
+                if value is None:
+                    continue
+                resolved[key] = value
+        return resolved
+
+    def _read_ai_settings_layer(self, folder: Path) -> dict[str, Any]:
+        """One layer's own `settings.ai` block. A folder with no `project.yaml`
+        (an organizational folder in the chain) contributes nothing, exactly as
+        a missing `metadata.schema.yaml` does to the schema walk."""
         try:
-            manifest = self._read_yaml(root / "project.yaml")
+            manifest = self._read_yaml(folder / "project.yaml")
         except Exception:
             return {}
         settings = manifest.get("settings")

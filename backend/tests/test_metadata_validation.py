@@ -956,6 +956,10 @@ class MetadataValidationTests(unittest.TestCase):
 
         # An explicit null (what the frontend sends for "(machine default)" /
         # "(unset)") clears the value rather than being treated as no-change.
+        # Since #312 the clear *removes* the key instead of storing a null: to
+        # the layer resolver both read as "not set here", and a sparse manifest
+        # keeps a stored value meaning divergence from the chain. Both keys go,
+        # so the now-empty `ai` block goes with them.
         project = self.service.update_project_settings(
             UpdateProjectSettingsRequest(
                 ai_default_provider=None,
@@ -965,8 +969,7 @@ class MetadataValidationTests(unittest.TestCase):
         self.assertIsNone(project.ai_default_provider)
         self.assertIsNone(project.ai_default_model_class)
         manifest = self.service._read_yaml(self.root / "project.yaml")
-        self.assertIsNone(manifest["settings"]["ai"]["default_provider"])
-        self.assertIsNone(manifest["settings"]["ai"]["default_model_class"])
+        self.assertNotIn("ai", manifest["settings"])
 
     def test_project_settings_unset_ai_field_is_left_unchanged(self) -> None:
         # Partial update: a request that omits the AI provider/class fields must

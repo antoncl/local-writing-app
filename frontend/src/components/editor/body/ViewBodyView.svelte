@@ -36,6 +36,7 @@
     effectiveFieldHidden,
     kindRootEntryTypeId,
     kindEntryTypeFqns,
+    kindEntryTypeOptions,
     descendantTypeFqns,
     intersectFieldKeysOverTypes,
   } from "@/lib/utils/schemaTypeHelpers";
@@ -394,11 +395,7 @@
   let warnings = $derived(nestWarnings(preview.diagnostics));
 
   // ---- schema-derived leaf-config options for the current kind ----
-  let entryTypeOptions = $derived(
-    Object.entries(schema?.entry_types ?? {})
-      .filter(([, def]) => def.kind === kind && !def.abstract)
-      .map(([fqn, def]) => ({ fqn, name: def.name })),
-  );
+  let entryTypeOptions = $derived(kindEntryTypeOptions(schema ?? null, kind));
   // The intrinsic identity fields (id/title/entry_type, #116) are now regular
   // schema fields injected into every entry_type, so title/entry_type surface
   // here naturally — pinned first (intrinsic before metadata). `hidden` fields

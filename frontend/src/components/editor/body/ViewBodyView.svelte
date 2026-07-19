@@ -821,10 +821,13 @@
       return;
     }
     if (snapshot === untrack(() => lastSaved)) return;
-    // An edit landed and a save is scheduled: mark the pane unsaved right away so
-    // the tab badge reflects it during the debounce window (#263).
-    onSaveState?.("dirty");
     if (saveTimer) clearTimeout(saveTimer);
+    // Both `onSaveState` calls mutate cross-component ($state) pane flags, which
+    // Svelte 5 forbids during an effect's synchronous run (state_unsafe_mutation),
+    // so both run from timer callbacks (macrotasks), never in the effect body. The
+    // 0ms timer marks "Unsaved" right after this flush (visible through the debounce
+    // window); the 600ms timer then persists.
+    setTimeout(() => onSaveState?.("dirty"), 0);
     saveTimer = setTimeout(() => {
       saveTimer = null;
       void persist(snapshot);

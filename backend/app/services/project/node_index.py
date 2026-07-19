@@ -27,6 +27,26 @@ class NodeIndexEntry:
 
 
 @dataclass(frozen=True)
+class IndexLayer:
+    """One folder in the layer chain, as the index walk sees it: where to read,
+    and the identity every entry collected there is stamped with."""
+
+    folder: Path
+    id: str
+    label: str
+
+
+@dataclass(frozen=True)
+class NodeFamily:
+    """A kind and where its files live — the (kind, folder, default entry type)
+    triple `_build_node_index` iterates once per layer."""
+
+    kind: str
+    folder_name: str
+    default_entry_type: str
+
+
+@dataclass(frozen=True)
 class ReferenceEdge:
     """One `entity_ref` / `entity_ref_list` link, qualified by the field it came
     from.

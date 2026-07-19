@@ -36,7 +36,33 @@ from app.models import (
     ReferenceResolveResponse,
 )
 from app.services.project.errors import ProjectServiceError
-from app.services.project.node_index import NodeIndex, NodeIndexEntry, ReferenceEdge
+from app.services.project.node_index import (
+    IndexLayer,
+    NodeFamily,
+    NodeIndex,
+    NodeIndexEntry,
+    ReferenceEdge,
+)
+
+# The Node-shaped kinds the index walks, once per layer of the chain.
+NODE_FAMILIES = [
+    NodeFamily("scene", "scenes", "scene:scene"),
+    # Research notes walk `research/notes/`. Treated like lore (cross-layer)
+    # rather than scenes (book-scoped) — universe- or series-level research
+    # notes are a natural use case.
+    NodeFamily("research", "research/notes", "research:note"),
+    NodeFamily("lore", "lore", "lore:lore_note"),
+    NodeFamily("prompt", "prompts", "prompt:base"),
+    NodeFamily("assistant", "assistants", "assistant:assistant"),
+    # Reusable mutation sets (#62): body-less Node files under `mutation-sets/`.
+    # Layered like lore/prompts (a werewolf transform can live at any project
+    # level).
+    NodeFamily("mutation_set", "mutation-sets", "mutation_set:mutation_set"),
+    # Saved views (0.5.0, #35/#78): body-less Node files under `views/`, each
+    # carrying a ViewSpec in front matter. Layered like mutation sets — a view
+    # can live at any project level.
+    NodeFamily("view", "views", "view:view"),
+]
 
 
 class ReferencesMixin:
@@ -64,37 +90,19 @@ class ReferencesMixin:
         layer_folders = self._project_layer_folders(root)
         # Outermost ancestor first so descendant entries overwrite on collision.
         for layer_index, folder in enumerate(layer_folders):
-            layer_id = self._metadata_schema_layer_id(folder)
-            layer_label = self._layer_label_for_folder(root, folder, layer_index)
+            layer = IndexLayer(
+                folder=folder,
+                id=self._metadata_schema_layer_id(folder),
+                label=self._layer_label_for_folder(root, folder, layer_index),
+            )
             is_current_project = folder == root
-            for kind, folder_name, default_entry_type in [
-                ("scene", "scenes", "scene:scene"),
-                # Research notes walk `research/notes/`. Treated like lore
-                # (cross-layer) rather than scenes (book-scoped) — universe-
-                # or series-level research notes are a natural use case.
-                ("research", "research/notes", "research:note"),
-                ("lore", "lore", "lore:lore_note"),
-                ("prompt", "prompts", "prompt:base"),
-                ("assistant", "assistants", "assistant:assistant"),
-                # Reusable mutation sets (#62): body-less Node files under
-                # `mutation-sets/`. Layered like lore/prompts (a werewolf
-                # transform can live at any project level).
-                ("mutation_set", "mutation-sets", "mutation_set:mutation_set"),
-                # Saved views (0.5.0, #35/#78): body-less Node files under
-                # `views/`, each carrying a ViewSpec in front matter. Layered
-                # like mutation sets — a view can live at any project level.
-                ("view", "views", "view:view"),
-            ]:
+            for family in NODE_FAMILIES:
                 # Scenes stay book-scoped — only walk the current project's scenes folder.
-                if kind == "scene" and not is_current_project:
+                if family.kind == "scene" and not is_current_project:
                     continue
                 self._collect_layer_entries(
-                    folder=folder,
-                    folder_name=folder_name,
-                    kind=kind,
-                    default_entry_type=default_entry_type,
-                    layer_id=layer_id,
-                    layer_label=layer_label,
+                    layer=layer,
+                    family=family,
                     index=index,
                     duplicate_relative_to=root,
                     schema=schema,
@@ -106,29 +114,17 @@ class ReferencesMixin:
             # remains the source of truth (Phase 3b-i / decisions-node-
             # editor-modularization).
             if is_current_project:
-                self._collect_chat_entries(
-                    folder=folder,
-                    layer_id=layer_id,
-                    layer_label=layer_label,
-                    index=index,
-                )
+                self._collect_chat_entries(layer=layer, index=index)
         index.rebuild_reverse_edges()
         return index
 
-    def _collect_chat_entries(
-        self,
-        *,
-        folder: Path,
-        layer_id: str,
-        layer_label: str,
-        index: NodeIndex,
-    ) -> None:
+    def _collect_chat_entries(self, *, layer: IndexLayer, index: NodeIndex) -> None:
         """Walk <project>/chats/*.yaml and add an index entry per session.
 
         Storage stays YAML — this is just a discovery layer so chats are
         addressable from the unified node index alongside other kinds.
         """
-        chats_dir = folder / "chats"
+        chats_dir = layer.folder / "chats"
         if not chats_dir.exists():
             return
         for path in sorted(chats_dir.glob("*.yaml")):
@@ -151,8 +147,8 @@ class ReferencesMixin:
                 entry_type="chat:chat_session",
                 path=path,
                 title=title,
-                source_layer_id=layer_id,
-                source_layer_label=layer_label,
+                source_layer_id=layer.id,
+                source_layer_label=layer.label,
             )
             index.id_by_path[path.resolve()] = chat_id
             existing = index.by_id.get(chat_id)
@@ -179,12 +175,12 @@ class ReferencesMixin:
         if not (machine_dir / "assistants").exists():
             return
         self._collect_layer_entries(
-            folder=machine_dir,
-            folder_name="assistants",
-            kind="assistant",
-            default_entry_type="assistant:assistant",
-            layer_id=self._metadata_schema_layer_id(machine_dir),
-            layer_label="Machine",
+            layer=IndexLayer(
+                folder=machine_dir,
+                id=self._metadata_schema_layer_id(machine_dir),
+                label="Machine",
+            ),
+            family=NodeFamily("assistant", "assistants", "assistant:assistant"),
             index=index,
             duplicate_relative_to=duplicate_relative_to,
             schema=schema,
@@ -193,17 +189,14 @@ class ReferencesMixin:
     def _collect_layer_entries(
         self,
         *,
-        folder: Path,
-        folder_name: str,
-        kind: str,
-        default_entry_type: str,
-        layer_id: str,
-        layer_label: str,
+        layer: IndexLayer,
+        family: NodeFamily,
         index: NodeIndex,
         duplicate_relative_to: Path,
         schema: MetadataSchema | None = None,
     ) -> None:
-        for path in sorted((folder / folder_name).glob("*.md")):
+        folder = layer.folder
+        for path in sorted((folder / family.folder_name).glob("*.md")):
             try:
                 front_matter = self._read_front_matter_only(path, strict=True)
             except ProjectServiceError as exc:
@@ -214,33 +207,33 @@ class ReferencesMixin:
             if raw_node_id is None:
                 node_id = path.stem
                 index.warnings.append(
-                    f"{kind.title()} file {self._safe_relative(path, folder)} is missing front matter id; using filename stem as legacy id."
+                    f"{family.kind.title()} file {self._safe_relative(path, folder)} is missing front matter id; using filename stem as legacy id."
                 )
             elif isinstance(raw_node_id, str) and raw_node_id.strip():
                 node_id = raw_node_id.strip()
             else:
                 node_id = path.stem
                 index.errors.append(
-                    f"{kind.title()} file {self._safe_relative(path, folder)} has invalid front matter id; it must be text."
+                    f"{family.kind.title()} file {self._safe_relative(path, folder)} has invalid front matter id; it must be text."
                 )
 
-            raw_entry_type = front_matter.get("entry_type") or default_entry_type
-            entry_type = raw_entry_type if isinstance(raw_entry_type, str) else default_entry_type
+            raw_entry_type = front_matter.get("entry_type") or family.default_entry_type
+            entry_type = raw_entry_type if isinstance(raw_entry_type, str) else family.default_entry_type
             raw_title = front_matter.get("title")
             title = raw_title.strip() if isinstance(raw_title, str) and raw_title.strip() else node_id
             entry = NodeIndexEntry(
                 id=node_id,
-                kind=kind,
+                kind=family.kind,
                 entry_type=entry_type,
                 path=path,
                 title=title,
-                source_layer_id=layer_id,
-                source_layer_label=layer_label,
+                source_layer_id=layer.id,
+                source_layer_label=layer.label,
             )
             index.id_by_path[path.resolve()] = node_id
             existing = index.by_id.get(node_id)
             if existing is not None:
-                if existing.source_layer_id == layer_id:
+                if existing.source_layer_id == layer.id:
                     # Duplicate within the same layer — stays an error.
                     index.errors.append(
                         f"Duplicate front matter id {node_id} in "
@@ -250,7 +243,7 @@ class ReferencesMixin:
                     continue
                 # Cross-layer collision: descendant wins, but flag it for visibility.
                 index.warnings.append(
-                    f"Entry id {node_id} in {layer_label} shadows the entry from "
+                    f"Entry id {node_id} in {layer.label} shadows the entry from "
                     f"{existing.source_layer_label}."
                 )
             index.by_id[node_id] = entry
@@ -422,27 +415,32 @@ class ReferencesMixin:
         except ProjectServiceError:
             return []
         edges: list[ReferenceEdge] = []
-        seen: set[tuple[str, str]] = set()
-
-        def add(candidate: object, field_id: str) -> None:
-            if not isinstance(candidate, str) or not candidate:
-                return
-            if (candidate, field_id) in seen:
-                return
-            seen.add((candidate, field_id))
-            edges.append(ReferenceEdge(src=entry.id, dst=candidate, field_id=field_id))
-
         for field_id in entry_definition.fields:
             field = schema.fields.get(field_id)
             if field is None:
                 continue
-            value = metadata.get(field_id)
-            if field.type == "entity_ref":
-                add(value, field_id)
-            elif field.type == "entity_ref_list" and isinstance(value, list):
-                for item in value:
-                    add(item, field_id)
+            edges.extend(self._edges_from_field(entry.id, field_id, field.type, metadata.get(field_id)))
         return edges
+
+    def _edges_from_field(
+        self, src: str, field_id: str, field_type: str, value: object
+    ) -> list[ReferenceEdge]:
+        """The edges one `entity_ref` / `entity_ref_list` value contributes.
+
+        Deduped within the field — a target listed twice is one edge — but not
+        across fields, since the field is part of the edge's identity.
+        """
+        if field_type == "entity_ref":
+            candidates: list[object] = [value]
+        elif field_type == "entity_ref_list" and isinstance(value, list):
+            candidates = list(value)
+        else:
+            return []
+        targets = [item for item in candidates if isinstance(item, str) and item]
+        return [
+            ReferenceEdge(src=src, dst=target, field_id=field_id)
+            for target in dict.fromkeys(targets)
+        ]
 
     def reference_graph(self) -> ReferenceGraphResponse:
         """Forward reference adjacency for the whole project (#184 Phase 2).

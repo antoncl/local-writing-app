@@ -396,6 +396,9 @@
 
   // ---- schema-derived leaf-config options for the current kind ----
   let entryTypeOptions = $derived(kindEntryTypeOptions(schema ?? null, kind));
+  // The `descendants_of` roster includes abstract family roots (#295); `type` and
+  // `field → entry_type` use the concrete-only `entryTypeOptions` above.
+  let entryTypeOptionsWithAbstract = $derived(kindEntryTypeOptions(schema ?? null, kind, true));
   // The intrinsic identity fields (id/title/entry_type, #116) are now regular
   // schema fields injected into every entry_type, so title/entry_type surface
   // here naturally — pinned first (intrinsic before metadata). `hidden` fields
@@ -557,6 +560,7 @@
       toggleExpanded,
       kind,
       entryTypes: entryTypeOptions,
+      entryTypesWithAbstract: entryTypeOptionsWithAbstract,
       fields: fieldOptions,
       fieldsFor: fieldsForNode,
       rosterWarningFor,

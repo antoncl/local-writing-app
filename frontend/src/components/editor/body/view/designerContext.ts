@@ -34,7 +34,13 @@ export type DesignerContext = {
   toggleExpanded: (nodeId: string) => void;
   // schema-derived leaf-config options for the view's anchor kind
   kind: string;
+  // Concrete (non-abstract) entry_types — the roster for an exact `type` match and
+  // for a `field → entry_type` value (abstract types have no members).
   entryTypes: EntryTypeOption[];
+  // Concrete + abstract entry_types — the roster for a `descendants_of` root, which
+  // expands a family and so accepts an abstract family head (e.g. `lore:base`). Also
+  // the superset used for name lookups, so an abstract root renders its display name.
+  entryTypesWithAbstract: EntryTypeOption[];
   // `fields` = the anchor-kind roster (fallback / non-node-specific reads).
   // `fieldsFor(nodeId)` = the roster for that node's INPUT-set kind (ADR-0031 §F,
   // kind-level) — the pickers use it so a node downstream of a cross-kind

@@ -12,7 +12,9 @@ same call the app makes.
 
 Questions answered:
   Q1  footprint  — what does holding the index / metadata / bodies cost?
-  Q2  cold build — `_build_node_index()` over one book's ancestor chain
+  Q2  cold build — `_build_node_index()` over one book's ancestor chain (since
+                   #305 that one pass also yields the edges + reverse map, so
+                   the graph is a projection, not a second walk)
   Q3  schema     — `read_metadata_schema()`, the uncached per-layer merge that
                    ADR-0039 deepens
   Q4  snapshot   — dump / load / rehydrate to real NodeIndexEntry objects
@@ -393,10 +395,18 @@ def sqlite_backlinks(db_path: Path, sample: list[str]) -> float:
 # ---------------------------------------------------------------------------
 # Measurement sections
 # ---------------------------------------------------------------------------
-def _measure_build(svc: ProjectService) -> tuple[float, object, float, dict]:
+def _measure_build(svc: ProjectService) -> tuple[float, object, float, float, dict]:
+    """Three numbers, because they answer different questions (#305).
+
+    `_build_node_index` now extracts the edges in the same front-matter pass, so
+    the *projection* is what a caller holding an index pays for the graph — while
+    `reference_graph()` still rebuilds the index from scratch on every call
+    (memoizing that is #306/#307), so it stays the honest cost of the endpoint.
+    """
     t_index, index = time_it(svc._build_node_index)
+    t_project, _ = time_it(lambda: {src: [e.dst for e in edges] for src, edges in index.edges_by_src.items()})
     t_graph, graph = time_it(svc.reference_graph)
-    return t_index, index, t_graph, graph.refs
+    return t_index, index, t_project, t_graph, graph.refs
 
 
 def _report_footprint(index, edges: dict) -> None:
@@ -450,7 +460,7 @@ def _report_incremental(svc: ProjectService, index, count: int = 10) -> None:
 
     t_reparse, _ = time_it(reparse)
     entries = [e for e in list(index.by_id.values())[:: max(1, len(index.by_id) // count)]][:count]
-    t_refs, _ = time_it(lambda: [svc._forward_refs_for_entry(e, schema) for e in entries])
+    t_refs, _ = time_it(lambda: [svc._reference_edges_for_entry(e, schema) for e in entries])
     print(f"  [Q6] re-parse {count} changed files : {t_reparse * 1000:8.2f} ms")
     print(f"       + re-extract their edges    : {t_refs * 1000:8.2f} ms")
 
@@ -474,10 +484,11 @@ def run_scale(sc: Scale, regen: bool) -> None:
     t_schema, _ = time_it(svc.read_metadata_schema)
     print(f"  [Q3] read_metadata_schema (uncached, {len(layers)} layers) : {t_schema * 1000:6.1f} ms")
 
-    t_index, index, t_graph, edges = _measure_build(svc)
-    print(f"  [Q2] _build_node_index  : {t_index * 1000:8.1f} ms   ({len(index.by_id)} nodes in chain)")
-    print(f"       reference_graph    : {t_graph * 1000:8.1f} ms   (schema-driven edges)")
-    print(f"       cold total         : {(t_index + t_graph) * 1000:8.1f} ms")
+    t_index, index, t_project, t_graph, edges = _measure_build(svc)
+    edge_count = sum(len(e) for e in index.edges_by_src.values())
+    print(f"  [Q2] _build_node_index   : {t_index * 1000:8.1f} ms   ({len(index.by_id)} nodes, {edge_count} edges, one pass)")
+    print(f"       + project the graph : {t_project * 1000:8.1f} ms   (index in hand - no re-parse)")
+    print(f"       reference_graph()   : {t_graph * 1000:8.1f} ms   (rebuilds the index; memoizing it is #306/#307)")
 
     _report_footprint(index, edges)
 

@@ -223,11 +223,6 @@ class Backlink(BaseModel):
     field_name: str
 
 
-class BacklinksResponse(BaseModel):
-    target_id: str
-    backlinks: list[Backlink] = Field(default_factory=list)
-
-
 class ReferenceGraphResponse(BaseModel):
     """Forward reference adjacency for the whole project (#184 Phase 2): each
     node id → the ids it references through any entity_ref / entity_ref_list

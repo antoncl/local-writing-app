@@ -10,8 +10,9 @@ Since #305 the edges are not re-derived per request: `_build_node_index` extract
 them in the same front-matter pass that builds the id map, keeps them
 field-qualified (`src`, `dst`, `field_id` — ADR-0039's reference-typed overrides
 need to know which field an edge came from), and builds the reverse adjacency map
-`list_backlinks` reads. So this file also pins the edge shape, the shadowing
-rule, and that backlinks still agree with the graph.
+the delete guards read (`_backlinks_to_targets`; the per-node `list_backlinks`
+endpoint was retired in #325). So this file also pins the edge shape, the
+shadowing rule, and that backlinks still agree with the graph.
 """
 
 from __future__ import annotations
@@ -125,18 +126,22 @@ class ReferenceGraphTests(unittest.TestCase):
                 ReferenceEdge(src=alice, dst=bob, field_id="rivals"),
             ],
         )
-        # …and that is what backlinks are served from: one row per field.
+        # …and that is what the delete guards read: one row per field.
         self.assertEqual(
-            [(link.id, link.field_id, link.field_name) for link in svc.list_backlinks(bob).backlinks],
+            [(link.id, link.field_id, link.field_name) for link in svc._backlinks_to_targets({bob})],
             [(alice, "ally", "Ally"), (alice, "rivals", "Rivals")],
         )
 
-    def test_self_reference_is_an_edge_but_not_a_backlink(self) -> None:
+    def test_self_reference_is_an_edge_and_the_caller_excludes_it(self) -> None:
+        """A node referencing itself is a real edge. It must not block its own
+        delete — but that is the caller's exclusion, not a rule baked into the
+        edge lookup, because a *different* node's reference to it must block."""
         alice = self._make("Alice")
         self._save(alice, "Alice", {"ally": alice})
 
         self.assertEqual(svc.reference_graph().refs[alice], [alice])
-        self.assertEqual(svc.list_backlinks(alice).backlinks, [])
+        self.assertEqual(len(svc._backlinks_to_targets({alice})), 1)
+        self.assertEqual(svc._backlinks_to_targets({alice}, exclude_source_ids={alice}), [])
 
 
 class ShadowedEdgeTests(unittest.TestCase):
@@ -296,18 +301,21 @@ class SceneEdgeTests(unittest.TestCase):
         )
         # The scene reaches `hero` through two fields → two backlink rows.
         self.assertEqual(
-            [link.field_id for link in self.service.list_backlinks(hero).backlinks],
+            [link.field_id for link in self.service._backlinks_to_targets({hero})],
             ["characters", "pov"],
         )
 
-    def test_delete_guard_and_backlinks_panel_agree(self) -> None:
-        """`_backlinks_to_targets` (the delete guards) and `list_backlinks` (the
-        panel) used to be independent walks. They now read the same edges, so
-        they cannot disagree about whether a node is referenced."""
+    def test_one_source_reaching_several_targets_is_one_row(self) -> None:
+        """The delete guards ask "what points into this set", not "how many
+        ways" — a scene listing two of the doomed nodes in one `characters`
+        field is one blocker, not two."""
         scene_path = next((self.root / "scenes").glob("*.md"))
         scene_id = self.service._read_front_matter_only(scene_path, strict=True)["id"]
         hero = self.service.create_lore_entry(
             CreateLoreEntryRequest(title="Hero", entry_type="lore:character")
+        ).id
+        foil = self.service.create_lore_entry(
+            CreateLoreEntryRequest(title="Foil", entry_type="lore:character")
         ).id
         scene = self.service.read_scene(scene_id)
         self.service.save_scene(
@@ -318,18 +326,13 @@ class SceneEdgeTests(unittest.TestCase):
                 base_revision=scene.revision,
                 status="draft",
                 entry_type="scene:scene",
-                metadata={"pov": hero, "characters": [hero]},
+                metadata={"characters": [hero, foil]},
             ),
         )
 
-        panel = self.service.list_backlinks(hero).backlinks
-        guard = self.service._backlinks_to_targets({hero})
+        rows = self.service._backlinks_to_targets({hero, foil})
 
-        self.assertEqual(
-            [(link.id, link.field_id) for link in panel],
-            [(link.id, link.field_id) for link in guard],
-        )
-        self.assertTrue(panel)
+        self.assertEqual([(link.id, link.field_id) for link in rows], [(scene_id, "characters")])
 
 
 if __name__ == "__main__":

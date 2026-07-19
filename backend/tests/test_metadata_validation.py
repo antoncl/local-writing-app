@@ -2650,19 +2650,22 @@ class ReferenceResolutionTests(unittest.TestCase):
             ),
         )
 
-        seren_backlinks = self.service.list_backlinks(seren.id)
-        self.assertEqual(len(seren_backlinks.backlinks), 1)
-        link = seren_backlinks.backlinks[0]
+        # `_backlinks_to_targets` is the surviving reverse-map consumer — it
+        # backs the scene/research delete guards. The per-node `list_backlinks`
+        # endpoint was retired in #325 (the frontend has computed backlinks
+        # client-side from the reference graph since #203).
+        seren_backlinks = self.service._backlinks_to_targets({seren.id})
+        self.assertEqual(len(seren_backlinks), 1)
+        link = seren_backlinks[0]
         self.assertEqual(link.id, scene_id)
         self.assertEqual(link.field_id, "characters")
 
-        taverna_backlinks = self.service.list_backlinks(taverna.id)
-        sources = {(link.id, link.field_id) for link in taverna_backlinks.backlinks}
+        taverna_backlinks = self.service._backlinks_to_targets({taverna.id})
+        sources = {(link.id, link.field_id) for link in taverna_backlinks}
         self.assertEqual(sources, {(seren.id, "home_place"), (scene_id, "locations")})
 
     def test_backlinks_returns_empty_for_unknown_id(self) -> None:
-        response = self.service.list_backlinks("lore_does_not_exist")
-        self.assertEqual(response.backlinks, [])
+        self.assertEqual(self.service._backlinks_to_targets({"lore_does_not_exist"}), [])
 
     def test_search_resolves_reference_titles_in_excerpts(self) -> None:
         seren = self.service.create_lore_entry(CreateLoreEntryRequest(title="Seren", entry_type="lore:character"))

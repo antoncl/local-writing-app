@@ -5,10 +5,12 @@ research, chats, plus the machine assistants layer) into an in-memory
 `NodeIndex` keyed by id — and, in that same front-matter pass, extracts the
 field-qualified reference edges plus their reverse adjacency map (#305, so
 answering a reference-graph request no longer parses the chain three times);
-the reference API (`resolve_references`,
-`list_backlinks`, `list_reference_candidates`) and the node-identity helpers
-(`_node_id_for_path`, `_path_for_node_id`, `_safe_relative`,
-`_read_body_summary`) build on it. This mixin owns that subsystem; almost
+the reference API (`resolve_references`, `list_reference_candidates`) and the
+node-identity helpers (`_node_id_for_path`, `_path_for_node_id`,
+`_safe_relative`, `_read_body_summary`) build on it. Backlinks are *not* served
+from here — the frontend computes them from the reference graph (#203), and the
+delete guards use `_backlinks_to_targets`; the per-node `list_backlinks` endpoint
+that once lived here was retired in #325. This mixin owns that subsystem; almost
 every other slice consumes `_build_node_index` / `_node_id_for_path` /
 `_path_for_node_id` via `self` → MRO, so they keep resolving unchanged.
 
@@ -27,8 +29,6 @@ from pathlib import Path
 from typing import Any
 
 from app.models import (
-    Backlink,
-    BacklinksResponse,
     MetadataSchema,
     ReferenceCandidate,
     ReferenceCandidatesResponse,
@@ -374,36 +374,6 @@ class ReferencesMixin:
                 continue
             candidates.append(self._candidate_from_index_entry(entry, include_summary=True))
         return ReferenceResolveResponse(candidates=candidates)
-
-    def list_backlinks(self, target_id: str) -> BacklinksResponse:
-        """What points at `target_id`, read straight off the reverse adjacency
-        map the index build produced — no second walk over every node's front
-        matter (#305)."""
-        node_index = self._build_node_index()
-        if target_id not in node_index.by_id:
-            return BacklinksResponse(target_id=target_id, backlinks=[])
-        schema = self.read_metadata_schema()
-        backlinks: list[Backlink] = []
-        for edge in node_index.edges_by_dst.get(target_id, []):
-            # A node's reference to itself is not a backlink.
-            if edge.src == target_id:
-                continue
-            entry = node_index.by_id.get(edge.src)
-            field = schema.fields.get(edge.field_id)
-            if entry is None or field is None:
-                continue
-            backlinks.append(
-                Backlink(
-                    id=entry.id,
-                    title=entry.title or entry.id,
-                    kind=entry.kind,
-                    entry_type=entry.entry_type,
-                    field_id=edge.field_id,
-                    field_name=field.name,
-                )
-            )
-        backlinks.sort(key=lambda link: (link.kind, link.title.lower(), link.field_id))
-        return BacklinksResponse(target_id=target_id, backlinks=backlinks)
 
     def _reference_edges_for_entry(
         self,

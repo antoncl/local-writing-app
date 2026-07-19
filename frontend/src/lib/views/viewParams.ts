@@ -6,12 +6,16 @@
 // pane today, the #182 canonical wrapper when it lands.
 //
 // Type derivation (§14.1): a param stores NO type. Its control's field def is
-// recomputed from the field(s) whose Filter slot references it via `{var: name}`
-// — the intersection rule (ADR-0031 §F). This cut takes the first referencing
-// slot's field (the single-slot common case); the intersection refinement and a
-// cross-slot-mismatch warning are deferred with the designer authoring (1b).
+// recomputed from the slot(s) that reference it via `{var: name}`. A `field`
+// predicate operand derives from the schema field it sits on (the intersection
+// rule, ADR-0031 §F). A leaf predicate (`type` / `descendants_of` / `tagged`,
+// #222) has no schema field, so its control is SYNTHESIZED — an entry_type
+// select for `type`/`descendants_of`, a tags picker for `tagged` — mirroring the
+// designer's own inline editors. This cut takes the first referencing slot (the
+// single-slot common case); the intersection refinement and a cross-slot-mismatch
+// warning are deferred with the designer authoring (1b).
 
-import type { MetadataFieldDefinition, MetadataSchema, ViewExpr, ViewParam, ViewSpec } from "@/lib/types";
+import type { MetadataFieldDefinition, MetadataSchema, SelectOption, ViewExpr, ViewLeafValue, ViewParam, ViewSpec } from "@/lib/types";
 import { SELF_VAR, type EvalBindings } from "@/lib/views/evaluateView";
 import { walkViewExpr } from "@/lib/views/walkViewExpr";
 
@@ -28,6 +32,26 @@ export type ParamControl = {
 // referencing field is absent from the schema): the strip still shows a control.
 function textFallback(name: string): MetadataFieldDefinition {
   return { name, type: "text", options: [] };
+}
+
+// A var promoted into a `type`/`descendants_of` leaf compares entry_type FQNs, so
+// synthesize a `select` over the schema's entry_types — the same roster the
+// designer offers (ViewBodyView `entryTypeOptions`): non-abstract types of the
+// view's kind, FQN value + display-name label. `toMultiValued` then widens it to a
+// multi_select, since a bound leaf operand matches ANY of a set (#222).
+function entryTypeField(name: string, kind: string, schema: MetadataSchema | null | undefined): MetadataFieldDefinition {
+  const options: SelectOption[] = Object.entries(schema?.entry_types ?? {})
+    .filter(([, def]) => def.kind === kind && !def.abstract)
+    .map(([fqn, def]) => ({ value: fqn, label: def.name }));
+  return { name, type: "select", options };
+}
+
+// A var promoted into a `tagged` leaf compares tags → a tags picker (already
+// multi-valued, so `toMultiValued` passes it through). `tagged` is retired as a
+// designer-authorable predicate (ViewFlowNode), reachable only via a hand-written
+// spec, but the derivation blind spot was the same, so it's covered here.
+function taggedField(name: string): MetadataFieldDefinition {
+  return { name, type: "tags", options: [] };
 }
 
 // A promoted param always fills an overlap/disjoint predicate's `value` operand
@@ -53,30 +77,54 @@ function isVarOperand(v: unknown): v is { var: string } {
   return typeof v === "object" && v !== null && typeof (v as { var?: unknown }).var === "string";
 }
 
-// Map each formal name → the field keys whose predicate operand is `{var: name}`.
+// A var reference discovered in the spec. A `field`-predicate operand derives its
+// control from the schema field it sits on; a leaf predicate has no schema field,
+// so its control is synthesized — `entry_type` covers both `type` and
+// `descendants_of` (both compare entry_type FQNs), `tagged` compares tags.
+type ParamRef = { kind: "field"; key: string } | { kind: "entry_type" } | { kind: "tagged" };
+
+// Map each formal name → the slot references whose operand is `{var: name}`.
 // Only predicate operands need a control: `$self` is surface-supplied and a
 // `field_of` `of`-var is a wired source, neither a user-facing formal. Traversal
 // is the shared `walkViewExpr` (#275) — so a promoted formal buried anywhere,
-// including inside an orphans-only Nest, is found.
-function collectReferencingFieldKeys(spec: ViewSpec): Map<string, string[]> {
-  const out = new Map<string, string[]>();
-  const add = (name: string, key: string): void => {
+// including inside an orphans-only Nest, is found. The leaf slots (`type` /
+// `descendants_of` / `tagged`) carry a `{var}` just like a field value does (#222),
+// so all four are inspected — walking only `field.value` was the #293 blind spot.
+function collectParamRefs(spec: ViewSpec): Map<string, ParamRef[]> {
+  const out = new Map<string, ParamRef[]>();
+  const add = (name: string, ref: ParamRef): void => {
     const list = out.get(name);
-    if (list) {
-      if (!list.includes(key)) list.push(key);
-    } else {
-      out.set(name, [key]);
-    }
+    if (list) list.push(ref);
+    else out.set(name, [ref]);
   };
+  const leafVar = (v: ViewLeafValue | undefined): string | null =>
+    isVarOperand(v) && v.var !== SELF_VAR ? v.var : null;
   const visit = (e: ViewExpr): void => {
-    if (e.field) {
-      const v = e.field.value;
-      if (isVarOperand(v) && v.var !== SELF_VAR) add(v.var, e.field.key);
-    }
+    if (e.field && isVarOperand(e.field.value) && e.field.value.var !== SELF_VAR) add(e.field.value.var, { kind: "field", key: e.field.key });
+    const t = leafVar(e.type) ?? leafVar(e.descendants_of);
+    if (t) add(t, { kind: "entry_type" });
+    const g = leafVar(e.tagged);
+    if (g) add(g, { kind: "tagged" });
   };
   walkViewExpr(spec.expr, visit);
   spec.groups?.forEach((g) => walkViewExpr(g.expr, visit));
   return out;
+}
+
+// The unwidened control field + informational `fieldKey` for a single reference.
+// A field ref keeps its schema key (even when the schema lacks it → a text
+// fallback still labelled by the key); a synthesized leaf control reports the
+// intrinsic key it stands in for.
+function controlFieldFor(
+  ref: ParamRef | undefined,
+  label: string,
+  kind: string,
+  schema: MetadataSchema | null | undefined,
+): { field: MetadataFieldDefinition; fieldKey: string } {
+  if (ref?.kind === "field") return { field: schema?.fields?.[ref.key] ?? textFallback(label), fieldKey: ref.key };
+  if (ref?.kind === "entry_type") return { field: entryTypeField(label, kind, schema), fieldKey: "entry_type" };
+  if (ref?.kind === "tagged") return { field: taggedField(label), fieldKey: "tags" };
+  return { field: textFallback(label), fieldKey: "" };
 }
 
 // Resolve the strip controls for a spec's declared formals, in declaration order.
@@ -86,11 +134,11 @@ export function resolveParamControls(
 ): ParamControl[] {
   const params = spec.params ?? [];
   if (params.length === 0) return [];
-  const keysByName = collectReferencingFieldKeys(spec);
+  const refsByName = collectParamRefs(spec);
   return params.map((p) => {
-    const fieldKey = keysByName.get(p.name)?.[0] ?? "";
-    const resolved = (fieldKey ? schema?.fields?.[fieldKey] : null) ?? textFallback(p.label || p.name);
-    return { name: p.name, label: p.label || p.name, field: toMultiValued(resolved), fieldKey };
+    const label = p.label || p.name;
+    const { field, fieldKey } = controlFieldFor(refsByName.get(p.name)?.[0], label, spec.kind, schema);
+    return { name: p.name, label, field: toMultiValued(field), fieldKey };
   });
 }
 

@@ -82,6 +82,65 @@ describe("resolveParamControls (type derived from the referencing Filter slot)",
     expect([c.field.type, c.fieldKey]).toEqual(["text", ""]);
   });
 
+  it("a `type`-referenced param → an entry_type select (widened to multi_select), #293", () => {
+    const schema = {
+      version: 1,
+      entry_types: {
+        "lore:character": { name: "Character", kind: "lore" },
+        "lore:place": { name: "Place", kind: "lore" },
+        "lore:base": { name: "Base", kind: "lore", abstract: true },
+        "scene:scene": { name: "Scene", kind: "scene" },
+      },
+      fields: {},
+    } as unknown as MetadataSchema;
+    const spec: ViewSpec = {
+      kind: "lore",
+      expr: { filter: { of: { descendants_of: "lore:base" }, pred: { type: { var: "Kind" } } } },
+      params: [{ name: "Kind", label: "Entry type", default: null }],
+    };
+    const [c] = resolveParamControls(spec, schema);
+    // Non-abstract types of the view's kind only — `lore:base` (abstract) and
+    // `scene:scene` (other kind) are excluded — value=FQN, label=display name.
+    expect(c.field.type).toBe("multi_select");
+    expect(c.field.options).toEqual([
+      { value: "lore:character", label: "Character" },
+      { value: "lore:place", label: "Place" },
+    ]);
+    expect(c.fieldKey).toBe("entry_type");
+  });
+
+  it("a `descendants_of`-referenced param also derives the entry_type control, #293", () => {
+    const schema = {
+      version: 1,
+      entry_types: { "lore:character": { name: "Character", kind: "lore" } },
+      fields: {},
+    } as unknown as MetadataSchema;
+    const spec: ViewSpec = {
+      kind: "lore",
+      expr: { filter: { of: { descendants_of: "lore:base" }, pred: { descendants_of: { var: "Family" } } } },
+      params: [{ name: "Family", label: "Family", default: null }],
+    };
+    const [c] = resolveParamControls(spec, schema);
+    expect([c.field.type, c.fieldKey]).toEqual(["multi_select", "entry_type"]);
+  });
+
+  it("a `tagged`-referenced param → a tags control (retired for authoring, hand-written specs), #293", () => {
+    const spec: ViewSpec = {
+      kind: "lore",
+      expr: { filter: { of: { descendants_of: "lore:base" }, pred: { tagged: { var: "Tag" } } } },
+      params: [{ name: "Tag", label: "Tag", default: null }],
+    };
+    const [c] = resolveParamControls(spec, SCHEMA);
+    expect([c.field.type, c.fieldKey]).toEqual(["tags", "tags"]);
+  });
+
+  it("a literal (non-var) leaf operand does NOT bind a formal → text fallback, #293", () => {
+    // `type` is a plain FQN string here, not `{var}`, so `Loose` stays unreferenced.
+    const spec: ViewSpec = { kind: "scene", expr: { type: "scene:scene" }, params: [{ name: "Loose", label: "Loose" }] };
+    const [c] = resolveParamControls(spec, SCHEMA);
+    expect([c.field.type, c.fieldKey]).toEqual(["text", ""]);
+  });
+
   it("$self operands are NOT formals (surface-supplied, no control)", () => {
     const spec: ViewSpec = {
       kind: "scene",

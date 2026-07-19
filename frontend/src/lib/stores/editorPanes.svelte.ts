@@ -173,16 +173,16 @@ class EditorPanesController {
     metadata: EntryMetadata,
     inputs?: PromptInputDefinition[],
   ): void {
+    // View panes self-persist (ViewBodyView owns a debounced PUT /api/views/{id})
+    // and drive their save-state flags via `setViewSaveState`. Their draft-* fields
+    // are NOT their source of truth, so the generic dirty diff would mark them
+    // PERMANENTLY unsaved (draft never equals the view `scene` baseline) — and,
+    // fired from the post-save `onBodyChange`, would instantly clobber the "Saved"
+    // flag (#263). Mirror the draft fields but leave the save flags to the view.
+    const isView = this.panes.find((pane) => pane.id === id)?.document?.type === "view";
     this.panes = this.panes.map((pane) => {
       if (pane.id !== id) return pane;
       const nextInputs = inputs ?? pane.draftInputs;
-      // View panes self-persist (ViewBodyView owns a debounced PUT /api/views/{id})
-      // and drive their save-state flags via `setViewSaveState`. Their draft-* fields
-      // are NOT their source of truth, so the generic dirty diff would mark them
-      // PERMANENTLY unsaved (draft never equals the view `scene` baseline) — and,
-      // fired from the post-save `onBodyChange`, would instantly clobber the "Saved"
-      // flag (#263). Mirror the draft fields but leave the save flags to the view.
-      const isView = pane.document?.type === "view";
       const nextDirty = isView ? pane.dirty : isEditorPaneDirty(pane.scene, title, body, status, entryType, metadata, nextInputs);
       return {
         ...pane,
@@ -199,7 +199,7 @@ class EditorPanesController {
     });
     // The generic autosave is a no-op for views (saveEditorPane returns early), so
     // don't arm it for them — their own debounce handles persistence.
-    if (this.panes.find((pane) => pane.id === id)?.document?.type !== "view") this.#autosave.schedule(id);
+    if (!isView) this.#autosave.schedule(id);
   }
 
   async refreshOpenEditorPaneBaselines(transformDraftMetadata?: (metadata: EntryMetadata) => EntryMetadata): Promise<void> {
@@ -462,12 +462,15 @@ class EditorPanesController {
   // designer owns its own debounced PUT /api/views/{id}), so they push these
   // transitions instead. `saveError` is deliberately sticky: an edit or a retry
   // does NOT clear it — only a `saved` does — so a failed view never reads "saved".
+  // `dirty` also clears `saving`: it means "unsaved changes, no save in progress",
+  // so a post-save re-dirty (an edit landed while the save was in flight, #263
+  // review) resolves to "Unsaved" rather than a stale "Saving…".
   setViewSaveState(id: string, state: ViewSaveState): void {
     this.panes = this.panes.map((pane) => {
       if (pane.id !== id) return pane;
       switch (state) {
         case "dirty":
-          return { ...pane, dirty: true, recentlySaved: false };
+          return { ...pane, dirty: true, saving: false, recentlySaved: false };
         case "saving":
           return { ...pane, saving: true };
         case "saved":

@@ -49,6 +49,7 @@ import { refreshPromptEntries, setPromptEntries } from "@/lib/stores/prompts";
 import { refreshAssistantEntries, setAssistantEntries } from "@/lib/stores/assistants";
 import { refreshKnownTags } from "@/lib/stores/tags";
 import { referenceIndexStore, refreshReferenceIndex } from "@/lib/stores/references";
+import { forwardRefsOf, sameRefSet } from "@/lib/views/referenceIndex";
 import { backlinksFor } from "@/lib/views/backlinks";
 import { defaultView } from "@/lib/views/evaluateView";
 import { refreshTodos, refreshEmbeddedTodos } from "@/lib/stores/todos";
@@ -412,8 +413,22 @@ class EditorPanesController {
       else this.#autosave.flashSaved(id);
       // A save can have changed this node's entity_ref fields (#184 Phase 2),
       // so the reverse reference index the `references` view field projects over
-      // may be stale — rebuild it in the background (cheap: one bulk endpoint).
-      void refreshReferenceIndex();
+      // may be stale. Change-gate the rebuild (#200): only a save that moved this
+      // node's forward-ref set (its entity_ref* values, or its entry_type — which
+      // selects the field list) can affect the reverse index. Most autosaves are
+      // prose-only and leave it identical, so skip the full-project refetch and
+      // the reactive storm a fresh Map identity would trigger across every view.
+      // Guard on schema availability: if it hasn't loaded we can't compute refs,
+      // so refresh rather than risk a wrong skip. `pane.scene` still holds the
+      // pre-save baseline (the reconciliation above rebuilt other pane objects).
+      const schema = get(metadataSchemaStore);
+      const refsUnchanged =
+        schema != null &&
+        sameRefSet(
+          forwardRefsOf(pane.scene.metadata, pane.scene.entry_type, schema),
+          forwardRefsOf(draftDocument.metadata, draftDocument.entry_type, schema),
+        );
+      if (!refsUnchanged) void refreshReferenceIndex();
       if (documentKind === "lore") {
         await refreshLoreEntries();
         await refreshKnownTags();

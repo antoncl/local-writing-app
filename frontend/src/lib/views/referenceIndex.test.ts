@@ -1,5 +1,20 @@
 import { describe, expect, it } from "vitest";
-import { buildReferenceIndex, projectReferences } from "./referenceIndex";
+import { buildReferenceIndex, forwardRefsOf, projectReferences, sameRefSet } from "./referenceIndex";
+import type { MetadataSchema } from "@/lib/types";
+
+// A minimal schema: a `character` type carrying one scalar ref (`mentor`), one
+// ref list (`allies`), and a non-ref text field (`title`) that must be ignored.
+const SCHEMA = {
+  version: 1,
+  entry_types: {
+    character: { name: "Character", kind: "lore", fields: ["mentor", "allies", "note"] },
+  },
+  fields: {
+    mentor: { type: "entity_ref" },
+    allies: { type: "entity_ref_list" },
+    note: { type: "text" },
+  },
+} as unknown as MetadataSchema;
 
 describe("buildReferenceIndex (#184 Phase 2)", () => {
   it("inverts forward adjacency into target → referrers", () => {
@@ -25,6 +40,50 @@ describe("buildReferenceIndex (#184 Phase 2)", () => {
   it("keeps a self-reference", () => {
     const reverse = buildReferenceIndex({ loop: ["loop"] });
     expect(reverse.get("loop")).toEqual(new Set(["loop"]));
+  });
+});
+
+describe("forwardRefsOf (#200 change-gate)", () => {
+  it("collects scalar + list entity_ref values, ignoring non-ref fields", () => {
+    const refs = forwardRefsOf(
+      { mentor: "gandalf", allies: ["sam", "merry"], note: "a plain text field" },
+      "character",
+      SCHEMA,
+    );
+    expect(refs).toEqual(new Set(["gandalf", "sam", "merry"]));
+  });
+
+  it("dedupes a target reached through more than one field", () => {
+    const refs = forwardRefsOf({ mentor: "sam", allies: ["sam", "merry"] }, "character", SCHEMA);
+    expect(refs).toEqual(new Set(["sam", "merry"]));
+  });
+
+  it("skips empty ids and non-string list items", () => {
+    const refs = forwardRefsOf({ mentor: "", allies: ["sam", "", 7] }, "character", SCHEMA);
+    expect(refs).toEqual(new Set(["sam"]));
+  });
+
+  it("is empty when metadata, entry_type, schema, or the type is missing", () => {
+    expect(forwardRefsOf(null, "character", SCHEMA).size).toBe(0);
+    expect(forwardRefsOf({ mentor: "gandalf" }, null, SCHEMA).size).toBe(0);
+    expect(forwardRefsOf({ mentor: "gandalf" }, "character", null).size).toBe(0);
+    expect(forwardRefsOf({ mentor: "gandalf" }, "unknown_type", SCHEMA).size).toBe(0);
+  });
+});
+
+describe("sameRefSet (#200 change-gate)", () => {
+  it("is order- and duplicate-insensitive on equal id sets", () => {
+    // A prose-only save reproduces the same forward-ref set → refresh is skipped.
+    const before = forwardRefsOf({ mentor: "gandalf", allies: ["sam", "merry"] }, "character", SCHEMA);
+    const afterReordered = forwardRefsOf({ mentor: "gandalf", allies: ["merry", "sam"] }, "character", SCHEMA);
+    expect(sameRefSet(before, afterReordered)).toBe(true);
+  });
+
+  it("detects an added, removed, or swapped ref", () => {
+    const base = new Set(["a", "b"]);
+    expect(sameRefSet(base, new Set(["a", "b", "c"]))).toBe(false); // added
+    expect(sameRefSet(base, new Set(["a"]))).toBe(false); // removed
+    expect(sameRefSet(base, new Set(["a", "c"]))).toBe(false); // swapped (same size)
   });
 });
 

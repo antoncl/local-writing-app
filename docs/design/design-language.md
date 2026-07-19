@@ -23,10 +23,21 @@ those memos never defined.
 
 **Type is system fonts, by design (#143).** The three faces are resident
 platform fonts — Segoe UI / Georgia / Consolas on Windows, native equivalents
-elsewhere — never bundled webfonts. This is deliberate, not a shortcut: the app
-is local-first and holds the whole project graph in memory (that is how Views
-operate, and the resident load grows at 0.7.0), so the type layer must not spend
-that budget on webfont glyph atlases. Serif is **Georgia, not Newsreader** —
+elsewhere — never bundled webfonts **for type**. This is deliberate, not a
+shortcut: the app is local-first and holds the whole project graph in memory
+(that is how Views operate, and the resident load grows at 0.7.0), so the type
+layer must not spend that budget on webfont glyph atlases.
+
+*One icon font is carried:* **Tabler**, because per-field mnemonic icons are a
+persisted part of the data model (`MetadataFieldDefinition.icon` stores a Tabler
+name). That decision scoped it to a **curated subset (~80–120 glyphs)** — a few
+KB, which is why it and the no-webfonts-for-type rule were never in conflict.
+The subset is what makes the budget argument above hold, so it is not optional:
+shipping the full 5,147-glyph atlas contradicts this section (#315). The set
+grows by PR as needs appear; 60 or 100 glyphs are equivalent against the budget,
+the full library is not.
+
+Serif is **Georgia, not Newsreader** —
 Georgia reads better on screen. The role split (serif = the work, sans = the
 tool) is the identity; the specific faces are the safe, zero-cost bets that
 carry it.
@@ -206,6 +217,42 @@ view*, the view's name (+ an active tint) once a real view is applied.
 information no lexicon glyph can (table cell alignment `⟵ ↔ ⟶`, directional
 row/column inserts), a self-contained domain toolbar keeps its own marks rather
 than forcing them into the global lexicon.
+
+**The lexicon governs affordances. Value annotations are a second vocabulary.**
+Every glyph in the table above is something you *click* — which is why the rule
+above it says each one carries an `aria-label` and a tooltip. A mark that
+annotates a **value** is a different animal: nothing to click, no action to
+label, no tooltip-as-verb. It says *something is true of this value*, and it
+lives beside the value, not on a control.
+
+Annotations draw from the **curated Tabler set** (`MetadataFieldDefinition.icon`
+already persists Tabler names; `DEFAULT_FIELD_GLYPH` maps every field type), not
+from the closed lexicon — so the two vocabularies grow independently and neither
+is forced to carry the other's meanings. Naming this split is what explains the
+one long-standing anomaly: `⤳` was never in the lexicon because it never
+belonged there, and the sweep that closed the lexicon was cataloguing
+affordances.
+
+| mark | meaning — everywhere |
+|---|---|
+| `⤳` | **mutated** — changed by a mutation marker at this point in the manuscript (violet, `--mutation-color`) |
+| `ti-arrow-bar-to-right` | **mutation ends here** — the interval closes at this position |
+| `ti-versions` | **overridden** — this value comes from a layer override, not from inherited canon |
+
+Two rules keep annotations legible where several can land on one row:
+
+- **Position carries meaning.** Provenance **leads** the value; mutation
+  **trails** it. A field both overridden and mutated reads
+  `[versions] Captain ⤳` — neither mark has to carry the full load alone.
+- **An annotation never doubles as an affordance, and vice versa.** `⧉`
+  ("duplicate — fork into a new editable copy") is the fork *button*; it must
+  never appear as a state mark on a forked node, or it would mean two things.
+
+Annotations are prose-safe by construction: the mutation marks are ProseMirror
+**atom nodes** whose stored form is an HTML comment
+(`<!-- mutate:close;ref=..;id=.. -->`), so the mark is display-only inside a
+span that already carries a class. Nothing an annotation renders is ever
+serialized into the manuscript text.
 
 **Caps-labels** (rail sections, `TITLE`, fine print): one recipe —
 `--fs-xs`, `--w-semibold`, `letter-spacing: 0.07em`, `text-transform:

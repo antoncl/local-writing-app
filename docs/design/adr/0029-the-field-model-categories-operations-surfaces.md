@@ -1,6 +1,6 @@
 # ADR-0029: The field model — a permissive convenience, categorized by authorship
 
-- Status: Proposed — 0.5.5, 2026-07-05
+- Status: Accepted — 0.5.5, 2026-07-05 · shipped (#118)
 - Amendments: **2026-07-06 (#113)** — §C matrix + §J corrected: intrinsics support **relabel only**; `hide`/`reorder` are N/A (their display is a routed identity control, not a rail row).
 - Feature: #118 (unify the field model, then conform) · follows #116 (intrinsic fields + per-type overrides, merged PR #119)
 - Governed by: `memory/decisions_intrinsic_fields_and_overrides.md`,

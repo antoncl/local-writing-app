@@ -1,6 +1,6 @@
 # ADR-0037: Grouping is view algebra — `group_by` on the result, a row-preserving pipeline, and the end of `ViewPresentation`
 
-- Status: Proposed — 0.7.0, 2026-07-12
+- Status: Accepted — 0.7.0, 2026-07-12 · shipped (#213, PR #229)
 - Feature: #213 (0.7.0 release blocker). Removes the last sibling of the null-view hack: grouping
   imposed pane-side behind a `presentation` switch. Settles the fork ADR-0036 §3 deferred (the
   manuscript tree's spec form) and resolves #112's original ask (strip/flatten manuscript levels) by

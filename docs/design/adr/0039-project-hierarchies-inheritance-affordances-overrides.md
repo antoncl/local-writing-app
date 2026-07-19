@@ -1,7 +1,7 @@
 # ADR-0039: Project hierarchies — inheritance is virtual membership; three edit affordances; per-field layer overrides
 
-- Status: **Proposed** — 0.7.0 planning, 2026-07-16 · **rewritten 2026-07-19** after adversarial
-  review · **Amendment 1 (2026-07-19): inheritance is declared, not inferred** (awaiting approval)
+- Status: **Accepted** — 0.7.0, 2026-07-19 (PR #319) · rewritten 2026-07-19 after two rounds of
+  adversarial review · **Amendment 1: inheritance is declared, not inferred**
 - Feature: #7 (epic) full project hierarchies
 - Companion: ADR-0040 (the index — which *materializes* the chain, not merely caches it)
 - Amends: ADR-0013 (see its Amendment 1) · Gesture UX: **ADR-0042** (co-designed with mutation

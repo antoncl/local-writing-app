@@ -6,7 +6,6 @@ from fastapi import APIRouter, HTTPException, Query, Request
 from app.models import (
     AssistantEntry,
     AssistantEntryList,
-    BacklinksResponse,
     ChatSession,
     ChatSessionList,
     CreateAssistantEntryRequest,
@@ -269,12 +268,6 @@ def list_reference_candidates(
 ) -> ReferenceCandidatesResponse:
     with translate_errors():
         return service.list_reference_candidates(kind=kind, entry_type=entry_type, exclude_id=exclude_id)
-
-
-@router.get("/api/references/backlinks", response_model=BacklinksResponse)
-def list_backlinks(id: str = Query()) -> BacklinksResponse:
-    with translate_errors():
-        return service.list_backlinks(id)
 
 
 @router.get("/api/references/graph", response_model=ReferenceGraphResponse)

@@ -701,9 +701,12 @@ miss every scene. `projectReferences` itself stays pure-canonical (the backlinks
 
 **Backend.** The forward-ref adjacency reaches the frontend as the **load-time reference-graph
 payload** above (per node: a display-summary — id, title, entry_type, kind — plus forward
-ref-target-ids) — computed once from the node index. The on-demand `/references/backlinks` scan (`references.py::list_backlinks`) is **not** on the
-eval path (evaluation is frontend-side, ADR-0025); it is superseded for view evaluation and may remain
-for non-view callers.
+ref-target-ids) — computed once from the node index. The on-demand
+`/references/backlinks` scan is **gone** (#325): evaluation is frontend-side (ADR-0025), so the payload
+above superseded it for view evaluation, and the "may remain for non-view callers" it was kept for
+turned out to be nobody — the frontend stopped calling it in #203 and nothing replaced it. The one
+backend consumer of reverse adjacency that survives is `_backlinks_to_targets`, which backs the
+scene- and research-delete guards and reads the node index's `edges_by_dst` map directly (#305).
 
 ### 14.5 Not specified here (deferred — do not infer)
 

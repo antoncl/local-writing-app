@@ -482,6 +482,22 @@ export function isEmptyValue(v: unknown): boolean {
   return v == null || v === "" || (Array.isArray(v) && v.length === 0);
 }
 
+// Whether a promoted-parameter node reads as INACTIVE by default (#198/#206). A
+// promoted formal (`param != null`) with an EMPTY default is unbound, so its
+// predicate imposes no constraint ("unset = show everything", ADR-0031 §B) and
+// the designer marks the node inactive (dashed tint + "inactive" chip + hover
+// title). Slot nuance: a `field` slot counts only when its op takes a value
+// (`overlap`/`disjoint`) — a `set`/`unset` op carries no operand and is never
+// inactive; the value-less slots (type/descendants_of/tagged) always count on an
+// empty default. Pure so the affordance is unit-tested, not left to a live check.
+export function isInactiveParamNode(
+  param: { default?: unknown } | null | undefined,
+  slotKind: PromotableSlot | null,
+  opNeedsValue: boolean,
+): boolean {
+  return param != null && isEmptyValue(param.default) && (slotKind !== "field" || opNeedsValue);
+}
+
 // Injector ≡ a set-arity-0 operator (ADR-0041 §D): a source with no set-valued
 // input port — the predicate leaves + `all` + an orphans ref (`orphans_of`
 // names its Nest by id, not a wired port). DERIVED from `inputArity` (the §D arity

@@ -83,12 +83,27 @@ export function kindRootEntryTypeId(
 // while type-specific fields drop out. NOT a base-type/common-ancestor shortcut,
 // which would be vertical-only and silently lose shared groups.
 
+// The entry_types of a kind as `{ fqn, name }` options — the single roster the
+// view designer (ViewBodyView) and the runtime param strip (viewParams) both
+// offer, so the "which types does this kind expose" rule lives in one place.
+// `includeAbstract` is for the `descendants_of` operator, whose root can be an
+// abstract family head (e.g. `lore:base` = all lore); the default (concrete only)
+// suits an exact `type` match and the intersection roster, where abstract types
+// have no members.
+export function kindEntryTypeOptions(
+  schema: MetadataSchema | null,
+  kind: string,
+  includeAbstract = false,
+): { fqn: string; name: string }[] {
+  return Object.entries(schema?.entry_types ?? {})
+    .filter(([, def]) => def.kind === kind && (includeAbstract || !def.abstract))
+    .map(([fqn, def]) => ({ fqn, name: def.name }));
+}
+
 // All concrete (instantiable) entry_type FQNs of a kind — abstract types have no
 // members, so they never constrain the intersection.
 export function kindEntryTypeFqns(schema: MetadataSchema | null, kind: string): string[] {
-  return Object.entries(schema?.entry_types ?? {})
-    .filter(([, def]) => def.kind === kind && !def.abstract)
-    .map(([id]) => id);
+  return kindEntryTypeOptions(schema, kind).map((o) => o.fqn);
 }
 
 // An entry_type FQN plus every concrete descendant (seed-inclusive), matching the

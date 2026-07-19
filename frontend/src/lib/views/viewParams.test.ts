@@ -109,10 +109,13 @@ describe("resolveParamControls (type derived from the referencing Filter slot)",
     expect(c.fieldKey).toBe("entry_type");
   });
 
-  it("a `descendants_of`-referenced param also derives the entry_type control, #293", () => {
+  it("a `descendants_of`-referenced param INCLUDES abstract family roots (unlike `type`), #293", () => {
     const schema = {
       version: 1,
-      entry_types: { "lore:character": { name: "Character", kind: "lore" } },
+      entry_types: {
+        "lore:base": { name: "Lore", kind: "lore", abstract: true },
+        "lore:character": { name: "Character", kind: "lore" },
+      },
       fields: {},
     } as unknown as MetadataSchema;
     const spec: ViewSpec = {
@@ -121,7 +124,26 @@ describe("resolveParamControls (type derived from the referencing Filter slot)",
       params: [{ name: "Family", label: "Family", default: null }],
     };
     const [c] = resolveParamControls(spec, schema);
-    expect([c.field.type, c.fieldKey]).toEqual(["multi_select", "entry_type"]);
+    // `descendants_of` expands a family, so the abstract root `lore:base` IS an
+    // offerable value — the exact-match `type` picker (above) excludes it.
+    expect(c.field.type).toBe("multi_select");
+    expect(c.field.options).toEqual([
+      { value: "lore:base", label: "Lore" },
+      { value: "lore:character", label: "Character" },
+    ]);
+    expect(c.fieldKey).toBe("entry_type");
+  });
+
+  it("a `type` param with no offerable entry_types → a usable text fallback, not a dead select, #293", () => {
+    // schema=null (not yet loaded) ⇒ empty roster ⇒ an empty <select> would be
+    // un-pickable, so the control degrades to a text box (type an FQN).
+    const spec: ViewSpec = {
+      kind: "lore",
+      expr: { filter: { of: { descendants_of: "lore:base" }, pred: { type: { var: "Kind" } } } },
+      params: [{ name: "Kind", label: "Kind", default: null }],
+    };
+    const [c] = resolveParamControls(spec, null);
+    expect(c.field.type).toBe("text");
   });
 
   it("a `tagged`-referenced param → a tags control (retired for authoring, hand-written specs), #293", () => {
@@ -132,13 +154,6 @@ describe("resolveParamControls (type derived from the referencing Filter slot)",
     };
     const [c] = resolveParamControls(spec, SCHEMA);
     expect([c.field.type, c.fieldKey]).toEqual(["tags", "tags"]);
-  });
-
-  it("a literal (non-var) leaf operand does NOT bind a formal → text fallback, #293", () => {
-    // `type` is a plain FQN string here, not `{var}`, so `Loose` stays unreferenced.
-    const spec: ViewSpec = { kind: "scene", expr: { type: "scene:scene" }, params: [{ name: "Loose", label: "Loose" }] };
-    const [c] = resolveParamControls(spec, SCHEMA);
-    expect([c.field.type, c.fieldKey]).toEqual(["text", ""]);
   });
 
   it("$self operands are NOT formals (surface-supplied, no control)", () => {

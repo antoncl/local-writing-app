@@ -16,6 +16,7 @@
 // warning are deferred with the designer authoring (1b).
 
 import type { MetadataFieldDefinition, MetadataSchema, SelectOption, ViewExpr, ViewLeafValue, ViewParam, ViewSpec } from "@/lib/types";
+import { kindEntryTypeOptions } from "@/lib/utils/schemaTypeHelpers";
 import { SELF_VAR, type EvalBindings } from "@/lib/views/evaluateView";
 import { walkViewExpr } from "@/lib/views/walkViewExpr";
 
@@ -35,14 +36,14 @@ function textFallback(name: string): MetadataFieldDefinition {
 }
 
 // A var promoted into a `type`/`descendants_of` leaf compares entry_type FQNs, so
-// synthesize a `select` over the schema's entry_types — the same roster the
-// designer offers (ViewBodyView `entryTypeOptions`): non-abstract types of the
-// view's kind, FQN value + display-name label. `toMultiValued` then widens it to a
-// multi_select, since a bound leaf operand matches ANY of a set (#222).
-function entryTypeField(name: string, kind: string, schema: MetadataSchema | null | undefined): MetadataFieldDefinition {
-  const options: SelectOption[] = Object.entries(schema?.entry_types ?? {})
-    .filter(([, def]) => def.kind === kind && !def.abstract)
-    .map(([fqn, def]) => ({ value: fqn, label: def.name }));
+// synthesize a `select` over the schema's entry_types — the same roster (shared
+// `kindEntryTypeOptions`) the designer offers: types of the view's kind, FQN value
+// + display-name label. `includeAbstract` is passed for `descendants_of`, whose
+// root can be an abstract family head (e.g. `lore:base` = all lore) — an exact
+// `type` match excludes abstract (no members). `toMultiValued` then widens the
+// select to a multi_select, since a bound leaf operand matches ANY of a set (#222).
+function entryTypeField(name: string, kind: string, schema: MetadataSchema | null | undefined, includeAbstract: boolean): MetadataFieldDefinition {
+  const options: SelectOption[] = kindEntryTypeOptions(schema ?? null, kind, includeAbstract).map((o) => ({ value: o.fqn, label: o.name }));
   return { name, type: "select", options };
 }
 
@@ -79,30 +80,47 @@ function isVarOperand(v: unknown): v is { var: string } {
 
 // A var reference discovered in the spec. A `field`-predicate operand derives its
 // control from the schema field it sits on; a leaf predicate has no schema field,
-// so its control is synthesized — `entry_type` covers both `type` and
-// `descendants_of` (both compare entry_type FQNs), `tagged` compares tags.
-type ParamRef = { kind: "field"; key: string } | { kind: "entry_type" } | { kind: "tagged" };
+// so its control is synthesized. `type` and `descendants_of` both compare
+// entry_type FQNs but differ on abstract roots (see `entryTypeField`), so they stay
+// distinct; `tagged` compares tags.
+type ParamRef = { kind: "field"; key: string } | { kind: "type" } | { kind: "descendants_of" } | { kind: "tagged" };
 
-// Map each formal name → the slot references whose operand is `{var: name}`.
-// Only predicate operands need a control: `$self` is surface-supplied and a
-// `field_of` `of`-var is a wired source, neither a user-facing formal. Traversal
-// is the shared `walkViewExpr` (#275) — so a promoted formal buried anywhere,
-// including inside an orphans-only Nest, is found. The leaf slots (`type` /
-// `descendants_of` / `tagged`) carry a `{var}` just like a field value does (#222),
-// so all four are inspected — walking only `field.value` was the #293 blind spot.
+// A stable identity for a reference, so `collectParamRefs` can de-dup: the same
+// formal referenced by two identical slots contributes one ref, not two.
+function refKey(ref: ParamRef): string {
+  return ref.kind === "field" ? `field:${ref.key}` : ref.kind;
+}
+
+// Map each formal name → the (de-duplicated) slot references whose operand is
+// `{var: name}`. Only predicate operands need a control: `$self` is surface-
+// supplied and a `field_of` `of`-var is a wired source, neither a user-facing
+// formal. Traversal is the shared `walkViewExpr` (#275) — so a promoted formal
+// buried anywhere, including inside an orphans-only Nest, is found. The leaf slots
+// (`type` / `descendants_of` / `tagged`) carry a `{var}` just like a field value
+// does (#222), so all four are inspected — walking only `field.value` was the #293
+// blind spot.
 function collectParamRefs(spec: ViewSpec): Map<string, ParamRef[]> {
   const out = new Map<string, ParamRef[]>();
   const add = (name: string, ref: ParamRef): void => {
     const list = out.get(name);
-    if (list) list.push(ref);
-    else out.set(name, [ref]);
+    if (!list) {
+      out.set(name, [ref]);
+    } else if (!list.some((r) => refKey(r) === refKey(ref))) {
+      list.push(ref);
+    }
   };
   const leafVar = (v: ViewLeafValue | undefined): string | null =>
     isVarOperand(v) && v.var !== SELF_VAR ? v.var : null;
   const visit = (e: ViewExpr): void => {
     if (e.field && isVarOperand(e.field.value) && e.field.value.var !== SELF_VAR) add(e.field.value.var, { kind: "field", key: e.field.key });
-    const t = leafVar(e.type) ?? leafVar(e.descendants_of);
-    if (t) add(t, { kind: "entry_type" });
+    // Precedence mirrors `evalLeaf`: `type` wins when both slots are set on one
+    // (malformed, dense-serialized) node; a well-formed leaf sets only one.
+    const t = leafVar(e.type);
+    if (t) add(t, { kind: "type" });
+    else {
+      const d = leafVar(e.descendants_of);
+      if (d) add(d, { kind: "descendants_of" });
+    }
     const g = leafVar(e.tagged);
     if (g) add(g, { kind: "tagged" });
   };
@@ -122,7 +140,13 @@ function controlFieldFor(
   schema: MetadataSchema | null | undefined,
 ): { field: MetadataFieldDefinition; fieldKey: string } {
   if (ref?.kind === "field") return { field: schema?.fields?.[ref.key] ?? textFallback(label), fieldKey: ref.key };
-  if (ref?.kind === "entry_type") return { field: entryTypeField(label, kind, schema), fieldKey: "entry_type" };
+  if (ref?.kind === "type" || ref?.kind === "descendants_of") {
+    const field = entryTypeField(label, kind, schema, ref.kind === "descendants_of");
+    // No offerable entry_types for this kind (schema not loaded, or only abstract
+    // types under an exact `type`): an empty <select> is a dead control, so fall
+    // back to a text box the user can type an FQN into.
+    return field.options.length > 0 ? { field, fieldKey: "entry_type" } : { field: textFallback(label), fieldKey: "entry_type" };
+  }
   if (ref?.kind === "tagged") return { field: taggedField(label), fieldKey: "tags" };
   return { field: textFallback(label), fieldKey: "" };
 }

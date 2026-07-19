@@ -940,6 +940,24 @@ class MetadataSchemaMixin:
         return warnings
 
     def _metadata_schema_base_folder(self, root: Path) -> Path | None:
+        """The shelf root: `settings.projects_base_folder`, and nothing above it.
+
+        This bound is the whole meaning of the property, and
+        `_validate_projects_base_folder` already enforces it on the write path
+        (the project root must be *inside* the base folder). The read path used
+        to exceed it (#326): when the configured base happened to equal
+        `root.parent` it scanned `root.parents` for the outermost folder holding
+        a `metadata.schema.yaml` and started there instead — so an unrelated
+        schema file in some grandparent silently lengthened the walk, changing
+        schema layering, node-index membership and (once #312 lands) AI policy.
+
+        That scan was compensating for `create_project` defaulting the base to
+        `root.parent`. The default is the thing to fix, in the create wizard
+        that ADR-0039 Amendment 1 already tasks with presenting the enumerated
+        ancestors — not in a read path that quietly overrides what the author
+        declared. A declaration narrows which enumerated ancestors count; it
+        never extends the range.
+        """
         manifest = self._read_yaml(root / "project.yaml")
         settings = manifest.get("settings")
         if not isinstance(settings, dict):
@@ -947,16 +965,7 @@ class MetadataSchemaMixin:
         base_folder = settings.get("projects_base_folder")
         if not isinstance(base_folder, str) or not base_folder.strip():
             return None
-        configured_base = Path(base_folder).expanduser().resolve()
-        if configured_base == root.parent:
-            schema_ancestors = [
-                ancestor
-                for ancestor in root.parents
-                if ancestor != root.parent and (ancestor / "metadata.schema.yaml").exists()
-            ]
-            if schema_ancestors:
-                return schema_ancestors[-1].resolve()
-        return configured_base
+        return Path(base_folder).expanduser().resolve()
 
     def _read_metadata_schema_layer(self, path: Path) -> dict[str, Any]:
         try:

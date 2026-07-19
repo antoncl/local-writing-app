@@ -794,7 +794,13 @@ class MetadataValidationTests(unittest.TestCase):
         self.assertFalse(layers[1].exists)
         self.assertFalse(layers[2].exists)
 
-    def test_schema_layers_infer_base_schema_above_default_project_parent(self) -> None:
+    def test_schema_layers_stop_at_the_configured_base_folder(self) -> None:
+        # Inverted by #326. This used to assert the opposite: with the base set
+        # to root.parent, a `metadata.schema.yaml` further up became the start of
+        # the walk. `projects_base_folder` declares the longest possible
+        # traversal, so a schema file above it must not extend the chain — the
+        # walk is shared with the node index and AI policy, and a stray file in a
+        # grandparent silently changing all three is the bug.
         self._set_projects_base_folder(self.root.parent)
         self.service._write_yaml(
             self.base / "metadata.schema.yaml",
@@ -809,7 +815,7 @@ class MetadataValidationTests(unittest.TestCase):
 
         self.assertEqual(
             [Path(layer.folder_path) for layer in layers],
-            [self.base, self.universe, self.world, self.root],
+            [self.world, self.root],
         )
 
     def test_valid_scene_metadata_saves(self) -> None:

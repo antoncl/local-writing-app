@@ -1,5 +1,7 @@
 # ADR-0041: `ViewExpr` is a language — one IDL grammar generates both runtimes; Filter becomes first-class
 
+> **⚠ Amended 2026-07-19 (#199): `$self` was removed entirely** — the grammar never reserved it (`var` is a plain string), so the IDL is unchanged; the arity table's `var`/`$self` row now reads just **`var`** (promoted formals). See [ADR-0032](0032-parameter-declaration-and-binding-provenance.md) Amendment 2.
+
 - Status: **Accepted** — 0.7.0, 2026-07-18
 - Feature: #277 · Retires the hand-rolled walkers named there
 - Amends: **ADR-0027 §B** (Filter promoted from layout-only sugar to a first-class stored
@@ -108,7 +110,7 @@ counts *only* set-input ports; it does **not** count:
 | `all` | 0 | — |
 | `type` / `descendants_of` / `tagged` / `field` (predicate leaves) | 0 | — |
 | `hand_picked` | 0 | — (ids are refs, not ports) |
-| `var` / `$self` | 0 | — |
+| `var` | 0 | — |
 | `orphans_of` | 0 | — (`nest_id` is a ref, not a port) |
 
 **"Injector" ≡ the derived predicate `set-arity == 0`.** It is emphatically **not** a stored field,

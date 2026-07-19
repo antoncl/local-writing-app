@@ -1,5 +1,7 @@
 # ADR-0034: The view universe is a full-field roster
 
+> **⚠ Amended 2026-07-19 (#199): `$self` was removed entirely** — no render surface ever bound it, so the **"Anchored (`$self`) pane"** case below is currently moot (every view pane is a roster pane; the roster-pane path is the only live one). Every `$self` reference is **superseded**; see [ADR-0032](0032-parameter-declaration-and-binding-provenance.md) Amendment 2. The anchored-pane roster rule returns with the anchored render surface if/when built.
+
 - Status: Accepted — 0.7.0, 2026-07-09 (design agreed; **Draft roster path resolved to (a) enrich**);
   accepted 2026-07-10 (5 context-blind gates)
 - Feature: #184 Parameterized views — a **prerequisite** for the forward model · relates #182

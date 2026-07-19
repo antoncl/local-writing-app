@@ -1,5 +1,7 @@
 # ADR-0035: `ViewNodeList` — a view's output is one `ViewResult<T>`, and that is its sole input
 
+> **⚠ Amended 2026-07-19 (#199): `$self` was removed entirely** — `ViewNodeList` no longer takes an `anchorId` and binds no `$self`. Every `$self` reference below is **superseded**; the param strip + bindings env remain, minus `$self`. See [ADR-0032](0032-parameter-declaration-and-binding-provenance.md) Amendment 2.
+
 - Status: Accepted — 0.7.0, 2026-07-11
 - Feature: #182 canonical list-render wrapper (named **`ViewNodeList`**) · relates #112 (Draft
   presentation), #181 (unified evaluator normalizers), #184 (parameterized views)

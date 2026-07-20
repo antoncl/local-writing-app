@@ -308,6 +308,18 @@ unsettled builds on sand — and #309 waits on #306.
   query-time delta for backlinks / `References` / Nest to apply. The split is clean: **layer overrides
   are position-independent and can be materialized; scene mutations are position-dependent and cannot**
   (they stay resolved at query time, as today).
+- **Ordering is inherited too, not just content — and it is currently the exception.** Assistants
+  carry a manual priority sequence (`.order.yaml` per layer, `assistants.py:128-142`) where **topmost
+  is the default** (ADR-0024). That makes position load-bearing rather than cosmetic, and it is the
+  one place the chain is composed *without* the descendant-wins rule this ADR applies everywhere else:
+  the effective order sorts on `layer_rank` first, and `layer_rank` is not stored — it is the order
+  entries stream out of the index (`assistants.py:76`), with the machine layer collected first
+  (`references.py:98`). So a project-level assistant can never outrank a machine one, whatever the
+  user does. Whether an ordering *inherits* — innermost layer that names an entry decides its position
+  — is **#332**, and it must be settled before the wizard (#318) offers an ordering step. The general
+  point for any future layered list: *the order is part of what layers, and it needs the same
+  descendant-wins answer as the content.*
+
 - **Settings / AI-policy resolution must extend to the chain.** Today AI settings read only the open
   project's own `project.yaml`; they must resolve `system → …chain… → prompt` over the same layer walk.
 - **`revision` must span the fold.** `read_lore_entry` returns `revision=self._revision(path)` — a hash

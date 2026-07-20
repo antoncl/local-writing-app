@@ -763,8 +763,6 @@ export type ProjectInfo = {
   root_path: string;
   projects_base_folder?: string | null;
   ai_policy: AIPolicy;
-  ai_default_provider?: string | null;
-  ai_default_model_class?: string | null;
 };
 
 export type ProviderCredentialsView = {

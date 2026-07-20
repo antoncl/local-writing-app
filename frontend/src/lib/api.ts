@@ -239,8 +239,6 @@ export const api = {
   updateProjectSettings(updates: {
     projects_base_folder?: string;
     ai_policy?: AIPolicy;
-    ai_default_provider?: string | null;
-    ai_default_model_class?: string | null;
   }) {
     return request<ProjectInfo>("/project/settings", {
       method: "PATCH",

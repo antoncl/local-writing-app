@@ -643,8 +643,6 @@
         aiHealthChecking={aiSettings.healthChecking}
         {validation}
         bind:aiPolicy={aiSettings.policy}
-        bind:aiDefaultProvider={aiSettings.defaultProvider}
-        bind:aiDefaultModelClass={aiSettings.defaultModelClass}
         bind:projectCostExpanded
         onValidate={validateProject}
         onOpenChats={openChatsPane}

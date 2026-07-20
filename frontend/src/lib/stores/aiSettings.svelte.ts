@@ -24,8 +24,6 @@ import type { AIHealthResponse, AIPolicy, ProjectInfo } from "@/lib/types";
 class AISettings {
   // ---- Per-project AI settings draft (bound by the Project pane) ----
   policy: AIPolicy = $state("off");
-  defaultProvider = $state("");
-  defaultModelClass = $state("");
 
   // ---- Provider health check ----
   healthResult = $state<AIHealthResponse | null>(null);
@@ -52,8 +50,6 @@ class AISettings {
   // health result and color so nothing leaks across a project switch.
   seedFromProject(project: ProjectInfo): void {
     this.policy = project.ai_policy;
-    this.defaultProvider = project.ai_default_provider ?? "";
-    this.defaultModelClass = project.ai_default_model_class ?? "";
     this.healthResult = null;
     this.projectColor = null;
   }
@@ -76,22 +72,21 @@ class AISettings {
     await this.run(async () => {
       const updatedProject = await api.updateProjectSettings({
         ai_policy: this.policy,
-        ai_default_provider: this.defaultProvider || null,
-        ai_default_model_class: this.defaultModelClass || null,
       });
       this.onProjectUpdated(updatedProject);
       this.policy = updatedProject.ai_policy;
-      this.defaultProvider = updatedProject.ai_default_provider ?? "";
-      this.defaultModelClass = updatedProject.ai_default_model_class ?? "";
       this.setStatus("Updated AI settings");
     });
   }
 
+  // No provider argument: the ping resolves through the same machine
+  // `default_provider` the invocation path uses, so a green check means the
+  // provider that will actually be called is reachable.
   async runHealthCheck(): Promise<void> {
     await this.run(async () => {
       this.healthChecking = true;
       try {
-        this.healthResult = await api.aiHealth(this.defaultProvider || undefined);
+        this.healthResult = await api.aiHealth();
       } finally {
         this.healthChecking = false;
       }

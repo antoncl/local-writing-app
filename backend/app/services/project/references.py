@@ -17,7 +17,7 @@ every other slice consumes `_build_node_index` / `_node_id_for_path` /
 Method bodies moved verbatim. Shared helpers they call (`self._require_project`,
 `self._read_yaml`, `self._read_markdown_with_front_matter`,
 `self._read_front_matter_only`, `self.read_metadata_schema`,
-`self.project_layers` — the one layer walk, in `layers.py` since #329, which
+`self.visit_layers` — the one layer walk, in `layers.py` since #329, which
 stamps each layer's id, label, rank and is_root/is_machine flags so this slice
 no longer builds `IndexLayer` inline) live elsewhere on the composed class.
 `NodeIndex`/`NodeIndexEntry` come from the shared `node_index` module so this
@@ -37,6 +37,7 @@ from app.models import (
     ReferenceResolveResponse,
 )
 from app.services.project.errors import ProjectServiceError
+from app.services.project.layers import LayerVisitor
 from app.services.project.node_index import (
     IndexLayer,
     NodeFamily,
@@ -70,7 +71,7 @@ NODE_FAMILIES = [
 MACHINE_LAYER_FAMILIES = [family for family in NODE_FAMILIES if family.kind == "assistant"]
 
 
-class _NodeIndexBuilder:
+class _NodeIndexBuilder(LayerVisitor):
     """The index build's per-layer logic, as a `LayerVisitor` (#329).
 
     This used to be the body of `_build_node_index`'s own `enumerate` over the
@@ -215,7 +216,7 @@ class ReferencesMixin:
         """Collect the machine layer on its own, for the no-project-open case.
 
         With a project open the machine layer is an ordinary layer in the walk
-        (`project_layers(include_machine=True)`); this stays for
+        (`visit_layers(..., include_machine=True)`); this stays for
         `_build_assistant_index`, which serves the assistant roster before any
         project has been opened and so has no chain to walk.
         """

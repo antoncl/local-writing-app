@@ -75,27 +75,20 @@ def _entry_type_ancestry(
     return chain
 
 
-class _SchemaLayerBuilder:
-    """The API-facing twin of `IndexLayer`, as a visitor (#329).
+def _schema_layer_from(layer: IndexLayer) -> MetadataSchemaLayer:
+    """The API-facing twin of `IndexLayer`.
 
     Used to run its own `enumerate` over the chain, re-deriving id and label
     with the same rules the index build used; now it reads them off the walk.
     """
-
-    def __init__(self) -> None:
-        self.layers: list[MetadataSchemaLayer] = []
-
-    def visit_layer(self, layer: IndexLayer) -> None:
-        schema_path = layer.folder / SCHEMA_FILENAME
-        self.layers.append(
-            MetadataSchemaLayer(
-                id=layer.id,
-                label=layer.label,
-                folder_path=str(layer.folder),
-                schema_path=str(schema_path),
-                exists=schema_path.exists(),
-            )
-        )
+    schema_path = layer.folder / SCHEMA_FILENAME
+    return MetadataSchemaLayer(
+        id=layer.id,
+        label=layer.label,
+        folder_path=str(layer.folder),
+        schema_path=str(schema_path),
+        exists=schema_path.exists(),
+    )
 
 
 class MetadataSchemaMixin:
@@ -125,9 +118,9 @@ class MetadataSchemaMixin:
 
     def read_metadata_schema_layers(self) -> MetadataSchemaLayers:
         root = self._require_project()
-        builder = _SchemaLayerBuilder()
-        self.visit_layers(builder, root)
-        return MetadataSchemaLayers(layers=builder.layers)
+        return MetadataSchemaLayers(
+            layers=[_schema_layer_from(layer) for layer in self.collect_layers(root)]
+        )
 
     def read_metadata_schema_overview(self) -> MetadataSchemaOverview:
         root = self._require_project()
@@ -904,10 +897,14 @@ class MetadataSchemaMixin:
     # call sites below are unchanged.
 
     def _metadata_schema_layer_path_for_id(self, root: Path, layer_id: str) -> Path | None:
-        for path in self._metadata_schema_layer_paths(root):
-            if self._metadata_schema_layer_id(path.parent) == layer_id:
-                return path
-        return None
+        """The schema file for a layer id, or None when the id is unknown.
+
+        Reverses the id through the walk (`layer_by_id` → `LayerFinder`) rather
+        than re-hashing `path.parent` per candidate, which was the last surviving
+        "derive the layer identity yourself" site (#329).
+        """
+        layer = self.layer_by_id(root, layer_id)
+        return None if layer is None else layer.folder / SCHEMA_FILENAME
 
     def _read_metadata_schema_through_path(self, root: Path, target_path: Path) -> MetadataSchema:
         data = deepcopy(DEFAULT_METADATA_SCHEMA)

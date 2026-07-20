@@ -29,8 +29,21 @@ class LayerWalkTests(unittest.TestCase):
         manifest = self.service._read_yaml(self.root / "project.yaml")
         manifest.setdefault("settings", {})["projects_base_folder"] = str(self.base)
         self.service._write_yaml(self.root / "project.yaml", manifest)
+        # A REAL machine layer. conftest's autouse fixture points the config dir
+        # at an empty tmp path, so without this `machine_layer()` returns None
+        # and every "the machine layer is excluded" assertion below passes for
+        # the wrong reason — it was vacuous until this existed.
+        self.config_dir = Path(self.temp_dir.name) / "config"
+        self.config_dir.mkdir()
+        self._patcher = patch(
+            "app.services.machine_settings.config_path",
+            return_value=self.config_dir / "config.yaml",
+        )
+        self._patcher.start()
+        (self.config_dir / "assistants").mkdir()
 
     def tearDown(self) -> None:
+        self._patcher.stop()
         self.temp_dir.cleanup()
 
     def test_walk_runs_outermost_to_root(self) -> None:
@@ -43,10 +56,15 @@ class LayerWalkTests(unittest.TestCase):
 
     def test_rank_is_explicit_and_matches_walk_order(self) -> None:
         # The whole point of #329: rank is stamped by the walk, not inferred by
-        # a consumer from enumerate or dict insertion order.
+        # a consumer from enumerate or dict insertion order. Asserted against
+        # the known fixture, not `range(len(layers))` — the latter also holds
+        # for a truncated or empty walk.
         layers = self.service.collect_layers(self.root)
 
-        self.assertEqual([layer.rank for layer in layers], list(range(len(layers))))
+        self.assertEqual(
+            [(layer.folder.name, layer.rank) for layer in layers],
+            [("writing", 0), ("honorverse", 1), ("honor-harrington", 2), ("book01", 3)],
+        )
 
     def test_is_root_marks_only_the_open_project(self) -> None:
         layers = self.service.collect_layers(self.root)
@@ -65,10 +83,24 @@ class LayerWalkTests(unittest.TestCase):
 
     def test_machine_layer_is_excluded_by_default(self) -> None:
         # Schema layering must not see it — it is out-of-tree and carries no
-        # metadata.schema.yaml.
+        # metadata.schema.yaml. setUp creates a real machine assistants/ dir, so
+        # this fails if `include_machine` ever defaults to True.
+        self.assertIsNotNone(self.service.machine_layer(), "fixture must have a machine layer")
+
         layers = self.service.collect_layers(self.root)
 
         self.assertTrue(all(not layer.is_machine for layer in layers))
+        self.assertEqual(len(layers), 4)
+        # And the schema surfaces built on the walk must not pick it up either.
+        machine_folder = self.service.machine_layer().folder
+        self.assertNotIn(
+            machine_folder / "metadata.schema.yaml",
+            self.service._metadata_schema_layer_paths(self.root),
+        )
+        self.assertNotIn(
+            str(machine_folder),
+            [layer.folder_path for layer in self.service.read_metadata_schema_layers().layers],
+        )
 
     def test_schema_layer_paths_come_from_the_walk(self) -> None:
         paths = self.service._metadata_schema_layer_paths(self.root)
@@ -87,7 +119,13 @@ class LayerWalkTests(unittest.TestCase):
             self.assertEqual(self.service.layer_by_id(self.root, layer.id), layer)
 
     def test_layer_by_id_returns_none_for_an_unknown_id(self) -> None:
+        # Paired with a positive lookup, so an empty walk (which would make the
+        # None assertion pass trivially) fails here.
         self.assertIsNone(self.service.layer_by_id(self.root, "not-a-layer"))
+        expected = self.service._metadata_schema_layer_id(self.universe)
+        found = self.service.layer_by_id(self.root, expected)
+        self.assertIsNotNone(found)
+        self.assertEqual(found.folder, self.universe)
 
     def test_visitor_sees_every_layer_in_order(self) -> None:
         class Collector:
@@ -100,7 +138,13 @@ class LayerWalkTests(unittest.TestCase):
         collector = Collector()
         self.service.visit_layers(collector, self.root)
 
-        self.assertEqual(collector.seen, self.service.collect_layers(self.root))
+        # Compared against an explicit oracle, not against `collect_layers` —
+        # that is itself LayerCollector over visit_layers, so the two agreeing
+        # proved nothing (they agreed at [] == [] too).
+        self.assertEqual(
+            [layer.folder for layer in collector.seen],
+            [self.base, self.universe, self.series, self.root],
+        )
 
     def test_walk_degrades_to_the_project_alone_without_a_base_folder(self) -> None:
         manifest = self.service._read_yaml(self.root / "project.yaml")
@@ -296,20 +340,131 @@ class MachineLayerIsAnOrdinaryLayerTests(unittest.TestCase):
         without = self.service.collect_layers(self.root)
         with_machine = self.service.collect_layers(self.root, include_machine=True)
 
+        # Positive assertions on both sides. Filtering the machine layer out of
+        # one side and comparing was vacuous — it held even when the walk
+        # returned nothing at all.
+        self.assertEqual([layer.folder for layer in without], [self.base, self.root])
         self.assertEqual(
-            [layer.folder for layer in without],
-            [layer.folder for layer in with_machine if not layer.is_machine],
+            [layer.folder for layer in with_machine],
+            [self.config_dir, self.base, self.root],
         )
+        self.assertEqual([layer.is_machine for layer in with_machine], [True, False, False])
 
     def test_machine_layer_has_one_constructor(self) -> None:
-        # The walk and the two no-project-chain callers must agree on the
-        # machine layer's identity — they used to build it separately.
+        # The walk and the no-project-chain callers must agree on the machine
+        # layer's IDENTITY — they used to build it separately. Compare the
+        # identity fields explicitly rather than the whole record: `rank` is
+        # positional and would make this fail spuriously if the machine layer
+        # ever stopped leading the walk, which is #332's business, not this
+        # test's.
         (self.config_dir / "assistants").mkdir()
 
-        from_walk = self.service.collect_layers(self.root, include_machine=True)[0]
+        from_walk = next(
+            layer
+            for layer in self.service.collect_layers(self.root, include_machine=True)
+            if layer.is_machine
+        )
         standalone = self.service.machine_layer()
 
-        self.assertEqual(from_walk, standalone)
+        self.assertIsNotNone(standalone)
+        self.assertEqual(
+            (from_walk.folder, from_walk.id, from_walk.label, from_walk.is_machine, from_walk.is_root),
+            (standalone.folder, standalone.id, standalone.label, standalone.is_machine, standalone.is_root),
+        )
+        self.assertEqual(standalone.folder, self.config_dir)
+
+
+class PerLayerCollectionRulesTests(unittest.TestCase):
+    """`_NodeIndexBuilder` / `_families_for_layer` — the per-layer decisions the
+    index walk used to inline.
+
+    Both rules below were unpinned by the whole 799-test suite: deleting the
+    machine-layer branch, or collecting chats at every layer, left every test
+    green. They are new code in #329, so they get their own net.
+    """
+
+    def setUp(self) -> None:
+        self.temp_dir = TemporaryDirectory()
+        self.base = Path(self.temp_dir.name) / "writing"
+        self.root = self.base / "book01"
+        self.service = ProjectService()
+        self.service.create_project(self.root, "Book 1")
+        manifest = self.service._read_yaml(self.root / "project.yaml")
+        manifest.setdefault("settings", {})["projects_base_folder"] = str(self.base)
+        self.service._write_yaml(self.root / "project.yaml", manifest)
+        self.config_dir = Path(self.temp_dir.name) / "config"
+        self.config_dir.mkdir()
+        self._patcher = patch(
+            "app.services.machine_settings.config_path",
+            return_value=self.config_dir / "config.yaml",
+        )
+        self._patcher.start()
+
+    def tearDown(self) -> None:
+        self._patcher.stop()
+        self.temp_dir.cleanup()
+
+    def _write_chat(self, layer_folder: Path, chat_id: str) -> None:
+        (layer_folder / "chats").mkdir(parents=True, exist_ok=True)
+        self.service._write_yaml(
+            layer_folder / "chats" / f"{chat_id}.yaml",
+            {"id": chat_id, "title": f"Chat {chat_id}", "messages": []},
+        )
+
+    def test_machine_layer_contributes_assistants_only(self) -> None:
+        # It is out-of-tree and holds the user's roster. Lore (or any other
+        # family) sitting next to it must not enter the index.
+        (self.config_dir / "assistants").mkdir()
+        self.service._write_node_entry_file(
+            self.config_dir / "assistants" / "m1.md", "m1", "Machine One", "assistant", {}, ""
+        )
+        (self.config_dir / "lore").mkdir()
+        self.service._write_node_entry_file(
+            self.config_dir / "lore" / "stray.md", "stray-lore", "Stray", "lore", {}, ""
+        )
+
+        index = self.service._build_node_index(self.root)
+
+        self.assertIn("m1", index.by_id)
+        self.assertNotIn("stray-lore", index.by_id)
+
+    def test_chats_are_collected_only_at_the_open_project(self) -> None:
+        # Chats are book-scoped like scenes; an ancestor's chats/ must be
+        # ignored even though the ancestor is a layer of this project.
+        self._write_chat(self.base, "chat_ancestor")
+        self._write_chat(self.root, "chat_book")
+
+        index = self.service._build_node_index(self.root)
+
+        self.assertIn("chat_book", index.by_id)
+        self.assertNotIn("chat_ancestor", index.by_id)
+
+    def test_scenes_are_collected_only_at_the_open_project(self) -> None:
+        # The other half of the same rule, and the one `_families_for_layer`
+        # expresses as `family.kind != "scene" or layer.is_root`.
+        (self.base / "scenes").mkdir(parents=True, exist_ok=True)
+        self.service._write_node_entry_file(
+            self.base / "scenes" / "ancestor.md", "scene-ancestor", "Ancestor Scene", "scene", {}, ""
+        )
+
+        index = self.service._build_node_index(self.root)
+
+        self.assertNotIn("scene-ancestor", index.by_id)
+        # The project's own seeded scene IS indexed — so this fails if the walk
+        # collapsed to nothing rather than because the rule works.
+        self.assertTrue(any(entry.kind == "scene" for entry in index.by_id.values()))
+
+    def test_ancestor_lore_is_collected(self) -> None:
+        # Guards the inverse of the two rules above: the scene/chat restriction
+        # must not be over-applied to cross-layer families.
+        (self.base / "lore").mkdir(parents=True, exist_ok=True)
+        self.service._write_node_entry_file(
+            self.base / "lore" / "shared.md", "ancestor-lore", "Ancestor Lore", "lore", {}, ""
+        )
+
+        index = self.service._build_node_index(self.root)
+
+        self.assertIn("ancestor-lore", index.by_id)
 
 
 if __name__ == "__main__":

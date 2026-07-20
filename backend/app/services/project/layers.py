@@ -56,18 +56,18 @@ def _layer_id_for_folder(folder: Path) -> str:
     the walk keeps the optimisation *inside* the abstraction, so every consumer
     gets it. Keyed on the argument, so a rename produces a new key rather than
     a stale hit.
+
+    ⚠ **The cache is safe only because layer ids are never persisted.** They are
+    derived, compared against ids from this same function within one process,
+    and reversed to a folder via the *walk* (`layer_by_id`), never via the id
+    itself — so even a stale entry stays self-consistent. Nothing writes a layer
+    id to disk today (`.order.yaml` holds entry ids). **#334 is where that could
+    change** — it owns layer-qualified identity and explicit rank, the shape
+    #306's snapshot serializes. If a layer id ever lands on disk, revisit this:
+    a path-hash id survives neither a moved project folder nor a re-resolved
+    symlink, cache or no cache.
     """
     return hashlib.sha256(str(folder.resolve()).encode("utf-8")).hexdigest()[:16]
-
-
-class _SchemaPathCollector:
-    """Each layer's `metadata.schema.yaml` candidate, in walk order."""
-
-    def __init__(self) -> None:
-        self.paths: list[Path] = []
-
-    def visit_layer(self, layer: IndexLayer) -> None:
-        self.paths.append(layer.folder / SCHEMA_FILENAME)
 
 
 class LayerVisitor(Protocol):
@@ -86,12 +86,25 @@ class LayerVisitor(Protocol):
     def visit_layer(self, layer: IndexLayer) -> None: ...
 
 
-class LayerCollector:
-    """The degenerate visitor: keeps every layer, in order.
+# Concrete visitors subclass the Protocol explicitly. It buys no static check —
+# there is no mypy in the gates, and `from __future__ import annotations` makes
+# the annotation a string that is never evaluated — but it makes every visitor
+# greppable from one name, which is the point of insisting they all be visitors.
 
-    For callers that genuinely want the whole sequence (tests, and the id
-    reversal below). Still goes through `visit_layers`, so it cannot drift from
-    the walk.
+
+class LayerCollector(LayerVisitor):
+    """The visitor that accumulates the sequence, in order.
+
+    A consumer with no real per-layer logic does not need a bespoke visitor and
+    does not need to iterate the walk itself: it visits with this and iterates
+    the result. That is still one traversal, still visitor-mediated, and reads
+    like the comprehension it replaces. The extra pass is a constant factor over
+    a sequence bounded by chain depth — O(2N) is O(N), and the per-layer work is
+    memoised anyway.
+
+    So there are two legitimate shapes, and neither is a compromise:
+    bespoke visitor when there is per-layer work (`_NodeIndexBuilder`),
+    `collect_layers` + a comprehension when there is not.
     """
 
     def __init__(self) -> None:
@@ -99,18 +112,6 @@ class LayerCollector:
 
     def visit_layer(self, layer: IndexLayer) -> None:
         self.layers.append(layer)
-
-
-class LayerFinder:
-    """Picks out the layer with a given id, or None."""
-
-    def __init__(self, layer_id: str) -> None:
-        self._layer_id = layer_id
-        self.found: IndexLayer | None = None
-
-    def visit_layer(self, layer: IndexLayer) -> None:
-        if self.found is None and layer.id == self._layer_id:
-            self.found = layer
 
 
 class LayerWalkMixin:
@@ -164,9 +165,14 @@ class LayerWalkMixin:
 
     def layer_by_id(self, root: Path, layer_id: str, *, include_machine: bool = False) -> IndexLayer | None:
         """Reverse a `source_layer_id` back to its layer, or None when unknown."""
-        finder = LayerFinder(layer_id)
-        self.visit_layers(finder, root, include_machine=include_machine)
-        return finder.found
+        return next(
+            (
+                layer
+                for layer in self.collect_layers(root, include_machine=include_machine)
+                if layer.id == layer_id
+            ),
+            None,
+        )
 
     def machine_layer(self, *, rank: int = 0) -> IndexLayer | None:
         """The machine layer as an `IndexLayer`, or None when it has no
@@ -268,6 +274,4 @@ class LayerWalkMixin:
         at the price of a second place to change the walk. The cost is now paid
         once, memoised in `_layer_id_for_folder`.
         """
-        collector = _SchemaPathCollector()
-        self.visit_layers(collector, root)
-        return collector.paths
+        return [layer.folder / SCHEMA_FILENAME for layer in self.collect_layers(root)]

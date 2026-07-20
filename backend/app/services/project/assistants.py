@@ -12,7 +12,7 @@ moved verbatim from project_service.py — shared helpers they call
 `self._new_id`, `self._check_entry_type_kind`, `self._maybe_rename_node_file`,
 `self._read_yaml`, `self._write_yaml`, `self.root_path`) still live on the
 core class and resolve through the MRO at call time. The layer walk
-(`self.project_layers`, `self.layer_by_id`, `self._metadata_schema_layer_id`,
+(`self.visit_layers`, `self.layer_by_id`, `self._metadata_schema_layer_id`,
 `self._machine_layer_folder`) lives in `layers.py` since #329 and resolves the
 same way — the roster's layer rank now comes from the walk rather than from
 `index.by_id` insertion order.
@@ -38,23 +38,7 @@ from app.models import (
     SaveAssistantEntryRequest,
 )
 from app.services.project.errors import ProjectServiceError
-from app.services.project.node_index import IndexLayer, NodeIndex, NodeIndexEntry
-
-
-class _AssistantLayerCollector:
-    """Each layer's `assistants/` folder and its rank, as a visitor (#329).
-
-    Both used to be inferred from the entries themselves — the folder from an
-    entry's `path.parent`, the rank from index insertion order.
-    """
-
-    def __init__(self) -> None:
-        self.paths: dict[str, Path] = {}
-        self.ranks: dict[str, int] = {}
-
-    def visit_layer(self, layer: IndexLayer) -> None:
-        self.paths[layer.id] = layer.folder / "assistants"
-        self.ranks[layer.id] = layer.rank
+from app.services.project.node_index import NodeIndex, NodeIndexEntry
 
 
 class AssistantEntriesMixin:
@@ -120,15 +104,16 @@ class AssistantEntriesMixin:
         Without an open project only the machine layer exists — the same
         degenerate case `_build_assistant_index` handles.
         """
-        collector = _AssistantLayerCollector()
         if self.root_path is not None:
-            self.visit_layers(collector, self.root_path, include_machine=True)
+            layers = self.collect_layers(self.root_path, include_machine=True)
         else:
             # No project open: the machine layer is the whole chain.
             machine_layer = self.machine_layer()
-            if machine_layer is not None:
-                collector.visit_layer(machine_layer)
-        return collector.paths, collector.ranks
+            layers = [] if machine_layer is None else [machine_layer]
+        return (
+            {layer.id: layer.folder / "assistants" for layer in layers},
+            {layer.id: layer.rank for layer in layers},
+        )
 
     def reorder_assistant_entries(
         self, request: ReorderAssistantsRequest

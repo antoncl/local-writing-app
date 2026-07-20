@@ -300,8 +300,21 @@ class SaveAssistantEntryRequest(BaseModel):
 class ReorderAssistantsRequest(BaseModel):
     # "" → machine layer. Otherwise the layer id (hash of folder path) as
     # returned in source_layer_id on each entry.
+    #
+    # This is the layer whose `.order.yaml` gets REWRITTEN, which since #332 is
+    # not necessarily where the listed assistants live: dragging an inherited
+    # assistant names its id in the local file. `ordered_ids` is therefore the
+    # local layer's whole opinion, not a per-layer slice of the roster.
     layer_id: str = ""
     ordered_ids: list[str] = Field(default_factory=list)
+
+
+class UnlistAssistantRequest(BaseModel):
+    # The layer that stops showing the assistant, from here inward (#332). The
+    # assistant's own file is never touched, so un-listing an inherited entry
+    # cannot remove it from the ancestor that owns it.
+    layer_id: str = ""
+    entry_id: str = Field(min_length=1)
 
 
 StructureNode.model_rebuild()

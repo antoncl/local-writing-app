@@ -13,6 +13,8 @@ from pathlib import Path
 from tempfile import TemporaryDirectory
 from unittest.mock import patch
 
+from app.models import ReorderAssistantsRequest, UnlistAssistantRequest
+from app.services.project.assistants import AssistantsOrder
 from app.services.project.node_index import IndexLayer, NodeIndex
 from app.services.project_service import ProjectService
 
@@ -174,6 +176,12 @@ class AssistantRankComesFromTheWalkTests(unittest.TestCase):
 
     Assistants were the only order-sensitive consumer: lore, prompts, mutation
     sets and views all sort explicitly by `(title, id)`.
+
+    ⚠ **#332 rewrote what these assert.** Layer rank is no longer a sort term at
+    all: every layer's `.order.yaml` folds into one merged sequence, and position
+    in *that* is the whole ordering story — so the roster is now most-local-first,
+    the inverse of what #329 shipped. The invariant worth keeping is the one
+    below the expectations: the roster must not depend on index insertion order.
     """
 
     def setUp(self) -> None:
@@ -201,14 +209,25 @@ class AssistantRankComesFromTheWalkTests(unittest.TestCase):
         )
 
     def test_roster_order_survives_reversed_index_insertion_order(self) -> None:
-        # Base-folder assistant sorts before the book's, because the walk ranks
-        # the base folder first — regardless of what order the index happens to
-        # hand the entries over in.
-        self._write_assistant(self.base, "outer", "Zed From Base")
-        self._write_assistant(self.root, "inner", "Alpha From Book")
+        # The base folder's assistant is titled to win alphabetically and the
+        # book's to lose it, then both are *listed* in their own layer's order
+        # file — so the assertion below is driven by merged position, not by
+        # title, and stays a real test of the ordering path rather than of
+        # `sorted()`.
+        self._write_assistant(self.base, "outer", "Alpha From Base")
+        self._write_assistant(self.root, "inner", "Zed From Book")
+        self.service._write_assistants_order(
+            self.base / "assistants", AssistantsOrder(ids=["outer"])
+        )
+        self.service._write_assistants_order(
+            self.root / "assistants", AssistantsOrder(ids=["inner"])
+        )
 
+        # Most-local-first since #332: the book's list leads, the base folder's
+        # remainder follows. Pre-#332 this was ["outer", "inner"] because layer
+        # rank led the sort key.
         natural = [entry.id for entry in self.service.list_assistant_entries().entries]
-        self.assertEqual(natural, ["outer", "inner"])
+        self.assertEqual(natural, ["inner", "outer"])
 
         # Now hand the roster an index whose insertion order is reversed. Under
         # the old first-seen-ordinal rank this flipped the roster; under the
@@ -228,23 +247,20 @@ class AssistantRankComesFromTheWalkTests(unittest.TestCase):
         self.assertEqual(perturbed, natural)
 
     def test_a_shadowed_assistant_id_does_not_drag_its_layer_up_the_roster(self) -> None:
-        # The sharp edge of the old first-seen-ordinal rank, and the case the
-        # walk actually changes today (not just under #307).
+        # The sharp edge of the old first-seen-ordinal rank. `index.by_id[id] =
+        # entry` on a cross-layer shadow overwrites the value but KEEPS the
+        # ancestor's insertion slot, so the descendant layer was first seen at
+        # the ancestor's position and its whole bucket teleported up the roster.
         #
-        # `index.by_id[id] = entry` on a cross-layer shadow overwrites the value
-        # but KEEPS the ancestor's insertion slot. So the descendant layer was
-        # first seen at the ancestor's position, and its whole bucket teleported
-        # up the roster. Here the book shadows a base-folder id, which used to
-        # hoist the book's other assistants above the intermediate layer's:
+        # #332 removed the layer term the bug expressed itself through, so the
+        # shadow can no longer move anything: with no `.order.yaml` anywhere,
+        # every assistant is unlisted and the roster is one global alphabetical
+        # tail. That is a weaker guarantee than #329's — the ordering-sensitive
+        # version of this case now lives in `AssistantOrderMergeTests` — but it
+        # still pins the property that a collision does not reorder the roster.
         #
-        #   before: base, [book bucket], middle
-        #   after:  base, middle, [book bucket]
-        #
-        # (Within the book bucket "Collides (book)" precedes "From Book"
-        # alphabetically, since neither layer has an .order.yaml.)
-        #
-        # Layer order must win regardless of which ids collide — this is
-        # user-visible, since roster[0] is the default assistant (ADR-0024).
+        # User-visible either way, since roster[0] is the default assistant
+        # (ADR-0024).
         middle = self.base / "middle"
         book = middle / "book"
         service = ProjectService()
@@ -269,25 +285,232 @@ class AssistantRankComesFromTheWalkTests(unittest.TestCase):
         # roster here is exactly the three project layers.
         roster = [entry.id for entry in service.list_assistant_entries().entries]
 
-        self.assertEqual(roster, ["from-base", "from-middle", "collides", "from-book"])
-        # Verified against origin/master, which yields
-        # ['collides', 'from-book', 'from-base', 'from-middle'] — the whole Book
-        # layer hoisted to the front, flipping roster[0] and with it the
-        # default assistant.
+        # "Collides (book)" wins the id, so the base's copy is not in the roster
+        # at all; the rest is title order.
+        self.assertEqual(roster, ["collides", "from-base", "from-book", "from-middle"])
 
-    def test_rank_map_covers_every_layer_including_ones_without_assistants(self) -> None:
-        # Ranks come from the walk, so a layer contributing no assistants still
-        # occupies its position — the roster's ordering cannot depend on which
-        # layers happen to have entries.
-        self._write_assistant(self.root, "only", "Only One")
+    def test_a_layer_with_no_assistants_folder_does_not_break_the_merge(self) -> None:
+        # The fold visits every layer, including ones that contribute nothing.
+        # A missing `assistants/` folder must read as "no opinion" rather than
+        # ending the walk or raising — the roster's ordering cannot depend on
+        # which layers happen to have entries.
+        self._write_assistant(self.base, "outer", "Outer")
+        self._write_assistant(self.root, "inner", "Inner")
+        self.service._write_assistants_order(
+            self.root / "assistants", AssistantsOrder(ids=["inner", "outer"])
+        )
+        # `middle` sits between base and root with no assistants/ folder at all.
+        (self.base / "middle").mkdir(parents=True, exist_ok=True)
 
-        _paths, ranks = self.service._assistant_layer_paths_and_ranks()
-        layers = self.service.collect_layers(self.root, include_machine=True)
+        roster = [entry.id for entry in self.service.list_assistant_entries().entries]
+        self.assertEqual(roster, ["inner", "outer"])
 
-        self.assertEqual(len(ranks), len(layers))
-        self.assertEqual(sorted(ranks.values()), list(range(len(layers))))
-        root_layer = next(layer for layer in layers if layer.is_root)
-        self.assertGreater(root_layer.rank, 0)
+
+class AssistantOrderMergeTests(unittest.TestCase):
+    """#332: every layer's `.order.yaml` folds into ONE priority sequence,
+
+        merged = local.ids + (inherited_merged − local.ids) − local.excluded
+
+    applied outermost → innermost. Descendant-wins has to fall out in *both*
+    directions or the shape is wrong, so both directions are pinned below.
+    """
+
+    def setUp(self) -> None:
+        self.temp_dir = TemporaryDirectory()
+        self.base = Path(self.temp_dir.name) / "writing"
+        self.root = self.base / "book01"
+        self.service = ProjectService()
+        self.service.create_project(self.root, "Book 1")
+        manifest = self.service._read_yaml(self.root / "project.yaml")
+        manifest.setdefault("settings", {})["projects_base_folder"] = str(self.base)
+        self.service._write_yaml(self.root / "project.yaml", manifest)
+
+    def tearDown(self) -> None:
+        self.temp_dir.cleanup()
+
+    def _write_assistant(self, layer_folder: Path, entry_id: str, title: str) -> None:
+        (layer_folder / "assistants").mkdir(parents=True, exist_ok=True)
+        self.service._write_node_entry_file(
+            layer_folder / "assistants" / f"{entry_id}.md", entry_id, title, "assistant", {}, ""
+        )
+
+    def _order(self, layer_folder: Path, **kwargs) -> None:
+        self.service._write_assistants_order(
+            layer_folder / "assistants", AssistantsOrder(**kwargs)
+        )
+
+    def _roster(self) -> list[str]:
+        return [entry.id for entry in self.service.list_assistant_entries().entries]
+
+    def test_local_list_leads_and_inherited_remainder_follows(self) -> None:
+        self._write_assistant(self.base, "outer_a", "Outer A")
+        self._write_assistant(self.base, "outer_b", "Outer B")
+        self._write_assistant(self.root, "inner", "Inner")
+        self._order(self.base, ids=["outer_a", "outer_b"])
+        self._order(self.root, ids=["inner"])
+
+        self.assertEqual(self._roster(), ["inner", "outer_a", "outer_b"])
+
+    def test_naming_an_inherited_id_locally_raises_it_to_the_local_position(self) -> None:
+        # The id is stripped from the inherited remainder before concatenation,
+        # so it rises rather than appearing twice.
+        self._write_assistant(self.base, "outer_a", "Outer A")
+        self._write_assistant(self.base, "outer_b", "Outer B")
+        self._write_assistant(self.root, "inner", "Inner")
+        self._order(self.base, ids=["outer_a", "outer_b"])
+        self._order(self.root, ids=["outer_b", "inner"])
+
+        self.assertEqual(self._roster(), ["outer_b", "inner", "outer_a"])
+
+    def test_descendant_exclusion_removes_an_inherited_assistant(self) -> None:
+        self._write_assistant(self.base, "outer", "Outer")
+        self._write_assistant(self.root, "inner", "Inner")
+        self._order(self.base, ids=["outer"])
+        self._order(self.root, ids=["inner"], excluded=["outer"])
+
+        self.assertEqual(self._roster(), ["inner"])
+
+    def test_a_descendant_can_undo_an_ancestors_exclusion(self) -> None:
+        # The other direction of descendant-wins: an ancestor's `excluded` is
+        # not binding on a layer that positively lists the id. Needs three
+        # layers — the exclusion has to be inherited, not local.
+        middle = self.base / "middle"
+        book = middle / "book"
+        service = ProjectService()
+        service.create_project(book, "Book")
+        manifest = service._read_yaml(book / "project.yaml")
+        manifest.setdefault("settings", {})["projects_base_folder"] = str(self.base)
+        service._write_yaml(book / "project.yaml", manifest)
+
+        for folder, entry_id, title in (
+            (self.base, "outer", "Outer"),
+            (book, "inner", "Inner"),
+        ):
+            (folder / "assistants").mkdir(parents=True, exist_ok=True)
+            service._write_node_entry_file(
+                folder / "assistants" / f"{entry_id}.md", entry_id, title, "assistant", {}, ""
+            )
+        service._write_assistants_order(
+            self.base / "assistants", AssistantsOrder(ids=["outer"])
+        )
+        service._write_assistants_order(
+            middle / "assistants", AssistantsOrder(excluded=["outer"])
+        )
+        service._write_assistants_order(
+            book / "assistants", AssistantsOrder(ids=["outer", "inner"])
+        )
+
+        roster = [entry.id for entry in service.list_assistant_entries().entries]
+        self.assertEqual(roster, ["outer", "inner"])
+
+    def test_ids_wins_when_one_layer_both_lists_and_excludes_an_id(self) -> None:
+        # Malformed, reachable only by hand-editing. Files are truth, so it must
+        # not break the roster — `ids` wins, and we log it.
+        self._write_assistant(self.root, "inner", "Inner")
+        self._order(self.root, ids=["inner"], excluded=["inner"])
+
+        with self.assertLogs("app.services.project.assistants", level="WARNING") as logged:
+            self.assertEqual(self._roster(), ["inner"])
+        self.assertIn("inner", logged.output[0])
+
+    def test_a_duplicated_id_in_one_layers_list_keeps_its_first_position(self) -> None:
+        # Hand-editable file, so the duplicate has to resolve to something. It
+        # takes its first position and does not displace what follows.
+        self._write_assistant(self.root, "a1", "A One")
+        self._write_assistant(self.root, "a2", "A Two")
+        self._order(self.root, ids=["a1", "a2", "a1"])
+
+        self.assertEqual(
+            self.service.merged_assistant_order().ids, ["a1", "a2"]
+        )
+        self.assertEqual(self._roster(), ["a1", "a2"])
+
+    def test_ids_naming_a_nonexistent_assistant_are_ignored(self) -> None:
+        self._write_assistant(self.root, "inner", "Inner")
+        self._order(self.root, ids=["ghost", "inner"], excluded=["also_gone"])
+
+        self.assertEqual(self._roster(), ["inner"])
+
+    def test_reorder_accepts_an_inherited_id_and_writes_it_locally(self) -> None:
+        # THE gesture #332 exists for, and the one the pre-#332 validation
+        # rejected with a 422: dragging an inherited assistant names a foreign
+        # id in the LOCAL file. The ancestor's file must not be touched —
+        # that is what makes the drag layer-safe by construction rather than by
+        # the UI remembering not to do it.
+        self._write_assistant(self.base, "outer", "Outer")
+        self._write_assistant(self.root, "inner", "Inner")
+        self._order(self.base, ids=["outer"])
+        base_order_before = (self.base / "assistants" / ".order.yaml").read_text(
+            encoding="utf-8"
+        )
+        # The book layer owns assistants of its own here. The folder-less case
+        # is the one the pre-#332 404 guard broke, so it gets its own test.
+
+        self.service.reorder_assistant_entries(
+            ReorderAssistantsRequest(
+                layer_id=self.service._metadata_schema_layer_id(self.root),
+                ordered_ids=["outer", "inner"],
+            )
+        )
+
+        self.assertEqual(self._roster(), ["outer", "inner"])
+        self.assertEqual(
+            self.service._read_assistants_order(self.root / "assistants").ids,
+            ["outer", "inner"],
+        )
+        self.assertEqual(
+            (self.base / "assistants" / ".order.yaml").read_text(encoding="utf-8"),
+            base_order_before,
+        )
+
+    def test_a_layer_owning_no_assistants_can_still_reorder_inherited_ones(self) -> None:
+        # A book that has written no assistants of its own has no `assistants/`
+        # folder, and the pre-#332 guard 404'd there — rejecting the drag at
+        # precisely the layer most likely to want it. The order file (and its
+        # folder) are created on demand.
+        self._write_assistant(self.base, "outer_a", "Outer A")
+        self._write_assistant(self.base, "outer_b", "Outer B")
+        self.assertFalse((self.root / "assistants").exists())
+
+        self.service.reorder_assistant_entries(
+            ReorderAssistantsRequest(
+                layer_id=self.service._metadata_schema_layer_id(self.root),
+                ordered_ids=["outer_b", "outer_a"],
+            )
+        )
+
+        self.assertEqual(self._roster(), ["outer_b", "outer_a"])
+        self.assertTrue((self.root / "assistants" / ".order.yaml").exists())
+
+    def test_unlisting_an_inherited_assistant_does_not_touch_the_ancestor(self) -> None:
+        self._write_assistant(self.base, "outer", "Outer")
+        self._write_assistant(self.root, "inner", "Inner")
+        self._order(self.base, ids=["outer"])
+
+        self.service.unlist_assistant_entry(
+            UnlistAssistantRequest(
+                layer_id=self.service._metadata_schema_layer_id(self.root),
+                entry_id="outer",
+            )
+        )
+
+        self.assertEqual(self._roster(), ["inner"])
+        self.assertEqual(
+            self.service._read_assistants_order(self.base / "assistants").ids, ["outer"]
+        )
+        self.assertEqual(
+            self.service._read_assistants_order(self.base / "assistants").excluded, []
+        )
+        self.assertTrue((self.base / "assistants" / "outer.md").exists())
+
+    def test_unlisted_assistants_trail_in_one_global_alphabetical_tail(self) -> None:
+        # Pre-#332 this tail was per layer, because rank led the sort key.
+        self._write_assistant(self.base, "outer", "Beta From Base")
+        self._write_assistant(self.root, "inner", "Alpha From Book")
+        self._write_assistant(self.root, "listed", "Zed But Listed")
+        self._order(self.root, ids=["listed"])
+
+        self.assertEqual(self._roster(), ["listed", "inner", "outer"])
 
 
 class MachineLayerIsAnOrdinaryLayerTests(unittest.TestCase):

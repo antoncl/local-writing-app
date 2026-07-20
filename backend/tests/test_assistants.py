@@ -381,11 +381,106 @@ class AssistantReorderTests(unittest.TestCase):
         self.assertEqual(ids, ["charlie", "alpha", "bravo"])
 
     def test_reorder_with_unknown_id_returns_422(self) -> None:
+        # Still 422, but on a narrower rule since #332: the id must exist
+        # *somewhere in the roster*, not in this layer's own files. See
+        # `test_reorder_accepts_an_inherited_id_and_writes_it_locally`.
         response = self.client.post(
             "/api/assistants/order",
             json={"layer_id": self.machine_layer_id, "ordered_ids": ["alpha", "ghost"]},
         )
         self.assertEqual(response.status_code, 422)
+
+    def test_creating_an_assistant_puts_it_on_top(self) -> None:
+        # A new assistant leads its layer's list rather than landing in the
+        # alphabetical tail — "Zulu" would otherwise sort last of four.
+        #
+        # The layer must ALREADY have a non-empty `ids` for this to test
+        # prepend-vs-append at all: against an empty list the two are the same
+        # operation, and the first version of this test passed against an
+        # `append` mutant for exactly that reason.
+        self.client.post(
+            "/api/assistants/order",
+            json={"layer_id": self.machine_layer_id, "ordered_ids": ["alpha", "bravo"]},
+        )
+        response = self.client.post(
+            "/api/assistants",
+            json={"title": "Zulu", "entry_type": "assistant:assistant", "layer_id": ""},
+        )
+        self.assertEqual(response.status_code, 200, response.text)
+        new_id = response.json()["id"]
+
+        ids = [e["id"] for e in self.client.get("/api/assistants").json()["entries"]]
+        self.assertEqual(ids, [new_id, "alpha", "bravo", "charlie"])
+        order = global_service._read_yaml(self.config_dir / "assistants" / ".order.yaml")
+        self.assertEqual(order["ids"], [new_id, "alpha", "bravo"])
+
+    def test_unlist_removes_an_assistant_from_the_roster(self) -> None:
+        # Seed a real `ids` first: against an empty list, unlist's "drop it from
+        # `ids`" step is vacuous, and without it the merger's ids-wins rule
+        # would keep the assistant listed and the unlist would silently do
+        # nothing. The first version of this test missed that entirely.
+        self.client.post(
+            "/api/assistants/order",
+            json={"layer_id": self.machine_layer_id, "ordered_ids": ["bravo", "alpha"]},
+        )
+        response = self.client.post(
+            "/api/assistants/unlist",
+            json={"layer_id": self.machine_layer_id, "entry_id": "bravo"},
+        )
+        self.assertEqual(response.status_code, 200, response.text)
+        self.assertEqual(
+            [e["id"] for e in response.json()["entries"]], ["alpha", "charlie"]
+        )
+        order = global_service._read_yaml(
+            self.config_dir / "assistants" / ".order.yaml"
+        )
+        self.assertEqual(order["ids"], ["alpha"])
+        self.assertEqual(order["excluded"], ["bravo"])
+        # The assistant's own file is untouched — un-listing is an opinion held
+        # by the layer, not a delete.
+        self.assertTrue((self.config_dir / "assistants" / "bravo.md").exists())
+
+    def test_unlist_then_reorder_relists(self) -> None:
+        # A drag is a positive listing, so it outranks a stale exclusion at the
+        # same layer; otherwise the drop would silently do nothing.
+        self.client.post(
+            "/api/assistants/unlist",
+            json={"layer_id": self.machine_layer_id, "entry_id": "bravo"},
+        )
+        response = self.client.post(
+            "/api/assistants/order",
+            json={"layer_id": self.machine_layer_id, "ordered_ids": ["bravo", "alpha"]},
+        )
+        self.assertEqual(
+            [e["id"] for e in response.json()["entries"]], ["bravo", "alpha", "charlie"]
+        )
+        # The exclusion is cleared from the FILE, not merely out-voted by the
+        # merger's ids-wins rule — otherwise we would persist a contradiction we
+        # wrote ourselves, and log a warning about it on every read.
+        order = global_service._read_yaml(self.config_dir / "assistants" / ".order.yaml")
+        self.assertEqual(order["excluded"], [])
+
+    def test_unlist_with_unknown_id_returns_422(self) -> None:
+        response = self.client.post(
+            "/api/assistants/unlist",
+            json={"layer_id": self.machine_layer_id, "entry_id": "ghost"},
+        )
+        self.assertEqual(response.status_code, 422)
+
+    def test_reorder_preserves_an_unrelated_exclusion(self) -> None:
+        self.client.post(
+            "/api/assistants/unlist",
+            json={"layer_id": self.machine_layer_id, "entry_id": "charlie"},
+        )
+        self.client.post(
+            "/api/assistants/order",
+            json={"layer_id": self.machine_layer_id, "ordered_ids": ["bravo", "alpha"]},
+        )
+        order = global_service._read_yaml(
+            self.config_dir / "assistants" / ".order.yaml"
+        )
+        self.assertEqual(order["ids"], ["bravo", "alpha"])
+        self.assertEqual(order["excluded"], ["charlie"])
 
     def test_subsequent_get_respects_saved_order(self) -> None:
         self.client.post(
@@ -398,10 +493,15 @@ class AssistantReorderTests(unittest.TestCase):
 
 
 class AssistantLayerOrderingTests(unittest.TestCase):
-    """#224 / ADR-0037 §7: the roster is layer-grouped, machine layer first,
-    so a fresh project-layer assistant never sorts above a machine one even
-    when its title would win alphabetically. This upholds the first-seen
-    bucket assumption the Assistants default's `group_by: source_layer` needs."""
+    """#332: the machine layer is the OUTERMOST layer, so it lands at the
+    bottom of the merged priority sequence — most-local-wins, the rule the rest
+    of the layer model already runs on.
+
+    This inverts #224 / ADR-0037 §7, where layer rank led the sort key to keep
+    the roster layer-grouped with the Machine bucket on top. That grouping was
+    the thing making a project-specific assistant unable to become the default
+    however the user ordered it, which is the defect #332 exists to remove; the
+    `group_by: source_layer` default view that relied on it goes with #333."""
 
     def setUp(self) -> None:
         self.temp_dir = TemporaryDirectory()
@@ -424,33 +524,44 @@ class AssistantLayerOrderingTests(unittest.TestCase):
             "---\nid: zed\ntitle: Zed\nentry_type: assistant\nmetadata: { ai_provider: anthropic, ai_model: m }\n---\n",
             encoding="utf-8",
         )
+        self.machine_layer_id = global_service._metadata_schema_layer_id(self.config_dir)
 
     def tearDown(self) -> None:
         self._patcher.stop()
         self.temp_dir.cleanup()
 
-    def test_machine_layer_sorts_before_project_layer(self) -> None:
-        # A project-layer assistant titled "Alpha" — sorts FIRST alphabetically.
+    def test_project_layer_sorts_before_machine_layer(self) -> None:
+        # A project-layer assistant titled "Zeta", so it LOSES alphabetically to
+        # the machine layer's "Zed" — the ordering below can then only come from
+        # the layer merge, not from the title tiebreak.
         project_layer_id = global_service._metadata_schema_layer_id(self.root)
-        create = self.client.post(
-            "/api/assistants",
-            json={
-                "title": "Alpha",
-                "entry_type": "assistant:assistant",
-                "layer_id": project_layer_id,
-            },
+        project_dir = self.root / "assistants"
+        project_dir.mkdir(parents=True, exist_ok=True)
+        (project_dir / "zeta.md").write_text(
+            "---\nid: zeta\ntitle: Zeta\nentry_type: assistant\nmetadata: { ai_provider: anthropic, ai_model: m }\n---\n",
+            encoding="utf-8",
         )
-        self.assertEqual(create.status_code, 200, create.text)
-        self.assertNotEqual(create.json()["source_layer_label"], "Machine")
+        # Both listed, each at its own layer, so the merge — not the unlisted
+        # alphabetical tail — decides.
+        self.client.post(
+            "/api/assistants/order",
+            json={"layer_id": project_layer_id, "ordered_ids": ["zeta"]},
+        )
+        self.client.post(
+            "/api/assistants/order",
+            json={"layer_id": self.machine_layer_id, "ordered_ids": ["zed"]},
+        )
 
         entries = self.client.get("/api/assistants").json()["entries"]
         titles = [e["title"] for e in entries]
         labels = [e["source_layer_label"] for e in entries]
-        # Machine "Zed" precedes project "Alpha" despite "Alpha" < "Zed":
-        # pre-#224 the layer-blind sort put "Alpha" first.
-        self.assertEqual(titles, ["Zed", "Alpha"])
-        self.assertEqual(labels[0], "Machine")
-        self.assertNotEqual(labels[1], "Machine")
+        # Project "Zeta" precedes machine "Zed". Pre-#332 this was ["Zed",
+        # "Zeta"] because layer rank led the sort key and the machine layer
+        # ranked 0 — which is exactly why a project assistant could never
+        # become the default.
+        self.assertEqual(titles, ["Zeta", "Zed"])
+        self.assertNotEqual(labels[0], "Machine")
+        self.assertEqual(labels[1], "Machine")
 
     def test_within_machine_layer_still_alphabetical(self) -> None:
         # Regression guard: the layer term must not disturb within-layer order.

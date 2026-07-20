@@ -111,7 +111,7 @@
   let projectPath = $state("");
   let projectTitle = $state("Untitled Project");
 
-  // AI policy/provider/model-class, the provider health check, and the top-bar
+  // AI policy, the provider health check, and the top-bar
   // project-color dot now live in the aiSettings controller (lib/stores/
   // aiSettings). App keeps project IDENTITY (appState) and folds the saved
   // project back via aiSettings.onProjectUpdated.

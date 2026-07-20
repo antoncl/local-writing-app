@@ -1,14 +1,16 @@
-// AI settings — owns the per-project AI policy/provider/model-class draft, the
-// provider health-check, and the top-bar project-color dot that App used to
-// carry directly. Extracted from App.svelte (#14 P0).
+// AI settings — owns the per-project AI policy draft, the provider
+// health-check, and the top-bar project-color dot that App used to carry
+// directly. Extracted from App.svelte (#14 P0).
 //
 // Singleton rune controller (mirrors confirmService /
 // projectChooser / projectSession): one app shell, one of each, so a
 // module-level instance with rune fields is the idiomatic shape.
 //
-// The policy/provider/model-class fields are two-way bound by the Project pane
-// (bind:aiPolicy={aiSettings.policy} …) — member-expression binds on $state
-// class fields, the projectSession.machineSettingsDraft pattern.
+// `policy` is two-way bound by the Project pane
+// (bind:aiPolicy={aiSettings.policy}) — a member-expression bind on a $state
+// class field, the projectSession.machineSettingsDraft pattern. It is the only
+// per-project AI setting left; the provider / model-class pair that used to sit
+// beside it was write-only and was retired in #330.
 //
 // PROJECT IDENTITY (appState) stays in App: saving AI settings returns an
 // updated ProjectInfo that must be written back onto App's appState, so the
@@ -79,9 +81,13 @@ class AISettings {
     });
   }
 
-  // No provider argument: the ping resolves through the same machine
-  // `default_provider` the invocation path uses, so a green check means the
-  // provider that will actually be called is reachable.
+  // No provider argument: the ping resolves the same way a send with no
+  // assistant does — the topmost assistant in the roster (ADR-0024) supplies
+  // both provider and model. Passing a provider override (what the retired
+  // project preference did) overrode *only* the provider, leaving the model
+  // from that assistant, so the ping could exercise a provider/model pair no
+  // send would ever make. This checks the default assistant, not whichever
+  // assistant a given chat is pinned to — see #336.
   async runHealthCheck(): Promise<void> {
     await this.run(async () => {
       this.healthChecking = true;

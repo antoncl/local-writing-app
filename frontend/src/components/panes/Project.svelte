@@ -11,9 +11,9 @@
   export let aiHealthChecking: boolean;
   export let validation: ProjectValidation | null;
 
-  // Two-way bound: App is the source of truth (these are set on project load
-  // and read back when saving AI settings), so they stay there and bind down.
-  // projectCostExpanded is bound too because App resets it on project switch.
+  // Two-way bound: App is the source of truth. aiPolicy is set on project load
+  // and read back when saving AI settings; projectCostExpanded is bound because
+  // App resets it on project switch. Both stay there and bind down.
   export let aiPolicy: AIPolicy;
   export let projectCostExpanded: boolean;
 

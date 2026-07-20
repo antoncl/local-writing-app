@@ -945,16 +945,25 @@ class MetadataValidationTests(unittest.TestCase):
     def test_project_settings_unset_field_is_left_unchanged(self) -> None:
         # Partial update: a request that omits a field must not disturb the
         # previously-saved value (the Project pane sends only ai_policy).
-        base = self.service.update_project_settings(
+        # The expectation is spelled out rather than read back from a prior
+        # call's return value — comparing the service against itself would
+        # pass even if both calls clobbered the setting identically.
+        expected_base = str(self.universe.resolve())
+        self.service.update_project_settings(
             UpdateProjectSettingsRequest(projects_base_folder=str(self.universe))
-        ).projects_base_folder
+        )
 
         project = self.service.update_project_settings(
             UpdateProjectSettingsRequest(ai_policy="cloud-allowed")
         )
 
         self.assertEqual(project.ai_policy, "cloud-allowed")
-        self.assertEqual(project.projects_base_folder, base)
+        self.assertEqual(project.projects_base_folder, expected_base)
+        # Assert the stored key too: `projects_base_folder` on ProjectInfo is
+        # derived (it falls back to root.parent), so the response alone can
+        # mask a manifest that lost the setting.
+        manifest = self.service._read_yaml(self.root / "project.yaml")
+        self.assertEqual(manifest["settings"]["projects_base_folder"], expected_base)
 
     def test_project_settings_rejects_base_folder_outside_project_ancestry(self) -> None:
         updated_base = Path(self.temp_dir.name) / "new-base"

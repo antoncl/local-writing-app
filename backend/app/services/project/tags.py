@@ -350,6 +350,67 @@ class TagsMixin:
             inherited = tag.scope if inherited is None else self._union_node_picker_scope(inherited, tag.scope)
         return inherited
 
+    def _reject_sources_above_this_layer(self, root: Path, sources: list[str]) -> None:
+        """A rename may only rewrite records and documents at or below the
+        authoring level (#339) — reaching higher is what ADR-0042's dropdown
+        forbids. L is the open project until #313 wires the dropdown.
+
+        The bound covers documents as well as records: a source with no ancestor
+        *record* may still be carried by ancestor *documents*, which this merge
+        cannot rewrite. The tag would survive the rename, keep a usage count in
+        the (now layered) overview, and be re-registered as new by the next save
+        that touches one of those entries. This is the rule, not a stopgap.
+        """
+        ancestor_tags = self._ancestor_document_tags(root)
+        blocked = sorted(
+            source
+            for source in sources
+            if self._inherited_tag_scope(root, source.lower()) is not None
+            or source.lower() in ancestor_tags
+        )
+        if blocked:
+            raise ProjectServiceError(
+                f"{', '.join(blocked)} is used in a parent folder and cannot be merged from here.",
+                422,
+            )
+
+    def _rename_tag_in_documents(self, paths: list[Path], source_lowers: set[str], target: str) -> None:
+        """Replace every occurrence of `source_lowers` with `target` in the tags
+        fields of `paths`, de-duplicating the result."""
+        schema = self.read_metadata_schema()
+        tags_fields = {fid for fid, field in schema.fields.items() if field.type == "tags"}
+        for path in paths:
+            front_matter, body = self._read_markdown_with_front_matter(path, strict=True)
+            metadata = front_matter.get("metadata")
+            if not isinstance(metadata, dict):
+                continue
+            changed = False
+            for field_id, value in list(metadata.items()):
+                if field_id not in tags_fields or not isinstance(value, list):
+                    continue
+                next_values = self._rename_tag_in_value(value, source_lowers, target)
+                if next_values != value:
+                    metadata[field_id] = next_values
+                    changed = True
+            if changed:
+                front_matter["metadata"] = metadata
+                self._write_markdown_with_front_matter(path, front_matter, body)
+
+    def _rename_tag_in_value(self, value: list[Any], source_lowers: set[str], target: str) -> list[Any]:
+        next_values: list[Any] = []
+        seen: set[str] = set()
+        for raw in value:
+            if not isinstance(raw, str):
+                next_values.append(raw)
+                continue
+            replaced = target if raw.strip().lower() in source_lowers else raw
+            key = replaced.strip().lower()
+            if key in seen:
+                continue
+            seen.add(key)
+            next_values.append(replaced)
+        return next_values
+
     def merge_tags(self, request: MergeTagsRequest) -> KnownTags:
         root = self._require_project()
         target = request.target.strip()
@@ -360,59 +421,10 @@ class TagsMixin:
             raise ProjectServiceError("Pick at least one tag to merge.", 422)
         source_lowers = {source.lower() for source in sources if source.lower() != target.lower()}
 
-        # A rename may only rewrite documents and records at or below the
-        # authoring level (#339) — reaching higher is exactly what ADR-0042's
-        # dropdown forbids. L is the open project until #313 wires the dropdown,
-        # so a source asserted in an ancestor cannot be merged from here: its
-        # record and its documents would survive the merge and the tag would
-        # reappear on the next read. This bound is the rule, not a stopgap.
-        # The bound is on documents as well as records. A source with no ancestor
-        # *record* may still be carried by ancestor *documents* — which this merge
-        # cannot rewrite, so the tag would survive the rename, keep a usage count
-        # in the (now layered) overview, and be re-registered as new by the next
-        # save that touches one of those entries.
-        inherited_sources = sorted(
-            source
-            for source in sources
-            if self._inherited_tag_scope(root, source.lower()) is not None
-            or source.lower() in self._ancestor_document_tags(root)
-        )
-        if inherited_sources:
-            raise ProjectServiceError(
-                f"{', '.join(inherited_sources)} is used in a parent folder and cannot be merged from here.",
-                422,
-            )
+        self._reject_sources_above_this_layer(root, sources)
 
-        # 1. Rewrite tag values across all node files on disk.
-        schema = self.read_metadata_schema()
-        tags_fields = {fid for fid, field in schema.fields.items() if field.type == "tags"}
-        for path in self._entry_markdown_paths(root):
-            front_matter, body = self._read_markdown_with_front_matter(path, strict=True)
-            metadata = front_matter.get("metadata")
-            if not isinstance(metadata, dict):
-                continue
-            changed = False
-            for field_id, value in list(metadata.items()):
-                if field_id not in tags_fields or not isinstance(value, list):
-                    continue
-                next_values: list[Any] = []
-                seen: set[str] = set()
-                for raw in value:
-                    if not isinstance(raw, str):
-                        next_values.append(raw)
-                        continue
-                    replaced = target if raw.strip().lower() in source_lowers else raw
-                    key = replaced.strip().lower()
-                    if key in seen:
-                        continue
-                    seen.add(key)
-                    next_values.append(replaced)
-                if next_values != value:
-                    metadata[field_id] = next_values
-                    changed = True
-            if changed:
-                front_matter["metadata"] = metadata
-                self._write_markdown_with_front_matter(path, front_matter, body)
+        # 1. Rewrite tag values across this layer's node files on disk.
+        self._rename_tag_in_documents(self._entry_markdown_paths(root), source_lowers, target)
 
         # 2. Union the source scopes (+ existing target) into the target; drop
         #    sources. Read merged for the scopes, write back only this layer's

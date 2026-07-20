@@ -24,35 +24,31 @@ class ProjectNodeMixin:
     def _project_node_path(self) -> Path:
         return self._require_project() / "project.md"
 
-    def _project_node_id(self, front_matter: dict[str, Any]) -> str:
-        """The project node's identity, read from front matter like any node.
+    def _project_node_id(self, path: Path, front_matter: dict[str, Any] | None = None) -> str:
+        """The project node's identity — read by the same helper as every kind.
 
         Minted (#343) rather than constant: the singleton-per-folder *address*
-        is what stays stable, not the id. Only a project node written before
-        the id existed lands in the mint branch.
+        is what stays stable, not the id. A read never invents one. Minting
+        here would hand out an id that reaches no file, so two reads of the
+        same node would disagree — worse than the collision this fixes.
         """
-        raw_id = front_matter.get("id")
-        if isinstance(raw_id, str) and raw_id.strip():
-            return raw_id.strip()
-        return self._new_id("project")
+        return self._node_id_for_path(path, front_matter, fallback=self._no_project_node_id)
+
+    def _no_project_node_id(self) -> str:
+        raise ProjectServiceError(
+            "project.md has no front matter id. It identifies the project node; restore it or recreate the file.",
+            422,
+        )
 
     def read_project_node(self) -> ProjectNode:
         path = self._project_node_path()
         if not path.exists():
-            # Should be auto-created by the v3 migration on open. If the file
-            # is genuinely missing (e.g. brand-new project before migration
-            # runs), synthesize from project.yaml's title.
-            manifest = self._read_yaml(self._require_project() / "project.yaml")
-            return ProjectNode(
-                id=self._new_id("project"),
-                title=str(manifest.get("title") or self.title or "Untitled Project"),
-                body="",
-                revision="",
-                entry_type="project:project",
-                metadata={},
-            )
+            # project.md always exists: create_project writes it and the v3
+            # migration back-fills it on open. Synthesizing one here would mean
+            # minting an identity that never reaches disk.
+            raise ProjectServiceError("Project node file project.md is missing.", 404)
         front_matter, body = self._read_markdown_with_front_matter(path, strict=True)
-        node_id = self._project_node_id(front_matter)
+        node_id = self._project_node_id(path, front_matter)
         title = str(front_matter.get("title") or self.title or "Untitled Project")
         raw_entry_type = front_matter.get("entry_type") or "project:project"
         entry_type = raw_entry_type if isinstance(raw_entry_type, str) else "project:project"
@@ -75,10 +71,7 @@ class ProjectNodeMixin:
             raise ProjectServiceError("Project node changed on disk after it was opened.", 409)
         # Identity is carried by the file, not by the save request — a save
         # must never re-mint it.
-        if exists:
-            node_id = self._project_node_id(self._read_front_matter_only(path, strict=True))
-        else:
-            node_id = self._new_id("project")
+        node_id = self._project_node_id(path) if exists else self._new_id("project")
         metadata = self._normalise_metadata(request.metadata, path)
         node = ProjectNode(
             id=node_id,

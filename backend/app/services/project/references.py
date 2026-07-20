@@ -26,6 +26,7 @@ slice imports them without a cycle.
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from pathlib import Path
 from typing import Any
 
@@ -320,13 +321,27 @@ class ReferencesMixin:
         except ValueError:
             return path
 
-    def _node_id_for_path(self, path: Path, front_matter: dict[str, Any] | None = None) -> str:
+    def _node_id_for_path(
+        self,
+        path: Path,
+        front_matter: dict[str, Any] | None = None,
+        *,
+        fallback: Callable[[], str] | None = None,
+    ) -> str:
+        """The one place a node's identity is read off a file.
+
+        `fallback` is what to do for a file that carries no id. It defaults to
+        the filename stem — the legacy rule, and fine while the stem is the id
+        it was written from. The project node passes a mint instead (#343):
+        `project.md`'s stem is the same word at every layer, so falling back to
+        it would hand every layer the same identity again.
+        """
         if front_matter is None:
             front_matter = self._read_front_matter_only(path, strict=True)
         raw_node_id = front_matter.get("id")
         if isinstance(raw_node_id, str) and raw_node_id.strip():
             return raw_node_id.strip()
-        return path.stem
+        return fallback() if fallback is not None else path.stem
 
     def _path_for_node_id(self, node_id: str, kind: str) -> Path:
         root = self._require_project()

@@ -46,6 +46,30 @@ class ProjectNodeServiceTests(unittest.TestCase):
             SaveProjectNodeRequest(title="Renamed", body="", base_revision=node.revision, metadata={})
         )
         self.assertEqual(saved.id, node.id)
+        # Stands on its own: a save must neither re-mint nor fall back to the
+        # old constant, so assert the shape here too rather than leaning on
+        # the sibling test.
+        self.assertTrue(saved.id.startswith("project_"), saved.id)
+        self.assertEqual(self.service.read_project_node().id, node.id)
+
+    def test_project_node_without_an_id_is_refused_not_invented(self) -> None:
+        # Neither fallback is available: the filename stem is the same word at
+        # every layer (the collision #343 removes), and minting on read hands
+        # back an id that reaches no file, so two reads would disagree.
+        path = self.root / "project.md"
+        path.write_text(
+            "---\ntitle: Honor's First Command\nentry_type: project:project\nmetadata: {}\n---\n\n",
+            encoding="utf-8",
+        )
+        with self.assertRaises(Exception) as ctx:
+            self.service.read_project_node()
+        self.assertIn("front matter id", str(ctx.exception))
+
+    def test_missing_project_md_is_refused_not_synthesized(self) -> None:
+        (self.root / "project.md").unlink()
+        with self.assertRaises(Exception) as ctx:
+            self.service.read_project_node()
+        self.assertIn("missing", str(ctx.exception).lower())
 
     def test_read_project_node_returns_title_and_metadata(self) -> None:
         node = self.service.read_project_node()
@@ -177,13 +201,22 @@ class NestedProjectNodeIdentityTests(unittest.TestCase):
         for node_id in (outer_id, inner_id):
             self.assertTrue(node_id.startswith("project_"), node_id)
 
-    def test_nested_projects_produce_no_shadow_warning(self) -> None:
+    def test_no_node_claims_the_bare_id_project(self) -> None:
+        # `_build_node_index` does not walk project.md yet — #342 adds that
+        # collector — so this cannot observe a shadow warning today, and a
+        # test asserting the absence of one would pass with #343 reverted.
+        # What it CAN state is the invariant that outlives both: no node
+        # anywhere in the index answers to the bare word "project". Once #342
+        # indexes the project node per layer, this becomes the live tripwire.
         index = self.inner._build_node_index()
-        self.assertEqual([w for w in index.warnings if "shadow" in w], [])
+        self.assertNotIn("project", index.by_id)
         self.assertEqual(index.errors, [])
+        indexed_ids = [entry.id for entry in index.by_id.values()]
+        self.assertEqual(len(indexed_ids), len(set(indexed_ids)))
 
+    def test_nested_project_index_builds_without_errors(self) -> None:
         validation = self.inner.validate_project()
-        self.assertEqual([w for w in validation.warnings if "shadow" in w], [])
+        self.assertEqual(validation.errors, [])
 
 
 class ProjectNodeEndpointTests(unittest.TestCase):

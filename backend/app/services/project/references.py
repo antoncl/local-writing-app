@@ -26,7 +26,6 @@ slice imports them without a cycle.
 
 from __future__ import annotations
 
-from collections.abc import Callable
 from pathlib import Path
 from typing import Any
 
@@ -321,27 +320,32 @@ class ReferencesMixin:
         except ValueError:
             return path
 
-    def _node_id_for_path(
-        self,
-        path: Path,
-        front_matter: dict[str, Any] | None = None,
-        *,
-        fallback: Callable[[], str] | None = None,
-    ) -> str:
-        """The one place a node's identity is read off a file.
-
-        `fallback` is what to do for a file that carries no id. It defaults to
-        the filename stem — the legacy rule, and fine while the stem is the id
-        it was written from. The project node passes a mint instead (#343):
-        `project.md`'s stem is the same word at every layer, so falling back to
-        it would hand every layer the same identity again.
-        """
+    def _front_matter_id(self, path: Path, front_matter: dict[str, Any] | None = None) -> str | None:
+        """The one place a node's identity is read off a file. None if absent."""
         if front_matter is None:
             front_matter = self._read_front_matter_only(path, strict=True)
         raw_node_id = front_matter.get("id")
         if isinstance(raw_node_id, str) and raw_node_id.strip():
             return raw_node_id.strip()
-        return fallback() if fallback is not None else path.stem
+        return None
+
+    def _node_id_for_path(self, path: Path, front_matter: dict[str, Any] | None = None) -> str:
+        """…or the filename stem. The legacy rule, sound while a node's file is
+        named from the id it was written with."""
+        return self._front_matter_id(path, front_matter) or path.stem
+
+    def _require_node_id(self, path: Path, front_matter: dict[str, Any] | None = None) -> str:
+        """…or refuse. For a file whose name carries no identity of its own:
+        `project.md` is the same word at every layer (#343), so the stem would
+        hand every layer the same id, and minting one here would invent an
+        identity that reaches no file."""
+        node_id = self._front_matter_id(path, front_matter)
+        if node_id is None:
+            raise ProjectServiceError(
+                f"{path.name} has no front matter id. It identifies the node; restore it or recreate the file.",
+                422,
+            )
+        return node_id
 
     def _path_for_node_id(self, node_id: str, kind: str) -> Path:
         root = self._require_project()

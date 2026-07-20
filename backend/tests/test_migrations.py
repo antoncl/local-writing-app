@@ -132,12 +132,12 @@ class MigrationFrameworkTests(unittest.TestCase):
         self.assertTrue(snippets.is_dir())
         self.assertFalse(project_md.exists())
         self.assertEqual(read_project_version(self.root), CURRENT_VERSION)
-        # Every registered migration ran (v2, v4, v5 — 3 is retired).
-        self.assertEqual(len(reopened.last_migrations), len(migrations.MIGRATIONS))
-        joined = " ".join(reopened.last_migrations)
-        self.assertIn("snippets", joined)
-        self.assertIn("research", joined)
-        self.assertIn("ai_invocations", joined)
+        # Assert the EFFECTS of every registered migration, not their
+        # descriptions: a step that silently no-ops still reports its own
+        # description, and comparing the count to len(MIGRATIONS) is
+        # self-referential — both survive a no-op mutant.
+        self.assertTrue((self.root / "research" / "notes").is_dir())
+        self.assertTrue((self.root / "research.structure.yaml").exists())
 
         # Backup was created
         backup_dir = self.root / BACKUP_DIRNAME

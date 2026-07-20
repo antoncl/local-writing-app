@@ -5,9 +5,10 @@ from pathlib import Path
 from tempfile import TemporaryDirectory
 
 from fastapi.testclient import TestClient
+from pydantic import ValidationError
 
 from app.main import app
-from app.models import SaveProjectNodeRequest
+from app.models import ProjectNode, SaveProjectNodeRequest
 from app.runtime import service as global_service
 from app.services.project_service import ProjectService
 
@@ -69,6 +70,42 @@ class ProjectNodeServiceTests(unittest.TestCase):
         with self.assertRaises(Exception) as ctx:
             self.service.read_project_node()
         self.assertIn("missing", str(ctx.exception).lower())
+
+    def test_saving_when_project_md_is_absent_mints_rather_than_constants(self) -> None:
+        # A save is the sanctioned repair, and that branch must mint too —
+        # otherwise the constant creeps back in through the side door.
+        (self.root / "project.md").unlink()
+        saved = self.service.save_project_node(
+            SaveProjectNodeRequest(title="Recreated", body="", base_revision="", metadata={})
+        )
+        self.assertTrue(saved.id.startswith("project_"), saved.id)
+        self.assertEqual(self.service.read_project_node().id, saved.id)
+
+    def test_saving_heals_a_project_md_that_lost_its_id(self) -> None:
+        # The reader refuses this file (422). The writer is writing it anyway,
+        # so a save is what repairs it — rather than the more-damaged state
+        # (no file at all) healing while the less-damaged one stays walled off.
+        (self.root / "project.md").write_text(
+            "---\ntitle: Honor's First Command\nentry_type: project:project\nmetadata: {}\n---\n\n",
+            encoding="utf-8",
+        )
+        saved = self.service.save_project_node(
+            SaveProjectNodeRequest(title="Honor's First Command", body="", base_revision="", metadata={})
+        )
+        self.assertTrue(saved.id.startswith("project_"), saved.id)
+        self.assertEqual(self.service.read_project_node().id, saved.id)
+
+    def test_validate_reports_a_missing_project_md_and_repair_restores_it(self) -> None:
+        (self.root / "project.md").unlink()
+        self.assertTrue(
+            any("project.md" in error for error in self.service.validate_project().errors),
+            self.service.validate_project().errors,
+        )
+        self.service.repair_project()
+        restored = self.service.read_project_node()
+        self.assertTrue(restored.id.startswith("project_"), restored.id)
+        self.assertEqual(restored.title, "Honor's First Command")
+        self.assertEqual(self.service.validate_project().errors, [])
 
     def test_read_project_node_returns_title_and_metadata(self) -> None:
         node = self.service.read_project_node()
@@ -138,6 +175,16 @@ class ProjectNodeServiceTests(unittest.TestCase):
                 )
             )
         self.assertIn("changed on disk", str(ctx.exception).lower())
+
+
+class ProjectNodeModelTests(unittest.TestCase):
+    """The id is required on the model, with no default (#343)."""
+
+    def test_project_node_id_has_no_default(self) -> None:
+        # Load-bearing: a default is exactly how the constant would come back,
+        # silently, at whichever construction site forgot to pass an id.
+        with self.assertRaises(ValidationError):
+            ProjectNode(title="No id supplied")
 
 
 class NestedProjectNodeIdentityTests(unittest.TestCase):

@@ -12,7 +12,6 @@ metadata-value strip/validate helpers, markdown IO, `_maybe_rename_node_file`,
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Any
 
 import yaml
 
@@ -24,31 +23,18 @@ class ProjectNodeMixin:
     def _project_node_path(self) -> Path:
         return self._require_project() / "project.md"
 
-    def _project_node_id(self, path: Path, front_matter: dict[str, Any] | None = None) -> str:
-        """The project node's identity — read by the same helper as every kind.
-
-        Minted (#343) rather than constant: the singleton-per-folder *address*
-        is what stays stable, not the id. A read never invents one. Minting
-        here would hand out an id that reaches no file, so two reads of the
-        same node would disagree — worse than the collision this fixes.
-        """
-        return self._node_id_for_path(path, front_matter, fallback=self._no_project_node_id)
-
-    def _no_project_node_id(self) -> str:
-        raise ProjectServiceError(
-            "project.md has no front matter id. It identifies the project node; restore it or recreate the file.",
-            422,
-        )
-
     def read_project_node(self) -> ProjectNode:
         path = self._project_node_path()
         if not path.exists():
-            # project.md always exists: create_project writes it and the v3
-            # migration back-fills it on open. Synthesizing one here would mean
-            # minting an identity that never reaches disk.
+            # project.md always exists: create_project writes it first, and
+            # there is no back-fill (the v3 migration was retired with #343),
+            # so a folder without one is damaged. `validate_project` reports it
+            # and `repair_project` recreates it — both of which write the file,
+            # where minting an id is honest. Synthesizing a node here would mint
+            # an identity that never reaches disk, so two reads would disagree.
             raise ProjectServiceError("Project node file project.md is missing.", 404)
         front_matter, body = self._read_markdown_with_front_matter(path, strict=True)
-        node_id = self._project_node_id(path, front_matter)
+        node_id = self._require_node_id(path, front_matter)
         title = str(front_matter.get("title") or self.title or "Untitled Project")
         raw_entry_type = front_matter.get("entry_type") or "project:project"
         entry_type = raw_entry_type if isinstance(raw_entry_type, str) else "project:project"
@@ -70,8 +56,11 @@ class ProjectNodeMixin:
         if request.base_revision and request.base_revision != current_revision:
             raise ProjectServiceError("Project node changed on disk after it was opened.", 409)
         # Identity is carried by the file, not by the save request — a save
-        # must never re-mint it.
-        node_id = self._project_node_id(path) if exists else self._new_id("project")
+        # never re-mints an id the file already has. Where the file has none to
+        # carry (absent, or damaged into losing its id), a save is the sanctioned
+        # repair: it mints, and unlike a read it writes what it minted, so the
+        # id it hands back is the one on disk.
+        node_id = (self._front_matter_id(path) if exists else None) or self._new_id("project")
         metadata = self._normalise_metadata(request.metadata, path)
         node = ProjectNode(
             id=node_id,

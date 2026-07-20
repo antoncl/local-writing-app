@@ -30,6 +30,9 @@ from pathlib import Path
 
 import yaml
 
+# Independent of MIGRATIONS on purpose: it is the version the code represents,
+# not the height of the ladder. Deriving it (e.g. max(m[0] for m in MIGRATIONS))
+# would throw on an empty registry and take the stamp-forward path down with it.
 CURRENT_VERSION = 5
 KEEP_BACKUPS = 3
 BACKUP_DIRNAME = ".migration-backups"

@@ -19,7 +19,6 @@ metadata-value subsystem, not schema-definition CRUD.
 
 from __future__ import annotations
 
-import hashlib
 import re
 from copy import deepcopy
 from pathlib import Path
@@ -50,6 +49,8 @@ from app.services.project.default_schema import (
     INTRINSIC_FIELD_KEYS,
 )
 from app.services.project.errors import ProjectServiceError
+from app.services.project.layers import SCHEMA_FILENAME
+from app.services.project.node_index import IndexLayer
 
 
 def _entry_type_ancestry(
@@ -72,6 +73,22 @@ def _entry_type_ancestry(
         definition = entry_types.get(current)
         current = definition.parent if definition is not None else None
     return chain
+
+
+def _schema_layer_from(layer: IndexLayer) -> MetadataSchemaLayer:
+    """The API-facing twin of `IndexLayer`.
+
+    Used to run its own `enumerate` over the chain, re-deriving id and label
+    with the same rules the index build used; now it reads them off the walk.
+    """
+    schema_path = layer.folder / SCHEMA_FILENAME
+    return MetadataSchemaLayer(
+        id=layer.id,
+        label=layer.label,
+        folder_path=str(layer.folder),
+        schema_path=str(schema_path),
+        exists=schema_path.exists(),
+    )
 
 
 class MetadataSchemaMixin:
@@ -101,20 +118,9 @@ class MetadataSchemaMixin:
 
     def read_metadata_schema_layers(self) -> MetadataSchemaLayers:
         root = self._require_project()
-        paths = self._metadata_schema_layer_paths(root)
-        layers: list[MetadataSchemaLayer] = []
-        for index, path in enumerate(paths):
-            folder = path.parent
-            layers.append(
-                MetadataSchemaLayer(
-                    id=self._metadata_schema_layer_id(folder),
-                    label=self._layer_label_for_folder(root, folder, index),
-                    folder_path=str(folder),
-                    schema_path=str(path),
-                    exists=path.exists(),
-                )
-            )
-        return MetadataSchemaLayers(layers=layers)
+        return MetadataSchemaLayers(
+            layers=[_schema_layer_from(layer) for layer in self.collect_layers(root)]
+        )
 
     def read_metadata_schema_overview(self) -> MetadataSchemaOverview:
         root = self._require_project()
@@ -884,39 +890,21 @@ class MetadataSchemaMixin:
             return mapped if mapped in valid else ""
         return value
 
-    def _project_layer_folders(self, root: Path) -> list[Path]:
-        """Project folders from outermost ancestor to current root, inclusive."""
-        base_folder = self._metadata_schema_base_folder(root)
-        if base_folder is None or not self._is_relative_to(root, base_folder):
-            return [root]
-
-        folders: list[Path] = []
-        current = root
-        while True:
-            folders.append(current)
-            if current == base_folder:
-                break
-            current = current.parent
-        return list(reversed(folders))
-
-    def _metadata_schema_layer_paths(self, root: Path) -> list[Path]:
-        return [folder / "metadata.schema.yaml" for folder in self._project_layer_folders(root)]
-
-    def _layer_label_for_folder(self, root: Path, folder: Path, layer_index: int) -> str:
-        if folder == root:
-            return self.title or root.name
-        if layer_index == 0:
-            return "Base Folder"
-        return folder.name
-
-    def _metadata_schema_layer_id(self, folder: Path) -> str:
-        return hashlib.sha256(str(folder.resolve()).encode("utf-8")).hexdigest()[:16]
+    # The layer walk itself — `_project_layer_folders`, `_metadata_schema_layer_paths`,
+    # `_layer_label_for_folder`, `_metadata_schema_layer_id` and
+    # `_metadata_schema_base_folder` — moved to `layers.py` in #329, so there is
+    # one traversal every consumer visits. They resolve through the MRO, so the
+    # call sites below are unchanged.
 
     def _metadata_schema_layer_path_for_id(self, root: Path, layer_id: str) -> Path | None:
-        for path in self._metadata_schema_layer_paths(root):
-            if self._metadata_schema_layer_id(path.parent) == layer_id:
-                return path
-        return None
+        """The schema file for a layer id, or None when the id is unknown.
+
+        Reverses the id through the walk (`layer_by_id` → `LayerFinder`) rather
+        than re-hashing `path.parent` per candidate, which was the last surviving
+        "derive the layer identity yourself" site (#329).
+        """
+        layer = self.layer_by_id(root, layer_id)
+        return None if layer is None else layer.folder / SCHEMA_FILENAME
 
     def _read_metadata_schema_through_path(self, root: Path, target_path: Path) -> MetadataSchema:
         data = deepcopy(DEFAULT_METADATA_SCHEMA)
@@ -939,24 +927,6 @@ class MetadataSchemaMixin:
             )
         return warnings
 
-    def _metadata_schema_base_folder(self, root: Path) -> Path | None:
-        manifest = self._read_yaml(root / "project.yaml")
-        settings = manifest.get("settings")
-        if not isinstance(settings, dict):
-            return None
-        base_folder = settings.get("projects_base_folder")
-        if not isinstance(base_folder, str) or not base_folder.strip():
-            return None
-        configured_base = Path(base_folder).expanduser().resolve()
-        if configured_base == root.parent:
-            schema_ancestors = [
-                ancestor
-                for ancestor in root.parents
-                if ancestor != root.parent and (ancestor / "metadata.schema.yaml").exists()
-            ]
-            if schema_ancestors:
-                return schema_ancestors[-1].resolve()
-        return configured_base
 
     def _read_metadata_schema_layer(self, path: Path) -> dict[str, Any]:
         try:

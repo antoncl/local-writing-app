@@ -28,12 +28,26 @@ class NodeIndexEntry:
 
 @dataclass(frozen=True)
 class IndexLayer:
-    """One folder in the layer chain, as the index walk sees it: where to read,
-    and the identity every entry collected there is stamped with."""
+    """One folder in the layer chain: where to read, the identity every entry
+    collected there is stamped with, and the layer's place in the walk.
+
+    Yielded by the single traversal in `layers.py` (#329). `rank` is explicit
+    rather than positional so consumers stop re-deriving it — the assistant
+    roster used to infer it from index insertion order, which an incremental
+    index patch (#307) would silently reorder. Compare ranks; never index with
+    them.
+
+    `is_root` marks the open project itself (scenes and chats are collected
+    only there). `is_machine` marks the out-of-tree machine config dir, which
+    contributes assistants only and carries no `metadata.schema.yaml`.
+    """
 
     folder: Path
     id: str
     label: str
+    rank: int
+    is_root: bool = False
+    is_machine: bool = False
 
 
 @dataclass(frozen=True)

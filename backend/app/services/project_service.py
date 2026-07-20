@@ -29,6 +29,7 @@ from app.services.project.embedded_todos import EmbeddedTodosMixin
 # Re-exported so the historic import path
 # `from app.services.project_service import ProjectServiceError` keeps working.
 from app.services.project.errors import ProjectServiceError
+from app.services.project.layers import LayerWalkMixin
 from app.services.project.lifecycle import ProjectLifecycleMixin
 from app.services.project.lore import LoreEntriesMixin
 from app.services.project.lore_mutations import LoreMutationsMixin
@@ -58,6 +59,7 @@ class ProjectService(
     EmbeddedTodosMixin,
     LoreEntriesMixin,
     LoreMutationsMixin,
+    LayerWalkMixin,
     ManuscriptMixin,
     MetadataSchemaMixin,
     MetadataValuesMixin,

@@ -7,15 +7,33 @@ from pydantic import BaseModel, Field, field_validator
 from app.models_views import NodePickerConfig
 
 
+class TagLayerRef(BaseModel):
+    """One layer that asserts a tag, for display and for the "does *this* layer
+    assert it?" test (#339)."""
+
+    id: str = ""
+    label: str = ""
+
+
 class ScopedTag(BaseModel):
     """A known tag with a scope (which kinds / sub-types it's suggested on).
 
     Scope reuses NodePickerConfig's kinds + per-kind entry_types vocabulary.
     An empty scope means "suggest everywhere" (legacy flat tags upgrade to
-    this)."""
+    this).
+
+    `source_layers` is the provenance of a **merged** read (#339) and is empty
+    on a single-layer read. Unlike a node — which has exactly one owning layer
+    because the index shadows, nearest wins — a tag does not shadow: the same
+    name may be asserted at world, series and book with different scopes, and
+    the merged record is the *union* of all of them. So provenance is a set,
+    not a single `source_layer_id`. #313 branches on it: a layer that merely
+    inherits a tag cannot edit its scope in place, it writes a local assertion.
+    """
 
     name: str
     scope: NodePickerConfig = Field(default_factory=NodePickerConfig)
+    source_layers: list[TagLayerRef] = Field(default_factory=list)
 
 
 class KnownTags(BaseModel):

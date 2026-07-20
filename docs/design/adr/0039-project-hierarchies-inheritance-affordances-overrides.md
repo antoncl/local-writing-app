@@ -1,7 +1,8 @@
 # ADR-0039: Project hierarchies — inheritance is virtual membership; three edit affordances; per-field layer overrides
 
 - Status: **Accepted** — 0.7.0, 2026-07-19 (PR #319) · rewritten 2026-07-19 after two rounds of
-  adversarial review · **Amendment 1: inheritance is declared, not inferred**
+  adversarial review · **Amendment 1: inheritance is declared, not inferred** · **Amendment 2: one
+  traversal; the root is stipulated, not inferred from a stray `metadata.schema.yaml`**
 - Feature: #7 (epic) full project hierarchies
 - Companion: ADR-0040 (the index — which *materializes* the chain, not merely caches it)
 - Amends: ADR-0013 (see its Amendment 1) · Gesture UX: **ADR-0042** (co-designed with mutation
@@ -215,6 +216,52 @@ construction: one declared chain serves node inheritance *and* schema layering, 
 **Where the declaration is made:** the create-project wizard, which presents the enumerated ancestors
 and lets the author tick the ones to inherit from. Editable afterwards in project settings.
 
+## Amendment 2 — one traversal, and the root is stipulated (2026-07-19)
+
+Amendment 1 said the walk "enumerates candidates by walking the filesystem to the base folder" and
+**never defined what determines the base folder**. The code does, dynamically and invisibly:
+`_metadata_schema_base_folder` (`schema.py:942-959`) ignores the configured
+`projects_base_folder` whenever it equals `root.parent` — *which the project chooser writes on every
+create* — and substitutes the **outermost** ancestor anywhere up `root.parents` that happens to
+contain a `metadata.schema.yaml`. A stray schema file in a grandparent directory therefore sets the
+extent of schema layering, the node index **and** the assistant roster. This ADR made inheritance
+explicit while leaving its outer bound implicit and file-triggered.
+
+**The root is stipulated, never inferred from a file's presence.** The walk's extent comes from the
+project's own declaration (Amendment 1) with `projects_base_folder` as the bound. The
+`metadata.schema.yaml`-presence widening is removed. A project whose schema layering depended on it
+declares those ancestors instead — which is the point of Amendment 1.
+
+**There is exactly one traversal, and every consumer visits it.** Today there are six derivations of
+the same chain, which is why a change to "how far do we walk" cannot be made in one place:
+
+| | today | derives |
+|---|---|---|
+| 1 | `_project_layer_folders` (`schema.py:887`) | the chain, root → base |
+| 2 | `_metadata_schema_base_folder` (`:942`) | where #1 *stops* — the widening above |
+| 3 | `_metadata_schema_layer_paths` (`:903`) | maps #1 → schema files |
+| 4 | `_build_node_index` (`references.py`) | iterates #1, building `IndexLayer` inline |
+| 5 | `assistants.py:75` | layer folder from `entry.path.parent`, **rank from index insertion order** |
+| 6 | `references.py:183`, `assistants.py:219` | the machine layer, special-cased outside the chain |
+
+`IndexLayer(folder, id, label)` (#305) is already the right value object; it is merely private to the
+index build, constructed inline by `_build_node_index` with rank implied by `enumerate`. Promote it:
+a single walk yields `IndexLayer` objects stamped with folder, id, label, **explicit rank** and
+`is_root`, and yields the machine assistants layer as an ordinary out-of-tree layer rather than a
+special case at two call sites. Schema merge, node index, assistants, settings/AI-policy resolution
+(slice F) and provenance all consume that one sequence.
+
+**Why this is a prerequisite rather than a cleanup.** When the create-project wizard lands and makes
+the declaration explicit, "how far do we traverse" must change in **one** place. With six derivations
+it changes in six, and #305 already showed how that goes — the index build grew its own layer walk
+while `assistants.py` kept inferring rank from insertion order, which an incremental patch (#307)
+would silently reorder. Slice F (#312) was attempted against this substrate and had to be rolled
+back.
+
+**Sequencing consequence:** the unified walk lands **before #306**. The snapshot's manifest and layer
+ranks are keyed on the chain, so persisting a format whose extent and rank semantics are still
+unsettled builds on sand — and #309 waits on #306.
+
 ## Why / rejected alternatives
 
 - **Overrides as a tier inside `effective_state`** (the earlier draft's central claim: an added layer
@@ -261,6 +308,18 @@ and lets the author tick the ones to inherit from. Editable afterwards in projec
   query-time delta for backlinks / `References` / Nest to apply. The split is clean: **layer overrides
   are position-independent and can be materialized; scene mutations are position-dependent and cannot**
   (they stay resolved at query time, as today).
+- **Ordering is inherited too, not just content — and it is currently the exception.** Assistants
+  carry a manual priority sequence (`.order.yaml` per layer, `assistants.py:128-142`) where **topmost
+  is the default** (ADR-0024). That makes position load-bearing rather than cosmetic, and it is the
+  one place the chain is composed *without* the descendant-wins rule this ADR applies everywhere else:
+  the effective order sorts on `layer_rank` first, and `layer_rank` is not stored — it is the order
+  entries stream out of the index (`assistants.py:76`), with the machine layer collected first
+  (`references.py:98`). So a project-level assistant can never outrank a machine one, whatever the
+  user does. Whether an ordering *inherits* — innermost layer that names an entry decides its position
+  — is **#332**, and it must be settled before the wizard (#318) offers an ordering step. The general
+  point for any future layered list: *the order is part of what layers, and it needs the same
+  descendant-wins answer as the content.*
+
 - **Settings / AI-policy resolution must extend to the chain.** Today AI settings read only the open
   project's own `project.yaml`; they must resolve `system → …chain… → prompt` over the same layer walk.
 - **`revision` must span the fold.** `read_lore_entry` returns `revision=self._revision(path)` — a hash

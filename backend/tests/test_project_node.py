@@ -30,9 +30,25 @@ class ProjectNodeServiceTests(unittest.TestCase):
         self.assertIn("title: Honor's First Command", text)
         self.assertIn("entry_type: project:project", text)
 
+    def test_project_node_id_is_minted_and_stable(self) -> None:
+        # #343: the project node is *addressed* by path, but its identity is
+        # minted like every other node — a constant id collides across layers.
+        node = self.service.read_project_node()
+        self.assertTrue(node.id.startswith("project_"), node.id)
+        self.assertNotEqual(node.id, "project")
+        # Stable across reads — it lives in front matter, not in the reader.
+        self.assertEqual(self.service.read_project_node().id, node.id)
+        self.assertIn(f"id: {node.id}", (self.root / "project.md").read_text(encoding="utf-8"))
+
+    def test_save_project_node_preserves_the_minted_id(self) -> None:
+        node = self.service.read_project_node()
+        saved = self.service.save_project_node(
+            SaveProjectNodeRequest(title="Renamed", body="", base_revision=node.revision, metadata={})
+        )
+        self.assertEqual(saved.id, node.id)
+
     def test_read_project_node_returns_title_and_metadata(self) -> None:
         node = self.service.read_project_node()
-        self.assertEqual(node.id, "project")
         self.assertEqual(node.title, "Honor's First Command")
         self.assertEqual(node.entry_type, "project:project")
         self.assertEqual(node.body, "")
@@ -131,6 +147,45 @@ class ProjectNodeMigrationTests(unittest.TestCase):
         self.assertEqual(node.entry_type, "project:project")
 
 
+class NestedProjectNodeIdentityTests(unittest.TestCase):
+    """#343: nested projects are different nodes, so they need different ids.
+
+    Under #7 every layer of a chain is a project. With a constant `id: project`
+    every layer's project node collided by construction — the index modelled
+    unrelated nodes as a fork and the validator reported a shadow that never
+    happened.
+    """
+
+    def setUp(self) -> None:
+        self.tmp = TemporaryDirectory()
+        self.base = Path(self.tmp.name) / "writing"
+        self.universe = self.base / "honorverse"
+        self.root = self.universe / "book01"
+        self.base.mkdir(parents=True)
+        self.outer = ProjectService()
+        self.outer.create_project(self.universe, "Honorverse", projects_base_folder=self.base)
+        self.inner = ProjectService()
+        self.inner.create_project(self.root, "Book 1", projects_base_folder=self.base)
+
+    def tearDown(self) -> None:
+        self.tmp.cleanup()
+
+    def test_nested_project_nodes_have_distinct_ids(self) -> None:
+        outer_id = self.outer.read_project_node().id
+        inner_id = self.inner.read_project_node().id
+        self.assertNotEqual(outer_id, inner_id)
+        for node_id in (outer_id, inner_id):
+            self.assertTrue(node_id.startswith("project_"), node_id)
+
+    def test_nested_projects_produce_no_shadow_warning(self) -> None:
+        index = self.inner._build_node_index()
+        self.assertEqual([w for w in index.warnings if "shadow" in w], [])
+        self.assertEqual(index.errors, [])
+
+        validation = self.inner.validate_project()
+        self.assertEqual([w for w in validation.warnings if "shadow" in w], [])
+
+
 class ProjectNodeEndpointTests(unittest.TestCase):
     """Endpoints expose the project node and accept updates."""
 
@@ -148,7 +203,7 @@ class ProjectNodeEndpointTests(unittest.TestCase):
         response = self.client.get("/api/project/node")
         self.assertEqual(response.status_code, 200, response.text)
         body = response.json()
-        self.assertEqual(body["id"], "project")
+        self.assertTrue(body["id"].startswith("project_"), body["id"])
         self.assertEqual(body["title"], "Pegasus Drift")
         self.assertEqual(body["entry_type"], "project:project")
 

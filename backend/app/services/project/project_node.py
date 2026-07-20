@@ -12,6 +12,7 @@ metadata-value strip/validate helpers, markdown IO, `_maybe_rename_node_file`,
 from __future__ import annotations
 
 from pathlib import Path
+from typing import Any
 
 import yaml
 
@@ -23,6 +24,18 @@ class ProjectNodeMixin:
     def _project_node_path(self) -> Path:
         return self._require_project() / "project.md"
 
+    def _project_node_id(self, front_matter: dict[str, Any]) -> str:
+        """The project node's identity, read from front matter like any node.
+
+        Minted (#343) rather than constant: the singleton-per-folder *address*
+        is what stays stable, not the id. Only a project node written before
+        the id existed lands in the mint branch.
+        """
+        raw_id = front_matter.get("id")
+        if isinstance(raw_id, str) and raw_id.strip():
+            return raw_id.strip()
+        return self._new_id("project")
+
     def read_project_node(self) -> ProjectNode:
         path = self._project_node_path()
         if not path.exists():
@@ -31,7 +44,7 @@ class ProjectNodeMixin:
             # runs), synthesize from project.yaml's title.
             manifest = self._read_yaml(self._require_project() / "project.yaml")
             return ProjectNode(
-                id="project",
+                id=self._new_id("project"),
                 title=str(manifest.get("title") or self.title or "Untitled Project"),
                 body="",
                 revision="",
@@ -39,28 +52,36 @@ class ProjectNodeMixin:
                 metadata={},
             )
         front_matter, body = self._read_markdown_with_front_matter(path, strict=True)
+        node_id = self._project_node_id(front_matter)
         title = str(front_matter.get("title") or self.title or "Untitled Project")
         raw_entry_type = front_matter.get("entry_type") or "project:project"
         entry_type = raw_entry_type if isinstance(raw_entry_type, str) else "project:project"
         metadata = self._normalise_metadata(front_matter.get("metadata"), path)
         return ProjectNode(
-            id="project",
+            id=node_id,
             title=title,
             body=body,
             revision=self._revision(path),
             entry_type=entry_type,
             metadata=metadata,
-            computed_metadata=self._computed_entry_metadata(body, node_id="project", entry_type=entry_type),
+            computed_metadata=self._computed_entry_metadata(body, node_id=node_id, entry_type=entry_type),
         )
 
     def save_project_node(self, request: SaveProjectNodeRequest) -> ProjectNode:
         path = self._project_node_path()
-        current_revision = self._revision(path) if path.exists() else ""
+        exists = path.exists()
+        current_revision = self._revision(path) if exists else ""
         if request.base_revision and request.base_revision != current_revision:
             raise ProjectServiceError("Project node changed on disk after it was opened.", 409)
+        # Identity is carried by the file, not by the save request — a save
+        # must never re-mint it.
+        if exists:
+            node_id = self._project_node_id(self._read_front_matter_only(path, strict=True))
+        else:
+            node_id = self._new_id("project")
         metadata = self._normalise_metadata(request.metadata, path)
         node = ProjectNode(
-            id="project",
+            id=node_id,
             title=request.title,
             body=request.body,
             revision=current_revision,

@@ -61,7 +61,11 @@ class ProjectNode(BaseModel):
     no separate "book" kind needed.
     """
 
-    id: str = "project"
+    # Minted like every other node (#343). The project node is *addressed*
+    # without an id — one singleton per folder, resolved by path — but a
+    # stable address is not an identity: under nesting (#7) every layer has
+    # a project node, and a constant id would collide by construction.
+    id: str
     title: str
     body: str = ""
     revision: str = ""

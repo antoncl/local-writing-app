@@ -57,7 +57,13 @@ class ProjectLifecycleMixin:
         # Project node singleton — book metadata, blurb, etc. live here.
         self._write_project_node_file(
             root / "project.md",
-            ProjectNode(id="project", title=title, body="", entry_type="project:project", metadata={}),
+            ProjectNode(
+                id=self._new_id("project"),
+                title=title,
+                body="",
+                entry_type="project:project",
+                metadata={},
+            ),
         )
         self._write_yaml(root / "metadata.schema.yaml", self._empty_metadata_schema())
         self._write_yaml(root / "tags.yaml", {"tags": []})

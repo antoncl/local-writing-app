@@ -38,7 +38,7 @@ from app.models import (
     SaveAssistantEntryRequest,
 )
 from app.services.project.errors import ProjectServiceError
-from app.services.project.node_index import IndexLayer, NodeIndex, NodeIndexEntry
+from app.services.project.node_index import NodeIndex, NodeIndexEntry
 
 
 class AssistantEntriesMixin:
@@ -47,10 +47,14 @@ class AssistantEntriesMixin:
         entries: list[AssistantEntrySummary] = []
         # Layer rank + folder read straight off the one walk (#329). Both used
         # to be inferred from the entries themselves — the folder from the first
-        # entry's `path.parent`, the rank from `index.by_id` insertion order —
-        # so an incremental index patch (#307) that re-parsed a single file
-        # would move its layer to the end of the dict and silently reorder the
-        # roster. The walk is machine-layer-first, then base folder → … → open
+        # entry's `path.parent`, the rank from `index.by_id` insertion order.
+        # That misordered the roster in two ways. Today: a cross-layer id
+        # collision reuses the *ancestor's* dict slot (`by_id[id] = entry`
+        # overwrites the value, keeps the position), so a descendant that
+        # shadows an outer id was "first seen" at the outer layer's position and
+        # its whole bucket jumped up the roster. Later: an incremental index
+        # patch (#307) re-parsing one file would move its layer to the end.
+        # The walk is machine-layer-first, then base folder → … → open
         # project, so rank stays the LEADING sort term and keeps the roster
         # layer-grouped (Machine bucket first). That is the ADR-0037 §7
         # assumption the Assistants default's `group_by: source_layer` relies on
@@ -103,20 +107,8 @@ class AssistantEntriesMixin:
         if self.root_path is not None:
             layers = self.project_layers(self.root_path, include_machine=True)
         else:
-            machine_folder = self._machine_layer_folder()
-            layers = (
-                []
-                if machine_folder is None
-                else [
-                    IndexLayer(
-                        folder=machine_folder,
-                        id=self._metadata_schema_layer_id(machine_folder),
-                        label="Machine",
-                        rank=0,
-                        is_machine=True,
-                    )
-                ]
-            )
+            machine_layer = self.machine_layer()
+            layers = [] if machine_layer is None else [machine_layer]
         layer_paths = {layer.id: layer.folder / "assistants" for layer in layers}
         layer_rank = {layer.id: layer.rank for layer in layers}
         return layer_paths, layer_rank

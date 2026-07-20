@@ -13,7 +13,7 @@ from pathlib import Path
 from tempfile import TemporaryDirectory
 from unittest.mock import patch
 
-from app.services.project.node_index import IndexLayer, NodeIndex, NodeIndexEntry
+from app.services.project.node_index import IndexLayer, NodeIndex
 from app.services.project_service import ProjectService
 
 
@@ -175,15 +175,65 @@ class AssistantRankComesFromTheWalkTests(unittest.TestCase):
 
         self.assertEqual(perturbed, natural)
 
-    def test_layer_rank_is_not_dense_over_layers_that_have_no_assistants(self) -> None:
-        # Only the book carries an assistant; its rank is the walk's rank (1),
-        # not a re-based 0. Ranks are compared, never used as indices.
+    def test_a_shadowed_assistant_id_does_not_drag_its_layer_up_the_roster(self) -> None:
+        # The sharp edge of the old first-seen-ordinal rank, and the case the
+        # walk actually changes today (not just under #307).
+        #
+        # `index.by_id[id] = entry` on a cross-layer shadow overwrites the value
+        # but KEEPS the ancestor's insertion slot. So the descendant layer was
+        # first seen at the ancestor's position, and its whole bucket teleported
+        # up the roster. Here the book shadows a base-folder id, which used to
+        # hoist the book's other assistants above the intermediate layer's:
+        #
+        #   before: base, [book bucket], middle
+        #   after:  base, middle, [book bucket]
+        #
+        # (Within the book bucket "Collides (book)" precedes "From Book"
+        # alphabetically, since neither layer has an .order.yaml.)
+        #
+        # Layer order must win regardless of which ids collide — this is
+        # user-visible, since roster[0] is the default assistant (ADR-0024).
+        middle = self.base / "middle"
+        book = middle / "book"
+        service = ProjectService()
+        service.create_project(book, "Book")
+        manifest = service._read_yaml(book / "project.yaml")
+        manifest.setdefault("settings", {})["projects_base_folder"] = str(self.base)
+        service._write_yaml(book / "project.yaml", manifest)
+
+        def write(folder: Path, entry_id: str, title: str) -> None:
+            (folder / "assistants").mkdir(parents=True, exist_ok=True)
+            service._write_node_entry_file(
+                folder / "assistants" / f"{entry_id}.md", entry_id, title, "assistant", {}, ""
+            )
+
+        write(self.base, "from-base", "From Base")
+        write(middle, "from-middle", "From Middle")
+        write(book, "from-book", "From Book")
+        write(self.base, "collides", "Collides (base)")
+        write(book, "collides", "Collides (book)")
+
+        # conftest's autouse fixture isolates the machine config dir, so the
+        # roster here is exactly the three project layers.
+        roster = [entry.id for entry in service.list_assistant_entries().entries]
+
+        self.assertEqual(roster, ["from-base", "from-middle", "collides", "from-book"])
+        # Verified against origin/master, which yields
+        # ['collides', 'from-book', 'from-base', 'from-middle'] — the whole Book
+        # layer hoisted to the front, flipping roster[0] and with it the
+        # default assistant.
+
+    def test_rank_map_covers_every_layer_including_ones_without_assistants(self) -> None:
+        # Ranks come from the walk, so a layer contributing no assistants still
+        # occupies its position — the roster's ordering cannot depend on which
+        # layers happen to have entries.
         self._write_assistant(self.root, "only", "Only One")
 
         _paths, ranks = self.service._assistant_layer_paths_and_ranks()
         layers = self.service.project_layers(self.root, include_machine=True)
 
-        self.assertEqual(ranks, {layer.id: layer.rank for layer in layers})
+        self.assertEqual(len(ranks), len(layers))
+        self.assertEqual(sorted(ranks.values()), list(range(len(layers))))
         root_layer = next(layer for layer in layers if layer.is_root)
         self.assertGreater(root_layer.rank, 0)
 
@@ -243,12 +293,15 @@ class MachineLayerIsAnOrdinaryLayerTests(unittest.TestCase):
             [layer.folder for layer in with_machine if not layer.is_machine],
         )
 
-    def test_index_entry_carries_the_walk_layer_identity(self) -> None:
-        entry = NodeIndexEntry(id="x", kind="assistant", entry_type="assistant:assistant", path=Path("x.md"))
+    def test_machine_layer_has_one_constructor(self) -> None:
+        # The walk and the two no-project-chain callers must agree on the
+        # machine layer's identity — they used to build it separately.
+        (self.config_dir / "assistants").mkdir()
 
-        # source_layer_id survives as the API-facing identity; rank rides
-        # alongside on the layer rather than replacing it (#329 scope).
-        self.assertEqual(entry.source_layer_id, "")
+        from_walk = self.service.project_layers(self.root, include_machine=True)[0]
+        standalone = self.service.machine_layer()
+
+        self.assertEqual(from_walk, standalone)
 
 
 if __name__ == "__main__":

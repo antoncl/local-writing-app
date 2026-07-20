@@ -64,17 +64,9 @@ class LayerWalkMixin:
         """
         layers: list[IndexLayer] = []
         if include_machine:
-            machine_folder = self._machine_layer_folder()
-            if machine_folder is not None:
-                layers.append(
-                    IndexLayer(
-                        folder=machine_folder,
-                        id=self._metadata_schema_layer_id(machine_folder),
-                        label="Machine",
-                        rank=len(layers),
-                        is_machine=True,
-                    )
-                )
+            machine_layer = self.machine_layer(rank=len(layers))
+            if machine_layer is not None:
+                layers.append(machine_layer)
         # `chain_index` is the position within the *project* chain, which is what
         # the label rule keys on ("Base Folder" is the outermost project layer).
         # It is deliberately not the same number as `rank`, which spans the whole
@@ -112,6 +104,26 @@ class LayerWalkMixin:
             if layer.id == layer_id:
                 return layer
         return None
+
+    def machine_layer(self, *, rank: int = 0) -> IndexLayer | None:
+        """The machine layer as an `IndexLayer`, or None when it has no
+        `assistants/` folder.
+
+        One constructor, so the walk and the two callers that need the machine
+        layer *without* a project chain (the index's no-project path and the
+        roster's) cannot drift apart on its id, label or flags — which is the
+        exact duplication #329 exists to remove.
+        """
+        folder = self._machine_layer_folder()
+        if folder is None:
+            return None
+        return IndexLayer(
+            folder=folder,
+            id=self._metadata_schema_layer_id(folder),
+            label="Machine",
+            rank=rank,
+            is_machine=True,
+        )
 
     def _machine_layer_folder(self) -> Path | None:
         """The machine config dir, when it carries an `assistants/` folder.
@@ -184,4 +196,12 @@ class LayerWalkMixin:
         return folder.name
 
     def _metadata_schema_layer_paths(self, root: Path) -> list[Path]:
-        return [layer.folder / SCHEMA_FILENAME for layer in self.project_layers(root)]
+        """Schema-file candidates, base → root.
+
+        Iterates the walk's folders rather than `project_layers`: this needs
+        neither id nor label, and stamping them costs a `Path.resolve()`
+        syscall per layer (~0.16 ms each). `read_metadata_schema` calls this on
+        a hot path, so going through the decorated form measured +11% there for
+        values it then discards. Same single traversal either way.
+        """
+        return [folder / SCHEMA_FILENAME for folder in self._project_layer_folders(root)]

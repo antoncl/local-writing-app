@@ -70,6 +70,46 @@ NODE_FAMILIES = [
 MACHINE_LAYER_FAMILIES = [family for family in NODE_FAMILIES if family.kind == "assistant"]
 
 
+class _NodeIndexBuilder:
+    """The index build's per-layer logic, as a `LayerVisitor` (#329).
+
+    This used to be the body of `_build_node_index`'s own `enumerate` over the
+    chain. Holding it as a visitor is what keeps the traversal itself in one
+    place: the walker decides *which* layers and in *what order*, this decides
+    what to do at each.
+    """
+
+    def __init__(
+        self,
+        service: ReferencesMixin,
+        *,
+        index: NodeIndex,
+        root: Path,
+        schema: MetadataSchema | None,
+    ) -> None:
+        self._service = service
+        self._index = index
+        self._root = root
+        self._schema = schema
+
+    def visit_layer(self, layer: IndexLayer) -> None:
+        for family in self._service._families_for_layer(layer):
+            self._service._collect_layer_entries(
+                layer=layer,
+                family=family,
+                index=self._index,
+                duplicate_relative_to=self._root,
+                schema=self._schema,
+            )
+        # Chat sessions live as YAML files (not Node-shaped .md), so they need
+        # their own collector. Read-only for now: this makes them discoverable
+        # as nodes (kind="chat") for reference graphs and the unified-CRUD
+        # migration to come, but ChatSession storage remains the source of
+        # truth (Phase 3b-i / decisions-node-editor-modularization).
+        if layer.is_root:
+            self._service._collect_chat_entries(layer=layer, index=self._index)
+
+
 class ReferencesMixin:
     def _build_node_index(self, root: Path | None = None) -> NodeIndex:
         """Walk the layer chain once, producing both the id→entry map and the
@@ -102,23 +142,11 @@ class ReferencesMixin:
         # assistants only — it lives outside the project tree and holds the
         # user's roster. Project layers follow outermost-ancestor first, so a
         # descendant entry overwrites an ancestor's on collision.
-        for layer in self.project_layers(root, include_machine=True):
-            for family in self._families_for_layer(layer):
-                self._collect_layer_entries(
-                    layer=layer,
-                    family=family,
-                    index=index,
-                    duplicate_relative_to=root,
-                    schema=schema,
-                )
-            # Chat sessions live as YAML files (not Node-shaped .md), so they
-            # need their own collector. Read-only for now: this makes them
-            # discoverable as nodes (kind="chat") for reference graphs and
-            # the unified-CRUD migration to come, but ChatSession storage
-            # remains the source of truth (Phase 3b-i / decisions-node-
-            # editor-modularization).
-            if layer.is_root:
-                self._collect_chat_entries(layer=layer, index=index)
+        self.visit_layers(
+            _NodeIndexBuilder(self, index=index, root=root, schema=schema),
+            root,
+            include_machine=True,
+        )
         index.rebuild_reverse_edges()
         return index
 
@@ -191,16 +219,9 @@ class ReferencesMixin:
         `_build_assistant_index`, which serves the assistant roster before any
         project has been opened and so has no chain to walk.
         """
-        machine_folder = self._machine_layer_folder()
-        if machine_folder is None:
+        layer = self.machine_layer()
+        if layer is None:
             return
-        layer = IndexLayer(
-            folder=machine_folder,
-            id=self._metadata_schema_layer_id(machine_folder),
-            label="Machine",
-            rank=0,
-            is_machine=True,
-        )
         for family in self._families_for_layer(layer):
             self._collect_layer_entries(
                 layer=layer,

@@ -123,6 +123,7 @@ from app.models.entries import (
     StructureNode,
 )
 from app.models.project import (
+    PROJECT_NODE_FILENAME,
     CreateProjectRequest,
     DirectoryEntry,
     DirectoryListing,
@@ -252,6 +253,7 @@ __all__ = [
     "ProjectCostChatRow",
     "ProjectCostResponse",
     "ProjectInfo",
+    "PROJECT_NODE_FILENAME",
     "ProjectNode",
     "ProjectValidation",
     "PromptContextStrategy",

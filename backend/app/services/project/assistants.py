@@ -266,6 +266,10 @@ class AssistantEntriesMixin:
         self._collect_machine_layer_assistants(
             index, duplicate_relative_to=Path("/")
         )
+        # Collection only fills `candidates`; `by_id` is derived (#334). The
+        # no-project path builds its index by hand, so it resolves by hand —
+        # without this the roster is empty rather than machine-only.
+        index.resolve()
         return index
 
     def resolve_assistant(self, assistant_id: str | None) -> AssistantEntry | None:

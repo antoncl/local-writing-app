@@ -424,14 +424,19 @@ def _report_footprint(index, edges: dict) -> None:
     `ReferenceEdge` objects in a forward map *and* a reverse one, ~3x the flat
     dict, and #306 sizes its snapshot off this number.
     """
-    size_index = deep_size(index.by_id) + deep_size(index.id_by_path)
-    size_forward = deep_size(index.edges_by_src)
+    # Sized off `candidates` + `edges_by_layer_src` since #334: those are the
+    # storage, and `by_id` / `edges_by_src` are derived views over the same
+    # objects. Summing a derived view instead would undercount a chain that
+    # shadows — exactly the chains #306 has to budget for.
+    size_index = deep_size(index.candidates)
+    size_forward = deep_size(index.edges_by_layer_src)
     size_reverse = deep_size(index.edges_by_dst)
     size_flat = deep_size(edges)
     bodies = {nid: entry.path.read_text(encoding="utf-8") for nid, entry in index.by_id.items()}
-    edge_count = sum(len(e) for e in index.edges_by_src.values())
-    print(f"  [Q1] index (by_id + id_by_path) : {mb(size_index)}   ({len(index.by_id)} nodes)")
-    print(f"       edges_by_src                : {mb(size_forward)}   ({edge_count} edges)")
+    edge_count = sum(len(e) for e in index.edges_by_layer_src.values())
+    shadowed = sum(len(c) - 1 for c in index.candidates.values())
+    print(f"  [Q1] index (candidates)         : {mb(size_index)}   ({len(index.by_id)} nodes, {shadowed} shadowed)")
+    print(f"       edges_by_layer_src          : {mb(size_forward)}   ({edge_count} edges)")
     print(f"       + edges_by_dst (reverse)    : {mb(size_forward + size_reverse)}   <- what the index holds")
     print(f"       (flat {{src: [dst]}} for ref) : {mb(size_flat)}")
     print(f"       + every body in memory      : {mb(size_index + size_forward + size_reverse + deep_size(bodies))}")

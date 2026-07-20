@@ -30,6 +30,9 @@ from pathlib import Path
 
 import yaml
 
+# Independent of MIGRATIONS on purpose: it is the version the code represents,
+# not the height of the ladder. Deriving it (e.g. max(m[0] for m in MIGRATIONS))
+# would throw on an empty registry and take the stamp-forward path down with it.
 CURRENT_VERSION = 5
 KEEP_BACKUPS = 3
 BACKUP_DIRNAME = ".migration-backups"
@@ -43,36 +46,6 @@ MigrationFn = Callable[[Path], None]
 def _create_snippets_folder(root: Path) -> None:
     """v1→v2: introduce the snippets/ folder for the snippet node kind."""
     (root / "snippets").mkdir(exist_ok=True)
-
-
-def _create_project_node_file(root: Path) -> None:
-    """v2→v3: synthesize project.md (the project node singleton) from the
-    existing project.yaml's title. Empty body; metadata empty. Per
-    [[decisions_project_nesting]]: project IS a node kind, single instance
-    per folder, carries the book/series/universe metadata."""
-    project_md = root / "project.md"
-    if project_md.exists():
-        return
-    manifest_path = root / "project.yaml"
-    title = "Untitled Project"
-    if manifest_path.exists():
-        try:
-            data = yaml.safe_load(manifest_path.read_text(encoding="utf-8")) or {}
-            if isinstance(data, dict) and isinstance(data.get("title"), str) and data["title"].strip():
-                title = data["title"]
-        except yaml.YAMLError:
-            pass
-    front_matter = yaml.safe_dump(
-        {
-            "id": "project",
-            "title": title,
-            "entry_type": "project:project",
-            "metadata": {},
-        },
-        sort_keys=False,
-        allow_unicode=True,
-    ).strip()
-    project_md.write_text(f"---\n{front_matter}\n---\n\n", encoding="utf-8")
 
 
 def _move_chat_costs_to_invocation_log(root: Path) -> None:
@@ -159,10 +132,13 @@ def _create_research_structure(root: Path) -> None:
 
 
 # Each tuple: (target_version, description, function)
-# Migrations run in registry order; gaps are not allowed.
+# Migrations run in registry order. Version numbers are history and are never
+# reused or renumbered, so a retired step leaves a gap: 3 (create project.md)
+# was removed with #343 — it wrote a constant `id: project`, which collides at
+# every layer of a nested chain, and pre-1.0 there are no projects old enough
+# to need it. A pre-v3 folder is simply stamped forward.
 MIGRATIONS: list[tuple[int, str, MigrationFn]] = [
     (2, "create snippets/ folder for snippet node kind", _create_snippets_folder),
-    (3, "create project.md (project node singleton)", _create_project_node_file),
     (4, "move chat cost_usd_total into ai_invocations.yaml", _move_chat_costs_to_invocation_log),
     (5, "create research/ folder and research.structure.yaml", _create_research_structure),
 ]

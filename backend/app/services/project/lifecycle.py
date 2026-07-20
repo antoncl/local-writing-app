@@ -53,12 +53,13 @@ class ProjectLifecycleMixin:
             (root / folder).mkdir(exist_ok=True)
         (root / "research" / "notes").mkdir(parents=True, exist_ok=True)
 
+        # Project node singleton — book metadata, blurb, etc. live here. It is
+        # written BEFORE project.yaml: open_project gates on the manifest, so
+        # a throw between the two must not leave a folder that opens forever
+        # and 404s on its project node forever. This order fails the other way,
+        # which is the recoverable one.
+        self._write_project_node_file(root / "project.md", self._new_project_node(title))
         self._write_yaml(root / "project.yaml", self._new_project_manifest(title, root, base_folder))
-        # Project node singleton — book metadata, blurb, etc. live here.
-        self._write_project_node_file(
-            root / "project.md",
-            ProjectNode(id="project", title=title, body="", entry_type="project:project", metadata={}),
-        )
         self._write_yaml(root / "metadata.schema.yaml", self._empty_metadata_schema())
         self._write_yaml(root / "tags.yaml", {"tags": []})
         initial_scene = Scene(
@@ -233,6 +234,10 @@ class ProjectLifecycleMixin:
 
         for required in [
             "project.yaml",
+            # The project node singleton. Nothing back-fills it since #343
+            # retired the v3 migration, so if it goes missing this report is
+            # how it surfaces; repair_project recreates it.
+            "project.md",
             "manuscript.structure.yaml",
             "research.structure.yaml",
             "todo.yaml",
@@ -323,8 +328,33 @@ class ProjectLifecycleMixin:
             migrations_applied=list(self.last_migrations),
         )
 
+    def _new_project_node(self, title: str) -> ProjectNode:
+        return ProjectNode(
+            id=self._new_id("project"),
+            title=title,
+            body="",
+            entry_type="project:project",
+            metadata={},
+        )
+
+    def _restore_project_node_file(self, root: Path) -> None:
+        """Recreate project.md if it went missing.
+
+        A read refuses rather than synthesize (#343), because an id invented on
+        a read reaches no file. Repair is where inventing one is honest: it
+        mints and persists, so every later read agrees. The title comes from
+        project.yaml, which is all a fresh project node carries anyway.
+        """
+        path = root / "project.md"
+        if path.exists():
+            return
+        manifest = self._read_yaml(root / "project.yaml") if (root / "project.yaml").exists() else {}
+        title = str(manifest.get("title") or self.title or "Untitled Project")
+        self._write_project_node_file(path, self._new_project_node(title))
+
     def repair_project(self) -> ProjectValidation:
         root = self._require_project()
+        self._restore_project_node_file(root)
         node_index = self._build_node_index(root)
         scene_ids = {entry.id for entry in node_index.by_id.values() if entry.kind == "scene"}
         anchors_by_scene = self._read_scene_todo_anchors(scene_ids)

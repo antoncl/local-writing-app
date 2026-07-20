@@ -26,41 +26,44 @@ class ProjectNodeMixin:
     def read_project_node(self) -> ProjectNode:
         path = self._project_node_path()
         if not path.exists():
-            # Should be auto-created by the v3 migration on open. If the file
-            # is genuinely missing (e.g. brand-new project before migration
-            # runs), synthesize from project.yaml's title.
-            manifest = self._read_yaml(self._require_project() / "project.yaml")
-            return ProjectNode(
-                id="project",
-                title=str(manifest.get("title") or self.title or "Untitled Project"),
-                body="",
-                revision="",
-                entry_type="project:project",
-                metadata={},
-            )
+            # project.md always exists: create_project writes it first, and
+            # there is no back-fill (the v3 migration was retired with #343),
+            # so a folder without one is damaged. `validate_project` reports it
+            # and `repair_project` recreates it — both of which write the file,
+            # where minting an id is honest. Synthesizing a node here would mint
+            # an identity that never reaches disk, so two reads would disagree.
+            raise ProjectServiceError("Project node file project.md is missing.", 404)
         front_matter, body = self._read_markdown_with_front_matter(path, strict=True)
+        node_id = self._require_node_id(path, front_matter)
         title = str(front_matter.get("title") or self.title or "Untitled Project")
         raw_entry_type = front_matter.get("entry_type") or "project:project"
         entry_type = raw_entry_type if isinstance(raw_entry_type, str) else "project:project"
         metadata = self._normalise_metadata(front_matter.get("metadata"), path)
         return ProjectNode(
-            id="project",
+            id=node_id,
             title=title,
             body=body,
             revision=self._revision(path),
             entry_type=entry_type,
             metadata=metadata,
-            computed_metadata=self._computed_entry_metadata(body, node_id="project", entry_type=entry_type),
+            computed_metadata=self._computed_entry_metadata(body, node_id=node_id, entry_type=entry_type),
         )
 
     def save_project_node(self, request: SaveProjectNodeRequest) -> ProjectNode:
         path = self._project_node_path()
-        current_revision = self._revision(path) if path.exists() else ""
+        exists = path.exists()
+        current_revision = self._revision(path) if exists else ""
         if request.base_revision and request.base_revision != current_revision:
             raise ProjectServiceError("Project node changed on disk after it was opened.", 409)
+        # Identity is carried by the file, not by the save request — a save
+        # never re-mints an id the file already has. Where the file has none to
+        # carry (absent, or damaged into losing its id), a save is the sanctioned
+        # repair: it mints, and unlike a read it writes what it minted, so the
+        # id it hands back is the one on disk.
+        node_id = (self._front_matter_id(path) if exists else None) or self._new_id("project")
         metadata = self._normalise_metadata(request.metadata, path)
         node = ProjectNode(
-            id="project",
+            id=node_id,
             title=request.title,
             body=request.body,
             revision=current_revision,

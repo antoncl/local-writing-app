@@ -105,8 +105,12 @@ class MigrationFrameworkTests(unittest.TestCase):
         self.assertEqual(read_project_version(self.root), CURRENT_VERSION)
         self.assertEqual(self.service.last_migrations, [])
 
-    def test_v1_project_migrates_creating_snippets_and_project_node(self) -> None:
-        """An existing v1 project gains snippets/ AND project.md on next open."""
+    def test_v1_project_migrates_creating_snippets(self) -> None:
+        """An existing v1 project gains snippets/ on next open.
+
+        It does NOT gain project.md: the v2→v3 back-fill was removed with #343
+        (it wrote a constant id). A folder that old is expected not to exist.
+        """
         manifest_path = self.root / "project.yaml"
         data = yaml.safe_load(manifest_path.read_text(encoding="utf-8"))
         data["schema_version"] = 1
@@ -126,15 +130,14 @@ class MigrationFrameworkTests(unittest.TestCase):
         reopened = ProjectService()
         reopened.open_project(self.root)
         self.assertTrue(snippets.is_dir())
-        self.assertTrue(project_md.exists())
+        self.assertFalse(project_md.exists())
         self.assertEqual(read_project_version(self.root), CURRENT_VERSION)
-        # All pending migrations ran (v1 → v2 → v3 → v4 → v5).
-        self.assertEqual(len(reopened.last_migrations), 4)
-        joined = " ".join(reopened.last_migrations)
-        self.assertIn("snippets", joined)
-        self.assertIn("project", joined)
-        self.assertIn("research", joined)
-        self.assertIn("ai_invocations", joined)
+        # Assert the EFFECTS of every registered migration, not their
+        # descriptions: a step that silently no-ops still reports its own
+        # description, and comparing the count to len(MIGRATIONS) is
+        # self-referential — both survive a no-op mutant.
+        self.assertTrue((self.root / "research" / "notes").is_dir())
+        self.assertTrue((self.root / "research.structure.yaml").exists())
 
         # Backup was created
         backup_dir = self.root / BACKUP_DIRNAME

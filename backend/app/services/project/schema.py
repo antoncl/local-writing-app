@@ -50,6 +50,7 @@ from app.services.project.default_schema import (
 )
 from app.services.project.errors import ProjectServiceError
 from app.services.project.layers import SCHEMA_FILENAME
+from app.services.project.node_index import IndexLayer
 
 
 def _entry_type_ancestry(
@@ -72,6 +73,29 @@ def _entry_type_ancestry(
         definition = entry_types.get(current)
         current = definition.parent if definition is not None else None
     return chain
+
+
+class _SchemaLayerBuilder:
+    """The API-facing twin of `IndexLayer`, as a visitor (#329).
+
+    Used to run its own `enumerate` over the chain, re-deriving id and label
+    with the same rules the index build used; now it reads them off the walk.
+    """
+
+    def __init__(self) -> None:
+        self.layers: list[MetadataSchemaLayer] = []
+
+    def visit_layer(self, layer: IndexLayer) -> None:
+        schema_path = layer.folder / SCHEMA_FILENAME
+        self.layers.append(
+            MetadataSchemaLayer(
+                id=layer.id,
+                label=layer.label,
+                folder_path=str(layer.folder),
+                schema_path=str(schema_path),
+                exists=schema_path.exists(),
+            )
+        )
 
 
 class MetadataSchemaMixin:
@@ -101,22 +125,9 @@ class MetadataSchemaMixin:
 
     def read_metadata_schema_layers(self) -> MetadataSchemaLayers:
         root = self._require_project()
-        layers: list[MetadataSchemaLayer] = []
-        # The API-facing twin of IndexLayer. It used to run its own enumerate
-        # over the chain, re-deriving id and label with the same rules; now it
-        # just reads them off the one walk (#329).
-        for layer in self.project_layers(root):
-            schema_path = layer.folder / SCHEMA_FILENAME
-            layers.append(
-                MetadataSchemaLayer(
-                    id=layer.id,
-                    label=layer.label,
-                    folder_path=str(layer.folder),
-                    schema_path=str(schema_path),
-                    exists=schema_path.exists(),
-                )
-            )
-        return MetadataSchemaLayers(layers=layers)
+        builder = _SchemaLayerBuilder()
+        self.visit_layers(builder, root)
+        return MetadataSchemaLayers(layers=builder.layers)
 
     def read_metadata_schema_overview(self) -> MetadataSchemaOverview:
         root = self._require_project()

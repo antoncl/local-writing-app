@@ -34,7 +34,7 @@ class LayerWalkTests(unittest.TestCase):
         self.temp_dir.cleanup()
 
     def test_walk_runs_outermost_to_root(self) -> None:
-        layers = self.service.project_layers(self.root)
+        layers = self.service.collect_layers(self.root)
 
         self.assertEqual(
             [layer.folder for layer in layers],
@@ -44,19 +44,19 @@ class LayerWalkTests(unittest.TestCase):
     def test_rank_is_explicit_and_matches_walk_order(self) -> None:
         # The whole point of #329: rank is stamped by the walk, not inferred by
         # a consumer from enumerate or dict insertion order.
-        layers = self.service.project_layers(self.root)
+        layers = self.service.collect_layers(self.root)
 
         self.assertEqual([layer.rank for layer in layers], list(range(len(layers))))
 
     def test_is_root_marks_only_the_open_project(self) -> None:
-        layers = self.service.project_layers(self.root)
+        layers = self.service.collect_layers(self.root)
 
         self.assertEqual([layer.is_root for layer in layers], [False, False, False, True])
 
     def test_labels_follow_the_layer_rules(self) -> None:
         # Outermost project layer is "Base Folder", the open project takes the
         # project title, everything between is the folder name.
-        layers = self.service.project_layers(self.root)
+        layers = self.service.collect_layers(self.root)
 
         self.assertEqual(
             [layer.label for layer in layers],
@@ -66,7 +66,7 @@ class LayerWalkTests(unittest.TestCase):
     def test_machine_layer_is_excluded_by_default(self) -> None:
         # Schema layering must not see it — it is out-of-tree and carries no
         # metadata.schema.yaml.
-        layers = self.service.project_layers(self.root)
+        layers = self.service.collect_layers(self.root)
 
         self.assertTrue(all(not layer.is_machine for layer in layers))
 
@@ -79,7 +79,7 @@ class LayerWalkTests(unittest.TestCase):
         )
 
     def test_layer_ids_are_unique_and_reversible(self) -> None:
-        layers = self.service.project_layers(self.root)
+        layers = self.service.collect_layers(self.root)
         ids = [layer.id for layer in layers]
 
         self.assertEqual(len(set(ids)), len(ids))
@@ -100,14 +100,14 @@ class LayerWalkTests(unittest.TestCase):
         collector = Collector()
         self.service.visit_layers(collector, self.root)
 
-        self.assertEqual(collector.seen, self.service.project_layers(self.root))
+        self.assertEqual(collector.seen, self.service.collect_layers(self.root))
 
     def test_walk_degrades_to_the_project_alone_without_a_base_folder(self) -> None:
         manifest = self.service._read_yaml(self.root / "project.yaml")
         manifest["settings"].pop("projects_base_folder")
         self.service._write_yaml(self.root / "project.yaml", manifest)
 
-        layers = self.service.project_layers(self.root)
+        layers = self.service.collect_layers(self.root)
 
         self.assertEqual([layer.folder for layer in layers], [self.root])
         self.assertTrue(layers[0].is_root)
@@ -115,13 +115,21 @@ class LayerWalkTests(unittest.TestCase):
 
 
 class AssistantRankComesFromTheWalkTests(unittest.TestCase):
-    """#329's actual bug fix.
+    """#329's actual bug fix — user-visible, since topmost is the default
+    assistant under ADR-0024.
 
-    The roster used to take each layer's rank from `index.by_id` insertion
-    order, so anything that re-parsed one file and re-inserted its entry (the
-    incremental patch in #307) would move that layer to the end and silently
-    reorder the assistant roster — which is user-visible, since topmost is the
-    default assistant under ADR-0024.
+    The roster took each layer's rank from `index.by_id` insertion order, which
+    misordered it two ways:
+
+    * **Today.** A cross-layer id collision reuses the *ancestor's* dict slot
+      (`by_id[id] = entry` replaces the value, keeps the position), so a
+      descendant that shadows an outer id was "first seen" at the outer layer's
+      position and its whole bucket jumped up the roster.
+    * **Later.** An incremental index patch (#307) re-parsing one file would
+      move its layer to the end.
+
+    Assistants were the only order-sensitive consumer: lore, prompts, mutation
+    sets and views all sort explicitly by `(title, id)`.
     """
 
     def setUp(self) -> None:
@@ -230,7 +238,7 @@ class AssistantRankComesFromTheWalkTests(unittest.TestCase):
         self._write_assistant(self.root, "only", "Only One")
 
         _paths, ranks = self.service._assistant_layer_paths_and_ranks()
-        layers = self.service.project_layers(self.root, include_machine=True)
+        layers = self.service.collect_layers(self.root, include_machine=True)
 
         self.assertEqual(len(ranks), len(layers))
         self.assertEqual(sorted(ranks.values()), list(range(len(layers))))
@@ -262,7 +270,7 @@ class MachineLayerIsAnOrdinaryLayerTests(unittest.TestCase):
     def test_machine_layer_leads_the_walk(self) -> None:
         (self.config_dir / "assistants").mkdir()
 
-        layers = self.service.project_layers(self.root, include_machine=True)
+        layers = self.service.collect_layers(self.root, include_machine=True)
 
         # Machine first (rank 0) is what keeps the roster layer-grouped with the
         # Machine bucket on top (ADR-0037 §7 / #224).
@@ -277,7 +285,7 @@ class MachineLayerIsAnOrdinaryLayerTests(unittest.TestCase):
         # made before #329 folded it into the walk.
         self.assertFalse((self.config_dir / "assistants").exists())
 
-        layers = self.service.project_layers(self.root, include_machine=True)
+        layers = self.service.collect_layers(self.root, include_machine=True)
 
         self.assertTrue(all(not layer.is_machine for layer in layers))
         self.assertEqual([layer.rank for layer in layers], list(range(len(layers))))
@@ -285,8 +293,8 @@ class MachineLayerIsAnOrdinaryLayerTests(unittest.TestCase):
     def test_project_layers_are_unaffected_by_the_machine_flag(self) -> None:
         (self.config_dir / "assistants").mkdir()
 
-        without = self.service.project_layers(self.root)
-        with_machine = self.service.project_layers(self.root, include_machine=True)
+        without = self.service.collect_layers(self.root)
+        with_machine = self.service.collect_layers(self.root, include_machine=True)
 
         self.assertEqual(
             [layer.folder for layer in without],
@@ -298,7 +306,7 @@ class MachineLayerIsAnOrdinaryLayerTests(unittest.TestCase):
         # machine layer's identity — they used to build it separately.
         (self.config_dir / "assistants").mkdir()
 
-        from_walk = self.service.project_layers(self.root, include_machine=True)[0]
+        from_walk = self.service.collect_layers(self.root, include_machine=True)[0]
         standalone = self.service.machine_layer()
 
         self.assertEqual(from_walk, standalone)

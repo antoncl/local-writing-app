@@ -35,6 +35,7 @@ Ordering contract, relied on by consumers:
 from __future__ import annotations
 
 import hashlib
+from functools import lru_cache
 from pathlib import Path
 from typing import Protocol
 
@@ -45,23 +46,94 @@ from app.services.project.node_index import IndexLayer
 SCHEMA_FILENAME = "metadata.schema.yaml"
 
 
+@lru_cache(maxsize=1024)
+def _layer_id_for_folder(folder: Path) -> str:
+    """A layer's stable id: sha256 of its resolved path, first 16 hex chars.
+
+    Memoised because `Path.resolve()` is a filesystem syscall (~0.16 ms on
+    Windows) and this is called once per layer per walk, on paths that barely
+    change within a session. Caching here rather than letting hot callers skip
+    the walk keeps the optimisation *inside* the abstraction, so every consumer
+    gets it. Keyed on the argument, so a rename produces a new key rather than
+    a stale hit.
+    """
+    return hashlib.sha256(str(folder.resolve()).encode("utf-8")).hexdigest()[:16]
+
+
+class _SchemaPathCollector:
+    """Each layer's `metadata.schema.yaml` candidate, in walk order."""
+
+    def __init__(self) -> None:
+        self.paths: list[Path] = []
+
+    def visit_layer(self, layer: IndexLayer) -> None:
+        self.paths.append(layer.folder / SCHEMA_FILENAME)
+
+
 class LayerVisitor(Protocol):
     """Visits each layer in walk order. Implementations carry whatever per-layer
-    logic used to live inside a bespoke traversal."""
+    logic used to live inside a bespoke traversal.
+
+    **Every consumer of the chain is a visitor** — including the ones whose body
+    would reduce to a one-line comprehension. Uniformity is the point: the walk's
+    definition changes mid-development (#309 declares inheritance, #318's wizard
+    authors it, #337 stipulates the root), and a consumer that iterates the
+    sequence itself is a second place to find when it does. The number of sites
+    needing a walk only grows, so non-uniformity compounds while the few
+    microseconds saved never do.
+    """
 
     def visit_layer(self, layer: IndexLayer) -> None: ...
 
 
-class LayerWalkMixin:
-    def project_layers(self, root: Path, *, include_machine: bool = False) -> list[IndexLayer]:
-        """The layer chain, outermost first, root last.
+class LayerCollector:
+    """The degenerate visitor: keeps every layer, in order.
 
-        `include_machine` prepends the machine config dir as an ordinary
-        out-of-tree layer (`is_machine=True`) when it actually holds an
-        `assistants/` folder — the condition the old
+    For callers that genuinely want the whole sequence (tests, and the id
+    reversal below). Still goes through `visit_layers`, so it cannot drift from
+    the walk.
+    """
+
+    def __init__(self) -> None:
+        self.layers: list[IndexLayer] = []
+
+    def visit_layer(self, layer: IndexLayer) -> None:
+        self.layers.append(layer)
+
+
+class LayerFinder:
+    """Picks out the layer with a given id, or None."""
+
+    def __init__(self, layer_id: str) -> None:
+        self._layer_id = layer_id
+        self.found: IndexLayer | None = None
+
+    def visit_layer(self, layer: IndexLayer) -> None:
+        if self.found is None and layer.id == self._layer_id:
+            self.found = layer
+
+
+class LayerWalkMixin:
+    def visit_layers(
+        self,
+        visitor: LayerVisitor,
+        root: Path,
+        *,
+        include_machine: bool = False,
+    ) -> None:
+        """Drive `visitor` over the layer chain, outermost first, root last.
+
+        **The** entry point. `include_machine` prepends the machine config dir
+        as an ordinary out-of-tree layer (`is_machine=True`) when it actually
+        holds an `assistants/` folder — the condition the old
         `_collect_machine_layer_assistants` early-returned on. Schema layering
-        must not include it, so it is opt-in rather than default.
+        must not see it, so it is opt-in rather than default.
         """
+        for layer in self._layer_sequence(root, include_machine=include_machine):
+            visitor.visit_layer(layer)
+
+    def _layer_sequence(self, root: Path, *, include_machine: bool) -> list[IndexLayer]:
+        """Build the chain. Private: consumers visit, they do not iterate."""
         layers: list[IndexLayer] = []
         if include_machine:
             machine_layer = self.machine_layer(rank=len(layers))
@@ -83,27 +155,18 @@ class LayerWalkMixin:
             )
         return layers
 
-    def visit_layers(
-        self,
-        visitor: LayerVisitor,
-        root: Path,
-        *,
-        include_machine: bool = False,
-    ) -> None:
-        """Drive `visitor` over the walk, in order."""
-        for layer in self.project_layers(root, include_machine=include_machine):
-            visitor.visit_layer(layer)
+    def collect_layers(self, root: Path, *, include_machine: bool = False) -> list[IndexLayer]:
+        """The whole sequence, via `LayerCollector`. For callers that really do
+        want every layer at once."""
+        collector = LayerCollector()
+        self.visit_layers(collector, root, include_machine=include_machine)
+        return collector.layers
 
     def layer_by_id(self, root: Path, layer_id: str, *, include_machine: bool = False) -> IndexLayer | None:
-        """Reverse a `source_layer_id` back to its layer, or None when unknown.
-
-        The id is a hash of the folder path, so this is a linear scan of the
-        walk rather than a registry lookup.
-        """
-        for layer in self.project_layers(root, include_machine=include_machine):
-            if layer.id == layer_id:
-                return layer
-        return None
+        """Reverse a `source_layer_id` back to its layer, or None when unknown."""
+        finder = LayerFinder(layer_id)
+        self.visit_layers(finder, root, include_machine=include_machine)
+        return finder.found
 
     def machine_layer(self, *, rank: int = 0) -> IndexLayer | None:
         """The machine layer as an `IndexLayer`, or None when it has no
@@ -186,7 +249,7 @@ class LayerWalkMixin:
         return configured_base
 
     def _metadata_schema_layer_id(self, folder: Path) -> str:
-        return hashlib.sha256(str(folder.resolve()).encode("utf-8")).hexdigest()[:16]
+        return _layer_id_for_folder(folder)
 
     def _layer_label_for_folder(self, root: Path, folder: Path, layer_index: int) -> str:
         if folder == root:
@@ -196,12 +259,15 @@ class LayerWalkMixin:
         return folder.name
 
     def _metadata_schema_layer_paths(self, root: Path) -> list[Path]:
-        """Schema-file candidates, base → root.
+        """Schema-file candidates, base → root — as a visitor like everything
+        else, even though the body is one line.
 
-        Iterates the walk's folders rather than `project_layers`: this needs
-        neither id nor label, and stamping them costs a `Path.resolve()`
-        syscall per layer (~0.16 ms each). `read_metadata_schema` calls this on
-        a hot path, so going through the decorated form measured +11% there for
-        values it then discards. Same single traversal either way.
+        This called `_project_layer_folders` directly for a while, to dodge the
+        `Path.resolve()` each layer id costs (`read_metadata_schema` is hot and
+        discards the ids). That was premature optimisation buying microseconds
+        at the price of a second place to change the walk. The cost is now paid
+        once, memoised in `_layer_id_for_folder`.
         """
-        return [folder / SCHEMA_FILENAME for folder in self._project_layer_folders(root)]
+        collector = _SchemaPathCollector()
+        self.visit_layers(collector, root)
+        return collector.paths

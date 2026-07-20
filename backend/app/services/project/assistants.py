@@ -38,7 +38,23 @@ from app.models import (
     SaveAssistantEntryRequest,
 )
 from app.services.project.errors import ProjectServiceError
-from app.services.project.node_index import NodeIndex, NodeIndexEntry
+from app.services.project.node_index import IndexLayer, NodeIndex, NodeIndexEntry
+
+
+class _AssistantLayerCollector:
+    """Each layer's `assistants/` folder and its rank, as a visitor (#329).
+
+    Both used to be inferred from the entries themselves — the folder from an
+    entry's `path.parent`, the rank from index insertion order.
+    """
+
+    def __init__(self) -> None:
+        self.paths: dict[str, Path] = {}
+        self.ranks: dict[str, int] = {}
+
+    def visit_layer(self, layer: IndexLayer) -> None:
+        self.paths[layer.id] = layer.folder / "assistants"
+        self.ranks[layer.id] = layer.rank
 
 
 class AssistantEntriesMixin:
@@ -104,14 +120,15 @@ class AssistantEntriesMixin:
         Without an open project only the machine layer exists — the same
         degenerate case `_build_assistant_index` handles.
         """
+        collector = _AssistantLayerCollector()
         if self.root_path is not None:
-            layers = self.project_layers(self.root_path, include_machine=True)
+            self.visit_layers(collector, self.root_path, include_machine=True)
         else:
+            # No project open: the machine layer is the whole chain.
             machine_layer = self.machine_layer()
-            layers = [] if machine_layer is None else [machine_layer]
-        layer_paths = {layer.id: layer.folder / "assistants" for layer in layers}
-        layer_rank = {layer.id: layer.rank for layer in layers}
-        return layer_paths, layer_rank
+            if machine_layer is not None:
+                collector.visit_layer(machine_layer)
+        return collector.paths, collector.ranks
 
     def reorder_assistant_entries(
         self, request: ReorderAssistantsRequest

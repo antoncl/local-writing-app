@@ -116,11 +116,22 @@ class NodeIndex:
     edges_by_dst: dict[str, list[ReferenceEdge]] = field(default_factory=dict)
     warnings: list[str] = field(default_factory=list)
     errors: list[str] = field(default_factory=list)
+    # The shadow warnings the last `resolve()` contributed, so a re-resolve can
+    # retract them instead of duplicating them.
+    _shadow_warnings: list[str] = field(default_factory=list, repr=False)
 
     def add(self, entry: NodeIndexEntry) -> None:
         """Record one entry. Nothing is ever replaced — a descendant claiming an
-        ancestor's id joins the candidate list instead of overwriting it."""
-        self.candidates.setdefault(entry.id, []).append(entry)
+        ancestor's id joins the candidate list instead of overwriting it.
+
+        Inserted at the front, so the list is innermost-first *as it is built*
+        rather than reversed at the end: the walk runs outermost → open project,
+        so each new claimant is nearer than the ones before it. That keeps
+        `resolve()` a pure derivation, which #307's incremental patching needs —
+        a `reverse()` in `resolve()` would invert the winner on a second call.
+        The lists are bounded by chain depth, so the insert is free.
+        """
+        self.candidates.setdefault(entry.id, []).insert(0, entry)
 
     def entry_for_layer(self, node_id: str, layer_id: str) -> NodeIndexEntry | None:
         """The entry a specific layer contributes for `node_id`, if any. Also the
@@ -131,31 +142,28 @@ class NodeIndex:
             None,
         )
 
-    def resolve(self, warnings: list[str] | None = None) -> None:
-        """Order the candidate lists innermost-first and rebuild the derived
-        views. Must run once, after the whole walk.
+    def resolve(self) -> None:
+        """Rebuild the derived views from the candidate lists.
 
-        Collection appends in walk order (outermost → open project), so the last
-        entry appended for an id is the innermost — the winner. Reversing once
-        here makes `candidates[id][0]` the winner, matching ADR-0040's
-        innermost-first convention, and leaves the derived views a one-liner.
+        **Idempotent**: it reads `candidates` (already innermost-first, see
+        `add`) and rewrites the derived state from scratch, so running it again
+        after more entries arrive is the supported way to re-resolve — which is
+        what #307's incremental patching will do. It mutates nothing it reads.
         """
-        for node_id, entries in self.candidates.items():
-            entries.reverse()
-            winner = entries[0]
-            self.by_id[node_id] = winner
-            edges = self.edges_by_layer_src.get((winner.source_layer_id, node_id))
-            if edges:
-                self.edges_by_src[node_id] = edges
-            if warnings is not None and len(entries) > 1:
-                # One warning per shadowed layer, innermost outward — the same
-                # pairing the pre-#334 build emitted as each layer overwrote the
-                # previous winner.
-                for shadower, shadowed in zip(entries, entries[1:], strict=False):
-                    warnings.append(
-                        f"Entry id {node_id} in {shadower.source_layer_label} shadows the entry from "
-                        f"{shadowed.source_layer_label}."
-                    )
+        self.by_id = {node_id: entries[0] for node_id, entries in self.candidates.items()}
+        self.edges_by_src = {
+            node_id: edges
+            for node_id, winner in self.by_id.items()
+            if (edges := self.edges_by_layer_src.get((winner.source_layer_id, node_id)))
+        }
+        self.warnings = [warning for warning in self.warnings if warning not in self._shadow_warnings]
+        self._shadow_warnings = [
+            f"Entry id {node_id} in {shadower.source_layer_label} shadows the entry from "
+            f"{shadowed.source_layer_label}."
+            for node_id, entries in self.candidates.items()
+            for shadower, shadowed in zip(entries, entries[1:], strict=False)
+        ]
+        self.warnings.extend(self._shadow_warnings)
         self.rebuild_reverse_edges()
 
     def rebuild_reverse_edges(self) -> None:

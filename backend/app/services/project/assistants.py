@@ -269,7 +269,7 @@ class AssistantEntriesMixin:
         # Collection only fills `candidates`; `by_id` is derived (#334). The
         # no-project path builds its index by hand, so it resolves by hand —
         # without this the roster is empty rather than machine-only.
-        index.resolve(index.warnings)
+        index.resolve()
         return index
 
     def resolve_assistant(self, assistant_id: str | None) -> AssistantEntry | None:

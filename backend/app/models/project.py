@@ -52,6 +52,13 @@ class DirectoryListing(BaseModel):
     directories: list[DirectoryEntry] = Field(default_factory=list)
 
 
+# The project node's file name is the same word at every layer — which is why the
+# id must not be (#343): the name is an address, the front-matter id is the
+# identity, and the index reads the latter off the file like it does for every
+# other node.
+PROJECT_NODE_FILENAME = "project.md"
+
+
 class ProjectNode(BaseModel):
     """The project's own node (file: project.md). Singleton per folder.
 

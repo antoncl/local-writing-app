@@ -30,6 +30,7 @@ from pathlib import Path
 from typing import Any
 
 from app.models import (
+    PROJECT_NODE_FILENAME,
     MetadataSchema,
     ReferenceCandidate,
     ReferenceCandidatesResponse,
@@ -109,6 +110,10 @@ class _NodeIndexBuilder(LayerVisitor):
         # truth (Phase 3b-i / decisions-node-editor-modularization).
         if layer.is_root:
             self._service._collect_chat_entries(layer=layer, index=self._index)
+        if not layer.is_machine:
+            self._service._collect_project_node_entry(
+                layer=layer, index=self._index, schema=self._schema
+            )
 
 
 class ReferencesMixin:
@@ -152,7 +157,7 @@ class ReferencesMixin:
         # `by_id` / `edges_by_src` from the winners, emit the shadow warnings and
         # build the reverse edge map. Nothing before this point resolves a
         # shadow — that is what stops the walk destroying an ancestor.
-        index.resolve(index.warnings)
+        index.resolve()
         return index
 
     def _collect_chat_entries(self, *, layer: IndexLayer, index: NodeIndex) -> None:
@@ -198,6 +203,67 @@ class ReferencesMixin:
                 )
                 continue
             index.add(entry)
+
+    def _collect_project_node_entry(
+        self, *, layer: IndexLayer, index: NodeIndex, schema: MetadataSchema | None = None
+    ) -> None:
+        """Index the layer's `project.md` (#334).
+
+        The project node sits at the layer root rather than in a kind-folder, so
+        `_collect_layer_entries`' `folder/folder_name/*.md` glob never reached
+        it — the one Node-shaped file the index did not see.
+
+        Its identity is read off the file like every other node's. The file
+        *name* is the same word at every layer, which is exactly why the id must
+        not be (#343) — `_require_node_id` refuses the filename-stem fallback
+        here, because the stem would hand every layer the same id.
+
+        `project.md` is required to exist (`create_project` writes it first, and
+        `validate_project` / `repair_project` own the damaged case since #343), so
+        a layer without one contributes no entry rather than an entry pointing at
+        a file that isn't there.
+        """
+        path = layer.folder / PROJECT_NODE_FILENAME
+        if not path.exists():
+            return
+        try:
+            front_matter = self._read_front_matter_only(path, strict=True)
+            node_id = self._require_node_id(path, front_matter)
+        except ProjectServiceError as exc:
+            index.errors.append(exc.message)
+            return
+        duplicate = index.entry_for_layer(node_id, layer.id)
+        if duplicate is not None:
+            # The same guard every other collector applies. Without it the
+            # `(layer, id)` edge key stops being a key, and two files at one
+            # layer fight over one edge list.
+            index.errors.append(
+                f"Duplicate front matter id {node_id} in "
+                f"{self._safe_relative(duplicate.path, layer.folder)} and "
+                f"{self._safe_relative(path, layer.folder)}."
+            )
+            return
+        raw_entry_type = front_matter.get("entry_type") or "project:project"
+        entry_type = raw_entry_type if isinstance(raw_entry_type, str) else "project:project"
+        raw_title = front_matter.get("title")
+        title = raw_title.strip() if isinstance(raw_title, str) and raw_title.strip() else layer.label
+        entry = NodeIndexEntry(
+            id=node_id,
+            kind="project",
+            entry_type=entry_type,
+            path=path,
+            title=title,
+            source_layer_id=layer.id,
+            source_layer_label=layer.label,
+        )
+        index.add(entry)
+        try:
+            edges = self._reference_edges_for_entry(entry, schema, front_matter=front_matter)
+        except ProjectServiceError as exc:
+            index.errors.append(f"{self._safe_relative(path, layer.folder)}: {exc.message} Its references were not indexed.")
+            edges = []
+        if edges:
+            index.edges_by_layer_src[(layer.id, node_id)] = edges
 
     def _families_for_layer(self, layer: IndexLayer) -> list[NodeFamily]:
         """Which node families this layer contributes — the per-layer logic the

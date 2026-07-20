@@ -49,6 +49,16 @@ class LayerQualifiedIdentityTests(unittest.TestCase):
         self.service._write_markdown_with_front_matter(path, front_matter, "Body.")
         return path
 
+    def _make_universe_a_project(self) -> None:
+        """Make the ancestor folder a project too, then re-open the book.
+
+        `create_project` leaves the service pointed at whatever it just created,
+        and the root layer's label is drawn from that cached title — so without
+        the re-open the book's own layer would render as "Honorverse".
+        """
+        self.service.create_project(self.universe, "Honorverse")
+        self.service.open_project(self.root)
+
     # --- the winner is unchanged -----------------------------------------
 
     def test_descendant_still_wins(self) -> None:
@@ -181,6 +191,74 @@ class LayerQualifiedIdentityTests(unittest.TestCase):
         self.assertEqual(len(index.candidates["shared_id"]), 1)
         self.assertEqual(index.by_id["shared_id"].kind, "lore")
         self.assertTrue(any("collides with an existing entry" in error for error in index.errors))
+
+
+    # --- the project node ------------------------------------------------
+
+    def test_each_layer_contributes_a_distinct_project_node(self) -> None:
+        # project.md sits at the layer root, outside the kind-folder glob, so it
+        # was not indexed at all before #334. Since #343 each carries a MINTED
+        # id, so nesting produces distinct nodes — not one id claimed at every
+        # layer.
+        self._make_universe_a_project()
+
+        index = self.service._build_node_index(self.root)
+        project_entries = [entry for entry in index.by_id.values() if entry.kind == "project"]
+
+        self.assertEqual(
+            sorted((entry.title, entry.source_layer_label) for entry in project_entries),
+            [("Book 1", "Book 1"), ("Honorverse", "honorverse")],
+        )
+        self.assertEqual(len({entry.id for entry in project_entries}), 2)
+
+    def test_nested_project_nodes_do_not_shadow_each_other(self) -> None:
+        # The regression #343 exists to prevent: with a constant id, every layer's
+        # project node collided by construction and `validate_project` reported a
+        # shadow that was not one.
+        self._make_universe_a_project()
+
+        index = self.service._build_node_index(self.root)
+
+        self.assertEqual([w for w in index.warnings if "shadows" in w], [])
+
+    def test_a_layer_without_a_project_file_contributes_nothing(self) -> None:
+        # project.md is required to exist (create_project writes it first, and
+        # validate/repair own the damaged case since #343), so a layer without
+        # one yields no entry rather than one pointing at a file that isn't there.
+        (self.universe / "lore").mkdir(parents=True, exist_ok=True)
+
+        index = self.service._build_node_index(self.root)
+
+        self.assertEqual(
+            [entry.source_layer_label for entry in index.by_id.values() if entry.kind == "project"],
+            ["Book 1"],
+        )
+
+    def test_a_project_file_with_no_id_is_an_error_not_a_stem_fallback(self) -> None:
+        # `project.md` is the same word at every layer, so the filename-stem
+        # fallback would hand every layer the id "project" — reintroducing #343
+        # through the back door. `_require_node_id` refuses it.
+        self.service._write_markdown_with_front_matter(
+            self.root / "project.md", {"title": "Book 1", "entry_type": "project:project"}, ""
+        )
+
+        index = self.service._build_node_index(self.root)
+
+        self.assertEqual([entry for entry in index.by_id.values() if entry.kind == "project"], [])
+        self.assertTrue(any("no front matter id" in error for error in index.errors))
+
+    def test_resolve_is_idempotent(self) -> None:
+        # #307 patches the index incrementally and will re-resolve. An in-place
+        # reverse would invert the winner to the OUTERMOST layer on a second call
+        # and duplicate every shadow warning.
+        self._write_lore(self.universe, "seren", "Seren (world)")
+        self._write_lore(self.root, "seren", "Seren (book)")
+        index = self.service._build_node_index(self.root)
+
+        index.resolve()
+
+        self.assertEqual(index.by_id["seren"].title, "Seren (book)")
+        self.assertEqual(len([w for w in index.warnings if "seren" in w]), 1)
 
 
 if __name__ == "__main__":

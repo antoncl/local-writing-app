@@ -24,12 +24,20 @@ separately (#337), which is now a one-line edit in one place because of this.
 
 Ordering contract, relied on by consumers:
 
-* The machine layer, when present, comes **first** (rank 0). The assistant
-  roster's layer-grouped sort depends on it (ADR-0037 §7 / #224).
+* The machine layer, when present, comes **first** (rank 0) — i.e. it is the
+  outermost layer, the one every project inherits from.
 * Project layers follow, **outermost ancestor → open project**, so a descendant
   entry overwrites an ancestor's on an id collision.
 * `rank` is dense over the yielded sequence and only ever compared, never used
   as an index into anything.
+
+⚠ The walk order above is unchanged since #329, but what *depends* on it moved.
+Until #332 the assistant roster used `rank` as its leading sort term, so
+machine-first meant the Machine bucket sat on top of the roster (ADR-0037 §7 /
+#224). #332 merges every layer's `.order.yaml` into one sequence instead, folding
+outermost → innermost — so the same machine-first walk now puts the machine layer
+at the **bottom** of the roster, which is what most-local-wins requires. No
+consumer should read "first in the walk" as "first in a user-facing list" again.
 """
 
 from __future__ import annotations

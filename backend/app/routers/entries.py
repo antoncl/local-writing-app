@@ -25,6 +25,7 @@ from app.models import (
     SearchRequest,
     SearchResponse,
     TodoDocument,
+    UnlistAssistantRequest,
     UpdateTodoRequest,
 )
 from app.models_views import (
@@ -117,6 +118,12 @@ def delete_assistant_entry(entry_id: str) -> AssistantEntryList:
 def reorder_assistant_entries(request: ReorderAssistantsRequest) -> AssistantEntryList:
     with translate_errors():
         return service.reorder_assistant_entries(request)
+
+
+@router.post("/api/assistants/unlist", response_model=AssistantEntryList)
+def unlist_assistant_entry(request: UnlistAssistantRequest) -> AssistantEntryList:
+    with translate_errors():
+        return service.unlist_assistant_entry(request)
 
 
 # --- Persistent chat sessions (Phase 3) ---

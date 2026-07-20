@@ -121,6 +121,7 @@ from app.models.entries import (
     Scene,
     StructureDocument,
     StructureNode,
+    UnlistAssistantRequest,
 )
 from app.models.project import (
     PROJECT_NODE_FILENAME,
@@ -302,6 +303,7 @@ __all__ = [
     "TagsOverview",
     "TodoDocument",
     "TodoItem",
+    "UnlistAssistantRequest",
     "UpdateEmbeddedTodoRequest",
     "UpdateMutationRequest",
     "UpdateProjectSettingsRequest",

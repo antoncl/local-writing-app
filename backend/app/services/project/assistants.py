@@ -27,6 +27,9 @@ that call resolves here through the composed class's MRO.
 
 from __future__ import annotations
 
+import logging
+from collections.abc import Callable
+from dataclasses import dataclass, field
 from pathlib import Path
 
 from app.models import (
@@ -36,31 +39,114 @@ from app.models import (
     CreateAssistantEntryRequest,
     ReorderAssistantsRequest,
     SaveAssistantEntryRequest,
+    UnlistAssistantRequest,
 )
 from app.services.project.errors import ProjectServiceError
-from app.services.project.node_index import NodeIndex, NodeIndexEntry
+from app.services.project.layers import LayerVisitor
+from app.services.project.node_index import IndexLayer, NodeIndex, NodeIndexEntry
+
+log = logging.getLogger(__name__)
+
+
+@dataclass
+class AssistantsOrder:
+    """One layer's ordering *opinion*, as stored in its `assistants/.order.yaml`.
+
+    Two lists, because omission cannot express un-listing (#332): dropping an id
+    from a book's file only means the book has no opinion, so the id survives in
+    the inherited remainder and returns from the universe. Removal needs a
+    positive expression, hence `excluded`.
+    """
+
+    ids: list[str] = field(default_factory=list)
+    excluded: list[str] = field(default_factory=list)
+
+
+@dataclass
+class MergedAssistantOrder:
+    """The resolved sequence, and the removals that survived to the open layer.
+
+    `excluded` is not derivable from `ids`: "absent from the merged list"
+    conflates *no layer had an opinion* (unlisted — sorts into the alphabetical
+    tail) with *a layer said no* (gone from the roster). The first version of
+    this returned only `ids`, and un-listed assistants came straight back in the
+    tail.
+    """
+
+    ids: list[str] = field(default_factory=list)
+    excluded: set[str] = field(default_factory=set)
+
+
+def _string_list(raw: object) -> list[str]:
+    if not isinstance(raw, list):
+        return []
+    return [entry for entry in raw if isinstance(entry, str)]
+
+
+class _AssistantOrderMerger(LayerVisitor):
+    """Folds every layer's opinion into ONE priority sequence (#332).
+
+    Layers arrive outermost → innermost, so at each step the accumulator is
+    exactly the `inherited_merged` of the model's formula and the layer applies
+    on top of it:
+
+        merged = local.ids + (inherited_merged − local.ids) − local.excluded
+
+    Descendant-wins falls out in both directions, which is the test that this is
+    the right shape: an ancestor's exclusion is undone by a descendant naming the
+    id in `ids` (it is re-added ahead of the remainder), and an ancestor's
+    listing is undone by a descendant excluding it (it is filtered after
+    concatenation). An id named at a nearer layer also *rises* to that layer's
+    position, because it is stripped from the remainder before concatenation.
+
+    The machine layer is visited first, so it settles at the bottom — the
+    deliberate reversal of the pre-#332 machine-first roster. Most-local-wins is
+    the rule the rest of the layer model already runs on.
+
+    This is the add/remove half of `_resolve_collection`'s vocabulary
+    (`lore_mutations.py`), not the whole of it: ordering has no `replace` op, so
+    the replace-cut half does not apply. Same words, smaller grammar — not a
+    second vocabulary invented for ordering.
+    """
+
+    def __init__(self, read_order: Callable[[Path], AssistantsOrder]) -> None:
+        self._read_order = read_order
+        self.merged = MergedAssistantOrder()
+
+    def visit_layer(self, layer: IndexLayer) -> None:
+        order = self._read_order(layer.folder / "assistants")
+        local: list[str] = []
+        seen: set[str] = set()
+        for entry_id in order.ids:
+            if entry_id not in seen:
+                seen.add(entry_id)
+                local.append(entry_id)
+        # An id in both lists at one layer is malformed: `ids` wins, and we say
+        # so. Files are truth, so a hand-edit must not be able to break the
+        # roster — it may only be surprising.
+        contradictory = sorted({eid for eid in order.excluded if eid in seen})
+        if contradictory:
+            log.warning(
+                "assistants/.order.yaml at %s lists %s in both `ids` and `excluded`; "
+                "`ids` wins.",
+                layer.folder,
+                ", ".join(contradictory),
+            )
+        excluded = {eid for eid in order.excluded if eid not in seen}
+        inherited = [entry_id for entry_id in self.merged.ids if entry_id not in seen]
+        self.merged = MergedAssistantOrder(
+            ids=[entry_id for entry_id in local + inherited if entry_id not in excluded],
+            # Listing an id locally clears an inherited exclusion of it — the
+            # descendant-wins direction that lets a book bring back something a
+            # series removed.
+            excluded=(self.merged.excluded - seen) | excluded,
+        )
 
 
 class AssistantEntriesMixin:
     def list_assistant_entries(self) -> AssistantEntryList:
         index = self._build_assistant_index()
         entries: list[AssistantEntrySummary] = []
-        # Layer rank + folder read straight off the one walk (#329). Both used
-        # to be inferred from the entries themselves — the folder from the first
-        # entry's `path.parent`, the rank from `index.by_id` insertion order.
-        # That misordered the roster in two ways. Today: a cross-layer id
-        # collision reuses the *ancestor's* dict slot (`by_id[id] = entry`
-        # overwrites the value, keeps the position), so a descendant that
-        # shadows an outer id was "first seen" at the outer layer's position and
-        # its whole bucket jumped up the roster. Later: an incremental index
-        # patch (#307) re-parsing one file would move its layer to the end.
-        # The walk is machine-layer-first, then base folder → … → open
-        # project, so rank stays the LEADING sort term and keeps the roster
-        # layer-grouped (Machine bucket first). That is the ADR-0037 §7
-        # assumption the Assistants default's `group_by: source_layer` relies on
-        # under the first-seen bucket rule; without it a fresh project-layer
-        # "Alpha" precedes a machine "Zed" whenever no `.order.yaml` exists (#224).
-        layer_paths, layer_rank = self._assistant_layer_paths_and_ranks()
         for entry in index.by_id.values():
             if entry.kind != "assistant":
                 continue
@@ -80,63 +166,65 @@ class AssistantEntriesMixin:
                     source_layer_label=entry.source_layer_label,
                 )
             )
-        # Per-layer ordering: read each layer's .order.yaml (if any) and use
-        # it as the secondary sort key (within a layer). Entries not listed in
-        # the order file sort alphabetically by title after the listed ones.
-        order_by_layer: dict[str, dict[str, int]] = {}
-        for layer_id, folder in layer_paths.items():
-            ordered = self._read_assistants_order(folder)
-            order_by_layer[layer_id] = {entry_id: idx for idx, entry_id in enumerate(ordered)}
+        # ONE merged sequence across every layer (#332), so position in it is
+        # the whole ordering story. `layer_rank` used to lead this key, keeping
+        # the roster layer-grouped with the machine bucket on top (#224 /
+        # ADR-0037 §7). It comes off the front here: concatenation order now
+        # *encodes* precedence, so a layer term would fight the user's single
+        # drag-ordered list rather than refine it. The grouping that relied on
+        # it moves with #333.
+        merged = self.merged_assistant_order()
+        entries = [entry for entry in entries if entry.id not in merged.excluded]
+        positions = {entry_id: idx for idx, entry_id in enumerate(merged.ids)}
 
         def sort_key(entry: AssistantEntrySummary):
-            rank = layer_rank.get(entry.source_layer_id, len(layer_rank))
-            positions = order_by_layer.get(entry.source_layer_id, {})
             if entry.id in positions:
-                return (rank, 0, positions[entry.id], "")
-            return (rank, 1, 0, entry.title.lower())
+                return (0, positions[entry.id], "")
+            # Unlisted at every layer: one global alphabetical tail. Pre-#332
+            # this tail was per layer, because rank led the key.
+            return (1, 0, entry.title.lower())
 
         entries.sort(key=sort_key)
         return AssistantEntryList(entries=entries)
 
-    def _assistant_layer_paths_and_ranks(self) -> tuple[dict[str, Path], dict[str, int]]:
-        """Each layer's `assistants/` folder and its rank, from the one walk.
+    def merged_assistant_order(self) -> MergedAssistantOrder:
+        """The one priority sequence, merged across every layer (#332).
 
-        Without an open project only the machine layer exists — the same
-        degenerate case `_build_assistant_index` handles.
+        Ids naming an assistant that no longer exists (deleted, or in a layer no
+        longer inherited) stay in the list and are simply never matched by a
+        caller — ignored, not an error.
         """
+        merger = _AssistantOrderMerger(self._read_assistants_order)
         if self.root_path is not None:
-            layers = self.collect_layers(self.root_path, include_machine=True)
+            self.visit_layers(merger, self.root_path, include_machine=True)
         else:
-            # No project open: the machine layer is the whole chain.
+            # No project open: the machine layer is the whole chain — the same
+            # degenerate case `_build_assistant_index` handles.
             machine_layer = self.machine_layer()
-            layers = [] if machine_layer is None else [machine_layer]
-        return (
-            {layer.id: layer.folder / "assistants" for layer in layers},
-            {layer.id: layer.rank for layer in layers},
-        )
+            if machine_layer is not None:
+                merger.visit_layer(machine_layer)
+        return merger.merged
 
     def reorder_assistant_entries(
         self, request: ReorderAssistantsRequest
     ) -> AssistantEntryList:
         folder = self._assistant_layer_folder_for_id(request.layer_id)
-        if not folder.exists():
-            raise ProjectServiceError(
-                f"No assistants folder exists at layer {request.layer_id!r}.", 404
-            )
-        # Validate that every supplied id exists in this layer.
-        layer_ids: set[str] = set()
-        for path in folder.glob("*.md"):
-            try:
-                front = self._read_front_matter_only(path, strict=True)
-            except ProjectServiceError:
-                continue
-            entry_id = front.get("id")
-            if isinstance(entry_id, str) and entry_id.strip():
-                layer_ids.add(entry_id.strip())
-        unknown = [eid for eid in request.ordered_ids if eid not in layer_ids]
+        # No `folder.exists()` guard: a layer that owns no assistants of its own
+        # still gets to hold an opinion about the ones it inherits, which is the
+        # whole point (#332). The pre-#332 guard 404'd there because
+        # `ordered_ids` could only name local files; `_write_assistants_order`
+        # creates the folder. `unlist_assistant_entry` has always worked this
+        # way, and the two gestures must not disagree about the same layer.
+        # Validate against the WHOLE roster, not this layer's own files (#332).
+        # Dragging an inherited assistant is the central gesture: it names a
+        # foreign id in the *local* file and no ancestor file is touched, which
+        # is what makes the drag layer-safe by construction. The pre-#332 check
+        # globbed `folder/*.md` and 422'd on anything else, i.e. it rejected
+        # exactly the gesture this issue exists to enable.
+        unknown = [eid for eid in request.ordered_ids if eid not in self._known_assistant_ids()]
         if unknown:
             raise ProjectServiceError(
-                f"Unknown assistant id(s) for layer: {', '.join(unknown)}.", 422
+                f"Unknown assistant id(s): {', '.join(unknown)}.", 422
             )
         # Preserve only the supplied ids; unlisted entries trail alphabetically.
         dedup: list[str] = []
@@ -146,25 +234,77 @@ class AssistantEntriesMixin:
                 continue
             seen.add(entry_id)
             dedup.append(entry_id)
-        self._write_assistants_order(folder, dedup)
+        order = self._read_assistants_order(folder)
+        order.ids = dedup
+        # A dragged id is a positive listing, so it outranks a stale exclusion
+        # at this same layer — otherwise the drop would silently do nothing.
+        order.excluded = [eid for eid in order.excluded if eid not in seen]
+        self._write_assistants_order(folder, order)
         return self.list_assistant_entries()
 
-    def _read_assistants_order(self, folder: Path) -> list[str]:
+    def unlist_assistant_entry(self, request: UnlistAssistantRequest) -> AssistantEntryList:
+        """Remove an assistant from the roster *at this layer and inward* (#332).
+
+        Writes to the local layer's `excluded`, never to the file the assistant
+        lives in — un-listing an inherited assistant in Book 12 must not remove
+        it from the universe. A descendant can name the id in its own `ids` to
+        bring it back.
+        """
+        if request.entry_id not in self._known_assistant_ids():
+            raise ProjectServiceError(f"Unknown assistant id: {request.entry_id}.", 422)
+        folder = self._assistant_layer_folder_for_id(request.layer_id)
+        order = self._read_assistants_order(folder)
+        order.ids = [eid for eid in order.ids if eid != request.entry_id]
+        if request.entry_id not in order.excluded:
+            order.excluded.append(request.entry_id)
+        self._write_assistants_order(folder, order)
+        return self.list_assistant_entries()
+
+    def _known_assistant_ids(self) -> set[str]:
+        return {
+            entry_id
+            for entry_id, entry in self._build_assistant_index().by_id.items()
+            if entry.kind == "assistant"
+        }
+
+    def _prepend_to_assistants_order(self, folder: Path, entry_id: str) -> None:
+        """Put a newly created assistant on top of **its own layer's** list.
+
+        The issue phrases this as "topmost, therefore the default" (#332,
+        ADR-0024). That holds only when the layer is the innermost one: the fold
+        puts every descendant layer's `ids` ahead of this one, so an assistant
+        created at the machine layer sits below anything a project layer has
+        listed. That is most-local-wins working correctly, not a bug — but the
+        shorter phrasing is wrong often enough to be worth stating.
+        """
+        order = self._read_assistants_order(folder)
+        order.ids = [entry_id] + [eid for eid in order.ids if eid != entry_id]
+        order.excluded = [eid for eid in order.excluded if eid != entry_id]
+        self._write_assistants_order(folder, order)
+
+    def _read_assistants_order(self, folder: Path) -> AssistantsOrder:
+        """This layer's opinion. A missing file, an unreadable one, or one
+        without `excluded` all read as empty lists — pre-1.0, no migration."""
         order_file = folder / ".order.yaml"
         if not order_file.exists():
-            return []
+            return AssistantsOrder()
         try:
             data = self._read_yaml(order_file)
         except ProjectServiceError:
-            return []
-        ids = data.get("ids") if isinstance(data, dict) else None
-        if not isinstance(ids, list):
-            return []
-        return [str(entry_id) for entry_id in ids if isinstance(entry_id, str)]
+            return AssistantsOrder()
+        if not isinstance(data, dict):
+            return AssistantsOrder()
+        return AssistantsOrder(
+            ids=_string_list(data.get("ids")),
+            excluded=_string_list(data.get("excluded")),
+        )
 
-    def _write_assistants_order(self, folder: Path, ordered_ids: list[str]) -> None:
+    def _write_assistants_order(self, folder: Path, order: AssistantsOrder) -> None:
         folder.mkdir(parents=True, exist_ok=True)
-        self._write_yaml(folder / ".order.yaml", {"ids": list(ordered_ids)})
+        self._write_yaml(
+            folder / ".order.yaml",
+            {"ids": list(order.ids), "excluded": list(order.excluded)},
+        )
 
     def read_assistant_entry(self, entry_id: str) -> AssistantEntry:
         index_entry = self._build_assistant_index().by_id.get(entry_id)
@@ -200,6 +340,11 @@ class AssistantEntriesMixin:
             {},
             "",
         )
+        # Creating an assistant is a statement of intent about the one you just
+        # made, so it leads its layer's list rather than landing in the
+        # alphabetical tail. See `_prepend_to_assistants_order` for why that is
+        # not the same as "it is now the default".
+        self._prepend_to_assistants_order(target_folder, entry_id)
         return self.read_assistant_entry(entry_id)
 
     def save_assistant_entry(self, entry_id: str, request: SaveAssistantEntryRequest) -> AssistantEntry:

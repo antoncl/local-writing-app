@@ -4,7 +4,6 @@ import unittest
 from pathlib import Path
 from tempfile import TemporaryDirectory
 
-import yaml
 from fastapi.testclient import TestClient
 
 from app.main import app
@@ -139,36 +138,6 @@ class ProjectNodeServiceTests(unittest.TestCase):
                 )
             )
         self.assertIn("changed on disk", str(ctx.exception).lower())
-
-
-class ProjectNodeMigrationTests(unittest.TestCase):
-    """Existing pre-v3 projects gain project.md on first open."""
-
-    def setUp(self) -> None:
-        self.tmp = TemporaryDirectory()
-        self.root = Path(self.tmp.name) / "project"
-        self.service = ProjectService()
-        self.service.create_project(self.root, "Legacy Project")
-
-    def tearDown(self) -> None:
-        self.tmp.cleanup()
-
-    def test_v2_project_synthesizes_project_md_on_open(self) -> None:
-        # Simulate a pre-v3 project: no project.md, schema_version=2.
-        project_md = self.root / "project.md"
-        if project_md.exists():
-            project_md.unlink()
-        manifest_path = self.root / "project.yaml"
-        manifest = yaml.safe_load(manifest_path.read_text(encoding="utf-8"))
-        manifest["schema_version"] = 2
-        manifest_path.write_text(yaml.safe_dump(manifest, sort_keys=False), encoding="utf-8")
-
-        reopened = ProjectService()
-        reopened.open_project(self.root)
-        self.assertTrue(project_md.exists())
-        node = reopened.read_project_node()
-        self.assertEqual(node.title, "Legacy Project")
-        self.assertEqual(node.entry_type, "project:project")
 
 
 class NestedProjectNodeIdentityTests(unittest.TestCase):

@@ -188,9 +188,19 @@ export type AssistantEntryList = {
 
 // A known tag with a scope (which kinds / sub-types it's suggested on).
 // Scope reuses NodePickerConfig; empty scope = suggested everywhere.
+// One layer that asserts a tag (#339). A tag does not shadow the way a node
+// does — the same name may be asserted at several layers and the merged record
+// unions their scopes — so provenance is a list, not one source_layer_id.
+export type TagLayerRef = {
+  id: string;
+  label: string;
+};
+
 export type ScopedTag = {
   name: string;
   scope: NodePickerConfig;
+  // Empty on a single-layer read; populated by the merged /api/tags read.
+  source_layers?: TagLayerRef[];
 };
 
 export type KnownTags = {

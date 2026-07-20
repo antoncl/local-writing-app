@@ -56,7 +56,16 @@ class MetadataValuesMixin:
         kind: str = "",
         entry_type: str = "",
     ) -> dict[str, Any]:
+        # Two views, deliberately (#339). `known` is the **merged** vocabulary —
+        # it decides "is this tag known?" (so an inherited tag is no longer
+        # silently re-registered here) and owns canonical casing. `local` is this
+        # layer's **own** records, and is the only thing written back: a layer
+        # stores what it asserted, never the resolved scope. Writing `known` back
+        # would copy every ancestor's vocabulary into this project's tags.yaml on
+        # the next save — automatically, with no author action.
+        root = self._require_project()
         known = {tag.name.lower(): tag for tag in self.read_known_tags().tags}
+        local = self._read_layer_tags(root)
         node_scope = self._tag_scope_for_node(kind, entry_type)
         changed = False
         next_metadata = dict(metadata)
@@ -79,13 +88,25 @@ class MetadataValuesMixin:
                     # New tag → scope it to the sub-type it was entered on.
                     entry = ScopedTag(name=tag, scope=node_scope.model_copy(deep=True))
                     known[key] = entry
+                    local[key] = ScopedTag(name=tag, scope=node_scope.model_copy(deep=True))
                     changed = True
                 else:
                     # Known tag used here → auto-broaden its scope to include
-                    # this (sub-)type (organic growth).
+                    # this (sub-)type (organic growth). The *merged* scope decides
+                    # whether anything needs recording; what gets recorded is this
+                    # layer's assertion. Union is associative, so re-reading merged
+                    # reproduces `broadened` without ever touching an ancestor's
+                    # record.
                     broadened = self._union_node_picker_scope(entry.scope, node_scope)
                     if broadened.model_dump() != entry.scope.model_dump():
                         entry.scope = broadened
+                        held = local.get(key)
+                        local[key] = ScopedTag(
+                            name=entry.name,
+                            scope=self._union_node_picker_scope(held.scope, node_scope)
+                            if held
+                            else node_scope.model_copy(deep=True),
+                        )
                         changed = True
                 if key in seen_values:
                     continue
@@ -94,7 +115,7 @@ class MetadataValuesMixin:
             next_metadata[field_id] = canonical_values
 
         if changed:
-            self._write_scoped_tags(list(known.values()))
+            self._write_scoped_tags(list(local.values()))
         return next_metadata
 
     def _validate_scene_metadata(

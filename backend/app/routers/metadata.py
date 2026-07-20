@@ -47,9 +47,12 @@ def get_metadata_schema_overview() -> MetadataSchemaOverview:
 
 
 @router.get("/api/tags", response_model=KnownTags)
-def get_known_tags() -> KnownTags:
+def get_known_tags(layer: str | None = None) -> KnownTags:
+    """The merged vocabulary. `layer` reads it as of an authoring level instead
+    of the open project (#339) — ancestors of that layer stay visible, layers
+    below it drop out."""
     with translate_errors():
-        return service.read_known_tags()
+        return service.read_known_tags(up_to_layer_id=layer)
 
 
 @router.get("/api/tags/overview", response_model=TagsOverview)

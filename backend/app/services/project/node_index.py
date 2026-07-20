@@ -82,17 +82,81 @@ class ReferenceEdge:
 
 @dataclass
 class NodeIndex:
+    """The layer-qualified node index (#334).
+
+    **Identity is layer-qualified**: `candidates` maps an id to every entry that
+    claims it, innermost layer first. Before #334 the index kept one entry per
+    id, so collecting a descendant's node *destroyed* the ancestor's — and there
+    is no second copy anywhere, the file was parsed once. That made two things
+    impossible rather than merely unimplemented: deleting a descendant node
+    could not restore the ancestor it had been shadowing (#307), and ADR-0042's
+    layer picker had nothing to show at any position but the innermost.
+
+    `by_id` and `edges_by_src` are **derived winners views**, rebuilt by
+    `resolve()` after the walk. They keep the shape every existing consumer
+    reads (43 call sites across 15 files), so shadow resolution moved without
+    those callers changing. They are outputs, never written directly during
+    collection — writing one is how the old destruction happened.
+    """
+
+    # id → every entry claiming it, **innermost layer first** after `resolve()`.
+    # During collection entries are appended in walk order (outermost first) and
+    # the list is reversed once, at the end.
+    candidates: dict[str, list[NodeIndexEntry]] = field(default_factory=dict)
+    # Forward edges keyed by **(source layer id, source node id)**, in
+    # field-declaration order. Layer-qualified for the same reason entries are:
+    # a shadowed ancestor keeps its edges, so un-shadowing on delete restores a
+    # node *with its references*, not a stripped one.
+    edges_by_layer_src: dict[tuple[str, str], list[ReferenceEdge]] = field(default_factory=dict)
+    # --- derived (see `resolve`) ---
     by_id: dict[str, NodeIndexEntry] = field(default_factory=dict)
-    id_by_path: dict[Path, str] = field(default_factory=dict)
-    # Forward edges keyed by source id, in field-declaration order. Written per
-    # node during the index walk, so a shadowing descendant replaces the
-    # ancestor's edges the same way it replaces its `by_id` entry.
     edges_by_src: dict[str, list[ReferenceEdge]] = field(default_factory=dict)
     # Reverse adjacency — the structure backlinks are served from. Populated by
     # `rebuild_reverse_edges` once the walk is complete.
     edges_by_dst: dict[str, list[ReferenceEdge]] = field(default_factory=dict)
     warnings: list[str] = field(default_factory=list)
     errors: list[str] = field(default_factory=list)
+
+    def add(self, entry: NodeIndexEntry) -> None:
+        """Record one entry. Nothing is ever replaced — a descendant claiming an
+        ancestor's id joins the candidate list instead of overwriting it."""
+        self.candidates.setdefault(entry.id, []).append(entry)
+
+    def entry_for_layer(self, node_id: str, layer_id: str) -> NodeIndexEntry | None:
+        """The entry a specific layer contributes for `node_id`, if any. Also the
+        same-layer duplicate check: a second file claiming an id already claimed
+        *at that layer* is an error, not a shadow."""
+        return next(
+            (entry for entry in self.candidates.get(node_id, []) if entry.source_layer_id == layer_id),
+            None,
+        )
+
+    def resolve(self, warnings: list[str] | None = None) -> None:
+        """Order the candidate lists innermost-first and rebuild the derived
+        views. Must run once, after the whole walk.
+
+        Collection appends in walk order (outermost → open project), so the last
+        entry appended for an id is the innermost — the winner. Reversing once
+        here makes `candidates[id][0]` the winner, matching ADR-0040's
+        innermost-first convention, and leaves the derived views a one-liner.
+        """
+        for node_id, entries in self.candidates.items():
+            entries.reverse()
+            winner = entries[0]
+            self.by_id[node_id] = winner
+            edges = self.edges_by_layer_src.get((winner.source_layer_id, node_id))
+            if edges:
+                self.edges_by_src[node_id] = edges
+            if warnings is not None and len(entries) > 1:
+                # One warning per shadowed layer, innermost outward — the same
+                # pairing the pre-#334 build emitted as each layer overwrote the
+                # previous winner.
+                for shadower, shadowed in zip(entries, entries[1:], strict=False):
+                    warnings.append(
+                        f"Entry id {node_id} in {shadower.source_layer_label} shadows the entry from "
+                        f"{shadowed.source_layer_label}."
+                    )
+        self.rebuild_reverse_edges()
 
     def rebuild_reverse_edges(self) -> None:
         """(Re)build `edges_by_dst` from `edges_by_src`.

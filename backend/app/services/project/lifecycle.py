@@ -102,8 +102,6 @@ class ProjectLifecycleMixin:
                 "theme": "system",
                 "ai": {
                     "policy": "off",
-                    "default_provider": None,
-                    "default_model_class": None,
                 },
             },
             "manuscript_structure": {
@@ -146,8 +144,6 @@ class ProjectLifecycleMixin:
             root_path=str(root),
             projects_base_folder=str(self._metadata_schema_base_folder(root) or root.parent),
             ai_policy=ai.get("policy", "off"),
-            ai_default_provider=ai.get("default_provider"),
-            ai_default_model_class=ai.get("default_model_class"),
         )
 
     def update_project_settings(self, request: UpdateProjectSettingsRequest) -> ProjectInfo:
@@ -164,19 +160,9 @@ class ProjectLifecycleMixin:
         ai_settings = settings.get("ai")
         if not isinstance(ai_settings, dict):
             ai_settings = {}
-        # Partial update: only touch a field the caller explicitly sent. An
-        # explicit null (or empty string) clears the value back to the machine
-        # default; a field left unset is left unchanged. `model_fields_set`
-        # distinguishes "absent" from "present and null" — the frontend always
-        # sends all three AI fields, so selecting "(machine default)" reaches
-        # here as an explicit null and clears, instead of being a silent no-op.
-        fields_set = request.model_fields_set
+        # Partial update: a field left unset is left unchanged.
         if request.ai_policy is not None:
             ai_settings["policy"] = request.ai_policy
-        if "ai_default_provider" in fields_set:
-            ai_settings["default_provider"] = request.ai_default_provider or None
-        if "ai_default_model_class" in fields_set:
-            ai_settings["default_model_class"] = request.ai_default_model_class or None
         if ai_settings:
             settings["ai"] = ai_settings
         manifest["settings"] = settings

@@ -27,15 +27,11 @@ class ProjectInfo(BaseModel):
     root_path: str
     projects_base_folder: str | None = None
     ai_policy: AIPolicy = "off"
-    ai_default_provider: str | None = None
-    ai_default_model_class: str | None = None
 
 
 class UpdateProjectSettingsRequest(BaseModel):
     projects_base_folder: str | None = None
     ai_policy: AIPolicy | None = None
-    ai_default_provider: str | None = None
-    ai_default_model_class: str | None = None
 
 
 class ProjectValidation(BaseModel):

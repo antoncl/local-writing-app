@@ -942,41 +942,15 @@ class MetadataValidationTests(unittest.TestCase):
         manifest = self.service._read_yaml(self.root / "project.yaml")
         self.assertEqual(manifest["settings"]["projects_base_folder"], str(updated_base.resolve()))
 
-    def test_project_settings_clear_ai_provider_and_class_to_default(self) -> None:
-        # Set concrete values, then clear them back to "(machine default)".
+    def test_project_settings_unset_field_is_left_unchanged(self) -> None:
+        # Partial update: a request that omits a field must not disturb the
+        # previously-saved value (the Project pane sends only ai_policy).
+        # The expectation is spelled out rather than read back from a prior
+        # call's return value — comparing the service against itself would
+        # pass even if both calls clobbered the setting identically.
+        expected_base = str(self.universe.resolve())
         self.service.update_project_settings(
-            UpdateProjectSettingsRequest(
-                ai_default_provider="anthropic",
-                ai_default_model_class="balanced",
-            )
-        )
-        manifest = self.service._read_yaml(self.root / "project.yaml")
-        self.assertEqual(manifest["settings"]["ai"]["default_provider"], "anthropic")
-        self.assertEqual(manifest["settings"]["ai"]["default_model_class"], "balanced")
-
-        # An explicit null (what the frontend sends for "(machine default)" /
-        # "(unset)") clears the value rather than being treated as no-change.
-        project = self.service.update_project_settings(
-            UpdateProjectSettingsRequest(
-                ai_default_provider=None,
-                ai_default_model_class=None,
-            )
-        )
-        self.assertIsNone(project.ai_default_provider)
-        self.assertIsNone(project.ai_default_model_class)
-        manifest = self.service._read_yaml(self.root / "project.yaml")
-        self.assertIsNone(manifest["settings"]["ai"]["default_provider"])
-        self.assertIsNone(manifest["settings"]["ai"]["default_model_class"])
-
-    def test_project_settings_unset_ai_field_is_left_unchanged(self) -> None:
-        # Partial update: a request that omits the AI provider/class fields must
-        # not disturb previously-saved values (existing callers pass only
-        # ai_policy and rely on this).
-        self.service.update_project_settings(
-            UpdateProjectSettingsRequest(
-                ai_default_provider="anthropic",
-                ai_default_model_class="balanced",
-            )
+            UpdateProjectSettingsRequest(projects_base_folder=str(self.universe))
         )
 
         project = self.service.update_project_settings(
@@ -984,8 +958,12 @@ class MetadataValidationTests(unittest.TestCase):
         )
 
         self.assertEqual(project.ai_policy, "cloud-allowed")
-        self.assertEqual(project.ai_default_provider, "anthropic")
-        self.assertEqual(project.ai_default_model_class, "balanced")
+        self.assertEqual(project.projects_base_folder, expected_base)
+        # Assert the stored key too: `projects_base_folder` on ProjectInfo is
+        # derived (it falls back to root.parent), so the response alone can
+        # mask a manifest that lost the setting.
+        manifest = self.service._read_yaml(self.root / "project.yaml")
+        self.assertEqual(manifest["settings"]["projects_base_folder"], expected_base)
 
     def test_project_settings_rejects_base_folder_outside_project_ancestry(self) -> None:
         updated_base = Path(self.temp_dir.name) / "new-base"

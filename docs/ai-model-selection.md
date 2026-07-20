@@ -223,10 +223,12 @@ When a model is marked `deprecated: true` in its descriptor:
 
 ## Project-level defaults
 
-The dormant `ai_default_model_class` field on `ProjectInfo`
-([project_service.py:406](../backend/app/services/project_service.py:406))
-becomes the project's default tier, inherited by newly-created assistants.
-Existing field, currently never read by anything else — safe to repurpose.
+This section planned to repurpose the dormant `ai_default_model_class` field
+on `ProjectInfo` as the project's default tier. That field — and its sibling
+`ai_default_provider` — were **removed in #330**: they were write-only, and
+assistant selection went to ADR-0024 tag matching instead. A project-level
+default tier, if it is ever wanted, starts from scratch rather than by
+reviving those keys.
 
 ## Files touched (estimated)
 
@@ -247,8 +249,6 @@ Modified:
   request; add `session_id` header for OpenRouter
 - `backend/app/main.py` — `/api/ai/providers` listing, `/api/ai/providers/<name>/models`,
   `/api/ai/providers/<name>/resolve-tier`
-- `backend/app/services/project_service.py` — repurpose `ai_default_model_class`
-  to mean tier
 - `frontend/src/App.svelte` — Assistant builder picker swap-out
 
 ## Open questions for v2

@@ -11,12 +11,10 @@
   export let aiHealthChecking: boolean;
   export let validation: ProjectValidation | null;
 
-  // Two-way bound: App is the source of truth (these are set on project load
-  // and read back when saving AI settings), so they stay there and bind down.
-  // projectCostExpanded is bound too because App resets it on project switch.
+  // Two-way bound: App is the source of truth. aiPolicy is set on project load
+  // and read back when saving AI settings; projectCostExpanded is bound because
+  // App resets it on project switch. Both stay there and bind down.
   export let aiPolicy: AIPolicy;
-  export let aiDefaultProvider: string;
-  export let aiDefaultModelClass: string;
   export let projectCostExpanded: boolean;
 
   // Actions — App owns the side effects (API calls, opening other panes).
@@ -81,25 +79,6 @@
       <label><input type="radio" bind:group={aiPolicy} value="local-only" /> Local only</label>
       <label><input type="radio" bind:group={aiPolicy} value="cloud-allowed" /> Cloud allowed</label>
     </fieldset>
-    <label>
-      Preferred subscription
-      <select bind:value={aiDefaultProvider}>
-        <option value="">(machine default)</option>
-        <option value="anthropic">Anthropic</option>
-        <option value="openai">OpenAI</option>
-        <option value="openrouter">OpenRouter</option>
-        <option value="ollama">Ollama (local)</option>
-      </select>
-    </label>
-    <label>
-      Preferred assistant tier
-      <select bind:value={aiDefaultModelClass}>
-        <option value="">(unset)</option>
-        <option value="cheap">cheap</option>
-        <option value="balanced">balanced</option>
-        <option value="best">best</option>
-      </select>
-    </label>
     <div class="button-row">
       <button type="button" on:click={onSaveAISettings}>Save AI Settings</button>
       <button type="button" disabled={aiHealthChecking || aiPolicy === "off"} on:click={onHealthCheck}>

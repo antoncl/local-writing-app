@@ -17,8 +17,9 @@ every other slice consumes `_build_node_index` / `_node_id_for_path` /
 Method bodies moved verbatim. Shared helpers they call (`self._require_project`,
 `self._read_yaml`, `self._read_markdown_with_front_matter`,
 `self._read_front_matter_only`, `self.read_metadata_schema`,
-`self._project_layer_folders` and the schema-layer label helpers from
-`MetadataSchemaMixin`) live elsewhere on the composed class.
+`self.project_layers` — the one layer walk, in `layers.py` since #329, which
+stamps each layer's id, label, rank and is_root/is_machine flags so this slice
+no longer builds `IndexLayer` inline) live elsewhere on the composed class.
 `NodeIndex`/`NodeIndexEntry` come from the shared `node_index` module so this
 slice imports them without a cycle.
 """
@@ -64,6 +65,10 @@ NODE_FAMILIES = [
     NodeFamily("view", "views", "view:view"),
 ]
 
+# The one family the out-of-tree machine layer contributes. Looked up rather
+# than re-spelled as a literal — a second copy of the triple would drift.
+MACHINE_LAYER_FAMILIES = [family for family in NODE_FAMILIES if family.kind == "assistant"]
+
 
 class ReferencesMixin:
     def _build_node_index(self, root: Path | None = None) -> NodeIndex:
@@ -93,22 +98,12 @@ class ReferencesMixin:
         except (ProjectServiceError, ValueError, OSError) as exc:
             schema = None
             index.errors.append(f"Invalid metadata schema; no reference edges were indexed: {exc}")
-        # Machine config dir is a base layer for assistants only — it lives
-        # outside the project tree and carries the user's roster.
-        self._collect_machine_layer_assistants(index, duplicate_relative_to=root, schema=schema)
-        layer_folders = self._project_layer_folders(root)
-        # Outermost ancestor first so descendant entries overwrite on collision.
-        for layer_index, folder in enumerate(layer_folders):
-            layer = IndexLayer(
-                folder=folder,
-                id=self._metadata_schema_layer_id(folder),
-                label=self._layer_label_for_folder(root, folder, layer_index),
-            )
-            is_current_project = folder == root
-            for family in NODE_FAMILIES:
-                # Scenes stay book-scoped — only walk the current project's scenes folder.
-                if family.kind == "scene" and not is_current_project:
-                    continue
+        # One walk, machine layer included (#329). It comes first and carries
+        # assistants only — it lives outside the project tree and holds the
+        # user's roster. Project layers follow outermost-ancestor first, so a
+        # descendant entry overwrites an ancestor's on collision.
+        for layer in self.project_layers(root, include_machine=True):
+            for family in self._families_for_layer(layer):
                 self._collect_layer_entries(
                     layer=layer,
                     family=family,
@@ -122,7 +117,7 @@ class ReferencesMixin:
             # the unified-CRUD migration to come, but ChatSession storage
             # remains the source of truth (Phase 3b-i / decisions-node-
             # editor-modularization).
-            if is_current_project:
+            if layer.is_root:
                 self._collect_chat_entries(layer=layer, index=index)
         index.rebuild_reverse_edges()
         return index
@@ -171,6 +166,17 @@ class ReferencesMixin:
                 continue
             index.by_id[chat_id] = entry
 
+    def _families_for_layer(self, layer: IndexLayer) -> list[NodeFamily]:
+        """Which node families this layer contributes — the per-layer logic the
+        index walk used to inline (#329).
+
+        The machine layer is out-of-tree: assistants only. Scenes stay
+        book-scoped, so they come from the open project alone.
+        """
+        if layer.is_machine:
+            return MACHINE_LAYER_FAMILIES
+        return [family for family in NODE_FAMILIES if family.kind != "scene" or layer.is_root]
+
     def _collect_machine_layer_assistants(
         self,
         index: NodeIndex,
@@ -178,22 +184,31 @@ class ReferencesMixin:
         duplicate_relative_to: Path,
         schema: MetadataSchema | None = None,
     ) -> None:
-        from app.services import machine_settings as ms_service
+        """Collect the machine layer on its own, for the no-project-open case.
 
-        machine_dir = ms_service.assistants_dir().parent
-        if not (machine_dir / "assistants").exists():
+        With a project open the machine layer is an ordinary layer in the walk
+        (`project_layers(include_machine=True)`); this stays for
+        `_build_assistant_index`, which serves the assistant roster before any
+        project has been opened and so has no chain to walk.
+        """
+        machine_folder = self._machine_layer_folder()
+        if machine_folder is None:
             return
-        self._collect_layer_entries(
-            layer=IndexLayer(
-                folder=machine_dir,
-                id=self._metadata_schema_layer_id(machine_dir),
-                label="Machine",
-            ),
-            family=NodeFamily("assistant", "assistants", "assistant:assistant"),
-            index=index,
-            duplicate_relative_to=duplicate_relative_to,
-            schema=schema,
+        layer = IndexLayer(
+            folder=machine_folder,
+            id=self._metadata_schema_layer_id(machine_folder),
+            label="Machine",
+            rank=0,
+            is_machine=True,
         )
+        for family in self._families_for_layer(layer):
+            self._collect_layer_entries(
+                layer=layer,
+                family=family,
+                index=index,
+                duplicate_relative_to=duplicate_relative_to,
+                schema=schema,
+            )
 
     def _collect_layer_entries(
         self,

@@ -10,9 +10,12 @@ moved verbatim from project_service.py — shared helpers they call
 `self._normalise_metadata`, `self._revision`, `self._node_id_for_path`,
 `self._write_node_entry_file`, `self._filepath_for_new_node`,
 `self._new_id`, `self._check_entry_type_kind`, `self._maybe_rename_node_file`,
-`self._read_yaml`, `self._write_yaml`, `self._metadata_schema_layer_id`,
-`self._project_layer_folders`, `self.root_path`) still live on the core
-class and resolve through the MRO at call time.
+`self._read_yaml`, `self._write_yaml`, `self.root_path`) still live on the
+core class and resolve through the MRO at call time. The layer walk
+(`self.project_layers`, `self.layer_by_id`, `self._metadata_schema_layer_id`,
+`self._machine_layer_folder`) lives in `layers.py` since #329 and resolves the
+same way — the roster's layer rank now comes from the walk rather than from
+`index.by_id` insertion order.
 
 `_build_assistant_index` moves here even though it instantiates `NodeIndex`
 and calls `_collect_machine_layer_assistants`: `NodeIndex` is imported from
@@ -35,24 +38,25 @@ from app.models import (
     SaveAssistantEntryRequest,
 )
 from app.services.project.errors import ProjectServiceError
-from app.services.project.node_index import NodeIndex, NodeIndexEntry
+from app.services.project.node_index import IndexLayer, NodeIndex, NodeIndexEntry
 
 
 class AssistantEntriesMixin:
     def list_assistant_entries(self) -> AssistantEntryList:
         index = self._build_assistant_index()
         entries: list[AssistantEntrySummary] = []
-        layer_paths: dict[str, Path] = {}
-        # First-seen ordinal per layer. `index.by_id` is walked machine-layer-
-        # first, then base folder → … → open project (see `_build_node_index`:
-        # `_collect_machine_layer_assistants` runs before the project-layer loop),
-        # so this ordinal is a machine-first layer rank. Making it the LEADING
-        # sort term keeps the roster layer-grouped (Machine bucket first) — the
-        # ADR-0037 §7 assumption the Assistants default's `group_by: source_layer`
-        # relies on under the first-seen bucket rule. Without it the sort
-        # interleaves layers, so a fresh project-layer "Alpha" precedes a machine
-        # "Zed" the moment no `.order.yaml` exists yet (#224).
-        layer_rank: dict[str, int] = {}
+        # Layer rank + folder read straight off the one walk (#329). Both used
+        # to be inferred from the entries themselves — the folder from the first
+        # entry's `path.parent`, the rank from `index.by_id` insertion order —
+        # so an incremental index patch (#307) that re-parsed a single file
+        # would move its layer to the end of the dict and silently reorder the
+        # roster. The walk is machine-layer-first, then base folder → … → open
+        # project, so rank stays the LEADING sort term and keeps the roster
+        # layer-grouped (Machine bucket first). That is the ADR-0037 §7
+        # assumption the Assistants default's `group_by: source_layer` relies on
+        # under the first-seen bucket rule; without it a fresh project-layer
+        # "Alpha" precedes a machine "Zed" whenever no `.order.yaml` exists (#224).
+        layer_paths, layer_rank = self._assistant_layer_paths_and_ranks()
         for entry in index.by_id.values():
             if entry.kind != "assistant":
                 continue
@@ -72,8 +76,6 @@ class AssistantEntriesMixin:
                     source_layer_label=entry.source_layer_label,
                 )
             )
-            layer_paths.setdefault(entry.source_layer_id, entry.path.parent)
-            layer_rank.setdefault(entry.source_layer_id, len(layer_rank))
         # Per-layer ordering: read each layer's .order.yaml (if any) and use
         # it as the secondary sort key (within a layer). Entries not listed in
         # the order file sort alphabetically by title after the listed ones.
@@ -91,6 +93,33 @@ class AssistantEntriesMixin:
 
         entries.sort(key=sort_key)
         return AssistantEntryList(entries=entries)
+
+    def _assistant_layer_paths_and_ranks(self) -> tuple[dict[str, Path], dict[str, int]]:
+        """Each layer's `assistants/` folder and its rank, from the one walk.
+
+        Without an open project only the machine layer exists — the same
+        degenerate case `_build_assistant_index` handles.
+        """
+        if self.root_path is not None:
+            layers = self.project_layers(self.root_path, include_machine=True)
+        else:
+            machine_folder = self._machine_layer_folder()
+            layers = (
+                []
+                if machine_folder is None
+                else [
+                    IndexLayer(
+                        folder=machine_folder,
+                        id=self._metadata_schema_layer_id(machine_folder),
+                        label="Machine",
+                        rank=0,
+                        is_machine=True,
+                    )
+                ]
+            )
+        layer_paths = {layer.id: layer.folder / "assistants" for layer in layers}
+        layer_rank = {layer.id: layer.rank for layer in layers}
+        return layer_paths, layer_rank
 
     def reorder_assistant_entries(
         self, request: ReorderAssistantsRequest
@@ -211,18 +240,26 @@ class AssistantEntriesMixin:
     def _assistant_layer_folder_for_id(self, layer_id: str) -> Path:
         """Resolve a layer_id (from list_metadata_schema_layers, or "") to its
         assistants/ folder. Empty layer_id → machine config dir (the canonical
-        per-user roster)."""
+        per-user roster).
+
+        Reverses the id over the one walk (#329) instead of re-deriving the
+        chain. The machine layer stays reachable two ways — "" and its folder
+        hash — which the create/reorder endpoints both rely on.
+        """
         from app.services import machine_settings as ms_service
 
         if not layer_id:
             return ms_service.assistants_dir()
+        # Deliberately not `_machine_layer_folder()`: that gates on the
+        # assistants/ folder already existing, and this path is how the *first*
+        # machine assistant gets created.
         machine_dir = ms_service.assistants_dir().parent
         if self._metadata_schema_layer_id(machine_dir) == layer_id:
             return machine_dir / "assistants"
         if self.root_path is not None:
-            for folder in self._project_layer_folders(self.root_path):
-                if self._metadata_schema_layer_id(folder) == layer_id:
-                    return folder / "assistants"
+            layer = self.layer_by_id(self.root_path, layer_id)
+            if layer is not None:
+                return layer.folder / "assistants"
         raise ProjectServiceError(f"Unknown layer id {layer_id}.", 422)
 
     def _build_assistant_index(self) -> NodeIndex:

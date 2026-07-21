@@ -164,6 +164,12 @@ export type AssistantEntrySummary = {
   metadata: EntryMetadata;
   source_layer_id?: string;
   source_layer_label?: string;
+  // Curation (`listed`, `position`), stamped by the layer traversal (#332) as
+  // declared computed fields — never in `metadata`, which round-trips to disk.
+  // Not inferable from array order: the unlisted tail is contiguous with the
+  // listed run. #333's Active/Unlisted grouping reads `listed` through the
+  // ordinary field machinery, so nothing special-cases the key.
+  computed_metadata?: EntryMetadata;
 };
 
 export type AssistantEntry = {
@@ -399,6 +405,11 @@ export type ViewSpec = {
 export type ViewGroupByLevel = {
   field: string;
   order?: "label";
+  // Mirrors backend ViewGroupByLevel.show_empty — render a bucket for every
+  // declared option of `field`, not only the ones rows landed in. Default off;
+  // empty-bucket pruning is what keeps a scene view from sprouting a bucket per
+  // unused status.
+  show_empty?: boolean;
 };
 
 // The view designer's persisted canvas graph (nodes + wiring). Non-semantic

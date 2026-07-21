@@ -174,7 +174,15 @@ class AssistantEntriesMixin:
         # drag-ordered list rather than refine it. The grouping that relied on
         # it moves with #333.
         merged = self.merged_assistant_order()
-        entries = [entry for entry in entries if entry.id not in merged.excluded]
+        # An excluded assistant is UNLISTED, not gone (#333). #332 filtered it out
+        # of the roster entirely, which made `excluded` a visibility mechanism as
+        # well as an inheritance one — and left anything so removed with no path
+        # back in the UI. Its real job is narrower: countermand an ancestor's
+        # listing so the thing is not Active. It still does exactly that, because
+        # exclusion keeps the id out of `merged.ids` and therefore out of the
+        # Active group; it simply no longer decides whether the id is *shown*.
+        # Nothing the app knows about can now become unreachable, and the cost is
+        # a few more rows in a group nobody reads day to day.
         positions = {entry_id: idx for idx, entry_id in enumerate(merged.ids)}
 
         def sort_key(entry: AssistantEntrySummary):
@@ -185,6 +193,16 @@ class AssistantEntriesMixin:
             return (1, 0, entry.title.lower())
 
         entries.sort(key=sort_key)
+        # Stamp curation state as COMPUTED metadata, so a view groups/filters on
+        # it through the ordinary field machinery (#332/#333). Position in the
+        # returned list already encodes the order, but "is this in my roster?"
+        # is NOT recoverable from it: the unlisted tail is contiguous with the
+        # listed sequence and looks identical. `computed_metadata`, never
+        # `metadata` — the latter round-trips to disk through
+        # `save_assistant_entry`, and a curation state written into front matter
+        # would be contradicted by the ordering files on the next read.
+        for entry in entries:
+            entry.computed_metadata = self._curation_metadata(entry.id, positions)
         return AssistantEntryList(entries=entries)
 
     def merged_assistant_order(self) -> MergedAssistantOrder:
@@ -254,11 +272,39 @@ class AssistantEntriesMixin:
             raise ProjectServiceError(f"Unknown assistant id: {request.entry_id}.", 422)
         folder = self._assistant_layer_folder_for_id(request.layer_id)
         order = self._read_assistants_order(folder)
+        # Unconditional, because exclusion no longer decides visibility (see
+        # `list_assistant_entries`): it says "not Active here", which is exactly
+        # what un-listing means whether the id was inherited or listed locally.
+        # An earlier fix made this conditional on some other layer still listing
+        # the id — correct in outcome, but it gave one gesture two meanings
+        # depending on where the file happened to live, which the user cannot
+        # see. Fixing the projection instead let the gesture stay uniform.
         order.ids = [eid for eid in order.ids if eid != request.entry_id]
         if request.entry_id not in order.excluded:
             order.excluded.append(request.entry_id)
         self._write_assistants_order(folder, order)
         return self.list_assistant_entries()
+
+    def _curation_metadata(self, entry_id: str, positions: dict[str, int] | None = None) -> dict[str, object]:
+        """The curation pair for one assistant, as computed-field values (#333).
+
+        Shared by the roster and the single-entry read. Splitting them was the
+        bug: only the roster stamped, so opening an assistant in the editor drew
+        `Curation` and `Priority` as permanently blank locked rows — for a kind
+        whose metadata rail *is* its editor, two thirds of the pane's new fields
+        were empty. A computed field that some read paths fill and others do not
+        is worse than one that does not exist.
+
+        `positions` is passed in by the roster, which already built the index;
+        a lone caller pays for one fold.
+        """
+        if positions is None:
+            positions = {eid: idx for idx, eid in enumerate(self.merged_assistant_order().ids)}
+        position = positions.get(entry_id)
+        return {
+            "listed": "listed" if position is not None else "unlisted",
+            "position": position,
+        }
 
     def _known_assistant_ids(self) -> set[str]:
         return {
@@ -268,14 +314,18 @@ class AssistantEntriesMixin:
         }
 
     def _prepend_to_assistants_order(self, folder: Path, entry_id: str) -> None:
-        """Put a newly created assistant on top of **its own layer's** list.
+        """Put an assistant on top of the given layer's list.
 
-        The issue phrases this as "topmost, therefore the default" (#332,
-        ADR-0024). That holds only when the layer is the innermost one: the fold
-        puts every descendant layer's `ids` ahead of this one, so an assistant
-        created at the machine layer sits below anything a project layer has
-        listed. That is most-local-wins working correctly, not a bug — but the
-        shorter phrasing is wrong often enough to be worth stating.
+        Callers pass the LOCAL layer (#333), which is what makes "topmost,
+        therefore the default" (#332, ADR-0024) actually true. The caveat this
+        docstring used to carry — that the phrasing only holds at the innermost
+        layer — was a description of the bug rather than of the design: the fold
+        puts every local id ahead of the inherited remainder, so prepending to
+        the layer a file happened to land on left a machine-layer assistant
+        below the whole local list. The id here may name an assistant living at
+        any layer; that asymmetry is the point (#332's central gesture), and it
+        is why nothing needs to be moved or copied to make a shared assistant
+        lead one project's roster.
         """
         order = self._read_assistants_order(folder)
         order.ids = [entry_id] + [eid for eid in order.ids if eid != entry_id]
@@ -322,6 +372,7 @@ class AssistantEntriesMixin:
             revision=self._revision(path),
             entry_type=raw_entry_type,
             metadata=self._normalise_metadata(front_matter.get("metadata"), path),
+            computed_metadata=self._curation_metadata(node_id),
             source_layer_id=index_entry.source_layer_id,
             source_layer_label=index_entry.source_layer_label,
         )
@@ -341,10 +392,21 @@ class AssistantEntriesMixin:
             "",
         )
         # Creating an assistant is a statement of intent about the one you just
-        # made, so it leads its layer's list rather than landing in the
-        # alphabetical tail. See `_prepend_to_assistants_order` for why that is
-        # not the same as "it is now the default".
-        self._prepend_to_assistants_order(target_folder, entry_id)
+        # made, so it leads the roster rather than landing in the alphabetical
+        # tail.
+        #
+        # The opinion goes to the LOCAL layer, not to the layer the FILE landed
+        # on (#333). Those are different questions: where a node lives is about
+        # ownership and sharing, while "this one comes first" is curation, and
+        # #332 makes curation always the open project's opinion about what it
+        # inherits. Prepending to the creation folder instead was correct only
+        # while the two coincided — once the local layer holds any `ids`, the
+        # fold puts every id it names ahead of the inherited remainder, so a
+        # machine-layer prepend landed the new assistant BELOW the whole local
+        # list and it silently stopped being the default. Writing the opinion
+        # locally keeps the file exactly where the user asked for it; nothing is
+        # moved or cloned to make it lead.
+        self._prepend_to_assistants_order(self._assistant_layer_folder_for_id(None), entry_id)
         return self.read_assistant_entry(entry_id)
 
     def save_assistant_entry(self, entry_id: str, request: SaveAssistantEntryRequest) -> AssistantEntry:
@@ -359,6 +421,27 @@ class AssistantEntriesMixin:
             raise ProjectServiceError("Assistant changed on disk after it was opened.", 409)
         self._check_entry_type_kind(request.entry_type, "assistant")
         metadata = self._normalise_metadata(request.metadata, path)
+        # Drop DERIVED keys before they reach disk (#333). The roster stamps
+        # `listed`/`position` into `computed_metadata`; a client that spreads
+        # that back into `metadata` on save would otherwise freeze a curation
+        # state into front matter that the `.order.yaml` fold contradicts on the
+        # very next read. Scene and lore saves are already protected — they
+        # validate and 422 — but the assistant save path does not validate, so
+        # the guard belongs here.
+        #
+        # Computed keys ONLY, never the full unknown/not-allowed strip. An
+        # assistant lives at the machine layer and is shared by every project,
+        # while `read_metadata_schema()` is the schema of whichever project
+        # happens to be OPEN. Filtering against it would delete any field a
+        # *different* project's schema layer declares — open project B, rename
+        # an assistant, and a field project A relies on is gone from disk for
+        # both. That is the regression this narrower form exists to avoid.
+        computed = {
+            field_id
+            for field_id, field in self.read_metadata_schema().fields.items()
+            if field.type == "computed"
+        }
+        metadata = {k: v for k, v in metadata.items() if k not in computed}
         self._write_node_entry_file(path, node_id, request.title, request.entry_type, metadata, "")
         self._maybe_rename_node_file(path, request.title)
         # Register the assistant's tags in the machine-global vocabulary so the
@@ -376,10 +459,21 @@ class AssistantEntriesMixin:
             index_entry.path.unlink()
         return self.list_assistant_entries()
 
-    def _assistant_layer_folder_for_id(self, layer_id: str) -> Path:
-        """Resolve a layer_id (from list_metadata_schema_layers, or "") to its
-        assistants/ folder. Empty layer_id → machine config dir (the canonical
-        per-user roster).
+    def _assistant_layer_folder_for_id(self, layer_id: str | None) -> Path:
+        """Resolve a layer_id (from list_metadata_schema_layers, "", or None) to
+        its assistants/ folder.
+
+        Three cases, and the distinction between the first two is load-bearing:
+          None → the LOCAL (innermost) layer, i.e. the open project. Curation is
+            always an opinion the current book holds about what it inherits, so
+            a caller that is simply curating says nothing about layers at all —
+            #318's "no layer arithmetic in the frontend". Degenerates to the
+            machine layer when no project is open, which is then the only layer.
+          ""   → the machine config dir explicitly (the canonical per-user
+            roster). Kept distinct from None because `create_assistant_entry`
+            uses it to put a new assistant on the machine layer *while a project
+            is open*, which None would silently redirect.
+          else → that layer by id.
 
         Reverses the id over the one walk (#329) instead of re-deriving the
         chain. The machine layer stays reachable two ways — "" and its folder
@@ -387,6 +481,8 @@ class AssistantEntriesMixin:
         """
         from app.services import machine_settings as ms_service
 
+        if layer_id is None:
+            return ms_service.assistants_dir() if self.root_path is None else self.root_path / "assistants"
         if not layer_id:
             return ms_service.assistants_dir()
         # Deliberately not `_machine_layer_folder()`: that gates on the
@@ -436,10 +532,29 @@ class AssistantEntriesMixin:
         # No id supplied: the topmost assistant in the **sorted roster** — the
         # same order the UI shows (per-layer .order.yaml, then title), so the
         # backend's fallback default and the frontend's dynamic default agree.
-        roster = self.list_assistant_entries().entries
-        if not roster:
+        # Since #333 the roster carries un-listed entries too — shown so nothing
+        # the app knows about becomes unreachable — so "topmost row" stopped
+        # meaning "topmost of my roster". Un-listing an assistant must never be
+        # a way to make the app start *using* it.
+        #
+        # The first LISTED id, and nothing else — no scan of the wider roster to
+        # find something usable. `create_assistant_entry` prepends every new
+        # assistant to its layer's `.order.yaml`, so anything made through the
+        # app is listed from birth and this is never empty in practice; an
+        # unlisted roster means the author emptied it deliberately, and the right
+        # answer then is no default rather than a guess.
+        #
+        # An earlier version fell back to the topmost row when nothing was
+        # listed. That was written for an install with no `.order.yaml`, a state
+        # only the hand-built test fixtures below are ever in — they write
+        # assistant files directly instead of going through create. Keeping the
+        # fallback would have meant reaching past the author's own list to pick
+        # something they never chose.
+        merged = self.merged_assistant_order()
+        listed = next((entry_id for entry_id in merged.ids if entry_id in index.by_id), None)
+        if listed is None:
             return None
-        entry = index.by_id.get(roster[0].id)
+        entry = index.by_id.get(listed)
         return self._read_assistant_from_index_entry(entry) if entry else None
 
     def _read_assistant_from_index_entry(

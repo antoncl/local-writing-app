@@ -45,6 +45,7 @@ from app.models import (
     UpsertMetadataGroupRequest,
 )
 from app.services.project.default_schema import (
+    AUTHORABLE_COMPUTED_FUNCTIONS,
     DEFAULT_METADATA_SCHEMA,
     INTRINSIC_FIELD_KEYS,
 )
@@ -536,9 +537,14 @@ class MetadataSchemaMixin:
         if request.field.type == "computed":
             spec = request.field.computed or {}
             function = spec.get("function")
-            if function not in ("word_count", "counter", "cost"):
+            # Deliberately the AUTHORABLE subset, not every known function: the
+            # built-in ones are resolver-supplied and meaningless on a type the
+            # resolver never visits, so offering them here would mint fields
+            # that are silently always empty.
+            if function not in AUTHORABLE_COMPUTED_FUNCTIONS:
                 raise ProjectServiceError(
-                    "Computed fields must use a supported function (word_count, counter, or cost).",
+                    "Computed fields must use a supported function "
+                    f"({', '.join(AUTHORABLE_COMPUTED_FUNCTIONS)}).",
                     422,
                 )
             if function == "counter" and spec.get("scope", "siblings") not in ("siblings", "manuscript"):

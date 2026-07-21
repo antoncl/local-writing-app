@@ -52,6 +52,16 @@ export function structureToEvalNodes(structure: StructureDocument | null): EvalN
       entry_type: node.type,
       title: node.title,
       metadata,
+      // Carried in ADDITION to the fold above, not instead of it. `fieldValue`
+      // routes a field the schema declares `computed` to this dict (ADR-0029 §D),
+      // so a node that only folded would read `undefined` for `number` — the
+      // counter the manuscript walk injects — and every Draft/Research view
+      // filtering or sorting on it would silently evaluate to nothing. The fold
+      // stays because other consumers read the merged `metadata` (display
+      // templates, the roster's one-pass filterability, #184 Phase 3); the
+      // disjoint-keys invariant above is what makes carrying both consistent
+      // rather than two sources of truth.
+      computed_metadata: node.computed_metadata ?? {},
       // #201: a scene's canonical identity is its front-matter `scene_id`, which
       // is what the reverse reference index keys on — while its roster `id` is
       // the structure `node.id`. Carry it so `field_of(…, references)` bridges

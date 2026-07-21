@@ -21,7 +21,7 @@ class MigrateDefaultModelsTests(unittest.TestCase):
 
     def setUp(self) -> None:
         self.temp_dir = TemporaryDirectory()
-        self.config_dir = Path(self.temp_dir.name).resolve() / "config"
+        self.config_dir = Path(self.temp_dir.name) / "config"
         self.config_dir.mkdir()
         self._patcher = patch(
             "app.services.machine_settings.config_path",
@@ -68,7 +68,7 @@ class ProjectServiceResolveAssistantTests(unittest.TestCase):
 
     def setUp(self) -> None:
         self.temp_dir = TemporaryDirectory()
-        self.config_dir = Path(self.temp_dir.name).resolve() / "config"
+        self.config_dir = Path(self.temp_dir.name) / "config"
         self.config_dir.mkdir()
         self._patcher = patch(
             "app.services.machine_settings.config_path",
@@ -102,6 +102,15 @@ class ProjectServiceResolveAssistantTests(unittest.TestCase):
             "---\n",
             encoding="utf-8",
         )
+        # These files are written directly rather than through
+        # `create_assistant_entry`, which would have prepended each id to the
+        # layer's `.order.yaml`. Seed the equivalent so the fixture matches an
+        # install the app can actually produce: since #333 the dynamic default is
+        # the first LISTED assistant, and a roster nothing has ever listed is a
+        # test artifact, not a state a user reaches.
+        (folder / ".order.yaml").write_text(
+            "ids:\n- cheap\n- creative\nexcluded: []\n", encoding="utf-8"
+        )
         global_service.__init__()
 
     def tearDown(self) -> None:
@@ -132,14 +141,14 @@ class ChatEndpointAssistantTests(unittest.TestCase):
 
     def setUp(self) -> None:
         self.temp_dir = TemporaryDirectory()
-        self.root = Path(self.temp_dir.name).resolve() / "project"
+        self.root = Path(self.temp_dir.name) / "project"
         global_service.__init__()
         global_service.create_project(self.root, "Assistant Tests")
         global_service.update_project_settings(
             UpdateProjectSettingsRequest(ai_policy="cloud-allowed")
         )
         self.client = TestClient(app)
-        self.config_dir = Path(self.temp_dir.name).resolve() / "config"
+        self.config_dir = Path(self.temp_dir.name) / "config"
         self.config_dir.mkdir()
         self._patcher = patch(
             "app.services.machine_settings.config_path",
@@ -173,6 +182,12 @@ class ChatEndpointAssistantTests(unittest.TestCase):
             "  ai_max_tokens: 512\n"
             "---\n",
             encoding="utf-8",
+        )
+        # Written directly rather than through `create_assistant_entry`, which
+        # would have listed each id — see ProjectServiceResolveAssistantTests.
+        # The endpoint's no-id default is the first LISTED assistant since #333.
+        (folder / ".order.yaml").write_text(
+            "ids:\n- cheap\n- creative\nexcluded: []\n", encoding="utf-8"
         )
         # Seed machine settings with the api key.
         ms.save_settings(
@@ -239,11 +254,11 @@ class MachineSettingsViewTests(unittest.TestCase):
 
     def setUp(self) -> None:
         self.temp_dir = TemporaryDirectory()
-        self.root = Path(self.temp_dir.name).resolve() / "project"
+        self.root = Path(self.temp_dir.name) / "project"
         global_service.__init__()
         global_service.create_project(self.root, "View Tests")
         self.client = TestClient(app)
-        self.config_dir = Path(self.temp_dir.name).resolve() / "config"
+        self.config_dir = Path(self.temp_dir.name) / "config"
         self.config_dir.mkdir()
         self._patcher = patch(
             "app.services.machine_settings.config_path",
@@ -284,11 +299,11 @@ class FileBackedAssistantsTests(unittest.TestCase):
 
     def setUp(self) -> None:
         self.temp_dir = TemporaryDirectory()
-        self.root = Path(self.temp_dir.name).resolve() / "project"
+        self.root = Path(self.temp_dir.name) / "project"
         global_service.__init__()
         global_service.create_project(self.root, "Files Tests")
         self.client = TestClient(app)
-        self.config_dir = Path(self.temp_dir.name).resolve() / "config"
+        self.config_dir = Path(self.temp_dir.name) / "config"
         self.config_dir.mkdir()
         self._patcher = patch(
             "app.services.machine_settings.config_path",
@@ -339,11 +354,11 @@ class AssistantReorderTests(unittest.TestCase):
 
     def setUp(self) -> None:
         self.temp_dir = TemporaryDirectory()
-        self.root = Path(self.temp_dir.name).resolve() / "project"
+        self.root = Path(self.temp_dir.name) / "project"
         global_service.__init__()
         global_service.create_project(self.root, "Reorder Tests")
         self.client = TestClient(app)
-        self.config_dir = Path(self.temp_dir.name).resolve() / "config"
+        self.config_dir = Path(self.temp_dir.name) / "config"
         self.config_dir.mkdir()
         self._patcher = patch(
             "app.services.machine_settings.config_path",
@@ -411,10 +426,34 @@ class AssistantReorderTests(unittest.TestCase):
 
         ids = [e["id"] for e in self.client.get("/api/assistants").json()["entries"]]
         self.assertEqual(ids, [new_id, "alpha", "bravo", "charlie"])
-        order = global_service._read_yaml(self.config_dir / "assistants" / ".order.yaml")
-        self.assertEqual(order["ids"], [new_id, "alpha", "bravo"])
 
-    def test_unlist_removes_an_assistant_from_the_roster(self) -> None:
+        # The FILE goes where asked — the machine layer, shared across projects.
+        self.assertTrue((self.config_dir / "assistants" / "Zulu.md").exists())
+        # The OPINION goes to the local layer (#333). These are different
+        # questions, and conflating them is what used to make a new assistant
+        # stop being the default: the fold puts local ids ahead of the inherited
+        # remainder, so a machine-layer prepend sank below anything the project
+        # had listed. Nothing is moved or copied to make a shared assistant lead.
+        local_order = global_service._read_yaml(self.root / "assistants" / ".order.yaml")
+        self.assertEqual(local_order["ids"], [new_id])
+        machine_order = global_service._read_yaml(self.config_dir / "assistants" / ".order.yaml")
+        self.assertEqual(machine_order["ids"], ["alpha", "bravo"], "the machine layer's opinion is untouched")
+
+    def test_creating_an_assistant_leads_even_when_the_project_has_listed_others(self) -> None:
+        # The regression the split caused: once the local layer holds ANY ids,
+        # a machine-layer prepend lands the new assistant below every one of
+        # them, so `resolve_assistant(None)` stops returning it.
+        self.client.post("/api/assistants/order", json={"ordered_ids": ["charlie", "alpha", "bravo"]})
+        response = self.client.post(
+            "/api/assistants",
+            json={"title": "Zulu", "entry_type": "assistant:assistant", "layer_id": ""},
+        )
+        new_id = response.json()["id"]
+        ids = [e["id"] for e in self.client.get("/api/assistants").json()["entries"]]
+        self.assertEqual(ids[0], new_id)
+        self.assertEqual(global_service.resolve_assistant(None).id, new_id)
+
+    def test_unlist_deactivates_an_assistant_without_hiding_it(self) -> None:
         # Seed a real `ids` first: against an empty list, unlist's "drop it from
         # `ids`" step is vacuous, and without it the merger's ids-wins rule
         # would keep the assistant listed and the unlist would silently do
@@ -428,9 +467,13 @@ class AssistantReorderTests(unittest.TestCase):
             json={"layer_id": self.machine_layer_id, "entry_id": "bravo"},
         )
         self.assertEqual(response.status_code, 200, response.text)
-        self.assertEqual(
-            [e["id"] for e in response.json()["entries"]], ["alpha", "charlie"]
-        )
+        # `bravo` leaves the ACTIVE sequence and trails with the other unlisted
+        # entry — it does not leave the roster. Nothing the app knows about may
+        # become invisible, or the gesture has no undo (#333).
+        entries = {e["id"]: e for e in response.json()["entries"]}
+        self.assertEqual([e["id"] for e in response.json()["entries"]], ["alpha", "bravo", "charlie"])
+        self.assertEqual(entries["alpha"]["computed_metadata"]["listed"], "listed")
+        self.assertEqual(entries["bravo"]["computed_metadata"]["listed"], "unlisted")
         order = global_service._read_yaml(
             self.config_dir / "assistants" / ".order.yaml"
         )
@@ -491,6 +534,162 @@ class AssistantReorderTests(unittest.TestCase):
         ids = [e["id"] for e in response.json()["entries"]]
         self.assertEqual(ids, ["bravo", "charlie", "alpha"])
 
+    def test_nothing_listed_stamps_every_entry_unlisted(self) -> None:
+        # No layer holds an opinion, so the whole roster is the tail. Order is
+        # still defined (alphabetical), which is exactly why `listed` cannot be
+        # inferred from position.
+        entries = self.client.get("/api/assistants").json()["entries"]
+        curation = [e["computed_metadata"] for e in entries]
+        self.assertEqual([c["listed"] for c in curation], ["unlisted"] * 3)
+        self.assertEqual([c["position"] for c in curation], [None, None, None])
+
+    def test_listing_stamps_listed_and_position(self) -> None:
+        self.client.post(
+            "/api/assistants/order",
+            json={"layer_id": self.machine_layer_id, "ordered_ids": ["charlie", "alpha"]},
+        )
+        entries = self.client.get("/api/assistants").json()["entries"]
+        curation = {e["id"]: e["computed_metadata"] for e in entries}
+        self.assertEqual(curation["charlie"], {"listed": "listed", "position": 0})
+        self.assertEqual(curation["alpha"], {"listed": "listed", "position": 1})
+        # `bravo` was never named, so it trails — unlisted, no position.
+        self.assertEqual(curation["bravo"], {"listed": "unlisted", "position": None})
+
+    def test_curation_is_never_written_into_stored_metadata(self) -> None:
+        # The response keeping the pair out of `metadata` is the EASY half and
+        # proves little on its own — the first version of this test asserted only
+        # that and passed while the invariant was false. What has to hold is that
+        # the pair cannot reach disk even when a client puts it there: a save
+        # that froze a curation state into front matter would be contradicted by
+        # the `.order.yaml` fold on the very next read.
+        self.client.post(
+            "/api/assistants/order",
+            json={"layer_id": self.machine_layer_id, "ordered_ids": ["alpha"]},
+        )
+        entry = next(e for e in self.client.get("/api/assistants").json()["entries"] if e["id"] == "alpha")
+        self.assertNotIn("listed", entry["metadata"])
+        self.assertNotIn("position", entry["metadata"])
+
+        # A naive client spreading computed_metadata back into metadata on save.
+        response = self.client.put(
+            "/api/assistants/alpha",
+            json={
+                "title": "Alpha",
+                "entry_type": "assistant:assistant",
+                "metadata": {"tags": ["keep"], "listed": "unlisted", "position": 99},
+                "base_revision": "",
+            },
+        )
+        self.assertEqual(response.status_code, 200, response.text)
+        on_disk = (self.config_dir / "assistants" / "alpha.md").read_text(encoding="utf-8")
+        self.assertNotIn("listed", on_disk)
+        self.assertNotIn("position", on_disk)
+        # …and the strip is surgical: the stored field alongside them survives.
+        self.assertIn("keep", on_disk)
+        # The roster still reports the TRAVERSAL's answer, not the rejected one.
+        entry = next(e for e in self.client.get("/api/assistants").json()["entries"] if e["id"] == "alpha")
+        self.assertEqual(entry["computed_metadata"], {"listed": "listed", "position": 0})
+
+    def test_unlisting_a_locally_owned_assistant_leaves_it_in_the_tail(self) -> None:
+        # The case that used to orphan an assistant: its file lives at the very
+        # layer doing the un-listing, so #332's roster filter dropped it out of
+        # sight with no UI path back. Exclusion is now recorded exactly as it is
+        # for an inherited id — the difference is that it no longer decides
+        # visibility, so one uniform gesture covers both.
+        self.client.post(
+            "/api/assistants/order",
+            json={"layer_id": self.machine_layer_id, "ordered_ids": ["alpha", "bravo"]},
+        )
+        response = self.client.post(
+            "/api/assistants/unlist",
+            json={"layer_id": self.machine_layer_id, "entry_id": "alpha"},
+        )
+        self.assertEqual(response.status_code, 200, response.text)
+        entries = {e["id"]: e for e in response.json()["entries"]}
+        self.assertIn("alpha", entries, "un-listing must not remove it from the roster")
+        self.assertEqual(entries["alpha"]["computed_metadata"]["listed"], "unlisted")
+        order = global_service._read_yaml(self.config_dir / "assistants" / ".order.yaml")
+        self.assertEqual(order["ids"], ["bravo"])
+        self.assertEqual(order["excluded"], ["alpha"])
+        # …and it can be listed again, which is what makes the gesture safe.
+        self.client.post("/api/assistants/order", json={"ordered_ids": ["alpha", "bravo"]})
+        entries = {e["id"]: e for e in self.client.get("/api/assistants").json()["entries"]}
+        self.assertEqual(entries["alpha"]["computed_metadata"]["listed"], "listed")
+
+    def test_an_unlisted_assistant_is_never_the_default(self) -> None:
+        # The roster shows un-listed entries since #333, so "topmost row" stopped
+        # meaning "topmost of my roster". Without this, un-listing an assistant
+        # while nothing else is listed made it the AI default — un-listing as a
+        # way to START using something. Every AI call with no explicit
+        # assistant_id resolves through here.
+        self.client.post(
+            "/api/assistants/unlist",
+            json={"layer_id": self.machine_layer_id, "entry_id": "alpha"},
+        )
+        # `alpha` is still in the roster (visible, un-listed) and sorts first by
+        # title, so the pre-#333 "topmost row" rule would hand it straight back.
+        entries = [e["id"] for e in self.client.get("/api/assistants").json()["entries"]]
+        self.assertEqual(entries[0], "alpha")
+        # Nothing is listed, so there is no default — resolution never reaches
+        # past the author's own list to pick something they did not choose.
+        self.assertIsNone(global_service.resolve_assistant(None))
+
+        # Listing one makes it the default; the un-listed `alpha` stays out even
+        # though it still sorts first in the roster.
+        self.client.post("/api/assistants/order", json={"ordered_ids": ["charlie"]})
+        self.assertEqual(global_service.resolve_assistant(None).id, "charlie")
+
+    def test_saving_an_assistant_keeps_fields_this_project_does_not_declare(self) -> None:
+        # An assistant lives at the MACHINE layer and is shared by every project,
+        # so a save must not filter its metadata against whichever project is
+        # open. An earlier form of the curation guard ran the full
+        # unknown/not-allowed strip here, which deleted any field another
+        # project's schema layer declared: open project B, rename an assistant,
+        # and project A's field was gone from disk for good.
+        self.client.put(
+            "/api/assistants/alpha",
+            json={
+                "title": "Alpha",
+                "entry_type": "assistant:assistant",
+                # `house_style` is declared by no schema this project can see.
+                "metadata": {"tags": ["keep"], "house_style": "wry, close third"},
+                "base_revision": "",
+            },
+        )
+        on_disk = (self.config_dir / "assistants" / "alpha.md").read_text(encoding="utf-8")
+        self.assertIn("house_style", on_disk)
+        self.assertIn("wry, close third", on_disk)
+
+    def test_reading_one_assistant_stamps_curation_like_the_roster(self) -> None:
+        # The editor opens a SINGLE entry, and for assistants the metadata rail
+        # is the whole pane — so a computed field the roster fills and the single
+        # read does not renders as a permanently blank locked row.
+        self.client.post(
+            "/api/assistants/order",
+            json={"layer_id": self.machine_layer_id, "ordered_ids": ["bravo", "alpha"]},
+        )
+        listed = self.client.get("/api/assistants/bravo").json()
+        self.assertEqual(listed["computed_metadata"], {"listed": "listed", "position": 0})
+        # …and the unlisted case reports the absence rather than omitting the key.
+        unlisted = self.client.get("/api/assistants/charlie").json()
+        self.assertEqual(unlisted["computed_metadata"], {"listed": "unlisted", "position": None})
+
+    def test_unlisting_repositions_the_survivors(self) -> None:
+        # Replaces an earlier test that asserted un-listing REMOVED the entry —
+        # it was written against the orphan behaviour and codified it as intent.
+        # What still has to hold is that positions renumber for whoever is left.
+        self.client.post(
+            "/api/assistants/order",
+            json={"layer_id": self.machine_layer_id, "ordered_ids": ["alpha", "bravo"]},
+        )
+        self.client.post(
+            "/api/assistants/unlist",
+            json={"layer_id": self.machine_layer_id, "entry_id": "alpha"},
+        )
+        curation = {e["id"]: e["computed_metadata"] for e in self.client.get("/api/assistants").json()["entries"]}
+        self.assertEqual(curation["bravo"], {"listed": "listed", "position": 0})
+        self.assertEqual(curation["alpha"], {"listed": "unlisted", "position": None})
+
 
 class AssistantLayerOrderingTests(unittest.TestCase):
     """#332: the machine layer is the OUTERMOST layer, so it lands at the
@@ -505,11 +704,11 @@ class AssistantLayerOrderingTests(unittest.TestCase):
 
     def setUp(self) -> None:
         self.temp_dir = TemporaryDirectory()
-        self.root = Path(self.temp_dir.name).resolve() / "project"
+        self.root = Path(self.temp_dir.name) / "project"
         global_service.__init__()
         global_service.create_project(self.root, "Layer Order Tests")
         self.client = TestClient(app)
-        self.config_dir = Path(self.temp_dir.name).resolve() / "config"
+        self.config_dir = Path(self.temp_dir.name) / "config"
         self.config_dir.mkdir()
         self._patcher = patch(
             "app.services.machine_settings.config_path",

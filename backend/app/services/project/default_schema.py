@@ -23,6 +23,29 @@ from typing import Any
 # consumer share one source of truth.
 INTRINSIC_FIELD_KEYS: tuple[str, ...] = ("title", "entry_type", "id")
 
+# Every `computed` function the app knows, split by WHO may declare one.
+#
+# Authorable — a user can point a schema field at these from the field editor,
+# so `save_metadata_field` validates against this tuple and nothing else.
+#
+# Built-in — supplied by a resolver rather than by `_computed_entry_metadata`'s
+# body-walking dispatch, and meaningless on an arbitrary entry type: `references`
+# is inverted at view-eval time on the frontend, and the assistant pair is
+# stamped by the layer traversal (#332/#333). Offering them in the field editor
+# would let a user declare "assistant curation" on a lore type and get a field
+# that is silently always empty.
+#
+# One place, because there were three and they already disagreed: this tuple,
+# the dispatch in `computed_metadata.py`, and the frontend field editor's own
+# union — which still omits `cost` (tracked separately, not fixed here).
+AUTHORABLE_COMPUTED_FUNCTIONS: tuple[str, ...] = ("word_count", "counter", "cost")
+BUILTIN_COMPUTED_FUNCTIONS: tuple[str, ...] = (
+    "references",
+    "assistant_listed",
+    "assistant_position",
+)
+COMPUTED_FUNCTIONS: tuple[str, ...] = AUTHORABLE_COMPUTED_FUNCTIONS + BUILTIN_COMPUTED_FUNCTIONS
+
 DEFAULT_METADATA_SCHEMA: dict[str, Any] = {
     "version": 1,
     "entry_types": {
@@ -277,6 +300,8 @@ DEFAULT_METADATA_SCHEMA: dict[str, Any] = {
                 "summary",
                 "tags",
                 "color",
+                "listed",
+                "position",
             ],
             "has_body": False,
             "color": "graphite",
@@ -468,6 +493,37 @@ DEFAULT_METADATA_SCHEMA: dict[str, Any] = {
             "name": "References",
             "type": "computed",
             "computed": {"function": "references", "value_type": "node_set"},
+        },
+        "listed": {
+            # An assistant's CURATION state (#332/#333) — is it in the author's
+            # roster, or merely available? Computed, not stored: the value is
+            # the layer traversal's answer (`.order.yaml` merged across layers),
+            # so it has no place in an assistant's front matter and must not be
+            # editable — hand-editing it would assert a curation the ordering
+            # files contradict on the next read.
+            #
+            # `computed.value_type` declares the payload the way `references`
+            # does, so surfaces can type it without re-deriving: a `select`, and
+            # therefore groupable (the #333 default groups on it) while the
+            # field itself stays read-only. This is the shape #232 wants for
+            # `source_layer` too — a resolver-stamped field rather than a magic
+            # string special-cased in every consumer.
+            "name": "Curation",
+            "type": "computed",
+            "options": [
+                {"value": "listed", "label": "Active"},
+                {"value": "unlisted", "label": "Unlisted"},
+            ],
+            "computed": {"function": "assistant_listed", "value_type": "select"},
+        },
+        "position": {
+            # Index in the merged priority sequence, or unset when the assistant
+            # is unlisted — an assistant nobody has ordered has no priority to
+            # report, and the unlisted tail's order is a fallback rather than an
+            # expressed one. Computed for the same reason as `listed`.
+            "name": "Priority",
+            "type": "computed",
+            "computed": {"function": "assistant_position", "value_type": "number"},
         },
         "ai_provider": {
             "name": "Subscription",

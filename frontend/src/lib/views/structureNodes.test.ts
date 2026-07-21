@@ -201,3 +201,44 @@ describe("structureToEvalNodes — references over the Draft roster (#201 id-spa
   });
 
 });
+
+// `fieldValue` routes a schema-declared `computed` field to `computed_metadata`
+// (ADR-0029 §D). The adapter also FOLDS those values into `metadata` for other
+// consumers, and carrying only the fold is a silent trap: every Draft/Research
+// view filtering or sorting on `number` — the counter the manuscript walk
+// injects — would evaluate against `undefined` and quietly render nothing.
+describe("structureToEvalNodes — computed fields stay reachable to the evaluator", () => {
+  const COUNTER_SCHEMA = {
+    version: 1,
+    fields: {
+      parent: { name: "Parent", type: "entity_ref", category: "stored" },
+      number: { name: "Number", type: "computed", category: "computed", computed: { function: "counter", value_type: "number" } },
+    },
+    entry_types: {
+      "scene:base": { name: "Scene root", kind: "scene", abstract: true },
+      "scene:act": { name: "Act", kind: "scene", parent: "scene:base" },
+      "scene:scene": { name: "Scene", kind: "scene", parent: "scene:base" },
+    },
+  } as unknown as MetadataSchema;
+
+  it("carries computed_metadata alongside the merged metadata fold", () => {
+    const node = structureToEvalNodes(draftDoc()).find((n) => n.id === "node_s2")!;
+    expect(node.computed_metadata).toEqual({ number: 2 });
+    // The fold is unchanged — consumers reading the merged dict still work.
+    expect(node.metadata?.number).toBe(2);
+  });
+
+  it("filters the Draft roster on a computed counter", () => {
+    const nodes = structureToEvalNodes(draftDoc());
+    const result = evaluateView(
+      {
+        kind: "scene",
+        expr: { filter: { of: { descendants_of: "scene:base" }, pred: { field: { key: "number", op: "overlap", value: 2 } } } },
+        sort: { by: "manual" },
+      },
+      nodes,
+      { schema: COUNTER_SCHEMA },
+    );
+    expect(result.nodes.map((n) => n.id)).toEqual(["node_s2"]);
+  });
+});

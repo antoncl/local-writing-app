@@ -379,6 +379,17 @@ class AssistantReorderTests(unittest.TestCase):
         self._patcher.stop()
         self.temp_dir.cleanup()
 
+    def _assistant_file(self, entry_id: str) -> Path:
+        """The assistant's file, resolved through the index rather than guessed.
+
+        A save renames the file to match the title (`_maybe_rename_node_file`),
+        and these fixtures deliberately write `alpha.md` with the title `Alpha`
+        — so after any PUT the path is `Alpha.md`. On Windows the case-insensitive
+        filesystem hides that and the old name still resolves; on Linux it does
+        not. Hardcoding the name passed locally and failed in CI.
+        """
+        return global_service._build_assistant_index().by_id[entry_id].path
+
     def test_default_order_is_alphabetical(self) -> None:
         response = self.client.get("/api/assistants")
         ids = [e["id"] for e in response.json()["entries"]]
@@ -581,7 +592,7 @@ class AssistantReorderTests(unittest.TestCase):
             },
         )
         self.assertEqual(response.status_code, 200, response.text)
-        on_disk = (self.config_dir / "assistants" / "alpha.md").read_text(encoding="utf-8")
+        on_disk = self._assistant_file("alpha").read_text(encoding="utf-8")
         self.assertNotIn("listed", on_disk)
         self.assertNotIn("position", on_disk)
         # …and the strip is surgical: the stored field alongside them survives.
@@ -656,7 +667,7 @@ class AssistantReorderTests(unittest.TestCase):
                 "base_revision": "",
             },
         )
-        on_disk = (self.config_dir / "assistants" / "alpha.md").read_text(encoding="utf-8")
+        on_disk = self._assistant_file("alpha").read_text(encoding="utf-8")
         self.assertIn("house_style", on_disk)
         self.assertIn("wry, close third", on_disk)
 

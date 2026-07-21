@@ -116,9 +116,22 @@ ADR-0016 already made the **mutation unit** the single authoring object, and ADR
 - `PATCH` / `DELETE /scenes/{id}/mutations/{marker_id}` already address rows, and a row edit inside a
   carrier rewrites the carrier through the existing marker-rewrite spine.
 
-**Limit, stated deliberately:** the card can only express a change *at an existing stop*. A change
-between stops has no stop to stand on and is authored in the prose, where the position exists. The
-axis is discrete by ADR-0013, and this keeps it honest.
+**There is no "between" — this is not a limitation awaiting closure.** The scrub coordinate is an
+**integer index over units** (`0 = base`, `i ≥ 1 = as of units[i-1]` — `MutationScrubber`'s
+`index: number`, `scrub.scrubTo(index)`), not a position on a continuum. ADR-0013 made the stops
+discrete because effective state is constant between markers and there is nothing to interpolate. So a
+"position between stops" is not something the card declines to edit; it is not expressible on this
+axis at all.
+
+> ⚠ **Implementers: do not read this as an invitation to add intermediate positions.** Authoring at an
+> arbitrary manuscript point requires a **prose cursor**, which the card does not have and must not
+> acquire — ADR-0003 makes position live only where a caller has one, and ADR-0001 anchors a marker to
+> the prose position where the change happens (narrative position *is* file position). A card-side
+> "insert a mutation somewhere in Chapter 7" would have to invent that position, and inventing it is
+> exactly what Model A was chosen to avoid.
+
+**New** mutation points are therefore authored in the prose, where the position exists. The card edits
+the units that exist; it does not create positions.
 
 ### 6. The one rule both axes obey
 

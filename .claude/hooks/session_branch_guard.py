@@ -1,20 +1,24 @@
 #!/usr/bin/env python3
-"""Claude Code SessionStart hook — branch-drift tripwire.
+"""Claude Code SessionStart hook — worktree + branch guard.
 
-Every new session/thread inherits whatever branch the *shared* working tree is
-on. There is only one worktree, so a `git checkout` in any other session or
-spawned background task moves HEAD out from under the next session — and the
-harness's own branch display can lag (it once showed `feat/...` while the tree
-was actually on `design/...`). Git has no pre-checkout hook to *block* that, so
-this surfaces the LIVE branch at session start and shouts if it changed since
-this project's last Claude session.
+Policy (CLAUDE.md, "Starting new work"): the primary working tree belongs to
+Anton. Every Claude session works in its own linked worktree, branched from
+`origin/master`. That turns three former discipline rules into structure:
 
-SessionStart semantics: text on stdout is injected into the model's context, so
-the first thing a new thread sees is the real branch + a warning if it drifted.
-Detection, not prevention — verify before working; another session may have
-switched it.
+- Anton's uncommitted WIP cannot be swept into a commit, stashed by pre-commit,
+  or reverted by its repo-wide `git checkout -- .` — it is in another directory.
+- HEAD cannot drift out from under a session, because no other session shares
+  this tree's HEAD.
+- Work cannot accidentally land on `master`, which the `master gates` ruleset
+  rejects at push time anyway.
 
-Always exits 0; a broken hook must never wedge a session start.
+This hook cannot *block* a session — SessionStart has no veto. What it can do is
+put the truth in front of the model before it edits anything: which tree it is
+in, which branch, and whether that is allowed. Enforcement proper lives in
+`CLAUDE.md` (which arms the EnterWorktree tool) and in `.claude/settings.json`
+(`worktree.baseRef`, pinning the base to origin/master).
+
+Always exits 0; a broken guard must never wedge a session start.
 """
 
 from __future__ import annotations
@@ -22,6 +26,7 @@ from __future__ import annotations
 import contextlib
 import subprocess
 import sys
+from pathlib import Path
 
 # The reflog subject echoed in a drift warning can carry non-ASCII (em dashes in
 # commit messages, etc.). On a Windows cp1252 console that raises
@@ -43,46 +48,93 @@ def git(*args: str) -> str | None:
     return (proc.stdout or "").strip()
 
 
+def in_linked_worktree() -> bool | None:
+    """True in a linked worktree, False in the primary tree, None if unknown.
+
+    A linked worktree has its own `.git` file pointing at a per-worktree admin
+    directory, so `--git-dir` and `--git-common-dir` diverge; in the primary
+    tree they name the same place.
+    """
+    common = git("rev-parse", "--git-common-dir")
+    own = git("rev-parse", "--git-dir")
+    if not common or not own:
+        return None
+    try:
+        return Path(common).resolve() != Path(own).resolve()
+    except Exception:
+        return None
+
+
+def drift_warning(branch: str, head: str) -> list[str]:
+    """Warn if the branch moved since this tree's last Claude session.
+
+    Still worth keeping under the worktree policy: a session can `checkout`
+    inside its own worktree, and the harness's branch display has lagged before.
+    The record lives in the git dir, which is per-worktree, so each worktree
+    tracks its own branch independently.
+    """
+    git_dir = git("rev-parse", "--git-dir")
+    if not git_dir:
+        return []
+    record = Path(git_dir) / "claude-session-branch"
+    previous = None
+    try:
+        previous = record.read_text(encoding="utf-8").strip() or None
+    except Exception:
+        previous = None
+
+    with contextlib.suppress(Exception):
+        record.write_text(branch + "\n", encoding="utf-8")
+
+    if not previous or previous == branch:
+        return []
+    lines = [
+        f"WARNING: git branch CHANGED since this tree's last Claude session: "
+        f"`{previous}` -> `{branch}` ({head}). VERIFY this is the branch you "
+        f"intend before editing or committing.",
+    ]
+    last_move = git("reflog", "-1", "--format=%gs") or ""
+    if last_move:
+        lines.append(f"Most recent HEAD move: {last_move}")
+    return lines
+
+
+def tree_lines(linked: bool | None, branch: str, head: str) -> list[str]:
+    """The headline: which tree this session is in, and whether that is allowed."""
+    if linked is False:
+        return [
+            "STOP: this session is in the PRIMARY working tree, which belongs "
+            "to Anton and routinely holds his uncommitted WIP.",
+            "Do NOT edit, stage, commit, or checkout here. Start the work with "
+            'the EnterWorktree tool, which branches a fresh worktree from '
+            'origin/master (CLAUDE.md, "Starting new work").',
+            "Reading, searching, and answering questions in place is fine.",
+        ]
+    if linked is None:
+        return [
+            f"On git branch `{branch}` ({head}); could not tell whether this "
+            f"is a linked worktree -- verify before editing."
+        ]
+    return [f"In a linked worktree on git branch `{branch}` ({head})."]
+
+
 def main() -> int:
     branch = git("rev-parse", "--abbrev-ref", "HEAD")
     if not branch:  # not a git repo / git unavailable — say nothing
         return 0
     head = git("rev-parse", "--short", "HEAD") or "?"
 
-    # Per-repo record of the branch this project's last Claude session saw. Lives
-    # inside the git dir, so it is never tracked and is worktree-local.
-    git_dir = git("rev-parse", "--git-dir")
-    record = None
-    previous = None
-    if git_dir:
-        from pathlib import Path
-
-        record = Path(git_dir) / "claude-session-branch"
-        try:
-            previous = record.read_text(encoding="utf-8").strip() or None
-        except Exception:
-            previous = None
-
     # ASCII only: this runs on a Windows cp1252 console where emoji/arrows raise
     # UnicodeEncodeError (matches the plain-text house style of the other hook).
-    lines: list[str] = [f"On git branch `{branch}` ({head})."]
+    lines = tree_lines(in_linked_worktree(), branch, head)
 
-    if previous and previous != branch:
-        last_move = git("reflog", "-1", "--format=%gs") or ""
-        lines = [
-            f"WARNING: git branch CHANGED since this project's last Claude "
-            f"session: `{previous}` -> `{branch}` ({head}).",
-            "Another session or background task may have run `git checkout` in "
-            "the shared working tree. VERIFY this is the branch you intend to "
-            "work on before editing or committing -- do not trust a stale "
-            "branch display.",
-        ]
-        if last_move:
-            lines.append(f"Most recent HEAD move: {last_move}")
+    if branch == "master":
+        lines.append(
+            "WARNING: HEAD is on `master`. The `master gates` ruleset rejects "
+            "direct pushes, so commit to a topic branch instead."
+        )
 
-    if record is not None:
-        with contextlib.suppress(Exception):
-            record.write_text(branch + "\n", encoding="utf-8")
+    lines += drift_warning(branch, head)
 
     print("\n".join(lines))
     return 0
@@ -94,5 +146,5 @@ if __name__ == "__main__":
     except SystemExit:
         raise
     except Exception:
-        # A broken tripwire must never wedge a session start.
+        # A broken guard must never wedge a session start.
         raise SystemExit(0) from None

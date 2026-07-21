@@ -49,6 +49,54 @@ re-run `ruff check` and the tests after `--fix`, don't assume one pass is clean.
 Note: bare `uvicorn` without `--reload` does **not** pick up Python changes —
 restart it after editing backend code.
 
+## Starting new work
+
+**The primary working tree is Anton's. Claude work happens in a linked
+worktree — always.** Start with the **EnterWorktree** tool (this paragraph is
+what authorises it); it creates a worktree under `.claude/worktrees/` and moves
+the session into it. `worktree.baseRef` is pinned so the branch forks
+**`origin/master`**, never local `HEAD`.
+
+This is an invariant, not etiquette. It is what three separate rules used to
+ask you to remember, and it retires all three:
+
+- Anton keeps uncommitted WIP in the primary tree. A broad `git add` has swept
+  it into a commit before, and `pre-commit`'s stash — a patch file under
+  `~/.cache/pre-commit`, *not* a git stash, so `git stash list` looks empty —
+  reverts the tree repo-wide while it runs. In a separate directory, neither
+  can reach his files.
+- HEAD used to drift mid-session: another session merges a PR, its branch is
+  deleted, and the shared tree silently lands on `master`. A private worktree
+  has a private HEAD.
+- `origin/master` as the base is now the harness's job, not yours. Reading a
+  floating `HEAD` is what produced the wrong-branch commit this policy came from.
+
+**The one carve-out:** work that genuinely depends on *unmerged* work forks the
+dependency's branch, explicitly, and says so in the PR. Forking `master` for a
+dependent slice is what got #312 rolled back. Prefer not to be in that position
+at all — **one work lane** still stands; sequence dependent work rather than
+running it in parallel.
+
+Mechanics:
+
+- **Everything lands via a PR.** The `master gates` ruleset requires the three
+  checks, requires a PR, and blocks direct pushes and force-pushes to `master`.
+  There is no fast path for a one-line fix, by design.
+- **Check the branch immediately before committing**, not just at session
+  start — `git branch --show-current`. Cheap, and it catches the case above.
+- **A worktree gets its own `node_modules`** (`scripts/npm_run.py` runs a real
+  `npm install`). That costs minutes and disk, so let it happen when a session
+  first needs frontend gates, not upfront — docs-only work never needs it.
+  **Never link or junction a shared `node_modules`/venv into a worktree**; see
+  the gates section for why that is destructive.
+- **Clean up when the PR merges**: `ExitWorktree` with `remove`. It refuses
+  while uncommitted changes or unmerged commits remain, which is the behaviour
+  you want.
+- A worktree is a **fresh checkout**, so gitignored files do not come along. If
+  some future local file must be present in every worktree, list it in a
+  `.worktreeinclude` at the repo root (`.gitignore` syntax; only gitignored
+  matches are copied) rather than copying it by hand.
+
 ## Automated quality gates
 
 The standards below are **machine-enforced** — they no longer depend on

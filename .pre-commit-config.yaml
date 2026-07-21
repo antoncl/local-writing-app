@@ -1,4 +1,4 @@
-# Git pre-commit / pre-push gates. Mirrors the in-session Claude Code hook
+# Git pre-commit gates. Mirrors the in-session Claude Code hook
 # (.claude/hooks/check_edited_file.py) so the same standards apply to commits
 # made outside a Claude session. All hooks are `local` so nothing is downloaded
 # and the existing backend venv / npm are reused.
@@ -6,9 +6,13 @@
 # One-time setup (per clone):
 #   backend/.venv/Scripts/python.exe -m pip install -e "backend[dev]"
 #   backend/.venv/Scripts/pre-commit install
-#   backend/.venv/Scripts/pre-commit install -t pre-push
 #
-# Fast checks run at commit; slow whole-project checks run at push.
+# There is deliberately NO pre-push stage (#352): the slow whole-project gates
+# live in CI, which runs on a clean checkout and cannot be walked past with
+# --no-verify. If an old clone still has one installed, remove it with
+#   backend/.venv/Scripts/pre-commit uninstall -t pre-push
+#
+# Only fast checks run here, at commit time.
 repos:
   - repo: local
     hooks:

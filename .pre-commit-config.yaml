@@ -14,11 +14,15 @@ repos:
     hooks:
       # --- commit stage (fast, staged files) ---
       - id: ruff
-        name: ruff (backend lint)
+        name: ruff (python lint)
         entry: python scripts/venv_run.py -m ruff check --force-exclude
         language: system
         types_or: [python]
-        files: ^backend/
+        # The gate scripts and hooks are linted too (#352): the machinery that
+        # enforces the standards was the one place exempt from them. Rules come
+        # from backend/pyproject.toml either way — .ruff.toml at the root
+        # extends it so files outside backend/ don't fall back to ruff defaults.
+        files: ^(backend|scripts|\.claude/hooks)/
 
       - id: file-size-guard
         name: file-size guard (split before ~1500 LOC)
@@ -40,7 +44,7 @@ repos:
         entry: python scripts/venv_run.py -m ruff check --exit-zero --no-cache --select PLR0912,PLR0913,PLR0915,C901
         language: system
         types_or: [python]
-        files: ^backend/
+        files: ^(backend|scripts|\.claude/hooks)/
         verbose: true
 
       # --- push stage (slow, whole project) ---

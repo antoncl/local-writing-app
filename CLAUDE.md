@@ -53,26 +53,38 @@ restart it after editing backend code.
 
 The standards below are **machine-enforced** — they no longer depend on
 remembering to run a command (a rule that lives only in prose drifts under
-context pressure; that is how `App.svelte` reached ~4900 lines). Three layers,
-weakest → strongest:
+context pressure; that is how `App.svelte` reached ~4900 lines). Two layers,
+weakest → strongest — there is **no CI**, so a `--no-verify` push is unchecked:
 
 1. **In-session** — a Claude Code `PostToolUse` hook
    (`.claude/hooks/check_edited_file.py`, wired in `.claude/settings.json`) runs
    the file-size guard + the style-token guard + `ruff` on **every file you
    edit** and feeds any violation straight back into context. Fix it before
    declaring the task done.
-2. **Git hooks** (`.pre-commit-config.yaml`) — *commit* runs `ruff` + the
-   file-size and style-token guards on staged files; *push* runs
-   `svelte-check` + `pytest`.
+2. **Git hooks** (`.pre-commit-config.yaml`) — *commit* runs `ruff` (blocking) +
+   advisory complexity + the file-size and style-token guards on staged files;
+   *push* runs `svelte-check` + `vitest` + `pytest`. `ruff` covers `backend/`,
+   `scripts/` **and** `.claude/hooks/` — the gate machinery is held to the rules
+   it enforces (#352); the root `.ruff.toml` extends `backend/pyproject.toml` so
+   files outside `backend/` don't fall back to ruff's weaker defaults.
    One-time setup per clone:
    `backend/.venv/Scripts/python.exe -m pip install -e "backend[dev]"`, then
    `backend/.venv/Scripts/pre-commit install` and `… install -t pre-push`.
 
+**In a linked git worktree** the gates must test *that* worktree's code.
+`scripts/venv_run.py` borrows the primary worktree's *interpreter* but forces
+this checkout's `backend/` onto `PYTHONPATH` (#352 — otherwise the editable
+install silently imports the primary tree's `app`), and `scripts/npm_run.py`
+runs a real `npm install` in the worktree. **Never link or junction a shared
+`node_modules`/venv into a worktree**: a recursive delete — `git worktree
+remove -f` among them — walks through the link and guts the primary install
+(#350, and `memory/feedback_never_junction_shared_venv.md`).
+
 The **file-size guard** (`scripts/check_file_size.py`) is the enforced half of
 "no monolithic files": warns ≥1200, **fails ≥1500** lines on `.py/.svelte/.ts`.
 Files knowingly over the cap are listed in that script's `GRANDFATHERED` set
-(currently `main.py`, `test_metadata_validation.py`) — split them when you next
-work there, then delete the entry. The **style-token guard**
+(currently `test_metadata_validation.py`) — split them when you next work there,
+then delete the entry. The **style-token guard**
 (`scripts/check_style_tokens.py`) is the enforced half of the design language
 (`docs/design/design-language.md` §5): hex/rgb color literals and non-token
 `font-size` in frontend style code fail, with its own shrink-to-zero

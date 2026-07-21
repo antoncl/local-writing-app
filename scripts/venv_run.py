@@ -15,6 +15,7 @@ Usage:
 
 from __future__ import annotations
 
+import os
 import subprocess
 import sys
 from pathlib import Path
@@ -33,4 +34,23 @@ if VENV_PYTHON is None:
     )
     raise SystemExit(1)
 
-raise SystemExit(subprocess.run([str(VENV_PYTHON), *sys.argv[1:]]).returncode)
+def _env_with_backend_first() -> dict[str, str]:
+    """Env with this repo's `backend/` ahead of the editable install (#352).
+
+    The venv installs the backend editable against the *primary* worktree, so
+    `import app` resolves there no matter which worktree invoked us. pytest
+    would then collect the invoking worktree's tests and fixtures while
+    importing the primary worktree's `app` — spurious red when the primary tree
+    carries WIP, and worse, silent green when it doesn't. Putting our own
+    `backend/` on PYTHONPATH makes the code under test match the code being
+    pushed. Harmless for ruff (it never imports `app`); set unconditionally so
+    there is one code path.
+    """
+    env = dict(os.environ)
+    backend = str(REPO / "backend")
+    existing = env.get("PYTHONPATH")
+    env["PYTHONPATH"] = f"{backend}{os.pathsep}{existing}" if existing else backend
+    return env
+
+
+raise SystemExit(subprocess.run([str(VENV_PYTHON), *sys.argv[1:]], env=_env_with_backend_first()).returncode)

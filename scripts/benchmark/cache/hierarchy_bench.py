@@ -38,7 +38,8 @@ import shutil
 import sqlite3
 import sys
 import time
-from dataclasses import dataclass, fields as dataclass_fields, is_dataclass
+from dataclasses import dataclass, is_dataclass
+from dataclasses import fields as dataclass_fields
 from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
@@ -47,11 +48,7 @@ sys.path.insert(0, str(REPO_ROOT / "backend"))
 from app.services.project_service import ProjectService  # noqa: E402
 
 FIXTURE_ROOT = REPO_ROOT / "tmp" / "benchmark-fixtures" / "cache"
-LOREM = (
-    "the ship translated into hyper space above the planet while the admiral "
-    "considered her orders and the fleet held station against the coming storm "
-    "of missiles treaties and the long politics of the star kingdom and its allies "
-).split()
+LOREM = ["the", "ship", "translated", "into", "hyper", "space", "above", "the", "planet", "while", "the", "admiral", "considered", "her", "orders", "and", "the", "fleet", "held", "station", "against", "the", "coming", "storm", "of", "missiles", "treaties", "and", "the", "long", "politics", "of", "the", "star", "kingdom", "and", "its", "allies"]
 
 # Fields the DEFAULT schema really declares as entity_ref / entity_ref_list.
 # Using anything else yields zero edges under the real extractor.
@@ -483,7 +480,7 @@ def _report_incremental(svc: ProjectService, index, count: int = 10) -> None:
         return [svc._read_front_matter_only(p) for p in paths]
 
     t_reparse, _ = time_it(reparse)
-    entries = [e for e in list(index.by_id.values())[:: max(1, len(index.by_id) // count)]][:count]
+    entries = list(index.by_id.values())[:: max(1, len(index.by_id) // count)][:count]
     t_refs, _ = time_it(lambda: [svc._reference_edges_for_entry(e, schema) for e in entries])
     print(f"  [Q6] re-parse {count} changed files : {t_reparse * 1000:8.2f} ms")
     print(f"       + re-extract their edges    : {t_refs * 1000:8.2f} ms")

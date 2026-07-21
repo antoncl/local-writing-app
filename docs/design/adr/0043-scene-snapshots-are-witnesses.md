@@ -153,14 +153,17 @@ second file bearing a live scene's id is an index collision, not a historical re
   front matter included. It therefore still carries the *source* node's id, which is correct: it is a
   photograph of that file.
 - `snapshots/<source-node-id>/<snapshot-id>.yaml` — the snapshot's own record: `id`, `snapshot_of`
-  (the source node id), `captured_at`, the scene's `title` as captured, `retention`, the
-  `schema_version` in force at capture, and the witness.
+  (the source node id), `captured_at`, `retention`, the `schema_version` in force at capture, and the
+  witness.
 
-  `title` was originally there to let an orphan listing render a name without parsing every body; that
-  reason is gone with orphan retention (below). It stays for an independent one: `title` is mutable
-  (`INTRINSIC_MUTABLE_FIELDS`, `lore_mutations.py:124`), so the name at capture can differ from the
-  name now, and a snapshot list that shows the current title for every entry hides a rename the author
-  may well be looking for.
+  The sidecar carries no denormalized copy of the scene's `title`. An earlier draft did, first to let
+  an orphan listing render a name, then — once orphans were retired — on the argument that `title` is
+  mutable so the captured name can differ from the current one. Both are gone. Nothing is lost by
+  removing it: the captured title is already in the byte-copy's front matter, so any surface that wants
+  it can read it. What the field actually was is a denormalization with **no consumer that exists**,
+  and this repo has paid for that shape before — mechanisms built for a render surface that never
+  arrived, used by nothing, deleted later. If a surface materializes that needs the lookup to be cheap,
+  it can denormalize then, with a reason.
 
 Splitting them is what makes byte-exactness *provable rather than reconstructed*. Restore is a file
 copy, not a re-serialization of nested YAML — and for the one feature whose job is not losing the
@@ -343,8 +346,6 @@ The value of the witness framing is that the feature's correctness criterion bec
   an interleaved explicit snapshot survives regardless of age.
 - Delete the source scene; assert its snapshot directory is gone and nothing is left behind under
   `snapshots/`. A partial delete would leave exactly the unreachable residue this ADR rejects.
-- Rename a scene, then snapshot it; assert the list shows the name each snapshot was captured under,
-  not the current one.
 
 ## Naming
 

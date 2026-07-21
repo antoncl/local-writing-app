@@ -30,6 +30,14 @@ about title/body, which are mutable too — all-or-nothing is the honest surface
 
 ## Amendment 1 — base at stop 0 is a *resolved* state (2026-07-19, ADR-0039)
 
+> **Resolved by [ADR-0042](0042-inherited-node-edit-gesture.md) (2026-07-21).** Stop-0 editing on an
+> inherited entry may now ship: an **authoring-layer picker** in the rail names the write target — at
+> the node's owning layer an ordinary write, below it an `overrides/` delta. Two clauses below are
+> superseded: the layer axis **does** now select (on the write side only — it still does not scrub the
+> *rendering*), and selecting an ancestor collapses this axis to stop 0, since an ancestor has no
+> manuscript. The mark question is settled (#304 / PR #320): `ti-versions` for an override, `⤳` for a
+> mutation, provenance leading and mutation trailing the value.
+
 Project hierarchies (ADR-0039) make an entry's base potentially composed from several project layers:
 an ancestor-owned node is materialized into the open project, with this layer's per-field overrides
 folded in. Three clarifications, no change to the decision above:

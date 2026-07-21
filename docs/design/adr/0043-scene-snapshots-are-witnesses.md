@@ -156,6 +156,12 @@ second file bearing a live scene's id is an index collision, not a historical re
   (the source node id), `captured_at`, the scene's `title` as captured, `retention`, the
   `schema_version` in force at capture, and the witness.
 
+  `title` was originally there to let an orphan listing render a name without parsing every body; that
+  reason is gone with orphan retention (below). It stays for an independent one: `title` is mutable
+  (`INTRINSIC_MUTABLE_FIELDS`, `lore_mutations.py:124`), so the name at capture can differ from the
+  name now, and a snapshot list that shows the current title for every entry hides a rename the author
+  may well be looking for.
+
 Splitting them is what makes byte-exactness *provable rather than reconstructed*. Restore is a file
 copy, not a re-serialization of nested YAML — and for the one feature whose job is not losing the
 author's words, a round-trip through a serializer is precisely the risk not worth taking. It also keeps
@@ -187,24 +193,28 @@ belongs where `.cache/` and `.migration-backups/` are already handled, and ADR-0
 manifest must skip it too, or every capture invalidates the index. Being *node-shaped* is not being an
 *indexed node*: a witness is evidence about the graph, not a participant in it.
 
-**Snapshots outlive their source — but only if they remain reachable.** Deleting a scene leaves its
-snapshot directory in place, and an earlier draft of this ADR stopped there. That was wrong:
+**Deleting a scene deletes its snapshots.** The confirmation says how many are going.
+
+An earlier draft of this ADR kept them, on the reasoning that destroying the last copy of an author's
+prose is the opposite of the point. That was wrong, for a reason worth stating because it generalizes:
 **unreachable data is not preserved data.** The directory is named by node id, the author knows scenes
-by title, and once the scene is gone there is no node left to hang an affordance on — so "we kept it"
-would amount to disk usage plus a false sense of safety, with recovery available only to someone
-willing to grep the filesystem. That is a worse outcome than either honest alternative, because it is
-the one that *looks* safe.
+by title, and once the scene is gone there is no node left to hang an affordance on — so retention
+without a recovery surface is disk usage plus a false sense of safety, with the data available only to
+someone willing to grep the filesystem. Of the three options that is the worst, precisely because it is
+the one that *looks* safe. Building the recovery surface is the other coherent answer, and it is out of
+scope here: it grows the feature well past snapshot-and-restore, for a case a general undelete should
+own rather than one per feature.
 
-Two consequences, and they are a package:
+Deleting also keeps snapshots consistent with the app as it stands — scene and lore deletes are hard
+deletes (`path.unlink()`), and there is no soft-delete or trash anywhere. A feature that quietly
+retained data after a delete would be the only such thing in the project, which is how a surprising
+invariant gets established by accident.
 
-1. **The sidecar denormalizes the scene's `title` as captured.** It is already present in the copied
-   `.md`, but an orphan listing must not have to parse every captured body to render a name.
-2. **Retention of orphans requires a recovery surface, and that surface is part of v1's acceptance —
-   not a follow-up.** Deleting the wrong chapter is precisely the disaster this feature exists for, so
-   the case must not be the one that silently fails.
-
-If that surface is judged out of scope, then the honest fallback is to **delete a scene's snapshots
-with the scene**, saying so in the confirmation. What must not ship is retention without reachability.
+**The durable property, which holds either way: a scene and its snapshots are one unit of deletion.**
+That is true under today's hard delete, and would remain true under any future undelete or trash
+metaphor — the snapshots travel with the scene rather than needing a concept of their own. If such a
+surface is ever built, whether and how snapshots participate is a decision for that design, not a
+commitment made here.
 
 ## The third axis is value reinterpretation, not schema change
 
@@ -331,9 +341,10 @@ The value of the witness framing is that the feature's correctness criterion bec
   members before and after six captures, and the staleness manifest does not change on capture.
 - Capture seven automatic snapshots; assert five remain, that the two dropped are the oldest, and that
   an interleaved explicit snapshot survives regardless of age.
-- Delete the source scene; assert its snapshots remain listable **and that each renders a human-readable
-  name from the sidecar without parsing the captured body**. The reachability half is the half that
-  fails silently, so it is the half worth pinning.
+- Delete the source scene; assert its snapshot directory is gone and nothing is left behind under
+  `snapshots/`. A partial delete would leave exactly the unreachable residue this ADR rejects.
+- Rename a scene, then snapshot it; assert the list shows the name each snapshot was captured under,
+  not the current one.
 
 ## Naming
 

@@ -362,9 +362,16 @@ class SnapshotIntegrityTests(SnapshotTestCase):
     def test_non_canonical_root_still_hits_the_cache(self) -> None:
         """`..` in the path would otherwise never match the stored `root`, so
         every call would miss *and* rewrite the snapshot — strictly worse than
-        no cache, and silent. No caller does this today; #307 adds callers."""
+        no cache, and silent. No caller does this today; #307 adds callers.
+
+        The detour goes through a folder that **exists**: POSIX resolves a path
+        component by component, so `nonexistent/..` is ENOENT there and would
+        fail this for a reason that has nothing to do with the cache. Windows
+        normalises `..` lexically and would have let that pass — which is what
+        the first version of this test did, green locally and red on Linux CI.
+        """
         self.service._build_node_index(self.root)
-        detour = self.root.parent / "nonexistent" / ".." / self.root.name
+        detour = self.universe.parent / self.universe.name / ".." / self.universe.name / self.root.name
         calls = self._count_collections()
         self.service._build_node_index(detour)
         self.assertEqual(calls[0], 0)

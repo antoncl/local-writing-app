@@ -272,7 +272,15 @@ class ReferencesMixin:
         plus an `index.errors` row. Callers that want the schema still fail
         loudly on their own read; this one does not fail on their behalf.
         """
-        root = root or self._require_project()
+        # Canonicalised **once, here**, so every path derived below — the
+        # snapshot's location, its `root` key, the manifest's keys — is in the
+        # same normal form as the layer folders the walk yields (`layers.py`
+        # resolves too). Normalising at each comparison instead would be a
+        # second place that decides what a path's normal form is, which is the
+        # shape of #356. An unresolved spelling would otherwise miss the cache
+        # on every call *and* rewrite the snapshot each time: strictly worse
+        # than no cache, and silent.
+        root = (root or self._require_project()).resolve()
         layers = self.collect_layers(root, include_machine=True)
         # Fingerprinted **before** the build, not after. A file written while
         # the build runs is then either missed by both (consistent) or indexed

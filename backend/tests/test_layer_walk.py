@@ -106,7 +106,10 @@ class LayerWalkTests(unittest.TestCase):
         error anywhere. Same normal-form defect as #356, one comparison on;
         found by #306's snapshot, which turned it into a permanent cache miss.
         """
-        detour = self.root.parent / "nonexistent" / ".." / self.root.name
+        # Through a folder that exists: POSIX resolves component by component,
+        # so a `..` after a missing folder is ENOENT there, and a test built on
+        # that would be measuring the wrong thing.
+        detour = self.root.parent / self.root.name / ".." / self.root.name
 
         layers = self.service.collect_layers(detour)
 

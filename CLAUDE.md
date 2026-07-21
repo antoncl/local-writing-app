@@ -115,7 +115,7 @@ isolation:
 
 ```bash
 # backend first — it publishes the port the frontend reads
-PORT=8799 python scripts/dev_backend.py          # background it
+python scripts/dev_backend.py                    # background it
 PORT=5199 npm run dev --prefix frontend -- --mode claude   # background it
 ```
 
@@ -123,10 +123,21 @@ Then `preview_start {url: "http://127.0.0.1:5199"}` — the `url` form opens a
 browser tab without starting a server — and verify with `read_page`,
 `read_network_requests`, and the console as usual.
 
-Pick ports outside Anton's `5173`/`8787` and outside another live worktree's.
-Verify isolation rather than assuming it: the uvicorn process should show
-`--app-dir <this worktree>/backend`, and the frontend's API calls should go to
-the port you chose.
+**Do not pick the backend port by hand.** `dev_backend.py` derives a default
+from *this checkout's path* (8800–8899), so sibling worktrees cannot aim at the
+same port; `PORT` still overrides. Choosing one yourself is how #364 happened:
+every worktree defaulted to `8788`, and on Windows `uvicorn --reload` binds with
+`SO_REUSEADDR`, which Windows reads as "share this address" — so the second
+start **succeeds silently**, owns nothing, and the first tree's server keeps
+answering every request. The launcher now refuses an occupied port up front, and
+after startup asks the server on that port to prove it is the one just started
+(a per-launch nonce over `/__dev_backend_provenance`, served by
+`scripts/dev_backend_app.py`). It publishes `tmp/dev-backend-port` only once
+that passes, so the frontend inherits the guarantee — `--mode claude` hard-fails
+on a missing port file rather than showing another tree's data.
+
+Read the startup line rather than assuming isolation: `dev_backend: verified
+<path> is serving 127.0.0.1:<port>` names the checkout actually being served.
 
 **Stopping them: kill the process tree, not the process.** `uvicorn --reload`
 spawns a `multiprocessing` child that survives its parent and keeps holding the

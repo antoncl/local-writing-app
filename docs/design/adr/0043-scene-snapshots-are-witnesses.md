@@ -80,11 +80,17 @@ never authoritative, and never consulted by the resolver — which preserves the
 that effective state is derived and never stored (ADR-0010's revert path recomputes rather than reading
 back a stash).
 
-**Drift on the inheritance axis is detected by the composite revision from #314.** ADR-0039 already
-requires `revision` to become a hash over the ancestor file plus every override in the chain. That is
-precisely the "has this composed value changed?" primitive the witness needs, so the snapshot stores it
-per influencing entity and the drift check is a recompute-and-compare rather than a re-resolution.
-This is a reason to want #314 landed first, not merely a reason to avoid conflicting with it.
+**Drift on the inheritance axis is detected by the entity's `revision`, consumed as an opaque change
+token.** The witness stores whatever `_revision` returns for each influencing entity at capture time;
+the drift check is a recompute-and-compare, never a re-resolution, and the snapshot code never inspects
+the token's structure.
+
+This makes the feature **independent of #314 rather than blocked on it**. ADR-0039 requires `revision`
+to become a hash over the ancestor file plus every override in the chain — but that redefines an
+existing value rather than adding a new one, so snapshots get the more correct detector automatically
+when #314 lands, with no change here. The one seam: tokens captured before that change do not compare
+meaningfully against tokens computed after it. Those snapshots report the inheritance axis as *unknown*
+rather than as *unchanged* — an honest degradation, and pre-1.0 it needs no migration.
 
 **Storage is full copies, not deltas.** Every snapshot stays independently restorable and readable in
 any text editor, with no replay chain whose corruption would forfeit everything after it. Scenes are
@@ -104,6 +110,23 @@ knows which state was worth marking.
 
 **Restore replaces the scene body and reports drift.** It does not touch the mutation records in other
 scenes, the manuscript order, the lore entries, or any ancestor layer.
+
+**Drift reporting is advisory, never blocking.** A restore into drifted context is shown and then
+allowed. This app is a tool, not a straitjacket: an author who understands the consequence is entitled
+to the outcome, and tools that refuse the unusual case are the ones people work around. There is no
+"are you sure" gate, no acknowledgement checkbox, and no restore this feature declines to perform.
+
+The obligation that decision creates is the important half, and it is binding on the surface design:
+**if the report is the only protection, the report is the feature.** It must name what actually
+changed — the entity, the field, the value then versus now — in the author's vocabulary, not "context
+has changed since this snapshot was taken". A vague warning is worse than none, because it trains
+dismissal and then fails silently on the one occasion it mattered. Any surface that cannot state the
+specific consequence has not implemented this ADR.
+
+**The user-facing surface is not designed here.** How snapshots are listed, compared, named, or
+invoked is deliberately left open; this ADR fixes only the contract those surfaces must honour
+(advisory, specific, in the author's vocabulary). It is a separate design pass, and nothing in this
+document should be read as constraining its shape.
 
 ## Non-goals
 
@@ -163,11 +186,15 @@ ADR-0040's `.cache/` node-index snapshot (#306) — a real domain noun in the sa
 user-facing. If that overlap is judged too close, the alternative is to name the feature for what it
 holds rather than what it does.
 
-## Open questions
+## Sequencing
 
-1. **Is drift reporting blocking or advisory on restore?** Whether a restore into drifted context
-   requires explicit acknowledgement, or merely shows the report and proceeds. A judgement about how
-   much friction the safety is worth.
-2. **Does this wait on #314, or is it designed now and built after?** The composite revision is the
-   detector for the inheritance axis. Designing now and building after 0.7.0 closes appears correct,
-   but the sequencing is a release-planning call.
+Nothing here is semantically blocked on 0.7.0. The feature reads `effective_state` and `_revision`
+without modifying either, so the constraint is **file contention, not dependency order** — the
+question to ask before scheduling a slice is whether it edits the same files as work already in
+flight, not whether the design depends on it.
+
+On that criterion the backend is close to disjoint from #313/#314: a snapshots service and its routes
+are new files, and the touch points into existing ones (mixin registration, route registration, the
+capture hook) are thin. The frontend is where the contention is — the editor surface is being reworked
+by the hierarchy slices under ADR-0042, so any snapshot UI should follow them rather than race them.
+That argues for the backend and its tests landing whenever convenient, and the surface afterwards.

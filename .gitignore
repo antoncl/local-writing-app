@@ -14,3 +14,6 @@ tmp/
 
 # Machine-specific Claude Code settings (launch.json is committed)
 .claude/settings.local.json
+
+# Claude Code worktrees live inside the repo; they are checkouts, not content.
+.claude/worktrees/

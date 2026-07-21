@@ -52,7 +52,7 @@ class RecentProjectsServiceTests(unittest.TestCase):
         # The autouse conftest fixture already redirects config_path to a
         # per-test tempdir; we just need fresh state.
         self.tmp = TemporaryDirectory()
-        self.project_root = Path(self.tmp.name)
+        self.project_root = Path(self.tmp.name).resolve()
 
     def tearDown(self) -> None:
         self.tmp.cleanup()
@@ -92,7 +92,7 @@ class RecentProjectsEndpointTests(unittest.TestCase):
 
     def setUp(self) -> None:
         self.tmp = TemporaryDirectory()
-        self.root = Path(self.tmp.name)
+        self.root = Path(self.tmp.name).resolve()
         global_service.__init__()
         self.client = TestClient(app)
 
@@ -146,7 +146,7 @@ class DefaultProjectsFolderTests(unittest.TestCase):
 
     def setUp(self) -> None:
         self.tmp = TemporaryDirectory()
-        self.projects_folder = str(Path(self.tmp.name) / "writing")
+        self.projects_folder = str(Path(self.tmp.name).resolve() / "writing")
         self.client = TestClient(app)
 
     def tearDown(self) -> None:

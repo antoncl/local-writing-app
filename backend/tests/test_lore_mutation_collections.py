@@ -42,7 +42,7 @@ def _define_field(field_id: str, field_type: str, name: str) -> None:
 class CollectionMutationTests(unittest.TestCase):
     def setUp(self) -> None:
         self.temp_dir = TemporaryDirectory()
-        self.root = Path(self.temp_dir.name) / "project"
+        self.root = Path(self.temp_dir.name).resolve() / "project"
         svc.__init__()
         svc.create_project(self.root, "Collection Mutation Tests")
         _define_field("clues", "tags", "Clues")

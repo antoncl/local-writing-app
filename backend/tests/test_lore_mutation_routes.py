@@ -25,7 +25,7 @@ from app.runtime import service as svc
 class MutationRouteTests(unittest.TestCase):
     def setUp(self) -> None:
         self.temp_dir = TemporaryDirectory()
-        self.root = Path(self.temp_dir.name) / "project"
+        self.root = Path(self.temp_dir.name).resolve() / "project"
         svc.__init__()
         svc.create_project(self.root, "Mutation Route Tests")
         layers = svc.read_metadata_schema_layers()

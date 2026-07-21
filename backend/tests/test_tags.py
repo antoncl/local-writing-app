@@ -46,7 +46,10 @@ def _scope(kind: str, entry_type: str) -> dict:
 class LayeredTagsTests(unittest.TestCase):
     def setUp(self) -> None:
         self.temp_dir = TemporaryDirectory()
-        self.base = Path(self.temp_dir.name) / "writing"
+        # Resolved: on Windows `TemporaryDirectory()` returns the 8.3 short form
+        # (C:\Users\RUNNER~1\...) while the layer walk canonicalises, so an
+        # unresolved fixture compares unequal to the folders it returns (#356).
+        self.base = Path(self.temp_dir.name).resolve() / "writing"
         self.universe = self.base / "honorverse"
         self.series = self.universe / "honor-harrington"
         self.root = self.series / "book01"

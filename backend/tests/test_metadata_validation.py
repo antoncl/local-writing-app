@@ -33,7 +33,7 @@ from app.services.tree_structure import TreeStructureService
 class MetadataValidationTests(unittest.TestCase):
     def setUp(self) -> None:
         self.temp_dir = TemporaryDirectory()
-        self.base = Path(self.temp_dir.name) / "writing"
+        self.base = Path(self.temp_dir.name).resolve() / "writing"
         self.universe = self.base / "universe"
         self.world = self.universe / "series"
         self.root = self.world / "test"
@@ -923,7 +923,7 @@ class MetadataValidationTests(unittest.TestCase):
         self.assertEqual(saved.metadata["tension"], 3)
 
     def test_validation_warns_when_base_folder_is_not_an_ancestor(self) -> None:
-        self._set_projects_base_folder(Path(self.temp_dir.name) / "elsewhere")
+        self._set_projects_base_folder(Path(self.temp_dir.name).resolve() / "elsewhere")
 
         validation = self.service.validate_project()
 
@@ -966,7 +966,7 @@ class MetadataValidationTests(unittest.TestCase):
         self.assertEqual(manifest["settings"]["projects_base_folder"], expected_base)
 
     def test_project_settings_rejects_base_folder_outside_project_ancestry(self) -> None:
-        updated_base = Path(self.temp_dir.name) / "new-base"
+        updated_base = Path(self.temp_dir.name).resolve() / "new-base"
         updated_base.mkdir()
 
         with self.assertRaisesRegex(ProjectServiceError, "inside the projects base folder"):
@@ -2496,7 +2496,7 @@ class MetadataValidationTests(unittest.TestCase):
 class ReferenceResolutionTests(unittest.TestCase):
     def setUp(self) -> None:
         self.temp_dir = TemporaryDirectory()
-        self.base = Path(self.temp_dir.name) / "writing"
+        self.base = Path(self.temp_dir.name).resolve() / "writing"
         self.root = self.base / "test"
         self.service = ProjectService()
         self.service.create_project(self.root, "Test Project")
@@ -2702,7 +2702,7 @@ class ReferenceResolutionTests(unittest.TestCase):
 class LayeredEntryIndexTests(unittest.TestCase):
     def setUp(self) -> None:
         self.temp_dir = TemporaryDirectory()
-        self.base = Path(self.temp_dir.name) / "writing"
+        self.base = Path(self.temp_dir.name).resolve() / "writing"
         self.universe = self.base / "honorverse"
         self.series = self.universe / "honor-harrington"
         self.root = self.series / "book01"

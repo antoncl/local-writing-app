@@ -4,10 +4,17 @@
 # modes that motivated it — no primary-worktree WIP to import instead of the
 # code under test, and no concurrent session writing into the tree mid-run.
 #
-# Cost discipline (private repo, minutes are billed): ubuntu-latest only (1x,
-# vs 2x for Windows), two parallel jobs rather than three (billing rounds each
-# job up to the minute), superseded runs cancelled, and no double-run — a
-# feature branch is gated by its PR, master by its push.
+# The repo is PUBLIC, so Actions minutes are free on standard runners. The
+# earlier cost discipline (Linux-only, minimise job count) no longer applies —
+# what remains is wall-clock and signal. Superseded runs are still cancelled,
+# and there is still no double-run: a feature branch is gated by its PR, master
+# by its push.
+#
+# The backend matrix runs Windows as well as Linux deliberately. This is a
+# Windows-first app — the developer machine is Windows, and the bugs that
+# actually bite are platform ones: directory junctions, cp1252 console
+# encoding, path separators, CRLF round-trips. Linux-only CI would go green on
+# all of them.
 #
 # CI calls the tools directly rather than through scripts/venv_run.py and
 # scripts/npm_run.py: those exist to solve venv discovery and worktree sharing
@@ -23,6 +30,11 @@ on:
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
+
+# Least privilege: nothing here writes to the repo, and a public repo takes
+# pull requests from forks.
+permissions:
+  contents: read
 
 jobs:
   backend:
@@ -59,8 +71,34 @@ jobs:
           git fetch --no-tags --depth=1 origin "$GITHUB_BASE_REF"
           python scripts/check_exemptions.py --base FETCH_HEAD
 
+      # --timeout: a hang is the worst CI failure mode — it burns the wall clock
+      # and reports nothing. thread method because Windows has no SIGALRM.
       - name: pytest
-        run: python -m pytest backend/tests -q
+        run: python -m pytest backend/tests -q --timeout=120 --timeout-method=thread
+
+  # The platform the app actually runs on. Only the test suite — lint, the
+  # guards and the ratchet are platform-independent and would just be a slower
+  # second opinion. This is the job that would have caught the cp1252 and
+  # junction problems that cost this project real time.
+  backend-windows:
+    runs-on: windows-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: actions/setup-python@v6
+        with:
+          python-version: '3.14'
+          cache: pip
+          cache-dependency-path: backend/pyproject.toml
+
+      - name: Install backend (editable, with dev extras)
+        run: python -m pip install -e "backend[dev]"
+
+      # --timeout: a hang is the worst CI failure mode — it burns the wall clock
+      # and reports nothing. thread method because Windows has no SIGALRM.
+      - name: pytest
+        run: python -m pytest backend/tests -q --timeout=120 --timeout-method=thread
 
   frontend:
     runs-on: ubuntu-latest

@@ -20,7 +20,7 @@ from app.runtime import service as global_service
 class NodeHttpEndpointTests(unittest.TestCase):
     def setUp(self) -> None:
         self.temp_dir = TemporaryDirectory()
-        self.root = Path(self.temp_dir.name) / "project"
+        self.root = Path(self.temp_dir.name).resolve() / "project"
         global_service.__init__()
         global_service.create_project(self.root, "Node Http Tests")
         self.client = TestClient(app)

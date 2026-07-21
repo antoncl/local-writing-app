@@ -31,7 +31,7 @@ from app.services.ai.helpers import _format_lore_block, create_environment_for_p
 class MutationResolutionTests(unittest.TestCase):
     def setUp(self) -> None:
         self.temp_dir = TemporaryDirectory()
-        self.root = Path(self.temp_dir.name) / "project"
+        self.root = Path(self.temp_dir.name).resolve() / "project"
         svc.__init__()
         svc.create_project(self.root, "Mutation Resolution Tests")
         # `rank` is a user-defined field on characters; define it so the rank

@@ -21,7 +21,7 @@ class MigrateDefaultModelsTests(unittest.TestCase):
 
     def setUp(self) -> None:
         self.temp_dir = TemporaryDirectory()
-        self.config_dir = Path(self.temp_dir.name) / "config"
+        self.config_dir = Path(self.temp_dir.name).resolve() / "config"
         self.config_dir.mkdir()
         self._patcher = patch(
             "app.services.machine_settings.config_path",
@@ -68,7 +68,7 @@ class ProjectServiceResolveAssistantTests(unittest.TestCase):
 
     def setUp(self) -> None:
         self.temp_dir = TemporaryDirectory()
-        self.config_dir = Path(self.temp_dir.name) / "config"
+        self.config_dir = Path(self.temp_dir.name).resolve() / "config"
         self.config_dir.mkdir()
         self._patcher = patch(
             "app.services.machine_settings.config_path",
@@ -132,14 +132,14 @@ class ChatEndpointAssistantTests(unittest.TestCase):
 
     def setUp(self) -> None:
         self.temp_dir = TemporaryDirectory()
-        self.root = Path(self.temp_dir.name) / "project"
+        self.root = Path(self.temp_dir.name).resolve() / "project"
         global_service.__init__()
         global_service.create_project(self.root, "Assistant Tests")
         global_service.update_project_settings(
             UpdateProjectSettingsRequest(ai_policy="cloud-allowed")
         )
         self.client = TestClient(app)
-        self.config_dir = Path(self.temp_dir.name) / "config"
+        self.config_dir = Path(self.temp_dir.name).resolve() / "config"
         self.config_dir.mkdir()
         self._patcher = patch(
             "app.services.machine_settings.config_path",
@@ -239,11 +239,11 @@ class MachineSettingsViewTests(unittest.TestCase):
 
     def setUp(self) -> None:
         self.temp_dir = TemporaryDirectory()
-        self.root = Path(self.temp_dir.name) / "project"
+        self.root = Path(self.temp_dir.name).resolve() / "project"
         global_service.__init__()
         global_service.create_project(self.root, "View Tests")
         self.client = TestClient(app)
-        self.config_dir = Path(self.temp_dir.name) / "config"
+        self.config_dir = Path(self.temp_dir.name).resolve() / "config"
         self.config_dir.mkdir()
         self._patcher = patch(
             "app.services.machine_settings.config_path",
@@ -284,11 +284,11 @@ class FileBackedAssistantsTests(unittest.TestCase):
 
     def setUp(self) -> None:
         self.temp_dir = TemporaryDirectory()
-        self.root = Path(self.temp_dir.name) / "project"
+        self.root = Path(self.temp_dir.name).resolve() / "project"
         global_service.__init__()
         global_service.create_project(self.root, "Files Tests")
         self.client = TestClient(app)
-        self.config_dir = Path(self.temp_dir.name) / "config"
+        self.config_dir = Path(self.temp_dir.name).resolve() / "config"
         self.config_dir.mkdir()
         self._patcher = patch(
             "app.services.machine_settings.config_path",
@@ -339,11 +339,11 @@ class AssistantReorderTests(unittest.TestCase):
 
     def setUp(self) -> None:
         self.temp_dir = TemporaryDirectory()
-        self.root = Path(self.temp_dir.name) / "project"
+        self.root = Path(self.temp_dir.name).resolve() / "project"
         global_service.__init__()
         global_service.create_project(self.root, "Reorder Tests")
         self.client = TestClient(app)
-        self.config_dir = Path(self.temp_dir.name) / "config"
+        self.config_dir = Path(self.temp_dir.name).resolve() / "config"
         self.config_dir.mkdir()
         self._patcher = patch(
             "app.services.machine_settings.config_path",
@@ -505,11 +505,11 @@ class AssistantLayerOrderingTests(unittest.TestCase):
 
     def setUp(self) -> None:
         self.temp_dir = TemporaryDirectory()
-        self.root = Path(self.temp_dir.name) / "project"
+        self.root = Path(self.temp_dir.name).resolve() / "project"
         global_service.__init__()
         global_service.create_project(self.root, "Layer Order Tests")
         self.client = TestClient(app)
-        self.config_dir = Path(self.temp_dir.name) / "config"
+        self.config_dir = Path(self.temp_dir.name).resolve() / "config"
         self.config_dir.mkdir()
         self._patcher = patch(
             "app.services.machine_settings.config_path",

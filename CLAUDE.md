@@ -78,14 +78,14 @@ weakest → strongest:
    cannot be walked past with `--no-verify`, and the only one immune to the
    local hazards below (a worktree importing the primary tree's code; a
    concurrent session writing into the shared tree mid-run). It runs the two
-   guards **repo-wide**, not just over staged files. Private repo, so minutes
-   are billed: `ubuntu-latest` only, two parallel jobs, superseded runs
-   cancelled — keep it that way.
-   ⚠ **CI is currently ADVISORY.** Branch protection and rulesets are a paid
-   feature on a private repo (both APIs 403 with *"Upgrade to GitHub Pro or make
-   this repository public"*), so nothing mechanically stops a red PR being
-   merged. Until that changes the rule is human: **never merge a PR whose checks
-   are not green, and never report "green" without opening the run.**
+   guards **repo-wide**, not just over staged files. Three jobs: `backend` and
+   `frontend` on Linux, plus `backend-windows` — this is a Windows-first app and
+   the bugs that bite are platform ones (junctions, cp1252, path separators,
+   CRLF). The repo is public, so runner minutes are free; optimise for signal,
+   not cost.
+   **The checks are REQUIRED** — the `master gates` ruleset blocks merging a red
+   PR, blocks direct pushes to master, and blocks force-push/deletion. Still:
+   **never report "green" without opening the run.**
 
 The **exemption ratchet** (`scripts/check_exemptions.py`, CI, PRs only) is the
 guard on the guards: every escape hatch may shrink, never grow. It compares this

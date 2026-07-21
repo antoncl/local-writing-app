@@ -56,7 +56,7 @@ def test_default_view_specs_match_frontend() -> None:
 class ViewCrudTests(unittest.TestCase):
     def setUp(self) -> None:
         self.temp_dir = TemporaryDirectory()
-        self.root = Path(self.temp_dir.name) / "project"
+        self.root = Path(self.temp_dir.name).resolve() / "project"
         svc.__init__()
         svc.create_project(self.root, "View Tests")
         self.client = TestClient(app)
@@ -441,7 +441,7 @@ class ViewUiStateTests(unittest.TestCase):
 
     def setUp(self) -> None:
         self.temp_dir = TemporaryDirectory()
-        self.root = Path(self.temp_dir.name) / "project"
+        self.root = Path(self.temp_dir.name).resolve() / "project"
         svc.__init__()
         svc.create_project(self.root, "View UI Tests")
         self.client = TestClient(app)

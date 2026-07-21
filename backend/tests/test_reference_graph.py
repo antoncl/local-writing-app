@@ -48,7 +48,7 @@ def _define_field(field_id: str, field_type: str, name: str) -> None:
 class ReferenceGraphTests(unittest.TestCase):
     def setUp(self) -> None:
         self.temp_dir = TemporaryDirectory()
-        self.root = Path(self.temp_dir.name) / "project"
+        self.root = Path(self.temp_dir.name).resolve() / "project"
         svc.__init__()
         svc.create_project(self.root, "Reference Graph Tests")
         _define_field("ally", "entity_ref", "Ally")
@@ -151,7 +151,7 @@ class ShadowedEdgeTests(unittest.TestCase):
 
     def setUp(self) -> None:
         self.temp_dir = TemporaryDirectory()
-        self.base = Path(self.temp_dir.name) / "writing"
+        self.base = Path(self.temp_dir.name).resolve() / "writing"
         self.root = self.base / "universe" / "book"
         self.service = ProjectService()
         self.service.create_project(self.root, "Shadowing Tests")
@@ -205,7 +205,7 @@ class DegradedInputTests(unittest.TestCase):
 
     def setUp(self) -> None:
         self.temp_dir = TemporaryDirectory()
-        self.base = Path(self.temp_dir.name) / "writing"
+        self.base = Path(self.temp_dir.name).resolve() / "writing"
         self.root = self.base / "universe" / "book"
         self.service = ProjectService()
         self.service.create_project(self.root, "Degraded Input Tests")
@@ -264,7 +264,7 @@ class SceneEdgeTests(unittest.TestCase):
 
     def setUp(self) -> None:
         self.temp_dir = TemporaryDirectory()
-        self.root = Path(self.temp_dir.name) / "project"
+        self.root = Path(self.temp_dir.name).resolve() / "project"
         self.service = ProjectService()
         self.service.create_project(self.root, "Scene Edge Tests")
 

@@ -216,19 +216,26 @@ class LayerWalkMixin:
         return machine_dir
 
     def _project_layer_folders(self, root: Path) -> list[Path]:
-        """Project folders from outermost ancestor to current root, inclusive."""
-        base_folder = self._metadata_schema_base_folder(root)
-        if base_folder is None or not self._is_relative_to(root, base_folder):
-            return [root]
+        """Project folders from outermost ancestor to current root, inclusive.
 
-        folders: list[Path] = []
-        current = root
-        while True:
-            folders.append(current)
-            if current == base_folder:
-                break
-            current = current.parent
-        return list(reversed(folders))
+        One normal form, and finite by construction (#356). The previous version
+        checked `_is_relative_to` — which resolves *both* operands — and then
+        walked an **unresolved** `current` comparing it against a **resolved**
+        `base_folder`. Where `.resolve()` changes the string (a junction or
+        symlink above the project, a mapped or substituted drive, an 8.3 short
+        path) the guard passed, the equality could never hold, and the walk ran
+        to the drive root — where `Path("C:/").parent` is itself. It never
+        terminated. A `break` on that fixpoint would only hide the real defect,
+        which is comparing two normal forms in one traversal.
+        """
+        root = root.resolve()
+        base_folder = self._metadata_schema_base_folder(root)
+        # Membership in the ancestor chain IS the relation this walk needs, and
+        # testing it in the same form the walk uses is what makes the stop reachable.
+        chain = [root, *root.parents]
+        if base_folder is None or base_folder not in chain:
+            return [root]
+        return list(reversed(chain[: chain.index(base_folder) + 1]))
 
     def _metadata_schema_base_folder(self, root: Path) -> Path | None:
         """Where the walk stops — the outer bound of the layer chain.

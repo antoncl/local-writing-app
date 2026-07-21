@@ -38,7 +38,7 @@ def _define_field(field_id: str, field_type: str, entry_type: str = "lore:charac
 class MutationAdvisoryValidationTests(unittest.TestCase):
     def setUp(self) -> None:
         self.temp_dir = TemporaryDirectory()
-        self.root = Path(self.temp_dir.name) / "project"
+        self.root = Path(self.temp_dir.name).resolve() / "project"
         svc.__init__()
         svc.create_project(self.root, "Mutation Validation Tests")
         _define_field("rank", "number")

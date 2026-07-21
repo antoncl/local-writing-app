@@ -45,7 +45,7 @@ def _setup_honor() -> str:
 class LoreMutationScanTests(unittest.TestCase):
     def setUp(self) -> None:
         self.temp_dir = TemporaryDirectory()
-        self.root = Path(self.temp_dir.name) / "project"
+        self.root = Path(self.temp_dir.name).resolve() / "project"
         svc.__init__()
         svc.create_project(self.root, "Lore Mutation Tests")
         self.honor = _setup_honor()
@@ -148,7 +148,7 @@ class LoreMutationResolverTests(unittest.TestCase):
 
     def setUp(self) -> None:
         self.temp_dir = TemporaryDirectory()
-        self.root = Path(self.temp_dir.name) / "project"
+        self.root = Path(self.temp_dir.name).resolve() / "project"
         svc.__init__()
         svc.create_project(self.root, "Resolver Tests")
         self.honor = _setup_honor()

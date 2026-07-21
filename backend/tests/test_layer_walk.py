@@ -22,7 +22,10 @@ from app.services.project_service import ProjectService
 class LayerWalkTests(unittest.TestCase):
     def setUp(self) -> None:
         self.temp_dir = TemporaryDirectory()
-        self.base = Path(self.temp_dir.name) / "writing"
+        # Resolved: on Windows `TemporaryDirectory()` returns the 8.3 short form
+        # (C:\Users\RUNNER~1\...) while the layer walk canonicalises, so an
+        # unresolved fixture compares unequal to the folders it returns (#356).
+        self.base = Path(self.temp_dir.name).resolve() / "writing"
         self.universe = self.base / "honorverse"
         self.series = self.universe / "honor-harrington"
         self.root = self.series / "book01"
@@ -35,7 +38,7 @@ class LayerWalkTests(unittest.TestCase):
         # at an empty tmp path, so without this `machine_layer()` returns None
         # and every "the machine layer is excluded" assertion below passes for
         # the wrong reason — it was vacuous until this existed.
-        self.config_dir = Path(self.temp_dir.name) / "config"
+        self.config_dir = Path(self.temp_dir.name).resolve() / "config"
         self.config_dir.mkdir()
         self._patcher = patch(
             "app.services.machine_settings.config_path",
@@ -66,6 +69,29 @@ class LayerWalkTests(unittest.TestCase):
         self.assertEqual(
             [(layer.folder.name, layer.rank) for layer in layers],
             [("writing", 0), ("honorverse", 1), ("honor-harrington", 2), ("book01", 3)],
+        )
+
+    def test_walk_canonicalises_the_root_it_is_given(self) -> None:
+        """#356: the walk must compare paths in ONE normal form.
+
+        It used to certify the walk with `_is_relative_to` — which resolves both
+        operands — and then walk an unresolved `current` against a resolved
+        `base_folder`. Any path whose `.resolve()` differs from its literal form
+        (a junction or symlink above the project, a mapped or substituted drive,
+        an 8.3 short path) made that equality unreachable, and the walk ran up to
+        the drive root, where `parent` is a fixpoint — forever.
+
+        A `..` segment reproduces the mismatch on every platform. Deliberately
+        an assertion about the RESULT rather than a hang: a regression test that
+        wedges the suite is worse than the bug.
+        """
+        via_dotdot = self.series / self.root.name / ".." / self.root.name
+
+        layers = self.service.collect_layers(via_dotdot)
+
+        self.assertEqual(
+            [layer.folder for layer in layers],
+            [self.base, self.universe, self.series, self.root],
         )
 
     def test_is_root_marks_only_the_open_project(self) -> None:
@@ -186,7 +212,7 @@ class AssistantRankComesFromTheWalkTests(unittest.TestCase):
 
     def setUp(self) -> None:
         self.temp_dir = TemporaryDirectory()
-        self.base = Path(self.temp_dir.name) / "writing"
+        self.base = Path(self.temp_dir.name).resolve() / "writing"
         self.root = self.base / "book01"
         self.service = ProjectService()
         self.service.create_project(self.root, "Book 1")
@@ -317,7 +343,7 @@ class AssistantOrderMergeTests(unittest.TestCase):
 
     def setUp(self) -> None:
         self.temp_dir = TemporaryDirectory()
-        self.base = Path(self.temp_dir.name) / "writing"
+        self.base = Path(self.temp_dir.name).resolve() / "writing"
         self.root = self.base / "book01"
         self.service = ProjectService()
         self.service.create_project(self.root, "Book 1")
@@ -516,13 +542,13 @@ class AssistantOrderMergeTests(unittest.TestCase):
 class MachineLayerIsAnOrdinaryLayerTests(unittest.TestCase):
     def setUp(self) -> None:
         self.temp_dir = TemporaryDirectory()
-        self.base = Path(self.temp_dir.name) / "writing"
+        self.base = Path(self.temp_dir.name).resolve() / "writing"
         self.root = self.base / "book01"
         self.service = ProjectService()
         self.service.create_project(self.root, "Book 1")
         # Redirect the machine config dir into the temp tree so the machine
         # layer is deterministic rather than "whatever this box happens to have".
-        self.config_dir = Path(self.temp_dir.name) / "config"
+        self.config_dir = Path(self.temp_dir.name).resolve() / "config"
         self.config_dir.mkdir()
         self._patcher = patch(
             "app.services.machine_settings.config_path",
@@ -608,14 +634,14 @@ class PerLayerCollectionRulesTests(unittest.TestCase):
 
     def setUp(self) -> None:
         self.temp_dir = TemporaryDirectory()
-        self.base = Path(self.temp_dir.name) / "writing"
+        self.base = Path(self.temp_dir.name).resolve() / "writing"
         self.root = self.base / "book01"
         self.service = ProjectService()
         self.service.create_project(self.root, "Book 1")
         manifest = self.service._read_yaml(self.root / "project.yaml")
         manifest.setdefault("settings", {})["projects_base_folder"] = str(self.base)
         self.service._write_yaml(self.root / "project.yaml", manifest)
-        self.config_dir = Path(self.temp_dir.name) / "config"
+        self.config_dir = Path(self.temp_dir.name).resolve() / "config"
         self.config_dir.mkdir()
         self._patcher = patch(
             "app.services.machine_settings.config_path",

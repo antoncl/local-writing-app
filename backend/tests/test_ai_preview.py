@@ -21,7 +21,7 @@ from app.services.ai.sessions import default_registry
 class PreviewEndpointTests(unittest.TestCase):
     def setUp(self) -> None:
         self.temp_dir = TemporaryDirectory()
-        self.root = Path(self.temp_dir.name) / "project"
+        self.root = Path(self.temp_dir.name).resolve() / "project"
         # Use the module-level service so /api/ai/preview sees the open project.
         global_service.__init__()
         global_service.create_project(self.root, "Preview Tests")
@@ -485,8 +485,8 @@ class PreviewCostEstimateTests(unittest.TestCase):
 
     def setUp(self) -> None:
         self.temp_dir = TemporaryDirectory()
-        self.root = Path(self.temp_dir.name) / "project"
-        self.config_dir = Path(self.temp_dir.name) / "config"
+        self.root = Path(self.temp_dir.name).resolve() / "project"
+        self.config_dir = Path(self.temp_dir.name).resolve() / "config"
         self.config_dir.mkdir()
         # Patch machine_settings config path so assistant resolution finds
         # OUR temp assistant file, not whatever's on the developer's disk.

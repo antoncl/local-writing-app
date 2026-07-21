@@ -20,7 +20,7 @@ from app.services.project_service import ProjectService
 class MigrationFrameworkTests(unittest.TestCase):
     def setUp(self) -> None:
         self.temp_dir = TemporaryDirectory()
-        self.base = Path(self.temp_dir.name) / "writing"
+        self.base = Path(self.temp_dir.name).resolve() / "writing"
         self.root = self.base / "project"
         self.service = ProjectService()
         self.service.create_project(self.root, "Test Project")
@@ -179,7 +179,7 @@ class ChatCostMigrationTests(unittest.TestCase):
 
     def setUp(self) -> None:
         self.temp_dir = TemporaryDirectory()
-        self.base = Path(self.temp_dir.name) / "writing"
+        self.base = Path(self.temp_dir.name).resolve() / "writing"
         self.root = self.base / "project"
         self.service = ProjectService()
         self.service.create_project(self.root, "Test Project")
@@ -252,7 +252,7 @@ class ResearchStructureMigrationTests(unittest.TestCase):
 
     def setUp(self) -> None:
         self.temp_dir = TemporaryDirectory()
-        self.base = Path(self.temp_dir.name) / "writing"
+        self.base = Path(self.temp_dir.name).resolve() / "writing"
         self.root = self.base / "project"
         self.service = ProjectService()
         self.service.create_project(self.root, "Test Project")

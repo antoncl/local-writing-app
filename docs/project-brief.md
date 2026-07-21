@@ -1,14 +1,19 @@
 # Local Writing App Project Brief
 
+> **Historical.** This is the original brief, kept for the reasoning behind the
+> early decisions. It describes the project before AI, Views, research notes,
+> chats, and mutations shipped. For what the app does today read `README.md`;
+> for how it is built read `CLAUDE.md`; for the decisions since, read the ADRs
+> under `docs/design/adr/`. Where this file and those disagree, they win.
+
 ## Why This Exists
 
 The goal is to build a standalone alternative to hosted fiction-writing tools:
-a private writing environment with AI support later, no platform lock-in, and no
+a private writing environment with AI support, no platform lock-in, and no
 subscription dependency.
 
-The user has long experience as a developer and architect, but has not written
-production code recently. The project should therefore favor clear architecture,
-incremental progress, and understandable code over fashionable complexity.
+The project should favor clear architecture, incremental progress, and
+understandable code over fashionable complexity.
 
 ## Core Decisions So Far
 
@@ -73,7 +78,8 @@ starts with a single empty Scene in the tree.
 - Perform atomic saves.
 - Maintain TODOs.
 - Provide search.
-- Later: maintain SQLite indexes, render prompts, and call AI providers.
+- Render prompts and call AI providers.
+- Maintain rebuildable indexes under `.cache/`.
 
 ## Frontend Responsibilities
 
@@ -81,15 +87,4 @@ starts with a single empty Scene in the tree.
 - Own editor state between saves.
 - Render manuscript structure.
 - Present TODOs and search results.
-- Later: present AI prompt/suggestion workflows.
-
-## Current Code Location
-
-The working codebase is:
-
-```text
-C:\Users\anton\Documents\Codex\local-writing-app
-```
-
-The old generated-thread copy under the previous `outputs/` folder should be
-ignored.
+- Present AI prompt/suggestion workflows.

@@ -35,7 +35,11 @@ from pathlib import Path
 
 CHECKOUT = Path(os.environ["DEV_BACKEND_CHECKOUT"]).resolve()
 NONCE = os.environ.get("DEV_BACKEND_NONCE", "")
-PROBE_PATH = "/__dev_backend_provenance"
+
+# The launcher hands this over so the two sides cannot drift. The literal is
+# only a fallback for a by-hand `uvicorn dev_backend_app:app`, and
+# `test_probe_path_cannot_drift` pins it equal to `dev_backend.PROBE_PATH`.
+PROBE_PATH = os.environ.get("DEV_BACKEND_PROBE_PATH", "/__dev_backend_provenance")
 
 
 def _fail(message: str) -> None:

@@ -165,21 +165,89 @@ def test_no_meta_path_finder_outranks_pythonpath_for_app():
 # --------------------------------------------------------------------------
 
 
-def test_default_port_is_per_checkout():
-    """Two checkouts must not aim at the same port by default.
+def test_default_port_varies_with_the_checkout(monkeypatch):
+    """Different checkouts must get different ports — the actual #364 property.
 
-    The old launcher fell back to a constant 8788 held in a *tracked* file, so
-    every worktree targeted the same port — the collision `dev_backend.py`'s own
-    docstring says it exists to prevent.
+    Stated as "the port is a function of REPO that separates siblings", because
+    the obvious version of this test cannot fail: assert determinism, a range,
+    and "not 8787", and `return 8888` — a constant in a tracked file, which *is*
+    the #364 root cause — passes all three. Vary REPO instead.
     """
-    assert dev_backend.default_port() == dev_backend.default_port()
-    assert (
-        dev_backend.PORT_BASE
-        <= dev_backend.default_port()
-        < dev_backend.PORT_BASE + dev_backend.PORT_SPAN
+    ports = {}
+    for path in (
+        r"D:\Users\anton\Documents\Projects\local-writing-app",
+        r"D:\Users\anton\Documents\Projects\local-writing-app\.claude\worktrees\a",
+        r"D:\Users\anton\Documents\Projects\local-writing-app\.claude\worktrees\b",
+        "/home/runner/work/local-writing-app/local-writing-app",
+    ):
+        monkeypatch.setattr(dev_backend, "REPO", Path(path))
+        ports[path] = dev_backend.default_port()
+
+    assert len(set(ports.values())) == len(ports), (
+        f"checkouts share a default port: {ports}. Sibling worktrees would "
+        "collide, which is #364."
     )
-    assert dev_backend.default_port() not in (8787, 5173), (
-        "must not collide with Anton's pinned stack"
+    for path, port in ports.items():
+        assert dev_backend.PORT_BASE <= port < dev_backend.PORT_BASE + dev_backend.PORT_SPAN, (
+            f"{path} -> {port} is outside the reserved range"
+        )
+
+
+def test_default_port_is_stable_for_one_checkout(monkeypatch):
+    """Restarting the same tree must reuse its port, or the port file churns."""
+    monkeypatch.setattr(dev_backend, "REPO", Path(r"D:\some\checkout"))
+    assert dev_backend.default_port() == dev_backend.default_port()
+
+
+def test_default_port_range_avoids_the_pinned_stack():
+    """Anton's :8787 and :5173 must be unreachable, not merely unlikely."""
+    reserved = range(dev_backend.PORT_BASE, dev_backend.PORT_BASE + dev_backend.PORT_SPAN)
+    assert 8787 not in reserved
+    assert 5173 not in reserved
+    assert 8788 not in reserved, "the historical shared port that caused #364"
+
+
+def test_probe_path_cannot_drift():
+    """The wrapper's fallback must equal the path the launcher probes.
+
+    They are separate modules, and if the constants differ our own healthy
+    server 404s the probe — which `verify_server` reports as "SERVED BY A
+    DIFFERENT SERVER", sending the reader after a hijack that never happened.
+    The launcher passes the real value through `DEV_BACKEND_PROBE_PATH`; this
+    pins the fallback the two literals share.
+    """
+    source = (REPO / "scripts" / "dev_backend_app.py").read_text(encoding="utf-8")
+    assert f'"{dev_backend.PROBE_PATH}"' in source, (
+        f"scripts/dev_backend_app.py no longer mentions {dev_backend.PROBE_PATH!r}"
+    )
+
+
+def test_port_file_is_left_alone_when_a_start_fails(tmp_path, monkeypatch):
+    """A failed launch must not delete the port file a working one published.
+
+    Both launchers in a worktree share `tmp/dev-backend-port`, so an
+    unconditional cleanup on the failure path strands the running server: the
+    frontend hard-fails on the missing file and `claim_port` refuses to start a
+    replacement on the port still held.
+    """
+    port_file = tmp_path / "dev-backend-port"
+    port_file.write_text("8801", encoding="utf-8")
+    monkeypatch.setattr(dev_backend, "PORT_FILE", port_file)
+    monkeypatch.setattr(dev_backend, "resolve_port", lambda: 8802)
+    monkeypatch.setattr(dev_backend, "claim_port", lambda _port: True)
+    monkeypatch.setattr(dev_backend, "find_venv_python", lambda _root: Path(sys.executable))
+    monkeypatch.setattr(dev_backend, "verify_server", lambda *_a: False)
+
+    killed = []
+    monkeypatch.setattr(dev_backend, "kill_tree", killed.append)
+    monkeypatch.setattr(
+        dev_backend.subprocess, "Popen", lambda *_a, **_k: _StubProc()
+    )
+
+    assert dev_backend.main() == 1
+    assert killed, "a failed start must take its server down"
+    assert port_file.read_text(encoding="utf-8") == "8801", (
+        "the other launcher's published port was deleted"
     )
 
 

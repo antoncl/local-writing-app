@@ -123,15 +123,17 @@ Then `preview_start {url: "http://127.0.0.1:5199"}` — the `url` form opens a
 browser tab without starting a server — and verify with `read_page`,
 `read_network_requests`, and the console as usual.
 
-**Do not pick the backend port by hand.** `dev_backend.py` derives a default
-from *this checkout's path* (8800–8899), so sibling worktrees cannot aim at the
-same port; `PORT` still overrides. Choosing one yourself is how #364 happened:
-every worktree defaulted to `8788`, and on Windows `uvicorn --reload` binds with
-`SO_REUSEADDR`, which Windows reads as "share this address" — so the second
-start **succeeds silently**, owns nothing, and the first tree's server keeps
-answering every request. The launcher now refuses an occupied port up front, and
-after startup asks the server on that port to prove it is the one just started
-(a per-launch nonce over `/__dev_backend_provenance`, served by
+**Don't pick the backend port by hand.** `dev_backend.py` derives it from *this
+checkout's path* (8800–8899), which separates sibling worktrees; `PORT` still
+overrides, and is the escape hatch if two checkouts ever hash to the same slot
+(1-in-100, and it now fails loudly rather than silently). Hand-picking is how
+#364 happened: every worktree defaulted to `8788`, and on Windows
+`uvicorn --reload` binds with `SO_REUSEADDR` — which Windows reads as "share
+this address" when both sides set it, as every `--reload` server does. The
+second start then **succeeds silently**, receives nothing, and the first tree's
+server answers every request. The launcher now refuses an occupied port up
+front, and after startup makes the server prove it is the one just started (a
+per-launch nonce over `/__dev_backend_provenance`, served by
 `scripts/dev_backend_app.py`). It publishes `tmp/dev-backend-port` only once
 that passes, so the frontend inherits the guarantee — `--mode claude` hard-fails
 on a missing port file rather than showing another tree's data.
@@ -139,11 +141,22 @@ on a missing port file rather than showing another tree's data.
 Read the startup line rather than assuming isolation: `dev_backend: verified
 <path> is serving 127.0.0.1:<port>` names the checkout actually being served.
 
-**Stopping them: kill the process tree, not the process.** `uvicorn --reload`
-spawns a `multiprocessing` child that survives its parent and keeps holding the
-port, so the port still answers after the obvious kill. Check what actually
-listens (`netstat -ano | Select-String ":<port>.*LISTENING"`) and kill the
-orphan too, or the next run collides with a server you thought was gone.
+**Stopping them: kill the process tree, not the process — and don't trust the
+PID the OS gives you.** `uvicorn --reload` spawns a `multiprocessing` child that
+survives its parent and keeps holding the port. Worse, `netstat -ano` and
+`Get-NetTCPConnection` both report the socket against the *reloader* that
+created it, which by then is usually **dead** — so you kill that PID, it
+"succeeds", and the port keeps serving. This is exactly how #364's "I killed
+every listener on the port" step produced a false negative and sent the
+diagnosis after the import system instead. Ask the server who it is
+(`curl 127.0.0.1:<port>/__dev_backend_provenance` returns the real pid), or find
+the live child:
+
+```powershell
+Get-CimInstance Win32_Process | Where-Object { $_.CommandLine -like '*multiprocessing*' } |
+  Select-Object ProcessId,ParentProcessId
+taskkill /F /T /PID <the reloader pid>   # /T is the part that matters
+```
 
 ## Automated quality gates
 

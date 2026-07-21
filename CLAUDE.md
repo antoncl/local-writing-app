@@ -97,6 +97,43 @@ Mechanics:
   `.worktreeinclude` at the repo root (`.gitignore` syntax; only gitignored
   matches are copied) rather than copying it by hand.
 
+### Running the app from a worktree — start the servers yourself
+
+**`preview_start` by config name resolves `.claude/launch.json` from the
+PRIMARY tree, so it runs the primary tree's code no matter which worktree the
+session is in** (#360, verified: a fresh start from a worktree watched
+`<primary>/backend`, wrote no port file, and used a config the worktree had
+rewritten). That is the same defect as #352 — a verification path exercising
+the wrong tree — and it is worse than for the gates, because the primary tree
+holds Anton's WIP *and his live projects*. A worktree session that believes it
+is driving an isolated backend would be driving his.
+
+**So in a worktree, start the dev servers yourself and point the Browser pane
+at the URL.** This is a deliberate, Anton-approved exception to the general
+"never use Bash to run dev servers" guidance, which predates worktree
+isolation:
+
+```bash
+# backend first — it publishes the port the frontend reads
+PORT=8799 python scripts/dev_backend.py          # background it
+PORT=5199 npm run dev --prefix frontend -- --mode claude   # background it
+```
+
+Then `preview_start {url: "http://127.0.0.1:5199"}` — the `url` form opens a
+browser tab without starting a server — and verify with `read_page`,
+`read_network_requests`, and the console as usual.
+
+Pick ports outside Anton's `5173`/`8787` and outside another live worktree's.
+Verify isolation rather than assuming it: the uvicorn process should show
+`--app-dir <this worktree>/backend`, and the frontend's API calls should go to
+the port you chose.
+
+**Stopping them: kill the process tree, not the process.** `uvicorn --reload`
+spawns a `multiprocessing` child that survives its parent and keeps holding the
+port, so the port still answers after the obvious kill. Check what actually
+listens (`netstat -ano | Select-String ":<port>.*LISTENING"`) and kill the
+orphan too, or the next run collides with a server you thought was gone.
+
 ## Automated quality gates
 
 The standards below are **machine-enforced** — they no longer depend on

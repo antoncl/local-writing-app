@@ -19,6 +19,9 @@ dev = [
   "ruff>=0.15",
   "pre-commit>=4.0",
   "pytest>=9",
+  # A hung test must fail with a traceback, not sit there until the CI job's
+  # 20-minute wall clock kills it and tells you nothing (#352 follow-up).
+  "pytest-timeout>=2.3",
   "httpx>=0.28",  # FastAPI TestClient dependency
 ]
 

@@ -71,8 +71,10 @@ jobs:
           git fetch --no-tags --depth=1 origin "$GITHUB_BASE_REF"
           python scripts/check_exemptions.py --base FETCH_HEAD
 
+      # --timeout: a hang is the worst CI failure mode — it burns the wall clock
+      # and reports nothing. thread method because Windows has no SIGALRM.
       - name: pytest
-        run: python -m pytest backend/tests -q
+        run: python -m pytest backend/tests -q --timeout=120 --timeout-method=thread
 
   # The platform the app actually runs on. Only the test suite — lint, the
   # guards and the ratchet are platform-independent and would just be a slower
@@ -93,8 +95,10 @@ jobs:
       - name: Install backend (editable, with dev extras)
         run: python -m pip install -e "backend[dev]"
 
+      # --timeout: a hang is the worst CI failure mode — it burns the wall clock
+      # and reports nothing. thread method because Windows has no SIGALRM.
       - name: pytest
-        run: python -m pytest backend/tests -q
+        run: python -m pytest backend/tests -q --timeout=120 --timeout-method=thread
 
   frontend:
     runs-on: ubuntu-latest

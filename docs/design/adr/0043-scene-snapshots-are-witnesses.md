@@ -1,6 +1,7 @@
 # ADR-0043: Scene snapshots are witnesses — prose is restored, context is only reported
 
-- Status: **Draft — awaiting red pen**, 0.8.0
+- Status: **Draft — held open until the UX pass**, 0.8.0. Not merely unreviewed: deliberately not
+  approvable yet. See "Why this stays a Draft" below before promoting it.
 - Feature: #6 (scopes the "revisions" issue) · Relates: #314 (composite revision) · Follows: ADR-0001,
   ADR-0002, ADR-0003, ADR-0010, ADR-0039
 - Supersedes nothing. Settles the four-way scoping question posed in #6.
@@ -358,6 +359,31 @@ implementation noun (AI session state, workspace layout, collapse state) and, mo
 ADR-0040's `.cache/` node-index snapshot (#306) — a real domain noun in the same repo. None are
 user-facing. If that overlap is judged too close, the alternative is to name the feature for what it
 holds rather than what it does.
+
+## Why this stays a Draft
+
+This document is held open until the user-facing surface has been thought through, and **not** because
+it is waiting in a queue for a signature. The reason is evidence from its own drafting: the sharpest
+corrections to it did not come from reading it, they came from asking what using it would be like.
+
+- *"How will the user know the ID of the scene they deleted?"* overturned orphan retention entirely —
+  twice-written, and wrong, because the data was reachable only to someone willing to grep the
+  filesystem.
+- *"How does a snapshot avoid colliding with the scene it copies?"* produced the whole identity and
+  store-layout section, which had no place in the design before it was asked.
+- *"Which fields can actually change under a restore?"* narrowed the third drift axis from "the schema
+  changed" to value reinterpretation, and retired a detector that would have cried wolf on every
+  harmless schema edit.
+
+Three of this ADR's load-bearing decisions arrived that way. That is a strong prior that a surface pass
+will turn up more, and every one it finds is cheaper now than after implementation. **Approving it
+before then would convert an untested assumption into a decision of record** — the failure mode this
+repo has already paid for, where a document sketched something it had not thought through and a later
+thread honoured the sketch.
+
+Consequence, per the approval gate: **no snapshot implementation starts.** Not the backend either,
+even though it is close to file-disjoint from 0.7.0 and could technically proceed — a surface finding
+is exactly the kind that changes what gets stored.
 
 ## Sequencing
 

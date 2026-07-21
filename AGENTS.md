@@ -22,35 +22,43 @@ Avoid the term `Codex` for story information because it reads as derivative and 
 
 ## Architecture
 
-- Backend: Python local application service.
-- API style: REST-like HTTP plus streaming later for AI/events.
-- Frontend: TypeScript browser UI.
-- Editor: WYSIWYG, currently TipTap/ProseMirror.
+- Backend: Python/FastAPI local application service on `127.0.0.1:8787`.
+- API style: REST-like HTTP, plus SSE streaming for AI responses.
+- Frontend: TypeScript/Svelte 5 browser UI.
+- Editor: WYSIWYG, TipTap/ProseMirror; CodeMirror for code/JSON bodies.
 - Scene storage: Markdown files with YAML front matter.
-- Structure storage: a backend-owned structure file.
-- Derived data: SQLite/cache later, never canonical.
+- Structure storage: backend-owned structure files.
+- Derived data: `.cache/`, never canonical, always rebuildable.
 
 ## Current Scope
 
-Current prototype scope:
+Shipped and in daily use:
 
-- Create/open a local project folder.
-- Read/write a manuscript structure.
-- Create/read/save/delete scenes.
-- Edit one scene at a time.
-- Support headings, bold, italic, and tables.
-- Store scenes as Markdown.
-- Maintain project-level and scene-level TODOs.
-- Support basic search.
+- Create/open local project folders, with a layered metadata schema merged
+  from the projects base folder down to the open project.
+- A manuscript tree of acts, chapters, and scenes, and a separate research tree.
+- Create/read/save/delete scenes; Markdown storage; headings, bold, italic,
+  tables, and more.
+- Lore entries with entry types, tags, aliases, references, and backlinks,
+  including mid-scene mutations and a mutation timeline.
+- Views: a set-algebra query language authored in a node-graph designer, and
+  the backing for every node list in the app.
+- AI: Anthropic, OpenAI, OpenRouter, and Ollama providers; Jinja2 prompt
+  entries with declared inputs; chat sessions as nodes; implicit context
+  detection; per-call token and cost accounting.
+- Project-level and scene-anchored TODOs; full-project search; an assistant
+  roster; saveable pane layouts.
 
-Out of scope for now:
+Out of scope:
 
 - Word, PDF, or EPUB export.
 - Hosted accounts or subscriptions.
-- Collaboration.
-- Full Markdown support.
-- AI provider integration.
+- Collaboration and cloud sync.
 - Semantic rename/global replace beyond basic search.
+
+AI is off by default: a project's `ai_policy` starts at `off` and must be
+raised to `local-only` or `cloud-allowed` deliberately. Credentials live in
+per-machine settings, never in the project folder.
 
 ## Engineering Notes
 

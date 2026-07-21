@@ -1,6 +1,8 @@
 # ADR-0042: The edit gesture on an inherited node — two bounded axes, one rule
 
-- Status: **Proposed** — 2026-07-21 (designed with Anton over #308; awaiting approval)
+- Status: **Accepted** — 2026-07-21 (Anton, PR #351). Designed with him over #308 across two sessions:
+  the in-context reach and the bounded authoring layer (§1–§4), **§5 including its no-"between"
+  boundary**, and the reach cue (§8 — header strip, entry gate, footer echo, non-sticky L).
 - Feature: #7 · Issue: #308 · Gates: #313 (slice D) · #314 (slice E)
 - Follows: ADR-0039 (the hierarchy model), ADR-0013 (+ Amendment 1 — **this ADR settles its open
   question**), ADR-0016 (the mutation unit), ADR-0017 (collection deltas authored as list edits),

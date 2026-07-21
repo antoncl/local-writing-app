@@ -61,15 +61,17 @@ weakest → strongest:
    the file-size guard + the style-token guard + `ruff` on **every file you
    edit** and feeds any violation straight back into context. Fix it before
    declaring the task done.
-2. **Git hooks** (`.pre-commit-config.yaml`) — *commit* runs `ruff` (blocking) +
-   advisory complexity + the file-size and style-token guards on staged files;
-   *push* runs `svelte-check` + `vitest` + `pytest`. `ruff` covers `backend/`,
+2. **Git hooks** (`.pre-commit-config.yaml`) — *commit only*, and fast: `ruff`
+   (blocking) + advisory complexity + the file-size and style-token guards on
+   staged files. **There is deliberately no push stage** — the slow whole-project
+   gates moved to CI (#352). `ruff` covers `backend/`,
    `scripts/` **and** `.claude/hooks/` — the gate machinery is held to the rules
    it enforces (#352); the root `.ruff.toml` extends `backend/pyproject.toml` so
    files outside `backend/` don't fall back to ruff's weaker defaults.
    One-time setup per clone:
    `backend/.venv/Scripts/python.exe -m pip install -e "backend[dev]"`, then
-   `backend/.venv/Scripts/pre-commit install` and `… install -t pre-push`.
+   `backend/.venv/Scripts/pre-commit install` — **not** `… -t pre-push`; if an
+   old clone has one, `pre-commit uninstall -t pre-push` removes it.
 
 3. **CI** (`.github/workflows/gates.yml`, #352) — the same gates on a **clean
    checkout**, on every PR and every push to master. It is the only layer that

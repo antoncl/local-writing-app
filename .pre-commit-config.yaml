@@ -47,28 +47,21 @@ repos:
         files: ^(backend|scripts|\.claude/hooks)/
         verbose: true
 
-      # --- push stage (slow, whole project) ---
-      - id: svelte-check
-        name: svelte-check (frontend types/templates)
-        # via npm_run.py so a git worktree links the primary install (#137)
-        entry: python scripts/npm_run.py run check
-        language: system
-        pass_filenames: false
-        always_run: true
-        stages: [pre-push]
-
-      - id: vitest
-        name: vitest (frontend unit tests)
-        entry: python scripts/npm_run.py test
-        language: system
-        pass_filenames: false
-        always_run: true
-        stages: [pre-push]
-
-      - id: pytest
-        name: pytest (backend)
-        entry: python scripts/venv_run.py -m pytest backend/tests -q
-        language: system
-        pass_filenames: false
-        always_run: true
-        stages: [pre-push]
+      # --- push stage: NONE. CI owns the slow gates (#352) ---
+      #
+      # svelte-check, vitest and pytest used to run here. They now run in
+      # .github/workflows/gates.yml, on a clean checkout, and duplicating them
+      # locally cost more than it caught:
+      #
+      #   * ~5 minutes of dead time on every push, which is what makes people
+      #     reach for --no-verify — the way a gate actually dies.
+      #   * pre-commit's `staged_files_only` runs `git checkout -- .` REPO-WIDE
+      #     and rolls back anything written during the run. A five-minute window
+      #     of that in a shared working tree destroyed a concurrent session's
+      #     uncommitted work (2026-07-21). The commit stage keeps a window of
+      #     the same shape, but seconds long instead of minutes.
+      #   * they gated the working tree, not the commits being pushed.
+      #
+      # Run them by hand while iterating (CLAUDE.md lists the invocations); the
+      # PR check is the authority. Do NOT re-add a push stage without also
+      # re-reading #352 — and note the per-clone setup no longer installs one.

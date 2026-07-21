@@ -53,8 +53,8 @@ restart it after editing backend code.
 
 The standards below are **machine-enforced** — they no longer depend on
 remembering to run a command (a rule that lives only in prose drifts under
-context pressure; that is how `App.svelte` reached ~4900 lines). Two layers,
-weakest → strongest — there is **no CI**, so a `--no-verify` push is unchecked:
+context pressure; that is how `App.svelte` reached ~4900 lines). Three layers,
+weakest → strongest:
 
 1. **In-session** — a Claude Code `PostToolUse` hook
    (`.claude/hooks/check_edited_file.py`, wired in `.claude/settings.json`) runs
@@ -70,6 +70,15 @@ weakest → strongest — there is **no CI**, so a `--no-verify` push is uncheck
    One-time setup per clone:
    `backend/.venv/Scripts/python.exe -m pip install -e "backend[dev]"`, then
    `backend/.venv/Scripts/pre-commit install` and `… install -t pre-push`.
+
+3. **CI** (`.github/workflows/gates.yml`, #352) — the same gates on a **clean
+   checkout**, on every PR and every push to master. It is the only layer that
+   cannot be walked past with `--no-verify`, and the only one immune to the
+   local hazards below (a worktree importing the primary tree's code; a
+   concurrent session writing into the shared tree mid-run). It runs the two
+   guards **repo-wide**, not just over staged files. Private repo, so minutes
+   are billed: `ubuntu-latest` only, two parallel jobs, superseded runs
+   cancelled — keep it that way.
 
 **In a linked git worktree** the gates must test *that* worktree's code.
 `scripts/venv_run.py` borrows the primary worktree's *interpreter* but forces

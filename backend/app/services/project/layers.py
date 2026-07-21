@@ -52,6 +52,10 @@ from app.services.project.node_index import IndexLayer
 # The metadata-schema file each project layer may carry. Not applicable to the
 # machine layer, which is out-of-tree and contributes assistants only.
 SCHEMA_FILENAME = "metadata.schema.yaml"
+# The per-layer manifest. Its `settings.projects_base_folder` is what the walk
+# consults to decide where it stops, so it is an input to the *shape* of the
+# chain and not only to a layer's content.
+MANIFEST_FILENAME = "project.yaml"
 
 
 @lru_cache(maxsize=1024)
@@ -251,7 +255,7 @@ class LayerWalkMixin:
         removing the widening is a behaviour change and is *not* part of the
         #329 refactor. It is now a single edit, here.
         """
-        manifest = self._read_yaml(root / "project.yaml")
+        manifest = self._read_yaml(root / MANIFEST_FILENAME)
         settings = manifest.get("settings")
         if not isinstance(settings, dict):
             return None

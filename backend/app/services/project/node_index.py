@@ -142,6 +142,17 @@ class NodeIndex:
             None,
         )
 
+    def collected_warnings(self) -> list[str]:
+        """The warnings collection produced, without the shadow warnings
+        `resolve()` derives.
+
+        What a snapshot (#306) may persist. The shadow warnings are a function
+        of the candidate lists, so serializing them would double them the moment
+        the rehydrated index re-resolves — and `resolve()` is exactly what
+        rebuilds the derived views on load.
+        """
+        return [warning for warning in self.warnings if warning not in self._shadow_warnings]
+
     def resolve(self) -> None:
         """Rebuild the derived views from the candidate lists.
 

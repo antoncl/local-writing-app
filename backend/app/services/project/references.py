@@ -26,6 +26,7 @@ slice imports them without a cycle.
 
 from __future__ import annotations
 
+import logging
 from pathlib import Path
 from typing import Any
 
@@ -38,7 +39,7 @@ from app.models import (
     ReferenceResolveResponse,
 )
 from app.services.project.errors import ProjectServiceError
-from app.services.project.layers import LayerVisitor
+from app.services.project.layers import MANIFEST_FILENAME, SCHEMA_FILENAME, LayerVisitor
 from app.services.project.node_index import (
     IndexLayer,
     NodeFamily,
@@ -46,6 +47,16 @@ from app.services.project.node_index import (
     NodeIndexEntry,
     ReferenceEdge,
 )
+from app.services.project.node_index_snapshot import (
+    Manifest,
+    SnapshotUnusable,
+    fingerprint_for,
+    snapshot_path,
+)
+from app.services.project.node_index_snapshot import load as snapshot_load
+from app.services.project.node_index_snapshot import serialize as snapshot_serialize
+
+log = logging.getLogger(__name__)
 
 # The Node-shaped kinds the index walks, once per layer of the chain.
 NODE_FAMILIES = [
@@ -116,7 +127,114 @@ class _NodeIndexBuilder(LayerVisitor):
             )
 
 
+class _ManifestBuilder(LayerVisitor):
+    """Fingerprints every file the index build will read (#306).
+
+    A visitor over the same walk, globbing the same folders with the same
+    semantics as the collectors — `*.md`, **non-recursively**, per family folder.
+    That is not incidental: a recursive walk would report a nested file as an
+    addition on every open, forever, because the index would never index it.
+
+    Why re-glob rather than record paths as the collectors visit them: additions.
+    A file that was never indexed has no entry to record, so a manifest derived
+    from the index can only ever re-stat what it already knew — drop a `.md` into
+    an ancestor's `lore/` from Explorer, or `git pull` a layer, and it stays
+    invisible. Globbing is also what makes the two manifests comparable: the
+    stored one and the current one come from this same code, so equality means
+    what it says.
+    """
+
+    def __init__(self, service: ReferencesMixin) -> None:
+        self._service = service
+        self.manifest: Manifest = {}
+
+    def record(self, path: Path) -> None:
+        self.manifest[str(path)] = fingerprint_for(path)
+
+    def visit_layer(self, layer: IndexLayer) -> None:
+        for family in self._service._families_for_layer(layer):
+            for path in sorted((layer.folder / family.folder_name).glob("*.md")):
+                self.record(path)
+        if layer.is_root:
+            for path in sorted((layer.folder / "chats").glob("*.yaml")):
+                self.record(path)
+        if not layer.is_machine:
+            # Recorded even when absent — `project.md` is required to exist
+            # (#343) so its disappearance is a change, and a layer *gaining* a
+            # `metadata.schema.yaml` or `project.yaml` changes how every node in
+            # the chain resolves without touching a single node file.
+            self.record(layer.folder / PROJECT_NODE_FILENAME)
+            self.record(layer.folder / MANIFEST_FILENAME)
+            self.record(layer.folder / SCHEMA_FILENAME)
+
+
 class ReferencesMixin:
+    def _build_index_manifest(self, root: Path) -> Manifest:
+        """Fingerprint every file an index build over `root` reads.
+
+        Per layer, over the walk — so it covers exactly the layers the walk
+        actually yielded, whatever rule decided that.
+
+        **It deliberately does not fingerprint how far the walk goes.** The
+        extent rule probes ancestors *above* the outermost layer for a
+        `metadata.schema.yaml`, and one appearing there lengthens the chain
+        without changing any file this records. That is caught one level up, by
+        comparing the walk's resulting layer folders against the snapshot's
+        (`node_index_snapshot.load`): a longer chain is a different chain, and a
+        different chain is a hard rebuild before freshness is even consulted.
+
+        Checking the walk's *output* rather than its *inputs* is what keeps the
+        extent question deferred where #329 put it. When #337 stipulates the
+        root, or #318's wizard authors the bound, the walk yields a different
+        sequence and this notices — with nothing here to edit.
+        """
+        builder = _ManifestBuilder(self)
+        self.visit_layers(builder, root, include_machine=True)
+        return builder.manifest
+
+    def _load_index_snapshot(
+        self, root: Path, *, layers: list[IndexLayer], manifest: Manifest
+    ) -> NodeIndex | None:
+        """The snapshot, when it is still true. None means "build it".
+
+        Three of the failure paths are operationally distinct and deliberately
+        handled differently. **Missing** is the normal first open and says
+        nothing. **Corrupt** is evidence of a bug — something wrote a file we
+        cannot read back — and is logged loudly even though it self-heals.
+        **Version-mismatched** is expected after an upgrade, and the stale file
+        is unlinked rather than left to be rewritten, so a downgrade cannot find
+        a newer payload sitting under a name it trusts.
+        """
+        path = snapshot_path(root)
+        try:
+            text = path.read_text(encoding="utf-8")
+        except FileNotFoundError:
+            return None
+        except OSError as exc:
+            log.warning("Could not read the node-index snapshot at %s: %s", path, exc)
+            return None
+        try:
+            return snapshot_load(text, root=root, layers=layers, manifest=manifest)
+        except SnapshotUnusable as exc:
+            if exc.reason == "corrupt":
+                log.warning("Discarding an unreadable node-index snapshot at %s: %s", path, exc.detail)
+            elif exc.reason == "version":
+                log.info("Node-index snapshot format changed; rebuilding %s", path)
+                path.unlink(missing_ok=True)
+            return None
+
+    def _write_index_snapshot(
+        self, root: Path, index: NodeIndex, *, layers: list[IndexLayer], manifest: Manifest
+    ) -> None:
+        """Persist a freshly built index. Best-effort by construction: the
+        snapshot is derived, so failing to write one costs the next open its
+        speed and nothing else. A read-only project folder must not make the
+        index unbuildable."""
+        try:
+            self._atomic_write(snapshot_path(root), snapshot_serialize(index, root=root, layers=layers, manifest=manifest))
+        except OSError as exc:
+            log.warning("Could not write the node-index snapshot for %s: %s", root, exc)
+
     def _build_node_index(self, root: Path | None = None) -> NodeIndex:
         """Walk the layer chain once, producing both the id→entry map and the
         reference edges (#305).
@@ -135,6 +253,16 @@ class ReferencesMixin:
         loudly on their own read; this one does not fail on their behalf.
         """
         root = root or self._require_project()
+        layers = self.collect_layers(root, include_machine=True)
+        # Fingerprinted **before** the build, not after. A file written while
+        # the build runs is then either missed by both (consistent) or indexed
+        # but unrecorded — which reads as an addition next time and rebuilds.
+        # Stamping afterwards inverts that: the manifest would vouch for content
+        # the index never saw, and the snapshot would be silently short a node.
+        manifest = self._build_index_manifest(root)
+        cached = self._load_index_snapshot(root, layers=layers, manifest=manifest)
+        if cached is not None:
+            return cached
         index = NodeIndex()
         try:
             schema: MetadataSchema | None = self.read_metadata_schema()
@@ -158,6 +286,7 @@ class ReferencesMixin:
         # build the reverse edge map. Nothing before this point resolves a
         # shadow — that is what stops the walk destroying an ancestor.
         index.resolve()
+        self._write_index_snapshot(root, index, layers=layers, manifest=manifest)
         return index
 
     def _collect_chat_entries(self, *, layer: IndexLayer, index: NodeIndex) -> None:

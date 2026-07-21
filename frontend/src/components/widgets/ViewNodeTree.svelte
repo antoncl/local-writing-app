@@ -22,6 +22,7 @@
   import ViewNodeTree from "@/components/widgets/ViewNodeTree.svelte";
   import { getSwatch } from "@/lib/utils/colors";
   import type { EvalNode, ViewAnnotation, ViewGroup } from "@/lib/views/evaluateView";
+  import { groupBucketValue } from "@/lib/views/evaluateView";
   import type { GroupCtx, RowCtx } from "@/components/widgets/ViewNodeList.svelte";
   import type { DropPosition, TreeDrag } from "@/components/widgets/treeDrag.svelte";
   import type { TreeRename } from "@/components/widgets/treeRename.svelte";
@@ -38,6 +39,7 @@
     onDblClick,
     onRename,
     onReorder,
+    onGroupDrop,
     isContainer,
     drag,
     rename,
@@ -55,6 +57,7 @@
     onDblClick?: (node: T) => void;
     onRename?: (node: T, nextTitle: string) => void;
     onReorder?: (moved: T, target: T, position: "before" | "after" | "into") => void;
+    onGroupDrop?: (moved: T, groupKey: string) => void;
     isContainer?: (node: T) => boolean;
     drag: TreeDrag<T>;
     rename: TreeRename<T>;
@@ -148,6 +151,40 @@
     };
   }
 
+  // Drop-onto-a-BUCKET gesture (#333). A synthetic bucket is not a node, so it
+  // takes no before/after zone and never routes through `reorderHandlers`: the
+  // intent is "give the moved node this bucket's value", which for a `group_by`
+  // level is exactly the group key. This is also the ONLY way to reach an empty
+  // bucket — there is no member row to aim at — which is why it is a widget
+  // affordance rather than something a consumer can bolt on from the outside.
+  function groupDropHandlers(group: ViewGroup<T>) {
+    return {
+      onDragOver: (event: DragEvent) => {
+        if (!drag.dragged) return;
+        event.preventDefault();
+        if (event.dataTransfer) event.dataTransfer.dropEffect = "move";
+        // Clear any row-level indicator so the bucket and a member row never
+        // both show a drop marker.
+        drag.overId = null;
+        drag.position = null;
+        drag.overGroupKey = group.key;
+      },
+      onDragLeave: () => {
+        if (drag.overGroupKey === group.key) drag.overGroupKey = null;
+      },
+      onDrop: (event: DragEvent) => {
+        event.preventDefault();
+        const moved = drag.dragged;
+        drag.reset();
+        // Hand out the bucket's VALUE, never its render key — `group.key` is
+        // namespaced so buckets and real nodes can share one map, and a consumer
+        // comparing against the bare value would silently never match.
+        const value = groupBucketValue(group);
+        if (moved && value !== null) onGroupDrop?.(moved, value);
+      },
+    };
+  }
+
   // Distinct leaf members in a synthetic bucket's subtree — the count pill total.
   // A container node isn't counted (it's a header); a node reachable via two
   // branches counts once.
@@ -181,6 +218,7 @@
         {onDblClick}
         {onRename}
         {onReorder}
+        {onGroupDrop}
         {isContainer}
         {drag}
         {rename}
@@ -211,6 +249,7 @@
         {onDblClick}
         {onRename}
         {onReorder}
+        {onGroupDrop}
         {isContainer}
         {drag}
         {rename}
@@ -222,14 +261,19 @@
     {/if}
   {:else}
     <!-- Synthetic bucket, default groupHeader chrome. -->
+    {@const groupDrop = onGroupDrop ? groupDropHandlers(group) : undefined}
     <NodeRow
       groupHeader
       collapsed={isCollapsed}
       title={group.label ?? "Everything else"}
       {depth}
       stripeColor={group.color ? getSwatch(group.color)?.hex ?? null : null}
+      dropPosition={drag.overGroupKey === group.key ? "into" : null}
       onClick={() => toggle(group.key)}
       onmousedown={(event) => event.stopPropagation()}
+      ondragover={groupDrop?.onDragOver}
+      ondragleave={groupDrop?.onDragLeave}
+      ondrop={groupDrop?.onDrop}
     >
       {#snippet leading()}
         <GroupCaret collapsed={isCollapsed} />
@@ -249,6 +293,7 @@
             {onDblClick}
             {onRename}
             {onReorder}
+        {onGroupDrop}
             {isContainer}
             {drag}
             {rename}

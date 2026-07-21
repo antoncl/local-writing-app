@@ -19,10 +19,17 @@ export class TreeDrag<T extends EvalNode> {
   // The row the cursor is over + where a drop would land, for the indicator.
   overId = $state<string | null>(null);
   position = $state<DropPosition | null>(null);
+  // A synthetic BUCKET header the cursor is over, by group key. Distinct from
+  // `overId` because a bucket is not a node — it has no id and cannot take a
+  // before/after position; dropping on one means "take this bucket's value"
+  // (#333: drop on Active to list an assistant). It is also the only way to
+  // reach an EMPTY bucket, which has no member row to aim at.
+  overGroupKey = $state<string | null>(null);
 
   reset(): void {
     this.dragged = null;
     this.overId = null;
     this.position = null;
+    this.overGroupKey = null;
   }
 }

@@ -169,11 +169,14 @@ class _ManifestBuilder(LayerVisitor):
 
 
 class ReferencesMixin:
-    def _build_index_manifest(self, root: Path) -> Manifest:
-        """Fingerprint every file an index build over `root` reads.
+    def _build_index_manifest(self, layers: list[IndexLayer]) -> Manifest:
+        """Fingerprint every file an index build over these layers reads.
 
-        Per layer, over the walk — so it covers exactly the layers the walk
-        actually yielded, whatever rule decided that.
+        Takes the already-collected sequence rather than re-walking: the caller
+        needs the layers anyway, and a second walk re-reads `project.yaml` and
+        re-runs the ancestor probe for nothing (~1.7 ms of a ~7 ms warm call).
+        This is `LayerCollector`'s sanctioned second shape — collect once, then
+        iterate the collected sequence — not a bypass of the walk.
 
         **It deliberately does not fingerprint how far the walk goes.** The
         extent rule probes ancestors *above* the outermost layer for a
@@ -189,7 +192,8 @@ class ReferencesMixin:
         sequence and this notices — with nothing here to edit.
         """
         builder = _ManifestBuilder(self)
-        self.visit_layers(builder, root, include_machine=True)
+        for layer in layers:
+            builder.visit_layer(layer)
         return builder.manifest
 
     def _load_index_snapshot(
@@ -197,13 +201,19 @@ class ReferencesMixin:
     ) -> NodeIndex | None:
         """The snapshot, when it is still true. None means "build it".
 
-        Three of the failure paths are operationally distinct and deliberately
-        handled differently. **Missing** is the normal first open and says
-        nothing. **Corrupt** is evidence of a bug — something wrote a file we
-        cannot read back — and is logged loudly even though it self-heals.
-        **Version-mismatched** is expected after an upgrade, and the stale file
-        is unlinked rather than left to be rewritten, so a downgrade cannot find
-        a newer payload sitting under a name it trusts.
+        The failure paths are operationally distinct and logged differently.
+        **Missing** is the normal first open and says nothing. **Corrupt** is
+        evidence of a bug — something wrote a file we cannot read back — and is
+        logged loudly. **Version-mismatched** is expected after an upgrade and
+        is unremarkable.
+
+        None of them deletes the file. An earlier version unlinked on a version
+        mismatch, which reads as tidy and is a live hazard: that branch runs for
+        every project on the first open after a format bump, and on Windows a
+        single open handle — a scanner, a backup agent, a second instance — makes
+        `unlink` raise `PermissionError` out of the *read* path, 500ing every
+        index consumer. The rebuild overwrites the file moments later anyway, so
+        the deletion bought nothing that the write does not already do.
         """
         path = snapshot_path(root)
         try:
@@ -225,8 +235,7 @@ class ReferencesMixin:
             if exc.reason == "corrupt":
                 log.warning("Discarding an unreadable node-index snapshot at %s: %s", path, exc.detail)
             elif exc.reason == "version":
-                log.info("Node-index snapshot format changed; rebuilding %s", path)
-                path.unlink(missing_ok=True)
+                log.info("Node-index snapshot is from another build; rebuilding %s", path)
             return None
 
     def _write_index_snapshot(
@@ -270,7 +279,7 @@ class ReferencesMixin:
         # but unrecorded — which reads as an addition next time and rebuilds.
         # Stamping afterwards inverts that: the manifest would vouch for content
         # the index never saw, and the snapshot would be silently short a node.
-        manifest = self._build_index_manifest(root)
+        manifest = self._build_index_manifest(layers)
         cached = self._load_index_snapshot(root, layers=layers, manifest=manifest)
         if cached is not None:
             return cached

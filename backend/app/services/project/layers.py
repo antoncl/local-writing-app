@@ -146,7 +146,16 @@ class LayerWalkMixin:
             visitor.visit_layer(layer)
 
     def _layer_sequence(self, root: Path, *, include_machine: bool) -> list[IndexLayer]:
-        """Build the chain. Private: consumers visit, they do not iterate."""
+        """Build the chain. Private: consumers visit, they do not iterate.
+
+        `root` is canonicalised **once, here**, because everything below
+        compares against it. `_project_layer_folders` yields resolved folders
+        (see its docstring on #356), so `folder == root` against an unresolved
+        argument is false for *every* layer — no layer is marked `is_root`, and
+        `_families_for_layer` then drops scenes and chats from the index
+        silently. Same normal-form defect as #356, one comparison further on.
+        """
+        root = root.resolve()
         layers: list[IndexLayer] = []
         if include_machine:
             machine_layer = self.machine_layer(rank=len(layers))

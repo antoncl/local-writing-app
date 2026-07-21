@@ -99,6 +99,20 @@ class LayerWalkTests(unittest.TestCase):
 
         self.assertEqual([layer.is_root for layer in layers], [False, False, False, True])
 
+    def test_is_root_survives_a_non_canonical_root(self) -> None:
+        """`_project_layer_folders` yields *resolved* folders, so comparing them
+        against an unresolved argument marks **no** layer as the root — and
+        `_families_for_layer` then drops scenes and chats from the index with no
+        error anywhere. Same normal-form defect as #356, one comparison on;
+        found by #306's snapshot, which turned it into a permanent cache miss.
+        """
+        detour = self.root.parent / "nonexistent" / ".." / self.root.name
+
+        layers = self.service.collect_layers(detour)
+
+        self.assertEqual([layer.is_root for layer in layers], [False, False, False, True])
+        self.assertEqual([layer.folder for layer in layers], [layer.folder for layer in self.service.collect_layers(self.root)])
+
     def test_labels_follow_the_layer_rules(self) -> None:
         # Outermost project layer is "Base Folder", the open project takes the
         # project title, everything between is the folder name.

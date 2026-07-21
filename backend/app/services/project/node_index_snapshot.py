@@ -175,9 +175,14 @@ def serialize(
     payload = {
         "format_version": SNAPSHOT_FORMAT_VERSION,
         "build_identity": build_identity(),
-        # Absolute, and checked on load: users copy book folders, and without
-        # this a copy reads its ancestor's cache and believes it.
-        "root": str(root),
+        # Absolute, canonical, and checked on load: users copy book folders,
+        # and without this a copy reads its ancestor's cache and believes it.
+        # `resolve()` because the layer folders are resolved and this is
+        # compared against them in spirit — an unresolved spelling (a `..`
+        # segment) would otherwise never match what was stored, making every
+        # call a guaranteed miss *plus* a full write: strictly worse than no
+        # cache at all, and silent.
+        "root": str(root.resolve()),
         "layer_folders": [str(layer.folder) for layer in layers],
         "manifest": _manifest_to_raw(manifest),
         "entries": [
@@ -238,7 +243,7 @@ def load(
     # a format change: expected after an upgrade, and rebuilds silently.
     if payload.get("build_identity") != build_identity():
         raise SnapshotUnusable("version", "built by different code")
-    if payload.get("root") != str(root):
+    if payload.get("root") != str(root.resolve()):
         raise SnapshotUnusable("moved", str(payload.get("root")))
     # The chain the walk just produced, against the one it produced when this
     # was written. This is also what covers the *extent* of the walk, which no

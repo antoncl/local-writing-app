@@ -342,6 +342,33 @@ class SnapshotIntegrityTests(SnapshotTestCase):
         for layer in self.service.collect_layers(self.root, include_machine=True):
             self.assertNotIn(layer.id, blob)
 
+    def test_stale_snapshot_under_an_open_handle_does_not_break_the_build(self) -> None:
+        """The read path must not delete anything.
+
+        An earlier version unlinked on a version mismatch — the branch that runs
+        for *every* project on the first open after a format bump. On Windows one
+        open handle (a scanner, a backup agent, a second instance) turns that
+        into a `PermissionError` raised out of the read path, 500ing every index
+        consumer. The rebuild overwrites the file moments later regardless.
+        """
+        self.service._build_node_index(self.root)
+        payload = self._snapshot_payload()
+        payload["build_identity"] = "0" * 16
+        self._write_payload(payload)
+        with snapshot.snapshot_path(self.root).open(encoding="utf-8"):
+            index = self.service._build_node_index(self.root)
+        self.assertIn("project", {entry.kind for entry in index.by_id.values()})
+
+    def test_non_canonical_root_still_hits_the_cache(self) -> None:
+        """`..` in the path would otherwise never match the stored `root`, so
+        every call would miss *and* rewrite the snapshot — strictly worse than
+        no cache, and silent. No caller does this today; #307 adds callers."""
+        self.service._build_node_index(self.root)
+        detour = self.root.parent / "nonexistent" / ".." / self.root.name
+        calls = self._count_collections()
+        self.service._build_node_index(detour)
+        self.assertEqual(calls[0], 0)
+
     def test_unwritable_cache_does_not_break_the_build(self) -> None:
         """The snapshot is derived; a project folder we cannot write must cost
         the next open its speed and nothing else."""

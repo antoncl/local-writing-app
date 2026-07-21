@@ -24,6 +24,26 @@ export function assistantTagsOf(a: AssistantEntrySummary): string[] {
   return readTags(a.metadata?.tags);
 }
 
+// The assistants a prompt may actually USE — the author's active roster (#333).
+//
+// The roster carries un-listed entries since #333, so that nothing the app knows
+// about becomes unreachable in the Assistants pane. That is a curation surface;
+// this is not. Un-listing an assistant has to remove it from the prompt picker,
+// or "not in my roster" would mean nothing at the only place it matters — and an
+// un-listed assistant could still become a prompt's dynamic default via its tags.
+//
+// Active means listed, full stop — an emptied roster yields an empty picker
+// rather than a guess. Agrees with `resolve_assistant`, which takes the first
+// listed id and returns nothing when there is none; the two are meant to give
+// the same answer and there is no longer a case where they diverge.
+//
+// Not a state anyone lands in by accident: `create_assistant_entry` prepends
+// every new assistant to its layer's `.order.yaml`, so anything made through
+// the app is listed from birth.
+export function activeAssistants(entries: AssistantEntrySummary[]): AssistantEntrySummary[] {
+  return entries.filter((a) => a.computed_metadata?.listed === "listed");
+}
+
 export function assistantMatchesScope(a: AssistantEntrySummary, tags: string[]): boolean {
   if (tags.length === 0) return false;
   const own = assistantTagsOf(a);
@@ -36,13 +56,16 @@ export function preferredAssistantForPrompt(entry: PromptEntrySummary): string {
   return typeof raw === "string" ? raw : "";
 }
 
-// The first assistant (in roster/manual order) matching the scope, or null.
+// The first ACTIVE assistant (in roster/manual order) matching the scope, or
+// null. Filtering here rather than at the call sites is deliberate: a caller
+// that forgot would silently reintroduce un-listed assistants as tag-scoped
+// defaults, which is the regression ADR-0024 Amendment 1 exists to close.
 export function topmostMatchingAssistant(
   entries: AssistantEntrySummary[],
   tags: string[],
 ): AssistantEntrySummary | null {
   if (tags.length === 0) return null;
-  return entries.find((a) => assistantMatchesScope(a, tags)) ?? null;
+  return activeAssistants(entries).find((a) => assistantMatchesScope(a, tags)) ?? null;
 }
 
 // Dynamic default (ADR-0024): topmost matching the scope, else topmost overall.
@@ -54,9 +77,14 @@ export function scopedDefaultAssistantId(
   return topmostMatchingAssistant(entries, tags)?.id ?? fallbackId;
 }
 
-// Soft partition: assistants matching the scope first (manual order), the rest
-// below — the full list stays reachable. Search filters both. Manual order is
-// preserved throughout (no title sort): the roster order is the preference.
+// Partition over the ACTIVE roster: assistants matching the scope first (manual
+// order), the other active ones below. Search filters both, and manual order is
+// preserved throughout (no title sort) — the roster order is the preference.
+//
+// ADR-0024 v1 kept the FULL list reachable below the divider; Amendment 1
+// supersedes that. Un-listed assistants are absent here entirely, and the
+// "everything is reachable" requirement is met by the Assistants pane, which is
+// the curation surface. An emptied roster yields an empty picker.
 export function partitionAssistants(
   entries: AssistantEntrySummary[],
   search: string,
@@ -65,7 +93,7 @@ export function partitionAssistants(
   const q = search.trim().toLowerCase();
   const inSearch = (e: AssistantEntrySummary) =>
     !q || e.title.toLowerCase().includes(q) || (e.entry_type || "").toLowerCase().includes(q);
-  const list = entries.filter(inSearch);
+  const list = activeAssistants(entries).filter(inSearch);
   if (tags.length === 0) return { matching: [], rest: list };
   const matching: AssistantEntrySummary[] = [];
   const rest: AssistantEntrySummary[] = [];

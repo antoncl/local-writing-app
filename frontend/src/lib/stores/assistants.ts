@@ -5,6 +5,7 @@
 
 import { derived, writable } from "svelte/store";
 import { api } from "@/lib/api";
+import { activeAssistants } from "@/lib/chat/assistantScope";
 import type { AssistantEntrySummary } from "@/lib/types";
 
 export const assistantEntriesStore = writable<AssistantEntrySummary[]>([]);
@@ -14,9 +15,15 @@ export const assistantEntriesStore = writable<AssistantEntrySummary[]>([]);
 // manual order already expresses global preference. A derived store (not a
 // function) so consumers track the inner roster dependency — see
 // feedback_svelte5_reactivity_traps; this is what App's `$:` derivation did.
+// The topmost ACTIVE entry (ADR-0024 Amendment 1). The roster carries un-listed
+// entries since #333, so `$entries[0]` stopped meaning "top of my roster" — an
+// assistant the author just un-listed sorts first often enough that un-listing
+// became a way to make the app start USING it. Mirrors the backend's
+// `resolve_assistant`, which takes the first listed id and returns nothing when
+// there is none.
 export const defaultAssistantIdStore = derived(
   assistantEntriesStore,
-  ($entries) => $entries[0]?.id ?? "",
+  ($entries) => activeAssistants($entries)[0]?.id ?? "",
 );
 
 // Refresh swallows errors (backend may be unavailable) and leaves the previous

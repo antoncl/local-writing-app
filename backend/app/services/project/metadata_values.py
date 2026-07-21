@@ -260,6 +260,16 @@ class MetadataValuesMixin:
         entry, at which point the cleaned metadata is written back. Mirrors
         ``_strip_dangling_references`` for field-level rather than value-
         level staleness.
+
+        Deliberately does NOT drop computed fields. #333 briefly made it do so,
+        reasoning that a derived value has no business in stored metadata — but
+        `save_scene` and `save_lore_entry` already reject one with a 422
+        (`test_save_rejects_computed_metadata`), so the hole that justified it
+        did not exist, and dropping here turned a *stored → computed* field
+        retype from a loud rejection (scene/lore) or a preserved value
+        (research) into silent, unrecoverable erasure on the next save. The
+        narrow case that IS real — assistants, whose save path does not
+        validate — is handled at that write path instead.
         """
 
         entry_type_definition = schema.entry_types.get(entry_type)

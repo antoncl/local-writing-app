@@ -108,10 +108,17 @@ prevent.
 boundary — captured lazily when a pane opens a scene, materialized only if that session goes on to
 dirty the document, so clean reads cost nothing. This yields at most one per scene per session and
 answers "what did this look like when I sat down". Plus an explicit author-invoked snapshot, as in
-Scrivener. Automatic snapshots are thinned by a retention policy; explicit ones are named and kept
-until deleted. The explicit control alone is insufficient because the feature is worth most precisely
-when the author forgot to press it; the automatic capture alone is insufficient because only the author
+Scrivener. The explicit control alone is insufficient because the feature is worth most precisely when
+the author forgot to press it; the automatic capture alone is insufficient because only the author
 knows which state was worth marking.
+
+**Automatic snapshots retain the last five per scene; explicit ones are never thinned.** Five because
+the automatic tier is a prosthetic for the author's own recall of recent states, and that is roughly
+the depth a person holds — a human context store, working differently but not unboundedly. Beyond
+that the list stops being navigable and becomes an archive nobody reads, which is what the explicit
+tier is for. The number is a considered default, not a measured optimum; if it is ever made
+configurable, the reason to change it should be evidence about how authors actually navigate the list,
+not the assumption that more history is strictly better.
 
 **Restore replaces the scene body and reports drift.** It does not touch the mutation records in other
 scenes, the manuscript order, the lore entries, or any ancestor layer.
@@ -132,6 +139,85 @@ specific consequence has not implemented this ADR.
 invoked is deliberately left open; this ADR fixes only the contract those surfaces must honour
 (advisory, specific, in the author's vocabulary). It is a separate design pass, and nothing in this
 document should be read as constraining its shape.
+
+## Identity: a snapshot carries its own id and is never an indexed node
+
+A snapshot must not reuse the source node's `id`. The front-matter `id` is canonical identity
+(`project_service.py:374-375`) and the node index maps `id → [candidates by layer]` (ADR-0040) — a
+second file bearing a live scene's id is an index collision, not a historical record, and it would make
+`_path_for_node_id` non-deterministic and reference resolution ambiguous.
+
+**A snapshot is stored as two files: the captured bytes, and a sidecar describing them.**
+
+- `snapshots/<source-node-id>/<snapshot-id>.md` — a **byte-for-byte copy** of the scene file as it was,
+  front matter included. It therefore still carries the *source* node's id, which is correct: it is a
+  photograph of that file.
+- `snapshots/<source-node-id>/<snapshot-id>.yaml` — the snapshot's own record: `id`, `snapshot_of`
+  (the source node id), `captured_at`, `retention`, the `schema_version` in force at capture, and the
+  witness.
+
+  The sidecar carries no denormalized copy of the scene's `title`. An earlier draft did, first to let
+  an orphan listing render a name, then — once orphans were retired — on the argument that `title` is
+  mutable so the captured name can differ from the current one. Both are gone. Nothing is lost by
+  removing it: the captured title is already in the byte-copy's front matter, so any surface that wants
+  it can read it. What the field actually was is a denormalization with **no consumer that exists**,
+  and this repo has paid for that shape before — mechanisms built for a render surface that never
+  arrived, used by nothing, deleted later. If a surface materializes that needs the lookup to be cheap,
+  it can denormalize then, with a reason.
+
+Splitting them is what makes byte-exactness *provable rather than reconstructed*. Restore is a file
+copy, not a re-serialization of nested YAML — and for the one feature whose job is not losing the
+author's words, a round-trip through a serializer is precisely the risk not worth taking. It also keeps
+the witness out of the restored bytes entirely.
+
+**`retention` is `thinned | kept`**, not a boolean. `thinned` is subject to the keep-five policy;
+`kept` is not. An enum because the field will plausibly grow a third case (an author-pinned automatic
+capture is the obvious one), and a boolean extension point is the shape this repo has had to retire
+before.
+
+The sidecar's key names are otherwise unremarkable, and deliberately so: it is a private file the
+author never edits, parsed by its own model, namespaced by its own directory. Cross-ADR terminology
+discipline applies to words that appear in *design prose and shared code* — where the historical cost
+has been human confusion between two ADRs meaning different things by one word — not to internal keys,
+which cannot collide with anything.
+
+**The directory layout is the lookup table.** "How many snapshots does this id have, and which?" is a
+directory listing — no index to build, invalidate, or repair, and the answer survives any cache
+corruption because it *is* the storage. An index is only warranted by a query the filesystem cannot
+answer cheaply (project-wide chronological listing is the plausible one), and should be added when such
+a surface exists rather than in anticipation of it. Note this deliberately departs from "filenames are
+cosmetic": here the *directory* name is the source id, load-bearing and never renamed, because ids are
+stable and titles are not.
+
+**Invariant: `snapshots/` is not part of the node index, and is excluded at the index, once.** Not by
+a filter at each consumer — an unexcluded store would put five extra members into every view over
+scenes, and correcting that at each call site is the defensive shape this repo avoids. The exclusion
+belongs where `.cache/` and `.migration-backups/` are already handled, and ADR-0040's staleness
+manifest must skip it too, or every capture invalidates the index. Being *node-shaped* is not being an
+*indexed node*: a witness is evidence about the graph, not a participant in it.
+
+**Deleting a scene deletes its snapshots.** The confirmation says how many are going.
+
+An earlier draft of this ADR kept them, on the reasoning that destroying the last copy of an author's
+prose is the opposite of the point. That was wrong, for a reason worth stating because it generalizes:
+**unreachable data is not preserved data.** The directory is named by node id, the author knows scenes
+by title, and once the scene is gone there is no node left to hang an affordance on — so retention
+without a recovery surface is disk usage plus a false sense of safety, with the data available only to
+someone willing to grep the filesystem. Of the three options that is the worst, precisely because it is
+the one that *looks* safe. Building the recovery surface is the other coherent answer, and it is out of
+scope here: it grows the feature well past snapshot-and-restore, for a case a general undelete should
+own rather than one per feature.
+
+Deleting also keeps snapshots consistent with the app as it stands — scene and lore deletes are hard
+deletes (`path.unlink()`), and there is no soft-delete or trash anywhere. A feature that quietly
+retained data after a delete would be the only such thing in the project, which is how a surprising
+invariant gets established by accident.
+
+**The durable property, which holds either way: a scene and its snapshots are one unit of deletion.**
+That is true under today's hard delete, and would remain true under any future undelete or trash
+metaphor — the snapshots travel with the scene rather than needing a concept of their own. If such a
+surface is ever built, whether and how snapshots participate is a decision for that design, not a
+commitment made here.
 
 ## The third axis is value reinterpretation, not schema change
 
@@ -253,6 +339,13 @@ The value of the witness framing is that the feature's correctness criterion bec
 - Snapshot, change nothing, restore; assert no drift is reported and the body is byte-identical.
 - Assert the resolver never reads a witness record.
 - Assert a migration run leaves every stored snapshot byte-identical.
+- Assert a snapshot's id differs from its source's, and that `snapshot_of` round-trips to the source.
+- Assert `snapshots/` contributes nothing to the node index: a view over scenes returns the same
+  members before and after six captures, and the staleness manifest does not change on capture.
+- Capture seven automatic snapshots; assert five remain, that the two dropped are the oldest, and that
+  an interleaved explicit snapshot survives regardless of age.
+- Delete the source scene; assert its snapshot directory is gone and nothing is left behind under
+  `snapshots/`. A partial delete would leave exactly the unreachable residue this ADR rejects.
 
 ## Naming
 

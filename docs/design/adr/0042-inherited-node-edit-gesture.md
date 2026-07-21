@@ -41,8 +41,15 @@ mode* — stop 0 means edit, stops ≥ 1 mean view. This ADR adds the second axi
 
 - **Manuscript axis** — the existing `MutationScrubber` strip (ADR-0013).
 - **Hierarchy axis** — a **layer picker in the metadata rail**, selecting the *authoring layer* **L**.
-  It lands where slice D (#313) already reserves the rail's title bar for owning-level indication:
-  the planned read-only indicator becomes the picker.
+  It docks as a **strip in the editor header** (`.editor-header`), the structural counterpart to the
+  scrubber docked at the card's foot — two axes, two strips.
+
+**The picker is not in the metadata rail**, though slice D reserved that space for owning-level
+indication. Two reasons, and the first is decisive: the rail **collapses to a tab**, so a rail-borne
+mode indicator can be dismissed by the very gesture that hides the fields — and ADR-0013's scope is
+total, so title and body write to L as well; an author editing the *body* with a collapsed rail would
+have no indication at all. The division is therefore **rail = provenance** (`ti-versions`, the level
+pill — where this value came *from*) and **header = mode** (where the next keystroke *goes*).
 
 Four writes, three controls — two axis pickers plus `⧉` — and none of them per-field. **Rest position
 on both axes is local and safe** (stop 0; L = the open project). The inattentive path therefore
@@ -141,15 +148,38 @@ ADR-0017 gesture** rather than by asking the author to compile ops:
 Tags are an ordinary collection field here. Nothing about them is special at the value level; the
 *registry* is a separate concern, settled by #339.
 
-### 8. The bar is state plus a gate, not colour alone
+### 8. The bar: gate on entry, state throughout, echo on every write
 
-Two parts, because a frame present for the whole of an intentional edit stops being seen:
+**There is no save-time gate, because there is no save.** Lore entries autosave — a 6 s debounce in
+`AutosaveScheduler` (`editor-core/autosave.ts`, `editorPanes.svelte.ts:88`) covering every node kind,
+with no Save button, no `Ctrl+S`, and no per-field PATCH (a metadata edit folds into the whole-entry
+PUT). A confirm at write time would therefore fire seconds after typing stops, repeatedly. This also
+*raises* the stakes: writes are silent and continuous, so the persistent cue is the only thing between
+the author and an unnoticed ancestor write.
 
-- **State** — the rail carries the authoring layer persistently (slice D's treatment plus the level in
-  the title bar). Register is the `--warn` family, not `--danger`: editing canon is far-reaching, not
-  destructive, and `--danger` is spoken for by destructive dialog actions. The quiet-desk rule holds.
-- **Gate** — the write **names its target**: the layer, and the file or scene it is about to touch, at
-  the moment of saving. This is what actually carries the bar when L ≠ the open project.
+Four parts, none of them a frame — a border present for the whole of an intentional edit stops being
+seen:
+
+- **Gate on entry.** Switching L upward raises one confirm naming the layer and its blast radius,
+  through the existing `confirmService` (`stores/confirmService.svelte.ts`). ⚠ It supports
+  `dontShowAgainKey`; **this gate must not use it.** Suppressing it reconstructs precisely the silent
+  ancestor write it exists to prevent.
+- **State throughout.** While `L ≠ open project` the header strip carries the `--warn` family
+  (`--warn-soft` ground, `--warn-border`) and **states the target in words** —
+  `EDITING AT · Honorverse (series) — changes reach every book` — in the caps-label recipe. Words, not
+  a tint: the strip occupies layout and cannot be tuned out, and it names the thing at risk.
+  `--danger` is deliberately not used; it is spoken for by destructive actions, and editing canon is
+  far-reaching, not destructive.
+- **Echo on every write.** The status footer already reports "Unsaved changes" / "Saved"; when
+  `L ≠ open project` it reads **"Saved to series"**. This makes each silent autosave visible at the
+  moment it happens — the proportional replacement for the impossible save-time gate.
+- **L is non-sticky.** It resets to the open project when the pane closes or the author switches
+  entries. This costs a fluent multi-entry canon-fixing session — accepted, because the alternative
+  failure is setting L, forgetting, and writing upward unaware, which is the same unlabelled wrong
+  state this ADR exists to prevent.
+
+At rest (`L = open project`) none of this shows: overriding within your own book is the ordinary case
+and earns no alarm.
 
 Marks are consumed, not chosen (#304 / PR #320): `ti-versions` = overridden at this layer, `⤳` =
 mutated, `ti-arrow-bar-to-right` = interval ends here; provenance **leads** the value and mutation
@@ -196,8 +226,11 @@ disagree with it.
 
 ## Consequences
 
-- **Slice D (#313)** gains the picker: its planned read-only level indicator in the rail becomes the
-  authoring-layer selector, and it owns the `--warn` state treatment and the naming gate.
+- **Slice D (#313)** gains the picker, but **in the editor header, not the rail** (§1) — the rail
+  keeps provenance only, since it collapses. It also owns the entry confirm, the `--warn` header
+  state, the footer echo, and non-sticky L (§8).
+- **The status footer becomes layer-aware** (`"Saved to series"`), which is the only per-write signal
+  autosave permits.
 - **Slice E (#314)** gains the ADR-0017 authoring rules for deltas, and must close the **split-target
   save**: `save_lore_entry` resolves through `_path_for_node_id` to the *ancestor's* path while tag
   registration defaults to the open project, so one save of an inherited entry currently writes its

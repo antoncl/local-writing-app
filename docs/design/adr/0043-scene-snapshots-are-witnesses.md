@@ -58,6 +58,11 @@ ADR-0039 adds a **second, independent axis**. Once hierarchies land, a lore entr
 but a composition across the declared ancestor chain plus `overrides/` deltas. Editing a series-level
 entry changes what a book-level chapter meant, with no edit anywhere near that chapter.
 
+There is a **third**, developed under "Schema change is the third drift axis" below: the field
+definitions the values are interpreted against can themselves change. The count is not claimed to be
+final — the point is that context drifts along several independent axes, each needing its own
+detector, and that a design assuming one axis will be wrong.
+
 **Conclusion: a fully correct snapshot of a scene is not constructible.** That is a property of the
 mutation and inheritance models, not a gap to be closed. The decision below is built on accepting it
 rather than attempting to defeat it.
@@ -128,6 +133,58 @@ invoked is deliberately left open; this ADR fixes only the contract those surfac
 (advisory, specific, in the author's vocabulary). It is a separate design pass, and nothing in this
 document should be read as constraining its shape.
 
+## Schema change is the third drift axis
+
+The two axes above are not the whole set. A field can be **deleted or retyped in
+`metadata.schema.yaml` between capture and restore** — and unlike the other two, this is invisible to
+both detectors: `_revision` hashes the *entity file's* bytes, while the schema is a separate file
+merged across layers. Neither the mutation index nor the composite revision moves when a field's type
+changes from `text` to `multi_select`, yet both the snapshotted body's front-matter `metadata` block
+and the witness's recorded `effective_state` output now reference a field that means something else.
+
+So the witness carries a **third token: a hash of the merged effective schema at capture time**,
+reported on the same terms as the others. This is the axis most likely to be silently wrong, because
+schema edits feel unrelated to prose.
+
+## Snapshots and the 1.0 migration contract
+
+Snapshots introduce a category of data this project has not had before, and the distinction decides
+everything else in this section:
+
+- `.cache/` is **rebuildable** — ADR-0040's entire migration story is "bump the format key, rebuild
+  once, never write migration code".
+- `.migration-backups/` is **disposable** — pruned to the last three by design.
+- Scene and lore files are **authoritative**.
+
+Snapshots are none of these. They are **irreplaceable but not authoritative**: losing them destroys
+information that exists nowhere else, yet they are not the source of truth for anything. That means
+**the pre-1.0 escape hatch does not apply here.** "Bump the version and rebuild" is unavailable
+because there is nothing to rebuild from, so a snapshot store written before 1.0 has to be readable
+after it.
+
+**Snapshots are immutable; migration happens at restore, not at rest.** A migration must not rewrite
+stored snapshots. That is not only a cost argument — rewriting a witness destroys the thing that makes
+it a witness. Instead, each snapshot records the `schema_version` in force when it was taken, and a
+restore that crosses a version boundary runs the ladder over **that one body**, on the way out, leaving
+the stored record untouched.
+
+Two consequences follow, and the first is a **hard requirement on the migration framework that must be
+settled before 1.0 freezes it**:
+
+1. **Where a migration transforms document *content*, it must be expressible as a per-document
+   function.** Today it cannot be: `MigrationFn = Callable[[Path], None]`
+   (`backend/app/services/migrations.py:44`) takes a project root and mutates the filesystem in place,
+   and all three registered steps are folder- or file-level (`migrations.py:140-144`). A migration
+   authored only in that shape cannot be applied to a single snapshotted body, which makes
+   cross-version restore impossible. The framework does not need this today; it needs it before the
+   first post-1.0 migration touches scene content, and retrofitting it after the contract is frozen is
+   the expensive order.
+2. **Snapshots stay out of `SKIP_FROM_BACKUP`'s inverse — they need no migration backup.** Since
+   migrations never touch them at rest, the pre-migration zip (`backup_project`, `migrations.py:176`)
+   has nothing to protect there, and excluding them keeps the three retained backups from carrying a
+   full copy of the project's history each. Immutability at rest is what buys this; the two decisions
+   stand or fall together.
+
 ## Non-goals
 
 These are excluded, with reasons; this ADR deliberately does not describe how any of them would work,
@@ -159,6 +216,10 @@ rediscover them as improvements.
   back with it, and a recovery feature whose safe operation requires that trade will be used once and
   then avoided. The narrow contract plus honest reporting delivers what authors reach for.
 - **"Snapshot on every save."** The 6-second autosave debounce makes the boundary meaningless.
+- **"Let migrations rewrite the stored snapshots, like they rewrite everything else."** Rewriting a
+  witness destroys what makes it a witness — a record of what was there is worth nothing once it is a
+  record of what a later migration thought should have been there. It also loses the free result that
+  immutability buys: snapshots need no migration backup precisely because migrations never touch them.
 
 ## Test surface
 
@@ -171,8 +232,11 @@ The value of the witness framing is that the feature's correctness criterion bec
   reported.
 - Snapshot a scene; edit the entry at an ancestor layer; assert the composite-revision comparison
   reports it.
+- Snapshot a scene; retype a field in `metadata.schema.yaml`; assert the schema axis reports it — and
+  assert it reports *nothing* on the entity-revision axis, since neither entity file changed.
 - Snapshot, change nothing, restore; assert no drift is reported and the body is byte-identical.
 - Assert the resolver never reads a witness record.
+- Assert a migration run leaves every stored snapshot byte-identical.
 
 ## Naming
 

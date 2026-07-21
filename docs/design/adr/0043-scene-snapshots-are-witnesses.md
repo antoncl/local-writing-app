@@ -58,10 +58,10 @@ ADR-0039 adds a **second, independent axis**. Once hierarchies land, a lore entr
 but a composition across the declared ancestor chain plus `overrides/` deltas. Editing a series-level
 entry changes what a book-level chapter meant, with no edit anywhere near that chapter.
 
-There is a **third**, developed under "Schema change is the third drift axis" below: the field
-definitions the values are interpreted against can themselves change. The count is not claimed to be
-final — the point is that context drifts along several independent axes, each needing its own
-detector, and that a design assuming one axis will be wrong.
+There is a **third**, developed below: the field definitions the recorded values are interpreted
+against can themselves change. The count is not claimed to be final — the point is that context drifts
+along several independent axes, each needing its own detector, and that a design assuming one axis
+will be wrong.
 
 **Conclusion: a fully correct snapshot of a scene is not constructible.** That is a property of the
 mutation and inheritance models, not a gap to be closed. The decision below is built on accepting it
@@ -133,18 +133,30 @@ invoked is deliberately left open; this ADR fixes only the contract those surfac
 (advisory, specific, in the author's vocabulary). It is a separate design pass, and nothing in this
 document should be read as constraining its shape.
 
-## Schema change is the third drift axis
+## The third axis is value reinterpretation, not schema change
 
-The two axes above are not the whole set. A field can be **deleted or retyped in
-`metadata.schema.yaml` between capture and restore** — and unlike the other two, this is invisible to
-both detectors: `_revision` hashes the *entity file's* bytes, while the schema is a separate file
-merged across layers. Neither the mutation index nor the composite revision moves when a field's type
-changes from `text` to `multi_select`, yet both the snapshotted body's front-matter `metadata` block
-and the witness's recorded `effective_state` output now reference a field that means something else.
+Schema edits are invisible to the two detectors above — `_revision` hashes the *entity file's* bytes,
+while the schema is a separate file merged across layers — so a third token is needed. But the axis is
+much narrower than "the schema changed", and getting that boundary right matters more than the token
+itself.
 
-So the witness carries a **third token: a hash of the merged effective schema at capture time**,
-reported on the same terms as the others. This is the axis most likely to be silently wrong, because
-schema edits feel unrelated to prose.
+**Field availability needs no detector at all.** Stored files are sparse: a missing field is not an
+error, and fields with no definition are stripped. So a field *added* after capture is simply absent
+from the restored body, and a field *deleted* after capture is dropped on the way in. Both are handled
+by the storage model already, and neither changes what the recorded values mean.
+
+What remains is **reinterpretation of a value that is still present**: a field's type changing
+(`text` → `multi_select`), or a select's option set changing so that a recorded value is no longer
+among them. There the bytes survive and their meaning does not, which is the only case the author
+cannot see for themselves.
+
+So the third token covers **the type and constraints of the fields the witness actually recorded** —
+not the merged schema as a whole. An earlier draft of this ADR proposed hashing the whole merged
+schema; that is wrong, and the reason generalizes. A whole-schema hash fires on every schema edit,
+including the additions and deletions the sparse model already absorbs, so most reports would announce
+a change with no consequence. Under an advisory model (above) a detector that cries wolf is not merely
+noisy — it trains the dismissal that makes the report worthless on the one occasion it mattered.
+**Detector precision is part of the report-quality obligation, not separate from it.**
 
 ## Snapshots and the 1.0 migration contract
 
@@ -232,8 +244,12 @@ The value of the witness framing is that the feature's correctness criterion bec
   reported.
 - Snapshot a scene; edit the entry at an ancestor layer; assert the composite-revision comparison
   reports it.
-- Snapshot a scene; retype a field in `metadata.schema.yaml`; assert the schema axis reports it — and
-  assert it reports *nothing* on the entity-revision axis, since neither entity file changed.
+- Snapshot a scene; retype a recorded field in `metadata.schema.yaml`; assert the reinterpretation axis
+  reports it — and assert it reports *nothing* on the entity-revision axis, since no entity file
+  changed.
+- Snapshot a scene; **add** an unrelated field, and **delete** a field the witness recorded; assert
+  neither is reported as reinterpretation (the sparse model absorbs both) and that restore succeeds.
+  This is the anti-noise test — it pins the detector's precision, not just its sensitivity.
 - Snapshot, change nothing, restore; assert no drift is reported and the body is byte-identical.
 - Assert the resolver never reads a witness record.
 - Assert a migration run leaves every stored snapshot byte-identical.

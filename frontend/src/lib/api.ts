@@ -688,10 +688,19 @@ export const api = {
       method: "DELETE",
     });
   },
-  reorderAssistants(layerId: string, orderedIds: string[]) {
+  // `layerId` omitted ⇒ the LOCAL layer, which is what a curation gesture always
+  // means (#332/#333): the open project states its own opinion about what it
+  // inherits, and no ancestor file is touched. Pass "" for the machine layer.
+  reorderAssistants(orderedIds: string[], layerId?: string) {
     return request<AssistantEntryList>("/assistants/order", {
       method: "POST",
-      body: JSON.stringify({ layer_id: layerId, ordered_ids: orderedIds }),
+      body: JSON.stringify({ layer_id: layerId ?? null, ordered_ids: orderedIds }),
+    });
+  },
+  unlistAssistant(entryId: string, layerId?: string) {
+    return request<AssistantEntryList>("/assistants/unlist", {
+      method: "POST",
+      body: JSON.stringify({ layer_id: layerId ?? null, entry_id: entryId }),
     });
   },
   // Saved-view nodes (0.5.0 #78 backend / #80 designer). A view is a

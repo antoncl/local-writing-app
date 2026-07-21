@@ -385,12 +385,20 @@
     await storeRefreshStructure();
   }
 
-  // Persist a within-layer assistant reorder computed by Assistants.svelte.
-  // App owns assistantEntries (the chat pane reads it too), so the api call +
-  // state update stay here; the drag UI lives in the component.
-  async function reorderAssistantsInLayer(layerId: string, orderedIds: string[]) {
+  // Persist the assistant priority sequence computed by Assistants.svelte.
+  // App owns assistantEntries (the chat pane reads it too), so the api calls +
+  // state update stay here; the drag UI lives in the component. Both write to
+  // the LOCAL layer — curation is the open project's opinion (#332/#333) — so
+  // neither takes a layer id and the pane does no layer arithmetic.
+  async function setAssistantOrder(orderedIds: string[]) {
     await run(async () => {
-      setAssistantEntries((await api.reorderAssistants(layerId, orderedIds)).entries);
+      setAssistantEntries((await api.reorderAssistants(orderedIds)).entries);
+    });
+  }
+
+  async function unlistAssistant(entryId: string) {
+    await run(async () => {
+      setAssistantEntries((await api.unlistAssistant(entryId)).entries);
     });
   }
 
@@ -768,7 +776,8 @@
         entries={assistantEntries}
         {viewSpec}
         onOpenEntry={(id) => editorPanes.openAssistant(id)}
-        onReorder={reorderAssistantsInLayer}
+        onSetOrder={setAssistantOrder}
+        onUnlist={unlistAssistant}
       />
     </div>
   {/snippet}

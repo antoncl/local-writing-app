@@ -142,16 +142,11 @@ def compare(label: str, base: set[str], now: set[str], *, may_grow: bool) -> lis
     return []
 
 
-def main(argv: list[str]) -> int:
-    parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--base", default="origin/master", help="ref to ratchet against")
-    args = parser.parse_args(argv)
-
+def guard_set_ratchets(base: str, shrank: list[str]) -> list[str]:
+    """The two guards' GRANDFATHERED sets: additions are the sin."""
     failures: list[str] = []
-    shrank: list[str] = []
-
     for path, names in GUARD_SETS.items():
-        base_src = at_base(args.base, path)
+        base_src = at_base(base, path)
         if base_src is None:
             continue  # new file — nothing to ratchet against yet
         base_sets = module_sets(base_src, names)
@@ -161,24 +156,47 @@ def main(argv: list[str]) -> int:
             failures += compare(f"{path}:{name}", base_set, now_set, may_grow=False)
             if base_set - now_set:
                 shrank.append(f"{path}:{name} -{len(base_set - now_set)}")
+    return failures
 
-    base_src = at_base(args.base, PYPROJECT)
-    if base_src is not None:
-        base_lists = ruff_lists(base_src)
-        now_lists = ruff_lists((REPO / PYPROJECT).read_text(encoding="utf-8"))
-        for name, base_set in base_lists.items():
-            now_set = now_lists[name]
-            # `select` is the inverse ratchet: it may only grow.
-            may_grow = name == "ruff select"
-            failures += compare(name, base_set, now_set, may_grow=may_grow)
 
-    base_counts, now_counts = disabled_counts(args.base), disabled_counts(None)
-    for label, base_n in base_counts.items():
+def ruff_ratchets(base: str) -> list[str]:
+    """ruff's lists: `ignore`/`per-file-ignores` must not grow, `select` must not shrink."""
+    base_src = at_base(base, PYPROJECT)
+    if base_src is None:
+        return []
+    now_lists = ruff_lists((REPO / PYPROJECT).read_text(encoding="utf-8"))
+    return [
+        line
+        for name, base_set in ruff_lists(base_src).items()
+        # `select` is the inverse ratchet: it may only grow.
+        for line in compare(name, base_set, now_lists[name], may_grow=name == "ruff select")
+    ]
+
+
+def disabled_ratchets(base: str, shrank: list[str]) -> list[str]:
+    """Skipped/xfailed tests: the count may fall, never rise."""
+    failures: list[str] = []
+    now_counts = disabled_counts(None)
+    for label, base_n in disabled_counts(base).items():
         now_n = now_counts[label]
         if now_n > base_n:
             failures.append(f"FAIL  {label}: {base_n} -> {now_n} disabled test(s)")
         elif now_n < base_n:
             shrank.append(f"{label} -{base_n - now_n}")
+    return failures
+
+
+def main(argv: list[str]) -> int:
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--base", default="origin/master", help="ref to ratchet against")
+    args = parser.parse_args(argv)
+
+    shrank: list[str] = []
+    failures = (
+        guard_set_ratchets(args.base, shrank)
+        + ruff_ratchets(args.base)
+        + disabled_ratchets(args.base, shrank)
+    )
 
     for line in shrank:
         print(f"ok    ratchet tightened: {line}")

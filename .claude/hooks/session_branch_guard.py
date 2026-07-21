@@ -19,6 +19,7 @@ Always exits 0; a broken hook must never wedge a session start.
 
 from __future__ import annotations
 
+import contextlib
 import subprocess
 import sys
 
@@ -26,10 +27,8 @@ import sys
 # commit messages, etc.). On a Windows cp1252 console that raises
 # UnicodeEncodeError mid-print and swallows the warning — force UTF-8 so it
 # always survives.
-try:
+with contextlib.suppress(Exception):
     sys.stdout.reconfigure(encoding="utf-8", errors="replace")
-except Exception:
-    pass
 
 
 def git(*args: str) -> str | None:
@@ -82,10 +81,8 @@ def main() -> int:
             lines.append(f"Most recent HEAD move: {last_move}")
 
     if record is not None:
-        try:
+        with contextlib.suppress(Exception):
             record.write_text(branch + "\n", encoding="utf-8")
-        except Exception:
-            pass
 
     print("\n".join(lines))
     return 0

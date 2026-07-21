@@ -61,18 +61,56 @@ weakest → strongest:
    the file-size guard + the style-token guard + `ruff` on **every file you
    edit** and feeds any violation straight back into context. Fix it before
    declaring the task done.
-2. **Git hooks** (`.pre-commit-config.yaml`) — *commit* runs `ruff` + the
-   file-size and style-token guards on staged files; *push* runs
-   `svelte-check` + `pytest`.
+2. **Git hooks** (`.pre-commit-config.yaml`) — *commit only*, and fast: `ruff`
+   (blocking) + advisory complexity + the file-size and style-token guards on
+   staged files. **There is deliberately no push stage** — the slow whole-project
+   gates moved to CI (#352). `ruff` covers `backend/`,
+   `scripts/` **and** `.claude/hooks/` — the gate machinery is held to the rules
+   it enforces (#352); the root `.ruff.toml` extends `backend/pyproject.toml` so
+   files outside `backend/` don't fall back to ruff's weaker defaults.
    One-time setup per clone:
    `backend/.venv/Scripts/python.exe -m pip install -e "backend[dev]"`, then
-   `backend/.venv/Scripts/pre-commit install` and `… install -t pre-push`.
+   `backend/.venv/Scripts/pre-commit install` — **not** `… -t pre-push`; if an
+   old clone has one, `pre-commit uninstall -t pre-push` removes it.
+
+3. **CI** (`.github/workflows/gates.yml`, #352) — the same gates on a **clean
+   checkout**, on every PR and every push to master. It is the only layer that
+   cannot be walked past with `--no-verify`, and the only one immune to the
+   local hazards below (a worktree importing the primary tree's code; a
+   concurrent session writing into the shared tree mid-run). It runs the two
+   guards **repo-wide**, not just over staged files. Private repo, so minutes
+   are billed: `ubuntu-latest` only, two parallel jobs, superseded runs
+   cancelled — keep it that way.
+   ⚠ **CI is currently ADVISORY.** Branch protection and rulesets are a paid
+   feature on a private repo (both APIs 403 with *"Upgrade to GitHub Pro or make
+   this repository public"*), so nothing mechanically stops a red PR being
+   merged. Until that changes the rule is human: **never merge a PR whose checks
+   are not green, and never report "green" without opening the run.**
+
+The **exemption ratchet** (`scripts/check_exemptions.py`, CI, PRs only) is the
+guard on the guards: every escape hatch may shrink, never grow. It compares this
+branch against the PR base and fails on a new `GRANDFATHERED` entry, a widened
+ruff `ignore` or `per-file-ignores`, a rule dropped from `select`, or a newly
+skipped/xfailed test. **When a gate goes red, fix the code — do not widen the
+exemption.** If a new exemption is genuinely right, say so explicitly in the PR
+rather than letting it ride along in a diff; once it lands, the base moves and
+the ratchet re-arms. Run it locally with
+`python scripts/check_exemptions.py --base origin/master`.
+
+**In a linked git worktree** the gates must test *that* worktree's code.
+`scripts/venv_run.py` borrows the primary worktree's *interpreter* but forces
+this checkout's `backend/` onto `PYTHONPATH` (#352 — otherwise the editable
+install silently imports the primary tree's `app`), and `scripts/npm_run.py`
+runs a real `npm install` in the worktree. **Never link or junction a shared
+`node_modules`/venv into a worktree**: a recursive delete — `git worktree
+remove -f` among them — walks through the link and guts the primary install
+(#350, and `memory/feedback_never_junction_shared_venv.md`).
 
 The **file-size guard** (`scripts/check_file_size.py`) is the enforced half of
 "no monolithic files": warns ≥1200, **fails ≥1500** lines on `.py/.svelte/.ts`.
 Files knowingly over the cap are listed in that script's `GRANDFATHERED` set
-(currently `main.py`, `test_metadata_validation.py`) — split them when you next
-work there, then delete the entry. The **style-token guard**
+(currently `test_metadata_validation.py`) — split them when you next work there,
+then delete the entry. The **style-token guard**
 (`scripts/check_style_tokens.py`) is the enforced half of the design language
 (`docs/design/design-language.md` §5): hex/rgb color literals and non-token
 `font-size` in frontend style code fail, with its own shrink-to-zero

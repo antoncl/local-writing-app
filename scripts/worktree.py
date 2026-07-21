@@ -1,10 +1,15 @@
 #!/usr/bin/env python3
 """Shared git-worktree helper for the gate scripts.
 
-Venvs and node_modules are **not** shared into linked git worktrees, so the
-gate scripts (`venv_python.py`, `npm_run.py`) fall back to the *primary*
-worktree's install. Locating that primary worktree is the one bit of logic they
-share — it lives here so there is a single source of truth (issues #135, #137).
+A venv is **not** shared into a linked git worktree, so `venv_python.py` falls
+back to the *primary* worktree's interpreter rather than demanding a venv per
+worktree (#135). Locating that primary worktree lives here so there is a single
+source of truth.
+
+Note the asymmetry with the frontend: `npm_run.py` deliberately does **not**
+reach for the primary worktree's install any more — it installs locally instead
+(#350/#352). Borrowing an *interpreter* is safe; borrowing *code* is what broke
+both gates.
 """
 
 from __future__ import annotations

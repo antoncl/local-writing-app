@@ -1,0 +1,84 @@
+# The third enforcement layer (#352). The other two are local and defeatable:
+# pre-commit needs a per-clone `install`, and `--no-verify` walks past it. This
+# one runs on a clean checkout, which also makes it immune to the two failure
+# modes that motivated it — no primary-worktree WIP to import instead of the
+# code under test, and no concurrent session writing into the tree mid-run.
+#
+# Cost discipline (private repo, minutes are billed): ubuntu-latest only (1x,
+# vs 2x for Windows), two parallel jobs rather than three (billing rounds each
+# job up to the minute), superseded runs cancelled, and no double-run — a
+# feature branch is gated by its PR, master by its push.
+#
+# CI calls the tools directly rather than through scripts/venv_run.py and
+# scripts/npm_run.py: those exist to solve venv discovery and worktree sharing
+# on a developer machine, neither of which a fresh runner has.
+name: gates
+
+on:
+  push:
+    branches: [master]
+  pull_request:
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  backend:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: actions/setup-python@v6
+        with:
+          python-version: '3.14'   # matches the dev venv
+          cache: pip
+          cache-dependency-path: backend/pyproject.toml
+
+      - name: Install backend (editable, with dev extras)
+        run: python -m pip install -e "backend[dev]"
+
+      - name: ruff
+        run: python -m ruff check backend scripts .claude/hooks
+
+      # Repo-wide, unlike the commit hook's staged-files view: a file can drift
+      # past the cap in a commit that doesn't touch it (a rename, a revert).
+      - name: file-size guard
+        run: git ls-files '*.py' '*.svelte' '*.ts' '*.tsx' | xargs -r python scripts/check_file_size.py
+
+      - name: style-token guard
+        run: git ls-files 'frontend/src/**/*.svelte' 'frontend/src/styles.css' | xargs -r python scripts/check_style_tokens.py
+
+      # Escape hatches may shrink, never grow. PR-only: it is a diff-against-base
+      # question, and master has no base to compare with.
+      - name: exemption ratchet
+        if: github.event_name == 'pull_request'
+        run: |
+          git fetch --no-tags --depth=1 origin "$GITHUB_BASE_REF"
+          python scripts/check_exemptions.py --base FETCH_HEAD
+
+      - name: pytest
+        run: python -m pytest backend/tests -q
+
+  frontend:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: actions/setup-node@v5
+        with:
+          node-version: '24'       # matches the dev machine
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Install frontend (from the lockfile)
+        run: npm ci --prefix frontend
+
+      - name: svelte-check
+        run: npm run check --prefix frontend
+
+      - name: vitest
+        run: npm test --prefix frontend

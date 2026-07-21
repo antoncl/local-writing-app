@@ -121,7 +121,7 @@ def main(out: Path | None = None) -> None:
     for name, rec in records.items():
         parts += [_emit_type(TS_NAME[name], rec["fields"], records), ""]
 
-    slot_fields = {s: spec for s, spec in node["slots"].items()}
+    slot_fields = dict(node["slots"])
     parts += [_emit_type("ViewExpr", slot_fields, records), ""]
     parts += [_emit_children(records, node), ""]
 

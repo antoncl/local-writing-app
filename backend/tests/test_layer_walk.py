@@ -368,6 +368,10 @@ class AssistantOrderMergeTests(unittest.TestCase):
     def _roster(self) -> list[str]:
         return [entry.id for entry in self.service.list_assistant_entries().entries]
 
+    def _curation(self, entry_id: str) -> str:
+        entry = next(e for e in self.service.list_assistant_entries().entries if e.id == entry_id)
+        return str(entry.computed_metadata["listed"])
+
     def test_local_list_leads_and_inherited_remainder_follows(self) -> None:
         self._write_assistant(self.base, "outer_a", "Outer A")
         self._write_assistant(self.base, "outer_b", "Outer B")
@@ -388,13 +392,20 @@ class AssistantOrderMergeTests(unittest.TestCase):
 
         self.assertEqual(self._roster(), ["outer_b", "inner", "outer_a"])
 
-    def test_descendant_exclusion_removes_an_inherited_assistant(self) -> None:
+    def test_descendant_exclusion_deactivates_an_inherited_assistant(self) -> None:
+        # Exclusion countermands the ancestor's LISTING, so `outer` leaves the
+        # active sequence — but it stays in the roster, in the unlisted tail.
+        # #332 dropped it from the roster outright, which made `excluded` decide
+        # visibility as well as inheritance and left the assistant unreachable
+        # from the UI (#333): nothing the app knows about may become invisible.
         self._write_assistant(self.base, "outer", "Outer")
         self._write_assistant(self.root, "inner", "Inner")
         self._order(self.base, ids=["outer"])
         self._order(self.root, ids=["inner"], excluded=["outer"])
 
-        self.assertEqual(self._roster(), ["inner"])
+        self.assertEqual(self._roster(), ["inner", "outer"])
+        self.assertEqual(self._curation("inner"), "listed")
+        self.assertEqual(self._curation("outer"), "unlisted")
 
     def test_a_descendant_can_undo_an_ancestors_exclusion(self) -> None:
         # The other direction of descendant-wins: an ancestor's `excluded` is
@@ -520,7 +531,10 @@ class AssistantOrderMergeTests(unittest.TestCase):
             )
         )
 
-        self.assertEqual(self._roster(), ["inner"])
+        # Deactivated here, still present and still listed by the ancestor —
+        # un-listing is this layer's opinion, never a reach up the chain.
+        self.assertEqual(self._roster(), ["inner", "outer"])
+        self.assertEqual(self._curation("outer"), "unlisted")
         self.assertEqual(
             self.service._read_assistants_order(self.base / "assistants").ids, ["outer"]
         )

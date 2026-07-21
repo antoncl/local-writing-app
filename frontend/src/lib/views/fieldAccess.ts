@@ -29,9 +29,14 @@ export function isIntrinsicField(schema: MetadataSchema | null | undefined, key:
 // the node property; everything else reads from metadata. Which is which comes
 // from the resolver-stamped `category` (ADR-0029 §D), never a mirrored set.
 export function fieldValue(node: EvalNode, key: string, schema: MetadataSchema | null | undefined): unknown {
-  return isIntrinsicField(schema, key)
-    ? (node as unknown as Record<string, unknown>)[key]
-    : node.metadata?.[key];
+  if (isIntrinsicField(schema, key)) return (node as unknown as Record<string, unknown>)[key];
+  // A `computed` field's value is resolver-stamped, so it lives in
+  // `computed_metadata` and never in the stored `metadata` dict (which
+  // round-trips to disk). Routing on the declared category — the same rule
+  // intrinsic already uses — is what lets #333 group the assistants roster on
+  // `listed` with no key-specific branch anywhere in the evaluator.
+  if (schema?.fields?.[key]?.category === "computed") return node.computed_metadata?.[key];
+  return node.metadata?.[key];
 }
 
 // A node's link-field values as a list of trimmed strings — entity_ref (a bare
@@ -108,4 +113,16 @@ export function isNodeSetField(def: MetadataFieldDefinition | null | undefined):
   if (!def) return false;
   if (def.type === "entity_ref" || def.type === "entity_ref_list") return true;
   return def.type === "computed" && def.computed?.value_type === "node_set";
+}
+
+// The type a field BEHAVES as. For a stored field that is just its type; for a
+// computed one it is the declared `computed.value_type` — the payload, not the
+// authorship (`type: "computed"` says who produces the value, ADR-0029 §D, and
+// says nothing about its shape). Same generic move `isNodeSetField` already
+// makes, lifted so pickers can ask "can I group/sort on this?" without knowing
+// which fields happen to be computed. #333's `listed` is a computed select, and
+// is offerable because of this and not because of a key check.
+export function effectiveFieldType(def: MetadataFieldDefinition | null | undefined): string | undefined {
+  if (!def) return undefined;
+  return def.type === "computed" ? def.computed?.value_type : def.type;
 }

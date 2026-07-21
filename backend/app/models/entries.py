@@ -260,10 +260,26 @@ class SaveMutationSetEntryRequest(BaseModel):
 
 
 class AssistantEntrySummary(BaseModel):
+    """One assistant, as the merged roster presents it (#332).
+
+    Curation — is this in the author's roster, and where in it — is the layer
+    traversal's answer, not the file's, so it rides in `computed_metadata`
+    (`listed`, `position`) as declared computed fields rather than as top-level
+    projections. That keeps it out of `metadata`, which round-trips to disk on
+    save, and lets every surface read it through the ordinary field machinery
+    instead of special-casing a key — the mistake `source_layer_*` makes and
+    #232 tracks.
+
+    `position` is unset exactly when `listed` is false: an assistant no layer
+    has listed has no priority to report — it trails in the unlisted tail, whose
+    order is a fallback rather than an expressed one.
+    """
+
     id: str
     title: str
     entry_type: str = "assistant:assistant"
     metadata: dict[str, MetadataValue] = Field(default_factory=dict)
+    computed_metadata: dict[str, MetadataValue] = Field(default_factory=dict)
     source_layer_id: str = ""
     source_layer_label: str = ""
 
@@ -274,6 +290,10 @@ class AssistantEntry(BaseModel):
     revision: str
     entry_type: str = "assistant:assistant"
     metadata: dict[str, MetadataValue] = Field(default_factory=dict)
+    # Same curation pair the roster stamps (see AssistantEntrySummary). Carried
+    # here too because the editor reads the single entry, and a computed field
+    # that only some read paths fill renders as a permanently blank locked row.
+    computed_metadata: dict[str, MetadataValue] = Field(default_factory=dict)
     source_layer_id: str = ""
     source_layer_label: str = ""
 
@@ -305,15 +325,19 @@ class ReorderAssistantsRequest(BaseModel):
     # not necessarily where the listed assistants live: dragging an inherited
     # assistant names its id in the local file. `ordered_ids` is therefore the
     # local layer's whole opinion, not a per-layer slice of the roster.
-    layer_id: str = ""
+    #
+    # Omit it (None) to mean the LOCAL layer — the normal case for a curation
+    # gesture, and what lets the pane drag without resolving layer ids (#318).
+    layer_id: str | None = None
     ordered_ids: list[str] = Field(default_factory=list)
 
 
 class UnlistAssistantRequest(BaseModel):
     # The layer that stops showing the assistant, from here inward (#332). The
     # assistant's own file is never touched, so un-listing an inherited entry
-    # cannot remove it from the ancestor that owns it.
-    layer_id: str = ""
+    # cannot remove it from the ancestor that owns it. Omit it (None) for the
+    # local layer — see ReorderAssistantsRequest.
+    layer_id: str | None = None
     entry_id: str = Field(min_length=1)
 
 

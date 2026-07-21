@@ -9,8 +9,19 @@ import {
 } from "@/lib/chat/assistantScope";
 
 // Roster in manual (drag) order. "b" and "d" carry the "summary" tag.
-const A = (id: string, title: string, tags?: unknown): AssistantEntrySummary =>
-  ({ id, title, entry_type: "assistant:assistant", metadata: tags === undefined ? {} : { tags } }) as AssistantEntrySummary;
+//
+// Every entry is stamped LISTED. The scope helpers range over the active roster
+// only (ADR-0024 Amendment 1), and the backend stamps this pair on every
+// assistant it returns — a summary without it is not a shape the API produces.
+// `listed: "unlisted"` is exercised deliberately in the amendment's own tests.
+const A = (id: string, title: string, tags?: unknown, listed = "listed"): AssistantEntrySummary =>
+  ({
+    id,
+    title,
+    entry_type: "assistant:assistant",
+    metadata: tags === undefined ? {} : { tags },
+    computed_metadata: { listed, position: 0 },
+  }) as AssistantEntrySummary;
 
 const ROSTER = [
   A("a", "Main"),
@@ -66,5 +77,33 @@ describe("assistantTitle", () => {
   });
   it("explicit selection shows its title", () => {
     expect(assistantTitle("c", ROSTER, "b")).toBe("Coder");
+  });
+});
+
+// ADR-0024 Amendment 1 (#333): membership is a precondition on the set the
+// dynamic default and the picker range over — not another fallback step.
+describe("un-listed assistants are out of the picker and never the default", () => {
+  const MIXED = [
+    A("gone", "Aardvark", ["summary"], "unlisted"), // sorts first, tagged, un-listed
+    A("keep", "Zebra", ["summary"]),
+  ];
+
+  it("a tag-scoped default skips an un-listed match", () => {
+    // Pre-amendment this returned `gone`: un-listing was a way to make the app
+    // START using something, since the un-listed row still sorts first.
+    expect(topmostMatchingAssistant(MIXED, ["summary"])?.id).toBe("keep");
+    expect(scopedDefaultAssistantId(MIXED, ["summary"], "")).toBe("keep");
+  });
+
+  it("the picker omits un-listed assistants entirely, not below a divider", () => {
+    const { matching, rest } = partitionAssistants(MIXED, "", ["summary"]);
+    expect(matching.map((a) => a.id)).toEqual(["keep"]);
+    expect(rest).toEqual([]);
+  });
+
+  it("an emptied roster yields an empty picker rather than a guess", () => {
+    const none = [A("x", "X", undefined, "unlisted")];
+    expect(partitionAssistants(none, "", [])).toEqual({ matching: [], rest: [] });
+    expect(scopedDefaultAssistantId(none, ["summary"], "")).toBe("");
   });
 });

@@ -25,6 +25,7 @@ from app.models_views import (
     ViewNode,
     ViewNodeList,
     ViewNodeSummary,
+    ViewParam,
     ViewSpec,
     ViewUiState,
 )
@@ -216,8 +217,9 @@ class ViewsMixin:
     @staticmethod
     def _default_view_spec(kind: str, root_type: str) -> ViewSpec:
         """The per-kind system default spec (ADR-0037 §7). Lore + Prompts group by
-        entry_type (alphabetical labels); Assistants by source layer (first-seen
-        keeps the machine layer first); the structural kinds (scene/research)
+        entry_type (alphabetical labels); Assistants by curation state
+        (Active/Unlisted) over a tag-parameterized roster; the structural kinds
+        (scene/research)
         are a recursive containment Nest over the `parent` relation (roots =
         parentless); every other kind stays the plain whole-kind roster.
 
@@ -244,7 +246,32 @@ class ViewsMixin:
         if kind in ("lore", "prompt"):
             return ViewSpec(kind=kind, expr=roster, group_by=[ViewGroupByLevel(field="entry_type", order="label")])
         if kind == "assistant":
-            return ViewSpec(kind=kind, expr=roster, group_by=[ViewGroupByLevel(field="source_layer")])
+            # #333. Two changes, both consequences of #332 making priority ONE
+            # merged sequence:
+            #  - group on `listed`, not `source_layer`. Layer was structure only
+            #    while layer *was* the ordering; now it would re-cluster the
+            #    author's single dragged list by an accident of which folder each
+            #    file sits in. Provenance survives as a row annotation.
+            #  - born tag-scoped (ADR-0024): `tags` is the soft scope that
+            #    decides which assistants are relevant. The formal ships UNBOUND,
+            #    so the predicate is inactive and the pane opens on the whole
+            #    roster (ADR-0031 §B) — nothing is decided for the author, the
+            #    control is simply already there.
+            # `field`-on-tags rather than the `tagged` leaf: identical
+            # OR-over-tags semantics, but it stays designer-authorable and its
+            # strip control resolves the real schema `tags` field, so a duplicate
+            # of this view can be edited instead of being a one-way door.
+            return ViewSpec(
+                kind=kind,
+                expr=ViewExpr(
+                    filter=FilterOp(
+                        of=roster,
+                        pred=ViewExpr(field=FieldPredicate(key="tags", op="overlap", value={"var": "TAG"})),
+                    )
+                ),
+                params=[ViewParam(name="TAG", label="Tag")],
+                group_by=[ViewGroupByLevel(field="listed", show_empty=True)],
+            )
         return ViewSpec(kind=kind, expr=roster)
 
     # ----- helpers --------------------------------------------------------

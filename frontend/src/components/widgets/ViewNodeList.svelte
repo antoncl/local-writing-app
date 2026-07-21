@@ -120,6 +120,7 @@
   import { leafGroup, nodeSet } from "@/lib/views/viewResult";
   import { buildBindings } from "@/lib/views/viewParams";
   import { repairSpecCycles } from "@/lib/views/cycleCheck";
+  import type { GroupValue } from "@/lib/views/groupTree";
 
   let {
     result,
@@ -136,6 +137,7 @@
     onDblClick,
     onRename,
     onReorder,
+    onGroupDrop,
     isContainer,
     addMenu,
     collapsed = $bindable(new SvelteSet<string>()),
@@ -176,6 +178,13 @@
     // Reorder intent (drag OR keyboard). May return a Promise; the keyboard path
     // awaits it before restoring focus to the moved row's new position.
     onReorder?: (moved: T, target: T, position: "before" | "after" | "into") => void | Promise<void>;
+    // Drop onto a synthetic BUCKET header (#333). `groupKey` is the group's key —
+    // for a `group_by` level, the field VALUE the bucket stands for — so the
+    // intent reads "give the moved node this value". Separate from `onReorder`
+    // because a bucket is not a node and admits no before/after, and because it
+    // is the only way to reach an EMPTY bucket. Wire it and bucket headers
+    // become drop targets; omit it and they stay inert.
+    onGroupDrop?: (moved: T, groupValue: GroupValue) => void | Promise<void>;
     // Domain classification for drag: does this node accept an "into" drop (i.e.
     // it's a container, even an empty one)? The wrapper owns the drop-zone
     // mechanics; the consumer names what can contain. Absent ⇒ falls back to
@@ -439,6 +448,7 @@
       {onDblClick}
       {onRename}
       {onReorder}
+      {onGroupDrop}
       {isContainer}
       {drag}
       {rename}

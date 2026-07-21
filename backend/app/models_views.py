@@ -64,6 +64,20 @@ class ViewGroupByLevel(BaseModel):
 
     field: str = Field(min_length=1)
     order: Literal["label"] | None = None
+    # Render a bucket for every DECLARED option of `field`, including ones no row
+    # landed in (#333). Off by default, and that default is load-bearing: buckets
+    # are built from rows precisely so an empty one prunes itself, which the
+    # structural kinds rely on — a scene view must not sprout a bucket per unused
+    # status. Opt in where the empty bucket is the point rather than noise: the
+    # assistants default groups Active/Unlisted, and a roster with nothing yet
+    # listed has to still show an Active bucket, or the gesture that fills it has
+    # no target. Only meaningful for a field with a closed vocabulary.
+    #
+    # `| None` rather than a plain bool, matching `order` above: the specs are
+    # dumped with `exclude_none`, so an unset flag stays out of the serialized
+    # view entirely instead of writing `show_empty: false` into every level of
+    # every materialized view on disk.
+    show_empty: bool | None = None
 
 
 class ViewGroupSpec(BaseModel):

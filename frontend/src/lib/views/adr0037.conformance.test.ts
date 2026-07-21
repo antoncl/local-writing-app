@@ -469,9 +469,13 @@ describe("ADR-0037 §7: defaults", () => {
     expect(spec.group_by).toEqual([{ field: "entry_type", order: "label" }]);
   });
 
-  it("the Assistants default groups by source layer", () => {
+  // #333 re-keyed this level from provenance to curation: once #332 made
+  // priority ONE merged sequence, grouping by the layer a file happens to live
+  // in re-clustered the author's single dragged list. §7's requirement is that
+  // the default be an HONEST spec, not that it group by any particular field.
+  it("the Assistants default groups by curation state, not source layer", () => {
     const spec = defaultView("assistant", null);
-    expect(spec.group_by?.[0]?.field).toBe("source_layer");
+    expect(spec.group_by?.[0]?.field).toBe("listed");
   });
 
   it("the Draft default is a recursive containment Nest — not a presentation flag", () => {

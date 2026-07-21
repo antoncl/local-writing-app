@@ -12,7 +12,15 @@ describe("system default view golden (backend/frontend drift guard)", () => {
     if (kind === "_comment") continue;
     it(`${kind} default matches the canonical shape`, () => {
       const spec = defaultView(kind);
-      expect({ expr: spec.expr, group_by: spec.group_by ?? null }).toEqual(expected);
+      expect({
+        expr: spec.expr,
+        // `params` joined the golden with #333 — the assistants default is the
+        // first to declare a formal, and a formal that drifts between the two
+        // builders means the pane's parameter strip appears or vanishes across
+        // the first fold.
+        params: spec.params ?? null,
+        group_by: spec.group_by ?? null,
+      }).toEqual(expected);
     });
   }
 });

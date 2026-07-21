@@ -31,6 +31,7 @@ import type {
   MetadataSchema,
   ViewExpr,
   ViewFieldPredicate,
+  ViewGroupByLevel,
   ViewFilterOp,
   ViewGroupSpec,
   ViewLeafValue,
@@ -42,6 +43,10 @@ import { collectNests } from "@/lib/views/nestRegistry";
 import { kindRootEntryTypeId } from "@/lib/utils/schemaTypeHelpers";
 import { asArray, coerceStringList, fieldValue, fieldValueList, isCollectionField, isEmpty, isFieldOfOperand, isSortableField, isVarOperand } from "@/lib/views/fieldAccess";
 import { applyGroupBy } from "@/lib/views/groupBy";
+import { normalize } from "@/lib/views/groupTree";
+// Re-exported so consumers keep importing the view API from one place; the
+// split that moved them was a file-size measure, not an API change.
+export { GROUP_KEY_PREFIX, filterGroups, groupBucketValue } from "@/lib/views/groupTree";
 import { projectReferences } from "@/lib/views/referenceIndex";
 
 // The minimal node shape the evaluator reads. Every `*EntrySummary` satisfies
@@ -66,6 +71,12 @@ export type EvalNode = {
   // `segmentForField` reads them. Other rosters omit them (rows stay bare).
   source_layer_id?: string | null;
   source_layer_label?: string | null;
+  // Resolver-stamped values for the kind's `computed` fields (ADR-0029 §D) —
+  // read by `fieldValue` for any field the schema declares computed, so a view
+  // can group/filter/sort on one without a per-key special case. The assistants
+  // roster carries curation here (#332/#333); the Draft adapter already folds
+  // its structure-node computed values in at the call site.
+  computed_metadata?: Record<string, unknown> | null;
 };
 
 // Per-node stamp from a color `annotate` (Highlight) node. Drives the NodeRow
@@ -107,14 +118,7 @@ export type PathSegment = {
 // ancestry for tree views). The normalize pass reconstructs nesting from paths.
 export type ViewRow<T extends EvalNode = EvalNode> = { node: T; path: PathSegment[] };
 
-// A group in the normalized result — recursive and tree-uniform (ADR-0027 §E,
-// #101, #181). Every real node (container OR leaf) is a `nodeId` group carrying
-// its `node`; a leaf is simply a childless group. `nodeId: null` (with `node:
-// null`) is a synthetic named-handle bucket. `children` is the single ordered
-// child list — leaf members and sub-containers interleave in it, preserving
-// row/document order (there is no separate `nodes[]`; #181 retired it so one
-// ordered list can keep container/leaf siblings in place, e.g. a chapter next
-// to an empty chapter).
+
 export type ViewGroup<T extends EvalNode = EvalNode> = {
   key: string;
   label: string | null;
@@ -221,7 +225,7 @@ export function kindUniverseExpr(kind: string, schema?: MetadataSchema | null): 
 // the backend `_default_view_spec`): the whole roster of `kind` in stored/
 // manual order, carrying the shape the panes used to synthesize in
 // presentation code. Lore and Prompts group by entry_type (alphabetical labels);
-// Assistants by source layer (first-seen keeps the machine layer first); the
+// Assistants by curation state over a tag-parameterized roster (#333); the
 // structural kinds (scene/research) are a recursive containment Nest over the
 // `parent` relation (roots = parentless, ADR-0037 §4). Post-ADR-0036 an
 // unspecified view is empty, so "everything" must be stated. The seam every
@@ -249,31 +253,26 @@ export function defaultView(kind: string, schema?: MetadataSchema | null): ViewS
     return { kind, expr: roster, sort, group_by: [{ field: "entry_type", order: "label" }] };
   }
   if (kind === "assistant") {
-    return { kind, expr: roster, sort, group_by: [{ field: "source_layer" }] };
+    // #333 — mirrors `_default_view_spec`; see there for why `listed` replaces
+    // `source_layer` and why the tag formal ships unbound (inactive ⇒ the whole
+    // roster). `field`-on-tags rather than the retired-for-authoring `tagged`
+    // leaf, so a duplicate of this view stays editable in the designer.
+    return {
+      kind,
+      expr: { filter: { of: roster, pred: { field: { key: "tags", op: "overlap", value: { var: "TAG" } } } } },
+      sort,
+      // No `default` — an absent authored default IS the unbound state, and
+      // omitting it keeps this byte-identical to the backend's `exclude_none`
+      // dump so the golden compares the two directly.
+      params: [{ name: "TAG", label: "Tag" }],
+      // show_empty: a roster with nothing listed yet must still show an
+      // Active bucket, or there is nowhere to drop the first assistant.
+      group_by: [{ field: "listed", show_empty: true }],
+    };
   }
   return { kind, expr: roster, sort };
 }
 
-// Filter a group tree to members whose id is in `keep`, pruning any branch with
-// no survivors (a group stays if it keeps a direct node OR a surviving child).
-// Pure; panes use it to apply a text search over an already-computed group tree
-// without re-evaluating (#101). A container's own `nodeId` doesn't keep it
-// alive — only surviving descendants do, matching the tree's self-prune rule.
-export function filterGroups<T extends EvalNode>(groups: ViewGroup<T>[], keep: Set<string>): ViewGroup<T>[] {
-  const out: ViewGroup<T>[] = [];
-  for (const g of groups) {
-    if (g.children.length === 0) {
-      // A leaf survives iff its node is kept.
-      if (g.nodeId && keep.has(g.nodeId)) out.push(g);
-      continue;
-    }
-    // A container survives iff some descendant survives — its own `nodeId`
-    // doesn't keep it alive, matching the tree's self-prune rule.
-    const children = filterGroups(g.children, keep);
-    if (children.length > 0) out.push({ ...g, children });
-  }
-  return out;
-}
 
 type RunState<T extends EvalNode> = {
   universe: T[];
@@ -368,7 +367,10 @@ export function evaluateView<T extends EvalNode>(
     rows = spec.group_by && spec.group_by.length > 0 ? applyGroupBy(state, src, spec.group_by) : src;
   }
 
-  return normalize(state, rows);
+  // The unnamed-group path is the only one that can fill empty buckets: with a
+  // named handle the levels sit *inside* a handle bucket, so `buildLevel`'s top
+  // level is the handle strip, not the level's own buckets.
+  return withDiag(state, normalize(state, rows, groups ? null : (spec.group_by ?? null)));
 }
 
 // Attach nest diagnostics to a result — only when a `nest` actually ran, so
@@ -532,167 +534,8 @@ function evalGroups<T extends EvalNode>(
   return rows;
 }
 
-// (`applyGroupBy` — ν by attribute, ADR-0037 §2 — lives in `groupBy.ts`;
-// `RunState` satisfies its `GroupByContext` slice structurally.)
 
-// Normalize rows → a render-ready result. Flat membership (dedupe by id, row
-// order) is always exposed as `nodes`. Grouping reconstructs a tree-uniform
-// nesting from each row's `path` (ADR-0027 §E, #181): the leading segment is a
-// nesting parent; a row with an empty remaining path is the node itself as a
-// member at that level. Every real node — container or leaf — becomes a `nodeId`
-// group, merged by id (no double appearance for a member that is also an
-// ancestor). Flat membership is σ-passage (ADR-0037 §6): a Nest's real-node
-// parent segments that pass selection ARE members; `revived` ancestors of a
-// σ-filtered nest are context (excluded). A view whose rows carry no paths is a
-// flat list (`groups: null`).
-function normalize<T extends EvalNode>(state: RunState<T>, rows: ViewRow<T>[]): ViewResult<T> {
-  const seenId = new Set<string>();
-  const nodes: T[] = [];
-  const pushNode = (n: T): void => {
-    if (seenId.has(n.id)) return;
-    seenId.add(n.id);
-    nodes.push(n);
-  };
-  for (const r of rows) {
-    // Membership is σ-passage (ADR-0037 §6): a path segment is a member iff it is
-    // a `placed` real node — a Nest-placed parent that itself passed selection,
-    // pulled into the flat list ancestors-before-leaf. `revived` ancestors (a
-    // σ-filtered tree/nest's context), `field` buckets (a value the algebra
-    // surfaced, never a member — even a real-node reference bucket), and synthetic
-    // `handle` segments are all skipped. The leaf `r.node` is always a member.
-    for (const seg of r.path) {
-      if (seg.origin !== "placed" || !seg.nodeId) continue;
-      const n = state.nodeById.get(seg.nodeId);
-      if (n) pushNode(n);
-    }
-    pushNode(r.node);
-  }
 
-  // A view whose rows carry no paths is a flat list (`groups: null`) — a
-  // degenerate Nest (all roots, no placements) collapses here, as does any
-  // ungrouped selection.
-  if (!rows.some((r) => r.path.length > 0)) {
-    return withDiag(state, { nodes, annotations: state.annotations, groups: null });
-  }
-
-  let groups = buildLevel(state, rows);
-  // "Top level not considered": a lone HANDLE wrapper whose children are all
-  // sub-containers is a passthrough strip (a handle over a grouped sub-flow) —
-  // drop it and surface the sub-flow's groups directly. Restricted to `handle`
-  // origin (ADR-0037 §6): a lone `group_by` level over a nested result keeps its
-  // header (a Lore-of-only-characters must still show "Character").
-  if (
-    groups.length === 1 &&
-    groups[0].origin === "handle" &&
-    groups[0].children.length > 0 &&
-    groups[0].children.every((c) => c.children.length > 0)
-  ) {
-    groups = groups[0].children;
-  }
-  // A lone HANDLE whose children are all leaves renders as a flat list — its name
-  // is the list title, not a group header. Collapse-to-flat applies to `handle`
-  // buckets ONLY (ADR-0037 §6): a lone real-node group is a genuine tree parent
-  // (a `nest`/tree header), and a lone declared `group_by` bucket always shows
-  // its header — else a project holding one type loses its header on day one.
-  if (
-    groups.length <= 1 &&
-    groups.every((g) => g.origin === "handle" && g.children.every((c) => c.children.length === 0))
-  ) {
-    return withDiag(state, { nodes, annotations: state.annotations, groups: null });
-  }
-  return withDiag(state, { nodes, annotations: state.annotations, groups });
-}
-
-// Recursively bucket rows into the tree-uniform group shape (#181). The leading
-// path segment is a nesting parent at this level; a row whose remaining path is
-// empty is the node itself as a member here — it becomes its own `nodeId` group
-// (a childless leaf, or merged with its container appearance when it is also an
-// ancestor). Same segment key → one merged group, first-seen order, so a
-// pre-sorted row stream carries its order through and container/leaf siblings
-// interleave in one ordered `children` list. Ancestor-only segments resolve
-// their concrete `node` from the roster so a kept-but-unmatched container is
-// still openable.
-function buildLevel<T extends EvalNode>(state: RunState<T>, rows: ViewRow<T>[]): ViewGroup<T>[] {
-  const order: string[] = [];
-  type Bucket = { seg: PathSegment; node: T | null; rows: ViewRow<T>[] };
-  const buckets = new Map<string, Bucket>();
-  // Keys of bare LEAF members at this level (a node with no value for a group_by
-  // level → no segment, so it lands here as itself). Tracked so `order: "label"`
-  // can sink them below the sorted buckets (ADR-0037 §2 — an out-of-sequence bare
-  // row amid alphabetized buckets reads as broken sorting).
-  const memberKeys = new Set<string>();
-  const ensure = (key: string, seg: PathSegment): Bucket => {
-    let b = buckets.get(key);
-    if (!b) {
-      b = { seg, node: seg.nodeId ? state.nodeById.get(seg.nodeId) ?? null : null, rows: [] };
-      buckets.set(key, b);
-      order.push(key);
-    }
-    return b;
-  };
-
-  for (const r of rows) {
-    if (r.path.length === 0) {
-      // The node itself is a member at this level → its own group. Carry the
-      // concrete node (a bare ancestor segment may have resolved a null node).
-      const mkey = `node:${r.node.id}`;
-      ensure(mkey, { key: r.node.id, label: r.node.title, nodeId: r.node.id }).node = r.node;
-      memberKeys.add(mkey);
-      continue;
-    }
-    const seg = r.path[0];
-    const key = seg.nodeId ? `node:${seg.nodeId}` : `group:${seg.key}`;
-    ensure(key, seg).rows.push({ node: r.node, path: r.path.slice(1) });
-  }
-
-  const built = order.map((key) => {
-    const b = buckets.get(key)!;
-    return {
-      key,
-      label: b.seg.label,
-      color: b.seg.color ?? null,
-      nodeId: b.seg.nodeId,
-      node: b.node,
-      origin: b.seg.origin,
-      children: buildLevel(state, b.rows),
-    };
-  });
-
-  // ADR-0037 §2 `order: "label"`: a §2 field level opts ITS buckets into
-  // alphabetical-by-label ordering instead of the default first-seen (row order).
-  // Reorder the slots occupied by label-ordered field buckets AND bare leaf
-  // members (empty-value rows): buckets sort A–Z, then bare members SINK below
-  // them (an out-of-sequence bare row amid alphabetized buckets reads as broken
-  // sorting). Structural siblings — pipeline (handle/nest `placed`) and any
-  // member that is itself a parent — keep their first-seen slots. No label-ordered
-  // bucket ⇒ the array is untouched (first-seen mode intersperses by design).
-  const isLabelBucket = (key: string): boolean => buckets.get(key)!.seg.order === "label";
-  // A sinkable bare member is a childless member row that is NOT itself a label
-  // bucket. The guard against label buckets matters when a reference-field bucket
-  // and a bare member share a `node:<id>` key (the node is both a group_by target
-  // AND has no value of its own): that entry is a real populated bucket and must
-  // ALPHABETIZE, not sink to the bottom as if it were empty.
-  const isBareMember = (key: string): boolean => memberKeys.has(key) && !isLabelBucket(key);
-  const hasLabelOrder = order.some((key) => isLabelBucket(key));
-  if (!hasLabelOrder) return built;
-  const movable: number[] = [];
-  built.forEach((g, i) => {
-    if (isLabelBucket(g.key) || (isBareMember(g.key) && g.children.length === 0)) movable.push(i);
-  });
-  const sorted = movable
-    .map((i) => built[i])
-    .sort((a, b) => {
-      const am = isBareMember(a.key);
-      const bm = isBareMember(b.key);
-      if (am !== bm) return am ? 1 : -1; // bare members sink below label buckets
-      if (am) return 0; // stable sort keeps bare members in first-seen order
-      return (a.label ?? "").localeCompare(b.label ?? "", undefined, { sensitivity: "base" });
-    });
-  movable.forEach((slot, k) => {
-    built[slot] = sorted[k];
-  });
-  return built;
-}
 
 // Filter's declared lowering (ADR-0041 §C): `keep ≝ intersect(of, pred)`,
 // `drop ≝ difference(keep: of, remove: pred)`. Desugared at eval entry so the

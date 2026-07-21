@@ -27,7 +27,8 @@ def test_default_view_specs_match_frontend() -> None:
     materializes the default on disk; the frontend synthesizes it for the pane).
     Both assert the SAME canonical fixture (owned by the frontend), so a change to
     one without the other fails CI instead of shipping a before-fold/after-fold
-    mismatch. Compares expr + group_by with roots fixed at `<kind>:base`."""
+    mismatch. Compares expr + params + group_by with roots fixed at `<kind>:base`
+    (`params` joined with #333, the first default to declare a formal)."""
     fixture_path = (
         Path(__file__).resolve().parents[2]
         / "frontend" / "src" / "lib" / "views" / "__fixtures__" / "default-view-specs.json"
@@ -49,14 +50,18 @@ def test_default_view_specs_match_frontend() -> None:
         if kind == "_comment":
             continue
         dumped = ViewsMixin._default_view_spec(kind, f"{kind}:base").model_dump(exclude_none=True)
-        got = {"expr": _strip_keep(dumped["expr"]), "group_by": dumped.get("group_by")}
+        got = {
+            "expr": _strip_keep(dumped["expr"]),
+            "params": dumped.get("params"),
+            "group_by": dumped.get("group_by"),
+        }
         assert got == expected, f"backend default for {kind!r} drifted from the frontend canonical: {got} != {expected}"
 
 
 class ViewCrudTests(unittest.TestCase):
     def setUp(self) -> None:
         self.temp_dir = TemporaryDirectory()
-        self.root = Path(self.temp_dir.name).resolve() / "project"
+        self.root = Path(self.temp_dir.name) / "project"
         svc.__init__()
         svc.create_project(self.root, "View Tests")
         self.client = TestClient(app)
@@ -441,7 +446,7 @@ class ViewUiStateTests(unittest.TestCase):
 
     def setUp(self) -> None:
         self.temp_dir = TemporaryDirectory()
-        self.root = Path(self.temp_dir.name).resolve() / "project"
+        self.root = Path(self.temp_dir.name) / "project"
         svc.__init__()
         svc.create_project(self.root, "View UI Tests")
         self.client = TestClient(app)
@@ -571,7 +576,10 @@ class ViewUiStateTests(unittest.TestCase):
         self.assertEqual(res.status_code, 200, res.text)
         body = res.json()
         self.assertEqual(body["spec"]["expr"]["descendants_of"], "lore:base")
-        self.assertEqual(body["spec"]["group_by"], [{"field": "entry_type", "order": "label"}])
+        # Dense read shape — see the note in the round-trip test above.
+        self.assertEqual(
+            body["spec"]["group_by"], [{"field": "entry_type", "order": "label", "show_empty": None}]
+        )
 
     def test_group_by_and_orphans_round_trip_through_create_and_read(self) -> None:
         # ADR-0037 group_by + ADR-0028 Amendment 1 (#260): the nest's orphan output
@@ -598,7 +606,13 @@ class ViewUiStateTests(unittest.TestCase):
         }
         created = self._create("Paris view", spec)
         got = self.client.get(f"/api/views/{created['id']}").json()
-        self.assertEqual(got["spec"]["group_by"], [{"field": "entry_type", "order": None}])
+        # Dense read shape: every unset slot comes back as an explicit null, so a
+        # new optional level field shows up here by construction (#333's
+        # `show_empty`). Asserting the whole dict keeps that honest — it is how a
+        # silently-added level knob would be noticed.
+        self.assertEqual(
+            got["spec"]["group_by"], [{"field": "entry_type", "order": None, "show_empty": None}]
+        )
         # The Nest id and the orphans reference survive, still consistent.
         self.assertEqual(got["spec"]["groups"][0]["expr"]["nest"]["id"], "cities")
         self.assertEqual(got["spec"]["groups"][1]["expr"]["orphans_of"], "cities")

@@ -1,27 +1,33 @@
 {
-  "_comment": "Canonical per-kind system default view shape (expr + group_by), roots fixed at <kind>:base. The FRONTEND defaultView() is the source of truth; the backend _default_view_spec() must match. Asserted by frontend defaultView.golden.test.ts AND backend test_views.py::test_default_view_specs_match_frontend so the two hand-written builders can't drift (#271 / finding-2). Update this when the default shape intentionally changes.",
+  "_comment": "Canonical per-kind system default view shape (expr + params + group_by), roots fixed at <kind>:base. The FRONTEND defaultView() is the source of truth; the backend _default_view_spec() must match. Asserted by frontend defaultView.golden.test.ts AND backend test_views.py::test_default_view_specs_match_frontend so the two hand-written builders can't drift (#271 / finding-2). `params` joined the comparison with #333, when a default first carried a declared formal. Update this when the default shape intentionally changes.",
   "scene": {
     "expr": { "nest": { "parents": { "filter": { "of": { "descendants_of": "scene:base" }, "pred": { "field": { "key": "parent", "op": "unset" } } } }, "children": { "descendants_of": "scene:base" }, "match": { "field": "parent", "direction": "child_to_parent", "by": "ref" }, "recursive": true } },
+    "params": null,
     "group_by": null
   },
   "research": {
     "expr": { "nest": { "parents": { "filter": { "of": { "descendants_of": "research:base" }, "pred": { "field": { "key": "parent", "op": "unset" } } } }, "children": { "descendants_of": "research:base" }, "match": { "field": "parent", "direction": "child_to_parent", "by": "ref" }, "recursive": true } },
+    "params": null,
     "group_by": null
   },
   "lore": {
     "expr": { "descendants_of": "lore:base" },
+    "params": null,
     "group_by": [{ "field": "entry_type", "order": "label" }]
   },
   "prompt": {
     "expr": { "descendants_of": "prompt:base" },
+    "params": null,
     "group_by": [{ "field": "entry_type", "order": "label" }]
   },
   "assistant": {
-    "expr": { "descendants_of": "assistant:base" },
-    "group_by": [{ "field": "source_layer" }]
+    "expr": { "filter": { "of": { "descendants_of": "assistant:base" }, "pred": { "field": { "key": "tags", "op": "overlap", "value": { "var": "TAG" } } } } },
+    "params": [{ "name": "TAG", "label": "Tag" }],
+    "group_by": [{ "field": "listed", "show_empty": true }]
   },
   "chat": {
     "expr": { "descendants_of": "chat:base" },
+    "params": null,
     "group_by": null
   }
 }

@@ -17,7 +17,7 @@
   import { defaultFilterKind, inputArity, isInactiveParamNode, outputPayload, promotableSlot, valueSlotPayload, type GraphNodeKind, type PredicateKind, type ViewGraphNode, type ViewHandle, type ViewNodeData } from "@/lib/views/viewGraph";
   import { nodeSummary } from "@/lib/views/nodeSummary";
   import { toMultiValued } from "@/lib/views/viewParams";
-  import { isSortableField } from "@/lib/views/fieldAccess";
+  import { effectiveFieldType, isSortableField } from "@/lib/views/fieldAccess";
   import { useDesignerContext } from "./designerContext";
   import type { MetadataFieldType, MetadataValue, NodePickerRef, ViewGroupByLevel, ViewLeafValue, ViewSort } from "@/lib/types";
   import type { Snippet } from "svelte";
@@ -469,10 +469,16 @@
   // per value, so they are dropped — mirroring `joinableFields`/`projectFields`.
   // `boolean` is deliberately excluded: it is not in the §2 table and
   // `segmentForField` has no label case for it (would render raw true/false).
-  const GROUPABLE_TYPES: MetadataFieldType[] = ["select", "multi_select", "tags", "entity_ref", "entity_ref_list"];
+  // Tested against the EFFECTIVE type, so a computed field whose declared
+  // `value_type` is groupable (the assistants roster's `listed`, #333) is
+  // offered like any other — `type: "computed"` states authorship, not shape,
+  // and a read-only field is still a perfectly good bucket key.
+  const GROUPABLE_TYPES: string[] = ["select", "multi_select", "tags", "entity_ref", "entity_ref_list"];
   let groupableFields = $derived(
     nodeFields.filter(
-      (f) => f.key === "entry_type" || (f.def.category !== "intrinsic" && GROUPABLE_TYPES.includes(f.def.type)),
+      (f) =>
+        f.key === "entry_type" ||
+        (f.def.category !== "intrinsic" && GROUPABLE_TYPES.includes(effectiveFieldType(f.def) ?? "")),
     ),
   );
   // A stored level may name a field the roster can't offer — the Assistants

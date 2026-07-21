@@ -82,6 +82,16 @@ weakest → strongest:
    are billed: `ubuntu-latest` only, two parallel jobs, superseded runs
    cancelled — keep it that way.
 
+The **exemption ratchet** (`scripts/check_exemptions.py`, CI, PRs only) is the
+guard on the guards: every escape hatch may shrink, never grow. It compares this
+branch against the PR base and fails on a new `GRANDFATHERED` entry, a widened
+ruff `ignore` or `per-file-ignores`, a rule dropped from `select`, or a newly
+skipped/xfailed test. **When a gate goes red, fix the code — do not widen the
+exemption.** If a new exemption is genuinely right, say so explicitly in the PR
+rather than letting it ride along in a diff; once it lands, the base moves and
+the ratchet re-arms. Run it locally with
+`python scripts/check_exemptions.py --base origin/master`.
+
 **In a linked git worktree** the gates must test *that* worktree's code.
 `scripts/venv_run.py` borrows the primary worktree's *interpreter* but forces
 this checkout's `backend/` onto `PYTHONPATH` (#352 — otherwise the editable

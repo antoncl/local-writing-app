@@ -28,7 +28,7 @@ from app.runtime import service as svc
 class TextAppendMutationTests(unittest.TestCase):
     def setUp(self) -> None:
         self.temp_dir = TemporaryDirectory()
-        self.root = Path(self.temp_dir.name) / "project"
+        self.root = Path(self.temp_dir.name).resolve() / "project"
         svc.__init__()
         svc.create_project(self.root, "Text Append Tests")
         layers = svc.read_metadata_schema_layers()

@@ -28,7 +28,7 @@ from app.services.project_service import ProjectServiceError
 class ReadNodeDispatchTests(unittest.TestCase):
     def setUp(self) -> None:
         self.temp_dir = TemporaryDirectory()
-        self.root = Path(self.temp_dir.name) / "project"
+        self.root = Path(self.temp_dir.name).resolve() / "project"
         global_service.__init__()
         global_service.create_project(self.root, "Read Node Tests")
 
@@ -86,7 +86,7 @@ class ReadNodeDispatchTests(unittest.TestCase):
 class SaveNodeDispatchTests(unittest.TestCase):
     def setUp(self) -> None:
         self.temp_dir = TemporaryDirectory()
-        self.root = Path(self.temp_dir.name) / "project"
+        self.root = Path(self.temp_dir.name).resolve() / "project"
         global_service.__init__()
         global_service.create_project(self.root, "Save Node Tests")
 
@@ -143,7 +143,7 @@ class SaveNodeDispatchTests(unittest.TestCase):
 class DeleteNodeDispatchTests(unittest.TestCase):
     def setUp(self) -> None:
         self.temp_dir = TemporaryDirectory()
-        self.root = Path(self.temp_dir.name) / "project"
+        self.root = Path(self.temp_dir.name).resolve() / "project"
         global_service.__init__()
         global_service.create_project(self.root, "Delete Node Tests")
 

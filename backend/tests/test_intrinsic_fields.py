@@ -20,7 +20,7 @@ from app.services.project_service import ProjectService, ProjectServiceError
 class IntrinsicFieldTests(unittest.TestCase):
     def setUp(self) -> None:
         self.temp_dir = TemporaryDirectory()
-        self.root = Path(self.temp_dir.name) / "project"
+        self.root = Path(self.temp_dir.name).resolve() / "project"
         self.service = ProjectService()
         self.service.create_project(self.root, "Test Project")
         self.scene_id = self.service._read_front_matter_only(
@@ -135,7 +135,7 @@ class FieldOverrideTests(unittest.TestCase):
 
     def setUp(self) -> None:
         self.temp_dir = TemporaryDirectory()
-        self.root = Path(self.temp_dir.name) / "project"
+        self.root = Path(self.temp_dir.name).resolve() / "project"
         self.service = ProjectService()
         self.service.create_project(self.root, "Test Project")
 

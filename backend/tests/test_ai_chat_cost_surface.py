@@ -54,7 +54,7 @@ def _anthropic_raw_with_usage() -> SimpleNamespace:
 class NonStreamingChatCostTests(unittest.TestCase):
     def setUp(self) -> None:
         self.temp_dir = TemporaryDirectory()
-        self.root = Path(self.temp_dir.name) / "project"
+        self.root = Path(self.temp_dir.name).resolve() / "project"
         global_service.__init__()
         global_service.create_project(self.root, "Cost Tests")
         global_service.update_project_settings(
@@ -148,7 +148,7 @@ class NonStreamingChatCostTests(unittest.TestCase):
 class StreamingChatCostTests(unittest.TestCase):
     def setUp(self) -> None:
         self.temp_dir = TemporaryDirectory()
-        self.root = Path(self.temp_dir.name) / "project"
+        self.root = Path(self.temp_dir.name).resolve() / "project"
         global_service.__init__()
         global_service.create_project(self.root, "Cost Stream Tests")
         global_service.update_project_settings(

@@ -35,7 +35,7 @@ def _settings(**keys: str):
 class GenerateEndpointTests(unittest.TestCase):
     def setUp(self) -> None:
         self.temp_dir = TemporaryDirectory()
-        self.root = Path(self.temp_dir.name) / "project"
+        self.root = Path(self.temp_dir.name).resolve() / "project"
         global_service.__init__()
         global_service.create_project(self.root, "Generate Tests")
         default_registry.clear()

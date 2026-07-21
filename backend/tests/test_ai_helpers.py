@@ -47,7 +47,7 @@ class _HelperFixtureBase(unittest.TestCase):
 
     def setUp(self) -> None:
         self.temp_dir = TemporaryDirectory()
-        self.root = Path(self.temp_dir.name) / "project"
+        self.root = Path(self.temp_dir.name).resolve() / "project"
         self.service = ProjectService()
         self.service.create_project(self.root, "Helper Tests")
         # Several tests in this file use `home_place` as a convenient
@@ -1075,7 +1075,7 @@ class ResearchNoteEntryRefTests(unittest.TestCase):
 
     def setUp(self) -> None:
         self.temp_dir = TemporaryDirectory()
-        self.root = Path(self.temp_dir.name) / "project"
+        self.root = Path(self.temp_dir.name).resolve() / "project"
         self.service = ProjectService()
         self.service.create_project(self.root, "Research Helper Tests")
         # Create a research note via the structure CRUD (the route the

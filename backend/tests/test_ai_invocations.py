@@ -20,7 +20,7 @@ from app.runtime import service as global_service
 class AIInvocationLogEndpointTests(unittest.TestCase):
     def setUp(self) -> None:
         self.temp_dir = TemporaryDirectory()
-        self.root = Path(self.temp_dir.name) / "project"
+        self.root = Path(self.temp_dir.name).resolve() / "project"
         global_service.__init__()
         global_service.create_project(self.root, "Invocation Tests")
         self.client = TestClient(app)
@@ -131,7 +131,7 @@ class CostComputedFieldTests(unittest.TestCase):
 
     def setUp(self) -> None:
         self.temp_dir = TemporaryDirectory()
-        self.root = Path(self.temp_dir.name) / "project"
+        self.root = Path(self.temp_dir.name).resolve() / "project"
         global_service.__init__()
         global_service.create_project(self.root, "Cost Computed Tests")
         self.client = TestClient(app)
@@ -203,7 +203,7 @@ class CrossKindCostDispatchTests(unittest.TestCase):
 
     def setUp(self) -> None:
         self.temp_dir = TemporaryDirectory()
-        self.root = Path(self.temp_dir.name) / "project"
+        self.root = Path(self.temp_dir.name).resolve() / "project"
         global_service.__init__()
         global_service.create_project(self.root, "Cross-kind Cost Tests")
         self.client = TestClient(app)
@@ -283,7 +283,7 @@ class ChatSessionCostViaLogTests(unittest.TestCase):
 
     def setUp(self) -> None:
         self.temp_dir = TemporaryDirectory()
-        self.root = Path(self.temp_dir.name) / "project"
+        self.root = Path(self.temp_dir.name).resolve() / "project"
         global_service.__init__()
         global_service.create_project(self.root, "Slice B Tests")
         self.client = TestClient(app)

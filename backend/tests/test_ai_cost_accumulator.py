@@ -27,7 +27,7 @@ from app.services.ai.sessions import default_registry
 class ChatCostAccumulatorTests(unittest.TestCase):
     def setUp(self) -> None:
         self.temp_dir = TemporaryDirectory()
-        self.root = Path(self.temp_dir.name) / "project"
+        self.root = Path(self.temp_dir.name).resolve() / "project"
         global_service.__init__()
         global_service.create_project(self.root, "Cost Acc Tests")
         default_registry.clear()
@@ -129,7 +129,7 @@ class ChatCostAccumulatorTests(unittest.TestCase):
 class ProjectCostEndpointTests(unittest.TestCase):
     def setUp(self) -> None:
         self.temp_dir = TemporaryDirectory()
-        self.root = Path(self.temp_dir.name) / "project"
+        self.root = Path(self.temp_dir.name).resolve() / "project"
         global_service.__init__()
         global_service.create_project(self.root, "Project Cost Tests")
         default_registry.clear()

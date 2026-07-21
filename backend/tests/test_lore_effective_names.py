@@ -21,7 +21,7 @@ from app.services.ai.helpers import _alias_match
 class EffectiveNamesTests(unittest.TestCase):
     def setUp(self) -> None:
         self.temp_dir = TemporaryDirectory()
-        self.root = Path(self.temp_dir.name) / "project"
+        self.root = Path(self.temp_dir.name).resolve() / "project"
         svc.__init__()
         svc.create_project(self.root, "Effective Names Tests")
         self.remus = svc.create_lore_entry(

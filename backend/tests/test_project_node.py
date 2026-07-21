@@ -16,7 +16,7 @@ from app.services.project_service import ProjectService
 class ProjectNodeServiceTests(unittest.TestCase):
     def setUp(self) -> None:
         self.tmp = TemporaryDirectory()
-        self.root = Path(self.tmp.name) / "project"
+        self.root = Path(self.tmp.name).resolve() / "project"
         self.service = ProjectService()
         self.service.create_project(self.root, "Honor's First Command")
 
@@ -198,7 +198,7 @@ class NestedProjectNodeIdentityTests(unittest.TestCase):
 
     def setUp(self) -> None:
         self.tmp = TemporaryDirectory()
-        self.base = Path(self.tmp.name) / "writing"
+        self.base = Path(self.tmp.name).resolve() / "writing"
         self.universe = self.base / "honorverse"
         self.root = self.universe / "book01"
         self.base.mkdir(parents=True)
@@ -240,7 +240,7 @@ class ProjectNodeEndpointTests(unittest.TestCase):
 
     def setUp(self) -> None:
         self.tmp = TemporaryDirectory()
-        self.root = Path(self.tmp.name) / "project"
+        self.root = Path(self.tmp.name).resolve() / "project"
         global_service.__init__()
         global_service.create_project(self.root, "Pegasus Drift")
         self.client = TestClient(app)

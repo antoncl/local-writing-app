@@ -21,7 +21,7 @@ class MigrateDefaultModelsTests(unittest.TestCase):
 
     def setUp(self) -> None:
         self.temp_dir = TemporaryDirectory()
-        self.config_dir = Path(self.temp_dir.name) / "config"
+        self.config_dir = Path(self.temp_dir.name).resolve() / "config"
         self.config_dir.mkdir()
         self._patcher = patch(
             "app.services.machine_settings.config_path",
@@ -68,7 +68,7 @@ class ProjectServiceResolveAssistantTests(unittest.TestCase):
 
     def setUp(self) -> None:
         self.temp_dir = TemporaryDirectory()
-        self.config_dir = Path(self.temp_dir.name) / "config"
+        self.config_dir = Path(self.temp_dir.name).resolve() / "config"
         self.config_dir.mkdir()
         self._patcher = patch(
             "app.services.machine_settings.config_path",
@@ -132,14 +132,14 @@ class ChatEndpointAssistantTests(unittest.TestCase):
 
     def setUp(self) -> None:
         self.temp_dir = TemporaryDirectory()
-        self.root = Path(self.temp_dir.name) / "project"
+        self.root = Path(self.temp_dir.name).resolve() / "project"
         global_service.__init__()
         global_service.create_project(self.root, "Assistant Tests")
         global_service.update_project_settings(
             UpdateProjectSettingsRequest(ai_policy="cloud-allowed")
         )
         self.client = TestClient(app)
-        self.config_dir = Path(self.temp_dir.name) / "config"
+        self.config_dir = Path(self.temp_dir.name).resolve() / "config"
         self.config_dir.mkdir()
         self._patcher = patch(
             "app.services.machine_settings.config_path",
@@ -239,11 +239,11 @@ class MachineSettingsViewTests(unittest.TestCase):
 
     def setUp(self) -> None:
         self.temp_dir = TemporaryDirectory()
-        self.root = Path(self.temp_dir.name) / "project"
+        self.root = Path(self.temp_dir.name).resolve() / "project"
         global_service.__init__()
         global_service.create_project(self.root, "View Tests")
         self.client = TestClient(app)
-        self.config_dir = Path(self.temp_dir.name) / "config"
+        self.config_dir = Path(self.temp_dir.name).resolve() / "config"
         self.config_dir.mkdir()
         self._patcher = patch(
             "app.services.machine_settings.config_path",
@@ -284,11 +284,11 @@ class FileBackedAssistantsTests(unittest.TestCase):
 
     def setUp(self) -> None:
         self.temp_dir = TemporaryDirectory()
-        self.root = Path(self.temp_dir.name) / "project"
+        self.root = Path(self.temp_dir.name).resolve() / "project"
         global_service.__init__()
         global_service.create_project(self.root, "Files Tests")
         self.client = TestClient(app)
-        self.config_dir = Path(self.temp_dir.name) / "config"
+        self.config_dir = Path(self.temp_dir.name).resolve() / "config"
         self.config_dir.mkdir()
         self._patcher = patch(
             "app.services.machine_settings.config_path",
@@ -339,11 +339,11 @@ class AssistantReorderTests(unittest.TestCase):
 
     def setUp(self) -> None:
         self.temp_dir = TemporaryDirectory()
-        self.root = Path(self.temp_dir.name) / "project"
+        self.root = Path(self.temp_dir.name).resolve() / "project"
         global_service.__init__()
         global_service.create_project(self.root, "Reorder Tests")
         self.client = TestClient(app)
-        self.config_dir = Path(self.temp_dir.name) / "config"
+        self.config_dir = Path(self.temp_dir.name).resolve() / "config"
         self.config_dir.mkdir()
         self._patcher = patch(
             "app.services.machine_settings.config_path",
@@ -491,6 +491,58 @@ class AssistantReorderTests(unittest.TestCase):
         ids = [e["id"] for e in response.json()["entries"]]
         self.assertEqual(ids, ["bravo", "charlie", "alpha"])
 
+    def test_nothing_listed_stamps_every_entry_unlisted(self) -> None:
+        # No layer holds an opinion, so the whole roster is the tail. Order is
+        # still defined (alphabetical), which is exactly why `listed` cannot be
+        # inferred from position.
+        entries = self.client.get("/api/assistants").json()["entries"]
+        curation = [e["computed_metadata"] for e in entries]
+        self.assertEqual([c["listed"] for c in curation], ["unlisted"] * 3)
+        self.assertEqual([c["position"] for c in curation], [None, None, None])
+
+    def test_listing_stamps_listed_and_position(self) -> None:
+        self.client.post(
+            "/api/assistants/order",
+            json={"layer_id": self.machine_layer_id, "ordered_ids": ["charlie", "alpha"]},
+        )
+        entries = self.client.get("/api/assistants").json()["entries"]
+        curation = {e["id"]: e["computed_metadata"] for e in entries}
+        self.assertEqual(curation["charlie"], {"listed": "listed", "position": 0})
+        self.assertEqual(curation["alpha"], {"listed": "listed", "position": 1})
+        # `bravo` was never named, so it trails — unlisted, no position.
+        self.assertEqual(curation["bravo"], {"listed": "unlisted", "position": None})
+
+    def test_curation_is_never_written_into_stored_metadata(self) -> None:
+        # `metadata` round-trips to disk through save_assistant_entry, so the
+        # computed pair must stay out of it — otherwise a save would persist a
+        # curation state the .order.yaml files contradict on the next read.
+        self.client.post(
+            "/api/assistants/order",
+            json={"layer_id": self.machine_layer_id, "ordered_ids": ["alpha"]},
+        )
+        entry = next(e for e in self.client.get("/api/assistants").json()["entries"] if e["id"] == "alpha")
+        self.assertNotIn("listed", entry["metadata"])
+        self.assertNotIn("position", entry["metadata"])
+        on_disk = (self.config_dir / "assistants" / "alpha.md").read_text(encoding="utf-8")
+        self.assertNotIn("listed", on_disk)
+
+    def test_unlisting_removes_the_entry_from_the_roster(self) -> None:
+        self.client.post(
+            "/api/assistants/order",
+            json={"layer_id": self.machine_layer_id, "ordered_ids": ["alpha", "bravo"]},
+        )
+        # Un-listing at the layer that owns the file drops it from `ids` AND
+        # excludes it, so it leaves the roster entirely rather than falling back
+        # to the tail — the orphan case #332 left open.
+        self.client.post(
+            "/api/assistants/unlist",
+            json={"layer_id": self.machine_layer_id, "entry_id": "alpha"},
+        )
+        entries = self.client.get("/api/assistants").json()["entries"]
+        self.assertNotIn("alpha", [e["id"] for e in entries])
+        curation = {e["id"]: e["computed_metadata"] for e in entries}
+        self.assertEqual(curation["bravo"], {"listed": "listed", "position": 0})
+
 
 class AssistantLayerOrderingTests(unittest.TestCase):
     """#332: the machine layer is the OUTERMOST layer, so it lands at the
@@ -505,11 +557,11 @@ class AssistantLayerOrderingTests(unittest.TestCase):
 
     def setUp(self) -> None:
         self.temp_dir = TemporaryDirectory()
-        self.root = Path(self.temp_dir.name) / "project"
+        self.root = Path(self.temp_dir.name).resolve() / "project"
         global_service.__init__()
         global_service.create_project(self.root, "Layer Order Tests")
         self.client = TestClient(app)
-        self.config_dir = Path(self.temp_dir.name) / "config"
+        self.config_dir = Path(self.temp_dir.name).resolve() / "config"
         self.config_dir.mkdir()
         self._patcher = patch(
             "app.services.machine_settings.config_path",

@@ -32,13 +32,13 @@ def _set_machine_keys(**keys: str) -> None:
 class ChatEndpointTests(unittest.TestCase):
     def setUp(self) -> None:
         self.temp_dir = TemporaryDirectory()
-        self.root = Path(self.temp_dir.name) / "project"
+        self.root = Path(self.temp_dir.name).resolve() / "project"
         global_service.__init__()
         global_service.create_project(self.root, "Chat Tests")
         self.client = TestClient(app)
         # Isolate the file-backed assistant store so the chat resolver
         # doesn't pick up the developer's real ~/AppData entries.
-        self.config_dir = Path(self.temp_dir.name) / "machine_config"
+        self.config_dir = Path(self.temp_dir.name).resolve() / "machine_config"
         self.config_dir.mkdir()
         self._config_patcher = patch(
             "app.services.machine_settings.config_path",
@@ -308,11 +308,11 @@ class ChatEndpointTests(unittest.TestCase):
 class ChatStreamEndpointTests(unittest.TestCase):
     def setUp(self) -> None:
         self.temp_dir = TemporaryDirectory()
-        self.root = Path(self.temp_dir.name) / "project"
+        self.root = Path(self.temp_dir.name).resolve() / "project"
         global_service.__init__()
         global_service.create_project(self.root, "Stream Tests")
         self.client = TestClient(app)
-        self.config_dir = Path(self.temp_dir.name) / "machine_config"
+        self.config_dir = Path(self.temp_dir.name).resolve() / "machine_config"
         self.config_dir.mkdir()
         self._config_patcher = patch(
             "app.services.machine_settings.config_path",
@@ -488,11 +488,11 @@ class ChatEndpointJournalTests(unittest.TestCase):
             SaveLoreEntryRequest,
         )
         self.temp_dir = TemporaryDirectory()
-        self.root = Path(self.temp_dir.name) / "project"
+        self.root = Path(self.temp_dir.name).resolve() / "project"
         global_service.__init__()
         global_service.create_project(self.root, "Journal Tests")
         self.client = TestClient(app)
-        self.config_dir = Path(self.temp_dir.name) / "machine_config"
+        self.config_dir = Path(self.temp_dir.name).resolve() / "machine_config"
         self.config_dir.mkdir()
         self._config_patcher = patch(
             "app.services.machine_settings.config_path",

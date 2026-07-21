@@ -27,7 +27,8 @@ def test_default_view_specs_match_frontend() -> None:
     materializes the default on disk; the frontend synthesizes it for the pane).
     Both assert the SAME canonical fixture (owned by the frontend), so a change to
     one without the other fails CI instead of shipping a before-fold/after-fold
-    mismatch. Compares expr + group_by with roots fixed at `<kind>:base`."""
+    mismatch. Compares expr + params + group_by with roots fixed at `<kind>:base`
+    (`params` joined with #333, the first default to declare a formal)."""
     fixture_path = (
         Path(__file__).resolve().parents[2]
         / "frontend" / "src" / "lib" / "views" / "__fixtures__" / "default-view-specs.json"
@@ -49,14 +50,18 @@ def test_default_view_specs_match_frontend() -> None:
         if kind == "_comment":
             continue
         dumped = ViewsMixin._default_view_spec(kind, f"{kind}:base").model_dump(exclude_none=True)
-        got = {"expr": _strip_keep(dumped["expr"]), "group_by": dumped.get("group_by")}
+        got = {
+            "expr": _strip_keep(dumped["expr"]),
+            "params": dumped.get("params"),
+            "group_by": dumped.get("group_by"),
+        }
         assert got == expected, f"backend default for {kind!r} drifted from the frontend canonical: {got} != {expected}"
 
 
 class ViewCrudTests(unittest.TestCase):
     def setUp(self) -> None:
         self.temp_dir = TemporaryDirectory()
-        self.root = Path(self.temp_dir.name) / "project"
+        self.root = Path(self.temp_dir.name).resolve() / "project"
         svc.__init__()
         svc.create_project(self.root, "View Tests")
         self.client = TestClient(app)
@@ -441,7 +446,7 @@ class ViewUiStateTests(unittest.TestCase):
 
     def setUp(self) -> None:
         self.temp_dir = TemporaryDirectory()
-        self.root = Path(self.temp_dir.name) / "project"
+        self.root = Path(self.temp_dir.name).resolve() / "project"
         svc.__init__()
         svc.create_project(self.root, "View UI Tests")
         self.client = TestClient(app)

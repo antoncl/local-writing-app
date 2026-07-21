@@ -120,6 +120,7 @@
   import { leafGroup, nodeSet } from "@/lib/views/viewResult";
   import { buildBindings } from "@/lib/views/viewParams";
   import { repairSpecCycles } from "@/lib/views/cycleCheck";
+  import type { GroupValue } from "@/lib/views/groupTree";
 
   let {
     result,
@@ -183,7 +184,7 @@
     // because a bucket is not a node and admits no before/after, and because it
     // is the only way to reach an EMPTY bucket. Wire it and bucket headers
     // become drop targets; omit it and they stay inert.
-    onGroupDrop?: (moved: T, groupKey: string) => void | Promise<void>;
+    onGroupDrop?: (moved: T, groupValue: GroupValue) => void | Promise<void>;
     // Domain classification for drag: does this node accept an "into" drop (i.e.
     // it's a container, even an empty one)? The wrapper owns the drop-zone
     // mechanics; the consumer names what can contain. Absent ⇒ falls back to

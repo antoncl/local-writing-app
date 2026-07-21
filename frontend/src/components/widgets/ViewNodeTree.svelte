@@ -23,6 +23,7 @@
   import { getSwatch } from "@/lib/utils/colors";
   import type { EvalNode, ViewAnnotation, ViewGroup } from "@/lib/views/evaluateView";
   import { groupBucketValue } from "@/lib/views/evaluateView";
+  import type { GroupValue } from "@/lib/views/groupTree";
   import type { GroupCtx, RowCtx } from "@/components/widgets/ViewNodeList.svelte";
   import type { DropPosition, TreeDrag } from "@/components/widgets/treeDrag.svelte";
   import type { TreeRename } from "@/components/widgets/treeRename.svelte";
@@ -57,7 +58,7 @@
     onDblClick?: (node: T) => void;
     onRename?: (node: T, nextTitle: string) => void;
     onReorder?: (moved: T, target: T, position: "before" | "after" | "into") => void;
-    onGroupDrop?: (moved: T, groupKey: string) => void;
+    onGroupDrop?: (moved: T, groupValue: GroupValue) => void;
     isContainer?: (node: T) => boolean;
     drag: TreeDrag<T>;
     rename: TreeRename<T>;

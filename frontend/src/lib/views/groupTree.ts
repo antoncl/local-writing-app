@@ -46,9 +46,18 @@ export const GROUP_KEY_PREFIX = "group:";
 // silently did nothing while still painting the drop highlight, because the key
 // on the wire was `group:listed`. Strips exactly ONE prefix, so a value that
 // itself contains a colon — an entry_type FQN, a tag named `group:x` — survives.
-export function groupBucketValue<T extends EvalNode>(group: ViewGroup<T>): string | null {
+// Branded so the render key cannot be passed where a value is wanted. Both are
+// strings, so the compiler could not otherwise tell them apart — and that is
+// exactly the mistake #333 shipped: `onGroupDrop` was handed `group.key` and
+// every bucket drop silently did nothing. A mutation putting `group.key` back
+// survives the whole test suite (there are no component tests to catch it), so
+// the guard has to live in the type rather than in a test.
+export type GroupValue = string & { readonly __groupValue: unique symbol };
+
+export function groupBucketValue<T extends EvalNode>(group: ViewGroup<T>): GroupValue | null {
   if (group.nodeId !== null) return null;
-  return group.key.startsWith(GROUP_KEY_PREFIX) ? group.key.slice(GROUP_KEY_PREFIX.length) : group.key;
+  const value = group.key.startsWith(GROUP_KEY_PREFIX) ? group.key.slice(GROUP_KEY_PREFIX.length) : group.key;
+  return value as GroupValue;
 }
 
 // Filter a group tree to members whose id is in `keep`, pruning any branch with

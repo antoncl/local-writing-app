@@ -29,7 +29,9 @@ manifest is already the work list, it just has one consumer so far.
 
 from __future__ import annotations
 
+import hashlib
 import json
+from functools import lru_cache
 from pathlib import Path
 
 from app.services.project.node_index import (
@@ -42,7 +44,67 @@ from app.services.project.node_index import (
 # Bumped whenever the payload's shape changes. Pre-1.0 that is the whole
 # migration story: a mismatch is expected after an upgrade and rebuilds, and no
 # migration code is ever written for a derived file (`feedback_no_pre_1_0_migrations`).
+#
+# It is **not** the whole identity — see `build_identity`. A snapshot can be
+# stale because the code that produced it changed, with the payload's shape and
+# every project file untouched, and no human-maintained version number catches
+# that reliably.
 SNAPSHOT_FORMAT_VERSION = 1
+
+# Source trees whose contents determine what a build *produces*: the walk, the
+# collectors, the edge extraction, the built-in schema, the models they parse
+# into. Globbed rather than listed file-by-file, so a module added to any of
+# them is covered without anyone remembering to add it here.
+_SOURCE_ROOTS = ("services/project", "models")
+
+
+@lru_cache(maxsize=1)
+def build_identity() -> str:
+    """A digest of the code that builds an index.
+
+    The manifest answers "have the *files* changed". This answers "would this
+    build still produce the same thing" — and nothing else does. Ship a release
+    that adds an `entity_ref` field to a built-in entry type, or fixes a bug in
+    edge extraction, and every existing project's files are byte-identical: the
+    manifest matches, the old index is served as fresh, and the new edges never
+    appear. Not until the user happens to edit something unrelated, at which
+    point they appear for no reason the user can see.
+
+    Bumping `SNAPSHOT_FORMAT_VERSION` by hand would cover it only if whoever
+    made the change noticed that they had to — and its own contract says
+    "payload shape", which is exactly the wrong instruction for this case. A
+    cache invalidated by a rule nobody has to remember is worth more than a
+    slightly narrower one that depends on discipline.
+
+    Deliberately over-broad: a comment-only edit in any covered module changes
+    the digest and costs one rebuild. That is the right side to err on for a
+    derived file, and the digest is computed once per process.
+    """
+    digest = hashlib.sha256()
+    for path in source_files():
+        # The name matters as well as the bytes: renaming a module changes what
+        # imports resolve to without changing any file's contents.
+        digest.update(path.name.encode("utf-8"))
+        digest.update(path.read_bytes())
+    return digest.hexdigest()[:16]
+
+
+def source_files() -> list[Path]:
+    """The files `build_identity` digests. Public so a test can assert *what*
+    is covered without re-deriving the path arithmetic — a duplicated
+    `parents[n]` is how the first version of this silently hashed nothing."""
+    # …/app/services/project/node_index_snapshot.py → …/app
+    package_root = Path(__file__).resolve().parents[2]
+    files: list[Path] = []
+    for source_root in _SOURCE_ROOTS:
+        source_folder = package_root / source_root
+        # An empty glob would hash to a constant — a digest that changes for
+        # nothing and therefore protects nothing. Fail loudly instead: this is a
+        # wiring error whose only symptom is silence.
+        if not source_folder.is_dir():
+            raise RuntimeError(f"Cannot compute the node-index build identity: {source_folder} is missing")
+        files.extend(sorted(source_folder.rglob("*.py")))
+    return files
 
 # `.cache/` is the project's rebuildable-artifacts folder by convention
 # (README, AGENTS.md) and is excluded from migration backups.
@@ -112,6 +174,7 @@ def serialize(
     layer_index_by_id = {layer.id: position for position, layer in enumerate(layers)}
     payload = {
         "format_version": SNAPSHOT_FORMAT_VERSION,
+        "build_identity": build_identity(),
         # Absolute, and checked on load: users copy book folders, and without
         # this a copy reads its ancestor's cache and believes it.
         "root": str(root),
@@ -171,6 +234,10 @@ def load(
         raise SnapshotUnusable("corrupt", "payload is not an object")
     if payload.get("format_version") != SNAPSHOT_FORMAT_VERSION:
         raise SnapshotUnusable("version", str(payload.get("format_version")))
+    # The code that produced it, not just the shape it produced. Same verdict as
+    # a format change: expected after an upgrade, and rebuilds silently.
+    if payload.get("build_identity") != build_identity():
+        raise SnapshotUnusable("version", "built by different code")
     if payload.get("root") != str(root):
         raise SnapshotUnusable("moved", str(payload.get("root")))
     # The chain the walk just produced, against the one it produced when this
@@ -182,14 +249,19 @@ def load(
     if payload.get("layer_folders") != [str(layer.folder) for layer in layers]:
         raise SnapshotUnusable("moved", "layer chain differs")
 
-    stored_manifest = payload.get("manifest")
-    if not isinstance(stored_manifest, dict):
-        raise SnapshotUnusable("corrupt", "manifest is not an object")
-    changed = diff_manifests(_manifest_from_raw(stored_manifest), manifest)
-    if changed:
-        raise SnapshotUnusable("stale", f"{len(changed)} path(s) changed, first: {changed[0]}")
-
+    # Everything from here reads the payload's *body*, so it all sits inside one
+    # guard. Decoding the manifest used to sit above it, and a single
+    # non-numeric fingerprint — `["notanint", …]` — raised straight out of the
+    # build instead of rebuilding, 500ing every endpoint that touches the index.
+    # `SnapshotUnusable` is not a `ValueError`, so the `stale` verdict raised in
+    # here passes through this handler untouched.
     try:
+        stored_manifest = payload["manifest"]
+        if not isinstance(stored_manifest, dict):
+            raise ValueError("manifest is not an object")
+        changed = diff_manifests(_manifest_from_raw(stored_manifest), manifest)
+        if changed:
+            raise SnapshotUnusable("stale", f"{len(changed)} path(s) changed, first: {changed[0]}")
         return _rehydrate(payload, layers)
     # A payload that parsed but does not have the shape we wrote — a truncated
     # write, a hand-edited file, a bug in a past version. Same verdict as
@@ -224,7 +296,13 @@ def _rehydrate(payload: dict, layers: list[IndexLayer]) -> NodeIndex:
     index = NodeIndex()
     # Freshly derived, never read off disk — see `serialize`.
     for entry in payload["entries"]:
-        layer = layers[entry["layer"]]
+        # Explicit, because `layers[-1]` is not an error in Python: a payload
+        # carrying a negative position would silently re-stamp entries onto the
+        # innermost layer instead of being rejected as unreadable.
+        position = entry["layer"]
+        if not isinstance(position, int) or not 0 <= position < len(layers):
+            raise ValueError(f"entry {entry.get('id')!r} names layer {position!r}")
+        layer = layers[position]
         index.add(
             NodeIndexEntry(
                 id=entry["id"],
@@ -243,10 +321,19 @@ def _rehydrate(payload: dict, layers: list[IndexLayer]) -> NodeIndex:
     for entries in index.candidates.values():
         entries.reverse()
     for edge in payload["edges"]:
-        key = (layers[edge["layer"]].id, edge["src"])
+        position = edge["layer"]
+        if not isinstance(position, int) or not 0 <= position < len(layers):
+            raise ValueError(f"edge from {edge.get('src')!r} names layer {position!r}")
+        key = (layers[position].id, edge["src"])
         index.edges_by_layer_src.setdefault(key, []).append(
             ReferenceEdge(src=edge["src"], dst=edge["dst"], field_id=edge["field_id"])
         )
+    # Typed, not just coerced: `list("boom")` is four warnings, one per
+    # character, and `validate_project` shows `index.warnings` to the user
+    # verbatim. A payload that is wrong here must rebuild, not be displayed.
+    for key in ("warnings", "errors"):
+        if not isinstance(payload[key], list) or not all(isinstance(item, str) for item in payload[key]):
+            raise ValueError(f"{key} is not a list of strings")
     index.warnings = list(payload["warnings"])
     index.errors = list(payload["errors"])
     # Rebuilds `by_id`, `edges_by_src`, the reverse map and the shadow warnings

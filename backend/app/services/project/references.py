@@ -210,8 +210,14 @@ class ReferencesMixin:
             text = path.read_text(encoding="utf-8")
         except FileNotFoundError:
             return None
-        except OSError as exc:
-            log.warning("Could not read the node-index snapshot at %s: %s", path, exc)
+        # `ValueError` is here for `UnicodeDecodeError`: a snapshot truncated by
+        # a power cut, or corrupted on disk, is *bytes* we cannot decode, and
+        # that is raised by `read_text` before any JSON handling can see it.
+        # Left uncaught it escapes `_build_node_index` and 500s every endpoint
+        # that touches the index — a derived, self-healing file making the
+        # project unopenable, which is the exact inversion of this design.
+        except (OSError, ValueError) as exc:
+            log.warning("Discarding an unreadable node-index snapshot at %s: %s", path, exc)
             return None
         try:
             return snapshot_load(text, root=root, layers=layers, manifest=manifest)
@@ -230,6 +236,11 @@ class ReferencesMixin:
         snapshot is derived, so failing to write one costs the next open its
         speed and nothing else. A read-only project folder must not make the
         index unbuildable."""
+        if index.degraded:
+            # See `NodeIndex.degraded`. Writing nothing means the next open
+            # rebuilds, and gets a clean index the moment the condition clears.
+            log.warning("Not caching a degraded node index for %s; it will be rebuilt.", root)
+            return
         try:
             self._atomic_write(snapshot_path(root), snapshot_serialize(index, root=root, layers=layers, manifest=manifest))
         except OSError as exc:
@@ -272,6 +283,15 @@ class ReferencesMixin:
         except (ProjectServiceError, ValueError, OSError) as exc:
             schema = None
             index.errors.append(f"Invalid metadata schema; no reference edges were indexed: {exc}")
+            # An unreadable schema costs the *whole project* its reference
+            # edges, so persisting that result would freeze an empty reference
+            # graph and backlinks panel in place — the schema file is unchanged,
+            # so every later open matches the manifest and serves it. One
+            # unlucky read (a cloud-sync placeholder, an AV scanner, a
+            # concurrent checkout) would otherwise brick the graph until the
+            # user edited something unrelated. A malformed schema is content and
+            # is cached; a schema we could not *read* is not.
+            index.degraded = isinstance(exc, OSError)
         # One walk, machine layer included (#329). It comes first and carries
         # assistants only — it lives outside the project tree and holds the
         # user's roster. Project layers follow outermost-ancestor first, so a
@@ -303,6 +323,10 @@ class ReferencesMixin:
                 data = self._read_yaml(path)
             except Exception as exc:
                 index.errors.append(f"Failed to read chat session {path.name}: {exc}")
+                # Same rule as the schema read: a chat we could not open is
+                # missing from the index entirely, and its file is unchanged, so
+                # a snapshot would keep it missing across every later open.
+                index.degraded = index.degraded or isinstance(exc, OSError)
                 continue
             if not isinstance(data, dict):
                 continue

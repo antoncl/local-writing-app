@@ -116,6 +116,17 @@ class NodeIndex:
     edges_by_dst: dict[str, list[ReferenceEdge]] = field(default_factory=dict)
     warnings: list[str] = field(default_factory=list)
     errors: list[str] = field(default_factory=list)
+    # Set when the build degraded for a reason that is a property of the
+    # *environment* rather than of the files — an unreadable schema, a chat
+    # session that would not open. Such an index is correct to serve now and
+    # wrong to persist (#306): the files it failed to read are unchanged, so
+    # their fingerprints match on the next open and the crippled result would be
+    # vouched for as fresh until something unrelated in the chain was edited.
+    #
+    # Content errors are deliberately *not* degradations. Malformed front matter
+    # is deterministic — the same files produce the same index — and fixing it
+    # moves that file's mtime, so caching it is both correct and self-healing.
+    degraded: bool = False
     # The shadow warnings the last `resolve()` contributed, so a re-resolve can
     # retract them instead of duplicating them.
     _shadow_warnings: list[str] = field(default_factory=list, repr=False)

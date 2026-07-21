@@ -14,12 +14,14 @@ to agree".
 
 from __future__ import annotations
 
+import hashlib
 import json
 import unittest
 from pathlib import Path
 from tempfile import TemporaryDirectory
 
 from app.services.project import node_index_snapshot as snapshot
+from app.services.project.errors import ProjectServiceError
 from app.services.project_service import ProjectService
 
 
@@ -245,6 +247,46 @@ class SnapshotIntegrityTests(SnapshotTestCase):
         snapshot.snapshot_path(self.root).write_text("{not json", encoding="utf-8")
         self.assertTrue(self._rebuilds())
 
+    def test_undecodable_bytes_rebuild_rather_than_raising(self) -> None:
+        """A snapshot truncated by a power cut is *bytes* that will not decode,
+        which `read_text` raises before any JSON handling sees it. Uncaught it
+        escapes the build and 500s every endpoint that touches the index —
+        a derived, self-healing file making the project unopenable."""
+        self.service._build_node_index(self.root)
+        snapshot.snapshot_path(self.root).write_bytes(b'{"format_version": 1, \xff\xfe\x00 truncated')
+        self.assertTrue(self._rebuilds())
+
+    def test_unparseable_manifest_value_rebuilds_rather_than_raising(self) -> None:
+        """The manifest is payload *body*, so it must be decoded inside the same
+        guard as the rest. Decoded above it, one non-numeric fingerprint raised
+        straight out of the build — 500ing every endpoint that touches the
+        index, for a file that exists to be thrown away."""
+        self.service._build_node_index(self.root)
+        payload = self._snapshot_payload()
+        payload["manifest"][sorted(payload["manifest"])[0]] = ["notanint", "alsonot"]
+        self._write_payload(payload)
+        self.assertTrue(self._rebuilds())
+
+    def test_warnings_of_the_wrong_shape_rebuild(self) -> None:
+        """`list("boom")` is four warnings, one per character — and
+        `validate_project` shows warnings to the user verbatim."""
+        self.service._build_node_index(self.root)
+        payload = self._snapshot_payload()
+        payload["warnings"] = "boom"
+        self._write_payload(payload)
+        self.assertTrue(self._rebuilds())
+
+    def test_negative_layer_position_rebuilds(self) -> None:
+        """`layers[-1]` is not an error in Python, so a negative position would
+        silently re-stamp entries onto the innermost layer — a wrong
+        `source_layer` on a node, which is what ADR-0042's layer picker reads."""
+        self._write_lore(self.root, "seren", "Seren")
+        self.service._build_node_index(self.root)
+        payload = self._snapshot_payload()
+        payload["entries"][0]["layer"] = -1
+        self._write_payload(payload)
+        self.assertTrue(self._rebuilds())
+
     def test_wrong_shape_rebuilds(self) -> None:
         """Parses, passes every header check, and is still not what we wrote."""
         self.service._build_node_index(self.root)
@@ -314,6 +356,97 @@ class SnapshotIntegrityTests(SnapshotTestCase):
         self._write_lore(self.root, "seren", "Seren")
         index = self.service._build_node_index(self.root)
         self.assertEqual(index.by_id["seren"].title, "Seren")
+
+
+class DegradedBuildTests(SnapshotTestCase):
+    """A build can degrade for reasons that are nothing to do with the files.
+
+    Persisting one of those is the nastiest failure this design can have: the
+    files it failed to read are unchanged, so the manifest matches on every
+    later open and the crippled index is served as fresh — forever, or until the
+    user edits something unrelated. Restarting the app does not clear it.
+    """
+
+    def _with_failing_schema_read(self, exc: Exception) -> None:
+        def failing(*args: object, **kwargs: object) -> None:
+            raise exc
+
+        self.service.read_metadata_schema = failing  # type: ignore[method-assign]
+
+    def test_unreadable_schema_is_not_cached(self) -> None:
+        """An OSError costs the whole project its reference edges."""
+        self._write_lore(self.root, "sphinx", "Sphinx")
+        self._write_lore(self.root, "hero", "Hero", refs=["sphinx"])
+        real = self.service.read_metadata_schema
+        self._with_failing_schema_read(OSError("locked by a scanner"))
+        degraded = self.service._build_node_index(self.root)
+        self.assertEqual(degraded.edges_by_src, {})
+        self.assertFalse(snapshot.snapshot_path(self.root).exists())
+
+        self.service.read_metadata_schema = real  # type: ignore[method-assign]
+        recovered = self.service._build_node_index(self.root)
+        self.assertIn("hero", recovered.edges_by_src)
+
+    def test_malformed_schema_IS_cached(self) -> None:
+        """The counter-case, and the reason this is not just "never cache an
+        error". Bad content is deterministic — the same files give the same
+        index — and fixing it moves that file's mtime, so the cache self-heals.
+        Refusing to cache it would mean a project with one typo never caches."""
+        self._with_failing_schema_read(ProjectServiceError("metadata.schema.yaml is not valid YAML"))
+        index = self.service._build_node_index(self.root)
+        self.assertTrue(index.errors)
+        self.assertTrue(snapshot.snapshot_path(self.root).exists())
+
+    def test_unreadable_chat_is_not_cached(self) -> None:
+        chats = self.root / "chats"
+        chats.mkdir(parents=True, exist_ok=True)
+        (chats / "chat_1.yaml").write_text("id: chat_1\ntitle: Talk\n", encoding="utf-8")
+        real = self.service._read_yaml
+
+        def failing(path: Path, *args: object, **kwargs: object) -> object:
+            if path.suffix == ".yaml" and path.parent.name == "chats":
+                raise OSError("not hydrated")
+            return real(path, *args, **kwargs)
+
+        self.service._read_yaml = failing  # type: ignore[method-assign]
+        degraded = self.service._build_node_index(self.root)
+        self.assertNotIn("chat_1", degraded.by_id)
+        self.assertFalse(snapshot.snapshot_path(self.root).exists())
+
+
+class BuildIdentityTests(SnapshotTestCase):
+    """The manifest answers "have the files changed". Nothing else answers
+    "would this code still produce the same index"."""
+
+    def test_snapshot_built_by_different_code_is_rebuilt(self) -> None:
+        """Ship a release that adds an `entity_ref` field to a built-in entry
+        type and every project file is byte-identical — the new edges would
+        never appear until the user edited something unrelated."""
+        self.service._build_node_index(self.root)
+        payload = self._snapshot_payload()
+        payload["build_identity"] = "0" * 16
+        self._write_payload(payload)
+        calls = self._count_collections()
+        self.service._build_node_index(self.root)
+        self.assertGreater(calls[0], 0)
+
+    def test_identity_tracks_the_source_that_decides_a_build(self) -> None:
+        """Globbed, not listed, so a module added to those trees is covered
+        without anyone remembering to add it here."""
+        covered = {"references.py", "layers.py", "node_index.py", "default_schema.py", "schema.py"}
+        found = {path.name for path in snapshot.source_files()}
+        self.assertTrue(covered <= found, f"not covered: {sorted(covered - found)}")
+
+    def test_identity_actually_digests_those_files(self) -> None:
+        """The first version resolved its package root one level too high, so
+        both globs matched nothing and the digest was a constant over zero
+        files — stable, plausible, and protecting nothing."""
+        self.assertGreater(len(snapshot.source_files()), 10)
+        digest = hashlib.sha256()
+        for path in snapshot.source_files():
+            digest.update(path.name.encode("utf-8"))
+            digest.update(path.read_bytes())
+        self.assertEqual(snapshot.build_identity(), digest.hexdigest()[:16])
 
 
 class ManifestUnitTests(unittest.TestCase):

@@ -81,6 +81,11 @@ weakest → strongest:
    guards **repo-wide**, not just over staged files. Private repo, so minutes
    are billed: `ubuntu-latest` only, two parallel jobs, superseded runs
    cancelled — keep it that way.
+   ⚠ **CI is currently ADVISORY.** Branch protection and rulesets are a paid
+   feature on a private repo (both APIs 403 with *"Upgrade to GitHub Pro or make
+   this repository public"*), so nothing mechanically stops a red PR being
+   merged. Until that changes the rule is human: **never merge a PR whose checks
+   are not green, and never report "green" without opening the run.**
 
 The **exemption ratchet** (`scripts/check_exemptions.py`, CI, PRs only) is the
 guard on the guards: every escape hatch may shrink, never grow. It compares this

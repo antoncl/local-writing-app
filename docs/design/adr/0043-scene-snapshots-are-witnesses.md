@@ -153,8 +153,8 @@ second file bearing a live scene's id is an index collision, not a historical re
   front matter included. It therefore still carries the *source* node's id, which is correct: it is a
   photograph of that file.
 - `snapshots/<source-node-id>/<snapshot-id>.yaml` — the snapshot's own record: `id`, `snapshot_of`
-  (the source node id), `captured_at`, `retention`, the `schema_version` in force at capture, and the
-  witness.
+  (the source node id), `captured_at`, the scene's `title` as captured, `retention`, the
+  `schema_version` in force at capture, and the witness.
 
 Splitting them is what makes byte-exactness *provable rather than reconstructed*. Restore is a file
 copy, not a re-serialization of nested YAML — and for the one feature whose job is not losing the
@@ -164,7 +164,13 @@ the witness out of the restored bytes entirely.
 **`retention` is `thinned | kept`**, not a boolean. `thinned` is subject to the keep-five policy;
 `kept` is not. An enum because the field will plausibly grow a third case (an author-pinned automatic
 capture is the obvious one), and a boolean extension point is the shape this repo has had to retire
-before. The name avoids `origin`, which ADR-0037 already owns as `PathSegment.origin`.
+before.
+
+The sidecar's key names are otherwise unremarkable, and deliberately so: it is a private file the
+author never edits, parsed by its own model, namespaced by its own directory. Cross-ADR terminology
+discipline applies to words that appear in *design prose and shared code* — where the historical cost
+has been human confusion between two ADRs meaning different things by one word — not to internal keys,
+which cannot collide with anything.
 
 **The directory layout is the lookup table.** "How many snapshots does this id have, and which?" is a
 directory listing — no index to build, invalidate, or repair, and the answer survives any cache
@@ -181,9 +187,24 @@ belongs where `.cache/` and `.migration-backups/` are already handled, and ADR-0
 manifest must skip it too, or every capture invalidates the index. Being *node-shaped* is not being an
 *indexed node*: a witness is evidence about the graph, not a participant in it.
 
-**Snapshots outlive their source.** Deleting a scene leaves its snapshot directory in place. Silently
-destroying the only remaining record of prose the author may want back is the opposite of what this
-feature is for; orphaned directories stay listable, and pruning them is an explicit act.
+**Snapshots outlive their source — but only if they remain reachable.** Deleting a scene leaves its
+snapshot directory in place, and an earlier draft of this ADR stopped there. That was wrong:
+**unreachable data is not preserved data.** The directory is named by node id, the author knows scenes
+by title, and once the scene is gone there is no node left to hang an affordance on — so "we kept it"
+would amount to disk usage plus a false sense of safety, with recovery available only to someone
+willing to grep the filesystem. That is a worse outcome than either honest alternative, because it is
+the one that *looks* safe.
+
+Two consequences, and they are a package:
+
+1. **The sidecar denormalizes the scene's `title` as captured.** It is already present in the copied
+   `.md`, but an orphan listing must not have to parse every captured body to render a name.
+2. **Retention of orphans requires a recovery surface, and that surface is part of v1's acceptance —
+   not a follow-up.** Deleting the wrong chapter is precisely the disaster this feature exists for, so
+   the case must not be the one that silently fails.
+
+If that surface is judged out of scope, then the honest fallback is to **delete a scene's snapshots
+with the scene**, saying so in the confirmation. What must not ship is retention without reachability.
 
 ## The third axis is value reinterpretation, not schema change
 
@@ -310,7 +331,9 @@ The value of the witness framing is that the feature's correctness criterion bec
   members before and after six captures, and the staleness manifest does not change on capture.
 - Capture seven automatic snapshots; assert five remain, that the two dropped are the oldest, and that
   an interleaved explicit snapshot survives regardless of age.
-- Delete the source scene; assert its snapshots remain listable.
+- Delete the source scene; assert its snapshots remain listable **and that each renders a human-readable
+  name from the sidecar without parsing the captured body**. The reachability half is the half that
+  fails silently, so it is the half worth pinning.
 
 ## Naming
 

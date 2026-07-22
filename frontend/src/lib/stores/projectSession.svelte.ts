@@ -196,6 +196,15 @@ class ProjectSession {
   // Returns false when the open failed (App's run() swallows the error), so
   // rehydrate can forget a moved/deleted last-opened path.
   async openProjectAt(path: string): Promise<boolean> {
+    // Opening another project tears the editor surface down (`editorPanes
+    // .reset()` via App's `resetEditorWorkspace`), so anything still inside the
+    // 6s autosave debounce would go with it. Persist first, and refuse the
+    // switch if that fails — #310 made this reachable in one click from the
+    // child roster, but the switcher and the recents menu always had it.
+    if (!(await editorPanes.flushDirtyPanes())) {
+      this.setStatus("Unsaved changes could not be saved — staying in this project.");
+      return false;
+    }
     return await this.run(async () => {
       const openedProject = await api.openProject(path, "");
       this.rememberLastProject(openedProject.root_path);

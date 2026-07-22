@@ -1,5 +1,7 @@
 <script lang="ts">
-  import type { AIHealthResponse, AIPolicy, ProjectValidation } from "@/lib/types";
+  import type { AIHealthResponse, AIPolicy, ProjectChild, ProjectValidation } from "@/lib/types";
+  import NodeList from "@/components/widgets/NodeList.svelte";
+  import NodeRow from "@/components/widgets/NodeRow.svelte";
   import { formatCostEur } from "@/lib/utils/money";
 
   export let isProjectOpen: boolean;
@@ -10,6 +12,11 @@
   export let aiHealthResult: AIHealthResponse | null;
   export let aiHealthChecking: boolean;
   export let validation: ProjectValidation | null;
+  // Project folders directly inside this one (#310). Direct children only —
+  // a level offers the places you can open *from here*, not the whole shelf.
+  // Empty for a leaf, which is the only thing that distinguishes one: there
+  // is no level type to branch on, and depth is not consulted anywhere.
+  export let projectChildren: ProjectChild[] = [];
 
   // Two-way bound: App is the source of truth. aiPolicy is set on project load
   // and read back when saving AI settings; projectCostExpanded is bound because
@@ -25,6 +32,10 @@
   export let onOpenPrompts: () => void;
   export let onOpenMutations: () => void;
   export let onRepair: () => void;
+  // Opening a child is a resolution-scope change, i.e. a unit boundary
+  // (ADR-0045) — App routes it through the same open path as the switcher
+  // rather than mutating anything in place.
+  export let onOpenChild: (path: string) => void;
 </script>
 
 {#if !isProjectOpen}
@@ -63,6 +74,39 @@
       <button type="button" on:click={onValidate}>Validate</button>
     </div>
   </div>
+
+  <!--
+    The child roster (#310). Rendered only when there is something in it: a
+    leaf has no children, and an always-present empty section would be noise on
+    every book. That emptiness IS the only leaf/non-leaf distinction in the UI —
+    no depth, no level type, nothing derived from the chain's shape.
+  -->
+  {#if projectChildren.length > 0}
+    <section class="project-children" aria-label="Projects inside this one">
+      <h3>Contains</h3>
+      <NodeList isEmpty={false}>
+        {#each projectChildren as child (child.path)}
+          <!--
+            `detail` is the folder name, and only when it differs from the
+            title: a project keeps its folder name as its default title, so
+            passing it unconditionally prints the same string twice on exactly
+            the projects nobody has renamed yet.
+
+            No `dataNodeId`: it exists so focus helpers can find a row by node
+            id, and a filesystem path is not one. ViewNodeList interpolates that
+            attribute straight into a `querySelector`, so putting a Windows path
+            there is a hazard bought for nothing.
+          -->
+          <NodeRow
+            title={child.title}
+            detail={child.name === child.title ? null : child.name}
+            ariaLabel={`Open ${child.title}`}
+            onClick={() => onOpenChild(child.path)}
+          />
+        {/each}
+      </NodeList>
+    </section>
+  {/if}
 {/if}
 
 <section class="ai-settings" aria-label="AI settings" class:disabled-section={!isProjectOpen}>
@@ -203,6 +247,10 @@
     color: var(--text-3);
   }
 
+  /* Same section rhythm as the AI block below — a sibling section of the
+     pane, not a nested treatment. The rows inside are plain NodeRows, so
+     they carry the canonical card chrome and need nothing here. */
+  .project-children,
   .ai-settings {
     display: grid;
     gap: 10px;
@@ -211,6 +259,7 @@
     border-top: 1px solid var(--border);
   }
 
+  .project-children h3,
   .ai-settings h3 {
     margin: 0;
     font-size: var(--fs-md);

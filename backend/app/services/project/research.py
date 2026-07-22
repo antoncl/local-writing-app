@@ -47,14 +47,22 @@ from app.services.tree_structure import TreeStructureService
 
 
 class ResearchNotesMixin:
-    def _research_tree(self) -> TreeStructureService:
-        return TreeStructureService(self._require_project(), RESEARCH_TREE_CONFIG)
+    def _research_tree(self, root: Path) -> TreeStructureService:
+        """The research tree for **`root`**, which the caller must already hold.
+
+        Required, not defaulted — same reasoning as `_manuscript_tree` (#381 /
+        ADR-0045): a unit of work that read the tree, mutated it and wrote it
+        back used to resolve the project twice through the process-wide
+        singleton, so a concurrent `open_project` could land the write in
+        another project's `research.structure.yaml`.
+        """
+        return TreeStructureService(root, RESEARCH_TREE_CONFIG)
 
     def read_research_structure(self) -> StructureDocument:
-        return self._research_tree().read()
+        return self._research_tree(self._require_project()).read()
 
     def create_research_node(self, request: CreateStructureNodeRequest) -> StructureDocument:
-        self._require_project()
+        root = self._require_project()
         schema = self.read_metadata_schema()
         entry_type = schema.entry_types.get(request.entry_type)
         if entry_type is None:
@@ -68,7 +76,7 @@ class ResearchNotesMixin:
                 f"Entry type {request.entry_type} is abstract and cannot be instantiated.", 422
             )
 
-        tree = self._research_tree()
+        tree = self._research_tree(root)
         document = tree.read()
 
         parent: StructureNode | None
@@ -112,10 +120,11 @@ class ResearchNotesMixin:
         return tree.read()
 
     def rename_research_node(self, node_id: str, title: str) -> StructureDocument:
+        root = self._require_project()
         clean_title = title.strip()
         if not clean_title:
             raise ProjectServiceError("Title cannot be empty.", 422)
-        tree = self._research_tree()
+        tree = self._research_tree(root)
         document = tree.read()
         node = TreeStructureService.find_node(document, node_id)
         if node is None:
@@ -135,7 +144,8 @@ class ResearchNotesMixin:
     def move_research_node(
         self, node_id: str, target_parent_id: str, position: int
     ) -> StructureDocument:
-        tree = self._research_tree()
+        root = self._require_project()
+        tree = self._research_tree(root)
         document = tree.read()
         node = TreeStructureService.find_node(document, node_id)
         if node is None:
@@ -169,7 +179,7 @@ class ResearchNotesMixin:
     def cascade_research_delete_preview(
         self, node_id: str
     ) -> StructureNodeDeletePreview:
-        document = self._research_tree().read()
+        document = self._research_tree(self._require_project()).read()
         node = TreeStructureService.find_node(document, node_id)
         if node is None:
             raise ProjectServiceError(f"Structure node {node_id} does not exist.", 404)
@@ -205,7 +215,7 @@ class ResearchNotesMixin:
 
     def delete_research_node(self, node_id: str) -> StructureDocument:
         root = self._require_project()  # see manuscript.delete_structure_node (#381)
-        tree = self._research_tree()
+        tree = self._research_tree(root)
         document = tree.read()
         node = TreeStructureService.find_node(document, node_id)
         if node is None:
@@ -328,7 +338,8 @@ class ResearchNotesMixin:
         returned in the response so the UI can surface them; nothing
         about the migration is silent.
         """
-        index = self._build_node_index()
+        root = self._require_project()
+        index = self._build_node_index(root)
         index_entry = index.by_id.get(lore_id)
         if index_entry is None or index_entry.kind != "lore":
             raise ProjectServiceError(f"Lore entry {lore_id} does not exist.", 404)
@@ -347,7 +358,7 @@ class ResearchNotesMixin:
                 if value not in (None, "", [], {}):
                     dropped_fields.append(field_id)
 
-        tree = self._research_tree()
+        tree = self._research_tree(root)
         document = tree.read()
         note_id = self._new_id("note")
         note = ResearchNote(
@@ -383,7 +394,8 @@ class ResearchNotesMixin:
         )
 
     def _update_research_title_in_structure(self, note_id: str, title: str) -> None:
-        tree = self._research_tree()
+        root = self._require_project()
+        tree = self._research_tree(root)
         document = tree.read()
         node = TreeStructureService.find_by_leaf_ref(document, note_id)
         if node is not None:

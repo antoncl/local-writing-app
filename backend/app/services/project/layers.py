@@ -52,6 +52,10 @@ from app.services.project.node_index import IndexLayer
 # The metadata-schema file each project layer may carry. Not applicable to the
 # machine layer, which is out-of-tree and contributes assistants only.
 SCHEMA_FILENAME = "metadata.schema.yaml"
+# The per-layer manifest. Its `settings.projects_base_folder` is what the walk
+# consults to decide where it stops, so it is an input to the *shape* of the
+# chain and not only to a layer's content.
+MANIFEST_FILENAME = "project.yaml"
 
 
 @lru_cache(maxsize=1024)
@@ -142,7 +146,16 @@ class LayerWalkMixin:
             visitor.visit_layer(layer)
 
     def _layer_sequence(self, root: Path, *, include_machine: bool) -> list[IndexLayer]:
-        """Build the chain. Private: consumers visit, they do not iterate."""
+        """Build the chain. Private: consumers visit, they do not iterate.
+
+        `root` is canonicalised **once, here**, because everything below
+        compares against it. `_project_layer_folders` yields resolved folders
+        (see its docstring on #356), so `folder == root` against an unresolved
+        argument is false for *every* layer — no layer is marked `is_root`, and
+        `_families_for_layer` then drops scenes and chats from the index
+        silently. Same normal-form defect as #356, one comparison further on.
+        """
+        root = root.resolve()
         layers: list[IndexLayer] = []
         if include_machine:
             machine_layer = self.machine_layer(rank=len(layers))
@@ -251,7 +264,7 @@ class LayerWalkMixin:
         removing the widening is a behaviour change and is *not* part of the
         #329 refactor. It is now a single edit, here.
         """
-        manifest = self._read_yaml(root / "project.yaml")
+        manifest = self._read_yaml(root / MANIFEST_FILENAME)
         settings = manifest.get("settings")
         if not isinstance(settings, dict):
             return None

@@ -164,6 +164,12 @@ from app.models.schema import (
     UpsertMetadataFieldRequest,
     UpsertMetadataGroupRequest,
 )
+from app.models.snapshots import (
+    Retention,
+    Snapshot,
+    SnapshotDetail,
+    SnapshotList,
+)
 
 # Preserve the documented `from app.models import NodePickerConfig` contract
 # (the old flat module re-exported it from models_views; see models_views.py).
@@ -280,6 +286,7 @@ __all__ = [
     "RenameStructureNodeRequest",
     "ReorderAssistantsRequest",
     "ResearchNote",
+    "Retention",
     "SaveAssistantEntryRequest",
     "SaveChatSessionRequest",
     "SaveLoreEntryRequest",
@@ -298,6 +305,9 @@ __all__ = [
     "SetFieldOrderRequest",
     "SetFieldOverrideRequest",
     "SetGroupApplicationsRequest",
+    "Snapshot",
+    "SnapshotDetail",
+    "SnapshotList",
     "StructureDocument",
     "StructureNode",
     "StructureNodeDeletePreview",

@@ -3,7 +3,11 @@
   import BacklinksPanel from "@/components/editor/BacklinksPanel.svelte";
   import MutationTimeline from "@/components/editor/MutationTimeline.svelte";
   import MutationScrubber from "@/components/editor/MutationScrubber.svelte";
+  import SnapshotStrip from "@/components/editor/SnapshotStrip.svelte";
+  import ReadOnlyBodyOverlay from "@/components/editor/body/ReadOnlyBodyOverlay.svelte";
   import { LoreScrubController } from "@/lib/stores/loreScrub.svelte";
+  import { SnapshotStripController } from "@/lib/stores/snapshotStrip.svelte";
+  import { relativeTime } from "@/lib/utils/relativeTime";
   import MetadataPanel from "@/components/editor/MetadataPanel.svelte";
   import InputsDialog from "@/components/editor/InputsDialog.svelte";
   import FieldsOnlyView from "@/components/editor/body/FieldsOnlyView.svelte";
@@ -78,6 +82,12 @@
     // The view designer self-persists; it reports its save lifecycle up so the
     // pane's tab badge can reflect it (#263).
     onViewSaveState?: ((state: ViewSaveState) => void) | undefined;
+    // Snapshots (#401). Autosave lags the buffer by up to 6 seconds, and both
+    // capture and restore read the FILE — so the strip asks the host to write
+    // pending edits first, and hands the restored document back for the host to
+    // reload. The pane store owns the document lifecycle; the card does not.
+    onFlushScene?: (() => Promise<void>) | undefined;
+    onSceneRestored?: ((restored: import("@/lib/types").Scene) => void | Promise<void>) | undefined;
   }
 
   let {
@@ -101,7 +111,9 @@
     onCustomData = undefined,
     onNavigate = undefined,
     onOpenChat = undefined,
-    onViewSaveState = undefined
+    onViewSaveState = undefined,
+    onFlushScene = undefined,
+    onSceneRestored = undefined
   }: Props = $props();
 
 
@@ -137,6 +149,21 @@
     const id = documentKind === "lore" ? (scene?.id ?? null) : null;
     void mutationsVersion.value;
     return scrub.load(id);
+  });
+
+  // ---- Snapshot strip (#401, ADR-0044) --------------------------------------
+  // The same shape as the scrub above, on the real-time axis: `parked` flips
+  // the body to a read-only overlay while the TipTap buffer stays mounted and
+  // hidden underneath. Scenes only — ADR-0043's v1 is scenes, and putting a
+  // third axis on a lore card is exactly the L-not-a-grid problem ADR-0042 had
+  // to settle.
+  const snapshots = new SnapshotStripController();
+  let snapshotParked = $derived(documentKind === "scene" && snapshots.parked !== null);
+
+  $effect(() => {
+    snapshots.flushScene = onFlushScene ?? null;
+    snapshots.onRestored = onSceneRestored ?? null;
+    return snapshots.load(documentKind === "scene" ? (scene?.id ?? null) : null);
   });
 
   // Effective intrinsics at the scrub point. Title/body may be mutated too
@@ -1002,23 +1029,24 @@
   {/if}
   {#if bodyShape === "prose"}
     {#if scrubbed}
-      <!-- The effective body as of the scrub point (§4.4). An overlay layer:
-           the editable TipTap buffer stays mounted (hidden) underneath, so
-           unsaved base edits survive the scrub round-trip untouched. -->
-      <div class="effective-body" aria-label="Effective body (read-only)">
-        {#if bodyMutated}
-          <div class="effective-body-ribbon">
-            <span aria-hidden="true">⤳</span>
-            Body as of {scrub.units[scrub.index - 1]?.records[0]?.scene_path || "scene"} — mutated
-          </div>
-        {/if}
-        <div class="effective-body-content">
-          <!-- eslint-disable-next-line svelte/no-at-html-tags — sceneMarkdownToHtml output, same trust level as the editor load path -->
-          {@html overlayBodyHtml}
-        </div>
-      </div>
+      <!-- The effective body as of the scrub point (§4.4). -->
+      <ReadOnlyBodyOverlay
+        html={overlayBodyHtml}
+        label="Effective body (read-only)"
+        ribbon={bodyMutated ? `Body as of ${scrub.units[scrub.index - 1]?.records[0]?.scene_path || "scene"} — mutated` : ""}
+        ribbonMark="⤳"
+      />
+    {:else if snapshotParked}
+      <!-- The parked snapshot, on the same overlay: the live buffer stays
+           mounted and hidden underneath (ADR-0044 §G). -->
+      <ReadOnlyBodyOverlay
+        html={snapshots.bodyHtml}
+        label="Snapshot body (read-only)"
+        ribbon={`Snapshot · ${relativeTime(snapshots.current?.captured_at ?? "")}`}
+        tone="snapshot"
+      />
     {/if}
-    <div class="prose-body-host" class:hidden={scrubbed}>
+    <div class="prose-body-host" class:hidden={scrubbed || snapshotParked}>
       <ProseBodyView
         bind:this={proseBodyView}
       bind:liveWordCount
@@ -1112,6 +1140,12 @@
 
   {#if documentKind === "lore" && scene && scrub.units.length > 0}
     <MutationScrubber units={scrub.units} index={scrub.index} onScrub={(index) => void scrub.scrubTo(index)} />
+  {/if}
+
+  <!-- Foot-docked, and only on scenes: the scrubber's slot is free here, so
+       there is no competition for the dock and no mode to collide with. -->
+  {#if documentKind === "scene" && scene && bodyShape === "prose"}
+    <SnapshotStrip strip={snapshots} />
   {/if}
 
   <footer class="status">
@@ -1359,34 +1393,6 @@
   .title-input.mutated {
     color: var(--mutation-color);
     font-weight: 600;
-  }
-
-  .effective-body {
-    min-height: 0;
-    overflow-y: auto;
-    display: flex;
-    flex-direction: column;
-  }
-  .effective-body-ribbon {
-    display: flex;
-    align-items: center;
-    gap: 6px;
-    padding: 4px 24px;
-    font-size: var(--fs-sm);
-    font-weight: 600;
-    color: var(--mutation-color);
-    background: color-mix(in srgb, var(--mutation-color) 10%, transparent);
-    border-bottom: 1px solid color-mix(in srgb, var(--mutation-color) 30%, transparent);
-  }
-  .effective-body-content {
-    padding: 12px 24px 24px;
-    max-width: 72ch;
-    font-size: var(--fs-lg);
-    line-height: 1.65;
-    color: var(--text);
-  }
-  .effective-body-content :global(p) {
-    margin: 0 0 0.9em;
   }
 
   .title-label {

@@ -1,0 +1,412 @@
+"""Scene snapshots: capture · list · view · restore (ADR-0043, #401 slice 1).
+
+The pinning tests #395 asked to ship with the slice live here, alongside the
+parts of ADR-0043's own test surface that do not need the witness (that is slice
+3). They are pinning tests rather than coverage: each one names an invariant
+that as-implemented must not drift away from without a red build.
+
+**The gap is simulated by backdating the scene file's mtime, not by waiting.**
+That is the rule under test rather than a stand-in for it: the capture trigger
+reads mtime and nothing else, so `os.utime` is the only way to exercise it
+without a 30-minute test.
+"""
+
+from __future__ import annotations
+
+import os
+import time
+import unittest
+import zipfile
+from datetime import UTC, datetime
+from pathlib import Path
+from tempfile import TemporaryDirectory
+
+from fastapi.testclient import TestClient
+
+from app.main import app
+from app.models import CreateStructureNodeRequest, SaveSceneRequest
+from app.runtime import service as svc
+from app.services.migrations import (
+    CURRENT_VERSION,
+    migrate_project,
+    write_project_version,
+)
+from app.services.project.scene_snapshots import AUTOMATIC_KEEP, SESSION_GAP_MINUTES
+
+
+class SnapshotTestCase(unittest.TestCase):
+    def setUp(self) -> None:
+        self.temp_dir = TemporaryDirectory()
+        # `.resolve()` because Windows hands back the 8.3 short form and the
+        # layer walk canonicalises (#356).
+        self.root = Path(self.temp_dir.name).resolve() / "book"
+        svc.__init__()
+        svc.create_project(self.root, "Snapshot Tests")
+        self.client = TestClient(app)
+        response = self.client.post("/api/scenes", json={"title": "The Tide"})
+        self.assertEqual(response.status_code, 200, response.text)
+        self.scene_id = response.json()["id"]
+        self.scene_path = svc._path_for_node_id(self.scene_id, "scene")
+
+    def tearDown(self) -> None:
+        self.temp_dir.cleanup()
+
+    # ----- helpers ----------------------------------------------------------
+
+    def _save(self, body: str) -> None:
+        svc.save_scene(
+            self.scene_id,
+            SaveSceneRequest(title="The Tide", body=body, status="draft", entry_type="scene:scene"),
+        )
+        # The scene file may have been renamed by the save; re-resolve.
+        self.scene_path = svc._path_for_node_id(self.scene_id, "scene")
+
+    def _age_past_the_gap(self) -> None:
+        """Make the last save look like it happened before the session gap."""
+        stale = time.time() - (SESSION_GAP_MINUTES + 1) * 60
+        os.utime(self.scene_path, (stale, stale))
+
+    def _snapshots(self) -> list:
+        return svc.list_snapshots(self.scene_id).snapshots
+
+    def _store(self) -> Path:
+        return self.root / "snapshots" / self.scene_id
+
+    def _structure_node_for_scene(self) -> str:
+        """The manuscript node wrapping this scene. A fresh project puts scenes
+        at the root, so there is no chapter to reach for by index."""
+        for node in svc.read_structure().root.children:
+            if node.scene_id == self.scene_id:
+                return node.id
+        raise AssertionError("the scene is not in the manuscript")
+
+
+class CaptureTriggerTests(SnapshotTestCase):
+    """ADR-0043 Amendment 2: on a save, if the last save to this scene was more
+    than N minutes ago, capture the pre-save state first."""
+
+    def test_two_saves_inside_the_gap_produce_one_automatic_snapshot(self) -> None:
+        self._age_past_the_gap()
+        self._save("The tide went out.")
+        self._save("The tide went out further.")
+        records = self._snapshots()
+        self.assertEqual(len(records), 1)
+        self.assertEqual(records[0].retention, "thinned")
+
+    def test_two_saves_either_side_of_the_gap_produce_two(self) -> None:
+        self._age_past_the_gap()
+        self._save("The tide went out.")
+        self._age_past_the_gap()
+        self._save("The tide went out further.")
+        self.assertEqual(len(self._snapshots()), 2)
+
+    def test_a_save_within_the_gap_captures_nothing_at_all(self) -> None:
+        # The scene was created moments ago, so this is the same sitting.
+        self._save("Still the same sitting.")
+        self.assertEqual(self._snapshots(), [])
+        self.assertFalse(self._store().exists())
+
+    def test_the_captured_bytes_are_the_pre_save_state(self) -> None:
+        """The point is *what this looked like when I sat down* — so the capture
+        is taken from the file on disk before the new body is written."""
+        self._save("Morning words.")
+        before = self.scene_path.read_bytes()
+        self._age_past_the_gap()
+        self._save("Afternoon words.")
+
+        records = self._snapshots()
+        self.assertEqual(len(records), 1)
+        stored = (self._store() / f"{records[0].id}.md").read_bytes()
+        self.assertEqual(stored, before)
+        self.assertIn(b"Morning words.", stored)
+        self.assertNotIn(b"Afternoon words.", stored)
+
+
+class IdentityAndStoreTests(SnapshotTestCase):
+    def test_snapshot_id_is_never_the_sources_and_snapshot_of_round_trips(self) -> None:
+        record = svc.capture_snapshot(self.scene_id)
+        self.assertNotEqual(record.id, self.scene_id)
+        self.assertEqual(record.snapshot_of, self.scene_id)
+        self.assertEqual(svc.read_scene(record.snapshot_of).id, self.scene_id)
+
+    def test_the_stored_body_is_a_byte_for_byte_copy_including_front_matter(self) -> None:
+        self._save("The tide went out further than she had ever seen it.")
+        record = svc.capture_snapshot(self.scene_id)
+        stored = (self._store() / f"{record.id}.md").read_bytes()
+        self.assertEqual(stored, self.scene_path.read_bytes())
+        # It therefore still carries the *source* node's id. That is correct:
+        # it is a photograph of that file, not a second node.
+        self.assertIn(f"id: {self.scene_id}".encode(), stored)
+
+    def test_the_sidecar_records_the_schema_version_in_force_at_capture(self) -> None:
+        record = svc.capture_snapshot(self.scene_id)
+        self.assertEqual(record.schema_version, CURRENT_VERSION)
+
+    def test_an_explicit_capture_is_kept(self) -> None:
+        self.assertEqual(svc.capture_snapshot(self.scene_id).retention, "kept")
+
+
+class RetentionTests(SnapshotTestCase):
+    def test_seven_automatic_captures_keep_five_and_drop_the_oldest_two(self) -> None:
+        explicit_id: str | None = None
+        automatic_ids: list[str] = []
+        for i in range(7):
+            self._age_past_the_gap()
+            self._save(f"Sitting {i}.")
+            automatic_ids.append(self._snapshots()[-1].id)
+            if i == 1:
+                # Interleaved, and deliberately old: an explicit snapshot
+                # survives regardless of age.
+                explicit_id = svc.capture_snapshot(self.scene_id).id
+
+        records = self._snapshots()
+        thinned = [record.id for record in records if record.retention == "thinned"]
+        self.assertEqual(len(thinned), AUTOMATIC_KEEP)
+        self.assertEqual(thinned, automatic_ids[2:])
+        # The two dropped are the oldest, and they are gone from disk — not
+        # merely absent from the listing.
+        for dropped in automatic_ids[:2]:
+            self.assertNotIn(dropped, thinned)
+            self.assertFalse((self._store() / f"{dropped}.md").exists())
+            self.assertFalse((self._store() / f"{dropped}.yaml").exists())
+        self.assertIn(explicit_id, [record.id for record in records])
+
+    def test_explicit_snapshots_do_not_count_against_the_automatic_budget(self) -> None:
+        for _ in range(3):
+            svc.capture_snapshot(self.scene_id)
+        for i in range(AUTOMATIC_KEEP):
+            self._age_past_the_gap()
+            self._save(f"Sitting {i}.")
+        records = self._snapshots()
+        self.assertEqual(len([r for r in records if r.retention == "kept"]), 3)
+        self.assertEqual(len([r for r in records if r.retention == "thinned"]), AUTOMATIC_KEEP)
+
+    def test_snapshots_are_listed_oldest_first(self) -> None:
+        ids = [svc.capture_snapshot(self.scene_id).id for _ in range(3)]
+        self.assertEqual([record.id for record in self._snapshots()], ids)
+        stamps = [record.captured_at for record in self._snapshots()]
+        self.assertEqual(stamps, sorted(stamps))
+        # Parseable, and UTC — the strip positions notches by age.
+        self.assertLessEqual(datetime.fromisoformat(stamps[0]), datetime.now(UTC))
+
+
+class ViewTests(SnapshotTestCase):
+    def test_reading_a_snapshot_returns_its_body_and_leaves_the_scene_alone(self) -> None:
+        self._save("The tide went out.")
+        record = svc.capture_snapshot(self.scene_id)
+        self._save("The tide came back in.")
+
+        detail = svc.read_snapshot(self.scene_id, record.id)
+        self.assertEqual(detail.snapshot.id, record.id)
+        self.assertEqual(detail.title, "The Tide")
+        self.assertEqual(detail.body.strip(), "The tide went out.")
+        self.assertEqual(svc.read_scene(self.scene_id).body.strip(), "The tide came back in.")
+
+    def test_reading_an_unknown_snapshot_is_a_404(self) -> None:
+        response = self.client.get(f"/api/scenes/{self.scene_id}/snapshots/snap_nope")
+        self.assertEqual(response.status_code, 404, response.text)
+
+
+class RestoreTests(SnapshotTestCase):
+    def test_snapshot_change_nothing_restore_is_byte_identical(self) -> None:
+        self._save("The tide went out further than she had ever seen it.")
+        before = self.scene_path.read_bytes()
+        record = svc.capture_snapshot(self.scene_id)
+
+        svc.restore_snapshot(self.scene_id, record.id)
+        self.assertEqual(svc._path_for_node_id(self.scene_id, "scene").read_bytes(), before)
+
+    def test_restore_puts_the_snapshot_back_over_a_changed_scene(self) -> None:
+        self._save("The tide went out.")
+        record = svc.capture_snapshot(self.scene_id)
+        self._save("Something else entirely.")
+
+        restored = svc.restore_snapshot(self.scene_id, record.id)
+        self.assertEqual(restored.body.strip(), "The tide went out.")
+        self.assertEqual(svc.read_scene(self.scene_id).body.strip(), "The tide went out.")
+
+    def test_restore_captures_first_so_the_author_can_change_their_mind(self) -> None:
+        """Acceptance 5. Restore is reversible *because* it captures first —
+        which is what justifies there being no confirmation gate."""
+        self._save("The morning draft.")
+        morning = svc.capture_snapshot(self.scene_id).id
+        self._save("The afternoon rewrite.")
+
+        svc.restore_snapshot(self.scene_id, morning)
+        self.assertEqual(svc.read_scene(self.scene_id).body.strip(), "The morning draft.")
+
+        # The afternoon rewrite is on the strip, unasked for, and restoring it
+        # puts the author back where they were.
+        automatic = [record for record in self._snapshots() if record.retention == "thinned"]
+        self.assertEqual(len(automatic), 1)
+        svc.restore_snapshot(self.scene_id, automatic[-1].id)
+        self.assertEqual(svc.read_scene(self.scene_id).body.strip(), "The afternoon rewrite.")
+
+    def test_restores_own_capture_is_thinned_and_can_evict_the_oldest(self) -> None:
+        """Stated in ADR-0043 rather than defended against: restoring costs the
+        author their oldest automatic snapshot when five are already held."""
+        for i in range(AUTOMATIC_KEEP):
+            self._age_past_the_gap()
+            self._save(f"Sitting {i}.")
+        automatic = [record.id for record in self._snapshots() if record.retention == "thinned"]
+        self.assertEqual(len(automatic), AUTOMATIC_KEEP)
+        target = svc.capture_snapshot(self.scene_id).id
+
+        svc.restore_snapshot(self.scene_id, target)
+
+        remaining = [record.id for record in self._snapshots() if record.retention == "thinned"]
+        self.assertEqual(len(remaining), AUTOMATIC_KEEP)
+        self.assertNotIn(automatic[0], remaining)
+
+    def test_restoring_an_earlier_title_reaches_the_manuscript_tree(self) -> None:
+        record = svc.capture_snapshot(self.scene_id)
+        svc.save_scene(
+            self.scene_id,
+            SaveSceneRequest(title="A Different Title", body="x", status="draft", entry_type="scene:scene"),
+        )
+        node_id = self._structure_node_for_scene()
+        self.assertEqual(
+            [n.title for n in svc.read_structure().root.children if n.id == node_id],
+            ["A Different Title"],
+        )
+
+        svc.restore_snapshot(self.scene_id, record.id)
+
+        self.assertEqual(
+            [n.title for n in svc.read_structure().root.children if n.id == node_id],
+            ["The Tide"],
+        )
+
+
+class DeletionTests(SnapshotTestCase):
+    def _chapter_id(self) -> str:
+        for node in svc.read_structure().root.children:
+            if node.type == "scene:chapter":
+                return node.id
+        svc.create_structure_node(
+            CreateStructureNodeRequest(title="Chapter One", entry_type="scene:chapter")
+        )
+        return self._chapter_id()
+
+    def test_deleting_a_scene_leaves_no_residue_under_snapshots(self) -> None:
+        for _ in range(3):
+            svc.capture_snapshot(self.scene_id)
+        self.assertTrue(self._store().is_dir())
+
+        svc.delete_scene(self.scene_id)
+
+        self.assertFalse(self._store().exists())
+        self.assertEqual(list((self.root / "snapshots").rglob("*")), [])
+
+    def test_deleting_a_container_cascades_to_its_scenes_snapshots(self) -> None:
+        """The other delete path: `delete_structure_node` unlinks each
+        descendant scene itself rather than calling `delete_scene`, so the
+        cascade has to be on both or one of them leaves residue."""
+        svc.move_structure_node(self._structure_node_for_scene(), self._chapter_id(), 0)
+        svc.capture_snapshot(self.scene_id)
+        self.assertTrue(self._store().is_dir())
+
+        svc.delete_structure_node(self._chapter_id())
+
+        self.assertFalse(self._store().exists())
+        self.assertEqual(list((self.root / "snapshots").rglob("*")), [])
+
+
+class IndexAndMigrationTests(SnapshotTestCase):
+    def test_a_migration_run_leaves_every_stored_snapshot_byte_identical(self) -> None:
+        """Snapshots are immutable at rest: migration happens at restore, over
+        the one body, on the way out. Rewriting a witness destroys what makes it
+        a witness."""
+        ids = [svc.capture_snapshot(self.scene_id).id for _ in range(3)]
+        before = {path.name: path.read_bytes() for path in sorted(self._store().iterdir())}
+
+        write_project_version(self.root, 0)
+        applied = migrate_project(self.root)
+        self.assertTrue(applied)
+
+        after = {path.name: path.read_bytes() for path in sorted(self._store().iterdir())}
+        self.assertEqual(after, before)
+        self.assertEqual(len(ids) * 2, len(after))
+
+    def test_the_migration_backup_does_not_carry_the_snapshot_store(self) -> None:
+        """`SKIP_FROM_BACKUP` covers `snapshots/`, or the three retained backups
+        each carry a full copy of the project's history."""
+        svc.capture_snapshot(self.scene_id)
+        write_project_version(self.root, 0)
+        applied = migrate_project(self.root)
+        self.assertTrue(applied)
+        archives = sorted((self.root / ".migration-backups").glob("*.zip"))
+        self.assertTrue(archives)
+        with zipfile.ZipFile(archives[-1]) as archive:
+            names = archive.namelist()
+        self.assertFalse([name for name in names if name.startswith("snapshots/")], names)
+
+    def test_no_resolver_read_touches_the_snapshot_store(self) -> None:
+        """ADR-0043: the witness is never consulted by the resolver. There is no
+        witness yet (slice 3), so what is pinned here is the stronger and more
+        durable half — nothing on the resolution path opens the store at all."""
+        self._save("The tide went out.")
+        for _ in range(3):
+            svc.capture_snapshot(self.scene_id)
+
+        reads: list[Path] = []
+        real_read_text = Path.read_text
+        real_read_bytes = Path.read_bytes
+
+        def spy_text(self: Path, *args, **kwargs):  # type: ignore[no-untyped-def]
+            reads.append(self)
+            return real_read_text(self, *args, **kwargs)
+
+        def spy_bytes(self: Path, *args, **kwargs):  # type: ignore[no-untyped-def]
+            reads.append(self)
+            return real_read_bytes(self, *args, **kwargs)
+
+        Path.read_text = spy_text  # type: ignore[method-assign]
+        Path.read_bytes = spy_bytes  # type: ignore[method-assign]
+        try:
+            svc._build_node_index()
+            svc.effective_state("nobody", self.scene_id)
+            svc.read_scene(self.scene_id)
+        finally:
+            Path.read_text = real_read_text  # type: ignore[method-assign]
+            Path.read_bytes = real_read_bytes  # type: ignore[method-assign]
+
+        touched = [path for path in reads if "snapshots" in path.parts]
+        self.assertEqual(touched, [], touched)
+
+
+class RouteTests(SnapshotTestCase):
+    """The HTTP surface the strip drives: capture · list · view · restore."""
+
+    def test_capture_list_view_restore_over_http(self) -> None:
+        base = f"/api/scenes/{self.scene_id}/snapshots"
+        svc.save_scene(
+            self.scene_id,
+            SaveSceneRequest(title="The Tide", body="The tide went out.", status="draft", entry_type="scene:scene"),
+        )
+
+        captured = self.client.post(base)
+        self.assertEqual(captured.status_code, 200, captured.text)
+        snapshot_id = captured.json()["id"]
+        self.assertEqual(captured.json()["retention"], "kept")
+
+        listed = self.client.get(base)
+        self.assertEqual(listed.status_code, 200, listed.text)
+        self.assertEqual([item["id"] for item in listed.json()["snapshots"]], [snapshot_id])
+
+        svc.save_scene(
+            self.scene_id,
+            SaveSceneRequest(title="The Tide", body="Rewritten.", status="draft", entry_type="scene:scene"),
+        )
+        viewed = self.client.get(f"{base}/{snapshot_id}")
+        self.assertEqual(viewed.status_code, 200, viewed.text)
+        self.assertEqual(viewed.json()["body"].strip(), "The tide went out.")
+
+        restored = self.client.post(f"{base}/{snapshot_id}/restore")
+        self.assertEqual(restored.status_code, 200, restored.text)
+        self.assertEqual(restored.json()["body"].strip(), "The tide went out.")
+
+    def test_listing_a_scene_with_no_snapshots_is_an_empty_list(self) -> None:
+        response = self.client.get(f"/api/scenes/{self.scene_id}/snapshots")
+        self.assertEqual(response.status_code, 200, response.text)
+        self.assertEqual(response.json(), {"snapshots": []})

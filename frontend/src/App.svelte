@@ -855,6 +855,13 @@
         onNavigate={(detail) => navigateToBacklink(detail.id, detail.kind)}
         onOpenChat={(detail) => chatSessions.openChatFromPromptEntry(detail.entry, detail.inputs, detail.sceneId, detail.assistantId)}
         onViewSaveState={(state) => editorPanes.setViewSaveState(editorPane.id, state)}
+        onFlushScene={async () => {
+          // A capture photographs the file and a restore overwrites it, so both
+          // must run against a file that already holds the author's latest
+          // words — autosave is a 6-second idle debounce behind (#401).
+          if (editorPane.scene) await editorPanes.flushSceneIfDirty(editorPane.scene.id);
+        }}
+        onSceneRestored={(restored) => editorPanes.reconcileSceneFromServer(restored)}
       />
     {/if}
   {/snippet}

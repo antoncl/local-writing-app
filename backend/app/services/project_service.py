@@ -42,6 +42,7 @@ from app.services.project.project_node import ProjectNodeMixin
 from app.services.project.prompts import PromptEntriesMixin
 from app.services.project.references import ReferencesMixin
 from app.services.project.research import ResearchNotesMixin
+from app.services.project.scene_snapshots import SceneSnapshotsMixin
 from app.services.project.scene_todos import SceneTodoAnchorsMixin
 from app.services.project.schema import MetadataSchemaMixin
 from app.services.project.search import SearchMixin
@@ -71,6 +72,7 @@ class ProjectService(
     PromptEntriesMixin,
     ReferencesMixin,
     ResearchNotesMixin,
+    SceneSnapshotsMixin,
     SceneTodoAnchorsMixin,
     SearchMixin,
     TagsMixin,

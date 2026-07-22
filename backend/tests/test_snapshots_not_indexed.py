@@ -3,18 +3,20 @@
 The invariant: a snapshot store is *node-shaped* but is not an *indexed node*.
 A witness is evidence about the graph, not a participant in it.
 
-**This test exists before the store does, deliberately.** Today the invariant
-holds for free — the index walk enumerates `<layer>/<family folder>/*.md` from a
-fixed family list, so a store at the project root is never reached. That is a
-property of the current walk, not a decision anyone recorded in code, and the
-obvious future edit breaks it silently: someone reaches for a recursive glob to
-pick up nested files, and every snapshot's byte-copy joins the index carrying
-**its source scene's id**. That is an id collision, which makes
-`_path_for_node_id` non-deterministic and reference resolution ambiguous — the
-exact failure ADR-0043's identity section exists to prevent.
+**This test landed before the store did, deliberately** (#395, ahead of slice
+1), so slice 1 could not introduce a store that gets walked. The invariant holds
+for free — the index walk enumerates `<layer>/<family folder>/*.md` from a fixed
+family list, so a store at the project root is never reached. That is a property
+of the current walk, not a decision anyone recorded in code, and the obvious
+future edit breaks it silently: someone reaches for a recursive glob to pick up
+nested files, and every snapshot's byte-copy joins the index carrying **its
+source scene's id**. That is an id collision, which makes `_path_for_node_id`
+non-deterministic and reference resolution ambiguous — the exact failure
+ADR-0043's identity section exists to prevent.
 
-So the fixture materialises a realistic store by hand and asserts on the whole
-index rather than on the walk's shape: nothing the index holds, and nothing the
+The store is now real, so the fixture captures through the shipped API (#401)
+rather than materialising the two files by hand, and asserts on the whole index
+rather than on the walk's shape: nothing the index holds, and nothing the
 staleness manifest fingerprints, may live under `snapshots/`.
 
 Two halves, because they fail differently:
@@ -57,6 +59,7 @@ import unittest
 from pathlib import Path
 from tempfile import TemporaryDirectory
 
+from app.models import Snapshot
 from app.services.project.node_index_snapshot import SNAPSHOT_RELATIVE_PATH
 from app.services.project_service import ProjectService
 
@@ -86,30 +89,22 @@ class SnapshotsAreNotIndexedTests(unittest.TestCase):
         )
         return path
 
-    def _capture(self, snapshot_id: str, *, retention: str = "thinned") -> Path:
-        """Materialise one snapshot the way ADR-0043 specifies it.
+    def _capture(self) -> Snapshot:
+        """One real snapshot, through the shipped capture (#401 slice 1).
 
-        The `.md` is a **byte-for-byte copy**, front matter included — so it
+        This used to materialise the two files by hand, because the store did
+        not exist yet. Now that it does, the fixture goes through the API — a
+        hand-built store would keep passing after the real one moved.
+
+        The `.md` is a **byte-for-byte copy**, front matter included, so it
         carries the source scene's id. That is what makes this a real probe
         rather than a decoy: a walk that reaches it does not merely gain a node,
         it gains a *second claimant to a live scene's id*.
+
+        Explicit rather than automatic, so nothing is thinned away underneath a
+        test that counts on six being there.
         """
-        folder = self.root / "snapshots" / SCENE_ID
-        folder.mkdir(parents=True, exist_ok=True)
-        body = folder / f"{snapshot_id}.md"
-        body.write_bytes(self.scene_path.read_bytes())
-        sidecar = folder / f"{snapshot_id}.yaml"
-        self.service._write_yaml(
-            sidecar,
-            {
-                "id": snapshot_id,
-                "snapshot_of": SCENE_ID,
-                "captured_at": "2026-07-22T09:00:00Z",
-                "retention": retention,
-                "schema_version": 1,
-            },
-        )
-        return body
+        return self.service.capture_snapshot(SCENE_ID)
 
     def _cold_index(self):
         """Rebuild from disk, defeating the cached index (see the module note)."""
@@ -122,8 +117,8 @@ class SnapshotsAreNotIndexedTests(unittest.TestCase):
         return [str(path) for path in paths if store in Path(path).resolve().parents]
 
     def test_a_cold_rebuild_ignores_the_snapshot_store(self) -> None:
-        for number in range(6):
-            self._capture(f"snap-{number}")
+        for _ in range(6):
+            self._capture()
 
         index = self._cold_index()
 
@@ -135,7 +130,7 @@ class SnapshotsAreNotIndexedTests(unittest.TestCase):
         )
 
     def test_a_snapshot_does_not_become_a_second_claimant_to_the_scene_id(self) -> None:
-        self._capture("snap-0")
+        self._capture()
 
         index = self._cold_index()
 
@@ -150,8 +145,8 @@ class SnapshotsAreNotIndexedTests(unittest.TestCase):
     def test_the_index_has_the_same_members_before_and_after_six_captures(self) -> None:
         before = sorted(self._cold_index().by_id)
 
-        for number in range(6):
-            self._capture(f"snap-{number}")
+        for _ in range(6):
+            self._capture()
 
         self.assertEqual(sorted(self._cold_index().by_id), before)
 
@@ -159,7 +154,7 @@ class SnapshotsAreNotIndexedTests(unittest.TestCase):
         layers = self.service.collect_layers(self.root, include_machine=True)
         before = self.service._build_index_manifest(layers)
 
-        self._capture("snap-0")
+        self._capture()
 
         after = self.service._build_index_manifest(layers)
         self.assertEqual(
@@ -174,12 +169,12 @@ class SnapshotsAreNotIndexedTests(unittest.TestCase):
         )
 
     def test_a_snapshot_contributes_no_reference_edges(self) -> None:
-        self._capture("snap-0")
+        snapshot = self._capture()
 
         index = self._cold_index()
 
         sources = {src for _layer, src in index.edges_by_layer_src}
-        self.assertNotIn("snap-0", sources)
+        self.assertNotIn(snapshot.id, sources)
 
     def test_the_walk_never_reads_a_file_in_the_store(self) -> None:
         """The assertion that survives the duplicate mask (see the module note).
@@ -189,7 +184,7 @@ class SnapshotsAreNotIndexedTests(unittest.TestCase):
         is visible in `errors` even when it is invisible in `candidates` — and
         an error mentioning it means the walk opened and parsed it.
         """
-        self._capture("snap-0")
+        self._capture()
 
         index = self._cold_index()
 

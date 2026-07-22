@@ -212,6 +212,10 @@ class ManuscriptMixin:
             except ProjectServiceError:
                 pass
             self._remove_scene_todos(scene_id)
+            # A scene and its snapshots are one unit of deletion (ADR-0043).
+            # Outside the try: the store is keyed by id, so it must go even when
+            # the scene file itself could not be resolved.
+            self.delete_scene_snapshots(root, scene_id)
 
         TreeStructureService.remove_node_by_id(structure.root, node_id)
         self._manuscript_tree(root).write(structure)
@@ -371,6 +375,10 @@ class ManuscriptMixin:
         )
 
     def save_scene(self, scene_id: str, request: SaveSceneRequest) -> Scene:
+        # Captured once and passed down: a capture is a write, so this unit of
+        # work resolves its scope here rather than letting the snapshot store
+        # read ambient state (ADR-0045).
+        root = self._require_project()
         path = self._path_for_node_id(scene_id, "scene")
         front_matter = self._read_front_matter_only(path, strict=True)
         node_id = self._node_id_for_path(path, front_matter)
@@ -408,6 +416,10 @@ class ManuscriptMixin:
         # scene save (that's user-hostile). The authoring UI's typed widgets keep
         # values well-formed at the source; project validation surfaces any stray
         # ones as advisory warnings (see validate_project).
+        # Before the write, because the point of the automatic capture is what
+        # this looked like when the author sat down — the pre-save bytes, not
+        # the post-save ones (ADR-0043 Amendment 2).
+        self.maybe_capture_session_boundary(root, node_id, path)
         self._write_scene_file(path, scene)
         path = self._maybe_rename_node_file(path, request.title)
         self._update_scene_title_in_structure(node_id, request.title)
@@ -422,6 +434,9 @@ class ManuscriptMixin:
         node_id = self._node_id_for_path(path)
         if path.exists():
             path.unlink()
+        # A scene and its snapshots are one unit of deletion (ADR-0043): a
+        # partial delete leaves exactly the unreachable residue that ADR rejects.
+        self.delete_scene_snapshots(root, node_id)
         structure = self._read_structure(root)
         scene_node = TreeStructureService.find_by_leaf_ref(structure, node_id)
         if scene_node is not None:

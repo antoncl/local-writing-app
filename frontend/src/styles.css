@@ -131,6 +131,35 @@
      from a component-local into a shared role (#125). No dark override — the
      violet already shipped identically in both themes. */
   --mutation-color: #7c5cbf;
+  /* Temporal provenance on the snapshot axis (#401, ADR-0044 §H). Warm = in
+     the scene NOW, cool = in the SNAPSHOT — the past reading cooler is an
+     intuition most people already have, and it puts the two on an axis rather
+     than making them arbitrary. Red/green is excluded on both accessibility
+     and semantics: this is before and after, not bad and good. Every other hue
+     was taken — teal is the accent, violet the mutation axis, amber --warn,
+     brick --danger (destructive, and a diff is not an error).
+
+     ONE hue axis, warm ~20° and cool ~205°, with the CHROMA HALVED FOR LIGHT
+     (~15/10 here against ~26/25 in dark). The two themes were picked
+     independently and turned out to be the same hues at different chroma,
+     which is the finding worth keeping: a tint on white sits at peak
+     luminance, where colour discrimination is best, so it shouts; on a dark
+     ground discrimination falls away and the identical tint barely registers.
+     A palette that is merely inverted will be wrong in one of the two.
+
+     Two constraints hold. Equal chroma across the pair within a theme — if one
+     tint is more saturated it reads as MORE IMPORTANT, and the pair stops
+     meaning then-vs-now. And hue is never the only channel: roughly 1 in 12
+     men has a colour-vision deficiency and warm-vs-cool is the axis most
+     affected, so each tint carries a darker `-edge` rule beneath it and the
+     pair must stay apart in greyscale. That bites hardest here, in light,
+     whose chroma is already halved. */
+  --diff-now: #7d6353;
+  --diff-now-soft: #f2ebe3;
+  --diff-now-edge: #cfbdaa;
+  --diff-was: #566b7a;
+  --diff-was-soft: #e7edf1;
+  --diff-was-edge: #b1c2ce;
   --danger: #a64a4a;
   --danger-soft: #fbeeee;
   --danger-border: #e2c4c2;
@@ -218,6 +247,14 @@
   --k-lore-text: #b6b8e4;
   --k-system: #9a9579; /* olive, lifted for dark */
   --k-assistant: #8f99b5; /* slate, lifted for dark */
+  /* Same two hues as light, at roughly double the chroma — see the light
+     block for why that is the finding rather than an inconsistency. */
+  --diff-now: #d9a184;
+  --diff-now-soft: #3b2a21;
+  --diff-now-edge: #6d4a36;
+  --diff-was: #8fb6d2;
+  --diff-was-soft: #1f2d38;
+  --diff-was-edge: #3d5a70;
   --danger: #d97070;
   --danger-soft: #3a2424;
   --danger-border: #5a3838;

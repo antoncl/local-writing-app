@@ -62,6 +62,30 @@ export type Scene = {
   source_layer_label?: string;
 };
 
+/** One scene snapshot's sidecar record (ADR-0043). `id` is the snapshot's own,
+ *  never the source scene's — the stored `.md` is a byte copy that still
+ *  carries the source id, and conflating the two is an index collision. */
+export type Snapshot = {
+  id: string;
+  snapshot_of: string;
+  /** ISO 8601, UTC. The strip positions notches by age from this. */
+  captured_at: string;
+  /** `thinned` = automatic, subject to keep-five; `kept` = explicit, never thinned. */
+  retention: "thinned" | "kept";
+  schema_version: number;
+};
+
+export type SnapshotList = {
+  /** Oldest first — the order the strip lays out left to right. */
+  snapshots: Snapshot[];
+};
+
+export type SnapshotDetail = {
+  snapshot: Snapshot;
+  title: string;
+  body: string;
+};
+
 export type LoreEntrySummary = {
   id: string;
   title: string;

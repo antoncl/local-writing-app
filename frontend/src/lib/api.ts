@@ -56,6 +56,9 @@ import type {
   ResearchNote,
   Scene,
   SearchHit,
+  Snapshot,
+  SnapshotDetail,
+  SnapshotList,
   StructureDocument,
   StructureNodeDeletePreview,
   TodoDocument,
@@ -557,6 +560,30 @@ export const api = {
     return request<StructureDocument>(`/scenes/${sceneId}`, {
       method: "DELETE",
     });
+  },
+  // ---- scene snapshots (ADR-0043 / ADR-0044, #401) -------------------------
+  listSnapshots(sceneId: string) {
+    return request<SnapshotList>(`/scenes/${encodeURIComponent(sceneId)}/snapshots`);
+  },
+  /** The camera: an explicit, never-thinned capture. */
+  captureSnapshot(sceneId: string) {
+    return request<Snapshot>(`/scenes/${encodeURIComponent(sceneId)}/snapshots`, {
+      method: "POST",
+    });
+  },
+  readSnapshot(sceneId: string, snapshotId: string) {
+    return request<SnapshotDetail>(
+      `/scenes/${encodeURIComponent(sceneId)}/snapshots/${encodeURIComponent(snapshotId)}`,
+    );
+  },
+  /** Captures the current state and restores, in ONE call. Never do this as a
+   *  client-side capture-then-restore: the pair can half-fail into a snapshot
+   *  nobody asked for and an author who cannot tell whether it worked (#395). */
+  restoreSnapshot(sceneId: string, snapshotId: string) {
+    return request<Scene>(
+      `/scenes/${encodeURIComponent(sceneId)}/snapshots/${encodeURIComponent(snapshotId)}/restore`,
+      { method: "POST" },
+    );
   },
   listLoreEntries() {
     return request<LoreEntryList>("/lore");

@@ -117,6 +117,27 @@ MEMORY_SLUG_RE = re.compile(
 # same way out.
 IGNORE_MARKER = "<!-- citation-rot: ignore -->"
 
+# `> **Verified against `v0.6.5` (2026-07-22).**` — the provenance header this
+# repo already puts on issues and ADRs (#412). A citation pinned to a ref
+# **cannot rot**: it was either right at that ref or never right. So a pinned
+# document is checked against *that* ref, and a pinned citation that still holds
+# there is silent. Verifying it against HEAD instead would report drift its
+# author can never resolve, which is the fastest way to teach people to stop
+# pinning.
+PROVENANCE_RE = re.compile(
+    # A ref is a sha or a version tag — deliberately not a branch name,
+    # which moves, and not a free-form placeholder, so documentation *about*
+    # the convention (`Verified against `<tag>``) does not pin itself.
+    r"(?:verified|written)\s+against\s+`([0-9a-f]{7,40}|v\d[\w.\-]*)`",
+    re.IGNORECASE,
+)
+
+
+def provenance_ref(text: str) -> str | None:
+    """The git ref a document pins its citations to, if it declares one."""
+    match = PROVENANCE_RE.search(text)
+    return match.group(1) if match else None
+
 BACKTICK_RE = re.compile(r"`([^`\n]+)`")
 CAMEL_RE = re.compile(r"^[A-Za-z]+[A-Z]")
 
@@ -125,10 +146,11 @@ OUT_OF_RANGE = "OUT OF RANGE"
 MOVED = "MOVED"
 RENAMED_OR_DELETED = "RENAMED OR DELETED"
 AMBIGUOUS = "AMBIGUOUS"
+UNVERIFIABLE = "UNVERIFIABLE"
 OK = "OK"
 
 # Ordered worst-first, which is also the order they are reported in.
-SEVERITY = [GONE, OUT_OF_RANGE, MOVED, RENAMED_OR_DELETED, AMBIGUOUS]
+SEVERITY = [GONE, OUT_OF_RANGE, MOVED, RENAMED_OR_DELETED, AMBIGUOUS, UNVERIFIABLE]
 
 
 # --------------------------------------------------------------------------
@@ -326,9 +348,30 @@ def extract_mentions(text: str, cited: set[str]) -> list[Mention]:
 
 @dataclass(frozen=True)
 class Definition:
+    name: str
     path: str
     line: int
     end_line: int
+
+
+def parse_definitions(rel: str, text: str) -> list[Definition]:
+    """`def`/`class` spans in one Python file. Non-Python yields nothing.
+
+    A file that will not parse simply contributes no anchors — that degrades a
+    citation to range-only, it does not fail the run.
+    """
+    if not rel.endswith(".py"):
+        return []
+    try:
+        tree = ast.parse(text)
+    except (SyntaxError, ValueError):
+        return []
+    found = []
+    for node in ast.walk(tree):
+        if isinstance(node, ast.FunctionDef | ast.AsyncFunctionDef | ast.ClassDef):
+            end = getattr(node, "end_lineno", None) or node.lineno
+            found.append(Definition(name=node.name, path=rel, line=node.lineno, end_line=end))
+    return found
 
 
 class RepoIndex:
@@ -345,6 +388,7 @@ class RepoIndex:
         for rel in self.files:
             self._by_suffix.setdefault(rel.rsplit("/", 1)[-1], []).append(rel)
         self._defs: dict[str, list[Definition]] | None = None
+        self._defs_by_file: dict[str, list[Definition]] = {}
         self._text: dict[str, str] = {}
         self._searchable: dict[str, str] = {}
 
@@ -391,33 +435,29 @@ class RepoIndex:
         return candidates
 
     def definitions_in(self, rel: str) -> list[Definition]:
-        return [d for defs in self.definitions().values() for d in defs if d.path == rel]
+        """Every `def`/`class` in one file, with its true span.
 
-    def definitions(self) -> dict[str, list[Definition]]:
+        The span matters — it is what lets a citation into a function *body*
+        anchor to that function — so this parses, where `definitions_of` below
+        only has to locate.
+        """
+        if rel not in self._defs_by_file:
+            self._defs_by_file[rel] = parse_definitions(rel, self.read(rel))
+        return self._defs_by_file[rel]
+
+    def definitions_of(self, symbol: str) -> list[Definition]:
+        """Everywhere that name is defined — for saying where a symbol went."""
         if self._defs is None:
             self._defs = self._build_definitions()
-        return self._defs
+        return self._defs.get(symbol, [])
 
     def _build_definitions(self) -> dict[str, list[Definition]]:
         table: dict[str, list[Definition]] = {}
         for rel in self.files:
             if not rel.endswith(".py"):
                 continue
-            try:
-                tree = ast.parse(self.read(rel))
-            except (SyntaxError, ValueError):
-                # A file we cannot parse simply contributes no anchors; that
-                # degrades a citation to range-only, it does not fail the run.
-                continue
-            for node in ast.walk(tree):
-                if not isinstance(
-                    node, ast.FunctionDef | ast.AsyncFunctionDef | ast.ClassDef
-                ):
-                    continue
-                end = getattr(node, "end_lineno", None) or node.lineno
-                table.setdefault(node.name, []).append(
-                    Definition(path=rel, line=node.lineno, end_line=end)
-                )
+            for definition in self.definitions_in(rel):
+                table.setdefault(definition.name, []).append(definition)
         return table
 
     def searchable_text(self, rel: str) -> str:
@@ -465,12 +505,90 @@ class RepoIndex:
         return False
 
 
+def _git_text(root: Path, *args: str) -> str | None:
+    """`git` output, or None if the command failed."""
+    proc = subprocess.run(
+        ["git", "-C", str(root), *args],
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+        errors="replace",
+    )
+    return proc.stdout if proc.returncode == 0 else None
+
+
+class RefIndex(RepoIndex):
+    """The repo as it stood at one git ref, for documents that pin themselves.
+
+    Deliberately lazy. Building the whole `def`/`class` table at a ref would
+    mean reading every tracked Python blob; instead a single `git grep` answers
+    "where else is this defined" and only the cited file is ever parsed. A
+    pinned document usually makes a handful of claims, so this stays cheap even
+    when several documents pin several different refs.
+    """
+
+    def __init__(self, root: Path, ref: str, files: list[str]) -> None:
+        super().__init__(root, files)
+        self.ref = ref
+
+    @classmethod
+    def at(cls, root: Path, ref: str) -> RefIndex | None:
+        """None when the ref is not in this checkout.
+
+        Two ways that happens, and both matter: a shallow CI clone, and a sha
+        from a topic branch that was squashed away at merge. The second is the
+        argument for pinning to a **tag**.
+        """
+        if _git_text(root, "rev-parse", "--verify", "--quiet", f"{ref}^{{commit}}") is None:
+            return None
+        listing = _git_text(root, "ls-tree", "-r", "--name-only", ref)
+        if listing is None:
+            return None
+        return cls(root, ref, [line for line in listing.splitlines() if line])
+
+    def read(self, rel: str) -> str:
+        if rel not in self._text:
+            self._text[rel] = _git_text(self.root, "show", f"{self.ref}:{rel}") or ""
+        return self._text[rel]
+
+    def definitions_of(self, symbol: str) -> list[Definition]:
+        pattern = r"^[ 	]*(async +def|def|class) +" + re.escape(symbol) + r"\b"
+        out = _git_text(self.root, "grep", "-nE", pattern, self.ref, "--", "*.py")
+        if not out:
+            return []
+        found = []
+        for line in out.splitlines():
+            # `<ref>:<path>:<line>:<text>`
+            parts = line.split(":", 3)
+            if len(parts) < 3 or not parts[2].isdigit():
+                continue
+            number = int(parts[2])
+            found.append(Definition(name=symbol, path=parts[1], line=number, end_line=number))
+        return found
+
+    def mentions_anywhere(self, symbol: str) -> bool:
+        globs = [f"*{suffix}" for suffix in sorted(SEARCHABLE_SUFFIXES)]
+        out = _git_text(self.root, "grep", "-lw", "-F", symbol, self.ref, "--", *globs)
+        if not out:
+            return False
+        # `git grep` sees docstrings and comments; `searchable_text` does not,
+        # and that distinction is the whole point of #397's own near-miss. So
+        # the grep only narrows the candidates — the verdict is still taken on
+        # the prose-stripped text.
+        pattern = re.compile(r"\b" + re.escape(symbol) + r"\b")
+        for line in out.splitlines():
+            rel = line.split(":", 1)[-1]
+            if pattern.search(self.searchable_text(rel)):
+                return True
+        return False
+
+
 # --------------------------------------------------------------------------
 # Checking
 # --------------------------------------------------------------------------
 
 
-def _anchors(cite: Citation, defs: list[Definition], rel: str, index: RepoIndex) -> bool:
+def _anchors(cite: Citation, mine: list[Definition], rel: str, index: RepoIndex) -> bool:
     """Does one of these definitions actually cover the cited lines?
 
     Overlap is the strong answer. The slack below it is for a citation pointing
@@ -478,7 +596,6 @@ def _anchors(cite: Citation, defs: list[Definition], rel: str, index: RepoIndex)
     line is not already inside some *other* definition, which is precisely the
     shape-3 case and must not be forgiven.
     """
-    mine = [d for d in defs if d.path == rel]
     if any(cite.start <= d.end_line and cite.end >= d.line for d in mine):
         return True
     if _inside_another_definition(cite, rel, index, {d.line for d in mine}):
@@ -535,29 +652,26 @@ def _check_against(cite: Citation, rel: str, index: RepoIndex, source: Source) -
         # TypeScript parser; the two cheap shapes are still caught.
         return Finding(OK, source, "in range", cite, resolved=rel)
 
-    defs = index.definitions().get(cite.symbol, [])
-    if not defs:
-        if index.mentions_anywhere(cite.symbol):
-            # Not a def/class — a variable, a constant, a string. Nothing to
-            # anchor to, so we do not pretend to a verdict.
-            return Finding(
-                OK, source, f"in range (`{cite.symbol}` is not a def/class)", cite, resolved=rel
-            )
-        return Finding(
-            RENAMED_OR_DELETED,
-            source,
-            f"`{cite.symbol}` appears nowhere in the repo — the sentence around "
-            "the citation is probably wrong too, not just the number",
-            cite,
-            resolved=rel,
-        )
-
-    if _anchors(cite, defs, rel, index):
+    mine = [d for d in index.definitions_in(rel) if d.name == cite.symbol]
+    if _anchors(cite, mine, rel, index):
         return Finding(OK, source, f"`{cite.symbol}` is there", cite, resolved=rel)
+
+    elsewhere = index.definitions_of(cite.symbol)
+    if elsewhere:
+        return Finding(
+            MOVED, source, f"`{cite.symbol}` is now at {_describe(elsewhere)}", cite, resolved=rel
+        )
+    if index.mentions_anywhere(cite.symbol):
+        # Not a def/class — a variable, a constant, a string. Nothing to anchor
+        # to, so we do not pretend to a verdict.
+        return Finding(
+            OK, source, f"in range (`{cite.symbol}` is not a def/class)", cite, resolved=rel
+        )
     return Finding(
-        MOVED,
+        RENAMED_OR_DELETED,
         source,
-        f"`{cite.symbol}` is now at {_describe(defs)}",
+        f"`{cite.symbol}` appears nowhere in the repo — the sentence around "
+        "the citation is probably wrong too, not just the number",
         cite,
         resolved=rel,
     )
@@ -656,6 +770,7 @@ class Report:
     sources_checked: int = 0
     citations_checked: int = 0
     warnings: list[str] = field(default_factory=list)
+    pinned: list[tuple[str, str]] = field(default_factory=list)
 
     @property
     def rotted(self) -> list[Finding]:
@@ -701,6 +816,7 @@ def render_report(
     for warning in report.warnings:
         lines.append(f"> ⚠ {warning}")
     lines.append("")
+    lines += _pinned_footer(report)
     if not rotted:
         lines.append("No rot found.")
         return "\n".join(lines) + "\n"
@@ -727,6 +843,24 @@ def render_report(
         lines.append("")
         lines += _render_group(bare)
     return "\n".join(lines) + "\n"
+
+
+def _pinned_footer(report: Report) -> list[str]:
+    """One line for the pinned documents — honest, and not a weekly nag.
+
+    A pinned citation that still holds at its ref says nothing at all: that is
+    the point of pinning. But silence about *which* documents describe an older
+    tree would be its own small lie to a reader wondering why an ADR's line
+    numbers do not match HEAD.
+    """
+    if not report.pinned:
+        return []
+    refs = ", ".join(sorted({ref for _, ref in report.pinned}))
+    return [
+        f"{len(report.pinned)} document(s) pin their citations to an earlier ref "
+        f"({refs}) and were verified there.",
+        "",
+    ]
 
 
 def _render_group(findings: list[Finding]) -> list[str]:
@@ -770,6 +904,25 @@ def collect_sources(
     return sources, warnings
 
 
+class IndexSet:
+    """HEAD, plus one index per ref that some document pins itself to.
+
+    Cached per ref: several documents pinned to the same release share one.
+    """
+
+    def __init__(self, head: RepoIndex) -> None:
+        self.head = head
+        self._by_ref: dict[str, RepoIndex | None] = {}
+
+    def for_source(self, source: Source) -> tuple[RepoIndex | None, str | None]:
+        ref = provenance_ref(source.text)
+        if ref is None:
+            return self.head, None
+        if ref not in self._by_ref:
+            self._by_ref[ref] = RefIndex.at(self.head.root, ref)
+        return self._by_ref[ref], ref
+
+
 def run(args: argparse.Namespace) -> Report:
     index = RepoIndex.from_git(Path(args.repo))
     sources, warnings = collect_sources(args, index)
@@ -777,8 +930,26 @@ def run(args: argparse.Namespace) -> Report:
     # header describe what was actually read.
     sources = [source for source in sources if IGNORE_MARKER not in source.text]
     report = Report(sources_checked=len(sources), warnings=warnings)
+    indexes = IndexSet(index)
     for source in sources:
-        findings = check_source(source, index, mentions=not args.no_mentions)
+        pinned, ref = indexes.for_source(source)
+        if ref and pinned is None:
+            report.findings.append(
+                Finding(
+                    UNVERIFIABLE,
+                    source,
+                    f"pinned to `{ref}`, which is not a ref in this checkout — a shallow "
+                    "clone, or a sha squashed away at merge (pin to a tag instead)",
+                )
+            )
+            continue
+        findings = check_source(source, pinned, mentions=not args.no_mentions)
+        if ref:
+            report.pinned.append((source.label, ref))
+            for finding in findings:
+                # Say which tree the verdict was taken against, or a reader
+                # will check the line against HEAD and find something else.
+                finding.detail += f" (at `{ref}`)"
         report.citations_checked += sum(1 for f in findings if f.citation)
         report.findings += findings
     if args.changed_files:

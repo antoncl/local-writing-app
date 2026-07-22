@@ -331,6 +331,24 @@ class Definition:
     end_line: int
 
 
+def strip_relative_prefix(path: str) -> str:
+    """Drop leading `./` and `../` **segments** from a cited path.
+
+    Not `lstrip("./")`, which was the bug (#421): that takes a character *set*,
+    so it also ate the dot off a dot-directory and made every citation into
+    `.github/…` or `.claude/…` report a false GONE — the worst output this tool
+    has, because "this file does not exist" is the finding a reader acts on.
+
+    Not `removeprefix("./")` either, which is the obvious fix and a regression:
+    citations are written relative to the document as often as to the repo root
+    (`../../backend/app/services/ai/helpers.py:587` is a real one), and the old
+    `lstrip` happened to strip those too. Both forms have to keep working.
+    """
+    while path.startswith(("./", "../")):
+        path = path[path.index("/") + 1 :]
+    return path
+
+
 class RepoIndex:
     """Tracked files, their lengths, and the Python `def`/`class` table.
 
@@ -379,7 +397,7 @@ class RepoIndex:
         Citations are usually written bare (`references.py:373`), so a basename
         match is the common case; a partial path narrows it.
         """
-        cited = cited.lstrip("./")
+        cited = strip_relative_prefix(cited)
         exact = [rel for rel in self.files if rel == cited]
         if exact:
             return exact
@@ -674,13 +692,13 @@ def filter_to_changed(findings: list[Finding], changed: list[str]) -> list[Findi
     A PR must not be told about rot it did not create — that is how an
     advisory check becomes noise people learn to skip.
     """
-    wanted = {c.replace("\\", "/").lstrip("./") for c in changed}
+    wanted = {strip_relative_prefix(c.replace("\\", "/")) for c in changed}
     kept = []
     for finding in findings:
         path = _relevant_path(finding)
         if path is None:
             continue
-        path = path.replace("\\", "/").lstrip("./")
+        path = strip_relative_prefix(path.replace("\\", "/"))
         if any(w == path or w.endswith("/" + path) or path.endswith("/" + w) for w in wanted):
             kept.append(finding)
     return kept

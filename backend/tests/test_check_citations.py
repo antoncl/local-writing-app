@@ -325,3 +325,58 @@ def _boom():
 def test_clean_report_says_so(index):
     markdown = cc.render_report(cc.Report(), title="Citation rot")
     assert "No rot found." in markdown
+
+
+# --------------------------------------------------------------------------
+# Dot-directories and relative citations (#421)
+# --------------------------------------------------------------------------
+
+
+@pytest.fixture
+def dotted_index(tmp_path: Path):
+    files = [".github/workflows/gates.yml", "backend/app/services/ai/helpers.py", "frontend/src/api.ts"]
+    for rel in files:
+        path = tmp_path / rel
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text("x = 1\n" * 20, encoding="utf-8")
+    return cc.RepoIndex(tmp_path, files)
+
+
+def test_a_citation_into_a_dot_directory_resolves(dotted_index):
+    """`lstrip("./")` is a character set, so it ate the leading dot.
+
+    CLAUDE.md cites `.github/workflows/gates.yml` and `.claude/hooks/...`, and
+    both were reported GONE — a live file accused of not existing, which is the
+    finding a reader is most likely to act on.
+    """
+    assert dotted_index.resolve(".github/workflows/gates.yml") == [".github/workflows/gates.yml"]
+    finding = cc.check_source(
+        cc.Source(label="CLAUDE.md", url="", text="See `.github/workflows/gates.yml:3`."),
+        dotted_index,
+        mentions=False,
+    )[0]
+    assert finding.status == cc.OK
+
+
+def test_a_document_relative_citation_still_resolves(dotted_index):
+    """The regression `removeprefix("./")` alone would cause.
+
+    `frontend/benchmarks/results.md` really does cite
+    `../../backend/app/services/ai/helpers.py:587`, and the old lstrip stripped
+    those segments as a side effect of the bug being fixed here.
+    """
+    assert dotted_index.resolve("../../backend/app/services/ai/helpers.py") == [
+        "backend/app/services/ai/helpers.py"
+    ]
+    assert dotted_index.resolve("./frontend/src/api.ts") == ["frontend/src/api.ts"]
+
+
+def test_pr_mode_matches_a_dot_directory_path(dotted_index):
+    """The same lstrip sat on both sides of filter_to_changed's comparison."""
+    findings = cc.check_source(
+        cc.Source(label="CLAUDE.md", url="", text="See `.github/workflows/gates.yml:900`."),
+        dotted_index,
+        mentions=False,
+    )
+    assert [f.status for f in findings] == [cc.OUT_OF_RANGE]
+    assert cc.filter_to_changed(findings, [".github/workflows/gates.yml"]) == findings

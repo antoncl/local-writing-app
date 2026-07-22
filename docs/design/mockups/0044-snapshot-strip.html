@@ -1,0 +1,1108 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<!--
+  ADR-0044 — design mockup for the scene-snapshot strip and the flip diff.
+
+  Self-contained: no build step, no dependencies, no network. Open it in a
+  browser. Every value is FIXTURE data; the diff runs are hand-authored, so
+  this demonstrates the intended rendering, not that a diff algorithm produces
+  those groupings.
+
+  The design tokens below are COPIES of frontend/src/styles.css taken while
+  this was drafted. They will drift, and that is fine — this file is a record
+  of a design conversation, not a component. Do not import from it.
+
+  Theme: follows the OS by default; force with data-theme="dark" | "light" on
+  <html>.
+-->
+<style>html{color-scheme:light dark}*{box-sizing:border-box}</style>
+</head>
+<body>
+<title>Scene snapshots — strip &amp; diff mockup</title>
+
+<div class="sheet">
+
+  <header class="mock-head">
+    <div>
+      <p class="eyebrow">ADR-0043 · surface pass</p>
+      <h1>Scene snapshots — the strip and the diff</h1>
+      <p class="lede">A working mockup on fixture data. The pane below uses the app's real tokens
+        (<code>styles.css</code>, ADR-0030) — surfaces, type scale, Georgia for prose. The two diff
+        colours are <em>candidates</em>, the one thing here not yet in the token layer.</p>
+    </div>
+  </header>
+
+  <!-- ───────────────────────── palette bench ───────────────────────── -->
+  <section class="bench" aria-label="Palette comparison">
+    <div class="bench-row">
+      <span class="bench-label">Palette</span>
+      <div class="pal-picker" id="pal-picker" role="group" aria-label="Candidate palettes"></div>
+      <label class="bench-check">
+        <input type="checkbox" id="desat"> strip the hue
+      </label>
+    </div>
+    <p class="bench-note" id="pal-note"></p>
+  </section>
+
+  <!-- ───────────────────────── the editor pane ───────────────────────── -->
+  <section class="pane" aria-label="Scene editor (mockup)">
+
+    <div class="pane-head">
+      <div class="pane-title">
+        <span class="kind-label">Scene</span>
+        <h2>The Salt Line</h2>
+      </div>
+      <div class="pane-head-right">
+        <span class="wordcount">412 words</span>
+      </div>
+    </div>
+
+    <div class="pane-body">
+
+      <!-- prose -->
+      <article class="prose" id="prose" aria-live="polite"></article>
+
+      <!-- metadata rail -->
+      <aside class="rail" aria-label="Scene fields">
+        <p class="rail-label">Fields</p>
+        <div class="field">
+          <span class="field-name">Status</span>
+          <span class="field-value" id="f-status"></span>
+        </div>
+        <div class="field">
+          <span class="field-name">POV</span>
+          <span class="field-value" id="f-pov"></span>
+        </div>
+        <div class="field">
+          <span class="field-name">Location</span>
+          <span class="field-value" id="f-loc"></span>
+        </div>
+        <p class="rail-note" id="rail-note"></p>
+      </aside>
+    </div>
+
+    <!-- the drift advisory — only while parked on a notch -->
+    <div class="drift" id="drift" hidden>
+      <span class="drift-mark" aria-hidden="true">⤳</span>
+      <div>
+        <strong>The world around this scene has changed since this snapshot.</strong>
+        <ul>
+          <li>Maren’s <em>rank</em> was <b>Captain</b> here, and is <b>Lieutenant</b> now — a
+            mutation opened in <b>Chapter 9</b> after this snapshot was taken.</li>
+        </ul>
+        <span class="drift-foot">Restoring brings back this scene’s words only. It does not change
+          Maren, Chapter 9, or anything outside this scene.</span>
+      </div>
+    </div>
+
+    <!-- ─────────────── the snapshot strip (foot-docked) ─────────────── -->
+    <div class="strip" role="group" aria-label="Snapshots">
+
+      <div class="strip-track" id="track"></div>
+
+      <!-- Fixed width, always. Anything here that grows or vanishes would
+           resize the track and slide every notch — a timeline that moves when
+           you use it is unreadable. -->
+      <div class="strip-right">
+        <button class="capture" id="capture" type="button"
+                title="Take a snapshot" aria-label="Take a snapshot">
+          <svg class="cam" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+               stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+            <path d="M4 7h3l1.6-2h6.8L17 7h3a1 1 0 0 1 1 1v10a1 1 0 0 1-1 1H4a1 1 0 0 1-1-1V8a1 1 0 0 1 1-1z"/>
+            <circle cx="12" cy="13" r="3.4"/>
+          </svg>
+        </button>
+      </div>
+    </div>
+
+    <!-- contextual actions: contents follow the position -->
+    <div class="actions" id="actions" hidden>
+      <span class="asof" id="asof">Live</span>
+      <div class="view-toggle" role="group" aria-label="Compare view">
+        <button type="button" data-view="both" class="on">Both</button>
+        <button type="button" data-view="now">Now</button>
+        <button type="button" data-view="was">Snapshot</button>
+      </div>
+      <span class="peek-hint">
+        <kbd>←</kbd><kbd>→</kbd> when · <kbd>A</kbd>ctive <kbd>S</kbd>napshot <kbd>B</kbd>oth ·
+        <kbd>Esc</kbd> live
+      </span>
+      <div class="spacer"></div>
+      <button type="button" class="act act-restore" id="act-restore">Restore</button>
+      <button type="button" class="act" id="act-pin">Pin</button>
+      <button type="button" class="act act-del" id="act-del">Delete</button>
+    </div>
+  </section>
+
+  <div class="legend">
+    <span><i class="sw sw-now"></i> in the scene <b>now</b></span>
+    <span><i class="sw sw-was"></i> in the <b>snapshot</b></span>
+    <span><i class="sw sw-same"></i> unchanged</span>
+    <span class="legend-note">— the tint stays in <em>every</em> compare state, not just Both</span>
+  </div>
+
+  <!-- ─────────────────── the two resting states ─────────────────── -->
+  <section class="notes">
+    <h3>At rest vs. engaged</h3>
+    <p class="colour-copy">The same strip in both states, static, so the difference in weight is
+      visible without leaving compare mode. Writing happens against the first one nearly all of the
+      time.</p>
+
+    <div class="states">
+      <figure>
+        <figcaption><b>Collapsed</b> — while writing</figcaption>
+        <div class="pane-mini">
+          <div class="mini-prose">…the boats lying over on their sides like something sleeping.</div>
+          <div class="strip compact" id="prev-compact">
+            <div class="strip-track"></div>
+            <div class="strip-right"><span class="capture mini-cam"></span></div>
+          </div>
+        </div>
+        <p class="state-note">27&nbsp;px. A ruled line under the prose — no labels, no controls,
+          transparent until the pointer nears it. The notches are still there and still clickable;
+          they just stop asking for attention.</p>
+      </figure>
+
+      <figure>
+        <figcaption><b>Engaged</b> — parked on a snapshot</figcaption>
+        <div class="pane-mini">
+          <div class="mini-prose">…the boats lying over on their sides like something sleeping.</div>
+          <div class="strip" id="prev-open">
+            <div class="strip-track"></div>
+            <div class="strip-right"><span class="capture mini-cam"></span></div>
+          </div>
+          <div class="mini-actions">
+            <span class="asof">Snapshot · 2 hours ago</span>
+            <span class="mini-seg"><b>Both</b><i>Now</i><i>Snapshot</i></span>
+          </div>
+        </div>
+        <p class="state-note">46&nbsp;px plus the actions row, and the scale ticks appear. Earned by
+          a deliberate act — you clicked a notch.</p>
+      </figure>
+    </div>
+  </section>
+
+  <!-- ───────────────────────── what to look at ───────────────────────── -->
+  <section class="notes">
+    <h3>What this is testing</h3>
+
+    <div class="note">
+      <h4>Position is the mode</h4>
+      <p>Parked at <b>Live</b> the only action is <em>Snapshot</em>. Click a notch and the strip
+        offers <em>Restore · Pin · Delete</em> plus the compare toggle. Same rule ADR-0013 uses on the
+        mutation scrubber — no context menus, nothing hidden behind a right-click. The strip's
+        <em>size</em> follows the same rule, not just its contents.</p>
+    </div>
+
+    <div class="note">
+      <h4>Notches, not beads</h4>
+      <p>The mutation scrubber uses round stops on a rail. These cut <em>into</em> the edge, so if
+        both axes ever appear on one card they read apart at a glance while the gesture stays
+        identical. Tall + filled = explicit (kept). Short + faint = automatic (thinned, last five).</p>
+    </div>
+
+    <div class="note">
+      <h4>Time runs left → right</h4>
+      <p>Oldest at the left, <b>Live at the right end</b> — deliberately <em>not</em> the mutation
+        scrubber's home-at-left, because there base is <em>earliest</em>. Copying its home position
+        would make the two strips look alike while reading backwards.</p>
+    </div>
+
+    <div class="note">
+      <h4>One colour rule</h4>
+      <p>The colour says <em>which version the text belongs to</em>. An addition is “now” because it
+        exists only in the current scene; a deletion is “snapshot” because it exists only there; a
+        modification is simply the two adjacent. Three cases that could drift apart become one that
+        can't.</p>
+    </div>
+
+    <div class="note">
+      <h4>Inline vs stacked is structural</h4>
+      <p>A change inside one block renders side by side; a change spanning blocks stacks. No length
+        threshold — a word count deciding the layout makes it jitter as you type. Paragraph 2 is
+        inline, paragraph 4 is stacked.</p>
+    </div>
+
+    <div class="note">
+      <h4>Flip, don't split — and keep the tint while you flip</h4>
+      <p>No side-by-side panes to keep in sync. The same region swaps between the two states — the
+        eye is poor at parallel scanning and excellent at change detection.</p>
+      <p style="margin-top:.5em">The changed regions stay tinted in <em>every</em> compare state, not
+        only Both. An earlier pass rendered the single states as unmarked prose, which broke the
+        gesture: with nothing marked, a flip changes words <em>somewhere</em> and the eye has no
+        anchor to hold. The tint is the anchor — the words swap underneath a patch that doesn't
+        move. Only <b>Live</b> is unmarked, because there is nothing to compare it to.</p>
+    </div>
+
+    <div class="note">
+      <h4>Two axes, no held modifier</h4>
+      <p>Holding <kbd>Shift</kbd> was wrong: repeated holds trip Windows <em>FilterKeys</em>, and
+        five presses fire <em>Sticky Keys</em>. It isn't needed either — the compare view is
+        <b>read-only</b> (the live TipTap buffer stays mounted and hidden beneath), so the entire
+        unmodified keyboard is free and nothing has to be a chord.</p>
+      <p style="margin-top:.5em"><kbd>←</kbd><kbd>→</kbd> move through <em>time</em>;
+        <kbd>A</kbd>ctive / <kbd>S</kbd>napshot flip the <em>version</em>. Left hand on the letters,
+        right hand on the arrows — and not <kbd>↑</kbd><kbd>↓</kbd>, which fight page scroll on a
+        long scene. Press the active one again for Both, <kbd>Esc</kbd> for Live.</p>
+    </div>
+
+    <div class="note">
+      <h4>Spacing is the timeline — and it can't be linear</h4>
+      <p>Notches sit at their <em>age</em>, so a tight cluster is an afternoon's work and a long run
+        is a week away from the scene. Linear time would break instantly: one snapshot from last
+        week plus four from this morning piles the recent four into an unreadable clump at the right
+        edge — and those are the ones you reach for. A <b>log scale</b> spreads recent history and
+        compresses deep history, which is also how people remember their own work. Faint
+        <b>1h / 1d / 1w</b> ticks make the scale legible rather than merely implied, and a minimum
+        gap keeps notches from touching however they bunch.</p>
+    </div>
+
+    <div class="note">
+      <h4>The track never changes width</h4>
+      <p>Notches are positioned as percentages of the track, so anything beside it that grows or
+        disappears slides every notch along the timeline. Two things did: the <em>“Snapshot · this
+        morning”</em> label appearing on park, and the camera button growing a text label. The label
+        moved down into the actions row — which only exists while parked, so it can be any width —
+        and the camera is now a fixed square in both states. <b>A timeline that moves when you use it
+        can't be read.</b></p>
+    </div>
+
+    <div class="note">
+      <h4>Compact at rest</h4>
+      <p>While writing, the strip is a quiet ruled line — small notches, camera only, no labels.
+        Parking on a notch is what earns the taller strip and the controls. Same compact-at-rest,
+        expand-on-engage shape ADR-0038 §A chose for the view-designer nodes.</p>
+    </div>
+
+    <div class="note">
+      <h4>The camera is an affordance, so it is not an annotation</h4>
+      <p>The design language already rules that <em>a mark is never both</em> — which is why
+        <code>⧉</code> is the fork button only. So the camera marks capture, and never appears on a
+        changed field. The general rule that caps the glyph pile-up:
+        <b>a glyph marks what is true about the value; colour marks what is true about the view.</b>
+        <code>⤳</code> mutated and <code>ti-versions</code> overridden are permanent facts about
+        where a value came from. A snapshot difference is not a property of the field at all — it
+        exists only while you are parked, and vanishes at Live. Lenses get colour, not glyphs.</p>
+    </div>
+
+    <div class="note">
+      <h4>Fields flip only</h4>
+      <p>The rail never interleaves — a value is atomic, so it resolves in one blink. Same colours,
+        same meaning, no second vocabulary. Watch <b>Status</b> and <b>POV</b> as you flip.</p>
+    </div>
+
+    <div class="note open">
+      <h4>Open: the description</h4>
+      <p>Hover a notch. Two carry a one-liner, three don't — <b>the empty case is the common
+        case</b>, so the tooltip has to read well without one. Whether the description replaces the
+        date or sits under it is exactly what this is for.</p>
+    </div>
+  </section>
+
+  <section class="notes">
+    <h3>The colours are the open question</h3>
+    <p class="colour-copy">Almost every hue is spoken for: teal is the accent, violet is the mutation
+      axis, amber is <code>--warn</code>, brick red is <code>--danger</code> (reserved for destructive
+      — and this isn't an error), slate-blue is lore. Red/green is out on both accessibility and
+      semantics: this is <em>before and after</em>, not <em>bad and good</em>.</p>
+    <p class="colour-copy">Every candidate reads <b>warm = live, cool = archived</b> — the past
+      reading cooler is an intuition most people already have, and it puts the pair on an axis rather
+      than making them arbitrary. <b>Use the bench at the top of the page</b> to put each one behind
+      the real prose.</p>
+    <div class="swatches">
+      <div><i class="sw sw-now"></i><code>--diff-now</code><span>warm · live</span></div>
+      <div><i class="sw sw-was"></i><code>--diff-was</code><span>cool · snapshot</span></div>
+    </div>
+    <p class="colour-copy">Three things the theory can settle, leaving the rest to the eye:</p>
+    <ul class="colour-list">
+      <li><b>Equal chroma.</b> If one tint is more saturated than the other it reads as more
+        important, and the pair stops meaning <em>then vs. now</em> and starts meaning
+        <em>significant vs. incidental</em>. Every candidate is balanced.</li>
+      <li><b>Light needs to be lighter than dark is dark.</b> A wash that reads on
+        <code>#1f2522</code> is usually too faint on white — dark surfaces tolerate a smaller
+        lightness step. Each pair is tuned separately per theme, not inverted.</li>
+      <li><b>Hue cannot be the only channel.</b> Roughly 1 in 12 men has a colour-vision deficiency,
+        and the warm/cool axis is exactly the one most affected. Tick <b>strip the hue</b> to see
+        each pair in greyscale: if the two are still distinguishable, the lightness step is carrying
+        enough on its own. That is also why every tint has a darker <em>edge</em> rule under it —
+        an underline survives what a wash does not.</li>
+    </ul>
+    <p class="colour-copy">What the theory can't settle: whether a given pair is <em>restful</em>
+      behind prose you're reading for an hour. Toggle the theme too — a pair can be right in one and
+      wrong in the other.</p>
+  </section>
+
+</div>
+
+<div class="tip" id="tip" hidden></div>
+
+<style>
+  :root {
+    color-scheme: light;
+    --surface: #ffffff;  --board: #f4f6f5;   --panel: #edf3f1;  --inset: #f1f5f3;
+    --tier2: #dde7e3;    --border: #cbd6d2;  --border-strong: #b4c2bc; --divider: #e2e8e5;
+    --text: #242424;     --text-2: #4d5753;  --text-3: #74817b;
+    --accent: #2f6f5e;   --accent-strong: #234e43; --accent-emphasis: #234e43;
+    --accent-soft: #edf6f2; --accent-soft2: #dff0ea;
+    --danger: #a64a4a;   --warn: #8a520d;    --warn-soft: #fff4e6; --warn-border: #f0d29a;
+    --mutation-color: #7c5cbf;
+    --app-bg: #f5f7f6;
+    --shadow: rgba(36,36,36,.06); --shadow2: rgba(36,36,36,.10);
+
+    /* ── candidate diff pair — the only non-token colours here ── */
+    --diff-now: #a2542f;          /* clay — belongs to the scene NOW */
+    --diff-now-soft: #fbe4d3;
+    --diff-now-edge: #d59a6c;
+    --diff-was: #3d6b88;          /* steel — belongs to the SNAPSHOT */
+    --diff-was-soft: #dfeaf4;
+    --diff-was-edge: #90b8d4;
+
+    --sans: "Segoe UI", system-ui, sans-serif;
+    --serif: Georgia, "Times New Roman", serif;
+    --mono: Consolas, ui-monospace, monospace;
+    --fs-xs: 11px; --fs-sm: 12px; --fs-md: 13px; --fs-lg: 15px; --fs-xl: 16px;
+    --fs-2xl: 20px; --fs-prose: 16px;
+    --sp-1: 4px; --sp-2: 8px; --sp-3: 12px; --sp-4: 16px; --sp-5: 24px; --sp-6: 32px;
+    --r-sm: 4px; --r-md: 6px; --r-lg: 10px; --r-pill: 999px;
+    --t-fast: 80ms linear; --t-base: 160ms ease-out;
+  }
+
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      color-scheme: dark;
+      --surface: #1f2522; --board: #181c1a; --panel: #20272a; --inset: #242a28;
+      --tier2: #2d3633;   --border: #3a4541; --border-strong: #4a5651; --divider: #2a322f;
+      --text: #e8edeb;    --text-2: #a9b6b0; --text-3: #7e8a84;
+      --accent: #6cc4a6;  --accent-strong: #4ea88c; --accent-emphasis: #7cc0a1;
+      --accent-soft: #1f3a32; --accent-soft2: #2a4a3f;
+      --danger: #d97070;  --warn: #e6c084;   --warn-soft: #2c2414; --warn-border: #5a4a24;
+      --app-bg: #14181a;
+      --shadow: rgba(0,0,0,.40); --shadow2: rgba(0,0,0,.50);
+
+      --diff-now: #d9a184; --diff-now-soft: #3b2a21; --diff-now-edge: #6d4a36;
+      --diff-was: #8fb6d2; --diff-was-soft: #1f2d38; --diff-was-edge: #3d5a70;
+    }
+  }
+  :root[data-theme="dark"] {
+    color-scheme: dark;
+    --surface: #1f2522; --board: #181c1a; --panel: #20272a; --inset: #242a28;
+    --tier2: #2d3633;   --border: #3a4541; --border-strong: #4a5651; --divider: #2a322f;
+    --text: #e8edeb;    --text-2: #a9b6b0; --text-3: #7e8a84;
+    --accent: #6cc4a6;  --accent-strong: #4ea88c; --accent-emphasis: #7cc0a1;
+    --accent-soft: #1f3a32; --accent-soft2: #2a4a3f;
+    --danger: #d97070;  --warn: #e6c084;   --warn-soft: #2c2414; --warn-border: #5a4a24;
+    --app-bg: #14181a;
+    --shadow: rgba(0,0,0,.40); --shadow2: rgba(0,0,0,.50);
+    --diff-now: #d9a184; --diff-now-soft: #3b2a21; --diff-now-edge: #6d4a36;
+    --diff-was: #8fb6d2; --diff-was-soft: #1f2d38; --diff-was-edge: #3d5a70;
+  }
+
+  body { margin: 0; background: var(--app-bg); color: var(--text);
+         font-family: var(--sans); font-size: var(--fs-md); }
+
+  .sheet { max-width: 940px; margin: 0 auto; padding: var(--sp-6) var(--sp-4) 64px;
+           display: flex; flex-direction: column; gap: var(--sp-5); }
+
+  .mock-head .eyebrow { margin: 0 0 var(--sp-2); font-size: var(--fs-xs);
+    letter-spacing: .09em; text-transform: uppercase; color: var(--text-3); }
+  .mock-head h1 { margin: 0; font-family: var(--serif); font-size: 26px; font-weight: 700;
+    letter-spacing: -.01em; text-wrap: balance; }
+  .lede { margin: var(--sp-3) 0 0; max-width: 66ch; color: var(--text-2); line-height: 1.6; }
+  code { font-family: var(--mono); font-size: .93em;
+         background: var(--inset); padding: 1px 5px; border-radius: var(--r-sm); }
+
+  /* ── pane ── */
+  .pane { background: var(--surface); border: 1px solid var(--border);
+    border-radius: var(--r-lg); box-shadow: 0 2px 8px var(--shadow); overflow: hidden; }
+
+  .pane-head { display: flex; align-items: flex-end; justify-content: space-between;
+    gap: var(--sp-4); padding: var(--sp-4) var(--sp-5) var(--sp-3);
+    border-bottom: 1px solid var(--divider); }
+  .kind-label { display: block; font-size: var(--fs-xs); letter-spacing: .09em;
+    text-transform: uppercase; color: var(--text-3); margin-bottom: 2px; }
+  .pane-title h2 { margin: 0; font-family: var(--serif); font-size: var(--fs-2xl);
+    font-weight: 700; }
+  .wordcount { font-size: var(--fs-sm); color: var(--text-3);
+               font-variant-numeric: tabular-nums; }
+
+  .pane-body { display: grid; grid-template-columns: minmax(0,1fr) 208px; }
+  @media (max-width: 720px) { .pane-body { grid-template-columns: minmax(0,1fr); } }
+
+  .prose { padding: var(--sp-5); font-family: var(--serif); font-size: var(--fs-prose);
+    line-height: 1.72; min-width: 0; }
+  .prose p { margin: 0 0 1.05em; max-width: 62ch; }
+  .prose p:last-child { margin-bottom: 0; }
+
+  /* diff marks */
+  .r-now, .r-was { border-radius: var(--r-sm); padding: .06em .22em;
+                   box-decoration-break: clone; -webkit-box-decoration-break: clone; }
+  .r-now { background: var(--diff-now-soft); box-shadow: inset 0 -2px 0 var(--diff-now-edge); }
+  .r-was { background: var(--diff-was-soft); box-shadow: inset 0 -2px 0 var(--diff-was-edge); }
+
+  .blk { display: block; border-left: 3px solid; padding: .5em .8em; border-radius: var(--r-sm);
+         margin: 0 0 .55em; max-width: 62ch; }
+  .blk-now { border-left-color: var(--diff-now); background: var(--diff-now-soft); }
+  .blk-was { border-left-color: var(--diff-was); background: var(--diff-was-soft); }
+  .blk-tag { display: block; font-family: var(--sans); font-size: var(--fs-xs);
+    letter-spacing: .08em; text-transform: uppercase; margin-bottom: .3em; }
+  .blk-now .blk-tag { color: var(--diff-now); }
+  .blk-was .blk-tag { color: var(--diff-was); }
+
+  /* ── rail ── */
+  .rail { border-left: 1px solid var(--divider); background: var(--inset);
+    padding: var(--sp-4); display: flex; flex-direction: column; gap: var(--sp-3); }
+  .rail-label { margin: 0; font-size: var(--fs-xs); letter-spacing: .09em;
+    text-transform: uppercase; color: var(--text-3); }
+  .field { display: flex; flex-direction: column; gap: 3px; }
+  .field-name { font-size: var(--fs-xs); color: var(--text-3); }
+  .field-value { font-size: var(--fs-md); color: var(--text); }
+  .field-value.changed { padding: 2px 6px; border-radius: var(--r-sm); width: fit-content; }
+  .v-now { background: var(--diff-now-soft); box-shadow: inset 0 -2px 0 var(--diff-now-edge); }
+  .v-was { background: var(--diff-was-soft); box-shadow: inset 0 -2px 0 var(--diff-was-edge); }
+  .rail-note { margin: auto 0 0; font-size: var(--fs-xs); color: var(--text-3); line-height: 1.5; }
+
+  /* ── drift advisory ── */
+  .drift { display: flex; gap: var(--sp-3); align-items: flex-start;
+    padding: var(--sp-3) var(--sp-5); background: var(--warn-soft);
+    border-top: 1px solid var(--warn-border); font-size: var(--fs-sm); line-height: 1.55; }
+  .drift-mark { color: var(--mutation-color); font-size: var(--fs-lg); line-height: 1.2; }
+  .drift strong { display: block; margin-bottom: 3px; color: var(--text); font-weight: 600; }
+  .drift ul { margin: 0; padding-left: 1.1em; color: var(--text-2); }
+  .drift b { color: var(--text); }
+  .drift-foot { display: block; margin-top: var(--sp-2); color: var(--text-3); }
+
+  /* ── strip ── */
+  /* Compact at rest, expands when engaged — the same shape ADR-0038 §A chose
+     for the view-designer nodes. At rest it is a quiet ruled line under the
+     prose; parking on a notch is what earns the taller strip. */
+  .strip { display: flex; align-items: stretch; gap: var(--sp-4);
+    border-top: 1px solid var(--divider); background: var(--inset);
+    padding: var(--sp-2) var(--sp-4); min-height: 46px;
+    transition: min-height var(--t-base), padding var(--t-base), background var(--t-base); }
+  .strip.compact { min-height: 27px; padding: 0 var(--sp-4); background: transparent; }
+  .strip.compact .strip-track { padding-bottom: 6px; }
+  .strip.compact .strip-track::before { bottom: 5px; }
+  .strip.compact .notch { bottom: 5px; }
+  .strip.compact .tick { display: none; }
+  .strip.compact .notch.auto i { height: 5px; }
+  .strip.compact .notch.kept i { height: 10px; }
+  .strip.compact .notch-live i { height: 13px; }
+  .strip.compact .capture { border-color: transparent; background: transparent; }
+  .strip:hover.compact { background: var(--inset); }
+  .strip:hover.compact .capture { border-color: var(--border); background: var(--surface); }
+
+  /* Notches are POSITIONED BY AGE (log scale), so the gaps carry meaning:
+     a cluster is an afternoon's work, a long run is a week away from it. */
+  .strip-track { position: relative; flex: 1 1 auto; min-width: 0;
+    padding-bottom: 9px; transition: padding var(--t-base); }
+  .strip-track::before { content: ""; position: absolute; left: 0; right: 0; bottom: 8px;
+    height: 1px; background: var(--border); }
+
+  .tick { position: absolute; bottom: 8px; transform: translateX(-50%);
+    display: flex; flex-direction: column; align-items: center; pointer-events: none; }
+  .tick b { display: block; width: 1px; height: 5px; background: var(--border); }
+  .tick em { font-family: var(--sans); font-style: normal; font-size: 9px;
+    color: var(--text-3); opacity: .75; margin-top: 1px; }
+
+  .notch { position: absolute; bottom: 8px; transform: translateX(-50%);
+    width: 14px; padding: 0; border: 0; background: none; cursor: pointer;
+    display: flex; align-items: flex-end; justify-content: center; }
+  .notch i { display: block; width: 2px; border-radius: 1px;
+    background: var(--border-strong); transition: background var(--t-fast), height var(--t-fast); }
+  .notch.auto i { height: 9px; }
+  .notch.kept i { height: 17px; background: var(--text-3); }
+  .notch:hover i { background: var(--diff-was); }
+  .notch.current i { background: var(--diff-was); width: 3px; }
+  .notch.current::after { content: ""; position: absolute; bottom: -4px; left: 50%;
+    transform: translateX(-50%); width: 5px; height: 5px; border-radius: 50%;
+    background: var(--diff-was); }
+  .notch.fresh i { animation: cut var(--t-base) ease-out; }
+  @keyframes cut { from { height: 0; } }
+
+  .notch-live { left: 96%; }
+  .notch-live i { height: 21px; width: 3px; background: var(--diff-now); border-radius: 2px; }
+  .notch-live.current i { box-shadow: 0 0 0 3px var(--diff-now-soft); }
+
+  /* Constant width in both states — see the note in the markup. */
+  .strip-right { display: flex; align-items: center; flex: none; width: 34px;
+                 justify-content: flex-end; }
+
+  /* Lives in the actions row, which only exists while parked — so it can be as
+     wide as it likes without touching the track. */
+  .asof { font-size: var(--fs-sm); color: var(--diff-was); font-weight: 600;
+          white-space: nowrap; font-variant-numeric: tabular-nums; }
+
+  .capture { display: inline-flex; align-items: center; justify-content: center;
+    color: var(--text-2); background: var(--surface);
+    border: 1px solid var(--border); border-radius: var(--r-md);
+    width: 30px; height: 26px; padding: 0; cursor: pointer;
+    transition: border-color var(--t-fast), color var(--t-fast), background var(--t-fast); }
+  .capture:hover { border-color: var(--diff-now); color: var(--diff-now); }
+  .cam { width: 16px; height: 16px; flex: none; }
+
+  /* ── contextual actions ── */
+  .actions { display: flex; align-items: center; gap: var(--sp-3); flex-wrap: wrap;
+    padding: var(--sp-2) var(--sp-4); border-top: 1px solid var(--divider);
+    background: var(--panel); }
+  .spacer { flex: 1 1 auto; }
+
+  .view-toggle { display: inline-flex; border: 1px solid var(--border);
+    border-radius: var(--r-md); overflow: hidden; }
+  .view-toggle button { font-family: var(--sans); font-size: var(--fs-sm); padding: 4px 11px;
+    background: var(--surface); color: var(--text-2); border: 0; cursor: pointer;
+    border-right: 1px solid var(--border); transition: background var(--t-fast); }
+  .view-toggle button:last-child { border-right: 0; }
+  .view-toggle button:hover { background: var(--tier2); }
+  .view-toggle button.on { background: var(--accent-soft); color: var(--accent-emphasis);
+    font-weight: 600; }
+
+  .peek-hint { font-size: var(--fs-xs); color: var(--text-3); display: inline-flex;
+    align-items: center; gap: 4px; }
+  kbd { font-family: var(--sans); font-size: 10px; border: 1px solid var(--border);
+    border-bottom-width: 2px; border-radius: var(--r-sm); padding: 1px 5px;
+    background: var(--surface); color: var(--text-2); }
+
+  .act { font-family: var(--sans); font-size: var(--fs-sm); padding: 4px 11px;
+    background: var(--surface); border: 1px solid var(--border); border-radius: var(--r-md);
+    color: var(--text-2); cursor: pointer; transition: border-color var(--t-fast), color var(--t-fast); }
+  .act:hover { border-color: var(--border-strong); color: var(--text); }
+  .act-restore { border-color: var(--accent); color: var(--accent-emphasis); font-weight: 600; }
+  .act-restore:hover { background: var(--accent-soft); border-color: var(--accent); }
+  .act-del:hover { border-color: var(--danger); color: var(--danger); }
+
+  /* ── legend ── */
+  .legend { display: flex; gap: var(--sp-5); flex-wrap: wrap; font-size: var(--fs-sm);
+    color: var(--text-2); padding: 0 var(--sp-1); }
+  .legend span { display: inline-flex; align-items: center; gap: 7px; }
+  .sw { width: 15px; height: 15px; border-radius: var(--r-sm); flex: none; }
+  .sw-now { background: var(--diff-now-soft); box-shadow: inset 0 -3px 0 var(--diff-now-edge); }
+  .sw-was { background: var(--diff-was-soft); box-shadow: inset 0 -3px 0 var(--diff-was-edge); }
+  .sw-same { background: var(--surface); border: 1px solid var(--border); }
+  .legend-note { color: var(--text-3); font-size: var(--fs-xs); }
+
+  /* ── notes ── */
+  .notes { background: var(--surface); border: 1px solid var(--border);
+    border-radius: var(--r-lg); padding: var(--sp-5); }
+  .notes h3 { margin: 0 0 var(--sp-4); font-family: var(--serif); font-size: var(--fs-xl);
+    font-weight: 700; }
+  .note { padding: var(--sp-3) 0; border-top: 1px solid var(--divider); }
+  .note:first-of-type { border-top: 0; padding-top: 0; }
+  .note h4 { margin: 0 0 4px; font-size: var(--fs-md); font-weight: 600; }
+  .note p { margin: 0; color: var(--text-2); line-height: 1.6; max-width: 72ch; }
+  .note.open h4 { color: var(--warn); }
+  .colour-copy { margin: 0 0 var(--sp-3); color: var(--text-2); line-height: 1.6; max-width: 72ch; }
+  .colour-list { margin: 0 0 var(--sp-3); padding-left: 1.15em; color: var(--text-2);
+    line-height: 1.6; max-width: 72ch; }
+  .colour-list li { margin-bottom: var(--sp-2); }
+  .swatches { display: flex; gap: var(--sp-5); flex-wrap: wrap; margin: var(--sp-4) 0; }
+  .swatches div { display: inline-flex; align-items: center; gap: 8px; font-size: var(--fs-sm);
+    color: var(--text-2); }
+  .swatches .sw { width: 26px; height: 26px; }
+  .swatches span { color: var(--text-3); }
+
+  /* ── palette bench ── */
+  .bench { background: var(--surface); border: 1px solid var(--border);
+    border-radius: var(--r-lg); padding: var(--sp-3) var(--sp-4); }
+  .bench-row { display: flex; align-items: center; gap: var(--sp-3); flex-wrap: wrap; }
+  .bench-label { font-size: var(--fs-xs); letter-spacing: .09em; text-transform: uppercase;
+    color: var(--text-3); }
+  .pal-picker { display: inline-flex; border: 1px solid var(--border);
+    border-radius: var(--r-md); overflow: hidden; }
+  .pal-picker button { display: inline-flex; align-items: center; gap: 6px;
+    font-family: var(--sans); font-size: var(--fs-sm); padding: 5px 10px;
+    background: var(--surface); color: var(--text-2); border: 0;
+    border-right: 1px solid var(--border); cursor: pointer; transition: background var(--t-fast); }
+  .pal-picker button:last-child { border-right: 0; }
+  .pal-picker button:hover { background: var(--tier2); }
+  .pal-picker button.on { background: var(--accent-soft); color: var(--accent-emphasis);
+    font-weight: 600; }
+  .pal-picker .chips { display: inline-flex; gap: 2px; }
+  .pal-picker .chips i { width: 11px; height: 11px; border-radius: 2px; display: block; }
+  .bench-check { display: inline-flex; align-items: center; gap: 6px; font-size: var(--fs-sm);
+    color: var(--text-2); cursor: pointer; }
+  .bench-note { margin: var(--sp-2) 0 0; font-size: var(--fs-sm); color: var(--text-3);
+    line-height: 1.5; max-width: 78ch; }
+  .hue-stripped .prose, .hue-stripped .rail, .hue-stripped .legend .sw { filter: saturate(0); }
+
+  /* ── the two resting states (static preview) ── */
+  .states { display: grid; grid-template-columns: 1fr 1fr; gap: var(--sp-5); margin-top: var(--sp-4); }
+  @media (max-width: 760px) { .states { grid-template-columns: 1fr; } }
+  .states figure { margin: 0; }
+  .states figcaption { font-size: var(--fs-sm); color: var(--text-2); margin-bottom: var(--sp-2); }
+  .pane-mini { border: 1px solid var(--border); border-radius: var(--r-md);
+    background: var(--surface); overflow: hidden; pointer-events: none; }
+  .mini-prose { font-family: var(--serif); font-size: 14px; color: var(--text-3);
+    padding: var(--sp-4) var(--sp-4) var(--sp-5); line-height: 1.6; }
+  .pane-mini .strip { padding-left: var(--sp-3); padding-right: var(--sp-3); }
+  .mini-cam { width: 30px; height: 26px; display: block; border-radius: var(--r-md);
+    border: 1px solid var(--border); background: var(--surface);
+    background-image: radial-gradient(circle at 50% 56%, var(--text-3) 2.4px, transparent 2.6px); }
+  .strip.compact .mini-cam { border-color: transparent; background-color: transparent; }
+  .mini-actions { display: flex; align-items: center; gap: var(--sp-3);
+    padding: var(--sp-2) var(--sp-3); border-top: 1px solid var(--divider);
+    background: var(--panel); }
+  .mini-seg { display: inline-flex; border: 1px solid var(--border); border-radius: var(--r-md);
+    overflow: hidden; font-size: var(--fs-xs); }
+  .mini-seg b, .mini-seg i { font-style: normal; padding: 3px 8px; border-right: 1px solid var(--border); }
+  .mini-seg i { color: var(--text-3); background: var(--surface); }
+  .mini-seg b { color: var(--accent-emphasis); background: var(--accent-soft); }
+  .mini-seg i:last-child { border-right: 0; }
+  .state-note { margin: var(--sp-3) 0 0; font-size: var(--fs-sm); color: var(--text-2);
+    line-height: 1.55; }
+
+  /* ── tooltip ── */
+  .tip { position: fixed; z-index: 400; max-width: 268px; pointer-events: none;
+    background: #28302d; color: #f5f7f6; border: 1px solid #37413d;
+    border-radius: var(--r-md); padding: 7px 10px; font-size: var(--fs-sm); line-height: 1.45;
+    box-shadow: 0 14px 28px rgba(25,40,35,.22); }
+  .tip .tip-when { color: #a8b2ad; font-size: var(--fs-xs); display: block; }
+  .tip .tip-desc { display: block; margin-top: 3px; }
+  .tip .tip-kept { color: #9adfba; font-size: var(--fs-xs); }
+
+  button:focus-visible, .notch:focus-visible { outline: 2px solid var(--accent);
+    outline-offset: 2px; border-radius: var(--r-sm); }
+
+  @media (prefers-reduced-motion: reduce) {
+    * { animation-duration: 0ms !important; transition-duration: 0ms !important; }
+  }
+</style>
+
+<script>
+  // ── fixture: one scene, two states ──────────────────────────────────
+  // Runs are provenance-tagged, which is the whole colour rule: "same" is
+  // unchanged, "now" belongs to the live scene, "was" belongs to the snapshot.
+  const PARAS = [
+    [{t:"same", s:"The tide went out further than Maren had ever seen it, and kept going. Where the harbour should have been there was only ribbed sand, black with weed, and the boats lying over on their sides like something sleeping."}],
+
+    // inline modification — a few words, so the two sit side by side
+    [{t:"same", s:"She counted the hulls twice. "},
+     {t:"mod", inline:true, now:"Eleven. One short.", was:"Twelve. All of them."},
+     {t:"same", s:" The eleventh was the Corrant, and the Corrant had gone out on the evening tide with her father aboard and no reason at all to be anywhere but here."}],
+
+    // pure addition — exists only in the live scene
+    [{t:"now", s:"Somewhere behind her, up in the town, a shutter began to bang. Nobody came to close it."}],
+
+    // block-level rewrite — stacks
+    [{t:"mod", inline:false,
+      now:"She had been told what the sea did before it came back. Everyone in the town had been told, the way children are told things that are meant to frighten them into caution and instead only make them curious. Run for the high road. Do not stop for anything you can carry. Do not stop for anything that can walk.",
+      was:"Her grandmother had explained it once, standing in this exact spot, holding her wrist too tightly. When the water leaves like that, she had said, it is not leaving. It is drawing breath."}],
+
+    // pure deletion — exists only in the snapshot
+    [{t:"was", s:"Maren did not run. She had never once in her life done the sensible thing quickly."}],
+
+    [{t:"same", s:"The gulls had stopped. That was the part she would remember afterwards — not the sand, not the boats, but the silence where the gulls had been."}]
+  ];
+
+  const FIELDS = {
+    status: { now: "revised", was: "draft" },
+    pov:    { now: "Maren",   was: "Maren (close)" },
+    loc:    { now: "Corrant Harbour", was: "Corrant Harbour" }
+  };
+
+  // Oldest → newest. `kept` = explicit (never thinned); otherwise automatic.
+  // `age` = minutes before now — the strip positions notches by it.
+  const SNAPS = [
+    { id:"s1", rel:"Wednesday 12th", age:7160, kept:true,  desc:"Before the flashback rewrite" },
+    { id:"s2", rel:"yesterday",      age:1490, kept:false, desc:null },
+    { id:"s3", rel:"this morning",   age:158,  kept:false, desc:null },
+    { id:"s4", rel:"2 hours ago",    age:120,  kept:true,  desc:"Cut grandmother's dialogue" },
+    { id:"s5", rel:"5 minutes ago",  age:5,    kept:false, desc:null }
+  ];
+
+  // ── the time scale ──────────────────────────────────────────────────
+  // Spacing carries relative age, so the strip reads as a timeline rather
+  // than a list. It CANNOT be linear: one snapshot from last week plus four
+  // from this morning would pile the recent four into a single unreadable
+  // clump at the right edge — and the recent ones are the ones you reach for.
+  // A log scale spreads recent history and compresses deep history, which is
+  // also how people actually remember their own work.
+  const TRACK_L = 1, TRACK_R = 88;          // % — right of 88 is reserved for Live
+  const MIN_GAP = 4.5;                      // % — notches never touch
+
+  function positions() {
+    const maxAge = Math.max(60, ...SNAPS.map((s) => s.age));
+    const span = Math.log(1 + maxAge);
+    const raw = SNAPS.map((s) =>
+      TRACK_L + (TRACK_R - TRACK_L) * (1 - Math.log(1 + s.age) / span));
+    for (let i = 1; i < raw.length; i++) {          // ascending, so one pass
+      if (raw[i] - raw[i-1] < MIN_GAP) raw[i] = raw[i-1] + MIN_GAP;
+    }
+    const overflow = raw[raw.length-1] - TRACK_R;   // squeeze back if crowded
+    if (overflow > 0) {
+      const scale = (TRACK_R - TRACK_L) / (raw[raw.length-1] - TRACK_L);
+      for (let i = 0; i < raw.length; i++) raw[i] = TRACK_L + (raw[i] - TRACK_L) * scale;
+    }
+    return raw;
+  }
+
+  // Faint labelled ticks make the scale legible instead of merely implied.
+  const TICKS = [
+    { age: 60,    label: "1h" },
+    { age: 1440,  label: "1d" },
+    { age: 10080, label: "1w" }
+  ];
+
+  let parked = null;     // null = Live, else index into SNAPS
+  let view = "both";     // both | now | was
+
+  const track   = document.getElementById("track");
+  const prose   = document.getElementById("prose");
+  const actions = document.getElementById("actions");
+  const drift   = document.getElementById("drift");
+  const asof    = document.getElementById("asof");
+  const tip     = document.getElementById("tip");
+  const railNote= document.getElementById("rail-note");
+
+  function effectiveView() { return view; }
+
+  function renderProse() {
+    const live = parked === null;
+    const v = live ? "now" : effectiveView();
+    const html = [];
+
+    for (const para of PARAS) {
+      // whole-paragraph, single provenance (a pure addition or deletion)
+      if (para.length === 1 && (para[0].t === "now" || para[0].t === "was")) {
+        const side = para[0].t;
+        if (live) { if (side === "now") html.push(`<p>${para[0].s}</p>`); continue; }
+        if (v !== "both" && v !== side) continue;       // absent from the other state
+        // Tinted in EVERY compare state, not just Both: the tint is what holds
+        // your place while the words swap under it.
+        html.push(`<p><span class="r-${side}">${para[0].s}</span></p>`);
+        continue;
+      }
+
+      const parts = [];
+      for (const run of para) {
+        if (run.t === "same") { parts.push(run.s); continue; }
+        if (run.t !== "mod") continue;
+
+        if (live) { parts.push(run.now); continue; }    // no marks at Live
+
+        if (v === "now") { parts.push(`<span class="r-now">${run.now}</span>`); continue; }
+        if (v === "was") { parts.push(`<span class="r-was">${run.was}</span>`); continue; }
+
+        parts.push(run.inline
+          ? `<span class="r-now">${run.now}</span> <span class="r-was">${run.was}</span>`
+          : `<span class="blk blk-now"><span class="blk-tag">now</span>${run.now}</span>` +
+            `<span class="blk blk-was"><span class="blk-tag">snapshot</span>${run.was}</span>`);
+      }
+      const body = parts.join("");
+      if (body.trim()) html.push(`<p>${body}</p>`);
+    }
+
+    // One assignment, so the browser paints a single frame — swapping
+    // innerHTML per paragraph is what made a held key strobe.
+    const next = html.join("");
+    if (prose.innerHTML !== next) prose.innerHTML = next;
+  }
+
+  function renderFields() {
+    const v = parked === null ? "now" : effectiveView();
+    for (const [key, el] of [["status", "f-status"], ["pov", "f-pov"], ["loc", "f-loc"]]) {
+      const node = document.getElementById(el);
+      const f = FIELDS[key];
+      const changed = f.now !== f.was;
+      if (parked === null || !changed) {
+        node.textContent = f.now;
+        node.className = "field-value";
+        continue;
+      }
+      // Fields flip — never interleave. In "both" we show the live value marked.
+      const side = v === "was" ? "was" : "now";
+      node.textContent = f[side];
+      node.className = `field-value changed v-${side}`;
+    }
+    railNote.textContent = parked === null
+      ? ""
+      : "Fields flip with the body — a value is atomic, so there is nothing to interleave.";
+  }
+
+  function renderStrip() {
+    track.innerHTML = "";
+    const maxAge = Math.max(60, ...SNAPS.map((s) => s.age));
+    const span = Math.log(1 + maxAge);
+
+    // scale ticks — drawn first so notches sit above them
+    for (const t of TICKS) {
+      if (t.age > maxAge) continue;
+      const x = TRACK_L + (TRACK_R - TRACK_L) * (1 - Math.log(1 + t.age) / span);
+      const el = document.createElement("span");
+      el.className = "tick";
+      el.style.left = x + "%";
+      el.innerHTML = `<b></b><em>${t.label}</em>`;
+      track.append(el);
+    }
+
+    const xs = positions();
+    SNAPS.forEach((s, i) => {
+      const b = document.createElement("button");
+      b.type = "button";
+      b.className = `notch ${s.kept ? "kept" : "auto"}${parked === i ? " current" : ""}`;
+      b.style.left = xs[i] + "%";
+      b.setAttribute("aria-label", `Snapshot ${s.rel}${s.desc ? " — " + s.desc : ""}`);
+      b.innerHTML = "<i></i>";
+      b.addEventListener("click", () => { parked = (parked === i ? null : i); renderAll(); });
+      b.addEventListener("mouseenter", (e) => showTip(e, s));
+      b.addEventListener("mouseleave", hideTip);
+      b.addEventListener("focus", (e) => showTip(e, s));
+      b.addEventListener("blur", hideTip);
+      track.append(b);
+    });
+
+    const live = document.createElement("button");
+    live.type = "button";
+    live.className = `notch notch-live${parked === null ? " current" : ""}`;
+    live.setAttribute("aria-label", "Live — the scene as it is now");
+    live.innerHTML = "<i></i>";
+    live.addEventListener("click", () => { parked = null; renderAll(); });
+    track.append(live);
+  }
+
+  function renderChrome() {
+    const on = parked !== null;
+    actions.hidden = !on;
+    drift.hidden   = !on;
+    document.querySelector(".strip").classList.toggle("compact", !on);
+    if (on) asof.textContent = `Snapshot · ${SNAPS[parked].rel}`;
+    for (const b of actions.querySelectorAll(".view-toggle button")) {
+      b.classList.toggle("on", b.dataset.view === effectiveView());
+    }
+    document.getElementById("act-pin").textContent =
+      on && SNAPS[parked].kept ? "Unpin" : "Pin";
+  }
+
+  function renderAll() { renderStrip(); renderProse(); renderFields(); renderChrome(); }
+
+  // The static at-rest / engaged pair — same geometry, same CSS, no behaviour.
+  function renderPreviews() {
+    const xs = positions();
+    const maxAge = Math.max(60, ...SNAPS.map((s) => s.age));
+    const span = Math.log(1 + maxAge);
+
+    for (const [id, parkedAt] of [["prev-compact", null], ["prev-open", 3]]) {
+      const strip = document.getElementById(id);
+      if (!strip) continue;
+      const t = strip.querySelector(".strip-track");
+      t.innerHTML = "";
+      if (parkedAt !== null) {
+        for (const tick of TICKS) {
+          if (tick.age > maxAge) continue;
+          const x = TRACK_L + (TRACK_R - TRACK_L) * (1 - Math.log(1 + tick.age) / span);
+          const el = document.createElement("span");
+          el.className = "tick";
+          el.style.left = x + "%";
+          el.innerHTML = `<b></b><em>${tick.label}</em>`;
+          t.append(el);
+        }
+      }
+      SNAPS.forEach((s, i) => {
+        const n = document.createElement("span");
+        n.className = `notch ${s.kept ? "kept" : "auto"}${parkedAt === i ? " current" : ""}`;
+        n.style.left = xs[i] + "%";
+        n.innerHTML = "<i></i>";
+        t.append(n);
+      });
+      const live = document.createElement("span");
+      live.className = `notch notch-live${parkedAt === null ? " current" : ""}`;
+      live.innerHTML = "<i></i>";
+      t.append(live);
+    }
+  }
+
+  // ── tooltip: the three-rung time ladder + optional description ──
+  function showTip(e, s) {
+    tip.innerHTML =
+      `<span class="tip-when">Snapshot · ${s.rel}</span>` +
+      (s.desc ? `<span class="tip-desc">${s.desc}</span>` : "") +
+      (s.kept ? `<span class="tip-kept">pinned — kept</span>` : "");
+    tip.hidden = false;
+    const r = e.currentTarget.getBoundingClientRect();
+    const w = tip.offsetWidth;
+    tip.style.left = Math.max(8, Math.min(window.innerWidth - w - 8, r.left + r.width/2 - w/2)) + "px";
+    tip.style.top  = (r.top - tip.offsetHeight - 9) + "px";
+  }
+  function hideTip() { tip.hidden = true; }
+
+  // ── controls ──
+  actions.querySelectorAll(".view-toggle button").forEach((b) => {
+    b.addEventListener("click", () => {
+      view = b.dataset.view;
+      renderProse(); renderFields(); renderChrome();   // strip is unaffected
+    });
+  });
+
+  document.getElementById("capture").addEventListener("click", () => {
+    for (const s of SNAPS) s.age += 3;             // everything ages a little
+    SNAPS.push({ id:"n"+Date.now(), rel:"just now", age:0.2, kept:true,
+                 desc:"Captured from the mockup" });
+    parked = null;
+    renderAll();
+    const last = track.querySelectorAll(".notch")[SNAPS.length - 1];
+    if (last) last.classList.add("fresh");   // only an explicit capture animates
+  });
+
+  document.getElementById("act-del").addEventListener("click", () => {
+    const s = SNAPS[parked];
+    if (!confirm(`Delete the snapshot from ${s.rel}?\n\nThis cannot be undone — the snapshot is the only copy of those words.`)) return;
+    SNAPS.splice(parked, 1);
+    parked = null;
+    renderAll();
+  });
+
+  document.getElementById("act-pin").addEventListener("click", () => {
+    SNAPS[parked].kept = !SNAPS[parked].kept;
+    renderAll();
+  });
+
+  document.getElementById("act-restore").addEventListener("click", () => {
+    // Restore captures first — non-destructive by construction, not by foresight.
+    for (const s of SNAPS) s.age += 3;
+    SNAPS.push({ id:"r"+Date.now(), rel:"just now", age:0.2, kept:false,
+                 desc:"Before restoring" });
+    parked = null;
+    renderAll();
+    alert("Restored.\n\nThe scene as it was a moment ago was snapshotted first, so this is undoable — that is why restore asks nothing before it runs.");
+  });
+
+  // ── keys: two axes, two arrow pairs ────────────────────────────────
+  // No held modifier — repeatedly holding Shift trips Windows FilterKeys, and
+  // Sticky Keys fires on five presses. The compare view is READ-ONLY (the live
+  // TipTap buffer sits mounted and hidden underneath), so the whole unmodified
+  // keyboard is free here and nothing needs a chord.
+  //   ← →  move through time   (which snapshot)
+  //   a s  flip the version    (a = Active, s = Snapshot) — left hand, so the
+  //        right stays on the arrows; and NOT ↑↓, which fight page scroll.
+  //   press the active one again to return to Both · Esc returns to Live.
+  addEventListener("keydown", (e) => {
+    if (parked === null || e.ctrlKey || e.metaKey || e.altKey) return;
+    const t = e.target;
+    if (t && /^(INPUT|TEXTAREA)$/.test(t.tagName)) return;
+
+    // A/S are toggles, not held modifiers — so ignore OS key auto-repeat.
+    // Without this, holding one fires keydown ~30×/s and the view strobes
+    // between the two states instead of settling on one.
+    if (e.repeat && /^[asbASB]$/.test(e.key)) { e.preventDefault(); return; }
+
+    let moved = false;
+    switch (e.key) {
+      case "ArrowLeft":  parked = Math.max(0, parked - 1); moved = true; break;
+      case "ArrowRight":
+        parked = (parked >= SNAPS.length - 1) ? null : parked + 1;
+        moved = true; break;
+      case "a": case "A": view = (view === "now") ? "both" : "now"; break;   // Active
+      case "s": case "S": view = (view === "was") ? "both" : "was"; break;   // Snapshot
+      case "b": case "B": view = "both"; break;                             // Both
+      case "Escape":     parked = null; moved = true; break;
+      default: return;
+    }
+    e.preventDefault();
+    // A pure version flip leaves the strip untouched — rebuilding its DOM was
+    // the other half of the flicker.
+    if (moved) renderAll(); else { renderProse(); renderFields(); renderChrome(); }
+  });
+
+  // ── palette bench ────────────────────────────────────────────────────
+  // Four candidate pairs. Shared constraints: hue must dodge every claimed
+  // role (teal accent · violet mutation · amber warn/star · brick danger ·
+  // slate-blue lore); the two tints carry EQUAL chroma so neither reads as
+  // more important; and the light washes sit lighter than the dark ones are
+  // dark, because a tint that reads on #1f2522 is usually too faint on white.
+  const PALETTES = [
+    { id:"clay", name:"Clay / Steel",
+      note:"The working pair. Warm ~22° against cool ~205° — a wide hue gap with both sitting well "
+         + "clear of danger-brick and mutation-violet. The safe choice.",
+      light:{ now:"#a2542f", nowSoft:"#fbe4d3", nowEdge:"#d59a6c",
+              was:"#3d6b88", wasSoft:"#dfeaf4", wasEdge:"#90b8d4" },
+      dark: { now:"#d9a184", nowSoft:"#3b2a21", nowEdge:"#6d4a36",
+              was:"#8fb6d2", wasSoft:"#1f2d38", wasEdge:"#3d5a70" } },
+
+    { id:"ember", name:"Ember / Cerulean",
+      note:"Same axis, more chroma in both directions. Easier to tell apart at a glance and at speed "
+         + "— the question is whether it is too loud to sit behind prose all day.",
+      light:{ now:"#ad5a2b", nowSoft:"#fde5d0", nowEdge:"#e3a878",
+              was:"#2f6f95", wasSoft:"#d9e9f4", wasEdge:"#84bcd9" },
+      dark: { now:"#e6a87f", nowSoft:"#402b1c", nowEdge:"#7d5238",
+              was:"#7cbadd", wasSoft:"#1b2f3b", wasEdge:"#356178" } },
+
+    { id:"rose", name:"Rose / Slate",
+      note:"Drops orange entirely. Rose sits at ~350° — near danger in hue, but pink-leaning and low "
+         + "in chroma, so it reads as a tint rather than an alarm. Slate is cooler and quieter than "
+         + "steel. The pair to check hardest against --danger.",
+      light:{ now:"#a4536b", nowSoft:"#fbe3ea", nowEdge:"#dda6b7",
+              was:"#4a6491", wasSoft:"#e3e8f6", wasEdge:"#a6b5d9" },
+      dark: { now:"#d99ab0", nowSoft:"#3a2530", nowEdge:"#6b4354",
+              was:"#97aada", wasSoft:"#23283a", wasEdge:"#454f72" } },
+
+    { id:"quiet", name:"Sand / Mist",
+      note:"Near-neutral: barely any chroma at all. Tests the opposite hypothesis — that on a quiet "
+         + "writing desk the tint only has to be *noticeable*, not *coloured*. Strip the hue and "
+         + "this one barely changes, which is the point.",
+      light:{ now:"#7d6353", nowSoft:"#f2ebe3", nowEdge:"#cfbdaa",
+              was:"#566b7a", wasSoft:"#e7edf1", wasEdge:"#b1c2ce" },
+      dark: { now:"#c2a894", nowSoft:"#332b25", nowEdge:"#5c4c3f",
+              was:"#9db3c0", wasSoft:"#232b31", wasEdge:"#465661" } }
+  ];
+
+  let palIndex = 0;
+
+  function isDark() {
+    const attr = document.documentElement.getAttribute("data-theme");
+    if (attr === "dark") return true;
+    if (attr === "light") return false;
+    return matchMedia("(prefers-color-scheme: dark)").matches;
+  }
+
+  function applyPalette() {
+    const p = PALETTES[palIndex];
+    const c = isDark() ? p.dark : p.light;
+    const r = document.documentElement.style;
+    r.setProperty("--diff-now", c.now);
+    r.setProperty("--diff-now-soft", c.nowSoft);
+    r.setProperty("--diff-now-edge", c.nowEdge);
+    r.setProperty("--diff-was", c.was);
+    r.setProperty("--diff-was-soft", c.wasSoft);
+    r.setProperty("--diff-was-edge", c.wasEdge);
+    document.getElementById("pal-note").textContent = p.note;
+    for (const b of document.querySelectorAll("#pal-picker button")) {
+      b.classList.toggle("on", b.dataset.pal === p.id);
+    }
+  }
+
+  function buildPalPicker() {
+    const host = document.getElementById("pal-picker");
+    PALETTES.forEach((p, i) => {
+      const b = document.createElement("button");
+      b.type = "button";
+      b.dataset.pal = p.id;
+      const c = isDark() ? p.dark : p.light;
+      b.innerHTML = `<span class="chips"><i style="background:${c.nowSoft};box-shadow:inset 0 -3px 0 ${c.nowEdge}"></i>`
+                  + `<i style="background:${c.wasSoft};box-shadow:inset 0 -3px 0 ${c.wasEdge}"></i></span>${p.name}`;
+      b.addEventListener("click", () => { palIndex = i; applyPalette(); buildPalPicker(); });
+      host.append(b);
+    });
+    applyPalette();
+  }
+
+  document.getElementById("desat").addEventListener("change", (e) => {
+    document.body.classList.toggle("hue-stripped", e.target.checked);
+  });
+
+  // The viewer's theme toggle stamps data-theme on <html>; the palette has to
+  // follow it, or a switch leaves the previous theme's tints in place.
+  new MutationObserver(() => { document.getElementById("pal-picker").innerHTML = ""; buildPalPicker(); })
+    .observe(document.documentElement, { attributes: true, attributeFilter: ["data-theme"] });
+  matchMedia("(prefers-color-scheme: dark)").addEventListener("change", () => {
+    document.getElementById("pal-picker").innerHTML = ""; buildPalPicker();
+  });
+
+  buildPalPicker();
+  renderAll();
+  renderPreviews();   // static — deliberately not re-rendered as SNAPS changes
+</script>
+
+</body>
+</html>

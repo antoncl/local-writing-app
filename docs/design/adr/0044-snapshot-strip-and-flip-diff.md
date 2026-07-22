@@ -4,8 +4,10 @@
 - Feature: #6 · Companion: ADR-0043 (the model) · Follows: ADR-0013 (the scrubber), ADR-0030 (the
   design language), ADR-0038 §A (compact at rest), ADR-0042 (the layer picker, the same gesture on
   the hierarchy axis)
-- Evidence: an interactive mockup built on the real token layer and iterated with Anton over one
-  session — the geometry, the keys, and the diff rendering below were all *tried*, not sketched.
+- Evidence: [`../mockups/0044-snapshot-strip.html`](../mockups/0044-snapshot-strip.html) — an
+  interactive mockup on the real token layer, iterated with Anton over one session. The geometry, the
+  keys and the diff rendering below were all *tried*, not sketched. Open it in a browser; it is a
+  single self-contained file with fixture data and no build step.
 
 ## Context
 
@@ -75,15 +77,29 @@ they bunch.
 can mean *"a week passed"* or *"a snapshot used to be there"*. A lone explicit notch far left is
 "the oldest thing I chose to keep", not "the oldest thing that existed".
 
-### E. The track never changes width
+### E. Nothing inside the strip may change the track's width
 
 Notches are positioned as percentages of the track, so anything beside it that grows or disappears
 slides every notch along the timeline — the strip silently claims a snapshot happened at a different
-time than it did a moment earlier. **A timeline that moves when you use it cannot be read.**
+time than it did a moment earlier. **A timeline that moves *because you used it* cannot be read.**
 
 Therefore: everything sharing the strip's row is **fixed width** (the camera is a fixed square in
 both states), and everything variable — the `Snapshot · 2 hours ago` label above all — lives in the
 actions row, which only exists while parked and can be any width it likes.
+
+**This is emphatically not "the track is a fixed size".** The track is fluid and **must** rescale
+with the editor pane: it fills whatever width the pane gives it, and the notches keep their
+proportional positions, so a resized pane shows the same timeline larger or smaller. A fixed-width
+track in a resizable pane would leave dead space or overflow, and would look broken.
+
+The invariant is about *cause*, not *dimension*:
+
+> The track's width is a function of the pane's width **and nothing else**. Parking on a notch,
+> labels appearing, controls changing state — none of these may move a notch.
+
+Resizing the pane moves every notch, and that is correct: the author changed the container, so the
+timeline redraws to fit. What must never happen is the timeline shifting under a gesture that was
+about *reading* it.
 
 ### F. Comparison is a flip, not a split
 
@@ -132,9 +148,20 @@ good*.
 
 The pair reads **warm = live, cool = archived** — the past reading cooler is an intuition most people
 already have, and it puts the two on an axis rather than making them arbitrary. Each is a
-`--diff-*` / `-soft` / `-edge` triple defined for both themes, tinted against the surface the way
-`--mutation-color` is. The light pair needs to be deeper than the dark one: a wash that reads on the
-dark surface is usually too faint on white.
+`--diff-*` / `-soft` / `-edge` triple defined for both themes.
+
+Three constraints are settled; the specific pair is not, and is chosen by eye against real prose
+(the mockup carries a bench with four candidates and a greyscale toggle):
+
+- **Equal chroma across the pair.** If one tint is more saturated than the other it reads as *more
+  important*, and the pair stops meaning *then vs. now* and starts meaning *significant vs.
+  incidental*.
+- **Tuned per theme, never inverted.** A wash that reads on the dark surface is usually too faint on
+  white, so the light pair carries a larger lightness step than the dark one.
+- **Hue must not be the only channel.** Roughly 1 in 12 men has a colour-vision deficiency, and
+  warm-vs-cool is the axis most affected. Each tint therefore carries a darker **edge** rule beneath
+  it, and the pair must stay distinguishable in greyscale — an underline survives what a wash does
+  not.
 
 ### I. Keys: two axes, no held modifier
 
@@ -199,12 +226,15 @@ and nothing about the layout — sketching that is how ADR-0005 acquired authori
 
 1. **The scale ticks may be over-explaining.** If the spacing reads on its own, `1h/1d/1w` is clutter
    on a writing desk.
-2. **A narrow pane.** Percentages reflow, so a pane resize slides every notch — correct, but it may
-   read as movement; and on a narrow pane the minimum gap starts doing real work, compressing a
-   cluster into evenly-spaced ticks that no longer reflect time.
+2. **A narrow pane.** Rescaling with the pane is required (§E), but on a *narrow* pane the minimum
+   gap starts doing real work — compressing a cluster into evenly-spaced ticks that no longer
+   reflect time. At some width the honest answer may be to stop pretending the spacing is
+   proportional.
 3. **Discoverability of the compact strip.** It may now be quiet enough that a new author never
    learns snapshots exist.
 4. **The description's presentation** (K).
+5. **Which candidate pair** (H). The constraints are settled; the choice is an eye judgement about
+   what is restful behind prose for an hour, in both themes.
 
 ## Test surface
 

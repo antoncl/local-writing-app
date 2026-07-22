@@ -1,10 +1,10 @@
 # ADR-0045: Scope is a property of the unit of work, not of the process
 
-- Status: **Proposed** — 2026-07-22. Drafted from Anton's framing of the book as a build target with
+- Status: **Accepted** — 2026-07-22 (Anton, PR #389). Drafted from his framing of the book as a build target with
   the ancestor projects as its dependencies. Its two open questions — the cached title and the
   last-migration result — were answered by him the same day; see the closing section. Reviewed on a
   second thread, whose four corrections are §1 (scope is captured when the work is *initiated*), the
-  wire asymmetry in §1, §5 (the choke point) and the restart note in Consequences. Awaiting approval.
+  wire asymmetry in §1, §5 (the choke point) and the restart note in Consequences.
 - Feature: #7 · Issues: #381 (the data-loss symptom), #307 (the in-memory index it unblocks)
 - Follows: ADR-0005 (book as the resolution boundary), ADR-0039 (the hierarchy model),
   ADR-0040 (the node index), ADR-0042 (the bounded authoring layer L — **this ADR generalises its

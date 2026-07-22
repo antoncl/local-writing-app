@@ -127,6 +127,18 @@ class NodeIndex:
     # is deterministic — the same files produce the same index — and fixing it
     # moves that file's mtime, so caching it is both correct and self-healing.
     degraded: bool = False
+    # Set when a node file was found but its identity could not be read —
+    # malformed front matter, an unparseable chat session. The file is on disk
+    # and may well claim an id, but the index cannot know which, so **`by_id` is
+    # no longer a complete answer to "does this id exist"** (#379).
+    #
+    # Only destructive consumers need care. Reading a stale index shows one
+    # entry less; `_purge_references_to` rewriting the user's files on the same
+    # assumption destroys links to a node that is merely mistyped, and fixing
+    # the typo does not bring them back. Unlike `degraded`, this **is**
+    # persisted: it is a property of the files, not the environment, so a warm
+    # load must inherit it or the guard evaporates on the second open.
+    has_unparsed_nodes: bool = False
     # The shadow warnings the last `resolve()` contributed, so a re-resolve can
     # retract them instead of duplicating them.
     _shadow_warnings: list[str] = field(default_factory=list, repr=False)

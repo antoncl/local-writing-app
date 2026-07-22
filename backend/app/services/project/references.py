@@ -340,6 +340,7 @@ class ReferencesMixin:
                 data = self._read_yaml(path)
             except Exception as exc:
                 index.errors.append(f"Failed to read chat session {path.name}: {exc}")
+                index.has_unparsed_nodes = True
                 # Same rule as the schema read: a chat we could not open is
                 # missing from the index entirely, and its file is unchanged, so
                 # a snapshot would keep it missing across every later open.
@@ -401,6 +402,8 @@ class ReferencesMixin:
             node_id = self._require_node_id(path, front_matter)
         except ProjectServiceError as exc:
             index.errors.append(exc.message)
+            # The file is here; its identity is not. See `has_unparsed_nodes`.
+            index.has_unparsed_nodes = True
             return
         duplicate = index.entry_for_layer(node_id, layer.id)
         if duplicate is not None:
@@ -487,6 +490,9 @@ class ReferencesMixin:
                 front_matter = self._read_front_matter_only(path, strict=True)
             except ProjectServiceError as exc:
                 index.errors.append(exc.message)
+                # A file on disk whose id we could not read — so `by_id` stops
+                # being a complete answer to "does this id exist" (#379).
+                index.has_unparsed_nodes = True
                 continue
 
             raw_node_id = front_matter.get("id")

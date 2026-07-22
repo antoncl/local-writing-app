@@ -141,5 +141,60 @@ class PurgeStillRemovesDanglingReferencesTests(ReferencePurgeTestCase):
         self.assertEqual(self._refs_of("honor"), ["seren"])
 
 
+class PurgeRefusesToActOnIncompleteKnowledgeTests(ReferencePurgeTestCase):
+    """`by_id` answers "which ids did we successfully parse", not "which ids
+    exist". A file with malformed front matter is on disk, very possibly
+    claiming an id, and absent from the index — so treating absence as
+    non-existence destroys links to a node that is merely mistyped, and fixing
+    the typo does not bring them back (#379).
+
+    An unquoted colon in a `title:` is the single likeliest way a user of a
+    file-based app produces this, by hand-editing exactly as the format invites.
+    """
+
+    def _break_front_matter(self, path: Path) -> None:
+        path.write_text(
+            path.read_text(encoding="utf-8").replace("title: Seren (universe)", "title: Seren: The Elder"),
+            encoding="utf-8",
+        )
+
+    def test_an_unparseable_ancestor_stops_the_purge(self) -> None:
+        self._write_lore(self.universe, "seren", "Seren (universe)")
+        self._write_lore(self.root, "seren", "Seren (book)")
+        self._write_lore(self.root, "honor", "Honor", refs=["seren"])
+        self._break_front_matter(self.universe / "lore" / "seren.md")
+        index = self.service._build_node_index(self.root)
+        # Premise: the ancestor really is invisible to the index.
+        self.assertEqual([e.source_layer_label for e in index.candidates["seren"]], ["Book 1"])
+
+        self.service.delete_lore_entry("seren")
+
+        self.assertIn("seren", (self.root / "lore" / "honor.md").read_text(encoding="utf-8"))
+
+    def test_the_flag_survives_a_snapshot_round_trip(self) -> None:
+        """The guard would otherwise evaporate on the second open — the index
+        is cached, and a warm load that dropped the flag would purge exactly as
+        before #379."""
+        self._write_lore(self.universe, "seren", "Seren (universe)")
+        self._break_front_matter(self.universe / "lore" / "seren.md")
+
+        cold = self.service._build_node_index(self.root)
+        warm = self.service._build_node_index(self.root)
+
+        self.assertTrue(cold.has_unparsed_nodes)
+        self.assertTrue(warm.has_unparsed_nodes, "a warm load dropped the guard")
+
+    def test_a_clean_project_still_purges(self) -> None:
+        """The flag must not be set by ordinary conditions, or the guard turns
+        the purge off permanently and dangling references never get cleaned."""
+        self._write_lore(self.root, "seren", "Seren (book)")
+        self._write_lore(self.root, "honor", "Honor", refs=["seren"])
+        self.assertFalse(self.service._build_node_index(self.root).has_unparsed_nodes)
+
+        self.service.delete_lore_entry("seren")
+
+        self.assertNotIn("seren", (self.root / "lore" / "honor.md").read_text(encoding="utf-8"))
+
+
 if __name__ == "__main__":
     unittest.main()

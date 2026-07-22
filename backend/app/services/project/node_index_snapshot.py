@@ -211,6 +211,10 @@ def serialize(
         ],
         "warnings": index.collected_warnings(),
         "errors": list(index.errors),
+        # Persisted, unlike `degraded`: it is a property of the *files*, and a
+        # warm load that lost it would let `_purge_references_to` rewrite the
+        # user's files on the second open exactly as it did before #379.
+        "has_unparsed_nodes": index.has_unparsed_nodes,
     }
     return json.dumps(payload)
 
@@ -339,6 +343,9 @@ def _rehydrate(payload: dict, layers: list[IndexLayer]) -> NodeIndex:
             raise ValueError(f"{key} is not a list of strings")
     index.warnings = list(payload["warnings"])
     index.errors = list(payload["errors"])
+    if not isinstance(payload["has_unparsed_nodes"], bool):
+        raise ValueError("has_unparsed_nodes is not a bool")
+    index.has_unparsed_nodes = payload["has_unparsed_nodes"]
     # Rebuilds `by_id`, `edges_by_src`, the reverse map and the shadow warnings
     # — the same call that ends a cold build, so a rehydrated index and a freshly
     # built one are the same object by construction rather than by agreement.

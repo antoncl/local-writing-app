@@ -17,6 +17,7 @@ Method bodies moved verbatim. Shared helpers resolve through the MRO:
 
 from __future__ import annotations
 
+import logging
 from pathlib import Path
 from typing import Any
 
@@ -29,6 +30,8 @@ from app.models import (
 )
 from app.services.project.errors import ProjectServiceError
 from app.services.project.node_index import NodeIndex
+
+log = logging.getLogger(__name__)
 
 
 class MetadataValuesMixin:
@@ -375,6 +378,21 @@ class MetadataValuesMixin:
         # user's own files, irreversibly, to strip links that had just become
         # right — while the read-side `_strip_dangling_references` asked the
         # correct question (`by_id.get`) all along.
+        if index.has_unparsed_nodes:
+            # We cannot enumerate what still exists, and this method's only
+            # action is an irreversible rewrite of the user's files. One
+            # mistyped `title:` in an ancestor would otherwise strip every link
+            # to that node — and fixing the typo would not bring them back.
+            # Skipping costs nothing durable: the read-side healer already hides
+            # dangling references, and the next delete after the file parses
+            # cleans up (#379).
+            log.warning(
+                "Skipping the reference purge for %s: %d node file(s) could not be parsed, "
+                "so which ids still exist is unknown.",
+                self.root_path,
+                len(index.errors),
+            )
+            return
         purge_ids = {node_id for node_id in purge_ids if node_id not in index.by_id}
         if not purge_ids:
             return

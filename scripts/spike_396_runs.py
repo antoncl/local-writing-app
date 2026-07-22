@@ -103,41 +103,57 @@ def snap(pos: int, intervals: list[tuple[int, int]], *, left: bool) -> int:
     return pos
 
 
-def word_runs(was: str, now: str) -> list[dict[str, str]]:
-    """Word-level runs within one block, with boundaries snapped (constraint 2)."""
-    a, b = tokenize(was), tokenize(now)
-    a_off = _offsets(a)
-    b_off = _offsets(b)
-    a_int, b_int = protected_intervals(was), protected_intervals(now)
+Region = tuple[int, int, int, int]  # (was start, was end, now start, now end)
 
-    # Changed regions as character ranges on each side.
-    regions: list[tuple[int, int, int, int]] = []
-    for op, i1, i2, j1, j2 in difflib.SequenceMatcher(None, a, b, autojunk=False).get_opcodes():
-        if op == "equal":
-            continue
-        regions.append((a_off[i1], a_off[i2], b_off[j1], b_off[j2]))
 
-    # Expand out of every construct, then merge anything that now overlaps.
+def _expand_out_of_constructs(
+    regions: list[Region],
+    a_int: list[tuple[int, int]],
+    b_int: list[tuple[int, int]],
+) -> list[Region]:
+    """Grow every changed region until no boundary sits inside a construct.
+
+    Expanding can make two regions touch, so this merges as it goes and repeats
+    until nothing moves.
+    """
     changed = True
     while changed:
         changed = False
-        grown: list[tuple[int, int, int, int]] = []
-        for a1, a2, b1, b2 in regions:
-            n = (
+        grown: list[Region] = []
+        for region in regions:
+            a1, a2, b1, b2 = region
+            wider = (
                 snap(a1, a_int, left=True),
                 snap(a2, a_int, left=False),
                 snap(b1, b_int, left=True),
                 snap(b2, b_int, left=False),
             )
-            if n != (a1, a2, b1, b2):
+            if wider != region:
                 changed = True
-            if grown and (n[0] <= grown[-1][1] or n[2] <= grown[-1][3]):
+            if grown and (wider[0] <= grown[-1][1] or wider[2] <= grown[-1][3]):
                 prev = grown[-1]
-                grown[-1] = (prev[0], max(prev[1], n[1]), prev[2], max(prev[3], n[3]))
+                grown[-1] = (prev[0], max(prev[1], wider[1]), prev[2], max(prev[3], wider[3]))
                 changed = True
             else:
-                grown.append(n)
+                grown.append(wider)
         regions = grown
+    return regions
+
+
+def word_runs(was: str, now: str) -> list[dict[str, str]]:
+    """Word-level runs within one block, with boundaries snapped (constraint 2)."""
+    a, b = tokenize(was), tokenize(now)
+    a_off, b_off = _offsets(a), _offsets(b)
+
+    # Changed regions as character ranges on each side.
+    regions: list[Region] = [
+        (a_off[i1], a_off[i2], b_off[j1], b_off[j2])
+        for op, i1, i2, j1, j2 in difflib.SequenceMatcher(None, a, b, autojunk=False).get_opcodes()
+        if op != "equal"
+    ]
+    regions = _expand_out_of_constructs(
+        regions, protected_intervals(was), protected_intervals(now)
+    )
 
     out: list[dict[str, str]] = []
     a_cursor = 0

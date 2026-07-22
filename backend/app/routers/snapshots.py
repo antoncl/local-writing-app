@@ -8,7 +8,14 @@ from __future__ import annotations
 
 from fastapi import APIRouter
 
-from app.models import Scene, Snapshot, SnapshotDetail, SnapshotList
+from app.models import (
+    Scene,
+    Snapshot,
+    SnapshotDetail,
+    SnapshotDiff,
+    SnapshotDiffRequest,
+    SnapshotList,
+)
 from app.runtime import service, translate_errors
 
 router = APIRouter()
@@ -47,3 +54,19 @@ def restore_snapshot(scene_id: str, snapshot_id: str) -> Scene:
     """
     with translate_errors():
         return service.restore_snapshot(scene_id, snapshot_id)
+
+
+@router.post(
+    "/api/scenes/{scene_id}/snapshots/{snapshot_id}/diff", response_model=SnapshotDiff
+)
+def diff_snapshot(scene_id: str, snapshot_id: str, live: SnapshotDiffRequest) -> SnapshotDiff:
+    """Provenance-tagged runs between the snapshot and the live state.
+
+    POST, and the live state travels in the request: autosave lags the buffer by
+    up to six seconds, and parking on a notch is a *reading* gesture that must
+    not write. One call, at the discrete moment the author parks — the runs carry
+    all the text, so Both, Now and Snapshot are three filters over one payload
+    (ADR-0044 §G).
+    """
+    with translate_errors():
+        return service.diff_snapshot(scene_id, snapshot_id, live)

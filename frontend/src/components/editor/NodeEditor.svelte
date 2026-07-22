@@ -4,6 +4,7 @@
   import MutationTimeline from "@/components/editor/MutationTimeline.svelte";
   import MutationScrubber from "@/components/editor/MutationScrubber.svelte";
   import SnapshotStrip from "@/components/editor/SnapshotStrip.svelte";
+  import EditorRail from "@/components/editor/EditorRail.svelte";
   import ReadOnlyBodyOverlay from "@/components/editor/body/ReadOnlyBodyOverlay.svelte";
   import { LoreScrubController } from "@/lib/stores/loreScrub.svelte";
   import { SnapshotStripController } from "@/lib/stores/snapshotStrip.svelte";
@@ -163,8 +164,29 @@
   $effect(() => {
     snapshots.flushScene = onFlushScene ?? null;
     snapshots.onRestored = onSceneRestored ?? null;
+    // What the diff compares against: the BUFFER, not the file. Autosave lags
+    // by up to six seconds, so the file is not reliably what the author is
+    // looking at — and parking is a reading gesture, so flushing to make it
+    // current would make reading write (ADR-0044 §G).
+    snapshots.readLive = () => ({
+      body: proseBodyView?.getBody() ?? scene?.body ?? "",
+      title,
+      status,
+      metadata,
+    });
     return snapshots.load(documentKind === "scene" ? (scene?.id ?? null) : null);
   });
+
+  // The rail flips with the body (§F). Kept apart from `effectiveOverrides`:
+  // that axis draws a glyph, and a snapshot difference must never have one.
+  const VIEW_LABEL = { both: "both versions", now: "the scene now", was: "the snapshot" } as const;
+  let snapshotRibbon = $derived(
+    `Snapshot · ${relativeTime(snapshots.current?.captured_at ?? "")} · reading ${VIEW_LABEL[snapshots.view]}`,
+  );
+
+  let snapshotCompare = $derived(
+    snapshotParked ? { fields: snapshots.fields, side: snapshots.fieldSide() } : null,
+  );
 
   // Effective intrinsics at the scrub point. Title/body may be mutated too
   // (ADR-0009 amendment) — scope is total, the whole card travels.
@@ -194,35 +216,6 @@
     };
   });
 
-  // Rail width is user-resizable via the left-edge drag handle, persisted
-  // across sessions. Clamped so the rail can be made slimmer or wider but
-  // never collapses the body.
-  const RAIL_MIN = 220;
-  const RAIL_MAX = 560;
-  function loadRailWidth(): number {
-    const stored = Number(localStorage.getItem("editorRailWidth"));
-    return Number.isFinite(stored) && stored >= RAIL_MIN && stored <= RAIL_MAX ? stored : 280;
-  }
-  let railWidth = $state(loadRailWidth());
-  let railEl: HTMLElement | undefined = $state();
-  let railResizing = $state(false);
-  let railRightEdge = 0;
-  function startRailResize(event: MouseEvent) {
-    event.preventDefault();
-    railResizing = true;
-    railRightEdge = railEl ? railEl.getBoundingClientRect().right : event.clientX + railWidth;
-  }
-  function onRailResizeMove(event: MouseEvent) {
-    if (!railResizing) return;
-    // Rail sits on the right edge; dragging its left handle leftward widens it.
-    const next = Math.min(RAIL_MAX, Math.max(RAIL_MIN, railRightEdge - event.clientX));
-    railWidth = next;
-  }
-  function endRailResize() {
-    if (!railResizing) return;
-    railResizing = false;
-    localStorage.setItem("editorRailWidth", String(railWidth));
-  }
   // Per-scene continuation cost rollup. Bound out from ProseBodyView so the
   // header chip stays in the shell (where the rest of the document header
   // lives). Cost state itself is owned by ProseBodyView since the AI
@@ -905,7 +898,8 @@
       excludeId={scene?.id ?? null}
       computedFieldString={computedFieldString}
       effectiveOverrides={scrubbed ? scrub.overrides : null}
-      readOnly={scrubbed}
+      compare={snapshotCompare}
+      readOnly={scrubbed || snapshotParked}
       onEntryTypeChange={(next) => updateEntryType(next)}
       onStatusChange={(next) => updateStatus(next)}
       onMetadataChange={(next) => {
@@ -934,7 +928,6 @@
   {/if}
 {/snippet}
 
-<svelte:window onmousemove={onRailResizeMove} onmouseup={endRailResize} />
 
 <div
   class="editor-panel"
@@ -1042,7 +1035,7 @@
       <ReadOnlyBodyOverlay
         html={snapshots.bodyHtml}
         label="Snapshot body (read-only)"
-        ribbon={`Snapshot · ${relativeTime(snapshots.current?.captured_at ?? "")}`}
+        ribbon={snapshotRibbon}
         tone="snapshot"
       />
     {/if}
@@ -1099,43 +1092,7 @@
   {/if}
 
   {#if scene && metadataSchema && !railIsPane}
-    {#if railOpen}
-      <aside class="editor-rail" class:resizing={railResizing} style={`width: ${railWidth}px`} bind:this={railEl} aria-label={`${documentLabel} details`}>
-        <button
-          class="rail-resize"
-          type="button"
-          title="Drag to resize details"
-          aria-label="Resize details rail"
-          onmousedown={startRailResize}
-        ></button>
-        <div class="rail-head">
-          <span class="rail-head-label">Details</span>
-          <button
-            class="rail-collapse"
-            type="button"
-            title="Collapse details"
-            aria-label="Collapse details"
-            onclick={() => (railOpen = false)}
-          >
-            <i class="ti ti-layout-sidebar-right-collapse" aria-hidden="true"></i>
-          </button>
-        </div>
-        <div class="rail-scroll">
-          {@render metaContent()}
-        </div>
-      </aside>
-    {:else}
-      <button
-        class="rail-tab"
-        type="button"
-        title="Show details"
-        aria-label="Show details"
-        onclick={() => (railOpen = true)}
-      >
-        <i class="ti ti-layout-sidebar-right-expand" aria-hidden="true"></i>
-        <span class="rail-tab-label">Details</span>
-      </button>
-    {/if}
+    <EditorRail bind:open={railOpen} label={`${documentLabel} details`} content={metaContent} />
   {/if}
 
   {#if documentKind === "lore" && scene && scrub.units.length > 0}
@@ -1217,134 +1174,14 @@
     grid-column: 1;
     min-width: 0;
   }
-  .editor-panel.has-rail > .editor-rail,
-  .editor-panel.has-rail > .rail-tab {
+  /* `:global` because these elements belong to `EditorRail` now. The placement
+     rule stays here, with the grid that defines the columns — the parent owns
+     where its children sit. `:global()` adds no specificity, so this still
+     outranks the `> *` rule above exactly as it did. */
+  .editor-panel.has-rail > :global(.editor-rail),
+  .editor-panel.has-rail > :global(.rail-tab) {
     grid-column: 2;
     grid-row: 1 / -1;
-  }
-
-  .editor-rail {
-    display: flex;
-    flex-direction: column;
-    position: relative;
-    width: 280px;
-    min-height: 0;
-    background: var(--inset);
-    border-left: 1px solid var(--divider);
-  }
-
-  /* Left-edge drag handle to widen/narrow the rail. */
-  .rail-resize {
-    position: absolute;
-    top: 0;
-    left: -3px;
-    width: 7px;
-    height: 100%;
-    margin: 0;
-    padding: 0;
-    border: 0;
-    border-radius: 0;
-    background: transparent;
-    cursor: col-resize;
-    z-index: 5;
-  }
-
-  .rail-resize:hover {
-    background: linear-gradient(
-      to right,
-      transparent 0 2px,
-      var(--accent) 2px 4px,
-      transparent 4px
-    );
-  }
-
-  .editor-rail.resizing {
-    user-select: none;
-  }
-
-  .editor-rail.resizing .rail-resize {
-    background: linear-gradient(
-      to right,
-      transparent 0 2px,
-      var(--accent) 2px 4px,
-      transparent 4px
-    );
-  }
-
-  .rail-head {
-    display: flex;
-    align-items: center;
-    gap: 7px;
-    flex: 0 0 auto;
-    padding: 10px 12px;
-    border-bottom: 1px solid var(--divider, var(--divider));
-  }
-
-  .rail-head-label {
-    flex: 1;
-    font-size: var(--fs-xs);
-    font-weight: 800;
-    letter-spacing: 0.09em;
-    text-transform: uppercase;
-    color: var(--text-3, var(--text-3));
-  }
-
-  .rail-collapse {
-    display: inline-flex;
-    align-items: center;
-    justify-content: center;
-    flex: 0 0 auto;
-    width: 24px;
-    height: 24px;
-    padding: 0;
-    border: 1px solid transparent;
-    border-radius: 6px;
-    background: transparent;
-    color: var(--text-3);
-    font-size: var(--fs-xl);
-    cursor: pointer;
-  }
-
-  .rail-collapse:hover {
-    background: var(--surface);
-    border-color: var(--divider);
-    color: var(--text-2);
-  }
-
-  .rail-scroll {
-    flex: 1 1 auto;
-    min-height: 0;
-    overflow: auto;
-    overscroll-behavior: contain;
-  }
-
-  /* Collapsed: a 34px vertical edge-tab that reopens the rail. */
-  .rail-tab {
-    display: flex;
-    flex-direction: column;
-    align-items: center;
-    gap: 8px;
-    width: 34px;
-    padding: 12px 0;
-    border: 0;
-    border-left: 1px solid var(--divider);
-    background: var(--inset);
-    color: var(--text-3);
-    font-size: var(--fs-lg);
-    cursor: pointer;
-  }
-
-  .rail-tab:hover {
-    color: var(--text);
-    background: var(--panel);
-  }
-
-  .rail-tab-label {
-    writing-mode: vertical-rl;
-    font-size: var(--fs-xs);
-    font-weight: 700;
-    letter-spacing: 0.09em;
-    text-transform: uppercase;
   }
 
   /* none-shape: the rail IS the pane (assistant / project / structure_node). */

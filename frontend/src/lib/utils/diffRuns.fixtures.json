@@ -1,0 +1,544 @@
+[
+  {
+    "name": "edit-inside-emphasis",
+    "why": "the canonical case from the issue: **a bold phrase** -> **a bolder phrase**",
+    "was": "The tide went out further than **she had ever seen it**, and kept going.",
+    "now": "The tide went out further than **she had ever once seen it**, and kept going.",
+    "runs": [
+      {
+        "kind": "equal",
+        "text": "The tide went out further than ",
+        "stacked": false
+      },
+      {
+        "kind": "was",
+        "text": "**she had ever seen it**",
+        "stacked": false
+      },
+      {
+        "kind": "now",
+        "text": "**she had ever once seen it**",
+        "stacked": false
+      },
+      {
+        "kind": "equal",
+        "text": ", and kept going.",
+        "stacked": false
+      }
+    ]
+  },
+  {
+    "name": "edit-straddles-emphasis-start",
+    "why": "the edit consumes the opening delimiter and the word before it",
+    "was": "She counted the hulls twice and was **very tired** by the end of it.",
+    "now": "She counted the hulls twice and was quite **tired** by the end of it.",
+    "runs": [
+      {
+        "kind": "equal",
+        "text": "She counted the hulls twice and was ",
+        "stacked": false
+      },
+      {
+        "kind": "was",
+        "text": "**very tired**",
+        "stacked": false
+      },
+      {
+        "kind": "now",
+        "text": "quite **tired**",
+        "stacked": false
+      },
+      {
+        "kind": "equal",
+        "text": " by the end of it.",
+        "stacked": false
+      }
+    ]
+  },
+  {
+    "name": "edit-straddles-emphasis-end",
+    "why": "the edit consumes the closing delimiter and the word after it",
+    "was": "She counted the hulls twice and was **very tired** by the end of it.",
+    "now": "She counted the hulls twice and was **very** tired indeed by the end of it.",
+    "runs": [
+      {
+        "kind": "equal",
+        "text": "She counted the hulls twice and was ",
+        "stacked": false
+      },
+      {
+        "kind": "was",
+        "text": "**very tired**",
+        "stacked": false
+      },
+      {
+        "kind": "now",
+        "text": "**very** tired indeed",
+        "stacked": false
+      },
+      {
+        "kind": "equal",
+        "text": " by the end of it.",
+        "stacked": false
+      }
+    ]
+  },
+  {
+    "name": "edit-inside-italic-inside-bold",
+    "why": "nested inline markup — the boundary lands between two delimiter runs",
+    "was": "The gulls had stopped, and **that was the *part* she remembered** afterwards.",
+    "now": "The gulls had stopped, and **that was the *only part* she remembered** afterwards.",
+    "runs": [
+      {
+        "kind": "equal",
+        "text": "The gulls had stopped, and ",
+        "stacked": false
+      },
+      {
+        "kind": "was",
+        "text": "**that was the *part* she remembered**",
+        "stacked": false
+      },
+      {
+        "kind": "now",
+        "text": "**that was the *only part* she remembered**",
+        "stacked": false
+      },
+      {
+        "kind": "equal",
+        "text": " afterwards.",
+        "stacked": false
+      }
+    ]
+  },
+  {
+    "name": "edit-inside-link-text",
+    "why": "the run boundary falls inside [ ... ]",
+    "was": "The eleventh was moored at [the harbour](lore://loc-corrant) all week.",
+    "now": "The eleventh was moored at [the old harbour](lore://loc-corrant) all week.",
+    "runs": [
+      {
+        "kind": "equal",
+        "text": "The eleventh was moored at ",
+        "stacked": false
+      },
+      {
+        "kind": "was",
+        "text": "[the harbour](lore://loc-corrant)",
+        "stacked": false
+      },
+      {
+        "kind": "now",
+        "text": "[the old harbour](lore://loc-corrant)",
+        "stacked": false
+      },
+      {
+        "kind": "equal",
+        "text": " all week.",
+        "stacked": false
+      }
+    ]
+  },
+  {
+    "name": "edit-inside-link-target",
+    "why": "the run boundary falls inside ( ... ) — the target is not prose",
+    "was": "The eleventh was moored at [the harbour](lore://loc-corrant) all week.",
+    "now": "The eleventh was moored at [the harbour](lore://loc-westquay) all week.",
+    "runs": [
+      {
+        "kind": "equal",
+        "text": "The eleventh was moored at ",
+        "stacked": false
+      },
+      {
+        "kind": "was",
+        "text": "[the harbour](lore://loc-corrant)",
+        "stacked": false
+      },
+      {
+        "kind": "now",
+        "text": "[the harbour](lore://loc-westquay)",
+        "stacked": false
+      },
+      {
+        "kind": "equal",
+        "text": " all week.",
+        "stacked": false
+      }
+    ]
+  },
+  {
+    "name": "edit-adjacent-to-mutation-marker",
+    "why": "the marker is an HTML comment in the body and must survive untouched",
+    "was": "Maren did not run. <!-- mutate:entity=char-maren;field=mood;value=stricken;id=m1 --> She had never done the sensible thing quickly.",
+    "now": "Maren did not run. <!-- mutate:entity=char-maren;field=mood;value=stricken;id=m1 --> She had never once done the sensible thing quickly.",
+    "runs": [
+      {
+        "kind": "equal",
+        "text": "Maren did not run. <!-- mutate:entity=char-maren;field=mood;value=stricken;id=m1 --> She had never ",
+        "stacked": false
+      },
+      {
+        "kind": "now",
+        "text": "once ",
+        "stacked": false
+      },
+      {
+        "kind": "equal",
+        "text": "done the sensible thing quickly.",
+        "stacked": false
+      }
+    ]
+  },
+  {
+    "name": "edit-inside-mutation-marker",
+    "why": "the author changed the marker's value — the diff cuts the comment itself",
+    "was": "Maren did not run. <!-- mutate:entity=char-maren;field=mood;value=stricken;id=m1 --> She stood where she was.",
+    "now": "Maren did not run. <!-- mutate:entity=char-maren;field=mood;value=numb;id=m1 --> She stood where she was.",
+    "runs": [
+      {
+        "kind": "equal",
+        "text": "Maren did not run. ",
+        "stacked": false
+      },
+      {
+        "kind": "was",
+        "text": "<!-- mutate:entity=char-maren;field=mood;value=stricken;id=m1 -->",
+        "stacked": false
+      },
+      {
+        "kind": "now",
+        "text": "<!-- mutate:entity=char-maren;field=mood;value=numb;id=m1 -->",
+        "stacked": false
+      },
+      {
+        "kind": "equal",
+        "text": " She stood where she was.",
+        "stacked": false
+      }
+    ]
+  },
+  {
+    "name": "edit-inside-embedded-todo",
+    "why": "a todo anchor wraps prose across two comments; the edit lands between them",
+    "was": "The boats lay <!-- embedded-todo:id=t1;status=open;note=check%20the%20tide -->over on their sides<!-- /embedded-todo --> like something sleeping.",
+    "now": "The boats lay <!-- embedded-todo:id=t1;status=open;note=check%20the%20tide -->over on their black sides<!-- /embedded-todo --> like something sleeping.",
+    "runs": [
+      {
+        "kind": "equal",
+        "text": "The boats lay <!-- embedded-todo:id=t1;status=open;note=check%20the%20tide -->over on their ",
+        "stacked": false
+      },
+      {
+        "kind": "now",
+        "text": "black ",
+        "stacked": false
+      },
+      {
+        "kind": "equal",
+        "text": "sides<!-- /embedded-todo --> like something sleeping.",
+        "stacked": false
+      }
+    ]
+  },
+  {
+    "name": "paragraph-split",
+    "why": "a block boundary appears where there was none",
+    "was": "She counted the hulls twice. The eleventh was the Corrant. Her father was aboard.",
+    "now": "She counted the hulls twice.\n\nThe eleventh was the Corrant. Her father was aboard.",
+    "runs": [
+      {
+        "kind": "equal",
+        "text": "She counted the hulls twice.",
+        "stacked": false
+      },
+      {
+        "kind": "was",
+        "text": " The eleventh was the Corrant. Her father was aboard.",
+        "stacked": false
+      },
+      {
+        "kind": "now",
+        "text": "\n\nThe eleventh was the Corrant. Her father was aboard.",
+        "stacked": true
+      }
+    ]
+  },
+  {
+    "name": "paragraph-join",
+    "why": "a block boundary disappears",
+    "was": "She counted the hulls twice.\n\nThe eleventh was the Corrant, and her father was aboard.",
+    "now": "She counted the hulls twice. The eleventh was the Corrant, and her father was aboard.",
+    "runs": [
+      {
+        "kind": "was",
+        "text": "She counted the hulls twice.\n\n",
+        "stacked": true
+      },
+      {
+        "kind": "now",
+        "text": "She counted the hulls twice. ",
+        "stacked": false
+      },
+      {
+        "kind": "equal",
+        "text": "The eleventh was the Corrant, and her father was aboard.",
+        "stacked": false
+      }
+    ]
+  },
+  {
+    "name": "edit-inside-table-cell",
+    "why": "the run boundary falls inside a table row, whose pipes are structural",
+    "was": "| boat | state |\n| --- | --- |\n| Corrant | at sea |\n| Maren's Luck | beached |\n",
+    "now": "| boat | state |\n| --- | --- |\n| Corrant | lost at sea |\n| Maren's Luck | beached |\n",
+    "runs": [
+      {
+        "kind": "equal",
+        "text": "| boat | state |\n| --- | --- |\n| Corrant | ",
+        "stacked": false
+      },
+      {
+        "kind": "now",
+        "text": "lost ",
+        "stacked": false
+      },
+      {
+        "kind": "equal",
+        "text": "at sea |\n| Maren's Luck | beached |\n",
+        "stacked": false
+      }
+    ]
+  },
+  {
+    "name": "edit-spanning-a-list-item-boundary",
+    "why": "list markers are line-leading structure a word diff cannot see",
+    "was": "- run for the high road\n- do not stop for anything you can carry\n",
+    "now": "- run for the high road at once\n- do not stop for anything that can walk\n",
+    "runs": [
+      {
+        "kind": "equal",
+        "text": "- run for the high road",
+        "stacked": false
+      },
+      {
+        "kind": "now",
+        "text": " at once",
+        "stacked": false
+      },
+      {
+        "kind": "equal",
+        "text": "\n- do not stop for anything ",
+        "stacked": false
+      },
+      {
+        "kind": "was",
+        "text": "you",
+        "stacked": false
+      },
+      {
+        "kind": "now",
+        "text": "that",
+        "stacked": false
+      },
+      {
+        "kind": "equal",
+        "text": " can ",
+        "stacked": false
+      },
+      {
+        "kind": "was",
+        "text": "carry",
+        "stacked": false
+      },
+      {
+        "kind": "now",
+        "text": "walk",
+        "stacked": false
+      },
+      {
+        "kind": "equal",
+        "text": "\n",
+        "stacked": false
+      }
+    ]
+  },
+  {
+    "name": "emphasis-added-around-existing-words",
+    "why": "a construct exists on one side only — the snap has nothing to snap to in the other",
+    "was": "She counted the hulls twice and was very tired by the end of it.",
+    "now": "She counted the hulls twice and was **very tired** by the end of it.",
+    "runs": [
+      {
+        "kind": "equal",
+        "text": "She counted the hulls twice and was ",
+        "stacked": false
+      },
+      {
+        "kind": "was",
+        "text": "very tired",
+        "stacked": false
+      },
+      {
+        "kind": "now",
+        "text": "**very tired**",
+        "stacked": false
+      },
+      {
+        "kind": "equal",
+        "text": " by the end of it.",
+        "stacked": false
+      }
+    ]
+  },
+  {
+    "name": "emphasis-removed-from-existing-words",
+    "why": "the same asymmetry the other way round",
+    "was": "She counted the hulls twice and was **very tired** by the end of it.",
+    "now": "She counted the hulls twice and was very tired by the end of it.",
+    "runs": [
+      {
+        "kind": "equal",
+        "text": "She counted the hulls twice and was ",
+        "stacked": false
+      },
+      {
+        "kind": "was",
+        "text": "**very tired**",
+        "stacked": false
+      },
+      {
+        "kind": "now",
+        "text": "very tired",
+        "stacked": false
+      },
+      {
+        "kind": "equal",
+        "text": " by the end of it.",
+        "stacked": false
+      }
+    ]
+  },
+  {
+    "name": "edit-inside-a-heading",
+    "why": "a block whose leading markup is line-structural, not inline",
+    "was": "## The Harbour\n\nThe tide went out further than she had ever seen it.\n",
+    "now": "## The Empty Harbour\n\nThe tide went out further than she had ever seen it.\n",
+    "runs": [
+      {
+        "kind": "equal",
+        "text": "## The ",
+        "stacked": false
+      },
+      {
+        "kind": "now",
+        "text": "Empty ",
+        "stacked": false
+      },
+      {
+        "kind": "equal",
+        "text": "Harbour\n\nThe tide went out further than she had ever seen it.\n",
+        "stacked": false
+      }
+    ]
+  },
+  {
+    "name": "edit-inside-a-blockquote",
+    "why": "every line of the block carries a marker the word diff cannot see",
+    "was": "> When the water leaves like that, it is not leaving.\n> It is drawing breath.\n",
+    "now": "> When the water leaves like that, it is not leaving at all.\n> It is drawing breath.\n",
+    "runs": [
+      {
+        "kind": "equal",
+        "text": "> When the water leaves like that, it is not ",
+        "stacked": false
+      },
+      {
+        "kind": "was",
+        "text": "leaving.",
+        "stacked": false
+      },
+      {
+        "kind": "now",
+        "text": "leaving at all.",
+        "stacked": false
+      },
+      {
+        "kind": "equal",
+        "text": "\n> It is drawing breath.\n",
+        "stacked": false
+      }
+    ]
+  },
+  {
+    "name": "split-shifts-every-later-block",
+    "why": "a split early in the scene shifts every later block by one, so difflib pairs unrelated paragraphs one-to-one; word-diffing those interleaves them into mush that still reassembles and still renders well-formed (#409)",
+    "was": "The tide went out further than she had ever seen it.\n\nShe counted the hulls twice. The eleventh was moored at the harbour.\n\nMaren did not run. She had never done the sensible thing quickly.\n",
+    "now": "The tide went out further than she had ever seen it.\n\nShe counted the hulls twice.\n\nThe eleventh was moored at the harbour.\n\nMaren did not run. She had never done the sensible thing quickly.\n",
+    "runs": [
+      {
+        "kind": "equal",
+        "text": "The tide went out further than she had ever seen it.\n\nShe counted the hulls twice.",
+        "stacked": false
+      },
+      {
+        "kind": "was",
+        "text": " The eleventh was moored at the harbour.",
+        "stacked": false
+      },
+      {
+        "kind": "now",
+        "text": "\n\nThe eleventh was moored at the harbour.",
+        "stacked": true
+      },
+      {
+        "kind": "equal",
+        "text": "\n\nMaren did not run. She had never done the sensible thing quickly.\n",
+        "stacked": false
+      }
+    ]
+  },
+  {
+    "name": "clean-prose-control",
+    "why": "the case the mockup already proves — must stay clean, or the harness is wrong",
+    "was": "Somewhere behind her a shutter began to bang. Nobody came to close it.",
+    "now": "Somewhere behind her, up in the town, a shutter began to bang. Nobody closed it.",
+    "runs": [
+      {
+        "kind": "equal",
+        "text": "Somewhere behind ",
+        "stacked": false
+      },
+      {
+        "kind": "was",
+        "text": "her",
+        "stacked": false
+      },
+      {
+        "kind": "now",
+        "text": "her, up in the town,",
+        "stacked": false
+      },
+      {
+        "kind": "equal",
+        "text": " a shutter began to bang. Nobody ",
+        "stacked": false
+      },
+      {
+        "kind": "was",
+        "text": "came to close",
+        "stacked": false
+      },
+      {
+        "kind": "now",
+        "text": "closed",
+        "stacked": false
+      },
+      {
+        "kind": "equal",
+        "text": " it.",
+        "stacked": false
+      }
+    ]
+  }
+]

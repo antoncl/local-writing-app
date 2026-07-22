@@ -53,14 +53,35 @@
   // never do. But a keyboard author who has tabbed to a notch has to be able to
   // walk the timeline from there, and at Live that means ← is their way in.
   //
-  // A/S/B are the compare axis and belong to slice 2.
+  // A/S/B are the compare axis (#409): Active · Snapshot · Both. Left hand on
+  // the letters, right hand on the arrows, so *when* and *which* are driven at
+  // once. Not ↑↓, which fight page scroll on a long scene.
   let stripEl: HTMLDivElement | null = $state(null);
+
+  // The three compare states, as a list so the buttons and the key map cannot
+  // drift apart.
+  const VIEWS = [
+    { id: "now", key: "A", label: "Active", hint: "the scene as it is now" },
+    { id: "was", key: "S", label: "Snapshot", hint: "the scene as it was" },
+    { id: "both", key: "B", label: "Both", hint: "both versions, adjacent" },
+  ] as const;
 
   function onKeydown(event: KeyboardEvent): void {
     if (event.ctrlKey || event.metaKey || event.altKey) return;
     const target = event.target as HTMLElement | null;
     if (target?.isContentEditable || /^(INPUT|TEXTAREA|SELECT)$/.test(target?.tagName ?? "")) return;
     if (!parked && !(target && stripEl?.contains(target))) return;
+
+    // A/S/B are TOGGLES, not held modifiers. Without this an OS auto-repeat
+    // fires keydown ~30×/s and the view strobes between two states instead of
+    // settling on one (§I). The arrows are exempt: repeating those is a
+    // legitimate way to walk the timeline.
+    const compare = /^[asb]$/i.test(event.key);
+    if (compare && event.repeat) {
+      event.preventDefault();
+      return;
+    }
+
     switch (event.key) {
       case "ArrowLeft":
         strip.step(-1);
@@ -69,7 +90,21 @@
         strip.step(1);
         break;
       case "Escape":
+        // Straight back to Live in one press, not via Both: Esc keeps one
+        // meaning, and B is already the way back to Both.
         void strip.park(null);
+        break;
+      case "a":
+      case "A":
+        strip.toggleView("now");
+        break;
+      case "s":
+      case "S":
+        strip.toggleView("was");
+        break;
+      case "b":
+      case "B":
+        strip.setView("both");
         break;
       default:
         return;
@@ -144,6 +179,23 @@
 {#if parked}
   <div class="snapshot-actions">
     <span class="asof">Snapshot · {relativeTime(strip.current?.captured_at ?? "")}</span>
+
+    <!-- The compare axis. It lives HERE and not beside the track because it is
+         variable-width, and nothing sharing the track's row may change width —
+         that would slide every notch along the timeline (§E). -->
+    <div class="compare" role="group" aria-label="Which version">
+      {#each VIEWS as option (option.id)}
+        <button
+          type="button"
+          class="cmp"
+          class:on={strip.view === option.id}
+          title={`${option.label} — ${option.hint} (${option.key})`}
+          aria-pressed={strip.view === option.id}
+          onclick={() => strip.setView(option.id)}
+        >{option.label}<kbd>{option.key}</kbd></button>
+      {/each}
+    </div>
+
     <span class="keys" aria-hidden="true"><kbd>←</kbd><kbd>→</kbd> when · <kbd>Esc</kbd> live</span>
     <div class="spacer"></div>
     <button type="button" class="act act-restore" disabled={strip.busy} onclick={() => void strip.restore()}>
@@ -368,6 +420,54 @@
     white-space: nowrap;
     font-variant-numeric: tabular-nums;
   }
+  /* Active · Snapshot · Both. A segmented control rather than three loose
+     buttons: they are one choice, and the selected one is the answer to
+     "which version am I reading". */
+  .compare {
+    display: inline-flex;
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    overflow: hidden;
+  }
+  .cmp {
+    display: inline-flex;
+    align-items: center;
+    gap: 5px;
+    font: inherit;
+    font-size: var(--fs-sm);
+    padding: 3px 9px;
+    border: 0;
+    border-left: 1px solid var(--border);
+    background: var(--surface);
+    color: var(--text-2);
+    cursor: pointer;
+    transition: background-color 80ms linear, color 80ms linear;
+  }
+  .cmp:first-child {
+    border-left: 0;
+  }
+  .cmp:hover {
+    background: var(--inset);
+  }
+  .cmp.on {
+    background: var(--accent-soft);
+    color: var(--accent-emphasis);
+    font-weight: 600;
+  }
+  .cmp kbd {
+    font-family: inherit;
+    font-size: var(--fs-xs);
+    color: var(--text-3);
+    border: 1px solid var(--border);
+    border-radius: 3px;
+    padding: 0 3px;
+    background: var(--panel);
+  }
+  .cmp.on kbd {
+    color: var(--accent-emphasis);
+    border-color: currentColor;
+  }
+
   .keys {
     display: inline-flex;
     align-items: center;

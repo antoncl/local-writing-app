@@ -86,6 +86,37 @@ export type SnapshotDetail = {
   body: string;
 };
 
+/** Which version the author is reading: Active · Snapshot · Both (ADR-0044 §I). */
+export type DiffView = "both" | "now" | "was";
+
+/** One provenance-tagged markdown fragment. Warm `now` = in the scene as it is;
+ *  cool `was` = in the snapshot; `equal` is in both.
+ *
+ *  Amendment 1's contract: the text is always a complete markdown fragment, and
+ *  the run is either inline-within-one-block or block-spanning, never both. */
+export type DiffRun = {
+  kind: "equal" | "now" | "was";
+  text: string;
+  /** Spans block boundaries, so it is wrapped around the RENDERED output — no
+   *  inline element can wrap two paragraphs. */
+  stacked?: boolean;
+};
+
+/** One field's two values. Not a diff: a value is atomic, so fields flip. */
+export type FieldDiff = {
+  was: unknown;
+  now: unknown;
+};
+
+export type SnapshotDiff = {
+  snapshot: Snapshot;
+  runs: DiffRun[];
+  /** Only fields whose value differs, keyed by field id. */
+  fields: Record<string, FieldDiff>;
+  title_was: string;
+  title_now: string;
+};
+
 export type LoreEntrySummary = {
   id: string;
   title: string;

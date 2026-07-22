@@ -245,6 +245,15 @@ first run (`--regen` to rebuild them), and a bare invocation runs all three scal
 
 Status: **Proposed** — awaiting approval (#390).
 
+**Code read against `master` at `052895c` (2026-07-22)**, after #305/#306/#307's merged half. Every
+name cited below lives in `backend/app/services/project/` — `node_index.py` (`NodeIndex`,
+`NodeIndexEntry`, `ReferenceEdge`), `references.py` (`_reference_edges_for_entry`,
+`_edges_from_field`), `node_index_patch.py`, `node_index_snapshot.py` (`build_identity`). They are
+cited as evidence that the fusion is real and that `field_id` already exists, not as a contract:
+**if a name has moved, the model below is what binds, and the citation is the thing to update.**
+v1's own citations have already drifted this way — its `_forward_refs_for_entry` (`references.py:373-399`)
+is today's `_reference_edges_for_entry`, and its line numbers predate three PRs.
+
 Established with Anton during the ADR-0045 design pass, and a correction to this ADR's own model
 rather than a new subject: splitting the node index across two documents would leave a reader to
 reconcile them.

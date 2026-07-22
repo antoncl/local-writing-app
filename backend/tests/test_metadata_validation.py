@@ -794,7 +794,14 @@ class MetadataValidationTests(unittest.TestCase):
         self.assertFalse(layers[1].exists)
         self.assertFalse(layers[2].exists)
 
-    def test_schema_layers_infer_base_schema_above_default_project_parent(self) -> None:
+    def test_a_schema_file_above_the_configured_base_does_not_widen_the_walk(self) -> None:
+        """#337, inverting the test that used to codify the widening.
+
+        A `metadata.schema.yaml` in a grandparent used to *become* the base
+        folder whenever the configured one happened to equal `root.parent` —
+        which is what the project chooser writes on every create. The walk now
+        stops where the setting says, and a file's presence changes nothing.
+        """
         self._set_projects_base_folder(self.root.parent)
         self.service._write_yaml(
             self.base / "metadata.schema.yaml",
@@ -809,7 +816,7 @@ class MetadataValidationTests(unittest.TestCase):
 
         self.assertEqual(
             [Path(layer.folder_path) for layer in layers],
-            [self.base, self.universe, self.world, self.root],
+            [self.root.parent, self.root],
         )
 
     def test_valid_scene_metadata_saves(self) -> None:

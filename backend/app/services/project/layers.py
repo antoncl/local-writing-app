@@ -253,16 +253,25 @@ class LayerWalkMixin:
     def _metadata_schema_base_folder(self, root: Path) -> Path | None:
         """Where the walk stops — the outer bound of the layer chain.
 
-        ⚠ **Known behaviour, deliberately preserved by #329 and tracked as
-        #337.** When the configured `projects_base_folder` equals `root.parent`
-        — which the project chooser writes on *every* create, so it is the
-        normal path — this ignores the configured value and substitutes the
-        **outermost** ancestor anywhere up `root.parents` that happens to
+        **The configured `projects_base_folder`, and nothing else** (#337 /
+        ADR-0039 Amendment 2: the root is stipulated, never inferred from a
+        file's presence).
+
+        Until #337 this widened: when the configured value equalled
+        `root.parent` — which the project chooser writes on *every* create, so
+        it was the normal path, not an edge case — it was discarded in favour of
+        the **outermost** ancestor anywhere up `root.parents` that happened to
         contain a `metadata.schema.yaml`. A stray schema file in a grandparent
-        therefore sets the extent of schema layering, the node index and the
-        assistant roster. ADR-0039 Amendment 2 stipulates the root instead;
-        removing the widening is a behaviour change and is *not* part of the
-        #329 refactor. It is now a single edit, here.
+        therefore set the extent of schema layering, the node index *and* the
+        assistant roster, with no declaration and nothing on screen naming it.
+        Under #312 it would have decided which ancestors contribute AI policy,
+        which turns a surprise into a permission surprise.
+
+        The widening was also, accidentally, the only thing giving a
+        UI-created project a chain deeper than two layers. That is why this
+        lands **with** the declaration (#309) and not before it: enumeration
+        now stops where the user said it does, and inheritance is what the
+        project declares within that bound.
         """
         manifest = self._read_yaml(root / MANIFEST_FILENAME)
         settings = manifest.get("settings")
@@ -271,16 +280,7 @@ class LayerWalkMixin:
         base_folder = settings.get("projects_base_folder")
         if not isinstance(base_folder, str) or not base_folder.strip():
             return None
-        configured_base = Path(base_folder).expanduser().resolve()
-        if configured_base == root.parent:
-            schema_ancestors = [
-                ancestor
-                for ancestor in root.parents
-                if ancestor != root.parent and (ancestor / SCHEMA_FILENAME).exists()
-            ]
-            if schema_ancestors:
-                return schema_ancestors[-1].resolve()
-        return configured_base
+        return Path(base_folder).expanduser().resolve()
 
     def _metadata_schema_layer_id(self, folder: Path) -> str:
         return _layer_id_for_folder(folder)

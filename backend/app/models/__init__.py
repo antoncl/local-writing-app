@@ -125,10 +125,12 @@ from app.models.entries import (
 )
 from app.models.project import (
     PROJECT_NODE_FILENAME,
+    AncestorCandidate,
     CreateProjectRequest,
     DirectoryEntry,
     DirectoryListing,
     OpenProjectRequest,
+    ProjectChild,
     ProjectInfo,
     ProjectNode,
     ProjectValidation,
@@ -213,6 +215,7 @@ __all__ = [
     "DeleteMetadataEntryTypeRequest",
     "DeleteMetadataFieldRequest",
     "DeleteMetadataGroupRequest",
+    "AncestorCandidate",
     "DirectoryEntry",
     "DirectoryListing",
     "EffectiveStateResponse",
@@ -253,6 +256,7 @@ __all__ = [
     "PreviewMessage",
     "ProjectCostChatRow",
     "ProjectCostResponse",
+    "ProjectChild",
     "ProjectInfo",
     "PROJECT_NODE_FILENAME",
     "ProjectNode",

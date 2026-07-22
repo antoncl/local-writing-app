@@ -17,13 +17,16 @@ Method bodies moved verbatim. Shared tooling resolves through the MRO:
 
 from __future__ import annotations
 
+import os
 from pathlib import Path
 from typing import Any
 
 from app.models import (
+    AncestorCandidate,
     DirectoryEntry,
     DirectoryListing,
     MetadataSchema,
+    ProjectChild,
     ProjectInfo,
     ProjectNode,
     ProjectValidation,
@@ -34,6 +37,7 @@ from app.models import (
 from app.services.migrations import CURRENT_VERSION as PROJECT_SCHEMA_VERSION
 from app.services.migrations import migrate_project
 from app.services.project.errors import ProjectServiceError
+from app.services.project.layers import INHERITS_KEY, MANIFEST_FILENAME
 from app.services.project.tree_configs import (
     MANUSCRIPT_TREE_CONFIG,
     RESEARCH_TREE_CONFIG,
@@ -145,7 +149,55 @@ class ProjectLifecycleMixin:
             root_path=str(root),
             projects_base_folder=str(self._metadata_schema_base_folder(root) or root.parent),
             ai_policy=ai.get("policy", "off"),
+            ancestors=self._ancestor_candidates_for_api(root),
+            children=self._project_children(root),
         )
+
+    def _ancestor_candidates_for_api(self, root: Path) -> list[AncestorCandidate]:
+        """The enumeration, outermost first — every ancestor folder, flagged.
+
+        Not the declared subset: #311's switcher filters this down, while
+        #318's wizard needs the *un*declared rows in order to offer them, and a
+        non-project folder must be visible and marked rather than absent (an
+        unexplained gap in the list reads as a defect, and its presence is a
+        quiet warning that a folder up there is not what the author assumed).
+        """
+        return [
+            AncestorCandidate(
+                path=str(folder),
+                name=folder.name,
+                is_project=is_project,
+                inherited=inherited,
+            )
+            for folder, is_project, inherited in self.ancestor_candidates(root)
+        ]
+
+    def _project_children(self, root: Path) -> list[ProjectChild]:
+        """Project folders directly inside this one, alphabetically.
+
+        Direct children only — visibility is ancestor-only (ADR-0039), so a
+        level shows its own children and never the whole shelf. Non-project
+        subfolders are omitted here, unlike ancestors: a child roster is a list
+        of places you can open, and `scenes/` is not one.
+        """
+        children: list[ProjectChild] = []
+        try:
+            entries = sorted(root.iterdir(), key=lambda path: path.name.lower())
+        except OSError:
+            return []
+        for folder in entries:
+            if not folder.is_dir() or not (folder / MANIFEST_FILENAME).exists():
+                continue
+            manifest = self._read_yaml(folder / MANIFEST_FILENAME)
+            title = manifest.get("title")
+            children.append(
+                ProjectChild(
+                    path=str(folder),
+                    name=folder.name,
+                    title=title.strip() if isinstance(title, str) and title.strip() else folder.name,
+                )
+            )
+        return children
 
     def update_project_settings(self, request: UpdateProjectSettingsRequest) -> ProjectInfo:
         root = self._require_project()
@@ -164,11 +216,39 @@ class ProjectLifecycleMixin:
         # Partial update: a field left unset is left unchanged.
         if request.ai_policy is not None:
             ai_settings["policy"] = request.ai_policy
+        if request.inherits is not None:
+            manifest[INHERITS_KEY] = self._validated_declaration(request.inherits, root)
         if ai_settings:
             settings["ai"] = ai_settings
         manifest["settings"] = settings
         self._write_yaml(root / "project.yaml", manifest)
         return self.current_project()
+
+    def _validated_declaration(self, declared: list[str], root: Path) -> list[str]:
+        """Turn a requested declaration into manifest entries, or refuse (#309).
+
+        Refuses here rather than dropping-with-a-warning at read time, because
+        the two cases are different: a **write** naming a non-ancestor is a
+        caller error we can reject before it reaches disk, while a *stored*
+        entry that stopped being an ancestor (a folder moved out from under it)
+        is a state the reader must survive. Same rule, different obligation.
+
+        Stored relative to the project so that moving or renaming a shelf does
+        not invalidate every book beneath it.
+        """
+        candidates = {folder for folder, is_project, _ in self.ancestor_candidates(root) if is_project}
+        entries: list[str] = []
+        for raw in declared:
+            folder = Path(raw).expanduser()
+            if not folder.is_absolute():
+                folder = root / folder
+            folder = folder.resolve()
+            if folder not in candidates:
+                raise ProjectServiceError(
+                    f"{folder} is not an ancestor project within the base folder.", 422
+                )
+            entries.append(os.path.relpath(folder, root).replace("\\", "/"))
+        return entries
 
     def _read_ai_settings(self, root: Path) -> dict[str, Any]:
         try:

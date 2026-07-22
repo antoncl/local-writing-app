@@ -7,6 +7,8 @@
   the directory-as-lookup-table, deletion cascading with the scene, the three drift axes with the
   third narrowed to value *reinterpretation*, immutability with migration-at-restore, and the
   advisory-never-blocking rule with its report-quality obligation.
+  · **Amendment 2 (2026-07-22, #395):** the session boundary is the backend's, inferred from save
+  cadence at *N* = 30 minutes — replacing the pane-open wording in the capture-triggers paragraph.
 - Feature: #6 (scopes the "revisions" issue) · Relates: #314 (composite revision) · Companion:
   **ADR-0044** (the surface) · Follows: ADR-0001, ADR-0002, ADR-0003, ADR-0010, ADR-0039
 - Supersedes nothing. Settles the four-way scoping question posed in #6.
@@ -57,6 +59,47 @@ five-sessions-old one — but it reads as a bug when hit without having read thi
 that was removed earlier: `title` was a copy of data already in the byte-copy's front matter, whereas
 a description is original data that exists nowhere else. Same file, opposite reasoning. Its
 presentation is ADR-0044's, and deliberately open.
+
+## Amendment 2 — the session boundary is the backend's (2026-07-22)
+
+Settled on #395 before slice 1, and recorded here because the original wording above described a
+*mechanism* the decision has since replaced. The rule:
+
+> **On a save, if the last save to this scene was more than *N* minutes ago, capture the pre-save
+> state first.**
+
+The wording it replaces — "captured lazily when a pane opens a scene, materialized only if that
+session goes on to dirty the document" — is a **frontend** concept. It makes pane open/close part of
+the contract, needs a new event, and requires the two sides to agree on what a session is. The rule
+above needs none of that: the backend already has the file, its modification time, and the save.
+
+**Capture on session *close* was the first proposal and is rejected**, for three reasons in order of
+weight:
+
+- **The close event is the one thing the app cannot observe reliably.** There is no
+  `pagehide`/`beforeunload` handler today (#369), and a crash, force-quit, OS kill or power loss
+  fires nothing at all. The session that ended badly would be the session with no snapshot — the
+  feature failing exactly where it is meant to help.
+- **Tab lifetime is not a work session.** A browser left open for two weeks with daily editing yields
+  *one* snapshot. The boundary that means something is a gap between **edits**.
+- **It captures the wrong content.** The end-of-session state duplicates Live at the moment it is
+  written. What an author wants back is the *pre-edit* state.
+
+***N* = 30 minutes, and it is a constant, not a setting** — long enough that lunch does not split a
+sitting, short enough that a morning and an evening are separate. A named constant in one place with
+the reasoning beside it, so evidence makes it a one-line change.
+
+A setting earns its place when users genuinely differ, the user can tell which value they want
+*without understanding the implementation*, and a wrong value causes real harm. *N* passes only the
+first: a wrong *N* cannot lose work, and "how many minutes constitutes a new session?" is
+unanswerable without knowing how capture, thinning and pinning interact. The author already has
+controls in both directions that require no knowledge of the rule — press the camera, pin what should
+survive. **A parameter that cannot hurt you has not earned a place in the settings surface.** When
+evidence arrives, the setting to add is the *goal* (how much history to keep), not the *lever*.
+
+**Watch for the sprinter case:** short bursts with sub-*N* gaps collapse a day into one snapshot. If
+that shows up in real use the answer is probably a second trigger — accumulated change since the last
+snapshot — rather than a smaller *N*, because it adapts instead of asking the author to tune it.
 
 ## Context
 
@@ -158,10 +201,11 @@ oblige the *storage* to be delta-encoded, and conflating the two is the error th
 prevent.
 
 **Two capture triggers, with asymmetric retention.** An automatic snapshot at the editing-session
-boundary — captured lazily when a pane opens a scene, materialized only if that session goes on to
-dirty the document, so clean reads cost nothing. This yields at most one per scene per session and
-answers "what did this look like when I sat down". Plus an explicit author-invoked snapshot, as in
-Scrivener. The explicit control alone is insufficient because the feature is worth most precisely when
+boundary, which **the backend decides from save cadence**: on a save, if the last save to this scene
+was more than *N* minutes ago, the pre-save state is captured first
+([Amendment 2](#amendment-2--the-session-boundary-is-the-backends-2026-07-22)). This yields at most
+one per scene per session and answers "what did this look like when I sat down". Plus an explicit
+author-invoked snapshot, as in Scrivener. The explicit control alone is insufficient because the feature is worth most precisely when
 the author forgot to press it; the automatic capture alone is insufficient because only the author
 knows which state was worth marking.
 
@@ -395,6 +439,14 @@ The value of the witness framing is that the feature's correctness criterion bec
 - Assert a snapshot's id differs from its source's, and that `snapshot_of` round-trips to the source.
 - Assert `snapshots/` contributes nothing to the node index: a view over scenes returns the same
   members before and after six captures, and the staleness manifest does not change on capture.
+
+  **Membership alone is not a sufficient assertion, and the reason is a property of this design.**
+  A snapshot's byte-copy claims its *source scene's* id, and the collector drops a second claimant of
+  an id at the same layer. So a walk that reached the store would collide with the live scene, lose,
+  and leave the index looking untouched — the invariant broken and every membership assertion still
+  green. The assertions that survive that are the **staleness manifest** (it fingerprints every file
+  the walk reads) and the **duplicate-id error** (it names both paths). Landed ahead of the store
+  itself, so slice 1 cannot introduce a store that is walked.
 - Capture seven automatic snapshots; assert five remain, that the two dropped are the oldest, and that
   an interleaved explicit snapshot survives regardless of age.
 - Delete the source scene; assert its snapshot directory is gone and nothing is left behind under

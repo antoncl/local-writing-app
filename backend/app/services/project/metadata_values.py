@@ -366,6 +366,18 @@ class MetadataValuesMixin:
             return
         schema = self.read_metadata_schema()
         index = self._build_node_index()
+        # **Only ids that no longer resolve** (#379). Every caller unlinks the
+        # file and writes the structure *before* calling this, so the index
+        # built above is the post-delete truth — and under #334's layered
+        # identity, deleting a node that shadowed an ancestor's promotes the
+        # ancestor instead of removing the id. Those references are still
+        # correct: they now point at the ancestor. Purging them rewrote the
+        # user's own files, irreversibly, to strip links that had just become
+        # right — while the read-side `_strip_dangling_references` asked the
+        # correct question (`by_id.get`) all along.
+        purge_ids = {node_id for node_id in purge_ids if node_id not in index.by_id}
+        if not purge_ids:
+            return
         for entry in list(index.by_id.values()):
             if entry.kind not in {"scene", "lore"}:
                 continue

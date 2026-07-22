@@ -1,0 +1,219 @@
+# ADR-0044: The snapshot strip is the scrubber's third axis; comparison is a flip, not a split
+
+- Status: **Draft** — 0.8.0
+- Feature: #6 · Companion: ADR-0043 (the model) · Follows: ADR-0013 (the scrubber), ADR-0030 (the
+  design language), ADR-0038 §A (compact at rest), ADR-0042 (the layer picker, the same gesture on
+  the hierarchy axis)
+- Evidence: an interactive mockup built on the real token layer and iterated with Anton over one
+  session — the geometry, the keys, and the diff rendering below were all *tried*, not sketched.
+
+## Context
+
+ADR-0043 settles what a snapshot **is** — a witness: prose restored byte-exact, context captured and
+only reported when it has drifted. It deliberately did not design the surface, and was held open as a
+Draft on the grounds that a UX pass would probably find something the model was missing. It did:
+three model-level gaps, folded back into 0043 as amendments (delete, pin, capture-before-restore).
+
+This ADR is that pass. It exists separately for the reason ADR-0039 and ADR-0042 are separate — the
+model and the gesture are each arguable on their own terms, and a reviewer of one should not have to
+accept the other.
+
+## Decision
+
+### A. The strip is the third axis of a control the app already has
+
+Two surfaces already solve *this document has an ordered set of states; pick one; position is the
+mode*: the mutation scrubber on story time (ADR-0013, foot-docked on a lore card) and the layer
+picker on the hierarchy axis (ADR-0042, header-docked). Snapshots are the same problem on **real**
+time, so they get the same gesture rather than a new one. **The burden is on any departure from the
+scrubber, not on the reuse.**
+
+The slot is free: the scrubber renders only for lore (`NodeEditor.svelte`, the `documentKind ===
+"lore"` guard on the `MutationScrubber` mount), and scenes are book-scoped so they carry no layer
+axis either. The scene editor has no axis picker today, so there is no competition for the foot dock
+and no mode to collide with.
+
+This is also a better argument for 0043's scenes-only v1 than the effort one it gives: ADR-0042 had
+to establish that two axes form **an L, not a grid**. Snapshots on lore entries would put *three*
+axes on one card — layer, story time, real time — which is where that problem actually bites.
+
+### B. Position is the mode, and it governs the strip's size too
+
+At **Live** the only action is capture. Parked on a notch, the strip offers **Restore · Pin ·
+Delete** plus the compare toggle. No context menus, nothing behind a right-click — clicking a notch
+already means "view this one", so the actions simply apply to wherever you are.
+
+**Compact at rest.** While writing, the strip is a quiet ruled line: small notches, camera only, no
+labels, transparent until the pointer nears it. Parking is what earns the taller strip, the scale
+ticks and the controls. This is ADR-0038 §A's compact-at-rest / expand-on-engage shape, applied to
+the strip's *size* rather than only its contents.
+
+### C. Notches, not beads; time runs left to right
+
+The scrubber uses round stops on a rail. Snapshots cut **into** the edge instead — so if both axes
+ever appear on one card they read apart at a glance while the gesture stays identical. Tall and
+filled = explicit (kept); short and faint = automatic (thinned).
+
+**Live sits at the right end**, deliberately *not* the scrubber's home-at-left. There, base is
+*earliest*, so home and origin coincide. Here the rest position is the **present**, and time reads
+rightward. Copying the scrubber's home position would make the two strips look alike while reading
+backwards, which is the worse kind of consistency.
+
+### D. Spacing is the timeline, and it cannot be linear
+
+Notches sit at their **age**, so the gaps carry meaning: a tight cluster is an afternoon's work, a
+long run is a week away from the scene. Edits cluster, which is precisely why the spacing is worth
+having — and precisely why linear time fails. One snapshot from last week plus four from this
+morning piles the recent four into an unreadable clump at the right edge, and those are the ones an
+author reaches for.
+
+**A log scale** spreads recent history and compresses deep history. Faint `1h / 1d / 1w` ticks make
+the scale legible rather than merely implied, and a minimum gap keeps notches from touching however
+they bunch.
+
+**Known ambiguity, stated so it is not later mistaken for a defect:** under keep-five thinning, a gap
+can mean *"a week passed"* or *"a snapshot used to be there"*. A lone explicit notch far left is
+"the oldest thing I chose to keep", not "the oldest thing that existed".
+
+### E. The track never changes width
+
+Notches are positioned as percentages of the track, so anything beside it that grows or disappears
+slides every notch along the timeline — the strip silently claims a snapshot happened at a different
+time than it did a moment earlier. **A timeline that moves when you use it cannot be read.**
+
+Therefore: everything sharing the strip's row is **fixed width** (the camera is a fixed square in
+both states), and everything variable — the `Snapshot · 2 hours ago` label above all — lives in the
+actions row, which only exists while parked and can be any width it likes.
+
+### F. Comparison is a flip, not a split
+
+Two synced columns make the reader do the comparison manually, line by line. Flipping the **same
+region** between two states makes the difference announce itself: the eye is poor at parallel
+scanning and excellent at change detection. It also dissolves the sync problem by construction —
+there is only ever one column.
+
+**The colour says which version the text belongs to.** Warm = in the scene **now**; cool = in the
+**snapshot**. Everything else falls out of that one rule: an addition is warm because it exists only
+in the current scene, a deletion is cool because it exists only in the snapshot, and a modification
+is simply the two adjacent. Three cases that could drift apart become one that cannot.
+
+**The tint stays in every compare state, not only "both".** An earlier iteration rendered the single
+states as unmarked prose, on the theory that the same control could then serve reading as well as
+judging. That broke the gesture: with nothing marked, a flip changes words *somewhere* and the eye
+has no anchor. **The tint is the anchor** — the words swap underneath a patch that does not move.
+Only **Live** is unmarked, because there is nothing to compare it against.
+
+**Inline vs stacked is structural, never a length threshold.** A change contained within one block
+renders side by side; a change spanning block boundaries stacks. A word count deciding the layout
+makes it jitter as the author types, and the structural rule matches how the change reads: a
+substitution inside a sentence *is* inline; a rewritten paragraph *is* a block.
+
+**Fields flip, and never interleave.** A field value is atomic — it resolves in one blink — so
+interleaving would only make a cramped row cramped. Same colours, same meaning, no second vocabulary:
+**the colour means temporal provenance everywhere, and location carries the subject.**
+
+### G. This is rendered HTML, not a TipTap decoration layer
+
+The mechanism already exists and is proven by the scrubber: when scrubbed, the card renders a
+read-only effective-body overlay while **the editable TipTap buffer stays mounted and hidden
+underneath**, so unsaved edits survive the round trip untouched.
+
+That is not a workaround, it is the better design on three counts. The live buffer is never touched
+by the feature whose job is not losing words. The inline-vs-stacked layout above is near-intractable
+as ProseMirror decorations and trivial in rendered HTML. And it reuses a pattern the author has
+already seen on lore cards.
+
+### H. Two new colour tokens, warm and cool
+
+Almost every hue is spoken for: teal is the accent, violet is the mutation axis, amber is `--warn`,
+brick is `--danger` (reserved for destructive — and a diff is not an error), slate-blue is lore.
+Red/green is excluded on both accessibility and semantics: this is **before and after**, not *bad and
+good*.
+
+The pair reads **warm = live, cool = archived** — the past reading cooler is an intuition most people
+already have, and it puts the two on an axis rather than making them arbitrary. Each is a
+`--diff-*` / `-soft` / `-edge` triple defined for both themes, tinted against the surface the way
+`--mutation-color` is. The light pair needs to be deeper than the dark one: a wash that reads on the
+dark surface is usually too faint on white.
+
+### I. Keys: two axes, no held modifier
+
+A held modifier was tried and withdrawn. Repeatedly holding <kbd>Shift</kbd> trips Windows
+**FilterKeys**, and five presses fire **Sticky Keys** — and this is a Windows-first app. It is not
+needed anyway: **the compare view is read-only**, so the entire unmodified keyboard is free here and
+nothing has to be a chord.
+
+| keys | axis |
+|---|---|
+| <kbd>←</kbd> <kbd>→</kbd> | **when** — move through the snapshots; right past the newest lands on Live |
+| <kbd>A</kbd> <kbd>S</kbd> <kbd>B</kbd> | **which** — Active · Snapshot · Both |
+| <kbd>Esc</kbd> | back to Live |
+
+Left hand on the letters, right hand on the arrows, so the two axes can be driven at once. Not
+<kbd>↑</kbd><kbd>↓</kbd>, which fight page scroll on a long scene. **A/S/B are toggles, not held
+modifiers, so OS key auto-repeat must be ignored** — otherwise holding one fires `keydown` ~30×/s and
+the view strobes. (The other half of that flicker was rebuilding the notch track on a pure version
+flip; a flip must not touch the strip's DOM.)
+
+### J. The camera is an affordance, so it is never an annotation
+
+Capture takes a camera glyph — it reads immediately, and drawing it inline is cheaper than reaching
+into the icon bundle (#315 is already about trimming that).
+
+**It must not appear on a changed field.** The design language already rules that a mark is never
+both annotation and affordance, which is why `⧉` is the fork button only. And the general rule, which
+is what caps the glyph pile-up across mutations, layer deltas and now snapshots:
+
+> **A glyph marks what is true about the *value*. Colour marks what is true about the *view*.**
+
+`⤳` mutated and `ti-versions` overridden are *permanent properties* — true whenever you look at the
+card, describing where a value came from. A snapshot difference is not a property of the field at
+all: it exists only while parked, and vanishes at Live. Giving it a glyph would put a
+permanent-looking mark on a temporary condition. **Lenses get colour, not glyphs** — and comparison
+state can therefore never add a glyph, however many axes the app grows.
+
+### K. The tooltip, and the description
+
+Hovering a notch gives the capture time on a relative ladder — *5 minutes ago · yesterday ·
+Wednesday 12th* — plus the one-line description if the snapshot has one, and whether it is pinned.
+
+**Most snapshots will have no description**: every automatic one, and every explicit one where the
+author was in flow and did not stop to type. So the empty case is the *common* case, and a
+description is an enrichment on top of the date, never a replacement for it.
+
+**Whether the description replaces or augments the date line is deliberately not decided here.** It
+needs to be tried at implementation. This ADR records the constraint (the absent case must read well)
+and nothing about the layout — sketching that is how ADR-0005 acquired authority it had not earned.
+
+## Non-goals
+
+- **A clean-reading mode for a snapshot.** The tint decision (F) costs the "read the snapshot as
+  plain prose" case. If that turns out to be wanted, it is a separate affordance, not a side effect
+  of the compare mode.
+- **Rendering the drift report anywhere but the strip.** With lore out of v1 scope, two of 0043's
+  three drift axes concern entries the scene editor does not display, so the strip is where the
+  advisory lives.
+- **A snapshot browser across scenes.** The strip is per-scene, as the store is.
+
+## Open — to settle at implementation
+
+1. **The scale ticks may be over-explaining.** If the spacing reads on its own, `1h/1d/1w` is clutter
+   on a writing desk.
+2. **A narrow pane.** Percentages reflow, so a pane resize slides every notch — correct, but it may
+   read as movement; and on a narrow pane the minimum gap starts doing real work, compressing a
+   cluster into evenly-spaced ticks that no longer reflect time.
+3. **Discoverability of the compact strip.** It may now be quiet enough that a new author never
+   learns snapshots exist.
+4. **The description's presentation** (K).
+
+## Test surface
+
+- The track's rendered width is identical at Live and parked on a notch.
+- A pure version flip (A/S/B) does not rebuild the notch DOM, and held keys produce exactly one
+  state change.
+- Changed regions carry their tint in `both`, `now` and `was`; Live renders unmarked.
+- A change within one block renders inline; a change spanning blocks renders stacked — regardless of
+  how many words either side contains.
+- Notch order matches capture order, and positions are monotonic in age under the minimum-gap
+  adjustment.
+- A snapshot with no description renders a tooltip with no empty affordance in it.

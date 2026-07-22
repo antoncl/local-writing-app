@@ -31,6 +31,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+from dataclasses import dataclass
 from functools import lru_cache
 from pathlib import Path
 
@@ -219,13 +220,37 @@ def serialize(
     return json.dumps(payload)
 
 
+@dataclass(frozen=True)
+class LoadedSnapshot:
+    """A usable snapshot, and how far out of date it is.
+
+    `stale` was a verdict until #307 and is now a **measurement**: the index is
+    returned either way, with `changed` naming every path it and the disk
+    disagree about. Empty means fresh. Non-empty is the work list — re-parse
+    these, drop those — which is almost always a handful of files rather than a
+    reason to re-walk thousands.
+
+    The three remaining refusals stay refusals, because none of them yields an
+    index worth patching: `corrupt` and `version` cannot be interpreted at all,
+    and `moved` means the chain itself differs, so the entries' layer positions
+    no longer mean anything.
+    """
+
+    index: NodeIndex
+    changed: tuple[str, ...]
+
+    @property
+    def is_fresh(self) -> bool:
+        return not self.changed
+
+
 def load(
     text: str,
     *,
     root: Path,
     layers: list[IndexLayer],
     manifest: Manifest,
-) -> NodeIndex:
+) -> LoadedSnapshot:
     """Rehydrate, or raise `SnapshotUnusable`.
 
     The order of the checks is the order they get cheaper to be wrong about:
@@ -275,9 +300,7 @@ def load(
         if not isinstance(stored_manifest, dict):
             raise ValueError("manifest is not an object")
         changed = diff_manifests(_manifest_from_raw(stored_manifest), manifest)
-        if changed:
-            raise SnapshotUnusable("stale", f"{len(changed)} path(s) changed, first: {changed[0]}")
-        return _rehydrate(payload, layers)
+        return LoadedSnapshot(_rehydrate(payload, layers), tuple(changed))
     # A payload that parsed but does not have the shape we wrote — a truncated
     # write, a hand-edited file, a bug in a past version. Same verdict as
     # unparseable, and the caller logs it just as loudly.

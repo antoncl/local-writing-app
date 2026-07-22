@@ -23,6 +23,7 @@ from tempfile import TemporaryDirectory
 from app.services.project import node_index_snapshot as snapshot
 from app.services.project.errors import ProjectServiceError
 from app.services.project_service import ProjectService
+from tests.layer_fixtures import declare_full_chain
 
 
 class SnapshotTestCase(unittest.TestCase):
@@ -43,9 +44,7 @@ class SnapshotTestCase(unittest.TestCase):
         self.temp_dir.cleanup()
 
     def _set_base_folder(self, folder: Path) -> None:
-        manifest = self.service._read_yaml(self.root / "project.yaml")
-        manifest.setdefault("settings", {})["projects_base_folder"] = str(folder)
-        self.service._write_yaml(self.root / "project.yaml", manifest)
+        declare_full_chain(self.service, self.root, folder)
 
     def _write_lore(self, folder: Path, node_id: str, title: str, *, refs: list[str] | None = None) -> Path:
         (folder / "lore").mkdir(parents=True, exist_ok=True)

@@ -21,6 +21,7 @@ from tempfile import TemporaryDirectory
 
 from app.services.project.node_index import NodeIndex
 from app.services.project_service import ProjectService
+from tests.layer_fixtures import declare_full_chain
 
 
 def _fingerprint(index: NodeIndex) -> dict[str, object]:
@@ -49,9 +50,7 @@ class PatchTestCase(unittest.TestCase):
         self.root = self.universe / "book01"
         self.service = ProjectService()
         self.service.create_project(self.root, "Book 1")
-        manifest = self.service._read_yaml(self.root / "project.yaml")
-        manifest.setdefault("settings", {})["projects_base_folder"] = str(self.base)
-        self.service._write_yaml(self.root / "project.yaml", manifest)
+        declare_full_chain(self.service, self.root, self.base)
         self.service.create_project(self.universe, "Honorverse")
         self.service.open_project(self.root)
 
@@ -220,7 +219,7 @@ class UnShadowingTests(PatchTestCase):
         (self.root / "lore" / "seren.md").unlink()
 
         patched = self._assert_patch_matches_cold_build()
-        self.assertEqual(patched.by_id["seren"].source_layer_label, "honorverse")
+        self.assertEqual(patched.by_id["seren"].source_layer_label, "Honorverse")
 
     def test_the_promoted_ancestor_arrives_with_its_edges(self) -> None:
         """The silently-wrong case #307 names: a node that reappears with no
@@ -261,7 +260,7 @@ class UnShadowingTests(PatchTestCase):
 
         patched = self._assert_patch_matches_cold_build()
         self.assertEqual(patched.by_id["seren"].source_layer_label, "Book 1")
-        self.assertEqual([e.source_layer_label for e in patched.candidates["seren"]], ["Book 1", "honorverse"])
+        self.assertEqual([e.source_layer_label for e in patched.candidates["seren"]], ["Book 1", "Honorverse"])
         self.assertTrue([w for w in patched.warnings if "shadows" in w])
 
 
@@ -342,7 +341,7 @@ class CandidateOrderTests(PatchTestCase):
 
         patched = self._assert_patch_matches_cold_build()
         self.assertEqual(patched.by_id["seren"].source_layer_label, "Book 1")
-        self.assertEqual([e.source_layer_label for e in patched.candidates["seren"]], ["Book 1", "honorverse"])
+        self.assertEqual([e.source_layer_label for e in patched.candidates["seren"]], ["Book 1", "Honorverse"])
 
     def test_adding_a_shadowed_ancestor_keeps_the_descendant_winning(self) -> None:
         self._write_lore(self.root, "seren", "Seren (book)")

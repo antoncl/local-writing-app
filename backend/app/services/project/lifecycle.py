@@ -328,6 +328,9 @@ class ProjectLifecycleMixin:
         try:
             metadata_schema = self.read_metadata_schema()
             warnings.extend(self._metadata_schema_layer_warnings(root))
+            # A declared ancestor that is no longer one — a folder moved, or a
+            # typo. Dropped by the walk; surfaced here so it is not silent (#309).
+            warnings.extend(self.declared_ancestor_warnings(root))
             errors.extend(self._validate_metadata_schema_definition(metadata_schema))
         except (ProjectServiceError, ValueError) as exc:
             errors.append(f"Invalid metadata schema: {exc}")

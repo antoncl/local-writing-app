@@ -31,6 +31,7 @@ from app.models import (
 from app.runtime import service as svc
 from app.services.project.node_index import ReferenceEdge
 from app.services.project_service import ProjectService
+from tests.layer_fixtures import declare_full_chain
 
 
 def _define_field(field_id: str, field_type: str, name: str) -> None:
@@ -155,9 +156,7 @@ class ShadowedEdgeTests(unittest.TestCase):
         self.root = self.base / "universe" / "book"
         self.service = ProjectService()
         self.service.create_project(self.root, "Shadowing Tests")
-        manifest = self.service._read_yaml(self.root / "project.yaml")
-        manifest.setdefault("settings", {})["projects_base_folder"] = str(self.base)
-        self.service._write_yaml(self.root / "project.yaml", manifest)
+        declare_full_chain(self.service, self.root, self.base)
 
     def tearDown(self) -> None:
         self.temp_dir.cleanup()
@@ -209,9 +208,7 @@ class DegradedInputTests(unittest.TestCase):
         self.root = self.base / "universe" / "book"
         self.service = ProjectService()
         self.service.create_project(self.root, "Degraded Input Tests")
-        manifest = self.service._read_yaml(self.root / "project.yaml")
-        manifest.setdefault("settings", {})["projects_base_folder"] = str(self.base)
-        self.service._write_yaml(self.root / "project.yaml", manifest)
+        declare_full_chain(self.service, self.root, self.base)
 
     def tearDown(self) -> None:
         self.temp_dir.cleanup()

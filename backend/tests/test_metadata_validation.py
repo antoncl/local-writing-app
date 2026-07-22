@@ -26,8 +26,10 @@ from app.models import (
     UpsertMetadataEntryTypeRequest,
     UpsertMetadataFieldRequest,
 )
-from app.services.project_service import ProjectService, ProjectServiceError
+from app.services.project.errors import ProjectServiceError
+from app.services.project_service import ProjectService
 from app.services.tree_structure import TreeStructureService
+from tests.layer_fixtures import declare_full_chain
 
 
 class MetadataValidationTests(unittest.TestCase):
@@ -52,9 +54,7 @@ class MetadataValidationTests(unittest.TestCase):
         self.temp_dir.cleanup()
 
     def _set_projects_base_folder(self, path: Path) -> None:
-        manifest = self.service._read_yaml(self.root / "project.yaml")
-        manifest.setdefault("settings", {})["projects_base_folder"] = str(path)
-        self.service._write_yaml(self.root / "project.yaml", manifest)
+        declare_full_chain(self.service, self.root, path)
 
     def _add_home_place_to_character_schema(self, root: Path) -> None:
         schema_path = root / "metadata.schema.yaml"
@@ -983,7 +983,9 @@ class MetadataValidationTests(unittest.TestCase):
         layers = self.service.read_metadata_schema_layers().layers
 
         self.assertEqual([layer.folder_path for layer in layers], [str(self.base), str(self.universe), str(self.world), str(self.root)])
-        self.assertEqual(layers[0].label, "Base Folder")
+        # #309: a declared layer carries its own project title. "Base Folder"
+        # survives only for a base that is not itself a project.
+        self.assertEqual(layers[0].label, "writing")
         self.assertEqual(layers[1].label, "universe")
         self.assertEqual(layers[2].label, "series")
         self.assertEqual(layers[-1].label, "Test Project")
@@ -2507,9 +2509,7 @@ class ReferenceResolutionTests(unittest.TestCase):
         self.root = self.base / "test"
         self.service = ProjectService()
         self.service.create_project(self.root, "Test Project")
-        manifest = self.service._read_yaml(self.root / "project.yaml")
-        manifest.setdefault("settings", {})["projects_base_folder"] = str(self.base)
-        self.service._write_yaml(self.root / "project.yaml", manifest)
+        declare_full_chain(self.service, self.root, self.base)
         # See MetadataValidationTests for the rationale — home_place is
         # a test-only field on Character.
         schema_path = self.root / "metadata.schema.yaml"
@@ -2715,9 +2715,7 @@ class LayeredEntryIndexTests(unittest.TestCase):
         self.root = self.series / "book01"
         self.service = ProjectService()
         self.service.create_project(self.root, "Book 1")
-        manifest = self.service._read_yaml(self.root / "project.yaml")
-        manifest.setdefault("settings", {})["projects_base_folder"] = str(self.base)
-        self.service._write_yaml(self.root / "project.yaml", manifest)
+        declare_full_chain(self.service, self.root, self.base)
 
     def tearDown(self) -> None:
         self.temp_dir.cleanup()

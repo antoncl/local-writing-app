@@ -35,6 +35,7 @@ from app.models import (
 )
 from app.services.project.errors import ProjectServiceError
 from app.services.project_service import ProjectService
+from tests.layer_fixtures import declare_full_chain
 
 
 def _scope(kind: str, entry_type: str) -> dict:
@@ -55,9 +56,7 @@ class LayeredTagsTests(unittest.TestCase):
         self.root = self.series / "book01"
         self.service = ProjectService()
         self.service.create_project(self.root, "Book 1")
-        manifest = self.service._read_yaml(self.root / "project.yaml")
-        manifest.setdefault("settings", {})["projects_base_folder"] = str(self.base)
-        self.service._write_yaml(self.root / "project.yaml", manifest)
+        declare_full_chain(self.service, self.root, self.base)
 
     def tearDown(self) -> None:
         self.temp_dir.cleanup()

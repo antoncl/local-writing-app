@@ -20,6 +20,7 @@ from pathlib import Path
 from tempfile import TemporaryDirectory
 
 from app.services.project_service import ProjectService
+from tests.layer_fixtures import declare_full_chain
 
 
 class LayerQualifiedIdentityTests(unittest.TestCase):
@@ -33,9 +34,7 @@ class LayerQualifiedIdentityTests(unittest.TestCase):
         self.root = self.universe / "book01"
         self.service = ProjectService()
         self.service.create_project(self.root, "Book 1")
-        manifest = self.service._read_yaml(self.root / "project.yaml")
-        manifest.setdefault("settings", {})["projects_base_folder"] = str(self.base)
-        self.service._write_yaml(self.root / "project.yaml", manifest)
+        declare_full_chain(self.service, self.root, self.base)
 
     def tearDown(self) -> None:
         self.temp_dir.cleanup()
@@ -210,7 +209,7 @@ class LayerQualifiedIdentityTests(unittest.TestCase):
 
         self.assertEqual(
             sorted((entry.title, entry.source_layer_label) for entry in project_entries),
-            [("Book 1", "Book 1"), ("Honorverse", "honorverse")],
+            [("Book 1", "Book 1"), ("Honorverse", "Honorverse")],
         )
         self.assertEqual(len({entry.id for entry in project_entries}), 2)
 

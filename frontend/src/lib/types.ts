@@ -779,11 +779,36 @@ export type ProjectValidation = {
 
 export type AIPolicy = "off" | "local-only" | "cloud-allowed";
 
+/**
+ * One folder between the configured base and the open project (#309).
+ *
+ * Every ancestor is reported, not only the inheritable ones: `is_project`
+ * false means an organisational folder, which the wizard shows marked rather
+ * than omits — a gap in the list reads as a bug, and the marking doubles as a
+ * quiet warning that a folder up there was never made into a project.
+ */
+export type AncestorCandidate = {
+  path: string;
+  name: string;
+  is_project: boolean;
+  inherited: boolean;
+};
+
+/** A project folder directly inside this one — the roster #310 renders. */
+export type ProjectChild = {
+  path: string;
+  name: string;
+  title: string;
+};
+
 export type ProjectInfo = {
   title: string;
   root_path: string;
   projects_base_folder?: string | null;
   ai_policy: AIPolicy;
+  /** Outermost first, matching layer rank. */
+  ancestors?: AncestorCandidate[];
+  children?: ProjectChild[];
 };
 
 export type ProviderCredentialsView = {

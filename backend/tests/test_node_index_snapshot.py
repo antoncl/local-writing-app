@@ -471,6 +471,31 @@ class BuildIdentityTests(SnapshotTestCase):
         found = {path.name for path in snapshot.source_files()}
         self.assertTrue(covered <= found, f"not covered: {sorted(covered - found)}")
 
+    def test_a_payload_missing_a_newer_key_is_a_quiet_version_reject(self) -> None:
+        """Ordering, pinned. `_rehydrate` reads payload keys directly, so a
+        snapshot written before a key existed would `KeyError` → `corrupt` → a
+        warning that says "this is a bug" — on every user's first open after any
+        upgrade that adds a key. The identity check catches it first, and only
+        because this module is inside `_SOURCE_ROOTS`."""
+        self.service._build_node_index(self.root)
+        payload = self._snapshot_payload()
+        # What an upgrade actually leaves behind: written by older code (so the
+        # identity differs) *and* missing the key that code never wrote.
+        del payload["has_unparsed_nodes"]
+        payload["build_identity"] = "0" * 16
+        self._write_payload(payload)
+
+        with self.assertRaises(snapshot.SnapshotUnusable) as caught:
+            snapshot.load(
+                json.dumps(payload),
+                root=self.root,
+                layers=self.service.collect_layers(self.root, include_machine=True),
+                manifest=self.service._build_index_manifest(
+                    self.service.collect_layers(self.root, include_machine=True)
+                ),
+            )
+        self.assertEqual(caught.exception.reason, "version")
+
     def test_identity_actually_digests_those_files(self) -> None:
         """The first version resolved its package root one level too high, so
         both globs matched nothing and the digest was a constant over zero

@@ -211,6 +211,10 @@ def serialize(
         ],
         "warnings": index.collected_warnings(),
         "errors": list(index.errors),
+        # Persisted, unlike `degraded`: it is a property of the *files*, and a
+        # warm load that lost it would let `_purge_references_to` rewrite the
+        # user's files on the second open exactly as it did before #379.
+        "has_unparsed_nodes": index.has_unparsed_nodes,
     }
     return json.dumps(payload)
 
@@ -239,6 +243,14 @@ def load(
         raise SnapshotUnusable("version", str(payload.get("format_version")))
     # The code that produced it, not just the shape it produced. Same verdict as
     # a format change: expected after an upgrade, and rebuilds silently.
+    #
+    # ⚠ This must stay **above** the body checks. `_rehydrate` reads payload keys
+    # directly, so a snapshot written before a key existed raises `KeyError` →
+    # `corrupt` → a loud warning that says "this is a bug". Every user has such a
+    # snapshot after any upgrade that adds a key. Because this module is itself
+    # inside `_SOURCE_ROOTS`, adding one changes the identity and those payloads
+    # are rejected quietly here instead — which is only true while this check
+    # comes first.
     if payload.get("build_identity") != build_identity():
         raise SnapshotUnusable("version", "built by different code")
     if payload.get("root") != str(root):
@@ -339,6 +351,9 @@ def _rehydrate(payload: dict, layers: list[IndexLayer]) -> NodeIndex:
             raise ValueError(f"{key} is not a list of strings")
     index.warnings = list(payload["warnings"])
     index.errors = list(payload["errors"])
+    if not isinstance(payload["has_unparsed_nodes"], bool):
+        raise ValueError("has_unparsed_nodes is not a bool")
+    index.has_unparsed_nodes = payload["has_unparsed_nodes"]
     # Rebuilds `by_id`, `edges_by_src`, the reverse map and the shadow warnings
     # — the same call that ends a cold build, so a rehydrated index and a freshly
     # built one are the same object by construction rather than by agreement.

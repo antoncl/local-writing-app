@@ -17,6 +17,7 @@ Method bodies moved verbatim. Shared helpers resolve through the MRO:
 
 from __future__ import annotations
 
+import logging
 from pathlib import Path
 from typing import Any
 
@@ -29,6 +30,8 @@ from app.models import (
 )
 from app.services.project.errors import ProjectServiceError
 from app.services.project.node_index import NodeIndex
+
+log = logging.getLogger(__name__)
 
 
 class MetadataValuesMixin:
@@ -352,6 +355,52 @@ class MetadataValuesMixin:
                     changed = True
         return cleaned, changed
 
+    def _ids_safe_to_purge(self, purge_ids: set[str], index: NodeIndex) -> set[str]:
+        """Which of `purge_ids` may have their references destroyed (#379).
+
+        Separated from the rewrite because it is the whole decision: everything
+        after it is mechanical, and this is where getting it wrong costs the
+        user their links irreversibly.
+
+        Two ways an id survives a delete, and the purge missed both:
+
+        **It un-shadowed.** Every caller unlinks the file and writes the
+        structure *before* the purge, so `index` reflects the delete — and under
+        #334's layered identity, deleting a node that shadowed an ancestor's
+        promotes the ancestor rather than removing the id. Those references are
+        still correct; they now point one layer out. The
+        read-side `_strip_dangling_references` asked exactly this question
+        (`by_id.get`) throughout, which is the strongest sign the purge was
+        simply wrong rather than trading differently.
+
+        **We could not read it.** `by_id` records what the index could *parse*.
+        A file with malformed front matter is on disk, very possibly claiming an
+        id, and invisible here — so absence stops meaning non-existence and
+        nothing may be purged at all. One mistyped `title:` in an ancestor would
+        otherwise strip every link to that node, and fixing the typo would not
+        bring them back.
+
+        Skipping costs nothing durable either way: the read-side healer already
+        hides dangling references, and the next delete once the file parses
+        cleans up.
+
+        ⚠ Scoped to *which ids*, not *which project*. `_purge_references_to`
+        re-derives its root from the process-global `ProjectService`, and the
+        delete routes are sync `def`s on FastAPI's threadpool, so a concurrent
+        `open_project` can still point the rewrite loop at another project
+        (#381). This narrows the blast radius; it does not make the caller's
+        root safe.
+        """
+        if index.has_unparsed_nodes:
+            log.warning(
+                "Skipping the reference purge for %s: %d node file(s) could not be parsed, "
+                "so which ids still exist is unknown.",
+                self.root_path,
+                len(index.errors),
+            )
+            return set()
+        return {node_id for node_id in purge_ids if node_id not in index.by_id}
+
     def _purge_references_to(self, purge_ids: set[str]) -> None:
         """Walk every metadata-bearing entry in the project (scenes and
         lore today; assistants/prompts skipped because they don't carry
@@ -366,6 +415,9 @@ class MetadataValuesMixin:
             return
         schema = self.read_metadata_schema()
         index = self._build_node_index()
+        purge_ids = self._ids_safe_to_purge(purge_ids, index)
+        if not purge_ids:
+            return
         for entry in list(index.by_id.values()):
             if entry.kind not in {"scene", "lore"}:
                 continue

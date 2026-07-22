@@ -159,6 +159,17 @@ class SnapshotIsUsedTests(SnapshotTestCase):
 
 
 class StalenessTests(SnapshotTestCase):
+    """A changed input must never be served from a stale snapshot.
+
+    ⚠ These assert **the change is visible**, never *how* it became visible.
+    Whether a full rebuild or #307's incremental patch produced it is an
+    implementation choice; the first version of these tests counted
+    `_collect_layer_entries` calls and duly broke when the patch started
+    collecting single files instead of folders — measuring the mechanism, not
+    the guarantee. The patch/rebuild split is asserted where it *is* the point,
+    in `test_node_index_patch.py`.
+    """
+
     def _rebuilt(self) -> bool:
         calls = self._count_collections()
         self.service._build_node_index(self.root)
@@ -166,25 +177,27 @@ class StalenessTests(SnapshotTestCase):
         self.service._collect_layer_entries = ProjectService._collect_layer_entries.__get__(self.service)
         return rebuilt
 
-    def test_edited_file_rebuilds(self) -> None:
+    def test_edited_file_is_not_served_from_the_snapshot(self) -> None:
         path = self._write_lore(self.root, "seren", "Seren")
         self.service._build_node_index(self.root)
         self._write_lore(self.root, "seren", "Seren, renamed")
         self.assertTrue(path.exists())
-        self.assertTrue(self._rebuilt())
+        self.assertEqual(self.service._build_node_index(self.root).by_id["seren"].title, "Seren, renamed")
 
-    def test_deleted_file_rebuilds(self) -> None:
+    def test_deleted_file_is_not_served_from_the_snapshot(self) -> None:
+        """A delete re-collects nothing — there is no file to parse — so this
+        asserts the observable outcome rather than the mechanism."""
         path = self._write_lore(self.root, "seren", "Seren")
         self.service._build_node_index(self.root)
         path.unlink()
-        self.assertTrue(self._rebuilt())
+        self.assertNotIn("seren", self.service._build_node_index(self.root).by_id)
 
-    def test_added_file_rebuilds(self) -> None:
+    def test_added_file_is_not_served_from_the_snapshot(self) -> None:
         """The case a stat-sweep over known paths cannot see: a file dropped
         into an ancestor's `lore/` from Explorer, or arriving via `git pull`."""
         self.service._build_node_index(self.root)
         self._write_lore(self.universe, "seren", "Seren (universe)")
-        self.assertTrue(self._rebuilt())
+        self.assertIn("seren", self.service._build_node_index(self.root).by_id)
 
     def test_untouched_project_does_not_rebuild(self) -> None:
         self._write_lore(self.root, "seren", "Seren")

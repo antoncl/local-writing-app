@@ -47,7 +47,9 @@ from app.services.project.node_index import (
     NodeIndexEntry,
     ReferenceEdge,
 )
+from app.services.project.node_index_patch import PatchNotApplicable
 from app.services.project.node_index_snapshot import (
+    LoadedSnapshot,
     Manifest,
     SnapshotUnusable,
     fingerprint_for,
@@ -198,7 +200,7 @@ class ReferencesMixin:
 
     def _load_index_snapshot(
         self, root: Path, *, layers: list[IndexLayer], manifest: Manifest
-    ) -> NodeIndex | None:
+    ) -> LoadedSnapshot | None:
         """The snapshot, when it is still true. None means "build it".
 
         The failure paths are operationally distinct and logged differently.
@@ -288,9 +290,9 @@ class ReferencesMixin:
         # Stamping afterwards inverts that: the manifest would vouch for content
         # the index never saw, and the snapshot would be silently short a node.
         manifest = self._build_index_manifest(layers)
-        cached = self._load_index_snapshot(root, layers=layers, manifest=manifest)
-        if cached is not None:
-            return cached
+        loaded = self._load_index_snapshot(root, layers=layers, manifest=manifest)
+        if loaded is not None and loaded.is_fresh:
+            return loaded.index
         index = NodeIndex()
         try:
             schema: MetadataSchema | None = self.read_metadata_schema()
@@ -309,6 +311,26 @@ class ReferencesMixin:
             # user edited something unrelated. A malformed schema is content and
             # is cached; a schema we could not *read* is not.
             index.degraded = isinstance(exc, OSError)
+        # A stale snapshot is a **work list**, not a write-off (#307): re-parse
+        # the handful of paths that moved and patch in place. It declines
+        # (`PatchNotApplicable`) whenever the diff reaches something it does not
+        # model — a schema edit, which fans out across the chain, or a path no
+        # layer owns — and then this falls through to the full walk below.
+        #
+        # A failed schema read is not patchable either: the patch would extract
+        # edges against `None` and quietly drop the references of every file it
+        # touched, while leaving every other node's intact. That is a corrupt
+        # index rather than a degraded one.
+        if loaded is not None and schema is not None:
+            try:
+                patched = self._patch_node_index(
+                    loaded.index, changed=loaded.changed, layers=layers, root=root, schema=schema
+                )
+            except PatchNotApplicable as exc:
+                log.debug("Rebuilding the node index for %s instead of patching: %s", root, exc)
+            else:
+                self._write_index_snapshot(root, patched, layers=layers, manifest=manifest)
+                return patched
         # One walk, machine layer included (#329). It comes first and carries
         # assistants only — it lives outside the project tree and holds the
         # user's roster. Project layers follow outermost-ancestor first, so a
@@ -484,78 +506,106 @@ class ReferencesMixin:
         duplicate_relative_to: Path,
         schema: MetadataSchema | None = None,
     ) -> None:
-        folder = layer.folder
-        for path in sorted((folder / family.folder_name).glob("*.md")):
-            try:
-                front_matter = self._read_front_matter_only(path, strict=True)
-            except ProjectServiceError as exc:
-                index.errors.append(exc.message)
-                # A file on disk whose id we could not read — so `by_id` stops
-                # being a complete answer to "does this id exist" (#379).
-                index.has_unparsed_nodes = True
-                continue
-
-            raw_node_id = front_matter.get("id")
-            if raw_node_id is None:
-                node_id = path.stem
-                index.warnings.append(
-                    f"{family.kind.title()} file {self._safe_relative(path, folder)} is missing front matter id; using filename stem as legacy id."
-                )
-            elif isinstance(raw_node_id, str) and raw_node_id.strip():
-                node_id = raw_node_id.strip()
-            else:
-                node_id = path.stem
-                index.errors.append(
-                    f"{family.kind.title()} file {self._safe_relative(path, folder)} has invalid front matter id; it must be text."
-                )
-
-            raw_entry_type = front_matter.get("entry_type") or family.default_entry_type
-            entry_type = raw_entry_type if isinstance(raw_entry_type, str) else family.default_entry_type
-            raw_title = front_matter.get("title")
-            title = raw_title.strip() if isinstance(raw_title, str) and raw_title.strip() else node_id
-            entry = NodeIndexEntry(
-                id=node_id,
-                kind=family.kind,
-                entry_type=entry_type,
-                path=path,
-                title=title,
-                source_layer_id=layer.id,
-                source_layer_label=layer.label,
+        for path in sorted((layer.folder / family.folder_name).glob("*.md")):
+            self._collect_entry_file(
+                path,
+                layer=layer,
+                family=family,
+                index=index,
+                duplicate_relative_to=duplicate_relative_to,
+                schema=schema,
             )
-            duplicate = index.entry_for_layer(node_id, layer.id)
-            if duplicate is not None:
-                # Two files claiming one id *at the same layer* — an error, not a
-                # shadow. Shadowing is a relationship between layers; within one
-                # layer there is no order to resolve by.
-                index.errors.append(
-                    f"Duplicate front matter id {node_id} in "
-                    f"{self._safe_relative(duplicate.path, duplicate_relative_to)} and "
-                    f"{self._safe_relative(path, duplicate_relative_to)}."
-                )
-                continue
-            # A descendant claiming an ancestor's id joins the candidate list;
-            # nothing is overwritten. The shadow warning is emitted once, by
-            # `index.resolve()`, where the whole list is visible.
-            index.add(entry)
-            # Same front matter, no second read: the edges this node declares
-            # are extracted here rather than in a later per-entry pass (#305).
-            # Keyed by (layer, id) for the same reason the entry is: a shadowed
-            # ancestor must keep its edges, or un-shadowing it on delete (#307)
-            # would restore the node with its references silently missing.
-            try:
-                edges = self._reference_edges_for_entry(entry, schema, front_matter=front_matter)
-            except ProjectServiceError as exc:
-                # `metadata:` that isn't a mapping. The node still indexes — it
-                # just contributes no edges — but that has to be *said*, or its
-                # references vanish from the graph and the backlinks panel with
-                # no signal anywhere.
-                index.errors.append(
-                    f"{self._safe_relative(path, duplicate_relative_to)}: {exc.message} "
-                    f"Its references were not indexed."
-                )
-                edges = []
-            if edges:
-                index.edges_by_layer_src[(layer.id, node_id)] = edges
+
+    def _collect_entry_file(
+        self,
+        path: Path,
+        *,
+        layer: IndexLayer,
+        family: NodeFamily,
+        index: NodeIndex,
+        duplicate_relative_to: Path,
+        schema: MetadataSchema | None = None,
+    ) -> None:
+        """Collect exactly one node file into `index`.
+
+        Split out of the folder glob so #307 can re-parse **the file that
+        changed** rather than its whole folder — the difference between ~4x and
+        ~30x on a folder holding a few hundred entries. The loop above is now
+        this called per path, so there is one definition of what collecting a
+        node file means and no chance of the incremental path drifting from the
+        cold one.
+        """
+        folder = layer.folder
+        try:
+            front_matter = self._read_front_matter_only(path, strict=True)
+        except ProjectServiceError as exc:
+            index.errors.append(exc.message)
+            # A file on disk whose id we could not read — so `by_id` stops
+            # being a complete answer to "does this id exist" (#379).
+            index.has_unparsed_nodes = True
+            return
+
+        raw_node_id = front_matter.get("id")
+        if raw_node_id is None:
+            node_id = path.stem
+            index.warnings.append(
+                f"{family.kind.title()} file {self._safe_relative(path, folder)} is missing front matter id; using filename stem as legacy id."
+            )
+        elif isinstance(raw_node_id, str) and raw_node_id.strip():
+            node_id = raw_node_id.strip()
+        else:
+            node_id = path.stem
+            index.errors.append(
+                f"{family.kind.title()} file {self._safe_relative(path, folder)} has invalid front matter id; it must be text."
+            )
+
+        raw_entry_type = front_matter.get("entry_type") or family.default_entry_type
+        entry_type = raw_entry_type if isinstance(raw_entry_type, str) else family.default_entry_type
+        raw_title = front_matter.get("title")
+        title = raw_title.strip() if isinstance(raw_title, str) and raw_title.strip() else node_id
+        entry = NodeIndexEntry(
+            id=node_id,
+            kind=family.kind,
+            entry_type=entry_type,
+            path=path,
+            title=title,
+            source_layer_id=layer.id,
+            source_layer_label=layer.label,
+        )
+        duplicate = index.entry_for_layer(node_id, layer.id)
+        if duplicate is not None:
+            # Two files claiming one id *at the same layer* — an error, not a
+            # shadow. Shadowing is a relationship between layers; within one
+            # layer there is no order to resolve by.
+            index.errors.append(
+                f"Duplicate front matter id {node_id} in "
+                f"{self._safe_relative(duplicate.path, duplicate_relative_to)} and "
+                f"{self._safe_relative(path, duplicate_relative_to)}."
+            )
+            return
+        # A descendant claiming an ancestor's id joins the candidate list;
+        # nothing is overwritten. The shadow warning is emitted once, by
+        # `index.resolve()`, where the whole list is visible.
+        index.add(entry)
+        # Same front matter, no second read: the edges this node declares
+        # are extracted here rather than in a later per-entry pass (#305).
+        # Keyed by (layer, id) for the same reason the entry is: a shadowed
+        # ancestor must keep its edges, or un-shadowing it on delete (#307)
+        # would restore the node with its references silently missing.
+        try:
+            edges = self._reference_edges_for_entry(entry, schema, front_matter=front_matter)
+        except ProjectServiceError as exc:
+            # `metadata:` that isn't a mapping. The node still indexes — it
+            # just contributes no edges — but that has to be *said*, or its
+            # references vanish from the graph and the backlinks panel with
+            # no signal anywhere.
+            index.errors.append(
+                f"{self._safe_relative(path, duplicate_relative_to)}: {exc.message} "
+                f"Its references were not indexed."
+            )
+            edges = []
+        if edges:
+            index.edges_by_layer_src[(layer.id, node_id)] = edges
 
     def _safe_relative(self, path: Path, anchor: Path) -> Path | str:
         try:

@@ -36,6 +36,7 @@ from app.services.project.lore_mutations import LoreMutationsMixin
 from app.services.project.manuscript import ManuscriptMixin
 from app.services.project.metadata_values import MetadataValuesMixin
 from app.services.project.mutation_sets import MutationSetEntriesMixin
+from app.services.project.node_index_patch import NodeIndexPatchMixin
 from app.services.project.node_ops import NodeOpsMixin
 from app.services.project.project_node import ProjectNodeMixin
 from app.services.project.prompts import PromptEntriesMixin
@@ -63,6 +64,7 @@ class ProjectService(
     ManuscriptMixin,
     MetadataSchemaMixin,
     MetadataValuesMixin,
+    NodeIndexPatchMixin,
     NodeOpsMixin,
     ProjectLifecycleMixin,
     ProjectNodeMixin,

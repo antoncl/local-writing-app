@@ -173,7 +173,7 @@ A change straddling inline markup can produce runs that do not survive rendering
 mockup dodges it by construction (hand-authored runs over clean prose), so it is untested.
 
 > **Settled by [Amendment 1](#amendment-1--runs-must-be-complete-markdown-fragments-2026-07-22).**
-> The risk is real — 6 of 14 fixtures broke — and it is bounded: three constraints on the runs make
+> The risk is real — 8 of 18 fixtures broke — and it is bounded: three constraints on the runs make
 > all of them render correctly, so §F stands as decided.
 
 ### H. Two new colour tokens, warm and cool
@@ -283,7 +283,7 @@ Settles the risk §G records against §F, from the spike in
 [#396](https://github.com/antoncl/local-writing-app/issues/396). Full finding and the harness:
 [`../spikes/0396-word-level-markdown-diff.md`](../spikes/0396-word-level-markdown-diff.md).
 
-The risk was real. A plain word-level diff over the whole body damaged 6 of 14 realistic fixtures —
+The risk was real. A plain word-level diff over the whole body damaged 8 of 18 realistic fixtures —
 the tint element overlapping `<strong>` or `<a>`, `](lore://…)` leaking into the prose as literal
 text, and a mutation marker silently degrading to a raw HTML comment when the edit fell inside it.
 That last one is worth naming because neither ADR saw it coming: `sceneMarkdownToHtml` rewrites the
@@ -348,7 +348,7 @@ emphasised phrase would read worse than tinting all of it.
 - Changed regions carry their tint in `both`, `now` and `was`; Live renders unmarked.
 - A change within one block renders inline; a change spanning blocks renders stacked — regardless of
   how many words either side contains.
-- The fourteen fixtures of #396 render well-formed HTML in all three view states, with no markdown
+- The eighteen fixtures of #396 render well-formed HTML in all three view states, with no markdown
   syntax reaching the reader as literal text and no marker degraded to a raw comment (Amendment 1).
 - Notch order matches capture order, and positions are monotonic in age under the minimum-gap
   adjustment.

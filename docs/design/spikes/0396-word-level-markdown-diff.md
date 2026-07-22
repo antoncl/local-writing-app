@@ -22,11 +22,16 @@ it looks, because that function does **not** just call `marked`: it first rewrit
 data-…>` atoms with regexes over the source. So a run boundary can break a *marker* as well as an
 emphasis span, which is a failure mode neither ADR anticipated.
 
-Fourteen fixtures, each a probe at one hazard: an edit inside emphasis, straddling its start,
+Eighteen fixtures, each a probe at one hazard: an edit inside emphasis, straddling its start,
 straddling its end, inside nested emphasis, inside a link's text, inside a link's target, adjacent
 to a mutation marker, inside a mutation marker, inside a todo anchor's wrapped prose, a paragraph
-split, a paragraph join, inside a table cell, across a list-item boundary, and clean prose as a
-control.
+split, a paragraph join, inside a table cell, across a list-item boundary, emphasis added around
+existing words, emphasis removed from them, inside a heading, inside a blockquote, and clean prose
+as a control.
+
+The last four came from a second adversarial pass over the first fourteen, asking what an author
+does that the fixtures didn't cover. Two of them broke — which is the argument for the pass, not an
+aside.
 
 **Three oracles, because the obvious one is not enough.** The natural check — wrap the runs, render,
 strip the wrappers, compare against a plain render — passes on cases that are badly broken. It was
@@ -43,11 +48,12 @@ no `](`, `**`, `~~` or `|` reaching the reader as literal text. All three run ag
 states (`now`, `was`, `both`), because `both` is where the runs actually interleave and it has no
 baseline to compare against.
 
-## Result: 6 of 14 fixtures damaged as designed
+## Result: 8 of 18 fixtures damaged as designed
 
 | what breaks | fixtures | what the author sees |
 |---|---|---|
 | a run boundary falls **between an inline construct's delimiters** | emphasis start, emphasis end, link target | the tint element overlaps `<strong>` / `<a>`; in `both`, `](lore://loc-westquay)` leaks into the prose as literal text |
+| a construct exists **on one side only**, so the boundary is inside it in one text and not the other | emphasis added, emphasis removed | same overlap, and this is the *common* edit — an author bolding or unbolding a phrase they already wrote |
 | a run **spans a block boundary** | paragraph split, paragraph join | the wrapper contains `</p><p>` — an inline element wrapping two paragraphs |
 | a run **cuts an HTML-comment marker** | mutation-marker value edit | the marker preprocessing no longer matches, so the pill silently degrades to a raw comment; in `both` the two versions merge into one malformed comment |
 
@@ -55,15 +61,15 @@ Two results are worth having explicitly, because they bound the problem rather t
 
 - **An edit strictly *inside* a construct is already safe.** `**she had ever seen it**` →
   `**she had ever once seen it**` — the issue's canonical case — renders clean, as do nested
-  emphasis, link *text*, table cells and list items. The problem is never "inline markup is
-  present"; it is only ever a boundary landing *between* a construct's delimiters.
+  emphasis, link *text*, table cells, list items, headings and blockquotes. The problem is never
+  "inline markup is present"; it is only ever a boundary landing *between* a construct's delimiters.
 - **The wrapper element is irrelevant.** A control run with real `<span class="r-now">` wrappers
   produces the identical nesting errors on the identical fixtures. This is not a
   custom-element artefact.
 
 ## The constraints, and that they are sufficient
 
-All three are implemented in the harness and all fourteen fixtures then pass all three oracles in
+All three are implemented in the harness and all eighteen fixtures then pass all three oracles in
 all three views.
 
 1. **Diff per block; word granularity only *inside* a block.** Blocks are diffed first; a word-level
@@ -110,5 +116,5 @@ odder rendering.
 ## Fixtures kept
 
 `frontend/spikes/396-runs.json` is generated, not hand-authored — regenerate it rather than editing
-it. The fourteen cases are the regression surface for slice 2: each one is a rendering the runs
+it. The eighteen cases are the regression surface for slice 2: each one is a rendering the runs
 endpoint must not produce.

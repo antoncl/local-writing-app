@@ -314,6 +314,30 @@ CASES: list[dict[str, str]] = [
         "now": "- run for the high road at once\n- do not stop for anything that can walk\n",
     },
     {
+        "name": "emphasis-added-around-existing-words",
+        "why": "a construct exists on one side only — the snap has nothing to snap to in the other",
+        "was": "She counted the hulls twice and was very tired by the end of it.",
+        "now": "She counted the hulls twice and was **very tired** by the end of it.",
+    },
+    {
+        "name": "emphasis-removed-from-existing-words",
+        "why": "the same asymmetry the other way round",
+        "was": "She counted the hulls twice and was **very tired** by the end of it.",
+        "now": "She counted the hulls twice and was very tired by the end of it.",
+    },
+    {
+        "name": "edit-inside-a-heading",
+        "why": "a block whose leading markup is line-structural, not inline",
+        "was": "## The Harbour\n\nThe tide went out further than she had ever seen it.\n",
+        "now": "## The Empty Harbour\n\nThe tide went out further than she had ever seen it.\n",
+    },
+    {
+        "name": "edit-inside-a-blockquote",
+        "why": "every line of the block carries a marker the word diff cannot see",
+        "was": "> When the water leaves like that, it is not leaving.\n> It is drawing breath.\n",
+        "now": "> When the water leaves like that, it is not leaving at all.\n> It is drawing breath.\n",
+    },
+    {
         "name": "clean-prose-control",
         "why": "the case the mockup already proves — must stay clean, or the harness is wrong",
         "was": "Somewhere behind her a shutter began to bang. Nobody came to close it.",

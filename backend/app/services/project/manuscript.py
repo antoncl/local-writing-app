@@ -172,7 +172,10 @@ class ManuscriptMixin:
         )
 
     def delete_structure_node(self, node_id: str) -> StructureDocument:
-        self._require_project()
+        # Captured, not discarded: the purge below rewrites files, so it must
+        # target the project this delete belongs to even if another request
+        # opens a different one mid-operation (#381).
+        root = self._require_project()
         structure = self.read_structure()
         node = TreeStructureService.find_node(structure, node_id)
         if node is None:
@@ -199,7 +202,7 @@ class ManuscriptMixin:
 
         TreeStructureService.remove_node_by_id(structure.root, node_id)
         self._manuscript_tree().write(structure)
-        self._purge_references_to(purge_ids)
+        self._purge_references_to(purge_ids, root)
         return self.read_structure()
 
     def _manuscript_tree(self) -> TreeStructureService:
@@ -384,7 +387,7 @@ class ManuscriptMixin:
     # ----- project node (singleton per folder) ------------------------------
 
     def delete_scene(self, scene_id: str) -> StructureDocument:
-        self._require_project()
+        root = self._require_project()  # see delete_structure_node (#381)
         path = self._path_for_node_id(scene_id, "scene")
         node_id = self._node_id_for_path(path)
         if path.exists():
@@ -397,7 +400,7 @@ class ManuscriptMixin:
         self._remove_scene_todos(node_id)
         # Strip references to both the scene file id and the structure
         # node wrapping it from every metadata-bearing entry.
-        self._purge_references_to({scene_id, node_id})
+        self._purge_references_to({scene_id, node_id}, root)
         return self.read_structure()
 
     def _is_leaf_node(self, node: StructureNode) -> bool:

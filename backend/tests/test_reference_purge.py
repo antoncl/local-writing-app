@@ -124,14 +124,14 @@ class PurgeStillRemovesDanglingReferencesTests(ReferencePurgeTestCase):
         self._write_lore(self.root, "nimitz", "Nimitz")
         self._write_lore(self.root, "honor", "Honor", refs=["seren", "nimitz"])
 
-        self.service._purge_references_to({"seren", "nimitz"})
+        self.service._purge_references_to({"seren", "nimitz"}, self.root)
 
         # Nothing was deleted, so both still resolve and nothing is stripped.
         self.assertEqual(self._refs_of("honor"), ["seren", "nimitz"])
 
         (self.root / "lore" / "nimitz.md").unlink()
         (self.root / "lore" / "seren.md").unlink()
-        self.service._purge_references_to({"seren", "nimitz"})
+        self.service._purge_references_to({"seren", "nimitz"}, self.root)
 
         # `seren` un-shadowed to the universe and survives; `nimitz` is gone.
         # On the file, so the read-path healer cannot supply the answer.
@@ -194,6 +194,119 @@ class PurgeRefusesToActOnIncompleteKnowledgeTests(ReferencePurgeTestCase):
         self.service.delete_lore_entry("seren")
 
         self.assertNotIn("seren", (self.root / "lore" / "honor.md").read_text(encoding="utf-8"))
+
+
+class PurgeStaysInTheCallersProjectTests(unittest.TestCase):
+    """The purge rewrites files, so it must rewrite the project the delete
+    belongs to (#381).
+
+    `ProjectService` is a process-global singleton (`runtime.py`) whose
+    `root_path` mutates in place, and the delete routes and `open_project` are
+    all sync `def`s on FastAPI's threadpool. An `open_project` landing between
+    the caller's `unlink` and the purge used to redirect the whole rewrite loop
+    at **another project's** files — reproduced against master as data loss.
+
+    #379's guard does not cover this: it skips ids that still resolve, and the
+    interesting case is an id that resolves in neither project.
+    """
+
+    def setUp(self) -> None:
+        self.temp_dir = TemporaryDirectory()
+        self.base = Path(self.temp_dir.name).resolve() / "writing"
+        self.service = ProjectService()
+        self.book1 = self.base / "book01"
+        self.book2 = self.base / "book02"
+        for path, title in ((self.book1, "Book 1"), (self.book2, "Book 2")):
+            self.service.create_project(path, title)
+            manifest = self.service._read_yaml(path / "project.yaml")
+            manifest.setdefault("settings", {})["projects_base_folder"] = str(self.base)
+            self.service._write_yaml(path / "project.yaml", manifest)
+
+    def tearDown(self) -> None:
+        self.temp_dir.cleanup()
+
+    def _write_lore(self, folder: Path, node_id: str, title: str, *, refs: list[str] | None = None) -> None:
+        (folder / "lore").mkdir(parents=True, exist_ok=True)
+        self.service._write_markdown_with_front_matter(
+            folder / "lore" / f"{node_id}.md",
+            {
+                "id": node_id,
+                "title": title,
+                "entry_type": "lore:character",
+                "metadata": {"related_entries": refs} if refs else {},
+            },
+            "Body.",
+        )
+
+    def test_a_concurrent_open_does_not_redirect_the_purge(self) -> None:
+        # book02 references an id it does not own, so the id resolves in
+        # neither project once book01's copy is deleted.
+        self._write_lore(self.book2, "keeper", "Keeper", refs=["shared"])
+        self._write_lore(self.book1, "shared", "Shared")
+        keeper = self.book2 / "lore" / "keeper.md"
+        self.service.open_project(self.book1)
+        before = keeper.read_text(encoding="utf-8")
+
+        real_purge = self.service._purge_references_to
+
+        def racing(purge_ids: set[str], *args: object, **kwargs: object) -> None:
+            # Another request opens a different project mid-delete.
+            self.service.open_project(self.book2)
+            return real_purge(purge_ids, *args, **kwargs)
+
+        self.service._purge_references_to = racing  # type: ignore[method-assign]
+        self.service.open_project(self.book1)
+        self.service.delete_lore_entry("shared")
+
+        self.assertEqual(keeper.read_text(encoding="utf-8"), before)
+        self.assertIn("shared", keeper.read_text(encoding="utf-8"))
+
+    def _add_ally_field(self, root: Path) -> None:
+        """Give one project an `entity_ref_list` field the other lacks.
+
+        Which fields hold references is *schema*-decided, so the purge reads the
+        schema as well as the index. With only the index threaded, the schema
+        still came from the singleton — and against the wrong project's schema
+        this field is not a reference at all, so its links are silently left
+        dangling rather than purged.
+        """
+        schema_path = root / "metadata.schema.yaml"
+        data = self.service._read_yaml(schema_path)
+        data.setdefault("fields", {})["ally"] = {"name": "Ally", "type": "entity_ref_list"}
+        character = data.setdefault("entry_types", {}).get("lore:character") or {}
+        fields = list(character.get("fields") or [])
+        if "ally" not in fields:
+            fields.insert(0, "ally")
+        character["fields"] = fields
+        data["entry_types"]["lore:character"] = character
+        self.service._write_yaml(schema_path, data)
+
+    def test_a_concurrent_open_does_not_redirect_the_schema_either(self) -> None:
+        self._add_ally_field(self.book1)
+        (self.book1 / "lore").mkdir(parents=True, exist_ok=True)
+        self.service._write_markdown_with_front_matter(
+            self.book1 / "lore" / "honor.md",
+            {"id": "honor", "title": "Honor", "entry_type": "lore:character", "metadata": {"ally": ["shared"]}},
+            "Body.",
+        )
+        self._write_lore(self.book1, "shared", "Shared")
+        honor = self.book1 / "lore" / "honor.md"
+        self.service.open_project(self.book1)
+        self.assertIn("shared", honor.read_text(encoding="utf-8"))
+
+        real_purge = self.service._purge_references_to
+
+        def racing(purge_ids: set[str], *args: object, **kwargs: object) -> None:
+            self.service.open_project(self.book2)
+            return real_purge(purge_ids, *args, **kwargs)
+
+        self.service._purge_references_to = racing  # type: ignore[method-assign]
+        self.service.open_project(self.book1)
+        self.service.delete_lore_entry("shared")
+
+        # Genuinely gone, so the reference must be purged — and only book01's
+        # schema knows `ally` is a reference field at all.
+        self.assertNotIn("shared", honor.read_text(encoding="utf-8"))
 
 
 if __name__ == "__main__":

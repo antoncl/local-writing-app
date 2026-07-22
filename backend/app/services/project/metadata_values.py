@@ -384,12 +384,11 @@ class MetadataValuesMixin:
         hides dangling references, and the next delete once the file parses
         cleans up.
 
-        ⚠ Scoped to *which ids*, not *which project*. `_purge_references_to`
-        re-derives its root from the process-global `ProjectService`, and the
-        delete routes are sync `def`s on FastAPI's threadpool, so a concurrent
-        `open_project` can still point the rewrite loop at another project
-        (#381). This narrows the blast radius; it does not make the caller's
-        root safe.
+        ⚠ Scoped to *which ids*, not *which project*. The project is the
+        caller's explicit `root` since #381 — but that only pins the purge.
+        `ProjectService` is still a process-global singleton on FastAPI's
+        threadpool, so a caller that resolves the project more than once can
+        still straddle a concurrent `open_project`; #381 stays open for that.
         """
         if index.has_unparsed_nodes:
             log.warning(
@@ -401,7 +400,7 @@ class MetadataValuesMixin:
             return set()
         return {node_id for node_id in purge_ids if node_id not in index.by_id}
 
-    def _purge_references_to(self, purge_ids: set[str]) -> None:
+    def _purge_references_to(self, purge_ids: set[str], root: Path) -> None:
         """Walk every metadata-bearing entry in the project (scenes and
         lore today; assistants/prompts skipped because they don't carry
         node references in current schemas). For each, strip any
@@ -413,8 +412,12 @@ class MetadataValuesMixin:
         """
         if not purge_ids:
             return
-        schema = self.read_metadata_schema()
-        index = self._build_node_index()
+        # Both keyed on the caller's `root`, never re-resolved from the global
+        # singleton. This method's only action is an irreversible rewrite of
+        # the user's files, so the project it rewrites must be the project the
+        # delete happened in — see the note in `_ids_safe_to_purge` (#381).
+        schema = self.read_metadata_schema(root)
+        index = self._build_node_index(root)
         purge_ids = self._ids_safe_to_purge(purge_ids, index)
         if not purge_ids:
             return

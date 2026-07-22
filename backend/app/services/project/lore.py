@@ -158,8 +158,12 @@ class LoreEntriesMixin:
         return self.read_lore_entry(node_id)
 
     def delete_lore_entry(self, entry_id: str) -> LoreEntryList:
+        # Captured before the unlink, so the purge rewrites the project this
+        # delete belongs to even if another request opens a different one
+        # mid-operation (#381).
+        root = self._require_project()
         path = self._path_for_node_id(entry_id, "lore")
         if path.exists():
             path.unlink()
-        self._purge_references_to({entry_id})
+        self._purge_references_to({entry_id}, root)
         return self.list_lore_entries()

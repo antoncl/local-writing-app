@@ -7,10 +7,10 @@ from types import SimpleNamespace
 from unittest.mock import patch
 
 from fastapi.testclient import TestClient
+from project_fixtures import open_test_project
 
 from app.main import app
 from app.models import UpdateProjectSettingsRequest
-from app.runtime import service as global_service
 
 
 def _set_machine_keys(**keys: str) -> None:
@@ -33,8 +33,7 @@ class ChatEndpointTests(unittest.TestCase):
     def setUp(self) -> None:
         self.temp_dir = TemporaryDirectory()
         self.root = Path(self.temp_dir.name).resolve() / "project"
-        global_service.__init__()
-        global_service.create_project(self.root, "Chat Tests")
+        self.service = open_test_project(self.root, "Chat Tests")
         self.client = TestClient(app)
         # Isolate the file-backed assistant store so the chat resolver
         # doesn't pick up the developer's real ~/AppData entries.
@@ -51,12 +50,12 @@ class ChatEndpointTests(unittest.TestCase):
         self.temp_dir.cleanup()
 
     def _allow_cloud(self) -> None:
-        global_service.update_project_settings(
+        self.service.update_project_settings(
             UpdateProjectSettingsRequest(ai_policy="cloud-allowed")
         )
 
     def _allow_local_only(self) -> None:
-        global_service.update_project_settings(
+        self.service.update_project_settings(
             UpdateProjectSettingsRequest(ai_policy="local-only")
         )
 
@@ -309,8 +308,7 @@ class ChatStreamEndpointTests(unittest.TestCase):
     def setUp(self) -> None:
         self.temp_dir = TemporaryDirectory()
         self.root = Path(self.temp_dir.name).resolve() / "project"
-        global_service.__init__()
-        global_service.create_project(self.root, "Stream Tests")
+        self.service = open_test_project(self.root, "Stream Tests")
         self.client = TestClient(app)
         self.config_dir = Path(self.temp_dir.name).resolve() / "machine_config"
         self.config_dir.mkdir()
@@ -335,7 +333,7 @@ class ChatStreamEndpointTests(unittest.TestCase):
 
     def test_chat_stream_emits_deltas_then_done(self) -> None:
         from app.services.ai import providers as ai_providers
-        global_service.update_project_settings(
+        self.service.update_project_settings(
             UpdateProjectSettingsRequest(ai_policy="cloud-allowed")
         )
         loaded = _set_machine_keys(anthropic="sk-ant-test", default_provider="anthropic")
@@ -389,7 +387,7 @@ class ChatStreamEndpointTests(unittest.TestCase):
 
     def test_chat_stream_anthropic_thinking_events(self) -> None:
         from app.services.ai import providers as ai_providers
-        global_service.update_project_settings(
+        self.service.update_project_settings(
             UpdateProjectSettingsRequest(ai_policy="cloud-allowed")
         )
         loaded = _set_machine_keys(anthropic="sk-ant-test")
@@ -404,10 +402,10 @@ class ChatStreamEndpointTests(unittest.TestCase):
         # plumbs thinking_enabled=True. The provider mock doesn't care, but
         # this exercises the param wiring.
         from app.models import CreateAssistantEntryRequest, SaveAssistantEntryRequest
-        created = global_service.create_assistant_entry(
+        created = self.service.create_assistant_entry(
             CreateAssistantEntryRequest(title="Thinker", entry_type="assistant:assistant")
         )
-        global_service.save_assistant_entry(
+        self.service.save_assistant_entry(
             created.id,
             SaveAssistantEntryRequest(
                 title="Thinker",
@@ -446,7 +444,7 @@ class ChatStreamEndpointTests(unittest.TestCase):
 
     def test_chat_stream_truncated_when_stop_reason_is_max_tokens(self) -> None:
         from app.services.ai import providers as ai_providers
-        global_service.update_project_settings(
+        self.service.update_project_settings(
             UpdateProjectSettingsRequest(ai_policy="cloud-allowed")
         )
         loaded = _set_machine_keys(anthropic="sk-ant-test")
@@ -489,8 +487,7 @@ class ChatEndpointJournalTests(unittest.TestCase):
         )
         self.temp_dir = TemporaryDirectory()
         self.root = Path(self.temp_dir.name).resolve() / "project"
-        global_service.__init__()
-        global_service.create_project(self.root, "Journal Tests")
+        self.service = open_test_project(self.root, "Journal Tests")
         self.client = TestClient(app)
         self.config_dir = Path(self.temp_dir.name).resolve() / "machine_config"
         self.config_dir.mkdir()
@@ -500,24 +497,24 @@ class ChatEndpointJournalTests(unittest.TestCase):
         )
         self._config_patcher.start()
 
-        global_service.update_project_settings(
+        self.service.update_project_settings(
             UpdateProjectSettingsRequest(ai_policy="cloud-allowed")
         )
 
         # Lore: Honor (with alias) → body mentions Pavel (depth-1); Nimitz unrelated.
-        honor = global_service.create_lore_entry(
+        honor = self.service.create_lore_entry(
             CreateLoreEntryRequest(title="Honor Harrington", entry_type="lore:character")
         )
-        nimitz = global_service.create_lore_entry(
+        nimitz = self.service.create_lore_entry(
             CreateLoreEntryRequest(title="Nimitz", entry_type="lore:character")
         )
-        pavel = global_service.create_lore_entry(
+        pavel = self.service.create_lore_entry(
             CreateLoreEntryRequest(title="Pavel Young", entry_type="lore:character")
         )
 
         def _save(entry_id: str, metadata: dict, body: str) -> None:
-            existing = global_service.read_lore_entry(entry_id)
-            global_service.save_lore_entry(
+            existing = self.service.read_lore_entry(entry_id)
+            self.service.save_lore_entry(
                 entry_id,
                 SaveLoreEntryRequest(
                     title=existing.title, body=body,
@@ -533,7 +530,7 @@ class ChatEndpointJournalTests(unittest.TestCase):
         self.nimitz_id = nimitz.id
         self.pavel_id = pavel.id
 
-        chat = global_service.create_chat_session(
+        chat = self.service.create_chat_session(
             CreateChatSessionRequest(title="Test", prompt_entry_id="prompt_x")
         )
         self.chat_id = chat.id
@@ -576,7 +573,7 @@ class ChatEndpointJournalTests(unittest.TestCase):
         self.assertEqual(pavel_entry["source"], "depth1_expansion")
 
         # Persisted chat journal mirrors what was added.
-        chat = global_service.read_chat_session(self.chat_id)
+        chat = self.service.read_chat_session(self.chat_id)
         journal_ids = [e.entry_id for e in chat.journal]
         self.assertIn(self.honor_id, journal_ids)
         self.assertIn(self.pavel_id, journal_ids)
@@ -634,7 +631,7 @@ class ChatEndpointJournalTests(unittest.TestCase):
                     "chat_id": self.chat_id,
                 },
             )
-        first = global_service.read_chat_session(self.chat_id)
+        first = self.service.read_chat_session(self.chat_id)
         first_ids = {e.entry_id for e in first.journal}
         self.assertIn(self.honor_id, first_ids)
 
@@ -660,7 +657,7 @@ class ChatEndpointJournalTests(unittest.TestCase):
         added_ids = {e["entry_id"] for e in response.json()["journal_added"]}
         self.assertIn(self.nimitz_id, added_ids)
         self.assertNotIn(self.honor_id, added_ids)  # dedup against existing journal
-        second = global_service.read_chat_session(self.chat_id)
+        second = self.service.read_chat_session(self.chat_id)
         second_ids = [e.entry_id for e in second.journal]
         # All first-turn entries preserved + new ones appended (order stable).
         for eid in first_ids:

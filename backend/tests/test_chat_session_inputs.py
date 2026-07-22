@@ -16,8 +16,7 @@ def _project(tmp_path: Path, monkeypatch) -> ProjectService:
         "app.services.machine_settings.config_path",
         lambda: tmp_path / "machine_settings.yaml",
     )
-    service = ProjectService()
-    service.create_project(tmp_path / "project", "Demo")
+    service = ProjectService.created_at(tmp_path / "project", "Demo")
     return service
 
 

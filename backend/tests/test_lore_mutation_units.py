@@ -14,6 +14,7 @@ from pathlib import Path
 from tempfile import TemporaryDirectory
 
 from fastapi.testclient import TestClient
+from project_fixtures import open_test_project
 
 from app.main import app
 from app.models import (
@@ -22,14 +23,14 @@ from app.models import (
     UpdateMutationRequest,
     UpsertMetadataFieldRequest,
 )
-from app.runtime import service as svc
+from app.services.project_service import ProjectService
 
 
-def _setup_honor() -> str:
+def _setup_honor(service: ProjectService) -> str:
     """Define `rank` (text) + `titles` (tags) on characters and create Honor."""
-    layers = svc.read_metadata_schema_layers()
+    layers = service.read_metadata_schema_layers()
     layer_id = layers.layers[-1].id
-    svc.upsert_metadata_field(
+    service.upsert_metadata_field(
         UpsertMetadataFieldRequest(
             layer_id=layer_id,
             field_id="rank",
@@ -37,7 +38,7 @@ def _setup_honor() -> str:
             entry_type="lore:character",
         )
     )
-    svc.upsert_metadata_field(
+    service.upsert_metadata_field(
         UpsertMetadataFieldRequest(
             layer_id=layer_id,
             field_id="titles",
@@ -45,7 +46,7 @@ def _setup_honor() -> str:
             entry_type="lore:character",
         )
     )
-    return svc.create_lore_entry(
+    return service.create_lore_entry(
         CreateLoreEntryRequest(title="Honor", entry_type="lore:character")
     ).id
 
@@ -54,9 +55,8 @@ class MutationUnitTestBase(unittest.TestCase):
     def setUp(self) -> None:
         self.temp_dir = TemporaryDirectory()
         self.root = Path(self.temp_dir.name).resolve() / "project"
-        svc.__init__()
-        svc.create_project(self.root, "Mutation Unit Tests")
-        self.honor = _setup_honor()
+        self.service = open_test_project(self.root, "Mutation Unit Tests")
+        self.honor = _setup_honor(self.service)
         self.client = TestClient(app)
         created = self.client.post("/api/scenes", json={"title": "Chapter One"})
         self.assertEqual(created.status_code, 200, created.text)
@@ -81,11 +81,11 @@ class MutationUnitTestBase(unittest.TestCase):
         )
 
     def _scan(self) -> dict[str, object]:
-        scene = svc.read_scene(self.scene_id)
-        return {m.marker_id: m for m in svc._scan_scene_mutations(scene)}
+        scene = self.service.read_scene(self.scene_id)
+        return {m.marker_id: m for m in self.service._scan_scene_mutations(scene)}
 
     def _body(self) -> str:
-        return svc.read_scene(self.scene_id).body
+        return self.service.read_scene(self.scene_id).body
 
 
 class CarrierScanTests(MutationUnitTestBase):
@@ -131,8 +131,8 @@ class CarrierScanTests(MutationUnitTestBase):
             f"<!-- mutate:entity={self.honor};field=rank;value=Ensign;id=m0 --> "
             f"Later. {self._carrier()}"
         )
-        scene = svc.read_scene(self.scene_id)
-        ids = [m.marker_id for m in svc._scan_scene_mutations(scene)]
+        scene = self.service.read_scene(self.scene_id)
+        ids = [m.marker_id for m in self.service._scan_scene_mutations(scene)]
         self.assertEqual(ids, ["m0", "r1", "r2"])
 
     def test_carrier_with_malformed_row_is_ignored_entirely(self) -> None:
@@ -160,19 +160,19 @@ class CarrierScanTests(MutationUnitTestBase):
 class CarrierResolutionTests(MutationUnitTestBase):
     def test_all_rows_of_a_unit_resolve(self) -> None:
         self._save_body(f"Honor rose. {self._carrier()}")
-        state = svc.effective_state(self.honor, self.scene_id)
+        state = self.service.effective_state(self.honor, self.scene_id)
         self.assertEqual(state, {"rank": "Captain", "title": "Lady Dame"})
 
     def test_rows_are_position_granular_together(self) -> None:
         self._save_body(f"Before. {self._carrier()} After.")
-        index = svc.build_mutations_index()
+        index = self.service.build_mutations_index()
         offset = index.by_entity[self.honor][0].offset
         self.assertEqual(
-            svc.effective_state(self.honor, self.scene_id, position=offset - 1, index=index),
+            self.service.effective_state(self.honor, self.scene_id, position=offset - 1, index=index),
             {},
         )
         self.assertEqual(
-            svc.effective_state(self.honor, self.scene_id, position=offset, index=index),
+            self.service.effective_state(self.honor, self.scene_id, position=offset, index=index),
             {"rank": "Captain", "title": "Lady Dame"},
         )
 
@@ -180,14 +180,14 @@ class CarrierResolutionTests(MutationUnitTestBase):
         self._save_body(
             f"{self._carrier()} Mid. <!-- mutate:close;ref=u1;id=c1 --> End."
         )
-        index = svc.build_mutations_index()
+        index = self.service.build_mutations_index()
         close_offset = self._body().index("<!-- mutate:close")
-        live_before = svc.effective_state(
+        live_before = self.service.effective_state(
             self.honor, self.scene_id, position=close_offset - 1, index=index
         )
         self.assertEqual(set(live_before), {"rank", "title"})
         self.assertEqual(
-            svc.effective_state(
+            self.service.effective_state(
                 self.honor, self.scene_id, position=close_offset + 1, index=index
             ),
             {},
@@ -197,7 +197,7 @@ class CarrierResolutionTests(MutationUnitTestBase):
         self._save_body(
             f"{self._carrier()} Mid. <!-- mutate:close;ref=r1;id=c1 --> End."
         )
-        state = svc.effective_state(self.honor, self.scene_id)
+        state = self.service.effective_state(self.honor, self.scene_id)
         self.assertEqual(state, {"title": "Lady Dame"})
 
     def test_close_by_unit_id_matches_row_id_for_standalone(self) -> None:
@@ -206,7 +206,7 @@ class CarrierResolutionTests(MutationUnitTestBase):
             f"<!-- mutate:entity={self.honor};field=rank;value=Captain;id=m1 --> "
             "Mid. <!-- mutate:close;ref=m1;id=c1 --> End."
         )
-        self.assertEqual(svc.effective_state(self.honor, self.scene_id), {})
+        self.assertEqual(self.service.effective_state(self.honor, self.scene_id), {})
 
     def test_close_by_legacy_group_ends_all_members(self) -> None:
         self._save_body(
@@ -214,27 +214,27 @@ class CarrierResolutionTests(MutationUnitTestBase):
             f"<!-- mutate:entity={self.honor};field=title;value=Dame;group=g1;id=m2 -->"
             " Mid. <!-- mutate:close;ref=g1;id=c1 --> End."
         )
-        self.assertEqual(svc.effective_state(self.honor, self.scene_id), {})
+        self.assertEqual(self.service.effective_state(self.honor, self.scene_id), {})
 
     def test_live_mutations_reflect_unit_close(self) -> None:
         self._save_body(
             f"{self._carrier()} Mid. <!-- mutate:close;ref=u1;id=c1 --> End."
         )
         close_offset = self._body().index("<!-- mutate:close")
-        live = svc.live_mutations(self.honor, self.scene_id, position=close_offset - 1)
+        live = self.service.live_mutations(self.honor, self.scene_id, position=close_offset - 1)
         self.assertEqual({m.marker_id for m in live.items}, {"r1", "r2"})
-        live_after = svc.live_mutations(self.honor, self.scene_id)
+        live_after = self.service.live_mutations(self.honor, self.scene_id)
         self.assertEqual(live_after.items, [])
 
     def test_effective_state_exclude_skips_records(self) -> None:
         # The list-edit baseline (#71, ADR-0017): re-editing a unit resolves the
         # effective value WITHOUT the unit's own rows.
         self._save_body(f"Honor rose. {self._carrier()}")
-        state = svc.effective_state(
+        state = self.service.effective_state(
             self.honor, self.scene_id, exclude={"r1", "r2"}
         )
         self.assertEqual(state, {})
-        partial = svc.effective_state(self.honor, self.scene_id, exclude={"r1"})
+        partial = self.service.effective_state(self.honor, self.scene_id, exclude={"r1"})
         self.assertEqual(partial, {"title": "Lady Dame"})
 
     def test_effective_route_accepts_exclude_param(self) -> None:
@@ -248,9 +248,9 @@ class CarrierResolutionTests(MutationUnitTestBase):
 
     def test_index_version_tracks_unit_name(self) -> None:
         self._save_body(f"Honor rose. {self._carrier('Promotion')}")
-        before = svc.build_mutations_index().version
+        before = self.service.build_mutations_index().version
         self._save_body(f"Honor rose. {self._carrier('Coronation')}")
-        self.assertNotEqual(before, svc.build_mutations_index().version)
+        self.assertNotEqual(before, self.service.build_mutations_index().version)
 
 
 class CarrierRewriteTests(MutationUnitTestBase):
@@ -259,7 +259,7 @@ class CarrierRewriteTests(MutationUnitTestBase):
         self._save_body(f"Honor rose. {self._carrier()} The fleet cheered.")
 
     def test_update_row_rewrites_only_that_row(self) -> None:
-        svc.update_mutation(self.scene_id, "r1", UpdateMutationRequest(value="Commodore"))
+        self.service.update_mutation(self.scene_id, "r1", UpdateMutationRequest(value="Commodore"))
         markers = self._scan()
         self.assertEqual(markers["r1"].value, "Commodore")
         self.assertEqual(markers["r2"].value, "Lady Dame")
@@ -269,7 +269,7 @@ class CarrierRewriteTests(MutationUnitTestBase):
         self.assertIn(f"<!-- mutate:entity={self.honor};name=Promotion;id=u1\n", body)
 
     def test_update_row_name_renames_the_unit_head(self) -> None:
-        svc.update_mutation(self.scene_id, "r1", UpdateMutationRequest(name="Coronation"))
+        self.service.update_mutation(self.scene_id, "r1", UpdateMutationRequest(name="Coronation"))
         markers = self._scan()
         self.assertEqual(markers["r1"].unit_name, "Coronation")
         self.assertEqual(markers["r2"].unit_name, "Coronation")
@@ -277,7 +277,7 @@ class CarrierRewriteTests(MutationUnitTestBase):
 
     def test_update_missing_row_is_404(self) -> None:
         with self.assertRaises(Exception) as ctx:
-            svc.update_mutation(self.scene_id, "nope", UpdateMutationRequest(value="x"))
+            self.service.update_mutation(self.scene_id, "nope", UpdateMutationRequest(value="x"))
         self.assertEqual(getattr(ctx.exception, "status_code", None), 404)
 
     def test_delete_row_keeps_carrier_when_rows_remain(self) -> None:
@@ -288,13 +288,13 @@ class CarrierRewriteTests(MutationUnitTestBase):
             "field=titles;op=add;value=Steadholder;id=r3\n"
             "-->"
         )
-        svc.delete_mutation(self.scene_id, "r2")
+        self.service.delete_mutation(self.scene_id, "r2")
         markers = self._scan()
         self.assertEqual(set(markers), {"r1", "r3"})
         self.assertIn("id=u1\n", self._body())  # still a carrier
 
     def test_delete_row_degenerates_two_row_carrier_to_single_line(self) -> None:
-        svc.delete_mutation(self.scene_id, "r2")
+        self.service.delete_mutation(self.scene_id, "r2")
         body = self._body()
         self.assertNotIn("\n", body[body.index("<!-- mutate:") : body.index("-->")])
         marker = self._scan()["r1"]
@@ -305,7 +305,7 @@ class CarrierRewriteTests(MutationUnitTestBase):
         self.assertIn("The fleet cheered.", body)
 
     def test_delete_by_unit_head_id_drops_whole_carrier(self) -> None:
-        svc.delete_mutation(self.scene_id, "u1")
+        self.service.delete_mutation(self.scene_id, "u1")
         self.assertEqual(self._scan(), {})
         body = self._body()
         self.assertIn("Honor rose.", body)
@@ -316,7 +316,7 @@ class CarrierRewriteTests(MutationUnitTestBase):
         self._save_body(
             f"<!-- mutate:entity={self.honor};field=rank;value=Ensign;id=m1 -->"
         )
-        svc.update_mutation(self.scene_id, "m1", UpdateMutationRequest(value="Admiral"))
+        self.service.update_mutation(self.scene_id, "m1", UpdateMutationRequest(value="Admiral"))
         self.assertEqual(self._scan()["m1"].value, "Admiral")
 
 
@@ -330,7 +330,7 @@ class CarrierValidationTests(MutationUnitTestBase):
             "field=titles;op=add;value=Steadholder;id=r2\n"
             "-->"
         )
-        report = svc.validate_project()
+        report = self.service.validate_project()
         joined = " ".join(report.warnings)
         self.assertIn("op remove is only valid on collection fields", joined)
         self.assertNotIn("r2", joined)

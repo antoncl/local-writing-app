@@ -8,7 +8,7 @@ from unittest.mock import patch
 from fastapi.testclient import TestClient
 
 from app.main import app
-from app.runtime import service as global_service
+from app.runtime import current_scope
 from app.services import machine_settings as ms
 
 
@@ -93,7 +93,7 @@ class RecentProjectsEndpointTests(unittest.TestCase):
     def setUp(self) -> None:
         self.tmp = TemporaryDirectory()
         self.root = Path(self.tmp.name).resolve()
-        global_service.__init__()
+        current_scope.clear()
         self.client = TestClient(app)
 
     def tearDown(self) -> None:

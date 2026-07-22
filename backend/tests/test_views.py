@@ -12,11 +12,11 @@ from pathlib import Path
 from tempfile import TemporaryDirectory
 
 from fastapi.testclient import TestClient
+from project_fixtures import open_test_project
 
 from app.main import app
 from app.models import NodePickerConfig
 from app.models_views import ViewSpec
-from app.runtime import service as svc
 from app.services.project.views import ViewsMixin
 from app.view_grammar_generated import NestMatch, NestOp, ViewExpr
 
@@ -62,8 +62,7 @@ class ViewCrudTests(unittest.TestCase):
     def setUp(self) -> None:
         self.temp_dir = TemporaryDirectory()
         self.root = Path(self.temp_dir.name) / "project"
-        svc.__init__()
-        svc.create_project(self.root, "View Tests")
+        self.service = open_test_project(self.root, "View Tests")
         self.client = TestClient(app)
 
     def tearDown(self) -> None:
@@ -447,8 +446,7 @@ class ViewUiStateTests(unittest.TestCase):
     def setUp(self) -> None:
         self.temp_dir = TemporaryDirectory()
         self.root = Path(self.temp_dir.name) / "project"
-        svc.__init__()
-        svc.create_project(self.root, "View UI Tests")
+        self.service = open_test_project(self.root, "View UI Tests")
         self.client = TestClient(app)
 
     def tearDown(self) -> None:

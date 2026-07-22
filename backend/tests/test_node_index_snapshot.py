@@ -37,8 +37,7 @@ class SnapshotTestCase(unittest.TestCase):
         self.base = Path(self.temp_dir.name).resolve() / "writing"
         self.universe = self.base / "honorverse"
         self.root = self.universe / "book01"
-        self.service = ProjectService()
-        self.service.create_project(self.root, "Book 1")
+        self.service = ProjectService.created_at(self.root, "Book 1")
         self._set_base_folder(self.base)
 
     def tearDown(self) -> None:
@@ -102,8 +101,8 @@ class SnapshotIsUsedTests(SnapshotTestCase):
     def test_rehydrated_index_matches_a_cold_build(self) -> None:
         """The whole contract in one assertion: same winners, same shadowed
         candidates in the same order, same edges both ways, same diagnostics."""
-        self.service.create_project(self.universe, "Honorverse")
-        self.service.open_project(self.root)
+        self.service = ProjectService.created_at(self.universe, "Honorverse")
+        self.service = ProjectService.opened_at(self.root)
         self._write_lore(self.universe, "seren", "Seren (universe)")
         self._write_lore(self.base, "seren", "Seren (base)")
         self._write_lore(self.root, "seren", "Seren (book)", refs=["harrington"])
@@ -126,8 +125,8 @@ class SnapshotIsUsedTests(SnapshotTestCase):
     def test_shadow_warnings_are_not_doubled(self) -> None:
         """`resolve()` derives them, so persisting them would emit each twice —
         and `validate_project` shows warnings to the user verbatim."""
-        self.service.create_project(self.universe, "Honorverse")
-        self.service.open_project(self.root)
+        self.service = ProjectService.created_at(self.universe, "Honorverse")
+        self.service = ProjectService.opened_at(self.root)
         self._write_lore(self.universe, "seren", "Seren (universe)")
         self._write_lore(self.root, "seren", "Seren (book)")
 
@@ -142,8 +141,8 @@ class SnapshotIsUsedTests(SnapshotTestCase):
         """Innermost first, still. Entries are stored grouped by id, so replaying
         them through `add` — which front-inserts — inverts each group unless the
         group is reversed on the way in."""
-        self.service.create_project(self.universe, "Honorverse")
-        self.service.open_project(self.root)
+        self.service = ProjectService.created_at(self.universe, "Honorverse")
+        self.service = ProjectService.opened_at(self.root)
         self._write_lore(self.base, "seren", "Seren (base)")
         self._write_lore(self.universe, "seren", "Seren (universe)")
         self._write_lore(self.root, "seren", "Seren (book)")
@@ -238,8 +237,8 @@ class StalenessTests(SnapshotTestCase):
         """Same mechanism, stated directly: the chain the walk yields is part of
         the snapshot's identity, not merely of its content."""
         self.service._build_node_index(self.root)
-        self.service.create_project(self.universe, "Honorverse")
-        self.service.open_project(self.root)
+        self.service = ProjectService.created_at(self.universe, "Honorverse")
+        self.service = ProjectService.opened_at(self.root)
         self.assertTrue(self._rebuilt())
 
     def test_project_manifest_edit_rebuilds(self) -> None:

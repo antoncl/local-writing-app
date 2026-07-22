@@ -32,9 +32,8 @@ class DeclaredChainTestCase(unittest.TestCase):
         self.universe = self.base / "honorverse"
         self.series = self.universe / "honor-harrington"
         self.root = self.series / "book01"
-        self.service = ProjectService()
-        self.service.create_project(self.root, "Book 1")
-        self.service.open_project(self.root)
+        self.service = ProjectService.created_at(self.root, "Book 1")
+        self.service = ProjectService.opened_at(self.root)
         self._set_base(self.base)
 
     def tearDown(self) -> None:
@@ -140,8 +139,8 @@ class TheEnumerationIsReportedWholeTests(DeclaredChainTestCase):
 
     def test_direct_child_projects_are_listed_with_their_titles(self) -> None:
         child = self.root / "part-two"
-        self.service.create_project(child, "Part Two")
-        self.service.open_project(self.root)
+        self.service = ProjectService.created_at(child, "Part Two")
+        self.service = ProjectService.opened_at(self.root)
 
         self.assertEqual(
             [(row.name, row.title) for row in self.service.current_project().children],
@@ -200,8 +199,8 @@ class LabelsFollowTheProjectTests(DeclaredChainTestCase):
     def test_the_outermost_declared_layer_is_not_called_base_folder(self) -> None:
         """The old rule labelled position 0 "Base Folder", which was true only
         while the walk always started at the configured base."""
-        self.service.create_project(self.universe, "Honorverse")
-        self.service.open_project(self.root)
+        self.service = ProjectService.created_at(self.universe, "Honorverse")
+        self.service = ProjectService.opened_at(self.root)
         declare(self.service, self.root, [self.universe])
 
         labels = [layer.label for layer in self.service.collect_layers(self.root)]

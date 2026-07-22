@@ -55,8 +55,7 @@ class LayeredTagsTests(unittest.TestCase):
         self.universe = self.base / "honorverse"
         self.series = self.universe / "honor-harrington"
         self.root = self.series / "book01"
-        self.service = ProjectService()
-        self.service.create_project(self.root, "Book 1")
+        self.service = ProjectService.created_at(self.root, "Book 1")
         declare_full_chain(self.service, self.root, self.base)
 
     def tearDown(self) -> None:

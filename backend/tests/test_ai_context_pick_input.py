@@ -72,9 +72,8 @@ def test_context_pick_roundtrips_through_prompt_save(tmp_path, monkeypatch):
     from app.models import SavePromptEntryRequest
     from app.services.project_service import ProjectService
 
-    service = ProjectService()
-    info = service.create_project(tmp_path / "project", "Demo")
-    assert info.title == "Demo"
+    service = ProjectService.created_at(tmp_path / "project", "Demo")
+    assert service.current_project().title == "Demo"
     created = service.create_prompt_entry(
         type("R", (), {"title": "Pick demo", "entry_type": "prompt:snippet"})()
     )

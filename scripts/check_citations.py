@@ -49,11 +49,13 @@ from __future__ import annotations
 
 import argparse
 import ast
+import io
 import json
 import keyword
 import re
 import subprocess
 import sys
+import tokenize
 from dataclasses import dataclass, field
 from pathlib import Path
 
@@ -335,6 +337,7 @@ class RepoIndex:
             self._by_suffix.setdefault(rel.rsplit("/", 1)[-1], []).append(rel)
         self._defs: dict[str, list[Definition]] | None = None
         self._text: dict[str, str] = {}
+        self._searchable: dict[str, str] = {}
 
     @classmethod
     def from_git(cls, root: Path = REPO) -> RepoIndex:
@@ -408,18 +411,47 @@ class RepoIndex:
                 )
         return table
 
-    def mentions_anywhere(self, symbol: str) -> bool:
-        """Does the token appear in any tracked source file?
+    def searchable_text(self, rel: str) -> str:
+        """A file's *code*, with its prose removed.
 
-        Deliberately textual and deliberately generous: the question at step 5
-        is "did this name vanish", and a name that survives as a variable, a
-        Svelte component or a dict key has not vanished.
+        Python comments and string literals are dropped. Otherwise a name that
+        survives only in a docstring counts as evidence the code still exists —
+        and the first victim of that was this checker: naming a genuinely
+        deleted function in its own docstring and test fixtures resurrected it,
+        and silently downgraded the flagship finding to OK. A gate that blinds
+        itself by describing what it looks for is exactly the erosion this repo
+        builds gates against.
+        """
+        if rel not in self._searchable:
+            self._searchable[rel] = self._strip_prose(rel)
+        return self._searchable[rel]
+
+    def _strip_prose(self, rel: str) -> str:
+        text = self.read(rel)
+        if not rel.endswith(".py"):
+            return text
+        try:
+            tokens = tokenize.generate_tokens(io.StringIO(text).readline)
+            return " ".join(
+                tok.string
+                for tok in tokens
+                if tok.type not in (tokenize.COMMENT, tokenize.STRING)
+            )
+        except (tokenize.TokenError, IndentationError, SyntaxError, ValueError):
+            return text
+
+    def mentions_anywhere(self, symbol: str) -> bool:
+        """Does the token appear in the code of any tracked source file?
+
+        Still deliberately generous: the question at step 5 is "did this name
+        vanish", and a name that survives as a variable, a Svelte component or
+        a dict key has not vanished. Prose about the name is not the name.
         """
         pattern = re.compile(rf"\b{re.escape(symbol)}\b")
         for rel in self.files:
             if Path(rel).suffix not in SEARCHABLE_SUFFIXES:
                 continue
-            if pattern.search(self.read(rel)):
+            if pattern.search(self.searchable_text(rel)):
                 return True
         return False
 

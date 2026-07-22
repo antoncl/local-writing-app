@@ -206,6 +206,25 @@ def test_bare_mention_of_a_vanished_symbol_is_flagged(index):
     ]
 
 
+def test_a_name_that_survives_only_in_prose_has_still_vanished(tmp_path):
+    """The checker blinded itself this way within a day of merging.
+
+    Naming a genuinely deleted function in its own docstring and test fixtures
+    made `mentions_anywhere` find it, which downgraded the flagship finding to
+    OK — the gate eroded by describing what it looks for. Python comments and
+    string literals are code's prose, and prose about a name is not the name.
+    """
+    (tmp_path / "doc.py").write_text(
+        '"""Once resolved by long_gone_helper, which no longer exists."""\n'
+        "# long_gone_helper used to live here\n"
+        "SURVIVOR = 1\n",
+        encoding="utf-8",
+    )
+    index = cc.RepoIndex(tmp_path, ["doc.py"])
+    assert not index.mentions_anywhere("long_gone_helper")
+    assert index.mentions_anywhere("SURVIVOR")
+
+
 def test_bare_mention_of_a_surviving_name_is_quiet(index):
     source = cc.Source(label="ADR", url="", text="The `unrelated_helper` and `CACHE_VERSION` still exist.")
     assert all(f.status == cc.OK for f in cc.check_source(source, index))

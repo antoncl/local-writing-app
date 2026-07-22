@@ -206,6 +206,19 @@ rather than letting it ride along in a diff; once it lands, the base moves and
 the ratchet re-arms. Run it locally with
 `python scripts/check_exemptions.py --base origin/master`.
 
+The **citation-rot checker** (`scripts/check_citations.py`,
+`.github/workflows/citation-rot.yml`, #397) is the one **advisory** gate, and
+deliberately not part of `gates.yml`: a PR must not go red because an unrelated
+issue got stale. It verifies `path:line` claims in issue bodies, ADRs and docs
+against the code, anchoring each on the symbol the prose names next to it —
+which is what catches the dangerous shape, a line number that is still valid
+and now lands on unrelated code. On a PR it comments about the files that diff
+touches; weekly it edits one standing tracking issue. **It flags, it never
+fixes**: repointing a stale line number yields a citation that resolves cleanly
+and still does not support the sentence, which turns visible rot into invisible
+rot. Locally, `python scripts/check_citations.py --memory-dir <memory>` is the
+only run that can see the memory files — CI cannot.
+
 **In a linked git worktree** the gates must test *that* worktree's code.
 `scripts/venv_run.py` borrows the primary worktree's *interpreter* but forces
 this checkout's `backend/` onto `PYTHONPATH` (#352 — otherwise the editable

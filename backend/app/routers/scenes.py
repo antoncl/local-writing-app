@@ -11,55 +11,60 @@ from app.models import (
     UpdateEmbeddedTodoRequest,
     UpdateMutationRequest,
 )
-from app.runtime import service, translate_errors
+from app.runtime import CurrentProject, translate_errors
 
 router = APIRouter()
 
 
 @router.post("/api/scenes", response_model=Scene)
-def create_scene(request: CreateSceneRequest) -> Scene:
+def create_scene(project: CurrentProject, request: CreateSceneRequest) -> Scene:
     with translate_errors():
-        return service.create_scene(request)
+        return project.create_scene(request)
 
 
 @router.get("/api/scenes/{scene_id}", response_model=Scene)
-def get_scene(scene_id: str) -> Scene:
+def get_scene(project: CurrentProject, scene_id: str) -> Scene:
     with translate_errors():
-        return service.read_scene(scene_id)
+        return project.read_scene(scene_id)
 
 
 @router.get("/api/scenes/{scene_id}/effective-names")
-def get_scene_effective_names(scene_id: str) -> dict[str, list[str]]:
+def get_scene_effective_names(project: CurrentProject, scene_id: str) -> dict[str, list[str]]:
     """Each lore entry's effective name-set (title + aliases) as of this scene —
     the source for the effective-name-aware implicit-context matcher (#61)."""
     with translate_errors():
-        return service.effective_names(scene_id)
+        return project.effective_names(scene_id)
 
 
 @router.put("/api/scenes/{scene_id}", response_model=Scene)
-def save_scene(scene_id: str, request: SaveSceneRequest) -> Scene:
+def save_scene(project: CurrentProject, scene_id: str, request: SaveSceneRequest) -> Scene:
     with translate_errors():
-        return service.save_scene(scene_id, request)
+        return project.save_scene(scene_id, request)
 
 
 @router.delete("/api/scenes/{scene_id}", response_model=StructureDocument)
-def delete_scene(scene_id: str) -> StructureDocument:
+def delete_scene(project: CurrentProject, scene_id: str) -> StructureDocument:
     with translate_errors():
-        return service.delete_scene(scene_id)
+        return project.delete_scene(scene_id)
 
 
 @router.patch("/api/scenes/{scene_id}/todos/{todo_id}", response_model=Scene)
-def update_embedded_todo(scene_id: str, todo_id: str, request: UpdateEmbeddedTodoRequest) -> Scene:
+def update_embedded_todo(
+    project: CurrentProject,
+    scene_id: str,
+    todo_id: str,
+    request: UpdateEmbeddedTodoRequest,
+) -> Scene:
     """Rewrite a single in-prose embedded-todo marker without a full body save."""
     with translate_errors():
-        return service.update_embedded_todo(scene_id, todo_id, request)
+        return project.update_embedded_todo(scene_id, todo_id, request)
 
 
 @router.delete("/api/scenes/{scene_id}/todos/{todo_id}", response_model=Scene)
-def delete_embedded_todo(scene_id: str, todo_id: str) -> Scene:
+def delete_embedded_todo(project: CurrentProject, scene_id: str, todo_id: str) -> Scene:
     """Remove a single in-prose embedded-todo marker, keeping its wrapped text."""
     with translate_errors():
-        return service.delete_embedded_todo(scene_id, todo_id)
+        return project.delete_embedded_todo(scene_id, todo_id)
 
 
 # The two single-marker mutation routes below are the intentful API mirror of the
@@ -70,16 +75,16 @@ def delete_embedded_todo(scene_id: str, todo_id: str) -> Scene:
 # Kept for parity and future non-editor callers; they return the re-read Scene so
 # any open pane could reconcile if one ever did use them.
 @router.patch("/api/scenes/{scene_id}/mutations/{marker_id}", response_model=Scene)
-def update_mutation(scene_id: str, marker_id: str, request: UpdateMutationRequest) -> Scene:
+def update_mutation(project: CurrentProject, scene_id: str, marker_id: str, request: UpdateMutationRequest) -> Scene:
     """Rewrite a single in-prose lore-mutation marker without a full body save (#33)."""
     with translate_errors():
-        return service.update_mutation(scene_id, marker_id, request)
+        return project.update_mutation(scene_id, marker_id, request)
 
 
 @router.delete("/api/scenes/{scene_id}/mutations/{marker_id}", response_model=Scene)
-def delete_mutation(scene_id: str, marker_id: str) -> Scene:
+def delete_mutation(project: CurrentProject, scene_id: str, marker_id: str) -> Scene:
     """Remove a single in-prose lore-mutation marker (#33)."""
     with translate_errors():
-        return service.delete_mutation(scene_id, marker_id)
+        return project.delete_mutation(scene_id, marker_id)
 
 

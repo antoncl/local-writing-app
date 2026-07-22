@@ -1,10 +1,13 @@
 """Project lifecycle slice of ProjectService (#14 backend split).
 
-Project-as-a-whole operations: create / open a project, read + update its
+Project-as-a-whole operations: scaffold a new project, read + update its
 settings, browse the filesystem for the project/base-folder pickers, and
-validate / repair the on-disk structure. `ProjectService` composes this mixin;
-the per-request state (`self.root_path`, `self.title`, `self.last_migrations`)
-lives on the core `__init__` and is mutated here through `self`.
+validate / repair the on-disk structure. `ProjectService` composes this mixin.
+
+Nothing here mutates the service's scope any more (#399): a service arrives
+bound to an immutable `WorkScope`, so the create/open *entry points* are
+`ProjectService.created_at` / `.opened_at`, and what is left here — the
+scaffold, the base-folder rebase — writes files under an already-bound root.
 
 Method bodies moved verbatim. Shared tooling resolves through the MRO:
 `self._require_project`, `self._read_yaml` / `self._write_yaml`,
@@ -35,7 +38,6 @@ from app.models import (
     UpdateProjectSettingsRequest,
 )
 from app.services.migrations import CURRENT_VERSION as PROJECT_SCHEMA_VERSION
-from app.services.migrations import migrate_project
 from app.services.project.errors import ProjectServiceError
 from app.services.project.layers import INHERITS_KEY, MANIFEST_FILENAME
 from app.services.project.tree_configs import (
@@ -46,9 +48,15 @@ from app.services.tree_structure import TreeStructureService
 
 
 class ProjectLifecycleMixin:
-    def create_project(self, root_path: Path, title: str, projects_base_folder: Path | None = None) -> ProjectInfo:
-        self.last_migrations = []
-        root = root_path.expanduser().resolve()
+    def _scaffold_new_project(self, title: str, projects_base_folder: Path | None = None) -> None:
+        """Write a new project's files under this service's already-bound root.
+
+        Creation used to resolve the root and then point the service at it, which
+        made "which project is this service on?" an outcome of the call rather
+        than an input to it (#399). The root now arrives with the service, so
+        this only writes files; `ProjectService.created_at` is the entry point.
+        """
+        root = self._require_project()
         if projects_base_folder is None:
             root.parent.mkdir(parents=True, exist_ok=True)
         base_folder = self._validate_projects_base_folder(projects_base_folder or root.parent, root)
@@ -92,9 +100,6 @@ class ProjectLifecycleMixin:
         # the file exists so validate_project doesn't flag it as missing.
         TreeStructureService(root, RESEARCH_TREE_CONFIG).initialize()
         self._write_yaml(root / "todo.yaml", {"items": []})
-        self.root_path = root
-        self.title = title
-        return self.current_project()
 
     def _new_project_manifest(self, title: str, root: Path, projects_base_folder: Path | None = None) -> dict[str, Any]:
         base_folder = projects_base_folder or root.parent
@@ -120,32 +125,40 @@ class ProjectLifecycleMixin:
     def _empty_metadata_schema(self) -> dict[str, Any]:
         return {"version": 1, "entry_types": {}, "fields": {}, "groups": {}}
 
-    def open_project(self, root_path: Path, projects_base_folder: Path | None = None) -> ProjectInfo:
-        root = root_path.expanduser().resolve()
-        if not (root / "project.yaml").exists():
-            raise ProjectServiceError("No project.yaml found in that folder.", 404)
-        try:
-            self.last_migrations = migrate_project(root)
-        except Exception as exc:  # noqa: BLE001
-            raise ProjectServiceError(f"Project migration failed: {exc}", 500) from exc
-        manifest = self._read_yaml(root / "project.yaml")
-        if projects_base_folder is not None:
-            base_folder = self._validate_projects_base_folder(projects_base_folder, root)
-            settings = manifest.get("settings")
-            if not isinstance(settings, dict):
-                settings = {}
-            settings["projects_base_folder"] = str(base_folder)
-            manifest["settings"] = settings
-            self._write_yaml(root / "project.yaml", manifest)
-        self.root_path = root
-        self.title = str(manifest.get("title") or root.name)
-        return self.current_project()
+    def _rebase_projects_base_folder(self, projects_base_folder: Path) -> None:
+        """Re-point this project's base folder — the opt-in half of opening.
+
+        Split out of `open_project` (#399) for the same reason as the scaffold:
+        it operates on a bound root instead of producing one.
+        """
+        root = self._require_project()
+        manifest = self._read_yaml(root / MANIFEST_FILENAME)
+        base_folder = self._validate_projects_base_folder(projects_base_folder, root)
+        settings = manifest.get("settings")
+        if not isinstance(settings, dict):
+            settings = {}
+        settings["projects_base_folder"] = str(base_folder)
+        manifest["settings"] = settings
+        self._write_yaml(root / MANIFEST_FILENAME, manifest)
+
+    def _project_title(self, root: Path) -> str | None:
+        """This project's title, from the manifest — the only place it lives.
+
+        It used to be cached on the service and refreshed by whoever wrote it
+        (`save_project_node`), which made it a second mutable field to keep in
+        step with the scope (#399). `save_project_node` already syncs
+        project.yaml, so reading it is both simpler and one fewer thing that can
+        disagree with disk.
+        """
+        manifest = self._read_yaml(root / MANIFEST_FILENAME)
+        title = manifest.get("title")
+        return title.strip() if isinstance(title, str) and title.strip() else None
 
     def current_project(self) -> ProjectInfo:
         root = self._require_project()
         ai = self._read_ai_settings(root)
         return ProjectInfo(
-            title=self.title or root.name,
+            title=self._project_title(root) or root.name,
             root_path=str(root),
             projects_base_folder=str(self._metadata_schema_base_folder(root) or root.parent),
             ai_policy=ai.get("policy", "off"),
@@ -441,7 +454,7 @@ class ProjectLifecycleMixin:
         if path.exists():
             return
         manifest = self._read_yaml(root / "project.yaml") if (root / "project.yaml").exists() else {}
-        title = str(manifest.get("title") or self.title or "Untitled Project")
+        title = str(manifest.get("title") or "Untitled Project")
         self._write_project_node_file(path, self._new_project_node(title))
 
     def repair_project(self) -> ProjectValidation:

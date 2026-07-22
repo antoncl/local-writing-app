@@ -1,10 +1,62 @@
 # ADR-0043: Scene snapshots are witnesses — prose is restored, context is only reported
 
-- Status: **Draft — held open until the UX pass**, 0.8.0. Not merely unreviewed: deliberately not
-  approvable yet. See "Why this stays a Draft" below before promoting it.
-- Feature: #6 (scopes the "revisions" issue) · Relates: #314 (composite revision) · Follows: ADR-0001,
-  ADR-0002, ADR-0003, ADR-0010, ADR-0039
+- Status: **Accepted** — 0.8.0, 2026-07-22 (Anton, having read it alongside ADR-0044 and the mockup).
+  Accepted covers the whole document **including Amendment 1** — snapshot-as-witness and its stated
+  non-goal (context is never restored), scenes-only v1, full copies rather than deltas, the two
+  capture triggers with keep-five/never-thinned retention, snapshot identity and the two-file store,
+  the directory-as-lookup-table, deletion cascading with the scene, the three drift axes with the
+  third narrowed to value *reinterpretation*, immutability with migration-at-restore, and the
+  advisory-never-blocking rule with its report-quality obligation.
+- Feature: #6 (scopes the "revisions" issue) · Relates: #314 (composite revision) · Companion:
+  **ADR-0044** (the surface) · Follows: ADR-0001, ADR-0002, ADR-0003, ADR-0010, ADR-0039
 - Supersedes nothing. Settles the four-way scoping question posed in #6.
+
+## Amendment 1 — what the surface pass found (ADR-0044)
+
+The document was held open on the argument that designing the surface would probably expose
+something the model was missing. It did. Three author actions had no place in the model, and all
+three are the same insight from different angles: **the author needs control over what the strip
+holds, and the strip must not lose anything without their say-so.**
+
+**A snapshot can be deleted.** The model had automatic thinning (keep five) and cascade (delete the
+scene, its snapshots go), but no author verb for a single snapshot. There now is one.
+
+*This does not contradict immutability.* "Snapshots are immutable" means a migration must never
+rewrite one at rest — falsifying a witness destroys what makes it a witness. It has never meant
+undeletable. The two are stated together here because a later reader will otherwise see a collision.
+
+Deletion is also trivially safe *because* snapshots are full copies (below). Under delta storage,
+removing a middle snapshot would mean rebasing every later one against a new base — a chain repair on
+the one feature whose job is not losing words. The full-copy decision was argued on restore
+integrity; it turns out to pay for deletion too.
+
+**A snapshot can be pinned**, flipping `retention` from `thinned` to `kept`. This is the third case
+the enum was chosen for. It means an automatic snapshot the author notices is worth keeping does not
+have to be re-captured to become permanent, and it makes delete one of a coherent pair rather than an
+odd single verb.
+
+**Restore captures first, automatically.** An earlier reading of this ADR held that restore was
+recoverable because the author *could* capture beforehand — which rests the safety property on
+foresight, the same weakness already identified in the explicit tier ("worth most precisely when you
+forgot to press it"). Restoring therefore takes an automatic snapshot of the current state before
+overwriting it. Two consequences:
+
+- It is what actually justifies **advisory, never blocking** (below). A restore into drifted context
+  proceeds with no gate not merely because the author is entitled to their choice, but because the
+  action is *undoable*.
+- It sharpens the contrast with delete. Restore is reversible → no confirmation. Delete is
+  irreversible → confirm, naming what is going. Two destructive-looking actions in one strip get
+  opposite treatments, on a principle rather than an aesthetic.
+
+**Side effect worth stating rather than discovering:** the auto-capture is a `thinned` snapshot, so
+on a scene already holding five it evicts the oldest. Restoring costs the author their oldest
+automatic snapshot. That is the right trade — the state about to be overwritten is worth more than a
+five-sessions-old one — but it reads as a bug when hit without having read this.
+
+**The sidecar gains an optional one-line `description`.** Note this is *not* the denormalized `title`
+that was removed earlier: `title` was a copy of data already in the byte-copy's front matter, whereas
+a description is original data that exists nowhere else. Same file, opposite reasoning. Its
+presentation is ADR-0044's, and deliberately open.
 
 ## Context
 
@@ -360,11 +412,16 @@ ADR-0040's `.cache/` node-index snapshot (#306) — a real domain noun in the sa
 user-facing. If that overlap is judged too close, the alternative is to name the feature for what it
 holds rather than what it does.
 
-## Why this stays a Draft
+## Why this was held a Draft — and what it caught
 
-This document is held open until the user-facing surface has been thought through, and **not** because
-it is waiting in a queue for a signature. The reason is evidence from its own drafting: the sharpest
-corrections to it did not come from reading it, they came from asking what using it would be like.
+> **Resolved.** The UX pass ran (ADR-0044) and returned the three additions in Amendment 1. Kept
+> because the reasoning is the argument for holding the *next* model ADR the same way, and because it
+> records that the hold was not procedural.
+
+This document was held open until the user-facing surface had been thought through, and **not**
+because it was waiting in a queue for a signature. The reason was evidence from its own drafting: the
+sharpest corrections to it did not come from reading it, they came from asking what using it would be
+like.
 
 - *"How will the user know the ID of the scene they deleted?"* overturned orphan retention entirely —
   twice-written, and wrong, because the data was reachable only to someone willing to grep the
@@ -375,15 +432,18 @@ corrections to it did not come from reading it, they came from asking what using
   changed" to value reinterpretation, and retired a detector that would have cried wolf on every
   harmless schema edit.
 
-Three of this ADR's load-bearing decisions arrived that way. That is a strong prior that a surface pass
-will turn up more, and every one it finds is cheaper now than after implementation. **Approving it
-before then would convert an untested assumption into a decision of record** — the failure mode this
-repo has already paid for, where a document sketched something it had not thought through and a later
-thread honoured the sketch.
+Three of this ADR's load-bearing decisions arrived that way. That was a strong prior that a surface
+pass would turn up more, and every one it found is cheaper now than after implementation. **Approving
+it before then would have converted an untested assumption into a decision of record** — the failure
+mode this repo has already paid for, where a document sketched something it had not thought through
+and a later thread honoured the sketch.
 
-Consequence, per the approval gate: **no snapshot implementation starts.** Not the backend either,
-even though it is close to file-disjoint from 0.7.0 and could technically proceed — a surface finding
-is exactly the kind that changes what gets stored.
+**The prior held.** The pass returned three (Amendment 1), and the most consequential — restore
+capturing first — changes what gets *written to disk*, which is exactly the class of finding that
+would have been expensive to discover after the backend was built. The hold was worth its cost.
+
+Consequence, per the approval gate: **no snapshot implementation starts until both this and ADR-0044
+are approved.**
 
 ## Sequencing
 

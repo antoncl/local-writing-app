@@ -109,7 +109,12 @@ jobs:
       contents: read
       issues: write          # creates/edits the single tracking issue
     steps:
+      # Full history AND tags: a document pinned with "Verified against `v0.6.5`"
+      # is verified at that ref, and a shallow clone would make every pinned
+      # document UNVERIFIABLE at once (#412).
       - uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
 
       - uses: actions/setup-python@v6
         with:

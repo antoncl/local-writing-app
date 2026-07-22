@@ -3,6 +3,17 @@
 One decision per file (MADR-lite: decision · why/rejected-alternative · consequences). The *why*,
 especially the rejected alternative, is the load-bearing part — it's what decays from memory.
 
+**An ADR that quotes `file:line` names the git tag it was written against**, as a header:
+
+> **Verified against `<tag>` (YYYY-MM-DD).**  — e.g. the 0.6.5 release tag
+
+A pinned citation cannot rot — it was either right at that ref or never right — so it stays readable
+years later, and `scripts/check_citations.py` verifies it *there* instead of against HEAD (#412).
+Without the pin, every line number in an ADR decays the moment the next PR lands, and the honest
+repair for a paragraph describing older code is to delete the numbers rather than repoint them into
+a file that no longer supports the sentence. Prefer a **tag** to a sha: a topic-branch sha can be
+squashed out of existence at merge, and the checker can then only report UNVERIFIABLE.
+
 ## 0.4.0 — Mid-scene lore mutations (#33)
 Design docs: [`../mid-scene-lore-mutations.md`](../mid-scene-lore-mutations.md) (v1.0 spine) ·
 [`../mid-scene-lore-mutations-v1.1.md`](../mid-scene-lore-mutations-v1.1.md) (v1.1)

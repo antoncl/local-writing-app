@@ -9,6 +9,7 @@ them; shape 3 is the one that motivated the tool, because it looks fine.
 from __future__ import annotations
 
 import importlib.util
+import subprocess
 import sys
 import textwrap
 from pathlib import Path
@@ -277,6 +278,106 @@ def test_pr_mode_drops_bare_mentions(index):
 
 
 # --------------------------------------------------------------------------
+# Pinned citations (#412) — "Verified against `<ref>`"
+# --------------------------------------------------------------------------
+
+
+def _git(repo: Path, *args: str) -> str:
+    proc = subprocess.run(
+        ["git", "-C", str(repo), *args],
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+        check=True,
+    )
+    return proc.stdout
+
+
+@pytest.fixture
+def pinned_repo(tmp_path: Path):
+    """A repo where the cited function has since moved down its file.
+
+    Tagged at the moment the citation was written, so `v1` is what a document
+    pinned to it should be judged against.
+    """
+    _git(tmp_path, "init", "-q", "-b", "main")
+    _git(tmp_path, "config", "user.email", "t@example.com")
+    _git(tmp_path, "config", "user.name", "Test")
+    target = tmp_path / "mod.py"
+    target.write_text("def forward_refs(entry):\n    return entry.refs\n", encoding="utf-8")
+    _git(tmp_path, "add", "mod.py")
+    _git(tmp_path, "commit", "-qm", "first")
+    _git(tmp_path, "tag", "v1")
+    target.write_text(
+        "def added_later(a):\n    return a\n\n\ndef forward_refs(entry):\n    return entry.refs\n",
+        encoding="utf-8",
+    )
+    _git(tmp_path, "add", "mod.py")
+    _git(tmp_path, "commit", "-qm", "second")
+    return tmp_path
+
+
+def test_provenance_header_is_recognised():
+    assert cc.provenance_ref("> **Verified against `v0.6.5` (2026-07-22).**") == "v0.6.5"
+    assert cc.provenance_ref("Written against `052895c`, out of the audit.") == "052895c"
+    assert cc.provenance_ref("No provenance here.") is None
+
+
+def test_a_pinned_citation_that_held_at_its_ref_is_silent(pinned_repo):
+    """The whole point: a pinned citation cannot rot.
+
+    Line 1 was `forward_refs` at `v1` and is `added_later` at HEAD. Judged
+    against HEAD this is the headline shape-3 finding; judged against the ref
+    the document names, it is simply correct.
+    """
+    text = "Verified against `v1`. `forward_refs` (`mod.py:1`) resolves the edges."
+    source = cc.Source(label="ADR", url="", text=text)
+
+    at_head = cc.check_source(source, cc.RepoIndex(pinned_repo, ["mod.py"]), mentions=False)
+    assert [f.status for f in at_head] == [cc.MOVED]
+
+    at_ref = cc.check_source(source, cc.RefIndex.at(pinned_repo, "v1"), mentions=False)
+    assert [f.status for f in at_ref] == [cc.OK]
+
+
+def test_a_pinned_citation_that_was_wrong_at_its_own_ref_is_still_reported(pinned_repo):
+    """The write-time check the pin makes possible — a typo'd line number."""
+    text = "Verified against `v1`. `forward_refs` (`mod.py:900`) resolves."
+    findings = cc.check_source(
+        cc.Source(label="ADR", url="", text=text),
+        cc.RefIndex.at(pinned_repo, "v1"),
+        mentions=False,
+    )
+    assert [f.status for f in findings] == [cc.OUT_OF_RANGE]
+
+
+def test_a_pinned_document_still_reports_a_symbol_that_never_existed(pinned_repo):
+    text = "Verified against `v1`. `never_existed` (`mod.py:1`) resolves."
+    findings = cc.check_source(
+        cc.Source(label="ADR", url="", text=text),
+        cc.RefIndex.at(pinned_repo, "v1"),
+        mentions=False,
+    )
+    assert [f.status for f in findings] == [cc.RENAMED_OR_DELETED]
+
+
+def test_an_unresolvable_ref_never_silently_passes(pinned_repo):
+    """A shallow clone, or a sha squashed away at merge.
+
+    `None` is what makes `run` emit UNVERIFIABLE rather than quietly checking
+    against HEAD, which would report drift the pin exists to prevent.
+    """
+    assert cc.RefIndex.at(pinned_repo, "v99-never-tagged") is None
+
+
+def test_the_pinned_roster_is_reported_once_not_per_citation():
+    report = cc.Report(pinned=[("ADR-0045", "6284bda"), ("#310", "052895c")])
+    markdown = cc.render_report(report, title="Citation rot")
+    assert "2 document(s) pin their citations to an earlier ref" in markdown
+    assert "052895c, 6284bda" in markdown
+
+
+# --------------------------------------------------------------------------
 # It flags, it never fixes
 # --------------------------------------------------------------------------
 
@@ -325,3 +426,13 @@ def _boom():
 def test_clean_report_says_so(index):
     markdown = cc.render_report(cc.Report(), title="Citation rot")
     assert "No rot found." in markdown
+
+
+def test_documentation_about_the_convention_does_not_pin_itself():
+    """The ADR README shows the header; it must not thereby adopt it.
+
+    A ref is a sha or a version tag, never a placeholder or a branch name —
+    branches move, which defeats the point of pinning.
+    """
+    assert cc.provenance_ref("> **Verified against `<tag>` (YYYY-MM-DD).**") is None
+    assert cc.provenance_ref("Verified against `main`.") is None

@@ -47,6 +47,10 @@ export async function renderDiffRuns(runs: DiffRun[], view: DiffView): Promise<s
   for (const run of runs) {
     if (!shows(view, run.kind)) continue;
     if (run.stacked && run.kind !== "equal") {
+      // A stacked run carrying only a block separator would render as an empty
+      // tinted box — a mark with nothing under it, which reads as a change the
+      // author cannot find.
+      if (!run.text.trim()) continue;
       await flush();
       const html = await sceneMarkdownToHtml(run.text);
       parts.push(`<div class="blk blk-${run.kind}">${html}</div>`);

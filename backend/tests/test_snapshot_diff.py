@@ -226,15 +226,26 @@ def test_generated_documents_hold_every_invariant() -> None:
         # No words lost, on either side. Everything else is presentation.
         assert reassembles(runs, was, now), name
 
+        # A run's offset is a running total, one cursor per side — NOT
+        # `source.index(run.text)`, which finds the first occurrence anywhere in
+        # the document. With prose that repeats its vocabulary that is almost
+        # never where the run actually is, so the container check would be
+        # asserting about the wrong region and passing for the wrong reason.
+        was_at = 0
+        now_at = 0
         for run in runs:
+            source, start = (was, was_at) if run.kind != "now" else (now, now_at)
+            if run.kind != "now":
+                was_at += len(run.text)
+            if run.kind != "was":
+                now_at += len(run.text)
             if run.kind == "equal" or run.stacked:
                 continue
             # Rule 1: an inline run wrapping a blank line would wrap `</p><p>`.
             assert "\n\n" not in run.text, name
             # A changed inline run must sit inside one structural container, or
             # the parser tears its wrapper apart.
-            source = was if run.kind == "was" else now
-            start = source.index(run.text)
+            assert source[start : start + len(run.text)] == run.text, f"{name}: bad offset"
             assert not escapes_container(source, start, start + len(run.text)), name
 
 

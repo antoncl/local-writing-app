@@ -64,9 +64,16 @@ export class SnapshotStripController {
   readLive: (() => LiveState) | null = null;
 
   #sceneId: string | null = null;
-  // A monotonic token, so a slow read for a notch the author has already left
-  // cannot overwrite the body they are looking at now.
-  #seq = 0;
+  // Two monotonic tokens, because they guard two different things and sharing
+  // one is a bug the author meets immediately.
+  //
+  // `#fetch` discards a diff for a notch already left. `#render` discards a
+  // rendering for a view already left. They are independent: the author drives
+  // *when* and *which* at once (§I), so a keypress lands mid-fetch constantly —
+  // and with one shared token the flip cancelled the fetch it was waiting on,
+  // leaving a parked notch with an empty overlay and no runs to flip.
+  #fetch = 0;
+  #render = 0;
 
   /** (Re)load this scene's snapshots, returning to Live. Returns a cancel fn
    *  for the caller's `$effect` teardown. */
@@ -74,7 +81,9 @@ export class SnapshotStripController {
     this.#sceneId = sceneId;
     this.parked = null;
     this.#clearDiff();
-    this.#seq++;
+    // Both, because a scene change invalidates a fetch AND a render.
+    this.#fetch++;
+    this.#render++;
     if (!sceneId) {
       this.snapshots = [];
       return () => {};
@@ -112,16 +121,17 @@ export class SnapshotStripController {
       this.#clearDiff();
       return;
     }
-    const seq = ++this.#seq;
-    const fresh = () => seq === this.#seq && this.#sceneId === sceneId;
+    const seq = ++this.#fetch;
+    const fresh = () => seq === this.#fetch && this.#sceneId === sceneId;
     try {
       const diff = await api.diffSnapshot(sceneId, snapshotId, this.readLive?.() ?? NO_LIVE);
-      const html = await renderDiffRuns(diff.runs, this.view);
-      if (fresh()) {
-        this.runs = diff.runs;
-        this.fields = diff.fields;
-        this.bodyHtml = html;
-      }
+      if (!fresh()) return;
+      this.runs = diff.runs;
+      this.fields = diff.fields;
+      // Render against the view as it is NOW, not as it was when the fetch
+      // started: the author may have pressed a key while it was in flight, and
+      // they should get the version they asked for.
+      await this.#renderBody();
     } catch {
       // Can't read it → don't show a blank page pretending to be a snapshot.
       if (fresh()) {
@@ -142,11 +152,16 @@ export class SnapshotStripController {
   setView(view: DiffView): void {
     if (view === this.view) return;
     this.view = view;
-    if (this.parked === null) return;
-    const seq = ++this.#seq;
-    void renderDiffRuns(this.runs, view).then((html) => {
-      if (seq === this.#seq) this.bodyHtml = html;
-    });
+    if (this.parked !== null) void this.#renderBody();
+  }
+
+  /** Render the runs into the overlay at the current view. Guarded on its own
+   *  token so a slow render for a view already left cannot land, and so it
+   *  cannot cancel an in-flight fetch. */
+  async #renderBody(): Promise<void> {
+    const seq = ++this.#render;
+    const html = await renderDiffRuns(this.runs, this.view);
+    if (seq === this.#render) this.bodyHtml = html;
   }
 
   /** `a` and `s` toggle against Both, so one key both enters and leaves a single

@@ -243,6 +243,14 @@ def load(
         raise SnapshotUnusable("version", str(payload.get("format_version")))
     # The code that produced it, not just the shape it produced. Same verdict as
     # a format change: expected after an upgrade, and rebuilds silently.
+    #
+    # ⚠ This must stay **above** the body checks. `_rehydrate` reads payload keys
+    # directly, so a snapshot written before a key existed raises `KeyError` →
+    # `corrupt` → a loud warning that says "this is a bug". Every user has such a
+    # snapshot after any upgrade that adds a key. Because this module is itself
+    # inside `_SOURCE_ROOTS`, adding one changes the identity and those payloads
+    # are rejected quietly here instead — which is only true while this check
+    # comes first.
     if payload.get("build_identity") != build_identity():
         raise SnapshotUnusable("version", "built by different code")
     if payload.get("root") != str(root):

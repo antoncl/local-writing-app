@@ -1,0 +1,282 @@
+"""Scene snapshots: capture, list, view, restore (ADR-0043, #401 slice 1).
+
+A snapshot is a **witness** — prose restored byte-exact, context captured and
+only reported when it has drifted. Slice 1 is the prose half; the witness and
+its drift report are slice 3, and the sidecar deliberately leaves room for it
+rather than guessing its shape here.
+
+**Two files per snapshot, under `snapshots/<source-node-id>/`:**
+
+- `<snapshot-id>.md` — a byte-for-byte copy of the scene file *including front
+  matter*, so it still carries the **source** node's id. That is correct: it is
+  a photograph of that file, not a second node. Restore copies these bytes back;
+  it never re-serializes, because a round trip through a serializer is the one
+  risk not worth taking on the feature whose job is not losing words.
+- `<snapshot-id>.yaml` — the snapshot's own record. Its `id` is its own, never
+  the source's; `snapshot_of` points back.
+
+The store is at the project root and contributes **nothing** to the node index —
+excluded at the index, once, never filtered per consumer (ADR-0043; pinned by
+`backend/tests/test_snapshots_not_indexed.py`, which landed ahead of this file).
+
+Every method here takes `root` from the caller rather than reading
+`self._require_project()` itself: a capture is a write, so it is a unit of work
+with a resolution scope it carries explicitly (ADR-0045, same reasoning as
+`_manuscript_tree`).
+"""
+
+from __future__ import annotations
+
+import shutil
+from datetime import UTC, datetime
+from pathlib import Path
+from typing import TYPE_CHECKING, Any
+
+from app.models import Snapshot, SnapshotDetail, SnapshotList
+from app.services.migrations import CURRENT_VERSION
+from app.services.project.errors import ProjectServiceError
+
+if TYPE_CHECKING:
+    from app.models import Scene
+
+SNAPSHOTS_DIRNAME = "snapshots"
+
+# How long a pause makes the next save a new sitting. On a save, if the last
+# save to this scene was longer ago than this, the **pre-save** bytes are
+# captured first — "what did this look like when I sat down" (ADR-0043
+# Amendment 2, settled on #395).
+#
+# 30 minutes: long enough that lunch does not split a sitting, short enough that
+# a morning and an evening are separate. It is a constant and not a setting
+# because a wrong value cannot lose work — it only makes automatic snapshots
+# sparser or denser than ideal — and "how many minutes constitutes a new
+# session?" is unanswerable without knowing how capture, thinning and pinning
+# interact. The author already has controls in both directions that need no
+# knowledge of this rule at all: press the camera, pin what should survive.
+#
+# Watch for the sprinter case — short bursts with sub-N gaps collapse a day into
+# one snapshot. If that shows up in real use the answer is a second trigger
+# (accumulated change since the last snapshot), not a smaller N: it adapts on
+# its own instead of asking the author to tune it.
+SESSION_GAP_MINUTES = 30
+
+# Automatic snapshots keep the last five per scene; explicit ones are never
+# thinned. Five because the automatic tier is a prosthetic for the author's own
+# recall of recent states, and that is roughly the depth a person holds. A
+# considered default, not a measured optimum.
+AUTOMATIC_KEEP = 5
+
+
+class SceneSnapshotsMixin:
+    """Composed onto `ProjectService`; the project IO helpers it uses
+    (`_atomic_write`, `_read_yaml`, `_write_yaml`, `_new_id`,
+    `_read_markdown_with_front_matter`, `_path_for_node_id`,
+    `_node_id_for_path`, `_update_scene_title_in_structure`,
+    `_remove_missing_scene_todo_anchors`, `read_scene`) resolve via MRO."""
+
+    # ----- store layout -----------------------------------------------------
+
+    def _snapshots_dir(self, root: Path, node_id: str) -> Path:
+        """The store for one scene. The *directory* name is the source node id —
+        load-bearing and never renamed, which is a deliberate departure from
+        "filenames are cosmetic": ids are stable and titles are not.
+
+        The directory listing **is** the lookup table (ADR-0043). There is no
+        index to build, invalidate or repair, and the answer survives any cache
+        corruption because it is the storage.
+        """
+        return root / SNAPSHOTS_DIRNAME / node_id
+
+    # ----- reading ----------------------------------------------------------
+
+    def _read_snapshot_record(self, sidecar: Path) -> Snapshot:
+        data = self._read_yaml(sidecar)
+        retention = data.get("retention")
+        if retention not in ("thinned", "kept"):
+            raise ProjectServiceError(
+                f"Snapshot {sidecar.stem} has an unreadable retention value.", 422
+            )
+        return Snapshot(
+            id=str(data.get("id") or sidecar.stem),
+            snapshot_of=str(data.get("snapshot_of") or ""),
+            captured_at=str(data.get("captured_at") or ""),
+            retention=retention,
+            schema_version=int(data.get("schema_version") or 0),
+        )
+
+    def _snapshot_records(self, root: Path, node_id: str) -> list[Snapshot]:
+        """Every snapshot of `node_id`, oldest first.
+
+        Sorted by `(captured_at, id)` rather than `captured_at` alone so the
+        order is total: thinning drops "the oldest", and an order with ties has
+        no such thing.
+        """
+        folder = self._snapshots_dir(root, node_id)
+        if not folder.is_dir():
+            return []
+        records = [self._read_snapshot_record(sidecar) for sidecar in sorted(folder.glob("*.yaml"))]
+        records.sort(key=lambda record: (record.captured_at, record.id))
+        return records
+
+    def list_snapshots(self, scene_id: str) -> SnapshotList:
+        root = self._require_project()
+        node_id = self._snapshot_source_id(scene_id)
+        return SnapshotList(snapshots=self._snapshot_records(root, node_id))
+
+    def read_snapshot(self, scene_id: str, snapshot_id: str) -> SnapshotDetail:
+        """The stored body, parsed for display. Reading is not restoring — the
+        byte-copy is parsed here so a pane can render it, while restore stays a
+        file copy."""
+        root = self._require_project()
+        node_id = self._snapshot_source_id(scene_id)
+        record = self._require_snapshot(root, node_id, snapshot_id)
+        front_matter, body = self._read_markdown_with_front_matter(
+            self._snapshots_dir(root, node_id) / f"{snapshot_id}.md"
+        )
+        return SnapshotDetail(
+            snapshot=record,
+            title=str(front_matter.get("title") or node_id),
+            body=body,
+        )
+
+    def _require_snapshot(self, root: Path, node_id: str, snapshot_id: str) -> Snapshot:
+        sidecar = self._snapshots_dir(root, node_id) / f"{snapshot_id}.yaml"
+        body = self._snapshots_dir(root, node_id) / f"{snapshot_id}.md"
+        if not sidecar.exists() or not body.exists():
+            raise ProjectServiceError(f"Snapshot {snapshot_id} does not exist.", 404)
+        return self._read_snapshot_record(sidecar)
+
+    def _snapshot_source_id(self, scene_id: str) -> str:
+        """The id the store is keyed by: the scene file's front-matter id, which
+        is canonical identity. A route may be reached with the structure node's
+        id instead, and the two are not always the same."""
+        path = self._path_for_node_id(scene_id, "scene")
+        return self._node_id_for_path(path)
+
+    # ----- capture ----------------------------------------------------------
+
+    def capture_snapshot(self, scene_id: str) -> Snapshot:
+        """The camera: an explicit, never-thinned capture of the current state."""
+        root = self._require_project()
+        path = self._path_for_node_id(scene_id, "scene")
+        node_id = self._node_id_for_path(path)
+        return self._capture(root, node_id, path, retention="kept")
+
+    def _capture(self, root: Path, node_id: str, path: Path, *, retention: str) -> Snapshot:
+        """Copy `path`'s bytes into the store and write the sidecar beside them.
+
+        The `.md` is written with `write_bytes`, not through the front-matter
+        writer: the record must be what the file *was*, not what a serializer
+        would make of it.
+        """
+        folder = self._snapshots_dir(root, node_id)
+        folder.mkdir(parents=True, exist_ok=True)
+        snapshot_id = self._new_id("snap")
+        record: dict[str, Any] = {
+            "id": snapshot_id,
+            "snapshot_of": node_id,
+            # Microseconds are pinned rather than left to `isoformat`, which
+            # omits them on the exact second — two captures in one second would
+            # then be compared as strings of different shapes, and the sort that
+            # decides which snapshot is "the oldest" would rest on where "+"
+            # falls against "." in ASCII.
+            "captured_at": datetime.now(UTC).isoformat(timespec="microseconds"),
+            "retention": retention,
+            "schema_version": CURRENT_VERSION,
+        }
+        # Body first: a sidecar with no body beside it is a listing entry that
+        # cannot be viewed or restored, which is worse than an orphan .md that
+        # nothing lists.
+        (folder / f"{snapshot_id}.md").write_bytes(path.read_bytes())
+        self._write_yaml(folder / f"{snapshot_id}.yaml", record)
+        if retention == "thinned":
+            self._thin(root, node_id)
+        return self._read_snapshot_record(folder / f"{snapshot_id}.yaml")
+
+    def _thin(self, root: Path, node_id: str) -> None:
+        """Keep the last `AUTOMATIC_KEEP` automatic snapshots; `kept` ones are
+        never thinned, and never count toward the budget."""
+        thinned = [record for record in self._snapshot_records(root, node_id) if record.retention == "thinned"]
+        folder = self._snapshots_dir(root, node_id)
+        for record in thinned[: max(0, len(thinned) - AUTOMATIC_KEEP)]:
+            (folder / f"{record.id}.md").unlink(missing_ok=True)
+            (folder / f"{record.id}.yaml").unlink(missing_ok=True)
+
+    def maybe_capture_session_boundary(self, root: Path, node_id: str, path: Path) -> None:
+        """Called from the save path **before** the new body is written.
+
+        The rule (ADR-0043 Amendment 2): on a save, if the last save to this
+        scene was longer ago than `SESSION_GAP_MINUTES`, capture the pre-save
+        state first. The backend needs nothing new for this — it already has the
+        file, its modification time and the save.
+
+        *Last save is the file's mtime.* It needs no new state, and the two
+        things that could have made it lie do not: a rename preserves mtime, and
+        structure writes touch `manuscript.structure.yaml`, not the scene. What
+        does refresh it — a marker rewrite, an embedded-todo edit, a schema-driven
+        metadata rewrite — are all writes to this scene's own file, so counting
+        them as a save is right rather than merely tolerable.
+
+        A missing file is not an error here: a capture is never the reason a
+        save fails.
+        """
+        if not path.exists():
+            return
+        last_save = datetime.fromtimestamp(path.stat().st_mtime, UTC)
+        if (datetime.now(UTC) - last_save).total_seconds() <= SESSION_GAP_MINUTES * 60:
+            return
+        self._capture(root, node_id, path, retention="thinned")
+
+    # ----- restore ----------------------------------------------------------
+
+    def restore_snapshot(self, scene_id: str, snapshot_id: str) -> Scene:
+        """Capture the current state, then put the snapshot back — one
+        operation, never a client-side capture-then-restore.
+
+        Restore is reversible *because* it captures first (ADR-0043 Amendment
+        1), which is what justifies there being no confirmation gate. The
+        capture is a `thinned` one, so on a scene already holding five it evicts
+        the oldest: the state about to be overwritten is worth more than a
+        five-sittings-old one. That is intended, and is not defended against.
+
+        The failure ordering is deliberate. Capture precedes the overwrite, so a
+        failure between them leaves an extra snapshot and an untouched scene —
+        never the reverse.
+        """
+        root = self._require_project()
+        path = self._path_for_node_id(scene_id, "scene")
+        node_id = self._node_id_for_path(path)
+        self._require_snapshot(root, node_id, snapshot_id)
+
+        self._capture(root, node_id, path, retention="thinned")
+
+        stored = self._snapshots_dir(root, node_id) / f"{snapshot_id}.md"
+        self._atomic_write_bytes(path, stored.read_bytes())
+
+        front_matter, body = self._read_markdown_with_front_matter(path, strict=True)
+        # The filename stays as it is — it is cosmetic, and reads resolve by id.
+        # The structure title is not: it is what the manuscript tree renders, so
+        # a restore that changed the title has to reach it.
+        self._update_scene_title_in_structure(node_id, str(front_matter.get("title") or node_id))
+        self._remove_missing_scene_todo_anchors(node_id, body)
+        return self.read_scene(node_id)
+
+    def _atomic_write_bytes(self, path: Path, data: bytes) -> None:
+        """`_atomic_write` for bytes. Restore must not go through the text
+        writer: encoding, newline translation and the front-matter writer's
+        normalisation are each a way for "byte-for-byte" to stop being true."""
+        temp_path = path.with_name(f"{path.name}.restore-tmp")
+        temp_path.write_bytes(data)
+        temp_path.replace(path)
+
+    # ----- deletion ---------------------------------------------------------
+
+    def delete_scene_snapshots(self, root: Path, node_id: str) -> None:
+        """A scene and its snapshots are one unit of deletion (ADR-0043).
+
+        Keeping them would leave exactly the unreachable residue that ADR
+        rejects: the directory is named by node id, the author knows scenes by
+        title, and once the scene is gone there is no node left to hang an
+        affordance on.
+        """
+        shutil.rmtree(self._snapshots_dir(root, node_id), ignore_errors=True)

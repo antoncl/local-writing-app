@@ -1,0 +1,49 @@
+"""Scene-snapshot routes: capture · list · view · restore (ADR-0043, #401).
+
+Its own router rather than lines in `scenes.py`: the snapshot store is a new
+subsystem with a per-scene sub-resource of its own, and ADR-0043's sequencing
+note asks the touch points into existing files to stay thin.
+"""
+from __future__ import annotations
+
+from fastapi import APIRouter
+
+from app.models import Scene, Snapshot, SnapshotDetail, SnapshotList
+from app.runtime import service, translate_errors
+
+router = APIRouter()
+
+
+@router.get("/api/scenes/{scene_id}/snapshots", response_model=SnapshotList)
+def list_snapshots(scene_id: str) -> SnapshotList:
+    """Every snapshot of this scene, oldest first."""
+    with translate_errors():
+        return service.list_snapshots(scene_id)
+
+
+@router.post("/api/scenes/{scene_id}/snapshots", response_model=Snapshot)
+def capture_snapshot(scene_id: str) -> Snapshot:
+    """The camera: an explicit capture, never thinned. No request body — the
+    description is slice 4, and guessing its shape here would fix it."""
+    with translate_errors():
+        return service.capture_snapshot(scene_id)
+
+
+@router.get("/api/scenes/{scene_id}/snapshots/{snapshot_id}", response_model=SnapshotDetail)
+def read_snapshot(scene_id: str, snapshot_id: str) -> SnapshotDetail:
+    """The stored body, parsed for the read-only overlay. Reading a snapshot
+    never touches the live buffer."""
+    with translate_errors():
+        return service.read_snapshot(scene_id, snapshot_id)
+
+
+@router.post("/api/scenes/{scene_id}/snapshots/{snapshot_id}/restore", response_model=Scene)
+def restore_snapshot(scene_id: str, snapshot_id: str) -> Scene:
+    """Capture the current state and restore, in one call.
+
+    One endpoint rather than two calls, deliberately: a client-side
+    capture-then-restore can half-fail into a snapshot nobody asked for and an
+    author who cannot tell whether it worked (#395).
+    """
+    with translate_errors():
+        return service.restore_snapshot(scene_id, snapshot_id)

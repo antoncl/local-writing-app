@@ -36,7 +36,13 @@ import yaml
 CURRENT_VERSION = 5
 KEEP_BACKUPS = 3
 BACKUP_DIRNAME = ".migration-backups"
-SKIP_FROM_BACKUP = {".migration-backups", ".cache"}
+# `snapshots/` is excluded because migrations never touch it: snapshots are
+# immutable at rest and migrate at *restore*, over that one body, on the way out
+# (ADR-0043). So the pre-migration zip has nothing to protect there, and
+# excluding it keeps the three retained backups from each carrying a full copy
+# of the project's history. Immutability at rest is what buys this; the two
+# decisions stand or fall together.
+SKIP_FROM_BACKUP = {".migration-backups", ".cache", "snapshots"}
 
 logger = logging.getLogger(__name__)
 

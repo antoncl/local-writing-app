@@ -1,0 +1,634 @@
+[
+  {
+    "name": "edit-inside-emphasis",
+    "why": "the canonical case from the issue: **a bold phrase** -> **a bolder phrase**",
+    "was": "The tide went out further than **she had ever seen it**, and kept going.",
+    "now": "The tide went out further than **she had ever once seen it**, and kept going.",
+    "runs": [
+      {
+        "kind": "equal",
+        "text": "The tide went out further than **she had ever "
+      },
+      {
+        "kind": "now",
+        "text": "once "
+      },
+      {
+        "kind": "equal",
+        "text": "seen it**, and kept going."
+      }
+    ],
+    "snapped": [
+      {
+        "kind": "equal",
+        "text": "The tide went out further than "
+      },
+      {
+        "kind": "was",
+        "text": "**she had ever seen it**"
+      },
+      {
+        "kind": "now",
+        "text": "**she had ever once seen it**"
+      },
+      {
+        "kind": "equal",
+        "text": ", and kept going."
+      }
+    ]
+  },
+  {
+    "name": "edit-straddles-emphasis-start",
+    "why": "the edit consumes the opening delimiter and the word before it",
+    "was": "She counted the hulls twice and was **very tired** by the end of it.",
+    "now": "She counted the hulls twice and was quite **tired** by the end of it.",
+    "runs": [
+      {
+        "kind": "equal",
+        "text": "She counted the hulls twice and was "
+      },
+      {
+        "kind": "was",
+        "text": "**very"
+      },
+      {
+        "kind": "now",
+        "text": "quite"
+      },
+      {
+        "kind": "equal",
+        "text": " "
+      },
+      {
+        "kind": "was",
+        "text": "tired**"
+      },
+      {
+        "kind": "now",
+        "text": "**tired**"
+      },
+      {
+        "kind": "equal",
+        "text": " by the end of it."
+      }
+    ],
+    "snapped": [
+      {
+        "kind": "equal",
+        "text": "She counted the hulls twice and was "
+      },
+      {
+        "kind": "was",
+        "text": "**very tired**"
+      },
+      {
+        "kind": "now",
+        "text": "quite **tired**"
+      },
+      {
+        "kind": "equal",
+        "text": " by the end of it."
+      }
+    ]
+  },
+  {
+    "name": "edit-straddles-emphasis-end",
+    "why": "the edit consumes the closing delimiter and the word after it",
+    "was": "She counted the hulls twice and was **very tired** by the end of it.",
+    "now": "She counted the hulls twice and was **very** tired indeed by the end of it.",
+    "runs": [
+      {
+        "kind": "equal",
+        "text": "She counted the hulls twice and was "
+      },
+      {
+        "kind": "was",
+        "text": "**very"
+      },
+      {
+        "kind": "now",
+        "text": "**very**"
+      },
+      {
+        "kind": "equal",
+        "text": " "
+      },
+      {
+        "kind": "was",
+        "text": "tired**"
+      },
+      {
+        "kind": "now",
+        "text": "tired indeed"
+      },
+      {
+        "kind": "equal",
+        "text": " by the end of it."
+      }
+    ],
+    "snapped": [
+      {
+        "kind": "equal",
+        "text": "She counted the hulls twice and was "
+      },
+      {
+        "kind": "was",
+        "text": "**very tired**"
+      },
+      {
+        "kind": "now",
+        "text": "**very** tired indeed"
+      },
+      {
+        "kind": "equal",
+        "text": " by the end of it."
+      }
+    ]
+  },
+  {
+    "name": "edit-inside-italic-inside-bold",
+    "why": "nested inline markup — the boundary lands between two delimiter runs",
+    "was": "The gulls had stopped, and **that was the *part* she remembered** afterwards.",
+    "now": "The gulls had stopped, and **that was the *only part* she remembered** afterwards.",
+    "runs": [
+      {
+        "kind": "equal",
+        "text": "The gulls had stopped, and **that was the "
+      },
+      {
+        "kind": "was",
+        "text": "*part*"
+      },
+      {
+        "kind": "now",
+        "text": "*only part*"
+      },
+      {
+        "kind": "equal",
+        "text": " she remembered** afterwards."
+      }
+    ],
+    "snapped": [
+      {
+        "kind": "equal",
+        "text": "The gulls had stopped, and "
+      },
+      {
+        "kind": "was",
+        "text": "**that was the *part* she remembered**"
+      },
+      {
+        "kind": "now",
+        "text": "**that was the *only part* she remembered**"
+      },
+      {
+        "kind": "equal",
+        "text": " afterwards."
+      }
+    ]
+  },
+  {
+    "name": "edit-inside-link-text",
+    "why": "the run boundary falls inside [ ... ]",
+    "was": "The eleventh was moored at [the harbour](lore://loc-corrant) all week.",
+    "now": "The eleventh was moored at [the old harbour](lore://loc-corrant) all week.",
+    "runs": [
+      {
+        "kind": "equal",
+        "text": "The eleventh was moored at [the "
+      },
+      {
+        "kind": "now",
+        "text": "old "
+      },
+      {
+        "kind": "equal",
+        "text": "harbour](lore://loc-corrant) all week."
+      }
+    ],
+    "snapped": [
+      {
+        "kind": "equal",
+        "text": "The eleventh was moored at "
+      },
+      {
+        "kind": "was",
+        "text": "[the harbour](lore://loc-corrant)"
+      },
+      {
+        "kind": "now",
+        "text": "[the old harbour](lore://loc-corrant)"
+      },
+      {
+        "kind": "equal",
+        "text": " all week."
+      }
+    ]
+  },
+  {
+    "name": "edit-inside-link-target",
+    "why": "the run boundary falls inside ( ... ) — the target is not prose",
+    "was": "The eleventh was moored at [the harbour](lore://loc-corrant) all week.",
+    "now": "The eleventh was moored at [the harbour](lore://loc-westquay) all week.",
+    "runs": [
+      {
+        "kind": "equal",
+        "text": "The eleventh was moored at [the "
+      },
+      {
+        "kind": "was",
+        "text": "harbour](lore://loc-corrant)"
+      },
+      {
+        "kind": "now",
+        "text": "harbour](lore://loc-westquay)"
+      },
+      {
+        "kind": "equal",
+        "text": " all week."
+      }
+    ],
+    "snapped": [
+      {
+        "kind": "equal",
+        "text": "The eleventh was moored at "
+      },
+      {
+        "kind": "was",
+        "text": "[the harbour](lore://loc-corrant)"
+      },
+      {
+        "kind": "now",
+        "text": "[the harbour](lore://loc-westquay)"
+      },
+      {
+        "kind": "equal",
+        "text": " all week."
+      }
+    ]
+  },
+  {
+    "name": "edit-adjacent-to-mutation-marker",
+    "why": "the marker is an HTML comment in the body and must survive untouched",
+    "was": "Maren did not run. <!-- mutate:entity=char-maren;field=mood;value=stricken;id=m1 --> She had never done the sensible thing quickly.",
+    "now": "Maren did not run. <!-- mutate:entity=char-maren;field=mood;value=stricken;id=m1 --> She had never once done the sensible thing quickly.",
+    "runs": [
+      {
+        "kind": "equal",
+        "text": "Maren did not run. <!-- mutate:entity=char-maren;field=mood;value=stricken;id=m1 --> She had never "
+      },
+      {
+        "kind": "now",
+        "text": "once "
+      },
+      {
+        "kind": "equal",
+        "text": "done the sensible thing quickly."
+      }
+    ],
+    "snapped": [
+      {
+        "kind": "equal",
+        "text": "Maren did not run. <!-- mutate:entity=char-maren;field=mood;value=stricken;id=m1 --> She had never "
+      },
+      {
+        "kind": "now",
+        "text": "once "
+      },
+      {
+        "kind": "equal",
+        "text": "done the sensible thing quickly."
+      }
+    ]
+  },
+  {
+    "name": "edit-inside-mutation-marker",
+    "why": "the author changed the marker's value — the diff cuts the comment itself",
+    "was": "Maren did not run. <!-- mutate:entity=char-maren;field=mood;value=stricken;id=m1 --> She stood where she was.",
+    "now": "Maren did not run. <!-- mutate:entity=char-maren;field=mood;value=numb;id=m1 --> She stood where she was.",
+    "runs": [
+      {
+        "kind": "equal",
+        "text": "Maren did not run. <!-- "
+      },
+      {
+        "kind": "was",
+        "text": "mutate:entity=char-maren;field=mood;value=stricken;id=m1"
+      },
+      {
+        "kind": "now",
+        "text": "mutate:entity=char-maren;field=mood;value=numb;id=m1"
+      },
+      {
+        "kind": "equal",
+        "text": " --> She stood where she was."
+      }
+    ],
+    "snapped": [
+      {
+        "kind": "equal",
+        "text": "Maren did not run. "
+      },
+      {
+        "kind": "was",
+        "text": "<!-- mutate:entity=char-maren;field=mood;value=stricken;id=m1 -->"
+      },
+      {
+        "kind": "now",
+        "text": "<!-- mutate:entity=char-maren;field=mood;value=numb;id=m1 -->"
+      },
+      {
+        "kind": "equal",
+        "text": " She stood where she was."
+      }
+    ]
+  },
+  {
+    "name": "edit-inside-embedded-todo",
+    "why": "a todo anchor wraps prose across two comments; the edit lands between them",
+    "was": "The boats lay <!-- embedded-todo:id=t1;status=open;note=check%20the%20tide -->over on their sides<!-- /embedded-todo --> like something sleeping.",
+    "now": "The boats lay <!-- embedded-todo:id=t1;status=open;note=check%20the%20tide -->over on their black sides<!-- /embedded-todo --> like something sleeping.",
+    "runs": [
+      {
+        "kind": "equal",
+        "text": "The boats lay <!-- embedded-todo:id=t1;status=open;note=check%20the%20tide -->over on their "
+      },
+      {
+        "kind": "now",
+        "text": "black "
+      },
+      {
+        "kind": "equal",
+        "text": "sides<!-- /embedded-todo --> like something sleeping."
+      }
+    ],
+    "snapped": [
+      {
+        "kind": "equal",
+        "text": "The boats lay <!-- embedded-todo:id=t1;status=open;note=check%20the%20tide -->over on their "
+      },
+      {
+        "kind": "now",
+        "text": "black "
+      },
+      {
+        "kind": "equal",
+        "text": "sides<!-- /embedded-todo --> like something sleeping."
+      }
+    ]
+  },
+  {
+    "name": "paragraph-split",
+    "why": "a block boundary appears where there was none",
+    "was": "She counted the hulls twice. The eleventh was the Corrant. Her father was aboard.",
+    "now": "She counted the hulls twice.\n\nThe eleventh was the Corrant. Her father was aboard.",
+    "runs": [
+      {
+        "kind": "equal",
+        "text": "She counted the hulls twice."
+      },
+      {
+        "kind": "was",
+        "text": " "
+      },
+      {
+        "kind": "now",
+        "text": "\n\n"
+      },
+      {
+        "kind": "equal",
+        "text": "The eleventh was the Corrant. Her father was aboard."
+      }
+    ],
+    "snapped": [
+      {
+        "kind": "was",
+        "text": "She counted the hulls twice. The eleventh was the Corrant. Her father was aboard.",
+        "stacked": true
+      },
+      {
+        "kind": "now",
+        "text": "She counted the hulls twice.\n\nThe eleventh was the Corrant. Her father was aboard.",
+        "stacked": true
+      }
+    ]
+  },
+  {
+    "name": "paragraph-join",
+    "why": "a block boundary disappears",
+    "was": "She counted the hulls twice.\n\nThe eleventh was the Corrant, and her father was aboard.",
+    "now": "She counted the hulls twice. The eleventh was the Corrant, and her father was aboard.",
+    "runs": [
+      {
+        "kind": "equal",
+        "text": "She counted the hulls twice."
+      },
+      {
+        "kind": "was",
+        "text": "\n\n"
+      },
+      {
+        "kind": "now",
+        "text": " "
+      },
+      {
+        "kind": "equal",
+        "text": "The eleventh was the Corrant, and her father was aboard."
+      }
+    ],
+    "snapped": [
+      {
+        "kind": "was",
+        "text": "She counted the hulls twice.\n\nThe eleventh was the Corrant, and her father was aboard.",
+        "stacked": true
+      },
+      {
+        "kind": "now",
+        "text": "She counted the hulls twice. The eleventh was the Corrant, and her father was aboard.",
+        "stacked": true
+      }
+    ]
+  },
+  {
+    "name": "edit-inside-table-cell",
+    "why": "the run boundary falls inside a table row, whose pipes are structural",
+    "was": "| boat | state |\n| --- | --- |\n| Corrant | at sea |\n| Maren's Luck | beached |\n",
+    "now": "| boat | state |\n| --- | --- |\n| Corrant | lost at sea |\n| Maren's Luck | beached |\n",
+    "runs": [
+      {
+        "kind": "equal",
+        "text": "| boat | state |\n| --- | --- |\n| Corrant | "
+      },
+      {
+        "kind": "now",
+        "text": "lost "
+      },
+      {
+        "kind": "equal",
+        "text": "at sea |\n| Maren's Luck | beached |\n"
+      }
+    ],
+    "snapped": [
+      {
+        "kind": "equal",
+        "text": "| boat | state |\n| --- | --- |\n| Corrant | "
+      },
+      {
+        "kind": "now",
+        "text": "lost "
+      },
+      {
+        "kind": "equal",
+        "text": "at sea |\n| Maren's Luck | beached |\n"
+      }
+    ]
+  },
+  {
+    "name": "edit-spanning-a-list-item-boundary",
+    "why": "list markers are line-leading structure a word diff cannot see",
+    "was": "- run for the high road\n- do not stop for anything you can carry\n",
+    "now": "- run for the high road at once\n- do not stop for anything that can walk\n",
+    "runs": [
+      {
+        "kind": "equal",
+        "text": "- run for the high road"
+      },
+      {
+        "kind": "now",
+        "text": " at once"
+      },
+      {
+        "kind": "equal",
+        "text": "\n- do not stop for anything "
+      },
+      {
+        "kind": "was",
+        "text": "you"
+      },
+      {
+        "kind": "now",
+        "text": "that"
+      },
+      {
+        "kind": "equal",
+        "text": " can "
+      },
+      {
+        "kind": "was",
+        "text": "carry"
+      },
+      {
+        "kind": "now",
+        "text": "walk"
+      },
+      {
+        "kind": "equal",
+        "text": "\n"
+      }
+    ],
+    "snapped": [
+      {
+        "kind": "equal",
+        "text": "- run for the high road"
+      },
+      {
+        "kind": "now",
+        "text": " at once"
+      },
+      {
+        "kind": "equal",
+        "text": "\n- do not stop for anything "
+      },
+      {
+        "kind": "was",
+        "text": "you"
+      },
+      {
+        "kind": "now",
+        "text": "that"
+      },
+      {
+        "kind": "equal",
+        "text": " can "
+      },
+      {
+        "kind": "was",
+        "text": "carry"
+      },
+      {
+        "kind": "now",
+        "text": "walk"
+      },
+      {
+        "kind": "equal",
+        "text": "\n"
+      }
+    ]
+  },
+  {
+    "name": "clean-prose-control",
+    "why": "the case the mockup already proves — must stay clean, or the harness is wrong",
+    "was": "Somewhere behind her a shutter began to bang. Nobody came to close it.",
+    "now": "Somewhere behind her, up in the town, a shutter began to bang. Nobody closed it.",
+    "runs": [
+      {
+        "kind": "equal",
+        "text": "Somewhere behind "
+      },
+      {
+        "kind": "was",
+        "text": "her"
+      },
+      {
+        "kind": "now",
+        "text": "her, up in the town,"
+      },
+      {
+        "kind": "equal",
+        "text": " a shutter began to bang. Nobody "
+      },
+      {
+        "kind": "was",
+        "text": "came to close"
+      },
+      {
+        "kind": "now",
+        "text": "closed"
+      },
+      {
+        "kind": "equal",
+        "text": " it."
+      }
+    ],
+    "snapped": [
+      {
+        "kind": "equal",
+        "text": "Somewhere behind "
+      },
+      {
+        "kind": "was",
+        "text": "her"
+      },
+      {
+        "kind": "now",
+        "text": "her, up in the town,"
+      },
+      {
+        "kind": "equal",
+        "text": " a shutter began to bang. Nobody "
+      },
+      {
+        "kind": "was",
+        "text": "came to close"
+      },
+      {
+        "kind": "now",
+        "text": "closed"
+      },
+      {
+        "kind": "equal",
+        "text": " it."
+      }
+    ]
+  }
+]

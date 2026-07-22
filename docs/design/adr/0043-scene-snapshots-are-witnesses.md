@@ -1,7 +1,12 @@
 # ADR-0043: Scene snapshots are witnesses — prose is restored, context is only reported
 
-- Status: **Draft — the UX pass is done; awaiting review**, 0.8.0. The surface pass it was held for
-  ran (ADR-0044) and returned three additions, folded in below as Amendment 1.
+- Status: **Accepted** — 0.8.0, 2026-07-22 (Anton, having read it alongside ADR-0044 and the mockup).
+  Accepted covers the whole document **including Amendment 1** — snapshot-as-witness and its stated
+  non-goal (context is never restored), scenes-only v1, full copies rather than deltas, the two
+  capture triggers with keep-five/never-thinned retention, snapshot identity and the two-file store,
+  the directory-as-lookup-table, deletion cascading with the scene, the three drift axes with the
+  third narrowed to value *reinterpretation*, immutability with migration-at-restore, and the
+  advisory-never-blocking rule with its report-quality obligation.
 - Feature: #6 (scopes the "revisions" issue) · Relates: #314 (composite revision) · Companion:
   **ADR-0044** (the surface) · Follows: ADR-0001, ADR-0002, ADR-0003, ADR-0010, ADR-0039
 - Supersedes nothing. Settles the four-way scoping question posed in #6.

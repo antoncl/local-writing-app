@@ -1,6 +1,12 @@
 # ADR-0044: The snapshot strip is the scrubber's third axis; comparison is a flip, not a split
 
-- Status: **Draft** — 0.8.0
+- Status: **Accepted** — 0.8.0, 2026-07-22 (Anton, having read it alongside the mockup). Accepted
+  covers §A–§K: the strip as the scrubber's third axis, position-is-the-mode governing size as well
+  as contents, notches with Live at the right, log-scaled spacing, the track-width invariant, flip
+  rather than split with the tint held in every compare state, rendered HTML in the read-only overlay
+  slot, the warm/cool hue axis with chroma halved for light, the key map, and the
+  glyph-vs-colour rule. The five items under "Open" stay open by design — they are implementation
+  judgements, not unresolved decisions.
 - Feature: #6 · Companion: ADR-0043 (the model) · Follows: ADR-0013 (the scrubber), ADR-0030 (the
   design language), ADR-0038 §A (compact at rest), ADR-0042 (the layer picker, the same gesture on
   the hierarchy axis)

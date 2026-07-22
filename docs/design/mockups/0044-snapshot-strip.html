@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <!--
-  ADR-0044 — design mockup for the scene-snapshot strip and the flip diff.
+  ADR-0044 - design mockup for the scene-snapshot strip and the flip diff.
 
   Self-contained: no build step, no dependencies, no network. Open it in a
   browser. Every value is FIXTURE data; the diff runs are hand-authored, so
@@ -12,13 +12,13 @@
   those groupings.
 
   The design tokens below are COPIES of frontend/src/styles.css taken while
-  this was drafted. They will drift, and that is fine — this file is a record
+  this was drafted. They will drift, and that is fine - this file is a record
   of a design conversation, not a component. Do not import from it.
 
-  Theme: follows the OS by default; force with data-theme="dark" | "light" on
-  <html>.
+  Theme: follows the OS by default; use the in-page "Theme" button, or force
+  it with data-theme="dark" | "light" on <html>.
 -->
-<style>html{color-scheme:light dark}*{box-sizing:border-box}</style>
+<style>*{box-sizing:border-box}</style>
 </head>
 <body>
 <title>Scene snapshots — strip &amp; diff mockup</title>
@@ -27,7 +27,7 @@
 
   <header class="mock-head">
     <div>
-      <p class="eyebrow">ADR-0043 · surface pass</p>
+      <p class="eyebrow">ADR-0044 · the surface for ADR-0043</p>
       <h1>Scene snapshots — the strip and the diff</h1>
       <p class="lede">A working mockup on fixture data. The pane below uses the app's real tokens
         (<code>styles.css</code>, ADR-0030) — surfaces, type scale, Georgia for prose. The two diff
@@ -43,6 +43,7 @@
       <label class="bench-check">
         <input type="checkbox" id="desat"> strip the hue
       </label>
+      <button type="button" class="act" id="theme-btn">Theme: auto</button>
     </div>
     <p class="bench-note" id="pal-note"></p>
   </section>
@@ -1028,14 +1029,9 @@
       dark: { now:"#e6a87f", nowSoft:"#402b1c", nowEdge:"#7d5238",
               was:"#7cbadd", wasSoft:"#1b2f3b", wasEdge:"#356178" } },
 
-    { id:"rose", name:"Rose / Slate",
-      note:"Drops orange entirely. Rose sits at ~350° — near danger in hue, but pink-leaning and low "
-         + "in chroma, so it reads as a tint rather than an alarm. Slate is cooler and quieter than "
-         + "steel. The pair to check hardest against --danger.",
-      light:{ now:"#a4536b", nowSoft:"#fbe3ea", nowEdge:"#dda6b7",
-              was:"#4a6491", wasSoft:"#e3e8f6", wasEdge:"#a6b5d9" },
-      dark: { now:"#d99ab0", nowSoft:"#3a2530", nowEdge:"#6b4354",
-              was:"#97aada", wasSoft:"#23283a", wasEdge:"#454f72" } },
+    // Rose / Slate was here and is RULED OUT (Anton, on sight). Recorded so it
+    // is not re-proposed: dropping orange entirely put the warm side at ~350°,
+    // close enough to --danger that it read as an alarm behind prose.
 
     { id:"quiet", name:"Sand / Mist",
       note:"Near-neutral: barely any chroma at all. Tests the opposite hypothesis — that on a quiet "
@@ -1074,6 +1070,7 @@
 
   function buildPalPicker() {
     const host = document.getElementById("pal-picker");
+    host.innerHTML = "";           // rebuild, never append — every caller re-enters here
     PALETTES.forEach((p, i) => {
       const b = document.createElement("button");
       b.type = "button";
@@ -1091,13 +1088,28 @@
     document.body.classList.toggle("hue-stripped", e.target.checked);
   });
 
-  // The viewer's theme toggle stamps data-theme on <html>; the palette has to
-  // follow it, or a switch leaves the previous theme's tints in place.
-  new MutationObserver(() => { document.getElementById("pal-picker").innerHTML = ""; buildPalPicker(); })
-    .observe(document.documentElement, { attributes: true, attributeFilter: ["data-theme"] });
-  matchMedia("(prefers-color-scheme: dark)").addEventListener("change", () => {
-    document.getElementById("pal-picker").innerHTML = ""; buildPalPicker();
+  // An in-page theme control, so judging the light pair never depends on
+  // finding the viewer's own toggle. Writes data-theme, which the observer
+  // below picks up — same path the viewer uses.
+  const THEMES = ["auto", "light", "dark"];
+  let themeIdx = 0;
+  document.getElementById("theme-btn").addEventListener("click", (e) => {
+    themeIdx = (themeIdx + 1) % THEMES.length;
+    const t = THEMES[themeIdx];
+    if (t === "auto") document.documentElement.removeAttribute("data-theme");
+    else document.documentElement.setAttribute("data-theme", t);
+    e.target.textContent = `Theme: ${t}`;
+    buildPalPicker();          // removeAttribute fires the observer too, but be explicit
   });
+
+  // The palette is written as INLINE custom properties on <html>, which
+  // outrank every stylesheet rule — including the dark-theme block. So a theme
+  // change MUST re-run applyPalette, or the page goes light while the diff
+  // tints stay dark. Both signals are watched: the viewer's toggle (which
+  // stamps data-theme on <html>) and the OS preference.
+  new MutationObserver(buildPalPicker)
+    .observe(document.documentElement, { attributes: true, attributeFilter: ["data-theme"] });
+  matchMedia("(prefers-color-scheme: dark)").addEventListener("change", buildPalPicker);
 
   buildPalPicker();
   renderAll();

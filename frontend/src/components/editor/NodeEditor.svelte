@@ -945,6 +945,18 @@
             <!-- Effective title as of the scrub point — read-only; the draft
                  title stays untouched underneath (stop 0 restores it). -->
             <input class="title-input" class:mutated={titleMutated} readonly aria-label={`${documentLabel} ${documentNameLabel.toLowerCase()} (effective, read-only)`} value={effectiveTitle} />
+          {:else if snapshotParked}
+            <!-- Parked: the title flips with the body and the rail, and is
+                 read-only like them. Leaving it editable let an author type
+                 into a document they were not looking at. -->
+            <input
+              class="title-input"
+              class:flipped={snapshots.titleDiffers}
+              class:flip-was={snapshots.titleDiffers && snapshots.view === "was"}
+              readonly
+              aria-label={`${documentLabel} ${documentNameLabel.toLowerCase()} (snapshot, read-only)`}
+              value={snapshots.titleForView}
+            />
           {:else}
             <input class="title-input" aria-label={`${documentLabel} ${documentNameLabel.toLowerCase()}`} placeholder={documentNameLabel} bind:value={title} oninput={handleTitleInput} />
           {/if}
@@ -1226,6 +1238,18 @@
   .title-input[readonly] {
     background: var(--inset);
     cursor: default;
+  }
+  /* The same two colours as the body and the rail — one vocabulary, and never a
+     glyph (§J). Two rules rather than one with a variable, so a state class
+     cannot silently outrank an identity class for a single property. */
+  .title-input.flipped {
+    color: var(--diff-now);
+    font-weight: 600;
+    box-shadow: inset 0 -2px 0 var(--diff-now-edge);
+  }
+  .title-input.flipped.flip-was {
+    color: var(--diff-was);
+    box-shadow: inset 0 -2px 0 var(--diff-was-edge);
   }
   .title-input.mutated {
     color: var(--mutation-color);

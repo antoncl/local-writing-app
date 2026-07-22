@@ -474,11 +474,13 @@ def _field_diffs(front_matter: dict[str, Any], live: SnapshotDiffRequest) -> dic
     covers both — reading the top level as if it were the field map is how the
     flip would silently report nothing at all.
     """
-    was: dict[str, Any] = {
-        **(front_matter.get("metadata") or {}),
-        "status": front_matter.get("status", ""),
-    }
-    now: dict[str, Any] = {**live.metadata, "status": live.status}
+    was: dict[str, Any] = {**(front_matter.get("metadata") or {})}
+    now: dict[str, Any] = {**live.metadata}
+    # Only compare status when the caller actually sent one. Otherwise silence
+    # is read as "the author cleared it".
+    if live.status is not None:
+        was["status"] = front_matter.get("status", "")
+        now["status"] = live.status
     keys = (set(was) | set(now)) - NON_FIELD_KEYS
     return {
         key: FieldDiff(was=was.get(key), now=now.get(key))

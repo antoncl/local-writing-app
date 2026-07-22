@@ -90,7 +90,12 @@ class SnapshotDiffRequest(BaseModel):
     # stores it — top-level in front matter, not inside the field map — while
     # the rail renders it as one field row among the others. The flip has to
     # cover what the rail shows.
-    status: str = ""
+    #
+    # `None` is "not sent", which is NOT the same as "no status". Defaulting to
+    # `""` made an omitted field indistinguishable from a cleared one, so a
+    # caller that simply did not send it was told the author had cleared the
+    # status — a claim the compare view then displayed.
+    status: str | None = None
     metadata: dict[str, Any] = Field(default_factory=dict)
 
 

@@ -48,6 +48,15 @@ export class SnapshotStripController {
   runs = $state<DiffRun[]>([]);
   /** Only the fields whose value differs, both sides carried. */
   fields = $state<Record<string, FieldDiff>>({});
+  /** The title on each side. It flips like any other field — the colour means
+   *  temporal provenance everywhere, and location carries the subject (§F). */
+  titleWas = $state("");
+  titleNow = $state("");
+
+  /** Whether the title itself changed. Colour only, never a glyph (§J). */
+  titleDiffers = $derived(this.parked !== null && this.titleWas !== this.titleNow);
+  /** The title for the version currently being read. */
+  titleForView = $derived(this.view === "was" ? this.titleWas : this.titleNow);
 
   index = $derived(
     this.parked === null ? -1 : this.snapshots.findIndex((item) => item.id === this.parked),
@@ -128,6 +137,8 @@ export class SnapshotStripController {
       if (!fresh()) return;
       this.runs = diff.runs;
       this.fields = diff.fields;
+      this.titleWas = diff.title_was;
+      this.titleNow = diff.title_now;
       // Render against the view as it is NOW, not as it was when the fetch
       // started: the author may have pressed a key while it was in flight, and
       // they should get the version they asked for.
@@ -182,6 +193,8 @@ export class SnapshotStripController {
     this.bodyHtml = "";
     this.runs = [];
     this.fields = {};
+    this.titleWas = "";
+    this.titleNow = "";
   }
 
   /** ← → along the time axis. Right past the newest lands on Live (§I), which

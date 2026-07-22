@@ -355,6 +355,41 @@ class DiffRouteTests(unittest.TestCase):
         # metadata field.
         self.assertEqual(payload["title_now"], "A Different Title")
 
+    def test_an_omitted_status_is_not_reported_as_a_cleared_one(self) -> None:
+        """Silence is not a claim. A caller that does not send `status` is not
+        saying the author cleared it — and the compare view would have shown
+        that as a real change, tinted, beside the genuine ones."""
+        self._save("Body.", {"summary": "Low water."})
+        snapshot_id = self._capture()
+        payload = self._diff(
+            snapshot_id=snapshot_id, body="Body.", title="The Tide", metadata={"summary": "Low water."}
+        )
+        self.assertEqual(payload["fields"], {})
+
+    def test_a_genuinely_cleared_status_is_still_reported(self) -> None:
+        """The other half: `""` is a value, and stays distinguishable from
+        absence."""
+        self._save("Body.", {"summary": "Low water."})
+        snapshot_id = self._capture()
+        payload = self._diff(
+            snapshot_id=snapshot_id,
+            body="Body.",
+            title="The Tide",
+            status="",
+            metadata={"summary": "Low water."},
+        )
+        self.assertEqual(payload["fields"]["status"], {"was": "draft", "now": ""})
+
+    def test_the_title_travels_on_both_sides_for_the_flip(self) -> None:
+        """The title flips like any other field, so both sides must arrive."""
+        self._save("Body.", {"summary": "Low water."})
+        snapshot_id = self._capture()
+        payload = self._diff(
+            snapshot_id=snapshot_id, body="Body.", title="The Empty Harbour", status="draft", metadata={"summary": "Low water."}
+        )
+        self.assertEqual(payload["title_was"], "The Tide")
+        self.assertEqual(payload["title_now"], "The Empty Harbour")
+
     def test_an_unknown_snapshot_is_a_404(self) -> None:
         response = self.client.post(
             f"/api/scenes/{self.scene_id}/snapshots/snap-nope/diff",

@@ -86,10 +86,20 @@
       <h3>Contains</h3>
       <NodeList isEmpty={false}>
         {#each projectChildren as child (child.path)}
+          <!--
+            `detail` is the folder name, and only when it differs from the
+            title: a project keeps its folder name as its default title, so
+            passing it unconditionally prints the same string twice on exactly
+            the projects nobody has renamed yet.
+
+            No `dataNodeId`: it exists so focus helpers can find a row by node
+            id, and a filesystem path is not one. ViewNodeList interpolates that
+            attribute straight into a `querySelector`, so putting a Windows path
+            there is a hazard bought for nothing.
+          -->
           <NodeRow
             title={child.title}
-            detail={child.name}
-            dataNodeId={child.path}
+            detail={child.name === child.title ? null : child.name}
             ariaLabel={`Open ${child.title}`}
             onClick={() => onOpenChild(child.path)}
           />

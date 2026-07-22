@@ -133,6 +133,10 @@ jobs:
         run: |
           TITLE='Citation rot: standing report'
           {
+            # The marker is load-bearing, not decoration: this issue is an open
+            # issue, so without it the next run reads this report and re-flags
+            # every citation quoted in it (#411).
+            echo "<!-- citation-rot: ignore -->"
             echo "_Maintained by \`.github/workflows/citation-rot.yml\`. Edited in place every week — do not reply, fix the prose._"
             echo
             cat report.md

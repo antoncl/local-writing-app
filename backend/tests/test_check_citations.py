@@ -230,6 +230,18 @@ def test_bare_mention_of_a_surviving_name_is_quiet(index):
     assert all(f.status == cc.OK for f in cc.check_source(source, index))
 
 
+def test_a_source_carrying_the_ignore_marker_is_skipped(index):
+    """The weekly report is an open issue, so the checker reads its own output.
+
+    Without the marker it re-flags every citation last week's report quoted —
+    68 of 245 findings on the run that found this (#411). A marker rather than
+    a hardcoded issue number: a memo quoting historical citations on purpose
+    needs the same way out.
+    """
+    text = f"{cc.IGNORE_MARKER}\n- **MOVED** `references.py:6` — `forward_refs` moved."
+    assert cc.check_source(cc.Source(label="#407 report", url="", text=text), index) == []
+
+
 def test_memory_slugs_are_not_treated_as_symbols(index):
     """They name documents that live outside the repo, and always would fail."""
     source = cc.Source(label="ADR", url="", text="See `decisions_node_edit_gesture`.")

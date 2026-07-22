@@ -150,18 +150,33 @@ The pair reads **warm = live, cool = archived** — the past reading cooler is a
 already have, and it puts the two on an axis rather than making them arbitrary. Each is a
 `--diff-*` / `-soft` / `-edge` triple defined for both themes.
 
-Three constraints are settled; the specific pair is not, and is chosen by eye against real prose
-(the mockup carries a bench with four candidates and a greyscale toggle):
+**One hue axis: warm ~20°, cool ~205°.** Chosen by eye against real prose, in both themes, from a
+bench of candidates. A warm side drifting further toward red was tried and rejected on sight — at
+~350° it reads as an alarm rather than a tint, too close to `--danger`. That is worth recording as a
+boundary, not just a preference: the warm side belongs in the orange/clay band.
 
-- **Equal chroma across the pair.** If one tint is more saturated than the other it reads as *more
-  important*, and the pair stops meaning *then vs. now* and starts meaning *significant vs.
-  incidental*.
-- **Tuned per theme, never inverted.** A wash that reads on the dark surface is usually too faint on
-  white, so the light pair carries a larger lightness step than the dark one.
+**Chroma is halved for the light theme** — roughly 15/10 in light against 26/25 in dark (RGB chroma
+behind the prose). The two themes were picked independently and turned out to be *the same hues at
+different chroma*, which is the finding worth keeping:
+
+> A tint on white sits at peak luminance, where the eye's colour discrimination is best, so it
+> shouts. On a dark ground discrimination falls away and the identical tint barely registers.
+> **Chroma is not theme-invariant, and a palette that is merely inverted will be wrong in one of the
+> two.**
+
+The token layer already carries this lesson from a different direction: `--accent-emphasis` exists
+because `--accent-strong` had to deepen in light and *brighten* in dark, and one token could not do
+both. This is the same asymmetry on the chroma channel rather than the lightness one.
+
+Two further constraints hold:
+
+- **Equal chroma across the pair, within a theme.** If one tint is more saturated than the other it
+  reads as *more important*, and the pair stops meaning *then vs. now* and starts meaning
+  *significant vs. incidental*.
 - **Hue must not be the only channel.** Roughly 1 in 12 men has a colour-vision deficiency, and
   warm-vs-cool is the axis most affected. Each tint therefore carries a darker **edge** rule beneath
   it, and the pair must stay distinguishable in greyscale — an underline survives what a wash does
-  not.
+  not. This constraint bites hardest on the light theme, whose chroma is already halved.
 
 ### I. Keys: two axes, no held modifier
 
@@ -233,8 +248,9 @@ and nothing about the layout — sketching that is how ADR-0005 acquired authori
 3. **Discoverability of the compact strip.** It may now be quiet enough that a new author never
    learns snapshots exist.
 4. **The description's presentation** (K).
-5. **Which candidate pair** (H). The constraints are settled; the choice is an eye judgement about
-   what is restful behind prose for an hour, in both themes.
+5. **The exact hex values** (H). The hues, the chroma ratio between themes and the constraints are
+   settled; the final values land when the tokens are added, and should be re-checked in greyscale
+   at that point — the light theme's halved chroma is where that constraint is tightest.
 
 ## Test surface
 

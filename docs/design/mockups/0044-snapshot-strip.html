@@ -309,10 +309,17 @@
       axis, amber is <code>--warn</code>, brick red is <code>--danger</code> (reserved for destructive
       — and this isn't an error), slate-blue is lore. Red/green is out on both accessibility and
       semantics: this is <em>before and after</em>, not <em>bad and good</em>.</p>
-    <p class="colour-copy">Every candidate reads <b>warm = live, cool = archived</b> — the past
-      reading cooler is an intuition most people already have, and it puts the pair on an axis rather
-      than making them arbitrary. <b>Use the bench at the top of the page</b> to put each one behind
-      the real prose.</p>
+    <p class="colour-copy"><b>Settled:</b> warm = live, cool = archived, on one hue axis — warm
+      ~20°, cool ~205° — with <b>the chroma roughly halved for the light theme</b>. Anton chose the
+      two themes separately by eye, and they turned out to be the same hues at different chroma;
+      the bench's other entries are kept only as the bounds either side of it.</p>
+    <p class="colour-copy"><b>Why the light theme needs less.</b> A tint on white sits at peak
+      luminance, where the eye's colour discrimination is best — so it shouts. On a dark ground
+      discrimination falls away and the identical tint barely registers. Chroma is therefore not
+      theme-invariant, and a palette that is merely <em>inverted</em> will be wrong in one of the two.
+      The token layer already carries this lesson: <code>--accent-emphasis</code> exists precisely
+      because <code>--accent-strong</code> had to deepen in light and <em>brighten</em> in dark.
+      Switch the bench to <b>Clay / Steel</b> and flip to light to see the failure directly.</p>
     <div class="swatches">
       <div><i class="sw sw-now"></i><code>--diff-now</code><span>warm · live</span></div>
       <div><i class="sw sw-was"></i><code>--diff-was</code><span>cool · snapshot</span></div>
@@ -1013,17 +1020,34 @@
   // more important; and the light washes sit lighter than the dark ones are
   // dark, because a tint that reads on #1f2522 is usually too faint on white.
   const PALETTES = [
+    // CHOSEN (Anton, by eye): Sand/Mist in light, Clay/Steel in dark.
+    // Not two palettes — ONE hue axis (warm ~20°, cool ~205°) with the chroma
+    // roughly halved for light. See the note; the others are kept for
+    // comparison and are not candidates any more.
+    { id:"chosen", name:"Chosen",
+      note:"One hue pair, chroma tuned per theme: ~15/10 chroma in light, ~26/25 in dark. Anton "
+         + "picked these separately by eye and they turned out to be the same hues — Clay and Sand "
+         + "are both ~20°, Steel and Mist are both ~205°. The light theme simply needs about half "
+         + "the chroma for the same loudness: a tint on white sits at peak luminance where the eye "
+         + "discriminates colour best, so it shouts; on a dark ground colour discrimination falls "
+         + "away and the same tint barely registers.",
+      light:{ now:"#7d6353", nowSoft:"#f2ebe3", nowEdge:"#cfbdaa",
+              was:"#566b7a", wasSoft:"#e7edf1", wasEdge:"#b1c2ce" },
+      dark: { now:"#d9a184", nowSoft:"#3b2a21", nowEdge:"#6d4a36",
+              was:"#8fb6d2", wasSoft:"#1f2d38", wasEdge:"#3d5a70" } },
+
     { id:"clay", name:"Clay / Steel",
-      note:"The working pair. Warm ~22° against cool ~205° — a wide hue gap with both sitting well "
-         + "clear of danger-brick and mutation-violet. The safe choice.",
+      note:"REFERENCE — the chosen pair's chroma, applied to BOTH themes. Switch to light and this "
+         + "is the 'too loud' case: the same tint that reads as a quiet wash on the dark ground "
+         + "shouts on white.",
       light:{ now:"#a2542f", nowSoft:"#fbe4d3", nowEdge:"#d59a6c",
               was:"#3d6b88", wasSoft:"#dfeaf4", wasEdge:"#90b8d4" },
       dark: { now:"#d9a184", nowSoft:"#3b2a21", nowEdge:"#6d4a36",
               was:"#8fb6d2", wasSoft:"#1f2d38", wasEdge:"#3d5a70" } },
 
     { id:"ember", name:"Ember / Cerulean",
-      note:"Same axis, more chroma in both directions. Easier to tell apart at a glance and at speed "
-         + "— the question is whether it is too loud to sit behind prose all day.",
+      note:"REFERENCE — the same hue axis pushed further still. Useful as the upper bound: this is "
+         + "what 'easy to tell apart' costs in loudness.",
       light:{ now:"#ad5a2b", nowSoft:"#fde5d0", nowEdge:"#e3a878",
               was:"#2f6f95", wasSoft:"#d9e9f4", wasEdge:"#84bcd9" },
       dark: { now:"#e6a87f", nowSoft:"#402b1c", nowEdge:"#7d5238",
@@ -1034,9 +1058,9 @@
     // close enough to --danger that it read as an alarm behind prose.
 
     { id:"quiet", name:"Sand / Mist",
-      note:"Near-neutral: barely any chroma at all. Tests the opposite hypothesis — that on a quiet "
-         + "writing desk the tint only has to be *noticeable*, not *coloured*. Strip the hue and "
-         + "this one barely changes, which is the point.",
+      note:"REFERENCE — the mirror of the above: the light theme's chroma applied to BOTH. On the "
+         + "dark ground it all but disappears, which is why the chosen pair does not simply use the "
+         + "quieter values everywhere.",
       light:{ now:"#7d6353", nowSoft:"#f2ebe3", nowEdge:"#cfbdaa",
               was:"#566b7a", wasSoft:"#e7edf1", wasEdge:"#b1c2ce" },
       dark: { now:"#c2a894", nowSoft:"#332b25", nowEdge:"#5c4c3f",

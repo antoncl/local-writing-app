@@ -93,8 +93,16 @@ def _schema_layer_from(layer: IndexLayer) -> MetadataSchemaLayer:
 
 
 class MetadataSchemaMixin:
-    def read_metadata_schema(self) -> MetadataSchema:
-        root = self._require_project()
+    def read_metadata_schema(self, root: Path | None = None) -> MetadataSchema:
+        """The merged schema for `root`, defaulting to the open project.
+
+        `root` is explicit for callers that must not straddle a concurrent
+        `open_project` (#381): `ProjectService` is a process-global singleton
+        whose `root_path` mutates in place, so an operation that resolves the
+        project more than once can read one project's schema against another's
+        files.
+        """
+        root = root or self._require_project()
         data = deepcopy(DEFAULT_METADATA_SCHEMA)
         for path in self._metadata_schema_layer_paths(root):
             if path.exists():

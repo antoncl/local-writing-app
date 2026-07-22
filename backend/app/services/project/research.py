@@ -204,6 +204,7 @@ class ResearchNotesMixin:
         )
 
     def delete_research_node(self, node_id: str) -> StructureDocument:
+        root = self._require_project()  # see manuscript.delete_structure_node (#381)
         tree = self._research_tree()
         document = tree.read()
         node = TreeStructureService.find_node(document, node_id)
@@ -228,7 +229,7 @@ class ResearchNotesMixin:
 
         TreeStructureService.remove_node_by_id(document.root, node_id)
         tree.write(document)
-        self._purge_references_to(purge_ids)
+        self._purge_references_to(purge_ids, root)
         return tree.read()
 
     # ----- Research note leaf IO -----

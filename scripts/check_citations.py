@@ -49,6 +49,7 @@ from __future__ import annotations
 
 import argparse
 import ast
+import contextlib
 import io
 import json
 import keyword
@@ -108,6 +109,14 @@ IDENT_RE = re.compile(r"[A-Za-z_][A-Za-z0-9_]*")
 MEMORY_SLUG_RE = re.compile(
     r"^(decisions|feedback|project|strategy|architecture|reference|user|ux|ui)_\w+_\w+$"
 )
+# A document carrying this opts out of checking entirely. It exists because the
+# weekly report is itself an open issue: without it the checker reads its own
+# output and re-flags every citation it quoted last week (#411 — 68 of 245
+# findings on the run that found this). A marker rather than a hardcoded issue
+# number, so a design memo that quotes historical citations on purpose has the
+# same way out.
+IGNORE_MARKER = "<!-- citation-rot: ignore -->"
+
 BACKTICK_RE = re.compile(r"`([^`\n]+)`")
 CAMEL_RE = re.compile(r"^[A-Za-z]+[A-Z]")
 
@@ -566,6 +575,8 @@ def check_mention(mention: Mention, index: RepoIndex, source: Source) -> Finding
 
 
 def check_source(source: Source, index: RepoIndex, *, mentions: bool = True) -> list[Finding]:
+    if IGNORE_MARKER in source.text:
+        return []
     citations = extract_citations(source.text)
     findings = [check_citation(c, index, source) for c in citations]
     if mentions:
@@ -762,6 +773,9 @@ def collect_sources(
 def run(args: argparse.Namespace) -> Report:
     index = RepoIndex.from_git(Path(args.repo))
     sources, warnings = collect_sources(args, index)
+    # Dropped here as well as in check_source, so the counts in the report
+    # header describe what was actually read.
+    sources = [source for source in sources if IGNORE_MARKER not in source.text]
     report = Report(sources_checked=len(sources), warnings=warnings)
     for source in sources:
         findings = check_source(source, index, mentions=not args.no_mentions)
@@ -799,6 +813,11 @@ def main(argv: list[str]) -> int:
     if args.out:
         Path(args.out).write_text(markdown, encoding="utf-8")
     else:
+        # Windows defaults stdout to cp1252, which cannot encode the report's
+        # ⚠ — so the checker crashed precisely when it had a warning to deliver,
+        # and only on the platform this app is developed on.
+        with contextlib.suppress(AttributeError, OSError):
+            sys.stdout.reconfigure(encoding="utf-8")
         sys.stdout.write(markdown)
     # Always 0. This is advisory by design: a PR must not go red because an
     # unrelated issue got stale. The workflow decides what to do with the text.

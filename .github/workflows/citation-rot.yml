@@ -67,6 +67,7 @@ jobs:
         run: |
           python scripts/check_citations.py \
             --changed-files changed.txt \
+            --no-mentions \
             --sha "$GITHUB_SHA" \
             --title "Citation rot in the files this PR touches" \
             --out report.md
@@ -83,8 +84,10 @@ jobs:
         run: |
           MARKER='<!-- citation-rot -->'
           printf '%s\n' "$MARKER" | cat - report.md > body.md
-          EXISTING=$(gh api "repos/$GITHUB_REPOSITORY/issues/$PR/comments" \
-            --jq "map(select(.body | startswith(\"$MARKER\"))) | .[0].id // empty")
+          # --paginate: a PR with more than 30 comments would otherwise miss
+          # its own sticky comment and post a second one, every push.
+          EXISTING=$(gh api --paginate "repos/$GITHUB_REPOSITORY/issues/$PR/comments" \
+            --jq "map(select(.body | startswith(\"$MARKER\"))) | .[].id" | head -n1)
           if [ -z "$EXISTING" ] && grep -q 'No rot found.' report.md; then
             echo "Nothing to report and nothing said before."
             exit 0

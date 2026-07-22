@@ -87,10 +87,27 @@
      a flip changes words somewhere and the eye has no anchor — the tint is what
      holds your place while the words swap underneath it.
 
-     **The edge rule is not decoration.** Roughly 1 in 12 men has a colour-vision
-     deficiency and warm-vs-cool is the axis most affected, so hue must never be
-     the only channel: an underline survives greyscale where a wash does not
-     (§H). It bites hardest in the light theme, whose chroma is halved.
+     **The edge rule is not decoration, and its SHAPE is the load-bearing part.**
+     Roughly 1 in 12 men has a colour-vision deficiency and warm-vs-cool is the
+     axis most affected, so hue must never be the only channel (§H).
+
+     Colour alone cannot carry that here, and the reason is structural rather
+     than a badly chosen swatch: §H also requires equal chroma across the pair
+     within a theme, so neither reads as more important — and equal chroma at
+     equal lightness is equal LUMINANCE, which is exactly what greyscale keeps.
+     Measured on the shipped tokens the two washes differ by 0.1 of 255 in light
+     and 2.1 in dark: indistinguishable, by construction.
+
+     Separating the edges by lightness instead would work, and trade the problem
+     for the one §H was avoiding — a darker rule on one side reads as heavier,
+     which is unequal weight moved from the chroma channel into the lightness
+     one. So the edges differ by **shape**: solid for the scene now, dotted for
+     the snapshot. Shape is neither hue nor lightness, so equal chroma and equal
+     weight both survive and greyscale keeps the distinction whole. The archived
+     side reading as the provisional one is the right way round.
+
+     Drawn as a background gradient rather than a border so it costs no layout —
+     a 2px border on an inline span would move the line box under the prose.
 
      `:global` because this HTML comes from `{@html}` and Svelte's scoping never
      sees it. The class names are the runs' own (`diffRuns.ts`). */
@@ -104,8 +121,15 @@
     box-shadow: inset 0 -2px 0 var(--diff-now-edge);
   }
   .effective-body-content :global(.r-was) {
-    background: var(--diff-was-soft);
-    box-shadow: inset 0 -2px 0 var(--diff-was-edge);
+    background-color: var(--diff-was-soft);
+    background-image: repeating-linear-gradient(
+      to right,
+      var(--diff-was-edge) 0 3px,
+      transparent 3px 6px
+    );
+    background-repeat: no-repeat;
+    background-position: 0 100%;
+    background-size: 100% 2px;
   }
 
   /* A change spanning block boundaries stacks — no inline element can wrap two
@@ -125,6 +149,7 @@
   }
   .effective-body-content :global(.blk-was) {
     border-left-color: var(--diff-was);
+    border-left-style: dashed;
     background: var(--diff-was-soft);
   }
   .effective-body-content :global(.blk p:last-child) {

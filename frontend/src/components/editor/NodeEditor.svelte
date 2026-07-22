@@ -1247,9 +1247,18 @@
     font-weight: 600;
     box-shadow: inset 0 -2px 0 var(--diff-now-edge);
   }
+  /* Dotted, matching the body and the rail — the greyscale channel is shape. */
   .title-input.flipped.flip-was {
     color: var(--diff-was);
-    box-shadow: inset 0 -2px 0 var(--diff-was-edge);
+    box-shadow: none;
+    background-image: repeating-linear-gradient(
+      to right,
+      var(--diff-was-edge) 0 3px,
+      transparent 3px 6px
+    );
+    background-repeat: no-repeat;
+    background-position: 0 100%;
+    background-size: 100% 2px;
   }
   .title-input.mutated {
     color: var(--mutation-color);

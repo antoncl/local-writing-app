@@ -468,16 +468,30 @@
   .field-row.flipped.flip-was .fr-name {
     color: var(--diff-was);
   }
-  .field-row.flipped .fr-val :global(.fv-static),
-  .field-row.flipped .fr-val :global(.fv-static-longtext) {
-    background: var(--diff-now-soft);
+  /* On `.fr-val` itself, not on the inner value widgets. A changed field can
+     render as a plain static, a chip, a swatch or a select, and marking only
+     some of them left the rail carrying its difference on the LABEL's hue
+     alone — the hue-only failure §H rules out, reintroduced in the one place
+     the body had just fixed it. */
+  .field-row.flipped .fr-val {
+    background-color: var(--diff-now-soft);
     box-shadow: inset 0 -2px 0 var(--diff-now-edge);
     border-radius: var(--r-sm);
+    padding: 1px 4px;
   }
-  .field-row.flipped.flip-was .fr-val :global(.fv-static),
-  .field-row.flipped.flip-was .fr-val :global(.fv-static-longtext) {
-    background: var(--diff-was-soft);
-    box-shadow: inset 0 -2px 0 var(--diff-was-edge);
+  /* Dotted rather than solid, so the pair survives greyscale on a channel that
+     is neither hue nor lightness — see ReadOnlyBodyOverlay for the reasoning. */
+  .field-row.flipped.flip-was .fr-val {
+    background-color: var(--diff-was-soft);
+    background-image: repeating-linear-gradient(
+      to right,
+      var(--diff-was-edge) 0 3px,
+      transparent 3px 6px
+    );
+    background-repeat: no-repeat;
+    background-position: 0 100%;
+    background-size: 100% 2px;
+    box-shadow: none;
   }
 
   .fr-computed {

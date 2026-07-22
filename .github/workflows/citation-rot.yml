@@ -1,0 +1,144 @@
+# Citation rot (#397) — the machine half of "does this prose still describe the
+# code?". `scripts/check_citations.py` does the work; this only decides when it
+# runs and where the text lands.
+#
+# Two modes, and they are not the same check:
+#
+#   1. On a PR, scoped to the files the diff touches. This catches rot at the
+#      moment it is created, by the person creating it, while the context is
+#      still in their head. It is ADVISORY and must never fail the build — a PR
+#      going red because an unrelated issue got stale is how a check earns the
+#      reflex to skip it. Note the deliberate absence from gates.yml: the
+#      required checks stay the ones that must be green.
+#
+#   2. Weekly, repo-wide. Catches what mode 1 cannot: issues written after the
+#      code moved, ADRs, docs. Output goes to ONE tracking issue, edited in
+#      place — a new comment every week is notification spam, and the point is
+#      one URL to check.
+#
+# GitHub disables a `schedule:` trigger in a public repo after 60 days without
+# repository activity. `workflow_dispatch` is the manual fallback, and the
+# tracking issue's last-updated date is the tell that it stopped firing.
+name: citation-rot
+
+on:
+  pull_request:
+  schedule:
+    - cron: '17 6 * * 1'    # Mondays, 06:17 UTC
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  # ------------------------------------------------------------------ mode 1
+  pull-request:
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
+      issues: read           # the checker reads open issue bodies
+      pull-requests: write   # ...and leaves one sticky comment
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          fetch-depth: 0     # the diff against the base needs real history
+
+      - uses: actions/setup-python@v6
+        with:
+          python-version: '3.14'
+
+      # The checker is stdlib-only on purpose: no install step, nothing to
+      # cache, nothing that can rot on its own.
+      - name: Files this PR touches
+        run: |
+          git fetch --no-tags origin "$GITHUB_BASE_REF"
+          git diff --name-only "origin/$GITHUB_BASE_REF...HEAD" > changed.txt
+          cat changed.txt
+
+      - name: Check citations into those files
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          python scripts/check_citations.py \
+            --changed-files changed.txt \
+            --sha "$GITHUB_SHA" \
+            --title "Citation rot in the files this PR touches" \
+            --out report.md
+          cat report.md
+
+      # Sticky: one comment, edited on every push, so a long PR does not
+      # accumulate a column of stale reports. Skipped entirely when there is
+      # nothing to say and nothing said before.
+      - name: Comment (advisory)
+        continue-on-error: true   # a fork PR's token cannot write; not a failure
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PR: ${{ github.event.pull_request.number }}
+        run: |
+          MARKER='<!-- citation-rot -->'
+          printf '%s\n' "$MARKER" | cat - report.md > body.md
+          EXISTING=$(gh api "repos/$GITHUB_REPOSITORY/issues/$PR/comments" \
+            --jq "map(select(.body | startswith(\"$MARKER\"))) | .[0].id // empty")
+          if [ -z "$EXISTING" ] && grep -q 'No rot found.' report.md; then
+            echo "Nothing to report and nothing said before."
+            exit 0
+          fi
+          if [ -n "$EXISTING" ]; then
+            gh api --method PATCH "repos/$GITHUB_REPOSITORY/issues/comments/$EXISTING" \
+              -F body=@body.md
+          else
+            gh api --method POST "repos/$GITHUB_REPOSITORY/issues/$PR/comments" \
+              -F body=@body.md
+          fi
+
+  # ------------------------------------------------------------------ mode 2
+  repo-wide:
+    if: github.event_name != 'pull_request'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: read
+      issues: write          # creates/edits the single tracking issue
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: actions/setup-python@v6
+        with:
+          python-version: '3.14'
+
+      # Memory files live outside the repo, so this run cannot see them. Run
+      # the checker locally with --memory-dir to cover those.
+      - name: Check every citation in every open issue and tracked document
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          python scripts/check_citations.py \
+            --sha "$GITHUB_SHA" \
+            --title "Citation rot — repo-wide" \
+            --out report.md
+          cat report.md
+
+      - name: Update the tracking issue
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          TITLE='Citation rot: standing report'
+          {
+            echo "_Maintained by \`.github/workflows/citation-rot.yml\`. Edited in place every week — do not reply, fix the prose._"
+            echo
+            cat report.md
+          } > body.md
+          NUMBER=$(gh issue list --state open --search "in:title \"$TITLE\"" \
+            --json number,title --jq "map(select(.title == \"$TITLE\")) | .[0].number // empty")
+          if [ -n "$NUMBER" ]; then
+            gh issue edit "$NUMBER" --body-file body.md
+            echo "Updated #$NUMBER"
+          else
+            gh issue create --title "$TITLE" --body-file body.md
+          fi

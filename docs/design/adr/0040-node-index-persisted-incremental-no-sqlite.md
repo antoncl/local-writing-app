@@ -1,8 +1,8 @@
 # ADR-0040: The node index is a persisted, incrementally-maintained id-map; bodies are lazy; no SQLite
 
 - Status: **Accepted** — 0.7.0, 2026-07-19 (PR #319) · re-measured 2026-07-19 after two rounds of
-  adversarial review · **Amendment 1 (Proposed): the index is three caches with different lifetimes,
-  not one** (2026-07-22, #390)
+  adversarial review · **Amendment 1: the index is three caches with different lifetimes, not one**
+  (Accepted — Anton, 2026-07-22, #390)
 - Feature: #7 (prerequisite) · Companion: ADR-0039 · Follows: ADR-0025 · Context: **ADR-0045**
 - Amended by: #390 — see [Amendment 1](#amendment-1--the-index-is-three-caches-not-one-2026-07-22)
 - Implemented by: #305 (single-pass) → #306 (snapshot + staleness manifest) → #307 (incremental patch
@@ -243,7 +243,7 @@ first run (`--regen` to rebuild them), and a bare invocation runs all three scal
 
 ## Amendment 1 — the index is three caches, not one (2026-07-22)
 
-Status: **Proposed** — awaiting approval (#390).
+Status: **Accepted** — Anton, 2026-07-22 (#390).
 
 **Code read against `master` at `052895c` (2026-07-22)**, after #305/#306/#307's merged half. Every
 name cited below lives in `backend/app/services/project/` — `node_index.py` (`NodeIndex`,

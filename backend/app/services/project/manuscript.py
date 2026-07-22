@@ -20,6 +20,7 @@ or the other kinds.
 
 from __future__ import annotations
 
+from pathlib import Path
 from typing import Any
 
 from app.models import (
@@ -41,7 +42,7 @@ from app.services.tree_structure import TreeStructureService
 class ManuscriptMixin:
     def read_structure(self) -> StructureDocument:
         root = self._require_project()
-        document = self._manuscript_tree().read()
+        document = self._manuscript_tree(root).read()
         schema = self.read_metadata_schema()
         # One-shot scene front-matter scan: avoids per-leaf read_scene
         # (which does full body parsing). Builds {id → (status, metadata)} so
@@ -135,7 +136,7 @@ class ManuscriptMixin:
         if parent is None or self._is_leaf_node(parent):
             parent = self._first_container(structure.root)
         TreeStructureService.insert_node(parent, scene_node)
-        self._manuscript_tree().write(structure)
+        self._manuscript_tree(root).write(structure)
         return self.read_scene(scene_id)
 
     def cascade_delete_preview(self, node_id: str) -> StructureNodeDeletePreview:
@@ -201,15 +202,32 @@ class ManuscriptMixin:
             self._remove_scene_todos(scene_id)
 
         TreeStructureService.remove_node_by_id(structure.root, node_id)
-        self._manuscript_tree().write(structure)
+        self._manuscript_tree(root).write(structure)
         self._purge_references_to(purge_ids, root)
         return self.read_structure()
 
-    def _manuscript_tree(self) -> TreeStructureService:
-        return TreeStructureService(self._require_project(), MANUSCRIPT_TREE_CONFIG)
+    def _manuscript_tree(self, root: Path) -> TreeStructureService:
+        """The manuscript tree for **`root`**, which the caller must already
+        hold (#381 / ADR-0045).
+
+        `root` is required rather than defaulted, and that is the whole point.
+        This used to read `self._require_project()` itself, so a unit of work
+        that captured a root, read the structure, mutated it and wrote it back
+        resolved the project **twice** — and `ProjectService` is a process-wide
+        singleton whose `root_path` an `open_project` on another thread swaps in
+        place. The write then landed in whatever project was open by then,
+        overwriting *that* project's `manuscript.structure.yaml` with this
+        one's tree. Same class as the reference purge (fixed in #381's first
+        half), same irreversibility.
+
+        A default would have left the trap armed for the next caller: the
+        invariant is "a unit resolves its scope once", and a parameter that can
+        be omitted is a defense, not an invariant.
+        """
+        return TreeStructureService(root, MANUSCRIPT_TREE_CONFIG)
 
     def move_structure_node(self, node_id: str, target_parent_id: str, position: int) -> StructureDocument:
-        self._require_project()
+        root = self._require_project()
         structure = self.read_structure()
 
         node = TreeStructureService.find_node(structure, node_id)
@@ -236,11 +254,11 @@ class ManuscriptMixin:
         insert_at = max(0, min(position, len(target_parent.children)))
         target_parent.children.insert(insert_at, removed)
 
-        self._manuscript_tree().write(structure)
+        self._manuscript_tree(root).write(structure)
         return self.read_structure()
 
     def rename_structure_node(self, node_id: str, title: str) -> StructureDocument:
-        self._require_project()
+        root = self._require_project()
         structure = self.read_structure()
         node = TreeStructureService.find_node(structure, node_id)
         if node is None:
@@ -257,7 +275,7 @@ class ManuscriptMixin:
             front_matter["title"] = clean_title
             self._write_markdown_with_front_matter(path, front_matter, body)
             self._maybe_rename_node_file(path, clean_title)
-        self._manuscript_tree().write(structure)
+        self._manuscript_tree(root).write(structure)
         return self.read_structure()
 
     def create_structure_node(self, request: CreateStructureNodeRequest) -> StructureDocument:
@@ -299,7 +317,7 @@ class ManuscriptMixin:
         if parent is None or self._is_leaf_node(parent):
             parent = structure.root
         TreeStructureService.insert_node(parent, new_node)
-        self._manuscript_tree().write(structure)
+        self._manuscript_tree(root).write(structure)
         return self.read_structure()
 
     def read_scene(self, scene_id: str) -> Scene:
@@ -396,7 +414,7 @@ class ManuscriptMixin:
         scene_node = TreeStructureService.find_by_leaf_ref(structure, node_id)
         if scene_node is not None:
             TreeStructureService.remove_node_by_id(structure.root, scene_node.id)
-        self._manuscript_tree().write(structure)
+        self._manuscript_tree(root).write(structure)
         self._remove_scene_todos(node_id)
         # Strip references to both the scene file id and the structure
         # node wrapping it from every metadata-bearing entry.
@@ -416,9 +434,9 @@ class ManuscriptMixin:
         return node
 
     def _update_scene_title_in_structure(self, scene_id: str, title: str) -> None:
-        self._require_project()
+        root = self._require_project()
         structure = self.read_structure()
         node = TreeStructureService.find_by_leaf_ref(structure, scene_id)
         if node is not None:
             node.title = title
-            self._manuscript_tree().write(structure)
+            self._manuscript_tree(root).write(structure)

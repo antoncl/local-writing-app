@@ -1,7 +1,7 @@
 # ADR-0044: The snapshot strip is the scrubber's third axis; comparison is a flip, not a split
 
 - Status: **Accepted** — 0.8.0, 2026-07-22 (Anton, having read it alongside the mockup). Accepted
-  covers §A–§K: the strip as the scrubber's third axis, position-is-the-mode governing size as well
+  covers §A–§L: the strip as the scrubber's third axis, position-is-the-mode governing size as well
   as contents, notches with Live at the right, log-scaled spacing, the track-width invariant, flip
   rather than split with the tint held in every compare state, rendered HTML in the read-only overlay
   slot, the warm/cool hue axis with chroma halved for light, the key map, and the
@@ -145,6 +145,31 @@ by the feature whose job is not losing words. The inline-vs-stacked layout above
 as ProseMirror decorations and trivial in rendered HTML. And it reuses a pattern the author has
 already seen on lore cards.
 
+**The diff itself is computed backend-side, and ADR-0025 authorises this rather than tolerating it.**
+That ADR defers server-side evaluation "until something that cannot see the frontend needs it" — and
+a snapshot body is exactly that: it lives on disk under `snapshots/` and the frontend has never
+loaded it. Its two objections both invert here. The premise "*the data is already frontend-side, so a
+round-trip costs more than the in-memory pass*" is false — the frontend would have to be *sent* the
+snapshot body first, so the round-trip happens either way; sending runs instead of a second document
+is strictly cheaper. And the round-trip it warns about is *per evaluation during live preview*, where
+the diff is computed **once, when the author parks on a notch**.
+
+That second point is the load-bearing one, and it is the boundary rather than the framing:
+
+> This holds because the diff is computed at a **discrete moment**. Diffing continuously — against
+> the live buffer as the author types — would put an HTTP round-trip back in the typing loop, and
+> ADR-0025's objection would apply again in full.
+
+The backend endpoint therefore takes two node states and returns provenance-tagged runs (§F). Because
+the runs carry *all* the text, one response serves all three view states — Both, Now and Snapshot are
+three filters over one payload, not three requests. Python's `difflib.SequenceMatcher.get_opcodes()`
+already emits `equal / insert / delete / replace` spans in that shape, so no library is added on
+either side.
+
+**Known risk, to spike before treating §F as proven:** this diffs *markdown source* and then renders.
+A change straddling inline markup can produce runs that do not survive rendering independently. The
+mockup dodges it by construction (hand-authored runs over clean prose), so it is untested.
+
 ### H. Two new colour tokens, warm and cool
 
 Almost every hue is spoken for: teal is the accent, violet is the mutation axis, amber is `--warn`,
@@ -220,7 +245,20 @@ all: it exists only while parked, and vanishes at Live. Giving it a glyph would 
 permanent-looking mark on a temporary condition. **Lenses get colour, not glyphs** — and comparison
 state can therefore never add a glyph, however many axes the app grows.
 
-### K. The tooltip, and the description
+### K. Relative time is platform-native; nothing is added for it
+
+`Intl.RelativeTimeFormat` is built into the browser and produces the *5 minutes ago / yesterday*
+ladder directly. The frontend today formats **no** dates at all — chat sessions carry
+`created_at`/`updated_at` and nothing renders them — so there is no existing helper to reuse and none
+to import.
+
+What has to be written is only the **bucketing**: where the ladder switches from relative to named to
+absolute. That is the design decision, not boilerplate, and a library would make it for us wrongly.
+It belongs in a **shared helper rather than inline**, because it is the second consumer already —
+ADR-0042's layer-aware footer echo wants one too, and those unrendered chat timestamps are unrendered
+precisely because no formatter existed.
+
+### L. The tooltip, and the description
 
 Hovering a notch gives the capture time on a relative ladder — *5 minutes ago · yesterday ·
 Wednesday 12th* — plus the one-line description if the snapshot has one, and whether it is pinned.
@@ -253,7 +291,7 @@ and nothing about the layout — sketching that is how ADR-0005 acquired authori
    proportional.
 3. **Discoverability of the compact strip.** It may now be quiet enough that a new author never
    learns snapshots exist.
-4. **The description's presentation** (K).
+4. **The description's presentation** (L).
 5. **The exact hex values** (H). The hues, the chroma ratio between themes and the constraints are
    settled; the final values land when the tokens are added, and should be re-checked in greyscale
    at that point — the light theme's halved chroma is where that constraint is tightest.

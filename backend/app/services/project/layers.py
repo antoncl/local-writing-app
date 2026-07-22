@@ -56,6 +56,9 @@ SCHEMA_FILENAME = "metadata.schema.yaml"
 # consults to decide where it stops, so it is an input to the *shape* of the
 # chain and not only to a layer's content.
 MANIFEST_FILENAME = "project.yaml"
+# The manifest key holding the declaration: which enumerated ancestors this
+# project inherits from (#309 / ADR-0039 Amendment 1). Absent means none.
+INHERITS_KEY = "inherits"
 
 
 @lru_cache(maxsize=1024)
@@ -228,8 +231,115 @@ class LayerWalkMixin:
             return None
         return machine_dir
 
+    def ancestor_candidates(self, root: Path, *, base: Path | None = None) -> list[tuple[Path, bool, bool]]:
+        """Every folder between the configured base and `root`, outermost first,
+        as `(folder, is_project, inherited)` (#309).
+
+        The candidate set is the **filesystem walk**, which is finite and
+        cycle-free by construction — ADR-0039 Amendment 1 rejected a
+        user-editable `parent:` link precisely because that can form a loop.
+        The declaration only ever *selects* from this list; it can never extend
+        it, so a project cannot name its way out of the configured base folder.
+
+        Non-project folders are reported too, marked `is_project=False`. They
+        can never be inherited (there is no `project.yaml` to layer), but
+        omitting them from the enumeration would leave a hole in the wizard's
+        list that reads as a defect rather than as information.
+
+        `base` overrides the stored bound with one that is **about to be
+        written**. A settings update that widens `projects_base_folder` and
+        declares a newly-eligible ancestor in the same request would otherwise
+        validate the declaration against the *old* bound and reject it — which
+        is exactly the shape #318's wizard submits (pick a shelf, tick the
+        levels, save once). It is a pending-value parameter, not an opt-out:
+        omitting it reads the manifest, which is right for every other caller.
+        """
+        root = root.resolve()
+        base_folder = base.resolve() if base is not None else self._metadata_schema_base_folder(root)
+        chain = [root, *root.parents]
+        if base_folder is None or base_folder not in chain:
+            return []
+        declared = self._declared_ancestors(root)
+        ancestors = list(reversed(chain[: chain.index(base_folder) + 1]))[:-1]
+        return [
+            (folder, (folder / MANIFEST_FILENAME).exists(), folder in declared)
+            for folder in ancestors
+        ]
+
+    def _declared_ancestors(self, root: Path) -> set[Path]:
+        """The folders `root`'s manifest says it inherits from, resolved.
+
+        **An absent key means "inherits nothing"** — not "inherits everything",
+        which would be inference wearing a declaration's clothes: folder
+        placement would still decide, and the key would only ever let you opt
+        out. It also means an author who has declared nothing gets a flat
+        project rather than a hierarchy they never asked for and cannot see.
+
+        Paths are stored **relative to the project**, so moving or renaming a
+        shelf does not invalidate every book beneath it. Entries that do not
+        resolve to an actual ancestor are dropped by `_project_layer_folders`,
+        which is where the warning belongs — this is a read, not a validator.
+        """
+        manifest = self._read_yaml(root / MANIFEST_FILENAME)
+        declared = manifest.get(INHERITS_KEY)
+        if not isinstance(declared, list):
+            return set()
+        resolved: set[Path] = set()
+        for entry in declared:
+            if not isinstance(entry, str) or not entry.strip():
+                continue
+            candidate = Path(entry.strip())
+            if not candidate.is_absolute():
+                candidate = root / candidate
+            try:
+                resolved.add(candidate.resolve())
+            except OSError:
+                continue
+        return resolved
+
+    def declared_ancestor_warnings(self, root: Path) -> list[str]:
+        """One warning per declared entry that is not an ancestor (#309).
+
+        Dropped rather than honoured: the enumeration is the filesystem walk,
+        and an entry outside it is either a typo or a folder that has since
+        moved. Honouring it would let the manifest extend the chain past the
+        configured base — the property the walk exists to guarantee.
+
+        **Two ways a declaration can fail, and both must be said out loud.**
+        The first is an entry that is not an ancestor at all. The second is an
+        ancestor that carries no `project.yaml`: it is a legitimate row in the
+        enumeration, so the first check passes it, and it still contributes
+        nothing — the author ticked something and got silence. A folder that
+        was a project and stopped being one (a manifest deleted, a folder
+        restored without it) lands here, which is precisely when a silent drop
+        is least affordable.
+        """
+        root = root.resolve()
+        candidates = {folder for folder, _, _ in self.ancestor_candidates(root)}
+        projects = {folder for folder, is_project, _ in self.ancestor_candidates(root) if is_project}
+        declared = self._declared_ancestors(root)
+        return [
+            f"Project declares inheritance from {folder}, which is not an ancestor "
+            f"within the base folder. It was ignored."
+            for folder in sorted(declared - candidates)
+        ] + [
+            f"Project declares inheritance from {folder}, which is not a project "
+            f"(no {MANIFEST_FILENAME}). It contributes nothing."
+            for folder in sorted((declared & candidates) - projects)
+        ]
+
     def _project_layer_folders(self, root: Path) -> list[Path]:
         """Project folders from outermost ancestor to current root, inclusive.
+
+        **The declared subset, plus the open project** (#309). The project is
+        always in its own chain and is never subject to the declaration —
+        "inherit from myself" is not a choice anyone should have to make.
+
+        Gaps are legal by construction: the declaration is a set membership
+        test per candidate, so declaring a grandparent without its parent is a
+        recorded choice rather than an error. Nothing here reads an *ancestor's*
+        declaration — each project's own list is the complete answer for itself,
+        which is what keeps the chain a property of the file you are editing.
 
         One normal form, and finite by construction (#356). The previous version
         checked `_is_relative_to` — which resolves *both* operands — and then
@@ -242,27 +352,34 @@ class LayerWalkMixin:
         which is comparing two normal forms in one traversal.
         """
         root = root.resolve()
-        base_folder = self._metadata_schema_base_folder(root)
-        # Membership in the ancestor chain IS the relation this walk needs, and
-        # testing it in the same form the walk uses is what makes the stop reachable.
-        chain = [root, *root.parents]
-        if base_folder is None or base_folder not in chain:
-            return [root]
-        return list(reversed(chain[: chain.index(base_folder) + 1]))
+        return [
+            folder
+            for folder, is_project, inherited in self.ancestor_candidates(root)
+            if is_project and inherited
+        ] + [root]
 
     def _metadata_schema_base_folder(self, root: Path) -> Path | None:
         """Where the walk stops — the outer bound of the layer chain.
 
-        ⚠ **Known behaviour, deliberately preserved by #329 and tracked as
-        #337.** When the configured `projects_base_folder` equals `root.parent`
-        — which the project chooser writes on *every* create, so it is the
-        normal path — this ignores the configured value and substitutes the
-        **outermost** ancestor anywhere up `root.parents` that happens to
+        **The configured `projects_base_folder`, and nothing else** (#337 /
+        ADR-0039 Amendment 2: the root is stipulated, never inferred from a
+        file's presence).
+
+        Until #337 this widened: when the configured value equalled
+        `root.parent` — which the project chooser writes on *every* create, so
+        it was the normal path, not an edge case — it was discarded in favour of
+        the **outermost** ancestor anywhere up `root.parents` that happened to
         contain a `metadata.schema.yaml`. A stray schema file in a grandparent
-        therefore sets the extent of schema layering, the node index and the
-        assistant roster. ADR-0039 Amendment 2 stipulates the root instead;
-        removing the widening is a behaviour change and is *not* part of the
-        #329 refactor. It is now a single edit, here.
+        therefore set the extent of schema layering, the node index *and* the
+        assistant roster, with no declaration and nothing on screen naming it.
+        Under #312 it would have decided which ancestors contribute AI policy,
+        which turns a surprise into a permission surprise.
+
+        The widening was also, accidentally, the only thing giving a
+        UI-created project a chain deeper than two layers. That is why this
+        lands **with** the declaration (#309) and not before it: enumeration
+        now stops where the user said it does, and inheritance is what the
+        project declares within that bound.
         """
         manifest = self._read_yaml(root / MANIFEST_FILENAME)
         settings = manifest.get("settings")
@@ -271,24 +388,31 @@ class LayerWalkMixin:
         base_folder = settings.get("projects_base_folder")
         if not isinstance(base_folder, str) or not base_folder.strip():
             return None
-        configured_base = Path(base_folder).expanduser().resolve()
-        if configured_base == root.parent:
-            schema_ancestors = [
-                ancestor
-                for ancestor in root.parents
-                if ancestor != root.parent and (ancestor / SCHEMA_FILENAME).exists()
-            ]
-            if schema_ancestors:
-                return schema_ancestors[-1].resolve()
-        return configured_base
+        return Path(base_folder).expanduser().resolve()
 
     def _metadata_schema_layer_id(self, folder: Path) -> str:
         return _layer_id_for_folder(folder)
 
     def _layer_label_for_folder(self, root: Path, folder: Path, layer_index: int) -> str:
+        """A layer's name follows the *project*, not its position (#309).
+
+        The old rule labelled position 0 "Base Folder", which was true while
+        the walk always started at the configured base. Under a declared chain
+        the outermost layer is normally a real project — and with gaps legal it
+        may be a grandparent — so a positional rule mislabels it. This is
+        user-visible in the schema-layers overview and in every shadow warning.
+
+        A layer that carries a manifest gets that manifest's title; "Base
+        Folder" survives only for a folder that genuinely is the configured
+        base and is not itself a project.
+        """
         if folder == root:
             return self.title or root.name
-        if layer_index == 0:
+        manifest = self._read_yaml(folder / MANIFEST_FILENAME)
+        title = manifest.get("title")
+        if isinstance(title, str) and title.strip():
+            return title.strip()
+        if layer_index == 0 and folder == self._metadata_schema_base_folder(root):
             return "Base Folder"
         return folder.name
 

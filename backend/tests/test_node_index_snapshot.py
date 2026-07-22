@@ -20,6 +20,8 @@ import unittest
 from pathlib import Path
 from tempfile import TemporaryDirectory
 
+from layer_fixtures import declare_full_chain
+
 from app.services.project import node_index_snapshot as snapshot
 from app.services.project.errors import ProjectServiceError
 from app.services.project_service import ProjectService
@@ -43,9 +45,7 @@ class SnapshotTestCase(unittest.TestCase):
         self.temp_dir.cleanup()
 
     def _set_base_folder(self, folder: Path) -> None:
-        manifest = self.service._read_yaml(self.root / "project.yaml")
-        manifest.setdefault("settings", {})["projects_base_folder"] = str(folder)
-        self.service._write_yaml(self.root / "project.yaml", manifest)
+        declare_full_chain(self.service, self.root, folder)
 
     def _write_lore(self, folder: Path, node_id: str, title: str, *, refs: list[str] | None = None) -> Path:
         (folder / "lore").mkdir(parents=True, exist_ok=True)
@@ -211,25 +211,28 @@ class StalenessTests(SnapshotTestCase):
         (self.universe / "metadata.schema.yaml").write_text("version: 1\n", encoding="utf-8")
         self.assertTrue(self._rebuilt())
 
-    def test_schema_file_appearing_ABOVE_the_chain_rebuilds(self) -> None:
-        """The case no per-file fingerprint can see.
+    def test_schema_file_appearing_ABOVE_the_chain_changes_nothing(self) -> None:
+        """The inverse of what this test asserted before #337.
 
-        A stray `metadata.schema.yaml` above the outer bound *lengthens* the
-        chain (`_metadata_schema_base_folder`'s widening, #337): no recorded
-        file changes, no indexed folder gains one, and yet the index gains a
-        whole layer. What catches it is the layer-chain comparison — the walk's
-        output, not its inputs — which is why the snapshot stores the folders
-        the walk yielded.
+        A stray `metadata.schema.yaml` above the outer bound used to *lengthen*
+        the chain — no recorded file changed, no indexed folder gained one, and
+        yet the index gained a whole layer, so the snapshot had to rebuild. With
+        the widening gone the walk stops where the setting says, so the file is
+        simply outside the project's world: the chain is unchanged and there is
+        nothing to rebuild.
+
+        The mechanism that caught the old case is still worth having, and
+        `test_a_layer_appearing_rebuilds` below is what exercises it now — a
+        chain that grows for a legitimate reason still invalidates the snapshot.
         """
         self._set_base_folder(self.universe)
         before = self.service.collect_layers(self.root, include_machine=True)
         self.service._build_node_index(self.root)
         (self.base / "metadata.schema.yaml").write_text("version: 1\n", encoding="utf-8")
-        # Pin the premise: if the widening ever stops lengthening the chain this
-        # test would pass for the wrong reason, having asserted nothing.
         after = self.service.collect_layers(self.root, include_machine=True)
-        self.assertGreater(len(after), len(before))
-        self.assertTrue(self._rebuilt())
+
+        self.assertEqual(len(after), len(before))
+        self.assertFalse(self._rebuilt())
 
     def test_a_layer_appearing_rebuilds(self) -> None:
         """Same mechanism, stated directly: the chain the walk yields is part of

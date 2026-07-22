@@ -22,16 +22,58 @@ class OpenProjectRequest(BaseModel):
     projects_base_folder: str | None = None
 
 
+class AncestorCandidate(BaseModel):
+    """One folder between the configured base and the open project (#309).
+
+    **Every** ancestor folder is reported, not only the ones that could be
+    layers, and that is deliberate: a folder silently missing from this list
+    reads as a bug, while a folder present and marked `is_project: false` both
+    explains itself and warns that something up there may not be what the
+    author thought it was.
+
+    So a row is in one of three states:
+
+    - `is_project` and `inherited` — a declared layer;
+    - `is_project` and not `inherited` — available, and the wizard offers it;
+    - not `is_project` — an organisational folder, shown and not offerable.
+    """
+
+    path: str
+    name: str
+    is_project: bool = False
+    inherited: bool = False
+
+
+class ProjectChild(BaseModel):
+    """A project folder directly inside this one — the roster #310 renders."""
+
+    path: str
+    name: str
+    title: str
+
+
 class ProjectInfo(BaseModel):
     title: str
     root_path: str
     projects_base_folder: str | None = None
     ai_policy: AIPolicy = "off"
+    # Outermost first, matching layer rank. Carries the whole enumeration with
+    # a flag rather than the declared subset: #311's switcher filters this,
+    # while #318's wizard needs the *un*declared rows to offer them, and one
+    # shape serving both is what stops the second endpoint asking the same
+    # question a different way.
+    ancestors: list[AncestorCandidate] = Field(default_factory=list)
+    children: list[ProjectChild] = Field(default_factory=list)
 
 
 class UpdateProjectSettingsRequest(BaseModel):
     projects_base_folder: str | None = None
     ai_policy: AIPolicy | None = None
+    # The declaration (#309). Partial update like the rest: `None` leaves it
+    # alone, `[]` clears it. Entries may be absolute or relative to the
+    # project; they are stored relative so a renamed shelf does not invalidate
+    # every book beneath it.
+    inherits: list[str] | None = None
 
 
 class ProjectValidation(BaseModel):

@@ -13,6 +13,8 @@ from pathlib import Path
 from tempfile import TemporaryDirectory
 from unittest.mock import patch
 
+from layer_fixtures import declare_full_chain
+
 from app.models import ReorderAssistantsRequest, UnlistAssistantRequest
 from app.services.project.assistants import AssistantsOrder
 from app.services.project.node_index import IndexLayer, NodeIndex
@@ -31,9 +33,7 @@ class LayerWalkTests(unittest.TestCase):
         self.root = self.series / "book01"
         self.service = ProjectService()
         self.service.create_project(self.root, "Book 1")
-        manifest = self.service._read_yaml(self.root / "project.yaml")
-        manifest.setdefault("settings", {})["projects_base_folder"] = str(self.base)
-        self.service._write_yaml(self.root / "project.yaml", manifest)
+        declare_full_chain(self.service, self.root, self.base)
         # A REAL machine layer. conftest's autouse fixture points the config dir
         # at an empty tmp path, so without this `machine_layer()` returns None
         # and every "the machine layer is excluded" assertion below passes for
@@ -117,13 +117,13 @@ class LayerWalkTests(unittest.TestCase):
         self.assertEqual([layer.folder for layer in layers], [layer.folder for layer in self.service.collect_layers(self.root)])
 
     def test_labels_follow_the_layer_rules(self) -> None:
-        # Outermost project layer is "Base Folder", the open project takes the
+        # Each layer takes its own project title (#309); the open project takes the
         # project title, everything between is the folder name.
         layers = self.service.collect_layers(self.root)
 
         self.assertEqual(
             [layer.label for layer in layers],
-            ["Base Folder", "honorverse", "honor-harrington", "Book 1"],
+            ["writing", "honorverse", "honor-harrington", "Book 1"],
         )
 
     def test_machine_layer_is_excluded_by_default(self) -> None:
@@ -233,9 +233,7 @@ class AssistantRankComesFromTheWalkTests(unittest.TestCase):
         self.root = self.base / "book01"
         self.service = ProjectService()
         self.service.create_project(self.root, "Book 1")
-        manifest = self.service._read_yaml(self.root / "project.yaml")
-        manifest.setdefault("settings", {})["projects_base_folder"] = str(self.base)
-        self.service._write_yaml(self.root / "project.yaml", manifest)
+        declare_full_chain(self.service, self.root, self.base)
 
     def tearDown(self) -> None:
         self.temp_dir.cleanup()
@@ -308,9 +306,7 @@ class AssistantRankComesFromTheWalkTests(unittest.TestCase):
         book = middle / "book"
         service = ProjectService()
         service.create_project(book, "Book")
-        manifest = service._read_yaml(book / "project.yaml")
-        manifest.setdefault("settings", {})["projects_base_folder"] = str(self.base)
-        service._write_yaml(book / "project.yaml", manifest)
+        declare_full_chain(service, book, self.base)
 
         def write(folder: Path, entry_id: str, title: str) -> None:
             (folder / "assistants").mkdir(parents=True, exist_ok=True)
@@ -364,9 +360,7 @@ class AssistantOrderMergeTests(unittest.TestCase):
         self.root = self.base / "book01"
         self.service = ProjectService()
         self.service.create_project(self.root, "Book 1")
-        manifest = self.service._read_yaml(self.root / "project.yaml")
-        manifest.setdefault("settings", {})["projects_base_folder"] = str(self.base)
-        self.service._write_yaml(self.root / "project.yaml", manifest)
+        declare_full_chain(self.service, self.root, self.base)
 
     def tearDown(self) -> None:
         self.temp_dir.cleanup()
@@ -432,9 +426,7 @@ class AssistantOrderMergeTests(unittest.TestCase):
         book = middle / "book"
         service = ProjectService()
         service.create_project(book, "Book")
-        manifest = service._read_yaml(book / "project.yaml")
-        manifest.setdefault("settings", {})["projects_base_folder"] = str(self.base)
-        service._write_yaml(book / "project.yaml", manifest)
+        declare_full_chain(service, book, self.base)
 
         for folder, entry_id, title in (
             (self.base, "outer", "Outer"),
@@ -577,6 +569,10 @@ class MachineLayerIsAnOrdinaryLayerTests(unittest.TestCase):
         self.root = self.base / "book01"
         self.service = ProjectService()
         self.service.create_project(self.root, "Book 1")
+        # The base folder is a layer only because this project declares it
+        # (#309). Nothing is inherited by default any more, so a fixture that
+        # wants a project layer to compare against has to say so.
+        declare_full_chain(self.service, self.root, self.base)
         # Redirect the machine config dir into the temp tree so the machine
         # layer is deterministic rather than "whatever this box happens to have".
         self.config_dir = Path(self.temp_dir.name).resolve() / "config"
@@ -669,9 +665,7 @@ class PerLayerCollectionRulesTests(unittest.TestCase):
         self.root = self.base / "book01"
         self.service = ProjectService()
         self.service.create_project(self.root, "Book 1")
-        manifest = self.service._read_yaml(self.root / "project.yaml")
-        manifest.setdefault("settings", {})["projects_base_folder"] = str(self.base)
-        self.service._write_yaml(self.root / "project.yaml", manifest)
+        declare_full_chain(self.service, self.root, self.base)
         self.config_dir = Path(self.temp_dir.name).resolve() / "config"
         self.config_dir.mkdir()
         self._patcher = patch(

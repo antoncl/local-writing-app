@@ -21,6 +21,8 @@ import unittest
 from pathlib import Path
 from tempfile import TemporaryDirectory
 
+from layer_fixtures import declare_full_chain
+
 from app.models import (
     CreateLoreEntryRequest,
     MetadataFieldDefinition,
@@ -155,9 +157,7 @@ class ShadowedEdgeTests(unittest.TestCase):
         self.root = self.base / "universe" / "book"
         self.service = ProjectService()
         self.service.create_project(self.root, "Shadowing Tests")
-        manifest = self.service._read_yaml(self.root / "project.yaml")
-        manifest.setdefault("settings", {})["projects_base_folder"] = str(self.base)
-        self.service._write_yaml(self.root / "project.yaml", manifest)
+        declare_full_chain(self.service, self.root, self.base)
 
     def tearDown(self) -> None:
         self.temp_dir.cleanup()
@@ -209,9 +209,7 @@ class DegradedInputTests(unittest.TestCase):
         self.root = self.base / "universe" / "book"
         self.service = ProjectService()
         self.service.create_project(self.root, "Degraded Input Tests")
-        manifest = self.service._read_yaml(self.root / "project.yaml")
-        manifest.setdefault("settings", {})["projects_base_folder"] = str(self.base)
-        self.service._write_yaml(self.root / "project.yaml", manifest)
+        declare_full_chain(self.service, self.root, self.base)
 
     def tearDown(self) -> None:
         self.temp_dir.cleanup()

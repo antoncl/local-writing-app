@@ -22,6 +22,8 @@ import unittest
 from pathlib import Path
 from tempfile import TemporaryDirectory
 
+from layer_fixtures import declare_full_chain
+
 from app.services.project_service import ProjectService
 
 
@@ -37,9 +39,7 @@ class ReferencePurgeTestCase(unittest.TestCase):
         self.root = self.universe / "book01"
         self.service = ProjectService()
         self.service.create_project(self.root, "Book 1")
-        manifest = self.service._read_yaml(self.root / "project.yaml")
-        manifest.setdefault("settings", {})["projects_base_folder"] = str(self.base)
-        self.service._write_yaml(self.root / "project.yaml", manifest)
+        declare_full_chain(self.service, self.root, self.base)
         self.service.create_project(self.universe, "Honorverse")
         # `create_project` leaves the service pointed at what it just created.
         self.service.open_project(self.root)
@@ -76,7 +76,7 @@ class PurgeSkipsIdsThatStillResolveTests(ReferencePurgeTestCase):
         self.service.delete_lore_entry("seren")
 
         index = self.service._build_node_index(self.root)
-        self.assertEqual(index.by_id["seren"].source_layer_label, "honorverse")
+        self.assertEqual(index.by_id["seren"].source_layer_label, "Honorverse")
         self.assertEqual(self._refs_of("honor"), ["seren"])
 
     def test_the_file_on_disk_is_not_rewritten(self) -> None:
@@ -218,9 +218,7 @@ class PurgeStaysInTheCallersProjectTests(unittest.TestCase):
         self.book2 = self.base / "book02"
         for path, title in ((self.book1, "Book 1"), (self.book2, "Book 2")):
             self.service.create_project(path, title)
-            manifest = self.service._read_yaml(path / "project.yaml")
-            manifest.setdefault("settings", {})["projects_base_folder"] = str(self.base)
-            self.service._write_yaml(path / "project.yaml", manifest)
+            declare_full_chain(self.service, path, self.base)
 
     def tearDown(self) -> None:
         self.temp_dir.cleanup()

@@ -33,8 +33,7 @@ class LayerQualifiedIdentityTests(unittest.TestCase):
         self.base = Path(self.temp_dir.name).resolve() / "writing"
         self.universe = self.base / "honorverse"
         self.root = self.universe / "book01"
-        self.service = ProjectService()
-        self.service.create_project(self.root, "Book 1")
+        self.service = ProjectService.created_at(self.root, "Book 1")
         declare_full_chain(self.service, self.root, self.base)
 
     def tearDown(self) -> None:
@@ -59,8 +58,8 @@ class LayerQualifiedIdentityTests(unittest.TestCase):
         and the root layer's label is drawn from that cached title — so without
         the re-open the book's own layer would render as "Honorverse".
         """
-        self.service.create_project(self.universe, "Honorverse")
-        self.service.open_project(self.root)
+        self.service = ProjectService.created_at(self.universe, "Honorverse")
+        self.service = ProjectService.opened_at(self.root)
 
     # --- the winner is unchanged -----------------------------------------
 

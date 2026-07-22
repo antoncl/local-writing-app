@@ -28,6 +28,7 @@ from app.models import (
     UpsertMetadataEntryTypeRequest,
     UpsertMetadataFieldRequest,
 )
+from app.runtime import current_scope
 from app.services.project.errors import ProjectServiceError
 from app.services.project_service import ProjectService
 from app.services.tree_structure import TreeStructureService
@@ -40,8 +41,7 @@ class MetadataValidationTests(unittest.TestCase):
         self.universe = self.base / "universe"
         self.world = self.universe / "series"
         self.root = self.world / "test"
-        self.service = ProjectService()
-        self.service.create_project(self.root, "Test Project")
+        self.service = ProjectService.created_at(self.root, "Test Project")
         self._set_projects_base_folder(self.base)
         # Several tests use `home_place` as a single-ref field on
         # Character to exercise validation + ref-graph behaviour. The
@@ -2508,8 +2508,7 @@ class ReferenceResolutionTests(unittest.TestCase):
         self.temp_dir = TemporaryDirectory()
         self.base = Path(self.temp_dir.name).resolve() / "writing"
         self.root = self.base / "test"
-        self.service = ProjectService()
-        self.service.create_project(self.root, "Test Project")
+        self.service = ProjectService.created_at(self.root, "Test Project")
         declare_full_chain(self.service, self.root, self.base)
         # See MetadataValidationTests for the rationale — home_place is
         # a test-only field on Character.
@@ -2678,18 +2677,16 @@ class ReferenceResolutionTests(unittest.TestCase):
         from fastapi.testclient import TestClient
 
         from app.main import app
-        from app.runtime import service
 
-        # The routers operate on the shared runtime singleton (app/runtime.py),
-        # so drive the HTTP routes by opening THIS test's project on it. Restore
-        # the singleton's prior identity afterwards so the test leaves shared
-        # state as it found it (open_project sets exactly root_path + title).
-        prev_root = getattr(service, "root_path", None)
-        prev_title = getattr(service, "title", None)
-        service.open_project(self.root)
+        # The routes resolve their project from `current_scope` (#399), so point
+        # that at THIS test's project and clear it afterwards. The handle the
+        # test itself holds is bound to the same root and never moves — the
+        # swap-and-restore of a shared service's fields that used to be needed
+        # here is precisely what the request-scoped handle removed.
+        current_scope.set(ProjectService.opened_at(self.root).scope)
         try:
             client = TestClient(app)
-            seren = service.create_lore_entry(CreateLoreEntryRequest(title="Seren", entry_type="lore:character"))
+            seren = self.service.create_lore_entry(CreateLoreEntryRequest(title="Seren", entry_type="lore:character"))
 
             resolve_response = client.post("/api/references/resolve", json={"ids": [seren.id, "missing"]})
             self.assertEqual(resolve_response.status_code, 200)
@@ -2703,8 +2700,7 @@ class ReferenceResolutionTests(unittest.TestCase):
             titles = {candidate["title"] for candidate in candidates_response.json()["candidates"]}
             self.assertIn("Seren", titles)
         finally:
-            service.root_path = prev_root
-            service.title = prev_title
+            current_scope.clear()
 
 
 class LayeredEntryIndexTests(unittest.TestCase):
@@ -2714,8 +2710,7 @@ class LayeredEntryIndexTests(unittest.TestCase):
         self.universe = self.base / "honorverse"
         self.series = self.universe / "honor-harrington"
         self.root = self.series / "book01"
-        self.service = ProjectService()
-        self.service.create_project(self.root, "Book 1")
+        self.service = ProjectService.created_at(self.root, "Book 1")
         declare_full_chain(self.service, self.root, self.base)
 
     def tearDown(self) -> None:

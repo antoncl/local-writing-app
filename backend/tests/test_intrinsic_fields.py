@@ -21,8 +21,7 @@ class IntrinsicFieldTests(unittest.TestCase):
     def setUp(self) -> None:
         self.temp_dir = TemporaryDirectory()
         self.root = Path(self.temp_dir.name).resolve() / "project"
-        self.service = ProjectService()
-        self.service.create_project(self.root, "Test Project")
+        self.service = ProjectService.created_at(self.root, "Test Project")
         self.scene_id = self.service._read_front_matter_only(
             next((self.root / "scenes").glob("*.md")), strict=True
         )["id"]
@@ -136,8 +135,7 @@ class FieldOverrideTests(unittest.TestCase):
     def setUp(self) -> None:
         self.temp_dir = TemporaryDirectory()
         self.root = Path(self.temp_dir.name).resolve() / "project"
-        self.service = ProjectService()
-        self.service.create_project(self.root, "Test Project")
+        self.service = ProjectService.created_at(self.root, "Test Project")
 
     def tearDown(self) -> None:
         self.temp_dir.cleanup()

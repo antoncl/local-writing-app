@@ -12,6 +12,7 @@ from pathlib import Path
 from tempfile import TemporaryDirectory
 
 from fastapi.testclient import TestClient
+from project_fixtures import open_test_project
 
 from app.main import app
 from app.models import (
@@ -19,17 +20,15 @@ from app.models import (
     MetadataFieldDefinition,
     UpsertMetadataFieldRequest,
 )
-from app.runtime import service as svc
 
 
 class MutationRouteTests(unittest.TestCase):
     def setUp(self) -> None:
         self.temp_dir = TemporaryDirectory()
         self.root = Path(self.temp_dir.name).resolve() / "project"
-        svc.__init__()
-        svc.create_project(self.root, "Mutation Route Tests")
-        layers = svc.read_metadata_schema_layers()
-        svc.upsert_metadata_field(
+        self.service = open_test_project(self.root, "Mutation Route Tests")
+        layers = self.service.read_metadata_schema_layers()
+        self.service.upsert_metadata_field(
             UpsertMetadataFieldRequest(
                 layer_id=layers.layers[-1].id,
                 field_id="rank",
@@ -38,7 +37,7 @@ class MutationRouteTests(unittest.TestCase):
             )
         )
         self.client = TestClient(app)
-        self.honor = svc.create_lore_entry(
+        self.honor = self.service.create_lore_entry(
             CreateLoreEntryRequest(title="Honor", entry_type="lore:character")
         ).id
         self.s1 = self._new_scene("Scene One", "Honor commands.")

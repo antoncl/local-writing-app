@@ -24,6 +24,7 @@ from tempfile import TemporaryDirectory
 
 from layer_fixtures import declare_full_chain
 
+from app.runtime import current_scope
 from app.services.project_service import ProjectService
 
 
@@ -37,12 +38,10 @@ class ReferencePurgeTestCase(unittest.TestCase):
         self.base = Path(self.temp_dir.name).resolve() / "writing"
         self.universe = self.base / "honorverse"
         self.root = self.universe / "book01"
-        self.service = ProjectService()
-        self.service.create_project(self.root, "Book 1")
+        self.service = ProjectService.created_at(self.root, "Book 1")
         declare_full_chain(self.service, self.root, self.base)
-        self.service.create_project(self.universe, "Honorverse")
-        # `create_project` leaves the service pointed at what it just created.
-        self.service.open_project(self.root)
+        ProjectService.created_at(self.universe, "Honorverse")
+        self.service = ProjectService.opened_at(self.root)
 
     def tearDown(self) -> None:
         self.temp_dir.cleanup()
@@ -198,13 +197,17 @@ class PurgeRefusesToActOnIncompleteKnowledgeTests(ReferencePurgeTestCase):
 
 class PurgeStaysInTheCallersProjectTests(unittest.TestCase):
     """The purge rewrites files, so it must rewrite the project the delete
-    belongs to (#381).
+    belongs to (#381, #399).
 
-    `ProjectService` is a process-global singleton (`runtime.py`) whose
-    `root_path` mutates in place, and the delete routes and `open_project` are
-    all sync `def`s on FastAPI's threadpool. An `open_project` landing between
+    The delete routes and `open_project` are all sync `def`s on FastAPI's
+    threadpool, so they genuinely interleave. An `open_project` landing between
     the caller's `unlink` and the purge used to redirect the whole rewrite loop
     at **another project's** files — reproduced against master as data loss.
+
+    Since #399 a concurrent open changes `current_scope`, which is what the
+    *next* request resolves; the unit in flight holds a service bound to an
+    immutable scope. These tests race the open that way, so what they pin is the
+    property rather than the two call sites that were patched first.
 
     #379's guard does not cover this: it skips ids that still resolve, and the
     interesting case is an id that resolves in neither project.
@@ -213,15 +216,21 @@ class PurgeStaysInTheCallersProjectTests(unittest.TestCase):
     def setUp(self) -> None:
         self.temp_dir = TemporaryDirectory()
         self.base = Path(self.temp_dir.name).resolve() / "writing"
-        self.service = ProjectService()
         self.book1 = self.base / "book01"
         self.book2 = self.base / "book02"
         for path, title in ((self.book1, "Book 1"), (self.book2, "Book 2")):
-            self.service.create_project(path, title)
-            declare_full_chain(self.service, path, self.base)
+            declare_full_chain(ProjectService.created_at(path, title), path, self.base)
+        self.service = ProjectService.opened_at(self.book1)
+        current_scope.set(self.service.scope)
 
     def tearDown(self) -> None:
+        current_scope.clear()
         self.temp_dir.cleanup()
+
+    def _open_book2_concurrently(self) -> None:
+        """Exactly what a concurrent `/api/project/open` does, and no more: it
+        changes what the *next* request resolves, never a unit in flight."""
+        current_scope.set(ProjectService.opened_at(self.book2).scope)
 
     def _write_lore(self, folder: Path, node_id: str, title: str, *, refs: list[str] | None = None) -> None:
         (folder / "lore").mkdir(parents=True, exist_ok=True)
@@ -249,7 +258,7 @@ class PurgeStaysInTheCallersProjectTests(unittest.TestCase):
 
         def racing(node_id: str, kind: str, *args: object, **kwargs: object) -> Path:
             resolved = real(node_id, kind, *args, **kwargs)
-            self.service.open_project(self.book2)
+            self._open_book2_concurrently()
             return resolved
 
         self.service._path_for_node_id = racing  # type: ignore[method-assign]
@@ -259,7 +268,6 @@ class PurgeStaysInTheCallersProjectTests(unittest.TestCase):
         self._write_lore(self.book2, "keeper", "Keeper", refs=["shared"])
         self._write_lore(self.book1, "shared", "Shared")
         keeper = self.book2 / "lore" / "keeper.md"
-        self.service.open_project(self.book1)
         before = keeper.read_text(encoding="utf-8")
 
         self._race_at_path_resolution()
@@ -273,18 +281,16 @@ class PurgeStaysInTheCallersProjectTests(unittest.TestCase):
         self._write_lore(self.book2, "keeper", "Keeper", refs=["shared"])
         self._write_lore(self.book1, "shared", "Shared")
         keeper = self.book2 / "lore" / "keeper.md"
-        self.service.open_project(self.book1)
         before = keeper.read_text(encoding="utf-8")
 
         real_purge = self.service._purge_references_to
 
         def racing(purge_ids: set[str], *args: object, **kwargs: object) -> None:
             # Another request opens a different project mid-delete.
-            self.service.open_project(self.book2)
+            self._open_book2_concurrently()
             return real_purge(purge_ids, *args, **kwargs)
 
         self.service._purge_references_to = racing  # type: ignore[method-assign]
-        self.service.open_project(self.book1)
         self.service.delete_lore_entry("shared")
 
         self.assertEqual(keeper.read_text(encoding="utf-8"), before)
@@ -320,17 +326,15 @@ class PurgeStaysInTheCallersProjectTests(unittest.TestCase):
         )
         self._write_lore(self.book1, "shared", "Shared")
         honor = self.book1 / "lore" / "honor.md"
-        self.service.open_project(self.book1)
         self.assertIn("shared", honor.read_text(encoding="utf-8"))
 
         real_purge = self.service._purge_references_to
 
         def racing(purge_ids: set[str], *args: object, **kwargs: object) -> None:
-            self.service.open_project(self.book2)
+            self._open_book2_concurrently()
             return real_purge(purge_ids, *args, **kwargs)
 
         self.service._purge_references_to = racing  # type: ignore[method-assign]
-        self.service.open_project(self.book1)
         self.service.delete_lore_entry("shared")
 
         # Genuinely gone, so the reference must be purged — and only book01's

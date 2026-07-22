@@ -12,17 +12,16 @@ from pathlib import Path
 from tempfile import TemporaryDirectory
 
 from fastapi.testclient import TestClient
+from project_fixtures import open_test_project
 
 from app.main import app
-from app.runtime import service as global_service
 
 
 class AIInvocationLogEndpointTests(unittest.TestCase):
     def setUp(self) -> None:
         self.temp_dir = TemporaryDirectory()
         self.root = Path(self.temp_dir.name).resolve() / "project"
-        global_service.__init__()
-        global_service.create_project(self.root, "Invocation Tests")
+        self.service = open_test_project(self.root, "Invocation Tests")
         self.client = TestClient(app)
 
     def tearDown(self) -> None:
@@ -132,8 +131,7 @@ class CostComputedFieldTests(unittest.TestCase):
     def setUp(self) -> None:
         self.temp_dir = TemporaryDirectory()
         self.root = Path(self.temp_dir.name).resolve() / "project"
-        global_service.__init__()
-        global_service.create_project(self.root, "Cost Computed Tests")
+        self.service = open_test_project(self.root, "Cost Computed Tests")
         self.client = TestClient(app)
 
     def tearDown(self) -> None:
@@ -204,8 +202,7 @@ class CrossKindCostDispatchTests(unittest.TestCase):
     def setUp(self) -> None:
         self.temp_dir = TemporaryDirectory()
         self.root = Path(self.temp_dir.name).resolve() / "project"
-        global_service.__init__()
-        global_service.create_project(self.root, "Cross-kind Cost Tests")
+        self.service = open_test_project(self.root, "Cross-kind Cost Tests")
         self.client = TestClient(app)
 
     def tearDown(self) -> None:
@@ -284,8 +281,7 @@ class ChatSessionCostViaLogTests(unittest.TestCase):
     def setUp(self) -> None:
         self.temp_dir = TemporaryDirectory()
         self.root = Path(self.temp_dir.name).resolve() / "project"
-        global_service.__init__()
-        global_service.create_project(self.root, "Slice B Tests")
+        self.service = open_test_project(self.root, "Slice B Tests")
         self.client = TestClient(app)
 
     def tearDown(self) -> None:
@@ -293,15 +289,15 @@ class ChatSessionCostViaLogTests(unittest.TestCase):
 
     def _create_chat(self, title: str = "Test chat") -> str:
         from app.models import CreateChatSessionRequest
-        chat = global_service.create_chat_session(
+        chat = self.service.create_chat_session(
             CreateChatSessionRequest(title=title, system_prompt="")
         )
         return chat.id
 
     def _save_with_cost(self, chat_id: str, cost: float) -> None:
         from app.models import SaveChatSessionRequest
-        existing = global_service.read_chat_session(chat_id)
-        global_service.save_chat_session(
+        existing = self.service.read_chat_session(chat_id)
+        self.service.save_chat_session(
             chat_id,
             SaveChatSessionRequest(
                 title=existing.title,
@@ -329,7 +325,7 @@ class ChatSessionCostViaLogTests(unittest.TestCase):
         chat_id = self._create_chat()
         self._save_with_cost(chat_id, 0.10)
         self._save_with_cost(chat_id, 0.20)
-        chat = global_service.read_chat_session(chat_id)
+        chat = self.service.read_chat_session(chat_id)
         # cost_usd_total is re-derived on every read; YAML value stays 0.
         self.assertAlmostEqual(chat.cost_usd_total, 0.30, places=6)
 

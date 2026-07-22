@@ -48,8 +48,7 @@ class _HelperFixtureBase(unittest.TestCase):
     def setUp(self) -> None:
         self.temp_dir = TemporaryDirectory()
         self.root = Path(self.temp_dir.name).resolve() / "project"
-        self.service = ProjectService()
-        self.service.create_project(self.root, "Helper Tests")
+        self.service = ProjectService.created_at(self.root, "Helper Tests")
         # Several tests in this file use `home_place` as a convenient
         # single-ref field on Character to exercise EntryRef / ref-graph
         # behaviour. The seed schema no longer ships it (it was test
@@ -1076,8 +1075,7 @@ class ResearchNoteEntryRefTests(unittest.TestCase):
     def setUp(self) -> None:
         self.temp_dir = TemporaryDirectory()
         self.root = Path(self.temp_dir.name).resolve() / "project"
-        self.service = ProjectService()
-        self.service.create_project(self.root, "Research Helper Tests")
+        self.service = ProjectService.created_at(self.root, "Research Helper Tests")
         # Create a research note via the structure CRUD (the route the
         # frontend uses). Capture the leaf's note id from the returned tree.
         tree = self.service.create_research_node(

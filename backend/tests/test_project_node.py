@@ -5,11 +5,11 @@ from pathlib import Path
 from tempfile import TemporaryDirectory
 
 from fastapi.testclient import TestClient
+from project_fixtures import open_test_project
 from pydantic import ValidationError
 
 from app.main import app
 from app.models import ProjectNode, SaveProjectNodeRequest
-from app.runtime import service as global_service
 from app.services.project_service import ProjectService
 
 
@@ -17,8 +17,7 @@ class ProjectNodeServiceTests(unittest.TestCase):
     def setUp(self) -> None:
         self.tmp = TemporaryDirectory()
         self.root = Path(self.tmp.name).resolve() / "project"
-        self.service = ProjectService()
-        self.service.create_project(self.root, "Honor's First Command")
+        self.service = ProjectService.created_at(self.root, "Honor's First Command")
 
     def tearDown(self) -> None:
         self.tmp.cleanup()
@@ -202,10 +201,8 @@ class NestedProjectNodeIdentityTests(unittest.TestCase):
         self.universe = self.base / "honorverse"
         self.root = self.universe / "book01"
         self.base.mkdir(parents=True)
-        self.outer = ProjectService()
-        self.outer.create_project(self.universe, "Honorverse", projects_base_folder=self.base)
-        self.inner = ProjectService()
-        self.inner.create_project(self.root, "Book 1", projects_base_folder=self.base)
+        self.outer = ProjectService.created_at(self.universe, "Honorverse", projects_base_folder=self.base)
+        self.inner = ProjectService.created_at(self.root, "Book 1", projects_base_folder=self.base)
 
     def tearDown(self) -> None:
         self.tmp.cleanup()
@@ -241,8 +238,7 @@ class ProjectNodeEndpointTests(unittest.TestCase):
     def setUp(self) -> None:
         self.tmp = TemporaryDirectory()
         self.root = Path(self.tmp.name).resolve() / "project"
-        global_service.__init__()
-        global_service.create_project(self.root, "Pegasus Drift")
+        self.service = open_test_project(self.root, "Pegasus Drift")
         self.client = TestClient(app)
 
     def tearDown(self) -> None:

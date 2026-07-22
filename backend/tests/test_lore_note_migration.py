@@ -14,18 +14,17 @@ from pathlib import Path
 from tempfile import TemporaryDirectory
 
 from fastapi.testclient import TestClient
+from project_fixtures import open_test_project
 
 from app.main import app
 from app.models import CreateLoreEntryRequest, SaveLoreEntryRequest
-from app.runtime import service as global_service
 
 
 class MoveLoreNoteToResearchTests(unittest.TestCase):
     def setUp(self) -> None:
         self.temp_dir = TemporaryDirectory()
         self.root = Path(self.temp_dir.name).resolve() / "project"
-        global_service.__init__()
-        global_service.create_project(self.root, "Migration Tests")
+        self.service = open_test_project(self.root, "Migration Tests")
         self.client = TestClient(app)
 
     def tearDown(self) -> None:
@@ -38,12 +37,12 @@ class MoveLoreNoteToResearchTests(unittest.TestCase):
         body: str = "Mills employed children from age 8.",
         metadata: dict | None = None,
     ) -> str:
-        entry = global_service.create_lore_entry(
+        entry = self.service.create_lore_entry(
             CreateLoreEntryRequest(title=title, entry_type="lore:lore_note")
         )
         # The service.read_lore_entry pulls the current revision.
-        current = global_service.read_lore_entry(entry.id)
-        global_service.save_lore_entry(
+        current = self.service.read_lore_entry(entry.id)
+        self.service.save_lore_entry(
             entry.id,
             SaveLoreEntryRequest(
                 title=title,
@@ -136,7 +135,7 @@ class MoveLoreNoteToResearchTests(unittest.TestCase):
         self.assertEqual(response.status_code, 404, response.text)
 
     def test_422_when_entry_is_not_a_lore_note(self) -> None:
-        entry = global_service.create_lore_entry(
+        entry = self.service.create_lore_entry(
             CreateLoreEntryRequest(title="Honor", entry_type="lore:character")
         )
         response = self.client.post(
@@ -144,7 +143,7 @@ class MoveLoreNoteToResearchTests(unittest.TestCase):
         )
         self.assertEqual(response.status_code, 422, response.text)
         # The character entry still exists.
-        listed = global_service.list_lore_entries()
+        listed = self.service.list_lore_entries()
         self.assertIn(entry.id, [e.id for e in listed.entries])
 
     # --- body preservation ---------------------------------------------------
@@ -166,7 +165,7 @@ class MoveLoreNoteToResearchTests(unittest.TestCase):
         # appends rather than replacing.
         from app.models import CreateStructureNodeRequest
 
-        global_service.create_research_node(
+        self.service.create_research_node(
             CreateStructureNodeRequest(title="Existing", entry_type="research:note")
         )
         lore_id = self._make_lore_note(title="Imported")

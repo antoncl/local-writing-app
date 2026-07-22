@@ -72,8 +72,7 @@ class SnapshotsAreNotIndexedTests(unittest.TestCase):
         # Resolved: on Windows `TemporaryDirectory()` returns the 8.3 short form
         # while the layer walk canonicalises (#356).
         self.root = Path(self.temp_dir.name).resolve() / "book01"
-        self.service = ProjectService()
-        self.service.create_project(self.root, "Book 1")
+        self.service = ProjectService.created_at(self.root, "Book 1")
         self.scene_path = self._write_scene(SCENE_ID, "The Tide")
 
     def tearDown(self) -> None:

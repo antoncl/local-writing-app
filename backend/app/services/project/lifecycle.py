@@ -217,14 +217,21 @@ class ProjectLifecycleMixin:
         if request.ai_policy is not None:
             ai_settings["policy"] = request.ai_policy
         if request.inherits is not None:
-            manifest[INHERITS_KEY] = self._validated_declaration(request.inherits, root)
+            # Against the bound this request is *setting*, not the stored one —
+            # widening the base folder and declaring a newly-eligible ancestor
+            # is one gesture in the wizard and must be one request here.
+            manifest[INHERITS_KEY] = self._validated_declaration(
+                request.inherits, root, base=Path(settings["projects_base_folder"])
+                if isinstance(settings.get("projects_base_folder"), str)
+                else None,
+            )
         if ai_settings:
             settings["ai"] = ai_settings
         manifest["settings"] = settings
         self._write_yaml(root / "project.yaml", manifest)
         return self.current_project()
 
-    def _validated_declaration(self, declared: list[str], root: Path) -> list[str]:
+    def _validated_declaration(self, declared: list[str], root: Path, *, base: Path | None = None) -> list[str]:
         """Turn a requested declaration into manifest entries, or refuse (#309).
 
         Refuses here rather than dropping-with-a-warning at read time, because
@@ -236,7 +243,9 @@ class ProjectLifecycleMixin:
         Stored relative to the project so that moving or renaming a shelf does
         not invalidate every book beneath it.
         """
-        candidates = {folder for folder, is_project, _ in self.ancestor_candidates(root) if is_project}
+        candidates = {
+            folder for folder, is_project, _ in self.ancestor_candidates(root, base=base) if is_project
+        }
         entries: list[str] = []
         for raw in declared:
             folder = Path(raw).expanduser()

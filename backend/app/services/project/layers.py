@@ -231,7 +231,7 @@ class LayerWalkMixin:
             return None
         return machine_dir
 
-    def ancestor_candidates(self, root: Path) -> list[tuple[Path, bool, bool]]:
+    def ancestor_candidates(self, root: Path, *, base: Path | None = None) -> list[tuple[Path, bool, bool]]:
         """Every folder between the configured base and `root`, outermost first,
         as `(folder, is_project, inherited)` (#309).
 
@@ -245,9 +245,17 @@ class LayerWalkMixin:
         can never be inherited (there is no `project.yaml` to layer), but
         omitting them from the enumeration would leave a hole in the wizard's
         list that reads as a defect rather than as information.
+
+        `base` overrides the stored bound with one that is **about to be
+        written**. A settings update that widens `projects_base_folder` and
+        declares a newly-eligible ancestor in the same request would otherwise
+        validate the declaration against the *old* bound and reject it — which
+        is exactly the shape #318's wizard submits (pick a shelf, tick the
+        levels, save once). It is a pending-value parameter, not an opt-out:
+        omitting it reads the manifest, which is right for every other caller.
         """
         root = root.resolve()
-        base_folder = self._metadata_schema_base_folder(root)
+        base_folder = base.resolve() if base is not None else self._metadata_schema_base_folder(root)
         chain = [root, *root.parents]
         if base_folder is None or base_folder not in chain:
             return []
@@ -296,13 +304,28 @@ class LayerWalkMixin:
         and an entry outside it is either a typo or a folder that has since
         moved. Honouring it would let the manifest extend the chain past the
         configured base — the property the walk exists to guarantee.
+
+        **Two ways a declaration can fail, and both must be said out loud.**
+        The first is an entry that is not an ancestor at all. The second is an
+        ancestor that carries no `project.yaml`: it is a legitimate row in the
+        enumeration, so the first check passes it, and it still contributes
+        nothing — the author ticked something and got silence. A folder that
+        was a project and stopped being one (a manifest deleted, a folder
+        restored without it) lands here, which is precisely when a silent drop
+        is least affordable.
         """
         root = root.resolve()
         candidates = {folder for folder, _, _ in self.ancestor_candidates(root)}
+        projects = {folder for folder, is_project, _ in self.ancestor_candidates(root) if is_project}
+        declared = self._declared_ancestors(root)
         return [
             f"Project declares inheritance from {folder}, which is not an ancestor "
             f"within the base folder. It was ignored."
-            for folder in sorted(self._declared_ancestors(root) - candidates)
+            for folder in sorted(declared - candidates)
+        ] + [
+            f"Project declares inheritance from {folder}, which is not a project "
+            f"(no {MANIFEST_FILENAME}). It contributes nothing."
+            for folder in sorted((declared & candidates) - projects)
         ]
 
     def _project_layer_folders(self, root: Path) -> list[Path]:

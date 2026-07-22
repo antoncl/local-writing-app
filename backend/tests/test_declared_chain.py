@@ -102,15 +102,27 @@ class TheDeclarationSelectsFromTheWalkTests(DeclaredChainTestCase):
             any("not an ancestor" in warning for warning in self.service.declared_ancestor_warnings(self.root))
         )
 
-    def test_a_declared_entry_that_is_not_a_project_is_not_a_layer(self) -> None:
+    def test_a_declared_entry_that_is_not_a_project_is_not_a_layer_and_says_so(self) -> None:
         """A layer is a project. Without a manifest there is no project, and no
-        title to show for it either."""
+        title to show for it either.
+
+        It must **not** be silent: the entry is a legitimate row in the
+        enumeration, so the not-an-ancestor check passes it, and the author
+        ticked something and got nothing. The case that matters is a folder
+        that *was* a project and stopped being one.
+        """
         self.universe.mkdir(parents=True, exist_ok=True)
         manifest = self.service._read_yaml(self.root / "project.yaml")
         manifest["inherits"] = ["../.."]
         self.service._write_yaml(self.root / "project.yaml", manifest)
 
         self.assertEqual(self._layer_folders(), [self.root])
+        self.assertTrue(
+            any("is not a project" in warning for warning in self.service.declared_ancestor_warnings(self.root))
+        )
+        self.assertTrue(
+            any("is not a project" in warning for warning in self.service.validate_project().warnings)
+        )
 
 
 class TheEnumerationIsReportedWholeTests(DeclaredChainTestCase):
@@ -149,6 +161,25 @@ class WritingTheDeclarationTests(DeclaredChainTestCase):
         manifest = self.service._read_yaml(self.root / "project.yaml")
         self.assertEqual(manifest["inherits"], ["../.."])
         self.assertEqual(self._layer_folders(), [self.universe, self.root])
+
+    def test_widening_the_base_and_declaring_in_one_request_is_accepted(self) -> None:
+        """The wizard's gesture is one save: pick a shelf, tick the levels.
+
+        Validation reads the bound from the manifest, so before this was fixed
+        it saw the *stored* base — and refused a declaration the same request
+        was making legal. Splitting it into two requests worked, which is what
+        made it easy to miss.
+        """
+        make_project_folder(self.service, self.base)
+        self._set_base(self.universe)  # a narrower stored bound: base is out of reach
+
+        self.service.update_project_settings(
+            UpdateProjectSettingsRequest(
+                projects_base_folder=str(self.base), inherits=[str(self.base)]
+            )
+        )
+
+        self.assertEqual(self._layer_folders(), [self.base, self.root])
 
     def test_declaring_a_non_ancestor_is_refused(self) -> None:
         """A write naming a non-ancestor is a caller error and is rejected; a

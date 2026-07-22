@@ -323,6 +323,132 @@ class PatchDeclinesWhenTheChangeFansOutTests(PatchTestCase):
         self.assertIn("seren", rebuilt.by_id)
 
 
+class CandidateOrderTests(PatchTestCase):
+    """`NodeIndex.add` front-inserts, which is correct only while entries arrive
+    outermost-first — as a cold walk guarantees and a patch, collecting in
+    changed-path order, does not. Re-collecting an *ancestor's* file therefore
+    inserted it ahead of the descendant shadowing it and the ancestor won:
+    wrong content everywhere, the layer stack backwards, the shadow warning
+    reversed, edges following the wrong winner — and persisted, so only a full
+    rebuild healed it. The order is now re-established from `IndexLayer.rank`.
+    """
+
+    def test_editing_a_shadowed_ancestor_keeps_the_descendant_winning(self) -> None:
+        self._write_lore(self.universe, "seren", "Seren (universe)")
+        self._write_lore(self.root, "seren", "Seren (book)")
+        self.service._build_node_index(self.root)
+
+        self._write_lore(self.universe, "seren", "Seren (universe, edited)")
+
+        patched = self._assert_patch_matches_cold_build()
+        self.assertEqual(patched.by_id["seren"].source_layer_label, "Book 1")
+        self.assertEqual([e.source_layer_label for e in patched.candidates["seren"]], ["Book 1", "honorverse"])
+
+    def test_adding_a_shadowed_ancestor_keeps_the_descendant_winning(self) -> None:
+        self._write_lore(self.root, "seren", "Seren (book)")
+        self.service._build_node_index(self.root)
+
+        self._write_lore(self.universe, "seren", "Seren (universe)")
+
+        patched = self._assert_patch_matches_cold_build()
+        self.assertEqual(patched.by_id["seren"].source_layer_label, "Book 1")
+
+    def test_the_winners_edges_are_the_descendants(self) -> None:
+        self._write_lore(self.universe, "nimitz", "Nimitz")
+        self._write_lore(self.universe, "seren", "Seren (universe)", refs=["nimitz"])
+        self._write_lore(self.root, "seren", "Seren (book)")
+        self.service._build_node_index(self.root)
+
+        self._write_lore(self.universe, "seren", "Seren (universe, edited)", refs=["nimitz"])
+
+        self.assertEqual(self._assert_patch_matches_cold_build().edges_by_src.get("seren"), None)
+
+    def test_backlink_order_does_not_shuffle_after_an_unrelated_edit(self) -> None:
+        """`edges_by_dst` followed `candidates` key order, and a patch re-inserts
+        a touched id at the end — so the backlinks panel reshuffled after an
+        edit the user did not make to those nodes."""
+        self._write_lore(self.root, "nimitz", "Nimitz")
+        self._write_lore(self.root, "aaa", "A", refs=["nimitz"])
+        self._write_lore(self.root, "bbb", "B", refs=["nimitz"])
+        self.service._build_node_index(self.root)
+
+        self._write_lore(self.root, "aaa", "A edited", refs=["nimitz"])
+
+        patched = self._assert_patch_matches_cold_build()
+        self.assertEqual([e.src for e in patched.edges_by_dst["nimitz"]], ["aaa", "bbb"])
+
+
+class PatchRequiresACleanIndexTests(PatchTestCase):
+    """Collection diagnostics are free-form strings with no record of which file
+    produced them, so a drop cannot retract one. Patching an index that carries
+    any would leave stale messages behind and duplicate them on every later
+    edit — monotonic, persisted, and shown verbatim by `validate_project`."""
+
+    def _write_duplicate_id(self) -> None:
+        for name in ("aaa", "bbb"):
+            (self.root / "lore").mkdir(parents=True, exist_ok=True)
+            self.service._write_markdown_with_front_matter(
+                self.root / "lore" / f"{name}.md",
+                {"id": "twin", "title": name, "entry_type": "lore:character", "metadata": {}},
+                "Body.",
+            )
+
+    def test_a_fixed_warning_does_not_survive(self) -> None:
+        path = self.root / "lore" / "noid.md"
+        (self.root / "lore").mkdir(parents=True, exist_ok=True)
+        self.service._write_markdown_with_front_matter(
+            path, {"title": "No id", "entry_type": "lore:character"}, "Body."
+        )
+        self.assertTrue(self.service._build_node_index(self.root).warnings)
+
+        self.service._write_markdown_with_front_matter(
+            path, {"id": "noid", "title": "Now has one", "entry_type": "lore:character"}, "Body."
+        )
+
+        self.assertEqual(self._assert_patch_matches_cold_build().warnings, [])
+
+    def test_diagnostics_do_not_accumulate_across_repeated_edits(self) -> None:
+        path = self.root / "lore" / "noid.md"
+        (self.root / "lore").mkdir(parents=True, exist_ok=True)
+        for i in range(4):
+            self.service._write_markdown_with_front_matter(
+                path, {"title": f"No id {i}", "entry_type": "lore:character"}, "Body."
+            )
+            self.service._build_node_index(self.root)
+
+        self.assertEqual(len(self._assert_patch_matches_cold_build().warnings), 1)
+
+    def test_a_duplicate_id_sibling_is_promoted_when_the_winner_goes(self) -> None:
+        """The sibling was rejected by the duplicate guard, so it is not in
+        `candidates` and there is nothing for a drop to promote. A cold build
+        promotes it — and `_strip_dangling_references` would otherwise strip
+        every link to the id on the next read."""
+        self._write_duplicate_id()
+        self.service._build_node_index(self.root)
+
+        (self.root / "lore" / "aaa.md").unlink()
+
+        self.assertIn("twin", self._assert_patch_matches_cold_build().by_id)
+
+
+class PatchDeclinesWhenTheDiffIsHugeTests(PatchTestCase):
+    """Above roughly half the project a patch re-parses what a rebuild would,
+    plus the rehydrate and the drop bookkeeping. Measured crossover is ~36% of
+    nodes, where patching ran 2.1x slower than the rebuild it replaced. Real
+    triggers are ordinary: a `git pull`, a cloud sync that moves every mtime."""
+
+    def test_a_diff_covering_most_of_the_project_rebuilds(self) -> None:
+        for i in range(8):
+            self._write_lore(self.root, f"n{i}", f"Node {i}")
+        self.service._build_node_index(self.root)
+
+        for i in range(8):
+            self._write_lore(self.root, f"n{i}", f"Node {i} edited")
+
+        self.assertFalse(self._patched_without_full_walk())
+        self._assert_patch_matches_cold_build()
+
+
 class PatchAvoidsTheFullWalkTests(PatchTestCase):
     """#307's actual point. Correctness is asserted elsewhere; this asserts the
     saving is real, so a regression to "rebuild everything" is caught."""

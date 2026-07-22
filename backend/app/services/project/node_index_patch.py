@@ -44,6 +44,7 @@ from app.services.project.node_index import (
     IndexLayer,
     NodeFamily,
     NodeIndex,
+    NodeIndexEntry,
 )
 
 log = logging.getLogger(__name__)
@@ -81,6 +82,25 @@ class NodeIndexPatchMixin:
             # nothing about the ones that failed and did not change. Rebuilding
             # is what lets it become false again once the user fixes the typo.
             raise PatchNotApplicable("the snapshot recorded unparsed node files")
+        if index.errors or index.collected_warnings():
+            # **A patch requires a clean index.** Collection diagnostics are
+            # free-form strings with no record of which file produced them, so
+            # dropping a file cannot retract its message: fix a malformed id and
+            # the warning survives; edit the file again and it is emitted twice.
+            # `validate_project` shows these verbatim, and the snapshot persists
+            # them, so the wrong output would be monotonic — it never heals.
+            #
+            # It also covers a subtler one. A same-layer duplicate id records an
+            # *error* and indexes only the first claimant, so the sibling is not
+            # in `candidates`; deleting the winner would leave nothing to
+            # promote and the id would vanish, while a cold build promotes the
+            # sibling. Both are the same underlying gap — diagnostics carry no
+            # provenance — so both wait on the same fix (#382).
+            #
+            # Derived shadow warnings are excluded: `resolve()` retracts and
+            # re-emits those itself, and they are common enough that including
+            # them would disable patching for any project with an override.
+            raise PatchNotApplicable("the index carries diagnostics that a patch cannot retract")
 
         # One unit per changed **path** — `_collect_entry_file` collects a
         # single file, so re-parsing a folder's other few hundred entries buys
@@ -97,14 +117,53 @@ class NodeIndexPatchMixin:
         # duplicate guard rejects it — then the old unit drops the original, and
         # the node has vanished. A cold build never sees this because it starts
         # from an empty index; two phases give the patch the same footing.
+        # Above roughly half the project, patching stops being a saving: it
+        # re-parses the same files a rebuild would *plus* the rehydrate, the
+        # drop bookkeeping and a second snapshot write. Measured crossover is
+        # ~36% of nodes, where a patch runs 2.1x slower than the rebuild it
+        # replaces. Real triggers are ordinary — a `git pull`, a cloud-sync
+        # re-download that moves every mtime, a restore from backup.
+        if len(units) * 2 > max(len(index.candidates), 1):
+            raise PatchNotApplicable(f"{len(units)} units over {len(index.candidates)} nodes; rebuilding is cheaper")
+        # Built once, not re-scanned per unit. The drop used to walk every
+        # candidate list for every changed path — O(changed x nodes), and 38-45%
+        # of patch cost at scale.
+        entries_by_path: dict[str, list[NodeIndexEntry]] = {}
+        for entries in index.candidates.values():
+            for entry in entries:
+                entries_by_path.setdefault(str(entry.path), []).append(entry)
         for unit in units.values():
-            self._drop_entries_under(index, unit)
+            self._drop_entries_under(index, unit, entries_by_path=entries_by_path)
         for unit in units.values():
             self._collect_patch_unit(index, unit, root=root, schema=schema)
+        self._restore_candidate_order(index, layers)
         # Once, at the end — same as the cold build. Re-deriving the winners
         # per unit would let a half-applied patch pick one.
         index.resolve()
         return index
+
+    def _restore_candidate_order(self, index: NodeIndex, layers: list[IndexLayer]) -> None:
+        """Put every candidate list back in innermost-first order.
+
+        `NodeIndex.add` front-inserts, which is correct **only** while entries
+        arrive in walk order — outermost first — as its docstring states. A cold
+        build satisfies that by construction; a patch collects in changed-path
+        order, which has nothing to do with layer depth. So re-collecting an
+        *ancestor's* file inserted it ahead of the descendant shadowing it and
+        the ancestor won: wrong node content everywhere, the layer stack
+        backwards, the shadow warning reversed, the edges following the wrong
+        winner — and persisted, so nothing short of a full rebuild healed it.
+
+        Sorting on the explicit `IndexLayer.rank` rather than preserving arrival
+        order is what makes the patch independent of the order the diff happens
+        to arrive in. #329 made rank explicit for exactly this kind of consumer.
+        """
+        rank_by_layer = {layer.id: layer.rank for layer in layers}
+        for entries in index.candidates.values():
+            if len(entries) > 1:
+                # Descending: the walk runs outermost (rank 0) → open project,
+                # so the innermost layer has the highest rank and wins.
+                entries.sort(key=lambda entry: rank_by_layer.get(entry.source_layer_id, -1), reverse=True)
 
     def _patch_unit(self, path: Path, layers: list[IndexLayer]) -> _PatchUnit:
         """Which collection unit a changed path belongs to.
@@ -164,7 +223,9 @@ class NodeIndexPatchMixin:
                     schema=schema,
                 )
 
-    def _drop_entries_under(self, index: NodeIndex, unit: _PatchUnit) -> None:
+    def _drop_entries_under(
+        self, index: NodeIndex, unit: _PatchUnit, *, entries_by_path: dict[str, list[NodeIndexEntry]]
+    ) -> None:
         """Remove this layer's claims arising from the unit's folder.
 
         Only this layer's, and only this folder's. The other candidates are
@@ -172,12 +233,18 @@ class NodeIndexPatchMixin:
         would turn into data loss, because `resolve()` needs the survivors in
         order to promote one.
         """
-        doomed = [
-            entry
-            for entries in index.candidates.values()
-            for entry in entries
-            if entry.source_layer_id == unit.layer.id and unit.owns(entry.path)
-        ]
+        if unit.path is not None:
+            candidates_at_path = entries_by_path.get(str(unit.path), [])
+        else:
+            # Folder-shaped units (chats, the project node) still scan, but over
+            # the path map rather than every candidate list.
+            candidates_at_path = [
+                entry
+                for path_str, entries in entries_by_path.items()
+                if Path(path_str).parent == unit.folder
+                for entry in entries
+            ]
+        doomed = [entry for entry in candidates_at_path if entry.source_layer_id == unit.layer.id]
         for entry in doomed:
             # Matched on **layer and path**, so a drop removes exactly what its
             # own unit contributed and nothing else. With the two-phase ordering

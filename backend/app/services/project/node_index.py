@@ -213,4 +213,11 @@ class NodeIndex:
         for edges in self.edges_by_src.values():
             for edge in edges:
                 reverse.setdefault(edge.dst, []).append(edge)
+        # Sorted, so a backlink list does not depend on the order ids happen to
+        # sit in `candidates`. That order is an accident of insertion — a cold
+        # build gets walk order, an incremental patch (#307) re-inserts a
+        # touched id at the end — and the backlinks surface reads this list
+        # directly, so it would reshuffle after an edit the user did not make.
+        for edges in reverse.values():
+            edges.sort(key=lambda edge: (edge.src, edge.field_id))
         self.edges_by_dst = reverse

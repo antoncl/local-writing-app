@@ -1,8 +1,10 @@
 # ADR-0040: The node index is a persisted, incrementally-maintained id-map; bodies are lazy; no SQLite
 
-- Status: **Accepted** — 0.7.0, 2026-07-19 (PR #319) · red-penned and re-measured 2026-07-19 after
-  two rounds of adversarial review
-- Feature: #7 (prerequisite) · Companion: ADR-0039 · Follows: ADR-0025
+- Status: **Accepted** — 0.7.0, 2026-07-19 (PR #319) · re-measured 2026-07-19 after two rounds of
+  adversarial review · **Amendment 1 (Proposed): the index is three caches with different lifetimes,
+  not one** (2026-07-22, #390)
+- Feature: #7 (prerequisite) · Companion: ADR-0039 · Follows: ADR-0025 · Context: **ADR-0045**
+- Amended by: #390 — see [Amendment 1](#amendment-1--the-index-is-three-caches-not-one-2026-07-22)
 - Implemented by: #305 (single-pass) → #306 (snapshot + staleness manifest) → #307 (incremental patch
   + change-gate). #307 is the **backend** half of the reference-index work that #200 never landed —
   it closed 2026-07-19 having shipped the *frontend* change-gate only (PR #301).
@@ -36,6 +38,11 @@ any chain. `project` becomes an indexed kind; it is not indexed today (`referenc
 **Each entry carries an ordered layer rank**, not just a label. `NodeIndexEntry.source_layer_id` is
 today a sha256 of the path (`schema.py:912-913`) — an opaque identity with no ancestry in it. ADR-0039
 resolves overrides in layer order and renders provenance, so the rank is part of the index contract.
+
+> **Amended by [Amendment 1](#amendment-1--the-index-is-three-caches-not-one-2026-07-22):** the
+> identity map and the edges are still both correct and still built in one pass, but they are two
+> caches with different lifetimes rather than one artifact — and the edges need a second layer, the
+> values they were extracted from.
 
 **The index holds** `id → (path, kind, entry_type, title, layer rank)` plus reference edges
 `(src, dst, field)`. Note both are partly new work, not the status quo: today's store is
@@ -117,6 +124,9 @@ because they are not one-file-in-one-file-out:
   (`references.py:373-399`) resolves `entry_type → field → type == "entity_ref"`. A
   `metadata.schema.yaml` edit therefore invalidates edges for *every node of the affected entry types
   across the chain*, not one file. `project.yaml` likewise fans out to the settings/AI-policy chain.
+  > **Amended by [Amendment 1](#amendment-1--the-index-is-three-caches-not-one-2026-07-22):** the
+  > fan-out is over *edges*, not over the index. It never reached identity, and it is a lookup by
+  > `field_id` rather than a re-read once the extraction inputs are cached.
 
 **Concurrent writers are a non-goal.** This is a single-user, offline-capable tool. Two backends over
 one project folder would race on the snapshot — and that is fine: the snapshot is advisory and
@@ -230,3 +240,102 @@ The benchmark now drives `ProjectService` directly, so faithfulness is a propert
 claim, and it is tracked at `scripts/benchmark/cache/` (fixtures generate into gitignored `tmp/`).
 Every number above is reproducible from a clean clone: `hierarchy_bench.py` generates its fixtures on
 first run (`--regen` to rebuild them), and a bare invocation runs all three scales.
+
+## Amendment 1 — the index is three caches, not one (2026-07-22)
+
+Status: **Proposed** — awaiting approval (#390).
+
+Established with Anton during the ADR-0045 design pass, and a correction to this ADR's own model
+rather than a new subject: splitting the node index across two documents would leave a reader to
+reconcile them.
+
+### What v1 got wrong
+
+The original design was **two caches**, and both are here and correct:
+
+1. **`id → path`.** The app references nodes by id; nodes are files; with folder inheritance,
+   resolving an id means knowing *which layer's* file it is, and rescanning the chain per lookup is
+   a non-starter. This is `candidates`.
+2. **the reference graph** — which nodes a node points at, traversable both directions. This is
+   `edges_by_layer_src` / `edges_by_src` / `edges_by_dst`.
+
+**The error is that they were fused into one artifact with one lifetime.** #305 folded edge
+extraction into the identity walk so each file is parsed once instead of once per pass — a real win, still
+right, and nothing here undoes it. But a shared *read* was allowed to dictate a shared
+*invalidation*, and the two have opposite relationships to the schema:
+
+- **identity is schema-independent.** It changes when a file is added, removed, renamed, or changes
+  its front-matter `id` — and at no other time. No schema edit can move it.
+- **references are schema-dependent.** Knowing which fields are references requires resolved field
+  definitions, which are layered and which resolve differently per authoring layer (ADR-0042 §3).
+
+Fused, the schema dependency contaminates identity: a `metadata.schema.yaml` edit forces a **full**
+rebuild *including the id→path map, which could not have changed*. #307 declines to patch on schema
+edits for exactly this reason, and wrote the fan-out up as though it were inherent
+(`node_index_patch.py`, "Two things fan out and are therefore not patchable"). It is not inherent —
+it is an artifact of the fusion.
+
+### The third cache, never designed as one
+
+**Resolved field definitions, per layer.** Today the schema is re-merged from YAML on every index
+build (measured above at 6.0 ms / 7.4 ms for a 4-layer chain — small, but paid unconditionally), and
+ADR-0042's picker surfaces want a second, as-of-L variant of the same thing. It is a derived,
+layered, expensive artifact consumed by everything: a cache whether or not it is treated as one. Not
+modelling it is what allowed an index to be built against one project's files and another project's
+schema (found in #381).
+
+**It is an *input* to the index, not part of it.** This amendment names it as required and stops
+there; its design belongs to a separate issue, or ADR-0040 acquires a second subject that ADR-0042's
+surfaces would then have to share.
+
+### References must be two-layered
+
+**An edge is a function of a value AND a definition** — literally so:
+`_reference_edges_for_entry` walks the entry type's declared fields, looks each field's `type` up in
+the schema, and pairs it with the node's stored value. We cache only the *output*. So when the
+definition changes, the other input has to be reconstructed from source.
+
+Adding an `entity_ref` field mints edges from values that were already on disk — **no file changed**.
+That means the references cache cannot be rebuilt from "which files changed", and cannot be rebuilt
+at all without the values, which the identity cache does not hold. This is not an edge case: it is
+the faction example that carries ADR-0045.
+
+So the references cache stores the extraction **input** alongside its result: per node, per layer,
+the metadata values that could ever become a reference. **Bounded** — only strings and lists of
+strings can (`_edges_from_field` discards everything else), so a field retyped from `number` loses
+nothing by never having been kept. Note the values worth keeping are *not* only those of currently
+declared reference fields: the case that needs them is precisely a field that had no such definition
+a moment ago.
+
+### `field_id` is the join key, and it is already there
+
+`ReferenceEdge` carries `(src, dst, field_id)` — Anton's design, which this ADR justified by
+ADR-0039's reference-typed overrides. That undersells it. **The field id is what makes a definitions
+change a lookup instead of a rebuild:**
+
+- a field retyped away from `entity_ref*`, or deleted → drop the edges carrying that field id;
+- a picker constraint narrowed → re-check only those edges;
+- a field **added** as `entity_ref*` → no existing edge carries that id, and this is the one case
+  that needs the cached values.
+
+Key the values by the same `(node, layer, field_id)` and the third case collapses into the shape of
+the other two. The join key exists on one side of the join today; the amendment is that it must
+exist on both.
+
+### Consequences
+
+- **A schema edit stops being the most expensive invalidation we have.** It leaves identity
+  untouched and reduces to a field-id lookup over the edges, plus a values scan only for
+  newly-reference-typed fields.
+- **#307's patch gains a second unit of work.** Its work list is "changed paths"; it now also needs
+  "changed *definitions*", which touch nodes whose files never moved. The manifest cannot express
+  that unit, and this is the amendment's main obligation on the implementation.
+- **The three lifetimes differ, so invalidation must be stated per cache**, not per snapshot: files
+  moving invalidates identity (and, through it, values); definitions changing invalidates edges
+  alone; a code change to what a build *produces* still invalidates everything, as `build_identity()`
+  already arranges.
+- **Nothing here changes the storage decision.** JSON under `.cache/`, rebuildable by design, no
+  SQLite. Deliberately **no cache formats are specified**: the moment this section describes storage
+  it stops being an amendment to a model and becomes a design for one.
+- **#314 (slice E) must be planned against this model**, not the fused one — which is why this was
+  written before it.

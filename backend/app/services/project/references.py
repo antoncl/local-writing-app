@@ -295,7 +295,13 @@ class ReferencesMixin:
             return loaded.index
         index = NodeIndex()
         try:
-            schema: MetadataSchema | None = self.read_metadata_schema()
+            # `root`, not the singleton. Edge extraction is schema-driven, so
+            # indexing one project's files against another's schema yields an
+            # index with the wrong edges — and it is then written to *this*
+            # project's snapshot with *this* project's manifest, so it validates
+            # as fresh forever after. Every explicit-root caller had this latent
+            # mismatch (#381); the purge only made it reachable under a race.
+            schema: MetadataSchema | None = self.read_metadata_schema(root)
         # Malformed YAML arrives as ProjectServiceError (`_read_yaml` wraps it),
         # a bad shape as pydantic ValidationError (a ValueError), and a locked
         # or unreadable file as OSError.

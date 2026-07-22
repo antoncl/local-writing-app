@@ -238,6 +238,37 @@ class PurgeStaysInTheCallersProjectTests(unittest.TestCase):
             "Body.",
         )
 
+    def _race_at_path_resolution(self) -> None:
+        """Fire the concurrent open at the EARLIEST point the caller touches the
+        singleton, not inside the purge.
+
+        Shimming `_purge_references_to` fires the race after `root` is already
+        captured, so it passes even if the capture moves to the line above the
+        purge call — it pins nothing about *when* the caller captures. Shimming
+        the first singleton read does.
+        """
+        real = self.service._path_for_node_id
+
+        def racing(node_id: str, kind: str, *args: object, **kwargs: object) -> Path:
+            resolved = real(node_id, kind, *args, **kwargs)
+            self.service.open_project(self.book2)
+            return resolved
+
+        self.service._path_for_node_id = racing  # type: ignore[method-assign]
+
+    def test_the_root_is_captured_before_any_singleton_read(self) -> None:
+        """The capture must precede the unlink, not merely precede the purge."""
+        self._write_lore(self.book2, "keeper", "Keeper", refs=["shared"])
+        self._write_lore(self.book1, "shared", "Shared")
+        keeper = self.book2 / "lore" / "keeper.md"
+        self.service.open_project(self.book1)
+        before = keeper.read_text(encoding="utf-8")
+
+        self._race_at_path_resolution()
+        self.service.delete_lore_entry("shared")
+
+        self.assertEqual(keeper.read_text(encoding="utf-8"), before)
+
     def test_a_concurrent_open_does_not_redirect_the_purge(self) -> None:
         # book02 references an id it does not own, so the id resolves in
         # neither project once book01's copy is deleted.

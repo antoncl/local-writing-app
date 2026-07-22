@@ -355,7 +355,7 @@ class MetadataValuesMixin:
                     changed = True
         return cleaned, changed
 
-    def _ids_safe_to_purge(self, purge_ids: set[str], index: NodeIndex) -> set[str]:
+    def _ids_safe_to_purge(self, purge_ids: set[str], index: NodeIndex, root: Path) -> set[str]:
         """Which of `purge_ids` may have their references destroyed (#379).
 
         Separated from the rewrite because it is the whole decision: everything
@@ -394,7 +394,10 @@ class MetadataValuesMixin:
             log.warning(
                 "Skipping the reference purge for %s: %d node file(s) could not be parsed, "
                 "so which ids still exist is unknown.",
-                self.root_path,
+                # The purge's own root, not the singleton's — naming a project
+                # that might not be the one being purged is exactly the
+                # misattribution #381 is about.
+                root,
                 len(index.errors),
             )
             return set()
@@ -418,7 +421,7 @@ class MetadataValuesMixin:
         # delete happened in — see the note in `_ids_safe_to_purge` (#381).
         schema = self.read_metadata_schema(root)
         index = self._build_node_index(root)
-        purge_ids = self._ids_safe_to_purge(purge_ids, index)
+        purge_ids = self._ids_safe_to_purge(purge_ids, index, root)
         if not purge_ids:
             return
         for entry in list(index.by_id.values()):

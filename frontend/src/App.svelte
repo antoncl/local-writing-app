@@ -650,6 +650,8 @@
         aiHealthResult={aiSettings.healthResult}
         aiHealthChecking={aiSettings.healthChecking}
         {validation}
+        projectChildren={project?.children ?? []}
+        onOpenChild={(path) => void projectSession.openProjectAt(path)}
         bind:aiPolicy={aiSettings.policy}
         bind:projectCostExpanded
         onValidate={validateProject}

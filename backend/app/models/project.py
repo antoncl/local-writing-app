@@ -42,6 +42,16 @@ class AncestorCandidate(BaseModel):
     name: str
     is_project: bool = False
     inherited: bool = False
+    # The manifest title, when the folder is a project — `None` otherwise, and
+    # never a fallback to `name`. #311's breadcrumb renders one path whose leaf
+    # is the open project's title, so labelling an ancestor by its folder would
+    # mix two naming schemes in a single line; #309's own layer-label rule
+    # ("a layer's name follows the project, not its position") already settled
+    # which one wins. Leaving it null rather than defaulting keeps "has no
+    # title because it is not a project" distinguishable from "is titled after
+    # its folder", which is what lets the wizard mark the row instead of
+    # silently showing a plausible name.
+    title: str | None = None
 
 
 class ProjectChild(BaseModel):

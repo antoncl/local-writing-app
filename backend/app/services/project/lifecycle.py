@@ -181,6 +181,7 @@ class ProjectLifecycleMixin:
                 name=folder.name,
                 is_project=is_project,
                 inherited=inherited,
+                title=self._project_title(folder) if is_project else None,
             )
             for folder, is_project, inherited in self.ancestor_candidates(root)
         ]

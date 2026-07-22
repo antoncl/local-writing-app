@@ -1,6 +1,8 @@
 <script lang="ts">
-  import type { RecentProject } from "@/lib/types";
+  import type { AncestorCandidate, ProjectChild, RecentProject } from "@/lib/types";
   import type { ThemePreference } from "@/lib/utils/theme";
+
+  import ProjectBreadcrumb from "./ProjectBreadcrumb.svelte";
 
   // Null when no project is open — switcher shows "Open a project…".
   export let currentTitle: string | null;
@@ -9,6 +11,14 @@
   // project they're in at a glance (especially when nesting lands).
   export let currentProjectColor: string | null = null;
   export let recentProjects: RecentProject[] = [];
+  // The open project's place in the hierarchy (#311). Ancestors render as the
+  // breadcrumb to the left; children ride in the switcher menu, because both
+  // directions are the same gesture — open a different project — and because
+  // the Project pane that also lists the children is not guaranteed to be on
+  // screen (#417). Ascent is chrome, so descent has to be too.
+  export let ancestors: AncestorCandidate[] = [];
+  export let childProjects: ProjectChild[] = [];
+  export let onOpenProjectPath: (path: string) => void = () => {};
   // Event hooks. The parent owns all side effects; this component is
   // purely presentational + dropdown state.
   export let onSelectRecent: (path: string) => void = () => {};
@@ -117,6 +127,11 @@
     onSelectRecent(path);
   }
 
+  function handleOpenProjectPath(path: string) {
+    closeSwitcher();
+    onOpenProjectPath(path);
+  }
+
   function handleOpenFolder() {
     closeSwitcher();
     onOpenFolder();
@@ -169,6 +184,8 @@
 <header class="top-bar">
   <span class="wordmark">Local Writer</span>
 
+  <ProjectBreadcrumb {ancestors} onOpen={onOpenProjectPath} />
+
   <div class="switcher-wrap">
     <button
       bind:this={switcherButton}
@@ -195,6 +212,23 @@
       ></div>
 
       <div class="switcher-menu" role="menu" aria-label="Project switcher">
+        {#if childProjects.length > 0}
+          <div class="switcher-section-label">Contains</div>
+          {#each childProjects as child (child.path)}
+            <button
+              type="button"
+              class="switcher-item child-item"
+              role="menuitem"
+              on:click={() => handleOpenProjectPath(child.path)}
+            >
+              <span class="child-title">{child.title}</span>
+              {#if child.name !== child.title}
+                <span class="child-folder">{child.name}</span>
+              {/if}
+            </button>
+          {/each}
+          <div class="switcher-divider" role="separator"></div>
+        {/if}
         {#if recentProjects.length > 0}
           <div class="switcher-section-label">Recent</div>
           {#each recentProjects as recent (recent.path)}
@@ -349,6 +383,10 @@
 
   .top-bar .switcher-wrap {
     position: relative;
+    /* Lets the button below give ground once a chain shares the bar (#311).
+       Without it the wrap's automatic minimum is its content, so every pixel
+       of pressure landed on the breadcrumb. */
+    min-width: 0;
   }
 
   .top-bar .switcher-button {
@@ -362,7 +400,9 @@
     font-size: var(--fs-md);
     border-radius: 6px;
     cursor: pointer;
-    min-width: 200px;
+    /* 200px when the bar can afford it, narrower when it cannot — the leaf
+       title is the subject, but not at the price of an unreadable path. */
+    min-width: min(200px, 100%);
     max-width: 360px;
   }
 
@@ -473,6 +513,23 @@
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
+    font-family: var(--mono);
+  }
+
+  .top-bar .child-item {
+    justify-content: space-between;
+  }
+
+  .top-bar .child-title {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .top-bar .child-folder {
+    flex: none;
+    font-size: var(--fs-xs);
+    color: var(--text-3);
     font-family: var(--mono);
   }
 

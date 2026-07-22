@@ -578,6 +578,9 @@
   currentTitle={isProjectOpen ? projectTitle : null}
   currentProjectColor={aiSettings.projectColor}
   recentProjects={projectSession.recentProjects}
+  ancestors={project?.ancestors ?? []}
+  childProjects={project?.children ?? []}
+  onOpenProjectPath={(path) => void projectSession.openProjectAt(path)}
   projectOpen={isProjectOpen}
   themePref={$themePreference}
   onCycleTheme={() => themePreference.update((p) => nextPreference(p))}

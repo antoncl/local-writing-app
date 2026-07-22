@@ -816,6 +816,8 @@ export type AncestorCandidate = {
   name: string;
   is_project: boolean;
   inherited: boolean;
+  /** What the project calls itself; null when the folder is not a project. */
+  title?: string | null;
 };
 
 /** A project folder directly inside this one — the roster #310 renders. */

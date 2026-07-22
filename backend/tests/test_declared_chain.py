@@ -137,6 +137,24 @@ class TheEnumerationIsReportedWholeTests(DeclaredChainTestCase):
             [("writing", False, False), ("honorverse", True, True), ("honor-harrington", False, False)],
         )
 
+    def test_an_ancestor_that_is_a_project_carries_its_title_and_the_rest_carry_none(self) -> None:
+        """The breadcrumb (#311) renders one path, so it needs one naming scheme.
+
+        `name` is the folder and stays the folder — the wizard addresses rows by
+        it. `title` is what a *project* calls itself, which is the same rule the
+        layer labels already follow, and it is `None` rather than the folder for
+        a non-project so that "there is nothing to display here" cannot be
+        mistaken for a project named after its directory.
+        """
+        make_project_folder(self.service, self.universe, "The Honorverse")
+        self.series.mkdir(parents=True, exist_ok=True)  # organisational, no manifest
+        declare(self.service, self.root, [self.universe])
+
+        self.assertEqual(
+            [(row.name, row.title) for row in self.service.current_project().ancestors],
+            [("writing", None), ("honorverse", "The Honorverse"), ("honor-harrington", None)],
+        )
+
     def test_direct_child_projects_are_listed_with_their_titles(self) -> None:
         child = self.root / "part-two"
         self.service = ProjectService.created_at(child, "Part Two")

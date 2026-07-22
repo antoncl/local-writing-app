@@ -305,9 +305,15 @@ def pinned_repo(tmp_path: Path):
     _git(tmp_path, "config", "user.name", "Test")
     target = tmp_path / "mod.py"
     target.write_text("def forward_refs(entry):\n    return entry.refs\n", encoding="utf-8")
-    _git(tmp_path, "add", "mod.py")
+    # Gone by HEAD, so anything found here can only have come from the ref.
+    (tmp_path / "other.py").write_text(
+        "CACHE_VERSION = 3\n\n\ndef helper():\n    return 1\n", encoding="utf-8"
+    )
+    _git(tmp_path, "add", "mod.py", "other.py")
     _git(tmp_path, "commit", "-qm", "first")
     _git(tmp_path, "tag", "v1")
+    (tmp_path / "other.py").unlink()
+    _git(tmp_path, "rm", "-q", "other.py")
     target.write_text(
         "def added_later(a):\n    return a\n\n\ndef forward_refs(entry):\n    return entry.refs\n",
         encoding="utf-8",
@@ -359,6 +365,43 @@ def test_a_pinned_document_still_reports_a_symbol_that_never_existed(pinned_repo
         mentions=False,
     )
     assert [f.status for f in findings] == [cc.RENAMED_OR_DELETED]
+
+
+def test_a_pinned_citation_reports_where_the_symbol_was_at_that_ref(pinned_repo):
+    """Kills the mutant where the ref-backed symbol search finds nothing.
+
+    This is the shape that shipped past me once: a mangled regex made the
+    `git grep` match nothing, so every symbol read as deleted and the checker
+    returned a confident, wrong RENAMED OR DELETED. Every other pinned test
+    passes with that lookup stubbed out — MOVED is the one verdict that cannot
+    be reached without it, and the detail has to name a file that exists only
+    at the ref.
+    """
+    finding = cc.check_source(
+        cc.Source(label="ADR", url="", text="Verified against `v1`. `helper()` (`mod.py:2`) runs."),
+        cc.RefIndex.at(pinned_repo, "v1"),
+        mentions=False,
+    )[0]
+    assert finding.status == cc.MOVED
+    assert "other.py:4" in finding.detail
+
+
+def test_a_pinned_non_definition_is_in_range_not_deleted(pinned_repo):
+    """Kills the mutant where the ref-backed *text* search finds nothing.
+
+    `CACHE_VERSION` is no `def`, so the verdict rests entirely on "does this
+    name exist at the ref" — and getting that wrong turns a fine citation into
+    an alarming one.
+    """
+    finding = cc.check_source(
+        cc.Source(
+            label="ADR", url="", text="Verified against `v1`. `CACHE_VERSION` (`other.py:1`) is it."
+        ),
+        cc.RefIndex.at(pinned_repo, "v1"),
+        mentions=False,
+    )[0]
+    assert finding.status == cc.OK
+    assert "not a def/class" in finding.detail
 
 
 def test_an_unresolvable_ref_never_silently_passes(pinned_repo):

@@ -26,6 +26,8 @@ import unittest
 from pathlib import Path
 from tempfile import TemporaryDirectory
 
+from layer_fixtures import declare_full_chain
+
 from app.models import (
     CreateLoreEntryRequest,
     MergeTagsRequest,
@@ -35,7 +37,6 @@ from app.models import (
 )
 from app.services.project.errors import ProjectServiceError
 from app.services.project_service import ProjectService
-from tests.layer_fixtures import declare_full_chain
 
 
 def _scope(kind: str, entry_type: str) -> dict:

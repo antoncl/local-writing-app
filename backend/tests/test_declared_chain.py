@@ -16,10 +16,11 @@ import unittest
 from pathlib import Path
 from tempfile import TemporaryDirectory
 
+from layer_fixtures import declare, make_project_folder
+
 from app.models import UpdateProjectSettingsRequest
 from app.services.project.errors import ProjectServiceError
 from app.services.project_service import ProjectService
-from tests.layer_fixtures import declare, make_project_folder
 
 
 class DeclaredChainTestCase(unittest.TestCase):

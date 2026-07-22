@@ -4,6 +4,8 @@ import unittest
 from pathlib import Path
 from tempfile import TemporaryDirectory
 
+from layer_fixtures import declare_full_chain
+
 from app.models import (
     CreateLoreEntryRequest,
     CreateSceneRequest,
@@ -29,7 +31,6 @@ from app.models import (
 from app.services.project.errors import ProjectServiceError
 from app.services.project_service import ProjectService
 from app.services.tree_structure import TreeStructureService
-from tests.layer_fixtures import declare_full_chain
 
 
 class MetadataValidationTests(unittest.TestCase):

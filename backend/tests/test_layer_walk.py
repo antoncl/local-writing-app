@@ -13,11 +13,12 @@ from pathlib import Path
 from tempfile import TemporaryDirectory
 from unittest.mock import patch
 
+from layer_fixtures import declare_full_chain
+
 from app.models import ReorderAssistantsRequest, UnlistAssistantRequest
 from app.services.project.assistants import AssistantsOrder
 from app.services.project.node_index import IndexLayer, NodeIndex
 from app.services.project_service import ProjectService
-from tests.layer_fixtures import declare_full_chain
 
 
 class LayerWalkTests(unittest.TestCase):

@@ -21,6 +21,8 @@ import unittest
 from pathlib import Path
 from tempfile import TemporaryDirectory
 
+from layer_fixtures import declare_full_chain
+
 from app.models import (
     CreateLoreEntryRequest,
     MetadataFieldDefinition,
@@ -31,7 +33,6 @@ from app.models import (
 from app.runtime import service as svc
 from app.services.project.node_index import ReferenceEdge
 from app.services.project_service import ProjectService
-from tests.layer_fixtures import declare_full_chain
 
 
 def _define_field(field_id: str, field_type: str, name: str) -> None:

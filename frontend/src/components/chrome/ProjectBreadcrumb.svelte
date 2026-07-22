@@ -1,6 +1,4 @@
 <script lang="ts">
-  import { tick } from "svelte";
-
   import type { AncestorCandidate } from "@/lib/types";
   import { declaredChain } from "@/lib/utils/projectChain";
 
@@ -14,18 +12,6 @@
   export let onOpen: (path: string) => void = () => {};
 
   $: crumbs = declaredChain(ancestors);
-
-  let chainEl: HTMLElement | null = null;
-
-  // When the chain is wider than the bar can spare it scrolls, and the end is
-  // the part worth keeping: the nearest ancestor is both the likeliest hop and
-  // the one whose adjacency to the switcher button makes the path read as a
-  // path. Left-anchored, a deep chain hides the parent and shows the root.
-  $: if (chainEl && crumbs.length > 0) {
-    void tick().then(() => {
-      if (chainEl) chainEl.scrollLeft = chainEl.scrollWidth;
-    });
-  }
 </script>
 
 <!--
@@ -43,7 +29,7 @@
   no path to show, and an empty rail would be chrome that encodes nothing.
 -->
 {#if crumbs.length > 0}
-  <nav bind:this={chainEl} class="project-chain" aria-label="Project chain">
+  <nav class="project-chain" aria-label="Project chain">
     {#each crumbs as crumb (crumb.path)}
       <button
         type="button"

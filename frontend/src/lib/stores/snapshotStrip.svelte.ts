@@ -17,6 +17,7 @@
 import { api } from "@/lib/api";
 import type { DiffRun, DiffView, FieldDiff, Scene, Snapshot, SnapshotDrift } from "@/lib/types";
 import { renderDiffRuns } from "@/lib/utils/diffRuns";
+import { inNotchOrder } from "@/lib/utils/snapshotTime";
 
 /** What the diff compares the snapshot against: the buffer, not the file.
  *  Autosave lags by up to six seconds and parking must not write. */
@@ -51,7 +52,10 @@ const NO_DRIFT: SnapshotDrift = {
 const SLOW_PARK_MS = 2000;
 
 export class SnapshotStripController {
-  /** Oldest first, as the backend lists them — the order the strip lays out. */
+  /** Oldest first **by content time** (`inNotchOrder`) — the order the strip
+   *  lays out, and therefore the order ← / → walk. Deliberately not the
+   *  backend's listing order, which is by record time: that is the right key for
+   *  thinning and the wrong one for a track laid out by age (#458). */
   snapshots = $state<Snapshot[]>([]);
   /** `null` = Live. Otherwise the parked snapshot's id. */
   parked = $state<string | null>(null);
@@ -195,7 +199,7 @@ export class SnapshotStripController {
     if (!sceneId) return;
     try {
       const list = await api.listSnapshots(sceneId);
-      if (this.#sceneId === sceneId) this.snapshots = list.snapshots;
+      if (this.#sceneId === sceneId) this.snapshots = inNotchOrder(list.snapshots);
     } catch {
       // A strip that cannot list is an empty strip, not an error dialog: the
       // author is writing, and this is a safety net rather than the task.

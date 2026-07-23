@@ -27,6 +27,7 @@ with a resolution scope it carries explicitly (ADR-0045, same reasoning as
 
 from __future__ import annotations
 
+import os
 import shutil
 from datetime import UTC, datetime
 from pathlib import Path
@@ -70,11 +71,11 @@ SESSION_GAP_MINUTES = 30
 AUTOMATIC_KEEP = 5
 
 
-def _content_written_at(path: Path) -> str:
-    """When the bytes about to be copied were **written**, not when we copied them.
+def _read_body_and_content_time(path: Path) -> tuple[bytes, str]:
+    """The bytes to copy, and when those bytes were **written** — from one file.
 
-    This is the timestamp the strip should lay out by. `captured_at` is right for
-    the camera and wrong for every automatic capture: `maybe_capture_session_
+    The timestamp is what the strip lays out by. `captured_at` is right for the
+    camera and wrong for every automatic capture: `maybe_capture_session_
     boundary` fires *before* the save, so the file still holds what the previous
     sitting wrote — that is the whole point, and
     `test_the_captured_bytes_are_the_pre_save_state` pins it. The record then
@@ -99,17 +100,27 @@ def _content_written_at(path: Path) -> str:
     snapshot of it is dated now, because that is when those bytes became the
     file's contents.
 
-    Falls back to the wall clock if the file cannot be stat'd — a capture is
-    never the reason a save fails, and a stamp slightly late beats no snapshot.
+    **One open handle, read then `fstat`** — not `stat()` beside `read_bytes()`.
+    Scene routes are `def`, so FastAPI runs them in a threadpool and two panes on
+    one scene interleave; a write landing between two separate calls would pair
+    one version's bytes with the other version's time, baking #458 in miniature
+    into a record ADR-0043 forbids rewriting. Every writer here replaces the file
+    atomically, so the handle pins the version that was read and `fstat` cannot
+    describe anything else.
+
+    No `OSError` fallback: this **is** the read, so a failure here is exactly the
+    failure `read_bytes` already raised, and it belongs to the caller that owns
+    "a capture is never the reason a save fails" (`maybe_capture_session_
+    boundary`, which returns early on a missing file).
+
     Microseconds are pinned for the same reason `captured_at` pins them: an
     `isoformat` that omits them on the exact second makes two stamps compare as
     strings of different shapes.
     """
-    try:
-        written = datetime.fromtimestamp(path.stat().st_mtime, UTC)
-    except OSError:
-        written = datetime.now(UTC)
-    return written.isoformat(timespec="microseconds")
+    with path.open("rb") as handle:
+        body = handle.read()
+        written = datetime.fromtimestamp(os.fstat(handle.fileno()).st_mtime, UTC)
+    return body, written.isoformat(timespec="microseconds")
 
 
 class SceneSnapshotsMixin:
@@ -269,6 +280,10 @@ class SceneSnapshotsMixin:
         land, leaving the `.md` holding post-write bytes and the sidecar
         describing the world before them.
 
+        `content_written_at` is not a second read for the same reason: it comes
+        off the handle the bytes came from, so no write can slip between the two
+        and leave the record dating one version's bytes by another's clock.
+
         The witness is written once, here, and never rewritten: letting a later
         save land a fresh context set in an existing sidecar would leave the body
         at the start of the session and the witness at its end.
@@ -279,10 +294,10 @@ class SceneSnapshotsMixin:
         folder = self._snapshots_dir(root, node_id)
         folder.mkdir(parents=True, exist_ok=True)
         snapshot_id = self._new_id("snap")
-        # Read together, in this order, so the timestamp describes the bytes
-        # beside it even if the file is rewritten a moment later.
-        content_written_at = _content_written_at(path)
-        body = path.read_bytes()
+        # One read, so the timestamp describes the bytes beside it even if the
+        # file is rewritten a moment later — the same invariant the witness gets
+        # from following this line, stated in the docstring below.
+        body, content_written_at = _read_body_and_content_time(path)
         witness = self.build_witness(node_id, dynamic_context)
         record: dict[str, Any] = {
             "id": snapshot_id,

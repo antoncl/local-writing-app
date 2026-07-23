@@ -121,15 +121,19 @@ class CaptureTriggerTests(SnapshotTestCase):
         self.assertNotIn(b"Afternoon words.", stored)
 
 
-class CapturedAtDatesTheContentTests(SnapshotTestCase):
-    """#458 — `captured_at` is when the bytes were **written**, not when they
-    were copied.
+class ContentTimeIsItsOwnFactTests(SnapshotTestCase):
+    """#458 — a record carries **two** times: when it was made (`captured_at`,
+    unchanged) and when its bytes were written (`content_written_at`).
 
-    ADR-0044's strip lays notches out by age, so this is the difference between
-    the time surface telling the truth and telling a plausible lie. The whole
-    class drives real captures rather than asserting the field directly: the
-    claim is about what the record says relative to the file, and a test that
-    read the stamp back out of the code that wrote it could not fail.
+    Not a redefinition of `captured_at`, which the last test here is the reason
+    for: content time ties where creation time cannot, so the store's total order
+    still needs the creation stamp. ADR-0044's strip lays out by the content
+    stamp, which is the difference between the time surface telling the truth and
+    telling a plausible lie.
+
+    The whole class drives real captures rather than asserting the field
+    directly: the claim is about what the record says relative to the file, and a
+    test that read the stamp back out of the code that wrote it could not fail.
     """
 
     def _content_time(self, record) -> datetime:
@@ -169,15 +173,30 @@ class CapturedAtDatesTheContentTests(SnapshotTestCase):
             "the record was still created now — the two facts must not be conflated",
         )
 
-    def test_an_explicit_snapshot_is_still_dated_correctly(self) -> None:
-        """The control, and the reason the bug was invisible: the camera reads
-        the live file, so its stamp was always right. Both tiers must now agree
-        about what a position on the track means."""
-        self._save("Now.")
+    def test_an_explicit_snapshot_dates_the_content_it_photographs(self) -> None:
+        """The camera has the same two times as the automatic tier, and they can
+        be as far apart: an author who parks, reads, and presses the camera on a
+        scene untouched for a fortnight gets a record made now of prose written
+        then.
+
+        Aged deliberately. On a freshly-saved file all three timestamps sit
+        inside any tolerance worth writing, so the version of this test that
+        saved and immediately captured stayed green with the fix deleted.
+        """
+        self._save("A fortnight ago.")
+        stale = time.time() - 14 * 24 * 60 * 60
+        os.utime(self.scene_path, (stale, stale))
+
         record = self.service.capture_snapshot(self.scene_id)
         self.assertLess(
-            abs((self._content_time(record) - self._mtime()).total_seconds()),
+            abs((self._content_time(record) - datetime.fromtimestamp(stale, UTC)).total_seconds()),
             2,
+            "the camera dates the bytes it photographed, not the shutter",
+        )
+        self.assertGreater(
+            datetime.fromisoformat(record.captured_at),
+            self._content_time(record),
+            "the record was still made now — the two facts must not be conflated",
         )
 
     def test_the_two_tiers_mean_the_same_thing_on_one_track(self) -> None:

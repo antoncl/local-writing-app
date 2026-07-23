@@ -17,35 +17,22 @@
   // ticks and the actions row (ADR-0038 §A's shape, applied to size).
   import type { SnapshotStripController } from "@/lib/stores/snapshotStrip.svelte";
   import DriftReport from "@/components/editor/DriftReport.svelte";
-  import { relativeTime } from "@/lib/utils/relativeTime";
-  import { LIVE_LEFT, TICKS, ageMinutes, agePosition, notchPositions, trackSpanMinutes } from "@/lib/utils/snapshotTrack";
+  import { notchAges, notchTooltip, notchWhen } from "@/lib/utils/snapshotTime";
+  import { LIVE_LEFT, TICKS, agePosition, notchPositions, trackSpanMinutes } from "@/lib/utils/snapshotTrack";
 
   let { strip }: { strip: SnapshotStripController } = $props();
 
   // Ages are read once per render against a single `now`, so every notch and
   // tick on one paint shares a clock. Recomputed whenever the list changes.
-  let ages = $derived.by(() => {
-    const now = new Date();
-    // By CONTENT age, not record age (#458). The notch's position is the
-    // timeline, so it has to answer "how far back is this prose" — an automatic
-    // capture's record is made at the start of the current sitting while its
-    // bytes are from the end of the previous one.
-    return strip.snapshots.map((snapshot) => ageMinutes(snapshot.content_written_at, now));
-  });
+  //
+  // By CONTENT age, not record age (#458) — and the list arrives ordered by the
+  // same key, which is `notchPositions`' input contract. Both rules live in
+  // `snapshotTime`, where they can be tested.
+  let ages = $derived(notchAges(strip.snapshots, new Date()));
   let positions = $derived(notchPositions(ages));
   let span = $derived(trackSpanMinutes(ages));
   let visibleTicks = $derived(TICKS.filter((tick) => tick.minutes <= span));
   let parked = $derived(strip.parked !== null);
-
-  function tooltip(index: number): string {
-    const snapshot = strip.snapshots[index];
-    // Most snapshots have no description — every automatic one, and every
-    // explicit one taken in flow — so slice 1's tooltip is the date line alone
-    // (§L: the absent case is the COMMON case and must read well on its own).
-    // A description is an enrichment on top of it, and arrives with slice 4.
-    const when = relativeTime(snapshot.content_written_at);
-    return snapshot.retention === "kept" ? `Snapshot · ${when} · kept` : `Snapshot · ${when}`;
-  }
 
   // ← → move through time; Esc returns to Live. No held modifier: repeatedly
   // holding Shift trips Windows FilterKeys and five presses fire Sticky Keys,
@@ -162,8 +149,8 @@
         class:kept={snapshot.retention === "kept"}
         class:current={strip.parked === snapshot.id}
         style={`left: ${positions[index]}%`}
-        title={tooltip(index)}
-        aria-label={tooltip(index)}
+        title={notchTooltip(snapshot)}
+        aria-label={notchTooltip(snapshot)}
         aria-pressed={strip.parked === snapshot.id}
         onclick={() => void strip.park(strip.parked === snapshot.id ? null : snapshot.id)}
       ><i></i></button>
@@ -205,7 +192,7 @@
      here rather than beside the track — so it can be any width it likes. -->
 {#if parked}
   <div class="snapshot-actions">
-    <span class="asof">Snapshot · {relativeTime(strip.current?.content_written_at ?? "")}</span>
+    <span class="asof">Snapshot · {notchWhen(strip.current)}</span>
 
     <!-- The compare axis. It lives HERE and not beside the track because it is
          variable-width, and nothing sharing the track's row may change width —
@@ -259,7 +246,10 @@
     align-items: stretch;
     gap: 16px;
     padding: 8px 14px;
-    min-height: 46px;
+    /* Tall enough for the notches above the rule AND the scale below it
+       (#406). Only while parked — compact overrides it below, and parking is
+       what earns the taller strip in the first place (§B). */
+    min-height: 61px;
     border-top: 1px solid var(--divider);
     background: var(--inset);
     transition: min-height 160ms ease-out, padding 160ms ease-out, background-color 160ms ease-out;
@@ -315,7 +305,7 @@
     position: relative;
     flex: 1 1 auto;
     min-width: 0;
-    padding-bottom: 9px;
+    padding-bottom: 24px;
     transition: padding 160ms ease-out;
   }
   .strip-track::before {
@@ -323,15 +313,22 @@
     position: absolute;
     left: 0;
     right: 0;
-    bottom: 8px;
+    bottom: 23px;
     height: 1px;
     background: var(--border);
   }
 
+  /* The scale hangs BELOW the rule; notches rise above it (#406). They used to
+     share the band above the line — 1px of width and one step of neutral grey
+     apart — so a notch landing on `1h` was hard to pick out and the tick's
+     label read as an annotation *of that notch*. The notch could not be the
+     thing that moved: its position **is** the timeline (§D/§E). Two marks on
+     opposite sides of one line can never be the same mark in the same place,
+     whatever the spacing does. */
   .tick {
     position: absolute;
-    bottom: 8px;
-    transform: translateX(-50%);
+    bottom: 23px;
+    transform: translate(-50%, 100%);
     display: flex;
     flex-direction: column;
     align-items: center;
@@ -354,7 +351,7 @@
 
   .notch {
     position: absolute;
-    bottom: 8px;
+    bottom: 23px;
     transform: translateX(-50%);
     width: 14px;
     padding: 0;

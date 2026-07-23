@@ -97,6 +97,36 @@ beforeEach(() => {
   listSnapshots.mockReset();
 });
 
+describe("the order the strip holds", () => {
+  // The backend lists by record time; the strip lays out by content time
+  // (#458). Where the two disagree — a restore from backup, a cloud sync, an
+  // NTP correction — the controller has to hold the layout order, or ← / →
+  // walk one sequence while the eye reads another.
+  it("re-orders the listing by content time on load", async () => {
+    const older = { ...SNAPSHOT, id: "older", captured_at: "2026-07-22T09:00:00.000000+00:00", content_written_at: "2026-07-22T08:00:00.000000+00:00" };
+    const newer = { ...SNAPSHOT, id: "newer", captured_at: "2026-07-22T10:00:00.000000+00:00", content_written_at: "2026-07-01T08:00:00.000000+00:00" };
+    listSnapshots.mockResolvedValue({ snapshots: [older, newer] });
+    const strip = new SnapshotStripController();
+    strip.load("scene_1");
+    await vi.waitFor(() => expect(strip.snapshots.length).toBe(2));
+    expect(strip.snapshots.map((item) => item.id)).toEqual(["newer", "older"]);
+  });
+
+  it("steps ← from Live onto the notch nearest Live", async () => {
+    // `step` walks the same array the notches are drawn from, so "the newest"
+    // has to mean the rightmost one — which is the newest CONTENT.
+    const older = { ...SNAPSHOT, id: "older", captured_at: "2026-07-22T09:00:00.000000+00:00", content_written_at: "2026-07-22T08:00:00.000000+00:00" };
+    const newer = { ...SNAPSHOT, id: "newer", captured_at: "2026-07-22T10:00:00.000000+00:00", content_written_at: "2026-07-01T08:00:00.000000+00:00" };
+    listSnapshots.mockResolvedValue({ snapshots: [older, newer] });
+    diffSnapshot.mockImplementation(async () => diff());
+    const strip = new SnapshotStripController();
+    strip.load("scene_1");
+    await vi.waitFor(() => expect(strip.snapshots.length).toBe(2));
+    strip.step(-1);
+    await vi.waitFor(() => expect(strip.parked).toBe("older"));
+  });
+});
+
 describe("parking", () => {
   it("keeps the runs and the field pairs from the one call", async () => {
     const strip = await parked(async () => diff());

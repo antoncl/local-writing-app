@@ -285,8 +285,17 @@ second file bearing a live scene's id is an index collision, not a historical re
   front matter included. It therefore still carries the *source* node's id, which is correct: it is a
   photograph of that file.
 - `snapshots/<source-node-id>/<snapshot-id>.yaml` — the snapshot's own record: `id`, `snapshot_of`
-  (the source node id), `captured_at`, `retention`, the `schema_version` in force at capture, and the
-  witness.
+  (the source node id), `captured_at`, `content_written_at`, `retention`, the `schema_version` in
+  force at capture, and the witness.
+
+  **The record carries two times** (#458, 2026-07-23). `captured_at` is when the record was made:
+  monotonic, so it is the listing's sort key and what thinning means by "the oldest".
+  `content_written_at` is the scene file's mtime at capture — when the bytes it copied were written
+  — and it is what ADR-0044's strip positions and labels by, because the automatic trigger fires
+  *before* the save and so photographs the previous sitting's prose. Two facts and not one: captures
+  of unchanged content share an mtime, so content time ties where creation time cannot. A snapshot
+  taken before the field existed reads back with `content_written_at` falling back to `captured_at`
+  — exactly what such a record has always displayed — because a stored snapshot is never rewritten.
 
   The sidecar carries no denormalized copy of the scene's `title`. An earlier draft did, first to let
   an orphan listing render a name, then — once orphans were retired — on the argument that `title` is

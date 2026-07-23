@@ -75,18 +75,24 @@ backwards, which is the worse kind of consistency.
 ### D. Spacing is the timeline, and it cannot be linear
 
 Notches sit at their **age**, so the gaps carry meaning: a tight cluster is an afternoon's work, a
-long run is a week away from the scene.
-
-> **The age of the *content*, not of the record** (#458, 2026-07-23). An automatic capture fires
-> before the save, so its bytes are the previous sitting's while its record is made at the start of
-> this one — the two can be a fortnight apart. Explicit captures were dated correctly, so laying out
-> by record time meant automatic and explicit notches on the same track described different things
-> with nothing to tell them apart. The sidecar carries both times; the strip reads
-> `content_written_at`. Record time stays the sort and thinning key, because repeated captures of
-> unchanged content share an mtime and content time therefore has ties where an ordering cannot. Edits cluster, which is precisely why the spacing is worth
+long run is a week away from the scene. Edits cluster, which is precisely why the spacing is worth
 having — and precisely why linear time fails. One snapshot from last week plus four from this
 morning piles the recent four into an unreadable clump at the right edge, and those are the ones an
 author reaches for.
+
+> **Whose age: the *content*'s, not the record's** (#458, 2026-07-23). An automatic capture fires
+> before the save, so its bytes are the previous sitting's while its record is made at the start of
+> this one — the two can be a fortnight apart. Explicit captures were dated correctly, so laying
+> out by record time meant automatic and explicit notches on the same track described different
+> things with nothing to tell them apart. The sidecar carries both times; the strip positions and
+> labels by `content_written_at`.
+>
+> **Record time stays the sort and thinning key**, and the two keys are not interchangeable:
+> repeated captures of unchanged content share an mtime, so content time has ties where creation
+> time cannot. What follows is that the *listing* order and the *layout* order can disagree —
+> whenever an mtime moves backwards relative to record order (a restore from backup, a cloud sync,
+> an NTP correction) — and the strip must hold the layout order, or ← / → walk one sequence while
+> the eye reads another.
 
 **A log scale** spreads recent history and compresses deep history. Faint `1h / 1d / 1w` ticks make
 the scale legible rather than merely implied, and a minimum gap keeps notches from touching however
@@ -95,6 +101,12 @@ they bunch.
 **Known ambiguity, stated so it is not later mistaken for a defect:** under keep-five thinning, a gap
 can mean *"a week passed"* or *"a snapshot used to be there"*. A lone explicit notch far left is
 "the oldest thing I chose to keep", not "the oldest thing that existed".
+
+**A second one, from #458's two keys:** captures of *unchanged* content share a content time, so the
+minimum-gap pass draws them a gap apart although no time passed between them. On a surface whose
+premise is "spacing is the timeline" that gap encodes nothing — it is the price of notches that
+never touch and stay individually clickable. It is bounded and self-announcing: the notches carry
+identical date lines, which is the tell that the space between them is separation, not duration.
 
 ### E. Nothing inside the strip may change the track's width
 

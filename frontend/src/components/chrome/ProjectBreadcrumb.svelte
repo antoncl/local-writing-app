@@ -48,24 +48,30 @@
   recents menu instead. Absence of a path is a fact about the project, and
   stating it is what stops the switcher being mistaken for a crumb.
 
-  THE NOTE VOCABULARY (#427, and the two states #431 still owes):
+  THE NOTE VOCABULARY (#427):
   a `.chain-note` is a quiet, non-navigable statement living inside the strip,
-  saying what the crumbs cannot. Three states share it, so the strip never
-  grows a second idiom for "this path is not what it appears":
+  saying what the crumbs cannot. Exactly ONE state uses it — the empty chain:
+  the note IS the strip, "Inherits from nothing" plus the remedy.
 
-    1. empty chain — this issue. The note IS the strip: "Inherits from
-       nothing", plus the remedy.
-    2. a gap in the chain (#431) — a note BETWEEN two crumbs, where the
-       undeclared intervening level would be.
-    3. a declared layer that stopped being a project (#431) — a note IN PLACE
-       OF the crumb it would have been.
+  #431 asked whether two more states earn a note: a GAP (a project declaring a
+  grandparent and skipping the parent) and a STALE layer (a declared ancestor
+  whose `project.yaml` was deleted). The answer is no, and it is settled at the
+  data layer rather than here. `_project_layer_folders` yields only folders that
+  are `is_project and inherited`, so neither ever reaches this component: a gap's
+  undeclared middle folder was never in the chain to begin with, and a stale
+  layer drops out the moment its manifest goes. There is nothing to mark because
+  there is nothing to render. The reasoning: a gap is a deliberate, legal
+  decluttering (an author foldering "Books/" under a series is not a defect), and
+  a "defective folder" — a plausible-looking tree with no `project.yaml` — cannot
+  be told apart from an ordinary folder with any confidence, so marking one would
+  be a guess. The broken layer that IS repairable still surfaces where the repair
+  lives: the declaration editor's `stale` row (`declarationRows`), not here.
 
-  The separators carry the distinction and must stay disjoint: `›` is only ever
-  a real hop between two layers, so a note is never joined to anything by one.
-  `·` joins a statement to its remedy, and carries no navigational claim. The
-  glyph question `›` itself raises (#304 — it is not in the closed lexicon of
-  `docs/design/design-language.md` §4) is inherited, not widened: `·` is
-  punctuation between words, not a glyph standing for an operation.
+  So `›` is only ever a real hop between two layers, and `·` only ever joins a
+  statement to its remedy — the two separators stay disjoint and neither carries
+  the other's claim. The glyph question `›` itself raises (#304 — it is not in
+  the closed lexicon of `docs/design/design-language.md` §4) is inherited, not
+  widened: `·` is punctuation between words, not a glyph standing for an operation.
 -->
 {#if crumbs.length > 0}
   <nav class="project-chain" aria-label="Project chain">

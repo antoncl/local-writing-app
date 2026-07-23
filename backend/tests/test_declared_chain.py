@@ -295,10 +295,14 @@ class TheResolvedChainReachesTheWireTests(DeclaredChainTestCase):
         self.assertEqual(self._chain(), [("Book 1", "book01", True)])
 
     def test_a_declared_folder_that_is_not_a_project_is_not_in_the_chain(self) -> None:
-        """The `is_project` half of the rule. A declared folder whose manifest
-        was deleted keeps its declaration — `declared_ancestor_warnings` says
-        so out loud rather than dropping it silently — but it contributes
-        nothing, so it is not a layer and has no label to render."""
+        """The `is_project` half of the rule, and #431's stale-layer decision:
+        a declared folder whose manifest was deleted keeps its declaration —
+        `declared_ancestor_warnings` and the declaration editor's `stale` row
+        say so where the repair lives — but it contributes nothing, so it is
+        not a layer and gets no crumb. #431 settled that the bar does NOT mark
+        it: a "defective folder" cannot be told from an ordinary one with any
+        confidence, so a mark would be a guess. It vanishes from the chain by
+        design, not by oversight."""
         make_project_folder(self.service, self.universe, "The Honorverse")
         declare(self.service, self.root, [self.universe])
         (self.universe / "project.yaml").unlink()
@@ -330,9 +334,11 @@ class TheResolvedChainReachesTheWireTests(DeclaredChainTestCase):
 
     def test_a_gap_is_carried_as_declared(self) -> None:
         """Declaring a grandparent without its parent is legal upstream, so the
-        chain reports two layers with a folder between them. Whether the BAR
-        should say so is #431; this pins that the data does not quietly fill
-        the gap in."""
+        chain reports two layers with a folder between them. #431 settled that
+        the bar does NOT mark the gap — the undeclared middle folder simply
+        never enters the chain — and this pins the data side of that: the walk
+        does not quietly fill the gap in, so there is no phantom layer for the
+        bar to render or to flag."""
         make_project_folder(self.service, self.universe, "The Honorverse")
         make_project_folder(self.service, self.series, "Honor Harrington")
         declare(self.service, self.root, [self.universe])

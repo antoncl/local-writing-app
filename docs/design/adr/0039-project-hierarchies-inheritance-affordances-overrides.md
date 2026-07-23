@@ -207,6 +207,23 @@ inference the app has to make. This is the same principle the ADR already applie
 divergence must be explicit. Inferring an inheritance structure from where a folder happens to sit is
 exactly the implicit magic that auto-shadow-on-edit is rejected for.
 
+> **Rejected: the breadcrumb marks the gap, or a stale layer (2026-07-23, #431).** A legitimate gap
+> raises a presentation question the level switcher (slice C) must answer: should it *show* that a
+> declared ancestor is not the open project's immediate parent — a distinct separator, an ellipsis
+> crumb, the undeclared middle level in an inactive treatment? **It renders nothing.** A gap is a
+> deliberate, legal choice — an author foldering `Books/` under a series to declutter is not a defect —
+> and the honest rendering of a declared *set* is the declared layers, drawn contiguously. The sibling
+> case, a declared ancestor whose `project.yaml` was later deleted, is likewise unmarked *in the bar*:
+> telling a "defective folder" (a plausible-looking tree that has lost its manifest) from an ordinary
+> organizational folder cannot be done with any confidence, so a mark would be a guess, not a fact.
+> This is settled at the data layer, not in the component — `_project_layer_folders` yields only folders
+> that are `is_project and inherited`, so neither a gap's middle folder nor a stale layer ever reaches
+> the breadcrumb; there is nothing to mark because there is nothing to render. The stale layer that *is*
+> repairable still surfaces where the repair lives — the declaration editor's `stale` row and
+> `declared_ancestor_warnings` — never in the top chrome. What #431 originally read as an overclaim (the
+> bar "draws a path" over a set) is resolved by the presentation being strictly the declared set: the
+> only path it can draw is the one the author declared.
+
 **Rejected: a `parent:` link resolved transitively.** Superficially cleaner — one field, chain by
 transitivity, gaps free. But a link is *data in a user-editable file*, so `A → B → C → A` is reachable
 by hand-editing `project.yaml`, and the app would need cycle detection on every chain resolution to

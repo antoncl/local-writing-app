@@ -417,6 +417,113 @@ class ReadSideHealingCoversMoreThanSceneAndLoreTests(ReferencePurgeTestCase):
         self.assertEqual(self.service.read_project_node().metadata.get("ally"), ["seren"])
 
 
+class ReadSideHealingRespectsLayerScopeTests(unittest.TestCase):
+    """The healer may only hide an id when the index it consulted is a complete
+    answer to "does this id exist".
+
+    Two projects, because the counter-example needs two. The **machine layer**
+    is out-of-tree and global: one assistant roster shared by every project, so
+    a machine assistant's references can point into any of them while the open
+    project's index knows exactly one. Healing it there deletes its links into
+    every other project the user owns — silently on read, and for real the
+    moment the frontend saves the entry back.
+
+    Caught reviewing #345, which introduced it: the first gate was "a project is
+    open", which is necessary and not sufficient. This is #379's rule one layer
+    over — an id missing from a PARTIAL index is unknown, not gone.
+    """
+
+    def setUp(self) -> None:
+        self.temp_dir = TemporaryDirectory()
+        self.base = Path(self.temp_dir.name).resolve() / "writing"
+        self.book1 = self.base / "book01"
+        self.book2 = self.base / "book02"
+        for path, title in ((self.book1, "Book 1"), (self.book2, "Book 2")):
+            declare_full_chain(ProjectService.created_at(path, title), path, self.base)
+        for path in (self.book1, self.book2):
+            self._add_ally(path)
+
+    def tearDown(self) -> None:
+        self.temp_dir.cleanup()
+
+    def _add_ally(self, root: Path) -> None:
+        """`ally` on assistants in BOTH books, so the schema is not the variable
+        under test — only which project is open."""
+        service = ProjectService.opened_at(root)
+        schema_path = root / "metadata.schema.yaml"
+        data = service._read_yaml(schema_path)
+        data.setdefault("fields", {})["ally"] = {"name": "Ally", "type": "entity_ref_list"}
+        types = data.setdefault("entry_types", {})
+        definition = types.get("assistant:assistant") or {}
+        fields = list(definition.get("fields") or [])
+        if "ally" not in fields:
+            fields.insert(0, "ally")
+        definition["fields"] = fields
+        types["assistant:assistant"] = definition
+        service._write_yaml(schema_path, data)
+
+    def _machine_assistant_pointing_into_book1(self) -> Path:
+        service = ProjectService.opened_at(self.book1)
+        (self.book1 / "lore").mkdir(parents=True, exist_ok=True)
+        service._write_markdown_with_front_matter(
+            self.book1 / "lore" / "seren.md",
+            {"id": "seren", "title": "Seren", "entry_type": "lore:character", "metadata": {}},
+            "Body.",
+        )
+        from app.services import machine_settings as ms_service
+
+        roster = ms_service.assistants_dir()
+        roster.mkdir(parents=True, exist_ok=True)
+        path = roster / "roster.md"
+        service._write_markdown_with_front_matter(
+            path,
+            {
+                "id": "asst_machine",
+                "title": "Editor",
+                "entry_type": "assistant:assistant",
+                "metadata": {"ally": ["seren"]},
+            },
+            "",
+        )
+        return path
+
+    def test_a_machine_assistants_reference_survives_opening_another_project(self) -> None:
+        self._machine_assistant_pointing_into_book1()
+
+        with_book1 = ProjectService.opened_at(self.book1).read_assistant_entry("asst_machine")
+        with_book2 = ProjectService.opened_at(self.book2).read_assistant_entry("asst_machine")
+
+        # `seren` is nowhere in book02's chain, and that is not evidence of
+        # anything: book02's index was never asked about book01.
+        self.assertEqual(with_book1.metadata.get("ally"), ["seren"])
+        self.assertEqual(
+            with_book2.metadata.get("ally"),
+            ["seren"],
+            "opening a different project hid a machine assistant's reference into this one",
+        )
+
+    def test_a_project_layer_assistant_still_heals(self) -> None:
+        """The guard must not switch healing off for assistants generally — a
+        project-layer assistant IS in the open chain, so the chain's index is a
+        complete answer for it."""
+        service = ProjectService.opened_at(self.book1)
+        (self.book1 / "assistants").mkdir(parents=True, exist_ok=True)
+        assistant = self.book1 / "assistants" / "local.md"
+        service._write_markdown_with_front_matter(
+            assistant,
+            {
+                "id": "asst_local",
+                "title": "Local",
+                "entry_type": "assistant:assistant",
+                "metadata": {"ally": ["ghost"]},
+            },
+            "",
+        )
+
+        self.assertEqual(service.read_assistant_entry("asst_local").metadata.get("ally"), [])
+        self.assertIn("ghost", assistant.read_text(encoding="utf-8"))
+
+
 class PurgeStaysInTheCallersProjectTests(unittest.TestCase):
     """The purge rewrites files, so it must rewrite the project the delete
     belongs to (#381, #399).

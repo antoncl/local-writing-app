@@ -368,12 +368,26 @@ class AssistantEntriesMixin:
         if not isinstance(raw_entry_type, str):
             raise ProjectServiceError(f"Assistant {node_id} has invalid entry_type; it must be text.", 422)
         metadata = self._normalise_metadata(front_matter.get("metadata"), path)
-        # Read-side healing (#345) — but only with a project open. Without one
-        # `_build_assistant_index` covers the machine layer alone, so every
-        # reference into a project would look dangling and get hidden; the next
-        # save would then persist that as the truth. Same reasoning as #379's
-        # purge guard: an id missing from a partial index is unknown, not gone.
-        if self.root_path is not None:
+        # Read-side healing (#345), under one rule: heal only when the index
+        # answering "does this id still exist" covers the same ground the
+        # node's references can reach. Two ways it does not, and both end in
+        # the frontend persisting the loss on the next save:
+        #
+        # **No project open.** `_build_assistant_index` is then machine-only,
+        # so every reference into any project reads as dangling.
+        #
+        # **A machine-layer assistant.** It is global — one roster shared by
+        # every project — so its references can point into any of them, while
+        # the open project's index knows exactly one. Healing it there deletes
+        # its links into every other project the user owns.
+        #
+        # Same rule as #379's purge guard, applied to layer scope instead of
+        # parse failures: an id missing from a PARTIAL index is unknown, not
+        # gone. Project-layer assistants are in the open chain, so the chain's
+        # index is a complete answer for them and they heal normally.
+        machine_layer = self.machine_layer()
+        on_machine_layer = machine_layer is not None and index_entry.source_layer_id == machine_layer.id
+        if self.root_path is not None and not on_machine_layer:
             metadata = self._strip_dangling_references(metadata, self.read_metadata_schema(), index)
         return AssistantEntry(
             id=node_id,

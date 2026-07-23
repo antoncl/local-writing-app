@@ -57,7 +57,9 @@ Out of scope:
 - Semantic rename/global replace beyond basic search.
 
 AI is off by default: a project's `ai_policy` starts at `off` and must be
-raised to `local-only` or `cloud-allowed` deliberately. Credentials live in
+raised to `local-only` or `cloud-allowed` deliberately. It resolves over the
+declared layer chain — nearest layer that states one wins, none anywhere means
+`off` — so a universe can raise it once for every book beneath it. Credentials live in
 per-machine settings, never in the project folder.
 
 ## Engineering Notes

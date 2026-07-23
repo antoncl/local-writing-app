@@ -59,6 +59,12 @@ class ProjectSession {
   // saves (which can change the default folder).
   recentProjects = $state<RecentProject[]>([]);
 
+  // True for the whole of `setDeclaration` — the request AND the project-data
+  // reload that follows it. The Project pane reads it to disable the
+  // inheritance checkboxes, because a second tick mid-flight would be computed
+  // from the enumeration the first one is about to replace (#426).
+  declarationSaving = $state(false);
+
   // ---- Injected host hooks (set in App.onMount) ----
   // Wraps an action in App's run() so errors surface in App's `error`; returns
   // false when the action threw (used by rehydrate to detect a failed re-open).
@@ -232,12 +238,11 @@ class ProjectSession {
   // checkbox click would discard the reason the author is looking at the pane.
   // Nothing here changes the resolution scope, so it is not a unit boundary
   // (ADR-0045) — only the layers behind it.
-  // Held for the whole round trip, reload included, and read by the pane to
-  // disable the boxes. Each request is derived from the enumeration currently
-  // on screen, so overlapping saves would compute from a stale one and undo
-  // each other — the second tick of a fast double-click would drop the first.
-  declarationSaving = $state(false);
-
+  //
+  // Rejects an overlapping call rather than queueing it: each request is
+  // derived from the enumeration on screen, so a second one issued mid-flight
+  // would compute from a stale one and undo the first. `declarationSaving`
+  // disables the boxes, and the pane puts the rejected box back.
   async setDeclaration(paths: string[]): Promise<boolean> {
     if (this.declarationSaving) return false;
     this.declarationSaving = true;

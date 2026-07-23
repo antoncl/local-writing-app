@@ -16,6 +16,11 @@
 export interface AutosaveSchedulerOptions {
   // Idle debounce before an autosave fires.
   idleMs: number;
+  // Ceiling on how long a pane may stay dirty while the author keeps typing.
+  // Required rather than optional: without it the idle debounce alone bounds
+  // nothing, and that has to be a decision at every construction site rather
+  // than a default someone can forget (#369).
+  maxWaitMs: number;
   // How long the "Saved" indicator stays up after a successful save.
   indicatorMs: number;
   shouldSave: (id: string) => boolean;
@@ -27,34 +32,69 @@ export class AutosaveScheduler {
   #opts: AutosaveSchedulerOptions;
   // Per-pane pending timers, keyed by pane id.
   #saveTimers = new Map<string, ReturnType<typeof setTimeout>>();
+  // Per-pane ceiling timers: at most one live per dirty run, never re-armed
+  // while that run continues.
+  #ceilingTimers = new Map<string, ReturnType<typeof setTimeout>>();
   #indicatorTimers = new Map<string, ReturnType<typeof setTimeout>>();
 
   constructor(opts: AutosaveSchedulerOptions) {
     this.#opts = opts;
   }
 
-  // (Re)arm the idle debounce for a pane. Cancels any pending timer first, then
-  // schedules a fresh one only if the pane currently wants saving. The fire-time
-  // re-check via `shouldSave` guards against the pane no longer being dirty (or
-  // having become a non-savable kind) by the time the timer elapses.
+  // (Re)arm the idle debounce for a pane. Cancels any pending idle timer first,
+  // then schedules a fresh one only if the pane currently wants saving. The
+  // fire-time re-check via `shouldSave` guards against the pane no longer being
+  // dirty (or having become a non-savable kind) by the time the timer elapses.
+  //
+  // The ceiling is armed once per dirty run and deliberately NOT re-armed by
+  // later keystrokes. That asymmetry is the whole mechanism: the idle timer is
+  // the one keystrokes push out, and the ceiling is the one they cannot. With
+  // only the idle timer, an author typing without a full `idleMs` gap never
+  // saves at all — the exposure is the length of the burst, not `idleMs` (#369).
   schedule(id: string): void {
-    this.cancel(id);
-    if (!this.#opts.shouldSave(id)) return;
-    const timer = setTimeout(() => {
-      this.#saveTimers.delete(id);
-      if (!this.#opts.shouldSave(id)) return;
-      this.#opts.save(id);
-    }, this.#opts.idleMs);
-    this.#saveTimers.set(id, timer);
+    this.#clearIdle(id);
+    if (!this.#opts.shouldSave(id)) {
+      // Nothing to save any more, so the run is over and its ceiling with it.
+      this.#clearCeiling(id);
+      return;
+    }
+    this.#saveTimers.set(id, setTimeout(() => this.#fire(id), this.#opts.idleMs));
+    if (!this.#ceilingTimers.has(id)) {
+      this.#ceilingTimers.set(id, setTimeout(() => this.#fire(id), this.#opts.maxWaitMs));
+    }
   }
 
-  // Cancel a pane's pending autosave (manual save / teardown).
-  cancel(id: string): void {
+  // Whichever timer got there first ends the run: both are dropped, then the
+  // same fire-time `shouldSave` re-check applies.
+  #fire(id: string): void {
+    this.#clearIdle(id);
+    this.#clearCeiling(id);
+    if (!this.#opts.shouldSave(id)) return;
+    this.#opts.save(id);
+  }
+
+  #clearIdle(id: string): void {
     const timer = this.#saveTimers.get(id);
     if (timer !== undefined) {
       clearTimeout(timer);
       this.#saveTimers.delete(id);
     }
+  }
+
+  #clearCeiling(id: string): void {
+    const timer = this.#ceilingTimers.get(id);
+    if (timer !== undefined) {
+      clearTimeout(timer);
+      this.#ceilingTimers.delete(id);
+    }
+  }
+
+  // Cancel a pane's pending autosave (manual save / teardown). Ends the run, so
+  // it drops the ceiling too — a pane that is being torn down or has just been
+  // saved by hand has nothing left to bound.
+  cancel(id: string): void {
+    this.#clearIdle(id);
+    this.#clearCeiling(id);
   }
 
   // Show the "Saved" indicator for `indicatorMs`, then clear it. Re-arming
@@ -81,8 +121,10 @@ export class AutosaveScheduler {
   // Clear every pending timer (app unmount / shutdown).
   dispose(): void {
     for (const timer of this.#saveTimers.values()) clearTimeout(timer);
+    for (const timer of this.#ceilingTimers.values()) clearTimeout(timer);
     for (const timer of this.#indicatorTimers.values()) clearTimeout(timer);
     this.#saveTimers.clear();
+    this.#ceilingTimers.clear();
     this.#indicatorTimers.clear();
   }
 }

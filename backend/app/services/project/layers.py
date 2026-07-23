@@ -234,9 +234,9 @@ class LayerWalkMixin:
             return None
         return machine_dir
 
-    def ancestor_candidates(self, root: Path) -> list[tuple[Path, bool, bool]]:
+    def ancestor_candidates(self, root: Path) -> list[tuple[Path, bool]]:
         """Every folder between the machine root and `root`, outermost first,
-        as `(folder, is_project, inherited)` (#309).
+        as `(folder, is_project)` (#309).
 
         The candidate set is the **filesystem walk**, which is finite and
         cycle-free by construction — ADR-0039 Amendment 1 rejected a
@@ -248,6 +248,23 @@ class LayerWalkMixin:
         can never be inherited (there is no `project.yaml` to layer), but
         omitting them from the enumeration would leave a hole in the wizard's
         list that reads as a defect rather than as information.
+
+        **This is the walk alone, and it parses nothing** (#460). It used to
+        carry a third `inherited` flag, which three of its five consumers threw
+        away — and that flag was the only reason the walk read a manifest, so
+        it was also the only thing in the walk that could fail. On the create
+        path (#425) that turned a `project.yaml` the scaffold was about to
+        overwrite into a 422. The declaration is an overlay now:
+        `declared_ancestor_candidates` puts it back for the two consumers that
+        want it, and `ancestor_projects` answers the narrower question the rest
+        were really asking.
+
+        An optional `with_declaration=` flag was rejected. It must either
+        change the tuple's arity — two methods wearing one name — or fill
+        `inherited=False` when not requested, and `_project_layer_folders`
+        filters on exactly that field: a caller passing the wrong flag would
+        get a silently **flat chain** rather than an error, because "nobody
+        asked" and "not declared" would be the same value.
 
         Took a pending `base` override until #429, so that a settings update
         widening `projects_base_folder` and declaring a newly-eligible ancestor
@@ -264,12 +281,35 @@ class LayerWalkMixin:
         chain = [root, *root.parents]
         if base_folder is None or base_folder not in chain:
             return []
-        declared = self._declared_ancestors(root)
         ancestors = list(reversed(chain[: chain.index(base_folder) + 1]))[:-1]
+        return [(folder, (folder / MANIFEST_FILENAME).exists()) for folder in ancestors]
+
+    def declared_ancestor_candidates(self, root: Path) -> list[tuple[Path, bool, bool]]:
+        """The walk with the declaration on it, as `(folder, is_project,
+        inherited)` (#460).
+
+        The one place the enumeration and `root`'s own `inherits:` are joined,
+        and therefore the one place the walk reads a manifest. Two consumers
+        need it: the layer chain (`_project_layer_folders`) and the wizard's
+        row states (`_ancestor_candidates_for_api`). Everything else wants
+        either the bare walk or `ancestor_projects`.
+        """
+        declared = self._declared_ancestors(root.resolve())
         return [
-            (folder, (folder / MANIFEST_FILENAME).exists(), folder in declared)
-            for folder in ancestors
+            (folder, is_project, folder in declared)
+            for folder, is_project in self.ancestor_candidates(root)
         ]
+
+    def ancestor_projects(self, root: Path) -> list[Path]:
+        """The ancestor folders that are projects, outermost first (#460).
+
+        The question four call sites were open-coding as a filter over the
+        walk — validation, the create default, the warning report, and the
+        layer chain. One name so that a change to what counts as a project
+        (#441's enforcement, #430's malformed manifests) lands in one place
+        rather than in whichever three of the four someone remembers.
+        """
+        return [folder for folder, is_project in self.ancestor_candidates(root) if is_project]
 
     def _declared_ancestors(self, root: Path) -> set[Path]:
         """The folders `root`'s manifest says it inherits from, resolved.
@@ -320,8 +360,8 @@ class LayerWalkMixin:
         is least affordable.
         """
         root = root.resolve()
-        candidates = {folder for folder, _, _ in self.ancestor_candidates(root)}
-        projects = {folder for folder, is_project, _ in self.ancestor_candidates(root) if is_project}
+        candidates = {folder for folder, _ in self.ancestor_candidates(root)}
+        projects = set(self.ancestor_projects(root))
         declared = self._declared_ancestors(root)
         return [
             f"Project declares inheritance from {folder}, which is not an ancestor "
@@ -359,7 +399,7 @@ class LayerWalkMixin:
         root = root.resolve()
         return [
             folder
-            for folder, is_project, inherited in self.ancestor_candidates(root)
+            for folder, is_project, inherited in self.declared_ancestor_candidates(root)
             if is_project and inherited
         ] + [root]
 

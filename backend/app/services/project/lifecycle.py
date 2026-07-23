@@ -128,14 +128,17 @@ class ProjectLifecycleMixin:
         Both paths go through `_validated_declaration`, so there is one writer
         of the stored (project-relative) form, and an explicitly requested
         non-ancestor is refused here exactly as it is on a settings save.
+
+        `ancestor_projects` rather than the declared walk, deliberately (#460):
+        a project being created has no declaration to read, and reading for one
+        anyway meant parsing the `project.yaml` the scaffold is about to
+        overwrite — which turned a stale malformed file in the target folder
+        into a 422 on create.
         """
-        if requested is None:
-            requested = [
-                str(folder)
-                for folder, is_project, _ in self.ancestor_candidates(root)
-                if is_project
-            ]
-        return self._validated_declaration(requested, root)
+        entries = requested if requested is not None else [
+            str(folder) for folder in self.ancestor_projects(root)
+        ]
+        return self._validated_declaration(entries, root)
 
     def _new_project_manifest(self, title: str, inherits: list[str]) -> dict[str, Any]:
         """The manifest a fresh project starts with.
@@ -251,7 +254,7 @@ class ProjectLifecycleMixin:
                 inherited=inherited,
                 title=self._readable_project_title(folder) if is_project else None,
             )
-            for folder, is_project, inherited in self.ancestor_candidates(root)
+            for folder, is_project, inherited in self.declared_ancestor_candidates(root)
         ]
 
     def _readable_project_title(self, folder: Path) -> str | None:
@@ -369,9 +372,7 @@ class ProjectLifecycleMixin:
         widening is not part of any project's save and there is no pending
         value to validate against.
         """
-        candidates = {
-            folder for folder, is_project, _ in self.ancestor_candidates(root) if is_project
-        }
+        candidates = set(self.ancestor_projects(root))
         entries: list[str] = []
         for raw in declared:
             folder = Path(raw).expanduser()

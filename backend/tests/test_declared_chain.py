@@ -389,10 +389,7 @@ class OneMachineRootMeansEveryLevelAgreesTests(unittest.TestCase):
         for root, ancestors in expected.items():
             with self.subTest(project=root.name):
                 service = ProjectService.opened_at(root)
-                projects = [
-                    folder for folder, is_project, _ in service.ancestor_candidates(root) if is_project
-                ]
-                self.assertEqual(projects, ancestors)
+                self.assertEqual(service.ancestor_projects(root), ancestors)
 
     def test_a_three_level_chain_is_declarable_and_walks_whole(self) -> None:
         """The demo that motivated #311, end to end."""
@@ -420,6 +417,40 @@ class OneMachineRootMeansEveryLevelAgreesTests(unittest.TestCase):
         self.assertEqual([layer.folder for layer in service.collect_layers(stray)], [stray])
         self.assertTrue(
             any("outside the machine's projects folder" in w for w in service.validate_project().warnings)
+        )
+
+
+class TheWalkIsSeparateFromTheDeclarationTests(DeclaredChainTestCase):
+    """#460 — the walk parses nothing; the declaration is an overlay.
+
+    It used to be one method returning `(folder, is_project, inherited)`, and
+    that third flag was the only reason the walk read a manifest. Three of five
+    consumers discarded it, and on the create path the discarded parse was the
+    only thing that could fail.
+    """
+
+    def test_the_walk_survives_the_projects_own_manifest_being_malformed(self) -> None:
+        """The property the split buys, stated as a property rather than as the
+        create-path symptom it was found through: enumerating a project's
+        ancestors is a filesystem question and must not depend on parsing that
+        project's own file."""
+        make_project_folder(self.service, self.universe)
+        (self.root / "project.yaml").write_text("title: X\n  bad: [unclosed\n", encoding="utf-8")
+
+        self.assertEqual(
+            self.service.ancestor_candidates(self.root),
+            [(self.base, False), (self.universe, True), (self.series, False)],
+        )
+        self.assertEqual(self.service.ancestor_projects(self.root), [self.universe])
+
+    def test_the_declared_overlay_still_reads_the_declaration(self) -> None:
+        """The two consumers that need `inherited` must still get it — the
+        split must not quietly turn every chain flat."""
+        declare(self.service, self.root, [self.universe])
+
+        self.assertEqual(
+            self.service.declared_ancestor_candidates(self.root),
+            [(self.base, False, False), (self.universe, True, True), (self.series, False, False)],
         )
 
 
@@ -501,6 +532,36 @@ class ANewProjectDeclaresItsAncestorsTests(unittest.TestCase):
         service = ProjectService.created_at(stray, "Orphan")
 
         self.assertEqual(service._read_yaml(stray / "project.yaml")["inherits"], [])
+
+    def test_the_machine_root_is_declared_when_it_is_itself_a_project(self) -> None:
+        """The enumeration's own boundary, which nothing else pins.
+
+        The root folder is a candidate like any other, so "every ancestor
+        project" includes it when it carries a manifest. The mirror case — a
+        project *outside* the root — is pinned above; this is the same edge
+        approached from the inside, and a change to the walk's slicing would
+        otherwise add or drop a layer on such a machine in silence.
+        """
+        (self.shelf / "project.yaml").write_text("title: The Shelf\n", encoding="utf-8")
+
+        service = ProjectService.created_at(self.universe, "The Honorverse")
+
+        self.assertEqual(service._read_yaml(self.universe / "project.yaml")["inherits"], [".."])
+
+    def test_creating_over_a_folder_whose_manifest_is_malformed_still_works(self) -> None:
+        """#460, from the create side. Resolving the default used to read the
+        target's own `project.yaml` for an `inherited` flag it discarded — so a
+        stale malformed file in the folder being scaffolded turned create into
+        a 422, naming a parse error for a file the very next line overwrites.
+        """
+        ProjectService.created_at(self.universe, "The Honorverse")
+        victim = self.universe / "half-made"
+        victim.mkdir()
+        (victim / "project.yaml").write_text("title: X\n  bad: [unclosed\n", encoding="utf-8")
+
+        service = ProjectService.created_at(victim, "Remade")
+
+        self.assertEqual(service._read_yaml(victim / "project.yaml")["inherits"], [".."])
 
     def test_an_explicit_declaration_is_honoured_verbatim(self) -> None:
         """`inherits` on the request is what #318's wizard will send. An empty

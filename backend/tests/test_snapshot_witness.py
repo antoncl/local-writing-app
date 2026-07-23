@@ -24,6 +24,7 @@ from app.models import (
     MetadataFieldDefinition,
     SaveLoreEntryRequest,
     SaveSceneRequest,
+    SelectOption,
     UpsertMetadataFieldRequest,
 )
 from app.services.project.snapshot_witness import (
@@ -121,6 +122,21 @@ class WitnessTestCase(unittest.TestCase):
                 entry_type="scene:scene",
                 metadata={"cast": cast} if cast is not None else {},
             ),
+        )
+
+    def _define_lore_field(self, field_id: str, field: MetadataFieldDefinition) -> None:
+        _define_field(self.service, field_id, field, "lore:character")
+
+    def _write_lore_front_matter(self, entity_id: str, metadata_yaml: str) -> None:
+        """Hand-author one metadata line into a lore file, bypassing the app's
+        writer — the case a file-based local-first app has to survive, and the
+        only way to produce YAML types the app itself never writes."""
+        path = self.service._path_for_node_id(entity_id, "lore")
+        entry = self.service.read_lore_entry(entity_id)
+        path.write_text(
+            f"---\nid: {entity_id}\ntitle: {entry.title}\n"
+            f"entry_type: {entry.entry_type}\nmetadata:\n  {metadata_yaml}\n---\n\n",
+            encoding="utf-8",
         )
 
     def _witness_for(self, entity_id: str, dynamic: list[str] | None = None):
@@ -225,20 +241,70 @@ class WitnessContentTests(WitnessTestCase):
         self.assertEqual(entity.field_types["eye_colour"].label, "Eye colour")
         self.assertEqual(entity.field_types["eye_colour"].type, "text")
 
-    def test_the_resolved_source_layer_is_recorded(self) -> None:
+    def test_the_resolved_source_layer_is_recorded_as_a_label(self) -> None:
         """Axis 5. Scope visibility is a property of the resolved index, not of
         any file, so no hash over bytes can see it — including the composite
         `revision` #314 introduces."""
         self._save_scene(cast=[self.tom])
         entity = self._witness_for(self.tom)
-        self.assertTrue(entity.source_layer_id)
+        self.assertTrue(entity.source_layer_label)
 
-    def test_the_body_is_never_recorded(self) -> None:
-        """Unbounded, and a body edit still reports at the floor through
-        `revision`. The witness stores what a report can name."""
-        self._save_lore(self.tom, "Tom", "A very long life story.")
+    def test_the_witness_never_stores_a_layer_id(self) -> None:
+        """`_layer_id_for_folder` is a hash of the resolved folder path, and
+        `layers.py` states the invariant: "the cache is safe only because layer
+        ids are never persisted… a path-hash id survives neither a moved project
+        folder nor a re-resolved symlink". A stored one would make axis 5 fire on
+        every witnessed entity of every existing snapshot after a folder move."""
         self._save_scene(cast=[self.tom])
-        self.assertNotIn("body", self._witness_for(self.tom).state)
+        self.assertNotIn("source_layer_id", self._witness_for(self.tom).model_dump())
+
+    def test_no_long_text_field_is_recorded(self) -> None:
+        """Unbounded, and an edit to one still reports at the floor through
+        `revision`. The witness stores what a report can name.
+
+        By **type**, not by field id. Excluding `body` alone read as if the rule
+        were about the intrinsic body, when the justification — "unbounded" — is
+        a statement about the type: a schema `long_text` is exactly as unbounded,
+        and was being copied verbatim into every entity of every sidecar."""
+        self._define_lore_field("notes", MetadataFieldDefinition(name="Notes", type="long_text"))
+        self._set_lore_field(self.tom, "notes", "A very long life story. " * 200)
+        self._save_lore(self.tom, "Tom", "A body nobody should store either.")
+        self._save_scene(cast=[self.tom])
+
+        state = self._witness_for(self.tom).state
+        self.assertNotIn("body", state)
+        self.assertNotIn("notes", state)
+        self.assertIn("eye_colour", state, "short fields are still recorded")
+
+    def test_the_field_options_travel_with_the_witness(self) -> None:
+        """Axis 3's constraint half. Every reinterpretation test hand-builds its
+        `WitnessFieldType`, so nothing exercised the producer — and a narrowed
+        select whose recorded value is now illegal is the case the module calls
+        "exactly what axis 3 fires on"."""
+        self._define_lore_field(
+            "rank",
+            MetadataFieldDefinition(
+                name="Rank",
+                type="select",
+                options=[SelectOption(value="Captain"), SelectOption(value="Commodore")],
+            ),
+        )
+        # The value has to exist: `field_types` covers the fields the witness
+        # actually recorded, which is `state`, not the whole schema.
+        self._set_lore_field(self.tom, "rank", "Captain")
+        self._save_scene(cast=[self.tom])
+        recorded = self._witness_for(self.tom).field_types["rank"]
+        self.assertEqual(recorded.type, "select")
+        self.assertEqual(recorded.options, ["Captain", "Commodore"])
+
+    def test_a_field_the_schema_does_not_define_carries_no_label(self) -> None:
+        """Empty, not the field id. The id looked like a harmless fallback but it
+        made every label truthy, so the comparison's fallback to the *captured*
+        label became unreachable and a dropped field was reported by its raw
+        id — in the one case the carried label exists for."""
+        self._write_lore_front_matter(self.tom, "unschemad: something")
+        self._save_scene(cast=[self.tom])
+        self.assertEqual(self._witness_for(self.tom).field_types["unschemad"].label, "")
 
     def test_the_revision_is_recorded_as_an_opaque_token(self) -> None:
         self._save_scene(cast=[self.tom])

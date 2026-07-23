@@ -31,12 +31,15 @@ scenes nobody had touched; the fix is structural, not a normalisation step.
 
 from __future__ import annotations
 
+from collections.abc import Iterable
 from dataclasses import dataclass
+from dataclasses import field as dc_field
 from pathlib import Path
 from typing import Any
 
 from app.models import Witness, WitnessEntity, WitnessFieldType
 from app.services.project.errors import ProjectServiceError
+from app.services.project.field_values import display_value as _display_value
 from app.services.project.lore_mutations import MutationsIndex
 
 # The structural cost bound the drift path needs (#409's lesson: an unbounded
@@ -54,15 +57,36 @@ MAX_WITNESS_ENTITIES = 200
 # than trusted. Typical is 2–3 ids.
 MAX_DYNAMIC_CONTEXT_IDS = 200
 
-# Never recorded in `state`: unbounded, and a body edit still reports at the
-# floor through `revision`. The witness stores what a report can *name*.
-UNWITNESSED_FIELDS = frozenset({"body"})
+# Field **types** never recorded in `state`: unbounded, and an edit to one still
+# reports at the floor through `revision`. The witness stores what a report can
+# *name*, and no report names a page of prose.
+#
+# By type, not by field id. Excluding `"body"` alone read as if the rule were
+# about the intrinsic body, when the justification — "unbounded" — is a
+# statement about the type: a schema `long_text` (a character's Notes, or the
+# `summary` and `dynamics` fields the default schema already ships) is exactly
+# as unbounded, and was being copied verbatim into every entity of every
+# sidecar. Measured at ~40x the size of the prose the snapshot exists to hold.
+UNWITNESSED_FIELD_TYPES = frozenset({"long_text"})
 
 # Membership provenance, in the order sources are unioned. Ordering is fixed so
 # a witness rebuilt from the same world is byte-identical.
 SOURCE_MUTATION = "mutation"
 SOURCE_ENTITY_REF = "entity_ref"
 SOURCE_DYNAMIC = "dynamic"
+
+
+@dataclass
+class _Member:
+    """One candidate entity while the membership pass runs.
+
+    `overrides` is carried from the pass that already resolved it, so
+    `effective_state` is computed once per entity rather than once to test
+    membership and again to record state.
+    """
+
+    overrides: dict[str, Any]
+    sources: list[str] = dc_field(default_factory=list)
 
 
 @dataclass(frozen=True)
@@ -95,7 +119,8 @@ class SnapshotWitnessMixin:
         dynamic_context: list[str] | None = None,
         *,
         index: MutationsIndex | None = None,
-    ) -> Witness:
+        also_resolve: Iterable[str] = (),
+    ) -> Witness | None:
         """The scene's immediate context, resolved as of that scene.
 
         `dynamic_context` distinguishes **not observed** (`None`) from
@@ -104,19 +129,34 @@ class SnapshotWitnessMixin:
         three, and the comparison narrows accordingly rather than reporting every
         implicitly-detected entity as removed.
 
+        `also_resolve` names entities to record the state of **without making
+        them members** (`sources` stays empty). The comparison passes the stored
+        witness's ids, so an entity that has since dropped out of the context can
+        still have its values named — see `_entity_drift`.
+
         `index` is threaded rather than rebuilt: `build_mutations_index` is the
-        expensive part of this request (1.16 s at 600 scenes), and a comparison
-        that also resolves names would otherwise build it twice. Count the
+        expensive part of this request (1.16 s at 600 scenes). Count the
         re-derivations of a shared traversal before adding a consumer.
 
-        A capture is never the reason a save fails, so this degrades to an empty
-        witness rather than raising: an absent witness reports as *no witness
-        recorded*, which is honest, while a failed save loses words.
+        **Returns `None` when the witness could not be built**, and a capture
+        then writes no witness at all. It used to return an empty `Witness()`,
+        which is a different and much worse thing: the comparison accepted it as
+        a real one and reported *nothing changed* — an affirmative all-clear from
+        a build that saw nothing, which is the exact claim ADR-0043's
+        degrade-coarsely rule says a witness must never make.
+
+        The exception net matches `_build_node_index`'s for the same schema read:
+        a bad schema shape arrives as a pydantic `ValidationError`, which is a
+        `ValueError`. Catching only `ProjectServiceError`/`OSError` let it escape
+        and 500 the save — breaking this method's own contract that a capture is
+        never the reason a save fails.
         """
         try:
-            return self._build_witness(scene_id, dynamic_context, index=index)
-        except (ProjectServiceError, OSError):
-            return Witness()
+            return self._build_witness(
+                scene_id, dynamic_context, index=index, also_resolve=also_resolve
+            )
+        except (ProjectServiceError, ValueError, OSError):
+            return None
 
     def _build_witness(
         self,
@@ -124,6 +164,7 @@ class SnapshotWitnessMixin:
         dynamic_context: list[str] | None,
         *,
         index: MutationsIndex | None,
+        also_resolve: Iterable[str],
     ) -> Witness:
         # One schema read, three derivations. `_mutation_field_types` reads it
         # again internally and the display maps would be a third — at ~10 ms a
@@ -141,98 +182,138 @@ class SnapshotWitnessMixin:
             options=options,
         )
 
-        ordered, truncated = self._witness_membership(scope, dynamic_context or [])
-        entities = [self._witness_entity(scope, entity_id, sources) for entity_id, sources in ordered]
+        ordered, truncated = self._witness_membership(
+            scope, dynamic_context or [], also_resolve
+        )
         recorded = [SOURCE_MUTATION, SOURCE_ENTITY_REF]
         if dynamic_context is not None:
             recorded.append(SOURCE_DYNAMIC)
         return Witness(
             truncated=truncated,
             sources_recorded=recorded,
-            entities=[e for e in entities if e is not None],
+            entities=[
+                self._witness_entity(scope, entity_id, member.sources, member.overrides)
+                for entity_id, member in ordered
+            ],
         )
 
     # ----- membership (drift axis 4's raw material) -------------------------
 
     def _witness_membership(
-        self, scope: _WitnessScope, dynamic_context: list[str]
-    ) -> tuple[list[tuple[str, list[str]]], bool]:
+        self,
+        scope: _WitnessScope,
+        dynamic_context: list[str],
+        also_resolve: Iterable[str],
+    ) -> tuple[list[tuple[str, _Member]], bool]:
         """The witnessed ids with their provenance, and whether the cap fired.
 
         Only ids that resolve to a **lore** entry in this scope are kept. An id
         that resolves to nothing is dropped rather than recorded as an absent
         entity: an entity that never participated must not be manufactured into
         the report (#409, narrowed).
-        """
-        sources: dict[str, list[str]] = {}
 
-        def add(entity_id: str, source: str) -> None:
+        The resolved overrides are **carried, not discarded**. This pass already
+        computes `effective_state` for every candidate and used to keep only its
+        truthiness, leaving `_witness_entity` to resolve each survivor a second
+        time — which, whenever an `add`/`remove` op is live, means a second
+        `read_lore_entry` per entity (a file read plus a schema merge).
+        """
+        members: dict[str, _Member] = {}
+
+        def add(entity_id: str, source: str, overrides: dict[str, Any] | None = None) -> None:
             entry = scope.node_index.by_id.get(entity_id)
             if entry is None or entry.kind != "lore":
                 return
-            bucket = sources.setdefault(entity_id, [])
-            if source not in bucket:
-                bucket.append(source)
+            member = members.get(entity_id)
+            if member is None:
+                member = _Member(
+                    overrides=self._resolve_overrides(scope, entity_id)
+                    if overrides is None
+                    else overrides
+                )
+                members[entity_id] = member
+            if source and source not in member.sources:
+                member.sources.append(source)
 
         for entity_id in scope.mutations.by_entity:
-            if self.effective_state(
-                entity_id, scope.scene_id, index=scope.mutations, field_types=scope.field_types
-            ):
-                add(entity_id, SOURCE_MUTATION)
+            overrides = self._resolve_overrides(scope, entity_id)
+            if overrides:
+                add(entity_id, SOURCE_MUTATION, overrides)
         for edge in scope.node_index.edges_by_src.get(scope.scene_id, []):
             add(edge.dst, SOURCE_ENTITY_REF)
         for entity_id in dynamic_context[:MAX_DYNAMIC_CONTEXT_IDS]:
             add(entity_id, SOURCE_DYNAMIC)
+        # Non-members: recorded so their values can still be compared, never
+        # counted as part of this scene's context. `add("")` adds no source.
+        for entity_id in also_resolve:
+            add(entity_id, "")
 
         # Sorted by id, not by discovery order: the witness is compared against
         # a later rebuild, and a list whose order depends on dict iteration
         # would make the cap drop a different tail each time.
-        ordered = sorted(sources.items())
+        ordered = sorted(members.items())
         truncated = len(ordered) > MAX_WITNESS_ENTITIES or len(dynamic_context) > MAX_DYNAMIC_CONTEXT_IDS
         return ordered[:MAX_WITNESS_ENTITIES], truncated
+
+    def _resolve_overrides(self, scope: _WitnessScope, entity_id: str) -> dict[str, Any]:
+        return self.effective_state(
+            entity_id, scope.scene_id, index=scope.mutations, field_types=scope.field_types
+        )
 
     # ----- one entity -------------------------------------------------------
 
     def _witness_entity(
-        self, scope: _WitnessScope, entity_id: str, sources: list[str]
-    ) -> WitnessEntity | None:
-        entry = scope.node_index.by_id.get(entity_id)
-        if entry is None:
-            return None
-        overrides = self.effective_state(
-            entity_id, scope.scene_id, index=scope.mutations, field_types=scope.field_types
-        )
+        self,
+        scope: _WitnessScope,
+        entity_id: str,
+        sources: list[str],
+        overrides: dict[str, Any],
+    ) -> WitnessEntity:
+        # Total, not optional: `_witness_membership.add()` already resolved this
+        # id against this same `node_index` and dropped anything that did not,
+        # so a `None` guard here would be a defence with no invariant behind it
+        # — and one no test could ever reach.
+        entry = scope.node_index.by_id[entity_id]
         base_title, base_metadata = self._witness_base_values(entry.path)
 
         # The resolved view: what this entity *was* at this scene. Stored values
         # with the live mutation overrides applied — not one or the other, since
         # a report that named only the stored value would be wrong inside an
         # interval, and one that named only the override would be empty outside.
+        def witnessed(key: str) -> bool:
+            return scope.field_types.get(key, "text") not in UNWITNESSED_FIELD_TYPES
+
         state: dict[str, Any] = {
-            key: value
-            for key, value in base_metadata.items()
-            if key not in UNWITNESSED_FIELDS
+            key: value for key, value in base_metadata.items() if witnessed(key)
         }
         state["title"] = base_title
         for key, value in overrides.items():
-            if key not in UNWITNESSED_FIELDS:
+            if witnessed(key):
                 state[key] = value
 
         return WitnessEntity(
             id=entity_id,
-            # A live title mutation wins even when it blanks the name (an
-            # intentional rename to empty), so the default is only consulted
-            # when no title mutation is in play — `or` would swallow "".
-            title=str(overrides.get("title", base_title or "")),
+            # Read off `state`, never recomputed. The effective-title rule was
+            # written twice — once building `state["title"]`, once as
+            # `str(overrides.get(...))` — and the `str()` in the second silently
+            # stringified what the first kept structured: retyping the intrinsic
+            # `title` to a collection made this the Python repr of a list, which
+            # the report then rendered as the entity's name.
+            title=_display_value(state.get("title")),
             sources=list(sources),
             revision=self._witness_revision(entry.path),
-            source_layer_id=entry.source_layer_id,
             source_layer_label=entry.source_layer_label,
             state=state,
-            overrides=sorted(key for key in overrides if key not in UNWITNESSED_FIELDS),
+            overrides=sorted(key for key in overrides if witnessed(key)),
             field_types={
                 key: WitnessFieldType(
-                    label=scope.labels.get(key, key),
+                    # Empty, not the field id, when the schema has no entry for
+                    # this key. The id looked like a harmless fallback but it
+                    # made every label truthy, so the comparison's own fallback
+                    # to the *captured* label became unreachable — and a field
+                    # the schema has since dropped, which is exactly what axis 3
+                    # fires on, was reported by its raw id.
+                    label=scope.labels.get(key, ""),
                     type=scope.field_types.get(key, ""),
                     options=scope.options.get(key, []),
                 )
@@ -249,21 +330,33 @@ class SnapshotWitnessMixin:
             return None
 
     def _witness_base_values(self, path: Path) -> tuple[str, dict[str, Any]]:
-        """The entry's stored title and metadata, read **without validation**.
+        """The entry's stored title and metadata, **normalised but not validated**.
 
         Deliberately not `read_lore_entry`: a witness is a historical record and
         one side of the comparison may not satisfy today's schema. Validating
         here would drop exactly the entity whose value became illegal — the case
         the drift report exists to announce.
+
+        **`_normalise_metadata` is not optional, though**, and skipping it was
+        two bugs at once. It is the same `str()` coercion `_snapshot_state` uses
+        one module over, for the same reason its docstring gives: an unquoted
+        YAML date loads as `datetime.date`, and since the *stored* side of the
+        witness goes through `model_dump(mode="json")` on the way to the sidecar
+        while the *live* side did not, the two rendered identically and compared
+        unequal — a drift row reading `Born: 1985-04-12 → 1985-04-12`, on every
+        park, forever, on a scene nobody had touched. It also coerces keys to
+        `str`, without which a hand-authored `metadata: {2019: …}` reached a
+        `str`-typed pydantic field and 500'd the author's save.
+
+        Both sides of a comparison must come off the same pipeline; this is that
+        pipeline for the witness.
         """
         try:
             front_matter = self._read_front_matter_only(path)
+            metadata = self._normalise_metadata(front_matter.get("metadata"), path)
         except (ProjectServiceError, OSError):
             return "", {}
-        metadata = front_matter.get("metadata")
-        if not isinstance(metadata, dict):
-            metadata = {}
-        return str(front_matter.get("title") or ""), dict(metadata)
+        return str(front_matter.get("title") or ""), metadata
 
     def _witness_schema(self) -> Any | None:
         """The merged schema, or `None` when it cannot be read.

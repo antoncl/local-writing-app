@@ -35,6 +35,7 @@ from typing import TYPE_CHECKING, Any
 from pydantic import ValidationError
 
 from app.models import Snapshot, SnapshotDetail, SnapshotList, Witness
+from app.models.snapshots import UNREADABLE_WITNESS_VERSION
 from app.services.migrations import CURRENT_VERSION
 from app.services.project.errors import ProjectServiceError
 
@@ -104,29 +105,40 @@ class SceneSnapshotsMixin:
             captured_at=str(data.get("captured_at") or ""),
             retention=retention,
             schema_version=int(data.get("schema_version") or 0),
-            witness=self._read_witness(data.get("witness")),
         )
 
-    @staticmethod
-    def _read_witness(raw: Any) -> Witness | None:
-        """The stored witness, or `None` when there isn't one.
+    def read_snapshot_witness(self, root: Path, node_id: str, snapshot_id: str) -> Witness | None:
+        """The witness stored beside one snapshot, or `None` when there isn't one.
 
-        Absent on every snapshot captured before slice 3, which the drift report
-        shows as *no witness recorded* — a third state, distinct from both
-        "unchanged" and "unknown".
+        Read here and **not** carried on `Snapshot`. The strip refetches the list
+        on every scene open and after every capture and restore, and a witness
+        holds up to 200 entities of resolved lore state — putting it on the
+        listing model shipped ~1.5 MB per refresh to a client with no field to
+        read it into. Only the comparison wants it, and it wants exactly one.
 
-        An unreadable witness is also `None` rather than an error. A witness is
-        evidence about the world, not part of the record that makes a snapshot
-        restorable: refusing to list or restore a snapshot because its witness
-        will not parse would let the advisory half break the half that holds the
-        words.
+        A witness that is present but will not parse is **not** reported as
+        absent. Absent means "this snapshot predates the witness — there is
+        nothing to compare"; a corrupt one is a witness *recorded under a shape
+        this build cannot read*, which is what `comparable=False` says. Those
+        used to produce byte-identical payloads, so the corrupt case rendered
+        nothing at all — no report, no note, no sign a comparison had been tried.
+
+        Never raises for the witness's sake. It is evidence about the world, not
+        part of the record that makes a snapshot restorable: refusing to restore
+        because a sidecar's advisory half will not parse would let it break the
+        half that holds the words.
         """
+        sidecar = self._snapshots_dir(root, node_id) / f"{snapshot_id}.yaml"
+        try:
+            raw = self._read_yaml(sidecar).get("witness")
+        except (ProjectServiceError, OSError):
+            return None
         if not isinstance(raw, dict):
             return None
         try:
             return Witness.model_validate(raw)
         except ValidationError:
-            return None
+            return Witness(version=UNREADABLE_WITNESS_VERSION)
 
     def _snapshot_records(self, root: Path, node_id: str) -> list[Snapshot]:
         """Every snapshot of `node_id`, oldest first.
@@ -184,13 +196,7 @@ class SceneSnapshotsMixin:
         root = self._require_project()
         path = self._path_for_node_id(scene_id, "scene")
         node_id = self._node_id_for_path(path)
-        return self._capture(
-            root,
-            node_id,
-            path,
-            retention="kept",
-            witness=self.build_witness(node_id, dynamic_context),
-        )
+        return self._capture(root, node_id, path, retention="kept", dynamic_context=dynamic_context)
 
     def _capture(
         self,
@@ -199,7 +205,7 @@ class SceneSnapshotsMixin:
         path: Path,
         *,
         retention: str,
-        witness: Witness | None = None,
+        dynamic_context: list[str] | None = None,
     ) -> Snapshot:
         """Copy `path`'s bytes into the store and write the sidecar beside them.
 
@@ -207,15 +213,26 @@ class SceneSnapshotsMixin:
         writer: the record must be what the file *was*, not what a serializer
         would make of it.
 
-        `witness` is written once, here, and never rewritten. **A witness
-        describes the bytes it accompanies** — letting a later save land a fresh
-        context set in an existing sidecar would leave the body at the start of
-        the session and the witness at its end, reporting drift against context
-        the snapshotted prose never had.
+        **The bytes are read before the witness is built**, and the order is the
+        invariant rather than an accident: *a witness describes the bytes it
+        accompanies*. Building the witness first — which is what passing it in as
+        an argument did — opened a window of the witness's own build time (tens
+        of milliseconds, plus the mutations index) in which another writer could
+        land, leaving the `.md` holding post-write bytes and the sidecar
+        describing the world before them.
+
+        The witness is written once, here, and never rewritten: letting a later
+        save land a fresh context set in an existing sidecar would leave the body
+        at the start of the session and the witness at its end.
+
+        `dynamic_context` keeps `None` ("not observed") distinct from `[]`
+        ("observed and empty") all the way down.
         """
         folder = self._snapshots_dir(root, node_id)
         folder.mkdir(parents=True, exist_ok=True)
         snapshot_id = self._new_id("snap")
+        body = path.read_bytes()
+        witness = self.build_witness(node_id, dynamic_context)
         record: dict[str, Any] = {
             "id": snapshot_id,
             "snapshot_of": node_id,
@@ -228,12 +245,16 @@ class SceneSnapshotsMixin:
             "retention": retention,
             "schema_version": CURRENT_VERSION,
         }
+        # `None` means the build failed, and then no witness is written at all.
+        # Storing an empty one instead made the comparison accept it as real and
+        # answer "nothing changed" — an affirmative all-clear from a build that
+        # saw nothing.
         if witness is not None:
             record["witness"] = witness.model_dump(mode="json")
         # Body first: a sidecar with no body beside it is a listing entry that
         # cannot be viewed or restored, which is worse than an orphan .md that
         # nothing lists.
-        (folder / f"{snapshot_id}.md").write_bytes(path.read_bytes())
+        (folder / f"{snapshot_id}.md").write_bytes(body)
         self._write_yaml(folder / f"{snapshot_id}.yaml", record)
         if retention == "thinned":
             self._thin(root, node_id)
@@ -281,13 +302,7 @@ class SceneSnapshotsMixin:
         last_save = datetime.fromtimestamp(path.stat().st_mtime, UTC)
         if (datetime.now(UTC) - last_save).total_seconds() <= SESSION_GAP_MINUTES * 60:
             return
-        self._capture(
-            root,
-            node_id,
-            path,
-            retention="thinned",
-            witness=self.build_witness(node_id, dynamic_context),
-        )
+        self._capture(root, node_id, path, retention="thinned", dynamic_context=dynamic_context)
 
     # ----- restore ----------------------------------------------------------
 
@@ -314,9 +329,7 @@ class SceneSnapshotsMixin:
         # implicit set is *not observed* rather than empty. The witness records
         # two sources, and a later comparison narrows membership to what both
         # sides saw instead of reporting every detected entity as removed.
-        self._capture(
-            root, node_id, path, retention="thinned", witness=self.build_witness(node_id)
-        )
+        self._capture(root, node_id, path, retention="thinned")
 
         stored = self._snapshots_dir(root, node_id) / f"{snapshot_id}.md"
         self._atomic_write_bytes(path, stored.read_bytes())

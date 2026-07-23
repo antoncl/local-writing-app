@@ -39,7 +39,7 @@ from app.models import (
 from app.services.project.field_values import same_rendered_value
 
 
-def compare_witnesses(was: Witness | None, now: Witness) -> SnapshotDrift:
+def compare_witnesses(was: Witness | None, now: Witness | None) -> SnapshotDrift:
     """What has changed between the world at capture and the world now.
 
     Three outcomes, kept distinguishable because the surface cannot honour a
@@ -47,13 +47,17 @@ def compare_witnesses(was: Witness | None, now: Witness) -> SnapshotDrift:
 
     - `available=False` — the snapshot predates the witness. There is nothing to
       compare, which is neither "unchanged" nor "unknown".
-    - `comparable=False` — the witness was recorded under a shape this build
-      cannot read. Degrade coarsely; never guess.
+    - `comparable=False` — one side cannot be read. Either the stored witness was
+      recorded under a shape this build does not understand, or the *current*
+      side could not be built at all. Degrade coarsely; never guess.
     - a real comparison, whose `entities` may legitimately be empty.
     """
     if was is None:
         return SnapshotDrift(available=False)
-    if was.version != WITNESS_VERSION:
+    # A live side that would not build is not evidence of an unchanged world.
+    # Reporting an empty comparison here was an affirmative all-clear drawn from
+    # having seen nothing.
+    if now is None or was.version != WITNESS_VERSION:
         return SnapshotDrift(available=True, comparable=False, truncated=was.truncated)
 
     was_by_id = {entity.id: entity for entity in was.entities}
@@ -65,12 +69,24 @@ def compare_witnesses(was: Witness | None, now: Witness) -> SnapshotDrift:
     # implicitly-detected entity as removed on a scene nobody touched.
     common_sources = set(was.sources_recorded) & set(now.sources_recorded)
 
+    # …and it is not a claim either side is in a position to make once the entity
+    # cap has fired. The cap keeps the lowest-sorting ids and is applied
+    # independently on each side, so a single new low-sorting entity shifts the
+    # retained window and drops a different tail — which the set difference then
+    # reported as an entity "no longer part of this scene" while it sat, present
+    # and unchanged, in both worlds. Field, revision, schema and layer drift on
+    # the entities both sides did retain are unaffected and still reported.
+    membership_is_claimable = not (was.truncated or now.truncated)
+
     entities: list[EntityDrift] = []
     # Sorted so the report is stable across requests; the surface orders for
     # reading, not the wire.
     for entity_id in sorted(set(was_by_id) | set(now_by_id)):
         drift = _entity_drift(
-            was_by_id.get(entity_id), now_by_id.get(entity_id), common_sources
+            was_by_id.get(entity_id),
+            now_by_id.get(entity_id),
+            common_sources,
+            membership_is_claimable=membership_is_claimable,
         )
         if drift is not None:
             entities.append(drift)
@@ -84,7 +100,11 @@ def compare_witnesses(was: Witness | None, now: Witness) -> SnapshotDrift:
 
 
 def _entity_drift(
-    was: WitnessEntity | None, now: WitnessEntity | None, common_sources: set[str]
+    was: WitnessEntity | None,
+    now: WitnessEntity | None,
+    common_sources: set[str],
+    *,
+    membership_is_claimable: bool,
 ) -> EntityDrift | None:
     """One entity across the axes, or `None` when it has nothing to report.
 
@@ -96,37 +116,63 @@ def _entity_drift(
     An entity that participated in **neither** version never reaches here: the
     union is over what the two witnesses recorded, so absence is never
     manufactured into a claim.
+
+    **Membership keys on `sources`, not on presence.** A witness may carry an
+    entity with no sources — recorded so its values can still be compared, but
+    not a member of that version's context. That is what lets the mutation case
+    report properly: an entity whose only source was a marker interval, and whose
+    interval has since been deleted, is no longer a member *and* has values worth
+    naming. Keying on presence returned a bare "no longer part of this scene" and
+    discarded both values — on ADR-0043's own motivating example.
     """
     if was is None and now is None:  # pragma: no cover - not reachable from the union
         return None
-    if now is None:
-        # Removed. A character who played a primary role in one version and is
-        # absent or deleted in the other is exactly the information the author
-        # needs, and it is not obtainable from any per-entity comparison.
-        if not common_sources.intersection(was.sources):
+
+    was_member = bool(was and common_sources.intersection(was.sources))
+    now_member = bool(now and common_sources.intersection(now.sources))
+    membership = "present"
+    if was_member and not now_member:
+        # A character who played a primary role in one version and is absent or
+        # deleted in the other is exactly the information the author needs, and
+        # it is not obtainable from any per-entity comparison.
+        membership = "removed"
+    elif now_member and not was_member:
+        membership = "added"
+    elif not was_member and not now_member:
+        # Neither side counts it as context — nothing to say about the set, and
+        # nothing to say about a version that never had it.
+        return None
+    if membership != "present" and not membership_is_claimable:
+        membership = "present"
+
+    # Only one side has a record: there is no comparison to make, so the
+    # membership claim is all there is.
+    if was is None or now is None:
+        recorded = was or now
+        if membership == "present":
             return None
         return EntityDrift(
-            entity_id=was.id,
-            title=was.title or was.id,
-            membership="removed",
-            sources=list(was.sources),
-        )
-    if was is None:
-        if not common_sources.intersection(now.sources):
-            return None
-        return EntityDrift(
-            entity_id=now.id,
-            title=now.title or now.id,
-            membership="added",
-            sources=list(now.sources),
+            entity_id=recorded.id,
+            title=recorded.title or recorded.id,
+            membership=membership,
+            sources=list(recorded.sources),
         )
 
     fields = _field_drifts(was, now)
     reinterpreted = _reinterpretations(was, now)
     entry_changed = _entry_changed(was, now)
-    layer_moved = was.source_layer_id != now.source_layer_id
+    # The **label**, never the layer id: that id is a hash of the resolved folder
+    # path, and comparing one across a project move would fire this axis on every
+    # witnessed entity of every existing snapshot.
+    layer_moved = was.source_layer_label != now.source_layer_label
 
-    if not fields and not reinterpreted and entry_changed == "no" and not layer_moved:
+    if (
+        membership == "present"
+        and not fields
+        and not reinterpreted
+        and entry_changed == "no"
+        and not layer_moved
+    ):
         return None
 
     return EntityDrift(
@@ -134,8 +180,8 @@ def _entity_drift(
         # The current name, so the author recognises what they are looking at;
         # the captured one only survives for an entity that no longer exists.
         title=now.title or was.title or now.id,
-        membership="present",
-        sources=list(now.sources),
+        membership=membership,
+        sources=list(now.sources or was.sources),
         entry_changed=entry_changed,
         fields=fields,
         reinterpreted=reinterpreted,

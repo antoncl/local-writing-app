@@ -124,6 +124,15 @@ whole load. The claim below is still true as far as it goes:
 revision token, and the drift report treats a moved layer as its own axis. It fires with no file
 edit, and it is the only axis that can — which is exactly why it cannot be folded into axis 2.
 
+**It records the layer's *label*, never its id**, and that constraint is part of the amendment rather
+than an implementation note. `_layer_id_for_folder` is a SHA-256 over the resolved folder path, and
+`layers.py` states the invariant it rests on: *"the cache is safe only because layer ids are never
+persisted… a path-hash id survives neither a moved project folder nor a re-resolved symlink"*. A
+witness is durable by definition, so storing one would make this axis fire on every witnessed entity
+of every existing snapshot the first time the project folder moved, a drive letter changed, or
+Windows handed back a different short-path spelling — a cry-wolf failure on a scale that would
+discredit the whole report.
+
 This does not weaken the independence argument, which was about *not blocking on #314*. It narrows
 what #314 will fix for free: the token gets better, and this axis still needs its own record.
 

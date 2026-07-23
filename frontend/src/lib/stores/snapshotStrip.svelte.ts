@@ -91,12 +91,17 @@ export class SnapshotStripController {
   drift = $state<SnapshotDrift>(NO_DRIFT);
 
   /** Whether there is anything to say about the world underneath this notch —
-   *  including "the comparison could not be made", which is itself worth
-   *  saying. */
+   *  including the two things that are not findings but are still claims: that
+   *  the comparison could not be made, and that it was **incomplete**.
+   *
+   *  `truncated` is load-bearing here. Gating on `entities.length` alone made a
+   *  truncated-but-otherwise-clean report unrenderable, so the author read
+   *  silence as "nothing else changed" — the one inference a truncated witness
+   *  must never allow. */
   hasDriftToReport = $derived(
     this.parked !== null &&
       this.drift.available &&
-      (!this.drift.comparable || this.drift.entities.length > 0),
+      (!this.drift.comparable || this.drift.truncated || this.drift.entities.length > 0),
   );
 
   /** Whether the title itself changed. Colour only, never a glyph (§J). */

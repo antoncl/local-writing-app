@@ -126,7 +126,12 @@ class SaveSceneRequest(BaseModel):
     #
     # Read only by the automatic capture inside this save. It is derived data
     # about an authored file and never enters the scene's front matter.
-    dynamic_context: list[str] = Field(default_factory=list)
+    #
+    # **`None` is "not observed", `[]` is "observed and empty".** A caller with
+    # no prose editor behind it — the acts/chapters save path, a script — says
+    # nothing rather than claiming emptiness, and the witness then records two
+    # sources instead of three so membership drift narrows accordingly.
+    dynamic_context: list[str] | None = None
 
 
 class LoreEntrySummary(BaseModel):

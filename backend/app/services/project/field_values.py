@@ -33,3 +33,19 @@ def same_rendered_value(was: Any, now: Any) -> bool:
     if was_blank or now_blank:
         return was_blank and now_blank
     return bool(was == now)
+
+
+def display_value(value: Any) -> str:
+    """One field value as a reader sees it.
+
+    Here so that a *name* the report prints and a *value* it prints are produced
+    by the same rule. The snapshot witness records an entity's title by reading
+    it back out of the resolved state, and the intrinsic `title` can be retyped
+    to a collection — at which point `str(value)` yields a Python repr
+    (`"['Tom', 'Thomas']"`) and the report renders that as the entity's name.
+    """
+    if value is None:
+        return ""
+    if isinstance(value, list):
+        return ", ".join(display_value(item) for item in value if item not in (None, ""))
+    return str(value)

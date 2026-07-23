@@ -27,6 +27,7 @@ from test_snapshot_witness import WitnessTestCase
 from app.models import (
     REVISION_KIND,
     WITNESS_VERSION,
+    MetadataFieldDefinition,
     Witness,
     WitnessEntity,
     WitnessFieldType,
@@ -56,7 +57,6 @@ def entity(entity_id: str = "lore_tom", **changed: object) -> WitnessEntity:
         "sources": [SOURCE_ENTITY_REF],
         "revision": "rev-1",
         "revision_kind": REVISION_KIND,
-        "source_layer_id": "layer-a",
         "source_layer_label": "Base Folder",
         "state": {"eye_colour": "green"},
         "overrides": [],
@@ -198,16 +198,34 @@ class ReinterpretationAxisTests(unittest.TestCase):
         )
         self.assertEqual(report.entities[0].reinterpreted[0].options_now, ["green"])
 
-    def test_a_field_the_witness_never_recorded_is_not_reported(self) -> None:
+    def test_a_field_only_one_witness_recorded_is_not_a_reinterpretation(self) -> None:
         """Not a whole-schema hash. That fires on every schema edit, including
         the additions the sparse storage model already absorbs, so most reports
         would announce a change with no consequence — and a detector that cries
-        wolf trains the dismissal that makes the report worthless."""
+        wolf trains the dismissal that makes the report worthless.
+
+        The two witnesses are deliberately **asymmetric**: `rank` exists only on
+        the now side. Widening `_reinterpretations` from the intersection to the
+        union — the exact regression ADR-0043 pre-refutes — turns this red. The
+        earlier version of this test passed two identical witnesses, so it could
+        not fail and merely restated the unchanged-world control."""
+        shared = WitnessFieldType(label="Eye colour", type="text")
         report = compare_witnesses(
-            witness(entity(state={"eye_colour": "green"})),
-            witness(entity(state={"eye_colour": "green"})),
+            witness(entity(field_types={"eye_colour": shared})),
+            witness(
+                entity(
+                    field_types={
+                        "eye_colour": shared,
+                        "rank": WitnessFieldType(label="Rank", type="select", options=["Captain"]),
+                    }
+                )
+            ),
         )
-        self.assertEqual(report.entities, [])
+        self.assertEqual(
+            [e.reinterpreted for e in report.entities],
+            [],
+            "a field present on only one side is a field change, not a reinterpretation",
+        )
 
 
 class MembershipAxisTests(unittest.TestCase):
@@ -232,12 +250,38 @@ class MembershipAxisTests(unittest.TestCase):
         )
         self.assertEqual(report.entities[0].membership, "added")
 
-    def test_an_entity_in_neither_version_is_never_manufactured(self) -> None:
-        report = compare_witnesses(
-            witness(entity("lore_tom")),
-            witness(entity("lore_tom")),
-        )
+    def test_an_entity_neither_side_counts_as_context_is_never_reported(self) -> None:
+        """The invariant, pinned where it now lives.
+
+        A witness may carry an entity with **no sources** — recorded so its
+        values can be compared, but not a member of that version's context. If
+        neither side counts it, there is nothing to say about the set and nothing
+        to say about a version that never had it. The earlier version of this
+        test put the same entity in both witnesses with full sources, so it was a
+        third copy of the unchanged-world control and pinned nothing."""
+        carried = entity("lore_chicago", title="Chicago", sources=[])
+        report = compare_witnesses(witness(carried), witness(carried))
         self.assertEqual([e.entity_id for e in report.entities], [])
+
+    def test_a_dropped_entity_still_has_its_values_compared(self) -> None:
+        """ADR-0043's motivating case. An entity whose only source was a marker
+        interval, and whose interval has since been deleted, is no longer a
+        member *and* has values worth naming. Keying membership on presence
+        returned a bare "no longer part of this scene" and discarded both."""
+        report = compare_witnesses(
+            witness(entity("lore_chicago", title="Chicago", sources=[SOURCE_MUTATION],
+                           state={"weather": "storm"}, overrides=["weather"])),
+            witness(entity("lore_chicago", title="Chicago", sources=[],
+                           state={"weather": "clear"})),
+        )
+        self.assertEqual(len(report.entities), 1)
+        drifted = report.entities[0]
+        self.assertEqual(drifted.membership, "removed")
+        self.assertEqual(
+            [(f.field_id, f.was, f.now) for f in drifted.fields],
+            [("weather", "storm", "clear")],
+            "the report must name what the world became, not only that the set shrank",
+        )
 
     def test_membership_is_only_claimed_over_sources_both_sides_observed(self) -> None:
         """A capture with no prose editor behind it records two sources. Naively
@@ -268,8 +312,8 @@ class VisibilityAxisTests(unittest.TestCase):
 
     def test_a_moved_source_layer_is_reported_with_no_file_edit(self) -> None:
         report = compare_witnesses(
-            witness(entity(source_layer_id="layer-a", source_layer_label="Series")),
-            witness(entity(source_layer_id="layer-b", source_layer_label="Book")),
+            witness(entity(source_layer_label="Series")),
+            witness(entity(source_layer_label="Book")),
         )
         drifted = report.entities[0]
         self.assertEqual(drifted.layer_was, "Series")
@@ -301,6 +345,45 @@ class DegradationTests(unittest.TestCase):
     def test_a_truncated_witness_says_so_in_the_report(self) -> None:
         report = compare_witnesses(witness(entity(), truncated=True), witness(entity()))
         self.assertTrue(report.truncated)
+
+    def test_a_live_side_that_would_not_build_is_not_an_unchanged_world(self) -> None:
+        """`build_witness` returns `None` when it could not build. Reporting an
+        empty comparison for that was an affirmative all-clear drawn from having
+        seen nothing — the claim ADR-0043's degrade-coarsely rule forbids."""
+        report = compare_witnesses(witness(entity()), None)
+        self.assertTrue(report.available)
+        self.assertFalse(report.comparable)
+
+    def test_truncation_suppresses_membership_but_keeps_field_drift(self) -> None:
+        """The cap keeps the lowest-sorting ids and is applied independently on
+        each side, so one new low-sorting entity shifts the retained window and
+        drops a different tail — which the set difference then reported as an
+        entity "no longer part of this scene" while it sat, present and
+        unchanged, in both worlds. Field drift on the entities both sides *did*
+        retain is unaffected and must still be reported."""
+        report = compare_witnesses(
+            witness(
+                entity("lore_a", state={"eye_colour": "green"}),
+                entity("lore_z", title="Zephyr"),
+                truncated=True,
+            ),
+            witness(entity("lore_a", state={"eye_colour": "blue"}), truncated=True),
+        )
+        by_id = {e.entity_id: e for e in report.entities}
+        self.assertNotIn(
+            "lore_z", by_id, "a truncated comparison cannot claim an entity left the scene"
+        )
+        self.assertEqual(
+            [(f.was, f.now) for f in by_id["lore_a"].fields],
+            [("green", "blue")],
+            "suppressing the membership axis must not suppress the others",
+        )
+
+    def test_membership_is_claimed_when_neither_side_truncated(self) -> None:
+        """The control. Without it, suppressing membership unconditionally passes
+        the test above."""
+        report = compare_witnesses(witness(entity("lore_z", title="Zephyr")), witness())
+        self.assertEqual([e.membership for e in report.entities], ["removed"])
 
 
 class DriftOverTheDiffRouteTests(WitnessTestCase):
@@ -350,6 +433,78 @@ class DriftOverTheDiffRouteTests(WitnessTestCase):
         drift = self._diff(snapshot_id)["drift"]
         self.assertTrue(drift["available"])
         self.assertEqual(drift["entities"], [])
+
+    def test_an_unquoted_yaml_date_does_not_drift_against_itself(self) -> None:
+        """Both sides must come off the same pipeline. The stored side goes
+        through `model_dump(mode="json")` on its way to the sidecar, so a value
+        the live side keeps as `datetime.date` compared unequal against its own
+        ISO string — a row reading `Born: 1985-04-12 → 1985-04-12`, on every
+        park, forever, on a scene nobody touched. `_normalise_metadata` is the
+        coercion that makes the two sides comparable, and it is the same one
+        `_snapshot_state` already applies to the scene's own fields."""
+        self._define_lore_field("born", MetadataFieldDefinition(name="Born", type="text"))
+        self._write_lore_front_matter(self.tom, "born: 1985-04-12")
+        self._save_scene(cast=[self.tom])
+        snapshot_id = self._capture()
+
+        drift = self._diff(snapshot_id)["drift"]
+        self.assertEqual(
+            drift["entities"], [], "an untouched entry must not drift against itself"
+        )
+
+    def test_a_non_string_metadata_key_does_not_break_the_save(self) -> None:
+        """A hand-authored `metadata: {2019: …}` used to reach a `str`-typed
+        pydantic field and 500 the save. `_normalise_metadata` coerces the key,
+        so the witness records it rather than merely surviving it."""
+        self._write_lore_front_matter(self.tom, "2019: the year")
+        self._save_scene(cast=[self.tom])
+        response = self.client.post(
+            f"/api/scenes/{self.scene_id}/snapshots", json={"dynamic_context": []}
+        )
+        self.assertEqual(response.status_code, 200, response.text)
+        witness = self.service.build_witness(self.scene_id, [])
+        recorded = next(e for e in witness.entities if e.id == self.tom)
+        self.assertEqual(recorded.state["2019"], "the year")
+
+    def test_a_malformed_schema_is_never_the_reason_a_capture_fails(self) -> None:
+        """The stated contract: "a capture is never the reason a save fails".
+
+        A `metadata.schema.yaml` that is valid YAML but the wrong *shape* raises
+        a pydantic `ValidationError` out of `build_mutations_index` — a
+        `ValueError`, which escaped an except tuple naming only
+        `ProjectServiceError` and `OSError`. The capture must still write the
+        prose, and must record **no** witness rather than an empty one: an empty
+        witness is read as a real comparison that found nothing.
+        """
+        self._save_scene(cast=[self.tom])
+        (self.root / "metadata.schema.yaml").write_text(
+            "fields:\n  rank: not-a-mapping\n", encoding="utf-8"
+        )
+        response = self.client.post(
+            f"/api/scenes/{self.scene_id}/snapshots", json={"dynamic_context": []}
+        )
+        self.assertEqual(response.status_code, 200, response.text)
+
+        snapshot_id = response.json()["id"]
+        root = self.service._require_project()
+        self.assertIsNone(self.service.read_snapshot_witness(root, self.scene_id, snapshot_id))
+
+    def test_a_corrupt_witness_is_not_reported_as_an_absent_one(self) -> None:
+        """Absent means "this snapshot predates the witness — nothing to
+        compare". A witness that is present but will not parse is one *recorded
+        under a shape this build cannot read*, which is `comparable=False`. They
+        used to produce byte-identical payloads, so the corrupt case rendered
+        nothing at all."""
+        self._save_scene(cast=[self.tom])
+        snapshot_id = self._capture()
+        sidecar = self.root / "snapshots" / self.scene_id / f"{snapshot_id}.yaml"
+        record = self.service._read_yaml(sidecar)
+        record["witness"] = {"version": 1, "entities": [{"nonsense": True}]}
+        self.service._write_yaml(sidecar, record)
+
+        drift = self._diff(snapshot_id)["drift"]
+        self.assertTrue(drift["available"], "the witness is present; it just will not parse")
+        self.assertFalse(drift["comparable"])
 
     def test_a_snapshot_taken_before_the_witness_existed_says_so(self) -> None:
         """`available=False` — a third state, distinct from both "unchanged" and

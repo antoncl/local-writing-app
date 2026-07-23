@@ -162,6 +162,18 @@ describe("drift", () => {
     await strip.park("snap_1");
     expect(strip.hasDriftToReport).toBe(false);
   });
+
+  it("surfaces a truncated report even when it found nothing", async () => {
+    // Gating on `entities.length` alone made this state unrenderable, so the
+    // author read silence as "nothing else changed" — the one inference a
+    // truncated witness must never allow.
+    const strip = await parked(async () => ({
+      ...diff(),
+      drift: { available: true, comparable: true, truncated: true, entities: [] },
+    }));
+    await strip.park("snap_1");
+    expect(strip.hasDriftToReport).toBe(true);
+  });
 });
 
 describe("flipping", () => {

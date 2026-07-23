@@ -139,7 +139,11 @@ export type EntityDrift = {
   entity_id: string;
   /** The author's vocabulary; for a removed entity, the name at capture. */
   title: string;
-  /** Axis 4, both directions. `present` = in both versions. */
+  /** Axis 4, both directions. `present` = context in both versions.
+   *
+   *  Always `present` when the report is `truncated`: the entity cap is applied
+   *  independently on each side, so the retained id sets can differ and a set
+   *  difference over them would fabricate a departure. */
   membership: "added" | "removed" | "present";
   sources: string[];
   /** Axis 2. `unknown` where the change tokens cannot be compared meaningfully
@@ -160,7 +164,13 @@ export type EntityDrift = {
  *  build cannot read), and a real comparison whose `entities` may be empty. */
 export type SnapshotDrift = {
   available: boolean;
+  /** False when either side could not be read — an older witness shape, one
+   *  that will not parse, or a current side that could not be built. All three
+   *  mean the same thing to a reader: no claim is being made either way. */
   comparable: boolean;
+  /** The entity cap fired on one of the sides, so the list may be short AND the
+   *  membership axis is withheld. Must be surfaced: silence would otherwise read
+   *  as "nothing else changed". */
   truncated: boolean;
   entities: EntityDrift[];
 };

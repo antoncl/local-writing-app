@@ -16,7 +16,12 @@
   // warm = the scene as it is (§H). Nothing here draws a glyph — a snapshot
   // difference exists only while parked, and a glyph puts a permanent-looking
   // mark on a temporary condition (§J).
-  import type { EntityDrift, SnapshotDrift, WitnessFieldDrift } from "@/lib/types";
+  import type {
+    EntityDrift,
+    FieldReinterpretation,
+    SnapshotDrift,
+    WitnessFieldDrift,
+  } from "@/lib/types";
 
   let { drift }: { drift: SnapshotDrift } = $props();
 
@@ -49,20 +54,48 @@
     return "";
   }
 
+  /** The field's name. Falls back to its id when no schema on either side had a
+   *  label for it — the id is a poor name but it is the author's only handle on
+   *  a field the schema has since dropped. */
+  function fieldLabel(field: { label: string; field_id: string }): string {
+    return field.label || field.field_id;
+  }
+
   function fieldLine(field: WitnessFieldDrift): string {
-    return field.from_mutation ? `${field.label} (from a marker)` : field.label;
+    const label = fieldLabel(field);
+    return field.from_mutation ? `${label} (from a marker)` : label;
+  }
+
+  /** Axis 3 in a sentence. An absent type is the *headline* case, not an edge
+   *  one: a field the schema has since dropped has no current type at all, and
+   *  interpolating it produced "is now a  field, not a select one". */
+  function reinterpretation(field: FieldReinterpretation): string {
+    const { type_was: was, type_now: now } = field;
+    if (was === now) return "no longer allows the same values";
+    if (!now) return `is no longer defined — it was a ${was} field`;
+    if (!was) return `is now a ${now} field; the snapshot recorded no type for it`;
+    return `is now a ${now} field, not a ${was} one`;
   }
 </script>
 
 {#if drift.available}
   <div class="drift" role="group" aria-label="Changed since this snapshot">
     {#if !drift.comparable}
+      <!-- Reached three ways — an older witness shape, one that will not parse,
+           and a current side that could not be built — and worded to cover all
+           three, because the honest claim is the same in each: this cannot be
+           compared, which is NOT the same as nothing having changed. -->
       <p class="note">
-        This snapshot recorded its context in an older form, so it cannot be compared.
-        The prose is unaffected and restores exactly.
+        This snapshot's context cannot be compared with the world as it is now, so
+        nothing here is being claimed either way. The prose is unaffected and restores
+        exactly.
       </p>
     {:else}
-      <p class="lede">Since this snapshot:</p>
+      <!-- The lede is a promise that rows follow. With a truncated-but-clean
+           report there are none, and the note below is the whole message. -->
+      {#if drift.entities.length > 0}
+        <p class="lede">Since this snapshot:</p>
+      {/if}
       <ul>
         {#each drift.entities as entity (entity.entity_id)}
           <li class="entity" class:gone={entity.membership === "removed"}>
@@ -89,14 +122,8 @@
               <ul class="fields">
                 {#each entity.reinterpreted as field (field.field_id)}
                   <li>
-                    <span class="label">{field.label}</span>
-                    <span class="reinterpreted">
-                      {#if field.type_was !== field.type_now}
-                        is now a {field.type_now} field, not a {field.type_was} one
-                      {:else}
-                        no longer allows the same values
-                      {/if}
-                    </span>
+                    <span class="label">{fieldLabel(field)}</span>
+                    <span class="reinterpreted">{reinterpretation(field)}</span>
                   </li>
                 {/each}
               </ul>
@@ -112,9 +139,13 @@
       </ul>
 
       {#if drift.truncated}
+        <!-- Said plainly rather than as a footnote, because it is the reason
+             the list above may be shorter than the truth — and because the
+             comparison also declines to claim anything about which entities
+             belong to the scene while it holds. -->
         <p class="note">
-          This scene's context was larger than a snapshot records, so this list may be
-          incomplete.
+          This scene's context was larger than a snapshot records, so anything above may
+          be incomplete and entries joining or leaving the scene are not reported.
         </p>
       {/if}
     {/if}

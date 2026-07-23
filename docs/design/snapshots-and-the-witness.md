@@ -365,11 +365,39 @@ Slice 3 shipped in #439, and building it closed four of the five.
 - **`sources_recorded`.** A capture from a route with no prose editor behind it (the pre-restore
   capture) observes two sources, not three. Differencing that against a three-source witness would
   report every implicitly-detected entity as *removed* — a wolf cried on a scene nobody touched — so
-  membership drift is computed only over the sources **both** sides observed.
-- **Measured cost.** `build_witness` is **~34 ms** for a typical scene (5 witnessed entities in a
-  150-entity project) and **~110 ms** at the 200-entity cap. Roughly 25 ms of the typical figure is
-  fixed overhead — the node index and the merged schema — rather than per-entity work. It runs at
-  most once per scene per editing session on the save path, and once per park on the diff path.
+  membership drift is computed only over the sources **both** sides observed. The distinction is
+  carried by the *type* — `list[str] | None`, where `None` is "not observed" and `[]` is "observed and
+  empty". Defaulting it to `[]` collapsed the two, because an omitted JSON key is indistinguishable
+  from an absent one, and made the whole mechanism inert on the path that matters most.
+- **The witness is normalised, not raw.** `_normalise_metadata` runs on the entry's stored values —
+  the same coercion `_snapshot_state` applies to the scene's own fields, for the same reason. The
+  stored side of a witness goes through `model_dump(mode="json")` on its way to the sidecar, so a
+  value the live side kept as `datetime.date` compared unequal against its own ISO string. *Both
+  sides of a comparison must come off the same pipeline* is a rule this design states twice and had
+  to learn a third time.
 - **The bounds.** `MAX_WITNESS_ENTITIES = 200` and `MAX_DYNAMIC_CONTEXT_IDS = 200`, with `truncated`
   reported rather than hidden: a silently truncated witness reads as "nothing else changed", which is
-  the one claim it cannot make.
+  the one claim it cannot make. The cap also **withholds the membership axis** while it is in force —
+  it is applied independently on each side, so the retained id sets can differ, and a set difference
+  over them would report an entity as having left a scene it never left.
+- **A dropped entity keeps its values.** The comparison hands the captured witness's ids to the live
+  build as `also_resolve`, recording their state without counting them as members. Without it the
+  mutation case — an interval opened in an earlier scene and since deleted, which is §1's own
+  motivating example — could only say *no longer part of this scene*, discarding both values.
+
+### Cost, honestly
+
+The figure this section first carried (~34 ms) measured `build_witness` with a **prebuilt** mutations
+index. No caller passes one, so it was not the cost anyone pays. Measured properly, on a 200-scene /
+40-entity fixture, a park goes from ~0.7 s to **~1.5 s**, and to ~3 s when `add`/`remove` markers are
+live — dominated by `build_mutations_index`, which reads every scene body and is uncached.
+
+**That is the witness policy's bill, not an accident of this slice.** §1 defines the mutation source
+by *resolution* rather than syntax precisely because the syntactic answer is wrong, and resolution
+means the index. Two things were genuinely wasteful and are fixed — `effective_state` was computed
+twice per entity, and `long_text` fields were being copied into every sidecar — but the index build
+itself is inherent.
+
+What is left is a **scheduling** question rather than an algorithmic one: the work is real, and the
+answer if it becomes intrusive is to take it off the synchronous route, not to make the witness know
+less. Recorded here so the next reader does not re-derive it as a defect.

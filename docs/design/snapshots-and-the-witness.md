@@ -168,20 +168,45 @@ cannot see — but the dynamic context is a frontend product. Allocation is what
 
 1. **Allocate at the first dirty save** of an editing session. The allocated snapshot holds the
    **pre-save** bytes, per Amendment 2: what this looked like when the author sat down.
-2. **Every autosave carries the current dynamic-context set**, which lands in the allocated sidecar.
-   The backend therefore always holds a set that describes bytes it actually has.
+2. **Every autosave carries the current dynamic-context set.** It keeps the backend's working set
+   fresh **for the next capture**. It does *not* rewrite an allocated snapshot — see the rule below.
 3. **Promotion into the keep-five budget** happens either on an explicit *editing finished* signal
    from the author, or lazily at the **next session boundary** on that scene.
 
-### Why the tick lines up
+### The governing rule: a witness describes the bytes it accompanies
 
-The set sent with save *N* describes the body written by save *N* — which is exactly the body that the
-next session-boundary capture takes. So a capture always records a set describing the bytes it
-captured, rather than a set describing the buffer that replaced them.
+This is the invariant everything else in this section serves, and it is easy to violate by accident.
 
-The one exception is the **first** dirty save on a scene, where the only set available describes the
-body about to be written rather than the pre-save body. Anton's call: **accept it.** The author may be
-mid-word on a character name; the error is small and self-correcting.
+The captured body is the state **before this session's first edit**. That is not approximate:
+`maybe_capture_session_boundary` runs *before* `_write_scene_file`, so at the moment it fires the file
+on disk still holds what the *previous* session last wrote. The new body has not been written yet.
+Pinned by `test_the_captured_bytes_are_the_pre_save_state`.
+
+**The witness must therefore be frozen at allocation too.** An earlier draft of this document had
+every autosave land its dynamic set in the allocated sidecar, which would leave the body at the start
+of the session while the witness drifted to the end of it. That is worse than having no witness: it
+would report drift against context the snapshotted prose never had, and it would make the sidecar
+mutable after the fact, which ADR-0043's immutability rule forbids for good reason.
+
+### Why the start of the session is the state worth keeping
+
+Because it is the only one the author cannot otherwise reach. Undo covers the current sitting — but
+undo is in-memory, per-tab, and bleeds across document switches (#368), so it does not merely stop at
+the session boundary, it dies with the tab. **Snapshots are the only durable "before" the app has.**
+This is also why capture-on-close was rejected: the end-of-session state duplicates Live at the moment
+it is written, so it preserves nothing that is not already on disk.
+
+### The one place body and witness disagree
+
+At allocation the freshest dynamic set available describes the body *about to be written* rather than
+the pre-edit body — the author has been typing for up to `AUTO_SAVE_MAX_WAIT_MS` before that first
+save lands. Exact agreement would need the backend to retain the previous session's last set across
+the gap and across restarts.
+
+Anton's call: **accept the imprecision.** The author may be mid-word on a character name; the error is
+bounded by one save rather than by the session, and it is self-correcting. What matters is that this
+is now the *only* point of disagreement, rather than a drift that grows with the length of the
+sitting.
 
 ### Why promotion cannot hang on document close
 

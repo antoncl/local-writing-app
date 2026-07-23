@@ -1,8 +1,8 @@
 """What `build_mutations_index` may and may not read (#440).
 
-Both tests here pin the same one-line decision: the index scans scene *bodies*
-directly rather than going through `read_scene`. Two defects rode on that call,
-and each of these fails if it comes back.
+All three tests here pin the same one-line decision: the index scans scene
+*bodies* directly rather than going through `read_scene`. Two defects rode on
+that call, and each of these fails if it comes back.
 
 They are cost/claim tests, not wall-clock tests — the linearity one counts
 `read_structure` calls, so it stays honest on a slow CI runner and still goes
@@ -78,7 +78,7 @@ class MutationIndexReadTests(unittest.TestCase):
     # --- the scene the schema no longer accepts ---------------------------
 
     def test_a_scene_failing_validation_still_contributes_its_markers(self) -> None:
-        """A schema edit that retires a select option leaves existing scenes
+        """Retiring a `status` value leaves every scene still carrying it
         unreadable by `read_scene`. Their markers must keep resolving — the
         alternative is the whole downstream manuscript quietly changing meaning
         because one scene's front matter went stale."""
@@ -148,9 +148,12 @@ class MutationIndexReadTests(unittest.TestCase):
                         f"/api/scenes/{scene_id}",
                         json={
                             "title": f"Scene {n}",
+                            # No space in the value — marker values are
+                            # percent-encoded, so `Rank 0` simply does not match
+                            # the pattern and scans to nothing.
                             "body": (
                                 f"<!-- mutate:entity={honor};field=title;"
-                                f"value=Rank {n};id=m{n} -->"
+                                f"value=Rank-{n};id=m{n} -->"
                             ),
                         },
                     )
@@ -165,9 +168,20 @@ class MutationIndexReadTests(unittest.TestCase):
 
                 ProjectService._read_structure = counting  # type: ignore[assignment]
                 try:
-                    service.build_mutations_index()
+                    index = service.build_mutations_index()
                 finally:
                     ProjectService._read_structure = original  # type: ignore[assignment]
+
+                # Two vacuity guards, because an equality between two numbers
+                # this test computed itself is satisfiable by doing nothing.
+                # Without them, a manuscript that failed to build (0 == 0) or a
+                # patch that stopped intercepting (0 == 0) both read as a pass.
+                self.assertEqual(
+                    len(index.by_entity.get(honor, [])),
+                    scene_count,
+                    "the manuscript under measurement did not actually build",
+                )
+                self.assertGreater(calls, 0, "the patch never intercepted a read")
                 counts[scene_count] = calls
 
         self.assertEqual(

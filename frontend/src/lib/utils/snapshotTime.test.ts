@@ -13,7 +13,12 @@ import { describe, expect, it } from "vitest";
 import type { Snapshot } from "@/lib/types";
 import { inNotchOrder, notchAges, notchTooltip, notchWhen } from "./snapshotTime";
 
-const NOW = new Date("2026-07-23T12:00:00.000Z");
+// `relativeTime` formats in the runtime's LOCAL zone (weekday, ordinal, day
+// boundaries), so fixtures feeding a formatted assertion are built from local
+// wall-clock — a local `NOW` and local (no-`Z`) ISO strings — exactly as
+// `relativeTime.test.ts` does. A UTC instant would land on a different calendar
+// day east of UTC+12 and turn "Thursday 9th" into "Friday 10th".
+const NOW = new Date(2026, 6, 23, 12, 0, 0);
 
 function snapshot(id: string, capturedAt: string, contentWrittenAt: string, retention: "thinned" | "kept" = "thinned"): Snapshot {
   return {
@@ -30,8 +35,8 @@ function snapshot(id: string, capturedAt: string, contentWrittenAt: string, rete
  *  body. Every assertion below is a fortnight away from the wrong answer. */
 const AUTOMATIC = snapshot(
   "snap_auto",
-  "2026-07-23T11:00:00.000Z",
-  "2026-07-09T11:00:00.000Z",
+  "2026-07-23T11:00:00.000",
+  "2026-07-09T11:00:00.000",
 );
 
 describe("notchAges", () => {
@@ -42,7 +47,7 @@ describe("notchAges", () => {
   });
 
   it("shares one clock across the list", () => {
-    const ages = notchAges([AUTOMATIC, snapshot("b", "x", "2026-07-23T11:00:00.000Z")], NOW);
+    const ages = notchAges([AUTOMATIC, snapshot("b", "x", "2026-07-23T11:00:00.000")], NOW);
     expect(ages).toEqual([14 * 24 * 60 + 60, 60]);
   });
 });

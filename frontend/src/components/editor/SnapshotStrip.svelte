@@ -250,6 +250,12 @@
        (#406). Only while parked — compact overrides it below, and parking is
        what earns the taller strip in the first place (§B). */
     min-height: 61px;
+    /* One baseline for everything that lines up on the rule — the rule itself,
+       the notches above it, the ticks below it (#406). Written once here and
+       once in `.compact`; every consumer reads `var(--rule-bottom)`, so the two
+       states are the only places the number lives and nothing can drift off the
+       rule the way #406 did. */
+    --rule-bottom: 23px;
     border-top: 1px solid var(--divider);
     background: var(--inset);
     transition: min-height 160ms ease-out, padding 160ms ease-out, background-color 160ms ease-out;
@@ -258,15 +264,7 @@
     min-height: 27px;
     padding: 0 14px;
     background: transparent;
-  }
-  .snapshot-strip.compact .strip-track {
-    padding-bottom: 6px;
-  }
-  .snapshot-strip.compact .strip-track::before {
-    bottom: 5px;
-  }
-  .snapshot-strip.compact .notch {
-    bottom: 5px;
+    --rule-bottom: 5px;
   }
   .snapshot-strip.compact .tick {
     display: none;
@@ -305,7 +303,7 @@
     position: relative;
     flex: 1 1 auto;
     min-width: 0;
-    padding-bottom: 24px;
+    padding-bottom: calc(var(--rule-bottom) + 1px);
     transition: padding 160ms ease-out;
   }
   .strip-track::before {
@@ -313,9 +311,12 @@
     position: absolute;
     left: 0;
     right: 0;
-    bottom: 23px;
+    bottom: var(--rule-bottom);
     height: 1px;
     background: var(--border);
+    /* Moves with the rule baseline in lockstep with the strip's min-height, so
+       parking doesn't snap the rule while the height animates (#406 follow-up). */
+    transition: bottom 160ms ease-out;
   }
 
   /* The scale hangs BELOW the rule; notches rise above it (#406). They used to
@@ -327,7 +328,7 @@
      whatever the spacing does. */
   .tick {
     position: absolute;
-    bottom: 23px;
+    bottom: var(--rule-bottom);
     transform: translate(-50%, 100%);
     display: flex;
     flex-direction: column;
@@ -351,7 +352,7 @@
 
   .notch {
     position: absolute;
-    bottom: 23px;
+    bottom: var(--rule-bottom);
     transform: translateX(-50%);
     width: 14px;
     padding: 0;
@@ -361,6 +362,9 @@
     display: flex;
     align-items: flex-end;
     justify-content: center;
+    /* In lockstep with the rule and the strip height, so parking doesn't leave
+       the notches hanging above the strip while it grows (#406 follow-up). */
+    transition: bottom 160ms ease-out;
   }
   .notch i {
     display: block;
@@ -382,10 +386,16 @@
     width: 3px;
     background: var(--diff-was);
   }
+  /* The parked marker sits at the foot of the notch, ABOVE the rule (#406
+     follow-up). It used to hang below the rule (bottom:-4px), which was clear
+     when ticks lived above the line but now lands in the tick band — parking a
+     notch onto a 1h/1d/1w tick reprinted the collision the tick fix removed.
+     Above the rule there are no ticks, so the marker cannot meet one whatever
+     the spacing does. */
   .notch.current::after {
     content: "";
     position: absolute;
-    bottom: -4px;
+    bottom: 0;
     left: 50%;
     transform: translateX(-50%);
     width: 5px;

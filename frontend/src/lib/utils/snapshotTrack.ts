@@ -93,11 +93,14 @@ export function notchPositions(agesMinutes: readonly number[]): number[] {
   return positions;
 }
 
-/** Age in minutes of an ISO timestamp. Negative ages (clock skew) clamp to 0 —
- *  a snapshot cannot be in the future, and letting one through would put a
- *  notch to the right of Live. */
-export function ageMinutes(capturedAt: string, now: Date = new Date()): number {
-  const stamp = new Date(capturedAt).getTime();
+/** Age in minutes of an ISO timestamp. Field-agnostic on purpose — the strip
+ *  ages notches by `content_written_at`, never `captured_at` (#458), and naming
+ *  the parameter for either field would assert a choice that belongs to the
+ *  caller (`notchAges`). Negative ages (clock skew) clamp to 0 — a snapshot
+ *  cannot be in the future, and letting one through would put a notch to the
+ *  right of Live. */
+export function ageMinutes(at: string, now: Date = new Date()): number {
+  const stamp = new Date(at).getTime();
   if (!Number.isFinite(stamp)) return 0;
   return Math.max(0, (now.getTime() - stamp) / 60_000);
 }

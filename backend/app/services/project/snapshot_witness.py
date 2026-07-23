@@ -31,14 +31,13 @@ scenes nobody had touched; the fix is structural, not a normalisation step.
 
 from __future__ import annotations
 
+from dataclasses import dataclass
 from pathlib import Path
-from typing import TYPE_CHECKING, Any
+from typing import Any
 
 from app.models import Witness, WitnessEntity, WitnessFieldType
 from app.services.project.errors import ProjectServiceError
-
-if TYPE_CHECKING:
-    from app.services.project.lore_mutations import MutationsIndex
+from app.services.project.lore_mutations import MutationsIndex
 
 # The structural cost bound the drift path needs (#409's lesson: an unbounded
 # cost on the synchronous route is a hung pane with nothing on screen explaining
@@ -64,6 +63,24 @@ UNWITNESSED_FIELDS = frozenset({"body"})
 SOURCE_MUTATION = "mutation"
 SOURCE_ENTITY_REF = "entity_ref"
 SOURCE_DYNAMIC = "dynamic"
+
+
+@dataclass(frozen=True)
+class _WitnessScope:
+    """Everything one witness build resolves against, gathered once.
+
+    A parameter object rather than eight arguments threaded through three
+    methods: the contents are read-only for the duration of the build, and every
+    one of them is a shared traversal that must not be re-derived per entity —
+    which is exactly the thing a long parameter list stops making obvious.
+    """
+
+    scene_id: str
+    node_index: Any
+    mutations: MutationsIndex
+    field_types: dict[str, str]
+    labels: dict[str, str]
+    options: dict[str, list[str]]
 
 
 class SnapshotWitnessMixin:
@@ -108,24 +125,24 @@ class SnapshotWitnessMixin:
         *,
         index: MutationsIndex | None,
     ) -> Witness:
-        node_index = self._build_node_index()
-        idx = index if index is not None else self.build_mutations_index()
         # One schema read, three derivations. `_mutation_field_types` reads it
-        # again internally and `_schema_field_display` would be a third — at
-        # ~10 ms a read that is most of the fixed cost of a witness on a typical
-        # scene. Count the re-derivations of a shared traversal before adding a
+        # again internally and the display maps would be a third — at ~10 ms a
+        # read, that is most of the fixed cost of a witness on a typical scene.
+        # Count the re-derivations of a shared traversal before adding a
         # consumer.
         schema = self._witness_schema()
-        field_types = _field_types_from(schema)
         labels, options = _field_display_from(schema)
-
-        ordered, truncated = self._witness_membership(
-            node_index, idx, scene_id, dynamic_context or [], field_types
+        scope = _WitnessScope(
+            scene_id=scene_id,
+            node_index=self._build_node_index(),
+            mutations=index if index is not None else self.build_mutations_index(),
+            field_types=_field_types_from(schema),
+            labels=labels,
+            options=options,
         )
-        entities = [
-            self._witness_entity(node_index, idx, scene_id, entity_id, sources, field_types, labels, options)
-            for entity_id, sources in ordered
-        ]
+
+        ordered, truncated = self._witness_membership(scope, dynamic_context or [])
+        entities = [self._witness_entity(scope, entity_id, sources) for entity_id, sources in ordered]
         recorded = [SOURCE_MUTATION, SOURCE_ENTITY_REF]
         if dynamic_context is not None:
             recorded.append(SOURCE_DYNAMIC)
@@ -138,12 +155,7 @@ class SnapshotWitnessMixin:
     # ----- membership (drift axis 4's raw material) -------------------------
 
     def _witness_membership(
-        self,
-        node_index: Any,
-        idx: MutationsIndex,
-        scene_id: str,
-        dynamic_context: list[str],
-        field_types: dict[str, str],
+        self, scope: _WitnessScope, dynamic_context: list[str]
     ) -> tuple[list[tuple[str, list[str]]], bool]:
         """The witnessed ids with their provenance, and whether the cap fired.
 
@@ -155,17 +167,19 @@ class SnapshotWitnessMixin:
         sources: dict[str, list[str]] = {}
 
         def add(entity_id: str, source: str) -> None:
-            entry = node_index.by_id.get(entity_id)
+            entry = scope.node_index.by_id.get(entity_id)
             if entry is None or entry.kind != "lore":
                 return
             bucket = sources.setdefault(entity_id, [])
             if source not in bucket:
                 bucket.append(source)
 
-        for entity_id in idx.by_entity:
-            if self.effective_state(entity_id, scene_id, index=idx, field_types=field_types):
+        for entity_id in scope.mutations.by_entity:
+            if self.effective_state(
+                entity_id, scope.scene_id, index=scope.mutations, field_types=scope.field_types
+            ):
                 add(entity_id, SOURCE_MUTATION)
-        for edge in node_index.edges_by_src.get(scene_id, []):
+        for edge in scope.node_index.edges_by_src.get(scope.scene_id, []):
             add(edge.dst, SOURCE_ENTITY_REF)
         for entity_id in dynamic_context[:MAX_DYNAMIC_CONTEXT_IDS]:
             add(entity_id, SOURCE_DYNAMIC)
@@ -180,20 +194,14 @@ class SnapshotWitnessMixin:
     # ----- one entity -------------------------------------------------------
 
     def _witness_entity(
-        self,
-        node_index: Any,
-        idx: MutationsIndex,
-        scene_id: str,
-        entity_id: str,
-        sources: list[str],
-        field_types: dict[str, str],
-        labels: dict[str, str],
-        options: dict[str, list[str]],
+        self, scope: _WitnessScope, entity_id: str, sources: list[str]
     ) -> WitnessEntity | None:
-        entry = node_index.by_id.get(entity_id)
+        entry = scope.node_index.by_id.get(entity_id)
         if entry is None:
             return None
-        overrides = self.effective_state(entity_id, scene_id, index=idx, field_types=field_types)
+        overrides = self.effective_state(
+            entity_id, scope.scene_id, index=scope.mutations, field_types=scope.field_types
+        )
         base_title, base_metadata = self._witness_base_values(entry.path)
 
         # The resolved view: what this entity *was* at this scene. Stored values
@@ -224,9 +232,9 @@ class SnapshotWitnessMixin:
             overrides=sorted(key for key in overrides if key not in UNWITNESSED_FIELDS),
             field_types={
                 key: WitnessFieldType(
-                    label=labels.get(key, key),
-                    type=field_types.get(key, ""),
-                    options=options.get(key, []),
+                    label=scope.labels.get(key, key),
+                    type=scope.field_types.get(key, ""),
+                    options=scope.options.get(key, []),
                 )
                 for key in state
             },

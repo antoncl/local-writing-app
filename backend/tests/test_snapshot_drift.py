@@ -41,39 +41,35 @@ from app.services.project.snapshot_witness import (
 ALL_SOURCES = [SOURCE_MUTATION, SOURCE_ENTITY_REF, SOURCE_DYNAMIC]
 
 
-def entity(
-    entity_id: str = "lore_tom",
-    *,
-    title: str = "Tom",
-    sources: list[str] | None = None,
-    revision: str | None = "rev-1",
-    revision_kind: str = REVISION_KIND,
-    layer: str = "layer-a",
-    layer_label: str = "Base Folder",
-    state: dict | None = None,
-    overrides: list[str] | None = None,
-    field_types: dict | None = None,
-) -> WitnessEntity:
+def entity(entity_id: str = "lore_tom", **changed: object) -> WitnessEntity:
     """One witnessed entity, with everything but the point under test held
-    fixed — so a failure names the axis rather than the fixture."""
-    state = {"eye_colour": "green"} if state is None else state
-    return WitnessEntity(
-        id=entity_id,
-        title=title,
-        sources=sources if sources is not None else [SOURCE_ENTITY_REF],
-        revision=revision,
-        revision_kind=revision_kind,
-        source_layer_id=layer,
-        source_layer_label=layer_label,
-        state=state,
-        overrides=overrides or [],
-        field_types=field_types
-        if field_types is not None
-        else {
+    fixed — so a failure names the axis rather than the fixture.
+
+    Keyword overrides rather than a parameter per field: this fixture would
+    otherwise grow one argument per witness field, and a caller reading
+    `entity(source_layer_id="layer-b")` should see the *one* thing that differs from the
+    baseline, not the nine that do not.
+    """
+    fields: dict = {
+        "id": entity_id,
+        "title": "Tom",
+        "sources": [SOURCE_ENTITY_REF],
+        "revision": "rev-1",
+        "revision_kind": REVISION_KIND,
+        "source_layer_id": "layer-a",
+        "source_layer_label": "Base Folder",
+        "state": {"eye_colour": "green"},
+        "overrides": [],
+        **changed,
+    }
+    fields.setdefault(
+        "field_types",
+        {
             key: WitnessFieldType(label="Eye colour" if key == "eye_colour" else key, type="text")
-            for key in state
+            for key in fields["state"]
         },
     )
+    return WitnessEntity(**fields)
 
 
 def witness(*entities: WitnessEntity, version: int = WITNESS_VERSION, truncated: bool = False,
@@ -272,8 +268,8 @@ class VisibilityAxisTests(unittest.TestCase):
 
     def test_a_moved_source_layer_is_reported_with_no_file_edit(self) -> None:
         report = compare_witnesses(
-            witness(entity(layer="layer-a", layer_label="Series")),
-            witness(entity(layer="layer-b", layer_label="Book")),
+            witness(entity(source_layer_id="layer-a", source_layer_label="Series")),
+            witness(entity(source_layer_id="layer-b", source_layer_label="Book")),
         )
         drifted = report.entities[0]
         self.assertEqual(drifted.layer_was, "Series")

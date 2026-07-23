@@ -315,6 +315,19 @@ class TheResolvedChainReachesTheWireTests(DeclaredChainTestCase):
             [("honorverse", "honorverse", False), ("Book 1", "book01", True)],
         )
 
+    def test_a_blank_title_falls_back_like_a_missing_one(self) -> None:
+        """A whitespace-only title is not a name. The frontend suite owned this
+        case before #432 moved the rule; it is only meaningful against the
+        implementation that does the stripping."""
+        self.universe.mkdir(parents=True, exist_ok=True)
+        self.service._write_yaml(self.universe / "project.yaml", {"title": "   "})
+        declare(self.service, self.root, [self.universe])
+
+        self.assertEqual(
+            self._chain(),
+            [("honorverse", "honorverse", False), ("Book 1", "book01", True)],
+        )
+
     def test_a_gap_is_carried_as_declared(self) -> None:
         """Declaring a grandparent without its parent is legal upstream, so the
         chain reports two layers with a folder between them. Whether the BAR

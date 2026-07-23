@@ -311,15 +311,22 @@ class ProjectLifecycleMixin:
         by falling back to the folder name. The folder still reports
         `is_project`, so nothing about the enumeration is falsified.
 
-        ⚠ It is **not** reported elsewhere either, which is a wider hole than
-        this method can close: `_layer_label_for_folder` reads a declared
-        ancestor's manifest unguarded during the layer walk, so a malformed one
-        also breaks `_build_node_index` and `validate_project` — the very report
-        that should have named it. Verified, not assumed: with a declared
-        ancestor's manifest malformed, `POST /project/validate` returns 422
-        rather than listing the problem. That predates #311 (it arrived with
-        #309's label rule) and wants its own fix; do not read this guard as
-        having handled it.
+        This used to carry a warning that the same hole was still open one
+        level down — `_layer_label_for_folder` read a declared ancestor's
+        manifest unguarded during the layer walk, so a malformed one broke
+        `_build_node_index` and `validate_project`, the very report that should
+        have named it (#430). **That is closed**: the label now comes through
+        this method, so there is one guarded cross-project title read rather
+        than a guarded one and an unguarded one. `POST /project/validate`
+        returns 200 and lists the problem, pinned by
+        `test_a_malformed_ancestor_manifest_leaves_the_validation_report_readable`.
+
+        What forced it was #432 putting `collect_layers` on `current_project()`:
+        the unguarded read moved onto `POST /project/open`, so a broken manifest
+        two levels up stopped the project below it opening at all. #430 stays
+        open for the rest of its body — `validate_project` still builds the node
+        index outside the `try` that would turn any *other* cause into a
+        reported error.
         """
         try:
             return self._project_title(folder)

@@ -27,6 +27,7 @@ with a resolution scope it carries explicitly (ADR-0045, same reasoning as
 
 from __future__ import annotations
 
+import os
 import shutil
 from datetime import UTC, datetime
 from pathlib import Path
@@ -70,6 +71,58 @@ SESSION_GAP_MINUTES = 30
 AUTOMATIC_KEEP = 5
 
 
+def _read_body_and_content_time(path: Path) -> tuple[bytes, str]:
+    """The bytes to copy, and when those bytes were **written** — from one file.
+
+    The timestamp is what the strip lays out by. `captured_at` is right for the
+    camera and wrong for every automatic capture: `maybe_capture_session_
+    boundary` fires *before* the save, so the file still holds what the previous
+    sitting wrote — that is the whole point, and
+    `test_the_captured_bytes_are_the_pre_save_state` pins it. The record then
+    claimed "just now" about prose last touched a fortnight ago (#458).
+
+    Not cosmetic: ADR-0044's strip lays notches out **by age**, so the one surface
+    built for navigating time was the surface misreporting it — and because
+    explicit captures *were* dated correctly, automatic and explicit notches on
+    the same track meant different things with nothing to tell them apart.
+
+    **Why this is a second field rather than a redefinition of `captured_at`.**
+    Stamping `captured_at` from the mtime was the first attempt and it broke the
+    total order the store depends on. Two explicit captures with no edit between
+    them read the *same* mtime, so they tie; `_snapshot_records` then falls back
+    to the random `id`, and "oldest first" — the listing contract, and the basis
+    on which `_thin` drops "the oldest" — becomes arbitrary. Creation time is
+    monotonic and content time is not, so they are genuinely two facts and the
+    record keeps both.
+
+    Read as "when this content was last written to the scene file", which stays
+    honest after a restore: restoring old prose writes it now, so a later
+    snapshot of it is dated now, because that is when those bytes became the
+    file's contents.
+
+    **One open handle, read then `fstat`** — not `stat()` beside `read_bytes()`.
+    Scene routes are `def`, so FastAPI runs them in a threadpool and two panes on
+    one scene interleave; a write landing between two separate calls would pair
+    one version's bytes with the other version's time, baking #458 in miniature
+    into a record ADR-0043 forbids rewriting. Every writer here replaces the file
+    atomically, so the handle pins the version that was read and `fstat` cannot
+    describe anything else.
+
+    No `OSError` fallback: this **is** the read, so a failure here is exactly the
+    failure `read_bytes` already raised, and it belongs to the caller that owns
+    "a capture is never the reason a save fails" (`maybe_capture_session_
+    boundary`, which returns early on a missing file).
+
+    Microseconds are pinned for the same reason `captured_at` pins them: an
+    `isoformat` that omits them on the exact second makes two stamps compare as
+    strings of different shapes.
+    """
+    with path.open("rb") as handle:
+        body = handle.read()
+        written = datetime.fromtimestamp(os.fstat(handle.fileno()).st_mtime, UTC)
+    return body, written.isoformat(timespec="microseconds")
+
+
 class SceneSnapshotsMixin:
     """Composed onto `ProjectService`; the project IO helpers it uses
     (`_atomic_write`, `_read_yaml`, `_write_yaml`, `_new_id`,
@@ -99,10 +152,16 @@ class SceneSnapshotsMixin:
             raise ProjectServiceError(
                 f"Snapshot {sidecar.stem} has an unreadable retention value.", 422
             )
+        captured_at = str(data.get("captured_at") or "")
         return Snapshot(
             id=str(data.get("id") or sidecar.stem),
             snapshot_of=str(data.get("snapshot_of") or ""),
-            captured_at=str(data.get("captured_at") or ""),
+            captured_at=captured_at,
+            # Falls back to `captured_at` on every snapshot taken before #458,
+            # which is exactly what those records have always displayed. An
+            # additive field with a defensive read, not a migration — and the
+            # ADR forbids rewriting a stored snapshot in any case.
+            content_written_at=str(data.get("content_written_at") or captured_at),
             retention=retention,
             schema_version=int(data.get("schema_version") or 0),
         )
@@ -221,6 +280,10 @@ class SceneSnapshotsMixin:
         land, leaving the `.md` holding post-write bytes and the sidecar
         describing the world before them.
 
+        `content_written_at` is not a second read for the same reason: it comes
+        off the handle the bytes came from, so no write can slip between the two
+        and leave the record dating one version's bytes by another's clock.
+
         The witness is written once, here, and never rewritten: letting a later
         save land a fresh context set in an existing sidecar would leave the body
         at the start of the session and the witness at its end.
@@ -231,17 +294,25 @@ class SceneSnapshotsMixin:
         folder = self._snapshots_dir(root, node_id)
         folder.mkdir(parents=True, exist_ok=True)
         snapshot_id = self._new_id("snap")
-        body = path.read_bytes()
+        # One read, so the timestamp describes the bytes beside it even if the
+        # file is rewritten a moment later — the same invariant the witness gets
+        # from following this line, stated in the docstring below.
+        body, content_written_at = _read_body_and_content_time(path)
         witness = self.build_witness(node_id, dynamic_context)
         record: dict[str, Any] = {
             "id": snapshot_id,
             "snapshot_of": node_id,
+            # When the RECORD was made. Monotonic across captures, so it is what
+            # the listing sorts by and what `_thin` calls "the oldest".
+            #
             # Microseconds are pinned rather than left to `isoformat`, which
             # omits them on the exact second — two captures in one second would
             # then be compared as strings of different shapes, and the sort that
             # decides which snapshot is "the oldest" would rest on where "+"
             # falls against "." in ASCII.
             "captured_at": datetime.now(UTC).isoformat(timespec="microseconds"),
+            # When the CONTENT was written. What the strip lays out by (#458).
+            "content_written_at": content_written_at,
             "retention": retention,
             "schema_version": CURRENT_VERSION,
         }

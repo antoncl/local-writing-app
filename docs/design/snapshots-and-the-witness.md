@@ -211,15 +211,17 @@ What actually differs:
   overwrite the state, and never otherwise. A scene written once and never revisited gets no
   automatic snapshot — and needs none, because nothing overwrote it. This is the strongest argument
   for the current choice, and it is about cost rather than about content.
-- **The timestamp, which the current choice gets wrong.** `captured_at` is stamped
-  `datetime.now(UTC)` in `_capture`, so an automatic snapshot is dated when the *capture* ran — the
-  start of session B — while its bytes are from the end of session A. Those can be a fortnight apart,
-  and ADR-0044's strip lays notches out **by age**. Explicit snapshots are captured from the live
-  file and so are dated correctly, which means automatic and explicit notches on the same track mean
-  different things with nothing to distinguish them. Capturing at the end of a sitting would have got
-  this right by construction. Filed as
-  [#458](https://github.com/antoncl/local-writing-app/issues/458); fixable without moving the
-  trigger, since the file's mtime already records when the content was written.
+- **The timestamp, which the trigger made two facts rather than one.** `captured_at` is stamped
+  `datetime.now(UTC)` in `_capture`, so an automatic snapshot's record is made when the *capture*
+  ran — the start of session B — while its bytes are from the end of session A. Those can be a
+  fortnight apart, and ADR-0044's strip lays notches out **by age**, so the strip dated a
+  fortnight-old body "just now" while explicit snapshots were dated correctly: the two tiers meant
+  different things on one track. Capturing at the end of a sitting would have got this right by
+  construction. Fixed without moving the trigger
+  ([#458](https://github.com/antoncl/local-writing-app/issues/458)): the record carries the file's
+  mtime as `content_written_at` alongside `captured_at`, and the strip lays out by it. **Not** a
+  redefinition — repeated captures of unchanged content share an mtime, so content time ties where
+  creation time cannot, and the store's ordering and thinning still need the monotonic one.
 
 **Which of ADR-0043's three rejections of capture-on-close actually load-bear.** The first two do —
 the close event cannot be observed (`pagehide`/`beforeunload` exist nowhere, #369; a crash or power

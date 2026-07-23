@@ -121,6 +121,144 @@ class CaptureTriggerTests(SnapshotTestCase):
         self.assertNotIn(b"Afternoon words.", stored)
 
 
+class ContentTimeIsItsOwnFactTests(SnapshotTestCase):
+    """#458 — a record carries **two** times: when it was made (`captured_at`,
+    unchanged) and when its bytes were written (`content_written_at`).
+
+    Not a redefinition of `captured_at`, which the last test here is the reason
+    for: content time ties where creation time cannot, so the store's total order
+    still needs the creation stamp. ADR-0044's strip lays out by the content
+    stamp, which is the difference between the time surface telling the truth and
+    telling a plausible lie.
+
+    The whole class drives real captures rather than asserting the field
+    directly: the claim is about what the record says relative to the file, and a
+    test that read the stamp back out of the code that wrote it could not fail.
+    """
+
+    def _content_time(self, record) -> datetime:
+        return datetime.fromisoformat(record.content_written_at)
+
+    def _mtime(self) -> datetime:
+        return datetime.fromtimestamp(self.scene_path.stat().st_mtime, UTC)
+
+    def test_an_automatic_snapshot_is_dated_when_its_content_was_written(self) -> None:
+        """The bug in one test. The capture fires on the first save of a new
+        sitting, and the bytes are the previous sitting's — so the record must
+        carry the previous sitting's time, not this one's."""
+        self._save("Morning words.")
+        wrote_the_content_at = self._mtime()
+
+        # A fortnight passes, then one keystroke.
+        stale = time.time() - 14 * 24 * 60 * 60
+        os.utime(self.scene_path, (stale, stale))
+        self._save("A fortnight later.")
+
+        records = self._snapshots()
+        self.assertEqual(len(records), 1)
+        dated = self._content_time(records[0])
+        self.assertLess(
+            dated,
+            wrote_the_content_at,
+            "an automatic snapshot dated 'now' claims a fortnight-old body is fresh",
+        )
+        self.assertLess(
+            abs((dated - datetime.fromtimestamp(stale, UTC)).total_seconds()),
+            2,
+            "it should carry the mtime of the bytes it copied",
+        )
+        self.assertGreater(
+            datetime.fromisoformat(records[0].captured_at),
+            dated,
+            "the record was still created now — the two facts must not be conflated",
+        )
+
+    def test_an_explicit_snapshot_dates_the_content_it_photographs(self) -> None:
+        """The camera has the same two times as the automatic tier, and they can
+        be as far apart: an author who parks, reads, and presses the camera on a
+        scene untouched for a fortnight gets a record made now of prose written
+        then.
+
+        Aged deliberately. On a freshly-saved file all three timestamps sit
+        inside any tolerance worth writing, so the version of this test that
+        saved and immediately captured stayed green with the fix deleted.
+        """
+        self._save("A fortnight ago.")
+        stale = time.time() - 14 * 24 * 60 * 60
+        os.utime(self.scene_path, (stale, stale))
+
+        record = self.service.capture_snapshot(self.scene_id)
+        self.assertLess(
+            abs((self._content_time(record) - datetime.fromtimestamp(stale, UTC)).total_seconds()),
+            2,
+            "the camera dates the bytes it photographed, not the shutter",
+        )
+        self.assertGreater(
+            datetime.fromisoformat(record.captured_at),
+            self._content_time(record),
+            "the record was still made now — the two facts must not be conflated",
+        )
+
+    def test_the_two_tiers_mean_the_same_thing_on_one_track(self) -> None:
+        """The actual defect ADR-0044 suffers: a notch's position is its
+        content's age, and that has to hold for both tiers or the track means
+        two different things at once."""
+        self._save("Shared content.")
+        fresh_source = self._mtime()
+        explicit = self.service.capture_snapshot(self.scene_id)
+
+        self._age_past_the_gap()
+        aged_source = self._mtime()
+        self._save("A new sitting.")
+        automatic = [r for r in self._snapshots() if r.retention == "thinned"][0]
+
+        # The explicit one was taken from unaged content; the automatic one from
+        # content backdated past the gap. Each must date its own source.
+        self.assertLess(
+            abs((self._content_time(explicit) - fresh_source).total_seconds()), 2
+        )
+        self.assertLess(
+            abs((self._content_time(automatic) - aged_source).total_seconds()), 2
+        )
+        self.assertLess(
+            self._content_time(automatic),
+            self._content_time(explicit),
+            "the automatic notch holds older content and must sit further left",
+        )
+
+    def test_repeated_captures_of_unchanged_content_share_a_content_time(self) -> None:
+        """Why this is a second field and not a redefinition.
+
+        Content time is **not** monotonic: three captures with no edit between
+        them read one mtime. Stamping `captured_at` from it made the listing's
+        total order collapse onto the random `id`, and "oldest first" — which is
+        also how `_thin` picks what to drop — became arbitrary. Creation time
+        still separates them.
+        """
+        self._save("Unchanged.")
+        records = [self.service.capture_snapshot(self.scene_id) for _ in range(3)]
+        self.assertEqual(len({r.content_written_at for r in records}), 1)
+        self.assertEqual(len({r.captured_at for r in records}), 3)
+        self.assertEqual(
+            [r.id for r in self._snapshots()],
+            [r.id for r in records],
+            "creation order still decides the listing",
+        )
+
+    def test_a_snapshot_from_before_this_field_falls_back_to_captured_at(self) -> None:
+        """Additive field, defensive read, no migration — and the ADR forbids
+        rewriting a stored snapshot anyway. An old record must keep showing
+        exactly what it always showed."""
+        record = self.service.capture_snapshot(self.scene_id)
+        sidecar = self._store() / f"{record.id}.yaml"
+        stored = self.service._read_yaml(sidecar)
+        stored.pop("content_written_at")
+        self.service._write_yaml(sidecar, stored)
+
+        reread = self._snapshots()[0]
+        self.assertEqual(reread.content_written_at, reread.captured_at)
+
+
 class IdentityAndStoreTests(SnapshotTestCase):
     def test_snapshot_id_is_never_the_sources_and_snapshot_of_round_trips(self) -> None:
         record = self.service.capture_snapshot(self.scene_id)

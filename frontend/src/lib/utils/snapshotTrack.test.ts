@@ -68,7 +68,9 @@ describe("notchPositions", () => {
 describe("ageMinutes", () => {
   const now = new Date("2026-07-22T15:00:00.000000+00:00");
 
-  it("reads the backend's captured_at", () => {
+  // Which field the strip hands it is `snapshotTime`'s rule and is pinned
+  // there — this function only sees a stamp.
+  it("reads an ISO stamp from the backend", () => {
     expect(ageMinutes("2026-07-22T14:30:00.000000+00:00", now)).toBeCloseTo(30, 6);
   });
 

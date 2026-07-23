@@ -9,7 +9,7 @@
   import { LoreScrubController } from "@/lib/stores/loreScrub.svelte";
   import { SnapshotStripController } from "@/lib/stores/snapshotStrip.svelte";
   import { implicitContextFor } from "@/lib/stores/implicitContext.svelte";
-  import { relativeTime } from "@/lib/utils/relativeTime";
+  import { notchWhen } from "@/lib/utils/snapshotTime";
   import MetadataPanel from "@/components/editor/MetadataPanel.svelte";
   import InputsDialog from "@/components/editor/InputsDialog.svelte";
   import FieldsOnlyView from "@/components/editor/body/FieldsOnlyView.svelte";
@@ -185,7 +185,7 @@
   // that axis draws a glyph, and a snapshot difference must never have one.
   const VIEW_LABEL = { both: "both versions", now: "the scene now", was: "the snapshot" } as const;
   let snapshotRibbon = $derived(
-    `Snapshot · ${relativeTime(snapshots.current?.captured_at ?? "")} · reading ${VIEW_LABEL[snapshots.view]}`,
+    `Snapshot · ${notchWhen(snapshots.current)} · reading ${VIEW_LABEL[snapshots.view]}`,
   );
 
   let snapshotCompare = $derived(

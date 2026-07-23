@@ -17,31 +17,22 @@
   // ticks and the actions row (ADR-0038 §A's shape, applied to size).
   import type { SnapshotStripController } from "@/lib/stores/snapshotStrip.svelte";
   import DriftReport from "@/components/editor/DriftReport.svelte";
-  import { relativeTime } from "@/lib/utils/relativeTime";
-  import { LIVE_LEFT, TICKS, ageMinutes, agePosition, notchPositions, trackSpanMinutes } from "@/lib/utils/snapshotTrack";
+  import { notchAges, notchTooltip, notchWhen } from "@/lib/utils/snapshotTime";
+  import { LIVE_LEFT, TICKS, agePosition, notchPositions, trackSpanMinutes } from "@/lib/utils/snapshotTrack";
 
   let { strip }: { strip: SnapshotStripController } = $props();
 
   // Ages are read once per render against a single `now`, so every notch and
   // tick on one paint shares a clock. Recomputed whenever the list changes.
-  let ages = $derived.by(() => {
-    const now = new Date();
-    return strip.snapshots.map((snapshot) => ageMinutes(snapshot.captured_at, now));
-  });
+  //
+  // By CONTENT age, not record age (#458) — and the list arrives ordered by the
+  // same key, which is `notchPositions`' input contract. Both rules live in
+  // `snapshotTime`, where they can be tested.
+  let ages = $derived(notchAges(strip.snapshots, new Date()));
   let positions = $derived(notchPositions(ages));
   let span = $derived(trackSpanMinutes(ages));
   let visibleTicks = $derived(TICKS.filter((tick) => tick.minutes <= span));
   let parked = $derived(strip.parked !== null);
-
-  function tooltip(index: number): string {
-    const snapshot = strip.snapshots[index];
-    // Most snapshots have no description — every automatic one, and every
-    // explicit one taken in flow — so slice 1's tooltip is the date line alone
-    // (§L: the absent case is the COMMON case and must read well on its own).
-    // A description is an enrichment on top of it, and arrives with slice 4.
-    const when = relativeTime(snapshot.captured_at);
-    return snapshot.retention === "kept" ? `Snapshot · ${when} · kept` : `Snapshot · ${when}`;
-  }
 
   // ← → move through time; Esc returns to Live. No held modifier: repeatedly
   // holding Shift trips Windows FilterKeys and five presses fire Sticky Keys,
@@ -158,8 +149,8 @@
         class:kept={snapshot.retention === "kept"}
         class:current={strip.parked === snapshot.id}
         style={`left: ${positions[index]}%`}
-        title={tooltip(index)}
-        aria-label={tooltip(index)}
+        title={notchTooltip(snapshot)}
+        aria-label={notchTooltip(snapshot)}
         aria-pressed={strip.parked === snapshot.id}
         onclick={() => void strip.park(strip.parked === snapshot.id ? null : snapshot.id)}
       ><i></i></button>
@@ -201,7 +192,7 @@
      here rather than beside the track — so it can be any width it likes. -->
 {#if parked}
   <div class="snapshot-actions">
-    <span class="asof">Snapshot · {relativeTime(strip.current?.captured_at ?? "")}</span>
+    <span class="asof">Snapshot · {notchWhen(strip.current)}</span>
 
     <!-- The compare axis. It lives HERE and not beside the track because it is
          variable-width, and nothing sharing the track's row may change width —
@@ -255,7 +246,16 @@
     align-items: stretch;
     gap: 16px;
     padding: 8px 14px;
-    min-height: 46px;
+    /* Tall enough for the notches above the rule AND the scale below it
+       (#406). Only while parked — compact overrides it below, and parking is
+       what earns the taller strip in the first place (§B). */
+    min-height: 61px;
+    /* One baseline for everything that lines up on the rule — the rule itself,
+       the notches above it, the ticks below it (#406). Written once here and
+       once in `.compact`; every consumer reads `var(--rule-bottom)`, so the two
+       states are the only places the number lives and nothing can drift off the
+       rule the way #406 did. */
+    --rule-bottom: 23px;
     border-top: 1px solid var(--divider);
     background: var(--inset);
     transition: min-height 160ms ease-out, padding 160ms ease-out, background-color 160ms ease-out;
@@ -264,15 +264,7 @@
     min-height: 27px;
     padding: 0 14px;
     background: transparent;
-  }
-  .snapshot-strip.compact .strip-track {
-    padding-bottom: 6px;
-  }
-  .snapshot-strip.compact .strip-track::before {
-    bottom: 5px;
-  }
-  .snapshot-strip.compact .notch {
-    bottom: 5px;
+    --rule-bottom: 5px;
   }
   .snapshot-strip.compact .tick {
     display: none;
@@ -311,7 +303,7 @@
     position: relative;
     flex: 1 1 auto;
     min-width: 0;
-    padding-bottom: 9px;
+    padding-bottom: calc(var(--rule-bottom) + 1px);
     transition: padding 160ms ease-out;
   }
   .strip-track::before {
@@ -319,15 +311,25 @@
     position: absolute;
     left: 0;
     right: 0;
-    bottom: 8px;
+    bottom: var(--rule-bottom);
     height: 1px;
     background: var(--border);
+    /* Moves with the rule baseline in lockstep with the strip's min-height, so
+       parking doesn't snap the rule while the height animates (#406 follow-up). */
+    transition: bottom 160ms ease-out;
   }
 
+  /* The scale hangs BELOW the rule; notches rise above it (#406). They used to
+     share the band above the line — 1px of width and one step of neutral grey
+     apart — so a notch landing on `1h` was hard to pick out and the tick's
+     label read as an annotation *of that notch*. The notch could not be the
+     thing that moved: its position **is** the timeline (§D/§E). Two marks on
+     opposite sides of one line can never be the same mark in the same place,
+     whatever the spacing does. */
   .tick {
     position: absolute;
-    bottom: 8px;
-    transform: translateX(-50%);
+    bottom: var(--rule-bottom);
+    transform: translate(-50%, 100%);
     display: flex;
     flex-direction: column;
     align-items: center;
@@ -350,7 +352,7 @@
 
   .notch {
     position: absolute;
-    bottom: 8px;
+    bottom: var(--rule-bottom);
     transform: translateX(-50%);
     width: 14px;
     padding: 0;
@@ -360,6 +362,9 @@
     display: flex;
     align-items: flex-end;
     justify-content: center;
+    /* In lockstep with the rule and the strip height, so parking doesn't leave
+       the notches hanging above the strip while it grows (#406 follow-up). */
+    transition: bottom 160ms ease-out;
   }
   .notch i {
     display: block;
@@ -381,10 +386,16 @@
     width: 3px;
     background: var(--diff-was);
   }
+  /* The parked marker sits at the foot of the notch, ABOVE the rule (#406
+     follow-up). It used to hang below the rule (bottom:-4px), which was clear
+     when ticks lived above the line but now lands in the tick band — parking a
+     notch onto a 1h/1d/1w tick reprinted the collision the tick fix removed.
+     Above the rule there are no ticks, so the marker cannot meet one whatever
+     the spacing does. */
   .notch.current::after {
     content: "";
     position: absolute;
-    bottom: -4px;
+    bottom: 0;
     left: 50%;
     transform: translateX(-50%);
     width: 5px;

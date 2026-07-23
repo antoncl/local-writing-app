@@ -27,6 +27,18 @@
           }
         ]
       }
+    ],
+    "SessionEnd": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python ${CLAUDE_PROJECT_DIR}/.claude/hooks/cleanup_session_servers.py",
+            "statusMessage": "Stopping this worktree's dev servers...",
+            "timeout": 60
+          }
+        ]
+      }
     ]
   }
 }

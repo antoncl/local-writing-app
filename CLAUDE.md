@@ -85,6 +85,9 @@ Then `preview_start {url: "http://127.0.0.1:5199"}` and verify with `read_page`,
   <path> is serving 127.0.0.1:<port>` names the checkout actually being served.
 - **To stop a server, kill the process *tree*, and don't trust the PID the OS
   reports** — `taskkill /F /T /PID <reloader pid>`. → `docs/development/worktrees.md`
+- A `SessionEnd` hook now stops this worktree's own dev servers automatically
+  (#452). It never touches another tree's, so killing one by hand mid-session is
+  still yours to do.
 
 ## Quality gates
 

@@ -42,6 +42,21 @@ class AncestorCandidate(BaseModel):
     name: str
     is_project: bool = False
     inherited: bool = False
+    # The manifest title, when there is one to read — `None` otherwise, and
+    # never a fallback to `name`. #311's breadcrumb renders one path whose leaf
+    # is the open project's title, so labelling an ancestor by its folder would
+    # mix two naming schemes in a single line; #309's own layer-label rule
+    # ("a layer's name follows the project, not its position") already settled
+    # which one wins.
+    #
+    # **`None` does not mean "not a project" — read `is_project` for that.**
+    # Three different states arrive here as null: a folder with no manifest, a
+    # project whose manifest has a blank or missing `title`, and a project whose
+    # manifest could not be read at all. Only the first is "not a project", and
+    # conflating them is a live hazard for #318's wizard, which must decide
+    # whether a row is offerable: keyed on `title` it would refuse a perfectly
+    # declarable ancestor that simply has no title.
+    title: str | None = None
 
 
 class ProjectChild(BaseModel):

@@ -181,9 +181,49 @@ class ProjectLifecycleMixin:
                 name=folder.name,
                 is_project=is_project,
                 inherited=inherited,
+                title=self._readable_project_title(folder) if is_project else None,
             )
             for folder, is_project, inherited in self.ancestor_candidates(root)
         ]
+
+    def _readable_project_title(self, folder: Path) -> str | None:
+        """Another project's title, or None when its manifest cannot be read.
+
+        A title is decoration on someone else's folder; the open project must not
+        become unopenable because of it. Reading it *unguarded* is what made a
+        malformed `project.yaml` two levels up return 422 from `GET /project` and
+        `POST /project/open` — for a project whose own files are fine, and for an
+        ancestor it may not even have declared. Worse, the five AI routes catch
+        `ProjectServiceError` and fall back to `policy="off"`, so the same broken
+        file silently turned AI off with nothing naming the cause.
+
+        This is the same judgement `_project_children` already makes one method
+        down, where `iterdir()` is wrapped because it reaches outside the project.
+        This read reaches further out, so it needs the guard more, not less.
+        `OSError` covers the Windows cases that motivated it: a manifest locked
+        mid-write by another instance, an ACL-restricted shelf, an offline
+        network or OneDrive path. `UnicodeDecodeError` covers a manifest saved as
+        cp1252 by a hand editor — `_read_yaml` opens as utf-8 and only catches
+        `yaml.YAMLError`.
+
+        None here means "no title to show", which the breadcrumb already renders
+        by falling back to the folder name. The folder still reports
+        `is_project`, so nothing about the enumeration is falsified.
+
+        ⚠ It is **not** reported elsewhere either, which is a wider hole than
+        this method can close: `_layer_label_for_folder` reads a declared
+        ancestor's manifest unguarded during the layer walk, so a malformed one
+        also breaks `_build_node_index` and `validate_project` — the very report
+        that should have named it. Verified, not assumed: with a declared
+        ancestor's manifest malformed, `POST /project/validate` returns 422
+        rather than listing the problem. That predates #311 (it arrived with
+        #309's label rule) and wants its own fix; do not read this guard as
+        having handled it.
+        """
+        try:
+            return self._project_title(folder)
+        except (ProjectServiceError, OSError, UnicodeDecodeError):
+            return None
 
     def _project_children(self, root: Path) -> list[ProjectChild]:
         """Project folders directly inside this one, alphabetically.
@@ -201,13 +241,19 @@ class ProjectLifecycleMixin:
         for folder in entries:
             if not folder.is_dir() or not (folder / MANIFEST_FILENAME).exists():
                 continue
-            manifest = self._read_yaml(folder / MANIFEST_FILENAME)
-            title = manifest.get("title")
             children.append(
                 ProjectChild(
                     path=str(folder),
                     name=folder.name,
-                    title=title.strip() if isinstance(title, str) and title.strip() else folder.name,
+                    # Guarded for the same reason as the ancestor side, and by
+                    # the same helper: a child's manifest is another folder's
+                    # file, and an unreadable one must not 422 the open project.
+                    # This read was unguarded (#310), so a malformed manifest in
+                    # any direct subfolder took out `current_project()` — the
+                    # exact mirror of the ancestor case, found by review of the
+                    # ancestor fix. Reusing the helper also retires the second
+                    # copy of the title-or-folder-name rule.
+                    title=self._readable_project_title(folder) or folder.name,
                 )
             )
         return children

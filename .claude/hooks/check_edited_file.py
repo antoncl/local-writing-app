@@ -26,6 +26,7 @@ from pathlib import Path
 REPO = Path(__file__).resolve().parents[2]
 SIZE_GUARD = REPO / "scripts" / "check_file_size.py"
 STYLE_GUARD = REPO / "scripts" / "check_style_tokens.py"
+MEMORY_GUARD = REPO / "scripts" / "check_memory_index.py"
 # Advisory complexity rules — flagged, never blocking, while the existing count
 # is burned down (see backend/pyproject.toml for thresholds).
 COMPLEXITY_RULES = ("PLR0912", "PLR0913", "PLR0915", "C901")
@@ -131,6 +132,14 @@ def main() -> int:
 
     if path.suffix == ".py" and VENV_PYTHON is not None:
         messages.extend(ruff_messages(path))
+
+    # Memory writes only: the index is loaded into every request of every
+    # session, so it gets a ratchet of its own. Gated on the file actually
+    # living beside a MEMORY.md, so ordinary edits pay no extra process.
+    if path.suffix == ".md" and (path.parent / "MEMORY.md").is_file() and MEMORY_GUARD.is_file():
+        _, out = run([sys.executable, str(MEMORY_GUARD), "--memory-dir", str(path.parent)])
+        if out:
+            messages.append(out)
 
     if messages:
         body = "\n".join(messages)

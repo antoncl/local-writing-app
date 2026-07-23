@@ -115,7 +115,7 @@
 
 <svelte:window onkeydown={onKeydown} />
 
-<div class="snapshot-strip" class:compact={!parked} role="group" aria-label="Snapshots" bind:this={stripEl}>
+<div class="snapshot-strip" class:compact={!parked} class:waiting={strip.slow} role="group" aria-label="Snapshots" bind:this={stripEl}>
   <div class="strip-track">
     <!-- Ticks first, so notches paint above them. -->
     {#each visibleTicks as tick (tick.label)}
@@ -205,6 +205,17 @@
 {/if}
 
 <style>
+  /* A park that has gone on long enough to notice. Below a couple of seconds
+     an indicator is worse than nothing — it flashes on every notch and reads as
+     the app being slow rather than busy — so this only appears past the
+     threshold, and it is the cursor rather than a spinner because there is no
+     real progress to report. */
+  .snapshot-strip.waiting,
+  .snapshot-strip.waiting .notch,
+  .snapshot-strip.waiting .capture {
+    cursor: progress;
+  }
+
   /* Compact at rest, expanding when engaged. At rest a quiet ruled line under
      the prose; parking earns the taller strip, the ticks and the actions. */
   .snapshot-strip {

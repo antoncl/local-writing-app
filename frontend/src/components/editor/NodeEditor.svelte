@@ -932,6 +932,7 @@
 <div
   class="editor-panel"
   class:body-hidden={bodyShape === "none"}
+  class:waiting={snapshots.slow}
   class:has-rail={scene && !railIsPane}
   class:rail-collapsed={scene && !railIsPane && !railOpen}
   class:rail-pane={scene && railIsPane}
@@ -1177,6 +1178,13 @@
   .editor-panel.body-hidden {
     display: flex;
     flex-direction: column;
+  }
+
+  /* The pointer is as likely to be over the prose as over the strip, so the
+     wait cursor covers the whole pane (SnapshotStrip owns the threshold). */
+  .editor-panel.waiting,
+  .editor-panel.waiting * {
+    cursor: progress;
   }
 
   .editor-panel.has-rail {

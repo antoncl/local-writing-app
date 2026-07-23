@@ -119,6 +119,71 @@ describe("flipping", () => {
   });
 });
 
+describe("entering compare mode", () => {
+  // Parking used to set `parked` synchronously, so the pane switched a whole
+  // round trip before it had anything to show. The author got an empty title
+  // bar and an empty page under a ribbon already naming the snapshot — and
+  // stepping notch to notch, the PREVIOUS snapshot's body under the new one's
+  // timestamp. The swap now happens once, with the payload in hand.
+  it("stays where the author was until the payload is rendered", async () => {
+    let release: (value: SnapshotDiff) => void = () => {};
+    const strip = await parked(
+      () => new Promise<SnapshotDiff>((resolve) => (release = resolve)),
+    );
+
+    const parking = strip.park("snap_1");
+    // Mid-flight: still Live, still empty, and nothing claiming otherwise.
+    expect(strip.parked, "switched before it had anything to show").toBe(null);
+    expect(strip.bodyHtml).toBe("");
+    expect(strip.titleForView).toBe("");
+    // ...but the strip knows which notch is being fetched.
+    expect(strip.pendingId).toBe("snap_1");
+
+    release(diff());
+    await parking;
+
+    expect(strip.parked).toBe("snap_1");
+    expect(strip.bodyHtml).toContain("r-was");
+    expect(strip.titleForView).toBe("The Tide");
+    expect(strip.pendingId).toBe(null);
+  });
+
+  it("a failed park leaves the author where they were", async () => {
+    const strip = await parked(async () => diff());
+    await strip.park("snap_1");
+    diffSnapshot.mockImplementation(async () => {
+      throw new Error("gone");
+    });
+    await strip.park("snap_1");
+    // Still reading the snapshot it successfully loaded, not dumped to Live
+    // with an empty page.
+    expect(strip.parked).toBe("snap_1");
+    expect(strip.bodyHtml).toContain("r-was");
+    expect(strip.pendingId).toBe(null);
+  });
+
+  it("only admits it is working once the wait is worth mentioning", async () => {
+    vi.useFakeTimers();
+    try {
+      let release: (value: SnapshotDiff) => void = () => {};
+      const strip = await parked(
+        () => new Promise<SnapshotDiff>((resolve) => (release = resolve)),
+      );
+      const parking = strip.park("snap_1");
+      expect(strip.slow, "flagged a wait nobody would notice").toBe(false);
+      vi.advanceTimersByTime(1900);
+      expect(strip.slow).toBe(false);
+      vi.advanceTimersByTime(200);
+      expect(strip.slow, "never admitted to a long wait").toBe(true);
+      release(diff());
+      await parking;
+      expect(strip.slow, "left the cursor spinning after it finished").toBe(false);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+});
+
 describe("a keypress landing while the diff is still in flight", () => {
   // The regression this file exists for. `park` and `setView` both guard
   // against a stale result, and sharing one token made `setView` cancel the

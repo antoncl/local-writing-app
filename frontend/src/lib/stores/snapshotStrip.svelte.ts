@@ -24,6 +24,14 @@ export type LiveState = { body: string; title: string; status: string; metadata:
 
 const NO_LIVE: LiveState = { body: "", title: "", status: "", metadata: {} };
 
+/** How long a park may take before the pane admits it is working.
+ *
+ *  Anton's call, and the reasoning is that below a couple of seconds an
+ *  indicator is worse than nothing: it flashes on every notch and reads as the
+ *  app being slow rather than as it being busy. Past it the click looks
+ *  unacknowledged, which is the only case worth spending an affordance on. */
+const SLOW_PARK_MS = 2000;
+
 export class SnapshotStripController {
   /** Oldest first, as the backend lists them — the order the strip lays out. */
   snapshots = $state<Snapshot[]>([]);
@@ -84,11 +92,48 @@ export class SnapshotStripController {
   #fetch = 0;
   #render = 0;
 
+  // ---- entering compare mode (#409 review) ----------------------------------
+  //
+  // **Parking does not switch the view until the payload is in hand.** It used
+  // to set `parked` synchronously, so the pane entered compare mode a whole
+  // round trip before it had anything to show: an empty title bar and an empty
+  // page under a ribbon already naming the snapshot, and — stepping notch to
+  // notch — the PREVIOUS snapshot's body and tints under the new one's
+  // timestamp. Every one of those is the screen saying something untrue, on the
+  // surface whose whole job is to be trusted about what changed.
+  //
+  // Swapping only once the runs are rendered removes all three at once and
+  // needs no "pending" flag for consumers to remember to honour.
+  /** The notch being fetched, while the view still shows where the author was. */
+  pendingId = $state<string | null>(null);
+  /** Whether that fetch has gone on long enough to be worth admitting to. */
+  slow = $state(false);
+  #slowTimer: ReturnType<typeof setTimeout> | null = null;
+
+  #watchForSlow(): void {
+    this.#stopWatchingForSlow();
+    this.#slowTimer = setTimeout(() => {
+      this.slow = true;
+    }, SLOW_PARK_MS);
+  }
+
+  #stopWatchingForSlow(): void {
+    if (this.#slowTimer !== null) clearTimeout(this.#slowTimer);
+    this.#slowTimer = null;
+  }
+
+  #endPending(): void {
+    this.#stopWatchingForSlow();
+    this.pendingId = null;
+    this.slow = false;
+  }
+
   /** (Re)load this scene's snapshots, returning to Live. Returns a cancel fn
    *  for the caller's `$effect` teardown. */
   load(sceneId: string | null): () => void {
     this.#sceneId = sceneId;
     this.parked = null;
+    this.#endPending();
     // `#clearDiff` cancels the in-flight fetch and render, which a scene change
     // needs just as much as a return to Live does.
     this.#clearDiff();
@@ -124,30 +169,35 @@ export class SnapshotStripController {
    *  text, so every later flip is a re-render of this payload. */
   async park(snapshotId: string | null): Promise<void> {
     const sceneId = this.#sceneId;
-    this.parked = snapshotId;
     if (!snapshotId || !sceneId) {
+      // Live needs no round trip, so it happens at once.
+      this.parked = null;
+      this.#endPending();
       this.#clearDiff();
       return;
     }
     const seq = ++this.#fetch;
     const fresh = () => seq === this.#fetch && this.#sceneId === sceneId;
+    this.pendingId = snapshotId;
+    this.#watchForSlow();
     try {
       const diff = await api.diffSnapshot(sceneId, snapshotId, this.readLive?.() ?? NO_LIVE);
       if (!fresh()) return;
+      // Render before anything is shown, so the swap below is one step.
+      const html = await renderDiffRuns(diff.runs, this.view);
+      if (!fresh()) return;
+      this.#render++;
       this.runs = diff.runs;
       this.fields = diff.fields;
       this.titleWas = diff.title_was;
       this.titleNow = diff.title_now;
-      // Render against the view as it is NOW, not as it was when the fetch
-      // started: the author may have pressed a key while it was in flight, and
-      // they should get the version they asked for.
-      await this.#renderBody();
+      this.bodyHtml = html;
+      this.parked = snapshotId;
     } catch {
-      // Can't read it → don't show a blank page pretending to be a snapshot.
-      if (fresh()) {
-        this.parked = null;
-        this.#clearDiff();
-      }
+      // Can't read it → stay where the author already was rather than dropping
+      // them somewhere neither state explains.
+    } finally {
+      if (fresh()) this.#endPending();
     }
   }
 
@@ -212,12 +262,16 @@ export class SnapshotStripController {
    *  is why this walks the index rather than wrapping. */
   step(direction: -1 | 1): void {
     if (this.snapshots.length === 0) return;
-    if (this.parked === null) {
+    // While a park is in flight the author's position is the one they are
+    // moving TO; stepping again from the old one would walk backwards.
+    const from = this.pendingId ?? this.parked;
+    if (from === null) {
       // From Live, only ← means anything: it steps back onto the newest.
       if (direction === -1) void this.park(this.snapshots[this.snapshots.length - 1].id);
       return;
     }
-    const next = this.index + direction;
+    const fromIndex = this.snapshots.findIndex((item) => item.id === from);
+    const next = fromIndex + direction;
     if (next >= this.snapshots.length) {
       void this.park(null);
       return;

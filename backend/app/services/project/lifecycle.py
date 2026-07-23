@@ -21,6 +21,7 @@ Method bodies moved verbatim. Shared tooling resolves through the MRO:
 from __future__ import annotations
 
 import os
+from collections.abc import Callable
 from pathlib import Path
 from typing import Any, get_args
 
@@ -41,12 +42,39 @@ from app.models import (
 )
 from app.services.migrations import CURRENT_VERSION as PROJECT_SCHEMA_VERSION
 from app.services.project.errors import ProjectServiceError
-from app.services.project.layers import INHERITS_KEY, MANIFEST_FILENAME
+from app.services.project.layers import INHERITS_KEY, MANIFEST_FILENAME, LayerVisitor
+from app.services.project.node_index import IndexLayer
 from app.services.project.tree_configs import (
     MANUSCRIPT_TREE_CONFIG,
     RESEARCH_TREE_CONFIG,
 )
 from app.services.tree_structure import TreeStructureService
+
+
+class _AIPolicyResolver(LayerVisitor):
+    """Keeps the innermost layer's stated policy (#312).
+
+    The walk runs outermost first, so "last statement seen" *is* "nearest
+    explicit statement wins" — no comparison, no rank arithmetic, and no second
+    notion of which end of the chain is near. A layer that states nothing leaves
+    the answer alone; a chain where nobody states anything leaves the `off` it
+    starts with, which is the fail-closed floor rather than a permissive
+    default.
+
+    A bespoke visitor rather than `collect_layers` + a comprehension because
+    there is real per-layer work here (a manifest read); the reader is injected
+    so the visitor stays a pure fold over the chain and the file access stays on
+    the service — see `LayerCollector` for the other legitimate shape.
+    """
+
+    def __init__(self, stated: Callable[[Path], AIPolicy | None]) -> None:
+        self._stated = stated
+        self.policy: AIPolicy = "off"
+
+    def visit_layer(self, layer: IndexLayer) -> None:
+        stated = self._stated(layer.folder)
+        if stated is not None:
+            self.policy = stated
 
 
 class ProjectLifecycleMixin:
@@ -153,6 +181,17 @@ class ProjectLifecycleMixin:
         same thing to the reader, so this costs nothing and makes the key
         present in every manifest the app writes — which is where a hand-editor
         looks for it, and the one place the flat case is otherwise invisible.
+
+        **No `ai` block** (#312). It used to seed `policy: "off"` explicitly,
+        which was harmless while the policy was read from one manifest and fatal
+        the moment it resolves over the chain: every layer would state `off` at
+        birth, so "this layer has no opinion" would not exist on disk and a book
+        set to `cloud-allowed` under a universe still carrying its birth default
+        could never be distinguished from one deliberately switched off. Absent
+        now means *no opinion*, and a chain that states nothing anywhere still
+        resolves to `off` — see `_resolved_ai_policy`. The default is unchanged;
+        what changed is that it is no longer written down as a decision nobody
+        made.
         """
         return {
             "title": title,
@@ -161,9 +200,6 @@ class ProjectLifecycleMixin:
             INHERITS_KEY: inherits,
             "settings": {
                 "theme": "system",
-                "ai": {
-                    "policy": "off",
-                },
             },
             "manuscript_structure": {
                 "container_types": [
@@ -191,7 +227,6 @@ class ProjectLifecycleMixin:
 
     def current_project(self) -> ProjectInfo:
         root = self._require_project()
-        ai = self._read_ai_settings(root)
         base_folder = self._metadata_schema_base_folder(root)
         return ProjectInfo(
             title=self._project_title(root) or root.name,
@@ -202,7 +237,7 @@ class ProjectLifecycleMixin:
             # returns no candidates without a root, so claiming the parent was
             # the bound described a chain that does not exist.
             projects_base_folder=str(base_folder) if base_folder else None,
-            ai_policy=ai.get("policy", "off"),
+            ai_policy=self._resolved_ai_policy(root),
             ancestors=self._ancestor_candidates_for_api(root),
             chain=self._project_chain_for_api(root),
             children=self._project_children(root),
@@ -239,6 +274,12 @@ class ProjectLifecycleMixin:
     def ai_policy(self) -> AIPolicy:
         """Just the permission, without building the whole `ProjectInfo` (#433).
 
+        Resolved over the layer chain since #312, so this is no longer a single
+        manifest read — but it is still bounded by the chain, where
+        `current_project()` scales with the whole shelf (every child project,
+        every ancestor title). The saving #433 bought is smaller and still real;
+        the read-count test below pins what it is now.
+
         `current_project()` is the app's most I/O-heavy read: the root manifest
         several times over, a stat of every folder between the base and the
         project, one open + `yaml.safe_load` per project ancestor for its title
@@ -258,14 +299,14 @@ class ProjectLifecycleMixin:
         `ai_chat_stream`, and those two routes pay one extra manifest read
         until the preview context is settled.
 
-        The value itself is normalised by `_read_ai_settings`, not here, so
+        The value itself is normalised by `_stated_ai_policy`, not here, so
         `current_project()` gets the same guarantee — see that method.
 
         `_require_project()` still raises when no project is open, deliberately:
         callers turn that into `"off"` too, and a silent `"off"` from here would
         be indistinguishable from a project that chose it.
         """
-        return self._read_ai_settings(self._require_project()).get("policy", "off")
+        return self._resolved_ai_policy(self._require_project())
 
     def _ancestor_candidates_for_api(self, root: Path) -> list[AncestorCandidate]:
         """The enumeration, outermost first — every ancestor folder, flagged.
@@ -423,39 +464,92 @@ class ProjectLifecycleMixin:
             entries.append(os.path.relpath(folder, root).replace("\\", "/"))
         return entries
 
-    def _read_ai_settings(self, root: Path) -> dict[str, Any]:
-        """The manifest's `settings.ai` block, with `policy` normalised (#433).
+    def _resolved_ai_policy(self, root: Path) -> AIPolicy:
+        """The permission in force here, resolved over the layer chain (#312).
 
-        The normalisation is here rather than in a caller because this is the
-        one place the block is parsed, and both consumers — `current_project()`
-        and `ai_policy()` — need the same guarantee. Guarding only the caller
-        that noticed is what let them disagree: `ai_policy()` fell closed on a
-        hand-edited `policy: cloud_allowed` while `current_project()` passed the
-        raw string into `ProjectInfo`'s `AIPolicy` Literal, raising a Pydantic
+        **Nearest explicit statement wins, and a chain that states nothing is
+        `off`.** An ancestor's policy is a *default* for everything beneath it,
+        not a lock: a universe set to `cloud-allowed` lets its books use the
+        model without each one saying so, and a book that says `off` is off
+        regardless. Anton's call, recorded on #312 — "B, but overrideable".
+
+        The rejected alternative was plain most-restrictive along the chain. It
+        reads like `decisions_ai_permission_fails_closed`, but it fails closed
+        on the *wrong* question: fail-closed is about a permission we cannot
+        read, and an ancestor that deliberately says `off` is one we read
+        perfectly well. Most-restrictive would also have made the feature
+        unusable, because every project the app has ever created seeded
+        `policy: "off"` into its own manifest, so every ancestor would have
+        pinned every descendant off forever. `_new_project_manifest` no longer
+        writes that block — which is what makes "no opinion" expressible at all.
+
+        Fail-closed keeps the two places it belongs: an unreadable or
+        unrecognised *value* is `off` (see `_stated_ai_policy`), and a chain
+        with no statement anywhere resolves to `off` here rather than to some
+        permissive default.
+
+        Through `visit_layers`, not a private walk — the chain's membership rule
+        is the declaration's, and a permission resolved over a second, slightly
+        different notion of the chain is exactly the bug #432 records for the
+        frontend's re-derivation (`decisions_walker_visitor_uniformity`).
+
+        ⚠ Cost: one manifest read per chain layer, on top of the walk's own (the
+        label rule reads each ancestor's manifest for its title). Both
+        `current_project()` and `ai_policy()` pay it per call, and `ai_policy()`
+        is on five AI routes. That is the same waste #466 records for
+        `current_project()`'s double walk, one consumer further on; the fix is a
+        memo over the walk, which belongs with #392/#466 and not here.
+        """
+        resolver = _AIPolicyResolver(self._stated_ai_policy)
+        self.visit_layers(resolver, root)
+        return resolver.policy
+
+    def _stated_ai_policy(self, folder: Path) -> AIPolicy | None:
+        """What one layer's manifest *says*, or `None` when it says nothing.
+
+        Absent block, or a block without a `policy` key, is **no opinion** — the
+        distinction the whole resolution rests on. It is deliberately not the
+        same as `off`: nearest-explicit-wins can only mean anything if a layer
+        can decline to have a view.
+
+        Anything outside `AIPolicy` becomes `"off"`, including an explicit
+        `policy: null` and a non-string — a stated-but-unreadable permission is
+        one we do not have (`decisions_ai_permission_fails_closed`), and it is
+        still a *statement*, so it also stops the search rather than deferring
+        to an ancestor. The membership set is derived from the type rather than
+        restated, so adding a policy to `AIPolicy` cannot silently start reading
+        as "off" here.
+
+        A manifest that cannot be read at all is `off` for the same reason,
+        which is also what keeps a malformed ancestor from raising out of a
+        walk driven by every AI route — the guard `_readable_project_title` and
+        `_layer_label_for_folder` already apply to the title beside it (#430).
+        A nearer layer still overrides it, so an unreadable *ancestor* cannot
+        turn a book's own `cloud-allowed` off.
+
+        This normalisation used to live in `_read_ai_settings`, which returned
+        the whole `settings.ai` block; nothing ever read another key out of it.
+        Guarding only the caller that noticed is what once let the two readers
+        disagree: `ai_policy()` fell closed on a hand-edited
+        `policy: cloud_allowed` while `current_project()` passed the raw string
+        into `ProjectInfo`'s `AIPolicy` Literal, raising a Pydantic
         `ValidationError` that `translate_errors` does not catch. That escaped
         as a 500 from `GET /api/project` **and** `POST /api/project/open`, where
         it precedes `current_scope.set(...)` — so one mistyped character made
         the project unopenable, with an error naming nothing.
-
-        Anything outside `AIPolicy` becomes `"off"`, including an explicit
-        `policy: null` and a non-string. A permission we cannot read is one we
-        do not have (`decisions_ai_permission_fails_closed`). The membership set
-        is derived from the type rather than restated, so adding a policy to
-        `AIPolicy` cannot silently start reading as "off" here.
         """
         try:
-            manifest = self._read_yaml(root / "project.yaml")
+            manifest = self._read_yaml(folder / MANIFEST_FILENAME)
         except Exception:
-            return {}
+            return "off"
         settings = manifest.get("settings")
         if not isinstance(settings, dict):
-            return {}
+            return None
         ai = settings.get("ai")
-        if not isinstance(ai, dict):
-            return {}
-        if "policy" in ai and ai["policy"] not in get_args(AIPolicy):
-            ai = {**ai, "policy": "off"}
-        return ai
+        if not isinstance(ai, dict) or "policy" not in ai:
+            return None
+        policy = ai["policy"]
+        return policy if policy in get_args(AIPolicy) else "off"
 
     def list_directories(self, path: Path | None = None) -> DirectoryListing:
         target = (path or self._default_directory_picker_path()).expanduser().resolve()

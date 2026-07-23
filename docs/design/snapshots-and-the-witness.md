@@ -271,24 +271,47 @@ than about field-level granularity: the thing it forbids is "context has changed
 was taken". Naming the entity is a specific claim. The field-and-values form is better and should be
 the target, but it is not the gate.
 
-Since the comparison and its presentation belong to the frontend (§7), the floor-versus-goal choice is
-a rendering decision made against data already on the wire, not a backend feature needing its own
-justification.
+The **presentation** is the frontend's (§7), so the floor-versus-goal choice is a rendering decision
+made against data already on the wire rather than a backend feature needing its own justification.
+That holds even though the *comparison* stays on the backend: what the route reports and how much of
+it the strip shows are separate questions, and only the second is where "floor versus goal" lives.
 
 ## 7. Where the work sits
 
-**The backend captures. The frontend compares and renders.**
+**The backend captures and compares. The frontend renders.**
 
-Anton's correction, and it retracts an earlier constraint of his own: the diff was pushed to the
-backend out of a worry about performance, but *how to present the delta between a snapshot and the
-current state* is a rendering decision. Wording in the author's vocabulary, how much to show at once,
-the floor-versus-goal call — none of that belongs in a service method.
+This is a *deliberately provisional* answer, and the reasoning matters more than the line.
 
-The one thing that cannot move: **resolved state must come from the backend, both sides.** The
-frontend cannot recompute `effective_state`, revision tokens or source layers. So the route returns
-the stored witness plus a freshly computed current one, and the frontend diffs two structures it was
-handed. That still satisfies slice 2's hardest-won lesson — *both sides of a comparison must come off
-the same pipeline* — because both are produced by the same backend code.
+The architectural preference is the other way round. Anton: *how to present the delta between a
+snapshot and the current state* is a rendering decision — the wording in the author's vocabulary, how
+much to show at once, the floor-versus-goal call — and none of that belongs in a service method. The
+prose diff went to the backend out of a worry about performance, which he has since called a premature
+optimisation of his own making.
+
+**It is not moving, and the reason is cost rather than correctness.** The diff is on the backend
+(slice 2, `snapshot_diff.py`), it is shipped, it survived a 15-defect review, and it works. Re-tiering
+working code to satisfy a preference is a can of worms with no user-visible payoff, and Anton has
+declined to open it. Recorded as his call, so a later reader does not "fix" it — and equally does not
+mistake the current shape for the ideal one.
+
+What follows for this slice: **the drift comparison goes where the diff already is.** Not because the
+backend is the right home for it, but because splitting one gesture's comparison across two tiers is
+worse than either consistent choice — the strip would be asking two different layers what changed, on
+one request, with two failure modes. The frontend's job is presentation: wording, ordering, how much
+of the floor-versus-goal detail to show.
+
+Two consequences worth stating rather than discovering:
+
+- **Resolved state was never movable anyway.** The frontend cannot recompute `effective_state`,
+  revision tokens or source layers, so both sides of every comparison are produced by the same backend
+  code. That satisfies slice 2's hardest-won lesson — *both sides of a comparison must come off the
+  same pipeline* — under either tiering.
+- **The `effective_names` re-derivation is back in scope.** `_alias_match` reaches `effective_names`,
+  which calls `build_mutations_index()` with no way to accept a prebuilt one — so a drift comparison
+  that also resolves names would build that index twice on one synchronous request (1.16 s becomes
+  2.3 s at 600 scenes). Had the comparison moved to the frontend this would have gone away with it.
+  Since it has not, thread the index through rather than rebuilding it: count the re-derivations of a
+  shared traversal before adding a consumer.
 
 ### Cost, measured
 

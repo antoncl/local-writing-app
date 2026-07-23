@@ -22,6 +22,7 @@ from pathlib import Path
 from tempfile import TemporaryDirectory
 
 from layer_fixtures import declare_full_chain
+from project_fixtures import open_test_project
 
 from app.models import (
     CreateLoreEntryRequest,
@@ -30,14 +31,13 @@ from app.models import (
     SaveSceneRequest,
     UpsertMetadataFieldRequest,
 )
-from app.runtime import service as svc
 from app.services.project.node_index import ReferenceEdge
 from app.services.project_service import ProjectService
 
 
-def _define_field(field_id: str, field_type: str, name: str) -> None:
-    layers = svc.read_metadata_schema_layers()
-    svc.upsert_metadata_field(
+def _define_field(service: ProjectService, field_id: str, field_type: str, name: str) -> None:
+    layers = service.read_metadata_schema_layers()
+    service.upsert_metadata_field(
         UpsertMetadataFieldRequest(
             layer_id=layers.layers[-1].id,
             field_id=field_id,
@@ -51,21 +51,20 @@ class ReferenceGraphTests(unittest.TestCase):
     def setUp(self) -> None:
         self.temp_dir = TemporaryDirectory()
         self.root = Path(self.temp_dir.name).resolve() / "project"
-        svc.__init__()
-        svc.create_project(self.root, "Reference Graph Tests")
-        _define_field("ally", "entity_ref", "Ally")
-        _define_field("rivals", "entity_ref_list", "Rivals")
+        self.service = open_test_project(self.root, "Reference Graph Tests")
+        _define_field(self.service, "ally", "entity_ref", "Ally")
+        _define_field(self.service, "rivals", "entity_ref_list", "Rivals")
 
     def tearDown(self) -> None:
         self.temp_dir.cleanup()
 
     def _make(self, title: str) -> str:
-        return svc.create_lore_entry(
+        return self.service.create_lore_entry(
             CreateLoreEntryRequest(title=title, entry_type="lore:character")
         ).id
 
     def _save(self, node_id: str, title: str, metadata: dict) -> None:
-        svc.save_lore_entry(
+        self.service.save_lore_entry(
             node_id,
             SaveLoreEntryRequest(
                 title=title, body="", entry_type="lore:character", metadata=metadata
@@ -78,7 +77,7 @@ class ReferenceGraphTests(unittest.TestCase):
         mara = self._make("Mara")
         self._save(alice, "Alice", {"ally": bob, "rivals": [mara, bob]})
 
-        graph = svc.reference_graph()
+        graph = self.service.reference_graph()
         # Alice → bob (ally) then mara, bob (rivals), deduped, declaration order.
         self.assertEqual(graph.refs[alice], [bob, mara])
         # Bob / Mara reference nothing → absent as keys.
@@ -88,13 +87,13 @@ class ReferenceGraphTests(unittest.TestCase):
     def test_empty_and_unset_refs_are_omitted(self) -> None:
         alice = self._make("Alice")
         self._save(alice, "Alice", {"ally": "", "rivals": []})
-        self.assertEqual(svc.reference_graph().refs, {})
+        self.assertEqual(self.service.reference_graph().refs, {})
 
     def test_dedupes_repeated_targets(self) -> None:
         alice = self._make("Alice")
         bob = self._make("Bob")
         self._save(alice, "Alice", {"ally": bob, "rivals": [bob, bob]})
-        self.assertEqual(svc.reference_graph().refs[alice], [bob])
+        self.assertEqual(self.service.reference_graph().refs[alice], [bob])
 
     def test_index_edges_are_field_qualified(self) -> None:
         alice = self._make("Alice")
@@ -102,7 +101,7 @@ class ReferenceGraphTests(unittest.TestCase):
         mara = self._make("Mara")
         self._save(alice, "Alice", {"ally": bob, "rivals": [mara, bob]})
 
-        index = svc._build_node_index()
+        index = self.service._build_node_index()
         # alice → bob twice: the same pair through two different fields is two
         # edges, because the field is part of the edge's identity.
         self.assertEqual(
@@ -120,7 +119,7 @@ class ReferenceGraphTests(unittest.TestCase):
         bob = self._make("Bob")
         self._save(alice, "Alice", {"ally": bob, "rivals": [bob]})
 
-        index = svc._build_node_index()
+        index = self.service._build_node_index()
         self.assertEqual(
             index.edges_by_dst[bob],
             [
@@ -130,7 +129,7 @@ class ReferenceGraphTests(unittest.TestCase):
         )
         # …and that is what the delete guards read: one row per field.
         self.assertEqual(
-            [(link.id, link.field_id, link.field_name) for link in svc._backlinks_to_targets({bob})],
+            [(link.id, link.field_id, link.field_name) for link in self.service._backlinks_to_targets({bob})],
             [(alice, "ally", "Ally"), (alice, "rivals", "Rivals")],
         )
 
@@ -141,9 +140,9 @@ class ReferenceGraphTests(unittest.TestCase):
         alice = self._make("Alice")
         self._save(alice, "Alice", {"ally": alice})
 
-        self.assertEqual(svc.reference_graph().refs[alice], [alice])
-        self.assertEqual(len(svc._backlinks_to_targets({alice})), 1)
-        self.assertEqual(svc._backlinks_to_targets({alice}, exclude_source_ids={alice}), [])
+        self.assertEqual(self.service.reference_graph().refs[alice], [alice])
+        self.assertEqual(len(self.service._backlinks_to_targets({alice})), 1)
+        self.assertEqual(self.service._backlinks_to_targets({alice}, exclude_source_ids={alice}), [])
 
 
 class ShadowedEdgeTests(unittest.TestCase):
@@ -155,8 +154,7 @@ class ShadowedEdgeTests(unittest.TestCase):
         self.temp_dir = TemporaryDirectory()
         self.base = Path(self.temp_dir.name).resolve() / "writing"
         self.root = self.base / "universe" / "book"
-        self.service = ProjectService()
-        self.service.create_project(self.root, "Shadowing Tests")
+        self.service = ProjectService.created_at(self.root, "Shadowing Tests")
         declare_full_chain(self.service, self.root, self.base)
 
     def tearDown(self) -> None:
@@ -207,8 +205,7 @@ class DegradedInputTests(unittest.TestCase):
         self.temp_dir = TemporaryDirectory()
         self.base = Path(self.temp_dir.name).resolve() / "writing"
         self.root = self.base / "universe" / "book"
-        self.service = ProjectService()
-        self.service.create_project(self.root, "Degraded Input Tests")
+        self.service = ProjectService.created_at(self.root, "Degraded Input Tests")
         declare_full_chain(self.service, self.root, self.base)
 
     def tearDown(self) -> None:
@@ -263,8 +260,7 @@ class SceneEdgeTests(unittest.TestCase):
     def setUp(self) -> None:
         self.temp_dir = TemporaryDirectory()
         self.root = Path(self.temp_dir.name).resolve() / "project"
-        self.service = ProjectService()
-        self.service.create_project(self.root, "Scene Edge Tests")
+        self.service = ProjectService.created_at(self.root, "Scene Edge Tests")
 
     def tearDown(self) -> None:
         self.temp_dir.cleanup()

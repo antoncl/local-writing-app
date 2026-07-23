@@ -11,17 +11,16 @@ from pathlib import Path
 from tempfile import TemporaryDirectory
 
 from fastapi.testclient import TestClient
+from project_fixtures import open_test_project
 
 from app.main import app
-from app.runtime import service as svc
 
 
 class MutationSetCrudTests(unittest.TestCase):
     def setUp(self) -> None:
         self.temp_dir = TemporaryDirectory()
         self.root = Path(self.temp_dir.name).resolve() / "project"
-        svc.__init__()
-        svc.create_project(self.root, "Mutation Set Tests")
+        self.service = open_test_project(self.root, "Mutation Set Tests")
         self.client = TestClient(app)
 
     def tearDown(self) -> None:
@@ -98,7 +97,7 @@ class MutationSetCrudTests(unittest.TestCase):
 
     def test_mutation_set_node_is_indexed_by_kind(self) -> None:
         created = self._create("Full Moon", "lore:character", [{"field": "title", "value": "The Wolf"}])
-        index = svc._build_node_index()
+        index = self.service._build_node_index()
         entry = index.by_id.get(created["id"])
         self.assertIsNotNone(entry)
         self.assertEqual(entry.kind, "mutation_set")

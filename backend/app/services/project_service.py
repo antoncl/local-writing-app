@@ -20,6 +20,8 @@ from app.models import (
     MetadataValue,
     Scene,
 )
+from app.scope import WorkScope
+from app.services.migrations import migrate_project
 from app.services.project.ai_invocations import AiInvocationsMixin
 from app.services.project.assistants import AssistantEntriesMixin
 from app.services.project.chats import ChatSessionsMixin
@@ -82,10 +84,55 @@ class ProjectService(
     MutationSetEntriesMixin,
     ViewsMixin,
 ):
-    def __init__(self) -> None:
-        self.root_path: Path | None = None
-        self.title: str | None = None
-        self.last_migrations: list[str] = []
+    def __init__(self, scope: WorkScope | None = None) -> None:
+        """Bind this service to one unit of work's scope, for good (#399).
+
+        The scope is the *only* instance state, and it is immutable: `root_path`
+        is a read-only property, so no helper can re-point a service mid-unit
+        and nothing later in the unit can observe a different project than the
+        one it started in (ADR-0045). `None` means no project is open — a real
+        state the machine-level assistant surfaces run in — and every caller
+        that needs a root asks through `_require_project()`.
+
+        Use `opened_at` / `created_at` to get a bound service from a path.
+        """
+        self._scope = scope
+
+    @property
+    def scope(self) -> WorkScope | None:
+        return self._scope
+
+    @property
+    def root_path(self) -> Path | None:
+        return self._scope.root if self._scope is not None else None
+
+    @property
+    def last_migrations(self) -> tuple[str, ...]:
+        return self._scope.migrations_applied if self._scope is not None else ()
+
+    @classmethod
+    def created_at(
+        cls, root_path: Path, title: str, projects_base_folder: Path | None = None
+    ) -> ProjectService:
+        """Scaffold a new project on disk and return a service bound to it."""
+        service = cls(WorkScope(root=root_path.expanduser().resolve()))
+        service._scaffold_new_project(title, projects_base_folder)
+        return service
+
+    @classmethod
+    def opened_at(cls, root_path: Path, projects_base_folder: Path | None = None) -> ProjectService:
+        """Migrate an existing project folder and return a service bound to it."""
+        root = root_path.expanduser().resolve()
+        if not (root / "project.yaml").exists():
+            raise ProjectServiceError("No project.yaml found in that folder.", 404)
+        try:
+            migrations = migrate_project(root)
+        except Exception as exc:  # noqa: BLE001
+            raise ProjectServiceError(f"Project migration failed: {exc}", 500) from exc
+        service = cls(WorkScope(root=root, migrations_applied=tuple(migrations)))
+        if projects_base_folder is not None:
+            service._rebase_projects_base_folder(projects_base_folder)
+        return service
 
     def _entry_markdown_paths(self, root: Path) -> list[Path]:
         return [*(root / "scenes").glob("*.md"), *(root / "lore").glob("*.md")]

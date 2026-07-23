@@ -7,11 +7,12 @@ from types import SimpleNamespace
 from unittest.mock import patch
 
 from fastapi.testclient import TestClient
+from project_fixtures import open_test_project
 
 from app.main import app
 from app.models import UpdateProjectSettingsRequest
-from app.runtime import service as global_service
 from app.services import machine_settings as ms
+from app.services.project_service import ProjectService
 
 
 class MigrateDefaultModelsTests(unittest.TestCase):
@@ -111,14 +112,16 @@ class ProjectServiceResolveAssistantTests(unittest.TestCase):
         (folder / ".order.yaml").write_text(
             "ids:\n- cheap\n- creative\nexcluded: []\n", encoding="utf-8"
         )
-        global_service.__init__()
+        # No project open: these are the machine-level assistants, resolved
+        # against an unbound service exactly as a route does with no project.
+        self.service = ProjectService()
 
     def tearDown(self) -> None:
         self._patcher.stop()
         self.temp_dir.cleanup()
 
     def test_resolve_by_id(self) -> None:
-        result = global_service.resolve_assistant("cheap")
+        result = self.service.resolve_assistant("cheap")
         assert result is not None
         self.assertEqual(result.id, "cheap")
         self.assertEqual(result.metadata["ai_model"], "claude-haiku-4-5-20251001")
@@ -126,12 +129,12 @@ class ProjectServiceResolveAssistantTests(unittest.TestCase):
     def test_resolve_falls_back_to_topmost(self) -> None:
         # No id → topmost in roster order. With no per-layer .order.yaml the
         # roster sorts by title, so "Cheap" precedes "Creative".
-        result = global_service.resolve_assistant(None)
+        result = self.service.resolve_assistant(None)
         assert result is not None
         self.assertEqual(result.id, "cheap")
 
     def test_resolve_returns_none_for_unknown_id(self) -> None:
-        result = global_service.resolve_assistant("ghost")
+        result = self.service.resolve_assistant("ghost")
         self.assertIsNone(result)
 
 
@@ -142,9 +145,8 @@ class ChatEndpointAssistantTests(unittest.TestCase):
     def setUp(self) -> None:
         self.temp_dir = TemporaryDirectory()
         self.root = Path(self.temp_dir.name) / "project"
-        global_service.__init__()
-        global_service.create_project(self.root, "Assistant Tests")
-        global_service.update_project_settings(
+        self.service = open_test_project(self.root, "Assistant Tests")
+        self.service.update_project_settings(
             UpdateProjectSettingsRequest(ai_policy="cloud-allowed")
         )
         self.client = TestClient(app)
@@ -255,8 +257,7 @@ class MachineSettingsViewTests(unittest.TestCase):
     def setUp(self) -> None:
         self.temp_dir = TemporaryDirectory()
         self.root = Path(self.temp_dir.name) / "project"
-        global_service.__init__()
-        global_service.create_project(self.root, "View Tests")
+        self.service = open_test_project(self.root, "View Tests")
         self.client = TestClient(app)
         self.config_dir = Path(self.temp_dir.name) / "config"
         self.config_dir.mkdir()
@@ -300,8 +301,7 @@ class FileBackedAssistantsTests(unittest.TestCase):
     def setUp(self) -> None:
         self.temp_dir = TemporaryDirectory()
         self.root = Path(self.temp_dir.name) / "project"
-        global_service.__init__()
-        global_service.create_project(self.root, "Files Tests")
+        self.service = open_test_project(self.root, "Files Tests")
         self.client = TestClient(app)
         self.config_dir = Path(self.temp_dir.name) / "config"
         self.config_dir.mkdir()
@@ -355,8 +355,7 @@ class AssistantReorderTests(unittest.TestCase):
     def setUp(self) -> None:
         self.temp_dir = TemporaryDirectory()
         self.root = Path(self.temp_dir.name) / "project"
-        global_service.__init__()
-        global_service.create_project(self.root, "Reorder Tests")
+        self.service = open_test_project(self.root, "Reorder Tests")
         self.client = TestClient(app)
         self.config_dir = Path(self.temp_dir.name) / "config"
         self.config_dir.mkdir()
@@ -373,7 +372,7 @@ class AssistantReorderTests(unittest.TestCase):
                 f"---\nid: {slug}\ntitle: {slug.capitalize()}\nentry_type: assistant\nmetadata: {{ ai_provider: anthropic, ai_model: m }}\n---\n",
                 encoding="utf-8",
             )
-        self.machine_layer_id = global_service._metadata_schema_layer_id(self.config_dir)
+        self.machine_layer_id = self.service._metadata_schema_layer_id(self.config_dir)
 
     def tearDown(self) -> None:
         self._patcher.stop()
@@ -388,7 +387,7 @@ class AssistantReorderTests(unittest.TestCase):
         filesystem hides that and the old name still resolves; on Linux it does
         not. Hardcoding the name passed locally and failed in CI.
         """
-        return global_service._build_assistant_index().by_id[entry_id].path
+        return self.service._build_assistant_index().by_id[entry_id].path
 
     def test_default_order_is_alphabetical(self) -> None:
         response = self.client.get("/api/assistants")
@@ -445,9 +444,9 @@ class AssistantReorderTests(unittest.TestCase):
         # stop being the default: the fold puts local ids ahead of the inherited
         # remainder, so a machine-layer prepend sank below anything the project
         # had listed. Nothing is moved or copied to make a shared assistant lead.
-        local_order = global_service._read_yaml(self.root / "assistants" / ".order.yaml")
+        local_order = self.service._read_yaml(self.root / "assistants" / ".order.yaml")
         self.assertEqual(local_order["ids"], [new_id])
-        machine_order = global_service._read_yaml(self.config_dir / "assistants" / ".order.yaml")
+        machine_order = self.service._read_yaml(self.config_dir / "assistants" / ".order.yaml")
         self.assertEqual(machine_order["ids"], ["alpha", "bravo"], "the machine layer's opinion is untouched")
 
     def test_creating_an_assistant_leads_even_when_the_project_has_listed_others(self) -> None:
@@ -462,7 +461,7 @@ class AssistantReorderTests(unittest.TestCase):
         new_id = response.json()["id"]
         ids = [e["id"] for e in self.client.get("/api/assistants").json()["entries"]]
         self.assertEqual(ids[0], new_id)
-        self.assertEqual(global_service.resolve_assistant(None).id, new_id)
+        self.assertEqual(self.service.resolve_assistant(None).id, new_id)
 
     def test_unlist_deactivates_an_assistant_without_hiding_it(self) -> None:
         # Seed a real `ids` first: against an empty list, unlist's "drop it from
@@ -485,7 +484,7 @@ class AssistantReorderTests(unittest.TestCase):
         self.assertEqual([e["id"] for e in response.json()["entries"]], ["alpha", "bravo", "charlie"])
         self.assertEqual(entries["alpha"]["computed_metadata"]["listed"], "listed")
         self.assertEqual(entries["bravo"]["computed_metadata"]["listed"], "unlisted")
-        order = global_service._read_yaml(
+        order = self.service._read_yaml(
             self.config_dir / "assistants" / ".order.yaml"
         )
         self.assertEqual(order["ids"], ["alpha"])
@@ -511,7 +510,7 @@ class AssistantReorderTests(unittest.TestCase):
         # The exclusion is cleared from the FILE, not merely out-voted by the
         # merger's ids-wins rule — otherwise we would persist a contradiction we
         # wrote ourselves, and log a warning about it on every read.
-        order = global_service._read_yaml(self.config_dir / "assistants" / ".order.yaml")
+        order = self.service._read_yaml(self.config_dir / "assistants" / ".order.yaml")
         self.assertEqual(order["excluded"], [])
 
     def test_unlist_with_unknown_id_returns_422(self) -> None:
@@ -530,7 +529,7 @@ class AssistantReorderTests(unittest.TestCase):
             "/api/assistants/order",
             json={"layer_id": self.machine_layer_id, "ordered_ids": ["bravo", "alpha"]},
         )
-        order = global_service._read_yaml(
+        order = self.service._read_yaml(
             self.config_dir / "assistants" / ".order.yaml"
         )
         self.assertEqual(order["ids"], ["bravo", "alpha"])
@@ -619,7 +618,7 @@ class AssistantReorderTests(unittest.TestCase):
         entries = {e["id"]: e for e in response.json()["entries"]}
         self.assertIn("alpha", entries, "un-listing must not remove it from the roster")
         self.assertEqual(entries["alpha"]["computed_metadata"]["listed"], "unlisted")
-        order = global_service._read_yaml(self.config_dir / "assistants" / ".order.yaml")
+        order = self.service._read_yaml(self.config_dir / "assistants" / ".order.yaml")
         self.assertEqual(order["ids"], ["bravo"])
         self.assertEqual(order["excluded"], ["alpha"])
         # …and it can be listed again, which is what makes the gesture safe.
@@ -643,12 +642,12 @@ class AssistantReorderTests(unittest.TestCase):
         self.assertEqual(entries[0], "alpha")
         # Nothing is listed, so there is no default — resolution never reaches
         # past the author's own list to pick something they did not choose.
-        self.assertIsNone(global_service.resolve_assistant(None))
+        self.assertIsNone(self.service.resolve_assistant(None))
 
         # Listing one makes it the default; the un-listed `alpha` stays out even
         # though it still sorts first in the roster.
         self.client.post("/api/assistants/order", json={"ordered_ids": ["charlie"]})
-        self.assertEqual(global_service.resolve_assistant(None).id, "charlie")
+        self.assertEqual(self.service.resolve_assistant(None).id, "charlie")
 
     def test_saving_an_assistant_keeps_fields_this_project_does_not_declare(self) -> None:
         # An assistant lives at the MACHINE layer and is shared by every project,
@@ -716,8 +715,7 @@ class AssistantLayerOrderingTests(unittest.TestCase):
     def setUp(self) -> None:
         self.temp_dir = TemporaryDirectory()
         self.root = Path(self.temp_dir.name) / "project"
-        global_service.__init__()
-        global_service.create_project(self.root, "Layer Order Tests")
+        self.service = open_test_project(self.root, "Layer Order Tests")
         self.client = TestClient(app)
         self.config_dir = Path(self.temp_dir.name) / "config"
         self.config_dir.mkdir()
@@ -734,7 +732,7 @@ class AssistantLayerOrderingTests(unittest.TestCase):
             "---\nid: zed\ntitle: Zed\nentry_type: assistant\nmetadata: { ai_provider: anthropic, ai_model: m }\n---\n",
             encoding="utf-8",
         )
-        self.machine_layer_id = global_service._metadata_schema_layer_id(self.config_dir)
+        self.machine_layer_id = self.service._metadata_schema_layer_id(self.config_dir)
 
     def tearDown(self) -> None:
         self._patcher.stop()
@@ -744,7 +742,7 @@ class AssistantLayerOrderingTests(unittest.TestCase):
         # A project-layer assistant titled "Zeta", so it LOSES alphabetically to
         # the machine layer's "Zed" — the ordering below can then only come from
         # the layer merge, not from the title tiebreak.
-        project_layer_id = global_service._metadata_schema_layer_id(self.root)
+        project_layer_id = self.service._metadata_schema_layer_id(self.root)
         project_dir = self.root / "assistants"
         project_dir.mkdir(parents=True, exist_ok=True)
         (project_dir / "zeta.md").write_text(

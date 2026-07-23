@@ -13,9 +13,9 @@ from pathlib import Path
 from tempfile import TemporaryDirectory
 
 from fastapi.testclient import TestClient
+from project_fixtures import open_test_project
 
 from app.main import app
-from app.runtime import service as global_service
 
 MARKER = (
     "<!-- embedded-todo:id=t1;status=open;note=buy -->Buy milk<!-- /embedded-todo -->"
@@ -28,8 +28,7 @@ class EmbeddedTodoHttpTests(unittest.TestCase):
     def setUp(self) -> None:
         self.temp_dir = TemporaryDirectory()
         self.root = Path(self.temp_dir.name).resolve() / "project"
-        global_service.__init__()
-        global_service.create_project(self.root, "Embedded Todo Tests")
+        self.service = open_test_project(self.root, "Embedded Todo Tests")
         self.client = TestClient(app)
         scene = self.client.post("/api/scenes", json={"title": "Chapter One"})
         self.assertEqual(scene.status_code, 200, scene.text)

@@ -1036,6 +1036,32 @@ class EditorPanesController {
     if (pane?.dirty) await this.saveEditorPane(pane.id);
   }
 
+  /** Persist every dirty pane. Returns false if any of them could not be saved.
+   *
+   * `reset()` drops `panes` outright, so a project switch used to discard
+   * whatever had not yet hit the 6s autosave debounce — invariant 2 above says
+   * every open→close and pane-switch saves first, and a switch is neither, so
+   * it slipped through. Prose typed seconds before a switch simply vanished.
+   *
+   * The caller aborts the switch when this returns false. That is the safe
+   * direction: staying in the current project with the edit intact is
+   * recoverable, and losing it is not. A save can legitimately fail here — a
+   * revision conflict from a second window or an external editor — and the user
+   * needs to be looking at the pane to resolve it.
+   */
+  async flushDirtyPanes(): Promise<boolean> {
+    const dirty = this.panes.filter((pane) => pane.dirty);
+    let allSaved = true;
+    for (const pane of dirty) {
+      // Cancel first so the pending timer cannot fire a second write against a
+      // baseline this save is about to move.
+      this.#autosave.cancel(pane.id);
+      const saved = await this.run(() => this.saveEditorPane(pane.id));
+      if (!saved) allSaved = false;
+    }
+    return allSaved;
+  }
+
   async reconcileSceneFromServer(scene: Scene): Promise<void> {
     const pane = this.paneForScene(scene.id);
     if (!pane) return;

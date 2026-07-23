@@ -49,11 +49,14 @@ from __future__ import annotations
 
 import argparse
 import ast
+import contextlib
+import io
 import json
 import keyword
 import re
 import subprocess
 import sys
+import tokenize
 from dataclasses import dataclass, field
 from pathlib import Path
 
@@ -106,6 +109,14 @@ IDENT_RE = re.compile(r"[A-Za-z_][A-Za-z0-9_]*")
 MEMORY_SLUG_RE = re.compile(
     r"^(decisions|feedback|project|strategy|architecture|reference|user|ux|ui)_\w+_\w+$"
 )
+# A document carrying this opts out of checking entirely. It exists because the
+# weekly report is itself an open issue: without it the checker reads its own
+# output and re-flags every citation it quoted last week (#411 — 68 of 245
+# findings on the run that found this). A marker rather than a hardcoded issue
+# number, so a design memo that quotes historical citations on purpose has the
+# same way out.
+IGNORE_MARKER = "<!-- citation-rot: ignore -->"
+
 BACKTICK_RE = re.compile(r"`([^`\n]+)`")
 CAMEL_RE = re.compile(r"^[A-Za-z]+[A-Z]")
 
@@ -320,6 +331,24 @@ class Definition:
     end_line: int
 
 
+def strip_relative_prefix(path: str) -> str:
+    """Drop leading `./` and `../` **segments** from a cited path.
+
+    Not `lstrip("./")`, which was the bug (#421): that takes a character *set*,
+    so it also ate the dot off a dot-directory and made every citation into
+    `.github/…` or `.claude/…` report a false GONE — the worst output this tool
+    has, because "this file does not exist" is the finding a reader acts on.
+
+    Not `removeprefix("./")` either, which is the obvious fix and a regression:
+    citations are written relative to the document as often as to the repo root
+    (`../../backend/app/services/ai/helpers.py:587` is a real one), and the old
+    `lstrip` happened to strip those too. Both forms have to keep working.
+    """
+    while path.startswith(("./", "../")):
+        path = path[path.index("/") + 1 :]
+    return path
+
+
 class RepoIndex:
     """Tracked files, their lengths, and the Python `def`/`class` table.
 
@@ -335,6 +364,7 @@ class RepoIndex:
             self._by_suffix.setdefault(rel.rsplit("/", 1)[-1], []).append(rel)
         self._defs: dict[str, list[Definition]] | None = None
         self._text: dict[str, str] = {}
+        self._searchable: dict[str, str] = {}
 
     @classmethod
     def from_git(cls, root: Path = REPO) -> RepoIndex:
@@ -367,7 +397,7 @@ class RepoIndex:
         Citations are usually written bare (`references.py:373`), so a basename
         match is the common case; a partial path narrows it.
         """
-        cited = cited.lstrip("./")
+        cited = strip_relative_prefix(cited)
         exact = [rel for rel in self.files if rel == cited]
         if exact:
             return exact
@@ -408,18 +438,47 @@ class RepoIndex:
                 )
         return table
 
-    def mentions_anywhere(self, symbol: str) -> bool:
-        """Does the token appear in any tracked source file?
+    def searchable_text(self, rel: str) -> str:
+        """A file's *code*, with its prose removed.
 
-        Deliberately textual and deliberately generous: the question at step 5
-        is "did this name vanish", and a name that survives as a variable, a
-        Svelte component or a dict key has not vanished.
+        Python comments and string literals are dropped. Otherwise a name that
+        survives only in a docstring counts as evidence the code still exists —
+        and the first victim of that was this checker: naming a genuinely
+        deleted function in its own docstring and test fixtures resurrected it,
+        and silently downgraded the flagship finding to OK. A gate that blinds
+        itself by describing what it looks for is exactly the erosion this repo
+        builds gates against.
+        """
+        if rel not in self._searchable:
+            self._searchable[rel] = self._strip_prose(rel)
+        return self._searchable[rel]
+
+    def _strip_prose(self, rel: str) -> str:
+        text = self.read(rel)
+        if not rel.endswith(".py"):
+            return text
+        try:
+            tokens = tokenize.generate_tokens(io.StringIO(text).readline)
+            return " ".join(
+                tok.string
+                for tok in tokens
+                if tok.type not in (tokenize.COMMENT, tokenize.STRING)
+            )
+        except (tokenize.TokenError, IndentationError, SyntaxError, ValueError):
+            return text
+
+    def mentions_anywhere(self, symbol: str) -> bool:
+        """Does the token appear in the code of any tracked source file?
+
+        Still deliberately generous: the question at step 5 is "did this name
+        vanish", and a name that survives as a variable, a Svelte component or
+        a dict key has not vanished. Prose about the name is not the name.
         """
         pattern = re.compile(rf"\b{re.escape(symbol)}\b")
         for rel in self.files:
             if Path(rel).suffix not in SEARCHABLE_SUFFIXES:
                 continue
-            if pattern.search(self.read(rel)):
+            if pattern.search(self.searchable_text(rel)):
                 return True
         return False
 
@@ -534,6 +593,8 @@ def check_mention(mention: Mention, index: RepoIndex, source: Source) -> Finding
 
 
 def check_source(source: Source, index: RepoIndex, *, mentions: bool = True) -> list[Finding]:
+    if IGNORE_MARKER in source.text:
+        return []
     citations = extract_citations(source.text)
     findings = [check_citation(c, index, source) for c in citations]
     if mentions:
@@ -631,13 +692,13 @@ def filter_to_changed(findings: list[Finding], changed: list[str]) -> list[Findi
     A PR must not be told about rot it did not create — that is how an
     advisory check becomes noise people learn to skip.
     """
-    wanted = {c.replace("\\", "/").lstrip("./") for c in changed}
+    wanted = {strip_relative_prefix(c.replace("\\", "/")) for c in changed}
     kept = []
     for finding in findings:
         path = _relevant_path(finding)
         if path is None:
             continue
-        path = path.replace("\\", "/").lstrip("./")
+        path = strip_relative_prefix(path.replace("\\", "/"))
         if any(w == path or w.endswith("/" + path) or path.endswith("/" + w) for w in wanted):
             kept.append(finding)
     return kept
@@ -730,6 +791,9 @@ def collect_sources(
 def run(args: argparse.Namespace) -> Report:
     index = RepoIndex.from_git(Path(args.repo))
     sources, warnings = collect_sources(args, index)
+    # Dropped here as well as in check_source, so the counts in the report
+    # header describe what was actually read.
+    sources = [source for source in sources if IGNORE_MARKER not in source.text]
     report = Report(sources_checked=len(sources), warnings=warnings)
     for source in sources:
         findings = check_source(source, index, mentions=not args.no_mentions)
@@ -767,6 +831,11 @@ def main(argv: list[str]) -> int:
     if args.out:
         Path(args.out).write_text(markdown, encoding="utf-8")
     else:
+        # Windows defaults stdout to cp1252, which cannot encode the report's
+        # ⚠ — so the checker crashed precisely when it had a warning to deliver,
+        # and only on the platform this app is developed on.
+        with contextlib.suppress(AttributeError, OSError):
+            sys.stdout.reconfigure(encoding="utf-8")
         sys.stdout.write(markdown)
     # Always 0. This is advisory by design: a PR must not go red because an
     # unrelated issue got stale. The workflow decides what to do with the text.

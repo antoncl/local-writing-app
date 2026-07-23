@@ -3,6 +3,37 @@
 One decision per file (MADR-lite: decision · why/rejected-alternative · consequences). The *why*,
 especially the rejected alternative, is the load-bearing part — it's what decays from memory.
 
+## Citing code from an ADR
+
+**An ADR that quotes `file:line` names the commit it was written against**, as a header:
+
+> **Verified against `052895c` (2026-07-22).**
+
+A citation pinned to a commit **cannot rot** — it was either right at that commit or never right —
+so the ADR stays readable years later instead of decaying the moment the next PR lands. Without the
+pin, the honest repair for a paragraph describing older code is to *delete* its line numbers rather
+than repoint them into a file that no longer supports the sentence (which is what ADR-0040's
+baseline section needed in PR #408).
+
+Use a **git hex id while the code is churning** — during 0.7.0 the code mutates faster than the
+version tags, so a release tag would predate half the files an ADR cites. Once the churn settles, a
+**release tag is the more valuable pin**: it is immutable, meaningful to a reader, and survives in a
+shallow clone.
+
+Two things worth knowing:
+
+- **Name the symbol next to the citation** — write the symbol first and the location after it, never
+  a bare line number. In this codebase the line number is the part that rots: every stale citation
+  measured on 2026-07-22 was the symbol sitting still in its file while its line drifted. The file
+  and the symbol are what a reader can recover from; the number is a convenience. (This bullet
+  deliberately carries no `path:line` of its own — an example here would be a live claim, and would
+  be stale within the week.)
+- **Re-pin when you amend.** A header naming an old commit says nothing about a section added later,
+  and a citation added under a stale pin is verified against the wrong tree.
+
+`scripts/check_citations.py` (#397) does **not** honour these headers yet — it checks every citation
+against `HEAD`. Teaching it to read the pin is #412.
+
 ## 0.4.0 — Mid-scene lore mutations (#33)
 Design docs: [`../mid-scene-lore-mutations.md`](../mid-scene-lore-mutations.md) (v1.0 spine) ·
 [`../mid-scene-lore-mutations-v1.1.md`](../mid-scene-lore-mutations-v1.1.md) (v1.1)

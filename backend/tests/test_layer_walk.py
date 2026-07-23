@@ -31,8 +31,7 @@ class LayerWalkTests(unittest.TestCase):
         self.universe = self.base / "honorverse"
         self.series = self.universe / "honor-harrington"
         self.root = self.series / "book01"
-        self.service = ProjectService()
-        self.service.create_project(self.root, "Book 1")
+        self.service = ProjectService.created_at(self.root, "Book 1")
         declare_full_chain(self.service, self.root, self.base)
         # A REAL machine layer. conftest's autouse fixture points the config dir
         # at an empty tmp path, so without this `machine_layer()` returns None
@@ -231,8 +230,7 @@ class AssistantRankComesFromTheWalkTests(unittest.TestCase):
         self.temp_dir = TemporaryDirectory()
         self.base = Path(self.temp_dir.name).resolve() / "writing"
         self.root = self.base / "book01"
-        self.service = ProjectService()
-        self.service.create_project(self.root, "Book 1")
+        self.service = ProjectService.created_at(self.root, "Book 1")
         declare_full_chain(self.service, self.root, self.base)
 
     def tearDown(self) -> None:
@@ -304,8 +302,7 @@ class AssistantRankComesFromTheWalkTests(unittest.TestCase):
         # (ADR-0024).
         middle = self.base / "middle"
         book = middle / "book"
-        service = ProjectService()
-        service.create_project(book, "Book")
+        service = ProjectService.created_at(book, "Book")
         declare_full_chain(service, book, self.base)
 
         def write(folder: Path, entry_id: str, title: str) -> None:
@@ -358,8 +355,7 @@ class AssistantOrderMergeTests(unittest.TestCase):
         self.temp_dir = TemporaryDirectory()
         self.base = Path(self.temp_dir.name).resolve() / "writing"
         self.root = self.base / "book01"
-        self.service = ProjectService()
-        self.service.create_project(self.root, "Book 1")
+        self.service = ProjectService.created_at(self.root, "Book 1")
         declare_full_chain(self.service, self.root, self.base)
 
     def tearDown(self) -> None:
@@ -424,8 +420,7 @@ class AssistantOrderMergeTests(unittest.TestCase):
         # layers — the exclusion has to be inherited, not local.
         middle = self.base / "middle"
         book = middle / "book"
-        service = ProjectService()
-        service.create_project(book, "Book")
+        service = ProjectService.created_at(book, "Book")
         declare_full_chain(service, book, self.base)
 
         for folder, entry_id, title in (
@@ -567,8 +562,7 @@ class MachineLayerIsAnOrdinaryLayerTests(unittest.TestCase):
         self.temp_dir = TemporaryDirectory()
         self.base = Path(self.temp_dir.name).resolve() / "writing"
         self.root = self.base / "book01"
-        self.service = ProjectService()
-        self.service.create_project(self.root, "Book 1")
+        self.service = ProjectService.created_at(self.root, "Book 1")
         # The base folder is a layer only because this project declares it
         # (#309). Nothing is inherited by default any more, so a fixture that
         # wants a project layer to compare against has to say so.
@@ -663,8 +657,7 @@ class PerLayerCollectionRulesTests(unittest.TestCase):
         self.temp_dir = TemporaryDirectory()
         self.base = Path(self.temp_dir.name).resolve() / "writing"
         self.root = self.base / "book01"
-        self.service = ProjectService()
-        self.service.create_project(self.root, "Book 1")
+        self.service = ProjectService.created_at(self.root, "Book 1")
         declare_full_chain(self.service, self.root, self.base)
         self.config_dir = Path(self.temp_dir.name).resolve() / "config"
         self.config_dir.mkdir()

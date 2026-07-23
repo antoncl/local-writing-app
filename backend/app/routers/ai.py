@@ -36,14 +36,14 @@ from app.models import (
     ProjectCostResponse,
     SaveChatSessionRequest,
 )
-from app.runtime import service, translate_errors
+from app.runtime import CurrentProject, translate_errors
 from app.services import machine_settings as machine_settings_service
 from app.services.ai import providers as ai_providers
 from app.services.ai import tokens as ai_tokens
 from app.services.ai.preview import PreviewError, build_chat_payload, build_preview
 from app.services.ai.profiles import CapabilityTier, ModelDescriptor
 from app.services.ai.profiles.registry import known_provider_names, profile_for
-from app.services.project_service import ProjectServiceError
+from app.services.project_service import ProjectService, ProjectServiceError
 
 router = APIRouter()
 
@@ -80,6 +80,7 @@ class _ResolvedCall:
 
 
 def _resolve_call_params(
+    project: ProjectService,
     settings: machine_settings_service.MachineSettings,
     *,
     assistant_id: str | None,
@@ -100,7 +101,7 @@ def _resolve_call_params(
     own default apply. Some newer models (e.g. claude-opus-4-7+) actually
     400 on an explicit temperature; assuming 0.7 broke them silently.
     """
-    assistant = service.resolve_assistant(assistant_id)
+    assistant = project.resolve_assistant(assistant_id)
     if assistant is not None:
         meta = assistant.metadata or {}
         a_provider = meta.get("ai_provider")
@@ -204,9 +205,10 @@ def _validate_assistant_temperature(metadata: dict[str, Any] | None) -> str | No
 
 
 @router.post("/api/ai/health", response_model=AIHealthResponse)
-def ai_health(request: AIHealthRequest) -> AIHealthResponse:
+def ai_health(project: CurrentProject, request: AIHealthRequest) -> AIHealthResponse:
     settings = machine_settings_service.load_settings()
     resolved = _resolve_call_params(
+        project,
         settings,
         assistant_id=request.assistant_id,
         provider_override=request.provider,
@@ -214,7 +216,7 @@ def ai_health(request: AIHealthRequest) -> AIHealthResponse:
         max_tokens_override=None,
     )
     try:
-        project_info = service.current_project()
+        project_info = project.current_project()
         policy = project_info.ai_policy
     except ProjectServiceError:
         policy = "off"
@@ -308,7 +310,7 @@ async def resolve_ai_provider_tier(
 
 
 @router.post("/api/ai/preview", response_model=AIPreviewResponse)
-async def ai_preview(request: AIPreviewRequest) -> AIPreviewResponse:
+async def ai_preview(project: CurrentProject, request: AIPreviewRequest) -> AIPreviewResponse:
     with translate_errors():
         # `current_project` raises ProjectServiceError if no project is open;
         # translate_errors handles that. Preview-render failures (undefined
@@ -318,7 +320,7 @@ async def ai_preview(request: AIPreviewRequest) -> AIPreviewResponse:
         # than throwing. `/api/ai/generate` keeps the strict 422 behavior.
         try:
             rendered, session_id = build_preview(
-                project_service=service,
+                project_service=project,
                 template_source=request.template_source,
                 target_scene_id=request.target_scene_id,
                 session_id=request.session_id,
@@ -365,6 +367,7 @@ async def ai_preview(request: AIPreviewRequest) -> AIPreviewResponse:
     descriptor: ModelDescriptor | None = None
     if request.assistant_id is not None:
         resolved = _resolve_call_params(
+            project,
             settings,
             assistant_id=request.assistant_id,
             provider_override=None,
@@ -464,6 +467,7 @@ async def ai_preview(request: AIPreviewRequest) -> AIPreviewResponse:
 
 
 def _prepare_chat_send_payload(
+    project: ProjectService,
     chat_id: str | None,
     system_prompt: str,
     messages_list: list[dict],
@@ -481,7 +485,7 @@ def _prepare_chat_send_payload(
     if not chat_id:
         return None, None, []
     try:
-        chat = service.read_chat_session(chat_id)
+        chat = project.read_chat_session(chat_id)
     except ProjectServiceError:
         return None, None, []
 
@@ -497,7 +501,7 @@ def _prepare_chat_send_payload(
     turn = max(0, len(messages_list) - 1)
 
     new_entries = expand_context(
-        service,
+        project,
         user_text,
         existing_journal=chat.journal,
         explicit_picks=chat.context_items,
@@ -509,7 +513,7 @@ def _prepare_chat_send_payload(
     )
     if new_entries:
         extended_journal = list(chat.journal) + new_entries
-        service.save_chat_session(
+        project.save_chat_session(
             chat_id,
             SaveChatSessionRequest(
                 title=chat.title,
@@ -535,7 +539,7 @@ def _prepare_chat_send_payload(
         blocks.append({"text": system_prompt, "cache_break_after": True, "ttl": "1h"})
     if journal_for_send:
         journal_xml = _format_lore_block(
-            service, [e.entry_id for e in journal_for_send]
+            project, [e.entry_id for e in journal_for_send]
         )
         if journal_xml:
             # Slot 2: merged explicit + detected context (we treat the
@@ -579,9 +583,10 @@ async def _usage_and_cost(
 
 
 @router.post("/api/ai/chat", response_model=AIChatResponse)
-async def ai_chat(request: AIChatRequest) -> AIChatResponse:
+async def ai_chat(project: CurrentProject, request: AIChatRequest) -> AIChatResponse:
     settings = machine_settings_service.load_settings()
     resolved = _resolve_call_params(
+        project,
         settings,
         assistant_id=request.assistant_id,
         provider_override=request.provider,
@@ -589,13 +594,14 @@ async def ai_chat(request: AIChatRequest) -> AIChatResponse:
         max_tokens_override=request.max_tokens,
     )
     try:
-        project_info = service.current_project()
+        project_info = project.current_project()
         policy = project_info.ai_policy
     except ProjectServiceError:
         policy = "off"
 
     messages_list = [m.model_dump() for m in request.messages]
     system_blocks, session_id, journal_added = _prepare_chat_send_payload(
+        project,
         request.chat_id, request.system_prompt, messages_list
     )
 
@@ -640,11 +646,11 @@ async def ai_chat(request: AIChatRequest) -> AIChatResponse:
 
 
 @router.post("/api/ai/generate", response_model=AIGenerateResponse)
-async def ai_generate(request: AIGenerateRequest) -> AIGenerateResponse:
+async def ai_generate(project: CurrentProject, request: AIGenerateRequest) -> AIGenerateResponse:
     with translate_errors():
         try:
             rendered, session_id = build_preview(
-                project_service=service,
+                project_service=project,
                 template_source=request.template_source,
                 target_scene_id=request.target_scene_id,
                 session_id=request.session_id,
@@ -687,6 +693,7 @@ async def ai_generate(request: AIGenerateRequest) -> AIGenerateResponse:
 
     settings = machine_settings_service.load_settings()
     resolved = _resolve_call_params(
+        project,
         settings,
         assistant_id=request.assistant_id,
         provider_override=request.provider,
@@ -694,7 +701,7 @@ async def ai_generate(request: AIGenerateRequest) -> AIGenerateResponse:
         max_tokens_override=request.max_tokens,
     )
     try:
-        project_info = service.current_project()
+        project_info = project.current_project()
         policy = project_info.ai_policy
     except ProjectServiceError:
         policy = "off"
@@ -831,9 +838,10 @@ def _stream_provider_events(
 
 
 @router.post("/api/ai/chat/stream")
-async def ai_chat_stream(request: AIChatRequest) -> StreamingResponse:
+async def ai_chat_stream(project: CurrentProject, request: AIChatRequest) -> StreamingResponse:
     settings = machine_settings_service.load_settings()
     resolved = _resolve_call_params(
+        project,
         settings,
         assistant_id=request.assistant_id,
         provider_override=request.provider,
@@ -841,13 +849,14 @@ async def ai_chat_stream(request: AIChatRequest) -> StreamingResponse:
         max_tokens_override=request.max_tokens,
     )
     try:
-        project_info = service.current_project()
+        project_info = project.current_project()
         policy = project_info.ai_policy
     except ProjectServiceError:
         policy = "off"
 
     messages_list = [m.model_dump() for m in request.messages]
     system_blocks, session_id, journal_added = _prepare_chat_send_payload(
+        project,
         request.chat_id, request.system_prompt, messages_list
     )
 
@@ -885,13 +894,13 @@ async def ai_chat_stream(request: AIChatRequest) -> StreamingResponse:
 
 
 @router.post("/api/ai/generate/stream")
-async def ai_generate_stream(request: AIGenerateRequest) -> StreamingResponse:
+async def ai_generate_stream(project: CurrentProject, request: AIGenerateRequest) -> StreamingResponse:
     # Render template first — if this fails, return an HTTP error like the
     # non-streaming endpoint does. The stream itself only carries provider events.
     with translate_errors():
         try:
             rendered, session_id = build_preview(
-                project_service=service,
+                project_service=project,
                 template_source=request.template_source,
                 target_scene_id=request.target_scene_id,
                 session_id=request.session_id,
@@ -922,6 +931,7 @@ async def ai_generate_stream(request: AIGenerateRequest) -> StreamingResponse:
 
     settings = machine_settings_service.load_settings()
     resolved = _resolve_call_params(
+        project,
         settings,
         assistant_id=request.assistant_id,
         provider_override=request.provider,
@@ -929,7 +939,7 @@ async def ai_generate_stream(request: AIGenerateRequest) -> StreamingResponse:
         max_tokens_override=request.max_tokens,
     )
     try:
-        project_info = service.current_project()
+        project_info = project.current_project()
         policy = project_info.ai_policy
     except ProjectServiceError:
         policy = "off"
@@ -969,10 +979,10 @@ async def ai_generate_stream(request: AIGenerateRequest) -> StreamingResponse:
 
 
 @router.get("/api/ai/project-cost", response_model=ProjectCostResponse)
-def ai_project_cost() -> ProjectCostResponse:
+def ai_project_cost(project: CurrentProject) -> ProjectCostResponse:
     """Sum of per-chat cost_usd_total across the current project."""
     with translate_errors():
-        result = service.compute_project_cost()
+        result = project.compute_project_cost()
     return ProjectCostResponse(
         total_usd=float(result.get("total_usd", 0.0) or 0.0),
         chats=[
@@ -987,17 +997,18 @@ def ai_project_cost() -> ProjectCostResponse:
 
 
 @router.post("/api/ai/invocations", response_model=AIInvocation, status_code=201)
-def ai_invocation_append(request: CreateAIInvocationRequest) -> AIInvocation:
+def ai_invocation_append(project: CurrentProject, request: CreateAIInvocationRequest) -> AIInvocation:
     """Append one AI invocation telemetry record. Called from the frontend
     on accept of a continuation or roleplay generation. The `cost` computed
     field and the per-character cost chip read these records.
     """
     with translate_errors():
-        return service.append_ai_invocation(request)
+        return project.append_ai_invocation(request)
 
 
 @router.get("/api/ai/invocations", response_model=AIInvocationList)
 def ai_invocation_list(
+    project: CurrentProject,
     scene_id: str | None = Query(default=None),
     character_id: str | None = Query(default=None),
     chat_session_id: str | None = Query(default=None),
@@ -1008,7 +1019,7 @@ def ai_invocation_list(
     after Phase C2 Slice B.
     """
     with translate_errors():
-        return service.list_ai_invocations(
+        return project.list_ai_invocations(
             scene_id=scene_id,
             character_id=character_id,
             chat_session_id=chat_session_id,
@@ -1016,7 +1027,7 @@ def ai_invocation_list(
 
 
 @router.get("/api/ai/context-preset", response_model=AIContextPresetResponse)
-def ai_context_preset(kind: str = Query(...)) -> AIContextPresetResponse:
+def ai_context_preset(project: CurrentProject, kind: str = Query(...)) -> AIContextPresetResponse:
     from app.services.ai.context_presets import VALID_PRESETS, render_preset
 
     if kind not in VALID_PRESETS:
@@ -1025,5 +1036,5 @@ def ai_context_preset(kind: str = Query(...)) -> AIContextPresetResponse:
             detail=f"Unknown context preset '{kind}'. Valid: {list(VALID_PRESETS)}.",
         )
     with translate_errors():
-        content = render_preset(service, kind)
+        content = render_preset(project, kind)
     return AIContextPresetResponse(kind=kind, content=content)

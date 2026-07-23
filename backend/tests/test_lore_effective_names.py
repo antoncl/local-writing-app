@@ -11,10 +11,10 @@ from pathlib import Path
 from tempfile import TemporaryDirectory
 
 from fastapi.testclient import TestClient
+from project_fixtures import open_test_project
 
 from app.main import app
 from app.models import CreateLoreEntryRequest, SaveLoreEntryRequest
-from app.runtime import service as svc
 from app.services.ai.helpers import _alias_match
 
 
@@ -22,9 +22,8 @@ class EffectiveNamesTests(unittest.TestCase):
     def setUp(self) -> None:
         self.temp_dir = TemporaryDirectory()
         self.root = Path(self.temp_dir.name).resolve() / "project"
-        svc.__init__()
-        svc.create_project(self.root, "Effective Names Tests")
-        self.remus = svc.create_lore_entry(
+        self.service = open_test_project(self.root, "Effective Names Tests")
+        self.remus = self.service.create_lore_entry(
             CreateLoreEntryRequest(title="Remus", entry_type="lore:character")
         ).id
         self.client = TestClient(app)
@@ -49,10 +48,10 @@ class EffectiveNamesTests(unittest.TestCase):
     # --- effective_names --------------------------------------------------
 
     def test_effective_names_base_before_rename(self) -> None:
-        self.assertEqual(svc.effective_names(self.s1), {self.remus: ["Remus"]})
+        self.assertEqual(self.service.effective_names(self.s1), {self.remus: ["Remus"]})
 
     def test_effective_names_reflect_rename_at_and_after(self) -> None:
-        self.assertEqual(svc.effective_names(self.s2), {self.remus: ["The Wolf"]})
+        self.assertEqual(self.service.effective_names(self.s2), {self.remus: ["The Wolf"]})
 
     def test_effective_names_endpoint(self) -> None:
         res = self.client.get(f"/api/scenes/{self.s2}/effective-names")
@@ -63,7 +62,7 @@ class EffectiveNamesTests(unittest.TestCase):
         # Blanking the title is an intentional rename; the base "Remus" must NOT
         # come back via an `or` fallback (#4). An alias keeps the entry in the
         # name-set so we can assert the old title is gone, not just the entry.
-        svc.save_lore_entry(
+        self.service.save_lore_entry(
             self.remus,
             SaveLoreEntryRequest(
                 title="Remus", body="", entry_type="lore:character",
@@ -74,24 +73,24 @@ class EffectiveNamesTests(unittest.TestCase):
             "Blank",
             f"<!-- mutate:entity={self.remus};field=title;value=;id=b1 -->",
         )
-        self.assertEqual(svc.effective_names(scene), {self.remus: ["Grey"]})
+        self.assertEqual(self.service.effective_names(scene), {self.remus: ["Grey"]})
 
     # --- matcher uses effective names -------------------------------------
 
     def test_new_name_matches_at_rename_scene(self) -> None:
-        self.assertEqual(_alias_match(svc, "The Wolf howled", scene=self.s2), {self.remus})
+        self.assertEqual(_alias_match(self.service, "The Wolf howled", scene=self.s2), {self.remus})
 
     def test_old_name_does_not_match_after_rename(self) -> None:
         # As of s2 the effective name is "The Wolf" — the old "Remus" is redacted.
-        self.assertEqual(_alias_match(svc, "Remus howled", scene=self.s2), set())
+        self.assertEqual(_alias_match(self.service, "Remus howled", scene=self.s2), set())
 
     def test_old_name_still_matches_before_rename(self) -> None:
-        self.assertEqual(_alias_match(svc, "Remus howled", scene=self.s1), {self.remus})
+        self.assertEqual(_alias_match(self.service, "Remus howled", scene=self.s1), {self.remus})
 
     def test_base_names_used_without_a_scene(self) -> None:
         # No resolution scene → base names (prior behavior, no regression).
-        self.assertEqual(_alias_match(svc, "Remus howled"), {self.remus})
-        self.assertEqual(_alias_match(svc, "The Wolf howled"), set())
+        self.assertEqual(_alias_match(self.service, "Remus howled"), {self.remus})
+        self.assertEqual(_alias_match(self.service, "The Wolf howled"), set())
 
 
 if __name__ == "__main__":

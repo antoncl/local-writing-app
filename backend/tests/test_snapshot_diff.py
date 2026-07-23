@@ -26,10 +26,10 @@ from tempfile import TemporaryDirectory
 import pytest
 from diff_fuzz import fuzz_cases
 from fastapi.testclient import TestClient
+from project_fixtures import open_test_project
 
 from app.main import app
 from app.models import SaveSceneRequest
-from app.runtime import service as svc
 from app.services.markdown_scan import (
     escapes_container,
     is_structured,
@@ -712,9 +712,9 @@ class DiffRouteTests(unittest.TestCase):
 
         self.root = Path(self.temp_dir.name).resolve() / "book"
 
-        svc.__init__()
-
-        svc.create_project(self.root, "Diff Tests")
+        # One `ProjectService` per test, bound as the scope the routes
+        # resolve against — the process-wide singleton is gone (#399).
+        self.service = open_test_project(self.root, "Diff Tests")
 
         self.client = TestClient(app)
 
@@ -730,7 +730,7 @@ class DiffRouteTests(unittest.TestCase):
 
     def _save(self, body: str, metadata: dict | None = None) -> None:
 
-        svc.save_scene(
+        self.service.save_scene(
 
             self.scene_id,
 
@@ -976,7 +976,7 @@ class DiffRouteTests(unittest.TestCase):
         file format is the contract — so the interesting comparisons are the
         ones where a key is absent on one side.
         """
-        path = svc._path_for_node_id(self.scene_id, "scene")
+        path = self.service._path_for_node_id(self.scene_id, "scene")
         kept = [
             line
             for line in path.read_text(encoding="utf-8").splitlines()
@@ -1027,7 +1027,7 @@ class DiffRouteTests(unittest.TestCase):
         exist only inside a snapshot — the file was written when the schema, or
         the referenced node, still allowed them.
         """
-        path = svc._path_for_node_id(self.scene_id, "scene")
+        path = self.service._path_for_node_id(self.scene_id, "scene")
         out = []
         for existing in path.read_text(encoding="utf-8").splitlines():
             out.append(existing)

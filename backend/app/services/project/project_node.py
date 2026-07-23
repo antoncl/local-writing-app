@@ -35,7 +35,7 @@ class ProjectNodeMixin:
             raise ProjectServiceError("Project node file project.md is missing.", 404)
         front_matter, body = self._read_markdown_with_front_matter(path, strict=True)
         node_id = self._require_node_id(path, front_matter)
-        title = str(front_matter.get("title") or self.title or "Untitled Project")
+        title = str(front_matter.get("title") or self._project_title(path.parent) or "Untitled Project")
         raw_entry_type = front_matter.get("entry_type") or "project:project"
         entry_type = raw_entry_type if isinstance(raw_entry_type, str) else "project:project"
         metadata = self._normalise_metadata(front_matter.get("metadata"), path)
@@ -71,9 +71,8 @@ class ProjectNodeMixin:
             metadata=metadata,
         )
         self._write_project_node_file(path, node)
-        # Keep the cached title and project.yaml's title in sync so legacy
-        # readers (current_project, etc.) see the latest value.
-        self.title = request.title
+        # project.yaml's title is the single source (#399 retired the cached
+        # copy on the service), so keep it in step with the node's.
         self._sync_project_yaml_title(request.title)
         return self.read_project_node()
 

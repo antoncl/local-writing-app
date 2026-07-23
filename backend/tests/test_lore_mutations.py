@@ -14,6 +14,7 @@ from pathlib import Path
 from tempfile import TemporaryDirectory
 
 from fastapi.testclient import TestClient
+from project_fixtures import open_test_project
 
 from app.main import app
 from app.models import (
@@ -22,14 +23,14 @@ from app.models import (
     UpdateMutationRequest,
     UpsertMetadataFieldRequest,
 )
-from app.runtime import service as svc
+from app.services.project_service import ProjectService
 
 
-def _setup_honor() -> str:
+def _setup_honor(service: ProjectService) -> str:
     """Define a `rank` field on characters and create a real `Honor` character,
     returning its id — mutations must target a real lore entity (#53)."""
-    layers = svc.read_metadata_schema_layers()
-    svc.upsert_metadata_field(
+    layers = service.read_metadata_schema_layers()
+    service.upsert_metadata_field(
         UpsertMetadataFieldRequest(
             layer_id=layers.layers[-1].id,
             field_id="rank",
@@ -37,7 +38,7 @@ def _setup_honor() -> str:
             entry_type="lore:character",
         )
     )
-    return svc.create_lore_entry(
+    return service.create_lore_entry(
         CreateLoreEntryRequest(title="Honor", entry_type="lore:character")
     ).id
 
@@ -46,9 +47,8 @@ class LoreMutationScanTests(unittest.TestCase):
     def setUp(self) -> None:
         self.temp_dir = TemporaryDirectory()
         self.root = Path(self.temp_dir.name).resolve() / "project"
-        svc.__init__()
-        svc.create_project(self.root, "Lore Mutation Tests")
-        self.honor = _setup_honor()
+        self.service = open_test_project(self.root, "Lore Mutation Tests")
+        self.honor = _setup_honor(self.service)
         self.client = TestClient(app)
         scene = self.client.post("/api/scenes", json={"title": "Chapter One"})
         self.assertEqual(scene.status_code, 200, scene.text)
@@ -73,11 +73,11 @@ class LoreMutationScanTests(unittest.TestCase):
         self.assertEqual(response.status_code, 200, response.text)
 
     def _scan(self) -> dict[str, object]:
-        scene = svc.read_scene(self.scene_id)
-        return {m.marker_id: m for m in svc._scan_scene_mutations(scene)}
+        scene = self.service.read_scene(self.scene_id)
+        return {m.marker_id: m for m in self.service._scan_scene_mutations(scene)}
 
     def _body(self) -> str:
-        return svc.read_scene(self.scene_id).body
+        return self.service.read_scene(self.scene_id).body
 
     # --- scan -------------------------------------------------------------
 
@@ -100,7 +100,7 @@ class LoreMutationScanTests(unittest.TestCase):
     # --- update (atomic rewrite) -----------------------------------------
 
     def test_update_value_rewrites_single_marker(self) -> None:
-        svc.update_mutation(
+        self.service.update_mutation(
             self.scene_id, "m1", UpdateMutationRequest(value="Commodore")
         )
         markers = self._scan()
@@ -108,27 +108,27 @@ class LoreMutationScanTests(unittest.TestCase):
         self.assertEqual(markers["m2"].value, "Lady Dame")  # untouched
 
     def test_update_value_is_url_encoded(self) -> None:
-        svc.update_mutation(
+        self.service.update_mutation(
             self.scene_id, "m1", UpdateMutationRequest(value="Rear Admiral")
         )
         self.assertIn("value=Rear%20Admiral", self._body())
         self.assertEqual(self._scan()["m1"].value, "Rear Admiral")
 
     def test_update_field_only_preserves_value_encoding(self) -> None:
-        svc.update_mutation(self.scene_id, "m2", UpdateMutationRequest(field="rank"))
+        self.service.update_mutation(self.scene_id, "m2", UpdateMutationRequest(field="rank"))
         # Field changed but the pre-encoded value must survive verbatim.
         self.assertIn("field=rank;value=Lady%20Dame", self._body())
         self.assertEqual(self._scan()["m2"].value, "Lady Dame")
 
     def test_update_missing_marker_is_404(self) -> None:
         with self.assertRaises(Exception) as ctx:
-            svc.update_mutation(self.scene_id, "nope", UpdateMutationRequest(value="x"))
+            self.service.update_mutation(self.scene_id, "nope", UpdateMutationRequest(value="x"))
         self.assertEqual(getattr(ctx.exception, "status_code", None), 404)
 
     # --- delete -----------------------------------------------------------
 
     def test_delete_removes_only_the_marker(self) -> None:
-        svc.delete_mutation(self.scene_id, "m2")
+        self.service.delete_mutation(self.scene_id, "m2")
         body = self._body()
         self.assertNotIn("id=m2", body)
         self.assertIn("The crew saluted.", body)  # surrounding prose survives
@@ -136,7 +136,7 @@ class LoreMutationScanTests(unittest.TestCase):
 
     def test_delete_missing_marker_is_404(self) -> None:
         with self.assertRaises(Exception) as ctx:
-            svc.delete_mutation(self.scene_id, "nope")
+            self.service.delete_mutation(self.scene_id, "nope")
         self.assertEqual(getattr(ctx.exception, "status_code", None), 404)
 
 
@@ -149,9 +149,8 @@ class LoreMutationResolverTests(unittest.TestCase):
     def setUp(self) -> None:
         self.temp_dir = TemporaryDirectory()
         self.root = Path(self.temp_dir.name).resolve() / "project"
-        svc.__init__()
-        svc.create_project(self.root, "Resolver Tests")
-        self.honor = _setup_honor()
+        self.service = open_test_project(self.root, "Resolver Tests")
+        self.honor = _setup_honor(self.service)
         self.client = TestClient(app)
         # Three scenes in manuscript order: s1 (before), s2 (rank->Captain),
         # s3 (rank->Commodore).
@@ -181,7 +180,7 @@ class LoreMutationResolverTests(unittest.TestCase):
     # --- index ------------------------------------------------------------
 
     def test_index_orders_records_by_manuscript_position(self) -> None:
-        index = svc.build_mutations_index()
+        index = self.service.build_mutations_index()
         records = index.by_entity[self.honor]
         self.assertEqual([m.marker_id for m in records], ["m1", "m2"])
         # Manuscript order reflects scene-creation order here.
@@ -189,45 +188,45 @@ class LoreMutationResolverTests(unittest.TestCase):
         self.assertLess(index.scene_order[self.s2], index.scene_order[self.s3])
 
     def test_index_version_changes_when_a_marker_changes(self) -> None:
-        before = svc.build_mutations_index().version
-        svc.update_mutation(
+        before = self.service.build_mutations_index().version
+        self.service.update_mutation(
             self.s2, "m1", UpdateMutationRequest(value="Commander")
         )
-        self.assertNotEqual(before, svc.build_mutations_index().version)
+        self.assertNotEqual(before, self.service.build_mutations_index().version)
 
     # --- effective_state: manuscript-order redaction (#33) ---------------
 
     def test_earlier_scene_sees_no_override(self) -> None:
-        self.assertEqual(svc.effective_state(self.honor, self.s1), {})
+        self.assertEqual(self.service.effective_state(self.honor, self.s1), {})
 
     def test_mutation_scene_and_after_see_new_value(self) -> None:
-        self.assertEqual(svc.effective_state(self.honor, self.s2), {"rank": "Captain"})
+        self.assertEqual(self.service.effective_state(self.honor, self.s2), {"rank": "Captain"})
 
     def test_latest_started_record_wins(self) -> None:
         # By scene 3 the later rank record shadows the earlier one.
-        self.assertEqual(svc.effective_state(self.honor, self.s3), {"rank": "Commodore"})
+        self.assertEqual(self.service.effective_state(self.honor, self.s3), {"rank": "Commodore"})
 
     def test_unknown_scene_yields_base_only(self) -> None:
-        self.assertEqual(svc.effective_state(self.honor, "does-not-exist"), {})
+        self.assertEqual(self.service.effective_state(self.honor, "does-not-exist"), {})
 
     def test_unmutated_entity_yields_empty(self) -> None:
-        self.assertEqual(svc.effective_state("nimitz", self.s2), {})
+        self.assertEqual(self.service.effective_state("nimitz", self.s2), {})
 
     # --- position-granular resolution within a scene ----------------------
 
     def test_position_before_marker_is_not_live(self) -> None:
-        index = svc.build_mutations_index()
+        index = self.service.build_mutations_index()
         offset = index.by_entity[self.honor][0].offset
         # A cursor just before the marker sees the old (base) value.
         self.assertEqual(
-            svc.effective_state(self.honor, self.s2, position=offset - 1, index=index), {}
+            self.service.effective_state(self.honor, self.s2, position=offset - 1, index=index), {}
         )
 
     def test_position_at_or_after_marker_is_live(self) -> None:
-        index = svc.build_mutations_index()
+        index = self.service.build_mutations_index()
         offset = index.by_entity[self.honor][0].offset
         self.assertEqual(
-            svc.effective_state(self.honor, self.s2, position=offset, index=index),
+            self.service.effective_state(self.honor, self.s2, position=offset, index=index),
             {"rank": "Captain"},
         )
 

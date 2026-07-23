@@ -16,10 +16,10 @@ from types import SimpleNamespace
 from unittest.mock import patch
 
 from fastapi.testclient import TestClient
+from project_fixtures import open_test_project
 
 from app.main import app
 from app.models import UpdateProjectSettingsRequest
-from app.runtime import service as global_service
 from app.services import machine_settings as ms
 from app.services.ai import providers as ai_providers
 from app.services.ai.profiles import UsageMetrics
@@ -55,9 +55,8 @@ class NonStreamingChatCostTests(unittest.TestCase):
     def setUp(self) -> None:
         self.temp_dir = TemporaryDirectory()
         self.root = Path(self.temp_dir.name).resolve() / "project"
-        global_service.__init__()
-        global_service.create_project(self.root, "Cost Tests")
-        global_service.update_project_settings(
+        self.service = open_test_project(self.root, "Cost Tests")
+        self.service.update_project_settings(
             UpdateProjectSettingsRequest(ai_policy="cloud-allowed")
         )
         default_registry.clear()
@@ -149,9 +148,8 @@ class StreamingChatCostTests(unittest.TestCase):
     def setUp(self) -> None:
         self.temp_dir = TemporaryDirectory()
         self.root = Path(self.temp_dir.name).resolve() / "project"
-        global_service.__init__()
-        global_service.create_project(self.root, "Cost Stream Tests")
-        global_service.update_project_settings(
+        self.service = open_test_project(self.root, "Cost Stream Tests")
+        self.service.update_project_settings(
             UpdateProjectSettingsRequest(ai_policy="cloud-allowed")
         )
         default_registry.clear()

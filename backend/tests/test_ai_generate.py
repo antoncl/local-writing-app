@@ -7,6 +7,7 @@ from types import SimpleNamespace
 from unittest.mock import patch
 
 from fastapi.testclient import TestClient
+from project_fixtures import open_test_project
 
 from app.main import app
 from app.models import (
@@ -14,7 +15,6 @@ from app.models import (
     SaveSceneRequest,
     UpdateProjectSettingsRequest,
 )
-from app.runtime import service as global_service
 from app.services.ai.sessions import default_registry
 
 
@@ -36,17 +36,16 @@ class GenerateEndpointTests(unittest.TestCase):
     def setUp(self) -> None:
         self.temp_dir = TemporaryDirectory()
         self.root = Path(self.temp_dir.name).resolve() / "project"
-        global_service.__init__()
-        global_service.create_project(self.root, "Generate Tests")
+        self.service = open_test_project(self.root, "Generate Tests")
         default_registry.clear()
         self.client = TestClient(app)
 
         # Minimal scene with a summary
-        structure = global_service.create_structure_node(
+        structure = self.service.create_structure_node(
             CreateStructureNodeRequest(title="Act One", entry_type="scene:act")
         )
         act_node = next(c for c in structure.root.children if c.type == "scene:act")
-        s = global_service.create_structure_node(
+        s = self.service.create_structure_node(
             CreateStructureNodeRequest(
                 title="The Departure", entry_type="scene:scene", parent_id=act_node.id
             )
@@ -55,8 +54,8 @@ class GenerateEndpointTests(unittest.TestCase):
         act_after = next(c for c in s.root.children if c.id == act_node.id)
         self.scene_id = act_after.children[-1].scene_id
 
-        scene = global_service.read_scene(self.scene_id)
-        global_service.save_scene(
+        scene = self.service.read_scene(self.scene_id)
+        self.service.save_scene(
             self.scene_id,
             SaveSceneRequest(
                 title=scene.title,
@@ -73,7 +72,7 @@ class GenerateEndpointTests(unittest.TestCase):
         self.temp_dir.cleanup()
 
     def _allow_cloud(self) -> None:
-        global_service.update_project_settings(
+        self.service.update_project_settings(
             UpdateProjectSettingsRequest(ai_policy="cloud-allowed")
         )
 

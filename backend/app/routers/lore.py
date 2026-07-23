@@ -20,49 +20,51 @@ from app.models import (
     SaveMutationSetEntryRequest,
     SavePromptEntryRequest,
 )
-from app.runtime import service, translate_errors
+from app.runtime import CurrentProject, translate_errors
 
 router = APIRouter()
 
 
 @router.get("/api/lore", response_model=LoreEntryList)
-def list_lore_entries() -> LoreEntryList:
+def list_lore_entries(project: CurrentProject) -> LoreEntryList:
     with translate_errors():
-        return service.list_lore_entries()
+        return project.list_lore_entries()
 
 
 @router.post("/api/lore", response_model=LoreEntry)
-def create_lore_entry(request: CreateLoreEntryRequest) -> LoreEntry:
+def create_lore_entry(project: CurrentProject, request: CreateLoreEntryRequest) -> LoreEntry:
     with translate_errors():
-        return service.create_lore_entry(request)
+        return project.create_lore_entry(request)
 
 
 @router.get("/api/lore/{entry_id}", response_model=LoreEntry)
-def get_lore_entry(entry_id: str) -> LoreEntry:
+def get_lore_entry(project: CurrentProject, entry_id: str) -> LoreEntry:
     with translate_errors():
-        return service.read_lore_entry(entry_id)
+        return project.read_lore_entry(entry_id)
 
 
 @router.get("/api/lore/{entity_id}/mutations", response_model=MutationMarkerList)
-def list_entity_mutations(entity_id: str) -> MutationMarkerList:
+def list_entity_mutations(project: CurrentProject, entity_id: str) -> MutationMarkerList:
     """Manuscript-ordered mutation timeline for a lore entity (#33)."""
     with translate_errors():
-        return service.entity_mutations(entity_id)
+        return project.entity_mutations(entity_id)
 
 
 @router.get("/api/lore/{entity_id}/live-mutations", response_model=MutationMarkerList)
-def list_live_entity_mutations(
-    entity_id: str, scene: str, pos: int | None = None
-) -> MutationMarkerList:
+def list_live_entity_mutations(project: CurrentProject, entity_id: str, scene: str, pos: int | None = None) -> MutationMarkerList:
     """The entity's start records still open (live, not yet closed) at (scene,
     position) — the source for the `/mutate close` picker (#59)."""
     with translate_errors():
-        return service.live_mutations(entity_id, scene, pos)
+        return project.live_mutations(entity_id, scene, pos)
 
 
 @router.get("/api/lore/{entity_id}/effective", response_model=EffectiveStateResponse)
 def get_entity_effective_state(
-    entity_id: str, scene: str, pos: int | None = None, exclude: str = ""
+    project: CurrentProject,
+    entity_id: str,
+    scene: str,
+    pos: int | None = None,
+    exclude: str = "",
 ) -> EffectiveStateResponse:
     """Effective mutation overrides for a lore entity as of (scene, position) —
     drives the lore-card time-slider (#33). `exclude` (comma-separated record
@@ -70,98 +72,96 @@ def get_entity_effective_state(
     a unit (#71, ADR-0017)."""
     with translate_errors():
         excluded = {part.strip() for part in exclude.split(",") if part.strip()}
-        values = service.effective_state(entity_id, scene, pos, exclude=excluded)
+        values = project.effective_state(entity_id, scene, pos, exclude=excluded)
         return EffectiveStateResponse(
             entity_id=entity_id, scene_id=scene, position=pos, values=values
         )
 
 
 @router.put("/api/lore/{entry_id}", response_model=LoreEntry)
-def save_lore_entry(entry_id: str, request: SaveLoreEntryRequest) -> LoreEntry:
+def save_lore_entry(project: CurrentProject, entry_id: str, request: SaveLoreEntryRequest) -> LoreEntry:
     with translate_errors():
-        return service.save_lore_entry(entry_id, request)
+        return project.save_lore_entry(entry_id, request)
 
 
 @router.delete("/api/lore/{entry_id}", response_model=LoreEntryList)
-def delete_lore_entry(entry_id: str) -> LoreEntryList:
+def delete_lore_entry(project: CurrentProject, entry_id: str) -> LoreEntryList:
     with translate_errors():
-        return service.delete_lore_entry(entry_id)
+        return project.delete_lore_entry(entry_id)
 
 
 @router.post(
     "/api/lore/{entry_id}/move-to-research",
     response_model=MoveLoreNoteToResearchResponse,
 )
-def move_lore_note_to_research(entry_id: str) -> MoveLoreNoteToResearchResponse:
+def move_lore_note_to_research(project: CurrentProject, entry_id: str) -> MoveLoreNoteToResearchResponse:
     """Convert a lore_note to a research/note (slice 5 of
     docs/research-strategy.md). Returns the new note id, updated
     research tree, dropped metadata field ids (aliases / related_entries
     / context_policy are intentional v1 data loss), and refreshed lore
     list so callers update both panes in one round-trip."""
     with translate_errors():
-        return service.move_lore_note_to_research(entry_id)
+        return project.move_lore_note_to_research(entry_id)
 
 
 @router.get("/api/prompts", response_model=PromptEntryList)
-def list_prompt_entries() -> PromptEntryList:
+def list_prompt_entries(project: CurrentProject) -> PromptEntryList:
     with translate_errors():
-        return service.list_prompt_entries()
+        return project.list_prompt_entries()
 
 
 @router.post("/api/prompts", response_model=PromptEntry)
-def create_prompt_entry(request: CreatePromptEntryRequest) -> PromptEntry:
+def create_prompt_entry(project: CurrentProject, request: CreatePromptEntryRequest) -> PromptEntry:
     with translate_errors():
-        return service.create_prompt_entry(request)
+        return project.create_prompt_entry(request)
 
 
 @router.get("/api/prompts/{entry_id}", response_model=PromptEntry)
-def get_prompt_entry(entry_id: str) -> PromptEntry:
+def get_prompt_entry(project: CurrentProject, entry_id: str) -> PromptEntry:
     with translate_errors():
-        return service.read_prompt_entry(entry_id)
+        return project.read_prompt_entry(entry_id)
 
 
 @router.put("/api/prompts/{entry_id}", response_model=PromptEntry)
-def save_prompt_entry(entry_id: str, request: SavePromptEntryRequest) -> PromptEntry:
+def save_prompt_entry(project: CurrentProject, entry_id: str, request: SavePromptEntryRequest) -> PromptEntry:
     with translate_errors():
-        return service.save_prompt_entry(entry_id, request)
+        return project.save_prompt_entry(entry_id, request)
 
 
 @router.delete("/api/prompts/{entry_id}", response_model=PromptEntryList)
-def delete_prompt_entry(entry_id: str) -> PromptEntryList:
+def delete_prompt_entry(project: CurrentProject, entry_id: str) -> PromptEntryList:
     with translate_errors():
-        return service.delete_prompt_entry(entry_id)
+        return project.delete_prompt_entry(entry_id)
 
 
 @router.get("/api/mutation-sets", response_model=MutationSetEntryList)
-def list_mutation_set_entries() -> MutationSetEntryList:
+def list_mutation_set_entries(project: CurrentProject) -> MutationSetEntryList:
     """Reusable mutation sets (#62) — the Mutations pane list."""
     with translate_errors():
-        return service.list_mutation_set_entries()
+        return project.list_mutation_set_entries()
 
 
 @router.post("/api/mutation-sets", response_model=MutationSetEntry)
-def create_mutation_set_entry(request: CreateMutationSetEntryRequest) -> MutationSetEntry:
+def create_mutation_set_entry(project: CurrentProject, request: CreateMutationSetEntryRequest) -> MutationSetEntry:
     with translate_errors():
-        return service.create_mutation_set_entry(request)
+        return project.create_mutation_set_entry(request)
 
 
 @router.get("/api/mutation-sets/{entry_id}", response_model=MutationSetEntry)
-def get_mutation_set_entry(entry_id: str) -> MutationSetEntry:
+def get_mutation_set_entry(project: CurrentProject, entry_id: str) -> MutationSetEntry:
     with translate_errors():
-        return service.read_mutation_set_entry(entry_id)
+        return project.read_mutation_set_entry(entry_id)
 
 
 @router.put("/api/mutation-sets/{entry_id}", response_model=MutationSetEntry)
-def save_mutation_set_entry(
-    entry_id: str, request: SaveMutationSetEntryRequest
-) -> MutationSetEntry:
+def save_mutation_set_entry(project: CurrentProject, entry_id: str, request: SaveMutationSetEntryRequest) -> MutationSetEntry:
     with translate_errors():
-        return service.save_mutation_set_entry(entry_id, request)
+        return project.save_mutation_set_entry(entry_id, request)
 
 
 @router.delete("/api/mutation-sets/{entry_id}", response_model=MutationSetEntryList)
-def delete_mutation_set_entry(entry_id: str) -> MutationSetEntryList:
+def delete_mutation_set_entry(project: CurrentProject, entry_id: str) -> MutationSetEntryList:
     with translate_errors():
-        return service.delete_mutation_set_entry(entry_id)
+        return project.delete_mutation_set_entry(entry_id)
 
 

@@ -17,6 +17,7 @@ from pathlib import Path
 from tempfile import TemporaryDirectory
 
 from fastapi.testclient import TestClient
+from project_fixtures import open_test_project
 
 from app.main import app
 from app.models import (
@@ -24,7 +25,6 @@ from app.models import (
     MetadataFieldDefinition,
     UpsertMetadataFieldRequest,
 )
-from app.runtime import service as svc
 from app.services.ai.helpers import _format_lore_block, create_environment_for_project
 
 
@@ -32,12 +32,11 @@ class MutationResolutionTests(unittest.TestCase):
     def setUp(self) -> None:
         self.temp_dir = TemporaryDirectory()
         self.root = Path(self.temp_dir.name).resolve() / "project"
-        svc.__init__()
-        svc.create_project(self.root, "Mutation Resolution Tests")
+        self.service = open_test_project(self.root, "Mutation Resolution Tests")
         # `rank` is a user-defined field on characters; define it so the rank
         # mutation validates (#53).
-        layers = svc.read_metadata_schema_layers()
-        svc.upsert_metadata_field(
+        layers = self.service.read_metadata_schema_layers()
+        self.service.upsert_metadata_field(
             UpsertMetadataFieldRequest(
                 layer_id=layers.layers[-1].id,
                 field_id="rank",
@@ -47,7 +46,7 @@ class MutationResolutionTests(unittest.TestCase):
         )
         self.client = TestClient(app)
 
-        honor = svc.create_lore_entry(
+        honor = self.service.create_lore_entry(
             CreateLoreEntryRequest(title="Commodore Honor", entry_type="lore:character")
         )
         self.honor = honor.id
@@ -77,21 +76,21 @@ class MutationResolutionTests(unittest.TestCase):
     # --- <lore> block auto-resolution (the choke-point) -------------------
 
     def test_block_before_change_shows_base_name(self) -> None:
-        block = _format_lore_block(svc, [self.honor], scene=self.s1)
+        block = _format_lore_block(self.service, [self.honor], scene=self.s1)
         self.assertIn('name="Commodore Honor"', block)
 
     def test_block_at_and_after_change_shows_effective_name(self) -> None:
-        block = _format_lore_block(svc, [self.honor], scene=self.s2)
+        block = _format_lore_block(self.service, [self.honor], scene=self.s2)
         self.assertIn('name="Captain Honor"', block)
 
     def test_block_without_scene_is_base_only(self) -> None:
-        block = _format_lore_block(svc, [self.honor])
+        block = _format_lore_block(self.service, [self.honor])
         self.assertIn('name="Commodore Honor"', block)
 
     # --- base()/effective() helpers (structured field: rank) --------------
 
     def test_effective_helper_resolves_field_per_scene(self) -> None:
-        env = create_environment_for_project(svc)
+        env = create_environment_for_project(self.service)
         render = env.from_string(
             "{{ effective(hid, 'rank', sid) }}"
         ).render
@@ -101,13 +100,13 @@ class MutationResolutionTests(unittest.TestCase):
         self.assertNotEqual(render(hid=self.honor, sid=self.s1), "Captain")
 
     def test_effective_helper_resolves_title_per_scene(self) -> None:
-        env = create_environment_for_project(svc)
+        env = create_environment_for_project(self.service)
         render = env.from_string("{{ effective(hid, 'title', sid) }}").render
         self.assertEqual(render(hid=self.honor, sid=self.s1), "Commodore Honor")
         self.assertEqual(render(hid=self.honor, sid=self.s2), "Captain Honor")
 
     def test_base_helper_ignores_mutations(self) -> None:
-        env = create_environment_for_project(svc)
+        env = create_environment_for_project(self.service)
         render = env.from_string("{{ base(hid, 'title') }}").render
         # base() is scene-independent: always the stored (book-start) value.
         self.assertEqual(render(hid=self.honor), "Commodore Honor")
@@ -115,8 +114,8 @@ class MutationResolutionTests(unittest.TestCase):
     def test_effective_coerces_to_field_native_type(self) -> None:
         # A number field resolves to an int, not the marker's "600" string, so
         # template comparisons behave the same as with a base value.
-        layers = svc.read_metadata_schema_layers()
-        svc.upsert_metadata_field(
+        layers = self.service.read_metadata_schema_layers()
+        self.service.upsert_metadata_field(
             UpsertMetadataFieldRequest(
                 layer_id=layers.layers[-1].id,
                 field_id="strength",
@@ -128,7 +127,7 @@ class MutationResolutionTests(unittest.TestCase):
             "Scene Three",
             f"Grew stronger. <!-- mutate:entity={self.honor};field=strength;value=600;id=s1 -->",
         )
-        env = create_environment_for_project(svc)
+        env = create_environment_for_project(self.service)
         value = env.globals["effective"](self.honor, "strength", scene)
         self.assertEqual(value, 600)
         self.assertIsInstance(value, int)

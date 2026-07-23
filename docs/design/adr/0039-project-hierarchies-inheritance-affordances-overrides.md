@@ -11,11 +11,17 @@
 
 ## Context
 
-The layering machinery largely exists. `_project_layer_folders` (`schema.py:887-900`) walks the
-ancestor chain, and `_build_node_index` (`references.py:46-72`) already collects lore, prompts,
-assistants, mutation sets, views and research across every layer — descendant winning on id collision
-(`references.py:216-230`) — while scenes stay book-scoped (`references.py:70-72`). What is missing is
-navigation, the edit story for an inherited node, and settings resolution.
+The layering machinery largely exists. `_project_layer_folders` (`layers.py:331`) walks the
+ancestor chain, and `_build_node_index` (`references.py:260`) already collects lore, prompts,
+assistants, mutation sets, views and research across every layer — descendant winning on id
+collision in `resolve()` (`node_index.py:179`) — while scenes stay book-scoped in
+`_families_for_layer` (`references.py:469-478`). What is missing is navigation, the edit story for an inherited node, and
+settings resolution.
+
+> **Citations re-verified 2026-07-22.** The claims above still hold; their locations had drifted —
+> the schema/index split of #14 moved the chain walk into `layers.py`, and #329 gave it a single
+> traversal. Where a later PR overtook a claim rather than moving it, the drift is marked inline
+> below rather than rewritten away: an ADR's Context is a record of why it was written.
 
 An earlier draft of this ADR framed per-field overrides as a new tier inside the `effective_state`
 resolver, "one level up" from scene mutations, and claimed to redeem a deferred slot from ADR-0005.
@@ -112,11 +118,12 @@ granularity while fork — which is a whole-node copy — remains a distinct, us
 differently, so inbound references from ancestor entries must resolve to the fork *within the forking
 project*. ADR-0040's `id → [candidates by layer]` provides exactly that, with the ancestor still
 reachable as a shadowed candidate. Front matter carries `forked_from`, which is what declares the
-severance and what suppresses the index's existing shadow warning (`references.py:216-230`) — the
+severance and what suppresses the shadow warning `resolve()` already emits (`node_index.py:179`) — the
 warning stays loud for *accidental* collisions.
 
 `forked_from` records the **relative path from the base folder** to the owning layer, not a layer id.
-The only layer identity in code is `sha256(str(folder.resolve()))[:16]` (`schema.py:912-913`), which
+The only layer identity in code is `_layer_id_for_folder` (`layers.py:64-85`) — sha256 of the
+resolved path, first 16 hex chars — which
 is machine- and location-dependent — persisting it into front matter breaks the moment the shelf is
 moved, renamed, or opened on another machine, and "layer rank" is an ordinal within one chain, not a
 durable identifier. A relative path survives all three.
@@ -207,6 +214,18 @@ defend against a problem it introduced. Enumerate-then-declare cannot cycle, bec
 is a directory walk. **Do not reintroduce transitive links to "simplify" the declaration** — the
 finiteness is the feature.
 
+> **Scope of that rejection (2026-07-23).** It is about a **free-form pointer**, and it does not reach
+> a *transitive reading of this declaration* — where a project would also inherit what its declared
+> ancestors declare. That cannot cycle: a declaration can only select from the filesystem walk, so
+> every hop strictly decreases depth and the closure terminates in at most `depth(project)` hops.
+> Considered and **not adopted for 0.7.0** — it buys only that inserting a level retroactively costs
+> one edit instead of one per descendant, and it spends "each project's list is complete for itself",
+> which is what keeps the chain a property of the file you are editing. Parked as an issue, not an
+> open ADR question. Anyone revisiting it inherits one non-obvious obligation: the ancestor filter
+> must be re-applied **at each hop**, because `_declared_ancestors` validates nothing (the ancestor
+> test lives one call later, in `_project_layer_folders`) and stored entries are relative paths that
+> drift — so a closure over raw `inherits:` lists has no termination guarantee at all.
+
 **The change is contained.** `_project_layer_folders` still returns an ordered `list[Path]`; only its
 body changes, from "every ancestor" to "the declared subset of every ancestor". Both consumers —
 `_metadata_schema_layer_paths` and `_build_node_index` — enumerate that list and are untouched, as are
@@ -220,7 +239,7 @@ and lets the author tick the ones to inherit from. Editable afterwards in projec
 
 Amendment 1 said the walk "enumerates candidates by walking the filesystem to the base folder" and
 **never defined what determines the base folder**. The code does, dynamically and invisibly:
-`_metadata_schema_base_folder` (`schema.py:942-959`) ignores the configured
+`_metadata_schema_base_folder` (`layers.py:361`) ignores the configured
 `projects_base_folder` whenever it equals `root.parent` — *which the project chooser writes on every
 create* — and substitutes the **outermost** ancestor anywhere up `root.parents` that happens to
 contain a `metadata.schema.yaml`. A stray schema file in a grandparent directory therefore sets the
@@ -237,12 +256,18 @@ the same chain, which is why a change to "how far do we walk" cannot be made in 
 
 | | today | derives |
 |---|---|---|
-| 1 | `_project_layer_folders` (`schema.py:887`) | the chain, root → base |
-| 2 | `_metadata_schema_base_folder` (`:942`) | where #1 *stops* — the widening above |
-| 3 | `_metadata_schema_layer_paths` (`:903`) | maps #1 → schema files |
-| 4 | `_build_node_index` (`references.py`) | iterates #1, building `IndexLayer` inline |
-| 5 | `assistants.py:75` | layer folder from `entry.path.parent`, **rank from index insertion order** |
-| 6 | `references.py:183`, `assistants.py:219` | the machine layer, special-cased outside the chain |
+| 1 | `_project_layer_folders` (`layers.py:331`) | the chain, root → base |
+| 2 | `_metadata_schema_base_folder` (`layers.py:361`) | where #1 *stops* — the widening above |
+| 3 | `_metadata_schema_layer_paths` (`layers.py:419`) | maps #1 → schema files |
+| 4 | `_build_node_index` (`references.py:260`) | iterates #1, building `IndexLayer` inline |
+| 5 | `assistants.py`, line 75 as it then stood | layer folder from `entry.path.parent`, **rank from index insertion order** |
+| 6 | `references.py` line 183 / `assistants.py` line 219, likewise | the machine layer, special-cased outside the chain |
+
+> Rows 4–6 describe the code **as this ADR found it**, and #329 answered them: the traversal is now
+> single and lives in `layers.py`, `IndexLayer` is declared once with an **explicit** `rank`
+> (`node_index.py:30-36`) instead of one inferred from index insertion order, and the machine layer
+> is an ordinary layer in the walk (`include_machine=True`) rather than a special case beside it.
+> Rows 1–3 are still live code, re-verified 2026-07-22.
 
 `IndexLayer(folder, id, label)` (#305) is already the right value object; it is merely private to the
 index build, constructed inline by `_build_node_index` with rank implied by `enumerate`. Promote it:
@@ -308,14 +333,21 @@ unsettled builds on sand — and #309 waits on #306.
   query-time delta for backlinks / `References` / Nest to apply. The split is clean: **layer overrides
   are position-independent and can be materialized; scene mutations are position-dependent and cannot**
   (they stay resolved at query time, as today).
-- **Ordering is inherited too, not just content — and it is currently the exception.** Assistants
+- **Ordering is inherited too, not just content — and it *was* the exception when this was written.**
+  **No longer: #332 took the layer term off the sort key** (`assistants.py`, `sort_key` — position in
+  one merged sequence, then an alphabetical tail; verified 2026-07-23). The paragraph below is kept as
+  the record of the concern and where it was answered; do not read its present tense as live code.
+  Assistants
   carry a manual priority sequence (`.order.yaml` per layer, `assistants.py:128-142`) where **topmost
   is the default** (ADR-0024). That makes position load-bearing rather than cosmetic, and it is the
   one place the chain is composed *without* the descendant-wins rule this ADR applies everywhere else:
   the effective order sorts on `layer_rank` first, and `layer_rank` is not stored — it is the order
-  entries stream out of the index (`assistants.py:76`), with the machine layer collected first
-  (`references.py:98`). So a project-level assistant can never outrank a machine one, whatever the
-  user does. Whether an ordering *inherits* — innermost layer that names an entry decides its position
+  entries stream out of the index (`assistants.py`, line 76 as it then stood), with the machine layer
+  collected first. So a project-level assistant can never outrank a machine one, whatever the
+  user does. **Overtaken since:** #329 made rank explicit on `IndexLayer` rather than inferred from
+  insertion order, and #332 took the layer term off the front of the sort key entirely
+  (`assistants.py:168-174`) — one merged sequence across every layer, where position *is* precedence.
+  The concern was real; this is where it was answered. Whether an ordering *inherits* — innermost layer that names an entry decides its position
   — is **#332**, and it must be settled before the wizard (#318) offers an ordering step. The general
   point for any future layered list: *the order is part of what layers, and it needs the same
   descendant-wins answer as the content.*
@@ -323,8 +355,9 @@ unsettled builds on sand — and #309 waits on #306.
 - **Settings / AI-policy resolution must extend to the chain.** Today AI settings read only the open
   project's own `project.yaml`; they must resolve `system → …chain… → prompt` over the same layer walk.
 - **`revision` must span the fold.** `read_lore_entry` returns `revision=self._revision(path)` — a hash
-  of *one* file (`lore.py:116`). Once an entry is folded, editing an override leaves the ancestor's
-  hash unchanged, so optimistic concurrency (`lore.py:129`) accepts a stale buffer **and** the AI
+  of *one* file (`read_lore_entry`, `services/project/lore.py:116`). Once an entry is folded, editing an override leaves
+  the ancestor's hash unchanged, so optimistic concurrency in `save_lore_entry` (`services/project/lore.py:128`)
+  accepts a stale buffer **and** the AI
   prompt cache, which partitions stable/volatile blocks on `entry.revision`
   (`services/ai/helpers.py:746-767`), keeps serving pre-override canon. The revision must be composite
   over the ancestor file plus every override in the chain. Slice E owns it.

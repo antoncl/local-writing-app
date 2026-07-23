@@ -10,6 +10,8 @@ import unittest
 from pathlib import Path
 from tempfile import TemporaryDirectory
 
+from project_fixtures import open_test_project
+
 from app.models import (
     AssistantEntry,
     ChatSession,
@@ -21,7 +23,6 @@ from app.models import (
     SavePromptEntryRequest,
     Scene,
 )
-from app.runtime import service as global_service
 from app.services.project_service import ProjectServiceError
 
 
@@ -29,57 +30,56 @@ class ReadNodeDispatchTests(unittest.TestCase):
     def setUp(self) -> None:
         self.temp_dir = TemporaryDirectory()
         self.root = Path(self.temp_dir.name).resolve() / "project"
-        global_service.__init__()
-        global_service.create_project(self.root, "Read Node Tests")
+        self.service = open_test_project(self.root, "Read Node Tests")
 
     def tearDown(self) -> None:
         self.temp_dir.cleanup()
 
     def test_dispatches_to_scene_reader(self) -> None:
-        structure = global_service.read_structure()
+        structure = self.service.read_structure()
         # The default project has a starter scene.
         scene_id = structure.root.children[0].scene_id
         self.assertIsNotNone(scene_id)
-        result = global_service.read_node(scene_id)
+        result = self.service.read_node(scene_id)
         self.assertIsInstance(result, Scene)
         self.assertEqual(result.id, scene_id)
 
     def test_dispatches_to_lore_reader(self) -> None:
-        created = global_service.create_lore_entry(
+        created = self.service.create_lore_entry(
             from_request_or_kwargs(title="Test Character", entry_type="lore:lore_note")
         )
-        result = global_service.read_node(created.id)
+        result = self.service.read_node(created.id)
         self.assertIsInstance(result, LoreEntry)
         self.assertEqual(result.id, created.id)
 
     def test_dispatches_to_prompt_reader(self) -> None:
-        created = global_service.create_prompt_entry(
+        created = self.service.create_prompt_entry(
             from_request_or_kwargs(title="Test Prompt", entry_type="prompt:general")
         )
-        result = global_service.read_node(created.id)
+        result = self.service.read_node(created.id)
         self.assertIsInstance(result, PromptEntry)
         self.assertEqual(result.id, created.id)
 
     def test_dispatches_to_assistant_reader(self) -> None:
         # Machine-layer assistants are populated by default — find any.
-        assistants = global_service.list_assistant_entries().entries
+        assistants = self.service.list_assistant_entries().entries
         if not assistants:
             self.skipTest("no assistants registered on this machine")
-        result = global_service.read_node(assistants[0].id)
+        result = self.service.read_node(assistants[0].id)
         self.assertIsInstance(result, AssistantEntry)
         self.assertEqual(result.id, assistants[0].id)
 
     def test_dispatches_to_chat_reader(self) -> None:
-        created = global_service.create_chat_session(
+        created = self.service.create_chat_session(
             CreateChatSessionRequest(title="Test Chat")
         )
-        result = global_service.read_node(created.id)
+        result = self.service.read_node(created.id)
         self.assertIsInstance(result, ChatSession)
         self.assertEqual(result.id, created.id)
 
     def test_unknown_node_id_raises_404(self) -> None:
         with self.assertRaises(ProjectServiceError) as ctx:
-            global_service.read_node("scene_does_not_exist")
+            self.service.read_node("scene_does_not_exist")
         self.assertEqual(ctx.exception.status_code, 404)
 
 
@@ -87,14 +87,13 @@ class SaveNodeDispatchTests(unittest.TestCase):
     def setUp(self) -> None:
         self.temp_dir = TemporaryDirectory()
         self.root = Path(self.temp_dir.name).resolve() / "project"
-        global_service.__init__()
-        global_service.create_project(self.root, "Save Node Tests")
+        self.service = open_test_project(self.root, "Save Node Tests")
 
     def tearDown(self) -> None:
         self.temp_dir.cleanup()
 
     def test_dispatches_to_chat_saver(self) -> None:
-        created = global_service.create_chat_session(
+        created = self.service.create_chat_session(
             CreateChatSessionRequest(title="Save Chat Test")
         )
         request = SaveChatSessionRequest(
@@ -106,13 +105,13 @@ class SaveNodeDispatchTests(unittest.TestCase):
             context_items=list(created.context_items),
             messages=list(created.messages),
         )
-        result = global_service.save_node(created.id, request)
+        result = self.service.save_node(created.id, request)
         self.assertIsInstance(result, ChatSession)
         self.assertEqual(result.title, "Renamed via unified path")
 
     def test_wrong_request_type_for_kind_is_422(self) -> None:
         # Create a chat, then try to save it via a Lore request.
-        chat = global_service.create_chat_session(
+        chat = self.service.create_chat_session(
             CreateChatSessionRequest(title="Wrong-type Test")
         )
         bogus = SaveLoreEntryRequest(
@@ -123,7 +122,7 @@ class SaveNodeDispatchTests(unittest.TestCase):
             base_revision="",
         )
         with self.assertRaises(ProjectServiceError) as ctx:
-            global_service.save_node(chat.id, bogus)
+            self.service.save_node(chat.id, bogus)
         self.assertEqual(ctx.exception.status_code, 422)
 
     def test_unknown_node_id_is_404(self) -> None:
@@ -136,7 +135,7 @@ class SaveNodeDispatchTests(unittest.TestCase):
             base_revision="",
         )
         with self.assertRaises(ProjectServiceError) as ctx:
-            global_service.save_node("prompt_does_not_exist", request)
+            self.service.save_node("prompt_does_not_exist", request)
         self.assertEqual(ctx.exception.status_code, 404)
 
 
@@ -144,35 +143,34 @@ class DeleteNodeDispatchTests(unittest.TestCase):
     def setUp(self) -> None:
         self.temp_dir = TemporaryDirectory()
         self.root = Path(self.temp_dir.name).resolve() / "project"
-        global_service.__init__()
-        global_service.create_project(self.root, "Delete Node Tests")
+        self.service = open_test_project(self.root, "Delete Node Tests")
 
     def tearDown(self) -> None:
         self.temp_dir.cleanup()
 
     def test_dispatches_to_chat_deleter(self) -> None:
-        created = global_service.create_chat_session(
+        created = self.service.create_chat_session(
             CreateChatSessionRequest(title="Delete Chat Test")
         )
         chat_path = self.root / "chats" / f"{created.id}.yaml"
         self.assertTrue(chat_path.exists())
-        result = global_service.delete_node(created.id)
+        result = self.service.delete_node(created.id)
         self.assertIsNone(result)
         self.assertFalse(chat_path.exists())
 
     def test_dispatches_to_lore_deleter(self) -> None:
-        created = global_service.create_lore_entry(
+        created = self.service.create_lore_entry(
             from_request_or_kwargs(title="Doomed", entry_type="lore:lore_note")
         )
-        before = {e.id for e in global_service.list_lore_entries().entries}
+        before = {e.id for e in self.service.list_lore_entries().entries}
         self.assertIn(created.id, before)
-        global_service.delete_node(created.id)
-        after = {e.id for e in global_service.list_lore_entries().entries}
+        self.service.delete_node(created.id)
+        after = {e.id for e in self.service.list_lore_entries().entries}
         self.assertNotIn(created.id, after)
 
     def test_unknown_node_id_is_404(self) -> None:
         with self.assertRaises(ProjectServiceError) as ctx:
-            global_service.delete_node("scene_nothing")
+            self.service.delete_node("scene_nothing")
         self.assertEqual(ctx.exception.status_code, 404)
 
 

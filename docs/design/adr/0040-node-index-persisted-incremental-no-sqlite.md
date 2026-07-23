@@ -19,12 +19,20 @@ becomes the **materialization mechanism** — it is what pulls ancestor-owned no
 notes, prompts, assistants, mutation sets, views) into the open book as members. That makes its cost and its
 correctness a prerequisite for hierarchies rather than an optimization of them.
 
-Today the index is rebuilt from scratch on demand, and the chain is parsed **three times** to answer
-one reference-graph request: `_build_node_index` parses every file (`references.py:182`);
-`reference_graph` then calls `_build_node_index` *again* (`references.py:410`) and re-reads each
-node's front matter per entry in `_forward_refs_for_entry` (`:377`). `list_backlinks` (`:343`) and
-every `list_*` slice add further passes. Nothing is memoized. Deepening the ancestor chain
-multiplies all of it.
+**Baseline as of this ADR's writing — since implemented; see the note below.** The index is rebuilt
+from scratch on demand, and the chain is parsed **three times** to answer one reference-graph
+request: `_build_node_index` parses every file; `reference_graph` then calls `_build_node_index`
+*again* and re-reads each node's front matter per entry in `_forward_refs_for_entry`.
+`list_backlinks` and every `list_*` slice add further passes. Nothing is memoized. Deepening the
+ancestor chain multiplies all of it.
+
+> **Re-verified 2026-07-22 — this ADR shipped, so the paragraph above is history, not the code.**
+> `_build_node_index` (`references.py:260`) now walks the chain **once** and returns both the id map
+> and the edges; `reference_graph` (`references.py:792`) is a projection over that single walk;
+> `_forward_refs_for_entry` is today's `_reference_edges_for_entry` (`references.py:733-791`); and
+> `list_backlinks` no longer exists at all. The line numbers that used to sit in this paragraph are
+> deliberately gone rather than repointed: a citation into today's file cannot support a claim about
+> yesterday's code, and repointing it would have made a false sentence look verified.
 
 ## Decision
 
@@ -33,10 +41,11 @@ multiplies all of it.
 is required by three separate things: ADR-0039's per-field overrides (which need the ancestor base
 *and* the descendant overlay simultaneously), un-shadowing on delete (below), and the project node,
 whose id is the constant `"project"` (`project_node.py:34`) and therefore collides at every level of
-any chain. `project` becomes an indexed kind; it is not indexed today (`references.py:52-68`).
+any chain. `project` becomes an indexed kind; it was not indexed when this was written — #334 did
+it, in `_collect_project_node_entry` (`references.py:406-468`).
 
 **Each entry carries an ordered layer rank**, not just a label. `NodeIndexEntry.source_layer_id` is
-today a sha256 of the path (`schema.py:912-913`) — an opaque identity with no ancestry in it. ADR-0039
+today a sha256 of the path (`layers.py:85`) — an opaque identity with no ancestry in it. ADR-0039
 resolves overrides in layer order and renders provenance, so the rank is part of the index contract.
 
 > **Amended by [Amendment 1](#amendment-1--the-index-is-three-caches-not-one-2026-07-22):** the
@@ -47,8 +56,10 @@ resolves overrides in layer order and renders provenance, so the rank is part of
 **The index holds** `id → (path, kind, entry_type, title, layer rank)` plus reference edges
 `(src, dst, field)`. Note both are partly new work, not the status quo: today's store is
 `refs: dict[str, list[str]]` with the field id computed and then **discarded** when targets are
-flattened across fields (`references.py:381-398`), and there is **no cache at all** — `reference_graph()`
-rebuilds on every call (`references.py:401`). The `field` qualifier is required by ADR-0039's
+flattened across fields, and there is **no cache at all** — `reference_graph()` rebuilds on every
+call. (Both since done: edges carry `field` as part of their identity — `_edges_from_field`,
+`references.py:772-791` — and the snapshot lands in `_write_index_snapshot`, `references.py:243`.)
+The `field` qualifier is required by ADR-0039's
 reference-typed overrides, which must know *which* field an override re-points.
 
 **Backlinks are served by a reverse adjacency map**, built alongside the forward edges — not by
@@ -59,13 +70,14 @@ it exposes must be the one they use — and note the flat edge list, which earli
 proposed, is the one option that loses to SQLite.
 
 **Storage:** plain in-memory dicts, persisted as a rebuildable JSON snapshot under `.cache/`, written
-through the existing `_atomic_write` (`project_service.py:250` — same-directory temp file then
+through the existing `_atomic_write` (`project_service.py:260` — same-directory temp file then
 `replace`). The snapshot carries a **format version key**; a mismatch triggers a rebuild. Pre-1.0
 that is the whole migration story: bump the key, rebuild once, never write migration code
 (consistent with the no-pre-1.0-migrations rule).
 
 **The snapshot is per-open-project, not global.** The index is root-parameterized — scenes are taken
-only from the open project (`references.py:70-72`), layer labels and shadow resolution are ordered by
+only from the open project (`_families_for_layer`, `references.py:469-478`), layer labels and shadow
+resolution are ordered by
 the chain to that root — so a snapshot is valid for one open-project root.
 
 *Per-project means the ancestor layers are re-parsed once per book, and that is deliberate.* At Weber
@@ -76,11 +88,16 @@ open is the warm path. Do not "fix" this into per-layer snapshots without new ev
 are actually opened.
 
 **The machine assistant layer is indexed but is not in any chain.**
-`_collect_machine_layer_assistants` (`references.py:45`, `:149-166`) reads
+`_collect_machine_layer_assistants` (`references.py:480-505`) reads
 `machine_settings.assistants_dir().parent` — outside every project tree and shared across all
 projects. So a chain walk will never stat it, and a per-project snapshot can serve a stale roster
 after it changes. Its files must be in the manifest despite not being in the chain, and the
 assistant index built with no project open (`assistants.py:228-238`) is **not** persisted.
+
+> **Half-overtaken (#329, re-verified 2026-07-22).** With a project open the machine layer *is* an
+> ordinary layer in the walk (`collect_layers(..., include_machine=True)`), so "a chain walk will
+> never stat it" no longer holds. The rest does: it is still out-of-tree and shared across projects,
+> and `_collect_machine_layer_assistants` survives for the no-project-open roster.
 
 **Bodies are never held by the index.** They are loaded on demand by `id → path` (on open, render, or
 AI-context assembly).
@@ -101,7 +118,7 @@ an *older* mtime on disk. Equality also catches deletions, as manifest keys with
 so nothing looks for it — drop a `.md` into an ancestor's `lore/` from Explorer, or `git pull` a
 layer, and it stays invisible. Detecting additions requires re-globbing the indexed folders, using
 the index's own glob semantics (`_collect_layer_entries` globs `*.md` **non-recursively**,
-`references.py:180`; a recursive walk would report permanent phantom additions). The measured sweep
+`references.py:506-524`; a recursive walk would report permanent phantom additions). The measured sweep
 below is therefore the stat-known-files half; the directory walk is additional.
 
 The diff is not a yes/no verdict, it is the **work list**, and it routes:
@@ -120,8 +137,8 @@ because they are not one-file-in-one-file-out:
   the ancestor visible again — and there is no changed file to re-parse. This is why the index keeps
   all candidates per id rather than the winner alone. A rename is a delete plus an add and needs no
   separate rule, since identity is the front-matter `id`, not the filename.
-- **Schema files fan out.** Edge extraction is schema-driven — `_forward_refs_for_entry`
-  (`references.py:373-399`) resolves `entry_type → field → type == "entity_ref"`. A
+- **Schema files fan out.** Edge extraction is schema-driven — `_reference_edges_for_entry`
+  (`references.py:733-791`) resolves `entry_type → field → type == "entity_ref"`. A
   `metadata.schema.yaml` edit therefore invalidates edges for *every node of the affected entry types
   across the chain*, not one file. `project.yaml` likewise fans out to the settings/AI-policy chain.
   > **Amended by [Amendment 1](#amendment-1--the-index-is-three-caches-not-one-2026-07-22):** the
@@ -143,8 +160,8 @@ files) — each opened at `universe_00/series_00/book_00`, a 4-layer chain. The 
 real `ProjectService`, so these are the app's own call paths, not a replica's.
 
 **Every figure is scoped to the ancestor chain, because that is what the code builds.**
-`_build_node_index` (`references.py:40`) walks `_project_layer_folders(root)` — base→root only — and
-never touches sibling books or universes. Opening one book indexes **~1610 nodes** (Weber) / **~3130** (huge) — the chain's 1600 / 3120 plus
+`_build_node_index` (`references.py:260`) walks the chain through `collect_layers` (`layers.py`, the
+single traversal of #329) — base→root only — and never touches sibling books or universes. Opening one book indexes **~1610 nodes** (Weber) / **~3130** (huge) — the chain's 1600 / 3120 plus
 this machine's assistant roster, so the tail digits vary per developer — not the 11.7k /
 31.4k files on the shelf. Mixing the two scopes is how earlier drafts produced both a 285–460×
 speedup and an implausible 3.5 s cold open; chain-vs-chain is the only comparison that means
@@ -251,8 +268,10 @@ name cited below lives in `backend/app/services/project/` — `node_index.py` (`
 `_edges_from_field`), `node_index_patch.py`, `node_index_snapshot.py` (`build_identity`). They are
 cited as evidence that the fusion is real and that `field_id` already exists, not as a contract:
 **if a name has moved, the model below is what binds, and the citation is the thing to update.**
-v1's own citations have already drifted this way — its `_forward_refs_for_entry` (`references.py:373-399`)
-is today's `_reference_edges_for_entry`, and its line numbers predate three PRs.
+v1's own citations have already drifted this way — its `_forward_refs_for_entry`, cited at lines
+373-399 of `references.py` as it stood then, is today's `_reference_edges_for_entry`, and those line
+numbers predate three PRs. (Written without a live `path:line` token on purpose: it is an example of
+a stale citation, and would otherwise be reported as one forever.)
 
 Established with Anton during the ADR-0045 design pass, and a correction to this ADR's own model
 rather than a new subject: splitting the node index across two documents would leave a reader to

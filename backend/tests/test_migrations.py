@@ -22,8 +22,7 @@ class MigrationFrameworkTests(unittest.TestCase):
         self.temp_dir = TemporaryDirectory()
         self.base = Path(self.temp_dir.name).resolve() / "writing"
         self.root = self.base / "project"
-        self.service = ProjectService()
-        self.service.create_project(self.root, "Test Project")
+        self.service = ProjectService.created_at(self.root, "Test Project")
 
     def tearDown(self) -> None:
         self.temp_dir.cleanup()
@@ -43,9 +42,8 @@ class MigrationFrameworkTests(unittest.TestCase):
         self.assertEqual(tree["root"]["children"], [])
 
     def test_fresh_project_open_runs_no_migrations(self) -> None:
-        reopened_service = ProjectService()
-        reopened_service.open_project(self.root)
-        self.assertEqual(reopened_service.last_migrations, [])
+        reopened_service = ProjectService.opened_at(self.root)
+        self.assertEqual(reopened_service.last_migrations, ())
         self.assertFalse((self.root / BACKUP_DIRNAME).exists())
 
     def test_pre_framework_project_runs_all_pending_migrations(self) -> None:
@@ -103,7 +101,7 @@ class MigrationFrameworkTests(unittest.TestCase):
         compatibility; see test_v1_project_migrates_to_v2_creating_snippets_folder."""
         self.assertFalse((self.root / "snippets").exists())
         self.assertEqual(read_project_version(self.root), CURRENT_VERSION)
-        self.assertEqual(self.service.last_migrations, [])
+        self.assertEqual(self.service.last_migrations, ())
 
     def test_v1_project_migrates_creating_snippets(self) -> None:
         """An existing v1 project gains snippets/ on next open.
@@ -127,8 +125,7 @@ class MigrationFrameworkTests(unittest.TestCase):
         self.assertFalse(snippets.exists())
         self.assertFalse(project_md.exists())
 
-        reopened = ProjectService()
-        reopened.open_project(self.root)
+        ProjectService.opened_at(self.root)
         self.assertTrue(snippets.is_dir())
         self.assertFalse(project_md.exists())
         self.assertEqual(read_project_version(self.root), CURRENT_VERSION)
@@ -161,8 +158,7 @@ class MigrationFrameworkTests(unittest.TestCase):
             migrations.MIGRATIONS.append((42, "noop", fake_migration))
             migrations.CURRENT_VERSION = 42
 
-            reopened_service = ProjectService()
-            reopened_service.open_project(self.root)
+            reopened_service = ProjectService.opened_at(self.root)
             self.assertEqual(len(reopened_service.last_migrations), 1)
 
             report = reopened_service.validate_project()
@@ -181,8 +177,7 @@ class ChatCostMigrationTests(unittest.TestCase):
         self.temp_dir = TemporaryDirectory()
         self.base = Path(self.temp_dir.name).resolve() / "writing"
         self.root = self.base / "project"
-        self.service = ProjectService()
-        self.service.create_project(self.root, "Test Project")
+        self.service = ProjectService.created_at(self.root, "Test Project")
 
     def tearDown(self) -> None:
         self.temp_dir.cleanup()
@@ -215,8 +210,7 @@ class ChatCostMigrationTests(unittest.TestCase):
         data["schema_version"] = 3
         manifest_path.write_text(yaml.safe_dump(data, sort_keys=False), encoding="utf-8")
 
-        reopened = ProjectService()
-        reopened.open_project(self.root)
+        ProjectService.opened_at(self.root)
 
         log_data = yaml.safe_load((self.root / "ai_invocations.yaml").read_text(encoding="utf-8"))
         rows = log_data["invocations"]
@@ -239,8 +233,7 @@ class ChatCostMigrationTests(unittest.TestCase):
         data["schema_version"] = 3
         manifest_path.write_text(yaml.safe_dump(data, sort_keys=False), encoding="utf-8")
 
-        reopened = ProjectService()
-        reopened.open_project(self.root)
+        ProjectService.opened_at(self.root)
         log_path = self.root / "ai_invocations.yaml"
         if log_path.exists():
             log_data = yaml.safe_load(log_path.read_text(encoding="utf-8")) or {}
@@ -254,8 +247,7 @@ class ResearchStructureMigrationTests(unittest.TestCase):
         self.temp_dir = TemporaryDirectory()
         self.base = Path(self.temp_dir.name).resolve() / "writing"
         self.root = self.base / "project"
-        self.service = ProjectService()
-        self.service.create_project(self.root, "Test Project")
+        self.service = ProjectService.created_at(self.root, "Test Project")
 
     def tearDown(self) -> None:
         self.temp_dir.cleanup()
@@ -279,8 +271,7 @@ class ResearchStructureMigrationTests(unittest.TestCase):
         self.assertFalse(research_dir.exists())
         self.assertFalse(structure_path.exists())
 
-        reopened = ProjectService()
-        reopened.open_project(self.root)
+        ProjectService.opened_at(self.root)
 
         self.assertTrue((self.root / "research" / "notes").is_dir())
         self.assertTrue(structure_path.exists())
@@ -320,8 +311,7 @@ class ResearchStructureMigrationTests(unittest.TestCase):
             encoding="utf-8",
         )
 
-        reopened = ProjectService()
-        reopened.open_project(self.root)
+        ProjectService.opened_at(self.root)
 
         tree = yaml.safe_load(structure_path.read_text(encoding="utf-8"))
         self.assertEqual(len(tree["root"]["children"]), 1)

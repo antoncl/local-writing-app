@@ -407,7 +407,7 @@ class LayerWalkMixin:
         base and is not itself a project.
         """
         if folder == root:
-            return self.title or root.name
+            return self._project_title(root) or root.name
         manifest = self._read_yaml(folder / MANIFEST_FILENAME)
         title = manifest.get("title")
         if isinstance(title, str) and title.strip():

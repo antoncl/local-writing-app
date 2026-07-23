@@ -6,6 +6,7 @@ from tempfile import TemporaryDirectory
 from unittest.mock import patch
 
 from fastapi.testclient import TestClient
+from project_fixtures import open_test_project
 
 from app.main import app
 from app.models import (
@@ -14,7 +15,6 @@ from app.models import (
     SaveLoreEntryRequest,
     SaveSceneRequest,
 )
-from app.runtime import service as global_service
 from app.services.ai.sessions import default_registry
 
 
@@ -23,9 +23,8 @@ class PreviewEndpointTests(unittest.TestCase):
         self.temp_dir = TemporaryDirectory()
         self.root = Path(self.temp_dir.name).resolve() / "project"
         # Use the module-level service so /api/ai/preview sees the open project.
-        global_service.__init__()
-        global_service.create_project(self.root, "Preview Tests")
-        self.service = global_service
+        self.service = open_test_project(self.root, "Preview Tests")
+        self.service = self.service
         default_registry.clear()
         self.client = TestClient(app)
 
@@ -519,9 +518,8 @@ class PreviewCostEstimateTests(unittest.TestCase):
             "---\n",
             encoding="utf-8",
         )
-        global_service.__init__()
-        global_service.create_project(self.root, "Cost Tests")
-        self.service = global_service
+        self.service = open_test_project(self.root, "Cost Tests")
+        self.service = self.service
         default_registry.clear()
         self.client = TestClient(app)
 

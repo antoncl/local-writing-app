@@ -14,15 +14,14 @@ from pathlib import Path
 
 import pytest
 
-from app.runtime import service as svc
+from app.services.project_service import ProjectService
 
 
 @pytest.fixture
 def service(monkeypatch):
-    svc.__init__()
     # Never actually sleep between rename retries.
     monkeypatch.setattr("app.services.project_service.time.sleep", lambda _: None)
-    return svc
+    return ProjectService()
 
 
 def test_rename_with_retry_recovers_from_transient_lock(service, monkeypatch, tmp_path):

@@ -28,8 +28,7 @@ def project(tmp_path, monkeypatch):
         "app.services.machine_settings.config_path",
         lambda: tmp_path / "machine_settings.yaml",
     )
-    svc = ProjectService()
-    svc.create_project(tmp_path / "project", "Demo")
+    svc = ProjectService.created_at(tmp_path / "project", "Demo")
 
     honor = svc.create_lore_entry(
         CreateLoreEntryRequest(title="Honor Harrington", entry_type="lore:character")

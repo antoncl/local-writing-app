@@ -13,6 +13,7 @@ from pathlib import Path
 from tempfile import TemporaryDirectory
 
 from fastapi.testclient import TestClient
+from project_fixtures import open_test_project
 
 from app.main import app
 from app.models import (
@@ -20,12 +21,12 @@ from app.models import (
     MetadataFieldDefinition,
     UpsertMetadataFieldRequest,
 )
-from app.runtime import service as svc
+from app.services.project_service import ProjectService
 
 
-def _define_field(field_id: str, field_type: str, entry_type: str = "lore:character") -> None:
-    layers = svc.read_metadata_schema_layers()
-    svc.upsert_metadata_field(
+def _define_field(service: ProjectService, field_id: str, field_type: str, entry_type: str = "lore:character") -> None:
+    layers = service.read_metadata_schema_layers()
+    service.upsert_metadata_field(
         UpsertMetadataFieldRequest(
             layer_id=layers.layers[-1].id,
             field_id=field_id,
@@ -39,10 +40,9 @@ class MutationAdvisoryValidationTests(unittest.TestCase):
     def setUp(self) -> None:
         self.temp_dir = TemporaryDirectory()
         self.root = Path(self.temp_dir.name).resolve() / "project"
-        svc.__init__()
-        svc.create_project(self.root, "Mutation Validation Tests")
-        _define_field("rank", "number")
-        self.char = svc.create_lore_entry(
+        self.service = open_test_project(self.root, "Mutation Validation Tests")
+        _define_field(self.service, "rank", "number")
+        self.char = self.service.create_lore_entry(
             CreateLoreEntryRequest(title="Rey", entry_type="lore:character")
         ).id
         self.client = TestClient(app)
@@ -62,7 +62,7 @@ class MutationAdvisoryValidationTests(unittest.TestCase):
         )
 
     def _warnings(self) -> list[str]:
-        return svc.validate_project().warnings
+        return self.service.validate_project().warnings
 
     # --- saves never block ------------------------------------------------
 
@@ -96,7 +96,7 @@ class MutationAdvisoryValidationTests(unittest.TestCase):
 
     def test_warnings_do_not_appear_in_errors(self) -> None:
         self._save(self._marker("context_policy", "bogus"))
-        report = svc.validate_project()
+        report = self.service.validate_project()
         self.assertFalse(any("context_policy" in e for e in report.errors), report.errors)
 
 

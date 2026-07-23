@@ -12,9 +12,10 @@
 //
 // What these tests pin is the property the `else` violated: a kind is either
 // routed to ITS OWN opener or refused out loud. Never guessed.
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { FOREIGN_PROJECT_NODE, editorPanes } from "./editorPanes.svelte";
 import { api } from "@/lib/api";
+import type { ProjectNode } from "@/lib/types";
 
 // kind → the opener it must reach. The table IS the assertion: a kind wired to
 // the wrong opener reads as an obvious mismatch here, which the old code's
@@ -26,8 +27,19 @@ const ROUTES = [
   ["prompt", "openPrompt"],
   ["assistant", "openAssistant"],
   ["view", "openView"],
+  ["chat", "openChat"],
   ["project", "openProjectNode"],
 ] as const;
+
+const LOCAL_PROJECT_NODE: ProjectNode = {
+  id: "project_local",
+  title: "Book 1",
+  body: "",
+  revision: "r1",
+  entry_type: "project:project",
+  metadata: {},
+  computed_metadata: {},
+};
 
 describe("editorPanes.openNodeOfKind (#344)", () => {
   beforeEach(() => vi.restoreAllMocks());
@@ -69,40 +81,16 @@ describe("editorPanes.openNodeOfKind (#344)", () => {
 });
 
 describe("editorPanes.openProjectNode id guard (#344/#334)", () => {
+  // `run` is App's injected error sink. The default rethrows nothing and
+  // swallows nothing, so a test that wants to SEE a refusal has to stand in for
+  // App — and has to put the real one back, since the controller is a singleton.
+  const defaultRun = editorPanes.run;
+  let reported: string[] = [];
+
   beforeEach(() => {
     vi.restoreAllMocks();
     editorPanes.reset();
-  });
-
-  it("opens the project node when the backlink names the open project's", async () => {
-    vi.spyOn(api, "getProjectNode").mockResolvedValue({
-      id: "project_local",
-      title: "Book 1",
-      body: "",
-      revision: "r1",
-      entry_type: "project:project",
-      metadata: {},
-    } as never);
-
-    await editorPanes.openNodeOfKind("project_local", "project");
-
-    expect(editorPanes.panes.some((pane) => pane.document?.type === "project")).toBe(true);
-  });
-
-  it("refuses an ancestor layer's project node and claims no pane", async () => {
-    // `project.md` is a singleton PER LAYER, so a backlink can name a
-    // universe's or series' node. Opening the local one under that id would
-    // show the wrong document with the right title — the quietest possible
-    // wrong answer, and the reason the id is checked rather than assumed.
-    vi.spyOn(api, "getProjectNode").mockResolvedValue({
-      id: "project_local",
-      title: "Book 1",
-      body: "",
-      revision: "r1",
-      entry_type: "project:project",
-      metadata: {},
-    } as never);
-    const reported: string[] = [];
+    reported = [];
     editorPanes.run = async (action) => {
       try {
         await action();
@@ -112,12 +100,45 @@ describe("editorPanes.openProjectNode id guard (#344/#334)", () => {
         return false;
       }
     };
+    vi.spyOn(api, "getProjectNode").mockResolvedValue(LOCAL_PROJECT_NODE);
+  });
 
+  afterEach(() => {
+    editorPanes.run = defaultRun;
+    editorPanes.reset();
+  });
+
+  it("opens the project node when the backlink names the open project's", async () => {
+    await editorPanes.openNodeOfKind("project_local", "project");
+
+    expect(editorPanes.panes.some((pane) => pane.document?.type === "project")).toBe(true);
+    expect(reported).toEqual([]);
+  });
+
+  it("refuses an ancestor layer's project node and claims no pane", async () => {
+    // `project.md` is a singleton PER LAYER, so a backlink can name a
+    // universe's or series' node. Opening the local one under that id would
+    // show the wrong document with the right title — the quietest possible
+    // wrong answer, and the reason the id is checked rather than assumed.
     await editorPanes.openNodeOfKind("project_universe", "project");
 
     expect(reported).toEqual([FOREIGN_PROJECT_NODE]);
     // The claim `#acquireTargetPane` stamps synchronously must be released, or
     // the refusal strands exactly the empty pane #344 is about.
     expect(editorPanes.panes.some((pane) => pane.document !== null)).toBe(false);
+  });
+
+  it("refuses a foreign id even when the project node is already open", async () => {
+    // The OTHER guard branch. `openProjectNode` short-circuits on an
+    // already-open project pane before it ever fetches, so that path needs its
+    // own check — without one it would focus the local node and report success
+    // for an id that is not the one asked for.
+    await editorPanes.openNodeOfKind("project_local", "project");
+    expect(editorPanes.panes.some((pane) => pane.document?.type === "project")).toBe(true);
+
+    await expect(editorPanes.openNodeOfKind("project_universe", "project")).rejects.toThrow(FOREIGN_PROJECT_NODE);
+
+    // …and the pane that WAS open is untouched — a refusal must not disturb it.
+    expect(editorPanes.panes.filter((pane) => pane.document?.type === "project")).toHaveLength(1);
   });
 });

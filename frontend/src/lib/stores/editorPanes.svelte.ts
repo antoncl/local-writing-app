@@ -1019,9 +1019,11 @@ class EditorPanesController {
   // extraction is schema-driven and the schema editor puts an `entity_ref` on
   // any entry_type.
   //
-  // The kinds are exactly the node families the backend index walks
-  // (`NODE_FAMILIES`) plus the project node (#334). Chats are indexed too but no
-  // collector draws edges from them, so they cannot arrive here.
+  // The kinds are the node families the backend index walks (`NODE_FAMILIES`)
+  // plus the project node (#334) and chats. A chat cannot arrive from the
+  // backlinks panel — chats are indexed but no collector draws edges from them
+  // — but this method advertises itself as the general cross-kind open, so
+  // leaving out a kind that HAS an opener would be a trap for the next caller.
   //
   // Unknown or unopenable kinds THROW rather than fall through to a default.
   // That is the whole lesson of the bug: the `else` was a guess, and a guess
@@ -1042,6 +1044,8 @@ class EditorPanesController {
         return this.openAssistant(nodeId);
       case "view":
         return this.openView(nodeId);
+      case "chat":
+        return this.openChat(nodeId);
       case "project":
         // Singleton per layer, so the id is checked rather than assumed —
         // an ancestor's project.md is a legitimate source with no surface.

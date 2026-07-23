@@ -53,6 +53,25 @@ class EffectiveNamesTests(unittest.TestCase):
     def test_effective_names_reflect_rename_at_and_after(self) -> None:
         self.assertEqual(self.service.effective_names(self.s2), {self.remus: ["The Wolf"]})
 
+    def test_a_prebuilt_index_is_used_rather_than_rebuilt(self) -> None:
+        """`index=` exists so a request that resolves both names and state pays
+        for the mutations index once (1.16 s at 600 scenes, #440). A parameter
+        that silently rebuilt anyway would look threaded and cost double, so the
+        assertion is that the rebuild does not happen — not merely that the
+        answer is the same."""
+        index = self.service.build_mutations_index()
+        original = self.service.build_mutations_index
+
+        def refuse() -> None:
+            raise AssertionError("effective_names rebuilt an index it was handed")
+
+        self.service.build_mutations_index = refuse  # type: ignore[method-assign]
+        try:
+            names = self.service.effective_names(self.s2, index=index)
+        finally:
+            self.service.build_mutations_index = original  # type: ignore[method-assign]
+        self.assertEqual(names, {self.remus: ["The Wolf"]})
+
     def test_effective_names_endpoint(self) -> None:
         res = self.client.get(f"/api/scenes/{self.s2}/effective-names")
         self.assertEqual(res.status_code, 200, res.text)

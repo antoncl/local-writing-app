@@ -37,6 +37,7 @@ The renderer's agreement is checked in CI rather than assumed: the fixtures in
 from __future__ import annotations
 
 import re
+from collections.abc import Callable
 from typing import NamedTuple
 
 Interval = tuple[int, int]
@@ -78,26 +79,48 @@ def _marker_pair_end(block: str, start: int, comment_end: int) -> int:
 class Scanned(NamedTuple):
     """What one construct handler made of the text at the cursor.
 
-    `end` is where the scan resumes. A handler that does not recognise its
-    construct at the cursor returns `None` instead, and the dispatcher offers
-    the position to the next one — so "this is not mine" and "this is mine and
-    protects nothing" stay distinguishable, which is the difference between
-    `[` opening a link and `[` being ordinary text.
+    `end` is where the scan resumes, and has no default: every handler that
+    claims a position must say where it ends.
+
+    A handler that does not recognise its construct at the cursor returns `None`
+    instead, and the dispatcher offers the position to the next one — so "this
+    is not mine" and "this is mine and protects nothing" stay distinguishable,
+    which is the difference between `[` opening a link and `[` being ordinary
+    text.
     """
 
     end: int
     span: Interval | None = None
     delimiter: tuple[int, int, str] | None = None
-    stack: bool = False
 
 
-# A construct the scan cannot bound. There is no honest interval to return, so
-# the whole block degrades to a stacked run rather than being cut somewhere we
-# guessed. `end` is never read on this one.
-STACK = Scanned(end=0, stack=True)
+class Unscannable:
+    """A construct a handler recognises but cannot bound.
+
+    There is no honest interval to return, so the whole block degrades to a
+    stacked run rather than being cut somewhere we guessed.
+
+    **A distinct type rather than a flag on `Scanned`**, because a flag needs an
+    `end` to fill in, and every plausible filler is a real offset: `0` sends the
+    scan back to the start of the block and loops forever, the cursor makes no
+    progress and loops forever. Both are hangs inside a synchronous request, and
+    both are one statement away — the dispatcher would only have to read `end`
+    before checking the flag. This module exists to be extended a construct at a
+    time, so the invariant belongs in the type rather than in statement order.
+    """
+
+    __slots__ = ()
 
 
-def _scan_escape(block: str, index: int) -> Scanned | None:
+UNSCANNABLE = Unscannable()
+
+# What a handler may answer: an interval it bounded, `Unscannable`, or `None`
+# for "not my construct, try the next one".
+Scan = Scanned | Unscannable | None
+Scanner = Callable[[str, int], Scan]
+
+
+def _scan_escape(block: str, index: int) -> Scan:
     """A backslash escape: two characters that must travel together, and the
     escaped character is emphatically not a delimiter."""
     if block[index] != "\\" or index + 1 >= len(block):
@@ -105,7 +128,7 @@ def _scan_escape(block: str, index: int) -> Scanned | None:
     return Scanned(end=index + 2, span=(index, index + 2))
 
 
-def _scan_html_comment(block: str, index: int) -> Scanned | None:
+def _scan_html_comment(block: str, index: int) -> Scan:
     """An HTML comment, counted as one construct.
 
     This is what keeps the mutation, embedded-todo and character markers whole —
@@ -117,12 +140,12 @@ def _scan_html_comment(block: str, index: int) -> Scanned | None:
         return None
     close = block.find("-->", index + 4)
     if close < 0:
-        return STACK  # unterminated: we cannot say where it ends
+        return UNSCANNABLE  # unterminated: we cannot say where it ends
     end = _marker_pair_end(block, index, close + 3)
     return Scanned(end=end, span=(index, end))
 
 
-def _scan_reference_link(block: str, index: int) -> Scanned | None:
+def _scan_reference_link(block: str, index: int) -> Scan:
     """A reference-style link and its definition.
 
     There is no `(`, so `_link_end` cannot see these and a boundary landed
@@ -137,7 +160,7 @@ def _scan_reference_link(block: str, index: int) -> Scanned | None:
     return Scanned(end=reference.end(), span=reference.span())
 
 
-def _scan_code_span(block: str, index: int) -> Scanned | None:
+def _scan_code_span(block: str, index: int) -> Scan:
     """A run of backticks closed by a run of exactly the same length.
 
     Its contents are literal, so any delimiter inside it must not be seen as one
@@ -148,21 +171,21 @@ def _scan_code_span(block: str, index: int) -> Scanned | None:
     run = _run_length(block, index, "`")
     close = _find_backtick_run(block, index + run, run)
     if close < 0:
-        return STACK  # unterminated: everything after it is ambiguous
+        return UNSCANNABLE  # unterminated: everything after it is ambiguous
     return Scanned(end=close + run, span=(index, close + run))
 
 
-def _scan_autolink(block: str, index: int) -> Scanned | None:
+def _scan_autolink(block: str, index: int) -> Scan:
     """An autolink or a raw tag: `<...>` on one line."""
     if block[index] != "<":
         return None
     close = block.find(">", index + 1)
     if close > 0 and "\n" not in block[index:close]:
         return Scanned(end=close + 1, span=(index, close + 1))
-    return STACK
+    return UNSCANNABLE
 
 
-def _scan_link(block: str, index: int) -> Scanned | None:
+def _scan_link(block: str, index: int) -> Scan:
     """A link or image: the whole of `[text](target)` is one construct, the
     target included — it is not prose, and a boundary inside it leaks
     `](lore://…)` into the reader's text."""
@@ -176,7 +199,7 @@ def _scan_link(block: str, index: int) -> Scanned | None:
     return Scanned(end=end, span=(index, end))
 
 
-def _scan_emphasis(block: str, index: int) -> Scanned | None:
+def _scan_emphasis(block: str, index: int) -> Scan:
     """A run of delimiters that opens or closes by pairing with itself.
 
     Emitted as a delimiter rather than a span because it is only half a
@@ -193,24 +216,54 @@ def _scan_emphasis(block: str, index: int) -> Scanned | None:
     return Scanned(end=index + run, delimiter=(index, index + run, char * run))
 
 
-# In order, and the order is load-bearing: an escape hides the character behind
-# it from every later handler, a code span's contents are literal, and a `[`
-# must be offered to the reference forms before the inline one because only the
-# reference forms lack the `(` `_link_end` looks for.
-SCANNERS = (
-    _scan_escape,
-    _scan_html_comment,
-    _scan_reference_link,
-    _scan_code_span,
-    _scan_autolink,
-    _scan_link,
-    _scan_emphasis,
+# Every handler, in order, against the characters that can open its construct.
+#
+# **The order is load-bearing**: an escape hides the character behind it from
+# every later handler, a code span's contents are literal, and a `[` must be
+# offered to the reference forms before the inline one because only the
+# reference forms lack the `(` `_link_end` looks for. It is written out linearly
+# here, and `_dispatch_table` derives the per-character lists from it, so the
+# ordering cannot be broken by editing the table.
+TRIGGERS: tuple[tuple[str, Scanner], ...] = (
+    ("\\", _scan_escape),
+    ("<", _scan_html_comment),
+    ("[", _scan_reference_link),
+    ("`", _scan_code_span),
+    ("<", _scan_autolink),
+    ("![", _scan_link),
+    (EMPHASIS, _scan_emphasis),
 )
 
 
-def _scan_at(block: str, index: int) -> Scanned | None:
-    """The first handler that recognises a construct at `index`, or `None`."""
-    for scanner in SCANNERS:
+def _dispatch_table() -> dict[str, tuple[Scanner, ...]]:
+    """`TRIGGERS` inverted: opening character -> its handlers, in order.
+
+    **Dispatching on the character rather than trying every handler is worth a
+    named function.** Prose is overwhelmingly characters that open nothing, and
+    offering each one to all seven handlers cost seven Python calls to reach the
+    same answer — measured at 3.5x the whole scan on a plain-prose block, on a
+    path that runs twice per block pair inside a synchronous request. A dict miss
+    answers it once.
+    """
+    table: dict[str, tuple[Scanner, ...]] = {}
+    for characters, scanner in TRIGGERS:
+        for character in characters:
+            table[character] = (*table.get(character, ()), scanner)
+    return table
+
+
+SCANNERS = _dispatch_table()
+
+
+def _scan_at(block: str, index: int) -> Scan:
+    """The first handler that recognises a construct at `index`, or `None`.
+
+    A handler still re-checks its own opening character. That is deliberate
+    redundancy: it keeps each one correct called on its own — which is how the
+    tests call them — so the table stays an optimisation rather than a
+    precondition the handlers silently depend on.
+    """
+    for scanner in SCANNERS.get(block[index], ()):
         scanned = scanner(block, index)
         if scanned is not None:
             return scanned
@@ -230,13 +283,14 @@ def protected_intervals(block: str) -> list[Interval] | None:
     spans: list[Interval] = []
     delimiters: list[tuple[int, int, str]] = []  # (start, end, marker)
     index = 0
+    length = len(block)
 
-    while index < len(block):
+    while index < length:
         scanned = _scan_at(block, index)
         if scanned is None:
             index += 1
             continue
-        if scanned.stack:
+        if isinstance(scanned, Unscannable):
             return None
         if scanned.span is not None:
             spans.append(scanned.span)

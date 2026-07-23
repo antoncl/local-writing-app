@@ -36,7 +36,6 @@ sys.path.insert(0, str(REPO / "backend"))
 sys.path.insert(0, str(REPO / "backend" / "tests"))
 
 from app.services.project.snapshot_diff import diff_runs  # noqa: E402
-from diff_fuzz import fuzz_cases  # noqa: E402
 
 MUTATE = "<!-- mutate:entity=char-maren;field=mood;value=stricken;id=m1 -->"
 TODO_OPEN = "<!-- embedded-todo:id=t1;status=open;note=check%20the%20tide -->"
@@ -213,9 +212,11 @@ def _payload(cases: list[dict[str, str]]) -> str:
 
 
 def _write(target: Path, cases: list[dict[str, str]]) -> None:
-    # `newline=""` because `.gitattributes` pins this repo to LF and the default
-    # translation would write CRLF on Windows — which `--check` would then read
-    # back as a difference on every developer machine that ran the generator.
+    # `newline=""` because `.gitattributes` pins this repo to LF, and the default
+    # translation writes CRLF on Windows — so a run on the dev machine would put
+    # a file in the working tree that does not match what is checked out.
+    # (`--check` would not catch it: `read_text` translates newlines back on the
+    # way in, so it compares blind to them. This is the write side's job.)
     target.write_text(_payload(cases), encoding="utf-8", newline="")
     print(f"wrote {len(cases)} cases to {target}")
 
@@ -235,10 +236,29 @@ def _check() -> int:
     return 1
 
 
+USAGE = "usage: gen_diff_fixtures.py [--check]"
+
+
 def main(argv: list[str]) -> int:
-    if "--check" in argv:
+    """No argument writes; `--check` compares; **anything else is an error.**
+
+    Not `if "--check" in argv`, which was the first form and is the shape of a
+    gate that reports green while doing nothing: a misspelled or renamed flag in
+    `gates.yml` fell through to write mode, regenerated the fixtures inside the
+    runner's own checkout, and exited 0. Every build would have stayed green
+    with the gate dead — the exact silent drift #435 exists to close, moved up a
+    level. A gate has to fail when it cannot do its job.
+    """
+    if argv == ["--check"]:
         return _check()
+    if argv:
+        print(f"{USAGE}\nunrecognised arguments: {' '.join(argv)}", file=sys.stderr)
+        return 2
     _write(FIXTURES, CASES)
+    # Imported here rather than at module scope: `--check` never generates the
+    # fuzz corpus, and a gate should not depend on a test module it does not use.
+    from diff_fuzz import fuzz_cases
+
     _write(FUZZ, fuzz_cases())
     return 0
 

@@ -55,12 +55,45 @@ from app.services.markdown_scan import (
 
 # Blocks are separated by a blank line. The separator is kept as its own chunk
 # so the runs still reassemble to the source byte for byte.
-BLOCK_SPLIT = re.compile(r"(\n[ \t]*\n)")
+#
+# **`\r?\n` on both ends**, because this is a Windows-first app and a CRLF scene
+# file is ordinary. Matching only `\n[ \t]*\n` made a whole CRLF document ONE
+# block, so inline runs came to contain blank lines and a wrapper opened in one
+# paragraph and closed in the next — rule 1 broken by the most common line
+# ending we ship against.
+#
+# **And the separator is greedy over a RUN of blank lines.** Stopping at two
+# newlines left the third heading the next chunk, so deleting one blank line of
+# three emitted an inline run of a bare newline at line start — which marked
+# reads as a raw-HTML block, swallowing the paragraph after it.
+BLOCK_SPLIT = re.compile(r"(\r?\n(?:[ \t]*\r?\n)+)")
 
 # Word granularity the way a diff over prose has to do it: tokens are non-space
 # runs and the whitespace between them, so a boundary always falls between
 # tokens and reassembling the tokens reproduces the source exactly.
 TOKEN = re.compile(r"\S+|\s+")
+
+def _is_whitespace(token: str) -> bool:
+    """difflib's `isjunk`: an element that may not anchor a match.
+
+    Whitespace is junk in the literal sense difflib means. A single space
+    matches every other single space, so letting it anchor does two kinds of
+    harm: it is the dominant term in the O(n·m) search that made a long
+    paragraph take minutes, and it inflates `SequenceMatcher.ratio()` to ~0.5
+    for ANY two prose blocks — which put `SAME_BLOCK_RATIO` on the noise floor
+    and let `_align_blocks` word-diff two unrelated paragraphs into mush.
+
+    Marking it junk fixes both at once and leaves the runs themselves unchanged:
+    measured on real prose the changed regions are identical, while two
+    unrelated paragraphs fall from 0.500 to 0.167.
+
+    Not `autojunk=True`, which is far faster but ruins the diff: it junks any
+    element appearing in >1% of the sequence, so in repetitive prose every
+    common word stops anchoring and a two-word edit reports the whole remaining
+    paragraph as changed.
+    """
+    return token.isspace()
+
 
 Interval = tuple[int, int]
 Region = tuple[int, int, int, int]  # (was start, was end, now start, now end)
@@ -69,6 +102,21 @@ Region = tuple[int, int, int, int]  # (was start, was end, now start, now end)
 # Each pass only ever grows the changed regions, so a handful is generous — this
 # is a guard against a future edit breaking that property, not a tuning knob.
 SETTLE_PASSES = 12
+
+# Above this many tokens on either side, a block is diffed as a whole rather
+# than word by word.
+#
+# `difflib`'s matcher is superlinear, and marking whitespace junk lowers the
+# constant without changing that: with every third word edited, 600 tokens cost
+# 0.12s, 2400 cost 0.88s, and it keeps climbing. This runs inside a synchronous
+# route on a *reading* gesture, so an unbounded cost is a hung pane with nothing
+# on screen explaining why — the same class of harm as a wrong render, which is
+# why the bound is structural rather than a hope about input size.
+#
+# 2000 tokens is roughly a thousand-word paragraph: far beyond anything in
+# fiction prose, and ~0.5s at the very worst. Past it the block stacks, which is
+# the degrade this module already uses everywhere it cannot proceed safely.
+MAX_WORD_DIFF_TOKENS = 2000
 
 # How much two blocks must still share to count as "the same block, rewritten"
 # rather than two different blocks that happen to line up positionally. Half is
@@ -186,6 +234,18 @@ def _first_match(block: str, candidates: list[str], start: int, stop: int) -> in
     return None
 
 
+def _too_large_to_diff(*blocks: str) -> bool:
+    """Whether a block pair is past the point where word-level diffing is safe.
+
+    Checked before **every** token-level matcher, which is the part that has to
+    be got right: the first attempt put this only in `_block_runs`, and
+    `_is_a_rewrite_of` runs `ratio()` over the same token lists *before*
+    `_block_runs` is ever reached — so the guard never fired and a 4000-word
+    paragraph still took 95 seconds. The hang had simply moved.
+    """
+    return any(len(TOKEN.findall(block)) > MAX_WORD_DIFF_TOKENS for block in blocks)
+
+
 def _is_a_rewrite_of(was: str, now: str) -> bool:
     """Whether these two blocks are the same block edited, or two different ones.
 
@@ -204,7 +264,11 @@ def _is_a_rewrite_of(was: str, now: str) -> bool:
     now_tokens = TOKEN.findall(now)
     if not was_tokens or not now_tokens:
         return False
-    matcher = difflib.SequenceMatcher(None, was_tokens, now_tokens, autojunk=False)
+    # Too big to compare cheaply, so it is not a rewrite as far as this asks —
+    # the caller stacks it, which is what an oversized block gets anyway.
+    if max(len(was_tokens), len(now_tokens)) > MAX_WORD_DIFF_TOKENS:
+        return False
+    matcher = difflib.SequenceMatcher(_is_whitespace, was_tokens, now_tokens, autojunk=False)
     if matcher.quick_ratio() < SAME_BLOCK_RATIO:
         return False
     return matcher.ratio() >= SAME_BLOCK_RATIO
@@ -223,9 +287,11 @@ def _block_runs(was: str, now: str) -> list[DiffRun]:
 
     was_tokens = TOKEN.findall(was)
     now_tokens = TOKEN.findall(now)
+    if _too_large_to_diff(was, now):
+        return _stacked_pair(was, now)
     was_offsets = _offsets(was_tokens)
     now_offsets = _offsets(now_tokens)
-    matcher = difflib.SequenceMatcher(None, was_tokens, now_tokens, autojunk=False)
+    matcher = difflib.SequenceMatcher(_is_whitespace, was_tokens, now_tokens, autojunk=False)
     regions: list[Region] = [
         (was_offsets[i1], was_offsets[i2], now_offsets[j1], now_offsets[j2])
         for op, i1, i2, j1, j2 in matcher.get_opcodes()

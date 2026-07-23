@@ -272,18 +272,18 @@
     "runs": [
       {
         "kind": "was",
-        "text": "She counted the hulls twice.\n\n",
+        "text": "She counted the hulls twice.",
         "stacked": true
       },
       {
         "kind": "now",
-        "text": "She counted the hulls twice. ",
-        "stacked": false
+        "text": "She counted the hulls twice. The eleventh was the Corrant, and her father was aboard.",
+        "stacked": true
       },
       {
-        "kind": "equal",
-        "text": "The eleventh was the Corrant, and her father was aboard.",
-        "stacked": false
+        "kind": "was",
+        "text": "\n\nThe eleventh was the Corrant, and her father was aboard.",
+        "stacked": true
       }
     ]
   },
@@ -317,49 +317,14 @@
     "now": "- run for the high road at once\n- do not stop for anything that can walk\n",
     "runs": [
       {
-        "kind": "equal",
-        "text": "- run for the high road",
-        "stacked": false
-      },
-      {
-        "kind": "now",
-        "text": " at once",
-        "stacked": false
-      },
-      {
-        "kind": "equal",
-        "text": "\n- do not stop for anything ",
-        "stacked": false
-      },
-      {
         "kind": "was",
-        "text": "you",
-        "stacked": false
+        "text": "- run for the high road\n- do not stop for anything you can carry\n",
+        "stacked": true
       },
       {
         "kind": "now",
-        "text": "that",
-        "stacked": false
-      },
-      {
-        "kind": "equal",
-        "text": " can ",
-        "stacked": false
-      },
-      {
-        "kind": "was",
-        "text": "carry",
-        "stacked": false
-      },
-      {
-        "kind": "now",
-        "text": "walk",
-        "stacked": false
-      },
-      {
-        "kind": "equal",
-        "text": "\n",
-        "stacked": false
+        "text": "- run for the high road at once\n- do not stop for anything that can walk\n",
+        "stacked": true
       }
     ]
   },

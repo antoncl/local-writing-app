@@ -357,7 +357,8 @@ class AssistantEntriesMixin:
         )
 
     def read_assistant_entry(self, entry_id: str) -> AssistantEntry:
-        index_entry = self._build_assistant_index().by_id.get(entry_id)
+        index = self._build_assistant_index()
+        index_entry = index.by_id.get(entry_id)
         if index_entry is None or index_entry.kind != "assistant":
             raise ProjectServiceError(f"Assistant {entry_id} does not exist.", 404)
         path = index_entry.path
@@ -366,12 +367,20 @@ class AssistantEntriesMixin:
         raw_entry_type = front_matter.get("entry_type") or "assistant:assistant"
         if not isinstance(raw_entry_type, str):
             raise ProjectServiceError(f"Assistant {node_id} has invalid entry_type; it must be text.", 422)
+        metadata = self._normalise_metadata(front_matter.get("metadata"), path)
+        # Read-side healing (#345) — but only with a project open. Without one
+        # `_build_assistant_index` covers the machine layer alone, so every
+        # reference into a project would look dangling and get hidden; the next
+        # save would then persist that as the truth. Same reasoning as #379's
+        # purge guard: an id missing from a partial index is unknown, not gone.
+        if self.root_path is not None:
+            metadata = self._strip_dangling_references(metadata, self.read_metadata_schema(), index)
         return AssistantEntry(
             id=node_id,
             title=str(front_matter.get("title") or node_id),
             revision=self._revision(path),
             entry_type=raw_entry_type,
-            metadata=self._normalise_metadata(front_matter.get("metadata"), path),
+            metadata=metadata,
             computed_metadata=self._curation_metadata(node_id),
             source_layer_id=index_entry.source_layer_id,
             source_layer_label=index_entry.source_layer_label,

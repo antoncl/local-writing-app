@@ -84,6 +84,20 @@ NODE_FAMILIES = [
 # than re-spelled as a literal — a second copy of the triple would drift.
 MACHINE_LAYER_FAMILIES = [family for family in NODE_FAMILIES if family.kind == "assistant"]
 
+# Every kind whose files the index extracts reference edges from: the node
+# families above, plus the per-layer project node (#334), which lives at the
+# layer root rather than in a kind folder and so is collected separately.
+# Chats are absent on purpose — they are YAML sessions, indexed for
+# addressability only, and no collector derives edges from them.
+#
+# Derived rather than re-spelled, because the two consumers that must agree
+# with edge extraction are destructive-adjacent: `_purge_references_to` rewrites
+# the user's files, and `_strip_dangling_references` hides values on read. A
+# hand-maintained allow-list drifting from this set is exactly #345 — it said
+# `{"scene", "lore"}` while the index had grown six more families, so every
+# other kind kept its dangling references forever.
+REFERENCE_BEARING_KINDS = frozenset({family.kind for family in NODE_FAMILIES} | {"project"})
+
 
 class _NodeIndexBuilder(LayerVisitor):
     """The index build's per-layer logic, as a `LayerVisitor` (#329).

@@ -99,7 +99,8 @@ class PromptEntriesMixin:
         return self.read_prompt_entry(entry_id)
 
     def read_prompt_entry(self, entry_id: str) -> PromptEntry:
-        index_entry = self._build_node_index().by_id.get(entry_id)
+        index = self._build_node_index()
+        index_entry = index.by_id.get(entry_id)
         if index_entry is not None and index_entry.kind == "prompt":
             path = index_entry.path
         else:
@@ -109,13 +110,23 @@ class PromptEntriesMixin:
         raw_entry_type = front_matter.get("entry_type") or "prompt:base"
         if not isinstance(raw_entry_type, str):
             raise ProjectServiceError(f"Prompt {node_id} has invalid entry_type; it must be text.", 422)
+        # Hide references whose target is gone, exactly as the scene/lore/research
+        # read paths do (#345). The schema editor can put an `entity_ref` on any
+        # entry_type, so "prompts don't hold references" was an assumption, not a
+        # constraint — and without this the picker renders a row for a node that
+        # no longer exists.
+        metadata = self._strip_dangling_references(
+            self._normalise_metadata(front_matter.get("metadata"), path),
+            self.read_metadata_schema(),
+            index,
+        )
         return PromptEntry(
             id=node_id,
             title=str(front_matter.get("title") or node_id),
             body=body,
             revision=self._revision(path),
             entry_type=raw_entry_type,
-            metadata=self._normalise_metadata(front_matter.get("metadata"), path),
+            metadata=metadata,
             inputs=self._parse_prompt_inputs(front_matter.get("inputs")),
             computed_metadata={},
             source_layer_id=index_entry.source_layer_id if index_entry else "",

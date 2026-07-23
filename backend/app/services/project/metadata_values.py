@@ -22,14 +22,13 @@ from pathlib import Path
 from typing import Any
 
 from app.models import (
-    LoreEntry,
     MetadataFieldDefinition,
     MetadataSchema,
-    Scene,
     ScopedTag,
 )
 from app.services.project.errors import ProjectServiceError
 from app.services.project.node_index import NodeIndex
+from app.services.project.references import REFERENCE_BEARING_KINDS
 
 log = logging.getLogger(__name__)
 
@@ -404,14 +403,38 @@ class MetadataValuesMixin:
         return {node_id for node_id in purge_ids if node_id not in index.by_id}
 
     def _purge_references_to(self, purge_ids: set[str], root: Path) -> None:
-        """Walk every metadata-bearing entry in the project (scenes and
-        lore today; assistants/prompts skipped because they don't carry
-        node references in current schemas). For each, strip any
-        reference value matching one of ``purge_ids`` and write the
-        file back if it changed. Called after node deletes so cross-
-        entity references stay in sync without waiting for a per-entry
-        open+save round-trip (which is what the read-side healer in
+        """Walk every reference-bearing entry in the project. For each, strip
+        any reference value matching one of ``purge_ids`` and write the file
+        back if it changed. Called after node deletes so cross-entity
+        references stay in sync without waiting for a per-entry open+save
+        round-trip (which is what the read-side healer in
         ``_strip_dangling_references`` does as a fallback).
+
+        **Every kind the index draws edges from** (`REFERENCE_BEARING_KINDS`),
+        not the `{"scene", "lore"}` allow-list this carried until #345. The old
+        docstring justified the narrowing by claiming prompts and assistants
+        "don't carry node references in current schemas" — which was never a
+        property of the code. Edge extraction is schema-driven and the schema
+        editor can add an `entity_ref` field to any entry_type, so a research
+        note or a view could hold a reference the purge would never reach, and
+        nothing else rewrites it: the stale id stayed in front matter forever
+        while `reference_graph` kept reporting the dead edge.
+
+        The rewrite is deliberately **kind-agnostic**: a purge only ever changes
+        `metadata`, so it edits that one key of the front matter already parsed
+        and writes the mapping straight back, rather than reconstructing a typed
+        model per kind. Reconstruction is what forced the allow-list — there is
+        no `_write_view_file`-shaped equivalent for every kind that takes a
+        cleaned metadata dict — and it also **dropped every top-level key the
+        typed writer didn't spell out** (`_write_scene_file` emits exactly `id`,
+        `title`, `entry_type`, `status`, `metadata`), so a purge silently ate a
+        scene's other front matter. Preserving the mapping fixes that in
+        passing.
+
+        One consequence worth stating: the index includes the out-of-tree
+        machine layer, so an assistant on it can now be rewritten — the only
+        file this touches outside `root`. That does not loosen #381, whose rule
+        is about *which ids* a delete may purge, and only the deleted id ever is.
         """
         if not purge_ids:
             return
@@ -425,7 +448,7 @@ class MetadataValuesMixin:
         if not purge_ids:
             return
         for entry in list(index.by_id.values()):
-            if entry.kind not in {"scene", "lore"}:
+            if entry.kind not in REFERENCE_BEARING_KINDS:
                 continue
             try:
                 front_matter, body = self._read_markdown_with_front_matter(entry.path, strict=True)
@@ -441,32 +464,8 @@ class MetadataValuesMixin:
             cleaned, changed = self._purge_metadata_refs(normalised, schema, purge_ids)
             if not changed:
                 continue
-            if entry.kind == "lore":
-                self._write_lore_entry_file(
-                    entry.path,
-                    LoreEntry(
-                        id=entry.id,
-                        title=str(front_matter.get("title") or entry.id),
-                        body=body,
-                        revision="",
-                        entry_type=entry.entry_type,
-                        metadata=cleaned,
-                    ),
-                )
-            else:  # scene
-                self._write_scene_file(
-                    entry.path,
-                    Scene(
-                        id=entry.id,
-                        title=str(front_matter.get("title") or entry.id),
-                        body=body,
-                        revision="",
-                        status=str(front_matter.get("status") or "draft"),
-                        entry_type=entry.entry_type,
-                        metadata=cleaned,
-                        computed_metadata={},
-                    ),
-                )
+            front_matter["metadata"] = cleaned
+            self._write_markdown_with_front_matter(entry.path, front_matter, body)
 
     def _validate_reference_target(
         self,

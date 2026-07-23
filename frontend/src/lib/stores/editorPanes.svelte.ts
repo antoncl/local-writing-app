@@ -86,6 +86,15 @@ interface EditorPaneComponentHandle {
 }
 
 const AUTO_SAVE_IDLE_MS = 6000;
+// Ceiling on a dirty run, regardless of how continuously the author is typing.
+// The idle debounce alone bounds NOTHING: it is re-armed on every keystroke, so
+// a burst with no full 6-second gap in it never reaches disk, and a crash or
+// force-quit takes the whole burst (#369). Thirty seconds because the loss
+// window should be measured in seconds rather than minutes, while a local save
+// every 30s during sustained typing is nothing — and because a save landing
+// mid-keystroke is already an anticipated case (`saveEditorPane` keeps the
+// draft fields rather than snapping them to the server's copy).
+const AUTO_SAVE_MAX_WAIT_MS = 30000;
 const SAVED_INDICATOR_MS = 2000;
 
 class EditorPanesController {
@@ -127,6 +136,7 @@ class EditorPanesController {
   // `shouldSave` excludes them from the timer.
   #autosave = new AutosaveScheduler({
     idleMs: AUTO_SAVE_IDLE_MS,
+    maxWaitMs: AUTO_SAVE_MAX_WAIT_MS,
     indicatorMs: SAVED_INDICATOR_MS,
     shouldSave: (id) => {
       const pane = this.panes.find((candidate) => candidate.id === id);

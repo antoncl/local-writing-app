@@ -199,8 +199,7 @@
     projectChooser.onRun = run;
     projectChooser.onError = (message) => { error = message; };
     projectChooser.onOpenProject = (path) => void projectSession.openProjectAt(path);
-    projectChooser.onCreateProject = (path, title, baseFolder) =>
-      projectSession.createProjectAt(path, title, baseFolder);
+    projectChooser.onCreateProject = (path, title) => projectSession.createProjectAt(path, title);
     projectChooser.getStartPath = () => projectPath;
     // The projectSession controller owns machine settings + the open/create/
     // rehydrate flow; App injects status/run and the cross-subsystem workspace

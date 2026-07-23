@@ -130,6 +130,56 @@ def config_path() -> Path:
     return config_dir() / CONFIG_FILENAME
 
 
+def projects_root() -> Path | None:
+    """The one folder the app works within — the outer bound of every layer
+    walk (#429).
+
+    The bound is **machine information**: there is exactly one root, so every
+    project under it necessarily agrees about where the chain stops. It used to
+    be `settings.projects_base_folder` in each project's own `project.yaml`,
+    which meant an absolute path duplicated into every manifest on disk —
+    surviving neither a move, nor another machine, nor a different drive
+    letter — and, because the create wizard built each project directly under
+    the folder it passed as the bound, always equal to the project's own
+    parent. No two levels of one shelf ever agreed, so a chain enumerated
+    exactly one hop from whichever end it was opened.
+
+    Pre-1.0 the stored manifest key is simply ignored; there is no migration
+    (`memory/feedback_no_pre_1_0_migrations.md`).
+
+    **Read directly rather than through `load_settings()`, deliberately.**
+    That function is a loader, not an accessor: it can *write* assistant files
+    (`_migrate_default_models_to_files_if_empty`) and it mutates the palette
+    (`_top_up_palette`). This is called from `_metadata_schema_base_folder`,
+    i.e. on every layer walk, i.e. on every node-index build. A read path must
+    not be able to write, and a walk must not carry a migration.
+
+    Derived from `config_path()` like `assistants_dir()`, so the autouse test
+    fixture that redirects the config path isolates this too — a test can never
+    read or write the developer's real machine root.
+
+    `None` when unset, empty or unreadable. That is the honest degradation: no
+    bound means a project's chain is itself alone, which is what the app did
+    for every project before a root was configured anyway.
+    """
+    path = config_path()
+    if not path.exists():
+        return None
+    try:
+        data = yaml.safe_load(path.read_text(encoding="utf-8")) or {}
+    except (yaml.YAMLError, OSError, UnicodeDecodeError):
+        return None
+    if not isinstance(data, dict):
+        return None
+    raw = data.get("default_projects_folder")
+    if not isinstance(raw, str) or not raw.strip():
+        return None
+    try:
+        return Path(raw).expanduser().resolve()
+    except (OSError, ValueError):
+        return None
+
+
 def assistants_dir() -> Path:
     """Folder holding assistant entry files. Derived from `config_path()` so
     test fixtures that patch the config path automatically isolate this too."""

@@ -45,11 +45,7 @@ def create_project(request: CreateProjectRequest) -> ProjectInfo:
     from app.services import machine_settings as ms_service
 
     with translate_errors():
-        created = ProjectService.created_at(
-            Path(request.root_path),
-            request.title,
-            Path(request.projects_base_folder) if request.projects_base_folder else None,
-        )
+        created = ProjectService.created_at(Path(request.root_path), request.title)
         info = created.current_project()
         current_scope.set(created.scope)
         ms_service.touch_recent_project(Path(info.root_path), info.title)
@@ -61,10 +57,7 @@ def open_project(request: OpenProjectRequest) -> ProjectInfo:
     from app.services import machine_settings as ms_service
 
     with translate_errors():
-        opened = ProjectService.opened_at(
-            Path(request.root_path),
-            Path(request.projects_base_folder) if request.projects_base_folder else None,
-        )
+        opened = ProjectService.opened_at(Path(request.root_path))
         info = opened.current_project()
         current_scope.set(opened.scope)
         ms_service.touch_recent_project(Path(info.root_path), info.title)

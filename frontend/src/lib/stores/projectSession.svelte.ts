@@ -174,12 +174,11 @@ class ProjectSession {
   }
 
   // ---- Project lifecycle entry points ----
-  // Create a project at the given path with the given title. Optional base
-  // folder lets callers override the default; omit to use the project's parent
-  // folder (matches the backend's fallback).
-  async createProjectAt(path: string, title: string, baseFolder?: string): Promise<void> {
+  // Create a project at the given path with the given title. The layer walk's
+  // bound is the machine root (#429), so creation neither takes nor sends one.
+  async createProjectAt(path: string, title: string): Promise<void> {
     await this.run(async () => {
-      const openedProject = await api.createProject(path, title, baseFolder ?? "");
+      const openedProject = await api.createProject(path, title);
       this.rememberLastProject(openedProject.root_path);
       this.onOpenWorkspace(openedProject);
       await loadProjectData();
@@ -206,7 +205,7 @@ class ProjectSession {
       return false;
     }
     return await this.run(async () => {
-      const openedProject = await api.openProject(path, "");
+      const openedProject = await api.openProject(path);
       this.rememberLastProject(openedProject.root_path);
       this.onOpenWorkspace(openedProject);
       await loadProjectData();

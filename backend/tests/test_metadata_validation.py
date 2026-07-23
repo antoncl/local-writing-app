@@ -4,7 +4,7 @@ import unittest
 from pathlib import Path
 from tempfile import TemporaryDirectory
 
-from layer_fixtures import declare_full_chain
+from layer_fixtures import declare_full_chain, set_projects_root
 
 from app.models import (
     CreateLoreEntryRequest,
@@ -930,25 +930,32 @@ class MetadataValidationTests(unittest.TestCase):
         self.assertEqual(saved.metadata["mood"], "tense")
         self.assertEqual(saved.metadata["tension"], 3)
 
-    def test_validation_warns_when_base_folder_is_not_an_ancestor(self) -> None:
-        self._set_projects_base_folder(Path(self.temp_dir.name).resolve() / "elsewhere")
+    def test_validation_warns_when_the_project_is_outside_the_machine_root(self) -> None:
+        """The warning names the machine root now (#429) — that is where the
+        author has to go to change it. Naming a per-project key sent them to a
+        setting that no longer decides anything."""
+        set_projects_root(Path(self.temp_dir.name).resolve() / "elsewhere")
 
         validation = self.service.validate_project()
 
         self.assertTrue(validation.valid)
         self.assertTrue(
-            any("not inside settings.projects_base_folder" in warning for warning in validation.warnings),
+            any("outside the machine's projects folder" in warning for warning in validation.warnings),
             validation.warnings,
         )
 
-    def test_project_settings_update_sets_base_folder(self) -> None:
-        updated_base = self.universe
+    def test_validation_warns_when_no_machine_root_is_set(self) -> None:
+        """The state every project is in before a root is ever configured.
+        Warned rather than failed: the project is fine, it just stands alone."""
+        set_projects_root(None)
 
-        project = self.service.update_project_settings(UpdateProjectSettingsRequest(projects_base_folder=str(updated_base)))
+        validation = self.service.validate_project()
 
-        self.assertEqual(project.projects_base_folder, str(updated_base.resolve()))
-        manifest = self.service._read_yaml(self.root / "project.yaml")
-        self.assertEqual(manifest["settings"]["projects_base_folder"], str(updated_base.resolve()))
+        self.assertTrue(validation.valid)
+        self.assertTrue(
+            any("No projects folder is set for this machine" in warning for warning in validation.warnings),
+            validation.warnings,
+        )
 
     def test_project_settings_unset_field_is_left_unchanged(self) -> None:
         # Partial update: a request that omits a field must not disturb the
@@ -956,9 +963,14 @@ class MetadataValidationTests(unittest.TestCase):
         # The expectation is spelled out rather than read back from a prior
         # call's return value — comparing the service against itself would
         # pass even if both calls clobbered the setting identically.
-        expected_base = str(self.universe.resolve())
+        #
+        # Paired against `inherits` since #429 removed `projects_base_folder`
+        # from this request. The property under test is the partial update, not
+        # the particular field, and `inherits` is now the other thing a save
+        # can carry — so it is the one that can be clobbered.
+        expected_inherits = ["../.."]
         self.service.update_project_settings(
-            UpdateProjectSettingsRequest(projects_base_folder=str(self.universe))
+            UpdateProjectSettingsRequest(inherits=[str(self.universe)])
         )
 
         project = self.service.update_project_settings(
@@ -966,19 +978,10 @@ class MetadataValidationTests(unittest.TestCase):
         )
 
         self.assertEqual(project.ai_policy, "cloud-allowed")
-        self.assertEqual(project.projects_base_folder, expected_base)
-        # Assert the stored key too: `projects_base_folder` on ProjectInfo is
-        # derived (it falls back to root.parent), so the response alone can
-        # mask a manifest that lost the setting.
+        # Assert the stored key too, not just the response: a derived field on
+        # ProjectInfo can mask a manifest that lost the setting.
         manifest = self.service._read_yaml(self.root / "project.yaml")
-        self.assertEqual(manifest["settings"]["projects_base_folder"], expected_base)
-
-    def test_project_settings_rejects_base_folder_outside_project_ancestry(self) -> None:
-        updated_base = Path(self.temp_dir.name).resolve() / "new-base"
-        updated_base.mkdir()
-
-        with self.assertRaisesRegex(ProjectServiceError, "inside the projects base folder"):
-            self.service.update_project_settings(UpdateProjectSettingsRequest(projects_base_folder=str(updated_base)))
+        self.assertEqual(manifest["inherits"], expected_inherits)
 
     def test_schema_layers_are_listed_from_base_to_project(self) -> None:
         layers = self.service.read_metadata_schema_layers().layers

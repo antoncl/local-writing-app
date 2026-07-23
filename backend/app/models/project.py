@@ -11,15 +11,10 @@ from app.models.base import (
 class CreateProjectRequest(BaseModel):
     root_path: str = Field(min_length=1)
     title: str = Field(default="Untitled Project", min_length=1)
-    # Optional — when omitted, the project's parent folder is used. The
-    # frontend no longer surfaces this; kept on the request for back-compat
-    # and to keep the validation path open for tooling.
-    projects_base_folder: str | None = None
 
 
 class OpenProjectRequest(BaseModel):
     root_path: str = Field(min_length=1)
-    projects_base_folder: str | None = None
 
 
 class AncestorCandidate(BaseModel):
@@ -70,6 +65,10 @@ class ProjectChild(BaseModel):
 class ProjectInfo(BaseModel):
     title: str
     root_path: str
+    # The machine root — the outer bound of this project's layer walk (#429).
+    # Reported, never accepted: it is machine settings, one folder for every
+    # project. `None` when no root is configured, which means no bound and so a
+    # chain of length one.
     projects_base_folder: str | None = None
     ai_policy: AIPolicy = "off"
     # Outermost first, matching layer rank. Carries the whole enumeration with
@@ -82,7 +81,9 @@ class ProjectInfo(BaseModel):
 
 
 class UpdateProjectSettingsRequest(BaseModel):
-    projects_base_folder: str | None = None
+    # No `projects_base_folder` (#429): the walk's bound is the machine root,
+    # so it is changed in machine settings, once, for every project — not per
+    # project, which is what let two levels of one chain disagree.
     ai_policy: AIPolicy | None = None
     # The declaration (#309). Partial update like the rest: `None` leaves it
     # alone, `[]` clears it. Entries may be absolute or relative to the

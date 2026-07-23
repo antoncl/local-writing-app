@@ -111,16 +111,18 @@ class ProjectService(
         return self._scope.migrations_applied if self._scope is not None else ()
 
     @classmethod
-    def created_at(
-        cls, root_path: Path, title: str, projects_base_folder: Path | None = None
-    ) -> ProjectService:
-        """Scaffold a new project on disk and return a service bound to it."""
+    def created_at(cls, root_path: Path, title: str) -> ProjectService:
+        """Scaffold a new project on disk and return a service bound to it.
+
+        No base folder (#429): the walk's bound is the machine root, so
+        creating or opening a project cannot set it.
+        """
         service = cls(WorkScope(root=root_path.expanduser().resolve()))
-        service._scaffold_new_project(title, projects_base_folder)
+        service._scaffold_new_project(title)
         return service
 
     @classmethod
-    def opened_at(cls, root_path: Path, projects_base_folder: Path | None = None) -> ProjectService:
+    def opened_at(cls, root_path: Path) -> ProjectService:
         """Migrate an existing project folder and return a service bound to it."""
         root = root_path.expanduser().resolve()
         if not (root / "project.yaml").exists():
@@ -129,10 +131,7 @@ class ProjectService(
             migrations = migrate_project(root)
         except Exception as exc:  # noqa: BLE001
             raise ProjectServiceError(f"Project migration failed: {exc}", 500) from exc
-        service = cls(WorkScope(root=root, migrations_applied=tuple(migrations)))
-        if projects_base_folder is not None:
-            service._rebase_projects_base_folder(projects_base_folder)
-        return service
+        return cls(WorkScope(root=root, migrations_applied=tuple(migrations)))
 
     def _entry_markdown_paths(self, root: Path) -> list[Path]:
         return [*(root / "scenes").glob("*.md"), *(root / "lore").glob("*.md")]

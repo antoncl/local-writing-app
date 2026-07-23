@@ -221,27 +221,24 @@ async function* streamNdjson(
 }
 
 export const api = {
-  createProject(rootPath: string, title: string, projectsBaseFolder?: string) {
+  // No `projects_base_folder` on create/open/settings (#429): the layer walk's
+  // bound is the machine root, set once in machine settings for every project.
+  // Sending it per project is what made every chain one hop long — the chooser
+  // passed the folder it had just built the project inside, so every project
+  // recorded its own parent as the bound.
+  createProject(rootPath: string, title: string) {
     return request<ProjectInfo>("/project/create", {
       method: "POST",
-      body: JSON.stringify({
-        root_path: rootPath,
-        title,
-        ...(projectsBaseFolder ? { projects_base_folder: projectsBaseFolder } : {}),
-      }),
+      body: JSON.stringify({ root_path: rootPath, title }),
     });
   },
-  openProject(rootPath: string, projectsBaseFolder?: string) {
+  openProject(rootPath: string) {
     return request<ProjectInfo>("/project/open", {
       method: "POST",
-      body: JSON.stringify({
-        root_path: rootPath,
-        ...(projectsBaseFolder ? { projects_base_folder: projectsBaseFolder } : {}),
-      }),
+      body: JSON.stringify({ root_path: rootPath }),
     });
   },
   updateProjectSettings(updates: {
-    projects_base_folder?: string;
     ai_policy?: AIPolicy;
   }) {
     return request<ProjectInfo>("/project/settings", {

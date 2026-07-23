@@ -5,6 +5,7 @@ from pathlib import Path
 from tempfile import TemporaryDirectory
 from unittest.mock import patch
 
+import yaml
 from fastapi.testclient import TestClient
 
 from app.main import app
@@ -128,14 +129,27 @@ class RecentProjectsEndpointTests(unittest.TestCase):
         recents = view["recent_projects"]
         self.assertEqual(len(recents), 1)
 
-    def test_create_request_accepts_omitted_projects_base_folder(self) -> None:
-        # Previously projects_base_folder was required; now optional. The
-        # frontend no longer surfaces it.
+    def test_create_ignores_a_projects_base_folder_it_no_longer_accepts(self) -> None:
+        """#429 removed the field; a client still sending it must not break.
+
+        It went required → optional → gone. The walk's bound is the machine
+        root now, so create has nothing to do with one. Pydantic ignores
+        unknown keys by default and that is the behaviour worth pinning: a
+        frontend cached from before the change keeps working, and — the part
+        that matters — the value it sends has no effect on the chain.
+        """
         response = self.client.post(
             "/api/project/create",
-            json={"root_path": str(self.root / "no-base"), "title": "No Base"},
+            json={
+                "root_path": str(self.root / "no-base"),
+                "title": "No Base",
+                "projects_base_folder": str(self.root / "somewhere-else"),
+            },
         )
         self.assertEqual(response.status_code, 200, response.text)
+        manifest_path = Path(response.json()["root_path"]) / "project.yaml"
+        manifest = yaml.safe_load(manifest_path.read_text(encoding="utf-8"))
+        self.assertNotIn("projects_base_folder", manifest["settings"])
 
 
 class DefaultProjectsFolderTests(unittest.TestCase):

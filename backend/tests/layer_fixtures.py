@@ -44,16 +44,49 @@ def make_project_folder(service: Any, folder: Path, title: str | None = None) ->
         service._write_yaml(folder / MANIFEST, {"title": title or folder.name})
 
 
+def set_projects_root(base: Path | None) -> None:
+    """Point the machine root at `base` — the walk's outer bound (#429).
+
+    `None` clears it, which is the state every machine is in before a root is
+    configured. Pass `None` rather than `Path("")`: that stringifies to `"."`,
+    i.e. the current working directory, which is a *valid* root and would make
+    a "no root set" test silently assert something else.
+
+    Safe to call from any test: `conftest.py`'s autouse fixture redirects
+    `machine_settings.config_path()` into a per-test tempdir, so this can never
+    reach the developer's real machine settings.
+
+    Writes the config file directly rather than through `save_settings()`,
+    which would drag in the palette top-up and the assistant-file migration —
+    a fixture should set one value, not run the app's upgrade paths.
+    """
+    import yaml
+
+    from app.services import machine_settings as ms_service
+
+    path = ms_service.config_path()
+    path.parent.mkdir(parents=True, exist_ok=True)
+    data = {}
+    if path.exists():
+        data = yaml.safe_load(path.read_text(encoding="utf-8")) or {}
+    data["default_projects_folder"] = str(base) if base is not None else ""
+    path.write_text(yaml.safe_dump(data, sort_keys=False), encoding="utf-8")
+
+
 def declare(service: Any, root: Path, layers: list[Path], *, base: Path | None = None) -> None:
     """Declare `layers` as `root`'s inheritance, making each one a project.
 
-    `base` sets `projects_base_folder` when given — the outer bound the
-    declaration selects within. Entries are stored relative to the project, the
-    same form the app writes.
+    `base` sets the **machine root** when given — the outer bound the
+    declaration selects within. Before #429 that bound was a per-project
+    manifest key; it is now one folder per machine, so this writes machine
+    settings rather than `root`'s own `project.yaml`. Call sites did not have
+    to change: the parameter still means "the folder the walk stops at".
+
+    Entries are stored relative to the project, the same form the app writes.
     """
     manifest = service._read_yaml(root / MANIFEST)
     if base is not None:
-        manifest.setdefault("settings", {})["projects_base_folder"] = str(base)
+        set_projects_root(base)
     for folder in layers:
         make_project_folder(service, folder)
     manifest["inherits"] = [os.path.relpath(folder, root).replace("\\", "/") for folder in layers]

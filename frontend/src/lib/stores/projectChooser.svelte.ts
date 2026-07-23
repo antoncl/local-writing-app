@@ -61,7 +61,7 @@ class ProjectChooser {
   // Open an existing project at the chosen path (App lifecycle).
   onOpenProject: (path: string) => void = () => {};
   // Create a project at path/title (App lifecycle).
-  onCreateProject: (path: string, title: string, baseFolder?: string) => Promise<void> = async () => {};
+  onCreateProject: (path: string, title: string) => Promise<void> = async () => {};
   // The directory the picker should start in (App's current project path).
   getStartPath: () => string = () => "";
 
@@ -135,14 +135,16 @@ class ProjectChooser {
       this.onError("Project name is required.");
       return;
     }
-    const baseFolder = this.overrideFolder && this.overridePath ? this.overridePath : this.defaultProjectsFolder;
-    if (!baseFolder) {
+    // Where to *put* the new project, not what its layer chain is bounded by
+    // (#429) — the bound is the machine root and is not sent per create.
+    const parentFolder = this.overrideFolder && this.overridePath ? this.overridePath : this.defaultProjectsFolder;
+    if (!parentFolder) {
       this.onError("No projects folder set. Open Settings to set a default.");
       return;
     }
-    const path = joinPath(baseFolder, slugifyProjectName(this.newProjectName));
+    const path = joinPath(parentFolder, slugifyProjectName(this.newProjectName));
     this.closeNewProject();
-    await this.onCreateProject(path, this.newProjectName.trim(), baseFolder);
+    await this.onCreateProject(path, this.newProjectName.trim());
   }
 }
 

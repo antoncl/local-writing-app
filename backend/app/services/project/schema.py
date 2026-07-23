@@ -931,13 +931,24 @@ class MetadataSchemaMixin:
         return MetadataSchema.model_validate(data)
 
     def _metadata_schema_layer_warnings(self, root: Path) -> list[str]:
+        """Why this project's chain is only itself, when it is (#429).
+
+        Both cases name the *machine* root now, because that is where the bound
+        lives and where the author has to go to change it. Naming
+        `settings.projects_base_folder` sent them to a per-project key that no
+        longer decides anything.
+        """
         warnings: list[str] = []
         base_folder = self._metadata_schema_base_folder(root)
         if base_folder is None:
-            warnings.append("Project has no settings.projects_base_folder; using project metadata schema only.")
+            warnings.append(
+                "No projects folder is set for this machine, so this project inherits nothing; "
+                "using its own metadata schema only. Set it in Settings."
+            )
         elif not self._is_relative_to(root, base_folder):
             warnings.append(
-                f"Project root is not inside settings.projects_base_folder {base_folder}; using project metadata schema only."
+                f"This project is outside the machine's projects folder ({base_folder}), so it "
+                "inherits nothing; using its own metadata schema only."
             )
         return warnings
 

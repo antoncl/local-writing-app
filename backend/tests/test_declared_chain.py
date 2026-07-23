@@ -389,10 +389,7 @@ class OneMachineRootMeansEveryLevelAgreesTests(unittest.TestCase):
         for root, ancestors in expected.items():
             with self.subTest(project=root.name):
                 service = ProjectService.opened_at(root)
-                projects = [
-                    folder for folder, is_project, _ in service.ancestor_candidates(root) if is_project
-                ]
-                self.assertEqual(projects, ancestors)
+                self.assertEqual(service.ancestor_projects(root), ancestors)
 
     def test_a_three_level_chain_is_declarable_and_walks_whole(self) -> None:
         """The demo that motivated #311, end to end."""
@@ -420,6 +417,231 @@ class OneMachineRootMeansEveryLevelAgreesTests(unittest.TestCase):
         self.assertEqual([layer.folder for layer in service.collect_layers(stray)], [stray])
         self.assertTrue(
             any("outside the machine's projects folder" in w for w in service.validate_project().warnings)
+        )
+
+
+class TheWalkIsSeparateFromTheDeclarationTests(DeclaredChainTestCase):
+    """#460 — the walk parses nothing; the declaration is an overlay.
+
+    It used to be one method returning `(folder, is_project, inherited)`, and
+    that third flag was the only reason the walk read a manifest. Three of five
+    consumers discarded it, and on the create path the discarded parse was the
+    only thing that could fail.
+    """
+
+    def test_the_walk_survives_the_projects_own_manifest_being_malformed(self) -> None:
+        """The property the split buys, stated as a property rather than as the
+        create-path symptom it was found through: enumerating a project's
+        ancestors is a filesystem question and must not depend on parsing that
+        project's own file."""
+        make_project_folder(self.service, self.universe)
+        (self.root / "project.yaml").write_text("title: X\n  bad: [unclosed\n", encoding="utf-8")
+
+        self.assertEqual(
+            self.service.ancestor_candidates(self.root),
+            [(self.base, False), (self.universe, True), (self.series, False)],
+        )
+        self.assertEqual(self.service.ancestor_projects(self.root), [self.universe])
+
+    def test_the_declared_overlay_still_reads_the_declaration(self) -> None:
+        """The two consumers that need `inherited` must still get it — the
+        split must not quietly turn every chain flat."""
+        declare(self.service, self.root, [self.universe])
+
+        self.assertEqual(
+            self.service.declared_ancestor_candidates(self.root),
+            [(self.base, False, False), (self.universe, True, True), (self.series, False, False)],
+        )
+
+
+class ANewProjectDeclaresItsAncestorsTests(unittest.TestCase):
+    """#425 — the default. Every project the app created declared nothing, so
+    every chain was length one and #311's breadcrumb was empty for all of them.
+
+    The fixture is the reported case: `writing/honorverse/honor-harrington/
+    on-basilisk-station`, created exactly as the app creates it.
+    """
+
+    def setUp(self) -> None:
+        self.tmp = TemporaryDirectory()
+        self.shelf = Path(self.tmp.name).resolve() / "writing"
+        self.universe = self.shelf / "honorverse"
+        self.series = self.universe / "honor-harrington"
+        self.book = self.series / "on-basilisk-station"
+        self.shelf.mkdir(parents=True)
+        set_projects_root(self.shelf)
+
+    def tearDown(self) -> None:
+        self.tmp.cleanup()
+
+    def _create_chain(self) -> None:
+        ProjectService.created_at(self.universe, "The Honorverse")
+        ProjectService.created_at(self.series, "Honor Harrington")
+        ProjectService.created_at(self.book, "On Basilisk Station")
+
+    def test_a_project_created_inside_a_chain_opens_with_that_chain(self) -> None:
+        """Acceptance 1, and the whole point: no further action."""
+        self._create_chain()
+
+        service = ProjectService.opened_at(self.book)
+
+        self.assertEqual(
+            [layer.folder for layer in service.collect_layers(self.book)],
+            [self.universe, self.series, self.book],
+        )
+
+    def test_the_default_is_every_ancestor_project_not_the_nearest_one(self) -> None:
+        """Nearest-only would be enough under a transitive reading, which is
+        exactly what #428 closed. With each project's list complete for itself,
+        declaring only the parent leaves the universe out of the book's chain.
+        """
+        self._create_chain()
+
+        manifest = ProjectService.opened_at(self.book)._read_yaml(self.book / "project.yaml")
+
+        self.assertEqual(manifest["inherits"], ["../..", ".."])
+
+    def test_a_project_created_outside_any_ancestor_project_is_a_chain_of_one(self) -> None:
+        """Acceptance 2. The shelf is a folder, not a project, so there is
+        nothing above the universe to declare."""
+        service = ProjectService.created_at(self.universe, "The Honorverse")
+
+        self.assertEqual(
+            service._read_yaml(self.universe / "project.yaml")["inherits"], []
+        )
+        self.assertEqual([layer.folder for layer in service.collect_layers(self.universe)], [self.universe])
+
+    def test_a_non_project_ancestor_is_never_written_into_the_declaration(self) -> None:
+        """Acceptance 3. An organisational folder mid-chain is skipped, not
+        declared: it carries no manifest, so declaring it would contribute
+        nothing and seed a `declared_ancestor_warnings` entry on a project
+        nobody had touched yet."""
+        ProjectService.created_at(self.universe, "The Honorverse")
+        self.series.mkdir(parents=True, exist_ok=True)  # organisational, no manifest
+
+        service = ProjectService.created_at(self.book, "On Basilisk Station")
+
+        self.assertEqual(service._read_yaml(self.book / "project.yaml")["inherits"], ["../.."])
+        self.assertEqual(service.declared_ancestor_warnings(self.book), [])
+
+    def test_a_project_created_outside_the_machine_root_declares_nothing(self) -> None:
+        """The enumeration is empty out there (#429/#441), so the default has
+        nothing to select and must not fall back to walking the filesystem."""
+        stray = Path(self.tmp.name).resolve() / "elsewhere" / "orphan"
+
+        service = ProjectService.created_at(stray, "Orphan")
+
+        self.assertEqual(service._read_yaml(stray / "project.yaml")["inherits"], [])
+
+    def test_the_machine_root_is_declared_when_it_is_itself_a_project(self) -> None:
+        """The enumeration's own boundary, which nothing else pins.
+
+        The root folder is a candidate like any other, so "every ancestor
+        project" includes it when it carries a manifest. The mirror case — a
+        project *outside* the root — is pinned above; this is the same edge
+        approached from the inside, and a change to the walk's slicing would
+        otherwise add or drop a layer on such a machine in silence.
+        """
+        (self.shelf / "project.yaml").write_text("title: The Shelf\n", encoding="utf-8")
+
+        service = ProjectService.created_at(self.universe, "The Honorverse")
+
+        self.assertEqual(service._read_yaml(self.universe / "project.yaml")["inherits"], [".."])
+
+    def test_creating_over_a_folder_whose_manifest_is_malformed_still_works(self) -> None:
+        """#460, from the create side. Resolving the default used to read the
+        target's own `project.yaml` for an `inherited` flag it discarded — so a
+        stale malformed file in the folder being scaffolded turned create into
+        a 422, naming a parse error for a file the very next line overwrites.
+        """
+        ProjectService.created_at(self.universe, "The Honorverse")
+        victim = self.universe / "half-made"
+        victim.mkdir()
+        (victim / "project.yaml").write_text("title: X\n  bad: [unclosed\n", encoding="utf-8")
+
+        service = ProjectService.created_at(victim, "Remade")
+
+        self.assertEqual(service._read_yaml(victim / "project.yaml")["inherits"], [".."])
+
+    def test_an_explicit_declaration_is_honoured_verbatim(self) -> None:
+        """`inherits` on the request is what #318's wizard will send. An empty
+        list is a real choice — a flat project inside a chain — and must not be
+        re-defaulted, which is why the request field distinguishes `[]` from
+        unset."""
+        self._create_chain()
+        deliberate = self.series / "part-two"
+
+        service = ProjectService.created_at(deliberate, "Part Two", [str(self.universe)])
+
+        self.assertEqual(service._read_yaml(deliberate / "project.yaml")["inherits"], ["../.."])
+
+    def test_an_explicit_empty_declaration_creates_a_flat_project(self) -> None:
+        self._create_chain()
+        flat = self.series / "standalone"
+
+        service = ProjectService.created_at(flat, "Standalone", [])
+
+        self.assertEqual(service._read_yaml(flat / "project.yaml")["inherits"], [])
+        self.assertEqual([layer.folder for layer in service.collect_layers(flat)], [flat])
+
+    def test_an_explicit_non_ancestor_is_refused_before_anything_is_written(self) -> None:
+        """Same rule as the settings save — and it must refuse *first*: a 422
+        raised after the scaffold began would leave a folder on disk for a
+        request that never should have written one."""
+        self._create_chain()
+        stranger = Path(self.tmp.name).resolve() / "elsewhere"
+        stranger.mkdir(parents=True)
+        (stranger / "project.yaml").write_text("title: Elsewhere\n", encoding="utf-8")
+        doomed = self.series / "doomed"
+
+        with self.assertRaises(ProjectServiceError) as caught:
+            ProjectService.created_at(doomed, "Doomed", [str(stranger)])
+
+        self.assertEqual(caught.exception.status_code, 422)
+        self.assertFalse(doomed.exists())
+
+    def test_the_declaration_reaches_the_wire(self) -> None:
+        """`POST /project/create` is the only caller that matters, and the
+        response is re-validated against `ProjectInfo` — a default written to
+        disk but absent from the enumeration would still read as empty."""
+        self._create_chain()
+        part_two = self.book / "part-two"
+
+        with TestClient(app) as client:
+            payload = client.post(
+                "/api/project/create",
+                json={"root_path": str(part_two), "title": "Part Two"},
+            ).json()
+
+        self.assertEqual(
+            [(row["name"], row["inherited"]) for row in payload["ancestors"]],
+            [
+                ("writing", False),
+                ("honorverse", True),
+                ("honor-harrington", True),
+                ("on-basilisk-station", True),
+            ],
+        )
+
+    def test_an_explicit_declaration_on_the_request_is_what_gets_written(self) -> None:
+        """The field has to be *read* by the route, not merely exist on the
+        model: with the default doing the visible work, a route that dropped
+        `inherits` would look correct in every other test here."""
+        self._create_chain()
+        part_two = self.book / "part-two"
+
+        with TestClient(app) as client:
+            payload = client.post(
+                "/api/project/create",
+                json={
+                    "root_path": str(part_two),
+                    "title": "Part Two",
+                    "inherits": [str(self.universe)],
+                },
+            ).json()
+
+        self.assertEqual(
+            [row["name"] for row in payload["ancestors"] if row["inherited"]], ["honorverse"]
         )
 
 

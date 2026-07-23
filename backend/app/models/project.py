@@ -11,6 +11,14 @@ from app.models.base import (
 class CreateProjectRequest(BaseModel):
     root_path: str = Field(min_length=1)
     title: str = Field(default="Untitled Project", min_length=1)
+    # What the new project inherits from (#425). **Unset is not "nothing"
+    # here** — it means "take the default", which is *every ancestor project*
+    # between the machine root and this folder. That asymmetry with the stored
+    # key (where absent genuinely means nothing, #309) is the point: a
+    # declaration nobody wrote should follow the folder layout the author just
+    # chose, while a declaration someone *did* write must be honoured verbatim.
+    # `[]` says so explicitly and creates a flat project.
+    inherits: list[str] | None = None
 
 
 class OpenProjectRequest(BaseModel):

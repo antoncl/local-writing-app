@@ -185,7 +185,7 @@
   // that axis draws a glyph, and a snapshot difference must never have one.
   const VIEW_LABEL = { both: "both versions", now: "the scene now", was: "the snapshot" } as const;
   let snapshotRibbon = $derived(
-    `Snapshot · ${relativeTime(snapshots.current?.captured_at ?? "")} · reading ${VIEW_LABEL[snapshots.view]}`,
+    `Snapshot · ${relativeTime(snapshots.current?.content_written_at ?? "")} · reading ${VIEW_LABEL[snapshots.view]}`,
   );
 
   let snapshotCompare = $derived(

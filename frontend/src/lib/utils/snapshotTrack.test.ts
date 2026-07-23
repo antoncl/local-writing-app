@@ -68,7 +68,7 @@ describe("notchPositions", () => {
 describe("ageMinutes", () => {
   const now = new Date("2026-07-22T15:00:00.000000+00:00");
 
-  it("reads the backend's captured_at", () => {
+  it("reads the backend's content_written_at", () => {
     expect(ageMinutes("2026-07-22T14:30:00.000000+00:00", now)).toBeCloseTo(30, 6);
   });
 

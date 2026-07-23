@@ -26,7 +26,11 @@
   // tick on one paint shares a clock. Recomputed whenever the list changes.
   let ages = $derived.by(() => {
     const now = new Date();
-    return strip.snapshots.map((snapshot) => ageMinutes(snapshot.captured_at, now));
+    // By CONTENT age, not record age (#458). The notch's position is the
+    // timeline, so it has to answer "how far back is this prose" — an automatic
+    // capture's record is made at the start of the current sitting while its
+    // bytes are from the end of the previous one.
+    return strip.snapshots.map((snapshot) => ageMinutes(snapshot.content_written_at, now));
   });
   let positions = $derived(notchPositions(ages));
   let span = $derived(trackSpanMinutes(ages));
@@ -39,7 +43,7 @@
     // explicit one taken in flow — so slice 1's tooltip is the date line alone
     // (§L: the absent case is the COMMON case and must read well on its own).
     // A description is an enrichment on top of it, and arrives with slice 4.
-    const when = relativeTime(snapshot.captured_at);
+    const when = relativeTime(snapshot.content_written_at);
     return snapshot.retention === "kept" ? `Snapshot · ${when} · kept` : `Snapshot · ${when}`;
   }
 
@@ -201,7 +205,7 @@
      here rather than beside the track — so it can be any width it likes. -->
 {#if parked}
   <div class="snapshot-actions">
-    <span class="asof">Snapshot · {relativeTime(strip.current?.captured_at ?? "")}</span>
+    <span class="asof">Snapshot · {relativeTime(strip.current?.content_written_at ?? "")}</span>
 
     <!-- The compare axis. It lives HERE and not beside the track because it is
          variable-width, and nothing sharing the track's row may change width —

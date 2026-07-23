@@ -75,7 +75,15 @@ backwards, which is the worse kind of consistency.
 ### D. Spacing is the timeline, and it cannot be linear
 
 Notches sit at their **age**, so the gaps carry meaning: a tight cluster is an afternoon's work, a
-long run is a week away from the scene. Edits cluster, which is precisely why the spacing is worth
+long run is a week away from the scene.
+
+> **The age of the *content*, not of the record** (#458, 2026-07-23). An automatic capture fires
+> before the save, so its bytes are the previous sitting's while its record is made at the start of
+> this one — the two can be a fortnight apart. Explicit captures were dated correctly, so laying out
+> by record time meant automatic and explicit notches on the same track described different things
+> with nothing to tell them apart. The sidecar carries both times; the strip reads
+> `content_written_at`. Record time stays the sort and thinning key, because repeated captures of
+> unchanged content share an mtime and content time therefore has ties where an ordering cannot. Edits cluster, which is precisely why the spacing is worth
 having — and precisely why linear time fails. One snapshot from last week plus four from this
 morning piles the recent four into an unreadable clump at the right edge, and those are the ones an
 author reaches for.

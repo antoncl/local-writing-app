@@ -25,6 +25,9 @@ const SNAPSHOT = {
   id: "snap_1",
   snapshot_of: "scene_1",
   captured_at: "2026-07-22T10:00:00.000000+00:00",
+  // Deliberately earlier than `captured_at`: this is an automatic capture, so
+  // its bytes are the previous sitting's (#458).
+  content_written_at: "2026-07-21T18:00:00.000000+00:00",
   retention: "kept" as const,
   schema_version: 5,
 };

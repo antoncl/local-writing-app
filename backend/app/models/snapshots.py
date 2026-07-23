@@ -139,7 +139,22 @@ class Snapshot(BaseModel):
 
     id: str
     snapshot_of: str
+    # When the RECORD was made. Monotonic across captures, so it is what the
+    # listing sorts by and what thinning calls "the oldest".
     captured_at: str
+    # When the CONTENT was written — the scene file's mtime at capture.
+    #
+    # **The strip lays out by this one** (#458). An automatic capture fires
+    # before the save, so its bytes are the previous sitting's; dating the notch
+    # by `captured_at` put a fortnight-old body at "just now", and since explicit
+    # captures were dated correctly the two tiers meant different things on one
+    # age-laid-out track.
+    #
+    # Not a redefinition of `captured_at`, because the two are different facts:
+    # repeated explicit captures with no edit between them share an mtime, so
+    # content time ties where creation time cannot. Ordering needs the monotonic
+    # one; the surface needs the honest one.
+    content_written_at: str = ""
     retention: Retention
     # The schema version in force at capture. Snapshots are immutable, so a
     # restore that crosses a version boundary runs the ladder over that one body

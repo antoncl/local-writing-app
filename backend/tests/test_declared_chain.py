@@ -17,7 +17,7 @@ from pathlib import Path
 from tempfile import TemporaryDirectory
 
 from fastapi.testclient import TestClient
-from layer_fixtures import declare, make_project_folder
+from layer_fixtures import declare, make_project_folder, set_projects_root
 from project_fixtures import bind_test_project
 
 from app.main import app
@@ -43,9 +43,13 @@ class DeclaredChainTestCase(unittest.TestCase):
         self.temp_dir.cleanup()
 
     def _set_base(self, folder: Path) -> None:
-        manifest = self.service._read_yaml(self.root / "project.yaml")
-        manifest.setdefault("settings", {})["projects_base_folder"] = str(folder)
-        self.service._write_yaml(self.root / "project.yaml", manifest)
+        """Set the walk's outer bound — the machine root since #429.
+
+        It used to be this project's own `settings.projects_base_folder`. One
+        folder per machine now, so it is written to machine settings; safe here
+        because conftest redirects `config_path()` per test.
+        """
+        set_projects_root(folder)
 
     def _layer_folders(self) -> list[Path]:
         return [layer.folder for layer in self.service.collect_layers(self.root)]
@@ -264,22 +268,32 @@ class WritingTheDeclarationTests(DeclaredChainTestCase):
         self.assertEqual(manifest["inherits"], ["../.."])
         self.assertEqual(self._layer_folders(), [self.universe, self.root])
 
-    def test_widening_the_base_and_declaring_in_one_request_is_accepted(self) -> None:
-        """The wizard's gesture is one save: pick a shelf, tick the levels.
+    def test_widening_the_bound_is_a_machine_change_that_every_project_sees(self) -> None:
+        """Since #429 the bound is the machine root, so widening it is not part
+        of any project's save — and does not need to be.
 
-        Validation reads the bound from the manifest, so before this was fixed
-        it saw the *stored* base — and refused a declaration the same request
-        was making legal. Splitting it into two requests worked, which is what
-        made it easy to miss.
+        This replaces `test_widening_the_base_and_declaring_in_one_request_is
+        _accepted`, which pinned the old shape: a settings update could carry a
+        new `projects_base_folder` *and* a declaration, because validation read
+        the bound from the manifest and would otherwise refuse a declaration
+        the same request was making legal. That gesture is gone with the key.
+
+        What replaces it is stronger. Widening happens once, in machine
+        settings, and every project sees it at once — so a folder that was out
+        of reach becomes declarable without touching any project, and the
+        declaration is then an ordinary save.
         """
         make_project_folder(self.service, self.base)
-        self._set_base(self.universe)  # a narrower stored bound: base is out of reach
+        self._set_base(self.universe)  # a narrower machine root: base is out of reach
 
-        self.service.update_project_settings(
-            UpdateProjectSettingsRequest(
-                projects_base_folder=str(self.base), inherits=[str(self.base)]
+        with self.assertRaises(ProjectServiceError):
+            self.service.update_project_settings(
+                UpdateProjectSettingsRequest(inherits=[str(self.base)])
             )
-        )
+
+        self._set_base(self.base)  # one machine-level change, no project touched
+
+        self.service.update_project_settings(UpdateProjectSettingsRequest(inherits=[str(self.base)]))
 
         self.assertEqual(self._layer_folders(), [self.base, self.root])
 
@@ -329,6 +343,84 @@ class TheSnapshotFollowsTheDeclarationTests(DeclaredChainTestCase):
         declare(self.service, self.root, [self.universe])
 
         self.assertIn("seren", self.service._build_node_index(self.root).by_id)
+
+
+class OneMachineRootMeansEveryLevelAgreesTests(unittest.TestCase):
+    """#429 — the defect this replaced, pinned so it cannot come back.
+
+    The bound used to be `settings.projects_base_folder`, written per project.
+    The create wizard built each project directly under the folder it passed as
+    the bound, so every project recorded **its own parent** — and no two levels
+    of one chain ever agreed. Opening the series enumerated `[universe]`;
+    opening the book enumerated `[series]`. `Universe › Series › Book` was
+    unreachable no matter what anyone declared, because the declaration can
+    only ever *select* from the enumeration.
+    """
+
+    def setUp(self) -> None:
+        self.tmp = TemporaryDirectory()
+        self.shelf = Path(self.tmp.name).resolve() / "writing"
+        self.universe = self.shelf / "honorverse"
+        self.series = self.universe / "honor-harrington"
+        self.book = self.series / "on-basilisk-station"
+        self.shelf.mkdir(parents=True)
+        set_projects_root(self.shelf)
+        # Created exactly as the app creates them — no per-project bound to
+        # pass any more, which is the point.
+        ProjectService.created_at(self.universe, "The Honorverse")
+        ProjectService.created_at(self.series, "Honor Harrington")
+        ProjectService.created_at(self.book, "On Basilisk Station")
+
+    def tearDown(self) -> None:
+        self.tmp.cleanup()
+
+    def test_every_level_reports_the_same_bound(self) -> None:
+        for root in (self.universe, self.series, self.book):
+            with self.subTest(project=root.name):
+                service = ProjectService.opened_at(root)
+                self.assertEqual(service.current_project().projects_base_folder, str(self.shelf))
+
+    def test_the_enumeration_deepens_with_the_project_instead_of_stopping_at_the_parent(self) -> None:
+        expected = {
+            self.universe: [],
+            self.series: [self.universe],
+            self.book: [self.universe, self.series],
+        }
+        for root, ancestors in expected.items():
+            with self.subTest(project=root.name):
+                service = ProjectService.opened_at(root)
+                projects = [
+                    folder for folder, is_project, _ in service.ancestor_candidates(root) if is_project
+                ]
+                self.assertEqual(projects, ancestors)
+
+    def test_a_three_level_chain_is_declarable_and_walks_whole(self) -> None:
+        """The demo that motivated #311, end to end."""
+        service = ProjectService.opened_at(self.book)
+        declare(service, self.book, [self.universe, self.series])
+
+        service = ProjectService.opened_at(self.book)
+        info = service.current_project()
+        chain = [row.title for row in info.ancestors if row.inherited and row.is_project]
+
+        self.assertEqual(chain, ["The Honorverse", "Honor Harrington"])
+        self.assertEqual(
+            [layer.folder for layer in service.collect_layers(self.book)],
+            [self.universe, self.series, self.book],
+        )
+
+    def test_a_project_outside_the_machine_root_stands_alone(self) -> None:
+        """Anton's framing: outside the root it is not a project the app works
+        on. Preventing it from being reachable at all is future work; today it
+        opens, warns, and inherits nothing rather than half-participating."""
+        stray = Path(self.tmp.name).resolve() / "elsewhere" / "orphan"
+        service = ProjectService.created_at(stray, "Orphan")
+
+        self.assertEqual(service.ancestor_candidates(stray), [])
+        self.assertEqual([layer.folder for layer in service.collect_layers(stray)], [stray])
+        self.assertTrue(
+            any("outside the machine's projects folder" in w for w in service.validate_project().warnings)
+        )
 
 
 if __name__ == "__main__":

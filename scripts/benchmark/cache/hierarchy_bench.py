@@ -34,6 +34,7 @@ from __future__ import annotations
 
 import gc
 import json
+import os
 import shutil
 import sqlite3
 import sys
@@ -45,6 +46,7 @@ from pathlib import Path
 REPO_ROOT = Path(__file__).resolve().parents[3]
 sys.path.insert(0, str(REPO_ROOT / "backend"))
 
+from app.services import machine_settings as ms_service  # noqa: E402
 from app.services.project_service import ProjectService  # noqa: E402
 
 FIXTURE_ROOT = REPO_ROOT / "tmp" / "benchmark-fixtures" / "cache"
@@ -192,10 +194,47 @@ def _write_layer_schema(folder: Path, layer: str) -> None:
 
 
 def _write_project_yaml(folder: Path, base: Path) -> None:
+    """A layer of the fixture chain: a manifest plus its declaration.
+
+    Two things this has to say, and it used to say neither correctly:
+
+    * `inherits` — since #309 inheritance is **declared**. A manifest alone
+      makes a folder a project; it does not make it a layer of anything.
+    * nothing about the bound — since #429 the walk stops at the *machine*
+      root, so `settings.projects_base_folder` is ignored. Writing it made the
+      generated tree look layered while every project actually walked alone,
+      and the bench happily reported 4-layer numbers for a 1-layer chain.
+
+    `set_machine_root` below is what makes `base` reachable at all.
+    """
     folder.mkdir(parents=True, exist_ok=True)
-    (folder / "project.yaml").write_text(
-        f"title: {folder.name}\nsettings:\n  projects_base_folder: {base}\n", encoding="utf-8"
-    )
+    ancestors = []
+    current = folder.parent
+    while True:
+        ancestors.append(os.path.relpath(current, folder).replace("\\", "/"))
+        if current == base:
+            break
+        current = current.parent
+    inherits = "".join(f"  - {entry}\n" for entry in reversed(ancestors)) if folder != base else ""
+    text = f"title: {folder.name}\n"
+    if inherits:
+        text += f"inherits:\n{inherits}"
+    (folder / "project.yaml").write_text(text, encoding="utf-8")
+
+
+def set_machine_root(base: Path) -> None:
+    """Point the walk's bound (#429) at this fixture tree.
+
+    Also isolates the bench from the developer's real machine config: without
+    this it would read `%APPDATA%`, so the chain depth would depend on whoever
+    happened to run it, and a stray `default_projects_folder` could make the
+    numbers unreproducible.
+    """
+    config_dir = FIXTURE_ROOT / ".machine"
+    config_dir.mkdir(parents=True, exist_ok=True)
+    config_path = config_dir / "config.yaml"
+    config_path.write_text(f"default_projects_folder: {base}\n", encoding="utf-8")
+    ms_service.config_path = lambda: config_path  # type: ignore[assignment]
 
 
 def _write_lore(folder: Path, prefix: str, count: int, start: int, pool: list[str], sc: Scale) -> list[str]:
@@ -495,12 +534,21 @@ def run_scale(sc: Scale, regen: bool) -> None:
         print(f" {elapsed:.1f}s")
 
     book = root / "universe_00" / "series_00" / "book_00"
-    svc = ProjectService()
-    svc.open_project(book)
+    # Must precede the open: the bound decides how deep the chain is, and the
+    # numbers below are meaningless if it is the developer's real config (#429).
+    set_machine_root(root)
+    # `open_project` was removed with the service singleton in #399; this bench
+    # kept calling it and would have raised on the first scale.
+    svc = ProjectService.opened_at(book)
 
     layers = svc._project_layer_folders(book)
     total_files = sum(1 for _ in root.rglob("*.md"))
     print(f"  chain depth={len(layers)}   shelf .md files={total_files}")
+    if len(layers) < 4:
+        # The bench exists to measure a deep chain. Reporting one-layer numbers
+        # under a four-layer heading is worse than not running: it is what a
+        # stale `projects_base_folder` did here for one whole release.
+        raise SystemExit(f"fixture is not layered (depth={len(layers)}); regenerate with --regen")
 
     t_schema, _ = time_it(svc.read_metadata_schema)
     print(f"  [Q3] read_metadata_schema (uncached, {len(layers)} layers) : {t_schema * 1000:6.1f} ms")

@@ -49,18 +49,20 @@ from app.services.tree_structure import TreeStructureService
 
 
 class ProjectLifecycleMixin:
-    def _scaffold_new_project(self, title: str, projects_base_folder: Path | None = None) -> None:
+    def _scaffold_new_project(self, title: str) -> None:
         """Write a new project's files under this service's already-bound root.
 
         Creation used to resolve the root and then point the service at it, which
         made "which project is this service on?" an outcome of the call rather
         than an input to it (#399). The root now arrives with the service, so
         this only writes files; `ProjectService.created_at` is the entry point.
+
+        No longer takes a base folder (#429): the bound is the machine root, so
+        creating a project cannot set it. Passing one per create is what made
+        every project record its own parent and every chain one hop long.
         """
         root = self._require_project()
-        if projects_base_folder is None:
-            root.parent.mkdir(parents=True, exist_ok=True)
-        base_folder = self._validate_projects_base_folder(projects_base_folder or root.parent, root)
+        root.parent.mkdir(parents=True, exist_ok=True)
         root.mkdir(parents=True, exist_ok=True)
         for folder in ["scenes", "lore", "prompts", ".cache"]:
             (root / folder).mkdir(exist_ok=True)
@@ -72,7 +74,7 @@ class ProjectLifecycleMixin:
         # and 404s on its project node forever. This order fails the other way,
         # which is the recoverable one.
         self._write_project_node_file(root / "project.md", self._new_project_node(title))
-        self._write_yaml(root / "project.yaml", self._new_project_manifest(title, root, base_folder))
+        self._write_yaml(root / "project.yaml", self._new_project_manifest(title))
         self._write_yaml(root / "metadata.schema.yaml", self._empty_metadata_schema())
         self._write_yaml(root / "tags.yaml", {"tags": []})
         initial_scene = Scene(
@@ -102,14 +104,19 @@ class ProjectLifecycleMixin:
         TreeStructureService(root, RESEARCH_TREE_CONFIG).initialize()
         self._write_yaml(root / "todo.yaml", {"items": []})
 
-    def _new_project_manifest(self, title: str, root: Path, projects_base_folder: Path | None = None) -> dict[str, Any]:
-        base_folder = projects_base_folder or root.parent
+    def _new_project_manifest(self, title: str) -> dict[str, Any]:
+        """The manifest a fresh project starts with.
+
+        No `projects_base_folder` (#429): the walk's bound is the machine root,
+        so a project does not carry one. Writing it per project is what made
+        every chain one hop long — the wizard passed the folder it had just
+        built the project inside, so the bound was always the parent.
+        """
         return {
             "title": title,
             "version": 1,
             "schema_version": PROJECT_SCHEMA_VERSION,
             "settings": {
-                "projects_base_folder": str(base_folder),
                 "theme": "system",
                 "ai": {
                     "policy": "off",
@@ -125,22 +132,6 @@ class ProjectLifecycleMixin:
 
     def _empty_metadata_schema(self) -> dict[str, Any]:
         return {"version": 1, "entry_types": {}, "fields": {}, "groups": {}}
-
-    def _rebase_projects_base_folder(self, projects_base_folder: Path) -> None:
-        """Re-point this project's base folder — the opt-in half of opening.
-
-        Split out of `open_project` (#399) for the same reason as the scaffold:
-        it operates on a bound root instead of producing one.
-        """
-        root = self._require_project()
-        manifest = self._read_yaml(root / MANIFEST_FILENAME)
-        base_folder = self._validate_projects_base_folder(projects_base_folder, root)
-        settings = manifest.get("settings")
-        if not isinstance(settings, dict):
-            settings = {}
-        settings["projects_base_folder"] = str(base_folder)
-        manifest["settings"] = settings
-        self._write_yaml(root / MANIFEST_FILENAME, manifest)
 
     def _project_title(self, root: Path) -> str | None:
         """This project's title, from the manifest — the only place it lives.
@@ -158,10 +149,16 @@ class ProjectLifecycleMixin:
     def current_project(self) -> ProjectInfo:
         root = self._require_project()
         ai = self._read_ai_settings(root)
+        base_folder = self._metadata_schema_base_folder(root)
         return ProjectInfo(
             title=self._project_title(root) or root.name,
             root_path=str(root),
-            projects_base_folder=str(self._metadata_schema_base_folder(root) or root.parent),
+            # The machine root (#429), reported as `None` when none is set
+            # rather than falling back to `root.parent`. That fallback was a
+            # lie the moment the bound stopped being per project: the walk
+            # returns no candidates without a root, so claiming the parent was
+            # the bound described a chain that does not exist.
+            projects_base_folder=str(base_folder) if base_folder else None,
             ai_policy=ai.get("policy", "off"),
             ancestors=self._ancestor_candidates_for_api(root),
             children=self._project_children(root),
@@ -296,11 +293,6 @@ class ProjectLifecycleMixin:
         settings = manifest.get("settings")
         if not isinstance(settings, dict):
             settings = {}
-        if request.projects_base_folder is not None:
-            if not request.projects_base_folder.strip():
-                raise ProjectServiceError("Projects base folder is required.", 400)
-            base_folder = self._validate_projects_base_folder(Path(request.projects_base_folder), root)
-            settings["projects_base_folder"] = str(base_folder)
         ai_settings = settings.get("ai")
         if not isinstance(ai_settings, dict):
             ai_settings = {}
@@ -308,21 +300,19 @@ class ProjectLifecycleMixin:
         if request.ai_policy is not None:
             ai_settings["policy"] = request.ai_policy
         if request.inherits is not None:
-            # Against the bound this request is *setting*, not the stored one —
-            # widening the base folder and declaring a newly-eligible ancestor
-            # is one gesture in the wizard and must be one request here.
-            manifest[INHERITS_KEY] = self._validated_declaration(
-                request.inherits, root, base=Path(settings["projects_base_folder"])
-                if isinstance(settings.get("projects_base_folder"), str)
-                else None,
-            )
+            # Validated against the machine root (#429). There is no pending
+            # bound to pass any more: widening is a machine-settings change, so
+            # it cannot arrive in the same request as a declaration — and it no
+            # longer needs to, because widening it widens it for every project
+            # at once rather than for this one.
+            manifest[INHERITS_KEY] = self._validated_declaration(request.inherits, root)
         if ai_settings:
             settings["ai"] = ai_settings
         manifest["settings"] = settings
         self._write_yaml(root / "project.yaml", manifest)
         return self.current_project()
 
-    def _validated_declaration(self, declared: list[str], root: Path, *, base: Path | None = None) -> list[str]:
+    def _validated_declaration(self, declared: list[str], root: Path) -> list[str]:
         """Turn a requested declaration into manifest entries, or refuse (#309).
 
         Refuses here rather than dropping-with-a-warning at read time, because
@@ -331,11 +321,17 @@ class ProjectLifecycleMixin:
         entry that stopped being an ancestor (a folder moved out from under it)
         is a state the reader must survive. Same rule, different obligation.
 
-        Stored relative to the project so that moving or renaming a shelf does
-        not invalidate every book beneath it.
+        Stored relative to the project so that moving or renaming the folder
+        above it does not invalidate every book beneath.
+
+        Took a pending `base` until #429, so that a settings update widening
+        `projects_base_folder` and declaring a newly-eligible ancestor could be
+        one request — the wizard's gesture. The bound is machine-level now, so
+        widening is not part of any project's save and there is no pending
+        value to validate against.
         """
         candidates = {
-            folder for folder, is_project, _ in self.ancestor_candidates(root, base=base) if is_project
+            folder for folder, is_project, _ in self.ancestor_candidates(root) if is_project
         }
         entries: list[str] = []
         for raw in declared:
@@ -383,16 +379,6 @@ class ProjectLifecycleMixin:
         if "policy" in ai and ai["policy"] not in get_args(AIPolicy):
             ai = {**ai, "policy": "off"}
         return ai
-
-    def _validate_projects_base_folder(self, base_folder_path: Path, project_root: Path) -> Path:
-        base_folder = base_folder_path.expanduser().resolve()
-        if not base_folder.exists():
-            raise ProjectServiceError("Projects base folder does not exist.", 404)
-        if not base_folder.is_dir():
-            raise ProjectServiceError("Projects base folder must be a folder.", 400)
-        if not self._is_relative_to(project_root, base_folder):
-            raise ProjectServiceError("Project folder must be inside the projects base folder.", 400)
-        return base_folder
 
     def list_directories(self, path: Path | None = None) -> DirectoryListing:
         target = (path or self._default_directory_picker_path()).expanduser().resolve()

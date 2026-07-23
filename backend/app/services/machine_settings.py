@@ -11,6 +11,7 @@ import yaml
 from pydantic import BaseModel, Field
 
 from app.models import AssistantTag, RecentProject, Swatch
+from app.services.project.errors import ProjectServiceError
 
 APP_NAME = "local-writing-app"
 CONFIG_FILENAME = "config.yaml"
@@ -128,6 +129,91 @@ def config_dir() -> Path:
 
 def config_path() -> Path:
     return config_dir() / CONFIG_FILENAME
+
+
+def validated_projects_root(raw: str) -> str:
+    """Check a projects root before it is stored, or refuse (#429).
+
+    The bound used to be validated on the way in — `_validate_projects_base_folder`
+    checked that a project's `projects_base_folder` existed, was a directory,
+    and actually contained the project, raising 404/400 otherwise. Moving the
+    bound to the machine tier deleted that check along with the key it guarded,
+    and the value it now guards is **more** dangerous unvalidated, not less: a
+    per-project mistake broke one project, whereas a mistyped machine root
+    silently flattens the chain for *every* project at once, and the resulting
+    validation warning blames each project for being "outside" a folder that
+    does not exist.
+
+    Empty is legal and means unset — the state of every machine before the
+    setting is touched, and the way to deliberately clear it.
+
+    Deliberately **not** checked: whether any particular project sits inside it.
+    That is no longer this value's business — a project outside the root is
+    #441's subject, and refusing to save a root because the currently-open
+    project is outside it would make the setting unfixable from the one screen
+    that edits it.
+    """
+    if not raw.strip():
+        return ""
+    try:
+        folder = Path(raw).expanduser()
+    except (OSError, ValueError) as exc:
+        raise ProjectServiceError(f"Not a usable folder path: {raw}", 400) from exc
+    if not folder.exists():
+        raise ProjectServiceError(f"That projects folder does not exist: {folder}", 404)
+    if not folder.is_dir():
+        raise ProjectServiceError(f"The projects folder must be a folder: {folder}", 400)
+    return str(folder.resolve())
+
+
+def projects_root() -> Path | None:
+    """The one folder the app works within — the outer bound of every layer
+    walk (#429).
+
+    The bound is **machine information**: there is exactly one root, so every
+    project under it necessarily agrees about where the chain stops. It used to
+    be `settings.projects_base_folder` in each project's own `project.yaml`,
+    which meant an absolute path duplicated into every manifest on disk —
+    surviving neither a move, nor another machine, nor a different drive
+    letter — and, because the create wizard built each project directly under
+    the folder it passed as the bound, always equal to the project's own
+    parent. No two levels of one shelf ever agreed, so a chain enumerated
+    exactly one hop from whichever end it was opened.
+
+    Pre-1.0 the stored manifest key is simply ignored; there is no migration
+    (`memory/feedback_no_pre_1_0_migrations.md`).
+
+    **Read directly rather than through `load_settings()`, deliberately.**
+    That function is a loader, not an accessor: it can *write* assistant files
+    (`_migrate_default_models_to_files_if_empty`) and it mutates the palette
+    (`_top_up_palette`). This is called from `_metadata_schema_base_folder`,
+    i.e. on every layer walk, i.e. on every node-index build. A read path must
+    not be able to write, and a walk must not carry a migration.
+
+    Derived from `config_path()` like `assistants_dir()`, so the autouse test
+    fixture that redirects the config path isolates this too — a test can never
+    read or write the developer's real machine root.
+
+    `None` when unset, empty or unreadable. That is the honest degradation: no
+    bound means a project's chain is itself alone, which is what the app did
+    for every project before a root was configured anyway.
+    """
+    path = config_path()
+    if not path.exists():
+        return None
+    try:
+        data = yaml.safe_load(path.read_text(encoding="utf-8")) or {}
+    except (yaml.YAMLError, OSError, UnicodeDecodeError):
+        return None
+    if not isinstance(data, dict):
+        return None
+    raw = data.get("default_projects_folder")
+    if not isinstance(raw, str) or not raw.strip():
+        return None
+    try:
+        return Path(raw).expanduser().resolve()
+    except (OSError, ValueError):
+        return None
 
 
 def assistants_dir() -> Path:
@@ -283,7 +369,7 @@ def merge_update(current: MachineSettings, patch: dict[str, Any]) -> MachineSett
     if "default_models" in patch and isinstance(patch["default_models"], dict):
         base.setdefault("default_models", {}).update(patch["default_models"])
     if "default_projects_folder" in patch and patch["default_projects_folder"] is not None:
-        base["default_projects_folder"] = patch["default_projects_folder"]
+        base["default_projects_folder"] = validated_projects_root(patch["default_projects_folder"])
     if "recent_projects" in patch and patch["recent_projects"] is not None:
         # An explicit list rewrites the recents — used when the user removes
         # a stale entry from the UI.

@@ -3,8 +3,10 @@ from __future__ import annotations
 import unittest
 from pathlib import Path
 from tempfile import TemporaryDirectory
+from typing import Any
 from unittest.mock import patch
 
+import yaml
 from fastapi.testclient import TestClient
 
 from app.main import app
@@ -128,14 +130,27 @@ class RecentProjectsEndpointTests(unittest.TestCase):
         recents = view["recent_projects"]
         self.assertEqual(len(recents), 1)
 
-    def test_create_request_accepts_omitted_projects_base_folder(self) -> None:
-        # Previously projects_base_folder was required; now optional. The
-        # frontend no longer surfaces it.
+    def test_create_ignores_a_projects_base_folder_it_no_longer_accepts(self) -> None:
+        """#429 removed the field; a client still sending it must not break.
+
+        It went required → optional → gone. The walk's bound is the machine
+        root now, so create has nothing to do with one. Pydantic ignores
+        unknown keys by default and that is the behaviour worth pinning: a
+        frontend cached from before the change keeps working, and — the part
+        that matters — the value it sends has no effect on the chain.
+        """
         response = self.client.post(
             "/api/project/create",
-            json={"root_path": str(self.root / "no-base"), "title": "No Base"},
+            json={
+                "root_path": str(self.root / "no-base"),
+                "title": "No Base",
+                "projects_base_folder": str(self.root / "somewhere-else"),
+            },
         )
         self.assertEqual(response.status_code, 200, response.text)
+        manifest_path = Path(response.json()["root_path"]) / "project.yaml"
+        manifest = yaml.safe_load(manifest_path.read_text(encoding="utf-8"))
+        self.assertNotIn("projects_base_folder", manifest["settings"])
 
 
 class DefaultProjectsFolderTests(unittest.TestCase):
@@ -146,7 +161,11 @@ class DefaultProjectsFolderTests(unittest.TestCase):
 
     def setUp(self) -> None:
         self.tmp = TemporaryDirectory()
-        self.projects_folder = str(Path(self.tmp.name).resolve() / "writing")
+        folder = Path(self.tmp.name).resolve() / "writing"
+        # Has to exist since #429: the value is the layer walk's bound now, and
+        # a root that is not a real folder is refused on save.
+        folder.mkdir()
+        self.projects_folder = str(folder)
         self.client = TestClient(app)
 
     def tearDown(self) -> None:
@@ -270,6 +289,73 @@ class PaletteTests(unittest.TestCase):
         view = self.client.get("/api/settings/machine").json()
         ids = [s["id"] for s in view["palette"]]
         self.assertEqual(ids[0], "only")
+
+
+class TheProjectsRootIsValidatedOnSaveTests(unittest.TestCase):
+    """#429 moved the layer walk's bound here, so a bad value is not a local
+    mistake — it silently flattens the chain for **every** project at once.
+
+    The check that used to guard the equivalent per-project key
+    (`_validate_projects_base_folder`) was deleted along with that key. These
+    pin its replacement, because the failure it prevents is invisible: an
+    unvalidated root produces no error, just every project quietly inheriting
+    nothing and a validation warning blaming each project for being "outside" a
+    folder that never existed.
+    """
+
+    def setUp(self) -> None:
+        self.tmp = TemporaryDirectory()
+        self.addCleanup(self.tmp.cleanup)
+        self.dir = Path(self.tmp.name).resolve()
+        self.client = TestClient(app)
+
+    def _put(self, folder: str) -> Any:
+        return self.client.put("/api/settings/machine", json={"default_projects_folder": folder})
+
+    def test_a_folder_that_does_not_exist_is_refused(self) -> None:
+        response = self._put(str(self.dir / "typo"))
+
+        self.assertEqual(response.status_code, 404, response.text)
+        self.assertIn("does not exist", response.json()["detail"])
+        self.assertEqual(ms.load_settings().default_projects_folder, "")
+
+    def test_a_file_is_refused(self) -> None:
+        target = self.dir / "notes.txt"
+        target.write_text("not a folder", encoding="utf-8")
+
+        response = self._put(str(target))
+
+        self.assertEqual(response.status_code, 400, response.text)
+        self.assertEqual(ms.load_settings().default_projects_folder, "")
+
+    def test_a_real_folder_is_stored_resolved(self) -> None:
+        response = self._put(str(self.dir))
+
+        self.assertEqual(response.status_code, 200, response.text)
+        self.assertEqual(ms.load_settings().default_projects_folder, str(self.dir))
+
+    def test_empty_clears_it_rather_than_being_refused(self) -> None:
+        """Unset is a legal state — every machine starts there, and it is the
+        only way to deliberately clear the setting."""
+        self.assertEqual(self._put(str(self.dir)).status_code, 200)
+
+        response = self._put("")
+
+        self.assertEqual(response.status_code, 200, response.text)
+        self.assertEqual(ms.load_settings().default_projects_folder, "")
+
+    def test_a_root_the_open_project_is_outside_is_still_accepted(self) -> None:
+        """Deliberately NOT checked (unlike the per-project key it replaced).
+
+        Refusing a root because the currently-open project sits outside it
+        would make the setting unfixable from the one screen that edits it —
+        exactly when the author most needs to fix it. A project outside the
+        root is #441's subject, not this validator's.
+        """
+        elsewhere = self.dir / "elsewhere"
+        elsewhere.mkdir()
+
+        self.assertEqual(self._put(str(elsewhere)).status_code, 200)
 
 
 if __name__ == "__main__":

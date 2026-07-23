@@ -5,6 +5,7 @@ from pathlib import Path
 from tempfile import TemporaryDirectory
 
 from fastapi.testclient import TestClient
+from layer_fixtures import set_projects_root
 from project_fixtures import open_test_project
 from pydantic import ValidationError
 
@@ -201,8 +202,12 @@ class NestedProjectNodeIdentityTests(unittest.TestCase):
         self.universe = self.base / "honorverse"
         self.root = self.universe / "book01"
         self.base.mkdir(parents=True)
-        self.outer = ProjectService.created_at(self.universe, "Honorverse", projects_base_folder=self.base)
-        self.inner = ProjectService.created_at(self.root, "Book 1", projects_base_folder=self.base)
+        # The bound is the machine root since #429, so it is set once here
+        # rather than passed to each create — which is the whole point: two
+        # levels of one chain can no longer disagree about it.
+        set_projects_root(self.base)
+        self.outer = ProjectService.created_at(self.universe, "Honorverse")
+        self.inner = ProjectService.created_at(self.root, "Book 1")
 
     def tearDown(self) -> None:
         self.tmp.cleanup()

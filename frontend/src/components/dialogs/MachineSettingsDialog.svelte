@@ -62,7 +62,7 @@
       <p class="muted">Stored locally at: <code>{settings?.config_path}</code></p>
 
       <label>
-        Default projects folder
+        Projects folder
         <div class="path-picker-row">
           <input type="text" bind:value={draft.default_projects_folder} placeholder="C:\path\to\writing" />
           <button
@@ -71,7 +71,21 @@
             on:click={() => draft && (draft.default_projects_folder = "")}
           >Clear</button>
         </div>
-        <small class="muted">Where new projects get created by default. Leave empty to require an explicit folder each time. The project switcher reads recent projects from this config too.</small>
+        <!--
+          The copy here used to describe this as a creation convenience only.
+          Since #429 it is also the outer bound of every project's inheritance
+          chain, so clearing it is not a neutral "ask me each time" — it stops
+          every project inheriting. Saying so is the difference between an
+          informed choice and a silent, machine-wide loss of schema, assistants
+          and lore. The label lost "Default" for the same reason: the value is
+          authoritative, not a suggestion.
+        -->
+        <small class="muted">
+          The one folder this app works within. New projects are created here, and a project
+          inherits from the projects above it up to this folder — so widening it deepens every
+          chain at once. Leave empty and each project stands alone, inheriting nothing. The
+          project switcher reads recent projects from this config too.
+        </small>
       </label>
 
       <p class="muted">API keys are masked on read. Leaving a masked field unchanged keeps the existing value.</p>

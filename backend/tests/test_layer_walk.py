@@ -32,7 +32,6 @@ class LayerWalkTests(unittest.TestCase):
         self.series = self.universe / "honor-harrington"
         self.root = self.series / "book01"
         self.service = ProjectService.created_at(self.root, "Book 1")
-        declare_full_chain(self.service, self.root, self.base)
         # A REAL machine layer. conftest's autouse fixture points the config dir
         # at an empty tmp path, so without this `machine_layer()` returns None
         # and every "the machine layer is excluded" assertion below passes for
@@ -45,6 +44,12 @@ class LayerWalkTests(unittest.TestCase):
         )
         self._patcher.start()
         (self.config_dir / "assistants").mkdir()
+        # AFTER the patch, deliberately: since #429 the walk's bound is the
+        # machine root, and `declare_full_chain` writes it through
+        # `config_path()`. Declaring before the patch would write into
+        # conftest's config dir while the walk read this one, and every layer
+        # assertion would then see a chain of length one.
+        declare_full_chain(self.service, self.root, self.base)
 
     def tearDown(self) -> None:
         self._patcher.stop()
@@ -191,9 +196,14 @@ class LayerWalkTests(unittest.TestCase):
         )
 
     def test_walk_degrades_to_the_project_alone_without_a_base_folder(self) -> None:
-        manifest = self.service._read_yaml(self.root / "project.yaml")
-        manifest["settings"].pop("projects_base_folder")
-        self.service._write_yaml(self.root / "project.yaml", manifest)
+        """No machine root configured → no bound → the project stands alone.
+
+        Since #429 the bound is machine settings, so "unset" means clearing
+        `default_projects_folder` there rather than popping a key from this
+        project's manifest. The degradation itself is unchanged, and it is the
+        state every project is in before a root is ever configured.
+        """
+        (self.config_dir / "config.yaml").write_text("default_projects_folder: ''\n", encoding="utf-8")
 
         layers = self.service.collect_layers(self.root)
 
@@ -563,10 +573,6 @@ class MachineLayerIsAnOrdinaryLayerTests(unittest.TestCase):
         self.base = Path(self.temp_dir.name).resolve() / "writing"
         self.root = self.base / "book01"
         self.service = ProjectService.created_at(self.root, "Book 1")
-        # The base folder is a layer only because this project declares it
-        # (#309). Nothing is inherited by default any more, so a fixture that
-        # wants a project layer to compare against has to say so.
-        declare_full_chain(self.service, self.root, self.base)
         # Redirect the machine config dir into the temp tree so the machine
         # layer is deterministic rather than "whatever this box happens to have".
         self.config_dir = Path(self.temp_dir.name).resolve() / "config"
@@ -576,6 +582,12 @@ class MachineLayerIsAnOrdinaryLayerTests(unittest.TestCase):
             return_value=self.config_dir / "config.yaml",
         )
         self._patcher.start()
+        # The base folder is a layer only because this project declares it
+        # (#309). Nothing is inherited by default any more, so a fixture that
+        # wants a project layer to compare against has to say so. Declared
+        # AFTER the patch: since #429 the walk's bound is the machine root, so
+        # the fixture writes through `config_path()` and must see this one.
+        declare_full_chain(self.service, self.root, self.base)
 
     def tearDown(self) -> None:
         self._patcher.stop()
@@ -658,7 +670,6 @@ class PerLayerCollectionRulesTests(unittest.TestCase):
         self.base = Path(self.temp_dir.name).resolve() / "writing"
         self.root = self.base / "book01"
         self.service = ProjectService.created_at(self.root, "Book 1")
-        declare_full_chain(self.service, self.root, self.base)
         self.config_dir = Path(self.temp_dir.name).resolve() / "config"
         self.config_dir.mkdir()
         self._patcher = patch(
@@ -666,6 +677,8 @@ class PerLayerCollectionRulesTests(unittest.TestCase):
             return_value=self.config_dir / "config.yaml",
         )
         self._patcher.start()
+        # After the patch (#429): the declaration's bound is the machine root.
+        declare_full_chain(self.service, self.root, self.base)
 
     def tearDown(self) -> None:
         self._patcher.stop()

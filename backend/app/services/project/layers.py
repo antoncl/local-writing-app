@@ -15,12 +15,13 @@ re-derive: `folder`, `id`, `label`, an **explicit `rank`**, and the `is_root` /
 `is_machine` flags. Per-layer logic lives in the visitor, not in a private copy
 of the traversal.
 
-**Behaviour is preserved exactly**, including the base-folder widening in
-`_metadata_schema_base_folder` (see its docstring). #329 is a refactor: the
-scattered walks collapse into one, and what each did per layer becomes a
-visitor. ADR-0039 Amendment 2 also stipulates the root rather than inferring it
-from a stray `metadata.schema.yaml` — that is a **behaviour** change and lands
-separately (#337), which is now a one-line edit in one place because of this.
+#329 was a refactor: the scattered walks collapse into one, and what each did
+per layer becomes a visitor. Two behaviour changes have landed in
+`_metadata_schema_base_folder` since, each a one-line edit in one place because
+of that collapse — #337 / ADR-0039 Amendment 2 stipulated the root rather than
+inferring it from a stray `metadata.schema.yaml`, and **#429 moved the bound off
+the project onto the machine**: one root per machine, so every project under it
+necessarily agrees about where the chain stops. See that method's docstring.
 
 Ordering contract, relied on by consumers:
 
@@ -52,9 +53,11 @@ from app.services.project.node_index import IndexLayer
 # The metadata-schema file each project layer may carry. Not applicable to the
 # machine layer, which is out-of-tree and contributes assistants only.
 SCHEMA_FILENAME = "metadata.schema.yaml"
-# The per-layer manifest. Its `settings.projects_base_folder` is what the walk
-# consults to decide where it stops, so it is an input to the *shape* of the
-# chain and not only to a layer's content.
+# The per-layer manifest: a folder carrying one IS a project, and its `inherits`
+# key is the declaration. It no longer says where the walk *stops* — that bound
+# is the machine root since #429, one folder for every project, so a manifest is
+# an input to a layer's content and to whether the folder counts as a layer at
+# all, but not to the extent of the chain.
 MANIFEST_FILENAME = "project.yaml"
 # The manifest key holding the declaration: which enumerated ancestors this
 # project inherits from (#309 / ADR-0039 Amendment 1). Absent means none.
@@ -231,31 +234,33 @@ class LayerWalkMixin:
             return None
         return machine_dir
 
-    def ancestor_candidates(self, root: Path, *, base: Path | None = None) -> list[tuple[Path, bool, bool]]:
-        """Every folder between the configured base and `root`, outermost first,
+    def ancestor_candidates(self, root: Path) -> list[tuple[Path, bool, bool]]:
+        """Every folder between the machine root and `root`, outermost first,
         as `(folder, is_project, inherited)` (#309).
 
         The candidate set is the **filesystem walk**, which is finite and
         cycle-free by construction — ADR-0039 Amendment 1 rejected a
         user-editable `parent:` link precisely because that can form a loop.
         The declaration only ever *selects* from this list; it can never extend
-        it, so a project cannot name its way out of the configured base folder.
+        it, so a project cannot name its way outside the machine root.
 
         Non-project folders are reported too, marked `is_project=False`. They
         can never be inherited (there is no `project.yaml` to layer), but
         omitting them from the enumeration would leave a hole in the wizard's
         list that reads as a defect rather than as information.
 
-        `base` overrides the stored bound with one that is **about to be
-        written**. A settings update that widens `projects_base_folder` and
-        declares a newly-eligible ancestor in the same request would otherwise
-        validate the declaration against the *old* bound and reject it — which
-        is exactly the shape #318's wizard submits (pick a shelf, tick the
-        levels, save once). It is a pending-value parameter, not an opt-out:
-        omitting it reads the manifest, which is right for every other caller.
+        Took a pending `base` override until #429, so that a settings update
+        widening `projects_base_folder` and declaring a newly-eligible ancestor
+        could be validated as one request. With the bound on the machine tier
+        there is no per-project value to be mid-write: widening happens once,
+        in machine settings, and every project sees it at once.
+
+        A project outside the machine root yields `[]` — the bound is absent
+        from its parent chain, so there is nothing between them. That is the
+        length-one chain a stray project gets.
         """
         root = root.resolve()
-        base_folder = base.resolve() if base is not None else self._metadata_schema_base_folder(root)
+        base_folder = self._metadata_schema_base_folder(root)
         chain = [root, *root.parents]
         if base_folder is None or base_folder not in chain:
             return []
@@ -361,34 +366,35 @@ class LayerWalkMixin:
     def _metadata_schema_base_folder(self, root: Path) -> Path | None:
         """Where the walk stops — the outer bound of the layer chain.
 
-        **The configured `projects_base_folder`, and nothing else** (#337 /
-        ADR-0039 Amendment 2: the root is stipulated, never inferred from a
-        file's presence).
+        **The machine root, and nothing else** (#429). One folder per machine,
+        so every project under it necessarily agrees about where the chain
+        stops. The root is stipulated, never inferred from a file's presence
+        (#337 / ADR-0039 Amendment 2) — that part is unchanged; what moved is
+        *who owns the value*.
 
-        Until #337 this widened: when the configured value equalled
-        `root.parent` — which the project chooser writes on *every* create, so
-        it was the normal path, not an edge case — it was discarded in favour of
-        the **outermost** ancestor anywhere up `root.parents` that happened to
-        contain a `metadata.schema.yaml`. A stray schema file in a grandparent
-        therefore set the extent of schema layering, the node index *and* the
-        assistant roster, with no declaration and nothing on screen naming it.
-        Under #312 it would have decided which ancestors contribute AI policy,
-        which turns a surprise into a permission surprise.
+        It used to be each project's own `settings.projects_base_folder`. Two
+        things were wrong with that. It is machine information wearing a file's
+        clothes: an absolute path duplicated into every manifest, surviving
+        neither a move, nor another machine, nor a different drive letter. And
+        because the create wizard built each project directly under the folder
+        it passed as the bound, the stored value was always the project's own
+        parent — so no two levels of one shelf agreed, and a chain enumerated
+        exactly one hop from whichever end it was opened. `Universe › Series ›
+        Book` was unreachable.
 
-        The widening was also, accidentally, the only thing giving a
-        UI-created project a chain deeper than two layers. That is why this
-        lands **with** the declaration (#309) and not before it: enumeration
-        now stops where the user said it does, and inheritance is what the
-        project declares within that bound.
+        `root` is still taken because the *caller's* question is "where does
+        this project's walk stop", and a project outside the root has no walk
+        at all: `ancestor_candidates` finds the bound absent from its parent
+        chain and returns nothing, leaving a chain of length one. Keeping the
+        parameter also means the signature does not change if the bound ever
+        becomes per-something-else again.
+
+        `None` when no root is configured — no bound, so a project's chain is
+        itself alone.
         """
-        manifest = self._read_yaml(root / MANIFEST_FILENAME)
-        settings = manifest.get("settings")
-        if not isinstance(settings, dict):
-            return None
-        base_folder = settings.get("projects_base_folder")
-        if not isinstance(base_folder, str) or not base_folder.strip():
-            return None
-        return Path(base_folder).expanduser().resolve()
+        from app.services import machine_settings as ms_service
+
+        return ms_service.projects_root()
 
     def _metadata_schema_layer_id(self, folder: Path) -> str:
         return _layer_id_for_folder(folder)

@@ -315,38 +315,75 @@ def _is_a_rewrite_of(was: str, now: str) -> bool:
 
 def _block_runs(was: str, now: str) -> list[DiffRun]:
     """Word-level runs within one block, with boundaries snapped out of
-    constructs — or the whole block stacked when that cannot be done safely."""
+    constructs — or the whole block stacked when that cannot be done safely.
+
+    Every way this can fail arrives as the same answer, `None` from
+    `_changed_regions`, and every one of them degrades the same way: the pair
+    stacks. That is the module's safe direction, and keeping it to one place
+    here is what stops a future construct from acquiring its own escape route.
+    """
     if was == now:
         return [DiffRun(kind="equal", text=was)]
 
+    regions = _changed_regions(was, now)
+    if regions is None:
+        return _stacked_pair(was, now)
+
+    runs = _emit_runs(regions, was, now)
+    # The invariant this whole function exists to keep: the runs must still BE
+    # the two documents. `_settle` establishes it, so this is a backstop rather
+    # than the mechanism — but it is the backstop on losing an author's words,
+    # so it fails safe into a coarser rendering rather than trusting the algebra.
+    if not _reassembles(runs, was, now):
+        return _stacked_pair(was, now)
+    return runs
+
+
+def _changed_regions(was: str, now: str) -> list[Region] | None:
+    """The differing regions of two blocks, settled out of every construct — or
+    `None` when this pair cannot carry an inline diff at all.
+
+    The `None`s are the ways an inline wrapper goes wrong, and the first three
+    are checked before the token diff because each of them makes it pointless: a
+    block the scanner cannot bound, one too large to diff inside a synchronous
+    request, and code — where the wrapper is content the reader sees. The last
+    two need the regions themselves: a settle that will not converge, and a
+    region the block's structure defeats.
+    """
     was_intervals = protected_intervals(was)
     now_intervals = protected_intervals(now)
     if was_intervals is None or now_intervals is None:
-        return _stacked_pair(was, now)
+        return None
+    if _too_large_to_diff(was, now):
+        return None
+    if is_code_block(was) or is_code_block(now):
+        return None
+    regions = _settle(_token_regions(was, now), was, now, was_intervals, now_intervals)
+    if regions is None or _needs_stacking(regions, was, now):
+        return None
+    return regions
 
+
+def _token_regions(was: str, now: str) -> list[Region]:
+    """The changed regions as *character* offsets, from a token-level diff."""
     was_tokens = TOKEN.findall(was)
     now_tokens = TOKEN.findall(now)
-    if _too_large_to_diff(was, now):
-        return _stacked_pair(was, now)
-    # Code never gets a word-level diff: a wrapper inside a fence is content,
-    # so the reader would see the markup itself.
-    if is_code_block(was) or is_code_block(now):
-        return _stacked_pair(was, now)
     was_offsets = _offsets(was_tokens)
     now_offsets = _offsets(now_tokens)
     matcher = difflib.SequenceMatcher(_is_whitespace, was_tokens, now_tokens, autojunk=False)
-    regions: list[Region] = [
+    return [
         (was_offsets[i1], was_offsets[i2], now_offsets[j1], now_offsets[j2])
         for op, i1, i2, j1, j2 in matcher.get_opcodes()
         if op != "equal"
     ]
-    regions = _settle(regions, was, now, was_intervals, now_intervals)
-    if regions is None:
-        return _stacked_pair(was, now)
 
-    if _needs_stacking(regions, was, now):
-        return _stacked_pair(was, now)
 
+def _emit_runs(regions: list[Region], was: str, now: str) -> list[DiffRun]:
+    """Cut the two blocks into runs at the region boundaries.
+
+    The unchanged text between regions is taken from the `was` side, which is
+    only sound because `_settle` has already made the two sides' gaps identical.
+    """
     runs: list[DiffRun] = []
     was_cursor = 0
     for was_start, was_end, now_start, now_end in regions:
@@ -359,15 +396,7 @@ def _block_runs(was: str, now: str) -> list[DiffRun]:
         was_cursor = was_end
     if was_cursor < len(was):
         runs.append(DiffRun(kind="equal", text=was[was_cursor:]))
-    runs = [run for run in runs if run.text]
-
-    # The invariant this whole function exists to keep: the runs must still BE
-    # the two documents. `_settle` establishes it, so this is a backstop rather
-    # than the mechanism — but it is the backstop on losing an author's words,
-    # so it fails safe into a coarser rendering rather than trusting the algebra.
-    if not _reassembles(runs, was, now):
-        return _stacked_pair(was, now)
-    return runs
+    return [run for run in runs if run.text]
 
 
 def _reassembles(runs: list[DiffRun], was: str, now: str) -> bool:

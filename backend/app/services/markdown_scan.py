@@ -37,6 +37,7 @@ The renderer's agreement is checked in CI rather than assumed: the fixtures in
 from __future__ import annotations
 
 import re
+from typing import NamedTuple
 
 Interval = tuple[int, int]
 
@@ -74,99 +75,174 @@ def _marker_pair_end(block: str, start: int, comment_end: int) -> int:
     return comment_end
 
 
+class Scanned(NamedTuple):
+    """What one construct handler made of the text at the cursor.
+
+    `end` is where the scan resumes. A handler that does not recognise its
+    construct at the cursor returns `None` instead, and the dispatcher offers
+    the position to the next one — so "this is not mine" and "this is mine and
+    protects nothing" stay distinguishable, which is the difference between
+    `[` opening a link and `[` being ordinary text.
+    """
+
+    end: int
+    span: Interval | None = None
+    delimiter: tuple[int, int, str] | None = None
+    stack: bool = False
+
+
+# A construct the scan cannot bound. There is no honest interval to return, so
+# the whole block degrades to a stacked run rather than being cut somewhere we
+# guessed. `end` is never read on this one.
+STACK = Scanned(end=0, stack=True)
+
+
+def _scan_escape(block: str, index: int) -> Scanned | None:
+    """A backslash escape: two characters that must travel together, and the
+    escaped character is emphatically not a delimiter."""
+    if block[index] != "\\" or index + 1 >= len(block):
+        return None
+    return Scanned(end=index + 2, span=(index, index + 2))
+
+
+def _scan_html_comment(block: str, index: int) -> Scanned | None:
+    """An HTML comment, counted as one construct.
+
+    This is what keeps the mutation, embedded-todo and character markers whole —
+    the failure mode neither ADR anticipated, because `sceneMarkdownToHtml`
+    rewrites those comments into spans with regexes *before* marked runs, so a
+    boundary inside one silently degrades the pill to a raw comment.
+    """
+    if not block.startswith("<!--", index):
+        return None
+    close = block.find("-->", index + 4)
+    if close < 0:
+        return STACK  # unterminated: we cannot say where it ends
+    end = _marker_pair_end(block, index, close + 3)
+    return Scanned(end=end, span=(index, end))
+
+
+def _scan_reference_link(block: str, index: int) -> Scanned | None:
+    """A reference-style link and its definition.
+
+    There is no `(`, so `_link_end` cannot see these and a boundary landed
+    inside the label: the link vanished and the definition block, which should
+    render to nothing, became a visible paragraph of raw source.
+    """
+    if block[index] != "[":
+        return None
+    reference = REFERENCE_LINK.match(block, index) or REFERENCE_DEF.match(block, index)
+    if not reference:
+        return None
+    return Scanned(end=reference.end(), span=reference.span())
+
+
+def _scan_code_span(block: str, index: int) -> Scanned | None:
+    """A run of backticks closed by a run of exactly the same length.
+
+    Its contents are literal, so any delimiter inside it must not be seen as one
+    — which is where a list of regexes goes wrong.
+    """
+    if block[index] != "`":
+        return None
+    run = _run_length(block, index, "`")
+    close = _find_backtick_run(block, index + run, run)
+    if close < 0:
+        return STACK  # unterminated: everything after it is ambiguous
+    return Scanned(end=close + run, span=(index, close + run))
+
+
+def _scan_autolink(block: str, index: int) -> Scanned | None:
+    """An autolink or a raw tag: `<...>` on one line."""
+    if block[index] != "<":
+        return None
+    close = block.find(">", index + 1)
+    if close > 0 and "\n" not in block[index:close]:
+        return Scanned(end=close + 1, span=(index, close + 1))
+    return STACK
+
+
+def _scan_link(block: str, index: int) -> Scanned | None:
+    """A link or image: the whole of `[text](target)` is one construct, the
+    target included — it is not prose, and a boundary inside it leaks
+    `](lore://…)` into the reader's text."""
+    if block[index] != "[" and not (block[index] == "!" and block.startswith("![", index)):
+        return None
+    end = _link_end(block, index)
+    if end is None:
+        # A bare `[` with no link shape is ordinary text; consume the character
+        # and protect nothing, so it is not mistaken for a link.
+        return Scanned(end=index + 1)
+    return Scanned(end=end, span=(index, end))
+
+
+def _scan_emphasis(block: str, index: int) -> Scanned | None:
+    """A run of delimiters that opens or closes by pairing with itself.
+
+    Emitted as a delimiter rather than a span because it is only half a
+    construct here — `_pair_delimiters` turns the pairs into intervals once the
+    whole block has been seen.
+    """
+    char = block[index]
+    if char not in EMPHASIS:
+        return None
+    run = _run_length(block, index, char)
+    # Keyed by the whole delimiter RUN, not the character: `**` and `*` are
+    # different constructs, and sharing one stack pairs an opening `**` with a
+    # closing `*` — which mis-bounds every nested emphasis.
+    return Scanned(end=index + run, delimiter=(index, index + run, char * run))
+
+
+# In order, and the order is load-bearing: an escape hides the character behind
+# it from every later handler, a code span's contents are literal, and a `[`
+# must be offered to the reference forms before the inline one because only the
+# reference forms lack the `(` `_link_end` looks for.
+SCANNERS = (
+    _scan_escape,
+    _scan_html_comment,
+    _scan_reference_link,
+    _scan_code_span,
+    _scan_autolink,
+    _scan_link,
+    _scan_emphasis,
+)
+
+
+def _scan_at(block: str, index: int) -> Scanned | None:
+    """The first handler that recognises a construct at `index`, or `None`."""
+    for scanner in SCANNERS:
+        scanned = scanner(block, index)
+        if scanned is not None:
+            return scanned
+    return None
+
+
 def protected_intervals(block: str) -> list[Interval] | None:
     """Ranges a run boundary may not fall strictly inside, or `None` to stack.
 
     `block` is one block of markdown — it contains no blank line, which is
     constraint 1's job and is what lets this ignore block structure beyond the
     line markers above.
+
+    One left-to-right pass, dispatching each position to the handlers above; a
+    position no handler claims is ordinary prose and a boundary may fall on it.
     """
     spans: list[Interval] = []
     delimiters: list[tuple[int, int, str]] = []  # (start, end, marker)
     index = 0
-    length = len(block)
 
-    while index < length:
-        char = block[index]
-
-        # A backslash escape is two characters that must travel together, and
-        # the escaped character is emphatically not a delimiter.
-        if char == "\\" and index + 1 < length:
-            spans.append((index, index + 2))
-            index += 2
+    while index < len(block):
+        scanned = _scan_at(block, index)
+        if scanned is None:
+            index += 1
             continue
-
-        # An HTML comment is one construct. This is what keeps the mutation,
-        # embedded-todo and character markers whole — the failure mode neither
-        # ADR anticipated, because `sceneMarkdownToHtml` rewrites those comments
-        # into spans with regexes *before* marked runs, so a boundary inside one
-        # silently degrades the pill to a raw comment.
-        if block.startswith("<!--", index):
-            close = block.find("-->", index + 4)
-            if close < 0:
-                return None  # unterminated: we cannot say where it ends
-            end = _marker_pair_end(block, index, close + 3)
-            spans.append((index, end))
-            index = end
-            continue
-
-        # A reference-style link and its definition. There is no `(`, so
-        # `_link_end` cannot see these and a boundary landed inside the label:
-        # the link vanished and the definition block, which should render to
-        # nothing, became a visible paragraph of raw source.
-        if char == "[":
-            reference = REFERENCE_LINK.match(block, index) or REFERENCE_DEF.match(block, index)
-            if reference:
-                spans.append(reference.span())
-                index = reference.end()
-                continue
-
-        # A code span is delimited by a run of backticks and closed by a run of
-        # exactly the same length. Its contents are literal, so any delimiter
-        # inside it must not be seen as one — which is where a list of regexes
-        # goes wrong.
-        if char == "`":
-            run = _run_length(block, index, "`")
-            close = _find_backtick_run(block, index + run, run)
-            if close < 0:
-                return None  # unterminated: everything after it is ambiguous
-            spans.append((index, close + run))
-            index = close + run
-            continue
-
-        # An autolink or a raw tag: `<...>` on one line.
-        if char == "<":
-            close = block.find(">", index + 1)
-            if close > 0 and "\n" not in block[index:close]:
-                spans.append((index, close + 1))
-                index = close + 1
-                continue
+        if scanned.stack:
             return None
-
-        # A link or image: the whole of `[text](target)` is one construct, the
-        # target included — it is not prose, and a boundary inside it leaks
-        # `](lore://…)` into the reader's text.
-        if char == "[" or (char == "!" and block.startswith("![", index)):
-            end = _link_end(block, index)
-            if end is None:
-                # A bare `[` with no link shape is ordinary text; fall through
-                # so it is not mistaken for one.
-                index += 1
-                continue
-            spans.append((index, end))
-            index = end
-            continue
-
-        if char in EMPHASIS:
-            run = _run_length(block, index, char)
-            # Keyed by the whole delimiter RUN, not the character: `**` and `*`
-            # are different constructs, and sharing one stack pairs an opening
-            # `**` with a closing `*` — which mis-bounds every nested emphasis.
-            delimiters.append((index, index + run, char * run))
-            index += run
-            continue
-
-        index += 1
+        if scanned.span is not None:
+            spans.append(scanned.span)
+        if scanned.delimiter is not None:
+            delimiters.append(scanned.delimiter)
+        index = scanned.end
 
     paired = _pair_delimiters(delimiters)
     if paired is None:

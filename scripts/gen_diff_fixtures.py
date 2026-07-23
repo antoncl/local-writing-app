@@ -11,8 +11,18 @@ renders these through the app's real `sceneMarkdownToHtml` and asserts
 well-formedness and no leaked syntax, so a scanner that drifts from the renderer
 turns into a red build rather than a wrong colour in a browser.
 
-Run:  python scripts/gen_diff_fixtures.py
-Out:  frontend/src/lib/utils/diffRuns.fixtures.json
+Run:    python scripts/gen_diff_fixtures.py
+Out:    frontend/src/lib/utils/diffRuns.fixtures.json
+Check:  python scripts/gen_diff_fixtures.py --check
+
+**`--check` is what makes the committed fixtures a gate rather than a souvenir**
+(#435). Without it the file billed as the regression surface is a frozen output
+of the code it grades: under a mutation to the diff the committed JSON stays
+stale and the frontend suite stays green, so a backend change to `diff_runs`
+cannot turn the frontend red until a person remembers to run this. CI runs
+`--check`, which regenerates in memory and fails on any difference — the same
+shape as a formatter check. A deliberate change to the diff then shows up as a
+reviewable change to this file instead of as silent drift.
 """
 
 from __future__ import annotations
@@ -188,14 +198,50 @@ def _with_runs(cases: list[dict[str, str]]) -> list[dict[str, object]]:
     return out
 
 
-def main() -> None:
-    target_dir = REPO / "frontend" / "src" / "lib" / "utils"
-    for name, cases in (("diffRuns.fixtures.json", CASES), ("diffRuns.fuzz.json", fuzz_cases())):
-        target = target_dir / name
-        payload = json.dumps(_with_runs(cases), indent=2, ensure_ascii=False) + chr(10)
-        target.write_text(payload, encoding="utf-8")
-        print(f"wrote {len(cases)} cases to {target}")
+TARGET_DIR = REPO / "frontend" / "src" / "lib" / "utils"
+
+# The committed regression surface, and the only file `--check` gates. The fuzz
+# corpus beside it is gitignored — a sweep, not a surface — so there is nothing
+# for it to drift from, and generating four hundred cases to compare against
+# nothing would just be wall clock.
+FIXTURES = TARGET_DIR / "diffRuns.fixtures.json"
+FUZZ = TARGET_DIR / "diffRuns.fuzz.json"
+
+
+def _payload(cases: list[dict[str, str]]) -> str:
+    return json.dumps(_with_runs(cases), indent=2, ensure_ascii=False) + chr(10)
+
+
+def _write(target: Path, cases: list[dict[str, str]]) -> None:
+    # `newline=""` because `.gitattributes` pins this repo to LF and the default
+    # translation would write CRLF on Windows — which `--check` would then read
+    # back as a difference on every developer machine that ran the generator.
+    target.write_text(_payload(cases), encoding="utf-8", newline="")
+    print(f"wrote {len(cases)} cases to {target}")
+
+
+def _check() -> int:
+    expected = _payload(CASES)
+    actual = FIXTURES.read_text(encoding="utf-8") if FIXTURES.exists() else ""
+    if actual == expected:
+        print(f"{FIXTURES.name} is up to date ({len(CASES)} cases)")
+        return 0
+    print(
+        f"{FIXTURES} is stale: it no longer matches what diff_runs produces.\n"
+        "Run `python scripts/gen_diff_fixtures.py` and commit the result. If the "
+        "change is deliberate, the diff is the thing to review.",
+        file=sys.stderr,
+    )
+    return 1
+
+
+def main(argv: list[str]) -> int:
+    if "--check" in argv:
+        return _check()
+    _write(FIXTURES, CASES)
+    _write(FUZZ, fuzz_cases())
+    return 0
 
 
 if __name__ == "__main__":
-    main()
+    raise SystemExit(main(sys.argv[1:]))

@@ -165,9 +165,13 @@ from app.models.schema import (
     UpsertMetadataGroupRequest,
 )
 from app.models.snapshots import (
+    DiffRun,
+    FieldDiff,
     Retention,
     Snapshot,
     SnapshotDetail,
+    SnapshotDiff,
+    SnapshotDiffRequest,
     SnapshotList,
 )
 
@@ -227,7 +231,9 @@ __all__ = [
     "EffectiveStateResponse",
     "EmbeddedTodo",
     "EmbeddedTodoList",
+    "DiffRun",
     "EntryTypeDefinition",
+    "FieldDiff",
     "FieldOverride",
     "GroupApplication",
     "GroupMember",
@@ -307,6 +313,8 @@ __all__ = [
     "SetGroupApplicationsRequest",
     "Snapshot",
     "SnapshotDetail",
+    "SnapshotDiff",
+    "SnapshotDiffRequest",
     "SnapshotList",
     "StructureDocument",
     "StructureNode",

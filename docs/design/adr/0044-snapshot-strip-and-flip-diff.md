@@ -9,6 +9,9 @@
   judgements, not unresolved decisions.
   · **Amendment 1 (2026-07-22, #396):** the §G risk is settled — runs must be complete markdown
   fragments; §F stands.
+  · **Amendment 2 (2026-07-22, #409):** the greyscale channel is the edge's **shape**, not its
+  colour — which settles Open item 5; and a block the construct scan cannot account for stacks
+  rather than being wrapped whole.
 - Feature: #6 · Companion: ADR-0043 (the model) · Follows: ADR-0013 (the scrubber), ADR-0030 (the
   design language), ADR-0038 §A (compact at rest), ADR-0042 (the layer picker, the same gesture on
   the hierarchy axis)
@@ -315,6 +318,62 @@ Rule 2 costs precision: one word changed inside `**very tired**` marks the whole
 on both sides. That is accepted — it is confined to the neighbourhood of markup, and half-tinting an
 emphasised phrase would read worse than tinting all of it.
 
+## Amendment 2 — the greyscale channel is shape, and an unreadable block stacks (2026-07-22)
+
+From implementing slice 2 ([#409](https://github.com/antoncl/local-writing-app/issues/409)). Two
+findings, one of which closes Open item 5.
+
+### The pair cannot be told apart in greyscale, and colour cannot fix it
+
+§H asks for two things that turn out to pull against each other. *Equal chroma across the pair
+within a theme*, so neither tint reads as more important — and *the pair must stay distinguishable
+in greyscale*. Equal chroma at equal lightness **is** equal luminance, and greyscale is exactly
+luminance. Measured on the shipped tokens (Rec. 709, out of 255):
+
+| | wash ΔL | edge ΔL |
+|---|---|---|
+| light | 0.1 | 0.2 |
+| dark | 2.1 | 5.4 |
+
+Both themes, not just the light one §H predicted. The mockup's own light palette was no better in
+kind — its edges reached 14.3, still faint — and its dark palette is the shipped one, so **the
+constraint was never met at any point**, in either theme. That is worth stating plainly: it was not
+lost when the light chroma was halved for shipping, it was never there.
+
+**So the wash cannot carry greyscale, and that is by construction rather than by a poor swatch.**
+Separating the two *edges* by lightness does work, and trades the problem for the one §H was
+avoiding: a darker rule on one side reads as heavier, which is unequal weight moved out of the
+chroma channel and into the lightness channel.
+
+**The edges therefore differ by shape: solid for the scene now, dotted for the snapshot.** Shape is
+neither hue nor lightness, so equal chroma and equal weight both survive untouched and the
+distinction survives greyscale whole. The archived side reading as the provisional one is the right
+way round. No token value changes.
+
+Drawn as a background gradient rather than a border, so it costs no layout — a 2px border on an
+inline span moves the line box under the prose.
+
+> **Open item 5 is settled.** The hex values stand; what was missing was never a value but a second
+> channel. And the finding generalises past this pair: *a lens that distinguishes two states by
+> colour must name the non-colour channel that carries it.*
+
+Evidence: `tmp/0044-greyscale-bench.html` in the slice-2 branch — the mockup's diff marks in five
+palettes, each rendered in light and dark beside a `filter: grayscale(1)` copy, with the luminance
+arithmetic computed in the page. Temporary by intent; the numbers above are its output.
+
+### A block the scanner cannot account for stacks
+
+Amendment 1's constraint 2 needs to know where a run boundary may fall, and some blocks cannot be
+answered for — unbalanced emphasis, an unterminated code span or HTML comment, markup the scan does
+not model. The obvious failsafe, *protect the whole block*, is *not* safe: it puts the wrapper at
+column 0, and a line beginning `> ` or `- ` stops being a blockquote or a list item the moment
+anything precedes its marker.
+
+**Such a block is emitted `stacked` instead** — wrapped around the rendered output, which constraint
+3 already provides for. Unfamiliar input degrades to a coarser rendering rather than a corrupt one.
+The same rule covers a change that would escape its structural container: a run spanning a newline
+crosses into the next quoted line or list item, and one spanning `|` crosses a table cell.
+
 ## Non-goals
 
 - **A clean-reading mode for a snapshot.** The tint decision (F) costs the "read the snapshot as
@@ -336,9 +395,10 @@ emphasised phrase would read worse than tinting all of it.
 3. **Discoverability of the compact strip.** It may now be quiet enough that a new author never
    learns snapshots exist.
 4. **The description's presentation** (L).
-5. **The exact hex values** (H). The hues, the chroma ratio between themes and the constraints are
-   settled; the final values land when the tokens are added, and should be re-checked in greyscale
-   at that point — the light theme's halved chroma is where that constraint is tightest.
+5. ~~**The exact hex values** (H).~~ **Settled by [Amendment 2](#amendment-2--the-greyscale-channel-is-shape-and-an-unreadable-block-stacks-2026-07-22).**
+   The greyscale re-check found that no hex value could satisfy the constraint, because §H's
+   equal-chroma rule makes the pair equally luminous by construction. The values stand; the edges
+   differ by **shape** instead.
 
 ## Test surface
 
@@ -350,6 +410,10 @@ emphasised phrase would read worse than tinting all of it.
   how many words either side contains.
 - The eighteen fixtures of #396 render well-formed HTML in all three view states, with no markdown
   syntax reaching the reader as literal text and no marker degraded to a raw comment (Amendment 1).
+- The two tints stay distinguishable with colour removed — which no hex value achieves, so this is a
+  test of the edge's shape rather than of the palette (Amendment 2).
+- A block whose markup the scan cannot account for renders stacked rather than wrapped, and a change
+  that would span a quoted line, a list item or a table cell does the same (Amendment 2).
 - Notch order matches capture order, and positions are monotonic in age under the minimum-gap
   adjustment.
 - A snapshot with no description renders a tooltip with no empty affordance in it.

@@ -48,6 +48,7 @@ from app.services.project.scene_snapshots import SceneSnapshotsMixin
 from app.services.project.scene_todos import SceneTodoAnchorsMixin
 from app.services.project.schema import MetadataSchemaMixin
 from app.services.project.search import SearchMixin
+from app.services.project.snapshot_diff import SnapshotDiffMixin
 from app.services.project.tags import TagsMixin
 from app.services.project.todos import TodosMixin
 from app.services.project.views import ViewsMixin
@@ -76,6 +77,7 @@ class ProjectService(
     ResearchNotesMixin,
     SceneSnapshotsMixin,
     SceneTodoAnchorsMixin,
+    SnapshotDiffMixin,
     SearchMixin,
     TagsMixin,
     TodosMixin,

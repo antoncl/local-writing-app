@@ -5,11 +5,14 @@
 - Settles: the risk ADR-0044 §G records against §F
 - Outcome: **2 of the issue's three — it holds, with constraints.** Three of them, and one is
   load-bearing enough that §F's own stacked/inline rule has to move into the diff.
-- Harness: `scripts/spike_396_runs.py` (the diff) + `frontend/spikes/396-diff-render.test.ts` (the
-  render), report at `frontend/spikes/396-report.txt`. Reproduce with:
+- Harness: **productionised in #409 and no longer present as a spike.** The diff moved to
+  `backend/app/services/project/snapshot_diff.py` with the construct scan in
+  `backend/app/services/markdown_scan.py`; the eighteen fixtures are generated from that production
+  code by `scripts/gen_diff_fixtures.py`, and the three oracles became assertions in
+  `frontend/src/lib/utils/diffRuns.test.ts`. Reproduce with:
 
 ```bash
-python scripts/spike_396_runs.py && (cd frontend && npx vitest run spikes/396)
+python scripts/gen_diff_fixtures.py && npm test --prefix frontend
 ```
 
 ## Method
@@ -115,6 +118,11 @@ odder rendering.
 
 ## Fixtures kept
 
-`frontend/spikes/396-runs.json` is generated, not hand-authored — regenerate it rather than editing
-it. The eighteen cases are the regression surface for slice 2: each one is a rendering the runs
-endpoint must not produce.
+`frontend/src/lib/utils/diffRuns.fixtures.json` is generated, not hand-authored — regenerate it
+rather than editing it. The eighteen cases are the regression surface: each one is a rendering the
+runs endpoint must not produce.
+
+**#409 added a generated sweep beside them** (`backend/tests/diff_fuzz.py`), because eighteen
+adversarial cases is a good sample and not a proof. It found four defects these fixtures never
+touched — most importantly that a construct present on **one side only** made the runs stop
+reassembling, which is the algorithm above losing an author's words. Each has a named test now.

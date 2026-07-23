@@ -58,6 +58,7 @@ import type {
   SearchHit,
   Snapshot,
   SnapshotDetail,
+  SnapshotDiff,
   SnapshotList,
   StructureDocument,
   StructureNodeDeletePreview,
@@ -574,6 +575,17 @@ export const api = {
   readSnapshot(sceneId: string, snapshotId: string) {
     return request<SnapshotDetail>(
       `/scenes/${encodeURIComponent(sceneId)}/snapshots/${encodeURIComponent(snapshotId)}`,
+    );
+  },
+  /** The compare view's one call, made at the discrete moment the author parks.
+   *  The LIVE state travels in the request: autosave lags the buffer by up to
+   *  six seconds, and parking is a reading gesture that must not write. The runs
+   *  carry all the text, so Both/Now/Snapshot are filters over this one payload
+   *  rather than three requests (ADR-0044 §G). */
+  diffSnapshot(sceneId: string, snapshotId: string, live: { body: string; title: string; metadata: Record<string, unknown> }) {
+    return request<SnapshotDiff>(
+      `/scenes/${encodeURIComponent(sceneId)}/snapshots/${encodeURIComponent(snapshotId)}/diff`,
+      { method: "POST", body: JSON.stringify(live) },
     );
   },
   /** Captures the current state and restores, in ONE call. Never do this as a

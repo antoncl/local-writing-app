@@ -40,6 +40,18 @@
     // the mutated fields (the backend override map) — membership IS the "this
     // changed by here" signal, no diffing. Base values render for the rest.
     effectiveOverrides?: Record<string, string | string[]> | null;
+    // Snapshot compare (ADR-0044 §F, #409). Deliberately NOT `effectiveOverrides`
+    // with a flag: that axis draws a `⤳` beside the name, and a snapshot
+    // difference must never get a glyph. A glyph marks what is true about the
+    // VALUE — permanent, true whenever you look at the card. A snapshot
+    // difference exists only while parked and vanishes at Live, so giving it one
+    // would put a permanent-looking mark on a temporary condition (§J).
+    // **Lenses get colour, not glyphs.**
+    //
+    // `fields` holds only what differs, both sides carried; `side` is which one
+    // to show. Fields FLIP and never interleave — a value is atomic, it resolves
+    // in one blink, so interleaving would only make a cramped row cramped.
+    compare?: { fields: Record<string, { was: unknown; now: unknown }>; side: "now" | "was" } | null;
     readOnly?: boolean;
     // Outbound events as callback props (#14: MetadataPanel is runes — replaces
     // its createEventDispatcher). NodeEditor (legacy parent) passes these.
@@ -67,6 +79,7 @@
     excludeId = null,
     computedFieldString = () => "",
     effectiveOverrides = null,
+    compare = null,
     readOnly = false,
     onEntryTypeChange,
     onStatusChange,
@@ -150,7 +163,15 @@
   }
 
   function displayValue(fieldId: string): MetadataValue {
-    return isMutated(fieldId) ? (effectiveOverrides?.[fieldId] ?? "") : metadata[fieldId];
+    if (isMutated(fieldId)) return effectiveOverrides?.[fieldId] ?? "";
+    const flipped = compare?.fields[fieldId];
+    if (flipped) return (flipped[compare.side] ?? "") as MetadataValue;
+    return metadata[fieldId];
+  }
+
+  /** Whether this field differs from the parked snapshot. Colour only. */
+  function isFlipped(fieldId: string): boolean {
+    return compare != null && fieldId in compare.fields;
   }
 
   function updateAssistantProvider(provider: string, tier: string, model: string) {
@@ -207,14 +228,18 @@
       {#if metadataSchema.fields[fieldId] && !metadataSchema.fields[fieldId].intrinsic && !effectiveFieldHidden(metadataSchema, entryType, fieldId)}
         {@const field = metadataSchema.fields[fieldId]}
         {@const fieldLabel = effectiveFieldLabel(metadataSchema, entryType, fieldId)}
-        <div class="field-row" class:color-row={field.type === "color"} class:wide={isWide(field)} class:inherited={isInherited(fieldId)} class:mutated={isMutated(fieldId)}>
+        <div class="field-row" class:color-row={field.type === "color"} class:wide={isWide(field)} class:inherited={isInherited(fieldId)} class:mutated={isMutated(fieldId)} class:flipped={isFlipped(fieldId)} class:flip-was={isFlipped(fieldId) && compare?.side === "was"}>
           <span class="fr-icon"><i class={fieldIconClass(field)} aria-hidden="true"></i></span>
           <span class="fr-name">{fieldLabel}{#if isMutated(fieldId)}<span class="fr-mutated-marker" title="Changed by here">⤳</span>{/if}</span>
           <div class="fr-val">
             {#if fieldId === "status"}
               <!-- status is stored off `metadata` and edited via onStatusChange. -->
               <ColoredSelect
-                value={isMutated("status") ? metadataValueString(effectiveOverrides?.["status"]) : status}
+                value={isMutated("status")
+                  ? metadataValueString(effectiveOverrides?.["status"])
+                  : isFlipped("status")
+                    ? metadataValueString(compare?.fields["status"]?.[compare.side] as MetadataValue)
+                    : status}
                 options={field.options}
                 ariaLabel={fieldLabel}
                 placeholder="(no status)"
@@ -425,6 +450,48 @@
     background: color-mix(in srgb, var(--mutation-color) 14%, transparent);
     border-color: color-mix(in srgb, var(--mutation-color) 42%, transparent);
     color: var(--mutation-color);
+  }
+
+  /* Snapshot-compare rows (#409): the SAME two colours as the body, because the
+     colour means temporal provenance everywhere and location carries the
+     subject — no second vocabulary. Warm = the value in the scene now, cool =
+     the value in the snapshot. No glyph, ever (§J).
+
+     The pair is written as two rules on one class rather than one rule with a
+     variable, so a state class cannot silently outrank an identity class for one
+     property — which is exactly how slice 1 shipped the Live notch painted in
+     the snapshot's colour. */
+  .field-row.flipped .fr-name {
+    color: var(--diff-now);
+    font-weight: 600;
+  }
+  .field-row.flipped.flip-was .fr-name {
+    color: var(--diff-was);
+  }
+  /* On `.fr-val` itself, not on the inner value widgets. A changed field can
+     render as a plain static, a chip, a swatch or a select, and marking only
+     some of them left the rail carrying its difference on the LABEL's hue
+     alone — the hue-only failure §H rules out, reintroduced in the one place
+     the body had just fixed it. */
+  .field-row.flipped .fr-val {
+    background-color: var(--diff-now-soft);
+    box-shadow: inset 0 -2px 0 var(--diff-now-edge);
+    border-radius: var(--r-sm);
+    padding: 1px 4px;
+  }
+  /* Dotted rather than solid, so the pair survives greyscale on a channel that
+     is neither hue nor lightness — see ReadOnlyBodyOverlay for the reasoning. */
+  .field-row.flipped.flip-was .fr-val {
+    background-color: var(--diff-was-soft);
+    background-image: repeating-linear-gradient(
+      to right,
+      var(--diff-was-edge) 0 3px,
+      transparent 3px 6px
+    );
+    background-repeat: no-repeat;
+    background-position: 0 100%;
+    background-size: 100% 2px;
+    box-shadow: none;
   }
 
   .fr-computed {

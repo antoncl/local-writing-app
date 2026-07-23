@@ -37,6 +37,7 @@ from app.services.markdown_scan import (
 from app.services.project.snapshot_diff import (
     MAX_WORD_DIFF_TOKENS,
     _is_a_rewrite_of,
+    _same_value,
     diff_runs,
 )
 
@@ -494,6 +495,30 @@ def test_generated_documents_hold_every_invariant() -> None:
 
 
 
+@pytest.mark.parametrize(
+    ("was", "now", "same"),
+    [
+        # An absent key and an empty one are the same absence to a reader.
+        (None, "", True),
+        (None, [], True),
+        ("", None, True),
+        # ...but zero and false are VALUES. Leaning on truthiness here would
+        # hide a real change behind a plausible-looking rule.
+        (0, None, False),
+        (False, "", False),
+        (0, 0, True),
+        (False, False, True),
+        ("Maren", "Maren", True),
+        ("Maren", "Corrant", False),
+        ([], ["char-a"], False),
+    ],
+)
+def test_blank_and_absent_read_as_the_same_value(was: object, now: object, same: bool) -> None:
+    """The rail renders a missing field and an empty one identically, so a flip
+    between them shows two identical-looking values with nothing to reconcile."""
+    assert _same_value(was, now) is same
+
+
 # ----- the route ------------------------------------------------------------
 
 
@@ -775,6 +800,106 @@ class DiffRouteTests(unittest.TestCase):
         self.assertEqual(payload["title_now"], "The Empty Harbour")
 
 
+
+
+    def _drop_front_matter_key(self, key: str) -> None:
+        """Remove a top-level front-matter key from the scene file.
+
+        Older and hand-edited scenes simply do not carry every key, and the
+        file format is the contract — so the interesting comparisons are the
+        ones where a key is absent on one side.
+        """
+        path = svc._path_for_node_id(self.scene_id, "scene")
+        kept = [
+            line
+            for line in path.read_text(encoding="utf-8").splitlines()
+            if not line.startswith(f"{key}:")
+        ]
+        path.write_text("\n".join(kept), encoding="utf-8")
+
+    def test_a_scene_that_never_set_a_status_reports_no_status_change(self) -> None:
+        """The live side comes through `read_scene`, which defaults an absent
+        status to "draft". Reading the snapshot's front matter raw gave "" for
+        the same file, so a scene that never set a status reported one changing
+        on EVERY park — a flip the author cannot reconcile, because the two
+        sides never differed."""
+        self._save("Body.", {"summary": "Low water."})
+        self._drop_front_matter_key("status")
+        snapshot_id = self._capture()
+        payload = self._diff(
+            snapshot_id=snapshot_id,
+            body="Body.",
+            title="The Tide",
+            status="draft",
+            metadata={"summary": "Low water."},
+        )
+        self.assertEqual(payload["fields"], {})
+
+    def test_a_scene_with_no_title_key_reports_no_title_change(self) -> None:
+        """`read_scene` and `read_snapshot` both fall back to the node id; the
+        diff fell back to "". The title then flipped on every park, and the
+        read-only title input rendered empty in Snapshot view."""
+        self._save("Body.", {})
+        self._drop_front_matter_key("title")
+        snapshot_id = self._capture()
+        payload = self._diff(
+            snapshot_id=snapshot_id,
+            body="Body.",
+            title=self.scene_id,
+            status="draft",
+            metadata={},
+        )
+        self.assertEqual(payload["title_was"], self.scene_id)
+        self.assertEqual(payload["title_was"], payload["title_now"])
+
+    def _inject_metadata_line(self, line: str) -> None:
+        """Add a raw line under `metadata:` in the scene file.
+
+        Deliberately behind the save path: the values that matter here are ones
+        `save_scene` would reject or strip, which is exactly how they come to
+        exist only inside a snapshot — the file was written when the schema, or
+        the referenced node, still allowed them.
+        """
+        path = svc._path_for_node_id(self.scene_id, "scene")
+        out = []
+        for existing in path.read_text(encoding="utf-8").splitlines():
+            out.append(existing)
+            if existing.startswith("metadata:"):
+                out.append(f"  {line}")
+        path.write_text("\n".join(out), encoding="utf-8")
+
+    def test_a_reference_to_a_deleted_node_is_not_a_field_change(self) -> None:
+        """`read_scene` blanks a reference whose target is gone, so the live
+        side never carries one. The snapshot is a byte copy and keeps it, so
+        comparing raw produced a phantom flip on a scene nobody had touched —
+        and one the author cannot resolve, because the value they see in the
+        rail is not in the document."""
+        self._save("Body.", {"summary": "Low water."})
+        self._inject_metadata_line("pov: char-long-since-deleted")
+        snapshot_id = self._capture()
+        payload = self._diff(
+            snapshot_id=snapshot_id,
+            body="Body.",
+            title="The Tide",
+            status="draft",
+            metadata={"summary": "Low water."},
+        )
+        self.assertEqual(payload["fields"], {})
+
+    def test_a_field_the_schema_has_since_retired_is_not_a_field_change(self) -> None:
+        """The other healing step, for the same reason: `read_scene` strips a
+        field the schema no longer defines, so it cannot reach the live side."""
+        self._save("Body.", {"summary": "Low water."})
+        self._inject_metadata_line("retired_field: gone")
+        snapshot_id = self._capture()
+        payload = self._diff(
+            snapshot_id=snapshot_id,
+            body="Body.",
+            title="The Tide",
+            status="draft",
+            metadata={"summary": "Low water."},
+        )
+        self.assertEqual(payload["fields"], {})
 
     def test_an_unknown_snapshot_is_a_404(self) -> None:
 

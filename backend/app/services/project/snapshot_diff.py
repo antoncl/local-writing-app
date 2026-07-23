@@ -43,6 +43,7 @@ from __future__ import annotations
 
 import difflib
 import re
+from pathlib import Path
 from typing import Any
 
 from app.models import DiffRun, FieldDiff, SnapshotDiff
@@ -154,13 +155,50 @@ class SnapshotDiffMixin:
         front_matter, body = self._read_markdown_with_front_matter(
             self._snapshots_dir(root, node_id) / f"{snapshot_id}.md"
         )
+        was = self._snapshot_state(front_matter, node_id, self._snapshots_dir(root, node_id))
         return SnapshotDiff(
             snapshot=record,
             runs=diff_runs(body, live.body),
-            fields=_field_diffs(front_matter, live),
-            title_was=str(front_matter.get("title") or ""),
+            fields=_field_diffs(was, live),
+            title_was=was["title"],
             title_now=live.title,
         )
+
+    def _snapshot_state(
+        self, front_matter: dict[str, Any], node_id: str, path: Path
+    ) -> dict[str, Any]:
+        """The snapshot's title, status and metadata, normalised the way
+        `read_scene` normalises the live side.
+
+        **The two sides have to come off the same pipeline or the comparison is
+        a lie.** The live values reach us through `read_scene`, which supplies
+        defaults and heals the metadata; reading the snapshot's front matter raw
+        made every one of those steps look like an authored change:
+
+        - `status` absent means `"draft"` live but read as `""` here, so a scene
+          that never set a status reported one changing on *every* park;
+        - `title` absent falls back to the node id everywhere else, and to `""`
+          here, so the title flipped on every park and the read-only title input
+          rendered empty;
+        - a reference to a deleted node is blanked live but kept in the byte
+          copy, giving a phantom flip the author cannot reconcile;
+        - an unquoted date parses to `datetime.date` here and arrives as a
+          string live, painting a flip whose two sides render identically.
+
+        **Validation deliberately does not run.** A snapshot is a historical
+        record and may not satisfy today's schema; refusing to read it would
+        make the compare view fail exactly when it is most wanted.
+        """
+        schema = self.read_metadata_schema()
+        entry_type = str(front_matter.get("entry_type") or "scene:scene")
+        metadata = self._normalise_metadata(front_matter.get("metadata"), path)
+        metadata = self._strip_unknown_metadata_fields(metadata, entry_type, schema)
+        metadata = self._strip_dangling_references(metadata, schema, self._build_node_index())
+        return {
+            "title": str(front_matter.get("title") or node_id),
+            "status": str(front_matter.get("status") or "draft"),
+            "metadata": metadata,
+        }
 
 
 def diff_runs(was: str, now: str) -> list[DiffRun]:
@@ -528,28 +566,50 @@ def _coalesce(runs: list[DiffRun]) -> list[DiffRun]:
 NON_FIELD_KEYS = frozenset({"id", "title", "schema_version"})
 
 
-def _field_diffs(front_matter: dict[str, Any], live: SnapshotDiffRequest) -> dict[str, FieldDiff]:
+def _field_diffs(was_state: dict[str, Any], live: SnapshotDiffRequest) -> dict[str, FieldDiff]:
     """Every field whose value differs, both sides carried.
 
     **No diff is computed on a value.** A field value is atomic — it resolves in
     one blink — so §F has fields flip rather than interleave, and the frontend
     needs only the pair.
 
-    Front matter nests the author's fields under `metadata:` and keeps `status`
-    beside it at the top level. The rail renders both as field rows, so the flip
-    covers both — reading the top level as if it were the field map is how the
-    flip would silently report nothing at all.
+    Both sides arrive already normalised — the snapshot's through
+    `_snapshot_state`, the live one through `read_scene` — so what is left here
+    is only the comparison. `status` is carried beside the field map because
+    that is where the scene file keeps it, while the rail renders it as one
+    field row among the others.
     """
-    was: dict[str, Any] = {**(front_matter.get("metadata") or {})}
+    was: dict[str, Any] = {**was_state["metadata"]}
     now: dict[str, Any] = {**live.metadata}
     # Only compare status when the caller actually sent one. Otherwise silence
     # is read as "the author cleared it".
     if live.status is not None:
-        was["status"] = front_matter.get("status", "")
+        was["status"] = was_state["status"]
         now["status"] = live.status
     keys = (set(was) | set(now)) - NON_FIELD_KEYS
     return {
         key: FieldDiff(was=was.get(key), now=now.get(key))
         for key in sorted(keys)
-        if was.get(key) != now.get(key)
+        if not _same_value(was.get(key), now.get(key))
     }
+
+
+def _same_value(was: Any, now: Any) -> bool:
+    """Whether two field values are the same *as the rail renders them*.
+
+    A missing key and an empty one are the same absence to a reader — the row
+    reads "(none)" either way — so reporting a flip between them shows the
+    author two identical-looking values and no way to reconcile them. They
+    arrive different for ordinary reasons: healing a reference to a deleted node
+    blanks it to `""` rather than removing it, and a scene saved before a field
+    existed simply has no key.
+
+    `0` and `False` are values, not absences, so the check is explicit about
+    the empty containers rather than leaning on truthiness.
+    """
+    empty = (None, "", [], {})
+    was_blank = any(was is candidate or was == candidate for candidate in empty)
+    now_blank = any(now is candidate or now == candidate for candidate in empty)
+    if was_blank or now_blank:
+        return was_blank and now_blank
+    return bool(was == now)

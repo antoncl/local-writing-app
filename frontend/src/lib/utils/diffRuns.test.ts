@@ -68,6 +68,86 @@ function leaks(html: string): string[] {
   return ["](", "**", "~~", "|"].filter((d) => text.includes(d)).map((d) => `literal ${d}`);
 }
 
+
+/**
+ * Oracle 4: PROVENANCE. Which side is each tint claiming the text belongs to?
+ *
+ * The three oracles above are all provenance-blind — they count tags, strip
+ * tags, or compare stripped text — so inverting every `r-now` / `r-was` class,
+ * which turns every addition into a deletion and reverses the feature's central
+ * claim, passed all of them. Warm means "in the scene now" and cool means "in
+ * the snapshot"; a test file about that has to be able to tell them apart.
+ *
+ * Counting is enough and is robust: a view shows `equal` plus its own side, so
+ * the marks present must be exactly the runs shown, by class and by number. A
+ * swap moves them to the wrong class; a dropped wrapper changes the count.
+ */
+function marks(html: string): Record<string, number> {
+  const count = (pattern: RegExp) => (html.match(pattern) ?? []).length;
+  return {
+    "r-now": count(/<span class="r-now">/g),
+    "r-was": count(/<span class="r-was">/g),
+    "blk-now": count(/<div class="blk blk-now">/g),
+    "blk-was": count(/<div class="blk blk-was">/g),
+  };
+}
+
+/** What `marks()` must return for these runs in this view. */
+function expectedMarks(runs: DiffRun[], view: DiffView): Record<string, number> {
+  const out: Record<string, number> = { "r-now": 0, "r-was": 0, "blk-now": 0, "blk-was": 0 };
+  for (const run of runs) {
+    if (run.kind === "equal") continue;
+    if (view !== "both" && view !== run.kind) continue;
+    // A stacked run carrying only a separator is dropped by the renderer.
+    if (run.stacked && !run.text.trim()) continue;
+    out[`${run.stacked ? "blk" : "r"}-${run.kind}`] += 1;
+  }
+  return out;
+}
+
+/**
+ * Oracle 1, restored to structure. It had been weakened to a whitespace-collapsed
+ * TEXT comparison, which cannot see a lost block boundary or a dropped `<em>`:
+ * `a
+
+b` and `a b` both reduce to "a b". Stripping the wrappers and comparing
+ * the MARKUP is what the spike did and what catches those.
+ *
+ * Stripping has to be structural rather than a regex, because `</span>` is also
+ * emitted by the marker preprocessing — so this removes each wrapper with its
+ * own matching close tag, counting depth.
+ */
+function stripWrappers(html: string): string {
+  const OPEN = /<span class="r-(?:now|was)">|<div class="blk blk-(?:now|was)">/;
+  let out = html;
+  for (;;) {
+    const match = OPEN.exec(out);
+    if (!match) return out;
+    const tag = match[0].startsWith("<div") ? "div" : "span";
+    const openTag = new RegExp(`<${tag}\b`, "g");
+    const closeTag = new RegExp(`</${tag}>`, "g");
+    let depth = 1;
+    let cursor = match.index + match[0].length;
+    while (depth > 0) {
+      openTag.lastIndex = cursor;
+      closeTag.lastIndex = cursor;
+      const nextOpen = openTag.exec(out);
+      const nextClose = closeTag.exec(out);
+      if (!nextClose) return out; // unbalanced; oracle 2 reports it
+      if (nextOpen && nextOpen.index < nextClose.index) {
+        depth += 1;
+        cursor = nextOpen.index + nextOpen[0].length;
+      } else {
+        depth -= 1;
+        cursor = nextClose.index + nextClose[0].length;
+        if (depth === 0) {
+          out = out.slice(0, match.index) + out.slice(match.index + match[0].length, nextClose.index) + out.slice(cursor);
+        }
+      }
+    }
+  }
+}
+
 async function problemsFor(runs: DiffRun[], was: string, now: string): Promise<string[]> {
   const baselines: Record<string, string> = {
     now: await sceneMarkdownToHtml(now),
@@ -104,18 +184,22 @@ describe("diff runs render safely — the eighteen fixtures", () => {
 
       const problems = await problemsFor(testCase.runs, testCase.was, testCase.now);
       expect(problems.join("\n"), problems.join("\n")).toBe("");
+
+      // Oracle 4: every mark on the side it belongs to, in the right number.
+      for (const view of VIEWS) {
+        const html = await renderDiffRuns(testCase.runs, view);
+        expect(marks(html), `${testCase.name}/${view}`).toEqual(expectedMarks(testCase.runs, view));
+      }
     });
   }
 
-  it("a single view reassembles to a plain render of that side", async () => {
+  it("a single view strips back to a plain render of that side, markup and all", async () => {
     for (const testCase of CASES) {
       for (const view of ["now", "was"] as const) {
         const html = await renderDiffRuns(testCase.runs, view);
         const baseline = await sceneMarkdownToHtml(view === "now" ? testCase.now : testCase.was);
-        // Stacked runs wrap rendered blocks in a container, so compare the
-        // reader-visible text rather than the markup for those cases.
-        const text = (value: string) => value.replace(/<[^>]+>/g, "").replace(/\s+/g, " ").trim();
-        expect(text(html), `${testCase.name}/${view}`).toBe(text(baseline));
+        const norm = (value: string) => value.replace(/\s+/g, " ").trim();
+        expect(norm(stripWrappers(html)), `${testCase.name}/${view}`).toBe(norm(baseline));
       }
     }
   });

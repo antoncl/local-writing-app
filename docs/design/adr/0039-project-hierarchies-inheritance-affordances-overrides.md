@@ -393,6 +393,70 @@ the invariant `test_a_folder_outside_the_base_cannot_be_declared_into_the_chain`
   folder governs only its own enumeration. Simpler to describe, and it silently removes the one
   guarantee `projects_base_folder` currently makes.
 
+### …and the decision dissolves if the bound moves to the machine layer
+
+Anton's question, and it is the better answer: **`projects_base_folder` is per-project only by
+accident.** Move it up and the sub-decision above stops existing — there is one bound per *location*
+rather than one per manifest, so a closure cannot exceed it by construction and there is nothing to
+clamp.
+
+Four facts that say the current placement is the anomaly, verified at `f743203`:
+
+1. **It is already half at the machine layer.** `MachineSettings.default_projects_folder`
+   (`models/ai.py:45`) is a machine-level projects folder — used as the picker's default, while the
+   *bound* lives in each `project.yaml`. Two settings, one concept, trivially confusable.
+2. **It is stored as an absolute path** (`_new_project_manifest`, `lifecycle.py:104-123`, writes
+   `str(base_folder)`), duplicated into every manifest on the shelf. That is a machine fact wearing a
+   file's clothes: it survives neither a move, nor another machine, nor a different drive letter.
+   Removing it makes the project folder **more** portable, not less — which is the opposite of the
+   usual files-are-truth objection to machine config.
+3. **A shelf can already disagree with itself.** `_metadata_schema_base_folder(root)`
+   (`layers.py:361-391`) reads *the open project's* manifest, so a series and one of its books may
+   carry different bounds — and the same folder chain then enumerates differently depending on which
+   end you open it from. That is a live inconsistency today, with or without transitivity.
+4. **A per-project bound buys nothing a shelf-level one does not.** Nobody wants two books on one
+   shelf to see different amounts of that shelf; when they do, that is what `inherits:` is for.
+
+**Shape, if adopted: the machine layer holds a list of shelves, not a single folder.** A single value
+breaks the author with two shelves on two drives. A project's bound is then *the nearest registered
+shelf containing it* — a function of location, which is why every project on a shelf necessarily
+agrees. A project inside no registered shelf is a **chain of length one**, with an offer to register
+its folder; that is today's "root is not inside `projects_base_folder`" warning
+(`schema.py:937-941`), except recoverable with one action instead of editing N manifests.
+
+**Rejected: a marker file at the shelf root** (`shelf.yaml` or similar). It is the files-are-truth
+answer and it is portable — but finding the shelf then means walking upward until a file appears,
+which is exactly *"the root inferred from a file's presence"* that **Amendment 2 removed**. A machine
+registry is the stipulated version of the same thing, and stipulation is the property Amendment 2
+bought.
+
+**On the name.** The layer is currently `"Machine"` (`machine_layer`, `layers.py:201-232`) and
+"application layer" reads better — but the two names are not synonyms, and there are genuinely **two**
+tiers here, only one of which is in the walk:
+
+- **the application tier** — `DEFAULT_METADATA_SCHEMA`, merged as tier 0 by
+  `_read_metadata_schema_through_path` (`schema.py`) and shipped in code. It is not an `IndexLayer`
+  at all; it has no folder, so the walk cannot see it.
+- **the machine tier** — `%APPDATA%\local-writing-app` (`config_dir`, `machine_settings.py:115-126`),
+  holding assistants, palette, recents and **credentials**. Those last two are per-computer facts by
+  definition, and would be a lie under the name "application".
+
+So: rename to *Application* only if the built-in tier is simultaneously given a name and, ideally,
+made a real layer in the walk — otherwise the rename takes the one accurate name in the pair and
+leaves the genuinely-application tier nameless. A shelf registry belongs on the **machine** tier under
+either naming.
+
+**What it costs.** `_rebase_projects_base_folder` (`lifecycle.py:128-142`) and the
+`projects_base_folder` field on the open/create requests lose their subject; the pending-`base`
+parameter threaded through `ancestor_candidates` / `_validated_declaration` for the wizard's
+widen-and-declare gesture stays, but now describes a *global* widening, which is a different consent
+question and needs saying in the UI. Pre-1.0, the stored key is simply ignored — no migration
+(`feedback_no_pre_1_0_migrations`).
+
+**This is a separate issue from Amendment 3**, and it is worth filing whether or not transitivity is
+adopted — it removes fact 3's live inconsistency on its own. If both are adopted, **it should land
+first**: it deletes this amendment's only genuinely new decision instead of answering it.
+
 ### The three options
 
 | | option | fixes #3 (insertion) | keeps exact declaration | cost |
@@ -463,7 +527,11 @@ into a wizard PR, which is where its four obligations would go missing.
   query-time delta for backlinks / `References` / Nest to apply. The split is clean: **layer overrides
   are position-independent and can be materialized; scene mutations are position-dependent and cannot**
   (they stay resolved at query time, as today).
-- **Ordering is inherited too, not just content — and it is currently the exception.** Assistants
+- **Ordering is inherited too, not just content — and it *was* the exception when this was written.**
+  **No longer: #332 took the layer term off the sort key** (`assistants.py`, `sort_key` — position in
+  one merged sequence, then an alphabetical tail; verified at `f743203`). The paragraph below is kept
+  as the record of the concern and where it was answered; do not read its present tense as live code.
+  Assistants
   carry a manual priority sequence (`.order.yaml` per layer, `assistants.py:128-142`) where **topmost
   is the default** (ADR-0024). That makes position load-bearing rather than cosmetic, and it is the
   one place the chain is composed *without* the descendant-wins rule this ADR applies everywhere else:

@@ -48,6 +48,31 @@ LINE_MARKER = re.compile(r"^[ \t]*(?:>[ \t]?|(?:[-*+]|\d+[.)])[ \t]+|#{1,6}[ \t]
 # Delimiters that open and close an inline construct by pairing with themselves.
 EMPHASIS = "*_~"
 
+# `[text][ref]` and a `[ref]: url` definition line. Both are constructs the
+# renderer resolves as a unit, and neither contains the `(` `_link_end` looks
+# for.
+REFERENCE_LINK = re.compile(r"\[[^\]\n]*\]\[[^\]\n]*\]")
+REFERENCE_DEF = re.compile(r"\[[^\]\n]+\]:[ \t]*\S+")
+
+# The marker pairs `sceneMarkdownToHtml` rewrites as a UNIT. Protecting each
+# comment on its own kept every comment whole and still let a boundary fall
+# BETWEEN an anchor's two markers, so the preprocessing then matched across the
+# injected wrapper and stranded its closing tag.
+MARKER_PAIRS = (
+    ("<!-- embedded-todo:", "<!-- /embedded-todo -->"),
+    ("<!-- character:", "<!-- /character -->"),
+)
+
+
+def _marker_pair_end(block: str, start: int, comment_end: int) -> int:
+    """Extend an opening marker comment to cover its closing partner."""
+    for opener, closer in MARKER_PAIRS:
+        if block.startswith(opener, start):
+            close = block.find(closer, comment_end)
+            if close >= 0:
+                return close + len(closer)
+    return comment_end
+
 
 def protected_intervals(block: str) -> list[Interval] | None:
     """Ranges a run boundary may not fall strictly inside, or `None` to stack.
@@ -80,9 +105,21 @@ def protected_intervals(block: str) -> list[Interval] | None:
             close = block.find("-->", index + 4)
             if close < 0:
                 return None  # unterminated: we cannot say where it ends
-            spans.append((index, close + 3))
-            index = close + 3
+            end = _marker_pair_end(block, index, close + 3)
+            spans.append((index, end))
+            index = end
             continue
+
+        # A reference-style link and its definition. There is no `(`, so
+        # `_link_end` cannot see these and a boundary landed inside the label:
+        # the link vanished and the definition block, which should render to
+        # nothing, became a visible paragraph of raw source.
+        if char == "[":
+            reference = REFERENCE_LINK.match(block, index) or REFERENCE_DEF.match(block, index)
+            if reference:
+                spans.append(reference.span())
+                index = reference.end()
+                continue
 
         # A code span is delimited by a run of backticks and closed by a run of
         # exactly the same length. Its contents are literal, so any delimiter
@@ -247,13 +284,55 @@ def first_line_is_structural(block: str) -> bool:
     return bool(marker and marker.group(0))
 
 
+# A GFM table's delimiter row. Leading pipes are OPTIONAL in GFM, so `LINE_MARKER`
+# alone — which anchors `|` at line start — declared `a | b\n--- | ---\nc | d` to
+# be ordinary prose, and a run then wrapped straight across a cell boundary.
+TABLE_DELIMITER = re.compile(r"^[ \t]*:?-{1,}:?([ \t]*\|[ \t]*:?-{1,}:?)+[ \t]*$")
+
+# A setext underline turns the line ABOVE it into a heading, so an inline run
+# that swallows it collapses the heading and leaks the underline as text.
+SETEXT_UNDERLINE = re.compile(r"^[ \t]*(=+|-{2,})[ \t]*$")
+
+# A code fence, and an indented (4-space or tab) code line.
+CODE_FENCE = re.compile(r"^[ \t]*(```|~~~)")
+INDENTED_CODE = re.compile(r"^(?: {4}|\t)")
+
+
+def is_code_block(block: str) -> bool:
+    """Whether this block is code, fenced or indented.
+
+    Code is the one place a wrapper cannot go *anywhere*. Inside a fence the
+    injected `<span>` is content, so the reader sees the markup as literal text
+    — and the fence itself was being scanned as a code span, so the whole block
+    came back as a single inline run whose wrapper opened at column 0 and
+    dissolved the fence entirely. An indented block behaves the same way.
+
+    So code never gets a word-level diff; it stacks, and the author reads the
+    two versions whole. That is the honest rendering of a change to code.
+    """
+    lines = [line for line in block.split("\n") if line.strip()]
+    if not lines:
+        return False
+    if CODE_FENCE.match(lines[0]):
+        return True
+    return all(INDENTED_CODE.match(line) for line in lines)
+
+
 def is_structured(block: str) -> bool:
     """Whether any line of the block carries block-level structure.
 
     In such a block the line — and in a table the *cell* — is a container an
     inline wrapper may not escape, quite apart from where the delimiters are.
+
+    Line markers are only part of it. A GFM table may be written without leading
+    pipes, and a setext heading's structure is the line *below* the text, so both
+    are checked in their own right rather than inferred from a leading character.
     """
-    return any(LINE_MARKER.match(line) for line in block.split("\n"))
+    lines = block.split("\n")
+    return any(
+        LINE_MARKER.match(line) or TABLE_DELIMITER.match(line) or SETEXT_UNDERLINE.match(line)
+        for line in lines
+    ) or is_code_block(block)
 
 
 # Characters that end a structural container mid-block: a newline ends a

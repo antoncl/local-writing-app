@@ -226,17 +226,22 @@
     "runs": [
       {
         "kind": "equal",
-        "text": "The boats lay <!-- embedded-todo:id=t1;status=open;note=check%20the%20tide -->over on their ",
+        "text": "The boats lay ",
+        "stacked": false
+      },
+      {
+        "kind": "was",
+        "text": "<!-- embedded-todo:id=t1;status=open;note=check%20the%20tide -->over on their sides<!-- /embedded-todo -->",
         "stacked": false
       },
       {
         "kind": "now",
-        "text": "black ",
+        "text": "<!-- embedded-todo:id=t1;status=open;note=check%20the%20tide -->over on their black sides<!-- /embedded-todo -->",
         "stacked": false
       },
       {
         "kind": "equal",
-        "text": "sides<!-- /embedded-todo --> like something sleeping.",
+        "text": " like something sleeping.",
         "stacked": false
       }
     ]

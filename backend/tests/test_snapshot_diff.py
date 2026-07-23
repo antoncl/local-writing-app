@@ -521,6 +521,77 @@ def test_blank_and_absent_read_as_the_same_value(was: object, now: object, same:
     assert _same_value(was, now) is same
 
 
+# ----- structure the scanner used to miss -------------------------------------
+#
+# Each of these renders broken HTML through `{@html}` if the block is word-diffed
+# inline, and each was found by driving the real `marked` rather than by reading
+# the code. The fix is the same shape in every case: the block is structured, so
+# it stacks.
+
+
+@pytest.mark.parametrize(
+    ("name", "was", "now"),
+    [
+        # turndown is configured `codeBlockStyle: "fenced"`, so this is what the
+        # app itself writes. The fence was being scanned as a code SPAN, so the
+        # whole block came back as one inline run whose wrapper opened at column
+        # zero and dissolved it.
+        ("fenced code", "```\nprint('tide')\n```", "```\nprint('water')\n```"),
+        ("fenced with info string", "```py\na\n```", "```py\nb\n```"),
+        # Inside code the wrapper is CONTENT: the author reads the markup.
+        ("indented code", "    print('tide')", "    print('water')"),
+        # Leading pipes are optional in GFM, so `LINE_MARKER` called this prose
+        # and a run wrapped straight across a cell boundary.
+        ("table without leading pipes", "a | b\n--- | ---\nc | d", "a | b\n--- | ---\nc d"),
+        # A setext underline turns the line ABOVE it into a heading. Editing the
+        # heading's WORDS is safe inline — the wrapper stays on that line — so
+        # the damaging shape is a change that reaches across the newline and
+        # swallows the underline, collapsing the heading and leaking `==` as
+        # text. That distinction is why these two are spelled out rather than
+        # assumed from "it is a heading".
+        ("setext h1 losing its underline", "The Harbour rope\n================", "The Harbour"),
+        ("setext h2 losing its underline", "The Harbour rope\n----------------", "The Harbour"),
+    ],
+)
+def test_structure_the_scanner_used_to_miss_is_never_wrapped_inline(
+    name: str, was: str, now: str
+) -> None:
+    runs = diff_runs(was, now)
+    assert reassembles(runs, was, now), name
+    assert [run for run in runs if run.kind != "equal" and not run.stacked] == [], name
+
+
+def test_an_embedded_todo_anchor_is_protected_as_a_PAIR() -> None:
+    """`sceneMarkdownToHtml` rewrites the open and close markers as one unit, so
+    protecting each comment separately still let a boundary fall between them —
+    and the preprocessing then matched across the injected wrapper and stranded
+    its closing tag, putting unbalanced HTML through `{@html}`."""
+    body = (
+        "The boats lay <!-- embedded-todo:id=t1;status=open;note=x -->"
+        "over on their sides<!-- /embedded-todo --> like something sleeping."
+    )
+    intervals = protected_intervals(body)
+    assert intervals is not None
+    start = body.index("<!-- embedded-todo")
+    end = body.index("<!-- /embedded-todo -->") + len("<!-- /embedded-todo -->")
+    assert any(span <= start and end <= stop for span, stop in intervals)
+
+
+@pytest.mark.parametrize(
+    "fragment",
+    ["[the harbour][h one]", "[h one]: lore://loc-corrant"],
+)
+def test_reference_style_links_are_protected(fragment: str) -> None:
+    """`_link_end` looks for `(`, which these do not have, so a boundary landed
+    inside the label: the link vanished and the definition block — which should
+    render to nothing — became a visible paragraph of raw source."""
+    body = f"see {fragment} now"
+    intervals = protected_intervals(body)
+    assert intervals is not None
+    at = body.index(fragment)
+    assert any(start <= at and at + len(fragment) <= stop for start, stop in intervals)
+
+
 # ----- block pairing: can a test see mush? ------------------------------------
 #
 # The interleaving this guards against is well-formed HTML containing correct

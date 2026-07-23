@@ -66,11 +66,33 @@
     { id: "both", key: "B", label: "Both", hint: "both versions, adjacent" },
   ] as const;
 
+  /**
+   * Whether this strip is the one the keypress is for.
+   *
+   * Every strip installs its own `svelte:window` handler, and the workspace
+   * keeps every tab MOUNTED — "only the active one is shown" — so gating on
+   * `parked` alone let one press drive every parked strip in the workspace, and
+   * a hidden pane swallow plain letters anywhere focus was not an input. Slice 1
+   * bound only the arrows and Esc; #409 made the bindings bare `a`/`s`/`b`,
+   * which is what turned a latent bug into a daily one.
+   *
+   * Two rules, in order: a strip inside a hidden tab is never addressed, and
+   * when focus sits inside some other editor pane that pane owns the key.
+   */
+  function addressedToThisPane(target: HTMLElement | null): boolean {
+    if (!stripEl) return false;
+    if (stripEl.closest(".hidden-doc")) return false;
+    const pane = stripEl.closest(".editor-panel");
+    const focused = target?.closest?.(".editor-panel") ?? null;
+    return !focused || !pane || focused === pane;
+  }
+
   function onKeydown(event: KeyboardEvent): void {
     if (event.ctrlKey || event.metaKey || event.altKey) return;
     const target = event.target as HTMLElement | null;
     if (target?.isContentEditable || /^(INPUT|TEXTAREA|SELECT)$/.test(target?.tagName ?? "")) return;
     if (!parked && !(target && stripEl?.contains(target))) return;
+    if (!addressedToThisPane(target)) return;
 
     // A/S/B are TOGGLES, not held modifiers. Without this an OS auto-repeat
     // fires keydown ~30×/s and the view strobes between two states instead of

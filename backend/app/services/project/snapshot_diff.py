@@ -51,6 +51,7 @@ from app.models.snapshots import SnapshotDiffRequest
 from app.services.markdown_scan import (
     escapes_container,
     first_line_is_structural,
+    is_code_block,
     protected_intervals,
 )
 
@@ -326,6 +327,10 @@ def _block_runs(was: str, now: str) -> list[DiffRun]:
     was_tokens = TOKEN.findall(was)
     now_tokens = TOKEN.findall(now)
     if _too_large_to_diff(was, now):
+        return _stacked_pair(was, now)
+    # Code never gets a word-level diff: a wrapper inside a fence is content,
+    # so the reader would see the markup itself.
+    if is_code_block(was) or is_code_block(now):
         return _stacked_pair(was, now)
     was_offsets = _offsets(was_tokens)
     now_offsets = _offsets(now_tokens)

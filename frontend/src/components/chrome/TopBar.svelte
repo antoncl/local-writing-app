@@ -550,6 +550,12 @@
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
+    /* Without these the ellipsis never fires: `min-width: auto` on a flex item
+       resolves to its intrinsic content width, so a long child title widens
+       the row instead of being clipped by it. Same pair `.switcher-label`
+       already uses a few rules up. */
+    flex: 1;
+    min-width: 0;
   }
 
   .top-bar .child-folder {

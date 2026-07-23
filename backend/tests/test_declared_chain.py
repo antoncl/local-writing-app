@@ -197,6 +197,24 @@ class TheEnumerationIsReportedWholeTests(DeclaredChainTestCase):
         self.assertTrue(row.is_project)
         self.assertIsNone(row.title)
 
+    def test_an_unreadable_child_manifest_does_not_break_the_open_project(self) -> None:
+        """The mirror of the ancestor case, found reviewing the ancestor fix.
+
+        `_project_children` read a child's manifest unguarded (#310), so a
+        malformed `project.yaml` in any direct subfolder took out
+        `current_project()` just as an ancestor's did. A child is another
+        folder's file too; the roster falls back to the folder name.
+        """
+        child = self.root / "part-two"
+        self.service = ProjectService.created_at(child, "Part Two")
+        self.service = ProjectService.opened_at(self.root)
+        (child / "project.yaml").write_text("title: Part Two\n  bad: [unclosed\n", encoding="utf-8")
+
+        self.assertEqual(
+            [(row.name, row.title) for row in self.service.current_project().children],
+            [("part-two", "part-two")],
+        )
+
     def test_direct_child_projects_are_listed_with_their_titles(self) -> None:
         child = self.root / "part-two"
         self.service = ProjectService.created_at(child, "Part Two")

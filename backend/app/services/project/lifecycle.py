@@ -241,13 +241,19 @@ class ProjectLifecycleMixin:
         for folder in entries:
             if not folder.is_dir() or not (folder / MANIFEST_FILENAME).exists():
                 continue
-            manifest = self._read_yaml(folder / MANIFEST_FILENAME)
-            title = manifest.get("title")
             children.append(
                 ProjectChild(
                     path=str(folder),
                     name=folder.name,
-                    title=title.strip() if isinstance(title, str) and title.strip() else folder.name,
+                    # Guarded for the same reason as the ancestor side, and by
+                    # the same helper: a child's manifest is another folder's
+                    # file, and an unreadable one must not 422 the open project.
+                    # This read was unguarded (#310), so a malformed manifest in
+                    # any direct subfolder took out `current_project()` — the
+                    # exact mirror of the ancestor case, found by review of the
+                    # ancestor fix. Reusing the helper also retires the second
+                    # copy of the title-or-folder-name rule.
+                    title=self._readable_project_title(folder) or folder.name,
                 )
             )
         return children

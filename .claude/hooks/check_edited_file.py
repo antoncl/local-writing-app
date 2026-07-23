@@ -26,6 +26,7 @@ from pathlib import Path
 REPO = Path(__file__).resolve().parents[2]
 SIZE_GUARD = REPO / "scripts" / "check_file_size.py"
 STYLE_GUARD = REPO / "scripts" / "check_style_tokens.py"
+MEMORY_GUARD = REPO / "scripts" / "check_memory_index.py"
 # Advisory complexity rules — flagged, never blocking, while the existing count
 # is burned down (see backend/pyproject.toml for thresholds).
 COMPLEXITY_RULES = ("PLR0912", "PLR0913", "PLR0915", "C901")
@@ -112,26 +113,41 @@ def ruff_messages(path: Path) -> list[str]:
     return messages
 
 
+def applicable_guards(path: Path) -> list[list[str]]:
+    """The guard commands that apply to `path`, in reporting order.
+
+    Each entry is gated so an edit only pays for the checks it can fail: style
+    tokens on frontend style code, the memory ratchet on a file that actually
+    sits beside a MEMORY.md.
+    """
+    commands: list[list[str]] = []
+    if SIZE_GUARD.is_file():
+        commands.append([sys.executable, str(SIZE_GUARD), str(path)])
+    if path.suffix in {".svelte", ".css"} and STYLE_GUARD.is_file():
+        commands.append([sys.executable, str(STYLE_GUARD), str(path)])
+    if path.suffix == ".md" and (path.parent / "MEMORY.md").is_file() and MEMORY_GUARD.is_file():
+        commands.append([sys.executable, str(MEMORY_GUARD), "--memory-dir", str(path.parent)])
+    return commands
+
+
+def collect(path: Path) -> list[str]:
+    """Every guard finding for `path`, as text ready to inject."""
+    messages: list[str] = []
+    for command in applicable_guards(path):
+        _, out = run(command)
+        if out:
+            messages.append(out)
+    if path.suffix == ".py" and VENV_PYTHON is not None:
+        messages.extend(ruff_messages(path))
+    return messages
+
+
 def main() -> int:
     path = edited_path()
     if path is None:
         return 0
 
-    messages: list[str] = []
-
-    if SIZE_GUARD.is_file():
-        _, out = run([sys.executable, str(SIZE_GUARD), str(path)])
-        if out:
-            messages.append(out)
-
-    if path.suffix in {".svelte", ".css"} and STYLE_GUARD.is_file():
-        _, out = run([sys.executable, str(STYLE_GUARD), str(path)])
-        if out:
-            messages.append(out)
-
-    if path.suffix == ".py" and VENV_PYTHON is not None:
-        messages.extend(ruff_messages(path))
-
+    messages = collect(path)
     if messages:
         body = "\n".join(messages)
         if len(body) > MAX_MESSAGE_CHARS:

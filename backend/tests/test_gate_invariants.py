@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import importlib.util
 import json
+import os
 import socket
 import subprocess
 import sys
@@ -383,3 +384,106 @@ def test_the_fixture_gate_refuses_an_argument_it_does_not_understand():
         "an unrecognised argument was accepted, so a typo in the workflow would "
         "silently turn the fixture gate into a no-op that reports success."
     )
+
+
+# --- the memory-index ratchet -------------------------------------------------
+#
+# `MEMORY.md` is loaded into every request of every session, so its size is paid
+# on every model step. It has no natural shrinking force — sessions add memories
+# and never remove them — so `scripts/check_memory_index.py` ratchets it. These
+# tests pin the two properties that make a ratchet useful: it must be silent
+# while nothing regresses, and it must not be silenceable by accident.
+
+check_memory_index = _load_script("check_memory_index")
+
+
+def _index(tmp_path: Path, body: str) -> Path:
+    (tmp_path / "real.md").write_text("a memo", encoding="utf-8")
+    index = tmp_path / "MEMORY.md"
+    index.write_text(body, encoding="utf-8")
+    return index
+
+
+def test_a_healthy_index_is_silent(tmp_path):
+    """No finding for a well-formed index — a guard that always fires is noise."""
+    index = _index(tmp_path, "# Memory Index\n\n- [Real](real.md) - a short hook\n")
+    assert check_memory_index.check(index) == []
+
+
+def test_a_pointer_to_a_missing_memo_is_always_reported(tmp_path):
+    """Dangling pointers are a correctness bug, so they carry no ratchet."""
+    index = _index(tmp_path, "# Memory Index\n\n- [Gone](vanished.md) - hook\n")
+    problems = check_memory_index.check(index)
+    assert any("missing memo" in p for p in problems)
+
+
+def test_growth_past_the_ratchet_is_reported(tmp_path):
+    """The whole point: the file may shrink, never grow."""
+    index = _index(tmp_path, "# Memory Index\n\n- [Real](real.md) - hook\n")
+    assert check_memory_index.check(index) == []
+    index.write_text("x" * (check_memory_index.MAX_BYTES + 1), encoding="utf-8")
+    assert any("over the" in p for p in check_memory_index.check(index))
+
+
+def test_inline_content_is_ratcheted_not_absolute(tmp_path):
+    """Below the budget it stays quiet; one line over the budget it speaks.
+
+    The index already carries inline prose today. An absolute rule would fire
+    on every memory write until that is consolidated, and a guard that fires
+    every time is one that gets tuned out — so the count ratchets instead.
+    """
+    budget = check_memory_index.MAX_CONTENT_LINES
+    # Pin the ratchet property itself. Without this the test reads the budget
+    # dynamically and so passes even if the budget is mutated to 0 — i.e. it
+    # would keep reporting success for the absolute rule it exists to forbid.
+    assert budget > 0, (
+        "MAX_CONTENT_LINES is a ratchet against today's count, not an absolute "
+        "rule; at 0 the guard fires on every memory write and gets tuned out."
+    )
+
+    at_budget = "# Memory Index\n\n" + "".join(f"**Inline {i}:** prose\n" for i in range(budget))
+    assert not any("non-pointer" in p for p in check_memory_index.check(_index(tmp_path, at_budget)))
+
+    over = at_budget + "**One more:** prose\n"
+    assert any("non-pointer" in p for p in check_memory_index.check(_index(tmp_path, over)))
+
+
+def test_a_missing_memory_dir_does_not_fail_the_gate(tmp_path):
+    """Clones without a memory directory must not go red; the guard falls open."""
+    result = subprocess.run(
+        [sys.executable, str(REPO / "scripts" / "check_memory_index.py"),
+         "--memory-dir", str(tmp_path / "absent")],
+        capture_output=True, text=True,
+    )
+    assert result.returncode == 0, result.stderr
+
+
+def test_findings_survive_a_cp1252_console(tmp_path):
+    """Memory files carry emoji; the guard must not die encoding one back.
+
+    This is a Windows-first repo and the guard runs on a console that defaults
+    to cp1252. An earlier version raised UnicodeEncodeError while *reporting* a
+    finding, which turns a useful gate into a crash at exactly the moment it
+    has something to say.
+    """
+    _index(tmp_path, "# Memory Index\n\n" + "\U0001f333 inline content with an emoji\n" * 40)
+    env = {**os.environ, "PYTHONIOENCODING": "cp1252"}
+    result = subprocess.run(
+        [sys.executable, str(REPO / "scripts" / "check_memory_index.py"),
+         "--memory-dir", str(tmp_path)],
+        capture_output=True, text=True, env=env,
+        # Decode with the encoding we just forced on the child. `text=True`
+        # alone decodes with the *parent's* default, which is cp1252 on Windows
+        # and UTF-8 on Linux — so the child's cp1252 em-dash (0x97) read back
+        # fine locally and raised UnicodeDecodeError in CI.
+        encoding="cp1252",
+    )
+    # `returncode == 1` alone proves nothing: a UnicodeEncodeError also exits 1,
+    # and it happens *after* the "memory index:" header has been flushed, so
+    # both of those pass while the guard is in fact crashing. The traceback on
+    # stderr is the only thing that distinguishes reporting from dying.
+    assert "Traceback" not in result.stderr, f"the guard crashed while reporting:\n{result.stderr}"
+    assert result.stderr.strip() == "", result.stderr
+    assert result.returncode == 1, "the oversized index should have been reported"
+    assert "memory index:" in result.stdout
+    assert "non-pointer" in result.stdout, "the finding itself never made it out"

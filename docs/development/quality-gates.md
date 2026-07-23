@@ -114,6 +114,41 @@ The gates must test *that* worktree's code.
   recursive delete — `git worktree remove -f` among them — walks through the link
   and guts the primary install (#350).
 
+## The memory-index ratchet
+
+`scripts/check_memory_index.py`, run from the `PostToolUse` hook when the edited
+file sits beside a `MEMORY.md` — so ordinary edits pay nothing for it.
+
+`MEMORY.md` is loaded into every request of every session, which means its size
+is paid on every model step (~24 per user prompt when this was measured). It has
+no natural shrinking force: every session may add a memory, none removes one.
+That is the same shape as the exemption ratchet, and it gets the same treatment
+— a high-water mark that only ever moves down.
+
+Four rules, three of them ratchets against the counts at the time the guard
+landed rather than absolutes:
+
+- **size** — `MAX_BYTES`; merge or retire a memory rather than raising it.
+- **inline content** — non-pointer lines. The index is meant to be pointers, one
+  line per memory, with content in the memo files; prose that accumulates here
+  is paid on every step instead of being read on demand.
+- **hook length** — a pointer over `MAX_POINTER_CHARS` has started summarising
+  the memo instead of pointing at it.
+- **dangling pointers** — a pointer to a missing memo. This one is a correctness
+  bug, so it carries no ratchet and is always reported.
+
+The ratchets exist because the first three rules are *already violated today*.
+An absolute rule would fire on every memory write until a consolidation pass
+lands, and a guard that fires every time is one that gets tuned out. Ratcheting
+keeps it silent until something gets worse. **After a consolidation pass, lower
+all three constants to whatever the trimmed file measures** — that is the step
+that converts a one-off cleanup into a floor.
+
+Pinned by `test_gate_invariants.py`, including that a finding survives being
+reported to a cp1252 console: an earlier version raised `UnicodeEncodeError`
+while echoing an emoji from the index back, which turned the guard into a crash
+at exactly the moment it had something to say.
+
 ## The two content guards
 
 - **File-size guard** (`scripts/check_file_size.py`) — the enforced half of "no

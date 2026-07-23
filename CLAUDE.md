@@ -102,6 +102,9 @@ setup, and the exemption ratchet: → `docs/development/quality-gates.md`
 - **File-size guard**: warns ≥1200, **fails ≥1500** lines on `.py/.svelte/.ts`.
 - **Style-token guard**: hex/rgb literals and non-token `font-size` in frontend
   style code fail (`docs/design/design-language.md` §5).
+- **`MEMORY.md` ratchets** — it is loaded on every request, so it may shrink and
+  never grow. If a new memory doesn't fit, merge or retire an old one; keep the
+  index to one pointer line per memo and the content in the memo.
 - The citation-rot checker is **advisory**, PR-scoped, and **flags but never
   fixes** — repointing a stale line turns visible rot into invisible rot.
 

@@ -76,15 +76,6 @@ jobs:
       - name: pytest
         run: python -m pytest backend/tests -q --timeout=120 --timeout-method=thread
 
-      # The frontend's diff fixtures are generated FROM the backend's diff, and
-      # a generated file nobody regenerates is a frozen output of the code it
-      # grades: under a mutation to `diff_runs` the committed JSON stayed stale
-      # and the frontend suite stayed green (#435). This is a Python step in a
-      # Python job, but it gates a frontend file — that is the point, because
-      # the backend is the side that can invalidate it.
-      - name: diff fixtures are current
-        run: python scripts/gen_diff_fixtures.py --check
-
   # The platform the app actually runs on. Only the test suite — lint, the
   # guards and the ratchet are platform-independent and would just be a slower
   # second opinion. This is the job that would have caught the cp1252 and

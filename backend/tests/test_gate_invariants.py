@@ -353,11 +353,13 @@ def test_diff_fixtures_are_current():
     it, so it was a frozen output of the code it grades: under a mutation to the
     diff the committed JSON stayed stale and the frontend stayed green (#435).
 
-    Here rather than only in `gates.yml` because this is the layer that runs on
-    **Windows** too. The generator's one platform-sensitive line is its
-    `newline=""` write, and the hazard it guards — the default translation
-    emitting CRLF — happens only on Windows, so a Linux-only gate never visits
-    the case it exists for.
+    A test rather than a step in `gates.yml`, which is where it started, for two
+    reasons. It runs on **Windows**: the generator's one platform-sensitive line
+    is its `newline=""` write, and the hazard it guards — the default
+    translation emitting CRLF — happens only on Windows, so as a step in the
+    Linux `backend` job the gate never visited the case it exists for. And a
+    workflow step can be deleted without anything noticing, while
+    `check_exemptions.py` ratchets a test that turns up newly skipped.
     """
     result = _gen_fixtures("--check")
     assert result.returncode == 0, (

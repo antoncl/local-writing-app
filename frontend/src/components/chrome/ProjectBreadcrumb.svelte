@@ -16,12 +16,15 @@
   // Project pane. The parent owns revealing it — this component knows the
   // chain is empty, not where the editor is mounted.
   export let onSetUpInheritance: () => void = () => {};
-  // Is there anything the declaration editor could offer? The enumeration is
-  // empty for a project outside the machine root, or on a machine with none
-  // set (#429) — nothing sits between the bound and the project, so the chain
-  // is length one *and* unfixable from that editor. Offering "set up…" there
-  // is a link to an empty list, which is the same defect this note removes:
-  // an affordance that promises something it does not have.
+  // Is there an ancestor the declaration editor could actually offer to
+  // inherit from — i.e. an enumerated folder that is itself a project? Not the
+  // same as "the enumeration is non-empty": a project directly inside the
+  // machine root enumerates that root folder, which is not a project and is
+  // shown only as a disabled row. And outside the machine root, or on a
+  // machine with none set (#429), the enumeration is empty outright. In both
+  // cases the editor has nothing tickable, so "set up…" would be a link to a
+  // dead end — the same defect this note removes. The remedy is withheld and
+  // the statement stands alone.
   export let canDeclare: boolean = false;
 
   $: crumbs = declaredChain(chain);

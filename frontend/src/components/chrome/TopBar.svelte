@@ -20,6 +20,16 @@
   export let chain: ProjectChainLayer[] = [];
   export let childProjects: ProjectChild[] = [];
   export let onOpenProjectPath: (path: string) => void = () => {};
+  // Reveal the inheritance declaration editor (#426) for the empty-chain note
+  // (#427). Not the same gesture as the Project action button below: that one
+  // opens the project NODE in an editor tab, this one brings the Project pane
+  // — which is where the declaration list lives — back on screen.
+  export let onOpenInheritance: () => void = () => {};
+  // Whether that editor would have any actionable row (#427). False both when
+  // the enumeration is empty (a project outside the machine root) AND when its
+  // only ancestor is the projects folder itself (a top-level project) — see
+  // `canDeclareInheritance`. Withheld so "set up…" never links to a dead end.
+  export let canDeclareInheritance: boolean = false;
   // Event hooks. The parent owns all side effects; this component is
   // purely presentational + dropdown state.
   export let onSelectRecent: (path: string) => void = () => {};
@@ -192,7 +202,12 @@
 <header class="top-bar">
   <span class="wordmark">Local Writer</span>
 
-  <ProjectBreadcrumb {chain} onOpen={handleOpenProjectPath} />
+  <ProjectBreadcrumb
+    {chain}
+    canDeclare={canDeclareInheritance}
+    onOpen={handleOpenProjectPath}
+    onSetUpInheritance={onOpenInheritance}
+  />
 
   <div class="switcher-wrap">
     <button

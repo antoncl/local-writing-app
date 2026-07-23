@@ -1,6 +1,6 @@
 <script lang="ts">
   import type { ProjectChainLayer } from "@/lib/types";
-  import { declaredChain } from "@/lib/utils/projectChain";
+  import { declaredChain, inheritsNothing } from "@/lib/utils/projectChain";
 
   // The RESOLVED chain as the backend walker computed it (#432) — already the
   // declared subset, already labelled. This took the whole enumeration and
@@ -12,8 +12,23 @@
   // with its own index and merged schema. The parent owns that; this component
   // only says which one was chosen.
   export let onOpen: (path: string) => void = () => {};
+  // Where "set up…" goes: the declaration editor (#426), which lives in the
+  // Project pane. The parent owns revealing it — this component knows the
+  // chain is empty, not where the editor is mounted.
+  export let onSetUpInheritance: () => void = () => {};
+  // Is there an ancestor the declaration editor could actually offer to
+  // inherit from — i.e. an enumerated folder that is itself a project? Not the
+  // same as "the enumeration is non-empty": a project directly inside the
+  // machine root enumerates that root folder, which is not a project and is
+  // shown only as a disabled row. And outside the machine root, or on a
+  // machine with none set (#429), the enumeration is empty outright. In both
+  // cases the editor has nothing tickable, so "set up…" would be a link to a
+  // dead end — the same defect this note removes. The remedy is withheld and
+  // the statement stands alone.
+  export let canDeclare: boolean = false;
 
   $: crumbs = declaredChain(chain);
+  $: empty = inheritsNothing(chain);
 </script>
 
 <!--
@@ -27,8 +42,30 @@
   present and always about the whole workspace; the authoring layer belongs to
   the node you are editing.
 
-  Nothing renders for a flat project — a project that declares no ancestors has
-  no path to show, and an empty rail would be chrome that encodes nothing.
+  A flat project used to render nothing here, which is where #427 came from:
+  the space went blank, and the project-switcher button next to it read as a
+  one-item breadcrumb — so clicking it to see "the rest of the path" opened the
+  recents menu instead. Absence of a path is a fact about the project, and
+  stating it is what stops the switcher being mistaken for a crumb.
+
+  THE NOTE VOCABULARY (#427, and the two states #431 still owes):
+  a `.chain-note` is a quiet, non-navigable statement living inside the strip,
+  saying what the crumbs cannot. Three states share it, so the strip never
+  grows a second idiom for "this path is not what it appears":
+
+    1. empty chain — this issue. The note IS the strip: "Inherits from
+       nothing", plus the remedy.
+    2. a gap in the chain (#431) — a note BETWEEN two crumbs, where the
+       undeclared intervening level would be.
+    3. a declared layer that stopped being a project (#431) — a note IN PLACE
+       OF the crumb it would have been.
+
+  The separators carry the distinction and must stay disjoint: `›` is only ever
+  a real hop between two layers, so a note is never joined to anything by one.
+  `·` joins a statement to its remedy, and carries no navigational claim. The
+  glyph question `›` itself raises (#304 — it is not in the closed lexicon of
+  `docs/design/design-language.md` §4) is inherited, not widened: `·` is
+  punctuation between words, not a glyph standing for an operation.
 -->
 {#if crumbs.length > 0}
   <nav class="project-chain" aria-label="Project chain">
@@ -44,6 +81,19 @@
       >{crumb.label}</button>
     {/each}
   </nav>
+{:else if empty}
+  <div class="project-chain">
+    <span
+      class="chain-note"
+      title={canDeclare
+        ? "This project declares no ancestors, so it inherits nothing."
+        : "Nothing sits between this project and the projects folder, so there is nothing to inherit from."}
+    >Inherits from nothing{#if canDeclare}<span class="note-sep" aria-hidden="true">·</span><button
+        type="button"
+        class="note-action"
+        aria-label="Set up what this project inherits from"
+        on:click={onSetUpInheritance}>set up…</button>{/if}</span>
+  </div>
 {/if}
 
 <style>
@@ -108,5 +158,50 @@
     color: var(--text-3);
     font-size: var(--fs-sm);
     user-select: none;
+  }
+
+  /* The note sits where the crumbs would, at their size, one step quieter than
+     they are — it is information about the path, not a stop on it. No border,
+     no hover box, nothing that suggests it can be activated. */
+  .project-chain .chain-note {
+    padding: 4px 8px;
+    /* Deliberately NOT a flex row of parts. The strip yields its space first
+       and completely (see the container), so at a narrow window the note is
+       the thing that gets squeezed — and a flex row squeezed to 40px renders
+       as a fragment of a control, which is the "looks like a rendering defect"
+       failure this note exists to remove. As one run of inline text it
+       truncates the way text does, with an ellipsis that reads as truncation,
+       and the tooltip carries the whole sentence. */
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    color: var(--text-3);
+    font-size: var(--fs-md);
+  }
+
+  .project-chain .note-sep {
+    /* Spaced in CSS, not in the markup: Svelte trims the whitespace between
+       an element and the tag beside it, so a literal space here disappears. */
+    margin: 0 5px;
+    user-select: none;
+  }
+
+  /* The remedy reads as a link rather than a button: it is a word inside a
+     sentence, and a bordered control here would be louder than the crumbs it
+     stands in for — the opposite of what the strip is for. */
+  .project-chain .note-action {
+    padding: 0;
+    border: none;
+    background: transparent;
+    color: inherit;
+    font: inherit;
+    text-decoration: underline;
+    text-underline-offset: 2px;
+    cursor: pointer;
+  }
+
+  .project-chain .note-action:hover {
+    color: var(--text);
   }
 </style>

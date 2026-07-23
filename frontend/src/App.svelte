@@ -24,7 +24,7 @@
   import TopBar from "@/components/chrome/TopBar.svelte";
   import { installThemeWiring, themePreference, nextPreference, type ThemePreference } from "@/lib/utils/theme";
   import { renderChatContent } from "@/lib/utils/chatMessageRender";
-  import { toggledDeclaration } from "@/lib/utils/projectChain";
+  import { canDeclareInheritance, toggledDeclaration } from "@/lib/utils/projectChain";
   import { get } from "svelte/store";
   import {
     chatSessionsStore,
@@ -596,6 +596,8 @@
   onOpenSettings={() => void projectSession.openMachineSettings()}
   onOpenDetailTypes={() => schemaPanes?.openDetailTypes()}
   onOpenProjectNode={() => void editorPanes.openProjectNode()}
+  onOpenInheritance={() => workspaceLayout.ensureVisible("project")}
+  canDeclareInheritance={canDeclareInheritance(project?.ancestors)}
   activePreset={workspaceLayout.activePreset}
   userPresets={layoutPresets.presets.map((preset) => preset.name)}
   onApplyPreset={(name) => workspaceLayout.applyPreset(name as PresetName)}

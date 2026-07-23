@@ -15,14 +15,14 @@ import { AutosaveScheduler } from "@/lib/editor-core/autosave";
 const IDLE = 6000;
 const MAX_WAIT = 30000;
 
-function makeScheduler(overrides: { dirty?: () => boolean } = {}) {
+function makeScheduler() {
   const saves: string[] = [];
   let dirty = true;
   const scheduler = new AutosaveScheduler({
     idleMs: IDLE,
     maxWaitMs: MAX_WAIT,
     indicatorMs: 2000,
-    shouldSave: overrides.dirty ?? (() => dirty),
+    shouldSave: () => dirty,
     save: (id) => {
       saves.push(id);
     },
@@ -105,11 +105,24 @@ describe("AutosaveScheduler", () => {
   });
 
   it("re-checks dirtiness when the ceiling fires", () => {
+    // Reaching the ceiling's own re-check takes some care, and two easier
+    // spellings of this test prove nothing:
+    //   - set `dirty` false and just wait: the *idle* timer reaches `#fire`
+    //     first at 6s, does the re-check itself, and clears the ceiling as it
+    //     goes, so the ceiling never fires;
+    //   - set it false and keep typing: `schedule` bails on `!shouldSave` and
+    //     clears the ceiling before it can fire.
+    // So: type right up to the ceiling, then have something else clean the pane
+    // *without* a further keystroke — which is what another save path doing
+    // `flushSceneIfDirty` looks like from here.
     const { scheduler, saves, setDirty } = makeScheduler();
-    scheduler.schedule("a");
-    // Something else saved the pane in the meantime.
+    for (let second = 0; second < MAX_WAIT / 1000 - 1; second += 1) {
+      scheduler.schedule("a");
+      vi.advanceTimersByTime(1000);
+    }
     setDirty(false);
-    vi.advanceTimersByTime(MAX_WAIT * 2);
+    // Past the ceiling (t=30s) but not yet past the last idle arm (t=34s).
+    vi.advanceTimersByTime(2000);
     expect(saves).toEqual([]);
   });
 

@@ -24,6 +24,7 @@
   import TopBar from "@/components/chrome/TopBar.svelte";
   import { installThemeWiring, themePreference, nextPreference, type ThemePreference } from "@/lib/utils/theme";
   import { renderChatContent } from "@/lib/utils/chatMessageRender";
+  import { toggledDeclaration } from "@/lib/utils/projectChain";
   import { get } from "svelte/store";
   import {
     chatSessionsStore,
@@ -208,6 +209,12 @@
     projectSession.setStatus = (message) => { status = message; };
     projectSession.onOpenWorkspace = openProjectWorkspace;
     projectSession.onProjectDataLoaded = () => schemaPanes?.syncSelection();
+    // A declaration change (#426) returns a fresh project without opening one,
+    // so it folds in the same way an AI-settings save does — appState only, no
+    // workspace teardown.
+    projectSession.onProjectUpdated = (project) => {
+      appState = { name: "projectOpen", project };
+    };
     cleanupThemeWiring = installThemeWiring();
     // Eagerly fetch machine settings (so the chat panel + inputs dialog can show
     // the assistant roster without a round-trip) and auto-rehydrate the
@@ -652,7 +659,11 @@
         aiHealthChecking={aiSettings.healthChecking}
         {validation}
         projectChildren={project?.children ?? []}
+        ancestors={project?.ancestors ?? []}
         onOpenChild={(path) => void projectSession.openProjectAt(path)}
+        onToggleInherit={(path) =>
+          void projectSession.setDeclaration(toggledDeclaration(project?.ancestors, path))}
+        inheritSaving={projectSession.declarationSaving}
         bind:aiPolicy={aiSettings.policy}
         bind:projectCostExpanded
         onValidate={validateProject}

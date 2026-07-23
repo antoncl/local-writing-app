@@ -33,23 +33,25 @@ import sys
 from pathlib import Path
 
 # High-water mark. Ratchet DOWN after a consolidation pass; never up.
-# Provisional: set just above the size at the time this guard landed, so it
-# does not fire on day one. The consolidation pass that follows should drop it
-# to whatever the trimmed file measures.
-MAX_BYTES = 17_200
+# Measured after the 2026-07-23 consolidation pass: 8 blocks of inline prose
+# moved out to memos (3 of them new, 5 already duplicated in their memo), and
+# the hooks trimmed. 17,613 -> 14,278 bytes.
+MAX_BYTES = 14_278
 
 # A pointer line is one memory: a link, then a short hook. Anything longer has
 # started summarising the memo instead of pointing at it.
 MAX_POINTER_CHARS = 140
 
-# The same ratchet applied to the structural rules. Both are already violated
-# today (the index carries inline prose, and most hooks have grown into
-# summaries), so an absolute rule would fire on every memory write and be
-# tuned out within a day. Instead the counts may fall and never rise, which
-# makes the guard silent until something gets worse. Ratchet these down after
-# a consolidation pass too.
-MAX_CONTENT_LINES = 8
-MAX_LONG_POINTERS = 44
+# The same ratchet applied to the structural rules: the counts may fall and
+# never rise, so the guard stays silent until something gets worse.
+#
+# MAX_CONTENT_LINES is now 0 — i.e. genuinely absolute. It could not be when
+# the guard landed, because the index carried 8 blocks of inline prose and a
+# rule that fires on every memory write is one that gets tuned out. The
+# consolidation pass removed all 8, so the rule the index always claimed to
+# follow — pointers only, content in the memo — is finally enforceable.
+MAX_CONTENT_LINES = 0
+MAX_LONG_POINTERS = 32
 
 POINTER = re.compile(r"^\s*[-*]\s*\[[^\]]+\]\(([^)]+\.md)\)")
 # Structural lines that legitimately are not pointers.

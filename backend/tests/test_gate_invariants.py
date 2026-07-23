@@ -425,20 +425,26 @@ def test_growth_past_the_ratchet_is_reported(tmp_path):
     assert any("over the" in p for p in check_memory_index.check(index))
 
 
-def test_inline_content_is_ratcheted_not_absolute(tmp_path):
-    """Below the budget it stays quiet; one line over the budget it speaks.
+def test_the_content_budget_only_ever_ratchets_down(tmp_path):
+    """Below the budget it stays quiet; one line over it, the guard speaks.
 
-    The index already carries inline prose today. An absolute rule would fire
-    on every memory write until that is consolidated, and a guard that fires
-    every time is one that gets tuned out — so the count ratchets instead.
+    This test used to assert the opposite — that the budget must be > 0 —
+    because when the guard landed the index carried 8 blocks of inline prose,
+    and an absolute rule would have fired on every memory write until that was
+    consolidated. The 2026-07-23 pass removed all 8, so the budget ratcheted to
+    0 and the rule the index always claimed to follow (pointers only, content
+    in the memo) is finally absolute.
+
+    The property being pinned is therefore the *direction*: the budget may fall
+    and must never rise. A future session that hits the rule and "fixes" it by
+    raising the constant has reintroduced exactly what this guard exists to
+    stop, and this assertion is what catches that.
     """
     budget = check_memory_index.MAX_CONTENT_LINES
-    # Pin the ratchet property itself. Without this the test reads the budget
-    # dynamically and so passes even if the budget is mutated to 0 — i.e. it
-    # would keep reporting success for the absolute rule it exists to forbid.
-    assert budget > 0, (
-        "MAX_CONTENT_LINES is a ratchet against today's count, not an absolute "
-        "rule; at 0 the guard fires on every memory write and gets tuned out."
+    assert budget == 0, (
+        "MAX_CONTENT_LINES ratchets down only. It reached 0 on 2026-07-23; "
+        "raising it means inline prose is back in the index, which is paid on "
+        "every model step. Move the content into a memo instead."
     )
 
     at_budget = "# Memory Index\n\n" + "".join(f"**Inline {i}:** prose\n" for i in range(budget))

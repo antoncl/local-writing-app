@@ -566,13 +566,20 @@ class LoreMutationsMixin(MarkerMixin):
         index = self.build_mutations_index()
         return MutationMarkerList(items=list(index.by_entity.get(entity_id, [])))
 
-    def effective_names(self, scene_id: str) -> dict[str, list[str]]:
+    def effective_names(
+        self, scene_id: str, index: MutationsIndex | None = None
+    ) -> dict[str, list[str]]:
         """Each lore entry's **effective** name-set (title + aliases) as of the
         end of `scene_id` — the primitive the effective-name-aware matcher (#61)
         needs. A renamed entity resolves under its as-of-scene name; unmutated
         entries return their base names. Resolution is **scene-granular** (the
-        end-of-scene name-set covers the whole scene; ADR-0008 amended)."""
-        index = self.build_mutations_index()
+        end-of-scene name-set covers the whole scene; ADR-0008 amended).
+
+        Pass a prebuilt `index` when the caller already has one. Building it is
+        the expensive part (1.16 s on a 600-scene manuscript), and a request that
+        both resolves names and resolves state would otherwise pay for it twice —
+        count the re-derivations of a shared traversal before adding a consumer."""
+        index = index if index is not None else self.build_mutations_index()
         names: dict[str, list[str]] = {}
         try:
             entries = self.list_lore_entries().entries

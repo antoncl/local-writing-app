@@ -16,7 +16,7 @@
 // if a large project shows pressure.
 
 import { Extension } from "@tiptap/core";
-import { Plugin, PluginKey } from "prosemirror-state";
+import { Plugin, PluginKey, type EditorState } from "prosemirror-state";
 import { Decoration, DecorationSet } from "prosemirror-view";
 import type { Node as PMNode } from "prosemirror-model";
 import type { EditorView } from "prosemirror-view";
@@ -34,25 +34,57 @@ export type ImplicitContextOptions = {
   matcher: CompiledMatcher | null;
 };
 
-const pluginKey = new PluginKey<DecorationSet>("implicit-context-highlight");
+/** What one scan produced: the decorations to paint, and the distinct entry
+ *  ids they were painted for — the *dynamic context* (#439).
+ *
+ *  The ids are a by-product of the decoration walk rather than a second scan,
+ *  and that is the point: the snapshot witness records exactly the entries the
+ *  author can see underlined. A separate pass (here or on the backend) would be
+ *  a second matcher that has to agree with this one, and every disagreement
+ *  between them would surface as drift on a scene nobody touched. */
+export type ScanState = {
+  decorations: DecorationSet;
+  /** Document order, deduplicated. Order is stable so the payload does not
+   *  churn between saves. */
+  entityIds: string[];
+};
+
+const EMPTY_SCAN: ScanState = { decorations: DecorationSet.empty, entityIds: [] };
+
+const pluginKey = new PluginKey<ScanState>("implicit-context-highlight");
 
 /** Meta key that triggers a forced re-scan even when the document hasn't
  *  changed. Use after mutating extension options.matcher so the new
  *  pattern set takes effect immediately. */
 export const REBUILD_META = "implicit-context-rebuild";
 
+/** The entry ids currently highlighted in this editor's document.
+ *
+ *  Empty when the extension is absent or the matcher has not compiled yet,
+ *  which is *not* the same as "the prose mentions nothing" — a caller that
+ *  needs the distinction must check whether the editor is ready first. */
+export function implicitContextIds(state: EditorState): string[] {
+  return pluginKey.getState(state)?.entityIds ?? [];
+}
+
 /** Walk all text nodes in the doc, run the matcher, build decorations.
  *  Position math: ProseMirror's text-node positions are document-wide;
  *  we add the in-text hit offset to the node's start position. */
-function buildDecorations(doc: PMNode, matcher: CompiledMatcher): DecorationSet {
-  if (matcher.isEmpty) return DecorationSet.empty;
+function buildScan(doc: PMNode, matcher: CompiledMatcher): ScanState {
+  if (matcher.isEmpty) return EMPTY_SCAN;
   const decorations: Decoration[] = [];
+  const entityIds: string[] = [];
+  const seen = new Set<string>();
   doc.descendants((node, pos) => {
     if (!node.isText) return;
     const text = node.text ?? "";
     if (!text) return;
     const hits = matcher.scan(text);
     for (const hit of hits) {
+      if (!seen.has(hit.entryId)) {
+        seen.add(hit.entryId);
+        entityIds.push(hit.entryId);
+      }
       const entry = matcher.lookup.get(hit.entryId);
       const attrs: Record<string, string> = {
         class: HIGHLIGHT_CLASS,
@@ -68,7 +100,7 @@ function buildDecorations(doc: PMNode, matcher: CompiledMatcher): DecorationSet 
       decorations.push(Decoration.inline(pos + hit.start, pos + hit.end, attrs));
     }
   });
-  return DecorationSet.create(doc, decorations);
+  return { decorations: DecorationSet.create(doc, decorations), entityIds };
 }
 
 /** Shared popup DOM — one element per editor view, kept hidden until a
@@ -181,28 +213,28 @@ export const ImplicitContextHighlight = Extension.create<ImplicitContextOptions>
     const getMatcher = (): CompiledMatcher | null => this.options.matcher;
 
     return [
-      new Plugin<DecorationSet>({
+      new Plugin<ScanState>({
         key: pluginKey,
         state: {
           init: (_config, state) => {
             const matcher = getMatcher();
-            if (!matcher) return DecorationSet.empty;
-            return buildDecorations(state.doc, matcher);
+            if (!matcher) return EMPTY_SCAN;
+            return buildScan(state.doc, matcher);
           },
           apply: (tr, old) => {
             const matcher = getMatcher();
-            if (!matcher || matcher.isEmpty) return DecorationSet.empty;
+            if (!matcher || matcher.isEmpty) return EMPTY_SCAN;
             const forced = tr.getMeta(REBUILD_META);
             if (!tr.docChanged && !forced) return old;
             // Doc changed (or caller forced a rebuild because the matcher
             // reference changed). Full rescan — sub-millisecond at our
             // scale per the benchmark. Incremental rescan is a v2 win.
-            return buildDecorations(tr.doc, matcher);
+            return buildScan(tr.doc, matcher);
           },
         },
         props: {
           decorations(state) {
-            return pluginKey.getState(state) ?? DecorationSet.empty;
+            return pluginKey.getState(state)?.decorations ?? DecorationSet.empty;
           },
           handleDOMEvents: (() => {
             let popup: PopupController | null = null;

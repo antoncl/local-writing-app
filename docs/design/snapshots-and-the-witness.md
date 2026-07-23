@@ -6,10 +6,10 @@
 > not supersede either. It is the explanatory layer they deliberately left out: ADR-0043 fixes *that*
 > a snapshot carries a witness and never defines *what a witness contains*, and the answer turned out
 > to need a page of reasoning rather than a sentence.
-> Slices 1 and 2 have shipped ([#401](https://github.com/antoncl/local-writing-app/issues/401),
-> [#409](https://github.com/antoncl/local-writing-app/issues/409)). Slice 3 is
-> [#439](https://github.com/antoncl/local-writing-app/issues/439), and this document is what it
-> should be read alongside.
+> Slices 1, 2 and 3 have shipped ([#401](https://github.com/antoncl/local-writing-app/issues/401),
+> [#409](https://github.com/antoncl/local-writing-app/issues/409),
+> [#439](https://github.com/antoncl/local-writing-app/issues/439)). §9 records what slice 3 closed
+> and what it added to this design.
 
 ## 0. What a snapshot is, in one paragraph
 
@@ -339,13 +339,65 @@ the witness set, and the question of *which* entities to record is about precisi
 
 ## 9. Open
 
-1. **#447** — which dynamic context is real. §4 gives the witness a workable answer, but the
-   underlying divergence between what the editor promises and what the model receives is undecided.
-2. **The scope-visibility gap (§3)** — wants an ADR-0043 amendment, since the ADR currently claims
-   axis 2 gets complete for free when #314 lands.
-3. **Recording the editing-finished trigger (§5)** — ADR-0043 says close was rejected; it should say
-   *which* close.
-4. **#439's Acceptance text** — strike the absent/deleted line (§2), recast report quality as
-   floor-and-goal (§6).
-5. **Where the report surfaces while parked** — ADR-0044 designs the strip without it, and the
-   compare view already owns the pane and the A/S/B letter keys. May need an ADR-0044 amendment.
+Slice 3 shipped in #439, and building it closed four of the five.
+
+1. **#447 — half-closed.** §4's answer is now built: the editor's hits ride on the scene save and on
+   the diff request, so the witness records exactly the entries the author sees underlined. That is
+   #447 direction (1)'s wire, and it refutes direction (3) — the promise is true on one path, so
+   qualifying the highlight would now misdescribe it. **What remains open is the other consumer:**
+   chat send still scans the composer message and prompt rendering still scans the scene `summary`,
+   so the model does not yet receive what the highlight promises. Feeding the prose hits into
+   `expand_context` changes what reaches the model on a hot path and wants its own change.
+2. **The scope-visibility gap (§3) — closed.** ADR-0043 **Amendment 3**. The witness records the
+   resolved source layer per entity, and a moved layer is its own drift axis.
+3. **Recording the editing-finished trigger (§5)** — still open. ADR-0043 says close was rejected; it
+   should say *which* close.
+4. **#439's Acceptance text — closed.** The absent/deleted line is struck (§2) and report quality is
+   recast as floor-and-goal (§6).
+5. **Where the report surfaces while parked — closed.** It rides on the **diff response**. A restore
+   is only reachable from a parked notch and parking is what fetches the diff, so ADR-0043's "restore
+   reports drift" costs no extra request and the report is already on screen when the author decides.
+   No ADR-0044 amendment was needed: the strip gained a band below its actions row, and the A/S/B
+   letter keys are untouched.
+
+### What the build added to this design
+
+- **`sources_recorded`.** A capture from a route with no prose editor behind it (the pre-restore
+  capture) observes two sources, not three. Differencing that against a three-source witness would
+  report every implicitly-detected entity as *removed* — a wolf cried on a scene nobody touched — so
+  membership drift is computed only over the sources **both** sides observed. The distinction is
+  carried by the *type* — `list[str] | None`, where `None` is "not observed" and `[]` is "observed and
+  empty". Defaulting it to `[]` collapsed the two, because an omitted JSON key is indistinguishable
+  from an absent one, and made the whole mechanism inert on the path that matters most.
+- **The witness is normalised, not raw.** `_normalise_metadata` runs on the entry's stored values —
+  the same coercion `_snapshot_state` applies to the scene's own fields, for the same reason. The
+  stored side of a witness goes through `model_dump(mode="json")` on its way to the sidecar, so a
+  value the live side kept as `datetime.date` compared unequal against its own ISO string. *Both
+  sides of a comparison must come off the same pipeline* is a rule this design states twice and had
+  to learn a third time.
+- **The bounds.** `MAX_WITNESS_ENTITIES = 200` and `MAX_DYNAMIC_CONTEXT_IDS = 200`, with `truncated`
+  reported rather than hidden: a silently truncated witness reads as "nothing else changed", which is
+  the one claim it cannot make. The cap also **withholds the membership axis** while it is in force —
+  it is applied independently on each side, so the retained id sets can differ, and a set difference
+  over them would report an entity as having left a scene it never left.
+- **A dropped entity keeps its values.** The comparison hands the captured witness's ids to the live
+  build as `also_resolve`, recording their state without counting them as members. Without it the
+  mutation case — an interval opened in an earlier scene and since deleted, which is §1's own
+  motivating example — could only say *no longer part of this scene*, discarding both values.
+
+### Cost, honestly
+
+The figure this section first carried (~34 ms) measured `build_witness` with a **prebuilt** mutations
+index. No caller passes one, so it was not the cost anyone pays. Measured properly, on a 200-scene /
+40-entity fixture, a park goes from ~0.7 s to **~1.5 s**, and to ~3 s when `add`/`remove` markers are
+live — dominated by `build_mutations_index`, which reads every scene body and is uncached.
+
+**That is the witness policy's bill, not an accident of this slice.** §1 defines the mutation source
+by *resolution* rather than syntax precisely because the syntactic answer is wrong, and resolution
+means the index. Two things were genuinely wasteful and are fixed — `effective_state` was computed
+twice per entity, and `long_text` fields were being copied into every sidecar — but the index build
+itself is inherent.
+
+What is left is a **scheduling** question rather than an algorithmic one: the work is real, and the
+answer if it becomes intrusive is to take it off the synchronous route, not to make the witness know
+less. Recorded here so the next reader does not re-derive it as a defect.

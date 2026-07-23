@@ -419,7 +419,7 @@ class ManuscriptMixin:
         # Before the write, because the point of the automatic capture is what
         # this looked like when the author sat down — the pre-save bytes, not
         # the post-save ones (ADR-0043 Amendment 2).
-        self.maybe_capture_session_boundary(root, node_id, path)
+        self.maybe_capture_session_boundary(root, node_id, path, request.dynamic_context)
         self._write_scene_file(path, scene)
         path = self._maybe_rename_node_file(path, request.title)
         self._update_scene_title_in_structure(node_id, request.title)

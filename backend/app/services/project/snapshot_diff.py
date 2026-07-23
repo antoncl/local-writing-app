@@ -46,7 +46,7 @@ import re
 from pathlib import Path
 from typing import Any
 
-from app.models import DiffRun, FieldDiff, SnapshotDiff
+from app.models import DiffRun, FieldDiff, SnapshotDiff, SnapshotDrift
 from app.models.snapshots import SnapshotDiffRequest
 from app.services.markdown_scan import (
     escapes_container,
@@ -54,6 +54,8 @@ from app.services.markdown_scan import (
     is_code_block,
     protected_intervals,
 )
+from app.services.project.field_values import same_rendered_value
+from app.services.project.snapshot_drift import compare_witnesses
 
 # Blocks are separated by a blank line. The separator is kept as its own chunk
 # so the runs still reassemble to the source byte for byte.
@@ -163,7 +165,33 @@ class SnapshotDiffMixin:
             fields=_field_diffs(was, live),
             title_was=was["title"],
             title_now=live.title,
+            # Drift rides here rather than on a route of its own: a restore is
+            # only reachable from a parked notch, and parking is what fetches
+            # this — so ADR-0043's "restore reports drift" costs one request, and
+            # the report is already on screen when the author decides.
+            drift=self._snapshot_drift(root, node_id, snapshot_id, live),
         )
+
+    def _snapshot_drift(
+        self, root: Path, node_id: str, snapshot_id: str, live: SnapshotDiffRequest
+    ) -> SnapshotDrift:
+        """The stored witness against the world as it is now.
+
+        The captured witness's ids are handed to the live build as
+        `also_resolve`, so an entity that has since dropped out of the scene's
+        context still gets its values resolved. Without it the comparison had
+        only one side and could say nothing beyond "no longer part of this
+        scene" — which on ADR-0043's motivating case (an interval deleted in an
+        earlier scene) is both the least useful thing to say and a claim about
+        the prose, when what changed was the world.
+        """
+        stored = self.read_snapshot_witness(root, node_id, snapshot_id)
+        live_witness = self.build_witness(
+            node_id,
+            live.dynamic_context,
+            also_resolve=[entity.id for entity in stored.entities] if stored else (),
+        )
+        return compare_witnesses(stored, live_witness)
 
     def _snapshot_state(
         self, front_matter: dict[str, Any], node_id: str, path: Path
@@ -624,26 +652,5 @@ def _field_diffs(was_state: dict[str, Any], live: SnapshotDiffRequest) -> dict[s
     return {
         key: FieldDiff(was=was.get(key), now=now.get(key))
         for key in sorted(keys)
-        if not _same_value(was.get(key), now.get(key))
+        if not same_rendered_value(was.get(key), now.get(key))
     }
-
-
-def _same_value(was: Any, now: Any) -> bool:
-    """Whether two field values are the same *as the rail renders them*.
-
-    A missing key and an empty one are the same absence to a reader — the row
-    reads "(none)" either way — so reporting a flip between them shows the
-    author two identical-looking values and no way to reconcile them. They
-    arrive different for ordinary reasons: healing a reference to a deleted node
-    blanks it to `""` rather than removing it, and a scene saved before a field
-    existed simply has no key.
-
-    `0` and `False` are values, not absences, so the check is explicit about
-    the empty containers rather than leaning on truthiness.
-    """
-    empty = (None, "", [], {})
-    was_blank = any(was is candidate or was == candidate for candidate in empty)
-    now_blank = any(now is candidate or now == candidate for candidate in empty)
-    if was_blank or now_blank:
-        return was_blank and now_blank
-    return bool(was == now)

@@ -108,6 +108,73 @@ export type FieldDiff = {
   now: unknown;
 };
 
+/** One of an entity's fields, then versus now (#439 drift axis 1). */
+export type WitnessFieldDrift = {
+  field_id: string;
+  /** The author-facing field name, carried from the witness so the report can
+   *  still name a field the schema has since dropped. */
+  label: string;
+  was: unknown;
+  now: unknown;
+  /** The value came from a live mutation marker rather than from the entry —
+   *  the difference between "someone edited Tom" and "a marker in another
+   *  scene changed what Tom is here". */
+  from_mutation: boolean;
+};
+
+/** A recorded value's *meaning* moved under it (#439 drift axis 3). */
+export type FieldReinterpretation = {
+  field_id: string;
+  label: string;
+  type_was: string;
+  type_now: string;
+  options_was: string[];
+  options_now: string[];
+};
+
+/** Everything that changed about one entity. Only entities where something
+ *  actually fired appear — an advisory report that lists the unchanged trains
+ *  the dismissal that makes it worthless. */
+export type EntityDrift = {
+  entity_id: string;
+  /** The author's vocabulary; for a removed entity, the name at capture. */
+  title: string;
+  /** Axis 4, both directions. `present` = context in both versions.
+   *
+   *  Always `present` when the report is `truncated`: the entity cap is applied
+   *  independently on each side, so the retained id sets can differ and a set
+   *  difference over them would fabricate a departure. */
+  membership: "added" | "removed" | "present";
+  sources: string[];
+  /** Axis 2. `unknown` where the change tokens cannot be compared meaningfully
+   *  — never collapsed into `no`. */
+  entry_changed: "yes" | "no" | "unknown";
+  fields: WitnessFieldDrift[];
+  reinterpreted: FieldReinterpretation[];
+  /** Axis 5, non-empty only when the resolved layer actually moved. */
+  layer_was: string;
+  layer_now: string;
+};
+
+/** What has changed underneath a snapshot since it was taken (ADR-0043).
+ *
+ *  Advisory: never a gate, never an acknowledgement, never a refused restore.
+ *  Three states are kept distinguishable — `available: false` (the snapshot
+ *  predates the witness), `comparable: false` (recorded under a shape this
+ *  build cannot read), and a real comparison whose `entities` may be empty. */
+export type SnapshotDrift = {
+  available: boolean;
+  /** False when either side could not be read — an older witness shape, one
+   *  that will not parse, or a current side that could not be built. All three
+   *  mean the same thing to a reader: no claim is being made either way. */
+  comparable: boolean;
+  /** The entity cap fired on one of the sides, so the list may be short AND the
+   *  membership axis is withheld. Must be surfaced: silence would otherwise read
+   *  as "nothing else changed". */
+  truncated: boolean;
+  entities: EntityDrift[];
+};
+
 export type SnapshotDiff = {
   snapshot: Snapshot;
   runs: DiffRun[];
@@ -115,6 +182,7 @@ export type SnapshotDiff = {
   fields: Record<string, FieldDiff>;
   title_was: string;
   title_now: string;
+  drift: SnapshotDrift;
 };
 
 export type LoreEntrySummary = {

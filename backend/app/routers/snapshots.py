@@ -9,6 +9,7 @@ from __future__ import annotations
 from fastapi import APIRouter
 
 from app.models import (
+    CaptureSnapshotRequest,
     Scene,
     Snapshot,
     SnapshotDetail,
@@ -29,11 +30,20 @@ def list_snapshots(project: CurrentProject, scene_id: str) -> SnapshotList:
 
 
 @router.post("/api/scenes/{scene_id}/snapshots", response_model=Snapshot)
-def capture_snapshot(project: CurrentProject, scene_id: str) -> Snapshot:
-    """The camera: an explicit capture, never thinned. No request body — the
-    description is slice 4, and guessing its shape here would fix it."""
+def capture_snapshot(
+    project: CurrentProject, scene_id: str, request: CaptureSnapshotRequest | None = None
+) -> Snapshot:
+    """The camera: an explicit capture, never thinned.
+
+    The body is optional, and its absence is meaningful: no body means the
+    dynamic context was **not observed**, which the witness records as two
+    sources rather than three. A caller with a prose editor behind it sends the
+    detected set; one without says nothing rather than claiming emptiness.
+    """
     with translate_errors():
-        return project.capture_snapshot(scene_id)
+        return project.capture_snapshot(
+            scene_id, request.dynamic_context if request is not None else None
+        )
 
 
 @router.get("/api/scenes/{scene_id}/snapshots/{snapshot_id}", response_model=SnapshotDetail)

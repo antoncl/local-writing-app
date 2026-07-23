@@ -35,11 +35,11 @@ from app.services.markdown_scan import (
     is_structured,
     protected_intervals,
 )
+from app.services.project.field_values import same_rendered_value
 from app.services.project.snapshot_diff import (
     MAX_WORD_DIFF_TOKENS,
     TOKEN,
     _is_a_rewrite_of,
-    _same_value,
     diff_runs,
 )
 
@@ -518,7 +518,7 @@ def test_generated_documents_hold_every_invariant() -> None:
 def test_blank_and_absent_read_as_the_same_value(was: object, now: object, same: bool) -> None:
     """The rail renders a missing field and an empty one identically, so a flip
     between them shows two identical-looking values with nothing to reconcile."""
-    assert _same_value(was, now) is same
+    assert same_rendered_value(was, now) is same
 
 
 # ----- structure the scanner used to miss -------------------------------------

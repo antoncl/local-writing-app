@@ -493,3 +493,91 @@ def test_findings_survive_a_cp1252_console(tmp_path):
     assert result.returncode == 1, "the oversized index should have been reported"
     assert "memory index:" in result.stdout
     assert "non-pointer" in result.stdout, "the finding itself never made it out"
+
+
+# --- the SessionEnd dev-server cleanup (#452) ---------------------------------
+#
+# A session's Vite server outlived it by twenty hours, holding port 5173 and —
+# because Windows will not unlink a running executable — locking esbuild.exe
+# inside its worktree, which left 23,413 files undeletable. The hook that stops
+# this is only safe if it kills strictly what the session started, so the two
+# invariants below are the whole point of it.
+
+
+def _load_hook(name: str):
+    """Import a module from `.claude/hooks/`, which is not a package."""
+    path = REPO / ".claude" / "hooks" / f"{name}.py"
+    spec = importlib.util.spec_from_file_location(f"_hook_{name}", path)
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+cleanup_servers = _load_hook("cleanup_session_servers")
+
+_WORKTREE = Path("D:/repo/.claude/worktrees/my-session")
+_SIBLING = Path("D:/repo/.claude/worktrees/other-session")
+
+
+def _proc(pid, name, cmdline):
+    return (pid, name, cmdline)
+
+
+def test_it_kills_a_dev_server_started_in_this_worktree():
+    procs = [_proc(101, "node.exe", f"node {_WORKTREE}/frontend/node_modules/vite/bin/vite.js --mode claude")]
+    assert cleanup_servers.owned_by(_WORKTREE, procs) == [101]
+
+
+def test_it_never_touches_another_tree_s_server():
+    """The invariant that makes this hook safe to run with sessions in parallel.
+
+    The primary tree holds Anton's WIP and his live projects, and sibling
+    worktrees belong to other sessions. Path containment — not the process
+    looking server-shaped — is what keeps the hook inside its own lane.
+    """
+    procs = [
+        _proc(201, "node.exe", "node D:/repo/frontend/node_modules/vite/bin/vite.js --mode claude"),
+        _proc(202, "node.exe", f"node {_SIBLING}/frontend/node_modules/vite/bin/vite.js --mode claude"),
+        _proc(203, "python.exe", "python D:/repo/scripts/dev_backend.py"),
+    ]
+    assert cleanup_servers.owned_by(_WORKTREE, procs) == []
+
+
+def test_it_never_kills_a_shell_however_its_arguments_read():
+    """A shell's command line contains the command it was asked to run.
+
+    The first version of this hook killed the shell running its own test,
+    because `bash -c "... vite --mode claude <worktree> ..."` satisfies every
+    content test a real server does. In a session that shell is the session's
+    own tooling. Nothing is lost by skipping it: killing the server with /T
+    takes its children, and the wrapper exits once its child is gone.
+    """
+    procs = [
+        _proc(301, "bash.exe", f"bash -c 'cd {_WORKTREE} && npm run dev -- --mode claude'"),
+        _proc(302, "cmd.exe", f"cmd /c vite --mode claude {_WORKTREE}"),
+        _proc(303, "powershell.exe", f"powershell -Command uvicorn {_WORKTREE}"),
+    ]
+    assert cleanup_servers.owned_by(_WORKTREE, procs) == []
+
+
+def test_it_leaves_non_servers_in_the_worktree_alone():
+    """Path containment alone is not licence to kill — editors and test runners
+    legitimately run from inside the worktree."""
+    procs = [
+        _proc(401, "python.exe", f"python -m pytest {_WORKTREE}/backend/tests"),
+        _proc(402, "node.exe", f"node {_WORKTREE}/node_modules/.bin/eslint"),
+    ]
+    assert cleanup_servers.owned_by(_WORKTREE, procs) == []
+
+
+def test_a_short_root_cannot_turn_it_into_a_machine_wide_killer():
+    """A degenerate root would otherwise match most of the filesystem."""
+    procs = [_proc(501, "node.exe", "node /srv/app/vite.js --mode claude")]
+    for root in (Path("/"), Path("D:/"), Path("/srv")):
+        assert cleanup_servers.owned_by(root, procs) == [], root
+
+
+def test_it_refuses_to_act_outside_a_linked_worktree(tmp_path):
+    """Fails closed: no git answer, or the primary tree, means no killing."""
+    assert cleanup_servers.is_linked_worktree(tmp_path) is False
+    assert cleanup_servers.is_linked_worktree(REPO.parent) is False

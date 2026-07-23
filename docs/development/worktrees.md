@@ -75,6 +75,40 @@ dev_backend: verified <path> is serving 127.0.0.1:<port>
 
 names the checkout actually being served.
 
+## Stopping them automatically at session end
+
+`.claude/hooks/cleanup_session_servers.py` runs on `SessionEnd` and stops the
+dev servers the session started, so the manual step below is the fallback rather
+than the only line of defence.
+
+It exists because prose was not enough (#452): a Vite server started by a
+session on 2026-07-22 was still running twenty hours later, holding port 5173 —
+Anton's own frontend port — and holding `esbuild.exe` inside its worktree.
+Windows will not unlink a running executable, so `rmdir` on that worktree failed
+with an access-denied error that reads like a permissions problem and is not
+one. 23,413 files were stranded until the process was found and killed.
+
+Two invariants make it safe to run while several sessions are going at once:
+
+1. **It never acts outside a linked worktree.** In the primary tree it exits
+   immediately — those servers are Anton's.
+2. **It only kills a process whose command line names *this* worktree's path**,
+   and which also looks like a dev server. Path containment is the boundary; the
+   server markers stop it reaching an editor or a test runner that happens to run
+   from the same directory.
+
+It also never kills a **shell**, whatever the arguments read like. A shell's
+command line contains the command it was asked to run, so
+`bash -c "… vite --mode claude <worktree> …"` satisfies every content test a real
+server does — the first version of the hook killed the shell running its own
+test for exactly that reason, and in a session that shell is the session's own
+tooling. Nothing is lost: killing the server with `/T` takes its children, and
+the wrapper exits once its child is gone.
+
+The decision logic is a pure function over `(pid, name, command line)` triples,
+pinned by `test_gate_invariants.py` — including that another tree's server and a
+shell both survive.
+
 ## Why stopping a server needs the process *tree*
 
 `uvicorn --reload` spawns a `multiprocessing` child that survives its parent and

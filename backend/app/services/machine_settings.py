@@ -11,6 +11,7 @@ import yaml
 from pydantic import BaseModel, Field
 
 from app.models import AssistantTag, RecentProject, Swatch
+from app.services.project.errors import ProjectServiceError
 
 APP_NAME = "local-writing-app"
 CONFIG_FILENAME = "config.yaml"
@@ -128,6 +129,41 @@ def config_dir() -> Path:
 
 def config_path() -> Path:
     return config_dir() / CONFIG_FILENAME
+
+
+def validated_projects_root(raw: str) -> str:
+    """Check a projects root before it is stored, or refuse (#429).
+
+    The bound used to be validated on the way in — `_validate_projects_base_folder`
+    checked that a project's `projects_base_folder` existed, was a directory,
+    and actually contained the project, raising 404/400 otherwise. Moving the
+    bound to the machine tier deleted that check along with the key it guarded,
+    and the value it now guards is **more** dangerous unvalidated, not less: a
+    per-project mistake broke one project, whereas a mistyped machine root
+    silently flattens the chain for *every* project at once, and the resulting
+    validation warning blames each project for being "outside" a folder that
+    does not exist.
+
+    Empty is legal and means unset — the state of every machine before the
+    setting is touched, and the way to deliberately clear it.
+
+    Deliberately **not** checked: whether any particular project sits inside it.
+    That is no longer this value's business — a project outside the root is
+    #441's subject, and refusing to save a root because the currently-open
+    project is outside it would make the setting unfixable from the one screen
+    that edits it.
+    """
+    if not raw.strip():
+        return ""
+    try:
+        folder = Path(raw).expanduser()
+    except (OSError, ValueError) as exc:
+        raise ProjectServiceError(f"Not a usable folder path: {raw}", 400) from exc
+    if not folder.exists():
+        raise ProjectServiceError(f"That projects folder does not exist: {folder}", 404)
+    if not folder.is_dir():
+        raise ProjectServiceError(f"The projects folder must be a folder: {folder}", 400)
+    return str(folder.resolve())
 
 
 def projects_root() -> Path | None:
@@ -333,7 +369,7 @@ def merge_update(current: MachineSettings, patch: dict[str, Any]) -> MachineSett
     if "default_models" in patch and isinstance(patch["default_models"], dict):
         base.setdefault("default_models", {}).update(patch["default_models"])
     if "default_projects_folder" in patch and patch["default_projects_folder"] is not None:
-        base["default_projects_folder"] = patch["default_projects_folder"]
+        base["default_projects_folder"] = validated_projects_root(patch["default_projects_folder"])
     if "recent_projects" in patch and patch["recent_projects"] is not None:
         # An explicit list rewrites the recents — used when the user removes
         # a stale entry from the UI.

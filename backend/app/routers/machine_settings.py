@@ -11,6 +11,7 @@ from app.models import (
     MachineSettingsView,
     SetAssistantTagColorRequest,
 )
+from app.runtime import translate_errors
 from app.services import machine_settings as machine_settings_service
 
 router = APIRouter()
@@ -38,12 +39,16 @@ def get_machine_settings() -> MachineSettingsView:
 
 @router.put("/api/settings/machine", response_model=MachineSettingsView)
 def update_machine_settings(request: MachineSettingsUpdate) -> MachineSettingsView:
-    current = machine_settings_service.load_settings()
-    patch = request.model_dump(exclude_unset=True)
-    updated = machine_settings_service.merge_update(current, patch)
-    machine_settings_service.save_settings(updated)
-    masked = machine_settings_service.mask_credentials(updated)
-    return _build_settings_view(masked)
+    # Guarded since #429: `default_projects_folder` is the layer walk's bound
+    # for every project on the machine, so a bad value here is not a local
+    # mistake — it silently flattens every chain at once.
+    with translate_errors():
+        current = machine_settings_service.load_settings()
+        patch = request.model_dump(exclude_unset=True)
+        updated = machine_settings_service.merge_update(current, patch)
+        machine_settings_service.save_settings(updated)
+        masked = machine_settings_service.mask_credentials(updated)
+        return _build_settings_view(masked)
 
 
 @router.get("/api/assistant-tags", response_model=AssistantTagList)

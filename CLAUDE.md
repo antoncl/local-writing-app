@@ -264,11 +264,19 @@ are Markdown with YAML front matter; the front-matter `id` is canonical identity
 
 ### Layered metadata schema
 The app ships a minimal built-in schema, then **merges every
-`metadata.schema.yaml` from `settings.projects_base_folder` down to the open
-project folder**, with nearer folders overriding farther ancestors. This lets
-users model world/series/book levels purely by folder depth — the app does not
-hardcode those concepts. A `metadata.schema.yaml` is only created at a layer when
-a definition is saved there.
+`metadata.schema.yaml` from the ancestor projects the open project *declares*
+(`inherits:`) down to itself**, with nearer folders overriding farther ancestors.
+This lets users model world/series/book levels purely by folder depth — the app
+does not hardcode those concepts. A `metadata.schema.yaml` is only created at a
+layer when a definition is saved there.
+
+Two rules bound that walk, and both were once a per-project manifest key:
+- **Where it stops** is the *machine* root — `default_projects_folder` in
+  machine settings, one folder for every project (#429). A project outside it,
+  or a machine with none set, is a chain of length one.
+- **What it includes** is the project's own `inherits:` declaration (#309).
+  Absent means it inherits nothing; the declaration can only *select* from the
+  folders between the machine root and the project, never extend past them.
 
 ### Node model (read `memory/strategy_node_model.md` and `architecture_class_instance_model.md`)
 Almost everything generalizes to a **Node** with metadata + references. The

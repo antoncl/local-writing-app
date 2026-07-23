@@ -154,8 +154,11 @@ Metadata field definitions should be schema-driven. The app should support
 layered schema:
 
 - Minimal application defaults: built-in fields and entry types available to all projects.
-- Ancestor folder schemas: every `metadata.schema.yaml` from
-  `settings.projects_base_folder` down to the project folder.
+- Ancestor folder schemas: every `metadata.schema.yaml` from the ancestor
+  projects this project declares (`inherits:`, #309) down to the project folder.
+  The declaration selects from the folders between the **machine root**
+  (`default_projects_folder`, one per machine since #429) and the project; it
+  can never reach past that root.
 - Project schema: the final project-local `metadata.schema.yaml`.
 
 Ancestor folders are not assigned semantic roles by the app. A user may choose

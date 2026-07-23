@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 
 import type { AncestorCandidate, ProjectChainLayer } from "@/lib/types";
 import {
+  canDeclareInheritance,
   declarationRows,
   declaredChain,
   inheritsNothing,
@@ -88,6 +89,45 @@ describe("inheritsNothing", () => {
     expect(
       inheritsNothing([layer("honorverse"), layer("obs", { is_root: true })]),
     ).toBe(false);
+  });
+});
+
+describe("canDeclareInheritance", () => {
+  it("is true when an ancestor project is available to declare", () => {
+    expect(
+      canDeclareInheritance([
+        ancestor("writing"),
+        ancestor("honorverse", { is_project: true }),
+      ]),
+    ).toBe(true);
+  });
+
+  it("is true when an ancestor project is already declared", () => {
+    // The editor still has an actionable row — unticking it.
+    expect(
+      canDeclareInheritance([ancestor("honorverse", { is_project: true, inherited: true })]),
+    ).toBe(true);
+  });
+
+  it("is false for a top-level project whose only ancestor is the projects folder", () => {
+    // The regression the second commit fixed: a non-project container folder is
+    // enumerated but renders as a permanently-disabled row, so `.length > 0`
+    // was the wrong gate. Nothing here is tickable.
+    expect(canDeclareInheritance([ancestor("writing")])).toBe(false);
+  });
+
+  it("is false outside the machine root, where nothing is enumerated", () => {
+    expect(canDeclareInheritance([])).toBe(false);
+    expect(canDeclareInheritance(undefined)).toBe(false);
+  });
+
+  it("is true for a stale declared ancestor, because unticking repairs it", () => {
+    // A folder that was declared and stopped being a project (#431's case):
+    // not a project, but the editor offers the untick, so the remedy points
+    // there rather than reading as a dead end.
+    expect(
+      canDeclareInheritance([ancestor("honorverse", { is_project: false, inherited: true })]),
+    ).toBe(true);
   });
 });
 

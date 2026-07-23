@@ -332,6 +332,41 @@ class TheResolvedChainReachesTheWireTests(DeclaredChainTestCase):
     def test_a_flat_project_is_a_chain_of_one(self) -> None:
         self.assertEqual(self._chain(), [("Book 1", "book01", True)])
 
+    def test_a_malformed_ancestor_manifest_does_not_stop_the_project_opening(self) -> None:
+        """A label is decoration on someone else's folder (#430, forced by #432).
+
+        `_layer_label_for_folder` read each layer's manifest unguarded, and
+        `_read_yaml` raises 422 on a syntax error. That already broke the node
+        index and the validation report. Putting `collect_layers` on
+        `current_project()` — which is what `POST /project/open` returns — made
+        the same broken file stop the project below it opening at all, for a
+        project whose own files are fine.
+
+        The layer survives with its folder name, exactly as
+        `_readable_project_title` already did for `ancestors`.
+        """
+        make_project_folder(self.service, self.universe, "The Honorverse")
+        declare(self.service, self.root, [self.universe])
+        (self.universe / "project.yaml").write_text("title: [unclosed\n", encoding="utf-8")
+
+        self.assertEqual(
+            self._chain(),
+            [("honorverse", "honorverse", False), ("Book 1", "book01", True)],
+        )
+
+    def test_a_malformed_ancestor_manifest_leaves_the_validation_report_readable(self) -> None:
+        """#430's own reproduction: the report that should name the problem was
+        the request that failed. The walk no longer raises, so it renders."""
+        make_project_folder(self.service, self.universe, "The Honorverse")
+        declare(self.service, self.root, [self.universe])
+        (self.universe / "project.yaml").write_text("title: [unclosed\n", encoding="utf-8")
+        bind_test_project(self.service)
+
+        with TestClient(app) as client:
+            response = client.post("/api/project/validate")
+
+        self.assertEqual(response.status_code, 200)
+
     def test_the_chain_agrees_with_the_schema_layers_view(self) -> None:
         """The disagreement #432 exists to remove, pinned as an equality.
 

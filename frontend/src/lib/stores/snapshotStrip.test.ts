@@ -144,6 +144,41 @@ describe("a keypress landing while the diff is still in flight", () => {
     expect(strip.bodyHtml).not.toContain("r-now");
   });
 
+  it("returning to Live cancels the diff that was still on its way", async () => {
+    // The Live path was the one notch the freshness guard did not cover: it
+    // cleared the fields and returned WITHOUT bumping the token, so the
+    // response landed afterwards and put everything back while parked was
+    // null. The next notch then rendered this snapshot's body and field pairs
+    // under its own timestamp until its own fetch returned.
+    let release: (value: SnapshotDiff) => void = () => {};
+    const strip = await parked(
+      () => new Promise<SnapshotDiff>((resolve) => (release = resolve)),
+    );
+
+    const parking = strip.park("snap_1");
+    await strip.park(null); // Esc, before the POST comes back
+    release(diff());
+    await parking;
+
+    expect(strip.parked).toBe(null);
+    expect(strip.runs, "the abandoned diff was applied anyway").toEqual([]);
+    expect(strip.fields).toEqual({});
+    expect(strip.titleWas).toBe("");
+    expect(strip.bodyHtml).toBe("");
+  });
+
+  it("returning to Live cancels a render that was still on its way", async () => {
+    // The same hole on the other axis: `setView` starts an unawaited render,
+    // and clearing without bumping let it paint the snapshot's body at Live.
+    const strip = await parked(async () => diff());
+    await strip.park("snap_1");
+    strip.setView("was"); // render starts, unawaited
+    await strip.park(null);
+    // Let any pending render resolve.
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    expect(strip.bodyHtml, "a stale render painted the body at Live").toBe("");
+  });
+
   it("a slow read for a notch already left cannot overwrite the current one", async () => {
     const releases: ((value: SnapshotDiff) => void)[] = [];
     const strip = await parked(

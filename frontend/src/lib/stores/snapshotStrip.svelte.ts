@@ -89,10 +89,9 @@ export class SnapshotStripController {
   load(sceneId: string | null): () => void {
     this.#sceneId = sceneId;
     this.parked = null;
+    // `#clearDiff` cancels the in-flight fetch and render, which a scene change
+    // needs just as much as a return to Live does.
     this.#clearDiff();
-    // Both, because a scene change invalidates a fetch AND a render.
-    this.#fetch++;
-    this.#render++;
     if (!sceneId) {
       this.snapshots = [];
       return () => {};
@@ -188,8 +187,20 @@ export class SnapshotStripController {
     return this.view === "was" ? "was" : "now";
   }
 
+  /**
+   * Drop the compare payload and cancel anything still on its way to replace it.
+   *
+   * **Bumping both tokens is the point**, not housekeeping. Clearing the fields
+   * without them left an in-flight fetch and an in-flight render still passing
+   * their own freshness checks, so returning to Live repopulated everything this
+   * just emptied — and the next notch then rendered the *previous* snapshot's
+   * body, tint and field pairs under its own timestamp until its fetch landed.
+   * `load()` always bumped them; the Live path is the one that did not.
+   */
   #clearDiff(): void {
     // `view` deliberately survives — see the field's comment.
+    this.#fetch++;
+    this.#render++;
     this.bodyHtml = "";
     this.runs = [];
     this.fields = {};

@@ -28,7 +28,15 @@ SIZE_GUARD = REPO / "scripts" / "check_file_size.py"
 STYLE_GUARD = REPO / "scripts" / "check_style_tokens.py"
 # Advisory complexity rules — flagged, never blocking, while the existing count
 # is burned down (see backend/pyproject.toml for thresholds).
-COMPLEXITY_RULES = "PLR0912,PLR0913,PLR0915,C901"
+COMPLEXITY_RULES = ("PLR0912", "PLR0913", "PLR0915", "C901")
+
+# The hook runs on *every* edit and its stdout is injected into the model's
+# context, so both its wall-clock and its output are on the session's hot path.
+# Hence: one ruff process, not two (the advisory pass used to be a second
+# invocation with --no-cache, which both doubled the process spawns and threw
+# away the cache the first pass had just warmed), and a cap on how much any
+# one run can inject.
+MAX_MESSAGE_CHARS = 4000
 
 # Resolve the backend venv via the shared helper so a git worktree (which has
 # no local .venv) falls back to the primary worktree's — otherwise the ruff
@@ -63,6 +71,47 @@ def run(cmd: list[str]) -> tuple[int, str]:
     return proc.returncode, (proc.stdout or proc.stderr).strip()
 
 
+def ruff_messages(path: Path) -> list[str]:
+    """Lint `path` in a single ruff process, split blocking from advisory.
+
+    The configured rule set and the advisory complexity rules are requested
+    together via --extend-select, then partitioned by rule code on the way
+    out. One process, cache intact, same two sections as before.
+    """
+    _, out = run(
+        [
+            str(VENV_PYTHON),
+            "-m",
+            "ruff",
+            "check",
+            "--extend-select",
+            ",".join(COMPLEXITY_RULES),
+            "--output-format",
+            "json",
+            str(path),
+        ]
+    )
+    try:
+        findings = json.loads(out)
+    except Exception:  # ruff crashed, or printed something that isn't JSON
+        return ["ruff:\n" + out] if out.strip() else []
+
+    blocking: list[str] = []
+    advisory: list[str] = []
+    for f in findings:
+        code = f.get("code") or "?"
+        row = (f.get("location") or {}).get("row", "?")
+        line = f"{path.name}:{row}: {code} {f.get('message', '')}"
+        (advisory if code in COMPLEXITY_RULES else blocking).append(line)
+
+    messages = []
+    if blocking:
+        messages.append("ruff:\n" + "\n".join(blocking))
+    if advisory:
+        messages.append("complexity (advisory - consider simplifying):\n" + "\n".join(advisory))
+    return messages
+
+
 def main() -> int:
     path = edited_path()
     if path is None:
@@ -81,19 +130,14 @@ def main() -> int:
             messages.append(out)
 
     if path.suffix == ".py" and VENV_PYTHON is not None:
-        code, out = run([str(VENV_PYTHON), "-m", "ruff", "check", str(path)])
-        if code != 0 and out:
-            messages.append("ruff:\n" + out)
-        # advisory: complexity hints (non-blocking — the hook always exits 0)
-        ccode, cout = run(
-            [str(VENV_PYTHON), "-m", "ruff", "check", "--no-cache", "--select", COMPLEXITY_RULES, str(path)]
-        )
-        if ccode != 0 and cout:
-            messages.append("complexity (advisory - consider simplifying):\n" + cout)
+        messages.extend(ruff_messages(path))
 
     if messages:
+        body = "\n".join(messages)
+        if len(body) > MAX_MESSAGE_CHARS:
+            body = body[:MAX_MESSAGE_CHARS] + "\n… (truncated; run the gate yourself for the full list)"
         print("Quality gate on the file you just edited:")
-        print("\n".join(messages))
+        print(body)
         print("Please address the above before finishing this task.")
     return 0
 

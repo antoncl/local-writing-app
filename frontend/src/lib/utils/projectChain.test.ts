@@ -1,7 +1,12 @@
 import { describe, expect, it } from "vitest";
 
 import type { AncestorCandidate, ProjectChainLayer } from "@/lib/types";
-import { declarationRows, declaredChain, toggledDeclaration } from "@/lib/utils/projectChain";
+import {
+  declarationRows,
+  declaredChain,
+  inheritsNothing,
+  toggledDeclaration,
+} from "@/lib/utils/projectChain";
 
 function ancestor(name: string, overrides: Partial<AncestorCandidate> = {}): AncestorCandidate {
   return {
@@ -62,6 +67,27 @@ describe("declaredChain", () => {
 
   it("treats a missing chain as a flat project", () => {
     expect(declaredChain(undefined)).toEqual([]);
+  });
+});
+
+describe("inheritsNothing", () => {
+  it("is true for an open project that declares no ancestors", () => {
+    // The chain always carries the open project itself, so "one layer, and it
+    // is the root" is exactly the flat case the note states.
+    expect(inheritsNothing([layer("obs", { is_root: true })])).toBe(true);
+  });
+
+  it("is false with no project open", () => {
+    // Nothing to say "inherits from nothing" ABOUT — and the bar has no
+    // switcher label to be mistaken for a crumb either.
+    expect(inheritsNothing([])).toBe(false);
+    expect(inheritsNothing(undefined)).toBe(false);
+  });
+
+  it("is false as soon as there is a path to draw", () => {
+    expect(
+      inheritsNothing([layer("honorverse"), layer("obs", { is_root: true })]),
+    ).toBe(false);
   });
 });
 

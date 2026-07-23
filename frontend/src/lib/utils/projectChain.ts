@@ -36,6 +36,27 @@ export function declaredChain(chain: ProjectChainLayer[] | undefined): ChainCrum
 }
 
 /**
+ * Does the open project inherit from nothing at all (#427)?
+ *
+ * Distinguishes the two ways `declaredChain` returns nothing, which the bar
+ * has to render differently:
+ *
+ * - **no project open** — the chain is absent or empty, and the bar has no
+ *   subject to say anything about;
+ * - **a flat project** — the chain holds the open project and nothing else,
+ *   because it declares no ancestors (ADR-0039 Amendment 1: absent means
+ *   inherits nothing).
+ *
+ * The second used to render as blank space, which left the switcher button
+ * beside it reading as a one-item breadcrumb — the mechanism behind the
+ * misclick in #427. It gets a stated note instead.
+ */
+export function inheritsNothing(chain: ProjectChainLayer[] | undefined): boolean {
+  const layers = chain ?? [];
+  return layers.length > 0 && declaredChain(layers).length === 0;
+}
+
+/**
  * What the declaration editor does with one enumerated ancestor (#426).
  *
  * The three states are the enumeration's own model — `is_project` crossed with

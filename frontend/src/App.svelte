@@ -596,6 +596,8 @@
   onOpenSettings={() => void projectSession.openMachineSettings()}
   onOpenDetailTypes={() => schemaPanes?.openDetailTypes()}
   onOpenProjectNode={() => void editorPanes.openProjectNode()}
+  onOpenInheritance={() => workspaceLayout.ensureVisible("project")}
+  canDeclareInheritance={(project?.ancestors ?? []).length > 0}
   activePreset={workspaceLayout.activePreset}
   userPresets={layoutPresets.presets.map((preset) => preset.name)}
   onApplyPreset={(name) => workspaceLayout.applyPreset(name as PresetName)}

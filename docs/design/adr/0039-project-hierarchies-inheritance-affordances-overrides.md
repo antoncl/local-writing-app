@@ -214,6 +214,18 @@ defend against a problem it introduced. Enumerate-then-declare cannot cycle, bec
 is a directory walk. **Do not reintroduce transitive links to "simplify" the declaration** — the
 finiteness is the feature.
 
+> **Scope of that rejection (2026-07-23).** It is about a **free-form pointer**, and it does not reach
+> a *transitive reading of this declaration* — where a project would also inherit what its declared
+> ancestors declare. That cannot cycle: a declaration can only select from the filesystem walk, so
+> every hop strictly decreases depth and the closure terminates in at most `depth(project)` hops.
+> Considered and **not adopted for 0.7.0** — it buys only that inserting a level retroactively costs
+> one edit instead of one per descendant, and it spends "each project's list is complete for itself",
+> which is what keeps the chain a property of the file you are editing. Parked as an issue, not an
+> open ADR question. Anyone revisiting it inherits one non-obvious obligation: the ancestor filter
+> must be re-applied **at each hop**, because `_declared_ancestors` validates nothing (the ancestor
+> test lives one call later, in `_project_layer_folders`) and stored entries are relative paths that
+> drift — so a closure over raw `inherits:` lists has no termination guarantee at all.
+
 **The change is contained.** `_project_layer_folders` still returns an ordered `list[Path]`; only its
 body changes, from "every ancestor" to "the declared subset of every ancestor". Both consumers —
 `_metadata_schema_layer_paths` and `_build_node_index` — enumerate that list and are untouched, as are
@@ -321,7 +333,11 @@ unsettled builds on sand — and #309 waits on #306.
   query-time delta for backlinks / `References` / Nest to apply. The split is clean: **layer overrides
   are position-independent and can be materialized; scene mutations are position-dependent and cannot**
   (they stay resolved at query time, as today).
-- **Ordering is inherited too, not just content — and it is currently the exception.** Assistants
+- **Ordering is inherited too, not just content — and it *was* the exception when this was written.**
+  **No longer: #332 took the layer term off the sort key** (`assistants.py`, `sort_key` — position in
+  one merged sequence, then an alphabetical tail; verified 2026-07-23). The paragraph below is kept as
+  the record of the concern and where it was answered; do not read its present tense as live code.
+  Assistants
   carry a manual priority sequence (`.order.yaml` per layer, `assistants.py:128-142`) where **topmost
   is the default** (ADR-0024). That makes position load-bearing rather than cosmetic, and it is the
   one place the chain is composed *without* the descendant-wins rule this ADR applies everywhere else:

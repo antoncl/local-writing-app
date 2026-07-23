@@ -12,6 +12,7 @@ from __future__ import annotations
 import importlib.util
 import json
 import socket
+import subprocess
 import sys
 import threading
 from http.server import BaseHTTPRequestHandler, HTTPServer
@@ -318,3 +319,65 @@ def test_verify_server_accepts_our_own_server(fake_server):
 
 def verify(port: int, nonce: str) -> bool:
     return dev_backend.verify_server(port, nonce, _StubProc())
+
+
+# --------------------------------------------------------------------------
+# #435 — the generated diff fixtures still describe the code that generates them
+# --------------------------------------------------------------------------
+
+
+def _gen_fixtures(*args: str) -> subprocess.CompletedProcess[str]:
+    """Run `scripts/gen_diff_fixtures.py` as CI runs it.
+
+    A subprocess rather than an import, for two reasons. The script inserts this
+    checkout's `backend/` and `backend/tests` at the front of `sys.path` when it
+    loads; importing it here would leave that mutation behind for every later
+    test in the session, and the two tests above exist precisely because which
+    tree `app` resolves from is load-bearing. And running the real command line
+    is the point — the gate CI depends on is the *CLI contract*, not the
+    internals, so this pins what CI actually invokes.
+    """
+    return subprocess.run(
+        [sys.executable, str(REPO / "scripts" / "gen_diff_fixtures.py"), *args],
+        capture_output=True,
+        text=True,
+        cwd=REPO,
+    )
+
+
+def test_diff_fixtures_are_current():
+    """`diffRuns.fixtures.json` must still be what `diff_runs` produces.
+
+    The file is generated from the backend and consumed by the frontend suite,
+    which renders it through the real `sceneMarkdownToHtml`. Nothing regenerated
+    it, so it was a frozen output of the code it grades: under a mutation to the
+    diff the committed JSON stayed stale and the frontend stayed green (#435).
+
+    Here rather than only in `gates.yml` because this is the layer that runs on
+    **Windows** too. The generator's one platform-sensitive line is its
+    `newline=""` write, and the hazard it guards — the default translation
+    emitting CRLF — happens only on Windows, so a Linux-only gate never visits
+    the case it exists for.
+    """
+    result = _gen_fixtures("--check")
+    assert result.returncode == 0, (
+        "the committed diff fixtures no longer match what diff_runs produces.\n"
+        "Run `python scripts/gen_diff_fixtures.py` and commit the result; if the "
+        "change is deliberate, the diff is the thing to review.\n"
+        f"{result.stdout}{result.stderr}"
+    )
+
+
+def test_the_fixture_gate_refuses_an_argument_it_does_not_understand():
+    """An unrecognised flag must fail, not silently fall through to writing.
+
+    This is the guard on the guard. The first form tested `"--check" in argv`,
+    so a misspelled or renamed flag in `gates.yml` regenerated the fixtures
+    inside the runner's own checkout and exited 0 — the gate reporting green
+    while doing nothing, which is the failure this whole file is about.
+    """
+    result = _gen_fixtures("--chek")
+    assert result.returncode != 0, (
+        "an unrecognised argument was accepted, so a typo in the workflow would "
+        "silently turn the fixture gate into a no-op that reports success."
+    )

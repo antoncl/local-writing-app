@@ -472,6 +472,11 @@ def test_findings_survive_a_cp1252_console(tmp_path):
         [sys.executable, str(REPO / "scripts" / "check_memory_index.py"),
          "--memory-dir", str(tmp_path)],
         capture_output=True, text=True, env=env,
+        # Decode with the encoding we just forced on the child. `text=True`
+        # alone decodes with the *parent's* default, which is cp1252 on Windows
+        # and UTF-8 on Linux — so the child's cp1252 em-dash (0x97) read back
+        # fine locally and raised UnicodeDecodeError in CI.
+        encoding="cp1252",
     )
     # `returncode == 1` alone proves nothing: a UnicodeEncodeError also exits 1,
     # and it happens *after* the "memory index:" header has been flushed, so

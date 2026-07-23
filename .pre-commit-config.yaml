@@ -45,7 +45,10 @@ repos:
         # --exit-zero: never fails the commit; verbose: always print the hints
         # so complexity stays visible while we burn the count down, then promote
         # these rules into the blocking `select` in backend/pyproject.toml.
-        entry: python scripts/venv_run.py -m ruff check --exit-zero --no-cache --select PLR0912,PLR0913,PLR0915,C901
+        # No --no-cache: ruff keys its cache on the resolved settings, so this
+        # pass gets its own entry and re-linting from scratch every commit buys
+        # nothing (see docs/development/quality-gates.md).
+        entry: python scripts/venv_run.py -m ruff check --exit-zero --select PLR0912,PLR0913,PLR0915,C901
         language: system
         types_or: [python]
         files: ^(backend|scripts|\.claude/hooks)/

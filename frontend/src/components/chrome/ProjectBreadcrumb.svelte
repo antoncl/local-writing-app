@@ -1,17 +1,19 @@
 <script lang="ts">
-  import type { AncestorCandidate } from "@/lib/types";
+  import type { ProjectChainLayer } from "@/lib/types";
   import { declaredChain } from "@/lib/utils/projectChain";
 
-  // The whole ancestor enumeration as the backend reports it; the filtering
-  // down to the declared chain lives in `declaredChain` so it is testable
+  // The RESOLVED chain as the backend walker computed it (#432) — already the
+  // declared subset, already labelled. This took the whole enumeration and
+  // re-derived both, which is the duplication #432 deleted. `declaredChain`
+  // now only drops the root layer, and stays a function so it is testable
   // without a component harness.
-  export let ancestors: AncestorCandidate[] = [];
+  export let chain: ProjectChainLayer[] = [];
   // Selecting a crumb is a **scope change** — a different project gets built,
   // with its own index and merged schema. The parent owns that; this component
   // only says which one was chosen.
   export let onOpen: (path: string) => void = () => {};
 
-  $: crumbs = declaredChain(ancestors);
+  $: crumbs = declaredChain(chain);
 </script>
 
 <!--

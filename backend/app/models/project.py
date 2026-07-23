@@ -70,6 +70,34 @@ class ProjectChild(BaseModel):
     title: str
 
 
+class ProjectChainLayer(BaseModel):
+    """One layer of the RESOLVED chain — what this project is actually built
+    from, outermost first, the open project last (#432).
+
+    The twin of `AncestorCandidate`, and the distinction is the point.
+    `ancestors` is the *enumeration*: every folder the walk crossed, flagged
+    rather than filtered, because the declaration editor (#426) has to offer
+    the undeclared rows and mark the non-project ones. This is the *chain*:
+    only the layers that contribute, already selected and already named.
+
+    It exists because the frontend was re-deriving it — filtering `ancestors`
+    on `inherited && is_project` and labelling with `title || name`, a
+    transcription of `_project_layer_folders` and `_layer_label_for_folder`
+    that the walker had already computed. Two implementations of one traversal,
+    and they disagreed. `id` and `label` are read straight off `IndexLayer`,
+    so a consumer cannot drift from the walk again.
+    """
+
+    id: str
+    label: str
+    path: str
+    # The open project itself, always the innermost entry. Flagged rather than
+    # dropped: the breadcrumb renders the ancestors and lets the project
+    # switcher be the last crumb, while the schema-layers view wants the whole
+    # sequence. Filtering here would just move the re-derivation.
+    is_root: bool = False
+
+
 class ProjectInfo(BaseModel):
     title: str
     root_path: str
@@ -85,6 +113,10 @@ class ProjectInfo(BaseModel):
     # shape serving both is what stops the second endpoint asking the same
     # question a different way.
     ancestors: list[AncestorCandidate] = Field(default_factory=list)
+    # The resolved chain over the same walk (#432) — the declared subset, named
+    # by the walker. Ships beside `ancestors`, not instead of it: they answer
+    # different questions and both have a consumer.
+    chain: list[ProjectChainLayer] = Field(default_factory=list)
     children: list[ProjectChild] = Field(default_factory=list)
 
 

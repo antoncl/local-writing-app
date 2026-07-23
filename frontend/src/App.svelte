@@ -583,7 +583,7 @@
   currentTitle={isProjectOpen ? projectTitle : null}
   currentProjectColor={aiSettings.projectColor}
   recentProjects={projectSession.recentProjects}
-  ancestors={project?.ancestors ?? []}
+  chain={project?.chain ?? []}
   childProjects={project?.children ?? []}
   onOpenProjectPath={(path) => void projectSession.openProjectAt(path)}
   projectOpen={isProjectOpen}

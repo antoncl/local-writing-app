@@ -454,10 +454,22 @@ class LayerWalkMixin:
         """
         if folder == root:
             return self._project_title(root) or root.name
-        manifest = self._read_yaml(folder / MANIFEST_FILENAME)
-        title = manifest.get("title")
-        if isinstance(title, str) and title.strip():
-            return title.strip()
+        # GUARDED (#430, forced by #432). This read reaches into *another*
+        # project's folder, so it gets the same treatment `_readable_project_title`
+        # already gives every other cross-project title read: unreadable means
+        # "no title to show", not an exception.
+        #
+        # It was an unguarded `_read_yaml` — which raises 422 on a syntax error
+        # and lets `UnicodeDecodeError` escape as a 500 — sitting on every walk
+        # that builds the layer list. That already took down the node index and
+        # the validation report for a malformed ancestor manifest (#430). #432
+        # then put `collect_layers` on `current_project()`, which is what
+        # `POST /project/open` returns, so the same broken file two levels up
+        # stopped the project below it opening **at all**. A label is decoration
+        # on someone else's folder; it must never be able to do that.
+        title = self._readable_project_title(folder)
+        if title:
+            return title
         if layer_index == 0 and folder == self._metadata_schema_base_folder(root):
             return "Base Folder"
         return folder.name

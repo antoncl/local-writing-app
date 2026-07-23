@@ -30,6 +30,7 @@ from app.models import (
     DirectoryEntry,
     DirectoryListing,
     MetadataSchema,
+    ProjectChainLayer,
     ProjectChild,
     ProjectInfo,
     ProjectNode,
@@ -203,8 +204,37 @@ class ProjectLifecycleMixin:
             projects_base_folder=str(base_folder) if base_folder else None,
             ai_policy=ai.get("policy", "off"),
             ancestors=self._ancestor_candidates_for_api(root),
+            chain=self._project_chain_for_api(root),
             children=self._project_children(root),
         )
+
+    def _project_chain_for_api(self, root: Path) -> list[ProjectChainLayer]:
+        """The resolved chain, straight off the walker (#432).
+
+        Deliberately `collect_layers` rather than a filter over the
+        enumeration this method sits next to. The chain's membership rule
+        (`declared and is_project, plus root`) and its naming rule (manifest
+        title, else the "Base Folder" case, else the folder name) both live in
+        `layers.py`, and re-applying either here would recreate exactly the
+        duplication this exists to delete —
+        `decisions_walker_visitor_uniformity`: every hierarchy walk goes
+        through the walker, even a one-line one; optimise inside it, never
+        bypass it.
+
+        The machine layer is excluded (`include_machine` defaults False): it
+        contributes assistants, carries no `metadata.schema.yaml`, and is not
+        a project anyone can navigate to. `read_metadata_schema_layers` makes
+        the same choice, which is why the two views agree by construction.
+        """
+        return [
+            ProjectChainLayer(
+                id=layer.id,
+                label=layer.label,
+                path=str(layer.folder),
+                is_root=layer.is_root,
+            )
+            for layer in self.collect_layers(root)
+        ]
 
     def ai_policy(self) -> AIPolicy:
         """Just the permission, without building the whole `ProjectInfo` (#433).
@@ -281,15 +311,22 @@ class ProjectLifecycleMixin:
         by falling back to the folder name. The folder still reports
         `is_project`, so nothing about the enumeration is falsified.
 
-        ⚠ It is **not** reported elsewhere either, which is a wider hole than
-        this method can close: `_layer_label_for_folder` reads a declared
-        ancestor's manifest unguarded during the layer walk, so a malformed one
-        also breaks `_build_node_index` and `validate_project` — the very report
-        that should have named it. Verified, not assumed: with a declared
-        ancestor's manifest malformed, `POST /project/validate` returns 422
-        rather than listing the problem. That predates #311 (it arrived with
-        #309's label rule) and wants its own fix; do not read this guard as
-        having handled it.
+        This used to carry a warning that the same hole was still open one
+        level down — `_layer_label_for_folder` read a declared ancestor's
+        manifest unguarded during the layer walk, so a malformed one broke
+        `_build_node_index` and `validate_project`, the very report that should
+        have named it (#430). **That is closed**: the label now comes through
+        this method, so there is one guarded cross-project title read rather
+        than a guarded one and an unguarded one. `POST /project/validate`
+        returns 200 and lists the problem, pinned by
+        `test_a_malformed_ancestor_manifest_leaves_the_validation_report_readable`.
+
+        What forced it was #432 putting `collect_layers` on `current_project()`:
+        the unguarded read moved onto `POST /project/open`, so a broken manifest
+        two levels up stopped the project below it opening at all. #430 stays
+        open for the rest of its body — `validate_project` still builds the node
+        index outside the `try` that would turn any *other* cause into a
+        reported error.
         """
         try:
             return self._project_title(folder)

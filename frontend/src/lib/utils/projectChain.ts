@@ -1,4 +1,4 @@
-import type { AncestorCandidate } from "@/lib/types";
+import type { AncestorCandidate, ProjectChainLayer } from "@/lib/types";
 
 /** One hop in the breadcrumb: somewhere the author can open. */
 export type ChainCrumb = {
@@ -7,29 +7,32 @@ export type ChainCrumb = {
 };
 
 /**
- * The declared chain, outermost first, as breadcrumb hops (#311).
+ * The declared chain, outermost first, as breadcrumb hops (#311, #432).
  *
- * `ProjectInfo.ancestors` is the **whole** enumeration by design — every folder
- * between the configured base and the open project, flagged rather than
- * filtered, because #318's wizard needs the undeclared rows in order to offer
- * them and a non-project folder must be visible and marked rather than absent.
- * The breadcrumb is the other consumer, and it wants the opposite: only the
- * levels this project actually inherits from, because those are the only ones
- * that are part of what is being built here.
+ * **Reads the resolved chain; derives nothing.** This used to filter
+ * `ProjectInfo.ancestors` on `inherited && is_project` and label each hop
+ * `title || name` — a transcription of `_project_layer_folders` and
+ * `_layer_label_for_folder`, i.e. a second implementation of a traversal the
+ * backend walker already owns. The two disagreed: the walker labels a
+ * titleless outermost layer that is the machine root **"Base Folder"**, and
+ * this labelled the same folder by its directory name, so the schema-layers
+ * view and the breadcrumb could name one layer two ways in the same session.
+ * `ProjectInfo.chain` now ships the walker's own answer.
  *
- * Both flags are required, not just `inherited`. A declared entry that stopped
- * being a project keeps its declaration — the backend survives it with a
- * warning rather than dropping it silently — so `inherited` alone would put a
- * row in the path with no title to render and nothing to open.
+ * The only thing left here is presentation: drop the root layer. The chain
+ * includes the open project as its innermost entry, and the bar renders that
+ * as the project switcher rather than as a crumb.
  *
- * Gaps are legal upstream (a project may declare a grandparent and not its
- * parent), so this is a path through the ancestry, not necessarily a walk of
- * consecutive folders. That is the declaration being honoured, not a defect.
+ * Gaps stay legal upstream (a project may declare a grandparent and not its
+ * parent), so this remains a path through the ancestry rather than a walk of
+ * consecutive folders — see #431 for the fact that the bar does not yet SAY
+ * so. Rendering it honestly is that issue's job; this one only makes sure
+ * there is a single source to render.
  */
-export function declaredChain(ancestors: AncestorCandidate[] | undefined): ChainCrumb[] {
-  return (ancestors ?? [])
-    .filter((row) => row.inherited && row.is_project)
-    .map((row) => ({ path: row.path, label: row.title?.trim() || row.name }));
+export function declaredChain(chain: ProjectChainLayer[] | undefined): ChainCrumb[] {
+  return (chain ?? [])
+    .filter((layer) => !layer.is_root)
+    .map((layer) => ({ path: layer.path, label: layer.label }));
 }
 
 /**

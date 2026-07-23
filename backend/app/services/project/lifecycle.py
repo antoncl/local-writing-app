@@ -181,10 +181,40 @@ class ProjectLifecycleMixin:
                 name=folder.name,
                 is_project=is_project,
                 inherited=inherited,
-                title=self._project_title(folder) if is_project else None,
+                title=self._readable_project_title(folder) if is_project else None,
             )
             for folder, is_project, inherited in self.ancestor_candidates(root)
         ]
+
+    def _readable_project_title(self, folder: Path) -> str | None:
+        """Another project's title, or None when its manifest cannot be read.
+
+        A title is decoration on someone else's folder; the open project must not
+        become unopenable because of it. Reading it *unguarded* is what made a
+        malformed `project.yaml` two levels up return 422 from `GET /project` and
+        `POST /project/open` — for a project whose own files are fine, and for an
+        ancestor it may not even have declared. Worse, the five AI routes catch
+        `ProjectServiceError` and fall back to `policy="off"`, so the same broken
+        file silently turned AI off with nothing naming the cause.
+
+        This is the same judgement `_project_children` already makes one method
+        down, where `iterdir()` is wrapped because it reaches outside the project.
+        This read reaches further out, so it needs the guard more, not less.
+        `OSError` covers the Windows cases that motivated it: a manifest locked
+        mid-write by another instance, an ACL-restricted shelf, an offline
+        network or OneDrive path. `UnicodeDecodeError` covers a manifest saved as
+        cp1252 by a hand editor — `_read_yaml` opens as utf-8 and only catches
+        `yaml.YAMLError`.
+
+        None here means "no title to show", which the breadcrumb already renders
+        by falling back to the folder name. The condition is not silenced: the
+        folder still reports `is_project`, and `validate_project` is where a
+        broken manifest is meant to be told about.
+        """
+        try:
+            return self._project_title(folder)
+        except (ProjectServiceError, OSError, UnicodeDecodeError):
+            return None
 
     def _project_children(self, root: Path) -> list[ProjectChild]:
         """Project folders directly inside this one, alphabetically.

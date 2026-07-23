@@ -129,6 +129,13 @@
 
   function handleOpenProjectPath(path: string) {
     closeSwitcher();
+    // Opening a project rebuilds the chain, so the control that was activated
+    // may not exist afterwards — a crumb for a level the new project does not
+    // declare simply goes away, dropping keyboard focus to <body> and sending
+    // the next Tab back to the top of the document. The switcher button is the
+    // one anchor here that survives every scope change, which is why the
+    // Escape path already restores to it.
+    switcherButton?.focus();
     onOpenProjectPath(path);
   }
 
@@ -184,7 +191,7 @@
 <header class="top-bar">
   <span class="wordmark">Local Writer</span>
 
-  <ProjectBreadcrumb {ancestors} onOpen={onOpenProjectPath} />
+  <ProjectBreadcrumb {ancestors} onOpen={handleOpenProjectPath} />
 
   <div class="switcher-wrap">
     <button
@@ -379,14 +386,24 @@
     color: var(--text);
     letter-spacing: 0.02em;
     user-select: none;
+    /* Fixed, so it never absorbs the breadcrumb's pressure. Measured before
+       this: four crumbs at 1280px wrapped "Local Writer" onto two lines inside
+       a 40px bar — the bar reported no overflow precisely *because* the
+       wordmark and the action cluster silently wrapped instead (#311). */
+    flex: none;
+    white-space: nowrap;
   }
 
   .top-bar .switcher-wrap {
     position: relative;
-    /* Lets the button below give ground once a chain shares the bar (#311).
-       Without it the wrap's automatic minimum is its content, so every pixel
-       of pressure landed on the breadcrumb. */
-    min-width: 0;
+    /* The floor lives on the flex item, not just on the button inside it.
+       With it only on the button, this wrapper's automatic minimum did not
+       resolve under pressure from the breadcrumb: the chain bottomed out at 0
+       while the switcher held its full 360px, and the bar overflowed to 905px
+       in a 760px window — carrying the settings button off-screen. Stated
+       explicitly, the switcher gives 360 -> 200 the way it did before #311. */
+    min-width: 200px;
+    max-width: 360px;
   }
 
   .top-bar .switcher-button {
@@ -400,10 +417,12 @@
     font-size: var(--fs-md);
     border-radius: 6px;
     cursor: pointer;
-    /* 200px when the bar can afford it, narrower when it cannot — the leaf
-       title is the subject, but not at the price of an unreadable path. */
-    min-width: min(200px, 100%);
-    max-width: 360px;
+    /* Fills the wrapper, which now carries the 200-360 range. The earlier
+       attempt to make the floor conditional — `min(200px, 100%)` — did not
+       soften it, it deleted it: the percentage resolved against a shrink-to-fit
+       parent, i.e. as `auto`. Measured at 144px instead of 200px at 1280px
+       wide, for every project with no declared chain. */
+    width: 100%;
   }
 
   .top-bar .switcher-button:hover,
@@ -460,6 +479,13 @@
     padding: 6px;
     display: grid;
     gap: 1px;
+    /* `children` is uncapped, unlike `recentProjects` which the backend caps at
+       RECENT_PROJECTS_MAX. A shelf with many book folders grew this menu past
+       the bottom of the window and took "Open folder…" / "New project…" with
+       it — the app's only entry affordances — with nothing to scroll, since the
+       page behind is a separate scroll container. */
+    max-height: calc(100vh - 60px);
+    overflow-y: auto;
   }
 
   .top-bar .switcher-section-label {
@@ -549,6 +575,11 @@
     display: flex;
     align-items: center;
     gap: 8px;
+    /* Same reason as the wordmark: these are fixed chrome, and letting them
+       shrink made them wrap to 44px inside a 40px bar rather than pushing back
+       on the thing that actually has a scroll fallback. */
+    flex: none;
+    white-space: nowrap;
   }
 
   .top-bar .action-button {

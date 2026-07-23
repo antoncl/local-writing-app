@@ -16,8 +16,11 @@ import unittest
 from pathlib import Path
 from tempfile import TemporaryDirectory
 
+from fastapi.testclient import TestClient
 from layer_fixtures import declare, make_project_folder
+from project_fixtures import bind_test_project
 
+from app.main import app
 from app.models import UpdateProjectSettingsRequest
 from app.services.project.errors import ProjectServiceError
 from app.services.project_service import ProjectService
@@ -155,6 +158,45 @@ class TheEnumerationIsReportedWholeTests(DeclaredChainTestCase):
             [("writing", None), ("honorverse", "The Honorverse"), ("honor-harrington", None)],
         )
 
+    def test_an_ancestor_project_with_no_title_is_still_marked_a_project(self) -> None:
+        """`title is None` does not mean "not a project" — `is_project` does.
+
+        Three states arrive as null and only one of them is "not a project".
+        Pinned because #318's wizard has to decide whether a row is offerable,
+        and keyed on `title` it would refuse a perfectly declarable ancestor.
+        """
+        self.universe.mkdir(parents=True, exist_ok=True)
+        self.service._write_yaml(self.universe / "project.yaml", {"title": "   "})
+        declare(self.service, self.root, [self.universe])
+
+        row = next(row for row in self.service.current_project().ancestors if row.name == "honorverse")
+
+        self.assertTrue(row.is_project)
+        self.assertTrue(row.inherited)
+        self.assertIsNone(row.title)
+
+    def test_an_unreadable_ancestor_manifest_does_not_break_the_open_project(self) -> None:
+        """A title is decoration on someone else's folder (#311 review).
+
+        Reading it unguarded made a malformed `project.yaml` **two levels up**
+        return 422 from `GET /project` and `POST /project/open` — for a project
+        whose own files are fine, and for an ancestor it need not even have
+        declared. The AI routes made it worse by catching `ProjectServiceError`
+        and falling back to `policy="off"`, so a stray tab in an unrelated
+        manifest silently turned AI off.
+
+        The ancestor is deliberately **not** declared here: that is the case
+        that proves the blast radius was unrelated to inheritance.
+        """
+        make_project_folder(self.service, self.universe)
+        (self.universe / "project.yaml").write_text("title: Universe\n  bad: [unclosed\n", encoding="utf-8")
+
+        info = self.service.current_project()
+
+        row = next(row for row in info.ancestors if row.name == "honorverse")
+        self.assertTrue(row.is_project)
+        self.assertIsNone(row.title)
+
     def test_direct_child_projects_are_listed_with_their_titles(self) -> None:
         child = self.root / "part-two"
         self.service = ProjectService.created_at(child, "Part Two")
@@ -163,6 +205,31 @@ class TheEnumerationIsReportedWholeTests(DeclaredChainTestCase):
         self.assertEqual(
             [(row.name, row.title) for row in self.service.current_project().children],
             [("part-two", "Part Two")],
+        )
+
+
+class TheEnumerationReachesTheWireTests(DeclaredChainTestCase):
+    """The service is not the contract — `response_model` is (#311 review).
+
+    `GET /project` declares `response_model=ProjectInfo`, so FastAPI
+    re-validates and **filters** the payload against the nested models. A field
+    present on the service's return value and absent from the wire model would
+    leave every service-level assertion green while the frontend silently fell
+    back to folder names for every crumb.
+    """
+
+    def test_ancestor_titles_survive_the_response_model(self) -> None:
+        make_project_folder(self.service, self.universe, "The Honorverse")
+        self.series.mkdir(parents=True, exist_ok=True)  # organisational, no manifest
+        declare(self.service, self.root, [self.universe])
+        bind_test_project(self.service)
+
+        with TestClient(app) as client:
+            payload = client.get("/api/project").json()
+
+        self.assertEqual(
+            [(row["name"], row["title"], row["is_project"]) for row in payload["ancestors"]],
+            [("writing", None, False), ("honorverse", "The Honorverse", True), ("honor-harrington", None, False)],
         )
 
 

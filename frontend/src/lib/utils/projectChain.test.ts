@@ -44,7 +44,20 @@ describe("declaredChain", () => {
     expect(crumbs).toEqual([]);
   });
 
-  it("falls back to the folder name when a project has no usable title", () => {
+  it("falls back to the folder name when a declared project has no title", () => {
+    // The only null-title shape the backend can actually emit for a rendered
+    // crumb: a project whose manifest has no `title`, or whose manifest could
+    // not be read. `_project_title` strips and returns None, so null — not a
+    // blank string — is what arrives, and nothing else in this suite exercises
+    // the optional chain on a row that survives the filter.
+    const crumbs = declaredChain([
+      ancestor("honorverse", { is_project: true, inherited: true, title: null }),
+    ]);
+
+    expect(crumbs).toEqual([{ path: "/writing/honorverse", label: "honorverse" }]);
+  });
+
+  it("falls back when the title is present but blank", () => {
     const crumbs = declaredChain([
       ancestor("honorverse", { is_project: true, inherited: true, title: "   " }),
     ]);

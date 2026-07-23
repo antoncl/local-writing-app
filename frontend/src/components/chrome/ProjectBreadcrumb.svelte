@@ -30,14 +30,16 @@
 -->
 {#if crumbs.length > 0}
   <nav class="project-chain" aria-label="Project chain">
-    {#each crumbs as crumb (crumb.path)}
+    {#each crumbs as crumb, index (crumb.path)}
+      {#if index > 0}
+        <span class="crumb-sep" aria-hidden="true">›</span>
+      {/if}
       <button
         type="button"
         class="crumb"
-        title={crumb.path}
+        title={crumb.label === crumb.path ? crumb.path : `${crumb.label} — ${crumb.path}`}
         on:click={() => onOpen(crumb.path)}
       >{crumb.label}</button>
-      <span class="crumb-sep" aria-hidden="true">›</span>
     {/each}
   </nav>
 {/if}
@@ -47,12 +49,25 @@
     display: flex;
     align-items: center;
     gap: 2px;
+    /* This is the one item in the bar that yields: the wordmark, the switcher
+       and the actions are all `flex: none`, so a chain too wide for the space
+       scrolls here rather than deforming its neighbours. Shrinking the crumbs
+       instead was measured and rejected — four crumbs at 900px collapsed to
+       14px each, clickable and unidentifiable.
+
+       ⚠ It is **left-anchored**: when it does scroll, the crumb pushed out of
+       view is the nearest ancestor, which is the likeliest hop. Pinning the end
+       was tried in JS and reverted (00bc123) after it hung the renderer; doing
+       it in CSS, which cannot loop, is open work. */
     min-width: 0;
-    /* A deep chain beside a long project title outgrows a 40px bar. Scrolling
-       is the degradation that keeps every level both legible and reachable:
-       shrinking them all instead crushes each crumb to a couple of pixels of
-       ellipsis (measured: four crumbs at 900px collapse to 14px each, which is
-       clickable and unidentifiable — the worst of both). */
+    /* Yield *first and completely*, before the switcher gives up a pixel.
+       Flex shrinks proportionally to base size by default, and the chain's base
+       is wide — so at 760px the two shrank together, the chain bottomed out at
+       0 and the switcher still held 360, overflowing the bar to 905px and
+       carrying the settings button off-screen. A large shrink factor makes the
+       order explicit: the chain is the only item here that can lose space
+       without losing a function. */
+    flex-shrink: 999;
     overflow-x: auto;
     scrollbar-width: thin;
     /* The path is context, not the subject: it recedes so the switcher button
@@ -61,12 +76,14 @@
   }
 
   .project-chain .crumb {
-    padding: 4px 6px;
+    padding: 4px 8px;
+    /* A long title ellipsises rather than eating the bar; the full name is in
+       the tooltip, since the label is the part that gets clipped. */
     max-width: 160px;
-    /* The floor that makes the scroll happen instead of the crush. Enough for
-       a handful of characters plus the ellipsis, so a clipped crumb still says
-       which level it is. */
-    min-width: 56px;
+    /* `flex: none` is what makes the container scroll instead of the crumbs
+       crushing — it is load-bearing, not cosmetic. (A `min-width` floor sat
+       here too, which read as the guard but was doing nothing except padding
+       short labels out to a fixed width.) */
     flex: none;
     overflow: hidden;
     text-overflow: ellipsis;

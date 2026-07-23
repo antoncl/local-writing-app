@@ -1,8 +1,15 @@
 <script lang="ts">
-  import type { AIHealthResponse, AIPolicy, ProjectChild, ProjectValidation } from "@/lib/types";
+  import type {
+    AIHealthResponse,
+    AIPolicy,
+    AncestorCandidate,
+    ProjectChild,
+    ProjectValidation,
+  } from "@/lib/types";
   import NodeList from "@/components/widgets/NodeList.svelte";
   import NodeRow from "@/components/widgets/NodeRow.svelte";
   import { formatCostEur } from "@/lib/utils/money";
+  import { declarationRows } from "@/lib/utils/projectChain";
 
   export let isProjectOpen: boolean;
   export let projectTitle: string;
@@ -17,6 +24,20 @@
   // Empty for a leaf, which is the only thing that distinguishes one: there
   // is no level type to branch on, and depth is not consulted anywhere.
   export let projectChildren: ProjectChild[] = [];
+  // The WHOLE ancestor enumeration (#309), not the declared subset — the
+  // editor's job is to offer the rows the breadcrumb filters out. Flags, not
+  // filtering, is why one payload serves both consumers.
+  export let ancestors: AncestorCandidate[] = [];
+  // Applied on the click, not on a Save button. There is nothing to compose:
+  // one tick is one complete intent, and a draft would need a dirty model to
+  // buy nothing. It is not a permission control, so the fail-closed rule that
+  // keeps AI access behind an explicit save does not reach here.
+  export let onToggleInherit: (path: string) => void;
+  // True for the duration of a declaration save, including the project-data
+  // reload it triggers. See the checkbox below for why it has to disable them.
+  export let inheritSaving: boolean = false;
+
+  $: inheritRows = declarationRows(ancestors);
 
   // Two-way bound: App is the source of truth. aiPolicy is set on project load
   // and read back when saving AI settings; projectCostExpanded is bound because
@@ -74,6 +95,66 @@
       <button type="button" on:click={onValidate}>Validate</button>
     </div>
   </div>
+
+  <!--
+    The inheritance declaration (#426). Rendered only when the walk found
+    something: a project directly under the machine root, or one outside it,
+    has an empty enumeration and there is nothing to choose from. Same rule as
+    the child roster below — an always-present empty section is noise on every
+    flat project, and #427 owns the affordance for the empty case.
+
+    Placed above "Contains" so the pane reads the way the chain does: what this
+    project is built on, then what is built inside it.
+  -->
+  {#if inheritRows.length > 0}
+    <section class="project-inherits" aria-label="Inherits from">
+      <h3>Inherits From</h3>
+      <NodeList isEmpty={false}>
+        {#each inheritRows as row (row.path)}
+          <!--
+            `clickable={false}`: the checkbox IS the gesture, so the title must
+            not also be a button competing for the same click. A disabled row
+            is still shown — it is the organisational folder the walk crossed,
+            and hiding it would leave a gap that reads as a defect.
+
+            No `active`: that state means "open in a pane", and the checkbox is
+            already the canonical indicator of what is declared. Two treatments
+            for one fact is the density smell the widget taxonomy codifies
+            against, and the stale row says its piece in `detail` rather than in
+            a colour nothing else on this pane uses.
+          -->
+          <NodeRow title={row.label} detail={row.detail} clickable={false}>
+            {#snippet leading()}
+              <!--
+                The box shows the DECLARATION, never the click. `on:change` puts
+                it straight back to the model value and lets the round trip move
+                it, because a save can fail (a 422, a vanished folder) and the
+                browser's own toggle would then leave a ticked box over an
+                unchanged manifest — the one state this pane must never show.
+                On success `ancestors` comes back changed and Svelte flips it.
+
+                `disabled` while a save is in flight is the other half: each
+                request is derived from the ancestors currently on screen, so a
+                second click during the round trip would compute from the stale
+                enumeration and silently undo the first tick.
+              -->
+              <input
+                type="checkbox"
+                class="project-inherit-check"
+                checked={row.checked}
+                disabled={!row.toggleable || inheritSaving}
+                aria-label={`Inherit from ${row.label}`}
+                on:change={(event) => {
+                  event.currentTarget.checked = row.checked;
+                  onToggleInherit(row.path);
+                }}
+              />
+            {/snippet}
+          </NodeRow>
+        {/each}
+      </NodeList>
+    </section>
+  {/if}
 
   <!--
     The child roster (#310). Rendered only when there is something in it: a
@@ -250,6 +331,7 @@
   /* Same section rhythm as the AI block below — a sibling section of the
      pane, not a nested treatment. The rows inside are plain NodeRows, so
      they carry the canonical card chrome and need nothing here. */
+  .project-inherits,
   .project-children,
   .ai-settings {
     display: grid;
@@ -259,6 +341,7 @@
     border-top: 1px solid var(--border);
   }
 
+  .project-inherits h3,
   .project-children h3,
   .ai-settings h3 {
     margin: 0;
@@ -267,6 +350,21 @@
     color: var(--text);
     letter-spacing: 0.04em;
     text-transform: uppercase;
+  }
+
+  /* `width: auto` is load-bearing, not tidying: styles.css:401 sets
+     `input, select { width: 100% }` for the app's form fields, and a checkbox
+     in a flex row inherits it as its flex basis — the box ate the whole row
+     and pushed the title off the right edge with zero width. `flex: none`
+     alone does NOT fix it (basis `auto` reads the width property back); the
+     width has to be overridden. Measured in the browser, not reasoned. */
+  .project-inherit-check {
+    flex: none;
+    width: auto;
+    margin: 0;
+  }
+  .project-inherit-check:disabled {
+    opacity: 0.45;
   }
 
   .ai-policy {

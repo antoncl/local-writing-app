@@ -59,6 +59,12 @@ class ProjectSession {
   // saves (which can change the default folder).
   recentProjects = $state<RecentProject[]>([]);
 
+  // True for the whole of `setDeclaration` — the request AND the project-data
+  // reload that follows it. The Project pane reads it to disable the
+  // inheritance checkboxes, because a second tick mid-flight would be computed
+  // from the enumeration the first one is about to replace (#426).
+  declarationSaving = $state(false);
+
   // ---- Injected host hooks (set in App.onMount) ----
   // Wraps an action in App's run() so errors surface in App's `error`; returns
   // false when the action threw (used by rehydrate to detect a failed re-open).
@@ -73,6 +79,10 @@ class ProjectSession {
   onOpenWorkspace: (project: ProjectInfo) => void = () => {};
   // Runs AFTER loadProjectData — App syncs the schema-authoring selection.
   onProjectDataLoaded: () => void = () => {};
+  // Writes an updated ProjectInfo back onto App's appState. Project identity
+  // stays in App (the aiSettings controller injects the same hook), and a
+  // declaration change returns a fresh enumeration the breadcrumb reads.
+  onProjectUpdated: (project: ProjectInfo) => void = () => {};
 
   // ---- Last-opened-project persistence ----
   rememberLastProject(path: string): void {
@@ -213,6 +223,44 @@ class ProjectSession {
       await this.refreshRecents();
       this.setStatus(`Opened ${openedProject.title}`);
     });
+  }
+
+  // Rewrite this project's `inherits:` declaration (#426).
+  //
+  // It lives here rather than on aiSettings because of the second half: the
+  // declaration decides which projects the merged schema, the node index, the
+  // tag registry and the lore roster are assembled from, so the response's
+  // fresh ProjectInfo is not enough — every project-scoped store has to be
+  // re-pulled. That is `loadProjectData`, which this controller already owns.
+  //
+  // What it deliberately does NOT do is `onOpenWorkspace`. This is the same
+  // project, still open: tearing down the editor panes and the layout on a
+  // checkbox click would discard the reason the author is looking at the pane.
+  // Nothing here changes the resolution scope, so it is not a unit boundary
+  // (ADR-0045) — only the layers behind it.
+  //
+  // Rejects an overlapping call rather than queueing it: each request is
+  // derived from the enumeration on screen, so a second one issued mid-flight
+  // would compute from a stale one and undo the first. `declarationSaving`
+  // disables the boxes, and the pane puts the rejected box back.
+  async setDeclaration(paths: string[]): Promise<boolean> {
+    if (this.declarationSaving) return false;
+    this.declarationSaving = true;
+    try {
+      return await this.run(async () => {
+        const updatedProject = await api.updateProjectSettings({ inherits: paths });
+        this.onProjectUpdated(updatedProject);
+        await loadProjectData();
+        this.onProjectDataLoaded();
+        this.setStatus(
+          paths.length === 0
+            ? "Inherits from nothing"
+            : `Inherits from ${paths.length} ${paths.length === 1 ? "level" : "levels"}`,
+        );
+      });
+    } finally {
+      this.declarationSaving = false;
+    }
   }
 
   // Eagerly fetch machine settings (so the chat panel + inputs dialog can show

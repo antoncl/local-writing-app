@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import type { AncestorCandidate } from "@/lib/types";
-import { declaredChain } from "@/lib/utils/projectChain";
+import { declarationRows, declaredChain, toggledDeclaration } from "@/lib/utils/projectChain";
 
 function ancestor(name: string, overrides: Partial<AncestorCandidate> = {}): AncestorCandidate {
   return {
@@ -67,5 +67,98 @@ describe("declaredChain", () => {
 
   it("treats a missing enumeration as a flat project", () => {
     expect(declaredChain(undefined)).toEqual([]);
+  });
+});
+
+describe("declarationRows", () => {
+  it("keeps every enumerated folder, in the backend's order", () => {
+    // The breadcrumb's opposite: the editor exists to offer what the
+    // breadcrumb hides, so nothing here is filtered out.
+    const rows = declarationRows([
+      ancestor("writing"),
+      ancestor("honorverse", { is_project: true, inherited: true, title: "The Honorverse" }),
+      ancestor("honor-harrington", { is_project: true, title: "Honor Harrington" }),
+    ]);
+
+    expect(rows.map((row) => [row.label, row.state, row.checked, row.toggleable])).toEqual([
+      ["writing", "folder", false, false],
+      ["The Honorverse", "declared", true, true],
+      ["Honor Harrington", "available", false, true],
+    ]);
+  });
+
+  it("shows the folder name only when the title is not already it", () => {
+    const [named, unnamed] = declarationRows([
+      ancestor("honorverse", { is_project: true, title: "The Honorverse" }),
+      ancestor("honor-harrington", { is_project: true, title: "honor-harrington" }),
+    ]);
+
+    expect(named.detail).toBe("honorverse");
+    expect(unnamed.detail).toBeNull();
+  });
+
+  it("flags a declared ancestor that has stopped being a project", () => {
+    // `declared_ancestor_warnings` keeps this one rather than dropping it, so
+    // the row must say why a ticked box is contributing nothing.
+    const [row] = declarationRows([ancestor("honorverse", { inherited: true })]);
+
+    expect(row.state).toBe("stale");
+    expect(row.checked).toBe(true);
+    // Unticking is the repair, so this one row IS toggleable despite not
+    // being a project — the disabled state would trap the author in it.
+    expect(row.toggleable).toBe(true);
+    expect(row.detail).toContain("no longer a project");
+  });
+
+  it("disables an organisational folder and says why", () => {
+    const [row] = declarationRows([ancestor("writing")]);
+
+    expect(row.state).toBe("folder");
+    expect(row.toggleable).toBe(false);
+    expect(row.detail).toContain("Not a project");
+  });
+
+  it("treats a missing enumeration as no rows", () => {
+    expect(declarationRows(undefined)).toEqual([]);
+  });
+});
+
+describe("toggledDeclaration", () => {
+  const chain = [
+    ancestor("writing"),
+    ancestor("honorverse", { is_project: true, inherited: true }),
+    ancestor("honor-harrington", { is_project: true }),
+  ];
+
+  it("adds an available ancestor, keeping the enumeration's order", () => {
+    // Outermost-first regardless of tick order: the list is derived from the
+    // walk, not appended to.
+    expect(toggledDeclaration(chain, "/writing/honor-harrington")).toEqual([
+      "/writing/honorverse",
+      "/writing/honor-harrington",
+    ]);
+  });
+
+  it("removes a declared ancestor", () => {
+    expect(toggledDeclaration(chain, "/writing/honorverse")).toEqual([]);
+  });
+
+  it("leaves a valid flat project when the last layer is unticked", () => {
+    // `[]` is a deliberate flat project, distinct from an absent key only on
+    // the create request — here it is the cleared declaration.
+    expect(
+      toggledDeclaration([ancestor("honorverse", { is_project: true, inherited: true })], "/writing/honorverse"),
+    ).toEqual([]);
+  });
+
+  it("declares gaps as written — a grandparent without its parent", () => {
+    // Legal upstream (`_project_layer_folders` is a membership test per
+    // candidate), so the editor must not quietly fill the gap in.
+    const rows = [
+      ancestor("honorverse", { is_project: true }),
+      ancestor("honor-harrington", { is_project: true }),
+    ];
+
+    expect(toggledDeclaration(rows, "/writing/honorverse")).toEqual(["/writing/honorverse"]);
   });
 });

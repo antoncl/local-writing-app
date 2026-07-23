@@ -238,8 +238,12 @@ export const api = {
       body: JSON.stringify({ root_path: rootPath }),
     });
   },
+  // Partial update, per field: an omitted key leaves that setting alone.
+  // `inherits: []` is therefore a deliberate flat project, not "no opinion" —
+  // which is what makes unticking the last layer expressible (#426).
   updateProjectSettings(updates: {
     ai_policy?: AIPolicy;
+    inherits?: string[];
   }) {
     return request<ProjectInfo>("/project/settings", {
       method: "PATCH",

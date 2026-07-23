@@ -193,8 +193,39 @@ mutable after the fact, which ADR-0043's immutability rule forbids for good reas
 Because it is the only one the author cannot otherwise reach. Undo covers the current sitting — but
 undo is in-memory, per-tab, and bleeds across document switches (#368), so it does not merely stop at
 the session boundary, it dies with the tab. **Snapshots are the only durable "before" the app has.**
-This is also why capture-on-close was rejected: the end-of-session state duplicates Live at the moment
-it is written, so it preserves nothing that is not already on disk.
+
+### …and why *when* to capture is genuinely arguable
+
+Recorded because it is arguable, not because it is settled. A document that presents this as obvious
+invites a later reader either to re-litigate it from scratch or to lean on the part of the argument
+that does not hold.
+
+**Both candidate moments store the same bytes.** The state at the end of session A *is* the pre-edit
+state of session B. "Capture when the author finishes" and "capture before the next sitting's first
+edit" write identical content; they differ only in *when the record is created*. Most of the apparent
+disagreement dissolves there.
+
+What actually differs:
+
+- **Demand-driven versus speculative.** The rule as built captures exactly when something is about to
+  overwrite the state, and never otherwise. A scene written once and never revisited gets no
+  automatic snapshot — and needs none, because nothing overwrote it. This is the strongest argument
+  for the current choice, and it is about cost rather than about content.
+- **The timestamp, which the current choice gets wrong.** `captured_at` is stamped
+  `datetime.now(UTC)` in `_capture`, so an automatic snapshot is dated when the *capture* ran — the
+  start of session B — while its bytes are from the end of session A. Those can be a fortnight apart,
+  and ADR-0044's strip lays notches out **by age**. Explicit snapshots are captured from the live
+  file and so are dated correctly, which means automatic and explicit notches on the same track mean
+  different things with nothing to distinguish them. Capturing at the end of a sitting would have got
+  this right by construction. Filed as
+  [#458](https://github.com/antoncl/local-writing-app/issues/458); fixable without moving the
+  trigger, since the file's mtime already records when the content was written.
+
+**Which of ADR-0043's three rejections of capture-on-close actually load-bear.** The first two do —
+the close event cannot be observed (`pagehide`/`beforeunload` exist nowhere, #369; a crash or power
+loss fires nothing), and tab lifetime is not a work session. The third, *"it captures the wrong
+content"*, does **not**: by the equivalence above it is the same content. Capture-on-close stays
+rejected on the first two reasons alone, and a later argument should not rest on the third.
 
 ### The one place body and witness disagree
 

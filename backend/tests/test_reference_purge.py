@@ -62,6 +62,49 @@ class ReferencePurgeTestCase(unittest.TestCase):
     def _refs_of(self, node_id: str) -> list[str]:
         return self.service.read_lore_entry(node_id).metadata.get("related_entries") or []
 
+    def _add_ally_field(self, *entry_types: str) -> None:
+        """Put an `entity_ref_list` on entry_types outside the old
+        `{"scene", "lore"}` allow-list — exactly what the schema editor lets a
+        user do, and the reason that allow-list was never a property of the
+        code (#345)."""
+        schema_path = self.root / "metadata.schema.yaml"
+        data = self.service._read_yaml(schema_path)
+        data.setdefault("fields", {})["ally"] = {"name": "Ally", "type": "entity_ref_list"}
+        entry_type_definitions = data.setdefault("entry_types", {})
+        for entry_type in entry_types:
+            definition = entry_type_definitions.get(entry_type) or {}
+            fields = list(definition.get("fields") or [])
+            if "ally" not in fields:
+                fields.insert(0, "ally")
+            definition["fields"] = fields
+            entry_type_definitions[entry_type] = definition
+        self.service._write_yaml(schema_path, data)
+
+    def _write_node(self, path: Path, node_id: str, entry_type: str, **extra: object) -> Path:
+        """A node of any kind whose `ally` field points at `seren`."""
+        path.parent.mkdir(parents=True, exist_ok=True)
+        self.service._write_markdown_with_front_matter(
+            path,
+            {
+                "id": node_id,
+                "title": node_id.title(),
+                "entry_type": entry_type,
+                "metadata": {"ally": ["seren"]},
+                **extra,
+            },
+            "Body.",
+        )
+        return path
+
+    def _reference_the_project_node(self) -> Path:
+        """The project node already exists (#334 indexes it); give it the same
+        dangling reference the other fixtures carry."""
+        path = self.root / "project.md"
+        front_matter, body = self.service._read_markdown_with_front_matter(path, strict=True)
+        front_matter["metadata"] = {"ally": ["seren"]}
+        self.service._write_markdown_with_front_matter(path, front_matter, body)
+        return path
+
 
 class PurgeSkipsIdsThatStillResolveTests(ReferencePurgeTestCase):
     def test_deleting_a_shadowing_entry_keeps_references_to_the_ancestor(self) -> None:
@@ -193,6 +236,292 @@ class PurgeRefusesToActOnIncompleteKnowledgeTests(ReferencePurgeTestCase):
         self.service.delete_lore_entry("seren")
 
         self.assertNotIn("seren", (self.root / "lore" / "honor.md").read_text(encoding="utf-8"))
+
+
+class PurgeCoversEveryReferenceBearingKindTests(ReferencePurgeTestCase):
+    """#345: the purge rewrote scenes and lore only, so every other kind kept
+    its dangling reference forever.
+
+    The allow-list justified itself with "assistants/prompts don't carry node
+    references in current schemas" — an assumption, not a constraint. Edge
+    extraction is schema-driven and the schema editor puts an `entity_ref` on
+    any entry_type, which is what these tests build. Nothing else rewrites those
+    files, so the stale id stays in front matter indefinitely while
+    `reference_graph` keeps reporting the dead edge and the delete-preview
+    dialogs keep promising a cleanup that will not happen.
+    """
+
+    def test_every_kind_that_can_hold_a_reference_is_purged(self) -> None:
+        """One delete, one assertion per kind — a per-kind loop rather than a
+        single representative, because the bug WAS a per-kind list and a fix
+        that reached one new kind would look identical from any one of them."""
+        self._add_ally_field("research:note", "prompt:base", "assistant:assistant", "project:project")
+        self._write_lore(self.root, "seren", "Seren")
+        paths = {
+            "research": self._write_node(self.root / "research" / "notes" / "n.md", "note1", "research:note"),
+            "prompt": self._write_node(self.root / "prompts" / "p.md", "prompt1", "prompt:base"),
+            "assistant": self._write_node(self.root / "assistants" / "a.md", "asst1", "assistant:assistant"),
+            "mutation_set": self._write_node(self.root / "mutation-sets" / "m.md", "mut1", "mutation_set:mutation_set"),
+            "view": self._write_node(self.root / "views" / "v.md", "view1", "view:view"),
+        }
+        paths["project"] = self._reference_the_project_node()
+        for kind, path in paths.items():
+            self.assertIn("seren", path.read_text(encoding="utf-8"), f"{kind} fixture is not referencing seren")
+
+        self.service.delete_lore_entry("seren")
+
+        for kind, path in paths.items():
+            self.assertNotIn(
+                "seren",
+                path.read_text(encoding="utf-8"),
+                f"the purge left a dangling reference in the {kind} file",
+            )
+
+    def test_a_machine_layer_assistant_is_purged_too(self) -> None:
+        """Called out because it is the one file the purge now rewrites
+        **outside the project root**, and #381 is otherwise about keeping the
+        rewrite inside it.
+
+        It is still the right answer: the machine layer is part of the index the
+        purge resolves ids against (`include_machine=True`), so an assistant's
+        reference to a deleted book-local node is genuinely dangling, and the
+        assistant roster is the one place no project's delete would ever reach.
+        The scoping rule #381 protects is *which project's ids* — and that is
+        unchanged, since only the deleted id is ever purged.
+        """
+        from app.services import machine_settings as ms_service
+
+        self._add_ally_field("assistant:assistant")
+        self._write_lore(self.root, "seren", "Seren")
+        assistant = self._write_node(
+            ms_service.assistants_dir() / "roster.md", "asst_machine", "assistant:assistant"
+        )
+        self.assertIn("Machine", [layer.label for layer in self.service._layer_sequence(self.root, include_machine=True)])
+
+        self.service.delete_lore_entry("seren")
+
+        self.assertNotIn("seren", assistant.read_text(encoding="utf-8"))
+
+    def test_a_chat_session_is_untouched(self) -> None:
+        """Chats are in the index but no collector draws edges from them — they
+        are YAML sessions, not front-matter nodes. Widening the purge must not
+        start rewriting them."""
+        self._write_lore(self.root, "seren", "Seren")
+        chats = self.root / "chats"
+        chats.mkdir(parents=True, exist_ok=True)
+        chat_path = chats / "chat_1.yaml"
+        self.service._write_yaml(chat_path, {"id": "chat_1", "title": "Talk", "messages": [{"body": "seren"}]})
+        before = chat_path.read_text(encoding="utf-8")
+
+        self.service.delete_lore_entry("seren")
+
+        self.assertEqual(chat_path.read_text(encoding="utf-8"), before)
+
+    def test_the_purge_preserves_front_matter_it_does_not_own(self) -> None:
+        """The typed writers spelled out a fixed key set, so a purge silently
+        dropped every other top-level key the file carried — `inputs` on a
+        prompt, `spec` on a view, `rows` on a mutation set. Rewriting the parsed
+        mapping instead of reconstructing a model is what fixes it, and this is
+        the assertion that says so."""
+        self._add_ally_field("prompt:base")
+        self._write_lore(self.root, "seren", "Seren")
+        prompt = self._write_node(
+            self.root / "prompts" / "p.md",
+            "prompt1",
+            "prompt:base",
+            inputs=[{"id": "topic", "label": "Topic", "type": "text"}],
+        )
+
+        self.service.delete_lore_entry("seren")
+
+        front_matter, _ = self.service._read_markdown_with_front_matter(prompt, strict=True)
+        self.assertEqual(front_matter["metadata"]["ally"], [])
+        self.assertEqual(front_matter["inputs"], [{"id": "topic", "label": "Topic", "type": "text"}])
+
+    def test_a_scene_keeps_its_status_and_extra_keys(self) -> None:
+        """The same preservation for the kinds that DID have a typed writer —
+        `_write_scene_file` emitted five keys and dropped the rest."""
+        self._add_ally_field("scene:scene")
+        self._write_lore(self.root, "seren", "Seren")
+        scene = self._write_node(
+            self.root / "scenes" / "s.md",
+            "scene1",
+            "scene:scene",
+            status="revised",
+            pov_note="kept",
+        )
+
+        self.service.delete_lore_entry("seren")
+
+        front_matter, _ = self.service._read_markdown_with_front_matter(scene, strict=True)
+        self.assertEqual(front_matter["metadata"]["ally"], [])
+        self.assertEqual(front_matter["status"], "revised")
+        self.assertEqual(front_matter["pov_note"], "kept")
+
+
+class ReadSideHealingCoversMoreThanSceneAndLoreTests(ReferencePurgeTestCase):
+    """The other half of #345. `_strip_dangling_references` is the fallback that
+    keeps an entry openable when its target is gone — and it was wired into the
+    scene, lore and research read paths only, so the same kinds were covered and
+    the same kinds were not.
+
+    Asserted through the read path with the purge suppressed, so the file still
+    carries the stale id and only the healer can produce the answer.
+    """
+
+    def _delete_without_purging(self, entry_id: str) -> None:
+        self.service._purge_references_to = lambda *args, **kwargs: None  # type: ignore[method-assign]
+        self.service.delete_lore_entry(entry_id)
+
+    def test_a_prompt_hides_a_dangling_reference(self) -> None:
+        self._add_ally_field("prompt:base")
+        self._write_lore(self.root, "seren", "Seren")
+        prompt = self._write_node(self.root / "prompts" / "p.md", "prompt1", "prompt:base")
+
+        self._delete_without_purging("seren")
+
+        self.assertIn("seren", prompt.read_text(encoding="utf-8"), "premise: the file still carries the stale id")
+        self.assertEqual(self.service.read_prompt_entry("prompt1").metadata.get("ally"), [])
+
+    def test_the_project_node_hides_a_dangling_reference(self) -> None:
+        self._add_ally_field("project:project")
+        self._write_lore(self.root, "seren", "Seren")
+        project_node = self._reference_the_project_node()
+
+        self._delete_without_purging("seren")
+
+        self.assertIn("seren", project_node.read_text(encoding="utf-8"))
+        self.assertEqual(self.service.read_project_node().metadata.get("ally"), [])
+
+    def test_an_assistant_hides_a_dangling_reference(self) -> None:
+        self._add_ally_field("assistant:assistant")
+        self._write_lore(self.root, "seren", "Seren")
+        assistant = self._write_node(self.root / "assistants" / "a.md", "asst1", "assistant:assistant")
+
+        self._delete_without_purging("seren")
+
+        self.assertIn("seren", assistant.read_text(encoding="utf-8"))
+        self.assertEqual(self.service.read_assistant_entry("asst1").metadata.get("ally"), [])
+
+    def test_a_live_reference_survives_every_read_path(self) -> None:
+        """The healer must not turn into a blanket eraser — that would trade a
+        stale row for silent data loss on the next save."""
+        self._add_ally_field("prompt:base", "assistant:assistant", "project:project")
+        self._write_lore(self.root, "seren", "Seren")
+        self._write_node(self.root / "prompts" / "p.md", "prompt1", "prompt:base")
+        self._write_node(self.root / "assistants" / "a.md", "asst1", "assistant:assistant")
+        self._reference_the_project_node()
+
+        self.assertEqual(self.service.read_prompt_entry("prompt1").metadata.get("ally"), ["seren"])
+        self.assertEqual(self.service.read_assistant_entry("asst1").metadata.get("ally"), ["seren"])
+        self.assertEqual(self.service.read_project_node().metadata.get("ally"), ["seren"])
+
+
+class ReadSideHealingRespectsLayerScopeTests(unittest.TestCase):
+    """The healer may only hide an id when the index it consulted is a complete
+    answer to "does this id exist".
+
+    Two projects, because the counter-example needs two. The **machine layer**
+    is out-of-tree and global: one assistant roster shared by every project, so
+    a machine assistant's references can point into any of them while the open
+    project's index knows exactly one. Healing it there deletes its links into
+    every other project the user owns — silently on read, and for real the
+    moment the frontend saves the entry back.
+
+    Caught reviewing #345, which introduced it: the first gate was "a project is
+    open", which is necessary and not sufficient. This is #379's rule one layer
+    over — an id missing from a PARTIAL index is unknown, not gone.
+    """
+
+    def setUp(self) -> None:
+        self.temp_dir = TemporaryDirectory()
+        self.base = Path(self.temp_dir.name).resolve() / "writing"
+        self.book1 = self.base / "book01"
+        self.book2 = self.base / "book02"
+        for path, title in ((self.book1, "Book 1"), (self.book2, "Book 2")):
+            declare_full_chain(ProjectService.created_at(path, title), path, self.base)
+        for path in (self.book1, self.book2):
+            self._add_ally(path)
+
+    def tearDown(self) -> None:
+        self.temp_dir.cleanup()
+
+    def _add_ally(self, root: Path) -> None:
+        """`ally` on assistants in BOTH books, so the schema is not the variable
+        under test — only which project is open."""
+        service = ProjectService.opened_at(root)
+        schema_path = root / "metadata.schema.yaml"
+        data = service._read_yaml(schema_path)
+        data.setdefault("fields", {})["ally"] = {"name": "Ally", "type": "entity_ref_list"}
+        types = data.setdefault("entry_types", {})
+        definition = types.get("assistant:assistant") or {}
+        fields = list(definition.get("fields") or [])
+        if "ally" not in fields:
+            fields.insert(0, "ally")
+        definition["fields"] = fields
+        types["assistant:assistant"] = definition
+        service._write_yaml(schema_path, data)
+
+    def _machine_assistant_pointing_into_book1(self) -> Path:
+        service = ProjectService.opened_at(self.book1)
+        (self.book1 / "lore").mkdir(parents=True, exist_ok=True)
+        service._write_markdown_with_front_matter(
+            self.book1 / "lore" / "seren.md",
+            {"id": "seren", "title": "Seren", "entry_type": "lore:character", "metadata": {}},
+            "Body.",
+        )
+        from app.services import machine_settings as ms_service
+
+        roster = ms_service.assistants_dir()
+        roster.mkdir(parents=True, exist_ok=True)
+        path = roster / "roster.md"
+        service._write_markdown_with_front_matter(
+            path,
+            {
+                "id": "asst_machine",
+                "title": "Editor",
+                "entry_type": "assistant:assistant",
+                "metadata": {"ally": ["seren"]},
+            },
+            "",
+        )
+        return path
+
+    def test_a_machine_assistants_reference_survives_opening_another_project(self) -> None:
+        self._machine_assistant_pointing_into_book1()
+
+        with_book1 = ProjectService.opened_at(self.book1).read_assistant_entry("asst_machine")
+        with_book2 = ProjectService.opened_at(self.book2).read_assistant_entry("asst_machine")
+
+        # `seren` is nowhere in book02's chain, and that is not evidence of
+        # anything: book02's index was never asked about book01.
+        self.assertEqual(with_book1.metadata.get("ally"), ["seren"])
+        self.assertEqual(
+            with_book2.metadata.get("ally"),
+            ["seren"],
+            "opening a different project hid a machine assistant's reference into this one",
+        )
+
+    def test_a_project_layer_assistant_still_heals(self) -> None:
+        """The guard must not switch healing off for assistants generally — a
+        project-layer assistant IS in the open chain, so the chain's index is a
+        complete answer for it."""
+        service = ProjectService.opened_at(self.book1)
+        (self.book1 / "assistants").mkdir(parents=True, exist_ok=True)
+        assistant = self.book1 / "assistants" / "local.md"
+        service._write_markdown_with_front_matter(
+            assistant,
+            {
+                "id": "asst_local",
+                "title": "Local",
+                "entry_type": "assistant:assistant",
+                "metadata": {"ally": ["ghost"]},
+            },
+            "",
+        )
+
+        self.assertEqual(service.read_assistant_entry("asst_local").metadata.get("ally"), [])
+        self.assertIn("ghost", assistant.read_text(encoding="utf-8"))
 
 
 class PurgeStaysInTheCallersProjectTests(unittest.TestCase):

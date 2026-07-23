@@ -357,7 +357,8 @@ class AssistantEntriesMixin:
         )
 
     def read_assistant_entry(self, entry_id: str) -> AssistantEntry:
-        index_entry = self._build_assistant_index().by_id.get(entry_id)
+        index = self._build_assistant_index()
+        index_entry = index.by_id.get(entry_id)
         if index_entry is None or index_entry.kind != "assistant":
             raise ProjectServiceError(f"Assistant {entry_id} does not exist.", 404)
         path = index_entry.path
@@ -366,12 +367,34 @@ class AssistantEntriesMixin:
         raw_entry_type = front_matter.get("entry_type") or "assistant:assistant"
         if not isinstance(raw_entry_type, str):
             raise ProjectServiceError(f"Assistant {node_id} has invalid entry_type; it must be text.", 422)
+        metadata = self._normalise_metadata(front_matter.get("metadata"), path)
+        # Read-side healing (#345), under one rule: heal only when the index
+        # answering "does this id still exist" covers the same ground the
+        # node's references can reach. Two ways it does not, and both end in
+        # the frontend persisting the loss on the next save:
+        #
+        # **No project open.** `_build_assistant_index` is then machine-only,
+        # so every reference into any project reads as dangling.
+        #
+        # **A machine-layer assistant.** It is global — one roster shared by
+        # every project — so its references can point into any of them, while
+        # the open project's index knows exactly one. Healing it there deletes
+        # its links into every other project the user owns.
+        #
+        # Same rule as #379's purge guard, applied to layer scope instead of
+        # parse failures: an id missing from a PARTIAL index is unknown, not
+        # gone. Project-layer assistants are in the open chain, so the chain's
+        # index is a complete answer for them and they heal normally.
+        machine_layer = self.machine_layer()
+        on_machine_layer = machine_layer is not None and index_entry.source_layer_id == machine_layer.id
+        if self.root_path is not None and not on_machine_layer:
+            metadata = self._strip_dangling_references(metadata, self.read_metadata_schema(), index)
         return AssistantEntry(
             id=node_id,
             title=str(front_matter.get("title") or node_id),
             revision=self._revision(path),
             entry_type=raw_entry_type,
-            metadata=self._normalise_metadata(front_matter.get("metadata"), path),
+            metadata=metadata,
             computed_metadata=self._curation_metadata(node_id),
             source_layer_id=index_entry.source_layer_id,
             source_layer_label=index_entry.source_layer_label,

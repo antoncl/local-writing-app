@@ -39,6 +39,10 @@ class ProjectNodeMixin:
         raw_entry_type = front_matter.get("entry_type") or "project:project"
         entry_type = raw_entry_type if isinstance(raw_entry_type, str) else "project:project"
         metadata = self._normalise_metadata(front_matter.get("metadata"), path)
+        # Same read-side healing every other node kind gets (#345): the project
+        # node has carried schema-driven metadata since #334, so it can hold a
+        # reference whose target was deleted.
+        metadata = self._strip_dangling_references(metadata, self.read_metadata_schema(), self._build_node_index())
         return ProjectNode(
             id=node_id,
             title=title,

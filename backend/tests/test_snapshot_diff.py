@@ -16,6 +16,7 @@ Python can say whether the diff is the diff. Neither half is sufficient alone.
 
 from __future__ import annotations
 
+import difflib
 import re
 import time
 import unittest
@@ -36,6 +37,7 @@ from app.services.markdown_scan import (
 )
 from app.services.project.snapshot_diff import (
     MAX_WORD_DIFF_TOKENS,
+    TOKEN,
     _is_a_rewrite_of,
     _same_value,
     diff_runs,
@@ -517,6 +519,100 @@ def test_blank_and_absent_read_as_the_same_value(was: object, now: object, same:
     """The rail renders a missing field and an empty one identically, so a flip
     between them shows two identical-looking values with nothing to reconcile."""
     assert _same_value(was, now) is same
+
+
+# ----- block pairing: can a test see mush? ------------------------------------
+#
+# The interleaving this guards against is well-formed HTML containing correct
+# words, tinted on the correct sides, that reassembles to both documents
+# exactly. It passes every other oracle in this file and in the frontend suite.
+# The only thing wrong with it is that it is meaningless to read:
+#
+#   was 'Maren did not run. She had never done' / now 'The eleventh was moored at'
+#   equal ' the '
+#   was 'sensible thing quickly.' / now 'old harbour all week.'
+#
+# So the property has to name what is actually broken: an adjacent was/now pair
+# is a *rewrite*, and a rewrite keeps some of its words. Two unrelated
+# paragraphs word-diffed against each other share only the articles.
+
+# A paragraph split early in the scene, plus an edit in every later paragraph,
+# so the block matcher has no equal anchors anywhere and positional pairing is
+# maximally wrong. This is the document that produced the mush in the browser.
+RESTRUCTURED_WAS = (
+    "The tide went out further than she had ever seen it, and kept going.\n\n"
+    "She counted the hulls twice. The eleventh was moored at the harbour all week.\n\n"
+    "Maren did not run. She had never done the sensible thing quickly.\n\n"
+    "When the water leaves like that, it is not leaving.\n"
+)
+RESTRUCTURED_NOW = (
+    "The tide went out further than she had ever once seen it, and kept going.\n\n"
+    "She counted the hulls twice.\n\n"
+    "The eleventh was moored at the old harbour all week.\n\n"
+    "Maren did not run. She had never once done the sensible thing quickly.\n\n"
+    "When the water leaves like that, it is not leaving at all.\n"
+)
+
+
+def interleaved_pairs(runs: list) -> list:
+    """Adjacent inline was/now runs that share almost nothing.
+
+    Short pairs are exempt: a two-word substitution legitimately shares nothing
+    ("quay" -> "pier"), and demanding otherwise would fire constantly.
+    """
+    words = lambda text: [t for t in TOKEN.findall(text) if not t.isspace()]  # noqa: E731
+    found = []
+    for first, second in zip(runs, runs[1:], strict=False):
+        if first.kind != "was" or second.kind != "now" or first.stacked or second.stacked:
+            continue
+        was_words, now_words = words(first.text), words(second.text)
+        if min(len(was_words), len(now_words)) < 5:
+            continue
+        shared = difflib.SequenceMatcher(None, was_words, now_words, autojunk=False).ratio()
+        if shared < 0.2:
+            found.append((first.text, second.text))
+    return found
+
+
+def test_unrelated_paragraphs_are_never_word_diffed_together() -> None:
+    """The output-level guard on block pairing.
+
+    Measured before it was written: zero hits across the 400-document corpus and
+    all nineteen fixtures, and exactly one on the restructured document as soon
+    as pairing goes positional — so it discriminates rather than merely
+    tolerating.
+    """
+    assert interleaved_pairs(diff_runs(RESTRUCTURED_WAS, RESTRUCTURED_NOW)) == []
+    for case in fuzz_cases():
+        assert interleaved_pairs(diff_runs(case["was"], case["now"])) == [], case["name"]
+
+
+# Reviewed by eye once, then frozen. Unlike the generated fixtures this is not
+# regenerated from the code it checks, so a change to pairing or to boundary
+# snapping has to be looked at by a person before this goes green again.
+RESTRUCTURED_EXPECTED = [
+    ("equal", False, "The tide went out further than she had ever "),
+    ("now", False, "once "),
+    ("equal", False, "seen it, and kept going.\n\nShe counted the hulls twice."),
+    ("was", False, " The eleventh was moored at the harbour all week."),
+    ("equal", False, "\n\n"),
+    ("was", True, "Maren did not run. She had never done the sensible thing quickly."),
+    ("now", True, "The eleventh was moored at the old harbour all week."),
+    ("equal", False, "\n\n"),
+    ("now", True, "Maren did not run. She had never once done the sensible thing quickly.\n\n"),
+    ("equal", False, "When the water leaves like that, it is not "),
+    ("was", False, "leaving.\n"),
+    ("now", False, "leaving at all.\n"),
+]
+
+
+def test_the_restructured_document_pairs_as_reviewed() -> None:
+    """The sentence moves out of paragraph two and becomes its own block; the
+    paragraph after it is recognised across the shift rather than lined up with
+    its neighbour. If this changes, read the new output before re-freezing it —
+    that reading is the whole value of this test."""
+    runs = diff_runs(RESTRUCTURED_WAS, RESTRUCTURED_NOW)
+    assert [(run.kind, run.stacked, run.text) for run in runs] == RESTRUCTURED_EXPECTED
 
 
 # ----- the route ------------------------------------------------------------

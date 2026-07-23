@@ -24,10 +24,12 @@ export type ChainCrumb = {
  * as the project switcher rather than as a crumb.
  *
  * Gaps stay legal upstream (a project may declare a grandparent and not its
- * parent), so this remains a path through the ancestry rather than a walk of
- * consecutive folders — see #431 for the fact that the bar does not yet SAY
- * so. Rendering it honestly is that issue's job; this one only makes sure
- * there is a single source to render.
+ * parent), so this is a path through the ancestry rather than a walk of
+ * consecutive folders. #431 settled that the bar does NOT mark the gap: the
+ * undeclared middle folder is not in `chain` (the backend yields only
+ * `is_project and inherited` layers), so there is nothing here to hide or to
+ * flag — the honest treatment of a deliberate, legal gap is to render the
+ * declared layers contiguously, which is all this can do.
  */
 export function declaredChain(chain: ProjectChainLayer[] | undefined): ChainCrumb[] {
   return (chain ?? [])

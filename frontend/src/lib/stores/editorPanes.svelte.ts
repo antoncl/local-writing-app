@@ -34,6 +34,7 @@ import {
   isEditorPaneDirty,
 } from "@/lib/editor-core/editorPaneModel";
 import { confirmService } from "@/lib/stores/confirmService.svelte";
+import { clearImplicitContext, implicitContextFor } from "@/lib/stores/implicitContext.svelte";
 import { findNodeBySceneId, findStructureNodeById } from "@/lib/utils/treeHelpers";
 import { metadataSchemaStore } from "@/lib/stores/schema";
 import {
@@ -330,6 +331,10 @@ class EditorPanesController {
   tearDown(id: string): void {
     this.#autosave.cancel(id);
     this.#autosave.cancelSavedIndicator(id);
+    const closing = this.panes.find((candidate) => candidate.id === id);
+    // The detected set is per open document; drop it so the registry does not
+    // grow with pane churn (#439).
+    if (closing?.scene?.id) clearImplicitContext(closing.scene.id);
     const remainingEditorPanes = this.panes.filter((candidate) => candidate.id !== id);
     this.panes = remainingEditorPanes;
     const { [id]: _closedReload, ...remainingReloads } = this.metadataReloadsByPane;
@@ -394,7 +399,15 @@ class EditorPanesController {
         // scene title, so refreshStructure below will pick up renames.
         savedDocument = await api.saveScene(draftDocument as Scene, pane.draftMarkdown);
       } else {
-        savedDocument = await api.saveScene(draftDocument as Scene, pane.draftMarkdown);
+        // The dynamic context rides on the scene save so the automatic capture
+        // inside it can witness what the editor detected (#439). `undefined`
+        // when no prose editor has reported for this document — the backend
+        // keeps *not observed* distinct from *observed and empty*.
+        savedDocument = await api.saveScene(
+          draftDocument as Scene,
+          pane.draftMarkdown,
+          implicitContextFor(pane.scene.id),
+        );
       }
       // Keep the pane's current draft-* fields rather than snapping them to
       // savedDocument: if the user kept typing while the save was in flight

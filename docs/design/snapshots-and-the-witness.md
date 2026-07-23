@@ -6,10 +6,10 @@
 > not supersede either. It is the explanatory layer they deliberately left out: ADR-0043 fixes *that*
 > a snapshot carries a witness and never defines *what a witness contains*, and the answer turned out
 > to need a page of reasoning rather than a sentence.
-> Slices 1 and 2 have shipped ([#401](https://github.com/antoncl/local-writing-app/issues/401),
-> [#409](https://github.com/antoncl/local-writing-app/issues/409)). Slice 3 is
-> [#439](https://github.com/antoncl/local-writing-app/issues/439), and this document is what it
-> should be read alongside.
+> Slices 1, 2 and 3 have shipped ([#401](https://github.com/antoncl/local-writing-app/issues/401),
+> [#409](https://github.com/antoncl/local-writing-app/issues/409),
+> [#439](https://github.com/antoncl/local-writing-app/issues/439)). §9 records what slice 3 closed
+> and what it added to this design.
 
 ## 0. What a snapshot is, in one paragraph
 
@@ -339,13 +339,37 @@ the witness set, and the question of *which* entities to record is about precisi
 
 ## 9. Open
 
-1. **#447** — which dynamic context is real. §4 gives the witness a workable answer, but the
-   underlying divergence between what the editor promises and what the model receives is undecided.
-2. **The scope-visibility gap (§3)** — wants an ADR-0043 amendment, since the ADR currently claims
-   axis 2 gets complete for free when #314 lands.
-3. **Recording the editing-finished trigger (§5)** — ADR-0043 says close was rejected; it should say
-   *which* close.
-4. **#439's Acceptance text** — strike the absent/deleted line (§2), recast report quality as
-   floor-and-goal (§6).
-5. **Where the report surfaces while parked** — ADR-0044 designs the strip without it, and the
-   compare view already owns the pane and the A/S/B letter keys. May need an ADR-0044 amendment.
+Slice 3 shipped in #439, and building it closed four of the five.
+
+1. **#447 — half-closed.** §4's answer is now built: the editor's hits ride on the scene save and on
+   the diff request, so the witness records exactly the entries the author sees underlined. That is
+   #447 direction (1)'s wire, and it refutes direction (3) — the promise is true on one path, so
+   qualifying the highlight would now misdescribe it. **What remains open is the other consumer:**
+   chat send still scans the composer message and prompt rendering still scans the scene `summary`,
+   so the model does not yet receive what the highlight promises. Feeding the prose hits into
+   `expand_context` changes what reaches the model on a hot path and wants its own change.
+2. **The scope-visibility gap (§3) — closed.** ADR-0043 **Amendment 3**. The witness records the
+   resolved source layer per entity, and a moved layer is its own drift axis.
+3. **Recording the editing-finished trigger (§5)** — still open. ADR-0043 says close was rejected; it
+   should say *which* close.
+4. **#439's Acceptance text — closed.** The absent/deleted line is struck (§2) and report quality is
+   recast as floor-and-goal (§6).
+5. **Where the report surfaces while parked — closed.** It rides on the **diff response**. A restore
+   is only reachable from a parked notch and parking is what fetches the diff, so ADR-0043's "restore
+   reports drift" costs no extra request and the report is already on screen when the author decides.
+   No ADR-0044 amendment was needed: the strip gained a band below its actions row, and the A/S/B
+   letter keys are untouched.
+
+### What the build added to this design
+
+- **`sources_recorded`.** A capture from a route with no prose editor behind it (the pre-restore
+  capture) observes two sources, not three. Differencing that against a three-source witness would
+  report every implicitly-detected entity as *removed* — a wolf cried on a scene nobody touched — so
+  membership drift is computed only over the sources **both** sides observed.
+- **Measured cost.** `build_witness` is **~34 ms** for a typical scene (5 witnessed entities in a
+  150-entity project) and **~110 ms** at the 200-entity cap. Roughly 25 ms of the typical figure is
+  fixed overhead — the node index and the merged schema — rather than per-entity work. It runs at
+  most once per scene per editing session on the save path, and once per park on the diff path.
+- **The bounds.** `MAX_WITNESS_ENTITIES = 200` and `MAX_DYNAMIC_CONTEXT_IDS = 200`, with `truncated`
+  reported rather than hidden: a silently truncated witness reads as "nothing else changed", which is
+  the one claim it cannot make.

@@ -16,6 +16,7 @@
   // camera only, no labels. Parking is what earns the taller strip, the scale
   // ticks and the actions row (ADR-0038 §A's shape, applied to size).
   import type { SnapshotStripController } from "@/lib/stores/snapshotStrip.svelte";
+  import DriftReport from "@/components/editor/DriftReport.svelte";
   import { relativeTime } from "@/lib/utils/relativeTime";
   import { LIVE_LEFT, TICKS, ageMinutes, agePosition, notchPositions, trackSpanMinutes } from "@/lib/utils/snapshotTrack";
 
@@ -224,6 +225,15 @@
       Restore
     </button>
   </div>
+
+  <!-- Below the actions, not in front of them: the report is advisory, and
+       Restore stays reachable without passing it (ADR-0043). It appears here
+       because the diff already carries it — parking is what fetches the
+       comparison, and a restore is only reachable from a parked notch, so
+       "restore reports drift" costs nothing extra. -->
+  {#if strip.hasDriftToReport}
+    <DriftReport drift={strip.drift} />
+  {/if}
 {/if}
 
 <style>

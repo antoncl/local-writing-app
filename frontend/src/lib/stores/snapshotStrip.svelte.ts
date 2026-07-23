@@ -15,14 +15,32 @@
 // this feature exists to prevent — so both flush first, and the flush is the
 // host's job because the pane store owns the document lifecycle.
 import { api } from "@/lib/api";
-import type { DiffRun, DiffView, FieldDiff, Scene, Snapshot } from "@/lib/types";
+import type { DiffRun, DiffView, FieldDiff, Scene, Snapshot, SnapshotDrift } from "@/lib/types";
 import { renderDiffRuns } from "@/lib/utils/diffRuns";
 
 /** What the diff compares the snapshot against: the buffer, not the file.
  *  Autosave lags by up to six seconds and parking must not write. */
-export type LiveState = { body: string; title: string; status: string; metadata: Record<string, unknown> };
+export type LiveState = {
+  body: string;
+  title: string;
+  status: string;
+  metadata: Record<string, unknown>;
+  /** The lore entries the editor currently detects in the prose — the *now*
+   *  side of the witness's dynamic axis (#439). Omitted when no prose editor
+   *  reported: the backend keeps *not observed* distinct from *observed and
+   *  empty*, and narrows membership drift rather than claiming a removal. */
+  dynamic_context?: string[];
+};
 
 const NO_LIVE: LiveState = { body: "", title: "", status: "", metadata: {} };
+
+/** No comparison was possible — the default until a park lands. */
+const NO_DRIFT: SnapshotDrift = {
+  available: false,
+  comparable: true,
+  truncated: false,
+  entities: [],
+};
 
 /** How long a park may take before the pane admits it is working.
  *
@@ -60,6 +78,26 @@ export class SnapshotStripController {
    *  temporal provenance everywhere, and location carries the subject (§F). */
   titleWas = $state("");
   titleNow = $state("");
+
+  // ---- the drift report (ADR-0043, #439) ------------------------------------
+  //
+  // It arrives on the diff payload rather than from a route of its own. A
+  // restore is only reachable from a parked notch, and parking is what fetches
+  // this — so ADR-0043's "restore reports drift" costs no extra request and the
+  // report is already on screen when the author decides.
+  //
+  // Advisory throughout: it never gates `restore()`, and there is no
+  // acknowledgement to clear.
+  drift = $state<SnapshotDrift>(NO_DRIFT);
+
+  /** Whether there is anything to say about the world underneath this notch —
+   *  including "the comparison could not be made", which is itself worth
+   *  saying. */
+  hasDriftToReport = $derived(
+    this.parked !== null &&
+      this.drift.available &&
+      (!this.drift.comparable || this.drift.entities.length > 0),
+  );
 
   /** Whether the title itself changed. Colour only, never a glyph (§J). */
   titleDiffers = $derived(this.parked !== null && this.titleWas !== this.titleNow);
@@ -191,6 +229,7 @@ export class SnapshotStripController {
       this.fields = diff.fields;
       this.titleWas = diff.title_was;
       this.titleNow = diff.title_now;
+      this.drift = diff.drift ?? NO_DRIFT;
       this.bodyHtml = html;
       this.parked = snapshotId;
     } catch {
@@ -256,6 +295,7 @@ export class SnapshotStripController {
     this.fields = {};
     this.titleWas = "";
     this.titleNow = "";
+    this.drift = NO_DRIFT;
   }
 
   /** ← → along the time axis. Right past the newest lands on Live (§I), which
@@ -287,7 +327,9 @@ export class SnapshotStripController {
     this.busy = true;
     try {
       await this.flushScene?.();
-      await api.captureSnapshot(sceneId);
+      // The camera witnesses the same world an automatic capture does, so an
+      // explicit snapshot is not the weaker record of the two.
+      await api.captureSnapshot(sceneId, this.readLive?.()?.dynamic_context);
       await this.refresh();
       await this.park(null);
     } catch {

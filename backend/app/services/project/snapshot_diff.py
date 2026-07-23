@@ -54,6 +54,8 @@ from app.services.markdown_scan import (
     is_code_block,
     protected_intervals,
 )
+from app.services.project.field_values import same_rendered_value
+from app.services.project.snapshot_drift import compare_witnesses
 
 # Blocks are separated by a blank line. The separator is kept as its own chunk
 # so the runs still reassemble to the source byte for byte.
@@ -163,6 +165,13 @@ class SnapshotDiffMixin:
             fields=_field_diffs(was, live),
             title_was=was["title"],
             title_now=live.title,
+            # Drift rides here rather than on a route of its own: a restore is
+            # only reachable from a parked notch, and parking is what fetches
+            # this — so ADR-0043's "restore reports drift" costs one request, and
+            # the report is already on screen when the author decides.
+            drift=compare_witnesses(
+                record.witness, self.build_witness(node_id, live.dynamic_context)
+            ),
         )
 
     def _snapshot_state(
@@ -624,26 +633,5 @@ def _field_diffs(was_state: dict[str, Any], live: SnapshotDiffRequest) -> dict[s
     return {
         key: FieldDiff(was=was.get(key), now=now.get(key))
         for key in sorted(keys)
-        if not _same_value(was.get(key), now.get(key))
+        if not same_rendered_value(was.get(key), now.get(key))
     }
-
-
-def _same_value(was: Any, now: Any) -> bool:
-    """Whether two field values are the same *as the rail renders them*.
-
-    A missing key and an empty one are the same absence to a reader — the row
-    reads "(none)" either way — so reporting a flip between them shows the
-    author two identical-looking values and no way to reconcile them. They
-    arrive different for ordinary reasons: healing a reference to a deleted node
-    blanks it to `""` rather than removing it, and a scene saved before a field
-    existed simply has no key.
-
-    `0` and `False` are values, not absences, so the check is explicit about
-    the empty containers rather than leaning on truthiness.
-    """
-    empty = (None, "", [], {})
-    was_blank = any(was is candidate or was == candidate for candidate in empty)
-    now_blank = any(now is candidate or now == candidate for candidate in empty)
-    if was_blank or now_blank:
-        return was_blank and now_blank
-    return bool(was == now)

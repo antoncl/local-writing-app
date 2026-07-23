@@ -541,7 +541,11 @@ export const api = {
   getScene(sceneId: string) {
     return request<Scene>(`/scenes/${sceneId}`);
   },
-  saveScene(scene: Scene, body: string) {
+  /** `dynamicContext` is the set of lore entries the prose editor detected in
+   *  this body (#439). Read only by the automatic snapshot capture inside the
+   *  save; omitted when no prose editor reported, which the backend treats as
+   *  *not observed* rather than as empty. */
+  saveScene(scene: Scene, body: string, dynamicContext?: string[]) {
     return request<Scene>(`/scenes/${scene.id}`, {
       method: "PUT",
       body: JSON.stringify({
@@ -551,6 +555,7 @@ export const api = {
         status: scene.status,
         entry_type: scene.entry_type,
         metadata: scene.metadata,
+        ...(dynamicContext ? { dynamic_context: dynamicContext } : {}),
       }),
     });
   },
@@ -563,10 +568,13 @@ export const api = {
   listSnapshots(sceneId: string) {
     return request<SnapshotList>(`/scenes/${encodeURIComponent(sceneId)}/snapshots`);
   },
-  /** The camera: an explicit, never-thinned capture. */
-  captureSnapshot(sceneId: string) {
+  /** The camera: an explicit, never-thinned capture. Carries the dynamic
+   *  context so an author-invoked snapshot witnesses the same world an
+   *  automatic one does. */
+  captureSnapshot(sceneId: string, dynamicContext?: string[]) {
     return request<Snapshot>(`/scenes/${encodeURIComponent(sceneId)}/snapshots`, {
       method: "POST",
+      ...(dynamicContext ? { body: JSON.stringify({ dynamic_context: dynamicContext }) } : {}),
     });
   },
   readSnapshot(sceneId: string, snapshotId: string) {
@@ -579,7 +587,18 @@ export const api = {
    *  six seconds, and parking is a reading gesture that must not write. The runs
    *  carry all the text, so Both/Now/Snapshot are filters over this one payload
    *  rather than three requests (ADR-0044 §G). */
-  diffSnapshot(sceneId: string, snapshotId: string, live: { body: string; title: string; metadata: Record<string, unknown> }) {
+  diffSnapshot(
+    sceneId: string,
+    snapshotId: string,
+    live: {
+      body: string;
+      title: string;
+      metadata: Record<string, unknown>;
+      /** The live dynamic context, so the *now* side of the drift comparison
+       *  sees the same implicit detections the capture did (#439). */
+      dynamic_context?: string[];
+    },
+  ) {
     return request<SnapshotDiff>(
       `/scenes/${encodeURIComponent(sceneId)}/snapshots/${encodeURIComponent(snapshotId)}/diff`,
       { method: "POST", body: JSON.stringify(live) },

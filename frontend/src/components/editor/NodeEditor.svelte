@@ -8,6 +8,7 @@
   import ReadOnlyBodyOverlay from "@/components/editor/body/ReadOnlyBodyOverlay.svelte";
   import { LoreScrubController } from "@/lib/stores/loreScrub.svelte";
   import { SnapshotStripController } from "@/lib/stores/snapshotStrip.svelte";
+  import { implicitContextFor } from "@/lib/stores/implicitContext.svelte";
   import { relativeTime } from "@/lib/utils/relativeTime";
   import MetadataPanel from "@/components/editor/MetadataPanel.svelte";
   import InputsDialog from "@/components/editor/InputsDialog.svelte";
@@ -173,6 +174,9 @@
       title,
       status,
       metadata,
+      // The *now* side of the witness's dynamic axis (#439) — the same hits
+      // the author sees underlined, not a rescan.
+      dynamic_context: scene?.id ? implicitContextFor(scene.id) : undefined,
     });
     return snapshots.load(documentKind === "scene" ? (scene?.id ?? null) : null);
   });

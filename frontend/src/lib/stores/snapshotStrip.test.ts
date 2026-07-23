@@ -41,6 +41,41 @@ function diff(): SnapshotDiff {
     fields: { status: { was: "draft", now: "revised" } },
     title_was: "The Tide",
     title_now: "The Tide",
+    drift: { available: true, comparable: true, truncated: false, entities: [] },
+  };
+}
+
+/** A drift report naming one changed entity — the shape ADR-0043 requires:
+ *  entity, field, value-then, value-now. */
+function driftedDiff(): SnapshotDiff {
+  return {
+    ...diff(),
+    drift: {
+      available: true,
+      comparable: true,
+      truncated: false,
+      entities: [
+        {
+          entity_id: "lore_tom",
+          title: "Tom",
+          membership: "present",
+          sources: ["entity_ref"],
+          entry_changed: "yes",
+          fields: [
+            {
+              field_id: "eye_colour",
+              label: "Eye colour",
+              was: "green",
+              now: "blue",
+              from_mutation: false,
+            },
+          ],
+          reinterpreted: [],
+          layer_was: "",
+          layer_now: "",
+        },
+      ],
+    },
   };
 }
 
@@ -76,6 +111,56 @@ describe("parking", () => {
     await strip.park("snap_1");
     expect(strip.parked).toBe(null);
     expect(strip.bodyHtml).toBe("");
+  });
+});
+
+/**
+ * The drift report rides on the diff payload (ADR-0043, #439). These pin the
+ * controller's half of that: it carries what the backend said, and it decides
+ * whether there is anything to show — never whether a restore may proceed.
+ */
+describe("drift", () => {
+  it("carries the report from the same call as the runs", async () => {
+    const strip = await parked(async () => driftedDiff());
+    await strip.park("snap_1");
+    expect(diffSnapshot.mock.calls.length).toBe(1);
+    expect(strip.drift.entities[0].title).toBe("Tom");
+    // Ordered, so swapping value-then with value-now turns this red.
+    expect(strip.drift.entities[0].fields[0].was).toBe("green");
+    expect(strip.drift.entities[0].fields[0].now).toBe("blue");
+    expect(strip.hasDriftToReport).toBe(true);
+  });
+
+  it("says nothing when nothing changed underneath", async () => {
+    const strip = await parked(async () => diff());
+    await strip.park("snap_1");
+    expect(strip.hasDriftToReport).toBe(false);
+  });
+
+  it("says nothing at Live — drift is a claim about a snapshot", async () => {
+    const strip = await parked(async () => driftedDiff());
+    await strip.park("snap_1");
+    await strip.park(null);
+    expect(strip.hasDriftToReport).toBe(false);
+    expect(strip.drift.entities).toEqual([]);
+  });
+
+  it("surfaces an uncomparable witness rather than reading it as unchanged", async () => {
+    const strip = await parked(async () => ({
+      ...diff(),
+      drift: { available: true, comparable: false, truncated: false, entities: [] },
+    }));
+    await strip.park("snap_1");
+    expect(strip.hasDriftToReport).toBe(true);
+  });
+
+  it("stays silent for a snapshot taken before witnesses existed", async () => {
+    const strip = await parked(async () => ({
+      ...diff(),
+      drift: { available: false, comparable: true, truncated: false, entities: [] },
+    }));
+    await strip.park("snap_1");
+    expect(strip.hasDriftToReport).toBe(false);
   });
 });
 

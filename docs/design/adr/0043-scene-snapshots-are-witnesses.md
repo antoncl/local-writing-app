@@ -101,6 +101,32 @@ evidence arrives, the setting to add is the *goal* (how much history to keep), n
 that shows up in real use the answer is probably a second trigger — accumulated change since the last
 snapshot — rather than a smaller *N*, because it adapts instead of asking the author to tune it.
 
+## Amendment 3 — `revision` does not reach scope visibility, so the witness records the layer (2026-07-23)
+
+Found while building slice 3 ([#439](https://github.com/antoncl/local-writing-app/issues/439)), and
+recorded because this ADR currently rests the inheritance axis on an argument that does not carry the
+whole load. The claim below is still true as far as it goes:
+
+> This makes the feature independent of #314 rather than blocked on it. ADR-0039 requires `revision`
+> to become a hash over the ancestor file plus every override in the chain […] so snapshots get the
+> more correct detector automatically when #314 lands, with no change here.
+
+**A lore entry changes in three ways, and the token sees one.** Anton's framing:
+
+- **direct edit** — caught: `_revision` is a SHA-256 over the entity file's bytes;
+- **delta** — caught, but by axis 1 (mutations are not edits to the file);
+- **scope visibility** — **caught by neither**, and not by a composite `revision` either. Which layer
+  wins, and whether the entry resolves in this scope at all, is a property of the *resolved index*
+  (ADR-0039/0040), not of any file. No hash over file **bytes** can see a change that is entirely
+  about which bytes were chosen.
+
+**The amendment:** the witness records the **resolved source layer** per entity alongside the
+revision token, and the drift report treats a moved layer as its own axis. It fires with no file
+edit, and it is the only axis that can — which is exactly why it cannot be folded into axis 2.
+
+This does not weaken the independence argument, which was about *not blocking on #314*. It narrows
+what #314 will fix for free: the token gets better, and this axis still needs its own record.
+
 ## Context
 
 Issue #6 records that "revisions" is ambiguous and lists four candidate meanings: per-save snapshots,

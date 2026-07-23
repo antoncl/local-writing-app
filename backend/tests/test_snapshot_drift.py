@@ -1,0 +1,420 @@
+"""Drift reporting between two witnesses (ADR-0043, #439 slice 3).
+
+**The acceptance bar is a drift-blind oracle failing.** Slice 2 shipped with
+three provenance-blind oracles: inverting every warm/cool class — which reverses
+the feature's central claim — passed 22 of 22 tests, because every assertion
+measured the report's *shape* rather than its *claim*. So the assertions here
+name the entity, the field, the value-then and the value-now. Concretely, all of
+these must turn this suite red:
+
+- returning an empty report;
+- returning every witnessed entity rather than the changed ones;
+- swapping `was` with `now`;
+- collapsing `unknown` into `no`;
+- dropping either direction of membership.
+
+The comparison is pure, so most of it is exercised on hand-built witnesses. The
+route-level tests at the bottom prove the wiring: that a real capture records a
+real witness and the diff endpoint carries the real report.
+"""
+
+from __future__ import annotations
+
+import unittest
+
+from test_snapshot_witness import WitnessTestCase
+
+from app.models import (
+    REVISION_KIND,
+    WITNESS_VERSION,
+    Witness,
+    WitnessEntity,
+    WitnessFieldType,
+)
+from app.services.project.snapshot_drift import compare_witnesses
+from app.services.project.snapshot_witness import (
+    SOURCE_DYNAMIC,
+    SOURCE_ENTITY_REF,
+    SOURCE_MUTATION,
+)
+
+ALL_SOURCES = [SOURCE_MUTATION, SOURCE_ENTITY_REF, SOURCE_DYNAMIC]
+
+
+def entity(
+    entity_id: str = "lore_tom",
+    *,
+    title: str = "Tom",
+    sources: list[str] | None = None,
+    revision: str | None = "rev-1",
+    revision_kind: str = REVISION_KIND,
+    layer: str = "layer-a",
+    layer_label: str = "Base Folder",
+    state: dict | None = None,
+    overrides: list[str] | None = None,
+    field_types: dict | None = None,
+) -> WitnessEntity:
+    """One witnessed entity, with everything but the point under test held
+    fixed — so a failure names the axis rather than the fixture."""
+    state = {"eye_colour": "green"} if state is None else state
+    return WitnessEntity(
+        id=entity_id,
+        title=title,
+        sources=sources if sources is not None else [SOURCE_ENTITY_REF],
+        revision=revision,
+        revision_kind=revision_kind,
+        source_layer_id=layer,
+        source_layer_label=layer_label,
+        state=state,
+        overrides=overrides or [],
+        field_types=field_types
+        if field_types is not None
+        else {
+            key: WitnessFieldType(label="Eye colour" if key == "eye_colour" else key, type="text")
+            for key in state
+        },
+    )
+
+
+def witness(*entities: WitnessEntity, version: int = WITNESS_VERSION, truncated: bool = False,
+            sources: list[str] | None = None) -> Witness:
+    return Witness(
+        version=version,
+        truncated=truncated,
+        sources_recorded=sources if sources is not None else list(ALL_SOURCES),
+        entities=list(entities),
+    )
+
+
+class ReportNamesTheChangeTests(unittest.TestCase):
+    """ADR-0043: *if the report is the only protection, the report is the
+    feature.* It must name the entity, the field, the value then and the value
+    now — never "context has changed since this snapshot was taken"."""
+
+    def test_a_changed_field_names_entity_field_and_both_values(self) -> None:
+        report = compare_witnesses(
+            witness(entity(state={"eye_colour": "green"})),
+            witness(entity(state={"eye_colour": "blue"}, revision="rev-2")),
+        )
+        self.assertEqual(len(report.entities), 1)
+        drifted = report.entities[0]
+        self.assertEqual(drifted.title, "Tom")
+        self.assertEqual(len(drifted.fields), 1)
+        field = drifted.fields[0]
+        # Ordered assertions, so swapping was/now turns this red. A shape-only
+        # check ("one field drifted") would not.
+        self.assertEqual(field.field_id, "eye_colour")
+        self.assertEqual(field.label, "Eye colour")
+        self.assertEqual(field.was, "green")
+        self.assertEqual(field.now, "blue")
+
+    def test_an_unchanged_world_reports_nothing(self) -> None:
+        """The control that stops "report everything" from passing the suite."""
+        report = compare_witnesses(witness(entity()), witness(entity()))
+        self.assertTrue(report.available)
+        self.assertTrue(report.comparable)
+        self.assertEqual(report.entities, [])
+
+    def test_a_change_from_a_marker_is_attributed_to_the_marker(self) -> None:
+        """The author needs to know whether to look for a marker or for an edit
+        — the two are fixed in different places."""
+        report = compare_witnesses(
+            witness(entity(state={"eye_colour": "green"})),
+            witness(entity(state={"eye_colour": "blue"}, overrides=["eye_colour"])),
+        )
+        self.assertTrue(report.entities[0].fields[0].from_mutation)
+
+    def test_a_direct_edit_is_not_attributed_to_a_marker(self) -> None:
+        report = compare_witnesses(
+            witness(entity(state={"eye_colour": "green"})),
+            witness(entity(state={"eye_colour": "blue"})),
+        )
+        self.assertFalse(report.entities[0].fields[0].from_mutation)
+
+    def test_blank_and_absent_do_not_flip(self) -> None:
+        """Same rule as the compare rail (`same_rendered_value`): a missing key
+        and an empty one read identically, so a flip between them shows the
+        author two values they cannot tell apart."""
+        report = compare_witnesses(
+            witness(entity(state={"eye_colour": ""})),
+            witness(entity(state={})),
+        )
+        self.assertEqual(report.entities, [])
+
+
+class InheritanceAxisTests(unittest.TestCase):
+    """Axis 2 — `revision` as an opaque token, and honest degradation."""
+
+    def test_a_changed_revision_reports_the_entry_changed(self) -> None:
+        report = compare_witnesses(
+            witness(entity(revision="rev-1", state={})),
+            witness(entity(revision="rev-2", state={})),
+        )
+        self.assertEqual(report.entities[0].entry_changed, "yes")
+
+    def test_an_unreadable_token_reports_unknown_not_unchanged(self) -> None:
+        """ADR-0043's degrade-coarsely rule. "Unchanged" is a claim, and this is
+        not in a position to make it."""
+        report = compare_witnesses(
+            witness(entity(revision=None, state={})),
+            witness(entity(revision="rev-2", state={})),
+        )
+        self.assertEqual(report.entities[0].entry_changed, "unknown")
+
+    def test_a_redefined_token_reports_unknown(self) -> None:
+        """Tokens captured before `revision` is redefined (#314 makes it a
+        composite hash) do not compare meaningfully against tokens computed
+        after."""
+        report = compare_witnesses(
+            witness(entity(revision="rev-1", revision_kind="sha256_file", state={})),
+            witness(entity(revision="rev-1", revision_kind="composite_v2", state={})),
+        )
+        self.assertEqual(report.entities[0].entry_changed, "unknown")
+
+    def test_an_identical_token_reports_no(self) -> None:
+        """The control: without it, `unknown` hard-coded passes the two tests
+        above."""
+        report = compare_witnesses(witness(entity(state={})), witness(entity(state={})))
+        self.assertEqual(report.entities, [])
+
+
+class ReinterpretationAxisTests(unittest.TestCase):
+    """Axis 3 — the meaning of a recorded value moved under it, scoped to the
+    recorded fields alone."""
+
+    def test_a_type_change_on_a_recorded_field_is_reported(self) -> None:
+        report = compare_witnesses(
+            witness(entity(field_types={"eye_colour": WitnessFieldType(label="Eye colour", type="text")})),
+            witness(entity(field_types={"eye_colour": WitnessFieldType(label="Eye colour", type="select")})),
+        )
+        reinterpreted = report.entities[0].reinterpreted
+        self.assertEqual(len(reinterpreted), 1)
+        self.assertEqual(reinterpreted[0].field_id, "eye_colour")
+        self.assertEqual(reinterpreted[0].type_was, "text")
+        self.assertEqual(reinterpreted[0].type_now, "select")
+
+    def test_a_constraint_change_on_a_recorded_field_is_reported(self) -> None:
+        was_type = WitnessFieldType(label="Eye colour", type="select", options=["green", "blue"])
+        now_type = WitnessFieldType(label="Eye colour", type="select", options=["green"])
+        report = compare_witnesses(
+            witness(entity(field_types={"eye_colour": was_type})),
+            witness(entity(field_types={"eye_colour": now_type})),
+        )
+        self.assertEqual(report.entities[0].reinterpreted[0].options_now, ["green"])
+
+    def test_a_field_the_witness_never_recorded_is_not_reported(self) -> None:
+        """Not a whole-schema hash. That fires on every schema edit, including
+        the additions the sparse storage model already absorbs, so most reports
+        would announce a change with no consequence — and a detector that cries
+        wolf trains the dismissal that makes the report worthless."""
+        report = compare_witnesses(
+            witness(entity(state={"eye_colour": "green"})),
+            witness(entity(state={"eye_colour": "green"})),
+        )
+        self.assertEqual(report.entities, [])
+
+
+class MembershipAxisTests(unittest.TestCase):
+    """Axis 4 — both directions. #439's acceptance said an entity absent at
+    capture or deleted since is not reported; that line was overruled (design doc
+    §2). A character primary in one version and gone in the other is exactly what
+    the report exists to say."""
+
+    def test_an_entity_gone_from_the_current_version_is_reported_removed(self) -> None:
+        report = compare_witnesses(
+            witness(entity("lore_chicago", title="Chicago")),
+            witness(),
+        )
+        self.assertEqual(len(report.entities), 1)
+        self.assertEqual(report.entities[0].title, "Chicago")
+        self.assertEqual(report.entities[0].membership, "removed")
+
+    def test_an_entity_new_to_the_current_version_is_reported_added(self) -> None:
+        report = compare_witnesses(
+            witness(),
+            witness(entity("lore_chicago", title="Chicago")),
+        )
+        self.assertEqual(report.entities[0].membership, "added")
+
+    def test_an_entity_in_neither_version_is_never_manufactured(self) -> None:
+        report = compare_witnesses(
+            witness(entity("lore_tom")),
+            witness(entity("lore_tom")),
+        )
+        self.assertEqual([e.entity_id for e in report.entities], [])
+
+    def test_membership_is_only_claimed_over_sources_both_sides_observed(self) -> None:
+        """A capture with no prose editor behind it records two sources. Naively
+        differencing that against a three-source witness would report every
+        implicitly-detected entity as removed — a wolf cried on a scene nobody
+        touched."""
+        detected = entity("lore_chicago", title="Chicago", sources=[SOURCE_DYNAMIC])
+        report = compare_witnesses(
+            witness(detected),
+            witness(sources=[SOURCE_MUTATION, SOURCE_ENTITY_REF]),
+        )
+        self.assertEqual(report.entities, [])
+
+    def test_an_explicitly_referenced_entity_is_still_reported_across_that_seam(self) -> None:
+        """The control for the rule above: narrowing must not swallow the
+        sources both sides *did* observe."""
+        referenced = entity("lore_chicago", title="Chicago", sources=[SOURCE_ENTITY_REF])
+        report = compare_witnesses(
+            witness(referenced),
+            witness(sources=[SOURCE_MUTATION, SOURCE_ENTITY_REF]),
+        )
+        self.assertEqual(report.entities[0].membership, "removed")
+
+
+class VisibilityAxisTests(unittest.TestCase):
+    """Axis 5 — the design doc's §3 gap. Which layer wins is a property of the
+    resolved index, not of any file, so no hash over bytes can see it."""
+
+    def test_a_moved_source_layer_is_reported_with_no_file_edit(self) -> None:
+        report = compare_witnesses(
+            witness(entity(layer="layer-a", layer_label="Series")),
+            witness(entity(layer="layer-b", layer_label="Book")),
+        )
+        drifted = report.entities[0]
+        self.assertEqual(drifted.layer_was, "Series")
+        self.assertEqual(drifted.layer_now, "Book")
+        self.assertEqual(
+            drifted.entry_changed,
+            "no",
+            "the file is byte-identical — this axis exists because `revision` cannot see it",
+        )
+
+
+class DegradationTests(unittest.TestCase):
+    """Three states, kept distinguishable: the surface cannot honour a
+    distinction the payload has collapsed."""
+
+    def test_a_snapshot_with_no_witness_is_not_a_snapshot_with_no_drift(self) -> None:
+        report = compare_witnesses(None, witness(entity()))
+        self.assertFalse(report.available)
+        self.assertEqual(report.entities, [])
+
+    def test_a_witness_of_an_unreadable_version_is_not_comparable(self) -> None:
+        report = compare_witnesses(
+            witness(entity(), version=WITNESS_VERSION + 1),
+            witness(entity()),
+        )
+        self.assertTrue(report.available)
+        self.assertFalse(report.comparable)
+
+    def test_a_truncated_witness_says_so_in_the_report(self) -> None:
+        report = compare_witnesses(witness(entity(), truncated=True), witness(entity()))
+        self.assertTrue(report.truncated)
+
+
+class DriftOverTheDiffRouteTests(WitnessTestCase):
+    """The wiring: a real capture records a real witness, and the diff endpoint
+    carries the real report — on one synchronous request, which is what makes
+    "restore reports drift" free (a restore is only reachable from a parked
+    notch, and parking is what fetches this)."""
+
+    def _capture(self) -> str:
+        response = self.client.post(
+            f"/api/scenes/{self.scene_id}/snapshots", json={"dynamic_context": []}
+        )
+        self.assertEqual(response.status_code, 200, response.text)
+        return response.json()["id"]
+
+    def _diff(self, snapshot_id: str, body: str = "") -> dict:
+        response = self.client.post(
+            f"/api/scenes/{self.scene_id}/snapshots/{snapshot_id}/diff",
+            json={"body": body, "title": "The Tide", "dynamic_context": []},
+        )
+        self.assertEqual(response.status_code, 200, response.text)
+        return response.json()
+
+    def test_the_diff_reports_a_lore_edit_made_after_the_capture(self) -> None:
+        self._save_scene(cast=[self.tom])
+        snapshot_id = self._capture()
+        self._set_lore_field(self.tom, "eye_colour", "blue")
+
+        drift = self._diff(snapshot_id)["drift"]
+        self.assertTrue(drift["available"])
+        self.assertEqual(len(drift["entities"]), 1)
+        drifted = drift["entities"][0]
+        self.assertEqual(drifted["title"], "Tom")
+        self.assertEqual(drifted["entry_changed"], "yes")
+        self.assertEqual(
+            [(f["label"], f["was"], f["now"]) for f in drifted["fields"]],
+            [("Eye colour", "green", "blue")],
+        )
+
+    def test_a_scene_nobody_touched_reports_no_drift(self) -> None:
+        """The park-on-a-notch control. Slice 2's largest defect class was a
+        comparison whose two sides came off different pipelines and flipped
+        fields on an untouched scene; the witness is built by one function,
+        called on both sides."""
+        self._save_scene(cast=[self.tom])
+        snapshot_id = self._capture()
+        drift = self._diff(snapshot_id)["drift"]
+        self.assertTrue(drift["available"])
+        self.assertEqual(drift["entities"], [])
+
+    def test_a_snapshot_taken_before_the_witness_existed_says_so(self) -> None:
+        """`available=False` — a third state, distinct from both "unchanged" and
+        "unknown"."""
+        self._save_scene(cast=[self.tom])
+        snapshot_id = self._capture()
+        sidecar = self.root / "snapshots" / self.scene_id / f"{snapshot_id}.yaml"
+        record = self.service._read_yaml(sidecar)
+        record.pop("witness")
+        self.service._write_yaml(sidecar, record)
+
+        drift = self._diff(snapshot_id)["drift"]
+        self.assertFalse(drift["available"])
+
+    def test_the_witness_is_never_written_back_by_a_restore(self) -> None:
+        """A witness is evidence about the graph, not a participant in it: never
+        restored, never authoritative, never consulted by the resolver."""
+        self._save_scene(cast=[self.tom])
+        snapshot_id = self._capture()
+        self._set_lore_field(self.tom, "eye_colour", "blue")
+
+        response = self.client.post(
+            f"/api/scenes/{self.scene_id}/snapshots/{snapshot_id}/restore"
+        )
+        self.assertEqual(response.status_code, 200, response.text)
+        self.assertEqual(
+            self.service.read_lore_entry(self.tom).metadata["eye_colour"],
+            "blue",
+            "restoring the prose must not put the witnessed world back",
+        )
+
+    def test_a_restore_is_never_refused_because_of_drift(self) -> None:
+        """Advisory: no gate, no acknowledgement, no restore this declines to
+        perform."""
+        self._save_scene("Before.", cast=[self.tom])
+        snapshot_id = self._capture()
+        self._set_lore_field(self.tom, "eye_colour", "blue")
+        self._save_scene("After.", cast=[self.tom])
+
+        response = self.client.post(
+            f"/api/scenes/{self.scene_id}/snapshots/{snapshot_id}/restore"
+        )
+        self.assertEqual(response.status_code, 200, response.text)
+        self.assertIn("Before.", response.json()["body"])
+
+
+class DriftIsNotDescribedGenericallyTests(unittest.TestCase):
+    """ADR-0043 forbids the wording outright, so it is asserted rather than
+    trusted: nothing the backend puts on the wire may be a stand-in for the
+    specific claim."""
+
+    def test_the_report_carries_values_rather_than_a_sentence(self) -> None:
+        report = compare_witnesses(
+            witness(entity(state={"eye_colour": "green"})),
+            witness(entity(state={"eye_colour": "blue"})),
+        )
+        payload = report.model_dump_json()
+        self.assertNotIn("context has changed", payload.lower())
+        self.assertIn("green", payload)
+        self.assertIn("blue", payload)
+
+
+if __name__ == "__main__":  # pragma: no cover
+    unittest.main()

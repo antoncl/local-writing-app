@@ -118,6 +118,15 @@ class SaveSceneRequest(BaseModel):
     status: str = "draft"
     entry_type: str = "scene:scene"
     metadata: dict[str, MetadataValue] = Field(default_factory=dict)
+    # The lore entries the prose editor detected in this body — the *dynamic
+    # context*, one of the three sources a snapshot witness records (ADR-0043,
+    # `docs/design/snapshots-and-the-witness.md` §4). The frontend owns the
+    # alias matcher, so the ids the author sees underlined are the ids that
+    # reach the backend; nothing here rescans the prose.
+    #
+    # Read only by the automatic capture inside this save. It is derived data
+    # about an authored file and never enters the scene's front matter.
+    dynamic_context: list[str] = Field(default_factory=list)
 
 
 class LoreEntrySummary(BaseModel):

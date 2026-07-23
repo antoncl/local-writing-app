@@ -32,7 +32,12 @@
   import TableRow from "@tiptap/extension-table-row";
   import { editorHtmlToSceneMarkdown, sceneMarkdownToHtml } from "@/lib/utils/markdown";
   import { sanitizePastedHtml } from "@/lib/utils/sanitizePastedHtml";
-  import { ImplicitContextHighlight, REBUILD_META } from "@/lib/editor-core/implicitContextHighlight";
+  import {
+    ImplicitContextHighlight,
+    REBUILD_META,
+    implicitContextIds,
+  } from "@/lib/editor-core/implicitContextHighlight";
+  import { setImplicitContext } from "@/lib/stores/implicitContext.svelte";
   import { createSceneEffectiveMatcher } from "@/lib/editor-core/sceneEffectiveMatcher.svelte";
   import {
     AISuggestion,
@@ -273,6 +278,18 @@
     if (!view) return;
     const tr = view.state.tr.setMeta(REBUILD_META, true).setMeta("addToHistory", false);
     view.dispatch(tr);
+    publishImplicitContext();
+  }
+
+  /** Publish the highlighted entry ids so the save path can send them (#439).
+   *
+   *  The same hits that paint the underlines — read out of the plugin's state
+   *  rather than rescanned, so what the snapshot witness records is exactly
+   *  what the author was shown. Scenes only: v1 snapshots scenes (ADR-0043),
+   *  and publishing for other kinds would claim a context nothing consumes. */
+  function publishImplicitContext(): void {
+    if (documentKind !== "scene" || !scene?.id || !editor?.view) return;
+    setImplicitContext(scene.id, implicitContextIds(editor.view.state));
   }
 
 
@@ -296,6 +313,7 @@
     syncEditorEmpty();
     updateSelectionMenu();
     updateTableMenu();
+    publishImplicitContext();
   }
 
   export function clearEditor(): void {
@@ -1194,6 +1212,7 @@
       updateSlashMenuFromContent();
       syncTodoAnchorDomState(true);
       updateLiveWordCount();
+      publishImplicitContext();
       onBodyChange?.();
     }
     if (aiSuggestion.suggestionId) aiSuggestion.updateToolbarPosition();

@@ -255,6 +255,103 @@ class TheEnumerationReachesTheWireTests(DeclaredChainTestCase):
         )
 
 
+class TheResolvedChainReachesTheWireTests(DeclaredChainTestCase):
+    """`ProjectInfo.chain` — the selection and the labels, decided once (#432).
+
+    These cases used to live in the frontend's `projectChain.test.ts`, against
+    a transcription of `_project_layer_folders` + `_layer_label_for_folder`
+    that the walker already implemented. Testing the transcript is what let the
+    two disagree in the first place: the walker labels a titleless outermost
+    layer that is the machine root "Base Folder", and the copy called the same
+    folder by its directory name. They belong here, against the code that
+    actually decides them.
+    """
+
+    def _chain(self) -> list[tuple[str, str, bool]]:
+        bind_test_project(self.service)
+        with TestClient(app) as client:
+            payload = client.get("/api/project").json()
+        return [(row["label"], Path(row["path"]).name, row["is_root"]) for row in payload["chain"]]
+
+    def test_the_chain_is_the_declared_subset_outermost_first(self) -> None:
+        make_project_folder(self.service, self.universe, "The Honorverse")
+        make_project_folder(self.service, self.series, "Honor Harrington")
+        declare(self.service, self.root, [self.universe, self.series])
+
+        self.assertEqual(
+            self._chain(),
+            [
+                ("The Honorverse", "honorverse", False),
+                ("Honor Harrington", "honor-harrington", False),
+                ("Book 1", "book01", True),
+            ],
+        )
+
+    def test_an_ancestor_project_that_was_never_declared_is_not_in_the_chain(self) -> None:
+        """#318's wizard offers it from `ancestors`; the chain must not imply
+        it is part of what is being built here."""
+        make_project_folder(self.service, self.universe, "The Honorverse")
+
+        self.assertEqual(self._chain(), [("Book 1", "book01", True)])
+
+    def test_a_declared_folder_that_is_not_a_project_is_not_in_the_chain(self) -> None:
+        """The `is_project` half of the rule. A declared folder whose manifest
+        was deleted keeps its declaration — `declared_ancestor_warnings` says
+        so out loud rather than dropping it silently — but it contributes
+        nothing, so it is not a layer and has no label to render."""
+        make_project_folder(self.service, self.universe, "The Honorverse")
+        declare(self.service, self.root, [self.universe])
+        (self.universe / "project.yaml").unlink()
+
+        self.assertEqual(self._chain(), [("Book 1", "book01", True)])
+
+    def test_a_declared_project_with_no_title_falls_back_to_its_folder_name(self) -> None:
+        self.universe.mkdir(parents=True, exist_ok=True)
+        self.service._write_yaml(self.universe / "project.yaml", {"version": 1})
+        declare(self.service, self.root, [self.universe])
+
+        self.assertEqual(
+            self._chain(),
+            [("honorverse", "honorverse", False), ("Book 1", "book01", True)],
+        )
+
+    def test_a_gap_is_carried_as_declared(self) -> None:
+        """Declaring a grandparent without its parent is legal upstream, so the
+        chain reports two layers with a folder between them. Whether the BAR
+        should say so is #431; this pins that the data does not quietly fill
+        the gap in."""
+        make_project_folder(self.service, self.universe, "The Honorverse")
+        make_project_folder(self.service, self.series, "Honor Harrington")
+        declare(self.service, self.root, [self.universe])
+
+        self.assertEqual(
+            self._chain(),
+            [("The Honorverse", "honorverse", False), ("Book 1", "book01", True)],
+        )
+
+    def test_a_flat_project_is_a_chain_of_one(self) -> None:
+        self.assertEqual(self._chain(), [("Book 1", "book01", True)])
+
+    def test_the_chain_agrees_with_the_schema_layers_view(self) -> None:
+        """The disagreement #432 exists to remove, pinned as an equality.
+
+        Both views are `collect_layers` now, so this fails the moment either
+        one starts deriving its own answer again.
+        """
+        make_project_folder(self.service, self.universe, "The Honorverse")
+        declare(self.service, self.root, [self.universe])
+        bind_test_project(self.service)
+
+        with TestClient(app) as client:
+            chain = client.get("/api/project").json()["chain"]
+            layers = client.get("/api/metadata/schema/layers").json()["layers"]
+
+        self.assertEqual(
+            [(row["id"], row["label"]) for row in chain],
+            [(row["id"], row["label"]) for row in layers],
+        )
+
+
 class WritingTheDeclarationTests(DeclaredChainTestCase):
     def test_settings_update_stores_a_relative_path(self) -> None:
         """Relative so that renaming a shelf does not invalidate every book."""

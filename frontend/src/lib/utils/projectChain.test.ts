@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import type { AncestorCandidate } from "@/lib/types";
+import type { AncestorCandidate, ProjectChainLayer } from "@/lib/types";
 import { declarationRows, declaredChain, toggledDeclaration } from "@/lib/utils/projectChain";
 
 function ancestor(name: string, overrides: Partial<AncestorCandidate> = {}): AncestorCandidate {
@@ -14,12 +14,29 @@ function ancestor(name: string, overrides: Partial<AncestorCandidate> = {}): Anc
   };
 }
 
+function layer(name: string, overrides: Partial<ProjectChainLayer> = {}): ProjectChainLayer {
+  return {
+    id: `layer-${name}`,
+    label: name,
+    path: `/writing/${name}`,
+    is_root: false,
+    ...overrides,
+  };
+}
+
+// #432 moved the selection and the labelling into the backend walker, so what
+// is left to test here is the one presentation rule. The cases this suite used
+// to own — "a project that was never declared is not a crumb", "a declared
+// folder that stopped being a project is not a crumb", "fall back to the folder
+// name" — are now pinned in `backend/tests/test_declared_chain.py` against the
+// implementation that actually decides them, rather than against a transcript
+// of it.
 describe("declaredChain", () => {
-  it("keeps only the declared layers, in the order the backend reports", () => {
+  it("renders the chain the backend resolved, in order, labels untouched", () => {
     const crumbs = declaredChain([
-      ancestor("writing"),
-      ancestor("honorverse", { is_project: true, inherited: true, title: "The Honorverse" }),
-      ancestor("honor-harrington", { is_project: true, inherited: true, title: "Honor Harrington" }),
+      layer("honorverse", { label: "The Honorverse" }),
+      layer("honor-harrington", { label: "Honor Harrington" }),
+      layer("on-basilisk-station", { label: "On Basilisk Station", is_root: true }),
     ]);
 
     expect(crumbs).toEqual([
@@ -28,44 +45,22 @@ describe("declaredChain", () => {
     ]);
   });
 
-  it("drops an ancestor that is a project but was never declared", () => {
-    // #318's wizard offers these; the breadcrumb must not imply they are part
-    // of what is being built here.
-    const crumbs = declaredChain([ancestor("honorverse", { is_project: true })]);
-
-    expect(crumbs).toEqual([]);
+  it("drops the open project — the switcher renders it, not the path", () => {
+    // Otherwise the bar shows the project twice, once as a crumb and once as
+    // the switcher button beside it.
+    expect(declaredChain([layer("obs", { is_root: true })])).toEqual([]);
   });
 
-  it("drops a declared entry that is no longer a project", () => {
-    // The backend keeps the declaration and warns rather than dropping it, so
-    // the row arrives with `inherited` set and nothing to show or open.
-    const crumbs = declaredChain([ancestor("honorverse", { inherited: true })]);
+  it("passes a label through verbatim rather than second-guessing it", () => {
+    // The walker's `_layer_label_for_folder` owns the fallbacks now, including
+    // the "Base Folder" case this file used to contradict by labelling the
+    // same folder by its directory name.
+    const crumbs = declaredChain([layer("root", { label: "Base Folder" })]);
 
-    expect(crumbs).toEqual([]);
+    expect(crumbs).toEqual([{ path: "/writing/root", label: "Base Folder" }]);
   });
 
-  it("falls back to the folder name when a declared project has no title", () => {
-    // The only null-title shape the backend can actually emit for a rendered
-    // crumb: a project whose manifest has no `title`, or whose manifest could
-    // not be read. `_project_title` strips and returns None, so null — not a
-    // blank string — is what arrives, and nothing else in this suite exercises
-    // the optional chain on a row that survives the filter.
-    const crumbs = declaredChain([
-      ancestor("honorverse", { is_project: true, inherited: true, title: null }),
-    ]);
-
-    expect(crumbs).toEqual([{ path: "/writing/honorverse", label: "honorverse" }]);
-  });
-
-  it("falls back when the title is present but blank", () => {
-    const crumbs = declaredChain([
-      ancestor("honorverse", { is_project: true, inherited: true, title: "   " }),
-    ]);
-
-    expect(crumbs).toEqual([{ path: "/writing/honorverse", label: "honorverse" }]);
-  });
-
-  it("treats a missing enumeration as a flat project", () => {
+  it("treats a missing chain as a flat project", () => {
     expect(declaredChain(undefined)).toEqual([]);
   });
 });

@@ -1,5 +1,5 @@
 <script lang="ts">
-  import type { AncestorCandidate, ProjectChild, RecentProject } from "@/lib/types";
+  import type { ProjectChainLayer, ProjectChild, RecentProject } from "@/lib/types";
   import type { ThemePreference } from "@/lib/utils/theme";
 
   import ProjectBreadcrumb from "./ProjectBreadcrumb.svelte";
@@ -16,7 +16,8 @@
   // directions are the same gesture — open a different project — and because
   // the Project pane that also lists the children is not guaranteed to be on
   // screen (#417). Ascent is chrome, so descent has to be too.
-  export let ancestors: AncestorCandidate[] = [];
+  // The resolved chain (#432), passed straight through to the breadcrumb.
+  export let chain: ProjectChainLayer[] = [];
   export let childProjects: ProjectChild[] = [];
   export let onOpenProjectPath: (path: string) => void = () => {};
   // Event hooks. The parent owns all side effects; this component is
@@ -191,7 +192,7 @@
 <header class="top-bar">
   <span class="wordmark">Local Writer</span>
 
-  <ProjectBreadcrumb {ancestors} onOpen={handleOpenProjectPath} />
+  <ProjectBreadcrumb {chain} onOpen={handleOpenProjectPath} />
 
   <div class="switcher-wrap">
     <button

@@ -30,6 +30,7 @@ from app.models import (
     DirectoryEntry,
     DirectoryListing,
     MetadataSchema,
+    ProjectChainLayer,
     ProjectChild,
     ProjectInfo,
     ProjectNode,
@@ -203,8 +204,37 @@ class ProjectLifecycleMixin:
             projects_base_folder=str(base_folder) if base_folder else None,
             ai_policy=ai.get("policy", "off"),
             ancestors=self._ancestor_candidates_for_api(root),
+            chain=self._project_chain_for_api(root),
             children=self._project_children(root),
         )
+
+    def _project_chain_for_api(self, root: Path) -> list[ProjectChainLayer]:
+        """The resolved chain, straight off the walker (#432).
+
+        Deliberately `collect_layers` rather than a filter over the
+        enumeration this method sits next to. The chain's membership rule
+        (`declared and is_project, plus root`) and its naming rule (manifest
+        title, else the "Base Folder" case, else the folder name) both live in
+        `layers.py`, and re-applying either here would recreate exactly the
+        duplication this exists to delete —
+        `decisions_walker_visitor_uniformity`: every hierarchy walk goes
+        through the walker, even a one-line one; optimise inside it, never
+        bypass it.
+
+        The machine layer is excluded (`include_machine` defaults False): it
+        contributes assistants, carries no `metadata.schema.yaml`, and is not
+        a project anyone can navigate to. `read_metadata_schema_layers` makes
+        the same choice, which is why the two views agree by construction.
+        """
+        return [
+            ProjectChainLayer(
+                id=layer.id,
+                label=layer.label,
+                path=str(layer.folder),
+                is_root=layer.is_root,
+            )
+            for layer in self.collect_layers(root)
+        ]
 
     def ai_policy(self) -> AIPolicy:
         """Just the permission, without building the whole `ProjectInfo` (#433).

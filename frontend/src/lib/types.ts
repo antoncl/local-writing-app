@@ -858,13 +858,33 @@ export type ProjectChild = {
   title: string;
 };
 
+/**
+ * One layer of the RESOLVED chain, outermost first, the open project last
+ * (#432).
+ *
+ * The twin of `AncestorCandidate`: that one is the whole enumeration, flagged
+ * so the declaration editor can offer the undeclared rows; this one is only
+ * the layers that contribute, already selected and already named by the
+ * backend walker. Nothing here is re-derived client-side — that duplication,
+ * and its disagreement with the walker over labels, is what #432 removed.
+ */
+export type ProjectChainLayer = {
+  id: string;
+  label: string;
+  path: string;
+  /** The open project itself, always last. */
+  is_root: boolean;
+};
+
 export type ProjectInfo = {
   title: string;
   root_path: string;
   projects_base_folder?: string | null;
   ai_policy: AIPolicy;
-  /** Outermost first, matching layer rank. */
+  /** The whole enumeration, outermost first, matching layer rank. */
   ancestors?: AncestorCandidate[];
+  /** The declared subset of the same walk, resolved and labelled server-side. */
+  chain?: ProjectChainLayer[];
   children?: ProjectChild[];
 };
 

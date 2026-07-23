@@ -207,9 +207,18 @@ class ProjectLifecycleMixin:
         `yaml.YAMLError`.
 
         None here means "no title to show", which the breadcrumb already renders
-        by falling back to the folder name. The condition is not silenced: the
-        folder still reports `is_project`, and `validate_project` is where a
-        broken manifest is meant to be told about.
+        by falling back to the folder name. The folder still reports
+        `is_project`, so nothing about the enumeration is falsified.
+
+        ⚠ It is **not** reported elsewhere either, which is a wider hole than
+        this method can close: `_layer_label_for_folder` reads a declared
+        ancestor's manifest unguarded during the layer walk, so a malformed one
+        also breaks `_build_node_index` and `validate_project` — the very report
+        that should have named it. Verified, not assumed: with a declared
+        ancestor's manifest malformed, `POST /project/validate` returns 422
+        rather than listing the problem. That predates #311 (it arrived with
+        #309's label rule) and wants its own fix; do not read this guard as
+        having handled it.
         """
         try:
             return self._project_title(folder)

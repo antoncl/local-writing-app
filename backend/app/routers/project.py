@@ -45,7 +45,9 @@ def create_project(request: CreateProjectRequest) -> ProjectInfo:
     from app.services import machine_settings as ms_service
 
     with translate_errors():
-        created = ProjectService.created_at(Path(request.root_path), request.title)
+        created = ProjectService.created_at(
+            Path(request.root_path), request.title, request.inherits
+        )
         info = created.current_project()
         current_scope.set(created.scope)
         ms_service.touch_recent_project(Path(info.root_path), info.title)

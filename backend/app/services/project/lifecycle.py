@@ -49,7 +49,7 @@ from app.services.tree_structure import TreeStructureService
 
 
 class ProjectLifecycleMixin:
-    def _scaffold_new_project(self, title: str) -> None:
+    def _scaffold_new_project(self, title: str, inherits: list[str] | None = None) -> None:
         """Write a new project's files under this service's already-bound root.
 
         Creation used to resolve the root and then point the service at it, which
@@ -60,8 +60,14 @@ class ProjectLifecycleMixin:
         No longer takes a base folder (#429): the bound is the machine root, so
         creating a project cannot set it. Passing one per create is what made
         every project record its own parent and every chain one hop long.
+
+        The declaration is resolved **before the first mkdir** (#425). An
+        explicit `inherits` naming a non-ancestor is a 422, and refusing it
+        after the folder exists would leave a half-scaffolded project on disk
+        for a request that never should have started writing.
         """
         root = self._require_project()
+        declaration = self._declaration_for_new_project(root, inherits)
         root.parent.mkdir(parents=True, exist_ok=True)
         root.mkdir(parents=True, exist_ok=True)
         for folder in ["scenes", "lore", "prompts", ".cache"]:
@@ -74,7 +80,7 @@ class ProjectLifecycleMixin:
         # and 404s on its project node forever. This order fails the other way,
         # which is the recoverable one.
         self._write_project_node_file(root / "project.md", self._new_project_node(title))
-        self._write_yaml(root / "project.yaml", self._new_project_manifest(title))
+        self._write_yaml(root / "project.yaml", self._new_project_manifest(title, declaration))
         self._write_yaml(root / "metadata.schema.yaml", self._empty_metadata_schema())
         self._write_yaml(root / "tags.yaml", {"tags": []})
         initial_scene = Scene(
@@ -104,18 +110,51 @@ class ProjectLifecycleMixin:
         TreeStructureService(root, RESEARCH_TREE_CONFIG).initialize()
         self._write_yaml(root / "todo.yaml", {"items": []})
 
-    def _new_project_manifest(self, title: str) -> dict[str, Any]:
+    def _declaration_for_new_project(self, root: Path, requested: list[str] | None) -> list[str]:
+        """The `inherits` entries a project being created should start with (#425).
+
+        **The default is every ancestor project**, not the nearest one. Under
+        the non-transitive semantics that shipped (#309 / ADR-0039 Amendment 1,
+        and #428 closed as YAGNI) only an explicit list produces a full chain,
+        so nearest-only would leave `Universe › Series › Book` unreachable
+        without a second gesture nobody knows to make — which is the defect
+        this fixes. "Every ancestor project" is the shape the folder layout the
+        author just chose already implies.
+
+        Non-project ancestors are skipped rather than declared-and-warned:
+        they carry no manifest, so they contribute nothing, and a default that
+        seeds a warning is a default that is wrong.
+
+        Both paths go through `_validated_declaration`, so there is one writer
+        of the stored (project-relative) form, and an explicitly requested
+        non-ancestor is refused here exactly as it is on a settings save.
+        """
+        if requested is None:
+            requested = [
+                str(folder)
+                for folder, is_project, _ in self.ancestor_candidates(root)
+                if is_project
+            ]
+        return self._validated_declaration(requested, root)
+
+    def _new_project_manifest(self, title: str, inherits: list[str]) -> dict[str, Any]:
         """The manifest a fresh project starts with.
 
         No `projects_base_folder` (#429): the walk's bound is the machine root,
         so a project does not carry one. Writing it per project is what made
         every chain one hop long — the wizard passed the folder it had just
         built the project inside, so the bound was always the parent.
+
+        `inherits` is written even when empty (#425). Absent and `[]` mean the
+        same thing to the reader, so this costs nothing and makes the key
+        present in every manifest the app writes — which is where a hand-editor
+        looks for it, and the one place the flat case is otherwise invisible.
         """
         return {
             "title": title,
             "version": 1,
             "schema_version": PROJECT_SCHEMA_VERSION,
+            INHERITS_KEY: inherits,
             "settings": {
                 "theme": "system",
                 "ai": {

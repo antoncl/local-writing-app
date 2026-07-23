@@ -111,14 +111,19 @@ class ProjectService(
         return self._scope.migrations_applied if self._scope is not None else ()
 
     @classmethod
-    def created_at(cls, root_path: Path, title: str) -> ProjectService:
+    def created_at(
+        cls, root_path: Path, title: str, inherits: list[str] | None = None
+    ) -> ProjectService:
         """Scaffold a new project on disk and return a service bound to it.
 
         No base folder (#429): the walk's bound is the machine root, so
         creating or opening a project cannot set it.
+
+        `inherits` is the declaration to write (#425); `None` takes the
+        default, which is every ancestor project.
         """
         service = cls(WorkScope(root=root_path.expanduser().resolve()))
-        service._scaffold_new_project(title)
+        service._scaffold_new_project(title, inherits)
         return service
 
     @classmethod

@@ -473,12 +473,11 @@
     return entryDefinition?.has_body ?? true;
   }
 
+  // Every kind the reference index can produce, not lore-else-scene (#344).
+  // The dispatch lives on the controller with the openers it chooses between;
+  // `run` puts an unopenable kind's message in the error banner.
   function navigateToBacklink(id: string, kind: string) {
-    if (kind === "lore") {
-      void run(() => editorPanes.openLore(id));
-    } else {
-      void run(() => editorPanes.openScene(id));
-    }
+    void run(() => editorPanes.openNodeOfKind(id, kind));
   }
 
   function metadataListText(value: unknown) {

@@ -88,6 +88,12 @@ interface EditorPaneComponentHandle {
 const AUTO_SAVE_IDLE_MS = 6000;
 const SAVED_INDICATOR_MS = 2000;
 
+// A project node reached by id that is not the OPEN project's — an ancestor
+// layer's project.md, which #334 made addressable and #344 made reachable from
+// the backlinks panel. Exported so a test names the same string the user sees.
+export const FOREIGN_PROJECT_NODE =
+  "That reference is on a parent project's node, which cannot be opened from here.";
+
 class EditorPanesController {
   // The open editor panes. Reassigned (not deep-mutated) to trigger reactivity —
   // the drafts ARE the pending buffer, no separate queue.
@@ -647,11 +653,17 @@ class EditorPanesController {
     this.setStatus(`Focused ${pane.scene?.title ?? label}`);
   }
 
-  async openProjectNode(): Promise<void> {
+  // `expectedId` guards the cross-kind entry point below. The project node is a
+  // singleton *per layer* and this opens the OPEN project's, so a caller that
+  // arrived with a specific id — a backlink from an ancestor's project.md, which
+  // #334 made a real possibility — must be told it landed elsewhere rather than
+  // shown the wrong node under the right title.
+  async openProjectNode(expectedId?: string): Promise<void> {
     // Singleton — focus the existing pane if it's already showing the
     // project node, otherwise open it in a fresh tab.
     const existingPane = this.panes.find((pane) => pane.document?.type === "project");
     if (existingPane) {
+      if (expectedId && existingPane.document?.id !== expectedId) throw new Error(FOREIGN_PROJECT_NODE);
       this.#focusExisting(existingPane, "project");
       return;
     }
@@ -659,6 +671,16 @@ class EditorPanesController {
     await this.run(async () => {
       const targetPane = await this.#acquireTargetPane({ type: "project", id: "" });
       const node = await api.getProjectNode();
+      if (expectedId && node.id !== expectedId) {
+        // Release the claim `#acquireTargetPane` stamped synchronously.
+        // Cleared rather than torn down because the acquire may have REUSED a
+        // pane the user already had open-and-empty; restoring it to empty is
+        // right either way, and an empty pane is invisible until content loads.
+        // Bailing without this is the stranded-empty-pane failure #344 is
+        // about, reached from the other direction.
+        this.panes = this.panes.map((pane) => (pane.id === targetPane.id ? { ...pane, document: null } : pane));
+        throw new Error(FOREIGN_PROJECT_NODE);
+      }
       // The editor pane uses Scene-compatible shape; project nodes have no
       // `status` so default to "" and let the documentKind branch hide it.
       const sceneShaped = {
@@ -983,6 +1005,60 @@ class EditorPanesController {
     );
     this.focusedEditorPaneId = targetPane.id;
     this.setStatus(`Loaded ${entry.title}`);
+  }
+
+  // Open any node given its kind — the one place cross-kind navigation
+  // dispatches, so a caller holding an `(id, kind)` pair never has to know which
+  // opener a kind maps to.
+  //
+  // #344: this used to be a two-branch `if` at the backlinks call site — lore,
+  // ELSE SCENE — so a backlink from a research note, prompt, assistant, view or
+  // project node issued `GET /scenes/<id>`, 404'd, and left behind the empty
+  // pane `#acquireTargetPane` had already claimed: an error banner AND a
+  // stranded tab. Every kind here can genuinely reach it, because reference-edge
+  // extraction is schema-driven and the schema editor puts an `entity_ref` on
+  // any entry_type.
+  //
+  // The kinds are the node families the backend index walks (`NODE_FAMILIES`)
+  // plus the project node (#334) and chats. A chat cannot arrive from the
+  // backlinks panel — chats are indexed but no collector draws edges from them
+  // — but this method advertises itself as the general cross-kind open, so
+  // leaving out a kind that HAS an opener would be a trap for the next caller.
+  //
+  // Unknown or unopenable kinds THROW rather than fall through to a default.
+  // That is the whole lesson of the bug: the `else` was a guess, and a guess
+  // that opens the wrong document is worse than one that says it cannot. The
+  // caller's `run()` puts the message in the error banner, and nothing has
+  // claimed a pane by then.
+  async openNodeOfKind(nodeId: string, kind: string): Promise<void> {
+    switch (kind) {
+      case "scene":
+        return this.openScene(nodeId);
+      case "lore":
+        return this.openLore(nodeId);
+      case "research":
+        return this.openResearchNote(nodeId);
+      case "prompt":
+        return this.openPrompt(nodeId);
+      case "assistant":
+        return this.openAssistant(nodeId);
+      case "view":
+        return this.openView(nodeId);
+      case "chat":
+        return this.openChat(nodeId);
+      case "project":
+        // Singleton per layer, so the id is checked rather than assumed —
+        // an ancestor's project.md is a legitimate source with no surface.
+        return this.openProjectNode(nodeId);
+      case "mutation_set":
+        // Mutation sets are edited in the Mutations pane, not an editor pane,
+        // and that pane holds the entry being edited in component-local state —
+        // there is no id-addressable open to route to (#449). Saying so beats
+        // opening something else.
+        throw new Error("Mutation sets open from the Mutations pane, not from a reference.");
+      default:
+        throw new Error(`Cannot open a ${kind} node from here.`);
+    }
   }
 
   async openResearchNote(noteId: string): Promise<void> {

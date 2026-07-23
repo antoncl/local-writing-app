@@ -66,6 +66,7 @@ from app.models import (
 )
 from app.services.project.errors import ProjectServiceError
 from app.services.project.markers import MarkerMixin
+from app.services.project.node_index import NodeIndex
 
 MUTATION_MARKER_PATTERN = re.compile(
     r"<!--\s*mutate:entity=(?P<entity>[A-Za-z0-9_-]+);field=(?P<field>[A-Za-z0-9_.-]+);"
@@ -467,6 +468,31 @@ class LoreMutationsMixin(MarkerMixin):
         walk(structure.root)
         return order
 
+    def _scene_body_for_scan(self, index: NodeIndex, scene_id: str) -> str | None:
+        """The raw body of one manuscript scene, for the marker scan and nothing
+        else (#440).
+
+        Deliberately **not** `read_scene`. The scanner consumes the body and the
+        id; `read_scene` additionally resolves computed metadata — which reads
+        the whole structure *per scene*, making the index quadratic — and
+        validates, which made a scene carrying a value its schema no longer
+        allows drop out of the index silently, taking its close markers with it
+        and changing resolved state across the rest of the manuscript.
+        """
+        entry = index.by_id.get(scene_id)
+        if entry is not None and entry.kind == "scene":
+            path = entry.path
+        else:
+            try:
+                path = self._path_for_node_id(scene_id, "scene")
+            except ProjectServiceError:
+                return None
+        try:
+            _, body = self._read_markdown_with_front_matter(path)
+        except OSError:
+            return None
+        return body
+
     def build_mutations_index(self) -> MutationsIndex:
         """Walk every manuscript scene in order, scanning its markers into a
         per-entity list ordered by (manuscript position, prose offset).
@@ -475,17 +501,17 @@ class LoreMutationsMixin(MarkerMixin):
         (§3.3)."""
         scene_order = self._scene_order()
         scene_paths = self._scene_display_paths()
+        index = self._build_node_index()
         by_entity: dict[str, list[MutationMarker]] = {}
         closes: list[MutationClose] = []
         for scene_id in scene_order:
-            try:
-                scene = self.read_scene(scene_id)
-            except ProjectServiceError:
+            body = self._scene_body_for_scan(index, scene_id)
+            if body is None:
                 continue
-            for marker in self._scan_scene_mutations(scene):
+            for marker in self._iter_body_mutations(body, scene_id):
                 marker.scene_path = scene_paths.get(scene_id, marker.scene_path)
                 by_entity.setdefault(marker.entity_id, []).append(marker)
-            closes.extend(self._iter_body_closes(scene.body, scene_id))
+            closes.extend(self._iter_body_closes(body, scene_id))
         for records in by_entity.values():
             records.sort(key=lambda m: (scene_order.get(m.scene_id, 0), m.offset))
         closes_by_start = self._resolve_closes(closes, by_entity, scene_order)

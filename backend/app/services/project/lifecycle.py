@@ -25,6 +25,7 @@ from pathlib import Path
 from typing import Any
 
 from app.models import (
+    AIPolicy,
     AncestorCandidate,
     DirectoryEntry,
     DirectoryListing,
@@ -165,6 +166,31 @@ class ProjectLifecycleMixin:
             ancestors=self._ancestor_candidates_for_api(root),
             children=self._project_children(root),
         )
+
+    def ai_policy(self) -> AIPolicy:
+        """Just the permission, without building the whole `ProjectInfo` (#433).
+
+        `current_project()` is the app's most I/O-heavy read: the root manifest
+        several times over, a stat of every folder between the base and the
+        project, one open + `yaml.safe_load` per project ancestor for its title
+        (#311), and an `iterdir()` plus a manifest parse per child project
+        (#310). Five AI routes were paying all of that to answer "is AI on?" —
+        on a four-level chain over a shelf of a dozen books, ~16 YAML parses per
+        call, on a path that includes the prompt preview's typing debounce and
+        that may be a network or OneDrive mount.
+
+        This reads the one file the answer actually lives in. `_read_ai_settings`
+        already swallows its own read errors and returns `{}`, so a malformed
+        manifest yields the `"off"` default rather than an exception — the
+        fail-closed direction (`decisions_ai_permission_fails_closed`).
+
+        `_require_project()` still raises when no project is open, deliberately:
+        callers turn that into `"off"` too, and a silent `"off"` from here would
+        be indistinguishable from a project that chose it.
+        """
+        ai = self._read_ai_settings(self._require_project())
+        policy = ai.get("policy", "off")
+        return policy if policy in ("off", "local-only", "cloud-allowed") else "off"
 
     def _ancestor_candidates_for_api(self, root: Path) -> list[AncestorCandidate]:
         """The enumeration, outermost first — every ancestor folder, flagged.

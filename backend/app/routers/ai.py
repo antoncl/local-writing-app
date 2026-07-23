@@ -216,8 +216,7 @@ def ai_health(project: CurrentProject, request: AIHealthRequest) -> AIHealthResp
         max_tokens_override=None,
     )
     try:
-        project_info = project.current_project()
-        policy = project_info.ai_policy
+        policy = project.ai_policy()
     except ProjectServiceError:
         policy = "off"
     return ai_providers.health_check(
@@ -594,8 +593,7 @@ async def ai_chat(project: CurrentProject, request: AIChatRequest) -> AIChatResp
         max_tokens_override=request.max_tokens,
     )
     try:
-        project_info = project.current_project()
-        policy = project_info.ai_policy
+        policy = project.ai_policy()
     except ProjectServiceError:
         policy = "off"
 
@@ -701,8 +699,7 @@ async def ai_generate(project: CurrentProject, request: AIGenerateRequest) -> AI
         max_tokens_override=request.max_tokens,
     )
     try:
-        project_info = project.current_project()
-        policy = project_info.ai_policy
+        policy = project.ai_policy()
     except ProjectServiceError:
         policy = "off"
 
@@ -849,8 +846,7 @@ async def ai_chat_stream(project: CurrentProject, request: AIChatRequest) -> Str
         max_tokens_override=request.max_tokens,
     )
     try:
-        project_info = project.current_project()
-        policy = project_info.ai_policy
+        policy = project.ai_policy()
     except ProjectServiceError:
         policy = "off"
 
@@ -939,8 +935,7 @@ async def ai_generate_stream(project: CurrentProject, request: AIGenerateRequest
         max_tokens_override=request.max_tokens,
     )
     try:
-        project_info = project.current_project()
-        policy = project_info.ai_policy
+        policy = project.ai_policy()
     except ProjectServiceError:
         policy = "off"
 

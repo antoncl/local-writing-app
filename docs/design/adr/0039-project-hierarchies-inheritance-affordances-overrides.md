@@ -2,8 +2,7 @@
 
 - Status: **Accepted** — 0.7.0, 2026-07-19 (PR #319) · rewritten 2026-07-19 after two rounds of
   adversarial review · **Amendment 1: inheritance is declared, not inferred** · **Amendment 2: one
-  traversal; the root is stipulated, not inferred from a stray `metadata.schema.yaml`** ·
-  **Amendment 3 (Proposed, undecided): is the declaration read transitively?**
+  traversal; the root is stipulated, not inferred from a stray `metadata.schema.yaml`**
 - Feature: #7 (epic) full project hierarchies
 - Companion: ADR-0040 (the index — which *materializes* the chain, not merely caches it)
 - Amends: ADR-0013 (see its Amendment 1) · Gesture UX: **ADR-0042** (co-designed with mutation
@@ -215,6 +214,18 @@ defend against a problem it introduced. Enumerate-then-declare cannot cycle, bec
 is a directory walk. **Do not reintroduce transitive links to "simplify" the declaration** — the
 finiteness is the feature.
 
+> **Scope of that rejection (2026-07-23).** It is about a **free-form pointer**, and it does not reach
+> a *transitive reading of this declaration* — where a project would also inherit what its declared
+> ancestors declare. That cannot cycle: a declaration can only select from the filesystem walk, so
+> every hop strictly decreases depth and the closure terminates in at most `depth(project)` hops.
+> Considered and **not adopted for 0.7.0** — it buys only that inserting a level retroactively costs
+> one edit instead of one per descendant, and it spends "each project's list is complete for itself",
+> which is what keeps the chain a property of the file you are editing. Parked as an issue, not an
+> open ADR question. Anyone revisiting it inherits one non-obvious obligation: the ancestor filter
+> must be re-applied **at each hop**, because `_declared_ancestors` validates nothing (the ancestor
+> test lives one call later, in `_project_layer_folders`) and stored entries are relative paths that
+> drift — so a closure over raw `inherits:` lists has no termination guarantee at all.
+
 **The change is contained.** `_project_layer_folders` still returns an ordered `list[Path]`; only its
 body changes, from "every ancestor" to "the declared subset of every ancestor". Both consumers —
 `_metadata_schema_layer_paths` and `_build_node_index` — enumerate that list and are untouched, as are
@@ -276,211 +287,6 @@ back.
 ranks are keyed on the chain, so persisting a format whose extent and rank semantics are still
 unsettled builds on sand — and #309 waits on #306.
 
-## Amendment 3 — should the declaration be read transitively? (**Proposed**, 2026-07-23)
-
-> **Status: Proposed. Anton decides.** This amendment states the question, prices three answers and
-> recommends one; it does not adopt anything. Nothing below is implemented.
->
-> **Citations.** There is no tag newer than `v0.6.5`, which predates #309 entirely, so the house rule
-> (an ADR quoting `file:line` names the tag it was written against) has nothing to name. Every
-> citation below was verified against **`origin/master` at `f743203`, 2026-07-23**. Cite that commit,
-> not this file's line numbers, when checking a claim.
-
-### What forced the question
-
-A real chain — The Honorverse › Honor Harrington › On Basilisk Station › Part Two — walked **down**
-four levels and could not walk back **up**, because Part Two declares nothing. The two directions are
-wired to one control and do not round-trip:
-
-- **descent is a filesystem fact** — `_project_children` (`lifecycle.py:188-213`) lists subfolders
-  carrying a `project.yaml`, and asks no manifest for permission;
-- **ascent is a declaration fact** — `_project_layer_folders` (`layers.py:331-359`) keeps the
-  ancestors this project's own `inherits:` names, and reads **no** ancestor's declaration.
-
-### Four defects were bundled into one question — separate them first
-
-Only the third is an argument about transitivity. The others are true under every option here, and
-adopting transitivity would fix none of them.
-
-1. **No project the app creates declares anything.** `_scaffold_project` /
-   `_new_project_manifest` (`lifecycle.py:55-123`) never write `inherits`, and
-   `CreateProjectRequest` (`models/project.py:11-17`) has no field to carry it. So the chain is
-   empty for essentially every project that exists, and the breadcrumb is empty with it. This is an
-   **authoring-default** defect owned by #318, not a semantic one.
-2. **Descent and ascent are different relations rendered as one control.** Also true with a full
-   chain declared: "contains" and "inherits from" are not each other's inverse and never were.
-   Owned by the UX design (`docs/design/hierarchy-navigation-ux.md`), not by this amendment.
-3. **Retroactive insertion costs N edits.** Put a universe above an existing series and the series
-   picks it up with one edit; its books do not pick it up at all until each one is edited. **This is
-   the only defect transitivity fixes**, and it recurs for the life of a shelf, which is what makes
-   it worth an ADR rather than a default.
-4. **The switcher's recents read as a breadcrumb**, which is how a stale entry got clicked (#423).
-   A demarcation defect; see the UX doc.
-
-### The cycle objection in Amendment 1 does not reach this proposal — with one condition
-
-Amendment 1 rejected *"a `parent:` link resolved transitively"* because a free-form pointer in a
-user-editable file admits `A → B → C → A`. That argument is sound and is **not** an argument against
-transitive closure over *this* declaration, because a declaration here can only ever **select from a
-filesystem walk** (`ancestor_candidates`, `layers.py:234-267`).
-
-The termination argument, precisely: define `closure(P) = D(P) ∪ ⋃_{A ∈ D(P)} closure(A)`, where
-`D(P)` is the set of folders `P` declares **that are genuine project ancestors of `P`**. Every edge
-`P → A` strictly decreases filesystem depth, so the relation is a DAG whose longest path is bounded
-by `depth(P)`; the closure terminates in at most that many hops and can never revisit a node.
-
-**The condition is load-bearing: the per-hop filter is what supplies `D(P)`, and it is not what
-`inherits:` gives you.** `_declared_ancestors` (`layers.py:269-298`) resolves the raw strings and
-validates *nothing* — deliberately, because it is a read; the ancestor test lives one call later, in
-`_project_layer_folders`'s comprehension over `ancestor_candidates`. A stored entry is a **relative
-path** that can drift when a folder moves (`_validated_declaration`, `lifecycle.py:247-273`, validates
-only on write), so a raw entry can resolve sideways or downward. **A closure built by unioning raw
-`inherits:` lists across hops therefore has no termination guarantee at all.** It must re-apply the
-ancestor filter *at each hop, relative to that hop's own root*. Any implementation of this amendment
-states that as an invariant and pins it with a test using a hand-written cyclic pair of manifests.
-
-### Ordering survives closure untouched — and this is why transitivity is cheap here
-
-`closure(P)` is a set of filesystem ancestors of `P`, and filesystem ancestors of one folder are
-**totally ordered by depth**. So the chain remains a sequence, `rank` remains well defined, and
-descendant-wins remains unambiguous. There is no diamond, no linearization, no C3 — the ordering
-problem that makes transitive inheritance expensive in a language type system does not arise, because
-the partial order is supplied by the filesystem rather than by the declarations. The walk
-(`_layer_sequence`, `layers.py:151-181`) changes only in which folders it is handed.
-
-### What transitivity costs — the honest list
-
-1. **Exclusion becomes inexpressible, and this is the real loss.** Today the declaration is *exact*:
-   the set is precisely what you named. Under closure it is a **lower bound** — you can still skip
-   *upward* past a level (declare the grandparent, not the parent: `test_a_gap_is_legal`,
-   `backend/tests/test_declared_chain.py:72-80`, still passes), but you can no longer **stop short**:
-   declare the parent and you inherit everything the parent inherits, whether or not you want the
-   shelf-wide canon above it. Restoring it means an `excludes:` key — a second declaration whose only
-   job is to contradict the first, which is the free-form complexity Amendment 1 spent. **Recommended:
-   no exclusion.** The escape hatch is to declare the *grandparent* directly instead of the parent, or
-   to move the folder; if a real case survives that, it earns its own amendment.
-2. **"Each project's list is complete for itself" is spent.** A grandparent's edit silently changes
-   what a book inherits. That is precisely the property being bought — but it makes provenance a
-   requirement rather than a nicety, which pulls the *labelling* half of #313 forward (the crumb and
-   the wizard row must say *declared* vs *implied*). The **mark** half of #313 stays where it is,
-   still blocked on #304.
-3. **The chain's identity is now a function of N manifests.** Anything keyed on "which layers, in
-   which order" must fingerprint every `project.yaml` in the closure, not the open project's alone —
-   the index snapshot and its manifest (#306/#307), the memo key (#392), and the definitions cache
-   key (#394, whose "chain identity" bullet is written assuming one declaration decides it). The
-   files are already stat-ed per layer; what changes is *which* file set determines the shape.
-   Cheap, and wrong if left implicit.
-4. **Validation acquires a second subject.** `declared_ancestor_warnings` (`layers.py:300-329`)
-   reports one project's own bad entries. Under closure, a broken declaration three levels up
-   degrades this project's chain, so a warning must name **whose** declaration failed — otherwise the
-   author of Part Two sees canon go missing with a clean validation report on their own file.
-5. **Per-open cost: one `project.yaml` read per declared ancestor.** Bounded by chain depth, and
-   #420 already reads each ancestor manifest for its title. Effectively free.
-
-### The one genuinely new decision: whose bound applies
-
-Every `project.yaml` carries its **own** `settings.projects_base_folder`
-(`_metadata_schema_base_folder`, `layers.py:361-391`), and an ancestor's declaration was validated
-against *its* bound. So a series whose base folder is wider than a book's can pull in a folder that is
-a filesystem ancestor of the book but sits **above the book's own base**. Termination is unaffected;
-the invariant `test_a_folder_outside_the_base_cannot_be_declared_into_the_chain`
-(`test_declared_chain.py:86-92`) protects is not.
-
-- **(a) Clamp to the opener's bound** — intersect the closure with the open project's own
-  `ancestor_candidates`. `projects_base_folder` stays a hard ceiling on everything the open project
-  can ever see; a level that falls off is dropped with a warning naming it. **Recommended.**
-- **(b) Honour the declaring layer's bound** — the shelf says what the shelf is, and a book's base
-  folder governs only its own enumeration. Simpler to describe, and it silently removes the one
-  guarantee `projects_base_folder` currently makes.
-
-### …and the decision dissolves if the bound moves to the machine layer
-
-Anton's question, and it is the better answer: **`projects_base_folder` is per-project only by
-accident.** Move it up and the sub-decision above stops existing — there is one bound per *location*
-rather than one per manifest, so a closure cannot exceed it by construction and there is nothing to
-clamp.
-
-Four facts that say the current placement is the anomaly, verified at `f743203`:
-
-1. **It is already half at the machine layer.** `MachineSettings.default_projects_folder`
-   (`models/ai.py:45`) is a machine-level projects folder — used as the picker's default, while the
-   *bound* lives in each `project.yaml`. Two settings, one concept, trivially confusable.
-2. **It is stored as an absolute path** (`_new_project_manifest`, `lifecycle.py:104-123`, writes
-   `str(base_folder)`), duplicated into every manifest on the shelf. That is a machine fact wearing a
-   file's clothes: it survives neither a move, nor another machine, nor a different drive letter.
-   Removing it makes the project folder **more** portable, not less — which is the opposite of the
-   usual files-are-truth objection to machine config.
-3. **A shelf can already disagree with itself.** `_metadata_schema_base_folder(root)`
-   (`layers.py:361-391`) reads *the open project's* manifest, so a series and one of its books may
-   carry different bounds — and the same folder chain then enumerates differently depending on which
-   end you open it from. That is a live inconsistency today, with or without transitivity.
-4. **A per-project bound buys nothing a shelf-level one does not.** Nobody wants two books on one
-   shelf to see different amounts of that shelf; when they do, that is what `inherits:` is for.
-
-**Shape, if adopted: the machine layer holds a list of shelves, not a single folder.** A single value
-breaks the author with two shelves on two drives. A project's bound is then *the nearest registered
-shelf containing it* — a function of location, which is why every project on a shelf necessarily
-agrees. A project inside no registered shelf is a **chain of length one**, with an offer to register
-its folder; that is today's "root is not inside `projects_base_folder`" warning
-(`schema.py:937-941`), except recoverable with one action instead of editing N manifests.
-
-**Rejected: a marker file at the shelf root** (`shelf.yaml` or similar). It is the files-are-truth
-answer and it is portable — but finding the shelf then means walking upward until a file appears,
-which is exactly *"the root inferred from a file's presence"* that **Amendment 2 removed**. A machine
-registry is the stipulated version of the same thing, and stipulation is the property Amendment 2
-bought.
-
-**On the name.** The layer is currently `"Machine"` (`machine_layer`, `layers.py:201-232`) and
-"application layer" reads better — but the two names are not synonyms, and there are genuinely **two**
-tiers here, only one of which is in the walk:
-
-- **the application tier** — `DEFAULT_METADATA_SCHEMA`, merged as tier 0 by
-  `_read_metadata_schema_through_path` (`schema.py`) and shipped in code. It is not an `IndexLayer`
-  at all; it has no folder, so the walk cannot see it.
-- **the machine tier** — `%APPDATA%\local-writing-app` (`config_dir`, `machine_settings.py:115-126`),
-  holding assistants, palette, recents and **credentials**. Those last two are per-computer facts by
-  definition, and would be a lie under the name "application".
-
-So: rename to *Application* only if the built-in tier is simultaneously given a name and, ideally,
-made a real layer in the walk — otherwise the rename takes the one accurate name in the pair and
-leaves the genuinely-application tier nameless. A shelf registry belongs on the **machine** tier under
-either naming.
-
-**What it costs.** `_rebase_projects_base_folder` (`lifecycle.py:128-142`) and the
-`projects_base_folder` field on the open/create requests lose their subject; the pending-`base`
-parameter threaded through `ancestor_candidates` / `_validated_declaration` for the wizard's
-widen-and-declare gesture stays, but now describes a *global* widening, which is a different consent
-question and needs saying in the UI. Pre-1.0, the stored key is simply ignored — no migration
-(`feedback_no_pre_1_0_migrations`).
-
-**This is a separate issue from Amendment 3**, and it is worth filing whether or not transitivity is
-adopted — it removes fact 3's live inconsistency on its own. If both are adopted, **it should land
-first**: it deletes this amendment's only genuinely new decision instead of answering it.
-
-### The three options
-
-| | option | fixes #3 (insertion) | keeps exact declaration | cost |
-|---|---|---|---|---|
-| **A** | **Symmetrize descent**: children become *children that declare this project* | no | yes | near-zero code; **hides real projects** (see below) |
-| **B** | **Transitive closure**, per-hop-filtered, clamped to the opener's bound, no exclusion | yes | no | §"costs" above; pulls #313's labelling forward |
-| **C** | **Name the two relations**; fix the create-time default; leave semantics alone | no | yes | UX work only |
-
-**A is not recommended.** It buys symmetry by making the roster *smaller* than the filesystem: a book
-sitting inside a series that never declared it would stop being listed by its own parent, even though
-the folder is right there. Hiding something that demonstrably exists on disk is a worse failure than
-an asymmetric affordance, and it is against files-are-truth. Symmetry is the wrong goal here — the two
-relations are genuinely different, and the fix is to **say so**, not to shrink one until it matches.
-
-**C is required under every option**, including B: naming the relations and defaulting the declaration
-at create time are what dissolve the reported failure (under a sane default, Part Two declares its
-parent and the breadcrumb is never empty). **B is the semantic change**, and it stands or falls on
-defect 3 alone.
-
-**Recommendation: C now, B after** — adopt C's UX and the create-time default with #318, and take B as
-a separate, testable change with the per-hop filter, the clamp, the multi-manifest chain identity and
-the attributed warnings landing together. Splitting them keeps the semantic change from being merged
-into a wizard PR, which is where its four obligations would go missing.
-
 ## Why / rejected alternatives
 
 - **Overrides as a tier inside `effective_state`** (the earlier draft's central claim: an added layer
@@ -529,8 +335,8 @@ into a wizard PR, which is where its four obligations would go missing.
   (they stay resolved at query time, as today).
 - **Ordering is inherited too, not just content — and it *was* the exception when this was written.**
   **No longer: #332 took the layer term off the sort key** (`assistants.py`, `sort_key` — position in
-  one merged sequence, then an alphabetical tail; verified at `f743203`). The paragraph below is kept
-  as the record of the concern and where it was answered; do not read its present tense as live code.
+  one merged sequence, then an alphabetical tail; verified 2026-07-23). The paragraph below is kept as
+  the record of the concern and where it was answered; do not read its present tense as live code.
   Assistants
   carry a manual priority sequence (`.order.yaml` per layer, `assistants.py:128-142`) where **topmost
   is the default** (ADR-0024). That makes position load-bearing rather than cosmetic, and it is the

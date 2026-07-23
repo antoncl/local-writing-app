@@ -212,12 +212,16 @@ deliberately not part of `gates.yml`: a PR must not go red because an unrelated
 issue got stale. It verifies `path:line` claims in issue bodies, ADRs and docs
 against the code, anchoring each on the symbol the prose names next to it —
 which is what catches the dangerous shape, a line number that is still valid
-and now lands on unrelated code. On a PR it comments about the files that diff
-touches; weekly it edits one standing tracking issue. **It flags, it never
+and now lands on unrelated code. **It runs on PRs only**, commenting about the
+files that diff touches — rot is caught by the person creating it, while the
+context is still in their head. A weekly repo-wide run once edited a standing
+tracking issue (#407); that was retired in 2026-07 because a permanently-open
+issue restating rot is a log, not a fix. **It flags, it never
 fixes**: repointing a stale line number yields a citation that resolves cleanly
 and still does not support the sentence, which turns visible rot into invisible
-rot. Locally, `python scripts/check_citations.py --memory-dir <memory>` is the
-only run that can see the memory files — CI cannot.
+rot. The repo-wide sweep still exists in the script — run it by hand before a
+release, and note that `python scripts/check_citations.py --memory-dir <memory>`
+is the only run that can see the memory files, since CI cannot.
 
 **In a linked git worktree** the gates must test *that* worktree's code.
 `scripts/venv_run.py` borrows the primary worktree's *interpreter* but forces

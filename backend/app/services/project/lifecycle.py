@@ -22,7 +22,7 @@ from __future__ import annotations
 
 import os
 from pathlib import Path
-from typing import Any
+from typing import Any, get_args
 
 from app.models import (
     AIPolicy,
@@ -174,23 +174,29 @@ class ProjectLifecycleMixin:
         several times over, a stat of every folder between the base and the
         project, one open + `yaml.safe_load` per project ancestor for its title
         (#311), and an `iterdir()` plus a manifest parse per child project
-        (#310). Five AI routes were paying all of that to answer "is AI on?" —
-        on a four-level chain over a shelf of a dozen books, ~16 YAML parses per
-        call, on a path that includes the prompt preview's typing debounce and
+        (#310). Measured on a three-level chain with three child projects, that
+        is **11 file reads to answer "is AI on?"**; it grows with the depth of
+        the chain and the number of books beside the one that is open, on paths
         that may be a network or OneDrive mount.
 
-        This reads the one file the answer actually lives in. `_read_ai_settings`
-        already swallows its own read errors and returns `{}`, so a malformed
-        manifest yields the `"off"` default rather than an exception — the
-        fail-closed direction (`decisions_ai_permission_fails_closed`).
+        ⚠ **Two of the five AI routes still pay it anyway.** `ai_generate`
+        (`routers/ai.py:650`) and `ai_generate_stream` (`:898`) call
+        `build_preview` *before* they reach here, and `build_preview` binds the
+        whole `ProjectInfo` into the template context as `project` / `novel`
+        (`services/ai/preview.py:180`). Narrowing that changes what a template
+        can reach, which is #317's question, so it is deliberately not done
+        here — but it means the saving lands on `ai_health`, `ai_chat` and
+        `ai_chat_stream`, and those two routes pay one extra manifest read
+        until the preview context is settled.
+
+        The value itself is normalised by `_read_ai_settings`, not here, so
+        `current_project()` gets the same guarantee — see that method.
 
         `_require_project()` still raises when no project is open, deliberately:
         callers turn that into `"off"` too, and a silent `"off"` from here would
         be indistinguishable from a project that chose it.
         """
-        ai = self._read_ai_settings(self._require_project())
-        policy = ai.get("policy", "off")
-        return policy if policy in ("off", "local-only", "cloud-allowed") else "off"
+        return self._read_ai_settings(self._require_project()).get("policy", "off")
 
     def _ancestor_candidates_for_api(self, root: Path) -> list[AncestorCandidate]:
         """The enumeration, outermost first — every ancestor folder, flagged.
@@ -345,6 +351,25 @@ class ProjectLifecycleMixin:
         return entries
 
     def _read_ai_settings(self, root: Path) -> dict[str, Any]:
+        """The manifest's `settings.ai` block, with `policy` normalised (#433).
+
+        The normalisation is here rather than in a caller because this is the
+        one place the block is parsed, and both consumers — `current_project()`
+        and `ai_policy()` — need the same guarantee. Guarding only the caller
+        that noticed is what let them disagree: `ai_policy()` fell closed on a
+        hand-edited `policy: cloud_allowed` while `current_project()` passed the
+        raw string into `ProjectInfo`'s `AIPolicy` Literal, raising a Pydantic
+        `ValidationError` that `translate_errors` does not catch. That escaped
+        as a 500 from `GET /api/project` **and** `POST /api/project/open`, where
+        it precedes `current_scope.set(...)` — so one mistyped character made
+        the project unopenable, with an error naming nothing.
+
+        Anything outside `AIPolicy` becomes `"off"`, including an explicit
+        `policy: null` and a non-string. A permission we cannot read is one we
+        do not have (`decisions_ai_permission_fails_closed`). The membership set
+        is derived from the type rather than restated, so adding a policy to
+        `AIPolicy` cannot silently start reading as "off" here.
+        """
         try:
             manifest = self._read_yaml(root / "project.yaml")
         except Exception:
@@ -353,7 +378,11 @@ class ProjectLifecycleMixin:
         if not isinstance(settings, dict):
             return {}
         ai = settings.get("ai")
-        return ai if isinstance(ai, dict) else {}
+        if not isinstance(ai, dict):
+            return {}
+        if "policy" in ai and ai["policy"] not in get_args(AIPolicy):
+            ai = {**ai, "policy": "off"}
+        return ai
 
     def _validate_projects_base_folder(self, base_folder_path: Path, project_root: Path) -> Path:
         base_folder = base_folder_path.expanduser().resolve()

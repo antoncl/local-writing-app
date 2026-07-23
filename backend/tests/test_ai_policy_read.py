@@ -27,7 +27,7 @@ from app.services.project.errors import ProjectServiceError
 from app.services.project_service import ProjectService
 
 
-def _set_policy(service: Any, root: Path, policy: str) -> None:
+def _set_policy(service: Any, root: Path, policy: Any) -> None:
     manifest = service._read_yaml(root / "project.yaml")
     manifest.setdefault("settings", {}).setdefault("ai", {})["policy"] = policy
     service._write_yaml(root / "project.yaml", manifest)
@@ -53,18 +53,35 @@ class AiPolicyReadTests(unittest.TestCase):
         service = open_test_project(self.base / "bare", "Bare")
         self.assertEqual(service.ai_policy(), "off")
 
-    def test_an_unrecognised_policy_falls_closed_rather_than_through(self) -> None:
-        """A value the Literal does not admit must not reach a provider call.
+    def test_a_hand_edited_policy_typo_does_not_make_the_project_unopenable(self) -> None:
+        """A value the Literal does not admit must fall closed in BOTH readers.
 
-        `decisions_ai_permission_fails_closed`: a rejected AI action is always
-        cheaper than an unwanted one. Returning the raw string would type-check
-        nowhere and compare unequal to every guard downstream, which is a
-        silent allow in any code that tests for `== "off"`.
+        Two failures in one, which is why they are one test.
+
+        *Fail-closed* (`decisions_ai_permission_fails_closed`): returning the
+        raw string would type-check nowhere and compare unequal to every guard
+        downstream, which is a silent **allow** in any code testing for
+        `== "off"`. A rejected AI action is always cheaper than an unwanted one.
+
+        *Unopenable*: `current_project()` passes the policy into `ProjectInfo`'s
+        `AIPolicy` Literal. Un-normalised, a typo raised a Pydantic
+        `ValidationError` — which `translate_errors` does not catch, so it
+        escaped as a 500 from `GET /api/project` and from
+        `POST /api/project/open`, where the call precedes
+        `current_scope.set(...)`. One mistyped character made the project
+        permanently unopenable, with an error naming nothing.
+
+        Both readers are asserted because guarding only the one that noticed is
+        precisely the defect: that is how they came to disagree.
         """
-        root = self.base / "typo"
-        service = open_test_project(root, "Typo")
-        _set_policy(service, root, "cloud_allowed")  # underscore, not hyphen
-        self.assertEqual(service.ai_policy(), "off")
+        for bad in ("cloud_allowed", "", "ON", None, 3):
+            with self.subTest(policy=bad):
+                root = self.base / f"typo-{bad!r}"
+                service = open_test_project(root, "Typo")
+                _set_policy(service, root, bad)
+                reopened = ProjectService.opened_at(root)
+                self.assertEqual(reopened.ai_policy(), "off")
+                self.assertEqual(reopened.current_project().ai_policy, "off")
 
     def test_no_project_open_raises_rather_than_answering_off(self) -> None:
         """The routes turn this into "off" themselves.
@@ -97,14 +114,22 @@ class AiPolicyReadTests(unittest.TestCase):
         _set_policy(service, book, "cloud-allowed")
 
         reads: list[Path] = []
-        original = type(service)._read_yaml
+        original = service._read_yaml
 
-        def counting(self_: Any, path: Path) -> dict[str, Any]:
+        def counting(path: Path) -> dict[str, Any]:
             reads.append(Path(path))
-            return original(self_, path)
+            return original(path)
 
-        with unittest.mock.patch.object(type(service), "_read_yaml", counting):
+        # Shadowed on the *instance*, not patched onto `ProjectService`: the
+        # class is module-global, so a class-level patch would collect reads
+        # from any test running beside this one and turn the assertion below
+        # into an unreproducible flake the day the suite gains a parallel
+        # runner.
+        service._read_yaml = counting  # type: ignore[method-assign]
+        try:
             self.assertEqual(service.ai_policy(), "cloud-allowed")
+        finally:
+            del service._read_yaml  # type: ignore[attr-defined]
 
         self.assertEqual(
             reads,
@@ -114,13 +139,21 @@ class AiPolicyReadTests(unittest.TestCase):
         )
 
     def test_an_unreadable_ancestor_manifest_cannot_change_the_answer(self) -> None:
-        """The blast radius this change closes.
+        """A property test, NOT a regression test for #433 — stated plainly
+        because claiming otherwise is how a suite grows tests that guard
+        nothing.
 
-        Before #433 the five AI routes caught `ProjectServiceError` and fell
-        back to `policy="off"`, so a malformed `project.yaml` in a folder the
-        author may not have touched in months silently turned AI off with
-        nothing naming the cause. PR #420 guarded the enumeration; not reading
-        the ancestor at all is what makes it structurally impossible.
+        This passes against the pre-#433 code too: PR #420 already guarded the
+        enumeration (`_readable_project_title`), so `current_project()` survives
+        a malformed ancestor manifest on its own. What makes it *structurally*
+        impossible here is not reading the ancestor at all, and the test that
+        actually pins that is the read-count one above.
+
+        It earns its place as an end-to-end statement of the property, because
+        the failure it describes was real: the five AI routes catch
+        `ProjectServiceError` and fall back to `policy="off"`, so before #420 a
+        malformed `project.yaml` in a folder the author had not touched in
+        months silently turned AI off with nothing naming the cause.
         """
         universe = self.base / "universe"
         book = universe / "book"

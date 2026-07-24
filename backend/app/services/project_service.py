@@ -516,13 +516,18 @@ class ProjectService(
         self._atomic_write(path, f"---\n{front_matter}\n---\n\n{body}")
 
     def _write_lore_entry_file(self, path: Path, entry: LoreEntry) -> None:
+        front_matter_data: dict[str, object] = {
+            "id": entry.id,
+            "title": entry.title,
+            "entry_type": entry.entry_type,
+            "metadata": entry.metadata,
+        }
+        # Only forks carry this key; an ordinary entry must not gain a
+        # `forked_from: null` line on every save (#313 / ADR-0039).
+        if entry.forked_from:
+            front_matter_data["forked_from"] = entry.forked_from
         front_matter = yaml.safe_dump(
-            {
-                "id": entry.id,
-                "title": entry.title,
-                "entry_type": entry.entry_type,
-                "metadata": entry.metadata,
-            },
+            front_matter_data,
             sort_keys=False,
             allow_unicode=True,
         ).strip()

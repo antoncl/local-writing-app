@@ -890,6 +890,7 @@ class ReferencesMixin:
             title=title,
             source_layer_id=layer.id,
             source_layer_label=layer.label,
+            forked_from_layer_id=self._forked_from_layer_id(front_matter.get("forked_from")),
         )
         duplicate = index.entry_for_layer(node_id, layer.id)
         if duplicate is not None:
@@ -925,6 +926,24 @@ class ReferencesMixin:
             edges = []
         if edges:
             index.edges_by_layer_src[(layer.id, node_id)] = edges
+
+    def _forked_from_layer_id(self, raw_forked_from: object) -> str:
+        """Resolve a fork's `forked_from` front-matter value — a path relative to
+        the base folder — to the layer id it names (#313 / ADR-0039).
+
+        Stored on disk as a relative path rather than a layer id because layer
+        ids are `sha256(resolved absolute path)`, so machine- and location-
+        dependent (`_layer_id_for_folder`); a relative path survives a moved or
+        renamed shelf. It is reversed to an id here, at collection, so
+        `NodeIndex.resolve()` can compare plain ids and never touch the
+        filesystem. "" for anything that did not fork.
+        """
+        if not isinstance(raw_forked_from, str) or not raw_forked_from.strip():
+            return ""
+        base = self._metadata_schema_base_folder(self.root_path)
+        if base is None:
+            return ""
+        return self._metadata_schema_layer_id(base / raw_forked_from.strip())
 
     def _safe_relative(self, path: Path, anchor: Path) -> Path | str:
         try:

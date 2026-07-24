@@ -656,6 +656,11 @@ export const api = {
   getLoreEntry(entryId: string) {
     return request<LoreEntry>(`/lore/${entryId}`);
   },
+  // Fork-to-here (#313): copy an inherited lore entry down into the current
+  // project, keeping its id, and stop inheriting it. Returns the now-local entry.
+  forkLoreEntry(entryId: string) {
+    return request<LoreEntry>(`/lore/${entryId}/fork`, { method: "POST" });
+  },
   saveLoreEntry(entry: LoreEntry, body: string) {
     return request<LoreEntry>(`/lore/${entry.id}`, {
       method: "PUT",

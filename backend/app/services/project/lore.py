@@ -119,6 +119,7 @@ class LoreEntriesMixin:
             computed_metadata=self._computed_entry_metadata(body, node_id=node_id, entry_type=entry_type, schema=schema),
             source_layer_id=index_entry.source_layer_id if index_entry else "",
             source_layer_label=index_entry.source_layer_label if index_entry else "",
+            forked_from=self._forked_from_of(front_matter),
         )
 
     def save_lore_entry(self, entry_id: str, request: SaveLoreEntryRequest) -> LoreEntry:
@@ -154,6 +155,9 @@ class LoreEntriesMixin:
             revision=current_revision,
             entry_type=request.entry_type,
             metadata=metadata,
+            # A fork stays severed across edits: preserve `forked_from` so a save
+            # never silently re-shadows the ancestor it forked from (#313).
+            forked_from=self._forked_from_of(front_matter),
         )
         metadata_errors = self._validate_lore_entry_metadata(
             node_id,
@@ -167,6 +171,70 @@ class LoreEntriesMixin:
         self._write_lore_entry_file(path, entry)
         self._maybe_rename_node_file(path, request.title)
         return self.read_lore_entry(node_id)
+
+    @staticmethod
+    def _forked_from_of(front_matter: dict) -> str | None:
+        """The `forked_from` relative path a lore file records, or None."""
+        raw = front_matter.get("forked_from")
+        return raw.strip() if isinstance(raw, str) and raw.strip() else None
+
+    def fork_lore_entry(self, entry_id: str) -> LoreEntry:
+        """Fork-to-here (#313 / ADR-0039): copy an inherited lore entry down into
+        the current project and stop inheriting it from here.
+
+        The copy **keeps the id**, so inbound references from ancestor entries
+        resolve to the fork within this project (ADR-0040's candidate stack keeps
+        the ancestor reachable as a shadow). Front matter records `forked_from` —
+        the path from the base folder to the layer copied from — which both
+        declares the severance and silences the shadow warning `resolve()` would
+        otherwise emit; an *accidental* same-id collision, carrying no
+        `forked_from`, still warns.
+
+        Only lore can be forked: scenes and research notes are book-local, so
+        they are never inherited and have nothing to sever.
+        """
+        root = self._require_project()
+        index = self._build_node_index()
+        index_entry = index.by_id.get(entry_id)
+        if index_entry is None or index_entry.kind != "lore":
+            raise ProjectServiceError(f"Lore Entry {entry_id} not found.", 404)
+        if index_entry.source_layer_id == self._metadata_schema_layer_id(root):
+            raise ProjectServiceError(
+                f"Lore Entry {entry_id} already lives in this project; there is nothing to fork.",
+                409,
+            )
+        base = self._metadata_schema_base_folder(root)
+        owning_layer = self.layer_by_id(root, index_entry.source_layer_id)
+        if base is None or owning_layer is None:
+            raise ProjectServiceError(
+                f"Cannot resolve the source layer of Lore Entry {entry_id} to fork it.",
+                409,
+            )
+        forked_from = owning_layer.folder.resolve().relative_to(base.resolve()).as_posix()
+
+        # The materialized effective entry is what gets copied down. Pre-#314
+        # (no layer overrides yet) that is simply the ancestor's canon.
+        resolved = self.read_lore_entry(entry_id)
+        entry = LoreEntry(
+            id=entry_id,
+            title=resolved.title,
+            body=resolved.body,
+            revision="",
+            entry_type=resolved.entry_type,
+            metadata=resolved.metadata,
+            forked_from=forked_from,
+        )
+        # The fork writes at the current level (= the resolution scope), so the
+        # as-of-L schema is the full-chain schema — no authoring-layer plumbing
+        # needed here (that is #314's, for writes *below* the owning layer).
+        schema = self._schema_as_authored()
+        metadata_errors = self._validate_lore_entry_metadata(
+            entry_id, entry.entry_type, entry.metadata, schema, index
+        )
+        if metadata_errors:
+            raise ProjectServiceError(" ".join(metadata_errors), 422)
+        self._write_lore_entry_file(self._filepath_for_new_node(root / "lore", entry.title), entry)
+        return self.read_lore_entry(entry_id)
 
     def delete_lore_entry(self, entry_id: str) -> LoreEntryList:
         # Captured before the unlink, so the purge rewrites the project this

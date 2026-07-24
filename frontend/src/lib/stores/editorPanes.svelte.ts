@@ -1030,6 +1030,31 @@ class EditorPanesController {
     this.setStatus(`Loaded ${entry.title}`);
   }
 
+  // Fork-to-here (#313): sever an inherited lore entry into a local copy, then
+  // reset the open pane to the now-local entry so the ancestor banner clears and
+  // edits stop writing back to the ancestor. Refreshes the roster so the Lore
+  // pane's provenance pill updates too.
+  async forkLore(entryId: string): Promise<void> {
+    const entry = await api.forkLoreEntry(entryId);
+    await refreshLoreEntries();
+    this.panes = this.panes.map((pane) =>
+      pane.document?.type === "lore" && pane.document.id === entryId
+        ? {
+            ...pane,
+            scene: entry,
+            dirty: false,
+            draftTitle: entry.title,
+            draftMarkdown: entry.body,
+            draftEntryType: entry.entry_type,
+            draftMetadata: cloneMetadata(entry.metadata),
+            saving: false,
+            recentlySaved: false,
+          }
+        : pane,
+    );
+    this.setStatus(`Forked ${entry.title} into this project`);
+  }
+
   // Open any node given its kind — the one place cross-kind navigation
   // dispatches, so a caller holding an `(id, kind)` pair never has to know which
   // opener a kind maps to.

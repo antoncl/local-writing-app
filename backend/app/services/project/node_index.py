@@ -24,6 +24,12 @@ class NodeIndexEntry:
     title: str = ""
     source_layer_id: str = ""
     source_layer_label: str = ""
+    # The layer id this entry was fork-to-here'd from (#313 / ADR-0039), resolved
+    # from the front-matter `forked_from` relative path at collection time. When
+    # it equals the id of the layer this entry shadows, `resolve()` treats the
+    # shadow as deliberate and stays quiet; "" (an ordinary entry) keeps the
+    # warning loud for an accidental collision.
+    forked_from_layer_id: str = ""
 
 
 @dataclass(frozen=True)
@@ -196,6 +202,10 @@ class NodeIndex:
             f"{shadowed.source_layer_label}."
             for node_id, entries in self.candidates.items()
             for shadower, shadowed in zip(entries, entries[1:], strict=False)
+            # A fork-to-here copy declares its severance (#313 / ADR-0039): when
+            # the shadower forked from exactly the layer it shadows, the shadow
+            # is deliberate, not an accidental id collision, so it is silent.
+            if shadower.forked_from_layer_id != shadowed.source_layer_id
         ]
         self.warnings.extend(self._shadow_warnings)
         self.rebuild_reverse_edges()

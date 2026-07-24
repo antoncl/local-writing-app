@@ -154,6 +154,11 @@ class LoreEntry(BaseModel):
     computed_metadata: dict[str, MetadataValue] = Field(default_factory=dict)
     source_layer_id: str = ""
     source_layer_label: str = ""
+    # Set when this entry was fork-to-here'd (#313 / ADR-0039): the relative path
+    # from the base folder to the layer it was copied down from. It severs
+    # inheritance and silences the shadow warning for the copied id. `None` for
+    # an ordinary entry that never forked.
+    forked_from: str | None = None
 
 
 class LoreEntryList(BaseModel):

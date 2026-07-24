@@ -1,6 +1,6 @@
 # Design: The resolved-definitions cache
 
-> Status: **DRAFT for review** · Issue: [#394](https://github.com/antoncl/local-writing-app/issues/394) ·
+> Status: **Approved (#485)** · Issue: [#394](https://github.com/antoncl/local-writing-app/issues/394) ·
 > Milestone: 0.7.0
 > Decision of record: **ADR-0040 Amendment 1** names this cache as *required* and deliberately declines
 > to design its storage — "the moment it specifies storage it stops being an amendment". This document

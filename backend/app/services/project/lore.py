@@ -39,7 +39,9 @@ class LoreEntriesMixin:
         index = self._build_node_index()
         # Read once for the override fold's field types (#314) — cached (#394),
         # and only consulted when a chain actually carries overrides.
-        field_types = self._schema_field_types(self.read_metadata_schema()) if index.overrides_by_target else {}
+        has_overrides = bool(index.overrides_by_target)
+        field_types = self._schema_field_types(self.read_metadata_schema()) if has_overrides else {}
+        open_layer_id = self._metadata_schema_layer_id(self._require_project()) if has_overrides else ""
         entries: list[LoreEntrySummary] = []
         for entry in index.by_id.values():
             if entry.kind != "lore":
@@ -51,9 +53,11 @@ class LoreEntriesMixin:
             raw_entry_type = front_matter.get("entry_type") or "lore:lore_note"
             entry_type = raw_entry_type if isinstance(raw_entry_type, str) else "lore:lore_note"
             metadata = self._normalise_metadata(front_matter.get("metadata"), entry.path)
-            # Fold overrides so a list shows the effective value (#314 / ADR-0039).
+            # Fold overrides so a list shows the effective value (#314 / ADR-0039),
+            # but only onto an inherited entry — a locally-owned winner (a fork)
+            # ignores any leftover override, matching read_lore_entry.
             override_records = index.overrides_by_target.get(entry.id)
-            if override_records:
+            if override_records and entry.source_layer_id != open_layer_id:
                 metadata, _ = self.materialize_override_metadata(metadata, override_records, field_types)
             entries.append(
                 LoreEntrySummary(
@@ -114,10 +118,13 @@ class LoreEntriesMixin:
         # (#314 / ADR-0039): the effective value the open project sees, while the
         # ancestor file stays untouched. `overridden_fields` tells the frontend
         # which values carry the `ti-versions` override mark (rendered in PR 2).
-        # No overrides (a flat project, or a book-owned entry) folds nothing.
+        # Overrides apply only to an **inherited** winner — an entry the open
+        # project owns locally (a book-local entry, or a fork that severed
+        # inheritance) ignores any leftover override, so an edit to a fork is
+        # never masked by the delta it copied down.
         overridden_fields: list[str] = []
         override_records = index.overrides_by_target.get(node_id)
-        if override_records:
+        if override_records and index_entry is not None and index_entry.source_layer_id != self._metadata_schema_layer_id(self._require_project()):
             metadata, overridden_fields = self.materialize_override_metadata(
                 metadata, override_records, self._schema_field_types(schema)
             )
@@ -126,6 +133,9 @@ class LoreEntriesMixin:
         # / _strip_dangling_references for the rationale.
         metadata = self._strip_unknown_metadata_fields(metadata, entry_type, schema)
         metadata = self._strip_dangling_references(metadata, schema, index)
+        # A field the fold touched but the strips then removed is no longer a
+        # value to mark — keep `overridden_fields` in step with what shipped.
+        overridden_fields = [field for field in overridden_fields if field in metadata]
         metadata_errors = self._validate_lore_entry_metadata(node_id, entry_type, metadata, schema, index)
         if metadata_errors:
             raise ProjectServiceError(" ".join(metadata_errors), 422)
@@ -162,24 +172,31 @@ class LoreEntriesMixin:
         index = self._build_node_index()
         winner = index.by_id.get(entry_id)
         open_layer_id = self._metadata_schema_layer_id(root)
-        layer_by_id = {layer.id: layer for layer in self.collect_layers(root)}
-        # The effective authoring layer L is supplied two ways: the request body
-        # (the ADR-0042 edit unit's rail picker) first, else the ambient
-        # `WorkScope` (#393/ADR-0045). The request id, when present, must name a
-        # real layer.
-        explicit_layer = layer_by_id.get(request.authoring_layer_id) if request.authoring_layer_id else None
-        if request.authoring_layer_id and explicit_layer is None:
-            raise ProjectServiceError("Unknown authoring layer.", 422)
         ambient_layer_folder = self._scope_authoring_layer()
 
         # Owned locally (book-local entry or a fork), or not yet indexed → the
         # ordinary save to the entry's own file. L defaults to the open project.
+        # The layer walk is deferred to the inherited / explicit-L paths, so a
+        # flat book-local save never pays for it.
         if winner is None or winner.kind != "lore" or winner.source_layer_id == open_layer_id:
             path = winner.path if winner is not None and winner.kind == "lore" else self._path_for_node_id(entry_id, "lore")
-            authoring_folder = explicit_layer.folder if explicit_layer is not None else (ambient_layer_folder or root)
+            if request.authoring_layer_id:
+                explicit = self.layer_by_id(root, request.authoring_layer_id)
+                if explicit is None:
+                    raise ProjectServiceError("Unknown authoring layer.", 422)
+                authoring_folder = explicit.folder
+            else:
+                authoring_folder = ambient_layer_folder or root
             return self._save_owned_lore_entry(entry_id, request, path, index, authoring_layer=authoring_folder)
 
-        # Inherited: the winner is an ancestor's entry.
+        # Inherited: the winner is an ancestor's entry. Resolve the effective
+        # authoring layer L — request body first (the ADR-0042 rail picker), else
+        # the ambient `WorkScope` (#393/ADR-0045).
+        layer_by_id = {layer.id: layer for layer in self.collect_layers(root)}
+        explicit_layer = layer_by_id.get(request.authoring_layer_id) if request.authoring_layer_id else None
+        if request.authoring_layer_id and explicit_layer is None:
+            raise ProjectServiceError("Unknown authoring layer.", 422)
+
         owning_layer = layer_by_id.get(winner.source_layer_id)
         authoring_layer = explicit_layer or (
             layer_by_id.get(self._metadata_schema_layer_id(ambient_layer_folder.resolve()))
@@ -277,8 +294,12 @@ class LoreEntriesMixin:
             record for record in index.overrides_by_target.get(entry_id, []) if record.layer_rank < authoring_layer.rank
         ]
         base_above_layer, _ = self.materialize_override_metadata(base_metadata, records_above, field_types)
+        # Diff raw-vs-raw: `base_above_layer` comes from the raw owning file, so
+        # canonicalising `submitted` first would diff a canonical value against a
+        # raw one and mint spurious tag rows (and defeat revert-to-canon). Tag
+        # canonicalisation on an override write is deferred with the tag *write
+        # target* (#393 / ADR-0045 §4), the same reason it is not scoped to L yet.
         submitted = self._normalise_metadata(request.metadata, winner.path)
-        submitted = self._canonicalise_metadata_tags(submitted, schema, kind="lore", entry_type=request.entry_type)
 
         current_revision = self._composite_revision([winner.path, *self._override_paths_for_target(index, entry_id)])
         if request.base_revision and request.base_revision != current_revision:
@@ -367,6 +388,14 @@ class LoreEntriesMixin:
         if metadata_errors:
             raise ProjectServiceError(" ".join(metadata_errors), 422)
         self._write_lore_entry_file(self._filepath_for_new_node(root / "lore", entry.title), entry)
+        # The fork copied the effective (already-folded) value down, so this
+        # project's own override for the id is now redundant — drop it so it does
+        # not resurface if the local copy is later deleted (the value fold already
+        # ignores it while the local copy wins). An ancestor's override stays: it
+        # belongs to that layer and its other descendants.
+        own_override = self._override_file_for_target(root, entry_id)
+        if own_override is not None:
+            self._delete_node_file(own_override)
         return self.read_lore_entry(entry_id)
 
     def delete_lore_entry(self, entry_id: str) -> LoreEntryList:

@@ -148,6 +148,7 @@ class LayerOverridesMixin:
         if not index.overrides_by_target or schema is None:
             return
         field_types = self._schema_field_types(schema)
+        open_layer_id = self._metadata_schema_layer_id(root)
         for target_id, records in index.overrides_by_target.items():
             candidates = index.candidates.get(target_id)
             if not candidates:
@@ -160,6 +161,11 @@ class LayerOverridesMixin:
             # inherited target. Overrides fold onto it.
             winner = candidates[0]
             if winner.kind != "lore":
+                continue
+            # An override applies only to an inherited winner. A winner the open
+            # project owns locally (a fork that severed inheritance) keeps its own
+            # edges — the value fold skips it for the same reason.
+            if winner.source_layer_id == open_layer_id:
                 continue
             try:
                 front_matter = self._read_front_matter_only(winner.path, strict=True)
@@ -241,6 +247,7 @@ class LayerOverridesMixin:
         for record in sorted(records, key=lambda record: record.layer_rank):
             for row in record.rows:
                 field_type = field_types.get(row.field, "text")
+                applied = True
                 if field_type in COLLECTION_FIELD_TYPES:
                     current = _as_str_list(result.get(row.field))
                     if row.op == "replace":
@@ -252,11 +259,15 @@ class LayerOverridesMixin:
                         current = [item for item in current if item != row.value]
                     result[row.field] = current
                 elif row.op == "replace":
-                    # Scalar / text: only whole-value replace in PR 1. `add`/`remove`
-                    # on a non-collection field are rejected at write time and
-                    # ignored on read (a hand-edited file cannot corrupt the fold).
+                    # Scalar / text: only whole-value replace in PR 1.
                     result[row.field] = row.value
-                if row.field not in touched:
+                else:
+                    # `add`/`remove` on a non-collection field are rejected at
+                    # write time and ignored on read (a hand-edited file cannot
+                    # corrupt the fold) — and an ignored op does not mark the
+                    # field overridden.
+                    applied = False
+                if applied and row.field not in touched:
                     touched.append(row.field)
         return result, touched
 
@@ -280,8 +291,13 @@ class LayerOverridesMixin:
         an override adds one item (ADR-0039). Fields equal to base contribute
         nothing, keeping the override sparse."""
         rows: list[MutationSetRow] = []
-        for field in sorted(set(base) | set(submitted)):
-            field_type = field_types.get(field, "text")
+        # Only fields in L's own roster can be stored at L. A field the client
+        # round-trips that is defined only *below* L (the entry is edited from the
+        # deeper open project) is not part of L's view of the entry and must not
+        # become a delta row — otherwise it fails the as-of-L validation that
+        # follows (ADR-0045 §4). Fields outside the roster are dropped here.
+        for field in sorted(f for f in (set(base) | set(submitted)) if f in field_types):
+            field_type = field_types[field]
             if field_type in COLLECTION_FIELD_TYPES:
                 base_items = _as_str_list(base.get(field))
                 new_items = _as_str_list(submitted.get(field))
@@ -294,8 +310,10 @@ class LayerOverridesMixin:
             else:
                 base_value = base.get(field)
                 new_value = submitted.get(field)
-                if new_value is not None and new_value != base_value:
-                    rows.append(MutationSetRow(field=field, op="replace", value=str(new_value)))
+                if new_value != base_value:
+                    # A field omitted from the payload clears to empty, matching an
+                    # owned save (which drops the key by rewriting the whole file).
+                    rows.append(MutationSetRow(field=field, op="replace", value="" if new_value is None else str(new_value)))
         return rows
 
     # --- composite revision -------------------------------------------------

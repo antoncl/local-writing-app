@@ -208,6 +208,66 @@ class LayerOverrideTests(unittest.TestCase):
         self.assertFalse(any((self.root / OVERRIDES_FOLDER).glob("*.md")))
         self.assertEqual(self.service.read_lore_entry("honor").metadata["rank"], "Commodore")
 
+    # --- fork severs the override (review finding 1) -------------------
+
+    def test_forking_an_overridden_entry_lets_later_edits_stick(self) -> None:
+        # series owns honor; the book overrides rank; then forks it local.
+        self._write_lore_at(self.series, "honor", "Honor Harrington", {"rank": "Commodore"})
+        self._save_override("honor", {"rank": "Captain"})
+        self.service.fork_lore_entry("honor")
+
+        # The fork is local now, so editing it writes its own file and the stale
+        # override must not mask the edit on read.
+        self.service.save_lore_entry(
+            "honor",
+            SaveLoreEntryRequest(title="Honor Harrington", body="Body.", entry_type="lore:character", metadata={"rank": "Admiral"}),
+        )
+        folded = self.service.read_lore_entry("honor")
+        self.assertEqual(folded.metadata["rank"], "Admiral")
+        self.assertEqual(folded.overridden_fields, [])
+        # Fork dropped this project's own override file.
+        self.assertFalse(any((self.root / OVERRIDES_FOLDER).glob("*.md")))
+
+    # --- as-of-L roster (review finding 2) -----------------------------
+
+    def test_a_mid_chain_override_ignores_a_deeper_only_field(self) -> None:
+        declare_full_chain(ProjectService(WorkScope(root=self.series)), self.series, self.base)
+        # `rank` lives chain-wide; `book_note` is defined only at the book.
+        self.service._write_yaml(
+            self.root / "metadata.schema.yaml",
+            {
+                "version": 1,
+                "fields": {"book_note": {"name": "book_note", "type": "text", "label": "Book note"}},
+                "entry_types": {"lore:character": {"fields": ["rank", "aliases", "ally", "book_note"]}},
+            },
+        )
+        self._write_lore_at(self.universe, "honor", "Honor Harrington", {"rank": "Ensign"})
+
+        # Authoring at the series with a payload that carries the book-only field
+        # (the leaf client round-trips it) must not 422 — the deeper field is
+        # simply not part of the series' view and is dropped from the delta.
+        saved = self.service.save_lore_entry(
+            "honor",
+            SaveLoreEntryRequest(
+                title="Honor Harrington", body="Body.", entry_type="lore:character",
+                metadata={"rank": "Commodore", "book_note": "only-at-book"},
+                authoring_layer_id=self._layer_id(self.series),
+            ),
+        )
+        self.assertEqual(saved.metadata["rank"], "Commodore")
+        # The series override file carries no row for the book-only field.
+        override_file = next((self.series / OVERRIDES_FOLDER).glob("*.md"))
+        self.assertNotIn("book_note", override_file.read_text(encoding="utf-8"))
+
+    # --- scalar clear (review finding 3) -------------------------------
+
+    def test_omitting_a_scalar_clears_it_via_override(self) -> None:
+        self._write_lore_at(self.series, "honor", "Honor Harrington", {"rank": "Commodore"})
+        # Save an override whose payload omits `rank` entirely — parity with an
+        # owned save, which clears an omitted field.
+        self._save_override("honor", {})
+        self.assertEqual(self.service.read_lore_entry("honor").metadata.get("rank", ""), "")
+
     # --- orphans -------------------------------------------------------
 
     def test_an_orphan_override_is_ignored_with_a_warning(self) -> None:

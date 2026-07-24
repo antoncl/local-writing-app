@@ -491,19 +491,8 @@ class ReferencesMixin:
             # re-reads the schema and re-derives the state, exactly as this path
             # did before the schema was memoised.
             return self._resolve_index_cold(current.root)
-        if not structural and len(placeable) == 1:
-            before = self._index_signature_from_memo(current.index, placeable[0])
-            after = self._index_signature_from_disk(placeable[0], layers, schema)
-            if before is not None and before == after:
-                return None  # prose-only: nothing the index holds moved.
-        if structural and self._structural_write_is_noop(current.index, placeable):
-            # A delete that removes nothing the index held (#476): the file was
-            # never indexed *and* is gone from disk now, so a patch would clone,
-            # drop nothing, collect nothing, and flush an unchanged snapshot.
-            # `structural=True` skips the value comparison above (a delete moves
-            # the path set), so without this guard an already-gone file or an
-            # unindexed note still marks the memo dirty. Leave it untouched.
-            return None
+        if self._write_leaves_index_unchanged(current, placeable, structural, layers, schema):
+            return None  # nothing the index holds moved — leave the memo untouched.
         new_index = self._clone_node_index(current.index)
         changed = tuple(str(path) for path in placeable)
         try:
@@ -532,21 +521,39 @@ class ReferencesMixin:
         # could not compute.
         return ResolvedIndex(current.root, new_index, current.layers, manifest, schema)
 
-    def _structural_write_is_noop(self, index: NodeIndex, placeable: list[Path]) -> bool:
-        """Whether a structural write touches nothing the index holds (#476).
+    def _write_leaves_index_unchanged(
+        self,
+        current: ResolvedIndex,
+        placeable: list[Path],
+        structural: bool,
+        layers: list[IndexLayer],
+        schema: MetadataSchema,
+    ) -> bool:
+        """Whether the write changes nothing the index holds, so the memo can be
+        left untouched — no clone, no patch, no snapshot flush.
 
-        True only when *every* path both was absent from the index and is absent
-        from disk now — a delete of a file that was never indexed (already gone,
-        or an unindexed note). Such a path drops no entry and collects none, so
-        the patch is a pure no-op and the memo should be left alone rather than
-        cloned, patched to no effect, and flushed. A path that had an entry (a
-        real delete) or exists now (a rename's new name, a restore) fails the
-        test and takes the patch path."""
-        for path in placeable:
-            was_indexed = self._index_signature_from_memo(index, path) is not None
-            if was_indexed or path.exists():
-                return False
-        return True
+        Two no-op shapes, one per gesture:
+
+        - a plain single-file save (`#392`): the file's index signature (id,
+          kind, entry_type, title, edges) is unmoved — a prose-only edit;
+        - a **structural** write (`#476`): it skips the signature comparison (a
+          delete moves the path set), but is still a no-op when *every* path was
+          absent from the index **and** is gone from disk now — a delete of a
+          file that was never indexed (already gone, or an unindexed note). A
+          path that had an entry (a real delete) or exists now (a rename's new
+          name, a restore) fails the test and takes the patch path.
+        """
+        if structural:
+            for path in placeable:
+                was_indexed = self._index_signature_from_memo(current.index, path) is not None
+                if was_indexed or path.exists():
+                    return False
+            return True
+        if len(placeable) == 1:
+            before = self._index_signature_from_memo(current.index, placeable[0])
+            after = self._index_signature_from_disk(placeable[0], layers, schema)
+            return before is not None and before == after
+        return False
 
     def _index_signature_from_memo(
         self, index: NodeIndex, path: Path

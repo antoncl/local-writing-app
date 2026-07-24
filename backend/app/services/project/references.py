@@ -633,11 +633,11 @@ class ReferencesMixin:
         ancestor's must make the ancestor visible again (#307), which the patch
         does by re-resolving a shorter candidate list.
         """
-        if path.exists():
-            path.unlink()
-        # Notify even when the file was already gone: the caller treated it as a
-        # delete, and a memo entry may still describe it.
-        self._apply_index_write((path,), structural=True)
+        # The single-file case of the batch below — one unlink, one structural
+        # notify. Delegating keeps the unlink-then-notify in one place; a single
+        # placeable path still applies even when the file was already gone, so
+        # the "notify even when absent" behaviour is preserved.
+        self._delete_node_files((path,))
 
     def _delete_node_files(self, paths: tuple[Path, ...]) -> None:
         """Batch form of `_delete_node_file` for a subtree delete (#476).

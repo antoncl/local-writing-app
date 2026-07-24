@@ -371,9 +371,12 @@ class DeferredFlushTests(MemoTestCase):
         writes = self._spy("_write_index_snapshot")
         self.service.delete_structure_node(chapter_id)
         # The pre-#476 behaviour was one full snapshot serialization per deleted
-        # scene (plus the purge's rewrites). Coalesced, it is a small constant.
-        self.assertLess(
-            writes[0], scene_count, f"{scene_count} deletes wrote {writes[0]} snapshots; they did not coalesce"
+        # scene (plus the purge's rewrites) — ~13 here. Coalesced, the batch
+        # collapses to a small constant (2: the delete's rebuild + the purge's
+        # resolve). A tight bound is what actually pins coalescing — `< scene_count`
+        # would pass even if all-but-two scenes still wrote one each.
+        self.assertLessEqual(
+            writes[0], 3, f"{scene_count} deletes wrote {writes[0]} snapshots; they did not coalesce"
         )
 
     def test_invalidate_flushes_a_pending_snapshot_before_clearing(self) -> None:
@@ -401,6 +404,31 @@ class DeferredFlushTests(MemoTestCase):
         self.assertEqual(writes[0], 1, "the shutdown flush did not write the pending snapshot")
         node_index_gate.flush()
         self.assertEqual(writes[0], 1, "the shutdown flush was not idempotent")
+
+    def test_resolving_a_different_root_flushes_the_outgoing_pending(self) -> None:
+        """The resolve() miss-path safety net (#476): if a *different* root is
+        resolved while the current root has a pending flush and no `invalidate`
+        ran in between, the outgoing pending must still be written, not dropped.
+        Normal flow flushes on the scope change; this guards the gate on its own."""
+        other_root = self.base / "book02"
+        ProjectService.created_at(other_root, "Book 2")
+        node_index_gate.invalidate()  # clean slate after scaffolding
+
+        scene_id = self._first_scene_id()
+        path = self.service._path_for_node_id(scene_id, "scene")
+        self.service._build_node_index(self.root)  # current = book01
+
+        # Spy the pending-flush thunk specifically (the cold build calls
+        # `_write_index_snapshot` directly, so it would not distinguish). Install
+        # before the write so `apply` captures the spied callable.
+        flushes = self._spy("_flush_resolved_index")
+        self.service._apply_index_write((path,), structural=True)  # pending for book01
+        self.assertEqual(flushes[0], 0, "the structural write flushed instead of deferring")
+
+        # Resolve the *other* root directly, with no invalidate between: the miss
+        # path must flush book01's pending before building book02.
+        self.service._build_node_index(other_root)
+        self.assertEqual(flushes[0], 1, "a cross-root resolve stranded the outgoing pending flush")
 
     def test_deleting_a_never_indexed_file_defers_nothing(self) -> None:
         """Finding 2 (#476): `structural=True` skips the value comparison, so a

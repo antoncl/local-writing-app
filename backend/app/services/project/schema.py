@@ -112,6 +112,14 @@ class MetadataSchemaMixin:
         the default, merges the whole chain to the open project, which is what
         every resolution-scope read wants and gets unchanged; only the write
         path passes L, via `_schema_as_authored`.
+
+        **The result is a shared, cached instance (#394) — treat it as
+        read-only.** The resolved-definitions cache returns the same object to
+        every caller of a given chain, so mutating it (or a nested `entry_types`
+        / `fields` member) corrupts it for all of them. `MetadataSchema` is
+        frozen against top-level reassignment; the nested collections rely on
+        this contract. To change definitions, write a layer (the schema-CRUD
+        methods), which reads YAML directly and never mutates this result.
         """
         root = root or self._require_project()
         paths = self._metadata_schema_layer_paths(root, up_to_layer_id=up_to_layer_id)

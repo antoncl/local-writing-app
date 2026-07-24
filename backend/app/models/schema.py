@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from typing import Any, Literal
 
-from pydantic import BaseModel, Field, field_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 from app.models.base import (
     AIPolicy,
@@ -260,6 +260,14 @@ class EntryTypeDefinition(BaseModel):
 
 
 class MetadataSchema(BaseModel):
+    # Frozen: a resolved schema is immutable value data, and the
+    # resolved-definitions cache (#394) hands the *same* instance to every
+    # consumer of `read_metadata_schema`. Reassigning a top-level field would
+    # corrupt that shared instance for all of them; `frozen` makes it an error.
+    # (Nested dict mutation is not blocked by pydantic here — the read-only
+    # contract for that is stated on `read_metadata_schema`.)
+    model_config = ConfigDict(frozen=True)
+
     version: int = 1
     entry_types: dict[str, EntryTypeDefinition] = Field(default_factory=dict)
     fields: dict[str, MetadataFieldDefinition] = Field(default_factory=dict)

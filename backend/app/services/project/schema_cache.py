@@ -38,25 +38,20 @@ from pathlib import Path
 from typing import Any
 
 from app.models import MetadataSchema
-from app.services.project.node_index_snapshot import build_identity
+from app.services.project.node_index_snapshot import (
+    Fingerprint,
+    build_identity,
+    fingerprint_for,
+)
 
-# `(mtime_ns, size)`, or `None` when the candidate file does not exist — an
-# absent layer is a stored value, not a miss, so it participates in the merged
-# stamp and a file appearing (absent → present) flips the stamp on the next read.
-Fingerprint = tuple[int, int] | None
+# `Fingerprint` (= `(mtime_ns, size)`, or `None` when the candidate file does not
+# exist) and `fingerprint_for` are the snapshot manifest's own stat identity,
+# reused rather than re-derived — the two must agree on how a file is compared
+# (equality, not recency), and an absent layer is a stored value (`None`), not a
+# miss, so a file appearing (absent → present) flips the stamp on the next read.
 
 _parse_cache: dict[Path, tuple[Fingerprint, dict[str, Any]]] = {}
 _merged_cache: dict[tuple[Path, ...], tuple[tuple[Any, ...], MetadataSchema]] = {}
-
-
-def fingerprint(path: Path) -> Fingerprint:
-    """The file's identity, compared by equality not recency (a backup-restored
-    file carries an older mtime yet is still a change). `None` = no file there."""
-    try:
-        stat = path.stat()
-    except OSError:
-        return None
-    return (stat.st_mtime_ns, stat.st_size)
 
 
 def layer_parse(
@@ -92,7 +87,7 @@ def resolved_schema(
     fold and no re-validation, a mismatch rebuilds and overwrites in place.
     `build` receives the same fingerprints so it need not stat twice.
     """
-    fingerprints = [fingerprint(path) for path in paths]
+    fingerprints = [fingerprint_for(path) for path in paths]
     key = tuple(paths)
     stamp = (tuple(fingerprints), build_identity())
     cached = _merged_cache.get(key)

@@ -205,18 +205,24 @@ class SchemaCacheTests(unittest.TestCase):
         # Catches: a recency-based staleness check ("is the file newer?") instead
         # of equality — the backup-restore case the design names. A file restored
         # from backup lands an OLDER mtime yet is a real change.
-        self._write_field_at(self.root, "before")
-        self.assertIn("before", self.service.read_metadata_schema().fields)
+        #
+        # The two field names are the SAME length ("aaaaa"/"bbbbb"), so the file
+        # size is byte-identical across the edit and mtime is the *only* thing
+        # that moves. That isolates the mtime dimension: the test now also fails
+        # for a size-only fingerprint that dropped mtime entirely, not just for a
+        # recency comparison.
+        self._write_field_at(self.root, "aaaaa")
+        self.assertIn("aaaaa", self.service.read_metadata_schema().fields)
 
         path = self.root / "metadata.schema.yaml"
         cached_mtime_ns = path.stat().st_mtime_ns
-        self._write_field_at(self.root, "after")
+        self._write_field_at(self.root, "bbbbb")
         older = cached_mtime_ns - 10_000_000_000  # 10s before the cached stamp
         os.utime(path, ns=(older, older))
 
         fields = self.service.read_metadata_schema().fields
-        self.assertIn("after", fields)
-        self.assertNotIn("before", fields)
+        self.assertIn("bbbbb", fields)
+        self.assertNotIn("aaaaa", fields)
 
     # --- F. switch-stable ----------------------------------------------
 

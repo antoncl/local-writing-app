@@ -26,6 +26,7 @@
   import type { AssistantEntrySummary, Backlink, BodyShape, DocumentKind, EditableDocument, EntryBodyLanguage, EntryMetadata, EntryTypeDefinition, MetadataFieldDefinition, MetadataSchema, PromptEntrySummary, PromptInputDefinition } from "@/lib/types";
   import type { ViewSaveState } from "@/lib/editor-core/editorPaneModel";
   import { metadataSchemaStore } from "@/lib/stores/schema";
+  import LayerAuthoringBar from "@/components/editor/LayerAuthoringBar.svelte";
   import { referenceIndexStore } from "@/lib/stores/references";
   import { backlinksFor } from "@/lib/views/backlinks";
   import { effectiveFieldLabel } from "@/lib/utils/schemaTypeHelpers";
@@ -74,6 +75,14 @@
     metadataReload?: { token: number; metadata: EntryMetadata; status?: string; entryType: string } | null;
     titleReload?: { token: number; title: string } | null;
     dirty?: boolean;
+    // True for ~2s after a save (#314): drives the layer picker's "Saved to …"
+    // footer echo — the only per-write signal the silent autosave permits.
+    recentlySaved?: boolean;
+    // ADR-0042's authoring layer L for an inherited lore entry (#314): the layer
+    // id the rail picker targets. `null` = rest (save to the open project / the
+    // entry's own file). The pane store owns it; the picker reports changes up
+    // via onAuthoringLayerChange.
+    authoringLayerId?: string | null;
     todoStatusHint?: string;
     // INTERNAL on: listeners (to still-legacy MetadataPanel/*BodyView) are unchanged.
     onChange?: ((payload: { title: string; body: string; status: string; entryType: string; metadata: EntryMetadata; inputs?: PromptInputDefinition[] }) => void) | undefined;
@@ -84,6 +93,9 @@
     // The view designer self-persists; it reports its save lifecycle up so the
     // pane's tab badge can reflect it (#263).
     onViewSaveState?: ((state: ViewSaveState) => void) | undefined;
+    // The rail layer picker chose a new authoring layer L (#314). Fires only
+    // after the confirm-on-entry gate for a target beyond the open project.
+    onAuthoringLayerChange?: ((layerId: string | null) => void) | undefined;
     // Snapshots (#401). Autosave lags the buffer by up to 6 seconds, and both
     // capture and restore read the FILE — so the strip asks the host to write
     // pending edits first, and hands the restored document back for the host to
@@ -107,6 +119,8 @@
     metadataReload = null,
     titleReload = null,
     dirty = false,
+    recentlySaved = false,
+    authoringLayerId = null,
     todoStatusHint = "",
     onChange = undefined,
     onFocus = undefined,
@@ -114,6 +128,7 @@
     onNavigate = undefined,
     onOpenChat = undefined,
     onViewSaveState = undefined,
+    onAuthoringLayerChange = undefined,
     onFlushScene = undefined,
     onSceneRestored = undefined
   }: Props = $props();
@@ -823,6 +838,15 @@
     maybeReseedInputs(scene, documentKind);
   });
   let documentLabel = $derived(documentKind === "lore" ? "Entry" : documentKind === "structure_node" ? "Node" : documentKind === "chat" ? "Chat" : "Scene");
+
+  // Fields whose value comes from a layer override (#314), passed to the rail so
+  // it can lead them with the `ti-versions` mark. The picker itself lives in
+  // LayerAuthoringBar (kept out of this shell for the file-size cap).
+  let overriddenFieldsForPanel = $derived(
+    documentKind === "lore" && scene && "overridden_fields" in scene
+      ? ((scene as import("@/lib/types").LoreEntry).overridden_fields ?? [])
+      : [],
+  );
   // The title header's label is the intrinsic `title` field's effective label
   // for this entry type (#116) — schema-driven, so lore reads "Name" (a
   // built-in per-type override) and users can relabel per type. Falls back to
@@ -906,6 +930,7 @@
       excludeId={scene?.id ?? null}
       sourceLayerId={scene?.source_layer_id ?? null}
       sourceLayerLabel={scene?.source_layer_label ?? null}
+      overriddenFields={overriddenFieldsForPanel}
       computedFieldString={computedFieldString}
       effectiveOverrides={scrubbed ? scrub.overrides : null}
       compare={snapshotCompare}
@@ -973,6 +998,16 @@
           {/if}
         </label>
       </div>
+      <!-- Layer override authoring (#314 / ADR-0042): choose which level this
+           inherited entry's edits write to. Renders only for an inherited lore
+           entry; no-ops otherwise. -->
+      <LayerAuthoringBar
+        {scene}
+        {documentKind}
+        {authoringLayerId}
+        {recentlySaved}
+        {onAuthoringLayerChange}
+      />
       {#if todoStatusHint || (documentKind === "scene" && (lastInvocationCostUsd != null || characterCostRowsView.length > 0)) || rollupCostKind}
         <div class="editor-hint">
           {#if todoStatusHint}

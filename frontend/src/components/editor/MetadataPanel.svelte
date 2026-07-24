@@ -41,6 +41,12 @@
     // visible. Null / matching the open project = authored here, no treatment.
     sourceLayerId?: string | null;
     sourceLayerLabel?: string | null;
+    // Layer-override marks (#314 / ADR-0039): the metadata fields whose effective
+    // value comes from an override in this project's chain, not inherited canon.
+    // Each such field leads its value with the `ti-versions` mark — the hierarchy
+    // twin of the manuscript `⤳` mutation mark (design-language.md §marks). A
+    // field can be both overridden and mutated; the two marks then co-occur.
+    overriddenFields?: string[];
     computedFieldString?: (fieldId: string) => string;
     // Time-travel overlay (#64, ADR-0013): when scrubbed to a mutation point the
     // rail renders effective values read-only. `effectiveOverrides` holds ONLY
@@ -86,6 +92,7 @@
     excludeId = null,
     sourceLayerId = null,
     sourceLayerLabel = null,
+    overriddenFields = [],
     computedFieldString = () => "",
     effectiveOverrides = null,
     compare = null,
@@ -181,6 +188,13 @@
     return effectiveOverrides != null && fieldId in effectiveOverrides;
   }
 
+  // Whether this field's effective value comes from a layer override (#314).
+  // A permanent fact about the value — like `⤳`, it draws a glyph — so it is a
+  // separate axis from the snapshot-compare lens (which gets colour, not a glyph).
+  function isOverridden(fieldId: string): boolean {
+    return overriddenFields.includes(fieldId);
+  }
+
   function displayValue(fieldId: string): MetadataValue {
     if (isMutated(fieldId)) return effectiveOverrides?.[fieldId] ?? "";
     const flipped = compare?.fields[fieldId];
@@ -256,10 +270,11 @@
       {#if metadataSchema.fields[fieldId] && !metadataSchema.fields[fieldId].intrinsic && !effectiveFieldHidden(metadataSchema, entryType, fieldId)}
         {@const field = metadataSchema.fields[fieldId]}
         {@const fieldLabel = effectiveFieldLabel(metadataSchema, entryType, fieldId)}
-        <div class="field-row" class:color-row={field.type === "color"} class:wide={isWide(field)} class:inherited={isInherited(fieldId)} class:mutated={isMutated(fieldId)} class:flipped={isFlipped(fieldId)} class:flip-was={isFlipped(fieldId) && compare?.side === "was"}>
+        <div class="field-row" class:color-row={field.type === "color"} class:wide={isWide(field)} class:inherited={isInherited(fieldId)} class:mutated={isMutated(fieldId)} class:overridden={isOverridden(fieldId)} class:flipped={isFlipped(fieldId)} class:flip-was={isFlipped(fieldId) && compare?.side === "was"}>
           <span class="fr-icon"><i class={fieldIconClass(field)} aria-hidden="true"></i></span>
           <span class="fr-name">{fieldLabel}{#if isMutated(fieldId)}<span class="fr-mutated-marker" title="Changed by here">⤳</span>{/if}</span>
           <div class="fr-val">
+            {#if isOverridden(fieldId)}<i class="ti ti-versions fr-override-marker" title={`Overridden here — this value comes from a layer override in this project, not from ${sourceLayerLabel ?? "inherited canon"}`}></i>{/if}
             {#if fieldId === "status"}
               <!-- status is stored off `metadata` and edited via onStatusChange. -->
               <ColoredSelect
@@ -479,6 +494,21 @@
     color: var(--mutation-color);
     font-weight: 700;
     font-size: var(--fs-sm);
+  }
+
+  /* Layer-override mark (#314): the hierarchy twin of `⤳`, leading the value.
+     On the `--star` provenance axis — the same vocabulary as the level pill,
+     ancestor banner and rail-provenance block — because it says where this
+     value came from. `flex: 0 0 auto` keeps the glyph from being stretched by
+     the wide-field `.fr-val > *` rule below. */
+  .fr-override-marker {
+    flex: 0 0 auto;
+    color: var(--star);
+    font-size: var(--fs-md);
+    line-height: 1;
+  }
+  .field-row.wide .fr-val > .fr-override-marker {
+    flex: 0 0 auto;
   }
   .field-row.mutated .fr-name {
     color: var(--mutation-color);

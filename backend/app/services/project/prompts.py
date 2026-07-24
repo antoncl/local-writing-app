@@ -183,6 +183,5 @@ class PromptEntriesMixin:
 
     def delete_prompt_entry(self, entry_id: str) -> PromptEntryList:
         path = self._path_for_node_id(entry_id, "prompt")
-        if path.exists():
-            path.unlink()
+        self._delete_node_file(path)  # unlink + un-shadow the memo (#392)
         return self.list_prompt_entries()

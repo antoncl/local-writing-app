@@ -478,8 +478,7 @@ class AssistantEntriesMixin:
         index_entry = self._build_assistant_index().by_id.get(entry_id)
         if index_entry is None or index_entry.kind != "assistant":
             raise ProjectServiceError(f"Assistant {entry_id} does not exist.", 404)
-        if index_entry.path.exists():
-            index_entry.path.unlink()
+        self._delete_node_file(index_entry.path)  # unlink + un-shadow the memo (#392)
         return self.list_assistant_entries()
 
     def _assistant_layer_folder_for_id(self, layer_id: str | None) -> Path:

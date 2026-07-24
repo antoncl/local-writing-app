@@ -414,6 +414,12 @@ class SceneSnapshotsMixin:
 
         stored = self._snapshots_dir(root, node_id) / f"{snapshot_id}.md"
         self._atomic_write_bytes(path, stored.read_bytes())
+        # `_atomic_write_bytes` deliberately bypasses the text writer, so it also
+        # bypasses the change-gate hook on `_atomic_write` — a restore that
+        # changed the scene's title, entry_type, or a reference field would
+        # otherwise leave the in-memory node index describing the pre-restore
+        # state (#392). Restore is always structural (the content is replaced).
+        self._apply_index_write((path,), structural=True)
 
         front_matter, body = self._read_markdown_with_front_matter(path, strict=True)
         # The filename stays as it is — it is cosmetic, and reads resolve by id.

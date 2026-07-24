@@ -30,6 +30,7 @@ from app.models import (
 )
 from app.runtime import current_scope
 from app.services.project.errors import ProjectServiceError
+from app.services.project.node_index_gate import node_index_gate
 from app.services.project_service import ProjectService
 from app.services.tree_structure import TreeStructureService
 
@@ -1816,6 +1817,7 @@ class MetadataValidationTests(unittest.TestCase):
         original_path = self.service._path_for_node_id(entry.id, "lore")
         renamed_path = self.root / "lore" / "robert-smith-renamed.md"
         original_path.rename(renamed_path)
+        node_index_gate.invalidate()  # a raw rename is external; model the reopen (#392)
 
         loaded = self.service.read_lore_entry(entry.id)
         listed = self.service.list_lore_entries().entries
@@ -1829,6 +1831,7 @@ class MetadataValidationTests(unittest.TestCase):
         original_path = self.service._path_for_node_id(scene.id, "scene")
         renamed_path = self.root / "scenes" / "opening-scene-renamed.md"
         original_path.rename(renamed_path)
+        node_index_gate.invalidate()  # a raw rename is external; model the reopen (#392)
 
         loaded = self.service.read_scene(scene.id)
         validation = self.service.validate_project()
@@ -1841,6 +1844,7 @@ class MetadataValidationTests(unittest.TestCase):
         path = self.service._path_for_node_id(entry.id, "lore")
         original_text = path.read_text(encoding="utf-8")
         path.write_text(original_text.replace(f"id: {entry.id}\n", ""), encoding="utf-8")
+        node_index_gate.invalidate()  # a raw file edit is external; model the reopen (#392)
 
         validation = self.service.validate_project()
 
@@ -1852,6 +1856,7 @@ class MetadataValidationTests(unittest.TestCase):
         duplicate_path = self.service._path_for_node_id(duplicate.id, "lore")
         duplicate_text = duplicate_path.read_text(encoding="utf-8")
         duplicate_path.write_text(duplicate_text.replace(f"id: {duplicate.id}\n", f"id: {entry.id}\n"), encoding="utf-8")
+        node_index_gate.invalidate()  # a raw file edit is external; model the reopen (#392)
 
         validation = self.service.validate_project()
 

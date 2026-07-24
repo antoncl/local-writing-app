@@ -232,8 +232,7 @@ class ResearchNotesMixin:
         for note_id in note_ids:
             try:
                 path = self._path_for_node_id(note_id, "research")
-                if path.exists():
-                    path.unlink()
+                self._delete_node_file(path)  # unlink + un-shadow the memo (#392)
             except ProjectServiceError:
                 pass
 

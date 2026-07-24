@@ -233,7 +233,15 @@ class LayerWalkMixin:
         machine_dir = ms_service.assistants_dir().parent
         if not (machine_dir / "assistants").exists():
             return None
-        return machine_dir
+        # Resolved, like every project layer (`_project_layer_folders`, #356) and
+        # `root` itself. It was the one un-canonicalised folder in the chain, and
+        # while the index was rebuilt by globbing that never showed — a glob works
+        # on any spelling. #392's change-gate compares a written file's *resolved*
+        # path against `layer.folder`, so an unresolved machine folder (e.g. an
+        # 8.3 short path like `C:\Users\RUNNER~1\…` on CI) fails to match, the
+        # patch silently no-ops, and a just-created machine-layer assistant 404s
+        # on read-back from the now-stale memo.
+        return machine_dir.resolve()
 
     def ancestor_candidates(self, root: Path) -> list[tuple[Path, bool]]:
         """Every folder between the machine root and `root`, outermost first,

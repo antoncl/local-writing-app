@@ -47,6 +47,7 @@ from app.services.project.node_index import (
     NodeIndexEntry,
     ReferenceEdge,
 )
+from app.services.project.node_index_gate import ResolvedIndex, node_index_gate
 from app.services.project.node_index_patch import PatchNotApplicable
 from app.services.project.node_index_snapshot import (
     LoadedSnapshot,
@@ -272,12 +273,34 @@ class ReferencesMixin:
             log.warning("Could not write the node-index snapshot for %s: %s", root, exc)
 
     def _build_node_index(self, root: Path | None = None) -> NodeIndex:
-        """Walk the layer chain once, producing both the id→entry map and the
-        reference edges (#305).
+        """The funnel every index consumer goes through — now memoized (#392).
 
-        Edge extraction is schema-driven, so the merged schema is read up front
-        and threaded into the collectors — the front matter each file yields is
-        parsed exactly once, for both purposes.
+        A warm hit returns the in-memory index held by `node_index_gate` for this
+        resolution scope with **no disk work at all**: no manifest sweep, no
+        snapshot read. A miss builds it cold (`_resolve_index_cold`, below) and
+        publishes it; the gate collapses a concurrent stampede to one build. The
+        memo is dropped on every scope change (`CurrentScope.set` → `invalidate`)
+        and maintained in place by the write funnel (`_apply_index_write`), so
+        two consecutive consumers in one request build the index once and a
+        prose-only save leaves it untouched.
+        """
+        # Canonicalised **once, here**, so the gate key, the snapshot's location,
+        # its `root` key and the manifest's keys are all in the same normal form
+        # as the layer folders the walk yields (`layers.py` resolves too), and so
+        # the write funnel's `path.resolve()` compares equal to a stored entry's
+        # path. Normalising at each comparison instead would be a second place
+        # that decides a path's normal form — the shape of #356.
+        root = (root or self._require_project()).resolve()
+        return node_index_gate.resolve(root, lambda: self._resolve_index_cold(root))
+
+    def _resolve_index_cold(self, root: Path) -> ResolvedIndex:
+        """Build the index for `root` from disk — the gate's miss path.
+
+        Walks the layer chain once, producing both the id→entry map and the
+        reference edges (#305). Edge extraction is schema-driven, so the merged
+        schema is read up front and threaded into the collectors — the front
+        matter each file yields is parsed exactly once, for both purposes. Serves
+        a fresh snapshot as-is, patches a stale one in place (#307), or rebuilds.
 
         **A schema that will not load must not make the index unbuildable.**
         Reading the schema is new work on this path: before #305 the index never
@@ -287,16 +310,13 @@ class ReferencesMixin:
         to `_path_for_node_id` on each save. The failure degrades to "no edges"
         plus an `index.errors` row. Callers that want the schema still fail
         loudly on their own read; this one does not fail on their behalf.
+
+        Returns the built index **with** the layers and manifest it was built
+        against, so the write funnel can patch and re-fingerprint without
+        re-walking or re-globbing.
         """
-        # Canonicalised **once, here**, so every path derived below — the
-        # snapshot's location, its `root` key, the manifest's keys — is in the
-        # same normal form as the layer folders the walk yields (`layers.py`
-        # resolves too). Normalising at each comparison instead would be a
-        # second place that decides what a path's normal form is, which is the
-        # shape of #356. An unresolved spelling would otherwise miss the cache
-        # on every call *and* rewrite the snapshot each time: strictly worse
-        # than no cache, and silent.
-        root = (root or self._require_project()).resolve()
+        # `root` is already resolved by the caller (`_build_node_index`), the one
+        # place canonicalisation happens.
         layers = self.collect_layers(root, include_machine=True)
         # Fingerprinted **before** the build, not after. A file written while
         # the build runs is then either missed by both (consistent) or indexed
@@ -306,7 +326,11 @@ class ReferencesMixin:
         manifest = self._build_index_manifest(layers)
         loaded = self._load_index_snapshot(root, layers=layers, manifest=manifest)
         if loaded is not None and loaded.is_fresh:
-            return loaded.index
+            # The snapshot carries the edges but not the schema they were drawn
+            # from; the memo stashes it (#392) so the change-gate reuses it
+            # rather than re-reading on every save. This one read rides the warm
+            # open, not the hot save path.
+            return ResolvedIndex(root, loaded.index, tuple(layers), manifest, self._read_schema_or_none(root))
         index = NodeIndex()
         try:
             # `root`, not the singleton. Edge extraction is schema-driven, so
@@ -350,7 +374,7 @@ class ReferencesMixin:
                 log.debug("Rebuilding the node index for %s instead of patching: %s", root, exc)
             else:
                 self._write_index_snapshot(root, patched, layers=layers, manifest=manifest)
-                return patched
+                return ResolvedIndex(root, patched, tuple(layers), manifest, schema)
         # One walk, machine layer included (#329). It comes first and carries
         # assistants only — it lives outside the project tree and holds the
         # user's roster. Project layers follow outermost-ancestor first, so a
@@ -366,7 +390,206 @@ class ReferencesMixin:
         # shadow — that is what stops the walk destroying an ancestor.
         index.resolve()
         self._write_index_snapshot(root, index, layers=layers, manifest=manifest)
-        return index
+        return ResolvedIndex(root, index, tuple(layers), manifest, schema)
+
+    def _read_schema_or_none(self, root: Path) -> MetadataSchema | None:
+        """The merged schema, or None when it will not load — the value the memo
+        stashes on the snapshot-serve path (#392). Mirrors the cold build's
+        posture (an unreadable schema costs edges, not correctness) but without
+        the `index.errors` row, since the served snapshot already carries its
+        own diagnostics."""
+        try:
+            return self.read_metadata_schema(root)
+        except (ProjectServiceError, ValueError, OSError):
+            return None
+
+    # ---- write funnel: the change-gate (#392) -------------------------------
+    #
+    # Every in-app mutation of an indexed node file routes through one of these,
+    # so the memo is maintained by construction rather than by every write path
+    # remembering to notify it. The node-write primitives call them
+    # (`_write_scene_file`, `_write_lore_entry_file`, `_write_node_entry_file`,
+    # the project-node write), as do the one delete helper (`_delete_node_file`)
+    # and the rename (`_maybe_rename_node_file`). A guard test forbids a bare
+    # `.unlink(`/hand-rolled node write under `services/project/`, so the funnel
+    # cannot be bypassed unnoticed.
+
+    def _apply_index_write(self, paths: tuple[Path, ...], *, structural: bool) -> None:
+        """Maintain the memo after writing/deleting/renaming node file(s).
+
+        `structural=False` (a plain save) runs the change-gate: re-derive the one
+        file's index signature and compare it to the held entry — a prose-only
+        save changes nothing the index holds (id, kind, entry_type, title, path,
+        or a reference field's value), so the memo is left untouched and no
+        snapshot is written. `structural=True` (a delete or rename) always
+        patches, because the path set itself changed.
+
+        Called for **every** write via `_maintain_index_after_write`, so a path
+        that is not an index input (a config file, the snapshot, a file outside
+        the chain) is a no-op — the mutate below leaves the memo untouched. Also
+        a no-op when no project is open or no index is held for this scope: the
+        next `_build_node_index` builds cold and sees the write through the
+        manifest sweep, so nothing is lost.
+        """
+        if self.root_path is None:
+            return
+        root = self.root_path.resolve()
+        resolved = tuple(path.resolve() for path in paths)
+        node_index_gate.apply(
+            root, lambda current: self._mutate_index_for_write(current, resolved, structural)
+        )
+
+    def _mutate_index_for_write(
+        self, current: ResolvedIndex, paths: tuple[Path, ...], structural: bool
+    ) -> ResolvedIndex | None:
+        """The gate callback: patch `current` for `paths`, or return None (no-op).
+
+        Runs under the gate lock. On `PatchNotApplicable` — the diff reaches
+        something the patch does not model (a diagnostic it cannot retract, a
+        fan-out file) — it rebuilds cold and republishes, so the memo is never
+        left describing a pre-write state.
+        """
+        layers = list(current.layers)
+        # Keep only paths this index actually holds. `_patch_unit` places a node
+        # file against the walk's own folder rules and raises for anything else,
+        # so an unplaceable path — a config file, the snapshot, a write outside
+        # the chain — drops out here and the memo is left untouched.
+        placeable = []
+        for path in paths:
+            try:
+                self._patch_unit(path, layers)
+            except PatchNotApplicable:
+                continue
+            placeable.append(path)
+        if not placeable:
+            return None
+        # Reuse the schema the memo was built with (#392) rather than re-reading
+        # the uncached layer-chain schema the save already read moments ago. It
+        # cannot be stale relative to `current.index`: a schema-file write fans
+        # out and invalidates the whole memo, so a held schema and its index
+        # always agree.
+        schema: MetadataSchema | None = current.schema
+        if schema is None:
+            # The memo was built without a loadable schema (a degraded,
+            # edge-less index). Without it, neither the signature comparison nor
+            # the patch can compute a written file's edges — so a reference
+            # change would be silently dropped. Rebuild cold instead, which
+            # re-reads the schema and re-derives the state, exactly as this path
+            # did before the schema was memoised.
+            return self._resolve_index_cold(current.root)
+        if not structural and len(placeable) == 1:
+            before = self._index_signature_from_memo(current.index, placeable[0])
+            after = self._index_signature_from_disk(placeable[0], layers, schema)
+            if before is not None and before == after:
+                return None  # prose-only: nothing the index holds moved.
+        new_index = self._clone_node_index(current.index)
+        changed = tuple(str(path) for path in placeable)
+        try:
+            self._patch_node_index(
+                new_index, changed=changed, layers=layers, root=current.root, schema=schema
+            )
+        except PatchNotApplicable as exc:
+            log.debug("Rebuilding the node index for %s instead of patching a write: %s", current.root, exc)
+            return self._resolve_index_cold(current.root)
+        manifest = dict(current.manifest)
+        for path in placeable:
+            fingerprint = fingerprint_for(path)
+            if fingerprint is None:
+                # A deleted node file is *absent* from a freshly globbed
+                # manifest, so drop the key rather than storing None — otherwise
+                # the next cold open's diff would flag it forever.
+                manifest.pop(str(path), None)
+            else:
+                manifest[str(path)] = fingerprint
+        self._write_index_snapshot(current.root, new_index, layers=layers, manifest=manifest)
+        # Carry the schema forward (#392): a patched memo must keep the schema
+        # its predecessor held, or the next save's change-gate would see None and
+        # rebuild — or worse, silently drop an edge change it could not compute.
+        return ResolvedIndex(current.root, new_index, current.layers, manifest, schema)
+
+    def _index_signature_from_memo(
+        self, index: NodeIndex, path: Path
+    ) -> tuple[str, str, str, str, tuple[ReferenceEdge, ...]] | None:
+        """What the held index records for the file at `path`: its identity
+        fields plus its edges. None when no entry there — a brand-new file, which
+        is a change, so the caller must patch."""
+        for entries in index.candidates.values():
+            for entry in entries:
+                if entry.path == path:
+                    edges = tuple(index.edges_by_layer_src.get((entry.source_layer_id, entry.id), ()))
+                    return (entry.id, entry.kind, entry.entry_type, entry.title, edges)
+        return None
+
+    _SIGNATURE_STRUCTURAL = object()
+
+    def _index_signature_from_disk(
+        self, path: Path, layers: list[IndexLayer], schema: MetadataSchema | None
+    ) -> object:
+        """The same signature, re-derived from the file as it now sits on disk.
+
+        Returns a distinct sentinel — never equal to any memo signature — when
+        the file is malformed, unplaceable, or otherwise uncertain, so the caller
+        falls through to the patch/rebuild path rather than trusting a partial
+        read.
+        """
+        try:
+            unit = self._patch_unit(path, layers)
+        except PatchNotApplicable:
+            return self._SIGNATURE_STRUCTURAL
+        probe = NodeIndex()
+        if unit.kind == "family":
+            if not path.exists():
+                return None
+            assert unit.family is not None
+            self._collect_entry_file(
+                path, layer=unit.layer, family=unit.family, index=probe,
+                duplicate_relative_to=unit.layer.folder, schema=schema,
+            )
+        elif unit.kind == "project_node":
+            self._collect_project_node_entry(layer=unit.layer, index=probe, schema=schema)
+        elif unit.kind == "chat":
+            # One file, not the whole chats/ folder (#392) — a chat's signature
+            # is (id, title), readable from the file that was just written.
+            self._collect_chat_file(path, layer=unit.layer, index=probe)
+        else:  # pragma: no cover - _patch_unit yields no other kind
+            return self._SIGNATURE_STRUCTURAL
+        if probe.errors or probe.has_unparsed_nodes:
+            # A malformed write. Force the structural path so the diagnostic is
+            # collected by a rebuild rather than silently dropped here.
+            return self._SIGNATURE_STRUCTURAL
+        return self._index_signature_from_memo(probe, path)
+
+    def _clone_node_index(self, index: NodeIndex) -> NodeIndex:
+        """A patchable copy of a published index.
+
+        Entries and edges are frozen, so only the container lists need copying:
+        the patch mutates `candidates` / `edges_by_layer_src` in place and
+        `resolve()`s at the end. Leaving the original untouched is what lets a
+        concurrent reader keep serving it (model B)."""
+        clone = NodeIndex()
+        clone.candidates = {node_id: list(entries) for node_id, entries in index.candidates.items()}
+        clone.edges_by_layer_src = {key: list(edges) for key, edges in index.edges_by_layer_src.items()}
+        clone.warnings = list(index.warnings)
+        clone.errors = list(index.errors)
+        clone.degraded = index.degraded
+        clone.has_unparsed_nodes = index.has_unparsed_nodes
+        clone._shadow_warnings = list(index._shadow_warnings)
+        return clone
+
+    def _delete_node_file(self, path: Path) -> None:
+        """Unlink an indexed node file and un-shadow the memo (#392).
+
+        The single delete primitive the node slices call instead of a bare
+        `path.unlink()`, so a delete maintains the memo the way a save does. A
+        delete is always structural: removing a book-level node that shadowed an
+        ancestor's must make the ancestor visible again (#307), which the patch
+        does by re-resolving a shorter candidate list.
+        """
+        if path.exists():
+            path.unlink()
+        # Notify even when the file was already gone: the caller treated it as a
+        # delete, and a memo entry may still describe it.
+        self._apply_index_write((path,), structural=True)
 
     def _collect_chat_entries(self, *, layer: IndexLayer, index: NodeIndex) -> None:
         """Walk <project>/chats/*.yaml and add an index entry per session.
@@ -378,44 +601,54 @@ class ReferencesMixin:
         if not chats_dir.exists():
             return
         for path in sorted(chats_dir.glob("*.yaml")):
-            try:
-                data = self._read_yaml(path)
-            except Exception as exc:
-                index.errors.append(f"Failed to read chat session {path.name}: {exc}")
-                index.has_unparsed_nodes = True
-                # Same rule as the schema read: a chat we could not open is
-                # missing from the index entirely, and its file is unchanged, so
-                # a snapshot would keep it missing across every later open.
-                index.degraded = index.degraded or isinstance(exc, OSError)
-                continue
-            if not isinstance(data, dict):
-                continue
-            raw_id = data.get("id")
-            if not isinstance(raw_id, str) or not raw_id.strip():
-                continue
-            chat_id = raw_id.strip()
-            raw_title = data.get("title")
-            title = raw_title.strip() if isinstance(raw_title, str) and raw_title.strip() else "Untitled chat"
-            entry = NodeIndexEntry(
-                id=chat_id,
-                kind="chat",
-                entry_type="chat:chat_session",
-                path=path,
-                title=title,
-                source_layer_id=layer.id,
-                source_layer_label=layer.label,
+            self._collect_chat_file(path, layer=layer, index=index)
+
+    def _collect_chat_file(self, path: Path, *, layer: IndexLayer, index: NodeIndex) -> None:
+        """Collect exactly one chat session file into `index`.
+
+        Split out of the folder walk (#392) so the change-gate can re-derive a
+        single chat's signature by reading *that* file, rather than re-parsing
+        every chat session — each of which carries its whole message journal —
+        to answer whether one chat's title moved.
+        """
+        try:
+            data = self._read_yaml(path)
+        except Exception as exc:
+            index.errors.append(f"Failed to read chat session {path.name}: {exc}")
+            index.has_unparsed_nodes = True
+            # Same rule as the schema read: a chat we could not open is
+            # missing from the index entirely, and its file is unchanged, so
+            # a snapshot would keep it missing across every later open.
+            index.degraded = index.degraded or isinstance(exc, OSError)
+            return
+        if not isinstance(data, dict):
+            return
+        raw_id = data.get("id")
+        if not isinstance(raw_id, str) or not raw_id.strip():
+            return
+        chat_id = raw_id.strip()
+        raw_title = data.get("title")
+        title = raw_title.strip() if isinstance(raw_title, str) and raw_title.strip() else "Untitled chat"
+        entry = NodeIndexEntry(
+            id=chat_id,
+            kind="chat",
+            entry_type="chat:chat_session",
+            path=path,
+            title=title,
+            source_layer_id=layer.id,
+            source_layer_label=layer.label,
+        )
+        if index.candidates.get(chat_id):
+            # Chat ids are prefixed (`chat_…`) and minted via _new_id, so
+            # cross-kind collisions shouldn't happen in practice. If one
+            # ever does, surface it rather than silently shadowing: `kind`
+            # partitions identity, so a chat and a lore entry sharing an id
+            # are two things colliding, not one shadowing the other.
+            index.errors.append(
+                f"Chat id {chat_id} collides with an existing entry."
             )
-            if index.candidates.get(chat_id):
-                # Chat ids are prefixed (`chat_…`) and minted via _new_id, so
-                # cross-kind collisions shouldn't happen in practice. If one
-                # ever does, surface it rather than silently shadowing: `kind`
-                # partitions identity, so a chat and a lore entry sharing an id
-                # are two things colliding, not one shadowing the other.
-                index.errors.append(
-                    f"Chat id {chat_id} collides with an existing entry."
-                )
-                continue
-            index.add(entry)
+            return
+        index.add(entry)
 
     def _collect_project_node_entry(
         self, *, layer: IndexLayer, index: NodeIndex, schema: MetadataSchema | None = None

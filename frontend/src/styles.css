@@ -1008,6 +1008,7 @@ button.row-action-add.active {
   background: transparent;
   border-style: dashed;
   font-weight: 500;
+  gap: 3px; /* icon + label are separate flex items; whitespace between them collapses */
 }
 .editor-body .mutation-pill-close:hover {
   background: color-mix(in oklab, var(--mutation-color) 14%, transparent);

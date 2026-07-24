@@ -15,6 +15,7 @@ from app.models import (
     UpsertMetadataEntryTypeRequest,
     UpsertMetadataFieldRequest,
 )
+from app.services.project_service import ProjectService
 from project_fixtures import open_test_project
 
 
@@ -42,6 +43,18 @@ class PlotNodeTests(unittest.TestCase):
         self.assertEqual(node["entry_type"], "plot:template")
         self.assertTrue(node["system"])
         self.assertGreater(len(node["template"]["plot_points"]), 0)
+
+    def test_open_project_backfills_missing_builtin_templates(self) -> None:
+        for path in (self.root / "plot").glob("*.md"):
+            path.unlink()
+
+        reopened = ProjectService.opened_at(self.root)
+        templates = [
+            entry for entry in reopened.list_plot_nodes().entries
+            if entry.entry_type == "plot:template"
+        ]
+        self.assertGreaterEqual(len(templates), 3)
+        self.assertTrue(all(entry.system for entry in templates))
 
     def test_system_template_rejects_save_and_delete(self) -> None:
         templates = self.client.get("/api/plots").json()["entries"]

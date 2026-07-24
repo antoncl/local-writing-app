@@ -140,7 +140,9 @@ class ProjectService(
             migrations = migrate_project(root)
         except Exception as exc:  # noqa: BLE001
             raise ProjectServiceError(f"Project migration failed: {exc}", 500) from exc
-        return cls(WorkScope(root=root, migrations_applied=tuple(migrations)))
+        service = cls(WorkScope(root=root, migrations_applied=tuple(migrations)))
+        service._seed_builtin_plot_templates(root)
+        return service
 
     def _entry_markdown_paths(self, root: Path) -> list[Path]:
         return [

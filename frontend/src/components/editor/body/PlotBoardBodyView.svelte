@@ -43,6 +43,12 @@
     claim: PlotPointClaim | null;
   };
 
+  type PlotDragPayload =
+    | { kind: "plot-point"; template_instance_id: string; plot_point_id: string }
+    | { kind: "plot-claim"; claim_id: string };
+
+  const PLOT_DND_TYPE = "application/x-local-writing-plot";
+
   const EMPTY_BOARD = {
     version: 1,
     template_instance_ids: [],
@@ -67,6 +73,7 @@
   let localPlotNode = $state<PlotNode | null>(null);
   let savingMessage = $state("");
   let saveError = $state("");
+  let dragOverCardId = $state<string | null>(null);
 
   let plotNode = $derived(localPlotNode ?? asPlotNode(scene));
   let board = $derived(plotNode?.board ?? EMPTY_BOARD);
@@ -264,6 +271,71 @@
     onFocus?.();
   }
 
+  function setPlotDragPayload(event: DragEvent, payload: PlotDragPayload): void {
+    const transfer = event.dataTransfer;
+    if (!transfer) return;
+    const encoded = JSON.stringify(payload);
+    transfer.setData(PLOT_DND_TYPE, encoded);
+    transfer.setData("text/plain", encoded);
+    transfer.effectAllowed = payload.kind === "plot-claim" ? "move" : "copy";
+  }
+
+  function readPlotDragPayload(event: DragEvent): PlotDragPayload | null {
+    const transfer = event.dataTransfer;
+    if (!transfer) return null;
+    const raw = transfer.getData(PLOT_DND_TYPE) || transfer.getData("text/plain");
+    if (!raw) return null;
+    try {
+      const parsed = JSON.parse(raw) as Partial<PlotDragPayload>;
+      if (
+        parsed.kind === "plot-point" &&
+        typeof parsed.template_instance_id === "string" &&
+        typeof parsed.plot_point_id === "string"
+      ) {
+        return {
+          kind: "plot-point",
+          template_instance_id: parsed.template_instance_id,
+          plot_point_id: parsed.plot_point_id,
+        };
+      }
+      if (parsed.kind === "plot-claim" && typeof parsed.claim_id === "string") {
+        return { kind: "plot-claim", claim_id: parsed.claim_id };
+      }
+    } catch {
+      return null;
+    }
+    return null;
+  }
+
+  function dragPalettePoint(row: TemplatePointRow, event: DragEvent): void {
+    selectPalettePoint(row);
+    setPlotDragPayload(event, {
+      kind: "plot-point",
+      template_instance_id: row.instance.id,
+      plot_point_id: row.point.plot_point_id,
+    });
+  }
+
+  function dragClaim(claim: PlotPointClaim, event: DragEvent): void {
+    event.stopPropagation();
+    selectClaim(claim);
+    setPlotDragPayload(event, { kind: "plot-claim", claim_id: claim.id });
+  }
+
+  function allowCardDrop(cardId: string, event: DragEvent): void {
+    event.preventDefault();
+    if (event.dataTransfer) event.dataTransfer.dropEffect = "copy";
+    dragOverCardId = cardId;
+  }
+
+  function leaveCardDrop(cardId: string, event: DragEvent): void {
+    const current = event.currentTarget as HTMLElement;
+    const next = event.relatedTarget as Node | null;
+    if (dragOverCardId === cardId && (!next || !current.contains(next))) {
+      dragOverCardId = null;
+    }
+  }
+
   function openCardNode(card: PlotBoardCard, event: MouseEvent): void {
     event.stopPropagation();
     if (!card.node_ref) return;
@@ -351,6 +423,82 @@
     }
   }
 
+  function plotlineIdForInstance(templateInstanceId: string): string | null {
+    return board.plotlines.find((line) => line.template_instance_id === templateInstanceId)?.id ?? null;
+  }
+
+  async function attachPointToCard(cardId: string, templateInstanceId: string, plotPointId: string): Promise<void> {
+    if (savingMessage) return;
+    const nextClaim: PlotPointClaim = {
+      id: newLocalId("claim"),
+      card_id: cardId,
+      template_instance_id: templateInstanceId,
+      plot_point_id: plotPointId,
+      plotline_id: plotlineIdForInstance(templateInstanceId),
+      claim_type: "satisfies",
+      claim_label: null,
+      strength: null,
+      confidence: null,
+      evidence: null,
+      rationale: null,
+      ai_notes: null,
+      metadata: {},
+    };
+    const nextBoard = cloneBoardSpec(board);
+    nextBoard.claims = [...(nextBoard.claims ?? []), nextClaim];
+    const saved = await persistBoard(nextBoard, "Attaching function point");
+    if (saved) {
+      selectedCardId = cardId;
+      selectedClaimId = nextClaim.id;
+      selectedPalettePoint = pointKey(templateInstanceId, plotPointId);
+    }
+  }
+
+  async function moveClaimToCard(claimId: string, cardId: string): Promise<void> {
+    if (savingMessage) return;
+    const claim = claims.find((candidate) => candidate.id === claimId);
+    if (!claim) return;
+    if (claim.card_id === cardId) {
+      selectClaim(claim);
+      return;
+    }
+    const nextBoard = cloneBoardSpec(board);
+    nextBoard.claims = (nextBoard.claims ?? []).map((candidate) =>
+      candidate.id === claimId ? { ...candidate, card_id: cardId } : candidate,
+    );
+    const saved = await persistBoard(nextBoard, "Moving claim");
+    if (saved) {
+      selectedCardId = cardId;
+      selectedClaimId = claimId;
+      selectedPalettePoint = pointKey(claim.template_instance_id, claim.plot_point_id);
+    }
+  }
+
+  async function removeClaim(claim: PlotPointClaim, event: MouseEvent): Promise<void> {
+    event.stopPropagation();
+    if (savingMessage) return;
+    const nextBoard = cloneBoardSpec(board);
+    nextBoard.claims = (nextBoard.claims ?? []).filter((candidate) => candidate.id !== claim.id);
+    const saved = await persistBoard(nextBoard, "Removing claim");
+    if (saved) {
+      selectedClaimId = null;
+      selectedPalettePoint = pointKey(claim.template_instance_id, claim.plot_point_id);
+    }
+  }
+
+  async function dropOnCard(cardId: string, event: DragEvent): Promise<void> {
+    event.preventDefault();
+    event.stopPropagation();
+    dragOverCardId = null;
+    const payload = readPlotDragPayload(event);
+    if (!payload) return;
+    if (payload.kind === "plot-claim") {
+      await moveClaimToCard(payload.claim_id, cardId);
+      return;
+    }
+    await attachPointToCard(cardId, payload.template_instance_id, payload.plot_point_id);
+  }
+
   async function addPlaceholderCard(columnId: string | null): Promise<void> {
     const title = window.prompt("Card title", "New plot card")?.trim();
     if (!title) return;
@@ -390,16 +538,6 @@
 
 <section class="plot-board" onfocusin={() => onFocus?.()}>
   <aside class="plot-palette" aria-label="Plot template instances">
-    <label class="filter-label">
-      Template
-      <select bind:value={templateFilterId}>
-        <option value="">All template instances</option>
-        {#each templateInstances as instance (instance.id)}
-          <option value={instance.id}>{instance.title}</option>
-        {/each}
-      </select>
-    </label>
-
     <div class="add-template">
       <label class="filter-label">
         Add instance
@@ -409,11 +547,27 @@
           {/each}
         </select>
       </label>
-      <button type="button" class="tool-button" disabled={!templateToAddId || Boolean(savingMessage)} onclick={() => addTemplateInstance()}>
+      <button
+        type="button"
+        class="tool-button icon-only"
+        title="Add template instance"
+        aria-label="Add template instance"
+        disabled={!templateToAddId || Boolean(savingMessage)}
+        onclick={() => addTemplateInstance()}
+      >
         <i class="ti ti-copy-plus" aria-hidden="true"></i>
-        Instance
       </button>
     </div>
+
+    <label class="filter-label template-filter">
+      Template
+      <select bind:value={templateFilterId}>
+        <option value="">All template instances</option>
+        {#each templateInstances as instance (instance.id)}
+          <option value={instance.id}>{instance.title}</option>
+        {/each}
+      </select>
+    </label>
 
     <div class="palette-list">
       {#if templateLoadError}
@@ -433,7 +587,12 @@
                 type="button"
                 class="point-row"
                 class:selected={selectedPalettePoint === pointKey(row.instance.id, row.point.plot_point_id)}
+                draggable={true}
                 onclick={() => selectPalettePoint(row)}
+                ondragstart={(event) => dragPalettePoint(row, event)}
+                ondragend={() => {
+                  dragOverCardId = null;
+                }}
               >
                 <span class="point-title">{row.point.title || row.point.plot_point_id}</span>
                 <span class:used={row.status === "used"} class:partial={row.status === "partial"} class:missing={row.status === "missing"}>
@@ -489,6 +648,11 @@
                 <article
                   class="plot-card"
                   class:selected={selectedCardId === card.id && !selectedClaimId}
+                  class:drag-over={dragOverCardId === card.id}
+                  ondragenter={(event) => allowCardDrop(card.id, event)}
+                  ondragover={(event) => allowCardDrop(card.id, event)}
+                  ondragleave={(event) => leaveCardDrop(card.id, event)}
+                  ondrop={(event) => dropOnCard(card.id, event)}
                 >
                   <header>
                     <button type="button" class="card-select" onclick={() => selectCard(card.id)}>
@@ -509,17 +673,38 @@
                   {/if}
                   <div class="claim-chips">
                     {#each claimsByCard.get(card.id) ?? [] as claim (claim.id)}
-                      <button
-                        type="button"
+                      <span
                         class="claim-chip"
                         class:selected={claim.id === selectedClaimId}
-                        onclick={(event) => {
-                          event.stopPropagation();
-                          selectClaim(claim);
+                        role="group"
+                        aria-label={`Claim ${pointLabel(claim)}`}
+                        draggable={true}
+                        ondragstart={(event) => dragClaim(claim, event)}
+                        ondragend={() => {
+                          dragOverCardId = null;
                         }}
                       >
-                        <span>{pointLabel(claim)}</span>
-                      </button>
+                        <button
+                          type="button"
+                          class="claim-chip-main"
+                          onclick={(event) => {
+                            event.stopPropagation();
+                            selectClaim(claim);
+                          }}
+                        >
+                          <span>{pointLabel(claim)}</span>
+                        </button>
+                        <button
+                          type="button"
+                          class="claim-remove"
+                          title={`Remove ${pointLabel(claim)}`}
+                          aria-label={`Remove ${pointLabel(claim)}`}
+                          disabled={Boolean(savingMessage)}
+                          onclick={(event) => removeClaim(claim, event)}
+                        >
+                          <i class="ti ti-x" aria-hidden="true"></i>
+                        </button>
+                      </span>
                     {/each}
                   </div>
                 </article>
@@ -641,7 +826,12 @@
 
   .add-template {
     display: grid;
-    gap: var(--sp-2);
+    grid-template-columns: minmax(0, 1fr) auto;
+    align-items: end;
+    gap: var(--sp-1);
+  }
+
+  .template-filter {
     margin-top: var(--sp-3);
     padding-top: var(--sp-3);
     border-top: 1px solid var(--divider);
@@ -671,6 +861,11 @@
   .tool-button:disabled {
     cursor: not-allowed;
     opacity: 0.55;
+  }
+
+  .tool-button.icon-only {
+    width: 28px;
+    padding: 0;
   }
 
   .palette-list {
@@ -858,9 +1053,14 @@
   }
 
   .plot-card:hover,
-  .plot-card.selected {
+  .plot-card.selected,
+  .plot-card.drag-over {
     border-color: var(--accent);
     box-shadow: 0 0 0 1px var(--accent);
+  }
+
+  .plot-card.drag-over {
+    background: var(--accent-soft);
   }
 
   .plot-card > header {
@@ -920,19 +1120,35 @@
   }
 
   .claim-chips {
-    display: flex;
-    flex-wrap: wrap;
+    display: grid;
+    justify-items: start;
     gap: var(--sp-1);
   }
 
   .claim-chip {
+    display: inline-flex;
+    align-items: stretch;
+    min-width: 0;
     max-width: 100%;
-    padding: 3px 7px;
     border: 1px solid var(--accent-soft2);
     border-radius: var(--r-sm);
     background: var(--accent-soft);
     color: var(--accent-deep);
     font-size: var(--fs-xs);
+    overflow: hidden;
+    cursor: grab;
+  }
+
+  .claim-chip:active {
+    cursor: grabbing;
+  }
+
+  .claim-chip-main,
+  .claim-remove {
+    border: 0;
+    background: transparent;
+    color: inherit;
+    font: inherit;
     cursor: pointer;
   }
 
@@ -941,11 +1157,37 @@
     box-shadow: 0 0 0 1px var(--accent);
   }
 
-  .claim-chip span {
+  .claim-chip-main {
+    min-width: 0;
+    max-width: 100%;
+    padding: 3px 6px;
+  }
+
+  .claim-chip-main span {
     display: block;
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
+  }
+
+  .claim-remove {
+    flex: none;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 20px;
+    min-height: 20px;
+    padding: 0;
+    border-left: 1px solid var(--accent-soft2);
+  }
+
+  .claim-remove:hover:not(:disabled) {
+    background: var(--surface);
+  }
+
+  .claim-remove:disabled {
+    cursor: not-allowed;
+    opacity: 0.5;
   }
 
   .empty-column,

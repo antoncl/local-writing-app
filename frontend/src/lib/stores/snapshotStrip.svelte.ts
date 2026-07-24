@@ -17,7 +17,7 @@
 import { api } from "@/lib/api";
 import { confirmService } from "@/lib/stores/confirmService.svelte";
 import type { DiffRun, DiffView, FieldDiff, Scene, Snapshot, SnapshotDrift } from "@/lib/types";
-import { renderDiffRuns } from "@/lib/utils/diffRuns";
+import { adoptRegion, renderDiffRuns } from "@/lib/utils/diffRuns";
 import { inNotchOrder, notchWhen } from "@/lib/utils/snapshotTime";
 
 /** What the diff compares the snapshot against: the buffer, not the file.
@@ -133,6 +133,10 @@ export class SnapshotStripController {
   flushScene: (() => Promise<void>) | null = null;
   /** Hand the restored document back to the host, which owns the buffer. */
   onRestored: ((scene: Scene) => void | Promise<void>) | null = null;
+  /** Hand a re-projected body to the host after adopting a region (Amendment
+   *  4). Distinct from `onRestored`: no backend round trip and no `Scene` — only
+   *  the prose changes, and the host writes it into the buffer marked dirty. */
+  onAdopt: ((body: string) => void | Promise<void>) | null = null;
   /** Read the buffer's current state for the diff. Deliberately NOT a flush:
    *  parking is a reading gesture, and writing the file to read it would touch
    *  mtime, which is what the session-gap capture trigger reads. */
@@ -294,6 +298,38 @@ export class SnapshotStripController {
    *  interleaving, and there is no third thing to show (§F). */
   fieldSide(): "now" | "was" {
     return this.view === "was" ? "was" : "now";
+  }
+
+  /**
+   * Adopt one region while parked (ADR-0044 Amendment 4). `clicked` is the side
+   * of the run the author clicked — the overlay reads it from the run's class.
+   *
+   * **No round trip.** The runs carry both versions, so this re-projects them
+   * locally and re-renders from what is already in hand; the diff is never
+   * re-requested, which is what keeps regions settled earlier from resurfacing.
+   * When the scene actually changes (the snapshot side won), the new body rides
+   * `onAdopt` into the buffer in the background — the same buffer restore writes,
+   * so §G holds: the compare view is not an editing surface.
+   *
+   * `busy` guards the same gate restore/capture/pin use, for two reasons: it
+   * serialises against those gestures (a click must not write the buffer
+   * underneath an in-flight restore), and — because region ids are positional
+   * and shift when one collapses — it blocks a second click landing before the
+   * re-render repaints, which would otherwise resolve a stale id.
+   */
+  async adopt(regionId: number, clicked: "now" | "was"): Promise<void> {
+    if (this.parked === null || this.busy) return;
+    this.busy = true;
+    try {
+      const { runs, body } = adoptRegion(this.runs, regionId, clicked);
+      this.runs = runs;
+      if (body !== null) await this.onAdopt?.(body);
+      await this.#renderBody();
+    } catch {
+      // Leave the strip as it was; a failed adopt must not move the author.
+    } finally {
+      this.busy = false;
+    }
   }
 
   /**

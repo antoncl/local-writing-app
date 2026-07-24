@@ -213,11 +213,13 @@
   .effective-body.interactive :global(.r-was:hover) {
     box-shadow: inset 0 -2px 0 var(--diff-was);
   }
+  /* No width change — the 3px gutter is already reserved, so firming it must not
+     reflow the block's text. The warm side deepens its wash like an inline run;
+     the cool side trades dashed for solid at the same width. */
   .effective-body.interactive :global(.blk-now:hover) {
-    border-left-width: 5px;
+    background: var(--diff-now-edge);
   }
   .effective-body.interactive :global(.blk-was:hover) {
     border-left-style: solid;
-    border-left-width: 5px;
   }
 </style>

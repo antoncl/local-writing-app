@@ -314,6 +314,36 @@ describe("adoptRegion re-projects one region, and only writes when the scene cha
     expect(body).toBeNull();
     expect(runs).toBe(SHAPES);
   });
+
+  // A block-spanning change: the runs carry `stacked` and render as a `blk` box,
+  // not an inline span. Collapsing one must yield plain prose (no `stacked`
+  // flag, no `blk` on re-render) and a body that reassembles — this is the path
+  // Amendment 1's markdown-validity constraint exists to protect.
+  it("collapses a stacked region to plain prose, both sides", async () => {
+    const STACKED: DiffRun[] = [
+      { kind: "equal", text: "Intro.\n\n" },
+      { kind: "was", text: "Old body.", stacked: true },
+      { kind: "now", text: "New body.", stacked: true },
+      { kind: "equal", text: "\n\nOutro." },
+    ];
+    expect(STACKED.filter((r) => r.kind !== "was").map((r) => r.text).join("")).toBe(
+      "Intro.\n\nNew body.\n\nOutro.",
+    );
+
+    const restored = adoptRegion(STACKED, 0, "was");
+    expect(restored.body).toBe("Intro.\n\nOld body.\n\nOutro.");
+    expect(restored.runs.every((r) => r.kind === "equal")).toBe(true);
+    expect(restored.runs.some((r) => r.stacked)).toBe(false);
+    // The resolved region no longer renders as a tinted block.
+    const html = await renderDiffRuns(restored.runs, "both");
+    expect(html).not.toContain("blk-was");
+    expect(html).not.toContain("blk-now");
+
+    // Keeping the scene side drops the snapshot block and writes nothing.
+    const kept = adoptRegion(STACKED, 0, "now");
+    expect(kept.body).toBeNull();
+    expect(kept.runs.every((r) => r.kind === "equal")).toBe(true);
+  });
 });
 
 describe("each changed run carries the action as its title (Amendment 4)", () => {

@@ -310,13 +310,26 @@ export class SnapshotStripController {
    * When the scene actually changes (the snapshot side won), the new body rides
    * `onAdopt` into the buffer in the background — the same buffer restore writes,
    * so §G holds: the compare view is not an editing surface.
+   *
+   * `busy` guards the same gate restore/capture/pin use, for two reasons: it
+   * serialises against those gestures (a click must not write the buffer
+   * underneath an in-flight restore), and — because region ids are positional
+   * and shift when one collapses — it blocks a second click landing before the
+   * re-render repaints, which would otherwise resolve a stale id.
    */
   async adopt(regionId: number, clicked: "now" | "was"): Promise<void> {
-    if (this.parked === null) return;
-    const { runs, body } = adoptRegion(this.runs, regionId, clicked);
-    this.runs = runs;
-    if (body !== null) await this.onAdopt?.(body);
-    await this.#renderBody();
+    if (this.parked === null || this.busy) return;
+    this.busy = true;
+    try {
+      const { runs, body } = adoptRegion(this.runs, regionId, clicked);
+      this.runs = runs;
+      if (body !== null) await this.onAdopt?.(body);
+      await this.#renderBody();
+    } catch {
+      // Leave the strip as it was; a failed adopt must not move the author.
+    } finally {
+      this.busy = false;
+    }
   }
 
   /**
